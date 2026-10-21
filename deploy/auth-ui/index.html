@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign in to Mumbo</title>
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+  body { margin: 0; min-height: 100dvh; display: grid; place-items: center; }
+  main { width: min(22rem, 100% - 2rem); display: grid; gap: .75rem; }
+  input, button { font: inherit; padding: .6rem .75rem; border-radius: .5rem; border: 1px solid GrayText; }
+  button { cursor: pointer; }
+  #msg { min-height: 1.5em; margin: 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Mumbo</h1>
+  <p id="msg"></p>
+  <form id="email-form">
+    <input id="email" type="email" required autocomplete="email" placeholder="Email" aria-label="Email">
+    <button type="submit">Email me a code</button>
+  </form>
+  <form id="code-form" hidden>
+    <input id="code" required inputmode="numeric" autocomplete="one-time-code" placeholder="Code from the email" aria-label="Code">
+    <button type="submit">Sign in</button>
+  </form>
+</main>
+<script src="supabase.js"></script>
+<script src="config.js"></script>
+<script>
+// Login and consent page for the Supabase OAuth server (first-party client: consent is approved automatically).
+const sb = supabase.createClient(MUMBO.url, MUMBO.anonKey)
+const authorizationId = new URLSearchParams(location.search).get('authorization_id')
+const $ = (id) => document.getElementById(id)
+const say = (text) => { $('msg').textContent = text }
+let email = ''
+
+async function authorize() {
+  say('Signing you in…')
+  const details = await sb.auth.oauth.getAuthorizationDetails(authorizationId)
+  if (details.error) return say(details.error.message)
+  const next = details.data.redirect_url ?? (await sb.auth.oauth.approveAuthorization(authorizationId)).data?.redirect_url
+  if (!next) return say('Authorization failed. Try again from the app address.')
+  location.replace(next)
+}
+
+$('email-form').addEventListener('submit', async (e) => {
+  e.preventDefault()
+  email = $('email').value.trim()
+  // shouldCreateUser:false keeps the service invite-only; the reply is the same for unknown addresses.
+  await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: false, emailRedirectTo: location.href } })
+  say('If this address is invited, a code was sent.')
+  $('email-form').hidden = true
+  $('code-form').hidden = false
+})
+
+$('code-form').addEventListener('submit', async (e) => {
+  e.preventDefault()
+  const { error } = await sb.auth.verifyOtp({ email, token: $('code').value.trim(), type: 'email' })
+  if (error) return say('That code did not work. Request a new one.')
+  authorize()
+})
+
+;(async () => {
+  if (!authorizationId) return say('Open Mumbo from its address to sign in.')
+  const { data } = await sb.auth.getSession()
+  if (data.session) authorize()
+})()
+</script>
+</body>
+</html>
