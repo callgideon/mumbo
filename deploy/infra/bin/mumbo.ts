@@ -85,6 +85,7 @@ const build = new cb.Project(stack, 'Build', {
   },
 })
 repo.grantPullPush(build)
+build.addToRolePolicy(new iam.PolicyStatement({ actions: ['codeconnections:GetConnection', 'codeconnections:GetConnectionToken', 'codeconnections:UseConnection', 'codestar-connections:GetConnection', 'codestar-connections:GetConnectionToken', 'codestar-connections:UseConnection'], resources: ['arn:aws:codeconnections:us-east-1:641134885443:connection/*', 'arn:aws:codestar-connections:us-east-1:641134885443:connection/*'] }))
 build.addToRolePolicy(new iam.PolicyStatement({ actions: ['ecs:UpdateService'], resources: [service.serviceArn] }))
 
 new cdk.CfnOutput(stack, 'CloudFrontDomain', { value: dist.distributionDomainName })
