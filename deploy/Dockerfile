@@ -7,7 +7,7 @@ RUN corepack enable
 WORKDIR /src
 COPY . .
 RUN pnpm install --frozen-lockfile
-RUN pnpm exec tsx scripts/mumbo-rebrand.ts
+RUN pnpm exec tsx scripts/mumbo-rebrand.ts && pnpm exec tsx scripts/mumbo-egress-check.ts
 ARG GIT_COMMIT
 RUN DSH_CLIENT_COMMIT_HASH="$GIT_COMMIT" pnpm run build:official
 
