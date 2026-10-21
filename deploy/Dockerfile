@@ -8,7 +8,8 @@ WORKDIR /src
 COPY . .
 RUN pnpm install --frozen-lockfile
 RUN pnpm exec tsx scripts/mumbo-rebrand.ts
-RUN pnpm run build:official
+ARG GIT_COMMIT
+RUN DSH_CLIENT_COMMIT_HASH="$GIT_COMMIT" pnpm run build:official
 
 FROM build AS runtime
 ENV DSH_HOME=/data DSH_TELEMETRY_DISABLED=1
