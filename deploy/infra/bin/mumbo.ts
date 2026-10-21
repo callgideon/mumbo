@@ -8,7 +8,7 @@
  * (an alias can live on one distribution only, and the ACM validation records already exist).
  */
 import * as cdk from 'aws-cdk-lib'
-import { aws_certificatemanager as acm, aws_cloudfront as cf, aws_cloudfront_origins as origins, aws_codebuild as cb, aws_ec2 as ec2, aws_ecr as ecr, aws_ecs as ecs, aws_efs as efs, aws_elasticloadbalancingv2 as elb, aws_iam as iam, aws_route53 as r53, aws_route53_targets as targets, aws_s3 as s3, aws_secretsmanager as sm } from 'aws-cdk-lib'
+import { aws_certificatemanager as acm, aws_cloudfront as cf, aws_cloudfront_origins as origins, aws_codebuild as cb, aws_ec2 as ec2, aws_ecr as ecr, aws_ecs as ecs, aws_efs as efs, aws_elasticloadbalancingv2 as elb, aws_iam as iam, aws_route53 as r53, aws_route53_targets as targets, aws_s3 as s3, aws_secretsmanager as sm, aws_ssm as ssm } from 'aws-cdk-lib'
 
 const app = new cdk.App()
 const env = app.node.tryGetContext('env') as 'dev' | 'prod'
@@ -34,11 +34,13 @@ const fs = new efs.FileSystem(stack, 'Data', { vpc, encrypted: true, removalPoli
 
 // Invite-only email login through Supabase Auth acting as an OIDC provider (see deploy/auth-ui). The container
 // reads generic SUPABASE_* / OAUTH_* variables, so self-hosted Supabase or another OIDC provider needs no image change.
-// Context: -c supabaseUrl=https://<ref>.supabase.co -c supabaseAnonKey=... -c oauthClientId=... -c allowedEmails=a@x,b@y and/or -c allowedDomains=x.com (or -c auth=off).
+// Context: -c supabaseUrl=https://<ref>.supabase.co (default: the Mumbo project) -c allowedEmails=a@x,b@y and/or -c allowedDomains=x.com (or -c auth=off).
 const authOff = app.node.tryGetContext('auth') === 'off'
-const ctx = (k: string) => { const v = app.node.tryGetContext(k) as string | undefined; if (!v && !authOff) throw new Error(`pass -c ${k}=... or -c auth=off`); return v ?? '' }
-const supabaseUrl = ctx('supabaseUrl')
-const clientSecret = new sm.Secret(stack, 'ClientSecret', { secretName: `mumbo/${env}/oauth-client-secret`, description: 'Supabase OAuth client secret; set after registering the client' })
+const allowed = (app.node.tryGetContext('allowedEmails') ?? app.node.tryGetContext('allowedDomains')) as string | undefined
+if (!authOff && !allowed) throw new Error('pass -c allowedEmails=a@x,b@y and/or -c allowedDomains=x.com, or -c auth=off')
+const supabaseUrl = (app.node.tryGetContext('supabaseUrl') as string | undefined) ?? 'https://qkvcouccrhyjiarkauyo.supabase.co'
+// OAuth client id, client secret (SecureString) and the publishable key live in SSM Parameter Store under /mumbo/<env>/.
+const param = (name: string) => ecs.Secret.fromSsmParameter(ssm.StringParameter.fromSecureStringParameterAttributes(stack, `P-${name}`, { parameterName: `/mumbo/${env}/${name}` }))
 const cookieSecret = new sm.Secret(stack, 'CookieSecret', { generateSecretString: { passwordLength: 32, excludePunctuation: true } })
 
 const cluster = new ecs.Cluster(stack, 'Cluster', { vpc })
@@ -48,10 +50,12 @@ const container = task.addContainer('web', {
   image: ecs.ContainerImage.fromEcrRepository(repo, env),
   logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'web' }),
   portMappings: [{ containerPort: 3080 }],
-  environment: { MUMBO_PUBLIC_HOST: appHost, MUMBO_EXTRA_TRUSTED_HOST: apiHost, DEEPSEEK_BASE_URL: 'https://api.deepseek.com', MUMBO_AUTH: authOff ? 'off' : 'oidc', OAUTH_ALLOWED_EMAILS: (app.node.tryGetContext('allowedEmails') as string | undefined) ?? '', OAUTH_ALLOWED_DOMAINS: (app.node.tryGetContext('allowedDomains') as string | undefined) ?? '', SUPABASE_URL: supabaseUrl, SUPABASE_ANON_KEY: ctx('supabaseAnonKey'), OAUTH_ISSUER_URL: `${supabaseUrl}/auth/v1`, OAUTH_CLIENT_ID: ctx('oauthClientId') },
+  environment: { MUMBO_PUBLIC_HOST: appHost, MUMBO_EXTRA_TRUSTED_HOST: apiHost, DEEPSEEK_BASE_URL: 'https://api.deepseek.com', MUMBO_AUTH: authOff ? 'off' : 'oidc', OAUTH_ALLOWED_EMAILS: (app.node.tryGetContext('allowedEmails') as string | undefined) ?? '', OAUTH_ALLOWED_DOMAINS: (app.node.tryGetContext('allowedDomains') as string | undefined) ?? '', SUPABASE_URL: supabaseUrl, OAUTH_ISSUER_URL: `${supabaseUrl}/auth/v1` },
   secrets: {
     DEEPSEEK_API_KEY: ecs.Secret.fromSecretsManager(apiKey),
-    OAUTH_CLIENT_SECRET: ecs.Secret.fromSecretsManager(clientSecret),
+    OAUTH_CLIENT_SECRET: param('oauth-client-secret'),
+    OAUTH_CLIENT_ID: param('oauth-client-id'),
+    SUPABASE_ANON_KEY: param('supabase-anon-key'),
     OAUTH_COOKIE_SECRET: ecs.Secret.fromSecretsManager(cookieSecret),
   },
 })
