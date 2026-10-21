@@ -44,7 +44,7 @@ const container = task.addContainer('web', {
 container.addMountPoints({ containerPath: '/data', sourceVolume: 'data', readOnly: false })
 fs.grantRootAccess(task.taskRole)
 
-const service = new ecs.FargateService(stack, 'Service', { cluster, taskDefinition: task, desiredCount: 1, assignPublicIp: true, minHealthyPercent: 0, maxHealthyPercent: 100 })
+const service = new ecs.FargateService(stack, 'Service', { cluster, taskDefinition: task, desiredCount: Number(app.node.tryGetContext('desired') ?? 1), assignPublicIp: true, minHealthyPercent: 0, maxHealthyPercent: 100 })
 fs.connections.allowDefaultPortFrom(service)
 
 const alb = new elb.ApplicationLoadBalancer(stack, 'Alb', { vpc, internetFacing: true, idleTimeout: cdk.Duration.seconds(300) })
