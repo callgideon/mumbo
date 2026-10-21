@@ -37,6 +37,8 @@ const authorizationId = new URLSearchParams(location.search).get('authorization_
 const $ = (id) => document.getElementById(id)
 const say = (text) => { $('msg').textContent = text }
 let email = ''
+// Return here with only the authorization id: no stale error parameters or earlier token fragments.
+const returnUrl = `${location.origin}${location.pathname}?authorization_id=${encodeURIComponent(authorizationId ?? '')}`
 
 async function authorize() {
   say('Signing you in…')
@@ -47,12 +49,12 @@ async function authorize() {
   location.replace(next)
 }
 
-$('google').addEventListener('click', () => sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.href } }))
+$('google').addEventListener('click', () => sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: returnUrl } }))
 
 $('email-form').addEventListener('submit', async (e) => {
   e.preventDefault()
   email = $('email').value.trim()
-    await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.href } })
+    await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: returnUrl } })
   say('If the address can sign in, a code was sent.')
   $('email-form').hidden = true
   $('code-form').hidden = false
@@ -68,7 +70,9 @@ $('code-form').addEventListener('submit', async (e) => {
 ;(async () => {
   if (!authorizationId) return say('Open Mumbo from its address to sign in.')
   const { data } = await sb.auth.getSession()
-  if (data.session) authorize()
+  if (data.session) return authorize()
+  const error = new URLSearchParams(location.search).get('error_description')
+  if (error) say(`Sign-in failed: ${error}`)
 })()
 </script>
 </body>
