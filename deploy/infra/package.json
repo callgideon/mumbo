@@ -1,0 +1,8 @@
+{
+  "name": "mumbo-infra",
+  "private": true,
+  "type": "module",
+  "scripts": { "synth": "cdk synth", "deploy": "cdk deploy" },
+  "dependencies": { "aws-cdk-lib": "2.190.0", "constructs": "10.4.2" },
+  "devDependencies": { "aws-cdk": "2.1019.2", "tsx": "4.23.13", "typescript": "6.0.3", "@types/node": "22.15.0" }
+}
