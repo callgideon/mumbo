@@ -43,7 +43,7 @@ sed -e "s|@TOKEN@|$TOKEN|" -e "s|@HOST@|$MUMBO_PUBLIC_HOST|" /etc/nginx/mumbo.co
 OAUTH2_PROXY_CLIENT_SECRET=$OAUTH_CLIENT_SECRET OAUTH2_PROXY_COOKIE_SECRET=$OAUTH_COOKIE_SECRET oauth2-proxy \
   --provider=oidc --oidc-issuer-url="$OAUTH_ISSUER_URL" --client-id="$OAUTH_CLIENT_ID" \
   --redirect-url="https://${MUMBO_PUBLIC_HOST}/oauth2/callback" $ALLOW --scope='openid email' \
-  --code-challenge-method=S256 --cookie-secure=true --cookie-samesite=lax --reverse-proxy=true \
+  --code-challenge-method=S256 --cookie-secure=true --cookie-csrf-per-request=true --cookie-csrf-expire=10m --cookie-samesite=lax --reverse-proxy=true \
   --upstream=static://202 --http-address=127.0.0.1:4180 --skip-provider-button=true ${OAUTH_ALLOW_UNVERIFIED_EMAIL:+--insecure-oidc-allow-unverified-email=true} &
 O2P_PID=$!
 
