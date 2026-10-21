@@ -7,7 +7,14 @@
  */
 import { cpSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 
-const brand = JSON.parse(readFileSync('brand/brand.json', 'utf8')) as Record<string, string>
+const brand = JSON.parse(readFileSync('brand/brand.json', 'utf8')) as {
+  productName: string
+  shortName: string
+  artifactPrefix: string
+  appId: string
+  updateOrigin: string
+  telemetryOtlpUrl: string
+}
 
 const RULES: Array<[file: string, from: string, to: string]> = [
   ['apps/desktop/scripts/electron-builder-config.mjs', "protocols: [{ name: 'DeepSeek Harness'", `protocols: [{ name: '${brand.productName}'`],
