@@ -9,7 +9,7 @@ services:
     environment:
       MUMBO_PUBLIC_HOST: ${MUMBO_PUBLIC_HOST:?}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?}
-      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com/anthropic}
       MUMBO_AUTH: ${MUMBO_AUTH:-oidc}
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}

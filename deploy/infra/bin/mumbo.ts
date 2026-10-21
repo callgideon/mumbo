@@ -50,7 +50,7 @@ const container = task.addContainer('web', {
   image: ecs.ContainerImage.fromEcrRepository(repo, env),
   logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'web' }),
   portMappings: [{ containerPort: 3080 }],
-  environment: { MUMBO_PUBLIC_HOST: appHost, MUMBO_EXTRA_TRUSTED_HOST: apiHost, DEEPSEEK_BASE_URL: 'https://api.deepseek.com', MUMBO_AUTH: authOff ? 'off' : 'oidc', OAUTH_ALLOWED_EMAILS: (app.node.tryGetContext('allowedEmails') as string | undefined) ?? '', OAUTH_ALLOWED_DOMAINS: (app.node.tryGetContext('allowedDomains') as string | undefined) ?? '', SUPABASE_URL: supabaseUrl, OAUTH_ISSUER_URL: `${supabaseUrl}/auth/v1` },
+  environment: { MUMBO_PUBLIC_HOST: appHost, MUMBO_EXTRA_TRUSTED_HOST: apiHost, DEEPSEEK_BASE_URL: 'https://api.deepseek.com/anthropic', MUMBO_AUTH: authOff ? 'off' : 'oidc', OAUTH_ALLOWED_EMAILS: (app.node.tryGetContext('allowedEmails') as string | undefined) ?? '', OAUTH_ALLOWED_DOMAINS: (app.node.tryGetContext('allowedDomains') as string | undefined) ?? '', SUPABASE_URL: supabaseUrl, OAUTH_ISSUER_URL: `${supabaseUrl}/auth/v1` },
   secrets: {
     DEEPSEEK_API_KEY: ecs.Secret.fromSecretsManager(apiKey),
     OAUTH_CLIENT_SECRET: param('oauth-client-secret'),
