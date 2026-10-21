@@ -24,6 +24,7 @@ http {
       proxy_set_header Content-Length "";
       proxy_pass_request_body off;
     }
+    location /auth-ui/ { alias /tmp/auth-ui/; add_header Cache-Control no-store; }
     location = /healthz { access_log off; return 200 'ok'; }
     location / {
       auth_request /oauth2/auth;

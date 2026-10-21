@@ -8,7 +8,7 @@
  * (an alias can live on one distribution only, and the ACM validation records already exist).
  */
 import * as cdk from 'aws-cdk-lib'
-import { aws_certificatemanager as acm, aws_cognito as cognito, aws_cloudfront as cf, aws_cloudfront_origins as origins, aws_codebuild as cb, aws_ec2 as ec2, aws_ecr as ecr, aws_ecs as ecs, aws_efs as efs, aws_elasticloadbalancingv2 as elb, aws_iam as iam, aws_route53 as r53, aws_route53_targets as targets, aws_s3 as s3, aws_secretsmanager as sm } from 'aws-cdk-lib'
+import { aws_certificatemanager as acm, aws_cloudfront as cf, aws_cloudfront_origins as origins, aws_codebuild as cb, aws_ec2 as ec2, aws_ecr as ecr, aws_ecs as ecs, aws_efs as efs, aws_elasticloadbalancingv2 as elb, aws_iam as iam, aws_route53 as r53, aws_route53_targets as targets, aws_s3 as s3, aws_secretsmanager as sm } from 'aws-cdk-lib'
 
 const app = new cdk.App()
 const env = app.node.tryGetContext('env') as 'dev' | 'prod'
@@ -32,26 +32,13 @@ const repo = new ecr.Repository(stack, 'Repo', { repositoryName: `mumbo-web-${en
 const apiKey = new sm.Secret(stack, 'DeepseekKey', { secretName: `mumbo/${env}/deepseek-api-key`, description: 'Set the value after deploy' })
 const fs = new efs.FileSystem(stack, 'Data', { vpc, encrypted: true, removalPolicy: removal })
 
-// Invite-only email login (admin creates users). The container reads the generic OAUTH_* variables, so a
-// self-hosted deployment swaps Cognito for any OIDC provider without image changes.
-const pool = new cognito.UserPool(stack, 'Users', {
-  userPoolName: `mumbo-${env}`,
-  selfSignUpEnabled: false,
-  signInAliases: { email: true },
-  autoVerify: { email: true },
-  mfa: cognito.Mfa.OPTIONAL,
-  mfaSecondFactor: { otp: true, sms: false },
-  accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
-  passwordPolicy: { minLength: 12, requireSymbols: false },
-  removalPolicy: removal,
-})
-const client = pool.addClient('Web', {
-  generateSecret: true,
-  oAuth: { flows: { authorizationCodeGrant: true }, scopes: [cognito.OAuthScope.OPENID, cognito.OAuthScope.EMAIL], callbackUrls: [`https://${appHost}/oauth2/callback`] },
-  supportedIdentityProviders: [cognito.UserPoolClientIdentityProvider.COGNITO],
-})
-pool.addDomain('Hosted', { cognitoDomain: { domainPrefix: `mumbo-${env}-641134885443` } })
-const clientSecret = new sm.Secret(stack, 'ClientSecret', { secretStringValue: client.userPoolClientSecret })
+// Invite-only email login through Supabase Auth acting as an OIDC provider (see deploy/auth-ui). The container
+// reads generic SUPABASE_* / OAUTH_* variables, so self-hosted Supabase or another OIDC provider needs no image change.
+// Context: -c supabaseUrl=https://<ref>.supabase.co -c supabaseAnonKey=... -c oauthClientId=... (or -c auth=off).
+const authOff = app.node.tryGetContext('auth') === 'off'
+const ctx = (k: string) => { const v = app.node.tryGetContext(k) as string | undefined; if (!v && !authOff) throw new Error(`pass -c ${k}=... or -c auth=off`); return v ?? '' }
+const supabaseUrl = ctx('supabaseUrl')
+const clientSecret = new sm.Secret(stack, 'ClientSecret', { secretName: `mumbo/${env}/oauth-client-secret`, description: 'Supabase OAuth client secret; set after registering the client' })
 const cookieSecret = new sm.Secret(stack, 'CookieSecret', { generateSecretString: { passwordLength: 32, excludePunctuation: true } })
 
 const cluster = new ecs.Cluster(stack, 'Cluster', { vpc })
@@ -61,7 +48,7 @@ const container = task.addContainer('web', {
   image: ecs.ContainerImage.fromEcrRepository(repo, env),
   logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'web' }),
   portMappings: [{ containerPort: 3080 }],
-  environment: { MUMBO_PUBLIC_HOST: appHost, MUMBO_EXTRA_TRUSTED_HOST: apiHost, DEEPSEEK_BASE_URL: 'https://api.deepseek.com', OAUTH_ISSUER_URL: `https://cognito-idp.us-east-1.amazonaws.com/${pool.userPoolId}`, OAUTH_CLIENT_ID: client.userPoolClientId },
+  environment: { MUMBO_PUBLIC_HOST: appHost, MUMBO_EXTRA_TRUSTED_HOST: apiHost, DEEPSEEK_BASE_URL: 'https://api.deepseek.com', MUMBO_AUTH: authOff ? 'off' : 'oidc', SUPABASE_URL: supabaseUrl, SUPABASE_ANON_KEY: ctx('supabaseAnonKey'), OAUTH_ISSUER_URL: `${supabaseUrl}/auth/v1`, OAUTH_CLIENT_ID: ctx('oauthClientId') },
   secrets: {
     DEEPSEEK_API_KEY: ecs.Secret.fromSecretsManager(apiKey),
     OAUTH_CLIENT_SECRET: ecs.Secret.fromSecretsManager(clientSecret),
@@ -116,5 +103,4 @@ repo.grantPullPush(build)
 build.addToRolePolicy(new iam.PolicyStatement({ actions: ['codeconnections:GetConnection', 'codeconnections:GetConnectionToken', 'codeconnections:UseConnection', 'codestar-connections:GetConnection', 'codestar-connections:GetConnectionToken', 'codestar-connections:UseConnection'], resources: ['arn:aws:codeconnections:us-east-1:641134885443:connection/*', 'arn:aws:codestar-connections:us-east-1:641134885443:connection/*'] }))
 build.addToRolePolicy(new iam.PolicyStatement({ actions: ['ecs:UpdateService'], resources: [service.serviceArn] }))
 
-new cdk.CfnOutput(stack, 'UserPoolId', { value: pool.userPoolId })
 new cdk.CfnOutput(stack, 'CloudFrontDomain', { value: dist.distributionDomainName })
