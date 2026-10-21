@@ -1,0 +1,15 @@
+# CodeBuild: runs on push to main (prod) and dev. Env supplied by the CodeBuild project:
+#   ECR_REPO, ECS_CLUSTER, ECS_SERVICE, MUMBO_ENV (prod|dev). Branch comes from the pipeline source.
+version: 0.2
+phases:
+  pre_build:
+    commands:
+      - aws ecr get-login-password | docker login --username AWS --password-stdin "${ECR_REPO%%/*}"
+      - TAG="${MUMBO_ENV}-$(git rev-parse --short HEAD 2>/dev/null || echo "$CODEBUILD_RESOLVED_SOURCE_VERSION" | cut -c1-10)"
+  build:
+    commands:
+      - docker build -f deploy/Dockerfile -t "$ECR_REPO:$TAG" -t "$ECR_REPO:$MUMBO_ENV" .
+  post_build:
+    commands:
+      - docker push "$ECR_REPO:$TAG" && docker push "$ECR_REPO:$MUMBO_ENV"
+      - aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" --force-new-deployment
