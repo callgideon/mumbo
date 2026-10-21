@@ -34,7 +34,7 @@ const fs = new efs.FileSystem(stack, 'Data', { vpc, encrypted: true, removalPoli
 
 // Invite-only email login through Supabase Auth acting as an OIDC provider (see deploy/auth-ui). The container
 // reads generic SUPABASE_* / OAUTH_* variables, so self-hosted Supabase or another OIDC provider needs no image change.
-// Context: -c supabaseUrl=https://<ref>.supabase.co -c supabaseAnonKey=... -c oauthClientId=... (or -c auth=off).
+// Context: -c supabaseUrl=https://<ref>.supabase.co -c supabaseAnonKey=... -c oauthClientId=... -c allowedEmails=a@x,b@y and/or -c allowedDomains=x.com (or -c auth=off).
 const authOff = app.node.tryGetContext('auth') === 'off'
 const ctx = (k: string) => { const v = app.node.tryGetContext(k) as string | undefined; if (!v && !authOff) throw new Error(`pass -c ${k}=... or -c auth=off`); return v ?? '' }
 const supabaseUrl = ctx('supabaseUrl')
@@ -48,7 +48,7 @@ const container = task.addContainer('web', {
   image: ecs.ContainerImage.fromEcrRepository(repo, env),
   logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'web' }),
   portMappings: [{ containerPort: 3080 }],
-  environment: { MUMBO_PUBLIC_HOST: appHost, MUMBO_EXTRA_TRUSTED_HOST: apiHost, DEEPSEEK_BASE_URL: 'https://api.deepseek.com', MUMBO_AUTH: authOff ? 'off' : 'oidc', SUPABASE_URL: supabaseUrl, SUPABASE_ANON_KEY: ctx('supabaseAnonKey'), OAUTH_ISSUER_URL: `${supabaseUrl}/auth/v1`, OAUTH_CLIENT_ID: ctx('oauthClientId') },
+  environment: { MUMBO_PUBLIC_HOST: appHost, MUMBO_EXTRA_TRUSTED_HOST: apiHost, DEEPSEEK_BASE_URL: 'https://api.deepseek.com', MUMBO_AUTH: authOff ? 'off' : 'oidc', OAUTH_ALLOWED_EMAILS: (app.node.tryGetContext('allowedEmails') as string | undefined) ?? '', OAUTH_ALLOWED_DOMAINS: (app.node.tryGetContext('allowedDomains') as string | undefined) ?? '', SUPABASE_URL: supabaseUrl, SUPABASE_ANON_KEY: ctx('supabaseAnonKey'), OAUTH_ISSUER_URL: `${supabaseUrl}/auth/v1`, OAUTH_CLIENT_ID: ctx('oauthClientId') },
   secrets: {
     DEEPSEEK_API_KEY: ecs.Secret.fromSecretsManager(apiKey),
     OAUTH_CLIENT_SECRET: ecs.Secret.fromSecretsManager(clientSecret),

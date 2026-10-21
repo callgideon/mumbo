@@ -17,6 +17,7 @@
 <main>
   <h1>Mumbo</h1>
   <p id="msg"></p>
+  <button id="google" type="button">Continue with Google</button>
   <form id="email-form">
     <input id="email" type="email" required autocomplete="email" placeholder="Email" aria-label="Email">
     <button type="submit">Email me a code</button>
@@ -26,10 +27,11 @@
     <button type="submit">Sign in</button>
   </form>
 </main>
-<script src="supabase.js"></script>
-<script src="config.js"></script>
+<script src="/auth-ui/supabase.js"></script>
+<script src="/auth-ui/config.js"></script>
 <script>
-// Login and consent page for the Supabase OAuth server (first-party client: consent is approved automatically).
+// Login and consent page for the Supabase OAuth server, served at the project's authorization path /oauth/consent.
+// First-party client: consent is approved automatically. Who may enter is decided by the gate allowlist, not here.
 const sb = supabase.createClient(MUMBO.url, MUMBO.anonKey)
 const authorizationId = new URLSearchParams(location.search).get('authorization_id')
 const $ = (id) => document.getElementById(id)
@@ -45,12 +47,13 @@ async function authorize() {
   location.replace(next)
 }
 
+$('google').addEventListener('click', () => sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.href } }))
+
 $('email-form').addEventListener('submit', async (e) => {
   e.preventDefault()
   email = $('email').value.trim()
-  // shouldCreateUser:false keeps the service invite-only; the reply is the same for unknown addresses.
-  await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: false, emailRedirectTo: location.href } })
-  say('If this address is invited, a code was sent.')
+    await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.href } })
+  say('If the address can sign in, a code was sent.')
   $('email-form').hidden = true
   $('code-form').hidden = false
 })

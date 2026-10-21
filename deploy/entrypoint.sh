@@ -13,6 +13,14 @@ if [ "${MUMBO_AUTH:-oidc}" = off ]; then
 fi
 
 : "${SUPABASE_URL:?}" "${SUPABASE_ANON_KEY:?}" "${OAUTH_ISSUER_URL:?}" "${OAUTH_CLIENT_ID:?}" "${OAUTH_CLIENT_SECRET:?}" "${OAUTH_COOKIE_SECRET:?}"
+# Supabase sign-up may be open, so the gate admits only listed identities: default deny.
+[ -n "${OAUTH_ALLOWED_EMAILS:-}${OAUTH_ALLOWED_DOMAINS:-}" ] || { echo "set OAUTH_ALLOWED_EMAILS and/or OAUTH_ALLOWED_DOMAINS (comma-separated)" >&2; exit 1; }
+ALLOW=
+if [ -n "${OAUTH_ALLOWED_EMAILS:-}" ]; then
+  echo "$OAUTH_ALLOWED_EMAILS" | tr ',' '\n' | sed 's/^ *//; s/ *$//' | grep . > /tmp/allowed-emails.txt
+  ALLOW="--authenticated-emails-file=/tmp/allowed-emails.txt"
+fi
+for d in $(echo "${OAUTH_ALLOWED_DOMAINS:-}" | tr ',' ' '); do ALLOW="$ALLOW --email-domain=$d"; done
 LOG=/tmp/dsh.log
 : > "$LOG"
 $DSH --host 127.0.0.1 --port 3081 > "$LOG" 2>&1 &
@@ -34,7 +42,7 @@ sed -e "s|@TOKEN@|$TOKEN|" -e "s|@HOST@|$MUMBO_PUBLIC_HOST|" /etc/nginx/mumbo.co
 
 OAUTH2_PROXY_CLIENT_SECRET=$OAUTH_CLIENT_SECRET OAUTH2_PROXY_COOKIE_SECRET=$OAUTH_COOKIE_SECRET oauth2-proxy \
   --provider=oidc --oidc-issuer-url="$OAUTH_ISSUER_URL" --client-id="$OAUTH_CLIENT_ID" \
-  --redirect-url="https://${MUMBO_PUBLIC_HOST}/oauth2/callback" --email-domain='*' --scope='openid email' \
+  --redirect-url="https://${MUMBO_PUBLIC_HOST}/oauth2/callback" $ALLOW --scope='openid email' \
   --code-challenge-method=S256 --cookie-secure=true --cookie-samesite=lax --reverse-proxy=true \
   --upstream=static://202 --http-address=127.0.0.1:4180 --skip-provider-button=true ${OAUTH_ALLOW_UNVERIFIED_EMAIL:+--insecure-oidc-allow-unverified-email=true} &
 O2P_PID=$!
