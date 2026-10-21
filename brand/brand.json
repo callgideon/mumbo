@@ -3,5 +3,6 @@
   "shortName": "Mumbo",
   "artifactPrefix": "mumbo",
   "appId": "si.mumbo.app",
-  "updateOrigin": "https://download.mumbo.si"
+  "updateOrigin": "https://download.mumbo.si",
+  "telemetryOtlpUrl": "https://telemetry.mumbo.si/v1/logs"
 }
