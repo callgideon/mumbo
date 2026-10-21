@@ -13,6 +13,7 @@ import { aws_certificatemanager as acm, aws_cloudfront as cf, aws_cloudfront_ori
 const app = new cdk.App()
 const env = app.node.tryGetContext('env') as 'dev' | 'prod'
 if (env !== 'dev' && env !== 'prod') throw new Error('pass -c env=dev|prod')
+const removal = env === 'dev' ? cdk.RemovalPolicy.DESTROY : cdk.RemovalPolicy.RETAIN
 const attach = env === 'dev' || app.node.tryGetContext('attach') === 'true'
 const branch = env === 'prod' ? 'main' : 'dev'
 const zoneName = 'mumbo.si'
@@ -27,9 +28,9 @@ const vpc = ec2.Vpc.fromLookup(stack, 'Vpc', { isDefault: true })
 const names = attach ? [appHost, apiHost, originHost] : [originHost]
 const cert = new acm.Certificate(stack, 'Cert', { domainName: names[0]!, subjectAlternativeNames: names.slice(1), validation: acm.CertificateValidation.fromDns(zone) })
 
-const repo = new ecr.Repository(stack, 'Repo', { repositoryName: `mumbo-web-${env}`, lifecycleRules: [{ maxImageCount: 20 }] })
+const repo = new ecr.Repository(stack, 'Repo', { repositoryName: `mumbo-web-${env}`, lifecycleRules: [{ maxImageCount: 20 }], removalPolicy: removal, emptyOnDelete: env === 'dev' })
 const apiKey = new sm.Secret(stack, 'DeepseekKey', { secretName: `mumbo/${env}/deepseek-api-key`, description: 'Set the value after deploy' })
-const fs = new efs.FileSystem(stack, 'Data', { vpc, encrypted: true, removalPolicy: cdk.RemovalPolicy.RETAIN })
+const fs = new efs.FileSystem(stack, 'Data', { vpc, encrypted: true, removalPolicy: removal })
 
 const cluster = new ecs.Cluster(stack, 'Cluster', { vpc })
 const task = new ecs.FargateTaskDefinition(stack, 'Task', { cpu: 2048, memoryLimitMiB: 8192 })
@@ -71,11 +72,12 @@ if (attach) for (const h of [appHost, apiHost]) {
   new r53.AaaaRecord(stack, `AAAA-${h}`, { zone, recordName: h, target: t })
 }
 
-new s3.Bucket(stack, 'Downloads', { bucketName: `mumbo-downloads-${env}-641134885443`, blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL, encryption: s3.BucketEncryption.S3_MANAGED, removalPolicy: cdk.RemovalPolicy.RETAIN })
+new s3.Bucket(stack, 'Downloads', { bucketName: `mumbo-downloads-${env}-641134885443`, blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL, encryption: s3.BucketEncryption.S3_MANAGED, removalPolicy: removal, autoDeleteObjects: env === 'dev' })
 
 const build = new cb.Project(stack, 'Build', {
   projectName: `mumbo-${env}`,
-  source: cb.Source.gitHub({ owner: 'callgideon', repo: 'mumbo', webhook: true, webhookFilters: [cb.FilterGroup.inEventOf(cb.EventAction.PUSH).andBranchIs(branch)] }),
+  // ponytail: no webhook yet (the GitHub connection lacks repo-admin); start builds manually until it has.
+  source: cb.Source.gitHub({ owner: 'callgideon', repo: 'mumbo', branchOrRef: branch }),
   buildSpec: cb.BuildSpec.fromSourceFilename('deploy/buildspec.yml'),
   environment: { buildImage: cb.LinuxBuildImage.STANDARD_7_0, computeType: cb.ComputeType.X_LARGE, privileged: true },
   timeout: cdk.Duration.minutes(60),
