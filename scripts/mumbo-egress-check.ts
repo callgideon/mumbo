@@ -3,7 +3,7 @@
  * model/search API). Known inert occurrences are listed in ALLOWED; a new hit after an upstream merge
  * means a new outbound contact to review. Run after scripts/mumbo-rebrand.ts.
  */
-import { execFileSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 
 const HOST = /[a-z0-9.-]*(?:deepseek|deepseeksvc)\.(?:com|cn|ai)\b/gi
 const ALLOWED_HOSTS = new Set(['api.deepseek.com'])
@@ -17,8 +17,9 @@ const ALLOWED_FILES = [
   'scripts/mumbo-',
 ]
 
-const files = execFileSync('git', ['grep', '-lIiE', 'deepseek(svc)?\\.(com|cn|ai)', '--', 'apps', 'packages', 'scripts',
-  ':!*.md', ':!*.zh.*', ':!*.spec.*', ':!*.test.*', ':!**/tests/**', ':!**/test/**', ':!*.i18n.yaml', ':!**/package.json'], { encoding: 'utf8' }).split('\n').filter(Boolean)
+const SKIP = /(^|\/)(node_modules|lib|dist|tests?)\/|\.(md|spec\.ts|test\.ts|i18n\.yaml)$|\.zh\.|(^|\/)package\.json$/
+const grep = spawnSync('grep', ['-rIliE', 'deepseek(svc)?\\.(com|cn|ai)', 'apps', 'packages', 'scripts', '--exclude-dir=node_modules', '--exclude-dir=lib', '--exclude-dir=dist'], { encoding: 'utf8', maxBuffer: 1 << 28 })
+const files = grep.stdout.split('\n').filter((f) => f && !SKIP.test(f))
 
 const { readFileSync } = await import('node:fs')
 const hits = files.filter((f) => !ALLOWED_FILES.some((p) => f.startsWith(p)))
