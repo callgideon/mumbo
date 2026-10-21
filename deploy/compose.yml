@@ -1,0 +1,18 @@
+# Self-hosted run, no cloud services: docker compose -f deploy/compose.yml up
+# Put TLS in front (Caddy/nginx/Traefik) and point it at port 3080; set MUMBO_PUBLIC_HOST to the public name.
+# Login: any OIDC provider (Keycloak, Authentik, Okta, Entra, Google). MUMBO_AUTH=off skips the gate (trusted network only).
+services:
+  mumbo:
+    build: { context: .., dockerfile: deploy/Dockerfile, args: { GIT_COMMIT: local00 } }
+    ports: ["3080:3080"]
+    volumes: ["mumbo-data:/data"]
+    environment:
+      MUMBO_PUBLIC_HOST: ${MUMBO_PUBLIC_HOST:?}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      MUMBO_AUTH: ${MUMBO_AUTH:-oidc}
+      OAUTH_ISSUER_URL: ${OAUTH_ISSUER_URL:-}
+      OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID:-}
+      OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET:-}
+      OAUTH_COOKIE_SECRET: ${OAUTH_COOKIE_SECRET:-}
+volumes: { mumbo-data: {} }
