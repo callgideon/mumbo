@@ -34,7 +34,7 @@ const fs = new efs.FileSystem(stack, 'Data', { vpc, encrypted: true, removalPoli
 
 const cluster = new ecs.Cluster(stack, 'Cluster', { vpc })
 const task = new ecs.FargateTaskDefinition(stack, 'Task', { cpu: 2048, memoryLimitMiB: 8192 })
-task.addVolume({ name: 'data', efsVolumeConfiguration: { fileSystemId: fs.fileSystemId } })
+task.addVolume({ name: 'data', efsVolumeConfiguration: { fileSystemId: fs.fileSystemId, transitEncryption: 'ENABLED', authorizationConfig: { iam: 'ENABLED' } } })
 const container = task.addContainer('web', {
   image: ecs.ContainerImage.fromEcrRepository(repo, env),
   logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'web' }),
