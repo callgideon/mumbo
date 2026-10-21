@@ -8,7 +8,7 @@
  * (an alias can live on one distribution only, and the ACM validation records already exist).
  */
 import * as cdk from 'aws-cdk-lib'
-import { aws_certificatemanager as acm, aws_cloudfront as cf, aws_cloudfront_origins as origins, aws_codebuild as cb, aws_ec2 as ec2, aws_ecr as ecr, aws_ecs as ecs, aws_efs as efs, aws_elasticloadbalancingv2 as elb, aws_iam as iam, aws_route53 as r53, aws_route53_targets as targets, aws_s3 as s3, aws_secretsmanager as sm } from 'aws-cdk-lib'
+import { aws_certificatemanager as acm, aws_cognito as cognito, aws_cloudfront as cf, aws_cloudfront_origins as origins, aws_codebuild as cb, aws_ec2 as ec2, aws_ecr as ecr, aws_ecs as ecs, aws_efs as efs, aws_elasticloadbalancingv2 as elb, aws_iam as iam, aws_route53 as r53, aws_route53_targets as targets, aws_s3 as s3, aws_secretsmanager as sm } from 'aws-cdk-lib'
 
 const app = new cdk.App()
 const env = app.node.tryGetContext('env') as 'dev' | 'prod'
@@ -32,6 +32,28 @@ const repo = new ecr.Repository(stack, 'Repo', { repositoryName: `mumbo-web-${en
 const apiKey = new sm.Secret(stack, 'DeepseekKey', { secretName: `mumbo/${env}/deepseek-api-key`, description: 'Set the value after deploy' })
 const fs = new efs.FileSystem(stack, 'Data', { vpc, encrypted: true, removalPolicy: removal })
 
+// Invite-only email login (admin creates users). The container reads the generic OAUTH_* variables, so a
+// self-hosted deployment swaps Cognito for any OIDC provider without image changes.
+const pool = new cognito.UserPool(stack, 'Users', {
+  userPoolName: `mumbo-${env}`,
+  selfSignUpEnabled: false,
+  signInAliases: { email: true },
+  autoVerify: { email: true },
+  mfa: cognito.Mfa.OPTIONAL,
+  mfaSecondFactor: { otp: true, sms: false },
+  accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
+  passwordPolicy: { minLength: 12, requireSymbols: false },
+  removalPolicy: removal,
+})
+const client = pool.addClient('Web', {
+  generateSecret: true,
+  oAuth: { flows: { authorizationCodeGrant: true }, scopes: [cognito.OAuthScope.OPENID, cognito.OAuthScope.EMAIL], callbackUrls: [`https://${appHost}/oauth2/callback`] },
+  supportedIdentityProviders: [cognito.UserPoolClientIdentityProvider.COGNITO],
+})
+pool.addDomain('Hosted', { cognitoDomain: { domainPrefix: `mumbo-${env}-641134885443` } })
+const clientSecret = new sm.Secret(stack, 'ClientSecret', { secretStringValue: client.userPoolClientSecret })
+const cookieSecret = new sm.Secret(stack, 'CookieSecret', { generateSecretString: { passwordLength: 32, excludePunctuation: true } })
+
 const cluster = new ecs.Cluster(stack, 'Cluster', { vpc })
 const task = new ecs.FargateTaskDefinition(stack, 'Task', { cpu: 2048, memoryLimitMiB: 8192 })
 task.addVolume({ name: 'data', efsVolumeConfiguration: { fileSystemId: fs.fileSystemId, transitEncryption: 'ENABLED', authorizationConfig: { iam: 'ENABLED' } } })
@@ -39,8 +61,12 @@ const container = task.addContainer('web', {
   image: ecs.ContainerImage.fromEcrRepository(repo, env),
   logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'web' }),
   portMappings: [{ containerPort: 3080 }],
-  environment: { MUMBO_PUBLIC_HOST: appHost, MUMBO_EXTRA_TRUSTED_HOST: apiHost, DEEPSEEK_BASE_URL: 'https://api.deepseek.com' },
-  secrets: { DEEPSEEK_API_KEY: ecs.Secret.fromSecretsManager(apiKey) },
+  environment: { MUMBO_PUBLIC_HOST: appHost, MUMBO_EXTRA_TRUSTED_HOST: apiHost, DEEPSEEK_BASE_URL: 'https://api.deepseek.com', OAUTH_ISSUER_URL: `https://cognito-idp.us-east-1.amazonaws.com/${pool.userPoolId}`, OAUTH_CLIENT_ID: client.userPoolClientId },
+  secrets: {
+    DEEPSEEK_API_KEY: ecs.Secret.fromSecretsManager(apiKey),
+    OAUTH_CLIENT_SECRET: ecs.Secret.fromSecretsManager(clientSecret),
+    OAUTH_COOKIE_SECRET: ecs.Secret.fromSecretsManager(cookieSecret),
+  },
 })
 container.addMountPoints({ containerPath: '/data', sourceVolume: 'data', readOnly: false })
 fs.grantRootAccess(task.taskRole)
@@ -51,7 +77,7 @@ fs.connections.allowDefaultPortFrom(service)
 const alb = new elb.ApplicationLoadBalancer(stack, 'Alb', { vpc, internetFacing: true, idleTimeout: cdk.Duration.seconds(300) })
 const listener = alb.addListener('Https', { port: 443, certificates: [cert], open: true })
 // The server answers 401 to unauthenticated requests, which proves it is up.
-listener.addTargets('Web', { port: 3080, protocol: elb.ApplicationProtocol.HTTP, targets: [service], healthCheck: { path: '/', healthyHttpCodes: '200-499' } })
+listener.addTargets('Web', { port: 3080, protocol: elb.ApplicationProtocol.HTTP, targets: [service], healthCheck: { path: '/healthz', healthyHttpCodes: '200-499' } })
 new r53.ARecord(stack, 'OriginRecord', { zone, recordName: originHost, target: r53.RecordTarget.fromAlias(new targets.LoadBalancerTarget(alb)) })
 
 const dist = new cf.Distribution(stack, 'Cdn', {
@@ -90,4 +116,5 @@ repo.grantPullPush(build)
 build.addToRolePolicy(new iam.PolicyStatement({ actions: ['codeconnections:GetConnection', 'codeconnections:GetConnectionToken', 'codeconnections:UseConnection', 'codestar-connections:GetConnection', 'codestar-connections:GetConnectionToken', 'codestar-connections:UseConnection'], resources: ['arn:aws:codeconnections:us-east-1:641134885443:connection/*', 'arn:aws:codestar-connections:us-east-1:641134885443:connection/*'] }))
 build.addToRolePolicy(new iam.PolicyStatement({ actions: ['ecs:UpdateService'], resources: [service.serviceArn] }))
 
+new cdk.CfnOutput(stack, 'UserPoolId', { value: pool.userPoolId })
 new cdk.CfnOutput(stack, 'CloudFrontDomain', { value: dist.distributionDomainName })
