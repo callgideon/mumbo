@@ -1,0 +1,9 @@
+# Loader overlay (`dsh --patch`): model access uses API-key credentials only. The DeepSeek
+# platform sign-in (OAuth to platform.deepseek.com) and its account-token LLM route are off.
+# Same disable pattern as packages/bundle/headless/cordis.patch.yml.
+- id: deepseek-account
+  disabled: true
+- id: llm-deepseek-account
+  disabled: true
+- id: account-controller
+  disabled: true
