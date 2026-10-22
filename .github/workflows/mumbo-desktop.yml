@@ -1,0 +1,40 @@
+# Unsigned Mumbo desktop DMG for Apple Silicon, kept as a run artifact for internal testing.
+name: Mumbo desktop (macOS arm64, unsigned)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mac-arm64:
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      DSH_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile
+      - name: Mumbo branding and no DeepSeek account/analytics
+        run: |
+          pnpm exec tsx scripts/mumbo-rebrand.ts
+          pnpm exec tsx scripts/mumbo-egress-check.ts
+          # Bake the web overlay into the bundle the desktop app loads.
+          { echo; cat deploy/mumbo.overlay.yml; } >> packages/bundle/web-app/cordis.patch.yml
+      - run: pnpm run package:desktop:mac:arm64:unsigned
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mumbo-mac-arm64-${{ github.run_number }}
+          path: apps/desktop/.desktop-build/targets/mac-arm64/unsigned-artifacts/*.dmg
+          if-no-files-found: error
+          retention-days: 30
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: packaging-logs-${{ github.run_number }}
+          path: apps/desktop/.desktop-build/packaging-runs/
