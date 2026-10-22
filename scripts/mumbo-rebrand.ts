@@ -20,6 +20,13 @@ const RULES: Array<[file: string, from: string, to: string]> = [
   ['apps/desktop/scripts/electron-builder-config.mjs', "protocols: [{ name: 'DeepSeek Harness'", `protocols: [{ name: '${brand.productName}'`],
   ['apps/desktop/scripts/electron-builder-config.mjs', "productName: 'DeepSeek Harness'", `productName: '${brand.productName}'`],
   ['apps/desktop/scripts/electron-builder-config.mjs', 'artifactName: `deepseek-harness-', `artifactName: \`${brand.artifactPrefix}-`],
+  ['apps/desktop/scripts/electron-builder-config.mjs', "NSMicrophoneUsageDescription: 'DeepSeek Harness", `NSMicrophoneUsageDescription: '${brand.productName}`],
+  // Packaging checks locate the built app by product name.
+  ['apps/desktop/scripts/package-macos.ts', "'DeepSeek Harness.app'", `'${brand.productName}.app'`],
+  ['apps/desktop/scripts/package-target.ts', "'DeepSeek Harness.app'", `'${brand.productName}.app'`],
+  ['apps/desktop/scripts/smoke-packaged-runtime.ts', "'DeepSeek Harness.app'", `'${brand.productName}.app'`],
+  ['apps/desktop/scripts/smoke-packaged-runtime.ts', "'DeepSeek Harness.exe'", `'${brand.productName}.exe'`],
+  ['apps/desktop/scripts/smoke-packaged-runtime.ts', "'MacOS', 'DeepSeek Harness')", `'MacOS', '${brand.productName}')`],
   ['apps/desktop/scripts/desktop-package-environment.mjs', "'com.deepseek.harness'", `'${brand.appId}'`],
   ['apps/desktop/scripts/desktop-auto-update-environment.mjs', "'https://download.deepseek.com'", `'${brand.updateOrigin}'`],
   ['apps/web/public/manifest.webmanifest', '"name": "DeepSeek Harness"', `"name": "${brand.productName}"`],
