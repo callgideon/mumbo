@@ -11,7 +11,7 @@ interface DesktopBootGlobal {
 // iOS shows the on-screen keyboard over the layout viewport and shrinks only the
 // visual one; base.css sizes #root to this height on touch screens so the
 // composer stays above the keyboard instead of being scrolled out of view.
-const visual = globalThis.visualViewport
+const visual = globalThis.visualViewport ?? null
 if (visual !== null) {
   const fitVisualViewport = (): void => {
     document.documentElement.style.setProperty('--dsh-visual-height', `${visual.height}px`)
