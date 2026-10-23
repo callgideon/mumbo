@@ -1,0 +1,37 @@
+# Loader overlay (`dsh --patch`) for one person's own machine, applied after mumbo.overlay.yml.
+# The machine is the boundary: bash and the Terminal run in Full access, and an ask still reaches the person.
+# It reads HOME and DSH_HOME from the environment, so the service that runs dsh sets both.
+# A patch replaces a row's whole config, so each row restates every key it keeps.
+- id: workspace-controller
+  config:
+    documentsDirectory: !!js process.env.HOME + '/projects'
+- id: spill-local
+  config:
+    root: !!js process.env.DSH_HOME + '/spill'
+# No session-log suffix on model requests.
+- id: session-log-deepseek
+  disabled: true
+# It would name the running release as the harness checkout.
+- id: harness-dev-context
+  disabled: true
+- id: sandbox-policy
+  config:
+    mode: danger-full-access
+    workspaceRoot: !!js process.cwd()
+# The base sets `never` when DSH_PERMISSION_MODE is danger-full-access, which rejects every ask without prompting.
+- id: approval
+  config:
+    policy: ask
+# The default preset is derived from the two rows above, so Full access needs a preset that asks.
+- id: permission
+  config:
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: ask
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: ask
