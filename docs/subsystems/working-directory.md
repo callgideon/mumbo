@@ -38,8 +38,9 @@ get(session: Session): string
 
 /**
  * Validate the current directory and restore the original project when it disappeared.
- * A missing original project is recreated empty through the filesystem provider, logged,
- * and reported once to the Agent; files it held are not restored.
+ * A missing original project is recreated empty through the filesystem provider and logged;
+ * files it held are not restored. Every Session in this process that was created before the
+ * recreation and works in, or falls back to, that project is told once.
  * @param agent - live or unpublished Agent owning the Session.
  * @param signal - cancellation for filesystem inspection and creation.
  * @returns the existing directory; recovery is committed before fulfillment.
