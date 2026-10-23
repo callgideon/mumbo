@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   mac-arm64:
@@ -33,6 +33,14 @@ jobs:
           path: apps/desktop/.desktop-build/targets/mac-arm64/unsigned-artifacts/*.dmg
           if-no-files-found: error
           retention-days: 30
+      - name: Publish to the desktop-latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp apps/desktop/.desktop-build/targets/mac-arm64/unsigned-artifacts/*.dmg mumbo-mac-arm64.dmg
+          gh release delete desktop-latest --cleanup-tag -y || true
+          gh release create desktop-latest mumbo-mac-arm64.dmg --target "$GITHUB_SHA" --title "mumbo for Mac (Apple Silicon)" \
+            --notes "Build ${GITHUB_SHA::10}. Unsigned: right-click the app and choose Open the first time."
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
