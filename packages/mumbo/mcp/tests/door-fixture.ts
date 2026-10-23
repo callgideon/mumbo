@@ -180,7 +180,9 @@ export function event(agent: FakeAgent, type: string, data: object, surfaceOp: F
  * @returns the appended event.
  */
 export function message(agent: FakeAgent, role: 'user' | 'assistant', source: object, content: object[]): FakeEvent {
-  const entry = event(agent, `${role}/message`, { id: `m${String(agent.log.length)}`, role, content, source })
+  const logged = { id: `m${String(agent.log.length)}`, role, content, source }
+  // A user message is logged as the message itself; an assistant message sits under `message` beside its settlement.
+  const entry = event(agent, `${role}/message`, role === 'user' ? logged : { message: logged, stopReason: 'stop' })
   agent.log.push(entry)
   return entry
 }

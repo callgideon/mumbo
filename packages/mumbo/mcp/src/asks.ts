@@ -151,10 +151,10 @@ export function listenForAsks(ctx: Context, irreversibleTools: readonly string[]
   return asks
 }
 
-/** The logged tool-call fields `needs_you` reads. */
-const toolCalls = z.object({
+/** The logged tool-call fields `needs_you` reads; an `assistant/message` event logs its message under `message`. */
+const toolCalls = z.object({ message: z.object({
   content: z.array(z.object({ type: z.string(), id: z.unknown().optional(), arguments: z.unknown().optional() })),
-})
+}) })
 
 /**
  * The raw JSON arguments of a tool ask's call, as the asking Session logged them.
@@ -171,7 +171,7 @@ async function callArguments(deps: ToolDeps, ask: PendingAsk, signal: AbortSigna
   }, signal)
   for (const { event } of page.records) {
     if (event.type !== 'assistant/message') continue
-    const call = toolCalls.parse(event.data).content.find(block => block.type === 'tool-call' && block.id === callId)
+    const call = toolCalls.parse(event.data).message.content.find(block => block.type === 'tool-call' && block.id === callId)
     if (typeof call?.arguments === 'string') return { arguments: fence(call.arguments) }
   }
   return {}
