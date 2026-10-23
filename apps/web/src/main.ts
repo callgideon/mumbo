@@ -8,6 +8,19 @@ interface DesktopBootGlobal {
     ready(): Promise<{ injections: Parameters<typeof applyIndexInjections>[0]; streamBaseUrl: string }>
   }
 }
+// iOS shows the on-screen keyboard over the layout viewport and shrinks only the
+// visual one; base.css sizes #root to this height on touch screens so the
+// composer stays above the keyboard instead of being scrolled out of view.
+const visual = globalThis.visualViewport
+if (visual !== null) {
+  const fitVisualViewport = (): void => {
+    document.documentElement.style.setProperty('--dsh-visual-height', `${visual.height}px`)
+    if (window.scrollY !== 0) window.scrollTo(0, 0)
+  }
+  visual.addEventListener('resize', fitVisualViewport)
+  fitVisualViewport()
+}
+
 const desktop = (globalThis as DesktopBootGlobal).dshDesktopBoot
 const reportFailure = (reason: unknown): void => {
   if (desktop === undefined) throw reason
