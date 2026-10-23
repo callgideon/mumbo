@@ -9,7 +9,7 @@ import z from '@deepseek-ai/schemastery'
 import { z as zod } from 'zod'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-fs'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, errorChain } from '@deepseek-ai/dsh-llm'
 import type { Session } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-system-prompt'
@@ -125,11 +125,13 @@ export class WorkingDirectoryService extends Service {
 
   /**
    * Validate the current directory and restore the original project when it disappeared.
+   * A missing original project is recreated empty through the filesystem provider, logged,
+   * and reported once to the Agent; files it held are not restored.
    * @param agent - live or unpublished Agent owning the Session.
-   * @param signal - cancellation for filesystem inspection.
+   * @param signal - cancellation for filesystem inspection and creation.
    * @returns the existing directory; recovery is committed before fulfillment.
    * A notice failure is warned without reverting the committed state.
-   * @throws when the original project is also unavailable.
+   * @throws when the original project cannot be recreated; the failure is logged.
    */
   ensure(agent: Agent, signal?: AbortSignal): Promise<string> {
     return this.serialize(agent, signal, async (control) => {
@@ -145,8 +147,24 @@ export class WorkingDirectoryService extends Service {
         return current
       }
       const original = agent.session.header.cwd ?? this.defaultDirectory
-      const restored = await this.directory(original, original, control)
-      this.commit(agent, restored, true, control)
+      const origin = await this.ctx.fs.resolve(original, { signal: control })
+      const originInfo = await this.ctx.fs.stat(origin, control)
+      control.throwIfAborted()
+      const recreated = originInfo?.type !== 'directory'
+      if (recreated) {
+        try {
+          // The original directory is Session metadata, not a model-selected path; Session creation creates it unconfined too.
+          await this.ctx.fs.makeDirectory(origin, control, { mode: 'danger-full-access', workspaceRoot: original })
+        } catch (error) {
+          control.throwIfAborted()
+          const failure = new Error(`working-directory: directory does not exist and could not be recreated: ${JSON.stringify(original)}: ${errorChain(error)}`, { cause: error })
+          this.ctx.logger.error(failure.message)
+          throw failure
+        }
+        this.ctx.logger.warn(`working-directory: recreated the missing directory ${JSON.stringify(original)} empty`)
+      }
+      const restored = this.ctx.fs.processPath(origin)
+      this.commit(agent, restored, recreated ? 'recreated' : 'recovered', control)
       return restored
     })
   }
@@ -164,7 +182,7 @@ export class WorkingDirectoryService extends Service {
     return this.serialize(agent, signal, async (control) => {
       if (path.length === 0) throw new Error('working-directory: cd must not be empty')
       const directory = await this.directory(path, this.get(agent.session), control)
-      this.commit(agent, directory, false, control)
+      this.commit(agent, directory, 'changed', control)
       return directory
     })
   }
@@ -183,18 +201,25 @@ export class WorkingDirectoryService extends Service {
     return this.ctx.fs.processPath(target)
   }
 
-  private commit(agent: Agent, directory: string, recovered: boolean, signal: AbortSignal): void {
+  private commit(agent: Agent, directory: string, transition: 'changed' | 'recovered' | 'recreated', signal: AbortSignal): void {
     signal.throwIfAborted()
     agent.ctx.fiber.assertActive()
     const previous = this.get(agent.session)
-    if (previous === directory) return
-    agent.session.append('working-directory/change', { cwd: directory })
+    if (previous !== directory) agent.session.append('working-directory/change', { cwd: directory })
+    else if (transition !== 'recreated') return
+    const from = JSON.stringify(previous)
+    const to = JSON.stringify(directory)
+    const recreation = 'was missing and has been recreated empty; files that were in it before are gone.'
     const notice = createUserMessage({
       content: [{
         type: 'text',
-        text: recovered
-          ? `The working directory ${JSON.stringify(previous)} is unavailable. The working directory is now ${JSON.stringify(directory)}.`
-          : `The working directory changed from ${JSON.stringify(previous)} to ${JSON.stringify(directory)}.`,
+        text: transition === 'changed'
+          ? `The working directory changed from ${from} to ${to}.`
+          : transition === 'recovered'
+            ? `The working directory ${from} is unavailable. The working directory is now ${to}.`
+            : previous === directory
+              ? `The working directory ${to} ${recreation}`
+              : `The working directory ${from} is unavailable. The original directory ${to} ${recreation} The working directory is now ${to}.`,
       }],
       source: { kind: 'working-directory' },
     })

@@ -1,9 +1,10 @@
-import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
+import { FsError } from '@deepseek-ai/dsh-fs'
 import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
 import WorkingDirectory, { type Config as WorkingDirectoryConfig } from '@deepseek-ai/dsh-working-directory'
 import { mountAgentLoopTestDependencies, mountAgentLoopTestHarness } from '@deepseek-ai/dsh-agent-loop-testkit'
@@ -107,14 +108,97 @@ describe('Session working directories', () => {
     })])
   })
 
-  it('reports a missing original project and permits an explicit directory change to recover', async () => {
+  it('recreates a missing original project empty through the filesystem provider and reports it once', async () => {
     await using f = await fixture()
     const origin = join(f.root, 'original')
     await mkdir(origin)
     const agent = await f.harness.create(SessionId('removed-origin'), {}, { cwd: origin })
+    await writeFile(join(origin, 'lost.txt'), 'lost')
     await rm(origin, { recursive: true })
-    await expect(f.ctx.workingDirectory.ensure(agent)).rejects.toThrow('directory does not exist')
-    await expect(f.ctx.workingDirectory.set(agent, f.root)).resolves.toBe(f.root)
+    const makeDirectory = vi.spyOn(f.ctx.fs, 'makeDirectory')
+    const warn = vi.spyOn(f.ctx.logger, 'warn').mockImplementation(() => {})
+    try {
+      await expect(f.ctx.workingDirectory.ensure(agent)).resolves.toBe(origin)
+      await expect(f.ctx.workingDirectory.ensure(agent)).resolves.toBe(origin)
+      expect(await readdir(origin)).toEqual([])
+      expect(makeDirectory).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ displayPath: origin }), expect.any(AbortSignal), { mode: 'danger-full-access', workspaceRoot: origin },
+      )
+      expect(warn).toHaveBeenCalledExactlyOnceWith(`working-directory: recreated the missing directory ${JSON.stringify(origin)} empty`)
+      expect(f.harness.claim(agent, 'next-step', 1)).toEqual([expect.objectContaining({
+        source: { kind: 'working-directory' },
+        content: [{ type: 'text', text: `The working directory ${JSON.stringify(origin)} was missing and has been recreated empty; files that were in it before are gone.` }],
+      })])
+      expect(agent.session.snapshotEvents().filter(event => event.type === 'working-directory/change')).toEqual([])
+    } finally {
+      makeDirectory.mockRestore()
+      warn.mockRestore()
+    }
+  })
+
+  it('recreates the original project when it disappeared together with the selected directory', async () => {
+    await using f = await fixture()
+    const origin = join(f.root, 'original')
+    const child = join(origin, 'child')
+    await mkdir(child, { recursive: true })
+    const agent = await f.harness.create(SessionId('removed-tree'), {}, { cwd: origin })
+    await f.ctx.workingDirectory.set(agent, child)
+    f.harness.claim(agent, 'next-step', 1)
+    await rm(origin, { recursive: true })
+    const warn = vi.spyOn(f.ctx.logger, 'warn').mockImplementation(() => {})
+    try {
+      await expect(f.ctx.workingDirectory.ensure(agent)).resolves.toBe(origin)
+      expect(f.ctx.workingDirectory.get(agent.session)).toBe(origin)
+      expect(f.harness.claim(agent, 'next-step', 1)).toEqual([expect.objectContaining({
+        content: [{ type: 'text', text: `The working directory ${JSON.stringify(child)} is unavailable. The original directory ${JSON.stringify(origin)} was missing and has been recreated empty; files that were in it before are gone. The working directory is now ${JSON.stringify(origin)}.` }],
+      })])
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('reports and logs a missing original project that cannot be recreated, and permits an explicit change to recover', async () => {
+    await using f = await fixture()
+    const origin = join(f.root, 'original')
+    await mkdir(origin)
+    const agent = await f.harness.create(SessionId('unrecoverable-origin'), {}, { cwd: origin })
+    await rm(origin, { recursive: true })
+    const cause = new FsError(`cannot create directory ${JSON.stringify(origin)}: permission denied`, 'FS_PERMISSION_DENIED')
+    const makeDirectory = vi.spyOn(f.ctx.fs, 'makeDirectory').mockRejectedValue(cause)
+    const logged = vi.spyOn(f.ctx.logger, 'error').mockImplementation(() => {})
+    const message = `working-directory: directory does not exist and could not be recreated: ${JSON.stringify(origin)}: ${cause.message}`
+    try {
+      await expect(f.ctx.workingDirectory.ensure(agent)).rejects.toMatchObject({ message, cause })
+      expect(logged).toHaveBeenCalledExactlyOnceWith(message)
+      expect(f.harness.claim(agent, 'next-step', 1)).toEqual([])
+      expect(agent.session.snapshotEvents().filter(event => event.type === 'working-directory/change')).toEqual([])
+      await expect(f.ctx.workingDirectory.set(agent, f.root)).resolves.toBe(f.root)
+    } finally {
+      makeDirectory.mockRestore()
+      logged.mockRestore()
+    }
+  })
+
+  it('does not report a cancelled directory creation as a creation failure', async () => {
+    await using f = await fixture()
+    const origin = join(f.root, 'original')
+    await mkdir(origin)
+    const agent = await f.harness.create(SessionId('cancelled-origin'), {}, { cwd: origin })
+    await rm(origin, { recursive: true })
+    const controller = new AbortController()
+    const makeDirectory = vi.spyOn(f.ctx.fs, 'makeDirectory').mockImplementation(async () => {
+      controller.abort(new Error('cancelled while creating directory'))
+      throw new FsError('mkdir aborted', 'FS_ABORTED')
+    })
+    const logged = vi.spyOn(f.ctx.logger, 'error').mockImplementation(() => {})
+    try {
+      await expect(f.ctx.workingDirectory.ensure(agent, controller.signal)).rejects.toThrow('cancelled while creating directory')
+      expect(logged).not.toHaveBeenCalled()
+      expect(f.harness.claim(agent, 'next-step', 1)).toEqual([])
+    } finally {
+      makeDirectory.mockRestore()
+      logged.mockRestore()
+    }
   })
 
   it('rejects files, empty paths, and cancelled changes without changing state', async () => {

@@ -1,5 +1,5 @@
 ---
-description: "Change one Session’s working directory while existing processes retain theirs. The selected directory survives replay and appears in user context. A missing directory restores the original project when it remains available."
+description: "Change one Session’s working directory while existing processes retain theirs. The selected directory survives replay and appears in user context. A missing directory restores the original project, which is recreated empty when it is missing too."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Change one Session’s working directory while existing processes retain theirs. The selected directory survives replay and appears in user context. A missing directory restores the original project when it remains available.
+Change one Session’s working directory while existing processes retain theirs. The selected directory survives replay and appears in user context. A missing directory restores the original project, which is recreated empty when it is missing too.
 
 ## Table of Contents
 
@@ -39,7 +39,7 @@ Mount alongside `fs`, `sessionProjections`, and `systemPrompt`. `defaultDirector
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-The Session projection owns the effective directory and exposes it in Session observations, so cold readers can use it without activating an Agent; the header continues to identify the original project. Changes serialize per Session, validate through the filesystem provider, check cancellation and Agent lifetime, commit an event, and queue a user-context notice. If notice queuing fails after commit, the operation returns the committed directory and logs a warning; the next request or resume still receives the required directory context. Prompt assembly validates the current directory before publishing its required context contribution. Existing processes and sandbox grants keep their independent ownership. The [service implementation](src/index.ts) defines the API.
+The Session projection owns the effective directory and exposes it in Session observations, so cold readers can use it without activating an Agent; the header continues to identify the original project. Changes serialize per Session, validate through the filesystem provider, check cancellation and Agent lifetime, commit an event, and queue a user-context notice. If notice queuing fails after commit, the operation returns the committed directory and logs a warning; the next request or resume still receives the required directory context. Prompt assembly validates the current directory before publishing its required context contribution. When the original project is missing too, `ensure` recreates it empty through the filesystem provider’s `makeDirectory`, without a sandbox fence because the path comes from the Session header rather than the model, then logs a warning and queues a notice. A creation failure is logged as an error and rejects with the provider error as its cause; cancellation rejects without that log. Existing processes and sandbox grants keep their independent ownership. The [service implementation](src/index.ts) defines the API.
 
 No runtime invariant companion is published because the service reads its only directory state from the Session projection and checks filesystem validity at use.
 
@@ -63,7 +63,7 @@ No runtime invariant companion is published because the service reads its only d
 
 #### What the model sees
 
-The current value is `Current working directory: <JSON-quoted absolute path>.` Each committed change, including automatic recovery, attempts to queue a user-context notice through the ordinary Agent inbox. Cancellation or disposal may discard unadmitted notices; the durable directory remains available to the next request. Directory context stays outside the system prompt and remains enabled when optional runtime context is disabled.
+The current value is `Current working directory: <JSON-quoted absolute path>.` Each committed change, including automatic recovery, attempts to queue a user-context notice through the ordinary Agent inbox. Cancellation or disposal may discard unadmitted notices; the durable directory remains available to the next request. When the original project had to be recreated, the notice states that it was missing, that it has been recreated empty, and that files previously in it are gone. Directory context stays outside the system prompt and remains enabled when optional runtime context is disabled.
 
 #### Token effect
 
@@ -77,7 +77,7 @@ Directory transitions append context without replacing the stable system-prompt 
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **Missing original project** — when the current directory and the original project are both unavailable, prompt assembly rejects every model turn, including chat-only turns. The service does not choose or recreate a repository. Restore the original directory, or use SDK `setWorkingDirectory` (`set_working_directory` in Python) or `ctx.workingDirectory.set` to select an existing absolute directory before retrying. Existing shells retain their process-local directories.
+- **Recreated original project is empty** — when the current directory and the original project are both missing, the service recreates the original project empty; files that were in it are not restored. If creation fails, for example because of permissions, a read-only filesystem or a remote error, prompt assembly rejects every model turn, including chat-only turns. Restore the original directory, or use SDK `setWorkingDirectory` (`set_working_directory` in Python) or `ctx.workingDirectory.set` to select an existing absolute directory before retrying. Existing shells retain their process-local directories.
 
 <a id="dev-note"></a>
 ### Dev Note
