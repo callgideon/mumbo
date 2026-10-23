@@ -145,6 +145,22 @@ describe('agent_read', () => {
     expect(value.next_seq).toBe(agent.log.length - 1)
   })
 
+  it('leaves out messages the harness adds unless include_context asks for them', async () => {
+    const { host, agent } = await door()
+    const after = agent.log.length - 1
+    message(agent, 'user', { kind: 'agent-instructions' }, [{ type: 'text', text: 'workspace rules' }])
+    message(agent, 'user', { kind: 'mcp', principal: 'ann' }, [{ type: 'text', text: 'hi' }])
+    message(agent, 'user', { kind: 'time-context' }, [{ type: 'text', text: 'now' }])
+    message(agent, 'assistant', { kind: 'model' }, [{ type: 'text', text: 'hello' }])
+
+    const people = (await call(host.url, 'agent_read', { after_seq: after })).value as { messages: { source: string }[] }
+    expect(people.messages.map(({ source }) => source)).toEqual(['mcp:ann', 'model'])
+    const all = (await call(host.url, 'agent_read', { after_seq: after, include_context: true })).value as { messages: { source: string; text: string }[] }
+    expect(all.messages.map(({ source, text }) => [source, unfence(text)])).toEqual([
+      ['agent-instructions', 'workspace rules'], ['mcp:ann', 'hi'], ['time-context', 'now'], ['model', 'hello'],
+    ])
+  })
+
   it('waits for the next message of the assistant Session with text when none follows after_seq yet', async () => {
     const { host, agent } = await door()
     const after = agent.log.length - 1
