@@ -2,16 +2,21 @@
 
 import { readFile } from 'node:fs/promises'
 import type { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import z from '@deepseek-ai/schemastery'
 import { McpServer } from '@modelcontextprotocol/server'
+import { ensureAssistant } from './assistant.ts'
 import { HANDLE_PATTERN } from './auth.ts'
+import { register as registerConversation } from './conversation.ts'
 import { createRouteHandler } from './http.ts'
+import { mcpDomain, prune } from './store.ts'
+import type { ToolDeps } from './tool.ts'
 
 /** Cordis function-plugin name. */
 export const name = 'mumbo-mcp'
-/** Host services required before the route registers. */
-export const inject = ['webServer']
+/** Host services required before the route registers; `sessionController` keeps the plugin to Web profiles. */
+export const inject = ['webServer', 'storageDomain', 'sessionController', 'workspaceRegistry']
 
 /** Route path on the injected WebServer; the listener, not the path, varies per deployment. */
 const ROUTE_PATH = '/mcp'
@@ -39,17 +44,30 @@ export const Config: z<Config> = z.object({
 })
 
 /**
- * Read the key, then register `/mcp` for the plugin's lifetime.
- * @param ctx - plugin context carrying the injected WebServer.
+ * Read the key, open the `mumbo_mcp` storage domain and prune expired request ids,
+ * then register `/mcp` for the plugin's lifetime.
+ * @param ctx - plugin context carrying the injected services.
  * @param config - validated configuration.
- * @throws when the key file is unreadable or holds only whitespace; no route registers then.
+ * @throws when the key file is unreadable or holds only whitespace, or the domain does not open; no route registers then.
  */
 export async function apply(ctx: Context, config: Config): Promise<void> {
   const key = (await readFile(config.keyFile, 'utf8')).trim()
   if (key === '') throw new Error(`mumbo-mcp: keyFile ${config.keyFile} is empty`)
+  const domain = await ctx.storageDomain.open(mcpDomain)
+  ctx.effect(() => () => domain.close(), 'mumbo-mcp: storage')
+  const idem = domain.table('idem')
+  await prune(idem)
+  const state = domain.table('state')
+  // Concurrent first calls share one creation, so they find one assistant Session.
+  let ensuring: Promise<Agent> | undefined
+  const assistant = (): Promise<Agent> => ensuring ??= ensureAssistant(ctx, config, state).finally(() => { ensuring = undefined })
   /** One server per request, its tools bound to the authenticated principal; each tool module registers here. */
-  const buildServer = (_principal: string): McpServer =>
-    new McpServer({ name, version: '0.0.1' }, { capabilities: { tools: {} } })
+  const buildServer = (principal: string): McpServer => {
+    const server = new McpServer({ name, version: '0.0.1' }, { capabilities: { tools: {} } })
+    const deps: ToolDeps = { ctx, principal, idem, assistant }
+    registerConversation(server, deps)
+    return server
+  }
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
     path: ROUTE_PATH,

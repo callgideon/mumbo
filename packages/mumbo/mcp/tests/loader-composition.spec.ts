@@ -7,6 +7,9 @@ import Group from '@deepseek-ai/cordis-plugin-group'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
+import Storage from '@deepseek-ai/dsh-storage'
+import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
+import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as McpDoor from '../src/index.ts'
 
@@ -33,6 +36,12 @@ describe('real Loader composition', () => {
 
     context = new Context()
     context.baseUrl = pathToFileURL(root).href + '/'
+    // Host services the Web profile provides; the Session services stay unused by tools/list.
+    await context.plugin(Storage)
+    await context.plugin(StorageJson, { root: join(root, 'storage') })
+    await context.plugin(StorageDomain, { backend: 'json' })
+    context.provide('sessionController', {} as never)
+    context.provide('workspaceRegistry', {} as never)
     await context.plugin(Loader)
     const modules = new Map<string, object>([
       ['@deepseek-ai/dsh-host-webserver', WebServer],
@@ -68,6 +77,7 @@ describe('real Loader composition', () => {
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
     })
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ jsonrpc: '2.0', id: 1, result: { tools: [] } })
+    const body = await response.json() as { result: { tools: { name: string }[] } }
+    expect(body.result.tools.map(tool => tool.name)).toEqual(['agent_send', 'agent_read'])
   })
 })

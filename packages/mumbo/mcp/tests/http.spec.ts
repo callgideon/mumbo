@@ -1,41 +1,18 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { Context } from '@deepseek-ai/cordis'
-import WebServer from '@deepseek-ai/dsh-host-webserver'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { afterEach, describe, expect, it } from 'vitest'
 import * as McpDoor from '../src/index.ts'
+import { KEY, startHost, stopHosts } from './door-fixture.ts'
 
-const KEY = 'fixture-key-0123456789'
 const TOOLS_LIST = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} })
+const TOOL_NAMES = ['agent_send', 'agent_read']
 
-let root: string | undefined
-let context: Context | undefined
-
-afterEach(async () => {
-  await context?.fiber.dispose()
-  context = undefined
-  if (root !== undefined) await rm(root, { recursive: true, force: true })
-  root = undefined
-})
-
-/** A real WebServer on an OS port plus the plugin config for a temp key file. */
-async function host(keyText = `${KEY}\n`, allowlist = ['ann']): Promise<{ ctx: Context; config: McpDoor.Config; url: string }> {
-  root = await mkdtemp(join(tmpdir(), 'mumbo-mcp-http-'))
-  const keyFile = join(root, 'key')
-  await writeFile(keyFile, keyText)
-  context = new Context()
-  await context.plugin(WebServer, { host: '127.0.0.1', port: 0 })
-  const config = { keyFile, allowlist, assistantTitle: 'assistant', assistantCwd: root, irreversibleTools: [] } satisfies McpDoor.Config
-  return { ctx: context, config, url: `${context.webServer.getOrigin()}/mcp` }
-}
+afterEach(stopHosts)
 
 /** Start the plugin and return the route URL. */
 async function serve(): Promise<string> {
-  const { ctx, config, url } = await host()
-  await ctx.plugin(McpDoor, config)
-  return url
+  const host = await startHost()
+  await host.ctx.plugin(McpDoor, host.config)
+  return host.url
 }
 
 /** Send one MCP-style request; `null` omits a header. */
@@ -62,7 +39,8 @@ describe('authenticated /mcp route', () => {
     const response = await post(await serve())
     expect(response.status).toBe(200)
     expect(response.headers.get('content-type')).toMatch(/^application\/json/)
-    expect(await response.json()).toEqual({ jsonrpc: '2.0', id: 1, result: { tools: [] } })
+    const body = await response.json() as { result: { tools: { name: string }[] } }
+    expect(body.result.tools.map(tool => tool.name)).toEqual(TOOL_NAMES)
   })
 
   it.each([
@@ -127,7 +105,7 @@ describe('authenticated /mcp route', () => {
       requestInit: { headers: { authorization: `Bearer ${KEY}`, 'x-mcp-principal': 'ann' } },
     }))
     try {
-      expect((await client.listTools()).tools).toEqual([])
+      expect((await client.listTools()).tools.map(tool => tool.name)).toEqual(TOOL_NAMES)
     } finally {
       await client.close()
     }
@@ -136,19 +114,19 @@ describe('authenticated /mcp route', () => {
 
 describe('plugin lifecycle', () => {
   it('fails load on an empty key file and registers no route', async () => {
-    const { ctx, config, url } = await host(' \n')
+    const { ctx, config, url } = await startHost({ keyText: ' \n' })
     await expect(ctx.plugin(McpDoor, config)).rejects.toThrow(/keyFile .* is empty/)
     expect((await post(url)).status).toBe(404)
   })
 
   it('fails load on a malformed allowlist entry', async () => {
-    const { ctx, config, url } = await host(`${KEY}\n`, ['Bad Name'])
+    const { ctx, config, url } = await startHost({ allowlist: ['Bad Name'] })
     await expect(ctx.plugin(McpDoor, config)).rejects.toThrow(/allowlist\[0\]/)
     expect((await post(url)).status).toBe(404)
   })
 
   it('frees /mcp on unload so a later load registers it again', async () => {
-    const { ctx, config, url } = await host()
+    const { ctx, config, url } = await startHost()
     const fiber = ctx.plugin(McpDoor, config)
     await fiber
     await fiber.dispose()

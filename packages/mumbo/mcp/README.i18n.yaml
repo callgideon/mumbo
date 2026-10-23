@@ -12,14 +12,17 @@
   en: 201d7f55a3123881
   zh: 7f126e5bb46df6a1
 /mumbo-mcp/table-of-contents:
-  en: b946752a1c17cd00
-  zh: cdaaea55e4da6831
+  en: 4dd05819c7c16040
+  zh: 35700f5facd70344
 /mumbo-mcp/configuration:
   en: 04852e283e6e8802
   zh: 3924d8092820649f
 /mumbo-mcp/http-contract:
-  en: b6a86bc554e9bbb1
-  zh: cb308a3e5dafbad7
+  en: 125cc56db3d031fe
+  zh: b061bee3007b58d3
+/mumbo-mcp/tools:
+  en: da66cb6bd3e318ea
+  zh: 9c01aaacb0b19d78
 /mumbo-mcp/dedicated-listener-composition:
   en: 5eb7e99a7f6aadc6
   zh: 1c2d37ad91cfb510
@@ -39,8 +42,8 @@
   en: 250194b7bf8c6b3f
   zh: 881d43036d58e62d
 /mumbo-mcp/known-limitations-and-deferred-work:
-  en: 6b11a50d5503b944
-  zh: 22bd8b307df297a6
+  en: 56cc0222260c530a
+  zh: c2b466cd21f5a6be
 /mumbo-mcp/known-limitations-and-deferred-work/dev-note:
   en: e67f633dc6fe7773
   zh: e88aeb617ffb74ea
