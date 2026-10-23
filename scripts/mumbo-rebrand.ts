@@ -30,6 +30,8 @@ const RULES: Array<[file: string, from: string, to: string]> = [
   ['packages/host/product-telemetry-otel/src/index.ts', 'https://dsh-otel-collector.deepseeksvc.com/v1/logs', brand.telemetryOtlpUrl],
   // New-chat hero: no animated whale.
   ['packages/client/ui-conversation/src/client/skeleton/EmptyHero.tsx', 'fallback: <HeroFish hovering={hovering} />', 'fallback: false && <HeroFish hovering={hovering} />'],
+  // Desktop: the overlay disables the DeepSeek account plugin, so its RPC 404s; read that as signed out.
+  ['apps/desktop/src/welcome-backend.ts', "loggedIn: (await account.state()).status === 'credential-stored',", "loggedIn: await account.state().then(s => s.status === 'credential-stored', () => false),"],
 ]
 
 const TEXT_ROOTS = ['packages', 'apps', 'scripts/client-build-environment.ts']
