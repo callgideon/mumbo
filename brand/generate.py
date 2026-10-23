@@ -101,24 +101,14 @@ write('apps/desktop/resources/icon-macos.svg', tile_svg(1024, 100, 185, INK, PAP
 write('apps/desktop/resources/icon-windows.svg', tile_svg(1024, 0, 200, INK, PAPER))
 
 
-def tile_png(size: int, inset: int, radius: int) -> Image.Image:
-    """Raster tile drawn at 4x and downsampled for smooth edges."""
-    k = 4
-    big = size * k
-    img = Image.new('RGBA', (big, big), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    draw.rounded_rectangle([inset * k, inset * k, big - inset * k - 1, big - inset * k - 1], radius * k, fill=INK)
-    # Rasterise the glyph outline: flatten the path with a recording pen.
+def draw_m(draw: ImageDraw.ImageDraw, ox: float, oy: float, s: float, fill) -> None:
+    """Fill the 'm' outline scaled by s with its ink box's top-left at (ox, oy)."""
     from fontTools.pens.basePen import BasePen
 
-    inner = (size - 2 * inset) * k
-    s = inner * 0.62 / m_w
     name = cmap[ord('m')]
     bp = BoundsPen(glyphs)
     glyphs[name].draw(bp)
-    gx0, gy0, gx1, gy1 = bp.bounds
-    ox = inset * k + (inner - m_w * s) / 2
-    oy = inset * k + (inner - m_h * s) / 2
+    gx0, _gy0, _gx1, gy1 = bp.bounds
 
     class Flatten(BasePen):
         def __init__(self):
@@ -150,7 +140,19 @@ def tile_png(size: int, inset: int, radius: int) -> Image.Image:
     glyphs[name].draw(pen)
     # 'm' has no counters, so filling each contour is exact.
     for poly in pen.polys:
-        draw.polygon(poly, fill=PAPER)
+        draw.polygon(poly, fill=fill)
+
+
+def tile_png(size: int, inset: int, radius: int) -> Image.Image:
+    """Raster tile drawn at 4x and downsampled for smooth edges."""
+    k = 4
+    big = size * k
+    img = Image.new('RGBA', (big, big), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    draw.rounded_rectangle([inset * k, inset * k, big - inset * k - 1, big - inset * k - 1], radius * k, fill=INK)
+    inner = (size - 2 * inset) * k
+    s = inner * 0.62 / m_w
+    draw_m(draw, inset * k + (inner - m_w * s) / 2, inset * k + (inner - m_h * s) / 2, s, PAPER)
     return img.resize((size, size), Image.LANCZOS)
 
 
@@ -162,3 +164,71 @@ write('apps/desktop/resources/tray-windows.ico', tile_png(256, 0, 48))
 write('apps/web/public/apple-touch-icon.png', tile_png(180, 0, 0).convert('RGB'))
 write('apps/web/public/icon-192.png', tile_png(192, 0, 0))
 write('apps/web/public/icon-512.png', tile_png(512, 0, 0))
+
+# Fallback brand mark (ui-primitives FishLogo keeps its export names; the shape is the mumbo 'm').
+write('packages/client/ui-primitives/src/FishLogo.tsx', f'''import type {{ IconProps }} from './icons/props.ts'
+
+/** Native viewBox of {{@link FISH_LOGO_PATH}} (width and height in user units). */
+export const FISH_LOGO_VIEWBOX = {{ width: {m_w}, height: {m_h} }}
+
+/** The mumbo 'm' mark path data, exported for consumers that compose their own svg around the same geometry. */
+export const FISH_LOGO_PATH = '{m_d}'
+
+/**
+ * Render the mumbo mark.
+ * @param props.size - width in px (default 24; height keeps the mark's ratio).
+ * @param props.className - extra class for layout placement.
+ * @returns the mark svg (aria-hidden; pair with the wordmark for accessibility).
+ */
+export function FishLogo({{ size = 24, className }}: IconProps) {{
+  return (
+    <svg
+      width={{size}}
+      height={{(size * FISH_LOGO_VIEWBOX.height) / FISH_LOGO_VIEWBOX.width}}
+      className={{className}}
+      viewBox={{`0 0 ${{FISH_LOGO_VIEWBOX.width}} ${{FISH_LOGO_VIEWBOX.height}}`}}
+      fill="none"
+      aria-hidden="true"
+    >
+      <path d={{FISH_LOGO_PATH}} fill="currentColor" />
+    </svg>
+  )
+}}
+''')
+
+# Running status: the 'm' mark, still (reduced motion) and as the pulsing alpha mask animation.
+pad = round(m_w * 0.12)
+write('packages/client/ui-chat/src/client/chat/RunningWhaleTail.tsx', f'''/** Animated mumbo mark mask and static SVG fallback for the running Chat status. */
+import css from './ChatView.module.css'
+
+const REST_PATH = '{m_d}'
+
+/**
+ * Render the decorative running icon; the APNG asset owns its animation timing.
+ * @returns mask and static SVG selected by browser capabilities and accessibility preferences.
+ */
+export function RunningWhaleTail() {{
+  return (
+    <span className={{css.runningIcon}} aria-hidden="true">
+      <span className={{css.runningWhaleAnimated}} />
+      <svg className={{css.runningWhaleStill}} width="100%" height="100%" viewBox="{-pad} {-(m_w + 2 * pad - m_h) // 2} {m_w + 2 * pad} {m_w + 2 * pad}" fill="none">
+        <path d={{REST_PATH}} fill="currentColor" />
+      </svg>
+    </span>
+  )
+}}
+''')
+
+import math
+frames = []
+for i in range(60):
+    k = 8
+    big = 28 * k
+    img = Image.new('LA', (big, big), (0, 0))
+    phase = (1 - math.cos(2 * math.pi * i / 60)) / 2  # 0 -> 1 -> 0 over the 3 s loop
+    alpha = round(255 * (0.35 + 0.65 * phase))
+    s = big * 0.78 / m_w
+    draw_m(ImageDraw.Draw(img), (big - m_w * s) / 2, (big - m_h * s) / 2 - phase * k, s, (0, alpha))
+    frames.append(img.resize((28, 28), Image.LANCZOS))
+target = OUT / 'packages/client/ui-chat/src/client/chat/running-whale@2x.png'
+frames[0].save(target, save_all=True, append_images=frames[1:], duration=50, loop=0, format='PNG')

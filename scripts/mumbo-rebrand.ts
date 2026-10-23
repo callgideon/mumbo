@@ -1,7 +1,7 @@
 /**
  * Build-time rebrand, so `git merge upstream/master` never conflicts on product text:
  * 1. RULES rewrite specific upstream literals (ids, origins, logo fallbacks) to brand/brand.json values.
- * 2. Every shipped text file under TEXT_ROOTS has the product names "DeepSeek Harness" and "DeepSeek"
+ * 2. Every shipped text file under TEXT_ROOTS has the product names "DeepSeek Harness", "DeepSeek" and "DSH"
  *    replaced by brand.productName. Only the capitalised word is touched: lowercase wire values
  *    (api.deepseek.com, model ids, @deepseek-ai/* packages, DEEPSEEK_API_KEY) and identifiers such as
  *    DeepSeekModelsEditor keep working.
@@ -40,6 +40,8 @@ const SKIP = /(^|\/)(node_modules|lib|dist|tests?|__tests__|fixtures|snapshots|t
 const NAMES: Array<[RegExp, string]> = [
   [/DeepSeek[ -][Hh]arness/g, brand.productName],
   [/(?<![\w@/.-])DeepSeek(?!\w)/g, brand.productName],
+  // The short product name in copy ("DSH Local Build", "Provided by DSH"); DSH_* variables and the dsh command stay.
+  [/(?<![\w@/.$-])DSH(?![\w-])/g, brand.productName],
 ]
 
 const missing = RULES.filter(([file, from]) => !readFileSync(file, 'utf8').includes(from))
