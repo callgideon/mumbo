@@ -10,6 +10,7 @@ import { listenForAsks, register as registerAsks } from './asks.ts'
 import { ensureAssistant } from './assistant.ts'
 import { HANDLE_PATTERN } from './auth.ts'
 import { register as registerConversation } from './conversation.ts'
+import { gateWhileHalted, register as registerHalt } from './halt.ts'
 import { createRouteHandler } from './http.ts'
 import { register as registerStatus } from './status.ts'
 import { mcpDomain, prune } from './store.ts'
@@ -56,8 +57,8 @@ export const Config: z<Config> = z.object({
 })
 
 /**
- * Read the key, open the `mumbo_mcp` storage domain and prune expired request ids,
- * then register `/mcp` for the plugin's lifetime.
+ * Read the key, open the `mumbo_mcp` storage domain and prune expired request ids, gate model steps on the
+ * stored halt flag, and answer asks, then register `/mcp`; all for the plugin's lifetime.
  * @param ctx - plugin context carrying the injected services.
  * @param config - validated configuration.
  * @throws when the key file is unreadable or holds only whitespace, or the domain does not open; no route registers then.
@@ -70,6 +71,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const idem = domain.table('idem')
   await prune(idem)
   const halt = domain.table('halt')
+  gateWhileHalted(ctx, halt)
   // Concurrent first calls share one creation, so they find one assistant Session.
   let ensuring: Promise<Agent> | undefined
   const assistant = (): Promise<Agent> => ensuring ??= ensureAssistant(ctx, config, domain.table('assistant')).finally(() => { ensuring = undefined })
@@ -81,6 +83,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     registerConversation(server, deps)
     registerAsks(server, deps)
     registerStatus(server, deps)
+    registerHalt(server, deps)
     return server
   }
   ctx.effect(() => ctx.webServer.register({

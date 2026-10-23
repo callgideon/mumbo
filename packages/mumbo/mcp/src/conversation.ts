@@ -5,7 +5,9 @@ import type { SessionWireEvent } from '@deepseek-ai/dsh-api-session-controller'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
+import { ToolError } from './errors.ts'
 import { fence } from './fence.ts'
+import { isHalted } from './halt.ts'
 import { once } from './store.ts'
 import { defineTool, requestId, type ToolDeps } from './tool.ts'
 
@@ -101,9 +103,10 @@ export function register(server: McpServer, deps: ToolDeps): void {
     'agent_send',
     'Send a message to the assistant as yourself; it reads it as a new user turn. '
     + 'Returns message_id and after_seq: pass after_seq to agent_read to read the reply. '
-    + 'Repeating a request_id within a day sends nothing and returns the first result.',
+    + 'Repeating a request_id within a day sends nothing and returns the first result. While runs are halted it answers halted.',
     sendArgs,
     async args => await once(deps.idem, 'agent_send', `${deps.principal}/${args.request_id}`, args, async () => {
+      if (isHalted(deps.halt)) throw new ToolError('halted', 'runs are halted; runs_resume ends the halt')
       const agent = await deps.assistant()
       const afterSeq = agent.session.seq - 1
       const sent = createUserMessage({ content: [{ type: 'text', text: args.text }], source: { kind: 'mcp', principal: deps.principal } })

@@ -11,6 +11,7 @@ import type { McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 import { ToolError } from './errors.ts'
 import { fence } from './fence.ts'
+import { isHalted } from './halt.ts'
 import { defineTool, type ToolDeps } from './tool.ts'
 
 /** Projections `task_status` reports; the rest, such as the inbox, stay out. */
@@ -130,7 +131,7 @@ export function register(server: McpServer, deps: ToolDeps): void {
       const worktrees = await git(deps.ctx, deps.assistantCwd, ['worktree', 'list', '--porcelain'], signal)
       return JSON.stringify({
         assistant_session: agent.id,
-        halted: deps.halt.get('main')?.halted === true,
+        halted: isHalted(deps.halt),
         projections: fence(JSON.stringify(Object.fromEntries(Object.entries(values).filter(([key]) => PROJECTIONS.has(key))))),
         children: await listChildren(deps.ctx, agent.id, signal),
         worktrees: fence(worktrees.text),
