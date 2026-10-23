@@ -8,9 +8,9 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { z as zod } from 'zod'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type {} from '@deepseek-ai/dsh-fs'
+import type { FsTarget } from '@deepseek-ai/dsh-fs'
 import { createUserMessage, errorChain } from '@deepseek-ai/dsh-llm'
-import type { Session } from '@deepseek-ai/dsh-session'
+import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 
@@ -71,6 +71,9 @@ export class WorkingDirectoryService extends Service {
   private readonly pending = new WeakMap<Session, Promise<void>>()
   private readonly operations = new Set<Promise<unknown>>()
   private readonly lifecycle = new AbortController()
+  // ponytail: in-process only; restarts and folders recreated outside ensure need a durable per-Session marker.
+  /** Original projects this process recreated, and the Sessions created before then that were told. */
+  private readonly recreations = new Map<string, { at: number; told: Set<SessionId> }>()
 
   constructor(ctx: Context, config: Config) {
     super(ctx, 'workingDirectory')
@@ -125,8 +128,9 @@ export class WorkingDirectoryService extends Service {
 
   /**
    * Validate the current directory and restore the original project when it disappeared.
-   * A missing original project is recreated empty through the filesystem provider, logged,
-   * and reported once to the Agent; files it held are not restored.
+   * A missing original project is recreated empty through the filesystem provider and logged;
+   * files it held are not restored. Every Session in this process that was created before the
+   * recreation and works in, or falls back to, that project is told once.
    * @param agent - live or unpublished Agent owning the Session.
    * @param signal - cancellation for filesystem inspection and creation.
    * @returns the existing directory; recovery is committed before fulfillment.
@@ -136,6 +140,7 @@ export class WorkingDirectoryService extends Service {
   ensure(agent: Agent, signal?: AbortSignal): Promise<string> {
     return this.serialize(agent, signal, async (control) => {
       const current = this.get(agent.session)
+      const original = agent.session.header.cwd ?? this.defaultDirectory
       const target = await this.ctx.fs.resolve(current, { signal: control })
       const info = await this.ctx.fs.stat(target, control)
       control.throwIfAborted()
@@ -144,27 +149,21 @@ export class WorkingDirectoryService extends Service {
         if (this.ctx.sessionProjections.stateOf(agent.session, 'workingDirectory') === null) {
           agent.session.append('working-directory/change', { cwd: current })
         }
+        const recreation = current === original ? this.untold(agent.session, original) : undefined
+        if (recreation !== undefined) {
+          this.commit(agent, current, 'recreated', control)
+          recreation.told.add(agent.session.id)
+        }
         return current
       }
-      const original = agent.session.header.cwd ?? this.defaultDirectory
       const origin = await this.ctx.fs.resolve(original, { signal: control })
       const originInfo = await this.ctx.fs.stat(origin, control)
       control.throwIfAborted()
-      const recreated = originInfo?.type !== 'directory'
-      if (recreated) {
-        try {
-          // The original directory is Session metadata, not a model-selected path; Session creation creates it unconfined too.
-          await this.ctx.fs.makeDirectory(origin, control, { mode: 'danger-full-access', workspaceRoot: original })
-        } catch (error) {
-          control.throwIfAborted()
-          const failure = new Error(`working-directory: directory does not exist and could not be recreated: ${JSON.stringify(original)}: ${errorChain(error)}`, { cause: error })
-          this.ctx.logger.error(failure.message)
-          throw failure
-        }
-        this.ctx.logger.warn(`working-directory: recreated the missing directory ${JSON.stringify(original)} empty`)
-      }
+      if (originInfo?.type !== 'directory') await this.recreate(original, origin, control)
       const restored = this.ctx.fs.processPath(origin)
-      this.commit(agent, restored, recreated ? 'recreated' : 'recovered', control)
+      const recreation = this.untold(agent.session, original)
+      this.commit(agent, restored, recreation === undefined ? 'recovered' : 'recreated', control)
+      recreation?.told.add(agent.session.id)
       return restored
     })
   }
@@ -189,6 +188,33 @@ export class WorkingDirectoryService extends Service {
 
   private contextText(session: Session): string {
     return `Current working directory: ${JSON.stringify(this.get(session))}.`
+  }
+
+  /** Recreate a missing original project; once it exists, the notice stays owed even if cancellation interrupts. */
+  private async recreate(original: string, origin: FsTarget, signal: AbortSignal): Promise<void> {
+    try {
+      // The original directory is Session metadata, not a model-selected path; Session creation creates it unconfined too.
+      await this.ctx.fs.makeDirectory(origin, signal, { mode: 'danger-full-access', workspaceRoot: original })
+    } catch (error) {
+      if (signal.aborted) {
+        // A remote provider may have created the directory before the cancelled call settled.
+        const info = await this.ctx.fs.stat(origin, this.lifecycle.signal).catch(() => undefined)
+        if (info?.type === 'directory') this.recreations.set(original, { at: Date.now(), told: new Set() })
+        signal.throwIfAborted()
+      }
+      const failure = new Error(`working-directory: directory does not exist and could not be recreated: ${JSON.stringify(original)}: ${errorChain(error)}; restore it or select another existing directory`, { cause: error })
+      this.ctx.logger.error(failure.message)
+      throw failure
+    }
+    this.recreations.set(original, { at: Date.now(), told: new Set() })
+    this.ctx.logger.warn(`working-directory: recreated the missing directory ${JSON.stringify(original)} empty`)
+  }
+
+  private untold(session: Session, original: string): { told: Set<SessionId> } | undefined {
+    const recreation = this.recreations.get(original)
+    // A Session created in the recreation's millisecond counts as earlier: a stray notice costs less than a missed one.
+    if (recreation === undefined || session.header.createdAt > recreation.at || recreation.told.has(session.id)) return undefined
+    return recreation
   }
 
   private async directory(path: string, cwd: string, signal: AbortSignal): Promise<string> {

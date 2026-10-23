@@ -228,10 +228,16 @@ describe('directory creation', () => {
     await fs.makeDirectory(await target(nested))
     await fs.makeDirectory(await target(nested))
     expect((await stat(nested)).isDirectory()).toBe(true)
-    await expect(fs.makeDirectory(await target(join(outside, 'escaped')))).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    await expect(fs.makeDirectory(await target(join(outside, 'escaped')))).rejects.toMatchObject({
+      code: 'FS_SANDBOX_DENIED',
+      message: `cannot create directory "${join(outside, 'escaped')}": file access denied under workspace-write mode`,
+    })
     expect(existsSync(join(outside, 'escaped'))).toBe(false)
     await expect(fs.makeDirectory(await target(join(workspace, 'denied')), undefined, { mode: 'read-only', workspaceRoot: workspace }))
-      .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+      .rejects.toMatchObject({
+        code: 'FS_SANDBOX_DENIED',
+        message: `cannot create directory "${join(workspace, 'denied')}": file access denied under read-only mode`,
+      })
     expect(existsSync(join(workspace, 'denied'))).toBe(false)
     const granted = join(outside, 'granted', 'nested')
     await fs.makeDirectory(await target(granted), undefined, { mode: 'danger-full-access', workspaceRoot: workspace })

@@ -166,7 +166,7 @@ describe('Session working directories', () => {
     const cause = new FsError(`cannot create directory ${JSON.stringify(origin)}: permission denied`, 'FS_PERMISSION_DENIED')
     const makeDirectory = vi.spyOn(f.ctx.fs, 'makeDirectory').mockRejectedValue(cause)
     const logged = vi.spyOn(f.ctx.logger, 'error').mockImplementation(() => {})
-    const message = `working-directory: directory does not exist and could not be recreated: ${JSON.stringify(origin)}: ${cause.message}`
+    const message = `working-directory: directory does not exist and could not be recreated: ${JSON.stringify(origin)}: ${cause.message}; restore it or select another existing directory`
     try {
       await expect(f.ctx.workingDirectory.ensure(agent)).rejects.toMatchObject({ message, cause })
       expect(logged).toHaveBeenCalledExactlyOnceWith(message)
@@ -186,18 +186,94 @@ describe('Session working directories', () => {
     const agent = await f.harness.create(SessionId('cancelled-origin'), {}, { cwd: origin })
     await rm(origin, { recursive: true })
     const controller = new AbortController()
-    const makeDirectory = vi.spyOn(f.ctx.fs, 'makeDirectory').mockImplementation(async () => {
+    const stat = vi.spyOn(f.ctx.fs, 'stat')
+    const makeDirectory = vi.spyOn(f.ctx.fs, 'makeDirectory').mockImplementationOnce(async () => {
       controller.abort(new Error('cancelled while creating directory'))
+      stat.mockRejectedValueOnce(new FsError('stat failed', 'FS_IO_ERROR'))
       throw new FsError('mkdir aborted', 'FS_ABORTED')
     })
     const logged = vi.spyOn(f.ctx.logger, 'error').mockImplementation(() => {})
+    const warn = vi.spyOn(f.ctx.logger, 'warn').mockImplementation(() => {})
     try {
       await expect(f.ctx.workingDirectory.ensure(agent, controller.signal)).rejects.toThrow('cancelled while creating directory')
       expect(logged).not.toHaveBeenCalled()
       expect(f.harness.claim(agent, 'next-step', 1)).toEqual([])
+      await expect(f.ctx.workingDirectory.ensure(agent)).resolves.toBe(origin)
+      expect(f.harness.claim(agent, 'next-step', 1)).toHaveLength(1)
     } finally {
+      stat.mockRestore()
       makeDirectory.mockRestore()
       logged.mockRestore()
+      warn.mockRestore()
+    }
+  })
+
+  it('keeps the recreation notice owed when cancellation interrupts after the directory exists', async () => {
+    await using f = await fixture()
+    const origin = join(f.root, 'original')
+    await mkdir(origin)
+    const agent = await f.harness.create(SessionId('interrupted-origin'), {}, { cwd: origin })
+    const real = f.ctx.fs.makeDirectory.bind(f.ctx.fs)
+    const warn = vi.spyOn(f.ctx.logger, 'warn').mockImplementation(() => {})
+    const notice = [expect.objectContaining({
+      content: [{ type: 'text', text: `The working directory ${JSON.stringify(origin)} was missing and has been recreated empty; files that were in it before are gone.` }],
+    })]
+    try {
+      for (const settle of ['resolves', 'rejects'] as const) {
+        await rm(origin, { recursive: true })
+        const controller = new AbortController()
+        const makeDirectory = vi.spyOn(f.ctx.fs, 'makeDirectory').mockImplementationOnce(async (target, signal, policy) => {
+          await real(target, signal, policy)
+          controller.abort(new Error('cancelled after creation'))
+          if (settle === 'rejects') throw new FsError('mkdir aborted', 'FS_ABORTED')
+        })
+        await expect(f.ctx.workingDirectory.ensure(agent, controller.signal)).rejects.toThrow('cancelled after creation')
+        makeDirectory.mockRestore()
+        expect(f.harness.claim(agent, 'next-step', 1)).toEqual([])
+        await expect(f.ctx.workingDirectory.ensure(agent)).resolves.toBe(origin)
+        expect(f.harness.claim(agent, 'next-step', 1)).toEqual(notice)
+        await expect(f.ctx.workingDirectory.ensure(agent)).resolves.toBe(origin)
+        expect(f.harness.claim(agent, 'next-step', 1)).toEqual([])
+      }
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('tells every earlier Session on a recreated project once, but not Sessions created afterwards', async () => {
+    await using f = await fixture()
+    const origin = join(f.root, 'original')
+    const child = join(origin, 'child')
+    await mkdir(child, { recursive: true })
+    const first = await f.harness.create(SessionId('shared-first'), {}, { cwd: origin })
+    const second = await f.harness.create(SessionId('shared-second'), {}, { cwd: origin })
+    const nested = await f.harness.create(SessionId('shared-nested'), {}, { cwd: origin })
+    await f.ctx.workingDirectory.set(nested, child)
+    f.harness.claim(nested, 'next-step', 1)
+    await rm(origin, { recursive: true })
+    const warn = vi.spyOn(f.ctx.logger, 'warn').mockImplementation(() => {})
+    const recreation = `${JSON.stringify(origin)} was missing and has been recreated empty; files that were in it before are gone.`
+    try {
+      await expect(f.ctx.workingDirectory.ensure(first)).resolves.toBe(origin)
+      expect(f.harness.claim(first, 'next-step', 1)).toHaveLength(1)
+      const recreated = Date.now()
+      await vi.waitUntil(() => Date.now() > recreated)
+      const later = await f.harness.create(SessionId('shared-later'), {}, { cwd: origin })
+      for (const agent of [second, nested, later]) await expect(f.ctx.workingDirectory.ensure(agent)).resolves.toBe(origin)
+      expect(f.harness.claim(second, 'next-step', 1)).toEqual([expect.objectContaining({
+        content: [{ type: 'text', text: `The working directory ${recreation}` }],
+      })])
+      expect(f.harness.claim(nested, 'next-step', 1)).toEqual([expect.objectContaining({
+        content: [{ type: 'text', text: `The working directory ${JSON.stringify(child)} is unavailable. The original directory ${recreation} The working directory is now ${JSON.stringify(origin)}.` }],
+      })])
+      expect(f.harness.claim(later, 'next-step', 1)).toEqual([])
+      for (const agent of [first, second, nested]) {
+        await f.ctx.workingDirectory.ensure(agent)
+        expect(f.harness.claim(agent, 'next-step', 1)).toEqual([])
+      }
+      expect(warn).toHaveBeenCalledOnce()
+    } finally {
+      warn.mockRestore()
     }
   })
 

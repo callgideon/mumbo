@@ -77,7 +77,7 @@ export class SandboxedFileSystem extends LocalFileSystem {
    * @returns a promise resolving once the directory exists.
    */
   override async makeDirectory(target: FsTarget, signal?: AbortSignal, sandboxPolicy?: SandboxExecutionPolicy): Promise<void> {
-    return super.makeDirectory(await this.checkedTarget(target, sandboxPolicy), signal)
+    return super.makeDirectory(await this.checkedTarget(target, sandboxPolicy, 'create directory'), signal)
   }
 
   /**
@@ -98,7 +98,7 @@ export class SandboxedFileSystem extends LocalFileSystem {
     signal?: AbortSignal,
     sandboxPolicy?: SandboxExecutionPolicy,
   ): Promise<FsWriteOutcome> {
-    return super.writeText(await this.checkedTarget(target, sandboxPolicy), content, expected, signal)
+    return super.writeText(await this.checkedTarget(target, sandboxPolicy, 'write'), content, expected, signal)
   }
 
   /**
@@ -119,7 +119,7 @@ export class SandboxedFileSystem extends LocalFileSystem {
     signal?: AbortSignal,
     sandboxPolicy?: SandboxExecutionPolicy,
   ): Promise<FsEditOutcome> {
-    return super.editText(await this.checkedTarget(target, sandboxPolicy), edit, expected, signal)
+    return super.editText(await this.checkedTarget(target, sandboxPolicy, 'write'), edit, expected, signal)
   }
 
   /**
@@ -131,14 +131,14 @@ export class SandboxedFileSystem extends LocalFileSystem {
    * writable root, and returns THAT fresh target; `danger-full-access` returns
    * the caller's target unfenced. Throws the structured `FS_SANDBOX_DENIED` on
    * refusal — the tool layer maps it to the model-facing `[sandbox: …]` marker
-   * and the escalation hint.
+   * and the escalation hint; its message names `operation`.
    */
-  private async checkedTarget(target: FsTarget, sandboxPolicy?: SandboxExecutionPolicy): Promise<FsTarget> {
+  private async checkedTarget(target: FsTarget, sandboxPolicy: SandboxExecutionPolicy | undefined, operation: 'write' | 'create directory'): Promise<FsTarget> {
     const policy = sandboxPolicy ?? this.ctx.sandboxPolicy.resolve()
     const { mode } = policy
     if (mode === 'danger-full-access') return target
     if (mode === 'read-only') {
-      throw new FsError(`cannot write "${target.displayPath}": file access denied under read-only mode`, 'FS_SANDBOX_DENIED')
+      throw new FsError(`cannot ${operation} "${target.displayPath}": file access denied under read-only mode`, 'FS_SANDBOX_DENIED')
     }
     // workspace-write: containment on the FRESH canonical path (catches a
     // symlink ancestor swapped since the tool resolved this target), and the
@@ -152,7 +152,7 @@ export class SandboxedFileSystem extends LocalFileSystem {
       }
     }
     if (!contained) {
-      throw new FsError(`cannot write "${target.displayPath}": file access denied under workspace-write mode`, 'FS_SANDBOX_DENIED')
+      throw new FsError(`cannot ${operation} "${target.displayPath}": file access denied under workspace-write mode`, 'FS_SANDBOX_DENIED')
     }
     return fresh
   }

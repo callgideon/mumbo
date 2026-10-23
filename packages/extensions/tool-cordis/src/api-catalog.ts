@@ -3768,7 +3768,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'ensure(agent: Agent, signal?: AbortSignal): Promise<string>',
-        description: 'Validate the current directory and restore the original project when it disappeared. A missing original project is recreated empty through the filesystem provider, logged, and reported once to the Agent; files it held are not restored.',
+        description: 'Validate the current directory and restore the original project when it disappeared. A missing original project is recreated empty through the filesystem provider and logged; files it held are not restored. Every Session in this process that was created before the recreation and works in, or falls back to, that project is told once.',
         parameters: [{ name: 'agent', description: 'live or unpublished Agent owning the Session.' }, { name: 'signal', description: 'cancellation for filesystem inspection and creation.' }],
         returns: 'the existing directory; recovery is committed before fulfillment. A notice failure is warned without reverting the committed state.',
         throws: ['when the original project cannot be recreated; the failure is logged.'],
