@@ -4589,7 +4589,7 @@ export interface Config {
 ## `@mumbo/mcp`
 
 - `inject`: `webServer` · `storageDomain` · `sessionController` · `workspaceRegistry`
-- `source`: [`packages/mumbo/mcp/src/index.ts:25`](../packages/mumbo/mcp/src/index.ts)
+- `source`: [`packages/mumbo/mcp/src/index.ts:26`](../packages/mumbo/mcp/src/index.ts)
 
 ```ts config-catalog
 /** MCP door configuration. */

@@ -5,6 +5,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type { CallToolResult, McpServer, StandardSchemaWithJSON } from '@modelcontextprotocol/server'
 import { z } from 'zod'
+import type { PendingAsk } from './asks.ts'
 import { ToolError } from './errors.ts'
 import type { IdemRecord } from './store.ts'
 
@@ -18,6 +19,8 @@ export interface ToolDeps {
   readonly idem: KvTable<string, IdemRecord>
   /** Resolve, or create once, the assistant Session's live Agent. */
   readonly assistant: () => Promise<Agent>
+  /** Open asks by `ask_id`, shared by every request. */
+  readonly asks: ReadonlyMap<string, PendingAsk>
 }
 
 /**
@@ -48,7 +51,7 @@ export function defineTool<S extends z.ZodObject>(
   name: string,
   description: string,
   schema: S,
-  run: (args: z.output<S>, signal: AbortSignal) => Promise<string>,
+  run: (args: z.output<S>, signal: AbortSignal) => string | Promise<string>,
 ): void {
   server.registerTool(name, { description, inputSchema: listedOnly(schema) }, async (raw, extra) => {
     try {

@@ -62,10 +62,14 @@ kind: "package-reference"
 |---|---|---|
 | `agent_send` | `text`（1 到 32,768 个字符）、`request_id`（`^[A-Za-z0-9_-]{1,64}$`） | `{message_id, after_seq}` |
 | `agent_read` | `after_seq`（整数，至少为 0）、`wait_s`（0 到 40，默认 0） | `{messages: [{seq, role, source, text}], next_seq}` |
+| `needs_you` | 无 | `{asks: [{ask_id, kind, session_id, tool, detail, irreversible}]}` |
+| `task_reply` | `ask_id`、`request_id`、`decision`（`approve` 或 `reject`）、`answers`（`[{id, selected, custom}]`）、`feedback` | `{ok: true}` |
 
 `agent_send` 把文本作为助手会话的一个 follow-up 轮次排队，source 为 `{kind: "mcp", principal}`；`after_seq` 是此前记录的最后一个事件。同一 principal 在 24 小时内重复同一 `request_id` 时返回首次结果且不再发送；参数不同则应答 `request_id_reused`。
 
 `agent_read` 按从旧到新返回 `after_seq` 之后记录的 user 与 assistant 消息，不含没有文本的消息，也不含压缩替换。source 指明某人时 `source` 为 `<kind>:<principal>`，否则为其 kind。没有消息且 `wait_s` 为正数时，它最多等待 `wait_s` 秒以获得下一条消息。一次应答至多包含 64 KiB 已包裹的文本，除非其唯一的消息更长；此时 `next_seq` 位于第一条被留下的消息之前，否则它是最后记录的事件。
+
+`needs_you` 列出任一会话中所有未决的工具批准（`kind: "tool"`，带 `tool`）、计划评审（`kind: "plan"`）与用户问题（`kind: "question"`）；在会话之外提出的问题没有 `session_id`。`detail` 是提问方给出的原因、计划，或以 JSON 表示的问题。插件在 `approval/request` 与 `user-questions/request` 链中最先应答，并让链的其余部分（例如浏览器）与 `task_reply` 竞速；先应答者决定结果，之后的 `task_reply` 应答 `not_found`。工具或计划请求接受 `decision`；被拒绝的计划选择其另一个选项，并以 `feedback` 作为自由文本。问题请求接受 `answers`，原样传递。回复缺少其请求所需的字段时应答 `invalid`，`irreversibleTools` 中列出的工具应答 `needs_person`；两者都让请求保持未决。被中止的请求会撤回其请求项。未决请求保存在内存中，随插件结束。
 
 助手会话就是插件所存 id 对应的会话：首次调用在 `assistantCwd` 工作区中创建它并命名为 `assistantTitle`，之后只有当所存会话已不存在时，调用才会创建新会话。该 id 与按 request id 保存的结果位于 `mumbo_mcp` 存储域中；超过 24 小时的结果在加载时清理。
 
@@ -99,6 +103,7 @@ Web profile 自己的监听器服务 UI。把第二个 `dsh-host-webserver` 和�
 - **无 TLS**：监听器必须留在 loopback；远程的人经由 SSH 等经过身份验证的 relay 访问它。
 - **轮换密钥需要重新加载**：插件只在加载时读取一次密钥文件。
 - **仅 JSON**：没有服务器主动发起的消息、`GET` 流或 MCP 会话。
+- **经 MCP 应答的请求会让浏览器卡片保持打开**：链的其余部分不会被取消，因此卡片会保留到其请求结束。
 - **`agent_read` 读取整个助手日志**：每次读取都取一页直到最新事件的历史，因此其开销随会话增长。
 
 <a id="dev-note"></a>
