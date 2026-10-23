@@ -3,76 +3,185 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sign in to Mumbo</title>
+<title>Sign in to mumbo</title>
 <style>
-  :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-  body { margin: 0; min-height: 100dvh; display: grid; place-items: center; }
-  main { width: min(22rem, 100% - 2rem); display: grid; gap: .75rem; }
-  input, button { font: inherit; padding: .6rem .75rem; border-radius: .5rem; border: 1px solid GrayText; }
-  button { cursor: pointer; }
-  #msg { min-height: 1.5em; margin: 0; }
+  /* Tokens and sizes follow the desktop welcome screen (apps/desktop/renderer/welcome.css). */
+  :root {
+    color-scheme: light dark;
+    --ink: #0f1115; --ink-2: #61666b; --ink-3: #81858c; --caption: #adb2b8;
+    --inverted: #fff; --primary-hover: #43454a; --elevated: #fff; --elevated-hover: #f1f3f5;
+    --border: #0000001a; --border-strong: #00000029; --bg: #f7f8fa; --card: #ffffff;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #f9fafb; --ink-2: #cfd3d6; --ink-3: #adb2b8; --caption: #81858c;
+      --inverted: #353638; --primary-hover: #ebeef2; --elevated: #43454a; --elevated-hover: #353638;
+      --border: #ffffff1f; --border-strong: #ffffff33; --bg: #0f1115; --card: #17191d;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px;
+    background: var(--bg); color: var(--ink); font-family: var(--font); -webkit-font-smoothing: antialiased;
+  }
+  main {
+    width: min(400px, 100%); display: flex; flex-direction: column; align-items: center; gap: 32px;
+    padding: 48px 40px 40px; background: var(--card); border: 1px solid var(--border); border-radius: 20px;
+  }
+  .brand { width: 132px; height: auto; color: var(--ink); }
+  header { text-align: center; display: grid; gap: 8px; }
+  h1 { margin: 0; font-size: 20px; font-weight: 400; line-height: 32px; letter-spacing: 0.01em; }
+  .sub { margin: 0; color: var(--ink-2); font-size: 15px; font-weight: 300; line-height: 22px; }
+  .stack { width: 100%; display: flex; flex-direction: column; gap: 12px; }
+  button {
+    display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; height: 44px;
+    padding: 8px 16px; border: 1px solid transparent; border-radius: 10px; cursor: pointer;
+    font: 500 14px/22px var(--font);
+    transition: background-color .2s var(--ease), border-color .2s var(--ease), opacity .2s var(--ease);
+  }
+  button:disabled { cursor: not-allowed; opacity: .4; }
+  button:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+  .primary { background: var(--ink); color: var(--inverted); }
+  .primary:hover:not(:disabled) { background: var(--primary-hover); }
+  .secondary { background: var(--elevated); border-color: var(--border); color: var(--ink); }
+  .secondary:hover:not(:disabled) { background: var(--elevated-hover); }
+  .link {
+    width: auto; height: 28px; margin: 0 auto; padding: 4px 10px; border: 0; border-radius: 24px;
+    background: transparent; color: var(--ink-2); font-weight: 400;
+  }
+  .link:hover:not(:disabled) { color: var(--ink); }
+  .divider { display: flex; align-items: center; gap: 12px; color: var(--caption); font-size: 13px; }
+  .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+  input {
+    display: block; width: 100%; height: 48px; padding: 7px 14px; border: 1px solid var(--border-strong);
+    border-radius: 12px; outline: none; background: transparent; color: var(--ink); font: 400 15px/24px var(--font);
+    transition: border-color .2s var(--ease);
+  }
+  input:focus { border-color: var(--ink); }
+  input::placeholder { color: var(--caption); opacity: 1; }
+  #code { text-align: center; letter-spacing: .3em; font-size: 18px; }
+  #msg { margin: 0; min-height: 22px; color: var(--ink-2); font-size: 14px; line-height: 22px; text-align: center; }
+  #msg.error { color: #d93025; }
+  #msg:empty { display: none; }
+  footer { color: var(--caption); font-size: 12px; line-height: 18px; text-align: center; }
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  @media (max-width: 440px) { main { padding: 40px 24px 32px; border: 0; background: transparent; } body { background: var(--card); } }
+  @media (prefers-reduced-motion: reduce) { button, input { transition: none; } }
 </style>
 </head>
 <body>
 <main>
-  <h1>Mumbo</h1>
-  <p id="msg"></p>
-  <button id="google" type="button">Continue with Google</button>
-  <form id="email-form">
-    <input id="email" type="email" required autocomplete="email" placeholder="Email" aria-label="Email">
-    <button type="submit">Email me a code</button>
+  <svg class="brand" viewBox="0 0 3114 704" role="img" aria-label="mumbo"><path id="wordmark" fill="currentColor" d="M70 635V350Q70 313 55 300Q40 286 0 284L3 255Q39 248 94 231Q100 229 126 221L144 230L151 282Q168 263 198 242Q229 221 273 221Q365 221 405 283Q436 255 468 238Q500 221 538 221Q606 221 650 258Q693 294 693 371V635Q703 643 722 651Q742 659 763 663L759 697H540L542 663Q580 657 608 635V368Q608 317 588 293Q569 269 529 269Q497 269 469 289Q441 309 427 336V635Q436 643 456 651Q476 659 497 663L493 697H273L276 663Q314 657 342 635V368Q342 317 322 293Q303 269 263 269Q228 269 197 294Q166 318 156 347V635Q179 653 225 663L221 697H0L4 661Q28 657 42 652Q56 647 70 635ZM871 543V348Q871 311 856 298Q841 284 802 282L804 253Q850 245 917 224L937 218L957 228V554Q957 603 978 631Q998 659 1043 659Q1069 659 1098 640Q1127 620 1149 580V348Q1149 311 1134 298Q1118 284 1079 282L1082 253Q1128 245 1195 224L1215 218L1234 228V635Q1243 643 1263 650Q1283 658 1303 662L1300 697H1167L1157 634Q1131 669 1098 686Q1066 704 1032 704Q871 704 871 543ZM1429 635V350Q1429 313 1414 300Q1399 286 1359 284L1362 255Q1398 248 1453 231Q1459 229 1485 221L1503 230L1510 282Q1527 263 1558 242Q1588 221 1632 221Q1724 221 1764 283Q1795 255 1827 238Q1859 221 1897 221Q1965 221 2008 258Q2052 294 2052 371V635Q2062 643 2082 651Q2101 659 2122 663L2118 697H1899L1901 663Q1939 657 1967 635V368Q1967 317 1948 293Q1928 269 1888 269Q1856 269 1828 289Q1800 309 1786 336V635Q1795 643 1815 651Q1835 659 1856 663L1852 697H1632L1635 663Q1673 657 1701 635V368Q1701 317 1682 293Q1662 269 1622 269Q1587 269 1556 294Q1525 318 1515 347V635Q1538 653 1584 663L1580 697H1359L1363 661Q1387 657 1401 652Q1415 647 1429 635ZM2302 655Q2287 678 2282 697H2234V130Q2234 93 2219 80Q2204 66 2164 64L2167 34Q2206 28 2248 16Q2291 3 2300 0L2320 10V291Q2335 262 2368 242Q2402 221 2438 221Q2540 221 2587 285Q2634 349 2634 460Q2634 569 2578 636Q2522 704 2418 704Q2355 704 2302 655ZM2543 460Q2543 399 2536 358Q2529 316 2506 290Q2484 264 2440 264Q2367 264 2344 326Q2320 388 2320 492V612Q2346 635 2370 648Q2394 662 2423 662Q2495 662 2519 606Q2543 549 2543 460ZM2690 462Q2690 344 2744 282Q2797 221 2902 221Q3007 221 3060 282Q3114 344 3114 462Q3114 580 3060 642Q3007 704 2902 704Q2797 704 2744 642Q2690 580 2690 462ZM3026 462Q3026 358 2997 312Q2968 267 2902 267Q2837 267 2808 312Q2780 358 2780 462Q2780 566 2808 612Q2837 658 2902 658Q2967 658 2996 612Q3026 566 3026 462Z"/></svg>
+  <header>
+    <h1 id="title">Welcome to mumbo</h1>
+    <p class="sub" id="subtitle">Sign in or create an account to continue.</p>
+  </header>
+
+  <section class="stack" id="start">
+    <button id="google" class="primary" type="button">
+      <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34.1 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34.1 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
+      Continue with Google
+    </button>
+    <div class="divider">or</div>
+    <form id="email-form" class="stack">
+      <label class="visually-hidden" for="email">Email</label>
+      <input id="email" type="email" required autocomplete="email" placeholder="you@example.com">
+      <button class="secondary" type="submit">Continue with email</button>
+    </form>
+  </section>
+
+  <form id="code-form" class="stack" hidden>
+    <label class="visually-hidden" for="code">Sign-in code</label>
+    <input id="code" required inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="••••••">
+    <button class="primary" type="submit">Verify and continue</button>
+    <button class="link" id="back" type="button">Use a different email</button>
   </form>
-  <form id="code-form" hidden>
-    <input id="code" required inputmode="numeric" autocomplete="one-time-code" placeholder="Code from the email" aria-label="Code">
-    <button type="submit">Sign in</button>
-  </form>
+
+  <p id="msg" role="status" aria-live="polite"></p>
+  <footer>New here? Signing in creates your account.</footer>
 </main>
 <script src="/auth-ui/supabase.js"></script>
 <script src="/auth-ui/config.js"></script>
 <script>
 // Login and consent page for the Supabase OAuth server, served at the project's authorization path /oauth/consent.
-// First-party client: consent is approved automatically. Who may enter is decided by the gate allowlist, not here.
+// First-party client: consent is approved automatically. Who may enter the web app is decided by the gate allowlist, not here.
 const sb = supabase.createClient(MUMBO.url, MUMBO.anonKey)
 const authorizationId = new URLSearchParams(location.search).get('authorization_id')
 const $ = (id) => document.getElementById(id)
-const say = (text) => { $('msg').textContent = text }
+const say = (text, error = false) => { $('msg').textContent = text; $('msg').classList.toggle('error', error) }
+const busy = (form, on) => form.querySelectorAll('button').forEach((b) => { b.disabled = on })
 let email = ''
 // Return here with only the authorization id: no stale error parameters or earlier token fragments.
 const returnUrl = `${location.origin}${location.pathname}?authorization_id=${encodeURIComponent(authorizationId ?? '')}`
 
 async function authorize() {
   say('Signing you in…')
+  // Desktop app sign-in (deploy/gateway.mjs): open to any account, unlike the web app gate.
+  if (authorizationId.startsWith('dsh.')) {
+    const { data } = await sb.auth.getSession()
+    const response = await fetch('/dsh/approve', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ aid: authorizationId.slice(4), access_token: data.session?.access_token }) })
+    const result = await response.json().catch(() => ({}))
+    if (!response.ok || !result.redirect) return say(result.error ?? 'Sign-in failed. Try again from the mumbo app.', true)
+    $('start').hidden = true
+    $('title').textContent = 'You’re signed in'
+    $('subtitle').textContent = 'Returning to the mumbo app…'
+    say('')
+    return location.replace(result.redirect)
+  }
   const details = await sb.auth.oauth.getAuthorizationDetails(authorizationId)
-  if (details.error) return say(details.error.message)
+  if (details.error) return say(details.error.message, true)
   const next = details.data.redirect_url ?? (await sb.auth.oauth.approveAuthorization(authorizationId)).data?.redirect_url
-  if (!next) return say('Authorization failed. Try again from the app address.')
+  if (!next) return say('Authorization failed. Try again from the app address.', true)
   location.replace(next)
 }
 
-$('google').addEventListener('click', () => sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: returnUrl } }))
+$('google').addEventListener('click', () => {
+  $('google').disabled = true
+  sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: returnUrl } })
+})
 
 $('email-form').addEventListener('submit', async (e) => {
   e.preventDefault()
   email = $('email').value.trim()
-    await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: returnUrl } })
-  say('If the address can sign in, a code was sent.')
-  $('email-form').hidden = true
+  busy($('email-form'), true)
+  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: returnUrl } })
+  busy($('email-form'), false)
+  if (error) return say('Could not send a code. Check the address and try again.', true)
+  $('start').hidden = true
   $('code-form').hidden = false
+  $('title').textContent = 'Check your email'
+  $('subtitle').textContent = `Enter the code sent to ${email}.`
+  say('')
+  $('code').focus()
 })
 
 $('code-form').addEventListener('submit', async (e) => {
   e.preventDefault()
+  busy($('code-form'), true)
   const { error } = await sb.auth.verifyOtp({ email, token: $('code').value.trim(), type: 'email' })
-  if (error) return say('That code did not work. Request a new one.')
+  busy($('code-form'), false)
+  if (error) return say('That code did not work. Request a new one.', true)
   authorize()
 })
 
+$('back').addEventListener('click', () => {
+  $('code-form').hidden = true
+  $('start').hidden = false
+  $('title').textContent = 'Welcome to mumbo'
+  $('subtitle').textContent = 'Sign in or create an account to continue.'
+  say('')
+})
+
 ;(async () => {
-  if (!authorizationId) return say('Open Mumbo from its address to sign in.')
+  if (!authorizationId) return say('Open mumbo from its address to sign in.')
   const { data } = await sb.auth.getSession()
   if (data.session) return authorize()
   const error = new URLSearchParams(location.search).get('error_description')
-  if (error) say(`Sign-in failed: ${error}`)
+  if (error) say(`Sign-in failed: ${error}`, true)
 })()
 </script>
 </body>

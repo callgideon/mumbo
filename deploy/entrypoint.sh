@@ -38,7 +38,11 @@ done
 [ -n "$TOKEN" ] || { echo "dsh printed no launch token" >&2; exit 1; }
 mkdir -p /tmp/auth-ui && cp /usr/share/mumbo-auth/index.html /usr/share/mumbo-auth/supabase.js /tmp/auth-ui/
 printf 'const MUMBO = { url: "%s", anonKey: "%s" }\n' "$SUPABASE_URL" "$SUPABASE_ANON_KEY" > /tmp/auth-ui/config.js
-sed -e "s|@TOKEN@|$TOKEN|" -e "s|@HOST@|$MUMBO_PUBLIC_HOST|" /etc/nginx/mumbo.conf.tmpl > /tmp/nginx.conf
+sed -e "s|@TOKEN@|$TOKEN|" -e "s|@HOST@|$MUMBO_PUBLIC_HOST|" -e "s|@API_HOST@|${MUMBO_EXTRA_TRUSTED_HOST:-api.invalid}|" /etc/nginx/mumbo.conf.tmpl > /tmp/nginx.conf
+
+# Desktop account gateway on the API host (deploy/gateway.mjs).
+MUMBO_API_HOST=${MUMBO_EXTRA_TRUSTED_HOST:-} GATEWAY_SECRET=$OAUTH_COOKIE_SECRET node /src/deploy/gateway.mjs &
+GW_PID=$!
 
 OAUTH2_PROXY_CLIENT_SECRET=$OAUTH_CLIENT_SECRET OAUTH2_PROXY_COOKIE_SECRET=$OAUTH_COOKIE_SECRET oauth2-proxy \
   --provider=oidc --oidc-issuer-url="$OAUTH_ISSUER_URL" --client-id="$OAUTH_CLIENT_ID" \
@@ -49,7 +53,7 @@ O2P_PID=$!
 
 nginx -c /tmp/nginx.conf &
 NGINX_PID=$!
-# Any of the three exiting takes the task down so ECS replaces it.
-while kill -0 "$DSH_PID" 2>/dev/null && kill -0 "$O2P_PID" 2>/dev/null && kill -0 "$NGINX_PID" 2>/dev/null; do sleep 5; done
+# Any process exiting takes the task down so ECS replaces it.
+while kill -0 "$DSH_PID" 2>/dev/null && kill -0 "$O2P_PID" 2>/dev/null && kill -0 "$NGINX_PID" 2>/dev/null && kill -0 "$GW_PID" 2>/dev/null; do sleep 5; done
 echo "a process exited; stopping" >&2
 exit 1
