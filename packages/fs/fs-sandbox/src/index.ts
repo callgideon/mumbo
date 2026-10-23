@@ -4,11 +4,11 @@
  * text-storage mechanics — resolve, stat, read/stream, list, the atomic
  * write and the read-match-write edit critical section — are the local
  * implementation's, verbatim; this package adds only the per-call POLICY fence
- * on the two mutations. Reads pass through untouched: every mode permits
+ * on the three mutations. Reads pass through untouched: every mode permits
  * reading.
  *
  * The fence is a policy check in TRUSTED code over a MODEL-CONTROLLED path,
- * NOT a kernel boundary — the operations are the seam's own (open, rename),
+ * NOT a kernel boundary — the operations are the seam's own (open, rename, mkdir),
  * and only the target path is untrusted, so canonicalize-then-contain is the
  * complete answer to this surface. This is containment, not a security
  * boundary; kernel-grade isolation of untrusted CODE stays `ctx.shell`'s job
@@ -17,9 +17,10 @@
  * syscall) is narrowed by re-canonicalizing immediately before delegating and
  * is accepted for this threat model.
  *
- * Per-call policy: `read-only` denies every mutation; `workspace-write` allows
- * a mutation only when the target canonicalizes under the policy's workspace
- * root or a platform temp area from the shared `writableRoots` policy;
+ * Per-call policy applies to writes, edits, and directory creation: `read-only`
+ * denies every mutation; `workspace-write` allows a mutation only when the
+ * target canonicalizes under the policy's workspace root or a platform temp
+ * area from the shared `writableRoots` policy;
  * `danger-full-access` delegates unfenced. A denial throws the structured
  * `FS_SANDBOX_DENIED`.
  *
@@ -67,6 +68,19 @@ export class SandboxedFileSystem extends LocalFileSystem {
   }
 
   /**
+   * Fence directory creation by the per-call policy, then delegate to the
+   * inherited creation. See {@link checkedTarget}.
+   * @param target - the resolved directory target to create.
+   * @param signal - aborts before creation takes effect.
+   * @param sandboxPolicy - the per-call mode and workspace root; omit to use
+   *   the deployment fallback.
+   * @returns a promise resolving once the directory exists.
+   */
+  override async makeDirectory(target: FsTarget, signal?: AbortSignal, sandboxPolicy?: SandboxExecutionPolicy): Promise<void> {
+    return super.makeDirectory(await this.checkedTarget(target, sandboxPolicy, 'create directory'), signal)
+  }
+
+  /**
    * Fence the write by the per-call policy, then delegate to the inherited
    * atomic write. See {@link checkedTarget}.
    * @param target - the resolved target to write.
@@ -84,7 +98,7 @@ export class SandboxedFileSystem extends LocalFileSystem {
     signal?: AbortSignal,
     sandboxPolicy?: SandboxExecutionPolicy,
   ): Promise<FsWriteOutcome> {
-    return super.writeText(await this.checkedTarget(target, sandboxPolicy), content, expected, signal)
+    return super.writeText(await this.checkedTarget(target, sandboxPolicy, 'write'), content, expected, signal)
   }
 
   /**
@@ -105,7 +119,7 @@ export class SandboxedFileSystem extends LocalFileSystem {
     signal?: AbortSignal,
     sandboxPolicy?: SandboxExecutionPolicy,
   ): Promise<FsEditOutcome> {
-    return super.editText(await this.checkedTarget(target, sandboxPolicy), edit, expected, signal)
+    return super.editText(await this.checkedTarget(target, sandboxPolicy, 'write'), edit, expected, signal)
   }
 
   /**
@@ -117,14 +131,14 @@ export class SandboxedFileSystem extends LocalFileSystem {
    * writable root, and returns THAT fresh target; `danger-full-access` returns
    * the caller's target unfenced. Throws the structured `FS_SANDBOX_DENIED` on
    * refusal — the tool layer maps it to the model-facing `[sandbox: …]` marker
-   * and the escalation hint.
+   * and the escalation hint; its message names `operation`.
    */
-  private async checkedTarget(target: FsTarget, sandboxPolicy?: SandboxExecutionPolicy): Promise<FsTarget> {
+  private async checkedTarget(target: FsTarget, sandboxPolicy: SandboxExecutionPolicy | undefined, operation: 'write' | 'create directory'): Promise<FsTarget> {
     const policy = sandboxPolicy ?? this.ctx.sandboxPolicy.resolve()
     const { mode } = policy
     if (mode === 'danger-full-access') return target
     if (mode === 'read-only') {
-      throw new FsError(`cannot write "${target.displayPath}": file access denied under read-only mode`, 'FS_SANDBOX_DENIED')
+      throw new FsError(`cannot ${operation} "${target.displayPath}": file access denied under read-only mode`, 'FS_SANDBOX_DENIED')
     }
     // workspace-write: containment on the FRESH canonical path (catches a
     // symlink ancestor swapped since the tool resolved this target), and the
@@ -138,7 +152,7 @@ export class SandboxedFileSystem extends LocalFileSystem {
       }
     }
     if (!contained) {
-      throw new FsError(`cannot write "${target.displayPath}": file access denied under workspace-write mode`, 'FS_SANDBOX_DENIED')
+      throw new FsError(`cannot ${operation} "${target.displayPath}": file access denied under workspace-write mode`, 'FS_SANDBOX_DENIED')
     }
     return fresh
   }

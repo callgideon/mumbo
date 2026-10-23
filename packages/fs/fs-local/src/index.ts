@@ -24,6 +24,7 @@ import type {
 } from '@deepseek-ai/dsh-fs'
 import {
   applyLiteralEdit,
+  createDirectory,
   listDirectory,
   localDisplayPath,
   normalizeLineEndings,
@@ -197,6 +198,10 @@ export class LocalFileSystem extends FileSystem {
       ...(entry.version !== undefined ? { version: entry.version } : {}),
       ...(entry.size !== undefined ? { size: entry.size } : {}),
     }))
+  }
+
+  override makeDirectory(target: FsTarget, signal?: AbortSignal): Promise<void> {
+    return createDirectory({ displayPath: target.displayPath, targetKey: target.targetKey }, signal)
   }
 
   override async writeText(

@@ -61,7 +61,7 @@ kind: "package-reference"
 | 工具 | 参数 | 结果 |
 |---|---|---|
 | `agent_send` | `text`（1 到 32,768 个字符）、`request_id`（`^[A-Za-z0-9_-]{1,64}$`） | `{message_id, after_seq}` |
-| `agent_read` | `after_seq`（整数，至少为 0）、`wait_s`（0 到 40，默认 0） | `{messages: [{seq, role, source, text}], next_seq, more}` |
+| `agent_read` | `after_seq`（整数，至少为 0）、`wait_s`（0 到 40，默认 0）、`include_context`（布尔值，默认 false） | `{messages: [{seq, role, source, text}], next_seq, more}` |
 | `needs_you` | 无 | `{asks: [{ask_id, kind, session_id, tool, call_id, arguments, detail, irreversible}]}` |
 | `task_reply` | `ask_id`、`request_id`、`decision`（`approve` 或 `reject`）、`answers`（`[{id, selected, custom}]`）、`feedback` | `{ok: true}` |
 | `task_status` | 无 | `{assistant_session, halted, projections, children: [{id, label, status}], worktrees}` |
@@ -71,7 +71,7 @@ kind: "package-reference"
 
 `agent_send` 把文本作为助手会话的一个 follow-up 轮次排队，source 为 `{kind: "mcp", principal}`；`after_seq` 是此前记录的最后一个事件。同一 principal 在 24 小时内重复同一 `request_id` 时返回首次结果且不再发送，使用它的并发调用共享一次发送；参数不同则应答 `request_id_reused`。结果先于文本排队存储，因此主机在两者之间停止时会丢失该消息，而不会发送两次。
 
-`agent_read` 按从旧到新返回 `after_seq` 之后记录的 user 与 assistant 消息，不含没有文本的消息，也不含压缩替换。source 指明某人时 `source` 为 `<kind>:<principal>`，否则为其 kind。没有消息且 `wait_s` 为正数时，它最多等待 `wait_s` 秒以获得下一条带文本的消息，插件卸载时停止等待。一次应答至多包含 64 KiB 已包裹的文本，除非其唯一的消息更长；此时 `next_seq` 位于第一条被留下的消息之前且 `more` 为 `true`，否则它是最后记录的事件且 `more` 为 `false`。
+`agent_read` 按从旧到新返回 `after_seq` 之后记录的由人撰写的消息（GUI 的 `user` kind 或指明 principal 的 source）与助手的回复，不含没有文本的消息，也不含压缩替换；`include_context` 会加入 harness 写入的 user 角色消息，例如指令、技能目录和提醒。source 指明某人时 `source` 为 `<kind>:<principal>`，否则为其 kind。没有消息且 `wait_s` 为正数时，它最多等待 `wait_s` 秒以获得下一条带文本的消息，插件卸载时停止等待。一次应答至多包含 64 KiB 已包裹的文本，除非其唯一的消息更长；此时 `next_seq` 位于第一条被留下的消息之前且 `more` 为 `true`，否则它是最后记录的事件且 `more` 为 `false`。
 
 `needs_you` 列出任一会话中所有未决的工具批准（`kind: "tool"`，带 `tool`）、计划评审（`kind: "plan"`）与用户问题（`kind: "question"`）；在会话之外提出的问题没有 `session_id`。`detail` 是提问方给出的原因、计划，或以 JSON 表示的问题。提问方指明调用时，工具请求带有 `call_id`；提问的会话记录了该调用时，还带有 `arguments`，即该调用的原始 JSON 参数。插件在 `approval/request` 与 `user-questions/request` 链中最先应答，并让链的其余部分（例如浏览器）与 `task_reply` 竞速；先应答者决定结果，之后的 `task_reply` 应答 `not_found`。工具或计划请求接受 `decision`；被拒绝的计划选择其另一个选项，并以 `feedback` 作为自由文本。问题请求接受 `answers`，原样传递。回复缺少其请求所需的字段时应答 `invalid`，`irreversibleTools` 中列出的工具应答 `needs_person`；两者都让请求保持未决。被中止的请求会撤回其请求项。未决请求保存在内存中，随插件结束。
 

@@ -357,6 +357,14 @@ describe('package payload constraints', () => {
     expect(checkWorkspaceManifest({ dir: 'apps/other-tool', manifest })).not.toEqual([])
   })
 
+  it('exempts private fork-local packages under packages/mumbo from release rules there only', () => {
+    const dir = 'packages/mumbo/mcp'
+    const manifest = JSON.parse(readFileSync(new URL(`../${dir}/package.json`, import.meta.url), 'utf8')) as WorkspaceManifest['manifest']
+    expect(manifest.private).toBe(true)
+    expect(checkWorkspaceManifest({ dir, manifest })).toEqual([])
+    expect(checkWorkspaceManifest({ dir: 'packages/other/mcp', manifest })).not.toEqual([])
+  })
+
   it('rejects locale publication entries without their resource exports', () => {
     const dir = 'packages/experimental/auto-review'
     const manifest = JSON.parse(readFileSync(new URL(`../${dir}/package.json`, import.meta.url), 'utf8')) as WorkspaceManifest['manifest']

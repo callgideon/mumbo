@@ -1192,6 +1192,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'one entry per direct child, in stable name order.',
       },
       {
+        signature: 'makeDirectory(target: FsTarget, signal?: AbortSignal, sandboxPolicy?: SandboxExecutionPolicy): Promise<void>',
+        description: 'Create a directory and its missing ancestors, like `mkdir -p`; an existing directory succeeds unchanged. The base provider rejects with `FS_IO_ERROR`; backends that can create directories override it.',
+        parameters: [{ name: 'target', description: 'the resolved directory target to create.' }, { name: 'signal', description: 'aborts before creation takes effect.' }, { name: 'sandboxPolicy', description: 'the per-call mode and workspace root this creation runs under; a sandboxing backend fences creation by it, the bare backend ignores it. Omit to leave the backend its own default.' }],
+        returns: 'a promise resolving once the directory exists.',
+      },
+      {
         signature: 'abstract writeText( target: FsTarget, content: string, expected?: FsWriteIntent, signal?: AbortSignal, sandboxPolicy?: SandboxExecutionPolicy, ): Promise<FsWriteOutcome>',
         description: 'Atomically create or replace UTF-8 text. `expected` guards intent and staleness; omission allows unconditional overwrite.',
         parameters: [{ name: 'target', description: 'the resolved target to write.' }, { name: 'content', description: 'the full new file content.' }, { name: 'expected', description: 'the write intent guarding the write; omit for unconditional.' }, { name: 'signal', description: 'aborts before atomic publication takes effect.' }, { name: 'sandboxPolicy', description: 'the per-call mode and workspace root this write runs under; a sandboxing backend fences the write by it, the bare backend ignores it. Omit to leave the backend its own default.' }],
@@ -3762,10 +3768,10 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'ensure(agent: Agent, signal?: AbortSignal): Promise<string>',
-        description: 'Validate the current directory and restore the original project when it disappeared.',
-        parameters: [{ name: 'agent', description: 'live or unpublished Agent owning the Session.' }, { name: 'signal', description: 'cancellation for filesystem inspection.' }],
+        description: 'Validate the current directory and restore the original project when it disappeared. A missing original project is recreated empty through the filesystem provider and logged; files it held are not restored. Every Session in this process that was created before the recreation and works in, or falls back to, that project is told once.',
+        parameters: [{ name: 'agent', description: 'live or unpublished Agent owning the Session.' }, { name: 'signal', description: 'cancellation for filesystem inspection and creation.' }],
         returns: 'the existing directory; recovery is committed before fulfillment. A notice failure is warned without reverting the committed state.',
-        throws: ['when the original project is also unavailable.'],
+        throws: ['when the original project cannot be recreated; the failure is logged.'],
       },
       {
         signature: 'set(agent: Agent, path: string, signal?: AbortSignal): Promise<string>',

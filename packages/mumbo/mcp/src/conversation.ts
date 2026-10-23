@@ -31,6 +31,7 @@ const sendArgs = z.object({
 const readArgs = z.object({
   after_seq: z.number().int().min(0).describe('Read messages after this seq: after_seq from agent_send, or next_seq from agent_read.'),
   wait_s: z.number().int().min(0).max(40).default(0).describe('Seconds to wait for a first message when none is there yet.'),
+  include_context: z.boolean().default(false).describe('Also return the messages the harness adds, such as instructions, skill lists and reminders.'),
 })
 
 /** The logged message fields `agent_read` reports. */
@@ -38,6 +39,9 @@ const messageData = z.object({
   content: z.array(z.object({ type: z.string(), text: z.unknown().optional() })),
   source: z.object({ kind: z.string(), principal: z.unknown().optional() }),
 })
+
+/** An `assistant/message` event logs its message under `message`, beside the turn's settlement. */
+const assistantData = z.object({ message: messageData })
 
 /** One message as `agent_read` reports it. */
 interface ReadMessage {
@@ -49,10 +53,16 @@ interface ReadMessage {
   readonly text: string
 }
 
-/** Report one logged message, or nothing for other events, compaction re-surfaces, and messages without text. */
-function toMessage(event: SessionWireEvent): ReadMessage[] {
+/**
+ * Report one logged message, or nothing for other events, compaction re-surfaces, and messages without text.
+ * Without `includeContext`, user-role messages count only when a person wrote them: the GUI's `user` kind or a
+ * source naming a principal; the rest is context the harness adds.
+ */
+function toMessage(event: SessionWireEvent, includeContext: boolean): ReadMessage[] {
   if (!MESSAGE_TYPES.has(event.type) || event.surfaceOp !== 'append') return []
-  const { content, source } = messageData.parse(event.data)
+  const { content, source } = event.type === 'user/message' ? messageData.parse(event.data) : assistantData.parse(event.data).message
+  const fromPerson = source.kind === 'user' || typeof source.principal === 'string'
+  if (event.type === 'user/message' && !fromPerson && !includeContext) return []
   const text = content.flatMap(block => block.type === 'text' && typeof block.text === 'string' ? [block.text] : []).join('\n')
   if (text === '') return []
   return [{
@@ -75,7 +85,13 @@ interface ReadReply {
  * Messages after `afterSeq`, oldest first, up to {@link READ_LIMIT_CHARS} of text.
  * `next_seq` precedes the first message the limit held back, else it is the log cursor.
  */
-async function messagesAfter(deps: ToolDeps, agent: Agent, afterSeq: number, signal: AbortSignal): Promise<ReadReply> {
+async function messagesAfter(
+  deps: ToolDeps,
+  agent: Agent,
+  afterSeq: number,
+  includeContext: boolean,
+  signal: AbortSignal,
+): Promise<ReadReply> {
   const cursor = agent.session.seq - 1
   // ponytail: one page of the whole log per read, as the observation behind `page` reads it whole anyway;
   // page back from the cursor with `beforeSeq` once observations stop reading whole logs.
@@ -84,7 +100,7 @@ async function messagesAfter(deps: ToolDeps, agent: Agent, afterSeq: number, sig
     throughSeq: cursor,
     maxMessages: Number.MAX_SAFE_INTEGER,
   }, signal)
-  const found = page.records.filter(({ event }) => event.seq > afterSeq).flatMap(({ event }) => toMessage(event))
+  const found = page.records.filter(({ event }) => event.seq > afterSeq).flatMap(({ event }) => toMessage(event, includeContext))
   const messages: ReadMessage[] = []
   let size = 0
   for (const message of found) {
@@ -125,12 +141,14 @@ export function register(server: McpServer, deps: ToolDeps): void {
   defineTool(
     server,
     'agent_read',
-    'Read the assistant conversation after after_seq: user and assistant messages, oldest first, each with seq, role, source and text. '
+    'Read the assistant conversation after after_seq: people\'s messages and the assistant\'s replies, oldest first, each with seq, role, source and text. '
     + 'Pass next_seq as after_seq to read on; more says the reply was cut short.',
     readArgs,
     async (args, signal) => {
       const agent = await deps.assistant()
-      if (args.wait_s === 0 || deps.closing.aborted) return JSON.stringify(await messagesAfter(deps, agent, args.after_seq, signal))
+      if (args.wait_s === 0 || deps.closing.aborted) {
+        return JSON.stringify(await messagesAfter(deps, agent, args.after_seq, args.include_context, signal))
+      }
       // Listen before each read, so a message logged during the read still wakes the wait after it.
       let wake = Promise.withResolvers<void>()
       const stop = deps.ctx.on('session/event', (session, event) => {
@@ -141,7 +159,7 @@ export function register(server: McpServer, deps: ToolDeps): void {
       done.addEventListener('abort', end)
       try {
         for (;;) {
-          const reply = await messagesAfter(deps, agent, args.after_seq, signal)
+          const reply = await messagesAfter(deps, agent, args.after_seq, args.include_context, signal)
           // A woken read can still find nothing, such as after a tool-call-only message; wait on until wait_s.
           if (reply.messages.length > 0 || done.aborted) return JSON.stringify(reply)
           await wake.promise
