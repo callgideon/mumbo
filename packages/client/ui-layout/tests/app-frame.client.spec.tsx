@@ -318,7 +318,7 @@ describe('AppFrame normal width concessions', () => {
     expect(frame.querySelector('[data-side="rightbar"]')).toBeNull()
     expect(instance.getSnapshot().layoutInfo).toMatchObject({ rightbarShown: true, rightbar: 864 })
     act(() => { instance.actions.closeRightbar() })
-    resize(455)
+    resize(640)
     expect(tracks(frame)).toEqual([56, 0])
     resize(1920)
     expect(tracks(frame)).toEqual([420, 0])
@@ -677,5 +677,41 @@ describe('AppFrame frame measurement lifecycle', () => {
     act(() => { observer.fire(); flushFrames() })
     expect(instance.getSnapshot().layoutInfo.viewportWidth).toBe(1920)
     expect(animationFrames.size).toBe(0)
+  })
+})
+
+describe('AppFrame phone layout', () => {
+  it('drops the rail below 640px and offers the leading controls instead', () => {
+    frameWidth = 390
+    const { frame } = mountFrame()
+    expect(tracks(frame)).toEqual([0, 0])
+    expect(frame.hasAttribute('data-phone')).toBe(true)
+    expect(frame.hasAttribute('data-sidebar-collapsed')).toBe(true)
+    expect(frame.querySelector('[data-shell-leading]')).not.toBeNull()
+    expect(frame.querySelector('[data-side="sidebar"]')).toBeNull()
+    resize(640)
+    expect(frame.hasAttribute('data-phone')).toBe(false)
+    expect(tracks(frame)).toEqual([56, 0])
+  })
+
+  it('opens the sidebar as a drawer that the scrim closes', () => {
+    frameWidth = 390
+    const { frame, instance, getByRole } = mountFrame()
+    act(() => { instance.actions.toggleSidebar() })
+    expect(frame.hasAttribute('data-sidebar-collapsed')).toBe(false)
+    expect(tracks(frame)).toEqual([0, 0])
+    expect(frame.querySelector('[data-side="sidebar"]')).toBeNull()
+    act(() => { getByRole('button', { name: 'close' }).click() })
+    expect(frame.hasAttribute('data-sidebar-collapsed')).toBe(true)
+    expect(frame.querySelector('button[aria-label="close"]')).toBeNull()
+  })
+
+  it('closes the drawer when the user picks another main panel', () => {
+    frameWidth = 390
+    const { frame, instance } = mountFrame()
+    act(() => { instance.actions.toggleSidebar() })
+    expect(frame.hasAttribute('data-sidebar-collapsed')).toBe(false)
+    act(() => { instance.actions.selectPanel('plugins' as MainPanelId) })
+    expect(frame.hasAttribute('data-sidebar-collapsed')).toBe(true)
   })
 })

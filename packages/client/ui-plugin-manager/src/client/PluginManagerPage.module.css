@@ -1542,3 +1542,13 @@ label.registryOption {
   flex-direction: column;
   gap: 24px;
 }
+
+/* Phones (below ui-layout PHONE_MAX): the frame's corner controls take the top
+   row, so heads start below the published clearance instead of the 28px inset. */
+@media (max-width: 639px) {
+  .pageHead,
+  .detailTop,
+  .moreHead {
+    padding-top: calc(8px + var(--dsh-frame-top-clearance, 0px));
+  }
+}

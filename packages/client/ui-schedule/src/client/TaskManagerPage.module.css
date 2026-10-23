@@ -1473,3 +1473,11 @@
     gap: 0;
   }
 }
+
+/* Phones (below ui-layout PHONE_MAX): the frame's corner controls take the top
+   row, so the heading starts below the published clearance. */
+@media (max-width: 639px) {
+  .pageHeading {
+    padding-top: calc(8px + var(--dsh-frame-top-clearance, 0px));
+  }
+}

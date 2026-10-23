@@ -158,3 +158,7 @@ write('apps/desktop/resources/icon.png', tile_png(1104, 40, 230))
 write('apps/desktop/resources/icon-macos.png', tile_png(1024, 100, 185))
 write('apps/desktop/resources/icon-windows.png', tile_png(1024, 0, 200))
 write('apps/desktop/resources/tray-windows.ico', tile_png(256, 0, 48))
+# Phone home screen: iOS rounds the square itself; the manifest icons keep the tile rounding.
+write('apps/web/public/apple-touch-icon.png', tile_png(180, 0, 0).convert('RGB'))
+write('apps/web/public/icon-192.png', tile_png(192, 0, 0))
+write('apps/web/public/icon-512.png', tile_png(512, 0, 0))

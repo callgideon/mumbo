@@ -246,3 +246,78 @@
    ui-web base.css's `body > :not(#root)` subtraction covers it wherever it
    overlaps a chrome row's drag — including above every column, which an in-root
    overlay could not promise once a chrome row declares drag itself. */
+
+/* Phones (below ui-layout PHONE_MAX): the panel fills the screen, the section
+   navigation becomes a horizontally scrolling tab row under the title, and the
+   header actions and close control sit on the title row. */
+@media (max-width: 639px) {
+  .panel {
+    flex-direction: column;
+    width: 100vw;
+    max-width: none;
+    height: 100dvh;
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+    box-sizing: border-box;
+    border-radius: 0;
+  }
+
+  .nav {
+    width: auto;
+    gap: 10px;
+    padding: 18px 0 8px;
+    border-bottom: 0.5px solid var(--dsw-alias-border-l3);
+  }
+
+  .navTitle {
+    padding: 0 16px;
+    line-height: 36px;
+  }
+
+  .navList {
+    flex-direction: row;
+    gap: 6px;
+    padding: 0 16px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .navCell {
+    flex: none;
+    height: 36px;
+    padding: 7px 12px;
+  }
+
+  .navLabel {
+    overflow: visible;
+  }
+
+  .header {
+    position: absolute;
+    top: env(safe-area-inset-top, 0px);
+    right: env(safe-area-inset-right, 0px);
+    height: auto;
+    padding: 18px 12px 0 0;
+    align-items: center;
+  }
+
+  .actions {
+    max-width: 55vw;
+  }
+
+  .close {
+    width: 36px;
+    height: 36px;
+  }
+
+  .options {
+    padding: 8px 16px 24px;
+  }
+}
+
+@media (hover: none) {
+  .navCell:hover:not(.active),
+  .close:hover {
+    background: transparent;
+  }
+}
