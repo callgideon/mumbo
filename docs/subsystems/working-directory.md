@@ -6,7 +6,7 @@ A Session's active directory is owned by [`dsh-working-directory`](../../package
 
 ## Directory selection
 
-`ctx.workingDirectory.get(session)` reads the logged value. `ensure(agent)` validates it and restores the original project when the directory disappeared. `set(agent, path)` validates and records a requested change. Sessions without a header directory use the configured runtime fallback; an unavailable fallback produces an error.
+`ctx.workingDirectory.get(session)` reads the logged value. `ensure(agent)` validates it and restores the original project when the directory disappeared; a missing original project is recreated empty through `ctx.fs.makeDirectory`, with a logged warning and a notice that its earlier files are gone. `set(agent, path)` validates and records a requested change. Sessions without a header directory use the configured runtime fallback, which is recreated the same way. A directory that cannot be recreated produces a logged error.
 
 Changes are local to one Session. Relative filesystem operations, newly started processes, instruction discovery, skills, and file completion use the active directory. Existing terminals and persistent shells retain their own directories. Sandbox writable roots and project membership remain anchored to the original project.
 
@@ -38,11 +38,13 @@ get(session: Session): string
 
 /**
  * Validate the current directory and restore the original project when it disappeared.
+ * A missing original project is recreated empty through the filesystem provider, logged,
+ * and reported once to the Agent; files it held are not restored.
  * @param agent - live or unpublished Agent owning the Session.
- * @param signal - cancellation for filesystem inspection.
+ * @param signal - cancellation for filesystem inspection and creation.
  * @returns the existing directory; recovery is committed before fulfillment.
  * A notice failure is warned without reverting the committed state.
- * @throws when the original project is also unavailable.
+ * @throws when the original project cannot be recreated; the failure is logged.
  */
 ensure(agent: Agent, signal?: AbortSignal): Promise<string>
 
