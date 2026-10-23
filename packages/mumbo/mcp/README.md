@@ -62,10 +62,14 @@ Every tool acts as the principal named by `x-mcp-principal`. A result is one tex
 |---|---|---|
 | `agent_send` | `text` (1 to 32,768 characters), `request_id` (`^[A-Za-z0-9_-]{1,64}$`) | `{message_id, after_seq}` |
 | `agent_read` | `after_seq` (integer, at least 0), `wait_s` (0 to 40, default 0) | `{messages: [{seq, role, source, text}], next_seq}` |
+| `needs_you` | none | `{asks: [{ask_id, kind, session_id, tool, detail, irreversible}]}` |
+| `task_reply` | `ask_id`, `request_id`, `decision` (`approve` or `reject`), `answers` (`[{id, selected, custom}]`), `feedback` | `{ok: true}` |
 
 `agent_send` queues the text as a follow-up turn of the assistant Session with source `{kind: "mcp", principal}`; `after_seq` is the last event logged before it. The same `request_id` from the same principal within 24 hours returns the first result and sends nothing; with other arguments it answers `request_id_reused`.
 
 `agent_read` returns the user and assistant messages logged after `after_seq`, oldest first, without messages that carry no text and without compaction replacements. `source` is `<kind>:<principal>` when the source names a person, else its kind. When there is none and `wait_s` is positive, it waits up to `wait_s` seconds for the next message. One reply holds at most 64 KiB of fenced text unless its single message is longer; `next_seq` then precedes the first message held back, otherwise it is the last logged event.
+
+`needs_you` lists every open tool approval (`kind: "tool"`, with `tool`), plan review (`kind: "plan"`), and user question (`kind: "question"`) of any Session; `session_id` is absent for a question asked outside a Session. `detail` is the asker's reason, the plan, or the questions as JSON. The plugin answers `approval/request` and `user-questions/request` first in their chains and races the rest of each chain, such as a browser, against `task_reply`; whichever answers first decides, and a later `task_reply` answers `not_found`. A tool or plan ask takes `decision`; a rejected plan selects its other option, with `feedback` as free text. A question ask takes `answers`, passed through. A reply missing the field its ask needs answers `invalid`, and a tool listed in `irreversibleTools` answers `needs_person`; both leave the ask open. An aborted request withdraws its ask. Open asks live in memory and end with the plugin.
 
 The assistant Session is the one whose id the plugin stored: the first call creates it in the `assistantCwd` workspace and titles it `assistantTitle`, and a later call creates a new one only when the stored Session no longer exists. The id and the request-id results live in the `mumbo_mcp` storage domain; results older than 24 hours are pruned at load.
 
@@ -99,6 +103,7 @@ Append-only. The message follows the Session's existing history, so the reusable
 - **No TLS** — the listener must stay on loopback; remote people reach it through an authenticated relay such as SSH.
 - **Key rotation needs a reload** — the plugin reads the key file once at load.
 - **JSON only** — there are no server-initiated messages, `GET` streams, or MCP sessions.
+- **An ask answered over MCP leaves its browser card open** — the rest of the chain is not cancelled, so the card stays until its request ends.
 - **`agent_read` reads the whole assistant log** — each read takes one history page through the latest event, so its cost grows with the Session.
 
 <a id="dev-note"></a>

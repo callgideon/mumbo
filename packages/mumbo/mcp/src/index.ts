@@ -6,6 +6,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import z from '@deepseek-ai/schemastery'
 import { McpServer } from '@modelcontextprotocol/server'
+import { listenForAsks, register as registerAsks } from './asks.ts'
 import { ensureAssistant } from './assistant.ts'
 import { HANDLE_PATTERN } from './auth.ts'
 import { register as registerConversation } from './conversation.ts'
@@ -61,11 +62,13 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // Concurrent first calls share one creation, so they find one assistant Session.
   let ensuring: Promise<Agent> | undefined
   const assistant = (): Promise<Agent> => ensuring ??= ensureAssistant(ctx, config, state).finally(() => { ensuring = undefined })
+  const asks = listenForAsks(ctx, config.irreversibleTools)
   /** One server per request, its tools bound to the authenticated principal; each tool module registers here. */
   const buildServer = (principal: string): McpServer => {
     const server = new McpServer({ name, version: '0.0.1' }, { capabilities: { tools: {} } })
-    const deps: ToolDeps = { ctx, principal, idem, assistant }
+    const deps: ToolDeps = { ctx, principal, idem, assistant, asks }
     registerConversation(server, deps)
+    registerAsks(server, deps)
     return server
   }
   ctx.effect(() => ctx.webServer.register({

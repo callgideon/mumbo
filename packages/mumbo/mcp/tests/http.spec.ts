@@ -4,7 +4,7 @@ import * as McpDoor from '../src/index.ts'
 import { KEY, startHost, stopHosts } from './door-fixture.ts'
 
 const TOOLS_LIST = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} })
-const TOOL_NAMES = ['agent_send', 'agent_read']
+const TOOL_NAMES = ['agent_send', 'agent_read', 'needs_you', 'task_reply']
 
 afterEach(stopHosts)
 
