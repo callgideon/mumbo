@@ -89,7 +89,10 @@
     <form id="email-form" class="stack">
       <label class="visually-hidden" for="email">Email</label>
       <input id="email" type="email" required autocomplete="email" placeholder="you@example.com">
-      <button class="secondary" type="submit">Continue with email</button>
+      <label class="visually-hidden" for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" placeholder="Password" hidden>
+      <button class="secondary" id="email-submit" type="submit">Continue with email</button>
+      <button class="link" id="password-toggle" type="button">Use a password instead</button>
     </form>
   </section>
 
@@ -144,10 +147,26 @@ $('google').addEventListener('click', () => {
   sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: returnUrl } })
 })
 
+let passwordMode = false
+$('password-toggle').addEventListener('click', () => {
+  passwordMode = !passwordMode
+  $('password').hidden = !passwordMode
+  $('password').required = passwordMode
+  $('email-submit').textContent = passwordMode ? 'Sign in' : 'Continue with email'
+  $('password-toggle').textContent = passwordMode ? 'Email me a code instead' : 'Use a password instead'
+  say('')
+})
+
 $('email-form').addEventListener('submit', async (e) => {
   e.preventDefault()
   email = $('email').value.trim()
   busy($('email-form'), true)
+  if (passwordMode) {
+    const { error } = await sb.auth.signInWithPassword({ email, password: $('password').value })
+    busy($('email-form'), false)
+    if (error) return say('Email or password is incorrect.', true)
+    return authorize()
+  }
   const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: returnUrl } })
   busy($('email-form'), false)
   if (error) return say('Could not send a code. Check the address and try again.', true)

@@ -19,7 +19,7 @@ import type { ReactNode } from 'react'
 import type {
   PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore,
 } from '@deepseek-ai/dsh-client-ui-slots'
-import { CENTER_MIN, clampWidth, computeColumns, RIGHTBAR_DEFAULT_RATIO, RIGHTBAR_MAX_RATIO, RIGHTBAR_MIN, SIDEBAR_AUTO_COLLAPSE, SIDEBAR_COLLAPSED, SIDEBAR_DEFAULT } from './columns.ts'
+import { CENTER_MIN, clampWidth, computeColumns, PHONE_MAX, RIGHTBAR_DEFAULT_RATIO, RIGHTBAR_MAX_RATIO, RIGHTBAR_MIN, SIDEBAR_AUTO_COLLAPSE, SIDEBAR_COLLAPSED, SIDEBAR_DEFAULT } from './columns.ts'
 import { DocumentTitle } from './DocumentTitle.tsx'
 import type { createLayoutStore } from './stores.ts'
 import css from './AppFrame.module.css'
@@ -117,6 +117,22 @@ function DragHandle(props: { side: 'sidebar' | 'rightbar'; left: number; onStart
   )
 }
 
+/**
+ * Close the open phone drawer once the user picks a destination: a different
+ * main panel or a different Session in the main view. Mounted only while the
+ * drawer is open, so the frame itself never subscribes to either selection.
+ */
+function DrawerAutoClose({ useSessions, usePanelInfo, onNavigate }: Pick<PropsRuntime<'root'>, 'useSessions' | 'usePanelInfo'> & { onNavigate: () => void }) {
+  const panelId = usePanelInfo(info => info.activePanelId)
+  const sessionId = useSessions(state => Object.values(state.byId)
+    .find(session => (session.retainedBy.mainView ?? 0) > 0)?.id)
+  const opened = useRef(`${panelId}:${sessionId}`)
+  useEffect(() => {
+    if (opened.current !== `${panelId}:${sessionId}`) onNavigate()
+  }, [onNavigate, panelId, sessionId])
+  return null
+}
+
 /** The three-column frame (see module doc). */
 export function AppFrame({
   useStore,
@@ -166,7 +182,9 @@ export function AppFrame({
   // Desktop reopen controls occupy the frame's shell.leading seat (macOS) or
   // the Windows caption row; neither platform keeps an icon rail.
   const darwin = document.documentElement.dataset.platform === 'darwin'
-  const collapsedWidth = darwin
+  // Phones keep no rail either: the sidebar is a drawer over the center.
+  const phone = viewport < PHONE_MAX
+  const collapsedWidth = darwin || phone
     || document.documentElement.hasAttribute('data-windows-titlebar') ? 0 : SIDEBAR_COLLAPSED
   // Opening on a narrow frame collapses the left sidebar. Eligibility must
   // include that space before the occupant's first shown report arrives.
@@ -253,7 +271,9 @@ export function AppFrame({
   // row (ui-sidebar). AppFrame.module.css publishes the matching
   // --dsh-frame-leading-clearance under the same collapsed condition.
   const leading = useMemo(() => renderSlot('shell.leading', {}), [renderSlot])
-  const leadingMounted = darwin && sidebarCollapsed
+  const leadingMounted = (darwin || phone) && sidebarCollapsed
+  const drawerOpen = phone && !sidebarCollapsed
+  const closeDrawer = useCallback(() => { actions.toggleSidebar() }, [actions])
 
   return (
     <div
@@ -263,8 +283,9 @@ export function AppFrame({
         ...(document.documentElement.hasAttribute('data-windows-titlebar')
           ? { '--dsh-windows-sidebar-width': `${cols.sidebar}px` } : {}),
         gridTemplateColumns:
-          `${cols.sidebar}px minmax(${cols.rightbar === 0 ? 0 : CENTER_MIN}px, 1fr) minmax(0px, ${rightbarMax}px)`,
+          `${phone ? 0 : cols.sidebar}px minmax(${cols.rightbar === 0 ? 0 : CENTER_MIN}px, 1fr) minmax(0px, ${rightbarMax}px)`,
       }}
+      data-phone={phone || undefined}
       data-sidebar-collapsed={sidebarCollapsed || undefined}
       data-rightbar-collapsed={cols.rightbar === 0 || undefined}
       data-rightbar-fullscreen={layoutInfo.rightbarFullscreen || undefined}
@@ -280,6 +301,12 @@ export function AppFrame({
       <div className={css.sidebarCol}>
         {sidebar}
       </div>
+      {drawerOpen && (
+        <>
+          <button type="button" className={css.drawerScrim} aria-label={t('close')} onClick={closeDrawer} />
+          <DrawerAutoClose useSessions={useSessions} usePanelInfo={usePanelInfo} onNavigate={closeDrawer} />
+        </>
+      )}
       <>
         <CenterColumn>{main}</CenterColumn>
         <RightbarColumn>
@@ -297,8 +324,8 @@ export function AppFrame({
           {leading}
         </div>
       )}
-      {/* The collapsed rail is fixed-width: no resize handle while closed. */}
-      {!sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
+      {/* The collapsed rail is fixed-width: no resize handle while closed; the phone drawer has none. */}
+      {!sidebarCollapsed && !phone && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
       {layoutInfo.rightbarShown && !layoutInfo.rightbarFullscreen && normal.rightbar > 0 && (
         <DragHandle side="rightbar" left={viewport - normal.rightbar} onStart={onRightbarStart} onDrag={onRightbarDrag} onEnd={onDragEnd} />
       )}

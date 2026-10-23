@@ -1,0 +1,91 @@
+# Static and unit gates for pull requests and main.
+# Gates read upstream workflow files this fork does not keep, so each job restores them in the runner's tree only.
+name: mumbo-ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  static:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      # A long TMPDIR breaks tsx's IPC socket path.
+      - name: Use runner-owned temporary storage
+        run: echo "TMPDIR=${{ runner.temp }}" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Restore upstream workflow files the gates read
+        run: |
+          git fetch --no-tags origin master
+          git checkout "$(git merge-base HEAD origin/master)" -- .github/workflows/
+
+      - uses: pnpm/action-setup@v5.0.0
+
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      - name: Run static gates
+        env:
+          DSH_ARCHIVE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: pnpm run check:ci:static
+
+  unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Use runner-owned temporary storage
+        run: echo "TMPDIR=${{ runner.temp }}" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Restore upstream workflow files the gates read
+        run: |
+          git fetch --no-tags origin master
+          git checkout "$(git merge-base HEAD origin/master)" -- .github/workflows/
+
+      - uses: pnpm/action-setup@v5.0.0
+
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      # Sandbox tests need bubblewrap; the script adds it to GITHUB_PATH, which later steps see.
+      - name: Prepare bubblewrap
+        run: bash scripts/prepare-ci-bubblewrap.sh
+
+      # Spill and helper-permission tests expect umask 0022.
+      - name: Run unit tests
+        env:
+          DSH_COVERAGE_TEST_TIMEOUT_MS: '90000'
+        run: |
+          umask 0022
+          pnpm run check:ci:unit

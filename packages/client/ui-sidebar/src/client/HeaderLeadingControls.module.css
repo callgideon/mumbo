@@ -24,6 +24,16 @@
   cursor: pointer;
 }
 
-.iconButton:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
+@media (hover: hover) {
+  .iconButton:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
+}
+
+/* Touch screens (the phone frame mounts this seat too): finger-sized targets. */
+@media (pointer: coarse) {
+  .iconButton {
+    width: 36px;
+    height: 36px;
+  }
 }

@@ -8,6 +8,14 @@ body,
   margin: 0;
 }
 
+/* Touch screens: the Web entry publishes the visual viewport height, which
+   excludes an open on-screen keyboard (apps/web/src/main.ts). */
+@media (pointer: coarse) {
+  #root {
+    height: var(--dsh-visual-height, 100%);
+  }
+}
+
 body {
   font-family: var(
     --dsw-font-family,
