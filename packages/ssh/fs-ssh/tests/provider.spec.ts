@@ -126,6 +126,17 @@ describe('SSH filesystem provider', () => {
     for (const [, params] of dispatch.mock.calls) expect(params).toMatchObject({ policy: { mode: 'read-only', workspaceRoot: '/remote/work' } })
   })
 
+  it('forwards directory creation with an explicit or deployment policy', async () => {
+    const { fs, dispatch } = await setup()
+    dispatch.mockResolvedValue(null)
+    const signal = new AbortController().signal
+    const policy: SandboxExecutionPolicy = { mode: 'danger-full-access', workspaceRoot: '/remote/work' }
+    await expect(fs.makeDirectory(target, signal, policy)).resolves.toBeUndefined()
+    expect(dispatch).toHaveBeenLastCalledWith('fs.mkdir', { target, policy }, signal)
+    await fs.makeDirectory(target)
+    expect(dispatch).toHaveBeenLastCalledWith('fs.mkdir', { target, policy: { mode: 'read-only', workspaceRoot: '/remote/work' } }, undefined)
+  })
+
   it('pulls text through completion without an unnecessary close request', async () => {
     const { fs, dispatch } = await setup()
     dispatch.mockResolvedValueOnce(streamId).mockResolvedValueOnce({ done: false, value: '' })
