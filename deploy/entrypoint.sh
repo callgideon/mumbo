@@ -2,7 +2,8 @@
 # Required: MUMBO_PUBLIC_HOST (e.g. app.mumbo.si), DEEPSEEK_API_KEY.
 # MUMBO_AUTH=off serves dsh directly (launch-token URL in the log); otherwise an OIDC gate sits in front:
 #   SUPABASE_URL, SUPABASE_ANON_KEY (login page), OAUTH_ISSUER_URL (<SUPABASE_URL>/auth/v1), OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_COOKIE_SECRET (16/24/32 chars).
-set -eu
+# -f: OAUTH_ALLOWED_DOMAINS='*' (open sign-up) must reach oauth2-proxy unexpanded.
+set -euf
 : "${MUMBO_PUBLIC_HOST:?}"
 cd /src
 DSH="node --import tsx/esm apps/cli/src/bin.ts --profile web --patch /src/deploy/mumbo.overlay.yml --no-open
