@@ -7,7 +7,7 @@ import type { McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 import { fence } from './fence.ts'
 import { once } from './store.ts'
-import { defineTool, type ToolDeps } from './tool.ts'
+import { defineTool, requestId, type ToolDeps } from './tool.ts'
 
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
@@ -23,8 +23,7 @@ const MESSAGE_TYPES: ReadonlySet<string> = new Set(['user/message', 'assistant/m
 
 const sendArgs = z.object({
   text: z.string().min(1).max(32_768).describe('The message, as you would type it to the assistant.'),
-  request_id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)
-    .describe('Your id for this send; repeat it to retry safely. Letters, digits, _ and -, at most 64.'),
+  request_id: requestId('send'),
 })
 
 const readArgs = z.object({

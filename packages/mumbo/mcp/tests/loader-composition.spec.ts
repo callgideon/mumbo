@@ -40,8 +40,9 @@ describe('real Loader composition', () => {
     await context.plugin(Storage)
     await context.plugin(StorageJson, { root: join(root, 'storage') })
     await context.plugin(StorageDomain, { backend: 'json' })
-    context.provide('sessionController', {} as never)
-    context.provide('workspaceRegistry', {} as never)
+    for (const service of ['sessionController', 'workspaceRegistry', 'agents', 'subagents', 'jobs', 'sessionProjections', 'subprocess']) {
+      context.provide(service, {} as never)
+    }
     await context.plugin(Loader)
     const modules = new Map<string, object>([
       ['@deepseek-ai/dsh-host-webserver', WebServer],
@@ -78,6 +79,6 @@ describe('real Loader composition', () => {
     })
     expect(response.status).toBe(200)
     const body = await response.json() as { result: { tools: { name: string }[] } }
-    expect(body.result.tools.map(tool => tool.name)).toEqual(['agent_send', 'agent_read', 'needs_you', 'task_reply'])
+    expect(body.result.tools.map(tool => tool.name)).toEqual(['agent_send', 'agent_read', 'needs_you', 'task_reply', 'task_status', 'task_result'])
   })
 })

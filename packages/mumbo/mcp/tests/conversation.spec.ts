@@ -1,10 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as McpDoor from '../src/index.ts'
-import { call, type FakeAgent, type Host, message, startHost, stopHosts } from './door-fixture.ts'
+import { call, type FakeAgent, type Host, message, startHost, stopHosts, unfence } from './door-fixture.ts'
 
 afterEach(stopHosts)
-
-const FENCED = /^<(untrusted-[0-9a-f]{16})>\n([\s\S]*)\n<\/\1>$/
 
 /** A host with the plugin loaded and one existing assistant Session `s1`. */
 async function door(allowlist?: string[]): Promise<{ host: Host; agent: FakeAgent }> {
@@ -15,13 +13,6 @@ async function door(allowlist?: string[]): Promise<{ host: Host; agent: FakeAgen
   const agent = host.agents.get('s1')
   if (agent === undefined) throw new Error('assistant Session was not created')
   return { host, agent }
-}
-
-/** Unwrap a fenced text, failing when it is not fenced. */
-function unfence(text: unknown): string {
-  const match = typeof text === 'string' ? FENCED.exec(text) : null
-  if (match === null) throw new Error(`not fenced: ${String(text)}`)
-  return match[2] ?? ''
 }
 
 describe('agent_send', () => {

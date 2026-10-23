@@ -7,7 +7,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@deepseek-ai/dsh-workspace'
 import type { Config } from './index.ts'
-import type { StateRecord } from './store.ts'
+import type { AssistantRecord } from './store.ts'
 
 /**
  * Resolve the stored assistant Session, or create one when none is stored or the stored one is gone.
@@ -16,24 +16,24 @@ import type { StateRecord } from './store.ts'
  * Callers serialize calls; two concurrent calls on an empty state create two Sessions.
  * @param ctx - context carrying `sessionController` and `workspaceRegistry`.
  * @param config - the workspace directory and title.
- * @param state - the plugin's `state` table.
+ * @param assistant - the plugin's `assistant` table.
  * @returns the assistant Session's live Agent.
  * @throws the session controller's error when the stored Session exists but cannot be resolved, or creation fails.
  */
 export async function ensureAssistant(
   ctx: Context,
   config: Pick<Config, 'assistantCwd' | 'assistantTitle'>,
-  state: KvTable<'main', StateRecord>,
+  assistant: KvTable<'main', AssistantRecord>,
 ): Promise<Agent> {
-  const stored = state.get('main')
-  if (stored?.assistantSessionId !== undefined) {
-    const resolved = await ctx.sessionController.resolveAgent(SessionId(stored.assistantSessionId))
+  const stored = assistant.get('main')
+  if (stored !== undefined) {
+    const resolved = await ctx.sessionController.resolveAgent(SessionId(stored.sessionId))
     if ('agent' in resolved) return resolved.agent
     if (resolved.error.code !== 'session/not-found') throw resolved.error
   }
   const workspace = await ctx.workspaceRegistry.create(config.assistantCwd)
   const { sessionId } = await ctx.sessionController.create({ workspaceId: workspace.id })
-  await state.put('main', { halted: stored?.halted ?? false, assistantSessionId: sessionId })
+  await assistant.put('main', { sessionId })
   await ctx.sessionController.rename({ sessionId, title: config.assistantTitle })
   const created = await ctx.sessionController.resolveAgent(sessionId)
   if ('error' in created) throw created.error

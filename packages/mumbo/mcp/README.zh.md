@@ -64,12 +64,16 @@ kind: "package-reference"
 | `agent_read` | `after_seq`（整数，至少为 0）、`wait_s`（0 到 40，默认 0） | `{messages: [{seq, role, source, text}], next_seq}` |
 | `needs_you` | 无 | `{asks: [{ask_id, kind, session_id, tool, detail, irreversible}]}` |
 | `task_reply` | `ask_id`、`request_id`、`decision`（`approve` 或 `reject`）、`answers`（`[{id, selected, custom}]`）、`feedback` | `{ok: true}` |
+| `task_status` | 无 | `{assistant_session, halted, projections, children: [{id, label, status}], worktrees}` |
+| `task_result` | `branch`（`^[A-Za-z0-9._/-]{1,100}$`，不含 `..`，不以 `-` 开头）、`page`（整数，至少为 0，默认 0） | `{page, pages, diff}` |
 
 `agent_send` 把文本作为助手会话的一个 follow-up 轮次排队，source 为 `{kind: "mcp", principal}`；`after_seq` 是此前记录的最后一个事件。同一 principal 在 24 小时内重复同一 `request_id` 时返回首次结果且不再发送；参数不同则应答 `request_id_reused`。
 
 `agent_read` 按从旧到新返回 `after_seq` 之后记录的 user 与 assistant 消息，不含没有文本的消息，也不含压缩替换。source 指明某人时 `source` 为 `<kind>:<principal>`，否则为其 kind。没有消息且 `wait_s` 为正数时，它最多等待 `wait_s` 秒以获得下一条消息。一次应答至多包含 64 KiB 已包裹的文本，除非其唯一的消息更长；此时 `next_seq` 位于第一条被留下的消息之前，否则它是最后记录的事件。
 
 `needs_you` 列出任一会话中所有未决的工具批准（`kind: "tool"`，带 `tool`）、计划评审（`kind: "plan"`）与用户问题（`kind: "question"`）；在会话之外提出的问题没有 `session_id`。`detail` 是提问方给出的原因、计划，或以 JSON 表示的问题。插件在 `approval/request` 与 `user-questions/request` 链中最先应答，并让链的其余部分（例如浏览器）与 `task_reply` 竞速；先应答者决定结果，之后的 `task_reply` 应答 `not_found`。工具或计划请求接受 `decision`；被拒绝的计划选择其另一个选项，并以 `feedback` 作为自由文本。问题请求接受 `answers`，原样传递。回复缺少其请求所需的字段时应答 `invalid`，`irreversibleTools` 中列出的工具应答 `needs_person`；两者都让请求保持未决。被中止的请求会撤回其请求项。未决请求保存在内存中，随插件结束。
+
+`task_status` 报告助手会话 id、暂停标志、以包裹后的 JSON 表示的助手会话 `todos`、`goal`、`plan` 与 `subagentCatalog` projection、其直接子会话（已加载时 `status` 为 `idle` 或 `running`，否则为 `unloaded`），以及在 `assistantCwd` 中执行 `git worktree list --porcelain` 的已包裹输出。`task_result` 返回在 `assistantCwd` 中执行 `git diff HEAD...<branch>` 的结果，即该分支自从当前检出的 `HEAD` 分叉以来的改动，按每页 65,536 个字符分页并包裹；`pages` 至少为 1。git 不认识的分支应答 `not_found`，超出最后一页的 page 应答 `invalid`。其他 git 失败以 git 的消息应答。
 
 助手会话就是插件所存 id 对应的会话：首次调用在 `assistantCwd` 工作区中创建它并命名为 `assistantTitle`，之后只有当所存会话已不存在时，调用才会创建新会话。该 id 与按 request id 保存的结果位于 `mumbo_mcp` 存储域中；超过 24 小时的结果在加载时清理。
 
