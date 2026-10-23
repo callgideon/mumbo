@@ -79,6 +79,11 @@ export class SshFileSystem extends FileSystem {
     return await this.call('fs.list', { target }, entriesSchema, signal) as FsDirEntry[]
   }
 
+  override async makeDirectory(target: FsTarget, signal?: AbortSignal, sandboxPolicy?: SandboxExecutionPolicy): Promise<void> {
+    const policy = sandboxPolicy ?? this.ctx.sandboxPolicy.resolve()
+    await this.call('fs.mkdir', { target, policy }, z.null(), signal)
+  }
+
   override async writeText(
     target: FsTarget, content: string, expected?: FsWriteIntent, signal?: AbortSignal, sandboxPolicy?: SandboxExecutionPolicy,
   ): Promise<FsWriteOutcome> {

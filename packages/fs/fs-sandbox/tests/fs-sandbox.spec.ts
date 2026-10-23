@@ -9,7 +9,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, parse } from 'node:path'
@@ -218,6 +218,24 @@ describe('the per-call policy override (escalation)', () => {
     const path = join(outside, 'granted-full.txt')
     await fs.writeText(await target(path), 'full', undefined, undefined, { mode: 'danger-full-access', workspaceRoot: workspace })
     expect(await readFile(path, 'utf8')).toBe('full')
+  })
+})
+
+describe('directory creation', () => {
+  it('fences nested creation by the per-call policy and accepts an existing directory', async () => {
+    await boot('workspace-write')
+    const nested = join(workspace, 'a', 'b')
+    await fs.makeDirectory(await target(nested))
+    await fs.makeDirectory(await target(nested))
+    expect((await stat(nested)).isDirectory()).toBe(true)
+    await expect(fs.makeDirectory(await target(join(outside, 'escaped')))).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    expect(existsSync(join(outside, 'escaped'))).toBe(false)
+    await expect(fs.makeDirectory(await target(join(workspace, 'denied')), undefined, { mode: 'read-only', workspaceRoot: workspace }))
+      .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    expect(existsSync(join(workspace, 'denied'))).toBe(false)
+    const granted = join(outside, 'granted', 'nested')
+    await fs.makeDirectory(await target(granted), undefined, { mode: 'danger-full-access', workspaceRoot: workspace })
+    expect((await stat(granted)).isDirectory()).toBe(true)
   })
 })
 

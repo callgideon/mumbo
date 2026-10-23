@@ -152,6 +152,13 @@ describe('FileSystem provider seam', () => {
       .rejects.toMatchObject({ code: 'FS_IO_ERROR' })
   })
 
+  it('rejects directory creation when a provider does not implement it', async () => {
+    const ctx = new Context()
+    await ctx.plugin(FakeFileSystem)
+    const fs = ctx.fs as FakeFileSystem
+    await expect(fs.makeDirectory(await fs.resolve('nested/directory'))).rejects.toMatchObject({ code: 'FS_IO_ERROR' })
+  })
+
   it('listDir returns child entry targets without reading file content', async () => {
     const ctx = new Context()
     await ctx.plugin(FakeFileSystem)

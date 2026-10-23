@@ -29,7 +29,7 @@ Mount this provider with [`dsh-ssh`](../ssh/README.md) and `sandboxPolicy`; use 
 
 `resolve()` canonicalizes paths on the remote host. `processPath()` and `fileUrl()` name files in that same remote namespace; they do not grant host-side access. File URLs encode literal percent signs, backslashes and newlines without changing the filename. `processPathFromHostPath()` returns `undefined`, so consumers requiring an installed executable or bootstrap must supply a remote artifact explicitly.
 
-Reads preserve the shared filesystem error codes. Writes and edits send the resolved per-call policy to the helper, which canonicalizes the workspace and enforces it beside the atomic mutation. Lost transport reports an I/O failure; a mutation may already have committed and is not retried automatically.
+Reads preserve the shared filesystem error codes. Writes, edits and directory creation send the resolved per-call policy to the helper, which canonicalizes the workspace and enforces it beside the atomic mutation. Lost transport reports an I/O failure; a mutation may already have committed and is not retried automatically.
 
 -----
 

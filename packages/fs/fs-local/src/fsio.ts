@@ -337,6 +337,25 @@ export async function listDirectory(target: LocalTarget, signal?: AbortSignal): 
   return result
 }
 
+// --- Directory creation ---
+
+/**
+ * Create a directory and its missing ancestors; an existing directory succeeds unchanged.
+ * @param target - the resolved directory to create.
+ * @param signal - aborts before creation (`FS_ABORTED`).
+ */
+export async function createDirectory(target: LocalTarget, signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal, 'mkdir')
+  try {
+    await mkdir(target.targetKey, { recursive: true })
+  } catch (error: unknown) {
+    const reason = `cannot create directory "${target.displayPath}"`
+    if (isEEXIST(error) || isENOTDIR(error)) throw new FsError(`${reason}: a path segment is not a directory`, 'FS_NOT_DIRECTORY', { cause: error })
+    if (isPermissionError(error)) throw new FsError(`${reason}: permission denied`, 'FS_PERMISSION_DENIED', { cause: error })
+    throw new FsError(`${reason}: ${errorMessage(error)}`, 'FS_IO_ERROR', { cause: error })
+  }
+}
+
 // --- Reading ---
 
 function notTextError(verb: 'read' | 'edit', displayPath: string): FsError {

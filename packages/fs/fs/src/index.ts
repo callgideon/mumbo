@@ -252,6 +252,24 @@ export abstract class FileSystem extends Service {
   abstract listDir(target: FsTarget, signal?: AbortSignal): Promise<FsDirEntry[]>
 
   /**
+   * Create a directory and its missing ancestors, like `mkdir -p`; an existing
+   * directory succeeds unchanged. The base provider rejects with `FS_IO_ERROR`;
+   * backends that can create directories override it.
+   * @param target - the resolved directory target to create.
+   * @param signal - aborts before creation takes effect.
+   * @param sandboxPolicy - the per-call mode and workspace root this creation
+   *   runs under; a sandboxing backend fences creation by it, the bare backend
+   *   ignores it. Omit to leave the backend its own default.
+   * @returns a promise resolving once the directory exists.
+   */
+  makeDirectory(target: FsTarget, signal?: AbortSignal, sandboxPolicy?: SandboxExecutionPolicy): Promise<void> {
+    void target
+    void signal
+    void sandboxPolicy
+    return Promise.reject(new FsError('Directory creation is not supported by this provider.', 'FS_IO_ERROR'))
+  }
+
+  /**
    * Atomically create or replace UTF-8 text. `expected` guards intent and
    * staleness; omission allows unconditional overwrite.
    * @param target - the resolved target to write.

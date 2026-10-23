@@ -45,6 +45,20 @@ describe.skipIf(process.platform === 'win32')('SSH helper runtime', () => {
     } finally { await test.close() }
   })
 
+  it('creates nested directories idempotently under the forwarded policy', async () => {
+    const test = await helper()
+    try {
+      const target = await test.client.request('fs.resolve', { path: 'a/b/c' }, targetSchema)
+      expect(await test.client.request('fs.mkdir', { target, policy: policy(test.root) }, z.null())).toBeNull()
+      await test.client.request('fs.mkdir', { target, policy: policy(test.root) }, z.null())
+      expect(await test.client.request('fs.stat', { target }, infoSchema)).toMatchObject({ type: 'directory' })
+      const denied = await test.client.request('fs.resolve', { path: 'denied' }, targetSchema)
+      await expect(test.client.request('fs.mkdir', { target: denied, policy: { mode: 'read-only', workspaceRoot: test.root } }, z.null()))
+        .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+      expect(await test.client.request('fs.stat', { target: denied }, z.null())).toBeNull()
+    } finally { await test.close() }
+  })
+
   it('returns metadata, byte ranges and canonical symlink observations', async () => {
     const test = await helper()
     try {
