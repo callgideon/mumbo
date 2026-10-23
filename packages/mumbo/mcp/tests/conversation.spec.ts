@@ -4,15 +4,26 @@ import { call, type FakeAgent, type Host, message, startHost, stopHosts, unfence
 
 afterEach(stopHosts)
 
-/** A host with the plugin loaded and one existing assistant Session `s1`. */
-async function door(allowlist?: string[]): Promise<{ host: Host; agent: FakeAgent }> {
+/** A host with the plugin loaded and one existing assistant Session `s1`; `unload` disposes the plugin. */
+async function door(allowlist?: string[]): Promise<{ host: Host; agent: FakeAgent; unload: () => Promise<void> }> {
   const host = await startHost(allowlist === undefined ? {} : { allowlist })
-  await host.ctx.plugin(McpDoor, host.config)
+  const fiber = host.ctx.plugin(McpDoor, host.config)
+  await fiber
   // The first call creates `s1`; tests then shape its log.
   await call(host.url, 'agent_read', { after_seq: 0 })
   const agent = host.agents.get('s1')
   if (agent === undefined) throw new Error('assistant Session was not created')
-  return { host, agent }
+  return { host, agent, unload: async () => { await fiber.dispose() } }
+}
+
+/** Make `resolveAgent` wait until the returned release is called. */
+function hold(host: Host): () => void {
+  const release = Promise.withResolvers<undefined>()
+  host.hold.promise = release.promise
+  return () => {
+    host.hold.promise = Promise.resolve()
+    release.resolve(undefined)
+  }
 }
 
 describe('agent_send', () => {
@@ -73,6 +84,26 @@ describe('agent_send', () => {
     expect(host.agents.get('s1')?.followup).toHaveBeenCalledTimes(2)
   })
 
+  it('finishes a send admitted before an unload, and its retry after reload sends nothing', async () => {
+    const { host, agent, unload } = await door()
+    const before = host.calls.length
+    const release = hold(host)
+    const sending = call(host.url, 'agent_send', { text: 'hello', request_id: 'r1' })
+    // `resolve:s1`: the send is held before it stores its result.
+    await vi.waitFor(() => { expect(host.calls.length).toBe(before + 1) })
+    let unloaded = false
+    const unloading = unload().then(() => { unloaded = true })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(unloaded).toBe(false)
+    release()
+    const first = await sending
+    await unloading
+    expect(first).toMatchObject({ isError: false })
+    await host.ctx.plugin(McpDoor, host.config)
+    expect(await call(host.url, 'agent_send', { text: 'hello', request_id: 'r1' })).toEqual(first)
+    expect(agent.followup).toHaveBeenCalledOnce()
+  })
+
   it('talks to the same assistant Session after the plugin reloads', async () => {
     const host = await startHost()
     const fiber = host.ctx.plugin(McpDoor, host.config)
@@ -114,18 +145,22 @@ describe('agent_read', () => {
     expect(value.next_seq).toBe(agent.log.length - 1)
   })
 
-  it('waits for the next message of the assistant Session when none follows after_seq yet', async () => {
+  it('waits for the next message of the assistant Session with text when none follows after_seq yet', async () => {
     const { host, agent } = await door()
     const after = agent.log.length - 1
     const before = host.calls.length
     const reading = call(host.url, 'agent_read', { after_seq: after, wait_s: 40 })
     // `resolve:s1` and the first `page:` call: the read found nothing and waits.
     await vi.waitFor(() => { expect(host.calls.length).toBe(before + 2) })
-    const reply = message(agent, 'assistant', { kind: 'model' }, [{ type: 'text', text: 'here' }])
-    host.ctx.emit('session/event', { id: 'other' } as never, reply as never)
-    host.ctx.emit('session/event', agent.session as never, { ...reply, type: 'turn/end' } as never)
+    const toolCall = message(agent, 'assistant', { kind: 'model' }, [{ type: 'tool-call', id: 'c1' }])
+    host.ctx.emit('session/event', { id: 'other' } as never, toolCall as never)
+    host.ctx.emit('session/event', agent.session as never, { ...toolCall, type: 'turn/end' } as never)
     await new Promise(resolve => setImmediate(resolve))
     expect(host.calls.length).toBe(before + 2)
+    // A message without text wakes a read that still finds nothing, and the wait goes on.
+    host.ctx.emit('session/event', agent.session as never, toolCall as never)
+    await vi.waitFor(() => { expect(host.calls.length).toBe(before + 3) })
+    const reply = message(agent, 'assistant', { kind: 'model' }, [{ type: 'text', text: 'here' }])
     host.ctx.emit('session/event', agent.session as never, reply as never)
     const value = (await reading).value as { messages: { text: string }[]; next_seq: number }
     expect(value.messages.map(({ text }) => unfence(text))).toEqual(['here'])
@@ -137,21 +172,44 @@ describe('agent_read', () => {
     const started = Date.now()
     const reply = await call(host.url, 'agent_read', { after_seq: agent.log.length - 1, wait_s: 1 })
     expect(Date.now() - started).toBeGreaterThanOrEqual(900)
-    expect(reply).toEqual({ isError: false, value: { messages: [], next_seq: agent.log.length - 1 } })
+    expect(reply).toEqual({ isError: false, value: { messages: [], next_seq: agent.log.length - 1, more: false } })
   })
 
-  it('ends a reply before it passes 64 KiB of text and continues from next_seq', async () => {
+  it('ends its wait when the plugin unloads', async () => {
+    const { host, agent, unload } = await door()
+    const before = host.calls.length
+    const reading = call(host.url, 'agent_read', { after_seq: agent.log.length - 1, wait_s: 40 })
+    await vi.waitFor(() => { expect(host.calls.length).toBe(before + 2) })
+    await unload()
+    expect(await reading).toEqual({ isError: false, value: { messages: [], next_seq: agent.log.length - 1, more: false } })
+  })
+
+  it('does not wait once the plugin is unloading', async () => {
+    const { host, agent, unload } = await door()
+    const before = host.calls.length
+    const release = hold(host)
+    const reading = call(host.url, 'agent_read', { after_seq: agent.log.length - 1, wait_s: 40 })
+    await vi.waitFor(() => { expect(host.calls.length).toBe(before + 1) })
+    const unloading = unload()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    release()
+    expect(await reading).toEqual({ isError: false, value: { messages: [], next_seq: agent.log.length - 1, more: false } })
+    await unloading
+  })
+
+  it('ends a reply before it passes 64 KiB of text, says more follows, and continues from next_seq', async () => {
     const { host, agent } = await door()
     const after = agent.log.length - 1
     for (const text of ['a'.repeat(40_000), 'b'.repeat(40_000), 'c']) {
       message(agent, 'assistant', { kind: 'model' }, [{ type: 'text', text }])
     }
-    const first = (await call(host.url, 'agent_read', { after_seq: after })).value as { messages: { seq: number }[]; next_seq: number }
+    type Reply = { messages: { seq: number }[]; next_seq: number; more: boolean }
+    const first = (await call(host.url, 'agent_read', { after_seq: after })).value as Reply
     expect(first.messages.map(({ seq }) => seq)).toEqual([after + 1])
-    expect(first.next_seq).toBe(after + 1)
-    const second = (await call(host.url, 'agent_read', { after_seq: first.next_seq })).value as { messages: { seq: number }[]; next_seq: number }
+    expect(first).toMatchObject({ next_seq: after + 1, more: true })
+    const second = (await call(host.url, 'agent_read', { after_seq: first.next_seq })).value as Reply
     expect(second.messages.map(({ seq }) => seq)).toEqual([after + 2, after + 3])
-    expect(second.next_seq).toBe(after + 3)
+    expect(second).toMatchObject({ next_seq: after + 3, more: false })
   })
 
   it.each([

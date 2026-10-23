@@ -2,7 +2,7 @@ import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions'
 import { afterEach, describe, expect, it } from 'vitest'
 import * as McpDoor from '../src/index.ts'
-import { call, type Host, startHost, stopHosts } from './door-fixture.ts'
+import { call, type FakeAgent, type Host, message, startHost, stopHosts } from './door-fixture.ts'
 
 afterEach(stopHosts)
 
@@ -32,12 +32,13 @@ async function door(): Promise<Host> {
 function askTool(
   host: Host,
   toolName: string,
-  options: { reason?: string; browser?: Promise<ApprovalOutcome>; signal?: AbortSignal } = {},
+  options: { reason?: string; browser?: Promise<ApprovalOutcome>; signal?: AbortSignal; agent?: FakeAgent; callId?: string } = {},
 ): Promise<ApprovalOutcome> {
   const browser = options.browser ?? new Promise<ApprovalOutcome>(() => {})
   return host.ctx.waterfall('approval/request', {
-    agent: { id: 's1' },
+    agent: options.agent ?? { id: 's1' },
     toolName,
+    ...(options.callId === undefined ? {} : { callId: options.callId }),
     ...(options.reason === undefined ? {} : { reason: options.reason }),
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   } as never, () => browser)
@@ -83,6 +84,24 @@ describe('tool approvals', () => {
     expect(reply).toEqual({ isError: false, value: { ok: true } })
     expect(await outcome).toBe('allowed-once')
     expect((await needsYou(host)).map(ask => ask.ask_id)).toEqual([asks[1]?.ask_id])
+  })
+
+  it('lists the call id of a tool ask and the call\'s arguments as the asking Session logged them', async () => {
+    const host = await door()
+    const agent = host.addAgent('s1')
+    message(agent, 'user', { kind: 'user' }, [{ type: 'text', text: 'clean up' }])
+    message(agent, 'assistant', { kind: 'model' }, [{ type: 'text', text: 'looking' }])
+    message(agent, 'assistant', { kind: 'model' }, [
+      { type: 'text', text: 'removing it' },
+      { type: 'tool-call', id: 'c1', name: 'shell', arguments: '{"command":"rm -r /srv/example"}' },
+    ])
+    void askTool(host, 'shell', { agent, callId: 'c1', reason: 'run shell' })
+    void askTool(host, 'shell', { agent, callId: 'c9' })
+    const tool = { ask_id: expect.any(String) as string, kind: 'tool', session_id: 's1', tool: 'shell', irreversible: false }
+    expect(await needsYou(host)).toEqual([
+      { ...tool, call_id: 'c1', detail: fenced('run shell'), arguments: fenced('\\{"command":"rm -r /srv/example"\\}') },
+      { ...tool, call_id: 'c9', detail: fenced('') },
+    ])
   })
 
   it('answers reject with rejected', async () => {

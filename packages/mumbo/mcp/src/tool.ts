@@ -5,9 +5,9 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type { CallToolResult, McpServer, StandardSchemaWithJSON } from '@modelcontextprotocol/server'
 import { z } from 'zod'
-import type { PendingAsk } from './asks.ts'
+import type { AskId, PendingAsk } from './asks.ts'
 import { ToolError } from './errors.ts'
-import type { HaltRecord, IdemRecord } from './store.ts'
+import type { HaltRecord, Idem } from './store.ts'
 
 /** What each tool module's `register` receives for one request's server. */
 export interface ToolDeps {
@@ -16,7 +16,7 @@ export interface ToolDeps {
   /** The authenticated handle the tools act for. */
   readonly principal: string
   /** Remembered results by request id. */
-  readonly idem: KvTable<string, IdemRecord>
+  readonly idem: Idem
   /** The halt flag. */
   readonly halt: KvTable<'main', HaltRecord>
   /** The assistant Session's workspace directory, a git checkout. */
@@ -24,7 +24,9 @@ export interface ToolDeps {
   /** Resolve, or create once, the assistant Session's live Agent. */
   readonly assistant: () => Promise<Agent>
   /** Open asks by `ask_id`, shared by every request. */
-  readonly asks: ReadonlyMap<string, PendingAsk>
+  readonly asks: ReadonlyMap<AskId, PendingAsk>
+  /** Aborted once the plugin starts unloading; a waiting tool returns early. */
+  readonly closing: AbortSignal
 }
 
 /**
@@ -34,7 +36,7 @@ export interface ToolDeps {
  */
 export function requestId(what: string): z.ZodString {
   return z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)
-    .describe(`Your id for this ${what}; repeat it to retry safely. Letters, digits, _ and -, at most 64.`)
+    .describe(`Your id for this ${what}; repeat it within a day to retry safely. Letters, digits, _ and -, at most 64.`)
 }
 
 /**

@@ -67,47 +67,66 @@ function sortedJson(value: unknown): string {
 /**
  * Key of one tool call in the `idem` table.
  * @param tool - the tool name.
- * @param requestId - the caller's request id.
+ * @param requestId - the request id, prefixed with the caller's principal and `/`.
  * @returns hex SHA-256 of `tool`, a newline, and `requestId`.
  */
 export function idemKey(tool: string, requestId: string): string {
   return sha256(`${tool}\n${requestId}`)
 }
 
+/** One plugin instance's request-id memory: the `idem` table, and the runs still in flight by {@link idemKey}. */
+export interface Idem {
+  readonly table: KvTable<string, IdemRecord>
+  /** Runs not yet stored, so a concurrent repeat joins its run instead of starting another. */
+  readonly running: Map<string, { readonly bodySha256: string; readonly result: Promise<string> }>
+}
+
 /**
- * Run a tool call at most once per request id within {@link IDEMPOTENCY_WINDOW_MS}.
- * A repeat with equal arguments returns the stored result without running; a failed run stores nothing.
- * Two concurrent calls with one request id both run, and a crash after `run` succeeds
- * but before the result is stored lets a retry run again.
- * @param table - the `idem` table.
+ * Run a tool call at most once per principal and request id within {@link IDEMPOTENCY_WINDOW_MS}.
+ * A repeat with equal arguments returns the first result without running, and a concurrent repeat
+ * shares the first run; a failed run stores nothing. A crash after `run` succeeds but before the
+ * result is stored lets a retry run again, so a caller whose effect must not repeat performs it
+ * after `once` returns.
+ * @param idem - the plugin's request-id memory.
  * @param tool - the tool name.
+ * @param principal - the calling handle; ids of different principals never meet.
  * @param requestId - the caller's request id.
  * @param args - the call's JSON arguments.
  * @param run - performs the call and returns its result.
  * @param now - clock in epoch milliseconds.
- * @returns the first result for this tool and request id.
+ * @returns the first result for this tool, principal and request id.
  * @throws {ToolError} `request_id_reused` when the id was used with other arguments inside the window.
  */
 export async function once(
-  table: KvTable<string, IdemRecord>,
+  idem: Idem,
   tool: string,
+  principal: string,
   requestId: string,
   args: unknown,
   run: () => Promise<string>,
   now: () => number = Date.now,
 ): Promise<string> {
-  const key = idemKey(tool, requestId)
+  const key = idemKey(tool, `${principal}/${requestId}`)
   const bodySha256 = sha256(sortedJson(args))
-  const stored = table.get(key)
-  if (stored !== undefined && now() - stored.at < IDEMPOTENCY_WINDOW_MS) {
-    if (stored.bodySha256 !== bodySha256) {
+  const stored = idem.table.get(key)
+  const first = idem.running.get(key) ?? (stored !== undefined && now() - stored.at < IDEMPOTENCY_WINDOW_MS ? stored : undefined)
+  if (first !== undefined) {
+    if (first.bodySha256 !== bodySha256) {
       throw new ToolError('request_id_reused', `request_id ${requestId} was already used with other arguments; send a new request_id`)
     }
-    return stored.result
+    return await first.result
   }
-  const result = await run()
-  await table.put(key, { bodySha256, result, at: now() })
-  return result
+  const result = (async () => {
+    const value = await run()
+    await idem.table.put(key, { bodySha256, result: value, at: now() })
+    return value
+  })()
+  idem.running.set(key, { bodySha256, result })
+  try {
+    return await result
+  } finally {
+    idem.running.delete(key)
+  }
 }
 
 /**

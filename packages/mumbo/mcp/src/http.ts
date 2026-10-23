@@ -1,8 +1,7 @@
 /** The `/mcp` HTTP handler: method and caller checks, then one stateless MCP exchange answered as JSON. */
 
-import type { ServerResponse } from 'node:http'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Readable } from 'node:stream'
-import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { type McpServer, WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/server'
 import { checkKey, checkPrincipal } from './auth.ts'
 
@@ -37,7 +36,7 @@ function refuse(response: ServerResponse, status: 401 | 403 | 405, message: stri
  * @param options - key, allowlist, and the per-request server factory.
  * @returns the route handler.
  */
-export function createRouteHandler(options: RouteOptions): WebRoute['handler'] {
+export function createRouteHandler(options: RouteOptions): (request: IncomingMessage, response: ServerResponse) => Promise<void> {
   return async (request, response) => {
     if (request.method !== 'POST') {
       response.setHeader('allow', 'POST')
