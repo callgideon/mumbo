@@ -12,6 +12,7 @@ import { isAbsolute, join, parse, relative, resolve } from 'node:path'
 import { createServer } from 'node:net'
 import {
   applyLiteralEdit,
+  createDirectory,
   listDirectory,
   probe,
   probeNoFollow,
@@ -331,6 +332,29 @@ describe('listDirectory', () => {
     } finally {
       await chmod(protectedRoot, 0o700)
     }
+  })
+})
+
+describe('createDirectory', () => {
+  it('translates permission failures into FS_PERMISSION_DENIED', async () => {
+    const root = join(dir, 'restricted')
+    await mkdir(root)
+    await chmod(root, 0o500)
+    try {
+      const error = await createDirectory(localTarget(join(root, 'child'))).then(() => undefined, (caught: unknown) => caught)
+      // Root-like environments and Windows may still create children of mode-500 directories.
+      if (error === undefined) return
+      expect(error).toBeInstanceOf(FsError)
+      expect(error).toMatchObject({ code: 'FS_PERMISSION_DENIED' })
+    } finally {
+      await chmod(root, 0o700)
+    }
+  })
+
+  it('translates other creation failures into FS_IO_ERROR', async () => {
+    const loop = join(dir, 'loop')
+    await symlink(loop, loop)
+    await expect(createDirectory(localTarget(join(loop, 'child')))).rejects.toMatchObject({ code: 'FS_IO_ERROR' })
   })
 })
 

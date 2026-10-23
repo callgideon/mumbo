@@ -402,6 +402,24 @@ describe('listDir', () => {
   })
 })
 
+describe('makeDirectory', () => {
+  it('creates missing nested directories and accepts an existing directory', async () => {
+    const target = await fs.resolve('a/b/c')
+    await fs.makeDirectory(target)
+    expect((await stat(join(dir, 'a', 'b', 'c'))).isDirectory()).toBe(true)
+    await writeFile(join(dir, 'a', 'b', 'c', 'kept.txt'), 'kept')
+    await fs.makeDirectory(target)
+    expect(await readFile(join(dir, 'a', 'b', 'c', 'kept.txt'), 'utf8')).toBe('kept')
+  })
+
+  it('rejects a file at the path and a pre-aborted signal without creating anything', async () => {
+    await writeFile(join(dir, 'a.txt'), 'text')
+    await expect(fs.makeDirectory(await fs.resolve('a.txt'))).rejects.toMatchObject({ code: 'FS_NOT_DIRECTORY' })
+    await expect(fs.makeDirectory(await fs.resolve('new'), AbortSignal.abort())).rejects.toMatchObject({ code: 'FS_ABORTED' })
+    await expect(stat(join(dir, 'new'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+})
+
 describe('writeText', () => {
   it('createIfAbsent creates a new file', async () => {
     const target = await fs.resolve('new.txt')

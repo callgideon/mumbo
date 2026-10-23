@@ -6,7 +6,7 @@ Session 的当前目录由 [`dsh-working-directory`](../../packages/session/work
 
 ## 目录选择
 
-`ctx.workingDirectory.get(session)` 读取日志中的值。`ensure(agent)` 验证它，并在目录消失时恢复原始项目。`set(agent, path)` 验证并记录请求的变更。header 没有目录的 Session 使用配置的运行时回退目录；回退目录不可用时返回错误。
+`ctx.workingDirectory.get(session)` 读取日志中的值。`ensure(agent)` 验证它，并在目录消失时恢复原始项目；原始项目也缺失时，通过 `ctx.fs.makeDirectory` 将其重建为空目录，记录警告，并通知其中原有的文件已不存在。`set(agent, path)` 验证并记录请求的变更。header 没有目录的 Session 使用配置的运行时回退目录，并以同样方式重建。无法重建的目录会产生记录在日志中的错误。
 
 变更仅影响一个 Session。相对路径文件系统操作、新启动的进程、指令发现、技能和文件补全使用当前目录。已有终端和持久 shell 保留自己的目录。沙箱可写根目录与项目归属继续绑定原始项目。
 
@@ -38,11 +38,14 @@ get(session: Session): string
 
 /**
  * Validate the current directory and restore the original project when it disappeared.
+ * A missing original project is recreated empty through the filesystem provider and logged;
+ * files it held are not restored. Every Session in this process that was created before the
+ * recreation and works in, or falls back to, that project is told once.
  * @param agent - live or unpublished Agent owning the Session.
- * @param signal - cancellation for filesystem inspection.
+ * @param signal - cancellation for filesystem inspection and creation.
  * @returns the existing directory; recovery is committed before fulfillment.
  * A notice failure is warned without reverting the committed state.
- * @throws when the original project is also unavailable.
+ * @throws when the original project cannot be recreated; the failure is logged.
  */
 ensure(agent: Agent, signal?: AbortSignal): Promise<string>
 
