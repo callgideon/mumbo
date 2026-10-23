@@ -9,12 +9,11 @@ import { z } from 'zod'
 import { ToolError } from './errors.ts'
 import { fence } from './fence.ts'
 import { once } from './store.ts'
-import { defineTool, type ToolDeps } from './tool.ts'
+import { defineTool, requestId, type ToolDeps } from './tool.ts'
 
 const replyArgs = z.object({
   ask_id: z.string().describe('The ask_id from needs_you.'),
-  request_id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)
-    .describe('Your id for this reply; repeat it to retry safely. Letters, digits, _ and -, at most 64.'),
+  request_id: requestId('reply'),
   decision: z.enum(['approve', 'reject']).exactOptional().describe('For a tool or plan ask.'),
   answers: z.array(z.object({
     id: z.string(),

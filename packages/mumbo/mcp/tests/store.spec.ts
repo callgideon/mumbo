@@ -96,10 +96,12 @@ describe('prune', () => {
   })
 })
 
-describe('state table', () => {
-  it('stores the assistant Session id and halt flag under main', async () => {
+describe('assistant and halt tables', () => {
+  it('store the assistant Session id and the halt flag under main as separate records', async () => {
     const domain = await (await storage()).storageDomain.open(mcpDomain)
-    await domain.table('state').put('main', { assistantSessionId: 'assistant', halted: true })
-    expect(domain.table('state').get('main')).toEqual({ assistantSessionId: 'assistant', halted: true })
+    await domain.table('assistant').put('main', { sessionId: 'assistant' })
+    await domain.table('halt').put('main', { halted: true })
+    expect(domain.table('assistant').get('main')).toEqual({ sessionId: 'assistant' })
+    expect(domain.table('halt').get('main')).toEqual({ halted: true })
   })
 })

@@ -33,10 +33,22 @@
       "path": "../../interaction/user-questions"
     },
     {
+      "path": "../../jobs/jobs"
+    },
+    {
       "path": "../../llm/llm"
     },
     {
+      "path": "../../session/session-projection"
+    },
+    {
       "path": "../../storage/storage-domain"
+    },
+    {
+      "path": "../../subagent/subagent"
+    },
+    {
+      "path": "../../subprocess/subprocess"
     },
     {
       "path": "../../workspace/workspace"

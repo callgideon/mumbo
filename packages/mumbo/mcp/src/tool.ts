@@ -7,7 +7,7 @@ import type { CallToolResult, McpServer, StandardSchemaWithJSON } from '@modelco
 import { z } from 'zod'
 import type { PendingAsk } from './asks.ts'
 import { ToolError } from './errors.ts'
-import type { IdemRecord } from './store.ts'
+import type { HaltRecord, IdemRecord } from './store.ts'
 
 /** What each tool module's `register` receives for one request's server. */
 export interface ToolDeps {
@@ -17,10 +17,24 @@ export interface ToolDeps {
   readonly principal: string
   /** Remembered results by request id. */
   readonly idem: KvTable<string, IdemRecord>
+  /** The halt flag. */
+  readonly halt: KvTable<'main', HaltRecord>
+  /** The assistant Session's workspace directory, a git checkout. */
+  readonly assistantCwd: string
   /** Resolve, or create once, the assistant Session's live Agent. */
   readonly assistant: () => Promise<Agent>
   /** Open asks by `ask_id`, shared by every request. */
   readonly asks: ReadonlyMap<string, PendingAsk>
+}
+
+/**
+ * The `request_id` argument of a tool that is safe to retry.
+ * @param what - what the id names, such as `send`.
+ * @returns its schema.
+ */
+export function requestId(what: string): z.ZodString {
+  return z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)
+    .describe(`Your id for this ${what}; repeat it to retry safely. Letters, digits, _ and -, at most 64.`)
 }
 
 /**

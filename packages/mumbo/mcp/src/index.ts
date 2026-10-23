@@ -11,13 +11,24 @@ import { ensureAssistant } from './assistant.ts'
 import { HANDLE_PATTERN } from './auth.ts'
 import { register as registerConversation } from './conversation.ts'
 import { createRouteHandler } from './http.ts'
+import { register as registerStatus } from './status.ts'
 import { mcpDomain, prune } from './store.ts'
 import type { ToolDeps } from './tool.ts'
 
 /** Cordis function-plugin name. */
 export const name = 'mumbo-mcp'
 /** Host services required before the route registers; `sessionController` keeps the plugin to Web profiles. */
-export const inject = ['webServer', 'storageDomain', 'sessionController', 'workspaceRegistry']
+export const inject = [
+  'webServer',
+  'storageDomain',
+  'sessionController',
+  'workspaceRegistry',
+  'agents',
+  'subagents',
+  'jobs',
+  'sessionProjections',
+  'subprocess',
+]
 
 /** Route path on the injected WebServer; the listener, not the path, varies per deployment. */
 const ROUTE_PATH = '/mcp'
@@ -58,17 +69,18 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.effect(() => () => domain.close(), 'mumbo-mcp: storage')
   const idem = domain.table('idem')
   await prune(idem)
-  const state = domain.table('state')
+  const halt = domain.table('halt')
   // Concurrent first calls share one creation, so they find one assistant Session.
   let ensuring: Promise<Agent> | undefined
-  const assistant = (): Promise<Agent> => ensuring ??= ensureAssistant(ctx, config, state).finally(() => { ensuring = undefined })
+  const assistant = (): Promise<Agent> => ensuring ??= ensureAssistant(ctx, config, domain.table('assistant')).finally(() => { ensuring = undefined })
   const asks = listenForAsks(ctx, config.irreversibleTools)
   /** One server per request, its tools bound to the authenticated principal; each tool module registers here. */
   const buildServer = (principal: string): McpServer => {
     const server = new McpServer({ name, version: '0.0.1' }, { capabilities: { tools: {} } })
-    const deps: ToolDeps = { ctx, principal, idem, assistant, asks }
+    const deps: ToolDeps = { ctx, principal, idem, halt, assistantCwd: config.assistantCwd, assistant, asks }
     registerConversation(server, deps)
     registerAsks(server, deps)
+    registerStatus(server, deps)
     return server
   }
   ctx.effect(() => ctx.webServer.register({

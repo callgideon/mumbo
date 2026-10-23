@@ -1,4 +1,4 @@
-/** Durable plugin state: results of retried tool calls by request id, and the assistant Session and halt flag. */
+/** Durable plugin state: results of retried tool calls by request id, the assistant Session, and the halt flag. */
 
 import { createHash } from 'node:crypto'
 import { defineDomain, domainTable, type KvTable } from '@deepseek-ai/dsh-storage-domain'
@@ -17,19 +17,27 @@ const idemRecord = z.object({
   at: z.number(),
 }).strict()
 
-const stateRecord = z.object({
-  /** The Session the tools talk to, once created. */
-  assistantSessionId: z.string().optional(),
+const assistantRecord = z.object({
+  /** The Session the tools talk to. */
+  sessionId: z.string(),
+}).strict()
+
+const haltRecord = z.object({
   /** Whether runs are halted until a resume. */
   halted: z.boolean(),
 }).strict()
 
 /** One remembered tool result. */
 export type IdemRecord = z.infer<typeof idemRecord>
-/** The single plugin state record, stored at key `main`. */
-export type StateRecord = z.infer<typeof stateRecord>
+/** The assistant Session, stored at key `main` once created. */
+export type AssistantRecord = z.infer<typeof assistantRecord>
+/** The halt flag, stored at key `main` once set. */
+export type HaltRecord = z.infer<typeof haltRecord>
 
-/** Storage domain `mumbo_mcp`: table `idem` keyed by {@link idemKey}, table `state` keyed `main`. */
+/**
+ * Storage domain `mumbo_mcp`: table `idem` keyed by {@link idemKey}, tables `assistant` and `halt` keyed `main`.
+ * The assistant Session and the halt flag are separate records, so their writers never overwrite each other.
+ */
 export const mcpDomain = defineDomain({
   name: 'mumbo_mcp',
   version: 1,
@@ -37,7 +45,8 @@ export const mcpDomain = defineDomain({
   invalidRecords: 'backup-and-skip',
   tables: {
     idem: domainTable<string, IdemRecord>(idemRecord),
-    state: domainTable<'main', StateRecord>(stateRecord),
+    assistant: domainTable<'main', AssistantRecord>(assistantRecord),
+    halt: domainTable<'main', HaltRecord>(haltRecord),
   },
 })
 
