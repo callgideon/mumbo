@@ -78,11 +78,14 @@ jobs:
       - name: Install (immutable)
         run: pnpm install --frozen-lockfile
 
-      # Sandbox tests need bubblewrap; spill and helper-permission tests expect umask 0022.
+      # Sandbox tests need bubblewrap; the script adds it to GITHUB_PATH, which later steps see.
+      - name: Prepare bubblewrap
+        run: bash scripts/prepare-ci-bubblewrap.sh
+
+      # Spill and helper-permission tests expect umask 0022.
       - name: Run unit tests
         env:
           DSH_COVERAGE_TEST_TIMEOUT_MS: '90000'
         run: |
           umask 0022
-          bash scripts/prepare-ci-bubblewrap.sh
           pnpm run check:ci:unit
