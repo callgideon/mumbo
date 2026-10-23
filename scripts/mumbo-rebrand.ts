@@ -33,6 +33,13 @@ const RULES: Array<[file: string, from: string, to: string]> = [
   ['packages/client/ui-conversation/src/client/skeleton/EmptyHero.tsx', 'fallback: <HeroFish hovering={hovering} />', 'fallback: false && <HeroFish hovering={hovering} />'],
   // Desktop: the overlay disables the DeepSeek account plugin, so its RPC 404s; read that as signed out.
   ['apps/desktop/src/welcome-backend.ts', "loggedIn: (await account.state()).status === 'credential-stored',", "loggedIn: await account.state().then(s => s.status === 'credential-stored', () => false),"],
+  // Web: the sidebar account comes from the sign-in gate (brand/assets GateAccountMenu.tsx), with gate sign-out.
+  ['packages/client/ui-settings-account/src/client/index.ts', "import { AccountMenu } from './AccountMenu.tsx'", "import { AccountMenu } from './AccountMenu.tsx'\nimport { GateAccountMenu } from './GateAccountMenu.tsx'"],
+  ['packages/client/ui-settings-account/src/client/index.ts', '  }, AccountMenu))', '  }, desktop ? AccountMenu : GateAccountMenu))'],
+  // "Contact us" opens a DeepSeek feedback form.
+  ['packages/client/ui-settings-account/src/client/AccountMenu.tsx', "        { id: 'contact', label: t('contactUs'), icon: <IconPaperPlaneOutlineMedium size={16} /> },", "        ...(Boolean(0) ? [{ id: 'contact', label: t('contactUs'), icon: <IconPaperPlaneOutlineMedium size={16} /> }] : []),"],
+  // Web opens chats in the same compact view as Desktop.
+  ['packages/client/ui-chat/src/client/apply.ts', "'dshDesktop' in globalThis ? 'standard' : DEFAULT_TRANSCRIPT_VIEW_MODE", "'standard' satisfies typeof DEFAULT_TRANSCRIPT_VIEW_MODE"],
 ]
 
 const TEXT_ROOTS = ['packages', 'apps', 'scripts/client-build-environment.ts']
