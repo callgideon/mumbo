@@ -6789,7 +6789,7 @@ SHA-256: `ab7ec5f9eb2c6dfacca5da4c37cf7ba85d04172053ee6b1ebf1709ffcd99c1a7`
 
 SHA-256: `4df7c2fce00219492a19802ad2fc3ef8741defb459cc8bdb7619961cdd89f4d5`
 
-来源：[`packages/mumbo/mcp/src/conversation.ts:15`](../packages/mumbo/mcp/src/conversation.ts)
+来源：[`packages/mumbo/mcp/src/conversation.ts:17`](../packages/mumbo/mcp/src/conversation.ts)
 
 | 属性 | 存在性 | 类型 |
 |---|---|---|

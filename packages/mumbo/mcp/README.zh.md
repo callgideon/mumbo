@@ -66,6 +66,8 @@ kind: "package-reference"
 | `task_reply` | `ask_id`、`request_id`、`decision`（`approve` 或 `reject`）、`answers`（`[{id, selected, custom}]`）、`feedback` | `{ok: true}` |
 | `task_status` | 无 | `{assistant_session, halted, projections, children: [{id, label, status}], worktrees}` |
 | `task_result` | `branch`（`^[A-Za-z0-9._/-]{1,100}$`，不含 `..`，不以 `-` 开头）、`page`（整数，至少为 0，默认 0） | `{page, pages, diff}` |
+| `runs_halt` | `request_id` | `{halted: true, cancelled: {sessions, jobs}, failed: [{job, message}]}` |
+| `runs_resume` | `request_id` | `{halted: false}` |
 
 `agent_send` 把文本作为助手会话的一个 follow-up 轮次排队，source 为 `{kind: "mcp", principal}`；`after_seq` 是此前记录的最后一个事件。同一 principal 在 24 小时内重复同一 `request_id` 时返回首次结果且不再发送；参数不同则应答 `request_id_reused`。
 
@@ -75,7 +77,9 @@ kind: "package-reference"
 
 `task_status` 报告助手会话 id、暂停标志、以包裹后的 JSON 表示的助手会话 `todos`、`goal`、`plan` 与 `subagentCatalog` projection、其直接子会话（已加载时 `status` 为 `idle` 或 `running`，否则为 `unloaded`），以及在 `assistantCwd` 中执行 `git worktree list --porcelain` 的已包裹输出。`task_result` 返回在 `assistantCwd` 中执行 `git diff HEAD...<branch>` 的结果，即该分支自从当前检出的 `HEAD` 分叉以来的改动，按每页 65,536 个字符分页并包裹；`pages` 至少为 1。git 不认识的分支应答 `not_found`，超出最后一页的 page 应答 `invalid`。其他 git 失败以 git 的消息应答。
 
-助手会话就是插件所存 id 对应的会话：首次调用在 `assistantCwd` 工作区中创建它并命名为 `assistantTitle`，之后只有当所存会话已不存在时，调用才会创建新会话。该 id 与按 request id 保存的结果位于 `mumbo_mcp` 存储域中；超过 24 小时的结果在加载时清理。
+`runs_halt` 先存储暂停状态，然后以 cause `{kind: "hook", reason: "runs_halt"}` 取消每个已加载 Agent 的轮次并保留其排队消息，再终止所有无主或属于已加载会话的运行中后台任务；`cancelled.sessions` 列出原本在运行的会话，`failed` 列出终止时抛错的每个任务，其余任务照常终止。暂停期间，插件在 `agent/pre-step` 链中最先拒绝每个会话提出的每个模型步骤，`agent_send` 应答 `halted`。`runs_resume` 存储暂停结束；它不会重启被取消的轮次。暂停在主机重启后仍然有效。两者都接受 `request_id`，与 `agent_send` 一样，重试时返回首次结果。
+
+助手会话就是插件所存 id 对应的会话：首次调用在 `assistantCwd` 工作区中创建它并命名为 `assistantTitle`，之后只有当所存会话已不存在时，调用才会创建新会话。该 id、暂停标志与按 request id 保存的结果位于 `mumbo_mcp` 存储域中；超过 24 小时的结果在加载时清理。
 
 <a id="dedicated-listener-composition"></a>
 ## 专用监听器组合
@@ -103,11 +107,12 @@ Web profile 自己的监听器服务 UI。把第二个 `dsh-host-webserver` 和�
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **密钥验证的是 relay，而不是人**：任何能读取密钥文件的进程都可以充当任一白名单 principal；白名单限制的是名字，而不是调用方。
+- **密钥验证的是 relay，而不是人**：主机用户的任何能读取密钥文件的进程都可以以任一白名单 principal 的身份调用该路由，包括 `runs_halt` 与 `runs_resume`；白名单限制的是名字，而不是调用方。
 - **无 TLS**：监听器必须留在 loopback；远程的人经由 SSH 等经过身份验证的 relay 访问它。
 - **轮换密钥需要重新加载**：插件只在加载时读取一次密钥文件。
 - **仅 JSON**：没有服务器主动发起的消息、`GET` 流或 MCP 会话。
 - **经 MCP 应答的请求会让浏览器卡片保持打开**：链的其余部分不会被取消，因此卡片会保留到其请求结束。
+- **被拒绝的步骤会消耗其认领的消息**：暂停期间，唤醒会话的消息会被认领给被闸门拒绝的步骤，`runs_resume` 之后不会再投递；需要重新发送。
 - **`agent_read` 读取整个助手日志**：每次读取都取一页直到最新事件的历史，因此其开销随会话增长。
 
 <a id="dev-note"></a>

@@ -6787,7 +6787,7 @@ Sources: [`packages/core/session/src/types.ts:215`](../packages/core/session/src
 
 SHA-256: `4df7c2fce00219492a19802ad2fc3ef8741defb459cc8bdb7619961cdd89f4d5`
 
-Sources: [`packages/mumbo/mcp/src/conversation.ts:15`](../packages/mumbo/mcp/src/conversation.ts)
+Sources: [`packages/mumbo/mcp/src/conversation.ts:17`](../packages/mumbo/mcp/src/conversation.ts)
 
 | Property | Presence | Type |
 |---|---|---|

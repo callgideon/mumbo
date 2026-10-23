@@ -79,6 +79,6 @@ describe('real Loader composition', () => {
     })
     expect(response.status).toBe(200)
     const body = await response.json() as { result: { tools: { name: string }[] } }
-    expect(body.result.tools.map(tool => tool.name)).toEqual(['agent_send', 'agent_read', 'needs_you', 'task_reply', 'task_status', 'task_result'])
+    expect(body.result.tools.map(tool => tool.name)).toEqual(['agent_send', 'agent_read', 'needs_you', 'task_reply', 'task_status', 'task_result', 'runs_halt', 'runs_resume'])
   })
 })

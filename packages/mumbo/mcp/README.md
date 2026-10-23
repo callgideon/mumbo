@@ -66,6 +66,8 @@ Every tool acts as the principal named by `x-mcp-principal`. A result is one tex
 | `task_reply` | `ask_id`, `request_id`, `decision` (`approve` or `reject`), `answers` (`[{id, selected, custom}]`), `feedback` | `{ok: true}` |
 | `task_status` | none | `{assistant_session, halted, projections, children: [{id, label, status}], worktrees}` |
 | `task_result` | `branch` (`^[A-Za-z0-9._/-]{1,100}$`, without `..` or a leading `-`), `page` (integer, at least 0, default 0) | `{page, pages, diff}` |
+| `runs_halt` | `request_id` | `{halted: true, cancelled: {sessions, jobs}, failed: [{job, message}]}` |
+| `runs_resume` | `request_id` | `{halted: false}` |
 
 `agent_send` queues the text as a follow-up turn of the assistant Session with source `{kind: "mcp", principal}`; `after_seq` is the last event logged before it. The same `request_id` from the same principal within 24 hours returns the first result and sends nothing; with other arguments it answers `request_id_reused`.
 
@@ -75,7 +77,9 @@ Every tool acts as the principal named by `x-mcp-principal`. A result is one tex
 
 `task_status` reports the assistant Session id, the halt flag, the assistant Session's `todos`, `goal`, `plan`, and `subagentCatalog` projections as fenced JSON, its direct children with `status` `idle` or `running` while loaded and `unloaded` otherwise, and the fenced output of `git worktree list --porcelain` in `assistantCwd`. `task_result` returns `git diff HEAD...<branch>` in `assistantCwd`, the changes the branch made since it forked from the checked-out `HEAD`, in fenced pages of 65,536 characters; `pages` is at least 1. A branch git does not know answers `not_found`, and a page past the last answers `invalid`. Any other git failure is answered with git's message.
 
-The assistant Session is the one whose id the plugin stored: the first call creates it in the `assistantCwd` workspace and titles it `assistantTitle`, and a later call creates a new one only when the stored Session no longer exists. The id and the request-id results live in the `mumbo_mcp` storage domain; results older than 24 hours are pruned at load.
+`runs_halt` stores the halt, then cancels every loaded Agent's turn with cause `{kind: "hook", reason: "runs_halt"}`, keeping its queued messages, and kills every running background job that is unowned or owned by a loaded Session; `cancelled.sessions` lists the Sessions that were running, and `failed` lists each job whose kill threw while the others are still killed. While halted, the plugin rejects every proposed model step of every Session, first in the `agent/pre-step` chain, and `agent_send` answers `halted`. `runs_resume` stores the end of the halt; it does not restart cancelled turns. The halt survives a host restart. Both take a `request_id` and repeat their first result for a retried one, like `agent_send`.
+
+The assistant Session is the one whose id the plugin stored: the first call creates it in the `assistantCwd` workspace and titles it `assistantTitle`, and a later call creates a new one only when the stored Session no longer exists. The id, the halt flag, and the request-id results live in the `mumbo_mcp` storage domain; results older than 24 hours are pruned at load.
 
 <a id="dedicated-listener-composition"></a>
 ## Dedicated listener composition
@@ -103,11 +107,12 @@ Append-only. The message follows the Session's existing history, so the reusable
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **The key authenticates the relay, not the person** — any process that can read the key file can act as any allowlisted principal; the allowlist limits names, not callers.
+- **The key authenticates the relay, not the person** — any process of the host user that can read the key file can call the route as any allowlisted principal, `runs_halt` and `runs_resume` included; the allowlist limits names, not callers.
 - **No TLS** — the listener must stay on loopback; remote people reach it through an authenticated relay such as SSH.
 - **Key rotation needs a reload** — the plugin reads the key file once at load.
 - **JSON only** — there are no server-initiated messages, `GET` streams, or MCP sessions.
 - **An ask answered over MCP leaves its browser card open** — the rest of the chain is not cancelled, so the card stays until its request ends.
+- **A rejected step consumes its claimed messages** — while halted, a message that wakes a Session is claimed by the step the gate rejects and is not delivered after `runs_resume`; send it again.
 - **`agent_read` reads the whole assistant log** — each read takes one history page through the latest event, so its cost grows with the Session.
 
 <a id="dev-note"></a>
