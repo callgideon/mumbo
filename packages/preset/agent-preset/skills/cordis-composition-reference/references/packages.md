@@ -318,6 +318,12 @@ Every package below exports a Cordis plugin that a bundle patch can name in a Lo
 | `@deepseek-ai/dsh-mcp-client` | yes | MCP client bridge: connects to MCP servers and registers their tools on ctx.tools |
 | `@deepseek-ai/dsh-mcp-resources` | no | Scoped MCP resource discovery and reading through shared model tools |
 
+## mumbo
+
+| Package | Config | Description |
+|---|---|---|
+| `@mumbo/mcp` | yes | Authenticated loopback MCP server for a running DeepSeek Harness web host |
+
 ## plan
 
 | Package | Config | Description |

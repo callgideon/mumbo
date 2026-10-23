@@ -4585,6 +4585,31 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-workspace-changes -->
 
+<!-- BEGIN GENERATED config-catalog:@mumbo/mcp -->
+<a id="mumbomcp"></a>
+
+## `@mumbo/mcp`
+
+- `inject`: `webServer` · `storageDomain` · `sessionController` · `workspaceRegistry` · `agents` · `subagents` · `jobs` · `sessionProjections` · `subprocess`
+- `source`: [`packages/mumbo/mcp/src/index.ts:42`](../packages/mumbo/mcp/src/index.ts)
+
+```ts config-catalog
+/** MCP door configuration. */
+export interface Config {
+  /** File holding the bearer key; surrounding whitespace is ignored and an empty key fails load. */
+  readonly keyFile: string
+  /** Principal handles allowed to call, each matching `^[a-z][a-z0-9-]{0,31}$`. */
+  readonly allowlist: string[]
+  /** Title of the assistant Session the tools talk to. */
+  readonly assistantTitle: string
+  /** Workspace directory of the assistant Session. */
+  readonly assistantCwd: string
+  /** Tool names whose approval only a person in the browser may give. */
+  readonly irreversibleTools: string[]
+}
+```
+<!-- END GENERATED config-catalog:@mumbo/mcp -->
+
 ## 无配置的可加载插件
 
 这些插件通过 `cordis.yml` 中不含 `config:` 块的条目加载；它们未声明任何配置接口。

@@ -1,0 +1,49 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/mumbo/mcp/README.md
+/:
+  en: d7fc01bcc890d4f7
+  zh: 58c08c5a05e4953a
+/mumbo-mcp:
+  en: e0fe6706934b8eaf
+  zh: 015038f1415988e3
+/mumbo-mcp/summary:
+  en: 201d7f55a3123881
+  zh: 7f126e5bb46df6a1
+/mumbo-mcp/table-of-contents:
+  en: 4dd05819c7c16040
+  zh: 35700f5facd70344
+/mumbo-mcp/configuration:
+  en: 04852e283e6e8802
+  zh: 3924d8092820649f
+/mumbo-mcp/http-contract:
+  en: 125cc56db3d031fe
+  zh: b061bee3007b58d3
+/mumbo-mcp/tools:
+  en: b12097da5ee09fb8
+  zh: ab311cfe444ed78c
+/mumbo-mcp/dedicated-listener-composition:
+  en: 5eb7e99a7f6aadc6
+  zh: 1c2d37ad91cfb510
+/mumbo-mcp/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/mumbo-mcp/model-experience/mcp-message:
+  en: 956ef818ab048244
+  zh: 9c24138adf242c95
+/mumbo-mcp/model-experience/mcp-message/what-the-model-sees:
+  en: b04756248fd51c25
+  zh: d8604aa6f3633f11
+/mumbo-mcp/model-experience/mcp-message/token-effect:
+  en: f9db5c16d9517df3
+  zh: 866c954f602cbaff
+/mumbo-mcp/model-experience/mcp-message/kv-cache-effect:
+  en: 250194b7bf8c6b3f
+  zh: 881d43036d58e62d
+/mumbo-mcp/known-limitations-and-deferred-work:
+  en: e55fbd7246db0424
+  zh: b0b2a506cf67b419
+/mumbo-mcp/known-limitations-and-deferred-work/dev-note:
+  en: e67f633dc6fe7773
+  zh: e88aeb617ffb74ea

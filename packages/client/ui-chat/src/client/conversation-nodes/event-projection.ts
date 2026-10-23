@@ -68,10 +68,12 @@ export function contextProducer(source: unknown): ContextProducerView {
       return { role: 'inject', label: joined(collect(record, 'changes', 'path')) ?? kind }
     case 'skill-invocation':
       return { role: 'inject', label: readString(record, 'name') ?? kind }
-    default:
+    default: {
       // MessageSourceMap is merge-extensible; keep an unknown producer
-      // visible by its durable kind.
-      return { role: 'inject', label: kind }
+      // visible by its durable kind, and name the person when it records one.
+      const principal = readString(record, 'principal')
+      return { role: 'inject', label: principal === null ? kind : `${kind}:${principal}` }
+    }
   }
 }
 
