@@ -401,6 +401,8 @@ export function checkExperimentalNameExceptions(manifests: readonly WorkspaceMan
 function isReleaseMemberDirectory(dir: string): boolean {
   // The SSH carrier is distributed as executable archives, never as an npm application.
   if (dir === 'packages/ssh/ssh-helper-runtime') return false
+  // Fork-local packages load by path from a built release and are never published to npm.
+  if (dir.startsWith('packages/mumbo/')) return false
   return standardReleaseMemberDirectory.test(dir) || isPublicExperimentalPackageDirectory(dir)
 }
 
