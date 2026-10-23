@@ -103,6 +103,10 @@
     <button class="link" id="back" type="button">Use a different email</button>
   </form>
 
+  <section class="stack" id="signed-out" hidden>
+    <button class="primary" type="button" onclick="location.replace('/')">Sign in again</button>
+  </section>
+
   <p id="msg" role="status" aria-live="polite"></p>
   <footer>New here? Signing in creates your account.</footer>
 </main>
@@ -196,6 +200,15 @@ $('back').addEventListener('click', () => {
 })
 
 ;(async () => {
+  // The app's Sign out ends the gate session first, then lands here to drop this page's session.
+  if (new URLSearchParams(location.search).has('signout')) {
+    await sb.auth.signOut({ scope: 'local' })
+    $('start').hidden = true
+    $('signed-out').hidden = false
+    $('title').textContent = 'You’re signed out'
+    $('subtitle').textContent = 'See you soon.'
+    return
+  }
   if (!authorizationId) return say('Open mumbo from its address to sign in.')
   const { data } = await sb.auth.getSession()
   if (data.session) return authorize()
