@@ -301,7 +301,6 @@
   padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
   box-sizing: border-box;
   background: var(--dsw-specific-sidebar-fill);
-  border-right: 0.5px solid var(--dsw-alias-border-l3);
   box-shadow: var(--dsw-elevation-prominent);
   transition: transform var(--ds-transition-duration-slow) var(--ds-ease-in-out);
 }
