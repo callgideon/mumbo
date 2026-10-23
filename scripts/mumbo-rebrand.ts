@@ -23,6 +23,8 @@ const brand = JSON.parse(readFileSync('brand/brand.json', 'utf8')) as {
 
 const RULES: Array<[file: string, from: string, to: string]> = [
   ['apps/desktop/scripts/electron-builder-config.mjs', 'artifactName: `deepseek-harness-', `artifactName: \`${brand.artifactPrefix}-`],
+  // Packaged app.name (crash reports, macOS app menu, userData folder) comes from the manifest productName.
+  ['apps/desktop/scripts/electron-builder-config.mjs', 'dshDesktopAppId: appId,', `productName: '${brand.productName}', dshDesktopAppId: appId,`],
   ['apps/desktop/scripts/desktop-package-environment.mjs', "'com.deepseek.harness'", `'${brand.appId}'`],
   ['apps/desktop/scripts/desktop-auto-update-environment.mjs', "'https://download.deepseek.com'", `'${brand.updateOrigin}'`],
   ['apps/web/public/manifest.webmanifest', '"short_name": "DSH"', `"short_name": "${brand.shortName}"`],
