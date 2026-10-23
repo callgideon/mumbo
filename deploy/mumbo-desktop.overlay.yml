@@ -1,0 +1,17 @@
+# Desktop overlay, appended to packages/bundle/web-app/cordis.patch.yml by .github/workflows/mumbo-desktop.yml.
+# "Sign in" uses a mumbo account: the account protocol and model requests go to the mumbo gateway
+# (deploy/gateway.mjs on api.mumbo.si), never to DeepSeek's platform. API-key access stays available.
+# A patch replaces a row's whole config, so the deepseek-account row restates desktopPlatform from the base bundle.
+- id: deepseek-account
+  config:
+    desktopPlatform: !!js "ctx.get('profileContext')?.name === 'desktop' && ['darwin', 'win32'].includes(process.platform) ? process.platform : null"
+    platformOrigin: https://api.mumbo.si
+    inferenceOrigin: https://api.mumbo.si
+- id: llm-deepseek-account
+  config:
+    baseURL: https://api.mumbo.si/anthropic
+# Desktop-only product analytics; there is no mumbo collector yet.
+- id: desktop-product-telemetry
+  disabled: true
+- id: product-analytics
+  disabled: true

@@ -27,6 +27,8 @@ http {
       proxy_pass_request_body off;
     }
     location = /oauth/consent { alias /tmp/auth-ui/index.html; default_type text/html; add_header Cache-Control no-store; }
+    # Desktop sign-in: the login page hands the Supabase session to the account gateway (deploy/gateway.mjs).
+    location = /dsh/approve { proxy_pass http://127.0.0.1:4300; }
     location /auth-ui/ { alias /tmp/auth-ui/; add_header Cache-Control no-store; }
     # Only page navigations start a sign-in; scripts and API calls get 401 instead of each starting its own.
     location @login {
@@ -42,6 +44,19 @@ http {
       proxy_set_header Host $http_host;
       proxy_set_header Upgrade $http_upgrade;
       proxy_set_header Connection $connection_upgrade;
+      proxy_read_timeout 3600s;
+    }
+  }
+  # API host: the desktop account gateway (sign-in protocol and model requests), not the web app.
+  server {
+    listen 3080;
+    server_name @API_HOST@;
+    client_max_body_size 64m;
+    location / {
+      proxy_pass http://127.0.0.1:4300;
+      proxy_http_version 1.1;
+      proxy_buffering off;
+      proxy_request_buffering off;
       proxy_read_timeout 3600s;
     }
   }

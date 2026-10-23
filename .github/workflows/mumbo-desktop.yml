@@ -20,12 +20,12 @@ jobs:
         with:
           node-version: '24'
       - run: pnpm install --frozen-lockfile
-      - name: Mumbo branding and no DeepSeek account/analytics
+      - name: mumbo branding, mumbo account sign-in, no analytics
         run: |
           pnpm exec tsx scripts/mumbo-rebrand.ts
           pnpm exec tsx scripts/mumbo-egress-check.ts
-          # Bake the web overlay into the bundle the desktop app loads.
-          { echo; cat deploy/mumbo.overlay.yml; } >> packages/bundle/web-app/cordis.patch.yml
+          # Bake the desktop overlay into the bundle the desktop app loads.
+          { echo; cat deploy/mumbo-desktop.overlay.yml; } >> packages/bundle/web-app/cordis.patch.yml
       - run: pnpm run package:desktop:mac:arm64:unsigned
       - uses: actions/upload-artifact@v4
         with:
