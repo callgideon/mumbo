@@ -16,6 +16,9 @@
     },
     {
       "path": "../../host/webserver"
+    },
+    {
+      "path": "../../storage/storage-domain"
     }
   ]
 }

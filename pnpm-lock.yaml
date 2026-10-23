@@ -11549,6 +11549,9 @@ importers:
       '@modelcontextprotocol/server':
         specifier: 2.2.0
         version: 2.2.0
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:~
@@ -11565,6 +11568,15 @@ importers:
       '@deepseek-ai/dsh-host-webserver':
         specifier: workspace:*
         version: link:../../host/webserver
+      '@deepseek-ai/dsh-storage':
+        specifier: workspace:*
+        version: link:../../storage/storage
+      '@deepseek-ai/dsh-storage-domain':
+        specifier: workspace:*
+        version: link:../../storage/storage-domain
+      '@deepseek-ai/dsh-storage-json':
+        specifier: workspace:*
+        version: link:../../storage/storage-json
       '@modelcontextprotocol/client':
         specifier: 2.2.0
         version: 2.2.0
