@@ -176,6 +176,17 @@ describe('maintained repository reference policy', () => {
     ])
   })
 
+  it('checks generated uv lockfiles for the organization URL but not for commit-shaped sizes and digests', () => {
+    const commits = new Set(['1234567'])
+    for (const file of ['uv.lock', 'python/sdk/uv.lock']) {
+      expect(findRepositoryReferences(file, 'size = 1234567', commits)).toEqual([])
+      expect(findRepositoryReferences(file, organizationUrl, commits)).toEqual([{ file, line: 1, kind: 'organization-url' }])
+    }
+    expect(findRepositoryReferences('docs/uv.lock.md', 'size = 1234567', commits)).toEqual([
+      { file: 'docs/uv.lock.md', line: 1, kind: 'commit-hash' },
+    ])
+  })
+
   it.skipIf(process.platform === 'win32')('inspects dangling symlink targets without following files outside the tree', (test) => {
     const fixture = repository(test)
     symlinkSync(`../${fixture.commit}`, join(fixture.root, 'reference-link'))
