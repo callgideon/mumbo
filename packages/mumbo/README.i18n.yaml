@@ -1,0 +1,25 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/mumbo/README.md
+/:
+  en: d0bfd2104cfe97f3
+  zh: a47ec1a5107cfb31
+/mumbo-reach-a-running-host-from-your-own-tools:
+  en: 7a1382a9b3c11efc
+  zh: 3e1f62aa8c4202af
+/mumbo-reach-a-running-host-from-your-own-tools/summary:
+  en: 150476aa78f3c75c
+  zh: 9f61f831e819a8f3
+/mumbo-reach-a-running-host-from-your-own-tools/table-of-contents:
+  en: 1eb35b015a6c423f
+  zh: a8a3dceee2c9e943
+/mumbo-reach-a-running-host-from-your-own-tools/packages:
+  en: 3fcfb07a00eda206
+  zh: 813b8428dc6d5858
+/mumbo-reach-a-running-host-from-your-own-tools/related-documentation:
+  en: fdf8745cfbc9d4d4
+  zh: cf0106897fe3785b
+/mumbo-reach-a-running-host-from-your-own-tools/dev-note:
+  en: b75c8458928b72b9
+  zh: 003ba4e17b4b5269
