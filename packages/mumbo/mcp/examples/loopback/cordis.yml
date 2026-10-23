@@ -1,0 +1,20 @@
+# MCP door on its own loopback listener. The group isolates only webServer, so
+# /mcp never shares the Web UI listener; every other service is inherited.
+- id: mumbo-mcp-ingress
+  name: cordis:group
+  group: true
+  isolate:
+    webServer: true
+  config:
+    - id: mumbo-mcp-listener
+      name: '@deepseek-ai/dsh-host-webserver'
+      config:
+        host: '127.0.0.1'
+        port: !!js Number(process.env.MUMBO_MCP_PORT ?? 3092)
+
+    - id: mumbo-mcp
+      name: '@mumbo/mcp'
+      config:
+        keyFile: !!js process.env.MUMBO_MCP_KEY_FILE
+        allowlist: [ann]
+        assistantCwd: !!js process.env.MUMBO_MCP_ASSISTANT_CWD

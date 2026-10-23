@@ -4583,6 +4583,31 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-workspace-changes -->
 
+<!-- BEGIN GENERATED config-catalog:@mumbo/mcp -->
+<a id="mumbomcp"></a>
+
+## `@mumbo/mcp`
+
+- `inject`: `webServer`
+- `source`: [`packages/mumbo/mcp/src/index.ts:20`](../packages/mumbo/mcp/src/index.ts)
+
+```ts config-catalog
+/** MCP door configuration. */
+export interface Config {
+  /** File holding the bearer key; surrounding whitespace is ignored and an empty key fails load. */
+  readonly keyFile: string
+  /** Principal handles allowed to call, each matching `^[a-z][a-z0-9-]{0,31}$`. */
+  readonly allowlist: string[]
+  /** Title of the assistant Session the tools talk to. */
+  readonly assistantTitle: string
+  /** Workspace directory of the assistant Session. */
+  readonly assistantCwd: string
+  /** Tool names whose approval only a person in the browser may give. */
+  readonly irreversibleTools: string[]
+}
+```
+<!-- END GENERATED config-catalog:@mumbo/mcp -->
+
 ## Loadable plugins with no config
 
 These load from a `cordis.yml` entry with no `config:` block; they declare no configuration API.
