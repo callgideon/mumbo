@@ -55,6 +55,8 @@ export interface Host {
   readonly agents: Map<string, FakeAgent>
   /** Session ids whose resolve fails with `session/writer-held`. */
   readonly held: Set<string>
+  /** `resolveAgent` waits for `hold.promise` before it answers. */
+  readonly hold: { promise: Promise<void> }
   /** Subagent catalog rows by parent Session id. */
   readonly children: Map<string, object[]>
   /** Jobs the fake job registry lists. */
@@ -98,6 +100,7 @@ export async function startHost(options: { keyText?: string; allowlist?: string[
   const calls: string[] = []
   const agents = new Map<string, FakeAgent>()
   const held = new Set<string>()
+  const hold = { promise: Promise.resolve() }
   const addAgent = (id: string): FakeAgent => {
     const log: FakeEvent[] = []
     const agent: FakeAgent = { id, session: { id, get seq() { return log.length } }, log, status: 'idle', followup: vi.fn(), cancel: vi.fn() }
@@ -122,6 +125,7 @@ export async function startHost(options: { keyText?: string; allowlist?: string[
   ctx.provide('sessionController', {
     resolveAgent: async (sessionId: string) => {
       calls.push(`resolve:${sessionId}`)
+      await hold.promise
       if (held.has(sessionId)) return { error: Object.assign(new Error('writer held'), { code: 'session/writer-held' }) }
       const agent = agents.get(sessionId)
       return agent === undefined
@@ -152,7 +156,7 @@ export async function startHost(options: { keyText?: string; allowlist?: string[
     assistantCwd: root,
     irreversibleTools: ['deploy'],
   } satisfies McpDoor.Config
-  return { ctx, root, config, url: `${ctx.webServer.getOrigin()}/mcp`, calls, agents, held, children, jobs, kill, projections, addAgent }
+  return { ctx, root, config, url: `${ctx.webServer.getOrigin()}/mcp`, calls, agents, held, hold, children, jobs, kill, projections, addAgent }
 }
 
 /**

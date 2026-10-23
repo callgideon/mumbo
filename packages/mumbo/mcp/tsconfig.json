@@ -51,6 +51,9 @@
       "path": "../../subprocess/subprocess"
     },
     {
+      "path": "../../util/brand"
+    },
+    {
       "path": "../../workspace/workspace"
     }
   ]

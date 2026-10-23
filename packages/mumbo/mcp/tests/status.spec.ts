@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { access, mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as McpDoor from '../src/index.ts'
@@ -41,7 +41,7 @@ async function door(): Promise<{ host: Host; repo: string }> {
 }
 
 describe('task_status', () => {
-  it('reports the assistant Session, the halt flag, its projections and worktrees fenced, and its children with live status', async () => {
+  it('reports the assistant Session, the halt flag, its projections, worktrees and child labels fenced, and its children with live status', async () => {
     const { host, repo } = await door()
     await call(host.url, 'task_status', {})
     host.children.set('s1', [
@@ -55,18 +55,19 @@ describe('task_status', () => {
 
     const reply = await call(host.url, 'task_status', {})
     expect(reply.isError).toBe(false)
-    const value = reply.value as { projections: string; worktrees: string }
+    const value = reply.value as { projections: string; worktrees: string; children: { label?: string }[] }
     expect(value).toEqual({
       assistant_session: 's1',
       halted: false,
       projections: expect.any(String) as string,
       children: [
-        { id: 'c1', label: 'build', status: 'running' },
+        { id: 'c1', label: expect.any(String) as string, status: 'running' },
         { id: 'c2', status: 'unloaded' },
-        { id: 'c3', label: 'lint', status: 'idle' },
+        { id: 'c3', label: expect.any(String) as string, status: 'idle' },
       ],
       worktrees: expect.any(String) as string,
     })
+    expect(value.children.flatMap(({ label }) => label === undefined ? [] : [unfence(label)])).toEqual(['build', 'lint'])
     expect(JSON.parse(unfence(value.projections))).toEqual({ todos: [{ text: 'ship' }], goal: null, plan: { active: false }, subagentCatalog: [] })
     expect(unfence(value.worktrees)).toBe(git(repo, 'worktree', 'list', '--porcelain'))
   })
@@ -82,7 +83,7 @@ describe('task_status', () => {
 })
 
 describe('task_result', () => {
-  it('pages the diff a branch makes since it forked from HEAD in fenced 64 KiB pages', async () => {
+  it('pages the diff a branch makes since it forked from HEAD in fenced pages of 65,536 characters', async () => {
     const { host, repo } = await door()
     const first = await call(host.url, 'task_result', { branch: 'feature' })
     const second = await call(host.url, 'task_result', { branch: 'feature', page: 1 })
@@ -98,6 +99,27 @@ describe('task_result', () => {
     const reply = await call(host.url, 'task_result', { branch: 'main' })
     expect(reply.value).toEqual({ page: 0, pages: 1, diff: expect.any(String) as string })
     expect(unfence((reply.value as { diff: string }).diff)).toBe('')
+  })
+
+  it('runs no textconv driver or fsmonitor the checkout configures', async () => {
+    const { host, repo } = await door()
+    const marker = join(host.root, 'ran')
+    const program = `sh -c 'touch ${marker}; cat "$0"'`
+    for (const key of ['diff.probe.textconv', 'core.fsmonitor']) git(repo, 'config', key, program)
+    await writeFile(join(repo, '.git', 'info', 'attributes'), '* diff=probe\n')
+    const expected = git(repo, '-c', 'core.fsmonitor=false', 'diff', '--no-textconv', 'HEAD...feature')
+    await call(host.url, 'task_status', {})
+    const reply = await call(host.url, 'task_result', { branch: 'feature', page: 1 })
+    expect(unfence((reply.value as { diff: string }).diff)).toBe(expected.slice(65_536))
+    await expect(access(marker)).rejects.toThrow()
+  })
+
+  it('ignores git repository selectors in the host environment', async () => {
+    const { host, repo } = await door()
+    const expected = git(repo, 'diff', 'HEAD...feature').slice(0, 65_536)
+    vi.stubEnv('GIT_DIR', join(host.root, 'elsewhere'))
+    const reply = await call(host.url, 'task_result', { branch: 'feature' })
+    expect(unfence((reply.value as { diff: string }).diff)).toBe(expected)
   })
 
   it('answers an unknown branch with code not_found', async () => {

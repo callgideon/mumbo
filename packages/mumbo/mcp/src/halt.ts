@@ -2,7 +2,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
-import type {} from '@deepseek-ai/dsh-jobs'
+import type { JobId } from '@deepseek-ai/dsh-jobs'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type { McpServer } from '@modelcontextprotocol/server'
@@ -24,17 +24,18 @@ export function isHalted(halt: KvTable<'main', HaltRecord>): boolean {
 
 /**
  * Reject every proposed model step of every Session while runs are halted. The gate runs first in the
- * `agent/pre-step` chain, so no other step listener runs for a rejected step; it lives as long as `ctx`.
+ * `agent/pre-step` chain, so no other step listener runs for a rejected step.
  * @param ctx - plugin context.
- * @param halt - the plugin's `halt` table.
+ * @param halt - the plugin's `halt` table, which must stay readable until the gate is removed.
+ * @returns the disposer that removes the gate.
  */
-export function gateWhileHalted(ctx: Context, halt: KvTable<'main', HaltRecord>): void {
-  ctx.on('agent/pre-step', (_payload, next) => isHalted(halt) ? Promise.resolve({ kind: 'reject' as const }) : next(), { prepend: true })
+export function gateWhileHalted(ctx: Context, halt: KvTable<'main', HaltRecord>): () => void {
+  return ctx.on('agent/pre-step', (_payload, next) => isHalted(halt) ? Promise.resolve({ kind: 'reject' as const }) : next(), { prepend: true })
 }
 
 /** A job whose kill threw, with the error. */
 interface FailedKill {
-  readonly job: string
+  readonly job: JobId
   readonly message: string
 }
 
@@ -44,8 +45,8 @@ interface FailedKill {
  * @param owners - the live Sessions.
  * @returns the jobs asked to stop, and the ones whose kill threw.
  */
-function killJobs(ctx: Context, owners: readonly SessionId[]): { killed: string[]; failed: FailedKill[] } {
-  const killed: string[] = []
+function killJobs(ctx: Context, owners: readonly SessionId[]): { killed: JobId[]; failed: FailedKill[] } {
+  const killed: JobId[] = []
   const failed: FailedKill[] = []
   for (const owner of [undefined, ...owners]) {
     for (const job of ctx.jobs.list(owner)) {
@@ -72,9 +73,9 @@ export function register(server: McpServer, deps: ToolDeps): void {
     'runs_halt',
     'Stop all work on the host now: the halt is stored, every running Session turn is cancelled with its queued messages kept, '
     + 'every running background job is killed, and no Session starts a model step until runs_resume. '
-    + 'agent_send answers halted meanwhile. Returns what was cancelled and any job whose kill failed.',
+    + 'Returns what was cancelled and any job whose kill failed.',
     z.object({ request_id: requestId('halt') }),
-    async args => await once(deps.idem, 'runs_halt', `${deps.principal}/${args.request_id}`, args, async () => {
+    async args => await once(deps.idem, 'runs_halt', deps.principal, args.request_id, args, async () => {
       // Close the gate first, so a cancelled turn cannot start another step.
       await deps.halt.put('main', { halted: true })
       const agents = deps.ctx.agents.list()
@@ -87,9 +88,9 @@ export function register(server: McpServer, deps: ToolDeps): void {
   defineTool(
     server,
     'runs_resume',
-    'End a halt: Sessions may start model steps again and agent_send works. Cancelled turns do not restart by themselves.',
+    'End a halt: Sessions may start model steps again. Cancelled turns do not restart by themselves.',
     z.object({ request_id: requestId('resume') }),
-    async args => await once(deps.idem, 'runs_resume', `${deps.principal}/${args.request_id}`, args, async () => {
+    async args => await once(deps.idem, 'runs_resume', deps.principal, args.request_id, args, async () => {
       await deps.halt.put('main', { halted: false })
       return JSON.stringify({ halted: false })
     }),
