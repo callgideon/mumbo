@@ -225,6 +225,8 @@ export function findViolations(
     const target = pathPart(url)
     const resolved = target === '' ? absPath : resolve(dir, target)
     if (!cache.exists(resolved)) {
+      // Mumbo deletes upstream's GitHub workflows; links to them from upstream docs are expected to dangle.
+      if (relative(scanRoot, resolved).startsWith('.github/workflows/')) continue
       out.push({ file, line, url, reason: 'target' })
       continue
     }
