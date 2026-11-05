@@ -130,7 +130,7 @@ export class SandboxedFileSystem extends LocalFileSystem {
     target: FsTarget, hunks: Parameters<LocalFileSystem['patchText']>[1], expected?: { version: FsVersion },
     signal?: AbortSignal, sandboxPolicy?: SandboxExecutionPolicy,
   ): Promise<FsEditOutcome> {
-    return super.patchText(await this.checkedTarget(target, sandboxPolicy), hunks, expected, signal)
+    return super.patchText(await this.checkedTarget(target, sandboxPolicy, 'write'), hunks, expected, signal)
   }
 
   /**
@@ -140,7 +140,7 @@ export class SandboxedFileSystem extends LocalFileSystem {
   override async deleteFile(
     target: FsTarget, expected?: { version: FsVersion }, signal?: AbortSignal, sandboxPolicy?: SandboxExecutionPolicy,
   ): Promise<FsDeleteOutcome> {
-    return super.deleteFile(await this.checkedTarget(target, sandboxPolicy), expected, signal)
+    return super.deleteFile(await this.checkedTarget(target, sandboxPolicy, 'write'), expected, signal)
   }
 
   /**
@@ -151,8 +151,8 @@ export class SandboxedFileSystem extends LocalFileSystem {
     source: FsTarget, destination: FsTarget, options: Parameters<LocalFileSystem['moveFile']>[2],
     signal?: AbortSignal, sandboxPolicy?: SandboxExecutionPolicy,
   ): Promise<FsMoveOutcome> {
-    const checkedSource = await this.checkedTarget(source, sandboxPolicy)
-    const checkedDestination = await this.checkedTarget(destination, sandboxPolicy)
+    const checkedSource = await this.checkedTarget(source, sandboxPolicy, 'write')
+    const checkedDestination = await this.checkedTarget(destination, sandboxPolicy, 'write')
     return super.moveFile(checkedSource, checkedDestination, options, signal)
   }
 

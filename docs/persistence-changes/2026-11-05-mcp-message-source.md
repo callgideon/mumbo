@@ -3,9 +3,9 @@ description: "Records a persistence type transition and its compatibility acknow
 kind: persistence-change
 ---
 
-# 2026-10-23-mcp-message-source
+# 2026-11-05-mcp-message-source
 
-English | [中文](2026-10-23-mcp-message-source.zh.md)
+English | [中文](2026-11-05-mcp-message-source.zh.md)
 
 ## Summary
 
@@ -23,24 +23,24 @@ Adds the mcp message source: a user message an allowlisted person sent through t
 
 ```yaml persistence-change
 schemaVersion: 1
-id: 2026-10-23-mcp-message-source
+id: 2026-11-05-mcp-message-source
 baseline: false
 changes:
   - root: "event:agent/inbox/spliced"
-    previous: "2026-10-13-user-rpc-principal"
-    after: "32bb18c82053221f1c275ddecc88711f2520a2bfe8bb745fea65ed955b33e353"
+    previous: "2026-10-27-retry-control-input"
+    after: "ac9cd191a7434ef0964ce1598f0881b4b2c8beabea02a7df6cacabde017d1162"
     decision: same-version
   - root: "event:developer/message"
-    previous: "2026-10-13-user-rpc-principal"
-    after: "a226c7c957f9eb496a92fb3b132797325468a2a754d41a317e2f985474a81325"
+    previous: "2026-10-27-retry-control-input"
+    after: "94ced8dbc80cd7d35eb508b5b2784c87f94b1900594d5ae2242685f860f53509"
     decision: same-version
   - root: "event:session/title-llm-request"
-    previous: "2026-10-13-user-rpc-principal"
-    after: "d93853442c28d0bd3523c19374449a0ce11fcedf74ca1d89ae13c700f0a9ef98"
+    previous: "2026-10-27-retry-control-input"
+    after: "8e938d968d77d8bd97c62ab9c16113518d2f0d43c946059855cdd6887d757002"
     decision: same-version
   - root: "event:user/message"
-    previous: "2026-10-13-user-rpc-principal"
-    after: "42b59da9feb7097bd2ccb03dc3b689c3036f3a8244409d57a79bb662afd3a141"
+    previous: "2026-10-27-retry-control-input"
+    after: "349ba8a544d17196a4d447994432d2ab71df1539e4b37d985f03f424594c5d03"
     decision: same-version
 ```
 

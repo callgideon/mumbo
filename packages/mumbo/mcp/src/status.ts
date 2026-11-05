@@ -5,7 +5,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-projection'
-import type {} from '@deepseek-ai/dsh-subagent'
+import type { SubagentCatalogEntry } from '@deepseek-ai/dsh-subagent'
 import type { SubprocessCollectedOutputs } from '@deepseek-ai/dsh-subprocess'
 import type { McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
@@ -64,16 +64,13 @@ export interface ChildStatus {
 }
 
 /**
- * The direct children of a Session from its subagent catalog, with each one's live Agent status.
- * @param ctx - context carrying `subagents` and `agents`.
- * @param sessionId - the parent Session.
- * @param signal - cancels the catalog read.
+ * The direct children in a Session's subagent catalog, with each one's live Agent status.
+ * @param ctx - context carrying `agents`.
+ * @param catalog - the Session's `subagentCatalog` projection; absent means no children.
  * @returns the children in catalog order.
- * @throws the subagent service's error when the catalog cannot be read.
  */
-export async function listChildren(ctx: Context, sessionId: SessionId, signal?: AbortSignal): Promise<ChildStatus[]> {
-  const children = await ctx.subagents.listChildren(sessionId, signal)
-  return children.map(child => ({
+export function listChildren(ctx: Context, catalog: readonly SubagentCatalogEntry[] | undefined): ChildStatus[] {
+  return (catalog ?? []).map(child => ({
     id: child.id,
     label: child.label === undefined ? undefined : fence(child.label),
     status: ctx.agents.get(child.id)?.status ?? 'unloaded',
@@ -159,7 +156,7 @@ export function register(server: McpServer, deps: ToolDeps): void {
         assistant_session: agent.id,
         halted: isHalted(deps.halt),
         projections: fence(JSON.stringify(Object.fromEntries(Object.entries(values).filter(([key]) => PROJECTIONS.has(key))))),
-        children: await listChildren(deps.ctx, agent.id, signal),
+        children: listChildren(deps.ctx, values.subagentCatalog),
         worktrees: fence(worktrees.text),
       })
     },

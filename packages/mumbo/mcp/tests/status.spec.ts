@@ -44,14 +44,15 @@ describe('task_status', () => {
   it('reports the assistant Session, the halt flag, its projections, worktrees and child labels fenced, and its children with live status', async () => {
     const { host, repo } = await door()
     await call(host.url, 'task_status', {})
-    host.children.set('s1', [
+    const catalog = [
       { id: 'c1', createdAt: 1, mode: 'continuable', label: 'build' },
       { id: 'c2', createdAt: 2, mode: 'one-shot' },
       { id: 'c3', createdAt: 3, mode: 'one-shot', label: 'lint' },
-    ])
+    ]
+    host.children.set('s1', catalog)
     host.addAgent('c1').status = 'running'
     host.addAgent('c3')
-    Object.assign(host.projections, { todos: [{ text: 'ship' }], goal: null, plan: { active: false }, subagentCatalog: [], inbox: ['private'] })
+    Object.assign(host.projections, { todos: [{ text: 'ship' }], goal: null, plan: { active: false }, inbox: ['private'] })
 
     const reply = await call(host.url, 'task_status', {})
     expect(reply.isError).toBe(false)
@@ -68,7 +69,7 @@ describe('task_status', () => {
       worktrees: expect.any(String) as string,
     })
     expect(value.children.flatMap(({ label }) => label === undefined ? [] : [unfence(label)])).toEqual(['build', 'lint'])
-    expect(JSON.parse(unfence(value.projections))).toEqual({ todos: [{ text: 'ship' }], goal: null, plan: { active: false }, subagentCatalog: [] })
+    expect(JSON.parse(unfence(value.projections))).toEqual({ todos: [{ text: 'ship' }], goal: null, plan: { active: false }, subagentCatalog: catalog })
     expect(unfence(value.worktrees)).toBe(git(repo, 'worktree', 'list', '--porcelain'))
   })
 
