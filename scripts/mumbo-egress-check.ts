@@ -11,6 +11,8 @@ const ALLOWED_HOSTS = new Set(['api.deepseek.com'])
 const ALLOWED_FILES = [
   'packages/credentials/deepseek-account-platform/',
   'apps/desktop/scripts/',
+  // Upstream's release-upload templates (placeholder buckets and keys); no Mumbo build reads them.
+  'apps/desktop/config/publishing/',
   'packages/client/ui-settings-web-search/',
   'packages/llm/llm-deepseek/src/image-tokens.ts',
   'packages/test-support/',
