@@ -8,14 +8,6 @@ body,
   margin: 0;
 }
 
-/* Touch screens: the Web entry publishes the visual viewport height, which
-   excludes an open on-screen keyboard (apps/web/src/main.ts). */
-@media (pointer: coarse) {
-  #root {
-    height: var(--dsh-visual-height, 100%);
-  }
-}
-
 body {
   font-family: var(
     --dsw-font-family,
@@ -95,6 +87,13 @@ html[data-platform='darwin'] :is(
   [role='slider'], [role='combobox'], [role='textbox']
 ) {
   -webkit-app-region: no-drag;
+}
+
+/* Reset both native region types for inert content. Chromium treats the explicit
+   `none` keyword as `no-drag`, which would erase foreground drag rows. */
+html[data-platform='darwin'] [inert],
+html[data-platform='darwin'] [inert] * {
+  -webkit-app-region: initial;
 }
 
 code,

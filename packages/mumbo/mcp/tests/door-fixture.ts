@@ -112,10 +112,10 @@ export async function startHost(options: { keyText?: string; allowlist?: string[
   const kill = vi.fn<(id: string, caller?: string, reason?: string) => void>()
   const projections: Record<string, unknown> = {}
   ctx.provide('agents', { list: () => [...agents.values()], get: (id: string) => agents.get(id) } as never)
-  ctx.provide('subagents', { listChildren: async (id: string) => children.get(id) ?? [] } as never)
+  ctx.provide('subagents', {} as never)
   // Like the real registry, a caller sees its own jobs and the unowned ones.
   ctx.provide('jobs', { list: (caller?: string) => jobs.filter(job => job.owner === undefined || job.owner === caller), kill } as never)
-  ctx.provide('sessionProjections', { snapshot: () => ({ asOfSeq: 0, values: projections }) } as never)
+  ctx.provide('sessionProjections', { snapshot: (session: { id: string }) => ({ asOfSeq: 0, values: { ...projections, subagentCatalog: children.get(session.id) } }) } as never)
   ctx.provide('workspaceRegistry', {
     create: async (path: string) => {
       calls.push(`workspace:${path}`)
