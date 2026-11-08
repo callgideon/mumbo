@@ -1,0 +1,38 @@
+# Front door + edge for the boxes trial, beside E2B on the same host. Host networking keeps :8080/:8081/:4180
+# on loopback; only Caddy's :80/:443 are reachable. Secrets arrive in .env, written by up.sh from SSM.
+name: mumbo-edge
+services:
+  caddy:
+    image: caddy:2.10.2
+    network_mode: host
+    restart: unless-stopped
+    env_file: .env
+    volumes: [./Caddyfile:/etc/caddy/Caddyfile:ro, caddy-data:/data]
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.9.0
+    network_mode: host
+    restart: unless-stopped
+    env_file: .env
+    command:
+      - --provider=oidc
+      - --oidc-issuer-url=${OAUTH_ISSUER_URL}
+      - --redirect-url=https://${PUBLIC_HOST}/oauth2/callback
+      - --scope=openid email
+      - --code-challenge-method=S256
+      - --cookie-secure=true
+      - --cookie-samesite=lax
+      - --cookie-csrf-per-request=true
+      - --cookie-csrf-expire=10m
+      - --reverse-proxy=true
+      - --pass-user-headers=true
+      - --skip-provider-button=true
+      - --email-domain=*
+      - --upstream=http://127.0.0.1:8080
+      - --http-address=127.0.0.1:4180
+  edge:
+    build: .
+    network_mode: host
+    restart: unless-stopped
+    env_file: .env
+volumes:
+  caddy-data:

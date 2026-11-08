@@ -1,0 +1,17 @@
+# TLS front door for the boxes trial. Certificates come from Let's Encrypt; both names must resolve to this host.
+{
+	email {$ACME_EMAIL}
+}
+
+{$PUBLIC_HOST} {
+	reverse_proxy 127.0.0.1:4180 {
+		flush_interval -1
+	}
+}
+
+{$LLM_HOST} {
+	reverse_proxy 127.0.0.1:8081 {
+		flush_interval -1
+		header_up X-Forwarded-For {remote_host}
+	}
+}
