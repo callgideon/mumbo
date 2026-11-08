@@ -169,3 +169,14 @@ test('model host swaps the box token for the server key, checks ownership, sourc
   assert.equal((await call(port, { method: 'POST', path: '/anthropic/v1/messages', headers: { ...from, 'x-api-key': tok } })).status, 429)
   s.close()
 })
+
+test('after a restart the edge adopts running boxes and backs them up on the next sweep', async () => {
+  const e2b = fakeE2B(); const ran = []
+  e2b.Sandbox.list = () => ({ hasNext: true, nextItems: async function () { this.hasNext = false; return [{ sandboxId: 'old', state: 'running', metadata: { user: 'a@x.com' } }, { sandboxId: 'stray', state: 'running', metadata: {} }] } })
+  e2b.Sandbox.connect = async (id) => ({ sandboxId: id, commands: { run: async (c) => { ran.push(c); return { stdout: '' } } } })
+  const b = boxes({ e2b, cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'PUT', log: () => {} })
+  await b.adoptRunning()
+  assert.deepEqual([...b.state.keys()], ['old'])
+  await b.sweep()
+  assert.ok(ran.some(c => c.includes("'PUT'")))
+})

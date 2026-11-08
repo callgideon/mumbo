@@ -204,7 +204,16 @@ export function boxes({ e2b, cfg, edgeKey, presignGet, presignPut, log = console
       }
     }
   }
-  return { ensure, touch, owns, sweep, forget: (id) => state.delete(id), state }
+  /** After an edge restart, take over every running box so backups and idle pauses continue. */
+  async function adoptRunning(now = Date.now()) {
+    for (const b of await all({ state: ['running'] })) {
+      const email = b.metadata?.user
+      if (!email || state.has(b.sandboxId)) continue
+      state.set(b.sandboxId, { email, launch: undefined, traffic: undefined, active: now, extended: 0, backedUp: 0, paused: false })
+      say({ msg: 'adopted', user: email, box: b.sandboxId })
+    }
+  }
+  return { ensure, touch, owns, sweep, adoptRunning, forget: (id) => state.delete(id), state }
 }
 
 // ---- HTTP plumbing
@@ -332,6 +341,7 @@ async function main() {
     return getSignedUrl(s3, new GetObjectCommand({ Bucket: cfg.bucket, Key: key }), { expiresIn: 900 })
   }
   const box = boxes({ e2b, cfg, edgeKey, presignGet, presignPut })
+  await box.adoptRunning()
   setInterval(() => box.sweep().catch(e => console.error('edge: sweep', e.message)), 60_000).unref()
   userServer({ cfg, box }).listen(8080, '127.0.0.1', () => console.log('edge: users on 127.0.0.1:8080'))
   modelServer({ cfg, edgeKey, modelKey, allow: budget(cfg.dailyRequests), owns: box.owns, touch: box.touch })
