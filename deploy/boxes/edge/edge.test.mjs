@@ -61,7 +61,7 @@ test('box start script carries only the box token, aimed at the model host', () 
   assert.match(start, /DEEPSEEK_BASE_URL=https:\/\/llm\.example\/anthropic/)
   assert.match(start, /DEEPSEEK_SEARCH_BASE_URL=https:\/\/llm\.example /)
   assert.match(start, /--trusted-host boxes\.example/)
-  assert.match(backupCommand('U'), /pipefail.*--exclude=node_modules.*-T - 'U'/)
+  assert.match(backupCommand('U'), /--exclude=node_modules.*--upload-file "\$f" 'U'/)
 })
 
 test('allowlist takes exact addresses and @domains, and admits nobody when empty', () => {
@@ -112,7 +112,7 @@ test('idle boxes are backed up, then paused; their tokens stop working', async (
   const b = boxes({ e2b, cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'PUT', log: () => {} })
   const { id } = await b.ensure('a@x.com')
   await b.sweep(Date.now() + cfg.idleMs + 1)
-  assert.ok(ran.some(c => c.includes("-T - 'PUT'")))
+  assert.ok(ran.some(c => c.includes("--upload-file \"$f\" 'PUT'")))
   assert.deepEqual(paused, [id])
   assert.equal(await b.owns('a@x.com', id), false)
 })

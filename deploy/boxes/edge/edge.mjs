@@ -71,8 +71,9 @@ nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\
   --no-open --host "$ip" --port 3080 --public-url https://${cfg.publicHost}/ --trusted-host ${cfg.publicHost} > /root/dsh.log 2>&1 &
 `
 }
-/** Stream chats and projects to a presigned S3 PUT. Runs inside the box; extraction on restore also stays inside. */
-export const backupCommand = (url) => `set -o pipefail; tar -C / --exclude=node_modules --exclude='*.sqlite-wal' --exclude='*.sqlite-shm' -czf - root/.dsh root/projects | curl -fsS -m 600 -X PUT -H 'content-type: application/gzip' -T - '${url}'`
+/** Upload chats and projects to a presigned S3 PUT. Runs inside the box; S3 refuses a streamed (chunked) body,
+ *  so the archive goes to a temporary file first. Extraction on restore also stays inside the box. */
+export const backupCommand = (url) => `set -e; f=$(mktemp /tmp/mumbo-backup.XXXXXX); trap 'rm -f "$f"' EXIT; tar -C / --exclude=node_modules --exclude='*.sqlite-wal' --exclude='*.sqlite-shm' -czf "$f" root/.dsh root/projects; curl -fsS -m 600 -X PUT -H 'content-type: application/gzip' --upload-file "$f" '${url}'`
 export const restoreCommand = (url) => `curl -fsS -m 600 '${url}' | tar -C / -xzf -`
 
 // ---- the router's view of E2B. `e2b` is the SDK module, injected so tests can fake it.
@@ -192,7 +193,10 @@ export function boxes({ e2b, cfg, edgeKey, presignGet, presignPut, log = console
       if (s.paused) continue
       const idle = now - s.active >= cfg.idleMs
       if (idle || now - s.backedUp >= cfg.backupEveryMs) {
-        await withLock(s.email, () => backup(id)).catch(e => say({ level: 'error', msg: 'backup failed', user: s.email, box: id, error: e.message }))
+        await withLock(s.email, () => backup(id)).catch((e) => {
+          s.backedUp = now - cfg.backupEveryMs + 5 * 60_000  // retry in 5 minutes, not on every sweep
+          say({ level: 'error', msg: 'backup failed', user: s.email, box: id, error: e.message })
+        })
       }
       if (idle) {
         await withLock(s.email, () => e2b.Sandbox.pause(id)).then(() => { s.paused = true; say({ msg: 'paused', user: s.email, box: id }) },
@@ -321,7 +325,7 @@ async function main() {
   const ssm = new SSMClient({ region })
   const edgeKey = (await ssm.send(new GetParameterCommand({ Name: env('EDGE_SECRET_PARAM', '/mumbo/boxes/edge-secret'), WithDecryption: true }))).Parameter.Value
   const modelKey = (await new SecretsManagerClient({ region }).send(new GetSecretValueCommand({ SecretId: env('MODEL_KEY_SECRET', 'mumbo/prod/deepseek-api-key') }))).SecretString
-  const s3 = new S3Client({ region })
+  const s3 = new S3Client({ region, requestChecksumCalculation: 'WHEN_REQUIRED' })  // presigned for curl, which sends no checksum
   const presignPut = (key) => getSignedUrl(s3, new PutObjectCommand({ Bucket: cfg.bucket, Key: key, ContentType: 'application/gzip' }), { expiresIn: 900 })
   const presignGet = async (key) => {
     try { await s3.send(new HeadObjectCommand({ Bucket: cfg.bucket, Key: key })) } catch (e) { if (e.name === 'NotFound') return undefined; throw e }
