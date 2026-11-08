@@ -24,6 +24,8 @@ module "e2b" {
   source       = "github.com/e2b-dev/runtime//embed/terraform/aws?ref=aa7739834e3e3384c8fd1a526adf251c7751d76d"
   name         = "mumbo-boxes-trial"
   client_cidrs = var.client_cidrs
+  # 8 GiB of the 16 GiB host for guest memory; 11 GiB starved the host's own memory once ~20 VMs ran.
+  hugepages = 4096
   tags         = { project = "mumbo", component = "boxes", stage = "trial" }
 }
 
