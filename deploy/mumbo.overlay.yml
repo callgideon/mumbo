@@ -12,6 +12,12 @@
   disabled: true
 - id: product-analytics
   disabled: true
+# No session-log upload to DeepSeek on model requests.
+- id: session-log-deepseek
+  disabled: true
+# It would name the running release as the harness checkout.
+- id: harness-dev-context
+  disabled: true
 # Fargate allows neither bubblewrap nor Landlock, so `workspace-write` refuses every command.
 # Commands run in Full access with an ask per command; the container is the boundary (owner-accepted, 2026-11-08).
 - id: sandbox-policy

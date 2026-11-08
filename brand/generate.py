@@ -230,5 +230,5 @@ for i in range(60):
     s = big * 0.78 / m_w
     draw_m(ImageDraw.Draw(img), (big - m_w * s) / 2, (big - m_h * s) / 2 - phase * k, s, (0, alpha))
     frames.append(img.resize((28, 28), Image.LANCZOS))
-target = OUT / 'packages/client/ui-chat/src/client/chat/running-whale@2x.png'
+target = OUT / 'packages/client/ui-chat/src/client/assets/running-whale@2x.png'
 frames[0].save(target, save_all=True, append_images=frames[1:], duration=50, loop=0, format='PNG')

@@ -8,9 +8,3 @@
 - id: spill-local
   config:
     root: !!js process.env.DSH_HOME + '/spill'
-# No session-log suffix on model requests.
-- id: session-log-deepseek
-  disabled: true
-# It would name the running release as the harness checkout.
-- id: harness-dev-context
-  disabled: true
