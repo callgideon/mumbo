@@ -35,6 +35,7 @@ const fs = new efs.FileSystem(stack, 'Data', { vpc, encrypted: true, removalPoli
 // Invite-only email login through Supabase Auth acting as an OIDC provider (see deploy/auth-ui). The container
 // reads generic SUPABASE_* / OAUTH_* variables, so self-hosted Supabase or another OIDC provider needs no image change.
 // Context: -c supabaseUrl=https://<ref>.supabase.co (default: the Mumbo project) -c allowedEmails=a@x,b@y and/or -c allowedDomains=x.com (or -c auth=off).
+// -c gatewayEmails=a@x,@team.io lists who may use the desktop gateway (deploy/gateway.mjs); unset = nobody.
 const authOff = app.node.tryGetContext('auth') === 'off'
 const allowed = (app.node.tryGetContext('allowedEmails') ?? app.node.tryGetContext('allowedDomains')) as string | undefined
 if (!authOff && !allowed) throw new Error('pass -c allowedEmails=a@x,b@y and/or -c allowedDomains=x.com, or -c auth=off')
@@ -50,7 +51,7 @@ const container = task.addContainer('web', {
   image: ecs.ContainerImage.fromEcrRepository(repo, env),
   logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'web' }),
   portMappings: [{ containerPort: 3080 }],
-  environment: { MUMBO_PUBLIC_HOST: appHost, MUMBO_EXTRA_TRUSTED_HOST: apiHost, DEEPSEEK_BASE_URL: 'https://api.deepseek.com/anthropic', MUMBO_AUTH: authOff ? 'off' : 'oidc', OAUTH_ALLOWED_EMAILS: (app.node.tryGetContext('allowedEmails') as string | undefined) ?? '', OAUTH_ALLOWED_DOMAINS: (app.node.tryGetContext('allowedDomains') as string | undefined) ?? '', SUPABASE_URL: supabaseUrl, OAUTH_ISSUER_URL: `${supabaseUrl}/auth/v1` },
+  environment: { MUMBO_PUBLIC_HOST: appHost, MUMBO_EXTRA_TRUSTED_HOST: apiHost, DEEPSEEK_BASE_URL: 'https://api.deepseek.com/anthropic', MUMBO_AUTH: authOff ? 'off' : 'oidc', OAUTH_ALLOWED_EMAILS: (app.node.tryGetContext('allowedEmails') as string | undefined) ?? '', OAUTH_ALLOWED_DOMAINS: (app.node.tryGetContext('allowedDomains') as string | undefined) ?? '', GATEWAY_ALLOWED_EMAILS: (app.node.tryGetContext('gatewayEmails') as string | undefined) ?? '', SUPABASE_URL: supabaseUrl, OAUTH_ISSUER_URL: `${supabaseUrl}/auth/v1` },
   secrets: {
     DEEPSEEK_API_KEY: ecs.Secret.fromSecretsManager(apiKey),
     OAUTH_CLIENT_SECRET: param('oauth-client-secret'),

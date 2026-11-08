@@ -126,7 +126,7 @@ const returnUrl = `${location.origin}${location.pathname}?authorization_id=${enc
 
 async function authorize() {
   say('Signing you in…')
-  // Desktop app sign-in (deploy/gateway.mjs): open to any account, unlike the web app gate.
+  // Desktop app sign-in (deploy/gateway.mjs): limited to GATEWAY_ALLOWED_EMAILS, separately from the web app gate.
   if (authorizationId.startsWith('dsh.')) {
     const { data } = await sb.auth.getSession()
     const response = await fetch('/dsh/approve', { method: 'POST', headers: { 'content-type': 'application/json' },

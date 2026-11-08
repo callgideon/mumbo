@@ -1,7 +1,8 @@
 // mumbo account gateway on the API host: speaks the desktop account protocol of
 // @deepseek-ai/dsh-deepseek-account-platform (platformOrigin) and llm-deepseek-account (inference).
-// Sign-in uses the Supabase login page at https://<app host>/oauth/consent in desktop mode; anyone with a
-// Supabase account may sign in. Model requests are forwarded to DeepSeek with the server API key.
+// Sign-in uses the Supabase login page at https://<app host>/oauth/consent in desktop mode. Only accounts in
+// GATEWAY_ALLOWED_EMAILS (comma-separated addresses or @domain; unset = nobody) may sign in or send model requests,
+// which are forwarded to DeepSeek with the server API key; the list is re-checked per request, so removing an address revokes it.
 // Stateless: authorize ids, codes and account tokens are HMAC-signed, so tasks need no shared store.
 // ponytail: tokens cannot be revoked before expiry (logout is local only); add a denylist if that matters.
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
@@ -14,6 +15,11 @@ const API = `https://${process.env.MUMBO_API_HOST}`
 const APP = `https://${process.env.MUMBO_PUBLIC_HOST}`
 const UPSTREAM = 'https://api.deepseek.com'
 const TOKEN_TTL = 30 * 86400
+const ALLOWED = (process.env.GATEWAY_ALLOWED_EMAILS ?? '').toLowerCase().split(',').map(e => e.trim()).filter(Boolean)
+export const allowed = (email, list = ALLOWED) => {
+  const e = String(email ?? '').toLowerCase()
+  return e.includes('@') && list.some(a => a === e || (a.startsWith('@') && e.endsWith(a)))
+}
 // The account route reads its catalog here; names come from the bundled (rebranded) catalog.
 const MODELS = { data: [
   { id: 'deepseek-flash', input_modalities: ['text', 'image'], api_capabilities: { anthropic_messages: { system_prompt_update: 'in-history' } } },
@@ -107,6 +113,7 @@ async function handle(req, res) {
     if (!attempt) return json(res, 400, { error: 'This sign-in link expired. Start again from the mumbo app.' })
     const user = typeof b.access_token === 'string' ? await supabaseUser(b.access_token) : undefined
     if (!user) return json(res, 401, { error: 'Sign-in failed. Try again.' })
+    if (!allowed(user.email)) return json(res, 403, { error: 'This account is not enabled for the mumbo desktop app yet.' })
     console.log(JSON.stringify({ gateway: 'sign-in', user: user.id, email: user.email }))
     const code = sign('code', { ch: attempt.ch, ru: attempt.ru, u: user }, 120)
     return json(res, 200, { redirect: `${attempt.ru}?code=${code}&state=${encodeURIComponent(attempt.st)}` })
@@ -129,7 +136,7 @@ async function handle(req, res) {
   if (req.method === 'GET' && path === '/healthz') return json(res, 200, { ok: true })
 
   // Everything below needs a valid account token; 401 makes the app sign out and offer sign-in again.
-  if (!account) return json(res, 401, { code: 40003, msg: 'sign in again' })
+  if (!account || !allowed(account.u.email)) return json(res, 401, { code: 40003, msg: 'sign in again' })
   if (req.method === 'GET' && path === '/auth-api/v0/users/current') return json(res, 200, ok(profile(account.u)))
   if (req.method === 'GET' && path === '/api/v0/users/get_user_summary') return json(res, 200, ok({ normal_wallets: [], bonus_wallets: [] }))
   if (req.method === 'GET' && path === '/api/v0/users/get_unnotified_bonuses') return json(res, 200, ok([]))
@@ -146,6 +153,7 @@ if (process.argv[2] === '--selftest') {
   console.assert(verify('code', `${code.split('.')[0]}.${mac('other')}`) === undefined, 'forged signature')
   console.assert(verify('code', sign('code', {}, -1)) === undefined, 'expired')
   console.assert(loopbackCallback('http://127.0.0.1:5123/oauth/callback') && !loopbackCallback('https://evil.example/oauth/callback'), 'redirect')
+  console.assert(allowed('A@x.com', ['a@x.com']) && allowed('b@team.io', ['@team.io']) && !allowed('b@evilteam.io', ['@team.io']) && !allowed('a@x.com', []), 'allowlist')
   console.log('gateway selftest done')
 } else {
   createServer((req, res) => {
