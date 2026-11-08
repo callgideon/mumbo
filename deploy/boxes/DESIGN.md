@@ -30,7 +30,7 @@ flowchart LR
   R -->|tar · curl to presigned PUT, run in the box| S3[(S3 mumbo-boxes-backup)]
 ```
 
-Code: `edge/edge.mjs` (router and model host in one Node process), `edge/compose.yaml` (Caddy, oauth2-proxy, edge, all on loopback except Caddy), `edge/up.sh` (secrets from SSM into `.env`, then `docker compose up`), `edge.tf` (bucket, IAM, SSM settings, DNS, ports 80/443), `template.mjs` (builds the `mumbo-box` template from a shipped ECR image). For the trial all of this runs on the E2B host.
+Code: `edge/edge.mjs` (router and model host in one Node process), `edge/compose.yaml` (Caddy, oauth2-proxy, edge, all on loopback except Caddy), `edge/up.sh` (secrets from SSM into `.env`, then `docker compose up`), `edge.tf` (bucket, IAM, SSM settings, DNS, ports 80/443), `edge/template.mjs` (builds the `mumbo-box` template from a shipped ECR image). For the trial all of this runs on the E2B host.
 
 ## Flows
 
@@ -105,5 +105,5 @@ E2B's own `onTimeout: pause` (15 minutes later) is the safety net if the edge is
 
 1. `terraform apply` in `deploy/boxes`. This creates the bucket, IAM, SSM settings, DNS for `boxes.mumbo.si` and `llm.boxes.mumbo.si`, and ports 80/443.
 2. In Supabase, create an OAuth client with redirect `https://boxes.mumbo.si/oauth2/callback`, and store it as `/mumbo/boxes/oauth-client-id` and `/mumbo/boxes/oauth-client-secret` (SecureString).
-3. Build the template: `node deploy/boxes/template.mjs <ecr image>`.
+3. Build the template: `node deploy/boxes/edge/template.mjs <ecr image>`.
 4. On the host, as root: fetch `deploy/boxes/edge/` at the deployed commit into `/opt/mumbo-edge` and run `./up.sh`.
