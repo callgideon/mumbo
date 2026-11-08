@@ -15,3 +15,6 @@
   disabled: true
 - id: product-analytics
   disabled: true
+# No session-log upload to DeepSeek on model requests.
+- id: session-log-deepseek
+  disabled: true
