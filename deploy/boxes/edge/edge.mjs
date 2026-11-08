@@ -1,0 +1,337 @@
+// mumbo edge: routes each signed-in user to their own box (an E2B Firecracker VM running `dsh web`),
+// proxies the box's model and search calls with the server key, pauses idle boxes and backs them up to S3.
+// :8080 is reached only through oauth2-proxy (X-Forwarded-Email is trusted); :8081 serves the model host and
+// accepts only box tokens. Design, review fixes and failure handling: deploy/boxes/DESIGN.md.
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
+import { createServer, request as httpRequest } from 'node:http'
+import { Readable } from 'node:stream'
+
+const env = (name, fallback) => process.env[name] ?? fallback ?? (() => { throw new Error(`edge: set ${name}`) })()
+const list = (value) => value.toLowerCase().split(',').map(s => s.trim()).filter(Boolean)
+export const config = () => ({
+  publicHost: env('PUBLIC_HOST'),
+  llmHost: env('LLM_HOST'),
+  template: env('BOX_TEMPLATE', 'mumbo-box'),
+  idleMs: Number(env('IDLE_MINUTES', '30')) * 60_000,
+  backupEveryMs: Number(env('BACKUP_MINUTES', '10')) * 60_000,
+  maxRunning: Number(env('MAX_RUNNING_BOXES', '3')),
+  allowed: list(env('ALLOWED_EMAILS', '')),
+  egressIps: list(env('BOX_EGRESS_IPS', '')),
+  dailyRequests: Number(env('DAILY_MODEL_REQUESTS', '3000')),
+  proxy: new URL(env('E2B_SANDBOX_URL', 'http://127.0.0.1:3002')),
+  bucket: env('BACKUP_BUCKET'),
+  upstream: env('MODEL_UPSTREAM', 'https://api.deepseek.com'),
+})
+
+/** Address or @domain allowlist; an empty list admits nobody. */
+export const admitted = (allowed, email) => allowed.some(a => a === email || (a.startsWith('@') && email.endsWith(a)))
+
+// ---- box tokens: HMAC(EDGE_SECRET) over {u: email, b: box id}. A token is honoured only while b is u's live box.
+const mac = (key, body) => createHmac('sha256', key).update(body).digest('base64url')
+export function signBox(key, email, boxId) {
+  const body = Buffer.from(JSON.stringify({ u: email, b: boxId })).toString('base64url')
+  return `mbx.${body}.${mac(key, body)}`
+}
+export function verifyBox(key, token) {
+  if (typeof token !== 'string') return undefined
+  const [prefix, body, sig, extra] = token.split('.')
+  if (prefix !== 'mbx' || !body || !sig || extra !== undefined) return undefined
+  const expected = Buffer.from(mac(key, body))
+  if (Buffer.byteLength(sig) !== expected.length || !timingSafeEqual(Buffer.from(sig), expected)) return undefined
+  try { return JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) } catch { return undefined }
+}
+export const userPrefix = (email) => `users/${createHash('sha256').update(email.toLowerCase()).digest('hex')}`
+
+// ---- per-user daily request budget. ponytail: in-memory, resets on restart; move to Redis when the edge has replicas.
+export function budget(limit) {
+  const counts = new Map()
+  return (email, now = new Date()) => {
+    const key = `${now.toISOString().slice(0, 10)}|${email}`
+    const n = (counts.get(key) ?? 0) + 1
+    counts.set(key, n)
+    if (counts.size > 50_000) counts.clear()
+    return n <= limit
+  }
+}
+
+// ---- inside a box. It never sees a server secret: its DeepSeek key is its own box token, valid only via LLM_HOST.
+export function startScript(cfg, token) {
+  const llm = `https://${cfg.llmHost}`
+  return `#!/bin/sh
+# Start dsh web for this box's user. Re-runnable: the router calls it again when dsh is found dead.
+set -eu
+pkill -f 'apps/cli/src/bin.ts' 2>/dev/null || true
+ip=$(hostname -I | cut -d' ' -f1)
+mkdir -p /root/projects /root/.dsh
+cd /src
+HOME=/root DSH_HOME=/root/.dsh DSH_TELEMETRY_DISABLED=1 \\
+DEEPSEEK_BASE_URL=${llm}/anthropic DEEPSEEK_SEARCH_BASE_URL=${llm} DEEPSEEK_API_KEY=${token} \\
+nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\
+  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml \\
+  --no-open --host "$ip" --port 3080 --public-url https://${cfg.publicHost}/ --trusted-host ${cfg.publicHost} > /root/dsh.log 2>&1 &
+`
+}
+/** Stream chats and projects to a presigned S3 PUT. Runs inside the box; extraction on restore also stays inside. */
+export const backupCommand = (url) => `set -o pipefail; tar -C / --exclude=node_modules --exclude='*.sqlite-wal' --exclude='*.sqlite-shm' -czf - root/.dsh root/projects | curl -fsS -m 600 -X PUT -H 'content-type: application/gzip' -T - '${url}'`
+export const restoreCommand = (url) => `curl -fsS -m 600 '${url}' | tar -C / -xzf -`
+
+// ---- the router's view of E2B. `e2b` is the SDK module, injected so tests can fake it.
+export function boxes({ e2b, cfg, edgeKey, presignGet, presignPut, log = console.log }) {
+  const locks = new Map()   // email -> in-flight ensure: one box per user even when the first page load fires many requests
+  const state = new Map()   // box id -> { email, launch, traffic, active, extended, backedUp, paused }
+  const withLock = (email, fn) => {
+    const next = (locks.get(email) ?? Promise.resolve()).catch(() => {}).then(fn)
+    locks.set(email, next)
+    next.finally(() => { if (locks.get(email) === next) locks.delete(email) }).catch(() => {})
+    return next
+  }
+  const say = (fields) => log(JSON.stringify({ edge: 'box', ...fields }))
+  const run = (box, cmd, timeoutMs = 60_000) => box.commands.run(cmd, { timeoutMs }).then(r => r.stdout.trim())
+
+  async function all(query) {
+    const pager = e2b.Sandbox.list({ query })
+    const found = []
+    while (pager.hasNext) found.push(...await pager.nextItems())
+    return found
+  }
+  async function find(email) {
+    const found = await all({ metadata: { user: email }, state: ['running', 'paused'] })
+    if (found.length > 1) say({ level: 'warn', msg: 'user has several boxes; using the oldest', user: email, ids: found.map(b => b.sandboxId) })
+    return found.sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt)))[0]
+  }
+  async function launchToken(box) {
+    for (let i = 0; i < 90; i++) {
+      const out = await run(box, "grep -o 'token=[A-Za-z0-9_-]*' /root/dsh.log 2>/dev/null | tail -1 | cut -d= -f2 || true")
+      if (out) return out
+      await new Promise(r => setTimeout(r, 1000))
+    }
+    throw Object.assign(new Error('dsh did not start'), { status: 503 })
+  }
+  const dshUp = async (box) => (await run(box, "curl -s -o /dev/null -m 5 -w '%{http_code}' http://$(hostname -I | cut -d' ' -f1):3080/ || true")) !== '000'
+
+  async function create(email) {
+    if ((await all({ state: ['running'] })).length >= cfg.maxRunning) throw Object.assign(new Error('capacity'), { status: 503, capacity: true })
+    const box = await e2b.Sandbox.create(cfg.template, {
+      timeoutMs: cfg.idleMs + 15 * 60_000, metadata: { user: email },
+      lifecycle: { onTimeout: 'pause', autoResume: true },
+      network: { allowPublicTraffic: false, maskRequestHost: cfg.publicHost },
+    })
+    try {
+      await box.files.write('/root/.mumbo/start.sh', startScript(cfg, signBox(edgeKey, email, box.sandboxId)))
+      const restoreUrl = await presignGet(`${userPrefix(email)}/latest.tar.gz`)
+      if (restoreUrl) {
+        const ok = await run(box, restoreCommand(restoreUrl), 660_000).then(() => true, () => false)
+        say({ msg: 'restore', user: email, box: box.sandboxId, ok })
+      }
+      await run(box, 'chmod +x /root/.mumbo/start.sh && /root/.mumbo/start.sh')
+      const launch = await launchToken(box)
+      state.set(box.sandboxId, { email, launch, traffic: box.trafficAccessToken, active: Date.now(), extended: Date.now(), backedUp: Date.now(), paused: false })
+      say({ msg: 'created', user: email, box: box.sandboxId })
+      return box.sandboxId
+    } catch (error) {
+      await box.kill().catch(() => {})  // nothing in it yet except the restored backup, which stays in S3
+      throw error
+    }
+  }
+
+  /** The user's running box: id, dsh launch token and E2B traffic token. Creates, resumes or repairs as needed. */
+  async function ensure(email) {
+    return withLock(email, async () => {
+      const found = await find(email)   // an API error throws here: never create a second box on a failed lookup
+      if (found === undefined) {
+        const id = await create(email)
+        return pick(id)
+      }
+      const id = found.sandboxId
+      const known = state.get(id)
+      if (found.state === 'paused' || !known || known.paused || !known.launch) {
+        const box = await e2b.Sandbox.connect(id, { timeoutMs: cfg.idleMs + 15 * 60_000 })
+        if (!(await dshUp(box))) {
+          say({ level: 'warn', msg: 'dsh down after resume; restarting', user: email, box: id })
+          await run(box, '/root/.mumbo/start.sh')
+        }
+        state.set(id, { email, launch: await launchToken(box), traffic: box.trafficAccessToken, active: Date.now(), extended: Date.now(), backedUp: known?.backedUp ?? 0, paused: false })
+      }
+      return pick(id)
+    })
+  }
+  const pick = (id) => { const s = state.get(id); return { id, token: s.launch, traffic: s.traffic } }
+
+  /** Record activity (a browser request, a WebSocket frame or a model call) and push E2B's own pause timer out. */
+  function touch(id) {
+    const s = state.get(id)
+    if (!s) return
+    const now = Date.now()
+    s.active = now
+    if (now - s.extended < 60_000) return
+    s.extended = now
+    e2b.Sandbox.setTimeout(id, cfg.idleMs + 15 * 60_000).catch(e => say({ level: 'warn', msg: 'timeout extension failed', box: id, error: e.message }))
+  }
+  /** True when `id` is `email`'s current, running box: a box token outlives neither. After an edge restart the
+   *  box is adopted from E2B, so agent turns keep their model access while nobody has the page open. */
+  async function owns(email, id) {
+    const s = state.get(id)
+    if (s) return s.email === email && !s.paused
+    const found = await find(email)
+    if (found?.sandboxId !== id || found.state !== 'running') return false
+    state.set(id, { email, launch: undefined, traffic: undefined, active: Date.now(), extended: 0, backedUp: 0, paused: false })
+    return true
+  }
+
+  async function backup(id) {
+    const s = state.get(id)
+    const url = await presignPut(`${userPrefix(s.email)}/latest.tar.gz`)
+    const box = await e2b.Sandbox.connect(id, { timeoutMs: cfg.idleMs + 15 * 60_000 })
+    await run(box, backupCommand(url), 660_000)
+    s.backedUp = Date.now()
+    say({ msg: 'backup', user: s.email, box: id })
+  }
+  /** Back up active boxes every BACKUP_MINUTES; back up and pause boxes idle for IDLE_MINUTES. */
+  async function sweep(now = Date.now()) {
+    for (const [id, s] of state) {
+      if (s.paused) continue
+      const idle = now - s.active >= cfg.idleMs
+      if (idle || now - s.backedUp >= cfg.backupEveryMs) {
+        await withLock(s.email, () => backup(id)).catch(e => say({ level: 'error', msg: 'backup failed', user: s.email, box: id, error: e.message }))
+      }
+      if (idle) {
+        await withLock(s.email, () => e2b.Sandbox.pause(id)).then(() => { s.paused = true; say({ msg: 'paused', user: s.email, box: id }) },
+          e => say({ level: 'error', msg: 'pause failed', box: id, error: e.message }))
+      }
+    }
+  }
+  return { ensure, touch, owns, sweep, forget: (id) => state.delete(id), state }
+}
+
+// ---- HTTP plumbing
+const json = (res, status, value) => res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(value))
+const page = (res, status, text, refresh = true) => res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...(refresh ? { refresh: '5' } : {}) })
+  .end(`<!doctype html><meta charset="utf-8"><title>mumbo</title><body style="font-family:system-ui;display:grid;place-items:center;min-height:90vh;margin:0"><p>${text}</p>`)
+const DROP = new Set(['connection', 'keep-alive', 'proxy-connection', 'transfer-encoding', 'upgrade', 'te', 'trailer', 'host', 'authorization'])
+
+/** Headers for the box: client headers minus hop-by-hop, identity and E2B headers, plus E2B routing for this box only. */
+export function boxHeaders(cfg, incoming, target) {
+  const out = {}
+  for (const [k, v] of Object.entries(incoming)) if (!DROP.has(k) && !k.startsWith('x-forwarded-') && !k.startsWith('e2b-')) out[k] = v
+  out.host = `sandbox.${cfg.publicHost}`
+  out['e2b-sandbox-id'] = target.id
+  out['e2b-sandbox-port'] = '3080'
+  if (target.traffic) out['e2b-traffic-access-token'] = target.traffic
+  return out
+}
+/** dsh listens on plain HTTP inside the box, so its cookies lack Secure; the edge adds it. */
+export const secureCookies = (headers) => {
+  const c = headers['set-cookie']
+  if (c) headers['set-cookie'] = c.map(v => /;\s*secure/i.test(v) ? v : `${v}; Secure`)
+  return headers
+}
+/** A browser with no dsh cookie and no token is sent to the token exchange, as nginx did for the shared server. */
+export const needsLaunch = (req) => req.method === 'GET' && !/(?:^|;\s*)dsh-auth-/.test(req.headers.cookie ?? '') && !new URL(req.url, 'http://x').searchParams.has('token')
+const isNavigation = (req) => req.method === 'GET' && String(req.headers.accept ?? '').includes('text/html')
+
+export function userServer({ cfg, box, log = console.log }) {
+  const identify = (req) => String(req.headers['x-forwarded-email'] ?? '').toLowerCase()
+  const server = createServer(async (req, res) => {
+    const email = identify(req)
+    if (!email.includes('@')) return json(res, 401, { error: 'not signed in' })
+    if (!admitted(cfg.allowed, email)) return page(res, 403, 'mumbo boxes are invite-only for now. This account is not on the list yet.', false)
+    let target
+    try { target = await box.ensure(email) } catch (e) {
+      log(JSON.stringify({ edge: 'error', user: email, error: e.message }))
+      return page(res, 503, e.capacity ? 'mumbo is at capacity right now. This page retries every few seconds.' : 'Your mumbo box is starting. This page reloads in a few seconds.')
+    }
+    if (needsLaunch(req)) return res.writeHead(302, { location: `/?token=${target.token}`, 'cache-control': 'no-store' }).end()
+    box.touch(target.id)
+    const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: req.url, headers: boxHeaders(cfg, req.headers, target) }, (r) => {
+      // A stale cookie (another account on this browser, or a recreated box) gets a fresh exchange instead of a dead end.
+      if (r.statusCode === 401 && isNavigation(req)) { r.resume(); return res.writeHead(302, { location: `/?token=${target.token}`, 'cache-control': 'no-store' }).end() }
+      res.writeHead(r.statusCode ?? 502, secureCookies({ ...r.headers }))
+      r.pipe(res)
+    })
+    up.on('error', (e) => { box.forget(target.id); if (!res.headersSent) page(res, 502, 'Could not reach your box. Retrying…'); else res.destroy(); log(JSON.stringify({ edge: 'error', user: email, error: e.message })) })
+    req.pipe(up)
+  })
+  server.on('upgrade', async (req, socket, head) => {
+    const email = identify(req)
+    if (!email.includes('@') || !admitted(cfg.allowed, email)) return socket.destroy()
+    try {
+      const target = await box.ensure(email)
+      box.touch(target.id)
+      const headers = { ...boxHeaders(cfg, req.headers, target), connection: 'Upgrade', upgrade: req.headers.upgrade ?? 'websocket' }
+      const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: req.url, headers })
+      up.on('upgrade', (r, upSocket, upHead) => {
+        socket.write(`HTTP/1.1 101 Switching Protocols\r\n${Object.entries(r.headers).map(([k, v]) => `${k}: ${v}`).join('\r\n')}\r\n\r\n`)
+        if (upHead.length) socket.write(upHead)
+        if (head.length) upSocket.write(head)
+        socket.on('data', () => box.touch(target.id))
+        upSocket.pipe(socket).pipe(upSocket)
+        upSocket.on('error', () => socket.destroy()); socket.on('error', () => upSocket.destroy())
+      })
+      up.on('response', (r) => { socket.end(`HTTP/1.1 ${r.statusCode} ${r.statusMessage}\r\n\r\n`) })
+      up.on('error', () => socket.destroy())
+      up.end()
+    } catch { socket.destroy() }
+  })
+  return server
+}
+
+/** Model and search calls from boxes. Only paths dsh uses are forwarded; the box token is swapped for the server key. */
+export const MODEL_PATHS = [/^\/anthropic\//, /^\/models$/, /^\/v1\/tools\//]
+export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, fetchImpl = fetch, log = console.log }) {
+  return createServer((req, res) => route(req, res).catch((e) => {
+    log(JSON.stringify({ edge: 'error', path: req.url?.split('?')[0], error: e.message }))
+    if (!res.headersSent) json(res, 502, { error: 'edge error' }); else res.destroy()
+  }))
+  async function route(req, res) {
+    const source = String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim()
+    if (cfg.egressIps.length > 0 && !cfg.egressIps.includes(source)) return json(res, 403, { error: 'box tokens work only from mumbo boxes' })
+    const token = req.headers['x-api-key'] ?? String(req.headers.authorization ?? '').replace(/^Bearer /, '')
+    const claim = verifyBox(edgeKey, token)
+    if (!claim || !(await owns(claim.u, claim.b))) return json(res, 401, { error: 'invalid box token' })
+    const path = new URL(req.url, 'http://x').pathname
+    if (!MODEL_PATHS.some(p => p.test(path))) return json(res, 404, { error: 'not found' })
+    if (!allow(claim.u)) return json(res, 429, { type: 'error', error: { type: 'rate_limit_error', message: 'Daily model budget reached for this account.' } })
+    touch(claim.b)
+    const chunks = []
+    for await (const c of req) chunks.push(c)
+    const headers = {}
+    for (const name of ['content-type', 'accept', 'anthropic-version', 'anthropic-beta', 'user-agent']) if (req.headers[name] !== undefined) headers[name] = req.headers[name]
+    headers['x-api-key'] = modelKey
+    headers.authorization = `Bearer ${modelKey}`
+    const started = Date.now()
+    const upstream = await fetchImpl(`${cfg.upstream}${req.url}`, { method: req.method, headers, body: ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks), redirect: 'error' })
+    log(JSON.stringify({ edge: 'model', user: claim.u, box: claim.b, path, status: upstream.status, ms: Date.now() - started }))
+    const out = {}
+    for (const [k, v] of upstream.headers) if (!['content-encoding', 'content-length', 'transfer-encoding', 'connection', 'set-cookie'].includes(k)) out[k] = v
+    res.writeHead(upstream.status, out)
+    if (upstream.body === null) return void res.end()
+    Readable.fromWeb(upstream.body).on('error', () => res.destroy()).pipe(res)
+  }
+}
+
+// ---- process wiring: secrets come from SSM / Secrets Manager through the host's instance role.
+async function main() {
+  const cfg = config()
+  const e2b = await import('e2b')
+  const { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand } = await import('@aws-sdk/client-s3')
+  const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner')
+  const { SSMClient, GetParameterCommand } = await import('@aws-sdk/client-ssm')
+  const { SecretsManagerClient, GetSecretValueCommand } = await import('@aws-sdk/client-secrets-manager')
+  const region = env('AWS_REGION', 'us-east-1')
+  const ssm = new SSMClient({ region })
+  const edgeKey = (await ssm.send(new GetParameterCommand({ Name: env('EDGE_SECRET_PARAM', '/mumbo/boxes/edge-secret'), WithDecryption: true }))).Parameter.Value
+  const modelKey = (await new SecretsManagerClient({ region }).send(new GetSecretValueCommand({ SecretId: env('MODEL_KEY_SECRET', 'mumbo/prod/deepseek-api-key') }))).SecretString
+  const s3 = new S3Client({ region })
+  const presignPut = (key) => getSignedUrl(s3, new PutObjectCommand({ Bucket: cfg.bucket, Key: key, ContentType: 'application/gzip' }), { expiresIn: 900 })
+  const presignGet = async (key) => {
+    try { await s3.send(new HeadObjectCommand({ Bucket: cfg.bucket, Key: key })) } catch (e) { if (e.name === 'NotFound') return undefined; throw e }
+    return getSignedUrl(s3, new GetObjectCommand({ Bucket: cfg.bucket, Key: key }), { expiresIn: 900 })
+  }
+  const box = boxes({ e2b, cfg, edgeKey, presignGet, presignPut })
+  setInterval(() => box.sweep().catch(e => console.error('edge: sweep', e.message)), 60_000).unref()
+  userServer({ cfg, box }).listen(8080, '127.0.0.1', () => console.log('edge: users on 127.0.0.1:8080'))
+  modelServer({ cfg, edgeKey, modelKey, allow: budget(cfg.dailyRequests), owns: box.owns, touch: box.touch })
+    .listen(8081, '127.0.0.1', () => console.log('edge: model host on 127.0.0.1:8081'))
+}
+
+if (process.argv[1] === new URL(import.meta.url).pathname) main().catch((e) => { console.error('edge: fatal', e); process.exit(1) })
