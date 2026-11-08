@@ -23,6 +23,7 @@ export function memoryStore() {
     async listBoxes() { return [...boxes].map(([id, b]) => ({ id, ...b })) },
     async increment(key, ttlSeconds) { const n = (counters.get(key) ?? 0) + 1; counters.set(key, n); void ttlSeconds; return n },
     async lease(key, ttlMs) { return take(key, ttlMs) },
+    async release(key) { leases.delete(key) },
     async withLock(key, ttlMs, fn) {
       for (let waited = 0; !take(`lock:${key}`, ttlMs); waited += 50) {
         if (waited > ttlMs) throw Object.assign(new Error(`lock ${key} busy`), { status: 503 })
@@ -62,6 +63,7 @@ export function redisStore(client) {
       return Number(n)
     },
     async lease(key, ttlMs) { return (await client.set(key, randomUUID(), { NX: true, PX: ttlMs })) === 'OK' },
+    async release(key) { await client.del(key) },
     async withLock(key, ttlMs, fn) {
       const token = randomUUID()
       for (let waited = 0; (await client.set(`lock:${key}`, token, { NX: true, PX: ttlMs })) !== 'OK'; waited += 100) {

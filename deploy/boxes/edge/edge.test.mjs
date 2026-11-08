@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { request } from 'node:http'
-import { signBox, verifyBox, userPrefix, budget, needsLaunch, boxHeaders, boxes, modelServer, userServer, startScript, backupCommand, admitted, secureCookies, albIdentity } from './edge.mjs'
+import { inParallel, signBox, verifyBox, userPrefix, budget, needsLaunch, boxHeaders, boxes, modelServer, userServer, startScript, backupCommand, admitted, secureCookies, albIdentity } from './edge.mjs'
 import { memoryStore, redisStore } from './store.mjs'
 import { generateKeyPairSync, createSign } from 'node:crypto'
 
@@ -236,4 +236,24 @@ test('redis store has the same contract', { skip: !process.env.REDIS_URL && 'set
   assert.ok(await store.lease('l', 1_000)); assert.equal(await store.lease('l', 1_000), false)
   await store.deleteBox('b1'); assert.deepEqual(await store.listBoxes(), [])
   await store.close()
+})
+
+test('a box whose snapshot cannot be resumed is replaced from backup instead of stranding the user', async () => {
+  const e2b = fakeE2B(); const killed = []
+  e2b.made.push({ id: 'broken', opts: {} })
+  e2b.Sandbox.list = (o) => ({ hasNext: true, nextItems: async function () { this.hasNext = false; return o.query.metadata ? e2b.made.filter(m => m.id !== 'gone').map(m => ({ sandboxId: m.id, state: m.id === 'broken' ? 'paused' : 'running', startedAt: m.id })) : [] } })
+  e2b.Sandbox.connect = async () => { throw new Error('snapshot not found in storage') }
+  e2b.Sandbox.kill = async (id) => { killed.push(id); e2b.made = e2b.made.filter(m => m.id !== id); e2b.made.forEach(() => {}) }
+  const b = boxes({ e2b, store: memoryStore(), cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'P', log: () => {} })
+  const r = await b.ensure('a@x.com')
+  assert.deepEqual(killed, ['broken'])
+  assert.notEqual(r.id, 'broken')
+  assert.equal(r.token, 'launch123')
+})
+
+test('inParallel keeps order and never exceeds the limit', async () => {
+  let live = 0, peak = 0
+  const out = await inParallel([1, 2, 3, 4, 5], 2, async (n) => { live++; peak = Math.max(peak, live); await new Promise(r => setTimeout(r, 5)); live--; return n * 2 })
+  assert.deepEqual(out, [2, 4, 6, 8, 10])
+  assert.equal(peak, 2)
 })

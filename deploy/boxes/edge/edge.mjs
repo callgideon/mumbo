@@ -14,7 +14,8 @@ export const config = () => ({
   template: env('BOX_TEMPLATE', 'mumbo-box'),
   idleMs: Number(env('IDLE_MINUTES', '30')) * 60_000,
   backupEveryMs: Number(env('BACKUP_MINUTES', '10')) * 60_000,
-  maxRunning: Number(env('MAX_RUNNING_BOXES', '3')),
+  maxRunning: Number(env('MAX_RUNNING_BOXES', '0')),  // 0: no edge-side cap; E2B's own placement errors decide
+  backupConcurrency: Number(env('BACKUP_CONCURRENCY', '8')),
   allowed: list(env('ALLOWED_EMAILS', '')),
   egressIps: list(env('BOX_EGRESS_IPS', '')),
   dailyRequests: Number(env('DAILY_MODEL_REQUESTS', '3000')),
@@ -69,6 +70,16 @@ nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\
 export const backupCommand = (url) => `set -e; f=$(mktemp /tmp/mumbo-backup.XXXXXX); trap 'rm -f "$f"' EXIT; tar -C / --exclude=node_modules --exclude='*.sqlite-wal' --exclude='*.sqlite-shm' -czf "$f" root/.dsh root/projects; curl -fsS -m 600 -X PUT -H 'content-type: application/gzip' --upload-file "$f" '${url}'`
 export const restoreCommand = (url) => `curl -fsS -m 600 '${url}' | tar -C / -xzf -`
 
+/** Run fn over items with at most `limit` in flight. */
+export async function inParallel(items, limit, fn) {
+  const out = []
+  let next = 0
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) { const i = next++; out[i] = await fn(items[i]) }
+  }))
+  return out
+}
+
 // ---- the router's view of E2B. `e2b` is the SDK module and `store` the shared state (store.mjs); both are injected.
 // A box record: { email, launch, traffic, active, extended, backedUp, paused }.
 export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, log = console.log }) {
@@ -99,12 +110,12 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, log = 
   const dshUp = async (box) => (await run(box, "curl -s -o /dev/null -m 5 -w '%{http_code}' http://$(hostname -I | cut -d' ' -f1):3080/ || true")) !== '000'
 
   async function create(email) {
-    if ((await all({ state: ['running'] })).length >= cfg.maxRunning) throw Object.assign(new Error('capacity'), { status: 503, capacity: true })
+    if (cfg.maxRunning > 0 && (await all({ state: ['running'] })).length >= cfg.maxRunning) throw Object.assign(new Error('capacity'), { status: 503, capacity: true })
     const box = await e2b.Sandbox.create(cfg.template, {
       timeoutMs: timeout(), metadata: { user: email },
       lifecycle: { onTimeout: 'pause', autoResume: true },
       network: { allowPublicTraffic: false, maskRequestHost: cfg.publicHost },
-    })
+    }).catch((e) => { throw /place sandbox|capacity|too many|concurrent/i.test(e.message) ? Object.assign(e, { capacity: true, status: 503 }) : e })
     try {
       await box.files.write('/root/.mumbo/start.sh', startScript(cfg, signBox(edgeKey, email, box.sandboxId)))
       const restoreUrl = await presignGet(`${userPrefix(email)}/latest.tar.gz`)
@@ -131,13 +142,23 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, log = 
       const id = found.sandboxId
       const known = await store.getBox(id)
       if (found.state === 'paused' || !known || known.paused || !known.launch) {
-        const box = await e2b.Sandbox.connect(id, { timeoutMs: timeout() })
-        if (!(await dshUp(box))) {
-          say({ level: 'warn', msg: 'dsh down after resume; restarting', user: email, box: id })
-          await run(box, '/root/.mumbo/start.sh')
+        try {
+          const box = await e2b.Sandbox.connect(id, { timeoutMs: timeout() })
+          if (!(await dshUp(box))) {
+            say({ level: 'warn', msg: 'dsh down after resume; restarting', user: email, box: id })
+            await run(box, '/root/.mumbo/start.sh')
+          }
+          const now = Date.now()
+          await store.putBox(id, { email, launch: await launchToken(box), traffic: box.trafficAccessToken, active: now, extended: now, backedUp: known?.backedUp ?? 0, paused: false })
+        } catch (error) {
+          // A snapshot that cannot be resumed (its node died before the upload finished, or dsh never comes back)
+          // must not strand the user: drop it and rebuild from the latest S3 backup.
+          if (error.capacity || /capacity|place sandbox|rate limit/i.test(error.message)) throw Object.assign(error, { capacity: true })
+          say({ level: 'error', msg: 'resume failed; recreating from backup', user: email, box: id, error: error.message })
+          await e2b.Sandbox.kill(id).catch(() => {})
+          await store.deleteBox(id)
+          return pick(await create(email))
         }
-        const now = Date.now()
-        await store.putBox(id, { email, launch: await launchToken(box), traffic: box.trafficAccessToken, active: now, extended: now, backedUp: known?.backedUp ?? 0, paused: false })
       }
       return pick(id)
     })
@@ -181,29 +202,32 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, log = 
   }
   /** One replica at a time (a store lease): back up active boxes every BACKUP_MINUTES; back up and pause idle ones. */
   async function sweep(now = Date.now()) {
-    if (!(await store.lease('sweep', 55_000))) return
-    await adoptRunning(now).catch(e => say({ level: 'warn', msg: 'adopt failed', error: e.message }))
-    for (const b of await store.listBoxes()) {
-      if (b.paused) continue
-      const idle = now - b.active >= cfg.idleMs
-      if (idle || now - b.backedUp >= cfg.backupEveryMs) {
-        await store.withLock(`user:${b.email}`, LOCK_MS, () => backup(b.id, b)).catch(async (e) => {
-          await store.patchBox(b.id, { backedUp: now - cfg.backupEveryMs + 5 * 60_000 })  // retry in 5 minutes
-          say({ level: 'error', msg: 'backup failed', user: b.email, box: b.id, error: e.message })
-        })
-      }
-      if (idle) {
-        await store.withLock(`user:${b.email}`, LOCK_MS, async () => {
-          await e2b.Sandbox.pause(b.id)
-          await store.patchBox(b.id, { paused: true })
-          say({ msg: 'paused', user: b.email, box: b.id })
-        }).catch(async (e) => {
-          // A box E2B no longer has is dropped; anything else is retried next sweep.
-          if (/not found/i.test(e.message)) await store.deleteBox(b.id)
-          say({ level: 'error', msg: 'pause failed', box: b.id, error: e.message })
-        })
-      }
+    // The lease covers the whole run (released at the end), so replicas never overlap a long sweep.
+    if (!(await store.lease('sweep', 15 * 60_000))) return
+    try {
+      await adoptRunning(now).catch(e => say({ level: 'warn', msg: 'adopt failed', error: e.message }))
+      const due = (await store.listBoxes()).filter(b => !b.paused && (now - b.active >= cfg.idleMs || now - b.backedUp >= cfg.backupEveryMs))
+      // Backups run in parallel (bounded) and take no user lock, so a long upload never blocks that user's visit.
+      await inParallel(due, cfg.backupConcurrency ?? 8, b => backup(b.id, b).then(() => true, async (e) => {
+        await store.patchBox(b.id, { backedUp: now - cfg.backupEveryMs + 5 * 60_000 })  // retry in 5 minutes
+        say({ level: 'error', msg: 'backup failed', user: b.email, box: b.id, error: e.message })
+        return false
+      }))
+      for (const b of due.filter(x => now - x.active >= cfg.idleMs)) await pauseIdle(b)
+    } finally {
+      await store.release('sweep').catch(() => {})
     }
+  }
+  async function pauseIdle(b) {
+    await store.withLock(`user:${b.email}`, LOCK_MS, async () => {
+      await e2b.Sandbox.pause(b.id)
+      await store.patchBox(b.id, { paused: true })
+      say({ msg: 'paused', user: b.email, box: b.id })
+    }).catch(async (e) => {
+      // A box E2B no longer has is dropped; anything else is retried next sweep.
+      if (/not found/i.test(e.message)) await store.deleteBox(b.id)
+      say({ level: 'error', msg: 'pause failed', box: b.id, error: e.message })
+    })
   }
   return { ensure, touch, owns, sweep, adoptRunning, forget: (id) => store.patchBox(id, { launch: undefined }) }
 }
