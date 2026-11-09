@@ -19,7 +19,8 @@
 - id: harness-dev-context
   disabled: true
 # Fargate allows neither bubblewrap nor Landlock, so `workspace-write` refuses every command.
-# Commands run in Full access with an ask per command; the container is the boundary (owner-accepted, 2026-11-08).
+# Commands run in Full access; the container is the boundary (owner-accepted, 2026-11-08). Bash and file tools ask only to
+# escalate the sandbox, and Full access has nothing wider, so plain commands run unprompted; `approval: ask` answers tools' asks.
 - id: sandbox-policy
   config:
     mode: danger-full-access

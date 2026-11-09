@@ -416,6 +416,7 @@
       "@deepseek-ai/dsh-ptc-runtime-node/configuration": ["./packages/ptc-runtime/ptc-runtime-node/src/configuration.ts"],
       "@mumbo/box-links": ["./packages/mumbo/box-links/src/index.ts"],
       "@mumbo/box-links/client": ["./packages/mumbo/box-links/src/client/index.ts"],
+      "@mumbo/browser-consent": ["./packages/mumbo/browser-consent/src/index.ts"],
       "@mumbo/mcp": ["./packages/mumbo/mcp/src/index.ts"],
       "@mumbo/edge-member": ["./packages/mumbo/edge-member/src/index.ts"],
       "@mumbo/edge-member/client": ["./packages/mumbo/edge-member/src/client/index.ts"],
