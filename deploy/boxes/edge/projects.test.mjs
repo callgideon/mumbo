@@ -109,9 +109,23 @@ test('addRepo binds only a repository in the mumbo-bot App installation that the
   await addRepo(store, id, 'callgideon/b', as('a@x.com'))
   await assert.rejects(addRepo(store, id, 'other/c', as('a@x.com')), (e) => e.status === 409 && e.code === 'repo_other_installation' && /another mumbo-bot installation than acme\/a/.test(e.message))
   assert.deepEqual(await getRepos(store, id), ['acme/a', 'callgideon/b'])
-  // Any other GitHub failure is no answer: it propagates and binds nothing.
-  await assert.rejects(addRepo(store, id, 'acme/c', { ...as('a@x.com'), installationOf: async () => { throw new Error('GitHub GET /repos/acme/c/installation: HTTP 502') } }), /HTTP 502/)
+  // Any other GitHub failure is no answer: it fails with the check named and no HTTP status of its own, so the approve
+  // page reports it as an edge error rather than its own 403 or 400, and binds nothing.
+  for (const status of [403, 400, 502]) {
+    const down = async (repo) => { throw Object.assign(new Error(`GitHub GET /repos/${repo}/installation: HTTP ${status}`), { status }) }
+    await assert.rejects(addRepo(store, id, 'acme/c', { ...as('a@x.com'), installationOf: down }),
+      (e) => e.status === undefined && e.message === `installation check for acme/c failed: GitHub GET /repos/acme/c/installation: HTTP ${status}` && e.cause?.status === status, String(status))
+  }
   assert.deepEqual(await getRepos(store, id), ['acme/a', 'callgideon/b'])
+})
+
+test('addRepo refuses with 409 repo_changed when the project\'s first repository changes during the installation check', async () => {
+  const store = memoryStore()
+  const { id } = await projects({ store, admitted: () => true, log: () => {} }).create('a@x.com', 'P')
+  // Another bind lands while GitHub answers this one's installation check.
+  const racing = async (repo) => { await store.putDoc(`project:${id}`, { ...(await store.getDoc(`project:${id}`)), repos: ['acme/first'] }); return installationOf(repo) }
+  await assert.rejects(addRepo(store, id, 'other/x', { ...as('a@x.com'), installationOf: racing }), (e) => e.status === 409 && e.code === 'repo_changed')
+  assert.deepEqual(await getRepos(store, id), ['acme/first'], 'other/x, in another installation than acme/first, is not bound')
 })
 
 test('removeRepo: an approver who owns the project unbinds a repository; the last one leaves projects:with-repos and another project may take it', async () => {

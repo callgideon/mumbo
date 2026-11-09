@@ -70,7 +70,8 @@ Check what the installation holds, read-only, with an App JWT: `GET /orgs/callgi
 
 **Errors a project box sees** (each also one edge log line `{"edge":"github","refused":…}`; find one with `aws logs filter-log-events --log-group-name /mumbo-boxes/edge --filter-pattern '"<text>"'`):
 - `mumbo-bot App permissions not approved: <GitHub's message>` (503): do steps 1 and 2 above. The approvals poller logs the same text in `poll failed; items kept`.
-- `repo_not_installed: <GitHub's message>` (502): a bound repository is not in the App's installation (another owner, or a repository the installation cannot see). Remove it on the approve page (Repository access → Remove); binding checks the installation, so only a binding made before that check, or one whose repository moved, gets here.
+- `repo_not_installed: <GitHub's message>` (502): a bound repository is not in the App's installation (another owner, or a repository the installation cannot see). Remove it on the approve page (Repository access → Remove; the repository's open approvals go with it); binding checks the installation, so only a binding made before that check, or one whose repository moved, gets here.
+- `the project's repositories changed; retry` (409): a repository was bound or removed while the request fetched its token; the next request uses the new list.
 - `no_repos` (403): the project has no repository; bind one on the approve page. Binding refuses a repository the App is not installed for, or one in another installation than the project's repositories.
 - `mumbo-bot App refused the token (HTTP <status>): …` or `mumbo-bot token mint failed: …` (502): read GitHub's message; a rate limit says so and clears by itself.
 

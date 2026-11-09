@@ -58,14 +58,16 @@ const READ_PERMISSIONS = { contents: 'read', pull_requests: 'read', checks: 'rea
  *   agent's numeric GitHub user id (the mumbo-bot App's bot user); unset, nothing is a candidate; `now` is epoch ms;
  *   notifications link to `https://<approveHost>/`; `approvers` (APPROVER_EMAILS, lowercased) are the only emails that
  *   may grant, and only for projects they own; an empty list lets nobody merge.
- * @returns {{ poll(): Promise<void>, list(email: string): Promise<Approval[]>, grant(email: string, id: string, sha: string): Promise<GrantResult>, grantLowRisk(email: string, shown: { id: string, sha: string }[]): Promise<GrantResult[]> }}
+ * @returns {{ poll(): Promise<void>, list(email: string): Promise<Approval[]>, grant(email: string, id: string, sha: string): Promise<GrantResult>, grantLowRisk(email: string, shown: { id: string, sha: string }[]): Promise<GrantResult[]>, dropRepo(project: string, repo: string): Promise<void> }}
  *   `poll` refreshes the queue from GitHub; a repository GitHub does not answer for, or whose read-only token GitHub
  *   does not mint (logged with mintToken's reason, such as permissions not approved), keeps its items, and an item stays
- *   with the project that first listed it. `list` gives the items of the projects `email` owns. `grant` merges item
- *   `id` only at `sha`, after re-reading the PR and its checks, then audits it (with `via` and `mergeCommitSha`) and
- *   removes it; a moved head answers `sha_moved` and re-reads that PR. `grantLowRisk` grants only the
- *   `shown` pairs (what the founder's page displayed) that are still low-risk at that exact SHA, in order, and gives
- *   one result per pair.
+ *   with the project that first listed it while that project has its repository. `list` gives the items of the
+ *   projects `email` owns. `grant` merges item `id` only at `sha`, after re-reading the PR and its checks, then audits
+ *   it (with `via` and `mergeCommitSha`) and removes it; a moved head answers `sha_moved` and re-reads that PR.
+ *   `grantLowRisk` grants only the `shown` pairs (what the founder's page displayed) that are still low-risk at that
+ *   exact SHA, in order, and gives one result per pair. An item whose repository its project no longer has is dropped
+ *   by `list` (not listed) and by `grant` (`not_found`). `dropRepo` drops the project's items for one repository, for
+ *   removeRepo's caller.
  */
 export function approvalsService({ store, github, notify, audit, fetchImpl, now, approveHost, approvers }) {
   const { app, agentId, requiredChecks } = github
@@ -107,13 +109,20 @@ export function approvalsService({ store, github, notify, audit, fetchImpl, now,
     if ((await store.getDoc(key(id)))?.project === project) await store.deleteDoc(key(id))
     await store.removeFromSet(openSet(project), id)
   }
+  /** Whether the item's repository is still bound to its project (removeRepo can take it away). */
+  const stillBound = async (doc) => (await getRepos(store, doc.project)).map(r => r.toLowerCase()).includes(doc.repo)
 
   /** Reads the facts of `listed` (a candidate as GitHub listed it) and saves its item, unless its head moved meanwhile. */
   async function refresh(project, repo, listed) {
     const id = `${repo}#${listed.number}`
-    const old = await store.getDoc(key(id))
-    // addRepo binds a repository to one project; an item never moves, even if stored data binds the repo twice.
-    if (old && old.project !== project) return fail('item belongs to another project; not rebound', { id, project, owner: old.project })
+    let old = await store.getDoc(key(id))
+    if (old && old.project !== project) {
+      // addRepo binds a repository to one project; an item never moves while its project still has the repository,
+      // even if stored data binds the repo twice. One whose project gave the repository up is dropped and listed anew.
+      if (await stillBound(old)) return fail('item belongs to another project; not rebound', { id, project, owner: old.project })
+      await drop(old.project, id)
+      old = undefined
+    }
     const files = await pages(repo, `/repos/${repo}/pulls/${listed.number}/files`)
     const pr = await read(repo, `/repos/${repo}/pulls/${listed.number}`)
     if (!isCandidate(pr)) return drop(project, id)
@@ -154,6 +163,7 @@ export function approvalsService({ store, github, notify, audit, fetchImpl, now,
     const no = (reason) => ({ id, merged: false, sha, reason })
     const doc = await store.getDoc(key(id))
     if (!doc) return no('not_found')
+    if (!(await stillBound(doc))) { await drop(doc.project, id); return no('not_found') }
     if (!approvers.includes(email) || !(await ownersOf(store, doc.project)).includes(email)) return no('not_owner')
     if (sha !== doc.sha) return no('sha_moved')
     if (lowRiskOnly && !doc.lowRisk) return no('not_low_risk')
@@ -214,9 +224,18 @@ export function approvalsService({ store, github, notify, audit, fetchImpl, now,
     async list(email) {
       const out = []
       for (const project of await projectsOwnedBy(store, email)) {
-        for (const id of await store.setMembers(openSet(project))) { const doc = await store.getDoc(key(id)); if (doc?.project === project) out.push(doc) }
+        const repos = (await getRepos(store, project)).map(r => r.toLowerCase())
+        for (const id of await store.setMembers(openSet(project))) {
+          const doc = await store.getDoc(key(id))
+          if (doc?.project !== project) continue
+          if (repos.includes(doc.repo)) out.push(doc); else await drop(project, id)
+        }
       }
       return out
+    },
+    async dropRepo(project, repo) {
+      const prefix = `${repo.toLowerCase()}#`
+      for (const id of await store.setMembers(openSet(project))) if (id.startsWith(prefix)) await drop(project, id)
     },
     grant: (email, id, sha) => grant(email, id, sha, false),
     async grantLowRisk(email, shown) {

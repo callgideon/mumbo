@@ -68,6 +68,7 @@ const AGENT_PERMISSIONS = { contents: 'write', pull_requests: 'write', issues: '
  * permissions the installation has not approved answers 503 `mumbo-bot App permissions not approved: <GitHub's
  * message>`; any other mint failure answers 502 with its cause (`repo_not_installed: …`, a rate limit, `mumbo-bot App
  * refused the token (HTTP <status>): …`, or `mumbo-bot token mint failed: …`). No request goes out with another token.
+ * A project whose repositories change while its token is fetched answers 409.
  * @param {{ store: object, halt: { isHalted(principal: string): Promise<boolean> }, app: { appId: string | undefined, privateKey: string | undefined } | undefined, fetchImpl: typeof fetch, now?: () => number, log?: (line: string) => void, pushTimeoutMs?: number }} deps
  *   `app` without both fields answers 503 to every request; `now` is epoch ms; `pushTimeoutMs` defaults to
  *   PUSH_TIMEOUT_MS.
@@ -116,8 +117,14 @@ export function githubForwarder({ store, halt, app, fetchImpl, now = Date.now, l
     if (url.pathname !== req.url.split('?')[0] || url.pathname.split('/').slice(1).some(s => !s || s.includes('%'))) return refuse()
     const repos = (await getRepos(store, id)).map(r => r.toLowerCase())
     if (!repos.length) return refuse('no_repos: this project has no GitHub repositories')
-    /** The project's token, or undefined once the mint failure is answered. */
-    const token = () => tokens.get(id, repos).catch((e) => void refuse(e.code ? e.message : `mumbo-bot token mint failed: ${e.message}`, e.code === 'not_approved' ? 503 : 502))
+    /** The project's token, or undefined once the mint failure or a change in its repositories is answered. */
+    const token = async () => {
+      let t
+      try { t = await tokens.get(id, repos) } catch (e) { return void refuse(e.code ? e.message : `mumbo-bot token mint failed: ${e.message}`, e.code === 'not_approved' ? 503 : 502) }
+      // A repository unbound since this request read them may still be in the token, and in `ours` above.
+      if ((await getRepos(store, id)).map(r => r.toLowerCase()).join() !== repos.join()) return void refuse('the project\'s repositories changed; retry', 409)
+      return t
+    }
     const ours = (owner, name) => name !== undefined && repos.includes(`${owner}/${name}`.toLowerCase().replace(/\.git$/, ''))
     const gitService = host === 'github.com' && method === 'POST' && segs.length === 3 && ours(segs[0], segs[1]) ? segs[2] : undefined
     const headers = {}

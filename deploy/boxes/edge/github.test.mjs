@@ -623,6 +623,35 @@ test('App token: concurrent requests share one mint; a 401 from GitHub drops the
   assert.equal(posts(f).length, 3)
 })
 
+test('App token: a 401 on the GraphQL node id lookup drops the cached token too', async (t) => {
+  let unauthorized = 1
+  const f = await forwarder({ mint: (asked, n, at) => granted(asked, `T${n}`, at), lookup: (ids) => (unauthorized-- > 0 ? Response.json({ message: 'Bad credentials' }, { status: 401 }) : lookupOk(ids)) })
+  t.after(f.close)
+  const comment = () => f.call('api.github.com/graphql', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: 'mutation { addComment(input: {subjectId: "I_1", body: "x"}) { clientMutationId } }' }) })
+  assert.equal((await comment()).status, 502)
+  assert.deepEqual(f.lookups.map(l => l.authorization), ['token T1'])
+  assert.equal((await comment()).status, 200)
+  assert.deepEqual(f.lookups.map(l => l.authorization), ['token T1', 'token T2'], 'minted again after the 401')
+})
+
+test('App token: a request whose project loses a repository while its token is minted answers 409 and forwards nothing', async (t) => {
+  let f
+  f = await forwarder({ mint: async (asked, n, at) => {
+    if (n === 1) await f.store.putDoc(`project:${P1}`, { ...(await f.store.getDoc(`project:${P1}`)), repos: ['callgideon/mumbo'] })  // unbound meanwhile
+    return granted(asked, `T${n}`, at)
+  } })
+  t.after(f.close)
+  await f.store.putDoc(`project:${P1}`, { ...(await f.store.getDoc(`project:${P1}`)), repos: ['callgideon/mumbo', 'callgideon/docs'] })
+  const r = await f.call('api.github.com/repos/callgideon/docs/pulls')
+  assert.equal(r.status, 409)
+  assert.deepEqual(r.json(), { message: 'Mumbo edge refused GET /repos/callgideon/docs/pulls: the project\'s repositories changed; retry' })
+  assert.equal(f.calls.length, 0)
+  assert.equal((await f.call('api.github.com/repos/callgideon/docs/pulls')).status, 403, 'the retry: docs is no longer the project\'s')
+  assert.equal((await f.call('api.github.com/repos/callgideon/mumbo/pulls')).status, 200)
+  assert.equal(f.calls.at(-1).init.headers.authorization, 'token T2', 'a token for the remaining repositories')
+  assert.deepEqual(posts(f).at(-1).body.repositories, ['mumbo'])
+})
+
 test('App token: reused until 5 minutes before it expires, then minted again; a change in bound repositories mints anew', async (t) => {
   const f = await forwarder({ mint: (asked, n, at) => granted(asked, `T${n}`, at) }); t.after(f.close)
   const auth = async (p = 'api.github.com/repos/callgideon/mumbo/pulls') => { assert.equal((await f.call(p)).status, 200, p); return f.calls.at(-1).init.headers.authorization }
@@ -692,7 +721,8 @@ test('App token: other mint failures answer 502 with their cause: repository not
     ['a 403 that is not a rate limit', { mint: answer(403, 'Resource not accessible by integration') }, 'mumbo-bot App refused the token (HTTP 403): Resource not accessible by integration'],
     ['another 422', { mint: answer(422, 'Invalid request') }, 'mumbo-bot App refused the token (HTTP 422): Invalid request'],
     ['a server error', { mint: answer(500, 'boom') }, 'mumbo-bot App refused the token (HTTP 500): boom'],
-    ['an installation lookup that fails', { installation: answer(502, 'bad gateway') }, 'mumbo-bot token mint failed: GitHub GET /repos/callgideon/mumbo/installation: HTTP 502'],
+    ['an installation lookup that fails', { installation: answer(502, 'bad gateway') }, 'mumbo-bot App refused the token (HTTP 502): bad gateway'],
+    ['a rate limit on the installation lookup', { installation: answer(403, 'API rate limit exceeded', { 'x-ratelimit-remaining': '0' }) }, 'mumbo-bot token mint failed: GitHub\'s rate limit (HTTP 403); retry later'],
   ]) {
     const f = await forwarder(opts); t.after(f.close)
     const r = await f.call('api.github.com/repos/callgideon/mumbo/pulls')

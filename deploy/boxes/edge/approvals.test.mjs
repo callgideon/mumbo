@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { generateKeyPairSync, verify } from 'node:crypto'
 import { memoryStore } from './store.mjs'
-import { projects, addRepo } from './projects.mjs'
+import { projects, addRepo, removeRepo } from './projects.mjs'
 import { approvalsService } from './approvals.mjs'
 import { mintToken, installationOf } from './github-app.mjs'
 import { config } from './edge.mjs'
@@ -370,6 +370,52 @@ test('an item stays with the project that first listed it, even when stored data
   assert.deepEqual(await svc.grant('mallory@x.com', ID, SHA), { id: ID, merged: false, sha: SHA, reason: 'not_owner' })
   assert.equal(gh.calls.filter(c => c.method === 'PUT').length, 0)
   assert.equal(errors.mock.callCount(), 2)  // one "not rebound" line per poll
+})
+
+test('removing a project\'s last repository: its item is no longer listed, and a grant does not merge it', async () => {
+  const { gh, store, svc, project } = await setup()
+  await svc.poll()
+  assert.equal((await only(svc)).project, project)
+  await removeRepo(store, project, REPO, { by: FOUNDER, approvers: [FOUNDER] })
+  await svc.poll()
+  assert.deepEqual(await svc.grant(FOUNDER, ID, SHA), { id: ID, merged: false, sha: SHA, reason: 'not_found' })
+  assert.deepEqual(await svc.list(FOUNDER), [])
+  assert.deepEqual(await store.setMembers(`approvals:open:${project}`), [])
+  assert.equal(gh.calls.filter(c => c.method === 'PUT').length, 0, 'never merged')
+})
+
+test('a repository given up and bound to a second project: the next poll moves its item there, for the new owner to merge', async () => {
+  const SECOND = 'second@x.com'
+  const { store, svc, project } = await setup({ approvers: [FOUNDER, SECOND] })
+  await svc.poll()
+  await removeRepo(store, project, REPO, { by: FOUNDER, approvers: [FOUNDER, SECOND] })
+  const { id: second } = await projects({ store, admitted: () => true, log: () => {} }).create(SECOND, 'Second')
+  await addRepo(store, second, REPO, { by: SECOND, approvers: [FOUNDER, SECOND], installationOf: async () => 77 })
+  await svc.poll()  // nobody listed or granted in between: the poll itself takes the item over
+  assert.deepEqual((await svc.list(SECOND)).map(i => [i.id, i.project]), [[ID, second]])
+  assert.deepEqual(await store.setMembers(`approvals:open:${project}`), [], 'gone from the first project')
+  assert.deepEqual(await svc.list(FOUNDER), [])
+  assert.equal((await svc.grant(FOUNDER, ID, SHA)).reason, 'not_owner')
+  assert.equal((await svc.grant(SECOND, ID, SHA)).merged, true, 'the new owner merges it')
+})
+
+test('removing one of two repositories: grant refuses its item as not_found and drops it; dropRepo removes a repository\'s items', async (t) => {
+  const { gh, store, svc, project } = await setup()
+  gh.pulls.push(pull(2))
+  await svc.poll()
+  await addRepo(store, project, 'acme/lib', { by: FOUNDER, approvers: [FOUNDER], installationOf: async () => 77 })
+  await store.addToSet(`approvals:open:${project}`, 'acme/lib#5')
+  await store.putDoc('approval:acme/lib#5', { id: 'acme/lib#5', project, repo: 'acme/lib', number: 5, sha: SHA })
+  await removeRepo(store, project, REPO, { by: FOUNDER, approvers: [FOUNDER] })
+  assert.deepEqual(await svc.grant(FOUNDER, ID, SHA), { id: ID, merged: false, sha: SHA, reason: 'not_found' })
+  assert.equal(await store.getDoc(`approval:${ID}`), undefined, 'grant dropped it')
+  await svc.dropRepo(project, REPO)
+  assert.deepEqual(await store.setMembers(`approvals:open:${project}`), ['acme/lib#5'], 'acme/app#2 dropped, acme/lib kept')
+  assert.equal(await store.getDoc('approval:acme/app#2'), undefined)
+  assert.deepEqual((await svc.list(FOUNDER)).map(i => i.id), ['acme/lib#5'], 'the other repository\'s item stays')
+  t.mock.method(console, 'error', () => {})  // acme/lib is not on the fake GitHub
+  await svc.poll()
+  assert.equal(gh.calls.filter(c => c.method === 'PUT').length, 0)
 })
 
 test('ids use the lowercased repository, and a project never takes or deletes another project\'s item', async (t) => {

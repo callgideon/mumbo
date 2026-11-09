@@ -52,7 +52,7 @@ const formFields = (html, action) => {
 async function setup(t, { approvers = [FOUNDER] } = {}) {
   const store = memoryStore()
   await store.putDoc(`project:${MINE}`, { id: MINE, name: 'App <b>', owner: FOUNDER, members: [FOUNDER], repos: ['acme/app'] })
-  await store.putDoc(`project:${THEIRS}`, { id: THEIRS, name: 'Theirs', owner: OTHER, members: [OTHER, FOUNDER] })
+  await store.putDoc(`project:${THEIRS}`, { id: THEIRS, name: 'Theirs', owner: OTHER, members: [OTHER, FOUNDER], repos: ['acme/theirs'] })
   await store.addToSet(`projects:${FOUNDER}`, MINE); await store.addToSet(`projects:${FOUNDER}`, THEIRS); await store.addToSet(`projects:${OTHER}`, THEIRS)
   const calls = []
   let stopped = false
@@ -65,6 +65,7 @@ async function setup(t, { approvers = [FOUNDER] } = {}) {
       return shown.map(({ id, sha }) => (skips[id] ? { id, sha, merged: false, reason: skips[id] } : { id, sha, merged: true }))
     },
     async poll() { throw new Error('the page never polls') },
+    async dropRepo(project, repo) { calls.push(['dropRepo', project, repo]) },
   }
   const halt = { async get(email) { return email === FOUNDER && stopped }, async set(email, on) { calls.push(['halt', email, on]); stopped = on } }
   let now = NOW
@@ -124,7 +125,7 @@ test('every response carries the CSP and framing headers; any other path answers
 })
 
 test('a POST without the exact approve origin, or with a bad CSRF token, is refused before any action', async (t) => {
-  const { port, calls, setNow } = await setup(t)
+  const { port, calls, store, setNow } = await setup(t)
   const fields = { id: 'acme/app#7', sha: 'a'.repeat(40), csrf: TOKEN }
   for (const origin of ['https://boxes.mumbo.si', 'http://approve.boxes.mumbo.si', 'https://approve.boxes.mumbo.si.evil.com', 'null']) {
     assert.equal((await post(port, '/grant', fields, { ...FORM, origin })).status, 403, origin)
@@ -138,6 +139,16 @@ test('a POST without the exact approve origin, or with a bad CSRF token, is refu
   assert.equal((await post(port, '/halt', { on: '1', csrf: 'x' })).status, 403)
   assert.equal((await post(port, '/grant', fields, { ...FORM, 'content-type': 'text/plain' })).status, 415)
   assert.equal((await post(port, '/grant', { ...fields, pad: 'x'.repeat(8192) })).status, 413)
+  // Every action, the repository ones included, needs the exact origin and a valid CSRF token.
+  const actions = [['/grant', { id: fields.id, sha: fields.sha }], ['/grant-low-risk', { id: fields.id, sha: fields.sha }], ['/halt', { on: '1' }],
+    ['/repo', { project: MINE, repo: 'acme/new' }], ['/repo-remove', { project: MINE, repo: 'acme/app' }]]
+  for (const [action, form] of actions) {
+    assert.equal((await post(port, action, { ...form, csrf: TOKEN }, { ...FORM, origin: 'https://boxes.mumbo.si' })).status, 403, `${action}: another origin`)
+    assert.equal((await post(port, action, { ...form, csrf: TOKEN }, noOrigin)).status, 403, `${action}: no origin`)
+    assert.equal((await post(port, action, { ...form, csrf: csrf(OTHER, '2026-11-09') })).status, 403, `${action}: another person's token`)
+    assert.equal((await post(port, action, form)).status, 403, `${action}: no token`)
+  }
+  assert.deepEqual(await getRepos(store, MINE), ['acme/app'], 'no repository bound or removed')
   assert.deepEqual(calls, [], 'nothing was granted or halted')
 
   setNow(Date.parse('2026-11-10T00:30:00Z'))
@@ -210,7 +221,7 @@ test('repository access: only for a project the email owns, only an owner/name r
   for (const repo of ['acme', 'acme/x/y', 'acme/x y', 'acme/<x>', '']) {
     assert.equal((await post(port, '/repo', { project: MINE, repo, csrf: TOKEN })).status, 400, repo)
   }
-  assert.deepEqual(await getRepos(store, THEIRS), [])
+  assert.deepEqual(await getRepos(store, THEIRS), ['acme/theirs'])
   const r = await post(port, '/repo', { project: MINE, repo: 'acme/new', csrf: TOKEN })
   assert.equal(r.headers.location, '/?m=repo_added')
   assert.deepEqual(binds.at(-1), [store, MINE, 'acme/new', { by: FOUNDER, approvers: [FOUNDER], installationOf }], 'addRepo gets the caller, the approvers and the App\'s installations')
@@ -225,6 +236,10 @@ test('repository access: only for a project the email owns, only an owner/name r
   assert.ok((await call(port, { path: bound.headers.location })).body.includes('class="notice">That repository already belongs to another project.'))
   failBind(403)
   assert.equal((await post(port, '/repo', { project: MINE, repo: 'acme/other', csrf: TOKEN })).status, 403)
+  failBind(409, 'repo_changed')
+  const changed = await post(port, '/repo', { project: MINE, repo: 'acme/other', csrf: TOKEN })
+  assert.equal(changed.headers.location, '/?m=repo_changed')
+  assert.ok((await call(port, { path: changed.headers.location })).body.includes('class="notice">The project\'s repositories changed meanwhile. Try again.'))
   // addRepo checks the App's installation: none for the repository, or another than the project's repositories.
   for (const [repo, code, notice] of [['nowhere/app', 'repo_not_installed', 'The mumbo-bot GitHub App is not installed for that repository.'],
     ['elsewhere/app', 'repo_other_installation', 'That repository is in another mumbo-bot App installation than this project\'s repositories.']]) {
@@ -235,16 +250,20 @@ test('repository access: only for a project the email owns, only an owner/name r
   assert.deepEqual(await getRepos(store, MINE), ['acme/app', 'acme/new'])
 })
 
-test('repository access: an approver who owns the project removes a repository', async (t) => {
-  const { port, store } = await setup(t)
+test('repository access: an approver who owns the project removes a repository, and its approval items go with it', async (t) => {
+  const { port, store, calls } = await setup(t)
   await addRepo(store, MINE, 'acme/new', { by: FOUNDER, approvers: [FOUNDER], installationOf })
   const page = (await call(port)).body
   assert.deepEqual(formFields(page, '/repo-remove'), [['project', MINE], ['repo', 'acme/app'], ['csrf', TOKEN]], 'one remove form per repository')
   assert.equal((page.match(/action="\/repo-remove"/g) ?? []).length, 2)
-  assert.equal((await post(port, '/repo-remove', { project: THEIRS, repo: 'acme/app', csrf: TOKEN })).status, 403, 'a member, not the owner')
+  assert.equal((await post(port, '/repo-remove', { project: THEIRS, repo: 'acme/theirs', csrf: TOKEN })).status, 403, 'a member, not the owner')
+  assert.deepEqual(await getRepos(store, THEIRS), ['acme/theirs'], 'their binding survives')
+  assert.equal((await post(port, '/repo-remove', { project: THEIRS, repo: 'acme/app', csrf: TOKEN })).status, 403, 'my repository named against their project')
+  assert.equal(calls.filter(([name]) => name === 'dropRepo').length, 0)
   const r = await post(port, '/repo-remove', { project: MINE, repo: 'acme/app', csrf: TOKEN })
   assert.equal(r.headers.location, '/?m=repo_removed')
   assert.deepEqual(await getRepos(store, MINE), ['acme/new'])
+  assert.deepEqual(calls.filter(([name]) => name === 'dropRepo'), [['dropRepo', MINE, 'acme/app']], 'the repository\'s approval items are dropped')
   assert.ok((await call(port, { path: r.headers.location })).body.includes('class="notice">Repository access removed.'))
   assert.equal((await post(port, '/repo-remove', { project: MINE, repo: 'acme/app', csrf: TOKEN })).status, 404, 'no longer bound')
   assert.equal((await post(port, '/repo-remove', { project: MINE, csrf: TOKEN })).status, 400, 'no repository named')

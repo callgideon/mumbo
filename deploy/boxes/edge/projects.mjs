@@ -30,21 +30,24 @@ async function ownedProject(store, projectId, by, approvers) {
  *  repositories, so that one installation token covers them all. Fails with 400 for a name that is not `owner/name`,
  *  400 (`code: 'repo_not_installed'`) for a repository the App is not installed for, 403 when `by` is not an approver
  *  or not the owner, 404 for an unknown project, 409 (`code: 'repo_bound'`) for a repository another project already
- *  has, 409 (`code: 'repo_other_installation'`) for one in another installation than the project's repositories, and
- *  with installationOf's error when GitHub gives no answer. */
+ *  has, 409 (`code: 'repo_other_installation'`) for one in another installation than the project's repositories, 409
+ *  (`code: 'repo_changed'`) when the project's first repository changed during the check, and with `installation check
+ *  for <repo> failed: …` (no status; `cause` is installationOf's error) when GitHub gives no answer. */
 export async function addRepo(store, projectId, repo, { by, approvers = [], installationOf } = {}) {
   if (typeof repo !== 'string' || !REPO_NAME.test(repo)) throw fail(400, `${repo} is not a repository name (owner/name)`)
   if (!approvers.includes(by)) throw fail(403, 'only an approver binds repositories')
   const same = (r) => r.toLowerCase() === repo.toLowerCase()
   // GitHub is asked outside the lock; a first repository that changes meanwhile is refused under it.
   const first = (await getRepos(store, projectId))[0]
-  const [installation, firstInstallation] = await Promise.all([installationOf(repo), first && installationOf(first)])
+  // A GitHub failure is no refusal of the caller: it loses its HTTP status, so the edge logs it as its own error.
+  const check = (r) => installationOf(r).catch((e) => { throw new Error(`installation check for ${r} failed: ${e.message}`, { cause: e }) })
+  const [installation, firstInstallation] = await Promise.all([check(repo), first && check(first)])
   if (installation === undefined) throw Object.assign(fail(400, `the mumbo-bot App is not installed for ${repo}`), { code: 'repo_not_installed' })
   if (first && firstInstallation !== installation) throw Object.assign(fail(409, `${repo} is in another mumbo-bot installation than ${first}`), { code: 'repo_other_installation' })
   // ponytail: one lock for every binding, so two projects cannot both take a repository; adding repositories is rare.
   await store.withLock('projects:repos', 10_000, async () => {
     const p = await ownedProject(store, projectId, by, approvers)
-    if ((p.repos ?? [])[0] !== first) throw fail(409, 'the project\'s repositories changed meanwhile; try again')
+    if ((p.repos ?? [])[0] !== first) throw Object.assign(fail(409, 'the project\'s repositories changed meanwhile; try again'), { code: 'repo_changed' })
     for (const other of await projectsWithRepos(store)) {
       if (other !== projectId && (await getRepos(store, other)).some(same)) throw Object.assign(fail(409, `${repo} already belongs to another project`), { code: 'repo_bound' })
     }

@@ -78,13 +78,14 @@ function mintRefusal(e) {
  *   it. Rejects before any request when `repos` is empty or spans owners, or the App is not configured. A refusal
  *   rejects with `code` and a message for the edge to report: `not_approved` (a 422 saying the installation has not
  *   granted a permission asked for), `repo_not_installed` (no installation for the first repository, or a 422 saying a
- *   repository is not accessible to it), `rate_limited`, or `refused` (any other answer, with its status and message).
+ *   repository is not accessible to it), `rate_limited`, or `refused` (any other answer, with its status and message),
+ *   for the installation lookup and the token request alike.
  *   Rejects, after revoking, when GitHub grants other repositories or other permissions, or names no permissions.
  */
 export async function mintToken({ appId, privateKey, repos, permissions, fetchImpl, now }) {
   if (new Set(repos.map(r => r.split('/')[0].toLowerCase())).size !== 1) throw new Error(`mumbo-bot tokens cover one owner's repositories, not [${repos.join(', ')}]`)
   const jwt = appJwt(appId, privateKey, now)
-  const id = await installationOf({ appId, privateKey, fetchImpl, now })(repos[0])
+  const id = await installationOf({ appId, privateKey, fetchImpl, now })(repos[0]).catch((e) => { throw mintRefusal(e) })
   if (id === undefined) throw Object.assign(new Error(`repo_not_installed: the mumbo-bot App has no installation for ${repos[0]}`), { code: 'repo_not_installed' })
   const grant = await githubJson(fetchImpl, 'POST', `/app/installations/${id}/access_tokens`, jwt, { repositories: repos.map(r => r.split('/')[1]), permissions })
     .catch((e) => { throw mintRefusal(e) })
