@@ -1,7 +1,8 @@
 # Stage 6: the edge on Fargate behind a public ALB.
-#   boxes.mumbo.si      -> oauth2-proxy :4180 (Supabase sign-in, same client and callback as the trial) -> edge :8080 (loopback)
-#   *.boxes.mumbo.si    -> the same; the edge serves approve.boxes.mumbo.si and project boxes p-<16 hex>.boxes.mumbo.si, 404 otherwise
-#   llm.boxes.mumbo.si  -> edge model host :8081 (box token + source address = one of our NAT EIPs)
+#   app.mumbo.si        -> oauth2-proxy :4180 (Supabase sign-in) -> edge :8080 (loopback)
+#   *.app.mumbo.si      -> the same; the edge serves approve.app.mumbo.si and project boxes p-<16 hex>.app.mumbo.si, 404 otherwise
+#   llm.app.mumbo.si    -> edge model host :8081 (box token + source address = one of our NAT EIPs); llm.boxes.mumbo.si too
+#   boxes.mumbo.si (the public host until 2026-11-09), api.mumbo.si and *.boxes.mumbo.si -> 301 (old_hosts rules)
 # The edge reaches E2B by private names on the internal NLB; client-proxy header routing needs sandbox.<domain>.
 variable "edge_tag" {
   description = "Edge image tag in ECR (mumbo repo commit)."
@@ -45,16 +46,21 @@ variable "signin_cookie_name" {
 }
 
 locals {
-  public_host  = "boxes.mumbo.si"
+  public_host  = "app.mumbo.si"
+  approve_host = "approve.${local.public_host}"
   supabase_url = "https://qkvcouccrhyjiarkauyo.supabase.co"
   # oauth2-proxy's callback: Mumbo's OAuth client's redirect URI, the only one the sign-in page sends a code to.
   oauth_redirect_url = "https://${local.public_host}/oauth2/callback"
-  llm_host           = "llm.boxes.mumbo.si"
-  backup_store       = "mumbo-boxes-backup-${data.aws_caller_identity.this.account_id}" # created by the trial (../edge.tf); users' backups carry over
-  # The shared Fargate server's names; they redirect here since it was retired (2026-11-09).
-  old_hosts = ["app.mumbo.si", "api.mumbo.si"]
+  # The public host until 2026-11-09. Its names answer 301 (old_hosts rules), except its model host, which boxes created
+  # before then have in their start script.
+  old_host     = "boxes.mumbo.si"
+  llm_host     = "llm.${local.public_host}" # LLM_HOST: new boxes' model host
+  llm_hosts    = [local.llm_host, "llm.${local.old_host}"]
+  backup_store = "mumbo-boxes-backup-${data.aws_caller_identity.this.account_id}" # created by the trial (../edge.tf); users' backups carry over
+  # api.mumbo.si was the retired shared server's (2026-11-09).
+  old_hosts = [local.old_host, "api.mumbo.si"]
   # PROJECT_DOMAIN: project boxes are p-<16 hex>.<this>. It must stay in the mumbo.si zone.
-  project_domain = "boxes.mumbo.si"
+  project_domain = local.public_host
   # Wildcard names: the approve page (approve.<public host>) and project boxes.
   wildcards    = distinct(["*.${local.public_host}", "*.${local.project_domain}"])
   audit_prefix = "audit/approvals/"
@@ -76,7 +82,7 @@ resource "aws_route53_record" "internal" {
 data "aws_route53_zone" "public" { name = "mumbo.si" }
 resource "aws_acm_certificate" "edge" {
   domain_name               = local.public_host
-  subject_alternative_names = concat([local.llm_host], local.old_hosts, local.wildcards)
+  subject_alternative_names = concat(local.llm_hosts, local.old_hosts, local.wildcards, ["*.${local.old_host}"])
   validation_method         = "DNS"
   lifecycle { create_before_destroy = true }
 }
@@ -164,8 +170,8 @@ resource "aws_lb_listener" "https" {
   }
 }
 resource "aws_lb_listener_rule" "edge" {
-  # [priority, host names, target group]; the llm. rule outranks the wildcard.
-  for_each     = { user = [10, [local.public_host], "user"], model = [20, [local.llm_host], "model"], subdomains = [30, local.wildcards, "user"] }
+  # [priority, host names, target group]; the llm. rule outranks the wildcards.
+  for_each     = { user = [10, [local.public_host], "user"], model = [20, local.llm_hosts, "model"], subdomains = [30, local.wildcards, "user"] }
   listener_arn = aws_lb_listener.https.arn
   priority     = each.value[0]
   condition {
@@ -176,23 +182,36 @@ resource "aws_lb_listener_rule" "edge" {
     target_group_arn = aws_lb_target_group.edge[each.value[2]].arn
   }
 }
+# Former names answer 301 with the same path and query on the new ones. A project box moved from p-<id>.boxes.mumbo.si
+# to p-<id>.app.mumbo.si, which a redirect cannot derive (it keeps or replaces the whole host), so those land on the
+# home page, which links every project of the signed-in person.
 resource "aws_lb_listener_rule" "old_hosts" {
+  # [priority, host names, redirect host, path]; the wildcard ranks below llm.boxes.mumbo.si (model, 20).
+  for_each = {
+    main     = [5, local.old_hosts, local.public_host, "/#{path}"]
+    approve  = [6, ["approve.${local.old_host}"], local.approve_host, "/#{path}"]
+    projects = [40, ["*.${local.old_host}"], local.public_host, "/home"]
+  }
   listener_arn = aws_lb_listener.https.arn
-  priority     = 5
+  priority     = each.value[0]
   condition {
-    host_header { values = local.old_hosts }
+    host_header { values = each.value[1] }
   }
   action {
     type = "redirect"
     redirect {
-      host        = local.public_host
+      host        = each.value[2]
       port        = "443"
       protocol    = "HTTPS"
-      path        = "/#{path}"
+      path        = each.value[3]
       query       = "#{query}"
       status_code = "HTTP_301"
     }
   }
+}
+moved {
+  from = aws_lb_listener_rule.old_hosts
+  to   = aws_lb_listener_rule.old_hosts["main"]
 }
 
 resource "aws_lb_listener" "http" {
@@ -307,7 +326,7 @@ resource "aws_ecs_task_definition" "edge" {
         MUMBO_OAUTH_REDIRECT_URIS = local.oauth_redirect_url
         SIGNIN_COOKIE             = var.signin_cookie_name
         # Approvals. PROJECT_TEMPLATE stays unset (it defaults to BOX_TEMPLATE) until the mumbo-project template is built.
-        APPROVE_HOST         = "approve.${local.public_host}"
+        APPROVE_HOST         = local.approve_host
         APPROVER_EMAILS      = var.approver_emails
         GITHUB_AGENT_LOGIN   = var.github_agent_login
         REQUIRED_CHECKS      = "static,unit"
@@ -359,7 +378,7 @@ output "edge_alb" { value = aws_lb.edge.dns_name }
 
 # Public names on the ALB. They replace the trial's A records (allow_overwrite); the trial no longer manages them.
 resource "aws_route53_record" "public" {
-  for_each        = toset(concat([local.public_host, local.llm_host], local.old_hosts, local.wildcards))
+  for_each        = toset(concat([local.public_host], local.llm_hosts, local.old_hosts, local.wildcards, ["*.${local.old_host}"]))
   zone_id         = data.aws_route53_zone.public.zone_id
   name            = each.key
   type            = "A"

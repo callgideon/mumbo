@@ -4,7 +4,7 @@
  * from the server (same origin), so the CDN fronts the whole app. CodeBuild builds deploy/Dockerfile on push.
  *
  * Domains: dev serves dev.app / dev.api.mumbo.si. prod no longer serves: the shared server was retired on
- * 2026-11-09 for per-user boxes (deploy/boxes); app / api.mumbo.si redirect to boxes.mumbo.si from the boxes ALB.
+ * 2026-11-09 for per-user boxes (deploy/boxes), whose ALB serves app.mumbo.si and redirects api.mumbo.si there.
  * The prod stack keeps what the boxes use: the mumbo-web-prod image repository and its CodeBuild project (the box
  * template is built from that image), the model key secret, and the downloads bucket.
  */

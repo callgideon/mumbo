@@ -5,8 +5,8 @@ From the boxes session, 2026-11-09. The infrastructure (stages 4–10 in `PRODUC
 ## What exists (do not rebuild)
 
 - **Boxes:** each signed-in user gets an E2B Firecracker VM running `dsh web` (template `mumbo-box`: the `mumbo-web-prod` image plus Xvfb, openbox, Chromium as user `browser`, noVNC). Boxes never pause for now (founder decision). Code: `deploy/boxes/edge/edge.mjs` (router, model host, box lifecycle), `store.mjs`, `sandboxes.mjs` (child sandboxes over MCP), `projects.mjs` (shared projects, relay).
-- **The box start script** (`startScript` in `edge.mjs`) runs dsh with `--patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml` (the last one is written by the script: `dsh-mcp-client` against `https://llm.boxes.mumbo.si/mcp`, and in person boxes `dsh-browser-use` with the playwright-mcp provider in `attach` mode on `http://127.0.0.1:9222`). The role instructions are an edge-owned `AGENTS.md` under `DSH_AGENTS_HOME=/root/.mumbo/agents`.
-- **Shared projects:** a project is its own box (principal `project:<id>`, served at `/p/<id>/`, own masked host `p-<id>.boxes.mumbo.si`). The edge relays a member's message into the coordinator session over dsh's unary RPC: `POST api/session/prompt` with `{ type: 'client-request', rpcId, method, payload: { args: { request } } }`, after signing in with the box's launch token. The member is named in the message text (`[from <email>] …`).
+- **The box start script** (`startScript` in `edge.mjs`) runs dsh with `--patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml` (the last one is written by the script: `dsh-mcp-client` against `https://llm.app.mumbo.si/mcp`, or `llm.boxes.mumbo.si` in boxes created before the public host moved to `app.mumbo.si`, and in person boxes `dsh-browser-use` with the playwright-mcp provider in `attach` mode on `http://127.0.0.1:9222`). The role instructions are an edge-owned `AGENTS.md` under `DSH_AGENTS_HOME=/root/.mumbo/agents`.
+- **Shared projects:** a project is its own box (principal `project:<id>`, served at `/p/<id>/`, own masked host `p-<id>.app.mumbo.si`). The edge relays a member's message into the coordinator session over dsh's unary RPC: `POST api/session/prompt` with `{ type: 'client-request', rpcId, method, payload: { args: { request } } }`, after signing in with the box's launch token. The member is named in the message text (`[from <email>] …`).
 - **PR #14** (`fix/schedule-wall-clock-recheck`): dsh's scheduler re-reads wall time every 60 s so a task due while a box was paused fires within a minute of waking. Open, awaiting the founder's review.
 
 ## How a dsh change reaches the boxes
@@ -17,7 +17,7 @@ dsh changes land through a PR to `main` (prod); the founder merges and deploys. 
 
 - `deploy/boxes/prod/check/tunnel.sh up|down`: SSM port forwards through a sandbox node to E2B (api `localhost:13000`, client-proxy `localhost:13002`) with a temporary security-group rule; always run `down` afterwards. Env for the E2B SDK: `E2B_API_URL=http://localhost:13000 E2B_SANDBOX_URL=http://localhost:13002 E2B_API_KEY=$(aws secretsmanager get-secret-value --secret-id mumbo-boxes/e2b --query SecretString --output text | jq -r .TEAM_API_KEY)`.
 - `deploy/boxes/edge/project.e2e.mjs`: a local edge against real E2B: project box, sign-in, page, WebSocket, relay, role. A copy of it is the fastest way to try a dsh change inside a real box (create a box from a template built with your image).
-- `boxes.mumbo.si` still points at the trial host until the founder runs the DNS cutover (`deploy/boxes/prod/cutover.plan`), so browser tests through the public name are not possible yet; a browser mapped to the ALB (`--host-resolver-rules`) works for everything except the model, which boxes reach through `llm.boxes.mumbo.si`.
+- Browser tests go through the public name, `https://app.mumbo.si`; boxes reach the model through `llm.app.mumbo.si`.
 
 ## The work
 
@@ -35,7 +35,7 @@ dsh's computer-use provider is macOS-only (`packages/experimental/cua-macos`). B
 
 ### 4. A web-app link to the home page and desktop
 
-The edge serves `https://boxes.mumbo.si/home` (assistant, desktop, projects) and `/desktop/` (live view). A small entry in the dsh web UI (for example in the sidebar, only when served behind the mumbo edge) would make them reachable from the app.
+The edge serves `https://app.mumbo.si/home` (assistant, desktop, projects) and `/desktop/` (live view). A small entry in the dsh web UI (for example in the sidebar, only when served behind the mumbo edge) would make them reachable from the app.
 
 ## Rules carried over
 

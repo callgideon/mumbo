@@ -4,7 +4,7 @@ Status: design, 2026-11-09; decisions taken (below). Builds on stages 8 (child s
 
 ## What the user gets
 
-- **One assistant per user,** always reachable at `boxes.mumbo.si`. It knows the user's accounts, files and projects, acts in the user's browser when permitted, and runs scheduled work while the user is away.
+- **One assistant per user,** always reachable at `app.mumbo.si`. It knows the user's accounts, files and projects, acts in the user's browser when permitted, and runs scheduled work while the user is away.
 - **Projects,** each with its own coordinator agent and its own sandbox. The user asks the assistant ("start a landing page for X", "update the API project", "what's the status of everything?"); the assistant hands the work to the project's coordinator and reports back.
 
 ## Decisions (founder, 2026-11-09)
@@ -26,7 +26,7 @@ Status: design, 2026-11-09; decisions taken (below). Builds on stages 8 (child s
 
 **Option B, modular:**
 - **One box layer for two kinds of owner.** The edge keys boxes by principal, `user:<email>` or `project:<id>`, instead of by email. Create, resume, backup, wake and drain stay one code path; a project box uses the same template with a project overlay (coordinator preset, no browser).
-- **Membership lives in the edge store:** project → members (owner or member). Members open `https://boxes.mumbo.si/p/<id>/` and reach the project box's dsh directly; non-members get 403.
+- **Membership lives in the edge store:** project → members (owner or member). Members open `https://p-<id>.app.mumbo.si/` (`https://app.mumbo.si/p/<id>/` redirects there) and reach the project box's dsh directly; non-members get 403.
 - **Assistants reach projects through edge tools** on the same MCP endpoint as stage 8: `project_list`, `project_create`, `project_message` and `project_status`. `project_message` relays the request into the coordinator's session. dsh supports this: the remote `session/prompt` call accepts a message for a session, and for a non-owner caller it records the caller as `principal` in the durable message source; `dsh-api-remote-access` grants non-owner principals roles per session (peer principals, `.agents/notes/implemented/architecture/2026-10-12-peer-principal-and-remote-access.md`). So members can be peers of the project's dsh with their own attribution, and the edge relays as the member.
 - **Project work runs in project-owned sandboxes** (stage 8 tools scoped to the project), never in a member's box.
 - **A member's assistant never gains the project's tools beyond messaging,** and the coordinator never gains a member's browser.
