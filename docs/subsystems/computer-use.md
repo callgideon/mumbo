@@ -19,14 +19,15 @@ The CUA provider owns `ctx.cuaAccess` for system-permission status, explicit sys
 
 ## Choose a provider
 
-Mount [`dsh-computer-use`](../../packages/computer-use/computer-use/README.md) and one provider in the same composition. Both Cua Driver providers are experimental public npm packages and require explicit activation.
+Mount [`dsh-computer-use`](../../packages/computer-use/computer-use/README.md) and one provider in the same composition. These providers are experimental public npm packages and require explicit activation.
 
 | Provider | Runtime |
 |---|---|
 | [Cua Driver MCP](../../packages/experimental/computer-use-cua-driver-mcp/README.md) | An already installed `cua-driver` executable connected through MCP |
 | [Cua Driver native](../../packages/experimental/computer-use-cua-driver-native/README.md) | The platform-native runtime installed with the npm dependency |
+| [Linux X11](../../packages/experimental/computer-use-x11/README.md) | Host-installed `xdotool`, ImageMagick `import` and `xsel` on a configured X display |
 
-Each provider supplies its upstream tool catalog. The shared service registers only a name and rejects any second provider, including another instance with the same name. It has no common desktop-operation methods or model-controlled selector.
+Each Cua Driver provider supplies its upstream tool catalog; the X11 provider supplies one `computer` tool. The shared service registers only a name and rejects any second provider, including another instance with the same name. It has no common desktop-operation methods or model-controlled selector.
 
 ## Lifetime and desktop sharing
 

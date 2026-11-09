@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Computer use (Linux X11)",
+    "description": "Let the model see and operate a Linux X11 desktop through screenshots, mouse and keyboard; needs xdotool and ImageMagick on the host."
+  }
+}

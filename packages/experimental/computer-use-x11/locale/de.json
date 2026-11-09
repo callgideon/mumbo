@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Computersteuerung (Linux X11)",
+    "description": "Lässt das Modell einen Linux-X11-Desktop über Bildschirmfotos, Maus und Tastatur sehen und bedienen; erfordert xdotool und ImageMagick auf dem Host."
+  }
+}

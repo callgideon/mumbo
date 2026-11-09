@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Uso del ordenador (Linux X11)",
+    "description": "Permite que el modelo vea y maneje un escritorio Linux X11 mediante capturas de pantalla, ratón y teclado; requiere xdotool e ImageMagick en el host."
+  }
+}
