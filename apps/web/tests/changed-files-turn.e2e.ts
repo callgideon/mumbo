@@ -542,7 +542,7 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
     } finally {
       await scrollLayout.evaluate(element => element.parentNode!.removeChild(element))
     }
-    await review.getByRole('button', { name: 'Wrap lines' }).click()
+    await review.getByRole('button', { name: 'Line wrap' }).click()
     await review.locator('[data-review-view][data-review-wrap]').waitFor({ state: 'visible' })
     await expect.poll(() => drawn(review)).toEqual(['del:1# Sample project1# Project notes', 'context:22', 'context:3A repository used for demos.3A repository used for demos.'])
     const wrappedAddition = review.locator('[data-diff-line="del"] > span').nth(1)
@@ -615,7 +615,7 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
 
   it('keeps edge gestures inside either diff column and accepts reverse scrolling', async () => {
     const review = page.locator('[data-changes-review]')
-    await review.getByRole('button', { name: 'Wrap lines' }).click()
+    await review.getByRole('button', { name: 'Line wrap' }).click()
     const body = review.locator('[data-review-view="split"]:not([data-review-wrap])')
     await body.waitFor({ state: 'visible' })
     // A scrollable parent makes escaped edge gestures observable without native trackpad rebound.
@@ -627,7 +627,7 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
     onTestFinished(async () => {
       await layout.evaluate(element => element.parentNode!.removeChild(element))
       await body.evaluate((element) => { element.scrollTo(0, 0) })
-      await review.getByRole('button', { name: 'Wrap lines' }).click()
+      await review.getByRole('button', { name: 'Line wrap' }).click()
     })
     const input = await page.context().newCDPSession(page)
     try {
