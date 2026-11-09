@@ -2,7 +2,8 @@
 // `project:<id>` and running dsh as the coordinator; its members are signed-in users. Membership lives in the edge
 // store: doc `project:<id>` = { id, name, owner, members, createdAt, repos? } and set `projects:<email>` = ids.
 // `repos` (`owner/name`) are the GitHub repositories the project may use through the edge; set `projects:with-repos`
-// lists every project that has one, for the approvals poller.
+// lists every project that has one, for the approvals poller. Doc `project-session:<id>` = { sessionId } is the
+// coordinator session (projects created before it keep `coordinatorSessionId` on the project doc).
 import { randomBytes, randomUUID } from 'node:crypto'
 
 const fail = (status, message) => Object.assign(new Error(message), { status })
@@ -124,7 +125,7 @@ export function projects({ store, admitted, log = console.log }) {
 /**
  * Delivers a member's message into the project's coordinator session. The project box is ensured (created or
  * resumed); the edge signs in to its dsh with the box's launch token like a browser, keeps the cookie, creates the
- * coordinator session once (its id lives on the project record) and prompts it over dsh's unary RPC
+ * coordinator session once (its id lives at `project-session:<id>`) and prompts it over dsh's unary RPC
  * (`POST api/session/prompt`). The member is named in the message text; per-member dsh principals come later.
  * `boxFetch(target, siteHost, path, init)` sends one request to the box through the client-proxy and resolves
  * { status, setCookie, body }.
@@ -167,10 +168,11 @@ export function projectRelay({ store, projects, box, boxFetch, siteHostOf, log =
       const principal = projectPrincipal(id)
       const target = await box.ensure(principal)
       const host = siteHostOf(principal)
-      let sessionId = p.coordinatorSessionId
+      // Its own key, so this write never replaces the project doc (and its repos) outside the bindings lock.
+      let sessionId = (await store.getDoc(`project-session:${id}`))?.sessionId ?? p.coordinatorSessionId
       if (!sessionId) {
         sessionId = (await rpc(target, host, 'session/create', { cwd: '/root/projects' }, member)).sessionId
-        await store.putDoc(`project:${id}`, { ...(await projects.get(id)), coordinatorSessionId: sessionId })
+        await store.putDoc(`project-session:${id}`, { sessionId })
       }
       await rpc(target, host, 'session/prompt', { requestId: randomUUID(), sessionId, mode: 'queue', content: [{ type: 'text', text: `[from ${member}] ${text.trim()}` }] }, member)
       say({ msg: 'delivered', project: id, member, session: sessionId })

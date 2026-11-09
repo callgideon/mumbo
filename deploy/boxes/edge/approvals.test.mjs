@@ -67,7 +67,7 @@ function fakeGithub() {
       return page(gh.pulls.filter(p => p.state === q.get('state')).map(({ additions, deletions, changed_files, ...simple }) => simple), q)
     }
     if (method === 'GET' && (n = m(/^\/repos\/acme\/app\/pulls\/(\d+)$/))) return json(gh.pulls.find(p => p.number === Number(n)))
-    if (method === 'GET' && (n = m(/^\/repos\/acme\/app\/pulls\/(\d+)\/files$/))) { gh.onFiles?.(); return page(gh.files[n] ?? [], q) }
+    if (method === 'GET' && (n = m(/^\/repos\/acme\/app\/pulls\/(\d+)\/files$/))) { await gh.onFiles?.(); return page(gh.files[n] ?? [], q) }
     if (method === 'GET' && (n = m(/^\/repos\/acme\/app\/issues\/(\d+)\/comments$/))) return page(gh.comments[n] ?? [], q)
     if (method === 'GET' && (n = m(/^\/repos\/acme\/app\/commits\/([0-9a-f]{40})\/check-runs$/))) return json({ check_runs: gh.runs[n] ?? [] })
     if (method === 'GET' && path === `/repos/${REPO}/installation`) return json({ id: 77 })
@@ -397,6 +397,28 @@ test('a repository given up and bound to a second project: the next poll moves i
   assert.deepEqual(await svc.list(FOUNDER), [])
   assert.equal((await svc.grant(FOUNDER, ID, SHA)).reason, 'not_owner')
   assert.equal((await svc.grant(SECOND, ID, SHA)).merged, true, 'the new owner merges it')
+})
+
+test('list() alone drops an item whose repository was removed, with no dropRepo and no poll in between', async () => {
+  const { store, svc, project } = await setup()
+  await svc.poll()
+  await removeRepo(store, project, REPO, { by: FOUNDER, approvers: [FOUNDER] })
+  assert.deepEqual(await svc.list(FOUNDER), [])
+  assert.deepEqual(await store.setMembers(`approvals:open:${project}`), [])
+  assert.equal(await store.getDoc(`approval:${ID}`), undefined)
+})
+
+test('a repository removed while a poll reads its pull request: no notification for the new head, and the item is not saved again', async () => {
+  const { gh, store, svc, project, notes } = await setup()
+  await svc.poll()
+  assert.equal(notes.length, 1)
+  gh.pulls[0].head.sha = NEW
+  gh.runs[NEW] = [run('static'), run('unit')]
+  gh.onFiles = async () => { gh.onFiles = undefined; await removeRepo(store, project, REPO, { by: FOUNDER, approvers: [FOUNDER] }) }
+  await svc.poll()
+  assert.equal(notes.length, 1, 'no notification after the unbind')
+  assert.deepEqual(await store.setMembers(`approvals:open:${project}`), [])
+  assert.equal(await store.getDoc(`approval:${ID}`), undefined, 'not resurrected')
 })
 
 test('removing one of two repositories: grant refuses its item as not_found and drops it; dropRepo removes a repository\'s items', async (t) => {

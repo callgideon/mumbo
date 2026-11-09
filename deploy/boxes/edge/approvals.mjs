@@ -139,6 +139,8 @@ export function approvalsService({ store, github, notify, audit, fetchImpl, now,
     const touched = [...new Set(files.flatMap(f => [f.filename, f.previous_filename]).filter(p => p && isProtected(p)))]
     const lines = pr.additions + pr.deletions
     const lowRisk = green && review?.verdict === 'pass' && lines < 200 && files.length === pr.changed_files && touched.length === 0
+    // The repository may have been removed while this poll read GitHub: then neither notify nor save the item again.
+    if (!(await stillBound({ project, repo }))) return drop(project, id)
     let notifiedSha = old?.notifiedSha
     if (notifiedSha !== sha) {
       try {
