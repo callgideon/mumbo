@@ -9,7 +9,7 @@ import { isoTime, said, type AcceptMode, type AdmissionCell, type ChannelRef, ty
 import { feishuChatLink } from '../sources/feishu-channel.ts'
 import { POLL_HORIZON_MS } from '../sources/poll.ts'
 import { SettingsSchema, policyVersion, type SettingsOrigin } from '../policy.ts'
-import { autoMergeThreshold, teamDefaults } from './context.ts'
+import { teamDefaults } from './context.ts'
 import { PromptConfigSchema, type PromptConfig, type PromptVersion } from './prompts.ts'
 import type { EffectKind, EffectPayloads } from './effects.ts'
 import { promptsNotice, settingsNotice, subscriptionNotice } from './notices.ts'
@@ -282,12 +282,11 @@ function legacyText(value: string): string {
 }
 /**
  * Upgrade a stored prompt configuration to current sections, tool names, and skill references; legacy configurations take
- * built-in team sections, keep custom guides as skills, and carry any auto-merge line threshold into `delivery`.
+ * built-in team sections, keep custom guides as skills, and drop any auto-merge line threshold.
  */
 function normalize(config: unknown): PromptConfig {
   const legacy = LegacyPromptConfigSchema.safeParse(config)
-  const limit = legacy.success ? /fewer than (\d+) lines \(additions plus deletions\)/.exec(legacy.data.guides.work ?? '')?.[1] : undefined
-  const current = legacy.success ? { ...teamDefaults, delivery: limit ? teamDefaults.delivery.replace(autoMergeThreshold(200), autoMergeThreshold(Number(limit))) : teamDefaults.delivery,
+  const current = legacy.success ? { ...teamDefaults, delivery: teamDefaults.delivery,
     skills: Object.fromEntries(Object.entries(legacy.data.guides).filter(([name]) => !LEGACY_FIXED.has(name)).map(([name, body]) => [name, legacyText(body)])) }
     : PromptConfigSchema.parse(config)
   return { communication: currentNames(current.communication), scope: currentNames(current.scope), delivery: currentNames(current.delivery),
@@ -313,16 +312,13 @@ function migratePrompts(store: Store): void {
   if (store.get('prompt-settings-text') === 1) return
   const before = store.get<unknown>('settings-before-9')
   const policy = (isObject(before) ? before.policy : undefined) as { autoMergeLineLimit?: unknown; members?: unknown } | undefined
-  const limit = typeof policy?.autoMergeLineLimit === 'number' ? policy.autoMergeLineLimit : 200
   const mapped = ((Array.isArray(policy?.members) ? policy.members : []) as Member[]).filter(person => person.feishuId && person.github)
   const revision = store.get<number>('prompt-revision')
   const current = revision === undefined ? undefined : store.get<PromptVersion>(`prompt-version:${revision}`)
   const config = current?.config ?? { ...teamDefaults, skills: {} }
-  const delivery = config.delivery.includes(autoMergeThreshold(200)) ? config.delivery.replace(autoMergeThreshold(200), autoMergeThreshold(limit))
-    : limit === 200 ? config.delivery : `${config.delivery}\nEnable auto-merge only on a PR that changes fewer than ${limit} lines (additions plus deletions).`
   const identities = mapped.length && !config.skills.identities ? { identities: ['The same colleague may use a different account on each Source. When you mention, assign or request a review from someone you met on another Source, use their account on this one:',
     ...mapped.map(person => `- ${person.name ?? person.feishuId} (Feishu ${person.feishuId}) is @${person.github} on GitHub`)].join('\n') } : {}
-  const next = { ...config, delivery, skills: { ...config.skills, ...identities } }
+  const next = { ...config, skills: { ...config.skills, ...identities } }
   if (JSON.stringify(next) === JSON.stringify(config)) return
   const previous = current?.revision ?? 0
   if (!current) store.set('prompt-version:0', { revision: 0, previousRevision: null, savedAt: '', source: 'defaults', config })

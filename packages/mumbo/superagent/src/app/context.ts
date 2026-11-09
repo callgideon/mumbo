@@ -23,8 +23,6 @@ export const mainAdmissionPolicy = promptFile('admission')
 const handoff = { shared: promptFile('handoff'), orchestrator: promptFile('handoff-orchestrator'), worker: promptFile('handoff-worker') }
 export const handoffPolicy = (role: 'orchestrator' | 'worker'): string => `${handoff.shared}\n${handoff[role]}`
 
-export const autoMergeThreshold = (lines: number): string => `it changes fewer than ${lines} lines (additions plus deletions);`
-
 /** Retains message content while omitting streamed chunks, usage accounting, and reasoning blocks. */
 export function transcriptEntry(event: SessionEvent) {
   if (event.type !== 'user/message' && event.type !== 'tool/result' && event.type !== 'assistant/message') return undefined

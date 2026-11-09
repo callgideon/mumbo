@@ -88,7 +88,14 @@ Settings, Policy and prompts change only in the panel. The router no longer has 
 
 ## S5: no merge, review marker
 
-The worker does not merge and posts the review marker comment. Written by task A6.
+The worker never merges, enables auto-merge or approves; it posts the review marker comment instead. Written by task A6.
+
+- `prompts/team/delivery.md`: lines 10-15 and 18 replaced; the marker `<!-- mumbo-review sha=<40 lowercase hex> verdict=<pass|fail> -->` is line 1 of the agent's PR comment and the automated-agent sentence is line 2.
+- `prompts/worker.md:6` and `prompts/team/communication.md:68` (marker-first exception).
+- `src/sources/github.ts`: `DSH_SUPERAGENT_GITHUB_ACCOUNT` description drops "except auto-merge".
+- `src/app/migration.ts`, `src/app/context.ts` (`autoMergeThreshold` removed), `src/client/locales.ts` (`promptPartHint.delivery`): no auto-merge text is carried into delivery.
+- Tests: `tests/prompts.spec.ts`, `tests/runtime.spec.ts` (merge test), `tests/cards.spec.ts`, `tests/migration.spec.ts`.
+- A delivery prompt stored by an earlier upstream install is not rewritten; merges stay impossible for workers regardless, because the edge forwards no merge.
 
 ## S6: project overlay
 

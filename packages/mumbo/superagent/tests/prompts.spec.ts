@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -20,6 +20,16 @@ function withStore(body: (store: Store, dir: string) => void): void {
   const dir = mkdtempSync(join(tmpdir(), 'prompts-')); const store = new Store(join(dir, 'db'))
   try { body(store, dir) } finally { store.close(); rmSync(dir, { recursive: true, force: true }) }
 }
+
+it('keeps merging out of the worker prompts and puts the review marker first', () => {
+  const read = (name: string) => readFileSync(join(packagePath(), 'prompts', name), 'utf8')
+  const delivery = read('team/delivery.md')
+  expect(delivery).not.toContain('--auto')
+  expect(delivery).not.toContain('merge CLI')
+  expect(delivery).toContain('<!-- mumbo-review sha=')
+  expect(read('worker.md')).toContain('Never merge a PR or enable auto-merge.')
+  expect(read('team/communication.md')).toContain('the review-marker comment begins with its marker line')
+})
 
 it('saves team sections and skills as versions that survive a restart, with history and rollback', () => {
   const dir = mkdtempSync(join(tmpdir(), 'prompt-config-'))
