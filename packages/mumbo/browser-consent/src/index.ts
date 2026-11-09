@@ -112,16 +112,18 @@ export function currentTabOrigin(text: string): string | undefined {
 
 /**
  * Summarize a call's arguments for the person deciding it. Only keys the tool's input schema declares are listed, since
- * the model may add others that the tool ignores. Each key and value is JSON with invisible format characters
- * percent-encoded and is cut at {@link VALUE_LIMIT} characters; entries that would pass {@link SUMMARY_LIMIT} are counted
- * instead of shown. `element` is returned apart because the model writes it.
+ * the model may add others that the tool ignores; those are counted, never shown. Each key and value is JSON with
+ * invisible format characters percent-encoded and is cut at {@link VALUE_LIMIT} characters; entries that would pass
+ * {@link SUMMARY_LIMIT} are counted instead of shown. `element` is returned apart because the model writes it.
  * @param args - the call's parsed arguments.
  * @param declared - the argument names the tool's input schema declares.
- * @returns the `"key": value` summary, `none` without declared arguments, and the model's element description.
+ * @returns the `"key": value` summary with counts of what it leaves out, and the model's element description.
  */
 export function describeArguments(args: unknown, declared: ReadonlySet<string>): { summary: string; element: string | undefined } {
-  const fields = fieldsOf(args)
-  const entries = Object.entries(fields).filter(([key]) => key !== 'element' && declared.has(key)).map(([key, value]) => `${shown(key)}: ${shown(value)}`)
+  if (typeof args !== 'object' || args === null) return { summary: 'not shown, because they are not a JSON object', element: undefined }
+  const fields = args as Record<string, unknown>
+  const keys = Object.keys(fields)
+  const entries = keys.filter(key => key !== 'element' && declared.has(key)).map(key => `${shown(key)}: ${shown(fields[key])}`)
   const listed: string[] = []
   let length = 0
   for (const entry of entries) {
@@ -130,9 +132,16 @@ export function describeArguments(args: unknown, declared: ReadonlySet<string>):
     length += entry.length + 2
   }
   const hidden = entries.length - listed.length
-  if (hidden > 0) listed.push(`… ${String(hidden)} more ${hidden === 1 ? 'argument' : 'arguments'} not shown`)
+  if (hidden > 0) listed.push(`… ${count(hidden, 'more argument')} not shown`)
+  const undeclared = keys.filter(key => !declared.has(key)).length
+  if (undeclared > 0) listed.push(`${count(undeclared, 'undeclared argument')} not shown`)
   const element = declared.has('element') && fields.element !== undefined ? shown(fields.element) : undefined
   return { summary: listed.length === 0 ? 'none' : listed.join(', '), element }
+}
+
+/** `n` followed by `noun`, pluralized with `s` unless `n` is 1. */
+function count(n: number, noun: string): string {
+  return `${String(n)} ${noun}${n === 1 ? '' : 's'}`
 }
 
 /** One JSON value cut at {@link VALUE_LIMIT} characters, with invisible format and separator characters percent-encoded. */
@@ -177,37 +186,25 @@ async function currentSite(ctx: Context, exec: ToolExecution): Promise<string | 
 }
 
 /**
- * Refuse every call to the tools of a browser provider that holds `browserUse` without this plugin, and the Playwright
- * MCP namespace, so a provider row loaded ahead of consent cannot drive the person's browser ungated.
- * @param ctx - plugin context carrying the tool registry.
- * @param holder - the registered provider's name, which is also its MCP tool namespace.
+ * Tool-name prefix of each browser provider whose tools can be told apart, keyed by its `browserUse` registration name.
+ * MCP providers name their tools `mcp__<server>__`; the Stagehand provider names them `stagehand_<method>`.
  */
-function refuseRival(ctx: Context, holder: string): void {
-  ctx.logger.error(`browser provider "${holder}" already holds browserUse, so its browser tools are refused; remove the row that mounts it and mount the browser only through ${name}`)
-  const prefixes = [PREFIX, `mcp__${holder}__`]
-  const refusal = (exec: ToolExecution): string | undefined => prefixes.some(prefix => exec.name.startsWith(prefix))
-    ? `${exec.name} did not run: browser tools are disabled because this browser was set up without consent checks.`
-    : undefined
-  ctx.tools.guard(refusal)
-  ctx.on('tools/pre-execute', (exec, next): Promise<PreToolDecision> => {
-    const reason = refusal(exec)
-    return reason === undefined ? next() : Promise.resolve({ kind: 'deny', reason })
-  }, { prepend: true })
+const PROVIDER_TOOL_PREFIXES: Readonly<Record<string, string>> = {
+  'playwright-mcp': PREFIX,
+  'chrome-devtools-mcp': 'mcp__chrome-devtools-mcp__',
+  'stagehand-native': 'stagehand_',
 }
 
 /**
- * Gate Playwright MCP browser writes, then mount the provider. Reads pass; a site write on an allowed origin proceeds
- * without asking; every other write asks the approval service once and is denied when unanswered for
- * `approvalTimeoutMs`. A guard denies any write that reaches dispatch without a consent this plugin recorded, so no
- * other `tools/pre-execute` listener can allow it, and an Agent-less write has no one to ask. The provider is a child of
- * this plugin that requires its service: it starts once the gate is active, finishes unloading before the gate goes, and
- * invalid configuration mounts no browser at all.
- * Each allowed write appends `browser-consent/write` to its Session when its result is final.
- * When another provider already holds `browserUse`, the plugin mounts nothing and refuses that provider's tools instead.
- * @param ctx - plugin context carrying the provider's services.
- * @param config - validated configuration.
- * @throws when an allowed site is not an exact `http:` or `https:` origin, or the browser endpoint is not a valid URL.
+ * Log that a provider other than this plugin's child holds `browserUse`, saying truthfully whether its tools are refused.
+ * @param ctx - plugin context carrying the logger.
+ * @param holder - the registered provider's name.
  */
+function reportRival(ctx: Context, holder: string): void {
+  const prefix = PROVIDER_TOOL_PREFIXES[holder]
+  ctx.logger.error(`browser provider "${holder}" holds browserUse without ${name}, so ${prefix === undefined ? 'its tools are not under consent' : `its tools (${prefix}*) are refused`}; remove the row that mounts it and mount the browser only through ${name}`)
+}
+
 export function apply(ctx: Context, config: Config): void {
   for (const site of config.allowedSites) {
     const origin = webOrigin(site)
@@ -217,21 +214,34 @@ export function apply(ctx: Context, config: Config): void {
   }
   validateBrowserMcpConfig(config.browser)
   const holder = ctx.browserUse.providerName
-  if (holder !== undefined) {
-    refuseRival(ctx, holder)
-    return
+  if (holder !== undefined && PROVIDER_TOOL_PREFIXES[holder] === undefined) {
+    throw new Error(`${name}: browser provider "${holder}" holds browserUse and its tools have no prefix this plugin can refuse; remove the row that mounts it`)
   }
+  if (holder !== undefined) reportRival(ctx, holder)
   const allowed = new Set(config.allowedSites)
   const consents = new WeakMap<ToolExecution, Consent>()
+  let owned = false
+  /** A refusal for a call to the tools of a provider that holds `browserUse` in place of this plugin's child. */
+  const rivalRefusal = (exec: ToolExecution): string | undefined => {
+    const current = ctx.browserUse.providerName
+    const prefix = current === undefined || owned ? undefined : PROVIDER_TOOL_PREFIXES[current]
+    return prefix !== undefined && exec.name.startsWith(prefix)
+      ? `${exec.name} did not run: browser tools are disabled because this browser was set up without consent checks.`
+      : undefined
+  }
   const toolOf = (exec: ToolExecution): string | undefined => exec.name.startsWith(PREFIX) ? exec.name.slice(PREFIX.length) : undefined
 
   ctx.tools.guard((exec) => {
+    const refusal = rivalRefusal(exec)
+    if (refusal !== undefined) return refusal
     const tool = toolOf(exec)
     if (tool === undefined || consents.has(exec) || classify(tool, exec.arguments) === 'read') return undefined
     return `${tool} needs the user's consent, which was not given.`
   })
 
   ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
+    const refusal = rivalRefusal(exec)
+    if (refusal !== undefined) return { kind: 'deny', reason: refusal }
     const tool = toolOf(exec)
     const agent = exec.agent
     if (tool === undefined || agent === undefined) return next()
@@ -292,8 +302,22 @@ export function apply(ctx: Context, config: Config): void {
     })
   })
 
+  if (holder !== undefined) return
   // The provider depends on this plugin's service, so it unloads before the guard and listeners go.
   ctx.provide(GATE, {})
   const { name: providerName, Config: ProviderConfig, apply: applyProvider } = PlaywrightBrowser
-  ctx.plugin({ name: providerName, inject: [...inject, GATE], Config: ProviderConfig, apply: applyProvider }, config.browser)
+  const applyOwned = (child: Context, browser: PlaywrightBrowser.Config): void => {
+    // Another provider may take browserUse between this plugin's load and its child's start.
+    const current = ctx.browserUse.providerName
+    if (current !== undefined) {
+      reportRival(ctx, current)
+      throw new Error(`${name}: browser provider "${current}" took browserUse before this plugin's browser started`)
+    }
+    applyProvider(child, browser)
+    child.effect(() => {
+      owned = true
+      return () => { owned = false }
+    })
+  }
+  ctx.plugin({ name: providerName, inject: [...inject, GATE], Config: ProviderConfig, apply: applyOwned }, config.browser)
 }

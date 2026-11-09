@@ -64,8 +64,9 @@ class ScriptedModel extends LlmAdapter {
  * Boot the composition in `root`: approval and the consent row, which mounts the real Playwright MCP provider.
  * @param root - scratch directory holding the config and serving as the Session's working directory.
  * @param options - consent config, approval policy, model script, the person's answers in order (`hang` never answers),
- *   rows placed before consent, and extra services the consent row waits for.
- * @returns the booted context and Session, the approval reasons asked, every Session event, and the consent Fiber.
+ *   rows placed before and after consent, and extra services the consent row waits for.
+ * @returns the booted context and Session, the approval reasons asked, every Session event, logged errors, and the
+ *   consent Fiber.
  */
 export async function bootComposition(root: string, options: {
   consent: Record<string, unknown>
@@ -74,6 +75,7 @@ export async function bootComposition(root: string, options: {
   answers?: Array<ApprovalOutcome | 'hang'>
   withoutApproval?: boolean
   before?: ReadonlyArray<readonly [string, Plugin]>
+  after?: ReadonlyArray<readonly [string, Plugin]>
   consentInject?: string[]
 }) {
   const asked: string[] = []
@@ -83,7 +85,7 @@ export async function bootComposition(root: string, options: {
     ['tools', Tools], ['toolExecutor', NativeToolExecutor], ['prompt', SystemPrompt], ['llm', Llm], ['sessions', Sessions],
     ['agents', Agents], ['loop', AgentLoop], ['projections', Projections], ['fs', LocalFileSystem], ['workingDirectory', WorkingDirectory],
     ...options.withoutApproval === true ? [] : [['approval', Approval] as const],
-    ['browserUse', BrowserUse], ...options.before ?? [], ['consent', Consent],
+    ['browserUse', BrowserUse], ...options.before ?? [], ['consent', Consent], ...options.after ?? [],
     ['model', { inject: ['llm'], apply(ctx: Context) { ctx.effect(() => ctx.llm.registerAdapter(['fixture'], model)) } }],
     // The person answering in the browser is an external input.
     ['person', { apply(ctx: Context) {
@@ -105,6 +107,8 @@ export async function bootComposition(root: string, options: {
     id: name, name, config: configs[name] ?? {}, ...name === 'consent' && options.consentInject !== undefined ? { inject: options.consentInject } : {},
   }))))
   const ctx = new Context()
+  const errors: string[] = []
+  ctx.logger.exporter({ levels: { default: 3 }, export: (message) => { if (message.type === 'error') errors.push(message.args.map(String).join(' ')) } })
   ctx.baseUrl = pathToFileURL(root).href + '/'
   await ctx.plugin(Loader)
   ctx.loader.builtins.include = class FixtureInclude extends Include {
@@ -121,7 +125,7 @@ export async function bootComposition(root: string, options: {
   const handle = await ctx.agents.create({ sessionId: SessionId('person'), meta: { cwd: root }, agentOptions: { provider: 'fixture', model: 'fixture' } })
   await handle.agent.whenIdle()
   const consentFiber = [...ctx.loader.entries()].find(entry => entry.options.id === 'consent')!.fiber
-  return { ctx, agent: handle.agent, asked, events, consentFiber }
+  return { ctx, agent: handle.agent, asked, events, errors, consentFiber }
 }
 
 /**

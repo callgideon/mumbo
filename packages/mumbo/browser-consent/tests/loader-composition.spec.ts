@@ -3,9 +3,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
+import { BrowserUseProviderName } from '@deepseek-ai/dsh-browser-use/brand'
 import * as PlaywrightBrowser from '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp'
+import { mountSessionMcp } from '@deepseek-ai/dsh-experimental-browser-use-runtime/mcp'
 import { ToolCallId, createUserMessage } from '@deepseek-ai/dsh-llm'
-import { executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
+import { defineContentToolFixture, executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import type { PreToolDecision, ToolExecution, ToolExecutionToken } from '@deepseek-ai/dsh-tools'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { bootComposition, consentRecords, tool, toolResults } from './harness.ts'
@@ -204,5 +206,50 @@ describe('browser write consent in the person-box composition', () => {
     expect(await calls()).toEqual([])
     const other = await executeModelToolFixture(ctx, { agent, name: 'other_tool', arguments: {}, callId: ToolCallId('other'), signal: new AbortController().signal })
     expect(other.error?.info?.code).toBe('UNKNOWN_TOOL')
+  })
+
+  it('refuses the tools of a differently named provider row that takes the browser right after consent loads', { timeout: 60_000 }, async () => {
+    const devtools = { inject: PlaywrightBrowser.inject, apply(ctx: Context) {
+      mountSessionMcp(ctx, { name: 'chrome-devtools-mcp', exclusive: true, command: process.execPath, args: [] })
+    } }
+    const { consentFiber, ctx, agent, errors, calls } = await load({ after: [['devtools', devtools]] })
+    expect(consentFiber?.state).toBe(ACTIVE)
+    expect(ctx.browserUse.providerName).toBe('chrome-devtools-mcp')
+    expect(errors).toContainEqual(expect.stringContaining('browser provider "chrome-devtools-mcp" holds browserUse without mumbo-browser-consent, so its tools (mcp__chrome-devtools-mcp__*) are refused'))
+    for (const name of ['browser_click', 'browser_snapshot']) {
+      const result = await executeModelToolFixture(ctx, { agent, name: `mcp__chrome-devtools-mcp__${name}`, arguments: {}, callId: ToolCallId(name), signal: new AbortController().signal })
+      expect(result.content).toEqual([{ type: 'text', text: `Error: mcp__chrome-devtools-mcp__${name} did not run: browser tools are disabled because this browser was set up without consent checks.` }])
+    }
+    expect(await calls()).toEqual([])
+  })
+
+  it('refuses a known non-MCP provider by its tool prefix, and fails or reports truthfully for an unknown one', { timeout: 60_000 }, async () => {
+    let acted = false
+    const holder = (providerName: string) => ({ inject: ['browserUse', 'tools'], apply(ctx: Context) {
+      ctx.effect(() => ctx.browserUse.register(BrowserUseProviderName(providerName)))
+      ctx.tools.register(defineContentToolFixture({ name: 'stagehand_act', description: 'Act.', parameters: {}, execute: () => {
+        acted = true
+        return Promise.resolve([{ type: 'text', text: 'acted' }])
+      } }))
+      ctx.provide('rivalReady', {})
+    } })
+    const stagehand = await load({ before: [['stagehand', holder('stagehand-native')]], consentInject: ['rivalReady'] })
+    expect(stagehand.consentFiber?.state).toBe(ACTIVE)
+    expect(stagehand.errors).toContainEqual(expect.stringContaining('"stagehand-native" holds browserUse without mumbo-browser-consent, so its tools (stagehand_*) are refused'))
+    const act = await executeModelToolFixture(stagehand.ctx, { agent: stagehand.agent, name: 'stagehand_act', arguments: {}, callId: ToolCallId('act'), signal: new AbortController().signal })
+    expect(act.content).toEqual([{ type: 'text', text: 'Error: stagehand_act did not run: browser tools are disabled because this browser was set up without consent checks.' }])
+    expect(acted).toBe(false)
+
+    const unknownFirst = await load({ before: [['mystery', holder('mystery')]], consentInject: ['rivalReady'] })
+    expect(unknownFirst.consentFiber?.state).toBe(FAILED)
+    expect(unknownFirst.errors).toContainEqual(expect.stringContaining('browser provider "mystery" holds browserUse and its tools have no prefix this plugin can refuse'))
+
+    const late = { inject: PlaywrightBrowser.inject, apply(ctx: Context) { ctx.effect(() => ctx.browserUse.register(BrowserUseProviderName('mystery'))) } }
+    const unknownLate = await load({ after: [['mystery', late]] })
+    expect(unknownLate.consentFiber?.state).toBe(ACTIVE)
+    expect(unknownLate.ctx.browserUse.providerName).toBe('mystery')
+    const report = unknownLate.errors.find(error => error.includes('"mystery" holds browserUse'))
+    expect(report).toContain('its tools are not under consent')
+    expect(report).not.toContain('refused')
   })
 })
