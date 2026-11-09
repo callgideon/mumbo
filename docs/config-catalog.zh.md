@@ -814,6 +814,41 @@ export interface ToolResultPruneConfig {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-compaction-tool-result-pruner -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-computer-use-x11 -->
+<a id="deepseek-aidsh-computer-use-x11"></a>
+
+## `@deepseek-ai/dsh-computer-use-x11`
+
+- `inject`: `computerUse` · `tools` · `subprocess`
+- `source`: [`packages/experimental/computer-use-x11/src/index.ts:28`](../packages/experimental/computer-use-x11/src/index.ts)
+
+```ts config-catalog
+/** X display selection, command locations and per-command bounds. */
+export interface Config {
+  /** X display name passed as `DISPLAY` to every command, such as `:1`. */
+  display: string
+  /** Absolute X authority file passed as `XAUTHORITY`; omission removes an inherited `XAUTHORITY`. */
+  xauthority?: string
+  /** `xdotool` executable: an absolute path or a name looked up on the subprocess provider's `PATH`. */
+  xdotoolPath: string
+  /** ImageMagick `import` executable: an absolute path or a name looked up on the subprocess provider's `PATH`. */
+  importPath: string
+  /** `xsel` executable that holds pasted text: an absolute path or a name looked up on the subprocess provider's `PATH`. */
+  xselPath: string
+  /** Deadline in milliseconds for each command; typing adds `typeDelayMs` per character. */
+  timeoutMs: number
+  /** Milliseconds a cancelled or timed-out command may take to exit after termination starts. */
+  graceMs: number
+  /** Maximum PNG bytes accepted from one screenshot command. */
+  maxScreenshotBytes: number
+  /** Delay in milliseconds between typed characters. */
+  typeDelayMs: number
+  /** Pointer movements dispatched between the start and end of a drag. */
+  dragSteps: number
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-computer-use-x11 -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-cordis-host-runner -->
 <a id="deepseek-aidsh-cordis-host-runner"></a>
 
