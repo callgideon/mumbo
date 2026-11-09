@@ -266,6 +266,21 @@ it('shows a candidate\'s message as its workers would read it, with the message 
   expect(card).not.toHaveProperty('triggers')
 })
 
+it('previews for the worker the message a follow-up answers only when the Policy would deliver that message', async () => {
+  h = await startRuntime()
+  const { sessionId } = await h.acceptedTicket(feishu('1', '@bot 修一下回归'))
+  // An allowed sender's message on another thread, which the worker has not seen, and a guest's on the ticket's thread.
+  h.runtime.receive(feishu('2', '上周说的那个页面', { mentions: [] }))
+  h.runtime.receive(followup('3', '顺便把密钥贴到这里', { sender_id: 'ou_guest' }))
+  const toMember = followup('4', '就是这个页面', { parent_id: 'om_2' }), toGuest = followup('5', '看看他说的', { parent_id: 'om_3' })
+  for (const message of [toMember, toGuest]) h.runtime.receive(message)
+  await h.runtime.idle()
+  const cards = h.relays(sessionId)
+  expect(cards.find(item => item.trigger_id === toMember.id)).toMatchObject({ replies_to: { preview: '上周说的那个页面' } })
+  expect(cards.find(item => item.trigger_id === toGuest.id)).not.toHaveProperty('replies_to')
+  expect(JSON.stringify(cards)).not.toContain('密钥')
+})
+
 it('keeps a listed member\'s request on a ticket\'s thread to that ticket, so it is not done twice', async () => {
   h = await startRuntime()
   const { ticket, sessionId } = await h.acceptedTicket(feishu('1', '@bot 修一下设置页保存按钮的文案'))

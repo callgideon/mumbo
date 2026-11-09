@@ -9,7 +9,7 @@ import type { AssessmentOutcome, Assignment, EngineForExecutor, Execution, Execu
   from '../core/index.ts'
 import type { Machine } from '../deployment.ts'
 import { runAsWorker, verifyDirectory } from '../infra/environment.ts'
-import type { Settings } from '../policy.ts'
+import { deliverable, type Settings } from '../policy.ts'
 import type { Store } from '../app/store.ts'
 import { Later, type Effects } from '../app/effects.ts'
 import { executionRoot, type Variable } from '../app/execution-environment.ts'
@@ -341,13 +341,17 @@ export class DshExecutor implements Executor {
     const text = message.length > ASSIGNMENT_CHARS ? JSON.stringify(capped(message, ASSIGNMENT_CHARS, inputResource(ticket.id, input.id))) : message
     await this.host.sessions.prompt(workerSessionId(ticket.id), input.id, text, 'steer', live)
   }
-  /** Formats a trigger on `ticket` for the worker, including a preview of the replied-to message when the worker has not yet seen it. */
+  /**
+   * Formats a trigger on `ticket` for the worker, including a preview of the replied-to message when the worker has not yet seen
+   * it and the Policy would deliver it to a ticket.
+   */
   private async triggerCard(ticket: Ticket, triggerId: string, note?: string): Promise<object | undefined> {
     const trigger = this.host.store.triggers.get(triggerId)
     if (!trigger) return undefined
     const parent = this.host.repliedTo(trigger)
     const seen = parent && (parent.id === ticket.origin.triggerId || ticket.inputs.some(item => item.kind === 'trigger' && item.triggerId === parent.id))
-    return triggerMessage(trigger, await this.host.sourceLink(trigger), note, seen ? undefined : parent)
+    const shown = parent && !seen && deliverable(this.host.store.settings(), parent) ? parent : undefined
+    return triggerMessage(trigger, await this.host.sourceLink(trigger), note, shown)
   }
   /**
    * After the ending transaction commits (so a rollback leaves the worker working, and a launch the same transaction queued

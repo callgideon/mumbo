@@ -5,7 +5,8 @@ import { backfillChat, consumerRetry, feishuKind, feishuTriggerId, feishuRef, fe
 import { KV } from '../src/kv.ts'
 import { apply as applyFeishu, pollThreads as pollFeishuThreads } from '../src/sources/feishu.ts'
 import { runFeishu } from '../src/sources/feishu-loops.ts'
-import { ciTrigger, commentTrigger, githubAddress, githubChannel, issueTrigger, type GithubComment, type GithubIssue } from '../src/sources/github-trigger.ts'
+import { HistoricalMessageSchema } from '../src/sources/feishu-trigger.ts'
+import { branchCiTrigger, ciTrigger, commentTrigger, githubAddress, githubChannel, issueTrigger, type GithubComment, type GithubIssue } from '../src/sources/github-trigger.ts'
 import { claimPull, observePull, pullEndNotices, pullOf, ticketBranch, type Pull } from '../src/sources/github-pull.ts'
 import { ciCounts, ciFact, ciSummary } from '../src/sources/github-read.ts'
 import { apply as applyGithub, githubKind, pollFailure, pollRound } from '../src/sources/github.ts'
@@ -121,6 +122,19 @@ describe('feishu source', () => {
     expect(feishuRef(trigger)).toEqual({ triggerId: trigger.id, chatId: 'oc_1', messageId: 'om_2', at: trigger.at })
     expect(feishuTrigger({ message_id: 'om_3', chat_id: 'oc_1', chat_type: 'p2p', sender_id: 'ou_bot', sender_type: 'bot', content: 'me', create_time: '1' }, 'ou_bot', 'cli_bot')).toBeUndefined()
     expect(feishuTrigger(historyEvent({ message_id: 'om_4', chat_id: 'oc_1', create_time: '2', sender: { id: 'ou_x', sender_type: 'app' }, body: { content: '{"text":"from app"}' } }, 'oc_1', false), 'ou_bot', 'cli_bot')).toMatchObject({ human: false, text: 'from app', threads: [{ id: 'oc_1:om_4' }] })
+  })
+  it('delivers to a subscribed ticket no history message without a sender: a system, an anonymous or an id-less app message', () => {
+    const h = host()
+    h.store.tickets.save(openTicket('ticket'))
+    subscribed(h, { source: 'feishu', id: 'oc_team:om_root' })
+    const item = (id: string, sender: Record<string, string>) => feishuTrigger(historyEvent(HistoricalMessageSchema.parse({ message_id: id,
+      chat_id: 'oc_team', create_time: '1757376000000', root_id: 'om_root', sender, body: { content: '{"text":"x"}' } }), 'oc_team', false), 'ou_bot', 'cli_bot')!
+    const senderless = [item('om_s', { sender_type: 'system' }), item('om_a', { sender_type: 'anonymous' }), item('om_e', { id: '', sender_type: 'app' })]
+    for (const trigger of senderless) expect(h.engine.receive(trigger)).toBe('stored')
+    expect(senderless.map(trigger => [trigger.actor.id, trigger.human, h.store.triggers.disposition(trigger.id)!.fanout]))
+      .toEqual([['', false, []], ['', false, []], ['', false, []]])
+    expect(h.store.tickets.get('ticket')!.inputs).toEqual([])
+    h.store.close()
   })
   it('polls subscribed threads and stores unseen replies as triggers on that thread', async () => {
     const h = host()
@@ -484,7 +498,10 @@ describe('github source', () => {
     // The agent's own comment and the merge bot's are not delivered either.
     expect([from('alice'), from('mallory'), from('dependabot[bot]', 'Bot'), from('mumbo-bot[bot]', 'Bot'), from('agent-bot')])
       .toEqual([true, false, true, false, false])
-    expect(policy.delivers(ciTrigger({ number: 7, html_url: '', user: { login: 'agent-bot' } }, 1, 'CI passed'))).toBe(true)
+    // CI on a PR and on the default branch is delivered; a senderless Trigger is not, without `meta.ci` or from another Source.
+    const ci = ciTrigger({ number: 7, html_url: '', user: { login: 'agent-bot' } }, 1, 'CI passed')
+    expect([ci, branchCiTrigger('main', 'abc', 1, 'CI passed', ''), { ...ci, meta: { number: 7, isPr: true } },
+      { ...ci, source: 'feishu', actor: { source: 'feishu', id: '' } }].map(trigger => policy.delivers(trigger))).toEqual([true, true, false, false])
   })
   it('writes the terminal notice in English for a request without Han characters', async () => {
     const h = host()

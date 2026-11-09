@@ -5,8 +5,8 @@ import type { Assessor, Assignment, Candidate, EngineOptions, Executor, Outbound
 
 const member = { source: 'chat', id: 'alice' }
 const guest = { source: 'chat', id: 'guest' }
-/** The settings Policy's delivery rule with `member` the only allowed sender and no listed bot. */
-const allowlisted: Policy['delivers'] = t => t.human ? t.actor.id === member.id : t.actor.id === ''
+/** The settings Policy's delivery rule, with `member` the only allowed sender, no listed bot, and this chat Source standing in for GitHub CI. */
+const allowlisted: Policy['delivers'] = t => t.human ? t.actor.id === member.id : t.actor.id === '' && t.meta.ci === true
 function trigger(id: string, overrides: Partial<Trigger> = {}): Trigger {
   return { id, source: 'chat', threads: [{ source: 'chat', id: 't1' }], actor: member, human: true, at: `2026-09-23T00:00:${id.padStart(2, '0')}Z`, text: `message ${id}`, channel: { source: 'chat', thread: 't1', address: { message: id } }, meta: {}, ...overrides }
 }
@@ -33,6 +33,7 @@ function harness(policyOverrides: Partial<Policy> = {}, { emit, prepareTicket }:
     gate: (t, thread) => !t.human ? { admissible: false, reason: 'not human' } : t.actor.id === 'alice' ? { admissible: true, strength: 'explicit', basis: { via: 'listed' } } : thread.subscriptions.length ? { admissible: true, strength: 'inferred', basis: { via: 'followup' } } : { admissible: false, reason: 'not a member' },
     revalidate: () => version !== 'revoked',
     admitsInferred: rules => rules.length > 0,
+    // A stand-in that delivers every Trigger, unlike the settings Policy; the S3 tests narrow it to `allowlisted`.
     delivers: () => true,
     ...policyOverrides,
   }
@@ -214,11 +215,12 @@ describe('subscription fan-out', () => {
     expect(h.repo.triggers.disposition('2')).toEqual({ fanout: [], at: expect.any(String) })
     expect(h.repo.threads.get('chat:t1')!.pending).toEqual(['2'])
   })
-  it('delivers senderless CI to the live ticket, and no unlisted bot\'s message', () => {
+  it('delivers senderless CI to the live ticket, and no unlisted bot\'s or other senderless message', () => {
     const h = harness({ delivers: allowlisted })
     const ticketId = accepted(h).ticketId!
-    h.engine.receive(trigger('2', { human: false, actor: { source: 'chat', id: '' } }))
+    h.engine.receive(trigger('2', { human: false, actor: { source: 'chat', id: '' }, meta: { ci: true } }))
     h.engine.receive(trigger('3', { human: false, actor: { source: 'chat', id: 'some-bot' } }))
+    h.engine.receive(trigger('4', { human: false, actor: { source: 'chat', id: '' } }))
     expect(h.repo.tickets.get(ticketId)!.inputs.map(input => input.kind === 'trigger' && input.triggerId)).toEqual(['2'])
   })
   it('does not resume an ended ticket on a guest\'s message, which goes to Eval', () => {

@@ -124,6 +124,12 @@ export function listedBot(settings: Settings, actor: ActorRef): z.infer<typeof A
   const bots = z.array(AllowedSchema).catch([]).parse(settings.policy.sources[actor.source]?.bots ?? [])
   return bots.find(entry => sameName(entry.id, actor.id))
 }
+/**
+ * Whether a Trigger may reach a ticket as an Input: a person on the Source's allowed list, a bot on its bot list, or GitHub CI,
+ * which has no sender and which GitHub's CI Triggers label with `meta.ci`. Any other senderless Trigger is withheld.
+ */
+export const deliverable = (settings: Settings, trigger: Trigger): boolean => trigger.human ? !!allowedSender(settings, trigger.actor)
+  : (trigger.source === 'github' && trigger.actor.id === '' && trigger.meta.ci === true) || !!listedBot(settings, trigger.actor)
 export const anyoneAllowed = (settings: Settings): boolean => Object.values(settings.policy.sources).some(part => part.allowed.length > 0)
 const senderName = (entry: z.infer<typeof AllowedSchema>): string => entry.name || entry.id
 
@@ -210,8 +216,7 @@ export function settingsPolicy(settings: Settings, sources: SourceScope): Policy
       return { admissible: false, reason: !allowed ? 'not_a_member' : receivable && admission === 'ignore' ? 'admission_ignored' : 'no_mention' }
     },
     admitsInferred: rules => mode === 'auto' && rules.length > 0 && rules.every(id => settings.policy.rules.some(rule => rule.enabled && rule.id === id)),
-    // An empty actor id is CI, which has no sender.
-    delivers: trigger => trigger.human ? !!allowedSender(settings, trigger.actor) : trigger.actor.id === '' || !!listedBot(settings, trigger.actor),
+    delivers: trigger => deliverable(settings, trigger),
     revalidate(mandate: Mandate) {
       // Revalidation rules follow docs/002 (Eval path; Resume revalidates).
       const { basis } = mandate
