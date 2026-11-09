@@ -51,6 +51,21 @@ Commit, `docker build` `deploy/boxes/edge` and push to `mumbo-boxes/edge:<commit
 ### Rebuild the box template
 `node deploy/boxes/edge/template.mjs <mumbo web image>` with `E2B_API_URL`, `E2B_SANDBOX_URL`, `E2B_API_KEY` (team key from the `mumbo-boxes/e2b` secret) and `ECR_PASSWORD`. From outside the VPC, tunnel through a node with SSM port forwarding to `api.boxes.internal:3000` and `sandbox.boxes.internal:3002`; the internal NLB admits :3002 only from the edge, so add a temporary rule for the node security group and remove it afterwards. A new template reaches a user when their box is next created.
 
+### Model routes
+Boxes reach models only through the edge model host (`llm.` host, port 8081), with their box token as the API key; every route checks the token, the source address (`BOX_EGRESS_IPS`), the founder's stop switch, the daily request budget (`DAILY_MODEL_REQUESTS`) and the daily token budget (`DAILY_TOKENS_USER`, `DAILY_TOKENS_PROJECT`; usage read from each response), and swaps the token for the edge's own key.
+
+| Route | Box side | Upstream | Body cap |
+|---|---|---|---|
+| DeepSeek | `DEEPSEEK_BASE_URL=https://<llm host>/anthropic`, search `/v1/tools/…`, `/models` | `MODEL_UPSTREAM` (api.deepseek.com), key `mumbo/prod/deepseek-api-key` | none at the edge |
+| OpenRouter | dsh-llm-pi-ai route `openrouter`, `baseURL https://<llm host>/openrouter/v1`, written by `startScript` (`/root/.mumbo/models.overlay.yml`) | `https://openrouter.ai/api/v1/chat/completions` and `/models` only, key `mumbo-boxes/openrouter` (`OPENROUTER_API_KEY`) | 20 MiB (413); dsh keeps images to 12 MiB |
+
+OpenRouter allows only the exact model ids in `OPENROUTER_MODELS` (tfvar `openrouter_models`, default `qwen/qwen3.8-27b,qwen/qwen3.5-9b`); any other `model` is refused with 400 before forwarding, and `/openrouter/v1/models` lists only those ids. The edge drops the request fields `provider`, `models`, `plugins`, `route`, `transforms` and `web_search_options`, then sets `provider` to `{"data_collection":"deny","zdr":true}` (no endpoint that trains on prompts; zero-data-retention endpoints only), and on a streamed request sets `stream_options.include_usage` to true. Usage is `prompt_tokens + completion_tokens` (reasoning tokens are inside `completion_tokens`); a box that drops a stream before its usage chunk is charged ceil(request bytes without image data / 3) plus ceil(streamed characters / 3).
+
+- **Add or remove a model:** change `openrouter_models` and apply. The edge enforces it at once; a box lists the new set when it is next created (`startScript`), with metadata from dsh's pi-ai catalog unless `OPENROUTER_BOX_MODELS` in `edge.mjs` overrides it. A box created earlier keeps listing a removed model, whose requests get 400.
+- **Disable:** set `openrouter_models = ""` and apply: the paths answer 404, the task stops reading the key, and new boxes get no OpenRouter route.
+- **No ZDR endpoint:** if requests fail with OpenRouter's 404 about data policy, set `openrouter_zdr = false` and apply; `data_collection: deny` stays.
+- **Sessions:** a Session keeps the model it started with; to use images, the user starts a Session on a Qwen model.
+
 ### Restore Postgres to a point in time
 `aws rds restore-db-instance-to-point-in-time --source-db-instance-identifier mumbo-boxes-e2b --target-db-instance-identifier mumbo-boxes-e2b-restore --restore-time <UTC>` into the same subnet group and security group, then point `POSTGRES_CONNECTION_STRING` in the `mumbo-boxes/e2b` secret at the new instance and force a new deployment of api. Snapshots that newer rows point at stay in the versioned templates bucket for 14 days (review M4).
 

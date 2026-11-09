@@ -69,6 +69,12 @@ export const config = () => ({
   // The sign-in page (authUi) is served only when set; SUPABASE_ANON_KEY, MUMBO_OAUTH_CLIENT_IDS and
   // MUMBO_OAUTH_REDIRECT_URIS (comma-separated, exact) are then required.
   supabaseUrl: optional('SUPABASE_URL'),
+  // The model host's OpenRouter route (OPENROUTER_PATHS): the exact model ids boxes may call, comma-separated; empty turns
+  // the route off. OPENROUTER_API_KEY, from Secrets Manager mumbo-boxes/openrouter through the ECS secrets map, is then
+  // required. OPENROUTER_ZDR=false allows endpoints that retain prompts; none may train on them (openrouterBody).
+  openrouterModels: env('OPENROUTER_MODELS', '').split(',').map(s => s.trim()).filter(Boolean),
+  openrouterKey: optional('OPENROUTER_API_KEY'),
+  openrouterZdr: env('OPENROUTER_ZDR', 'true') !== 'false',
 })
 
 /** Address or @domain allowlist; an empty list admits nobody. */
@@ -147,6 +153,10 @@ export function boxSite(cfg, principal) {
 // and box/gh as read by main() at start, written into project boxes. panelAdmins: the project owners' emails, for MUMBO_PANEL_ADMINS.
 export function startScript(cfg, token, site = boxSite(cfg, ''), role = '', memberKeyText, boxFiles, panelAdmins = []) {
   const llm = `https://${cfg.llmHost}`
+  // dsh's OpenRouter route (@deepseek-ai/dsh-llm-pi-ai, the base composition's row llm-pi-ai) through the model host,
+  // keyed by the box token. Images leave 8 MiB of OPENROUTER_MAX_BODY for a full context's text.
+  const openrouter = cfg.openrouterModels?.length ? { apiKeyEnv: 'DEEPSEEK_API_KEY', baseURL: `${llm}/openrouter/v1`, maxRequestImageBytes: 12 * 1024 * 1024,
+    models: cfg.openrouterModels.map(id => ({ id, ...OPENROUTER_BOX_MODELS[id] })) } : undefined
   const b64 = (text) => Buffer.from(text).toString('base64')
   const sq = (text) => `'${text.replaceAll("'", `'\\''`)}'`
   return `#!/bin/sh
@@ -173,7 +183,13 @@ cat > /root/.mumbo/sandboxes.overlay.yml <<'YML'
 ${site.desktop ? `    - id: browser-use
       name: '@deepseek-ai/dsh-browser-use'
 ` : ''}YML
-${site.desktop ? `# The user's Chromium for dsh's browser tools. With @mumbo/browser-consent in the image, writes on a site ask the
+${openrouter ? `# Image-capable models on OpenRouter (edge OPENROUTER_MODELS). A Session keeps the model it starts with.
+cat > /root/.mumbo/models.overlay.yml <<'YML'
+- id: llm-pi-ai
+  config:
+    providers: ${JSON.stringify({ openrouter })}
+YML
+` : ''}${site.desktop ? `# The user's Chromium for dsh's browser tools. With @mumbo/browser-consent in the image, writes on a site ask the
 # person first; consent mounts the Playwright MCP provider itself, so the plain provider row is used only without it.
 if [ -d /src/packages/mumbo/browser-consent ]; then
 cat >> /root/.mumbo/sandboxes.overlay.yml <<'YML'
@@ -278,7 +294,7 @@ ${site.desktop ? '' : `PATH=/root/.mumbo/bin:$PATH NODE_USE_ENV_PROXY=1 NODE_EXT
 `}HOME=/root DSH_HOME=/root/.dsh DSH_AGENTS_HOME=/root/.mumbo/agents DSH_TELEMETRY_DISABLED=1 \\
 DEEPSEEK_BASE_URL=${llm}/anthropic DEEPSEEK_SEARCH_BASE_URL=${llm} DEEPSEEK_API_KEY=${token} \\
 nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\
-  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml $LINKS_PATCH${site.desktop ? ' $CU_PATCH' : ''}${memberKeyText ? ' $PROJECT_PATCH' : ''} \\
+  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml${openrouter ? ' --patch /root/.mumbo/models.overlay.yml' : ''} $LINKS_PATCH${site.desktop ? ' $CU_PATCH' : ''}${memberKeyText ? ' $PROJECT_PATCH' : ''} \\
   --no-open --host "$ip" --port 3080 --public-url ${site.publicUrl} --trusted-host ${cfg.publicHost}${site.host === cfg.publicHost ? '' : ` --trusted-host ${site.host}`} > /root/dsh.log 2>&1 &
 `
 }
@@ -775,9 +791,51 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log
 
 /** Model and search calls from boxes. Only paths dsh uses are forwarded; the box token is swapped for the server key. */
 export const MODEL_PATHS = [/^\/anthropic\//, /^\/models$/, /^\/v1\/tools\//]
+/** The OpenRouter route (OpenAI Chat Completions): method and path on the model host -> the fixed upstream URL. Served
+ *  while cfg.openrouterModels names a model. */
+export const OPENROUTER_PATHS = {
+  'POST /openrouter/v1/chat/completions': 'https://openrouter.ai/api/v1/chat/completions',
+  'GET /openrouter/v1/models': 'https://openrouter.ai/api/v1/models',
+}
+/** Request fields that change OpenRouter's routing or cost (fallback models, plugins such as web search, prompt
+ *  transforms); openrouterBody drops them. */
+export const OPENROUTER_STRIPPED = ['provider', 'models', 'plugins', 'route', 'transforms', 'web_search_options']
+/** Request body cap on the OpenRouter route (413 above it); images travel base64 in the JSON. Other model paths have no edge cap. */
+export const OPENROUTER_MAX_BODY = 20 * 1024 * 1024
+/** Box-side metadata by OpenRouter id, on top of the installed pi-ai catalog's; an allowlisted model without an entry
+ *  takes the catalog's. Context windows as OpenRouter lists them (2026-11-09). */
+const OPENROUTER_BOX_MODELS = {
+  'qwen/qwen3.8-27b': { contextWindow: 1_024_000, input: ['text', 'image'] },
+  'qwen/qwen3.5-9b': { contextWindow: 262_144, input: ['text', 'image'] },
+}
+
+/**
+ * The upstream body for a chat request on the OpenRouter route, or why it is refused (400). `model` must be one of
+ * cfg.openrouterModels exactly. OPENROUTER_STRIPPED fields are dropped and `provider` is always the edge's own:
+ * `data_collection: "deny"` (no endpoint that trains on prompts), plus `zdr: true` (zero-data-retention endpoints only)
+ * unless cfg.openrouterZdr is false. A streamed request always asks for the usage chunk the token budget reads.
+ * @param {object} cfg - config()
+ * @param {Buffer} raw - the request body
+ * @returns {{ error: string } | { body: string, model: string, inputEstimate: number }} `inputEstimate` is ceil(bytes / 3)
+ *   of the request without its image data: the input charged when a box drops the response before its usage.
+ */
+export function openrouterBody(cfg, raw) {
+  let body
+  try { body = JSON.parse(raw) } catch { return { error: 'The request body is not JSON.' } }
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) return { error: 'The request body must be a JSON object.' }
+  if (!cfg.openrouterModels.includes(body.model)) return { error: `Model ${JSON.stringify(body.model)} is not offered; use one of ${cfg.openrouterModels.join(', ')}.` }
+  for (const field of OPENROUTER_STRIPPED) delete body[field]
+  body.provider = { data_collection: 'deny', ...(cfg.openrouterZdr ? { zdr: true } : {}) }
+  if (body.stream === true) body.stream_options = { ...(typeof body.stream_options === 'object' ? body.stream_options : {}), include_usage: true }
+  const images = (Array.isArray(body.messages) ? body.messages : []).flatMap(m => Array.isArray(m?.content) ? m.content : [])
+    .reduce((n, part) => n + (typeof part?.image_url?.url === 'string' ? part.image_url.url.length : 0), 0)
+  return { body: JSON.stringify(body), model: body.model, inputEstimate: Math.ceil(Math.max(0, raw.length - images) / 3) }
+}
+
 // github (github.mjs), halt (halt.mjs) and tokens (budget.mjs tokenBudget) are optional like mcp: absent, /github/
 // answers 404, nothing is halted and tokens are not counted. main() passes all of them.
 export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, mcp, github, halt, tokens, fetchImpl = fetch, log = console.log }) {
+  if (cfg.openrouterModels?.length && !cfg.openrouterKey) throw new Error('edge: OPENROUTER_MODELS needs OPENROUTER_API_KEY')
   return createServer((req, res) => route(req, res).catch((e) => {
     log(JSON.stringify({ edge: 'error', path: req.url?.split('?')[0], error: e.message }))
     if (!res.headersSent) json(res, 502, { error: 'edge error' }); else res.destroy()
@@ -795,25 +853,44 @@ export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, mcp, g
     if (path === '/mcp' && mcp) { Promise.resolve(touch(claim.b)).catch(() => {}); return mcp(req, res) }
     // GitHub for project boxes; the forwarder applies its own rules and the stop switch.
     if (path.startsWith('/github/') && github) return github(req, res, claim)
-    if (!MODEL_PATHS.some(p => p.test(path))) return json(res, 404, { error: 'not found' })
+    const openrouter = cfg.openrouterModels?.length ? OPENROUTER_PATHS[`${req.method} ${path}`] : undefined
+    if (!openrouter && !MODEL_PATHS.some(p => p.test(path))) return json(res, 404, { error: 'not found' })
     if (halt && await halt.isHalted(claim.u)) return json(res, 503, { type: 'error', error: { type: 'api_error', message: 'Stopped by the founder' } })
     if (!(await allow(claim.u))) return json(res, 429, { type: 'error', error: { type: 'rate_limit_error', message: 'Daily model budget reached for this account.' } })
     if (tokens && !(await tokens.allow(claim.u))) return json(res, 429, { type: 'error', error: { type: 'rate_limit_error', message: `Daily token budget reached for ${claim.u}` } })
     Promise.resolve(touch(claim.b)).catch(() => {})
     const chunks = []
-    for await (const c of req) chunks.push(c)
-    const headers = {}
-    for (const name of ['content-type', 'accept', 'anthropic-version', 'anthropic-beta', 'user-agent']) if (req.headers[name] !== undefined) headers[name] = req.headers[name]
-    headers['x-api-key'] = modelKey
-    headers.authorization = `Bearer ${modelKey}`
+    const cap = openrouter ? OPENROUTER_MAX_BODY : Infinity
+    let size = 0
+    for await (const c of req) if ((size += c.length) <= cap) chunks.push(c)
+    if (size > cap) return json(res, 413, { error: { type: 'invalid_request_error', message: `Request bodies are limited to ${cap} bytes here.` } })
+    let url = `${cfg.upstream}${req.url}`, init, forwarded
+    if (openrouter) {
+      const authorization = `Bearer ${cfg.openrouterKey}`
+      if (req.method === 'GET') {
+        const listed = await fetchImpl(openrouter, { headers: { authorization }, redirect: 'error' })
+        if (!listed.ok) return json(res, 502, { error: { type: 'api_error', message: `OpenRouter answered ${listed.status}` } })
+        return json(res, 200, { data: ((await listed.json()).data ?? []).filter(m => cfg.openrouterModels.includes(m?.id)) })
+      }
+      forwarded = openrouterBody(cfg, Buffer.concat(chunks))
+      if (forwarded.error) return json(res, 400, { error: { type: 'invalid_request_error', message: forwarded.error } })
+      url = openrouter
+      init = { method: 'POST', headers: { 'content-type': 'application/json', authorization }, body: forwarded.body, redirect: 'error' }
+    } else {
+      const headers = {}
+      for (const name of ['content-type', 'accept', 'anthropic-version', 'anthropic-beta', 'user-agent']) if (req.headers[name] !== undefined) headers[name] = req.headers[name]
+      headers['x-api-key'] = modelKey
+      headers.authorization = `Bearer ${modelKey}`
+      init = { method: req.method, headers, body: ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks), redirect: 'error' }
+    }
     const started = Date.now()
-    const upstream = await fetchImpl(`${cfg.upstream}${req.url}`, { method: req.method, headers, body: ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks), redirect: 'error' })
-    log(JSON.stringify({ edge: 'model', user: claim.u, box: claim.b, path, status: upstream.status, ms: Date.now() - started }))
+    const upstream = await fetchImpl(url, init)
+    log(JSON.stringify({ edge: 'model', user: claim.u, box: claim.b, path, ...(forwarded ? { model: forwarded.model } : {}), status: upstream.status, ms: Date.now() - started }))
     const out = {}
     for (const [k, v] of upstream.headers) if (!['content-encoding', 'content-length', 'transfer-encoding', 'connection', 'set-cookie'].includes(k)) out[k] = v
     res.writeHead(upstream.status, out)
     if (upstream.body === null) return void res.end()
-    const body = tokens ? tokens.meter(claim.u, upstream.body, upstream.headers.get('content-type')) : upstream.body
+    const body = tokens ? tokens.meter(claim.u, upstream.body, upstream.headers.get('content-type'), forwarded?.inputEstimate) : upstream.body
     // pipeline destroys the source when the client closes, so a dropped connection cancels the metered stream.
     pipeline(Readable.fromWeb(body), res, () => {})
   }

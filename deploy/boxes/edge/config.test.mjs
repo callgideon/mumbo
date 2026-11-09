@@ -6,7 +6,8 @@ import { config } from './edge.mjs'
 
 const base = { PUBLIC_HOST: 'boxes.mumbo.si', LLM_HOST: 'llm.boxes.mumbo.si', BACKUP_BUCKET: 'backups' }
 const M1 = ['APPROVE_HOST', 'GITHUB_AGENT_LOGIN', 'REQUIRED_CHECKS', 'DAILY_TOKENS_USER', 'DAILY_TOKENS_PROJECT', 'BOX_TEMPLATE', 'PROJECT_TEMPLATE',
-  'AUDIT_PREFIX', 'GITHUB_AGENT_TOKEN', 'GITHUB_APP_ID', 'GITHUB_APP_KEY', 'GITHUB_MERGE_TOKEN', 'NTFY_TOPIC', 'SIGNIN_COOKIE']
+  'AUDIT_PREFIX', 'GITHUB_AGENT_TOKEN', 'GITHUB_APP_ID', 'GITHUB_APP_KEY', 'GITHUB_MERGE_TOKEN', 'NTFY_TOPIC', 'SIGNIN_COOKIE',
+  'OPENROUTER_MODELS', 'OPENROUTER_API_KEY', 'OPENROUTER_ZDR']
 /** config() with exactly `base` plus `vars` set among the variables it reads here. */
 function configWith(vars = {}) {
   const all = { ...Object.fromEntries(M1.map(k => [k, undefined])), ...base, ...vars }
@@ -46,4 +47,12 @@ test('rollback safety: the pre-B13 edge filter strips the default sign-in cookie
   const tfDefault = /variable "signin_cookie_name" \{[^}]*default\s*=\s*"([^"]*)"/.exec(readFileSync(new URL('../prod/edge.tf', import.meta.url), 'utf8'))?.[1]
   assert.equal(tfDefault, configWith().signinCookie, 'the Terraform default and the edge default agree')
   for (const name of [tfDefault, configWith().signinCookie]) assert.equal(preB13(`${name}=a; ${name}_1=b; dsh-auth-x=d`), 'dsh-auth-x=d', name)
+})
+
+test('OpenRouter route: off unless OPENROUTER_MODELS names models (exact ids, trimmed); ZDR-only unless OPENROUTER_ZDR=false', () => {
+  const off = configWith()
+  assert.deepEqual(off.openrouterModels, []); assert.equal(off.openrouterKey, undefined); assert.equal(off.openrouterZdr, true)
+  const on = configWith({ OPENROUTER_MODELS: ' qwen/qwen3.8-27b , qwen/Qwen3.5-9b,', OPENROUTER_API_KEY: 'k', OPENROUTER_ZDR: 'false' })
+  assert.deepEqual(on.openrouterModels, ['qwen/qwen3.8-27b', 'qwen/Qwen3.5-9b'])
+  assert.equal(on.openrouterKey, 'k'); assert.equal(on.openrouterZdr, false)
 })
