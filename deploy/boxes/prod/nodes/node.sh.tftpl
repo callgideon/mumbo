@@ -93,9 +93,10 @@ umask 022
 cat > /usr/local/bin/mumbo-drain <<'SH'
 #!/bin/bash
 # ExecStop of e2b-orchestrator: a stop, restart or termination pauses boxes (memory kept) instead of killing them.
-. /etc/e2b/node.env
-curl -sf -m 3 http://127.0.0.1:5008/health >/dev/null || { echo "mumbo-drain: orchestrator not serving; nothing to pause"; exit 0; }
-boxes() { ls /sys/fs/cgroup/e2b 2>/dev/null | sed -n 's/^sbx-\(.*\)-[^-]*$/\1/p' | sort -u; }
+# Exported: the pauses run in child shells. NODE_ENV, CGROUP_ROOT and ORCH_HEALTH exist for nodes/drain.test.sh.
+set -a; . "$${NODE_ENV:-/etc/e2b/node.env}"; set +a
+curl -sf -m 3 "$${ORCH_HEALTH:-http://127.0.0.1:5008/health}" >/dev/null || { echo "mumbo-drain: orchestrator not serving; nothing to pause"; exit 0; }
+boxes() { ls "$${CGROUP_ROOT:-/sys/fs/cgroup/e2b}" 2>/dev/null | sed -n 's/^sbx-\(.*\)-[^-]*$/\1/p' | sort -u; }
 # Placement stops first: every api replica sees the status on its next node sync (10 s), so wait two syncs.
 curl -s -m 10 -X POST -H "X-Admin-Token: $ADMIN_TOKEN" -H 'content-type: application/json' -d '{"status":"draining"}' "$API_URL/nodes/$NODE_IP" -o /dev/null -w "mumbo-drain: mark draining %%{http_code}\n"
 sleep 20
