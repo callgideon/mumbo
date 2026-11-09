@@ -23,6 +23,9 @@ const hostname = (name, fallback) => {
   if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(value)) throw new Error(`edge: ${name} must be a bare lowercase hostname such as boxes.mumbo.si, not ${JSON.stringify(value)}`)
   return value
 }
+/** oauth2-proxy's sign-in cookie name when SIGNIN_COOKIE is unset (prod sets it from Terraform signin_cookie_name). It
+ *  starts with _oauth2_proxy, so edge images older than SIGNIN_COOKIE, which strip only that prefix, strip it too. */
+const SIGNIN_COOKIE = '_oauth2_proxy_mumbo'
 /** A cookie name: one or more RFC 9110 token characters. Anything else, the empty string included, fails at start. */
 const cookieName = (name, fallback) => {
   const value = env(name, fallback)
@@ -33,7 +36,7 @@ export const config = () => ({
   publicHost: env('PUBLIC_HOST'),
   projectDomain: hostname('PROJECT_DOMAIN', 'boxes.mumbo.si'),  // project boxes are served at p-<16 hex>.<this>
   llmHost: env('LLM_HOST'),
-  signinCookie: cookieName('SIGNIN_COOKIE', '_mumbo_auth'),  // oauth2-proxy's --cookie-name; boxHeaders drops it
+  signinCookie: cookieName('SIGNIN_COOKIE', SIGNIN_COOKIE),  // oauth2-proxy's --cookie-name; see isSignin
   template: env('BOX_TEMPLATE', 'mumbo-box'),
   idleMs: Number(env('IDLE_MINUTES', '30')) * 60_000,
   pauseIdle: env('PAUSE_IDLE', 'true') !== 'false',  // false: boxes stay running (founder, 2026-11-09); cost work comes later
@@ -562,18 +565,20 @@ export function boxRoute(url, projectDomain) {
   if (url.startsWith('/desktop/')) return { port: '6080', path: url.slice('/desktop'.length), base: '' }
   return { port: '3080', path: url, base: '' }
 }
+/** True when a cookie (`name=value…`, a Cookie pair or a Set-Cookie line) has a sign-in name: the name, the text before
+ *  the first `=`, starts with cfg.signinCookie, which covers oauth2-proxy's <name>_0, _1… chunks and its
+ *  <name>_<hash>_csrf cookies, or with oauth2-proxy's default name _oauth2_proxy, which browsers signed in before
+ *  SIGNIN_COOKIE still hold. */
+const isSignin = (cfg, cookie) => [cfg.signinCookie ?? SIGNIN_COOKIE, '_oauth2_proxy'].some(p => cookie.split('=')[0].trim().startsWith(p))
 /** Headers for the box: client headers minus hop-by-hop, identity and E2B headers, plus E2B routing for this box only.
  *  The browser's Origin passes unchanged; dsh accepts it only when it equals the box's masked host (boxSite). */
 export function boxHeaders(cfg, incoming, target, port = '3080') {
   const out = {}
   for (const [k, v] of Object.entries(incoming)) if (!DROP.has(k) && !k.startsWith('x-forwarded-') && !k.startsWith('e2b-')) out[k] = v
   // The sign-in cookie (oauth2-proxy) never reaches a box: a box that saw it could replay it as the signed-in person.
-  // Matched by name prefix, which covers oauth2-proxy's <name>_0, _1… chunks and <name>_<hash>_csrf cookies; browsers
-  // signed in before SIGNIN_COOKIE still send oauth2-proxy's default name, _oauth2_proxy. Used by every box request:
-  // HTTP, WebSocket upgrades and the relay (boxFetcher).
+  // Every box request goes through here: HTTP, WebSocket upgrades and the relay (boxFetcher).
   if (out.cookie !== undefined) {
-    const signin = [cfg.signinCookie, '_oauth2_proxy']
-    const kept = String(out.cookie).split(';').map(c => c.trim()).filter(c => c && !signin.some(p => c.split('=')[0].startsWith(p)))
+    const kept = [out.cookie].flat().join(';').split(';').map(c => c.trim()).filter(c => c && !isSignin(cfg, c))
     if (kept.length) out.cookie = kept.join('; '); else delete out.cookie
   }
   out.host = `sandbox.${cfg.publicHost}`
@@ -607,11 +612,13 @@ export const boxFetcher = (cfg) => (target, siteHost, path, { method = 'GET', he
   req.on('error', reject)
   req.end(body)
 })
-/** dsh listens on plain HTTP inside the box, so its cookies lack Secure; the edge adds it and drops any Domain. */
-export const secureCookies = (headers) => {
-  const c = headers['set-cookie']
+/** dsh listens on plain HTTP inside the box, so its cookies lack Secure; the edge adds it and drops any Domain. A box
+ *  cookie with a sign-in name (isSignin) is dropped: on the box's host it would shadow the visitor's sign-in. */
+export const secureCookies = (cfg, headers) => {
+  if (headers['set-cookie'] === undefined) return headers
   // Host-only: a box may not set a cookie for the parent domain, which other boxes and the sign-in share.
-  if (c) headers['set-cookie'] = c.map(v => v.replace(/;\s*domain=[^;]*/gi, '')).map(v => /;\s*secure/i.test(v) ? v : `${v}; Secure`)
+  const kept = headers['set-cookie'].filter(v => !isSignin(cfg, v)).map(v => v.replace(/;\s*domain=[^;]*/gi, '')).map(v => /;\s*secure/i.test(v) ? v : `${v}; Secure`)
+  if (kept.length) headers['set-cookie'] = kept; else delete headers['set-cookie']
   return headers
 }
 /** No other origin may frame a page from a box: a project page could otherwise show, and clickjack, the visitor's
@@ -680,7 +687,7 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, log = conso
     const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: to.path, headers: { ...boxHeaders(cfg, req.headers, target, to.port), ...(member ? { 'x-mumbo-member': member } : {}) } }, (r) => {
       // A stale cookie (another account on this browser, or a recreated box) gets a fresh exchange instead of a dead end.
       if (dsh && !member && r.statusCode === 401 && isNavigation(req)) { r.resume(); return res.writeHead(302, { location: launch, 'cache-control': 'no-store' }).end() }
-      res.writeHead(r.statusCode ?? 502, noFraming(secureCookies({ ...r.headers })))
+      res.writeHead(r.statusCode ?? 502, noFraming(secureCookies(cfg, { ...r.headers })))
       r.pipe(res)
     })
     up.on('error', (e) => { quiet(box.forget(target.id)); if (!res.headersSent) page(res, 502, 'Could not reach your box. Retrying…'); else res.destroy(); log(JSON.stringify({ edge: 'error', user: email, error: e.message })) })
@@ -703,7 +710,7 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, log = conso
       const headers = { ...boxHeaders(cfg, req.headers, target, to.port), ...(member ? { 'x-mumbo-member': member } : {}), connection: 'Upgrade', upgrade: req.headers.upgrade ?? 'websocket' }
       const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: to.path, headers })
       up.on('upgrade', (r, upSocket, upHead) => {
-        const lines = Object.entries(secureCookies({ ...r.headers })).flatMap(([k, v]) => [v].flat().map(x => `${k}: ${x}`))
+        const lines = Object.entries(secureCookies(cfg, { ...r.headers })).flatMap(([k, v]) => [v].flat().map(x => `${k}: ${x}`))
         socket.write(`HTTP/1.1 101 Switching Protocols\r\n${lines.join('\r\n')}\r\n\r\n`)
         if (upHead.length) socket.write(upHead)
         if (head.length) upSocket.write(head)

@@ -86,7 +86,7 @@ async function forwarder({ reply = ok, lookup = lookupOk, agentToken = 'AGENT', 
 
 test('reads: a project repository is read with the agent token; the box token and x-api-key stay behind', async (t) => {
   const f = await forwarder(); t.after(f.close)
-  const r = await f.call('api.github.com/repos/callgideon/mumbo/pulls?state=open', { headers: { authorization: 'Bearer BOXTOKEN', 'x-api-key': 'BOXTOKEN', accept: 'application/vnd.github+json', cookie: '_mumbo_auth=s' } })
+  const r = await f.call('api.github.com/repos/callgideon/mumbo/pulls?state=open', { headers: { authorization: 'Bearer BOXTOKEN', 'x-api-key': 'BOXTOKEN', accept: 'application/vnd.github+json', cookie: '_oauth2_proxy_mumbo=s' } })
   assert.equal(r.status, 200)
   assert.equal(r.body, '{"ok":true}')
   assert.equal(f.calls[0].url, 'https://api.github.com/repos/callgideon/mumbo/pulls?state=open')

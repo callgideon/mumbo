@@ -1,5 +1,6 @@
 // node --test: the edge's M1 settings from the environment.
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { config } from './edge.mjs'
 
@@ -33,8 +34,16 @@ test('an empty REQUIRED_CHECKS fails at start instead of dropping the merge gate
   for (const value of ['', ' ', ' , ,']) assert.throws(() => configWith({ REQUIRED_CHECKS: value }), /REQUIRED_CHECKS must name at least one check/, JSON.stringify(value))
 })
 
-test('SIGNIN_COOKIE: _mumbo_auth when unset; an empty or malformed cookie name fails at start', () => {
-  assert.equal(configWith().signinCookie, '_mumbo_auth')
+test('SIGNIN_COOKIE: _oauth2_proxy_mumbo when unset; an empty or malformed cookie name fails at start', () => {
+  assert.equal(configWith().signinCookie, '_oauth2_proxy_mumbo')
   assert.equal(configWith({ SIGNIN_COOKIE: '_other' }).signinCookie, '_other')
-  for (const value of ['', ' ', 'a b', 'a=b', 'a;b', '_mumbo_auth,']) assert.throws(() => configWith({ SIGNIN_COOKIE: value }), /SIGNIN_COOKIE must be a cookie name/, JSON.stringify(value))
+  for (const value of ['', ' ', 'a b', 'a=b', 'a;b', '_oauth2_proxy_mumbo,']) assert.throws(() => configWith({ SIGNIN_COOKIE: value }), /SIGNIN_COOKIE must be a cookie name/, JSON.stringify(value))
+})
+
+test('rollback safety: the pre-B13 edge filter strips the default sign-in cookie and its chunks', () => {
+  // boxHeaders' cookie filter as at 41bac8fe7f: prefix _oauth2_proxy only. Older edge images run it.
+  const preB13 = (cookie) => cookie.split(';').map(c => c.trim()).filter(c => c && !c.startsWith('_oauth2_proxy')).join('; ')
+  const tfDefault = /variable "signin_cookie_name" \{[^}]*default\s*=\s*"([^"]*)"/.exec(readFileSync(new URL('../prod/edge.tf', import.meta.url), 'utf8'))?.[1]
+  assert.equal(tfDefault, configWith().signinCookie, 'the Terraform default and the edge default agree')
+  for (const name of [tfDefault, configWith().signinCookie]) assert.equal(preB13(`${name}=a; ${name}_1=b; dsh-auth-x=d`), 'dsh-auth-x=d', name)
 })

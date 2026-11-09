@@ -6,7 +6,7 @@ import { inParallel, signBox, verifyBox, userPrefix, budget, needsLaunch, boxHea
 import { memoryStore, redisStore } from './store.mjs'
 import { generateKeyPairSync, createSign } from 'node:crypto'
 
-const cfg = { publicHost: 'boxes.example', projectDomain: 'boxes.example', llmHost: 'llm.example', template: 'mumbo-box', idleMs: 60_000, backupEveryMs: 600_000, maxRunning: 5, allowed: ['@x.com'], egressIps: [], signinCookie: '_mumbo_auth', proxy: new URL('http://127.0.0.1:1'), upstream: 'https://model.example' }
+const cfg = { publicHost: 'boxes.example', projectDomain: 'boxes.example', llmHost: 'llm.example', template: 'mumbo-box', idleMs: 60_000, backupEveryMs: 600_000, maxRunning: 5, allowed: ['@x.com'], egressIps: [], signinCookie: '_oauth2_proxy_mumbo', proxy: new URL('http://127.0.0.1:1'), upstream: 'https://model.example' }
 const listen = (server) => new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port)))
 const call = (port, { method = 'GET', path = '/', headers = {}, body } = {}) => new Promise((resolve, reject) => {
   const req = request({ host: '127.0.0.1', port, method, path, headers: { host: cfg.publicHost, ...headers } }, (res) => {
@@ -74,7 +74,7 @@ test('allowlist takes exact addresses and @domains, and admits nobody when empty
 })
 
 test('cookies from the box get Secure', () => {
-  assert.deepEqual(secureCookies({ 'set-cookie': ['a=1; Path=/', 'b=2; Secure'] })['set-cookie'], ['a=1; Path=/; Secure', 'b=2; Secure'])
+  assert.deepEqual(secureCookies(cfg, { 'set-cookie': ['a=1; Path=/', 'b=2; Secure'] })['set-cookie'], ['a=1; Path=/; Secure', 'b=2; Secure'])
 })
 
 function fakeE2B() {
@@ -666,12 +666,18 @@ test('relay to a member-capable box sends the member header and no owner sign-in
 })
 
 test('the sign-in cookie never reaches a box, and boxes cannot set parent-domain cookies', () => {
-  const h = boxHeaders(cfg, { cookie: '_mumbo_auth=a; _mumbo_auth_1=b; _oauth2_proxy=c; dsh-auth-x=d' }, { id: 'b' })
+  const h = boxHeaders(cfg, { cookie: '_oauth2_proxy_mumbo=a; _oauth2_proxy_mumbo_1=b; _oauth2_proxy=c; dsh-auth-x=d' }, { id: 'b' })
   assert.equal(h.cookie, 'dsh-auth-x=d')
-  const only = boxHeaders(cfg, { cookie: '_mumbo_auth_0=a; _mumbo_auth_1=b; _mumbo_auth_0f3a_csrf=c; _oauth2_proxy=d' }, { id: 'b' })
+  const only = boxHeaders(cfg, { cookie: '_oauth2_proxy_mumbo_0=a; _oauth2_proxy_mumbo_1=b; _oauth2_proxy_mumbo_0f3a_csrf=c; _oauth2_proxy=d' }, { id: 'b' })
   assert.equal('cookie' in only, false, 'no cookie header when only sign-in cookies were sent')
-  assert.equal(boxHeaders(cfg, { cookie: 'dsh-auth-x=_mumbo_auth; _mumbo_auth=a' }, { id: 'b' }).cookie, 'dsh-auth-x=_mumbo_auth', 'matched by name, not value')
-  const out = secureCookies({ 'set-cookie': ['s=1; Domain=.boxes.mumbo.si; Path=/', 't=2; path=/; domain=boxes.mumbo.si; HttpOnly'] })['set-cookie']
+  assert.equal(boxHeaders(cfg, { cookie: 'dsh-auth-x=_oauth2_proxy_mumbo; _oauth2_proxy_mumbo=a' }, { id: 'b' }).cookie, 'dsh-auth-x=_oauth2_proxy_mumbo', 'matched by name, not value')
+  assert.equal(boxHeaders({ publicHost: 'boxes.example' }, { cookie: '_oauth2_proxy_mumbo=a; undefined=1' }, { id: 'b' }).cookie, 'undefined=1', 'a cfg without signinCookie uses the default name, not "undefined"')
+  // A configured name outside the _oauth2_proxy prefix is dropped in requests and in box Set-Cookie alike.
+  const custom = { ...cfg, signinCookie: '_custom' }
+  assert.equal(boxHeaders(custom, { cookie: '_custom=a; _custom_1=b; _oauth2_proxy=c; x=1' }, { id: 'b' }).cookie, 'x=1')
+  assert.deepEqual(secureCookies(custom, { 'set-cookie': ['_custom=a; Path=/', '_custom_x_csrf=b', 'x=1'] })['set-cookie'], ['x=1; Secure'])
+  assert.equal('set-cookie' in secureCookies(custom, { 'set-cookie': ['_custom=a'] }), false, 'no Set-Cookie when only sign-in names were set')
+  const out = secureCookies(cfg, { 'set-cookie': ['s=1; Domain=.boxes.mumbo.si; Path=/', 't=2; path=/; domain=boxes.mumbo.si; HttpOnly'] })['set-cookie']
   assert.deepEqual(out, ['s=1; Path=/; Secure', 't=2; path=/; HttpOnly; Secure'])
 })
 
