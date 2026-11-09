@@ -341,6 +341,7 @@ Every package below exports a Cordis plugin that a bundle patch can name in a Lo
 
 | Package | Config | Description |
 |---|---|---|
+| `@mumbo/box-links` | yes | Sidebar links to the box home page and desktop live view |
 | `@mumbo/edge-member` | yes | Project members admitted from an edge-signed header as non-owner DeepSeek Harness principals |
 | `@mumbo/mcp` | yes | Authenticated loopback MCP server for a running DeepSeek Harness web host |
 
