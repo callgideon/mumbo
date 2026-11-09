@@ -64,6 +64,14 @@ resource "aws_iam_role_policy" "nodes" {
     { Effect = "Allow", Action = "autoscaling:CompleteLifecycleAction", Resource = "arn:aws:autoscaling:us-east-1:${data.aws_caller_identity.this.account_id}:autoScalingGroup:*:autoScalingGroupName/${local.name}-nodes" },
   ] })
 }
+resource "aws_iam_role_policy_attachment" "nodes_cloudwatch" {
+  role       = aws_iam_role.nodes.name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
+resource "aws_cloudwatch_log_group" "nodes" {
+  name              = "/${local.name}/nodes"
+  retention_in_days = 30
+}
 resource "aws_iam_instance_profile" "nodes" {
   name = "${local.name}-nodes"
   role = aws_iam_role.nodes.name
@@ -82,7 +90,7 @@ resource "aws_launch_template" "nodes" {
     mtls_secret = aws_secretsmanager_secret.mtls["orchestrator"].arn, e2b_secret = aws_secretsmanager_secret.e2b.arn,
     mtls_env    = local.mtls_env.orchestrator,
     api_url     = "http://${aws_lb.internal.dns_name}:3000", zone_id = aws_route53_zone.internal.zone_id, dns_name = local.orch_dns,
-    asg         = "${local.name}-nodes", hook = local.hook,
+    asg         = "${local.name}-nodes", hook = local.hook, log_group = aws_cloudwatch_log_group.nodes.name,
   }))
   iam_instance_profile { arn = aws_iam_instance_profile.nodes.arn }
   cpu_options { nested_virtualization = "enabled" }

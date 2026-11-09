@@ -142,6 +142,21 @@ aws autoscaling complete-lifecycle-action --auto-scaling-group-name "$ASG" --lif
 SH
 chmod 0755 /usr/local/bin/mumbo-drain /usr/local/bin/mumbo-dns /usr/local/bin/mumbo-lifecycle
 
+# ---- logs and host metrics to CloudWatch (log group per Terraform, one stream per instance and file).
+install -d -m 0755 /var/log/e2b
+curl -fsSL -o /tmp/cwagent.deb https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb && dpkg -i /tmp/cwagent.deb >/dev/null
+cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'JSON'
+{"agent":{"run_as_user":"root"},
+ "logs":{"logs_collected":{"files":{"collect_list":[
+   {"file_path":"/var/log/e2b/orchestrator.log","log_group_name":"${log_group}","log_stream_name":"{instance_id}/orchestrator"},
+   {"file_path":"/var/log/e2b/lifecycle.log","log_group_name":"${log_group}","log_stream_name":"{instance_id}/lifecycle"},
+   {"file_path":"/var/log/mumbo-node.log","log_group_name":"${log_group}","log_stream_name":"{instance_id}/boot"}]}}},
+ "metrics":{"namespace":"mumbo/boxes/nodes","append_dimensions":{"InstanceId":"$${aws:InstanceId}","AutoScalingGroupName":"$${aws:AutoScalingGroupName}"},
+   "metrics_collected":{"mem":{"measurement":["mem_used_percent"]},"disk":{"measurement":["used_percent"],"resources":["/"]}}}}
+JSON
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+printf '/var/log/e2b/*.log {\n  daily\n  rotate 3\n  compress\n  missingok\n  copytruncate\n}\n' > /etc/logrotate.d/e2b
+
 cat > /etc/systemd/system/e2b-orchestrator.service <<'UNIT'
 [Unit]
 Description=E2B orchestrator
@@ -150,6 +165,11 @@ Wants=network-online.target
 [Service]
 EnvironmentFile=/etc/e2b/orchestrator.env
 ExecStart=/var/lib/e2b/bin/orchestrator
+StandardOutput=append:/var/log/e2b/orchestrator.log
+StandardError=inherit
+# Boot race: while systemd is still starting units it can withhold cpu and memory from the root cgroup, and the
+# orchestrator exits with "failed to initialize root cgroup". Restart below retries until they settle (observed: 3–5
+# restarts within about 25 s at first boot); no box is placed before the node serves /health.
 ExecStop=/usr/local/bin/mumbo-drain
 TimeoutStartSec=15min
 TimeoutStopSec=30min
@@ -166,6 +186,8 @@ Description=Register this node in DNS; drain it when its Auto Scaling group term
 After=e2b-orchestrator.service
 [Service]
 ExecStart=/usr/local/bin/mumbo-lifecycle
+StandardOutput=append:/var/log/e2b/lifecycle.log
+StandardError=inherit
 Restart=always
 [Install]
 WantedBy=multi-user.target
