@@ -219,7 +219,7 @@ if id browser >/dev/null 2>&1; then
   XVFB_AUTH=
   if command -v xauth >/dev/null 2>&1; then
     mkdir -p /run/x11
-    [ -s /run/x11/auth ] || { xauth -q -f /run/x11/auth add :1 . "$(mcookie)"; chown browser /run/x11/auth; chmod 600 /run/x11/auth; }
+    [ -s /run/x11/auth ] || { xauth -q -f /run/x11/auth add :1 . "$(mcookie)" 2>/dev/null; chown browser /run/x11/auth; chmod 600 /run/x11/auth; }
     export XAUTHORITY=/run/x11/auth
     XVFB_AUTH="-auth /run/x11/auth"
   fi
