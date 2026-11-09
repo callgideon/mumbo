@@ -20,7 +20,7 @@
 ## AI Usage
 
 <!-- ai-declaration:start -->
-[![AI-DECLARATION: TBD](https://img.shields.io/badge/䷼%20AI--DECLARATION-TBD-e5e7eb?labelColor=e5e7eb)](https://ai-declaration.md)
+[![AI-DECLARATION: TBD](https://img.shields.io/badge/%E4%B7%BC%20AI--DECLARATION-TBD-e5e7eb?labelColor=e5e7eb)](https://ai-declaration.md)
 
 **AI declaration** ([v0.1.2](https://ai-declaration.md/en/0.1.2)): `TBD`
 <!-- ai-declaration:end -->

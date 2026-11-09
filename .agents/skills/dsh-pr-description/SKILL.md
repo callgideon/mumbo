@@ -134,11 +134,11 @@ The AI-DECLARATION block pins specification version 0.1.2. Use the badge URL for
 
 | Level | Badge URL |
 |---|---|
-| hint | `https://img.shields.io/badge/䷼%20AI--DECLARATION-hint-ecfccb?labelColor=ecfccb` |
-| assist | `https://img.shields.io/badge/䷼%20AI--DECLARATION-assist-fef9c3?labelColor=fef9c3` |
-| pair | `https://img.shields.io/badge/䷼%20AI--DECLARATION-pair-ffedd5?labelColor=ffedd5` |
-| copilot | `https://img.shields.io/badge/䷼%20AI--DECLARATION-copilot-fee2e2?labelColor=fee2e2` |
-| auto | `https://img.shields.io/badge/䷼%20AI--DECLARATION-auto-ede9fe?labelColor=ede9fe` |
+| hint | `https://img.shields.io/badge/%E4%B7%BC%20AI--DECLARATION-hint-ecfccb?labelColor=ecfccb` |
+| assist | `https://img.shields.io/badge/%E4%B7%BC%20AI--DECLARATION-assist-fef9c3?labelColor=fef9c3` |
+| pair | `https://img.shields.io/badge/%E4%B7%BC%20AI--DECLARATION-pair-ffedd5?labelColor=ffedd5` |
+| copilot | `https://img.shields.io/badge/%E4%B7%BC%20AI--DECLARATION-copilot-fee2e2?labelColor=fee2e2` |
+| auto | `https://img.shields.io/badge/%E4%B7%BC%20AI--DECLARATION-auto-ede9fe?labelColor=ede9fe` |
 
 When the upstream specification changes, update every version reference in this skill and the PR template.
 
@@ -182,7 +182,7 @@ Filled in from the session and review records of #6013:
 ## AI Usage
 
 <!-- ai-declaration:start -->
-[![AI-DECLARATION: pair](https://img.shields.io/badge/䷼%20AI--DECLARATION-pair-ffedd5?labelColor=ffedd5)](https://ai-declaration.md)
+[![AI-DECLARATION: pair](https://img.shields.io/badge/%E4%B7%BC%20AI--DECLARATION-pair-ffedd5?labelColor=ffedd5)](https://ai-declaration.md)
 
 **AI declaration** ([v0.1.2](https://ai-declaration.md/en/0.1.2)): `pair`
 <!-- ai-declaration:end -->

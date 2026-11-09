@@ -247,7 +247,7 @@ test('keeps the pull request template aligned with the dsh-pr-description skill'
     ['auto', 'ede9fe'],
   ]) {
     assert.ok(
-      badgeSection.includes(`https://img.shields.io/badge/䷼%20AI--DECLARATION-${level}-${color}?labelColor=${color}`),
+      badgeSection.includes(`https://img.shields.io/badge/%E4%B7%BC%20AI--DECLARATION-${level}-${color}?labelColor=${color}`),
       `the skill has the ${level} badge URL`,
     )
   }
@@ -285,7 +285,7 @@ test('keeps the pull request template aligned with the dsh-pr-description skill'
   assert.equal(source.match(/<!-- ai-declaration:end -->/g)?.length, 1)
   assert.ok(
     declarationBlock.includes(
-      '[![AI-DECLARATION: TBD](https://img.shields.io/badge/䷼%20AI--DECLARATION-TBD-e5e7eb?labelColor=e5e7eb)](https://ai-declaration.md)',
+      '[![AI-DECLARATION: TBD](https://img.shields.io/badge/%E4%B7%BC%20AI--DECLARATION-TBD-e5e7eb?labelColor=e5e7eb)](https://ai-declaration.md)',
     ),
     'the block has the placeholder badge link',
   )
