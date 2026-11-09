@@ -459,21 +459,20 @@ test('projects: owner creates, adds allowlisted members only, lists per member',
   assert.equal(await p.isMember('a@x.com', 'not-an-id'), false)
 })
 
-test('project paths reach the project box for members only, with its own launch path', async () => {
+test('project paths redirect to the project\'s own host, which members reach with its launch path at /', async () => {
   const ensured = []
   const box = { ensure: async (principal) => { ensured.push(principal); return { id: principal === 'a@x.com' ? 'ubox' : 'pbox', token: 'TOK' } }, touch: async () => {}, forget: async () => {} }
   const proj = projectStore({ store: memoryStore(), admitted: () => true, log: () => {} })
   const { id } = await proj.create('a@x.com', 'P')
-  const server = userServer({ cfg: { ...local, allowed: ['@x.com'] }, box, projects: proj, log: () => {} })
-  await new Promise(r => server.listen(0, '127.0.0.1', r))
-  const base = `http://127.0.0.1:${server.address().port}`
-  const go = (path, email) => fetch(base + path, { headers: { 'x-forwarded-email': email, accept: 'text/html' }, redirect: 'manual' })
+  const server = userServer({ cfg, box, projects: proj, log: () => {} })
+  const port = await listen(server)
+  const go = (path, email, host = `p-${id}.${cfg.publicHost}`) => call(port, { path, headers: { host, 'x-forwarded-email': email, accept: 'text/html' } })
   try {
-    assert.equal((await go(`/p/${id}`, 'a@x.com')).headers.get('location'), `/p/${id}/`)
-    const r = await go(`/p/${id}/`, 'a@x.com')
-    assert.equal(r.status, 302); assert.equal(r.headers.get('location'), `/p/${id}/?token=TOK`)
+    assert.equal((await go(`/p/${id}`, 'a@x.com', cfg.publicHost)).headers.location, `https://p-${id}.boxes.example/`)
+    const r = await go('/', 'a@x.com')
+    assert.equal(r.status, 302); assert.equal(r.headers.location, '/?token=TOK')
     assert.deepEqual(ensured, [`project:${id}`])
-    assert.equal((await go(`/p/${id}/`, 'b@x.com')).status, 404)
+    assert.equal((await go('/', 'b@x.com')).status, 403)
     assert.equal(ensured.length, 1, 'a non-member never starts the project box')
   } finally { server.close() }
 })
@@ -482,7 +481,7 @@ test('project boxes: own masked host and public path, no desktop or browser tool
   const { boxSite } = await import('./edge.mjs')
   const c = { llmHost: 'llm.x', publicHost: 'boxes.x' }
   const site = boxSite(c, 'project:0123456789abcdef')
-  assert.deepEqual(site, { host: 'p-0123456789abcdef.boxes.x', publicUrl: 'https://boxes.x/p/0123456789abcdef/', desktop: false })
+  assert.deepEqual(site, { host: 'p-0123456789abcdef.boxes.x', publicUrl: 'https://p-0123456789abcdef.boxes.x/', desktop: false })
   const script = startScript(c, 'T', site)
   assert.ok(!script.includes('browser-use') && !script.includes('chromium'))
   assert.match(script, /--trusted-host boxes\.x --trusted-host p-0123456789abcdef\.boxes\.x/)
@@ -509,11 +508,8 @@ test('project tools are offered to a person\'s box and not to a project box', as
   } finally { server.close() }
 })
 
-test('a project box gets our own origin translated to its masked host; foreign origins pass unchanged', () => {
-  const t = { id: 'pb' }
-  assert.equal(boxHeaders(cfg, { origin: `https://${cfg.publicHost}` }, t, '3080', `p-x.${cfg.publicHost}`).origin, `https://p-x.${cfg.publicHost}`)
-  assert.equal(boxHeaders(cfg, { origin: 'https://evil.example' }, t, '3080', `p-x.${cfg.publicHost}`).origin, 'https://evil.example')
-  assert.equal(boxHeaders(cfg, { origin: `https://${cfg.publicHost}` }, t).origin, `https://${cfg.publicHost}`)
+test('box requests carry the browser Origin unchanged, so a box\'s dsh compares it with its own host', () => {
+  for (const origin of [`https://${cfg.publicHost}`, `https://p-0123456789abcdef.${cfg.publicHost}`, 'https://evil.example']) assert.equal(boxHeaders(cfg, { origin }, { id: 'pb' }).origin, origin)
 })
 
 test('project relay: signs in once, creates the coordinator session once, re-signs after 401, members only', async () => {
@@ -626,38 +622,50 @@ test('routing: browser member headers are stripped; member-capable project boxes
   const capable = (await proj.create('a@x.com', 'Capable')).id
   const legacy = (await proj.create('a@x.com', 'Legacy')).id
   const box = { ensure: async (p) => p === `project:${capable}` ? { id: 'pbox', token: 'OWNER', member: (e) => memberHeader(key, e) } : { id: p === 'a@x.com' ? 'ubox' : 'lbox', token: 'OWNER' }, touch: async () => {}, forget: async () => {} }
-  const server = userServer({ cfg: { ...local, allowed: ['@x.com'], proxy: new URL(`http://127.0.0.1:${upstream.address().port}`) }, box, projects: proj, log: () => {} })
-  await new Promise(r => server.listen(0, '127.0.0.1', r))
-  const base = `http://127.0.0.1:${server.address().port}`
-  const go = (path, extra = {}) => fetch(base + path, { headers: { 'x-forwarded-email': 'a@x.com', accept: 'text/html', cookie: 'dsh-auth-x=1', ...extra }, redirect: 'manual' })
+  const server = userServer({ cfg: { ...cfg, proxy: new URL(`http://127.0.0.1:${upstream.address().port}`) }, box, projects: proj, log: () => {} })
+  const port = await listen(server)
+  const go = (host, path = '/', extra = {}) => call(port, { path, headers: { host, 'x-forwarded-email': 'a@x.com', accept: 'text/html', ...extra } })
+  const at = (id) => `p-${id}.${cfg.publicHost}`
   try {
-    await go('/', { 'x-mumbo-member': 'forged' })
+    await go(cfg.publicHost, '/', { cookie: 'dsh-auth-x=1', 'x-mumbo-member': 'forged' })
     assert.equal(seen.at(-1).member, undefined, 'a browser-sent member header never reaches a box')
-    const r = await fetch(`${base}/p/${capable}/`, { headers: { 'x-forwarded-email': 'a@x.com', accept: 'text/html' }, redirect: 'manual' })
+    const r = await go(at(capable), '/', { 'x-mumbo-member': 'forged' })
     assert.equal(r.status, 200, 'no owner launch redirect for a member')
-    const [e, , mac] = seen.at(-1).member.split('.')
-    assert.equal(Buffer.from(e, 'base64url').toString(), 'a@x.com'); assert.ok(mac)
-    assert.equal((await go(`/p/${capable}/deny`)).status, 401, 'a member 401 is not turned into an owner launch')
-    const old = await fetch(`${base}/p/${legacy}/`, { headers: { 'x-forwarded-email': 'a@x.com', accept: 'text/html' }, redirect: 'manual' })
-    assert.equal(old.headers.get('location'), `/p/${legacy}/?token=OWNER`, 'a box without the member plugin keeps the launch flow')
+    const [e, exp, mac] = seen.at(-1).member.split('.')
+    assert.equal(Buffer.from(e, 'base64url').toString(), 'a@x.com')
+    assert.equal(mac, (await import('node:crypto')).createHmac('sha256', key).update(`${e}.${exp}`).digest('base64url'), 'signed with this box\'s key')
+    assert.equal((await go(at(capable), '/deny', { cookie: 'dsh-auth-x=1' })).status, 401, 'a member 401 is not turned into an owner launch')
+    const old = await go(at(legacy))
+    assert.equal(old.headers.location, '/?token=OWNER', 'a box without the member plugin keeps the launch flow, at /')
   } finally { server.close(); upstream.close() }
 })
 
 test('relay to a member-capable box sends the member header and no owner sign-in', async () => {
   const { projectRelay } = await import('./projects.mjs')
+  const { boxFetcher, boxSite } = await import('./edge.mjs')
+  const seen = []
+  const upstream = createServer(async (req, res) => {
+    let body = ''; for await (const c of req) body += c
+    seen.push({ path: req.url, headers: req.headers })
+    const value = JSON.parse(body).method === 'session/create' ? { sessionId: 'S' } : { accepted: true }
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ result: { ok: true, value } }))
+  })
+  const c = { ...cfg, proxy: new URL(`http://127.0.0.1:${await listen(upstream)}`) }
   const store = memoryStore()
   const proj = projectStore({ store, admitted: () => true, log: () => {} })
   const { id } = await proj.create('a@x.com', 'P')
-  const calls = []
-  const boxFetch = async (target, host, path, init) => {
-    calls.push({ path, member: init.member, cookie: init.headers?.cookie })
-    const req = JSON.parse(init.body)
-    return { status: 200, setCookie: [], body: JSON.stringify({ result: { ok: true, value: req.method === 'session/create' ? { sessionId: 'S' } : { accepted: true } } }) }
-  }
   const box = { ensure: async () => ({ id: 'pbox', token: 'OWNER', member: (e) => `hdr-for-${e}` }) }
-  const relay = projectRelay({ store, projects: proj, box, boxFetch, siteHostOf: () => 'h', log: () => {} })
-  await relay.message('a@x.com', id, 'hi')
-  assert.ok(calls.every(c => c.member === 'hdr-for-a@x.com' && c.cookie === undefined && !c.path.startsWith('/?token=')))
+  const relay = projectRelay({ store, projects: proj, box, boxFetch: boxFetcher(c), siteHostOf: (p) => boxSite(c, p).host, log: () => {} })
+  try {
+    await relay.message('a@x.com', id, 'hi')
+    assert.deepEqual(seen.map(s => s.path), ['/api/session/create', '/api/session/prompt'], 'no owner sign-in')
+    for (const { headers: h } of seen) {
+      assert.equal(h['x-mumbo-member'], 'hdr-for-a@x.com')
+      assert.equal(h.cookie, undefined)
+      assert.equal(h.origin, `https://p-${id}.boxes.example`, 'the origin of the project\'s own host')
+      assert.equal(h['e2b-sandbox-id'], 'pbox')
+    }
+  } finally { upstream.close() }
 })
 
 test('the sign-in cookie never reaches a box, and boxes cannot set parent-domain cookies', () => {
