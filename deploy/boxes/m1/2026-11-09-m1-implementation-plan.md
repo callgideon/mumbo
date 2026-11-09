@@ -83,6 +83,28 @@ These override the task text below where they conflict.
   - an owner-match firewall rule admits only the MCP process to CDP;
   - the MCP process enforces consent.
 
+## Amendment 2: the merge bot is the `mumbo-bot` GitHub App (founder, 2026-11-09)
+
+PR #16 is merged (9c4eae19b5), so A7 branches from `origin/main`. The merge bot is the existing org-wide GitHub App `mumbo-bot` (id 5295930, contents/pull_requests/actions/workflows write, metadata read). Its credentials are in Secrets Manager `mumbo-boxes/github-app` (JSON `app_id`, `slug`, `private_key`; same KMS key as `mumbo-boxes/e2b`).
+
+1. **F1/F2:** one machine account only, the agent, with a classic token (`repo` + `notifications`, no `workflow`) at `/mumbo/boxes/github-agent-token`. There is no merge account, no merge token and no `/mumbo/boxes/github-merge-token`.
+2. **Edge config:** no `GITHUB_MERGE_TOKEN`. The ECS `secrets` are `GITHUB_APP_ID` ← `<arn>:app_id::` and `GITHUB_APP_KEY` ← `<arn>:private_key::`. B9 grants the exec role `secretsmanager:GetSecretValue` on that ARN.
+3. **New `edge/github-app.mjs`, owned by B2:**
+   - Signature: `mintRepoToken({ appId, privateKey, repo, permissions, fetchImpl, now }) → Promise<{ token, revoke(): Promise<void> }>`.
+   - It ports jumbo `apps/platform-api/src/jumbo_api/modules/github/app.py` `repository_token`:
+     - RS256 JWT with `iss` = app id, `iat` = now − 60 s, `exp` = now + 540 s;
+     - `GET /repos/{repo}/installation`;
+     - `POST /app/installations/{id}/access_tokens` with `{ repositories: [<name>], permissions }`.
+   - It refuses and revokes when the grant's repositories ≠ `[name]` or its permissions are wider than requested plus `metadata: read`.
+   - Tests: the JWT claims, the exact request body, and a too-wide grant refused and revoked.
+4. **B2 `grant`:**
+   - Merge with `mintRepoToken(..., permissions: { contents: 'write', pull_requests: 'write' })`, then `PUT …/merge` with `{ sha, merge_method: 'merge' }`, and `revoke()` in `finally`.
+   - The poller keeps reading with the agent token, because the App has no checks/statuses permission.
+   - B0's `approvalsService` stub takes `github: { agentToken, app: { appId, privateKey }, agentLogin, requiredChecks }` in place of `mergeToken`.
+   - The B2 test "uses the merge token" becomes "merges with a minted App token, never the agent token, and revokes it".
+5. **C2 step 3:** the PR is merged by `mumbo-bot[bot]` at exactly that SHA. Anywhere this plan says merge-bot account, read the App.
+6. **Unchanged:** the merge bot stays off superagent's allowlist; merges end Tickets through polling.
+
 ## How to run this plan in parallel
 
 **Branches.**
