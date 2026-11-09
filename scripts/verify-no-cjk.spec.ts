@@ -6,9 +6,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { applyCjkAllowlist, findCjkLines, parseCjkAllowlist, verifyNoCjk, type CjkAllowEntry } from './verify-no-cjk.ts'
 
 const roots: string[] = []
-// Escapes keep this spec itself free of the ideographs the gate rejects.
-const IDEOGRAPH = '中文'
-const COMPATIBILITY_IDEOGRAPH = '豈'
+// Code points keep this spec itself free of the ideographs the gate rejects.
+const IDEOGRAPH = String.fromCodePoint(0x4e2d, 0x6587)
+const COMPATIBILITY_IDEOGRAPH = String.fromCodePoint(0xf900)
 const EXTENSION_B_IDEOGRAPH = String.fromCodePoint(0x20000)
 
 afterEach(() => {
