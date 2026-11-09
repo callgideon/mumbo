@@ -649,13 +649,13 @@ describe('web e2e: resident question composer round trip', () => {
       signal: controller.signal,
       questions: [{
         id: 'reasoning',
-        header: 'ConfirmThink level',
-        question: 'select HF provider \'s Think level?',
+        header: 'Thinking level',
+        question: 'Which thinking level for HF provider?',
         options: [
-          { label: 'High (high)', description: 'leans toward more thorough Reasoning, usually slower and consumes More token; needs Model support.' },
-          { label: 'in (medium)', description: 'balances Reasoning depth and speed; needs Model support.' },
-          { label: 'Low (low)', description: 'prioritizes speed and lower token consumption; needs Model support.' },
-          { label: 'first Inspect current configuration', description: 'first Confirm HF provider \'s Model and its supported ThinkPayload, then decide.' },
+          { label: 'High (high)', description: 'Deeper reasoning, slower.' },
+          { label: 'Medium (medium)', description: 'Balanced depth and speed.' },
+          { label: 'Low (low)', description: 'Faster, fewer tokens.' },
+          { label: 'Check config first', description: 'Confirm model support.' },
         ],
       }],
     })
@@ -665,7 +665,7 @@ describe('web e2e: resident question composer round trip', () => {
     let completed = false
     try {
       await page.setViewportSize({ width: 1328, height: 720 })
-      await composer.getByRole('heading', { name: 'select HF provider \'s Think level?' }).waitFor()
+      await composer.getByRole('heading', { name: 'Which thinking level for HF provider?' }).waitFor()
       expect(await composer.getByRole('heading').evaluate(readCopy))
         .toEqual({ lines: 1, clipped: false, overflows: false, toggle: undefined })
       expect(await composer.getByRole('button', { name: 'Expand', exact: true }).count()).toBe(0)
@@ -685,9 +685,9 @@ describe('web e2e: resident question composer round trip', () => {
       expect(rows).toEqual(Array.from({ length: 4 }, () => ({
         sameLine: true, fontSize: '13px', lineHeight: '20px', maskImage: 'none',
       })))
-      await composer.getByRole('radio', { name: 'in (medium)' }).click()
+      await composer.getByRole('radio', { name: 'Medium (medium)' }).click()
       await composer.getByRole('button', { name: 'Submit', exact: true }).click()
-      expect(await outcome).toEqual({ value: { answers: [{ id: 'reasoning', selected: ['in (medium)'] }] } })
+      expect(await outcome).toEqual({ value: { answers: [{ id: 'reasoning', selected: ['Medium (medium)'] }] } })
       completed = true
     } finally {
       controller.abort()

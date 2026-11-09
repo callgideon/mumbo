@@ -9,7 +9,6 @@
 - paragraph: Registry description for the fixture bundle.
 - region "Details":
   - heading "Fixture bundle" [level=1]
-  - paragraph: English | 中文
   - paragraph:
     - text: Registry fixture for the Web plugin-manager tests. It declares no
     - code: meta.detail

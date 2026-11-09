@@ -16,7 +16,7 @@ The documentation website is a tested projection of repository Markdown, never a
 
 ## Manifest ownership
 
-Read [docs/AGENTS.md](../../../../docs/AGENTS.md) and the current `DocsPage` type and entries in [website/docs.ts](../../../../website/docs.ts) before changing the manifest; do not rely on a remembered field set. Read [website/.vitepress/config.ts](../../../../website/.vitepress/config.ts) before adding a new section, sidebar collection, locale, or top-level navigation item.
+Read [docs/AGENTS.md](../../../../docs/AGENTS.md) and the current `DocsPage` type and entries in [website/docs.ts](../../../../website/docs.ts) before changing the manifest; do not rely on a remembered field set. Read [website/.vitepress/config.ts](../../../../website/.vitepress/config.ts) before adding a new section, sidebar collection, or top-level navigation item.
 
 Never edit or commit `website/.generated/`, `website/.cache/`, or `website/.dist/`. Except for `website/AGENTS.md`, never add Markdown under `website/`; locale and route directories such as `website/en/` and `website/api/` are invalid source layouts. Keep generated catalogs under `docs/`, freshness-gate them there, and publish them through the manifest.
 
@@ -26,19 +26,19 @@ Never edit or commit `website/.generated/`, `website/.cache/`, or `website/.dist
 - **Publish a new page:** create it in its owning `docs/` tier, then add one manifest entry.
 - **Rename, move, or remove a page:** update the canonical file, manifest entry, and inbound repository links atomically. Remove stale manifest entries; `docs:check` rejects missing sources.
 - **Publish a generated catalog:** map the generated `docs/` file, but change its generator or source metadata rather than editing the catalog by hand.
-- **Change site structure:** update the manifest for ordinary pages; update VitePress configuration only when the existing sidebar, section, or locale model cannot express the change.
+- **Change site structure:** update the manifest for ordinary pages; update VitePress configuration only when the existing sidebar or section model cannot express the change.
 
 Keep the manifest an explicit public allowlist. Do not publish RFCs, postmortems, testing guides, `AGENTS.md`, or maintainer workflows merely because they exist under `docs/`; add internal material only when the user explicitly expands what the site publishes.
 
 ## DocsPage fields
 
-Set every `DocsPage` field deliberately. The canonical field set and the `DocsSidebar` union live in [website/docs.ts](../../../../website/docs.ts) — read them there rather than copying values into prose; sections are owned by the `sections` record in that file, with no separate order list in the VitePress config.
+Set every `DocsPage` field deliberately. The canonical field set and the `DocsSidebar` union live in [website/docs.ts](../../../../website/docs.ts) — read them there rather than copying values into prose; sections are owned by the ordered `sections` list in that file, with no separate order list in the VitePress config.
 
 - `source`: repository-relative canonical Markdown path.
 - `route`: public VitePress path including the `.md` suffix.
 - `label`: sidebar label, not necessarily the document H1.
 - `sidebar`: reuse an existing `DocsSidebar` collection unless the information architecture genuinely needs another one.
-- `section`: reuse an existing section when possible. If adding one, also define it in the `sections` record.
+- `section`: reuse an existing section when possible. If adding one, also add it to the `sections` list.
 - `order`: stable order within the section.
 - `sourceAliases`: optional additional repository paths that should resolve to this page when links are projected. It does not create another public route.
 

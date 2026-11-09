@@ -136,7 +136,7 @@ describe('Assembled liveshare viewer page branching a share', () => {
     // The shipped Tooltip listens for pointer events; a hover dispatched as a mouse event never raises
     // its bubble, so the ceiling statement would stay unread.
     await act(async () => { fireEvent.pointerEnter(mark) })
-    expect(await screen.findByText('Forked from “Fixture history Sessions”')).toBeDefined()
+    expect(await screen.findByText('Forked from “Fixture past session”')).toBeDefined()
     await act(async () => { fireEvent.pointerLeave(mark) })
     expect(screen.getAllByRole('button', { name: 'Send message' }).length).toBeGreaterThan(0)
     // Prompting the branch is not reconfiguring it: the child gets no preset seat and no session

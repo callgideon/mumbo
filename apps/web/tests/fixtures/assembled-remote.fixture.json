@@ -273,7 +273,7 @@
               "lastUsed": null,
               "next": null
             },
-            "title": "Fixture Past sessions",
+            "title": "Fixture past session",
             "todos": [
               {
                 "content": "sort out requirements",
@@ -5150,7 +5150,7 @@
               "content": [
                 {
                   "type": "text",
-                  "text": "entry 1: first item. Item 2: second item. Item 3: this one was interrupted halfway by"
+                  "text": "Item 1: first item. Item 2: second item. Item 3: this one was interrupted halfway by"
                 }
               ],
               "source": {
@@ -5184,7 +5184,7 @@
                   "index": 0,
                   "block": {
                     "type": "text",
-                    "text": "entry 1: first item. Item 2: second item. Item 3: this one was interrupted halfway by"
+                    "text": "Item 1: first item. Item 2: second item. Item 3: this one was interrupted halfway by"
                   }
                 }
               },
@@ -5678,7 +5678,7 @@
           "lastUsed": null,
           "next": null
         },
-        "title": "Fixture Past sessions",
+        "title": "Fixture past session",
         "todos": [
           {
             "content": "sort out requirements",

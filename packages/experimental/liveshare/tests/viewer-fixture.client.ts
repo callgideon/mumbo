@@ -925,7 +925,7 @@ function buildAlphaLog(presented = false): SessionEvent[] {
     if (turn === 0) {
       push({
         type: 'session/title',
-        data: { title: 'Fixture Past sessions', messageSeqs: [userSeq], source: { kind: 'fallback' } },
+        data: { title: 'Fixture past session', messageSeqs: [userSeq], source: { kind: 'fallback' } },
       })
     }
     if (turn % 9 === 4) {
@@ -1183,7 +1183,7 @@ function buildAlphaLog(presented = false): SessionEvent[] {
   push({
     type: 'assistant/message',
     surfaceOp: 'append',
-    data: { turn: 72, step: 0, message: assistantMessage(text('entry 1: first item. Item 2: second item. Item 3: this one was interrupted halfway by')) },
+    data: { turn: 72, step: 0, message: assistantMessage(text('Item 1: first item. Item 2: second item. Item 3: this one was interrupted halfway by')) },
   })
   push({ type: 'step/end', data: { turn: 72, step: 0 } })
   push({ type: 'turn/end', data: { turn: 72, reason: { kind: 'max-tokens' } } })
