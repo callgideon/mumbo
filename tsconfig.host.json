@@ -563,6 +563,7 @@
     { "path": "./packages/experimental/webhook" },
     { "path": "./packages/experimental/webhook-github" },
     { "path": "./packages/mumbo/box-links/tsconfig.host.json" },
+    { "path": "./packages/mumbo/browser-consent" },
     { "path": "./packages/mumbo/mcp" },
     { "path": "./packages/mumbo/edge-member" },
     { "path": "./packages/todo/tool-todo" },

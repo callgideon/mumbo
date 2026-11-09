@@ -3,23 +3,23 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/mumbo/README.md
 /:
-  en: 1ed97adb767078eb
-  zh: 61d331d90207e97b
-/mumbo-connect-a-running-host-to-the-mumbo-platform:
-  en: 1321c86214dc5b94
-  zh: 17efc75fe97163ec
-/mumbo-connect-a-running-host-to-the-mumbo-platform/summary:
-  en: 327dc5561cb2cd6e
-  zh: 0278a34d64c8be28
-/mumbo-connect-a-running-host-to-the-mumbo-platform/table-of-contents:
+  en: 40359a262f890cde
+  zh: 703af03572ad313b
+/mumbo-packages-for-the-per-user-box-platform:
+  en: 32dff2a9ed80532d
+  zh: e3054e09e7387089
+/mumbo-packages-for-the-per-user-box-platform/summary:
+  en: 675292c16110b294
+  zh: 41d32ac846cc3fd7
+/mumbo-packages-for-the-per-user-box-platform/table-of-contents:
   en: 1eb35b015a6c423f
   zh: a8a3dceee2c9e943
-/mumbo-connect-a-running-host-to-the-mumbo-platform/packages:
-  en: 6469a1c976e03b88
-  zh: 13ed3c325bd85ab5
-/mumbo-connect-a-running-host-to-the-mumbo-platform/related-documentation:
+/mumbo-packages-for-the-per-user-box-platform/packages:
+  en: d774028a1c9e7a3b
+  zh: d0b46d823885446d
+/mumbo-packages-for-the-per-user-box-platform/related-documentation:
   en: fdf8745cfbc9d4d4
   zh: cf0106897fe3785b
-/mumbo-connect-a-running-host-to-the-mumbo-platform/dev-note:
+/mumbo-packages-for-the-per-user-box-platform/dev-note:
   en: b75c8458928b72b9
   zh: 003ba4e17b4b5269
