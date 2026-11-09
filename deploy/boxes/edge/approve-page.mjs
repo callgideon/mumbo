@@ -14,13 +14,17 @@ const SECURITY = {
   'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
   'x-frame-options': 'DENY',
   'cache-control': 'no-store',
-  'referrer-policy': 'no-referrer',
+  // Not no-referrer: under it a browser sends `Origin: null` on the page's own form POSTs, which the exact-Origin check
+  // refuses. same-origin still sends no Referer to other sites (github.com links).
+  'referrer-policy': 'same-origin',
 }
 /** `?m=<code>` after a POST, and each `?s=<reason>:<id>` skip line, shows this fixed text; any other code shows nothing. */
 const NOTICES = new Map([
   ['merged', 'Merged.'],
-  ['sha_moved', 'The pull request changed since you looked. It is back in the queue at its new commit.'],
+  // B2 answers sha_moved for GitHub's 409 (head moved) and 405 (conflict or branch protection) alike.
+  ['sha_moved', 'The pull request changed or cannot be merged as it stands. Review it again.'],
   ['checks_not_green', 'Required checks are not green on that commit, so it was not merged.'],
+  ['not_low_risk', 'No longer low-risk at that commit, so it was not merged.'],
   ['not_candidate', 'That pull request is no longer ready to merge: closed, a draft, or not into main.'],
   ['not_owner', 'You do not own the project of that pull request.'],
   ['not_found', 'That approval is no longer open.'],

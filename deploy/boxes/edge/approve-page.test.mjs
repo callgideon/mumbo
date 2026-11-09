@@ -54,12 +54,13 @@ async function setup(t) {
   await store.addToSet(`projects:${FOUNDER}`, MINE); await store.addToSet(`projects:${FOUNDER}`, THEIRS); await store.addToSet(`projects:${OTHER}`, THEIRS)
   const calls = []
   let stopped = false
+  const skips = { 'acme/lib#2': 'sha_moved' }  // grantLowRisk's skip reason by id; any other shown pair merges
   const approvals = {
     async list(email) { calls.push(['list', email]); return email === FOUNDER ? ITEMS : [] },
     async grant(email, id, sha) { calls.push(['grant', email, id, sha]); return { id, sha, merged: true } },
     async grantLowRisk(email, shown) {
       calls.push(['grantLowRisk', email, shown])
-      return shown.map(({ id, sha }, i) => (i === 0 ? { id, sha, merged: true } : { id, sha, merged: false, reason: 'sha_moved' }))
+      return shown.map(({ id, sha }) => (skips[id] ? { id, sha, merged: false, reason: skips[id] } : { id, sha, merged: true }))
     },
     async poll() { throw new Error('the page never polls') },
   }
@@ -70,7 +71,7 @@ async function setup(t) {
   const server = createServer((req, res) => handler(req, res, req.headers['x-as'] ?? FOUNDER).catch(e => res.writeHead(500).end(e.stack)))
   const port = await listen(server)
   t.after(() => server.close())
-  return { port, calls, store, setNow: (ms) => { now = ms } }
+  return { port, calls, store, skips, setNow: (ms) => { now = ms } }
 }
 
 test('GET / shows only list(email) items with their facts, escaped, and embeds the CSRF token', async (t) => {
@@ -105,7 +106,7 @@ test('every response carries the CSP and framing headers; any other path answers
     assert.equal(r.headers['content-security-policy'], "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
     assert.equal(r.headers['x-frame-options'], 'DENY')
     assert.equal(r.headers['cache-control'], 'no-store')
-    assert.equal(r.headers['referrer-policy'], 'no-referrer')
+    assert.equal(r.headers['referrer-policy'], 'same-origin', "no-referrer would make the page's own POSTs send Origin: null")
   }
   assert.equal((await call(port, { path: '/x' })).status, 404)
   assert.equal((await call(port, { path: '/grant' })).status, 404)
@@ -151,7 +152,7 @@ test('a valid grant merges exactly the posted item at the posted SHA; notices sh
 })
 
 test('"Approve N low-risk" posts the displayed low-risk pairs, grants exactly those, and reports each skipped pair', async (t) => {
-  const { port, calls } = await setup(t)
+  const { port, calls, skips } = await setup(t)
   const fields = formFields((await call(port)).body, '/grant-low-risk')
   assert.deepEqual(fields, [['id', 'acme/app#7'], ['sha', 'a'.repeat(40)], ['id', 'acme/lib#2'], ['sha', 'c'.repeat(40)], ['csrf', TOKEN]])
   const r = await post(port, '/grant-low-risk', fields)
@@ -160,9 +161,16 @@ test('"Approve N low-risk" posts the displayed low-risk pairs, grants exactly th
   assert.equal(r.headers.location, `/?${new URLSearchParams([['m', 'merged'], ['s', 'sha_moved:acme/lib#2']])}`)
   const page = await call(port, { path: r.headers.location })
   assert.ok(page.body.includes('class="notice">Merged.'))
-  assert.match(page.body, /<li>acme\/lib#2: The pull request changed since you looked/)
+  assert.ok(page.body.includes('<li>acme/lib#2: The pull request changed or cannot be merged as it stands. Review it again.</li>'))
   const forged = await call(port, { path: `/?m=merged&s=${encodeURIComponent(`sha_moved:${EVIL}`)}&s=evil:acme/lib%232` })
   assert.ok(!forged.body.includes('class="skipped"') && !forged.body.includes('<script'), 'a skip line needs a known reason and an item id')
+
+  skips['acme/app#7'] = 'not_low_risk'
+  const none = await post(port, '/grant-low-risk', fields)
+  assert.equal(none.headers.location, `/?${new URLSearchParams([['m', 'not_low_risk'], ['s', 'not_low_risk:acme/app#7'], ['s', 'sha_moved:acme/lib#2']])}`)
+  const nonePage = (await call(port, { path: none.headers.location })).body
+  assert.ok(nonePage.includes('class="notice">No longer low-risk at that commit, so it was not merged.'))
+  assert.ok(nonePage.includes('<li>acme/app#7: No longer low-risk at that commit') && nonePage.includes('<li>acme/lib#2: The pull request changed or cannot be merged as it stands.'))
 
   const before = calls.length
   assert.equal((await post(port, '/grant-low-risk', [['id', 'acme/app#7'], ['csrf', TOKEN]])).status, 400, 'unpaired id')
