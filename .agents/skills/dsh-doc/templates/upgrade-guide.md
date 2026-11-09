@@ -1,6 +1,6 @@
 # Template: upgrade-guide
 
-Use this kind for `docs/upgrade-guide/v<version>/<item>/guide.md` and its Chinese sibling `guide.zh.md`, whose sections are `## 变更` and `## 迁移`. The tree has no folder index. [dsh-create-upgrade-guide](../../dsh-create-upgrade-guide/SKILL.md) owns scope, placement, maintenance, and length rules; `pnpm run verify-upgrade-guides` enforces them.
+Use this kind for `docs/upgrade-guide/v<version>/<item>/guide.md`. The tree has no folder index. [dsh-create-upgrade-guide](../../dsh-create-upgrade-guide/SKILL.md) owns scope, placement, maintenance, and length rules; `pnpm run verify-upgrade-guides` enforces them.
 
 ## Frontmatter
 

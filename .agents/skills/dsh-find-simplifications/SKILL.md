@@ -58,7 +58,7 @@ Use [dsh-prose-standard](../dsh-prose-standard/SKILL.md) when prose is in scope.
 
 A substantial proposal uses the mandatory note skeleton: `Problem`, `Proposal`, `Alternatives considered`, `Acceptance criteria`, and `Risks`. Include concrete consumer evidence, the removed maintenance cost, the capability given up, and observable acceptance conditions. An implemented decision uses the [implemented format](../../notes/README.md#the-body-skeleton) instead. Update an existing owner when the decision is the same; do not create duplicate notes to preserve candidate counts.
 
-Every new note requires a scoped supersession check through [dsh-archive-agent-notes](../dsh-archive-agent-notes/SKILL.md). That workflow owns retention, consolidation, triplet deletion, and frozen archive mechanics. A code survey does not imply a repository-wide note audit. Preserve partial supersessions and current durable, wire, compatibility, or rejected-alternative obligations.
+Every new note requires a scoped supersession check through [dsh-archive-agent-notes](../dsh-archive-agent-notes/SKILL.md). That workflow owns retention, consolidation, note deletion, and frozen archive mechanics. A code survey does not imply a repository-wide note audit. Preserve partial supersessions and current durable, wire, compatibility, or rejected-alternative obligations.
 
 When folding another branch, compare its independent diff against the target base, port only supported non-overlapping proposals, and consolidate overlapping rationale. Closing another PR requires authorization or clear ownership of that housekeeping.
 

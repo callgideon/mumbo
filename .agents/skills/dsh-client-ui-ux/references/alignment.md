@@ -23,7 +23,7 @@ Name the aligned object and reference container. Equal padding need not align te
 | Two edges | Title/action rows and left/right composer groups | Left group follows the content edge; right group follows the trailing edge | Distribute every icon across the available width |
 | Repeated columns | Action clusters, timestamps, file rows | Corresponding slots share centers or edges across rows | Only the last icon aligns; preceding icons drift |
 
-For Chinese/English navigation, identify leading icon centers, text starts and trailing controls by role. Headings, avatars and expandable search may differ. Continue axes only where the composition establishes them, including shared plugin reading edges even when hover paint extends beyond them, and conversation/right-sidebar header heights and baselines.
+For navigation in every locale, identify leading icon centers, text starts and trailing controls by role. Headings, avatars and expandable search may differ. Continue axes only where the composition establishes them, including shared plugin reading edges even when hover paint extends beyond them, and conversation/right-sidebar header heights and baselines.
 
 For a trigger and its menu, or search field and result rows, compare the complete text inset: outer padding, borders, leading slot and gap. Different icon sizes can retain one text start. For adjacent statistics, check font family, size, weight and line height together before moving the icon.
 
