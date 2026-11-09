@@ -190,7 +190,7 @@ PROJECT_PATCH=
 if [ -f /src/deploy/mumbo-project.overlay.yml ]; then PROJECT_PATCH="--patch /src/deploy/mumbo-project.overlay.yml"; touch /root/.mumbo/member-auth; else rm -f /root/.mumbo/member-auth; fi
 export MUMBO_MEMBER_KEY=${memberKeyText}
 ` : ''}cd /src
-${site.desktop ? '' : `HTTPS_PROXY=http://127.0.0.1:8899 NO_PROXY=127.0.0.1,localhost,${cfg.llmHost} MUMBO_PANEL_ADMINS=${sq(panelAdmins.map(e => e.toLowerCase()).join(','))} \\
+${site.desktop ? '' : `PATH=/root/.mumbo/bin:$PATH NODE_USE_ENV_PROXY=1 NODE_EXTRA_CA_CERTS=/root/.mumbo/ca/ca.crt HTTPS_PROXY=http://127.0.0.1:8899 NO_PROXY=127.0.0.1,localhost,${cfg.llmHost} MUMBO_PANEL_ADMINS=${sq(panelAdmins.map(e => e.toLowerCase()).join(','))} \\
 `}HOME=/root DSH_HOME=/root/.dsh DSH_AGENTS_HOME=/root/.mumbo/agents DSH_TELEMETRY_DISABLED=1 \\
 DEEPSEEK_BASE_URL=${llm}/anthropic DEEPSEEK_SEARCH_BASE_URL=${llm} DEEPSEEK_API_KEY=${token} \\
 nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\

@@ -31,7 +31,7 @@ test('a project box start script has the proxy setup in order, before the member
     'curl -s -o /dev/null -m 1 http://127.0.0.1:8899/',
     'if [ -f /src/deploy/mumbo-project.overlay.yml ]',
     'export MUMBO_MEMBER_KEY=KEYTEXT',
-    'HTTPS_PROXY=http://127.0.0.1:8899 NO_PROXY=127.0.0.1,localhost,l ',
+    'PATH=/root/.mumbo/bin:$PATH NODE_USE_ENV_PROXY=1 NODE_EXTRA_CA_CERTS=/root/.mumbo/ca/ca.crt HTTPS_PROXY=http://127.0.0.1:8899 NO_PROXY=127.0.0.1,localhost,l ',
     '$PROJECT_PATCH',
   ].map(n => at(s, n))
   assert.deepEqual(order, [...order].sort((a, b) => a - b))
