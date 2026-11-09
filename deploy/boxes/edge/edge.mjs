@@ -6,6 +6,7 @@ import { createHash, createHmac, createVerify, timingSafeEqual } from 'node:cryp
 import { readFileSync } from 'node:fs'
 import { createServer, request as httpRequest } from 'node:http'
 import { Readable, pipeline } from 'node:stream'
+import { ownersOf } from './projects.mjs'
 
 const env = (name, fallback) => process.env[name] ?? fallback ?? (() => { throw new Error(`edge: set ${name}`) })()
 const list = (value) => value.toLowerCase().split(',').map(s => s.trim()).filter(Boolean)
@@ -122,9 +123,11 @@ export function boxSite(cfg, principal) {
 
 // ---- inside a box. It never sees a server secret: its DeepSeek key is its own box token, valid only via LLM_HOST.
 // memberKeyText: a project box's member key (base64url). boxFiles: { proxy, gh }, the texts of box/github-local-proxy.mjs
-// and box/gh as read by main() at start, for project boxes; not written into boxes yet.
-export function startScript(cfg, token, site = boxSite(cfg, ''), role = '', memberKeyText, boxFiles) {
+// and box/gh as read by main() at start, written into project boxes. panelAdmins: the project owners' emails, for MUMBO_PANEL_ADMINS.
+export function startScript(cfg, token, site = boxSite(cfg, ''), role = '', memberKeyText, boxFiles, panelAdmins = []) {
   const llm = `https://${cfg.llmHost}`
+  const b64 = (text) => Buffer.from(text).toString('base64')
+  const sq = (text) => `'${text.replaceAll("'", `'\\''`)}'`
   return `#!/bin/sh
 # Start dsh web for this box's user. Re-runnable: the router calls it again when dsh is found dead.
 set -eu
@@ -165,13 +168,40 @@ if id browser >/dev/null 2>&1; then
   pgrep -x x11vnc >/dev/null || su browser -s /bin/sh -c 'x11vnc -display :1 -localhost -forever -shared -nopw -rfbport 5900 -quiet >/tmp/x11vnc.log 2>&1 &'
   pgrep -f websockify >/dev/null || nohup websockify --web /usr/share/novnc "$ip:6080" 127.0.0.1:5900 >/tmp/websockify.log 2>&1 &
 fi
-` : ''}${memberKeyText ? `# Project box: members sign in with the edge's x-mumbo-member header when the image ships the project overlay
+` : ''}${site.desktop ? '' : `# Project box: a TLS-terminating GitHub proxy on loopback (its own CA, trusted system-wide) aims git and gh at the edge's
+# forwarder with this box's token (edge/box/github-local-proxy.mjs); dsh and its children reach GitHub only through it.
+mkdir -p /root/.mumbo/ca /root/.mumbo/bin
+# One start at a time: the router can re-run this script while a first run is still setting up the CA or the proxy.
+(
+flock 9
+a=$(openssl x509 -noout -pubkey -in /root/.mumbo/ca/ca.crt 2>/dev/null || true)
+b=$(openssl pkey -pubout -in /root/.mumbo/ca/ca.key 2>/dev/null || true)
+if [ -z "$a" ] || [ "$a" != "$b" ]; then
+  pkill -f github-local-proxy.mjs || true
+  rm -rf /root/.mumbo/ca/leaf
+  openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj /CN=mumbo-box -keyout /root/.mumbo/ca/ca.key.tmp -out /root/.mumbo/ca/ca.crt.tmp
+  chmod 600 /root/.mumbo/ca/ca.key.tmp
+  mv /root/.mumbo/ca/ca.key.tmp /root/.mumbo/ca/ca.key
+  mv /root/.mumbo/ca/ca.crt.tmp /root/.mumbo/ca/ca.crt
+  cp /root/.mumbo/ca/ca.crt /usr/local/share/ca-certificates/mumbo-box.crt
+  update-ca-certificates
+fi
+echo ${b64(boxFiles.proxy)} | base64 -d > /root/.mumbo/bin/github-local-proxy.mjs
+echo ${b64(boxFiles.gh)} | base64 -d > /root/.mumbo/bin/gh
+chmod 0755 /root/.mumbo/bin/github-local-proxy.mjs /root/.mumbo/bin/gh
+pgrep -f github-local-proxy.mjs >/dev/null || PORT=8899 CA_DIR=/root/.mumbo/ca EDGE_GITHUB_URL=${llm}/github BOX_TOKEN=${token} nohup node /root/.mumbo/bin/github-local-proxy.mjs >/root/github-proxy.log 2>&1 9>&- &
+up=
+for i in $(seq 20); do curl -s -o /dev/null -m 1 http://127.0.0.1:8899/ && up=1 || { [ $? -ne 7 ] && up=1; }; [ -n "$up" ] && break; sleep 0.5; done
+[ -n "$up" ] || { echo 'github proxy did not start' >&2; exit 1; }
+) 9>/root/.mumbo/ca.lock
+`}${memberKeyText ? `# Project box: members sign in with the edge's x-mumbo-member header when the image ships the project overlay
 # (@mumbo/edge-member); the marker tells the edge to use it instead of the owner launch token.
 PROJECT_PATCH=
 if [ -f /src/deploy/mumbo-project.overlay.yml ]; then PROJECT_PATCH="--patch /src/deploy/mumbo-project.overlay.yml"; touch /root/.mumbo/member-auth; else rm -f /root/.mumbo/member-auth; fi
 export MUMBO_MEMBER_KEY=${memberKeyText}
 ` : ''}cd /src
-HOME=/root DSH_HOME=/root/.dsh DSH_AGENTS_HOME=/root/.mumbo/agents DSH_TELEMETRY_DISABLED=1 \\
+${site.desktop ? '' : `PATH=/root/.mumbo/bin:$PATH NODE_USE_ENV_PROXY=1 NODE_EXTRA_CA_CERTS=/root/.mumbo/ca/ca.crt HTTPS_PROXY=http://127.0.0.1:8899 NO_PROXY=127.0.0.1,localhost,${cfg.llmHost} MUMBO_PANEL_ADMINS=${sq(panelAdmins.map(e => e.toLowerCase()).join(','))} \\
+`}HOME=/root DSH_HOME=/root/.dsh DSH_AGENTS_HOME=/root/.mumbo/agents DSH_TELEMETRY_DISABLED=1 \\
 DEEPSEEK_BASE_URL=${llm}/anthropic DEEPSEEK_SEARCH_BASE_URL=${llm} DEEPSEEK_API_KEY=${token} \\
 nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\
   --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml${memberKeyText ? ' $PROJECT_PATCH' : ''} \\
@@ -259,7 +289,7 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
 
   async function create(email) {
     if (cfg.maxRunning > 0 && (await all({ state: ['running'] })).length >= cfg.maxRunning) throw Object.assign(new Error('capacity'), { status: 503, capacity: true })
-    const box = await e2b.Sandbox.create(cfg.template, {
+    const box = await e2b.Sandbox.create(email.startsWith('project:') ? cfg.projectTemplate : cfg.template, {
       timeoutMs: timeout(), metadata: { user: email },
       lifecycle: { onTimeout: 'pause', autoResume: true },
       network: { allowPublicTraffic: false, maskRequestHost: boxSite(cfg, email).host },
@@ -268,7 +298,8 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
     await store.putBox(box.sandboxId, { email, creating: Date.now(), active: Date.now(), extended: Date.now(), backedUp: Date.now(), paused: false })
     try {
       await box.files.write('/root/.mumbo/start.sh', startScript(cfg, signBox(edgeKey, email, box.sandboxId), boxSite(cfg, email), roleInstructions(cfg, email),
-        email.startsWith('project:') ? memberKey(edgeKey, box.sandboxId).toString('base64url') : undefined, boxFiles))
+        email.startsWith('project:') ? memberKey(edgeKey, box.sandboxId).toString('base64url') : undefined, boxFiles,
+        email.startsWith('project:') ? await ownersOf(store, email.slice('project:'.length)) : undefined))
       const restoreUrl = await presignGet(`${userPrefix(email)}/latest.tar.gz`)
       if (restoreUrl) {
         const ok = await run(box, restoreCommand(restoreUrl), 660_000).then(() => true, () => false)
