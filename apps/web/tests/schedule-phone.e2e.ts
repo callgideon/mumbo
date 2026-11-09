@@ -24,7 +24,7 @@ interface ViewFacts {
 /** Open the Automation tasks page and return its panel. */
 async function openTaskManager(page: Page, url: string): Promise<Locator> {
   await page.goto(url, { waitUntil: 'load' })
-  await revealNavigationDrawer(page, 'zh')
+  await revealNavigationDrawer(page, 'en')
   await page.getByRole('button', { name: '自动化任务', exact: true }).click()
   const panel = page.getByTestId('task-manager-page')
   await panel.getByRole('heading', { name: '自动化任务', exact: true }).waitFor({ timeout: 30_000 })
@@ -110,14 +110,14 @@ it('keeps the automation page on screen with its text fields at the touch step',
         search: '16px',
         instruction: '16px',
       })
-      const detail = phonePanel.getByRole('complementary', { name: '任务详情', exact: true })
-      await expectEditorAlignment(detail.getByRole('textbox', { name: '自动化任务名称', exact: true }))
-      await detail.getByRole('textbox', { name: '自动化任务名称', exact: true }).fill('未保存的手机草稿')
+      const detail = phonePanel.getByRole('complementary', { name: 'Task details', exact: true })
+      await expectEditorAlignment(detail.getByRole('textbox', { name: 'Automation task name', exact: true }))
+      await detail.getByRole('textbox', { name: 'Automation task name', exact: true }).fill('未保存的手机草稿')
       const task = (await scaffold.ctx.schedule.catalog()).find(item => item.title === PHONE_TASK_TITLE)
       if (task === undefined) throw new Error('phone task was not retained')
       await scaffold.ctx.schedule.edit({ id: task.id, action: 'update', expectedUpdatedAt: task.updatedAt ?? null,
         patch: { prompt: '其他窗口的最新内容' } })
-      const recovery = detail.getByRole('button', { name: '保留修改并复核', exact: true })
+      const recovery = detail.getByRole('button', { name: 'Review with my edits', exact: true })
       await recovery.waitFor()
       await recovery.scrollIntoViewIfNeeded()
       const recoveryBox = await recovery.boundingBox()
@@ -128,7 +128,7 @@ it('keeps the automation page on screen with its text fields at the touch step',
       expect(recoveryBox!.y + recoveryBox!.height).toBeLessThanOrEqual(844)
       const [noticeBox, messageBox, nameBox] = await Promise.all([
         detail.getByRole('alert').locator('..').boundingBox(), detail.getByRole('alert').boundingBox(),
-        detail.getByRole('textbox', { name: '自动化任务名称', exact: true }).locator('..').boundingBox(),
+        detail.getByRole('textbox', { name: 'Automation task name', exact: true }).locator('..').boundingBox(),
       ])
       expect(noticeBox).not.toBeNull()
       expect(messageBox).not.toBeNull()
@@ -137,19 +137,19 @@ it('keeps the automation page on screen with its text fields at the touch step',
       expect(Math.abs(noticeBox!.x + noticeBox!.width - nameBox!.x - nameBox!.width)).toBeLessThanOrEqual(1)
       expect(recoveryBox!.y).toBeGreaterThanOrEqual(messageBox!.y + messageBox!.height)
       expect(recoveryBox!.x + recoveryBox!.width).toBeLessThanOrEqual(noticeBox!.x + noticeBox!.width)
-      expect(await detail.getByRole('button', { name: '保存修改', exact: true }).isDisabled()).toBe(true)
+      expect(await detail.getByRole('button', { name: 'Save changes', exact: true }).isDisabled()).toBe(true)
       await recovery.click()
-      expect(await detail.getByRole('textbox', { name: '自动化任务名称', exact: true }).inputValue()).toBe('未保存的手机草稿')
-      expect(await detail.getByRole('textbox', { name: '自动化任务内容', exact: true }).inputValue()).toBe('其他窗口的最新内容')
+      expect(await detail.getByRole('textbox', { name: 'Automation task name', exact: true }).inputValue()).toBe('未保存的手机草稿')
+      expect(await detail.getByRole('textbox', { name: 'Automation task instruction', exact: true }).inputValue()).toBe('其他窗口的最新内容')
       expect((await viewFacts(phonePage)).documentWidth).toBe(PHONE_PAGE_WIDTH)
       expect(await scaffold.ctx.schedule.view({ id: task.id })).toMatchObject({ title: PHONE_TASK_TITLE })
-      await detail.getByRole('button', { name: '放弃', exact: true }).click()
-      await phonePanel.getByRole('button', { name: '关闭详情', exact: true }).click()
-      await phonePanel.getByRole('button', { name: '选择创建方式', exact: true }).click()
-      await phonePage.getByRole('menuitem', { name: '手动创建', exact: true }).click()
-      const creation = phonePanel.getByRole('complementary', { name: '手动创建', exact: true })
+      await detail.getByRole('button', { name: 'Discard', exact: true }).click()
+      await phonePanel.getByRole('button', { name: 'Close details', exact: true }).click()
+      await phonePanel.getByRole('button', { name: 'Choose a creation method', exact: true }).click()
+      await phonePage.getByRole('menuitem', { name: 'Create manually', exact: true }).click()
+      const creation = phonePanel.getByRole('complementary', { name: 'Create manually', exact: true })
       await creation.waitFor()
-      await expectEditorAlignment(creation.getByRole('textbox', { name: '自动化任务名称', exact: true }))
+      await expectEditorAlignment(creation.getByRole('textbox', { name: 'Automation task name', exact: true }))
       await expect.poll(() => viewFacts(phonePage)).toEqual({
         width: PHONE_PAGE_WIDTH,
         documentWidth: PHONE_PAGE_WIDTH,
@@ -158,7 +158,7 @@ it('keeps the automation page on screen with its text fields at the touch step',
         search: '16px',
         instruction: '16px',
       })
-      for (const name of ['放弃', '创建']) {
+      for (const name of ['Discard', 'Create']) {
         const button = creation.getByRole('button', { name, exact: true })
         await button.scrollIntoViewIfNeeded()
         const box = await button.boundingBox()
@@ -168,7 +168,7 @@ it('keeps the automation page on screen with its text fields at the touch step',
         expect(box!.y).toBeGreaterThanOrEqual(0)
         expect(box!.y + box!.height).toBeLessThanOrEqual(844)
       }
-      await creation.getByRole('button', { name: '放弃', exact: true }).click()
+      await creation.getByRole('button', { name: 'Discard', exact: true }).click()
       expect(await phonePanel.getByRole('complementary').count()).toBe(0)
       await phone.close()
 
@@ -214,10 +214,10 @@ it.each([
     methods: 'Choose a creation method', manual: 'Create manually', title: 'Automation task name', discard: 'Discard',
     instruction: 'Automation task instruction', create: 'Create',
     repeat: /^Repeat /, frequencies: ['Every month', 'Weekly', 'Once'] },
-  { locale: 'zh-CN', tasks: '自动化任务', sidebar: '收起侧边栏', openSidebar: '打开侧边栏', close: '关闭详情',
-    methods: '选择创建方式', manual: '手动创建', title: '自动化任务名称', discard: '放弃',
-    instruction: '自动化任务内容', create: '创建',
-    repeat: /^重复 /, frequencies: ['每月', '每周', '仅一次'] },
+  { locale: 'zh-CN', tasks: '自动化任务', sidebar: 'Collapse sidebar', openSidebar: 'Open sidebar', close: 'Close details',
+    methods: 'Choose a creation method', manual: 'Create manually', title: 'Automation task name', discard: 'Discard',
+    instruction: 'Automation task instruction', create: 'Create',
+    repeat: /^Repeat /, frequencies: ['Every month', 'Weekly', 'Once'] },
   { locale: 'fr-FR', tasks: "Tâches d'automatisation", sidebar: 'Réduire la barre latérale', openSidebar: 'Ouvrir la barre latérale', close: 'Fermer les détails',
     methods: 'Choisir le mode de création', manual: 'Créer manuellement', title: "Nom de la tâche d'automatisation", discard: 'Abandonner',
     instruction: "Instruction de tâche d'automatisation", create: 'Créer',

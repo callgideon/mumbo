@@ -26,7 +26,7 @@ it('keeps the automation title intact before moving New to another line', async 
           const heading = panel.getByRole('heading', { name: title, exact: true })
           await heading.waitFor()
           const header = heading.locator('..')
-          const create = header.getByRole('button', { name: language === 'en' ? 'New' : '新建', exact: true })
+          const create = header.getByRole('button', { name: language === 'en' ? 'New' : 'New', exact: true })
           await page.evaluate(() => document.fonts.ready)
           await create.focus()
           for (const width of [1680, 800, 520, 440, 390, 430, 1024]) {

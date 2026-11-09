@@ -14,7 +14,7 @@ import { excelDrawingFixture } from '../../../packages/client/ui-sidebar-documen
 import { xlsFixture } from '../../../packages/client/ui-sidebar-documentpreview/tests/xls-fixture.ts'
 import { pdfFixture, selectionPdfFixture } from '../../../packages/client/ui-sidebar-documentpreview/tests/pdf-fixture.ts'
 import { assertFixtureInventory, compareOrRefreshGolden, launchWebScaffold, watchConsole, webSnapshotMode, type WebScaffold } from './scaffold.ts'
-import { openSettings, connectFreshWorkspace, connectFreshWorkspaceZh, newEnglishPage, saveFailureShot, scrollIntoView } from './support.ts'
+import { openSettings, connectFreshWorkspace, newEnglishPage, saveFailureShot, scrollIntoView } from './support.ts'
 
 const FIXTURE = fileURLToPath(new URL('../../../snapshots/web/lifecycle-chrome/session.v3.jsonl', import.meta.url))
 const SNAPSHOT_DIR = fileURLToPath(new URL('../../../snapshots/web/document-preview', import.meta.url))
@@ -180,7 +180,7 @@ it.skipIf(MODE === 'record').each(['en-US', 'zh-CN'])('fills the spreadsheet pan
     const consoleErrors = watchConsole(page)
     onTestFailed(async () => { await saveFailureShot(page, `screenshots/0908-document-preview/excel-resize-${locale}-${process.pid}`) })
     await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-    await (locale === 'zh-CN' ? connectFreshWorkspaceZh : connectFreshWorkspace)(page, scaffold.workspaceCwd)
+    await connectFreshWorkspace(page, scaffold.workspaceCwd)
     const settled = scaffold.whenTurnSettled()
     const input = page.locator('[data-composer-input]').first()
     await input.fill(PROMPT)
@@ -1445,7 +1445,7 @@ else process.exit(1);
       await viewer.click()
       await page.getByRole('menuitem', { name: 'Spreadsheet', exact: true }).click()
       await excel.getByText(extension.toUpperCase(), { exact: true }).waitFor()
-      await writeFile(join(cwd, `table.${extension}`), extension === 'csv' ? '00999,更新' : '00999\t更新')
+      await writeFile(join(cwd, `table.${extension}`), extension === 'csv' ? '00999,Update' : '00999	Update')
       await preview.locator('[data-textpreview-tool="reload"]').click()
       await expect.poll(() => excel.locator('.fortune-fx-input').innerText()).toBe('00999')
       await excel.locator('.fortune-sheet-overlay').click({ position: { x: 70, y: 30 } })

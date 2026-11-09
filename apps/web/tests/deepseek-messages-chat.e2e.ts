@@ -8,7 +8,7 @@ import {
   assertFixtureInventory, captureStableAria, compareOrRefreshGolden, fixtureUserPrompts,
   launchWebScaffold, selectedSessionFixture, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { connectFreshWorkspaceZh, saveFailureShot, ZH_BROWSER_LOCALE } from './support.ts'
+import { saveFailureShot, connectFreshWorkspace } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('../../../snapshots/web/deepseek-messages-chat', import.meta.url))
 const FIXTURE = join(SNAPSHOT_DIR, 'session.v3.jsonl')
@@ -37,10 +37,10 @@ describe.skipIf(MODE === 'record')('web e2e: DeepSeek Messages conversation', ()
     })
     await scaffold.ctx.agentDefaultModel.saveSelection({ provider: 'deepseek-messages', model: 'deepseek-v4-flash' })
     browser = await chromium.launch()
-    page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: ZH_BROWSER_LOCALE })
+    page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: 'en-US' })
     tripwire = watchConsole(page)
     await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-    await connectFreshWorkspaceZh(page, scaffold.workspaceCwd)
+    await connectFreshWorkspace(page, scaffold.workspaceCwd)
   }, 120_000)
 
   afterAll(async () => {
@@ -52,10 +52,10 @@ describe.skipIf(MODE === 'record')('web e2e: DeepSeek Messages conversation', ()
     const prompts = fixtureUserPrompts(await readFile(replayFixture, 'utf8'))
     expect(prompts).toHaveLength(1)
     expect(scaffold.ctx.agentDefaultModel.currentSelection()).toEqual({ provider: 'deepseek-messages', model: 'deepseek-v4-flash' })
-    await page.getByRole('button', { name: /^选择模型/ }).click()
+    await page.getByRole('button', { name: /^Choose models/ }).click()
     await page.getByRole('menuitem', { name: /模型/ }).click()
     await page.getByRole('group', { name: 'DeepSeek', exact: true }).waitFor()
-    await page.getByRole('button', { name: /^选择模型/ }).click()
+    await page.getByRole('button', { name: /^Choose models/ }).click()
     const input = page.locator('[data-composer-input]').first()
     const settled = scaffold.whenTurnSettled()
     await input.fill(prompts[0]!)

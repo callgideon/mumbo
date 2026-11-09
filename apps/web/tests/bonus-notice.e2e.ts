@@ -308,7 +308,7 @@ describe.skipIf(MODE === 'record')('web e2e: bonus notice', () => {
     })
 
     // Closing the card only hides it; the acknowledgement already sent is not repeated.
-    await noticeCards(page).getByRole('button', { name: '关闭', exact: true }).click()
+    await noticeCards(page).getByRole('button', { name: 'Close', exact: true }).click()
     expect(await noticeCards(page).count()).toBe(0)
     expect(platform.acks).toHaveLength(1)
 
@@ -320,8 +320,8 @@ describe.skipIf(MODE === 'record')('web e2e: bonus notice', () => {
     // Hold the panel's notice read so the test observes its in-flight state instead of
     // racing a fast local response.
     platform.holdNextGet()
-    await openSettings(page, 'zh')
-    const settings = page.getByRole('dialog', { name: '设置', exact: true })
+    await openSettings(page, 'en')
+    const settings = page.getByRole('dialog', { name: 'Settings', exact: true })
     await settings.waitFor()
     await expect.poll(() => platform.gets.length, { timeout: 30_000 }).toBe(getsBefore + 1)
     // One open, one read: no control in the panel drives a second one.
@@ -349,14 +349,14 @@ describe.skipIf(MODE === 'record')('web e2e: bonus notice', () => {
 
     const openGet = platform.served.at(-1)!
     const panel = (await settings.textContent()) ?? ''
-    const usage = await settings.getByRole('link', { name: '查询用量', exact: true }).getAttribute('href')
+    const usage = await settings.getByRole('link', { name: 'View usage', exact: true }).getAttribute('href')
     observations.push(`open.get locale=${String(openGet.locale)} query=${openGet.query} served=true gets=${String(platform.gets.length - getsBefore)}`)
-    observations.push(`open.balance bonus-row=${String(panel.includes('赠金余额'))} amount=${String(panel.includes('¥13.00'))} dated=${String(/\d{4}-\d{2}-\d{2}/.test(panel))}`)
+    observations.push(`open.balance bonus-row=${String(panel.includes('Granted balance'))} amount=${String(panel.includes('¥13.00'))} dated=${String(/\d{4}-\d{2}-\d{2}/.test(panel))}`)
     observations.push(`open.cards-while-open=${String(await noticeCards(page).count())} acks=${String(platform.acks.length)}`)
     observations.push(`open.usage-link=${String(usage).replace(platform.origin, '{{origin}}')}`)
     expect(openGet.locale).toBe('zh_CN')
     expect(openGet.query).toBe('')
-    expect(panel).toContain('赠金余额')
+    expect(panel).toContain('Granted balance')
     expect(panel).toContain('¥13.00')
     expect(panel).not.toMatch(/\d{4}-\d{2}-\d{2}/)
     expect(usage).toBe(`${platform.origin}/usage`)
@@ -364,7 +364,7 @@ describe.skipIf(MODE === 'record')('web e2e: bonus notice', () => {
     expect(platform.acks).toHaveLength(2)
 
     // Closing settings repeats no acknowledgement and leaves the card on the sidebar.
-    const launcher = page.getByRole('button', { name: '账号菜单', exact: true })
+    const launcher = page.getByRole('button', { name: 'Account menu', exact: true })
     await page.keyboard.press('Escape')
     await settings.waitFor({ state: 'detached', timeout: 30_000 })
     // The shell restores focus to the launcher once the close commits.
@@ -373,7 +373,7 @@ describe.skipIf(MODE === 'record')('web e2e: bonus notice', () => {
     expect(await noticeCards(page).count()).toBe(1)
     expect(platform.acks).toHaveLength(2)
     // Closing the card hides it; the double already stopped serving this acknowledged order.
-    await noticeCards(page).getByRole('button', { name: '关闭', exact: true }).click()
+    await noticeCards(page).getByRole('button', { name: 'Close', exact: true }).click()
     expect(await noticeCards(page).count()).toBe(0)
     expect(platform.acks).toHaveLength(2)
     observations.push(`open.dismissed cards=0 acks=${String(platform.acks.length)}`)
@@ -381,8 +381,8 @@ describe.skipIf(MODE === 'record')('web e2e: bonus notice', () => {
     // The next entry refreshes once more; switching sections inside one open is not an entry.
     const reopenGetsBefore = platform.gets.length
     const reopenSummariesBefore = platform.summaries.length
-    await openSettings(page, 'zh')
-    const reopened = page.getByRole('dialog', { name: '设置', exact: true })
+    await openSettings(page, 'en')
+    const reopened = page.getByRole('dialog', { name: 'Settings', exact: true })
     await reopened.waitFor()
     await expect.poll(() => platform.gets.length, { timeout: 30_000 }).toBe(reopenGetsBefore + 1)
     await expect.poll(() => platform.summaries.length, { timeout: 30_000 }).toBe(reopenSummariesBefore + 1)
@@ -397,8 +397,8 @@ describe.skipIf(MODE === 'record')('web e2e: bonus notice', () => {
     const nav = reopened.locator('nav')
     await nav.getByRole('button', { name: '模型', exact: true }).click()
     await expect.poll(async () => nav.getByRole('button', { name: '模型', exact: true }).getAttribute('aria-current'), { timeout: 30_000 }).toBe('true')
-    await nav.getByRole('button', { name: '账号与余额', exact: true }).click()
-    await expect.poll(async () => nav.getByRole('button', { name: '账号与余额', exact: true }).getAttribute('aria-current'), { timeout: 30_000 }).toBe('true')
+    await nav.getByRole('button', { name: 'Account', exact: true }).click()
+    await expect.poll(async () => nav.getByRole('button', { name: 'Account', exact: true }).getAttribute('aria-current'), { timeout: 30_000 }).toBe('true')
     platform.releaseGet()
     const sectionPanel = (await reopened.textContent()) ?? ''
     observations.push(`reopen.section-switch gets=${String(platform.gets.length - sectionGetsBefore)} summaries=${String(platform.summaries.length - sectionSummariesBefore)} amount=${String(sectionPanel.includes('¥13.00'))} cards=${String(await noticeCards(page).count())} acks=${String(platform.acks.length)}`)
@@ -417,15 +417,15 @@ describe.skipIf(MODE === 'record')('web e2e: bonus notice', () => {
     const zhTopUp = '已赠送您 11.00 元 DSH 体验赠金。'
     const topUpGetsBefore = platform.gets.length
     const topUpSummariesBefore = platform.summaries.length
-    await openSettings(page, 'zh')
-    const topUpSettings = page.getByRole('dialog', { name: '设置', exact: true })
+    await openSettings(page, 'en')
+    const topUpSettings = page.getByRole('dialog', { name: 'Settings', exact: true })
     await topUpSettings.waitFor()
     await expect.poll(() => platform.gets.length, { timeout: 30_000 }).toBe(topUpGetsBefore + 1)
     await expect.poll(() => platform.summaries.length, { timeout: 30_000 }).toBe(topUpSummariesBefore + 1)
     observations.push(`topup.open gets=${String(platform.gets.length - topUpGetsBefore)} summaries=${String(platform.summaries.length - topUpSummariesBefore)}`)
     const callsBefore = (await platformCalls(page)).length
-    await topUpSettings.getByRole('link', { name: '充值', exact: true }).click()
-    const topUpOverlay = page.getByRole('dialog', { name: '返回 DeepSeek Harness', exact: true })
+    await topUpSettings.getByRole('link', { name: 'Top up', exact: true }).click()
+    const topUpOverlay = page.getByRole('dialog', { name: 'Back to DeepSeek Harness', exact: true })
     await topUpOverlay.waitFor()
     // Opening the native view reads nothing by itself.
     expect(platform.gets.length).toBe(topUpGetsBefore + 1)
@@ -437,7 +437,7 @@ describe.skipIf(MODE === 'record')('web e2e: bonus notice', () => {
     platform.grant(ORDER_TOPUP, '11.00')
     // Holding the notice read proves the return does not wait for the refresh it starts.
     platform.holdNextGet()
-    await topUpOverlay.getByRole('button', { name: '返回 DeepSeek Harness', exact: true }).click()
+    await topUpOverlay.getByRole('button', { name: 'Back to DeepSeek Harness', exact: true }).click()
     await topUpOverlay.waitFor({ state: 'detached', timeout: 30_000 })
     const topUpCalls = (await platformCalls(page)).slice(callsBefore).join(',')
     observations.push(`topup.returned bridge=${topUpCalls} cards=${String(await noticeCards(page).count())}`)
@@ -460,7 +460,7 @@ describe.skipIf(MODE === 'record')('web e2e: bonus notice', () => {
     observations.push(`topup.closed cards=${String(await noticeCards(page).count())} acks=${String(topUpAttempts().length)}`)
     expect(await noticeCards(page).count()).toBe(1)
     expect(topUpAttempts()).toHaveLength(1)
-    await noticeCards(page).getByRole('button', { name: '关闭', exact: true }).click()
+    await noticeCards(page).getByRole('button', { name: 'Close', exact: true }).click()
     expect(await noticeCards(page).count()).toBe(0)
 
     // A transient acknowledgement failure keeps the card and retries the same order after
@@ -468,8 +468,8 @@ describe.skipIf(MODE === 'record')('web e2e: bonus notice', () => {
     const zhRetry = '已赠送您 6.00 元 DSH 体验赠金。'
     platform.grant(ORDER_RETRY, '6.00')
     platform.failNextAcks(ORDER_RETRY, 1)
-    await openSettings(page, 'zh')
-    const retryDialog = page.getByRole('dialog', { name: '设置', exact: true })
+    await openSettings(page, 'en')
+    const retryDialog = page.getByRole('dialog', { name: 'Settings', exact: true })
     await retryDialog.waitFor()
     observations.push(`retry.notice=${await shownNotice(page, zhRetry)}`)
     const retryAttempts = (): AckRecord[] => platform.acks.filter(item => item.orderId === ORDER_RETRY)
@@ -489,7 +489,7 @@ describe.skipIf(MODE === 'record')('web e2e: bonus notice', () => {
     expect(retryBodyKept).toBe(true)
     await page.keyboard.press('Escape')
     await retryDialog.waitFor({ state: 'detached', timeout: 30_000 })
-    await noticeCards(page).getByRole('button', { name: '关闭', exact: true }).click()
+    await noticeCards(page).getByRole('button', { name: 'Close', exact: true }).click()
 
     // Display follows each response: the double keeps serving an acknowledged order, which
     // is what makes a second display of the same order observable.
@@ -498,8 +498,8 @@ describe.skipIf(MODE === 'record')('web e2e: bonus notice', () => {
     platform.setKeepUnnotified(true)
     platform.grant(ORDER_REPEAT, '7.00')
     const repeatAttempts = (): AckRecord[] => platform.acks.filter(item => item.orderId === ORDER_REPEAT)
-    await openSettings(page, 'zh')
-    const repeatDialog = page.getByRole('dialog', { name: '设置', exact: true })
+    await openSettings(page, 'en')
+    const repeatDialog = page.getByRole('dialog', { name: 'Settings', exact: true })
     await repeatDialog.waitFor()
     observations.push(`repeat.first=${await shownNotice(page, zhRepeat)}`)
     await expect.poll(() => repeatAttempts().length, { timeout: 30_000 }).toBe(1)
@@ -507,7 +507,7 @@ describe.skipIf(MODE === 'record')('web e2e: bonus notice', () => {
     await page.keyboard.press('Escape')
     await repeatDialog.waitFor({ state: 'detached', timeout: 30_000 })
     expect(await noticeCards(page).count()).toBe(1)
-    await noticeCards(page).getByRole('button', { name: '关闭', exact: true }).click()
+    await noticeCards(page).getByRole('button', { name: 'Close', exact: true }).click()
     // Displaying and acknowledging a notice writes nothing, so the key set is unchanged
     // against the baseline taken before it was shown.
     const shownAdded = (await storageKeys()).filter(key => !storedBeforeShown.includes(key))
@@ -519,7 +519,7 @@ describe.skipIf(MODE === 'record')('web e2e: bonus notice', () => {
     const reloadAdded = (await storageKeys()).filter(key => !storedBeforeShown.includes(key))
     observations.push(`repeat.shown added-storage-keys=${String(shownAdded.length)} reload-added=${String(reloadAdded.length)} acks=${String(repeatAttempts().length)} cards=${String(await noticeCards(page).count())}`)
     expect(reloadAdded).toEqual([])
-    await noticeCards(page).getByRole('button', { name: '关闭', exact: true }).click()
+    await noticeCards(page).getByRole('button', { name: 'Close', exact: true }).click()
 
     // A failed wallet read still leaves both balance rows reaching the Platform entry.
     platform.setKeepUnnotified(false)
@@ -528,10 +528,10 @@ describe.skipIf(MODE === 'record')('web e2e: bonus notice', () => {
     const failedGetsBefore = platform.gets.length
     const failedSummariesBefore = platform.summaries.length
     const failedUsagesBefore = (await platformCalls(page)).filter(call => call === 'open:usage').length
-    await openSettings(page, 'zh')
-    const failedSettings = page.getByRole('dialog', { name: '设置', exact: true })
+    await openSettings(page, 'en')
+    const failedSettings = page.getByRole('dialog', { name: 'Settings', exact: true })
     await failedSettings.waitFor()
-    const failedLinks = failedSettings.getByRole('link', { name: '前往开放平台查看', exact: true })
+    const failedLinks = failedSettings.getByRole('link', { name: 'View on Platform', exact: true })
     await expect.poll(() => failedLinks.count(), { timeout: 30_000 }).toBe(2)
     await expect.poll(() => platform.summaries.length, { timeout: 30_000 }).toBe(failedSummariesBefore + 1)
     const failedHrefs = (await failedLinks.evaluateAll(nodes => nodes.map(node => node.getAttribute('href'))))
@@ -541,9 +541,9 @@ describe.skipIf(MODE === 'record')('web e2e: bonus notice', () => {
     // Returning from usage refreshes nothing, because only a payment changes the account.
     for (const index of [0, 1]) {
       await failedLinks.nth(index).click()
-      const usageOverlay = page.getByRole('dialog', { name: '返回 DeepSeek Harness', exact: true })
+      const usageOverlay = page.getByRole('dialog', { name: 'Back to DeepSeek Harness', exact: true })
       await usageOverlay.waitFor()
-      await usageOverlay.getByRole('button', { name: '返回 DeepSeek Harness', exact: true }).click()
+      await usageOverlay.getByRole('button', { name: 'Back to DeepSeek Harness', exact: true }).click()
       await usageOverlay.waitFor({ state: 'detached', timeout: 30_000 })
     }
     const failedUsages = (await platformCalls(page)).filter(call => call === 'open:usage').length - failedUsagesBefore
@@ -641,10 +641,10 @@ describe.skipIf(MODE === 'record')('web e2e: bonus notice', () => {
     await expect.poll(() => platform.acks.length).toBe(ackStart + 2)
     expect(platform.acks.slice(ackStart).map(ack => ack.orderId)).toEqual(['stack-first', 'stack-second'])
     observations.push('stack.promoted cards=2 acks=stack-first,stack-second width=280 same-node=true')
-    await second.getByRole('button', { name: '关闭', exact: true }).click()
+    await second.getByRole('button', { name: 'Close', exact: true }).click()
     await expect.poll(() => platform.acks.length).toBe(ackStart + 3)
     expect(platform.acks.slice(ackStart).map(ack => ack.orderId)).toEqual(['stack-first', 'stack-second', 'stack-third'])
-    await cards.filter({ hasText: '23.00' }).getByRole('button', { name: '关闭', exact: true }).click()
+    await cards.filter({ hasText: '23.00' }).getByRole('button', { name: 'Close', exact: true }).click()
     await expect.poll(() => cards.count()).toBe(0)
     observations.push('stack.dismissed cards=0 acks=stack-first,stack-second,stack-third')
     await stackPage.close()

@@ -87,11 +87,11 @@ it('toggles bottom DevTools from the page and iframe without a selected Session'
 
 it.each([
   {
-    locale: 'zh-CN', file: 'zh', plugins: '插件', open: '查看 开发者工具', bundle: '开发者工具',
+    locale: 'zh-CN', file: 'zh', plugins: '插件', open: 'View Developer tools', bundle: 'Developer tools',
     description: experimentalBundleDescription('inspector-profile', 'zh'),
-    inspector: 'NodeJS 诊断', inspectorDescription: '按 Ctrl/Cmd+Shift+. 在底部面板打开 Chrome DevTools 进行开发调试',
-    session: '会话数据诊断', sessionDescription: '在会话侧边栏启用当前会话的原始数据和聊天分组数据分析功能',
-    openSidebar: '打开右侧边栏', sidebarDescription: '在侧边栏分析当前会话原始日志和聊天分组数据',
+    inspector: 'NodeJS inspector', inspectorDescription: 'Press Ctrl/Cmd+Shift+. to open Chrome DevTools in the bottom panel for development and debugging.',
+    session: 'Session log', sessionDescription: 'Enable analysis of the current session\'s raw data and grouped chat messages in the session sidebar.',
+    openSidebar: 'Open right sidebar', sidebarDescription: 'Analyze raw logs and grouped chat messages for the current session in the sidebar.',
   },
   {
     locale: 'en-US', file: 'en', plugins: 'Plugins', open: 'View Developer tools', bundle: 'Developer tools',

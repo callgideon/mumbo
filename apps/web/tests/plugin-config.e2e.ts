@@ -16,7 +16,7 @@ import {
   assertFixtureInventory, captureStableAria, compareOrRefreshGolden,
   launchWebScaffold, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { ZH_BROWSER_LOCALE, saveFailureShot } from './support.ts'
+import { saveFailureShot } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('./expected/plugin-config', import.meta.url))
 const OFFICIAL_EXPECTED = join(SNAPSHOT_DIR, 'official.expected.md')
@@ -45,7 +45,7 @@ describe('web e2e: plugin configuration pages', () => {
     browser = await chromium.launch()
     // Chinese browser: the pages assert the localized copy the client derives
     // from it, as the rest of the settings surface does.
-    page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: ZH_BROWSER_LOCALE })
+    page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: 'en-US' })
     tripwire = watchConsole(page)
     await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
@@ -62,23 +62,23 @@ describe('web e2e: plugin configuration pages', () => {
    * dialog a previous scenario left open and leaves whatever page it opened.
    */
   async function openPlugins(): Promise<Locator> {
-    if (await page.getByRole('dialog', { name: '设置' }).count() > 0) {
+    if (await page.getByRole('dialog', { name: 'Settings' }).count() > 0) {
       await page.keyboard.press('Escape')
-      await expect.poll(() => page.getByRole('dialog', { name: '设置' }).count(), { timeout: 5_000 }).toBe(0)
+      await expect.poll(() => page.getByRole('dialog', { name: 'Settings' }).count(), { timeout: 5_000 }).toBe(0)
     }
-    await page.getByRole('navigation', { name: '全局面板' }).getByRole('button', { name: '插件', exact: true }).click()
+    await page.getByRole('navigation', { name: 'Global panels' }).getByRole('button', { name: '插件', exact: true }).click()
     const panel = page.locator('[data-plugin-panel]')
     await panel.waitFor({ timeout: 10_000 })
-    while (await panel.getByRole('button', { name: /^返回/ }).count() > 0) {
-      await panel.getByRole('button', { name: /^返回/ }).first().click()
+    while (await panel.getByRole('button', { name: /^Back/ }).count() > 0) {
+      await panel.getByRole('button', { name: /^Back/ }).first().click()
     }
-    await panel.getByRole('heading', { name: '内置插件配置', exact: true }).waitFor({ timeout: 20_000 })
+    await panel.getByRole('heading', { name: 'Built-in plugin settings', exact: true }).waitFor({ timeout: 20_000 })
     return panel
   }
 
   /** Open one official plugin's page from its card and wait for its form. */
   async function openPage(panel: Locator, title: string): Promise<void> {
-    await panel.getByRole('button', { name: `查看 ${title}`, exact: true }).click()
+    await panel.getByRole('button', { name: `View ${title}`, exact: true }).click()
     await panel.locator('[data-plugin-config]').waitFor({ timeout: 10_000 })
   }
 
@@ -93,27 +93,27 @@ describe('web e2e: plugin configuration pages', () => {
 
     // Every page the shipped web composition exposes: the shell executor, the
     // agent loop, subagent selection, and the DeepSeek search provider.
-    await panel.getByRole('button', { name: '查看 网页搜索与获取', exact: true }).waitFor({ timeout: 20_000 })
+    await panel.getByRole('button', { name: 'View Web search and fetch', exact: true }).waitFor({ timeout: 20_000 })
     const basic = panel.locator('[data-plugin-group="basic"]')
     expect(await basic.locator('[data-plugin-item]').count()).toBe(4)
     expect(await basic.locator(':scope > ul > li').evaluateAll(cards => cards.map(card => card.getAttribute('data-plugin-item'))))
       .toEqual(['subagent', 'web-search', 'agent-loop', 'shell'])
-    for (const title of ['子智能体', '网页搜索与获取', 'Agent 循环', '终端']) {
-      expect(await basic.getByRole('button', { name: `查看 ${title}`, exact: true }).count()).toBe(1)
+    for (const title of ['子智能体', 'Web search and fetch', 'Agent loop', '终端']) {
+      expect(await basic.getByRole('button', { name: `View ${title}`, exact: true }).count()).toBe(1)
     }
     // A card carries the one-liner; the fields wait for the page.
-    expect(await basic.getByText('限制每条命令最多能跑多久、最多输出多少内容。', { exact: true }).count()).toBe(1)
-    expect(await panel.getByLabel('命令超时（毫秒）').count()).toBe(0)
+    expect(await basic.getByText('Limit how long each command may run and how much it may output.', { exact: true }).count()).toBe(1)
+    expect(await panel.getByLabel('Command timeout (ms)').count()).toBe(0)
 
     const extensions = panel.locator('[data-plugin-group="extensions"]')
-    const more = panel.getByRole('button', { name: '更多', exact: true })
-    expect(await extensions.getByRole('heading', { name: '实验性插件', exact: true }).count()).toBe(1)
-    expect(await extensions.getByRole('button', { name: '更多', exact: true }).textContent()).toBe('更多')
+    const more = panel.getByRole('button', { name: 'More', exact: true })
+    expect(await extensions.getByRole('heading', { name: 'Experimental plugins', exact: true }).count()).toBe(1)
+    expect(await extensions.getByRole('button', { name: 'More', exact: true }).textContent()).toBe('More')
     expect(await extensions.getByRole('list').isVisible()).toBe(true)
     expect(await panel.locator('[data-plugin-group="more"]').count()).toBe(0)
     await more.focus()
     await page.keyboard.press('Enter')
-    await panel.getByRole('heading', { name: '实验性插件', exact: true, level: 1 }).waitFor()
+    await panel.getByRole('heading', { name: 'Experimental plugins', exact: true, level: 1 }).waitFor()
     // The More list omits the shipped bundles whose own rows do not run (the visibility rule lives in
     // ui-plugin-manager), so it holds fewer cards than the installed optional-bundle list.
     const bundles = await scaffold.ctx.pluginManager.listBundles()
@@ -124,11 +124,11 @@ describe('web e2e: plugin configuration pages', () => {
     expect(await basic.count()).toBe(0)
     expect(await extensions.count()).toBe(0)
     expect(await panel.locator('[data-plugin-group="bundles"]').count()).toBe(0)
-    await panel.getByRole('button', { name: '查看 开发者工具', exact: true }).click()
+    await panel.getByRole('button', { name: 'View Developer tools', exact: true }).click()
     await panel.locator('[data-plugin-detail]').waitFor()
-    await panel.getByRole('button', { name: '返回 实验性插件', exact: true }).click()
-    await panel.getByRole('heading', { name: '实验性插件', exact: true, level: 1 }).waitFor()
-    await panel.getByRole('button', { name: '返回插件', exact: true }).focus()
+    await panel.getByRole('button', { name: 'Back to Experimental plugins', exact: true }).click()
+    await panel.getByRole('heading', { name: 'Experimental plugins', exact: true, level: 1 }).waitFor()
+    await panel.getByRole('button', { name: 'Back to plugins', exact: true }).focus()
     await page.keyboard.press('Space')
     expect(await extensions.getByRole('list').isVisible()).toBe(true)
     expect(await panel.locator('[data-plugin-group="more"]').count()).toBe(0)
@@ -146,14 +146,14 @@ describe('web e2e: plugin configuration pages', () => {
   it('selects search and fetch providers independently and keeps each provider’s settings', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-search-api-settings'))
     const panel = await openPlugins()
-    await openPage(panel, '网页搜索与获取')
+    await openPage(panel, 'Web search and fetch')
     // A menu's accessible name is its label followed by the selected entry, so the menus are found by id.
     const searchMenu = panel.locator('#plugin-config-web-search-provider')
     const fetchMenu = panel.locator('#plugin-config-web-fetch-provider')
-    const searchSection = panel.getByRole('region', { name: '网页搜索提供方', exact: true })
-    const fetchSection = panel.getByRole('region', { name: '网页获取提供方', exact: true })
-    const count = panel.getByLabel('每次搜索结果数', { exact: true })
-    const save = panel.getByRole('button', { name: '保存', exact: true })
+    const searchSection = panel.getByRole('region', { name: 'Web search provider', exact: true })
+    const fetchSection = panel.getByRole('region', { name: 'Web fetch provider', exact: true })
+    const count = panel.getByLabel('Results per search', { exact: true })
+    const save = panel.getByRole('button', { name: 'Save', exact: true })
     /** Pick one entry from a menu. */
     async function choose(menu: Locator, label: string): Promise<void> {
       await menu.click()
@@ -169,21 +169,21 @@ describe('web e2e: plugin configuration pages', () => {
     }
     // The shipped composition selects the DeepSeek Search API and local fetch, and the page writes nothing on mount.
     expect(await searchMenu.textContent()).toBe('DeepSeek Search API')
-    expect(await fetchMenu.textContent()).toBe('本机直接获取')
-    expect(await panel.getByRole('button', { name: '网页搜索提供方 DeepSeek Search API', exact: true }).count()).toBe(1)
-    expect(await panel.getByRole('button', { name: '网页获取提供方 本机直接获取', exact: true }).count()).toBe(1)
-    expect(await entries(searchMenu)).toEqual(['DeepSeek Search API', 'DeepSeek（旧版）'])
-    expect(await entries(fetchMenu)).toEqual(['本机直接获取', 'DeepSeek Fetch API'])
+    expect(await fetchMenu.textContent()).toBe('Direct fetch')
+    expect(await panel.getByRole('button', { name: 'Web search provider DeepSeek Search API', exact: true }).count()).toBe(1)
+    expect(await panel.getByRole('button', { name: 'Web fetch provider Direct fetch', exact: true }).count()).toBe(1)
+    expect(await entries(searchMenu)).toEqual(['DeepSeek Search API', 'DeepSeek (legacy)'])
+    expect(await entries(fetchMenu)).toEqual(['Direct fetch', 'DeepSeek Fetch API'])
     expect(await settingsDocument()).not.toContain('searchProvider:')
     // The page fixes the menu order itself; the Loader imports plugins concurrently, so the
     // Host's registration order is not the YAML row order and only its membership is checked here.
     const hostWeb = scaffold.ctx.get('web') as { listProviders(): Record<'search' | 'fetch', { id: string }[]> } | undefined
     expect(hostWeb?.listProviders().search.map(provider => provider.id).sort()).toEqual(['deepseek-official', 'deepseek-search-api'])
-    expect(await panel.getByRole('link', { name: '网页搜索与获取指南', exact: true }).getAttribute('href'))
+    expect(await panel.getByRole('link', { name: 'Search & Fetch guide', exact: true }).getAttribute('href'))
       .toBe('https://api-docs.deepseek.com/zh-cn/guides/search')
     // Each section shows the description its selected provider registered with the Host, in the active language.
-    expect(await searchSection.getByText('直接请求搜索接口返回标题、URL 与摘要，无需额外调用模型。使用当前会话的 DeepSeek 账号或 DeepSeek API Key，可能产生计费', { exact: true }).count()).toBe(1)
-    expect(await fetchSection.getByText('本机直接请求，免 API Key 与计费，可访问内网和本机。仅解码 HTML、JSON 等文本，不执行 JavaScript、不带登录态，不支持 PDF；也可以试试 DeepSeek Fetch API', { exact: true }).count()).toBe(1)
+    expect(await searchSection.getByText('Queries the search endpoint directly for titles, URLs, and snippets without an extra model call. Uses the DeepSeek account of the current conversation, or a DeepSeek API key, and may incur API charges.', { exact: true }).count()).toBe(1)
+    expect(await fetchSection.getByText('Fetches URLs directly from this machine with no API key or charges, including intranet and loopback addresses. Decodes text, HTML, JSON, and XML only; no JavaScript, cookies, or PDFs. You can also try DeepSeek Fetch API.', { exact: true }).count()).toBe(1)
     // The Fetch API suggestion is text, not an action.
     expect(await fetchSection.getByRole('button').count()).toBe(1)
     expect(await save.isDisabled()).toBe(true)
@@ -192,7 +192,7 @@ describe('web e2e: plugin configuration pages', () => {
     expect(await searchSection.getByRole('textbox').count()).toBe(1)
     expect(await count.inputValue()).toBe('10')
     await count.fill('51')
-    await panel.getByText('请填 1–50 的整数；留空表示使用默认值。', { exact: true }).waitFor()
+    await panel.getByText('Enter an integer from 1 to 50, or leave blank to use the default.', { exact: true }).waitFor()
     expect(await save.isDisabled()).toBe(true)
     for (const menu of [searchMenu, fetchMenu]) expect(await menu.isDisabled()).toBe(true)
     await count.fill('10')
@@ -200,7 +200,7 @@ describe('web e2e: plugin configuration pages', () => {
 
     // The Fetch API takes no settings here, so its section shows no panel.
     await choose(fetchMenu, 'DeepSeek Fetch API')
-    expect(await fetchSection.getByText('由 DeepSeek 服务端抓取公网页面并返回 Markdown。使用当前会话的 DeepSeek 账号或 DeepSeek API Key，可能产生计费，且无法访问内网和本机', { exact: true }).count()).toBe(1)
+    expect(await fetchSection.getByText('Fetches public URLs on DeepSeek servers and returns Markdown. Uses the DeepSeek account of the current conversation, or a DeepSeek API key, may incur API charges, and cannot reach intranet or loopback addresses.', { exact: true }).count()).toBe(1)
     expect(await fetchSection.getByRole('textbox').count()).toBe(0)
     expect(await fetchSection.getByRole('button').count()).toBe(1)
     await save.click()
@@ -210,20 +210,20 @@ describe('web e2e: plugin configuration pages', () => {
     await page.reload({ waitUntil: 'load' })
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
     await openPlugins()
-    await openPage(panel, '网页搜索与获取')
+    await openPage(panel, 'Web search and fetch')
     expect(await searchMenu.textContent()).toBe('DeepSeek Search API')
     expect(await fetchMenu.textContent()).toBe('DeepSeek Fetch API')
     const snapshot = await captureStableAria(page, '[data-plugin-panel]', scaffold.workspaceCwd)
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'web-search.expected.md'), snapshot, MODE)
 
-    await choose(fetchMenu, '本机直接获取')
+    await choose(fetchMenu, 'Direct fetch')
     await save.click()
     await expect.poll(() => save.isDisabled()).toBe(true)
     await expect.poll(settingsDocument).not.toContain('fetchProvider: deepseek-fetch-api')
 
-    await choose(searchMenu, 'DeepSeek（旧版）')
+    await choose(searchMenu, 'DeepSeek (legacy)')
     const messagesEndpoint = panel.locator('#plugin-config-web-search-endpoint')
-    expect(await panel.getByLabel('单次请求最多搜索次数', { exact: true }).inputValue()).toBe('5')
+    expect(await panel.getByLabel('Maximum searches per request', { exact: true }).inputValue()).toBe('5')
     await messagesEndpoint.fill('https://messages.test/anthropic/v1')
     await save.click()
     await expect.poll(() => save.isDisabled()).toBe(true)
@@ -231,10 +231,10 @@ describe('web e2e: plugin configuration pages', () => {
     await page.reload({ waitUntil: 'load' })
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
     await openPlugins()
-    await openPage(panel, '网页搜索与获取')
-    expect(await searchMenu.textContent()).toBe('DeepSeek（旧版）')
+    await openPage(panel, 'Web search and fetch')
+    expect(await searchMenu.textContent()).toBe('DeepSeek (legacy)')
     expect(await messagesEndpoint.inputValue()).toBe('https://messages.test/anthropic/v1')
-    expect(await entries(searchMenu)).toEqual(['DeepSeek Search API', 'DeepSeek（旧版）'])
+    expect(await entries(searchMenu)).toEqual(['DeepSeek Search API', 'DeepSeek (legacy)'])
     expect(await save.isDisabled()).toBe(true)
     expect(await settingsDocument()).toContain('searchProvider: deepseek-official')
     await choose(searchMenu, 'DeepSeek Search API')
@@ -250,14 +250,14 @@ describe('web e2e: plugin configuration pages', () => {
   it('saves subagent limits and resets them to the deployment defaults', async () => {
     const panel = await openPlugins()
     await openPage(panel, '子智能体')
-    const depth = panel.getByLabel('最大递归深度', { exact: true })
-    const capacity = panel.getByLabel('子智能体并行数量上限', { exact: true })
+    const depth = panel.getByLabel('Maximum recursion depth', { exact: true })
+    const capacity = panel.getByLabel('Subagent parallelism limit', { exact: true })
     expect(await depth.inputValue()).toBe('1')
     expect(await capacity.inputValue()).toBe('8')
     await depth.fill('2')
     await capacity.fill('12')
-    await panel.getByRole('button', { name: '保存', exact: true }).click()
-    await expect.poll(() => panel.getByRole('button', { name: '保存', exact: true }).isDisabled()).toBe(true)
+    await panel.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect.poll(() => panel.getByRole('button', { name: 'Save', exact: true }).isDisabled()).toBe(true)
     await expect.poll(settingsDocument).toContain('maxActiveSubagents: 12')
     await expect.poll(settingsDocument).toContain('maxDepth: 2')
     await openPlugins()
@@ -267,41 +267,41 @@ describe('web e2e: plugin configuration pages', () => {
     const controlHeight = await depth.evaluate(element => element.getBoundingClientRect().height)
     await depth.fill('1.5')
     expect(await depth.evaluate(element => element.getBoundingClientRect().height)).toBe(controlHeight)
-    expect(await panel.getByRole('button', { name: '保存', exact: true }).isDisabled()).toBe(true)
+    expect(await panel.getByRole('button', { name: 'Save', exact: true }).isDisabled()).toBe(true)
     await depth.fill('2')
     await panel.getByRole('button', { name: '恢复默认', exact: true }).first().click()
     await panel.getByRole('button', { name: '恢复默认', exact: true }).first().click()
-    await panel.getByRole('button', { name: '保存', exact: true }).click()
-    await expect.poll(() => panel.getByRole('button', { name: '保存', exact: true }).isDisabled()).toBe(true)
+    await panel.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect.poll(() => panel.getByRole('button', { name: 'Save', exact: true }).isDisabled()).toBe(true)
     await openPlugins()
     await openPage(panel, '子智能体')
     expect(await depth.inputValue()).toBe('1')
     expect(await capacity.inputValue()).toBe('8')
-    await panel.getByRole('button', { name: '返回插件', exact: true }).click()
+    await panel.getByRole('button', { name: 'Back to plugins', exact: true }).click()
   })
 
   it('opens field explanations with the keyboard and retains unsaved edits', async () => {
     const panel = await openPlugins()
     await openPage(panel, '子智能体')
-    const depth = panel.getByLabel('最大递归深度', { exact: true })
+    const depth = panel.getByLabel('Maximum recursion depth', { exact: true })
     await depth.fill('2')
-    const depthHelp = panel.getByRole('button', { name: '最大递归深度说明', exact: true })
-    expect(await panel.getByRole('region', { name: '最大递归深度说明', exact: true }).count()).toBe(0)
+    const depthHelp = panel.getByRole('button', { name: 'About maximum recursion depth', exact: true })
+    expect(await panel.getByRole('region', { name: 'About maximum recursion depth', exact: true }).count()).toBe(0)
     await depthHelp.press('Enter')
-    const depthRules = panel.getByRole('region', { name: '最大递归深度说明', exact: true })
+    const depthRules = panel.getByRole('region', { name: 'About maximum recursion depth', exact: true })
     await depthRules.waitFor()
-    expect(await depthRules.getByText('限制 Agent 创建子智能体的递归层级。', { exact: true }).count()).toBe(1)
-    const depthTable = depthRules.getByRole('table', { name: '最大递归深度说明', exact: true })
-    expect(await depthTable.getByRole('row', { name: '0 禁用子智能体', exact: true }).count()).toBe(1)
-    expect(await depthTable.getByRole('row', { name: '1 仅允许主 Agent 创建子智能体', exact: true }).count()).toBe(1)
-    expect(await depthRules.getByText('如果某个工具单独设置了最大递归深度，以该工具的设置为准。', { exact: true }).count()).toBe(1)
+    expect(await depthRules.getByText('Limits how many levels of Subagents an Agent can create.', { exact: true }).count()).toBe(1)
+    const depthTable = depthRules.getByRole('table', { name: 'About maximum recursion depth', exact: true })
+    expect(await depthTable.getByRole('row', { name: '0 Disable Subagents', exact: true }).count()).toBe(1)
+    expect(await depthTable.getByRole('row', { name: '1 Only the main Agent can create Subagents', exact: true }).count()).toBe(1)
+    expect(await depthRules.getByText('If a tool defines its own maximum recursion depth, that setting takes precedence.', { exact: true }).count()).toBe(1)
     await depthHelp.press('Enter')
     expect(await depthRules.count()).toBe(0)
     expect(await depth.inputValue()).toBe('2')
-    await panel.getByRole('button', { name: '子智能体并行数量上限说明', exact: true }).click()
-    const capacityRules = panel.getByRole('region', { name: '子智能体并行数量上限说明', exact: true })
-    expect(await capacityRules.getByText('同一主 Agent 下，所有递归层级同时存活的子智能体总数，主 Agent 不计入。达到上限时，新的启动请求会被拒绝。', { exact: true }).count()).toBe(1)
-    await panel.getByRole('button', { name: '返回插件', exact: true }).click()
+    await panel.getByRole('button', { name: 'About the Subagent parallelism limit', exact: true }).click()
+    const capacityRules = panel.getByRole('region', { name: 'About the Subagent parallelism limit', exact: true })
+    expect(await capacityRules.getByText('Total live Subagents under the same main Agent, across all recursion levels. The main Agent is excluded. New start requests are rejected when the limit is reached.', { exact: true }).count()).toBe(1)
+    await panel.getByRole('button', { name: 'Back to plugins', exact: true }).click()
     await openPage(panel, '子智能体')
     expect(await depth.inputValue()).toBe('1')
   })
@@ -310,15 +310,15 @@ describe('web e2e: plugin configuration pages', () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-plugin-config-subagent-model-selection'))
     const panel = await openPlugins()
     await openPage(panel, '子智能体')
-    const toggle = panel.getByRole('switch', { name: '允许 Agent 为子智能体选择模型' })
+    const toggle = panel.getByRole('switch', { name: 'Allow agents to choose models for Subagents' })
 
-    await panel.getByLabel('最大递归深度', { exact: true }).fill('2')
+    await panel.getByLabel('Maximum recursion depth', { exact: true }).fill('2')
     await toggle.click()
-    const models = panel.getByRole('group', { name: 'Agent 可选择的模型' })
+    const models = panel.getByRole('group', { name: 'Models agents may choose' })
     await models.waitFor({ timeout: 10_000 })
     const firstModel = models.getByRole('checkbox').first()
     await firstModel.check()
-    const save = panel.getByRole('button', { name: '保存', exact: true })
+    const save = panel.getByRole('button', { name: 'Save', exact: true })
     await save.click()
 
     // The Save label returns only after both namespace controllers settle.
@@ -347,7 +347,7 @@ describe('web e2e: plugin configuration pages', () => {
     const entry = [...scaffold.ctx.loader.entries()].find(row => row.options.id === 'bash-sandbox')!
     const fiber = entry.fiber
 
-    const timeout = panel.getByLabel('命令超时（毫秒）')
+    const timeout = panel.getByLabel('Command timeout (ms)')
     await timeout.waitFor({ timeout: 10_000 })
     // The composed default this deployment ships, before any user layer.
     expect(await timeout.inputValue()).toBe('60000')
@@ -357,7 +357,7 @@ describe('web e2e: plugin configuration pages', () => {
     // Nothing crosses the wire until the user saves: leaving the control is
     // not a decision to store the value.
     expect(await settingsDocument()).not.toContain('timeoutMs')
-    const save = panel.getByRole('button', { name: '保存', exact: true })
+    const save = panel.getByRole('button', { name: 'Save', exact: true })
     await expect.poll(() => save.isEnabled(), { timeout: 5_000 }).toBe(true)
     await save.click()
 
@@ -367,7 +367,7 @@ describe('web e2e: plugin configuration pages', () => {
     expect(entry.fiber === fiber).toBe(true)
     // Presence in the user layer is what the badge reports, and the reset is
     // offered only for a field that has one.
-    await expect.poll(() => panel.getByText('已覆盖').count(), { timeout: 5_000 }).toBe(1)
+    await expect.poll(() => panel.getByText('Overridden').count(), { timeout: 5_000 }).toBe(1)
     expect(await panel.getByRole('button', { name: '恢复默认' }).count()).toBe(1)
     // A settled form offers no save to repeat.
     await expect.poll(() => save.isDisabled(), { timeout: 5_000 }).toBe(true)
@@ -378,15 +378,15 @@ describe('web e2e: plugin configuration pages', () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-plugin-config-leave'))
     const panel = await openPlugins()
     await openPage(panel, '终端')
-    const timeout = panel.getByLabel('命令超时（毫秒）')
+    const timeout = panel.getByLabel('Command timeout (ms)')
     await timeout.waitFor({ timeout: 10_000 })
 
     await timeout.fill('7000')
-    await panel.getByRole('button', { name: '返回插件' }).click()
-    await panel.getByRole('heading', { name: '内置插件配置', exact: true }).waitFor({ timeout: 10_000 })
+    await panel.getByRole('button', { name: 'Back to plugins' }).click()
+    await panel.getByRole('heading', { name: 'Built-in plugin settings', exact: true }).waitFor({ timeout: 10_000 })
     await openPage(panel, '终端')
 
-    await expect.poll(() => panel.getByLabel('命令超时（毫秒）').inputValue(), { timeout: 5_000 }).toBe('12000')
+    await expect.poll(() => panel.getByLabel('Command timeout (ms)').inputValue(), { timeout: 5_000 }).toBe('12000')
     expect(await settingsDocument()).toContain('timeoutMs: 12000')
     expect(tripwire.pageErrors).toEqual([])
   }, 60_000)
@@ -395,14 +395,14 @@ describe('web e2e: plugin configuration pages', () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-plugin-config-invalid'))
     const panel = await openPlugins()
     await openPage(panel, '终端')
-    const timeout = panel.getByLabel('命令超时（毫秒）')
+    const timeout = panel.getByLabel('Command timeout (ms)')
     await timeout.waitFor({ timeout: 10_000 })
 
     await timeout.fill('soon')
 
-    const save = panel.getByRole('button', { name: '保存', exact: true })
+    const save = panel.getByRole('button', { name: 'Save', exact: true })
     await expect.poll(() => save.isDisabled(), { timeout: 5_000 }).toBe(true)
-    expect(await panel.getByText('请填数字；留空表示使用默认值。').count()).toBe(1)
+    expect(await panel.getByText('Enter a number, or leave blank to use the default.').count()).toBe(1)
     expect(tripwire.pageErrors).toEqual([])
   }, 60_000)
 
@@ -410,7 +410,7 @@ describe('web e2e: plugin configuration pages', () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-plugin-config-reset'))
     const panel = await openPlugins()
     await openPage(panel, '终端')
-    const timeout = panel.getByLabel('命令超时（毫秒）')
+    const timeout = panel.getByLabel('Command timeout (ms)')
     await timeout.waitFor({ timeout: 10_000 })
     expect(await timeout.inputValue()).toBe('12000')
 
@@ -420,12 +420,12 @@ describe('web e2e: plugin configuration pages', () => {
     await expect.poll(() => timeout.inputValue(), { timeout: 5_000 }).toBe('60000')
     expect(await settingsDocument()).toContain('timeoutMs: 12000')
 
-    await panel.getByRole('button', { name: '保存', exact: true }).click()
+    await panel.getByRole('button', { name: 'Save', exact: true }).click()
 
     await expect.poll(async () => (await settingsDocument()).includes('timeoutMs'), { timeout: 10_000 })
       .toBe(false)
     expect(await timeout.inputValue()).toBe('60000')
-    expect(await panel.getByText('已覆盖').count()).toBe(0)
+    expect(await panel.getByText('Overridden').count()).toBe(0)
     expect(tripwire.pageErrors).toEqual([])
   }, 60_000)
 
@@ -434,10 +434,10 @@ describe('web e2e: plugin configuration pages', () => {
     const panel = await openPlugins()
 
     // Off, the bundle's browser half is not loaded and the row has no configuration to open.
-    await panel.getByRole('button', { name: '查看 @fixture/live-client', exact: true }).click()
+    await panel.getByRole('button', { name: 'View @fixture/live-client', exact: true }).click()
     const row = panel.locator('[data-plugin-row]', { hasText: 'fixture-live-client' })
     await row.waitFor({ timeout: 10_000 })
-    expect(await panel.getByRole('button', { name: '配置 @fixture/live-client' }).count()).toBe(0)
+    expect(await panel.getByRole('button', { name: 'Configure @fixture/live-client' }).count()).toBe(0)
 
     // Off, the bundle's page carries no contribution either: the browser half
     // that would make them is not loaded.
@@ -448,8 +448,8 @@ describe('web e2e: plugin configuration pages', () => {
     // reload; its registration puts the configure control on the row, and
     // its detail contributions on the bundle's page: the action before the
     // page's own switch, the badge beside the title, the section after the rows.
-    await panel.getByRole('switch', { name: '启用 @fixture/live-client' }).click()
-    const configure = panel.getByRole('button', { name: '配置 @fixture/live-client' })
+    await panel.getByRole('switch', { name: 'Enable @fixture/live-client' }).click()
+    const configure = panel.getByRole('button', { name: 'Configure @fixture/live-client' })
     await configure.waitFor({ timeout: 30_000 })
     await bundlePage.locator('[data-live-section="bundle"]').waitFor({ timeout: 10_000 })
     // The page's own view of the row follows the Host's change event, which
@@ -474,16 +474,16 @@ describe('web e2e: plugin configuration pages', () => {
     expect(await rowPage.locator('[data-live-section="row"]').count()).toBe(1)
     const form = rowPage.getByRole('form', { name: '动态插件配置' })
     await form.getByLabel('问候语').fill('你好')
-    await form.getByRole('button', { name: '保存' }).click()
+    await form.getByRole('button', { name: 'Save' }).click()
     await expect.poll(() => page.evaluate(() => document.documentElement.dataset.liveSaves), { timeout: 5_000 }).toBe('1')
 
     const snapshot = await captureStableAria(page, '[data-plugin-panel]', scaffold.workspaceCwd)
     await compareOrRefreshGolden(ROW_EXPECTED, snapshot, MODE)
-    await rowPage.getByRole('button', { name: '返回 @fixture/live-client' }).click()
+    await rowPage.getByRole('button', { name: 'Back to @fixture/live-client' }).click()
     await bundlePage.waitFor({ timeout: 10_000 })
 
     // An official plugin's page is another subject; the fixture's entries render nothing for it.
-    await panel.getByRole('button', { name: '返回插件' }).click()
+    await panel.getByRole('button', { name: 'Back to plugins' }).click()
     await openPage(panel, '终端')
     const itemPage = panel.locator('[data-plugin-item-detail]')
     expect(await itemPage.locator('[data-live-action], [data-live-badge], [data-live-section]').count()).toBe(0)

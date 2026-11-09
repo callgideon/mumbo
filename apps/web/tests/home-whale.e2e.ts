@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium, type Browser, type Page } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { launchWebScaffold, watchConsole, type WebScaffold } from './scaffold.ts'
-import { ZH_BROWSER_LOCALE } from './support.ts'
+import { 'en-US' } from './support.ts'
 
 const artifacts = fileURLToPath(new URL('../../../.artifacts/home-whale/', import.meta.url))
 
@@ -21,7 +21,7 @@ describe('official home whale in the default web profile', () => {
     captureDir = await mkdtemp(join(artifacts, 'run-'))
     scaffold = await launchWebScaffold({ firstUse: true })
     browser = await chromium.launch()
-    page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: ZH_BROWSER_LOCALE })
+    page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'en-US' })
     consoleState = watchConsole(page)
     await page.goto(scaffold.authenticatedUrl)
     await page.locator('[data-home-whale]').waitFor()

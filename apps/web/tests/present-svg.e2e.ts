@@ -14,7 +14,7 @@ import {
   fixtureUserPrompts, launchWebScaffold, recordFixture, watchConsole,
   webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { connectFreshWorkspaceZh, ZH_BROWSER_LOCALE } from './support.ts'
+import { connectFreshWorkspace } from './support.ts'
 
 const DIR = fileURLToPath(new URL('../../../snapshots/web/present-svg', import.meta.url))
 const FIXTURE = join(DIR, 'session.v3.jsonl')
@@ -92,7 +92,7 @@ describe('web e2e: requested SVG is explicitly delivered', () => {
     })
     browser = await chromium.launch()
     page = await browser.newPage({
-      viewport: { width: 1680, height: 1000 }, locale: ZH_BROWSER_LOCALE, timezoneId: 'Asia/Shanghai',
+      viewport: { width: 1680, height: 1000 }, locale: timezoneId: 'Asia/Shanghai',
     })
     tripwire = watchConsole(page)
     page.on('console', (message) => {
@@ -110,7 +110,7 @@ describe('web e2e: requested SVG is explicitly delivered', () => {
     })
     await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
     await page.waitForSelector('[class*="frame"]')
-    await connectFreshWorkspaceZh(page, scaffold.workspaceCwd)
+    await connectFreshWorkspace(page, scaffold.workspaceCwd)
   })
 
   afterAll(async () => {
@@ -173,7 +173,7 @@ describe('web e2e: requested SVG is explicitly delivered', () => {
     // Changed-file cards wait for a separate summary request after the presentation events arrive.
     await changes.waitFor({ state: 'visible' })
     expect(await changes.count()).toBe(1)
-    expect(await changes.getByText(`已编辑 ${FILE}`, { exact: true }).count()).toBe(1)
+    expect(await changes.getByText(`Edited ${FILE}`, { exact: true }).count()).toBe(1)
     expect(await changes.getByRole('list').count()).toBe(0)
     expect(await changes.locator('svg').evaluate(icon => icon.innerHTML))
       .toBe(await card.locator('svg').evaluate(icon => icon.innerHTML))
@@ -218,10 +218,10 @@ describe('web e2e: requested SVG is explicitly delivered', () => {
   })
 
   it('opens the single edited file from its compact card', async () => {
-    await page.locator('[data-changed-files]').getByRole('button', { name: `查看 ${FILE} 的改动` }).click()
+    await page.locator('[data-changed-files]').getByRole('button', { name: `View changes to ${FILE}` }).click()
     const review = page.locator('[data-changes-review]')
     await review.waitFor({ state: 'visible' })
-    expect(await review.getByRole('button', { name: '选择要查看的文件' }).innerText()).toContain(FILE)
+    expect(await review.getByRole('button', { name: 'Choose the file to review' }).innerText()).toContain(FILE)
     expect(tripwire.pageErrors).toEqual([])
   })
 })

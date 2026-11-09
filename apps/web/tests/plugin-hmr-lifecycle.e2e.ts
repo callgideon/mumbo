@@ -10,7 +10,7 @@ import { chromium, type Browser, type Locator, type Page } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { ChangeResult } from '@deepseek-ai/dsh-plugin-manager'
 import { launchWebScaffold, watchConsole, type WebScaffold } from './scaffold.ts'
-import { PLUGIN_TOGGLE_SETTLE_MS, ZH_BROWSER_LOCALE } from './support.ts'
+import { PLUGIN_TOGGLE_SETTLE_MS } from './support.ts'
 
 const NAME = 'e2e-hmr-addon'
 
@@ -75,14 +75,14 @@ export function apply(ctx) {
   }
 
   async function openPanel(): Promise<Locator> {
-    if (await page.getByRole('dialog', { name: '设置' }).count() > 0) await page.keyboard.press('Escape')
+    if (await page.getByRole('dialog', { name: 'Settings' }).count() > 0) await page.keyboard.press('Escape')
     const panel = page.locator('[data-plugin-panel]')
     const list = panel.getByRole('heading', { name: '插件', exact: true })
     // The sidebar entry toggles the page, so it is pressed only while the page is closed.
     if (await panel.count() === 0) {
-      await page.getByRole('navigation', { name: '全局面板' }).getByRole('button', { name: '插件', exact: true }).click()
+      await page.getByRole('navigation', { name: 'Global panels' }).getByRole('button', { name: '插件', exact: true }).click()
     } else if (!await list.isVisible()) {
-      await panel.getByRole('button', { name: '返回插件', exact: true }).click()
+      await panel.getByRole('button', { name: 'Back to plugins', exact: true }).click()
     }
     await list.waitFor({ timeout: 10_000 })
     return panel
@@ -91,19 +91,19 @@ export function apply(ctx) {
   /** Install a spec through the page's dialog and switch the bundle on from its finished screen. */
   async function installThroughPage(spec: string): Promise<Locator> {
     const panel = await openPanel()
-    await panel.getByRole('button', { name: '添加插件', exact: true }).click()
+    await panel.getByRole('button', { name: 'Add plugin', exact: true }).click()
     const dialog = page.getByRole('dialog')
-    await dialog.getByRole('textbox', { name: '包名或地址' }).fill(spec)
-    await dialog.getByRole('button', { name: '安装', exact: true }).click()
-    await dialog.getByRole('button', { name: '立即启用', exact: true }).click({ timeout: 30_000 })
+    await dialog.getByRole('textbox', { name: 'Package name or address' }).fill(spec)
+    await dialog.getByRole('button', { name: 'Install', exact: true }).click()
+    await dialog.getByRole('button', { name: 'Enable now', exact: true }).click({ timeout: 30_000 })
     await dialog.waitFor({ state: 'detached', timeout: 10_000 })
     return panel
   }
 
   async function uninstallThroughPage(panel: Locator): Promise<void> {
-    await panel.getByRole('button', { name: `查看 ${NAME}`, exact: true }).click()
-    await panel.getByRole('button', { name: `卸载 ${NAME}`, exact: true }).click()
-    await page.getByRole('dialog', { name: `卸载「${NAME}」？` }).getByRole('button', { name: '卸载', exact: true }).click()
+    await panel.getByRole('button', { name: `View ${NAME}`, exact: true }).click()
+    await panel.getByRole('button', { name: `Uninstall ${NAME}`, exact: true }).click()
+    await page.getByRole('dialog', { name: `Uninstall "${NAME}"?` }).getByRole('button', { name: 'Uninstall', exact: true }).click()
     // The page leaves the removed package's details for the list.
     await panel.getByRole('heading', { name: '插件', exact: true }).waitFor({ timeout: 30_000 })
     await expect.poll(() => panel.locator(`[data-plugin-package="${NAME}"]`).count(), { timeout: 30_000 }).toBe(0)
@@ -122,7 +122,7 @@ export function apply(ctx) {
     await writeFile(tracePath, '')
     scaffold = await launchWebScaffold({ profile: { packages: [], packageManager: isolatedPnpm(scratch) } })
     browser = await chromium.launch()
-    page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: ZH_BROWSER_LOCALE })
+    page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'en-US' })
     tripwire = watchConsole(page)
     await page.goto(scaffold.authenticatedUrl)
     await page.waitForSelector('[class*="frame"]')
@@ -138,7 +138,7 @@ export function apply(ctx) {
     const v1 = await version('v1')
     const panel = await installThroughPage(`file:${v1}`)
     await traced(['start:v1'])
-    const toggle = panel.getByRole('switch', { name: `启用 ${NAME}`, exact: true })
+    const toggle = panel.getByRole('switch', { name: `Enable ${NAME}`, exact: true })
     await expect.poll(() => toggle.getAttribute('aria-checked'), { timeout: PLUGIN_TOGGLE_SETTLE_MS }).toBe('true')
     await toggle.click()
     await traced(['stop:v1'])
@@ -153,9 +153,9 @@ export function apply(ctx) {
     expect(upgraded, JSON.stringify(upgraded)).toMatchObject({ application: 'applied' })
     await traced(['stop:v1', 'start:v2'])
     // The page reads the upgrade from the Host's change announcement.
-    await panel.getByRole('button', { name: `查看 ${NAME}`, exact: true }).click()
+    await panel.getByRole('button', { name: `View ${NAME}`, exact: true }).click()
     await panel.getByText('v2.0.0', { exact: true }).waitFor({ timeout: 10_000 })
-    await panel.getByRole('button', { name: '返回插件' }).click()
+    await panel.getByRole('button', { name: 'Back to plugins' }).click()
   }, 90_000)
 
   it('stops the running version and names the load error when the upgrade cannot load, then applies the fix', async () => {
@@ -166,12 +166,12 @@ export function apply(ctx) {
     await traced(['stop:v2'])
     // Switching the broken plugin off and on again loads the same files, and the page names the missing dependency.
     const panel = await openPanel()
-    const toggle = panel.getByRole('switch', { name: `启用 ${NAME}`, exact: true })
+    const toggle = panel.getByRole('switch', { name: `Enable ${NAME}`, exact: true })
     await toggle.click()
     await expect.poll(() => toggle.getAttribute('aria-checked'), { timeout: PLUGIN_TOGGLE_SETTLE_MS }).toBe('false')
     await toggle.click()
     await alertWith(page, 'e2e-hmr-missing-dependency').waitFor({ timeout: 10_000 })
-    expect(await alertWith(page, 'e2e-hmr-missing-dependency').textContent()).not.toContain('重启')
+    expect(await alertWith(page, 'e2e-hmr-missing-dependency').textContent()).not.toContain('Restart')
     await traced([])
     const fixed = await version('v4')
     expect(await reinstall(`file:${fixed}`)).toMatchObject({ application: 'applied' })
@@ -213,7 +213,7 @@ export function apply(ctx) {
     const moved = await version('v9')
     expect(await reinstall(moved)).toMatchObject({ application: 'applied' })
     await traced(['stop:v8', 'start:v9'])
-    expect(await alertWith(page, '重启').count()).toBe(0)
+    expect(await alertWith(page, 'Restart').count()).toBe(0)
     expect(tripwire.pageErrors).toEqual([])
   }, 90_000)
 })
@@ -233,17 +233,17 @@ describe('web e2e: plugin installation without HMR', () => {
       await writeFile(join(dir, 'index.mjs'), `export const name = '${NAME}'\nexport function apply() {}\n`)
       scaffold = await launchWebScaffold({ profile: { packages: [], hmr: false, packageManager: isolatedPnpm(scratch) } })
       browser = await chromium.launch()
-      const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: ZH_BROWSER_LOCALE })
+      const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'en-US' })
       await page.goto(scaffold.authenticatedUrl)
       await page.waitForSelector('[class*="frame"]')
-      if (await page.getByRole('dialog', { name: '设置' }).count() > 0) await page.keyboard.press('Escape')
-      await page.getByRole('navigation', { name: '全局面板' }).getByRole('button', { name: '插件', exact: true }).click()
+      if (await page.getByRole('dialog', { name: 'Settings' }).count() > 0) await page.keyboard.press('Escape')
+      await page.getByRole('navigation', { name: 'Global panels' }).getByRole('button', { name: '插件', exact: true }).click()
       const panel = page.locator('[data-plugin-panel]')
-      await panel.getByRole('button', { name: '添加插件', exact: true }).click()
+      await panel.getByRole('button', { name: 'Add plugin', exact: true }).click()
       const dialog = page.getByRole('dialog')
-      await dialog.getByRole('textbox', { name: '包名或地址' }).fill(`file:${dir}`)
-      await dialog.getByRole('button', { name: '安装', exact: true }).click()
-      await dialog.getByText('已安装，请重启 DSH 加载它。这个 profile 只在启动时应用更改。', { exact: true }).waitFor({ timeout: 30_000 })
+      await dialog.getByRole('textbox', { name: 'Package name or address' }).fill(`file:${dir}`)
+      await dialog.getByRole('button', { name: 'Install', exact: true }).click()
+      await dialog.getByText('Installed; restart DSH to load it. This profile applies changes only at startup.', { exact: true }).waitFor({ timeout: 30_000 })
     } finally {
       await browser?.close()
       await scaffold?.close()
