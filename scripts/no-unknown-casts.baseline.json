@@ -252,7 +252,7 @@
     "4e6289bbcd36e12927fd2ac87dc09b4de8ac884f2a0041af58383a0144b8b9b1": 1
   },
   "packages/api/session-controller/tests/session-pending-submissions.client.spec.ts": {
-    "f35467810e1f7bd9ea7659c947c274c48d310411d0eabcf528366708ea3b7ca1": 1
+    "fb250cb1168ab3ea8eec7faf0c4914e40900b64096c3b64faca5580ff993d13b": 1
   },
   "packages/api/session-controller/tests/session-presets.host.spec.ts": {
     "c051663ae60f381f30367e71bae4da0ea88c490453bbc1d86230b71c0fde8d6f": 1
@@ -586,7 +586,7 @@
     "85f4d0d762126e709ae2178ca656f586dac1ba425eb1d8dd402cb5577d6e8225": 1
   },
   "packages/client/ui-settings-plugin-inventory/tests/components.client.spec.tsx": {
-    "0d78ec7c8ca39f70a4033ff4d330f8ef26832bb89932f98d1c87d76b4ce16d00": 1,
+    "6619acab5d0dedc74082c26cb743d01e7d34dd0475ed8c51687d793930f3b547": 1,
     "79c53da50aa08004e201cebca842267ae2650a543b435a7906960f6492c2398b": 1,
     "a3c1509d552d0102e118f3071a234002a5c83c30ca6923f8a87e9e3733ce0dcf": 1
   },
@@ -1191,7 +1191,7 @@
     "67c8811e65c7d4c40d6de95cb9b9576873c717164d609124dcac39e82e95abca": 1
   },
   "packages/extensions/ui-cordis/tests/inventory.client.spec.ts": {
-    "205cd2f0d90ee000d0bd5f8c9e7e03d7d602f22e12220ebdf8043d68fd9b796a": 1
+    "55e77dcc06589d0c2a4b9380b75845a9ccff28f2ae8b5a28e8b39d205bcdbe5c": 1
   },
   "packages/feedback/command-feedback/tests/loader-composition.spec.ts": {
     "59c63f734e8bba862325f776e3fcbebd78a84cfb4161f8df41c216950d9bf351": 1
