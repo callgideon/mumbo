@@ -3,25 +3,12 @@ import { homedir } from 'node:os'
 import { createServer, type Socket } from 'node:net'
 import { delimiter, join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import Sandbox from '@deepseek-ai/dsh-sandbox-local'
-import { SandboxUnavailableError } from '@deepseek-ai/dsh-sandbox'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { PtcBindingFunction, PtcBindingNamespace, PtcRunRequest } from '@deepseek-ai/dsh-ptc-runtime'
 import type { Config } from '../src/index.ts'
-import { mountRuntime } from './setup.ts'
+import { mountRuntime, probeSandbox } from './setup.ts'
 
-/** Probe the sandbox independently so Node-runtime launch failures cannot skip enforcement tests. */
-const sandboxUsable = await (async () => {
-  const probe = new Context()
-  try {
-    await probe.plugin(Sandbox, {})
-    await probe.sandbox.confine([process.execPath, '--version'], { mode: 'read-only', workspaceRoot: process.cwd() })
-    return true
-  } catch (error: unknown) {
-    if (error instanceof SandboxUnavailableError) return false
-    throw error
-  } finally { await probe.fiber.dispose() }
-})()
+const sandboxUsable = await probeSandbox()
 
 async function setup(config: Config = {}, mode: 'read-only' | 'workspace-write' | 'danger-full-access' = 'danger-full-access') {
   const root = await mkdtemp(join(homedir(), '.dsh-node-runtime-test-'))

@@ -7,7 +7,9 @@ import { Context } from '@deepseek-ai/cordis'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import PtcWorkflowEngine from '../src/index.ts'
-import { fakeParent, mountPtcRuntime } from './setup.ts'
+import { fakeParent, mountPtcRuntime, probeSandbox } from './setup.ts'
+
+const sandboxUsable = await probeSandbox()
 
 async function setup(mode: SandboxMode, executionMode: 'per-call' | 'persistent-in-memory' = 'per-call') {
   const ctx = new Context()
@@ -24,7 +26,7 @@ async function setup(mode: SandboxMode, executionMode: 'per-call' | 'persistent-
   return { ctx, parent: await fakeParent(ctx), ...files }
 }
 
-it('runs the default workflow config through the source PTC runtime', async () => {
+it.skipIf(!sandboxUsable)('runs the default workflow config through the source PTC runtime', async () => {
   const { ctx, parent } = await setup('read-only')
   const run = ctx.workflowEngine.start({
     script: 'return args.left * args.right',
@@ -38,7 +40,7 @@ it('runs the default workflow config through the source PTC runtime', async () =
   } finally { await run.dispose() }
 })
 
-it.each(['per-call', 'persistent-in-memory'] as const)('enforces workspace writes in %s workflows', async (executionMode) => {
+it.skipIf(!sandboxUsable).each(['per-call', 'persistent-in-memory'] as const)('enforces workspace writes in %s workflows', async (executionMode) => {
   const mode = 'workspace-write'
   const { ctx, parent, root, cwd } = await setup(mode, executionMode)
   const outside = join(root, 'outside.txt')

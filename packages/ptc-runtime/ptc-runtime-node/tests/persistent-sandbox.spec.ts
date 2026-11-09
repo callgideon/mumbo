@@ -7,7 +7,9 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { Context } from '@deepseek-ai/cordis'
 import { SandboxUnavailableError } from '@deepseek-ai/dsh-sandbox'
 import { expect, it, onTestFinished, vi } from 'vitest'
-import { mountRuntime } from './setup.ts'
+import { mountRuntime, probeSandbox } from './setup.ts'
+
+const sandboxUsable = await probeSandbox()
 
 async function setup(mode: 'read-only' | 'workspace-write' = 'read-only', executionMode: 'per-call' | 'persistent-in-memory' = 'persistent-in-memory') {
   const root = await mkdtemp(join(homedir(), '.dsh-persistent-sandbox-'))
@@ -21,7 +23,7 @@ async function setup(mode: 'read-only' | 'workspace-write' = 'read-only', execut
   return { root, cwd, ctx, runtime, owner, run }
 }
 
-it('retains variables under read-only confinement and denies writes across calls', async () => {
+it.skipIf(!sandboxUsable)('retains variables under read-only confinement and denies writes across calls', async () => {
   const { cwd, run } = await setup()
   expect((await run('const fsp = await import("node:fs/promises"); var count = 1;')).error).toBeUndefined()
   expect((await run('++count')).value).toBe(2)
@@ -31,7 +33,7 @@ it('retains variables under read-only confinement and denies writes across calls
   expect((await run('count')).value).toBe(2)
 })
 
-it('retains workspace write access while refusing a sibling path', async () => {
+it.skipIf(!sandboxUsable)('retains workspace write access while refusing a sibling path', async () => {
   const { root, cwd, run } = await setup('workspace-write')
   expect((await run('const fsp = await import("node:fs/promises"); await fsp.writeFile("inside.txt", "allowed")')).error).toBeUndefined()
   const result = await run(`await fsp.writeFile(${JSON.stringify(join(root, 'outside.txt'))}, "denied")`)
@@ -40,7 +42,7 @@ it('retains workspace write access while refusing a sibling path', async () => {
   await expect(readFile(join(root, 'outside.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
 })
 
-it('refuses reuse under another policy until the owner has been released', async () => {
+it.skipIf(!sandboxUsable)('refuses reuse under another policy until the owner has been released', async () => {
   const { cwd, runtime, owner, run } = await setup()
   expect((await run('var retained = 42;')).error).toBeUndefined()
   const spec = runtime.resolve({ program: 'typeof retained', bindings: [], stateOwner: owner, sandboxPolicy: { mode: 'workspace-write', workspaceRoot: cwd } })
@@ -50,7 +52,7 @@ it('refuses reuse under another policy until the owner has been released', async
 })
 
 // Windows ACL rejects additional roots; its refusal is covered by sandbox-local's runner tests.
-it.skipIf(process.platform === 'win32')('requires release before changing a retained environment\'s additional writable roots', async () => {
+it.skipIf(process.platform === 'win32' || !sandboxUsable)('requires release before changing a retained environment\'s additional writable roots', async () => {
   const { root, cwd, runtime, owner, run } = await setup('workspace-write')
   const extra = join(root, 'extra')
   await mkdir(extra)
@@ -102,7 +104,7 @@ it('cancels a pending confinement operation before spawning', async () => {
   }
 })
 
-it('clears a registered live REPL through the file-policy setter before starting under the new mode', async () => {
+it.skipIf(!sandboxUsable)('clears a registered live REPL through the file-policy setter before starting under the new mode', async () => {
   const { ctx, cwd, runtime, owner } = await setup('workspace-write')
   const session = ctx.sessions.create(SessionId('retained-policy-change'), { meta: { cwd } })
   const run = (program: string) => runtime.run(runtime.resolve({
@@ -121,7 +123,7 @@ it('clears a registered live REPL through the file-policy setter before starting
   await expect(readFile(join(cwd, 'denied-after-switch.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
 })
 
-it('keeps a one-shot wider policy separate from standing variables and subsequent writes', async () => {
+it.skipIf(!sandboxUsable)('keeps a one-shot wider policy separate from standing variables and subsequent writes', async () => {
   const { ctx, cwd, runtime, owner } = await setup()
   const session = ctx.sessions.create(SessionId('temporary-policy'), { meta: { cwd } })
   const standing = ctx.sandboxPolicy.resolve({ session })
@@ -139,7 +141,7 @@ it('keeps a one-shot wider policy separate from standing variables and subsequen
   expect(ctx.sandboxPolicy.resolve({ session }).mode).toBe('read-only')
 })
 
-it('preserves the current execution context for bindings in a reused REPL', async () => {
+it.skipIf(!sandboxUsable)('preserves the current execution context for bindings in a reused REPL', async () => {
   const { ctx, cwd, runtime, owner } = await setup('workspace-write')
   const session = ctx.sessions.create(SessionId('binding-context'), { meta: { cwd } })
   const context = new AsyncLocalStorage<string>()
@@ -151,7 +153,7 @@ it('preserves the current execution context for bindings in a reused REPL', asyn
   expect((await context.run('second', () => run('await tools.current({})'))).value).toBe('second')
 })
 
-it.each(['per-call', 'persistent-in-memory'] as const)('cancels active %s execution after a synchronous policy change', async (executionMode) => {
+it.skipIf(!sandboxUsable).each(['per-call', 'persistent-in-memory'] as const)('cancels active %s execution after a synchronous policy change', async (executionMode) => {
   const { ctx, cwd, runtime, owner } = await setup('workspace-write', executionMode)
   const session = ctx.sessions.create(SessionId(`active-${executionMode}`), { meta: { cwd } })
   const entered = Promise.withResolvers<undefined>()
