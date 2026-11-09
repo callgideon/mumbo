@@ -182,9 +182,9 @@ describe('SidebarRightTabRegistry — claiming', () => {
 
   it('reads the title fresh, so a language change needs no re-registration', () => {
     const registry = new SidebarRightTabRegistry(new Context())
-    let language = 'zh'
-    registry.register({ id: 'shipped/guide', kind: 'guide', title: () => language === 'zh' ? 'Start' : 'Start' })
-    expect(registry.get('guide')?.title('sidebar://guide')).toBe('Start')
+    let language = 'de'
+    registry.register({ id: 'shipped/guide', kind: 'guide', title: () => language === 'de' ? 'Anfangen' : 'Start' })
+    expect(registry.get('guide')?.title('sidebar://guide')).toBe('Anfangen')
     language = 'en'
     expect(registry.get('guide')?.title('sidebar://guide')).toBe('Start')
   })

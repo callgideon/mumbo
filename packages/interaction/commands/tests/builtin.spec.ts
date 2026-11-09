@@ -13,12 +13,12 @@ const definitions = [
 ] as const
 
 describe('builtin command resolution', () => {
-  it.each(definitions)('follows the %s identity through canonical, Chinese and renamed input', (name, id) => {
+  it.each(definitions)('follows the %s identity through canonical and renamed input', (name, id) => {
     const descriptor: CommandDescriptor = {
       name: `renamed-${name}`, definitionId: CommandDefinitionId(id), description: 'Renamed command',
     }
     expect(builtinCommandName(descriptor)).toBe(name)
-    for (const token of [builtinCommandTokens.en[name], builtinCommandTokens.zh[name], descriptor.name]) {
+    for (const token of [builtinCommandTokens.en[name], descriptor.name]) {
       expect(resolveCommand(token, [descriptor])).toBe(descriptor)
     }
   })
@@ -32,7 +32,7 @@ describe('builtin command resolution', () => {
     }
     expect(resolveCommand('plan', [builtin, replacement])).toBe(replacement)
     expect(builtinCommandName(replacement)).toBeUndefined()
-    expect(resolveCommand('计划', [builtin, replacement])).toBe(builtin)
+    expect(resolveCommand('planning', [builtin, replacement])).toBe(builtin)
     expect(resolveCommand('missing', [builtin])).toBeUndefined()
     expect(resolveCommand('plan', [])).toBeUndefined()
   })

@@ -16,12 +16,12 @@ type CardProps = ComponentProps<typeof ActionCard>
 const callId = ToolCallId('card-1')
 const proposal = { callId, turn: 3, action: 'test_action', title: 'Counter', brief: 'Keep my task count visible.', details: { value: 'a' } }
 
-function props(bodies: ReadonlyMap<string, RegisteredBody> = new Map(), decision?: ActionCardDecision, chinese = false): CardProps {
+function props(bodies: ReadonlyMap<string, RegisteredBody> = new Map(), decision?: ActionCardDecision): CardProps {
   return { proposal, decision, sessionId: SessionId('session-1'),
     act: vi.fn(async (): Promise<ActionCardResult | undefined> => ({ status: 'settled', decision: { callId, action: 'test_action', phase: 'dismissed' } })),
     bind: vi.fn(() => (key: string) => `body:${key}`),
     useBodies: selector => selector(bodies),
-    t: makeTranslate(chinese ? en : en) }
+    t: makeTranslate(en) }
 }
 
 it('places the card admitted in its turn once the turn has ended with an answer, and leaves other turns empty', () => {

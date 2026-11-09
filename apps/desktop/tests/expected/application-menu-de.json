@@ -1,44 +1,44 @@
 [
   {
-    "label": "关于 DeepSeek Harness",
+    "label": "Über DeepSeek Harness",
     "role": "about"
   },
   {
     "type": "separator"
   },
   {
-    "label": "检查更新…"
+    "label": "Nach Updates suchen…"
   },
   {
-    "label": "管理 dsh 命令…"
+    "label": "dsh-Befehl verwalten…"
   },
   {
     "type": "separator"
   },
   {
     "role": "toggleDevTools",
-    "label": "开发者工具"
+    "label": "Entwicklertools"
   },
   {
     "type": "separator"
   },
   {
     "role": "hide",
-    "label": "隐藏 DeepSeek Harness"
+    "label": "DeepSeek Harness ausblenden"
   },
   {
     "role": "hideOthers",
-    "label": "隐藏其他"
+    "label": "Andere ausblenden"
   },
   {
     "role": "unhide",
-    "label": "显示全部"
+    "label": "Alle einblenden"
   },
   {
     "type": "separator"
   },
   {
     "role": "quit",
-    "label": "退出 DeepSeek Harness"
+    "label": "DeepSeek Harness beenden"
   }
 ]

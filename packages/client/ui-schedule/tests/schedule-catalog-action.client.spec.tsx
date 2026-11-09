@@ -129,7 +129,7 @@ function sessionSnapshot(openState: SessionSnapshot['openState']): SessionSnapsh
 function props(
   records: readonly Entry[] | undefined,
   openState: SessionSnapshot['openState'] = 'open',
-  dictionary: typeof en | typeof en = en,
+  dictionary: typeof en = en,
   allowed = true,
 ): ScheduleCatalogActionProps {
   const snapshot = sessionSnapshot(openState)

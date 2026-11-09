@@ -83,7 +83,7 @@ function tabInfo(params: unknown, revision = 1): SidebarRightTabInfo {
 function mount(
   initial: Partial<CatalogSnapshot<Entry>> = {},
   params: unknown = { sessionId: SESSION, id: at.id },
-  dictionary: typeof en | typeof en = en,
+  dictionary: typeof en = en,
   sessionState: SessionListState = sessions,
   overrides: Partial<ScheduleTaskTabProps> = {},
 ) {

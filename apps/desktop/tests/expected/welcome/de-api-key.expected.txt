@@ -1,0 +1,8 @@
+DeepSeek Harness
+DeepSeek Harness
+Fügen Sie einen API-Schlüssel hinzu, um loszulegen
+Konfigurieren Sie offizielle DeepSeek-Modelle für die Verwendung von Harness
+API-Schlüssel eingeben [password]
+Speichern und fortfahren [disabled]
+Später einrichten
+Zurück zur Anmeldung

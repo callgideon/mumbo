@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest'
 import { channelSaveFailure, configurationFailure, configurationMessage } from '../src/update-configuration.ts'
 import { DesktopSettingsFileError } from '../src/settings-file.ts'
-import { en, zh } from '../src/locale.ts'
+import { en, de } from '../src/locale.ts'
 
 it('keeps startup suspensions distinct from transient save failures', () => {
   const json = new DesktopSettingsFileError({ kind: 'invalid', reason: 'json' }, '/settings.json')
@@ -30,8 +30,8 @@ it('only exposes a permission hint for a known filesystem permission failure', (
 it('keeps settings errors concise and cleanup recovery distinct', () => {
   expect(configurationMessage('read', en)).toBe('Settings file error; updates are paused')
   expect(configurationMessage('format', en)).toBe('Settings file error; updates are paused')
-  expect(configurationMessage('channel', zh)).toBe('配置文件异常，更新已暂停')
-  expect(configurationMessage('cleanup', zh)).toContain('请重启应用')
+  expect(configurationMessage('channel', de)).toBe('Fehler in der Einstellungsdatei; Updates pausiert')
+  expect(configurationMessage('cleanup', de)).toContain('App neu starten')
   expect(configurationMessage('cleanup', en)).not.toContain('settings file')
 })
 

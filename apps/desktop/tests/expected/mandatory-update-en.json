@@ -1,0 +1,10 @@
+{
+  "title": "Tasks are still in progress",
+  "detail": "Updating will stop the tasks in progress and restart the app. Continue?",
+  "status": "",
+  "version": "New version: 1.0.1-nightly.1",
+  "buttons": [
+    "Stop tasks and update",
+    "Update later"
+  ]
+}

@@ -970,7 +970,7 @@ describe('native review request', () => {
         ? { en: 'Auto review denied this call.', ja: '自動認可レビューがこの呼び出しを拒否しました。',
           es: 'Auto review ha denegado esta llamada.', fr: 'Auto review a refusé cet appel.',
           de: 'Auto review hat diesen Aufruf abgelehnt.', ru: 'Auto review отклонила этот вызов.', pt: 'Auto review negou esta chamada.' }
-        : { en: `Auto review denied this call: ${item.expectedReason}`, 
+        : { en: `Auto review denied this call: ${item.expectedReason}`,
           ja: `自動認可レビューがこの呼び出しを拒否しました：${item.expectedReason}`,
           es: `Auto review ha denegado esta llamada: ${item.expectedReason}`,
           fr: `Auto review a refusé cet appel : ${item.expectedReason}`,

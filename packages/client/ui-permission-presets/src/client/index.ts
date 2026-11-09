@@ -43,7 +43,7 @@ import type { PermissionSelectInjected } from './PermissionSelect.tsx'
 import { PermissionRow } from './PermissionRow.tsx'
 import type { PermissionRowInjected } from './PermissionRow.tsx'
 import {
-  accessEn, accessJa, accessEs, accessFr, accessDe, accessRu, accessPt, en, ja, es, fr, de, ru, pt, PERMISSION_ACCESS_NS, 
+  accessEn, accessJa, accessEs, accessFr, accessDe, accessRu, accessPt, en, ja, es, fr, de, ru, pt, PERMISSION_ACCESS_NS,
 } from './locales.ts'
 import {
   AUTO_REVIEW_PRESET, displayPermissionPreset, FULL_ACCESS_PRESET,

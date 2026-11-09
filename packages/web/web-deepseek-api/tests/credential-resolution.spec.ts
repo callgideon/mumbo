@@ -461,11 +461,9 @@ describe('provider registration', () => {
     expect(fetch.map(({ id }) => id)).toEqual(['deepseek-fetch-api'])
     expect(search[0]?.description).toMatchObject({
       en: 'Queries the search endpoint directly for titles, URLs, and snippets without an extra model call. Uses the DeepSeek account of the current conversation, or a DeepSeek API key, and may incur API charges.',
-      zh: '直接请求搜索接口返回标题、URL 与摘要，无需额外调用模型。使用当前会话的 DeepSeek 账号或 DeepSeek API Key，可能产生计费',
     })
     expect(fetch[0]?.description).toMatchObject({
       en: 'Fetches public URLs on DeepSeek servers and returns Markdown. Uses the DeepSeek account of the current conversation, or a DeepSeek API key, may incur API charges, and cannot reach intranet or loopback addresses.',
-      zh: '由 DeepSeek 服务端抓取公网页面并返回 Markdown。使用当前会话的 DeepSeek 账号或 DeepSeek API Key，可能产生计费，且无法访问内网和本机',
     })
   })
 })

@@ -71,7 +71,7 @@ function mount({
 }: {
   shortcuts?: readonly ShortcutCatalogEntry[]
   wide?: boolean
-  dictionary?: typeof en | typeof en
+  dictionary?: typeof en
   connectionState?: ConnectionSnapshot
   desktopUpdate?: DesktopUpdateView
   onboardingActive?: boolean

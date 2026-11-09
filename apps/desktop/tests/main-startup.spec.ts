@@ -11,7 +11,7 @@ import type { MenuItemConstructorOptions, MessageBoxOptions } from 'electron'
 import { DESKTOP_IPC, type DesktopUpdateState } from '../src/ipc.ts'
 import { MANDATORY_IPC } from '../src/mandatory-update-ipc.ts'
 import { DesktopHostFatalError, DesktopHostUncleanExitError } from '../src/host-process.ts'
-import { en, zh } from '../src/locale.ts'
+import { en, de } from '../src/locale.ts'
 import { DesktopUpdatePreparationError } from '../src/update-error.ts'
 import { writeCrashReport } from '../src/crash-report.ts'
 import { runOperationReportJob } from '../src/operation-report-job.ts'
@@ -462,7 +462,7 @@ beforeEach(() => {
   harness.app.getPath.mockImplementation(name => name === 'userData' ? userData : join(userData, `desktop-test-${name}`))
   vi.mocked(writeCrashReport).mockResolvedValue(join(harness.app.getPath('logs'), 'crash-test.log'))
   harness.dialog.showMessageBox.mockImplementation((options: { title?: string }) => {
-    if (options.title !== en.startupFailed && options.title !== zh.startupFailed) return Promise.resolve({ response: 1 })
+    if (options.title !== en.startupFailed && options.title !== de.startupFailed) return Promise.resolve({ response: 1 })
     harness.dialogShown.resolve()
     return new Promise(() => {})
   })
@@ -789,7 +789,7 @@ describe('desktop main startup', () => {
   })
 
   it.each(([
-    ['darwin', 'en'], ['darwin', 'zh-CN'], ['win32', 'en'], ['win32', 'zh-CN'], ['linux', 'en'], ['linux', 'zh-CN'],
+    ['darwin', 'en'], ['darwin', 'de'], ['win32', 'en'], ['win32', 'de'], ['linux', 'en'], ['linux', 'de'],
   ] as const).flatMap(([platform, locale]) => [
     [platform, locale, true] as const, [platform, locale, false] as const,
   ]))('groups localized DevTools before quit on %s (%s, packaged=%s)', async (platform, locale, packaged) => {
@@ -797,7 +797,7 @@ describe('desktop main startup', () => {
     harness.app.isPackaged = packaged
     vi.spyOn(harness.app, 'getPreferredSystemLanguages').mockReturnValue([locale])
     await readyForUpdate()
-    const messages = locale === 'en' ? en : zh
+    const messages = locale === 'en' ? en : de
     const menu = applicationMenuItems()
     const visible = menu.filter(item => item.visible !== false)
     expect(visible.map(item => item.role === 'quit' ? 'quit' : item.label ?? item.type)).toEqual([
@@ -823,22 +823,22 @@ describe('desktop main startup', () => {
       ])
     }
     const sender = harness.windows[0]!.webContents
-    const nextLocale = locale === 'en' ? 'zh' : 'en'
+    const nextLocale = locale === 'en' ? 'de' : 'en'
     harness.ipcOn.mock.calls.find(([channel]) => channel === DESKTOP_IPC.localeChanged)![1](
       { sender, senderFrame: sender.mainFrame }, nextLocale,
     )
     const refreshed = platform === 'win32' ? applicationMenuItems()
       : harness.menu.mock.lastCall![0][0]!.submenu as MenuItemConstructorOptions[]
     expect(refreshed.filter(item => item.role === 'toggleDevTools' && item.visible !== false)).toEqual([
-      { role: 'toggleDevTools', label: nextLocale === 'en' ? en.toggleDevToolsMenu : zh.toggleDevToolsMenu },
+      { role: 'toggleDevTools', label: nextLocale === 'en' ? en.toggleDevToolsMenu : de.toggleDevToolsMenu },
     ])
     expect(harness.windows[0]!.options).toMatchObject({ webPreferences: { devTools: true } })
   })
 
   it.each([
     ['darwin', true, 'en-US'],
-    ['darwin', false, 'zh-CN'],
-    ['win32', true, 'zh-CN'],
+    ['darwin', false, 'de'],
+    ['win32', true, 'de'],
     ['win32', false, 'en-US'],
   ] as const)('offers the About command before other commands on %s (packaged=%s, locale=%s)', async (platform, packaged, locale) => {
     vi.stubGlobal('process', { ...process, platform })
@@ -860,10 +860,10 @@ describe('desktop main startup', () => {
     harness.dialog.showMessageBox.mockResolvedValueOnce({ response: 0 })
     ;(about!.click as () => void)()
     await vi.advanceTimersByTimeAsync(0)
-    const zh = locale === 'zh-CN'
+    const de = locale === 'de'
     expect(harness.dialog.showMessageBox).toHaveBeenLastCalledWith(expect.objectContaining({
-      type: 'info', title: zh ? '关于 DeepSeek Harness' : 'About DeepSeek Harness', message: 'DeepSeek Harness',
-      detail: zh ? '版本 V1.0.0' : 'Version V1.0.0', buttons: [zh ? '确定' : 'OK'], cancelId: 0,
+      type: 'info', title: de ? 'Über DeepSeek Harness' : 'About DeepSeek Harness', message: 'DeepSeek Harness',
+      detail: 'Version V1.0.0', buttons: ['OK'], cancelId: 0,
     }))
     // A dialog that cannot open is logged, not surfaced as an unhandled rejection.
     harness.dialog.showMessageBox.mockRejectedValueOnce(new Error('overlay unavailable'))
@@ -1244,13 +1244,13 @@ describe('desktop main startup', () => {
     const window = harness.windows[0]!
     const listener = harness.ipcOn.mock.calls.find(([channel]) => channel === DESKTOP_IPC.windowsAppearance)![1]
     const event = { sender: window.webContents, senderFrame: window.webContents.mainFrame }
-    listener({ ...event, senderFrame: { url: 'dsh-app://app/' } }, 'zh-CN', '#ffffff', '#000000')
+    listener({ ...event, senderFrame: { url: 'dsh-app://app/' } }, 'de', '#ffffff', '#000000')
     expect(window.setTitleBarOverlay).not.toHaveBeenCalled()
-    harness.ipcOn.mock.calls.find(([channel]) => channel === DESKTOP_IPC.localeChanged)![1](event, 'zh')
-    listener(event, 'zh-CN', 'rgb(249, 250, 251)', '#0f1115')
+    harness.ipcOn.mock.calls.find(([channel]) => channel === DESKTOP_IPC.localeChanged)![1](event, 'de')
+    listener(event, 'de', 'rgb(249, 250, 251)', '#0f1115')
     expect(window.setTitleBarOverlay).toHaveBeenCalledWith({ color: 'rgb(249, 250, 251)', symbolColor: '#0f1115' })
     window.webContents.emit('context-menu', {}, { isEditable: false, selectionText: 'text', editFlags: { canCopy: true } })
-    expect(harness.menu.buildFromTemplate).toHaveBeenLastCalledWith([{ role: 'copy', enabled: true, label: '复制', accelerator: '' }])
+    expect(harness.menu.buildFromTemplate).toHaveBeenLastCalledWith([{ role: 'copy', enabled: true, label: 'Kopieren', accelerator: '' }])
     harness.ipcOn.mock.calls.find(([channel]) => channel === DESKTOP_IPC.localeChanged)![1](event, 'en')
     listener(event, 'en', '#1b1b1c', '#f9fafb')
     window.webContents.emit('context-menu', {}, { isEditable: false, selectionText: 'text', editFlags: { canCopy: true } })
@@ -1262,16 +1262,16 @@ describe('desktop main startup', () => {
     expect(window.setTitleBarOverlay).toHaveBeenLastCalledWith({ color: '#fff', symbolColor: '#000' })
     window.setTitleBarOverlay.mockClear()
     window.webContents.mainFrame.url = 'dsh-app://unowned/index.html'
-    listener(event, 'zh-CN', '#fff', '#000')
+    listener(event, 'de', '#fff', '#000')
     expect(window.setTitleBarOverlay).not.toHaveBeenCalled()
     expect(harness.menu.setApplicationMenu).toHaveBeenCalledTimes(3)
   })
 
-  it('retains cached Chinese for a Host startup crash after the loading page reports English', async () => {
+  it('retains cached German for a Host startup crash after the loading page reports English', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     const directory = join(harness.app.getPath('userData'), 'desktop')
     mkdirSync(directory, { recursive: true })
-    writeFileSync(join(directory, 'locale-cache'), 'zh-CN\n')
+    writeFileSync(join(directory, 'locale-cache'), 'de\n')
     await import('../src/main.ts')
     await harness.preparing.promise
     const window = harness.windows[0]!
@@ -1286,8 +1286,8 @@ describe('desktop main startup', () => {
     await host.stopping.promise
     host.exited.resolve()
     await harness.dialogShown.promise
-    expect(vi.mocked(writeCrashReport).mock.calls[0]![1].app.locale).toBe('zh-CN')
-    expect((harness.dialog.showMessageBox.mock.calls[0]![0] as MessageBoxOptions).message).toBe(zh.fatalSummary)
+    expect(vi.mocked(writeCrashReport).mock.calls[0]![1].app.locale).toBe('de')
+    expect((harness.dialog.showMessageBox.mock.calls[0]![0] as MessageBoxOptions).message).toBe(de.fatalSummary)
   })
 
   it('maps Windows caption menus to localized native commands and rejects foreign popup requests', async () => {
@@ -1297,8 +1297,8 @@ describe('desktop main startup', () => {
     const window = harness.windows[0]!
     const event = { sender: window.webContents, senderFrame: window.webContents.mainFrame }
     const appearance = harness.ipcOn.mock.calls.find(([channel]) => channel === DESKTOP_IPC.windowsAppearance)![1]
-    harness.ipcOn.mock.calls.find(([channel]) => channel === DESKTOP_IPC.localeChanged)![1](event, 'zh')
-    appearance(event, 'zh-CN', '#fff', '#000')
+    harness.ipcOn.mock.calls.find(([channel]) => channel === DESKTOP_IPC.localeChanged)![1](event, 'de')
+    appearance(event, 'de', '#fff', '#000')
     const handler = harness.handlers.get(DESKTOP_IPC.windowsMenu)!
     const foreignEvent = { ...event, sender: {} }
     expect(() => handler(foreignEvent, 'application', 48, 34)).toThrow('rejected sender')
@@ -1306,7 +1306,7 @@ describe('desktop main startup', () => {
     expect(() => handler(event, 'application', NaN, 34)).toThrow('invalid popup request')
     const application = handler(event, 'application', 48, 34)
     expect(harness.menu.buildFromTemplate.mock.lastCall![0].map(item => item.label ?? item.type)).toEqual([
-      '关于 DeepSeek Harness', 'separator', '检查更新…', '管理 dsh 命令…', 'separator', zh.toggleDevToolsMenu, 'separator', '退出',
+      'Über DeepSeek Harness', 'separator', 'Nach Updates suchen…', 'dsh-Befehl verwalten…', 'separator', de.toggleDevToolsMenu, 'separator', 'Beenden',
     ])
     expect(harness.popup.mock.lastCall![0]).toMatchObject({ window, x: 48, y: 34 })
     expect(harness.popup.mock.lastCall![0].callback).toBeTypeOf('function')
@@ -1314,7 +1314,7 @@ describe('desktop main startup', () => {
     await application
     const edit = handler(event, 'edit', 104, 34)
     expect(harness.menu.buildFromTemplate.mock.lastCall![0].map(item => item.label ?? item.type)).toEqual([
-      '撤销', '重做', 'separator', '剪切', '复制', '粘贴', '删除', 'separator', '全选',
+      'Rückgängig machen', 'Wiederholen', 'separator', 'Ausschneiden', 'Kopieren', 'Einfügen', 'Löschen', 'separator', 'Alles auswählen',
     ])
     const commands = harness.menu.buildFromTemplate.mock.lastCall![0].filter(item => item.type !== 'separator')
     for (const [index, keyCode] of ['Z', 'Y', 'X', 'C', 'V', 'Delete', 'A'].entries()) {
@@ -1359,7 +1359,7 @@ describe('desktop main startup', () => {
     expect(harness.menu.setApplicationMenu).toHaveBeenCalledOnce()
   })
 
-  it.each(['en-US', 'zh-CN'])('localizes macOS application commands without changing the application name (%s)', async (locale) => {
+  it.each(['en-US', 'de'])('localizes macOS application commands without changing the application name (%s)', async (locale) => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     vi.spyOn(harness.app, 'getLocale').mockReturnValue(locale)
     vi.spyOn(harness.app, 'getPreferredSystemLanguages').mockReturnValue([locale])
@@ -1572,7 +1572,7 @@ describe('desktop main startup', () => {
   })
 
   it.each([
-    ['win32', 'zh-CN'], ['win32', 'en-US'], ['darwin', 'zh-CN'], ['darwin', 'en-US'],
+    ['win32', 'de'], ['win32', 'en-US'], ['darwin', 'de'], ['darwin', 'en-US'],
   ] as const)('records the restart confirmation on %s in %s', async (platform, language) => {
     vi.stubGlobal('process', { ...process, platform })
     vi.spyOn(harness.app, 'getPreferredSystemLanguages').mockReturnValue([language])
@@ -1632,7 +1632,7 @@ describe('desktop main startup', () => {
     expect(window.show).toHaveBeenCalledTimes(2)
     // Locale changes relabel the tray together with the application menu.
     const relabels = harness.trays[0]!.setContextMenu.mock.calls.length
-    harness.ipcOn.mock.calls.find(call => call[0] === DESKTOP_IPC.localeChanged)![1]({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, 'zh')
+    harness.ipcOn.mock.calls.find(call => call[0] === DESKTOP_IPC.localeChanged)![1]({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, 'de')
     expect(harness.trays[0]!.setContextMenu.mock.calls.length).toBe(relabels + 1)
   })
 

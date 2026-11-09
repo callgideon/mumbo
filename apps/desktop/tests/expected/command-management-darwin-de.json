@@ -1,0 +1,67 @@
+{
+  "dialogs": [
+    {
+      "type": "info",
+      "title": "dsh-Befehl verwalten",
+      "message": "Fügen Sie den Desktop-Befehl zu Ihrem Terminal hinzu.",
+      "detail": "Desktop-Befehl: /usr/local/bin/dsh",
+      "buttons": [
+        "Installieren",
+        "Abbrechen"
+      ],
+      "defaultId": 0,
+      "cancelId": 1
+    },
+    {
+      "type": "info",
+      "title": "dsh-Befehl verwalten",
+      "message": "Der Desktop-Befehl ist installiert.",
+      "detail": "Desktop-Befehl: /usr/local/bin/dsh\n\nAktueller dsh-Befehl: /usr/local/bin/dsh",
+      "buttons": [
+        "Schließen",
+        "Reparieren",
+        "Entfernen"
+      ],
+      "defaultId": 0,
+      "cancelId": 0
+    },
+    {
+      "type": "info",
+      "title": "dsh-Befehl verwalten",
+      "message": "Der Desktop-Befehl muss repariert werden.",
+      "detail": "Desktop-Befehl: /usr/local/bin/dsh",
+      "buttons": [
+        "Schließen",
+        "Reparieren",
+        "Entfernen"
+      ],
+      "defaultId": 0,
+      "cancelId": 0
+    },
+    {
+      "type": "warning",
+      "title": "dsh-Befehl verwalten",
+      "message": "Der Desktop-Befehl ist installiert.",
+      "detail": "Desktop-Befehl: /usr/local/bin/dsh\n\nAktueller dsh-Befehl: /opt/homebrew/bin/dsh\n\nEin anderer dsh hat Vorrang. Entfernen Sie diese Installation oder ordnen Sie sie neu an, um standardmäßig den Desktop-Befehl zu verwenden. Sie können den Desktop-Befehl auch über seinen vollständigen Pfad ausführen.",
+      "buttons": [
+        "Schließen",
+        "Reparieren",
+        "Entfernen"
+      ],
+      "defaultId": 0,
+      "cancelId": 0
+    },
+    {
+      "type": "info",
+      "title": "dsh-Befehl verwalten",
+      "message": "Fügen Sie den Desktop-Befehl zu Ihrem Terminal hinzu.",
+      "detail": "Desktop-Befehl: /usr/local/bin/dsh\n\nIhr Shell-Befehl konnte nicht überprüft werden. Ein Alias oder eine andere dsh-Installation kann Vorrang haben.",
+      "buttons": [
+        "Installieren",
+        "Abbrechen"
+      ],
+      "defaultId": 0,
+      "cancelId": 1
+    }
+  ]
+}

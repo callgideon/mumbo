@@ -1,0 +1,6 @@
+DeepSeek Harness ist nicht verfügbar
+Die Anwendung konnte nicht gestartet werden oder wurde unerwartet gestoppt.
+Eine andere DSH-Instanz (z. B. dsh Web oder die Desktop-App) wird ausgeführt. Sie können nicht gleichzeitig starten. Beenden Sie die andere laufende DSH-Instanz und starten Sie sie neu.
+Der Diagnosebericht konnte nicht gespeichert werden. Sie können bei einer Supportanfrage einen Screenshot dieses Dialogs bereitstellen.
+Beenden
+Neustart

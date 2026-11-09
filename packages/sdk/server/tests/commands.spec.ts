@@ -208,11 +208,11 @@ describe('SDK command dispatch', () => {
   })
 
   it.each([
-    ['compact', '@deepseek-ai/dsh-command-compact', '/compact', '/压缩'],
-    ['permission', '@deepseek-ai/dsh-permission-presets', '/permission read-only', '/权限 read-only'],
-    ['plan', '@deepseek-ai/dsh-plan-mode', '/plan', '/计划'],
-    ['goal', '@deepseek-ai/dsh-command-goal', '/goal', '/目标'],
-  ])('accepts the %s English and Chinese aliases and delivers their lifecycle before resolution', async (name, definitionId, line, alias) => {
+    ['compact', '@deepseek-ai/dsh-command-compact', '/compact', ' \n/compact \t'],
+    ['permission', '@deepseek-ai/dsh-permission-presets', '/permission read-only', ' \n/permission\tread-only \t'],
+    ['plan', '@deepseek-ai/dsh-plan-mode', '/plan', ' \n/plan \t'],
+    ['goal', '@deepseek-ai/dsh-command-goal', '/goal', ' \n/goal \t'],
+  ])('accepts the %s command and its padded form and delivers their lifecycle before resolution', async (name, definitionId, line, alias) => {
     const input = new PassThrough()
     const output = new PassThrough()
     const serverWire = new JsonRpcLineTransport(input, output)
@@ -259,11 +259,11 @@ describe('SDK command dispatch', () => {
   })
 
   it.each([
-    ['compact', '@deepseek-ai/dsh-command-compact', '压缩', ''],
-    ['permission', '@deepseek-ai/dsh-permission-presets', '权限', ' read-only'],
-    ['plan', '@deepseek-ai/dsh-plan-mode', '计划', ' task'],
-    ['goal', '@deepseek-ai/dsh-command-goal', '目标', ' task'],
-  ])('dispatches the renamed %s definition through its registered name and aliases', async (name, id, alias, args) => {
+    ['compact', '@deepseek-ai/dsh-command-compact', ''],
+    ['permission', '@deepseek-ai/dsh-permission-presets', ' read-only'],
+    ['plan', '@deepseek-ai/dsh-plan-mode', ' task'],
+    ['goal', '@deepseek-ai/dsh-command-goal', ' task'],
+  ])('dispatches the renamed %s definition through its registered name and builtin alias', async (name, id, args) => {
     const h = await setup()
     await h.initialize()
     const registered = `renamed-${name}`
@@ -272,16 +272,16 @@ describe('SDK command dispatch', () => {
       name: registered, definitionId: CommandDefinitionId(id), description: 'Renamed builtin', handler,
     }))
     const sessionId = SessionId('renamed')
-    for (const token of [name, alias, registered]) {
+    for (const token of [name, registered]) {
       await expect(h.server.handleRequest('session/query', {
         sessionId, contentBlocks: [{ type: 'text', text: `/${token}${args}` }],
       })).resolves.toMatchObject({ kind: 'command', execution: { result: { kind: 'success' } } })
     }
-    expect(handler).toHaveBeenCalledTimes(3)
-    expect(handler.mock.calls.map(([invocation]) => invocation.rawInput)).toEqual(Array.from({ length: 3 }, () => args))
+    expect(handler).toHaveBeenCalledTimes(2)
+    expect(handler.mock.calls.map(([invocation]) => invocation.rawInput)).toEqual(Array.from({ length: 2 }, () => args))
     const events = h.ctx.agents.get(sessionId)!.session.snapshotEvents()
     expect(events.filter(event => event.type === 'command/run').map(event => event.data.name))
-      .toEqual(Array.from({ length: 3 }, () => registered))
+      .toEqual(Array.from({ length: 2 }, () => registered))
     expect(events.every(event => event.type === 'command/run' || event.type === 'command/done')).toBe(true)
   })
 
@@ -366,11 +366,11 @@ describe('SDK command dispatch', () => {
 
   it.each([
     ['/plan\u3000Inspect\u3000the\nchange', 'plan', '@deepseek-ai/dsh-plan-mode', ' Inspect\u3000the\nchange'],
-    ['/计划\u00a0\t设计\u00a0方案', 'plan', '@deepseek-ai/dsh-plan-mode', ' \t设计\u00a0方案'],
+    ['/plan\u00a0\tDesign\u00a0the change', 'plan', '@deepseek-ai/dsh-plan-mode', ' \tDesign\u00a0the change'],
     ['/goal\u2003Finish\u3000the task', 'goal', '@deepseek-ai/dsh-command-goal', ' Finish\u3000the task'],
-    ['/目标\u3000\u00a0完成任务', 'goal', '@deepseek-ai/dsh-command-goal', ' \u00a0完成任务'],
+    ['/goal\u3000\u00a0Finish the task', 'goal', '@deepseek-ai/dsh-command-goal', ' \u00a0Finish the task'],
     ['/permission\u00a0read-only', 'permission', '@deepseek-ai/dsh-permission-presets', ' read-only'],
-    ['/权限\u202f\tread-only', 'permission', '@deepseek-ai/dsh-permission-presets', ' \tread-only'],
+    ['/permission\u202f\tread-only', 'permission', '@deepseek-ai/dsh-permission-presets', ' \tread-only'],
   ])('executes Unicode-separated input %j through its native handler', async (line, name, definitionId, rawInput) => {
     const h = await setup()
     await h.initialize()
@@ -548,7 +548,7 @@ describe('SDK query dispatch', () => {
     expect(agent.session.snapshotEvents().map(event => event.type)).toEqual(['command/run', 'command/done'])
   })
 
-  it.each(['/feedback inspect', '/model', '/file', '/export', '/permission', ' \n/权限\t '])('preserves existing prompt behavior for unimplemented input %s', async (text) => {
+  it.each(['/feedback inspect', '/model', '/file', '/export', '/permission', ' \n/permission\t '])('preserves existing prompt behavior for unimplemented input %s', async (text) => {
     const h = await setup()
     const model = new TextModel()
     h.ctx.effect(() => h.ctx.llm.registerAdapter(['query-model'], model))

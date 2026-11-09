@@ -8,19 +8,19 @@ import { FoldedText } from '@deepseek-ai/dsh-client-ui-action-cards/src/client/C
 import type { ActionCardFields, ActionCardResult } from '@deepseek-ai/dsh-action-cards/types'
 import { PageCardBody, type PageCardProps } from '../src/client/Card.tsx'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
-import { en } from '../src/client/locales.ts'
+import { en, fr } from '../src/client/locales.ts'
 
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 const callId = ToolCallId('creation-1')
 const ACTION = 'create_personalized_page'
 type Act = (verb: string, payload?: ActionCardFields) => Promise<ActionCardResult | undefined>
 
-function props(decision?: { phase: string; data?: ActionCardFields }, chinese = true, details: ActionCardFields = { slot: 'sidebar-right' }): PageCardProps & { act: ReturnType<typeof vi.fn<Act>> } {
+function props(decision?: { phase: string; data?: ActionCardFields }, french = false, details: ActionCardFields = { slot: 'sidebar-right' }): PageCardProps & { act: ReturnType<typeof vi.fn<Act>> } {
   const proposal = { callId, turn: 1, action: ACTION, title: 'Counter', brief: 'Keep my task count visible.', details }
   return { proposal, decision: decision === undefined ? undefined : { callId, action: ACTION, ...decision },
     sessionId: SessionId('session-1'), summary: <><strong>{proposal.title}</strong><p>{proposal.brief}</p></>, Folded: FoldedText,
     act: vi.fn<Act>(async () => ({ status: 'accepted' })), infoDismissed: createSnapshotStore(true),
-    t: makeTranslate(chinese ? en : en) }
+    t: makeTranslate(french ? fr : en) }
 }
 
 it('starts with the recommended location, lets the user change it, and starts only on Create', async () => {
@@ -131,9 +131,9 @@ it.each(['installing', 'dismissed', 'replaced'] as const)('restores %s without r
   expect(screen.getByText('Add to · Global page')).toBeTruthy()
 })
 
-it.each([true, false])('explains cost and background creation without starting work (Chinese: %s)', (chinese) => {
-  const value = props(undefined, chinese)
-  const copy = chinese ? en : en
+it.each([true, false])('explains cost and background creation without starting work (French: %s)', (french) => {
+  const value = props(undefined, french)
+  const copy = french ? fr : en
   render(<PageCardBody {...value} />)
   const button = screen.getByRole('button', { name: copy.creationInfo })
   expect(screen.queryByRole('note')).toBeNull()
@@ -245,17 +245,17 @@ it('shows supplied initial content as folded data below the plan and omits it ot
   const view = render(<PageCardBody {...props()} />)
   expect(screen.queryByText('Starts with')).toBeNull()
   const items = '1. 导出成功\n2. 断网提示清楚'
-  view.rerender(<PageCardBody {...props(undefined, true, { slot: 'sidebar-right', initialContent: items })} />)
+  view.rerender(<PageCardBody {...props(undefined, false, { slot: 'sidebar-right', initialContent: items })} />)
   expect(screen.getByText('Starts with')).toBeTruthy()
   expect(screen.getByText(/导出成功/).textContent).toBe(items)
   expect(screen.queryByRole('button', { name: 'View all content' })).toBeNull()
-  view.rerender(<PageCardBody {...props(undefined, true, { slot: 'sidebar-right', initialContent: '条'.repeat(131) })} />)
+  view.rerender(<PageCardBody {...props(undefined, false, { slot: 'sidebar-right', initialContent: '条'.repeat(131) })} />)
   fireEvent.click(screen.getByRole('button', { name: 'View all content' }))
   expect(screen.getByRole('button', { name: 'Collapse content' }).getAttribute('aria-expanded')).toBe('true')
 })
 
 it('falls back to the summary for invalid fields and ignores unknown phases and invalid data', () => {
-  const invalid = render(<PageCardBody {...props(undefined, true, { slot: 'elsewhere' })} />)
+  const invalid = render(<PageCardBody {...props(undefined, false, { slot: 'elsewhere' })} />)
   expect(screen.getByText('Counter')).toBeTruthy()
   expect(screen.queryByRole('button')).toBeNull()
   invalid.unmount()

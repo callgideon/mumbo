@@ -72,7 +72,7 @@ function sourceFor(
 function renderHover(
   source: CatalogInjected<ScheduleCatalogEntry>,
   sessionId: SessionId = SESSION,
-  dictionary: typeof en | typeof en = en,
+  dictionary: typeof en = en,
 ) {
   const props = {
     sessionId,
