@@ -316,6 +316,26 @@ Not built now. The platform comes first. When this comes back, start from these 
   - **Workflow files.** Changes under `.github/workflows` are refused by GitHub itself, because the agent token has no `workflow` scope. Other `.github/` files are flagged as protected at approval time.
   - **Token type.** The agent token is a classic token with `repo` and `notifications` scopes. Superagent's GitHub Source reads notifications, which fine-grained tokens cannot.
   - Superagent's GitHub Source runs through the same proxy.
+- **The agent is the `mumbo-bot` App too** **[founder: 2026-11-09, "re-use or take over the mumbo-bot"; this replaces the machine account]**. Design **[my call]**:
+  - **Tokens.**
+    - The edge forwarder mints an App installation token per project, limited to `repositories: <the project's bound repos>` and `permissions: { contents: write, pull_requests: write, issues: write, checks: read, statuses: read }`. It caches each token until 5 minutes before expiry. No box ever holds one.
+    - Because the token never names `workflows`, workflow files stay unwritable.
+    - GitHub itself now limits each project to its own repos, so node-id scoping stays as a second defence.
+  - **App permissions (founder, in the App settings):**
+    - add Issues read/write, Checks read and Commit statuses read;
+    - remove Actions write and Workflows write;
+    - then approve the updated permissions on the organization's installation.
+  - **Superagent's GitHub Source, App mode (UPSTREAM S7):**
+    - It takes its identity from config (`mumbo-bot[bot]` and the bot's numeric user id), not from `/user`.
+    - Commits use `<bot id>+mumbo-bot[bot]@users.noreply.github.com`.
+    - It doesn't poll notifications (App tokens can't). It polls the repository streams it already has (new issues, new PRs, comments, reviews) plus check runs.
+    - To keep strangers on a public repo from costing an Eval each, a comment becomes a Trigger only when at least one holds:
+      - it is on a Thread a Ticket subscribes to;
+      - it mentions `@mumbo-bot`;
+      - it comes from an allowlisted sender.
+      - Everything else is filtered at the Source scope, before Eval.
+  - **Identity checks.** The approval poller's author filter and the review-marker author are `mumbo-bot[bot]`, matched by numeric id.
+  - **Merges** still use a separate single-repo token minted per merge. The author and the merger are now the same App, so the founder's tap stays the only merge gate.
 - **Merge bot.** The existing `mumbo-bot` GitHub App (id 5295930, installed on the `callgideon` organization) **[founder]**.
   - Its credentials are in Secrets Manager `mumbo-boxes/github-app`, and only the edge's approval service reads them.
   - For each merge, the edge mints a token limited to the one repository, with contents and pull requests write only. It merges, then revokes the token.
@@ -473,6 +493,12 @@ Reference mockups (sample data): `mumbo-mockups-v2.html`.
 | Signed-in accounts and the browser | The founder's box only; never a project box or a worker |
 
 - Each node's model is set in config, so admin or finance Tickets can move to another provider without a design change.
+- **Image-capable models** **[founder: 2026-11-09]**: Qwen (`qwen/qwen3.8-27b`, `qwen/qwen3.5-9b`) through OpenRouter, behind the edge, with the server key held there and the models allowlisted. Screenshots of the founder's signed-in desktop are among the most sensitive data here, so:
+  - **Retention.** Every OpenRouter request sets `provider: { data_collection: "deny" }`, and the edge enforces it. Prefer zero-data-retention endpoints. **[my call]**
+  - **A session's model never changes mid-session.**
+  - **Computer use** runs in a subagent whose model is the image-capable one. The DeepSeek session delegates "do X on the desktop or in the browser" and receives text back, so screenshots never reach DeepSeek, which can't read them anyway.
+  - **Images the founder drops in chat** go through a `look` tool on the image model, which returns a description and any text in the image as a logged tool result.
+  - **Fallback.** If dsh can't do either yet, a session the user starts on Qwen is the fallback. Automatic per-turn routing between models is not wanted. **[my call]**
 - Backups are not encrypted with KMS until stage 9's open item on that closes.
 
 ## 17. Quality and observability **[my call]**
@@ -484,6 +510,17 @@ Reference mockups (sample data): `mumbo-mockups-v2.html`.
 - A health line in the digest across all nodes: stale Tickets, failed workers, budget used, last backup.
 
 ## 17a. Accounts and sign-up **[founder: 2026-11-09]**
+
+**Hosts** **[founder: "replace boxes -> app"]**:
+- `app.mumbo.si` is the primary host, with `approve.app.mumbo.si` and `p-<id>.app.mumbo.si`.
+- `boxes.mumbo.si` and `api.mumbo.si` answer `301` to `app.mumbo.si`.
+- The model host stays `llm.boxes.mumbo.si` for boxes already running, alongside `llm.app.mumbo.si`.
+- Project boxes are still under the same registrable domain (`mumbo.si`), so the separate-domain gate before multi-person projects still applies.
+
+**Sign-in consent page.** The Supabase OAuth server's authorization page is served by the edge, on an origin no box serves.
+- It completes the sign-in automatically only for Mumbo's own client id(s), which are configured.
+- It refuses any other client, so an OAuth client registered later in Supabase can't obtain the founder's consent silently.
+- It shows "Continue with Google" and "Email me a sign-in link".
 
 **Who.** The founder is `hi@mumbo.si`, the only approver (`APPROVER_EMAILS`). Anyone with a **verified** `@mumbo.si` or `@cambrialabs.ai` email may sign up, and each person gets their own box automatically. **[founder]**
 
