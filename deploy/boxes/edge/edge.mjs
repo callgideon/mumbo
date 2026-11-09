@@ -342,7 +342,8 @@ export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, fetchI
   }))
   async function route(req, res) {
     if (req.url === '/edge/healthz') return json(res, 200, { ok: true })
-    const source = String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim()
+    // The last X-Forwarded-For entry is the one our load balancer appended; earlier entries come from the client.
+    const source = String(req.headers['x-forwarded-for'] ?? '').split(',').at(-1).trim()
     if (cfg.egressIps.length > 0 && !cfg.egressIps.includes(source)) return json(res, 403, { error: 'box tokens work only from mumbo boxes' })
     const token = req.headers['x-api-key'] ?? String(req.headers.authorization ?? '').replace(/^Bearer /, '')
     const claim = verifyBox(edgeKey, token)
@@ -398,11 +399,13 @@ async function main() {
   const box = boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut })
   const verifyAlb = process.env.ALB_ARN ? albIdentity({ albArn: env('ALB_ARN'), region }) : undefined
   const listenHost = env('LISTEN_HOST', '127.0.0.1')  // beyond loopback only behind an ALB, where identity is the ALB token
+  // The model host authenticates every call by box token and source address, so it may listen beyond loopback.
+  const modelHost = env('MODEL_LISTEN_HOST', listenHost)
   setInterval(() => box.sweep().catch(e => console.error('edge: sweep', e.message)), 60_000).unref()
   if (listenHost !== '127.0.0.1' && !verifyAlb) throw new Error('edge: LISTEN_HOST beyond loopback needs ALB_ARN (the email header is only trusted from oauth2-proxy)')
   userServer({ cfg, box, verifyAlb }).listen(8080, listenHost, () => console.log(`edge: users on ${listenHost}:8080`))
   modelServer({ cfg, edgeKey, modelKey, allow: budget(store, cfg.dailyRequests), owns: box.owns, touch: box.touch })
-    .listen(8081, listenHost, () => console.log(`edge: model host on ${listenHost}:8081`))
+    .listen(8081, modelHost, () => console.log(`edge: model host on ${modelHost}:8081`))
 }
 
 if (process.argv[1] === new URL(import.meta.url).pathname) main().catch((e) => { console.error('edge: fatal', e); process.exit(1) })

@@ -157,6 +157,8 @@ test('model host swaps the box token for the server key, checks ownership, sourc
   const tok = signBox('k', 'a@x.com', 'b1')
   const from = { 'x-forwarded-for': '1.2.3.4' }
   assert.equal((await call(port, { method: 'POST', path: '/anthropic/v1/messages', headers: { 'x-api-key': tok, 'x-forwarded-for': '9.9.9.9' } })).status, 403)
+  // A client-supplied entry before the load balancer's own does not pass.
+  assert.equal((await call(port, { method: 'POST', path: '/anthropic/v1/messages', headers: { 'x-api-key': tok, 'x-forwarded-for': '1.2.3.4, 9.9.9.9' } })).status, 403)
   assert.equal((await call(port, { method: 'POST', path: '/anthropic/v1/messages', headers: { ...from, 'x-api-key': 'nope' } })).status, 401)
   assert.equal((await call(port, { method: 'POST', path: '/anthropic/v1/messages', headers: { ...from, 'x-api-key': signBox('k', 'a@x.com', 'old-box') } })).status, 401)
   const ok = await call(port, { method: 'POST', path: '/anthropic/v1/messages', headers: { ...from, 'x-api-key': tok, 'content-type': 'application/json' }, body: '{}' })
