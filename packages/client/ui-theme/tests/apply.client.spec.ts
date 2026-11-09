@@ -5,7 +5,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
-import { TestRemote, stubConfigForm } from '@deepseek-ai/dsh-client-test-runtime'
+import { TestRemote, stubConfigForm, StaticRemoteAccess } from '@deepseek-ai/dsh-client-test-runtime'
 import { apply as settingsApply, inject as settingsInject } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { apply, inject, SETTINGS_NS, ThemeRuntime } from '@deepseek-ai/dsh-client-ui-theme/client'
 import type { AppearanceRowInjected, FontSettingsInjected, ThemeSnapshot } from '@deepseek-ai/dsh-client-ui-theme/client'
@@ -54,6 +54,7 @@ async function bench(isLoopback = true) {
   })
   const events = new TestRemote(ctx, { settings: { describe, mutate } })
   events.$host = { home: undefined, isLoopback }
+  new StaticRemoteAccess(ctx)
   await ctx.plugin({ inject: [...settingsInject], apply: settingsApply }).await()
   return {
     ctx, slots: ctx.get('slots') as SlotRegistry, locale, describe, mutate, events,

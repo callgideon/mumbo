@@ -155,9 +155,10 @@ describe('Assembled viewer page global configuration privacy', () => {
     const forms = context.get('configForms')
     if (forms === undefined) throw new Error('assembled viewer page configuration forms did not activate')
     await act(async () => { await forms.describe().ensure() })
-    expect(relay.answers.filter(item => item.endpoint === 'settings/describe').length).toBeGreaterThan(0)
-    expect(forms.describe().getSnapshot().view).toBeUndefined()
-    expect(forms.describe().getSnapshot().error).toContain('settings/describe')
+    // The viewer's access snapshot omits `settings/describe`, so the page issues no settings read at all.
+    // The direct-caller loop below still proves the Owner Gateway refuses these endpoints through remote access.
+    expect(relay.answers.filter(item => item.endpoint === 'settings/describe')).toEqual([])
+    expect(forms.describe().getSnapshot()).toMatchObject({ status: 'idle', view: undefined, error: null })
 
     // Direct callers still cross the production viewer transport; absence of Settings UI is not enforcement.
     const connection = context.get('connection') as ConnectionHandle | undefined

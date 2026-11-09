@@ -69,7 +69,7 @@ function derivedScope(
   spec: { namespace: string; decode?: (section: unknown) => UiTestSettings | undefined } = { namespace: 'ui-test' },
 ) {
   const ctx = ctxWith(api)
-  const mirror = new SettingsDescribeMirror(ctx)
+  const mirror = new SettingsDescribeMirror(ctx, () => true)
   const scope = new ConfigFormController<UiTestSettings>(ctx, spec, mirror, settingsSchema)
   return { mirror, scope }
 }
@@ -238,7 +238,7 @@ describe('ConfigFormController', () => {
     const describeCall = vi.fn().mockResolvedValueOnce(described({ preference: 'system' }, 4))
     const mutate = vi.fn().mockResolvedValueOnce(ok(view({ preference: 'dark' }, 5)))
     const ctx = ctxWith({ describe: describeCall, mutate })
-    const mirror = new SettingsDescribeMirror(ctx)
+    const mirror = new SettingsDescribeMirror(ctx, () => true)
     const writer = new ConfigFormController<UiTestSettings>(ctx, { namespace: 'ui-test' }, mirror, settingsSchema)
     const sibling = new ConfigFormController<UiTestSettings>(ctx, { namespace: 'ui-test' }, mirror, settingsSchema)
     await mirror.load()
@@ -500,7 +500,7 @@ describe('ConfigFormController', () => {
 describe('ConfigForms.get', () => {
   it('shares accepted values and one write queue across consumers of the same entry', async () => {
     const describeCall = vi.fn().mockResolvedValue(described({ preference: 'dark' }, 1))
-    const mirror = new SettingsDescribeMirror(ctxWith({ describe: describeCall }))
+    const mirror = new SettingsDescribeMirror(ctxWith({ describe: describeCall }), () => true)
     const ctx = new Context()
     let theme!: ConfigForm<UiTestSettings>
     let locale!: ConfigForm<UiTestSettings>

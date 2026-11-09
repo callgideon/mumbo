@@ -60,7 +60,7 @@ async function harness(options: {
     mutate,
   } } } as never
   const schema = new SettingsSchemaService(new Context())
-  const mirror = new SettingsDescribeMirror(ctx)
+  const mirror = new SettingsDescribeMirror(ctx, () => true)
   const progress = new ConfigFormController(ctx, {
     namespace: DESKTOP_ONBOARDING_NAMESPACE,
     decode: value => OnboardingSettingsSchema(value as OnboardingSettings),

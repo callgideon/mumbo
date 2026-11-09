@@ -93,6 +93,9 @@ const PEER_REQUIRED_HOST_EXPORTS = {
   '@deepseek-ai/dsh-session-persistence': ['SessionPersistenceNotFoundError'],
   // Readers recognize a deadline's TimeoutReason only by `instanceof` against their own copy.
   '@deepseek-ai/dsh-timeout': ['deadline'],
+  // The edge-member Host half mints its notices with the message factory of the LLM package the agent loop
+  // admits them through.
+  '@deepseek-ai/dsh-llm': ['createUserMessage'],
 } as const satisfies HostDependencyExports
 
 /** Exact import specifier to reviewed runtime exports. */

@@ -25,7 +25,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-功能插件用本包存储与编辑自己的偏好设置，而无需重新实现传输层或 schema 处理。每个组合挂载一次即可；它注入 `remote` 服务及其 `settings` 命名空间，并持有浏览器中唯一的 `settings.describe` 读取方。
+功能插件用本包存储与编辑自己的偏好设置，而无需重新实现传输层或 schema 处理。每个组合挂载一次即可；它注入 `remote` 服务及其 `settings` 命名空间以及 `remoteAccess` 服务，并持有浏览器中唯一的 `settings.describe` 读取方。
 
 ### 配置表单
 
@@ -65,6 +65,8 @@ kind: "package-reference"
 ### Describe 镜像
 
 `ui-settings` 条目的 Host Config 声明默认开启的 `enabled` 偏好。Client 插件注入 `remote` 及其 `settings` 命名空间，并持有浏览器中唯一的 `settings.describe` 读取方：一面共享镜像，在每次转发的 `settings/document-updated` 事件与 `connection/reset` 时刷新（首次连接也包含在内，关闭「提交落在急切读取与 SSE 订阅之间」的窗口）。跨命名空间表面通过 `ctx.configForms.describe()` 读它，这是一个读取/折叠面（`getSnapshot`/`subscribe`/`ensure`，另有把写应答折入的 `acceptView`）。
+
+镜像只在页面的 `remoteAccess` 在全局资源上允许 `settings/describe` 时读取，owner 始终如此。不含该动作的页面（例如项目成员或分享查看者的页面）不发出 `settings.describe` 读取：镜像保持 `idle` 且没有错误，所有表单都保持未应答，`ensure()` 与失效通知都不发请求即结束。
 
 ### 共享条目写入
 

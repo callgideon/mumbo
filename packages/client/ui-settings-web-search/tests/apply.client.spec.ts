@@ -4,7 +4,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
-import { RemoteError, TestRemote } from '@deepseek-ai/dsh-client-test-runtime'
+import { RemoteError, TestRemote, StaticRemoteAccess } from '@deepseek-ai/dsh-client-test-runtime'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { apply as settingsApply, inject as settingsInject } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { apply, inject, NS } from '../src/client/index.ts'
@@ -17,7 +17,7 @@ function view(ns: string, revision = 0) {
 }
 
 /** @param served - namespaces the Host describes; omitted answers a failed read. */
-async function bench(served?: string[]) {
+async function bench(served?: string[], allows: (action: string) => boolean = () => true) {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
   const locale = new LocaleRuntime(ctx)
@@ -35,6 +35,7 @@ async function bench(served?: string[]) {
     settings: { describe: describeSettings },
     web: { listProviders },
   })
+  new StaticRemoteAccess(ctx, allows)
   await ctx.plugin({ inject: [...settingsInject], apply: settingsApply }).await()
   return { ctx, slots: ctx.get('slots') as SlotRegistry, describeCredentials, describeSettings, listProviders, remote }
 }
@@ -53,7 +54,7 @@ describe('ui-settings-web-search apply', () => {
   })
 
   it('declares the services it uses', () => {
-    expect(inject).toEqual(['slots', 'locale', 'remote', 'remote.credentials', 'remote.web', 'configForms'])
+    expect(inject).toEqual(['slots', 'locale', 'remote', 'remote.credentials', 'remote.web', 'configForms', 'remoteAccess'])
   })
 
   it('registers the page while the Host serves the web namespace, titled in the active locale', async () => {
@@ -69,6 +70,23 @@ describe('ui-settings-web-search apply', () => {
     expect(entry.locale).toBe(NS)
     const face = (entry.inject as () => Pick<WebSearchCardFace, 'hooks'>)()
     expect(Object.keys(face.hooks)).toEqual(['webSearchCard'])
+  })
+
+  it('reads no credential or provider and registers nothing while the page may not describe credentials', async () => {
+    const allows = vi.fn((action: string) => action !== 'credentials/describe')
+    const { ctx, slots, describeCredentials, describeSettings, listProviders, remote } = await bench(['web'], allows)
+    declareRoot(slots)
+    await ctx.plugin({ inject: [...inject], apply }).await()
+    await vi.waitFor(() => { expect(describeSettings).toHaveBeenCalled() })
+    remote.emit('credentials/reference-updated', ['DEEPSEEK_API_KEY'])
+    remote.emit('web/providers-changed', [])
+    ctx.emit('connection/reset')
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(allows).toHaveBeenCalledWith('credentials/describe')
+    expect(describeCredentials).not.toHaveBeenCalled()
+    expect(listProviders).not.toHaveBeenCalled()
+    expect(slots.entries('plugins.item')).toHaveLength(0)
   })
 
   it('registers nothing while the web namespace is not served', async () => {

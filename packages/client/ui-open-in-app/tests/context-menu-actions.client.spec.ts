@@ -46,7 +46,7 @@ async function boot() {
   const browserTab = vi.fn(() => ({}))
   const directoryFetch = vi.fn(async () => new Response(JSON.stringify({ apps: ['vscode', 'finder'] })))
   const directories = new OpenInAppController(directoryFetch)
-  const paths = new OpenInAppPathController(remote)
+  const paths = new OpenInAppPathController(remote, () => true)
   ctx.provide('remote', remote as never)
   ctx.provide('contextMenus', { register: registry.register.bind(registry), notify } as never)
   ctx.provide('sessions', { list: sessions } as never)

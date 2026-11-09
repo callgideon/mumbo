@@ -7,6 +7,8 @@ import type {} from '@deepseek-ai/dsh-api-remotes/client'
 // artifact into the Host graph (rationale beside the same pair in
 // config-form.ts).
 import type {} from '@deepseek-ai/dsh-api-remotes/types'
+// Type-only: pulls the remoteAccess service merge (ctx.remoteAccess).
+import type {} from '@deepseek-ai/dsh-api-remote-access/client'
 import type {} from '@deepseek-ai/dsh-settings/types'
 import { SettingsSchemaService } from './schema.ts'
 import { ConfigForms } from './config-form.ts'
@@ -25,10 +27,11 @@ export type {
 } from './settings-mirror.ts'
 
 /**
- * Required services: the Remote namespace the mirror reads through and the
- * forwarded settings invalidation it refreshes on.
+ * Required services: the Remote namespace the mirror reads through, the
+ * forwarded settings invalidation it refreshes on, and the access answer
+ * that decides whether this page reads the settings document at all.
  */
-export const inject = ['remote', 'remote.settings']
+export const inject = ['remote', 'remote.settings', 'remoteAccess']
 
 /** Provide shared forms and refresh them on document changes and reconnects.
  * @param ctx Client provider context.
@@ -37,18 +40,19 @@ export function apply(ctx: Context): void {
   const schema = new SettingsSchemaService(ctx)
   // Persistence policy: every authenticated browser persists through the Host document
   // (.agents/notes/implemented/bug-fix/2026-09-15-authenticated-browser-host-preferences.md).
-  const mirror = new SettingsDescribeMirror(ctx)
-  ctx.effect(() => {
-    const disposers = [
-      ctx.remote.$on('settings/document-updated', () => { void mirror.load() }),
-      ctx.on('connection/reset', () => { void mirror.load() }),
-    ]
+  // A page whose Peer may not call `settings/describe` reads nothing, so its forms stay unanswered.
+  let readable = false
+  const mirror = new SettingsDescribeMirror(ctx, () => readable)
+  ctx.remoteAccess.whenAccess('settings/describe', function* () {
+    readable = true
+    yield () => { readable = false }
+    yield ctx.remote.$on('settings/document-updated', () => { void mirror.load() })
+    yield ctx.on('connection/reset', () => { void mirror.load() })
     // The first connection also emits connection/reset, so startup normally
     // costs two reads (budgeted in startup-rpc-budget.e2e.ts). The in-flight
     // fold does not merge them into one; it guarantees at most one pending
     // read at a time and that no invalidation arriving mid-read is lost.
     void mirror.ensure()
-    return () => { for (const dispose of disposers) dispose() }
-  }, 'ui-settings: describe mirror invalidations')
+  })
   new ConfigForms(ctx, { mirror, schema })
 }

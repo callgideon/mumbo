@@ -3561,7 +3561,7 @@ SHA-256: `2462bd6ea3401bc4e63f86dca931574941084459c7ae93b650b3db9ec3cfcaac`
 
 SHA-256: `de5b34128b6ab550240b161e9b56b872c93ccb9358818642304bcaa82f8ab1d9`
 
-来源：[`packages/mumbo/edge-member/src/index.ts:33`](../packages/mumbo/edge-member/src/index.ts)
+来源：[`packages/mumbo/edge-member/src/index.ts:34`](../packages/mumbo/edge-member/src/index.ts)
 
 | 属性 | 存在性 | 类型 |
 |---|---|---|

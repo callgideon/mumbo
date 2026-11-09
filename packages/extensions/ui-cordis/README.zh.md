@@ -41,6 +41,8 @@ kind: "package-reference"
 
 定义仅存在于进程内：刷新后的页面手上什么都没有，直到有人再次运行某个包；面板在每次公告时重读清单。审批按设计是框架级的，所以某个标签页里的人可以批准模型为另一个标签页正在看的会话所发起的 run；首个应答生效，其余收敛。
 
+面板与所有清单读取只在页面的 Peer 可以调用 `dynamicCordisRunner/inventory` 时存在。不含该动作的页面（例如项目成员的页面）不显示面板，也不读取清单；其对话记录仍渲染 Cordis 工具卡片。
+
 -----
 
 <a id="understand-the-implementation"></a>

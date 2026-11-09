@@ -6,7 +6,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { apply as settingsApply, inject as settingsInject } from '@deepseek-ai/dsh-client-ui-settings/client'
-import { TestRemote } from '@deepseek-ai/dsh-client-test-runtime'
+import { TestRemote, StaticRemoteAccess } from '@deepseek-ai/dsh-client-test-runtime'
 import {
   apply, inject, SETTINGS_NS,
 } from '@deepseek-ai/dsh-client-locale/client'
@@ -40,6 +40,7 @@ async function bench(preference?: string) {
     return { ok: true as const, value: namespace() }
   })
   const events = new TestRemote(ctx, { settings: { describe, mutate } })
+  new StaticRemoteAccess(ctx)
   await ctx.plugin({ inject: [...settingsInject], apply: settingsApply }).await()
   return {
     ctx, slots: ctx.get('slots') as SlotRegistry, describe, mutate, events,

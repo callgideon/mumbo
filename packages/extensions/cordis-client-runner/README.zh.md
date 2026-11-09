@@ -39,6 +39,8 @@ kind: "package-reference"
 
 装载是幂等的：要求装载这一页已在运行的 revision 不会改变任何东西，更新的 revision 顶替已装载的那个，同一 revision 在 retract 之后再装则重新装载。同一定义的操作串行执行。刷新按设计从干净状态开始——host 仍持有定义，本页在再次被要求之前不运行它。
 
+页面只在其 Peer 可以调用 `dynamicCordisRunner/syncInspectManifest` 时向 host 发布客户端 Inspect Provider，并在每次重连后重新发布；不含该动作的页面（例如项目成员的页面）不发布。
+
 -----
 
 <a id="understand-the-implementation"></a>

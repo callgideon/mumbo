@@ -27,6 +27,8 @@ kind: "package-reference"
 
 把本插件与 [`dsh-host-open-in-app`](../../host/open-in-app/README.zh.md) 并排挂载到 Web 组合；本行不接受配置。会话目录已知且至少有一个已安装、已本地化的目录应用时，显示在应用中打开子菜单。Host 通过 `session.canOpenWorkspacePath` 报告桌面可用时，[`ui-sidebar-documentpreview`](../ui-sidebar-documentpreview/README.zh.md) 的文档预览显示文件控件；删除本行会移除其全部控件与菜单贡献。
 
+应用探测、图标与启动所用的 HTTP open-in-app 路由位于 Gateway 之外且只应答 owner，因此没有访问应答指向它们。插件以 `session/openWorkspacePath`（在 Host 应用中打开 Host 路径的 Remote 动作）作为这些路由的代理：页面的 Peer 不能调用它时（例如项目成员的页面），插件不探测应用、不读取桌面或文件关联，也不提供打开入口。
+
 头部入口使用 [`ui-conversation`](../ui-conversation/README.zh.md) 持有的更多按钮，由 [`ui-context-menu`](../ui-context-menu/README.zh.md) 提供共享按钮行为。未挂载导出插件时，在应用中打开仍可通过该入口使用；本包提供菜单项，而不创建自己的头部按钮。
 
 ### 预期行为

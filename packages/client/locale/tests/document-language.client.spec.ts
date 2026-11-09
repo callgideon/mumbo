@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { apply as settingsApply, inject as settingsInject } from '@deepseek-ai/dsh-client-ui-settings/client'
-import { TestRemote } from '@deepseek-ai/dsh-client-test-runtime'
+import { TestRemote, StaticRemoteAccess } from '@deepseek-ai/dsh-client-test-runtime'
 import { apply, inject } from '@deepseek-ai/dsh-client-locale/client'
 import type { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { LOCALE_SETTINGS_NAMESPACE, LocaleSettingsSchema } from '../src/locale-settings.ts'
@@ -42,6 +42,7 @@ async function bench(preference?: string) {
   })
   // The settings transport and the forwarded-event port the plugin injects.
   new TestRemote(ctx, { settings: { describe: describeRpc, mutate } })
+  new StaticRemoteAccess(ctx)
   await ctx.plugin({ inject: [...settingsInject], apply: settingsApply }).await()
   await ctx.plugin({ inject: [...inject], apply }).await()
   return { ctx, locale: ctx.get('locale') as LocaleRuntime }

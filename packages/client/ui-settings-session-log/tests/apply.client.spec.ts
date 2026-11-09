@@ -2,7 +2,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import { expect, it, vi } from 'vitest'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
-import { TestRemote } from '@deepseek-ai/dsh-client-test-runtime'
+import { TestRemote, StaticRemoteAccess } from '@deepseek-ai/dsh-client-test-runtime'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { apply as settingsApply, inject as settingsInject } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { apply, inject } from '../src/client/index.ts'
@@ -20,6 +20,7 @@ it('adds the last General row only while served and removes all contributions on
       namespaces: [] as { ns: string; schema: object; value: object; applies: 'live'; secrets: never[]; revision: number }[],
     } }))
     const remote = new TestRemote(ctx, { settings: { describe } })
+    new StaticRemoteAccess(ctx)
     await ctx.plugin({ inject: [...settingsInject], apply: settingsApply }).await()
     const slots = ctx.get('slots') as SlotRegistry
     slots.register({ name: 'root', children: {

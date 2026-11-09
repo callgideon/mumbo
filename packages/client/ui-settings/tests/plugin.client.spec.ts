@@ -2,7 +2,7 @@ import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { SettingsNamespaceView } from '@deepseek-ai/dsh-api-remotes/client'
-import { TestRemote } from '@deepseek-ai/dsh-client-test-runtime'
+import { StaticRemoteAccess, TestRemote } from '@deepseek-ai/dsh-client-test-runtime'
 import { apply, inject } from '../src/client/index.ts'
 import { SettingsSchemaService } from '../src/client/schema.ts'
 import { ConfigForms } from '../src/client/config-form.ts'
@@ -22,10 +22,11 @@ function described(preference: string, revision: number) {
   return { ok: true as const, value: { writable: true, hasDocument: true, namespaces: [namespace] } }
 }
 
-function bench() {
+function bench(allows: (action: string) => boolean = () => true) {
   const describeCall = vi.fn().mockResolvedValue(described('light', 0))
   const ctx = new Context()
   onTestFinished(() => ctx.fiber.dispose())
+  new StaticRemoteAccess(ctx, allows)
   const remote = new TestRemote(ctx, { settings: { describe: describeCall } })
   remote.$host = { home: undefined, isLoopback: false }
   return { ctx, describeCall, remote, fiber: ctx.plugin({ inject: [...inject], apply }) }
@@ -58,6 +59,21 @@ describe('settings domain base plugin', () => {
     await vi.waitFor(() => {
       expect(scope.getSnapshot()).toMatchObject({ value: { preference: 'system' }, revision: 2 })
     })
+  })
+
+  it('reads no settings document on a page that may not describe it', async () => {
+    const allows = vi.fn((action: string) => action !== 'settings/describe')
+    const { ctx, describeCall, remote, fiber } = bench(allows)
+    await fiber.await()
+    expect(allows).toHaveBeenCalledWith('settings/describe')
+    const scope = ctx.configForms.get<{ preference: string }>('ui-test')
+    await ctx.configForms.describe().ensure()
+    remote.emit('settings/document-updated', ['ui-test', 1])
+    ctx.emit('connection/reset')
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(describeCall).not.toHaveBeenCalled()
+    expect(ctx.configForms.describe().getSnapshot()).toMatchObject({ status: 'idle', view: undefined, error: null })
+    expect(scope.getSnapshot().status).not.toBe('ready')
   })
 
   it('fiber disposal retires the service and its invalidation subscriptions', async () => {

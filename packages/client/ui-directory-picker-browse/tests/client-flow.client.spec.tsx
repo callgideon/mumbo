@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import type { DirectoryListing } from '@deepseek-ai/dsh-api-remotes/client'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
-import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
+import { StaticRemoteAccess, usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import type { DirectoryFlowOwnerProps } from '@deepseek-ai/dsh-client-ui-workspace/client'
 import { apply, inject } from '../src/client/index.ts'
 import { BrowseDirectoryFlow } from '../src/client/flow.ts'
@@ -28,10 +28,11 @@ const homeListing: DirectoryListing = {
   truncated: false,
 }
 
-async function bench() {
+async function bench(allows: (action: string) => boolean = () => true) {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
   ctx.provide('locale', new LocaleRuntime(ctx))
+  new StaticRemoteAccess(ctx, allows)
   const listDirectory = vi.fn(async (): Promise<DirectoryListing> => homeListing)
   const createDirectory = vi.fn(async (path: string, name: string) => `${path}/${name}`)
   ctx.provide('uiWorkspace', { listDirectory, createDirectory } as never)
@@ -53,7 +54,17 @@ function owner(overrides: Partial<DirectoryFlowOwnerProps> = {}): DirectoryFlowO
 
 describe('directory-picker-browse client half', () => {
   it('declares the services it drives', () => {
-    expect(inject).toEqual(['slots', 'uiWorkspace', 'locale'])
+    expect(inject).toEqual(['slots', 'uiWorkspace', 'locale', 'remoteAccess'])
+  })
+
+  it('fills no directory flow while the current Peer may not list Host directories', async () => {
+    const allows = vi.fn(() => false)
+    const b = await bench(allows)
+    b.declare()
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+    expect(allows).toHaveBeenCalledWith('directoryPicker/list')
+    for (const hole of HOLES) expect(b.slots.entries(hole)).toEqual([])
+    expect(b.listDirectory).not.toHaveBeenCalled()
   })
 
   it('fills both directory-flow holes for declarations before or after apply, and leaves with its fiber', async () => {

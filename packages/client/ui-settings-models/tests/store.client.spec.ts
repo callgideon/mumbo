@@ -158,7 +158,7 @@ function api(overrides: {
   }
   // The page plugin's context, scripted down to the namespaces it reaches.
   const ctx = { remote: face } as never
-  return { ctx, face, mirror: new SettingsDescribeMirror(ctx), seenRefs }
+  return { ctx, face, mirror: new SettingsDescribeMirror(ctx, () => true), seenRefs }
 }
 
 describe('ModelsSettingsStore', () => {

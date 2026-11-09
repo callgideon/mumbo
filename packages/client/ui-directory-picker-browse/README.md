@@ -31,6 +31,8 @@ Mount this plugin alongside `ui-workspace` and the host backend [`dsh-host-direc
 
 Step through folders, edit the path directly, or filter the last pane by prefix; a Host-flagged hidden entry stays hidden until the footer toggle reveals it. **New folder** opens a nested create dialog targeting the selected folder and selects what it creates; **Open** adopts the selected folder, falling back to the listed level. Confirming a directory is the picked path; dismissing the dialog is the cancellation.
 
+Access: both directory flows are registered only while the current Peer may call `directoryPicker/list`, so a page that may not browse Host directories offers no way to add a Workspace. The owner always has access.
+
 -----
 
 <a id="understand-the-implementation"></a>

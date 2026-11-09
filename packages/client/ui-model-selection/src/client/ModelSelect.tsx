@@ -56,15 +56,18 @@ interface EffortChoice {
 
 /**
  * Render the composer model seat.
- * @param props - owner share (locked) + injected face (shared directory
- * store/verbs) + the standard locale seat.
+ * @param props - owner share (locked), the Session access Hook, injected face
+ * (shared directory store/verbs), and the standard locale seat.
  * @returns the trigger and, while open, the two-level menu.
  */
 export function ModelSelect(
-  { locked, available, directory, load, select, resolveText, t, renderSlot }:
-  ModelSelectInjected & Pick<PropsRuntime<'conversation.input.model'>, 'locked'> & PropsLocale<'model'>
+  { locked, useAccess, available, directory, load, select, resolveText, t, renderSlot }:
+  ModelSelectInjected & Pick<PropsRuntime<'conversation.input.model'>, 'locked' | 'useAccess'> & PropsLocale<'model'>
     & Omit<PropsRenderSlots<'conversation.input.model.label' | 'conversation.input.model.options'>, 'SessionProvider'>,
 ) {
+  // A page that may not select this Session's model still reads it: the trigger stays focusable and
+  // announced, but opens no menu and claims none.
+  const readOnly = !useAccess('session/selectModel')
   const state = useSyncExternalStore(
     fn => directory.subscribe(fn),
     () => directory.getSnapshot(),
@@ -405,6 +408,11 @@ export function ModelSelect(
       : effortLabel === undefined
         ? t('trigger.aria', { model: modelLabel })
         : t('trigger.ariaEffort', { model: modelLabel, effort: effortLabel })
+  const readOnlyAria = currentChoice === undefined
+    ? modelLabel
+    : effortLabel === undefined
+      ? t('trigger.readOnlyAria', { model: modelLabel })
+      : t('trigger.readOnlyAriaEffort', { model: modelLabel, effort: effortLabel })
   const renderModelLabel = (
     provider: ModelLabelOwner['provider'], model: ModelLabelOwner['model'],
     placement: ModelLabelOwner['placement'], selected: boolean,
@@ -446,16 +454,19 @@ export function ModelSelect(
         type="button"
         className={css.trigger}
         style={anchorStyle}
-        aria-label={triggerAria}
-        aria-haspopup="menu"
-        aria-expanded={open}
+        aria-label={readOnly ? readOnlyAria : triggerAria}
+        aria-haspopup={readOnly ? undefined : 'menu'}
+        aria-expanded={readOnly ? undefined : open}
         aria-controls={open ? `${id}-menu` : undefined}
+        aria-disabled={readOnly || undefined}
         title={triggerLabel}
         aria-busy={busy}
         data-selection-focus={selectionFocus ? '' : undefined}
+        data-read-only={readOnly ? '' : undefined}
         onBlur={() => { setSelectionFocus(false) }}
         disabled={locked}
         onClick={() => {
+          if (readOnly) return
           if (open) {
             close(true)
           } else {
@@ -470,7 +481,7 @@ export function ModelSelect(
         {effortLabel !== undefined && <span className={css.triggerEffort}>{effortLabel}</span>}
         {busy
           ? <StateDot state="ongoing" />
-          : <IconChevronDownOutlineRegular className={clsx(css.chevron, open && css.chevronOpen)} />}
+          : !readOnly && <IconChevronDownOutlineRegular className={clsx(css.chevron, open && css.chevronOpen)} />}
       </button>
 
       {/* Portaled to body (Menu primitive's portal mode) so the sidebar and

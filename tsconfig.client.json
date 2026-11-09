@@ -36,8 +36,10 @@
     "packages/*/*/tests/**/*.client.spec.tsx",
     "packages/*/*/tests/**/*.client.tsx",
     "packages/*/*/tests/**/*.client.ts",
-    // Client package outside packages/client with a local CSS module face.
+    // Client packages outside packages/client with a local CSS module face.
     "packages/extensions/ui-cordis/src/css-modules.d.ts",
+    "packages/mumbo/box-links/src/css-modules.d.ts",
+    "packages/mumbo/edge-member/src/css-modules.d.ts",
     "packages/client/tsdown.client.ts",
     "scripts/client-build-environment.ts",
     "scripts/shipped-locales.ts",
@@ -92,6 +94,7 @@
     { "path": "./packages/experimental/inspector/tsconfig.client.json" },
     { "path": "./packages/experimental/liveshare-protocol/tsconfig.client.json" },
     { "path": "./packages/experimental/liveshare/tsconfig.client.json" },
+    { "path": "./packages/mumbo/edge-member/tsconfig.client.json" },
     { "path": "./packages/experimental/session-inspector" },
     { "path": "./packages/experimental/client-ui-forge/tsconfig.client.json" },
     { "path": "./packages/client/hmr" },

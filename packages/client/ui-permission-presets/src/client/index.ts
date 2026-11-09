@@ -32,6 +32,8 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 // Type-only: pulls the ctx.remote merge and the forwarded-event key face
 // (the settings invalidation rides the allowlist) into this program.
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
+// Type-only: pulls the remoteAccess service merge (ctx.remoteAccess).
+import type {} from '@deepseek-ai/dsh-api-remote-access/client'
 import type { CommandUiContract, SelectOption } from '@deepseek-ai/dsh-client-ui-commands/client'
 import type { ClientSessionContext } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
@@ -59,7 +61,7 @@ export type {
 export const inject = [
   'commandUi', 'connection', 'sessions', 'slots', 'locale', 'remote',
   'remote.permissionPresets', 'remote.settings',
-  'configForms', 'settingsSchema',
+  'configForms', 'settingsSchema', 'remoteAccess',
 ]
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -141,62 +143,62 @@ export function apply(ctx: ClientContext): void {
     return true
   }
 
-  const catalog = new PermissionCatalogDirectory(ctx)
-  ctx.effect(() => () => { catalog.dispose() }, 'ui-permission: process catalog directory')
-  ctx.effect(
+  ctx.effect(() => ctx.locale.register('settings.permission', { zh, en, ja, es, fr, de, ru, pt }), 'ui-permission: settings row dictionaries')
+
+  // Every surface below lists the process catalog, so a page that may not read it offers none of them.
+  ctx.remoteAccess.whenAccess('permissionPresets/catalog', function* () {
+    const catalog = new PermissionCatalogDirectory(ctx)
+    yield () => { catalog.dispose() }
     // Only an invalidation makes displayed options stale; publishing the result
     // of a read a displayed picker waits for must leave it open with its failure
     // and retry state intact.
-    () => catalog.invalidations.subscribe(() => { command.dismiss('permission') }),
-    'ui-permission: dismiss stale slash choices',
-  )
+    yield catalog.invalidations.subscribe(() => { command.dismiss('permission') })
 
-  ctx.effect(() => ctx.locale.register('settings.permission', { zh, en, ja, es, fr, de, ru, pt }), 'ui-permission: settings row dictionaries')
+    // The shared ConfigForm mirror updates after document commits and reconnects.
+    const controller = new PermissionPresetSettingsController(
+      ctx.configForms.describe(), ctx, catalog)
+    const load = (): Promise<void> => controller.load()
+    const select = (preset: string): Promise<void> => controller.select(preset)
+    const injected = (): PermissionRowInjected => ({
+      hooks: { permission: controller.store },
+      load,
+      select,
+    })
 
-  // The shared ConfigForm mirror updates after document commits and reconnects.
-  const controller = new PermissionPresetSettingsController(
-    ctx.configForms.describe(), ctx, catalog)
-  const load = (): Promise<void> => controller.load()
-  const select = (preset: string): Promise<void> => controller.select(preset)
-  const injected = (): PermissionRowInjected => ({
-    hooks: { permission: controller.store },
-    load,
-    select,
-  })
+    yield () => { controller.dispose() }
 
-  ctx.effect(() => () => { controller.dispose() }, 'ui-permission: settings row directory')
+    yield ctx.slots.inject('settings.general.item', () => ctx.slots.register({
+      name: 'settings.general.item',
+      id: 'permission',
+      order: -20,
+      locale: 'settings.permission',
+      inject: injected,
+    }, PermissionRow))
 
-  ctx.slots.inject('settings.general.item', () => ctx.slots.register({
-    name: 'settings.general.item',
-    id: 'permission',
-    order: -20,
-    locale: 'settings.permission',
-    inject: injected,
-  }, PermissionRow))
+    yield ctx.slots.inject('conversation.input.permission', () => ctx.slots.register({
+      name: 'conversation.input.permission',
+      locale: PERMISSION_ACCESS_NS,
+      inject: (sessionId: SessionId): PermissionSelectInjected => ({
+        hooks: { permissionCatalog: catalog.store },
+        select: preset => submit(sessionId, preset),
+      }),
+    }, PermissionSelect))
 
-  ctx.slots.inject('conversation.input.permission', () => ctx.slots.register({
-    name: 'conversation.input.permission',
-    locale: PERMISSION_ACCESS_NS,
-    inject: (sessionId: SessionId): PermissionSelectInjected => ({
-      hooks: { permissionCatalog: catalog.store },
-      select: preset => submit(sessionId, preset),
-    }),
-  }, PermissionSelect))
-
-  ctx.effect(() => command.decorate({
-    name: 'permission',
-    // The Session's current value alone decides availability. A missing catalog
-    // surfaces through `options()`, which keeps the picker's own retry entry
-    // reachable after a failed read instead of hiding the command.
-    available: session => selectionOf(sessionFor(session)) !== undefined,
-    ui: {
-      kind: 'popupSelect',
-      options: async (session) => {
-        const selection = selectionOf(sessionFor(session))
-        if (selection === undefined) throw new Error('permission presets are not available on this host')
-        return optionsOf(await catalog.load(), selection.currentValue, t)
+    yield command.decorate({
+      name: 'permission',
+      // The Session's current value alone decides availability. A missing catalog
+      // surfaces through `options()`, which keeps the picker's own retry entry
+      // reachable after a failed read instead of hiding the command.
+      available: session => selectionOf(sessionFor(session)) !== undefined,
+      ui: {
+        kind: 'popupSelect',
+        options: async (session) => {
+          const selection = selectionOf(sessionFor(session))
+          if (selection === undefined) throw new Error('permission presets are not available on this host')
+          return optionsOf(await catalog.load(), selection.currentValue, t)
+        },
+        onSelect: (option, session) => submit(session.sessionId, option.id).then(() => undefined),
       },
-      onSelect: (option, session) => submit(session.sessionId, option.id).then(() => undefined),
-    },
-  }), 'ui-permission: /permission decoration')
+    })
+  })
 }

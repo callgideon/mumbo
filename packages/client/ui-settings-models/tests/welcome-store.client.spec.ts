@@ -3,7 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { SettingsSchemaService } from '@deepseek-ai/dsh-client-ui-settings/src/client/schema.ts'
 import { SettingsDescribeMirror } from '@deepseek-ai/dsh-client-ui-settings/src/client/settings-mirror.ts'
 import { ConfigFormController } from '@deepseek-ai/dsh-client-ui-settings/src/client/config-form.ts'
-import { RemoteError, TestRemote } from '@deepseek-ai/dsh-client-test-runtime'
+import { RemoteError, StaticRemoteAccess, TestRemote } from '@deepseek-ai/dsh-client-test-runtime'
 import { apply as applySettings, inject as settingsInject } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { decodeWelcomeSection, WelcomeNoticeStore, type WelcomeSection } from '../src/client/welcome-store.ts'
 import {
@@ -44,7 +44,7 @@ function buildWelcome(
   api: { describe?: ReturnType<typeof vi.fn>; mutate?: ReturnType<typeof vi.fn> },
 ) {
   const ctx = { remote: { settings: api } } as never
-  const mirror = new SettingsDescribeMirror(ctx)
+  const mirror = new SettingsDescribeMirror(ctx, () => true)
   const scope = new ConfigFormController(
     ctx,
     { namespace: WELCOME_NOTICE_SETTINGS_NAMESPACE, decode: decodeWelcomeSection },
@@ -104,6 +104,7 @@ describe('WelcomeNoticeStore', () => {
         }),
       },
     })
+    new StaticRemoteAccess(ctx)
     const plugin = { inject: [...settingsInject], apply: applySettings }
     let controller: WelcomeNoticeStore | undefined
     try {

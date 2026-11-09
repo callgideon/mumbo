@@ -32,7 +32,7 @@
 }
 
 @media (hover: hover) {
-  .trigger:hover:not(:disabled) {
+  .trigger:hover:not(:disabled):not([data-read-only]) {
     background: var(--dsw-alias-interactive-bg-hover);
   }
 }
@@ -43,6 +43,13 @@
 
 .trigger:disabled {
   color: var(--dsw-alias-label-dimmed);
+  cursor: default;
+}
+
+/* A page that may not select the model states it: no chevron, symmetric inset, no hover fill.
+   It keeps the usual ink; a locked Session still dims it through :disabled. */
+.trigger[data-read-only] {
+  padding-right: 8px;
   cursor: default;
 }
 

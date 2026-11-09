@@ -28,6 +28,9 @@
     },
     {
       "path": "../ui-workspace"
+    },
+    {
+      "path": "../../api/remote-access/tsconfig.client.json"
     }
   ]
 }
