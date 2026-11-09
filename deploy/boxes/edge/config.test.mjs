@@ -56,3 +56,9 @@ test('the agent is the mumbo-bot App\'s bot user: GITHUB_AGENT_ID is its numeric
   for (const vars of [{ GITHUB_AGENT_LOGIN: 'mumbo-bot[bot]' }, { GITHUB_AGENT_ID: '341797844' }]) assert.throws(() => configWith(vars), /set GITHUB_AGENT_ID and GITHUB_AGENT_LOGIN together/, JSON.stringify(vars))
   for (const id of ['abc', '0', '-1', '1.5', '1e3', ' 1', '12345678901234567']) assert.throws(() => configWith({ GITHUB_AGENT_LOGIN: 'mumbo-bot[bot]', GITHUB_AGENT_ID: id }), /GITHUB_AGENT_ID must be a numeric GitHub user id/, id)
 })
+
+test('PAGE_AFTER_MS: default 3000, and a value below 1000 or not a number stops the edge', () => {
+  assert.equal(configWith().pageAfterMs, 3000)
+  assert.equal(configWith({ PAGE_AFTER_MS: '5000' }).pageAfterMs, 5000)
+  for (const bad of ['999', 'soon', '-1', 'Infinity', '']) assert.throws(() => configWith({ PAGE_AFTER_MS: bad }), /PAGE_AFTER_MS/, bad)
+})
