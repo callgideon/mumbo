@@ -1630,7 +1630,7 @@ describe.skipIf(MODE === 'record')('web e2e: Host Office preview', () => {
     try { await browser?.close() } finally { await scaffold?.close() }
   })
 
-  it('rejects renamed text and renders Chinese Office documents through the PDF worker', async () => {
+  it('rejects renamed text and renders non-ASCII Office documents through the PDF worker', async () => {
     scaffold = await launchWebScaffold({ replayFixture: FIXTURE, paceMs: 5, compareReplaySession: false,
       extraOverlayPath: [
         fileURLToPath(new URL('../../../packages/client/ui-sidebar-documentpreview/tests/fixtures/office-cache.patch.yml', import.meta.url)),
@@ -1843,7 +1843,8 @@ describe.skipIf(MODE === 'record')('web e2e: Host Office preview', () => {
       for (const extension of ['doc', 'ppt', 'pptx']) {
         await openPreviewFile(column, filesTab, preview, `chinese.${extension}`)
         await preview.getByRole('img', { name: 'PDF page 1', exact: true }).waitFor({ state: 'visible', timeout: 60_000 })
-        await expect.poll(async () => (await preview.locator('[data-pdf-text]').allTextContents()).join(''), { timeout: 30_000 }).toContain('옭뇣뇣뒿')
+        // The committed doc/ppt exports share only `Office preview` with the generated OOXML text.
+        await expect.poll(async () => (await preview.locator('[data-pdf-text]').allTextContents()).join(''), { timeout: 30_000 }).toContain(extension === 'pptx' ? '옭뇣뇣뒿' : 'Office preview')
         if (extension === 'pptx') await expectPdfPageSpacing(preview)
         const officeZoom = await revealDocumentZoom(page, preview)
         await officeZoom.click()

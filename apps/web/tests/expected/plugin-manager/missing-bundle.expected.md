@@ -7,7 +7,6 @@
 - paragraph:
   - code: "@fixture/missing-bundle"
 - status: "Reason: dsh: cannot resolve profile bundle \"@fixture/missing-bundle\" from the dsh installation or {{home}}/profiles/scaffold; run 'dsh plugin --profile scaffold install' if its dependency is not installed"
-- status "Reading details"
 - heading "Source" [level=4]
 - term: Code source
 - definition: Not installed

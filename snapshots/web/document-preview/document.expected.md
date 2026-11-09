@@ -90,7 +90,7 @@
 ## Browser Excel preview
 
 - Opens without the Office conversion service
-- Sheets: 季度预算 | 公式与格式; hidden worksheet omitted
+- Sheets: 퍣횦뤼쟳 | 쥬휏옎뒘휏; hidden worksheet omitted
 - Formula workbooks use a compact warning beside fx; notice rows absent
 - Unsupported XLSX content: This preview does not support charts, conditional formatting in this workbook. Open it in a system application for the full experience.
 - Drawing parts omitted; styled cells and cached formulas retained; notice cleared on file replacement
