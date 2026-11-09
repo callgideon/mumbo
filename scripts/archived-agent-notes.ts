@@ -44,22 +44,36 @@ export function renderArchiveManifest(files: Readonly<Record<string, string>>): 
   }, null, 2)}\n`
 }
 
-/**
- * Whether a baseline still seals Chinese translation or pairing-record files.
- * Such a baseline predates the English-only archive, which removed those files
- * and the language switcher from every archived note; that removal replaces the
- * baseline once, after which every seal is append-only again.
- */
-function sealsBilingualArchive(baseline: ArchiveManifest): boolean {
-  return Object.keys(baseline.files).some(path => path.endsWith('.zh.md') || path.endsWith('.i18n.yaml'))
+function isBilingualOnly(path: string): boolean {
+  return path.endsWith('.zh.md') || path.endsWith('.i18n.yaml')
 }
 
-/** Reject a removed or changed seal, except for the one-time English-only replacement of a bilingual baseline. */
+/**
+ * Digest of the English-only archive's replacement of the last bilingual
+ * baseline: it removed every Chinese and pairing-record seal and three
+ * translation-process notes, and resealed the other English notes without the
+ * language switcher. A bilingual baseline accepts exactly this replacement;
+ * after it, every seal is append-only again.
+ */
+const ENGLISH_ONLY_REPLACEMENT = 'sha256:8308d72743c8e9d804bc3ffe879988ce147cd7de7877232fa03ab037e3777f8c'
+
+/** Hash each English baseline path with its old seal and its current seal, or `removed`. */
+function englishOnlyReplacementDigest(baseline: ArchiveManifest, current: ArchiveManifest): string {
+  const seals = Object.keys(baseline.files).filter(path => !isBilingualOnly(path)).sort()
+    .map(path => `${path} ${baseline.files[path]} ${current.files[path] ?? 'removed'}\n`)
+  return archiveContentHash(Buffer.from(seals.join('')))
+}
+
+/** Reject a removed or changed seal, except for the pinned English-only replacement of a bilingual baseline. */
 export function validateArchiveManifestExtension(
   baseline: ArchiveManifest,
   current: ArchiveManifest,
 ): string[] {
-  if (sealsBilingualArchive(baseline)) return []
+  if (Object.keys(baseline.files).some(isBilingualOnly)) {
+    return englishOnlyReplacementDigest(baseline, current) === ENGLISH_ONLY_REPLACEMENT ? [] : [
+      'archived/manifest.json: a baseline that seals Chinese files accepts only the recorded English-only replacement; base the change on the English-only archive',
+    ]
+  }
   const errors: string[] = []
   for (const [path, expected] of Object.entries(baseline.files)) {
     const actual = current.files[path]

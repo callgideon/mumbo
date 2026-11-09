@@ -16,7 +16,7 @@ function row(label: string, value: string): string { return `| ${label} | ${valu
 function link(url: string, label = url): string { return `<a href="${text(url)}">${text(label)}</a>` }
 
 /**
- * Render Chinese approval details after package, destination and signature verification succeeds.
+ * Render approval details after package, destination and signature verification succeeds.
  * @param source Verified retained packaging identity; a test plan requires its validated release ID.
  * @param plan Validated upload plan; YAML contents are the bytes that will be uploaded.
  * @param approval Digest bound to the approved manifest and upload plan.

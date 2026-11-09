@@ -91,14 +91,16 @@ describe('archived Agent Notes', () => {
     )
   })
 
-  it('replaces a baseline that still seals bilingual files once', () => {
+  it('replaces a baseline that still seals bilingual files only with the recorded English-only archive', () => {
     const hash = (digit: string): string => `sha256:${digit.repeat(64)}`
     const bilingual: ArchiveManifest = {
       version: 1,
       files: { 'process/a.md': hash('1'), 'process/a.zh.md': hash('2'), 'process/a.i18n.yaml': hash('3') },
     }
     const english: ArchiveManifest = { version: 1, files: { 'process/a.md': hash('4') } }
-    expect(validateArchiveManifestExtension(bilingual, english)).toEqual([])
+    expect(validateArchiveManifestExtension(bilingual, english)).toEqual([
+      'archived/manifest.json: a baseline that seals Chinese files accepts only the recorded English-only replacement; base the change on the English-only archive',
+    ])
     expect(validateArchiveManifestExtension(english, { version: 1, files: { 'process/a.md': hash('5') } })).toEqual([
       'process/a.md: sealed manifest hash changed',
     ])

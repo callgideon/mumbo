@@ -416,7 +416,7 @@ describe('LocaleRuntime', () => {
     expect(svc.getLocale().locales).toEqual([{ id: 'en', label: 'English' }])
   })
 
-  it('resolves a stored or browser language without a registered definition, such as zh, to English', () => {
+  it('resolves a stored and browser language without a registered definition, such as zh, to English', () => {
     stubLanguages('zh-CN', 'zh-TW')
     const host = stubConfigForm<LocaleSettings>()
     const { svc } = make(host)
@@ -428,5 +428,14 @@ describe('LocaleRuntime', () => {
     expect(svc.bind('settings.locale')('language.title')).toBe(en['language.title'])
     expect(host.set).not.toHaveBeenCalled()
     expect(() => { svc.setLocale('zh') }).toThrow('not registered')
+  })
+
+  it('opens a stored language without a registered definition in the first registered browser language', () => {
+    stubLanguages('zh-CN', 'de-DE')
+    const host = stubConfigForm<LocaleSettings>()
+    const { svc } = make(host)
+    host.publish({ status: 'ready', value: { preference: 'zh' }, revision: 1, writable: true })
+    expect(svc.getLocale().active).toBe('de')
+    expect(host.set).not.toHaveBeenCalled()
   })
 })

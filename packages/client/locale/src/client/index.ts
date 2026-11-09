@@ -102,8 +102,9 @@ declare module '@deepseek-ai/cordis' {
  * English is both the locale the UI opens in when the browser names no registered
  * language (and for non-browser runs), and the dictionary consulted after the
  * active locale misses a key. English dictionaries define every namespace's key
- * set, so the fallback never leaves a key unresolved. A stored or browser
- * language without a registered definition also resolves here.
+ * set, so the fallback never leaves a key unresolved. A stored language without
+ * a registered definition opens in the browser-derived locale, which is English
+ * only when the browser names no registered language.
  */
 export const FALLBACK_LOCALE: BuiltInLocaleId = 'en'
 
