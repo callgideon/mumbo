@@ -612,12 +612,19 @@ export const boxFetcher = (cfg) => (target, siteHost, path, { method = 'GET', he
   req.on('error', reject)
   req.end(body)
 })
+/** A Set-Cookie line's cookie name, trimmed: the text before the first `=` of its name=value pair. '' when the pair has
+ *  no name or no `=`: a browser stores that cookie nameless and sends its bare value (RFC 6265bis), so the value of
+ *  `=_oauth2_proxy_mumbo=V` arrives as a cookie named _oauth2_proxy_mumbo. */
+const setCookieName = (line) => {
+  const pair = line.split(';')[0]
+  return pair.includes('=') ? pair.split('=')[0].trim() : ''
+}
 /** dsh listens on plain HTTP inside the box, so its cookies lack Secure; the edge adds it and drops any Domain. A box
- *  cookie with a sign-in name (isSignin) is dropped: on the box's host it would shadow the visitor's sign-in. */
+ *  cookie with a sign-in name (isSignin) or no name is dropped: on the box's host it would shadow the visitor's sign-in. */
 export const secureCookies = (cfg, headers) => {
   if (headers['set-cookie'] === undefined) return headers
   // Host-only: a box may not set a cookie for the parent domain, which other boxes and the sign-in share.
-  const kept = headers['set-cookie'].filter(v => !isSignin(cfg, v)).map(v => v.replace(/;\s*domain=[^;]*/gi, '')).map(v => /;\s*secure/i.test(v) ? v : `${v}; Secure`)
+  const kept = headers['set-cookie'].filter(v => { const name = setCookieName(v); return name !== '' && !isSignin(cfg, name) }).map(v => v.replace(/;\s*domain=[^;]*/gi, '')).map(v => /;\s*secure/i.test(v) ? v : `${v}; Secure`)
   if (kept.length) headers['set-cookie'] = kept; else delete headers['set-cookie']
   return headers
 }

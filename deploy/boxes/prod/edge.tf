@@ -30,13 +30,17 @@ variable "github_agent_login" {
   default     = ""
 }
 variable "signin_cookie_name" {
-  description = "oauth2-proxy's --cookie-name and the edge's SIGNIN_COOKIE: the edge drops every cookie whose name starts with it from box requests and box Set-Cookie. The default starts with _oauth2_proxy, which edge images older than SIGNIN_COOKIE also strip."
+  description = "oauth2-proxy's --cookie-name and the edge's SIGNIN_COOKIE: the edge drops every cookie whose name starts with it from box requests and box Set-Cookie. It starts with _oauth2_proxy_, a prefix every edge image strips."
   type        = string
   default     = "_oauth2_proxy_mumbo"
   validation {
     # The edge's SIGNIN_COOKIE check (edge.mjs cookieName): RFC 9110 token characters.
     condition     = can(regex("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$", var.signin_cookie_name))
     error_message = "signin_cookie_name must be a cookie name: one or more RFC 9110 token characters."
+  }
+  validation {
+    condition     = startswith(var.signin_cookie_name, "_oauth2_proxy_")
+    error_message = "signin_cookie_name must start with _oauth2_proxy_: during a rollout or rollback, old edge tasks strip only their own SIGNIN_COOKIE and the _oauth2_proxy prefix, so any other name reaches boxes through them. Exactly _oauth2_proxy is the old host-only cookie's name."
   }
 }
 

@@ -86,8 +86,9 @@ test('a relay request (boxFetcher) reaches the box without sign-in cookies, even
   } finally { fakeBox.close() }
 })
 
-test('a box cannot plant a sign-in cookie: Set-Cookie with a sign-in name is dropped from HTTP responses and WebSocket 101s', async () => {
-  const planted = ['_oauth2_proxy_mumbo=x; Path=/api', '_oauth2_proxy_1=y', 'box=z']
+test('a box cannot plant a sign-in cookie: Set-Cookie with a sign-in name or no name is dropped from HTTP responses and WebSocket 101s', async () => {
+  // A nameless cookie (empty name, or no `=`) is stored and sent as its bare value, so `=<sign-in name>=V` plants one.
+  const planted = ['_oauth2_proxy_mumbo=x; Path=/api', '_oauth2_proxy_1=y', '=_oauth2_proxy_mumbo=V; Path=/api', ' =_oauth2_proxy=V', '=abc', 'abc; Path=/', 'box=z']
   const fakeBox = createServer((req, res) => { res.writeHead(200, { 'set-cookie': planted }).end('from box') })
   fakeBox.on('upgrade', (req, socket) => {
     socket.end(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n${planted.map(c => `Set-Cookie: ${c}\r\n`).join('')}\r\n`)
