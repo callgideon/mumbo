@@ -41,6 +41,17 @@ test('production hosts: app.mumbo.si gives the project domain and the approve ho
   assert.doesNotMatch(script, /boxes\.mumbo\.si/)
 })
 
+test('prod/edge.tf former-host redirects: 302 for now, path kept (projects to /home), query marked moved=1 first so no target equals a cached plain URL', () => {
+  const tf = readFileSync(new URL('../prod/edge.tf', import.meta.url), 'utf8')
+  const rule = /resource "aws_lb_listener_rule" "old_hosts" \{[\s\S]*?\n\}\n/.exec(tf)?.[0] ?? ''
+  assert.match(rule, /main\s+= \[5, local\.old_hosts, local\.public_host, "\/#\{path\}"\]/)
+  assert.match(rule, /approve\s+= \[6, \["approve\.\$\{local\.old_host\}"\], local\.approve_host, "\/#\{path\}"\]/)
+  assert.match(rule, /projects = \[40, \["\*\.\$\{local\.old_host\}"\], local\.public_host, "\/home"\]/, 'the wildcard ranks below llm.boxes (model, 20)')
+  assert.match(rule, /host\s+= each\.value\[2\]\n.*\n.*\n\s+path\s+= each\.value\[3\]\n\s+query\s+= "moved=1&#\{query\}"\n\s+status_code = "HTTP_302"\n/)
+  assert.match(tf, /old_hosts\s+= \[local\.old_host, "api\.mumbo\.si"\]/)
+  assert.match(tf, /old_host\s+= "boxes\.mumbo\.si"/)
+})
+
 test('an empty REQUIRED_CHECKS fails at start instead of dropping the merge gate\'s CI requirement', () => {
   for (const value of ['', ' ', ' , ,']) assert.throws(() => configWith({ REQUIRED_CHECKS: value }), /REQUIRED_CHECKS must name at least one check/, JSON.stringify(value))
 })

@@ -2,7 +2,7 @@
 #   app.mumbo.si        -> oauth2-proxy :4180 (Supabase sign-in) -> edge :8080 (loopback)
 #   *.app.mumbo.si      -> the same; the edge serves approve.app.mumbo.si and project boxes p-<16 hex>.app.mumbo.si, 404 otherwise
 #   llm.app.mumbo.si    -> edge model host :8081 (box token + source address = one of our NAT EIPs); llm.boxes.mumbo.si too
-#   boxes.mumbo.si (the public host until 2026-11-09), api.mumbo.si and *.boxes.mumbo.si -> 301 (old_hosts rules)
+#   boxes.mumbo.si (the former public host), api.mumbo.si and *.boxes.mumbo.si -> redirect (old_hosts rules)
 # The edge reaches E2B by private names on the internal NLB; client-proxy header routing needs sandbox.<domain>.
 variable "edge_tag" {
   description = "Edge image tag in ECR (mumbo repo commit)."
@@ -51,8 +51,8 @@ locals {
   supabase_url = "https://qkvcouccrhyjiarkauyo.supabase.co"
   # oauth2-proxy's callback: Mumbo's OAuth client's redirect URI, the only one the sign-in page sends a code to.
   oauth_redirect_url = "https://${local.public_host}/oauth2/callback"
-  # The public host until 2026-11-09. Its names answer 301 (old_hosts rules), except its model host, which boxes created
-  # before then have in their start script.
+  # The former public host. Its names redirect (old_hosts rules), except its model host, which boxes created
+  # under it have in their start script.
   old_host     = "boxes.mumbo.si"
   llm_host     = "llm.${local.public_host}" # LLM_HOST: new boxes' model host
   llm_hosts    = [local.llm_host, "llm.${local.old_host}"]
@@ -182,9 +182,12 @@ resource "aws_lb_listener_rule" "edge" {
     target_group_arn = aws_lb_target_group.edge[each.value[2]].arn
   }
 }
-# Former names answer 301 with the same path and query on the new ones. A project box moved from p-<id>.boxes.mumbo.si
+# Former names redirect to the new ones with the same path and query. A project box moved from p-<id>.boxes.mumbo.si
 # to p-<id>.app.mumbo.si, which a redirect cannot derive (it keeps or replaces the whole host), so those land on the
 # home page, which links every project of the signed-in person.
+# The query starts with moved=1 (moved=1& when the request had none): browsers hold the app.mumbo.si -> boxes.mumbo.si
+# 301 from before as a cache entry for the plain URL, which would loop; the marked URL is never that entry.
+# HTTP_302 until the move is final (PRODUCTION.md, "Public host app.mumbo.si"), then HTTP_301.
 resource "aws_lb_listener_rule" "old_hosts" {
   # [priority, host names, redirect host, path]; the wildcard ranks below llm.boxes.mumbo.si (model, 20).
   for_each = {
@@ -204,8 +207,8 @@ resource "aws_lb_listener_rule" "old_hosts" {
       port        = "443"
       protocol    = "HTTPS"
       path        = each.value[3]
-      query       = "#{query}"
-      status_code = "HTTP_301"
+      query       = "moved=1&#{query}"
+      status_code = "HTTP_302"
     }
   }
 }
