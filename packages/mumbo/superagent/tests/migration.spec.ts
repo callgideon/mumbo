@@ -245,8 +245,8 @@ it('writes a prompt version saved before the team sections in them, keeping its 
   const prompts = new Prompts(store, () => 100000, () => undefined, () => true)
   const { config } = prompts.version(3)
   expect(config.communication).toBe(defaultPrompts().communication)
-  expect(config.delivery).toContain('it changes fewer than 350 lines (additions plus deletions);')
-  expect(config.delivery).not.toContain('fewer than 200 lines')
+  // Workers never merge, so the legacy threshold has no sentence to land in.
+  expect(config.delivery).not.toContain('fewer than')
   // Guides that are now fixed or built-in are gone; the team's own skills stay, in current names.
   expect(Object.keys(config.skills)).toEqual(['identities', 'notes'])
   expect(config.skills.notes).toBe('Call orchestrator_route (kind accept) with trigger_id, read trigger/<id>, follow the work section and skill dsh-superagent-release, load dsh-superagent-github, cd "$DSH_SUPERAGENT_DIR".')
@@ -278,7 +278,7 @@ it('writes the removed auto-merge threshold and member identities into the promp
   const prompts = new Prompts(store, () => 100000, () => undefined, () => true)
   const migrated = prompts.current()
   expect(migrated).toMatchObject({ revision: 1, previousRevision: 0, source: 'settings-migration' })
-  expect(migrated.config.delivery).toContain('it changes fewer than 350 lines (additions plus deletions);')
+  expect(migrated.config.delivery).toContain('Enable auto-merge only on a PR that changes fewer than 350 lines (additions plus deletions).')
   expect(migrated.config.skills.identities).toContain('- Alice (Feishu ou_alice) is @alice on GitHub')
   expect(migrated.config.skills.identities).not.toContain('Bob')
   expect(store.get('settings-before-9')).toBeUndefined()

@@ -57,7 +57,12 @@ Settings changes require a person principal. Written by task A5.
 
 ## S5: no merge, review marker
 
-The worker does not merge and posts the review marker comment. Written by task A6.
+The worker never merges, enables auto-merge or approves; it posts the review marker comment instead. Written by task A6.
+
+- `prompts/team/delivery.md`: lines 10-15 and 18 replaced; the delivery text now ends with the marker comment as the first line of one PR comment, `<!-- mumbo-review sha=<40 lowercase hex> verdict=<pass|fail> -->`, the automated-agent sentence second.
+- `prompts/worker.md:6` and `prompts/team/communication.md:68` (marker-first exception).
+- `src/sources/github.ts`: `DSH_SUPERAGENT_GITHUB_ACCOUNT` description drops "except auto-merge".
+- Tests: `tests/prompts.spec.ts`, `tests/runtime.spec.ts` (merge test), `tests/cards.spec.ts`.
 
 ## S6: project overlay
 
