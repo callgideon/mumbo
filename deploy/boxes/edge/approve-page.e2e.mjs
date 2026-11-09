@@ -40,7 +40,7 @@ const approvals = {
 }
 let stopped = false
 const halt = { async get() { return stopped }, async set(email, on) { calls.push(['halt', email, on]); stopped = on } }
-const handler = approvePage({ approvals, halt, store: memoryStore(), csrfKey: Buffer.from('k'.repeat(32)), host: HOST })
+const handler = approvePage({ approvals, halt, store: memoryStore(), csrfKey: Buffer.from('k'.repeat(32)), host: HOST, approvers: [FOUNDER] })
 
 const pw = playwright()
 const tls = pw && certificate()

@@ -47,7 +47,7 @@ const formFields = (html, action) => {
   return [...form.matchAll(/<input type="hidden" name="([a-z]+)" value="([^"]*)">/g)].map(m => [m[1], m[2]])
 }
 
-async function setup(t) {
+async function setup(t, { approvers = [FOUNDER] } = {}) {
   const store = memoryStore()
   await store.putDoc(`project:${MINE}`, { id: MINE, name: 'App <b>', owner: FOUNDER, members: [FOUNDER], repos: ['acme/app'] })
   await store.putDoc(`project:${THEIRS}`, { id: THEIRS, name: 'Theirs', owner: OTHER, members: [OTHER, FOUNDER] })
@@ -66,7 +66,7 @@ async function setup(t) {
   }
   const halt = { async get(email) { return email === FOUNDER && stopped }, async set(email, on) { calls.push(['halt', email, on]); stopped = on } }
   let now = NOW
-  const handler = approvePage({ approvals, halt, store, csrfKey: KEY, host: HOST, now: () => now })
+  const handler = approvePage({ approvals, halt, store, csrfKey: KEY, host: HOST, approvers, now: () => now })
   // The signed-in email is FOUNDER unless a test names another in `x-as` (userServer passes it in production).
   const server = createServer((req, res) => handler(req, res, req.headers['x-as'] ?? FOUNDER).catch(e => res.writeHead(500).end(e.stack)))
   const port = await listen(server)
@@ -88,7 +88,8 @@ test('GET / shows only list(email) items with their facts, escaped, and embeds t
   assert.ok(r.body.includes('· 302 lines changed') && r.body.includes('· 12 lines changed'))
   assert.ok(r.body.includes('deploy/x.tf'), 'protected paths are listed')
   assert.ok(r.body.includes('unit: failure'), 'each required check state')
-  assert.ok(r.body.includes("Agent's review (claim)") && r.body.includes('Small and tested.'))
+  assert.equal((r.body.match(/Agent's review \(claim\): /g) ?? []).length, 3, 'every review is labelled a claim')
+  assert.ok(r.body.includes('Small and tested.') && !/verif/i.test(r.body), 'never called verified')
   assert.equal((r.body.match(/>low-risk</g) ?? []).length, 2)
   assert.deepEqual(formFields(r.body, '/grant').filter(([k]) => k !== 'csrf'), [['id', 'acme/app#7'], ['sha', 'a'.repeat(40)]])
   assert.deepEqual(formFields(r.body, '/grant').find(([k]) => k === 'csrf'), ['csrf', TOKEN])
@@ -97,7 +98,7 @@ test('GET / shows only list(email) items with their facts, escaped, and embeds t
 
   const other = await call(port, { headers: { 'x-as': 'a<i>@x.com' } })
   assert.ok(other.body.includes('a&#60;i&#62;@x.com') && !other.body.includes('<i>'), 'the email is escaped')
-  assert.ok(!other.body.includes('acme/app#7') && other.body.includes('Approve 0 low-risk'), "another person sees only their list(email) items")
+  assert.ok(!other.body.includes('acme/app#7') && other.body.includes('Nothing to approve.'), "another person sees only their list(email) items")
 })
 
 test('every response carries the CSP and framing headers; any other path answers 404', async (t) => {
@@ -206,4 +207,25 @@ test('repository access: only for a project the email owns, only an owner/name r
   assert.deepEqual(await getRepos(store, MINE), ['acme/app', 'acme/new'])
   const page = (await call(port, { path: '/?m=repo_added' })).body
   assert.ok(page.includes('acme/new') && page.includes('Repository access given.'))
+
+  // addRepo answers 409 for a repository bound to another project (Amendment 4).
+  const putDoc = store.putDoc
+  store.putDoc = async () => { throw Object.assign(new Error('bound elsewhere'), { status: 409 }) }
+  const bound = await post(port, '/repo', { project: MINE, repo: 'acme/other', csrf: TOKEN })
+  store.putDoc = putDoc
+  assert.equal(bound.headers.location, '/?m=repo_bound')
+  assert.ok((await call(port, { path: bound.headers.location })).body.includes('class="notice">That repository already belongs to another project.'))
+})
+
+test('a project owner who is not an approver sees their items read-only and cannot give a repository', async (t) => {
+  const { port, store, calls } = await setup(t, { approvers: [OTHER] })
+  const page = (await call(port)).body
+  assert.ok(page.includes('acme/app#7') && page.includes("Agent's review (claim): "), 'items are shown')
+  assert.ok(page.includes('Only approvers can merge.') && page.includes('Stop everything'))
+  for (const action of ['/grant', '/grant-low-risk', '/repo']) assert.ok(!page.includes(`action="${action}"`), `no ${action} form`)
+  assert.ok(page.includes('acme/app'), 'repositories are listed')
+  assert.equal((await post(port, '/repo', { project: MINE, repo: 'acme/new', csrf: TOKEN })).status, 403)
+  assert.deepEqual(await getRepos(store, MINE), ['acme/app'])
+  assert.ok(!calls.some(([name]) => name === 'grant' || name === 'grantLowRisk'))
+  assert.throws(() => approvePage({ approvals: {}, halt: {}, store, csrfKey: KEY, host: HOST }), /approvers/, 'approvers must be wired')
 })

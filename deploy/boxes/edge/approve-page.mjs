@@ -32,6 +32,7 @@ const NOTICES = new Map([
   ['halted', 'Everything is stopped. Model calls and GitHub writes are refused until you resume.'],
   ['resumed', 'Resumed. Model calls and GitHub writes pass again.'],
   ['repo_added', 'Repository access given.'],
+  ['repo_bound', 'That repository already belongs to another project.'],
 ])
 const STYLE = `body{margin:0;background:#fff;color:rgb(15,17,21);font:14px/24px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 main{max-width:40rem;margin:0 auto;padding:24px 16px}h1{font-size:20px;line-height:28px;margin:0}h2{font-size:14px;margin:32px 0 0}
@@ -57,15 +58,17 @@ async function readForm(req) {
 
 /**
  * The approve page.
- * @param {{ approvals: ReturnType<typeof import('./approvals.mjs').approvalsService>, halt: ReturnType<typeof import('./halt.mjs').haltService>, store: object, csrfKey: Buffer, host: string, now?: () => number }} deps
+ * @param {{ approvals: ReturnType<typeof import('./approvals.mjs').approvalsService>, halt: ReturnType<typeof import('./halt.mjs').haltService>, store: object, csrfKey: Buffer, host: string, approvers: string[], now?: () => number }} deps
  *   `csrfKey` is HMAC-SHA256(edge key, 'approve-csrf'); `host` is the approve host, the only origin its POSTs accept;
- *   `now` is epoch ms. The CSRF token is base64url HMAC-SHA256(csrfKey, `<email>:<yyyy-mm-dd>`) for the UTC day; the
+ *   `approvers` is APPROVER_EMAILS (lowercased; empty means nobody): only they see Approve controls and may give a
+ *   project a repository, and approvals.grant refuses everyone else; `now` is epoch ms. The CSRF token is base64url HMAC-SHA256(csrfKey, `<email>:<yyyy-mm-dd>`) for the UTC day; the
  *   page embeds today's, and a POST may carry today's or yesterday's.
  * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, email: string) => Promise<void>}
  *   handles one request from the signed-in, allowlisted `email`: `GET /` shows the page; `POST /grant`,
  *   `/grant-low-risk`, `/halt` and `/repo` act and answer 303 to `/?m=<code>`; anything else answers 404.
  */
-export function approvePage({ approvals, halt, store, csrfKey, host, now = () => Date.now() }) {
+export function approvePage({ approvals, halt, store, csrfKey, host, approvers, now = () => Date.now() }) {
+  if (!Array.isArray(approvers)) throw new Error('approvePage: approvers must be the list of approver emails (APPROVER_EMAILS)')
   const origin = `https://${host}`
   const token = (email, ms) => createHmac('sha256', csrfKey).update(`${email}:${new Date(ms).toISOString().slice(0, 10)}`).digest('base64url')
   const validCsrf = (email, given) => {
@@ -98,8 +101,11 @@ export function approvePage({ approvals, halt, store, csrfKey, host, now = () =>
     },
     async '/repo'(email, form) {
       const project = form.get('project'), repo = form.get('repo')
-      if (!(await projectsOwnedBy(store, email)).includes(project)) throw fail(403)
-      await addRepo(store, project, repo)  // 400 unless repo is owner/name
+      if (!approvers.includes(email) || !(await projectsOwnedBy(store, email)).includes(project)) throw fail(403)
+      try { await addRepo(store, project, repo) } catch (e) {  // 400 unless repo is owner/name
+        if (e.status === 409) return [['m', 'repo_bound']]  // bound to another project
+        throw e
+      }
       return [['m', 'repo_added']]
     },
   }
@@ -110,6 +116,7 @@ export function approvePage({ approvals, halt, store, csrfKey, host, now = () =>
     const notice = NOTICES.get(query.get('m'))
     const skips = query.getAll('s').map(s => /^([a-z_]+):(.+)$/.exec(s)).filter(m => m && NOTICES.has(m[1]) && ITEM_ID.test(m[2]))
     const low = items.filter(i => i.lowRisk)
+    const approver = approvers.includes(email)
     const card = (i) => `<section class="card">
 <div class="row"><a href="https://github.com/${esc(i.repo)}/pull/${esc(i.number)}">${esc(i.repo)}#${esc(i.number)}</a>${i.lowRisk ? '<span class="tag low">low-risk</span>' : '<span class="tag">needs a look</span>'}</div>
 <p><strong>${esc(i.title)}</strong></p>
@@ -117,20 +124,18 @@ export function approvePage({ approvals, halt, store, csrfKey, host, now = () =>
 <p>Protected paths: ${i.protected.length ? i.protected.map(p => `<code>${esc(p)}</code>`).join(', ') : '<span class="muted">none</span>'}</p>
 <p>Checks: ${Object.entries(i.checks).map(([name, state]) => `${esc(name)}: ${esc(state)}`).join(' · ')}</p>
 <p>Agent's review (claim): ${i.review ? `${esc(i.review.verdict)}<br><span class="muted">${esc(String(i.review.excerpt ?? i.review.body ?? '').slice(0, 400))}</span>` : '<span class="muted">none for this commit</span>'}</p>
-<form method="post" action="/grant">${hidden({ id: i.id, sha: i.sha, csrf })}<div class="row"><span></span><button class="primary">Approve</button></div></form>
-</section>`
+${approver ? `<form method="post" action="/grant">${hidden({ id: i.id, sha: i.sha, csrf })}<div class="row"><span></span><button class="primary">Approve</button></div></form>\n` : ''}</section>`
     const repos = await Promise.all(owned.map(async (id) => `<section class="card">
 <p><strong>${esc((await store.getDoc(`project:${id}`))?.name ?? id)}</strong></p>
 <p class="muted">${(await getRepos(store, id)).map(esc).join(', ') || 'No repositories yet.'}</p>
-<form method="post" action="/repo">${hidden({ project: id, csrf })}<div class="row"><input name="repo" placeholder="owner/name" required aria-label="Repository (owner/name)"><button class="primary">Give access</button></div></form>
-</section>`))
+${approver ? `<form method="post" action="/repo">${hidden({ project: id, csrf })}<div class="row"><input name="repo" placeholder="owner/name" required aria-label="Repository (owner/name)"><button class="primary">Give access</button></div></form>\n` : ''}</section>`))
     res.writeHead(200, { ...SECURITY, 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>mumbo approvals</title>
 <style>${STYLE}</style>
 <main>
 <div class="row"><h1>Approvals</h1><span class="muted">${esc(email)}</span></div>
 ${notice ? `<p class="notice">${notice}</p>` : ''}${skips.length ? `<ul class="skipped">${skips.map(([, reason, id]) => `<li>${esc(id)}: ${NOTICES.get(reason)}</li>`).join('')}</ul>` : ''}
 <section class="card"><div class="row">
-<form method="post" action="/grant-low-risk">${low.map(i => hidden({ id: i.id, sha: i.sha })).join('')}${hidden({ csrf })}<button class="primary"${low.length ? '' : ' disabled'}>Approve ${low.length} low-risk</button></form>
+${approver ? `<form method="post" action="/grant-low-risk">${low.map(i => hidden({ id: i.id, sha: i.sha })).join('')}${hidden({ csrf })}<button class="primary"${low.length ? '' : ' disabled'}>Approve ${low.length} low-risk</button></form>` : '<span class="muted">Only approvers can merge.</span>'}
 <form method="post" action="/halt">${hidden({ on: stopped ? '0' : '1', csrf })}${stopped ? '<span>Everything is stopped. </span><button>Resume</button>' : '<button>Stop everything</button>'}</form>
 </div></section>
 ${items.length ? items.map(card).join('\n') : '<p class="muted">Nothing to approve.</p>'}
