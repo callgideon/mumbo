@@ -30,21 +30,32 @@ export class OpenInAppPathController {
   /** Whether the Host desktop can open paths; null until the Host answered, false also after a failed read. */
   readonly desktop: SnapshotStore<boolean | null> = createSnapshotStore<boolean | null>(null)
   private loading: Promise<void> | undefined
+  private deferred = false
 
   /**
    * @param remote - the Session Remote namespace answering availability and running gestures.
    * @param launchable - whether this page may open Host paths now; while false, {@link load} asks
-   * nothing and publishes no desktop.
+   * nothing and the desktop stays null until {@link resume} runs the deferred read.
    */
   constructor(private readonly remote: OpenInAppPathRemote, private readonly launchable: () => boolean) {}
 
   /**
-   * Read desktop availability once per controller life; concurrent calls share the read.
-   * @returns after availability is published.
+   * Read desktop availability once per controller life while the page may open Host paths; concurrent
+   * calls share the read.
+   * @returns after availability is published, or at once while the page may not open Host paths.
    */
   load(): Promise<void> {
+    if (!this.launchable()) {
+      this.deferred = true
+      return Promise.resolve()
+    }
     this.loading ??= this.run()
     return this.loading
+  }
+
+  /** Run the read a {@link load} deferred while the page could not open Host paths; call when access arrives. */
+  resume(): void {
+    if (this.deferred) void this.load()
   }
 
   /**
@@ -87,10 +98,6 @@ export class OpenInAppPathController {
 
   private async run(): Promise<void> {
     let available = false
-    if (!this.launchable()) {
-      this.desktop.set(available)
-      return
-    }
     try {
       const result = await this.remote.session.canOpenWorkspacePath()
       available = result.ok && result.value

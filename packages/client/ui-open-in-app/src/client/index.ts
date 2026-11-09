@@ -61,12 +61,13 @@ export function apply(ctx: ClientContext): void {
   // path in a Host application, stands in for them: a page without it probes no apps, reads no desktop or
   // file associations, and offers no opener.
   let launchable = false
+  const paths = new OpenInAppPathController(ctx.remote, () => launchable)
   ctx.remoteAccess.whenAccess('session/openWorkspacePath', () => {
     launchable = true
     void controller.load()
+    paths.resume()
     return () => { launchable = false }
   })
-  const paths = new OpenInAppPathController(ctx.remote, () => launchable)
   ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }), 'open-in-app: dictionaries')
   const t = ctx.locale.bind(NS)
   // Keep operation feedback visible after its initiating panel closes.

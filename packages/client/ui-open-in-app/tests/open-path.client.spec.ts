@@ -52,7 +52,27 @@ describe('OpenInAppPathController launch access', () => {
     const controller = new OpenInAppPathController(remoteOf({ canOpenWorkspacePath }), () => false)
     await controller.load()
     expect(canOpenWorkspacePath).not.toHaveBeenCalled()
-    expect(controller.desktop.getSnapshot()).toBe(false)
+    expect(controller.desktop.getSnapshot()).toBeNull()
+  })
+
+  it('reads the desktop on resume after a load that ran before access arrived', async () => {
+    let launchable = false
+    const canOpenWorkspacePath = vi.fn(async () => ({ ok: true as const, value: true }))
+    const controller = new OpenInAppPathController(remoteOf({ canOpenWorkspacePath }), () => launchable)
+    await controller.load()
+    launchable = true
+    controller.resume()
+    await controller.load()
+    expect(canOpenWorkspacePath).toHaveBeenCalledOnce()
+    expect(controller.desktop.getSnapshot()).toBe(true)
+  })
+
+  it('asks nothing on resume when no load was deferred', () => {
+    const canOpenWorkspacePath = vi.fn(async () => ({ ok: true as const, value: true }))
+    const controller = new OpenInAppPathController(remoteOf({ canOpenWorkspacePath }), () => true)
+    controller.resume()
+    expect(canOpenWorkspacePath).not.toHaveBeenCalled()
+    expect(controller.desktop.getSnapshot()).toBeNull()
   })
 })
 

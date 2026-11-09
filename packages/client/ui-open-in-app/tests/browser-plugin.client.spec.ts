@@ -417,7 +417,7 @@ describe('open-in-app browser half', () => {
     if (pathInjected?.hooks === undefined || pathInjected.loadDesktop === undefined) throw new Error('expected the injected path controls')
     await pathInjected.loadDesktop()
     expect(remote.session.canOpenWorkspacePath).not.toHaveBeenCalled()
-    expect(pathInjected.hooks.openInAppDesktop.getSnapshot()).toBe(false)
+    expect(pathInjected.hooks.openInAppDesktop.getSnapshot()).toBeNull()
     await fiber.dispose()
   })
 
