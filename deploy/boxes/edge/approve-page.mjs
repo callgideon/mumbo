@@ -58,16 +58,17 @@ async function readForm(req) {
 
 /**
  * The approve page.
- * @param {{ approvals: ReturnType<typeof import('./approvals.mjs').approvalsService>, halt: ReturnType<typeof import('./halt.mjs').haltService>, store: object, csrfKey: Buffer, host: string, approvers: string[], now?: () => number }} deps
+ * @param {{ approvals: ReturnType<typeof import('./approvals.mjs').approvalsService>, halt: ReturnType<typeof import('./halt.mjs').haltService>, store: object, csrfKey: Buffer, host: string, approvers: string[], now?: () => number, bindRepo?: typeof addRepo }} deps
  *   `csrfKey` is HMAC-SHA256(edge key, 'approve-csrf'); `host` is the approve host, the only origin its POSTs accept;
  *   `approvers` is APPROVER_EMAILS (lowercased; empty means nobody): only they see Approve controls and may give a
- *   project a repository, and approvals.grant refuses everyone else; `now` is epoch ms. The CSRF token is base64url HMAC-SHA256(csrfKey, `<email>:<yyyy-mm-dd>`) for the UTC day; the
+ *   project a repository, and approvals.grant refuses everyone else; `now` is epoch ms; `bindRepo` is projects.mjs
+ *   addRepo unless a test replaces it. The CSRF token is base64url HMAC-SHA256(csrfKey, `<email>:<yyyy-mm-dd>`) for the UTC day; the
  *   page embeds today's, and a POST may carry today's or yesterday's.
  * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, email: string) => Promise<void>}
  *   handles one request from the signed-in, allowlisted `email`: `GET /` shows the page; `POST /grant`,
  *   `/grant-low-risk`, `/halt` and `/repo` act and answer 303 to `/?m=<code>`; anything else answers 404.
  */
-export function approvePage({ approvals, halt, store, csrfKey, host, approvers, now = () => Date.now() }) {
+export function approvePage({ approvals, halt, store, csrfKey, host, approvers, now = () => Date.now(), bindRepo = addRepo }) {
   if (!Array.isArray(approvers)) throw new Error('approvePage: approvers must be the list of approver emails (APPROVER_EMAILS)')
   const origin = `https://${host}`
   const token = (email, ms) => createHmac('sha256', csrfKey).update(`${email}:${new Date(ms).toISOString().slice(0, 10)}`).digest('base64url')
@@ -102,7 +103,8 @@ export function approvePage({ approvals, halt, store, csrfKey, host, approvers, 
     async '/repo'(email, form) {
       const project = form.get('project'), repo = form.get('repo')
       if (!approvers.includes(email) || !(await projectsOwnedBy(store, email)).includes(project)) throw fail(403)
-      try { await addRepo(store, project, repo) } catch (e) {  // 400 unless repo is owner/name
+      // addRepo checks again: 403 unless `by` is an approver who owns the project, 400 unless repo is owner/name.
+      try { await bindRepo(store, project, repo, { by: email, approvers }) } catch (e) {
         if (e.status === 409) return [['m', 'repo_bound']]  // bound to another project
         throw e
       }

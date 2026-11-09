@@ -6,7 +6,7 @@ import { createHmac } from 'node:crypto'
 import { createServer, request } from 'node:http'
 import { approvePage } from './approve-page.mjs'
 import { memoryStore } from './store.mjs'
-import { getRepos } from './projects.mjs'
+import { addRepo, getRepos } from './projects.mjs'
 
 const HOST = 'approve.boxes.mumbo.si'
 const FOUNDER = 'f@x.com'
@@ -66,12 +66,19 @@ async function setup(t, { approvers = [FOUNDER] } = {}) {
   }
   const halt = { async get(email) { return email === FOUNDER && stopped }, async set(email, on) { calls.push(['halt', email, on]); stopped = on } }
   let now = NOW
-  const handler = approvePage({ approvals, halt, store, csrfKey: KEY, host: HOST, approvers, now: () => now })
+  const binds = []  // addRepo calls; `bindStatus` makes the next one fail with that status
+  let bindStatus
+  const bindRepo = async (...args) => {
+    binds.push(args)
+    if (bindStatus) { const status = bindStatus; bindStatus = undefined; throw Object.assign(new Error('refused'), { status }) }
+    return addRepo(...args)
+  }
+  const handler = approvePage({ approvals, halt, store, csrfKey: KEY, host: HOST, approvers, now: () => now, bindRepo })
   // The signed-in email is FOUNDER unless a test names another in `x-as` (userServer passes it in production).
   const server = createServer((req, res) => handler(req, res, req.headers['x-as'] ?? FOUNDER).catch(e => res.writeHead(500).end(e.stack)))
   const port = await listen(server)
   t.after(() => server.close())
-  return { port, calls, store, skips, setNow: (ms) => { now = ms } }
+  return { port, calls, store, skips, binds, failBind: (status) => { bindStatus = status }, setNow: (ms) => { now = ms } }
 }
 
 test('GET / shows only list(email) items with their facts, escaped, and embeds the CSRF token', async (t) => {
@@ -195,7 +202,7 @@ test('the stop switch toggles the signed-in person', async (t) => {
 })
 
 test('repository access: only for a project the email owns, only an owner/name repository', async (t) => {
-  const { port, store } = await setup(t)
+  const { port, store, binds, failBind } = await setup(t)
   assert.equal((await post(port, '/repo', { project: THEIRS, repo: 'acme/x', csrf: TOKEN })).status, 403, 'a member, not the owner')
   assert.equal((await post(port, '/repo', { project: 'cccccccccccccccc', repo: 'acme/x', csrf: TOKEN })).status, 403, 'unknown project')
   for (const repo of ['acme', 'acme/x/y', 'acme/x y', 'acme/<x>', '']) {
@@ -204,17 +211,19 @@ test('repository access: only for a project the email owns, only an owner/name r
   assert.deepEqual(await getRepos(store, THEIRS), [])
   const r = await post(port, '/repo', { project: MINE, repo: 'acme/new', csrf: TOKEN })
   assert.equal(r.headers.location, '/?m=repo_added')
+  assert.deepEqual(binds.at(-1), [store, MINE, 'acme/new', { by: FOUNDER, approvers: [FOUNDER] }], 'addRepo gets the caller and the approvers')
   assert.deepEqual(await getRepos(store, MINE), ['acme/app', 'acme/new'])
   const page = (await call(port, { path: '/?m=repo_added' })).body
   assert.ok(page.includes('acme/new') && page.includes('Repository access given.'))
 
-  // addRepo answers 409 for a repository bound to another project (Amendment 4).
-  const putDoc = store.putDoc
-  store.putDoc = async () => { throw Object.assign(new Error('bound elsewhere'), { status: 409 }) }
+  // addRepo answers 409 for a repository bound to another project, and 403 when it refuses the caller (Amendment 4).
+  failBind(409)
   const bound = await post(port, '/repo', { project: MINE, repo: 'acme/other', csrf: TOKEN })
-  store.putDoc = putDoc
   assert.equal(bound.headers.location, '/?m=repo_bound')
   assert.ok((await call(port, { path: bound.headers.location })).body.includes('class="notice">That repository already belongs to another project.'))
+  failBind(403)
+  assert.equal((await post(port, '/repo', { project: MINE, repo: 'acme/other', csrf: TOKEN })).status, 403)
+  assert.deepEqual(await getRepos(store, MINE), ['acme/app', 'acme/new'])
 })
 
 test('a project owner who is not an approver sees their items read-only and cannot give a repository', async (t) => {
