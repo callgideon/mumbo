@@ -119,7 +119,8 @@
 // someone else puts in a link, in the query or the fragment, never become the session.
 const sb = supabase.createClient(MUMBO.url, MUMBO.anonKey, { auth: { flowType: 'pkce', detectSessionInUrl: false } })
 const query = new URLSearchParams(location.search)
-const authorizationId = query.get('authorization_id')
+// Supabase's ids are alphanumeric; the id goes into Supabase request paths, so anything else is treated as missing.
+const authorizationId = /^[A-Za-z0-9_-]+$/.test(query.get('authorization_id') ?? '') ? query.get('authorization_id') : null
 const $ = (id) => document.getElementById(id)
 const say = (text, error = false) => { $('msg').textContent = text; $('msg').classList.toggle('error', error) }
 const busy = (form, on) => form.querySelectorAll('button').forEach((b) => { b.disabled = on })
@@ -140,7 +141,7 @@ async function authorize() {
     return say('')
   }
   const next = decision === 'follow' ? details.data.redirect_url : (await sb.auth.oauth.approveAuthorization(authorizationId, { skipBrowserRedirect: true })).data?.redirect_url
-  if (!next) return say('Authorization failed. Try again from the app address.', true)
+  if (!toMumbo(next, MUMBO)) return say('Authorization failed. Try again from the app address.', true)
   location.replace(next)
 }
 
@@ -202,8 +203,8 @@ $('back').addEventListener('click', () => {
     return say(exchange.error.code === 'pkce_code_verifier_not_found'
       ? 'A sign-in link works only in the browser that asked for it. Enter the code from the email there instead.' : 'Sign-in failed. Try again.', true)
   }
-  const error = query.get('error_description')
-  if (error) say(`Sign-in failed: ${error}`, true)
+  // Fixed text: the error parameters come from whoever wrote the link.
+  if (query.has('error') || query.has('error_description')) say('Sign-in failed. Try again.', true)
 })()
 </script>
 </body>
