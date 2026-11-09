@@ -7,7 +7,15 @@ import { Sandbox, Template } from 'e2b'
 const image = process.argv[2] ?? (() => { throw new Error('pass the ECR image URI') })()
 const name = process.argv[3] ?? 'mumbo-box'
 const memoryMB = Number(process.argv[4] ?? 4096)
-const tpl = Template().fromImage(image, { username: 'AWS', password: process.env.ECR_PASSWORD }).setUser('root')
+let tpl = Template().fromImage(image, { username: 'AWS', password: process.env.ECR_PASSWORD }).setUser('root')
+// The user's box is their computer: a virtual display, a window manager, Chromium and the noVNC live view
+// (PRODUCTION.md stage 9). The edge's start script runs them; children (mumbo-child) stay headless.
+if (name.startsWith('mumbo-box')) {
+  tpl = tpl.runCmd([
+    'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xvfb openbox x11vnc novnc websockify chromium dbus-x11 fonts-noto-core fonts-noto-color-emoji fonts-noto-cjk procps && rm -rf /var/lib/apt/lists/*',
+    'id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser',
+  ])
+}
 const info = await Template.build(tpl, name, { cpuCount: 2, memoryMB })
 console.log('built', info.templateId, info.buildId)
 // Smoke: a box from the template has the app, no prior user data, and curl for backups.

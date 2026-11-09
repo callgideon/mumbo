@@ -70,7 +70,25 @@ cat > /root/.mumbo/sandboxes.overlay.yml <<'YML'
         url: ${llm}/mcp
         headers:
           Authorization: !!js '\`Bearer \${process.env.DEEPSEEK_API_KEY}\`'
+    - id: browser-use
+      name: '@deepseek-ai/dsh-browser-use'
+    - id: browser-use-box-chromium
+      name: '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp'
+      config:
+        mode: attach
+        endpoint: http://127.0.0.1:9222
 YML
+# Desktop: the user's own Chromium (signed-in accounts live in its profile) on a virtual display, as the unprivileged
+# user browser; its debugging port stays on loopback for dsh's browser tools; noVNC on :6080 is the live view, which
+# only the edge reaches (E2B traffic token). Re-runnable: each part starts only if it is not running.
+if id browser >/dev/null 2>&1; then
+  # E2B forwards every loopback port to the box address; the browser's debugging port and raw VNC stay box-local.
+  for port in 9222 5900; do iptables -C INPUT -p tcp --dport $port ! -i lo -j DROP 2>/dev/null || iptables -I INPUT -p tcp --dport $port ! -i lo -j DROP || true; done
+  pgrep -x Xvfb >/dev/null || { su browser -s /bin/sh -c 'Xvfb :1 -screen 0 1440x900x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &'; sleep 1; su browser -s /bin/sh -c 'DISPLAY=:1 openbox >/tmp/openbox.log 2>&1 &'; }
+  pgrep -f 'remote-debugging-port=9222' >/dev/null || { rm -f /home/browser/profile/Singleton*; su browser -s /bin/sh -c 'DISPLAY=:1 chromium --user-data-dir=/home/browser/profile --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --no-first-run --no-default-browser-check --password-store=basic --start-maximized >/tmp/chromium.log 2>&1 &'; }
+  pgrep -x x11vnc >/dev/null || su browser -s /bin/sh -c 'x11vnc -display :1 -localhost -forever -shared -nopw -rfbport 5900 -quiet >/tmp/x11vnc.log 2>&1 &'
+  pgrep -f websockify >/dev/null || nohup websockify --web /usr/share/novnc "$ip:6080" 127.0.0.1:5900 >/tmp/websockify.log 2>&1 &
+fi
 cd /src
 HOME=/root DSH_HOME=/root/.dsh DSH_TELEMETRY_DISABLED=1 \\
 DEEPSEEK_BASE_URL=${llm}/anthropic DEEPSEEK_SEARCH_BASE_URL=${llm} DEEPSEEK_API_KEY=${token} \\
@@ -79,9 +97,9 @@ nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\
   --no-open --host "$ip" --port 3080 --public-url https://${cfg.publicHost}/ --trusted-host ${cfg.publicHost} > /root/dsh.log 2>&1 &
 `
 }
-/** Upload chats and projects to a presigned S3 PUT. Runs inside the box; S3 refuses a streamed (chunked) body,
+/** Upload chats, projects and the browser profile (signed-in accounts; caches and locks excluded) to a presigned S3 PUT. Runs inside the box; S3 refuses a streamed (chunked) body,
  *  so the archive goes to a temporary file first. Extraction on restore also stays inside the box. */
-export const backupCommand = (url) => `set -e; f=$(mktemp /tmp/mumbo-backup.XXXXXX); trap 'rm -f "$f"' EXIT; tar -C / --exclude=node_modules --exclude='*.sqlite-wal' --exclude='*.sqlite-shm' -czf "$f" root/.dsh root/projects; curl -fsS -m 600 -X PUT -H 'content-type: application/gzip' --upload-file "$f" '${url}'`
+export const backupCommand = (url) => `set -e; f=$(mktemp /tmp/mumbo-backup.XXXXXX); trap 'rm -f "$f"' EXIT; tar -C / --exclude=node_modules --exclude='*.sqlite-wal' --exclude='*.sqlite-shm' --exclude='home/browser/profile/Singleton*' --exclude='home/browser/profile/*/Cache' --exclude='home/browser/profile/*/Code Cache' --exclude='home/browser/profile/*/GPUCache' --exclude='home/browser/profile/*/Service Worker/CacheStorage' -czf "$f" $(cd / && ls -d root/.dsh root/projects home/browser/profile 2>/dev/null); curl -fsS -m 600 -X PUT -H 'content-type: application/gzip' --upload-file "$f" '${url}'`
 export const restoreCommand = (url) => `curl -fsS -m 600 '${url}' | tar -C / -xzf -`
 
 /** Run fn over items with at most `limit` in flight. */
@@ -291,12 +309,18 @@ const page = (res, status, text, refresh = true) => res.writeHead(status, { 'con
 const DROP = new Set(['connection', 'keep-alive', 'proxy-connection', 'transfer-encoding', 'upgrade', 'te', 'trailer', 'host', 'authorization'])
 
 /** Headers for the box: client headers minus hop-by-hop, identity and E2B headers, plus E2B routing for this box only. */
-export function boxHeaders(cfg, incoming, target) {
+/** Which box port a request goes to: the desktop live view (noVNC, :6080) under /desktop/, otherwise dsh (:3080). */
+export function boxRoute(url) {
+  if (url === '/desktop' || url === '/desktop/') return { redirect: '/desktop/vnc.html?autoconnect=1&resize=remote&path=desktop/websockify' }
+  if (url.startsWith('/desktop/')) return { port: '6080', path: url.slice('/desktop'.length) }
+  return { port: '3080', path: url }
+}
+export function boxHeaders(cfg, incoming, target, port = '3080') {
   const out = {}
   for (const [k, v] of Object.entries(incoming)) if (!DROP.has(k) && !k.startsWith('x-forwarded-') && !k.startsWith('e2b-')) out[k] = v
   out.host = `sandbox.${cfg.publicHost}`
   out['e2b-sandbox-id'] = target.id
-  out['e2b-sandbox-port'] = '3080'
+  out['e2b-sandbox-port'] = port
   if (target.traffic) out['e2b-traffic-access-token'] = target.traffic
   return out
 }
@@ -325,11 +349,14 @@ export function userServer({ cfg, box, verifyAlb, log = console.log }) {
       log(JSON.stringify({ edge: 'error', user: email, error: e.message }))
       return page(res, 503, e.capacity ? 'mumbo is at capacity right now. This page retries every few seconds.' : 'Your mumbo box is starting. This page reloads in a few seconds.')
     }
-    if (needsLaunch(req)) return res.writeHead(302, { location: `/?token=${target.token}`, 'cache-control': 'no-store' }).end()
+    const to = boxRoute(req.url)
+    if (to.redirect) return res.writeHead(302, { location: to.redirect, 'cache-control': 'no-store' }).end()
+    const dsh = to.port === '3080'
+    if (dsh && needsLaunch(req)) return res.writeHead(302, { location: `/?token=${target.token}`, 'cache-control': 'no-store' }).end()
     quiet(box.touch(target.id))
-    const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: req.url, headers: boxHeaders(cfg, req.headers, target) }, (r) => {
+    const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: to.path, headers: boxHeaders(cfg, req.headers, target, to.port) }, (r) => {
       // A stale cookie (another account on this browser, or a recreated box) gets a fresh exchange instead of a dead end.
-      if (r.statusCode === 401 && isNavigation(req)) { r.resume(); return res.writeHead(302, { location: `/?token=${target.token}`, 'cache-control': 'no-store' }).end() }
+      if (dsh && r.statusCode === 401 && isNavigation(req)) { r.resume(); return res.writeHead(302, { location: `/?token=${target.token}`, 'cache-control': 'no-store' }).end() }
       res.writeHead(r.statusCode ?? 502, secureCookies({ ...r.headers }))
       r.pipe(res)
     })
@@ -342,8 +369,10 @@ export function userServer({ cfg, box, verifyAlb, log = console.log }) {
     try {
       const target = await box.ensure(email)
       quiet(box.touch(target.id))
-      const headers = { ...boxHeaders(cfg, req.headers, target), connection: 'Upgrade', upgrade: req.headers.upgrade ?? 'websocket' }
-      const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: req.url, headers })
+      const to = boxRoute(req.url)
+      if (to.redirect) return socket.destroy()
+      const headers = { ...boxHeaders(cfg, req.headers, target, to.port), connection: 'Upgrade', upgrade: req.headers.upgrade ?? 'websocket' }
+      const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: to.path, headers })
       up.on('upgrade', (r, upSocket, upHead) => {
         socket.write(`HTTP/1.1 101 Switching Protocols\r\n${Object.entries(r.headers).map(([k, v]) => `${k}: ${v}`).join('\r\n')}\r\n\r\n`)
         if (upHead.length) socket.write(upHead)

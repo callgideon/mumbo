@@ -349,3 +349,19 @@ test('MCP endpoint on the model host: box token required, tools act as the token
     assert.match(ran.content[0].text, /ran echo hi/)
   } finally { server.close() }
 })
+
+test('desktop live view: /desktop/ goes to the box\'s noVNC port, everything else to dsh', async () => {
+  const { boxRoute } = await import('./edge.mjs')
+  assert.match(boxRoute('/desktop').redirect, /^\/desktop\/vnc\.html\?.*path=desktop\/websockify/)
+  assert.deepEqual(boxRoute('/desktop/websockify'), { port: '6080', path: '/websockify' })
+  assert.deepEqual(boxRoute('/desktop-not'), { port: '3080', path: '/desktop-not' })
+  assert.deepEqual(boxRoute('/api/remote.mux'), { port: '3080', path: '/api/remote.mux' })
+  assert.equal(boxHeaders(cfg, {}, { id: 'b1' }, '6080')['e2b-sandbox-port'], '6080')
+})
+
+test('backups carry the browser profile without caches or profile locks, and tolerate its absence', async () => {
+  const { backupCommand } = await import('./edge.mjs')
+  const c = backupCommand('URL')
+  assert.match(c, /ls -d root\/\.dsh root\/projects home\/browser\/profile 2>\/dev\/null/)
+  for (const x of ['Singleton*', '*/Cache', '*/Code Cache', '*/GPUCache']) assert.ok(c.includes(`--exclude='home/browser/profile/${x}'`), x)
+})
