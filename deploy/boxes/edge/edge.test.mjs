@@ -130,7 +130,7 @@ test('box creation stops at the running-box cap', async () => {
 })
 
 test('user router refuses requests without a signed-in email', async () => {
-  const s = userServer({ cfg, box: { ensure: async (e) => { if (e !== 'a@x.com') assert.fail('must not route'); throw new Error('starting') }, touch() {}, forget() {} }, log: () => {} })
+  const s = userServer({ cfg, box: { ensure: async (e) => { if (e !== 'a@x.com') assert.fail('must not route'); throw new Error('starting') }, firstSetUp: async () => false, touch() {}, forget() {} }, log: () => {} })
   const port = await listen(s)
   assert.equal((await call(port)).status, 401)
   assert.equal((await call(port, { headers: { 'x-forwarded-email': 'z@other.com' } })).status, 403)
@@ -736,8 +736,10 @@ const gated = () => {
 const gatedServer = async (presign, email = 'a@x.com') => {
   const g = gated(); const store = memoryStore()
   const b = boxes({ e2b: g.e2b, store, cfg, edgeKey: 'k', presignGet: presign, presignPut: async () => 'P', log: () => {} })
-  const s = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: b, log: () => {} })
-  return { ...g, b, store, s, port: await listen(s) }
+  let ensures = 0
+  const counted = { ...b, ensure: (k) => { ensures++; return b.ensure(k) }, firstSetUp: b.firstSetUp, touch: b.touch, forget: b.forget }
+  const s = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: counted, log: () => {} })
+  return { ...g, b, store, s, ensures: () => ensures, port: await listen(s) }
 }
 test('first visit: the set-up page within the delay, a reload joins the same create, then the box answers', async () => {
   const t = await gatedServer(async () => undefined)
@@ -748,6 +750,7 @@ test('first visit: the set-up page within the delay, a reload joins the same cre
   assert.match(one.body, /<meta http-equiv="refresh" content="5">/)
   assert.equal(one.headers['cache-control'], 'no-store')
   assert.match((await call(t.port, { headers: nav })).body, /Setting up your computer/)
+  assert.equal(t.ensures(), 1, 'the reload joins the in-flight ensure')
   assert.equal(t.creates(), 1)
   assert.equal((await t.store.getBox('b1')), undefined)
   t.open(); await new Promise(r => setTimeout(r, 100))
@@ -788,16 +791,52 @@ test('a non-navigation request still waits for the box', async () => {
   t.s.close()
 })
 test('capacity page is kept and needs no first-set-up lookup', async () => {
-  const s = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure: async () => { throw Object.assign(new Error('capacity'), { capacity: true }) }, firstSetUp: async () => assert.fail('no lookup'), touch() {}, forget() {} }, log: () => {} })
+  let lookups = 0
+  const s = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure: async () => { throw Object.assign(new Error('capacity'), { capacity: true }) }, firstSetUp: async () => { lookups++ }, touch() {}, forget() {} }, log: () => {} })
   const r = await call(await listen(s), { headers: nav })
   s.close()
   assert.match(r.body, /at capacity/)
+  assert.equal(lookups, 0)
 })
 test('project routes get neutral text, never the person texts', async () => {
   const id = '0123456789abcdef'
-  const s = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure: () => new Promise(() => {}), firstSetUp: async () => assert.fail('no lookup'), touch() {}, forget() {} }, projects: { isMember: async () => true }, log: () => {} })
-  const r = await call(await listen(s), { headers: { ...nav, host: `p-${id}.${cfg.projectDomain}` } })
-  s.close()
-  assert.match(r.body, /Starting this project's computer/)
-  assert.doesNotMatch(r.body, /your computer/)
+  let lookups = 0
+  for (const ensure of [() => new Promise(() => {}), async () => { throw new Error('boom') }]) {
+    const s = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure, firstSetUp: async () => { lookups++; return true }, touch() {}, forget() {} }, projects: { isMember: async () => true }, log: () => {} })
+    const r = await call(await listen(s), { headers: { ...nav, host: `p-${id}.${cfg.projectDomain}` } })
+    s.close()
+    assert.match(r.body, /Starting this project's computer/)
+    assert.doesNotMatch(r.body, /your computer/)
+  }
+  assert.equal(lookups, 0)
+})
+test('a fast non-capacity failure uses the same first-set-up choice as a slow one, and is logged once', async () => {
+  const logs = []
+  const mk = (first) => userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure: async () => { throw new Error('box is being created') }, firstSetUp: async () => first, touch() {}, forget() {} }, log: (l) => logs.push(l) })
+  for (const [first, text] of [[true, /Setting up your computer/], [false, /Starting your computer/]]) {
+    const s = mk(first)
+    const r = await call(await listen(s), { headers: nav })
+    s.close()
+    assert.match(r.body, text)
+  }
+  assert.equal(logs.length, 2, 'one log per failed ensure')
+})
+test('create looks up the backup before it creates the sandbox', async () => {
+  const e2b = fakeE2B(); let seen
+  const b = boxes({ e2b, store: memoryStore(), cfg, edgeKey: 'k', presignGet: async () => { seen = e2b.made.length; return undefined }, presignPut: async () => 'P', log: () => {} })
+  await b.ensure('a@x.com')
+  assert.equal(seen, 0)
+  const bad = fakeE2B()
+  await assert.rejects(boxes({ e2b: bad, store: memoryStore(), cfg, edgeKey: 'k', presignGet: async () => { throw new Error('s3') }, presignPut: async () => 'P', log: () => {} }).ensure('a@x.com'), /s3/)
+  assert.equal(bad.made.length, 0)
+})
+test('firstSetUp: no box and no backup, or a creating record marked first', async () => {
+  const mk = (presign) => { const e2b = fakeE2B(); const store = memoryStore(); return { e2b, store, b: boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: presign, presignPut: async () => 'P', log: () => {} }) } }
+  assert.equal(await mk(async () => undefined).b.firstSetUp('a@x.com'), true)
+  assert.equal(await mk(async () => 'GET-URL').b.firstSetUp('a@x.com'), false)
+  const t = mk(async () => undefined); t.e2b.made.push({ id: 'b1' })
+  await t.store.putBox('b1', { email: 'a@x.com', creating: 1, first: true })
+  assert.equal(await t.b.firstSetUp('a@x.com'), true)
+  await t.store.putBox('b1', { email: 'a@x.com', creating: 1 })
+  assert.equal(await t.b.firstSetUp('a@x.com'), false)
 })

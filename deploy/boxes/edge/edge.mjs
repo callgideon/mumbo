@@ -9,6 +9,12 @@ import { Readable, pipeline } from 'node:stream'
 import { ownersOf } from './projects.mjs'
 
 const env = (name, fallback) => process.env[name] ?? fallback ?? (() => { throw new Error(`edge: set ${name}`) })()
+/** A number setting that must be finite and at least `min`; a bad value stops the edge at start. */
+const atLeast = (name, min, fallback) => {
+  const n = Number(env(name, String(fallback)))
+  if (!Number.isFinite(n) || n < min) throw new Error(`edge: ${name} must be a number of at least ${min}`)
+  return n
+}
 const list = (value) => value.toLowerCase().split(',').map(s => s.trim()).filter(Boolean)
 const optional = (name) => process.env[name] || undefined
 /** Required CI check names (case-sensitive). An empty list would drop the merge gate's CI requirement, so it fails. */
@@ -42,7 +48,7 @@ export const config = () => ({
   pauseIdle: env('PAUSE_IDLE', 'true') !== 'false',  // false: boxes stay running (founder, 2026-11-09); cost work comes later
   backupEveryMs: Number(env('BACKUP_MINUTES', '10')) * 60_000,
   maxRunning: Number(env('MAX_RUNNING_BOXES', '0')),  // 0: no edge-side cap; E2B's own placement errors decide
-  pageAfterMs: Number(env('PAGE_AFTER_MS', '3000')),  // a page load waiting longer on a box gets the starting page
+  pageAfterMs: atLeast('PAGE_AFTER_MS', 1000, 3000),  // a page load waiting longer on a box gets the starting page
   backupConcurrency: Number(env('BACKUP_CONCURRENCY', '8')),
   allowed: list(env('ALLOWED_EMAILS', '')),
   egressIps: list(env('BOX_EGRESS_IPS', '')),
@@ -392,15 +398,12 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
   }
 
   /** The user's running box: id, dsh launch token and E2B traffic token. Creates, resumes or repairs as needed. */
-  async function ensure(email) {
-    return ensureLocked(email)
-  }
   /** True while the person has no box and no backup, or their box is still its first creation (edge pages). */
   async function firstSetUp(email) {
     const found = await find(email)
     return found ? (await store.getBox(found.sandboxId))?.first === true : !(await presignGet(`${userPrefix(email)}/latest.tar.gz`))
   }
-  async function ensureLocked(email) {
+  async function ensure(email) {
     return store.withLock(`user:${email}`, LOCK_MS, async () => {
       const found = await find(email)   // an API error throws here: never create a second box on a failed lookup
       if (found === undefined) return pick(await create(email))
@@ -701,20 +704,20 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, log = conso
     if (to.project && !(await projects?.isMember(email, to.project))) return page(res, 403, 'No such project, or you are not one of its members.', false)
     let target
     const key = to.project ? `project:${to.project}` : email
+    // The starting page for a person or project box that is not ready; a first set-up (no backup yet) says so.
+    const starting = async () => page(res, 503, to.project ? "Starting this project's computer. This page reloads by itself."
+      : await box.firstSetUp(email).catch(() => false) ? 'Setting up your computer, about a minute. This page reloads by itself.' : 'Starting your computer. This page reloads by itself.')
     try {
       let p = pending.get(key)
-      if (!p) { p = box.ensure(key); pending.set(key, p); p.then(() => pending.delete(key), () => pending.delete(key)) }
+      if (!p) {
+        p = box.ensure(key); pending.set(key, p)
+        p.then(() => pending.delete(key), (e) => { pending.delete(key); log(JSON.stringify({ edge: 'error', user: email, project: to.project, error: e.message })) })
+      }
       // A page load that waits on a box shows the starting page after cfg.pageAfterMs; reloads join the same ensure.
       target = isNavigation(req) ? await Promise.race([p, new Promise(r => setTimeout(r, cfg.pageAfterMs, SLOW).unref())]) : await p
-      if (target === SLOW) {
-        p.catch((e) => log(JSON.stringify({ edge: 'error', user: email, project: to.project, error: e.message })))
-        if (to.project) return page(res, 503, "Starting this project's computer. This page reloads by itself.")
-        return page(res, 503, await box.firstSetUp(email).catch(() => false) ? 'Setting up your computer, about a minute. This page reloads by itself.' : 'Starting your computer. This page reloads by itself.')
-      }
+      if (target === SLOW) return await starting()
     } catch (e) {
-      log(JSON.stringify({ edge: 'error', user: email, project: to.project, error: e.message }))
-      return page(res, 503, e.capacity ? 'mumbo is at capacity right now. This page retries every few seconds.'
-        : to.project ? "Starting this project's computer. This page reloads by itself." : 'Starting your computer. This page reloads by itself.')
+      return e.capacity ? page(res, 503, 'mumbo is at capacity right now. This page retries every few seconds.') : starting()
     }
     const dsh = to.port === '3080'
     // On a member-capable project box a member is themselves (signed header), never the box owner.

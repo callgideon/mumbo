@@ -36,7 +36,6 @@ Code: `edge/edge.mjs` (router and model host in one Node process), `edge/compose
 
 **Open my box.**
 1. oauth2-proxy signs the user in with Supabase. Only oauth2-proxy reaches the router (loopback), so `X-Forwarded-Email` is trusted. The router lowercases it and checks `ALLOWED_EMAILS` (addresses or `@domains`); anyone else gets 403.
-1a. A page load that waits on a box longer than `PAGE_AFTER_MS` (3 s, config `pageAfterMs`) gets a self-refreshing 503 page: "Setting up your computer, about a minute" when the person has no box and no S3 backup (`first`, recorded on the `creating` box record and cleared when creation ends), otherwise "Starting your computer". Project hosts get a neutral text. Reloads join the same in-flight `ensure`; other requests and WebSockets simply wait.
 2. A per-email single flight finds the box by E2B metadata `user=<email>` in states running and paused, the oldest if several. E2B is the only ownership record. A failed lookup returns 503 and never creates a box.
 3. No box: refuse with a capacity page if `MAX_RUNNING_BOXES` are running. Otherwise create from `mumbo-box` with:
    - `lifecycle {onTimeout: pause, autoResume: true}`;
@@ -51,6 +50,10 @@ Code: `edge/edge.mjs` (router and model host in one Node process), `edge/compose
    - `Secure` is added to every Set-Cookie.
 
    The cookie name is the same for every user on this host. Cookie values are checked by each box's own secret, so a cookie cannot cross users.
+
+**Starting pages.**
+- A page load that waits on a box longer than `PAGE_AFTER_MS` (3 s, config `pageAfterMs`) gets a self-refreshing 503 page: "Setting up your computer, about a minute" when the person has no box and no S3 backup (`first`, recorded on the `creating` box record and cleared when creation ends), otherwise "Starting your computer". Project hosts get a neutral text.
+- Reloads on the same replica join its in-flight `ensure`; other replicas wait on the user lock. Other requests and WebSockets simply wait.
 
 **Activity and pause (R2).** Activity is recorded on:
 - every proxied request;
