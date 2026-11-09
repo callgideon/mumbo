@@ -1,4 +1,5 @@
-// Shared running-sandbox cap for boxes (edge.mjs) and children (sandboxes.mjs).
+// Shared running-sandbox cap for boxes (edge.mjs) and children (sandboxes.mjs). The cap is approximate: the count and the create are
+// not atomic, so concurrent creates can pass the limit together; the two boxes of headroom in MAX_RUNNING_UNITS absorb that.
 /** Capacity units per running sandbox, by memory: person and project boxes are 4096 MB (template.mjs default), children 2048 MB (the
  *  `mumbo-child` build argument). A child is any sandbox with `metadata.owner`. MAX_RUNNING_UNITS caps the sum over running sandboxes. */
 export const UNITS = { box: 2, child: 1 }

@@ -1,14 +1,16 @@
 # Stage 4: sandbox nodes. Plain EC2 with nested virtualization in an Auto Scaling group across three AZs.
 # A node boots from stock Ubuntu 24.04 with nodes/node.sh.tftpl; a termination is held by the lifecycle hook
-# while the node pauses its boxes (memory kept) and leaves DNS. Upgrades are blue/green: change e2b_sha, apply,
-# raise desired capacity, then lower it so the old nodes drain (review B2). Never restart orchestrators in place.
+# while the node pauses its boxes (memory kept) and leaves DNS. Upgrades are blue/green through node_count (review B2):
+# change e2b_sha and set node_count to 2N, apply, wait until the new nodes are in orchestrators.boxes.internal, then set
+# N and apply; scale-in ends the oldest launch template's nodes first and each drains through the hook. Never restart
+# orchestrators in place, and never apply while the desired capacity differs from node_count.
 variable "e2b_sha" {
   description = "Fork commit whose orchestrator and envd the nodes run (setup/build.sh uploads them)."
   type        = string
 }
 
 variable "node_count" {
-  description = "Sandbox nodes: the ASG min and desired capacity (and so the nodes-below-min alarm threshold). The edge cap is MAX_RUNNING_UNITS = 2 * (12 * node_count - 2) capacity units: a 4096 MB person or project box is 2 units (edge/template.mjs memoryMB) and a 2048 MB child sandbox is 1 (the mumbo-child build argument), 12 boxes per node on 48 GiB of guest hugepages, minus 2 boxes of headroom."
+  description = "Sandbox nodes: the ASG desired capacity and the nodes-below-min alarm threshold. The edge cap is MAX_RUNNING_UNITS = 2 * (12 * node_count - 2) capacity units: a 4096 MB person or project box is 2 units (edge/template.mjs memoryMB) and a 2048 MB child sandbox is 1 (the mumbo-child build argument), 12 boxes per node on 48 GiB of guest hugepages, minus 2 boxes of headroom."
   type        = number
   default     = 2
   validation {
@@ -131,11 +133,13 @@ resource "aws_launch_template" "nodes" {
 
 resource "aws_autoscaling_group" "nodes" {
   name                      = "${local.name}-nodes"
-  min_size                  = var.node_count
+  min_size                  = min(2, var.node_count) # below node_count: scale-in from 2N to N must not hit the minimum
   max_size                  = local.node_max_size
   desired_capacity          = var.node_count
   vpc_zone_identifier       = module.vpc.private_subnets
   health_check_type         = "EC2"
+  termination_policies      = ["OldestLaunchTemplate", "OldestInstance"]
+  enabled_metrics           = ["GroupInServiceInstances", "GroupDesiredCapacity"] # the nodes-below-min alarm reads GroupInServiceInstances
   health_check_grace_period = 600
   default_instance_warmup   = 600
   launch_template {

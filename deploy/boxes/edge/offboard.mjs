@@ -1,9 +1,11 @@
 // Offboard one person's data: kill their E2B boxes and children, delete every version of their backup, and list (never delete)
-// the projects they own. Dry run by default. This does NOT revoke access: run RUNBOOK.md "Offboarding a person" steps 1-4 first
+// the projects they own. Dry run by default. This does NOT revoke access: run RUNBOOK.md "Offboarding a person" steps 1-3 first
 // (Google, Supabase, the `!email` deny entry), or the next visit by a still-admitted person recreates the box from nothing.
 // Usage: node offboard.mjs <email>                     list what would be deleted
 //        node offboard.mjs <email> --delete <email>    delete it (the email repeated, as confirmation)
-// Env: E2B_API_URL, E2B_SANDBOX_URL, E2B_API_KEY (as template.mjs), BACKUP_BUCKET, AWS_REGION, REDIS_URL (project listing).
+// Env: E2B_API_URL, E2B_SANDBOX_URL, E2B_API_KEY (as template.mjs), BACKUP_BUCKET, AWS_REGION, and for the project listing REDIS_URL
+// (the edge's ElastiCache `mumbo-boxes-edge`, through the SSM port forward in the RUNBOOK) with REDIS_SERVERNAME (its endpoint name, for TLS).
+// Pause snapshots in the templates bucket are not covered (RUNBOOK).
 // Run from deploy/boxes/edge through the tunnel in RUNBOOK.md. The edge drops its Redis record of a box once E2B no longer has it.
 import { pathToFileURL } from 'node:url'
 import { userPrefix } from './edge.mjs'
@@ -38,6 +40,11 @@ export function s3Adapter(client, { ListObjectVersionsCommand, DeleteObjectsComm
       }
     },
   }
+}
+
+/** Throws unless the Redis behind `client` holds the edge's box index; the wrong store would list no projects and look clean. */
+export async function assertEdgeStore(client) {
+  if (!(await client.sCard('boxes'))) throw new Error('REDIS_URL does not point at the edge store: it holds no `boxes` set. Use the ElastiCache mumbo-boxes-edge endpoint, not MemoryDB')
 }
 
 async function listSandboxes(e2b, query) {
@@ -79,13 +86,14 @@ export async function offboard({ email, apply, e2b, s3, bucket, store, say = con
 
 async function main() {
   const { email, apply } = offboardArgs(process.argv.slice(2))
-  for (const k of ['BACKUP_BUCKET', 'REDIS_URL', 'E2B_API_KEY']) if (!process.env[k]) throw new Error(`${k} is required`)
+  for (const k of ['BACKUP_BUCKET', 'REDIS_URL', 'REDIS_SERVERNAME', 'E2B_API_KEY']) if (!process.env[k]) throw new Error(`${k} is required`)
   const e2b = await import('e2b')
   const { S3Client, ListObjectVersionsCommand, DeleteObjectsCommand } = await import('@aws-sdk/client-s3')
   const { createClient } = await import('redis')
   const { redisStore } = await import('./store.mjs')
-  const redis = createClient({ url: process.env.REDIS_URL })
+  const redis = createClient({ url: process.env.REDIS_URL, socket: { servername: process.env.REDIS_SERVERNAME } })
   await redis.connect()
+  await assertEdgeStore(redis)
   const s3 = s3Adapter(new S3Client({ region: process.env.AWS_REGION ?? 'us-east-1' }), { ListObjectVersionsCommand, DeleteObjectsCommand })
   const store = redisStore(redis)
   try { await offboard({ email, apply, e2b: e2b.default?.Sandbox ? e2b.default : e2b, s3, bucket: process.env.BACKUP_BUCKET, store }) } finally { await store.close() }

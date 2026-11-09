@@ -3,14 +3,14 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { userPrefix } from './edge.mjs'
 import { memoryStore } from './store.mjs'
-import { offboard, offboardArgs, s3Adapter } from './offboard.mjs'
+import { assertEdgeStore, offboard, offboardArgs, s3Adapter } from './offboard.mjs'
 
 test('arguments: dry run by default; --delete must repeat the email', () => {
   assert.deepEqual(offboardArgs(['A@Mumbo.si']), { email: 'a@mumbo.si', apply: false })
   assert.deepEqual(offboardArgs(['a@mumbo.si', '--delete', 'A@mumbo.si']), { email: 'a@mumbo.si', apply: true })
   for (const bad of [[], ['nobody'], ['a@mumbo.si', '--delete'], ['a@mumbo.si', '--delete', 'b@mumbo.si'], ['a@mumbo.si', '--force', 'a@mumbo.si'], ['a@mumbo.si', '--delete', 'a@mumbo.si', 'x']])
     assert.throws(() => offboardArgs(bad), /usage|confirmation/, bad.join(' '))
-}) 
+})
 
 /** An E2B fake that, like a loose backend, returns every sandbox for any query, so the script's own exact filter is under test. */
 function fakes({ stuck = false } = {}) {
@@ -81,4 +81,9 @@ test('S3 adapter: pages, delete markers, batches of 1000, and per-object errors'
   assert.deepEqual(sent.map(c => c.input.Delete.Objects.length), [1000, 1000, 500])
   errors = [{ Message: 'AccessDenied' }]
   await assert.rejects(s3.deleteVersions('b', [{ Key: 'k', VersionId: '1' }]), /refused 1.*AccessDenied/)
+})
+
+test('a store without the edge box index is refused', async () => {
+  await assert.rejects(assertEdgeStore({ sCard: async () => 0 }), /does not point at the edge store/)
+  await assertEdgeStore({ sCard: async () => 3 })
 })

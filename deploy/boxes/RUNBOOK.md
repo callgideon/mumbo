@@ -43,31 +43,71 @@ Postgres is busy or short of space. Storage grows automatically up to 500 GB; CP
 1. In the fork checkout at the commit: `setup/build.sh <fork>`; it prints the tag.
 2. Set `e2b_sha` in `terraform.tfvars`, apply `-target=aws_ecs_task_definition.setup`, run `setup/run.sh` (migrations, idempotent).
 3. Apply. api and client-proxy roll with a circuit breaker.
-4. Nodes: raise the ASG desired capacity by the node count, wait until the new nodes are in DNS (`orchestrators.boxes.internal`), then terminate the old ones one at a time. Each termination pauses its boxes first. Never restart orchestrators in place on a node with boxes you cannot afford to pause.
+4. Nodes: blue/green through `node_count` ("Adding nodes", step 5). Each termination pauses its boxes first. Never restart orchestrators in place on a node with boxes you cannot afford to pause.
 
 ### Adding nodes
-`node_count` in `prod/terraform.tfvars` is the one setting. It is the ASG min and desired capacity (1..10; `max_size` is 10, so the `nodes-below-min` alarm threshold follows it) and sets the edge cap `MAX_RUNNING_UNITS = 2 * (12 * node_count - 2)`.
+`node_count` in `prod/terraform.tfvars` is the one setting. It is the ASG desired capacity (1..10; `max_size` is 10), the `nodes-below-min` alarm threshold, and sets the edge cap `MAX_RUNNING_UNITS = 2 * (12 * node_count - 2)`. The ASG `min_size` is `min(2, node_count)`, below `node_count`, so scale-in never meets the minimum.
 
-The cap counts capacity units of running sandboxes, by memory: a person or project box is 4096 MB (`edge/template.mjs`, default `memoryMB`) and costs 2 units; a child sandbox is 2048 MB (the `mumbo-child` template build argument) and costs 1 (`edge/capacity.mjs`). Twelve boxes per node is 48 GiB of guest hugepages (`hugepages` in `prod/nodes.tf`) divided by 4 GiB; 2 boxes of headroom are subtracted in total. Boxes and children share the cap, and a child create is refused at the limit like a box create. Project boxes use the person template until `PROJECT_TEMPLATE` is set. `box_ram = 8192` in `prod/control.tf` is only the E2B tier's per-sandbox RAM ceiling, not a box size. Limits: 2 nodes 44 units (22 boxes), 3 nodes 68, 4 nodes 92.
-1. Edit `node_count`. Run `terraform -chdir=deploy/boxes/prod plan`. Expect `aws_autoscaling_group.nodes` (`min_size`, `desired_capacity`), `aws_ecs_task_definition.edge` (replaced) and `aws_ecs_service.edge`. Read every other line: `APPROVER_EMAILS` and the `NTFY_TOPIC` secret must not change.
+The cap counts capacity units of running sandboxes, by memory: a person or project box is 4096 MB (`edge/template.mjs`, default `memoryMB`) and costs 2 units; a child sandbox is 2048 MB (the `mumbo-child` template build argument) and costs 1 (`edge/capacity.mjs`). Twelve boxes per node is 48 GiB of guest hugepages (`hugepages` in `prod/nodes.tf`) divided by 4 GiB; 2 boxes of headroom are subtracted in total. Boxes and children share the cap, and a child create is refused at the limit like a box create. The cap is approximate: the edge counts, then creates, so concurrent creates can pass the limit together, and the headroom absorbs that. Project boxes use the person template until `PROJECT_TEMPLATE` is set. `box_ram = 8192` in `prod/control.tf` is only the E2B tier's per-sandbox RAM ceiling, not a box size. Limits: 2 nodes 44 units (22 boxes), 3 nodes 68, 4 nodes 92.
+
+The edge also gets `MAX_RUNNING_BOXES = 12 * node_count - 2`, read only by edge images from before the units change, so a rollback to one stays capped. Remove it from `prod/edge.tf` (and its guard in `edge/config.test.mjs`) when no such image can be rolled back to.
+1. Edit `node_count`. Run `terraform -chdir=deploy/boxes/prod plan`. Expect `aws_autoscaling_group.nodes`, `aws_cloudwatch_metric_alarm.ops["nodes-below-min"]` (threshold), `aws_ecs_task_definition.edge` (replaced) and `aws_ecs_service.edge`. Read every other line: `APPROVER_EMAILS` and the `NTFY_TOPIC` secret must not change.
 2. Apply. New nodes boot from the current launch template, join `orchestrators.boxes.internal` and take new boxes; existing boxes stay where they are.
-3. Verify. The ASG: `aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names mumbo-boxes-nodes --query 'AutoScalingGroups[0].[DesiredCapacity,length(Instances[?LifecycleState==`InService`])]'` shows `node_count` twice. The edge rollout: `aws ecs describe-services --cluster mumbo-boxes-e2b --services edge --query 'services[0].deployments[].[status,taskDefinition,rolloutState,runningCount]'` shows one `PRIMARY` deployment, `COMPLETED`, on the new task definition revision. `aws ecs describe-task-definition --task-definition mumbo-boxes-edge --query "taskDefinition.containerDefinitions[?name=='edge'].environment[] | [?name=='MAX_RUNNING_UNITS']"` shows the new limit. The `nodes-below-min` alarm is OK.
-4. Lowering `node_count`: only when the running units fit under the new limit. Count them with `E2B_API_URL=... E2B_SANDBOX_URL=... E2B_API_KEY=... node -e "import('./capacity.mjs').then(async c=>{const {Sandbox}=await import('e2b');console.log(await c.runningUnits({Sandbox}))})"` from `deploy/boxes/edge` (tunnel and key as in "Rebuild the box template"); the result must be at most `2 * (12 * new_count - 2)`. Surplus nodes terminate through the drain hook: their boxes pause and resume on the remaining nodes.
-5. Blue/green node upgrades go through `node_count` from now on: set it to 2N and apply; when the new nodes are in `orchestrators.boxes.internal`, terminate each old node one at a time with `aws autoscaling terminate-instance-in-auto-scaling-group --instance-id <id> --should-decrement-desired-capacity`; set `node_count` back to N and apply. Never apply while the ASG desired capacity differs from `node_count`, and do not set desired capacity by hand.
+3. Verify. The ASG must show `node_count` twice:
+   ```sh
+   aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names mumbo-boxes-nodes \
+     --query 'AutoScalingGroups[0].[DesiredCapacity,length(Instances[?LifecycleState==`InService`])]'
+   ```
+   The edge rollout must show one `PRIMARY` deployment, `COMPLETED`, on the new task definition revision:
+   ```sh
+   aws ecs describe-services --cluster mumbo-boxes-e2b --services edge \
+     --query 'services[0].deployments[].[status,taskDefinition,rolloutState,runningCount]'
+   aws ecs describe-task-definition --task-definition mumbo-boxes-edge \
+     --query "taskDefinition.containerDefinitions[?name=='edge'].environment[] | [?starts_with(name, 'MAX_RUNNING')]"
+   ```
+   The `nodes-below-min` alarm reads `GroupInServiceInstances` (group metrics are enabled on the ASG) and returns to OK once the new nodes are in service.
+4. Lowering `node_count`: only when the running units fit under the new limit. Count them from `deploy/boxes/edge` with the tunnel and key from "Rebuild the box template":
+   ```sh
+   cd deploy/boxes/edge && E2B_API_URL=... E2B_API_KEY=... node -e "import('./capacity.mjs').then(async c=>{const {Sandbox}=await import('e2b');console.log(await c.runningUnits({Sandbox}))})"
+   ```
+   The result must be at most `2 * (12 * new_count - 2)`. Surplus nodes terminate through the drain hook: their boxes pause and resume on the remaining nodes. The same check applies when blue/green goes back from 2N to N.
+5. Blue/green node upgrades go through `node_count` only. Set `e2b_sha` and `node_count = 2N` (N at most 5) and apply; the unit cap doubles while both sets run. Wait until the new nodes are in `orchestrators.boxes.internal` and the ASG shows 2N in service. Set `node_count = N` and apply: scale-in uses `OldestLaunchTemplate`, so the old nodes terminate, each pausing its boxes through the drain hook. Never apply while the ASG desired capacity differs from `node_count`, and never change it with `set-desired-capacity` or a decrementing terminate.
 
 ### Offboarding a person
-Deleting a box and its backup does not remove the person's access. A domain-admitted person (`@mumbo.si`, `@cambrialabs.ai`) would sign in again and get a new empty box, and an existing oauth2-proxy session stays valid for up to 168 hours. Do these in order.
+Deleting a box and its backup does not remove the person's access. A domain-admitted person (`@mumbo.si`, `@cambrialabs.ai`) would sign in again and get a new empty box, and an existing oauth2-proxy session stays valid for up to 168 hours. Do steps 1 to 3 in order, then 4.
 1. Disable the account in Google Workspace (Admin console, Directory, Users, the person, Suspend user).
-2. Delete or ban the user in Supabase (dashboard of project `qkvcouccrhyjiarkauyo`, Authentication, Users, the person, "..." menu, Delete user or Ban user), so no email link or Google sign-in produces a new token.
-3. Deny the address at the edge. The allowlist accepts `!<address>` entries, an exact address (case-insensitive) that is refused before any allow match, and the edge checks it on every request, so it also cuts off a live session. Append it and roll the edge:
-   `P=/mumbo/boxes/allowed-emails; V=$(aws ssm get-parameter --name $P --query Parameter.Value --output text); aws ssm put-parameter --name $P --type String --overwrite --value "$V,!<email>"`
-   `aws ecs update-service --cluster mumbo-boxes-e2b --service edge --force-new-deployment`
-   Wait for `aws ecs describe-services --cluster mumbo-boxes-e2b --services edge --query 'services[0].deployments[].rolloutState'` to show only `COMPLETED`. Without this step an existing session stays valid for up to 168 hours. Rotating the oauth2-proxy cookie secret (`/mumbo/boxes/cookie-secret`) followed by the same forced deployment signs everyone out at once; use it only if the person's session itself is a concern for all users.
-4. Delete the data. From `deploy/boxes/edge` (`npm ci` once), with the tunnel from "Rebuild the box template" (`E2B_API_URL`, `E2B_SANDBOX_URL`; `E2B_API_KEY` is the team key in the `mumbo-boxes/e2b` secret, `TEAM_API_KEY` field), `BACKUP_BUCKET=mumbo-boxes-backup-<account id>`, `AWS_REGION=us-east-1`, AWS credentials that may list and delete object versions in that bucket, and `REDIS_URL` (the MemoryDB address, reached through the same tunnel, only to list owned projects):
-   `cd deploy/boxes/edge && node offboard.mjs <email>` (dry run: every sandbox id with its owner, every backup version, owned projects).
-   `cd deploy/boxes/edge && node offboard.mjs <email> --delete <email>` kills the person's boxes and children (metadata `user` or `owner` equal to the email, nobody else's), deletes every backup version under `users/<sha256 of the lowercased email>/`, then lists again and exits with an error if anything remains.
-5. Projects the person owns are listed, never deleted. Killing one or transferring it is the founder's decision. To kill a project box: `node -e "import('e2b').then(({Sandbox})=>Sandbox.kill('<sandbox id from the dry run>'))"` with the same E2B variables; there is no transfer command today.
-6. The edge drops its Redis record of a killed box on its next sweep. The person's chat and project data live only in the box and its backup, which step 4 removes; audit records of approvals (`audit/approvals/` in the backup bucket) are kept on purpose.
+2. Ban the user in Supabase (dashboard of project `qkvcouccrhyjiarkauyo`, Authentication, Users, the person, "..." menu, Ban user). Ban also blocks signing up again with the address; Delete user only removes the record and lets the address sign up anew.
+3. Deny the address at the edge. The allowlist accepts `!<address>` entries, an exact address (case-insensitive) that is refused before any allow match; the edge checks the allowlist on every request, so it also cuts off a live session. A malformed `!` entry stops the edge at startup. Append it (the literal part is single-quoted because `!` triggers history expansion inside double quotes in interactive bash and zsh):
+   ```sh
+   P=/mumbo/boxes/allowed-emails
+   V=$(aws ssm get-parameter --name $P --query Parameter.Value --output text)
+   aws ssm put-parameter --name $P --type String --overwrite --value "$V"',!<email>'
+   aws ssm get-parameter --name $P --query Parameter.Value --output text
+   ```
+   The read-back must end with `,!<email>`; stop and fix it if not. Then roll the edge and wait:
+   ```sh
+   aws ecs update-service --cluster mumbo-boxes-e2b --service edge --force-new-deployment
+   aws ecs describe-services --cluster mumbo-boxes-e2b --services edge --query 'services[0].deployments[].rolloutState'
+   ```
+   Wait until only `COMPLETED` is shown. Without this step an existing session stays valid for up to 168 hours. Rotating the oauth2-proxy cookie secret (`/mumbo/boxes/cookie-secret`) with the same forced deployment signs everyone out at once; use it only if all sessions must end.
+   Deny entries are exact addresses. Add a `!` entry for each Workspace alias of the person; a plus-address (`name+x@mumbo.si`) is a different address and is stopped only by step 1 (the disabled account). Owned projects stay tied to the address, so removing a deny entry later hands them to whoever holds that address.
+4. Delete the data, from `deploy/boxes/edge` (`npm ci` once). The script needs the E2B tunnel from "Rebuild the box template" (`E2B_API_URL`, `E2B_SANDBOX_URL`, and `E2B_API_KEY`, the team key in the `mumbo-boxes/e2b` secret, `TEAM_API_KEY` field), `BACKUP_BUCKET=mumbo-boxes-backup-<account id>`, `AWS_REGION=us-east-1`, AWS credentials that may list and delete object versions in that bucket, and the edge's Redis (ElastiCache `mumbo-boxes-edge`, not MemoryDB) to list owned projects. Forward it through a node:
+   ```sh
+   EP=$(terraform -chdir=deploy/boxes/prod output -raw edge_redis_endpoint)
+   NODE=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names mumbo-boxes-nodes \
+     --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`]|[0].InstanceId' --output text)
+   aws ssm start-session --target $NODE --document-name AWS-StartPortForwardingSessionToRemoteHost \
+     --parameters "host=$EP,portNumber=6379,localPortNumber=16379"   # leave running in its own terminal
+   export REDIS_URL=rediss://127.0.0.1:16379 REDIS_SERVERNAME=$EP    # the server certificate is checked against REDIS_SERVERNAME
+   ```
+   The script refuses a Redis that holds no `boxes` set. Then:
+   ```sh
+   cd deploy/boxes/edge && node offboard.mjs <email>                    # dry run: sandbox ids with owners, backup versions, owned projects
+   cd deploy/boxes/edge && node offboard.mjs <email> --delete <email>   # kill, delete, list again, fail if anything remains
+   ```
+   `--delete` kills the person's boxes and children (metadata `user` or `owner` equal to the email, nobody else's) and deletes every backup version under `users/<sha256 of the lowercased email>/`.
+5. Projects the person owns are listed, never deleted. Killing one or transferring it is the founder's decision. To kill a project box: `node -e "import('e2b').then(({Sandbox})=>Sandbox.kill('<sandbox id from the dry run>'))"` from `deploy/boxes/edge` with the same E2B variables; there is no transfer command today.
+6. The edge drops its Redis record of a killed box on its next sweep. The person's chats and files live in the box and its backup, which step 4 removes. Not removed: the audit records of approvals (`audit/approvals/` in the backup bucket, kept on purpose), and pause snapshots of a box that was paused. Those are objects named by an E2B build UUID (`<uuid>/memfile`, `rootfs.ext4`) in the templates bucket (`mumbo-boxes-templates-<account id>`), not by the person; the bucket's lifecycle rule expires only noncurrent versions (14 days), so a current snapshot object does not expire. Whether E2B deletes those objects when a sandbox is killed is not verified; treat them as retained until the boxes session confirms or adds a cleanup.
 
 ### Ship a new edge
 Commit, `docker build` `deploy/boxes/edge` and push to `mumbo-boxes/edge:<commit>`, set `edge_tag`, apply.

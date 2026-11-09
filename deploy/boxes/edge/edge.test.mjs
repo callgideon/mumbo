@@ -729,9 +729,17 @@ test('child creation goes through the same unit cap', async () => {
   assert.equal(created.length, 2)
 })
 
+test('a box create at 6 of 7 units is refused: it weighs 2, not the child weight of 1', async () => {
+  const e2b = fakeE2B()
+  e2b.Sandbox.list = ({ query }) => { let more = true; return { get hasNext() { return more }, nextItems: async () => { more = false; return query.metadata ? [] : [{ metadata: { user: 'b@x.com' } }, { metadata: { user: 'c@x.com' } }, { metadata: { user: 'd@x.com' } }] } } }
+  const b = boxes({ e2b, store: memoryStore(), cfg: { ...cfg, maxRunningUnits: 7 }, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'P', log: () => {} })
+  await assert.rejects(b.ensure('a@x.com'), /capacity/)
+})
+
 test('a !address entry denies exactly that address, before any allow match', () => {
   const list = ['@mumbo.si', '!a@mumbo.si']
   assert.equal(admitted(list, 'a@mumbo.si'), false)
+  assert.equal(admitted(['@mumbo.si', '!A@mumbo.si'], 'a@mumbo.si'), false, 'a mixed-case entry still denies')
   assert.equal(admitted(list, 'A@Mumbo.si'), false)
   assert.ok(admitted(list, 'aa@mumbo.si'), 'a longer local part is not denied')
   assert.ok(admitted(list, 'b@mumbo.si'))

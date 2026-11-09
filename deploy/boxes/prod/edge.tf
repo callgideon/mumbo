@@ -46,8 +46,11 @@ variable "signin_cookie_name" {
 
 locals {
   public_host  = "boxes.mumbo.si"
-  llm_host     = "llm.boxes.mumbo.si"
-  backup_store = "mumbo-boxes-backup-${data.aws_caller_identity.this.account_id}" # created by the trial (../edge.tf); users' backups carry over
+  supabase_url = "https://qkvcouccrhyjiarkauyo.supabase.co"
+  # oauth2-proxy's callback: Mumbo's OAuth client's redirect URI, the only one the sign-in page sends a code to.
+  oauth_redirect_url = "https://${local.public_host}/oauth2/callback"
+  llm_host           = "llm.boxes.mumbo.si"
+  backup_store       = "mumbo-boxes-backup-${data.aws_caller_identity.this.account_id}" # created by the trial (../edge.tf); users' backups carry over
   # The shared Fargate server's names; they redirect here since it was retired (2026-11-09).
   old_hosts = ["app.mumbo.si", "api.mumbo.si"]
   # PROJECT_DOMAIN: project boxes are p-<16 hex>.<this>. It must stay in the mumbo.si zone.
@@ -229,7 +232,7 @@ resource "aws_iam_role_policy" "edge" {
 resource "aws_iam_role_policy" "exec_edge" {
   role = aws_iam_role.exec.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [
-    { Effect = "Allow", Action = "ssm:GetParameters", Resource = [for p in values(merge(local.proxy_ssm, local.edge_ssm)) : "${local.ssm}/${p}"] },
+    { Effect = "Allow", Action = "ssm:GetParameters", Resource = distinct([for p in values(merge(local.proxy_ssm, local.edge_ssm)) : "${local.ssm}/${p}"]) },
     { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = data.aws_secretsmanager_secret.github_app.arn },
   ] })
 }
@@ -237,13 +240,14 @@ resource "aws_iam_role_policy" "exec_edge" {
 data "aws_secretsmanager_secret" "github_app" { name = "${local.name}/github-app" }
 
 locals {
-  ssm = "arn:aws:ssm:us-east-1:${data.aws_caller_identity.this.account_id}:parameter/mumbo/boxes"
-  # Container env name -> SSM parameter under /mumbo/boxes; these are all the exec role may read.
-  proxy_ssm = { OAUTH2_PROXY_CLIENT_ID = "oauth-client-id", OAUTH2_PROXY_CLIENT_SECRET = "oauth-client-secret", OAUTH2_PROXY_COOKIE_SECRET = "cookie-secret" }
+  ssm = "arn:aws:ssm:us-east-1:${data.aws_caller_identity.this.account_id}:parameter/mumbo"
+  # Container env name -> SSM parameter under /mumbo; these are all the exec role may read.
+  proxy_ssm = { OAUTH2_PROXY_CLIENT_ID = "boxes/oauth-client-id", OAUTH2_PROXY_CLIENT_SECRET = "boxes/oauth-client-secret", OAUTH2_PROXY_COOKIE_SECRET = "boxes/cookie-secret" }
   edge_ssm = merge(
-    { ALLOWED_EMAILS = "allowed-emails" },
-    var.github_agent_token_enabled ? { GITHUB_AGENT_TOKEN = "github-agent-token" } : {},
-    var.ntfy_enabled ? { NTFY_TOPIC = "ntfy-topic" } : {},
+    # The Supabase publishable key, for the sign-in page; the retired web app's parameter (deploy/infra).
+    { ALLOWED_EMAILS = "boxes/allowed-emails", SUPABASE_ANON_KEY = "prod/supabase-anon-key", MUMBO_OAUTH_CLIENT_IDS = "boxes/oauth-client-id" },
+    var.github_agent_token_enabled ? { GITHUB_AGENT_TOKEN = "boxes/github-agent-token" } : {},
+    var.ntfy_enabled ? { NTFY_TOPIC = "boxes/ntfy-topic" } : {},
   )
 }
 resource "aws_ecs_task_definition" "edge" {
@@ -265,14 +269,17 @@ resource "aws_ecs_task_definition" "edge" {
       essential    = true
       portMappings = [{ containerPort = 4180, protocol = "tcp" }]
       command = [
-        "--provider=oidc", "--oidc-issuer-url=https://qkvcouccrhyjiarkauyo.supabase.co/auth/v1",
-        "--redirect-url=https://${local.public_host}/oauth2/callback", "--scope=openid email", "--code-challenge-method=S256",
+        "--provider=oidc", "--oidc-issuer-url=${local.supabase_url}/auth/v1",
+        "--redirect-url=${local.oauth_redirect_url}", "--scope=openid email", "--code-challenge-method=S256",
         "--cookie-secure=true", "--cookie-samesite=lax", "--cookie-csrf-per-request=true", "--cookie-csrf-expire=10m",
         # One sign-in for the approve page and project boxes; the edge never forwards these cookies to a box.
         "--cookie-name=${var.signin_cookie_name}", "--cookie-domain=.${local.public_host}", "--whitelist-domain=.${local.public_host}",
         "--reverse-proxy=true", "--pass-user-headers=true", "--skip-provider-button=true", "--email-domain=*",
         "--upstream=http://127.0.0.1:8080", "--http-address=0.0.0.0:4180",
         "--upstream-timeout=120s", # a first visit creates the box and restores its backup before answering
+        # The Supabase sign-in page and its scripts (edge authUi), for visitors not signed in yet. v7.9 matches the
+        # request URI with its query; the edge serves exactly these GETs on the approve host and redirects the page there.
+        "--skip-auth-route=GET=^/oauth/consent([?].*)?$", "--skip-auth-route=GET=^/auth-ui/(supabase|config|consent)[.]js$",
       ]
       secrets          = [for k, p in local.proxy_ssm : { name = k, valueFrom = "${local.ssm}/${p}" }]
       logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.edge.name, awslogs-region = "us-east-1", awslogs-stream-prefix = "oauth2-proxy" } }
@@ -295,10 +302,15 @@ resource "aws_ecs_task_definition" "edge" {
         AWS_REGION        = "us-east-1"
         PAUSE_IDLE        = "false" # boxes stay running (founder, 2026-11-09); cost work later
         PROJECT_DOMAIN    = local.project_domain
-        SIGNIN_COOKIE     = var.signin_cookie_name
+        SUPABASE_URL      = local.supabase_url
+        # The sign-in page consents only for this client (MUMBO_OAUTH_CLIENT_IDS, below) and redirect URI.
+        MUMBO_OAUTH_REDIRECT_URIS = local.oauth_redirect_url
+        SIGNIN_COOKIE             = var.signin_cookie_name
         # Capacity units, not boxes: a person or project box (4096 MB, edge/template.mjs) is 2, a child sandbox (2048 MB, the
-        # mumbo-child build argument) is 1. 12 boxes per node (nodes.tf hugepages) minus 2 of headroom.
+        # mumbo-child build argument) is 1. 12 boxes per node (nodes.tf hugepages) minus 2 of headroom. An edge image from before
+        # the units change reads MAX_RUNNING_BOXES (box count) instead; both stay until no such image can be rolled back to.
         MAX_RUNNING_UNITS = tostring(2 * (12 * var.node_count - 2))
+        MAX_RUNNING_BOXES = tostring(12 * var.node_count - 2)
         # Approvals. PROJECT_TEMPLATE stays unset (it defaults to BOX_TEMPLATE) until the mumbo-project template is built.
         APPROVE_HOST         = "approve.${local.public_host}"
         APPROVER_EMAILS      = var.approver_emails
