@@ -1,6 +1,7 @@
 /**
  * Host desktop availability, file associations, and open/reveal actions over the Session Remote.
- * The desktop answer is read once per page; a failed read renders no control.
+ * The desktop answer is read once per page; a failed read, or a page that may not open Host paths,
+ * renders no control and issues no association query.
  */
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { RemoteResult } from '@deepseek-ai/dsh-api-remotes/client'
@@ -32,8 +33,10 @@ export class OpenInAppPathController {
 
   /**
    * @param remote - the Session Remote namespace answering availability and running gestures.
+   * @param launchable - whether this page may open Host paths now; while false, {@link load} asks
+   * nothing and publishes no desktop.
    */
-  constructor(private readonly remote: OpenInAppPathRemote) {}
+  constructor(private readonly remote: OpenInAppPathRemote, private readonly launchable: () => boolean) {}
 
   /**
    * Read desktop availability once per controller life; concurrent calls share the read.
@@ -84,6 +87,10 @@ export class OpenInAppPathController {
 
   private async run(): Promise<void> {
     let available = false
+    if (!this.launchable()) {
+      this.desktop.set(available)
+      return
+    }
     try {
       const result = await this.remote.session.canOpenWorkspacePath()
       available = result.ok && result.value

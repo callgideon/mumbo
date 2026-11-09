@@ -156,6 +156,7 @@ describe('Assembled viewer page global configuration privacy', () => {
     if (forms === undefined) throw new Error('assembled viewer page configuration forms did not activate')
     await act(async () => { await forms.describe().ensure() })
     // The viewer's access snapshot omits `settings/describe`, so the page issues no settings read at all.
+    // The direct-caller loop below still proves the Owner Gateway refuses these endpoints through remote access.
     expect(relay.answers.filter(item => item.endpoint === 'settings/describe')).toEqual([])
     expect(forms.describe().getSnapshot()).toMatchObject({ status: 'idle', view: undefined, error: null })
 

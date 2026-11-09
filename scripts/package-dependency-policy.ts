@@ -94,9 +94,8 @@ const PEER_REQUIRED_HOST_EXPORTS = {
   // Readers recognize a deadline's TimeoutReason only by `instanceof` against their own copy.
   '@deepseek-ai/dsh-timeout': ['deadline'],
   // The edge-member Host half mints its notices with the message factory of the LLM package the agent loop
-  // admits them through, and reads the Workspace domain name from the package whose registry it runs beside.
+  // admits them through.
   '@deepseek-ai/dsh-llm': ['createUserMessage'],
-  '@deepseek-ai/dsh-workspace': ['workspaceDomainSpec'],
 } as const satisfies HostDependencyExports
 
 /** Exact import specifier to reviewed runtime exports. */

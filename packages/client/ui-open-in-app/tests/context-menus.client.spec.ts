@@ -36,7 +36,7 @@ it('offers image actions on file targets, copies absolute paths, and keeps save 
   ctx.provide('contextMenus', { register: registry.register.bind(registry), notify } as never)
   ctx.provide('sessions', { list: createSnapshotStore({ byId: { [id]: { cwd: '/workspace' } } }) } as never)
   ctx.provide('fileActions', { save, copyImage: copy, canSaveAs: true } as never)
-  const paths = new OpenInAppPathController(remote)
+  const paths = new OpenInAppPathController(remote, () => true)
   const directories = new OpenInAppController()
   const fiber = ctx.plugin({ apply: (plugin: Context) => {
     registerContextMenus(plugin, paths, key => key, directories, vi.fn())

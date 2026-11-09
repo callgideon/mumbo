@@ -56,13 +56,17 @@ export const inject = ['contextMenus', 'sidebarRight', 'sidebarRightTabs', 'sess
  */
 export function apply(ctx: ClientContext): void {
   const controller = new OpenInAppController()
-  // The apps and launch routes answer only the owner. `session/openWorkspacePath` is the Remote action
-  // for the same launch of a Host application, so a page without it probes nothing and offers no app.
+  // The HTTP open-in-app routes (apps probe, icons, launch) sit outside the Gateway and answer only the
+  // owner, so no access answer names them. `session/openWorkspacePath`, the Remote action that opens a Host
+  // path in a Host application, stands in for them: a page without it probes no apps, reads no desktop or
+  // file associations, and offers no opener.
+  let launchable = false
   ctx.remoteAccess.whenAccess('session/openWorkspacePath', () => {
+    launchable = true
     void controller.load()
-    return () => {}
+    return () => { launchable = false }
   })
-  const paths = new OpenInAppPathController(ctx.remote)
+  const paths = new OpenInAppPathController(ctx.remote, () => launchable)
   ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }), 'open-in-app: dictionaries')
   const t = ctx.locale.bind(NS)
   // Keep operation feedback visible after its initiating panel closes.

@@ -45,7 +45,7 @@ Both entries group models by provider, with DeepSeek Account first and DeepSeek 
 
 The composer replaces the model and effort text with the Models icon when the expanded controls cannot share one line, and restores the text when space permits. The full selection remains available in the trigger's accessible name, tooltip, and menu.
 
-A page whose Session access does not list `session/selectModel` still shows the current model and effort in the trigger's usual color, without its chevron, on a disabled trigger that opens no menu.
+A page whose Session access does not list `session/selectModel` still shows the current model and effort in the trigger's usual color, without its chevron. The trigger stays in the tab order with `aria-disabled`, announces a localized "Model: name" label without menu semantics, keeps its tooltip, and opens no menu; a locked composer still dims and disables it.
 
 ### Model label extensions
 

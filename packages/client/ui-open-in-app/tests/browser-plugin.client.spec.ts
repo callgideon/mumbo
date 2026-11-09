@@ -411,6 +411,13 @@ describe('open-in-app browser half', () => {
     expect(allows).toHaveBeenCalledWith('session/openWorkspacePath')
     expect(fetcher).not.toHaveBeenCalled()
     expect(injected.hooks.openInAppApps.getSnapshot()).toBeNull()
+    // The document-preview path controls read no desktop, so they render nothing and query no associations.
+    const pathEntry = ctx.slots.entries('sidebar.right.tab.document.actions')[0]
+    const pathInjected: Partial<OpenPathInjected> | undefined = pathEntry?.inject?.()
+    if (pathInjected?.hooks === undefined || pathInjected.loadDesktop === undefined) throw new Error('expected the injected path controls')
+    await pathInjected.loadDesktop()
+    expect(remote.session.canOpenWorkspacePath).not.toHaveBeenCalled()
+    expect(pathInjected.hooks.openInAppDesktop.getSnapshot()).toBe(false)
     await fiber.dispose()
   })
 

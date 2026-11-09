@@ -499,27 +499,55 @@ describe('ModelSelect reasoning effort', () => {
     expect(load).not.toHaveBeenCalled()
   })
 
-  it('states the model on a trigger that opens no menu while the page may not select it', () => {
+  it('states the model on a focusable trigger that claims and opens no menu while the page may not select it', () => {
     const useAccess = vi.fn((action: string) => action !== 'session/selectModel')
     const select = vi.fn()
+    const load = vi.fn()
     render(<ModelSelect useAccess={useAccess} renderSlot={renderLabel}
       locked={false}
       available
       directory={createSnapshotStore(state())}
-      load={vi.fn()} resolveText={resolveText}
+      load={load} resolveText={resolveText}
       select={select}
       t={t}
     />)
 
     expect(useAccess).toHaveBeenCalledWith('session/selectModel')
-    const trigger = screen.getByRole('button', { name: /^选择模型，当前 / })
-    expect(trigger.hasAttribute('disabled')).toBe(true)
+    const trigger = screen.getByRole('button', { name: '模型：DeepSeek-V4-Flash，推理等级 High' })
+    expect(trigger.getAttribute('aria-disabled')).toBe('true')
+    expect(trigger.hasAttribute('aria-haspopup')).toBe(false)
+    expect(trigger.hasAttribute('aria-expanded')).toBe(false)
+    expect(trigger.hasAttribute('disabled')).toBe(false)
+    expect(trigger.getAttribute('title')).toBe('DeepSeek-V4-Flash · High')
     expect(trigger.hasAttribute('data-read-only')).toBe(true)
     // Only the Models icon remains; the chevron that promises a menu is absent.
     expect(trigger.querySelectorAll('svg')).toHaveLength(1)
+
+    // Keyboard path: the trigger takes focus, and Enter, Space, and the activation they produce open nothing.
+    trigger.focus()
+    expect(document.activeElement).toBe(trigger)
+    fireEvent.keyDown(trigger, { key: 'Enter' })
+    fireEvent.keyDown(trigger, { key: ' ' })
     fireEvent.click(trigger)
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' })
     expect(screen.queryByRole('menu')).toBeNull()
+    expect(screen.queryByRole('group')).toBeNull()
+    expect(document.activeElement).toBe(trigger)
     expect(select).not.toHaveBeenCalled()
+  })
+
+  it('dims a read-only trigger while the composer locks it', () => {
+    render(<ModelSelect useAccess={action => action !== 'session/selectModel'} renderSlot={renderLabel}
+      locked
+      available
+      directory={createSnapshotStore(state())}
+      load={vi.fn()} resolveText={resolveText}
+      select={vi.fn()}
+      t={t}
+    />)
+    const trigger = screen.getByRole('button', { name: '模型：DeepSeek-V4-Flash，推理等级 High' })
+    expect(trigger.hasAttribute('disabled')).toBe(true)
+    expect(trigger.hasAttribute('data-read-only')).toBe(true)
   })
 })
 

@@ -5,7 +5,9 @@
  * `conversation.chat.user.before` chain seat elects that source above the official user bubble; this entry
  * supplies only the member's address and leaves the bubble, actions, and text interaction to Chat. Chat
  * dispatches the seat for `user` rows alone and passes the durable source unparsed, so this module is the only
- * place that recognizes the principal.
+ * place that recognizes the principal. The Host also attributes a member's `retry` source, but that source is
+ * a content-less continuation that Chat renders as its continuation receipt, which has no message-source seat;
+ * the attribution notice in that turn names the member.
  *
  * @module @mumbo/edge-member/src/client/member-origin
  */
