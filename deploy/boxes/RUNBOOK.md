@@ -45,6 +45,20 @@ Postgres is busy or short of space. Storage grows automatically up to 500 GB; CP
 3. Apply. api and client-proxy roll with a circuit breaker.
 4. Nodes: raise the ASG desired capacity by the node count, wait until the new nodes are in DNS (`orchestrators.boxes.internal`), then terminate the old ones one at a time. Each termination pauses its boxes first. Never restart orchestrators in place on a node with boxes you cannot afford to pause.
 
+### Adding nodes
+`node_count` in `prod/terraform.tfvars` is the one setting: it is the ASG desired capacity (1..10; `max_size` is 10) and the edge's `MAX_RUNNING_BOXES = 12 * node_count - 2`. Twelve is the person-box figure: each node gives guests 48 GiB of hugepages (`hugepages` in `prod/nodes.tf`) and a person box is 4096 MB (`edge/template.mjs`, default `memoryMB`). Project boxes use the same template until `PROJECT_TEMPLATE` is set, and count against the same cap. `box_ram = 8192` in `prod/control.tf` is only the E2B tier's per-sandbox RAM ceiling, not a box size. 2 nodes allow 22 running boxes, 3 allow 34, 4 allow 46.
+1. Edit `node_count`. Run `terraform -chdir=deploy/boxes/prod plan`. Expect `aws_autoscaling_group.nodes` `desired_capacity` to change, plus `aws_ecs_task_definition.edge` (replaced) and `aws_ecs_service.edge` (the new `MAX_RUNNING_BOXES`). Read every other line: the plan must not change `APPROVER_EMAILS` or the `NTFY_TOPIC` secret. If it does, the variables `approver_emails` and `ntfy_enabled` were applied from the command line and must be passed again (`-var approver_emails=... -var ntfy_enabled=true`).
+2. Apply. New nodes boot from the current launch template, join `orchestrators.boxes.internal` and take new boxes; existing boxes stay where they are.
+3. Verify: `aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names mumbo-boxes-nodes` shows `InService` equal to `node_count`; the `nodes-below-min` alarm is OK; the edge log's capacity pages stop; a running task has `MAX_RUNNING_BOXES` set (`aws ecs describe-task-definition --task-definition mumbo-boxes-edge`).
+4. Lowering `node_count` terminates the surplus nodes through the drain hook (their boxes pause and resume elsewhere). Lower the cap first only if the running boxes fit in the smaller pool.
+Blue/green node upgrades still raise desired capacity by hand (`aws autoscaling set-desired-capacity`); the next apply sets it back to `node_count`.
+
+### Offboarding a person
+`node deploy/boxes/edge/offboard.mjs <email>` lists the person's E2B boxes and every version of their backup (`users/<sha256 of the lowercased email>/` in the backup bucket). It deletes nothing unless run as `... <email> --delete <email>`. Run it from `deploy/boxes/edge` (`npm ci` once) with the E2B tunnel from "Rebuild the box template" (`E2B_API_URL`, `E2B_SANDBOX_URL`, `E2B_API_KEY`) and `BACKUP_BUCKET=mumbo-boxes-backup-<account id>`, `AWS_REGION=us-east-1` and credentials that may list and delete object versions.
+1. Remove the person from the allowlist (SSM `/mumbo/boxes/allowed-emails`, then restart the edge tasks), or their next visit creates a new box.
+2. Dry run, read the box ids and version count, then run with `--delete`.
+3. The edge drops its record of a box E2B no longer has on its next sweep; nothing else holds the person's data. Their grants (`APPROVER_EMAILS`) and project boxes are separate: project boxes are owned by the person's email and are not touched by this script.
+
 ### Ship a new edge
 Commit, `docker build` `deploy/boxes/edge` and push to `mumbo-boxes/edge:<commit>`, set `edge_tag`, apply.
 

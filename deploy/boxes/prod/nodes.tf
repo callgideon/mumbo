@@ -7,7 +7,18 @@ variable "e2b_sha" {
   type        = string
 }
 
+variable "node_count" {
+  description = "Sandbox nodes (ASG desired capacity). The edge admits 12 running boxes per node (4096 MB person boxes on 48 GiB of guest hugepages) minus 2 of headroom: MAX_RUNNING_BOXES = 12 * node_count - 2."
+  type        = number
+  default     = 2
+  validation {
+    condition     = floor(var.node_count) == var.node_count && var.node_count >= 1 && var.node_count <= 10
+    error_message = "node_count must be a whole number from 1 to 10 (the node group's max_size)."
+  }
+}
+
 locals {
+  node_max_size = 10 # the node group max_size; node_count validates against it
   node_type   = "r8i.2xlarge" # 8 vCPU, 64 GiB
   hugepages   = 24576         # 48 GiB of 2 MiB pages for guests: 12 running 4 GiB boxes (review M5)
   firecracker = "v1.14-0.2.0"
@@ -120,9 +131,9 @@ resource "aws_launch_template" "nodes" {
 
 resource "aws_autoscaling_group" "nodes" {
   name                      = "${local.name}-nodes"
-  min_size                  = 2
-  max_size                  = 10
-  desired_capacity          = 2
+  min_size                  = min(2, var.node_count)
+  max_size                  = local.node_max_size
+  desired_capacity          = var.node_count
   vpc_zone_identifier       = module.vpc.private_subnets
   health_check_type         = "EC2"
   health_check_grace_period = 600
@@ -138,7 +149,6 @@ resource "aws_autoscaling_group" "nodes" {
     default_result       = "CONTINUE"
   }
   # A new launch template version reaches nodes only through blue/green (see the header), never an instance refresh.
-  lifecycle { ignore_changes = [desired_capacity] }
   tag {
     key                 = "Name"
     value               = "${local.name}-node"
