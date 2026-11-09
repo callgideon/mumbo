@@ -11,7 +11,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 /** Request header carrying the signed member identity; the edge strips it from browser requests. */
 export const MEMBER_HEADER = 'x-mumbo-member'
 
-/** Latest expiry accepted, in seconds after now; the edge signs five minutes ahead. */
+/** Latest expiry accepted, in seconds after now; a protocol constant shared with the edge, which signs five minutes ahead. */
 export const MAX_FUTURE_SECONDS = 600
 
 /** Longest accepted email address, in characters. */
@@ -21,6 +21,14 @@ const BASE64URL = /^[A-Za-z0-9_-]+$/
 const EXPIRY = /^[1-9][0-9]{0,11}$/
 /** One `@` between non-empty parts, with no whitespace or control characters. */
 const EMAIL = /^[^\s\p{Cc}@]+@[^\s\p{Cc}@]+$/u
+
+/** A verified member header. */
+export interface VerifiedMember {
+  /** Lowercased member address. */
+  readonly email: string
+  /** Unix seconds after which the header no longer admits the member. */
+  readonly expiry: number
+}
 
 /**
  * Decode the configured member key.
@@ -51,9 +59,10 @@ export function signMemberHeader(key: Buffer, email: string, expiry: number): st
  * @param key - member key bytes.
  * @param value - the header value as received.
  * @param nowSeconds - current Unix time in seconds.
- * @returns the member's email, or undefined for a malformed, expired, too-distant, or wrongly signed value.
+ * @returns the member's email and the header's expiry, or undefined for a malformed, expired, too-distant, or
+ *   wrongly signed value.
  */
-export function verifyMemberHeader(key: Buffer, value: string, nowSeconds: number): string | undefined {
+export function verifyMemberHeader(key: Buffer, value: string, nowSeconds: number): VerifiedMember | undefined {
   const parts = value.split('.')
   if (parts.length !== 3) return undefined
   const [encodedEmail, expiryText, mac] = parts as [string, string, string]
@@ -65,5 +74,5 @@ export function verifyMemberHeader(key: Buffer, value: string, nowSeconds: numbe
   if (expiry < nowSeconds || expiry > nowSeconds + MAX_FUTURE_SECONDS) return undefined
   const email = Buffer.from(encodedEmail, 'base64url').toString('utf8')
   if (email.length > MAX_EMAIL_LENGTH || !EMAIL.test(email) || email !== email.toLowerCase()) return undefined
-  return email
+  return { email, expiry }
 }

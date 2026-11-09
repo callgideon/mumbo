@@ -183,7 +183,14 @@ export class HostConnectionService extends Service implements HostConnectionHand
 
   private authenticate(request: ConnectionTrustRequest): PeerScope | undefined {
     for (const authenticator of this.authenticatorList) {
-      const peer = authenticator(request)
+      let peer: PeerScope | undefined
+      try {
+        peer = authenticator(request)
+      } catch (error) {
+        // A faulty authenticator must not break owner admission; the request continues to the next check.
+        this.owner.logger.warn('client-connection: an authenticator failed; passing the request on', error)
+        continue
+      }
       if (peer !== undefined) return peer
     }
     return undefined
@@ -216,17 +223,19 @@ export class HostConnectionService extends Service implements HostConnectionHand
   }
 
   /**
-   * Authenticate an index request; an authenticator's Peer needs no cookie, and
-   * native TLS listeners mint Secure cookies.
+   * Authenticate an owner index request; native TLS listeners mint Secure cookies.
    */
-  authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): PeerScope | undefined {
+  authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): boolean {
+    return this.browserAuth.authorizeIndex(request, response, this.ctx.get('webServer')?.protocol === 'https:')
+  }
+
+  /** Admit an index request for an authenticator's Peer, else for the owner's browser Peer. */
+  admitIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): PeerScope | undefined {
     if (!this.disposed && this.isTrusted(request)) {
       const authenticated = this.authenticate(request)
       if (authenticated !== undefined) return authenticated
     }
-    return this.browserAuth.authorizeIndex(request, response, this.ctx.get('webServer')?.protocol === 'https:')
-      ? this.browserPeer
-      : undefined
+    return this.authorizeIndex(request, response) ? this.browserPeer : undefined
   }
 
   /** Add this process's launch token to the clean application URL. */
@@ -300,6 +309,13 @@ export class HostConnectionService extends Service implements HostConnectionHand
         if ('rejection' in admission) {
           res.writeHead(admission.rejection)
           res.end(admission.rejection === 401 ? 'unauthorized' : 'forbidden')
+          return
+        }
+        // Dedicated channels bypass Gateway access checks, so only the owner reaches them.
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+        if (admission.peer.principal.kind !== 'owner') {
+          res.writeHead(403)
+          res.end('forbidden')
           return
         }
         await bridge(req, res, fetchHandler, admission.peer)

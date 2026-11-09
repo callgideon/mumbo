@@ -804,8 +804,14 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the Peer and idempotent release, or 409 for duplicate API ownership. The carrier releases on socket termination or failed upgrade; release removes API admission synchronously without cancelling independent HTTP calls.',
       },
       {
-        signature: 'authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): PeerScope | undefined',
-        description: 'Authenticate one frontend index request, owning a token redirect or 401. A trusted request a registered authenticator admits is served for that Peer without minting a cookie. The cookie this mints is `Secure` when the mounted Web carrier serves TLS, which only that listener\'s protocol decides.',
+        signature: 'authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): boolean',
+        description: 'Authenticate one frontend index request for the owner, owning a token redirect or 401. Authenticators are not consulted, so a route that serves only the owner can rely on a true result. The cookie this mints is `Secure` when the mounted Web carrier serves TLS, which only that listener\'s protocol decides.',
+        parameters: [{ name: 'request', description: 'root or configured-index HTTP request.' }, { name: 'response', description: 'response owned when the result is false.' }],
+        returns: 'true only when the frontend may serve index.html to the owner.',
+      },
+      {
+        signature: 'admitIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): PeerScope | undefined',
+        description: 'Admit one frontend index request for any principal: a trusted request a registered authenticator admits renders for that Peer without a cookie; every other request goes through authorizeIndex and renders for `browserPeer`.',
         parameters: [{ name: 'request', description: 'root or configured-index HTTP request.' }, { name: 'response', description: 'response owned when the result is undefined.' }],
         returns: 'the Peer the index renders for, or undefined when the response was written.',
       },

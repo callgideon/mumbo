@@ -746,7 +746,7 @@ describe('operator-scoped connect', () => {
       const denied = fakeResponse()
       expect(host.connection.authorizeIndex(fakeRequest(
         { host: 'localhost', cookie: api.cookie }, '/',
-      ), denied.response)).toBeUndefined()
+      ), denied.response)).toBe(false)
       expect(denied.state.status).toBe(401)
     } finally { await host.dispose() }
   })
@@ -877,7 +877,7 @@ describe('operator-scoped connect', () => {
       await two.release()
       expect(admitted(host.connection, browser.cookie)).toBe(browserPeer)
       const refresh = fakeResponse()
-      expect(host.connection.authorizeIndex(fakeRequest({ host: 'localhost', cookie: browser.cookie }, '/'), refresh.response)).toBe(browserPeer)
+      expect(host.connection.authorizeIndex(fakeRequest({ host: 'localhost', cookie: browser.cookie }, '/'), refresh.response)).toBe(true)
       const cleanup = vi.fn()
       browserPeer.ctx.effect(() => cleanup)
       await host.dispose()
@@ -947,16 +947,49 @@ describe('non-owner authenticators', () => {
     } finally { await host.dispose() }
   })
 
-  it('renders the index for the authenticator Peer without minting a cookie', async () => {
+  it('admits the index for the authenticator Peer without a cookie while authorizeIndex stays owner-only', async () => {
     const host = await mounted()
     try {
       const member = memberAuthenticator(host.ctx)
       const served = fakeResponse()
-      expect(host.connection.authorizeIndex(fakeRequest({ host: 'localhost', 'x-test-member': 'ann' }, '/'), served.response)).toBe(member('ann'))
+      expect(host.connection.admitIndex(fakeRequest({ host: 'localhost', 'x-test-member': 'ann' }, '/'), served.response)).toBe(member('ann'))
       expect(served.state).toEqual({})
+      const cookie = browserCookie(host.connection, 'localhost')
+      expect(host.connection.admitIndex(fakeRequest({ host: 'localhost', cookie }, '/'), fakeResponse().response)).toBe(host.connection.browserPeer)
       const untrusted = fakeResponse()
-      expect(host.connection.authorizeIndex(fakeRequest({ host: 'evil.example', 'x-test-member': 'ann' }, '/'), untrusted.response)).toBeUndefined()
+      expect(host.connection.admitIndex(fakeRequest({ host: 'evil.example', 'x-test-member': 'ann' }, '/'), untrusted.response)).toBeUndefined()
       expect(untrusted.state.status).toBe(401)
+      const ownerOnly = fakeResponse()
+      expect(host.connection.authorizeIndex(fakeRequest({ host: 'localhost', 'x-test-member': 'ann' }, '/'), ownerOnly.response)).toBe(false)
+      expect(ownerOnly.state.status).toBe(401)
+    } finally { await host.dispose() }
+  })
+
+  it('refuses a non-owner on a dedicated RPC channel', async () => {
+    const host = await mounted()
+    try {
+      memberAuthenticator(host.ctx)
+      const handler = vi.fn(async () => ({ ok: true as const, value: null }))
+      host.connection.rpc.handle('/rpc', handler)
+      const route = host.routes.find(candidate => candidate.path === '/rpc')
+      const request: ClientRequest = { type: 'client-request', rpcId: RpcId('member'), method: 'goals/create', payload: { args: {} } }
+      const result = fakeResponse()
+      await route!.handler(fakePost({ host: '127.0.0.1:3080', 'x-test-member': 'ann' }, '/rpc/goals/create', request), result.response)
+      expect(result.state).toMatchObject({ status: 403, body: 'forbidden' })
+      expect(handler).not.toHaveBeenCalled()
+    } finally { await host.dispose() }
+  })
+
+  it('passes over an authenticator that throws', async () => {
+    const host = await mounted()
+    try {
+      const warn = vi.spyOn(host.ctx.logger, 'warn').mockImplementation(() => {})
+      host.ctx.connection.authenticators.register(() => { throw new Error('broken authenticator') })
+      const member = memberAuthenticator(host.ctx)
+      expect(host.connection.admit(fakeRequest({ host: 'localhost', 'x-test-member': 'ann' }))).toEqual({ peer: member('ann') })
+      const cookie = browserCookie(host.connection, 'localhost')
+      expect(host.connection.admit(fakeRequest({ host: 'localhost', cookie }))).toEqual({ peer: host.connection.browserPeer })
+      expect(warn).toHaveBeenCalledWith('client-connection: an authenticator failed; passing the request on', expect.any(Error))
     } finally { await host.dispose() }
   })
 

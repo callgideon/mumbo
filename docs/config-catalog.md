@@ -4890,8 +4890,8 @@ export interface Config {
 
 ## `@mumbo/edge-member`
 
-- `inject`: `connection` · `remoteAccess` · `workspaceRegistry`
-- `source`: [`packages/mumbo/edge-member/src/index.ts:39`](../packages/mumbo/edge-member/src/index.ts)
+- `inject`: `connection` · `remoteAccess` · `workspaceRegistry` · `sessions`
+- `source`: [`packages/mumbo/edge-member/src/index.ts:45`](../packages/mumbo/edge-member/src/index.ts)
 
 ```ts config-catalog
 /** Edge member configuration. */

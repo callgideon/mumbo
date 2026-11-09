@@ -182,9 +182,11 @@ export interface HostConnectionFetch {
  * Connection calls it synchronously after its Host/Origin fence and before
  * browser and API credentials. Returning undefined passes the request on to
  * the next authenticator and then to owner authentication; an authenticator
- * never refuses a request. The returned Peer must carry a non-owner principal
- * and stay live while the authenticator is registered; its creator owns its
- * disposal.
+ * never refuses a request, and one that throws is logged and passed over. The
+ * returned Peer must carry a non-owner principal; its creator owns its
+ * disposal, and a disposed Peer is refused at dispatch. Only the Gateway
+ * serves non-owner Peers: exact Fetch routes, dedicated RPC channels, and
+ * routes guarded by `requestRejection` answer them 403.
  * @param request - request headers from the HTTP or upgrade request.
  * @returns the Peer this credential speaks for, or undefined when the request carries none.
  */
@@ -285,15 +287,27 @@ export interface HostConnectionHandle {
   admitConnection(request: ConnectionTrustRequest): ConnectionAdmission
 
   /**
-   * Authenticate one frontend index request, owning a token redirect or 401.
-   * A trusted request a registered authenticator admits is served for that
-   * Peer without minting a cookie. The cookie this mints is `Secure` when the
-   * mounted Web carrier serves TLS, which only that listener's protocol decides.
+   * Authenticate one frontend index request for the owner, owning a token
+   * redirect or 401. Authenticators are not consulted, so a route that serves
+   * only the owner can rely on a true result. The cookie this mints is
+   * `Secure` when the mounted Web carrier serves TLS, which only that
+   * listener's protocol decides.
+   * @param request - root or configured-index HTTP request.
+   * @param response - response owned when the result is false.
+   * @returns true only when the frontend may serve index.html to the owner.
+   */
+  authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): boolean
+
+  /**
+   * Admit one frontend index request for any principal: a trusted request a
+   * registered authenticator admits renders for that Peer without a cookie;
+   * every other request goes through {@link authorizeIndex} and renders for
+   * `browserPeer`.
    * @param request - root or configured-index HTTP request.
    * @param response - response owned when the result is undefined.
    * @returns the Peer the index renders for, or undefined when the response was written.
    */
-  authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): PeerScope | undefined
+  admitIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): PeerScope | undefined
 
   /**
    * Add the fresh process token to an ordinary Web application URL.

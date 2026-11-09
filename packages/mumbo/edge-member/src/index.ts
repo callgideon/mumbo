@@ -1,19 +1,25 @@
 /**
  * Project members as Host principals: requests the mumbo edge signs for a project member are admitted as an
- * `edge-member` Peer that may read, follow, prompt, and create Sessions in this Host, and nothing else.
+ * `edge-member` Peer that may read, follow, prompt, and create Sessions in this Host, and nothing else, and each
+ * member message reaches the model after a notice naming its sender.
  *
  * @module @mumbo/edge-member
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { ConnectionTrustRequest, PeerScope } from '@deepseek-ai/dsh-client-connection'
-import type { RemoteAccessBinding, RemoteAccessRole } from '@deepseek-ai/dsh-api-remote-access'
+import type { ConnectionTrustRequest } from '@deepseek-ai/dsh-client-connection'
+import type {} from '@deepseek-ai/dsh-api-remote-access'
 import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-storage-domain'
 import { workspaceDomainSpec } from '@deepseek-ai/dsh-workspace'
 import z from '@deepseek-ai/schemastery'
+import { MemberBindings } from './access.ts'
+import { attributeMemberMessages } from './attribution.ts'
 import { MEMBER_HEADER, decodeMemberKey, verifyMemberHeader } from './header.ts'
+import { MemberPeers } from './members.ts'
 
+export { MEMBER_GLOBAL_ROLE, MEMBER_SESSION_ROLE, MEMBER_WORKSPACE_ROLE } from './access.ts'
+export { ATTRIBUTION_SOURCE, attributionText } from './attribution.ts'
 export { MAX_FUTURE_SECONDS, MEMBER_HEADER, signMemberHeader, verifyMemberHeader } from './header.ts'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
@@ -32,8 +38,8 @@ export interface EdgeMemberPrincipal {
 
 /** Cordis function-plugin name. */
 export const name = 'mumbo-edge-member'
-/** Admission, the access policy, and the Workspace list the policy grants over. */
-export const inject = ['connection', 'remoteAccess', 'workspaceRegistry']
+/** Admission, the access policy, and the Workspace and live Session lists the policy grants over. */
+export const inject = ['connection', 'remoteAccess', 'workspaceRegistry', 'sessions']
 
 /** Edge member configuration. */
 export interface Config {
@@ -45,110 +51,50 @@ export const Config: z<Config> = z.object({
   key: z.string().required(),
 })
 
-/** Host-wide reads a collaborator's page needs; list and follow results are filtered per Session and Workspace. */
-const MEMBER_GLOBAL_ROLE: RemoteAccessRole<'global'> = {
-  name: 'mumbo:member-global',
-  resource: 'global',
-  actions: [
-    'commands/list',
-    'llm/listConfigurableProviders',
-    'llm/listProviders',
-    'session/control',
-    'session/list',
-    'session/modelCatalog',
-    'session/search',
-    'workspace/follow',
-  ],
-}
-
-/** Reading, following, prompting, and stopping one Session. */
-const MEMBER_SESSION_ROLE: RemoteAccessRole<'session'> = {
-  name: 'mumbo:member-session',
-  resource: 'session',
-  actions: [
-    'commands/list',
-    'fileUploads/upload',
-    'goals/get',
-    'session/attachment',
-    'session/cancel',
-    'session/control',
-    'session/events',
-    'session/follow',
-    'session/list',
-    'session/observeEvent',
-    'session/observeProjections',
-    'session/observeState',
-    'session/page',
-    'session/projections',
-    'session/prompt',
-    'session/search',
-    'session/state',
-    'session/updateQueue',
-    'session/wait',
-    'skills/list',
-    'toolResults/watch',
-    'workspace/follow',
-    'event:api-session/activity',
-    'event:api-session/added',
-    'event:api-session/error',
-    'event:api-session/removed',
-    'event:api-session/status',
-  ],
-}
-
-/** Following one Workspace and starting a Session in it. */
-const MEMBER_WORKSPACE_ROLE: RemoteAccessRole<'workspace'> = {
-  name: 'mumbo:member-workspace',
-  resource: 'workspace',
-  actions: ['workspace/follow', 'session/create'],
-}
-
 /**
- * Verify the member header and register the authenticator and the `edge-member` access policy.
- * @param ctx - plugin context carrying Connection, remote access, and the Workspace registry.
+ * Register the `edge-member` access policy, the member authenticator, and member attribution.
+ * @param ctx - plugin context carrying Connection, remote access, and the Workspace and Session registries.
  * @param config - validated configuration.
  * @throws when the key is not unpadded base64url of at least 32 bytes.
  */
 export function apply(ctx: Context, config: Config): void {
   const key = decodeMemberKey(config.key)
-  // One Peer per member, shared by every connection that member opens, as browser connections share the owner's.
-  const peers = new Map<string, PeerScope>()
-  const peerFor = (email: string): PeerScope => {
-    let peer = peers.get(email)
-    if (peer === undefined) {
-      peer = ctx.connection.createPeer({ principal: { kind: 'edge-member', email } })
-      peers.set(email, peer)
-    }
-    return peer
+  const bindings = new MemberBindings(ctx)
+  // The policy exists before any member can be admitted, and outlives the authenticator on unload.
+  ctx.effect(() => ctx.remoteAccess.registerPolicy('edge-member', {
+    bindings: () => bindings.current(),
+  }), 'mumbo-edge-member: access policy')
+  const changed = (): void => {
+    bindings.reset()
+    ctx.remoteAccess.invalidate()
   }
+  ctx.on('session/created', changed)
+  ctx.on('session/disposed', changed)
+  // The Workspace registry emits a change before its entity holds the new Session list, so the rebuild waits
+  // until the write that emitted it has settled.
+  const pending = new Set<ReturnType<typeof setImmediate>>()
+  ctx.effect(() => () => {
+    for (const handle of pending) clearImmediate(handle)
+    pending.clear()
+  }, 'mumbo-edge-member: deferred access rebuilds')
+  ctx.on('domain/changed', (change) => {
+    if (change.domain !== workspaceDomainSpec.name) return
+    const handle = setImmediate(() => {
+      pending.delete(handle)
+      changed()
+    })
+    pending.add(handle)
+  })
+
+  const peers = new MemberPeers(email => ctx.connection.createPeer({ principal: { kind: 'edge-member', email } }))
+  ctx.effect(() => () => { peers.clear() }, 'mumbo-edge-member: member Peers')
   ctx.connection.authenticators.register((request) => {
     const value = headerValue(request)
-    const email = value === undefined ? undefined : verifyMemberHeader(key, value, Math.floor(Date.now() / 1000))
-    return email === undefined ? undefined : peerFor(email)
+    const member = value === undefined ? undefined : verifyMemberHeader(key, value, Math.floor(Date.now() / 1000))
+    return member === undefined ? undefined : peers.admit(member.email, member.expiry)
   })
-  ctx.effect(() => ctx.remoteAccess.registerPolicy('edge-member', {
-    bindings: () => memberBindings(ctx),
-  }), 'mumbo-edge-member: access policy')
-  // Grants follow the Workspace list, so every new Session or Workspace changes members' snapshots.
-  ctx.on('session/created', () => { ctx.remoteAccess.invalidate() })
-  ctx.on('domain/changed', (change) => {
-    if (change.domain === workspaceDomainSpec.name) ctx.remoteAccess.invalidate()
-  })
-}
 
-/**
- * Every member holds the same grants: the global role, and the Workspace and Session roles on every
- * Workspace and every Session a Workspace lists.
- * @param ctx - context carrying the Workspace registry.
- * @returns the bindings of any `edge-member` principal.
- */
-function memberBindings(ctx: Context): RemoteAccessBinding[] {
-  const bindings: RemoteAccessBinding[] = [{ role: MEMBER_GLOBAL_ROLE, resource: { kind: 'global' } }]
-  for (const workspace of ctx.workspaceRegistry.list()) {
-    bindings.push({ role: MEMBER_WORKSPACE_ROLE, resource: { kind: 'workspace', id: workspace.id } })
-    for (const id of workspace.sessionIds) bindings.push({ role: MEMBER_SESSION_ROLE, resource: { kind: 'session', id } })
-  }
-  return bindings
+  attributeMemberMessages(ctx)
 }
 
 /**

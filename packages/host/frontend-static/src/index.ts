@@ -140,7 +140,7 @@ export function apply(ctx: Context, config: Config): void {
     let status = 401
     let headers = new Headers()
     let body: string | undefined
-    const admitted = ctx.connection.authorizeIndex(request, {
+    const admitted = ctx.connection.admitIndex(request, {
       writeHead(nextStatus, nextHeaders) {
         status = nextStatus
         headers = new Headers(nextHeaders)

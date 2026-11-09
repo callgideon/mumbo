@@ -6,34 +6,40 @@ Status: implemented
 
 ## Problem
 
-mumbo 共享项目是 mumbo 边缘之后的独立 Host，多人在其中协作。Connection 的准入是封闭的：`admit()` 对有效的浏览器 cookie 返回 owner 的 `browserPeer`，对 API cookie 返回 owner API Peer，除此之外什么也不返回。因此边缘用盒子的 owner 启动 token 为每个成员登录，Host 把每个成员的消息记录为 owner 的消息，每个成员都持有对设置、凭据与插件的 owner 权限。[peer principal 决策](2026-10-12-peer-principal-and-remote-access.zh.md) 已经在提示词上记录非 owner 调用方，并通过远程访问管控其调用，但它唯一的非 owner kind——liveshare 的 `share-viewer`——经进程内 relay 通道进入，而不是 HTTP 准入。
+mumbo 共享项目是 mumbo 边缘之后的独立 Host，多人在其中协作。Connection 的准入是封闭的：`admit()` 对有效的浏览器 cookie 返回 owner 的 `browserPeer`，对 API cookie 返回 owner API Peer，除此之外什么也不返回。因此边缘用盒子的 owner 启动 token 为每个成员登录，Host 把每个成员的消息记录为 owner 的消息，协调者只能从边缘写入转发文本的 `[from <email>]` 前缀得知作者，每个成员都持有对设置、凭据与插件的 owner 权限。[peer principal 决策](2026-10-12-peer-principal-and-remote-access.zh.md) 已经在提示词上记录非 owner 调用方，并通过远程访问管控其调用，但它唯一的非 owner kind——liveshare 的 `share-viewer`——经进程内 relay 通道进入，而不是 HTTP 准入。
 
 ## Decision
 
 ### Connection 中的 authenticator 接口
 
-`ctx.connection.authenticators.register(authenticator)` 注册一个同步的 `ConnectionAuthenticator`：`(request) => PeerScope | undefined`。[`admit()`](../../../../packages/client/connection/src/rpc-host.ts) 先执行 Host/Origin 检查，再按注册顺序询问每个 authenticator，然后检查浏览器与 API 凭据。authenticator 只回答携带其自有凭据的请求，从不拒绝请求，因此凭据缺失或无效的请求仍会进入 owner 认证。注册是注册方 fiber 的 effect。authenticator 用 `createPeer()` 创建并拥有自己的 Peer，保持 peer principal 决策中由创建方拥有的 principal 到 Peer 的映射。
+`ctx.connection.authenticators.register(authenticator)` 注册一个同步的 `ConnectionAuthenticator`：`(request) => PeerScope | undefined`。[`admit()`](../../../../packages/client/connection/src/rpc-host.ts) 先执行 Host/Origin 检查，再按注册顺序询问每个 authenticator，然后检查浏览器与 API 凭据。authenticator 只回答携带其自有凭据的请求，从不拒绝请求，因此凭据缺失或无效的请求仍会进入 owner 认证；抛错的 authenticator 会被记录并跳过。注册是注册方 fiber 的 effect。authenticator 用 `createPeer()` 创建并拥有自己的 Peer，保持 peer principal 决策中由创建方拥有的 principal 到 Peer 的映射。
 
-所有准入路径使用相同顺序：`/api` 路由、专用 RPC 通道、经 `admitConnection()` 的 Gateway WebSocket 升级，以及 index。`authorizeIndex()` 返回 index 渲染所代表的 Peer；authenticator 的 Peer 不获得 cookie 即可得到 index，因此 `webserver/index-inject` 与访问快照为该 principal 渲染。`requestRejection()` 对非 owner Peer 返回 403，因为使用它的路由（inspector、open-in-app）绕过 Gateway 访问检查，与 exact Fetch 路由相同。
+`/api` 路由与经 `admitConnection()` 的 Gateway WebSocket 升级使用这一顺序，因此只有检查远程访问的 Gateway 会服务非 owner Peer。所有绕过 Gateway 的路由仍只对 owner 开放：exact Fetch 路由与专用 RPC 通道对非 owner Peer 返回 403，`requestRejection()` 为 inspector、open-in-app 等兄弟路由对其返回 403，`authorizeIndex()` 仍只检查 owner 凭据，因此已有的 `if (!authorizeIndex(...))` owner 检查保持原意。`admitIndex()` 是面向任意 principal 的 index 准入：它返回 authenticator 的 Peer 且不签发 cookie，否则经 `authorizeIndex()` 返回 `browserPeer`；frontend-static 为它返回的 Peer 渲染 index，包括 `webserver/index-inject` 与访问快照。
 
 ### `edge-member` principal
 
-[`@mumbo/edge-member`](../../../../packages/mumbo/edge-member/README.zh.md) 声明 `edge-member { email }`，并注册一个 authenticator 与一个远程访问策略。authenticator 校验 `x-mumbo-member: <email>.<expiry>.<mac>`：email 是无填充 base64url 编码的小写地址，expiry 是 Unix 秒，MAC 是在盒子成员密钥下对原样发送的前两个字段计算的无填充 base64url HMAC-SHA256，以常量时间比较。过期、超前 600 秒以上、格式错误、重复或以其他密钥签名的请求头都不是成员。边缘按盒子派生成员密钥 HMAC(边缘密钥, `member:` + 盒子 id)，因此为一个盒子签发的请求头在其他盒子中都会失败；边缘在移除浏览器发送的请求头后，为每个代理请求签发一个五分钟后过期的新请求头。每个成员一个 Peer，服务该成员的所有连接，就像 `browserPeer` 服务 owner 的所有浏览器连接。
+[`@mumbo/edge-member`](../../../../packages/mumbo/edge-member/README.zh.md) 声明 `edge-member { email }`，并依次注册一个远程访问策略、一个 authenticator 与成员署名。authenticator 校验 `x-mumbo-member: <email>.<expiry>.<mac>`：email 是无填充 base64url 编码的小写地址，expiry 是 Unix 秒，MAC 是在盒子成员密钥下对原样发送的前两个字段计算的无填充 base64url HMAC-SHA256，以常量时间比较。过期、超前 600 秒以上、格式错误、重复或以其他密钥签名的请求头都不是成员。边缘按盒子派生成员密钥 HMAC(边缘密钥, `member:` + 盒子 id)，因此为一个盒子签发的请求头在其他盒子中都会失败；边缘在移除浏览器发送的请求头后，为每个代理请求签发一个五分钟后过期的新请求头。
+
+每个成员一个 Peer，服务该成员的所有连接，就像 `browserPeer` 服务 owner 的所有浏览器连接，并在该成员最新请求头过期前保持存活。之后插件释放它：Gateway 关闭该成员的 WebSocket 并结束其流，客户端经边缘重连，新请求头创建新的 Peer。因此只在 WebSocket 升级时校验一次的请求头无法让被移除的成员保持连接。
 
 ### 协作者访问
 
-策略给所有成员相同的绑定：一个 `global` 角色，覆盖 Session 列表、搜索、control、模型目录、提供方列表、命令与 Workspace 跟随；每个 Workspace 上的 Workspace 角色（`workspace/follow`、`session/create`）；以及 Workspace 列出的每个 Session 上的 Session 角色（分页、跟随、projection、状态、附件、上传、提示、取消、队列更新、技能、目标与 Session 通知）。`bindings()` 在每次决策时读取 Workspace 注册表，因此新 Session 立即可达；插件在 `session/created` 与 Workspace 域变化时调用 `remoteAccess.invalidate()`，使访问快照随之更新。没有任何角色列出设置、凭据、插件、fork、重命名、模型选择或 Workspace 管理操作，因此远程访问默认拒绝它们。
+策略给所有成员相同的绑定：一个 `global` 角色，覆盖创建 Session，以及 Session 列表、搜索、control、模型目录、预设与提供方列表、命令与 Workspace 跟随；每个 Workspace 上的 Workspace 角色（`workspace/follow`、`session/create`）；以及 Workspace 列出的每个 Session 与每个存活 Session 上的 Session 角色，存活 Session 包括运行中的子代理子 Session。Session 角色可以阅读与跟随 Session 及其作业与工作区文件、提示与取消、回答其问题、经 `fileUploads/upload` 上传、接收其通知，并列出 `session/create`，使复用 Workspace 列出的空白 Session（同时解析为该 Workspace 与该 Session）得到允许。没有任何角色列出设置、凭据、插件、fork、重命名、模型选择、队列编辑或 Workspace 管理操作，因此远程访问默认拒绝它们；队列编辑会保留被编辑消息的来源，因而会把一个人的文本记录为另一个人的。绑定被缓存，并在 `session/created`、`session/disposed` 或 Workspace 域变化提交后重建，每次重建都调用 `remoteAccess.invalidate()`，使访问快照随之更新。Workspace 注册表在其实体持有新的 Session 列表之前发出 `domain/changed`，因此该重建等到发出变化的写入完成后才运行；否则成员的快照会缺少其刚创建的 Session，客户端也不会为它提供输入框。
+
+### 成员署名
+
+principal 不进入模型请求，因此只记录 `principal` 无法让协调者知道消息的作者。`agent/pre-step` 监听器在每条 principal 为 `edge-member` 的进入消息之前插入一条 user 角色通知，来源为 `{ kind: 'mumbo-member', form: 'notice' }`，文本为 `The next message is from project member <email>.`。通知与消息一起进入 Session 日志，因此模型请求仍可从日志重建，恢复的 Session 会重放它。成员经盒子自身页面发送的消息不再需要边缘的文本前缀。
 
 ### 威胁模型
 
 | 参与方 | 能够 | 不能 |
 |---|---|---|
 | 成员的浏览器 | 经边缘以该成员身份行动 | 提交自己的 `x-mumbo-member`；边缘会移除它 |
-| 截获请求头的人 | 在该盒子中以该成员身份行动至多十分钟 | 在其他盒子中使用、延长过期时间或修改邮箱 |
-| 盒子内的代码 | 读取 `MUMBO_MEMBER_KEY` 并伪造成员请求头 | 获得任何额外能力：这些代码在该盒子中本就以 owner 权限运行 |
-| 成员 | 阅读并提示 Workspace 列出的每个 Session，从而运行盒子的工具 | 修改设置、凭据或插件，或访问 owner 专用路由 |
+| 截获请求头的人 | 在该盒子中以该成员身份行动，直到请求头过期（至多十分钟） | 在其他盒子中使用、延长过期时间或修改邮箱 |
+| 成员，经 Remote 调用 | 阅读、跟随并提示每个获授权的 Session | 调用设置、凭据、插件或队列编辑方法，或访问 Gateway 之外的路由 |
+| 成员，经代理的工具 | 指挥协调者，其工具在完全访问且审批为 `never` 时不受约束地运行 | 被约束：这些工具可以读取 `MUMBO_MEMBER_KEY` 与 owner cookie 的签名记录，从而伪造其他成员的请求头或 owner cookie |
 
-提示会运行协调者的工具，因此成员可以指挥盒子中的工作。这正是项目盒子的用途：它不保存账户或密钥，其工作在子沙箱中运行。
+访问策略在 Remote API 层面把成员与 owner 分开，并为其消息署名；它不是针对指挥代理提升权限的成员的约束边界。在盒子以独立身份或只在子沙箱中运行工具之前，成员是可信的协作者。
 
 ### 项目盒子中的 owner token 与审批
 
@@ -41,13 +47,19 @@ mumbo 共享项目是 mumbo 边缘之后的独立 Host，多人在其中协作�
 
 ## Alternatives considered
 
-**继续以 owner 身份为成员登录，并在消息文本中写明成员。** 它不需要改动 harness，但持久日志把 owner 记为作者，协调者不解析文本就无法区分成员，且每个成员都持有对设置与凭据的 owner 权限。
+**继续以 owner 身份为成员登录，并在消息文本中写明成员。** 它不需要改动 harness，但持久日志把 owner 记为作者，成员在盒子自身页面中的文本不带名字，且每个成员都持有对设置与凭据的 owner 权限。
 
 **每个成员一个 liveshare 式的 relay 通道。** liveshare 在自己的通道上创建查看者 Peer，但边缘已经代理普通 HTTP 与 WebSocket 流量；relay 会为每个项目请求复制一遍 Web 客户端的传输。
 
-**在 Gateway 或远程访问中准入成员。** 准入产生之后每项检查读取的 Peer，因此 Peer 必须在 Gateway 运行前存在；在 Gateway 内准入会让 index、WebSocket 升级与专用通道得到与 `/api` 不同的答案。
+**在 Gateway 或远程访问中准入成员。** 准入产生之后每项检查读取的 Peer，因此 Peer 必须在 Gateway 运行前存在；在 Gateway 内准入会让 index 与 WebSocket 升级得到与 `/api` 不同的答案。
 
-**在远程访问中加入按 kind 的绑定，例如所有 Session。** 它可以免于枚举 Workspace 列表，但会为一个使用方改变通用的决策与快照格式；枚举使用现有的精确资源规则。
+**让 `authorizeIndex()` 返回准入的 Peer。** 它免去第二个方法，但 `if (!authorizeIndex(...))` 对 Peer 结果仍能编译，因此每个已有的 owner 检查都会悄然开始服务成员。
+
+**边缘使用 Ed25519 签名，使盒子只持有公钥。** 它阻止盒子内的代码伪造其他成员的请求头，但这些代码同样可以读取 owner cookie 的签名记录与 Session 日志，因此署名仍无法抵御指挥代理提升权限的成员；真正起作用的边界是对工具的约束。
+
+**在模型适配器中渲染 principal。** 它可以免去额外的日志事件，但适配器只读取面向模型的来源，而不作为自身日志事件的模型可见输入会破坏“每个模型请求都可从日志重建”的规则。
+
+**在远程访问中加入按 kind 的绑定，例如所有 Session。** 它可以免于枚举 Session，但会为一个使用方改变通用的决策与快照格式；枚举使用现有的精确资源规则。
 
 **在盒子中保存按成员的允许列表或撤销列表。** 边缘拥有项目成员关系，只为当前成员签发短时效的请求头，盒子中的副本可能与之偏离；移除在最后一个请求头过期时生效。
 
@@ -55,4 +67,4 @@ mumbo 共享项目是 mumbo 边缘之后的独立 Host，多人在其中协作�
 
 ## Consequences
 
-任何插件现在都可以准入非 owner 的 HTTP principal 而无需修改 Connection，owner 专用路由通过一处检查保持只对 owner 开放。成员以 `principal: { kind: 'edge-member', email }` 出现在其消息上，因此协调者与之后的守卫可以分辨谁请求了什么。成员无法打开子代理的子 Session 记录，因为子 Session 不在 Workspace 列表中。被移除的成员在边缘签发的最后一个请求头过期前（至多十分钟）仍有访问权。每次成员决策都会扫描 Workspace 列表，其成本与盒子中的 Session 数量成线性关系。
+任何插件现在都可以准入非 owner 的 HTTP principal 而无需修改 Connection，Gateway 之外的每条路由都保持只对 owner 开放，且调用方无需改动。成员以 `principal: { kind: 'edge-member', email }` 出现在其消息上，协调者读到指明每个成员的通知，每条成员消息约十个 token。成员无法打开已结束的子代理记录、经浏览器的二进制路由上传或预览文件，因为它们涉及没有 Workspace 列出的 Session 或 exact 路由。成员的 WebSocket 在请求头过期后重连，至多每十分钟一次。被移除的成员在边缘签发的最后一个请求头过期前仍有访问权。在项目盒子约束工具之前，成员经代理的工具仍等同于 owner。

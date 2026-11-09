@@ -9,32 +9,47 @@
   en: 2462074f17d4d174
   zh: 62720f881ef8411f
 /mumbo-edge-member/summary:
-  en: 9aaf0df8f7a725ec
-  zh: 09abfc1403b0d708
+  en: 08ea3b701850323b
+  zh: 7cc69826358c254d
 /mumbo-edge-member/table-of-contents:
-  en: 729ee9ee0b53c5b6
-  zh: fc98bba5e541c6a5
+  en: 734f89a706b541f4
+  zh: 8d4e620b0c01a4d9
 /mumbo-edge-member/configuration:
-  en: 40653cc104b1dd9e
-  zh: fbb2c84735eedc1f
+  en: 5850103d8a8a5d5a
+  zh: a55d9e792d0d865a
 /mumbo-edge-member/member-header:
-  en: e9c347a771d23c2e
-  zh: 21e6c60f1ca37447
+  en: 430e6639a1f8a719
+  zh: c7f8cf22109f8a79
 /mumbo-edge-member/member-access:
-  en: d002ba7b17771ca1
-  zh: 29431d8d7d4bd015
+  en: 1b34eb2a4e5a8ba4
+  zh: 118e478e3f8f9613
+/mumbo-edge-member/member-attribution:
+  en: 21eb837878166310
+  zh: 262d654e68340648
 /mumbo-edge-member/composition:
   en: 223563143e3af6d8
   zh: 861b1feb40218e7b
 /mumbo-edge-member/model-experience:
-  en: eaff9b88dc5bfd96
-  zh: 9ae00b1e6038a13e
-/mumbo-edge-member/model-experience/kv-cache-effect:
-  en: 60835eca1cee4e0e
-  zh: 3b5579ceccd5b5e7
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/mumbo-edge-member/model-experience/member-attribution-notice:
+  en: df4bcef17df3062a
+  zh: ded277c55b87cdff
+/mumbo-edge-member/model-experience/member-attribution-notice/what-the-model-sees:
+  en: e5e128304d4238b5
+  zh: 2ced92bd546b85f9
+/mumbo-edge-member/model-experience/member-attribution-notice/what-the-model-sees/verbatim-text:
+  en: c2b7140873db3fd3
+  zh: 522a11812515c316
+/mumbo-edge-member/model-experience/member-attribution-notice/token-effect:
+  en: 49882aecd66b7231
+  zh: 9cd01cec28428cea
+/mumbo-edge-member/model-experience/member-attribution-notice/kv-cache-effect:
+  en: 80ad2c7b1fc16c7e
+  zh: 2039fd31c449e3c1
 /mumbo-edge-member/known-limitations-and-deferred-work:
-  en: 0e9e10dc2747b4ad
-  zh: 602258f740fb92ec
+  en: 090e2972d04cfa02
+  zh: ef2fd7ec596bfc2c
 /mumbo-edge-member/known-limitations-and-deferred-work/dev-note:
   en: e67f633dc6fe7773
   zh: 8ec3e73528ddb1a6

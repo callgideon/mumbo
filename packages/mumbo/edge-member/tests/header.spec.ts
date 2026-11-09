@@ -8,8 +8,8 @@ const NOW = 1_800_000_000
 describe('member header', () => {
   it('accepts a header signed with the key until its expiry', () => {
     const value = signMemberHeader(KEY, 'ann@example.com', NOW + 300)
-    expect(verifyMemberHeader(KEY, value, NOW)).toBe('ann@example.com')
-    expect(verifyMemberHeader(KEY, value, NOW + 300)).toBe('ann@example.com')
+    expect(verifyMemberHeader(KEY, value, NOW)).toEqual({ email: 'ann@example.com', expiry: NOW + 300 })
+    expect(verifyMemberHeader(KEY, value, NOW + 300)?.email).toBe('ann@example.com')
     expect(verifyMemberHeader(KEY, value, NOW + 301)).toBeUndefined()
   })
 
@@ -23,7 +23,7 @@ describe('member header', () => {
   })
 
   it('refuses an expiry more than ten minutes ahead', () => {
-    expect(verifyMemberHeader(KEY, signMemberHeader(KEY, 'ann@example.com', NOW + 600), NOW)).toBe('ann@example.com')
+    expect(verifyMemberHeader(KEY, signMemberHeader(KEY, 'ann@example.com', NOW + 600), NOW)?.email).toBe('ann@example.com')
     expect(verifyMemberHeader(KEY, signMemberHeader(KEY, 'ann@example.com', NOW + 601), NOW)).toBeUndefined()
   })
 

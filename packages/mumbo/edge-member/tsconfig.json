@@ -18,10 +18,19 @@
       "path": "../../api/remote-access/tsconfig.host.json"
     },
     {
+      "path": "../../api/session-controller/tsconfig.host.json"
+    },
+    {
       "path": "../../client/connection/tsconfig.host.json"
     },
     {
+      "path": "../../core/agent"
+    },
+    {
       "path": "../../core/session"
+    },
+    {
+      "path": "../../llm/llm"
     },
     {
       "path": "../../storage/storage-domain"

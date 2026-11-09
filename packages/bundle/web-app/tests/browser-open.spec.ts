@@ -81,6 +81,7 @@ describe('web app browser startup', () => {
       __dshConnection: {
         authenticatedUrl(baseUrl: string): string
         authorizeIndex(): boolean
+        admitIndex(): object
         requestRejection(): undefined
         rpc: object
       }
@@ -94,6 +95,7 @@ describe('web app browser startup', () => {
         return url.href
       },
       authorizeIndex: () => true,
+      admitIndex: () => ({ principal: { kind: 'owner' } }),
       requestRejection: () => undefined,
       rpc: {},
     }

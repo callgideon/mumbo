@@ -6,6 +6,7 @@
  */
 
 import { randomBytes } from 'node:crypto'
+import { request as httpRequest } from 'node:http'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import Group from '@deepseek-ai/cordis-plugin-group'
@@ -24,7 +25,7 @@ import { signMemberHeader } from '../src/header.ts'
 const CONFIG = fileURLToPath(new URL('./fixtures/cordis.yml', import.meta.url))
 const KEY = randomBytes(32)
 
-/** Stands in for the Session Controller's `session/prompt`: records the caller the Gateway admitted. */
+/** Stands in for the Session Controller's methods: records the caller the Gateway admitted. */
 class PromptProbe extends TypertRemoteService {
   readonly callers: (Principal | undefined)[] = []
   constructor(ctx: Context) {
@@ -36,6 +37,19 @@ class PromptProbe extends TypertRemoteService {
     void request
     this.callers.push(principalOf(this.ctx.invocation))
     return 'queued'
+  }
+
+  @Remote('create')
+  create(request: { readonly workspaceId?: string; readonly sessionId?: string }): string {
+    this.callers.push(principalOf(this.ctx.invocation))
+    return request.sessionId ?? 'new'
+  }
+
+  @Remote('updateQueue')
+  updateQueue(request: { readonly sessionId: string }): string {
+    void request
+    this.callers.push(principalOf(this.ctx.invocation))
+    return 'edited'
   }
 }
 
@@ -52,6 +66,8 @@ class SettingsProbe extends TypertRemoteService {
 }
 
 let context: Context | undefined
+/** The Session list Workspace `w1` holds; a test may commit a new one. */
+let workspaceSessions: string[] = []
 
 afterEach(async () => {
   await context?.fiber.dispose()
@@ -61,6 +77,7 @@ afterEach(async () => {
 
 async function boot(): Promise<{ readonly origin: string; readonly probe: PromptProbe }> {
   vi.stubEnv('MUMBO_MEMBER_KEY', KEY.toString('base64url'))
+  workspaceSessions = ['s1', 'blank']
   context = new Context()
   const records = new Map<unknown, unknown>()
   context.provide('credentials', {
@@ -71,7 +88,9 @@ async function boot(): Promise<{ readonly origin: string; readonly probe: Prompt
     },
   } as never)
   // One Workspace holding one Session; the policy grants over exactly this list.
-  context.provide('workspaceRegistry', { list: () => [{ id: 'w1', sessionIds: ['s1'] }] } as never)
+  context.provide('workspaceRegistry', { list: () => [{ id: 'w1', sessionIds: workspaceSessions }] } as never)
+  // One live subagent child Session that no Workspace lists.
+  context.provide('sessions', { list: () => [{ id: 'child' }] } as never)
   await context.plugin(Loader)
   const modules = new Map<string, object>([
     ['@deepseek-ai/dsh-typert-registry', TypertRegistry],
@@ -103,13 +122,46 @@ async function boot(): Promise<{ readonly origin: string; readonly probe: Prompt
   return { origin: `http://127.0.0.1:${String(context.webServer.port)}`, probe }
 }
 
-async function call(origin: string, method: string, args: Record<string, unknown>, header?: string): Promise<{ status: number; body: unknown }> {
+async function call(
+  origin: string,
+  method: string,
+  args: Record<string, unknown>,
+  header?: string,
+  extra: Record<string, string> = {},
+): Promise<{ status: number; body: unknown }> {
   const response = await fetch(`${origin}/api/${method}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...header === undefined ? {} : { 'x-mumbo-member': header } },
+    headers: { 'content-type': 'application/json', ...extra, ...header === undefined ? {} : { 'x-mumbo-member': header } },
     body: JSON.stringify({ type: 'client-request', rpcId: 'r1', method, payload: { args } }),
   })
   return { status: response.status, body: response.ok ? await response.json() : await response.text() }
+}
+
+/** Exchange the Host's launch token for the owner's browser cookie. */
+function ownerCookie(origin: string): string {
+  const target = new URL(context!.connection.authenticatedUrl(origin))
+  let setCookie: string | undefined
+  context!.connection.authorizeIndex({ method: 'GET', url: `${target.pathname}${target.search}`, headers: { host: target.host } }, {
+    writeHead(_status, headers) { setCookie = headers?.['set-cookie'] },
+    end() {},
+  })
+  if (setCookie === undefined) throw new Error('no owner cookie')
+  return setCookie.split(';', 1)[0]!
+}
+
+/** POST with the member header sent twice, which node:http forwards as two header lines. */
+function callWithRepeatedHeader(origin: string, headers: readonly string[]): Promise<number> {
+  const body = JSON.stringify({ type: 'client-request', rpcId: 'r1', method: 'session/prompt', payload: { args: { request: { sessionId: 's1', text: 'hi' } } } })
+  return new Promise((resolve, reject) => {
+    const outgoing = httpRequest(`${origin}/api/session/prompt`, { method: 'POST' }, (response) => {
+      response.resume()
+      resolve(response.statusCode ?? 0)
+    })
+    outgoing.setHeader('content-type', 'application/json')
+    outgoing.setHeader('x-mumbo-member', [...headers])
+    outgoing.on('error', reject)
+    outgoing.end(body)
+  })
 }
 
 const now = (): number => Math.floor(Date.now() / 1000)
@@ -131,6 +183,65 @@ describe('real Loader composition', () => {
     const settings = await call(origin, 'settings/update', { ns: 'llm', value: 'x' }, header)
     expect(settings.body).toMatchObject({ result: { ok: false, error: { code: 'remote-access/denied' } } })
     expect(probe.callers).toEqual([])
+  })
+
+  it('reuses a listed blank Session, prompts a live child Session, and refuses queue edits', { timeout: 60_000 }, async () => {
+    const { origin, probe } = await boot()
+    const header = signMemberHeader(KEY, 'ann@example.com', now() + 300)
+    const reused = await call(origin, 'session/create', { request: { workspaceId: 'w1', sessionId: 'blank' } }, header)
+    expect(reused.body).toMatchObject({ result: { ok: true, value: 'blank' } })
+    const fresh = await call(origin, 'session/create', { request: { workspaceId: 'w1' } }, header)
+    expect(fresh.body).toMatchObject({ result: { ok: true, value: 'new' } })
+    const child = await call(origin, 'session/prompt', { request: { sessionId: 'child', text: 'hi' } }, header)
+    expect(child.body).toMatchObject({ result: { ok: true } })
+    const edit = await call(origin, 'session/updateQueue', { request: { sessionId: 's1' } }, header)
+    expect(edit.body).toMatchObject({ result: { ok: false, error: { code: 'remote-access/denied' } } })
+    expect(probe.callers).toHaveLength(3)
+  })
+
+  it('snapshots the member grants on every listed and live Session', { timeout: 60_000 }, async () => {
+    await boot()
+    const snapshot = context!.remoteAccess.snapshotFor({ kind: 'edge-member', email: 'ann@example.com' })
+    expect(snapshot).toMatchObject({ type: 'baseline', owner: false })
+    const resources = 'grants' in snapshot ? snapshot.grants.map(grant => grant.resource) : []
+    expect(resources).toEqual(expect.arrayContaining([
+      { kind: 'global' },
+      { kind: 'workspace', id: 'w1' },
+      { kind: 'session', id: 's1' },
+      { kind: 'session', id: 'blank' },
+      { kind: 'session', id: 'child' },
+    ]))
+    const s1 = 'grants' in snapshot ? snapshot.grants.find(grant => grant.resource.kind === 'session' && grant.resource.id === 's1') : undefined
+    expect(s1?.actions).toContain('session/prompt')
+    expect(s1?.actions).not.toContain('session/updateQueue')
+  })
+
+  it('rebuilds member grants after a Workspace change has committed', { timeout: 60_000 }, async () => {
+    await boot()
+    const member = { kind: 'edge-member', email: 'ann@example.com' } as const
+    const sessionsOf = () => {
+      const snapshot = context!.remoteAccess.snapshotFor(member)
+      return 'grants' in snapshot ? snapshot.grants.flatMap(grant => grant.resource.kind === 'session' ? [grant.resource.id] : []) : []
+    }
+    expect(sessionsOf()).not.toContain('fresh')
+    // The registry emits the change before its entity holds the new list, which it commits a microtask later.
+    context!.emit('domain/changed', { domain: 'workspace', table: 'workspaces', key: 'w1', operation: 'put', value: {} })
+    queueMicrotask(() => { workspaceSessions = [...workspaceSessions, 'fresh'] })
+    expect(sessionsOf()).not.toContain('fresh')
+    await new Promise(resolve => setImmediate(resolve))
+    expect(sessionsOf()).toContain('fresh')
+  })
+
+  it('lets an owner cookie through when the member header is invalid, and refuses a repeated header', { timeout: 60_000 }, async () => {
+    const { origin, probe } = await boot()
+    const cookie = ownerCookie(origin)
+    const expired = signMemberHeader(KEY, 'ann@example.com', now() - 1)
+    const owner = await call(origin, 'session/prompt', { request: { sessionId: 's2', text: 'hi' } }, expired, { cookie })
+    expect(owner.body).toMatchObject({ result: { ok: true } })
+    expect(probe.callers).toEqual([undefined])
+    const valid = signMemberHeader(KEY, 'ann@example.com', now() + 300)
+    await expect(callWithRepeatedHeader(origin, [valid, valid])).resolves.toBe(401)
+    expect(probe.callers).toEqual([undefined])
   })
 
   it('does not admit a tampered, expired, too-distant, foreign-key, or missing header', { timeout: 60_000 }, async () => {
