@@ -171,7 +171,7 @@ describe('DiffBlock height cap', () => {
     // The path header counts as a row, so a body of maxLines added lines plus
     // the header is one over the cap.
     const { container } = render(<DiffBlock diffs={diffs} />)
-    const toggle = screen.getByRole('button', { name: /Expand rest/ })
+    const toggle = screen.getByRole('button', { name: /Expand the remaining/ })
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
     // Collapsed shows fewer rows than the full body.
     const collapsedCount = bodyRows(container).length
@@ -184,7 +184,7 @@ describe('DiffBlock height cap', () => {
   it('shows no expand control at or under the cap', () => {
     const diffs: DiffHunk[] = [{ path: 'a.ts', oldText: null, newText: added(4) }]
     render(<DiffBlock diffs={diffs} maxLines={16} />)
-    expect(screen.queryByRole('button', { name: /Expand rest|Collapse diff/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Expand the remaining|Collapse diff/ })).toBeNull()
   })
 })
 

@@ -920,7 +920,7 @@ function buildAlphaLog(presented = false): SessionEvent[] {
     }
     const userSeq = push({
       type: 'user/message', surfaceOp: 'append',
-      data: userMessage(text(turn === 59 ? USER_MARKDOWN_LITERAL : `question ${turn}: fixture Historical message, used for pagination and rendering acceptance.`)),
+      data: userMessage(text(turn === 59 ? USER_MARKDOWN_LITERAL : `question ${turn}: fixture history message for pagination and rendering checks.`)),
     })
     if (turn === 0) {
       push({
@@ -936,7 +936,7 @@ function buildAlphaLog(presented = false): SessionEvent[] {
     const withReasoning = turn % 3 === 1
     const blocks: ContentBlock[] = []
     if (withReasoning) blocks.push({ type: 'reasoning', text: `Thinking ${turn}: this is a collapsible reasoning content.` })
-    blocks.push({ type: 'text', text: turn === 59 ? MARKDOWN_FIXTURE : `Answer ${turn}: this is fixture Generated historical reply body.` })
+    blocks.push({ type: 'text', text: turn === 59 ? MARKDOWN_FIXTURE : `Answer ${turn}: this is a fixture-generated history reply.` })
     if (withTool) {
       const callId = brandString<ToolCallId>(`fx-call-${turn}`)
       blocks.push({ type: 'tool-call', id: callId, name: 'echo', arguments: `{"text":"turn ${turn}"}` })

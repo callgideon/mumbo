@@ -4,7 +4,7 @@ import { ReasoningTranslation, reasoningFragments, type TranslateText, type Tran
 
 function fixture(maxTextChars = 4000) {
   const states: TranslationState[] = []
-  const translate = vi.fn<TranslateText>(async ({ text }) => `translation:${text}`)
+  const translate = vi.fn<TranslateText>(async ({ text }) => `흷:${text}`)
   const controller = new ReasoningTranslation({ provider: 'google', targetLanguage: 'zh' }, maxTextChars, translate,
     (state) => { states.push(state) })
   return { controller, translate, states }
@@ -43,7 +43,7 @@ describe('reasoning translation', () => {
     const b = fixture(4)
     try {
       b.controller.update('abcdefghij', true)
-      await vi.waitFor(() => { expect(b.states.at(-1)).toEqual({ text: 'translation:abcd translation:efghij', pending: false, failed: false }) })
+      await vi.waitFor(() => { expect(b.states.at(-1)).toEqual({ text: '흷:abcd흷:efghij', pending: false, failed: false }) })
       expect(b.translate.mock.calls.map(([request]) => request.text)).toEqual(['abcd', 'efgh'])
       b.controller.update('abcdefghij', false)
       await vi.waitFor(() => { expect(b.translate).toHaveBeenCalledTimes(3) })
@@ -59,12 +59,12 @@ describe('reasoning translation', () => {
       b.controller.update('First\n\nTail', true)
       b.controller.update('First\n\nTail continues', true)
       expect(b.translate).toHaveBeenCalledTimes(1)
-      pending.resolve('first paragraph')
-      await vi.waitFor(() => { expect(b.states.at(-1)?.text).toBe('first paragraph\n\nTail continues') })
+      pending.resolve('쨜퀼뾛')
+      await vi.waitFor(() => { expect(b.states.at(-1)?.text).toBe('쨜퀼뾛\n\nTail continues') })
       b.controller.update('First\n\nFirst\n\nTail continues', true)
       expect(b.translate).toHaveBeenCalledTimes(1)
-      expect(b.states.at(-1)?.text).toBe('first paragraph\n\n first paragraph\n\nTail continues')
-    } finally { pending.resolve('first paragraph'); b.controller.dispose() }
+      expect(b.states.at(-1)?.text).toBe('쨜퀼뾛\n\n쨜퀼뾛\n\nTail continues')
+    } finally { pending.resolve('쨜퀼뾛'); b.controller.dispose() }
   })
 
   it('keeps a repeated unfinished tail original until the paragraph completes', async () => {
@@ -72,12 +72,12 @@ describe('reasoning translation', () => {
     try {
       b.controller.update('First\n\nFirst', true)
       await vi.waitFor(() => { expect(b.states.at(-1)?.pending).toBe(false) })
-      expect(b.states.at(-1)?.text).toBe('translation:First\n\nFirst')
+      expect(b.states.at(-1)?.text).toBe('흷:First\n\nFirst')
       b.controller.update('First\n\nFirst words', true)
-      expect(b.states.at(-1)?.text).toBe('translation:First\n\nFirst words')
+      expect(b.states.at(-1)?.text).toBe('흷:First\n\nFirst words')
       expect(b.translate.mock.calls.map(([request]) => request.text)).toEqual(['First'])
       b.controller.update('First\n\nFirst words', false)
-      await vi.waitFor(() => { expect(b.states.at(-1)?.text).toBe('translation:First\n\n translation:First words') })
+      await vi.waitFor(() => { expect(b.states.at(-1)?.text).toBe('흷:First\n\n흷:First words') })
       expect(b.translate.mock.calls.map(([request]) => request.text)).toEqual(['First', 'First words'])
     } finally { b.controller.dispose() }
   })
@@ -92,7 +92,7 @@ describe('reasoning translation', () => {
       expect(b.translate).toHaveBeenCalledTimes(1)
       expect(JSON.stringify(b.states)).not.toContain('sensitive')
       b.controller.retry()
-      await vi.waitFor(() => { expect(b.states.at(-1)).toEqual({ text: 'translation:First\n\n translation:Second', failed: false, pending: false }) })
+      await vi.waitFor(() => { expect(b.states.at(-1)).toEqual({ text: '흷:First\n\n흷:Second', failed: false, pending: false }) })
       expect(b.translate).toHaveBeenCalledTimes(3)
     } finally { b.controller.dispose() }
   })

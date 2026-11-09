@@ -1,43 +1,43 @@
 
-## 发布前确认
+## Confirm before publishing
 
-核对以下信息后，点击 **Review deployments**，选择 <code>desktop-production</code> 并点击 **Approve and deploy**；信息有误请点击 **Reject**。
+After checking the information below, click **Review deployments**, select <code>desktop-production</code>, and click **Approve and deploy**; if anything is wrong, click **Reject**.
 
-| 项目 | 发布信息 |
+| Item | Release information |
 | --- | --- |
-| 发布环境 | <code>production</code> |
-| 版本号 | <code>1.0.0</code> |
-| 升级通道 | <code>stable</code> |
-| 更新灰度比例 | 全量（未设置） |
-| 平台 | <code>win-x64</code> |
-| 下载地址预览 | <a href="https&#58;//download.example.com/dsh-desk/bin/win-x64/stable/deepseek-harness-1.0.0-win-x64.exe">https&#58;//download.example.com/dsh-desk/bin/win-x64/stable/deepseek-harness-1.0.0-win-x64.exe</a><br>发布后的目标地址，审批前不保证可下载。 |
-| 升级 YAML | <a href="https&#58;//download.example.com/dsh-desk/feeds/win-x64/stable.yml">https&#58;//download.example.com/dsh-desk/feeds/win-x64/stable.yml</a><br>本次发布将更新此文件；审批前可能不存在或仍指向旧版本。 |
-| 打包来源 | <a href="https&#58;//github.com/owner/repo/actions/runs/20/attempts/3">查看打包运行 #20 · 第 3 次尝试</a><br>源码：<code>dsh-v1.0.0 @ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</code><br>打包机器：<code>windows-publisher</code> |
-| 签名与公证 | EXE 签名校验通过 |
-| 官网固定安装包 | <a href="https&#58;//download.deepseek.com/desktop/dsh-latest-windows-x64.exe">https&#58;//download.deepseek.com/desktop/dsh-latest-windows-x64.exe</a><br>替换为版本 <code>1.0.0</code>；已有安装包会被替换，无防降级保护；官网上传与刷新在后续 job 中执行，可能需另行审批。 |
+| Environment | <code>production</code> |
+| Version | <code>1.0.0</code> |
+| Update channel | <code>stable</code> |
+| Staged rollout percentage | Full (not set) |
+| Platform | <code>win-x64</code> |
+| Download URL preview | <a href="https&#58;//download.example.com/dsh-desk/bin/win-x64/stable/deepseek-harness-1.0.0-win-x64.exe">https&#58;//download.example.com/dsh-desk/bin/win-x64/stable/deepseek-harness-1.0.0-win-x64.exe</a><br>Target addresses after publishing; downloads are not guaranteed before approval. |
+| Update YAML | <a href="https&#58;//download.example.com/dsh-desk/feeds/win-x64/stable.yml">https&#58;//download.example.com/dsh-desk/feeds/win-x64/stable.yml</a><br>This release will update this file; before approval it may not exist or may still point to the old version. |
+| Package source | <a href="https&#58;//github.com/owner/repo/actions/runs/20/attempts/3">View packaging run #20 · attempt 3</a><br>Source: <code>dsh-v1.0.0 @ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</code><br>Packaging machine: <code>windows-publisher</code> |
+| Signing and notarization | EXE signature verified |
+| Pinned website installer | <a href="https&#58;//download.deepseek.com/desktop/dsh-latest-windows-x64.exe">https&#58;//download.deepseek.com/desktop/dsh-latest-windows-x64.exe</a><br>Replaced with version <code>1.0.0</code>; the existing installer will be replaced, with no downgrade protection; the website upload and refresh run in a later job and may need separate approval. |
 | Git tag | <code>desktop-v1.0.0</code> |
 
-### 批准后将执行
+### Runs after approval
 
-1. 重新校验产物与发布目标；若与审批摘要不一致则停止。
-2. 上传缺少的文件，跳过内容一致的已有文件；发现内容冲突则停止。
-3. 更新上述升级 YAML，并保存发布记录。
-4. 为实际打包提交创建上述 Git tag；若 tag 创建失败，记录“已发布，待补 tag”。
+1. Re-verify the artifacts and release target; stop if they differ from the approval digest.
+2. Upload missing files and skip existing files with identical content; stop on a content conflict.
+3. Update the update YAML above and save the release record.
+4. Create the Git tag above for the commit that was actually packaged; if tag creation fails, record "published, tag pending".
 
 <details>
-<summary>技术详情与文件清单</summary>
+<summary>Technical details and file list</summary>
 
-COS 存储桶：<code>production-1234567890</code>
+COS bucket: <code>production-1234567890</code>
 
-审批摘要 SHA-256：<code>cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc</code>
+Approval digest SHA-256: <code>cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc</code>
 
-共 2 个文件；大小及 SHA-256 对应实际上传字节，包括更新后的 YAML 内容。
+2 files in total; sizes and SHA-256 correspond to the bytes actually uploaded, including the updated YAML content.
 
-| 文件 | 大小 | SHA-256 |
+| File | Size | SHA-256 |
 | --- | --- | --- |
-| <a href="https&#58;//download.example.com/dsh-desk/bin/win-x64/stable/deepseek-harness-1.0.0-win-x64.exe">deepseek-harness-1.0.0-win-x64.exe</a> | 15 字节 | <code>e34210a6de4f653edf588301431c3d69a633638cbf587345cc50a7fed9f38f4c</code> |
-| <a href="https&#58;//download.example.com/dsh-desk/feeds/win-x64/stable.yml">stable.yml</a> | 15 字节 | <code>8850e6075dda0080c526269a4de29848c32c2a65e3d81f4a64ed8ce53d4b47c1</code> |
+| <a href="https&#58;//download.example.com/dsh-desk/bin/win-x64/stable/deepseek-harness-1.0.0-win-x64.exe">deepseek-harness-1.0.0-win-x64.exe</a> | 15 bytes | <code>e34210a6de4f653edf588301431c3d69a633638cbf587345cc50a7fed9f38f4c</code> |
+| <a href="https&#58;//download.example.com/dsh-desk/feeds/win-x64/stable.yml">stable.yml</a> | 15 bytes | <code>8850e6075dda0080c526269a4de29848c32c2a65e3d81f4a64ed8ce53d4b47c1</code> |
 
 </details>
 
-若仓库为公开仓库，此摘要中的下载路径及 test 发布的 release ID 也会公开。随机前缀不能替代访问鉴权。
+If the repository is public, the download paths in this summary and the release ID of a test release are also public. A random prefix is not a substitute for access authentication.

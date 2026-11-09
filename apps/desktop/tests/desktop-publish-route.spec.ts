@@ -19,12 +19,12 @@ it('routes the exact successful attempt to its registered machine', () => {
 })
 
 it.each(['test', 'production'])('explains how to rebuild debugging packages for %s', (preset) => {
-  for (const [qualification, remedy] of [['unsigned', 'signing=signed'], ['unnotarized', 'Cancel check“Skip notarization”']]) {
+  for (const [qualification, remedy] of [['unsigned', 'signing=signed'], ['unnotarized', 'clear the "skip notarization" option']]) {
     const f = fixture()
     f.source.preset = preset
     f.source.qualification = qualification!
     expect(() => resolveDesktopPublishRoute('owner/repo', f.run, { source: f.source }, f.jobs, f.routes)).toThrow(remedy)
-    expect(() => resolveDesktopPublishRoute('owner/repo', f.run, { source: f.source }, f.jobs, f.routes)).toThrow('rerun the current release To-dos invalid')
+    expect(() => resolveDesktopPublishRoute('owner/repo', f.run, { source: f.source }, f.jobs, f.routes)).toThrow('re-running the current publish job has no effect')
   }
 })
 

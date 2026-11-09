@@ -20,7 +20,7 @@ const file: ForgeDiffFile = { path: 'a.ts', previousPath: null, status: 'modifie
   ] }
 
 const selection: ReviewSelection = { source: { kind: 'change', url: 'https://github.com/octo/demo/pull/7', headSha: 'a'.repeat(40) },
-  comment: { ...selectReviewLines(file, 'R', 3, 4)!, body: 'why Added these two lines?' } }
+  comment: { ...selectReviewLines(file, 'R', 3, 4)!, body: '픞표퇈늀빂쇿묰묄？' } }
 afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks() })
 
 describe('review references', () => {
@@ -83,27 +83,27 @@ describe('review references', () => {
     const input = view.getByRole('textbox')
     const send = view.getByRole('button', { name: 'Add to input' })
     expect(send).toHaveProperty('disabled', true)
-    fireEvent.change(input, { target: { value: 'first Checks' } })
+    fireEvent.change(input, { target: { value: '뚤퇤잻' } })
     expect(send).toHaveProperty('disabled', false)
     commits.mockClear()
-    for (const value of ['first Checks boundary', 'first Checks boundary\n add tests later', 'first Checks boundary\n add tests again.']) fireEvent.change(input, { target: { value } })
+    for (const value of ['뚤퇤잻쿛웤', '뚤퇤잻쿛웤\n늫껓똥큇', '뚤퇤잻쿛웤\n늫껓똥큇。']) fireEvent.change(input, { target: { value } })
     expect(commits).not.toHaveBeenCalled()
     view.rerender(<Profiler id="comment" onRender={commits}>
       <ReviewComposer selection={empty} actions={{ ...actions }} close={close} t={t} />
     </Profiler>)
-    expect(input).toHaveProperty('value', 'first Checks boundary\n add tests again.')
+    expect(input).toHaveProperty('value', '뚤퇤잻쿛웤\n늫껓똥큇。')
     fireEvent.change(input, { target: { value: ' \n' } })
     expect(send).toHaveProperty('disabled', true)
-    fireEvent.change(input, { target: { value: 'Modified\'s Content' } })
+    fireEvent.change(input, { target: { value: '뜲휶컛춘섋퓋' } })
     fireEvent.click(send)
-    expect(addToInput).toHaveBeenCalledWith({ ...selection, comment: { ...selection.comment, body: 'Modified\'s Content' } })
+    expect(addToInput).toHaveBeenCalledWith({ ...selection, comment: { ...selection.comment, body: '뜲휶컛춘섋퓋' } })
   })
   it('keeps sides, reversed ranges, and the complete hunk while refusing gaps and cross-hunk selection', () => {
     expect(selectReviewLines(file, 'R', 4, 3)).toEqual({ ...selection.comment, body: '' })
     expect(selectReviewLines(file, 'L', 3, 3)?.hunk).toContain('-old\n+new')
     expect(selectReviewLines(file, 'L', 4, 4)).toBeUndefined()
     expect(selectReviewLines(file, 'R', 4, 11)).toBeUndefined()
-    expect(formatReviewComment(selection, 1)).toBe(`## User Comment 1\nFile: a.ts\nSide: R\nLines: 3-4\nSource: https://github.com/octo/demo/pull/7\nCommit: ${'a'.repeat(40)}\nDiff hunk:\n\`\`\`diff\n@@ -2,2 +2,3 @@\n unchanged\n-old\n+new\n+another\n\`\`\`\nComment:\n why Added these two lines?`)
+    expect(formatReviewComment(selection, 1)).toBe(`## User Comment 1\nFile: a.ts\nSide: R\nLines: 3-4\nSource: https://github.com/octo/demo/pull/7\nCommit: ${'a'.repeat(40)}\nDiff hunk:\n\`\`\`diff\n@@ -2,2 +2,3 @@\n unchanged\n-old\n+new\n+another\n\`\`\`\nComment:\n픞표퇈늀빂쇿묰묄？`)
     expect(formatReviewComment({ source: { kind: 'local', scope: 'staged', base: null, baseRef: null }, comment: { ...selection.comment, startLine: 4, hunk: '```' } }, 2))
       .toContain('Lines: 4\nSource: Local (staged)\nDiff hunk:\n````diff\n```\n````')
     expect(formatReviewComment({ source: { kind: 'local', scope: 'branch', base: 'origin/release/2.4', baseRef: 'refs/remotes/origin/release/2.4' }, comment: selection.comment }, 3))

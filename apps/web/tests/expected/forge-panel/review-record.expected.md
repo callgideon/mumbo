@@ -1,4 +1,4 @@
-- region "评论 R2–4":
-  - text: 你的评论 R2–4 已发布到 GitHub 请核对边界条件
-  - button "添加到输入框"
-  - button "在 GitHub 查看"
+- region "Comment on R2–4":
+  - text: Your comment R2–4 Published to GitHub please check the boundary conditions
+  - button "Add to input"
+  - button "View on GitHub"

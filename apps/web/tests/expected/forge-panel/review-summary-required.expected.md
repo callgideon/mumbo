@@ -1,14 +1,14 @@
-- dialog "提交评审":
-  - heading "提交评审" [level=2]
-  - button "关闭"
-  - text: 待提交评论（1）
-  - textbox "评审总结…"
-  - status: 请求更改时，请填写评审总结
-  - radio "评论"
-  - text: 评论
-  - radio "批准"
-  - text: 批准
-  - radio "请求更改" [checked]
-  - text: 请求更改
-  - button "取消"
-  - button "提交评审" [disabled]
+- dialog "Submit review":
+  - heading "Submit review" [level=2]
+  - button "Close"
+  - text: Pending comments (1)
+  - textbox "Review summary…"
+  - status: Enter a review summary to request changes.
+  - radio "Comment"
+  - text: Comment
+  - radio "Approve"
+  - text: Approve
+  - radio "Request changes" [checked]
+  - text: Request changes
+  - button "Cancel"
+  - button "Submit review" [disabled]

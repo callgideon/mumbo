@@ -112,7 +112,7 @@ it.each([
     expect(summary).not.toContain('Publish separately')
     await expect(prepareDesktopPublication({ ...env, DESKTOP_PUBLISH_ROUTE: JSON.stringify({
       runId: '123', attempt: '2', commit: env.GITHUB_SHA, runnerName: env.RUNNER_NAME, target, preset: 'test', sourceRef: 'master', channel: 'nightly',
-    }) })).rejects.toThrow('rerun the current release To-dos invalid')
+    }) })).rejects.toThrow('re-running the current publish job has no effect')
     await expect(summary).toMatchFileSnapshot(`./expected/retained-${qualification}.md`)
   } else expect(summary).toContain('Publish separately with package_run_id=123 and package_run_attempt=2')
 })

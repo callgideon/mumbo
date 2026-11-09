@@ -33,7 +33,7 @@ describe('fileReferenceRule and folderReferenceRule', () => {
 
   it('separates ordinary files from directories and decodes quoted paths', () => {
     const evaluate = setup()
-    const text = '@src/deep/file.txt Conflicts with @dir/ Conflicts with @"a b.md" Conflicts with @"dir a/" Conflicts with @C:\\\\src\\\\a.ts'
+    const text = '@src/deep/file.txt 쳦 @dir/ 쳦 @"a b.md" 쳦 @"dir a/" 쳦 @C:\\src\\a.ts'
     const input = Object.freeze({ text, facts: Object.freeze({}) })
     const nodes = evaluate(input)
     expect(nodes.filter(node => node.id === 'file').map(node => ({ raw: text.slice(node.start, node.end), data: node.data }))).toEqual([

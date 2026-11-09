@@ -19,10 +19,10 @@ async function fixture() {
   ctx.provide('sandboxPolicy', { workspaceRoot: root } as never)
   const id = SessionId('file-drag-test')
   ctx.sessions.create(id, { meta: { cwd: root, origin: 'subagent' } })
-  const path = join(root, 'report.pdf')
-  const bytes = Buffer.from('%PDF-1.4\n쮟퇋즅펹\n%%EOF')
+  const path = join(root, '홿궺.pdf')
+  const bytes = Buffer.from('%PDF-1.4\n퀽췑섋퓋\n%%EOF')
   await writeFile(path, bytes)
-  return { ctx, root, id, path, bytes, address: sessionFileAddress(id, '꼁챊.pdf') }
+  return { ctx, root, id, path, bytes, address: sessionFileAddress(id, '홿궺.pdf') }
 }
 
 it('authorizes Session-relative file reads and returns their original digest privately to main', async () => {

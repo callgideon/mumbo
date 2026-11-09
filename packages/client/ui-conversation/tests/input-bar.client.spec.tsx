@@ -1833,9 +1833,9 @@ describe('decorations', () => {
   it('the hint lookup keys on the claim name, so a localized claim token keeps the locale entry', () => {
     const { shell, textarea } = bench()
     act(() => {
-      shell.setDraft('/Goal ')
+      shell.setDraft('/목표 ')
       shell.beginCommand(
-        { name: 'goal', token: '/Goal ', hint: '[<objective>|clear|edit <objective>|pause|resume]', submit: () => Promise.resolve({ kind: 'success' as const }) },
+        { name: 'goal', token: '/목표 ', hint: '[<objective>|clear|edit <objective>|pause|resume]', submit: () => Promise.resolve({ kind: 'success' as const }) },
         { start: 0, end: 4, draftRev: shell.snapshot.draftRev },
       )
     })
@@ -1856,18 +1856,18 @@ describe('decorations', () => {
     expect(textarea.hasAttribute('data-composer-composing')).toBe(false)
 
     act(() => {
-      shell.setDraft('/Goal ')
+      shell.setDraft('/목표 ')
       shell.beginCommand(
-        { name: 'goal', token: '/Goal ', hint: 'Goal objective', submit: () => Promise.resolve({ kind: 'success' as const }) },
+        { name: 'goal', token: '/목표 ', hint: 'Goal objective', submit: () => Promise.resolve({ kind: 'success' as const }) },
         { start: 0, end: 4, draftRev: shell.snapshot.draftRev },
       )
     })
     fireEvent.compositionStart(textarea)
-    act(() => { shell.setDraft('/Goal z') })
-    act(() => { shell.setDraft('/Goal ') })
+    act(() => { shell.setDraft('/목표 z') })
+    act(() => { shell.setDraft('/목표 ') })
     expect(textarea.hasAttribute('data-composer-composing')).toBe(true)
-    fireEvent.compositionEnd(textarea, { data: 'this' })
-    act(() => { shell.setDraft('/Goal this') })
+    fireEvent.compositionEnd(textarea, { data: '이' })
+    act(() => { shell.setDraft('/목표 이') })
     await act(async () => {})
     expect(textarea.hasAttribute('data-composer-composing')).toBe(false)
     expect(textarea.style.getPropertyValue('--dsh-composer-hint')).toBe('')
@@ -1876,22 +1876,22 @@ describe('decorations', () => {
   it('an inserted reference renders a real chip capsule with its icon and label', () => {
     const { view, shell } = bench()
     const reference = {
-      source: 'reference', ref: 'w1', label: 'Sessions one', appearance: 'session' as const, clipboardText: '@w1',
+      source: 'reference', ref: 'w1', label: 'Session one', appearance: 'session' as const, clipboardText: '@w1',
     }
     act(() => {
-      shell.setDraft('Allow roughly @w1 Content')
+      shell.setDraft('참고 @w1 내용')
       shell.insertReference(
         reference,
         { start: 3, end: 6, draftRev: shell.snapshot.draftRev },
       )
     })
     const chip = view.container.querySelector('[data-composer-chip]')
-    expect(chip?.textContent).toBe('Sessions one')
+    expect(chip?.textContent).toBe('Session one')
     expect(chip?.querySelector('svg')).not.toBeNull()
     expect(chip?.getAttribute('contenteditable')).toBe('false')
     expect(shell.snapshot.occurrences).toHaveLength(1)
     // The draft IS the clipboard projection; the label lives in the chip DOM.
-    expect(shell.snapshot.draft).toBe('Allow roughly @w1 Content')
+    expect(shell.snapshot.draft).toBe('참고 @w1 내용')
     expect(shell.snapshot.occurrences[0]).toMatchObject({ offset: 3, length: 3 })
   })
 
@@ -1900,7 +1900,7 @@ describe('decorations', () => {
     act(() => {
       shell.setDraft('@w1')
       shell.insertReference({
-        source: 'reference', ref: 'w1', label: 'Sessions one', appearance: 'session', clipboardText: '@w1',
+        source: 'reference', ref: 'w1', label: 'Session one', appearance: 'session', clipboardText: '@w1',
       }, { start: 0, end: 3, draftRev: shell.snapshot.draftRev })
     })
     const chip = view.container.querySelector('[data-composer-chip]')
@@ -1917,9 +1917,9 @@ describe('decorations', () => {
     // removes the whole occurrence — is checkable here.
     const { shell } = bench()
     act(() => {
-      shell.setDraft('before @w1 after')
+      shell.setDraft('앞 @w1 뒤')
       shell.insertReference({
-        source: 'reference', ref: 'w1', label: 'Sessions one', appearance: 'session', clipboardText: '@w1',
+        source: 'reference', ref: 'w1', label: 'Session one', appearance: 'session', clipboardText: '@w1',
       }, { start: 2, end: 5, draftRev: shell.snapshot.draftRev })
     })
     expect(shell.snapshot.occurrences).toHaveLength(1)
@@ -1928,15 +1928,15 @@ describe('decorations', () => {
         expect($replaceDetectSpanWithText({ start: 2, end: 3 }, '')).toBe(true)
       }, { discrete: true })
     })
-    expect(shell.snapshot).toMatchObject({ draft: 'before  after', occurrences: [] })
+    expect(shell.snapshot).toMatchObject({ draft: '앞  뒤', occurrences: [] })
   })
 
   it('copy and cut expand a selected chip to its clipboard projection natively', async () => {
     const { shell, textarea } = bench()
     act(() => {
-      shell.setDraft('before @w1 after')
+      shell.setDraft('앞 @w1 뒤')
       shell.insertReference({
-        source: 'reference', ref: 'w1', label: 'Sessions one', appearance: 'session', clipboardText: '@w1',
+        source: 'reference', ref: 'w1', label: 'Session one', appearance: 'session', clipboardText: '@w1',
       }, { start: 2, end: 5, draftRev: shell.snapshot.draftRev })
       // Select the chip plus its flanking spaces: detect [1, 4).
       shell.editor.update(() => { $selectDetectSpan({ start: 1, end: 4 }) }, { discrete: true })
@@ -1944,14 +1944,14 @@ describe('decorations', () => {
     const setData = vi.fn()
     fireEvent.copy(textarea, { clipboardData: { setData, getData: () => '' } })
     expect(setData).toHaveBeenCalledWith('text/plain', ' @w1 ')
-    expect(shell.snapshot.draft).toBe('before @w1 after')
+    expect(shell.snapshot.draft).toBe('앞 @w1 뒤')
 
     act(() => {
       shell.editor.update(() => { $selectDetectSpan({ start: 1, end: 4 }) }, { discrete: true })
     })
     fireEvent.cut(textarea, { clipboardData: { setData, getData: () => '' } })
     await vi.waitFor(() => {
-      expect(shell.snapshot).toMatchObject({ draft: 'before and after', occurrences: [] })
+      expect(shell.snapshot).toMatchObject({ draft: '앞뒤', occurrences: [] })
     })
     expect(setData).toHaveBeenLastCalledWith('text/plain', ' @w1 ')
   })

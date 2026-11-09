@@ -1,13 +1,13 @@
 - text: main
-- button "基准分支：origin/main": origin/main
-- text: 包含未提交的修改
-- button "创建变更请求"
-- button "分支"
-- button "全部 0 个文件" [disabled]
-- button "刷新变更"
-- button "全部展开" [disabled]
-- button "左右对比" [pressed]
-- button "自动换行" [pressed]
+- button "Base branch: origin/main": origin/main
+- text: Including uncommitted changes
+- button "Create change request"
+- button "Branch"
+- button "All 0 files" [disabled]
+- button "Refresh changes"
+- button "Expand all files" [disabled]
+- button "Split view" [pressed]
+- button "Line wrap" [pressed]
 - status:
-  - text: 无法完整读取 Git 过滤器配置，尚未执行比较。请检查 Git 配置和读取上限后重试
-  - button "重试"
+  - text: No comparison was run because Git filter settings could not be read completely. Check the Git settings and output limit, then retry.
+  - button "Retry"

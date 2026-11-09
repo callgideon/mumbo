@@ -1,20 +1,20 @@
-- text: feat 项目目录
-- button "复制项目目录路径"
-- button "本地变更"
+- text: feat Project directory
+- button "Copy project directory path"
+- button "Local changes"
 - text: HEAD → origin/main
-- button "查看本会话的变更：4 个文件，新增 4 行，删除 1 行": +4 −1 4 个文件
-- heading "本会话的变更请求 · 1" [level=3]
-- button "刷新状态"
+- button "View the changes of this Session: 4 files, 4 lines added, 1 lines deleted": +4 −1 4 files
+- heading "Change requests of this Session · 1" [level=3]
+- button "Refresh status"
 - list:
   - listitem:
-    - img "变更请求状态：需要处理"
+    - img "Change request state: Needs attention"
     - link "Add the pull request panel":
       - /url: https://github.com/octo/demo/pull/7
     - text: "#7 feat → main"
-    - button "在浏览器中打开"
-    - button "复制变更请求链接"
-    - 'button "从本会话移除 #7"'
-    - 'button "收起 #7" [expanded]'
-    - button "检查 已加载 1 项检查，仍有更多"
-    - text: 评审 等待评审 · 1 条未解决讨论 合并 无冲突
-    - 'button "查看 #7 的变更：新增 128 行，删除 14 行"': 变更 +128 −14
+    - button "Open in browser"
+    - button "Copy change request link"
+    - 'button "Remove #7 from this Session"'
+    - 'button "Collapse #7" [expanded]'
+    - button "Checks 1 checks loaded; more available"
+    - text: Review Review required · 1 unresolved Merge No conflicts
+    - 'button "View the changes of #7: 128 lines added, 14 lines deleted"': Changes +128 −14

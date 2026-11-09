@@ -194,7 +194,7 @@ describe('Assembled viewer page global configuration privacy', () => {
     expect(document.documentElement.lang).toBe(locale)
     expect(document.documentElement.style.colorScheme).toMatch(/^(light|dark)$/u)
     expect(document.body.style.getPropertyValue('--dsh-content-font-size')).toBe('14px')
-    expect(document.body.textContent).toContain('question 51: fixture history Message')
+    expect(document.body.textContent).toContain('question 51: fixture history message')
     expect(document.querySelector('pre.shiki code')).not.toBeNull()
     const delivered = document.querySelector<HTMLElement>('[data-presented-files-row]')
     if (delivered === null) throw new Error('assembled viewer page delivered-file card is missing')

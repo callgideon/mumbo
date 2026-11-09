@@ -29,7 +29,7 @@ function references(text: string, nodes: readonly UserTextNode[]) {
 describe('original-text reference competition', () => {
   it('keeps an earlier complete file instead of a Session label inside its path', () => {
     const { evaluate } = setup()
-    const text = 'reference @types Repair @src/@types/react/index.d.ts'
+    const text = '쟦퐅 @types 휶끇 @src/@types/react/index.d.ts'
     expect(references(text, evaluate({ text, facts: { sessionLabels: ['types'] } }))).toEqual([
       ['session', '@types', { label: 'types' }],
       ['file', '@src/@types/react/index.d.ts', { path: 'src/@types/react/index.d.ts', label: 'index.d.ts' }],
@@ -38,9 +38,9 @@ describe('original-text reference competition', () => {
 
   it('keeps an earlier complete file instead of a wire Session inside its path', () => {
     const { evaluate } = setup()
-    const text = '@src/@[Sessions one](dsh-session:x)'
+    const text = '@src/@[쭢쇧퀼](dsh-session:x)'
     expect(references(text, evaluate({ text, facts: {} }))).toEqual([
-      ['file', text, { path: 'src/@[Sessions one](dsh-session:x)', label: '@[Sessions one](dsh-session:x)' }],
+      ['file', text, { path: 'src/@[쭢쇧퀼](dsh-session:x)', label: '@[쭢쇧퀼](dsh-session:x)' }],
     ])
   })
 
@@ -54,21 +54,21 @@ describe('original-text reference competition', () => {
   })
 
   it.each([
-    ['@Sessions one@src/a.ts', '@src/a.ts'], ['@Sessions one/plan', '/plan'],
+    ['@쭢쇧퀼@src/a.ts', '@src/a.ts'], ['@쭢쇧퀼/plan', '/plan'],
   ])('does not turn the suffix into an original word boundary in %s', (text, tail) => {
     const { evaluate } = setup()
-    expect(evaluate({ text, facts: { sessionLabels: ['Sessions one'], skillNames: ['plan'] } })).toEqual([
-      { id: 'session', start: 0, end: 4, data: { label: '윚겕였' } },
+    expect(evaluate({ text, facts: { sessionLabels: ['쭢쇧퀼'], skillNames: ['plan'] } })).toEqual([
+      { id: 'session', start: 0, end: 4, data: { label: '쭢쇧퀼' } },
       { id: 'text', start: 4, end: text.length, data: { text: tail } },
     ])
   })
 
   it('preserves real whitespace boundaries and stable same-start Session precedence', () => {
     const { evaluate } = setup()
-    const facts = { sessionLabels: ['Sessions one', 'types'], skillNames: ['plan'] }
-    const text = '@Sessions one @src/a.ts /plan'
+    const facts = { sessionLabels: ['쭢쇧퀼', 'types'], skillNames: ['plan'] }
+    const text = '@쭢쇧퀼 @src/a.ts /plan'
     expect(references(text, evaluate({ text, facts }))).toEqual([
-      ['session', '@Sessions one', { label: 'Sessions one' }], ['file', '@src/a.ts', { path: 'src/a.ts', label: 'a.ts' }],
+      ['session', '@쭢쇧퀼', { label: '쭢쇧퀼' }], ['file', '@src/a.ts', { path: 'src/a.ts', label: 'a.ts' }],
       ['skill', '/plan', { name: 'plan' }],
     ])
     expect(evaluate({ text: '@types/react/index.d.ts', facts })).toEqual([
@@ -94,15 +94,15 @@ describe('original-text reference competition', () => {
   it('matches a new evaluator through additions and withdrawals of multiple business Facts', () => {
     const { evaluate, registry } = setup()
     const texts = [
-      '🙂 @Sessions one @src/@types/react/index.d.ts /review @docs/',
+      '🙂 @쭢쇧퀼 @src/@types/react/index.d.ts /review @docs/',
       '/review @"docs /review notes.md" @types/react/index.d.ts',
-      '@Sessions one@src/a.ts @Sessions one/plan @src/@[Sessions one](dsh-session:x)',
-      '@multi-word /review @src/a.ts /goal',
+      '@쭢쇧퀼@src/a.ts @쭢쇧퀼/plan @src/@[쭢쇧퀼](dsh-session:x)',
+      '@릦댃 /review @src/a.ts /goal',
     ]
     const factsList: readonly Partial<UserTextFacts>[] = [
-      {}, { sessionLabels: ['Sessions one', 'types'] }, { skillNames: ['review', 'plan'] },
-      { sessionLabels: ['Sessions one', 'types'], skillNames: ['review', 'plan'] },
-      { sessionLabels: ['multi-word /review', 'Sessions one'], skillNames: ['review'], commands: [{ start: 0, end: 7, name: 'review' }] },
+      {}, { sessionLabels: ['쭢쇧퀼', 'types'] }, { skillNames: ['review', 'plan'] },
+      { sessionLabels: ['쭢쇧퀼', 'types'], skillNames: ['review', 'plan'] },
+      { sessionLabels: ['릦댃 /review', '쭢쇧퀼'], skillNames: ['review'], commands: [{ start: 0, end: 7, name: 'review' }] },
       {},
     ]
     for (const text of texts) for (const facts of factsList) {

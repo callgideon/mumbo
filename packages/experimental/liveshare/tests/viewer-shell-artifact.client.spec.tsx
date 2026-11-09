@@ -136,7 +136,7 @@ describe('Assembled liveshare viewer page', () => {
     expect(screen.queryByRole('button', { name: 'Branch into a new conversation' })).toBeNull()
     // The assembled conversation renders the fixture history through the real presentation plugins:
     // a user turn, an assistant turn whose Markdown became a highlighted code block, and a tool card.
-    expect(document.body.textContent).toContain('question 51: fixture history Message')
+    expect(document.body.textContent).toContain('question 51: fixture history message')
     expect(document.body.textContent).toContain('Tool call')
     const codeBlock = document.querySelector('pre.shiki')
     expect(codeBlock).not.toBeNull()

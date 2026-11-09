@@ -1,7 +1,7 @@
-- region "评论 R2–4":
-  - text: 评论 R2–4
-  - textbox "留下评论…": 请核对边界条件
-  - button "取消"
-  - button "添加到输入框"
-  - button "开始评审"
-  - button "GitHub 评论选项"
+- region "Comment on R2–4":
+  - text: Comment on R2–4
+  - textbox "Leave a comment…": please check the boundary conditions
+  - button "Cancel"
+  - button "Add to input"
+  - button "Start review"
+  - button "GitHub comment options"

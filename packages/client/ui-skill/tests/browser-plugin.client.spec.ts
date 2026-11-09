@@ -159,7 +159,7 @@ describe('apply', () => {
           'row.preparing': 'スキルの読み込みを準備中',
           'row.failed': 'スキルの読み込みに失敗しました',
           'row.stopped': 'スキルの読み込みが停止しました',
-          'row.instructions': 'tejun',
+          'row.instructions': '手順',
           'row.inspect': '詳細を確認',
           'menu.userOnly': 'ユーザー専用',
         },

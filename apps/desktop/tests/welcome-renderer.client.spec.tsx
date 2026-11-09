@@ -80,7 +80,7 @@ describe('desktop welcome presentation', () => {
     expect(view.document.body.textContent).not.toContain('sk-desktop-example')
   })
 
-  it.each(['', 'bad key', 'key', 'DEEPSEEK_API_KEY=sk-example', '"sk-example"', '`sk-example`'])(
+  it.each(['', 'bad key', '늆픛', 'DEEPSEEK_API_KEY=sk-example', '"sk-example"', '`sk-example`'])(
     'rejects invalid input before sending it: %s', (value) => {
       const view = mount()
       fireEvent.click(view.button('#api-key'))

@@ -599,7 +599,7 @@
             "content": [
               {
                 "type": "text",
-                "text": "question 51: fixture Historical message, used for pagination and rendering acceptance."
+                "text": "question 51: fixture history message for pagination and rendering checks."
               }
             ],
             "source": {
@@ -637,7 +637,7 @@
               "content": [
                 {
                   "type": "text",
-                  "text": "Answer 51: this is fixture Generated historical reply body."
+                  "text": "Answer 51: this is a fixture-generated history reply."
                 }
               ],
               "source": {
@@ -671,7 +671,7 @@
                   "index": 0,
                   "block": {
                     "type": "text",
-                    "text": "Answer 51: this is fixture Generated historical reply body."
+                    "text": "Answer 51: this is a fixture-generated history reply."
                   }
                 }
               },
@@ -750,7 +750,7 @@
             "content": [
               {
                 "type": "text",
-                "text": "question 52: fixture Historical message, used for pagination and rendering acceptance."
+                "text": "question 52: fixture history message for pagination and rendering checks."
               }
             ],
             "source": {
@@ -792,7 +792,7 @@
                 },
                 {
                   "type": "text",
-                  "text": "Answer 52: this is fixture Generated historical reply body."
+                  "text": "Answer 52: this is a fixture-generated history reply."
                 },
                 {
                   "type": "tool-call",
@@ -853,7 +853,7 @@
                   "index": 1,
                   "block": {
                     "type": "text",
-                    "text": "Answer 52: this is fixture Generated historical reply body."
+                    "text": "Answer 52: this is a fixture-generated history reply."
                   }
                 }
               },
@@ -1103,7 +1103,7 @@
             "content": [
               {
                 "type": "text",
-                "text": "question 53: fixture Historical message, used for pagination and rendering acceptance."
+                "text": "question 53: fixture history message for pagination and rendering checks."
               }
             ],
             "source": {
@@ -1141,7 +1141,7 @@
               "content": [
                 {
                   "type": "text",
-                  "text": "Answer 53: this is fixture Generated historical reply body."
+                  "text": "Answer 53: this is a fixture-generated history reply."
                 }
               ],
               "source": {
@@ -1175,7 +1175,7 @@
                   "index": 0,
                   "block": {
                     "type": "text",
-                    "text": "Answer 53: this is fixture Generated historical reply body."
+                    "text": "Answer 53: this is a fixture-generated history reply."
                   }
                 }
               },
@@ -1254,7 +1254,7 @@
             "content": [
               {
                 "type": "text",
-                "text": "question 54: fixture Historical message, used for pagination and rendering acceptance."
+                "text": "question 54: fixture history message for pagination and rendering checks."
               }
             ],
             "source": {
@@ -1292,7 +1292,7 @@
               "content": [
                 {
                   "type": "text",
-                  "text": "Answer 54: this is fixture Generated historical reply body."
+                  "text": "Answer 54: this is a fixture-generated history reply."
                 }
               ],
               "source": {
@@ -1326,7 +1326,7 @@
                   "index": 0,
                   "block": {
                     "type": "text",
-                    "text": "Answer 54: this is fixture Generated historical reply body."
+                    "text": "Answer 54: this is a fixture-generated history reply."
                   }
                 }
               },
@@ -1405,7 +1405,7 @@
             "content": [
               {
                 "type": "text",
-                "text": "question 55: fixture Historical message, used for pagination and rendering acceptance."
+                "text": "question 55: fixture history message for pagination and rendering checks."
               }
             ],
             "source": {
@@ -1447,7 +1447,7 @@
                 },
                 {
                   "type": "text",
-                  "text": "Answer 55: this is fixture Generated historical reply body."
+                  "text": "Answer 55: this is a fixture-generated history reply."
                 }
               ],
               "source": {
@@ -1502,7 +1502,7 @@
                   "index": 1,
                   "block": {
                     "type": "text",
-                    "text": "Answer 55: this is fixture Generated historical reply body."
+                    "text": "Answer 55: this is a fixture-generated history reply."
                   }
                 }
               },
@@ -1581,7 +1581,7 @@
             "content": [
               {
                 "type": "text",
-                "text": "question 56: fixture Historical message, used for pagination and rendering acceptance."
+                "text": "question 56: fixture history message for pagination and rendering checks."
               }
             ],
             "source": {
@@ -1619,7 +1619,7 @@
               "content": [
                 {
                   "type": "text",
-                  "text": "Answer 56: this is fixture Generated historical reply body."
+                  "text": "Answer 56: this is a fixture-generated history reply."
                 }
               ],
               "source": {
@@ -1653,7 +1653,7 @@
                   "index": 0,
                   "block": {
                     "type": "text",
-                    "text": "Answer 56: this is fixture Generated historical reply body."
+                    "text": "Answer 56: this is a fixture-generated history reply."
                   }
                 }
               },
@@ -1732,7 +1732,7 @@
             "content": [
               {
                 "type": "text",
-                "text": "question 57: fixture Historical message, used for pagination and rendering acceptance."
+                "text": "question 57: fixture history message for pagination and rendering checks."
               }
             ],
             "source": {
@@ -1770,7 +1770,7 @@
               "content": [
                 {
                   "type": "text",
-                  "text": "Answer 57: this is fixture Generated historical reply body."
+                  "text": "Answer 57: this is a fixture-generated history reply."
                 },
                 {
                   "type": "tool-call",
@@ -1810,7 +1810,7 @@
                   "index": 0,
                   "block": {
                     "type": "text",
-                    "text": "Answer 57: this is fixture Generated historical reply body."
+                    "text": "Answer 57: this is a fixture-generated history reply."
                   }
                 }
               },
@@ -2060,7 +2060,7 @@
             "content": [
               {
                 "type": "text",
-                "text": "question 58: fixture Historical message, used for pagination and rendering acceptance."
+                "text": "question 58: fixture history message for pagination and rendering checks."
               }
             ],
             "source": {
@@ -2125,7 +2125,7 @@
                 },
                 {
                   "type": "text",
-                  "text": "Answer 58: this is fixture Generated historical reply body."
+                  "text": "Answer 58: this is a fixture-generated history reply."
                 }
               ],
               "source": {
@@ -2180,7 +2180,7 @@
                   "index": 1,
                   "block": {
                     "type": "text",
-                    "text": "Answer 58: this is fixture Generated historical reply body."
+                    "text": "Answer 58: this is a fixture-generated history reply."
                   }
                 }
               },

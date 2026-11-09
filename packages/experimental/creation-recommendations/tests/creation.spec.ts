@@ -22,7 +22,7 @@ describe('interface creation', () => {
       { ...installedBundle('enabled'), official: true, meta: { title: 'Existing view', description: 'Inspect current work' } },
       { ...installedBundle('disabled'), official: true, enabled: false, description: 'Optional view' },
       { ...installedBundle('empty'), official: true },
-      { ...installedBundle('localized'), official: true, meta: { title: { en: 'Counter', zh: 'counter' }, description: { en: 'Count tasks', zh: 'StatisticsTo-dos' } } },
+      { ...installedBundle('localized'), official: true, meta: { title: { en: 'Counter', ja: 'カウンター' }, description: { en: 'Count tasks', ja: 'タスクをかぞえる' } } },
       installedBundle('third-party'),
     )
     expect(f.ctx.tools.get('plugin_manager')).toBeUndefined()

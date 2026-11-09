@@ -711,10 +711,10 @@ describe('PendingQuestion domain face', () => {
 })
 
 describe('parseRecommendedLabel', () => {
-  it('recognizes English and Chinese suffixes without changing ordinary labels', () => {
+  it('recognizes the suffix in ASCII and full-width parentheses without changing ordinary labels', () => {
     expect(parseRecommendedLabel('Fast (Recommended)')).toEqual({ label: 'Fast', recommended: true })
-    expect(parseRecommendedLabel('Safe (Recommended)')).toEqual({ label: 'steady', recommended: true })
-    expect(parseRecommendedLabel('steady (Recommended)')).toEqual({ label: 'steady', recommended: true })
+    expect(parseRecommendedLabel('Safe（Recommended）')).toEqual({ label: 'Safe', recommended: true })
+    expect(parseRecommendedLabel('Safe (recommended)')).toEqual({ label: 'Safe', recommended: true })
     expect(parseRecommendedLabel('Plain')).toEqual({ label: 'Plain', recommended: false })
   })
 })

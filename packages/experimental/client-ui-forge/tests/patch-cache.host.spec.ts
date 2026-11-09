@@ -29,10 +29,10 @@ describe('PatchCache', () => {
     expect(cache.get(key(1), 'v')).toBe('aaaa')
 
     // Two three-byte characters bring the total to 13 bytes, so #2, read least recently, leaves.
-    cache.set(key(3), 'v', 'Changes')
+    cache.set(key(3), 'v', '똰콈')
     expect(cache.get(key(2), 'v')).toBeUndefined()
     expect(cache.get(key(1), 'v')).toBe('aaaa')
-    expect(cache.get(key(3), 'v')).toBe('Changes')
+    expect(cache.get(key(3), 'v')).toBe('똰콈')
   })
 
   it('keeps no patch over the bound, dropping the earlier version all the same', () => {

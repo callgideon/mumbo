@@ -32,9 +32,9 @@ import {
 const SESSION_REF: ReferenceInsert = {
   source: 'session-reference',
   ref: 'session-a',
-  label: 'do not reply casually CallsTOOL',
+  label: '랡둑톺끇귷뼕끌귓쑡',
   appearance: 'session',
-  clipboardText: '@session:do not reply casually CallsTOOL',
+  clipboardText: '@session:랡둑톺끇귷뼕끌귓쑡',
 }
 
 const SKILL_REF: ReferenceInsert = {
@@ -85,9 +85,9 @@ describe('ReferenceChipNode', () => {
       const chip = $createReferenceChipNode(SESSION_REF)
       expect(chip.getSource()).toBe('session-reference')
       expect(chip.getReference()).toBe('session-a')
-      expect(chip.getLabel()).toBe('do not reply casually CallsTOOL')
+      expect(chip.getLabel()).toBe('랡둑톺끇귷뼕끌귓쑡')
       expect(chip.getAppearance()).toBe('session')
-      expect(chip.getTextContent()).toBe('@session:do not reply casually CallsTOOL')
+      expect(chip.getTextContent()).toBe('@session:랡둑톺끇귷뼕끌귓쑡')
       expect(chip.isInvalid()).toBe(false)
       expect(chip.isInline()).toBe(true)
       expect(chip.isKeyboardSelectable()).toBe(false)
@@ -175,7 +175,7 @@ describe('$projectComposer', () => {
     editor.read(() => {
       const projection = $projectComposer(idAssigner())
       expect(projection.detectText).toBe(`ask ${ATOMIC_CHAR} now`)
-      expect(projection.clipboardText).toBe('ask @session:do not reply casually CallsTool now')
+      expect(projection.clipboardText).toBe('ask @session:랡둑톺끇귷뼕끌귓쑡 now')
       expect(projection.occurrences).toHaveLength(1)
       const occurrence = projection.occurrences[0]
       expect(occurrence).toMatchObject({
