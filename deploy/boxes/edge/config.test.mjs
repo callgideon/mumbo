@@ -7,7 +7,7 @@ import { config } from './edge.mjs'
 const base = { PUBLIC_HOST: 'boxes.mumbo.si', LLM_HOST: 'llm.boxes.mumbo.si', BACKUP_BUCKET: 'backups' }
 const M1 = ['APPROVE_HOST', 'GITHUB_AGENT_LOGIN', 'REQUIRED_CHECKS', 'DAILY_TOKENS_USER', 'DAILY_TOKENS_PROJECT', 'BOX_TEMPLATE', 'PROJECT_TEMPLATE',
   'AUDIT_PREFIX', 'GITHUB_AGENT_TOKEN', 'GITHUB_APP_ID', 'GITHUB_APP_KEY', 'GITHUB_MERGE_TOKEN', 'NTFY_TOPIC', 'SIGNIN_COOKIE',
-  'OPENROUTER_MODELS', 'OPENROUTER_API_KEY', 'OPENROUTER_ZDR']
+  'OPENROUTER_MODELS', 'OPENROUTER_API_KEY', 'OPENROUTER_ZDR', 'OPENROUTER_IMAGE_TOKENS']
 /** config() with exactly `base` plus `vars` set among the variables it reads here. */
 function configWith(vars = {}) {
   const all = { ...Object.fromEntries(M1.map(k => [k, undefined])), ...base, ...vars }
@@ -61,4 +61,7 @@ test('OpenRouter route: off unless OPENROUTER_MODELS names models (exact ids, tr
   const on = configWith({ OPENROUTER_MODELS: ' qwen/qwen3.8-27b , qwen/Qwen3.5-9b,', OPENROUTER_API_KEY: 'k', OPENROUTER_ZDR: 'false' })
   assert.deepEqual(on.openrouterModels, ['qwen/qwen3.8-27b', 'qwen/Qwen3.5-9b'])
   assert.equal(on.openrouterKey, 'k'); assert.equal(on.openrouterZdr, false)
+  assert.equal(off.openrouterImageTokens, 1500)
+  assert.equal(configWith({ OPENROUTER_IMAGE_TOKENS: '0' }).openrouterImageTokens, 0)
+  for (const bad of ['-1', 'many']) assert.throws(() => configWith({ OPENROUTER_IMAGE_TOKENS: bad }), /OPENROUTER_IMAGE_TOKENS/, bad)
 })

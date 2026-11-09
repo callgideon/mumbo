@@ -82,6 +82,8 @@ export const config = () => ({
   openrouterModels: env('OPENROUTER_MODELS', '').split(',').map(s => s.trim()).filter(Boolean),
   openrouterKey: optional('OPENROUTER_API_KEY'),
   openrouterZdr: env('OPENROUTER_ZDR', 'true') !== 'false',
+  // Input tokens charged per image when a box drops a response before its usage (openrouterBody inputEstimate).
+  openrouterImageTokens: atLeast('OPENROUTER_IMAGE_TOKENS', 0, 1500),
 })
 
 /** Address or @domain allowlist; an empty list admits nobody. */
@@ -175,7 +177,7 @@ export function boxSite(cfg, principal) {
 export function startScript(cfg, token, site = boxSite(cfg, ''), role = '', memberKeyText, boxFiles, panelAdmins = []) {
   const llm = `https://${cfg.llmHost}`
   // dsh's OpenRouter route (@deepseek-ai/dsh-llm-pi-ai, the base composition's row llm-pi-ai) through the model host,
-  // keyed by the box token. Images leave 8 MiB of OPENROUTER_MAX_BODY for a full context's text.
+  // keyed by the box token. Images leave 8 MiB of OPENROUTER_MAX_BODY for the text.
   const openrouter = cfg.openrouterModels?.length ? { displayName: 'OpenRouter', apiKeyEnv: 'DEEPSEEK_API_KEY', baseURL: `${llm}/openrouter/v1`, maxRequestImageBytes: 12 * 1024 * 1024,
     models: cfg.openrouterModels.map(id => ({ id, ...OPENROUTER_BOX_MODELS[id] })) } : undefined
   const b64 = (text) => Buffer.from(text).toString('base64')
@@ -886,40 +888,64 @@ export const OPENROUTER_PATHS = {
   'POST /openrouter/v1/chat/completions': 'https://openrouter.ai/api/v1/chat/completions',
   'GET /openrouter/v1/models': 'https://openrouter.ai/api/v1/models',
 }
-/** Request fields that change OpenRouter's routing or cost (fallback models, plugins such as web search, prompt
- *  transforms); openrouterBody drops them. */
-export const OPENROUTER_STRIPPED = ['provider', 'models', 'plugins', 'route', 'transforms', 'web_search_options']
+/** The only top-level request fields forwarded to OpenRouter: what dsh's pi-ai openai-completions provider sends for
+ *  these models (pi-ai 1.3.0 buildParams) and standard sampling fields. Every other field, such as provider, models,
+ *  plugins, route, transforms, preset or web_search_options, can change routing or cost and is dropped. */
+export const OPENROUTER_FIELDS = ['model', 'messages', 'stream', 'stream_options', 'max_tokens', 'max_completion_tokens', 'temperature', 'top_p',
+  'stop', 'seed', 'tools', 'tool_choice', 'parallel_tool_calls', 'response_format', 'reasoning']
 /** Request body cap on the OpenRouter route (413 above it); images travel base64 in the JSON. Other model paths have no edge cap. */
 export const OPENROUTER_MAX_BODY = 20 * 1024 * 1024
-/** Box-side metadata by OpenRouter id, on top of the installed pi-ai catalog's; an allowlisted model without an entry
- *  takes the catalog's. Context windows as OpenRouter lists them (2026-11-09). */
+/** Box-side model fields on top of the installed pi-ai catalog, which supplies the rest (context window included); an
+ *  allowlisted model without an entry takes the catalog's. */
 const OPENROUTER_BOX_MODELS = {
-  'qwen/qwen3.8-27b': { contextWindow: 1_024_000, input: ['text', 'image'] },
-  'qwen/qwen3.5-9b': { contextWindow: 262_144, input: ['text', 'image'] },
+  'qwen/qwen3.8-27b': { input: ['text', 'image'] },
+  'qwen/qwen3.5-9b': { input: ['text', 'image'] },
 }
 
 /**
  * The upstream body for a chat request on the OpenRouter route, or why it is refused (400). `model` must be one of
- * cfg.openrouterModels exactly. OPENROUTER_STRIPPED fields are dropped and `provider` is always the edge's own:
- * `data_collection: "deny"` (no endpoint that trains on prompts), plus `zdr: true` (zero-data-retention endpoints only)
- * unless cfg.openrouterZdr is false. A streamed request always asks for the usage chunk the token budget reads.
+ * cfg.openrouterModels exactly; message content parts may only be `text`, or `image_url` with a `data:image/` URL, so
+ * the body cap bounds every image and no paid file parser or remote fetch starts. Only OPENROUTER_FIELDS are kept;
+ * then the edge sets `stream: true` with `stream_options: {include_usage: true}` (the token budget reads the final
+ * usage chunk; dsh always streams), `reasoning.exclude: false` when reasoning is set (reasoning is reported, not
+ * hidden), and its own `provider`: `data_collection: "deny"`, plus `zdr: true` unless cfg.openrouterZdr is false.
  * @param {object} cfg - config()
  * @param {Buffer} raw - the request body
- * @returns {{ error: string } | { body: string, model: string, inputEstimate: number }} `inputEstimate` is ceil(bytes / 3)
- *   of the request without its image data: the input charged when a box drops the response before its usage.
+ * @returns {{ error: string } | { body: string, model: string, inputEstimate: number }} `inputEstimate`, the input charged
+ *   when a box drops the response before its usage: ceil(bytes without image data / 3) plus cfg.openrouterImageTokens per image.
  */
 export function openrouterBody(cfg, raw) {
   let body
   try { body = JSON.parse(raw) } catch { return { error: 'The request body is not JSON.' } }
   if (body === null || typeof body !== 'object' || Array.isArray(body)) return { error: 'The request body must be a JSON object.' }
   if (!cfg.openrouterModels.includes(body.model)) return { error: `Model ${JSON.stringify(body.model)} is not offered; use one of ${cfg.openrouterModels.join(', ')}.` }
-  for (const field of OPENROUTER_STRIPPED) delete body[field]
-  body.provider = { data_collection: 'deny', ...(cfg.openrouterZdr ? { zdr: true } : {}) }
-  if (body.stream === true) body.stream_options = { ...(typeof body.stream_options === 'object' ? body.stream_options : {}), include_usage: true }
-  const images = (Array.isArray(body.messages) ? body.messages : []).flatMap(m => Array.isArray(m?.content) ? m.content : [])
-    .reduce((n, part) => n + (typeof part?.image_url?.url === 'string' ? part.image_url.url.length : 0), 0)
-  return { body: JSON.stringify(body), model: body.model, inputEstimate: Math.ceil(Math.max(0, raw.length - images) / 3) }
+  if (!Array.isArray(body.messages)) return { error: 'messages must be an array.' }
+  const parts = body.messages.flatMap(m => Array.isArray(m?.content) ? m.content : [])
+  const images = parts.filter(p => p?.type === 'image_url')
+  if (parts.some(p => p?.type !== 'text' && p?.type !== 'image_url') || images.some(p => !/^data:image\//.test(p.image_url?.url ?? ''))) {
+    return { error: 'Message content parts may only be text, or image_url with a data:image/ URL.' }
+  }
+  const out = Object.fromEntries(OPENROUTER_FIELDS.filter(f => f in body).map(f => [f, body[f]]))
+  out.stream = true
+  out.stream_options = { include_usage: true }
+  if (out.reasoning !== undefined) out.reasoning = { ...(typeof out.reasoning === 'object' ? out.reasoning : {}), exclude: false }
+  out.provider = { data_collection: 'deny', ...(cfg.openrouterZdr ? { zdr: true } : {}) }
+  const imageBytes = images.reduce((n, p) => n + p.image_url.url.length, 0)
+  return { body: JSON.stringify(out), model: out.model, inputEstimate: Math.ceil(Math.max(0, raw.length - imageBytes) / 3) + images.length * cfg.openrouterImageTokens }
 }
+
+/** A request's body, or null once it passes `cap` bytes; the rest is left unread. */
+const readBody = (req, cap) => new Promise((resolve, reject) => {
+  const chunks = []
+  let size = 0
+  req.on('data', (c) => {
+    if (size > cap) return
+    if ((size += c.length) > cap) { req.pause(); return resolve(null) }
+    chunks.push(c)
+  })
+  req.on('end', () => resolve(Buffer.concat(chunks)))
+  req.on('error', reject)
+})
 
 // github (github.mjs), halt (halt.mjs) and tokens (budget.mjs tokenBudget) are optional like mcp: absent, /github/
 // answers 404, nothing is halted and tokens are not counted. main() passes all of them.
@@ -944,42 +970,51 @@ export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, mcp, g
     if (path.startsWith('/github/') && github) return github(req, res, claim)
     const openrouter = cfg.openrouterModels?.length ? OPENROUTER_PATHS[`${req.method} ${path}`] : undefined
     if (!openrouter && !MODEL_PATHS.some(p => p.test(path))) return json(res, 404, { error: 'not found' })
+    const cap = openrouter ? OPENROUTER_MAX_BODY : Infinity
+    // Over the cap: answer and close the connection without reading on; a declared length is refused before any check.
+    const tooLarge = () => void res.writeHead(413, { 'content-type': 'application/json', 'cache-control': 'no-store', connection: 'close' })
+      .end(JSON.stringify({ error: { type: 'invalid_request_error', message: `Request bodies are limited to ${cap} bytes here.` } }), () => req.destroy())
+    if (Number(req.headers['content-length']) > cap) return tooLarge()
     if (halt && await halt.isHalted(claim.u)) return json(res, 503, { type: 'error', error: { type: 'api_error', message: 'Stopped by the founder' } })
     if (!(await allow(claim.u))) return json(res, 429, { type: 'error', error: { type: 'rate_limit_error', message: 'Daily model budget reached for this account.' } })
     if (tokens && !(await tokens.allow(claim.u))) return json(res, 429, { type: 'error', error: { type: 'rate_limit_error', message: `Daily token budget reached for ${claim.u}` } })
     Promise.resolve(touch(claim.b)).catch(() => {})
-    const chunks = []
-    const cap = openrouter ? OPENROUTER_MAX_BODY : Infinity
-    let size = 0
-    for await (const c of req) if ((size += c.length) <= cap) chunks.push(c)
-    if (size > cap) return json(res, 413, { error: { type: 'invalid_request_error', message: `Request bodies are limited to ${cap} bytes here.` } })
+    const raw = await readBody(req, cap)
+    if (raw === null) return tooLarge()
+    const started = Date.now()
+    const logCall = (status, model) => log(JSON.stringify({ edge: 'model', user: claim.u, box: claim.b, path, ...(model ? { model } : {}), status, ms: Date.now() - started }))
     let url = `${cfg.upstream}${req.url}`, init, forwarded
     if (openrouter) {
       const authorization = `Bearer ${cfg.openrouterKey}`
       if (req.method === 'GET') {
         const listed = await fetchImpl(openrouter, { headers: { authorization }, redirect: 'error' })
+        logCall(listed.status)
         if (!listed.ok) return json(res, 502, { error: { type: 'api_error', message: `OpenRouter answered ${listed.status}` } })
         return json(res, 200, { data: ((await listed.json()).data ?? []).filter(m => cfg.openrouterModels.includes(m?.id)) })
       }
-      forwarded = openrouterBody(cfg, Buffer.concat(chunks))
+      forwarded = openrouterBody(cfg, raw)
       if (forwarded.error) return json(res, 400, { error: { type: 'invalid_request_error', message: forwarded.error } })
       url = openrouter
-      init = { method: 'POST', headers: { 'content-type': 'application/json', authorization }, body: forwarded.body, redirect: 'error' }
+      const headers = { 'content-type': 'application/json', authorization }
+      // pi-ai's session affinity header, so OpenRouter keeps a Session on one provider (prompt cache).
+      const session = req.headers['x-session-id']
+      if (typeof session === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(session)) headers['x-session-id'] = session
+      init = { method: 'POST', headers, body: forwarded.body, redirect: 'error' }
     } else {
       const headers = {}
       for (const name of ['content-type', 'accept', 'anthropic-version', 'anthropic-beta', 'user-agent']) if (req.headers[name] !== undefined) headers[name] = req.headers[name]
       headers['x-api-key'] = modelKey
       headers.authorization = `Bearer ${modelKey}`
-      init = { method: req.method, headers, body: ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks), redirect: 'error' }
+      init = { method: req.method, headers, body: ['GET', 'HEAD'].includes(req.method) ? undefined : raw, redirect: 'error' }
     }
-    const started = Date.now()
     const upstream = await fetchImpl(url, init)
-    log(JSON.stringify({ edge: 'model', user: claim.u, box: claim.b, path, ...(forwarded ? { model: forwarded.model } : {}), status: upstream.status, ms: Date.now() - started }))
+    logCall(upstream.status, forwarded?.model)
     const out = {}
     for (const [k, v] of upstream.headers) if (!['content-encoding', 'content-length', 'transfer-encoding', 'connection', 'set-cookie'].includes(k)) out[k] = v
     res.writeHead(upstream.status, out)
     if (upstream.body === null) return void res.end()
-    const body = tokens ? tokens.meter(claim.u, upstream.body, upstream.headers.get('content-type'), forwarded?.inputEstimate) : upstream.body
+    // An upstream error is not billed, so it carries no input estimate.
+    const body = tokens ? tokens.meter(claim.u, upstream.body, upstream.headers.get('content-type'), upstream.ok ? forwarded?.inputEstimate : 0) : upstream.body
     // pipeline destroys the source when the client closes, so a dropped connection cancels the metered stream.
     pipeline(Readable.fromWeb(body), res, () => {})
   }

@@ -16,14 +16,20 @@ const openaiUsage = (u) => {
   const out = [u.completion_tokens, u.completion_tokens_details?.reasoning_tokens].filter(v => Number.isSafeInteger(v) && v >= 0)
   return { input_tokens: u.prompt_tokens, output_tokens: out.length ? Math.max(...out) : undefined }
 }
+/** Characters of generated text in an Anthropic content block or delta, or an OpenAI message or delta. */
+const generated = (d) => [d?.text, d?.thinking, d?.partial_json, d?.content, d?.reasoning, d?.reasoning_content,
+  ...(Array.isArray(d?.tool_calls) ? d.tool_calls.map(t => t?.function?.arguments) : [])].reduce((n, v) => n + (typeof v === 'string' ? v.length : 0), 0)
 
 /**
  * Daily token budget per principal: `limits.project` for `project:*` principals, `limits.user` otherwise.
  * @param {{ store: object, limits: { user: number, project: number }, now: () => number }} deps - `now` is epoch ms.
  * @returns {{ allow(principal: string): Promise<boolean>, meter(principal: string, webBody: ReadableStream, contentType: string | null, inputEstimate?: number): ReadableStream }}
- *   `allow` is false once today's tokens reach the limit; `meter` passes every byte through and counts the usage it reads,
- *   Anthropic Messages or OpenAI Chat Completions. `inputEstimate` (default 0) is the input charged when the body ends or
- *   is cancelled before any usage names its input: OpenAI streams report usage only in their last chunk.
+ *   `allow` is false once today's tokens reach the limit. `meter` passes every byte through and counts the usage it reads,
+ *   Anthropic Messages or OpenAI Chat Completions, SSE or JSON. Without readable usage it charges an estimate instead:
+ *   `inputEstimate` (default 0; OpenAI streams report input only in their last chunk) plus ceil(generated characters / 3),
+ *   when an SSE body ends or is cancelled before its final usage, when a JSON body has no usage, and (input only) when a
+ *   JSON body is cancelled before its end. The OpenRouter route forces streaming, so its JSON bodies are upstream errors,
+ *   which the caller meters with inputEstimate 0.
  */
 export function tokenBudget({ store, limits, now }) {
   const key = (principal) => `tokens:${new Date(now()).toISOString().slice(0, 10)}:${principal}`
@@ -45,11 +51,12 @@ export function tokenBudget({ store, limits, now }) {
         return webBody.pipeThrough(new TransformStream({
           transform(chunk, controller) { pending += decoder.decode(chunk, { stream: true }); controller.enqueue(chunk) },
           async flush() {
-            try {
-              const body = JSON.parse(pending + decoder.decode())
-              const usage = openaiUsage(body?.usage) ?? body?.usage
-              await add(USAGE_FIELDS.reduce((sum, f) => sum + (Number.isSafeInteger(usage?.[f]) ? usage[f] : 0), 0))
-            } catch (err) { console.error('edge: token usage unreadable', err.message) }
+            let body
+            try { body = JSON.parse(pending + decoder.decode()) } catch (err) { console.error('edge: token usage unreadable', err.message); return add(inputEstimate) }
+            const usage = openaiUsage(body?.usage) ?? body?.usage
+            if (USAGE_FIELDS.some(f => Number.isSafeInteger(usage?.[f]))) return add(USAGE_FIELDS.reduce((sum, f) => sum + (Number.isSafeInteger(usage[f]) ? usage[f] : 0), 0))
+            const blocks = [...(Array.isArray(body?.choices) ? body.choices.map(c => c?.message) : []), ...(Array.isArray(body?.content) ? body.content : [])]
+            await add(inputEstimate + Math.ceil(blocks.reduce((n, b) => n + generated(b), 0) / 3))
           },
           cancel: () => add(inputEstimate),
         }))
@@ -75,10 +82,7 @@ export function tokenBudget({ store, limits, now }) {
           const data = JSON.parse(line.slice(5))
           // Anthropic content_block_delta, or OpenAI choices[].delta.
           const deltas = data.type === 'content_block_delta' ? [data.delta ?? {}] : Array.isArray(data.choices) ? data.choices.map(c => c?.delta ?? {}) : []
-          for (const d of deltas) {
-            const calls = Array.isArray(d.tool_calls) ? d.tool_calls.map(t => t?.function?.arguments) : []
-            for (const v of [d.text, d.thinking, d.partial_json, d.content, d.reasoning, d.reasoning_content, ...calls]) if (typeof v === 'string') chars += v.length
-          }
+          for (const d of deltas) chars += generated(d)
           const usage = data.type === 'message_start' ? data.message?.usage : data.type === 'message_delta' ? data.usage : openaiUsage(data.usage)
           if (!usage) return
           for (const f of USAGE_FIELDS) if (Number.isSafeInteger(usage[f]) && usage[f] >= 0) last[f] = usage[f]

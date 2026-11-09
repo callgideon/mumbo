@@ -122,6 +122,18 @@ test('OpenAI JSON usage is counted once; a non-stream response cancelled before 
   assert.equal(await store.getCount(key('b@x.co')), 25)
 })
 
+test('a JSON body without usage charges the input estimate plus ceil(generated chars / 3); an unreadable one the estimate', async () => {
+  const { store, t } = make()
+  await drain(t.meter('a@x.co', stream(JSON.stringify({ choices: [{ message: { content: 'a'.repeat(10), reasoning: 'b'.repeat(10), tool_calls: [{ function: { arguments: '{}' } }] } }] })), 'application/json', 100))
+  assert.equal(await store.getCount(key('a@x.co')), 100 + Math.ceil(22 / 3))
+  await drain(t.meter('b@x.co', stream(JSON.stringify({ content: [{ type: 'text', text: 'c'.repeat(9) }] })), 'application/json', 0))
+  assert.equal(await store.getCount(key('b@x.co')), 3)
+  await drain(t.meter('c@x.co', stream('{"error":'), 'application/json', 40))
+  assert.equal(await store.getCount(key('c@x.co')), 40)
+  await drain(t.meter('d@x.co', stream(JSON.stringify({ error: { message: 'no' } })), 'application/json'))
+  assert.equal(await store.getCount(key('d@x.co')), 0, 'an error body with no estimate costs nothing')
+})
+
 test('a failed upstream read still charges what was streamed, then errors the stream', async () => {
   const { store, t } = make()
   const body = new ReadableStream({ start(c) { c.enqueue(enc.encode(start + textDelta('z'.repeat(30)))); setTimeout(() => c.error(new Error('upstream reset')), 20) } })

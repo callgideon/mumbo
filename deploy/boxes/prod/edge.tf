@@ -248,8 +248,11 @@ resource "aws_iam_role_policy" "exec_edge" {
 }
 # The mumbo-bot GitHub App (app_id, slug, private_key), created outside Terraform under the data key (kms:Decrypt in control.tf).
 data "aws_secretsmanager_secret" "github_app" { name = "${local.name}/github-app" }
-# The OpenRouter API key (a plain string), created outside Terraform under the data key.
-data "aws_secretsmanager_secret" "openrouter" { name = "${local.name}/openrouter" }
+# The OpenRouter API key (a plain string), created outside Terraform under the data key; read only while the route is on.
+data "aws_secretsmanager_secret" "openrouter" {
+  count = var.openrouter_models == "" ? 0 : 1
+  name  = "${local.name}/openrouter"
+}
 
 locals {
   ssm = "arn:aws:ssm:us-east-1:${data.aws_caller_identity.this.account_id}:parameter/mumbo"
@@ -262,7 +265,7 @@ locals {
     var.ntfy_enabled ? { NTFY_TOPIC = "boxes/ntfy-topic" } : {},
   )
   # Container env name -> plain-string Secrets Manager secret; with github_app, all the secrets the exec role may read.
-  edge_secrets = var.openrouter_models == "" ? {} : { OPENROUTER_API_KEY = data.aws_secretsmanager_secret.openrouter.arn }
+  edge_secrets = { for s in data.aws_secretsmanager_secret.openrouter : "OPENROUTER_API_KEY" => s.arn }
 }
 resource "aws_ecs_task_definition" "edge" {
   family                   = "${local.name}-edge"
