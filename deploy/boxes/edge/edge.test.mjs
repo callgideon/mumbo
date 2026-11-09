@@ -704,3 +704,54 @@ test('model host: a client that drops mid-stream cancels the upstream and the me
     assert.equal(await store.getCount('tokens:2026-11-09:a@x.com'), 100)
   } finally { s.close() }
 })
+
+// ---- edge pages: invite-only, first set-up, later start, capacity
+const pageOf = async (cfgx, ensure, email = 'a@x.com') => {
+  const s = userServer({ cfg: cfgx, box: { ensure, touch() {}, forget() {} }, log: () => {} })
+  const r = await call(await listen(s), { headers: { 'x-forwarded-email': email } })
+  s.close()
+  return r
+}
+test('invite-only page names the allowed domains from the config, escaped, and does not refresh', async () => {
+  const r = await pageOf({ ...cfg, allowed: ['@mumbo.si', 'one@y.com', '@cambria<labs>.ai'] }, async () => assert.fail('no box'), 'z@other.com')
+  assert.equal(r.status, 403)
+  assert.match(r.body, /@mumbo\.si/)
+  assert.match(r.body, /@cambria&#60;labs&#62;\.ai/)
+  assert.doesNotMatch(r.body, /one@y\.com|<labs>/)
+  assert.equal(r.headers.refresh, undefined)
+  assert.equal(r.headers['cache-control'], 'no-store')
+})
+test('invite-only page without domain entries keeps the plain text', async () => {
+  const r = await pageOf({ ...cfg, allowed: ['a@x.com'] }, async () => assert.fail('no box'), 'z@other.com')
+  assert.match(r.body, /invite-only/)
+})
+test('first create shows the set-up page, a later start the starting page; both refresh and are not cached', async () => {
+  const first = await pageOf(cfg, async () => { throw Object.assign(new Error('x'), { first: true }) })
+  assert.match(first.body, /Setting up your computer, about a minute/)
+  const later = await pageOf(cfg, async () => { throw Object.assign(new Error('x'), { first: false }) })
+  assert.match(later.body, /Starting your computer/)
+  for (const r of [first, later]) {
+    assert.equal(r.status, 503)
+    assert.equal(r.headers.refresh, '5')
+    assert.match(r.body, /<meta http-equiv="refresh" content="5">/)
+    assert.equal(r.headers['cache-control'], 'no-store')
+  }
+})
+test('capacity page is kept', async () => {
+  const r = await pageOf(cfg, async () => { throw Object.assign(new Error('capacity'), { capacity: true, first: true }) })
+  assert.match(r.body, /at capacity/)
+})
+test('ensure marks a failure as first set-up only for a person with no box and no backup', async () => {
+  const mk = (presign, e2b = fakeE2B()) => boxes({ e2b, store: memoryStore(), cfg, edgeKey: 'k', presignGet: presign, presignPut: async () => 'P', log: () => {} })
+  const failing = () => { const e2b = fakeE2B(); e2b.Sandbox.create = async () => { throw new Error('boom') }; return e2b }
+  await assert.rejects(mk(async () => undefined, failing()).ensure('a@x.com'), (e) => e.first === true)
+  await assert.rejects(mk(async () => 'GET-URL', failing()).ensure('a@x.com'), (e) => e.first === false)
+  // A box another replica is still creating for a first-time person.
+  const store = memoryStore(); const e2b = fakeE2B()
+  const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'P', log: () => {} })
+  e2b.made.push({ id: 'b1' })
+  await store.putBox('b1', { email: 'a@x.com', creating: Date.now(), first: true })
+  await assert.rejects(b.ensure('a@x.com'), (e) => e.first === true)
+  await store.putBox('b1', { email: 'a@x.com', creating: Date.now() })
+  await assert.rejects(b.ensure('a@x.com'), (e) => e.first === false)
+})

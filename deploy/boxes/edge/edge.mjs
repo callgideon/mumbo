@@ -365,13 +365,14 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
       lifecycle: { onTimeout: 'pause', autoResume: true },
       network: { allowPublicTraffic: false, maskRequestHost: boxSite(cfg, email).host },
     }).catch((e) => { throw /place sandbox|capacity|too many|concurrent/i.test(e.message) ? Object.assign(e, { capacity: true, status: 503 }) : e })
+    const restoreUrl = await presignGet(`${userPrefix(email)}/latest.tar.gz`).catch(async (e) => { await box.kill().catch(() => {}); throw e })
     // Recorded before the restore: other replicas then neither adopt nor back up a box whose data is half restored.
-    await store.putBox(box.sandboxId, { email, creating: Date.now(), active: Date.now(), extended: Date.now(), backedUp: Date.now(), paused: false })
+    // `first`: no backup exists, so this is the person's first set-up (the edge pages say so).
+    await store.putBox(box.sandboxId, { email, creating: Date.now(), first: !restoreUrl, active: Date.now(), extended: Date.now(), backedUp: Date.now(), paused: false })
     try {
       await box.files.write('/root/.mumbo/start.sh', startScript(cfg, signBox(edgeKey, email, box.sandboxId), boxSite(cfg, email), roleInstructions(cfg, email),
         email.startsWith('project:') ? memberKey(edgeKey, box.sandboxId).toString('base64url') : undefined, boxFiles,
         email.startsWith('project:') ? await ownersOf(store, email.slice('project:'.length)) : undefined))
-      const restoreUrl = await presignGet(`${userPrefix(email)}/latest.tar.gz`)
       if (restoreUrl) {
         const ok = await run(box, restoreCommand(restoreUrl), 660_000).then(() => true, () => false)
         say({ msg: 'restore', user: email, box: box.sandboxId, ok })
@@ -390,6 +391,17 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
 
   /** The user's running box: id, dsh launch token and E2B traffic token. Creates, resumes or repairs as needed. */
   async function ensure(email) {
+    try { return await ensureLocked(email) } catch (error) {
+      error.first ??= await firstSetUp(email).catch(() => false)
+      throw error
+    }
+  }
+  /** True while the person has no box and no backup, or their box is still its first creation. */
+  async function firstSetUp(email) {
+    const found = await find(email)
+    return found ? (await store.getBox(found.sandboxId))?.first === true : !(await presignGet(`${userPrefix(email)}/latest.tar.gz`))
+  }
+  async function ensureLocked(email) {
     return store.withLock(`user:${email}`, LOCK_MS, async () => {
       const found = await find(email)   // an API error throws here: never create a second box on a failed lookup
       if (found === undefined) return pick(await create(email))
@@ -552,8 +564,9 @@ export function albIdentity({ albArn, region, fetchImpl = fetch, now = () => Dat
 
 // ---- HTTP plumbing
 const json = (res, status, value) => res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(value))
+/** An edge page; `text` is HTML, so interpolated values go through esc(). A refreshing page reloads every 5 seconds. */
 const page = (res, status, text, refresh = true) => res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...(refresh ? { refresh: '5' } : {}) })
-  .end(`<!doctype html><meta charset="utf-8"><title>mumbo</title><body style="font-family:system-ui;display:grid;place-items:center;min-height:90vh;margin:0"><p>${text}</p>`)
+  .end(`<!doctype html><meta charset="utf-8">${refresh ? '<meta http-equiv="refresh" content="5">' : ''}<title>mumbo</title><body style="font-family:system-ui;display:grid;place-items:center;min-height:90vh;margin:0"><p>${text}</p>`)
 const DROP = new Set(['connection', 'keep-alive', 'proxy-connection', 'transfer-encoding', 'upgrade', 'te', 'trailer', 'host', 'authorization', 'x-mumbo-member'])
 
 /** Which box port a main-host request goes to: the desktop live view (noVNC, :6080) under /desktop/, otherwise dsh
@@ -588,6 +601,11 @@ export function boxHeaders(cfg, incoming, target, port = '3080') {
   return out
 }
 export const esc = (v) => String(v).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
+/** The invite-only page text; names the domains the allowlist admits to join. */
+export const inviteText = (allowed) => {
+  const domains = allowed.filter(a => a.startsWith('@'))
+  return `mumbo boxes are invite-only for now. This account is not on the list yet.${domains.length ? ` Anyone with an address at ${domains.map(esc).join(' or ')} can join.` : ''}`
+}
 /** The signed-in person's home: their assistant, their desktop and the shared projects they belong to. Edge-served,
  *  so it loads without starting any box. */
 export function homePage(cfg, res, email, projects) {
@@ -666,7 +684,7 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, log = conso
     if (req.url === '/edge/healthz') return json(res, 200, { ok: true })
     const email = await identify(req)
     if (!email.includes('@')) return json(res, 401, { error: 'not signed in' })
-    if (!admitted(cfg.allowed, email)) return page(res, 403, 'mumbo boxes are invite-only for now. This account is not on the list yet.', false)
+    if (!admitted(cfg.allowed, email)) return page(res, 403, inviteText(cfg.allowed), false)
     const host = hostOf(req)
     if (host === cfg.approveHost && approve) return approve(req, res, email).catch((e) => {
       log(JSON.stringify({ edge: 'error', user: email, host, error: e.message }))
@@ -683,7 +701,8 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, log = conso
     let target
     try { target = await box.ensure(to.project ? `project:${to.project}` : email) } catch (e) {
       log(JSON.stringify({ edge: 'error', user: email, project: to.project, error: e.message }))
-      return page(res, 503, e.capacity ? 'mumbo is at capacity right now. This page retries every few seconds.' : 'This mumbo box is starting. This page reloads in a few seconds.')
+      return page(res, 503, e.capacity ? 'mumbo is at capacity right now. This page retries every few seconds.'
+        : e.first ? 'Setting up your computer, about a minute. This page reloads by itself.' : 'Starting your computer. This page reloads by itself.')
     }
     const dsh = to.port === '3080'
     // On a member-capable project box a member is themselves (signed header), never the box owner.
