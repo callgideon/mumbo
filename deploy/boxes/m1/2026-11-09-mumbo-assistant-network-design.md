@@ -511,6 +511,14 @@ Then the part C design (accounts in the box), then D.
 - Test design per `docs/testing.md`; documentation and upgrade guides per the repository rules.
 - Lower priority, for M6: which Sources bitlane, openinfrx and whiteboard need. whiteboard uses Scion and may need its own Source kind.
 
+### Follow-ups after M1 (found in implementation review)
+
+- **Move Mumbo-authored security code in the superagent copy under the coverage gate.** Today the whole copy is excluded. Move the panel admission rule (S2) and `Policy.delivers` (S3) into `src/mumbo/*.ts`, and narrow the exclusion to leave `src/mumbo/**` covered.
+- **Match GitHub identities by numeric user id, not login,** in superagent's Policy allowlist and in the edge's agent-author and review-marker checks. A renamed or recycled login could otherwise match.
+- **Bind the approval item's file list to the head SHA** through `compare/{base}...{sha}` (B2's noted race).
+- **Trim the `mumbo-bot` App's permissions:** remove actions and workflows write. The edge already mints narrower tokens.
+- **Move the agent onto the `mumbo-bot` App**, so no machine accounts remain. This needs superagent's GitHub Source to work without `/user` and notifications.
+
 ### Deferred to their own research or design
 
 - Claude workers in sandboxes and the account-manager plugin: subscription logins, usage and rotation, with `cux` as the reference (section 8.1).
