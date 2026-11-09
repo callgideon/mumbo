@@ -67,7 +67,7 @@ it('opens inline images in the shared lightbox, restores focus, and never opens 
 
 it.each([
   ['assets/my%20photo.png', 'my photo.png'],
-  ['assets/%E5%9B%BE%E7%89%87.png', 'Image.png'],
+  ['assets/%EC%BB%BE%EB%BA%A3.png', '컾뺣.png'],
   ['C:%5Cassets%5Cmy%20photo.png', 'my photo.png'],
 ])('prepares the decoded basename for %s', async (destination, name) => {
   fileDrag.prepare.mockClear()
