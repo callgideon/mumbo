@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, readdirSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -37,11 +37,26 @@ test('backup snapshots SQLite databases without -wal files, and restore puts the
   back.close()
 })
 
+test('a non-SQLite .db survives a round trip, and the browser profile keeps its journals', () => {
+  const { root, db, target } = fixture()
+  db.close()
+  mkdirSync(join(root, 'root/projects/p'), { recursive: true })
+  mkdirSync(join(root, 'home/browser/profile/Default'), { recursive: true })
+  writeFileSync(join(root, 'root/projects/p/x.db'), 'plain bytes')
+  writeFileSync(join(root, 'home/browser/profile/Default/Cookies-journal'), 'j')
+  const b = sh(backupCommand(target, root))
+  assert.equal(b.status, 0, b.stderr)
+  assert.match(execFileSync('tar', ['-tzf', `${root}.tgz`], { encoding: 'utf8' }), /home\/browser\/profile\/Default\/Cookies-journal/)
+  rmSync(join(root, 'root/projects'), { recursive: true })
+  assert.equal(sh(restoreCommand(target, root)).status, 0)
+  assert.equal(readFileSync(join(root, 'root/projects/p/x.db'), 'utf8'), 'plain bytes')
+})
+
 test('a corrupt database fails the backup and leaves the previous archive alone', () => {
   const { root, db, target } = fixture()
   db.close()
   writeFileSync(`${root}.tgz`, 'previous')
-  writeFileSync(join(root, 'root/.dsh/superagent/bad.db'), 'not a sqlite database'.repeat(50))
+  writeFileSync(join(root, 'root/.dsh/superagent/bad.db'), Buffer.concat([Buffer.from('SQLite format 3\0'), Buffer.alloc(200, 7)]))
   const b = sh(backupCommand(target, root))
   assert.notEqual(b.status, 0)
   assert.equal(execFileSync('cat', [`${root}.tgz`], { encoding: 'utf8' }), 'previous')

@@ -178,7 +178,8 @@ nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\
   --no-open --host "$ip" --port 3080 --public-url ${site.publicUrl} --trusted-host ${cfg.publicHost}${site.host === cfg.publicHost ? '' : ` --trusted-host ${site.host}`} > /root/dsh.log 2>&1 &
 `
 }
-/** VACUUM INTO a `.snap` copy of every SQLite database under .dsh and projects (the live files are WAL-mode and cannot be tarred consistently). Any failure aborts the backup. */
+/** Write a `.snap` copy of every *.sqlite and *.db under .dsh and projects (the live files are WAL-mode and cannot be tarred consistently). Files with the SQLite header get VACUUM INTO
+ *  and a failure aborts the backup; any other file is copied verbatim. */
 const SNAPSHOT_JS = `const { DatabaseSync } = require("node:sqlite"), fs = require("fs"), path = require("path"), Q = String.fromCharCode(39)
 const [home, out] = process.argv.slice(1)
 for (const d of [".dsh", "projects"]) {
@@ -187,6 +188,10 @@ for (const d of [".dsh", "projects"]) {
     if (!e.isFile() || !/\\.(sqlite|db)$/.test(e.name)) continue
     const src = path.join(e.parentPath, e.name), dst = path.join(out, path.relative(home, src) + ".snap")
     fs.mkdirSync(path.dirname(dst), { recursive: true })
+    const fd = fs.openSync(src, "r"), head = Buffer.alloc(16)
+    fs.readSync(fd, head, 0, 16, 0)
+    fs.closeSync(fd)
+    if (head.toString("latin1") !== "SQLite format 3\\u0000") { fs.copyFileSync(src, dst); continue }
     const db = new DatabaseSync(src)
     db.exec("VACUUM INTO " + Q + dst.replaceAll(Q, Q + Q) + Q)
     db.close()
@@ -197,12 +202,12 @@ for (const d of [".dsh", "projects"]) {
  *  `root` (default `/`) is the filesystem root, for tests. */
 export const backupCommand = (url, root = '/') => {
   const r = root.replace(/\/+$/, ''), snap = `${r}/root/.mumbo-sqlite`
-  return `set -e; f=$(mktemp /tmp/mumbo-backup.XXXXXX); trap 'rm -f "$f"; rm -rf '${snap}'' EXIT; rm -rf '${snap}'; node -e '${SNAPSHOT_JS}' '${r}/root' '${snap}'; tar -C '${root}' --exclude=node_modules --exclude='*.sqlite' --exclude='*.db' --exclude='*-wal' --exclude='*-shm' --exclude='*-journal' --exclude='home/browser/profile/Singleton*' --exclude='home/browser/profile/*/Cache' --exclude='home/browser/profile/*/Code Cache' --exclude='home/browser/profile/*/GPUCache' --exclude='home/browser/profile/*/Service Worker/CacheStorage' -czf "$f" $(cd '${root}' && ls -d root/.dsh root/projects root/.mumbo-sqlite home/browser/profile 2>/dev/null); curl -fsS -m 600 -X PUT -H 'content-type: application/gzip' --upload-file "$f" '${url}'; rm -rf '${snap}'`
+  return `set -e; f=$(mktemp /tmp/mumbo-backup.XXXXXX); trap 'rm -f "$f"; rm -rf '${snap}'' EXIT; rm -rf '${snap}'; node -e '${SNAPSHOT_JS}' '${r}/root' '${snap}'; tar -C '${root}' --exclude=node_modules --exclude='*.sqlite-wal' --exclude='*.sqlite-shm' ${['root/.dsh', 'root/projects'].flatMap((d) => ['*.sqlite', '*.db', '*-wal', '*-shm', '*-journal'].map((p) => `--exclude='${d}/${p}'`)).join(' ')} --exclude='home/browser/profile/Singleton*' --exclude='home/browser/profile/*/Cache' --exclude='home/browser/profile/*/Code Cache' --exclude='home/browser/profile/*/GPUCache' --exclude='home/browser/profile/*/Service Worker/CacheStorage' -czf "$f" $(cd '${root}' && ls -d root/.dsh root/projects root/.mumbo-sqlite home/browser/profile 2>/dev/null); curl -fsS -m 600 -X PUT -H 'content-type: application/gzip' --upload-file "$f" '${url}'; rm -rf '${snap}'`
 }
 /** Download and unpack a backup, then move each `.snap` back over its database path. Runs before dsh starts. */
 export const restoreCommand = (url, root = '/') => {
   const r = root.replace(/\/+$/, ''), snap = `${r}/root/.mumbo-sqlite`
-  return `set -e; curl -fsS -m 600 '${url}' | tar -C '${root}' -xzf -; if [ -d '${snap}' ]; then (cd '${snap}' && find . -name '*.snap' -type f) | while IFS= read -r p; do d='${r}/root/'"\${p#./}"; d="\${d%.snap}"; rm -f "$d-wal" "$d-shm"; mv '${snap}'/"$p" "$d"; done; rm -rf '${snap}'; fi`
+  return `set -e; curl -fsS -m 600 '${url}' | tar -C '${root}' -xzf -; if [ -d '${snap}' ]; then (cd '${snap}' && find . -name '*.snap' -type f) | while IFS= read -r p; do d='${r}/root/'"\${p#./}"; d="\${d%.snap}"; rm -f "$d-wal" "$d-shm" "$d-journal"; mv '${snap}'/"$p" "$d"; done; rm -rf '${snap}'; fi`
 }
 
 /** Prints the earliest next run (epoch ms) of the box's active dsh scheduled tasks, or nothing. Reads both storage
