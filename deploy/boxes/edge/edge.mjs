@@ -68,8 +68,12 @@ export const config = () => ({
   ntfyTopic: optional('NTFY_TOPIC'),
 })
 
-/** Address or @domain allowlist; an empty list admits nobody. */
-export const admitted = (allowed, email) => allowed.some(a => a === email || (a.startsWith('@') && email.endsWith(a)))
+/** Address or @domain allowlist, lowercased (config()); an empty list admits nobody. The email compares lowercased. An
+ *  @domain entry matches that exact domain only: @mumbo.si admits neither x@sub.mumbo.si nor x@evil-mumbo.si. */
+export const admitted = (allowed, email) => {
+  email = email.toLowerCase()
+  return allowed.some(a => a === email || (a.startsWith('@') && email.endsWith(a)))
+}
 
 // ---- box tokens: HMAC(EDGE_SECRET) over {u: email, b: box id}. A token is honoured only while b is u's live box.
 const mac = (key, body) => createHmac('sha256', key).update(body).digest('base64url')

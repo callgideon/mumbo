@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { config } from './edge.mjs'
+import { admitted, config } from './edge.mjs'
 
 const base = { PUBLIC_HOST: 'boxes.mumbo.si', LLM_HOST: 'llm.boxes.mumbo.si', BACKUP_BUCKET: 'backups' }
 const M1 = ['APPROVE_HOST', 'GITHUB_AGENT_LOGIN', 'REQUIRED_CHECKS', 'DAILY_TOKENS_USER', 'DAILY_TOKENS_PROJECT', 'BOX_TEMPLATE', 'PROJECT_TEMPLATE',
@@ -46,4 +46,22 @@ test('rollback safety: the pre-B13 edge filter strips the default sign-in cookie
   const tfDefault = /variable "signin_cookie_name" \{[^}]*default\s*=\s*"([^"]*)"/.exec(readFileSync(new URL('../prod/edge.tf', import.meta.url), 'utf8'))?.[1]
   assert.equal(tfDefault, configWith().signinCookie, 'the Terraform default and the edge default agree')
   for (const name of [tfDefault, configWith().signinCookie]) assert.equal(preB13(`${name}=a; ${name}_1=b; dsh-auth-x=d`), 'dsh-auth-x=d', name)
+})
+
+test('ALLOWED_EMAILS: comma-separated, trimmed and lowercased; empty admits nobody', () => {
+  const allowed = configWith({ ALLOWED_EMAILS: ' @Mumbo.si , @cambrialabs.ai ,, Founder@X.com ' }).allowed
+  assert.deepEqual(allowed, ['@mumbo.si', '@cambrialabs.ai', 'founder@x.com'])
+  for (const email of ['New@Mumbo.SI', 'a@cambrialabs.ai', 'founder@x.com']) assert.ok(admitted(allowed, email), email)
+  assert.equal(admitted(allowed, 'other@x.com'), false)
+  assert.deepEqual(configWith({ ALLOWED_EMAILS: ' , ' }).allowed, [])
+})
+
+test('no oauth2-proxy launch turns off its email_verified check', () => {
+  // The edge never sees the ID token, so oauth2-proxy alone refuses email_verified=false. v7.9.0 checks it only while the
+  // email claim is `email` and --insecure-oidc-allow-unverified-email is off (providers/provider_data.go, buildSessionFromClaims).
+  const read = (file) => readFileSync(new URL(file, import.meta.url), 'utf8')
+  for (const file of ['../prod/edge.tf', './compose.yaml']) assert.match(read(file), /--provider=oidc/, file)
+  for (const file of ['../prod/edge.tf', './compose.yaml', './up.sh']) {
+    assert.doesNotMatch(read(file), /allow[-_]?unverified[-_]?email|email[-_]?claim/i, file)
+  }
 })
