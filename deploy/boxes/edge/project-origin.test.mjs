@@ -1,17 +1,17 @@
-// node --test: a project box is served at the root of its own origin, p-<16 hex>.<public host>, end to end through
+// node --test: a project box is served at the root of its own origin, p-<16 hex>.<project domain>, end to end through
 // userServer with a fake box behind the client-proxy address. Members reach it as themselves; nothing on that host
 // reaches the founder's box, /home or the approve page; the old /p/<id>/ path redirects there.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { createHmac } from 'node:crypto'
 import { createServer, request } from 'node:http'
-import { userServer, memberKey, memberHeader } from './edge.mjs'
+import { config, userServer, memberKey, memberHeader, boxSite, roleInstructions } from './edge.mjs'
 import { memoryStore } from './store.mjs'
 import { projects } from './projects.mjs'
 
 const listen = (server) => new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port)))
-const call = (port, { path = '/', headers = {} } = {}) => new Promise((resolve, reject) => {
-  const req = request({ host: '127.0.0.1', port, path, headers: { 'x-forwarded-email': 'a@x.com', accept: 'text/html', ...headers } }, (res) => {
+const call = (port, { method = 'GET', path = '/', headers = {} } = {}) => new Promise((resolve, reject) => {
+  const req = request({ host: '127.0.0.1', port, method, path, headers: { 'x-forwarded-email': 'a@x.com', accept: 'text/html', ...headers } }, (res) => {
     let body = ''; res.on('data', c => { body += c }); res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body }))
   })
   req.on('upgrade', (res, socket) => { socket.destroy(); resolve({ upgraded: true, headers: res.headers }) })
@@ -26,17 +26,18 @@ const memberOf = (key, header) => {
   return Buffer.from(e, 'base64url').toString()
 }
 
-async function setup() {
+/** userServer over a fake box; `extra` overrides the config. */
+async function setup(extra = {}) {
   const seen = []
   const fakeBox = createServer((req, res) => {
-    seen.push({ path: req.url, headers: req.headers })
+    seen.push({ method: req.method, path: req.url, headers: req.headers })
     res.writeHead(req.url === '/deny' ? 401 : 200, { 'set-cookie': ['dsh-auth-p=1; Domain=.boxes.mumbo.si; Path=/; HttpOnly'] }).end('from box')
   })
   fakeBox.on('upgrade', (req, socket) => {
     seen.push({ path: req.url, headers: req.headers })
     socket.end('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n')
   })
-  const cfg = { publicHost: 'boxes.mumbo.si', approveHost: 'approve.boxes.mumbo.si', allowed: ['@x.com'], proxy: new URL(`http://127.0.0.1:${await listen(fakeBox)}`) }
+  const cfg = { publicHost: 'boxes.mumbo.si', projectDomain: 'boxes.mumbo.si', approveHost: 'approve.boxes.mumbo.si', allowed: ['@x.com'], ...extra, proxy: new URL(`http://127.0.0.1:${await listen(fakeBox)}`) }
   const proj = projects({ store: memoryStore(), admitted: () => true, log: () => {} })
   const { id } = await proj.create('a@x.com', 'P')
   const key = memberKey('k', 'pbox')
@@ -48,10 +49,10 @@ async function setup() {
   const approve = async (req, res) => { approved.push(req.url); res.writeHead(200).end('approve page') }
   const server = userServer({ cfg, box, projects: proj, approve, log: () => {} })
   const port = await listen(server)
-  return { id, key, seen, ensured, approved, port, host: `p-${id}.boxes.mumbo.si`, close: () => { server.close(); fakeBox.close() } }
+  return { id, key, seen, ensured, approved, port, host: `p-${id}.${cfg.projectDomain}`, close: () => { server.close(); fakeBox.close() } }
 }
 
-test('a member on p-<id>.<public host> reaches the project box at /, as themselves, without the sign-in cookie', async () => {
+test('a member on p-<id>.<project domain> reaches the project box at /, as themselves, without the sign-in cookie', async () => {
   const t = await setup()
   try {
     const r = await call(t.port, { headers: { host: `P-${t.id}.Boxes.Mumbo.Si:443`, cookie: '_oauth2_proxy=s; _oauth2_proxy_1=s; dsh-auth-p=1', 'x-mumbo-member': 'forged' } })
@@ -148,5 +149,50 @@ test('Host: other.boxes.mumbo.si and near-miss project hosts give 404, and their
     }
     assert.deepEqual(t.ensured, [])
     assert.equal(t.seen.length, 0)
+  } finally { t.close() }
+})
+
+test('a desktop request other than a read must come from the desktop\'s own page; reads and same-origin requests pass', async () => {
+  const t = await setup()
+  const main = 'boxes.mumbo.si'
+  try {
+    for (const origin of [`https://${t.host}`, 'null', undefined]) {
+      const r = await call(t.port, { path: '/desktop/x', headers: { host: main, ...(origin ? { origin } : {}) }, method: 'POST' })
+      assert.equal(r.status, 403, String(origin))
+    }
+    assert.deepEqual(t.ensured, []); assert.equal(t.seen.length, 0)
+    assert.equal((await call(t.port, { path: '/desktop/x', headers: { host: main, origin: `https://${main}` }, method: 'POST' })).body, 'from box')
+    assert.equal((await call(t.port, { path: '/desktop/vnc.html', headers: { host: main } })).body, 'from box')
+    assert.deepEqual(t.seen.map(s => [s.method, s.path, s.headers['e2b-sandbox-port']]), [['POST', '/x', '6080'], ['GET', '/vnc.html', '6080']])
+  } finally { t.close() }
+})
+
+/** config() with exactly these environment variables among those it reads. */
+function configFrom(vars) {
+  const keys = ['PUBLIC_HOST', 'LLM_HOST', 'BACKUP_BUCKET', 'ALLOWED_EMAILS', 'PROJECT_DOMAIN', 'APPROVE_HOST']
+  const saved = Object.fromEntries(keys.map(k => [k, process.env[k]]))
+  const apply = (values) => { for (const k of keys) if (values[k] === undefined) delete process.env[k]; else process.env[k] = values[k] }
+  apply(vars)
+  try { return config() } finally { apply(saved) }
+}
+
+test('with PROJECT_DOMAIN=projects.example, p-<id>.projects.example is the project origin, p-<id>.boxes.mumbo.si answers 404, and links use the new domain', async () => {
+  const env = { PUBLIC_HOST: 'boxes.mumbo.si', LLM_HOST: 'llm.boxes.mumbo.si', BACKUP_BUCKET: 'b', ALLOWED_EMAILS: '@x.com' }
+  assert.equal(configFrom(env).projectDomain, 'boxes.mumbo.si', 'the default changes nothing')
+  const c = configFrom({ ...env, PROJECT_DOMAIN: 'projects.example' })
+  const t = await setup(c)
+  const host = `p-${t.id}.projects.example`, old = `p-${t.id}.boxes.mumbo.si`
+  try {
+    assert.equal(t.host, host)
+    assert.equal((await call(t.port, { headers: { host } })).body, 'from box')
+    assert.ok((await call(t.port, { path: '/api/remote.mux', headers: { host, origin: `https://${host}`, ...upgrade } })).upgraded)
+    assert.equal((await call(t.port, { headers: { host: old } })).status, 404)
+    assert.ok((await call(t.port, { headers: { host: old, origin: `https://${old}`, ...upgrade } })).error)
+    assert.deepEqual(t.seen.map(s => s.headers['e2b-sandbox-id']), ['pbox', 'pbox'])
+    assert.equal((await call(t.port, { path: `/p/${t.id}/x`, headers: { host: 'boxes.mumbo.si' } })).headers.location, `https://${host}/x`)
+    assert.ok((await call(t.port, { path: '/home', headers: { host: 'boxes.mumbo.si' } })).body.includes(`href="https://${host}/"`))
+    assert.deepEqual(boxSite(c, `project:${t.id}`), { host, publicUrl: `https://${host}/`, desktop: false })
+    assert.ok(roleInstructions(c, `project:${t.id}`).includes(`Its members reach you at https://${host}/ `))
+    assert.deepEqual(t.ensured, [`project:${t.id}`, `project:${t.id}`])
   } finally { t.close() }
 })

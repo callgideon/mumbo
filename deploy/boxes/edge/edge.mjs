@@ -18,6 +18,7 @@ const checkNames = (name, fallback) => {
 }
 export const config = () => ({
   publicHost: env('PUBLIC_HOST'),
+  projectDomain: env('PROJECT_DOMAIN', 'boxes.mumbo.si'),  // project boxes are served at p-<16 hex>.<this>
   llmHost: env('LLM_HOST'),
   template: env('BOX_TEMPLATE', 'mumbo-box'),
   idleMs: Number(env('IDLE_MINUTES', '30')) * 60_000,
@@ -73,7 +74,7 @@ export { budget } from './budget.mjs'
 
 /**
  * Where a box is served. A user's box is the site root with a desktop; a project box (principal `project:<id>`) is
- * the root of its own origin, p-<id>.<public host>, so script it serves cannot drive the user's box, and has no
+ * the root of its own origin, p-<id>.<project domain>, so script it serves cannot drive the user's box, and has no
  * desktop: it never holds anyone's signed-in browser.
  */
 // ---- project members (dsh @mumbo/edge-member). Each project box gets its own key, HMAC(edge key, "member:" + box id),
@@ -117,7 +118,7 @@ export function boxSite(cfg, principal) {
   const id = principal.startsWith('project:') ? principal.slice('project:'.length) : undefined
   return id === undefined
     ? { host: cfg.publicHost, publicUrl: `https://${cfg.publicHost}/`, desktop: true }
-    : { host: `p-${id}.${cfg.publicHost}`, publicUrl: `https://p-${id}.${cfg.publicHost}/`, desktop: false }
+    : { host: `p-${id}.${cfg.projectDomain}`, publicUrl: `https://p-${id}.${cfg.projectDomain}/`, desktop: false }
 }
 
 // ---- inside a box. It never sees a server secret: its DeepSeek key is its own box token, valid only via LLM_HOST.
@@ -429,9 +430,9 @@ const DROP = new Set(['connection', 'keep-alive', 'proxy-connection', 'transfer-
 
 /** Which box port a main-host request goes to: the desktop live view (noVNC, :6080) under /desktop/, otherwise dsh
  *  (:3080). The old project path /p/<id>/… redirects to the project's own origin (boxSite). */
-export function boxRoute(url, publicHost) {
+export function boxRoute(url, projectDomain) {
   const p = /^\/p\/([0-9a-f]{16})(\/.*)?$/.exec(url)
-  if (p) return { redirect: `https://p-${p[1]}.${publicHost}${p[2] ?? '/'}` }
+  if (p) return { redirect: `https://p-${p[1]}.${projectDomain}${p[2] ?? '/'}` }
   if (url === '/desktop' || url === '/desktop/') return { redirect: '/desktop/vnc.html?autoconnect=1&resize=remote&path=desktop/websockify' }
   if (url.startsWith('/desktop/')) return { port: '6080', path: url.slice('/desktop'.length), base: '' }
   return { port: '3080', path: url, base: '' }
@@ -490,8 +491,8 @@ const isNavigation = (req) => req.method === 'GET' && String(req.headers.accept 
 /** The request's Host, lowercased and without a port. */
 const hostOf = (req) => String(req.headers.host ?? '').toLowerCase().replace(/:\d+$/, '')
 
-/** Signed-in users' traffic. The public host reaches the user's own box and p-<16 hex>.<public host> a project's box,
- *  for its members only; `approve` (approve-page.mjs) serves cfg.approveHost, an origin no box serves; any other host
+/** Signed-in users' traffic. The public host reaches the user's own box and p-<16 hex>.<project domain> a project's
+ *  box, for its members only; `approve` (approve-page.mjs) serves cfg.approveHost, an origin no box serves; any other host
  *  answers 404. */
 export function userServer({ cfg, box, verifyAlb, projects, approve, log = console.log }) {
   const identify = async (req) => verifyAlb
@@ -501,10 +502,10 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, log = conso
   // A project box is the root of its own origin (boxSite): every path on that host, /home included, goes to its dsh.
   // undefined: a host no box serves.
   const routeOf = (host, url) => {
-    const label = host.endsWith(`.${cfg.publicHost}`) ? host.slice(0, -cfg.publicHost.length - 1) : ''
+    const label = host.endsWith(`.${cfg.projectDomain}`) ? host.slice(0, -cfg.projectDomain.length - 1) : ''
     const project = /^p-([0-9a-f]{16})$/.exec(label)?.[1]
     if (project) return { project, port: '3080', path: url, base: '' }
-    if (host === cfg.publicHost) return boxRoute(url, cfg.publicHost)
+    if (host === cfg.publicHost) return boxRoute(url, cfg.projectDomain)
   }
   const server = createServer(async (req, res) => {
     if (req.url === '/edge/healthz') return json(res, 200, { ok: true })
@@ -520,6 +521,9 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, log = conso
     if (!to) return page(res, 404, 'Not found.', false)
     if (!to.project && (req.url === '/home' || req.url === '/home/')) return homePage(cfg, res, email, await projects?.list(email) ?? [])
     if (to.redirect) return res.writeHead(302, { location: to.redirect, 'cache-control': 'no-store' }).end()
+    // dsh refuses a cross-origin /api request itself; the desktop (websockify) checks no Origin, so anything but a read
+    // must come from its own page.
+    if (to.port === '6080' && req.method !== 'GET' && req.method !== 'HEAD' && req.headers.origin !== `https://${host}`) return page(res, 403, 'Forbidden.', false)
     if (to.project && !(await projects?.isMember(email, to.project))) return page(res, 403, 'No such project, or you are not one of its members.', false)
     let target
     try { target = await box.ensure(to.project ? `project:${to.project}` : email) } catch (e) {
@@ -689,7 +693,7 @@ async function main() {
 
   userServer({ cfg, box, verifyAlb, projects: proj, approve }).listen(8080, listenHost, () => console.log(`edge: users on ${listenHost}:8080`))
   const { children, mcpServer } = await import('./sandboxes.mjs')
-  const mcp = mcpServer({ ops: children({ e2b, cfg }), projects: proj, relay, claimOf: (info) => verifyBox(edgeKey, String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
+  const mcp = mcpServer({ ops: children({ e2b, cfg }), projects: proj, relay, projectDomain: cfg.projectDomain, claimOf: (info) => verifyBox(edgeKey, String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
   modelServer({ cfg, edgeKey, modelKey, allow: budget(store, cfg.dailyRequests), owns: box.owns, touch: box.touch, mcp, github, halt, tokens })
     .listen(8081, modelHost, () => console.log(`edge: model host on ${modelHost}:8081`))
 }

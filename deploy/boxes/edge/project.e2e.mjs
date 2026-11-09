@@ -1,11 +1,11 @@
 // Live check of a shared project box against real E2B (tunnel to api :13000 and client-proxy :13002): a member is
-// routed to the project box on its own host p-<id>.<public host>, signs in, loads the page and assets, opens the dsh
+// routed to the project box on its own host p-<id>.<project domain>, signs in, loads the page and assets, opens the dsh
 // WebSocket; a non-member is refused. Env: E2B_API_URL, E2B_SANDBOX_URL, E2B_API_KEY.
 import * as e2b from 'e2b'
 import { boxes, userServer } from './edge.mjs'
 import { memoryStore } from './store.mjs'
 import { projects } from './projects.mjs'
-const cfg = { publicHost: 'boxes.mumbo.si', llmHost: 'llm.boxes.mumbo.si', template: 'mumbo-box', idleMs: 3600_000, backupEveryMs: 3600_000, maxRunning: 0,
+const cfg = { publicHost: 'boxes.mumbo.si', projectDomain: 'boxes.mumbo.si', llmHost: 'llm.boxes.mumbo.si', template: 'mumbo-box', idleMs: 3600_000, backupEveryMs: 3600_000, maxRunning: 0,
   allowed: ['@mumbo.si'], egressIps: [], proxy: new URL(process.env.E2B_SANDBOX_URL), bucket: 'unused', pauseIdle: false }
 const store = memoryStore()
 const box = boxes({ e2b, store, cfg, edgeKey: 'e2e-key', presignGet: async () => undefined, presignPut: async () => 'http://127.0.0.1:9/none', log: () => {} })
@@ -14,7 +14,7 @@ const user = `e2e-${Date.now()}@mumbo.si`
 const { id } = await proj.create(user, 'e2e project')
 const server = userServer({ cfg, box, projects: proj, log: (l) => console.log('  log', l) })
 // fetch cannot set Host: every request here is for the project's own host.
-const projectHost = `p-${id}.${cfg.publicHost}`
+const projectHost = `p-${id}.${cfg.projectDomain}`
 for (const event of ['request', 'upgrade']) server.prependListener(event, (req) => { req.headers.host = projectHost })
 await new Promise(r => server.listen(0, '127.0.0.1', r))
 const base = `http://127.0.0.1:${server.address().port}`

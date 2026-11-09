@@ -6,7 +6,7 @@ import { inParallel, signBox, verifyBox, userPrefix, budget, needsLaunch, boxHea
 import { memoryStore, redisStore } from './store.mjs'
 import { generateKeyPairSync, createSign } from 'node:crypto'
 
-const cfg = { publicHost: 'boxes.example', llmHost: 'llm.example', template: 'mumbo-box', idleMs: 60_000, backupEveryMs: 600_000, maxRunning: 5, allowed: ['@x.com'], egressIps: [], proxy: new URL('http://127.0.0.1:1'), upstream: 'https://model.example' }
+const cfg = { publicHost: 'boxes.example', projectDomain: 'boxes.example', llmHost: 'llm.example', template: 'mumbo-box', idleMs: 60_000, backupEveryMs: 600_000, maxRunning: 5, allowed: ['@x.com'], egressIps: [], proxy: new URL('http://127.0.0.1:1'), upstream: 'https://model.example' }
 const listen = (server) => new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port)))
 const call = (port, { method = 'GET', path = '/', headers = {}, body } = {}) => new Promise((resolve, reject) => {
   const req = request({ host: '127.0.0.1', port, method, path, headers: { host: cfg.publicHost, ...headers } }, (res) => {
@@ -477,7 +477,7 @@ test('project paths redirect to the project\'s own host, which members reach wit
 
 test('project boxes: own masked host and public path, no desktop or browser tools', async () => {
   const { boxSite } = await import('./edge.mjs')
-  const c = { llmHost: 'llm.x', publicHost: 'boxes.x' }
+  const c = { llmHost: 'llm.x', publicHost: 'boxes.x', projectDomain: 'boxes.x' }
   const site = boxSite(c, 'project:0123456789abcdef')
   assert.deepEqual(site, { host: 'p-0123456789abcdef.boxes.x', publicUrl: 'https://p-0123456789abcdef.boxes.x/', desktop: false })
   const script = startScript(c, 'T', site)
@@ -489,7 +489,7 @@ test('project boxes: own masked host and public path, no desktop or browser tool
 test('project tools are offered to a person\'s box and not to a project box', async () => {
   const proj = projectStore({ store: memoryStore(), admitted: () => true, log: () => {} })
   const ops = children({ e2b: fakeChildE2B(), cfg: childCfg, log: () => {} })
-  const mcp = mcpServer({ ops, projects: proj, claimOf: (info) => verifyBox('k', String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
+  const mcp = mcpServer({ ops, projects: proj, projectDomain: 'projects.example', claimOf: (info) => verifyBox('k', String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
   const server = createServer((req, res) => mcp(req, res))
   await new Promise(r => server.listen(0, '127.0.0.1', r))
   const call = async (token, method, params) => {
@@ -500,7 +500,7 @@ test('project tools are offered to a person\'s box and not to a project box', as
     const person = signBox('k', 'a@x.com', 'b1'), project = signBox('k', 'project:0123456789abcdef', 'pb')
     const names = async (tok) => (await call(tok, 'tools/list', {})).result.tools.map(t => t.name)
     assert.ok((await names(person)).includes('project_create'))
-    assert.match((await call(person, 'tools/list', {})).result.tools.find(t => t.name === 'project_create').description, /at https:\/\/p-<id>\.<this site>\/;/)
+    assert.match((await call(person, 'tools/list', {})).result.tools.find(t => t.name === 'project_create').description, /at https:\/\/p-<id>\.projects\.example\/;/)
     assert.ok(!(await names(project)).some(n => n.startsWith('project_')))
     const made = JSON.parse((await call(person, 'tools/call', { name: 'project_create', arguments: { name: 'Shop' } })).result.content[0].text)
     assert.equal((await proj.list('a@x.com'))[0].id, made.id)
@@ -542,7 +542,7 @@ test('project relay: signs in once, creates the coordinator session once, re-sig
 
 test('role instructions: assistant with write consent and desktop sign-in; coordinator without accounts', async () => {
   const { roleInstructions } = await import('./edge.mjs')
-  const c = { publicHost: 'boxes.x' }
+  const c = { publicHost: 'boxes.x', projectDomain: 'boxes.x' }
   const a = roleInstructions(c, 'a@x.com')
   assert.match(a, /personal assistant of a@x\.com/)
   assert.match(a, /wait for the user to agree/)
@@ -601,7 +601,7 @@ test('member header: exact format, signed with the per-box key, 5 minutes', asyn
 })
 
 test('project start script carries the member key and loads the project overlay only when the image has it', async () => {
-  const c = { llmHost: 'l', publicHost: 'boxes.x' }
+  const c = { llmHost: 'l', publicHost: 'boxes.x', projectDomain: 'boxes.x' }
   const { boxSite } = await import('./edge.mjs')
   const p = startScript(c, 'T', boxSite(c, 'project:0123456789abcdef'), 'role', 'KEYTEXT')
   assert.match(p, /export MUMBO_MEMBER_KEY=KEYTEXT/)
