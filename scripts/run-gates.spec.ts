@@ -366,6 +366,13 @@ describe('gate graph validation', () => {
     expect(quick).toEqual(full.filter(gate => gate.quick === true))
   })
 
+  it('rejects CJK text in the static CI and documentation aggregates', () => {
+    for (const mode of ['ci-static', 'ci-primary', 'doc-sync', 'doc-quick'] as const) {
+      expect(withPnpmEntrypoint(() => gatesForMode(mode).find(gate => gate.id === 'no-cjk')), mode)
+        .toMatchObject({ args: ['/private/pnpm.cjs', 'run', 'verify-no-cjk'] })
+    }
+  })
+
   it('checks the recorded npm dependency catalog in both documentation aggregates', () => {
     for (const mode of ['doc-sync', 'doc-quick'] as const) {
       expect(withPnpmEntrypoint(() => gatesForMode(mode).find(gate => gate.id === 'dependency-catalog')))
