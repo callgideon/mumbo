@@ -3,7 +3,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { MessageId } from '@deepseek-ai/dsh-llm/brand'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
-import { ScheduleRuntime, MAX_TIMER_DELAY_MS } from '../src/runtime.ts'
+import { ScheduleRuntime, WALL_CLOCK_RECHECK_MS } from '../src/runtime.ts'
 import {
   createAfterScheduleRecord, createAtScheduleRecord, createDailyScheduleRecord, createEveryScheduleRecord, ScheduleId,
 } from '../src/domain.ts'
@@ -325,11 +325,23 @@ describe('Host Schedule timer', () => {
     const tasks = [task(createAfterScheduleRecord(ScheduleId('long'), 'Long', 3_000_000, Date.now(), 'Long'))]
     const test = await setup(tasks)
     test.runtime.requestDrive()
-    await vi.advanceTimersByTimeAsync(MAX_TIMER_DELAY_MS)
+    await vi.advanceTimersByTimeAsync(WALL_CLOCK_RECHECK_MS)
     expect(test.resolve).not.toHaveBeenCalled()
     await test.runtime.dispose()
     await vi.advanceTimersByTimeAsync(3_000_000_000)
     expect(test.resolve).not.toHaveBeenCalled()
+  })
+
+  it('delivers within a minute after wall time jumps past a task while timers stood still', async () => {
+    // A paused VM resumes with wall time hours ahead and every pending timer exactly where it was.
+    const tasks = [task(createAfterScheduleRecord(ScheduleId('woke'), 'Woke', 7_200, Date.now(), 'Woke'))]
+    const test = await setup(tasks)
+    test.runtime.requestDrive()
+    await vi.advanceTimersByTimeAsync(0)
+    vi.setSystemTime(Date.now() + 3 * 3_600_000)
+    await vi.advanceTimersByTimeAsync(WALL_CLOCK_RECHECK_MS)
+    expect(test.resolve).toHaveBeenCalled()
+    await test.runtime.dispose()
   })
 })
 
