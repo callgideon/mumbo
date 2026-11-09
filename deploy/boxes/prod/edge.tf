@@ -308,7 +308,7 @@ resource "aws_ecs_task_definition" "edge" {
         SIGNIN_COOKIE             = var.signin_cookie_name
         # Capacity units, not boxes: a person or project box (4096 MB, edge/template.mjs) is 2, a child sandbox (2048 MB, the
         # mumbo-child build argument) is 1. 12 boxes per node (nodes.tf hugepages) minus 2 of headroom. An edge image from before
-        # the units change reads MAX_RUNNING_BOXES (box count) instead; both stay until no such image can be rolled back to.
+        # the units change reads MAX_RUNNING_BOXES (running boxes of all kinds, children too, counted as one each) instead; both stay until no such image can be rolled back to.
         MAX_RUNNING_UNITS = tostring(2 * (12 * var.node_count - 2))
         MAX_RUNNING_BOXES = tostring(12 * var.node_count - 2)
         # Approvals. PROJECT_TEMPLATE stays unset (it defaults to BOX_TEMPLATE) until the mumbo-project template is built.

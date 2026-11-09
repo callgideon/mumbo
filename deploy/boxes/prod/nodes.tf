@@ -2,7 +2,8 @@
 # A node boots from stock Ubuntu 24.04 with nodes/node.sh.tftpl; a termination is held by the lifecycle hook
 # while the node pauses its boxes (memory kept) and leaves DNS. Upgrades are blue/green through node_count (review B2):
 # change e2b_sha and set node_count to 2N, apply, wait until the new nodes are in orchestrators.boxes.internal, then set
-# N and apply; scale-in ends the oldest launch template's nodes first and each drains through the hook. Never restart
+# N and apply; scale-in prefers the oldest launch template but rebalances Availability Zones first, so protect the new nodes and
+# check every node's launch template version (RUNBOOK "Adding nodes", step 5); each terminated node drains through the hook. Never restart
 # orchestrators in place, and never apply while the desired capacity differs from node_count.
 variable "e2b_sha" {
   description = "Fork commit whose orchestrator and envd the nodes run (setup/build.sh uploads them)."
@@ -133,7 +134,7 @@ resource "aws_launch_template" "nodes" {
 
 resource "aws_autoscaling_group" "nodes" {
   name                      = "${local.name}-nodes"
-  min_size                  = min(2, var.node_count) # below node_count: scale-in from 2N to N must not hit the minimum
+  min_size                  = min(2, var.node_count) # at most node_count, below it from 3 nodes up: scale-in from 2N to N must not hit the minimum
   max_size                  = local.node_max_size
   desired_capacity          = var.node_count
   vpc_zone_identifier       = module.vpc.private_subnets
