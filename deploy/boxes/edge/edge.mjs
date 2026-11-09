@@ -426,7 +426,7 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
       }
       await run(box, 'chmod +x /root/.mumbo/start.sh && /root/.mumbo/start.sh')
       const now = Date.now()
-      await store.putBox(box.sandboxId, { email, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), active: now, extended: now, backedUp: now, paused: false })
+      await store.putBox(box.sandboxId, { email, host: boxSite(cfg, email).host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), active: now, extended: now, backedUp: now, paused: false })
       say({ msg: 'created', user: email, box: box.sandboxId })
       return box.sandboxId
     } catch (error) {
@@ -458,7 +458,7 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
             await run(box, '/root/.mumbo/start.sh')
           }
           const now = Date.now()
-          await store.putBox(id, { email, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), active: now, extended: now, backedUp: known?.backedUp ?? 0, paused: false })
+          await store.putBox(id, { email, host: known?.host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), active: now, extended: now, backedUp: known?.backedUp ?? 0, paused: false })
         } catch (error) {
           // A snapshot that cannot be resumed (its node died before the upload finished, or dsh never comes back)
           // must not strand the user: drop it and rebuild from the latest S3 backup.
@@ -474,9 +474,16 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
   }
   const pick = async (id) => {
     const b = await store.getBox(id)
+    // The masked host (E2B maskRequestHost) is recorded at creation; for a box recorded without it (adopted, or created
+    // before the record held it) E2B is asked once.
+    let host = b.host
+    if (!host) {
+      host = (await e2b.Sandbox.getInfo(id)).network?.maskRequestHost
+      if (host) await store.patchBox(id, { host })
+    }
     // A project box whose image runs @mumbo/edge-member: members get a signed header, never the owner launch token.
     const member = b.memberAuth ? (email) => memberHeader(memberKey(edgeKey, id), email) : undefined
-    return { id, token: b.launch, traffic: b.traffic, ...(member ? { member } : {}) }
+    return { id, token: b.launch, traffic: b.traffic, host, ...(member ? { member } : {}) }
   }
 
   /** Record activity (a browser request, a WebSocket frame or a model call) and push E2B's own pause timer out. */
@@ -615,7 +622,7 @@ const DROP = new Set(['connection', 'keep-alive', 'proxy-connection', 'transfer-
 export function boxRoute(url, projectDomain) {
   const p = /^\/p\/([0-9a-f]{16})(\/.*)?$/.exec(url)
   if (p) return { redirect: `https://p-${p[1]}.${projectDomain}${p[2] ?? '/'}` }
-  if (url === '/desktop' || url === '/desktop/') return { redirect: '/desktop/vnc.html?autoconnect=1&resize=remote&path=desktop/websockify' }
+  if (['/desktop', '/desktop/'].includes(url.split('?')[0])) return { redirect: '/desktop/vnc.html?autoconnect=1&resize=remote&path=desktop/websockify' }
   if (url.startsWith('/desktop/')) return { port: '6080', path: url.slice('/desktop'.length), base: '' }
   return { port: '3080', path: url, base: '' }
 }
@@ -625,14 +632,13 @@ export function boxRoute(url, projectDomain) {
  *  SIGNIN_COOKIE still hold. */
 const isSignin = (cfg, cookie) => [cfg.signinCookie ?? SIGNIN_COOKIE, '_oauth2_proxy'].some(p => cookie.split('=')[0].trim().startsWith(p))
 /** Headers for the box: client headers minus hop-by-hop, identity and E2B headers, plus E2B routing for this box only.
- *  A same-origin Origin (https://<the request's Host>) is dropped: a box created before PUBLIC_HOST or PROJECT_DOMAIN
- *  changed keeps the former name as its masked host, and its dsh would refuse that Origin. Without an Origin, dsh's
- *  Host fence binds the request. Any other Origin passes unchanged; dsh accepts it only when it equals the box's
- *  masked host (boxSite). */
+ *  dsh accepts an Origin only when it equals the box's masked host (target.host). A same-origin Origin
+ *  (https://<the request's Host>) becomes https://<target.host>, because a box created before PUBLIC_HOST or
+ *  PROJECT_DOMAIN changed keeps the former name as its masked host. Any other Origin, and Sec-Fetch-Site, pass unchanged. */
 export function boxHeaders(cfg, incoming, target, port = '3080') {
   const out = {}
   for (const [k, v] of Object.entries(incoming)) if (!DROP.has(k) && !k.startsWith('x-forwarded-') && !k.startsWith('e2b-')) out[k] = v
-  if (out.origin === `https://${hostOf({ headers: incoming })}`) delete out.origin
+  if (target.host && out.origin === `https://${hostOf({ headers: incoming })}`) out.origin = `https://${target.host}`
   // The sign-in cookie (oauth2-proxy) never reaches a box: a box that saw it could replay it as the signed-in person.
   // Every box request goes through here: HTTP, WebSocket upgrades and the relay (boxFetcher).
   if (out.cookie !== undefined) {

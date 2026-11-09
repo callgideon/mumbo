@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { request, createServer } from 'node:http'
+import { readFileSync } from 'node:fs'
 import { inParallel, signBox, verifyBox, userPrefix, budget, needsLaunch, boxHeaders, boxes, modelServer, userServer, startScript, backupCommand, admitted, secureCookies, albIdentity } from './edge.mjs'
 import { memoryStore, redisStore } from './store.mjs'
 import { generateKeyPairSync, createSign } from 'node:crypto'
@@ -407,6 +408,8 @@ test('MCP endpoint on the model host: box token required, tools act as the token
 test('desktop live view: /desktop/ goes to the box\'s noVNC port, everything else to dsh', async () => {
   const { boxRoute } = await import('./edge.mjs')
   assert.match(boxRoute('/desktop').redirect, /^\/desktop\/vnc\.html\?.*path=desktop\/websockify/)
+  // A former-host redirect adds its marker query (prod/edge.tf old_hosts).
+  for (const url of ['/desktop/?moved=1&', '/desktop?moved=1&']) assert.equal(boxRoute(url).redirect, boxRoute('/desktop/').redirect, url)
   assert.deepEqual(boxRoute('/desktop/websockify'), { port: '6080', path: '/websockify', base: '' })
   assert.deepEqual(boxRoute('/desktop-not'), { port: '3080', path: '/desktop-not', base: '' })
   assert.deepEqual(boxRoute('/api/remote.mux'), { port: '3080', path: '/api/remote.mux', base: '' })
@@ -531,18 +534,41 @@ test('project tools are offered to a person\'s box and not to a project box', as
   } finally { server.close() }
 })
 
-test('box requests drop a same-origin Origin, which a box masked with a former host name would refuse; any other Origin passes unchanged for its dsh to refuse', () => {
-  const p = 'p-0123456789abcdef.app.mumbo.si'
-  for (const [host, origin] of [['app.mumbo.si', 'https://app.mumbo.si'], ['App.Mumbo.Si:443', 'https://app.mumbo.si'], [p, `https://${p}`]]) {
-    assert.equal('origin' in boxHeaders(cfg, { host, origin }, { id: 'b' }), false, `${host} from ${origin}`)
+test('box requests: a same-origin Origin becomes the box\'s masked host; other Origins, a missing Origin and Sec-Fetch-Site pass unchanged', () => {
+  // A box created before the move to app.mumbo.si is masked as boxes.mumbo.si; its dsh accepts only that Origin.
+  const p = 'p-0123456789abcdef', user = { id: 'b', host: 'boxes.mumbo.si' }, project = { id: 'pb', host: `${p}.boxes.mumbo.si` }
+  const fwd = (headers, target = user) => boxHeaders(cfg, headers, target)
+  assert.equal(fwd({ host: 'app.mumbo.si', origin: 'https://app.mumbo.si' }).origin, 'https://boxes.mumbo.si')
+  assert.equal(fwd({ host: 'App.Mumbo.Si:443', origin: 'https://app.mumbo.si' }).origin, 'https://boxes.mumbo.si')
+  assert.equal(fwd({ host: `${p}.app.mumbo.si`, origin: `https://${p}.app.mumbo.si` }, project).origin, `https://${p}.boxes.mumbo.si`)
+  assert.equal(fwd({ host: 'app.mumbo.si', origin: 'https://app.mumbo.si' }, { id: 'n', host: 'app.mumbo.si' }).origin, 'https://app.mumbo.si', 'a box masked with the current name')
+  for (const [host, origin] of [['app.mumbo.si', `https://${p}.app.mumbo.si`], [`${p}.app.mumbo.si`, 'https://app.mumbo.si'], ['app.mumbo.si', 'http://app.mumbo.si'],
+    ['app.mumbo.si', 'https://app.mumbo.si:8443'], ['app.mumbo.si', 'https://boxes.mumbo.si'], ['app.mumbo.si', 'null'], ['app.mumbo.si', 'https://evil.example'], [undefined, 'https://app.mumbo.si']]) {
+    assert.equal(fwd({ host, origin }).origin, origin, `${host} from ${origin}`)
   }
-  for (const [host, origin] of [['app.mumbo.si', `https://${p}`], [p, 'https://app.mumbo.si'], ['app.mumbo.si', 'http://app.mumbo.si'], ['app.mumbo.si', 'https://app.mumbo.si:8443'],
-    ['app.mumbo.si', 'https://boxes.mumbo.si'], ['app.mumbo.si', 'null'], ['app.mumbo.si', 'https://evil.example'], [undefined, 'https://app.mumbo.si']]) {
-    assert.equal(boxHeaders(cfg, { host, origin }, { id: 'b' }).origin, origin, `${host} from ${origin}`)
-  }
+  assert.equal('origin' in fwd({ host: 'app.mumbo.si' }), false, 'a missing Origin stays absent')
+  assert.equal(fwd({ host: 'app.mumbo.si', origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' })['sec-fetch-site'], 'cross-site')
+  assert.equal(fwd({ host: 'app.mumbo.si', origin: 'https://app.mumbo.si', 'sec-fetch-site': 'cross-site' })['sec-fetch-site'], 'cross-site')
 })
 
-test('model host: llm.app.mumbo.si and llm.boxes.mumbo.si are both served, since running boxes keep the name they started with', async () => {
+test('a box\'s masked host: boxSite at creation; read once from E2B for a box the store has none for (created before the move)', async () => {
+  const e2b = fakeE2B(); const infos = []
+  e2b.Sandbox.getInfo = async (id) => { infos.push(id); return { sandboxId: id, network: { maskRequestHost: 'boxes.mumbo.si' } } }
+  const store = memoryStore()
+  const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'P', log: () => {} })
+  const made = await b.ensure('a@x.com')
+  assert.equal(made.host, 'boxes.example')
+  const { host, ...before } = await store.getBox(made.id)
+  await store.putBox(made.id, before)
+  assert.equal((await b.ensure('a@x.com')).host, 'boxes.mumbo.si')
+  assert.equal((await b.ensure('a@x.com')).host, 'boxes.mumbo.si')
+  assert.deepEqual(infos, [made.id], 'read once, then kept in the store')
+})
+
+test('model host: the edge does not filter Host, so llm.app.mumbo.si and llm.boxes.mumbo.si both reach it; the gate is the ALB model rule (prod/edge.tf local.llm_hosts)', async () => {
+  const tf = readFileSync(new URL('../prod/edge.tf', import.meta.url), 'utf8')
+  assert.match(tf, /llm_hosts\s*=\s*\[local\.llm_host, "llm\.\$\{local\.old_host\}"\]/)
+  assert.match(tf, /model = \[20, local\.llm_hosts, "model"\]/)
   const fetchImpl = async () => new Response('{"data":[]}', { status: 200, headers: { 'content-type': 'application/json' } })
   const s = modelServer({ cfg, edgeKey: 'k', modelKey: 'SERVER', allow: async () => true, owns: async () => true, touch: () => {}, fetchImpl, log: () => {} })
   const port = await listen(s)
@@ -610,8 +636,8 @@ test('home page lists the assistant, desktop and the member\'s projects without 
     assert.ok(html.includes(`href="https://p-${id}.boxes.example/"`) && html.includes('&#60;b&#62;Shop&#60;/b&#62;') && !html.includes('<b>Shop'))
     assert.ok(!html.includes('Not mine'))
     assert.ok(html.includes('href="/desktop/"'))
-    // A former project host (p-<id>.boxes.mumbo.si) answers 301 to /home with its query kept.
-    assert.equal((await call(port, { path: '/home/?token=x', headers: { 'x-forwarded-email': 'a@x.com' } })).body, html)
+    // Where the ALB sends a former project host (prod/edge.tf old_hosts["projects"]): /home with the moved marker first.
+    for (const path of ['/home?moved=1&', '/home?moved=1&token=x']) assert.equal((await call(port, { path, headers: { 'x-forwarded-email': 'a@x.com' } })).body, html, path)
     assert.deepEqual(ensured, [])
   } finally { server.close() }
 })
@@ -695,7 +721,8 @@ test('relay to a member-capable box sends the member header and no owner sign-in
   const store = memoryStore()
   const proj = projectStore({ store, admitted: () => true, log: () => {} })
   const { id } = await proj.create('a@x.com', 'P')
-  const box = { ensure: async () => ({ id: 'pbox', token: 'OWNER', member: (e) => `hdr-for-${e}` }) }
+  // Masked under the former project domain: the relay sends the Origin that box's dsh accepts.
+  const box = { ensure: async () => ({ id: 'pbox', token: 'OWNER', host: `p-${id}.boxes.mumbo.si`, member: (e) => `hdr-for-${e}` }) }
   const relay = projectRelay({ store, projects: proj, box, boxFetch: boxFetcher(c), siteHostOf: (p) => boxSite(c, p).host, log: () => {} })
   try {
     await relay.message('a@x.com', id, 'hi')
@@ -703,7 +730,7 @@ test('relay to a member-capable box sends the member header and no owner sign-in
     for (const { headers: h } of seen) {
       assert.equal(h['x-mumbo-member'], 'hdr-for-a@x.com')
       assert.equal(h.cookie, undefined)
-      assert.equal(h.origin, undefined, 'a same-origin request, so a box masked with a former host name accepts it too')
+      assert.equal(h.origin, `https://p-${id}.boxes.mumbo.si`, 'the box\'s masked host')
       assert.equal(h['e2b-sandbox-id'], 'pbox')
     }
   } finally { upstream.close() }
