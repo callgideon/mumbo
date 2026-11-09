@@ -1,20 +1,34 @@
 # Stage 4: sandbox nodes. Plain EC2 with nested virtualization in an Auto Scaling group across three AZs.
 # A node boots from stock Ubuntu 24.04 with nodes/node.sh.tftpl; a termination is held by the lifecycle hook
-# while the node pauses its boxes (memory kept) and leaves DNS. Upgrades are blue/green: change e2b_sha, apply,
-# raise desired capacity, then lower it so the old nodes drain (review B2). Never restart orchestrators in place.
+# while the node pauses its boxes (memory kept) and leaves DNS. Upgrades are blue/green through node_count (review B2):
+# change e2b_sha and set node_count to 2N, apply, wait until the new nodes are in orchestrators.boxes.internal, then set
+# N and apply; scale-in prefers the oldest launch template but rebalances Availability Zones first, so protect the new nodes and
+# check every node's launch template version (RUNBOOK "Adding nodes", step 5); each terminated node drains through the hook. Never restart
+# orchestrators in place, and never apply while the desired capacity differs from node_count.
 variable "e2b_sha" {
   description = "Fork commit whose orchestrator and envd the nodes run (setup/build.sh uploads them)."
   type        = string
 }
 
+variable "node_count" {
+  description = "Sandbox nodes: the ASG desired capacity and the nodes-below-min alarm threshold. The edge cap is MAX_RUNNING_UNITS = 2 * (12 * node_count - 2) capacity units: a 4096 MB person or project box is 2 units (edge/template.mjs memoryMB) and a 2048 MB child sandbox is 1 (the mumbo-child build argument), 12 boxes per node on 48 GiB of guest hugepages, minus 2 boxes of headroom."
+  type        = number
+  default     = 2
+  validation {
+    condition     = floor(var.node_count) == var.node_count && var.node_count >= 1 && var.node_count <= 10
+    error_message = "node_count must be a whole number from 1 to 10 (the node group's max_size)."
+  }
+}
+
 locals {
-  node_type   = "r8i.2xlarge" # 8 vCPU, 64 GiB
-  hugepages   = 24576         # 48 GiB of 2 MiB pages for guests: 12 running 4 GiB boxes (review M5)
-  firecracker = "v1.14-0.2.0"
-  kernel      = "vmlinux-6.1.177_5008931"
-  busybox     = "1.36.1"
-  orch_dns    = "orchestrators.boxes.internal"
-  hook        = "drain"
+  node_max_size = 10            # the node group max_size; node_count validates against it
+  node_type     = "r8i.2xlarge" # 8 vCPU, 64 GiB
+  hugepages     = 24576         # 48 GiB of 2 MiB pages for guests: 12 running 4 GiB boxes (review M5)
+  firecracker   = "v1.14-0.2.0"
+  kernel        = "vmlinux-6.1.177_5008931"
+  busybox       = "1.36.1"
+  orch_dns      = "orchestrators.boxes.internal"
+  hook          = "drain"
 }
 
 resource "aws_security_group" "nodes" {
@@ -120,11 +134,13 @@ resource "aws_launch_template" "nodes" {
 
 resource "aws_autoscaling_group" "nodes" {
   name                      = "${local.name}-nodes"
-  min_size                  = 2
-  max_size                  = 10
-  desired_capacity          = 2
+  min_size                  = min(2, var.node_count) # at most node_count, below it from 3 nodes up: scale-in from 2N to N must not hit the minimum
+  max_size                  = local.node_max_size
+  desired_capacity          = var.node_count
   vpc_zone_identifier       = module.vpc.private_subnets
   health_check_type         = "EC2"
+  termination_policies      = ["OldestLaunchTemplate", "OldestInstance"]
+  enabled_metrics           = ["GroupInServiceInstances", "GroupDesiredCapacity"] # the nodes-below-min alarm reads GroupInServiceInstances
   health_check_grace_period = 600
   default_instance_warmup   = 600
   launch_template {
@@ -138,7 +154,6 @@ resource "aws_autoscaling_group" "nodes" {
     default_result       = "CONTINUE"
   }
   # A new launch template version reaches nodes only through blue/green (see the header), never an instance refresh.
-  lifecycle { ignore_changes = [desired_capacity] }
   tag {
     key                 = "Name"
     value               = "${local.name}-node"

@@ -5,7 +5,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { STATUS_CODES } from 'node:http'
 import { esc } from './edge.mjs'
-import { addRepo, getRepos, projectsOwnedBy } from './projects.mjs'
+import { addRepo, getRepos, projectsOwnedBy, removeRepo } from './projects.mjs'
 
 const MAX_BODY = 8192
 const DAY_MS = 86_400_000
@@ -33,6 +33,10 @@ const NOTICES = new Map([
   ['resumed', 'Resumed. Model calls and GitHub writes pass again.'],
   ['repo_added', 'Repository access given.'],
   ['repo_bound', 'That repository already belongs to another project.'],
+  ['repo_not_installed', 'The mumbo-bot GitHub App is not installed for that repository.'],
+  ['repo_other_installation', 'That repository is in another mumbo-bot App installation than this project\'s repositories.'],
+  ['repo_removed', 'Repository access removed.'],
+  ['repo_changed', 'The project\'s repositories changed meanwhile. Try again.'],
 ])
 const STYLE = `body{margin:0;background:#fff;color:rgb(15,17,21);font:14px/24px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 main{max-width:40rem;margin:0 auto;padding:24px 16px}h1{font-size:20px;line-height:28px;margin:0}h2{font-size:14px;margin:32px 0 0}
@@ -58,17 +62,18 @@ async function readForm(req) {
 
 /**
  * The approve page.
- * @param {{ approvals: ReturnType<typeof import('./approvals.mjs').approvalsService>, halt: ReturnType<typeof import('./halt.mjs').haltService>, store: object, csrfKey: Buffer, host: string, approvers: string[], now?: () => number, bindRepo?: typeof addRepo }} deps
+ * @param {{ approvals: ReturnType<typeof import('./approvals.mjs').approvalsService>, halt: ReturnType<typeof import('./halt.mjs').haltService>, store: object, csrfKey: Buffer, host: string, approvers: string[], installationOf: ReturnType<typeof import('./github-app.mjs').installationOf>, now?: () => number, bindRepo?: typeof addRepo }} deps
  *   `csrfKey` is HMAC-SHA256(edge key, 'approve-csrf'); `host` is the approve host, the only origin its POSTs accept;
  *   `approvers` is APPROVER_EMAILS (lowercased; empty means nobody): only they see Approve controls and may give a
- *   project a repository, and approvals.grant refuses everyone else; `now` is epoch ms; `bindRepo` is projects.mjs
- *   addRepo unless a test replaces it. The CSRF token is base64url HMAC-SHA256(csrfKey, `<email>:<yyyy-mm-dd>`) for the UTC day; the
- *   page embeds today's, and a POST may carry today's or yesterday's.
+ *   project a repository or take one away, and approvals.grant refuses everyone else; `installationOf` is passed to
+ *   addRepo; `now` is epoch ms; `bindRepo` is projects.mjs addRepo unless a test replaces it. The CSRF token is
+ *   base64url HMAC-SHA256(csrfKey, `<email>:<yyyy-mm-dd>`) for the UTC day; the page embeds today's, and a POST may
+ *   carry today's or yesterday's.
  * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, email: string) => Promise<void>}
  *   handles one request from the signed-in, allowlisted `email`: `GET /` shows the page; `POST /grant`,
- *   `/grant-low-risk`, `/halt` and `/repo` act and answer 303 to `/?m=<code>`; anything else answers 404.
+ *   `/grant-low-risk`, `/halt`, `/repo` and `/repo-remove` act and answer 303 to `/?m=<code>`; anything else answers 404.
  */
-export function approvePage({ approvals, halt, store, csrfKey, host, approvers, now = () => Date.now(), bindRepo = addRepo }) {
+export function approvePage({ approvals, halt, store, csrfKey, host, approvers, installationOf, now = () => Date.now(), bindRepo = addRepo }) {
   if (!Array.isArray(approvers)) throw new Error('approvePage: approvers must be the list of approver emails (APPROVER_EMAILS)')
   const origin = `https://${host}`
   const token = (email, ms) => createHmac('sha256', csrfKey).update(`${email}:${new Date(ms).toISOString().slice(0, 10)}`).digest('base64url')
@@ -104,11 +109,22 @@ export function approvePage({ approvals, halt, store, csrfKey, host, approvers, 
       const project = form.get('project'), repo = form.get('repo')
       if (!approvers.includes(email) || !(await projectsOwnedBy(store, email)).includes(project)) throw fail(403)
       // addRepo checks again: 403 unless `by` is an approver who owns the project, 400 unless repo is owner/name.
-      try { await bindRepo(store, project, repo, { by: email, approvers }) } catch (e) {
-        if (e.status === 409) return [['m', 'repo_bound']]  // bound to another project
+      // A refusal with a code (bound elsewhere, App not installed, another installation) shows its notice.
+      try { await bindRepo(store, project, repo, { by: email, approvers, installationOf }) } catch (e) {
+        if (NOTICES.has(e.code)) return [['m', e.code]]
         throw e
       }
       return [['m', 'repo_added']]
+    },
+    async '/repo-remove'(email, form) {
+      const project = form.get('project'), repo = form.get('repo')
+      if (!repo) throw fail(400)
+      if (!approvers.includes(email) || !(await projectsOwnedBy(store, email)).includes(project)) throw fail(403)
+      // removeRepo checks again, and answers 404 for a repository the project does not have. Its approval items go
+      // with it, so none stays mergeable or blocks a project that binds the repository later.
+      await removeRepo(store, project, repo, { by: email, approvers })
+      await approvals.dropRepo(project, repo)
+      return [['m', 'repo_removed']]
     },
   }
 
@@ -127,9 +143,12 @@ export function approvePage({ approvals, halt, store, csrfKey, host, approvers, 
 <p>Checks: ${Object.entries(i.checks).map(([name, state]) => `${esc(name)}: ${esc(state)}`).join(' · ')}</p>
 <p>Agent's review (claim): ${i.review ? `${esc(i.review.verdict)}<br><span class="muted">${esc(String(i.review.excerpt ?? i.review.body ?? '').slice(0, 400))}</span>` : '<span class="muted">none for this commit</span>'}</p>
 ${approver ? `<form method="post" action="/grant">${hidden({ id: i.id, sha: i.sha, csrf })}<div class="row"><span></span><button class="primary">Approve</button></div></form>\n` : ''}</section>`
+    const bound = (id, list) => list.length ? list.map(r => approver
+      ? `<form method="post" action="/repo-remove">${hidden({ project: id, repo: r, csrf })}<div class="row"><code>${esc(r)}</code><button>Remove</button></div></form>`
+      : `<p><code>${esc(r)}</code></p>`).join('\n') : '<p class="muted">No repositories yet.</p>'
     const repos = await Promise.all(owned.map(async (id) => `<section class="card">
 <p><strong>${esc((await store.getDoc(`project:${id}`))?.name ?? id)}</strong></p>
-<p class="muted">${(await getRepos(store, id)).map(esc).join(', ') || 'No repositories yet.'}</p>
+${bound(id, await getRepos(store, id))}
 ${approver ? `<form method="post" action="/repo">${hidden({ project: id, csrf })}<div class="row"><input name="repo" placeholder="owner/name" required aria-label="Repository (owner/name)"><button class="primary">Give access</button></div></form>\n` : ''}</section>`))
     res.writeHead(200, { ...SECURITY, 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>mumbo approvals</title>
 <style>${STYLE}</style>

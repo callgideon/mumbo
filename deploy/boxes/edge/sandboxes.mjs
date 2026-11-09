@@ -5,6 +5,7 @@
 import { z } from 'zod'
 import { createMcpHandler, McpServer } from '@modelcontextprotocol/server'
 import { toNodeHandler } from '@modelcontextprotocol/node'
+import { UNITS, atCapacity } from './capacity.mjs'
 
 const MAX_OUTPUT = 64 * 1024
 const clip = (s) => (s.length > MAX_OUTPUT ? `${s.slice(0, MAX_OUTPUT)}\n[… ${s.length - MAX_OUTPUT} more characters cut]` : s)
@@ -28,6 +29,7 @@ export function children({ e2b, cfg, log = console.log }) {
     async create(user, parent, { template = cfg.childTemplates[0], timeoutMinutes = 30 } = {}) {
       if (!cfg.childTemplates.includes(template)) throw fail(400, `template must be one of ${cfg.childTemplates.join(', ')}`)
       if ((await mine(user)).length >= cfg.maxChildren) throw fail(429, `you already run ${cfg.maxChildren} sandboxes; kill one first`)
+      if (await atCapacity(e2b, cfg, UNITS.child)) throw fail(503, 'mumbo is at capacity right now; try again in a few minutes')
       const box = await e2b.Sandbox.create(template, {
         timeoutMs: Math.min(Math.max(timeoutMinutes, 1), 240) * 60_000,
         metadata: { owner: user, parent },
