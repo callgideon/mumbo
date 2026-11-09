@@ -8,7 +8,7 @@ import type { SubprocessHandle, SubprocessOutcome, SubprocessSpawnSpec } from '@
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import * as X11Provider from '../src/index.ts'
-import { resolveInput } from '../src/index.ts'
+import { RELEASE_ARGS, resolveInput } from '../src/index.ts'
 import type { ScreenFrame } from '../src/index.ts'
 
 interface Behavior {
@@ -33,6 +33,7 @@ let missing: Set<string>
 let behave: (argv: readonly string[]) => Behavior
 
 function spawn(spec: SubprocessSpawnSpec): SubprocessHandle {
+  spec.signal?.throwIfAborted()
   spawned.push({ argv: spec.argv, env: spec.env, stdin: spec.stdio.stdin })
   const behavior = behave(spec.argv)
   const stdout = new PassThrough()
@@ -67,12 +68,36 @@ function spawn(spec: SubprocessSpawnSpec): SubprocessHandle {
   return handle
 }
 
+/** Hang every command except the release, so the release itself completes. */
+const hangInput = (argv: readonly string[]): Behavior => argv[1] === RELEASE_ARGS[0] ? {} : { hang: true }
+
 const agent = { session: { requestHeader: () => undefined }, options: { provider: 'fixture', model: 'vision' } }
 
 async function call(args: Record<string, unknown>, options: { agent?: unknown; signal?: AbortSignal } = {}) {
   const tool = ctx.tools.get('computer')
   if (tool === undefined) throw new Error('computer tool is not registered')
   return tool.execute(args, { agent: 'agent' in options ? options.agent : agent, signal: options.signal ?? new AbortController().signal } as never)
+}
+
+function screenshotServices(inputModalities: string[] = ['text', 'image']) {
+  ctx.provide('attachments', {
+    saveImages: () => Promise.resolve([{ attachmentId: 'a', mediaType: 'image/png', bytes: 3, width: 1440, height: 900 }]),
+    readImageRequest: () => Promise.resolve({ width: 720, height: 450 }),
+  } as never)
+  ctx.provide('llm', {
+    resolveModelInfo: () => Promise.resolve({ inputModalities }),
+    imageRequestTarget: () => ({ width: 720, height: 450, maxBytes: 1 }),
+  } as never)
+}
+
+/** Deliver one 720x450 screenshot of the 1440x900 screen, then forget the commands it ran. */
+async function takeFrame(): Promise<void> {
+  screenshotServices()
+  const previous = behave
+  behave = () => ({ stdout: 'png' })
+  await call({ action: 'screenshot' })
+  behave = previous
+  spawned = []
 }
 
 beforeEach(async () => {
@@ -103,6 +128,7 @@ describe('provider lifecycle', () => {
     expect(ctx.tools.schemas().map(tool => tool.name)).toEqual(['computer'])
     expect(spawned).toEqual([{ argv: ['/usr/bin/xdotool', 'getdisplaygeometry'], env: { DISPLAY: ':1', XAUTHORITY: undefined }, stdin: 'ignore' }])
     await fiber.dispose()
+    expect(spawned.at(-1)?.argv).toEqual(['/usr/bin/xdotool', ...RELEASE_ARGS])
     expect(ctx.tools.schemas()).toEqual([])
     expect(ctx.computerUse.providerName).toBeUndefined()
   })
@@ -110,11 +136,14 @@ describe('provider lifecycle', () => {
   it('aborts running commands before releasing the registration', async () => {
     const fiber = ctx.plugin(X11Provider, { display: ':1' })
     await fiber
-    behave = () => ({ hang: true })
-    const running = call({ action: 'key', keys: 'Return' })
+    await takeFrame()
+    behave = hangInput
+    const running = call({ action: 'click', x: 1, y: 1 })
     await new Promise(resolve => setImmediate(resolve))
     await fiber.dispose()
     await expect(running).rejects.toThrow()
+    // The interrupted click and unload each release held input.
+    expect(spawned.filter(entry => entry.argv[1] === RELEASE_ARGS[0])).toHaveLength(2)
     expect(ctx.computerUse.providerName).toBeUndefined()
   })
 
@@ -148,17 +177,6 @@ describe('computer tool', () => {
     await ctx.plugin(X11Provider, { display: ':1', maxScreenshotBytes: 1024, timeoutMs: 50 })
     spawned = []
   })
-
-  function screenshotServices(inputModalities: string[] = ['text', 'image']) {
-    ctx.provide('attachments', {
-      saveImages: () => Promise.resolve([{ attachmentId: 'a', mediaType: 'image/png', bytes: 3, width: 1440, height: 900 }]),
-      readImageRequest: () => Promise.resolve({ width: 720, height: 450 }),
-    } as never)
-    ctx.provide('llm', {
-      resolveModelInfo: () => Promise.resolve({ inputModalities }),
-      imageRequestTarget: () => ({ width: 720, height: 450, maxBytes: 1 }),
-    } as never)
-  }
 
   it('captures the root window and maps later coordinates from the delivered image size', async () => {
     screenshotServices()
@@ -214,9 +232,32 @@ describe('computer tool', () => {
     expect(spawned).toEqual([])
   })
 
-  it('reports unknown key names that xdotool skipped', async () => {
-    behave = () => ({ stderr: '(symbol) No such key name \'nosuchkey\'. Ignoring it.' })
-    await expect(call({ action: 'key', keys: 'ctrl+nosuchkey' })).rejects.toThrow('xdotool skipped an unknown key name and sent the other keys')
+  it('reports key names that xdotool skipped and releases held input', async () => {
+    behave = () => ({ stderr: '(symbol) No such key name \'XF86AudioMute\'. Ignoring it.' })
+    await expect(call({ action: 'key', keys: 'ctrl+XF86AudioMute' })).rejects.toThrow('xdotool skipped an unknown key name and sent the other keys')
+    expect(spawned.map(entry => entry.argv.slice(1))).toEqual([['key', 'ctrl+XF86AudioMute'], RELEASE_ARGS])
+  })
+
+  it.each([
+    'exec xterm', 'sleep 60', 'windowkill', 'getactivewindow', 'Exec xterm', 'GETACTIVEWINDOW', 'ctrl+exec', 'Return exec reboot', 'windowclose',
+  ])('rejects the xdotool command name in %j before running a command', async (keys) => {
+    await expect(call({ action: 'key', keys })).rejects.toThrow('Unknown key')
+    expect(spawned).toEqual([])
+  })
+
+  it('releases modifiers and buttons after a timed-out drag', async () => {
+    await takeFrame()
+    behave = hangInput
+    await expect(call({ action: 'drag', x: 0, y: 0, toX: 1, toY: 1, modifiers: ['shift'] })).rejects.toThrow('timed out after 50 ms')
+    expect(spawned.map(entry => entry.argv[1])).toEqual(['mousemove', 'keyup'])
+    expect(spawned[1]?.argv).toEqual(['/usr/bin/xdotool', ...RELEASE_ARGS])
+  })
+
+  it('keeps the input failure when the release also fails', async () => {
+    await takeFrame()
+    behave = () => ({ exitCode: 1 })
+    await expect(call({ action: 'click', x: 1, y: 1, modifiers: ['ctrl'] })).rejects.toThrow('/usr/bin/xdotool mousemove failed (exit 1)')
+    expect(spawned.at(-1)?.argv.slice(1)).toEqual(RELEASE_ARGS)
   })
 
   it.each<[Behavior, string]>([
@@ -238,13 +279,14 @@ describe('computer tool', () => {
     await expect(call({ action: 'screenshot' })).rejects.toThrow('/usr/bin/import -silent wrote more than 1024 bytes')
   })
 
-  it('stops a cancelled command', async () => {
-    behave = () => ({ hang: true })
+  it('stops a cancelled command and releases held input', async () => {
+    behave = hangInput
     const controller = new AbortController()
-    const running = call({ action: 'key', keys: 'Return' }, { signal: controller.signal })
+    const running = call({ action: 'key', keys: 'ctrl+shift+t' }, { signal: controller.signal })
     await new Promise(resolve => setImmediate(resolve))
     controller.abort(new Error('cancelled by caller'))
     await expect(running).rejects.toThrow('cancelled by caller')
+    expect(spawned.map(entry => entry.argv.slice(1))).toEqual([['key', 'ctrl+shift+t'], RELEASE_ARGS])
   })
 })
 

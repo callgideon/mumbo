@@ -137,5 +137,11 @@ describe.skipIf(missing.length > 0)(`computer tool on a real X display${missing.
 
     const unknown = await computer({ action: 'key', keys: 'ctrl+nosuchkey' })
     expect(unknown.isError).toBe(true)
+
+    // xdotool would run `exec` as a chained command; the provider rejects it before xdotool starts.
+    const marker = join(root as string, 'injected')
+    const injected = await computer({ action: 'key', keys: `Return exec touch ${marker}` })
+    expect(injected.isError).toBe(true)
+    expect(existsSync(marker)).toBe(false)
   })
 })

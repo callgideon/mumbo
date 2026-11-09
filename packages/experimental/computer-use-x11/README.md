@@ -49,13 +49,15 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 ### Activation and failures
 
-Loading resolves the three executables and runs `xdotool getdisplaygeometry` against the display. A missing program fails activation with its installation command and configuration field; an unreachable display fails with the X error and asks for the server, `display` or `xauthority` to be corrected. The provider then registers as `x11`; a second computer-use provider fails activation. Unload removes the tool, aborts running commands, waits for them, and releases the registration.
+Loading resolves the three executables and runs `xdotool getdisplaygeometry` against the display. A missing program fails activation with its installation command and configuration field; an unreachable display fails with the X error and asks for the server, `display` or `xauthority` to be corrected. The provider then registers as `x11`; a second computer-use provider fails activation. Unload removes the tool, aborts running commands, waits for them, releases held keys and mouse buttons, and releases the registration.
 
-An X server started without `-auth`, such as `Xvfb :1 -nolisten tcp`, accepts local clients without a cookie, so DSH can run as a different user from the X session. Otherwise set `xauthority` to a cookie file that the DSH user can read.
+Start the X server with an authorization cookie and set `xauthority` to that file, so only processes that can read it can watch or drive the display. For example, create the cookie with `xauth -f /run/x11/auth add :1 . "$(mcookie)"`, start `Xvfb :1 -auth /run/x11/auth -nolisten tcp`, give the X session's own clients `XAUTHORITY=/run/x11/auth`, and keep the file readable by the DSH user and the session user only. As a fallback, an X server started without `-auth` accepts every local client without a cookie; any local process can then read or drive that display.
 
 ### Calls and results
 
 A screenshot requires an Agent-owned call, an attachment store and a model route declaring image input; it fails before capture otherwise. Its value contains the image dimensions the model receives and the stored attachment reference. Input actions return `{"dispatched":true}`: the X server received the input, and the effect is unverified. Command failures, timeouts, oversized output and key names that `xdotool` skipped become tool errors.
+
+`key` accepts a closed set of names: common aliases such as `enter`, `esc`, `ctrl` and `win`, named keysyms such as `Return`, `Page_Up`, `KP_Enter` and `XF86AudioMute`, `F1` to `F24`, `U<hex>` code points and single printable characters. Any other name fails before `xdotool` starts, because `xdotool key` runs an argument that names one of its commands, such as `exec`, as a chained command.
 
 -----
 
@@ -71,6 +73,8 @@ A screenshot requires an Agent-owned call, an attachment store and a model route
 | [src/keys.ts](src/keys.ts) | Translation of model-written key chords to X keysym names |
 
 Every command runs through `ctx.subprocess` with an explicit `DISPLAY` and `XAUTHORITY`, its own deadline, the caller's cancellation and the provider lifetime. Standard output is read up to `maxScreenshotBytes` for captures and 64 KiB otherwise; exceeding the bound terminates the command. Standard error keeps a 64 KiB tail for diagnostics.
+
+After an input action fails, is cancelled or times out, and once at unload, the provider runs `xdotool keyup ctrl+shift+alt+super mouseup 1 mouseup 2 mouseup 3`, because a terminated command can stop between a press and its release. A failure of this release is logged as a warning and does not replace the original error.
 
 Each Agent keeps its latest screenshot geometry: the image size from the attachment store's request version for the calling model route, and the captured screen size. A pointer coordinate must fall inside that image and maps to the center of its screen region. Pointer actions before the first screenshot fail.
 
@@ -119,9 +123,10 @@ The definition preserves its request prefix while the display setting is unchang
 - **No accessibility tree or window list** — the model works from screenshots; it cannot read element text, list windows or raise a window except by clicking or pressing keys.
 - **Shared desktop** — the provider does not reserve the display for a Session. Other Sessions, the user's own viewer and applications can change it between calls, and keyboard input goes to whichever window has focus.
 - **Clipboard replacement** — typing non-ASCII text replaces the CLIPBOARD and PRIMARY selections, and applications without shift+Insert paste do not receive it.
-- **Cancellation and partial input** — a cancelled, timed-out or failed command can have delivered part of its input; modifiers held for a click or drag can stay pressed if `xdotool` is killed mid-sequence. Observe with a screenshot before retrying.
+- **Cancellation and partial input** — a cancelled, timed-out or failed command can have delivered part of its input. Held modifiers and buttons are released afterwards, but when the release command itself cannot run, for example because the display is gone, keys and buttons can stay pressed and only a warning is logged. Observe with a screenshot before retrying.
 - **Screen geometry** — mapping uses the screen size at the latest screenshot; resizing the X screen afterwards maps coordinates incorrectly until the next screenshot.
-- **No approval gate** — input actions run without a per-call approval; deployments that require one compose a tool policy.
+- **No approval gate** — input actions run without asking the user, so a deployment policy that writes must ask is not enforced for computer use; deployments that require approval compose a tool policy.
+- **Unauthenticated displays** — with the no-cookie fallback, any local process can read or drive the display; the provider cannot detect or prevent that.
 - **Experimental release** — the action set and results have no stability promise.
 
 <a id="dev-note"></a>
@@ -135,5 +140,7 @@ Run the real-display test with `xvfb`, `xdotool`, `imagemagick` and `xsel` insta
 ```sh
 node node_modules/vitest/vitest.mjs run --config vitest.e2e.config.ts packages/experimental/computer-use-x11/tests/xvfb.e2e.ts
 ```
+
+Mumbo box readiness: the box model route currently declares no image input, because `llm-deepseek` defaults `inputModalities` to text only, so screenshots are refused until the deployment selects an image-capable route. Input actions do not ask the user, so the box's writes-ask policy does not cover computer use.
 
 </details>

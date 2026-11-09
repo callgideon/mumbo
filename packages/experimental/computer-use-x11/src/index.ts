@@ -65,6 +65,9 @@ export const Config = Schema.object({
 /** Bytes retained from diagnostic output; xdotool prints only short status lines. */
 const DIAGNOSTIC_BYTES = 64 * 1024
 
+/** xdotool arguments that release every modifier and mouse button an input action can hold. */
+export const RELEASE_ARGS: readonly string[] = ['keyup', 'ctrl+shift+alt+super', 'mouseup', '1', 'mouseup', '2', 'mouseup', '3']
+
 /** Actions accepted by the `computer` tool. */
 export const ACTIONS = ['screenshot', 'click', 'move', 'drag', 'scroll', 'type', 'key'] as const
 
@@ -237,7 +240,7 @@ function describe(display: string): string {
 
 /**
  * Verify the commands and display, then register the provider and its `computer` tool.
- * Unload stops admitting calls, aborts running commands and awaits them before releasing the registration.
+ * Unload stops admitting calls, aborts running commands, awaits them and releases held input before releasing the registration.
  * @param ctx - context with computer-use registration, tools and subprocess services.
  * @param config - validated display, executables and bounds.
  * @returns after the display answered and the tool is registered.
@@ -314,6 +317,17 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const frames = new WeakMap<Agent, ScreenFrame>()
   const pending = new Set<Promise<unknown>>()
 
+  /** Release held input after an interrupted or failed action; the caller's signal may already be aborted. */
+  async function releaseInput(): Promise<void> {
+    try {
+      await run(programs.xdotool, RELEASE_ARGS, {
+        signal: new AbortController().signal, timeoutMs: config.timeoutMs, maxStdoutBytes: DIAGNOSTIC_BYTES,
+      })
+    } catch (error) {
+      ctx.logger.warn(`computer-use-x11 could not release modifiers and mouse buttons on ${config.display}: ${errorMessage(error)}`)
+    }
+  }
+
   async function screenshot(agent: Agent, signal: AbortSignal) {
     const attachments = ctx.get('attachments')
     if (attachments === undefined) throw new Error('computer screenshots require an attachment store')
@@ -388,13 +402,20 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           rejectExtraFields(args)
           return screenshot(agent, signal)
         }
-        for (const step of resolveInput({ ...args, action }, frames.get(agent), config)) {
-          const { stderr } = await run(programs[step.program], step.args, {
-            signal, timeoutMs: step.timeoutMs, maxStdoutBytes: DIAGNOSTIC_BYTES,
-            ...step.stdin === undefined ? {} : { stdin: step.stdin },
-          })
-          // xdotool reports unknown key names on stderr and still exits 0.
-          if (stderr.includes('No such key name')) throw new Error(`xdotool skipped an unknown key name and sent the other keys: ${stderr}`)
+        const steps = resolveInput({ ...args, action }, frames.get(agent), config)
+        try {
+          for (const step of steps) {
+            const { stderr } = await run(programs[step.program], step.args, {
+              signal, timeoutMs: step.timeoutMs, maxStdoutBytes: DIAGNOSTIC_BYTES,
+              ...step.stdin === undefined ? {} : { stdin: step.stdin },
+            })
+            // xdotool reports unknown key names on stderr and still exits 0.
+            if (stderr.includes('No such key name')) throw new Error(`xdotool skipped an unknown key name and sent the other keys: ${stderr}`)
+          }
+        } catch (error) {
+          // A terminated command can stop between keydown and keyup or mousedown and mouseup.
+          await releaseInput()
+          throw error
         }
         return { dispatched: true }
       })()
@@ -412,6 +433,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     yield async () => {
       lifetime.abort()
       await Promise.allSettled(pending)
+      await releaseInput()
     }
     yield ctx.tools.register(tool)
   }, 'computer-use-x11.runtime')

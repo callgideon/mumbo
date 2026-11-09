@@ -49,13 +49,15 @@ kind: "package-reference"
 
 ### 激活与失败
 
-加载时解析三个可执行文件，并对该显示运行 `xdotool getdisplaygeometry`。缺少程序时激活失败，并给出安装命令和对应配置字段；显示无法连接时激活失败，给出 X 错误，并要求启动服务器或更正 `display`、`xauthority`。随后提供者以 `x11` 名称注册；第二个电脑操作提供者会激活失败。卸载时移除工具、中止正在运行的命令、等待其结束，然后释放注册。
+加载时解析三个可执行文件，并对该显示运行 `xdotool getdisplaygeometry`。缺少程序时激活失败，并给出安装命令和对应配置字段；显示无法连接时激活失败，给出 X 错误，并要求启动服务器或更正 `display`、`xauthority`。随后提供者以 `x11` 名称注册；第二个电脑操作提供者会激活失败。卸载时移除工具、中止正在运行的命令、等待其结束、释放仍按住的按键和鼠标按钮，然后释放注册。
 
-未使用 `-auth` 启动的 X 服务器（例如 `Xvfb :1 -nolisten tcp`）接受没有 cookie 的本地客户端，因此 DSH 可以以不同于 X 会话的用户运行。否则请把 `xauthority` 设为 DSH 用户可读的 cookie 文件。
+请使用授权 cookie 启动 X 服务器，并把 `xauthority` 设为该文件，使只有能读取它的进程才能查看或操作该显示。例如，用 `xauth -f /run/x11/auth add :1 . "$(mcookie)"` 创建 cookie，启动 `Xvfb :1 -auth /run/x11/auth -nolisten tcp`，为 X 会话自己的客户端设置 `XAUTHORITY=/run/x11/auth`，并让该文件只对 DSH 用户和会话用户可读。作为后备方案，未使用 `-auth` 启动的 X 服务器无需 cookie 即接受所有本地客户端；此时任何本地进程都可以读取或操作该显示。
 
 ### 调用与结果
 
 截图要求调用属于某个 Agent、存在附件存储，且模型路由声明支持图像输入；否则在截图前失败。其值包含模型收到的图像尺寸和已存储的附件引用。输入操作返回 `{"dispatched":true}`：X 服务器已收到输入，但效果未经验证。命令失败、超时、输出超限以及被 `xdotool` 跳过的按键名称都会成为工具错误。
+
+`key` 只接受一个封闭的名称集合：常见别名（如 `enter`、`esc`、`ctrl` 和 `win`）、具名 keysym（如 `Return`、`Page_Up`、`KP_Enter` 和 `XF86AudioMute`）、`F1` 到 `F24`、`U<hex>` 码点和单个可打印字符。其他名称在 `xdotool` 启动前即失败，因为 `xdotool key` 会把命名其命令（例如 `exec`）的参数当作链式命令运行。
 
 -----
 
@@ -71,6 +73,8 @@ kind: "package-reference"
 | [src/keys.ts](src/keys.ts) | 把模型书写的按键组合转换为 X keysym 名称 |
 
 每条命令都通过 `ctx.subprocess` 运行，带有显式的 `DISPLAY` 和 `XAUTHORITY`、自己的截止时间、调用方的取消信号和提供者生命周期。截图的标准输出最多读取 `maxScreenshotBytes`，其他命令最多读取 64 KiB；超出上限会终止命令。标准错误保留最后 64 KiB 用于诊断。
+
+输入操作失败、被取消或超时之后，以及卸载时一次，提供者运行 `xdotool keyup ctrl+shift+alt+super mouseup 1 mouseup 2 mouseup 3`，因为被终止的命令可能停在按下与释放之间。该释放命令失败时只记录警告，不会替换原始错误。
 
 每个 Agent 保存最近一次截图的几何信息：附件存储为调用模型路由生成的请求版本的图像尺寸，以及截取时的屏幕尺寸。指针坐标必须位于该图像内，并映射到对应屏幕区域的中心。第一次截图之前的指针操作会失败。
 
@@ -119,9 +123,10 @@ Operate the Linux desktop on X display <display>. Take a screenshot before using
 - **没有无障碍树或窗口列表**——模型只能依据截图工作；除了点击或按键之外，无法读取元素文本、列出窗口或提升窗口。
 - **共享桌面**——此提供者不为某个 Session 预留显示。其他 Session、用户自己的查看器和应用都可以在两次调用之间更改它，键盘输入总是发给当前拥有焦点的窗口。
 - **剪贴板被替换**——输入非 ASCII 文本会替换 CLIPBOARD 和 PRIMARY 选区，不支持 shift+Insert 粘贴的应用收不到该文本。
-- **取消与部分输入**——被取消、超时或失败的命令可能已经传入部分输入；如果 `xdotool` 在序列中途被终止，点击或拖动时按住的修饰键可能保持按下。重试前先截图观察。
+- **取消与部分输入**——被取消、超时或失败的命令可能已经传入部分输入。之后会释放按住的修饰键和按钮，但释放命令本身无法运行时（例如显示已经消失），按键和按钮可能保持按下，并且只记录警告。重试前先截图观察。
 - **屏幕几何**——映射使用最近一次截图时的屏幕尺寸；之后调整 X 屏幕大小会导致坐标映射错误，直到下一次截图。
-- **没有审批关卡**——输入操作不经过逐次审批；需要审批的部署应组合工具策略。
+- **没有审批关卡**——输入操作不询问用户，因此部署中"写操作需询问"的策略不适用于电脑操作；需要审批的部署应组合工具策略。
+- **未认证的显示**——使用无 cookie 的后备方案时，任何本地进程都可以读取或操作该显示；提供者无法检测或阻止。
 - **实验性发布**——操作集合与结果不作稳定性承诺。
 
 <a id="dev-note"></a>
@@ -135,5 +140,7 @@ Operate the Linux desktop on X display <display>. Take a screenshot before using
 ```sh
 node node_modules/vitest/vitest.mjs run --config vitest.e2e.config.ts packages/experimental/computer-use-x11/tests/xvfb.e2e.ts
 ```
+
+Mumbo 盒子就绪情况：盒子当前的模型路由没有声明图像输入，因为 `llm-deepseek` 默认把 `inputModalities` 设为仅文本，所以在部署选择支持图像的路由之前，截图会被拒绝。输入操作不询问用户，因此盒子的"写操作需询问"策略不覆盖电脑操作。
 
 </details>
