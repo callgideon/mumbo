@@ -576,6 +576,20 @@ test('box requests: a same-origin Origin becomes the box\'s masked host; other O
   assert.equal(fwd({ host: 'app.mumbo.si', origin: 'https://app.mumbo.si', 'sec-fetch-site': 'cross-site' })['sec-fetch-site'], 'cross-site')
 })
 
+test('a box E2B reports no masked host for: a warning names it, and Origins pass unchanged', async () => {
+  const e2b = fakeE2B(); const logs = []
+  e2b.Sandbox.getInfo = async () => ({})
+  const store = memoryStore()
+  const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'P', log: (l) => logs.push(JSON.parse(l)) })
+  const made = await b.ensure('a@x.com')
+  const { host, ...before } = await store.getBox(made.id)
+  await store.putBox(made.id, before)
+  const target = await b.ensure('a@x.com')
+  assert.equal(target.host, undefined)
+  assert.deepEqual(logs.filter(l => l.level === 'warn').map(l => [l.msg, l.box]), [['no masked host; Origin passes unchanged', made.id]])
+  assert.equal(boxHeaders(cfg, { host: 'app.mumbo.si', origin: 'https://app.mumbo.si' }, target).origin, 'https://app.mumbo.si')
+})
+
 test('a box\'s masked host: boxSite at creation; read once from E2B for a box the store has none for (created before the move)', async () => {
   const e2b = fakeE2B(); const infos = []
   e2b.Sandbox.getInfo = async (id) => { infos.push(id); return { sandboxId: id, network: { maskRequestHost: 'boxes.mumbo.si' } } }

@@ -57,7 +57,7 @@ const cookieName = (name, fallback) => {
 const redirectUris = (name) => {
   const uris = env(name).split(',').map(s => s.trim()).filter(Boolean)
   const exact = (v) => { try { const u = new URL(v); return `${u.origin}${u.pathname}` === v } catch { return false } }
-  if (uris.length === 0 || !uris.every(exact)) throw new Error(`edge: ${name} must list origin-and-path URIs such as https://boxes.mumbo.si/oauth2/callback, not ${JSON.stringify(env(name))}`)
+  if (uris.length === 0 || !uris.every(exact)) throw new Error(`edge: ${name} must list origin-and-path URIs such as https://app.mumbo.si/oauth2/callback, not ${JSON.stringify(env(name))}`)
   return uris
 }
 export const config = () => ({
@@ -508,7 +508,7 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
     let host = b.host
     if (!host) {
       host = (await e2b.Sandbox.getInfo(id)).network?.maskRequestHost
-      if (host) await store.patchBox(id, { host })
+      if (host) await store.patchBox(id, { host }); else say({ level: 'warn', msg: 'no masked host; Origin passes unchanged', user: b.email, box: id })
     }
     // A project box whose image runs @mumbo/edge-member: members get a signed header, never the owner launch token.
     const member = b.memberAuth ? (email) => memberHeader(memberKey(edgeKey, id), email) : undefined
@@ -649,9 +649,12 @@ const DROP = new Set(['connection', 'keep-alive', 'proxy-connection', 'transfer-
 /** Which box port a main-host request goes to: the desktop live view (noVNC, :6080) under /desktop/, otherwise dsh
  *  (:3080). The old project path /p/<id>/… redirects to the project's own origin (boxSite). */
 export function boxRoute(url, projectDomain) {
-  const p = /^\/p\/([0-9a-f]{16})(\/.*)?$/.exec(url)
-  if (p) return { redirect: `https://p-${p[1]}.${projectDomain}${p[2] ?? '/'}` }
-  if (['/desktop', '/desktop/'].includes(url.split('?')[0])) return { redirect: '/desktop/vnc.html?autoconnect=1&resize=remote&path=desktop/websockify' }
+  // Matched on the path: former-host redirects add a query (moved=1) even to links that had none.
+  const q = url.indexOf('?')
+  const path = q < 0 ? url : url.slice(0, q), query = q < 0 ? '' : url.slice(q)
+  const p = /^\/p\/([0-9a-f]{16})(\/.*)?$/.exec(path)
+  if (p) return { redirect: `https://p-${p[1]}.${projectDomain}${p[2] ?? '/'}${query}` }
+  if (path === '/desktop' || path === '/desktop/') return { redirect: '/desktop/vnc.html?autoconnect=1&resize=remote&path=desktop/websockify' }
   if (url.startsWith('/desktop/')) return { port: '6080', path: url.slice('/desktop'.length), base: '' }
   return { port: '3080', path: url, base: '' }
 }

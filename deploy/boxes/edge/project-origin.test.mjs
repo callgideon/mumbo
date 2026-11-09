@@ -154,7 +154,10 @@ test('on app.mumbo.si, the URLs the former-host redirects send to (marker query 
     assert.equal((await call(t.port, { path: '/?moved=1&', headers: { host: main } })).headers.location, '/?token=T', 'the launch exchange')
     assert.match((await call(t.port, { path: '/desktop/?moved=1&', headers: { host: main } })).headers.location, /^\/desktop\/vnc\.html\?/)
     assert.match((await call(t.port, { path: '/home?moved=1&', headers: { host: main } })).body, /<h1>mumbo<\/h1>/)
-    assert.equal((await call(t.port, { path: `/p/${t.id}/x?moved=1&`, headers: { host: main } })).headers.location, `https://${t.host}/x?moved=1&`)
+    for (const [path, to] of [[`/p/${t.id}/x?moved=1&`, '/x?moved=1&'], [`/p/${t.id}?moved=1&`, '/?moved=1&'], [`/p/${t.id}?moved=1&a=b`, '/?moved=1&a=b'], [`/p/${t.id}/?moved=1&a=b`, '/?moved=1&a=b']]) {
+      assert.equal((await call(t.port, { path, headers: { host: main } })).headers.location, `https://${t.host}${to}`, path)
+    }
+    assert.deepEqual(t.ensured, ['a@x.com'], 'only the launch exchange started a box; the redirects started none')
   } finally { t.close() }
 })
 
