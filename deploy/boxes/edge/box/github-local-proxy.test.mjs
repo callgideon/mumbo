@@ -4,13 +4,14 @@
 import assert from 'node:assert/strict'
 import { after, before, test } from 'node:test'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { createHash, randomBytes, X509Certificate } from 'node:crypto'
-import { copyFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { createHash, createPrivateKey, randomBytes, X509Certificate } from 'node:crypto'
+import { copyFileSync, chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { request as httpRequest } from 'node:http'
 import { createServer as createHttpsServer, request as httpsRequest } from 'node:https'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { connect as tlsConnect, createServer as createTlsServer } from 'node:tls'
+import { gzipSync } from 'node:zlib'
 
 const PROXY = new URL('./github-local-proxy.mjs', import.meta.url).pathname
 const HOSTS = ['github.com', 'api.github.com', 'codeload.github.com', 'objects.githubusercontent.com']
@@ -18,30 +19,34 @@ const tmp = mkdtempSync(join(tmpdir(), 'gh-proxy-'))
 const caDir = join(tmp, 'ca')
 const openssl = (...args) => execFileSync('openssl', args, { stdio: 'pipe' })
 const ec = ['-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes']
+const sha256 = (b) => createHash('sha256').update(b).digest('hex')
 const listen = (server) => new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port)))
 
 let edgeUrl, proxy, edge, other, otherCert
 const seen = []
+const children = [] // every proxy started, killed in after() even when a test times out
 const proxyEnv = (over = {}) => ({ PATH: process.env.PATH, PORT: '0', CA_DIR: caDir, EDGE_GITHUB_URL: edgeUrl, BOX_TOKEN: 'test-token', NODE_EXTRA_CA_CERTS: join(caDir, 'ca.crt'), ...over })
 
 const startProxy = (env) => new Promise((resolve, reject) => {
   const child = spawn(process.execPath, [PROXY], { env })
+  children.push(child)
   let out = '', err = ''
   child.stdout.on('data', (c) => { out += c; const m = /listening on 127\.0\.0\.1:(\d+)/.exec(out); if (m) resolve({ child, port: Number(m[1]) }) })
   child.stderr.on('data', (c) => { err += c })
   child.on('exit', (code) => reject(new Error(`proxy exited ${code}: ${err}`)))
 })
 
-const connect = (target) => new Promise((resolve, reject) => {
-  httpRequest({ host: '127.0.0.1', port: proxy.port, method: 'CONNECT', path: target })
+const connect = (target, port = proxy.port) => new Promise((resolve, reject) => {
+  httpRequest({ host: '127.0.0.1', port, method: 'CONNECT', path: target })
     .on('connect', (res, socket) => (res.statusCode === 200 ? resolve(socket) : reject(new Error(`CONNECT ${res.statusCode}`))))
     .on('error', reject).end()
 })
 
 // An HTTPS request through the proxy, as gh and git make one: CONNECT host:443, then TLS trusting only the box CA.
-const github = async (host, { method = 'GET', path = '/', headers = {}, body } = {}) => {
-  const socket = await connect(`${host}:443`)
-  const secure = tlsConnect({ socket, servername: host, ca: readFileSync(join(caDir, 'ca.crt')) })
+// A servername other than the CONNECT host skips the name check; the certificate must still come from the box CA.
+const github = async (host, { port, servername = host, method = 'GET', path = '/', headers = {}, body } = {}) => {
+  const socket = await connect(`${host}:443`, port)
+  const secure = tlsConnect({ socket, servername, ca: readFileSync(join(caDir, 'ca.crt')), ...(servername !== host && { checkServerIdentity: () => undefined }) })
   return new Promise((resolve, reject) => {
     const req = httpsRequest({ host, method, path, headers, createConnection: () => secure }, (res) => {
       const chunks = []; res.on('data', c => chunks.push(c))
@@ -66,8 +71,10 @@ before(async () => {
     const hash = createHash('sha256'); let bytes = 0
     req.on('data', (c) => { hash.update(c); bytes += c.length })
     req.on('end', () => seen.push({ method: req.method, url: req.url, headers: req.headers, bytes, sha: hash.digest('hex') }))
+    if (req.url.endsWith('/hang')) return
     if (req.method === 'GET') return res.writeHead(200, { 'content-type': 'application/json' }).end('{"login":"mumbo-agent"}')
-    res.writeHead(201, { 'x-edge': 'echo' })
+    const encoding = req.headers['content-encoding']
+    res.writeHead(201, { 'x-edge': 'echo', ...(encoding && { 'content-encoding': encoding }) })
     req.pipe(res)
   })
   edgeUrl = `https://127.0.0.1:${await listen(edge)}/github`
@@ -76,7 +83,7 @@ before(async () => {
   proxy = await startProxy(proxyEnv())
 })
 
-after(() => { proxy?.child.kill(); edge?.close(); other?.close(); rmSync(tmp, { recursive: true, force: true }) })
+after(() => { for (const child of children) child.kill(); edge?.close(); other?.close(); rmSync(tmp, { recursive: true, force: true }) })
 
 test('a GitHub request is answered with a leaf from the box CA and reaches the edge as /github/<host><path> with the box token', async () => {
   seen.length = 0
@@ -168,4 +175,57 @@ test('leaf keys are private to their owner and cached across restarts; a readabl
     assert.equal(r.status, 1, JSON.stringify(over))
     assert.match(r.stderr, message)
   }
+})
+
+test('a leaf key that does not match its certificate, or is half written, is issued again and the proxy serves', async () => {
+  const leafDir = join(caDir, 'leaf')
+  openssl('genpkey', '-algorithm', 'EC', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-out', join(leafDir, 'api.github.com.key'))
+  const key = readFileSync(join(leafDir, 'github.com.key'))
+  writeFileSync(join(leafDir, 'github.com.key'), key.subarray(0, key.length >> 1))
+  const fixed = await startProxy(proxyEnv())
+  try {
+    for (const host of ['api.github.com', 'github.com']) {
+      const leaf = new X509Certificate(readFileSync(join(leafDir, `${host}.crt`)))
+      assert.ok(leaf.checkPrivateKey(createPrivateKey(readFileSync(join(leafDir, `${host}.key`)))), `${host} key matches its certificate`)
+      assert.equal(statSync(join(leafDir, `${host}.key`)).mode & 0o777, 0o600, `${host}.key`)
+    }
+    assert.deepEqual(readdirSync(leafDir).filter((f) => !/\.(key|crt)$/.test(f)), [], 'no temporary files are left')
+    for (const host of ['api.github.com', 'github.com']) assert.equal((await github(host, { port: fixed.port, path: '/user' })).status, 200, host)
+  } finally { fixed.child.kill() }
+})
+
+test('an edge that stays silent for EDGE_TIMEOUT_MS gets 504', { timeout: 10_000 }, async () => {
+  const slow = await startProxy(proxyEnv({ EDGE_TIMEOUT_MS: '300' }))
+  try {
+    const started = Date.now()
+    const r = await github('api.github.com', { port: slow.port, path: '/hang' })
+    const elapsed = Date.now() - started
+    assert.equal(r.status, 504)
+    // Under 3 s: EDGE_TIMEOUT_MS answers, not the global agent's own 5 s socket timeout.
+    assert.ok(elapsed >= 300 && elapsed < 3000, `answered after ${elapsed} ms`)
+  } finally { slow.child.kill() }
+  const r = spawnSync(process.execPath, [PROXY], { env: proxyEnv({ EDGE_TIMEOUT_MS: 'soon' }), encoding: 'utf8', timeout: 10_000 })
+  assert.equal(r.status, 1)
+  assert.match(r.stderr, /EDGE_TIMEOUT_MS must be a positive number of milliseconds/)
+})
+
+test('content-encoding passes through untouched both ways on upload-pack', async () => {
+  seen.length = 0
+  const body = gzipSync('0032want 0123456789abcdef0123456789abcdef01234567\n00000009done\n')
+  const r = await github('github.com', { method: 'POST', path: '/o/r.git/git-upload-pack', headers: { 'content-type': 'application/x-git-upload-pack-request', 'content-encoding': 'gzip' }, body })
+  assert.equal(seen[0].url, '/github/github.com/o/r.git/git-upload-pack')
+  assert.equal(seen[0].headers['content-encoding'], 'gzip')
+  assert.equal(seen[0].sha, sha256(body), 'the edge gets the compressed bytes')
+  assert.equal(r.headers['content-encoding'], 'gzip')
+  assert.deepEqual(r.body, body, 'the client gets the compressed bytes')
+})
+
+test('a Host header or SNI other than the CONNECT host still goes to the CONNECT host', async () => {
+  seen.length = 0
+  const r = await github('api.github.com', { servername: 'github.com', path: '/user', headers: { host: 'evil.example' } })
+  assert.equal(r.status, 200)
+  assert.equal(r.peer.subject, 'CN=api.github.com')
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0].url, '/github/api.github.com/user')
+  assert.equal(seen[0].headers.host, new URL(edgeUrl).host)
 })

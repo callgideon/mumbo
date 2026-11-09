@@ -5,12 +5,13 @@
 //   client's. The edge's GitHub forwarder checks the box token, swaps in the agent token and allows only listed
 //   operations.
 // - CONNECT to anything else: a raw TCP tunnel. A plain http:// proxy request answers 400.
-// Settings (all required): PORT, CA_DIR (holding ca.key, mode 0600, and ca.crt; the start script creates and trusts
-// them), EDGE_GITHUB_URL (https only) and BOX_TOKEN. Leaves are issued with openssl at start and cached in ${CA_DIR}/leaf/.
+// Required settings: PORT, CA_DIR (holding ca.key, mode 0600, and ca.crt; the start script creates and trusts them),
+// EDGE_GITHUB_URL (https only) and BOX_TOKEN. Optional: EDGE_TIMEOUT_MS (120000), the silence after which a request to
+// the edge answers 504. Leaves are issued with openssl at start and cached in ${CA_DIR}/leaf/.
 // Node built-ins only. The edge reads this file at start and hands it to startScript as boxFiles.proxy.
 import { execFileSync } from 'node:child_process'
-import { X509Certificate } from 'node:crypto'
-import { mkdirSync, readFileSync, statSync } from 'node:fs'
+import { createPrivateKey, X509Certificate } from 'node:crypto'
+import { mkdirSync, readFileSync, renameSync, statSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { request } from 'node:https'
 import { connect } from 'node:net'
@@ -32,6 +33,8 @@ const boxToken = setting('BOX_TOKEN')
 const edge = new URL(setting('EDGE_GITHUB_URL'))
 if (edge.protocol !== 'https:') fail('EDGE_GITHUB_URL must be an https:// URL')
 const edgePath = edge.pathname.replace(/\/+$/, '')
+const edgeTimeoutMs = Number(process.env.EDGE_TIMEOUT_MS || 120_000)
+if (!(edgeTimeoutMs > 0)) fail('EDGE_TIMEOUT_MS must be a positive number of milliseconds')
 
 const caKey = join(caDir, 'ca.key')
 const caCrt = join(caDir, 'ca.crt')
@@ -40,24 +43,35 @@ const ca = new X509Certificate(readFileSync(caCrt))
 const leafDir = join(caDir, 'leaf')
 mkdirSync(leafDir, { recursive: true, mode: 0o700 })
 
-// A cached leaf is reused while the current CA signed it and it has more than RENEW_BEFORE_MS left.
-const reusable = (crt) => {
+// The cached pair, read once, while the current CA signed the certificate, the key matches it and it has more than
+// RENEW_BEFORE_MS left; otherwise undefined.
+const cached = (key, crt) => {
   try {
-    const leaf = new X509Certificate(readFileSync(crt))
-    return leaf.verify(ca.publicKey) && Date.parse(leaf.validTo) - Date.now() > RENEW_BEFORE_MS
-  } catch { return false } // missing or unreadable: issue a new leaf
+    const pair = { key: readFileSync(key), cert: readFileSync(crt) }
+    const leaf = new X509Certificate(pair.cert)
+    const good = leaf.verify(ca.publicKey) && leaf.checkPrivateKey(createPrivateKey(pair.key)) && Date.parse(leaf.validTo) - Date.now() > RENEW_BEFORE_MS
+    return good ? pair : undefined
+  } catch { return undefined } // missing, unreadable or half written: issue a new pair
+}
+// openssl writes under per-process temporary names, which are renamed into place, so no reader sees a half-written file.
+// A start that reads the new key beside the old certificate (between the renames, or after concurrent starts) fails
+// the key check and issues its own pair. This process serves the pair it read, never a re-read.
+// ponytail: a start killed mid-issue leaves its temporary files behind; they are small and never read.
+const issue = (host, key, crt) => {
+  const tmp = `.${process.pid}.tmp`
+  execFileSync('openssl', ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes',
+    '-keyout', key + tmp, '-out', crt + tmp, '-subj', `/CN=${host}`, '-addext', `subjectAltName=DNS:${host}`,
+    '-addext', 'basicConstraints=critical,CA:FALSE', '-addext', 'extendedKeyUsage=serverAuth',
+    '-CA', caCrt, '-CAkey', caKey, '-days', String(LEAF_DAYS)], { stdio: 'pipe' }) // the key file gets mode 0600
+  const pair = { key: readFileSync(key + tmp), cert: readFileSync(crt + tmp) }
+  renameSync(key + tmp, key)
+  renameSync(crt + tmp, crt)
+  return pair
 }
 const contexts = new Map(HOSTS.map((host) => {
   const key = join(leafDir, `${host}.key`)
   const crt = join(leafDir, `${host}.crt`)
-  if (!reusable(crt)) {
-    // openssl writes the key with mode 0600.
-    execFileSync('openssl', ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes',
-      '-keyout', key, '-out', crt, '-subj', `/CN=${host}`, '-addext', `subjectAltName=DNS:${host}`,
-      '-addext', 'basicConstraints=critical,CA:FALSE', '-addext', 'extendedKeyUsage=serverAuth',
-      '-CA', caCrt, '-CAkey', caKey, '-days', String(LEAF_DAYS)], { stdio: 'pipe' })
-  }
-  return [host, createSecureContext({ key: readFileSync(key), cert: readFileSync(crt) })]
+  return [host, createSecureContext(cached(key, crt) ?? issue(host, key, crt))]
 }))
 
 const strip = (headers) => Object.fromEntries(Object.entries(headers).filter(([name]) => !HOP.has(name)))
@@ -67,15 +81,18 @@ function forward(host, req, res) {
   if (!req.url.startsWith('/')) return res.writeHead(400).end()
   let clientGone = false
   const out = request({ hostname: edge.hostname, port: edge.port, method: req.method, path: `${edgePath}/${host}${req.url}`,
-    headers: { ...strip(req.headers), authorization: `Bearer ${boxToken}` } }, (up) => {
+    headers: { ...strip(req.headers), authorization: `Bearer ${boxToken}` }, timeout: edgeTimeoutMs }, (up) => {
     res.writeHead(up.statusCode, strip(up.headers))
     pipeline(up, res, () => {})
   })
+  // The socket timeout fires after edgeTimeoutMs without traffic either way, so a long transfer that keeps moving is kept.
+  out.on('timeout', () => out.destroy(Object.assign(new Error(`no traffic to or from the edge for ${edgeTimeoutMs} ms`), { code: 'ETIMEDOUT' })))
   out.on('error', (e) => {
     if (clientGone) return
     console.error(`github-local-proxy: ${req.method} ${host}: ${e.code ?? e.message}`)
     if (res.headersSent) return res.destroy()
-    res.writeHead(502, { 'content-type': 'text/plain' }).end(`github-local-proxy: the edge GitHub forwarder failed (${e.code ?? e.message})\n`)
+    res.writeHead(e.code === 'ETIMEDOUT' ? 504 : 502, { 'content-type': 'text/plain' })
+      .end(`github-local-proxy: the edge GitHub forwarder failed (${e.code ?? e.message})\n`)
   })
   res.on('close', () => { if (!res.writableFinished) { clientGone = true; out.destroy() } })
   req.pipe(out)
