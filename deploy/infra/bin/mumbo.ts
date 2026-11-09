@@ -3,8 +3,9 @@
  * CloudFront -> ALB (HTTPS) -> Fargate `dsh web` with EFS at /data. Static assets are not separable
  * from the server (same origin), so the CDN fronts the whole app. CodeBuild builds deploy/Dockerfile on push.
  *
- * Domains: dev serves dev.app / dev.api.mumbo.si. prod no longer serves: the shared server was retired on
- * 2026-11-09 for per-user boxes (deploy/boxes); app / api.mumbo.si redirect to boxes.mumbo.si from the boxes ALB.
+ * Neither environment serves: the shared server was retired on 2026-11-09 for per-user boxes (deploy/boxes); app /
+ * api.mumbo.si redirect to the boxes edge. dev.app / dev.api.mumbo.si are retired too, because no host outside the
+ * edge may live under its sign-in cookie domain (.app.mumbo.si). Setting `serve` true restores the dev server.
  * The prod stack keeps what the boxes use: the mumbo-web-prod image repository and its CodeBuild project (the box
  * template is built from that image), the model key secret, and the downloads bucket.
  */
@@ -15,7 +16,7 @@ const app = new cdk.App()
 const env = app.node.tryGetContext('env') as 'dev' | 'prod'
 if (env !== 'dev' && env !== 'prod') throw new Error('pass -c env=dev|prod')
 const removal = env === 'dev' ? cdk.RemovalPolicy.DESTROY : cdk.RemovalPolicy.RETAIN
-const serve = env === 'dev'
+const serve = false
 const attach = serve
 const branch = env === 'prod' ? 'main' : 'dev'
 const zoneName = 'mumbo.si'
@@ -29,7 +30,7 @@ const vpc = ec2.Vpc.fromLookup(stack, 'Vpc', { isDefault: true })
 
 const repo = new ecr.Repository(stack, 'Repo', { repositoryName: `mumbo-web-${env}`, lifecycleRules: [{ maxImageCount: 20 }], removalPolicy: removal, emptyOnDelete: env === 'dev' })
 const apiKey = new sm.Secret(stack, 'DeepseekKey', { secretName: `mumbo/${env}/deepseek-api-key`, description: 'Set the value after deploy' })
-// The shared web server (dev only since 2026-11-09).
+// The shared web server (off since 2026-11-09; see the header).
 const web = serve ? (() => {
 const names = attach ? [appHost, apiHost, originHost] : [originHost]
 const cert = new acm.Certificate(stack, 'Cert', { domainName: names[0]!, subjectAlternativeNames: names.slice(1), validation: acm.CertificateValidation.fromDns(zone) })
