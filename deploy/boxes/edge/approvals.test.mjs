@@ -5,7 +5,7 @@ import { generateKeyPairSync, verify } from 'node:crypto'
 import { memoryStore } from './store.mjs'
 import { projects, addRepo } from './projects.mjs'
 import { approvalsService } from './approvals.mjs'
-import { mintRepoToken } from './github-app.mjs'
+import { mintToken } from './github-app.mjs'
 import { config } from './edge.mjs'
 
 const REPO = 'acme/app'
@@ -14,23 +14,28 @@ const SHA = 'a'.repeat(40)
 const NEW = 'b'.repeat(40)
 const OLD = 'c'.repeat(40)
 const MERGED = 'd'.repeat(40)
-const AGENT = 'mumbo-agent'
+// The mumbo-bot App's bot user; approvals match it by id, never by login.
+const BOT = { login: 'mumbo-bot[bot]', id: 341797844 }
+const LOOKALIKE = { login: 'mumbo-bot[bot]', id: 999 }
+const READ_PERMISSIONS = { contents: 'read', pull_requests: 'read', checks: 'read', statuses: 'read', issues: 'read' }
 const FOUNDER = 'founder@x.com'
 const NOW = Date.UTC(2026, 10, 9, 12)
+const HOUR = 3_600_000
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs1', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } })
 
 const pull = (n, over = {}) => ({
-  number: n, state: 'open', draft: false, title: `Change ${n}`, html_url: `https://github.com/${REPO}/pull/${n}`, user: { login: AGENT },
+  number: n, state: 'open', draft: false, title: `Change ${n}`, html_url: `https://github.com/${REPO}/pull/${n}`, user: BOT,
   base: { ref: 'main', repo: { full_name: REPO } }, head: { ref: `agent/t${n}`, sha: SHA, repo: { full_name: REPO } },
   additions: 10, deletions: 2, changed_files: 1, ...over,
 })
 const file = (filename, extra = {}) => ({ filename, additions: 1, deletions: 0, ...extra })
 const run = (name, conclusion = 'success', id = 1, app = 'github-actions') => ({ id, name, status: 'completed', conclusion, app: { slug: app } })
 let comments = 0
-const comment = (body, login = AGENT) => ({ user: { login }, body, html_url: `https://github.com/${REPO}/pull/1#issuecomment-${++comments}` })
-const marker = (sha, verdict, login = AGENT) => comment(`<!-- mumbo-review sha=${sha} verdict=${verdict} -->\nReview report.`, login)
+const comment = (body, user = BOT) => ({ user, body, html_url: `https://github.com/${REPO}/pull/1#issuecomment-${++comments}` })
+const marker = (sha, verdict, user = BOT) => comment(`<!-- mumbo-review sha=${sha} verdict=${verdict} -->\nReview report.`, user)
 
-/** A fake api.github.com that routes on method and path; every call is recorded with its authorization and body. */
+/** A fake api.github.com that routes on method and path; every call is recorded with its authorization and body. A
+ *  read-only mint (contents: read) gets read-token, any other bot-token; `mintStatus` other than 201 refuses mints. */
 function fakeGithub() {
   const pass = marker(SHA, 'pass')
   const gh = {
@@ -41,7 +46,8 @@ function fakeGithub() {
     pass,
     mergeStatus: 200,
     down: false,
-    grantFor: (asked) => ({ token: 'bot-token', repositories: [{ full_name: REPO }], permissions: { ...asked.permissions, metadata: 'read' } }),
+    mintStatus: 201,
+    grantFor: (asked) => ({ token: asked.permissions.contents === 'read' ? 'read-token' : 'bot-token', expires_at: new Date(NOW + HOUR).toISOString(), repositories: [{ full_name: REPO }], permissions: { ...asked.permissions, metadata: 'read' } }),
     calls: [],
   }
   const json = (body, status = 200) => new Response(status === 204 ? null : JSON.stringify(body), { status })
@@ -63,7 +69,9 @@ function fakeGithub() {
     if (method === 'GET' && (n = m(/^\/repos\/acme\/app\/issues\/(\d+)\/comments$/))) return page(gh.comments[n] ?? [], q)
     if (method === 'GET' && (n = m(/^\/repos\/acme\/app\/commits\/([0-9a-f]{40})\/check-runs$/))) return json({ check_runs: gh.runs[n] ?? [] })
     if (method === 'GET' && path === `/repos/${REPO}/installation`) return json({ id: 77 })
-    if (method === 'POST' && path === '/app/installations/77/access_tokens') return json(gh.grantFor(JSON.parse(init.body)), 201)
+    if (method === 'POST' && path === '/app/installations/77/access_tokens') {
+      return gh.mintStatus === 201 ? json(gh.grantFor(JSON.parse(init.body)), 201) : json({ message: 'The permissions requested are not granted to this installation.' }, gh.mintStatus)
+    }
     if (method === 'DELETE' && path === '/installation/token') return json(null, 204)
     if (method === 'PUT' && (n = m(/^\/repos\/acme\/app\/pulls\/(\d+)\/merge$/))) {
       // GitHub's precondition: the merge names the PR's current head, or it answers 409.
@@ -87,7 +95,7 @@ async function setup({ approvers = [FOUNDER] } = {}) {
   await addRepo(store, project, REPO, { by: FOUNDER, approvers: [FOUNDER] })
   const notes = [], audits = [], clock = { t: NOW }
   const svc = approvalsService({
-    store, github: { agentToken: 'agent-token', app: { appId: '5295930', privateKey }, agentLogin: AGENT, requiredChecks: ['static', 'unit'] },
+    store, github: { app: { appId: '5295930', privateKey }, agentId: BOT.id, requiredChecks: ['static', 'unit'] },
     notify: async (message) => { notes.push(message) }, audit: async (record) => { audits.push(record) },
     fetchImpl: gh.fetchImpl, now: () => clock.t, approveHost: 'approve.boxes.mumbo.si', approvers,
   })
@@ -97,14 +105,15 @@ const only = async (svc) => { const items = await svc.list(FOUNDER); assert.equa
 
 // ---- what gets listed
 
-test('the poller creates an item with the facts it read, for the owner only, reading with the agent token', async () => {
+test('the poller creates an item with the facts it read, for the owner only, reading with its own read-only App token', async () => {
   const { gh, svc, project } = await setup()
   gh.pulls[0].changed_files = 2
   gh.files[1] = [file('src/a.js', { additions: 8 }), file('src/b.js', { previous_filename: 'src/old.js' })]
   // The newest unit run decides; a check that is not required does not count.
   gh.runs[SHA] = [run('static'), run('unit', 'failure', 1), run('unit', 'success', 2), run('lint', 'failure')]
-  // The newest agent marker for the head SHA counts: not a stranger's, and not a marker below the first line.
-  gh.comments[1] = [marker(SHA, 'fail'), gh.pass, marker(SHA, 'fail', 'stranger'), comment('Thanks!'), comment(`Note\n<!-- mumbo-review sha=${SHA} verdict=fail -->`)]
+  // The newest agent marker for the head SHA counts: not a stranger's, not one from a look-alike login with another
+  // id, and not a marker below the first line.
+  gh.comments[1] = [marker(SHA, 'fail'), gh.pass, marker(SHA, 'fail', { login: 'stranger', id: 1 }), marker(SHA, 'fail', LOOKALIKE), comment('Thanks!'), comment(`Note\n<!-- mumbo-review sha=${SHA} verdict=fail -->`)]
   await svc.poll()
   assert.deepEqual(await svc.list(FOUNDER), [{
     id: ID, project, repo: REPO, number: 1, title: 'Change 1', url: `https://github.com/${REPO}/pull/1`, sha: SHA,
@@ -113,7 +122,22 @@ test('the poller creates an item with the facts it read, for the owner only, rea
     lowRisk: true, ruleVersion: 1, firstSeen: NOW, notifiedSha: SHA,
   }])
   assert.deepEqual(await svc.list('member@x.com'), [])
-  assert.ok(gh.calls.every(c => c.method === 'GET' && c.auth === 'Bearer agent-token'))
+  const [installation, mint, ...reads] = gh.calls
+  assert.equal(installation.path, `/repos/${REPO}/installation`)
+  assert.deepEqual(mint, { method: 'POST', path: '/app/installations/77/access_tokens', auth: installation.auth, body: { repositories: ['app'], permissions: READ_PERMISSIONS } })
+  assert.ok(reads.length && reads.every(c => c.method === 'GET' && c.auth === 'Bearer read-token'))
+  await svc.poll()
+  assert.equal(gh.calls.filter(c => c.method === 'POST').length, 1, 'the read token is reused')
+})
+
+test('a mint the installation refuses stops the poll loudly, naming the permissions, and lists nothing', async (t) => {
+  const { gh, svc } = await setup()
+  gh.mintStatus = 422
+  const errors = t.mock.method(console, 'error', () => {})
+  await svc.poll()
+  assert.deepEqual(await svc.list(FOUNDER), [])
+  assert.match(errors.mock.calls[0].arguments[0], /mumbo-bot App permissions not approved: The permissions requested are not granted to this installation\./)
+  assert.ok(gh.calls.every(c => !c.path.startsWith(`/repos/${REPO}/pulls`)), 'no read without the read-only token')
 })
 
 test('only agent PRs into main, from an agent/ branch of the same repository, and ready, are listed', async () => {
@@ -124,12 +148,14 @@ test('only agent PRs into main, from an agent/ branch of the same repository, an
     pull(2, head({ repo: { full_name: 'fork/app' } })),
     pull(3, head({ repo: null })),
     pull(4, head({ ref: 'feature/x' })),
-    pull(5, { user: { login: 'someone' } }),
+    pull(5, { user: { login: 'someone', id: 1 } }),
     pull(6, { draft: true }),
     pull(7),
+    pull(8, { user: LOOKALIKE }),
+    pull(9, { user: { login: 'renamed-bot[bot]', id: BOT.id } }),
   ]
   await svc.poll()
-  assert.deepEqual((await svc.list(FOUNDER)).map(i => i.id), ['acme/app#7'])
+  assert.deepEqual((await svc.list(FOUNDER)).map(i => i.id), ['acme/app#7', 'acme/app#9'], 'the author is matched by id')
 })
 
 // ---- the low-risk rule, version 1 (the default fake PR is low-risk; the facts test asserts it)
@@ -245,11 +271,12 @@ test('grant re-reads GitHub: a base changed to dev or a closed PR is not_candida
   assert.equal((await svc.grant(FOUNDER, ID, SHA)).reason, 'not_candidate')
   gh.pulls[0].state = 'open'
   assert.equal((await svc.grant(FOUNDER, ID, SHA)).reason, 'checks_not_green')
-  assert.ok(gh.calls.every(c => c.method === 'GET' && c.auth === 'Bearer agent-token'))
+  assert.ok(gh.calls.filter(c => c.path.startsWith(`/repos/${REPO}/`) && c.path !== `/repos/${REPO}/installation`).every(c => c.method === 'GET' && c.auth === 'Bearer read-token'))
+  assert.equal(gh.calls.filter(c => c.method === 'POST').length, 1, 'only the poll\'s read-only mint')
   assert.equal((await only(svc)).id, ID)
 })
 
-test('grant merges at the SHA with a minted App token, never the agent token, revokes it, audits with firstSeen, and removes the item', async () => {
+test('grant merges at the SHA with a single-repository merge token, never the read token, revokes it, audits with firstSeen, and removes the item', async () => {
   const { gh, svc, audits, clock } = await setup()
   await svc.poll()
   clock.t = NOW + 60_000
@@ -261,8 +288,8 @@ test('grant merges at the SHA with a minted App token, never the agent token, re
     'POST /app/installations/77/access_tokens', 'PUT /repos/acme/app/pulls/1/merge', 'DELETE /installation/token',
   ])
   const [pr, runs, installation, mint, merge, revoke] = calls
-  assert.equal(pr.auth, 'Bearer agent-token')
-  assert.equal(runs.auth, 'Bearer agent-token')
+  assert.equal(pr.auth, 'Bearer read-token')
+  assert.equal(runs.auth, 'Bearer read-token')
   assert.match(installation.auth, /^Bearer ey[\w-]+\.[\w-]+\.[\w-]+$/)
   assert.equal(mint.auth, installation.auth)
   assert.deepEqual(mint.body, { repositories: ['app'], permissions: { contents: 'write', pull_requests: 'write' } })
@@ -375,10 +402,11 @@ test('APPROVER_EMAILS: comma-separated and lowercased; unset or empty means nobo
 
 // ---- mumbo-bot repository tokens
 
-test('mintRepoToken: an RS256 App JWT finds the installation and asks for that one repository and the named permissions', async () => {
+test('mintToken: an RS256 App JWT finds the installation and asks for those repositories and the named permissions', async () => {
   const gh = fakeGithub()
-  const bot = await mintRepoToken({ appId: '5295930', privateKey, repo: REPO, permissions: { contents: 'write' }, fetchImpl: gh.fetchImpl, now: () => NOW + 999 })
+  const bot = await mintToken({ appId: '5295930', privateKey, repos: [REPO], permissions: { contents: 'write' }, fetchImpl: gh.fetchImpl, now: () => NOW + 999 })
   assert.equal(bot.token, 'bot-token')
+  assert.equal(bot.expiresAt, NOW + HOUR)
   const [installation, mint] = gh.calls
   assert.equal(installation.path, `/repos/${REPO}/installation`)
   const [h, p, s] = installation.auth.replace(/^Bearer /, '').split('.')
@@ -390,10 +418,13 @@ test('mintRepoToken: an RS256 App JWT finds the installation and asks for that o
   assert.deepEqual(gh.calls.at(-1), { method: 'DELETE', path: '/installation/token', auth: 'Bearer bot-token', body: undefined })
 })
 
-test('mintRepoToken refuses and revokes a grant wider than asked', async () => {
+test('mintToken refuses and revokes a grant other than asked, wider or narrower', async () => {
   for (const wide of [
     { permissions: { contents: 'read', workflows: 'write', metadata: 'read' } },
     { permissions: { contents: 'write' } },
+    { permissions: { metadata: 'read' } },
+    { permissions: { contents: 'read', metadata: 'write' } },
+    { repositories: [] },
     { repositories: [{ full_name: REPO }, { full_name: 'acme/other' }] },
     { repositories: [{ full_name: 'evil/app' }] },
     { repositories: undefined },
@@ -401,7 +432,22 @@ test('mintRepoToken refuses and revokes a grant wider than asked', async () => {
   ]) {
     const gh = fakeGithub()
     gh.grantFor = (asked) => ({ token: 'bot-token', repositories: [{ full_name: REPO }], permissions: asked.permissions, ...wide })
-    await assert.rejects(mintRepoToken({ appId: '5295930', privateKey, repo: REPO, permissions: { contents: 'read' }, fetchImpl: gh.fetchImpl, now: () => NOW }), /wider than asked/, JSON.stringify(wide))
+    await assert.rejects(mintToken({ appId: '5295930', privateKey, repos: [REPO], permissions: { contents: 'read' }, fetchImpl: gh.fetchImpl, now: () => NOW }), /differs from what was asked/, JSON.stringify(wide))
     assert.deepEqual(gh.calls.at(-1), { method: 'DELETE', path: '/installation/token', auth: 'Bearer bot-token', body: undefined })
+  }
+})
+
+test('mintToken: a mint the installation refuses (403, 422) rejects as not approved; repositories of two owners, or none, ask nothing', async () => {
+  for (const status of [403, 422]) {
+    const gh = fakeGithub()
+    gh.mintStatus = status
+    await assert.rejects(mintToken({ appId: '5295930', privateKey, repos: [REPO], permissions: READ_PERMISSIONS, fetchImpl: gh.fetchImpl, now: () => NOW }),
+      { notApproved: true, message: 'mumbo-bot App permissions not approved: The permissions requested are not granted to this installation.' })
+    assert.equal(gh.calls.at(-1).method, 'POST', 'no token, nothing to revoke')
+  }
+  for (const repos of [[REPO, 'other/app'], []]) {
+    const gh = fakeGithub()
+    await assert.rejects(mintToken({ appId: '5295930', privateKey, repos, permissions: READ_PERMISSIONS, fetchImpl: gh.fetchImpl, now: () => NOW }), /one owner's repositories/)
+    assert.equal(gh.calls.length, 0)
   }
 })

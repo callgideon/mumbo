@@ -51,6 +51,20 @@ Commit, `docker build` `deploy/boxes/edge` and push to `mumbo-boxes/edge:<commit
 ### Rebuild the box template
 `node deploy/boxes/edge/template.mjs <mumbo web image>` with `E2B_API_URL`, `E2B_SANDBOX_URL`, `E2B_API_KEY` (team key from the `mumbo-boxes/e2b` secret) and `ECR_PASSWORD`. From outside the VPC, tunnel through a node with SSM port forwarding to `api.boxes.internal:3000` and `sandbox.boxes.internal:3002`; the internal NLB admits :3002 only from the edge, so add a temporary rule for the node security group and remove it afterwards. A new template reaches a user when their box is next created.
 
+### GitHub: the agent is the mumbo-bot App
+The coding agent writes to GitHub as `mumbo-bot[bot]`, the bot user (id 341797844) of the `mumbo-bot` App (5295930, installed on `callgideon` as installation 170921050; credentials in Secrets Manager `mumbo-boxes/github-app`). No box holds a GitHub token. The edge mints installation tokens:
+- the GitHub forwarder, one per project for that project's bound repositories, with contents, pull requests and issues write and checks and commit statuses read, reused until 5 minutes before it expires;
+- the approval poller, one read-only token per repository;
+- each merge, one token for that repository with contents and pull requests write, revoked after the merge.
+
+No token asks for workflows, actions or administration, so `.github/workflows` stays unwritable. A box sees 403 `no_repos` until its project has a repository (bind one on the approve page).
+
+**`mumbo-bot App permissions not approved: <GitHub's message>`** (box answer 503, edge log line `{"edge":"github","refused":…}`, approvals log `poll failed; items kept`): GitHub refused the mint because the installation has not accepted a permission the edge asks for. Find it with `aws logs filter-log-events --log-group-name /mumbo-boxes/edge --filter-pattern '"permissions not approved"'`. The founder fixes it:
+1. App settings (GitHub → Settings → Developer settings → GitHub Apps → mumbo-bot) → Permissions & events → Repository permissions: Issues read and write, Checks read-only, Commit statuses read-only; Actions no access; Workflows no access. Save.
+2. Approve the request on the installation: `https://github.com/organizations/callgideon/settings/installations/170921050` → Review request → Accept new permissions.
+
+Check what the installation holds, read-only, with an App JWT: `GET /orgs/callgideon/installation` (its `permissions`). The next request mints again; nothing is cached after a failed mint.
+
 ### Restore Postgres to a point in time
 `aws rds restore-db-instance-to-point-in-time --source-db-instance-identifier mumbo-boxes-e2b --target-db-instance-identifier mumbo-boxes-e2b-restore --restore-time <UTC>` into the same subnet group and security group, then point `POSTGRES_CONNECTION_STRING` in the `mumbo-boxes/e2b` secret at the new instance and force a new deployment of api. Snapshots that newer rows point at stay in the versioned templates bucket for 14 days (review M4).
 

@@ -1,9 +1,11 @@
 // GitHub for project boxes, on the model host at /github/<host>/<path and query> (host: github.com, api.github.com,
 // codeload.github.com or objects.githubusercontent.com). The box authenticates with its box token, already verified
-// by modelServer; the edge holds the agent token and forwards only what its rules allow (design section 9): reads on
-// the project's repositories, comments and pull requests short of merging or retargeting, and pushes to agent/* only.
+// by modelServer; the edge mints the project's mumbo-bot App token, limited by GitHub to the project's repositories,
+// and forwards only what its rules allow (design section 9): reads on the project's repositories, comments and pull
+// requests short of merging or retargeting, and pushes to agent/* only.
 import { Readable, finished, pipeline } from 'node:stream'
 import { Kind, parse, print, valueFromASTUntyped, visit } from 'graphql'
+import { tokenCache } from './github-app.mjs'
 import { getRepos, isProjectId } from './projects.mjs'
 
 // content-length is left to fetch, which frames the body actually sent (GraphQL and pull request edits are re-serialized).
@@ -48,6 +50,8 @@ const REVIEWER_IDS = new Set(['userIds', 'teamIds', 'botIds'])
 // The node types a mutation may touch, each with its repository; any other type resolves to no repository.
 const NODE_REPOS = `query($ids: [ID!]!) { nodes(ids: $ids) { __typename ... on Repository { nameWithOwner } ${['PullRequest', 'Issue', 'IssueComment', 'PullRequestReviewComment'].map(t => `... on ${t} { repository { nameWithOwner } }`).join(' ')} } }`
 const STOPPED = 'stopped by the founder'
+// The agent's token: never workflows (so .github/workflows stays unwritable), actions or administration.
+const AGENT_PERMISSIONS = { contents: 'write', pull_requests: 'write', issues: 'write', checks: 'read', statuses: 'read' }
 
 /**
  * The GitHub forwarder. Refusals answer 403 (400 for a GraphQL document that does not parse, 413 past a body cap,
@@ -55,20 +59,27 @@ const STOPPED = 'stopped by the founder'
  * 504 for a push GitHub has not answered within `pushTimeoutMs`) and log one line
  * `{ edge: 'github', refused, principal, method, host, path }`. While `halt.isHalted(principal)`, only GET and HEAD,
  * git-upload-pack and GraphQL documents without a mutation pass. Every node id a GraphQL mutation names must resolve,
- * through one `nodes(ids:)` lookup with the agent token, to an object in one of the project's repositories. A request
- * whose client has left is not forwarded, and one in flight is aborted.
- * @param {{ store: object, halt: { isHalted(principal: string): Promise<boolean> }, agentToken: string | undefined, fetchImpl: typeof fetch, log?: (line: string) => void, pushTimeoutMs?: number }} deps
- *   `agentToken` unset answers 503 to every request; `pushTimeoutMs` defaults to PUSH_TIMEOUT_MS.
+ * through one `nodes(ids:)` lookup with the project's token, to an object in one of the project's repositories. A
+ * request whose client has left is not forwarded, and one in flight is aborted.
+ * Credentials: requests to api.github.com and github.com carry the project's App installation token, for the project's
+ * bound repositories and AGENT_PERMISSIONS (github-app.mjs tokenCache: reused until 5 minutes before expiry, minted anew
+ * when the bound repositories change). A project with no bound repository answers 403 `no_repos` and mints nothing. A
+ * mint GitHub refuses with 403 or 422 answers 503 `mumbo-bot App permissions not approved: <GitHub's message>`, any
+ * other mint failure 502; no request goes out with another token.
+ * @param {{ store: object, halt: { isHalted(principal: string): Promise<boolean> }, app: { appId: string | undefined, privateKey: string | undefined } | undefined, fetchImpl: typeof fetch, now?: () => number, log?: (line: string) => void, pushTimeoutMs?: number }} deps
+ *   `app` without both fields answers 503 to every request; `now` is epoch ms; `pushTimeoutMs` defaults to
+ *   PUSH_TIMEOUT_MS.
  * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, claim: { u: string, b: string }) => Promise<void>}
  *   handles one request; `claim` is the verified box token (`u` the principal, `b` the box id).
  */
-export function githubForwarder({ store, halt, agentToken, fetchImpl, log = console.log, pushTimeoutMs = PUSH_TIMEOUT_MS }) {
+export function githubForwarder({ store, halt, app, fetchImpl, now = Date.now, log = console.log, pushTimeoutMs = PUSH_TIMEOUT_MS }) {
   // Principals with a receive-pack in flight on this replica: one buffered push each.
   const pushing = new Set()
+  const tokenFor = app?.appId && app?.privateKey ? tokenCache({ app, permissions: AGENT_PERMISSIONS, fetchImpl, now }) : undefined
 
-  /** Resolves `ids`; returns a refusal `{ reason, status? }` unless each is an object in one of `repos`. */
-  async function outsideRepos(ids, repos) {
-    const r = await fetchImpl('https://api.github.com/graphql', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `token ${agentToken}` }, body: JSON.stringify({ query: NODE_REPOS, variables: { ids } }) })
+  /** Resolves `ids` with `token`; returns a refusal `{ reason, status? }` unless each is an object in one of `repos`. */
+  async function outsideRepos(ids, repos, token) {
+    const r = await fetchImpl('https://api.github.com/graphql', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `token ${token}` }, body: JSON.stringify({ query: NODE_REPOS, variables: { ids } }) })
     if (!r.ok) return { reason: `the node id lookup failed (HTTP ${r.status})`, status: 502 }
     const nodes = (await r.json())?.data?.nodes
     for (const [i, id] of ids.entries()) {
@@ -95,11 +106,14 @@ export function githubForwarder({ store, halt, agentToken, fetchImpl, log = cons
     }
     const id = claim.u.startsWith('project:') ? claim.u.slice('project:'.length) : undefined
     if (!isProjectId(id)) return refuse('GitHub is only for project boxes')
-    if (!agentToken) return void res.writeHead(503, { 'content-type': 'application/json' }).end(JSON.stringify({ message: 'Mumbo edge: GitHub is not configured' }))
+    if (!tokenFor) return void res.writeHead(503, { 'content-type': 'application/json' }).end(JSON.stringify({ message: 'Mumbo edge: GitHub is not configured' }))
     // Parsed once and forwarded as parsed; a path the parser rewrites (dot segments, escapes, backslashes) is refused.
     // Each branch below names its host, so any other host is refused.
     if (url.pathname !== req.url.split('?')[0] || url.pathname.split('/').slice(1).some(s => !s || s.includes('%'))) return refuse()
     const repos = (await getRepos(store, id)).map(r => r.toLowerCase())
+    if (!repos.length) return refuse('no_repos: this project has no GitHub repositories')
+    /** The project's token, or undefined once the mint failure is answered. */
+    const token = () => tokenFor(id, repos).catch((e) => void refuse(e.notApproved ? e.message : `mumbo-bot token mint failed: ${e.message}`, e.notApproved ? 503 : 502))
     const ours = (owner, name) => name !== undefined && repos.includes(`${owner}/${name}`.toLowerCase().replace(/\.git$/, ''))
     const gitService = host === 'github.com' && method === 'POST' && segs.length === 3 && ours(segs[0], segs[1]) ? segs[2] : undefined
     const headers = {}
@@ -119,7 +133,9 @@ export function githubForwarder({ store, halt, agentToken, fetchImpl, log = cons
       // Only mutations name node ids (each must name one), so a document with none is reads only.
       if (checked.ids.length) {
         if (await halt.isHalted(claim.u)) return refuse(STOPPED)
-        const outside = await outsideRepos(checked.ids, repos)
+        const t = await token()
+        if (!t) return
+        const outside = await outsideRepos(checked.ids, repos, t)
         if (outside) return refuse(outside.reason, outside.status)
       }
       body = checked.body
@@ -151,8 +167,11 @@ export function githubForwarder({ store, halt, agentToken, fetchImpl, log = cons
       if (why) return refuse(why)
     } else return refuse()
 
-    if (host === 'api.github.com') headers.authorization = `token ${agentToken}`
-    else if (host === 'github.com') headers.authorization = `Basic ${Buffer.from(`x-access-token:${agentToken}`).toString('base64')}`
+    if (host === 'api.github.com' || host === 'github.com') {
+      const t = await token()
+      if (!t) return
+      headers.authorization = host === 'api.github.com' ? `token ${t}` : `Basic ${Buffer.from(`x-access-token:${t}`).toString('base64')}`
+    }
     // A client that left during the checks gets nothing forwarded; one that leaves later aborts the upstream request,
     // so an abandoned push frees its buffer with its slot.
     if (res.destroyed) return

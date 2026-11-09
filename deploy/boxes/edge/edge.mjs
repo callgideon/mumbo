@@ -23,6 +23,13 @@ const hostname = (name, fallback) => {
   if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(value)) throw new Error(`edge: ${name} must be a bare lowercase hostname such as boxes.mumbo.si, not ${JSON.stringify(value)}`)
   return value
 }
+/** GITHUB_AGENT_ID, the agent's numeric GitHub user id, or undefined; set together with GITHUB_AGENT_LOGIN or fails. */
+const agentId = () => {
+  const id = optional('GITHUB_AGENT_ID')
+  if (!id !== !optional('GITHUB_AGENT_LOGIN')) throw new Error('edge: set GITHUB_AGENT_ID and GITHUB_AGENT_LOGIN together')
+  if (id !== undefined && !/^[1-9]\d{0,15}$/.test(id)) throw new Error(`edge: GITHUB_AGENT_ID must be a numeric GitHub user id, not ${JSON.stringify(id)}`)
+  return id && Number(id)
+}
 /** oauth2-proxy's sign-in cookie name when SIGNIN_COOKIE is unset (prod sets it from Terraform signin_cookie_name). It
  *  starts with _oauth2_proxy, so edge images older than SIGNIN_COOKIE, which strip only that prefix, strip it too. */
 const SIGNIN_COOKIE = '_oauth2_proxy_mumbo'
@@ -51,18 +58,18 @@ export const config = () => ({
   upstream: env('MODEL_UPSTREAM', 'https://api.deepseek.com'),
   childTemplates: list(env('CHILD_TEMPLATES', 'mumbo-child')),
   maxChildren: Number(env('MAX_CHILD_SANDBOXES', '10')),
-  // Approvals, GitHub and token budgets. Secrets arrive through the ECS secrets map: the agent token and ntfy topic from
-  // SSM; the id and private key of the mumbo-bot GitHub App, the only identity that merges, from Secrets Manager
-  // mumbo-boxes/github-app.
+  // Approvals, GitHub and token budgets. Secrets arrive through the ECS secrets map: the ntfy topic from SSM; the id and
+  // private key of the mumbo-bot GitHub App, which the agent writes as and the only identity that merges, from Secrets
+  // Manager mumbo-boxes/github-app.
   approveHost: env('APPROVE_HOST', `approve.${env('PUBLIC_HOST')}`),
   approverEmails: list(env('APPROVER_EMAILS', '')),  // who may merge and bind repositories; empty: nobody
-  agentLogin: optional('GITHUB_AGENT_LOGIN'),  // unset: the approvals poller is off
+  agentLogin: optional('GITHUB_AGENT_LOGIN'),  // the App's bot user, mumbo-bot[bot]
+  agentId: agentId(),  // its numeric user id, which approvals match; unset: the approvals poller is off
   requiredChecks: checkNames('REQUIRED_CHECKS', 'static,unit'),
   dailyTokensUser: Number(env('DAILY_TOKENS_USER', '20000000')),
   dailyTokensProject: Number(env('DAILY_TOKENS_PROJECT', '50000000')),
   projectTemplate: env('PROJECT_TEMPLATE', env('BOX_TEMPLATE', 'mumbo-box')),
   auditPrefix: env('AUDIT_PREFIX', 'audit/approvals/'),
-  agentToken: optional('GITHUB_AGENT_TOKEN'),
   appId: optional('GITHUB_APP_ID'),
   appKey: optional('GITHUB_APP_KEY'),
   ntfyTopic: optional('NTFY_TOPIC'),
@@ -838,12 +845,13 @@ async function main() {
     await s3.send(new PutObjectCommand({ Bucket: cfg.bucket, Key: key, Body: JSON.stringify(record), ContentType: 'application/json' }))
   }
   const csrfKey = createHmac('sha256', edgeKey).update('approve-csrf').digest()
-  const approvals = approvalsService({ store, github: { agentToken: cfg.agentToken, app: { appId: cfg.appId, privateKey: cfg.appKey }, agentLogin: cfg.agentLogin, requiredChecks: cfg.requiredChecks }, notify, audit, fetchImpl: fetch, now, approveHost: cfg.approveHost, approvers: cfg.approverEmails })
+  const app = { appId: cfg.appId, privateKey: cfg.appKey }
+  const approvals = approvalsService({ store, github: { app, agentId: cfg.agentId, requiredChecks: cfg.requiredChecks }, notify, audit, fetchImpl: fetch, now, approveHost: cfg.approveHost, approvers: cfg.approverEmails })
   const approve = approvePage({ approvals, halt, store, csrfKey, host: cfg.approveHost, approvers: cfg.approverEmails })
   const tokens = tokenBudget({ store, limits: { user: cfg.dailyTokensUser, project: cfg.dailyTokensProject }, now })
-  const github = githubForwarder({ store, halt, agentToken: cfg.agentToken, fetchImpl: fetch })
-  // One replica polls GitHub each minute: the 55 s lease lapses before the next tick. Off without GITHUB_AGENT_LOGIN.
-  if (cfg.agentLogin) {
+  const github = githubForwarder({ store, halt, app, fetchImpl: fetch, now })
+  // One replica polls GitHub each minute: the 55 s lease lapses before the next tick. Off without GITHUB_AGENT_ID.
+  if (cfg.agentId) {
     setInterval(() => store.lease('approvals:poll', 55_000).then(won => won && approvals.poll()).catch(e => console.error('edge: approvals poll', e.message)), 60_000).unref()
   }
 

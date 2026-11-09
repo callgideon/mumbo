@@ -1,6 +1,7 @@
 // node --test: the GitHub forwarder for project boxes (github.mjs, design section 9).
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { generateKeyPairSync } from 'node:crypto'
 import { createServer, request } from 'node:http'
 import { gzipSync } from 'node:zlib'
 import { parse, print } from 'graphql'
@@ -11,6 +12,12 @@ const P1 = 'p1'.repeat(8)  // project ids are 16 lowercase letters and digits
 const ME = `project:${P1}`
 const A = 'a'.repeat(40), B = 'b'.repeat(40), Z = '0'.repeat(40)
 const pkt = (s) => (s.length + 4).toString(16).padStart(4, '0') + s
+const NOW = Date.UTC(2026, 10, 9, 12), HOUR = 3_600_000, REFRESH = 5 * 60_000
+const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs1', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } })
+const APP = { appId: '5295930', privateKey }
+const AGENT_PERMISSIONS = { contents: 'write', pull_requests: 'write', issues: 'write', checks: 'read', statuses: 'read' }
+/** GitHub's answer to an installation token request: what was asked, plus metadata: read, valid for an hour from `t`. */
+const granted = (asked, token, t) => Response.json({ token, expires_at: new Date(t + HOUR).toISOString(), repositories: asked.repositories.map(n => ({ full_name: `callgideon/${n}` })), permissions: { ...asked.permissions, metadata: 'read' } }, { status: 201 })
 const ok = () => new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
 // GitHub's answer to the forwarder's nodes(ids:) lookup: a type outside its fragments comes back with __typename only.
 const mumbo = { nameWithOwner: 'callgideon/mumbo' }
@@ -50,16 +57,26 @@ const sendThenReset = (port, path, afterMs) => {
 /**
  * A forwarder behind a local server; project P1 has callgideon/mumbo and the claim's principal is `state.principal`.
  * Node id lookups are answered by `lookup(ids)` and recorded in `lookups`, apart from the forwarded `calls`.
+ * The App's own calls (installation, token mint, revoke: Bearer authorization) are recorded in `mints`; a mint is
+ * answered by `mint(asked body, nth mint, state.t)`, by default a token AGENT. `state.t` is the clock (epoch ms).
  * `isHalted` takes `haltMs` and records each principal it is asked about in `haltChecks`; `state.settled` counts
  * handlers that have returned.
  */
-async function forwarder({ reply = ok, lookup = lookupOk, agentToken = 'AGENT', haltMs = 0, pushTimeoutMs } = {}) {
+async function forwarder({ reply = ok, lookup = lookupOk, app = APP, mint = (asked, n, t) => granted(asked, 'AGENT', t), haltMs = 0, pushTimeoutMs } = {}) {
   const store = memoryStore()
   await store.putDoc(`project:${P1}`, { id: P1, name: 'P1', owner: 'a@x.com', members: ['a@x.com'], createdAt: '2026-11-09T00:00:00Z', repos: ['callgideon/mumbo'] })
-  const calls = [], lookups = [], logs = [], haltChecks = [], halted = new Set(), state = { principal: ME, settled: 0 }
+  const calls = [], lookups = [], mints = [], logs = [], haltChecks = [], halted = new Set(), state = { principal: ME, settled: 0, t: NOW }
   const isHalted = async (u) => { haltChecks.push(u); if (haltMs) await new Promise(r => setTimeout(r, haltMs)); return halted.has(u) }
   // Records each call with its body read into a Buffer; `streamed` says the forwarder sent a stream, not a buffer.
   const fetchImpl = async (url, init) => {
+    if (init.headers.authorization?.startsWith('Bearer ')) {
+      const { pathname } = new URL(url)
+      const asked = init.body === undefined ? undefined : JSON.parse(init.body)
+      mints.push({ method: init.method, path: pathname, auth: init.headers.authorization, body: asked })
+      if (pathname.endsWith('/installation')) return Response.json({ id: 77 })
+      if (init.method === 'DELETE') return new Response(null, { status: 204 })
+      return mint(asked, mints.filter(m => m.method === 'POST').length, state.t)
+    }
     const body = init.body == null ? undefined : Buffer.from(await new Response(init.body).arrayBuffer())
     const gql = url === 'https://api.github.com/graphql' ? JSON.parse(body) : undefined
     if (gql?.query.startsWith('query($ids: [ID!]!) { nodes(ids: $ids)')) {
@@ -69,7 +86,7 @@ async function forwarder({ reply = ok, lookup = lookupOk, agentToken = 'AGENT', 
     calls.push({ url, init: { ...init, body }, streamed: init.body instanceof ReadableStream })
     return reply(url, init)
   }
-  const forward = githubForwarder({ store, halt: { isHalted }, agentToken, fetchImpl, log: (line) => logs.push(JSON.parse(line)), pushTimeoutMs })
+  const forward = githubForwarder({ store, halt: { isHalted }, app, fetchImpl, now: () => state.t, log: (line) => logs.push(JSON.parse(line)), pushTimeoutMs })
   const server = createServer((req, res) => forward(req, res, { u: state.principal, b: 'b1' }).finally(() => { state.settled++ }))
   await new Promise(r => server.listen(0, '127.0.0.1', r))
   const port = server.address().port
@@ -81,10 +98,10 @@ async function forwarder({ reply = ok, lookup = lookupOk, agentToken = 'AGENT', 
     })
     req.on('error', reject); req.end(body)
   })
-  return { call, calls, lookups, logs, haltChecks, halted, state, store, port, close: () => { server.closeAllConnections(); server.close() } }
+  return { call, calls, lookups, mints, logs, haltChecks, halted, state, store, port, close: () => { server.closeAllConnections(); server.close() } }
 }
 
-test('reads: a project repository is read with the agent token; the box token and x-api-key stay behind', async (t) => {
+test('reads: a project repository is read with the project\'s App token; the box token and x-api-key stay behind', async (t) => {
   const f = await forwarder(); t.after(f.close)
   const r = await f.call('api.github.com/repos/callgideon/mumbo/pulls?state=open', { headers: { authorization: 'Bearer BOXTOKEN', 'x-api-key': 'BOXTOKEN', accept: 'application/vnd.github+json', cookie: '_oauth2_proxy_mumbo=s' } })
   assert.equal(r.status, 200)
@@ -502,9 +519,9 @@ test('caller and stop switch: only project principals; a halted project reads, f
   f.state.principal = `project:${P1}x`
   assert.equal((await f.call('api.github.com/repos/callgideon/mumbo/pulls')).status, 403)
   f.state.principal = ME
-  const unconfigured = await forwarder({ agentToken: null }); t.after(unconfigured.close)
+  const unconfigured = await forwarder({ app: { appId: '5295930', privateKey: undefined } }); t.after(unconfigured.close)
   assert.equal((await unconfigured.call('api.github.com/repos/callgideon/mumbo/pulls')).status, 503)
-  assert.equal(unconfigured.calls.length, 0)
+  assert.equal(unconfigured.calls.length + unconfigured.mints.length, 0)
 
   f.halted.add(ME)
   const comment = { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"body":"hi"}' }
@@ -553,4 +570,86 @@ test('pass-through: a 302 comes back unfollowed; content-encoding, framing and c
   assert.equal(r.headers['content-encoding'], undefined)
   assert.equal(r.headers['set-cookie'], undefined)
   assert.equal(r.headers['x-ratelimit-remaining'], '4999')
+})
+
+// ---- the project's mumbo-bot App token
+
+const posts = (f) => f.mints.filter(m => m.method === 'POST')
+
+test('App token: minted for the project\'s repositories with exactly the agent permissions, never workflows, actions or administration', async (t) => {
+  const f = await forwarder(); t.after(f.close)
+  assert.equal((await f.call('api.github.com/repos/callgideon/mumbo/pulls')).status, 200)
+  const [installation, mint] = f.mints
+  assert.equal(`${installation.method} ${installation.path}`, 'GET /repos/callgideon/mumbo/installation')
+  assert.match(installation.auth, /^Bearer ey[\w-]+\.[\w-]+\.[\w-]+$/, 'an App JWT')
+  assert.deepEqual(mint, { method: 'POST', path: '/app/installations/77/access_tokens', auth: installation.auth, body: { repositories: ['mumbo'], permissions: AGENT_PERMISSIONS } })
+  for (const k of ['workflows', 'actions', 'administration']) assert.equal(k in mint.body.permissions, false, k)
+  assert.equal(f.calls[0].init.headers.authorization, 'token AGENT')
+  // Another project gets its own token, for its own repositories only.
+  const [, p2] = await addProjects(f)
+  f.state.principal = `project:${p2}`
+  assert.equal((await f.call(`api.github.com/repos/${repoOf(p2)}/pulls`)).status, 200)
+  assert.deepEqual(posts(f).map(m => m.body.repositories), [['mumbo'], [p2]])
+})
+
+test('App token: reused until 5 minutes before it expires, then minted again; a change in bound repositories mints anew', async (t) => {
+  const f = await forwarder({ mint: (asked, n, at) => granted(asked, `T${n}`, at) }); t.after(f.close)
+  const auth = async (p = 'api.github.com/repos/callgideon/mumbo/pulls') => { assert.equal((await f.call(p)).status, 200, p); return f.calls.at(-1).init.headers.authorization }
+  assert.equal(await auth(), 'token T1')
+  f.state.t = NOW + HOUR - REFRESH - 1
+  assert.equal(await auth(), 'token T1', 'cached within expiry - 5 min')
+  assert.equal(await auth('github.com/callgideon/mumbo/info/refs?service=git-upload-pack'), `Basic ${Buffer.from('x-access-token:T1').toString('base64')}`, 'git uses the same token')
+  assert.equal(posts(f).length, 1)
+  f.state.t = NOW + HOUR - REFRESH
+  assert.equal(await auth(), 'token T2', 'minted again at expiry - 5 min')
+  assert.equal(posts(f).length, 2)
+  await f.store.putDoc(`project:${P1}`, { ...(await f.store.getDoc(`project:${P1}`)), repos: ['callgideon/mumbo', 'callgideon/docs'] })
+  assert.equal(await auth(), 'token T3', 'a new repository invalidates the cached token')
+  assert.deepEqual(posts(f).at(-1).body, { repositories: ['mumbo', 'docs'], permissions: AGENT_PERMISSIONS })
+  assert.equal(await auth('api.github.com/repos/callgideon/docs/pulls'), 'token T3')
+  assert.equal(posts(f).length, 3)
+})
+
+test('App token: a project with no bound repositories gets 403 no_repos and nothing is minted', async (t) => {
+  const f = await forwarder(); t.after(f.close)
+  const bare = 'p5'.repeat(8)
+  await f.store.putDoc(`project:${bare}`, { id: bare, name: 'bare', owner: 'a@x.com', members: ['a@x.com'], createdAt: '2026-11-09T00:00:00Z' })
+  f.state.principal = `project:${bare}`
+  for (const [p, init] of [['api.github.com/user', {}], ['api.github.com/repos/callgideon/mumbo/pulls', {}], ['api.github.com/graphql', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"query":"{ viewer { login } }"}' }]]) {
+    const r = await f.call(p, init)
+    assert.equal(r.status, 403, p)
+    assert.match(r.body, /no_repos/, p)
+  }
+  assert.equal(f.logs[0].refused.startsWith('no_repos'), true)
+  assert.equal(f.mints.length + f.calls.length + f.lookups.length, 0)
+})
+
+test('App token: permissions not approved on the installation answer 503 naming GitHub\'s message, with no fallback token; other mint failures 502', async (t) => {
+  const message = 'The permissions requested are not granted to this installation.'
+  for (const status of [422, 403]) {
+    const f = await forwarder({ mint: () => Response.json({ message, documentation_url: 'https://docs.github.com/rest' }, { status }) }); t.after(f.close)
+    const r = await f.call('api.github.com/repos/callgideon/mumbo/pulls')
+    assert.equal(r.status, 503, `GitHub ${status}`)
+    const reason = `mumbo-bot App permissions not approved: ${message}`
+    assert.deepEqual(r.json(), { message: `Mumbo edge refused GET /repos/callgideon/mumbo/pulls: ${reason}` })
+    assert.deepEqual(f.logs, [{ edge: 'github', refused: reason, principal: ME, method: 'GET', host: 'api.github.com', path: '/repos/callgideon/mumbo/pulls' }])
+    const push = await f.call('github.com/callgideon/mumbo.git/git-receive-pack', { method: 'POST', body: pkt(`${A} ${B} refs/heads/agent/a\0report-status\n`) + '0000' })
+    assert.equal(push.status, 503)
+    const mutation = await f.call('api.github.com/graphql', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: 'mutation { addComment(input: {subjectId: "I_1", body: "x"}) { clientMutationId } }' }) })
+    assert.equal(mutation.status, 503)
+    assert.equal(mutation.json().errors[0].message.endsWith(reason), true)
+    assert.equal(f.calls.length + f.lookups.length, 0, 'nothing forwarded, with no token or any other')
+    assert.equal(posts(f).length, 3, 'a failed mint is not cached: each request asks again')
+  }
+  const down = await forwarder({ mint: () => Response.json({ message: 'boom' }, { status: 500 }) }); t.after(down.close)
+  const r = await down.call('api.github.com/repos/callgideon/mumbo/pulls')
+  assert.equal(r.status, 502)
+  assert.match(r.json().message, /mumbo-bot token mint failed: GitHub POST \/app\/installations\/77\/access_tokens: HTTP 500/)
+  // A token that differs from what was asked, narrower included, is revoked and never used.
+  const narrow = await forwarder({ mint: (asked, n, at) => granted({ ...asked, permissions: { contents: 'write', pull_requests: 'write' } }, 'NARROW', at) }); t.after(narrow.close)
+  const n = await narrow.call('api.github.com/repos/callgideon/mumbo/pulls')
+  assert.equal(n.status, 502)
+  assert.match(n.json().message, /differs from what was asked/)
+  assert.deepEqual(narrow.mints.at(-1), { method: 'DELETE', path: '/installation/token', auth: 'Bearer NARROW', body: undefined })
+  assert.equal(down.calls.length + narrow.calls.length, 0)
 })
