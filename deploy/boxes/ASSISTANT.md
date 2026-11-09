@@ -62,3 +62,12 @@ Why the coordinator lives in the box and the code lives outside: one dsh per use
 | Home view | web client | The assistant session first, a projects panel, a link to the desktop live view. |
 
 Order: persistent project sandboxes and project tools (edge only, testable now) → presets (box start script) → consent → home view.
+
+## Spec: project members as dsh principals (harness work, for mumbo-impl)
+
+Today the edge relays a member's message as the project box's owner and names the member in the text. dsh already records a non-owner caller as `principal` on the durable message (`session/prompt`) and gates non-owner calls through `dsh-api-remote-access` ([peer principals note](../../.agents/notes/implemented/architecture/2026-10-12-peer-principal-and-remote-access.md)); its only non-owner kind is the liveshare `share-viewer`. Needed:
+
+1. **Principal kind `edge-member { email }`**, admitted by a Host plugin on Connection's admit path when a request carries an edge-signed identity header (`x-mumbo-member: <email>.<expiry>.<HMAC(edge key)>`); the box gets the verifying key through its start script (it already holds a box token signed with the same edge key, so a separate member key derived per box is preferable). Unsigned, expired or foreign-box headers fall back to ordinary cookie auth, never to a member.
+2. **A remote-access policy for `edge-member`** granting the session roles a collaborator needs (list, read, follow, prompt, create) on every session in the project box; no settings, credentials, plugin or workspace-admin actions.
+3. **Edge:** for project paths, send the member's signed header on every proxied request and on `project_message`, instead of using the owner cookie; the coordinator then sees `principal: edge-member{email}` on each message.
+4. **Tests (harness rules):** a real-composition test booting a test `cordis.yml` with the plugin: signed header admits the member and records `principal` on a prompt; tampered, expired and missing headers do not; the member cannot call a settings method. Edge unit test for header signing.
