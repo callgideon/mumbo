@@ -58,10 +58,10 @@ it('omits the desktop link for a box without a desktop', async () => {
 })
 
 it('keeps localized accessible names on the icon-only rail links', async () => {
-  const { runtime } = await bench({ home: HOME, desktop: DESKTOP }, 'zh')
+  const { runtime } = await bench({ home: HOME, desktop: DESKTOP }, 'en')
   const { view } = runtime.renderSlot('sidebar.footer.action', { wide: false })
   const links = view.getAllByRole('link')
-  expect(links.map(link => link.getAttribute('aria-label'))).toEqual(['主页', '桌面'])
+  expect(links.map(link => link.getAttribute('aria-label'))).toEqual(['Home', 'Desktop'])
   expect(links.map(link => link.textContent)).toEqual(['', ''])
 })
 

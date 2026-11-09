@@ -13,7 +13,7 @@ import { PluginInventorySettingsTab } from '../src/client/PluginInventorySetting
 import type { PluginInventorySettingsTabInjected } from '../src/client/PluginInventorySettingsTab.tsx'
 import { apply as hostApply } from '../src/index.ts'
 
-usePinnedBrowserLanguages('zh-CN')
+usePinnedBrowserLanguages('en-US')
 afterEach(cleanup)
 
 const EMPTY = { entries: [] }
@@ -66,15 +66,15 @@ describe('ui-settings-plugin-inventory browser plugin', () => {
     expect(entry.component).toBe(PluginInventorySettingsTab)
     expect(entry.options).toMatchObject({ id: 'all', order: 10 })
     expect(entry.locale).toBe(NS)
-    expect(resolveSlotLabel(entry.options.label)).toBe('插件列表')
+    expect(resolveSlotLabel(entry.options.label)).toBe('Plugin list')
     expect(b.list).not.toHaveBeenCalled()
 
     const injected = (entry.inject as unknown as () => PluginInventorySettingsTabInjected)()
-    const text = { en: 'Local tools', zh: '本地工具' }
-    expect(injected.resolveText(text)).toBe('本地工具')
+    const text = { en: 'Local tools' }
+    expect(injected.resolveText(text)).toBe('Local tools')
     b.locale.setLocale('en')
     expect(injected.resolveText(text)).toBe('Local tools')
-    b.locale.setLocale('zh')
+    b.locale.setLocale('en')
     injected.retryClient()
     const retryError = vi.spyOn(b.ctx.logger, 'error').mockImplementation(() => {})
     b.retryClient.mockRejectedValueOnce(new Error('retry unavailable'))
@@ -88,8 +88,8 @@ describe('ui-settings-plugin-inventory browser plugin', () => {
 
     // Shipped preset names resolve over the agent-preset dictionaries the
     // real plugin registers; user-authored metadata stays untranslated.
-    b.locale.register('settings.agentPreset', 'zh', { presetStandardName: '标准模式' } as never)
-    expect(injected.presetName({ id: 'standard', isDefault: true, rows: [] })).toBe('标准模式')
+    b.locale.register('settings.agentPreset', 'en', { presetStandardName: 'Standard mode' } as never)
+    expect(injected.presetName({ id: 'standard', isDefault: true, rows: [] })).toBe('Standard mode')
     expect(injected.presetName({ id: 'mine', name: '我自己的', isDefault: false, rows: [] })).toBe('我自己的')
     await b.ctx.fiber.dispose()
   })

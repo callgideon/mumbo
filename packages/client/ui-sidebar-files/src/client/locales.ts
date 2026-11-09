@@ -18,35 +18,10 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
-/** Simplified Chinese dictionary and key-set source of truth. */
-export const zh = {
-  'shortcut.noSession': '请先选择会话',
-  'type.label': '文件',
-  'guide.title': '工作区文件',
-  'guide.description': '浏览会话工作区的文件',
-  loading: '正在读取…',
-  empty: '空目录',
-  truncated: '条目太多，只显示了一部分。',
-  noWorkspace: '这个会话没有工作区目录。',
-  reload: '重新读取',
-  autoRefresh: '自动刷新',
-  'autoRefresh.enable': '开启自动刷新',
-  'autoRefresh.disable': '关闭自动刷新',
-  'entry.other': '这不是文件或目录，没法打开。',
-  'entry.noViewer': '没有可以打开此文件的查看器。',
-  'navigator.show': '显示文件树',
-  'navigator.hide': '隐藏文件树',
-  'navigator.resize': '调整文件树宽度',
-  'error.notFound': '这个目录不在了。可能已被移动或删除。',
-  'error.outsideWorkspace': '这个目录在工作区之外，侧栏不会读取它。',
-  'error.notDirectory': '这不是一个目录。',
-  'error.unavailable': '读取失败：{message}',
-} satisfies Record<string, string>
-
 /** Files dictionary key union. */
-export type SidebarFilesKey = keyof typeof zh
+export type SidebarFilesKey = keyof typeof en
 
-/** English dictionary, checked against the Chinese key set. */
+/** English dictionary (the key-set source of truth). */
 export const en = {
   'shortcut.noSession': 'Select a session first',
   'type.label': 'Files',
@@ -69,7 +44,7 @@ export const en = {
   'error.outsideWorkspace': 'That directory is outside the workspace, so the sidebar will not read it.',
   'error.notDirectory': 'That is not a directory.',
   'error.unavailable': 'Read failed: {message}',
-} satisfies Record<SidebarFilesKey, string>
+} satisfies Record<string, string>
 
 /** Japanese copy, checked against the English keys. */
 export const ja = {

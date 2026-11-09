@@ -97,12 +97,10 @@ it.each([
     intent: { kind: 'approval', approve: 'Allow for this session', reject: 'Deny',
       subject: { name: 'Test application' }, display: {
         question: { en: 'Allow agent to control this application via computer use?',
-          zh: '允许智能体通过 Computer Use 控制此应用吗？',
           ja: 'エージェントが Computer Use でこのアプリを操作することを許可しますか？' },
         detail: { en: 'Manage app permissions for all sessions on the plugin page.',
-          zh: '在插件页面管理所有会话的应用权限。',
           ja: 'プラグインページで、すべてのセッションのアプリ権限を管理できます。' },
-        approve: { en: 'Allow for this session', zh: '本会话允许', ja: 'このセッションで許可',
+        approve: { en: 'Allow for this session', ja: 'このセッションで許可',
           es: 'Permitir durante esta sesión', fr: 'Autoriser pour cette session', de: 'Für diese Sitzung zulassen',
           ru: 'Разрешить для этого сеанса', pt: 'Permitir nesta sessão' },
       },

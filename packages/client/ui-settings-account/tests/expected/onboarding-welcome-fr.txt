@@ -1,0 +1,1 @@
+Bienvenue à DeepSeek HarnessDeepSeek Harness fonctionne dans un dossier local et utilise des outils pour lire et écrire des fichiers sur votre ordinateur. Il peut vous aider à rechercher et à organiser des informations, à créer des documents et des feuilles de calcul, à écrire du code, à résoudre des problèmes, etc.Commencez

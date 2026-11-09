@@ -7,14 +7,15 @@ import { SessionId } from '@deepseek-ai/dsh-session/types'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { OpenInAppController } from '../src/client/controller.ts'
 import { registerSessionOpenWith } from '../src/client/session-open-with.ts'
-import { en, zh, NS } from '../src/client/locales.ts'
+import { en, fr, NS } from '../src/client/locales.ts'
 
 function bench(apps: readonly string[] | null = ['finder', 'cursor'], cwd: string | undefined = '/captured') {
   const ctx = new Context()
   onTestFinished(() => ctx.fiber.dispose())
   const locale = new LocaleRuntime(ctx)
+  locale.addLanguage({ id: 'fr', label: 'Français', fallback: 'en' })
   ctx.provide('locale', locale)
-  locale.register(NS, { en, zh }); locale.setLocale('en')
+  locale.register(NS, { en, fr }); locale.setLocale('en')
   const failed = vi.fn(), report = vi.fn()
   const registry = new MenuRegistry(failed)
   onTestFinished(() => { registry.dispose() })
@@ -56,15 +57,15 @@ it('omits unknown directories and follows metadata, locale and applications with
   expect(menu.source.getSnapshot()[0]?.children?.map(row => row.label)).toEqual(['Finder', 'Cursor'])
   b.controller.choose('cursor')
   expect(menu.source.getSnapshot()[0]?.children?.map(row => row.label)).toEqual(['Finder', 'Cursor'])
-  b.locale.setLocale('zh')
-  expect(menu.source.getSnapshot()[0]?.label).toBe('在应用中打开')
+  b.locale.setLocale('fr')
+  expect(menu.source.getSnapshot()[0]?.label).toBe('Ouvrir avec')
   expect(header.source.getSnapshot()[0]?.children?.[1]?.label).toBe('Cursor')
   b.controller.apps.set(['cursor', 'unknown', 'finder'])
-  expect(menu.source.getSnapshot()[0]?.children?.map(row => row.label)).toEqual(['Cursor', '访达'])
+  expect(menu.source.getSnapshot()[0]?.children?.map(row => row.label)).toEqual(['Cursor', 'Finder'])
   b.controller.apps.set(['finder'])
   expect(menu.source.getSnapshot()[0]?.children).toHaveLength(1)
   expect(menu.source.getSnapshot()[0]?.children?.[0]).toMatchObject({
-    label: '访达', icon: { key: 'open-in-app.application', src: 'open-in-app/icon/finder' },
+    label: 'Finder', icon: { key: 'open-in-app.application', src: 'open-in-app/icon/finder' },
   })
   b.controller.apps.set([])
   expect(menu.source.getSnapshot()).toEqual([])

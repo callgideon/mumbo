@@ -30,7 +30,7 @@ import { OpenPathAction, type OpenPathInjected } from './OpenPathAction.tsx'
 import { FileRouteAction } from './FileRouteAction.tsx'
 import { OpenPathEmptyAction } from './OpenPathEmptyAction.tsx'
 import type { OpenTargetReporter } from './OpenTargetButton.tsx'
-import { en, ja, es, fr, de, ru, pt, NS, zh, type OpenInAppKey } from './locales.ts'
+import { en, ja, es, fr, de, ru, pt, NS, type OpenInAppKey } from './locales.ts'
 import { createOpenInAppToastSource, OpenInAppToast } from './open-toast.tsx'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -68,7 +68,7 @@ export function apply(ctx: ClientContext): void {
     paths.resume()
     return () => { launchable = false }
   })
-  ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }), 'open-in-app: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { en, ja, es, fr, de, ru, pt }), 'open-in-app: dictionaries')
   const t = ctx.locale.bind(NS)
   // Keep operation feedback visible after its initiating panel closes.
   const announcement = createOpenInAppToastSource()

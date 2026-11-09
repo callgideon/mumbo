@@ -21,7 +21,7 @@ import { apply as applyMenus, inject as injectMenus } from '@deepseek-ai/dsh-cli
 import { apply, inject } from '@deepseek-ai/dsh-client-ui-workspace/client'
 import { SECTION_HOOK_CONTEXT, SECTION_INJECT } from './section-scroller.client.ts'
 
-usePinnedBrowserLanguages('zh-CN')
+usePinnedBrowserLanguages('en-US')
 
 afterEach(cleanup)
 beforeEach(() => { localStorage.clear() })
@@ -92,8 +92,8 @@ describe('Workspace header actions under the page access snapshot', () => {
     try {
       runtime.renderRoot()
       const header = await screen.findByRole('treeitem')
-      expect(screen.queryByRole('button', { name: '在“Project”中新建会话' })).toBeNull()
-      expect(screen.getByRole('button', { name: '工作区“Project”的操作' })).toBeTruthy()
+      expect(screen.queryByRole('button', { name: 'New session in Project' })).toBeNull()
+      expect(screen.getByRole('button', { name: 'Workspace actions for Project' })).toBeTruthy()
       const target = { kind: 'workspace' as const, value: { workspaceId: WORKSPACE, path: '/projects/project', displayTitle: 'Project' } }
       const deniedMenu = runtime.ctx.contextMenus.resolve(target)
       await deniedMenu.ready
@@ -111,8 +111,8 @@ describe('Workspace header actions under the page access snapshot', () => {
           },
         })
       })
-      expect(screen.getByRole('button', { name: '在“Project”中新建会话' })).toBeTruthy()
-      expect(screen.getByRole('button', { name: '工作区“Project”的操作' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'New session in Project' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Workspace actions for Project' })).toBeTruthy()
       expect(screen.getByRole('treeitem').getAttribute('draggable')).toBe('true')
 
       const grantedMenu = runtime.ctx.contextMenus.resolve(target)
@@ -125,7 +125,7 @@ describe('Workspace header actions under the page access snapshot', () => {
 
       // The owner's snapshot answers every action.
       act(() => { access.replace({ type: 'baseline', owner: true }) })
-      expect(screen.getByRole('button', { name: '在“Project”中新建会话' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'New session in Project' })).toBeTruthy()
     } finally {
       await runtime.dispose()
     }
@@ -136,12 +136,12 @@ describe('Workspace header actions under the page access snapshot', () => {
     const runtime = await bench(access, { ungroupedSession: 'loose' as SessionId })
     try {
       runtime.renderRoot()
-      await screen.findByText('未分组')
-      expect(screen.queryByRole('button', { name: '在“未分组”中新建会话' })).toBeNull()
+      await screen.findByText('Ungrouped')
+      expect(screen.queryByRole('button', { name: 'New session in Ungrouped' })).toBeNull()
       act(() => {
         access.update({ type: 'upsert', grant: { resource: { kind: 'global' }, actions: ['session/create'] } })
       })
-      expect(screen.getByRole('button', { name: '在“未分组”中新建会话' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'New session in Ungrouped' })).toBeTruthy()
     } finally {
       await runtime.dispose()
     }

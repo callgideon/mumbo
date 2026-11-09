@@ -6,7 +6,7 @@ import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { SurfaceSnapshot } from '@deepseek-ai/dsh-experimental-claude-code-mods/types'
 import { afterEach, expect, it, vi } from 'vitest'
 import { Band, type BandProps } from '../src/client/Band.tsx'
-import { zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 
 afterEach(cleanup)
 
@@ -49,7 +49,7 @@ const HOLD: SurfaceSnapshot = {
 function fixture(initial: SurfaceSnapshot | undefined) {
   const state = createSnapshotStore<SurfaceSnapshot | undefined>(initial)
   const press = vi.fn<(generation: number, actionId: string) => Promise<void>>(() => Promise.resolve())
-  const props = { t: makeTranslate(zh), press, useBand: bindSnapshotSelector(state) } as BandProps
+  const props = { t: makeTranslate(en), press, useBand: bindSnapshotSelector(state) } as BandProps
   render(<Band {...props} />)
   return { press, publish(next: SurfaceSnapshot | undefined) { act(() => { state.set(next) }) } }
 }
@@ -60,7 +60,7 @@ it('draws nothing without a tree, then the tree as the Host serialized it', () =
   b.publish({ generation: 1, tree: null })
   expect(screen.queryByRole('group')).toBeNull()
   b.publish(WEATHER)
-  const band = screen.getByRole('group', { name: zh.band })
+  const band = screen.getByRole('group', { name: en.band })
   expect(band.getAttribute('data-generation')).toBe('3')
   expect(band.textContent).toBe('☀  Clear  18% of context  36k / 200kplain tail')
   expect(screen.getByText(/Clear/).getAttribute('data-color')).toBe('yellow')
@@ -95,13 +95,13 @@ it('presses a button with the generation it was drawn in and shows the failure o
   b.press.mockImplementationOnce(() => Promise.reject(new Error('gone')))
   fireEvent.click(screen.getByRole('button', { name: /Cancel/ }))
   await act(async () => { await Promise.resolve() })
-  expect(screen.getByRole('status').textContent).toBe('按钮操作失败：gone')
+  expect(screen.getByRole('status').textContent).toBe('The button failed: gone')
 
   // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- a press rejected with a bare value is the scenario.
   b.press.mockImplementationOnce(() => Promise.reject('text failure'))
   fireEvent.click(screen.getByRole('button', { name: /Cancel/ }))
   await act(async () => { await Promise.resolve() })
-  expect(screen.getByRole('status').textContent).toBe('按钮操作失败：text failure')
+  expect(screen.getByRole('status').textContent).toBe('The button failed: text failure')
 })
 
 it('disables every button while a press is in flight', async () => {

@@ -3,7 +3,7 @@ import type { MarketListingEntry, MarketListingVersion } from '@deepseek-ai/dsh-
 import type { LocalizedText } from '@deepseek-ai/dsh-package-manifest'
 import { declaredQuery, displayDeclarations, indexLabel, INITIAL_QUERY, presentedVersion, sourceFacts, withText } from '../src/client/presentation.ts'
 
-const resolveText = (text: LocalizedText): string => typeof text === 'string' ? text : text.zh ?? text.en
+const resolveText = (text: LocalizedText): string => typeof text === 'string' ? text : text.fr ?? text.en
 
 function release(version: string, fields: Partial<MarketListingVersion> = {}): MarketListingVersion {
   return { version, publishTimestamp: 0, source: { type: 'npm' }, engines: {}, install: { spec: `x@${version}` }, compatibility: { compatible: true }, ...fields }
@@ -19,7 +19,7 @@ function entry(name: string, fields: Partial<MarketListingEntry> = {}, metadata:
 describe('displayDeclarations', () => {
   it('orders by localized title, then by id', () => {
     expect(displayDeclarations({
-      b: { title: 'Beta' }, a: { title: { en: 'Alpha', zh: 'Beta' } }, c: { title: 'Alpha' },
+      b: { title: 'Beta' }, a: { title: { en: 'Alpha', fr: 'Beta' } }, c: { title: 'Alpha' },
     }, resolveText, 'en').map(({ id, title }) => ({ id, title }))).toEqual([{ id: 'c', title: 'Alpha' }, { id: 'a', title: 'Beta' }, { id: 'b', title: 'Beta' }])
     expect(displayDeclarations({ z: { title: 'X' }, x: { title: 'X' }, y: { title: 'X' } }, resolveText, 'en').map(item => item.id)).toEqual(['x', 'y', 'z'])
   })
@@ -75,7 +75,7 @@ describe('sourceFacts', () => {
 
 describe('indexLabel', () => {
   it('uses the market title, else the host, else the URL as written', () => {
-    expect(indexLabel({ url: 'https://a.example/i.json', title: { en: 'A', zh: '甲' } }, resolveText)).toBe('甲')
+    expect(indexLabel({ url: 'https://a.example/i.json', title: { en: 'A' } }, resolveText)).toBe('A')
     expect(indexLabel({ url: 'https://a.example/i.json' }, resolveText)).toBe('a.example')
     expect(indexLabel({ url: 'https://[' }, resolveText)).toBe('https://[')
   })

@@ -3,9 +3,8 @@
 import { describe, expect, it } from 'vitest'
 import type { ToolResultNode } from '@deepseek-ai/dsh-client-ui-chat/client'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
-import { en, zh } from '@deepseek-ai/dsh-client-ui-conversation/src/client/locales.ts'
+import { en } from '@deepseek-ai/dsh-client-ui-conversation/src/client/locales.ts'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
-import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import { statusLine } from '@deepseek-ai/dsh-tool-jobs/src/render.ts'
 import { presentation } from '@deepseek-ai/dsh-tool-session-query/src/presentation.ts'
 import { renderList, renderRead, renderSpawn } from '@deepseek-ai/dsh-tool-terminal/src/render.ts'
@@ -58,7 +57,7 @@ describe('control detail adapters', () => {
     const states = ['corrupt', 'unsupported', 'unavailable']
     for (const [dictionary, common, locale, labels] of [
       [en, commonEn, 'en', ['Corrupt', 'Unsupported', 'Unavailable']],
-      [zh, commonZh, 'zh-CN', ['已损坏', '不支持', '不可用']],
+      [en, commonEn, 'zh-CN', ['Corrupt', 'Unsupported', 'Unavailable']],
     ] as const) {
       const translate = makeTranslate(dictionary, common)
       const result = states.map(status => ({ name: status, status }))
@@ -68,24 +67,24 @@ describe('control detail adapters', () => {
   })
 
   it('localizes Team owners while preserving inspection owner fields', () => {
-    const translate = makeTranslate(zh, commonZh)
+    const translate = makeTranslate(en, commonEn)
     for (const tool of ['team_task_get', 'team_task_create', 'team_task_update', 'team_task_list']) {
       const task = { subject: 'Review', owner: 'reviewer/checker' }
       const value = tool === 'team_task_list' ? { tasks: [task] } : task
       expect(detailsCardModel(output(tool, JSON.stringify(value)), translate, 'zh-CN')?.items[0]?.fields)
-        .toContainEqual({ label: '负责人', value: 'reviewer/checker' })
+        .toContainEqual({ label: 'Owner', value: 'reviewer/checker' })
     }
     expect(inspectionItems({ owner: 'client-ui-tool' }, translate)[0]?.fields)
       .toEqual([{ label: 'owner', value: 'client-ui-tool' }])
   })
 
   it.each([
-    [{ timedOut: false }, '等待已结束'],
-    [{ timedOut: true }, '等待已超时'],
-    [{ timedOut: false, noProgress: { message: 'No pending work' } }, '没有正在运行的子智能体'],
+    [{ timedOut: false }, 'Wait ended'],
+    [{ timedOut: true }, 'Wait timed out'],
+    [{ timedOut: false, noProgress: { message: 'No pending work' } }, 'No active subagents'],
   ] as const)('renders inbox wait results and historical activity diagnostics (%j)', (value, summary) => {
-    const translate = makeTranslate(zh, commonZh)
-    expect(translate('tool.title.waitAgent')).toBe('等待消息…')
+    const translate = makeTranslate(en, commonEn)
+    expect(translate('tool.title.waitAgent')).toBe('Waiting for messages…')
     expect(detailsCardModel(output('wait_agent', JSON.stringify(value)), translate, 'zh-CN')?.summary).toBe(summary)
   })
 
@@ -154,9 +153,9 @@ describe('control detail adapters', () => {
     })
     expect(detailsCardModel({ ...block, content: [] }, t, 'en')).toEqual(model)
     expect(detailsCardModel({ ...block, isError: true }, t, 'en')).toBeNull()
-    expect(detailsCardModel(block, makeTranslate(zh, commonZh), 'zh-CN')?.items[0]?.fields).toEqual([
-      { label: '智能体任务描述', value: args.description },
-      { label: '智能体名称', value: 'reviewer' },
+    expect(detailsCardModel(block, makeTranslate(en, commonEn), 'zh-CN')?.items[0]?.fields).toEqual([
+      { label: 'Agent task description', value: args.description },
+      { label: 'Agent name', value: 'reviewer' },
     ])
   })
 

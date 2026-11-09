@@ -9,12 +9,12 @@ import type { StartedToolCall, ToolResultNode } from '@deepseek-ai/dsh-client-ui
 import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
-import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
+import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
 import { toolRowModel } from '../src/client/tool/models/tool-call-model.ts'
 import { CHAT_DIFF_MAX_LINES, diffCardModel } from '../src/client/tool/models/diff-card-model.ts'
 import { GenericToolCard, type GenericToolCardProps } from '../src/client/tool/toolviews/GenericToolCard.tsx'
 import { FileMutationRow, fileMutationToolview } from '../src/client/tool/toolviews/file-mutation-row.tsx'
-import { zh } from '@deepseek-ai/dsh-client-ui-conversation/src/client/locales.ts'
+import { en } from '@deepseek-ai/dsh-client-ui-conversation/src/client/locales.ts'
 import { PartialArguments } from '@deepseek-ai/dsh-util-values'
 
 afterEach(cleanup)
@@ -23,7 +23,7 @@ type FileMutationRowProps = Parameters<typeof FileMutationRow>[0]
 
 const SID = 's1' as SessionId
 
-const t = makeTranslate(zh, commonZh)
+const t = makeTranslate(en, commonEn)
 
 const ARGS = '{"file_path":"notes/demo.txt","old_string":"hello","new_string":"hello fixture"}'
 
@@ -257,7 +257,7 @@ describe('FileMutationRow diff card', () => {
     expect(model.state).toBe('error')
     expect(model.errorSummary).toBe('Patch stopped after 1 of 3 operations.')
     const view = render(<FileMutationRow {...rowProps(block, 'apply_patch')} />)
-    expect(view.getByText('编辑')).toBeTruthy()
+    expect(view.getByText('Edit')).toBeTruthy()
     toggleRow(view)
     expect(view.container.querySelectorAll('[data-diff]').length).toBeGreaterThan(0)
     expect(view.getByText('created')).toBeTruthy()
@@ -337,7 +337,7 @@ describe('FileMutationRow diff card', () => {
     toggleRow(view)
     expect(view.container.querySelector('[data-diff]')).not.toBeNull()
     expect(view.getByText('hello fixture')).toBeTruthy()
-    expect(view.getByRole('button', { name: '复制' })).toBeTruthy()
+    expect(view.getByRole('button', { name: 'Copy' })).toBeTruthy()
   })
 
   it('the summary is a path link that opens the tool path through the host', () => {
@@ -415,7 +415,7 @@ describe('FileMutationRow diff card', () => {
     }))} />)
     expect(view.container.querySelector('[data-state="stopped"]')).not.toBeNull()
     expect(view.container.querySelector('[data-state="stopped"] svg')).not.toBeNull()
-    expect(view.getByText('已停止').className).toContain('visuallyHidden')
+    expect(view.getByText('Stopped').className).toContain('visuallyHidden')
     expect(view.container.querySelector('[class*="_stoppedSummary_"]')?.textContent).toBe('notes/demo.txt')
   })
 

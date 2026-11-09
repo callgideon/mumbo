@@ -17,13 +17,13 @@ import { cleanup, fireEvent, render } from '@testing-library/react'
 import { Context } from '@deepseek-ai/cordis'
 import { contextMenuHook, bindSnapshotSelector, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
-import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
+import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
 import type { StartedToolCall, ToolResultNode } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { MessageImageLoader } from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { zh } from '@deepseek-ai/dsh-client-ui-conversation/src/client/locales.ts'
+import { en } from '@deepseek-ai/dsh-client-ui-conversation/src/client/locales.ts'
 import { PartialArguments } from '@deepseek-ai/dsh-util-values'
 import { AttachmentId, type ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { ToolImagesOwnerProps, ToolTreeProps } from '../src/client/contract/slots.ts'
@@ -33,7 +33,7 @@ import { ReadImageRow, readImageToolview } from '../src/client/tool/toolviews/re
 afterEach(cleanup)
 
 const SID = 's1' as SessionId
-const t: ToolTreeProps['t'] = makeTranslate(zh, commonZh)
+const t: ToolTreeProps['t'] = makeTranslate(en, commonEn)
 const ARGS = '{"file_path":"shots/card.png"}'
 
 /** The envelope read_image writes beside its image block. */
@@ -332,14 +332,14 @@ describe('ReadImageRow keyed toolview', () => {
     const view = render(<ReadImageRow {...rowProps(settled({ meta: imageMeta({ path: '/w/app/shots/card.png' }) }), stubRenderSlot())} />)
     toggleRow(view)
     const lines = [...view.container.querySelectorAll('[class*="imageMeta"] > div')].map(line => line.textContent)
-    expect(lines).toEqual(['/w/app/shots/card.png', '1496x260px，24588 字节'])
+    expect(lines).toEqual(['/w/app/shots/card.png', '1496x260px, 24588 bytes'])
   })
 
   it('names the original size of a downscaled image', () => {
     const downscaled = { ...sampleImage, originalDimensions: { width: 2992, height: 520 } }
     const view = render(<ReadImageRow {...rowProps(settled({ content: withImage(downscaled) } as never), stubRenderSlot())} />)
     toggleRow(view)
-    expect(view.container.textContent).toContain('1496x260px（由 2992x520px 缩小），24588 字节')
+    expect(view.container.textContent).toContain('1496x260px (downscaled from 2992x520px), 24588 bytes')
   })
 
   it('keeps appended non-envelope text under the picture', () => {
@@ -358,7 +358,7 @@ describe('ReadImageRow keyed toolview', () => {
     toggleRow(view)
     expect(emptySlot).toHaveBeenCalled()
     expect(view.container.querySelector('[data-images]')).toBeNull()
-    expect(view.container.textContent).toContain('1496x260px，24588 字节')
+    expect(view.container.textContent).toContain('1496x260px, 24588 bytes')
   })
 
   it('degrades to the text body when neither the slot nor the loader is supplied', () => {

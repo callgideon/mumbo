@@ -14,7 +14,7 @@ function strings(value: unknown, key = ''): Record<string, string> {
 }
 
 /**
- * Compare shipped-language metadata with every field supplied by English or Chinese.
+ * Compare shipped-language metadata with every field supplied by English.
  * @param root - repository or fixture root.
  * @returns actionable missing-file, field, placeholder and resource diagnostics.
  */
@@ -47,22 +47,23 @@ export function localeMetadataProblems(root: string): string[] {
         return dictionary
       }
       const en = read('en')
-      const zh = existsSync(join(root, directory, 'zh.json')) ? read('zh') : {}
       const description = en['meta.description']
       if (description !== undefined && !/[.!?]$/u.test(description)) problems.push(`${directory}/en.json: meta.description must end with sentence punctuation`)
-      const expected = { ...zh, ...en }
-      for (const language of SHIPPED_LOCALE_IDS.filter(id => id !== 'en' && id !== 'zh')) {
-        const translated = read(language)
-        for (const key of new Set([...Object.keys(expected), ...Object.keys(translated)])) {
+      const translations = SHIPPED_LOCALE_IDS.filter(id => id !== 'en').map(language => [language, read(language)] as const)
+      // An English description may come from package.json instead of en.json;
+      // translated descriptions then stay consistent across languages.
+      const expected = new Set(Object.keys(en))
+      if (translations.some(([, translated]) => translated['meta.description'] !== undefined)) expected.add('meta.description')
+      for (const [language, translated] of translations) {
+        for (const key of new Set([...expected, ...Object.keys(translated)])) {
           if (translated[key] === undefined) problems.push(`${directory}/${language}.json: missing ${key}`)
-          else if (expected[key] === undefined) problems.push(`${directory}/${language}.json: unexpected ${key}`)
-          else {
-            if (language !== 'ja' && key === 'meta.description' && ((zh[key] !== undefined && /\p{Script=Han}/u.test(zh[key]) && translated[key] === zh[key])
-              || (en[key] !== undefined && translated[key] === en[key]))) {
+          else if (!expected.has(key)) problems.push(`${directory}/${language}.json: unexpected ${key}`)
+          else if (en[key] !== undefined) {
+            if (language !== 'ja' && key === 'meta.description' && translated[key] === en[key]) {
               problems.push(`${directory}/${language}.json: ${key} contains untranslated source text`)
             }
             const placeholders = (text: string): string => localeTokens(text).join(',')
-            if (placeholders(translated[key]) !== placeholders(expected[key])) problems.push(`${directory}/${language}.json: ${key} changes placeholders or literal tokens`)
+            if (placeholders(translated[key]) !== placeholders(en[key])) problems.push(`${directory}/${language}.json: ${key} changes placeholders or literal tokens`)
           }
         }
       }

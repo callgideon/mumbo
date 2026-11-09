@@ -3,59 +3,8 @@
 /** Dictionary namespace owned by this plugin. */
 export const NS = 'subagent'
 
-/** Simplified Chinese dictionary (the key-set source of truth). */
-export const zh = {
-  'section.title': '子智能体',
-  'section.empty': '暂无子智能体',
-  'progress.completed': '{count} 已完成',
-  'progress.active': '{count} 进行中',
-  'progress.inactive': '{count} 未运行',
-  'progress.external': '{count} 外部任务',
-  'duration.seconds': '{seconds}秒',
-  'duration.minutes': '{minutes}分{seconds}秒',
-  'duration.hours': '{hours}小时{minutes}分{seconds}秒',
-  'duration.days': '{days}天',
-  'duration.daysHours': '{days}天{hours}小时',
-  'duration.months': '约{months}个月',
-  'duration.monthsDays': '约{months}个月{days}天',
-  'duration.years': '约{years}年',
-  'duration.yearsMonths': '约{years}年{months}个月',
-  'duration.exactDays': '{days}天{hours}小时{minutes}分{seconds}秒',
-  'duration.exactTitle': '总活跃耗时：{duration}',
-  'tokens.thousand': '{value}K',
-  'tokens.million': '{value}M',
-  'tokens.total': '{value} tok',
-  'loading.label': '正在加载子智能体…',
-  'load.error': '无法加载子智能体',
-  'catalog.migrationRequired': '需要迁移',
-  'retry': '重试',
-  'mode.external': '外部任务',
-  'mode.oneShot': '一次性',
-  'mode.continuable': '可继续',
-  'mode.unknown': '模式未知',
-  'readonly.unknown.body': '读取子会话后才能确定是否可继续。',
-  'activity.running': '正在运行',
-  'activity.completed': '已完成',
-  'activity.inactive': '当前未运行',
-  'branch.collapse': '收起 {label} 的下级子智能体',
-  'branch.expand': '展开 {label} 的下级子智能体',
-  'count.total.one': '{count} 个子智能体',
-  'count.total.other': '{count} 个子智能体',
-  'count.running.one': '{count} 个子智能体，正在运行',
-  'count.running.other': '{count} 个子智能体，正在运行',
-  'switcher.aria': '切换子智能体：{title}',
-  'tree.aria': '子智能体会话',
-  'open.sidebar': '在侧边栏打开',
-  'open.floatWindow': '在浮窗中打开',
-  'open.sidebar.aria': '在侧边栏打开 {label}',
-  'sidebar.chat': '聊天',
-  'readonly.oneShot.title': '一次性子智能体记录',
-  'readonly.title': '此子智能体暂时只读',
-  'readonly.oneShot.body': '一次性任务不支持后续消息，可在这里查看完整执行记录。',
-} as const
-
-/** English dictionary, key-identical to the Chinese source of truth. */
-export const en: Record<SubagentKey, string> = {
+/** English dictionary (the key-set source of truth). */
+export const en = {
   'section.title': 'Subagents',
   'section.empty': 'No subagents',
   'progress.completed': '{count} completed',
@@ -103,10 +52,10 @@ export const en: Record<SubagentKey, string> = {
   'readonly.oneShot.title': 'One-shot subagent record',
   'readonly.title': 'This subagent is read-only for now',
   'readonly.oneShot.body': 'One-shot tasks do not accept follow-ups; review the full execution record here.',
-}
+} satisfies Record<string, string>
 
-/** Key domain of the `subagent` namespace (zh is the source of truth). */
-export type SubagentKey = keyof typeof zh
+/** Key domain of the `subagent` namespace (English is the source of truth). */
+export type SubagentKey = keyof typeof en
 
 /** Japanese copy, checked against the English keys. */
 export const ja = {

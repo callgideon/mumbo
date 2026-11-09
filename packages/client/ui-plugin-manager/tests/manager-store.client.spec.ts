@@ -204,8 +204,8 @@ describe('PluginManagerController', () => {
   })
 
   it('keeps local package and row metadata in the loaded view without changing technical identities', async () => {
-    const meta = { title: { en: 'Sidebar', zh: '侧栏' }, description: 'Local package', error: 'locale/zh.json: invalid title' }
-    const rowMeta = { title: { en: 'Theme', zh: '主题' }, description: { en: 'Display options', zh: '显示选项' } }
+    const meta = { title: { en: 'Sidebar' }, description: 'Local package', error: 'locale/zh.json: invalid title' }
+    const rowMeta = { title: { en: 'Theme' }, description: { en: 'Display options' } }
     const bundle: BundleInfo = {
       ...BUNDLE,
       meta,

@@ -7,42 +7,10 @@
 
 import { builtinCommandTokens } from '@deepseek-ai/dsh-commands/builtin'
 
-/** Simplified Chinese dictionary (the key-set source of truth). */
-export const zh = {
-  'section.add': '添加',
-  'section.commands': '指令',
-  'label.goal': '目标',
-  'label.plan': '计划',
-  'label.feedback': '反馈',
-  'label.compact': '压缩',
-  'label.permission': '权限',
-  'label.export': '下载日志',
-  'description.goal': '设置或查看长期任务目标',
-  'description.plan': '进入或退出计划模式',
-  'description.feedback': '发送关于当前会话的反馈',
-  'description.compact': '压缩以上对话内容',
-  'description.permission': '切换权限预设（沙箱模式与审批策略）',
-  'description.export': '将当前会话内容导出为 ZIP',
-  'token.goal': builtinCommandTokens.zh.goal,
-  'token.plan': builtinCommandTokens.zh.plan,
-  'token.feedback': builtinCommandTokens.zh.feedback,
-  'token.compact': builtinCommandTokens.zh.compact,
-  'token.permission': builtinCommandTokens.zh.permission,
-  'token.export': builtinCommandTokens.zh.export,
-  'search.placeholder': '搜索…',
-  'search.aria': '筛选选项',
-  'status.loading': '正在加载选项…',
-  'status.applying': '正在应用…',
-  'status.empty': '无选项',
-  'overlay.aria': '/{command} 选项',
-  'listbox.aria': '/{command} 匹配项',
-  'notice.attachmentsUnsupported': '/{command} 不接受附件，请先移除附件',
-} satisfies Record<string, string>
-
 /** The command namespace key union. */
-export type CommandKey = keyof typeof zh
+export type CommandKey = keyof typeof en
 
-/** English dictionary, checked complete against the zh key set. */
+/** English dictionary (the key-set source of truth). */
 export const en = {
   'section.add': 'Add',
   'section.commands': 'Commands',
@@ -72,7 +40,7 @@ export const en = {
   'overlay.aria': '/{command} options',
   'listbox.aria': '/{command} matches',
   'notice.attachmentsUnsupported': '/{command} does not accept attachments; remove them first',
-} satisfies Record<CommandKey, string>
+} satisfies Record<string, string>
 
 /** Japanese copy, checked against the English keys. */
 export const ja = {

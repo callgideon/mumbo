@@ -9,7 +9,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-action-cards/client'
 import type {} from '@deepseek-ai/dsh-plugin-recommendations/remote'
 import type { TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
 import { PluginCardBody, type CatalogDetails, type PluginCardServices } from './Card.tsx'
-import { de, en, es, fr, ja, pt, ru, zh, type RecommendationKey } from './locales.ts'
+import { de, en, es, fr, ja, pt, ru, type RecommendationKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap { pluginRecommendations: RecommendationKey }
@@ -41,7 +41,7 @@ function registerBody(ctx: Context): void {
     openDetails: (packageName) => { ctx.pluginNavigation.openBundle(packageName) },
     resolveText: text => ctx.locale.resolveText(text),
   }
-  ctx.effect(() => ctx.locale.register('pluginRecommendations', { en, zh, ja, es, fr, de, ru, pt }), 'plugin-recommendations: locale')
+  ctx.effect(() => ctx.locale.register('pluginRecommendations', { en, ja, es, fr, de, ru, pt }), 'plugin-recommendations: locale')
   ctx.effect(() => ctx.actionCards.register({
     action: 'enable_official_plugin', locale: 'pluginRecommendations',
     Body: props => createElement(PluginCardBody, { ...props, ...services }),

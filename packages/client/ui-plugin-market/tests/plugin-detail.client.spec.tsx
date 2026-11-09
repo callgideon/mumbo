@@ -8,7 +8,7 @@ import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { LocaleSnapshot } from '@deepseek-ai/dsh-client-locale/client'
 import { PluginDetailSection, type PluginDetailSectionProps } from '../src/client/PluginDetailSection.tsx'
 import { detailKey, type DetailRequest, type DetailsState } from '../src/client/market-store.ts'
-import { en, zh, type PluginMarketLocaleKey } from '../src/client/locales.ts'
+import { en, fr, type PluginMarketLocaleKey } from '../src/client/locales.ts'
 
 afterEach(cleanup)
 
@@ -47,12 +47,12 @@ it('reads the document of the request in the active language and renders its Mar
   // Relative links stay text.
   expect(screen.queryByRole('link', { name: 'guide' })).toBeNull()
   expect(screen.getByText('guide')).toBeTruthy()
-  act(() => { locale.set({ active: 'zh', locales: [], revision: 1 }) })
-  expect(face.loadDetail).toHaveBeenLastCalledWith(REQUEST, 'zh')
-  view.rerender(<PluginDetailSection request={REQUEST} t={translator(zh)} {...face} />)
+  act(() => { locale.set({ active: 'fr', locales: [], revision: 1 }) })
+  expect(face.loadDetail).toHaveBeenLastCalledWith(REQUEST, 'fr')
+  view.rerender(<PluginDetailSection request={REQUEST} t={translator(fr)} {...face} />)
   expect(face.loadDetail).toHaveBeenCalledTimes(2)
   // A read the controller forgot starts again; a settled one does not.
-  set(detailKey(REQUEST, 'zh'), { status: 'ready', detail: { status: 'none' } })
+  set(detailKey(REQUEST, 'fr'), { status: 'ready', detail: { status: 'none' } })
   act(() => { forget() })
   expect(face.loadDetail).toHaveBeenCalledTimes(3)
 })

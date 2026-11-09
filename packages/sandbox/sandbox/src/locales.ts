@@ -5,11 +5,6 @@ export const en = {
   escalation: (mode: string, justification: string): string => `Allow this operation with ${mode} permissions: ${justification}`,
 }
 
-/** Chinese escalation messages. */
-export const zh = {
-  escalation: (mode: string, justification: string): string => `允许本次操作使用 ${mode} 权限：${justification}`,
-} satisfies typeof en
-
 /** Japanese escalation messages. */
 export const ja = {
   escalation: (mode: string, justification: string): string => `${mode} 権限でこの操作を許可します：${justification}`,
@@ -46,10 +41,9 @@ export const pt = {
  * @param justification - raw model justification, preserved in every translation.
  * @returns localized approval text.
  */
-export function escalationDisplayReason(mode: string, justification: string): Record<'en' | 'zh' | 'ja' | 'es' | 'fr' | 'de' | 'ru' | 'pt', string> {
+export function escalationDisplayReason(mode: string, justification: string): Record<'en' | 'ja' | 'es' | 'fr' | 'de' | 'ru' | 'pt', string> {
   return {
     en: en.escalation(mode, justification),
-    zh: zh.escalation(mode, justification),
     ja: ja.escalation(mode, justification),
     es: es.escalation(mode, justification),
     fr: fr.escalation(mode, justification),

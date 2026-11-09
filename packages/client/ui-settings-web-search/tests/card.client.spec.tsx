@@ -8,7 +8,7 @@ import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { SettingsFieldState, SettingsFormShell } from '@deepseek-ai/dsh-client-ui-primitives'
 import { WebSearchCard, type WebSearchCardProps } from '../src/client/WebSearchCard.tsx'
 import type { WebProviderOption, WebSearchCardState } from '../src/client/web-search-card-controller.ts'
-import { en, zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 
 afterEach(cleanup)
 
@@ -22,15 +22,15 @@ function field(text: string, rest: Partial<SettingsFieldState> = {}): SettingsFi
 }
 
 /** Each official provider's registered description; the page shows the active language's entry. */
-const DESCRIPTIONS: Record<string, { en: string; zh: string }> = {
+const DESCRIPTIONS: Record<string, { en: string; fr: string }> = {
   'deepseek-search-api': {
     en: 'Search API description. Uses the DeepSeek account of the current conversation, or a DeepSeek API key, and may incur API charges.',
-    zh: 'Search API 说明。使用当前会话的 DeepSeek 账号或 DeepSeek API Key，可能产生计费',
+    fr: 'Description de Search API.',
   },
-  'http': { en: 'Direct fetch description.', zh: '本机获取说明' },
+  'http': { en: 'Direct fetch description.', fr: 'Description de la récupération directe.' },
   'deepseek-fetch-api': {
     en: 'Fetch API description. Uses the DeepSeek account of the current conversation, or a DeepSeek API key, may incur API charges.',
-    zh: 'Fetch API 说明。使用当前会话的 DeepSeek 账号或 DeepSeek API Key，可能产生计费',
+    fr: 'Description de Fetch API.',
   },
 }
 
@@ -43,7 +43,7 @@ const SEARCH_OPTIONS = options('deepseek-search-api', 'deepseek-official')
 const FETCH_OPTIONS = options('http', 'deepseek-fetch-api')
 
 /** The locale service's resolution, with Chinese active. */
-const resolveText = vi.fn((text: string | { en: string; [locale: string]: string }) => typeof text === 'string' ? text : text.zh ?? text.en)
+const resolveText = vi.fn((text: string | { en: string; [locale: string]: string }) => typeof text === 'string' ? text : text.fr ?? text.en)
 
 /** The shipped selection: the DeepSeek Search API with local fetch. */
 function shipped(): WebSearchCardState {
@@ -111,7 +111,6 @@ describe('WebSearchCard', () => {
   it('offers legacy search in both locales and renders its own settings', () => {
     const { actions } = renderPage(legacy())
     expect(searchMenu().textContent).toBe('DeepSeek (legacy)')
-    expect(zh.providerLegacy).toBe('DeepSeek（旧版）')
     expect(screen.queryByLabelText(en.count)).toBeNull()
     fireEvent.change(screen.getByLabelText(en.credential), { target: { value: 'new-key' } })
     fireEvent.change(screen.getByLabelText(en.baseUrl), { target: { value: 'https://messages.test/v1' } })
@@ -138,9 +137,7 @@ describe('WebSearchCard', () => {
   it('titles the page and its two sections by the provider each one picks', () => {
     renderPage()
     expect(en.title).toBe('Web search and fetch')
-    expect(zh.title).toBe('网页搜索与获取')
     expect([en.searchSection, en.fetchSection]).toEqual(['Web search provider', 'Web fetch provider'])
-    expect([zh.searchSection, zh.fetchSection]).toEqual(['网页搜索提供方', '网页获取提供方'])
     expect(screen.getByRole('heading', { name: en.searchSection })).toBeTruthy()
     expect(screen.getByRole('heading', { name: en.fetchSection })).toBeTruthy()
     expect(screen.getByRole('region', { name: en.searchSection })).toBeTruthy()
@@ -160,8 +157,8 @@ describe('WebSearchCard', () => {
     renderPage()
     expect(searchMenu().textContent).toBe(en.providerDeepSeek)
     expect(fetchMenu().textContent).toBe(en.providerLocal)
-    expect(region(en.searchSection).getByText(DESCRIPTIONS['deepseek-search-api']!.zh)).toBeTruthy()
-    expect(region(en.fetchSection).getByText('本机获取说明')).toBeTruthy()
+    expect(region(en.searchSection).getByText(DESCRIPTIONS['deepseek-search-api']!.fr)).toBeTruthy()
+    expect(region(en.fetchSection).getByText('Description de la récupération directe.')).toBeTruthy()
     expect(region(en.searchSection).getByLabelText(en.count)).toHaveProperty('value', '10')
     for (const label of [en.credential, en.baseUrl]) expect(screen.queryByLabelText(label)).toBeNull()
     expect(region(en.fetchSection).queryByRole('textbox')).toBeNull()
@@ -170,7 +167,7 @@ describe('WebSearchCard', () => {
   it('shows the DeepSeek Fetch API description under its provider menu', () => {
     renderPage(apis())
     expect(fetchMenu().textContent).toBe(en.providerDeepSeekFetch)
-    expect(region(en.fetchSection).getByText(DESCRIPTIONS['deepseek-fetch-api']!.zh)).toBeTruthy()
+    expect(region(en.fetchSection).getByText(DESCRIPTIONS['deepseek-fetch-api']!.fr)).toBeTruthy()
     expect(screen.getAllByRole('button').filter(button => button.hasAttribute('aria-expanded')).map(button => button.id))
       .toEqual(['plugin-config-web-search-provider', 'plugin-config-web-fetch-provider'])
     // The Fetch section holds only its title and provider menu block.
@@ -196,7 +193,7 @@ describe('WebSearchCard', () => {
     expect(guide.getAttribute('target')).toBe('_blank')
     expect(guide.getAttribute('rel')).toBe('noopener noreferrer')
     // The description comes first; the guide link is the page's own line after it.
-    expect(paragraphs(en.searchSection).slice(0, 2)).toEqual([DESCRIPTIONS['deepseek-search-api']!.zh, en.searchGuide])
+    expect(paragraphs(en.searchSection).slice(0, 2)).toEqual([DESCRIPTIONS['deepseek-search-api']!.fr, en.searchGuide])
   })
 
   it('shows no settings while neither provider takes them', () => {
@@ -224,7 +221,7 @@ describe('WebSearchCard', () => {
 
   it('shows each selected provider’s registered description as plain text, with no action of its own', () => {
     renderPage()
-    expect(region(en.fetchSection).getByText('本机获取说明').tagName).toBe('P')
+    expect(region(en.fetchSection).getByText('Description de la récupération directe.').tagName).toBe('P')
     expect(region(en.fetchSection).queryAllByRole('button').map(button => button.id)).toEqual(['plugin-config-web-fetch-provider'])
     expect(resolveText).toHaveBeenCalledWith(DESCRIPTIONS.http)
   })
@@ -233,10 +230,10 @@ describe('WebSearchCard', () => {
     const base = plugins()
     renderPage({
       ...base,
-      search: { ...base.search, options: [{ id: 'exa', title: 'Exa', description: { en: 'Exa search.', zh: 'Exa 搜索' }, missing: false }] },
-      fetch: { ...base.fetch, selected: 'jina', kind: 'plugin', options: [{ id: 'jina', description: { en: 'Jina.', zh: '' }, missing: false }] },
+      search: { ...base.search, options: [{ id: 'exa', title: 'Exa', description: { en: 'Exa search.', fr: 'Recherche Exa.' }, missing: false }] },
+      fetch: { ...base.fetch, selected: 'jina', kind: 'plugin', options: [{ id: 'jina', description: { en: 'Jina.', fr: '' }, missing: false }] },
     })
-    expect(paragraphs(en.searchSection)).toEqual(['Exa 搜索', en.pluginProviderHint])
+    expect(paragraphs(en.searchSection)).toEqual(['Recherche Exa.', en.pluginProviderHint])
     // An empty translation shows no paragraph.
     expect(paragraphs(en.fetchSection)).toEqual([en.pluginProviderHint])
   })
@@ -263,7 +260,6 @@ describe('WebSearchCard', () => {
       },
     })
     expect(searchMenu().textContent).toBe('perplexity (not loaded)')
-    expect(zh.providerMissing).toBe('{id}（未加载）')
     expect(fetchMenu().textContent).toBe('jina')
     expect(screen.getAllByText(en.pluginProviderHint)).toHaveLength(1)
     expect(screen.queryByText(en.credential)).toBeNull()
@@ -302,7 +298,6 @@ describe('WebSearchCard', () => {
       expect(region(name).getByRole('status').textContent).toBe(`${en.providersFailed}${en.retry}`)
       fireEvent.click(region(name).getByRole('button', { name: en.retry }))
     }
-    expect(zh.providersFailed).toBe('无法读取提供方列表，此菜单可能不完整')
     expect(actions.retryProviders).toHaveBeenCalledTimes(2)
     expect(searchMenu().textContent).toBe(en.providerDeepSeek)
   })

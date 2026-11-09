@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { TeamModeToggle, type TeamModeToggleProps } from '../src/client/TeamModeToggle.tsx'
-import { de, en, es, fr, ja, pt, ru, zh } from '../src/client/locales.ts'
+import { de, en, es, fr, ja, pt, ru } from '../src/client/locales.ts'
 
 afterEach(() => {
   cleanup()
@@ -21,7 +21,7 @@ function props(enabled: boolean | undefined, selectTeamMode = vi.fn(async () => 
       ? requestedModel === 'loading' ? undefined : { lastUsed: requestedModel ? { provider: 'mock', model: 'mock' } : null, next: { provider: 'mock', model: 'mock' } }
       : enabled === undefined ? undefined : { enabled, tasks: [] },
     locked: false, dismiss: vi.fn(), reportFailure: vi.fn(), selectTeamMode, requestDisableConfirmation: vi.fn(),
-    t: makeTranslate(zh),
+    t: makeTranslate(en),
   } as TeamModeToggleProps
 }
 
@@ -31,7 +31,7 @@ it('renders only available mode and waits for persisted state before displaying 
   const view = render(<TeamModeToggle {...props(undefined, select)} />)
   expect(screen.queryByRole('switch')).toBeNull()
   view.rerender(<TeamModeToggle {...props(false, select)} />)
-  const toggle = screen.getByRole('switch', { name: '启用智能体团队协作' })
+  const toggle = screen.getByRole('switch', { name: 'Enable agent teamwork' })
   fireEvent.click(toggle)
   expect(select).toHaveBeenCalledWith(true)
   expect(toggle.getAttribute('aria-checked')).toBe('false')
@@ -53,7 +53,7 @@ it.each(['returned', 'error', 'string'])('reports rejected mode writes through t
   expect(screen.getByRole('switch').getAttribute('aria-checked')).toBe('false')
 })
 
-it.each(Object.entries({ zh, en, ja, es, fr, de, ru, pt }).flatMap(([locale, dictionary]) =>
+it.each(Object.entries({ en, ja, es, fr, de, ru, pt }).flatMap(([locale, dictionary]) =>
   [false, true].map(locked => ({ locale, dictionary, locked })),
 ))('opens the $locale explanation without changing Team mode (locked: $locked)', ({ dictionary, locked }) => {
   vi.stubGlobal('ResizeObserver', class {

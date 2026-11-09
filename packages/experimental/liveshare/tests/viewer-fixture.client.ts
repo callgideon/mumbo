@@ -929,7 +929,7 @@ function buildAlphaLog(presented = false): SessionEvent[] {
       })
     }
     if (turn % 9 === 4) {
-      push({ type: 'user/message', surfaceOp: 'append', data: userMessage(text(`[fixture] 上下文注入（turn ${turn}）`), { kind: 'plugin:fixture' }) })
+      push({ type: 'user/message', surfaceOp: 'append', data: userMessage(text(`[fixture] Context injection（turn ${turn}）`), { kind: 'plugin:fixture' }) })
     }
     push({ type: 'step/start', data: { turn, step: 0 } })
     const withTool = turn % 5 === 2
@@ -1168,7 +1168,7 @@ function buildAlphaLog(presented = false): SessionEvent[] {
       data: {
         turn: 71,
         callId: brandString<ToolCallId>('fx-present-71'),
-        files: [{ path: 'notes/demo.txt', description: 'fixture 交付文件' }],
+        files: [{ path: 'notes/demo.txt', description: 'fixture Present files' }],
       },
     })
   }
@@ -2281,7 +2281,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     },
     {
       id: 'signals',
-      header: '信号',
+      header: 'Signal',
       question: '哪些面试信号最重要？',
       detail: '按当前招聘目标选择；跳过则视为不设偏好。',
       multiSelect: true,
@@ -3199,7 +3199,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         for (let index = state.emitted; index < end; index++) {
           const chunkText = index === chunkCount - 1
             ? `\n${marker}`
-            : index % 64 === 63 ? '推理\n' : '推理'
+            : index % 64 === 63 ? 'Reasoning\n' : 'Reasoning'
           pushAssistant(sessionId, { type: 'reasoning-delta', index: 0, text: chunkText })
         }
         state.emitted = end

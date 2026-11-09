@@ -1,78 +1,9 @@
 /** Shell chrome and General-nav dictionaries; feature rows own their copy. */
 
-/** Simplified Chinese dictionary (the key-set source of truth). */
-export const zh = {
-  'desktop.channel.title': '更新渠道',
-  'desktop.channel.description': '正式版适合日常使用；开发版可提前体验新功能，但可能不稳定。',
-  'desktop.channel.stable': '正式版',
-  'desktop.channel.nightly': '开发版',
-  'desktop.channel.unavailable': '配置不可用',
-  'desktop.channel.error': '未能应用更新配置。请点击桌面更新入口查看原因。',
-  'desktop.channel.readError': '无法读取更新渠道状态，请重启应用。',
-  'desktop.update.configurationFailed': '未能应用更新配置。请点击桌面更新入口查看原因。',
-  'desktop.channel.result.applied': '更新渠道已切换',
-  'desktop.channel.result.configuration': '配置文件异常，更新已暂停',
-  'desktop.channel.details': '查看详情',
-  'desktop.channel.result.save': '保存失败',
-  'desktop.channel.result.uncertain': '设置保存异常',
-  'desktop.channel.result.format': '保存失败，配置文件格式有误',
-  'desktop.channel.result.permission': '保存失败，没有写入权限',
-  'desktop.channel.result.apply': '设置保存异常',
-  'desktop.update.configuration.read': '更新已暂停：无法读取配置文件',
-  'desktop.update.configuration.format': '更新已暂停：配置文件格式有误',
-  'desktop.update.configuration.channel': '更新已暂停：channel 只能是 nightly 或 stable',
-  'desktop.update.configuration.cleanup': '更新已暂停：无法清理旧更新，请重启应用',
-  'trigger': '设置',
-  'shortcut.open': '打开设置',
-  'desktop.update.available': '新版本',
-  'desktop.update.checking': '正在检查更新…',
-  'desktop.update.progress': '{percent}%',
-  'desktop.update.verifying': '正在校验更新文件…',
-  'desktop.update.installing': '正在准备重启…',
-  'desktop.update.ready': '安装并重启',
-  'desktop.update.retry': '重试更新',
-  'desktop.update.versionDetail': '{label}：{version}',
-  'desktop.update.downloadDetail': '正在下载更新：{percent}%\n目标版本：{version}',
-  'desktop.update.checkFailed': '检查更新失败，请稍后重试。',
-  'desktop.update.downloadFailed': '下载更新失败，请重试。',
-  'desktop.update.downloadSpaceFailed': '磁盘空间不足，无法下载更新。请释放空间后重试。',
-  'desktop.update.downloadPermissionFailed': '无法写入更新文件，请检查目录权限后重试。',
-  'desktop.update.downloadBusyFailed': '更新文件正被占用，请关闭占用它的程序后重试。',
-  'desktop.update.installFailed': '安装更新失败，请稍后重试。',
-  'desktop.update.checkNetworkFailed': '检查更新失败，请检查网络连接后重试。',
-  'desktop.update.downloadNetworkFailed': '下载更新失败，请检查网络连接后重试。',
-  'desktop.update.installNetworkFailed': '安装更新失败，请检查网络连接后重试。',
-  'desktop.update.fullscreenTimeout': '无法退出全屏，请退出全屏后重试更新',
-  'desktop.update.stopFailed': '未能安全停止任务，更新尚未安装，请稍后重试。',
-  'desktop.update.tasksChanged': '有新任务开始运行，请重新确认是否停止任务并更新。',
-  'desktop.update.tasksUnavailable': '无法确认任务状态，请在工作区就绪后重试更新。',
-  'title': '设置',
-  'close': '关闭',
-  'openDocument': '打开配置文件',
-  'openDocument.error': '无法打开配置文件',
-  'general.nav': '通用设置',
-  'general.currentVersion': '当前版本：{version}',
-  'developerTools.title': '显示代码工作视图',
-  'developerTools.error': '保存失败，请重试',
-  'developerTools.description': '开启后，显示轨迹、本轮代码差异，可选择完整的 Agent 预设切换',
-  'connection.error': '连接异常，刷新重试',
-  'connection.connecting': '重新连接中',
-  'connection.connected': '连接成功',
-  'connection.reconnect': '连接异常，点击立即重连',
-  'connection.restart': '连接中断，正在重试，点击立即重连',
-  'hostRelease.title': '服务版本变化',
-  'hostRelease.description': '服务版本已变化，本页面已暂停热更新，刷新后加载新版本。',
-  'hostRelease.service': '服务',
-  'hostRelease.page': '页面',
-  'hostRelease.unknown': '未解析',
-  'hostRelease.reload': '刷新以加载新版本',
-  'hostRelease.later': '暂不刷新',
-} satisfies Record<string, string>
-
 /** The settings namespace key union. */
-export type SettingsKey = keyof typeof zh
+export type SettingsKey = keyof typeof en
 
-/** English dictionary, checked complete against the zh key set. */
+/** English dictionary (the key-set source of truth). */
 export const en = {
   'desktop.channel.title': 'Update channel',
   'desktop.channel.description': 'Stable is suitable for everyday use. Development offers early access to new features but may be unstable.',
@@ -139,7 +70,7 @@ export const en = {
   'hostRelease.unknown': 'Unknown',
   'hostRelease.reload': 'Reload to load the new version',
   'hostRelease.later': 'Not now',
-} satisfies Record<SettingsKey, string>
+} satisfies Record<string, string>
 
 /** Japanese copy, checked against the English keys. */
 export const ja = {

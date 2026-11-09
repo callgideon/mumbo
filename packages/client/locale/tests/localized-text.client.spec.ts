@@ -11,8 +11,9 @@ function make() {
 describe('package text resolution', () => {
   it('keeps strings verbatim without common lookup or interpolation', () => {
     const { ctx, locale } = make()
-    ctx.effect(() => locale.register('common', 'zh', { retry: '重试' }), 'test: common dictionary')
-    locale.setLocale('zh')
+    ctx.effect(() => locale.addLanguage({ id: 'de', label: 'Deutsch', fallback: 'en' }), 'test: German')
+    ctx.effect(() => locale.register('common', 'de', { retry: 'Erneut versuchen' }), 'test: common dictionary')
+    locale.setLocale('de')
 
     expect(locale.resolveText('retry')).toBe('retry')
     expect(locale.resolveText('Hello, {name}')).toBe('Hello, {name}')
@@ -21,16 +22,17 @@ describe('package text resolution', () => {
   })
 
   it('resolves each field in the current locale without registering map languages', () => {
-    const { locale } = make()
-    const title = { en: 'Tools', zh: '工具', ja: 'ツール' }
-    locale.setLocale('zh')
+    const { ctx, locale } = make()
+    ctx.effect(() => locale.addLanguage({ id: 'de', label: 'Deutsch', fallback: 'en' }), 'test: German')
+    const title = { en: 'Tools', de: 'Werkzeuge', ja: 'ツール' }
+    locale.setLocale('de')
     const snapshot = locale.getSnapshot()
 
-    expect(locale.resolveText(title)).toBe('工具')
+    expect(locale.resolveText(title)).toBe('Werkzeuge')
     expect(locale.resolveText({ en: 'English description' })).toBe('English description')
-    expect(locale.resolveText({ en: 'Fallback', zh: '' })).toBe('')
+    expect(locale.resolveText({ en: 'Fallback', de: '' })).toBe('')
     expect(locale.getSnapshot()).toBe(snapshot)
-    expect(snapshot.locales.map(item => item.id)).toEqual(['zh', 'en'])
+    expect(snapshot.locales.map(item => item.id)).toEqual(['en', 'de'])
 
     locale.setLocale('en')
     expect(locale.resolveText(title)).toBe('Tools')
@@ -44,7 +46,7 @@ describe('package text resolution', () => {
 
     expect(locale.resolveText({ en: 'Tools', fr: 'Outils', 'fr-ca': 'Outils Québec' })).toBe('Outils Québec')
     expect(locale.resolveText({ en: 'Tools', fr: 'Outils' })).toBe('Outils')
-    expect(locale.resolveText({ en: 'Tools', zh: '工具' })).toBe('Tools')
+    expect(locale.resolveText({ en: 'Tools', de: 'Werkzeuge' })).toBe('Tools')
   })
 
   it('uses English across an unloaded fallback and follows its replacement', () => {

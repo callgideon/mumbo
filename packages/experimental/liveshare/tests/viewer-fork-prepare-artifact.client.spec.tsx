@@ -78,7 +78,7 @@ describe('Assembled liveshare viewer page prompting an unprepared branch', () =>
       expect(document.querySelector('[data-sample="bash"]')).not.toBeNull()
     }, { timeout: 30_000 })
     const branches = await screen.findAllByRole(
-      'button', { name: '在新对话中分支' }, { timeout: 15_000 },
+      'button', { name: 'Branch into a new conversation' }, { timeout: 15_000 },
     )
     const branch = branches.at(-1)
     expect(branch).toBeDefined()
@@ -95,7 +95,7 @@ describe('Assembled liveshare viewer page prompting an unprepared branch', () =>
     const childRow = document.querySelector<HTMLElement>('[role="treeitem"][aria-selected="true"]')
     const childId = childRow?.dataset.rowKey?.replace(/^session:/u, '')
     if (childId === undefined) throw new Error('scripted Owner child is not listed')
-    await inputFixture.send(childId, 'hello', '发送消息')
+    await inputFixture.send(childId, 'hello', 'Send message')
 
     // The reader sees why the action did not run as the Host's message with its stable code; the branch
     // it already owns is neither running nor replaced: one branch row, no Stop, and the draft stays.
@@ -104,7 +104,7 @@ describe('Assembled liveshare viewer page prompting an unprepared branch', () =>
         'preparing this fork failed: token=FIXTURE_ONLY_NOT_A_REAL_CREDENTIAL; file=/private/unshared-fixture/credential.txt; url=https://internal.invalid/creds (fork-prepare-failed)',
       )
     }, { timeout: 15_000 })
-    expect(screen.queryByRole('button', { name: '停止生成' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Stop generating' })).toBeNull()
     expect(document.querySelectorAll('[data-slot="sidebar.session.row.leading"] span')).toHaveLength(1)
     expect(document.querySelector('[role="treeitem"][aria-selected="true"]')).toBe(childRow)
     expect(composer.textContent).toContain('hello')

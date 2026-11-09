@@ -5,11 +5,11 @@ import { onTestFinished } from 'vitest'
 import { SlotTestRuntime } from '@deepseek-ai/dsh-client-test-runtime'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
-import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
+import { fr as commonFr } from '@deepseek-ai/dsh-client-locale/src/locales/fr.ts'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { PropsRenderFactories, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
-import { en, NS, zh } from '../src/client/locale.ts'
+import { en, NS, fr } from '../src/client/locale.ts'
 import { derivePresentationPolicy, type CollapseTiming, type FoldedReplies } from '../src/client/presentation-policy.ts'
 import { registerChatNodeRenderers } from '../src/client/chat/register-node-renderers.ts'
 import type { PerformanceUsageMode, TranscriptViewMode } from '../src/chat-settings.ts'
@@ -21,13 +21,14 @@ type RenderSeats = PropsRenderSlots<'conversation.chat.reasoning.body'> & PropsR
  * @param language - active locale for the official default labels.
  * @returns rendering seats and the registry for replacement/lifecycle assertions.
  */
-export async function createReasoningRenderFixture(language = 'zh') {
+export async function createReasoningRenderFixture(language = 'fr') {
   const runtime = await SlotTestRuntime.create()
   onTestFinished(() => runtime.dispose())
   const locale = new LocaleRuntime(runtime.ctx)
+  locale.addLanguage({ id: 'fr', label: 'Français', fallback: 'en' })
   runtime.ctx.provide('locale', locale)
-  locale.register('common', { en: commonEn, zh: commonZh })
-  locale.register(NS, { en, zh })
+  locale.register('common', { en: commonEn, fr: commonFr })
+  locale.register(NS, { en, fr })
   locale.setLocale(language)
   runtime.slots.installLocale(locale)
   const captured: { seats?: RenderSeats; setContent?: (content: ReactNode) => void } = {}

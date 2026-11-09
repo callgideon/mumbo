@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { formatAgo, formatDuration } from '../src/client/format.ts'
-import { en, zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 
 const t = makeTranslate(en)
 
@@ -23,7 +23,7 @@ describe('formatDuration', () => {
   })
 
   it('uses the dictionary of the current language', () => {
-    expect(formatDuration(65_000, makeTranslate(zh))).toBe('1 分 5 秒')
+    expect(formatDuration(65_000, makeTranslate(en))).toBe('1m 5s')
   })
 })
 

@@ -3,24 +3,16 @@
 /** Locale namespace owned by the mods band. */
 export const NS = 'claude-code-mods'
 
-/** Simplified Chinese dictionary and key source. */
-export const zh = {
-  band: 'Claude Code 模组',
-  pressing: '正在处理…',
-  'press.failed': '按钮操作失败：{message}',
-  'press.stale': '该按钮属于更早的绘制，面板已刷新',
-} satisfies Record<string, string>
-
 /** Mods band locale key union. */
-export type ModsBandKey = keyof typeof zh
+export type ModsBandKey = keyof typeof en
 
-/** English dictionary checked against the Chinese key set. */
+/** English dictionary (the key-set source of truth). */
 export const en = {
   band: 'Claude Code mods',
   pressing: 'Working…',
   'press.failed': 'The button failed: {message}',
   'press.stale': 'That button belonged to an earlier drawing; the band has refreshed',
-} satisfies Record<ModsBandKey, string>
+} satisfies Record<string, string>
 
 /** Japanese copy, checked against the English keys. */
 export const ja = {

@@ -10,18 +10,18 @@ import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/c
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
-import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
+import { fr as commonFr } from '@deepseek-ai/dsh-client-locale/src/locales/fr.ts'
 import {
   localizeTerminalCardModel, terminalCardModel, terminalFailed, terminalExitLabel,
 } from '../src/client/tool/models/terminal-card-model.ts'
 import { GenericToolCard, type GenericToolCardProps } from '../src/client/tool/toolviews/GenericToolCard.tsx'
 import { BashRow } from '../src/client/tool/toolviews/bash-sample.tsx'
-import { en, zh } from '@deepseek-ai/dsh-client-ui-conversation/src/client/locales.ts'
+import { en, fr } from '@deepseek-ai/dsh-client-ui-conversation/src/client/locales.ts'
 import { PartialArguments } from '@deepseek-ai/dsh-util-values'
 
 type BashRowProps = Parameters<typeof BashRow>[0]
 
-const t: GenericToolCardProps['t'] = makeTranslate(zh, commonZh)
+const t: GenericToolCardProps['t'] = makeTranslate(fr, commonFr)
 const enT: GenericToolCardProps['t'] = makeTranslate(en, commonEn)
 
 afterEach(cleanup)
@@ -71,7 +71,7 @@ describe('terminalCardModel', () => {
     const card = terminalCardModel(settled({ content: [{ type: 'text', text: `failed\n[exit code: ${code}]` }] }))
     expect(card?.card).toMatchObject({ output: 'failed', exitCode: code })
     expect(terminalExitLabel(card, enT)).toBe(`exit code ${code}`)
-    expect(terminalExitLabel(card, t)).toBe(`退出码 ${code}`)
+    expect(terminalExitLabel(card, t)).toBe(`code de sortie ${code}`)
   })
 
   it('omits exit capsules without a settled foreground failure', () => {
@@ -98,7 +98,7 @@ describe('terminalCardModel', () => {
     expect(model.card).toMatchObject({ output: '(no output)\n[timed out after 100ms]', exitCode: null })
     expect(terminalFailed(model)).toBe(true)
     expect(terminalExitLabel(model, enT)).toBe('no exit code')
-    expect(terminalExitLabel(model, t)).toBe('未正常退出')
+    expect(terminalExitLabel(model, t)).toBe('pas de code de sortie')
   })
 
   it('derives a running standard-shell card from raw arguments', () => {
@@ -258,7 +258,7 @@ describe('terminalCardModel', () => {
     }))!
     expect(model.copy).toEqual({ kind: 'terminal-send', text: '', sessionId: 'pty-3' })
     expect(localizeTerminalCardModel(model, t)).toMatchObject({
-      description: '终端 pty-3', card: { command: '（发送输入）' },
+      description: 'Borne pty-3', card: { command: '(envoyer une entrée)' },
     })
     expect(localizeTerminalCardModel(model, enT)).toMatchObject({
       description: 'Terminal pty-3', card: { command: '(send input)' },
@@ -411,7 +411,7 @@ describe('chat row terminal body', () => {
     toggleRow(view)
     expect(view.getByText('line-5')).toBeTruthy()
     expect(view.getByText('line-19')).toBeTruthy()
-    expect(view.queryByText(/其余/)).toBeNull()
+    expect(view.queryByText(/plus de lignes/)).toBeNull()
   })
 
   it('renders a multi-line command as one prompt row per line', () => {
@@ -447,14 +447,14 @@ describe('chat row terminal body', () => {
     const view = render(<GenericToolCard {...ownerProps(running())} />)
     toggleRow(view)
     expect(view.getByText('ls -la')).toBeTruthy()
-    expect(view.queryByText('复制')).toBeNull()
+    expect(view.queryByText('Copier')).toBeNull()
     // The card states its own run state: a running command reads as running
     // even though it has no output yet to distinguish it from an empty settle.
     expect(runStateOf(view.container)).toBe('ongoing')
   })
 
   it.each([
-    { locale: 'zh', translate: t, description: '终端 pty-3', command: '（发送输入）' },
+    { locale: 'fr', translate: t, description: 'Borne pty-3', command: '(envoyer une entrée)' },
     { locale: 'en', translate: enT, description: 'Terminal pty-3', command: '(send input)' },
   ])('renders terminal_send copy through the $locale locale', ({ translate, description, command }) => {
     const block = running({
@@ -490,8 +490,8 @@ describe('chat row terminal body', () => {
       content: [{ type: 'text', text: 'boom\n[exit code: 2]' }],
     }))} />)
     expect(view.container.querySelector('[data-state]')?.getAttribute('data-state')).toBe('error')
-    expect(view.getByText('退出码 2')).toBeTruthy()
-    expect(view.getByText('退出码 2').previousElementSibling?.textContent).toBe('List files')
+    expect(view.getByText('code de sortie 2')).toBeTruthy()
+    expect(view.getByText('code de sortie 2').previousElementSibling?.textContent).toBe('List files')
     expect(view.container.querySelector('[class*="_errorSummary_"]')).toBeNull()
   })
 })
@@ -516,7 +516,7 @@ describe('BashRow terminal card', () => {
     expect(view.queryByText(/a\.ts/)).toBeNull()
     fireEvent.click(view.container.querySelector('[data-expandable]')!)
     expect(view.getByText('a.ts  b.ts', RAW)).toBeTruthy()
-    expect(view.getByText('复制')).toBeTruthy()
+    expect(view.getByText('Copier')).toBeTruthy()
     // Collapse back in place: the summary row returns, the card unmounts.
     fireEvent.click(view.container.querySelector('[data-expandable]')!)
     expect(view.queryByText(/a\.ts/)).toBeNull()
@@ -551,10 +551,10 @@ describe('BashRow terminal card', () => {
     }))} />)
     expect(view.container.querySelector('[data-variant="bash"]')?.getAttribute('data-state')).toBe('error')
     expect(view.container.querySelector('[class*="_errorSummary_"]')).toBeNull()
-    expect(view.getByText('退出码 2')).toBeTruthy()
+    expect(view.getByText('code de sortie 2')).toBeTruthy()
     expect(view.getByText('List files')).toBeTruthy()
     fireEvent.keyDown(view.getByRole('button'), { key: 'Enter' })
-    expect(view.getAllByText('退出码 2')).toHaveLength(2)
+    expect(view.getAllByText('code de sortie 2')).toHaveLength(2)
     expect(view.getByText('boom', RAW)).toBeTruthy()
   })
 
@@ -578,8 +578,8 @@ describe('BashRow terminal card', () => {
     fireEvent.click(row)
 
     expect(row.getAttribute('aria-expanded')).toBe('true')
-    expect(view.getByText('输入')).toBeTruthy()
-    expect(view.getByText('输出')).toBeTruthy()
+    expect(view.getByText('IN')).toBeTruthy()
+    expect(view.getByText('OUT')).toBeTruthy()
     expect(view.getByText(/"command": "ls -la"/)).toBeTruthy()
     expect(view.container.querySelector('[class*="_ioText_"][data-error]')).toBeNull()
     expect(view.container.querySelectorAll('[class*="_ioText_"]')[1]?.textContent)
@@ -623,8 +623,8 @@ describe('BashRow terminal card', () => {
     expect([...view.container.querySelectorAll('[data-command-text]')].map(line => line.textContent))
       .toEqual(command.slice(0, -1).split('\n'))
     expect(view.getByText('app')).toBeTruthy()
-    expect(view.queryByText('无输出')).toBeNull()
-    expect(view.queryByRole('button', { name: '复制' })).toBeNull()
+    expect(view.queryByText('Aucune sortie')).toBeNull()
+    expect(view.queryByRole('button', { name: 'Copier' })).toBeNull()
 
     const acknowledgement = 'started background job job-1'
     const result = settled({ call: { name, argsRaw }, ...parent, meta: { cwd: '/workspace/app' },
@@ -634,11 +634,11 @@ describe('BashRow terminal card', () => {
     expect(view.container.querySelector('[data-terminal]')).toBe(terminal)
     expect(view.container.querySelector('[data-command-text]')).toBe(firstCommand)
     expect(view.container.querySelector('[data-terminal] [data-state], [data-running]')).toBeNull()
-    expect(view.queryByText('运行中')).toBeNull()
-    expect(view.queryByText('已完成')).toBeNull()
-    expect(view.queryByText('无输出')).toBeNull()
+    expect(view.queryByText('Running')).toBeNull()
+    expect(view.queryByText('Terminé')).toBeNull()
+    expect(view.queryByText('Aucune sortie')).toBeNull()
     expect(view.queryByText(acknowledgement)).toBeNull()
-    expect(view.queryByRole('button', { name: '复制' })).toBeNull()
+    expect(view.queryByRole('button', { name: 'Copier' })).toBeNull()
     expect(result.call?.argsRaw).toBe(argsRaw)
     expect(result.content).toEqual([{ type: 'text', text: acknowledgement }])
     fireEvent.click(view.getByRole('button', { name: t('row.inspect') }))
@@ -694,7 +694,7 @@ describe('BashRow terminal card', () => {
       expect([...view.container.querySelectorAll('[data-command-text]')].map(line => line.textContent)).toEqual(lines)
       expect(view.getByText('  first\tcolumn', RAW)).toBeTruthy()
       expect(view.getByText('last ', RAW)).toBeTruthy()
-      await act(async () => { fireEvent.click(view.getByRole('button', { name: '复制' })) })
+      await act(async () => { fireEvent.click(view.getByRole('button', { name: 'Copier' })) })
       expect(writeText).toHaveBeenCalledOnce()
       expect(writeText).toHaveBeenCalledWith(output)
       await act(async () => { await vi.runOnlyPendingTimersAsync() })
@@ -730,8 +730,8 @@ describe('BashRow terminal card', () => {
     fireEvent.click(row)
 
     expect(row.getAttribute('aria-expanded')).toBe('true')
-    expect(view.getByText('输入')).toBeTruthy()
-    expect(view.getByText('输出')).toBeTruthy()
+    expect(view.getByText('IN')).toBeTruthy()
+    expect(view.getByText('OUT')).toBeTruthy()
     expect(view.getByText(/"command": "ls -la"/)).toBeTruthy()
     expect(view.container.querySelector('[data-error]')?.textContent).toBe('Error: command aborted')
   })

@@ -37,43 +37,8 @@ const PRODUCT_NAMES = {
   'app.konsole': 'Konsole',
 } as const
 
-/** Simplified Chinese dictionary (the key-set source of truth). */
-export const zh = {
-  'menu.openIn': '在应用中打开',
-  'menu.openInSidebar': '在侧边栏打开',
-  'menu.openInFloat': '在浮窗中打开',
-  'menu.finder': '在 Finder 中显示',
-  'menu.reveal': '在文件夹显示',
-  'menu.defaultApp': '使用默认应用打开',
-  'menu.external': '外部浏览器打开',
-  'menu.copyLink': '复制链接地址',
-  'menu.copyPath': '复制文件路径',
-  'menu.copyDirectoryPath': '复制文件夹路径',
-  'menu.copied': '已复制',
-  'menu.copyFailed': '无法复制，请检查内容是否可用后重试',
-
-  'open.title': '用 {app} 打开',
-  'path.appDefault': '{app}（默认）',
-  'path.appsError': '无法获取应用列表',
-  'shortcut.busy': '正在打开工作区',
-  'shortcut.unavailable': '当前工作区或本地应用不可用',
-  'open.tooltip': '在本地打开',
-  'path.open': '打开',
-  'path.more': '更多打开方式',
-  'path.reveal': '显示文件位置',
-  'path.opened': '已在其它设备打开',
-  'path.revealed': '已在其它设备显示文件位置',
-  'path.openError': '打开失败，请重试',
-  'path.revealError': '无法显示文件位置，请重试',
-  ...PRODUCT_NAMES,
-  'app.finder': '访达',
-  'app.explorer': '文件资源管理器',
-  'app.filemanager': '文件管理器',
-  'app.terminal': '终端',
-} as const
-
-/** English dictionary, key-identical to the Chinese source of truth. */
-export const en: Record<OpenInAppKey, string> = {
+/** English dictionary (the key-set source of truth). */
+export const en = {
   'menu.openIn': 'Open in',
   'menu.openInSidebar': 'Open in sidebar',
   'menu.openInFloat': 'Open in floating panel',
@@ -105,10 +70,10 @@ export const en: Record<OpenInAppKey, string> = {
   'app.explorer': 'File Explorer',
   'app.filemanager': 'Files',
   'app.terminal': 'Terminal',
-}
+} satisfies Record<string, string>
 
-/** Key domain of the `open-in-app` namespace (zh is the source of truth). */
-export type OpenInAppKey = keyof typeof zh
+/** Key domain of the `open-in-app` namespace (English is the source of truth). */
+export type OpenInAppKey = keyof typeof en
 
 /** Japanese copy, checked against the English keys. */
 export const ja = {

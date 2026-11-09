@@ -20,7 +20,7 @@ import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import type { DraftInitializationOptions, SessionInputResolver } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { RowToast } from '../src/client/contract/slots.ts'
 import { DirectoryBrowseError, UiWorkspaceService } from '../src/client/navigation.ts'
-import { en, zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 import { createWorkspaceViewStore, FLAT_SESSION_ORDER_KEY } from '../src/client/stores.ts'
 import { UNGROUPED_KEY } from '../src/client/tree.ts'
 
@@ -283,7 +283,7 @@ function bench(options: BenchOptions = {}) {
   contexts.push(ctx)
   const locale = new LocaleRuntime(ctx)
   locale.setLocale('en')
-  ctx.effect(() => locale.register('workspace', { en, zh }))
+  ctx.effect(() => locale.register('workspace', { en }))
   ctx.provide('locale', locale)
   const requestDraftInitialization = vi.fn<SessionInputResolver['requestDraftInitialization']>(() => 'applied')
   if (options.conversation !== false) ctx.provide('conversation', { input: { requestDraftInitialization } })
@@ -808,7 +808,7 @@ describe('UiWorkspaceService', () => {
 
   describe('startSession draft initialization', () => {
     it.each<{ name: string; options: DraftInitializationOptions }>([
-      { name: 'plain text', options: { prompt: '草稿 🧭\nsecond line', clearPreviousDraft: true } },
+      { name: 'plain text', options: { prompt: 'Draft 🧭\nsecond line', clearPreviousDraft: true } },
       { name: 'empty text', options: { prompt: '' } },
       { name: 'clear without prompt', options: { clearPreviousDraft: true } },
       { name: 'replace without prompt', options: { whenDraftExists: 'replace' } },

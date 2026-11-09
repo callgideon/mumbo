@@ -27,7 +27,7 @@ import { CHAT_SETTINGS_NAMESPACE, type ChatSettings } from '../src/chat-settings
 import type { LinkOpeningRowInjected } from '../src/client/settings/LinkOpeningRow.tsx'
 import type { TranscriptViewRowInjected } from '../src/client/settings/TranscriptViewRow.tsx'
 
-usePinnedBrowserLanguages('zh-CN')
+usePinnedBrowserLanguages('en-US')
 
 const ROOT = 'root-1' as SessionId
 const ATTACHMENT = {

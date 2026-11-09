@@ -12,7 +12,7 @@ import { AccountSection, type AccountSectionInjected, type AccountSnapshot } fro
 import type { BonusNotice } from '../src/client/bonus-notices.ts'
 import type { AccountMenuProps } from '../src/client/AccountMenu.tsx'
 import type {} from '../src/client/index.ts'
-import { en, zh, type AccountKey } from '../src/client/locales.ts'
+import { en, fr, type AccountKey } from '../src/client/locales.ts'
 import css from '../src/client/AccountSection.module.css'
 import type { AccountAvatarSnapshot } from '../src/client/account-avatar.ts'
 
@@ -44,7 +44,7 @@ function operationsOf(state: Omit<AccountView, 'links'>, details?: Partial<Accou
   }
 }
 
-function mount(state: Omit<AccountView, 'links'>, copy: typeof en | typeof zh = en, details?: Partial<AccountDetails>,
+function mount(state: Omit<AccountView, 'links'>, copy: typeof en | typeof fr = en, details?: Partial<AccountDetails>,
   platform?: PlatformBridge, avatar?: AccountAvatarSnapshot) {
   const pages = platform === undefined ? undefined : createPlatformPages()
   const operations = operationsOf(state, details, pages, avatar)
@@ -68,7 +68,7 @@ function SharedPlatformHost({ Globals, pages, platform, copy, refreshAccount }: 
   Globals: GlobalStandardProps
   pages: PlatformPages
   platform: PlatformBridge
-  copy: typeof en | typeof zh
+  copy: typeof en | typeof fr
   refreshAccount: () => Promise<void>
 }) {
   const subscribe = useMemo(() => (listener: () => void) => pages.subscribe(listener), [pages])
@@ -101,7 +101,7 @@ async function accountMenu(operations: AccountSectionInjected, snapshot: () => A
     openOnboarding={() => {}} openSettings={() => {}} t={key => en[key as AccountKey]} />
 }
 
-it.each([en, zh])('renders account cards without inventing profile or balance data', async (copy) => {
+it.each([en, fr])('renders account cards without inventing profile or balance data', async (copy) => {
   mount({ status: 'credential-stored', attempt: null }, copy)
   expect(screen.getByText(copy.signedIn)).toBeTruthy()
   expect(screen.getAllByText(copy.loading)).toHaveLength(3)
@@ -109,7 +109,7 @@ it.each([en, zh])('renders account cards without inventing profile or balance da
   expect(screen.getByRole('link', { name: copy.topUp }).getAttribute('href')).toBe('http://localhost:8081/top_up')
   expect(screen.queryByRole('button', { name: copy.signOut })).toBeNull()
   expect(document.body.textContent).not.toContain('209.00')
-  await expect(`${screen.getByRole('region').textContent}\n`).toMatchFileSnapshot(`./expected/account-${copy === en ? 'en' : 'zh'}.txt`)
+  await expect(`${screen.getByRole('region').textContent}\n`).toMatchFileSnapshot(`./expected/account-${copy === en ? 'en' : 'fr'}.txt`)
 })
 
 it('starts sign-in and disables cancellation during persistence', async () => {
@@ -122,7 +122,7 @@ it('starts sign-in and disables cancellation during persistence', async () => {
   expect(screen.queryByRole('button', { name: en.signIn })).toBeNull()
 })
 
-it.each([en, zh].flatMap(copy => ([false, true, 'unknown'] as const).map(running => ({ copy, running }))))('confirms sidebar sign-out with task impact $running', async ({ copy, running }) => {
+it.each([en, fr].flatMap(copy => ([false, true, 'unknown'] as const).map(running => ({ copy, running }))))('confirms sidebar sign-out with task impact $running', async ({ copy, running }) => {
   const signOut = vi.fn(() => Promise.resolve())
   const openSettings = vi.fn()
   const operations = mount({ status: 'credential-stored', attempt: null }, copy)
@@ -135,7 +135,7 @@ it.each([en, zh].flatMap(copy => ([false, true, 'unknown'] as const).map(running
     t={key => key in copy ? copy[key as AccountKey] : key} />)
   fireEvent.click(screen.getByRole('button', { name: copy.menu }))
   expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual([copy.settings, copy.contactUs, copy.signOut])
-  await expect(`${screen.getByRole('menu').textContent}\n`).toMatchFileSnapshot(`./expected/menu-${copy === en ? 'en' : 'zh'}.txt`)
+  await expect(`${screen.getByRole('menu').textContent}\n`).toMatchFileSnapshot(`./expected/menu-${copy === en ? 'en' : 'fr'}.txt`)
   fireEvent.click(screen.getByRole('menuitem', { name: copy.settings }))
   expect(openSettings).toHaveBeenCalledOnce()
   fireEvent.click(screen.getByRole('button', { name: copy.menu }))
@@ -145,13 +145,15 @@ it.each([en, zh].flatMap(copy => ([false, true, 'unknown'] as const).map(running
   fireEvent.click(screen.getByRole('button', { name: copy.menu }))
   await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: copy.signOut })) })
   expect(signOut).not.toHaveBeenCalled()
-  expect(screen.getByText(running === 'unknown' ? copy.signOutUnknownDescription : running ? copy.signOutRunningDescription : copy.signOutDescription)).toBeTruthy()
+  // French copy renders a no-break space before `?`; compare collapsed whitespace.
+  const description = (running === 'unknown' ? copy.signOutUnknownDescription : running ? copy.signOutRunningDescription : copy.signOutDescription).replace(/\s+/gu, ' ')
+  expect(screen.getByText((_content, element) => element?.tagName === 'P' && element.textContent?.replace(/\s+/gu, ' ') === description)).toBeTruthy()
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: copy.signOut })) })
   expect(signOut).toHaveBeenCalledOnce()
   expect(screen.queryByRole('menu')).toBeNull()
 })
 
-it.each([en, zh])('updates the Settings menu keycaps and accessible combination from its owner', async (copy) => {
+it.each([en, fr])('updates the Settings menu keycaps and accessible combination from its owner', async (copy) => {
   const operations = mount({ status: 'signed-out', attempt: null }, copy)
   cleanup()
   const { AccountMenu } = await import('../src/client/AccountMenu.tsx')
@@ -180,7 +182,7 @@ it.each([en, zh])('updates the Settings menu keycaps and accessible combination 
   expect(props.openSettings).toHaveBeenCalledOnce()
 })
 
-it.each([en, zh])('offers settings, contact and sign-in from the signed-out account menu', async (copy) => {
+it.each([en, fr])('offers settings, contact and sign-in from the signed-out account menu', async (copy) => {
   const openSettings = vi.fn()
   const operations = operationsOf({ status: 'signed-out', attempt: null })
   const { AccountMenu } = await import('../src/client/AccountMenu.tsx')
@@ -193,7 +195,7 @@ it.each([en, zh])('offers settings, contact and sign-in from the signed-out acco
   expect(trigger.querySelector('svg')).not.toBeNull()
   fireEvent.click(trigger)
   expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual([copy.settings, copy.contactUs, copy.signIn])
-  await expect(`${screen.getByRole('menu').textContent}\n`).toMatchFileSnapshot(`./expected/menu-signed-out-${copy === en ? 'en' : 'zh'}.txt`)
+  await expect(`${screen.getByRole('menu').textContent}\n`).toMatchFileSnapshot(`./expected/menu-signed-out-${copy === en ? 'en' : 'fr'}.txt`)
   fireEvent.click(screen.getByRole('menuitem', { name: copy.settings }))
   expect(openSettings).toHaveBeenCalledOnce()
   fireEvent.click(screen.getByRole('button', { name: copy.menu }))
@@ -273,7 +275,7 @@ it('keeps the confirmation dialog open after a failed sign-out', async () => {
   expect(within(dialog).getByRole('alert').textContent).toBe(en.failed)
 })
 
-it.each([en, zh])('renders Platform profile and recharge wallet balances', async (copy) => {
+it.each([en, fr])('renders Platform profile and recharge wallet balances', async (copy) => {
   mount({ status: 'credential-stored', attempt: null }, copy, {
     profile: { status: 'ready', value: { id: null, name: 'Harness Mock (TEST ONLY)', contact: '138****0000' } },
     balance: { status: 'ready', bonusWallets: [], value: [{ currency: 'CNY', balance: '1234.56000000' }, { currency: 'USD', balance: '0.00000100' }] },
@@ -282,17 +284,17 @@ it.each([en, zh])('renders Platform profile and recharge wallet balances', async
   expect(screen.getByText('138****0000')).toBeTruthy()
   expect(screen.getByText('¥1,234.56')).toBeTruthy()
   expect(screen.getByText('<$0.01')).toBeTruthy()
-  await expect(`${screen.getByRole('region').textContent}\n`).toMatchFileSnapshot(`./expected/details-${copy === en ? 'en' : 'zh'}.txt`)
+  await expect(`${screen.getByRole('region').textContent}\n`).toMatchFileSnapshot(`./expected/details-${copy === en ? 'en' : 'fr'}.txt`)
 })
 
-it.each([en, zh])('shows the signed-out settings prompt without balance or Platform links', async (copy) => {
+it.each([en, fr])('shows the signed-out settings prompt without balance or Platform links', async (copy) => {
   mount({ status: 'signed-out', attempt: null }, copy)
   expect(screen.getByText(copy.settingsSignedOutTitle)).toBeTruthy()
   expect(screen.getByText(copy.settingsSignedOutDescription)).toBeTruthy()
   expect(screen.queryByText(copy.balance)).toBeNull()
   expect(screen.queryByRole('link')).toBeNull()
   await expect(`${screen.getByRole('region').textContent}\n`)
-    .toMatchFileSnapshot(`./expected/account-signed-out-${copy === en ? 'en' : 'zh'}.txt`)
+    .toMatchFileSnapshot(`./expected/account-signed-out-${copy === en ? 'en' : 'fr'}.txt`)
 })
 
 
@@ -320,17 +322,17 @@ it('keeps a return action available when the native document fails to load', asy
   const platform: PlatformBridge = {
     open: vi.fn(async () => { throw new Error('load failed') }), setBounds: vi.fn(async () => {}), close: vi.fn(async () => {}),
   }
-  mount({ status: 'credential-stored', attempt: null }, zh, undefined, platform)
-  await act(async () => { fireEvent.click(screen.getByRole('link', { name: zh.topUp })) })
+  mount({ status: 'credential-stored', attempt: null }, fr, undefined, platform)
+  await act(async () => { fireEvent.click(screen.getByRole('link', { name: fr.topUp })) })
   expect(platform.open).toHaveBeenCalledWith('top-up', { x: 0, y: 0, width: 0, height: 0 })
-  expect(screen.getByText(zh.platformFailed)).toBeTruthy()
-  const back = screen.getByRole('button', { name: zh.backToHarness })
-  await expect(`${back.parentElement!.parentElement!.textContent}\n`).toMatchFileSnapshot('./expected/platform-header-zh.txt')
+  expect(screen.getByText(fr.platformFailed)).toBeTruthy()
+  const back = screen.getByRole('button', { name: fr.backToHarness })
+  await expect(`${back.parentElement!.parentElement!.textContent}\n`).toMatchFileSnapshot('./expected/platform-header-fr.txt')
   await act(async () => { fireEvent.click(back) })
   expect(platform.close).toHaveBeenCalledOnce()
 })
 
-it.each([en, zh])('retries the failed Platform destination and removes the error after loading', async (copy) => {
+it.each([en, fr])('retries the failed Platform destination and removes the error after loading', async (copy) => {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
   const loaded = Promise.withResolvers<undefined>()
   const open = vi.fn<PlatformBridge['open']>()
@@ -341,7 +343,7 @@ it.each([en, zh])('retries the failed Platform destination and removes the error
   mount({ status: 'credential-stored', attempt: null }, copy, undefined, platform)
   await act(async () => { fireEvent.click(screen.getByRole('link', { name: copy.topUp })) })
   await expect(`${screen.getByRole('dialog').textContent}\n`)
-    .toMatchFileSnapshot(`./expected/platform-error-${copy === en ? 'en' : 'zh'}.txt`)
+    .toMatchFileSnapshot(`./expected/platform-error-${copy === en ? 'en' : 'fr'}.txt`)
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: copy.platformRetry })) })
   expect(screen.getByText(copy.platformFailed)).toBeTruthy()
   const retry = screen.getByRole('button', { name: copy.platformRetry })
@@ -462,7 +464,7 @@ it.each(['loading', 'failed'] as const)('shows fallback until the shared avatar 
   expect(view.container.querySelector('img')).toBeNull()
 })
 
-it.each([en, zh])('renders positive bonus wallets separately from recharge balances', async (copy) => {
+it.each([en, fr])('renders positive bonus wallets separately from recharge balances', async (copy) => {
   mount({ status: 'credential-stored', attempt: null }, copy, {
     balance: { status: 'ready', value: [{ currency: 'CNY', balance: '209.00' }, { currency: 'USD', balance: '20.07' }],
       bonusWallets: [{ currency: 'CNY', balance: '5.00' }, { currency: 'USD', balance: '0.000001' }] },
@@ -471,7 +473,7 @@ it.each([en, zh])('renders positive bonus wallets separately from recharge balan
   expect(screen.getByText(copy.bonusBalance).parentElement!.textContent).toBe(`${copy.bonusBalance}¥5.00<$0.01`)
   expect(screen.getByRole('region').querySelectorAll(`.${css.divider}`)).toHaveLength(2)
   await expect(`${screen.getByRole('region').textContent}\n`)
-    .toMatchFileSnapshot(`./expected/bonus-${copy === en ? 'en' : 'zh'}.txt`)
+    .toMatchFileSnapshot(`./expected/bonus-${copy === en ? 'en' : 'fr'}.txt`)
 })
 
 it.each([[], [{ currency: 'CNY' as const, balance: '0.00' }, { currency: 'USD' as const, balance: '-1.00' }]].map(bonusWallets => ({ bonusWallets })))(
@@ -498,7 +500,7 @@ it('opens more account information at the configured Platform origin without inv
   expect(platform.open).not.toHaveBeenCalled()
 })
 
-it.each([en, zh])('shows a localized toast when the account credential expires', async (copy) => {
+it.each([en, fr])('shows a localized toast when the account credential expires', async (copy) => {
   vi.useFakeTimers()
   onTestFinished(() => { vi.useRealTimers() })
   const operations = mount({ status: 'signed-out', attempt: null }, copy)
@@ -515,7 +517,7 @@ it.each([en, zh])('shows a localized toast when the account credential expires',
   expect(screen.queryByRole('alert')).toBeNull()
   act(() => { expire!() })
   expect(screen.getByRole('alert').textContent).toContain(copy.sessionExpired)
-  await expect(`${screen.getByRole('alert').textContent}\n`).toMatchFileSnapshot(`./expected/expired-${copy === en ? 'en' : 'zh'}.txt`)
+  await expect(`${screen.getByRole('alert').textContent}\n`).toMatchFileSnapshot(`./expected/expired-${copy === en ? 'en' : 'fr'}.txt`)
   await act(async () => { await vi.advanceTimersByTimeAsync(4000) })
   expect(screen.queryByRole('alert')).toBeNull()
   view.unmount()
@@ -708,7 +710,7 @@ it('reports resize failure, ignores late native failures, and tolerates a remove
   expect(screen.queryByRole('dialog')).toBeNull()
 })
 
-it.each([en, zh])('shows live model sign-in guidance without replaying it after remount', async (copy) => {
+it.each([en, fr])('shows live model sign-in guidance without replaying it after remount', async (copy) => {
   vi.useFakeTimers()
   onTestFinished(() => { vi.useRealTimers() })
   const operations = operationsOf({ status: 'signed-out', attempt: null })

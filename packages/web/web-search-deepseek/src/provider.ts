@@ -206,7 +206,6 @@ export class DeepSeekSearchProvider implements WebSearchProvider {
   /** Picker description: what this provider suits and what it costs or cannot do. */
   readonly description: NonNullable<WebSearchProvider['description']> = {
     en: 'Runs server-side web search inside a full Messages model call, adding model latency and token usage on every search. Requires a DeepSeek account or API key.',
-    zh: '通过完整模型调用在服务端执行网页搜索，每次搜索都会产生模型延迟与 token 消耗。需 DeepSeek 账号或 API Key',
     ja: '完全な Messages モデル呼び出しの中でサーバー側の Web 検索を実行するため、検索のたびにモデルの待ち時間とトークン消費が発生します。DeepSeek アカウントまたは API キーが必要です。',
     es: 'Ejecuta la búsqueda web en el servidor dentro de una llamada completa al modelo de Messages, lo que añade latencia del modelo y consumo de tokens en cada búsqueda. Requiere una cuenta de DeepSeek o una clave de API.',
     fr: 'Exécute la recherche web côté serveur dans un appel complet au modèle Messages, ce qui ajoute la latence du modèle et une consommation de jetons à chaque recherche. Nécessite un compte DeepSeek ou une clé API.',

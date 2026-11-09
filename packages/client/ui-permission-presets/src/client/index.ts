@@ -43,7 +43,7 @@ import type { PermissionSelectInjected } from './PermissionSelect.tsx'
 import { PermissionRow } from './PermissionRow.tsx'
 import type { PermissionRowInjected } from './PermissionRow.tsx'
 import {
-  accessEn, accessJa, accessEs, accessFr, accessDe, accessRu, accessPt, accessZh, en, ja, es, fr, de, ru, pt, PERMISSION_ACCESS_NS, zh,
+  accessEn, accessJa, accessEs, accessFr, accessDe, accessRu, accessPt, en, ja, es, fr, de, ru, pt, PERMISSION_ACCESS_NS, 
 } from './locales.ts'
 import {
   AUTO_REVIEW_PRESET, displayPermissionPreset, FULL_ACCESS_PRESET,
@@ -116,7 +116,6 @@ export function apply(ctx: ClientContext): void {
   const command = ctx.get('commandUi') as CommandUiContract
   const sessions = ctx.sessions
   const accessDictionaries = {
-    zh: accessZh,
     en: accessEn,
     ja: accessJa,
     es: accessEs,
@@ -143,7 +142,7 @@ export function apply(ctx: ClientContext): void {
     return true
   }
 
-  ctx.effect(() => ctx.locale.register('settings.permission', { zh, en, ja, es, fr, de, ru, pt }), 'ui-permission: settings row dictionaries')
+  ctx.effect(() => ctx.locale.register('settings.permission', { en, ja, es, fr, de, ru, pt }), 'ui-permission: settings row dictionaries')
 
   // Every surface below lists the process catalog, so a page that may not read it offers none of them.
   ctx.remoteAccess.whenAccess('permissionPresets/catalog', function* () {

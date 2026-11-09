@@ -9,7 +9,7 @@ import { apply, inject, viewerSignInHref } from '../src/client/viewer-session-pl
 import { publishViewerCapabilities, viewerCapabilities } from '../src/client/viewer-capabilities.ts'
 import { viewerContextFacts } from '../src/client/viewer-context.ts'
 import { viewerStatus, viewerStatusFacts } from '../src/client/viewer-status.ts'
-import { en, zh } from '../src/client/locales.ts'
+import { en, fr } from '../src/client/locales.ts'
 import { cleanup, render } from '@testing-library/react'
 import { createElement, createRef } from 'react'
 import { DraftEditor } from '@deepseek-ai/dsh-client-ui-conversation/src/client/input/editor/DraftEditor.tsx'
@@ -35,7 +35,7 @@ type BlockRecord = { readonly reason: string }
  */
 async function bench(
   initial?: Parameters<typeof provideViewerRemoteAccess>[1],
-  language: 'zh' | 'en' = 'zh',
+  language: 'fr' | 'en' = 'fr',
   options: { readonly target?: boolean; readonly missingConversation?: boolean } = {},
 ) {
   const rows = createSnapshotStore<{ byId: Record<string, unknown> }>({ byId: {} })
@@ -245,7 +245,7 @@ describe('viewer sign-in return address', () => {
 })
 
 describe('viewer session plugin', () => {
-  for (const [language, dictionary] of [['zh', zh], ['en', en]] as const) {
+  for (const [language, dictionary] of [['fr', fr], ['en', en]] as const) {
     describe(`readable viewer in ${language}`, () => {
       it('renders localized blocked-composer copy and keeps read navigation available', async () => {
         // The share grants writing but this page's snapshot holds no prompt for it, which is the state a
@@ -299,7 +299,7 @@ describe('viewer session plugin', () => {
       admitted = true
       window.dispatchEvent(new Event('focus'))
       await vi.waitFor(() => { expect(viewerStatus.getSnapshot()).toBe('ready') })
-      expect(page.blocks.get(SHARED)?.reason).toBe(zh['viewer.readonlyNote'])
+      expect(page.blocks.get(SHARED)?.reason).toBe(fr['viewer.readonlyNote'])
       expect(document.getElementById('liveshare-viewer-status')?.style.display).toBe('none')
     } finally { await page.fiber.dispose() }
   })
@@ -345,7 +345,7 @@ describe('viewer session plugin', () => {
       expect(page.scopesAsked).not.toContain(OTHER)
       // The share never answered, so this page states that it could not confirm the share's state
       // rather than claiming the read-only fact an answer would have stated.
-      expect(page.blocks.get(SHARED)?.reason).toContain('无法确认该分享的当前状态')
+      expect(page.blocks.get(SHARED)?.reason).toContain('L’état actuel de ce partage n’a pas pu être confirmé ; il reste en lecture seule jusqu’à confirmation')
     } finally {
       await page.fiber.dispose()
     }
@@ -371,7 +371,7 @@ describe('viewer session plugin', () => {
         capabilities: { sessionMode: 'view', sessionModeReason: 'fork-not-permitted' },
       })
       page.access.push({ type: 'upsert', grant: { resource: { kind: 'session', id: CHILD }, actions: [] } })
-      expect(page.blocks.get(CHILD)?.reason).toBe('分享者未允许分支此会话')
+      expect(page.blocks.get(CHILD)?.reason).toBe('Le propriétaire n’autorise pas la dérivation de cette session')
       expect(page.blocks.get(SHARED)).toBeUndefined()
     } finally {
       await page.fiber.dispose()
@@ -410,19 +410,19 @@ describe('viewer session plugin', () => {
         capabilities: { sessionMode: 'view', sessionModeReason: 'share-stopped' },
       })
       deliverGrants(page.access, {})
-      expect(page.blocks.get(SHARED)?.reason).toBe('分享已停止')
-      expect(page.blocks.get(CHILD)?.reason).toBe('分享已停止')
+      expect(page.blocks.get(SHARED)?.reason).toBe('Le partage a été arrêté')
+      expect(page.blocks.get(CHILD)?.reason).toBe('Le partage a été arrêté')
 
       // Expiry reads the same way, and a deployment that cannot fork at all leaves the shared Session
       // stating that it is read-only.
       publishViewerCapabilities({
         capabilities: { sessionMode: 'view', sessionModeReason: 'share-expired' },
       })
-      expect(page.blocks.get(SHARED)?.reason).toBe('分享已过期')
+      expect(page.blocks.get(SHARED)?.reason).toBe('Le partage a expiré')
       publishViewerCapabilities({
         capabilities: { sessionMode: 'view', sessionModeReason: 'fork-not-implemented' },
       })
-      expect(page.blocks.get(SHARED)?.reason).toContain('仅可查看')
+      expect(page.blocks.get(SHARED)?.reason).toContain('Lecture seule')
     } finally {
       await page.fiber.dispose()
     }
@@ -443,8 +443,8 @@ describe('viewer session plugin', () => {
         capabilities: { sessionMode: 'view', sessionModeReason: 'viewer-not-authorized' },
       })
       deliverGrants(page.access, {})
-      expect(page.blocks.get(SHARED)?.reason).toBe('你的账号已无权访问该分享')
-      expect(page.blocks.get(CHILD)?.reason).toBe('你的账号已无权访问该分享')
+      expect(page.blocks.get(SHARED)?.reason).toBe('Votre compte n’a plus accès à ce partage')
+      expect(page.blocks.get(CHILD)?.reason).toBe('Votre compte n’a plus accès à ce partage')
     } finally {
       await page.fiber.dispose()
     }
@@ -478,7 +478,7 @@ describe('viewer session plugin', () => {
         capabilities: { sessionMode: 'view', ...(reason === undefined ? {} : { sessionModeReason: reason }) },
       })
       page.access.push({ type: 'remove', resource: { kind: 'session', id: CHILD } })
-      expect(page.blocks.get(CHILD)?.reason).toBe('分享者未允许分支此会话')
+      expect(page.blocks.get(CHILD)?.reason).toBe('Le propriétaire n’autorise pas la dérivation de cette session')
     } finally { await page.fiber.dispose() }
   })
 
@@ -490,7 +490,7 @@ describe('viewer session plugin', () => {
       listRows(page, { ownFork: true })
       expect(page.blocks.get(CHILD)).toBeUndefined()
       page.access.push({ type: 'remove', resource: { kind: 'session', id: CHILD } })
-      expect(page.blocks.get(CHILD)?.reason).toContain('分享者未允许分支此会话')
+      expect(page.blocks.get(CHILD)?.reason).toContain('Le propriétaire n’autorise pas la dérivation de cette session')
       page.access.push({ type: 'upsert', grant: { resource: { kind: 'session', id: CHILD }, actions: WRITES } })
       expect(page.blocks.get(CHILD)).toBeUndefined()
       // A list change re-reads the same answers and keeps them.
@@ -513,12 +513,12 @@ describe('viewer session plugin', () => {
       expect(injected.blocks.has(SHARED)).toBe(true)
       expect(injected.blocks.get(SHARED)).toBeUndefined()
       deliverGrants(injected.access, {})
-      await vi.waitFor(() => { expect(injected.blocks.get(SHARED)?.reason).toContain('无法确认该分享的当前状态') })
+      await vi.waitFor(() => { expect(injected.blocks.get(SHARED)?.reason).toContain('L’état actuel de ce partage n’a pas pu être confirmé ; il reste en lecture seule jusqu’à confirmation') })
     } finally { await injected.fiber.dispose() }
     const bare = await bench()
     try {
       bare.rows.set({ byId: { [SHARED]: { id: SHARED } } })
-      await vi.waitFor(() => { expect(bare.blocks.get(SHARED)?.reason).toContain('无法确认该分享的当前状态') })
+      await vi.waitFor(() => { expect(bare.blocks.get(SHARED)?.reason).toContain('L’état actuel de ce partage n’a pas pu être confirmé ; il reste en lecture seule jusqu’à confirmation') })
     } finally { await bare.fiber.dispose() }
   })
 
@@ -544,7 +544,7 @@ describe('viewer session plugin', () => {
       // The snapshot withdraws that Session: its composer returns to read-only at once and states the
       // page's own read-only reason, because the snapshot carries no per-Session refusal code.
       page.access.push({ type: 'remove', resource: { kind: 'session', id: OTHER } })
-      expect(page.blocks.get(OTHER)?.reason).toBe(zh['viewer.readonlyNote'])
+      expect(page.blocks.get(OTHER)?.reason).toBe(fr['viewer.readonlyNote'])
       // One withdrawn Session does not narrow what the page holds for the Session it presents.
       expect(page.blocks.get(SHARED)).toBeUndefined()
     } finally {
@@ -612,7 +612,7 @@ describe('viewer session plugin', () => {
 
   it('addresses no composer when a Session exposes no conversation face', async () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('the share is not read here'))))
-    const page = await bench(undefined, 'zh', { missingConversation: true })
+    const page = await bench(undefined, 'fr', { missingConversation: true })
     try {
       listRows(page, { ownFork: false })
       await vi.waitFor(() => { expect(page.scopesAsked).toContain(SHARED) })
@@ -626,7 +626,7 @@ describe('viewer session plugin', () => {
   it('reads the bare page when the served document names no share', async () => {
     const request = vi.fn((_input: unknown) => Promise.reject(new Error('context unavailable')))
     vi.stubGlobal('fetch', request)
-    const page = await bench(undefined, 'zh', { target: false })
+    const page = await bench(undefined, 'fr', { target: false })
     try {
       await vi.waitFor(() => { expect(request).toHaveBeenCalled() })
       // No share and no base path named: the context read asks for the empty share.

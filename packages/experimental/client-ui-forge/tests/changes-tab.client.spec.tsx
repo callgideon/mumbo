@@ -15,7 +15,7 @@ import type { ReviewActions } from '../src/client/ReviewComposer.tsx'
 import { ReviewQueue } from '../src/client/review-queue.ts'
 import { createChangesStore } from '../src/client/changes-store.ts'
 import { ChangesTab, type ChangesTabInjected, type ChangesTabProps } from '../src/client/ChangesTab.tsx'
-import { en, zh } from '../src/client/locales.ts'
+import { en, fr } from '../src/client/locales.ts'
 import type { PanelSnapshot } from '../src/client/source.ts'
 import css from '../src/client/ChangesTab.module.css'
 import baseCss from '../src/client/BaseMenu.module.css'
@@ -488,7 +488,7 @@ describe('ChangesTab local reads', () => {
     expect(m.view.getByRole('button', { name: 'All 0 files' }).hasAttribute('disabled')).toBe(true)
   })
 
-  it.each([['en', en], ['zh', zh]] as const)('explains a filter configuration failure in %s and retries the comparison', async (_locale, dictionary) => {
+  it.each([['en', en], ['fr', fr]] as const)('explains a filter configuration failure in %s and retries the comparison', async (_locale, dictionary) => {
     const m = mount({
       translate: makeTranslate(dictionary),
       setup: (faces) => { faces.localDiff.mockResolvedValueOnce(REFUSED.filterConfig) },

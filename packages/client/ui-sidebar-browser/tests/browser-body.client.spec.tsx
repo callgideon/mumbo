@@ -10,7 +10,7 @@ import type { BrowserBodyProps } from '../src/client/view/BrowserBody.tsx'
 import { BrowserBody } from '../src/client/view/BrowserBody.tsx'
 import { WEB_BROWSER_SANDBOX } from '../src/client/view/IframePresentation.ts'
 import { createIframePage } from '../src/client/pages.ts'
-import { zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 import { browserAddressCheckpoint, type BrowserTabState } from '../src/client/browser/BrowserPersistence.ts'
 import type { BrowserPageFactory, BrowserPageOptions } from '../src/client/browser/BrowserPage.ts'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
@@ -18,7 +18,7 @@ import { emptyBrowserFrame, type BrowserFrameState } from '../src/client/browser
 
 const SESSION = 'session' as SessionId
 const TAB = 'tab' as TabId
-const messages: Readonly<Record<string, string>> = zh
+const messages: Readonly<Record<string, string>> = en
 const lifetimes = new Set<AbortController>()
 const controllers: BrowserInjected[] = []
 let mountSequence = 0
@@ -91,7 +91,7 @@ describe('BrowserBody', () => {
     const mounted = mountBrowser(undefined, { refreshShortcut: { id: 'page.refresh' as never,
       label: 'Refresh', aliases: [], binding: null, keys: ['Ctrl', 'R'], aria: 'Control+R',
       modified: true, conflicts: [], issue: null } })
-    expect(mounted.view.getByRole('button', { name: zh.reload }).getAttribute('aria-keyshortcuts')).toBe('Control+R')
+    expect(mounted.view.getByRole('button', { name: en.reload }).getAttribute('aria-keyshortcuts')).toBe('Control+R')
   })
   it('shows the saved title and URL without loading until Restore is clicked', async () => {
     const target = { kind: 'https' as const, url: 'https://saved.example/page', title: 'Saved title' }
@@ -99,8 +99,8 @@ describe('BrowserBody', () => {
     expect(mounted.view.getByText(target.title)).toBeDefined()
     expect(mounted.view.getByText(target.url)).toBeDefined()
     expect(mounted.view.container.querySelector('iframe')).toBeNull()
-    expect(mounted.view.getByRole('button', { name: zh.reload })).toHaveProperty('disabled', false)
-    fireEvent.click(mounted.view.getByRole('button', { name: zh['restore.action'] }))
+    expect(mounted.view.getByRole('button', { name: en.reload })).toHaveProperty('disabled', false)
+    fireEvent.click(mounted.view.getByRole('button', { name: en['restore.action'] }))
     await waitFor(() => { expect(mounted.view.container.querySelector('iframe')?.src).toBe(target.url) })
     expect(mounted.view.queryByText(target.title)).toBeNull()
   })
@@ -119,7 +119,7 @@ describe('BrowserBody', () => {
     expect(mounted.view.getByRole('status').textContent).toContain('DNS failure')
     expect(mounted.view.getByRole('status').textContent).toContain('-105')
     act(() => { state.set({ ...state.getSnapshot(), error: { code: -105, description: undefined } }) })
-    expect(mounted.view.getByRole('status').textContent).toBe(zh['load.failed'])
+    expect(mounted.view.getByRole('status').textContent).toBe(en['load.failed'])
     act(() => { providers[0]!.openRequested('https://new.example/') })
     expect(mounted.tabActions.openTab).toHaveBeenCalledExactlyOnceWith('browser', {
       params: { url: 'https://new.example/' }, revealIfOpened: false,
@@ -131,12 +131,12 @@ describe('BrowserBody', () => {
     const input = mounted.view.getByRole('textbox')
     fireEvent.change(input, { target: { value: 'javascript:alert(1)' } })
     fireEvent.submit(input.closest('form')!)
-    await waitFor(() => { expect(mounted.view.getByRole('alert').textContent).toBe(zh['error.protocol']) })
+    await waitFor(() => { expect(mounted.view.getByRole('alert').textContent).toBe(en['error.protocol']) })
     expect(input).toHaveProperty('value', 'javascript:alert(1)')
     expect(mounted.view.container.querySelector('iframe')).toBeNull()
     fireEvent.change(input, { target: { value: 'file:///work/index.html' } })
     fireEvent.submit(input.closest('form')!)
-    expect(mounted.view.getByRole('alert').textContent).toBe(zh['error.protocol'])
+    expect(mounted.view.getByRole('alert').textContent).toBe(en['error.protocol'])
   })
 
   it('renders HTTPS in the fixed sandbox and follows controller history', async () => {
@@ -152,32 +152,32 @@ describe('BrowserBody', () => {
     expect(frame.getAttribute('allow')).toBeNull()
     // jsdom does not reflect the iframe referrerPolicy property to its attribute.
     expect(frame.referrerPolicy).toBe('no-referrer')
-    const disableSandbox = mounted.view.getByRole('button', { name: zh['sandbox.disable'] })
+    const disableSandbox = mounted.view.getByRole('button', { name: en['sandbox.disable'] })
     const protectedMark = disableSandbox.querySelector('svg path:last-child')?.getAttribute('d')
     fireEvent.click(disableSandbox)
     await waitFor(() => { expect(mounted.view.container.querySelector('iframe')?.getAttribute('sandbox')).toBeNull() })
-    expect(mounted.view.getByRole('status').textContent).toBe(zh['sandbox.warning'])
-    const enableSandbox = mounted.view.getByRole('button', { name: zh['sandbox.enable'] })
+    expect(mounted.view.getByRole('status').textContent).toBe(en['sandbox.warning'])
+    const enableSandbox = mounted.view.getByRole('button', { name: en['sandbox.enable'] })
     expect(enableSandbox.querySelector('svg path:last-child')?.getAttribute('d')).not.toBe(protectedMark)
     fireEvent.click(enableSandbox)
     await waitFor(() => { expect(mounted.view.container.querySelector('iframe')?.getAttribute('sandbox')).toBe(WEB_BROWSER_SANDBOX) })
-    expect(mounted.view.getByRole('button', { name: zh['sandbox.disable'] }).querySelector('svg path:last-child')?.getAttribute('d')).toBe(protectedMark)
+    expect(mounted.view.getByRole('button', { name: en['sandbox.disable'] }).querySelector('svg path:last-child')?.getAttribute('d')).toBe(protectedMark)
 
     fireEvent.change(input, { target: { value: 'https://example.com/two' } })
     fireEvent.submit(input.closest('form')!)
     await waitFor(() => { expect(mounted.view.container.querySelector('iframe')?.getAttribute('src')).toBe('https://example.com/two') })
-    fireEvent.click(mounted.view.getByRole('button', { name: zh.back }))
+    fireEvent.click(mounted.view.getByRole('button', { name: en.back }))
     await waitFor(() => { expect(mounted.view.container.querySelector('iframe')?.getAttribute('src')).toBe('https://example.com/one') })
     expect(input).toHaveProperty('value', 'https://example.com/one')
     frame = mounted.view.container.querySelector('iframe')!
     expect(frame.getAttribute('src')).toBe('https://example.com/one')
     expect(mounted.store.getSnapshot().byTab[TAB]?.index).toBe(0)
-    fireEvent.click(mounted.view.getByRole('button', { name: zh.forward }))
+    fireEvent.click(mounted.view.getByRole('button', { name: en.forward }))
     await waitFor(() => { expect(mounted.view.container.querySelector('iframe')?.getAttribute('src')).toBe('https://example.com/two') })
     expect(input).toHaveProperty('value', 'https://example.com/two')
 
     const beforeReload = mounted.store.getSnapshot().byTab[TAB]!.request!.revision
-    fireEvent.click(mounted.view.getByRole('button', { name: zh.reload }))
+    fireEvent.click(mounted.view.getByRole('button', { name: en.reload }))
     expect(mounted.store.getSnapshot().byTab[TAB]!.request?.revision).toBe(beforeReload + 1)
     fireEvent.submit(input.closest('form')!)
     expect(mounted.store.getSnapshot().byTab[TAB]!.request?.revision).toBe(beforeReload + 2)
@@ -200,18 +200,18 @@ describe('BrowserBody', () => {
 
     fireEvent.load(frame)
     expect(mounted.store.getSnapshot().byTab[TAB]?.navigation).toEqual({ status: 'known', revision })
-    expect(mounted.view.getByRole('button', { name: zh.back })).toHaveProperty('disabled', false)
+    expect(mounted.view.getByRole('button', { name: en.back })).toHaveProperty('disabled', false)
     fireEvent.load(frame)
     expect(mounted.store.getSnapshot().byTab[TAB]?.navigation).toEqual({ status: 'unknown', revision })
-    expect(mounted.view.getByText(zh['address.changed'])).toBeDefined()
-    expect(mounted.view.getByRole('button', { name: zh.back })).toHaveProperty('disabled', true)
-    expect(mounted.view.getByRole('button', { name: zh.forward })).toHaveProperty('disabled', true)
-    expect(mounted.view.getByRole('button', { name: zh.external })).toHaveProperty('disabled', true)
-    expect(mounted.view.getByRole('button', { name: zh.reload })).toHaveProperty('disabled', false)
-    fireEvent.click(mounted.view.getByRole('button', { name: zh.external }))
+    expect(mounted.view.getByText(en['address.changed'])).toBeDefined()
+    expect(mounted.view.getByRole('button', { name: en.back })).toHaveProperty('disabled', true)
+    expect(mounted.view.getByRole('button', { name: en.forward })).toHaveProperty('disabled', true)
+    expect(mounted.view.getByRole('button', { name: en.external })).toHaveProperty('disabled', true)
+    expect(mounted.view.getByRole('button', { name: en.reload })).toHaveProperty('disabled', false)
+    fireEvent.click(mounted.view.getByRole('button', { name: en.external }))
     expect(open).not.toHaveBeenCalled()
 
-    fireEvent.click(mounted.view.getByRole('button', { name: zh.reload }))
+    fireEvent.click(mounted.view.getByRole('button', { name: en.reload }))
     expect(mounted.store.getSnapshot().byTab[TAB]?.navigation).toEqual({ status: 'loading', revision: revision + 1 })
   })
 
@@ -225,11 +225,11 @@ describe('BrowserBody', () => {
 
     fireEvent.error(failedFrame)
     expect(mounted.injected.keyedHooks.browserState(TAB)?.getSnapshot().frame.error).toBeDefined()
-    await waitFor(() => { expect(mounted.view.getByText(zh['load.failed'])).toBeDefined() })
-    fireEvent.click(mounted.view.getByRole('button', { name: zh.reload }))
-    await waitFor(() => { expect(mounted.view.queryByText(zh['load.failed'])).toBeNull() })
+    await waitFor(() => { expect(mounted.view.getByText(en['load.failed'])).toBeDefined() })
+    fireEvent.click(mounted.view.getByRole('button', { name: en.reload }))
+    await waitFor(() => { expect(mounted.view.queryByText(en['load.failed'])).toBeNull() })
     fireEvent.error(failedFrame)
-    expect(mounted.view.queryByText(zh['load.failed'])).toBeNull()
+    expect(mounted.view.queryByText(en['load.failed'])).toBeNull()
   })
 
   it('loads loopback under the default sandbox and keeps it across sandbox changes', async () => {
@@ -240,9 +240,9 @@ describe('BrowserBody', () => {
     await waitFor(() => { expect(mounted.view.container.querySelector('iframe')?.getAttribute('src')).toBe('http://localhost:5173/') })
     expect(mounted.view.container.querySelector('iframe')?.getAttribute('sandbox')).toBe(WEB_BROWSER_SANDBOX)
 
-    fireEvent.click(mounted.view.getByRole('button', { name: zh['sandbox.disable'] }))
+    fireEvent.click(mounted.view.getByRole('button', { name: en['sandbox.disable'] }))
     await waitFor(() => { expect(mounted.view.container.querySelector('iframe')?.getAttribute('sandbox')).toBeNull() })
-    fireEvent.click(mounted.view.getByRole('button', { name: zh['sandbox.enable'] }))
+    fireEvent.click(mounted.view.getByRole('button', { name: en['sandbox.enable'] }))
     await waitFor(() => { expect(mounted.view.container.querySelector('iframe')?.getAttribute('sandbox')).toBe(WEB_BROWSER_SANDBOX) })
     expect(mounted.view.container.querySelector('iframe')?.getAttribute('src')).toBe('http://localhost:5173/')
   })
@@ -253,14 +253,14 @@ describe('BrowserBody', () => {
     const input = mounted.view.getByRole('textbox') as HTMLInputElement
     await waitFor(() => { expect(input.value).toBe('https://initial.example/path') })
     await waitFor(() => { expect(mounted.view.container.querySelector('iframe')).not.toBeNull() })
-    fireEvent.click(mounted.view.getByRole('button', { name: zh.external }))
+    fireEvent.click(mounted.view.getByRole('button', { name: en.external }))
     expect(open).toHaveBeenCalledWith('https://initial.example/path', '_blank', 'noopener,noreferrer')
   })
 
   it('keeps a rejected initial URL in the address input for editing', async () => {
     const mounted = mountBrowser({ url: 'file:/work/index.html' })
     const input = mounted.view.getByRole('textbox')
-    await waitFor(() => { expect(mounted.view.getByRole('alert').textContent).toBe(zh['error.protocol']) })
+    await waitFor(() => { expect(mounted.view.getByRole('alert').textContent).toBe(en['error.protocol']) })
     expect(input).toHaveProperty('value', 'file:/work/index.html')
     expect(mounted.view.container.querySelector('iframe')).toBeNull()
   })

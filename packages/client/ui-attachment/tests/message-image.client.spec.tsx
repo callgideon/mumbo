@@ -9,7 +9,7 @@ import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import { SessionId } from '@deepseek-ai/dsh-session/types'
 import { SlotTestRuntime } from '@deepseek-ai/dsh-client-test-runtime'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
-import { en, zh } from '@deepseek-ai/dsh-client-ui-conversation/src/client/locales.ts'
+import { en, fr } from '@deepseek-ai/dsh-client-ui-conversation/src/client/locales.ts'
 import { UiConversation } from '@deepseek-ai/dsh-client-ui-conversation/src/client/conversation/assembly.ts'
 import { ImageGallery, MessageImage } from '../src/MessageImage.tsx'
 import type { MessageImageLabels } from '../src/MessageImage.tsx'
@@ -18,12 +18,12 @@ import * as attachmentPlugin from '../src/client/index.ts'
 afterEach(cleanup)
 
 const labels: MessageImageLabels = {
-  image: '图片',
-  open: '查看原图',
-  openNamed: label => `${label}，点击查看原图`,
-  loading: '图片加载中…',
-  loadFailed: '图片加载失败，点击重试',
-  lightbox: { dialog: '原图预览', close: '关闭原图预览' },
+  image: 'Image',
+  open: 'Voir l\'original',
+  openNamed: label => `${label}, cliquez pour voir l'original`,
+  loading: 'Chargement de l\'image…',
+  loadFailed: 'L\'image n\'a pas pu être chargée ; cliquez pour réessayer',
+  lightbox: { dialog: 'Aperçu de l\'image originale', close: 'Fermer l\'aperçu de l\'image d\'origine' },
 }
 
 const attachment = {
@@ -42,7 +42,7 @@ describe('MessageImage', () => {
     })
     const view = render(<MessageImage
       getTriggerProps={contextMenuHook()().getTriggerProps} fileDrag={fileDrag} image={{ attachment }} load={load} variant="single" labels={labels} />)
-    expect(view.queryByText('图片加载中…')).toBeNull()
+    expect(view.queryByText('Chargement de l\'image…')).toBeNull()
     expect((view.getByAltText('history.png') as HTMLImageElement).src).toContain('blob:seeded')
     expect(load).toHaveBeenCalledWith(attachment)
   })
@@ -51,24 +51,24 @@ describe('MessageImage', () => {
     const load = vi.fn().mockResolvedValue('blob:history')
     const view = render(<MessageImage
       getTriggerProps={contextMenuHook()().getTriggerProps} fileDrag={fileDrag} image={{ attachment }} load={load} variant="single" labels={labels} />)
-    const frame = view.getByRole('button', { name: 'history.png，点击查看原图' })
+    const frame = view.getByRole('button', { name: 'history.png, cliquez pour voir l\'original' })
     expect(frame.getAttribute('style')).toContain('width: 240px')
     expect(frame.getAttribute('style')).toContain('height: 120px')
-    expect(frame.getAttribute('title')).toBe('查看原图')
+    expect(frame.getAttribute('title')).toBe('Voir l\'original')
     await waitFor(() => { expect(view.getByAltText('history.png')).toBeTruthy() })
     expect(load).toHaveBeenCalledWith(attachment)
     fireEvent.click(frame)
-    expect(view.getByRole('dialog', { name: '原图预览' })).toBeTruthy()
-    fireEvent.click(view.getByRole('button', { name: '关闭原图预览' }))
-    expect(view.queryByRole('dialog', { name: '原图预览' })).toBeNull()
+    expect(view.getByRole('dialog', { name: 'Aperçu de l\'image originale' })).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: 'Fermer l\'aperçu de l\'image d\'origine' }))
+    expect(view.queryByRole('dialog', { name: 'Aperçu de l\'image originale' })).toBeNull()
   })
 
   it('ignores a click while the thumbnail is still loading', () => {
     const load = vi.fn(() => new Promise<string>(() => {}))
     const view = render(<MessageImage
       getTriggerProps={contextMenuHook()().getTriggerProps} fileDrag={fileDrag} image={{ attachment }} load={load} variant="single" labels={labels} />)
-    const frame = view.getByRole('button', { name: 'history.png，点击查看原图' })
-    expect(view.getByText('图片加载中…')).toBeTruthy()
+    const frame = view.getByRole('button', { name: 'history.png, cliquez pour voir l\'original' })
+    expect(view.getByText('Chargement de l\'image…')).toBeTruthy()
     fireEvent.click(frame)
     expect(view.queryByRole('dialog')).toBeNull()
   })
@@ -78,8 +78,8 @@ describe('MessageImage', () => {
     const load = vi.fn().mockResolvedValue('blob:unnamed')
     const view = render(<MessageImage
       getTriggerProps={contextMenuHook()().getTriggerProps} fileDrag={fileDrag} image={{ attachment: unnamed }} load={load} variant="single" labels={labels} />)
-    await waitFor(() => { expect(view.getByAltText('图片')).toBeTruthy() })
-    expect(view.getByRole('button', { name: '图片，点击查看原图' })).toBeTruthy()
+    await waitFor(() => { expect(view.getByAltText('Image')).toBeTruthy() })
+    expect(view.getByRole('button', { name: "Image, cliquez pour voir l'original" })).toBeTruthy()
   })
 
   it('surfaces a retry control when durable bytes cannot be read, including a failed retry', async () => {
@@ -89,9 +89,9 @@ describe('MessageImage', () => {
       .mockResolvedValueOnce('blob:retry')
     const view = render(<MessageImage
       getTriggerProps={contextMenuHook()().getTriggerProps} fileDrag={fileDrag} image={{ attachment }} load={load} variant="single" labels={labels} />)
-    const retry = await view.findByRole('button', { name: '图片加载失败，点击重试' })
+    const retry = await view.findByRole('button', { name: 'L\'image n\'a pas pu être chargée ; cliquez pour réessayer' })
     fireEvent.click(retry)
-    const retryAgain = await view.findByRole('button', { name: '图片加载失败，点击重试' })
+    const retryAgain = await view.findByRole('button', { name: 'L\'image n\'a pas pu être chargée ; cliquez pour réessayer' })
     fireEvent.click(retryAgain)
     await waitFor(() => { expect(view.getByAltText('history.png')).toBeTruthy() })
     expect(load).toHaveBeenCalledTimes(3)
@@ -103,7 +103,7 @@ describe('MessageImage', () => {
       <MessageImage
         getTriggerProps={contextMenuHook()().getTriggerProps} fileDrag={fileDrag} image={{ attachment: { ...attachment, width: 100, height: 2000 } }} load={load} variant="single" labels={labels} />,
     )
-    const tallFrame = tall.getByRole('button', { name: 'history.png，点击查看原图' })
+    const tallFrame = tall.getByRole('button', { name: 'history.png, cliquez pour voir l\'original' })
     expect(tallFrame.getAttribute('style')).toContain('width: 60px')
     expect(tallFrame.getAttribute('style')).toContain('height: 240px')
     await waitFor(() => { expect(tall.getByAltText('history.png')).toBeTruthy() })
@@ -113,7 +113,7 @@ describe('MessageImage', () => {
       <MessageImage
         getTriggerProps={contextMenuHook()().getTriggerProps} fileDrag={fileDrag} image={{ attachment: { ...attachment, width: 4000, height: 100 } }} load={load} variant="single" labels={labels} />,
     )
-    const wideFrame = wide.getByRole('button', { name: 'history.png，点击查看原图' })
+    const wideFrame = wide.getByRole('button', { name: 'history.png, cliquez pour voir l\'original' })
     expect(wideFrame.getAttribute('style')).toContain('width: 240px')
     expect(wideFrame.getAttribute('style')).toContain('height: 60px')
     await waitFor(() => { expect(wide.getByAltText('history.png')).toBeTruthy() })
@@ -123,7 +123,7 @@ describe('MessageImage', () => {
       <MessageImage
         getTriggerProps={contextMenuHook()().getTriggerProps} fileDrag={fileDrag} image={{ attachment: { ...attachment, width: 100, height: 100 } }} load={load} variant="single" labels={labels} />,
     )
-    const smallFrame = small.getByRole('button', { name: 'history.png，点击查看原图' })
+    const smallFrame = small.getByRole('button', { name: 'history.png, cliquez pour voir l\'original' })
     expect(smallFrame.getAttribute('style')).toContain('width: 100px')
     expect(smallFrame.getAttribute('style')).toContain('height: 100px')
   })
@@ -132,7 +132,7 @@ describe('MessageImage', () => {
     const load = vi.fn(() => new Promise<string>(() => {}))
     const view = render(<MessageImage
       getTriggerProps={contextMenuHook()().getTriggerProps} fileDrag={fileDrag} image={{ attachment }} load={load} variant="tile" labels={labels} />)
-    const frame = view.getByRole('button', { name: 'history.png，点击查看原图' })
+    const frame = view.getByRole('button', { name: 'history.png, cliquez pour voir l\'original' })
     expect(frame.getAttribute('data-variant')).toBe('tile')
     expect(frame.getAttribute('style')).toBeNull()
   })
@@ -142,12 +142,12 @@ describe('MessageImage', () => {
     const view = render(<MessageImage
       getTriggerProps={contextMenuHook()().getTriggerProps}
       fileDrag={fileDrag} image={{ attachment }} load={load} variant={variant} labels={labels} />)
-    const retry = await view.findByRole('button', { name: '图片加载失败，点击重试' })
+    const retry = await view.findByRole('button', { name: 'L\'image n\'a pas pu être chargée ; cliquez pour réessayer' })
     expect(retry.getAttribute('data-variant')).toBe(variant)
   })
 
   it.each([
-    ['Chinese', labels],
+    ['French', labels],
     ['English', { ...labels, loading: 'Loading image…', loadFailed: 'Image failed to load; click to retry' }],
   ] as const)('labels thumbnail status icons and retries a failed read in %s', async (_locale, statusLabels) => {
     const pending = Promise.withResolvers<string>()
@@ -182,7 +182,7 @@ describe('MessageImage', () => {
     fireEvent.click(await view.findByRole('button', { name: labels.loadFailed }))
     const image = await view.findByAltText('Image 2')
     expect(image.closest('button')?.getAttribute('data-variant')).toBe('thumbnail')
-    const opener = view.getByRole('button', { name: 'Image 2，点击查看原图' })
+    const opener = view.getByRole('button', { name: 'Image 2, cliquez pour voir l\'original' })
     opener.focus()
     fireEvent.click(opener)
     expect(view.getByRole('dialog')).toBeTruthy()
@@ -236,7 +236,7 @@ describe('MessageImage preview arm', () => {
       <MessageImage
         getTriggerProps={contextMenuHook()().getTriggerProps} fileDrag={fileDrag} image={{ preview: { url: 'blob:unprobed' } }} load={load} variant="single" labels={labels} />,
     )
-    const img = view.getByAltText('图片') as HTMLImageElement
+    const img = view.getByAltText('Image') as HTMLImageElement
     const frame = img.closest('button') as HTMLButtonElement
     expect(frame.style.width).toBe('240px')
     expect(frame.style.height).toBe('240px')
@@ -247,8 +247,8 @@ describe('MessageImage preview arm', () => {
       <MessageImage
         getTriggerProps={contextMenuHook()().getTriggerProps} fileDrag={fileDrag} image={{ preview: { url: 'blob:box' } }} load={vi.fn(async () => '')} variant="tile" labels={labels} />,
     )
-    fireEvent.click(view.getByRole('button', { name: '图片，点击查看原图' }))
-    expect(view.getByRole('dialog', { name: '原图预览' })).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: "Image, cliquez pour voir l'original" }))
+    expect(view.getByRole('dialog', { name: 'Aperçu de l\'image originale' })).toBeTruthy()
   })
 })
 
@@ -294,7 +294,8 @@ describe('ImageGallery', () => {
     const runtime = await SlotTestRuntime.create()
     onTestFinished(() => runtime.dispose())
     const locale = new LocaleRuntime(runtime.ctx)
-    locale.register('conversation', { en, zh })
+    locale.addLanguage({ id: 'fr', label: 'Français', fallback: 'en' })
+    locale.register('conversation', { en, fr })
     locale.setLocale('en')
     runtime.ctx.provide('locale', locale)
     runtime.slots.installLocale(locale)
@@ -319,7 +320,7 @@ describe('ImageGallery', () => {
     const image = view.getByAltText('preview.png')
     fireEvent.contextMenu(image, { clientX: 7, clientY: 8 })
     expect(vi.spyOn(runtime.ctx.contextMenus, 'open')).toHaveBeenCalledWith({ kind: 'image', value: { url: 'blob:labels', name: 'preview.png' } }, { x: 7, y: 8 })
-    const frame = view.getByRole('button', { name: 'preview.png，点击查看原图' })
+    const frame = view.getByRole('button', { name: 'preview.png, cliquez pour voir l\'original' })
     expect(frame.getAttribute('title')).toBe(labels.open)
     fireEvent.click(frame)
     expect(view.getByRole('dialog', { name: labels.lightbox.dialog })).toBeTruthy()
@@ -341,8 +342,9 @@ describe('ImageGallery', () => {
     const runtime = await SlotTestRuntime.create()
     onTestFinished(() => runtime.dispose())
     const locale = new LocaleRuntime(runtime.ctx)
-    locale.register('conversation', { en, zh })
-    locale.setLocale('zh')
+    locale.addLanguage({ id: 'fr', label: 'Français', fallback: 'en' })
+    locale.register('conversation', { en, fr })
+    locale.setLocale('fr')
     runtime.ctx.provide('locale', locale)
     new UiConversation(runtime.ctx, runtime.sessions)
     runtime.slots.installLocale(locale)
@@ -361,19 +363,19 @@ describe('ImageGallery', () => {
     }, { session })
     const { view, container } = slot
     await waitFor(() => { expect(view.getByAltText('history.png')).toBeTruthy() })
-    expect(view.getByRole('button', { name: 'history.png，点击查看原图' })).toBeTruthy()
+    expect(view.getByRole('button', { name: 'history.png, cliquez pour voir l\'original' })).toBeTruthy()
     expect(container.querySelector('[data-align="end"]')).not.toBeNull()
     expect(loadImage).toHaveBeenCalledWith(attachment)
     fireEvent.contextMenu(view.getByAltText('history.png'), { clientX: 9, clientY: 10 })
     expect(vi.spyOn(runtime.ctx.contextMenus, 'open')).toHaveBeenCalledWith({ kind: 'image', value: { url: 'blob:slot-image', name: 'history.png', mediaType: 'image/png' } }, { x: 9, y: 10 })
-    expect(view.getByRole('button', { name: 'history.png，点击查看原图' }).getAttribute('data-variant')).toBe('single')
+    expect(view.getByRole('button', { name: 'history.png, cliquez pour voir l\'original' }).getAttribute('data-variant')).toBe('single')
     for (const [compact, thumbnail, variant] of [
       [true, false, 'tile'],
       [false, true, 'thumbnail'],
       [false, false, 'single'],
     ] as const) {
       slot.update({ images: [{ attachment }], loadImage, align: 'end', compact, thumbnail })
-      expect(view.getByRole('button', { name: 'history.png，点击查看原图' }).getAttribute('data-variant')).toBe(variant)
+      expect(view.getByRole('button', { name: 'history.png, cliquez pour voir l\'original' }).getAttribute('data-variant')).toBe(variant)
       expect(view.getByAltText('history.png').getAttribute('src')).toBe('blob:slot-image')
       expect(container.querySelector('[data-align="end"]')).not.toBeNull()
     }

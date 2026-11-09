@@ -26,7 +26,7 @@ import { FileNavigator } from '../src/client/FileNavigator.tsx'
 import { FilesBody } from '../src/client/FilesBody.tsx'
 import type { FilesBodyProps } from '../src/client/FilesBody.tsx'
 import { NavigatorToggle } from '../src/client/NavigatorToggle.tsx'
-import { zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 import { createFilesStore } from '../src/client/store.ts'
 import type { FilesStoreInstance } from '../src/client/store.ts'
 import { scriptedList } from './scripted-list.client.ts'
@@ -136,14 +136,14 @@ function harness(placement: Placement, controller: AbortController) {
     sidebar: { expanded: true, fullscreen: false },
     panel: { id: PANE, isFloating: placement.isFloating ?? false },
     tab: {
-      id: placement.tabId, kind: 'files', contentId: placement.contentId, title: zh['type.label'], visible: true,
+      id: placement.tabId, kind: 'files', contentId: placement.contentId, title: en['type.label'], visible: true,
       navigation: { address: placement.contentId, params: undefined, revision: 1 },
       signal: placement.signal,
       actions: tabActions, refreshShortcut: placement.refreshShortcut,
     },
   })
   const { hooks, keyedHooks, ...members } = face
-  const t = makeTranslate(zh)
+  const t = makeTranslate(en)
   const onOpen = vi.fn<(address: string) => void>()
   const openMenu = vi.fn()
   const shared = {

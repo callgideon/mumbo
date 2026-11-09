@@ -20,7 +20,7 @@ import { FileTree } from './FileTree.tsx'
 import { FileNavigator } from './FileNavigator.tsx'
 import { FilesBody } from './FilesBody.tsx'
 import { FilesTitle } from './FilesTitle.tsx'
-import { en, ja, es, fr, de, ru, pt, zh } from './locales.ts'
+import { en, ja, es, fr, de, ru, pt } from './locales.ts'
 import { NavigatorToggle } from './NavigatorToggle.tsx'
 import { createFilesStore } from './store.ts'
 
@@ -150,7 +150,7 @@ export function apply(ctx: ClientContext): void {
     }), 'ui-sidebar-files: shortcut')
   })
   ctx.effect(() => ctx.sidebarRightTabs.register(filesDefinition(t)), 'ui-sidebar-files: files type')
-  ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }), 'ui-sidebar-files: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { en, ja, es, fr, de, ru, pt }), 'ui-sidebar-files: dictionaries')
 
   ctx.effect(() => ctx.slots.registerFactory({
     name: 'sidebar.files.tree', scope: 'root', locale: NS, slots: { accessory: { scope: 'root' } },

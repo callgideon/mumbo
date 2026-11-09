@@ -7,7 +7,7 @@ import type { RemoteFailure } from '@deepseek-ai/dsh-api-remotes/client'
 import { fileAddressFor } from '@deepseek-ai/dsh-util-workspace-path'
 import { failureLine } from '../src/client/workspace-tree.ts'
 import type { DirLevel } from '../src/client/store.ts'
-import { zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 import { mountBody, PANE, ROOT, SESSION } from './mount.client.tsx'
 
 const ROOT_LEVEL: DirLevel = {
@@ -33,11 +33,11 @@ describe('FilesBody', () => {
       binding: null, keys: ['Ctrl', 'R'], aria: 'Control+R', modified: true, conflicts: [], issue: null } })
     await act(() => script.watches.ready(ROOT))
     await act(() => script.settle({ ok: true, value: ROOT_LEVEL }))
-    expect(view.getByRole('button', { name: zh.reload }).getAttribute('aria-keyshortcuts')).toBe('Control+R')
+    expect(view.getByRole('button', { name: en.reload }).getAttribute('aria-keyshortcuts')).toBe('Control+R')
   })
   it('says so when the session has no workspace directory, and asks for nothing', () => {
     const { view, script } = mountBody(null)
-    expect(view.container.querySelector('[data-files-state="no-workspace"]')?.textContent).toBe(zh.noWorkspace)
+    expect(view.container.querySelector('[data-files-state="no-workspace"]')?.textContent).toBe(en.noWorkspace)
     expect(script.list).not.toHaveBeenCalled()
   })
 
@@ -52,7 +52,7 @@ describe('FilesBody', () => {
     const header = page.firstElementChild!
     expect(header.querySelector('[data-files-path]')?.getAttribute('title')).toBe(ROOT)
     expect([...header.querySelectorAll('button:not([data-files-auto-refresh])')].map(button => button.getAttribute('aria-label')))
-      .toEqual([zh.reload])
+      .toEqual([en.reload])
     const content = page.querySelector('[data-files-content]')!
     expect(content.children).toHaveLength(1)
     const navigator = content.firstElementChild!
@@ -66,7 +66,7 @@ describe('FilesBody', () => {
     fireEvent.keyDown(navigator, { key: 'Escape' })
     act(() => { instance.actions.shown(PANE, false) })
     expect(view.container.querySelector('[data-files-navigator]')).not.toBeNull()
-    expect(view.getByRole('button', { name: zh.reload }).hasAttribute('disabled')).toBe(false)
+    expect(view.getByRole('button', { name: en.reload }).hasAttribute('disabled')).toBe(false)
     const bound = tabActions.bindCommands.mock.lastCall?.[0]
     expect(typeof bound?.refresh).toBe('function')
   })
@@ -190,18 +190,18 @@ describe('FilesBody', () => {
     expect(view.container.querySelector('[data-files-navigator]')).not.toBeNull()
     const other = view.container.querySelector(`[data-files-path="${ROOT}/pipe"]`)!
     expect(other.querySelector('button')).toBeNull()
-    expect(other.querySelector('[aria-disabled="true"]')?.getAttribute('title')).toBe(zh['entry.other'])
+    expect(other.querySelector('[aria-disabled="true"]')?.getAttribute('title')).toBe(en['entry.other'])
   })
 
   it('marks a cut listing and an empty one', async () => {
     const { view, script } = mountBody()
     await act(() => script.watches.ready(ROOT))
     await act(() => script.settle({ ok: true, value: { entries: [{ name: 'd', type: 'directory' }], truncated: true } }))
-    expect(view.container.querySelector('[data-files-row="truncated"]')?.textContent).toBe(zh.truncated)
+    expect(view.container.querySelector('[data-files-row="truncated"]')?.textContent).toBe(en.truncated)
     act(() => { fireEvent.click(within(view.container.querySelector<HTMLElement>(`[data-files-path="${ROOT}/d"]`)!).getByRole('button', { name: 'd' })) })
     await act(() => script.watches.ready(`${ROOT}/d`))
     await act(() => script.settle({ ok: true, value: { entries: [], truncated: false } }))
-    expect(view.container.querySelector('[data-files-row="empty"]')?.textContent).toBe(zh.empty)
+    expect(view.container.querySelector('[data-files-row="empty"]')?.textContent).toBe(en.empty)
   })
 
   it('shows a failed level under its directory in terms of the directory', async () => {
@@ -211,7 +211,7 @@ describe('FilesBody', () => {
       ok: false,
       error: new RemoteError('workspace-file/not-found', 'gone', { path: ROOT }),
     }))
-    expect(view.container.querySelector('[data-files-row="failed"]')?.textContent).toBe(zh['error.notFound'])
+    expect(view.container.querySelector('[data-files-row="failed"]')?.textContent).toBe(en['error.notFound'])
     expect(view.container.querySelector('[data-files-row="empty"]')).toBeNull()
   })
 
@@ -220,12 +220,12 @@ describe('FilesBody', () => {
     await act(() => script.watches.ready(ROOT))
     await act(() => script.settle({ ok: true, value: ROOT_LEVEL }))
     const rows = names(view.container)
-    const reload = view.getByRole('button', { name: zh.reload })
+    const reload = view.getByRole('button', { name: en.reload })
     act(() => { fireEvent.click(reload) })
     await act(() => script.settle({
       ok: false, error: new RemoteError('workspace-file/not-found', 'gone', { path: ROOT }),
     }))
-    expect(view.container.querySelector('[data-files-row="failed"]')?.textContent).toBe(zh['error.notFound'])
+    expect(view.container.querySelector('[data-files-row="failed"]')?.textContent).toBe(en['error.notFound'])
     expect(names(view.container)).toEqual(rows)
     act(() => { fireEvent.click(reload) })
     await act(() => script.settle({ ok: true, value: ROOT_LEVEL }))
@@ -270,7 +270,7 @@ describe('FilesBody', () => {
     expect(body.scrollTop).toBe(120)
     expect(instance.getSnapshot().byPane[PANE]!.tree!.expanded).toEqual([ROOT, child])
     expect(script.watches.opened.map(stream => stream.path)).toEqual([ROOT, child])
-    expect(view.container.querySelector('[data-files-reload]')?.getAttribute('aria-label')).toBe(zh.reload)
+    expect(view.container.querySelector('[data-files-reload]')?.getAttribute('aria-label')).toBe(en.reload)
   })
 
   it('keeps the automatic control hidden and enabled by default, with manual reload independent of its setting', async () => {
@@ -280,13 +280,13 @@ describe('FilesBody', () => {
     const automatic = view.container.querySelector('[data-files-auto-refresh]')!
     expect(automatic.closest('span[hidden]')).not.toBeNull()
     expect(automatic.getAttribute('aria-pressed')).toBe('true')
-    expect(view.queryByRole('button', { name: zh.autoRefresh })).toBeNull()
-    expect(view.getByRole('button', { name: zh.reload })).toBeDefined()
+    expect(view.queryByRole('button', { name: en.autoRefresh })).toBeNull()
+    expect(view.getByRole('button', { name: en.reload })).toBeDefined()
     act(() => { fireEvent.click(automatic) })
     expect(automatic.getAttribute('aria-pressed')).toBe('false')
     await act(() => stream.deliver('change'))
     expect(script.list).toHaveBeenCalledTimes(1)
-    act(() => { fireEvent.click(view.getByRole('button', { name: zh.reload })) })
+    act(() => { fireEvent.click(view.getByRole('button', { name: en.reload })) })
     await act(() => script.settle({ ok: true, value: ROOT_LEVEL }))
     expect(script.list).toHaveBeenCalledTimes(2)
     expect(instance.getSnapshot().byPane[PANE]!.tree!.autoRefresh).toBe(false)
@@ -295,19 +295,19 @@ describe('FilesBody', () => {
 })
 
 describe('failureLine', () => {
-  const t = makeTranslate(zh)
+  const t = makeTranslate(en)
 
   it('names each directory failure', () => {
-    expect(failureLine(t, new RemoteError('workspace-file/not-found', 'x', { path: 'p' }))).toBe(zh['error.notFound'])
+    expect(failureLine(t, new RemoteError('workspace-file/not-found', 'x', { path: 'p' }))).toBe(en['error.notFound'])
     expect(failureLine(t, new RemoteError('workspace-file/outside-workspace', 'x', { path: 'p' })))
-      .toBe(zh['error.outsideWorkspace'])
+      .toBe(en['error.outsideWorkspace'])
     expect(failureLine(t, new RemoteError('workspace-file/not-directory', 'x', { path: 'p', kind: 'file' })))
-      .toBe(zh['error.notDirectory'])
+      .toBe(en['error.notDirectory'])
   })
 
   it('carries an unclassified failure\'s own message', () => {
     const failure = { code: 'remote/transport', message: 'socket closed' } as unknown as RemoteFailure
-    expect(failureLine(t, failure)).toBe('读取失败：socket closed')
+    expect(failureLine(t, failure)).toBe('Read failed: socket closed')
   })
 })
 

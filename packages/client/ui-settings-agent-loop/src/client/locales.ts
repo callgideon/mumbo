@@ -24,22 +24,6 @@ export const en: Record<AgentLoopSettingsLocaleKey, string> = {
   invalidNumber: 'Enter a number, or leave blank to use the default.',
 }
 
-/** Simplified Chinese copy. */
-export const zh: Record<AgentLoopSettingsLocaleKey, string> = {
-  title: 'Agent 循环',
-  description: '控制 Agent 派发工具调用的方式。',
-  maxParallel: '并行工具调用数',
-  maxParallelHint: '同一步内最多同时运行多少个可并行的调用。',
-  overridden: '已覆盖',
-  reset: '恢复默认',
-  readOnly: '本部署的设置为只读。',
-  unavailable: '该插件当前未加载，暂时无法配置。',
-  save: '保存',
-  saving: '保存中…',
-  saveFailed: '本部署没有接受这些值，已保留供你修改。',
-  invalidNumber: '请填数字；留空表示使用默认值。',
-}
-
 /**
  * The form frame's copy, read from this page's dictionary.
  * @param t - the page's locale reader.

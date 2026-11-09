@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { contextMenuHook, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { PresentedFileCard } from '../src/client/PresentedFileCard.tsx'
-import { en, zh } from '../src/client/locales.ts'
+import { en, fr } from '../src/client/locales.ts'
 
 afterEach(cleanup)
 const props = () => {
@@ -23,8 +23,8 @@ const props = () => {
 }
 it('localizes reveal failures and restores the description when progress clears', () => {
   const p = props()
-  const view = render(<PresentedFileCard {...p} phase="revealError" t={makeTranslate(zh)} />)
-  expect(view.getByText(zh['presented.revealError'])).toBeTruthy()
+  const view = render(<PresentedFileCard {...p} phase="revealError" t={makeTranslate(fr)} />)
+  expect(view.getByText(fr['presented.revealError'])).toBeTruthy()
   view.rerender(<PresentedFileCard {...p} />)
   expect(view.getByText(p.file.description)).toBeTruthy()
   expect(view.queryByRole('status')).toBeNull()
@@ -53,7 +53,7 @@ it.each([
 })
 
 
-it.each([en, zh])('distinguishes directory-only progress and errors in each locale', (dictionary) => {
+it.each([en, fr])('distinguishes directory-only progress and errors in each locale', (dictionary) => {
   const p = { ...props(), t: makeTranslate(dictionary) }
   const view = render(<PresentedFileCard {...p} phase="revealing" />)
   expect(view.getByText(dictionary['presented.revealing'])).toBeTruthy()

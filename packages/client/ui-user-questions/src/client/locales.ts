@@ -1,44 +1,9 @@
 /** `question` namespace dictionaries. */
 
-/** Simplified Chinese dictionary (the key-set source of truth). */
-export const zh = {
-  'error.incomplete': '请先完成这道问题。',
-  'error.unanswered': '请选择一个选项或填写自定义答案。',
-  'error.unavailable': '当前无法提交，请稍候再试。',
-  'error.resubmit': '回答未送达，工作已继续，请再提交一次。',
-  'status.sent': '回答已发送；面板未能关闭。',
-  'wait.takeTime': '慢慢回答',
-  'wait.countdown': '{seconds} 秒后继续工作',
-  'wait.paused': '已暂停 · 剩余 {seconds} 秒',
-  'wait.held': '会一直等你回答',
-  'wait.continued': '已继续工作，仍可回答',
-  'review.status': '已回答',
-  'review.skipped': '这道问题当时被跳过。',
-  'reply.label': '问题与回答',
-  'reply.answerLabel': '回答：',
-  'reply.skipped': '已跳过',
-  'nav.prev': '上一题',
-  'nav.next': '下一题',
-  'nav.minimize': '收起问题卡片',
-  'nav.maximize': '展开问题卡片',
-  'nav.cancel': '放弃整组问题',
-  'nav.close': '收起问题面板，可从工具调用重新打开',
-  'text.expand': '展开',
-  'text.collapse': '收起',
-  'option.recommended': '推荐',
-  'custom.placeholder': '输入你的答案',
-  'action.skip': '跳过',
-  'action.next': '下一题',
-  'plan.header': '计划待审',
-  'plan.approve': '同意执行',
-  'plan.decline': '拒绝',
-  'plan.discuss': '要求修改',
-} satisfies Record<string, string>
-
 /** The question namespace key union. */
-export type QuestionKey = keyof typeof zh
+export type QuestionKey = keyof typeof en
 
-/** English dictionary, checked complete against the zh key set. */
+/** English dictionary (the key-set source of truth). */
 export const en = {
   'error.incomplete': 'Please complete this question first.',
   'error.unanswered': 'Please select an option or enter a custom answer.',
@@ -71,7 +36,7 @@ export const en = {
   'plan.approve': 'Approve',
   'plan.decline': 'Refuse',
   'plan.discuss': 'Request changes',
-} satisfies Record<QuestionKey, string>
+} satisfies Record<string, string>
 
 /** Japanese copy, checked against the English keys. */
 export const ja = {
