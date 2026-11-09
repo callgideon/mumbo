@@ -26,6 +26,7 @@ mumbo 家族在明确的身份验证之后，把运行中的 Web 主机已有的
 
 | 包 | 职责 |
 |---|---|
+| [`edge-member/`](edge-member/README.zh.md) | 以边缘签名的请求头把项目成员准入为拥有协作者访问权的非 owner principal |
 | [`mcp/`](mcp/README.zh.md) | 经过身份验证的 loopback MCP 服务器，白名单中的人通过它驱动主机的助手会话 |
 
 -----

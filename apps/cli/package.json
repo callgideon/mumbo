@@ -109,8 +109,7 @@
     "@deepseek-ai/dsh-cua-bundle": "workspace:*",
     "@deepseek-ai/dsh-experimental-plugin-market-bundle": "workspace:*",
     "@deepseek-ai/dsh-personalized-recommendations": "workspace:*",
-    "@deepseek-ai/dsh-experimental-forge-bundle": "workspace:*",
-    "@mumbo/edge-member": "workspace:*"
+    "@deepseek-ai/dsh-experimental-forge-bundle": "workspace:*"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-skill-badge": "workspace:*",

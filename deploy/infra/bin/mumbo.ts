@@ -3,9 +3,10 @@
  * CloudFront -> ALB (HTTPS) -> Fargate `dsh web` with EFS at /data. Static assets are not separable
  * from the server (same origin), so the CDN fronts the whole app. CodeBuild builds deploy/Dockerfile on push.
  *
- * Domains: dev serves dev.app / dev.api.mumbo.si. prod keeps app / api.mumbo.si OFF until
- * `-c attach=true`, because those names are live on the jumbo CloudFront distribution today
- * (an alias can live on one distribution only, and the ACM validation records already exist).
+ * Domains: dev serves dev.app / dev.api.mumbo.si. prod no longer serves: the shared server was retired on
+ * 2026-11-09 for per-user boxes (deploy/boxes); app / api.mumbo.si redirect to boxes.mumbo.si from the boxes ALB.
+ * The prod stack keeps what the boxes use: the mumbo-web-prod image repository and its CodeBuild project (the box
+ * template is built from that image), the model key secret, and the downloads bucket.
  */
 import * as cdk from 'aws-cdk-lib'
 import { aws_certificatemanager as acm, aws_cloudfront as cf, aws_cloudfront_origins as origins, aws_codebuild as cb, aws_ec2 as ec2, aws_ecr as ecr, aws_ecs as ecs, aws_efs as efs, aws_elasticloadbalancingv2 as elb, aws_iam as iam, aws_route53 as r53, aws_route53_targets as targets, aws_s3 as s3, aws_secretsmanager as sm, aws_ssm as ssm } from 'aws-cdk-lib'
@@ -14,7 +15,8 @@ const app = new cdk.App()
 const env = app.node.tryGetContext('env') as 'dev' | 'prod'
 if (env !== 'dev' && env !== 'prod') throw new Error('pass -c env=dev|prod')
 const removal = env === 'dev' ? cdk.RemovalPolicy.DESTROY : cdk.RemovalPolicy.RETAIN
-const attach = env === 'dev' || app.node.tryGetContext('attach') === 'true'
+const serve = env === 'dev'
+const attach = serve
 const branch = env === 'prod' ? 'main' : 'dev'
 const zoneName = 'mumbo.si'
 const appHost = env === 'prod' ? 'app.mumbo.si' : 'dev.app.mumbo.si'
@@ -25,11 +27,13 @@ const stack = new cdk.Stack(app, `mumbo-${env}`, { env: { account: '641134885443
 const zone = r53.HostedZone.fromHostedZoneAttributes(stack, 'Zone', { hostedZoneId: 'Z07707413UYOQHO5GVGN4', zoneName })
 const vpc = ec2.Vpc.fromLookup(stack, 'Vpc', { isDefault: true })
 
+const repo = new ecr.Repository(stack, 'Repo', { repositoryName: `mumbo-web-${env}`, lifecycleRules: [{ maxImageCount: 20 }], removalPolicy: removal, emptyOnDelete: env === 'dev' })
+const apiKey = new sm.Secret(stack, 'DeepseekKey', { secretName: `mumbo/${env}/deepseek-api-key`, description: 'Set the value after deploy' })
+// The shared web server (dev only since 2026-11-09).
+const web = serve ? (() => {
 const names = attach ? [appHost, apiHost, originHost] : [originHost]
 const cert = new acm.Certificate(stack, 'Cert', { domainName: names[0]!, subjectAlternativeNames: names.slice(1), validation: acm.CertificateValidation.fromDns(zone) })
 
-const repo = new ecr.Repository(stack, 'Repo', { repositoryName: `mumbo-web-${env}`, lifecycleRules: [{ maxImageCount: 20 }], removalPolicy: removal, emptyOnDelete: env === 'dev' })
-const apiKey = new sm.Secret(stack, 'DeepseekKey', { secretName: `mumbo/${env}/deepseek-api-key`, description: 'Set the value after deploy' })
 const fs = new efs.FileSystem(stack, 'Data', { vpc, encrypted: true, removalPolicy: removal })
 
 // Invite-only email login through Supabase Auth acting as an OIDC provider (see deploy/auth-ui). The container
@@ -90,6 +94,9 @@ if (attach) for (const h of [appHost, apiHost]) {
   new r53.AaaaRecord(stack, `AAAA-${h}`, { zone, recordName: h, target: t })
 }
 
+  return { cluster, service, dist }
+})() : undefined
+
 new s3.Bucket(stack, 'Downloads', { bucketName: `mumbo-downloads-${env}-641134885443`, blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL, encryption: s3.BucketEncryption.S3_MANAGED, removalPolicy: removal, autoDeleteObjects: env === 'dev' })
 
 const build = new cb.Project(stack, 'Build', {
@@ -100,12 +107,14 @@ const build = new cb.Project(stack, 'Build', {
   environment: { buildImage: cb.LinuxBuildImage.STANDARD_7_0, computeType: cb.ComputeType.X_LARGE, privileged: true },
   timeout: cdk.Duration.minutes(60),
   environmentVariables: {
-    ECR_REPO: { value: repo.repositoryUri }, ECS_CLUSTER: { value: cluster.clusterName },
-    ECS_SERVICE: { value: service.serviceName }, MUMBO_ENV: { value: env },
+    ECR_REPO: { value: repo.repositoryUri }, MUMBO_ENV: { value: env },
+    // Without a web server (prod) the build only pushes the image; deploy/buildspec.yml skips the redeploy.
+    ...(web ? { ECS_CLUSTER: { value: web.cluster.clusterName }, ECS_SERVICE: { value: web.service.serviceName } } : {}),
   },
 })
 repo.grantPullPush(build)
 build.addToRolePolicy(new iam.PolicyStatement({ actions: ['codeconnections:GetConnection', 'codeconnections:GetConnectionToken', 'codeconnections:UseConnection', 'codestar-connections:GetConnection', 'codestar-connections:GetConnectionToken', 'codestar-connections:UseConnection'], resources: ['arn:aws:codeconnections:us-east-1:641134885443:connection/*', 'arn:aws:codestar-connections:us-east-1:641134885443:connection/*'] }))
-build.addToRolePolicy(new iam.PolicyStatement({ actions: ['ecs:UpdateService'], resources: [service.serviceArn] }))
-
-new cdk.CfnOutput(stack, 'CloudFrontDomain', { value: dist.distributionDomainName })
+if (web) {
+  build.addToRolePolicy(new iam.PolicyStatement({ actions: ['ecs:UpdateService'], resources: [web.service.serviceArn] }))
+  new cdk.CfnOutput(stack, 'CloudFrontDomain', { value: web.dist.distributionDomainName })
+}
