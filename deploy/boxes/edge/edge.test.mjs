@@ -1,7 +1,7 @@
 // node --test deploy/boxes/edge/edge.test.mjs
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { request } from 'node:http'
+import { request, createServer } from 'node:http'
 import { inParallel, signBox, verifyBox, userPrefix, budget, needsLaunch, boxHeaders, boxes, modelServer, userServer, startScript, backupCommand, admitted, secureCookies, albIdentity } from './edge.mjs'
 import { memoryStore, redisStore } from './store.mjs'
 import { generateKeyPairSync, createSign } from 'node:crypto'
@@ -353,9 +353,9 @@ test('MCP endpoint on the model host: box token required, tools act as the token
 test('desktop live view: /desktop/ goes to the box\'s noVNC port, everything else to dsh', async () => {
   const { boxRoute } = await import('./edge.mjs')
   assert.match(boxRoute('/desktop').redirect, /^\/desktop\/vnc\.html\?.*path=desktop\/websockify/)
-  assert.deepEqual(boxRoute('/desktop/websockify'), { port: '6080', path: '/websockify' })
-  assert.deepEqual(boxRoute('/desktop-not'), { port: '3080', path: '/desktop-not' })
-  assert.deepEqual(boxRoute('/api/remote.mux'), { port: '3080', path: '/api/remote.mux' })
+  assert.deepEqual(boxRoute('/desktop/websockify'), { port: '6080', path: '/websockify', base: '' })
+  assert.deepEqual(boxRoute('/desktop-not'), { port: '3080', path: '/desktop-not', base: '' })
+  assert.deepEqual(boxRoute('/api/remote.mux'), { port: '3080', path: '/api/remote.mux', base: '' })
   assert.equal(boxHeaders(cfg, {}, { id: 'b1' }, '6080')['e2b-sandbox-port'], '6080')
 })
 
@@ -409,4 +409,79 @@ test('with PAUSE_IDLE=false idle boxes stay running: no pause, backups only when
   await b.sweep(t + cfg.backupEveryMs)
   assert.equal(ran.filter(c => c.includes("'PUT'")).length, 1, 'stale backup: taken')
   assert.deepEqual(paused, [])
+})
+
+// ---- shared projects (projects.mjs)
+import { projects as projectStore } from './projects.mjs'
+
+test('projects: owner creates, adds allowlisted members only, lists per member', async () => {
+  const p = projectStore({ store: memoryStore(), admitted: (e) => e.endsWith('@x.com'), log: () => {} })
+  const { id } = await p.create('a@x.com', ' Landing page ')
+  assert.match(id, /^[a-z0-9]{16}$/)
+  assert.equal((await p.list('a@x.com'))[0].name, 'Landing page')
+  await assert.rejects(p.addMember('b@x.com', id, 'c@x.com'), (e) => e.status === 404)
+  await p.addMember('a@x.com', id, 'B@x.com')
+  assert.equal(await p.isMember('b@x.com', id), true)
+  await assert.rejects(p.addMember('b@x.com', id, 'c@x.com'), (e) => e.status === 403)
+  await assert.rejects(p.addMember('a@x.com', id, 'eve@evil.com'), /not allowed/)
+  assert.deepEqual((await p.list('b@x.com')).map(x => x.id), [id])
+  assert.deepEqual(await p.list('c@x.com'), [])
+  assert.equal(await p.isMember('a@x.com', 'not-an-id'), false)
+})
+
+test('project paths reach the project box for members only, with its own launch path', async () => {
+  const ensured = []
+  const box = { ensure: async (principal) => { ensured.push(principal); return { id: principal === 'a@x.com' ? 'ubox' : 'pbox', token: 'TOK' } }, touch: async () => {}, forget: async () => {} }
+  const proj = projectStore({ store: memoryStore(), admitted: () => true, log: () => {} })
+  const { id } = await proj.create('a@x.com', 'P')
+  const server = userServer({ cfg: { ...cfg, allowed: ['@x.com'] }, box, projects: proj, log: () => {} })
+  await new Promise(r => server.listen(0, '127.0.0.1', r))
+  const base = `http://127.0.0.1:${server.address().port}`
+  const go = (path, email) => fetch(base + path, { headers: { 'x-forwarded-email': email, accept: 'text/html' }, redirect: 'manual' })
+  try {
+    assert.equal((await go(`/p/${id}`, 'a@x.com')).headers.get('location'), `/p/${id}/`)
+    const r = await go(`/p/${id}/`, 'a@x.com')
+    assert.equal(r.status, 302); assert.equal(r.headers.get('location'), `/p/${id}/?token=TOK`)
+    assert.deepEqual(ensured, [`project:${id}`])
+    assert.equal((await go(`/p/${id}/`, 'b@x.com')).status, 404)
+    assert.equal(ensured.length, 1, 'a non-member never starts the project box')
+  } finally { server.close() }
+})
+
+test('project boxes: own masked host and public path, no desktop or browser tools', async () => {
+  const { boxSite } = await import('./edge.mjs')
+  const c = { llmHost: 'llm.x', publicHost: 'boxes.x' }
+  const site = boxSite(c, 'project:0123456789abcdef')
+  assert.deepEqual(site, { host: 'p-0123456789abcdef.boxes.x', publicUrl: 'https://boxes.x/p/0123456789abcdef/', desktop: false })
+  const script = startScript(c, 'T', site)
+  assert.ok(!script.includes('browser-use') && !script.includes('chromium'))
+  assert.match(script, /--trusted-host boxes\.x --trusted-host p-0123456789abcdef\.boxes\.x/)
+  assert.deepEqual(boxSite(c, 'a@x.com'), { host: 'boxes.x', publicUrl: 'https://boxes.x/', desktop: true })
+})
+
+test('project tools are offered to a person\'s box and not to a project box', async () => {
+  const proj = projectStore({ store: memoryStore(), admitted: () => true, log: () => {} })
+  const ops = children({ e2b: fakeChildE2B(), cfg: childCfg, log: () => {} })
+  const mcp = mcpServer({ ops, projects: proj, claimOf: (info) => verifyBox('k', String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
+  const server = createServer((req, res) => mcp(req, res))
+  await new Promise(r => server.listen(0, '127.0.0.1', r))
+  const call = async (token, method, params) => {
+    const r = await fetch(`http://127.0.0.1:${server.address().port}/mcp`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) })
+    const t = await r.text(); return JSON.parse(t.startsWith('{') ? t : t.split('\n').find(l => l.startsWith('data:')).slice(5))
+  }
+  try {
+    const person = signBox('k', 'a@x.com', 'b1'), project = signBox('k', 'project:0123456789abcdef', 'pb')
+    const names = async (tok) => (await call(tok, 'tools/list', {})).result.tools.map(t => t.name)
+    assert.ok((await names(person)).includes('project_create'))
+    assert.ok(!(await names(project)).some(n => n.startsWith('project_')))
+    const made = JSON.parse((await call(person, 'tools/call', { name: 'project_create', arguments: { name: 'Shop' } })).result.content[0].text)
+    assert.equal((await proj.list('a@x.com'))[0].id, made.id)
+  } finally { server.close() }
+})
+
+test('a project box gets our own origin translated to its masked host; foreign origins pass unchanged', () => {
+  const t = { id: 'pb' }
+  assert.equal(boxHeaders(cfg, { origin: `https://${cfg.publicHost}` }, t, '3080', `p-x.${cfg.publicHost}`).origin, `https://p-x.${cfg.publicHost}`)
+  assert.equal(boxHeaders(cfg, { origin: 'https://evil.example' }, t, '3080', `p-x.${cfg.publicHost}`).origin, 'https://evil.example')
+  assert.equal(boxHeaders(cfg, { origin: `https://${cfg.publicHost}` }, t).origin, `https://${cfg.publicHost}`)
 })

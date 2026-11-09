@@ -65,7 +65,7 @@ export function children({ e2b, cfg, log = console.log }) {
  * Node request handler for the MCP endpoint. `claimOf(req)` returns the caller's verified {u, b}; the model host
  * checks the token, ownership and source address before calling this.
  */
-export function mcpServer({ ops, claimOf }) {
+export function mcpServer({ ops, projects, claimOf }) {
   const tool = (claim, fn) => async (args) => {
     try {
       return { content: [{ type: 'text', text: JSON.stringify(await fn(claim, args), null, 2) }] }
@@ -98,6 +98,20 @@ export function mcpServer({ ops, claimOf }) {
       inputSchema: z.object({ id, path: z.string() }),
     }, tool(claim, (c, a) => ops.read(c.u, a.id, a)))
     mcp.registerTool('sandbox_kill', { description: 'Kill a sandbox now.', inputSchema: z.object({ id }) }, tool(claim, (c, a) => ops.kill(c.u, a.id)))
+    // Shared projects (projects.mjs): a person's assistant creates and lists projects and adds members; a project's
+    // own box (principal project:<id>) does not get these tools.
+    if (projects && claim && !claim.u.startsWith('project:')) {
+      const pid = z.string().describe('Project id from project_create or project_list')
+      mcp.registerTool('project_create', {
+        description: 'Create a shared project. It gets its own box with a coordinator agent at https://<this site>/p/<id>/; you are its owner and first member.',
+        inputSchema: z.object({ name: z.string().min(1).max(80) }),
+      }, tool(claim, (c, a) => projects.create(c.u, a.name)))
+      mcp.registerTool('project_list', { description: 'List the projects you are a member of.', inputSchema: z.object({}) }, tool(claim, (c) => projects.list(c.u)))
+      mcp.registerTool('project_add_member', {
+        description: 'Add a person (by email) to a project you own.',
+        inputSchema: z.object({ id: pid, email: z.string() }),
+      }, tool(claim, (c, a) => projects.addMember(c.u, a.id, a.email)))
+    }
     return mcp
   })
   return toNodeHandler(handler)

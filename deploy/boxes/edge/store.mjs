@@ -1,4 +1,5 @@
-// Shared state for edge replicas: box records, per-user locks, daily budgets and the sweep leader.
+// Shared state for edge replicas: box records, per-user locks, daily budgets, the sweep leader, and small documents
+// and sets (projects and their members).
 // memoryStore serves tests and a single replica; redisStore serves production (ElastiCache, TLS).
 import { randomUUID } from 'node:crypto'
 
@@ -9,6 +10,8 @@ export function memoryStore() {
   const boxes = new Map()
   const counters = new Map()
   const leases = new Map()
+  const docs = new Map()
+  const sets = new Map()
   const take = (key, ttlMs) => {
     const now = Date.now()
     if ((leases.get(key) ?? 0) > now) return false
@@ -31,6 +34,10 @@ export function memoryStore() {
       }
       try { return await fn() } finally { leases.delete(`lock:${key}`) }
     },
+    async getDoc(key) { const v = docs.get(key); return v && structuredClone(v) },
+    async putDoc(key, value) { docs.set(key, structuredClone(value)) },
+    async addToSet(key, member) { if (!sets.has(key)) sets.set(key, new Set()); sets.get(key).add(member) },
+    async setMembers(key) { return [...(sets.get(key) ?? [])] },
     async close() {},
   }
 }
@@ -72,6 +79,10 @@ export function redisStore(client) {
       }
       try { return await fn() } finally { await client.eval(RELEASE, { keys: [`lock:${key}`], arguments: [token] }).catch(() => {}) }
     },
+    async getDoc(key) { const v = await client.get(`doc:${key}`); return v ? JSON.parse(v) : undefined },
+    async putDoc(key, value) { await client.set(`doc:${key}`, JSON.stringify(value)) },
+    async addToSet(key, member) { await client.sAdd(`set:${key}`, member) },
+    async setMembers(key) { return client.sMembers(`set:${key}`) },
     async close() { await client.quit() },
   }
 }

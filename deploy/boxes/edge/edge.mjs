@@ -51,8 +51,20 @@ export function budget(store, limit) {
   return async (email, now = new Date()) => (await store.increment(`budget:${now.toISOString().slice(0, 10)}:${email}`, 2 * 86_400)) <= limit
 }
 
+/**
+ * Where a box is served. A user's box is the site root with a desktop; a project box (principal `project:<id>`) is
+ * served under /p/<id>/ with its own masked host, so its dsh cookie name differs from the user's box, and no desktop:
+ * it never holds anyone's signed-in browser.
+ */
+export function boxSite(cfg, principal) {
+  const id = principal.startsWith('project:') ? principal.slice('project:'.length) : undefined
+  return id === undefined
+    ? { host: cfg.publicHost, publicUrl: `https://${cfg.publicHost}/`, desktop: true }
+    : { host: `p-${id}.${cfg.publicHost}`, publicUrl: `https://${cfg.publicHost}/p/${id}/`, desktop: false }
+}
+
 // ---- inside a box. It never sees a server secret: its DeepSeek key is its own box token, valid only via LLM_HOST.
-export function startScript(cfg, token) {
+export function startScript(cfg, token, site = boxSite(cfg, '')) {
   const llm = `https://${cfg.llmHost}`
   return `#!/bin/sh
 # Start dsh web for this box's user. Re-runnable: the router calls it again when dsh is found dead.
@@ -71,15 +83,15 @@ cat > /root/.mumbo/sandboxes.overlay.yml <<'YML'
         url: ${llm}/mcp
         headers:
           Authorization: !!js '\`Bearer \${process.env.DEEPSEEK_API_KEY}\`'
-    - id: browser-use
+${site.desktop ? `    - id: browser-use
       name: '@deepseek-ai/dsh-browser-use'
     - id: browser-use-box-chromium
       name: '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp'
       config:
         mode: attach
         endpoint: http://127.0.0.1:9222
-YML
-# Desktop: the user's own Chromium (signed-in accounts live in its profile) on a virtual display, as the unprivileged
+` : ''}YML
+${site.desktop ? `# Desktop: the user's own Chromium (signed-in accounts live in its profile) on a virtual display, as the unprivileged
 # user browser; its debugging port stays on loopback for dsh's browser tools; noVNC on :6080 is the live view, which
 # only the edge reaches (E2B traffic token). Re-runnable: each part starts only if it is not running.
 if id browser >/dev/null 2>&1; then
@@ -90,12 +102,12 @@ if id browser >/dev/null 2>&1; then
   pgrep -x x11vnc >/dev/null || su browser -s /bin/sh -c 'x11vnc -display :1 -localhost -forever -shared -nopw -rfbport 5900 -quiet >/tmp/x11vnc.log 2>&1 &'
   pgrep -f websockify >/dev/null || nohup websockify --web /usr/share/novnc "$ip:6080" 127.0.0.1:5900 >/tmp/websockify.log 2>&1 &
 fi
-cd /src
+` : ''}cd /src
 HOME=/root DSH_HOME=/root/.dsh DSH_TELEMETRY_DISABLED=1 \\
 DEEPSEEK_BASE_URL=${llm}/anthropic DEEPSEEK_SEARCH_BASE_URL=${llm} DEEPSEEK_API_KEY=${token} \\
 nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\
   --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml \\
-  --no-open --host "$ip" --port 3080 --public-url https://${cfg.publicHost}/ --trusted-host ${cfg.publicHost} > /root/dsh.log 2>&1 &
+  --no-open --host "$ip" --port 3080 --public-url ${site.publicUrl} --trusted-host ${cfg.publicHost}${site.host === cfg.publicHost ? '' : ` --trusted-host ${site.host}`} > /root/dsh.log 2>&1 &
 `
 }
 /** Upload chats, projects and the browser profile (signed-in accounts; caches and locks excluded) to a presigned S3 PUT. Runs inside the box; S3 refuses a streamed (chunked) body,
@@ -154,12 +166,12 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, log = 
     const box = await e2b.Sandbox.create(cfg.template, {
       timeoutMs: timeout(), metadata: { user: email },
       lifecycle: { onTimeout: 'pause', autoResume: true },
-      network: { allowPublicTraffic: false, maskRequestHost: cfg.publicHost },
+      network: { allowPublicTraffic: false, maskRequestHost: boxSite(cfg, email).host },
     }).catch((e) => { throw /place sandbox|capacity|too many|concurrent/i.test(e.message) ? Object.assign(e, { capacity: true, status: 503 }) : e })
     // Recorded before the restore: other replicas then neither adopt nor back up a box whose data is half restored.
     await store.putBox(box.sandboxId, { email, creating: Date.now(), active: Date.now(), extended: Date.now(), backedUp: Date.now(), paused: false })
     try {
-      await box.files.write('/root/.mumbo/start.sh', startScript(cfg, signBox(edgeKey, email, box.sandboxId)))
+      await box.files.write('/root/.mumbo/start.sh', startScript(cfg, signBox(edgeKey, email, box.sandboxId), boxSite(cfg, email)))
       const restoreUrl = await presignGet(`${userPrefix(email)}/latest.tar.gz`)
       if (restoreUrl) {
         const ok = await run(box, restoreCommand(restoreUrl), 660_000).then(() => true, () => false)
@@ -337,16 +349,21 @@ const DROP = new Set(['connection', 'keep-alive', 'proxy-connection', 'transfer-
 /** Headers for the box: client headers minus hop-by-hop, identity and E2B headers, plus E2B routing for this box only. */
 /** Which box port a request goes to: the desktop live view (noVNC, :6080) under /desktop/, otherwise dsh (:3080). */
 export function boxRoute(url) {
+  const p = /^\/p\/([a-z0-9]{16})(\/.*)?$/.exec(url)
+  if (p) return p[2] ? { project: p[1], port: '3080', path: p[2], base: `/p/${p[1]}` } : { redirect: `/p/${p[1]}/` }
   if (url === '/desktop' || url === '/desktop/') return { redirect: '/desktop/vnc.html?autoconnect=1&resize=remote&path=desktop/websockify' }
-  if (url.startsWith('/desktop/')) return { port: '6080', path: url.slice('/desktop'.length) }
-  return { port: '3080', path: url }
+  if (url.startsWith('/desktop/')) return { port: '6080', path: url.slice('/desktop'.length), base: '' }
+  return { port: '3080', path: url, base: '' }
 }
-export function boxHeaders(cfg, incoming, target, port = '3080') {
+export function boxHeaders(cfg, incoming, target, port = '3080', siteHost = cfg.publicHost) {
   const out = {}
   for (const [k, v] of Object.entries(incoming)) if (!DROP.has(k) && !k.startsWith('x-forwarded-') && !k.startsWith('e2b-')) out[k] = v
   out.host = `sandbox.${cfg.publicHost}`
   out['e2b-sandbox-id'] = target.id
   out['e2b-sandbox-port'] = port
+  // dsh accepts a browser Origin only when it equals the Host it sees, and a project box sees its own masked host.
+  // Our own site's origin is translated to it; any other origin passes unchanged, so dsh still refuses it.
+  if (siteHost !== cfg.publicHost && out.origin === `https://${cfg.publicHost}`) out.origin = `https://${siteHost}`
   if (target.traffic) out['e2b-traffic-access-token'] = target.traffic
   return out
 }
@@ -360,7 +377,7 @@ export const secureCookies = (headers) => {
 export const needsLaunch = (req) => req.method === 'GET' && !/(?:^|;\s*)dsh-auth-/.test(req.headers.cookie ?? '') && !new URL(req.url, 'http://x').searchParams.has('token')
 const isNavigation = (req) => req.method === 'GET' && String(req.headers.accept ?? '').includes('text/html')
 
-export function userServer({ cfg, box, verifyAlb, log = console.log }) {
+export function userServer({ cfg, box, verifyAlb, projects, log = console.log }) {
   const identify = async (req) => verifyAlb
     ? (await verifyAlb(req.headers['x-amzn-oidc-data']).catch(() => undefined)) ?? ''
     : String(req.headers['x-forwarded-email'] ?? '').toLowerCase()
@@ -370,19 +387,22 @@ export function userServer({ cfg, box, verifyAlb, log = console.log }) {
     const email = await identify(req)
     if (!email.includes('@')) return json(res, 401, { error: 'not signed in' })
     if (!admitted(cfg.allowed, email)) return page(res, 403, 'mumbo boxes are invite-only for now. This account is not on the list yet.', false)
-    let target
-    try { target = await box.ensure(email) } catch (e) {
-      log(JSON.stringify({ edge: 'error', user: email, error: e.message }))
-      return page(res, 503, e.capacity ? 'mumbo is at capacity right now. This page retries every few seconds.' : 'Your mumbo box is starting. This page reloads in a few seconds.')
-    }
     const to = boxRoute(req.url)
     if (to.redirect) return res.writeHead(302, { location: to.redirect, 'cache-control': 'no-store' }).end()
+    // A project path reaches the project's box, for its members only (projects.mjs).
+    if (to.project && !(await projects?.isMember(email, to.project))) return page(res, 404, 'No such project, or you are not one of its members.', false)
+    let target
+    try { target = await box.ensure(to.project ? `project:${to.project}` : email) } catch (e) {
+      log(JSON.stringify({ edge: 'error', user: email, project: to.project, error: e.message }))
+      return page(res, 503, e.capacity ? 'mumbo is at capacity right now. This page retries every few seconds.' : 'This mumbo box is starting. This page reloads in a few seconds.')
+    }
     const dsh = to.port === '3080'
-    if (dsh && needsLaunch(req)) return res.writeHead(302, { location: `/?token=${target.token}`, 'cache-control': 'no-store' }).end()
+    const launch = `${to.base}/?token=${target.token}`
+    if (dsh && needsLaunch(req)) return res.writeHead(302, { location: launch, 'cache-control': 'no-store' }).end()
     quiet(box.touch(target.id))
-    const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: to.path, headers: boxHeaders(cfg, req.headers, target, to.port) }, (r) => {
+    const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: to.path, headers: boxHeaders(cfg, req.headers, target, to.port, boxSite(cfg, to.project ? `project:${to.project}` : email).host) }, (r) => {
       // A stale cookie (another account on this browser, or a recreated box) gets a fresh exchange instead of a dead end.
-      if (dsh && r.statusCode === 401 && isNavigation(req)) { r.resume(); return res.writeHead(302, { location: `/?token=${target.token}`, 'cache-control': 'no-store' }).end() }
+      if (dsh && r.statusCode === 401 && isNavigation(req)) { r.resume(); return res.writeHead(302, { location: launch, 'cache-control': 'no-store' }).end() }
       res.writeHead(r.statusCode ?? 502, secureCookies({ ...r.headers }))
       r.pipe(res)
     })
@@ -393,11 +413,11 @@ export function userServer({ cfg, box, verifyAlb, log = console.log }) {
     const email = await identify(req)
     if (!email.includes('@') || !admitted(cfg.allowed, email)) return socket.destroy()
     try {
-      const target = await box.ensure(email)
-      quiet(box.touch(target.id))
       const to = boxRoute(req.url)
-      if (to.redirect) return socket.destroy()
-      const headers = { ...boxHeaders(cfg, req.headers, target, to.port), connection: 'Upgrade', upgrade: req.headers.upgrade ?? 'websocket' }
+      if (to.redirect || (to.project && !(await projects?.isMember(email, to.project)))) return socket.destroy()
+      const target = await box.ensure(to.project ? `project:${to.project}` : email)
+      quiet(box.touch(target.id))
+      const headers = { ...boxHeaders(cfg, req.headers, target, to.port, boxSite(cfg, to.project ? `project:${to.project}` : email).host), connection: 'Upgrade', upgrade: req.headers.upgrade ?? 'websocket' }
       const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: to.path, headers })
       up.on('upgrade', (r, upSocket, upHead) => {
         socket.write(`HTTP/1.1 101 Switching Protocols\r\n${Object.entries(r.headers).map(([k, v]) => `${k}: ${v}`).join('\r\n')}\r\n\r\n`)
@@ -488,9 +508,11 @@ async function main() {
   const modelHost = env('MODEL_LISTEN_HOST', listenHost)
   setInterval(() => box.sweep().catch(e => console.error('edge: sweep', e.message)), 60_000).unref()
   if (listenHost !== '127.0.0.1' && !verifyAlb) throw new Error('edge: LISTEN_HOST beyond loopback needs ALB_ARN (the email header is only trusted from oauth2-proxy)')
-  userServer({ cfg, box, verifyAlb }).listen(8080, listenHost, () => console.log(`edge: users on ${listenHost}:8080`))
+  const { projects: projectStore } = await import('./projects.mjs')
+  const proj = projectStore({ store, admitted: (e) => admitted(cfg.allowed, e) })
+  userServer({ cfg, box, verifyAlb, projects: proj }).listen(8080, listenHost, () => console.log(`edge: users on ${listenHost}:8080`))
   const { children, mcpServer } = await import('./sandboxes.mjs')
-  const mcp = mcpServer({ ops: children({ e2b, cfg }), claimOf: (info) => verifyBox(edgeKey, String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
+  const mcp = mcpServer({ ops: children({ e2b, cfg }), projects: proj, claimOf: (info) => verifyBox(edgeKey, String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
   modelServer({ cfg, edgeKey, modelKey, allow: budget(store, cfg.dailyRequests), owns: box.owns, touch: box.touch, mcp })
     .listen(8081, modelHost, () => console.log(`edge: model host on ${modelHost}:8081`))
 }
