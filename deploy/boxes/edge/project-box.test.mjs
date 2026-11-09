@@ -14,7 +14,7 @@ const at = (text, needle) => { const i = text.indexOf(needle); assert.ok(i >= 0,
 test('a user box start script is byte-for-byte what it was before project boxes grew a proxy', () => {
   const s = startScript(c, 'T', boxSite(c, 'a@x.com'), "role's", undefined, boxFiles, ['o@x.com'])
   // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows, the X cookie and the first-run welcome (same cfg, token T, role "role's").
-  assert.equal(createHash('sha256').update(s).digest('hex'), 'a17919a6a0a766aed9a14dbe4f5b7c8d105b28284508170d440c8b8f0b6701ce')
+  assert.equal(createHash('sha256').update(s).digest('hex'), '307068336f6f6c73a112ce4e3930485ccf012edf58082ffd8053de98765d58c1')
 })
 
 test('box links: the overlay loads only when the image ships @mumbo/box-links; project boxes get no desktop link', () => {

@@ -132,14 +132,15 @@ export function roleInstructions(cfg, principal) {
   ].join('\n')
 }
 
-/** Exists once a person box has given its first-run welcome. Under /root/.dsh, so backups carry it with the conversation that holds the welcome. */
+/** Exists once a person box has given its first-run welcome, or had sessions before it (DESIGN.md#first-run-welcome). Under
+ *  /root/.dsh, so backups carry it with the conversation that holds the welcome. */
 export const WELCOMED = '/root/.dsh/welcomed'
 /** The first-run welcome (spec section 17a, step 5), added to the person's first prompt in a new box (startScript). */
 export function welcomeInstructions(cfg) {
   return [
     'This person\'s computer was just set up, and this is their first message. Before you answer it, greet them once, briefly:',
-    '- what you can do now: use the web in their own browser (they sign in to sites on the desktop), work with files, run quick experiments in sandboxes, and do recurring or later work on a schedule while they are away;',
-    '- connecting their accounts and projects comes later;',
+    '- what you can do now: use the web in their own browser (they sign in to sites on the desktop), work with files, run quick experiments in sandboxes, do recurring or later work on a schedule while they are away, and start projects of their own;',
+    '- connecting their accounts comes later;',
     `- their computer's home page is https://${cfg.publicHost}/home.`,
     'Then answer their message.',
   ].join('\n')
@@ -233,7 +234,9 @@ CU_PATCH="--patch /root/.mumbo/computer.overlay.yml"
 fi
 ` : ''}${site.desktop ? `# First-run welcome (edge welcomeInstructions): until ${WELCOMED} exists, a UserPromptSubmit hook creates it (noclobber,
 # so exactly one prompt wins) and adds the welcome to that prompt. dsh reads AGENTS.md into every new session, so the
-# role file cannot carry a once-only greeting.
+# role file cannot carry a once-only greeting. A box with any session log under dsh's sessions root has been used (a
+# restart, or a restore from a backup taken before the marker existed): it is marked instead of welcomed.
+if [ ! -e ${WELCOMED} ] && [ -n "$(find /root/.dsh/sessions -type f 2>/dev/null | head -n 1)" ]; then : > ${WELCOMED}; fi
 WELCOME_PATCH=
 if [ ! -e ${WELCOMED} ]; then
 cat > /root/.mumbo/welcome.json <<'JSON'

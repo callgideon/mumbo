@@ -78,6 +78,18 @@ E2B's own `onTimeout: pause` (15 minutes later) is the safety net if the edge is
 - Bucket versioning keeps older backups for 30 days.
 - Worst case on host loss: `BACKUP_MINUTES` of files and chats (10), plus all memory state.
 
+<a id="first-run-welcome"></a>
+**First-run welcome** (spec section 17a, step 5).
+- While `/root/.dsh/welcomed` is absent, a person box's `start.sh` mounts `@deepseek-ai/dsh-hooks-claude-code` with one `UserPromptSubmit` hook. The hook creates the marker with noclobber. Only the prompt whose hook created it gets the welcome (`welcomeInstructions` in `edge.mjs`) as added context. Project boxes have no welcome. The role `AGENTS.md` cannot carry it, because dsh reads that file into every new session.
+- The marker means the box has been welcomed, or had sessions before it could be. `start.sh` also creates it, with no welcome, when dsh's sessions root `/root/.dsh/sessions` holds any file: a restart, or a restore from a backup taken before the welcome existed. A chat opened but never sent to may count as a session. The marker is under `/root/.dsh`, so backups carry it.
+- The bridge is mounted only on starts where the marker is absent: from a new box's first start until its first start after the welcome. Until then each prompt runs a no-op hook (about 8 ms) and logs `hook/invoked` and `hook/result`.
+- Delivery is at most once. The marker exists before the model sees the welcome, so a failed first turn (model error, abort) loses it. This is accepted.
+- dsh runs hooks through its shell service under the box's `sandbox-policy`, without approval. They run because `mumbo.overlay.yml` sets `danger-full-access`. Under `workspace-write` on a host without bubblewrap or Landlock, dsh refuses the hook and nobody is welcomed.
+- Operators run a command in a person's box from `deploy/boxes/edge`, with the E2B variables from RUNBOOK "Rebuild the box template":
+  `node --input-type=module -e 'import { Sandbox } from "e2b"; const [user, cmd] = process.argv.slice(1); for (const b of await Sandbox.list({ query: { metadata: { user } } }).nextItems()) console.log(b.sandboxId, (await (await Sandbox.connect(b.sandboxId)).commands.run(cmd)).stdout)' <email> '<command>'`.
+  - To suppress the welcome, run `touch /root/.dsh/welcomed`; it applies from the next prompt.
+  - To re-arm it, run `rm /root/.dsh/welcomed`; it works only in a box without sessions, from its next dsh start. A box with sessions is marked again at its next start, so showing the welcome again needs a new box: delete the box and its backups, then sign in.
+
 **Upgrade.** A new template reaches a user when their box is next created. A forced upgrade (backup, then kill and recreate) is a manual operation in v1, and only right after a successful backup.
 
 ## Failure handling
