@@ -121,7 +121,7 @@ test('OpenRouter route: off unless OPENROUTER_MODELS names models (exact ids, tr
   const on = configWith({ OPENROUTER_MODELS: ' qwen/qwen3.8-27b , qwen/Qwen3.5-9b,', OPENROUTER_API_KEY: 'k', OPENROUTER_ZDR: 'false' })
   assert.deepEqual(on.openrouterModels, ['qwen/qwen3.8-27b', 'qwen/Qwen3.5-9b'])
   assert.equal(on.openrouterKey, 'k'); assert.equal(on.openrouterZdr, false)
-  assert.equal(off.openrouterImageTokens, 1500)
+  assert.equal(off.openrouterImageTokens, 16384)
   assert.equal(configWith({ OPENROUTER_IMAGE_TOKENS: '0' }).openrouterImageTokens, 0)
   for (const bad of ['-1', 'many']) assert.throws(() => configWith({ OPENROUTER_IMAGE_TOKENS: bad }), /OPENROUTER_IMAGE_TOKENS/, bad)
 })

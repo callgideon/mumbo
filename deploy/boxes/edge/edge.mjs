@@ -105,8 +105,9 @@ export const config = () => ({
   openrouterModels: env('OPENROUTER_MODELS', '').split(',').map(s => s.trim()).filter(Boolean),
   openrouterKey: optional('OPENROUTER_API_KEY'),
   openrouterZdr: env('OPENROUTER_ZDR', 'true') !== 'false',
-  // Input tokens charged per image when a box drops a response before its usage (openrouterBody inputEstimate).
-  openrouterImageTokens: atLeast('OPENROUTER_IMAGE_TOKENS', 0, 1500),
+  // The most input tokens one image is charged when a box drops a response before its usage (openrouterBody
+  // inputEstimate), and the charge for an image whose size cannot be read. Qwen-VL's own per-image maximum.
+  openrouterImageTokens: atLeast('OPENROUTER_IMAGE_TOKENS', 0, 16384),
 })
 
 /** Address or @domain allowlist, lowercased (config()); an empty list admits nobody. The email compares lowercased. An
@@ -934,40 +935,100 @@ const OPENROUTER_BOX_MODELS = {
   'qwen/qwen3.5-9b': { input: ['text', 'image'] },
 }
 
+/** Message fields forwarded on the OpenRouter route: those pi-ai's convertMessages writes (pi-ai 1.3.0). */
+const MESSAGE_FIELDS = ['role', 'content', 'name', 'tool_calls', 'tool_call_id', 'reasoning', 'reasoning_content', 'reasoning_text', 'reasoning_details']
+const ROLES = ['system', 'developer', 'user', 'assistant', 'tool']
+/** Qwen-VL takes one token per 28x28 pixel patch. */
+const PIXELS_PER_IMAGE_TOKEN = 28 * 28
+
+/**
+ * Pixel dimensions from the header of a base64 PNG, GIF, WebP or JPEG, or undefined when they cannot be read.
+ * @param {string} base64 - image data; only its first 256 KiB are decoded
+ * @returns {{ width: number, height: number } | undefined}
+ */
+export function imageSize(base64) {
+  const b = Buffer.from(base64.slice(0, 256 * 1024), 'base64')
+  const at = (i, n) => b.toString('latin1', i, i + n)
+  if (b.length >= 24 && at(1, 3) === 'PNG') return { width: b.readUInt32BE(16), height: b.readUInt32BE(20) }
+  if (b.length >= 10 && at(0, 4) === 'GIF8') return { width: b.readUInt16LE(6), height: b.readUInt16LE(8) }
+  if (b.length >= 30 && at(0, 4) === 'RIFF' && at(8, 4) === 'WEBP') {
+    const kind = at(12, 4)
+    if (kind === 'VP8 ') return { width: b.readUInt16LE(26) & 0x3fff, height: b.readUInt16LE(28) & 0x3fff }
+    if (kind === 'VP8L') { const v = b.readUInt32LE(21); return { width: (v & 0x3fff) + 1, height: ((v >> 14) & 0x3fff) + 1 } }
+    if (kind === 'VP8X') return { width: b.readUIntLE(24, 3) + 1, height: b.readUIntLE(27, 3) + 1 }
+    return undefined
+  }
+  if (b.length >= 4 && b[0] === 0xff && b[1] === 0xd8) {
+    // JPEG: walk the segments to the first start-of-frame marker (C0-CF except C4, C8 and CC).
+    for (let i = 2; i + 9 <= b.length && b[i] === 0xff;) {
+      const marker = b[i + 1]
+      if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) return { width: b.readUInt16BE(i + 7), height: b.readUInt16BE(i + 5) }
+      i += 2 + b.readUInt16BE(i + 2)
+    }
+  }
+  return undefined
+}
+
 /**
  * The upstream body for a chat request on the OpenRouter route, or why it is refused (400). `model` must be one of
- * cfg.openrouterModels exactly; message content parts may only be `text`, or `image_url` with a `data:image/` URL, so
- * the body cap bounds every image and no paid file parser or remote fetch starts. Only OPENROUTER_FIELDS are kept;
- * then the edge sets `stream: true` with `stream_options: {include_usage: true}` (the token budget reads the final
- * usage chunk; dsh always streams), `reasoning.exclude: false` when reasoning is set (reasoning is reported, not
- * hidden), and its own `provider`: `data_collection: "deny"`, plus `zdr: true` unless cfg.openrouterZdr is false.
+ * cfg.openrouterModels exactly. Each message keeps only MESSAGE_FIELDS and a known role; its `content` is a string,
+ * null, absent, or an array of parts rebuilt from known keys: `{type: "text", text, cache_control?}` with a string
+ * `text`, or `{type: "image_url", image_url: {url, detail?}}` with a `data:image/` URL, so the body cap bounds every
+ * image and no paid file parser or remote fetch starts. Every tool is a `function` tool, and `tool_choice` is a string
+ * or a function choice. Only OPENROUTER_FIELDS are kept; then the edge sets `stream: true` with `stream_options:
+ * {include_usage: true}` (the token budget reads the final usage chunk; dsh always streams), `reasoning.exclude: false`
+ * when reasoning is set (reasoning is reported, not hidden), and its own `provider`: `data_collection: "deny"`, plus
+ * `zdr: true` unless cfg.openrouterZdr is false.
  * @param {object} cfg - config()
  * @param {Buffer} raw - the request body
  * @returns {{ error: string } | { body: string, model: string, inputEstimate: number }} `inputEstimate`, the input charged
- *   when a box drops the response before its usage: ceil(bytes without image data / 3) plus cfg.openrouterImageTokens per image.
+ *   when a box drops the response before its usage: ceil(bytes without image data / 3) plus, per image, its pixels /
+ *   PIXELS_PER_IMAGE_TOKEN from the image header, at most cfg.openrouterImageTokens (also charged when unreadable).
  */
 export function openrouterBody(cfg, raw) {
   let body
   try { body = JSON.parse(raw) } catch { return { error: 'The request body is not JSON.' } }
-  if (body === null || typeof body !== 'object' || Array.isArray(body)) return { error: 'The request body must be a JSON object.' }
+  const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
+  if (!isObject(body)) return { error: 'The request body must be a JSON object.' }
   if (!cfg.openrouterModels.includes(body.model)) return { error: `Model ${JSON.stringify(body.model)} is not offered; use one of ${cfg.openrouterModels.join(', ')}.` }
   if (!Array.isArray(body.messages)) return { error: 'messages must be an array.' }
-  const parts = body.messages.flatMap(m => Array.isArray(m?.content) ? m.content : [])
-  const images = parts.filter(p => p?.type === 'image_url')
-  if (parts.some(p => p?.type !== 'text' && p?.type !== 'image_url') || images.some(p => !/^data:image\//.test(p.image_url?.url ?? ''))) {
-    return { error: 'Message content parts may only be text, or image_url with a data:image/ URL.' }
+  const images = []
+  const part = (p) => {
+    if (p?.type === 'text' && typeof p.text === 'string') return { type: 'text', text: p.text, ...(isObject(p.cache_control) ? { cache_control: { type: 'ephemeral' } } : {}) }
+    const url = p?.type === 'image_url' ? p.image_url?.url : undefined
+    if (typeof url !== 'string' || !url.startsWith('data:image/')) return undefined
+    images.push(url)
+    return { type: 'image_url', image_url: { url, ...(['low', 'high', 'auto'].includes(p.image_url.detail) ? { detail: p.image_url.detail } : {}) } }
   }
+  const messages = []
+  for (const m of body.messages) {
+    if (!isObject(m) || !ROLES.includes(m.role)) return { error: `Each message needs a role: one of ${ROLES.join(', ')}.` }
+    const out = Object.fromEntries(MESSAGE_FIELDS.filter(f => f in m).map(f => [f, m[f]]))
+    if (Array.isArray(m.content)) {
+      out.content = m.content.map(part)
+      if (out.content.includes(undefined)) return { error: 'Message content parts may only be text with a string text, or image_url with a data:image/ URL.' }
+    } else if (!(m.content === undefined || m.content === null || typeof m.content === 'string')) return { error: 'Message content must be a string, null or an array of parts.' }
+    messages.push(out)
+  }
+  if (body.tools !== undefined && !(Array.isArray(body.tools) && body.tools.every(t => t?.type === 'function'))) return { error: 'tools must be an array of function tools.' }
+  if (body.tool_choice !== undefined && typeof body.tool_choice !== 'string' && body.tool_choice?.type !== 'function') return { error: 'tool_choice must be a string or a function choice.' }
   const out = Object.fromEntries(OPENROUTER_FIELDS.filter(f => f in body).map(f => [f, body[f]]))
+  out.messages = messages
   out.stream = true
   out.stream_options = { include_usage: true }
-  if (out.reasoning !== undefined) out.reasoning = { ...(typeof out.reasoning === 'object' ? out.reasoning : {}), exclude: false }
+  if (out.reasoning !== undefined) out.reasoning = { ...(isObject(out.reasoning) ? out.reasoning : {}), exclude: false }
   out.provider = { data_collection: 'deny', ...(cfg.openrouterZdr ? { zdr: true } : {}) }
-  const imageBytes = images.reduce((n, p) => n + p.image_url.url.length, 0)
-  return { body: JSON.stringify(out), model: out.model, inputEstimate: Math.ceil(Math.max(0, raw.length - imageBytes) / 3) + images.length * cfg.openrouterImageTokens }
+  const imageTokens = (url) => {
+    const size = imageSize(url.slice(url.indexOf(',') + 1))
+    return size ? Math.min(cfg.openrouterImageTokens, Math.ceil(size.width * size.height / PIXELS_PER_IMAGE_TOKEN)) : cfg.openrouterImageTokens
+  }
+  const imageBytes = images.reduce((n, url) => n + url.length, 0)
+  return { body: JSON.stringify(out), model: out.model, inputEstimate: Math.ceil(Math.max(0, raw.length - imageBytes) / 3) + images.reduce((n, url) => n + imageTokens(url), 0) }
 }
 
-/** A request's body, or null once it passes `cap` bytes; the rest is left unread. */
+/** A request's body, or null once it passes `cap` bytes (the rest is left unread). Rejects when the client goes away first. */
 const readBody = (req, cap) => new Promise((resolve, reject) => {
+  if (req.destroyed) return reject(new Error('request aborted'))
   const chunks = []
   let size = 0
   req.on('data', (c) => {
@@ -977,6 +1038,7 @@ const readBody = (req, cap) => new Promise((resolve, reject) => {
   })
   req.on('end', () => resolve(Buffer.concat(chunks)))
   req.on('error', reject)
+  req.on('close', () => { if (!req.complete) reject(new Error('request aborted')) })
 })
 
 // github (github.mjs), halt (halt.mjs) and tokens (budget.mjs tokenBudget) are optional like mcp: absent, /github/
@@ -1002,10 +1064,15 @@ export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, mcp, g
     if (path.startsWith('/github/') && github) return github(req, res, claim)
     const openrouter = cfg.openrouterModels?.length ? OPENROUTER_PATHS[`${req.method} ${path}`] : undefined
     if (!openrouter && !MODEL_PATHS.some(p => p.test(path))) return json(res, 404, { error: 'not found' })
+    const started = Date.now()
+    const logCall = (status, model) => log(JSON.stringify({ edge: 'model', user: claim.u, box: claim.b, path, ...(model ? { model } : {}), status, ms: Date.now() - started }))
     const cap = openrouter ? OPENROUTER_MAX_BODY : Infinity
     // Over the cap: answer and close the connection without reading on; a declared length is refused before any check.
-    const tooLarge = () => void res.writeHead(413, { 'content-type': 'application/json', 'cache-control': 'no-store', connection: 'close' })
-      .end(JSON.stringify({ error: { type: 'invalid_request_error', message: `Request bodies are limited to ${cap} bytes here.` } }), () => req.destroy())
+    const tooLarge = () => {
+      logCall(413)
+      res.writeHead(413, { 'content-type': 'application/json', 'cache-control': 'no-store', connection: 'close' })
+        .end(JSON.stringify({ error: { type: 'invalid_request_error', message: `Request bodies are limited to ${cap} bytes here.` } }), () => req.destroy())
+    }
     if (Number(req.headers['content-length']) > cap) return tooLarge()
     if (halt && await halt.isHalted(claim.u)) return json(res, 503, { type: 'error', error: { type: 'api_error', message: 'Stopped by the founder' } })
     if (!(await allow(claim.u))) return json(res, 429, { type: 'error', error: { type: 'rate_limit_error', message: 'Daily model budget reached for this account.' } })
@@ -1013,8 +1080,6 @@ export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, mcp, g
     Promise.resolve(touch(claim.b)).catch(() => {})
     const raw = await readBody(req, cap)
     if (raw === null) return tooLarge()
-    const started = Date.now()
-    const logCall = (status, model) => log(JSON.stringify({ edge: 'model', user: claim.u, box: claim.b, path, ...(model ? { model } : {}), status, ms: Date.now() - started }))
     let url = `${cfg.upstream}${req.url}`, init, forwarded
     if (openrouter) {
       const authorization = `Bearer ${cfg.openrouterKey}`
@@ -1025,12 +1090,12 @@ export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, mcp, g
         return json(res, 200, { data: ((await listed.json()).data ?? []).filter(m => cfg.openrouterModels.includes(m?.id)) })
       }
       forwarded = openrouterBody(cfg, raw)
-      if (forwarded.error) return json(res, 400, { error: { type: 'invalid_request_error', message: forwarded.error } })
+      if (forwarded.error) { logCall(400); return json(res, 400, { error: { type: 'invalid_request_error', message: forwarded.error } }) }
       url = openrouter
       const headers = { 'content-type': 'application/json', authorization }
-      // pi-ai's session affinity header, so OpenRouter keeps a Session on one provider (prompt cache).
+      // pi-ai's session affinity header, so OpenRouter keeps a Session on one provider (prompt cache). Never a box token.
       const session = req.headers['x-session-id']
-      if (typeof session === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(session)) headers['x-session-id'] = session
+      if (typeof session === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(session) && !session.startsWith('mbx.') && verifyBox(edgeKey, session) === undefined) headers['x-session-id'] = session
       init = { method: 'POST', headers, body: forwarded.body, redirect: 'error' }
     } else {
       const headers = {}
