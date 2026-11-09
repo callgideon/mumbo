@@ -91,8 +91,8 @@ describe('parsePatch', () => {
   })
 
   it('trims header whitespace but preserves path spelling and Unicode content', () => {
-    expect(parsePatch('\u0085 \n *** Begin Patch \t\n *** Add File: ../a/./文件 \t\n+é é \t\n *** End Patch\u0085')).toEqual([
-      { kind: 'add', path: '../a/./文件', lineNumber: 3, content: 'é é \t\n' },
+    expect(parsePatch('\u0085 \n *** Begin Patch \t\n *** Add File: ../a/./파일 \t\n+é é \t\n *** End Patch\u0085')).toEqual([
+      { kind: 'add', path: '../a/./파일', lineNumber: 3, content: 'é é \t\n' },
     ])
   })
 

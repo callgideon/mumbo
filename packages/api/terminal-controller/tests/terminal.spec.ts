@@ -115,8 +115,8 @@ describe('BrowserTerminal', () => {
   it('preserves a leading UTF-8 BOM in the terminal output stream', async () => {
     const { terminal, output } = fixture()
     const first = await attach(terminal)
-    output.write(Buffer.from('\uFEFF终端'))
-    expect(await readFrame(first.iterator)).toMatchObject({ type: 'output', data: '\uFEFF终端' })
+    output.write(Buffer.from('\uFEFF터널'))
+    expect(await readFrame(first.iterator)).toMatchObject({ type: 'output', data: '\uFEFF터널' })
   })
 
   it('shares concurrent close attempts and permits retry after termination fails', async () => {
@@ -155,11 +155,11 @@ it('refuses retention before allocation commit and disposes an uncommitted scree
 it('preserves split UTF-8 and gives input control only to the newest attachment', async () => {
   const { terminal, output, handle } = fixture()
   const first = await attach(terminal)
-  const encoded = Buffer.from('终端')
+  const encoded = Buffer.from('터널')
   output.write(encoded.subarray(0, 2))
   await expect.poll(() => output.readableLength).toBe(0)
   output.write(encoded.subarray(2))
-  expect(await readFrame(first.iterator)).toMatchObject({ type: 'output', data: '终端' })
+  expect(await readFrame(first.iterator)).toMatchObject({ type: 'output', data: '터널' })
   const second = await attach(terminal)
   expect(second.baseline).toMatchObject({ writable: true })
   expect(await readFrame(first.iterator)).toMatchObject({ type: 'state', writable: false })
@@ -215,7 +215,7 @@ it('half-closes input while continuing to publish output and exit state', async 
 
 it.each([
   { type: 'write', sequence: 2, data: 'gap' },
-  { type: 'write', sequence: 1, data: '界'.repeat(334) },
+  { type: 'write', sequence: 1, data: '계'.repeat(334) },
   { type: 'resize', sequence: 1, cols: 201, rows: 24 },
   { type: 'resize', sequence: 1, cols: 80, rows: 0 },
   { type: 'resize', sequence: 1, cols: 1.5, rows: 24 },

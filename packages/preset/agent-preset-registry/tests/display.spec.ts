@@ -17,8 +17,8 @@ describe('presetDisplayText', () => {
   })
 
   it('keeps user-authored metadata untranslated', () => {
-    expect(presetDisplayText({ id: 'mine', name: '我的模式', description: '自述' }, t))
-      .toEqual({ name: '我的模式', description: '自述' })
+    expect(presetDisplayText({ id: 'mine', name: 'My mode', description: 'Self description' }, t))
+      .toEqual({ name: 'My mode', description: 'Self description' })
   })
 
   it('falls back to the id for a preset publishing no metadata', () => {

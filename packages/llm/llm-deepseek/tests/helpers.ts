@@ -27,7 +27,7 @@ export const end = (reason = 'end_turn') => [
 ]
 export const textEvents = [start,
   { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
-  { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hello 世界' } },
+  { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hello 세계' } },
   { type: 'content_block_stop', index: 0 }, ...end()]
 export const sse = (events: unknown[]) => events.map(event => `event: ${(event as { type: string }).type}\ndata: ${JSON.stringify(event)}\n\n`).join('')
 export async function* events(values: Record<string, unknown>[]) { yield* values }

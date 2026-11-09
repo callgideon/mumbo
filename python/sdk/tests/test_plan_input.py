@@ -230,8 +230,8 @@ def _run(
     (b"a", [{"answers": [{"id": "plan-review", "selected": ["Approve"]}]}]),
     (b"d\n", [{"cancelled": True}]),
     (b"", [{"cancelled": True}]),
-    ("invalid\nk\n继续检查\r\nd\n".encode(), [
-        {"answers": [{"id": "plan-review", "selected": ["Keep planning"], "custom": "继续检查"}]},
+    ("invalid\nk\nkeep checking\r\nd\n".encode(), [
+        {"answers": [{"id": "plan-review", "selected": ["Keep planning"], "custom": "keep checking"}]},
         {"cancelled": True},
     ]),
 ])

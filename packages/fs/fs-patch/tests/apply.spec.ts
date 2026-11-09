@@ -62,7 +62,7 @@ describe('applyHunks', () => {
     { name: 'CRLF input retains CR on untouched lines', before: 'a\r\nb\r\n', body: ['-a', '+A'], after: 'A\nb\r\n' },
     { name: 'appending does not normalize existing CRLF', before: 'a\r\n', body: ['+b'], after: 'a\r\nb\n' },
     { name: 'lone CR remains an ordinary character', before: 'a\rb\n', body: ['-a\rb', '+c'], after: 'c\n' },
-    { name: 'non-ASCII content survives unchanged', before: '你好🙂\n', body: [' 你好🙂', '+é'], after: '你好🙂\né\n' },
+    { name: 'non-ASCII content survives unchanged', before: '안녕🙂\n', body: [' 안녕🙂', '+é'], after: '안녕🙂\né\n' },
     { name: 'long interior whitespace survives all failed earlier candidates', before: `${' '.repeat(32_000)}x–y\n`, body: ['-x-y', '+done'], after: 'done\n' },
   ])('$name', ({ before, body, after }) => {
     const hunks = update(...body)

@@ -430,7 +430,7 @@ describe('job_output', () => {
     const { ctx } = await setup()
     const p = producer({ outputLimitBytes: 48 })
     ctx.jobs.start(p.spec)
-    p.append('界'.repeat(100))
+    p.append('계'.repeat(100))
 
     const output = text(await call(ctx, 'job_output', { job_id: startedId(ctx, 'bash-1') }))
     expect(Buffer.byteLength(output)).toBeLessThanOrEqual(48)
@@ -1307,42 +1307,42 @@ describe('completion notice output', () => {
   it('inlines a notice of exactly inlineOutputBytes, counted in UTF-8 bytes, and points a longer one at job_output', async () => {
     // Job ids have a fixed length, so a placeholder id sizes the notice exactly.
     // Three characters, nine bytes: a character count would admit the longer notice too.
-    const bound = Buffer.byteLength(`background job bash-${'0'.repeat(16)} (bash: exact) finished [status: completed]. Output:\n日本語`)
+    const bound = Buffer.byteLength(`background job bash-${'0'.repeat(16)} (bash: exact) finished [status: completed]. Output:\nひらが`)
 
     const bounded = await setup({ inlineOutputBytes: bound })
     const boundedInject = vi.fn()
     const boundedOwner = await fakeAgent(bounded.ctx, 'sess-1', { inject: boundedInject })
     const fits = producer({ owner: boundedOwner.id, label: 'exact' })
     const fitsId = bounded.ctx.jobs.start(fits.spec)
-    fits.append('日本語')
+    fits.append('ひらが')
     fits.settle({ status: 'completed' })
     const over = producer({ owner: boundedOwner.id, label: 'exact' })
     const overId = bounded.ctx.jobs.start(over.spec)
-    over.append('日本語x')
+    over.append('ひらがx')
     over.settle({ status: 'completed' })
     await tick()
 
-    expect(notice(boundedInject, 0).content[0].text).toBe(`background job ${fitsId} (bash: exact) finished [status: completed]. Output:\n日本語`)
+    expect(notice(boundedInject, 0).content[0].text).toBe(`background job ${fitsId} (bash: exact) finished [status: completed]. Output:\nひらが`)
     expect(Buffer.byteLength(notice(boundedInject, 0).content[0].text)).toBe(bound)
     expect(notice(boundedInject, 1).content[0].text).toBe(`background job ${overId} (bash: exact) finished [status: completed]. Read its output with job_output.`)
     logged(bounded.ctx, boundedOwner, notice(boundedInject, 1))
-    expect(text(await call(bounded.ctx, 'job_output', { job_id: overId }, boundedOwner))).toBe('日本語x\n[status: completed]')
+    expect(text(await call(bounded.ctx, 'job_output', { job_id: overId }, boundedOwner))).toBe('ひらがx\n[status: completed]')
   })
 
   it('points a notice one byte over inlineOutputBytes at job_output even when the stream fits', async () => {
-    const bound = Buffer.byteLength(`background job bash-${'0'.repeat(16)} (bash: exact) finished [status: completed]. Output:\n日本語`)
+    const bound = Buffer.byteLength(`background job bash-${'0'.repeat(16)} (bash: exact) finished [status: completed]. Output:\nひらが`)
     const { ctx } = await setup({ inlineOutputBytes: bound - 1 })
     const inject = vi.fn()
     const owner = await fakeAgent(ctx, 'sess-1', { inject })
     const p = producer({ owner: owner.id, label: 'exact' })
     const id = ctx.jobs.start(p.spec)
-    p.append('日本語')
+    p.append('ひらが')
     p.settle({ status: 'completed' })
     await tick()
 
     expect(notice(inject).content[0].text).toBe(`background job ${id} (bash: exact) finished [status: completed]. Read its output with job_output.`)
     logged(ctx, owner, notice(inject))
-    expect(text(await call(ctx, 'job_output', { job_id: id }, owner))).toBe('日本語\n[status: completed]')
+    expect(text(await call(ctx, 'job_output', { job_id: id }, owner))).toBe('ひらが\n[status: completed]')
   })
 
   it('leaves a large final result for job_output instead of inlining it', async () => {

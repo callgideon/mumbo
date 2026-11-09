@@ -14,7 +14,7 @@ describe('SSH helper protocol', () => {
     })
     const client = new SshRpcPeer(inbound, outbound, 4096, 8)
     try {
-      await expect(client.request('echo', { value: 'a\0b\n中文' }, z.string())).resolves.toBe('a\0b\n中文')
+      await expect(client.request('echo', { value: 'a\0b\n한글' }, z.string())).resolves.toBe('a\0b\n한글')
       await expect(client.request('write', {}, z.null())).rejects.toMatchObject({ code: 'FS_STALE_VERSION', message: 'stale' })
       await expect(client.request('echo', { value: 'not a number' }, z.number())).rejects.toThrow()
     } finally { client.close(); server.close() }

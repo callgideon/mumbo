@@ -20,7 +20,7 @@ config = DeepSeekHarnessConfig(
 print("Test directory:", root)
 
 with DeepSeekHarness(config) as harness:
-    result = harness.run("只回复 OK，不要调用工具。")
+    result = harness.run("Reply with only OK. Do not call any tools.")
     started = monotonic()
 
 print(f"close() took {monotonic() - started:.3f}s")

@@ -130,10 +130,10 @@ it('reassembles fragmented UTF-8 and consecutive JSON lines', async () => {
     if (received.length === 2) complete.resolve(undefined)
   } }, [], (error) => { complete.reject(error) })
   onTestFinished(() => { endpoint.$close() })
-  const bytes = Buffer.from(['你好🙂\ninside', 'next'].map(text => JSON.stringify({ t: 'q', m: 'log', a: [text] }) + '\n').join(''))
+  const bytes = Buffer.from(['안녕🙂\ninside', 'next'].map(text => JSON.stringify({ t: 'q', m: 'log', a: [text] }) + '\n').join(''))
   for (const byte of bytes) remote.write(Buffer.from([byte]))
   await complete.promise
-  expect(received).toEqual(['你好🙂\ninside', 'next'])
+  expect(received).toEqual(['안녕🙂\ninside', 'next'])
 })
 
 it.each([

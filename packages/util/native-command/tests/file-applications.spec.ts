@@ -10,7 +10,7 @@ const signal = new AbortController().signal
 describe('native file associations', () => {
   it('passes file paths as arguments and preserves the desktop default', async () => {
     const run = vi.fn(async () => ({ stdout: JSON.stringify([application]), stderr: '' }))
-    const path = '/tmp/中文 $(touch nope).mp3'
+    const path = '/tmp/한글 $(touch nope).mp3'
     await expect(nativeFileApplications(path, signal, { platform: 'darwin', run })).resolves.toEqual([application])
     expect(run).toHaveBeenCalledWith('osascript', ['-l', 'JavaScript', '-e', expect.any(String), path, 'icons'], signal, 'hidden')
   })
@@ -24,13 +24,13 @@ describe('native file associations', () => {
   it('collapses duplicate copies of one application to its default or newest install', async () => {
     const copy = (id: string, name: string, extra: object) => ({ id, name, default: false, icon: null, ...extra })
     const stdout = JSON.stringify([
-      copy('/Applications/Quark.app', '夸克', { default: true, bundle: 'com.quark.desktop', version: '7.1.5' }),
-      copy('/Applications/Doubao.app', '豆包', { bundle: 'com.bot.pc.doubao', version: '2.18.12' }),
+      copy('/Applications/Quark.app', '쿼크', { default: true, bundle: 'com.quark.desktop', version: '7.1.5' }),
+      copy('/Applications/Doubao.app', '도우바오', { bundle: 'com.bot.pc.doubao', version: '2.18.12' }),
       copy('/Applications/Xcode.app', 'Xcode', { bundle: 'com.apple.dt.Xcode', version: '26.2' }),
       copy('/Applications/Xcode-26.0.0.app', 'Xcode-26.0.0', { bundle: 'com.apple.dt.Xcode', version: '26.0' }),
       copy('/stale/WeChat.app', 'WeChat', { bundle: 'com.tencent.xinWeChat', version: '4.0' }),
-      copy('/updates/Quark.app', '夸克', { bundle: 'com.quark.desktop', version: '9.9' }),
-      copy('/versions/Doubao.app', '豆包', { bundle: 'com.bot.pc.doubao', version: '2.25.16' }),
+      copy('/updates/Quark.app', '쿼크', { bundle: 'com.quark.desktop', version: '9.9' }),
+      copy('/versions/Doubao.app', '도우바오', { bundle: 'com.bot.pc.doubao', version: '2.25.16' }),
       copy('/Applications/WeChat.app', 'WeChat', { default: true, bundle: 'com.tencent.xinWeChat', version: '3.9' }),
       copy('/script-a.app', 'Script', {}),
       copy('/script-b.app', 'Script', { bundle: null, version: null }),
@@ -124,7 +124,7 @@ it('encodes Windows query and invocation data separately from native adapter sou
     scripts.push(await readFile(args.at(-1)!, 'utf8'))
     return { stdout: JSON.stringify([application]), stderr: '' }
   })
-  const path = "C:\\测试\\a'; write-host nope.mp3"
+  const path = "C:\\테스트\\a'; write-host nope.mp3"
   expect(await nativeFileApplications(path, signal, { platform: 'win32', run })).toEqual([application])
   expect(scripts[0]!).toContain(Buffer.from(path).toString('base64'))
   expect(scripts[0]!).not.toContain(path)
@@ -141,8 +141,8 @@ it('keeps the complete Windows command line below the CreateProcess limit for lo
   const run = vi.fn<runner.NativeCommandRunner>(async () => ({ stdout: '[]', stderr: '' }))
   const paths = [
     // 222 characters; this path measured 32883 characters of command line while the script travelled there.
-    `C:\\work\\${'测'.repeat(210)}.txt`,
-    `C:\\work\\${'测'.repeat(3000)}.txt`,
+    `C:\\work\\${'테'.repeat(210)}.txt`,
+    `C:\\work\\${'테'.repeat(3000)}.txt`,
   ]
   for (const path of paths) await nativeFileApplications(path, signal, { platform: 'win32', run })
   const commandLines = run.mock.calls.map(call => [call[0], ...call[1]].join(' '))
@@ -162,12 +162,12 @@ it('keeps the complete Windows command line below the CreateProcess limit for lo
 
 it('uses the Windows desktop for WSL paths and rejects an empty translation', async () => {
   const run = vi.fn<runner.NativeCommandRunner>(async command => ({
-    stdout: command === 'wslpath' ? 'C:\\音频.mp3\n' : JSON.stringify([application]), stderr: '',
+    stdout: command === 'wslpath' ? 'C:\\오디오.mp3\n' : JSON.stringify([application]), stderr: '',
   }))
   const facts = { platform: 'linux' as const, osRelease: 'microsoft', env: {}, run }
-  expect(await nativeFileApplications('/mnt/c/音频.mp3', signal, facts)).toEqual([application])
-  await openNativeFileApplication('/mnt/c/音频.mp3', application.id, signal, facts)
-  expect(run).toHaveBeenCalledWith('wslpath', ['-w', '/mnt/c/音频.mp3'], signal, 'hidden')
+  expect(await nativeFileApplications('/mnt/c/오디오.mp3', signal, facts)).toEqual([application])
+  await openNativeFileApplication('/mnt/c/오디오.mp3', application.id, signal, facts)
+  expect(run).toHaveBeenCalledWith('wslpath', ['-w', '/mnt/c/오디오.mp3'], signal, 'hidden')
   const empty = async () => ({ stdout: '', stderr: '' })
   await expect(nativeFileApplications('/a', signal, { ...facts, run: empty })).rejects.toThrow('no Windows path')
 })

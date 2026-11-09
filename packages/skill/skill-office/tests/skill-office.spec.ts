@@ -65,7 +65,7 @@ describe('bundled Office skills', () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-office-skills-'))
     const ctx = new Context()
     try {
-      const external = join(root, '中文 assets')
+      const external = join(root, '한글 assets')
       await cp(assets, external, { recursive: true })
       const configPath = join(root, 'cordis.yml')
       await writeFile(configPath, [
@@ -153,7 +153,7 @@ describe('bundled Office skills', () => {
 })
 
 it('executes capabilities using only paths returned by the loaded skill from a separate workspace', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'office CLI 工作目录 '))
+  const root = await mkdtemp(join(tmpdir(), 'office CLI 작업폴더 '))
   const ctx = new Context()
   try {
     await ctx.plugin(SkillRegistry)

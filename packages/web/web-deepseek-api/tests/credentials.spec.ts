@@ -79,7 +79,7 @@ describe('web-deepseek-api API-key resolution', () => {
     } finally { await ctx.fiber.dispose() }
   })
 
-  it.each(['', 'bad key', '非法密钥'])('rejects malformed stored key %j before dispatch', async (value) => {
+  it.each(['', 'bad key', '잘못된키'])('rejects malformed stored key %j before dispatch', async (value) => {
     const authorization = captureAuthorization()
     const ctx = new Context()
     try {
