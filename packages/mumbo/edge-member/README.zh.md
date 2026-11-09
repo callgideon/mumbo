@@ -71,7 +71,7 @@ kind: "package-reference"
 <a id="composition"></a>
 ## 组合
 
-项目盒子加载 [`deploy/mumbo-project.overlay.yml`](../../../deploy/mumbo-project.overlay.yml)：它以 `key: !!js process.env.MUMBO_MEMBER_KEY` 插入本插件，并把审批策略设为 `never`，使成员的回合从不等待 owner 审批。`apps/cli` 依赖本包，使 `--patch` overlay 可以按名称引用它。
+项目盒子加载 [`deploy/mumbo-project.overlay.yml`](../../../deploy/mumbo-project.overlay.yml)：它以 `key: !!js process.env.MUMBO_MEMBER_KEY` 插入本插件，并把审批策略设为 `never`，使成员的回合从不等待 owner 审批。根清单把这个私有包列为开发依赖，因此从仓库启动的 Host 可以从 `--patch` overlay 按名称解析它；已发布的 `@deepseek-ai/dsh` 包不依赖它。
 
 <a id="model-experience"></a>
 ## 模型体验

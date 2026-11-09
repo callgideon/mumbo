@@ -71,7 +71,7 @@ The package's browser half shows the member's address above each user message a 
 <a id="composition"></a>
 ## Composition
 
-A project box loads [`deploy/mumbo-project.overlay.yml`](../../../deploy/mumbo-project.overlay.yml), which inserts the plugin with `key: !!js process.env.MUMBO_MEMBER_KEY` and sets the approval policy to `never`, so a member's turn never waits for an owner approval. `apps/cli` depends on this package so a `--patch` overlay can name it.
+A project box loads [`deploy/mumbo-project.overlay.yml`](../../../deploy/mumbo-project.overlay.yml), which inserts the plugin with `key: !!js process.env.MUMBO_MEMBER_KEY` and sets the approval policy to `never`, so a member's turn never waits for an owner approval. The root manifest lists this private package as a development dependency, so a Host started from the repository resolves it by name from a `--patch` overlay; the published `@deepseek-ai/dsh` package does not depend on it.
 
 <a id="model-experience"></a>
 ## Model Experience

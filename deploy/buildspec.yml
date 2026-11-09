@@ -12,4 +12,4 @@ phases:
   post_build:
     commands:
       - docker push "$ECR_REPO:$TAG" && docker push "$ECR_REPO:$MUMBO_ENV"
-      - aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" --force-new-deployment
+      - '[ -z "$ECS_SERVICE" ] || aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" --force-new-deployment'
