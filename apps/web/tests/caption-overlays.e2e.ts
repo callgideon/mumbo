@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
 import { launchWebScaffold, watchConsole } from './scaffold.ts'
-import { openSettings } from './support.ts'
+import { openSettings, ZH_BROWSER_LOCALE } from './support.ts'
 
 it('keeps settings and expanded plugin dialogs clear of the Windows caption across fullscreen transitions', async () => {
   const scaffold = await launchWebScaffold({
@@ -13,7 +13,7 @@ it('keeps settings and expanded plugin dialogs clear of the Windows caption acro
   try {
     const browser = await chromium.launch()
     try {
-      const page = await browser.newPage({ viewport: { width: 520, height: 600 }, locale: 'en-US' })
+      const page = await browser.newPage({ viewport: { width: 520, height: 600 }, locale: ZH_BROWSER_LOCALE })
       const console = watchConsole(page)
       await page.goto(scaffold.authenticatedUrl)
       await page.waitForSelector('[class*="frame"]')
@@ -23,13 +23,13 @@ it('keeps settings and expanded plugin dialogs clear of the Windows caption acro
       })
       await page.setViewportSize({ width: 521, height: 600 })
       await page.locator('[data-sidebar-drawer]').waitFor({ state: 'detached' })
-      const reopenSidebar = page.locator('[data-shell-leading]').getByRole('button', { name: 'Open sidebar', exact: true })
-      await openSettings(page, 'en')
-      const settings = page.getByRole('dialog', { name: 'Settings', exact: true })
+      const reopenSidebar = page.locator('[data-shell-leading]').getByRole('button', { name: '打开侧边栏', exact: true })
+      await openSettings(page, 'zh')
+      const settings = page.getByRole('dialog', { name: '设置', exact: true })
       const settingsMask = settings.locator('..').locator(':scope > [aria-hidden="true"]')
       const permissionText = settings.getByText('权限', { exact: true }).locator('..')
       expect(await permissionText.evaluate(el => getComputedStyle(el).paddingRight)).toBe('48px')
-      const cubes = settings.getByRole('button', { name: /Light|Dark|System/ })
+      const cubes = settings.getByRole('button', { name: /浅色|深色|跟随系统/ })
       expect(await cubes.first().evaluate(el => getComputedStyle(el).flexBasis)).toBe('180px')
       for (const fullscreen of [false, true, false]) {
         await page.evaluate(value => document.documentElement.toggleAttribute('data-fullscreen', value), fullscreen)
@@ -51,12 +51,12 @@ it('keeps settings and expanded plugin dialogs clear of the Windows caption acro
       await page.keyboard.press('Escape')
       await menu.waitFor({ state: 'hidden' })
       expect(await settings.isVisible()).toBe(true)
-      await settings.getByRole('button', { name: 'Close', exact: true }).click()
+      await settings.getByRole('button', { name: '关闭', exact: true }).click()
       if (await page.locator('[data-sidebar-drawer][data-sidebar-collapsed]').count() > 0) await reopenSidebar.click()
-      await page.getByRole('navigation', { name: 'Global panels' }).getByRole('button', { name: '插件', exact: true }).click()
-      await page.locator('[data-plugin-panel]').getByRole('button', { name: 'Add plugin', exact: true }).click()
-      const plugin = page.getByRole('dialog', { name: 'Add plugin', exact: true })
-      await plugin.getByRole('button', { name: 'Install guide and examples', exact: true }).click()
+      await page.getByRole('navigation', { name: '全局面板' }).getByRole('button', { name: '插件', exact: true }).click()
+      await page.locator('[data-plugin-panel]').getByRole('button', { name: '添加插件', exact: true }).click()
+      const plugin = page.getByRole('dialog', { name: '添加插件', exact: true })
+      await plugin.getByRole('button', { name: '插件安装引导和示例', exact: true }).click()
       await expect.poll(() => plugin.locator('button[aria-expanded="true"]').count()).toBe(1)
       for (const fullscreen of [false, true, false]) {
         await page.evaluate(value => document.documentElement.toggleAttribute('data-fullscreen', value), fullscreen)
@@ -68,10 +68,10 @@ it('keeps settings and expanded plugin dialogs clear of the Windows caption acro
           return box !== null && box.y >= margin && box.y + box.height <= 600 - margin
         }, { timeout: 5_000 }).toBe(true)
         expect((await plugin.locator('..').locator(':scope > [aria-hidden="true"]').boundingBox())?.y).toBe(fullscreen ? 0 : 40)
-        expect(await plugin.getByRole('button', { name: 'Close', exact: true }).isVisible()).toBe(true)
-        expect(await plugin.getByRole('button', { name: 'Install', exact: true }).isVisible()).toBe(true)
+        expect(await plugin.getByRole('button', { name: '关闭', exact: true }).isVisible()).toBe(true)
+        expect(await plugin.getByRole('button', { name: '安装', exact: true }).isVisible()).toBe(true)
       }
-      await plugin.getByRole('button', { name: /^Registry/ }).click()
+      await plugin.getByRole('button', { name: /^安装源/ }).click()
       const registry = page.locator('[data-install-registry]')
       await registry.waitFor()
       const registryRect = await registry.boundingBox()
@@ -92,7 +92,7 @@ it('keeps settings and expanded plugin dialogs clear of the Windows caption acro
         // Publish the synthetic platform change through the frame's size observer.
         await page.setViewportSize({ width: platform === 'darwin' ? 520 : 521, height: 600 })
         await page.locator('[data-sidebar-drawer]').waitFor()
-        await openSettings(page, 'en')
+        await openSettings(page, 'zh')
         await expect.poll(async () => (await settings.boundingBox())?.y).toBe(platform === 'darwin' ? 68 : 0)
         expect((await settingsMask.boundingBox())?.y).toBe(0)
         expect(await permissionText.evaluate(el => getComputedStyle(el).paddingRight)).toBe(platform === 'darwin' ? '48px' : '16px')

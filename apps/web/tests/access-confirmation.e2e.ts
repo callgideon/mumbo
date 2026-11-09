@@ -14,7 +14,7 @@ import {
   launchWebScaffold, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
 import {
-  assertWarningDialogLayout, saveFailureShot, writeComposerDraft, connectFreshWorkspace,
+  ZH_BROWSER_LOCALE, assertWarningDialogLayout, connectFreshWorkspaceZh, saveFailureShot, writeComposerDraft,
 } from './support.ts'
 
 import { AUTO_REVIEW_FIXTURE, captureAutoReviewState } from './auto-review-fixture.ts'
@@ -39,14 +39,14 @@ describe('web e2e: experimental Auto and Full access confirmation', () => {
     // is temporarily unavailable.
     const executablePath = process.env.DSH_PLAYWRIGHT_EXECUTABLE_PATH
     browser = await chromium.launch(executablePath === undefined ? {} : { executablePath })
-    // Keep the Chinese surface via {@link 'en-US'}: the golden pins
+    // Keep the Chinese surface via {@link ZH_BROWSER_LOCALE}: the golden pins
     // the actual registered dictionary rather than a test-local translation
     // callback.
-    page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: colorScheme: 'light' })
+    page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: ZH_BROWSER_LOCALE, colorScheme: 'light' })
     tripwire = watchConsole(page)
     await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
-    await connectFreshWorkspace(page, scaffold.workspaceCwd)
+    await connectFreshWorkspaceZh(page, scaffold.workspaceCwd)
   }, 120_000)
 
   afterAll(async () => {
@@ -64,7 +64,7 @@ describe('web e2e: experimental Auto and Full access confirmation', () => {
     const currentMenu = page.getByRole('menu')
     await currentMenu.waitFor({ timeout: 10_000 })
     expect(await currentMenu.getByRole('menuitem').allTextContents())
-      .toEqual(['仅可查看', '工作区内修改', 'Full access', 'Auto reviewEXP'])
+      .toEqual(['仅可查看', '工作区内修改', '完全权限', '自动审查EXP'])
     await captureAutoReviewState(page, 'experimental-current-session-picker')
     const currentSnapshot = await captureStableAria(page, '[role="menu"]', scaffold.workspaceCwd)
     await compareOrRefreshGolden(CURRENT_SESSION_PICKER_EXPECTED, currentSnapshot, MODE)
@@ -77,10 +77,10 @@ describe('web e2e: experimental Auto and Full access confirmation', () => {
     expect(currentMenuBox!.width).toBeGreaterThan(currentTriggerBox!.width)
     expect(Math.abs(currentTriggerBox!.y - currentMenuBox!.y - currentMenuBox!.height - 4)).toBeLessThan(1)
 
-    await currentMenu.getByRole('menuitem', { name: 'Auto review EXP' }).click()
-    const autoDialog = page.getByRole('dialog', { name: 'Enable Auto review (experimental)?' })
+    await currentMenu.getByRole('menuitem', { name: '自动审查 EXP' }).click()
+    const autoDialog = page.getByRole('dialog', { name: '确认启用自动审查（实验）？' })
     await autoDialog.waitFor({ timeout: 10_000 })
-    const autoEnable = autoDialog.getByRole('button', { name: 'Enable Auto review' })
+    const autoEnable = autoDialog.getByRole('button', { name: '启用自动审查' })
     expect(await autoEnable.isDisabled()).toBe(true)
     expect(await autoDialog.getByText(/不使用沙箱/).count()).toBe(1)
     expect(await autoDialog.getByText(/误放行或误拒绝/).count()).toBe(1)
@@ -89,25 +89,25 @@ describe('web e2e: experimental Auto and Full access confirmation', () => {
     await captureAutoReviewState(page, 'experimental-confirmation')
     const confirmationSnapshot = await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd)
     await compareOrRefreshGolden(AUTO_CONFIRMATION_EXPECTED, confirmationSnapshot, MODE)
-    await autoDialog.getByRole('button', { name: 'Cancel' }).click()
+    await autoDialog.getByRole('button', { name: '取消' }).click()
     await expect.poll(() => autoDialog.count()).toBe(0)
     expect(await access.getAttribute('aria-label')).toBe('访问模式，当前：工作区内修改')
 
     const input = page.locator('[data-composer-input]').first()
     await writeComposerDraft(page, input, '/permission')
-    const suggestions = page.getByRole('listbox', { name: 'Trigger suggestions' })
+    const suggestions = page.getByRole('listbox', { name: '触发候选建议' })
     await suggestions.waitFor({ timeout: 10_000 })
     await input.press('Escape')
     await expect.poll(() => suggestions.count()).toBe(0)
     await input.press('Enter')
 
-    const slashPicker = page.locator('[aria-label="/permission Options"]')
+    const slashPicker = page.locator('[aria-label="/permission 选项"]')
     await slashPicker.waitFor({ timeout: 10_000 })
     const slashRows = slashPicker.getByRole('option')
     expect(await slashRows.count()).toBe(4)
-    expect(await slashPicker.getByRole('option', { name: 'Auto review EXP' }).count()).toBe(1)
+    expect(await slashPicker.getByRole('option', { name: '自动审查 EXP' }).count()).toBe(1)
     await captureAutoReviewState(page, 'experimental-slash-picker')
-    const slashSnapshot = await captureStableAria(page, '[aria-label="/permission Options"]', scaffold.workspaceCwd)
+    const slashSnapshot = await captureStableAria(page, '[aria-label="/permission 选项"]', scaffold.workspaceCwd)
     await compareOrRefreshGolden(SLASH_PICKER_EXPECTED, slashSnapshot, MODE)
 
     const slashPickerBox = await slashPicker.boundingBox()
@@ -119,15 +119,15 @@ describe('web e2e: experimental Auto and Full access confirmation', () => {
     expect(slashPickerBox!.x).toBeCloseTo(composerBox!.x)
     expect(Math.abs(composerBox!.y - slashPickerBox!.y - slashPickerBox!.height - 4)).toBeLessThan(1)
 
-    await slashPicker.getByRole('option', { name: 'Auto review EXP' }).click()
-    const slashDialog = page.getByRole('dialog', { name: 'Enable Auto review (experimental)?' })
+    await slashPicker.getByRole('option', { name: '自动审查 EXP' }).click()
+    const slashDialog = page.getByRole('dialog', { name: '确认启用自动审查（实验）？' })
     await slashDialog.waitFor({ timeout: 10_000 })
     expect(await slashDialog.count()).toBe(1)
     expect(await slashPicker.count()).toBe(0)
-    await slashDialog.getByRole('checkbox', { name: 'I understand these risks and want to continue' }).check()
-    await slashDialog.getByRole('button', { name: 'Enable Auto review' }).click()
+    await slashDialog.getByRole('checkbox', { name: '我已了解这些风险，并愿意继续' }).check()
+    await slashDialog.getByRole('button', { name: '启用自动审查' }).click()
     await expect.poll(() => access.getAttribute('aria-label'), { timeout: 10_000 })
-      .toBe('Access mode, current: Auto review')
+      .toBe('访问模式，当前：自动审查')
     expect(await slashDialog.count()).toBe(0)
     expect(await input.textContent()).toBe('')
     await captureAutoReviewState(page, 'experimental-current-session')
@@ -151,11 +151,11 @@ describe('web e2e: experimental Auto and Full access confirmation', () => {
     expect(await access.getAttribute('aria-label')).toBe('访问模式，当前：工作区内修改')
 
     await access.click()
-    await page.getByRole('menuitem', { name: 'Full access' }).click()
-    const dialog = page.getByRole('dialog', { name: 'Enable Full access?' })
+    await page.getByRole('menuitem', { name: '完全权限' }).click()
+    const dialog = page.getByRole('dialog', { name: '确认启用完全权限？' })
     await dialog.waitFor({ timeout: 10_000 })
     await assertWarningDialogLayout(dialog)
-    const enable = dialog.getByRole('button', { name: 'Enable Full access' })
+    const enable = dialog.getByRole('button', { name: '启用完全权限' })
     expect(await enable.isDisabled()).toBe(true)
 
     // The modal is in this page's body (not a native/new window) and escapes
@@ -164,7 +164,7 @@ describe('web e2e: experimental Auto and Full access confirmation', () => {
     const snapshot = await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd)
     await compareOrRefreshGolden(UI_EXPECTED, snapshot, MODE)
 
-    const acknowledgement = dialog.getByRole('checkbox', { name: 'I understand the risks and want to continue' })
+    const acknowledgement = dialog.getByRole('checkbox', { name: '我已了解风险，并愿意继续' })
     expect(await acknowledgement.evaluate((input) => {
       const label = input.closest('label')!
       const textStyle = getComputedStyle(label)
@@ -175,11 +175,11 @@ describe('web e2e: experimental Auto and Full access confirmation', () => {
         gap: textStyle.gap, width: inputStyle.width, height: inputStyle.height,
       }
     })).toEqual({ focused: true, fontSize: '14px', lineHeight: '20px', weight: '400', gap: '6px', width: '14px', height: '14px' })
-    await dialog.getByText('I understand the risks and want to continue', { exact: true }).click()
+    await dialog.getByText('我已了解风险，并愿意继续', { exact: true }).click()
     expect(await enable.isEnabled()).toBe(true)
     await enable.click()
     await expect.poll(() => access.getAttribute('aria-label'), { timeout: 10_000 })
-      .toBe('Access mode, current: Full access')
+      .toBe('访问模式，当前：完全权限')
     expect(await dialog.count()).toBe(0)
     expect(tripwire.pageErrors).toEqual([])
   }, 60_000)
@@ -200,7 +200,7 @@ describe('web e2e: experimental Auto and Full access confirmation', () => {
     expect(menuBox.width).toBeLessThanOrEqual(360)
     expect(menuBox.x).toBeGreaterThanOrEqual(0)
     expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(420)
-    for (const name of ['仅可查看', '工作区内修改', 'Full access', 'Auto review']) {
+    for (const name of ['仅可查看', '工作区内修改', '完全权限', '自动审查']) {
       expect(await menu.getByText(name, { exact: true }).evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true)
     }
     await page.keyboard.press('Escape')
@@ -208,14 +208,14 @@ describe('web e2e: experimental Auto and Full access confirmation', () => {
     const input = page.locator('[data-composer-input]').first()
     await writeComposerDraft(page, input, '/permission auto')
     await input.press('Enter')
-    await expect.poll(() => access.getAttribute('aria-label')).toBe('Access mode, current: Auto review')
-    expect(await access.getByText('Auto review', { exact: true }).isVisible()).toBe(false)
+    await expect.poll(() => access.getAttribute('aria-label')).toBe('访问模式，当前：自动审查')
+    expect(await access.getByText('自动审查', { exact: true }).isVisible()).toBe(false)
     expect(await access.getByText('EXP', { exact: true }).count()).toBe(0)
-    expect(await access.getAttribute('title')).toBe('Run without a sandbox after an experimental same-model review of every native tool call and PTC inner call.')
+    expect(await access.getAttribute('title')).toBe('无沙箱运行；每次原生工具调用和 PTC 内层调用前由同一模型进行实验性审查。')
     await writeComposerDraft(page, input, '/permission')
     await input.press('Escape')
     await input.press('Enter')
-    const slash = page.locator('[aria-label="/permission Options"]')
+    const slash = page.locator('[aria-label="/permission 选项"]')
     await slash.waitFor()
     await captureAutoReviewState(page, 'experimental-narrow-slash')
     const slashBox = (await slash.boundingBox())!
@@ -224,13 +224,13 @@ describe('web e2e: experimental Auto and Full access confirmation', () => {
     expect(slashBox.x + slashBox.width).toBeLessThanOrEqual(420)
     expect(await slash.evaluate(node => getComputedStyle(node).minWidth)).toBe('min(220px, 100%)')
     expect(await slash.evaluate(node => getComputedStyle(node).maxWidth)).toBe('100%')
-    for (const name of ['仅可查看', '工作区内修改', 'Full access', 'Auto review']) {
+    for (const name of ['仅可查看', '工作区内修改', '完全权限', '自动审查']) {
       expect(await slash.getByText(name, { exact: true }).evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true)
     }
     await page.keyboard.press('Escape')
     await writeComposerDraft(page, input, '/permission danger-full-access')
     await input.press('Enter')
-    await expect.poll(() => access.getAttribute('aria-label')).toBe('Access mode, current: Full access')
+    await expect.poll(() => access.getAttribute('aria-label')).toBe('访问模式，当前：完全权限')
     expect(tripwire.pageErrors).toEqual([])
   })
 
@@ -240,37 +240,37 @@ describe('web e2e: experimental Auto and Full access confirmation', () => {
     const access = page.locator('button[aria-label^="访问模式"]').first()
     await writeComposerDraft(page, input, '/permission auto')
     await input.press('Enter')
-    await expect.poll(() => access.getAttribute('aria-label')).toBe('Access mode, current: Auto review')
+    await expect.poll(() => access.getAttribute('aria-label')).toBe('访问模式，当前：自动审查')
     expect(await page.getByRole('dialog').count()).toBe(0)
     await writeComposerDraft(page, input, '/permission')
     await input.press('Escape')
     await input.press('Enter')
-    const slash = page.locator('[aria-label="/permission Options"]')
+    const slash = page.locator('[aria-label="/permission 选项"]')
     await slash.waitFor()
     expect(await slash.getByRole('option').count()).toBe(4)
     const entry = [...scaffold.ctx.loader.entries()].find(row => row.options.id === 'auto-review')
     if (entry === undefined) throw new Error('experimental Auto integration is absent')
     await entry.update({ disabled: true })
     await scaffold.ctx.loader.await()
-    await expect.poll(() => access.getAttribute('aria-label')).toBe('Access mode, current: Full access')
+    await expect.poll(() => access.getAttribute('aria-label')).toBe('访问模式，当前：完全权限')
     await expect.poll(() => slash.count()).toBe(0)
     expect(await input.textContent()).toBe('/permission')
     await input.press('Enter')
     await slash.waitFor()
     expect(await slash.getByRole('option').count()).toBe(3)
-    expect(await slash.getByText('Auto review', { exact: true }).count()).toBe(0)
+    expect(await slash.getByText('自动审查', { exact: true }).count()).toBe(0)
     await page.keyboard.press('Escape')
     await access.click()
     await expect.poll(() => page.getByRole('menuitem').allTextContents())
-      .toEqual(['仅可查看', '工作区内修改', 'Full access'])
+      .toEqual(['仅可查看', '工作区内修改', '完全权限'])
     await captureAutoReviewState(page, 'uninstalled-current-session-picker')
     await page.keyboard.press('Escape')
     await entry.update({ disabled: false })
     await scaffold.ctx.loader.await()
     await access.click()
     await expect.poll(() => page.getByRole('menuitem').allTextContents())
-      .toEqual(['仅可查看', '工作区内修改', 'Full access', 'Auto reviewEXP'])
-    expect(await access.getAttribute('aria-label')).toBe('Access mode, current: Full access')
+      .toEqual(['仅可查看', '工作区内修改', '完全权限', '自动审查EXP'])
+    expect(await access.getAttribute('aria-label')).toBe('访问模式，当前：完全权限')
     await captureAutoReviewState(page, 'reinstalled-current-session-picker')
     await page.keyboard.press('Escape')
     await writeComposerDraft(page, input, '/permission')
@@ -301,9 +301,9 @@ describe('web e2e: default permission choices', () => {
   beforeAll(async () => {
     scaffold = await launchWebScaffold()
     browser = await chromium.launch()
-    page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: colorScheme: 'light' })
+    page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: ZH_BROWSER_LOCALE, colorScheme: 'light' })
     await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-    await connectFreshWorkspace(page, scaffold.workspaceCwd)
+    await connectFreshWorkspaceZh(page, scaffold.workspaceCwd)
   }, 120_000)
   afterAll(async () => {
     await browser?.close()
@@ -313,17 +313,17 @@ describe('web e2e: default permission choices', () => {
     const access = page.locator('button[aria-label^="访问模式"]').first()
     await access.click()
     await expect.poll(() => page.getByRole('menuitem').allTextContents())
-      .toEqual(['仅可查看', '工作区内修改', 'Full access'])
+      .toEqual(['仅可查看', '工作区内修改', '完全权限'])
     await captureAutoReviewState(page, 'default-current-session-picker')
     await page.keyboard.press('Escape')
     const input = page.locator('[data-composer-input]').first()
     await writeComposerDraft(page, input, '/permission')
     await input.press('Escape')
     await input.press('Enter')
-    const slash = page.locator('[aria-label="/permission Options"]')
+    const slash = page.locator('[aria-label="/permission 选项"]')
     await slash.waitFor()
     expect(await slash.getByRole('option').count()).toBe(3)
-    expect(await slash.getByText('Auto review', { exact: true }).count()).toBe(0)
+    expect(await slash.getByText('自动审查', { exact: true }).count()).toBe(0)
     await captureAutoReviewState(page, 'default-slash-picker')
   })
 })

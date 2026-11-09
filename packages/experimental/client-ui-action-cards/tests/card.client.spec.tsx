@@ -78,7 +78,7 @@ it('renders a registered body with the frame summary, the fold, its own translat
 })
 
 it('offers only Not now for a card whose kind registered no body, and reports refusals and lost replies', async () => {
-  const value = props(new Map(), undefined, true)
+  const value = props(new Map(), undefined)
   const pending = Promise.withResolvers<ActionCardResult | undefined>()
   value.act = vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValueOnce(undefined)
     .mockRejectedValueOnce(new Error('disconnected')).mockResolvedValueOnce({ status: 'unconfirmed', reason: 'closing' })

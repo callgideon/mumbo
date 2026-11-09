@@ -7,7 +7,7 @@ import { chromium, type Browser } from 'playwright'
 import type {} from '@deepseek-ai/dsh-ptc-runtime'
 import { expect, it, onTestFinished } from 'vitest'
 import { captureStableAria, compareOrRefreshGolden, launchWebScaffold, webSnapshotMode, type WebScaffold } from './scaffold.ts'
-import { connectFreshWorkspace } from './support.ts'
+import { connectFreshWorkspaceZh, ZH_BROWSER_LOCALE } from './support.ts'
 
 it('disables unsupported bundles, shows the Host restriction, and refuses direct activation without changing PTC', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bundle-platform-web-'))
@@ -24,11 +24,11 @@ it('disables unsupported bundles, shows the Host restriction, and refuses direct
   await writeFile(join(root, 'cordis.patch.yml'), '- id: ptc-runtime\n  config:\n    executionMode: persistent-in-memory\n')
   const scaffold = owned.scaffold = await launchWebScaffold({ profile: { packages: [{ dir: root }] } })
   const browser = owned.browser = await chromium.launch()
-  const page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: 'en-US' })
+  const page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: ZH_BROWSER_LOCALE })
   await page.goto(scaffold.authenticatedUrl)
-  await connectFreshWorkspace(page, scaffold.workspaceCwd)
-  await page.getByRole('navigation', { name: 'Global panels' }).getByRole('button', { name: '插件', exact: true }).click()
-  const reason = 'This plugin does not support the operating system running DSH.'
+  await connectFreshWorkspaceZh(page, scaffold.workspaceCwd)
+  await page.getByRole('navigation', { name: '全局面板' }).getByRole('button', { name: '插件', exact: true }).click()
+  const reason = '此插件不支持运行 DSH 的主机操作系统'
   const card = page.locator(`[data-plugin-package="${name}"]`)
   await card.getByText(reason, { exact: true }).waitFor()
   expect(await card.getByRole('switch').isEnabled()).toBe(false)
@@ -42,7 +42,7 @@ it('disables unsupported bundles, shows the Host restriction, and refuses direct
   expect(beforeRuntime).toBeTypeOf('number')
   expect(scaffold.ctx.ptcRuntime.programFormat).toBe('function-body')
   const names = [name]
-  await page.locator('[data-plugin-panel]').getByRole('button', { name: 'More', exact: true }).click()
+  await page.locator('[data-plugin-panel]').getByRole('button', { name: '更多', exact: true }).click()
   const cua = page.locator('[data-plugin-package="@deepseek-ai/dsh-cua-bundle"]')
   expect(await cua.count()).toBe(process.platform === 'darwin' ? 1 : 0)
   if (process.platform !== 'darwin') {

@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { expect, it, onTestFinished } from 'vitest'
 import { launchWebScaffold, captureStableAria, compareOrRefreshGolden, webSnapshotMode, watchConsole } from './scaffold.ts'
-import { 'en-US' } from './support.ts'
+import { ZH_BROWSER_LOCALE } from './support.ts'
 
 it.each(['network', 'timeout'] as const)('offers a mirror after a GitHub %s, then another way on the mirror, and waits for replacement input', async (failure) => {
   const scratch = await mkdtemp(join(tmpdir(), 'dsh-install-github-'))
@@ -55,24 +55,24 @@ it.each(['network', 'timeout'] as const)('offers a mirror after a GitHub %s, the
     console.error('pnpm must not start after the GitHub connection check fails');
     process.exitCode = 1;
   `)
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, locale: 'en-US' })
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, locale: ZH_BROWSER_LOCALE })
   const tripwire = watchConsole(page)
   await page.goto(scaffold.authenticatedUrl)
   await page.waitForSelector('[class*="frame"]')
-  if (await page.getByRole('dialog', { name: 'Settings' }).count() > 0) await page.keyboard.press('Escape')
-  await page.getByRole('navigation', { name: 'Global panels' }).getByRole('button', { name: '插件', exact: true }).click()
-  await page.getByRole('button', { name: 'Add plugin', exact: true }).click()
+  if (await page.getByRole('dialog', { name: '设置' }).count() > 0) await page.keyboard.press('Escape')
+  await page.getByRole('navigation', { name: '全局面板' }).getByRole('button', { name: '插件', exact: true }).click()
+  await page.getByRole('button', { name: '添加插件', exact: true }).click()
   const spec = 'https://github.com/example/dsh-plugin.git'
-  const title = failure === 'timeout' ? 'GitHub connection timed out' : 'Cannot access GitHub'
-  let dialog = page.getByRole('dialog', { name: 'Add plugin', exact: true })
-  await dialog.getByRole('button', { name: 'Registry Official npm registry', exact: true }).waitFor()
-  await dialog.getByRole('textbox', { name: 'Package name or address' }).fill(spec)
+  const title = failure === 'timeout' ? '连接 GitHub 超时' : '无法访问 GitHub'
+  let dialog = page.getByRole('dialog', { name: '添加插件', exact: true })
+  await dialog.getByRole('button', { name: '安装源 npm 官方源', exact: true }).waitFor()
+  await dialog.getByRole('textbox', { name: '包名或地址' }).fill(spec)
   expect(await page.getByText(title, { exact: true }).count()).toBe(0)
-  await dialog.getByRole('button', { name: 'Install', exact: true }).click()
+  await dialog.getByRole('button', { name: '安装', exact: true }).click()
   dialog = page.getByRole('dialog', { name: title, exact: true })
   await dialog.waitFor()
   expect(await page.getByRole('dialog').count()).toBe(1)
-  expect(await dialog.getByText('Try another installation source.', { exact: true }).count()).toBe(1)
+  expect(await dialog.getByText('请尝试其他安装来源。', { exact: true }).count()).toBe(1)
   await compareOrRefreshGolden(
     fileURLToPath(new URL(`./expected/plugin-install-github/${failure === 'timeout' ? 'timeout' : 'failed'}.expected.md`, import.meta.url)),
     await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd), webSnapshotMode(),
@@ -82,14 +82,14 @@ it.each(['network', 'timeout'] as const)('offers a mirror after a GitHub %s, the
   expect(connections).toBeGreaterThan(0)
   await expect.poll(() => sockets.size).toBe(0)
   const checked = connections
-  await dialog.getByRole('button', { name: 'Use mainland China mirror', exact: true }).click()
-  dialog = page.getByRole('dialog', { name: 'Add plugin', exact: true })
-  const input = dialog.getByRole('textbox', { name: 'Plugin package name', exact: true })
+  await dialog.getByRole('button', { name: '改用国内镜像', exact: true }).click()
+  dialog = page.getByRole('dialog', { name: '添加插件', exact: true })
+  const input = dialog.getByRole('textbox', { name: '插件包名', exact: true })
   await input.waitFor()
   expect(await input.inputValue()).toBe('')
   expect(await input.evaluate(element => element === document.activeElement)).toBe(true)
-  expect(await dialog.getByRole('button', { name: 'Install', exact: true }).isDisabled()).toBe(true)
-  await dialog.getByRole('button', { name: 'Registry Mainland China mirror', exact: true }).waitFor()
+  expect(await dialog.getByRole('button', { name: '安装', exact: true }).isDisabled()).toBe(true)
+  await dialog.getByRole('button', { name: '安装源 中国大陆镜像源', exact: true }).waitFor()
   await compareOrRefreshGolden(
     fileURLToPath(new URL('./expected/plugin-install-github/mirror.expected.md', import.meta.url)),
     await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd), webSnapshotMode(),
@@ -98,16 +98,16 @@ it.each(['network', 'timeout'] as const)('offers a mirror after a GitHub %s, the
   expect(connections).toBe(checked)
   expect(await readFile(manifestPath, 'utf8')).toBe(manifestBefore)
   await input.fill(spec)
-  await dialog.getByRole('button', { name: 'Install', exact: true }).click()
+  await dialog.getByRole('button', { name: '安装', exact: true }).click()
   dialog = page.getByRole('dialog', { name: title, exact: true })
   await dialog.waitFor()
   await compareOrRefreshGolden(
     fileURLToPath(new URL(`./expected/plugin-install-github/${failure === 'timeout' ? 'timeout' : 'failed'}-on-mirror.expected.md`, import.meta.url)),
     await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd), webSnapshotMode(),
   )
-  await dialog.getByRole('button', { name: 'Try another way', exact: true }).click()
-  dialog = page.getByRole('dialog', { name: 'Add plugin', exact: true })
-  await dialog.getByRole('button', { name: 'Hide the guide', exact: true }).waitFor()
+  await dialog.getByRole('button', { name: '试试其他方式', exact: true }).click()
+  dialog = page.getByRole('dialog', { name: '添加插件', exact: true })
+  await dialog.getByRole('button', { name: '收起引导', exact: true }).waitFor()
   expect(await input.inputValue()).toBe('')
   expect(await input.evaluate(element => element === document.activeElement)).toBe(true)
   await compareOrRefreshGolden(
@@ -115,9 +115,9 @@ it.each(['network', 'timeout'] as const)('offers a mirror after a GitHub %s, the
     await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd), webSnapshotMode(),
   )
   await input.fill(spec)
-  await dialog.getByRole('button', { name: 'Install', exact: true }).click()
+  await dialog.getByRole('button', { name: '安装', exact: true }).click()
   dialog = page.getByRole('dialog', { name: title, exact: true })
-  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await dialog.getByRole('button', { name: '取消', exact: true }).click()
   await dialog.waitFor({ state: 'detached' })
   expect(await readFile(join(profile, '.attempts'), 'utf8')).toBe('')
   expect(connections).toBeGreaterThan(checked)
@@ -164,25 +164,25 @@ it("shows the failed check's Git run and complete log in the installation detail
     fs.appendFileSync('.attempts', JSON.stringify(process.argv) + '\\n');
     process.exitCode = 1;
   `)
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, locale: 'en-US' })
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, locale: ZH_BROWSER_LOCALE })
   const tripwire = watchConsole(page)
   await page.goto(scaffold.authenticatedUrl)
   await page.waitForSelector('[class*="frame"]')
-  if (await page.getByRole('dialog', { name: 'Settings' }).count() > 0) await page.keyboard.press('Escape')
-  await page.getByRole('navigation', { name: 'Global panels' }).getByRole('button', { name: '插件', exact: true }).click()
-  await page.getByRole('button', { name: 'Add plugin', exact: true }).click()
+  if (await page.getByRole('dialog', { name: '设置' }).count() > 0) await page.keyboard.press('Escape')
+  await page.getByRole('navigation', { name: '全局面板' }).getByRole('button', { name: '插件', exact: true }).click()
+  await page.getByRole('button', { name: '添加插件', exact: true }).click()
   const spec = 'https://github.com/example/dsh-plugin.git'
-  let dialog = page.getByRole('dialog', { name: 'Add plugin', exact: true })
-  await dialog.getByRole('textbox', { name: 'Package name or address' }).fill(spec)
-  await dialog.getByRole('button', { name: 'Install', exact: true }).click()
-  dialog = page.getByRole('dialog', { name: 'The plugin could not be installed', exact: true })
+  let dialog = page.getByRole('dialog', { name: '添加插件', exact: true })
+  await dialog.getByRole('textbox', { name: '包名或地址' }).fill(spec)
+  await dialog.getByRole('button', { name: '安装', exact: true }).click()
+  dialog = page.getByRole('dialog', { name: '插件安装失败', exact: true })
   await dialog.waitFor()
-  expect(await dialog.getByText('Unreachable github.com', { exact: false }).count()).toBe(1)
+  expect(await dialog.getByText('无法连接 github.com', { exact: false }).count()).toBe(1)
   // The details carry the failed check's own Git run and the complete log, not an empty terminal.
-  await dialog.getByRole('button', { name: 'Show install details', exact: true }).click()
+  await dialog.getByRole('button', { name: '查看安装详情', exact: true }).click()
   await dialog.getByText(/git -c credential\.helper= ls-remote -- https:\/\/github\.com\/example\/dsh-plugin\.git HEAD/).waitFor()
   await dialog.getByText(/fatal: unable to access/).waitFor()
-  expect(await dialog.getByText(/^Full log: .*github-connection-.*git\.log$/).count()).toBe(1)
+  expect(await dialog.getByText(/^完整日志：.*github-connection-.*git\.log$/).count()).toBe(1)
   expect(await readFile(attempts, 'utf8')).toBe('')
   expect(tripwire.pageErrors).toEqual([])
 })

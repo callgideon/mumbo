@@ -7,7 +7,7 @@ import {
   launchWebScaffold, watchConsole, webSnapshotMode, WELCOME_NOTICE_COPY,
   type WebConsoleTripwire, type WebScaffold,
 } from './scaffold.ts'
-import { 'en-US' } from './support.ts'
+import { ZH_BROWSER_LOCALE } from './support.ts'
 
 const MODE = webSnapshotMode()
 const MOUNT = '/tools/dsh/'
@@ -28,7 +28,8 @@ describe.skipIf(MODE === 'record')('web e2e: public mount through a prefix-strip
     browser = await chromium.launch()
     page = await browser.newPage({
       viewport: { width: 1440, height: 960 },
-      locale: })
+      locale: ZH_BROWSER_LOCALE,
+    })
     tripwire = watchConsole(page)
     page.on('request', (request) => { requestUrls.push(request.url()) })
     page.on('websocket', (socket) => {

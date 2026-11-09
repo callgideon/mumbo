@@ -19,7 +19,7 @@ import {
   acknowledgeReloadConnectionLoss, assertFixtureInventory, captureStableAria, compareOrRefreshGolden,
   launchWebScaffold, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { openSettings, saveFailureShot } from './support.ts'
+import { openSettings, ZH_BROWSER_LOCALE, saveFailureShot } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('./expected/settings-chrome', import.meta.url))
 const DIALOG_EXPECTED = join(SNAPSHOT_DIR, 'dialog.expected.md')
@@ -54,7 +54,7 @@ describe('web e2e: settings modal and General preferences', () => {
     browser = await chromium.launch()
     // Chinese browser: the shared page asserts the localized settings surface
     // the client derives from it (the English default has its own spec below).
-    page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: 'en-US' })
+    page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: ZH_BROWSER_LOCALE })
     tripwire = watchConsole(page)
     await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
@@ -71,17 +71,17 @@ describe('web e2e: settings modal and General preferences', () => {
   it('opens the settings dialog, switches sections, and closes by every path', async () => {
     onTestFailed(() => saveSettingsFailureShot(page, 'settings-shell'))
     onTestFinished(async () => {
-      const dialog = page.getByRole('dialog', { name: 'Settings' })
+      const dialog = page.getByRole('dialog', { name: '设置' })
       if (await dialog.isVisible()) await page.keyboard.press('Escape')
       await dialog.waitFor({ state: 'hidden' })
     })
-    const trigger = page.getByRole('button', { name: 'Account menu', exact: true })
+    const trigger = page.getByRole('button', { name: '账号菜单', exact: true })
     expect(await trigger.getAttribute('aria-haspopup')).toBe('menu')
     expect(await trigger.getAttribute('aria-expanded')).toBe('false')
     await trigger.click()
     expect(await trigger.getAttribute('aria-expanded')).toBe('true')
-    await page.getByRole('menuitem', { name: 'Settings', exact: true }).click()
-    const dialog = page.getByRole('dialog', { name: 'Settings' })
+    await page.getByRole('menuitem', { name: '设置', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: '设置' })
     await dialog.waitFor({ timeout: 10_000 })
     expect(await trigger.getAttribute('aria-expanded')).toBe('false')
     const panelBox = await dialog.boundingBox()
@@ -92,19 +92,19 @@ describe('web e2e: settings modal and General preferences', () => {
     const lastSection = dialog.getByRole('navigation').getByRole('button').last()
     await lastSection.focus()
     await page.keyboard.press('Tab')
-    expect(await dialog.getByRole('button', { name: 'Open configuration file' }).evaluate(el => el === document.activeElement)).toBe(true)
+    expect(await dialog.getByRole('button', { name: '打开配置文件' }).evaluate(el => el === document.activeElement)).toBe(true)
     await page.keyboard.press('Tab')
-    expect(await dialog.getByRole('button', { name: 'Close', exact: true }).evaluate(el => el === document.activeElement)).toBe(true)
+    expect(await dialog.getByRole('button', { name: '关闭', exact: true }).evaluate(el => el === document.activeElement)).toBe(true)
     // General is active by default; Permission, Language and Appearance are functional.
-    expect(await dialog.getByRole('button', { name: 'General' }).getAttribute('aria-current')).toBe('true')
+    expect(await dialog.getByRole('button', { name: '通用设置' }).getAttribute('aria-current')).toBe('true')
     await dialog.getByRole('button', { name: '工作区内修改' }).waitFor({ timeout: 10_000 })
-    await expect.poll(() => dialog.getByText('Language', { exact: true }).count(), { timeout: 5_000 }).toBe(1)
-    await expect.poll(() => dialog.getByText('Appearance', { exact: true }).count(), { timeout: 5_000 }).toBe(1)
-    await dialog.getByText('Work details', { exact: true }).locator('../..')
-      .getByRole('button', { name: 'Detailed', exact: true }).waitFor({ timeout: 10_000 })
+    await expect.poll(() => dialog.getByText('语言', { exact: true }).count(), { timeout: 5_000 }).toBe(1)
+    await expect.poll(() => dialog.getByText('外观', { exact: true }).count(), { timeout: 5_000 }).toBe(1)
+    await dialog.getByText('工作步骤展示', { exact: true }).locator('../..')
+      .getByRole('button', { name: '详细', exact: true }).waitFor({ timeout: 10_000 })
     expect(await readFile(join(scaffold.harnessHome, 'profiles', 'scaffold', 'cordis.patch.yml'), 'utf8'))
       .not.toContain('transcriptView:')
-    const openDocument = dialog.getByRole('button', { name: 'Open configuration file' })
+    const openDocument = dialog.getByRole('button', { name: '打开配置文件' })
     await openDocument.waitFor({ timeout: 10_000 })
     let openRequests = 0
     await page.route('**/api/settings/openSettingsDocument', async (route) => {
@@ -131,28 +131,28 @@ describe('web e2e: settings modal and General preferences', () => {
     } finally {
       await page.unrouteAll({ behavior: 'wait' })
     }
-    await dialog.getByText(`Current version: ${version}`, { exact: true }).waitFor()
+    await dialog.getByText(`当前版本：${version}`, { exact: true }).waitFor()
     // Golden of the freshly opened dialog (default zh, General active).
     const snapshot = await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd, versionCapture)
     await compareOrRefreshGolden(DIALOG_EXPECTED, snapshot, MODE)
     // Section switch: aria-current moves (the Models page itself has its own scenario file).
     await dialog.getByRole('button', { name: '模型', exact: true }).click()
     await expect.poll(() => dialog.getByRole('button', { name: '模型', exact: true }).getAttribute('aria-current'), { timeout: 5_000 }).toBe('true')
-    expect(await dialog.getByRole('button', { name: 'General' }).getAttribute('aria-current')).toBeNull()
+    expect(await dialog.getByRole('button', { name: '通用设置' }).getAttribute('aria-current')).toBeNull()
     // Built-in plugins: the read-only Plugin list, a projection of the same
     // assembled Loader tree, shown as the section's one page; management and
     // configuration live on the sidebar's Plugins panel (its own scenario files
     // drive that page over a profile runtime). Capture one stable shipped row
     // rather than the whole inventory so adding an unrelated plugin does not
     // rewrite this surface's golden.
-    await dialog.getByRole('button', { name: 'Built-in plugins', exact: true }).click()
-    await dialog.getByRole('heading', { name: 'Built-in plugins', exact: true }).waitFor({ timeout: 10_000 })
+    await dialog.getByRole('button', { name: '内置插件', exact: true }).click()
+    await dialog.getByRole('heading', { name: '内置插件', exact: true }).waitFor({ timeout: 10_000 })
     // The preset group starts open under its display-only switcher; the global group starts folded.
-    const presetSwitcher = dialog.getByRole('button', { name: 'Choose the agent preset to inspect' })
+    const presetSwitcher = dialog.getByRole('button', { name: '选择要查看的 Agent 预设' })
     await presetSwitcher.waitFor({ timeout: 10_000 })
     // The shipped default's zh display name comes from the zh dictionaries.
-    expect(await presetSwitcher.textContent()).toBe('Standard mode (default)')
-    const presetToggle = dialog.getByRole('button', { name: 'Session plugins', exact: true })
+    expect(await presetSwitcher.textContent()).toBe('标准模式（默认）')
+    const presetToggle = dialog.getByRole('button', { name: '会话插件', exact: true })
     expect(await presetToggle.getAttribute('aria-expanded')).toBe('true')
     expect(await dialog.locator('[data-plugin-scope="preset"] [data-plugin-entry]').count()).toBeGreaterThan(0)
     const globalToggle = dialog.getByRole('button', { name: /^全局/ })
@@ -163,7 +163,7 @@ describe('web e2e: settings modal and General preferences', () => {
     const expectedPluginCount = [...scaffold.ctx.loader.entries()]
       .filter(entry => !entry.options.group)
       .length
-    const pluginSearch = dialog.getByRole('searchbox', { name: 'Search plugins' })
+    const pluginSearch = dialog.getByRole('searchbox', { name: '搜索插件' })
     expect(await pluginSearch.count()).toBe(1)
     // Every Loader entry appears exactly once in the global group — rows the
     // presets took over included, preset compositions excluded.
@@ -172,13 +172,13 @@ describe('web e2e: settings modal and General preferences', () => {
     // A plainly enabled row states its status only in its accessible name: it
     // carries no tag, and an active fiber draws no dot, so no global row shows
     // either. Guard the assertions against matching nothing because no row is enabled.
-    const enabledRows = dialog.locator('[data-plugin-scope="global"] [data-plugin-entry] button[aria-label$="Enabled"]')
+    const enabledRows = dialog.locator('[data-plugin-scope="global"] [data-plugin-entry] button[aria-label$="已启用"]')
     expect(await enabledRows.count()).toBeGreaterThan(0)
-    expect(await enabledRows.getByText('Enabled', { exact: true }).count()).toBe(0)
+    expect(await enabledRows.getByText('已启用', { exact: true }).count()).toBe(0)
     expect(await dialog.locator('[data-plugin-scope="global"] [role="img"][aria-label="运行中"]').count()).toBe(0)
-    expect(await dialog.getByText('Composed per session by agent presets', { exact: true }).count()).toBe(1)
-    expect(await dialog.getByText('Shared by the system and every session', { exact: true }).count()).toBe(1)
-    expect(await dialog.getByRole('button', { name: 'Built-in plugins', exact: true }).getAttribute('aria-current')).toBe('true')
+    expect(await dialog.getByText('由 Agent 预设按会话组成', { exact: true }).count()).toBe(1)
+    expect(await dialog.getByText('系统与所有会话共用', { exact: true }).count()).toBe(1)
+    expect(await dialog.getByRole('button', { name: '内置插件', exact: true }).getAttribute('aria-current')).toBe('true')
     // One contribution shows as the page itself, without a tab row.
     expect(await dialog.getByRole('tab').count()).toBe(0)
     expect(await dialog.getByRole('button', { name: '模型', exact: true }).getAttribute('aria-current')).toBeNull()
@@ -190,12 +190,12 @@ describe('web e2e: settings modal and General preferences', () => {
     await compareOrRefreshGolden(PLUGINS_EXPECTED, pluginsSnapshot, MODE)
     await pluginSearch.fill('tool-subagent')
     const instanceRows = [
-      ['tool-subagent', 'Enabled'],
-      ['tool-subagent-fork', 'Enabled'],
+      ['tool-subagent', '已启用'],
+      ['tool-subagent-fork', '已启用'],
     ] as const
     for (const [entryId, status] of instanceRows) {
       const row = dialog.locator(`[data-plugin-scope="preset"] [data-plugin-entry="${entryId}"]`)
-      const name = `tool-subagent, ${entryId}, ${status}`
+      const name = `子智能体委派工具, ${entryId}, ${status}`
       const trigger = row.getByRole('button', { name, exact: true })
       await trigger.waitFor({ timeout: 10_000 })
       expect(await trigger.getAttribute('aria-expanded')).toBe('false')
@@ -211,7 +211,7 @@ describe('web e2e: settings modal and General preferences', () => {
     )
     await compareOrRefreshGolden(PLUGIN_INSTANCES_EXPECTED, instancesSnapshot, MODE)
     await dialog.getByRole('button', {
-      name: 'tool-subagent, tool-subagent-fork, Enabled',
+      name: '子智能体委派工具, tool-subagent-fork, 已启用',
       exact: true,
     }).click()
     expect(await dialog.locator('[data-plugin-entry="tool-subagent-fork"] button')
@@ -219,26 +219,26 @@ describe('web e2e: settings modal and General preferences', () => {
     await pluginSearch.fill('')
     // Close path 1: Escape.
     await page.keyboard.press('Escape')
-    await expect.poll(() => page.getByRole('dialog', { name: 'Settings' }).count(), { timeout: 5_000 }).toBe(0)
+    await expect.poll(() => page.getByRole('dialog', { name: '设置' }).count(), { timeout: 5_000 }).toBe(0)
     expect(await trigger.getAttribute('aria-expanded')).toBe('false')
     // Close path 2: the header close button.
-    await openSettings(page, 'en')
-    await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Close' }).click()
-    await expect.poll(() => page.getByRole('dialog', { name: 'Settings' }).count(), { timeout: 5_000 }).toBe(0)
+    await openSettings(page, 'zh')
+    await page.getByRole('dialog', { name: '设置' }).getByRole('button', { name: '关闭' }).click()
+    await expect.poll(() => page.getByRole('dialog', { name: '设置' }).count(), { timeout: 5_000 }).toBe(0)
     expect(tripwire.pageErrors).toEqual([])
   }, 60_000)
 
   it('scrolls overflowing section navigation independently of the title and settings content', async () => {
-    const overflowPage = await browser.newPage({ viewport: { width: 1280, height: 768 }, locale: 'en-US' })
+    const overflowPage = await browser.newPage({ viewport: { width: 1280, height: 768 }, locale: ZH_BROWSER_LOCALE })
     onTestFinished(() => overflowPage.close())
     onTestFailed(() => saveFailureShot(overflowPage, 'web-e2e-settings-navigation'))
     const console = watchConsole(overflowPage)
     await overflowPage.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-    await openSettings(overflowPage, 'en')
-    const dialog = overflowPage.getByRole('dialog', { name: 'Settings', exact: true })
+    await openSettings(overflowPage, 'zh')
+    const dialog = overflowPage.getByRole('dialog', { name: '设置', exact: true })
     const navigation = dialog.getByRole('navigation')
     const list = navigation.locator('[class*="_navList"]')
-    const title = dialog.getByText('Settings', { exact: true })
+    const title = dialog.getByText('设置', { exact: true })
     const options = dialog.locator('[class*="_options"]')
     const last = navigation.getByRole('button').last()
     await last.waitFor()
@@ -273,15 +273,15 @@ describe('web e2e: settings modal and General preferences', () => {
   })
 
   it('fills a phone viewport and turns the rail into the horizontal section strip', async () => {
-    const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, locale: 'en-US' })
+    const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, locale: ZH_BROWSER_LOCALE })
     onTestFinished(() => phone.close())
     onTestFailed(() => saveSettingsFailureShot(phone, 'web-e2e-settings-phone'))
     const console = watchConsole(phone)
     await phone.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-    await openSettings(phone, 'en')
-    const dialog = phone.getByRole('dialog', { name: 'Settings', exact: true })
+    await openSettings(phone, 'zh')
+    const dialog = phone.getByRole('dialog', { name: '设置', exact: true })
     await dialog.waitFor({ timeout: 10_000 })
-    await dialog.getByRole('button', { name: 'General', exact: true }).waitFor({ timeout: 10_000 })
+    await dialog.getByRole('button', { name: '通用设置', exact: true }).waitFor({ timeout: 10_000 })
 
     // The panel is the viewport: no centered card, no side margins, no rail.
     await expect.poll(() => dialog.boundingBox()).toEqual({ x: 0, y: 0, width: 390, height: 844 })
@@ -325,7 +325,7 @@ describe('web e2e: settings modal and General preferences', () => {
     expect(controlBox!.y).toBeLessThan(permissionBox!.y + permissionBox!.height)
 
     // The Appearance cubes share one row instead of wrapping to two.
-    const cubes = dialog.getByRole('button', { name: /Light|Dark|System/ })
+    const cubes = dialog.getByRole('button', { name: /浅色|深色|跟随系统/ })
     const cubeBoxes = await cubes.evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().top))
     expect(new Set(cubeBoxes.map(top => Math.round(top))).size).toBe(1)
 
@@ -343,12 +343,12 @@ describe('web e2e: settings modal and General preferences', () => {
     await expect.poll(() => last.getAttribute('aria-current')).toBe('true')
     await phone.keyboard.press('Escape')
     await dialog.waitFor({ state: 'hidden' })
-    await openSettings(phone, 'en')
+    await openSettings(phone, 'zh')
     const active = dialog.locator('[aria-current="true"]')
-    expect(await active.textContent()).toBe('General')
+    expect(await active.textContent()).toBe('通用设置')
     expect(await active.evaluate(el => el === document.activeElement)).toBe(true)
 
-    const close = dialog.getByRole('button', { name: 'Close', exact: true })
+    const close = dialog.getByRole('button', { name: '关闭', exact: true })
     const closeBox = await close.boundingBox()
     expect(closeBox!.width).toBe(28)
     expect(closeBox!.x).toBeGreaterThanOrEqual(0)
@@ -357,7 +357,7 @@ describe('web e2e: settings modal and General preferences', () => {
     expect(closeBox!.y + closeBox!.height).toBeLessThanOrEqual(844)
     await close.click()
     await dialog.waitFor({ state: 'hidden' })
-    const trigger = phone.getByRole('button', { name: 'Account menu', exact: true })
+    const trigger = phone.getByRole('button', { name: '账号菜单', exact: true })
     await expect.poll(() => trigger.evaluate(el => el === document.activeElement)).toBe(true)
 
     expect(console.pageErrors).toEqual([])
@@ -375,8 +375,8 @@ describe('web e2e: settings modal and General preferences', () => {
     expect(existing.snapshotEvents().find(event => event.type === 'permission/preset')?.data)
       .toEqual({ preset: 'workspace-write' })
 
-    await openSettings(page, 'en')
-    const dialog = page.getByRole('dialog', { name: 'Settings' })
+    await openSettings(page, 'zh')
+    const dialog = page.getByRole('dialog', { name: '设置' })
     await dialog.waitFor({ timeout: 10_000 })
     const selector = dialog.getByRole('button', { name: '工作区内修改' })
     await selector.waitFor({ timeout: 10_000 })
@@ -399,13 +399,13 @@ describe('web e2e: settings modal and General preferences', () => {
     ])
 
     await dialog.getByRole('button', { name: '仅可查看' }).click()
-    await page.getByRole('menuitem', { name: 'Full access' }).click()
-    const confirmation = page.getByRole('dialog', { name: 'Enable Full access?' })
-    const enable = confirmation.getByRole('button', { name: 'Enable Full access' })
+    await page.getByRole('menuitem', { name: '完全权限' }).click()
+    const confirmation = page.getByRole('dialog', { name: '确认启用完全权限？' })
+    const enable = confirmation.getByRole('button', { name: '启用完全权限' })
     expect(await enable.isDisabled()).toBe(true)
     await confirmation.getByRole('checkbox').click()
     await enable.click()
-    await dialog.getByRole('button', { name: 'Full access' }).waitFor({ timeout: 10_000 })
+    await dialog.getByRole('button', { name: '完全权限' }).waitFor({ timeout: 10_000 })
     const confirmedDocument = await readFile(join(scaffold.harnessHome, 'profiles', 'scaffold', 'cordis.patch.yml'), 'utf8')
     expect(confirmedDocument).toContain('defaultPreset: danger-full-access')
     const confirmed = await createSession('settings-permission-confirmed')
@@ -442,9 +442,9 @@ describe('web e2e: settings modal and General preferences', () => {
   it('uses the persisted dark preference while plugins are still loading', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-settings-boot-theme'))
     await page.emulateMedia({ colorScheme: 'light' })
-    await openSettings(page, 'en')
-    const initialDialog = page.getByRole('dialog', { name: 'Settings' })
-    const darkCube = initialDialog.getByRole('button', { name: 'Dark' })
+    await openSettings(page, 'zh')
+    const initialDialog = page.getByRole('dialog', { name: '设置' })
+    const darkCube = initialDialog.getByRole('button', { name: '深色' })
     await selectTheme(darkCube, 'dark')
     await expect.poll(() => darkCube.getAttribute('aria-pressed'), { timeout: 5_000 }).toBe('true')
     await expect.poll(async () => readFile(join(scaffold.harnessHome, 'profiles', 'scaffold', 'cordis.patch.yml'), 'utf8'), { timeout: 5_000 })
@@ -488,11 +488,11 @@ describe('web e2e: settings modal and General preferences', () => {
 
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
     acknowledgeReloadConnectionLoss(tripwire, warningStart)
-    await openSettings(page, 'en')
-    const restoredDialog = page.getByRole('dialog', { name: 'Settings' })
-    const systemCube = restoredDialog.getByRole('button', { name: 'System' })
+    await openSettings(page, 'zh')
+    const restoredDialog = page.getByRole('dialog', { name: '设置' })
+    const systemCube = restoredDialog.getByRole('button', { name: '跟随系统' })
     // The boot palette precedes the settings mirror's saved preference.
-    const restoredDarkCube = restoredDialog.getByRole('button', { name: 'Dark' })
+    const restoredDarkCube = restoredDialog.getByRole('button', { name: '深色' })
     await expect.poll(() => restoredDarkCube.getAttribute('aria-pressed'), { timeout: 5_000 }).toBe('true')
     await selectTheme(systemCube, 'system')
     await expect.poll(() => systemCube.getAttribute('aria-pressed'), { timeout: 5_000 }).toBe('true')
@@ -542,10 +542,10 @@ describe('web e2e: settings modal and General preferences', () => {
     expect(light.faviconPaths).toEqual(['/favicon.svg'])
     expectThemeColorSynchronized(light)
 
-    await openSettings(page, 'en')
-    const dialog = page.getByRole('dialog', { name: 'Settings' })
+    await openSettings(page, 'zh')
+    const dialog = page.getByRole('dialog', { name: '设置' })
     await dialog.waitFor({ timeout: 10_000 })
-    const darkCube = dialog.getByRole('button', { name: 'Dark' })
+    const darkCube = dialog.getByRole('button', { name: '深色' })
     expect(await darkCube.getAttribute('aria-pressed')).toBe('false')
     await selectTheme(darkCube, 'dark')
     // The full cascade: pressed state, Host-backed preference, body attribute,
@@ -577,7 +577,7 @@ describe('web e2e: settings modal and General preferences', () => {
     // user-settings home. Its fresh origin has no theme localStorage and still
     // converges to dark before the settings dialog opens.
     const second = await launchWebScaffold({ developerTools: false, harnessHome: scaffold.harnessHome })
-    const secondPage = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: 'en-US' })
+    const secondPage = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: ZH_BROWSER_LOCALE })
     const secondTripwire = watchConsole(secondPage)
     try {
       expect(second.baseUrl).not.toBe(scaffold.baseUrl)
@@ -596,8 +596,8 @@ describe('web e2e: settings modal and General preferences', () => {
     }
 
     // `system` follows the emulated OS scheme (dark stays dark, light clears).
-    await openSettings(page, 'en')
-    const systemCube = page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'System' })
+    await openSettings(page, 'zh')
+    const systemCube = page.getByRole('dialog', { name: '设置' }).getByRole('button', { name: '跟随系统' })
     await selectTheme(systemCube, 'system')
     await expect.poll(() => systemCube.getAttribute('aria-pressed'), { timeout: 5_000 }).toBe('true')
     await expect.poll(async () => (await readState()).attr, { timeout: 5_000 }).toBe(false)
@@ -608,7 +608,7 @@ describe('web e2e: settings modal and General preferences', () => {
     expectThemeColorSynchronized(await readState())
     // Restore for the specs that follow: light preference beats the emulated
     // dark OS scheme, leaving the shared page in the light default.
-    await selectTheme(page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Light' }), 'light')
+    await selectTheme(page.getByRole('dialog', { name: '设置' }).getByRole('button', { name: '浅色' }), 'light')
     await expect.poll(async () => (await readState()).attr, { timeout: 5_000 }).toBe(false)
     expect((await readState()).faviconPaths).toEqual(['/favicon-dark.svg'])
     await page.emulateMedia({ colorScheme: 'light' })
@@ -622,7 +622,7 @@ describe('web e2e: settings modal and General preferences', () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-settings-font-size'))
     onTestFinished(async () => {
       await page.keyboard.press('Escape')
-      await page.getByRole('dialog', { name: 'Settings', exact: true }).waitFor({ state: 'hidden' })
+      await page.getByRole('dialog', { name: '设置', exact: true }).waitFor({ state: 'hidden' })
     })
     const readFontSize = async (target: Page = page): Promise<string> => await target.evaluate(
       () => document.body.style.getPropertyValue('--dsh-content-font-size'),
@@ -653,17 +653,17 @@ describe('web e2e: settings modal and General preferences', () => {
       expect(envelope.result.ok).toBe(true)
       await expect.poll(async () => readFile(join(scaffold.harnessHome, 'profiles', 'scaffold', 'cordis.patch.yml'), 'utf8'), { timeout: 5_000 })
         .toContain(`fontSize: ${px}`)
-      await page.getByRole('dialog', { name: 'Settings' }).getByText(String(px), { exact: true }).waitFor({ timeout: 5_000 })
+      await page.getByRole('dialog', { name: '设置' }).getByText(String(px), { exact: true }).waitFor({ timeout: 5_000 })
       await expect.poll(readFontSize, { timeout: 5_000 }).toBe(`${px}px`)
     }
     expect(await readFontSize()).toBe('14px')
     expect(await readSecondaryFontSize()).toBe('13px')
-    await openSettings(page, 'en')
-    const dialog = page.getByRole('dialog', { name: 'Settings' })
+    await openSettings(page, 'zh')
+    const dialog = page.getByRole('dialog', { name: '设置' })
     await dialog.waitFor({ timeout: 10_000 })
     // The stepper reveals its arrows on hover; the up arrow steps 14 → 15 → 16.
     await dialog.getByText('14', { exact: true }).hover()
-    const increase = dialog.getByRole('button', { name: 'Increase font size' })
+    const increase = dialog.getByRole('button', { name: '增大字号' })
     await stepFontSize(increase, 15)
     // 15 is the piecewise boundary: the secondary tier holds at 13px (−2)
     // where the ≤14 branch would have given 14px (−1).
@@ -683,11 +683,11 @@ describe('web e2e: settings modal and General preferences', () => {
     expect(await readSecondaryFontSize()).toBe('14px')
 
     // Restore the default for the specs that follow (and the dialog golden).
-    await openSettings(page, 'en')
-    const restored = page.getByRole('dialog', { name: 'Settings' })
+    await openSettings(page, 'zh')
+    const restored = page.getByRole('dialog', { name: '设置' })
     await restored.waitFor({ timeout: 10_000 })
     await restored.getByText('16', { exact: true }).hover()
-    const decrease = restored.getByRole('button', { name: 'Decrease font size' })
+    const decrease = restored.getByRole('button', { name: '减小字号' })
     await stepFontSize(decrease, 15)
     await stepFontSize(decrease, 14)
     await page.keyboard.press('Escape')
@@ -698,7 +698,7 @@ describe('web e2e: settings modal and General preferences', () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-settings-font-family'))
     onTestFinished(async () => {
       await page.keyboard.press('Escape')
-      await page.getByRole('dialog', { name: 'Settings', exact: true }).waitFor({ state: 'hidden' })
+      await page.getByRole('dialog', { name: '设置', exact: true }).waitFor({ state: 'hidden' })
     })
     // Computed font-family lists: body text, code, and the two built-in stacks.
     const readFonts = async (): Promise<Record<'text' | 'code' | 'textStack' | 'codeStack', string>> => await page.evaluate(() => {
@@ -719,7 +719,7 @@ describe('web e2e: settings modal and General preferences', () => {
     })
     const patchFile = join(scaffold.harnessHome, 'profiles', 'scaffold', 'cordis.patch.yml')
     const commit = async (name: string, value: string): Promise<void> => {
-      const field = page.getByRole('dialog', { name: 'Settings' }).getByRole('textbox', { name, exact: true })
+      const field = page.getByRole('dialog', { name: '设置' }).getByRole('textbox', { name, exact: true })
       await field.fill(value)
       await field.press('Enter')
     }
@@ -728,17 +728,17 @@ describe('web e2e: settings modal and General preferences', () => {
     expect(defaults.text.startsWith(textStack)).toBe(true)
     // The font rows expand from the font-size row and start collapsed on every settings open.
     const expandFonts = async (): Promise<void> => {
-      const dialog = page.getByRole('dialog', { name: 'Settings' })
+      const dialog = page.getByRole('dialog', { name: '设置' })
       await dialog.waitFor({ timeout: 10_000 })
-      const toggle = dialog.getByRole('button', { name: 'More font settings', exact: true })
+      const toggle = dialog.getByRole('button', { name: '更多字体设置', exact: true })
       expect(await toggle.getAttribute('aria-expanded')).toBe('false')
-      expect(await dialog.getByRole('textbox', { name: 'Code font', exact: true }).count()).toBe(0)
+      expect(await dialog.getByRole('textbox', { name: '代码字体', exact: true }).count()).toBe(0)
       await toggle.click()
-      await dialog.getByRole('textbox', { name: 'Code font', exact: true }).waitFor()
+      await dialog.getByRole('textbox', { name: '代码字体', exact: true }).waitFor()
     }
-    await openSettings(page, 'en')
+    await openSettings(page, 'zh')
     await expandFonts()
-    await commit('Code font', 'Courier New, monospace')
+    await commit('代码字体', 'Courier New, monospace')
     await expect.poll(async () => readFile(patchFile, 'utf8'), { timeout: 5_000 }).toContain('codeFontFamily')
     await expect.poll(readFonts, { timeout: 5_000 }).toEqual({ ...defaults, code: `"Courier New", monospace, ${codeStack}` })
     // The code size moves the code-block token independently of the content size.
@@ -751,11 +751,11 @@ describe('web e2e: settings modal and General preferences', () => {
       return size
     })
     expect(await readCodeSize()).toBe('11px')
-    const codeSize = page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Increase code font size', exact: true })
+    const codeSize = page.getByRole('dialog', { name: '设置' }).getByRole('button', { name: '增大代码字号', exact: true })
     await codeSize.click()
     await expect.poll(readCodeSize, { timeout: 5_000 }).toBe('12px')
     await expect.poll(async () => readFile(patchFile, 'utf8'), { timeout: 5_000 }).toContain('codeFontSize: 12')
-    await commit('Text font', 'Georgia')
+    await commit('正文字体', 'Georgia')
     await expect.poll(readFonts, { timeout: 5_000 }).toEqual({ ...defaults, text: `Georgia, ${textStack}`, code: `"Courier New", monospace, ${codeStack}` })
     // The snapshot updates optimistically; reload only after the Host has persisted both lists.
     await expect.poll(async () => readFile(patchFile, 'utf8'), { timeout: 5_000 }).toContain('Georgia')
@@ -769,13 +769,13 @@ describe('web e2e: settings modal and General preferences', () => {
     expect(await readCodeSize()).toBe('12px')
 
     // Clearing each field restores the built-in stacks for the specs that follow.
-    await openSettings(page, 'en')
-    const reloaded = page.getByRole('dialog', { name: 'Settings' })
+    await openSettings(page, 'zh')
+    const reloaded = page.getByRole('dialog', { name: '设置' })
     await expandFonts()
-    expect(await reloaded.getByRole('textbox', { name: 'Code font', exact: true }).inputValue()).toBe('"Courier New", monospace')
-    await commit('Text font', '')
-    await commit('Code font', '')
-    await reloaded.getByRole('button', { name: 'Decrease code font size', exact: true }).click()
+    expect(await reloaded.getByRole('textbox', { name: '代码字体', exact: true }).inputValue()).toBe('"Courier New", monospace')
+    await commit('正文字体', '')
+    await commit('代码字体', '')
+    await reloaded.getByRole('button', { name: '减小代码字号', exact: true }).click()
     await expect.poll(readFonts, { timeout: 5_000 }).toEqual(defaults)
     await expect.poll(readCodeSize, { timeout: 5_000 }).toBe('11px')
     await expect.poll(async () => readFile(patchFile, 'utf8'), { timeout: 5_000 }).toContain('codeFontSize: 11')
@@ -785,15 +785,15 @@ describe('web e2e: settings modal and General preferences', () => {
   }, 90_000)
 
   it.each([
-    ['compact', 'Compact'], ['standard', 'Standard'], ['verbose', 'Verbose'],
+    ['compact', '简洁'], ['standard', '标准'], ['verbose', '完全展开'],
   ] as const)('persists the %s work-details mode across reload', async (mode, label) => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-settings-transcript-view'))
-    await openSettings(page, 'en')
-    const dialog = page.getByRole('dialog', { name: 'Settings' })
+    await openSettings(page, 'zh')
+    const dialog = page.getByRole('dialog', { name: '设置' })
     await dialog.waitFor({ timeout: 10_000 })
-    await dialog.getByText('Work details', { exact: true }).waitFor({ timeout: 10_000 })
-    const details = dialog.getByText('Work details', { exact: true }).locator('../..')
-    await details.getByRole('button', { name: 'Detailed', exact: true }).click()
+    await dialog.getByText('工作步骤展示', { exact: true }).waitFor({ timeout: 10_000 })
+    const details = dialog.getByText('工作步骤展示', { exact: true }).locator('../..')
+    await details.getByRole('button', { name: '详细', exact: true }).click()
     await page.getByRole('menuitem', { name: label, exact: true }).click()
     await details.getByRole('button', { name: label, exact: true }).waitFor({ timeout: 10_000 })
     await expect.poll(async () => readFile(join(scaffold.harnessHome, 'profiles', 'scaffold', 'cordis.patch.yml'), 'utf8'), { timeout: 5_000 })
@@ -804,14 +804,14 @@ describe('web e2e: settings modal and General preferences', () => {
     await page.reload({ waitUntil: 'load' })
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
     acknowledgeReloadConnectionLoss(tripwire, warningStart)
-    await openSettings(page, 'en')
-    const reloaded = page.getByRole('dialog', { name: 'Settings' })
-    const restoredDetails = reloaded.getByText('Work details', { exact: true }).locator('../..')
+    await openSettings(page, 'zh')
+    const reloaded = page.getByRole('dialog', { name: '设置' })
+    const restoredDetails = reloaded.getByText('工作步骤展示', { exact: true }).locator('../..')
     await restoredDetails.getByRole('button', { name: label, exact: true }).waitFor({ timeout: 10_000 })
 
     await restoredDetails.getByRole('button', { name: label, exact: true }).click()
-    await page.getByRole('menuitem', { name: 'Detailed', exact: true }).click()
-    await restoredDetails.getByRole('button', { name: 'Detailed', exact: true }).waitFor({ timeout: 10_000 })
+    await page.getByRole('menuitem', { name: '详细', exact: true }).click()
+    await restoredDetails.getByRole('button', { name: '详细', exact: true }).waitFor({ timeout: 10_000 })
     await expect.poll(async () => readFile(join(scaffold.harnessHome, 'profiles', 'scaffold', 'cordis.patch.yml'), 'utf8'), { timeout: 5_000 })
       .toContain('transcriptView: detailed')
     await page.keyboard.press('Escape')
@@ -820,8 +820,8 @@ describe('web e2e: settings modal and General preferences', () => {
 
   it('persists the busy-state Enter behavior across reload and a distinct port', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-settings-enter-behavior'))
-    await openSettings(page, 'en')
-    const dialog = page.getByRole('dialog', { name: 'Settings' })
+    await openSettings(page, 'zh')
+    const dialog = page.getByRole('dialog', { name: '设置' })
     await dialog.waitFor({ timeout: 10_000 })
     await dialog.getByRole('button', { name: '排队发送' }).click()
     await page.getByRole('menuitem', { name: '插话发送' }).click()
@@ -835,19 +835,19 @@ describe('web e2e: settings modal and General preferences', () => {
     await page.reload({ waitUntil: 'load' })
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
     acknowledgeReloadConnectionLoss(tripwire, warningStart)
-    await openSettings(page, 'en')
-    const reloaded = page.getByRole('dialog', { name: 'Settings' })
+    await openSettings(page, 'zh')
+    const reloaded = page.getByRole('dialog', { name: '设置' })
     await reloaded.getByRole('button', { name: '插话发送' }).waitFor({ timeout: 10_000 })
 
     const second = await launchWebScaffold({ developerTools: false, harnessHome: scaffold.harnessHome })
-    const secondPage = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: 'en-US' })
+    const secondPage = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: ZH_BROWSER_LOCALE })
     const secondTripwire = watchConsole(secondPage)
     try {
       expect(second.baseUrl).not.toBe(scaffold.baseUrl)
       await secondPage.goto(second.authenticatedUrl, { waitUntil: 'load' })
       await secondPage.waitForSelector('[class*="frame"]', { timeout: 30_000 })
-      await openSettings(secondPage, 'en')
-      await secondPage.getByRole('dialog', { name: 'Settings' })
+      await openSettings(secondPage, 'zh')
+      await secondPage.getByRole('dialog', { name: '设置' })
         .getByRole('button', { name: '插话发送' }).waitFor({ timeout: 10_000 })
       expect(await secondPage.evaluate(() => localStorage.getItem('dsh.conversation.busyEnter'))).toBeNull()
       expect(secondTripwire.pageErrors).toEqual([])
@@ -869,8 +869,8 @@ describe('web e2e: settings modal and General preferences', () => {
 
   it('persists the settings language across reload and a distinct port', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-settings-language'))
-    await openSettings(page, 'en')
-    const zhDialog = page.getByRole('dialog', { name: 'Settings' })
+    await openSettings(page, 'zh')
+    const zhDialog = page.getByRole('dialog', { name: '设置' })
     await zhDialog.waitFor({ timeout: 10_000 })
     // The document language follows the active locale in the assembled app, not
     // only on a directly-mounted plugin. This is a zh browser, so the served
@@ -878,7 +878,7 @@ describe('web e2e: settings modal and General preferences', () => {
     // than only in an English scenario) is what makes the check discriminating.
     expect(await page.evaluate(() => document.documentElement.lang)).toBe('zh-CN')
     // The Language selector pill shows the active locale's own name.
-    const selector = zhDialog.getByRole('button', { name: 'English' })
+    const selector = zhDialog.getByRole('button', { name: '中文' })
     expect(await selector.getAttribute('aria-haspopup')).toBe('menu')
     await selector.click()
     await page.getByRole('menuitem', { name: 'English' }).click()
@@ -907,7 +907,7 @@ describe('web e2e: settings modal and General preferences', () => {
     // A Chinese browser on another port still receives the explicit English
     // preference from the shared Host settings document.
     const second = await launchWebScaffold({ developerTools: false, harnessHome: scaffold.harnessHome })
-    const secondPage = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: 'en-US' })
+    const secondPage = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: ZH_BROWSER_LOCALE })
     const secondTripwire = watchConsole(secondPage)
     try {
       expect(second.baseUrl).not.toBe(scaffold.baseUrl)
@@ -926,8 +926,8 @@ describe('web e2e: settings modal and General preferences', () => {
 
     await openSettings(page, 'en')
     await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'English' }).click()
-    await page.getByRole('menuitem', { name: 'English' }).click()
-    await page.getByRole('dialog', { name: 'Settings' }).waitFor({ timeout: 10_000 })
+    await page.getByRole('menuitem', { name: '中文' }).click()
+    await page.getByRole('dialog', { name: '设置' }).waitFor({ timeout: 10_000 })
     expect(await page.evaluate(() => localStorage.getItem('dsh.locale'))).toBeNull()
     await expect.poll(async () => readFile(join(scaffold.harnessHome, 'profiles', 'scaffold', 'cordis.patch.yml'), 'utf8'), { timeout: 5_000 })
       .toContain('preference: zh')
@@ -1067,10 +1067,10 @@ describe('web e2e: Host-backed collapse timing preference', () => {
 
   it.each([
     {
-      locale: 'zh', browserLocale: theme: 'dark',
-      settings: 'Settings', close: 'Close', details: 'Work details', compact: 'Compact', detailed: 'Detailed',
-      title: 'When to Collapse Work Details', completion: 'On completion', nextInput: 'On next message',
-      description: 'Choose when to automatically collapse work details',
+      locale: 'zh', browserLocale: ZH_BROWSER_LOCALE, theme: 'dark',
+      settings: '设置', close: '关闭', details: '工作步骤展示', compact: '简洁', detailed: '详细',
+      title: '工作步骤收起时机', completion: '回答结束后', nextInput: '下次有新消息时',
+      description: '选择何时自动收起工作步骤',
     },
     {
       locale: 'en', browserLocale: 'en-US', theme: 'light',
