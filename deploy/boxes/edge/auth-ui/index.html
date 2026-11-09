@@ -114,8 +114,12 @@
 // Login and consent page for the Supabase OAuth server, served at the project's authorization path /oauth/consent.
 // Consent is given automatically to Mumbo's own OAuth clients only (consent.js); any other client is refused. Who may
 // enter is decided by the gate allowlist, not here. The page talks only to Supabase.
-const sb = supabase.createClient(MUMBO.url, MUMBO.anonKey)
-const authorizationId = new URLSearchParams(location.search).get('authorization_id')
+// PKCE, and supabase-js reads nothing from the URL: a session comes only from this page's own sign-in, or from a ?code=
+// that supabase-js exchanges with the verifier this browser stored when it started that sign-in. Tokens or codes that
+// someone else puts in a link, in the query or the fragment, never become the session.
+const sb = supabase.createClient(MUMBO.url, MUMBO.anonKey, { auth: { flowType: 'pkce', detectSessionInUrl: false } })
+const query = new URLSearchParams(location.search)
+const authorizationId = query.get('authorization_id')
 const $ = (id) => document.getElementById(id)
 const say = (text, error = false) => { $('msg').textContent = text; $('msg').classList.toggle('error', error) }
 const busy = (form, on) => form.querySelectorAll('button').forEach((b) => { b.disabled = on })
@@ -155,7 +159,7 @@ $('email-form').addEventListener('submit', async (e) => {
   $('start').hidden = true
   $('code-form').hidden = false
   $('title').textContent = 'Check your email'
-  $('subtitle').textContent = `Open the sign-in link sent to ${email}, or enter its code here.`
+  $('subtitle').textContent = `We sent a sign-in link and code to ${email}. Open the link in this browser, or enter the code here.`
   say('')
   $('code').focus()
 })
@@ -179,7 +183,7 @@ $('back').addEventListener('click', () => {
 
 ;(async () => {
   // The app's Sign out ends the gate session first, then lands here to drop this page's session.
-  if (new URLSearchParams(location.search).has('signout')) {
+  if (query.has('signout')) {
     await sb.auth.signOut({ scope: 'local' })
     $('start').hidden = true
     $('signed-out').hidden = false
@@ -188,9 +192,17 @@ $('back').addEventListener('click', () => {
     return
   }
   if (!authorizationId) return say('Open mumbo from its address to sign in.')
+  // Only authorization_id stays in the address: a returned code, error parameters and any fragment go. Before the
+  // exchange, which would otherwise read a flow id from the URL.
+  history.replaceState(null, '', returnUrl)
+  const exchange = query.has('code') ? await sb.auth.exchangeCodeForSession(query.get('code')) : {}
   const { data } = await sb.auth.getSession()
   if (data.session) return authorize()
-  const error = new URLSearchParams(location.search).get('error_description')
+  if (exchange.error) {
+    return say(exchange.error.code === 'pkce_code_verifier_not_found'
+      ? 'A sign-in link works only in the browser that asked for it. Enter the code from the email there instead.' : 'Sign-in failed. Try again.', true)
+  }
+  const error = query.get('error_description')
   if (error) say(`Sign-in failed: ${error}`, true)
 })()
 </script>

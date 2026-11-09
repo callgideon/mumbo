@@ -58,3 +58,9 @@ test('rollback safety: the pre-B13 edge filter strips the default sign-in cookie
   assert.equal(tfDefault, configWith().signinCookie, 'the Terraform default and the edge default agree')
   for (const name of [tfDefault, configWith().signinCookie]) assert.equal(preB13(`${name}=a; ${name}_1=b; dsh-auth-x=d`), 'dsh-auth-x=d', name)
 })
+
+test('PAGE_AFTER_MS: default 3000, and a value below 1000 or not a number stops the edge', () => {
+  assert.equal(configWith().pageAfterMs, 3000)
+  assert.equal(configWith({ PAGE_AFTER_MS: '5000' }).pageAfterMs, 5000)
+  for (const bad of ['999', 'soon', '-1', 'Infinity', '']) assert.throws(() => configWith({ PAGE_AFTER_MS: bad }), /PAGE_AFTER_MS/, bad)
+})
