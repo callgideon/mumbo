@@ -13,6 +13,7 @@
     "**/.node-next-types-*/**",
     "website/.generated/**",
     "vendor/**",
+    "packages/mumbo/superagent/**", // pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md
     "native/**",
     "**/*.js",
     "**/*.mjs",
