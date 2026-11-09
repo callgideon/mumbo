@@ -49,6 +49,12 @@ test('rollback safety: the pre-B13 edge filter strips the default sign-in cookie
   for (const name of [tfDefault, configWith().signinCookie]) assert.equal(preB13(`${name}=a; ${name}_1=b; dsh-auth-x=d`), 'dsh-auth-x=d', name)
 })
 
+test('PAGE_AFTER_MS: default 3000, and a value below 1000 or not a number stops the edge', () => {
+  assert.equal(configWith().pageAfterMs, 3000)
+  assert.equal(configWith({ PAGE_AFTER_MS: '5000' }).pageAfterMs, 5000)
+  for (const bad of ['999', 'soon', '-1', 'Infinity', '']) assert.throws(() => configWith({ PAGE_AFTER_MS: bad }), /PAGE_AFTER_MS/, bad)
+})
+
 test('OpenRouter route: off unless OPENROUTER_MODELS names models (exact ids, trimmed); ZDR-only unless OPENROUTER_ZDR=false', () => {
   const off = configWith()
   assert.deepEqual(off.openrouterModels, []); assert.equal(off.openrouterKey, undefined); assert.equal(off.openrouterZdr, true)

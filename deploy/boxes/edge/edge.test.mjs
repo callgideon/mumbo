@@ -6,7 +6,7 @@ import { inParallel, signBox, verifyBox, userPrefix, budget, needsLaunch, boxHea
 import { memoryStore, redisStore } from './store.mjs'
 import { generateKeyPairSync, createSign } from 'node:crypto'
 
-const cfg = { publicHost: 'boxes.example', projectDomain: 'boxes.example', llmHost: 'llm.example', template: 'mumbo-box', idleMs: 60_000, backupEveryMs: 600_000, maxRunning: 5, allowed: ['@x.com'], egressIps: [], signinCookie: '_oauth2_proxy_mumbo', proxy: new URL('http://127.0.0.1:1'), upstream: 'https://model.example' }
+const cfg = { pageAfterMs: 3000, publicHost: 'boxes.example', projectDomain: 'boxes.example', llmHost: 'llm.example', template: 'mumbo-box', idleMs: 60_000, backupEveryMs: 600_000, maxRunning: 5, allowed: ['@x.com'], egressIps: [], signinCookie: '_oauth2_proxy_mumbo', proxy: new URL('http://127.0.0.1:1'), upstream: 'https://model.example' }
 const listen = (server) => new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port)))
 const call = (port, { method = 'GET', path = '/', headers = {}, body } = {}) => new Promise((resolve, reject) => {
   const req = request({ host: '127.0.0.1', port, method, path, headers: { host: cfg.publicHost, ...headers } }, (res) => {
@@ -130,7 +130,7 @@ test('box creation stops at the running-box cap', async () => {
 })
 
 test('user router refuses requests without a signed-in email', async () => {
-  const s = userServer({ cfg, box: { ensure: async (e) => { if (e !== 'a@x.com') assert.fail('must not route'); throw new Error('starting') }, touch() {}, forget() {} }, log: () => {} })
+  const s = userServer({ cfg, box: { ensure: async (e) => { if (e !== 'a@x.com') assert.fail('must not route'); throw new Error('starting') }, firstSetUp: async () => false, touch() {}, forget() {} }, log: () => {} })
   const port = await listen(s)
   assert.equal((await call(port)).status, 401)
   assert.equal((await call(port, { headers: { 'x-forwarded-email': 'z@other.com' } })).status, 403)
@@ -241,6 +241,32 @@ test('user router behind an ALB trusts only the verified token, never the email 
   assert.equal((await call(port, { path: '/edge/healthz' })).status, 200)
   s.close()
   assert.equal(r.status, 302)
+})
+
+test('an unexpected throw answers 500 or closes the upgrade, and the log has the path without the query', async () => {
+  const upgrade = (port, headers) => new Promise((resolve) => {
+    const req = request({ host: '127.0.0.1', port, path: '/?token=secret', headers: { host: cfg.publicHost, connection: 'Upgrade', upgrade: 'websocket', origin: `https://${cfg.publicHost}`, ...headers } })
+    req.on('upgrade', (res, socket) => { socket.destroy(); resolve(res.statusCode) })
+    req.on('response', (res) => { res.resume(); resolve(res.statusCode) })
+    req.on('error', (e) => resolve(e.code))
+    req.end()
+  })
+  // A box whose touch throws (after the box is ready), and an identity check that throws (before any box).
+  const touchThrows = { box: { ensure: async () => ({ id: 'b1', token: 'T' }), touch: () => { throw new Error('touch broke') }, forget() {} } }
+  const identityThrows = { verifyAlb: () => { throw new Error('verifier broke') }, box: {} }
+  // The touch throw inside an upgrade is that upgrade's own box failure (closed, not logged); the identity throw is not.
+  for (const [opts, error, logged] of [[touchThrows, 'touch broke', 1], [identityThrows, 'verifier broke', 2]]) {
+    const logs = []
+    const s = userServer({ cfg, ...opts, log: (l) => logs.push(JSON.parse(l)) })
+    const port = await listen(s)
+    const headers = { 'x-forwarded-email': 'a@x.com', 'x-amzn-oidc-data': 'x' }
+    const r = await call(port, { path: '/?token=secret', headers })
+    assert.equal(r.status, 500, error)
+    assert.match(r.body, /Something went wrong/)
+    assert.equal(await upgrade(port, headers), 'ECONNRESET', error)
+    s.close()
+    assert.deepEqual(logs, Array(logged).fill({ edge: 'error', host: cfg.publicHost, path: '/', error }))
+  }
 })
 
 test('locks serialise per key and are released after errors', async () => {
@@ -703,4 +729,155 @@ test('model host: a client that drops mid-stream cancels the upstream and the me
     assert.equal(cancelled, true, 'upstream stream cancelled')
     assert.equal(await store.getCount('tokens:2026-11-09:a@x.com'), 100)
   } finally { s.close() }
+})
+
+// ---- edge pages: invite-only, first set-up, later start, capacity
+const pageOf = async (cfgx, ensure, email = 'a@x.com') => {
+  const s = userServer({ cfg: cfgx, box: { ensure, touch() {}, forget() {} }, log: () => {} })
+  const r = await call(await listen(s), { headers: { 'x-forwarded-email': email } })
+  s.close()
+  return r
+}
+test('invite-only page names the allowed domains from the config, escaped, and does not refresh', async () => {
+  const r = await pageOf({ ...cfg, allowed: ['@mumbo.si', 'one@y.com', '@cambria<labs>.ai'] }, async () => assert.fail('no box'), 'z@other.com')
+  assert.equal(r.status, 403)
+  assert.match(r.body, /@mumbo\.si/)
+  assert.match(r.body, /@cambria&#60;labs&#62;\.ai/)
+  assert.doesNotMatch(r.body, /one@y\.com|<labs>/)
+  assert.equal(r.headers.refresh, undefined)
+  assert.equal(r.headers['cache-control'], 'no-store')
+})
+test('invite-only page without domain entries keeps the plain text', async () => {
+  const r = await pageOf({ ...cfg, allowed: ['a@x.com'] }, async () => assert.fail('no box'), 'z@other.com')
+  assert.match(r.body, /invite-only/)
+})
+const nav = { 'x-forwarded-email': 'a@x.com', accept: 'text/html', cookie: 'dsh-auth-x=1' }
+// A fake E2B whose Sandbox.create waits for `gate`; counts creates.
+const gated = () => {
+  let open; const gate = new Promise(r => { open = r })
+  const e2b = fakeE2B(); const made = e2b.Sandbox.create; let creates = 0
+  e2b.Sandbox.create = async (...a) => { creates++; await gate; return made(...a) }
+  return { e2b, open, creates: () => creates }
+}
+const gatedServer = async (presign, email = 'a@x.com') => {
+  const g = gated(); const store = memoryStore()
+  const b = boxes({ e2b: g.e2b, store, cfg, edgeKey: 'k', presignGet: presign, presignPut: async () => 'P', log: () => {} })
+  let ensures = 0
+  const counted = { ...b, ensure: (k) => { ensures++; return b.ensure(k) }, firstSetUp: b.firstSetUp, touch: b.touch, forget: b.forget }
+  const s = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: counted, log: () => {} })
+  return { ...g, b, store, s, ensures: () => ensures, port: await listen(s) }
+}
+test('first visit: the set-up page within the delay, a reload joins the same create, then the box answers', async () => {
+  const t = await gatedServer(async () => undefined)
+  const one = await call(t.port, { headers: nav })
+  assert.equal(one.status, 503)
+  assert.match(one.body, /Setting up your computer, about a minute/)
+  assert.equal(one.headers.refresh, '5')
+  assert.match(one.body, /<meta http-equiv="refresh" content="5">/)
+  assert.equal(one.headers['cache-control'], 'no-store')
+  assert.match((await call(t.port, { headers: nav })).body, /Setting up your computer/)
+  assert.equal(t.ensures(), 1, 'the reload joins the in-flight ensure')
+  assert.equal(t.creates(), 1)
+  assert.equal((await t.store.getBox('b1')), undefined)
+  t.open(); await new Promise(r => setTimeout(r, 100))
+  // The box exists; the request now goes on to it (the test proxy is unreachable, so 502 proves it got that far).
+  assert.equal((await call(t.port, { headers: nav })).status, 502)
+  assert.equal(t.creates(), 1)
+  assert.equal('first' in (await t.store.getBox('b1')), false)
+  t.s.close()
+})
+test('later start (a backup exists) shows the starting page', async () => {
+  const t = await gatedServer(async () => 'GET-URL')
+  const one = await call(t.port, { headers: nav })
+  assert.match(one.body, /Starting your computer/)
+  assert.doesNotMatch(one.body, /Setting up/)
+  t.open(); t.s.close()
+})
+test('create records first only while it runs: true without a backup, false with one', async () => {
+  for (const [url, first] of [[undefined, true], ['GET-URL', false]]) {
+    const e2b = fakeE2B(); const store = memoryStore(); let release; const hold = new Promise(r => { release = r })
+    const mk = e2b.Sandbox.create
+    e2b.Sandbox.create = async (...a) => { const b = await mk(...a); const run = b.commands.run; b.commands.run = async (c) => { if (c.includes('chmod +x')) await hold; return run(c) }; return b }
+    const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => url, presignPut: async () => 'P', log: () => {} })
+    const done = b.ensure('a@x.com')
+    await new Promise(r => setTimeout(r, 60))
+    assert.equal((await store.getBox('b1')).creating > 0, true)
+    assert.equal((await store.getBox('b1')).first, first)
+    release(); await done
+    assert.equal('first' in (await store.getBox('b1')), false)
+  }
+})
+test('a non-navigation request still waits for the box', async () => {
+  const t = await gatedServer(async () => undefined)
+  let status; const req = call(t.port, { headers: { 'x-forwarded-email': 'a@x.com', cookie: 'dsh-auth-x=1' } }).then(r => { status = r.status })
+  await new Promise(r => setTimeout(r, 150))
+  assert.equal(status, undefined)
+  t.open(); await req
+  assert.equal(status, 502)
+  t.s.close()
+})
+test('capacity page is kept and needs no first-set-up lookup', async () => {
+  let lookups = 0
+  const s = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure: async () => { throw Object.assign(new Error('capacity'), { capacity: true }) }, firstSetUp: async () => { lookups++ }, touch() {}, forget() {} }, log: () => {} })
+  const r = await call(await listen(s), { headers: nav })
+  s.close()
+  assert.match(r.body, /at capacity/)
+  assert.equal(lookups, 0)
+})
+test('project routes get neutral text, never the person texts', async () => {
+  const id = '0123456789abcdef'
+  let lookups = 0
+  for (const ensure of [() => new Promise(() => {}), async () => { throw new Error('boom') }]) {
+    const s = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure, firstSetUp: async () => { lookups++; return true }, touch() {}, forget() {} }, projects: { isMember: async () => true }, log: () => {} })
+    const r = await call(await listen(s), { headers: { ...nav, host: `p-${id}.${cfg.projectDomain}` } })
+    s.close()
+    assert.match(r.body, /Starting this project's computer/)
+    assert.doesNotMatch(r.body, /your computer/)
+  }
+  assert.equal(lookups, 0)
+})
+test('a fast non-capacity failure uses the same first-set-up choice as a slow one, and is logged once', async () => {
+  const logs = []
+  const mk = (first) => userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure: async () => { throw new Error('box is being created') }, firstSetUp: async () => first, touch() {}, forget() {} }, log: (l) => logs.push(l) })
+  for (const [first, text] of [[true, /Setting up your computer/], [false, /Starting your computer/]]) {
+    const s = mk(first)
+    const r = await call(await listen(s), { headers: nav })
+    s.close()
+    assert.match(r.body, text)
+  }
+  assert.equal(logs.length, 2, 'one log per failed ensure')
+})
+test('create looks up the backup before it creates the sandbox', async () => {
+  const e2b = fakeE2B(); let seen
+  const b = boxes({ e2b, store: memoryStore(), cfg, edgeKey: 'k', presignGet: async () => { seen = e2b.made.length; return undefined }, presignPut: async () => 'P', log: () => {} })
+  await b.ensure('a@x.com')
+  assert.equal(seen, 0)
+  const bad = fakeE2B()
+  await assert.rejects(boxes({ e2b: bad, store: memoryStore(), cfg, edgeKey: 'k', presignGet: async () => { throw new Error('s3') }, presignPut: async () => 'P', log: () => {} }).ensure('a@x.com'), /s3/)
+  assert.equal(bad.made.length, 0)
+})
+test('firstSetUp: no box and no backup, or a creating record marked first', async () => {
+  const mk = (presign) => { const e2b = fakeE2B(); const store = memoryStore(); return { e2b, store, b: boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: presign, presignPut: async () => 'P', log: () => {} }) } }
+  assert.equal(await mk(async () => undefined).b.firstSetUp('a@x.com'), true)
+  assert.equal(await mk(async () => 'GET-URL').b.firstSetUp('a@x.com'), false)
+  const t = mk(async () => undefined); t.e2b.made.push({ id: 'b1' })
+  await t.store.putBox('b1', { email: 'a@x.com', creating: 1, first: true })
+  assert.equal(await t.b.firstSetUp('a@x.com'), true)
+  await t.store.putBox('b1', { email: 'a@x.com', creating: 1 })
+  assert.equal(await t.b.firstSetUp('a@x.com'), false)
+})
+test('after a completed first set-up, a restart (box exists, still no backup) says Starting, not Setting up', async () => {
+  const t = await gatedServer(async () => undefined)
+  t.open(); await new Promise(r => setTimeout(r, 100))
+  await call(t.port, { headers: nav })   // completes the first create
+  assert.equal('first' in (await t.store.getBox('b1')), false)
+  assert.equal(await t.b.firstSetUp('a@x.com'), false)
+  // dsh died: the next ensure takes the repair path and rewrites the record.
+  await t.store.patchBox('b1', { launch: undefined })
+  await t.b.ensure('a@x.com')
+  assert.equal(await t.b.firstSetUp('a@x.com'), false)
+  const slow = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure: () => new Promise(() => {}), firstSetUp: t.b.firstSetUp, touch() {}, forget() {} }, log: () => {} })
+  const r = await call(await listen(slow), { headers: nav })
+  slow.close(); t.s.close()
+  assert.match(r.body, /Starting your computer/)
 })
