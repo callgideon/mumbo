@@ -51,19 +51,20 @@ export function localeMetadataProblems(root: string): string[] {
       if (description !== undefined && !/[.!?]$/u.test(description)) problems.push(`${directory}/en.json: meta.description must end with sentence punctuation`)
       const translations = SHIPPED_LOCALE_IDS.filter(id => id !== 'en').map(language => [language, read(language)] as const)
       // An English description may come from package.json instead of en.json;
-      // translated descriptions then stay consistent across languages.
+      // translated descriptions then keep the tokens of the first translation.
       const expected = new Set(Object.keys(en))
       if (translations.some(([, translated]) => translated['meta.description'] !== undefined)) expected.add('meta.description')
       for (const [language, translated] of translations) {
         for (const key of new Set([...expected, ...Object.keys(translated)])) {
+          const reference = en[key] ?? translations.find(([, other]) => other[key] !== undefined)?.[1][key]
           if (translated[key] === undefined) problems.push(`${directory}/${language}.json: missing ${key}`)
           else if (!expected.has(key)) problems.push(`${directory}/${language}.json: unexpected ${key}`)
-          else if (en[key] !== undefined) {
+          else if (reference !== undefined) {
             if (language !== 'ja' && key === 'meta.description' && translated[key] === en[key]) {
               problems.push(`${directory}/${language}.json: ${key} contains untranslated source text`)
             }
             const placeholders = (text: string): string => localeTokens(text).join(',')
-            if (placeholders(translated[key]) !== placeholders(en[key])) problems.push(`${directory}/${language}.json: ${key} changes placeholders or literal tokens`)
+            if (placeholders(translated[key]) !== placeholders(reference)) problems.push(`${directory}/${language}.json: ${key} changes placeholders or literal tokens`)
           }
         }
       }

@@ -138,6 +138,15 @@ it.each(['es', 'fr', 'de', 'ru', 'pt'])('rejects copied English descriptions in 
   expect(localeMetadataProblems(root).join('\n')).toContain(`${language}.json: meta.description contains untranslated source text`)
 })
 
+it('rejects translated descriptions that drop tokens when English has no description', () => {
+  const root = fixture()
+  for (const language of SHIPPED_LOCALE_IDS.filter(id => id !== 'en')) {
+    const description = language === 'fr' ? 'Enregistrez la note.' : 'Record the rating with /feedback.'
+    writeFileSync(join(root, `packages/demo/plugin/locale/${language}.json`), JSON.stringify({ meta: { title: 'Name {name}', description } }))
+  }
+  expect(localeMetadataProblems(root)).toEqual(['packages/demo/plugin/locale/fr.json: meta.description changes placeholders or literal tokens'])
+})
+
 it.each(['\u200b', '\ufeff', String.raw`\u200b`, String.raw`\ufeff`])('rejects invisible characters in JSON resources', (character) => {
   const root = fixture()
   const file = join(root, 'packages/demo/plugin/locale/es.json')
