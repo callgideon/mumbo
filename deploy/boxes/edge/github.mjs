@@ -3,7 +3,7 @@
 // by modelServer; the edge holds the agent token and forwards only what its rules allow (design section 9): reads on
 // the project's repositories, comments and pull requests short of merging or retargeting, and pushes to agent/* only.
 import { Readable, pipeline } from 'node:stream'
-import { Kind, parse, print, valueFromASTUntyped } from 'graphql'
+import { Kind, parse, print, valueFromASTUntyped, visit } from 'graphql'
 import { getRepos, isProjectId } from './projects.mjs'
 
 // content-length is left to fetch, which frames the body actually sent (GraphQL and pull request edits are re-serialized).
@@ -14,6 +14,8 @@ const RESPONSE_DROP = new Set(['content-encoding', 'content-length', 'transfer-e
 // per source byte (10 MB of `query { a a a … }` took 2.4 GB), so their cap keeps one request far inside the edge's 2 GB.
 const PUSH_MAX = 256 * 1024 * 1024
 const JSON_MAX = 1024 * 1024
+// Buffered pushes in flight on one replica, any project: 3 × PUSH_MAX = 768 MB of the 2048 MB edge task.
+const MAX_CONCURRENT_PUSHES = 3
 // parse() aborts past this many tokens, a few MB of heap; the documents gh and superagent send have a few hundred.
 const GRAPHQL_MAX_TOKENS = 50_000
 // Node ids one request's mutations may name, all resolved in one nodes(ids:) lookup (GitHub takes at most 100).
@@ -46,7 +48,8 @@ const STOPPED = 'stopped by the founder'
 
 /**
  * The GitHub forwarder. Refusals answer 403 (400 for a GraphQL document that does not parse, 413 past a body cap,
- * 415 for GraphQL not sent as application/json, 429 for a second push in flight) and log one line
+ * 415 for GraphQL not sent as application/json, 429 for a second push from a project or past MAX_CONCURRENT_PUSHES) and
+ * log one line
  * `{ edge: 'github', refused, principal, method, host, path }`. While `halt.isHalted(principal)`, only GET and HEAD,
  * git-upload-pack and GraphQL documents without a mutation pass. Every node id a GraphQL mutation names must resolve,
  * through one `nodes(ids:)` lookup with the agent token, to an object in one of the project's repositories.
@@ -129,6 +132,7 @@ export function githubForwarder({ store, halt, agentToken, fetchImpl, log = cons
       if (req.headers['content-encoding'] !== undefined) return refuse('an encoded push is refused')
       if (await halt.isHalted(claim.u)) return refuse(STOPPED)
       if (pushing.has(claim.u)) return refuse('another push from this project is in progress', 429)
+      if (pushing.size >= MAX_CONCURRENT_PUSHES) return refuse(`the edge is taking ${MAX_CONCURRENT_PUSHES} other pushes; try again shortly`, 429)
       pushing.add(claim.u)
       res.once('close', () => pushing.delete(claim.u))
       body = await readBody(req, PUSH_MAX)
@@ -187,7 +191,8 @@ function pullEdit(buf) {
 }
 
 /**
- * Checks a GraphQL request: every operation, whatever operationName picks. A mutation may hold only allowed top-level
+ * Checks a GraphQL request: every operation, whatever operationName picks. No input object repeats a field name and no
+ * operation repeats a variable name (400 otherwise). A mutation may hold only allowed top-level
  * fields, by field name (never alias), and no fragments. Each field's `input`, with variables and their defaults
  * resolved, holds only known keys and names at least one node id; updatePullRequest may not set baseRefName or reopen.
  * Returns `{ refused, status? }` or `{ ids, body }`: the node ids to resolve, and the printed document with variables
@@ -201,6 +206,15 @@ function checkGraphql(text) {
   if (req.variables != null && !isObject(req.variables)) return { refused: 'variables must be a JSON object' }
   if (req.operationName != null && typeof req.operationName !== 'string') return { refused: 'operationName must be a string' }
   try { doc = parse(req.query, { maxTokens: GRAPHQL_MAX_TOKENS }) } catch (e) { return { refused: `the query does not parse (${e.message})`, status: 400 } }
+  // GraphQL requires these names unique; parse() keeps repeats and the input below would read the last, so the edge
+  // refuses them rather than rely on GitHub to.
+  let repeated
+  const once = (names, what) => { if (new Set(names).size !== names.length) repeated = what }
+  visit(doc, {
+    ObjectValue: (n) => once(n.fields.map(f => f.name.value), 'an input object repeats a field name'),
+    OperationDefinition: (n) => once(n.variableDefinitions.map(v => v.variable.name.value), 'an operation repeats a variable name'),
+  })
+  if (repeated) return { refused: repeated, status: 400 }
   const ids = new Set()
   for (const def of doc.definitions) {
     if (def.kind !== Kind.OPERATION_DEFINITION || def.operation === 'query') continue

@@ -59,7 +59,7 @@ async function forwarder({ reply = ok, lookup = lookupOk, agentToken = 'AGENT' }
     })
     req.on('error', reject); req.end(body)
   })
-  return { call, calls, lookups, logs, halted, state, port, close: () => { server.closeAllConnections(); server.close() } }
+  return { call, calls, lookups, logs, halted, state, store, port, close: () => { server.closeAllConnections(); server.close() } }
 }
 
 test('reads: a project repository is read with the agent token; the box token and x-api-key stay behind', async (t) => {
@@ -196,6 +196,18 @@ test('GraphQL: listed mutations by field name only, no fragments, every operatio
     assert.equal((await post(body)).status, 403, body)
   }
   assert.equal((await post('{"query":"mutation { createPullRequest("}')).status, 400, 'a query that does not parse')
+  // Repeated names would let the last one win past the checks; refused before any lookup.
+  for (const [why, query] of [
+    ['a repeated input field', 'mutation { addComment(input: {subjectId: "I_OTHER", subjectId: "I_1", body: "x"}) { clientMutationId } }'],
+    ['a repeated field deeper, in a query', '{ repository(owner: "callgideon", name: "mumbo") { issues(first: 1, filterBy: {states: OPEN, states: CLOSED}) { totalCount } } }'],
+    ['a repeated field in a variable default', 'mutation($i: AddCommentInput = {subjectId: "I_1", body: "x", body: "y"}) { addComment(input: $i) { clientMutationId } }'],
+    ['a repeated variable', 'mutation($s: ID = "I_OTHER", $s: ID = "I_1") { addComment(input: {subjectId: $s, body: "x"}) { clientMutationId } }'],
+  ]) {
+    const r = await gql(query)
+    assert.equal(r.status, 400, why)
+    assert.match(r.json().errors[0].message, /repeats a (field|variable) name/, why)
+  }
+  assert.equal(f.lookups.length, 0)
   for (const type of ['text/plain', 'application/graphql', 'application/x-www-form-urlencoded', '']) {
     const r = await gql('{ viewer { login } }', undefined, undefined, type)
     assert.equal(r.status, 415, type)
@@ -383,6 +395,30 @@ test('one push at a time per project: a second concurrent push answers 429, and 
   assert.equal((await first).status, 200)
   assert.equal((await push()).status, 200)
   assert.equal(f.calls.filter(c => c.url.endsWith('/git-receive-pack')).length, 2)
+})
+
+test('at most 3 buffered pushes per replica: a fourth project\'s push answers 429 until one ends', { timeout: 10_000 }, async (t) => {
+  let open
+  const gate = new Promise(r => { open = r })
+  const f = await forwarder({ reply: async (url) => { if (url.endsWith('/git-receive-pack')) await gate; return ok() } })
+  t.after(f.close)
+  const projects = [P1, ...['p2', 'p3', 'p4'].map(p => p.repeat(8))]
+  for (const id of projects.slice(1)) await f.store.putDoc(`project:${id}`, { id, name: id, owner: 'a@x.com', members: ['a@x.com'], createdAt: '2026-11-09T00:00:00Z', repos: [`callgideon/${id}`] })
+  const repo = (id) => (id === P1 ? 'callgideon/mumbo' : `callgideon/${id}`)
+  const body = pkt(`${A} ${B} refs/heads/agent/a\0report-status\n`) + '0000'
+  const push = (id) => { f.state.principal = `project:${id}`; return f.call(`github.com/${repo(id)}.git/git-receive-pack`, { method: 'POST', body }) }
+  const pending = []
+  for (const id of projects.slice(0, 3)) {
+    pending.push(push(id))
+    while (f.calls.length < pending.length) await new Promise(r => setTimeout(r, 5))
+  }
+  const fourth = await push(projects[3])
+  assert.equal(fourth.status, 429)
+  assert.match(fourth.json().message, /taking 3 other pushes/)
+  open()
+  for (const p of pending) assert.equal((await p).status, 200)
+  assert.equal((await push(projects[3])).status, 200)
+  assert.equal(f.calls.length, 4)
 })
 
 test('a client that leaves mid-response cancels the upstream body', { timeout: 10_000 }, async (t) => {
