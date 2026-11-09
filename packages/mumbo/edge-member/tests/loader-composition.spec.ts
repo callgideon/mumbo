@@ -1,8 +1,8 @@
 /**
- * The member plugin in a real Loader composition: Web carrier, Connection, Gateway, and remote access. A
- * request carrying the edge-signed header reaches Remote methods as the `edge-member` principal on the Sessions
- * the Workspace list holds; a tampered, expired, or missing header is not a member, and a member reaches no
- * settings method.
+ * The member plugin in a real Loader composition: Web carrier, Connection, Gateway, remote access, and the browser
+ * upload route. A request carrying the edge-signed header reaches Remote methods and the upload route as the
+ * `edge-member` principal on the Sessions the Workspace list holds; a tampered, expired, or missing header is not a
+ * member, and a member reaches no settings method.
  */
 
 import { randomBytes } from 'node:crypto'
@@ -15,6 +15,7 @@ import Loader from '@deepseek-ai/cordis-plugin-loader'
 import TypertGatewayService from '@deepseek-ai/dsh-api-gateway'
 import RemoteAccessService from '@deepseek-ai/dsh-api-remote-access'
 import * as Connection from '@deepseek-ai/dsh-client-connection'
+import FileUploads from '@deepseek-ai/dsh-client-file-upload'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
 import { Remote, TypertRemoteService, principalOf, type Principal } from '@deepseek-ai/dsh-typert-protocol'
 import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
@@ -68,6 +69,8 @@ class SettingsProbe extends TypertRemoteService {
 let context: Context | undefined
 /** The Session list Workspace `w1` holds; a test may commit a new one. */
 let workspaceSessions: string[] = []
+/** Names of the files the upload route stored. */
+let storedFiles: string[] = []
 
 afterEach(async () => {
   await context?.fiber.dispose()
@@ -91,6 +94,26 @@ async function boot(): Promise<{ readonly origin: string; readonly probe: Prompt
   context.provide('workspaceRegistry', { list: () => [{ id: 'w1', sessionIds: workspaceSessions }] } as never)
   // One live subagent child Session that no Workspace lists.
   context.provide('sessions', { list: () => [{ id: 'child' }] } as never)
+  // Every Session id resolves to a live ordinary Agent, so only access decides which upload is stored.
+  const agents = new Map<string, object>()
+  context.provide('agents', {
+    get: (id: string) => {
+      if (!agents.has(id)) agents.set(id, { id, session: { header: {} } })
+      return agents.get(id)
+    },
+  } as never)
+  storedFiles = []
+  context.provide('attachments', {
+    // Connection checks its request-body cap against the aggregate image limit.
+    imageLimits: { maxMessageImageBytes: 1024 },
+    async saveFileStream(input: { readonly data: AsyncIterable<Uint8Array>; readonly name?: string }) {
+      let bytes = 0
+      for await (const chunk of input.data) bytes += chunk.byteLength
+      storedFiles.push(input.name ?? 'file')
+      return { attachmentId: 'file-1', name: input.name ?? 'file', bytes }
+    },
+  } as never)
+  context.provide('commands', { registerFileReceiptResolver: () => () => {} } as never)
   await context.plugin(Loader)
   const modules = new Map<string, object>([
     ['@deepseek-ai/dsh-typert-registry', TypertRegistry],
@@ -98,6 +121,7 @@ async function boot(): Promise<{ readonly origin: string; readonly probe: Prompt
     ['@deepseek-ai/dsh-api-gateway', TypertGatewayService],
     ['@deepseek-ai/dsh-host-webserver', WebServer],
     ['@deepseek-ai/dsh-client-connection', Connection],
+    ['@deepseek-ai/dsh-client-file-upload', FileUploads],
     ['@mumbo/edge-member', EdgeMember],
   ])
   const loader = context.loader
@@ -175,6 +199,20 @@ describe('real Loader composition', () => {
     expect(probe.callers).toEqual([{ kind: 'edge-member', email: 'ann@example.com' }])
   })
 
+  it('lets a member upload through the browser binary route to a granted Session only', { timeout: 60_000 }, async () => {
+    const { origin } = await boot()
+    const header = signMemberHeader(KEY, 'ann@example.com', now() + 300)
+    const upload = (sessionId: string, name: string) => fetch(
+      `${origin}/api/session/uploadFileBinary?sessionId=${sessionId}&name=${name}`,
+      { method: 'POST', headers: { 'content-type': 'application/octet-stream', 'x-mumbo-member': header }, body: Uint8Array.of(1, 2, 3) },
+    )
+    const granted = await upload('s1', 'notes.txt')
+    expect(await granted.json()).toMatchObject({ ok: true, value: { file: { name: 'notes.txt', bytes: 3 } } })
+    const ungranted = await upload('s2', 'elsewhere.txt')
+    expect(ungranted.status).toBe(403)
+    expect(storedFiles).toEqual(['notes.txt'])
+  })
+
   it('refuses a member a Session no Workspace lists, and every settings method', { timeout: 60_000 }, async () => {
     const { origin, probe } = await boot()
     const header = signMemberHeader(KEY, 'ann@example.com', now() + 300)
@@ -212,8 +250,10 @@ describe('real Loader composition', () => {
       { kind: 'session', id: 'child' },
     ]))
     const s1 = 'grants' in snapshot ? snapshot.grants.find(grant => grant.resource.kind === 'session' && grant.resource.id === 's1') : undefined
-    expect(s1?.actions).toContain('session/prompt')
+    expect(s1?.actions).toEqual(expect.arrayContaining(['session/prompt', 'fileUploads/upload', 'sessionLog/export', 'sessionLog/markdown']))
     expect(s1?.actions).not.toContain('session/updateQueue')
+    const global = 'grants' in snapshot ? snapshot.grants.find(grant => grant.resource.kind === 'global') : undefined
+    expect(global?.actions).toContain('mediaReferences/read')
   })
 
   it('rebuilds member grants after a Workspace change has committed', { timeout: 60_000 }, async () => {

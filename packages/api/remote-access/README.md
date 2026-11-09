@@ -83,7 +83,7 @@ No direct effect.
 - Snapshot and list-filtering decisions carry no call arguments, so a condition that refines its answer from `args` can refuse a call that the snapshot shows as allowed.
 - Resource readers and automatic resolution must cover every resource a method touches; a resource the call does not name is not checked, so a principal granted on the named resources reaches it.
 - Default resource resolution matches wire field names; adding a field with a registered kind's name to a method adds that kind's resource to the call.
-- Exact Connection Fetch routes do not pass through the Gateway; the shared Fetch handler refuses them to every non-owner Peer with 403 until each route declares its own access rule.
+- Exact Connection Fetch routes do not pass through the Gateway. A route that declares `access` is decided, through the authorizer the Gateway installs on Connection, as its declared action on the resources its query names and without call arguments, so its conditions answer as for a snapshot; a route-specific action such as `sessionLog/export` names no Remote endpoint but still enters the snapshot. Every other exact route refuses non-owner Peers with 403.
 - Interaction participation (answering forwarded waterfalls) is owner-only: non-owner `$events` streams receive only the broadcast frames whose `event:<name>` action the policy allows on the event's resources.
 - `api-session/added` carries the whole `SessionSummary`, so a non-owner allowed to receive it also learns its `parentSessionId`.
 - A granted Session's cwd and tool paths already contain the owner's absolute paths, so the `$events` ready frame gives a non-owner the full `host`, including `home`; the Gateway does not hide `home` separately.

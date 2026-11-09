@@ -251,6 +251,8 @@ export class TypertGatewayService extends Service implements TypertGateway {
         endpoint => this.claimsEndpoint(endpoint),
         (endpoint, payload, signal, peer) => this.dispatchRpc(endpoint, payload, signal, peer),
       )
+      // Exact Fetch routes bypass dispatch; their declared access asks the same decision as a call.
+      connectionCtx.connection.fetch.authorize(request => this.ctx.remoteAccess.decide(request).kind === 'allow')
     })
     ctx.inject(['connection', 'webServer'], (webCtx) => {
       const listen = (): void => {

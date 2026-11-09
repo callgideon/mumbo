@@ -83,7 +83,7 @@ Client 入口同步读取 index 注入在 `REMOTE_ACCESS_SNAPSHOT_KEY` 下的 ba
 - 快照与列表过滤的判定不带调用参数，因此按 `args` 细化结论的 condition 可能拒绝快照显示为允许的调用。
 - 资源读取函数与自动解析必须覆盖方法访问的全部资源；调用未指明的资源不受检查，持有已指明资源授权的 principal 可以访问它。
 - 默认资源解析按 wire 字段名匹配；给方法新增与已登记种类同名的字段，会让调用多访问该种类的资源。
-- exact Connection Fetch route 不经过 Gateway；在各路由声明自己的访问规则之前，共享 Fetch handler 对所有非 owner Peer 返回 403。
+- exact Connection Fetch route 不经过 Gateway。声明了 `access` 的路由经 Gateway 安装在 Connection 上的 authorizer 判定：以其声明的 action、作用于其查询指定的资源，且不带调用参数，因此其 condition 按快照方式回答；`sessionLog/export` 这类路由专用 action 不对应任何 Remote 端点，但仍会进入快照。其他 exact 路由对非 owner Peer 返回 403。
 - 交互参与（回答转发的 waterfall）仅限 owner：非 owner 的 `$events` 流只收到 policy 在事件资源上放行其 `event:<name>` action 的广播帧。
 - `api-session/added` 携带完整的 `SessionSummary`，因此被允许接收它的非 owner 也会得知其 `parentSessionId`。
 - 被授权 Session 的 cwd 与工具路径本就包含 owner 的绝对路径，因此 `$events` ready 帧向非 owner 提供完整的 `host`（含 `home`）；Gateway 不单独隐藏 `home`。

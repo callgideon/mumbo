@@ -1,9 +1,19 @@
 import { runInNewContext } from 'node:vm'
+import { Context } from '@deepseek-ai/cordis'
+import { HostConnectionService, type ConnectionFetchAccessRequest } from '@deepseek-ai/dsh-client-connection'
+import type { BrowserAuth } from '@deepseek-ai/dsh-client-connection/src/browser-auth.ts'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { Mock } from 'vitest'
 import { handleFileUploadHttp } from '../src/http-route.ts'
-import type { FileUploads } from '../src/index.ts'
+import FileUploadsService, { type FileUploads } from '../src/index.ts'
+
+declare module '@deepseek-ai/dsh-typert-protocol' {
+  interface PrincipalMap {
+    /** Test-only non-owner caller shared by the access specs. */
+    'test-guest': { readonly kind: 'test-guest'; readonly guest: string }
+  }
+}
 
 function request(input: {
   method?: string
@@ -145,5 +155,42 @@ describe('background file upload Fetch route', () => {
     }))).json()).toEqual({
       ok: false, error: { code: 'gateway/internal', message: 'Error: disk exception', details: {} },
     })
+  })
+})
+
+describe('background file upload route access', () => {
+  it('serves a non-owner only with fileUploads/upload on the Session the query names', async () => {
+    const ctx = new Context()
+    onTestFinished(() => ctx.fiber.dispose())
+    const agent = { id: 's1', session: { header: {} } }
+    ctx.provide('agents', { get: (id: string) => id === agent.id ? agent : undefined } as never)
+    const saveFileStream = vi.fn(async (input: { readonly data: AsyncIterable<Uint8Array> }) => {
+      let bytes = 0
+      for await (const chunk of input.data) bytes += chunk.byteLength
+      return { attachmentId: 'file-1', name: 'file', bytes }
+    })
+    ctx.provide('attachments', { saveFileStream } as never)
+    ctx.provide('commands', { registerFileReceiptResolver: () => () => {} } as never)
+    const connection = new HostConnectionService(ctx, [], {} as BrowserAuth)
+    new FileUploadsService(ctx)
+    const decisions: ConnectionFetchAccessRequest[] = []
+    connection.fetch.authorize((request) => {
+      decisions.push(request)
+      return request.resources.every(resource => resource.kind === 'session' && resource.id === 's1')
+    })
+    const shared = connection.createSharedFetchHandler('/api')
+    const guest = connection.createPeer({ principal: { kind: 'test-guest', guest: 'file-upload' } })
+    const post = (sessionId: string) => shared.fetch(request({
+      sessionId, contentType: 'application/octet-stream', body: Uint8Array.of(1, 2, 3),
+    }), guest)
+
+    const granted = await post('s1')
+    expect(await granted.json()).toMatchObject({ ok: true, value: { file: { bytes: 3 } } })
+    expect((await post('s2')).status).toBe(403)
+    expect(saveFileStream).toHaveBeenCalledOnce()
+    expect(decisions.map(({ action, resources }) => ({ action, resources }))).toEqual([
+      { action: 'fileUploads/upload', resources: [{ kind: 'session', id: 's1' }] },
+      { action: 'fileUploads/upload', resources: [{ kind: 'session', id: 's2' }] },
+    ])
   })
 })

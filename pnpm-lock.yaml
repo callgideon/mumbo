@@ -13723,6 +13723,9 @@ importers:
       '@deepseek-ai/dsh-client-connection':
         specifier: workspace:*
         version: link:../../client/connection
+      '@deepseek-ai/dsh-client-file-upload':
+        specifier: workspace:*
+        version: link:../../client/file-upload
       '@deepseek-ai/dsh-host-webserver':
         specifier: workspace:*
         version: link:../../host/webserver

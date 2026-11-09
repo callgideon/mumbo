@@ -93,7 +93,7 @@ wireStream.open(endpoint, payload, uplink, peer: PeerScope, signal)          // 
 | Host 进程内自动化 | 需要调用 Remote 方法时用 `createPeer({ principal })` 创建自己的 Peer。目前没有这类生产调用方，因此不预置固定的 Host Peer |
 | 多 Peer | `createPeer()` 每次返回独立 Peer；liveshare 将用它为读者的每条连接建一个 Peer（在 #3854 侧接入） |
 | 交互参与 | `Peer(owner, { principal, interactions? })` 与 `createPeer()` 省略 interactions 时默认 `answer`。`none` 对所有 principal 拒绝 `$events` 与 `$events/result`；交互模式不赋予方法权限。回答型 owner 能接收并回答 waterfall，非 owner 只能接收 RBAC 授权的广播，不能回答 |
-| exact Fetch route | file-upload、present-open、media-references、session-log-export、inspector 等 exact route 不经 Gateway；共享 Fetch handler 对非 owner Peer 一律返回 403 |
+| exact Fetch route | file-upload、present-open、media-references、session-log-export、inspector 等 exact route 不经 Gateway。声明了 `access` 的路由指定一个 action 与每种资源的查询参数；在非 owner 请求运行之前，共享 Fetch handler 询问 Gateway 安装的 authorizer，由它调用 `remoteAccess.decide()`；对其他路由，非 owner Peer 一律得到 403（[exact Fetch route 访问](2026-11-09-connection-authenticators-and-edge-members.zh.md#exact-fetch-route-access)） |
 
 ### 身份类型
 
@@ -500,7 +500,7 @@ GlobalStandardProps.useWorkspaceAccess: (workspaceId: WorkspaceId, action: Remot
 |---|---|
 | principal 只能由进程内 Host 代码在创建 Peer 时给出 | `PeerScope.principal` 只读；`createPeer()` 不对应任何路由 |
 | wire 上任何字段都不能设置或覆盖 principal | principal 不来自 args、envelope、header、query 或 cookie。args 顶层多余字段被 `assertExactArguments` 拒绝；payload 必须恰为 `{ args }`；envelope 未知字段被 [`clientRequestSchema`](../../../../packages/client/connection/src/rpc-schema.ts) 丢弃；请求体内同名字段只是业务数据 |
-| 浏览器网络准入为 owner | 通过[浏览器 token 认证](../../implemented/architecture/2026-08-24-browser-token-authentication.zh.md)的连接得到 `browserPeer`；非 owner 网络 principal 只经已注册的 Connection authenticator 进入，且只由 Gateway 服务（[Connection authenticator](2026-11-09-connection-authenticators-and-edge-members.zh.md)） |
+| 浏览器网络准入为 owner | 通过[浏览器 token 认证](../../implemented/architecture/2026-08-24-browser-token-authentication.zh.md)的连接得到 `browserPeer`；非 owner 网络 principal 只经已注册的 Connection authenticator 进入，且只由 Gateway 与声明了 `access` 的 exact Fetch route 服务（[Connection authenticator](2026-11-09-connection-authenticators-and-edge-members.zh.md)） |
 | 没有隐式 Peer | Gateway 与 Connection 都不补默认 Peer；required 参数让漏传在编译期暴露 |
 | 已 dispose 的 Peer 不能再分派 | `gateway/peer-disposed` |
 | 非 owner 未经授权不能调用 | 只有 binding 的 role 显式列出该 action 且资源匹配时才放行；没有该 kind 的 policy 即拒；Gateway 依赖 `remoteAccess`，缺失时 Gateway 不启动 |
@@ -559,7 +559,7 @@ GlobalStandardProps.useWorkspaceAccess: (workspaceId: WorkspaceId, action: Remot
 - liveshare 接入（声明 `share-viewer`、每条读者连接一个 Peer、定义 role 并注册 policy、删除 `origin` / `prompt/origin` / `READ_ENDPOINTS`）：#3854 侧。
 - `session/cancel` 归属检查、fork 的 `childSessionId`、`ToolExecutionInput.turn`：不改。
 - 资源识别的精确方式（例如 Typert 生成器按 branded id 类型在请求对象中定位字段并写入描述符）：目前用 lookup 与 Context 声明的 `resource`、默认字段加 `resources` 读取函数，以后可替换资源解析而不改 policy 接口。
-- exact Fetch route 对非 owner 一律 403 是临时处理；以后由各路由声明访问规则。
+- exact Fetch route 的访问检查只从查询读取资源，且不传调用参数，因此 condition 按快照方式回答；资源位于请求体中的路由不声明 access，保持只对 owner 开放。
 - subagent `prompt` 的资源声明待定：其请求字段为 `parentSessionId` / `childSessionId`，目前解析为 `global`。生产者为进程内调用方记录 `source.principal`；没有 role 列出它，非 owner 不能经 Gateway 到达。
 - 预定义与聚合 role：出现第二种非 owner principal kind 时，由各领域包以 `@Remote({ roles })` 声明方法所属的通用 role（如 `session:viewer`），各 policy 绑定这些 role；目前 role 由业务包以显式 action 清单定义。
 

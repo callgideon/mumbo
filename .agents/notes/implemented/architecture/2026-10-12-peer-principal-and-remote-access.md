@@ -93,7 +93,7 @@ wireStream.open(endpoint, payload, uplink, peer: PeerScope, signal)          // 
 | In-process Host automation | Code that calls Remote methods creates its own Peer with `createPeer({ principal })`. No production caller exists yet, so no fixed Host Peer is pre-provisioned |
 | Multiple Peers | Each `createPeer()` returns an independent Peer; liveshare is to create one per viewer connection (wired on the #3854 side) |
 | Interaction participation | `Peer(owner, { principal, interactions? })` and `createPeer()` default omitted `interactions` to `answer`. `none` refuses `$events` and `$events/result` for every principal, even owner; this is independent of method-level RBAC. Answering owner Peers receive waterfalls, and non-owner Peers receive only RBAC-authorized broadcasts and cannot answer |
-| Exact Fetch routes | Exact routes such as file-upload, present-open, media-references, session-log-export, and inspector bypass the Gateway; the shared Fetch handler answers 403 to every non-owner Peer |
+| Exact Fetch routes | Exact routes such as file-upload, present-open, media-references, session-log-export, and inspector bypass the Gateway. A route that declares `access` names one action and the query parameter of each resource; the shared Fetch handler asks the authorizer the Gateway installs, which calls `remoteAccess.decide()`, before a non-owner request runs, and answers 403 to a non-owner Peer for every other route ([exact Fetch route access](2026-11-09-connection-authenticators-and-edge-members.md#exact-fetch-route-access)) |
 
 ### Identity types
 
@@ -500,7 +500,7 @@ GlobalStandardProps.useWorkspaceAccess: (workspaceId: WorkspaceId, action: Remot
 |---|---|
 | Only in-process Host code supplies a principal, when it creates a Peer | `PeerScope.principal` is read-only; `createPeer()` has no route |
 | No wire field can set or override a principal | Principals never come from args, the envelope, headers, the query, or cookies. Extra top-level args fields fail `assertExactArguments`; the payload must be exactly `{ args }`; [`clientRequestSchema`](../../../../packages/client/connection/src/rpc-schema.ts) drops unknown envelope fields; a same-named field inside a request body is business data |
-| Browser network admission yields the owner | Connections that pass [browser token authentication](../../implemented/architecture/2026-08-24-browser-token-authentication.md) receive `browserPeer`; a non-owner network principal enters only through a registered Connection authenticator, and only the Gateway serves it ([Connection authenticators](2026-11-09-connection-authenticators-and-edge-members.md)) |
+| Browser network admission yields the owner | Connections that pass [browser token authentication](../../implemented/architecture/2026-08-24-browser-token-authentication.md) receive `browserPeer`; a non-owner network principal enters only through a registered Connection authenticator, and only the Gateway and exact Fetch routes that declare `access` serve it ([Connection authenticators](2026-11-09-connection-authenticators-and-edge-members.md)) |
 | No implicit Peer | Neither the Gateway nor Connection supplies a default Peer; required parameters expose a missing Peer at compile time |
 | A disposed Peer cannot dispatch | `gateway/peer-disposed` |
 | A non-owner cannot call without authorization | A call is allowed only when a binding's role explicitly lists the action and its resource matches; a kind without a policy is refused; the Gateway depends on `remoteAccess` and does not start without it |
@@ -559,7 +559,7 @@ The review rule's home is the "`@Remote` marks capability methods" section of [R
 - Liveshare integration (declaring `share-viewer`, one Peer per viewer connection, defining roles and registering a policy, removing `origin` / `prompt/origin` / `READ_ENDPOINTS`) happens on the #3854 side.
 - `session/cancel` ownership checks, the fork `childSessionId`, and `ToolExecutionInput.turn` do not change.
 - Precise resource recognition (for example, the Typert generator locating request fields by branded id type and writing them into descriptors): this change uses the `resource` that lookups and Contexts declare, default fields, and `resources` readers, and resource resolution can later be replaced without changing the policy interface.
-- Answering 403 to every non-owner on exact Fetch routes is temporary; each route is to declare its own access rule later.
+- Exact Fetch route access reads resources only from the query and passes no call arguments, so a condition answers as for a snapshot; a route whose resource travels in its body declares no access and stays owner-only.
 - The resource declaration of subagent `prompt` is open: its request fields are `parentSessionId` / `childSessionId`, so it currently resolves to `global`. The producer records `source.principal` for in-process callers; no role lists it, so non-owners cannot reach it through the Gateway.
 - Predefined and aggregate roles: when a second non-owner principal kind appears, domain packages declare the generic roles a method belongs to (such as `session:viewer`) with `@Remote({ roles })`, and each policy binds those roles; roles are currently defined by the business package as explicit action lists.
 
