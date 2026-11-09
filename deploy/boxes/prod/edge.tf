@@ -14,20 +14,25 @@ variable "approver_emails" {
 }
 # Optional edge secrets: the task references an SSM parameter, and the exec role may read it, only when enabled. Create
 # the parameter first; a task whose parameter is missing does not start.
-variable "github_agent_token_enabled" {
-  description = "Pass /mumbo/boxes/github-agent-token to the edge as GITHUB_AGENT_TOKEN."
-  type        = bool
-  default     = false
-}
 variable "ntfy_enabled" {
   description = "Pass /mumbo/boxes/ntfy-topic to the edge as NTFY_TOPIC."
   type        = bool
   default     = false
 }
 variable "github_agent_login" {
-  description = "GITHUB_AGENT_LOGIN: the agent machine account's GitHub login. Empty: the approvals poller is off."
+  description = "GITHUB_AGENT_LOGIN: the agent's GitHub login, the mumbo-bot App's bot user mumbo-bot[bot]. Set with github_agent_id."
   type        = string
   default     = ""
+}
+variable "github_agent_id" {
+  description = "GITHUB_AGENT_ID: the numeric user id of github_agent_login (GET /users/mumbo-bot%5Bbot%5D); approvals match the agent by it. Empty: the approvals poller is off."
+  type        = string
+  default     = ""
+  validation {
+    # The edge's config() check: both or neither, and a positive integer.
+    condition     = can(regex("^([1-9][0-9]*)?$", var.github_agent_id)) && (var.github_agent_id == "") == (var.github_agent_login == "")
+    error_message = "github_agent_id must be a numeric GitHub user id, set together with github_agent_login (or both empty)."
+  }
 }
 variable "signin_cookie_name" {
   description = "oauth2-proxy's --cookie-name and the edge's SIGNIN_COOKIE: the edge drops every cookie whose name starts with it from box requests and box Set-Cookie. It starts with _oauth2_proxy_, a prefix every edge image strips."
@@ -273,7 +278,6 @@ locals {
   proxy_ssm = { OAUTH2_PROXY_CLIENT_ID = "boxes/oauth-client-id", OAUTH2_PROXY_CLIENT_SECRET = "boxes/oauth-client-secret", OAUTH2_PROXY_COOKIE_SECRET = "boxes/cookie-secret" }
   edge_ssm = merge(
     { ALLOWED_EMAILS = "boxes/allowed-emails", MUMBO_OAUTH_CLIENT_IDS = "boxes/oauth-client-id" },
-    var.github_agent_token_enabled ? { GITHUB_AGENT_TOKEN = "boxes/github-agent-token" } : {},
     var.ntfy_enabled ? { NTFY_TOPIC = "boxes/ntfy-topic" } : {},
   )
 }
@@ -339,10 +343,16 @@ resource "aws_ecs_task_definition" "edge" {
         # The sign-in page consents only for this client (MUMBO_OAUTH_CLIENT_IDS, below) and redirect URI.
         MUMBO_OAUTH_REDIRECT_URIS = local.oauth_redirect_url
         SIGNIN_COOKIE             = var.signin_cookie_name
+        # Capacity units, not boxes: a person or project box (4096 MB, edge/template.mjs) is 2, a child sandbox (2048 MB, the
+        # mumbo-child build argument) is 1. 12 boxes per node (nodes.tf hugepages) minus 2 of headroom. An edge image from before
+        # the units change reads MAX_RUNNING_BOXES (running boxes of all kinds, children too, counted as one each) instead; both stay until no such image can be rolled back to.
+        MAX_RUNNING_UNITS = tostring(2 * (12 * var.node_count - 2))
+        MAX_RUNNING_BOXES = tostring(12 * var.node_count - 2)
         # Approvals. PROJECT_TEMPLATE stays unset (it defaults to BOX_TEMPLATE) until the mumbo-project template is built.
         APPROVE_HOST         = "approve.${local.public_host}"
         APPROVER_EMAILS      = var.approver_emails
         GITHUB_AGENT_LOGIN   = var.github_agent_login
+        GITHUB_AGENT_ID      = var.github_agent_id
         REQUIRED_CHECKS      = "static,unit"
         DAILY_TOKENS_USER    = "20000000"
         DAILY_TOKENS_PROJECT = "50000000"

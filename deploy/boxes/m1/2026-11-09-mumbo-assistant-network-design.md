@@ -517,7 +517,10 @@ Reference mockups (sample data): `mumbo-mockups-v2.html`.
 - The model host stays `llm.boxes.mumbo.si` for boxes already running, alongside `llm.app.mumbo.si`.
 - Project boxes are still under the same registrable domain (`mumbo.si`), so the separate-domain gate before multi-person projects still applies.
 
+**Sign-in cookie domain.** No host that the edge does not serve may exist under the sign-in cookie's domain, because every such host would receive the sign-in cookie. This applies to dev servers too. **[my call]**
+
 **Sign-in consent page.** The Supabase OAuth server's authorization page is served by the edge, on an origin no box serves.
+- Supabase's client on that page uses the PKCE flow only. Tokens in a URL fragment never become a session, which would otherwise allow login CSRF.
 - It completes the sign-in automatically only for Mumbo's own client id(s), which are configured.
 - It refuses any other client, so an OAuth client registered later in Supabase can't obtain the founder's consent silently.
 - It shows "Continue with Google" and "Email me a sign-in link".
@@ -545,7 +548,7 @@ Reference mockups (sample data): `mumbo-mockups-v2.html`.
 
 **Capacity** **[my call]**:
 - A node holds 12 boxes, and boxes never pause, so each account holds a box permanently.
-- The edge sets `MAX_RUNNING_BOXES` to 12 × nodes, minus a headroom of 2. When it is full, newcomers see the capacity page, and the operator adds nodes (the node group allows up to 10).
+- The edge sets `MAX_RUNNING_UNITS` to 2 × (12 × nodes − 2), counting a box (4 GiB) as 2 units and a child sandbox (2 GiB) as 1 unit. When it is full, newcomers see the capacity page, and the operator adds nodes (the node group allows up to 10).
 - Scaling automatically on box count comes later.
 
 **Leaving.** A runbook command deletes a person's box and backups. An account disabled in Google Workspace can no longer sign in.

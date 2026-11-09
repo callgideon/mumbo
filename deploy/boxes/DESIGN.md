@@ -35,9 +35,9 @@ Code: `edge/edge.mjs` (router and model host in one Node process), `edge/compose
 ## Flows
 
 **Open my box.**
-1. oauth2-proxy signs the user in with Supabase. Only oauth2-proxy reaches the router (loopback), so `X-Forwarded-Email` is trusted. The router lowercases it and checks `ALLOWED_EMAILS` (addresses or `@domains`); anyone else gets 403.
+1. oauth2-proxy signs the user in with Supabase. Only oauth2-proxy reaches the router (loopback), so `X-Forwarded-Email` is trusted. The router lowercases it and checks `ALLOWED_EMAILS` (addresses, `@domains`, or `!address` entries that deny one exact address before any allow match); anyone else gets 403.
 2. A per-email single flight finds the box by E2B metadata `user=<email>` in states running and paused, the oldest if several. E2B is the only ownership record. A failed lookup returns 503 and never creates a box.
-3. No box: refuse with a capacity page if `MAX_RUNNING_BOXES` are running. Otherwise create from `mumbo-box` with:
+3. No box: refuse with a capacity page if `MAX_RUNNING_UNITS` capacity units are in use (a box is 2 units, a child sandbox 1; production, `RUNBOOK.md` "Adding nodes"). Otherwise create from `mumbo-box` with:
    - `lifecycle {onTimeout: pause, autoResume: true}`;
    - `network {allowPublicTraffic: false, maskRequestHost: boxes.mumbo.si}`;
    - an E2B timeout of `IDLE_MINUTES + 15`.
@@ -111,7 +111,7 @@ E2B's own `onTimeout: pause` (15 minutes later) is the safety net if the edge is
 
 ## Known limits of v1
 
-- Single E2B host: a single point of failure for every box. Its memory pool (8 GiB) holds about 3 running 2 GiB boxes, hence `MAX_RUNNING_BOXES=3`.
+- Single E2B host: a single point of failure for every box. Its memory pool (8 GiB) holds about 3 running 2 GiB boxes, hence a `MAX_RUNNING_BOXES` of 3 (the trial's code default then; production now uses `MAX_RUNNING_UNITS`, 2 per box).
 - E2B team limits (720 h, 200 sandboxes) were raised by hand in E2B's Postgres. A fresh host needs the same change.
 - Budgets count requests, not tokens, and live in memory.
 - Box egress is open internet (agents install packages). Boxes cannot reach private ranges.

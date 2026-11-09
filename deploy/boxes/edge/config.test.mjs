@@ -1,11 +1,11 @@
 // node --test: the edge's M1 settings from the environment.
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { config } from './edge.mjs'
+import { admitted, config } from './edge.mjs'
 
 const base = { PUBLIC_HOST: 'boxes.mumbo.si', LLM_HOST: 'llm.boxes.mumbo.si', BACKUP_BUCKET: 'backups' }
-const M1 = ['APPROVE_HOST', 'GITHUB_AGENT_LOGIN', 'REQUIRED_CHECKS', 'DAILY_TOKENS_USER', 'DAILY_TOKENS_PROJECT', 'BOX_TEMPLATE', 'PROJECT_TEMPLATE',
+const M1 = ['APPROVE_HOST', 'GITHUB_AGENT_LOGIN', 'GITHUB_AGENT_ID', 'REQUIRED_CHECKS', 'DAILY_TOKENS_USER', 'DAILY_TOKENS_PROJECT', 'BOX_TEMPLATE', 'PROJECT_TEMPLATE',
   'AUDIT_PREFIX', 'GITHUB_AGENT_TOKEN', 'GITHUB_APP_ID', 'GITHUB_APP_KEY', 'GITHUB_MERGE_TOKEN', 'NTFY_TOPIC', 'SIGNIN_COOKIE', 'SUPABASE_URL', 'MUMBO_OAUTH_REDIRECT_URIS']
 /** config() with exactly `base` plus `vars` set among the variables it reads here. */
 function configWith(vars = {}) {
@@ -22,8 +22,9 @@ test('M1 settings: defaults, and secrets optional so the edge starts before they
   assert.deepEqual(c.requiredChecks, ['static', 'unit'])
   assert.equal(c.dailyTokensUser, 20_000_000); assert.equal(c.dailyTokensProject, 50_000_000)
   assert.equal(c.projectTemplate, 'mumbo-box'); assert.equal(c.auditPrefix, 'audit/approvals/')
-  for (const k of ['agentLogin', 'agentToken', 'appId', 'appKey', 'ntfyTopic']) assert.equal(c[k], undefined, k)
-  assert.equal('mergeToken' in c, false)
+  for (const k of ['agentLogin', 'agentId', 'appId', 'appKey', 'ntfyTopic']) assert.equal(c[k], undefined, k)
+  for (const k of ['mergeToken', 'agentToken']) assert.equal(k in c, false, k)
+  assert.equal('agentToken' in configWith({ GITHUB_AGENT_TOKEN: 'ghp_x' }), false, 'GITHUB_AGENT_TOKEN is not read')
   assert.equal(configWith({ BOX_TEMPLATE: 'tpl' }).projectTemplate, 'tpl')
   const set = configWith({ GITHUB_APP_ID: '5295930', GITHUB_APP_KEY: 'PEM', REQUIRED_CHECKS: ' Static , unit,' })
   assert.equal(set.appId, '5295930'); assert.equal(set.appKey, 'PEM')
@@ -46,6 +47,53 @@ test('rollback safety: the pre-B13 edge filter strips the default sign-in cookie
   const tfDefault = /variable "signin_cookie_name" \{[^}]*default\s*=\s*"([^"]*)"/.exec(readFileSync(new URL('../prod/edge.tf', import.meta.url), 'utf8'))?.[1]
   assert.equal(tfDefault, configWith().signinCookie, 'the Terraform default and the edge default agree')
   for (const name of [tfDefault, configWith().signinCookie]) assert.equal(preB13(`${name}=a; ${name}_1=b; dsh-auth-x=d`), 'dsh-auth-x=d', name)
+})
+
+test('capacity: node_count drives both the node group and the edge cap (24 units per node minus 4, max 10 nodes)', () => {
+  const tf = (f) => readFileSync(new URL(`../prod/${f}`, import.meta.url), 'utf8')
+  assert.match(tf('edge.tf'), /MAX_RUNNING_UNITS\s*=\s*tostring\(2 \* \(12 \* var\.node_count - 2\)\)/)
+  assert.match(tf('nodes.tf'), /min_size\s*=\s*min\(2, var\.node_count\)/)
+  assert.match(tf('nodes.tf'), /termination_policies\s*=\s*\["OldestLaunchTemplate", "OldestInstance"\]/)
+  assert.match(tf('nodes.tf'), /enabled_metrics\s*=\s*\["GroupInServiceInstances"/)
+  assert.match(tf('ops.tf'), /nodes-below-min = \{[^\n]*threshold = var\.node_count/)
+  assert.match(tf('edge.tf'), /MAX_RUNNING_BOXES\s*=\s*tostring\(12 \* var\.node_count - 2\)/)
+  assert.match(tf('nodes.tf'), /desired_capacity\s*=\s*var\.node_count/)
+  assert.doesNotMatch(tf('nodes.tf'), /ignore_changes\s*=\s*\[desired_capacity\]/)
+  assert.match(tf('nodes.tf'), /node_max_size = 10\b/)
+  assert.match(tf('nodes.tf'), /var\.node_count <= 10/)
+  assert.equal(configWith({ MAX_RUNNING_UNITS: String(2 * (12 * 2 - 2)) }).maxRunningUnits, 44)
+})
+
+test('ALLOWED_EMAILS: a malformed deny entry fails at startup, a well-formed one is kept', () => {
+  assert.deepEqual(configWith({ ALLOWED_EMAILS: '@mumbo.si, !A@mumbo.si' }).allowed, ['@mumbo.si', '!a@mumbo.si'])
+  for (const bad of ['!', '!mumbo.si', '!@mumbo.si', '!!a@mumbo.si', '!a@']) assert.throws(() => configWith({ ALLOWED_EMAILS: bad }), /must be !local@domain/, bad)
+})
+
+test('ALLOWED_EMAILS: comma-separated, trimmed and lowercased; empty admits nobody', () => {
+  const allowed = configWith({ ALLOWED_EMAILS: ' @Mumbo.si , @cambrialabs.ai ,, Founder@X.com ' }).allowed
+  assert.deepEqual(allowed, ['@mumbo.si', '@cambrialabs.ai', 'founder@x.com'])
+  for (const email of ['New@Mumbo.SI', 'a@cambrialabs.ai', 'founder@x.com']) assert.ok(admitted(allowed, email), email)
+  assert.equal(admitted(allowed, 'other@x.com'), false)
+  assert.deepEqual(configWith({ ALLOWED_EMAILS: ' , ' }).allowed, [])
+})
+
+test('no oauth2-proxy launch turns off its email_verified check', () => {
+  // The edge never sees the ID token, so oauth2-proxy alone refuses email_verified=false. v7.9.0 checks it only while
+  // --insecure-oidc-allow-unverified-email is off and the email claim is `email`, which --oidc-email-claim and its
+  // deprecated alias --user-id-claim change (providers/provider_data.go buildSessionFromClaims, providers/providers.go).
+  const prod = new URL('../prod/', import.meta.url)
+  const files = [...readdirSync(prod).filter(f => f.endsWith('.tf') || f === 'terraform.tfvars').map(f => new URL(f, prod)),
+    new URL('./compose.yaml', import.meta.url), new URL('./up.sh', import.meta.url)]
+  for (const file of [new URL('edge.tf', prod), new URL('./compose.yaml', import.meta.url)]) assert.match(readFileSync(file, 'utf8'), /--provider=oidc/, file.pathname)
+  for (const file of files) assert.doesNotMatch(readFileSync(file, 'utf8'), /allow[-_]?unverified[-_]?email|email[-_]?claim|user[-_]?id[-_]?claim/i, file.pathname)
+})
+
+test('the agent is the mumbo-bot App\'s bot user: GITHUB_AGENT_ID is its numeric id, set together with GITHUB_AGENT_LOGIN', () => {
+  const c = configWith({ GITHUB_AGENT_LOGIN: 'mumbo-bot[bot]', GITHUB_AGENT_ID: '341797844' })
+  assert.equal(c.agentLogin, 'mumbo-bot[bot]')
+  assert.equal(c.agentId, 341797844)
+  for (const vars of [{ GITHUB_AGENT_LOGIN: 'mumbo-bot[bot]' }, { GITHUB_AGENT_ID: '341797844' }]) assert.throws(() => configWith(vars), /set GITHUB_AGENT_ID and GITHUB_AGENT_LOGIN together/, JSON.stringify(vars))
+  for (const id of ['abc', '0', '-1', '1.5', '1e3', ' 1', '12345678901234567']) assert.throws(() => configWith({ GITHUB_AGENT_LOGIN: 'mumbo-bot[bot]', GITHUB_AGENT_ID: id }), /GITHUB_AGENT_ID must be a numeric GitHub user id/, id)
 })
 
 test('PAGE_AFTER_MS: default 3000, and a value below 1000 or not a number stops the edge', () => {
