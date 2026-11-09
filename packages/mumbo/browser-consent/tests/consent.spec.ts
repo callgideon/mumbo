@@ -47,19 +47,33 @@ describe('currentTabOrigin', () => {
 })
 
 describe('describeArguments', () => {
-  it('shows each argument as escaped, bounded JSON and sets the model-written element apart', () => {
-    expect(describeArguments({ element: 'Send \u202Eevil', target: 'e1', fields: [{ name: 'To', value: 'a@b.c' }] })).toEqual({
-      summary: 'target="e1", fields=[{"name":"To","value":"a@b.c"}]',
+  const declared = new Set(['element', 'target', 'text', 'fields', 'key'])
+
+  it('lists declared arguments as escaped JSON and sets the model-written element apart', () => {
+    expect(describeArguments({ element: 'Send \u202Eevil', target: 'e1', fields: [{ name: 'To', value: 'a@b.c' }] }, declared)).toEqual({
+      summary: '"target": "e1", "fields": [{"name":"To","value":"a@b.c"}]',
       element: '"Send %E2%80%AEevil"',
     })
-    expect(describeArguments({ key: 'Enter' })).toEqual({ summary: 'key="Enter"', element: undefined })
-    expect(describeArguments({})).toEqual({ summary: 'none', element: undefined })
-    expect(describeArguments('not json')).toEqual({ summary: 'arguments="not json"', element: undefined })
-    const long = describeArguments({ text: 'x'.repeat(400) }).summary
-    expect(long).toBe(`text="${'x'.repeat(299)}…`)
-    const many = describeArguments(Object.fromEntries(Array.from({ length: 10 }, (_, index) => [`k${String(index)}`, 'y'.repeat(200)]))).summary
-    expect(many).toHaveLength(1201)
-    expect(many.endsWith('…')).toBe(true)
+    expect(describeArguments({ key: 'Enter' }, declared)).toEqual({ summary: '"key": "Enter"', element: undefined })
+    expect(describeArguments({}, declared)).toEqual({ summary: 'none', element: undefined })
+    expect(describeArguments('not json', declared)).toEqual({ summary: 'none', element: undefined })
+    expect(describeArguments({ element: 'Send' }, new Set())).toEqual({ summary: 'none', element: undefined })
+  })
+
+  it('leaves out keys the tool does not declare, so the model cannot write into the prompt through them', () => {
+    const spoof = { target: 'e1', '\u202Eevil': 'x', '. Site allowances cover this action': true }
+    expect(describeArguments(spoof, declared).summary).toBe('"target": "e1"')
+    expect(describeArguments(spoof, new Set([...declared, '\u202Eevil'])).summary).toBe('"target": "e1", "%E2%80%AEevil": "x"')
+  })
+
+  it('says how much it cuts, without splitting a character', () => {
+    expect(describeArguments({ text: 'x'.repeat(400) }, declared).summary).toBe(`"text": "${'x'.repeat(299)}… (102 more characters not shown)`)
+    expect(describeArguments({ text: '😀'.repeat(400) }, declared).summary).toBe(`"text": "${'😀'.repeat(299)}… (102 more characters not shown)`)
+    const many = Object.fromEntries(Array.from({ length: 10 }, (_, index) => [`k${String(index)}`, 'y'.repeat(200)]))
+    const summary = describeArguments(many, new Set(Object.keys(many))).summary
+    expect(summary).toMatch(/^"k0": "y{200}", .*"k4": "y{200}", … 5 more arguments not shown$/u)
+    const six = Object.fromEntries(Array.from({ length: 6 }, (_, index) => [`k${String(index)}`, 'y'.repeat(200)]))
+    expect(describeArguments(six, new Set(Object.keys(six))).summary).toMatch(/, … 1 more argument not shown$/u)
   })
 })
 

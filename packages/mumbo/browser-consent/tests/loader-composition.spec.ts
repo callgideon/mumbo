@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
-import { BrowserUseProviderName } from '@deepseek-ai/dsh-browser-use/brand'
+import * as PlaywrightBrowser from '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp'
 import { ToolCallId, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import type { PreToolDecision, ToolExecution, ToolExecutionToken } from '@deepseek-ai/dsh-tools'
@@ -12,6 +12,8 @@ import { bootComposition, consentRecords, tool, toolResults } from './harness.ts
 import type { ScriptStep } from './harness.ts'
 
 const FIXTURE = fileURLToPath(new URL('./playwright-fixture.mjs', import.meta.url))
+/** Cordis `FiberState.ACTIVE`. */
+const ACTIVE = 2
 /** Cordis `FiberState.FAILED`. */
 const FAILED = 3
 
@@ -100,12 +102,12 @@ describe('browser write consent in the person-box composition', () => {
       'browser_click http://broken.test/',
     ])
     expect(asked).toEqual([
-      'Browser write: browser_type on http://other.test. Arguments: target="e2", text="hi\\nthere". Model-written target description: "Message".',
-      'Browser write: browser_click on http://other.test. Arguments: target="e3". Model-written target description: "Send".',
-      'Browser write: browser_click on http://evil.test. Arguments: target="e5".',
-      'Browser write: browser_file_upload on http://allowed.test. Arguments: paths=["/root/tax.pdf"]. Site allowances do not cover this action.',
-      'Browser write: browser_evaluate on http://allowed.test. Arguments: function="() => document.forms[0].submit()". Site allowances do not cover this action.',
-      'Browser write: browser_click on an unidentified page. Arguments: target="e4". Model-written target description: "Continue".',
+      'Browser write: browser_type on http://other.test. Arguments: "target": "e2", "text": "hi\\nthere". Model-written target description: "Message".',
+      'Browser write: browser_click on http://other.test. Arguments: "target": "e3". Model-written target description: "Send".',
+      'Browser write: browser_click on http://evil.test. Arguments: "target": "e5".',
+      'Browser write: browser_file_upload on http://allowed.test. Arguments: "paths": ["/root/tax.pdf"]. Site allowances do not cover this action.',
+      'Browser write: browser_evaluate on http://allowed.test. Arguments: "function": "() => document.forms[0].submit()". Site allowances do not cover this action.',
+      'Browser write: browser_click on an unidentified page. Arguments: "target": "e4". Model-written target description: "Continue".',
     ])
     const results = toolResults(events)
     expect(results[4]).toEqual([{ type: 'text', text: 'Error: The user declined browser_type on http://other.test.' }])
@@ -168,22 +170,39 @@ describe('browser write consent in the person-box composition', () => {
       ...owner === undefined ? {} : { agent: owner }, name, arguments: { target: 'e1' }, callId: ToolCallId('direct'), signal: new AbortController().signal,
     })
     expect((await run(tool('browser_click'), agent)).content).toEqual([{ type: 'text', text: 'Error: browser_click on an unidentified page needs the user\'s approval, and no approval channel is available.' }])
+    expect((await run(tool('browser_unknown'), agent)).content).toEqual([{ type: 'text', text: 'Error: browser_unknown on an unidentified page needs the user\'s approval, and no approval channel is available.' }])
     expect((await run(tool('browser_click'))).content).toEqual([{ type: 'text', text: 'Error: browser_click needs the user\'s consent, which was not given.' }])
     expect(await calls()).toEqual([])
     // Other tools are not this plugin's to gate.
     expect((await run('other_tool', agent)).error?.info?.code).toBe('UNKNOWN_TOOL')
   })
 
-  it('mounts no browser when its config is invalid or another provider holds the browser', { timeout: 60_000 }, async () => {
-    const invalid = await load({ consent: { allowedSites: ['https://mail.google.com/'] } })
-    expect(invalid.consentFiber?.state).toBe(FAILED)
-    expect(invalid.ctx.browserUse.providerName).toBeUndefined()
-    expect(browserTools(invalid)).toEqual([])
+  it('mounts no browser when its config is invalid', { timeout: 60_000 }, async () => {
+    for (const consent of [{ allowedSites: ['https://mail.google.com/'] }, { browser: { mode: 'attach', endpoint: 'http://localhost:bad/path' } }]) {
+      const invalid = await load({ consent })
+      expect(invalid.consentFiber?.state).toBe(FAILED)
+      expect(invalid.ctx.browserUse.providerName).toBeUndefined()
+      expect(browserTools(invalid)).toEqual([])
+    }
+  })
 
-    const rival = { inject: ['browserUse'], apply(ctx: Context) { ctx.effect(() => ctx.browserUse.register(BrowserUseProviderName('rival'))) } }
-    const contested = await load({ before: [['rival', rival]] })
-    expect(contested.consentFiber?.state).toBe(FAILED)
-    expect(contested.ctx.browserUse.providerName).toBe('rival')
-    expect(browserTools(contested)).toEqual([])
+  it('refuses every tool of a provider row that loaded ahead of consent', { timeout: 60_000 }, async () => {
+    const rival = { inject: PlaywrightBrowser.inject, async apply(ctx: Context) {
+      await ctx.plugin(PlaywrightBrowser, { mode: 'attach', endpoint: 'http://127.0.0.1:9' })
+      ctx.provide('rivalReady', {})
+    } }
+    const { consentFiber, ctx, agent, events, calls, asked } = await turn({
+      before: [['rival', rival]], consentInject: ['rivalReady'],
+      script: [{ name: 'browser_snapshot', args: {} }, { name: 'browser_click', args: { target: 'e1' } }], answers: ['allowed-once'],
+    })
+    expect(consentFiber?.state).toBe(ACTIVE)
+    expect(ctx.browserUse.providerName).toBe('playwright-mcp')
+    expect(toolResults(events)).toEqual(['browser_snapshot', 'browser_click'].map(name => [{
+      type: 'text', text: `Error: ${tool(name)} did not run: browser tools are disabled because this browser was set up without consent checks.`,
+    }]))
+    expect(asked).toEqual([])
+    expect(await calls()).toEqual([])
+    const other = await executeModelToolFixture(ctx, { agent, name: 'other_tool', arguments: {}, callId: ToolCallId('other'), signal: new AbortController().signal })
+    expect(other.error?.info?.code).toBe('UNKNOWN_TOOL')
   })
 })

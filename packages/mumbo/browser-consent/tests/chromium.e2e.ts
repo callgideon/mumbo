@@ -45,8 +45,8 @@ it.skipIf(process.env.DSH_BROWSER_EXECUTABLE === undefined)('asks before a click
 
     expect(sent).toEqual([`127.0.0.1:${String(port)}`])
     expect(booted.asked).toEqual([
-      `Browser write: browser_click on ${other}. Arguments: target="#send". Model-written target description: "Send".`,
-      `Browser write: browser_evaluate on ${other}. Arguments: function="() => document.forms[0].requestSubmit()". Site allowances do not cover this action.`,
+      `Browser write: browser_click on ${other}. Arguments: "target": "#send". Model-written target description: "Send".`,
+      `Browser write: browser_evaluate on ${other}. Arguments: "function": "() => document.forms[0].requestSubmit()". Site allowances do not cover this action.`,
     ])
     expect(consentRecords(booted.events)).toEqual([{ callId: 'call-1', tool: 'browser_click', site: allowed, grant: 'site', outcome: 'succeeded' }])
   } finally {

@@ -15,14 +15,14 @@
   en: c5e68abca298fcdf
   zh: 11c1323a0b711dc3
 /mumbo-browser-consent/configuration:
-  en: c3384b540d5510f6
-  zh: 0d0a137c3c1dee02
+  en: 07e8b4c8162be83b
+  zh: 1e66ede49c6d2b97
 /mumbo-browser-consent/decisions:
-  en: ddf597251c43da90
-  zh: 698a0ce4c9058c7a
+  en: 6ca4efa4d5c1ed8e
+  zh: 1a10a557eceef465
 /mumbo-browser-consent/provider-ownership:
-  en: 1e7eb2d18e936f9a
-  zh: f6c08b2a8d7f1a27
+  en: 7a42bd3457de0a3b
+  zh: e741d7aef4d28230
 /mumbo-browser-consent/audit-record:
   en: 47351309b429792c
   zh: 708906d11222734d
@@ -36,8 +36,8 @@
   en: 6c3b0904f6b53d35
   zh: e781608e00dc3451
 /mumbo-browser-consent/model-experience/denied-browser-write/what-the-model-sees:
-  en: c12c06b3a728ce53
-  zh: 7651dabe4a1cea25
+  en: 46a1e3a0bc15bf45
+  zh: aa97dd91615ce90d
 /mumbo-browser-consent/model-experience/denied-browser-write/token-effect:
   en: 061629b57f8966fb
   zh: be2c8d57b5f4f7a3

@@ -7,6 +7,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-browser-use'
 import * as PlaywrightBrowser from '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp'
+import { validateBrowserMcpConfig } from '@deepseek-ai/dsh-experimental-browser-use-runtime/mcp'
 import type { McpResult } from '@deepseek-ai/dsh-mcp-client'
 import type { Session } from '@deepseek-ai/dsh-session'
 import type { ToolExecution, PreToolDecision } from '@deepseek-ai/dsh-tools'
@@ -28,9 +29,9 @@ const PREFIX = 'mcp__playwright-mcp__'
 const GATE = 'mumbo-browser-consent'
 /** Upstream tool whose `list` action reports Playwright's current tab. */
 const TABS = 'browser_tabs'
-/** Longest text shown for one argument value in an approval prompt, before `…`. */
+/** Characters shown of one argument key or value in an approval prompt; the rest is counted as not shown. */
 const VALUE_LIMIT = 300
-/** Longest argument summary shown in an approval prompt, before `…`. */
+/** Characters of arguments listed in an approval prompt; further arguments are counted as not shown. */
 const SUMMARY_LIMIT = 1200
 
 /** Upstream tools that only read the page or browser state, plus history navigation. */
@@ -110,26 +111,35 @@ export function currentTabOrigin(text: string): string | undefined {
 }
 
 /**
- * Summarize a call's arguments for the person deciding it. Each value is JSON with invisible format characters
- * percent-encoded, cut at {@link VALUE_LIMIT} characters, and the whole summary at {@link SUMMARY_LIMIT}; `element` is returned apart
- * because the model writes it.
+ * Summarize a call's arguments for the person deciding it. Only keys the tool's input schema declares are listed, since
+ * the model may add others that the tool ignores. Each key and value is JSON with invisible format characters
+ * percent-encoded and is cut at {@link VALUE_LIMIT} characters; entries that would pass {@link SUMMARY_LIMIT} are counted
+ * instead of shown. `element` is returned apart because the model writes it.
  * @param args - the call's parsed arguments.
- * @returns the `key=value` summary, `none` without arguments, and the model's element description when present.
+ * @param declared - the argument names the tool's input schema declares.
+ * @returns the `"key": value` summary, `none` without declared arguments, and the model's element description.
  */
-export function describeArguments(args: unknown): { summary: string; element: string | undefined } {
-  const { element, ...rest } = typeof args === 'object' && args !== null ? args as Record<string, unknown> : { arguments: args }
-  const summary = Object.entries(rest).map(([key, value]) => `${key}=${shown(value)}`).join(', ')
-  return { summary: clip(summary === '' ? 'none' : summary, SUMMARY_LIMIT), element: element === undefined ? undefined : shown(element) }
+export function describeArguments(args: unknown, declared: ReadonlySet<string>): { summary: string; element: string | undefined } {
+  const fields = fieldsOf(args)
+  const entries = Object.entries(fields).filter(([key]) => key !== 'element' && declared.has(key)).map(([key, value]) => `${shown(key)}: ${shown(value)}`)
+  const listed: string[] = []
+  let length = 0
+  for (const entry of entries) {
+    if (length + entry.length > SUMMARY_LIMIT) break
+    listed.push(entry)
+    length += entry.length + 2
+  }
+  const hidden = entries.length - listed.length
+  if (hidden > 0) listed.push(`… ${String(hidden)} more ${hidden === 1 ? 'argument' : 'arguments'} not shown`)
+  const element = declared.has('element') && fields.element !== undefined ? shown(fields.element) : undefined
+  return { summary: listed.length === 0 ? 'none' : listed.join(', '), element }
 }
 
-/** One JSON argument value as bounded JSON, with invisible format and separator characters percent-encoded. */
+/** One JSON value cut at {@link VALUE_LIMIT} characters, with invisible format and separator characters percent-encoded. */
 function shown(value: unknown): string {
-  return clip(JSON.stringify(value).replace(/[\p{Cf}\p{Zl}\p{Zp}]/gu, char => encodeURIComponent(char)), VALUE_LIMIT)
-}
-
-/** Cut text to `limit` characters, marking the cut with `…`. */
-function clip(text: string, limit: number): string {
-  return text.length > limit ? `${text.slice(0, limit)}…` : text
+  const characters = Array.from(JSON.stringify(value).replace(/[\p{Cf}\p{Zl}\p{Zp}]/gu, char => encodeURIComponent(char)))
+  if (characters.length <= VALUE_LIMIT) return characters.join('')
+  return `${characters.slice(0, VALUE_LIMIT).join('')}… (${String(characters.length - VALUE_LIMIT)} more characters not shown)`
 }
 
 /** The origin of an `http:` or `https:` URL string. */
@@ -167,6 +177,25 @@ async function currentSite(ctx: Context, exec: ToolExecution): Promise<string | 
 }
 
 /**
+ * Refuse every call to the tools of a browser provider that holds `browserUse` without this plugin, and the Playwright
+ * MCP namespace, so a provider row loaded ahead of consent cannot drive the person's browser ungated.
+ * @param ctx - plugin context carrying the tool registry.
+ * @param holder - the registered provider's name, which is also its MCP tool namespace.
+ */
+function refuseRival(ctx: Context, holder: string): void {
+  ctx.logger.error(`browser provider "${holder}" already holds browserUse, so its browser tools are refused; remove the row that mounts it and mount the browser only through ${name}`)
+  const prefixes = [PREFIX, `mcp__${holder}__`]
+  const refusal = (exec: ToolExecution): string | undefined => prefixes.some(prefix => exec.name.startsWith(prefix))
+    ? `${exec.name} did not run: browser tools are disabled because this browser was set up without consent checks.`
+    : undefined
+  ctx.tools.guard(refusal)
+  ctx.on('tools/pre-execute', (exec, next): Promise<PreToolDecision> => {
+    const reason = refusal(exec)
+    return reason === undefined ? next() : Promise.resolve({ kind: 'deny', reason })
+  }, { prepend: true })
+}
+
+/**
  * Gate Playwright MCP browser writes, then mount the provider. Reads pass; a site write on an allowed origin proceeds
  * without asking; every other write asks the approval service once and is denied when unanswered for
  * `approvalTimeoutMs`. A guard denies any write that reaches dispatch without a consent this plugin recorded, so no
@@ -174,10 +203,10 @@ async function currentSite(ctx: Context, exec: ToolExecution): Promise<string | 
  * this plugin that requires its service: it starts once the gate is active, finishes unloading before the gate goes, and
  * invalid configuration mounts no browser at all.
  * Each allowed write appends `browser-consent/write` to its Session when its result is final.
+ * When another provider already holds `browserUse`, the plugin mounts nothing and refuses that provider's tools instead.
  * @param ctx - plugin context carrying the provider's services.
  * @param config - validated configuration.
- * @throws when an allowed site is not an exact `http:` or `https:` origin, or when another browser provider already holds
- *   `browserUse`.
+ * @throws when an allowed site is not an exact `http:` or `https:` origin, or the browser endpoint is not a valid URL.
  */
 export function apply(ctx: Context, config: Config): void {
   for (const site of config.allowedSites) {
@@ -186,8 +215,12 @@ export function apply(ctx: Context, config: Config): void {
       throw new Error(`${name}: allowedSites entry "${site}" is not an origin${origin === undefined ? '; use one such as https://mail.google.com' : `; use "${origin}"`}`)
     }
   }
+  validateBrowserMcpConfig(config.browser)
   const holder = ctx.browserUse.providerName
-  if (holder !== undefined) throw new Error(`${name}: browser provider "${holder}" already holds browserUse; mount the browser only through this plugin`)
+  if (holder !== undefined) {
+    refuseRival(ctx, holder)
+    return
+  }
   const allowed = new Set(config.allowedSites)
   const consents = new WeakMap<ToolExecution, Consent>()
   const toolOf = (exec: ToolExecution): string | undefined => exec.name.startsWith(PREFIX) ? exec.name.slice(PREFIX.length) : undefined
@@ -211,7 +244,8 @@ export function apply(ctx: Context, config: Config): void {
     }
     if (kind === 'site-write' && site !== undefined && allowed.has(site)) return grant('site')
     const where = site ?? 'an unidentified page'
-    const { summary, element } = describeArguments(exec.arguments)
+    const properties = ctx.tools.get(exec.name, agent)?.parameters.properties
+    const { summary, element } = describeArguments(exec.arguments, new Set(typeof properties === 'object' && properties !== null ? Object.keys(properties) : []))
     const always = kind === 'always-ask'
     const reason = `Browser write: ${tool} on ${where}. Arguments: ${summary}.`
       + (element === undefined ? '' : ` Model-written target description: ${element}.`)

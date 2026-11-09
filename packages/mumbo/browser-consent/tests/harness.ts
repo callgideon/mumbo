@@ -64,7 +64,7 @@ class ScriptedModel extends LlmAdapter {
  * Boot the composition in `root`: approval and the consent row, which mounts the real Playwright MCP provider.
  * @param root - scratch directory holding the config and serving as the Session's working directory.
  * @param options - consent config, approval policy, model script, the person's answers in order (`hang` never answers),
- *   and rows placed before consent.
+ *   rows placed before consent, and extra services the consent row waits for.
  * @returns the booted context and Session, the approval reasons asked, every Session event, and the consent Fiber.
  */
 export async function bootComposition(root: string, options: {
@@ -74,6 +74,7 @@ export async function bootComposition(root: string, options: {
   answers?: Array<ApprovalOutcome | 'hang'>
   withoutApproval?: boolean
   before?: ReadonlyArray<readonly [string, Plugin]>
+  consentInject?: string[]
 }) {
   const asked: string[] = []
   const answers = [...options.answers ?? []]
@@ -100,7 +101,9 @@ export async function bootComposition(root: string, options: {
     consent: options.consent,
   }
   const configPath = join(root, 'cordis.yml')
-  await writeFile(configPath, JSON.stringify([...modules.keys()].map(name => ({ id: name, name, config: configs[name] ?? {} }))))
+  await writeFile(configPath, JSON.stringify([...modules.keys()].map(name => ({
+    id: name, name, config: configs[name] ?? {}, ...name === 'consent' && options.consentInject !== undefined ? { inject: options.consentInject } : {},
+  }))))
   const ctx = new Context()
   ctx.baseUrl = pathToFileURL(root).href + '/'
   await ctx.plugin(Loader)
