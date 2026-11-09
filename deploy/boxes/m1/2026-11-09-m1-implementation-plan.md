@@ -116,6 +116,35 @@ Today a project member can make the coordinator read the box token, `MUMBO_MEMBE
   - `project_add_member` over MCP also gives 403.
 - **Removal:** the containment PR deletes the gate and its test.
 
+## Amendment 4: wave-1 deep-review rulings (mumbo-design, 2026-11-09)
+
+1. **Only approvers merge and bind repositories (B2, B3, B9).**
+   - New config `APPROVER_EMAILS`: comma-separated, lowercased. B9 sets it to the founder's email. Empty means nobody (fails closed).
+   - `grant` and `grantLowRisk` require the email to be in `APPROVER_EMAILS` **and** to own the item's project. Test: an owner who is not an approver gets `not_owner`, and nothing merges.
+   - Binding a repository is founder-only: B3's `/repo` and `addRepo` require the email to be in `APPROVER_EMAILS`.
+   - `addRepo` returns 409 `repo_bound` for a repository already bound to another project (case-insensitive). Re-adding it to the same project is a no-op. The poller never rebinds an existing item.
+   - B2 owns the `addRepo` change in `projects.mjs`.
+2. **B3:** `referrer-policy: same-origin`. The exact-Origin check stays.
+3. **B1 request limits:**
+   - JSON bodies are capped at 1 MiB, GraphQL `parse()` is bounded by `maxTokens`, upload-pack is streamed, and each principal has at most one receive-pack at a time.
+   - `variables` sent as a string fail closed.
+   - GraphQL `updatePullRequest` with `state: OPEN` is refused.
+4. **GraphQL mutations stay in the project's repos (B1).**
+   - Every node id that reaches a mutation, whether inline or anywhere inside `variables`, must resolve to an object in one of the project's repos.
+   - Resolve them with one `nodes(ids:[…])` query using the agent token. `PullRequest`, `Issue`, `IssueComment`, `PullRequestReviewComment` and `Repository` map to `nameWithOwner`.
+   - An unknown type, an unresolvable id, or a repo outside `getRepos(id)` gets 403. A mutation with no node id is refused.
+   - Reads stay unscoped. C1 makes the agent account a collaborator only on repos bound to projects.
+   - Tests: `addComment` on another repo's issue gets 403; `createPullRequest` with another repo's `repositoryId` gets 403; an id passed through `variables` is resolved and checked.
+5. **The agent's review is a claim (B2, B3).** It stays in the low-risk rule as a sign that the workflow ran. The page labels it "Agent's review (claim)", never "verified".
+6. **CI must not trust agent code (A9, B2, C1; critical).**
+   - A9: `mumbo-ci.yml` sets top-level `permissions: contents: read` and `persist-credentials: false` on every checkout.
+   - B2: a required check counts only when `check_run.app.slug === 'github-actions'`. Test: a check with the same name from another app is ignored.
+   - C1 (needs the founder's yes):
+     - set Actions → General → Workflow permissions to "Read repository contents";
+     - list every workflow's triggers and secrets, and confirm that no workflow running agent-controlled code receives secrets;
+     - confirm that `issue-*` workflows run only default-branch code.
+7. **No comment-triggered merges (C1).** List the org's installed Apps and their repo access, and confirm that no App or bot that merges on comments acts on project repos.
+
 ## How to run this plan in parallel
 
 **Branches.**
