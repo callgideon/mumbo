@@ -13,8 +13,8 @@ const at = (text, needle) => { const i = text.indexOf(needle); assert.ok(i >= 0,
 
 test('a user box start script is byte-for-byte what it was before project boxes grew a proxy', () => {
   const s = startScript(c, 'T', boxSite(c, 'a@x.com'), "role's", undefined, boxFiles, ['o@x.com'])
-  // sha256 of the output recorded before B7, updated for the box-links and computer-use overlays and the X cookie (same cfg, token T, role "role's").
-  assert.equal(createHash('sha256').update(s).digest('hex'), '511eb7790988e02c7fe46bc1a8d0f837eb0bfd6aec0fdabb920e10e85f77849b')
+  // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows and the X cookie (same cfg, token T, role "role's").
+  assert.equal(createHash('sha256').update(s).digest('hex'), '12de055b700fbc0c77b602978eff0bfe9f19f4a7449e28d5b70df9ad1f6080c7')
 })
 
 test('box links: the overlay loads only when the image ships @mumbo/box-links; project boxes get no desktop link', () => {
@@ -25,6 +25,14 @@ test('box links: the overlay loads only when the image ships @mumbo/box-links; p
   const p = startScript({ ...c, projectDomain: 'boxes.x' }, 'T', boxSite({ ...c, projectDomain: 'boxes.x' }, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
   assert.match(p, /home: https:\/\/boxes\.x\/home\n/)
   assert.ok(!p.includes('desktop: https://'))
+})
+
+test('browser consent replaces the plain Playwright provider row only when the image ships @mumbo/browser-consent', () => {
+  const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles)
+  assert.ok(at(u, 'if [ -d /src/packages/mumbo/browser-consent ]; then') < at(u, "name: '@mumbo/browser-consent'"))
+  assert.ok(at(u, "name: '@mumbo/browser-consent'") < at(u, 'else') && at(u, 'else') < at(u, "dsh-experimental-browser-use-playwright-mcp"))
+  const p = startScript({ ...c, projectDomain: 'boxes.x' }, 'T', boxSite({ ...c, projectDomain: 'boxes.x' }, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
+  assert.ok(!p.includes('browser-consent') && !p.includes('playwright-mcp'))
 })
 
 test('computer use: person boxes load it only with the package and xdotool, and :1 needs the X cookie; project boxes never', () => {

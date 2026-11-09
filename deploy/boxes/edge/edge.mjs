@@ -159,13 +159,28 @@ cat > /root/.mumbo/sandboxes.overlay.yml <<'YML'
           Authorization: !!js '\`Bearer \${process.env.DEEPSEEK_API_KEY}\`'
 ${site.desktop ? `    - id: browser-use
       name: '@deepseek-ai/dsh-browser-use'
+` : ''}YML
+${site.desktop ? `# The user's Chromium for dsh's browser tools. With @mumbo/browser-consent in the image, writes on a site ask the
+# person first; consent mounts the Playwright MCP provider itself, so the plain provider row is used only without it.
+if [ -d /src/packages/mumbo/browser-consent ]; then
+cat >> /root/.mumbo/sandboxes.overlay.yml <<'YML'
+    - id: browser-consent
+      name: '@mumbo/browser-consent'
+      config:
+        browser:
+          mode: attach
+          endpoint: http://127.0.0.1:9222
+YML
+else
+cat >> /root/.mumbo/sandboxes.overlay.yml <<'YML'
     - id: browser-use-box-chromium
       name: '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp'
       config:
         mode: attach
         endpoint: http://127.0.0.1:9222
-` : ''}YML
-# Sidebar links to the edge's home page and desktop (@mumbo/box-links), when the image ships that package.
+YML
+fi
+` : ''}# Sidebar links to the edge's home page and desktop (@mumbo/box-links), when the image ships that package.
 LINKS_PATCH=
 if [ -d /src/packages/mumbo/box-links ]; then
 cat > /root/.mumbo/links.overlay.yml <<'YML'
