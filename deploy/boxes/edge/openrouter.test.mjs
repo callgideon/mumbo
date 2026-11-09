@@ -178,7 +178,7 @@ test('box start script: an OpenRouter route on the model host for every allowlis
   assert.match(overlay, /^- id: llm-pi-ai\n {2}config:\n {4}providers: /)
   const providers = JSON.parse(overlay.split('providers: ')[1])
   assert.deepEqual(providers, { openrouter: {
-    apiKeyEnv: 'DEEPSEEK_API_KEY', baseURL: 'https://llm.example/openrouter/v1', maxRequestImageBytes: 12 * 1024 * 1024,
+    displayName: 'OpenRouter', apiKeyEnv: 'DEEPSEEK_API_KEY', baseURL: 'https://llm.example/openrouter/v1', maxRequestImageBytes: 12 * 1024 * 1024,
     models: [{ id: 'qwen/qwen3.8-27b', contextWindow: 1_024_000, input: ['text', 'image'] }, { id: 'qwen/qwen3.5-9b', contextWindow: 262_144, input: ['text', 'image'] }],
   } })
   assert.match(start, /--patch \/root\/\.mumbo\/models\.overlay\.yml/)

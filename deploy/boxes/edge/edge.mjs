@@ -155,7 +155,7 @@ export function startScript(cfg, token, site = boxSite(cfg, ''), role = '', memb
   const llm = `https://${cfg.llmHost}`
   // dsh's OpenRouter route (@deepseek-ai/dsh-llm-pi-ai, the base composition's row llm-pi-ai) through the model host,
   // keyed by the box token. Images leave 8 MiB of OPENROUTER_MAX_BODY for a full context's text.
-  const openrouter = cfg.openrouterModels?.length ? { apiKeyEnv: 'DEEPSEEK_API_KEY', baseURL: `${llm}/openrouter/v1`, maxRequestImageBytes: 12 * 1024 * 1024,
+  const openrouter = cfg.openrouterModels?.length ? { displayName: 'OpenRouter', apiKeyEnv: 'DEEPSEEK_API_KEY', baseURL: `${llm}/openrouter/v1`, maxRequestImageBytes: 12 * 1024 * 1024,
     models: cfg.openrouterModels.map(id => ({ id, ...OPENROUTER_BOX_MODELS[id] })) } : undefined
   const b64 = (text) => Buffer.from(text).toString('base64')
   const sq = (text) => `'${text.replaceAll("'", `'\\''`)}'`
