@@ -9,12 +9,19 @@ import { SetupError } from '../src/setup.ts'
 
 type Handler = (req: unknown, res: unknown) => Promise<void>
 type Headers = Record<string, string | undefined>
-/** Mount management HTTP routes on a fake web server and return a request helper that includes default panel headers. */
+type Admission = { peer: { principal: { kind: string; email?: string } } } | { rejection: 401 | 403 }
+const OWNER: Admission = { peer: { principal: { kind: 'owner' } } }
+const member = (email: string): Admission => ({ peer: { principal: { kind: 'edge-member', email } } })
+/**
+ * Mount management HTTP routes on a fake web server and return a request helper that includes default panel headers.
+ * `call.connection.admit` answers DSH admission (the owner by default) and can be swapped between calls.
+ */
 function serve(runtime: Partial<Record<keyof HttpHost, unknown>>, host = '127.0.0.1') {
   let handler: Handler = async () => {}
-  const ctx = { webServer: { host, port: 3082, register: (route: { handler: Handler }) => { handler = route.handler; return () => {} } } }
-  registerHttp(ctx as never, { ready: Promise.resolve(), ...runtime } as unknown as HttpHost)
-  return async (method: string, path: string, body?: unknown, headers: Headers = {}) => {
+  const connection = { admit: (_req: { headers: Headers }): Admission => OWNER }
+  const ctx = { connection, webServer: { host, port: 3082, register: (route: { handler: Handler }) => { handler = route.handler; return () => {} } } }
+  registerHttp(ctx as never, { ready: Promise.resolve(), machine: { panelAdmins: [] }, ...runtime } as unknown as HttpHost)
+  const call = async (method: string, path: string, body?: unknown, headers: Headers = {}) => {
     let status = 0, text = ''
     const chunks = body === undefined ? [] : [Buffer.from(typeof body === 'string' ? body : JSON.stringify(body))]
     const sent = Object.fromEntries(Object.entries({ host: '127.0.0.1:3082', 'x-orchestrator-request': '1', ...headers }).filter(([,
@@ -23,6 +30,7 @@ function serve(runtime: Partial<Record<keyof HttpHost, unknown>>, host = '127.0.
     await handler(req, { writeHead: (code: number) => { status = code }, end: (data: string) => { text = data } })
     return { status, body: JSON.parse(text) as Record<string, unknown> }
   }
+  return Object.assign(call, { connection })
 }
 
 it('answers each kind of failure with its own status', async () => {
@@ -67,17 +75,44 @@ it('decodes path parameters and parses each route\'s query', async () => {
   expect(seen).toEqual(['feishu:oc_1:om/root', { filter: { kinds: ['accept', 'reopen'], since: expect.any(String) }, offset: 0, limit: 200 }])
 })
 
-it('answers only a same-origin request from the panel on the loopback address', async () => {
-  const call = serve({ sessions: { delivery: async () => 'injected' }, engine: { unsubscribe: () => true } })
-  const post = (headers: Headers) => call('POST', 'threads/github%3A1/unsubscribe', undefined, headers)
-  for (const headers of [{ 'x-orchestrator-request': undefined }, { host: 'evil.example:3082' }, { host: '127.0.0.1:9999' },
-    { origin: 'http://evil.example' }, { host: 'localhost:3082', origin: 'http://127.0.0.1:3082' }]) {
-    expect(await post(headers), JSON.stringify(headers)).toEqual({ status: 403,
-      body: { error: 'Same-origin management request required' } })
+it('runs a management request only for an admitted owner or listed panel admin that sends the panel header', async () => {
+  const unsubscribed: string[] = []
+  // Any bind address serves the panel; DSH admission applies the Host and Origin checks.
+  const call = serve({ machine: { panelAdmins: ['alice@example.com'] }, sessions: { delivery: async () => 'injected' },
+    engine: { unsubscribe: (key: string) => { unsubscribed.push(key); return true } } }, '10.0.0.5')
+  const box = { host: 'p-0123456789abcdef.boxes.mumbo.si', origin: 'https://p-0123456789abcdef.boxes.mumbo.si' }
+  const admitted: Headers[] = []
+  const post = (admission: Admission, headers: Headers = {}) => {
+    call.connection.admit = req => { admitted.push(req.headers); return admission }
+    return call('POST', 'threads/github%3A1/unsubscribe', undefined, { ...box, ...headers })
   }
-  expect(await post({ host: 'localhost:3082', origin: 'http://localhost:3082' })).toMatchObject({ status: 200 })
-  // Management routes require a loopback Web server.
-  expect(() => serve({}, '0.0.0.0')).toThrow('Orchestrator management requires a loopback Web server')
+  const refused = (status: number, error: string) => ({ status, body: { error } })
+  const unadmitted = 'DSH authentication refused this management request'
+  const notAdmin = 'Management requires the owner or a panel admin'
+  expect(await post({ rejection: 401 })).toEqual(refused(401, unadmitted))
+  expect(await post({ rejection: 403 })).toEqual(refused(403, unadmitted))
+  expect(await post({ peer: { principal: { kind: 'share-viewer' } } })).toEqual(refused(403, notAdmin))
+  expect(await post(member('bob@example.com'))).toEqual(refused(403, notAdmin))
+  // Emails match exactly: no domain, suffix or case folding.
+  for (const email of ['alice@example.com.evil', 'x.alice@example.com', 'Alice@example.com', '@example.com']) {
+    expect(await post(member(email)), email).toEqual(refused(403, notAdmin))
+  }
+  expect(await post({ peer: { principal: { kind: 'share-viewer', email: 'alice@example.com' } } })).toEqual(refused(403, notAdmin))
+  expect(await post(OWNER, { 'x-orchestrator-request': undefined })).toEqual(refused(403, 'Same-origin management request required'))
+  expect(await post(member('alice@example.com'), { 'x-orchestrator-request': '0' }))
+    .toEqual(refused(403, 'Same-origin management request required'))
+  expect(unsubscribed).toEqual([])
+  expect(await post(OWNER)).toMatchObject({ status: 200 })
+  expect(await post(member('alice@example.com'))).toMatchObject({ status: 200 })
+  expect(unsubscribed).toEqual(['github:1', 'github:1'])
+  expect(admitted.at(-1)).toMatchObject({ ...box, 'x-orchestrator-request': '1' })
+})
+
+it('admits no edge member while panelAdmins is empty', async () => {
+  const call = serve({ sessions: { delivery: async () => 'injected' }, engine: { unsubscribe: () => true } })
+  call.connection.admit = () => member('alice@example.com')
+  expect(await call('POST', 'threads/github%3A1/unsubscribe')).toEqual({ status: 403,
+    body: { error: 'Management requires the owner or a panel admin' } })
 })
 
 it('answers a prompt save that lost a race with 409, and a settings body over 128 KiB with 400', async () => {

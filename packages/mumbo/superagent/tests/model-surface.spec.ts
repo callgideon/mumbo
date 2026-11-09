@@ -134,7 +134,7 @@ async function start() {
     workspaceRegistry: { create: async (cwd: string) => ({ id: cwd }) },
     sessionController: { create, resolveAgent, selectModel: async () => {}, rename: async () => {} },
     sessionPersistence: { flush: async () => {}, open: async () => history }, permissionPresets: { set: () => {} }, subprocess,
-    webServer: { host: '127.0.0.1', port: 3082, connection: { admit: () => ({ peer: { principal: { kind: 'owner' } } }) }, register: () => () => {} } }
+    webServer: { host: '127.0.0.1', port: 3082, register: () => () => {} }, connection: { admit: () => ({ peer: { principal: { kind: 'owner' } } }) } }
   for (const [name, service] of Object.entries(services)) ctx.reflect.provide(name, service)
   const seed = new Store(join(directory, 'orchestrator.sqlite'))
   const github = { enabled: true, config: { repository: 'acme/widgets', cli: AGENT } }

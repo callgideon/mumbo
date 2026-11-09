@@ -45,7 +45,13 @@ Files outside the copy changed for S1:
 
 ## S2: management API admission
 
-`src/app/http.ts` admits management requests through the web server connection handle. Written by task A3.
+Upstream serves `/orchestrator/api/` only from a loopback Web server, to any request whose Host is `127.0.0.1:<port>` or `localhost:<port>` and that carries `x-orchestrator-request: 1`. The copy serves it on any bind address, admitted through DSH authentication.
+
+- `src/app/http.ts`: `registerHttp` no longer requires a loopback Web server, and `sameOrigin` is deleted. Each request first goes through `ctx.connection.admit`, which also applies DSH's Host and Origin checks; a rejection answers its 401 or 403. The principal must then be the owner, or an `edge-member` whose email `panelAdmins` lists exactly; anyone else gets 403. Last, a request without `x-orchestrator-request: 1` gets 403. Panel access grants no merge or approval power.
+- `src/deployment.ts`: the `panelAdmins` key, lowercased emails, default `[]`, which admits no `edge-member`; `Machine.panelAdmins` carries it. An entry that is not one lowercased address (uppercase, whitespace, `*`, `,`, or not exactly one `@`) fails at load.
+- `src/index.ts`: injects `connection`.
+- Tests: `tests/http.spec.ts` replaces the loopback test with the admission cases. `tests/deployment.spec.ts` covers the `panelAdmins` default and validation, and `tests/fixtures/deployment.ts` sets `panelAdmins: []`. The owner-admitting `connection` fake of S1 is a service of its own in `tests/fixtures/host.ts`, `tests/runtime.spec.ts` and `tests/model-surface.spec.ts`, where `ctx.connection` reads it, instead of a field of the web server fake.
+- Not updated: `docs/006-deployment.md` (the Management API section, its `curl` example and the configuration key table), `docs/007-architecture.md` (the `http.ts` and `http.spec.ts` rows) and `SETUP.md` step 3 still describe upstream's unauthenticated loopback access. A `curl` without a DSH browser cookie now gets 401.
 
 ## S3: delivery policy
 

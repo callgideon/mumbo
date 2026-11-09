@@ -1,5 +1,6 @@
-/** Loopback-only management HTTP routes with same-origin enforcement for the web panel. */
+/** Management HTTP routes for the web panel, admitted through DSH authentication for the owner and listed panel admins. */
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { z } from 'zod'
@@ -72,10 +73,16 @@ async function readBody(req: IncomingMessage, maxBytes = 128 * 1024): Promise<un
 function json(res: ServerResponse, status: number, value: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); res.end(JSON.stringify(value))
 }
-export function sameOrigin(req: Pick<IncomingMessage, 'headers'>, port: number): boolean {
-  const host = req.headers.host
-  if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) return false
-  return req.headers['x-orchestrator-request'] === '1' && (req.headers.origin === undefined || req.headers.origin === `http://${host}`)
+/**
+ * Whether an admitted principal may manage the orchestrator: the owner, or an `edge-member` whose email `admins` lists exactly.
+ * `edge-member` is declared by `@mumbo/edge-member`, which this package does not import, so the principal is read by its fields.
+ * @param principal - the admitted Peer's principal.
+ * @param admins - lowercased `edge-member` emails from `panelAdmins`.
+ * @returns true for the owner or a listed `edge-member`.
+ */
+function panelAdmitted(principal: { readonly kind: string; readonly email?: unknown }, admins: readonly string[]): boolean {
+  if (principal.kind === 'owner') return true
+  return principal.kind === 'edge-member' && typeof principal.email === 'string' && admins.includes(principal.email)
 }
 /** Maps errors to HTTP status codes and structured payloads that the panel localizes in the interface language. */
 function failure(error: unknown): [number, Record<string, unknown>] {
@@ -227,14 +234,26 @@ function match(table: Routes, method: string, segments: string[]) {
   }
   return undefined
 }
+/**
+ * Mount `/orchestrator/api/` on the DSH web server. A request runs its route only when `ctx.connection.admit` admits it (which
+ * also applies DSH's Host and Origin checks), its principal is the owner or an `edge-member` listed in `panelAdmins`, and it
+ * carries `x-orchestrator-request: 1`; otherwise it gets the admission's 401 or 403, or 403.
+ * @param ctx - plugin context carrying the web server and Connection.
+ * @param runtime - the orchestrator state the routes read and change.
+ * @returns disposer unmounting the routes.
+ */
 export function registerHttp(ctx: Context, runtime: HttpHost): () => void {
-  if (ctx.webServer.host !== '127.0.0.1') throw new Error('Orchestrator management requires a loopback Web server')
   const table = routes(runtime)
   const disposers = [
     ctx.webServer.register({ kind: 'prefix', path: '/orchestrator', handler: async (req, res) => {
       const url = new URL(req.url ?? '/', 'http://localhost')
       if (!url.pathname.startsWith('/orchestrator/api/')) { res.writeHead(404); res.end(); return }
-      if (!sameOrigin(req, ctx.webServer.port ?? 0)) { json(res, 403, { error: 'Same-origin management request required' }); return }
+      const admission = ctx.connection.admit(req)
+      if ('rejection' in admission) { json(res, admission.rejection, { error: 'DSH authentication refused this management request' }); return }
+      if (!panelAdmitted(admission.peer.principal, runtime.machine.panelAdmins)) {
+        json(res, 403, { error: 'Management requires the owner or a panel admin' }); return
+      }
+      if (req.headers['x-orchestrator-request'] !== '1') { json(res, 403, { error: 'Same-origin management request required' }); return }
       try {
         await runtime.ready
         const route = match(table, req.method ?? 'GET', url.pathname.slice('/orchestrator/api/'.length).split('/'))
