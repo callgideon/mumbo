@@ -732,10 +732,18 @@ export function authUi({ html, supabaseJs, consentJs, supabaseUrl, anonKey, clie
   }
 }
 
+// oauth2-proxy's --skip-auth-route GETs (prod/edge.tf). With --reverse-proxy it also skips sign-in for any request whose
+// client-sent X-Forwarded-Uri names one of them; neither it nor the ALB sets that header. A skipped request carries no
+// identity, so an email header on one did not come through sign-in.
+const SKIP_AUTH = [/^\/oauth\/consent([?].*)?$/, /^\/auth-ui\/(supabase|config|consent)[.]js$/]
+/** True for a request oauth2-proxy may not have signed in: any X-Forwarded-Uri, or an email header on a skip-auth GET. */
+const skippedSignin = (req) => req.headers['x-forwarded-uri'] !== undefined
+  || (req.method === 'GET' && req.headers['x-forwarded-email'] !== undefined && SKIP_AUTH.some(r => r.test(req.url)))
+
 /** Signed-in users' traffic. The public host reaches the user's own box and p-<16 hex>.<project domain> a project's
  *  box, for its members only; `approve` (approve-page.mjs) serves cfg.approveHost, an origin no box serves; any other host
  *  answers 404. `signin` (authUi) answers its GETs on the approve host before any identity check; GET /oauth/consent on
- *  the public host, which a box serves, redirects there. */
+ *  the public host, which a box serves, redirects there. A request or upgrade skippedSignin flags gets 400 before all that. */
 export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log = console.log }) {
   const identify = async (req) => verifyAlb
     ? (await verifyAlb(req.headers['x-amzn-oidc-data']).catch(() => undefined)) ?? ''
@@ -752,6 +760,7 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log
     if (host === cfg.publicHost) return boxRoute(url, cfg.projectDomain)
   }
   const server = createServer(async (req, res) => {
+    if (skippedSignin(req)) return json(res, 400, { error: 'bad request' })
     // The edge's own pages; a box's response replaces these through noFraming.
     res.setHeader('x-frame-options', 'SAMEORIGIN')
     res.setHeader('content-security-policy', "frame-ancestors 'self'")
@@ -810,6 +819,7 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log
     req.pipe(up)
   })
   server.on('upgrade', async (req, socket, head) => {
+    if (skippedSignin(req)) return socket.end('HTTP/1.1 400 Bad Request\r\n\r\n')
     // As for HTTP, only the public host's and project hosts' WebSockets reach a box; the approve host and unknown hosts
     // are refused. So is an upgrade whose Origin is not this host (browsers always send one): the sign-in cookie covers
     // every subdomain, so a project page could otherwise open the visitor's desktop, whose noVNC checks no Origin.

@@ -19,8 +19,11 @@ const call = (port, { method = 'GET', path = '/', host = cfg.approveHost, header
   const req = request({ host: '127.0.0.1', port, method, path, headers: { host, ...headers } }, (res) => {
     let data = ''; res.on('data', c => { data += c }); res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: data }))
   })
-  req.on('error', reject); req.end()
+  req.on('upgrade', (res, socket) => { socket.destroy(); resolve({ status: res.statusCode }) })
+  req.on('error', (e) => (headers.upgrade ? resolve({ error: e.code ?? e.message }) : reject(e)))
+  req.end()
 })
+const upgrade = (host) => ({ connection: 'Upgrade', upgrade: 'websocket', origin: `https://${host}` })
 /** Runs fn against a user server whose box layer records every call; returns the calls. */
 async function serve(fn) {
   const boxCalls = []
@@ -33,8 +36,8 @@ async function serve(fn) {
 
 test('signed out, GET /oauth/consent on the approve host serves the sign-in page with a strict CSP and no box', async () => {
   const boxCalls = await serve(async (port) => {
-    for (const headers of [{}, { 'x-forwarded-email': 'a@x.com' }]) {
-      const r = await call(port, { path: '/oauth/consent?authorization_id=x', headers })
+    for (const path of ['/oauth/consent?authorization_id=x', '/oauth/consent']) {
+      const r = await call(port, { path })
       assert.equal(r.status, 200)
       assert.equal(r.body, html)
       assert.match(r.headers['content-type'], /^text\/html/)
@@ -92,7 +95,7 @@ test('other methods, paths and hosts fall through to the signed-in router', asyn
   assert.deepEqual(boxCalls, [])
 })
 
-test('oauth2-proxy skips sign-in for exactly the requests the edge serves signed out', async () => {
+test('oauth2-proxy skips sign-in for exactly the requests the edge serves signed out, and refuses with an email header', async () => {
   // v7.9 matches each --skip-auth-route regex against the request URI, query included.
   const tf = readFileSync(new URL('../prod/edge.tf', import.meta.url), 'utf8')
   const routes = [...tf.matchAll(/"--skip-auth-route=([^"]*)"/g)].map(m => m[1])
@@ -103,8 +106,40 @@ test('oauth2-proxy skips sign-in for exactly the requests the edge serves signed
     for (const uri of ['/oauth/consent', '/oauth/consent?authorization_id=x', '/oauth/consent?signout', '/auth-ui/supabase.js', '/auth-ui/config.js', '/auth-ui/consent.js',
       '/', '/oauth/consent/x', '/oauth/consentx', '/OAUTH/consent', '/xoauth/consent', '/auth-ui/configxjs', '/auth-ui/config.js?x', '/auth-ui/supabase.js/', '/auth-ui/index.js', '/oauth2/start']) {
       assert.equal(skipped(uri), (await call(port, { path: uri })).status === 200, uri)
+      // A skipped request carries no identity, so one with an email header did not come through sign-in.
+      assert.equal(skipped(uri), (await call(port, { path: uri, headers: { 'x-forwarded-email': 'a@x.com' } })).status === 400, `${uri} with an email`)
     }
   })
+})
+
+test('a client X-Forwarded-Uri, on which oauth2-proxy skips sign-in for any path, is refused before routing, identity or a box, over HTTP and upgrade', async () => {
+  const forged = { 'X-Forwarded-Uri': '/oauth/consent', 'X-Forwarded-Email': 'a@x.com' }
+  const boxCalls = await serve(async (port) => {
+    for (const host of [cfg.publicHost, cfg.approveHost, 'p-0123456789abcdef.boxes.example', 'other.example']) {
+      for (const path of ['/', '/home', '/desktop/', '/oauth/consent', '/oauth/consent?authorization_id=x', '/auth-ui/config.js', '/edge/healthz']) {
+        assert.equal((await call(port, { host, path, headers: forged })).status, 400, `${host}${path}`)
+        assert.equal((await call(port, { host, path, headers: { ...forged, ...upgrade(host) } })).status, 400, `upgrade ${host}${path}`)
+      }
+    }
+    for (const headers of [{ 'x-forwarded-uri': '' }, { 'X-FORWARDED-URI': '/home' }, { 'x-forwarded-uri': '/oauth/consent' }]) {
+      assert.equal((await call(port, { host: cfg.publicHost, headers })).status, 400, JSON.stringify(headers))
+      assert.equal((await call(port, { host: cfg.publicHost, headers: { ...headers, ...upgrade(cfg.publicHost) } })).status, 400, `upgrade ${JSON.stringify(headers)}`)
+    }
+    // Skip-auth paths with an email header, as an upgrade too.
+    for (const host of [cfg.publicHost, cfg.approveHost]) {
+      for (const path of ['/oauth/consent?authorization_id=x', '/auth-ui/supabase.js', '/auth-ui/config.js', '/auth-ui/consent.js']) {
+        assert.equal((await call(port, { host, path, headers: { 'x-forwarded-email': 'a@x.com', ...upgrade(host) } })).status, 400, `upgrade ${host}${path}`)
+      }
+    }
+  })
+  assert.deepEqual(boxCalls, [])
+  // Without the header the same signed-in requests reach the box.
+  const reached = await serve(async (port) => {
+    const email = { 'x-forwarded-email': 'a@x.com' }
+    assert.equal((await call(port, { host: cfg.publicHost, headers: email })).status, 503)
+    assert.ok((await call(port, { host: cfg.publicHost, headers: { ...email, ...upgrade(cfg.publicHost) } })).error)
+  })
+  assert.deepEqual(reached, [['ensure', 'a@x.com'], ['ensure', 'a@x.com']])
 })
 
 test('consent: approve only Mumbo\'s own client ids, follow an earlier consent only to Mumbo\'s redirect URI, refuse the rest', () => {
