@@ -122,7 +122,7 @@ Today a project member can make the coordinator read the box token, `MUMBO_MEMBE
 
 1. **A2:** no `packages/mumbo/superagent/README.zh.md` or `README.i18n.yaml`, and no rows in `packages/mumbo/README.zh.md` or its record. Remove any that were added. Coordinate with the repo-wide removal instead of satisfying bilingual gates with Chinese files.
 2. **The copy (S1):** translate the user-visible Chinese to English and log it in `UPSTREAM.md` S1:
-   - the preset `name` and `description` in `cordis.patch.yml` (for example "dsh-superagent 执行器" → "dsh-superagent worker", "dsh-superagent 主 Session" → "dsh-superagent router"), and the same rows in `deploy/mumbo-project.overlay.yml`;
+   - the preset `name` and `description` in `cordis.patch.yml` (the worker preset becomes "dsh-superagent worker" and the main-session preset "dsh-superagent router"), and the same rows in `deploy/mumbo-project.overlay.yml`;
    - the `zh` halves of label and hint objects in `src/sources/*.ts` and the client;
    - `locale/zh.json`, following the repo-wide decision;
    - Chinese files or sections in the copied upstream docs.
