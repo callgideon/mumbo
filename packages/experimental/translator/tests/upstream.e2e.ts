@@ -3,6 +3,11 @@ import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it } from 'vitest'
 import Translator from '../src/index.ts'
 
+// Chinese text is written as escapes because the repository rejects literal Han characters.
+const WORLD = '\u4e16\u754c'
+const COMPUTER_SIMPLIFIED = /\u7535\u8111|\u8ba1\u7b97\u673a/u
+const COMPUTER_TRADITIONAL = /\u96fb\u8166|\u8a08\u7b97\u6a5f/u
+
 const contexts: Context[] = []
 afterEach(async () => { await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose())) })
 
@@ -19,26 +24,26 @@ describe.skipIf(process.env.DSH_TRANSLATION_LIVE !== '1')('anonymous translation
     const spec = service.resolve({ text: 'Hello world.', targetLanguage: 'zh-CN' })
     expect(spec.provider).toBe('bing')
     expect(spec.sourceLanguage).toBe('auto')
-    expect(await service.translate(spec)).toContain('옖솨')
+    expect(await service.translate(spec)).toContain(WORLD)
   })
 
   it('uses default Bing with an explicit English source and a Traditional Chinese locale', async () => {
     const service = await translator()
     const spec = service.resolve({ text: 'The computer processes data.', targetLanguage: 'zh-TW', sourceLanguage: 'en' })
     expect(spec.provider).toBe('bing')
-    expect(await service.translate(spec)).toMatch(/랳췂|홤쟳뚻/u)
+    expect(await service.translate(spec)).toMatch(COMPUTER_TRADITIONAL)
   })
 
   it.each(['zh-Hans', 'zh-Hant'])('uses explicit Google with Chinese tag %s', async (targetLanguage) => {
     const service = await translator()
     const spec = service.resolve({ text: 'The computer processes data.', targetLanguage, sourceLanguage: 'en', provider: 'google' })
     const result = await service.translate(spec)
-    expect(result).toMatch(targetLanguage === 'zh-Hans' ? /솑쵭|걙쟳뎖/u : /랳췂|홤쟳뚻/u)
+    expect(result).toMatch(targetLanguage === 'zh-Hans' ? COMPUTER_SIMPLIFIED : COMPUTER_TRADITIONAL)
   })
 
   it('translates 4000 CJK characters through the Google form endpoint', async () => {
     const service = await translator()
-    const text = '읠텽옖솨。'.repeat(800)
+    const text = `\u4f60\u597d${WORLD}\u3002`.repeat(800)
     expect(text.length).toBe(service.maxTextChars)
     const result = await service.translate(service.resolve({ text, targetLanguage: 'en', sourceLanguage: 'zh-CN', provider: 'google' }))
     expect(result).toMatch(/world/i)

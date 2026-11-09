@@ -839,7 +839,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY || notReady.length > 0)('web smoke
   it('bash differential rendering: tool row click leaves the default details column closed', async () => {
     onTestFailed(() => saveFailureShot(page, 'w5-tool-details'))
     const input = page.locator('[data-composer-input]').first()
-    await input.fill('please Open in bash TOOLBash echo w5marker then tell me Result')
+    await input.fill('Use the bash tool to run the command echo w5marker, then tell me the result')
     await input.press('Enter')
     // Wait for the tool ROW, not response text (the reply echoes any marker).
     // Bash renders through the third-party sample registration. Match that
