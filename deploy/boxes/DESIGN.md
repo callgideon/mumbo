@@ -72,9 +72,10 @@ E2B's own `onTimeout: pause` (15 minutes later) is the safety net if the edge is
   - the request comes from a box egress IP (`BOX_EGRESS_IPS`, the host's own address);
   - the HMAC is valid;
   - `b` is `u`'s current running box (adopted from E2B after an edge restart);
-  - the path is `/anthropic/*`, `/models` or `/v1/tools/*`;
+  - the path is `/anthropic/*`, `/models` or `/v1/tools/*`, or, while `OPENROUTER_MODELS` names models, `POST /openrouter/v1/chat/completions` or `GET /openrouter/v1/models`;
   - the user is within the daily request budget.
 - It swaps in the server key and streams the response. One log line per call: user, box, path, status, latency.
+- The OpenRouter route serves only the allowlisted models and sets its own provider preferences (no training on prompts, zero data retention); `RUNBOOK.md` (Model routes) lists the fields it drops and sets.
 
 **Backup (R3).**
 - The router owns backups. It signs a 15-minute PUT URL for `users/<sha256(email)>/latest.tar.gz` and runs `tar … | curl -T -` inside the box. Excluded: `node_modules` and SQLite WAL files.

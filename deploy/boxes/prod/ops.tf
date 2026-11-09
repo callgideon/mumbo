@@ -2,6 +2,18 @@
 # Unencrypted on purpose: CloudWatch cannot publish to a topic under the aws/sns key, and alarm text holds no secret.
 resource "aws_sns_topic" "alarms" { name = "${local.name}-alarms" }
 
+variable "ops_alert_email" {
+  description = "Address that gets every alarm and the edge-deploy-failed notice by email; empty for none. AWS mails a confirmation link once, which must be clicked."
+  type        = string
+  default     = ""
+}
+resource "aws_sns_topic_subscription" "ops_email" {
+  count     = var.ops_alert_email == "" ? 0 : 1
+  topic_arn = aws_sns_topic.alarms.arn
+  protocol  = "email"
+  endpoint  = var.ops_alert_email
+}
+
 # Log-derived signals: the edge logs one JSON line per box event; the api logs node status changes.
 locals {
   log_metrics = {
@@ -58,5 +70,61 @@ resource "aws_cloudwatch_metric_alarm" "ops" {
   alarm_description   = "Runbook: deploy/boxes/RUNBOOK.md#${each.key}"
   alarm_actions       = [aws_sns_topic.alarms.arn]
   ok_actions          = [aws_sns_topic.alarms.arn]
+}
+
+# The fullest node's root disk (CloudWatch agent disk_used_percent, nodes/node.sh.tftpl). A Metrics Insights query covers
+# every node the group launches without a per-instance alarm.
+resource "aws_cloudwatch_metric_alarm" "node_disk" {
+  alarm_name          = "${local.name}-node-disk"
+  evaluation_periods  = 1
+  threshold           = 75
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_description   = "Runbook: deploy/boxes/RUNBOOK.md#node-disk"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  ok_actions          = [aws_sns_topic.alarms.arn]
+  metric_query {
+    id          = "disk"
+    period      = 300
+    return_data = true
+    expression  = "SELECT MAX(disk_used_percent) FROM SCHEMA(\"mumbo/boxes/nodes\", AutoScalingGroupName, InstanceId, device, fstype, path) WHERE AutoScalingGroupName = '${aws_autoscaling_group.nodes.name}' AND path = '/'"
+  }
+}
+
+# A failed edge deployment: the circuit breaker stopped it and rolls the service back to the previous task definition,
+# which otherwise shows only in describe-services. Every circuit-breaker rollback starts with this event.
+resource "aws_cloudwatch_event_rule" "edge_deploy_failed" {
+  name        = "${local.name}-edge-deploy-failed"
+  description = "Runbook: deploy/boxes/RUNBOOK.md#edge-deploy-failed"
+  event_pattern = jsonencode({
+    source        = ["aws.ecs"]
+    "detail-type" = ["ECS Deployment State Change"]
+    resources     = [aws_ecs_service.edge.id]
+    detail        = { eventName = ["SERVICE_DEPLOYMENT_FAILED"] }
+  })
+}
+resource "aws_cloudwatch_event_target" "edge_deploy_failed" {
+  rule = aws_cloudwatch_event_rule.edge_deploy_failed.name
+  arn  = aws_sns_topic.alarms.arn
+  # One plain line instead of the raw event JSON.
+  input_transformer {
+    input_paths    = { time = "$.time", deployment = "$.detail.deploymentId", reason = "$.detail.reason" }
+    input_template = "\"mumbo-boxes edge deployment <deployment> failed at <time>: <reason>. ECS rolls back to the previous task definition. Runbook: deploy/boxes/RUNBOOK.md#edge-deploy-failed\""
+  }
+}
+# The default topic policy (this account, which covers the alarms) plus EventBridge for the rule above.
+resource "aws_sns_topic_policy" "alarms" {
+  arn = aws_sns_topic.alarms.arn
+  policy = jsonencode({ Version = "2012-10-17", Statement = [
+    {
+      Sid       = "account", Effect = "Allow", Principal = { AWS = "*" }, Resource = aws_sns_topic.alarms.arn
+      Action    = ["SNS:GetTopicAttributes", "SNS:SetTopicAttributes", "SNS:AddPermission", "SNS:RemovePermission", "SNS:DeleteTopic", "SNS:Subscribe", "SNS:ListSubscriptionsByTopic", "SNS:Publish"]
+      Condition = { StringEquals = { "AWS:SourceOwner" = data.aws_caller_identity.this.account_id } }
+    },
+    {
+      Sid       = "events", Effect = "Allow", Principal = { Service = "events.amazonaws.com" }, Resource = aws_sns_topic.alarms.arn, Action = "sns:Publish"
+      Condition = { ArnEquals = { "aws:SourceArn" = aws_cloudwatch_event_rule.edge_deploy_failed.arn } }
+    },
+  ] })
 }
 output "alarm_topic" { value = aws_sns_topic.alarms.arn }

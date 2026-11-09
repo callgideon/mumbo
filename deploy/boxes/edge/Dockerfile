@@ -9,7 +9,11 @@ RUN cd /tmp && npm pack @supabase/supabase-js@2.118.0 --silent && tar xzf supaba
  && echo "ee3be8de192b97cb1d73d1e95d6b82bb1f6b658c0f97c4ef757fc331996ed3d3  package/dist/umd/supabase.js" | sha256sum -c - \
  && install -D -m 0644 package/dist/umd/supabase.js /edge/auth-ui/supabase.js && rm -rf /tmp/package /tmp/*.tgz
 COPY auth-ui/index.html auth-ui/consent.js ./auth-ui/
-COPY edge.mjs store.mjs sandboxes.mjs projects.mjs template.mjs github.mjs approvals.mjs github-app.mjs approve-page.mjs halt.mjs budget.mjs notify.mjs ./
+COPY *.mjs ./
 COPY box/ ./box/
 USER node
+# Every module and file main() loads must be in the image: a missing one crashes the task at start and ECS rolls back.
+# The check (edge.mjs imageCheck) imports every module, the dynamically imported ones too, and reads runtimeFiles(), as
+# the runtime user.
+RUN node edge.mjs --check
 CMD ["node", "edge.mjs"]

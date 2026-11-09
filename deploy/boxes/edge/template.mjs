@@ -5,17 +5,21 @@
 import { pathToFileURL } from 'node:url'
 import { Sandbox, Template } from 'e2b'
 // Usage: template.mjs <ecr image> [name=mumbo-box] [memoryMB=4096] [cpuCount=2]; children use: mumbo-child 2048.
-export function templateArgs(argv) {
+// MIN_AVAIL_MB (default 9216, 9 GiB): the least free space on / a box from the new build may have, or the script fails.
+export function templateArgs(argv, env = process.env) {
+  const minAvail = env.MIN_AVAIL_MB ?? '9216'
+  if (!/^\d+$/.test(minAvail)) throw new Error('MIN_AVAIL_MB must be a whole number of MiB')
   return {
     image: argv[2] ?? (() => { throw new Error('pass the ECR image URI') })(),
     name: argv[3] ?? 'mumbo-box',
     memoryMB: Number(argv[4] ?? 4096),
     cpuCount: Number(argv[5] ?? 2),
+    minAvailMB: Number(minAvail),
   }
 }
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) await build(templateArgs(process.argv))
 
-async function build({ image, name, memoryMB, cpuCount }) {
+async function build({ image, name, memoryMB, cpuCount, minAvailMB }) {
 let tpl = Template().fromImage(image, { username: 'AWS', password: process.env.ECR_PASSWORD }).setUser('root')
 // The user's box is their computer: a virtual display, a window manager, Chromium and the noVNC live view
 // (PRODUCTION.md stage 9). The edge's start script runs them; children (mumbo-child) stay headless.
@@ -33,10 +37,14 @@ if (name.startsWith('mumbo-project')) {
 }
 const info = await Template.build(tpl, name, { cpuCount, memoryMB })
 console.log('built', info.templateId, info.buildId)
-// Smoke: a box from the template has the app, no prior user data, and curl for backups.
+// Smoke: a box from the template has the app, no prior user data, curl for backups, and at least minAvailMB free on /.
 const s = await Sandbox.create(name, { timeoutMs: 120_000 })
-const out = (await s.commands.run('test -f /src/apps/cli/src/bin.ts && echo app; test -e /root/.dsh && echo HAS-DSH-HOME || echo clean; command -v curl tar | wc -l')).stdout
+const out = (await s.commands.run('test -f /src/apps/cli/src/bin.ts && echo app; test -e /root/.dsh && echo HAS-DSH-HOME || echo clean; command -v curl tar | wc -l; df --output=avail -m / | tail -1')).stdout
 await s.kill()
-console.log(out.trim().replace(/\n/g, ' '))
-if (!/app clean 2/.test(out.trim().replace(/\n/g, ' '))) process.exit(1)
+const line = out.trim().replace(/\s+/g, ' ')
+console.log(line)
+const avail = /^app clean 2 (\d+)$/.exec(line)?.[1]
+if (avail === undefined) process.exit(1)
+// The template is already built and named by now: a failure means rebuild before boxes are created from it.
+if (Number(avail) < minAvailMB) { console.error(`template: ${avail} MiB free on /, below MIN_AVAIL_MB ${minAvailMB}; raise box_step_disk in prod/control.tf (RUNBOOK "Changing E2B limits")`); process.exit(1) }
 }

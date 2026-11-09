@@ -612,7 +612,7 @@ All Track B tasks branch from `origin/boxes/production`. Paths are relative to `
   - add `"graphql": "16.9.0"` (exact pin), which B1 uses.
 
 - [ ] **Step 1:** First set `"test": "node --test"`. Then write:
-  - `store.test.mjs`: `incrementBy` (3 then 5 → 8), `getCount`, `deleteDoc`, `removeFromSet`, against `memoryStore()`, and against redis when `REDIS_URL` is set (as at `edge.test.mjs:227`);
+  - `store.test.mjs`: `incrementBy` (3 then 5 → 8), `getCount`, `deleteDoc`, `removeFromSet`, against `memoryStore()`, and against a disposable redis when `TEST_REDIS_URL` is set (never `REDIS_URL`: the tests flush the database) (as at `edge.test.mjs:227`);
   - `projects.test.mjs`: the five functions;
   - `cookies.test.mjs`: a fake box records request headers. A request with `cookie: _oauth2_proxy=a; _oauth2_proxy_1=b; dsh-auth-x=c` reaches the box as `dsh-auth-x=c` only (B13 adds `_oauth2_proxy_mumbo=a; _oauth2_proxy_mumbo_1=b` to that vector on HTTP, upgrade and relay). A box `Set-Cookie: s=1; Domain=.boxes.mumbo.si; Path=/` reaches the client without `Domain`. A box `Set-Cookie` whose name starts with a sign-in prefix, or that has no name (`=_oauth2_proxy_mumbo=V`), is dropped, on HTTP and on the WebSocket 101 (B13). A request with `Host: approve.boxes.mumbo.si` never reaches a box.
 - [ ] **Step 2:** Run `npm test`. Expected: the new tests FAIL.

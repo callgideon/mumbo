@@ -25,6 +25,16 @@ variable "github_agent_login" {
   type        = string
   default     = ""
 }
+variable "openrouter_models" {
+  description = "OPENROUTER_MODELS: the OpenRouter model ids boxes may call through the model host's /openrouter/v1 route, comma-separated. Empty: the route is off and the edge reads no OpenRouter key."
+  type        = string
+  default     = "qwen/qwen3.8-27b,qwen/qwen3.5-9b"
+}
+variable "openrouter_zdr" {
+  description = "OPENROUTER_ZDR: OpenRouter routes only to zero-data-retention endpoints. false also allows endpoints that retain prompts; none may train on them (data_collection deny, always)."
+  type        = bool
+  default     = true
+}
 variable "github_agent_id" {
   description = "GITHUB_AGENT_ID: the numeric user id of github_agent_login (GET /users/mumbo-bot%5Bbot%5D); approvals match the agent by it. Empty: the approvals poller is off."
   type        = string
@@ -287,11 +297,16 @@ resource "aws_iam_role_policy" "exec_edge" {
       # from this parameter, and a circuit-breaker rollback to one must still start.
       ["${local.ssm}/prod/supabase-anon-key"],
     )) },
-    { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = data.aws_secretsmanager_secret.github_app.arn },
+    { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = concat([data.aws_secretsmanager_secret.github_app.arn], values(local.edge_secrets)) },
   ] })
 }
 # The mumbo-bot GitHub App (app_id, slug, private_key), created outside Terraform under the data key (kms:Decrypt in control.tf).
 data "aws_secretsmanager_secret" "github_app" { name = "${local.name}/github-app" }
+# The OpenRouter API key (a plain string), created outside Terraform under the data key; read only while the route is on.
+data "aws_secretsmanager_secret" "openrouter" {
+  count = var.openrouter_models == "" ? 0 : 1
+  name  = "${local.name}/openrouter"
+}
 
 locals {
   ssm = "arn:aws:ssm:us-east-1:${data.aws_caller_identity.this.account_id}:parameter/mumbo"
@@ -301,6 +316,8 @@ locals {
     { ALLOWED_EMAILS = "boxes/allowed-emails", MUMBO_OAUTH_CLIENT_IDS = "boxes/oauth-client-id" },
     var.ntfy_enabled ? { NTFY_TOPIC = "boxes/ntfy-topic" } : {},
   )
+  # Container env name -> plain-string Secrets Manager secret; with github_app, all the secrets the exec role may read.
+  edge_secrets = { for s in data.aws_secretsmanager_secret.openrouter : "OPENROUTER_API_KEY" => s.arn }
 }
 resource "aws_ecs_task_definition" "edge" {
   family                   = "${local.name}-edge"
@@ -378,8 +395,10 @@ resource "aws_ecs_task_definition" "edge" {
         DAILY_TOKENS_USER    = "20000000"
         DAILY_TOKENS_PROJECT = "50000000"
         AUDIT_PREFIX         = local.audit_prefix
+        OPENROUTER_MODELS    = var.openrouter_models
+        OPENROUTER_ZDR       = tostring(var.openrouter_zdr)
       } : { name = k, value = v }]
-      secrets = concat([for k, p in local.edge_ssm : { name = k, valueFrom = "${local.ssm}/${p}" }], [
+      secrets = concat([for k, p in local.edge_ssm : { name = k, valueFrom = "${local.ssm}/${p}" }], [for k, arn in local.edge_secrets : { name = k, valueFrom = arn }], [
         { name = "E2B_API_KEY", valueFrom = local.secret.TEAM_API_KEY },
         { name = "GITHUB_APP_ID", valueFrom = "${data.aws_secretsmanager_secret.github_app.arn}:app_id::" },
         { name = "GITHUB_APP_KEY", valueFrom = "${data.aws_secretsmanager_secret.github_app.arn}:private_key::" },

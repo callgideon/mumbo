@@ -111,7 +111,7 @@ resource "aws_launch_template" "nodes" {
   block_device_mappings {
     device_name = "/dev/sda1"
     ebs {
-      volume_size           = 200
+      volume_size           = 500 # reaches running nodes only through blue/green (RUNBOOK "Node disk size")
       volume_type           = "gp3"
       iops                  = 6000
       throughput            = 400

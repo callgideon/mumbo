@@ -3,7 +3,7 @@
 // :8080 is reached only through oauth2-proxy (X-Forwarded-Email is trusted); :8081 serves the model host and
 // accepts only box tokens. Design, review fixes and failure handling: deploy/boxes/DESIGN.md.
 import { createHash, createHmac, createVerify, timingSafeEqual } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { createServer, request as httpRequest } from 'node:http'
 import { Readable, pipeline } from 'node:stream'
 import { ownersOf } from './projects.mjs'
@@ -99,6 +99,15 @@ export const config = () => ({
   // MUMBO_OAUTH_REDIRECT_URIS (comma-separated, exact) are then required.
   supabaseUrl: optional('SUPABASE_URL'),
   oauthRedirectUris: optional('SUPABASE_URL') ? redirectUris('MUMBO_OAUTH_REDIRECT_URIS') : undefined,
+  // The model host's OpenRouter route (OPENROUTER_PATHS): the exact model ids boxes may call, comma-separated; empty turns
+  // the route off. OPENROUTER_API_KEY, from Secrets Manager mumbo-boxes/openrouter through the ECS secrets map, is then
+  // required. OPENROUTER_ZDR=false allows endpoints that retain prompts; none may train on them (openrouterBody).
+  openrouterModels: env('OPENROUTER_MODELS', '').split(',').map(s => s.trim()).filter(Boolean),
+  openrouterKey: optional('OPENROUTER_API_KEY'),
+  openrouterZdr: env('OPENROUTER_ZDR', 'true') !== 'false',
+  // The most input tokens one image is charged when a box drops a response before its usage (openrouterBody
+  // inputEstimate), and the charge for an image whose size cannot be read. Qwen-VL's own per-image maximum.
+  openrouterImageTokens: atLeast('OPENROUTER_IMAGE_TOKENS', 0, 16384),
 })
 
 /** Address or @domain allowlist, lowercased (config()); an empty list admits nobody. The email compares lowercased. An
@@ -197,6 +206,10 @@ export function boxSite(cfg, principal) {
 // and box/gh as read by main() at start, written into project boxes. panelAdmins: the project owners' emails, for MUMBO_PANEL_ADMINS.
 export function startScript(cfg, token, site = boxSite(cfg, ''), role = '', memberKeyText, boxFiles, panelAdmins = []) {
   const llm = `https://${cfg.llmHost}`
+  // dsh's OpenRouter route (@deepseek-ai/dsh-llm-pi-ai, the base composition's row llm-pi-ai) through the model host,
+  // keyed by the box token. Images leave 8 MiB of OPENROUTER_MAX_BODY for the text.
+  const openrouter = cfg.openrouterModels?.length ? { displayName: 'OpenRouter', apiKeyEnv: 'DEEPSEEK_API_KEY', baseURL: `${llm}/openrouter/v1`, maxRequestImageBytes: 12 * 1024 * 1024,
+    models: cfg.openrouterModels.map(id => ({ id, ...OPENROUTER_BOX_MODELS[id] })) } : undefined
   const b64 = (text) => Buffer.from(text).toString('base64')
   const sq = (text) => `'${text.replaceAll("'", `'\\''`)}'`
   return `#!/bin/sh
@@ -223,7 +236,13 @@ cat > /root/.mumbo/sandboxes.overlay.yml <<'YML'
 ${site.desktop ? `    - id: browser-use
       name: '@deepseek-ai/dsh-browser-use'
 ` : ''}YML
-${site.desktop ? `# The user's Chromium for dsh's browser tools. With @mumbo/browser-consent in the image, writes on a site ask the
+${openrouter ? `# Image-capable models on OpenRouter (edge OPENROUTER_MODELS). A Session keeps the model it starts with.
+cat > /root/.mumbo/models.overlay.yml <<'YML'
+- id: llm-pi-ai
+  config:
+    providers: ${JSON.stringify({ openrouter })}
+YML
+` : ''}${site.desktop ? `# The user's Chromium for dsh's browser tools. With @mumbo/browser-consent in the image, writes on a site ask the
 # person first; consent mounts the Playwright MCP provider itself, so the plain provider row is used only without it.
 if [ -d /src/packages/mumbo/browser-consent ]; then
 cat >> /root/.mumbo/sandboxes.overlay.yml <<'YML'
@@ -350,7 +369,7 @@ ${site.desktop ? '' : `PATH=/root/.mumbo/bin:$PATH NODE_USE_ENV_PROXY=1 NODE_EXT
 `}HOME=/root DSH_HOME=/root/.dsh DSH_AGENTS_HOME=/root/.mumbo/agents DSH_TELEMETRY_DISABLED=1 \\
 DEEPSEEK_BASE_URL=${llm}/anthropic DEEPSEEK_SEARCH_BASE_URL=${llm} DEEPSEEK_API_KEY=${token} \\
 nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\
-  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml $LINKS_PATCH${site.desktop ? ' $CU_PATCH $WELCOME_PATCH' : ''}${memberKeyText ? ' $PROJECT_PATCH' : ''} \\
+  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml${openrouter ? ' --patch /root/.mumbo/models.overlay.yml' : ''} $LINKS_PATCH${site.desktop ? ' $CU_PATCH $WELCOME_PATCH' : ''}${memberKeyText ? ' $PROJECT_PATCH' : ''} \\
   --no-open --host "$ip" --port 3080 --public-url ${site.publicUrl} --trusted-host ${cfg.publicHost}${site.host === cfg.publicHost ? '' : ` --trusted-host ${site.host}`} > /root/dsh.log 2>&1 &
 `
 }
@@ -909,9 +928,136 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log
 
 /** Model and search calls from boxes. Only paths dsh uses are forwarded; the box token is swapped for the server key. */
 export const MODEL_PATHS = [/^\/anthropic\//, /^\/models$/, /^\/v1\/tools\//]
+/** The OpenRouter route (OpenAI Chat Completions): method and path on the model host -> the fixed upstream URL. Served
+ *  while cfg.openrouterModels names a model. */
+export const OPENROUTER_PATHS = {
+  'POST /openrouter/v1/chat/completions': 'https://openrouter.ai/api/v1/chat/completions',
+  'GET /openrouter/v1/models': 'https://openrouter.ai/api/v1/models',
+}
+/** The only top-level request fields forwarded to OpenRouter: what dsh's pi-ai openai-completions provider sends for
+ *  these models (pi-ai 1.3.0 buildParams) and standard sampling fields. Every other field, such as provider, models,
+ *  plugins, route, transforms, preset or web_search_options, can change routing or cost and is dropped. */
+export const OPENROUTER_FIELDS = ['model', 'messages', 'stream', 'stream_options', 'max_tokens', 'max_completion_tokens', 'temperature', 'top_p',
+  'stop', 'seed', 'tools', 'tool_choice', 'parallel_tool_calls', 'response_format', 'reasoning']
+/** Request body cap on the OpenRouter route (413 above it); images travel base64 in the JSON. Other model paths have no edge cap. */
+export const OPENROUTER_MAX_BODY = 20 * 1024 * 1024
+/** Box-side model fields on top of the installed pi-ai catalog, which supplies the rest (context window included); an
+ *  allowlisted model without an entry takes the catalog's. */
+const OPENROUTER_BOX_MODELS = {
+  'qwen/qwen3.8-27b': { input: ['text', 'image'] },
+  'qwen/qwen3.5-9b': { input: ['text', 'image'] },
+}
+
+/** Message fields forwarded on the OpenRouter route: those pi-ai's convertMessages writes (pi-ai 1.3.0). */
+const MESSAGE_FIELDS = ['role', 'content', 'name', 'tool_calls', 'tool_call_id', 'reasoning', 'reasoning_content', 'reasoning_text', 'reasoning_details']
+const ROLES = ['system', 'developer', 'user', 'assistant', 'tool']
+/** Qwen-VL takes one token per 28x28 pixel patch. */
+const PIXELS_PER_IMAGE_TOKEN = 28 * 28
+
+/**
+ * Pixel dimensions from the header of a base64 PNG, GIF, WebP or JPEG, or undefined when they cannot be read.
+ * @param {string} base64 - image data; only its first 256 KiB are decoded
+ * @returns {{ width: number, height: number } | undefined}
+ */
+export function imageSize(base64) {
+  const b = Buffer.from(base64.slice(0, 256 * 1024), 'base64')
+  const at = (i, n) => b.toString('latin1', i, i + n)
+  if (b.length >= 24 && at(1, 3) === 'PNG') return { width: b.readUInt32BE(16), height: b.readUInt32BE(20) }
+  if (b.length >= 10 && at(0, 4) === 'GIF8') return { width: b.readUInt16LE(6), height: b.readUInt16LE(8) }
+  if (b.length >= 30 && at(0, 4) === 'RIFF' && at(8, 4) === 'WEBP') {
+    const kind = at(12, 4)
+    if (kind === 'VP8 ') return { width: b.readUInt16LE(26) & 0x3fff, height: b.readUInt16LE(28) & 0x3fff }
+    if (kind === 'VP8L') { const v = b.readUInt32LE(21); return { width: (v & 0x3fff) + 1, height: ((v >> 14) & 0x3fff) + 1 } }
+    if (kind === 'VP8X') return { width: b.readUIntLE(24, 3) + 1, height: b.readUIntLE(27, 3) + 1 }
+    return undefined
+  }
+  if (b.length >= 4 && b[0] === 0xff && b[1] === 0xd8) {
+    // JPEG: walk the segments to the first start-of-frame marker (C0-CF except C4, C8 and CC).
+    for (let i = 2; i + 9 <= b.length && b[i] === 0xff;) {
+      const marker = b[i + 1]
+      if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) return { width: b.readUInt16BE(i + 7), height: b.readUInt16BE(i + 5) }
+      i += 2 + b.readUInt16BE(i + 2)
+    }
+  }
+  return undefined
+}
+
+/**
+ * The upstream body for a chat request on the OpenRouter route, or why it is refused (400). `model` must be one of
+ * cfg.openrouterModels exactly. Each message keeps only MESSAGE_FIELDS and a known role; its `content` is a string,
+ * null, absent, or an array of parts rebuilt from known keys: `{type: "text", text, cache_control?}` with a string
+ * `text`, or `{type: "image_url", image_url: {url, detail?}}` with a `data:image/` URL, so the body cap bounds every
+ * image and no paid file parser or remote fetch starts. Every tool is a `function` tool, and `tool_choice` is a string
+ * or a function choice. Only OPENROUTER_FIELDS are kept; then the edge sets `stream: true` with `stream_options:
+ * {include_usage: true}` (the token budget reads the final usage chunk; dsh always streams), `reasoning.exclude: false`
+ * when reasoning is set (reasoning is reported, not hidden), and its own `provider`: `data_collection: "deny"`, plus
+ * `zdr: true` unless cfg.openrouterZdr is false.
+ * @param {object} cfg - config()
+ * @param {Buffer} raw - the request body
+ * @returns {{ error: string } | { body: string, model: string, inputEstimate: number }} `inputEstimate`, the input charged
+ *   when a box drops the response before its usage: ceil(bytes without image data / 3) plus, per image, its pixels /
+ *   PIXELS_PER_IMAGE_TOKEN from the image header, at most cfg.openrouterImageTokens (also charged when unreadable).
+ */
+export function openrouterBody(cfg, raw) {
+  let body
+  try { body = JSON.parse(raw) } catch { return { error: 'The request body is not JSON.' } }
+  const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
+  if (!isObject(body)) return { error: 'The request body must be a JSON object.' }
+  if (!cfg.openrouterModels.includes(body.model)) return { error: `Model ${JSON.stringify(body.model)} is not offered; use one of ${cfg.openrouterModels.join(', ')}.` }
+  if (!Array.isArray(body.messages)) return { error: 'messages must be an array.' }
+  const images = []
+  const part = (p) => {
+    if (p?.type === 'text' && typeof p.text === 'string') return { type: 'text', text: p.text, ...(isObject(p.cache_control) ? { cache_control: { type: 'ephemeral' } } : {}) }
+    const url = p?.type === 'image_url' ? p.image_url?.url : undefined
+    if (typeof url !== 'string' || !url.startsWith('data:image/')) return undefined
+    images.push(url)
+    return { type: 'image_url', image_url: { url, ...(['low', 'high', 'auto'].includes(p.image_url.detail) ? { detail: p.image_url.detail } : {}) } }
+  }
+  const messages = []
+  for (const m of body.messages) {
+    if (!isObject(m) || !ROLES.includes(m.role)) return { error: `Each message needs a role: one of ${ROLES.join(', ')}.` }
+    const out = Object.fromEntries(MESSAGE_FIELDS.filter(f => f in m).map(f => [f, m[f]]))
+    if (Array.isArray(m.content)) {
+      out.content = m.content.map(part)
+      if (out.content.includes(undefined)) return { error: 'Message content parts may only be text with a string text, or image_url with a data:image/ URL.' }
+    } else if (!(m.content === undefined || m.content === null || typeof m.content === 'string')) return { error: 'Message content must be a string, null or an array of parts.' }
+    messages.push(out)
+  }
+  if (body.tools !== undefined && !(Array.isArray(body.tools) && body.tools.every(t => t?.type === 'function'))) return { error: 'tools must be an array of function tools.' }
+  if (body.tool_choice !== undefined && typeof body.tool_choice !== 'string' && body.tool_choice?.type !== 'function') return { error: 'tool_choice must be a string or a function choice.' }
+  const out = Object.fromEntries(OPENROUTER_FIELDS.filter(f => f in body).map(f => [f, body[f]]))
+  out.messages = messages
+  out.stream = true
+  out.stream_options = { include_usage: true }
+  if (out.reasoning !== undefined) out.reasoning = { ...(isObject(out.reasoning) ? out.reasoning : {}), exclude: false }
+  out.provider = { data_collection: 'deny', ...(cfg.openrouterZdr ? { zdr: true } : {}) }
+  const imageTokens = (url) => {
+    const size = imageSize(url.slice(url.indexOf(',') + 1))
+    return size ? Math.min(cfg.openrouterImageTokens, Math.ceil(size.width * size.height / PIXELS_PER_IMAGE_TOKEN)) : cfg.openrouterImageTokens
+  }
+  const imageBytes = images.reduce((n, url) => n + url.length, 0)
+  return { body: JSON.stringify(out), model: out.model, inputEstimate: Math.ceil(Math.max(0, raw.length - imageBytes) / 3) + images.reduce((n, url) => n + imageTokens(url), 0) }
+}
+
+/** A request's body, or null once it passes `cap` bytes (the rest is left unread). Rejects when the client goes away first. */
+const readBody = (req, cap) => new Promise((resolve, reject) => {
+  if (req.destroyed) return reject(new Error('request aborted'))
+  const chunks = []
+  let size = 0
+  req.on('data', (c) => {
+    if (size > cap) return
+    if ((size += c.length) > cap) { req.pause(); return resolve(null) }
+    chunks.push(c)
+  })
+  req.on('end', () => resolve(Buffer.concat(chunks)))
+  req.on('error', reject)
+  req.on('close', () => { if (!req.complete) reject(new Error('request aborted')) })
+})
+
 // github (github.mjs), halt (halt.mjs) and tokens (budget.mjs tokenBudget) are optional like mcp: absent, /github/
 // answers 404, nothing is halted and tokens are not counted. main() passes all of them.
 export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, mcp, github, halt, tokens, fetchImpl = fetch, log = console.log }) {
+  if (cfg.openrouterModels?.length && !cfg.openrouterKey) throw new Error('edge: OPENROUTER_MODELS needs OPENROUTER_API_KEY')
   return createServer((req, res) => route(req, res).catch((e) => {
     log(JSON.stringify({ edge: 'error', path: req.url?.split('?')[0], error: e.message }))
     if (!res.headersSent) json(res, 502, { error: 'edge error' }); else res.destroy()
@@ -929,28 +1075,89 @@ export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, mcp, g
     if (path === '/mcp' && mcp) { Promise.resolve(touch(claim.b)).catch(() => {}); return mcp(req, res) }
     // GitHub for project boxes; the forwarder applies its own rules and the stop switch.
     if (path.startsWith('/github/') && github) return github(req, res, claim)
-    if (!MODEL_PATHS.some(p => p.test(path))) return json(res, 404, { error: 'not found' })
+    const openrouter = cfg.openrouterModels?.length ? OPENROUTER_PATHS[`${req.method} ${path}`] : undefined
+    if (!openrouter && !MODEL_PATHS.some(p => p.test(path))) return json(res, 404, { error: 'not found' })
+    const started = Date.now()
+    const logCall = (status, model) => log(JSON.stringify({ edge: 'model', user: claim.u, box: claim.b, path, ...(model ? { model } : {}), status, ms: Date.now() - started }))
+    const cap = openrouter ? OPENROUTER_MAX_BODY : Infinity
+    // Over the cap: answer and close the connection without reading on; a declared length is refused before any check.
+    const tooLarge = () => {
+      logCall(413)
+      res.writeHead(413, { 'content-type': 'application/json', 'cache-control': 'no-store', connection: 'close' })
+        .end(JSON.stringify({ error: { type: 'invalid_request_error', message: `Request bodies are limited to ${cap} bytes here.` } }), () => req.destroy())
+    }
+    if (Number(req.headers['content-length']) > cap) return tooLarge()
     if (halt && await halt.isHalted(claim.u)) return json(res, 503, { type: 'error', error: { type: 'api_error', message: 'Stopped by the founder' } })
     if (!(await allow(claim.u))) return json(res, 429, { type: 'error', error: { type: 'rate_limit_error', message: 'Daily model budget reached for this account.' } })
     if (tokens && !(await tokens.allow(claim.u))) return json(res, 429, { type: 'error', error: { type: 'rate_limit_error', message: `Daily token budget reached for ${claim.u}` } })
     Promise.resolve(touch(claim.b)).catch(() => {})
-    const chunks = []
-    for await (const c of req) chunks.push(c)
-    const headers = {}
-    for (const name of ['content-type', 'accept', 'anthropic-version', 'anthropic-beta', 'user-agent']) if (req.headers[name] !== undefined) headers[name] = req.headers[name]
-    headers['x-api-key'] = modelKey
-    headers.authorization = `Bearer ${modelKey}`
-    const started = Date.now()
-    const upstream = await fetchImpl(`${cfg.upstream}${req.url}`, { method: req.method, headers, body: ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks), redirect: 'error' })
-    log(JSON.stringify({ edge: 'model', user: claim.u, box: claim.b, path, status: upstream.status, ms: Date.now() - started }))
+    const raw = await readBody(req, cap)
+    if (raw === null) return tooLarge()
+    let url = `${cfg.upstream}${req.url}`, init, forwarded
+    if (openrouter) {
+      const authorization = `Bearer ${cfg.openrouterKey}`
+      if (req.method === 'GET') {
+        const listed = await fetchImpl(openrouter, { headers: { authorization }, redirect: 'error' })
+        logCall(listed.status)
+        if (!listed.ok) return json(res, 502, { error: { type: 'api_error', message: `OpenRouter answered ${listed.status}` } })
+        return json(res, 200, { data: ((await listed.json()).data ?? []).filter(m => cfg.openrouterModels.includes(m?.id)) })
+      }
+      forwarded = openrouterBody(cfg, raw)
+      if (forwarded.error) { logCall(400); return json(res, 400, { error: { type: 'invalid_request_error', message: forwarded.error } }) }
+      url = openrouter
+      const headers = { 'content-type': 'application/json', authorization }
+      // pi-ai's session affinity header, so OpenRouter keeps a Session on one provider (prompt cache). Never a box token.
+      const session = req.headers['x-session-id']
+      if (typeof session === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(session) && !session.startsWith('mbx.') && verifyBox(edgeKey, session) === undefined) headers['x-session-id'] = session
+      init = { method: 'POST', headers, body: forwarded.body, redirect: 'error' }
+    } else {
+      const headers = {}
+      for (const name of ['content-type', 'accept', 'anthropic-version', 'anthropic-beta', 'user-agent']) if (req.headers[name] !== undefined) headers[name] = req.headers[name]
+      headers['x-api-key'] = modelKey
+      headers.authorization = `Bearer ${modelKey}`
+      init = { method: req.method, headers, body: ['GET', 'HEAD'].includes(req.method) ? undefined : raw, redirect: 'error' }
+    }
+    const upstream = await fetchImpl(url, init)
+    logCall(upstream.status, forwarded?.model)
     const out = {}
     for (const [k, v] of upstream.headers) if (!['content-encoding', 'content-length', 'transfer-encoding', 'connection', 'set-cookie'].includes(k)) out[k] = v
     res.writeHead(upstream.status, out)
     if (upstream.body === null) return void res.end()
-    const body = tokens ? tokens.meter(claim.u, upstream.body, upstream.headers.get('content-type')) : upstream.body
+    // An upstream error is not billed, so it carries no input estimate.
+    const body = tokens ? tokens.meter(claim.u, upstream.body, upstream.headers.get('content-type'), upstream.ok ? forwarded?.inputEstimate : 0) : upstream.body
     // pipeline destroys the source when the client closes, so a dropped connection cancels the metered stream.
     pipeline(Readable.fromWeb(body), res, () => {})
   }
+}
+
+/** Files main() reads, by name, beside this module: the box/ texts for project boxes and the auth-ui/ sign-in page. */
+export const runtimeFiles = () => ({
+  proxy: new URL('./box/github-local-proxy.mjs', import.meta.url),
+  gh: new URL('./box/gh', import.meta.url),
+  html: new URL('./auth-ui/index.html', import.meta.url),
+  supabaseJs: new URL('./auth-ui/supabase.js', import.meta.url),
+  consentJs: new URL('./auth-ui/consent.js', import.meta.url),
+})
+
+/**
+ * `node edge.mjs --check`, run by the Dockerfile: rejects unless this directory holds everything main() loads. It imports
+ * every top-level .mjs except tests and e2e scripts, then every module those name in a dynamic import (main() loads its
+ * own only after start), and reads every runtimeFiles() entry. A dynamic import whose argument is not a string literal
+ * cannot be checked, so it fails the check.
+ * @returns {Promise<string[]>} the modules imported.
+ */
+export async function imageCheck() {
+  const own = readdirSync(new URL('.', import.meta.url)).filter(f => f.endsWith('.mjs') && !/\.(test|e2e)\.mjs$/.test(f)).map(f => `./${f}`)
+  const dynamic = own.flatMap(m => [...readFileSync(new URL(m, import.meta.url), 'utf8').matchAll(/\bimport\(([^)]*)\)/g)].flatMap(([call, arg]) => {
+    if (m === './edge.mjs' && arg === 'm') return []  // the loop below, which imports what this scan finds
+    const literal = /^\s*(['"`])([^'"`$]+)\1\s*$/.exec(arg)
+    if (!literal) throw new Error(`edge: ${m}: ${call} has no string literal argument, so the image check cannot import it`)
+    return [literal[2]]
+  }))
+  const all = [...new Set([...own, ...dynamic])]
+  for (const m of all) await import(m)
+  for (const u of Object.values(runtimeFiles())) readFileSync(u)
+  return all
 }
 
 // ---- process wiring: secrets come from SSM / Secrets Manager through the host's instance role.
@@ -980,8 +1187,10 @@ async function main() {
     try { await s3.send(new HeadObjectCommand({ Bucket: cfg.bucket, Key: key })) } catch (e) { if (e.name === 'NotFound') return undefined; throw e }
     return getSignedUrl(s3, new GetObjectCommand({ Bucket: cfg.bucket, Key: key }), { expiresIn: 900 })
   }
+  const files = runtimeFiles()
+  const read = (name) => readFileSync(files[name], 'utf8')
   // For project boxes' start script; read here so a missing file stops the edge at start.
-  const boxFiles = { proxy: readFileSync(new URL('./box/github-local-proxy.mjs', import.meta.url), 'utf8'), gh: readFileSync(new URL('./box/gh', import.meta.url), 'utf8') }
+  const boxFiles = { proxy: read('proxy'), gh: read('gh') }
   const box = boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFiles })
   const verifyAlb = process.env.ALB_ARN ? albIdentity({ albArn: env('ALB_ARN'), region }) : undefined
   const listenHost = env('LISTEN_HOST', '127.0.0.1')  // beyond loopback only behind an ALB, where identity is the ALB token
@@ -1022,13 +1231,12 @@ async function main() {
     setInterval(() => store.lease('approvals:poll', 55_000).then(won => won && approvals.poll()).catch(e => console.error('edge: approvals poll', e.message)), 60_000).unref()
   }
 
-  const authFile = (name) => readFileSync(new URL(`./auth-ui/${name}`, import.meta.url), 'utf8')
   const values = (name) => {
     const v = env(name).split(',').map(s => s.trim()).filter(Boolean)
     if (v.length === 0) throw new Error(`edge: ${name} must name at least one value`)
     return v
   }
-  const signin = cfg.supabaseUrl ? authUi({ html: authFile('index.html'), supabaseJs: authFile('supabase.js'), consentJs: authFile('consent.js'), supabaseUrl: cfg.supabaseUrl,
+  const signin = cfg.supabaseUrl ? authUi({ html: read('html'), supabaseJs: read('supabaseJs'), consentJs: read('consentJs'), supabaseUrl: cfg.supabaseUrl,
     anonKey: env('SUPABASE_ANON_KEY'), clientIds: values('MUMBO_OAUTH_CLIENT_IDS'), redirectUris: cfg.oauthRedirectUris }) : undefined
   userServer({ cfg, box, verifyAlb, projects: proj, approve, signin }).listen(8080, listenHost, () => console.log(`edge: users on ${listenHost}:8080`))
   const { children, mcpServer } = await import('./sandboxes.mjs')
@@ -1037,4 +1245,7 @@ async function main() {
     .listen(8081, modelHost, () => console.log(`edge: model host on ${modelHost}:8081`))
 }
 
-if (process.argv[1] === new URL(import.meta.url).pathname) main().catch((e) => { console.error('edge: fatal', e); process.exit(1) })
+if (process.argv[1] === new URL(import.meta.url).pathname) {
+  const run = process.argv[2] === '--check' ? imageCheck().then(m => console.log(`edge: image check passed (${m.length} modules)`)) : main()
+  run.catch((e) => { console.error('edge: fatal', e); process.exit(1) })
+}

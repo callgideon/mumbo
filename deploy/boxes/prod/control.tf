@@ -11,6 +11,16 @@ locals {
   ecr     = "${data.aws_caller_identity.this.account_id}.dkr.ecr.us-east-1.amazonaws.com/${local.name}"
   e2b_arn = aws_secretsmanager_secret.e2b.arn
   box_ram = 8192
+  # Box disk, written to the E2B team limits by setup/setup.sh. A box gets it only from a template built afterwards
+  # (RUNBOOK "Changing E2B limits"). On this fork disk_mb sizes the disk: it is the free rootfs space a build has before
+  # the template's own steps, so a box keeps disk_mb minus what edge/template.mjs installs. disk_mb = box_free_disk (the
+  # 10 GiB a box should keep; ~1 GB left dsh, the browser profile and caches full) + box_step_disk, which covers the steps:
+  # mumbo-box measured 1007 MiB, mumbo-project 41, mumbo-child none (RUNBOOK "Changing E2B limits" says how), E2B's
+  # 256 MiB root reserve, and ~0.75 GiB of margin.
+  # default_free_disk_size_mb (set to box_free_disk) has no effect while E2B's build-ensure-free-disk-space flag is off,
+  # its default with no LaunchDarkly. template.mjs fails a build whose box has under 9 GiB free.
+  box_free_disk = 10240
+  box_step_disk = 2048
 }
 
 resource "aws_security_group" "api" {
@@ -252,7 +262,7 @@ resource "aws_ecs_task_definition" "setup" {
     name             = "setup"
     image            = "${local.ecr}/e2b-setup:${var.e2b_sha}-${substr(sha256("${file("${path.module}/setup/Dockerfile")}${file("${path.module}/setup/setup.sh")}"), 0, 7)}"
     essential        = true
-    environment      = [{ name = "BOX_RAM_MB", value = tostring(local.box_ram) }]
+    environment      = [{ name = "BOX_RAM_MB", value = tostring(local.box_ram) }, { name = "BOX_FREE_DISK_MB", value = tostring(local.box_free_disk) }, { name = "BOX_DISK_MB", value = tostring(local.box_free_disk + local.box_step_disk) }]
     secrets          = [for k in ["POSTGRES_CONNECTION_STRING", "TEAM_API_KEY"] : { name = k, valueFrom = local.secret[k] }]
     logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.e2b["setup"].name, awslogs-region = "us-east-1", awslogs-stream-prefix = "setup" } }
   }])

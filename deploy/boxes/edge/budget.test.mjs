@@ -86,6 +86,54 @@ test('a completed stream with a final usage charges only the real figure', async
   assert.equal(await store.getCount(key('a@x.co')), 170)
 })
 
+// OpenAI Chat Completions (the OpenRouter route): usage only in the final chunk, then [DONE].
+const chunk = (delta, extra = {}) => `data: ${JSON.stringify({ object: 'chat.completion.chunk', choices: [{ index: 0, delta }], usage: null, ...extra })}\n\n`
+const openaiFinal = `: OPENROUTER PROCESSING\n\ndata: ${JSON.stringify({ object: 'chat.completion.chunk', choices: [], usage: { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150, completion_tokens_details: { reasoning_tokens: 20 } } })}\n\ndata: [DONE]\n\n`
+
+test('OpenAI SSE: the final chunk\'s prompt and completion tokens are charged once; reasoning is inside completion; [DONE] is not an error', async () => {
+  const { store, t } = make()
+  const errors = []; const saved = console.error; console.error = (...a) => errors.push(a.join(' '))
+  try {
+    const parts = [chunk({ reasoning: 'r'.repeat(300) }), chunk({ content: 'x'.repeat(300) }), openaiFinal]
+    assert.equal(await drain(t.meter('a@x.co', stream(...parts), 'text/event-stream')), parts.join(''))
+  } finally { console.error = saved }
+  assert.equal(await store.getCount(key('a@x.co')), 150)
+  assert.deepEqual(errors, [])
+})
+
+test('OpenAI SSE cancelled before its usage chunk: the input estimate plus ceil(chars / 3) of content, reasoning and tool arguments', async () => {
+  const { store, t } = make()
+  const parts = [chunk({ reasoning: 'r'.repeat(10) }), chunk({ content: 'c'.repeat(10) }), chunk({ tool_calls: [{ index: 0, function: { arguments: '{"a":"bcdef"}' } }] })]
+  const body = new ReadableStream({ start(c) { for (const p of parts) c.enqueue(enc.encode(p)) } })
+  const reader = t.meter('a@x.co', body, 'text/event-stream', 400).getReader()
+  for (let i = 0; i < 3; i++) await reader.read()
+  await reader.cancel()
+  assert.equal(await store.getCount(key('a@x.co')), 400 + Math.ceil(33 / 3))
+})
+
+test('OpenAI JSON usage is counted once; a non-stream response cancelled before its end charges the input estimate', async () => {
+  const { store, t } = make()
+  const json = JSON.stringify({ choices: [{ message: { content: 'hi' } }], usage: { prompt_tokens: 7, completion_tokens: 3 } })
+  assert.equal(await drain(t.meter('a@x.co', stream(json), 'application/json; charset=utf-8', 999)), json)
+  assert.equal(await store.getCount(key('a@x.co')), 10)
+  const reader = t.meter('b@x.co', new ReadableStream({ start(c) { c.enqueue(enc.encode('{"id":')) } }), 'application/json', 25).getReader()
+  await reader.read()
+  await reader.cancel()
+  assert.equal(await store.getCount(key('b@x.co')), 25)
+})
+
+test('a JSON body without usage charges the input estimate plus ceil(generated chars / 3); an unreadable one the estimate', async () => {
+  const { store, t } = make()
+  await drain(t.meter('a@x.co', stream(JSON.stringify({ choices: [{ message: { content: 'a'.repeat(10), reasoning: 'b'.repeat(10), tool_calls: [{ function: { arguments: '{}' } }] } }] })), 'application/json', 100))
+  assert.equal(await store.getCount(key('a@x.co')), 100 + Math.ceil(22 / 3))
+  await drain(t.meter('b@x.co', stream(JSON.stringify({ content: [{ type: 'text', text: 'c'.repeat(9) }] })), 'application/json', 0))
+  assert.equal(await store.getCount(key('b@x.co')), 3)
+  await drain(t.meter('c@x.co', stream('{"error":'), 'application/json', 40))
+  assert.equal(await store.getCount(key('c@x.co')), 40)
+  await drain(t.meter('d@x.co', stream(JSON.stringify({ error: { message: 'no' } })), 'application/json'))
+  assert.equal(await store.getCount(key('d@x.co')), 0, 'an error body with no estimate costs nothing')
+})
+
 test('a failed upstream read still charges what was streamed, then errors the stream', async () => {
   const { store, t } = make()
   const body = new ReadableStream({ start(c) { c.enqueue(enc.encode(start + textDelta('z'.repeat(30)))); setTimeout(() => c.error(new Error('upstream reset')), 20) } })

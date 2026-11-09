@@ -304,9 +304,10 @@ test('locks serialise per key and are released after errors', async () => {
   assert.ok(await store.lease('sweep', 1_000)); assert.equal(await store.lease('sweep', 1_000), false)
 })
 
-test('redis store has the same contract', { skip: !process.env.REDIS_URL && 'set REDIS_URL to run' }, async () => {
+// Flushes the database: only a disposable Redis named by TEST_REDIS_URL, never REDIS_URL (the edge's, as offboarding exports it).
+test('redis store has the same contract', { skip: !process.env.TEST_REDIS_URL && 'set TEST_REDIS_URL to a disposable Redis to run' }, async () => {
   const { createClient } = await import('redis')
-  const client = createClient({ url: process.env.REDIS_URL }); await client.connect(); await client.flushDb()
+  const client = createClient({ url: process.env.TEST_REDIS_URL }); await client.connect(); await client.flushDb()
   const store = redisStore(client)
   await store.putBox('b1', { email: 'a@x.com', active: 1 }); await store.patchBox('b1', { active: 2 })
   assert.deepEqual(await store.getBox('b1'), { email: 'a@x.com', active: 2 })
@@ -1005,4 +1006,33 @@ test('after a completed first set-up, a restart (box exists, still no backup) sa
   const r = await call(await listen(slow), { headers: nav })
   slow.close(); t.s.close()
   assert.match(r.body, /Starting your computer/)
+})
+
+test('the image check (node edge.mjs --check) fails without a module, a dynamically imported module or a runtime file', async () => {
+  const { cpSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } = await import('node:fs')
+  const { spawnSync } = await import('node:child_process')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { fileURLToPath } = await import('node:url')
+  const src = fileURLToPath(new URL('.', import.meta.url))
+  const check = (gone, extra) => {
+    const dir = mkdtempSync(join(tmpdir(), 'edge-image-'))
+    try {
+      cpSync(src, dir, { recursive: true, filter: (f) => !f.includes('node_modules') })
+      symlinkSync(join(src, 'node_modules'), join(dir, 'node_modules'))
+      writeFileSync(join(dir, 'auth-ui/supabase.js'), '')  // the Dockerfile downloads it
+      if (gone) rmSync(join(dir, gone))
+      if (extra) writeFileSync(join(dir, 'extra.mjs'), extra)
+      return spawnSync(process.execPath, ['edge.mjs', '--check'], { cwd: dir, encoding: 'utf8' })
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  }
+  assert.equal(check().status, 0)
+  // capacity.mjs: imported by edge.mjs; halt.mjs: only by main(), dynamically; box/gh: read by main(); extra.mjs: a
+  // double-quoted dynamic import of a missing module, and one that names no literal.
+  for (const [gone, extra, error] of [['capacity.mjs', '', /ERR_MODULE_NOT_FOUND/], ['halt.mjs', '', /ERR_MODULE_NOT_FOUND/], ['box/gh', '', /ENOENT.*box\/gh/],
+    ['', 'export const f = () => import("./gone.mjs")', /Cannot find module .*gone\.mjs/], ['', 'export const f = (m) => import(m)', /extra\.mjs: import\(m\) has no string literal/]]) {
+    const r = check(gone, extra)
+    assert.equal(r.status, 1, gone || extra)
+    assert.match(r.stderr, error, gone || extra)
+  }
 })

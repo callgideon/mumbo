@@ -93,7 +93,8 @@ test('create() starts a project box from projectTemplate with the owners as pane
 })
 
 test('templateArgs defaults', () => {
-  assert.deepEqual(templateArgs(['n', 's', 'img']), { image: 'img', name: 'mumbo-box', memoryMB: 4096, cpuCount: 2 })
-  assert.deepEqual(templateArgs(['n', 's', 'img', 'mumbo-project', '2048', '4']), { image: 'img', name: 'mumbo-project', memoryMB: 2048, cpuCount: 4 })
-  assert.throws(() => templateArgs(['n', 's']), /ECR image/)
+  assert.deepEqual(templateArgs(['n', 's', 'img'], {}), { image: 'img', name: 'mumbo-box', memoryMB: 4096, cpuCount: 2, minAvailMB: 9216 })
+  assert.deepEqual(templateArgs(['n', 's', 'img', 'mumbo-project', '2048', '4'], { MIN_AVAIL_MB: '10240' }), { image: 'img', name: 'mumbo-project', memoryMB: 2048, cpuCount: 4, minAvailMB: 10240 })
+  assert.throws(() => templateArgs(['n', 's'], {}), /ECR image/)
+  for (const bad of ['', 'x', '9.5', '-1']) assert.throws(() => templateArgs(['n', 's', 'img'], { MIN_AVAIL_MB: bad }), /MIN_AVAIL_MB/, bad)
 })

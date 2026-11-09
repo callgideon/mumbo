@@ -6,7 +6,8 @@ import { admitted, config, startScript } from './edge.mjs'
 
 const base = { PUBLIC_HOST: 'boxes.mumbo.si', LLM_HOST: 'llm.boxes.mumbo.si', BACKUP_BUCKET: 'backups' }
 const M1 = ['PROJECT_DOMAIN', 'APPROVE_HOST', 'GITHUB_AGENT_LOGIN', 'GITHUB_AGENT_ID', 'REQUIRED_CHECKS', 'DAILY_TOKENS_USER', 'DAILY_TOKENS_PROJECT', 'BOX_TEMPLATE', 'PROJECT_TEMPLATE',
-  'AUDIT_PREFIX', 'GITHUB_AGENT_TOKEN', 'GITHUB_APP_ID', 'GITHUB_APP_KEY', 'GITHUB_MERGE_TOKEN', 'NTFY_TOPIC', 'SIGNIN_COOKIE', 'SUPABASE_URL', 'MUMBO_OAUTH_REDIRECT_URIS']
+  'AUDIT_PREFIX', 'GITHUB_AGENT_TOKEN', 'GITHUB_APP_ID', 'GITHUB_APP_KEY', 'GITHUB_MERGE_TOKEN', 'NTFY_TOPIC', 'SIGNIN_COOKIE', 'SUPABASE_URL', 'MUMBO_OAUTH_REDIRECT_URIS',
+  'OPENROUTER_MODELS', 'OPENROUTER_API_KEY', 'OPENROUTER_ZDR', 'OPENROUTER_IMAGE_TOKENS']
 /** config() with exactly `base` plus `vars` set among the variables it reads here. */
 function configWith(vars = {}) {
   const all = { ...Object.fromEntries(M1.map(k => [k, undefined])), ...base, ...vars }
@@ -134,4 +135,15 @@ test('MUMBO_OAUTH_REDIRECT_URIS: with SUPABASE_URL, exact origin-and-path URIs o
     'https://boxes.mumbo.si/oauth2/callback,https://boxes.mumbo.si/x?y']) {
     assert.throws(() => configWith({ ...sb, MUMBO_OAUTH_REDIRECT_URIS: bad }), /MUMBO_OAUTH_REDIRECT_URIS/, String(bad))
   }
+})
+
+test('OpenRouter route: off unless OPENROUTER_MODELS names models (exact ids, trimmed); ZDR-only unless OPENROUTER_ZDR=false', () => {
+  const off = configWith()
+  assert.deepEqual(off.openrouterModels, []); assert.equal(off.openrouterKey, undefined); assert.equal(off.openrouterZdr, true)
+  const on = configWith({ OPENROUTER_MODELS: ' qwen/qwen3.8-27b , qwen/Qwen3.5-9b,', OPENROUTER_API_KEY: 'k', OPENROUTER_ZDR: 'false' })
+  assert.deepEqual(on.openrouterModels, ['qwen/qwen3.8-27b', 'qwen/Qwen3.5-9b'])
+  assert.equal(on.openrouterKey, 'k'); assert.equal(on.openrouterZdr, false)
+  assert.equal(off.openrouterImageTokens, 16384)
+  assert.equal(configWith({ OPENROUTER_IMAGE_TOKENS: '0' }).openrouterImageTokens, 0)
+  for (const bad of ['-1', 'many']) assert.throws(() => configWith({ OPENROUTER_IMAGE_TOKENS: bad }), /OPENROUTER_IMAGE_TOKENS/, bad)
 })
