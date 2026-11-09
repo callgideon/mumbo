@@ -3,11 +3,19 @@
 // :8080 is reached only through oauth2-proxy (X-Forwarded-Email is trusted); :8081 serves the model host and
 // accepts only box tokens. Design, review fixes and failure handling: deploy/boxes/DESIGN.md.
 import { createHash, createHmac, createVerify, timingSafeEqual } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { createServer, request as httpRequest } from 'node:http'
 import { Readable } from 'node:stream'
 
 const env = (name, fallback) => process.env[name] ?? fallback ?? (() => { throw new Error(`edge: set ${name}`) })()
 const list = (value) => value.toLowerCase().split(',').map(s => s.trim()).filter(Boolean)
+const optional = (name) => process.env[name] || undefined
+/** Required CI check names (case-sensitive). An empty list would drop the merge gate's CI requirement, so it fails. */
+const checkNames = (name, fallback) => {
+  const names = env(name, fallback).split(',').map(s => s.trim()).filter(Boolean)
+  if (names.length === 0) throw new Error(`edge: ${name} must name at least one check`)
+  return names
+}
 export const config = () => ({
   publicHost: env('PUBLIC_HOST'),
   llmHost: env('LLM_HOST'),
@@ -25,6 +33,20 @@ export const config = () => ({
   upstream: env('MODEL_UPSTREAM', 'https://api.deepseek.com'),
   childTemplates: list(env('CHILD_TEMPLATES', 'mumbo-child')),
   maxChildren: Number(env('MAX_CHILD_SANDBOXES', '10')),
+  // Approvals, GitHub and token budgets. Secrets arrive through the ECS secrets map: the agent token and ntfy topic from
+  // SSM; the id and private key of the mumbo-bot GitHub App, the only identity that merges, from Secrets Manager
+  // mumbo-boxes/github-app.
+  approveHost: env('APPROVE_HOST', `approve.${env('PUBLIC_HOST')}`),
+  agentLogin: optional('GITHUB_AGENT_LOGIN'),  // unset: the approvals poller is off
+  requiredChecks: checkNames('REQUIRED_CHECKS', 'static,unit'),
+  dailyTokensUser: Number(env('DAILY_TOKENS_USER', '20000000')),
+  dailyTokensProject: Number(env('DAILY_TOKENS_PROJECT', '50000000')),
+  projectTemplate: env('PROJECT_TEMPLATE', env('BOX_TEMPLATE', 'mumbo-box')),
+  auditPrefix: env('AUDIT_PREFIX', 'audit/approvals/'),
+  agentToken: optional('GITHUB_AGENT_TOKEN'),
+  appId: optional('GITHUB_APP_ID'),
+  appKey: optional('GITHUB_APP_KEY'),
+  ntfyTopic: optional('NTFY_TOPIC'),
 })
 
 /** Address or @domain allowlist; an empty list admits nobody. */
@@ -46,10 +68,8 @@ export function verifyBox(key, token) {
 }
 export const userPrefix = (email) => `users/${createHash('sha256').update(email.toLowerCase()).digest('hex')}`
 
-// ---- per-user daily request budget, shared by every edge replica through the store.
-export function budget(store, limit) {
-  return async (email, now = new Date()) => (await store.increment(`budget:${now.toISOString().slice(0, 10)}:${email}`, 2 * 86_400)) <= limit
-}
+// ---- per-user daily request budget (budget.mjs, with the token budget).
+export { budget } from './budget.mjs'
 
 /**
  * Where a box is served. A user's box is the site root with a desktop; a project box (principal `project:<id>`) is
@@ -101,7 +121,9 @@ export function boxSite(cfg, principal) {
 }
 
 // ---- inside a box. It never sees a server secret: its DeepSeek key is its own box token, valid only via LLM_HOST.
-export function startScript(cfg, token, site = boxSite(cfg, ''), role = '', memberKeyText) {
+// memberKeyText: a project box's member key (base64url). boxFiles: { proxy, gh }, the texts of box/github-local-proxy.mjs
+// and box/gh as read by main() at start, for project boxes; not written into boxes yet.
+export function startScript(cfg, token, site = boxSite(cfg, ''), role = '', memberKeyText, boxFiles) {
   const llm = `https://${cfg.llmHost}`
   return `#!/bin/sh
 # Start dsh web for this box's user. Re-runnable: the router calls it again when dsh is found dead.
@@ -179,7 +201,7 @@ export async function inParallel(items, limit, fn) {
 
 // ---- the router's view of E2B. `e2b` is the SDK module and `store` the shared state (store.mjs); both are injected.
 // A box record: { email, launch, traffic, active, extended, backedUp, paused }.
-export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, log = console.log }) {
+export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFiles, log = console.log }) {
   const LOCK_MS = 120_000
   const CREATE_STALE_MS = 15 * 60_000  // longer than a restore (11 min cap) plus dsh start
   const say = (fields) => log(JSON.stringify({ edge: 'box', ...fields }))
@@ -219,7 +241,7 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, log = 
     await store.putBox(box.sandboxId, { email, creating: Date.now(), active: Date.now(), extended: Date.now(), backedUp: Date.now(), paused: false })
     try {
       await box.files.write('/root/.mumbo/start.sh', startScript(cfg, signBox(edgeKey, email, box.sandboxId), boxSite(cfg, email), roleInstructions(cfg, email),
-        email.startsWith('project:') ? memberKey(edgeKey, box.sandboxId).toString('base64url') : undefined))
+        email.startsWith('project:') ? memberKey(edgeKey, box.sandboxId).toString('base64url') : undefined, boxFiles))
       const restoreUrl = await presignGet(`${userPrefix(email)}/latest.tar.gz`)
       if (restoreUrl) {
         const ok = await run(box, restoreCommand(restoreUrl), 660_000).then(() => true, () => false)
@@ -431,7 +453,7 @@ export function boxHeaders(cfg, incoming, target, port = '3080', siteHost = cfg.
   if (target.traffic) out['e2b-traffic-access-token'] = target.traffic
   return out
 }
-const esc = (v) => String(v).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
+export const esc = (v) => String(v).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 /** The signed-in person's home: their assistant, their desktop and the shared projects they belong to. Edge-served,
  *  so it loads without starting any box. */
 export function homePage(res, email, projects) {
@@ -465,8 +487,12 @@ export const secureCookies = (headers) => {
 /** A browser with no dsh cookie and no token is sent to the token exchange, as nginx did for the shared server. */
 export const needsLaunch = (req) => req.method === 'GET' && !/(?:^|;\s*)dsh-auth-/.test(req.headers.cookie ?? '') && !new URL(req.url, 'http://x').searchParams.has('token')
 const isNavigation = (req) => req.method === 'GET' && String(req.headers.accept ?? '').includes('text/html')
+/** The request's Host, lowercased and without a port. */
+const hostOf = (req) => String(req.headers.host ?? '').toLowerCase().replace(/:\d+$/, '')
 
-export function userServer({ cfg, box, verifyAlb, projects, log = console.log }) {
+/** Signed-in users' traffic. Only the public host reaches boxes; `approve` (approve-page.mjs) serves cfg.approveHost,
+ *  an origin no box serves; any other host answers 404. */
+export function userServer({ cfg, box, verifyAlb, projects, approve, log = console.log }) {
   const identify = async (req) => verifyAlb
     ? (await verifyAlb(req.headers['x-amzn-oidc-data']).catch(() => undefined)) ?? ''
     : String(req.headers['x-forwarded-email'] ?? '').toLowerCase()
@@ -476,6 +502,12 @@ export function userServer({ cfg, box, verifyAlb, projects, log = console.log })
     const email = await identify(req)
     if (!email.includes('@')) return json(res, 401, { error: 'not signed in' })
     if (!admitted(cfg.allowed, email)) return page(res, 403, 'mumbo boxes are invite-only for now. This account is not on the list yet.', false)
+    const host = hostOf(req)
+    if (host === cfg.approveHost && approve) return approve(req, res, email).catch((e) => {
+      log(JSON.stringify({ edge: 'error', user: email, host, error: e.message }))
+      if (!res.headersSent) page(res, 500, 'The approve page failed. Reload to try again.', false); else res.destroy()
+    })
+    if (host !== cfg.publicHost) return page(res, 404, 'Not found.', false)
     if (req.url === '/home' || req.url === '/home/') return homePage(res, email, await projects?.list(email) ?? [])
     const to = boxRoute(req.url)
     if (to.redirect) return res.writeHead(302, { location: to.redirect, 'cache-control': 'no-store' }).end()
@@ -502,6 +534,8 @@ export function userServer({ cfg, box, verifyAlb, projects, log = console.log })
     req.pipe(up)
   })
   server.on('upgrade', async (req, socket, head) => {
+    // As for HTTP, only the public host's WebSockets reach a box; the approve host and unknown hosts are refused.
+    if (hostOf(req) !== cfg.publicHost) return socket.destroy()
     const email = await identify(req)
     if (!email.includes('@') || !admitted(cfg.allowed, email)) return socket.destroy()
     try {
@@ -513,7 +547,8 @@ export function userServer({ cfg, box, verifyAlb, projects, log = console.log })
       const headers = { ...boxHeaders(cfg, req.headers, target, to.port, boxSite(cfg, to.project ? `project:${to.project}` : email).host), ...(member ? { 'x-mumbo-member': member } : {}), connection: 'Upgrade', upgrade: req.headers.upgrade ?? 'websocket' }
       const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: to.path, headers })
       up.on('upgrade', (r, upSocket, upHead) => {
-        socket.write(`HTTP/1.1 101 Switching Protocols\r\n${Object.entries(r.headers).map(([k, v]) => `${k}: ${v}`).join('\r\n')}\r\n\r\n`)
+        const lines = Object.entries(secureCookies({ ...r.headers })).flatMap(([k, v]) => [v].flat().map(x => `${k}: ${x}`))
+        socket.write(`HTTP/1.1 101 Switching Protocols\r\n${lines.join('\r\n')}\r\n\r\n`)
         if (upHead.length) socket.write(upHead)
         if (head.length) upSocket.write(head)
         let last = 0
@@ -531,7 +566,9 @@ export function userServer({ cfg, box, verifyAlb, projects, log = console.log })
 
 /** Model and search calls from boxes. Only paths dsh uses are forwarded; the box token is swapped for the server key. */
 export const MODEL_PATHS = [/^\/anthropic\//, /^\/models$/, /^\/v1\/tools\//]
-export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, mcp, fetchImpl = fetch, log = console.log }) {
+// github (github.mjs), halt (halt.mjs) and tokens (budget.mjs tokenBudget) are optional like mcp: absent, /github/
+// answers 404, nothing is halted and tokens are not counted. main() passes all of them.
+export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, mcp, github, halt, tokens, fetchImpl = fetch, log = console.log }) {
   return createServer((req, res) => route(req, res).catch((e) => {
     log(JSON.stringify({ edge: 'error', path: req.url?.split('?')[0], error: e.message }))
     if (!res.headersSent) json(res, 502, { error: 'edge error' }); else res.destroy()
@@ -547,8 +584,12 @@ export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, mcp, f
     const path = new URL(req.url, 'http://x').pathname
     // Child sandboxes (sandboxes.mjs) for the same verified box; they count as activity but not against the model budget.
     if (path === '/mcp' && mcp) { Promise.resolve(touch(claim.b)).catch(() => {}); return mcp(req, res) }
+    // GitHub for project boxes; the forwarder applies its own rules and the stop switch.
+    if (path.startsWith('/github/') && github) return github(req, res, claim)
     if (!MODEL_PATHS.some(p => p.test(path))) return json(res, 404, { error: 'not found' })
+    if (halt && await halt.isHalted(claim.u)) return json(res, 503, { type: 'error', error: { type: 'api_error', message: 'Stopped by the founder' } })
     if (!(await allow(claim.u))) return json(res, 429, { type: 'error', error: { type: 'rate_limit_error', message: 'Daily model budget reached for this account.' } })
+    if (tokens && !(await tokens.allow(claim.u))) return json(res, 429, { type: 'error', error: { type: 'rate_limit_error', message: `Daily token budget reached for ${claim.u}` } })
     Promise.resolve(touch(claim.b)).catch(() => {})
     const chunks = []
     for await (const c of req) chunks.push(c)
@@ -563,7 +604,8 @@ export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, mcp, f
     for (const [k, v] of upstream.headers) if (!['content-encoding', 'content-length', 'transfer-encoding', 'connection', 'set-cookie'].includes(k)) out[k] = v
     res.writeHead(upstream.status, out)
     if (upstream.body === null) return void res.end()
-    Readable.fromWeb(upstream.body).on('error', () => res.destroy()).pipe(res)
+    const body = tokens ? tokens.meter(claim.u, upstream.body, upstream.headers.get('content-type')) : upstream.body
+    Readable.fromWeb(body).on('error', () => res.destroy()).pipe(res)
   }
 }
 
@@ -594,7 +636,9 @@ async function main() {
     try { await s3.send(new HeadObjectCommand({ Bucket: cfg.bucket, Key: key })) } catch (e) { if (e.name === 'NotFound') return undefined; throw e }
     return getSignedUrl(s3, new GetObjectCommand({ Bucket: cfg.bucket, Key: key }), { expiresIn: 900 })
   }
-  const box = boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut })
+  // For project boxes' start script; read here so a missing file stops the edge at start.
+  const boxFiles = { proxy: readFileSync(new URL('./box/github-local-proxy.mjs', import.meta.url), 'utf8'), gh: readFileSync(new URL('./box/gh', import.meta.url), 'utf8') }
+  const box = boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFiles })
   const verifyAlb = process.env.ALB_ARN ? albIdentity({ albArn: env('ALB_ARN'), region }) : undefined
   const listenHost = env('LISTEN_HOST', '127.0.0.1')  // beyond loopback only behind an ALB, where identity is the ALB token
   // The model host authenticates every call by box token and source address, so it may listen beyond loopback.
@@ -604,10 +648,38 @@ async function main() {
   const { projects: projectStore, projectRelay } = await import('./projects.mjs')
   const proj = projectStore({ store, admitted: (e) => admitted(cfg.allowed, e) })
   const relay = projectRelay({ store, projects: proj, box, boxFetch: boxFetcher(cfg), siteHostOf: (p) => boxSite(cfg, p).host })
-  userServer({ cfg, box, verifyAlb, projects: proj }).listen(8080, listenHost, () => console.log(`edge: users on ${listenHost}:8080`))
+
+  // ---- approvals, stop switch, token budgets and the GitHub forwarder (design sections 5 and 12)
+  const { budget, tokenBudget } = await import('./budget.mjs')
+  const { haltService } = await import('./halt.mjs')
+  const { ntfy } = await import('./notify.mjs')
+  const { approvalsService } = await import('./approvals.mjs')
+  const { approvePage } = await import('./approve-page.mjs')
+  const { githubForwarder } = await import('./github.mjs')
+  const now = () => Date.now()
+  const halt = haltService({ store })
+  const notify = ntfy({ topic: cfg.ntfyTopic, fetchImpl: fetch })
+  // Every grant: one log line, then the record in the backup bucket (KMS by bucket default). A failed write rejects.
+  const audit = async (record) => {
+    const ts = now()
+    const key = `${cfg.auditPrefix}${new Date(ts).toISOString().slice(0, 10)}/${record.id}-${ts}.json`
+    console.log(JSON.stringify({ edge: 'audit', key, ...record }))
+    await s3.send(new PutObjectCommand({ Bucket: cfg.bucket, Key: key, Body: JSON.stringify(record), ContentType: 'application/json' }))
+  }
+  const csrfKey = createHmac('sha256', edgeKey).update('approve-csrf').digest()
+  const approvals = approvalsService({ store, github: { agentToken: cfg.agentToken, app: { appId: cfg.appId, privateKey: cfg.appKey }, agentLogin: cfg.agentLogin, requiredChecks: cfg.requiredChecks }, notify, audit, fetchImpl: fetch, now, approveHost: cfg.approveHost })
+  const approve = approvePage({ approvals, halt, store, csrfKey, host: cfg.approveHost })
+  const tokens = tokenBudget({ store, limits: { user: cfg.dailyTokensUser, project: cfg.dailyTokensProject }, now })
+  const github = githubForwarder({ store, halt, agentToken: cfg.agentToken, fetchImpl: fetch })
+  // One replica polls GitHub each minute: the 55 s lease lapses before the next tick. Off without GITHUB_AGENT_LOGIN.
+  if (cfg.agentLogin) {
+    setInterval(() => store.lease('approvals:poll', 55_000).then(won => won && approvals.poll()).catch(e => console.error('edge: approvals poll', e.message)), 60_000).unref()
+  }
+
+  userServer({ cfg, box, verifyAlb, projects: proj, approve }).listen(8080, listenHost, () => console.log(`edge: users on ${listenHost}:8080`))
   const { children, mcpServer } = await import('./sandboxes.mjs')
   const mcp = mcpServer({ ops: children({ e2b, cfg }), projects: proj, relay, claimOf: (info) => verifyBox(edgeKey, String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
-  modelServer({ cfg, edgeKey, modelKey, allow: budget(store, cfg.dailyRequests), owns: box.owns, touch: box.touch, mcp })
+  modelServer({ cfg, edgeKey, modelKey, allow: budget(store, cfg.dailyRequests), owns: box.owns, touch: box.touch, mcp, github, halt, tokens })
     .listen(8081, modelHost, () => console.log(`edge: model host on ${modelHost}:8081`))
 }
 

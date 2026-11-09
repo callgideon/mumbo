@@ -5,7 +5,7 @@
   "description": "Routes each user to their box, proxies model calls, presigns backups. See ../DESIGN.md.",
   "scripts": {
     "start": "node edge.mjs",
-    "test": "node --test edge.test.mjs"
+    "test": "node --test"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1164.0",
@@ -15,6 +15,7 @@
     "@modelcontextprotocol/node": "2.0.0",
     "@modelcontextprotocol/server": "2.2.0",
     "e2b": "2.63.0",
+    "graphql": "16.9.0",
     "redis": "4.7.0",
     "zod": "4.4.3"
   }

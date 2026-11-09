@@ -7,9 +7,11 @@ import { memoryStore, redisStore } from './store.mjs'
 import { generateKeyPairSync, createSign } from 'node:crypto'
 
 const cfg = { publicHost: 'boxes.example', llmHost: 'llm.example', template: 'mumbo-box', idleMs: 60_000, backupEveryMs: 600_000, maxRunning: 5, allowed: ['@x.com'], egressIps: [], proxy: new URL('http://127.0.0.1:1'), upstream: 'https://model.example' }
+// The user router serves only its public host; fetch cannot set Host, so fetch-driven router tests serve 127.0.0.1.
+const local = { ...cfg, publicHost: '127.0.0.1' }
 const listen = (server) => new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port)))
 const call = (port, { method = 'GET', path = '/', headers = {}, body } = {}) => new Promise((resolve, reject) => {
-  const req = request({ host: '127.0.0.1', port, method, path, headers }, (res) => {
+  const req = request({ host: '127.0.0.1', port, method, path, headers: { host: cfg.publicHost, ...headers } }, (res) => {
     let data = ''; res.on('data', c => { data += c }); res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: data }))
   })
   req.on('error', reject); req.end(body)
@@ -172,6 +174,34 @@ test('model host swaps the box token for the server key, checks ownership, sourc
   allowed = false
   assert.equal((await call(port, { method: 'POST', path: '/anthropic/v1/messages', headers: { ...from, 'x-api-key': tok } })).status, 429)
   s.close()
+})
+
+test('model host hooks: /github/ reaches the forwarder after the token check; halt answers 503 uncounted; token budget after the request count; bodies metered', async () => {
+  const forwarded = []; const counted = []; const metered = []
+  const fetchImpl = async () => new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
+  const s = modelServer({ cfg, edgeKey: 'k', modelKey: 'SERVER', owns: async () => true, touch: () => {}, fetchImpl, log: () => {},
+    allow: async (u) => { counted.push(`requests ${u}`); return true },
+    github: async (req, res, claim) => { forwarded.push([req.url, claim.u]); res.writeHead(204).end() },
+    halt: { isHalted: async (u) => u === 'halted@x.com' },
+    tokens: { allow: async (u) => { counted.push(`tokens ${u}`); return u !== 'spent@x.com' }, meter: (u, body, type) => { metered.push([u, type]); return body } } })
+  const port = await listen(s)
+  const as = (u) => ({ 'x-api-key': signBox('k', u, 'b1') })
+  const model = (u) => call(port, { method: 'POST', path: '/anthropic/v1/messages', headers: as(u), body: '{}' })
+  try {
+    assert.equal((await call(port, { path: '/github/api.github.com/user?x=1', headers: as('project:0123456789abcdef') })).status, 204)
+    assert.equal((await call(port, { path: '/github/api.github.com/user', headers: { 'x-api-key': 'nope' } })).status, 401)
+    assert.deepEqual(forwarded, [['/github/api.github.com/user?x=1', 'project:0123456789abcdef']])
+    const halted = await model('halted@x.com')
+    assert.equal(halted.status, 503)
+    assert.deepEqual(JSON.parse(halted.body), { type: 'error', error: { type: 'api_error', message: 'Stopped by the founder' } })
+    const spent = await model('spent@x.com')
+    assert.equal(spent.status, 429)
+    assert.equal(JSON.parse(spent.body).error.message, 'Daily token budget reached for spent@x.com')
+    assert.deepEqual(counted, ['requests spent@x.com', 'tokens spent@x.com'], 'a halted call is not counted; requests are counted before tokens')
+    const ok = await model('a@x.com')
+    assert.equal(ok.status, 200); assert.equal(ok.body, '{"ok":true}')
+    assert.deepEqual(metered, [['a@x.com', 'application/json']])
+  } finally { s.close() }
 })
 
 test('after a restart the edge adopts running boxes and backs them up on the next sweep', async () => {
@@ -434,7 +464,7 @@ test('project paths reach the project box for members only, with its own launch 
   const box = { ensure: async (principal) => { ensured.push(principal); return { id: principal === 'a@x.com' ? 'ubox' : 'pbox', token: 'TOK' } }, touch: async () => {}, forget: async () => {} }
   const proj = projectStore({ store: memoryStore(), admitted: () => true, log: () => {} })
   const { id } = await proj.create('a@x.com', 'P')
-  const server = userServer({ cfg: { ...cfg, allowed: ['@x.com'] }, box, projects: proj, log: () => {} })
+  const server = userServer({ cfg: { ...local, allowed: ['@x.com'] }, box, projects: proj, log: () => {} })
   await new Promise(r => server.listen(0, '127.0.0.1', r))
   const base = `http://127.0.0.1:${server.address().port}`
   const go = (path, email) => fetch(base + path, { headers: { 'x-forwarded-email': email, accept: 'text/html' }, redirect: 'manual' })
@@ -538,7 +568,7 @@ test('home page lists the assistant, desktop and the member\'s projects without 
   const proj = projectStore({ store: memoryStore(), admitted: () => true, log: () => {} })
   const { id } = await proj.create('a@x.com', '<b>Shop</b>')
   await proj.create('c@x.com', 'Not mine')
-  const server = userServer({ cfg: { ...cfg, allowed: ['@x.com'] }, box, projects: proj, log: () => {} })
+  const server = userServer({ cfg: { ...local, allowed: ['@x.com'] }, box, projects: proj, log: () => {} })
   await new Promise(r => server.listen(0, '127.0.0.1', r))
   try {
     const html = await (await fetch(`http://127.0.0.1:${server.address().port}/home`, { headers: { 'x-forwarded-email': 'a@x.com' } })).text()
@@ -596,7 +626,7 @@ test('routing: browser member headers are stripped; member-capable project boxes
   const capable = (await proj.create('a@x.com', 'Capable')).id
   const legacy = (await proj.create('a@x.com', 'Legacy')).id
   const box = { ensure: async (p) => p === `project:${capable}` ? { id: 'pbox', token: 'OWNER', member: (e) => memberHeader(key, e) } : { id: p === 'a@x.com' ? 'ubox' : 'lbox', token: 'OWNER' }, touch: async () => {}, forget: async () => {} }
-  const server = userServer({ cfg: { ...cfg, allowed: ['@x.com'], proxy: new URL(`http://127.0.0.1:${upstream.address().port}`) }, box, projects: proj, log: () => {} })
+  const server = userServer({ cfg: { ...local, allowed: ['@x.com'], proxy: new URL(`http://127.0.0.1:${upstream.address().port}`) }, box, projects: proj, log: () => {} })
   await new Promise(r => server.listen(0, '127.0.0.1', r))
   const base = `http://127.0.0.1:${server.address().port}`
   const go = (path, extra = {}) => fetch(base + path, { headers: { 'x-forwarded-email': 'a@x.com', accept: 'text/html', cookie: 'dsh-auth-x=1', ...extra }, redirect: 'manual' })
