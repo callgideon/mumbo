@@ -95,6 +95,19 @@ These are collected from M1 on.
     - Direction: the agent's shell runs as a non-root user with no route to CDP. Chromium and the browser-use MCP run as their own user. An owner-match firewall rule admits only that MCP process to CDP, and the MCP process enforces consent.
 - **A project box** holds one project's code and a project token. It holds no person's accounts or secrets.
   - It is served on its own origin, `p-<id>.boxes.mumbo.si`, never under the founder's origin. Otherwise script it serves could drive the founder's box.
+- **Agent containment inside every box** **[my call]**.
+  - **What it requires.** The agent's shell and file tools run as a non-root user that cannot:
+    - read the box's credentials: the box token, `MUMBO_MEMBER_KEY`, the dsh launch token in `/root/dsh.log`, the local CA key;
+    - reach Chromium's CDP port.
+  - **Who holds the credentials.** Only root-owned processes: the dsh server, MCP clients, and the box-local GitHub proxy.
+  - **Why.**
+    - Today the agent is root. Anyone who can ask it to run a command (a project member, or injected content) can read those credentials.
+    - All boxes share the node NAT IPs, so a stolen box token works from any mumbo box. For example, a member could act as `project:<id>` from their own box, with its budget, sandbox tools and `project_message`.
+  - **When.** Acceptable while the founder is every project's only member (M1). It must land before part C trusts account writes and before a second person joins any project (part D).
+  - **Options to evaluate.**
+    - dsh's own sandbox (bubblewrap/Landlock). It was unavailable on Fargate but may work inside a Firecracker VM, and it covers file tools too.
+    - A shell provider that switches user. This alone leaves the file tools, which run in the dsh process, unconfined.
+  - **Binding the box token to the sandbox's identity**, instead of the shared NAT IPs, was considered. Every credential a box could present to prove its identity sits inside the box, so binding adds nothing without containment. Do containment first. Then expire box tokens and have a root process refresh them.
 - **Content from anyone not on a node's allowlist is data,** never instructions and never an explicit request. Examples: a stranger's GitHub comment, a fetched web page, a forwarded message.
 
 ## 3. Architecture at a glance
@@ -293,7 +306,11 @@ Not built now. The platform comes first. When this comes back, start from these 
   - **Workflow files.** Changes under `.github/workflows` are refused by GitHub itself, because the agent token has no `workflow` scope. Other `.github/` files are flagged as protected at approval time.
   - **Token type.** The agent token is a classic token with `repo` and `notifications` scopes. Superagent's GitHub Source reads notifications, which fine-grained tokens cannot.
   - Superagent's GitHub Source runs through the same proxy.
-- **Merge bot.** A second account; only the edge's approval service uses its token **[founder]**.
+- **Merge bot.** The existing `mumbo-bot` GitHub App (id 5295930, installed on the `callgideon` organization) **[founder]**.
+  - Its credentials are in Secrets Manager `mumbo-boxes/github-app`, and only the edge's approval service reads them.
+  - For each merge, the edge mints a token limited to the one repository, with contents and pull requests write only. It merges, then revokes the token.
+  - Merges show as `mumbo-bot[bot]`.
+  - The agent stays a machine user for now. Moving it onto the App needs superagent's GitHub Source to work without `/user` and notifications.
 - **Until public launch, the edge proxy is the only enforcement** **[founder: branch rules wait]**.
   - The agent token never leaves the edge, so agents can push only what the proxy allows. Before merging, the edge checks CI on the SHA itself (section 5).
   - What is not covered until launch: a direct push to `main` by any other credential, such as a person's own or the upstream-sync token.

@@ -105,6 +105,10 @@ PR #16 is merged (9c4eae19b5), so A7 branches from `origin/main`. The merge bot 
 5. **C2 step 3:** the PR is merged by `mumbo-bot[bot]` at exactly that SHA. Anywhere this plan says merge-bot account, read the App.
 6. **Unchanged:** the merge bot stays off superagent's allowlist; merges end Tickets through polling.
 
+## Amendment 3: one person per project until agent containment (mumbo-design, 2026-11-09)
+
+Today a project member can make the coordinator read the box token, `MUMBO_MEMBER_KEY` and the launch token (spec section 2, "Agent containment inside every box"). Until containment lands, `projects.addMember` refuses every email except the project's owner, with 403 and the message "Projects take more members once agent containment lands." The `project_add_member` MCP tool and any page that adds members use that same check. Whichever wave-1 task first edits `projects.mjs` owns this change and its test, which checks that adding a second email gives 403. Remove the check, in the same PR, when containment is merged.
+
 ## How to run this plan in parallel
 
 **Branches.**
