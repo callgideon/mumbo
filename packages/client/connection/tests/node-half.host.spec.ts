@@ -22,6 +22,13 @@ import {
 import { DEFAULT_MAX_REQUEST_BODY_BYTES } from '../src/http-bridge.ts'
 import { provideBrowserCredentials } from './browser-credentials.ts'
 
+declare module '@deepseek-ai/dsh-typert-protocol' {
+  interface PrincipalMap {
+    /** Test-only non-owner admitted by a registered authenticator. */
+    'test-member': { readonly kind: 'test-member'; readonly name: string }
+  }
+}
+
 /** The Peer an index render speaks for; this listener reads no field of it. */
 const PAGE_PEER = { principal: { kind: 'owner' } } as Parameters<WebServer['renderIndex']>[1]
 
@@ -739,7 +746,7 @@ describe('operator-scoped connect', () => {
       const denied = fakeResponse()
       expect(host.connection.authorizeIndex(fakeRequest(
         { host: 'localhost', cookie: api.cookie }, '/',
-      ), denied.response)).toBe(false)
+      ), denied.response)).toBeUndefined()
       expect(denied.state.status).toBe(401)
     } finally { await host.dispose() }
   })
@@ -870,7 +877,7 @@ describe('operator-scoped connect', () => {
       await two.release()
       expect(admitted(host.connection, browser.cookie)).toBe(browserPeer)
       const refresh = fakeResponse()
-      expect(host.connection.authorizeIndex(fakeRequest({ host: 'localhost', cookie: browser.cookie }, '/'), refresh.response)).toBe(true)
+      expect(host.connection.authorizeIndex(fakeRequest({ host: 'localhost', cookie: browser.cookie }, '/'), refresh.response)).toBe(browserPeer)
       const cleanup = vi.fn()
       browserPeer.ctx.effect(() => cleanup)
       await host.dispose()
@@ -882,6 +889,86 @@ describe('operator-scoped connect', () => {
         expect(admitted(restarted.connection, browser.cookie)).not.toBe(browserPeer)
         expect(restarted.connection.admit(fakeRequest({ host: 'localhost', cookie: api.cookie }))).toEqual({ rejection: 401 })
       } finally { await restarted.dispose() }
+    } finally { await host.dispose() }
+  })
+})
+
+describe('non-owner authenticators', () => {
+  /** Admit requests carrying `x-test-member: <name>` as one fixed member Peer each. */
+  function memberAuthenticator(ctx: Context): (name: string) => PeerScope {
+    const peers = new Map<string, PeerScope>()
+    const peerFor = (name: string): PeerScope => {
+      let peer = peers.get(name)
+      if (peer === undefined) {
+        peer = ctx.connection.createPeer({ principal: { kind: 'test-member', name } })
+        peers.set(name, peer)
+      }
+      return peer
+    }
+    ctx.connection.authenticators.register((request) => {
+      const name = new Headers(request.headers as Record<string, string>).get('x-test-member')
+      return name === null ? undefined : peerFor(name)
+    })
+    return peerFor
+  }
+
+  it('admits a trusted request as the authenticator Peer before browser credentials', async () => {
+    const host = await mounted()
+    try {
+      const member = memberAuthenticator(host.ctx)
+      const cookie = browserCookie(host.connection, 'localhost')
+      const admission = host.connection.admit(fakeRequest({ host: 'localhost', cookie, 'x-test-member': 'ann' }))
+      expect(admission).toEqual({ peer: member('ann') })
+      expect(host.connection.admit(fakeRequest({ host: 'localhost', cookie }))).toEqual({ peer: host.connection.browserPeer })
+      expect(host.connection.admit(fakeRequest({ host: 'localhost' }))).toEqual({ rejection: 401 })
+      expect(host.connection.admit(fakeRequest({ host: 'evil.example', 'x-test-member': 'ann' }))).toEqual({ rejection: 403 })
+    } finally { await host.dispose() }
+  })
+
+  it('consults authenticators in registration order and passes over an undefined answer', async () => {
+    const host = await mounted()
+    try {
+      const silent = vi.fn((): undefined => undefined)
+      host.ctx.connection.authenticators.register(silent)
+      const member = memberAuthenticator(host.ctx)
+      const request = fakeRequest({ host: 'localhost', 'x-test-member': 'bo' })
+      expect(host.connection.admit(request)).toEqual({ peer: member('bo') })
+      expect(silent).toHaveBeenCalledWith(request)
+    } finally { await host.dispose() }
+  })
+
+  it('keeps sibling Web routes owner-only', async () => {
+    const host = await mounted()
+    try {
+      memberAuthenticator(host.ctx)
+      const cookie = browserCookie(host.connection, 'localhost')
+      expect(host.connection.requestRejection(fakeRequest({ host: 'localhost', 'x-test-member': 'ann' }))).toBe(403)
+      expect(host.connection.requestRejection(fakeRequest({ host: 'localhost', cookie }))).toBeUndefined()
+    } finally { await host.dispose() }
+  })
+
+  it('renders the index for the authenticator Peer without minting a cookie', async () => {
+    const host = await mounted()
+    try {
+      const member = memberAuthenticator(host.ctx)
+      const served = fakeResponse()
+      expect(host.connection.authorizeIndex(fakeRequest({ host: 'localhost', 'x-test-member': 'ann' }, '/'), served.response)).toBe(member('ann'))
+      expect(served.state).toEqual({})
+      const untrusted = fakeResponse()
+      expect(host.connection.authorizeIndex(fakeRequest({ host: 'evil.example', 'x-test-member': 'ann' }, '/'), untrusted.response)).toBeUndefined()
+      expect(untrusted.state.status).toBe(401)
+    } finally { await host.dispose() }
+  })
+
+  it('removes an authenticator with the fiber that registered it', async () => {
+    const host = await mounted()
+    try {
+      const fiber = host.ctx.plugin({ inject: ['connection'], apply: (ctx: Context) => { memberAuthenticator(ctx) } })
+      await fiber.await()
+      const request = fakeRequest({ host: 'localhost', 'x-test-member': 'ann' })
+      expect('peer' in host.connection.admit(request)).toBe(true)
+      await fiber.dispose()
+      expect(host.connection.admit(request)).toEqual({ rejection: 401 })
     } finally { await host.dispose() }
   })
 })

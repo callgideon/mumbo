@@ -175,6 +175,31 @@ export interface HostConnectionFetch {
   register(route: ConnectionFetchRoute): () => Promise<void>
 }
 
+/**
+ * Admit one trusted request as a non-owner Peer from a credential the
+ * authenticator owns, such as a signed proxy header.
+ *
+ * Connection calls it synchronously after its Host/Origin fence and before
+ * browser and API credentials. Returning undefined passes the request on to
+ * the next authenticator and then to owner authentication; an authenticator
+ * never refuses a request. The returned Peer must carry a non-owner principal
+ * and stay live while the authenticator is registered; its creator owns its
+ * disposal.
+ * @param request - request headers from the HTTP or upgrade request.
+ * @returns the Peer this credential speaks for, or undefined when the request carries none.
+ */
+export type ConnectionAuthenticator = (request: ConnectionTrustRequest) => PeerScope | undefined
+
+/** Host registry for non-owner authenticators consulted by admission. */
+export interface HostConnectionAuthenticators {
+  /**
+   * Register one authenticator; registration order decides which one answers first.
+   * @param authenticator - synchronous credential check returning a non-owner Peer.
+   * @returns asynchronous disposer removing this authenticator.
+   */
+  register(authenticator: ConnectionAuthenticator): () => Promise<void>
+}
+
 /** Host registry for logical RPC channels carried by the current transport. */
 export interface HostConnectionRpc {
   /**
@@ -208,6 +233,8 @@ export interface HostConnectionHandle {
   readonly rpc: HostConnectionRpc
   /** Exact Fetch routes for streaming or browser-native responses. */
   readonly fetch: HostConnectionFetch
+  /** Non-owner authenticators consulted before browser and API credentials. */
+  readonly authenticators: HostConnectionAuthenticators
   /** The owner Peer every authenticated browser connection shares. */
   readonly browserPeer: PeerScope
 
@@ -225,17 +252,19 @@ export interface HostConnectionHandle {
   createSharedFetchHandler(channel: '/api'): ConnectionFetchHandler
 
   /**
-   * Apply Connection's Host/Origin checks and browser authentication to
-   * another Web route.
+   * Apply Connection's Host/Origin checks and owner authentication to another
+   * Web route. Such routes bypass Gateway access checks, so a request an
+   * authenticator admits as a non-owner is refused with 403.
    * @param request - request headers from the HTTP or upgrade request.
    * @returns rejection status, or undefined when the route may accept the request.
    */
   requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection
 
   /**
-   * Admit an HTTP request against its signed browser or API credential and live Peer.
+   * Admit an HTTP request: the first registered authenticator that names a
+   * Peer wins; otherwise the signed browser or API credential and its live Peer.
    * @param request - request headers from the HTTP or upgrade request.
-   * @returns the credential's Peer, or the rejection status.
+   * @returns the admitted Peer, or the rejection status.
    */
   admit(request: ConnectionTrustRequest): PeerAdmission
 
@@ -257,13 +286,14 @@ export interface HostConnectionHandle {
 
   /**
    * Authenticate one frontend index request, owning a token redirect or 401.
-   * The cookie this mints is `Secure` when the mounted Web carrier serves TLS,
-   * which only that listener's protocol decides.
+   * A trusted request a registered authenticator admits is served for that
+   * Peer without minting a cookie. The cookie this mints is `Secure` when the
+   * mounted Web carrier serves TLS, which only that listener's protocol decides.
    * @param request - root or configured-index HTTP request.
-   * @param response - response owned when the result is false.
-   * @returns true only when the frontend may serve index.html.
+   * @param response - response owned when the result is undefined.
+   * @returns the Peer the index renders for, or undefined when the response was written.
    */
-  authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): boolean
+  authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): PeerScope | undefined
 
   /**
    * Add the fresh process token to an ordinary Web application URL.

@@ -98,7 +98,14 @@ export async function apply(ctx: Context, config: HostPluginConfig): Promise<voi
             res.writeHead(405, { allow: 'GET, HEAD' }).end()
             return
           }
-          if (!ctx.connection.authorizeIndex(req, res)) return
+          const peer = ctx.connection.authorizeIndex(req, res)
+          if (peer === undefined) return
+          // DevTools reads the whole Host outside Gateway access checks, so only the owner opens it.
+          // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+          if (peer.principal.kind !== 'owner') {
+            res.writeHead(403).end('forbidden')
+            return
+          }
           const url = new URL(req.url ?? '/', 'http://inspector.invalid')
           if (url.pathname === DEVTOOLS_PATH || url.pathname === `${DEVTOOLS_PATH}/`) {
             const location = `${url.pathname === DEVTOOLS_PATH ? 'devtools/' : ''}devtools_app.html${url.search}`

@@ -124,7 +124,7 @@ describe.skipIf(!requiredArtifacts)('Goal Remote built LIB chain', () => {
       const apiRoute = apiRoutes[0]
       const server = createServer((request, response) => {
         if ((request.url ?? '/').startsWith('/?')) {
-          if (host.connection.authorizeIndex(request, response)) {
+          if (host.connection.authorizeIndex(request, response) !== undefined) {
             response.writeHead(200, { 'content-type': 'text/html' })
             response.end('<body>shell</body>')
           }
