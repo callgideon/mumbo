@@ -138,10 +138,10 @@ describe('provider lifecycle', () => {
     await fiber
     await takeFrame()
     behave = hangInput
-    const running = call({ action: 'click', x: 1, y: 1 })
+    const running = expect(call({ action: 'click', x: 1, y: 1 })).rejects.toThrow()
     await new Promise(resolve => setImmediate(resolve))
     await fiber.dispose()
-    await expect(running).rejects.toThrow()
+    await running
     // The interrupted click and unload each release held input.
     expect(spawned.filter(entry => entry.argv[1] === RELEASE_ARGS[0])).toHaveLength(2)
     expect(ctx.computerUse.providerName).toBeUndefined()
@@ -282,10 +282,10 @@ describe('computer tool', () => {
   it('stops a cancelled command and releases held input', async () => {
     behave = hangInput
     const controller = new AbortController()
-    const running = call({ action: 'key', keys: 'ctrl+shift+t' }, { signal: controller.signal })
+    const running = expect(call({ action: 'key', keys: 'ctrl+shift+t' }, { signal: controller.signal })).rejects.toThrow('cancelled by caller')
     await new Promise(resolve => setImmediate(resolve))
     controller.abort(new Error('cancelled by caller'))
-    await expect(running).rejects.toThrow('cancelled by caller')
+    await running
     expect(spawned.map(entry => entry.argv.slice(1))).toEqual([['key', 'ctrl+shift+t'], RELEASE_ARGS])
   })
 })

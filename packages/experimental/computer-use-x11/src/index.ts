@@ -65,8 +65,11 @@ export const Config = Schema.object({
 /** Bytes retained from diagnostic output; xdotool prints only short status lines. */
 const DIAGNOSTIC_BYTES = 64 * 1024
 
-/** xdotool arguments that release every modifier and mouse button an input action can hold. */
-export const RELEASE_ARGS: readonly string[] = ['keyup', 'ctrl+shift+alt+super', 'mouseup', '1', 'mouseup', '2', 'mouseup', '3']
+/** xdotool arguments that release both sides of every modifier, AltGr and every mouse button an input action can hold. */
+export const RELEASE_ARGS: readonly string[] = [
+  'keyup', 'ctrl+shift+alt+super+Control_R+Shift_R+Alt_R+Super_R+ISO_Level3_Shift',
+  ...['1', '2', '3', '4', '5', '6', '7'].flatMap(button => ['mouseup', button]),
+]
 
 /** Actions accepted by the `computer` tool. */
 export const ACTIONS = ['screenshot', 'click', 'move', 'drag', 'scroll', 'type', 'key'] as const
