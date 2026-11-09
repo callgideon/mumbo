@@ -103,7 +103,7 @@ export function mcpServer({ ops, projects, relay, claimOf }) {
     if (projects && claim && !claim.u.startsWith('project:')) {
       const pid = z.string().describe('Project id from project_create or project_list')
       mcp.registerTool('project_create', {
-        description: 'Create a shared project. It gets its own box with a coordinator agent at https://<this site>/p/<id>/; you are its owner and first member.',
+        description: 'Create a shared project. It gets its own box with a coordinator agent at https://p-<id>.<this site>/; you are its owner and first member.',
         inputSchema: z.object({ name: z.string().min(1).max(80) }),
       }, tool(claim, (c, a) => projects.create(c.u, a.name)))
       mcp.registerTool('project_list', { description: 'List the projects you are a member of.', inputSchema: z.object({}) }, tool(claim, (c) => projects.list(c.u)))

@@ -7,8 +7,6 @@ import { memoryStore, redisStore } from './store.mjs'
 import { generateKeyPairSync, createSign } from 'node:crypto'
 
 const cfg = { publicHost: 'boxes.example', llmHost: 'llm.example', template: 'mumbo-box', idleMs: 60_000, backupEveryMs: 600_000, maxRunning: 5, allowed: ['@x.com'], egressIps: [], proxy: new URL('http://127.0.0.1:1'), upstream: 'https://model.example' }
-// The user router serves only its public host; fetch cannot set Host, so fetch-driven router tests serve 127.0.0.1.
-const local = { ...cfg, publicHost: '127.0.0.1' }
 const listen = (server) => new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port)))
 const call = (port, { method = 'GET', path = '/', headers = {}, body } = {}) => new Promise((resolve, reject) => {
   const req = request({ host: '127.0.0.1', port, method, path, headers: { host: cfg.publicHost, ...headers } }, (res) => {
@@ -502,6 +500,7 @@ test('project tools are offered to a person\'s box and not to a project box', as
     const person = signBox('k', 'a@x.com', 'b1'), project = signBox('k', 'project:0123456789abcdef', 'pb')
     const names = async (tok) => (await call(tok, 'tools/list', {})).result.tools.map(t => t.name)
     assert.ok((await names(person)).includes('project_create'))
+    assert.match((await call(person, 'tools/list', {})).result.tools.find(t => t.name === 'project_create').description, /at https:\/\/p-<id>\.<this site>\/;/)
     assert.ok(!(await names(project)).some(n => n.startsWith('project_')))
     const made = JSON.parse((await call(person, 'tools/call', { name: 'project_create', arguments: { name: 'Shop' } })).result.content[0].text)
     assert.equal((await proj.list('a@x.com'))[0].id, made.id)
@@ -550,7 +549,7 @@ test('role instructions: assistant with write consent and desktop sign-in; coord
   assert.match(a, /https:\/\/boxes\.x\/desktop\//)
   assert.match(a, /project_message/)
   const p = roleInstructions(c, 'project:0123456789abcdef')
-  assert.match(p, /coordinate the shared mumbo project 0123456789abcdef/)
+  assert.match(p, /coordinate the shared mumbo project 0123456789abcdef\. Its members reach you at https:\/\/p-0123456789abcdef\.boxes\.x\/ /)
   assert.match(p, /\[from <email>\]/)
   assert.match(p, /no browser and nobody's accounts/)
   const script = startScript(c, 'T', undefined, a)
@@ -564,11 +563,11 @@ test('home page lists the assistant, desktop and the member\'s projects without 
   const proj = projectStore({ store: memoryStore(), admitted: () => true, log: () => {} })
   const { id } = await proj.create('a@x.com', '<b>Shop</b>')
   await proj.create('c@x.com', 'Not mine')
-  const server = userServer({ cfg: { ...local, allowed: ['@x.com'] }, box, projects: proj, log: () => {} })
-  await new Promise(r => server.listen(0, '127.0.0.1', r))
+  const server = userServer({ cfg, box, projects: proj, log: () => {} })
+  const port = await listen(server)
   try {
-    const html = await (await fetch(`http://127.0.0.1:${server.address().port}/home`, { headers: { 'x-forwarded-email': 'a@x.com' } })).text()
-    assert.ok(html.includes(`href="/p/${id}/"`) && html.includes('&#60;b&#62;Shop&#60;/b&#62;') && !html.includes('<b>Shop'))
+    const html = (await call(port, { path: '/home', headers: { 'x-forwarded-email': 'a@x.com' } })).body
+    assert.ok(html.includes(`href="https://p-${id}.boxes.example/"`) && html.includes('&#60;b&#62;Shop&#60;/b&#62;') && !html.includes('<b>Shop'))
     assert.ok(!html.includes('Not mine'))
     assert.ok(html.includes('href="/desktop/"'))
     assert.deepEqual(ensured, [])

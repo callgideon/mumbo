@@ -102,24 +102,40 @@ test('on a project host, /home and the approve page\'s paths go to the project b
 test('a WebSocket upgrade on a project host reaches the project box with a fresh member header; a non-member\'s is refused', async () => {
   const t = await setup()
   try {
-    const ws = await call(t.port, { path: '/api/remote.mux', headers: { host: t.host, cookie: '_oauth2_proxy=s', 'x-mumbo-member': 'forged', ...upgrade } })
+    const own = `https://${t.host}`
+    const ws = await call(t.port, { path: '/api/remote.mux', headers: { host: t.host, origin: own, cookie: '_oauth2_proxy=s', 'x-mumbo-member': 'forged', ...upgrade } })
     assert.ok(ws.upgraded, JSON.stringify(ws))
     const got = t.seen[0]
     assert.equal(got.path, '/api/remote.mux')
     assert.equal(got.headers['e2b-sandbox-id'], 'pbox')
     assert.equal(got.headers.cookie, undefined)
     assert.equal(memberOf(t.key, got.headers['x-mumbo-member']), 'a@x.com')
-    assert.ok((await call(t.port, { headers: { host: t.host, 'x-forwarded-email': 'b@x.com', ...upgrade } })).error)
+    assert.ok((await call(t.port, { headers: { host: t.host, origin: own, 'x-forwarded-email': 'b@x.com', ...upgrade } })).error)
     assert.equal(t.seen.length, 1)
   } finally { t.close() }
 })
 
-test('a request from Origin: https://boxes.mumbo.si reaches the project box with that Origin unchanged', async () => {
+test('an HTTP request from Origin: https://boxes.mumbo.si reaches the project box with that Origin unchanged', async () => {
   const t = await setup()
   try {
     await call(t.port, { headers: { host: t.host, origin: 'https://boxes.mumbo.si' } })
-    await call(t.port, { headers: { host: t.host, origin: 'https://boxes.mumbo.si', ...upgrade } })
-    assert.deepEqual(t.seen.map(s => s.headers.origin), ['https://boxes.mumbo.si', 'https://boxes.mumbo.si'])
+    assert.deepEqual(t.seen.map(s => s.headers.origin), ['https://boxes.mumbo.si'])
+  } finally { t.close() }
+})
+
+test('an upgrade from another origin, or with none, is refused, so a project page cannot open the visitor\'s desktop; same-origin upgrades work', async () => {
+  const t = await setup()
+  const main = 'boxes.mumbo.si'
+  try {
+    for (const [host, origin] of [[main, `https://${t.host}`], [t.host, `https://${main}`], [main, undefined], [t.host, undefined], [main, `http://${main}`], [main, `https://${main}:8443`]]) {
+      const r = await call(t.port, { path: '/desktop/websockify', headers: { host, ...(origin ? { origin } : {}), ...upgrade } })
+      assert.ok(r.error, `${host} from ${origin}: ${JSON.stringify(r)}`)
+    }
+    assert.deepEqual(t.ensured, [], 'no box was started')
+    assert.equal(t.seen.length, 0)
+    assert.ok((await call(t.port, { path: '/desktop/websockify', headers: { host: main, origin: `https://${main}`, ...upgrade } })).upgraded)
+    assert.ok((await call(t.port, { path: '/api/remote.mux', headers: { host: t.host, origin: `https://${t.host}`, ...upgrade } })).upgraded)
+    assert.deepEqual(t.seen.map(s => [s.path, s.headers['e2b-sandbox-id'], s.headers['e2b-sandbox-port']]), [['/websockify', 'ubox', '6080'], ['/api/remote.mux', 'pbox', '3080']])
   } finally { t.close() }
 })
 

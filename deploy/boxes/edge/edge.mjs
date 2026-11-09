@@ -93,7 +93,7 @@ export function roleInstructions(cfg, principal) {
   if (project) return [
     '# Project coordinator',
     '',
-    `You coordinate the shared mumbo project ${project}. Its members reach you at https://${cfg.publicHost}/p/${project}/ and through their own assistants; a message relayed by an assistant starts with [from <email>].`,
+    `You coordinate the shared mumbo project ${project}. Its members reach you at ${boxSite(cfg, principal).publicUrl} and through their own assistants; a message relayed by an assistant starts with [from <email>].`,
     '',
     '- Keep the project in /root/projects. Run installs, builds, servers and tests in sandboxes (sandbox_* tools), not in this box.',
     '- Plan the work, report progress to the member who asked, and ask them when a decision or an account is needed.',
@@ -455,9 +455,9 @@ export function boxHeaders(cfg, incoming, target, port = '3080') {
 export const esc = (v) => String(v).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 /** The signed-in person's home: their assistant, their desktop and the shared projects they belong to. Edge-served,
  *  so it loads without starting any box. */
-export function homePage(res, email, projects) {
+export function homePage(cfg, res, email, projects) {
   const rows = projects.length
-    ? projects.map(p => `<li><a href="/p/${esc(p.id)}/">${esc(p.name)}</a> <small>${esc(p.members.length)} member${p.members.length === 1 ? '' : 's'}${p.owner === email ? ', yours' : ''}</small></li>`).join('')
+    ? projects.map(p => `<li><a href="${esc(boxSite(cfg, `project:${p.id}`).publicUrl)}">${esc(p.name)}</a> <small>${esc(p.members.length)} member${p.members.length === 1 ? '' : 's'}${p.owner === email ? ', yours' : ''}</small></li>`).join('')
     : '<li><small>None yet. Ask your assistant to create one.</small></li>'
   res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>mumbo</title>
 <style>body{font-family:system-ui;max-width:40rem;margin:3rem auto;padding:0 1rem;line-height:1.5}a{color:inherit}h1{font-size:1.4rem}h2{font-size:1rem;margin-top:2rem}ul{padding-left:1.2rem}small{color:#666}</style>
@@ -518,7 +518,7 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, log = conso
     })
     const to = routeOf(host, req.url)
     if (!to) return page(res, 404, 'Not found.', false)
-    if (!to.project && (req.url === '/home' || req.url === '/home/')) return homePage(res, email, await projects?.list(email) ?? [])
+    if (!to.project && (req.url === '/home' || req.url === '/home/')) return homePage(cfg, res, email, await projects?.list(email) ?? [])
     if (to.redirect) return res.writeHead(302, { location: to.redirect, 'cache-control': 'no-store' }).end()
     if (to.project && !(await projects?.isMember(email, to.project))) return page(res, 403, 'No such project, or you are not one of its members.', false)
     let target
@@ -543,9 +543,11 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, log = conso
   })
   server.on('upgrade', async (req, socket, head) => {
     // As for HTTP, only the public host's and project hosts' WebSockets reach a box; the approve host and unknown hosts
-    // are refused.
-    const to = routeOf(hostOf(req), req.url)
-    if (!to) return socket.destroy()
+    // are refused. So is an upgrade whose Origin is not this host (browsers always send one): the sign-in cookie covers
+    // every subdomain, so a project page could otherwise open the visitor's desktop, whose noVNC checks no Origin.
+    const host = hostOf(req)
+    const to = routeOf(host, req.url)
+    if (!to || req.headers.origin !== `https://${host}`) return socket.destroy()
     const email = await identify(req)
     if (!email.includes('@') || !admitted(cfg.allowed, email)) return socket.destroy()
     try {
