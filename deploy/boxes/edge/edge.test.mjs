@@ -243,6 +243,32 @@ test('user router behind an ALB trusts only the verified token, never the email 
   assert.equal(r.status, 302)
 })
 
+test('an unexpected throw answers 500 or closes the upgrade, and the log has the path without the query', async () => {
+  const upgrade = (port, headers) => new Promise((resolve) => {
+    const req = request({ host: '127.0.0.1', port, path: '/?token=secret', headers: { host: cfg.publicHost, connection: 'Upgrade', upgrade: 'websocket', origin: `https://${cfg.publicHost}`, ...headers } })
+    req.on('upgrade', (res, socket) => { socket.destroy(); resolve(res.statusCode) })
+    req.on('response', (res) => { res.resume(); resolve(res.statusCode) })
+    req.on('error', (e) => resolve(e.code))
+    req.end()
+  })
+  // A box whose touch throws (after the box is ready), and an identity check that throws (before any box).
+  const touchThrows = { box: { ensure: async () => ({ id: 'b1', token: 'T' }), touch: () => { throw new Error('touch broke') }, forget() {} } }
+  const identityThrows = { verifyAlb: () => { throw new Error('verifier broke') }, box: {} }
+  // The touch throw inside an upgrade is that upgrade's own box failure (closed, not logged); the identity throw is not.
+  for (const [opts, error, logged] of [[touchThrows, 'touch broke', 1], [identityThrows, 'verifier broke', 2]]) {
+    const logs = []
+    const s = userServer({ cfg, ...opts, log: (l) => logs.push(JSON.parse(l)) })
+    const port = await listen(s)
+    const headers = { 'x-forwarded-email': 'a@x.com', 'x-amzn-oidc-data': 'x' }
+    const r = await call(port, { path: '/?token=secret', headers })
+    assert.equal(r.status, 500, error)
+    assert.match(r.body, /Something went wrong/)
+    assert.equal(await upgrade(port, headers), 'ECONNRESET', error)
+    s.close()
+    assert.deepEqual(logs, Array(logged).fill({ edge: 'error', host: cfg.publicHost, path: '/', error }))
+  }
+})
+
 test('locks serialise per key and are released after errors', async () => {
   const store = memoryStore(); const order = []
   await Promise.all([1, 2, 3].map(i => store.withLock('u', 5_000, async () => { order.push(`in${i}`); await new Promise(r => setTimeout(r, 10)); order.push(`out${i}`) })))
