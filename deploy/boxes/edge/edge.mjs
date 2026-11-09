@@ -10,6 +10,12 @@ import { Readable } from 'node:stream'
 const env = (name, fallback) => process.env[name] ?? fallback ?? (() => { throw new Error(`edge: set ${name}`) })()
 const list = (value) => value.toLowerCase().split(',').map(s => s.trim()).filter(Boolean)
 const optional = (name) => process.env[name] || undefined
+/** Required CI check names (case-sensitive). An empty list would drop the merge gate's CI requirement, so it fails. */
+const checkNames = (name, fallback) => {
+  const names = env(name, fallback).split(',').map(s => s.trim()).filter(Boolean)
+  if (names.length === 0) throw new Error(`edge: ${name} must name at least one check`)
+  return names
+}
 export const config = () => ({
   publicHost: env('PUBLIC_HOST'),
   llmHost: env('LLM_HOST'),
@@ -27,16 +33,19 @@ export const config = () => ({
   upstream: env('MODEL_UPSTREAM', 'https://api.deepseek.com'),
   childTemplates: list(env('CHILD_TEMPLATES', 'mumbo-child')),
   maxChildren: Number(env('MAX_CHILD_SANDBOXES', '10')),
-  // Approvals, GitHub and token budgets. The three tokens are SSM SecureStrings in the ECS secrets map.
+  // Approvals, GitHub and token budgets. Secrets arrive through the ECS secrets map: the agent token and ntfy topic from
+  // SSM; the id and private key of the mumbo-bot GitHub App, the only identity that merges, from Secrets Manager
+  // mumbo-boxes/github-app.
   approveHost: env('APPROVE_HOST', `approve.${env('PUBLIC_HOST')}`),
   agentLogin: optional('GITHUB_AGENT_LOGIN'),  // unset: the approvals poller is off
-  requiredChecks: env('REQUIRED_CHECKS', 'static,unit').split(',').map(s => s.trim()).filter(Boolean),  // check names are case-sensitive
+  requiredChecks: checkNames('REQUIRED_CHECKS', 'static,unit'),
   dailyTokensUser: Number(env('DAILY_TOKENS_USER', '20000000')),
   dailyTokensProject: Number(env('DAILY_TOKENS_PROJECT', '50000000')),
   projectTemplate: env('PROJECT_TEMPLATE', env('BOX_TEMPLATE', 'mumbo-box')),
   auditPrefix: env('AUDIT_PREFIX', 'audit/approvals/'),
   agentToken: optional('GITHUB_AGENT_TOKEN'),
-  mergeToken: optional('GITHUB_MERGE_TOKEN'),
+  appId: optional('GITHUB_APP_ID'),
+  appKey: optional('GITHUB_APP_KEY'),
   ntfyTopic: optional('NTFY_TOPIC'),
 })
 
@@ -525,7 +534,8 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, log = conso
     req.pipe(up)
   })
   server.on('upgrade', async (req, socket, head) => {
-    if (hostOf(req) === cfg.approveHost) return socket.destroy()
+    // As for HTTP, only the public host's WebSockets reach a box; the approve host and unknown hosts are refused.
+    if (hostOf(req) !== cfg.publicHost) return socket.destroy()
     const email = await identify(req)
     if (!email.includes('@') || !admitted(cfg.allowed, email)) return socket.destroy()
     try {
@@ -537,7 +547,8 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, log = conso
       const headers = { ...boxHeaders(cfg, req.headers, target, to.port, boxSite(cfg, to.project ? `project:${to.project}` : email).host), ...(member ? { 'x-mumbo-member': member } : {}), connection: 'Upgrade', upgrade: req.headers.upgrade ?? 'websocket' }
       const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: to.path, headers })
       up.on('upgrade', (r, upSocket, upHead) => {
-        socket.write(`HTTP/1.1 101 Switching Protocols\r\n${Object.entries(r.headers).map(([k, v]) => `${k}: ${v}`).join('\r\n')}\r\n\r\n`)
+        const lines = Object.entries(secureCookies({ ...r.headers })).flatMap(([k, v]) => [v].flat().map(x => `${k}: ${x}`))
+        socket.write(`HTTP/1.1 101 Switching Protocols\r\n${lines.join('\r\n')}\r\n\r\n`)
         if (upHead.length) socket.write(upHead)
         if (head.length) upSocket.write(head)
         let last = 0
@@ -656,7 +667,7 @@ async function main() {
     await s3.send(new PutObjectCommand({ Bucket: cfg.bucket, Key: key, Body: JSON.stringify(record), ContentType: 'application/json' }))
   }
   const csrfKey = createHmac('sha256', edgeKey).update('approve-csrf').digest()
-  const approvals = approvalsService({ store, github: { agentToken: cfg.agentToken, mergeToken: cfg.mergeToken, agentLogin: cfg.agentLogin, requiredChecks: cfg.requiredChecks }, notify, audit, fetchImpl: fetch, now })
+  const approvals = approvalsService({ store, github: { agentToken: cfg.agentToken, app: { appId: cfg.appId, privateKey: cfg.appKey }, agentLogin: cfg.agentLogin, requiredChecks: cfg.requiredChecks }, notify, audit, fetchImpl: fetch, now, approveHost: cfg.approveHost })
   const approve = approvePage({ approvals, halt, store, csrfKey, host: cfg.approveHost })
   const tokens = tokenBudget({ store, limits: { user: cfg.dailyTokensUser, project: cfg.dailyTokensProject }, now })
   const github = githubForwarder({ store, halt, agentToken: cfg.agentToken, fetchImpl: fetch })
