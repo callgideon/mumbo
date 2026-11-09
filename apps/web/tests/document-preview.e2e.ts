@@ -188,7 +188,7 @@ it.skipIf(MODE === 'record').each(['en-US', 'zh-CN'])('fills the spreadsheet pan
     const sessionId = await settled
     const cwd = scaffold.ctx.agents.get(sessionId)?.session.header.cwd
     if (cwd === undefined) throw new Error('settled Session has no workspace cwd')
-    const longCellText = 'Monthly export/import matrix and category comparison. Exports by commodity category by month/Import matrix and structure comparison chart (formula summary) '.repeat(3)
+    const longCellText = 'Monthly export/import matrix and category comparison. 찄쵆쳁죗쨫쨆덤짺쯣/낓쯣쑅뛭옎쬯돠폹렰컾（쥬휏뢣겗） '.repeat(3)
     await Promise.all([
       writeFile(join(cwd, 'budget.xlsx'), await excelFixture()),
       writeFile(join(cwd, 'meeting.xlsx'), await meetingMinutesFixture()),

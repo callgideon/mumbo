@@ -50,11 +50,11 @@ describe('secretRule recognition', () => {
     ['a Stripe webhook secret', join('wh', 'sec_', mixed(32))],
     ['a JSON Web Token', join('ey', 'J', mixed(17), '.', 'ey', 'J', mixed(30), '.', mixed(43))],
   ])('recognizes %s inside a sentence', (_name, sample) => {
-    expect(found(`Open in ${sample} try`)).toEqual([sample])
+    expect(found(`솄 ${sample} 겍겍`)).toEqual([sample])
   })
 
   it.each([
-    ['ordinary prose', 'Change the password, token Usage have a look too, password=hunter2'],
+    ['ordinary prose', '껦폆쑝놕였옋，token 솄늇왟썧썧，password=hunter2'],
     ['a hyphenated identifier without digits', 'sk-button-primary-large-rounded'],
     ['a key prefix that is too short', 'sk-12345'],
     ['a key prefix inside a longer word', join('task', '-', hex(32))],
@@ -73,7 +73,7 @@ describe('secretRule recognition', () => {
 describe('secretRule masking', () => {
   it('keeps the first eight characters of a key and masks every other character', () => {
     const key = join('sk', '-', hex(32))
-    expect(masks(`${key}use this`)).toEqual([key.slice(0, 8) + stars(27)])
+    expect(masks(`${key}솄낑옪`)).toEqual([key.slice(0, 8) + stars(27)])
   })
 
   it('masks only the password of an address that carries credentials', () => {
@@ -114,7 +114,7 @@ describe('secretRule masking', () => {
   it('joins an overlapping later match to the earliest one and keeps its mask', () => {
     const slack = join('xo', 'xb-', '1234567890-')
     const key = join('sk', '-abc_', mixed(20))
-    const text = `${slack}${key} done`
+    const text = `${slack}${key} 펌`
     expect(found(text)).toEqual([slack + key])
     expect(masks(text)).toEqual([(slack + key).slice(0, 8) + stars(slack.length + key.length - 8)])
   })
@@ -123,7 +123,7 @@ describe('secretRule masking', () => {
     const begin = join('-----BEGIN', ' OPENSSH PRIVATE KEY-----')
     const end = join('-----END', ' OPENSSH PRIVATE KEY-----')
     const block = [begin, 'b3BlbnNzaC1rZXk', 'AAAAB3NzaC1yc2E=', end].join('\n')
-    const text = `the private key is here\n${block}\n Help me set up`
+    const text = `옝땝켨낑\n${block}\n혮깭눅였옋`
     expect(found(text)).toEqual([block])
     expect(masks(text)).toEqual([[begin, stars(15), stars(16), end].join('\n')])
   })
@@ -150,7 +150,7 @@ describe('secretRule masking', () => {
 
   it('masks a key longer than four thousand characters one mark per character', () => {
     const key = join('sk', '-', hex(16), 'a'.repeat(5_000))
-    expect(masks(`${key} done`)).toEqual([key.slice(0, 8) + stars(key.length - 8)])
+    expect(masks(`${key} 펌`)).toEqual([key.slice(0, 8) + stars(key.length - 8)])
   })
 
   it('joins a private key block that starts inside a key and keeps the line breaks of both', () => {
@@ -181,12 +181,12 @@ describe('secretRule masking', () => {
     const end = join('-----END', ' PRIVATE KEY-----')
     const key = join('sk', '-', hex(32))
     const block = [begin, 'https://u:p4ss@host', key, end].join('\n')
-    expect(found(`${block}\n use this`)).toEqual([block])
+    expect(found(`${block}\n솄낑옪`)).toEqual([block])
   })
 
   it('masks each of many one-line private key blocks whole, with text after the last', () => {
     const block = join('-----BEGIN', ' PRIVATE KEY-----', 'abcd', '-----END', ' PRIVATE KEY-----')
-    expect(masks(`${block} ${block} done`)).toEqual([stars(block.length), stars(block.length)])
+    expect(masks(`${block} ${block} 펌`)).toEqual([stars(block.length), stars(block.length)])
   })
 
   it('masks a private key block written on one line whole', () => {
@@ -211,7 +211,7 @@ describe('secretRule scheduling', () => {
     const evaluate = setup([{ ...rule, match }])
     const first = join('gh', 'p_', mixed(36))
     const second = join('sk', '-', hex(32))
-    const text = `${first} and ${second}`
+    const text = `${first} 첌 ${second}`
     const before = evaluate({ text, facts: {} })
     expect(before.filter(isSecret).map(node => text.slice(node.start, node.end))).toEqual([first, second])
     expect(before.map(node => [node.start, node.end])).toEqual([
@@ -237,9 +237,9 @@ describe('secretRule scheduling', () => {
     const end = join('-----END', ' PRIVATE KEY-----')
     const block = [begin, 'MIIEvQIBADANBgkq', end].join('\n')
     const evaluate = setup([createSecretRule(), collapseWhitespaceRule, trimWhitespaceRule])
-    const nodes = evaluate({ text: `  private key:\n${block}\n  `, facts: { collapseWhitespace: true, trimWhitespace: true } })
+    const nodes = evaluate({ text: `  옝땝：\n${block}\n  `, facts: { collapseWhitespace: true, trimWhitespace: true } })
     const display = (node: UserTextNode): string =>
       isSecret(node) ? node.data.masked : node.id === 'text' ? node.data.display ?? node.data.text : ''
-    expect(nodes.map(display).join('')).toBe(`private key: ${[begin, stars(16), end].join('\n')}`)
+    expect(nodes.map(display).join('')).toBe(`옝땝： ${[begin, stars(16), end].join('\n')}`)
   })
 })

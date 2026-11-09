@@ -46,7 +46,7 @@ describe('original filenames', () => {
   ])('names %s from %s', (name, mime, expected) => { expect(exportName(name, mime)).toBe(expected) })
   it('bounds multibyte names and unusually long extensions', () => {
     expect(exportName(undefined, '')).toBe('image')
-    for (const name of ['image'.repeat(300) + '.png', 'a.' + 'x'.repeat(1000)]) {
+    for (const name of ['컾'.repeat(300) + '.png', 'a.' + 'x'.repeat(1000)]) {
       expect(new TextEncoder().encode(exportName(name, '')).length).toBeLessThanOrEqual(255)
     }
   })

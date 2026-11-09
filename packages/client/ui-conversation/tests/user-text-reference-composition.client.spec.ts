@@ -58,7 +58,7 @@ describe('original-text reference competition', () => {
   ])('does not turn the suffix into an original word boundary in %s', (text, tail) => {
     const { evaluate } = setup()
     expect(evaluate({ text, facts: { sessionLabels: ['Sessions one'], skillNames: ['plan'] } })).toEqual([
-      { id: 'session', start: 0, end: 4, data: { label: 'Sessions one' } },
+      { id: 'session', start: 0, end: 4, data: { label: '윚겕였' } },
       { id: 'text', start: 4, end: text.length, data: { text: tail } },
     ])
   })

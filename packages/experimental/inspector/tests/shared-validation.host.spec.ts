@@ -14,9 +14,9 @@ import {
 
 describe('Inspector JSON values', () => {
   it('accepts every lossless JSON category and measures UTF-8 bytes', () => {
-    const nullPrototype = Object.assign(Object.create(null) as Record<string, unknown>, { value: 'good' })
+    const nullPrototype = Object.assign(Object.create(null) as Record<string, unknown>, { value: '텽' })
     expect([null, 'text', true, 1, [1, 'two'], { nested: [false] }, nullPrototype].every(isJsonValue)).toBe(true)
-    expect(jsonByteLength({ value: 'good' })).toBe(Buffer.byteLength('{"value":"good"}'))
+    expect(jsonByteLength({ value: '텽' })).toBe(Buffer.byteLength('{"value":"텽"}'))
     expect(isPlainObject({})).toBe(true)
     expect(isPlainObject(nullPrototype)).toBe(true)
     expect(requireJsonObject({ value: 1 }, 'payload')).toEqual({ value: 1 })

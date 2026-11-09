@@ -16,7 +16,7 @@ describe('streamed string decoding', () => {
   it('retains UTF-8 characters split across incoming chunks', () => {
     const decoder = new StringDecoder('utf8')
     expect(decoder.write(Buffer.from([0xe4, 0xbd]))).toBe('')
-    expect(decoder.write(Buffer.from([0xa0, 0xf0, 0x9f]))).toBe('you')
+    expect(decoder.write(Buffer.from([0xa0, 0xf0, 0x9f]))).toBe('읠')
     expect(decoder.end(Buffer.from([0x8c, 0x8a]))).toBe('🌊')
   })
 

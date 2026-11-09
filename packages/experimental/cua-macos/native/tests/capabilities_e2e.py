@@ -163,11 +163,11 @@ def main():
                 assert "valueWritable=true" in observed["tree"] and "selectionWritable=true" in observed["tree"], observed["tree"]
                 target = {**owner, "snapshotId": observed["snapshotId"], "elementIndex": field["index"]}
                 call("selectText", {**target, "text": "target"}, "AMBIGUOUS_TEXT")
-                call("selectText", {**target, "text": "target", "prefix": "second😀 "})
+                call("selectText", {**target, "text": "target", "prefix": "있욌😀 "})
                 selected = wait_for_state(state_file, lambda value: value["selection"] == [17, 6])
-                assert selected["text"] == "first😀 target, second😀 target.", selected
-                call("paste", {**owner, "text": "replace\n second line\t keep", "format": "text", "maxClipboardBytes": 33554432, "pasteReadTimeoutMs": 1000, "maxElements": 2000, "maxDepth": 25})
-                state = wait_for_state(state_file, lambda value: value["text"] == "first😀 target, second😀 replace\n second line\t keep.")
+                assert selected["text"] == "있였😀 target，있욌😀 target.", selected
+                call("paste", {**owner, "text": "덛꾾\n있욌풨\t쟝솵", "format": "text", "maxClipboardBytes": 33554432, "pasteReadTimeoutMs": 1000, "maxElements": 2000, "maxDepth": 25})
+                state = wait_for_state(state_file, lambda value: value["text"] == "있였😀 target，있욌😀 덛꾾\n있욌풨\t쟝솵.")
                 assert state["pasteAttempts"] == [True], state
                 observed = call("getState", {**owner, "maxElements": 2000, "maxDepth": 25})
                 field = next(item for item in observed["elements"] if item["role"] == "AXTextArea")

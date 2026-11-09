@@ -40,7 +40,7 @@ it('archives every file of the packages that publish ./assets/* under its unenco
 
 it('maps each archived file to a Blob URL under the reference and media type the Client build and route use', async () => {
   const vfs = new MemoryVfs()
-  const long = `${'Han'.repeat(10)}-0123456789ab.png`
+  const long = `${'뢥'.repeat(10)}-0123456789ab.png`
   seedPackage(vfs, '@fixture/ui', { [PACKAGE_ASSET_EXPORT]: PACKAGE_ASSET_EXPORT_TARGET }, {
     'lib/assets/mark-0123456789ab.svg': '<svg/>',
     'lib/assets/data-0123456789ab.bin': 'raw',

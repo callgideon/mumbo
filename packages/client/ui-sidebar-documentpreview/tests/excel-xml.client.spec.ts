@@ -20,13 +20,13 @@ describe.each([['Node', ExcelJS], ['browser bundle', browserExcel]] as const)('%
     const retained = archive.withoutDrawings()
     const workbook = new parser.Workbook()
     await workbook.xlsx.load(retained.buffer, { ignoreNodes: ['drawing'] })
-    const sheet = workbook.getWorksheet('Data')!
-    expect(sheet.getCell('A5').value).toBe(' <chart/> & Chinese😀\n tail ')
+    const sheet = workbook.getWorksheet('뇌꿊')!
+    expect(sheet.getCell('A5').value).toBe(' <chart/> & 옭뇣😀\n tail ')
     expect(sheet.getCell('A6').value).toEqual({ formula: 'SUM(B2:B3)', result: 57 })
-    expect(sheet.getCell('B2').note).toMatchObject({ texts: [{ text: 'Generation's comment' }] })
+    expect(sheet.getCell('B2').note).toMatchObject({ texts: [{ text: '셻깬신껕륄' }] })
     expect(sheet.getTable('Table1')).toMatchObject({ table: { name: 'Table1', tableRef: 'A1:B3' } })
     expect(sheet.getCell('B2').font).toMatchObject({ bold: true, color: { argb: 'FF112233' } })
-    expect(workbook.getWorksheet('hidden page')!.state).toBe('hidden')
+    expect(workbook.getWorksheet('띈툫뤭')!.state).toBe('hidden')
     const originalParts = unzipSync(source)
     for (const [path, bytes] of Object.entries(unzipSync(retained))) expect(bytes, path).toEqual(originalParts[path])
     expect(source).toEqual(original)

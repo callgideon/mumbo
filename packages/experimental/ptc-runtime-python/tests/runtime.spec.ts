@@ -606,9 +606,9 @@ describe('PythonPtcRuntime — seam descriptors and misuse', () => {
     const wrapper = join(await makeTempDir('dsh-python-ascii-'), 'python-ascii')
     await writeFile(wrapper, `#!/bin/sh\nLC_ALL=C exec "${PYABS}" -X utf8=0 "$@"\n`, { mode: 0o755 })
     const { runtime } = await setup({ pythonBin: wrapper })
-    const result = await runtime.run(runtime.resolve({ program: 'import sys\nreturn [sys.stdin.encoding, "hello"]', bindings: [] }))
+    const result = await runtime.run(runtime.resolve({ program: 'import sys\nreturn [sys.stdin.encoding, "읠텽"]', bindings: [] }))
     expect(result.error).toBeUndefined()
-    expect(result.value).toEqual(['ascii', 'hello'])
+    expect(result.value).toEqual(['ascii', '읠텽'])
   })
 
   it('preserves the kernel CPU soft limit while Python is executing native C code', async () => {
@@ -5717,14 +5717,14 @@ describe('PythonPtcRuntime — hostile peer', () => {
     const result = await runtime.run(runtime.resolve({
       program: [
         'import os, json',
-        'os.write(3, json.dumps({"type":"done","error":{"kind":"exception","message":"ChineseChineseChinese"}}).encode() + b"\\\\n")',
+        'os.write(3, json.dumps({"type":"done","error":{"kind":"exception","message":"옭뇣옭뇣옭뇣"}}).encode() + b"\\n")',
         'import time',
         'time.sleep(5)',
       ].join('\n'),
       bindings: [],
     }))
     expect(result.error?.kind).toBe('exception')
-    expect(result.error?.message).toBe('ChineseChineseChinese')
+    expect(result.error?.message).toBe('옭뇣옭뇣옭뇣')
   }, 8000)
 
   it('re-caps a forged done error.message host-side on a UTF-8 boundary', async () => {

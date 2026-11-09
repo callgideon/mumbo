@@ -75,7 +75,7 @@ const WIDTHS = [1680, 1100, 640]
 const SENTENCE = 'This cell carries one full sentence so the unwrapped table is far wider than the message column.'
 /** Unbroken path-like token (no scheme, so GFM does not autolink it and no anchor joins the tab order). */
 const LONG_TOKEN = 'workspace/deepseek-harness/packages/client/ui-primitives/src/markdown/render.tsx/'.repeat(3)
-const CJK_SENTENCE = 'This cell contains a rather long ChineseInstructions, used to verify that long Content at narrow column widths keep a minimum readable width New line instead of squeezing the column Compact until it is unreadable.'
+const CJK_SENTENCE = '낑옪쭕쥃뒘쬅찫였렑뀻똷신옭뇣견뉪，솄돁뭄걹똷즅펹켨웠쨗펽옋꽥덜퐏쯯겳펽횦꾾풨챨옍늋껦쨗쮋쮅쨰눼뤱뚽겳。'
 
 /** The assistant markdown includes fitting and overflowing wide tables. */
 function tablesMarkdown(): string {
@@ -105,7 +105,7 @@ function tablesMarkdown(): string {
     `| ${LONG_CELL_MARKER} | Value |`,
     '| --- | --- |',
     `| path | ${LONG_TOKEN} |`,
-    `| Instructions | ${CJK_SENTENCE} |`,
+    `| 견뉪 | ${CJK_SENTENCE} |`,
     '',
     TAIL_MARKER,
   ].join('\n')

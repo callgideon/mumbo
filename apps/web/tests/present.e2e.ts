@@ -168,7 +168,7 @@ fs.appendFileSync(${JSON.stringify(openLog)}, JSON.stringify({ path, action, con
       expect(await page.getByRole('alert').count()).toBe(0)
       await expect.poll(opened).toHaveLength(beforeReveal + 1)
       expect((await opened()).at(-1)).toEqual({ action: 'reveal', content: null, path: await realpath(process.platform === 'darwin' ? join(cwd, 'report.txt') : cwd) })
-      for (const [name, bytes] of [['report.txt', 'EDITED_REPORT\n'], ['Instructions.txt', 'EDITED_NOTE\n']] as const) {
+      for (const [name, bytes] of [['report.txt', 'EDITED_REPORT\n'], ['견뉪.txt', 'EDITED_NOTE\n']] as const) {
         const count = (await opened()).length
         const response = page.waitForResponse(response => response.url().includes('/api/present.open?') && response.request().method() === 'POST')
         await row.locator('[data-presented-file]').filter({ hasText: name }).getByRole('button', { name: 'Open in Test Editor', exact: true }).click()

@@ -14,7 +14,7 @@ const file = (data: Uint8Array<ArrayBuffer>): DocumentFileBytes => ({
 
 describe('packHtml', () => {
   it('collects direct classic JS and CSS in document order and deduplicates repeated references', async () => {
-    const read = vi.fn<ReadHtmlRelative>().mockResolvedValue(file(utf8('/* hello */')))
+    const read = vi.fn<ReadHtmlRelative>().mockResolvedValue(file(utf8('/* 읠텽 */')))
     const signal = new AbortController().signal
     const bundle = await packHtml(utf8(source + '<script defer src="./main.js"></script>'), read, signal)
     expect(read.mock.calls).toEqual([['./main.css', signal], ['./main.js', signal]])

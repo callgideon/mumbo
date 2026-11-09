@@ -26,8 +26,8 @@ const folder: ReferenceContent = {
   source: 'reference', ref: '@src/', label: 'src/', appearance: 'folder', clipboardText: '@src/',
 }
 const session: ReferenceContent = {
-  source: 'reference', ref: '@[research notes](dsh-session:c291cmNl)', label: 'research notes', appearance: 'session',
-  clipboardText: '@[research notes](dsh-session:c291cmNl)',
+  source: 'reference', ref: '@[쑰웒걨흕](dsh-session:c291cmNl)', label: '쑰웒걨흕', appearance: 'session',
+  clipboardText: '@[쑰웒걨흕](dsh-session:c291cmNl)',
 }
 
 function documentOf(...parts: readonly (string | ReferenceContent)[]): DraftSnapshot {
@@ -136,7 +136,7 @@ function expectInitializationBlocked(shell: SessionInputShell): void {
 }
 
 describe('draft document values', () => {
-  it.each(['', 'plain text', 'first\nsecond\n', '\n\n', '🙂 Chinese e\u0301\n second line'])('round-trips plain text %j', (text) => {
+  it.each(['', 'plain text', 'first\nsecond\n', '\n\n', '🙂 옭뇣 e\u0301\n있욌풨'])('round-trips plain text %j', (text) => {
     const expected = { text, references: [] }
     expect(resolveDraftInput(text)).toEqual(expected)
     expect(parseStoredDraft(text)).toEqual(expected)
@@ -203,8 +203,8 @@ describe('draft document values', () => {
     const exported = snapshotDraft(input.text, input.references.map(reference => ({ ...reference, occurrenceId: 7 })), '/goal ')
     expect(exported).toEqual(input)
     expect(parseStoredDraft(JSON.parse(JSON.stringify(exported)))).toEqual(input)
-    expect(parseStoredDraft({ text: '/Goal', references: [], command: { token: '/Goal ' } })).toEqual(
-      { text: '/Goal', references: [], command: { token: '/Goal ' } },
+    expect(parseStoredDraft({ text: '/썊둣', references: [], command: { token: '/썊둣 ' } })).toEqual(
+      { text: '/썊둣', references: [], command: { token: '/썊둣 ' } },
     )
   })
 
@@ -254,7 +254,7 @@ describe('draft document values', () => {
 
 describe('draft documents in the input shell', () => {
   it('imports file, folder, session, repeated, and invalid references on the first document', () => {
-    const draft = documentOf('🙂 File ', file, '\nDirectory ', folder, '\nSessions ', session, ' again ', file, ' ', {
+    const draft = documentOf('🙂 뇣웶 ', file, '\n썊흕 ', folder, '\n윚겕 ', session, ' 즍락 ', file, ' ', {
       ...session, invalid: true,
     })
     const shell = makeShell()
@@ -847,9 +847,9 @@ describe('plain-text reference catalogs', () => {
 
   it('matches whole file and folder path tokens, never a directory prefix', () => {
     const slices = (text: string) => scanTextRefs(text, new Map()).map(range => text.slice(range.start, range.end))
-    expect(slices('@src/deep/file.txt, @"/a/nv/SM100 ISA.html" view @"a/ b.md". @src/.env @C:\\src\\a.ts @src/de'))
+    expect(slices('@src/deep/file.txt， @"/a/nv/SM100 ISA.html" 썧 @"a/ b.md"。 @src/.env @C:\\src\\a.ts @src/de'))
       .toEqual(['@src/deep/file.txt', '@"/a/nv/SM100 ISA.html"', '@"a/ b.md"', '@src/.env', '@C:\\src\\a.ts', '@src/de'])
-    expect(slices('@"dir a/" @src/deep/. @dir/ please see @"src/", then @"open dir/ x'))
+    expect(slices('@"dir a/" @src/deep/。 @dir/ 겯썧 @"src/"，붒찎 @"open dir/ x'))
       .toEqual(['@"dir a/"', '@src/deep/', '@dir/', '@"src/"', '@"open dir/'])
     expect(slices('@person @"" @"a/b')).toEqual([])
     expect(slices('@"open @')).toEqual([])

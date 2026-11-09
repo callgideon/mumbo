@@ -45,7 +45,7 @@ async function fixture() {
 it('delivers original PDF bytes and filename through native copy drag', async () => {
   const f = await fixture()
   const bytes = new TextEncoder().encode('%PDF-1.4\noriginal\n%%EOF')
-  const handle = await f.prepare(bytes, 'report.pdf')
+  const handle = await f.prepare(bytes, '꼁챊.pdf')
   expect(f.window.webContents.startDrag).not.toHaveBeenCalled()
   expect(await f.call(DESKTOP_IPC.fileDragStart, handle)).toBe(true)
   const [request] = f.window.webContents.startDrag.mock.calls[0] as [{ file: string; icon: NativeImage }]

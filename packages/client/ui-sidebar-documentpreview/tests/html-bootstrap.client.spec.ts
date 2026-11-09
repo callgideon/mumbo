@@ -23,10 +23,10 @@ const utf8 = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode
 
 describe('HTML bootstrap', () => {
   it('carries UTF-8 and script-ending text as data, then writes the unchanged complete HTML', () => {
-    const source = '<!doctype html><html lang="zh"><body>hello<script>window.value="</script><p>Text</p>"</script></body></html>'
+    const source = '<!doctype html><html lang="zh"><body>읠텽<script>window.value="</script><p>뇣뎈</p>"</script></body></html>'
     const html = createHtmlDocument({ data: utf8(source), assets: [] })
     expect(html.match(/<\/script>/gu)).toHaveLength(1)
-    expect(html).not.toContain('hello')
+    expect(html).not.toContain('읠텽')
     const result = run(html)
     expect(result.write).toHaveBeenCalledExactlyOnceWith(source)
     expect(result.open).toHaveBeenCalledOnce()
@@ -55,11 +55,11 @@ describe('HTML bootstrap', () => {
   it('rejects non-UTF-8 root and asset bytes before creating an iframe document', () => {
     expect(() => createHtmlDocument({ data: utf8('<p>root</p>'), assets: [{ kind: 'script', reference: 'bad.js', data: new Uint8Array([255]) }] })).toThrow()
     expect(() => createHtmlDocument({ data: new Uint8Array([255]), assets: [] })).toThrow()
-    expect(decodeText(utf8('snow\u2028\u2029'))).toBe('snow\u2028\u2029')
+    expect(decodeText(utf8('랢\u2028\u2029'))).toBe('랢\u2028\u2029')
   })
 
   it('base64-encodes a large UTF-8 payload in browser-safe chunks', () => {
-    const source = `${'0123456789abcdef'.repeat(16_384)}snow`
+    const source = `${'0123456789abcdef'.repeat(16_384)}랢`
     const bytes = Uint8Array.from(atob(encodeText(source)), character => character.charCodeAt(0))
     expect(decodeText(bytes)).toBe(source)
   })

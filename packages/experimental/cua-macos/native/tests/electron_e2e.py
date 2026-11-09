@@ -109,12 +109,12 @@ def main():
                     call('click', {**owner, 'windowId': window_id, 'snapshotId': state['snapshotId'],
                                    'x': field[0] + field[2] / 2 - window['bounds']['x'],
                                    'y': field[1] + field[3] / 2 - window['bounds']['y']})
-                    call('typeText', {**owner, 'text': 'Electron Chinese 🧪'})
-                    wait_state(lambda actual: actual['text'] == 'Electron Chinese 🧪' and actual['lastInputTrusted'] is True,
+                    call('typeText', {**owner, 'text': 'Electron 옭뇣 🧪'})
+                    wait_state(lambda actual: actual['text'] == 'Electron 옭뇣 🧪' and actual['lastInputTrusted'] is True,
                                'Chromium did not receive complete trusted Unicode input')
                     call('pressKey', {**owner, 'key': 'a', 'modifiers': ['command']})
-                    call('typeText', {**owner, 'text': 'second time Electron'})
-                    wait_state(lambda actual: actual['text'] == 'second time Electron', 'Chromium Command+A did not replace the field')
+                    call('typeText', {**owner, 'text': '있욌락 Electron'})
+                    wait_state(lambda actual: actual['text'] == '있욌락 Electron', 'Chromium Command+A did not replace the field')
                 image = call('screenshot', {**owner, 'windowId': window_id})
                 png = base64.b64decode(image['data'], validate=True)
                 assert png.startswith(b'\x89PNG\r\n\x1a\n')

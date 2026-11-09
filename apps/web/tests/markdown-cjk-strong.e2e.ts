@@ -23,14 +23,14 @@ const MODE = webSnapshotMode()
 const SEED_ID = 'markdown-cjk-strong-web-e2e'
 const DONE = 'CJK_STRONG_DONE'
 const CASES = [
-  ['**Note:**Content', 'Note:', 'Note: Content'],
-  ['**Notice:**Content', 'Notice:', 'Notice:Content'],
-  ['**event middleware (waterfall)**implement', 'event middleware (waterfall)', 'event middleware (waterfall) implementation'],
-  ['**event middleware(waterfall)**implement', 'event middleware(waterfall)', 'event middleware(waterfall)implement'],
-  ['**full stop.**follow-up', 'full stop.', 'full stop. Follow-up'],
-  ['**Period.**follow-up', 'Period.', 'Period.follow-up'],
-  ['**Reminder!**Continue', 'Reminder!', 'Reminder! Continue'],
-  ['**Warning!**Continue', 'Warning!', 'Warning!Continue'],
+  ['**륄굫：**즅펹', '륄굫：', '륄굫：즅펹'],
+  ['**Notice:**즅펹', 'Notice:', 'Notice:즅펹'],
+  ['**욋웶옭뚬웶（waterfall）**펞쀌', '욋웶옭뚬웶（waterfall）', '욋웶옭뚬웶（waterfall）펞쀌'],
+  ['**욋웶옭뚬웶(waterfall)**펞쀌', '욋웶옭뚬웶(waterfall)', '욋웶옭뚬웶(waterfall)펞쀌'],
+  ['**쯥쯷。**찎쭉', '쯥쯷。', '쯥쯷。찎쭉'],
+  ['**Period.**찎쭉', 'Period.', 'Period.찎쭉'],
+  ['**뀬뉊！**쭃쭉', '뀬뉊！', '뀬뉊！쭃쭉'],
+  ['**Warning!**쭃쭉', 'Warning!', 'Warning!쭃쭉'],
 ] as const
 
 /** Build one settled assistant reply covering CJK-adjacent strong punctuation boundaries. */

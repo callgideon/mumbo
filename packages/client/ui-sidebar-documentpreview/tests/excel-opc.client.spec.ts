@@ -22,11 +22,11 @@ describe.each([['Node', ExcelJS], ['browser bundle', browserExcel]] as const)('%
     const input = archive.withoutDrawings()
     const workbook = new parser.Workbook()
     await workbook.xlsx.load(input.buffer, { ignoreNodes: ['drawing'] })
-    const sheet = workbook.getWorksheet('Data')!
+    const sheet = workbook.getWorksheet('뇌꿊')!
     expect(sheet.getCell('A1').value).toBe('Item')
     expect(sheet.getCell('B2').value).toBe(42)
     if (name === 'comments' || name === 'combined') {
-      expect(sheet.getCell('B2').note).toBe('Generation's comment')
+      expect(sheet.getCell('B2').note).toBe('셻깬신껕륄')
     }
     if (name === 'table' || name === 'combined') {
       expect(sheet.getTable('DataTable')).toMatchObject({ table: { name: 'DataTable', tableRef: 'A1:B3' } })
@@ -46,8 +46,8 @@ describe.each([['Node', ExcelJS], ['browser bundle', browserExcel]] as const)('%
     files[relsPath] = strToU8(xml.replace(relations.join(''), [...relations].reverse().join('')))
     const workbook = new parser.Workbook()
     await workbook.xlsx.load(new Uint8Array(zipSync(Object.fromEntries(Object.entries(files).reverse()))).buffer, { ignoreNodes: ['drawing'] })
-    expect(workbook.getWorksheet('Data')!.getCell('B2').note).toMatchObject({
-      texts: [{ text: 'Generation's comment', font: { bold: true } }], margins: { insetmode: 'custom' },
+    expect(workbook.getWorksheet('뇌꿊')!.getCell('B2').note).toMatchObject({
+      texts: [{ text: '셻깬신껕륄', font: { bold: true } }], margins: { insetmode: 'custom' },
     })
   })
 })
@@ -56,16 +56,16 @@ it('retains styles, formulas, hidden sheets and notices in the combined workbook
   const source = await excelOpcFixture('combined')
   const result = await convertExcel(source, 'xlsx', limits)
   const sheet = result.sheets[0]!
-  expect(result.sheets.map(sheet => [sheet.name, sheet.hide])).toEqual([['Data', 0], ['hidden page', 1]])
+  expect(result.sheets.map(sheet => [sheet.name, sheet.hide])).toEqual([['뇌꿊', 0], ['띈툫뤭', 1]])
   expect(sheet.celldata!.find(cell => cell.r === 1 && cell.c === 1)!.v).toMatchObject({ v: 42, bl: 1, fc: '#112233', bg: '#FFFF00' })
-  expect(sheet.celldata!.find(cell => cell.r === 4 && cell.c === 0)!.v?.v).toBe(' <s:pic/> & Chinese😀\n  tail ')
+  expect(sheet.celldata!.find(cell => cell.r === 4 && cell.c === 0)!.v?.v).toBe(' <s:pic/> & 옭뇣😀\n  tail ')
   expect(sheet.celldata!.find(cell => cell.r === 5 && cell.c === 0)!.v?.f).toBe('=SUM(B2:B3)')
   expect(sheet.config).toMatchObject({ merge: { '29_7': { r: 29, c: 7, rs: 1, cs: 3 } }, rowhidden: { 2: 0 }, colhidden: { 1: 0 } })
   expect(sheet.frozen).toMatchObject({ type: 'rangeBoth', range: { row_focus: 0, column_focus: 0 } })
   expect(result.unsupportedFeatures).toEqual(['charts', 'conditionalFormatting'])
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(new XlsxPreviewArchive(source).withoutDrawings().buffer, { ignoreNodes: ['drawing'] })
-  expect(workbook.getWorksheet('Data')!.getCell('A2').hyperlink).toBe('https://example.com/?a=1&b=2')
+  expect(workbook.getWorksheet('뇌꿊')!.getCell('A2').hyperlink).toBe('https://example.com/?a=1&b=2')
 })
 
 it.each([excelFixture, excelHtmlFixture])('preserves cells and attributes under equivalent namespace aliases', async (fixture) => {

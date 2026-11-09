@@ -7,7 +7,7 @@ import Testing
     let range = try TextSelection.range(in: "a😀 target / b😀 target", text: "target", prefix: "b😀 ", suffix: nil, mode: "text")
     #expect(range.location == 17)
     #expect(range.length == 6)
-    let emoji = try TextSelection.range(in: "😀in😀in", text: "😀", prefix: "in", suffix: nil, mode: "text")
+    let emoji = try TextSelection.range(in: "😀옭😀옭", text: "😀", prefix: "옭", suffix: nil, mode: "text")
     #expect(emoji.location == 3)
     #expect(emoji.length == 2)
 }
