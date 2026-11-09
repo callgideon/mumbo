@@ -144,6 +144,7 @@ Today a project member can make the coordinator read the box token, `MUMBO_MEMBE
      - list every workflow's triggers and secrets, and confirm that no workflow running agent-controlled code receives secrets;
      - confirm that `issue-*` workflows run only default-branch code.
 7. **No comment-triggered merges (C1).** List the org's installed Apps and their repo access, and confirm that no App or bot that merges on comments acts on project repos.
+8. **Project domain setting (B9, B11).** `PROJECT_DOMAIN` (default `boxes.mumbo.si`) sets the project-box host in `boxSite`, B11's host match, the certificate SAN, DNS and the ALB rule. Before B12 is lifted, projects move to their own registrable domain; agent containment is also required by then.
 
 ## How to run this plan in parallel
 

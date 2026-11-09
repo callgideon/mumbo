@@ -95,6 +95,15 @@ These are collected from M1 on.
     - Direction: the agent's shell runs as a non-root user with no route to CDP. Chromium and the browser-use MCP run as their own user. An owner-match firewall rule admits only that MCP process to CDP, and the MCP process enforces consent.
 - **A project box** holds one project's code and a project token. It holds no person's accounts or secrets.
   - It is served on its own origin, `p-<id>.boxes.mumbo.si`, never under the founder's origin. Otherwise script it serves could drive the founder's box.
+  - Every WebSocket upgrade must carry the Origin of its own host.
+  - **Before a project can have a second person** (the B12 gate), two things must be true:
+    - agent containment (below);
+    - project boxes served on a separate registrable domain, so they cannot toss same-site cookies onto `boxes.mumbo.si`. The project domain is a config value (`PROJECT_DOMAIN`).
+- **Approvals and repository grants belong to the founder.** Only emails in `APPROVER_EMAILS` may grant or bind a repository to a project. A repository belongs to at most one project, so ownership of a self-service project never reaches the organization-wide App.
+- **CI must not trust the code it runs.**
+  - Agent branches run in CI, so the repository's default workflow permissions are read-only, with `permissions: contents: read` and `persist-credentials: false`.
+  - Required checks count only when GitHub Actions itself created them.
+  - Every node id passed to a GitHub mutation must resolve to one of the project's repositories.
 - **Agent containment inside every box** **[my call]**.
   - **What it requires.** The agent's shell and file tools run as a non-root user that cannot:
     - read the box's credentials: the box token, `MUMBO_MEMBER_KEY`, the dsh launch token in `/root/dsh.log`, the local CA key;
