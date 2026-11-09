@@ -73,6 +73,13 @@ test('allowlist takes exact addresses and @domains, and admits nobody when empty
   assert.equal(admitted([], 'a@x.com'), false)
 })
 
+test('an @domain entry admits that exact domain, in any case, and never a subdomain or lookalike', () => {
+  const allowed = ['@mumbo.si', '@cambrialabs.ai']
+  for (const email of ['a@mumbo.si', 'A.B@Mumbo.SI', 'x@cambrialabs.ai']) assert.ok(admitted(allowed, email), email)
+  for (const email of ['x@evil-mumbo.si', 'x@mumbo.si.evil.com', 'x@sub.mumbo.si', 'x@mumbo.si.', 'mumbo.si@gmail.com', 'x@gmail.com']) assert.equal(admitted(allowed, email), false, email)
+  assert.ok(admitted(['@sub.mumbo.si'], 'x@sub.mumbo.si'), 'a subdomain is admitted when it is listed')
+})
+
 test('cookies from the box get Secure', () => {
   assert.deepEqual(secureCookies(cfg, { 'set-cookie': ['a=1; Path=/', 'b=2; Secure'] })['set-cookie'], ['a=1; Path=/; Secure', 'b=2; Secure'])
 })

@@ -1,8 +1,8 @@
 // node --test: the edge's M1 settings from the environment.
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { config } from './edge.mjs'
+import { admitted, config } from './edge.mjs'
 
 const base = { PUBLIC_HOST: 'boxes.mumbo.si', LLM_HOST: 'llm.boxes.mumbo.si', BACKUP_BUCKET: 'backups' }
 const M1 = ['APPROVE_HOST', 'GITHUB_AGENT_LOGIN', 'REQUIRED_CHECKS', 'DAILY_TOKENS_USER', 'DAILY_TOKENS_PROJECT', 'BOX_TEMPLATE', 'PROJECT_TEMPLATE',
@@ -66,4 +66,23 @@ test('capacity: node_count drives both the node group and the edge cap (24 units
 test('ALLOWED_EMAILS: a malformed deny entry fails at startup, a well-formed one is kept', () => {
   assert.deepEqual(configWith({ ALLOWED_EMAILS: '@mumbo.si, !A@mumbo.si' }).allowed, ['@mumbo.si', '!a@mumbo.si'])
   for (const bad of ['!', '!mumbo.si', '!@mumbo.si', '!!a@mumbo.si', '!a@']) assert.throws(() => configWith({ ALLOWED_EMAILS: bad }), /must be !local@domain/, bad)
+})
+
+test('ALLOWED_EMAILS: comma-separated, trimmed and lowercased; empty admits nobody', () => {
+  const allowed = configWith({ ALLOWED_EMAILS: ' @Mumbo.si , @cambrialabs.ai ,, Founder@X.com ' }).allowed
+  assert.deepEqual(allowed, ['@mumbo.si', '@cambrialabs.ai', 'founder@x.com'])
+  for (const email of ['New@Mumbo.SI', 'a@cambrialabs.ai', 'founder@x.com']) assert.ok(admitted(allowed, email), email)
+  assert.equal(admitted(allowed, 'other@x.com'), false)
+  assert.deepEqual(configWith({ ALLOWED_EMAILS: ' , ' }).allowed, [])
+})
+
+test('no oauth2-proxy launch turns off its email_verified check', () => {
+  // The edge never sees the ID token, so oauth2-proxy alone refuses email_verified=false. v7.9.0 checks it only while
+  // --insecure-oidc-allow-unverified-email is off and the email claim is `email`, which --oidc-email-claim and its
+  // deprecated alias --user-id-claim change (providers/provider_data.go buildSessionFromClaims, providers/providers.go).
+  const prod = new URL('../prod/', import.meta.url)
+  const files = [...readdirSync(prod).filter(f => f.endsWith('.tf') || f === 'terraform.tfvars').map(f => new URL(f, prod)),
+    new URL('./compose.yaml', import.meta.url), new URL('./up.sh', import.meta.url)]
+  for (const file of [new URL('edge.tf', prod), new URL('./compose.yaml', import.meta.url)]) assert.match(readFileSync(file, 'utf8'), /--provider=oidc/, file.pathname)
+  for (const file of files) assert.doesNotMatch(readFileSync(file, 'utf8'), /allow[-_]?unverified[-_]?email|email[-_]?claim|user[-_]?id[-_]?claim/i, file.pathname)
 })
