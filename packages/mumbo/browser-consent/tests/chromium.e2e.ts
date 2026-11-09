@@ -30,8 +30,7 @@ it.skipIf(process.env.DSH_BROWSER_EXECUTABLE === undefined)('asks before a click
     const allowed = `http://127.0.0.1:${String(port)}`
     const other = `http://localhost:${String(port)}`
     booted = await bootComposition(root, {
-      browser: { mode: 'attach', endpoint: `http://127.0.0.1:${debugPort}` },
-      allowedSites: [allowed],
+      consent: { browser: { mode: 'attach', endpoint: `http://127.0.0.1:${debugPort}` }, allowedSites: [allowed] },
       script: [
         { name: 'browser_navigate', args: { url: `${allowed}/` } },
         { name: 'browser_click', args: { element: 'Send', target: '#send' } },
@@ -46,8 +45,8 @@ it.skipIf(process.env.DSH_BROWSER_EXECUTABLE === undefined)('asks before a click
 
     expect(sent).toEqual([`127.0.0.1:${String(port)}`])
     expect(booted.asked).toEqual([
-      `Browser write: browser_click on ${other} (the assistant describes the target as "Send")`,
-      `Browser write: browser_evaluate on ${other}; this action can reach beyond the current site, so site allowances do not cover it`,
+      `Browser write: browser_click on ${other}. Arguments: target="#send". Model-written target description: "Send".`,
+      `Browser write: browser_evaluate on ${other}. Arguments: function="() => document.forms[0].requestSubmit()". Site allowances do not cover this action.`,
     ])
     expect(consentRecords(booted.events)).toEqual([{ callId: 'call-1', tool: 'browser_click', site: allowed, grant: 'site', outcome: 'succeeded' }])
   } finally {

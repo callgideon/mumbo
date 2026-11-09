@@ -15,6 +15,12 @@
       "path": "../../../vendor/schemastery"
     },
     {
+      "path": "../../browser-use/browser-use"
+    },
+    {
+      "path": "../../experimental/browser-use-playwright-mcp"
+    },
+    {
       "path": "../../mcp/mcp-client"
     },
     {

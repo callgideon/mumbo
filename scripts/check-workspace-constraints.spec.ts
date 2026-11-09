@@ -232,6 +232,12 @@ describe('experimental workspace constraints', () => {
     },
   )
 
+  it('lets a fork-local package under packages/mumbo require an experimental package', () => {
+    const consumer = (dir: string) => ({ dir, manifest: { name: '@mumbo/consumer', peerDependencies: { '@deepseek-ai/dsh-experimental-prototype': 'workspace:*' } } })
+    expect(checkExperimentalDependencyIsolation([experimental, consumer('packages/mumbo/consumer')])).toEqual([])
+    expect(checkExperimentalDependencyIsolation([experimental, consumer('packages/other/consumer')])).toHaveLength(1)
+  })
+
   it('allows the dsh installation to ship the optional bundles the launcher names, and nothing else experimental', () => {
     const listed = { '@deepseek-ai/dsh-experimental-prototype': 'workspace:^' }
     const installation = { dir: 'apps/cli', manifest: { name: '@deepseek-ai/dsh', dependencies: listed } } satisfies WorkspaceManifest

@@ -9,23 +9,26 @@
   en: 10b70472a26f18fd
   zh: 8bf2d513f1a4f5af
 /mumbo-browser-consent/summary:
-  en: 70681b2fb75edc45
-  zh: cbd9b44bdba05522
+  en: 5153a04772e6fb40
+  zh: 1da9cf06f8d93dae
 /mumbo-browser-consent/table-of-contents:
-  en: eff4a3f6306f6c48
-  zh: 9ca9b3a7f14300b9
+  en: c5e68abca298fcdf
+  zh: 11c1323a0b711dc3
 /mumbo-browser-consent/configuration:
-  en: 79a49d039d311d43
-  zh: 1caf5f327b3927b3
+  en: c3384b540d5510f6
+  zh: 0d0a137c3c1dee02
 /mumbo-browser-consent/decisions:
-  en: 4e63a10e5545ac8c
-  zh: 71d3a743e09f7813
+  en: ddf597251c43da90
+  zh: 698a0ce4c9058c7a
+/mumbo-browser-consent/provider-ownership:
+  en: 1e7eb2d18e936f9a
+  zh: f6c08b2a8d7f1a27
 /mumbo-browser-consent/audit-record:
-  en: 276bf3af5f56d437
-  zh: 106ff6811ad8814b
+  en: 47351309b429792c
+  zh: 708906d11222734d
 /mumbo-browser-consent/composition:
-  en: 8dd8e5c920271941
-  zh: 24233c46d5f45ba4
+  en: ab7f755e1505d989
+  zh: ffa3b40ec8edf09a
 /mumbo-browser-consent/model-experience:
   en: 215e7ba838619b7b
   zh: a311da3843709f90
@@ -33,8 +36,8 @@
   en: 6c3b0904f6b53d35
   zh: e781608e00dc3451
 /mumbo-browser-consent/model-experience/denied-browser-write/what-the-model-sees:
-  en: 263dd4a9bd0d1ca5
-  zh: 15a7b370697606f3
+  en: c12c06b3a728ce53
+  zh: 7651dabe4a1cea25
 /mumbo-browser-consent/model-experience/denied-browser-write/token-effect:
   en: 061629b57f8966fb
   zh: be2c8d57b5f4f7a3
@@ -42,8 +45,8 @@
   en: fb49c87d0cf71ca9
   zh: 4fdbeac5434f777f
 /mumbo-browser-consent/known-limitations-and-deferred-work:
-  en: ac9f4a719e5190db
-  zh: e4b09e8cd6255c06
+  en: b981fbd3659f4aa4
+  zh: 89a17af844d3c862
 /mumbo-browser-consent/known-limitations-and-deferred-work/dev-note:
   en: e67f633dc6fe7773
   zh: e88aeb617ffb74ea

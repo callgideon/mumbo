@@ -9,7 +9,6 @@ import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Agents from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import BrowserUse from '@deepseek-ai/dsh-browser-use'
-import * as PlaywrightBrowser from '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp'
 import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
 import Llm, { LlmAdapter, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm'
@@ -62,18 +61,19 @@ class ScriptedModel extends LlmAdapter {
 }
 
 /**
- * Boot the composition in `root`: the real Playwright MCP provider, approval, and consent rows.
+ * Boot the composition in `root`: approval and the consent row, which mounts the real Playwright MCP provider.
  * @param root - scratch directory holding the config and serving as the Session's working directory.
- * @param options - provider config, allowed sites, model script, the person's answers in order, and extra rows.
+ * @param options - consent config, approval policy, model script, the person's answers in order (`hang` never answers),
+ *   and rows placed before consent.
  * @returns the booted context and Session, the approval reasons asked, every Session event, and the consent Fiber.
  */
 export async function bootComposition(root: string, options: {
-  browser: Record<string, unknown>
-  allowedSites: string[]
+  consent: Record<string, unknown>
+  approvalPolicy?: 'ask' | 'never'
   script?: readonly ScriptStep[]
-  answers?: ApprovalOutcome[]
+  answers?: Array<ApprovalOutcome | 'hang'>
   withoutApproval?: boolean
-  extra?: ReadonlyArray<readonly [string, Plugin]>
+  before?: ReadonlyArray<readonly [string, Plugin]>
 }) {
   const asked: string[] = []
   const answers = [...options.answers ?? []]
@@ -82,22 +82,22 @@ export async function bootComposition(root: string, options: {
     ['tools', Tools], ['toolExecutor', NativeToolExecutor], ['prompt', SystemPrompt], ['llm', Llm], ['sessions', Sessions],
     ['agents', Agents], ['loop', AgentLoop], ['projections', Projections], ['fs', LocalFileSystem], ['workingDirectory', WorkingDirectory],
     ...options.withoutApproval === true ? [] : [['approval', Approval] as const],
-    ['browserUse', BrowserUse], ['browser', PlaywrightBrowser], ['consent', Consent],
+    ['browserUse', BrowserUse], ...options.before ?? [], ['consent', Consent],
     ['model', { inject: ['llm'], apply(ctx: Context) { ctx.effect(() => ctx.llm.registerAdapter(['fixture'], model)) } }],
     // The person answering in the browser is an external input.
     ['person', { apply(ctx: Context) {
       ctx.on('approval/request', (request) => {
         asked.push(request.reason ?? '')
-        return Promise.resolve(answers.shift() ?? 'rejected')
+        const answer = answers.shift() ?? 'rejected'
+        if (answer !== 'hang') return Promise.resolve(answer)
+        return new Promise<ApprovalOutcome>((resolve) => { request.signal?.addEventListener('abort', () => { resolve('cancelled') }) })
       })
     } }],
-    ...options.extra ?? [],
   ])
   const configs: Record<string, unknown> = {
     loop: { agents: [] },
-    approval: { policy: 'ask' },
-    browser: options.browser,
-    consent: { allowedSites: options.allowedSites },
+    approval: { policy: options.approvalPolicy ?? 'ask' },
+    consent: options.consent,
   }
   const configPath = join(root, 'cordis.yml')
   await writeFile(configPath, JSON.stringify([...modules.keys()].map(name => ({ id: name, name, config: configs[name] ?? {} }))))
@@ -117,7 +117,7 @@ export async function bootComposition(root: string, options: {
   ctx.on('session/event', (_session, event) => { events.push(event) })
   const handle = await ctx.agents.create({ sessionId: SessionId('person'), meta: { cwd: root }, agentOptions: { provider: 'fixture', model: 'fixture' } })
   await handle.agent.whenIdle()
-  const consentFiber = [...ctx.loader.entries()].find(entry => entry.options.id === 'consent')!.fiber!
+  const consentFiber = [...ctx.loader.entries()].find(entry => entry.options.id === 'consent')!.fiber
   return { ctx, agent: handle.agent, asked, events, consentFiber }
 }
 
