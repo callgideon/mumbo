@@ -24,7 +24,7 @@ const usePanelInfo: GlobalStandardProps['usePanelInfo'] = selector => selector({
 /** Store over a real mirror derived from the same scripted context. */
 function derivedDocumentStore(remote: object) {
   const ctx = { remote } as never
-  return new SettingsDocumentStore(ctx, new SettingsDescribeMirror(ctx))
+  return new SettingsDocumentStore(ctx, new SettingsDescribeMirror(ctx, () => true))
 }
 import { en, zh } from '../src/client/locales.ts'
 import { CurrentVersionRow } from '../src/client/CurrentVersionRow.tsx'
@@ -172,7 +172,7 @@ describe('SettingsDocumentAction', () => {
       .mockResolvedValueOnce({ ok: true as const, value: { writable: true, hasDocument: false, namespaces: [] } })
       .mockResolvedValueOnce({ ok: true as const, value: { writable: true, hasDocument: true, namespaces: [] } })
     const ctx = { remote: { settings: { describe, openSettingsDocument: vi.fn() } } } as never
-    const mirror = new SettingsDescribeMirror(ctx)
+    const mirror = new SettingsDescribeMirror(ctx, () => true)
     const controller = new SettingsDocumentStore(ctx, mirror)
     const first = render(<SettingsDocumentAction
       {...kit}

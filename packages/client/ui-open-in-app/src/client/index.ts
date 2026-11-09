@@ -18,6 +18,8 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar-documentpreview/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-files/client'
 import type {} from '@deepseek-ai/dsh-api-gateway/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
+// Type-only: pulls the remoteAccess service merge (ctx.remoteAccess).
+import type {} from '@deepseek-ai/dsh-api-remote-access/client'
 import type {} from '@deepseek-ai/dsh-api-session-controller/remote'
 import { OPEN_IN_APP_ICON_PREFIX_ROUTE } from '@deepseek-ai/dsh-host-open-in-app/shared'
 import { OpenInAppController } from './controller.ts'
@@ -44,8 +46,8 @@ export type { OpenInAppOutcome, OpenInAppPathFailure } from './outcome.ts'
 export type { OpenPathActionProps, OpenPathInjected } from './OpenPathAction.tsx'
 export type { OpenPathEmptyActionProps } from './OpenPathEmptyAction.tsx'
 
-/** Required services: sessions, layout selection, the slot registry, copy, Remote calls, and shortcuts. */
-export const inject = ['contextMenus', 'sidebarRight', 'sidebarRightTabs', 'sessions', 'slots', 'locale', 'remote', 'remote.session', 'remote.workspaceFiles', 'shortcuts', 'layout']
+/** Required services: sessions, layout selection, the slot registry, copy, Remote calls, shortcuts, and access. */
+export const inject = ['contextMenus', 'sidebarRight', 'sidebarRightTabs', 'sessions', 'slots', 'locale', 'remote', 'remote.session', 'remote.workspaceFiles', 'shortcuts', 'layout', 'remoteAccess']
 
 /**
  * Client plugin body: register dictionaries, workspace directory controls, and
@@ -54,8 +56,18 @@ export const inject = ['contextMenus', 'sidebarRight', 'sidebarRightTabs', 'sess
  */
 export function apply(ctx: ClientContext): void {
   const controller = new OpenInAppController()
-  void controller.load()
-  const paths = new OpenInAppPathController(ctx.remote)
+  // The HTTP open-in-app routes (apps probe, icons, launch) sit outside the Gateway and answer only the
+  // owner, so no access answer names them. `session/openWorkspacePath`, the Remote action that opens a Host
+  // path in a Host application, stands in for them: a page without it probes no apps, reads no desktop or
+  // file associations, and offers no opener.
+  let launchable = false
+  const paths = new OpenInAppPathController(ctx.remote, () => launchable)
+  ctx.remoteAccess.whenAccess('session/openWorkspacePath', () => {
+    launchable = true
+    void controller.load()
+    paths.resume()
+    return () => { launchable = false }
+  })
   ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }), 'open-in-app: dictionaries')
   const t = ctx.locale.bind(NS)
   // Keep operation feedback visible after its initiating panel closes.

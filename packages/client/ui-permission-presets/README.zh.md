@@ -25,7 +25,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-将本插件与 settings、commands 和 conversation 包一同挂载。通用设置获得未来默认值行；composer 获得 `conversation.input.permission` 控件，裸 `/permission` 打开 slash 选择器。当前会话控件同时要求 Session 投影和完整目录快照。不提供权限功能的装配既不公开当前会话控件，也不公开设置行。
+将本插件与 settings、commands 和 conversation 包一同挂载。通用设置获得未来默认值行；composer 获得 `conversation.input.permission` 控件，裸 `/permission` 打开 slash 选择器。当前会话控件同时要求 Session 投影和完整目录快照。不提供权限功能的装配既不公开当前会话控件，也不公开设置行。页面的 Peer 不能调用 `permissionPresets/catalog` 时（例如项目成员的页面），三个界面都不注册，也不读取目录。
 
 窄屏浏览器设置中，默认权限标签与控件的间距缩小；Windows 和 macOS 桌面窗口保留标准间距。
 

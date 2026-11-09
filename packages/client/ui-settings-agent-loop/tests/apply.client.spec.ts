@@ -4,7 +4,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
-import { RemoteError, TestRemote } from '@deepseek-ai/dsh-client-test-runtime'
+import { RemoteError, TestRemote, StaticRemoteAccess } from '@deepseek-ai/dsh-client-test-runtime'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { apply as settingsApply, inject as settingsInject } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { apply, inject, NS } from '../src/client/index.ts'
@@ -27,6 +27,7 @@ async function bench(served?: string[]) {
     ? { ok: false, error: new RemoteError('gateway/internal', 'no provider', {}) }
     : { ok: true, value: { writable: true, hasDocument: true, namespaces: served.map(ns => view(ns)) } }))
   const remote = new TestRemote(ctx, { settings: { describe: describeSettings } })
+  new StaticRemoteAccess(ctx)
   await ctx.plugin({ inject: [...settingsInject], apply: settingsApply }).await()
   return { ctx, slots: ctx.get('slots') as SlotRegistry, describeSettings, remote }
 }

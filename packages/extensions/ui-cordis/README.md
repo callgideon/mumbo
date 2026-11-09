@@ -41,6 +41,8 @@ The `cordis_define` card is a record: the name and purpose the model wrote, the 
 
 Definitions are process-local: a reloaded page holds nothing until someone runs a package again, and the panel re-reads the inventory on every announcement. Approvals are frame-wide by design, so a person in one tab can approve a run the model asked for while another tab shows the defining session; the first answer wins and the rest converge.
 
+The panel and every inventory read exist only while the page's Peer may call `dynamicCordisRunner/inventory`. A page without that action, such as a project member's, shows no panel and reads no inventory; its transcript still renders Cordis tool cards.
+
 -----
 
 <a id="understand-the-implementation"></a>

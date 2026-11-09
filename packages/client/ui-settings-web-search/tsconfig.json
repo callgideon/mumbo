@@ -40,6 +40,9 @@
     },
     {
       "path": "../../web/web"
+    },
+    {
+      "path": "../../api/remote-access/tsconfig.client.json"
     }
   ]
 }

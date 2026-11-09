@@ -25,7 +25,7 @@ This package lets web-client features expose editable preferences backed by the 
 <a id="use-this-package"></a>
 ## Use this package
 
-Feature plugins use this package to store and edit their preferences without re-implementing transport or schema handling. Mount it once per composition; it injects the `remote` service with its `settings` namespace and owns the single `settings.describe` reader in the browser.
+Feature plugins use this package to store and edit their preferences without re-implementing transport or schema handling. Mount it once per composition; it injects the `remote` service with its `settings` namespace and the `remoteAccess` service, and owns the single `settings.describe` reader in the browser.
 
 ### Configuration forms
 
@@ -65,6 +65,8 @@ The package realizes one ownership rule: the browser keeps one shared mirror of 
 ### The describe mirror
 
 The Host Config of the `ui-settings` entry declares the default-on `enabled` preference. The Client plugin injects `remote` with its `settings` namespace and owns the one `settings.describe` reader in the browser: a shared mirror refreshed on every forwarded `settings/document-updated` event and on `connection/reset` (the first connection included, closing the window where a commit lands between the eager read and the SSE subscription). Cross-namespace surfaces read it through `ctx.configForms.describe()`, a read/fold face (`getSnapshot`/`subscribe`/`ensure`, plus `acceptView` folding a write answer in).
+
+The mirror reads only while the page's `remoteAccess` answer allows `settings/describe` on the global resource, as it always does for the owner. A page without that action, such as a project member's or a share viewer's, issues no `settings.describe` read: the mirror stays `idle` with no error, every form stays unanswered, and `ensure()` and invalidations settle without a request.
 
 ### Shared entry writes
 

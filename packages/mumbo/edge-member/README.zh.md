@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`@mumbo/edge-member` 让 mumbo 共享项目的成员在项目盒子中以自己的身份行动。mumbo 边缘为每个代理请求附加签名的成员请求头；本插件注册一个 [Connection authenticator](../../client/connection/README.zh.md)，把签名正确的请求准入为 `edge-member` principal，并注册一个 [远程访问](../../api/remote-access/README.zh.md) 策略，授予成员协作所需的 Session 操作。成员的提示词以 `principal: { kind: 'edge-member', email }` 记录，模型在其前读到一条指明该成员的通知。设计与威胁模型见 [Agent Note](../../../.agents/notes/implemented/architecture/2026-11-09-connection-authenticators-and-edge-members.zh.md)。
+`@mumbo/edge-member` 让 mumbo 共享项目的成员在项目盒子中以自己的身份行动。mumbo 边缘为每个代理请求附加签名的成员请求头；本插件注册一个 [Connection authenticator](../../client/connection/README.zh.md)，把签名正确的请求准入为 `edge-member` principal，并注册一个 [远程访问](../../api/remote-access/README.zh.md) 策略，授予成员协作所需的 Session 操作。成员的提示词以 `principal: { kind: 'edge-member', email }` 记录，模型在其前读到一条指明该成员的通知，Web 页面在其上方显示该成员的地址。设计与威胁模型见 [Agent Note](../../../.agents/notes/implemented/architecture/2026-11-09-connection-authenticators-and-edge-members.zh.md)。
 
 ## 目录
 
@@ -66,6 +66,8 @@ kind: "package-reference"
 
 对于 `edge-member` Peer 提交的每条进入消息，`agent/pre-step` 监听器在其前插入一条 user 角色的通知，来源为 `{ kind: 'mumbo-member', form: 'notice', summary }`。通知与消息一起进入 Session 日志，因此协调者模型能看到每条消息的作者，恢复的 Session 会重放相同的请求。owner 消息与其他来源不变。
 
+本包的浏览器半侧通过 Chat 的 `conversation.chat.user.before` 席位，在 owner 页面与每个成员页面上，于成员发送的每条 user 消息上方显示该成员的地址；owner 消息与其他 principal 类型不显示该行。通知与其他上下文通知的呈现方式相同：在成员回合内显示为一条折叠的上下文注入行，列出其来源与摘要。
+
 <a id="composition"></a>
 ## 组合
 
@@ -102,6 +104,7 @@ The next message is from project member <email>.
 - **媒体引用不会为成员渲染** — `/api/file` 可读取盒子能读取的任何文件，包括 `/root/.mumbo/start.sh`、dsh 日志中的 owner 启动 token 以及每个 Session 日志，因此没有任何成员角色授予其 `hostFiles/readAny`。等到该路由能把非 owner 限定在某个 Session 的工作区根目录时才会向成员开放，这需要缺失的接口：`ConnectionFetchRoute.fetch` 收不到 Peer。
 - **成员无法在页面中打开已结束的子代理记录** — 子代理的子 Session 只在存活时被授权，因为没有 Workspace 列出它；已授权 Session 的日志下载仍包含每个子代理后代的日志。
 - **交付物路由只对 owner 开放** — 变更摘要、比较以及打开声明或变更的文件（`/api/changes.*`、`/api/present.*`）对成员返回 403。
+- **steering 消息与继续请求不显示作者行** — Chat 只在开启回合的 user 行上渲染消息来源席位。因此，回合运行期间进入的成员消息，以及成员发出的无内容继续请求（`retry` 来源，Chat 显示为继续回执），都不显示地址；该回合内的通知行仍会列出该成员。
 - **回答不携带成员** — `userQuestions/answer` 不记录 principal，因此模型无法分辨是哪个成员回答了问题。
 - **移除不会立即生效** — 盒子不保存成员列表；被边缘移除的成员在为其签发的最后一个请求头过期前（至多十分钟）仍有访问权。
 - **没有时钟偏差容忍** — 盒子按自身时钟拒绝过期时间已过或超前 600 秒以上的请求头，因此盒子与边缘的时钟偏差必须在五分钟以内。

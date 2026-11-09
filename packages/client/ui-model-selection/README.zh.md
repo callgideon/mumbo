@@ -45,6 +45,8 @@ composer 菜单中的模型名称和推理等级均使用 400（regular）字重
 
 展开的控件无法排在同一行时，composer 将模型与推理强度文字替换为模型图标；空间足够后恢复文字。触发器的无障碍名称、提示和菜单仍提供完整选择。
 
+页面的会话访问权限不含 `session/selectModel` 时，触发器仍以常规颜色显示当前模型与推理强度，不显示展开箭头。触发器带 `aria-disabled` 留在 Tab 顺序中，播报本地化的「模型：名称」标签而不带菜单语义，保留提示，且不打开菜单；composer 锁定时仍会变暗并禁用。
+
 ### 模型名称扩展
 
 `conversation.input.model.label` 是会话作用域的内联 `single` slot，覆盖 composer 触发按钮（`placement: 'trigger'`）、根菜单中的当前值（`'menu'`）和各模型选项（`'option'`）。owner props 提供 `provider: { id, name }`、准确的目录 `model`、`placement` 和 `selected`。提供方名称是本地化显示名称；按 `provider.id` 匹配渠道，按提供方与模型 ID 的组合识别模型。slot 不接收连接 URL 或凭据。

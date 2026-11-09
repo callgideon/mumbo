@@ -1,7 +1,7 @@
 /** Developer-tool choices share settings validation, persistence and accepted-state publication. */
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
-import { stubConfigForm, TestRemote, RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
+import { stubConfigForm, StaticRemoteAccess, TestRemote, RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
 import { DEVELOPER_TOOLS_NAMESPACE, DeveloperToolsSettingsSchema, type DeveloperToolsSettings } from '../src/developer-tools-settings.ts'
 import { DeveloperToolsPreference } from '../src/client/developer-tools.ts'
 import { apply as clientApply, inject } from '../src/client/index.ts'
@@ -21,6 +21,7 @@ describe('developer tools settings', () => {
     const mutate = vi.fn().mockResolvedValue({
       ok: false, error: new RemoteError('settings/rejected', 'conflict', { ns: DEVELOPER_TOOLS_NAMESPACE }),
     })
+    new StaticRemoteAccess(ctx)
     new TestRemote(ctx, { settings: { describe: describeCall, mutate } })
     await ctx.plugin({ inject, apply: clientApply }).await()
     await ctx.configForms.describe().ensure()
@@ -41,6 +42,7 @@ describe('developer tools settings', () => {
     } }
     const pending = Promise.withResolvers<typeof accepted>()
     onTestFinished(async () => { pending.resolve(accepted); await ctx.fiber.dispose() })
+    new StaticRemoteAccess(ctx)
     new TestRemote(ctx, { settings: { describe: () => pending.promise } })
     await ctx.plugin({ inject, apply: clientApply }).await()
     const preference = ctx.configForms.developerTools
@@ -57,6 +59,7 @@ describe('developer tools settings', () => {
   it('keeps features disabled when the initial Host read fails', async () => {
     const ctx = new Context()
     onTestFinished(() => ctx.fiber.dispose())
+    new StaticRemoteAccess(ctx)
     new TestRemote(ctx, { settings: { describe: () => Promise.reject(new Error('disconnected')) } })
     await ctx.plugin({ inject, apply: clientApply }).await()
     await ctx.configForms.describe().ensure()
@@ -67,6 +70,7 @@ describe('developer tools settings', () => {
     const ctx = new Context()
     onTestFinished(() => ctx.fiber.dispose())
     const describeCall = vi.fn().mockResolvedValue({ ok: true, value: { writable: true, hasDocument: true, namespaces: [] } })
+    new StaticRemoteAccess(ctx)
     new TestRemote(ctx, { settings: { describe: describeCall } })
     const fiber = ctx.plugin({ inject, apply: clientApply })
     await fiber.await()

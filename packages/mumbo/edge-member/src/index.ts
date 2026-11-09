@@ -12,7 +12,8 @@ import type { ConnectionTrustRequest } from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-api-remote-access'
 import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-storage-domain'
-import { workspaceDomainSpec } from '@deepseek-ai/dsh-workspace'
+// Type-only: the Workspace registry service merge (ctx.workspaceRegistry).
+import type {} from '@deepseek-ai/dsh-workspace'
 import z from '@deepseek-ai/schemastery'
 import { MemberBindings } from './access.ts'
 import { attributeMemberMessages } from './attribution.ts'
@@ -36,6 +37,9 @@ export interface EdgeMemberPrincipal {
   /** Lowercased address the edge signed in. */
   readonly email: string
 }
+
+/** Storage domain name of the Workspace registry; persisted domain names never change. */
+const WORKSPACE_DOMAIN = 'workspace'
 
 /** Cordis function-plugin name. */
 export const name = 'mumbo-edge-member'
@@ -79,7 +83,7 @@ export function apply(ctx: Context, config: Config): void {
     pending.clear()
   }, 'mumbo-edge-member: deferred access rebuilds')
   ctx.on('domain/changed', (change) => {
-    if (change.domain !== workspaceDomainSpec.name) return
+    if (change.domain !== WORKSPACE_DOMAIN) return
     const handle = setImmediate(() => {
       pending.delete(handle)
       changed()

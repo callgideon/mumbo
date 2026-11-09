@@ -51,6 +51,7 @@
   "devDependencies": {
     "@deepseek-ai/dsh-remote-mock": "workspace:*",
     "@deepseek-ai/cordis": "workspace:~",
+    "@deepseek-ai/dsh-api-remote-access": "workspace:*",
     "@deepseek-ai/dsh-api-remotes": "workspace:*",
     "@deepseek-ai/dsh-api-session-controller": "workspace:*",
     "@deepseek-ai/dsh-client-connection": "workspace:*",

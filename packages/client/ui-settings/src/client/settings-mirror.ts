@@ -79,8 +79,10 @@ export class SettingsDescribeMirror implements SettingsDescribeFace {
   /**
    * @param ctx - the providing plugin's context, whose `remote.settings`
    * namespace answers the describe read.
+   * @param readable - whether this page may read the settings document now;
+   * while false, {@link load} issues no read and the mirror stays as it is.
    */
-  constructor(private readonly ctx: ClientContext) {
+  constructor(private readonly ctx: ClientContext, private readonly readable: () => boolean) {
     this.store = createSnapshotStore<SettingsMirrorSnapshot>({
       status: 'idle',
       view: undefined,
@@ -104,10 +106,12 @@ export class SettingsDescribeMirror implements SettingsDescribeFace {
 
   /**
    * Refresh from the Host. A call during an in-flight read marks one rerun
-   * after it settles instead of racing a second wire read.
+   * after it settles instead of racing a second wire read. Without read
+   * access, no read starts and the call settles at once.
    * @returns settlement after this call's freshness is reflected.
    */
   load(): Promise<void> {
+    if (!this.readable()) return Promise.resolve()
     if (this.inFlight !== undefined) {
       this.rerun = true
       return this.inFlight
