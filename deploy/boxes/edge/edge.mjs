@@ -735,10 +735,11 @@ export function authUi({ html, supabaseJs, consentJs, supabaseUrl, anonKey, clie
 // oauth2-proxy's --skip-auth-route GETs (prod/edge.tf). With --reverse-proxy it also skips sign-in for any request whose
 // client-sent X-Forwarded-Uri names one of them; neither it nor the ALB sets that header. A skipped request carries no
 // identity, so an email header on one did not come through sign-in.
-const SKIP_AUTH = [/^\/oauth\/consent([?].*)?$/, /^\/auth-ui\/(supabase|config|consent)[.]js$/]
-/** True for a request oauth2-proxy may not have signed in: any X-Forwarded-Uri, or an email header on a skip-auth GET. */
+/** True for a request carrying X-Forwarded-Uri, which neither the ALB nor oauth2-proxy sets: with --reverse-proxy, oauth2-proxy
+ *  skips sign-in for any GET whose client-sent X-Forwarded-Uri matches a skip-auth route. oauth2-proxy strips client identity
+ *  headers on every route and sets X-Forwarded-Email itself for a visitor with a session, skip-auth routes included, so a
+ *  request without that header is signed out. This refusal is defence in depth behind that strip. */
 const skippedSignin = (req) => req.headers['x-forwarded-uri'] !== undefined
-  || (req.method === 'GET' && req.headers['x-forwarded-email'] !== undefined && SKIP_AUTH.some(r => r.test(req.url)))
 
 /** Signed-in users' traffic. The public host reaches the user's own box and p-<16 hex>.<project domain> a project's
  *  box, for its members only; `approve` (approve-page.mjs) serves cfg.approveHost, an origin no box serves; any other host
