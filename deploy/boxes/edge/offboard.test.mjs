@@ -85,7 +85,7 @@ test('S3 adapter: pages, delete markers, batches of 1000, and per-object errors'
 })
 
 test('a store without the edge box index is refused', async () => {
-  await assert.rejects(assertEdgeStore({ sCard: async () => 0 }), /does not point at the edge store/)
+  await assert.rejects(assertEdgeStore({ sCard: async () => 0 }), /holds no `boxes` set/)
   await assertEdgeStore({ sCard: async () => 3 })
   await assertEdgeStore({ sCard: async () => 0 }, true)
 })
