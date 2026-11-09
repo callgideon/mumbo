@@ -242,7 +242,7 @@ export async function revealNavigationDrawer(page: Page, locale: 'en' | 'zh' | '
   const closed = page.locator('[data-sidebar-drawer][data-sidebar-collapsed]')
   if (await closed.count() === 0) return
   await page.locator('[data-shell-leading]').getByRole('button', {
-    name: { en: 'Open sidebar', zh: 'Open sidebar', ja: 'サイドバーをhirakuく' }[locale], exact: true,
+    name: { en: 'Open sidebar', ja: 'サイドバーを開く' }[locale], exact: true,
   }).click()
   await closed.waitFor({ state: 'detached' })
 }
@@ -394,14 +394,14 @@ export function conversationContextKey(kind: string, id: string): string {
  * @param locale - current UI language.
  */
 export async function openSettings(page: Page, locale: 'en' | 'zh' | 'ja'): Promise<void> {
-  const labels = { en: ['Account menu', 'Settings'], zh: ['Account menu', 'Settings'], ja: ['アカウントメニュー', 'settei'] } as const
+  const labels = { en: ['Account menu', 'Settings'], ja: ['アカウントメニュー', '設定'] } as const
   const trigger = page.getByRole('button', {
     name: labels[locale][0], exact: true, includeHidden: true,
   })
   await trigger.waitFor({ state: 'attached' })
   await revealNavigationDrawer(page, locale)
   if (!await trigger.isVisible()) {
-    await page.getByRole('button', { name: { en: 'Open sidebar', zh: 'Open sidebar', ja: 'サイドバーをhirakuく' }[locale], exact: true }).click()
+    await page.getByRole('button', { name: { en: 'Open sidebar', ja: 'サイドバーを開く' }[locale], exact: true }).click()
   }
   await trigger.click()
   await page.getByRole('menuitem', { name: labels[locale][1], exact: true }).click()

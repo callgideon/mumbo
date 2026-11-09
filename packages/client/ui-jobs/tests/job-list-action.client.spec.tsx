@@ -77,7 +77,7 @@ describe('JobListAction count copy', () => {
   it.each([
     [zh, '1 background jobs', '2 background jobs'],
     [en, '1 background job', '2 background jobs'],
-    [ja, 'バックグラウンドジョブ 1 pieces', 'バックグラウンドジョブ 2 pieces'],
+    [ja, 'バックグラウンドジョブ 1 件', 'バックグラウンドジョブ 2 件'],
     [es, 'Tareas en segundo plano: 1', 'Tareas en segundo plano: 2'],
     [fr, 'Tâches en arrière-plan : 1', 'Tâches en arrière-plan : 2'],
     [de, 'Hintergrundaufgaben: 1', 'Hintergrundaufgaben: 2'],

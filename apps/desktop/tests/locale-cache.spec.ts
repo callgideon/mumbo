@@ -29,7 +29,7 @@ it('uses the confirmed Japanese language for recovery before Host settings are a
   const cached = readDesktopLocaleCache(directory)
   const locale = cached === undefined ? resolveDesktopStartupLocale(null, ['en-US']) : resolveDesktopLocale(cached)
   expect(locale.id).toBe('ja')
-  expect(locale.messages.getDiagnosticReport).toBe('shindanレポートをshutoku')
+  expect(locale.messages.getDiagnosticReport).toBe('診断レポートを取得')
 })
 
 it.each(SHIPPED_LOCALE_IDS)('restores the confirmed shipped language %s before Host settings are available', (id) => {

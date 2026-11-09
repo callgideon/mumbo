@@ -47,7 +47,7 @@ const data = {
 describe('QuestionReplyView', () => {
   it('names answered batches in Japanese', () => {
     render(<QuestionReplyBubble data={data} t={makeTranslate(ja)} />)
-    expect(screen.getByRole('group', { name: 'shitsumonとAnswer' })).toBeTruthy()
+    expect(screen.getByRole('group', { name: '質問と回答' })).toBeTruthy()
   })
 
   it('shows paired questions and answers immediately without auxiliary option content', () => {

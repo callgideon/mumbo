@@ -25,7 +25,7 @@ const MODE = webSnapshotMode()
 const ORIGINAL = 'The user wants me to reply with a single word. Let me comply.'
 const GOOGLE_TRANSLATION = 'USER Asked me to reply with one word. I will comply.'
 const BING_TRANSLATION = 'USER Asks me to reply with a single word.'
-const JAPANESE_TRANSLATION = 'ユーザーはtango ichiつでのhenshinをrequestめています.'
+const JAPANESE_TRANSLATION = 'ユーザーは単語一つでの返答を求めています。'
 const GERMAN_TRANSLATION = 'Der Nutzer möchte eine Antwort mit einem einzigen Wort.'
 
 /** Translation records are the only additions permitted beside the recorded conversation. */
