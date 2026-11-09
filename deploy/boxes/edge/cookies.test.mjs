@@ -1,11 +1,13 @@
-// node --test: end to end through userServer with a fake box behind the client-proxy address. The sign-in cookie
+// node --test: end to end through userServer and boxFetcher with a fake box behind the client-proxy address. The sign-in cookie
 // never reaches a box, a box cannot set a parent-domain cookie (in HTTP responses and WebSocket 101s alike), and the
 // approve host and unknown hosts never reach one.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { createServer, request } from 'node:http'
-import { userServer } from './edge.mjs'
+import { boxFetcher, userServer } from './edge.mjs'
 
+// Sign-in cookies (SIGNIN_COOKIE, its chunks, and oauth2-proxy's default name) next to a box's own cookie.
+const SIGNED_IN_COOKIES = '_mumbo_auth=a; _mumbo_auth_1=b; _oauth2_proxy=c; dsh-auth-x=d'
 const listen = (server) => new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port)))
 const call = (port, headers, extra = {}) => new Promise((resolve, reject) => {
   const req = request({ host: '127.0.0.1', port, path: '/', headers }, (res) => {
@@ -20,18 +22,18 @@ test('the sign-in cookie never reaches a box, Domain is dropped from box cookies
   const seen = []
   const fakeBox = createServer((req, res) => { seen.push(req.headers); res.writeHead(200, { 'set-cookie': ['s=1; Domain=.boxes.mumbo.si; Path=/'] }).end('from box') })
   const boxPort = await listen(fakeBox)
-  const cfg = { publicHost: 'boxes.mumbo.si', approveHost: 'approve.boxes.mumbo.si', allowed: ['@x.com'], proxy: new URL(`http://127.0.0.1:${boxPort}`) }
+  const cfg = { publicHost: 'boxes.mumbo.si', approveHost: 'approve.boxes.mumbo.si', allowed: ['@x.com'], signinCookie: '_mumbo_auth', proxy: new URL(`http://127.0.0.1:${boxPort}`) }
   const ensured = []; const approved = []
   const box = { ensure: async (p) => { ensured.push(p); return { id: 'b1', token: 'T' } }, touch: async () => {}, forget: async () => {} }
   const approve = async (req, res, email) => { approved.push(email); res.writeHead(200).end('approve page') }
   const server = userServer({ cfg, box, approve, log: () => {} })
   const port = await listen(server)
-  const signedIn = { 'x-forwarded-email': 'a@x.com', cookie: '_oauth2_proxy=a; _oauth2_proxy_1=b; dsh-auth-x=c' }
+  const signedIn = { 'x-forwarded-email': 'a@x.com', cookie: SIGNED_IN_COOKIES }
   try {
     const r = await call(port, { ...signedIn, host: 'boxes.mumbo.si' })
     assert.equal(r.body, 'from box')
     assert.equal(seen.length, 1)
-    assert.equal(seen[0].cookie, 'dsh-auth-x=c')
+    assert.equal(seen[0].cookie, 'dsh-auth-x=d')
     assert.deepEqual(r.headers['set-cookie'], ['s=1; Path=/; Secure'])
 
     const a = await call(port, { ...signedIn, host: 'Approve.Boxes.Mumbo.Si:443' })
@@ -60,14 +62,24 @@ test('a WebSocket upgrade reaches the box without the sign-in cookie, and its 10
       'Set-Cookie: t=1; Domain=.boxes.mumbo.si; Path=/\r\nSet-Cookie: u=2; Path=/; Secure\r\n\r\n')
   })
   const boxPort = await listen(fakeBox)
-  const cfg = { publicHost: 'boxes.mumbo.si', approveHost: 'approve.boxes.mumbo.si', allowed: ['@x.com'], proxy: new URL(`http://127.0.0.1:${boxPort}`) }
+  const cfg = { publicHost: 'boxes.mumbo.si', approveHost: 'approve.boxes.mumbo.si', allowed: ['@x.com'], signinCookie: '_mumbo_auth', proxy: new URL(`http://127.0.0.1:${boxPort}`) }
   const box = { ensure: async () => ({ id: 'b1', token: 'T' }), touch: async () => {}, forget: async () => {} }
   const server = userServer({ cfg, box, log: () => {} })
   const port = await listen(server)
   try {
-    const ws = await call(port, { host: 'boxes.mumbo.si', origin: 'https://boxes.mumbo.si', 'x-forwarded-email': 'a@x.com', cookie: '_oauth2_proxy=a; dsh-auth-x=c', connection: 'Upgrade', upgrade: 'websocket' }, { upgrade: true })
+    const ws = await call(port, { host: 'boxes.mumbo.si', origin: 'https://boxes.mumbo.si', 'x-forwarded-email': 'a@x.com', cookie: SIGNED_IN_COOKIES, connection: 'Upgrade', upgrade: 'websocket' }, { upgrade: true })
     assert.ok(ws.upgraded, JSON.stringify(ws))
-    assert.equal(seen[0].cookie, 'dsh-auth-x=c')
+    assert.equal(seen[0].cookie, 'dsh-auth-x=d')
     assert.deepEqual(ws.headers['set-cookie'], ['t=1; Path=/; Secure', 'u=2; Path=/; Secure'])
   } finally { server.close(); fakeBox.close() }
+})
+
+test('a relay request (boxFetcher) reaches the box without sign-in cookies, even when its caller passes them', async () => {
+  const seen = []
+  const fakeBox = createServer((req, res) => { seen.push(req.headers); res.end('{}') })
+  const cfg = { publicHost: 'boxes.mumbo.si', signinCookie: '_mumbo_auth', proxy: new URL(`http://127.0.0.1:${await listen(fakeBox)}`) }
+  try {
+    await boxFetcher(cfg)({ id: 'b1' }, 'p-0123456789abcdef.boxes.mumbo.si', '/api/session/create', { method: 'POST', headers: { cookie: SIGNED_IN_COOKIES }, body: '{}' })
+    assert.equal(seen[0].cookie, 'dsh-auth-x=d')
+  } finally { fakeBox.close() }
 })

@@ -6,7 +6,7 @@ import { inParallel, signBox, verifyBox, userPrefix, budget, needsLaunch, boxHea
 import { memoryStore, redisStore } from './store.mjs'
 import { generateKeyPairSync, createSign } from 'node:crypto'
 
-const cfg = { publicHost: 'boxes.example', projectDomain: 'boxes.example', llmHost: 'llm.example', template: 'mumbo-box', idleMs: 60_000, backupEveryMs: 600_000, maxRunning: 5, allowed: ['@x.com'], egressIps: [], proxy: new URL('http://127.0.0.1:1'), upstream: 'https://model.example' }
+const cfg = { publicHost: 'boxes.example', projectDomain: 'boxes.example', llmHost: 'llm.example', template: 'mumbo-box', idleMs: 60_000, backupEveryMs: 600_000, maxRunning: 5, allowed: ['@x.com'], egressIps: [], signinCookie: '_mumbo_auth', proxy: new URL('http://127.0.0.1:1'), upstream: 'https://model.example' }
 const listen = (server) => new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port)))
 const call = (port, { method = 'GET', path = '/', headers = {}, body } = {}) => new Promise((resolve, reject) => {
   const req = request({ host: '127.0.0.1', port, method, path, headers: { host: cfg.publicHost, ...headers } }, (res) => {
@@ -666,9 +666,11 @@ test('relay to a member-capable box sends the member header and no owner sign-in
 })
 
 test('the sign-in cookie never reaches a box, and boxes cannot set parent-domain cookies', () => {
-  const h = boxHeaders(cfg, { cookie: '_oauth2_proxy=a; _oauth2_proxy_1=b; dsh-auth-x=c' }, { id: 'b' })
-  assert.equal(h.cookie, 'dsh-auth-x=c')
-  assert.equal(boxHeaders(cfg, { cookie: '_oauth2_proxy=a' }, { id: 'b' }).cookie, undefined)
+  const h = boxHeaders(cfg, { cookie: '_mumbo_auth=a; _mumbo_auth_1=b; _oauth2_proxy=c; dsh-auth-x=d' }, { id: 'b' })
+  assert.equal(h.cookie, 'dsh-auth-x=d')
+  const only = boxHeaders(cfg, { cookie: '_mumbo_auth_0=a; _mumbo_auth_1=b; _mumbo_auth_0f3a_csrf=c; _oauth2_proxy=d' }, { id: 'b' })
+  assert.equal('cookie' in only, false, 'no cookie header when only sign-in cookies were sent')
+  assert.equal(boxHeaders(cfg, { cookie: 'dsh-auth-x=_mumbo_auth; _mumbo_auth=a' }, { id: 'b' }).cookie, 'dsh-auth-x=_mumbo_auth', 'matched by name, not value')
   const out = secureCookies({ 'set-cookie': ['s=1; Domain=.boxes.mumbo.si; Path=/', 't=2; path=/; domain=boxes.mumbo.si; HttpOnly'] })['set-cookie']
   assert.deepEqual(out, ['s=1; Path=/; Secure', 't=2; path=/; HttpOnly; Secure'])
 })

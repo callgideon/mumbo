@@ -23,10 +23,17 @@ const hostname = (name, fallback) => {
   if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(value)) throw new Error(`edge: ${name} must be a bare lowercase hostname such as boxes.mumbo.si, not ${JSON.stringify(value)}`)
   return value
 }
+/** A cookie name: one or more RFC 9110 token characters. Anything else, the empty string included, fails at start. */
+const cookieName = (name, fallback) => {
+  const value = env(name, fallback)
+  if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(value)) throw new Error(`edge: ${name} must be a cookie name (token characters only), not ${JSON.stringify(value)}`)
+  return value
+}
 export const config = () => ({
   publicHost: env('PUBLIC_HOST'),
   projectDomain: hostname('PROJECT_DOMAIN', 'boxes.mumbo.si'),  // project boxes are served at p-<16 hex>.<this>
   llmHost: env('LLM_HOST'),
+  signinCookie: cookieName('SIGNIN_COOKIE', '_mumbo_auth'),  // oauth2-proxy's --cookie-name; boxHeaders drops it
   template: env('BOX_TEMPLATE', 'mumbo-box'),
   idleMs: Number(env('IDLE_MINUTES', '30')) * 60_000,
   pauseIdle: env('PAUSE_IDLE', 'true') !== 'false',  // false: boxes stay running (founder, 2026-11-09); cost work comes later
@@ -561,8 +568,12 @@ export function boxHeaders(cfg, incoming, target, port = '3080') {
   const out = {}
   for (const [k, v] of Object.entries(incoming)) if (!DROP.has(k) && !k.startsWith('x-forwarded-') && !k.startsWith('e2b-')) out[k] = v
   // The sign-in cookie (oauth2-proxy) never reaches a box: a box that saw it could replay it as the signed-in person.
+  // Matched by name prefix, which covers oauth2-proxy's <name>_0, _1… chunks and <name>_<hash>_csrf cookies; browsers
+  // signed in before SIGNIN_COOKIE still send oauth2-proxy's default name, _oauth2_proxy. Used by every box request:
+  // HTTP, WebSocket upgrades and the relay (boxFetcher).
   if (out.cookie !== undefined) {
-    const kept = String(out.cookie).split(';').map(c => c.trim()).filter(c => c && !c.startsWith('_oauth2_proxy'))
+    const signin = [cfg.signinCookie, '_oauth2_proxy']
+    const kept = String(out.cookie).split(';').map(c => c.trim()).filter(c => c && !signin.some(p => c.split('=')[0].startsWith(p)))
     if (kept.length) out.cookie = kept.join('; '); else delete out.cookie
   }
   out.host = `sandbox.${cfg.publicHost}`

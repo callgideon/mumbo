@@ -5,7 +5,7 @@ import { config } from './edge.mjs'
 
 const base = { PUBLIC_HOST: 'boxes.mumbo.si', LLM_HOST: 'llm.boxes.mumbo.si', BACKUP_BUCKET: 'backups' }
 const M1 = ['APPROVE_HOST', 'GITHUB_AGENT_LOGIN', 'REQUIRED_CHECKS', 'DAILY_TOKENS_USER', 'DAILY_TOKENS_PROJECT', 'BOX_TEMPLATE', 'PROJECT_TEMPLATE',
-  'AUDIT_PREFIX', 'GITHUB_AGENT_TOKEN', 'GITHUB_APP_ID', 'GITHUB_APP_KEY', 'GITHUB_MERGE_TOKEN', 'NTFY_TOPIC']
+  'AUDIT_PREFIX', 'GITHUB_AGENT_TOKEN', 'GITHUB_APP_ID', 'GITHUB_APP_KEY', 'GITHUB_MERGE_TOKEN', 'NTFY_TOPIC', 'SIGNIN_COOKIE']
 /** config() with exactly `base` plus `vars` set among the variables it reads here. */
 function configWith(vars = {}) {
   const all = { ...Object.fromEntries(M1.map(k => [k, undefined])), ...base, ...vars }
@@ -31,4 +31,10 @@ test('M1 settings: defaults, and secrets optional so the edge starts before they
 
 test('an empty REQUIRED_CHECKS fails at start instead of dropping the merge gate\'s CI requirement', () => {
   for (const value of ['', ' ', ' , ,']) assert.throws(() => configWith({ REQUIRED_CHECKS: value }), /REQUIRED_CHECKS must name at least one check/, JSON.stringify(value))
+})
+
+test('SIGNIN_COOKIE: _mumbo_auth when unset; an empty or malformed cookie name fails at start', () => {
+  assert.equal(configWith().signinCookie, '_mumbo_auth')
+  assert.equal(configWith({ SIGNIN_COOKIE: '_other' }).signinCookie, '_other')
+  for (const value of ['', ' ', 'a b', 'a=b', 'a;b', '_mumbo_auth,']) assert.throws(() => configWith({ SIGNIN_COOKIE: value }), /SIGNIN_COOKIE must be a cookie name/, JSON.stringify(value))
 })

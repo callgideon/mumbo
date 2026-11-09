@@ -29,6 +29,11 @@ variable "github_agent_login" {
   type        = string
   default     = ""
 }
+variable "signin_cookie_name" {
+  description = "oauth2-proxy's --cookie-name and the edge's SIGNIN_COOKIE: the edge drops every cookie whose name starts with it from box requests."
+  type        = string
+  default     = "_mumbo_auth"
+}
 
 locals {
   public_host  = "boxes.mumbo.si"
@@ -255,7 +260,7 @@ resource "aws_ecs_task_definition" "edge" {
         "--redirect-url=https://${local.public_host}/oauth2/callback", "--scope=openid email", "--code-challenge-method=S256",
         "--cookie-secure=true", "--cookie-samesite=lax", "--cookie-csrf-per-request=true", "--cookie-csrf-expire=10m",
         # One sign-in for the approve page and project boxes; the edge never forwards these cookies to a box.
-        "--cookie-domain=.${local.public_host}", "--whitelist-domain=.${local.public_host}",
+        "--cookie-name=${var.signin_cookie_name}", "--cookie-domain=.${local.public_host}", "--whitelist-domain=.${local.public_host}",
         "--reverse-proxy=true", "--pass-user-headers=true", "--skip-provider-button=true", "--email-domain=*",
         "--upstream=http://127.0.0.1:8080", "--http-address=0.0.0.0:4180",
         "--upstream-timeout=120s", # a first visit creates the box and restores its backup before answering
@@ -281,6 +286,7 @@ resource "aws_ecs_task_definition" "edge" {
         AWS_REGION        = "us-east-1"
         PAUSE_IDLE        = "false" # boxes stay running (founder, 2026-11-09); cost work later
         PROJECT_DOMAIN    = local.project_domain
+        SIGNIN_COOKIE     = var.signin_cookie_name
         # Approvals. PROJECT_TEMPLATE stays unset (it defaults to BOX_TEMPLATE) until the mumbo-project template is built.
         APPROVE_HOST         = "approve.${local.public_host}"
         APPROVER_EMAILS      = var.approver_emails

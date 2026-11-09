@@ -39,7 +39,7 @@ async function setup(extra = {}) {
     seen.push({ path: req.url, headers: req.headers })
     socket.end('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n')
   })
-  const cfg = { publicHost: 'boxes.mumbo.si', projectDomain: 'boxes.mumbo.si', approveHost: 'approve.boxes.mumbo.si', allowed: ['@x.com'], ...extra, proxy: new URL(`http://127.0.0.1:${await listen(fakeBox)}`) }
+  const cfg = { publicHost: 'boxes.mumbo.si', projectDomain: 'boxes.mumbo.si', approveHost: 'approve.boxes.mumbo.si', allowed: ['@x.com'], signinCookie: '_mumbo_auth', ...extra, proxy: new URL(`http://127.0.0.1:${await listen(fakeBox)}`) }
   const proj = projects({ store: memoryStore(), admitted: () => true, log: () => {} })
   const { id } = await proj.create('a@x.com', 'P')
   const key = memberKey('k', 'pbox')
@@ -57,7 +57,7 @@ async function setup(extra = {}) {
 test('a member on p-<id>.<project domain> reaches the project box at /, as themselves, without the sign-in cookie', async () => {
   const t = await setup()
   try {
-    const r = await call(t.port, { headers: { host: `P-${t.id}.Boxes.Mumbo.Si:443`, cookie: '_oauth2_proxy=s; _oauth2_proxy_1=s; dsh-auth-p=1', 'x-mumbo-member': 'forged' } })
+    const r = await call(t.port, { headers: { host: `P-${t.id}.Boxes.Mumbo.Si:443`, cookie: '_mumbo_auth=s; _mumbo_auth_1=s; _oauth2_proxy=s; dsh-auth-p=1', 'x-mumbo-member': 'forged' } })
     assert.equal(r.status, 200, 'no owner launch redirect for a member')
     assert.equal(r.body, 'from box')
     assert.deepEqual(r.headers['set-cookie'], ['dsh-auth-p=1; Path=/; HttpOnly; Secure'], 'the box cookie stays host-only')
@@ -106,7 +106,7 @@ test('a WebSocket upgrade on a project host reaches the project box with a fresh
   const t = await setup()
   try {
     const own = `https://${t.host}`
-    const ws = await call(t.port, { path: '/api/remote.mux', headers: { host: t.host, origin: own, cookie: '_oauth2_proxy=s', 'x-mumbo-member': 'forged', ...upgrade } })
+    const ws = await call(t.port, { path: '/api/remote.mux', headers: { host: t.host, origin: own, cookie: '_mumbo_auth=s; _oauth2_proxy=s', 'x-mumbo-member': 'forged', ...upgrade } })
     assert.ok(ws.upgraded, JSON.stringify(ws))
     const got = t.seen[0]
     assert.equal(got.path, '/api/remote.mux')
