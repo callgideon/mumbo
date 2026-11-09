@@ -88,7 +88,7 @@ Follow [error handling](../dsh-error-handling/SKILL.md#localized-actionable-visi
 - Transient success/failure uses the app-wide Toast, with state and rendering in a host that survives the reporting panel/tab, such as a `shell.overlay` entry. A deletion may close its source panel; a Toast owned by that panel would disappear with it. Do not toast pending states.
 - Failed operations retain visible data; failed deletion keeps the row.
 - Surface-owned failures use in-place notices: query failure with Retry or field validation. Keep a compact notice beside populated content; only empty panels center a full error state.
-- Use short plain-language errors, preferably one sentence, without internal jargon except necessary diagnostic codes. Chinese notices of at most two sentences omit the trailing 句号（。）. Reserve space or overlay notices so neighbors do not shift.
+- Use short plain-language errors, preferably one sentence, without internal jargon except necessary diagnostic codes. Reserve space or overlay notices so neighbors do not shift.
 
 ### Loading states
 
