@@ -4885,6 +4885,24 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-workspace-changes -->
 
+<!-- BEGIN GENERATED config-catalog:@mumbo/box-links -->
+<a id="mumbobox-links"></a>
+
+## `@mumbo/box-links`
+
+- `source`: [`packages/mumbo/box-links/src/config.ts:5`](../packages/mumbo/box-links/src/config.ts)
+
+```ts config-catalog
+/** Absolute links from a box's Web page to the pages the box edge serves beside it. */
+export interface Config {
+  /** Box home page: the person's assistant, desktop, and shared projects. */
+  home: string
+  /** Desktop live view; omitted for a box without a desktop, such as a project box. */
+  desktop?: string
+}
+```
+<!-- END GENERATED config-catalog:@mumbo/box-links -->
+
 <!-- BEGIN GENERATED config-catalog:@mumbo/mcp -->
 <a id="mumbomcp"></a>
 

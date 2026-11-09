@@ -1,0 +1,63 @@
+/* Box links at the sidebar foot: the panel rows' geometry, fill, and focus ring,
+   using the sidebar's row variables inherited from its column. */
+
+.links {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  margin-bottom: 4px;
+}
+
+.link {
+  display: flex;
+  align-items: center;
+  gap: var(--dsh-sidebar-label-gap);
+  min-height: 32px;
+  padding: 5px calc(var(--dsh-sidebar-row-padding) - var(--dsh-sidebar-paint-inset));
+  box-sizing: border-box;
+  border-inline: var(--dsh-sidebar-paint-inset) solid transparent;
+  border-radius: var(--dsw-radius-md);
+  background-clip: padding-box;
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  line-height: 22px;
+  text-decoration: none;
+}
+
+.link > svg {
+  flex: none;
+}
+
+@media (hover: hover) {
+  .link:hover {
+    background-color: var(--dsw-alias-interactive-bg-hover);
+  }
+}
+
+.link:focus-visible {
+  outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: -2px;
+}
+
+.label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail {
+  gap: 12px;
+  width: auto;
+  margin-bottom: 12px;
+}
+
+.rail .link {
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-inline: 0;
+  background-clip: border-box;
+}

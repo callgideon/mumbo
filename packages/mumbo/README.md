@@ -1,15 +1,15 @@
 ---
-description: "The mumbo package group: deployment adapters that let people reach a running Web host from their own tools."
+description: "The mumbo package group: deployment adapters that connect a running Web host to people's own tools and to the box edge pages beside it."
 kind: "package-group"
 ---
 
-# mumbo/ — reach a running host from your own tools
+# mumbo/ — connect a running host to the mumbo platform
 
 English | [中文](README.zh.md)
 
 ## Summary
 
-The mumbo family exposes what a running Web host already does to people's own tools, behind explicit authentication. Its packages add no Session, tool, or storage behavior of their own; they adapt existing services to an outside protocol. Each package README owns its contract.
+The mumbo family connects a running Web host to the platform around it: people's own tools, behind explicit authentication, and the pages the box edge serves beside the host. Its packages add no Session, tool, or storage behavior of their own. Each package README owns its contract.
 
 ## Table of Contents
 
@@ -22,10 +22,9 @@ The mumbo family exposes what a running Web host already does to people's own to
 <a id="packages"></a>
 ## Packages
 
-Each package adapts one outside protocol.
-
 | Package | Role |
 |---|---|
+| [`box-links/`](box-links/README.md) | Sidebar links from a box's Web page to the box home page and desktop live view |
 | [`mcp/`](mcp/README.md) | Authenticated loopback MCP server through which allowlisted people drive the host's assistant Session |
 
 -----
