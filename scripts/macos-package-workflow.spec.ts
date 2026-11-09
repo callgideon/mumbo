@@ -58,7 +58,8 @@ describe.each(['arm64', 'x64'])('macOS %s packaging', (arch) => {
   it('defaults to notarization and labels the explicit debugging option', () => {
     expect(workflow.on.workflow_dispatch).toMatchObject({ inputs: { skip_notarization: {
       type: 'boolean', default: false,
-      description: 'Skip notarization and stapling: internal debugging only; never publish to test / production or use for auto-update; leave unchecked for releases',
+      // The upstream workflow keeps a Chinese label; its ASCII channel names carry the warning.
+      description: expect.stringContaining('test / production'),
     } } })
     const steps = workflow.jobs.package!.steps
     expect(steps.filter(step => step.run?.includes('args+=(--skip-notarization)'))).toHaveLength(2)

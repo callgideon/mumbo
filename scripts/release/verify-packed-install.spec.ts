@@ -73,6 +73,8 @@ fs.writeFileSync(process.env.CACHE_EVIDENCE, JSON.stringify({ consumer, files,
         npm_config_userconfig: npmrc,
         npm_config_offline: 'true',
         npm_config_ignore_scripts: 'false',
+        // npm 12 blocks dependency install scripts unless allowed; the probe observes the install through postinstall.
+        npm_config_dangerously_allow_all_scripts: 'true',
         CACHE_EVIDENCE: evidence,
         TMPDIR: temporary,
         TMP: temporary,
