@@ -22,6 +22,8 @@ export const config = () => ({
   proxy: new URL(env('E2B_SANDBOX_URL', 'http://127.0.0.1:3002')),
   bucket: env('BACKUP_BUCKET'),
   upstream: env('MODEL_UPSTREAM', 'https://api.deepseek.com'),
+  childTemplates: list(env('CHILD_TEMPLATES', 'mumbo-child')),
+  maxChildren: Number(env('MAX_CHILD_SANDBOXES', '10')),
 })
 
 /** Address or @domain allowlist; an empty list admits nobody. */
@@ -56,12 +58,24 @@ export function startScript(cfg, token) {
 set -eu
 pkill -f 'apps/cli/src/bin.ts' 2>/dev/null || true
 ip=$(hostname -I | cut -d' ' -f1)
-mkdir -p /root/projects /root/.dsh
+mkdir -p /root/projects /root/.dsh /root/.mumbo
+# Child sandboxes over MCP on the model host, authenticated by this box's token (edge sandboxes.mjs).
+cat > /root/.mumbo/sandboxes.overlay.yml <<'YML'
+- insert:
+    - id: mcp-sandboxes
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: sandboxes
+        transport: streamable-http
+        url: ${llm}/mcp
+        headers:
+          Authorization: !!js '\`Bearer \${process.env.DEEPSEEK_API_KEY}\`'
+YML
 cd /src
 HOME=/root DSH_HOME=/root/.dsh DSH_TELEMETRY_DISABLED=1 \\
 DEEPSEEK_BASE_URL=${llm}/anthropic DEEPSEEK_SEARCH_BASE_URL=${llm} DEEPSEEK_API_KEY=${token} \\
 nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\
-  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml \\
+  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml \\
   --no-open --host "$ip" --port 3080 --public-url https://${cfg.publicHost}/ --trusted-host ${cfg.publicHost} > /root/dsh.log 2>&1 &
 `
 }
@@ -349,7 +363,7 @@ export function userServer({ cfg, box, verifyAlb, log = console.log }) {
 
 /** Model and search calls from boxes. Only paths dsh uses are forwarded; the box token is swapped for the server key. */
 export const MODEL_PATHS = [/^\/anthropic\//, /^\/models$/, /^\/v1\/tools\//]
-export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, fetchImpl = fetch, log = console.log }) {
+export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, mcp, fetchImpl = fetch, log = console.log }) {
   return createServer((req, res) => route(req, res).catch((e) => {
     log(JSON.stringify({ edge: 'error', path: req.url?.split('?')[0], error: e.message }))
     if (!res.headersSent) json(res, 502, { error: 'edge error' }); else res.destroy()
@@ -363,6 +377,8 @@ export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, fetchI
     const claim = verifyBox(edgeKey, token)
     if (!claim || !(await owns(claim.u, claim.b))) return json(res, 401, { error: 'invalid box token' })
     const path = new URL(req.url, 'http://x').pathname
+    // Child sandboxes (sandboxes.mjs) for the same verified box; they count as activity but not against the model budget.
+    if (path === '/mcp' && mcp) { Promise.resolve(touch(claim.b)).catch(() => {}); return mcp(req, res) }
     if (!MODEL_PATHS.some(p => p.test(path))) return json(res, 404, { error: 'not found' })
     if (!(await allow(claim.u))) return json(res, 429, { type: 'error', error: { type: 'rate_limit_error', message: 'Daily model budget reached for this account.' } })
     Promise.resolve(touch(claim.b)).catch(() => {})
@@ -418,7 +434,9 @@ async function main() {
   setInterval(() => box.sweep().catch(e => console.error('edge: sweep', e.message)), 60_000).unref()
   if (listenHost !== '127.0.0.1' && !verifyAlb) throw new Error('edge: LISTEN_HOST beyond loopback needs ALB_ARN (the email header is only trusted from oauth2-proxy)')
   userServer({ cfg, box, verifyAlb }).listen(8080, listenHost, () => console.log(`edge: users on ${listenHost}:8080`))
-  modelServer({ cfg, edgeKey, modelKey, allow: budget(store, cfg.dailyRequests), owns: box.owns, touch: box.touch })
+  const { children, mcpServer } = await import('./sandboxes.mjs')
+  const mcp = mcpServer({ ops: children({ e2b, cfg }), claimOf: (info) => verifyBox(edgeKey, String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
+  modelServer({ cfg, edgeKey, modelKey, allow: budget(store, cfg.dailyRequests), owns: box.owns, touch: box.touch, mcp })
     .listen(8081, modelHost, () => console.log(`edge: model host on ${modelHost}:8081`))
 }
 

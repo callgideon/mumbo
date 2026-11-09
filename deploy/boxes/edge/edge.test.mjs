@@ -287,3 +287,65 @@ test('a box being restored is neither backed up nor started by another replica, 
   assert.deepEqual(killed, ['dead'])
   assert.equal(await store.getBox('dead'), undefined)
 })
+
+// ---- child sandboxes (sandboxes.mjs)
+import { children, mcpServer } from './sandboxes.mjs'
+function fakeChildE2B() {
+  const live = new Map(); let n = 0
+  return {
+    live,
+    Sandbox: {
+      list: ({ query }) => ({ hasNext: true, nextItems: async function () { this.hasNext = false; return [...live.values()].filter(s => s.metadata.owner === query.metadata.owner) } }),
+      create: async (template, opts) => { const s = { sandboxId: `c${++n}`, templateId: template, metadata: opts.metadata, opts }; live.set(s.sandboxId, s); return s },
+      getInfo: async (id) => { const s = live.get(id); if (!s) throw new Error('not found'); return s },
+      connect: async (id) => ({
+        commands: { run: async (cmd) => { if (cmd === 'false') throw Object.assign(new Error('exit 1'), { exitCode: 1, stdout: '', stderr: 'no' }); return { exitCode: 0, stdout: `ran ${cmd} in ${id}`, stderr: '' } } },
+        files: { write: async () => {}, read: async (p) => `content of ${p}` },
+      }),
+      kill: async (id) => { live.delete(id) },
+    },
+  }
+}
+const childCfg = { childTemplates: ['mumbo-child'], maxChildren: 2 }
+
+test('child sandboxes: owned per user, capped, template-limited, never tagged as the user\'s box', async () => {
+  const e2b = fakeChildE2B(); const ops = children({ e2b, cfg: childCfg, log: () => {} })
+  const { id } = await ops.create('a@x.com', 'box1')
+  assert.deepEqual(e2b.live.get(id).metadata, { owner: 'a@x.com', parent: 'box1' })
+  assert.equal(e2b.live.get(id).metadata.user, undefined)
+  assert.equal(e2b.live.get(id).opts.network.allowPublicTraffic, false)
+  await assert.rejects(ops.create('a@x.com', 'box1', { template: 'mumbo-box' }), /template must be/)
+  await ops.create('a@x.com', 'box1')
+  await assert.rejects(ops.create('a@x.com', 'box1'), (e) => e.status === 429)
+  assert.equal((await ops.list('a@x.com')).length, 2)
+  assert.equal((await ops.list('b@x.com')).length, 0)
+  await assert.rejects(ops.run('b@x.com', id, { command: 'ls' }), /no sandbox/)
+  await assert.rejects(ops.kill('b@x.com', id), /no sandbox/)
+  assert.deepEqual(await ops.run('a@x.com', id, { command: 'false' }), { exitCode: 1, stdout: '', stderr: 'no' })
+  await ops.kill('a@x.com', id)
+  assert.equal(e2b.live.has(id), false)
+})
+
+test('MCP endpoint on the model host: box token required, tools act as the token\'s user', async () => {
+  const e2b = fakeChildE2B(); const ops = children({ e2b, cfg: childCfg, log: () => {} })
+  const mcp = mcpServer({ ops, claimOf: (info) => verifyBox('k', String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
+  const server = modelServer({ cfg: { ...cfg, egressIps: [] }, edgeKey: 'k', modelKey: 'SERVER', allow: async () => true, owns: async (u, b) => u === 'a@x.com' && b === 'box1', touch: () => {}, mcp, log: () => {} })
+  await new Promise(r => server.listen(0, '127.0.0.1', r))
+  const url = `http://127.0.0.1:${server.address().port}/mcp`
+  const rpc = async (method, params, token = signBox('k', 'a@x.com', 'box1')) => {
+    const r = await fetch(url, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) })
+    const text = await r.text()
+    return { status: r.status, body: text.startsWith('{') ? JSON.parse(text) : JSON.parse(text.split('\n').find(l => l.startsWith('data:')).slice(5)) }
+  }
+  try {
+    assert.equal((await rpc('tools/list', {}, 'mbx.bad.sig').catch(() => ({ status: 401 }))).status, 401)
+    const init = await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } })
+    assert.equal(init.status, 200)
+    const tools = (await rpc('tools/list', {})).body.result.tools.map(t => t.name).sort()
+    assert.deepEqual(tools, ['sandbox_create', 'sandbox_kill', 'sandbox_list', 'sandbox_read_file', 'sandbox_run', 'sandbox_write_file'])
+    const made = JSON.parse((await rpc('tools/call', { name: 'sandbox_create', arguments: {} })).body.result.content[0].text)
+    assert.equal(e2b.live.get(made.id).metadata.owner, 'a@x.com')
+    const ran = (await rpc('tools/call', { name: 'sandbox_run', arguments: { id: made.id, command: 'echo hi' } })).body.result
+    assert.match(ran.content[0].text, /ran echo hi/)
+  } finally { server.close() }
+})

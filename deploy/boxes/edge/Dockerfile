@@ -3,6 +3,6 @@ FROM node:24-bookworm-slim
 WORKDIR /edge
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
-COPY edge.mjs store.mjs template.mjs ./
+COPY edge.mjs store.mjs sandboxes.mjs template.mjs ./
 USER node
 CMD ["node", "edge.mjs"]
