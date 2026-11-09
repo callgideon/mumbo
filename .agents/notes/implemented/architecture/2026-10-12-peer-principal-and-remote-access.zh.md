@@ -391,7 +391,7 @@ const childPrompt = child => ({ action, args }) =>
 
 | 步 | 动作 | 失败结果 |
 |---|---|---|
-| 1 | 准入得到 Peer：网络路径由 Connection `admit()` 给出（`browserPeer`）；进程内路径由调用方传入。Gateway 在读取 wire payload 之前检查 `peer.signal` | 网络准入失败返回 HTTP 401 / 403（不进入 Gateway）；Peer 已 dispose：`gateway/peer-disposed` |
+| 1 | 准入得到 Peer：网络路径由 Connection `admit()` 给出（已注册 authenticator 的非 owner Peer，否则为 `browserPeer` 或 API Peer）；进程内路径由调用方传入。Gateway 在读取 wire payload 之前检查 `peer.signal` | 网络准入失败返回 HTTP 401 / 403（不进入 Gateway）；Peer 已 dispose：`gateway/peer-disposed` |
 | 2 | 解析端点并做参数字段集校验（`resolveDescriptor`、`assertExactArguments`），再按 Typert 编译类型校验 JSON 参数，每个参数解码一次 | `gateway/invocation-unavailable`、`gateway/ambiguous-endpoint`、`gateway/definition-unavailable`；字段多余或缺失：`gateway/arguments-invalid`；JSON 参数校验失败：`gateway/input-invalid`（owner 与非 owner 相同，先于访问检查） |
 | 3 | owner 直通：`principal.kind === 'owner'` 时直接进入第 5 步 | — |
 | 4 | 非 owner：Gateway 从第 2 步校验后的参数解析资源（`resources` 读取函数、其次 lookup 参数与 Context 声明的 `resource`、再次注册的默认字段或 resolver；lookup 与 Context 身份取 wire 身份，不解析 lookup 与 Context），再以校验后的参数为 `args` 询问 `remoteAccess.decide({ principal, action: endpoint, resources, args })`；资源非法时不询问 `decide()`，直接以 `resource-invalid` 拒绝；`deny` 结论变为抛出的错误 | `remote-access/denied`，details `{ action, reason }` |
@@ -500,7 +500,7 @@ GlobalStandardProps.useWorkspaceAccess: (workspaceId: WorkspaceId, action: Remot
 |---|---|
 | principal 只能由进程内 Host 代码在创建 Peer 时给出 | `PeerScope.principal` 只读；`createPeer()` 不对应任何路由 |
 | wire 上任何字段都不能设置或覆盖 principal | principal 不来自 args、envelope、header、query 或 cookie。args 顶层多余字段被 `assertExactArguments` 拒绝；payload 必须恰为 `{ args }`；envelope 未知字段被 [`clientRequestSchema`](../../../../packages/client/connection/src/rpc-schema.ts) 丢弃；请求体内同名字段只是业务数据 |
-| 浏览器网络准入为 owner | 通过[浏览器 token 认证](../../implemented/architecture/2026-08-24-browser-token-authentication.zh.md)的连接得到 `browserPeer` |
+| 浏览器网络准入为 owner | 通过[浏览器 token 认证](../../implemented/architecture/2026-08-24-browser-token-authentication.zh.md)的连接得到 `browserPeer`；非 owner 网络 principal 只经已注册的 Connection authenticator 进入，且只由 Gateway 服务（[Connection authenticator](2026-11-09-connection-authenticators-and-edge-members.zh.md)） |
 | 没有隐式 Peer | Gateway 与 Connection 都不补默认 Peer；required 参数让漏传在编译期暴露 |
 | 已 dispose 的 Peer 不能再分派 | `gateway/peer-disposed` |
 | 非 owner 未经授权不能调用 | 只有 binding 的 role 显式列出该 action 且资源匹配时才放行；没有该 kind 的 policy 即拒；Gateway 依赖 `remoteAccess`，缺失时 Gateway 不启动 |

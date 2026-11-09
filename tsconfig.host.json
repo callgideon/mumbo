@@ -563,6 +563,7 @@
     { "path": "./packages/experimental/webhook" },
     { "path": "./packages/experimental/webhook-github" },
     { "path": "./packages/mumbo/mcp" },
+    { "path": "./packages/mumbo/edge-member" },
     { "path": "./packages/todo/tool-todo" },
     { "path": "./packages/plan/plan-mode" },
     { "path": "./packages/preset/agent-preset-registry" },

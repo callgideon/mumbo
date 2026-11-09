@@ -126,6 +126,7 @@ describe('agent_read', () => {
     message(agent, 'user', { kind: 'user' }, [{ type: 'text', text: 'from the browser' }, { type: 'image' }])
     message(agent, 'assistant', { kind: 'model' }, [{ type: 'reasoning', text: 'hidden' }, { type: 'tool-call', id: 'c1' }])
     message(agent, 'assistant', { kind: 'model' }, [{ type: 'text', text: 'all green' }, { type: 'text', text: 'done' }])
+    message(agent, 'user', { kind: 'user', principal: { kind: 'edge-member', email: 'bo@example.com' } }, [{ type: 'text', text: 'from a member' }])
     agent.log.push({
       type: 'user/message',
       seq: agent.log.length,
@@ -141,6 +142,7 @@ describe('agent_read', () => {
       { seq: after + 1, role: 'user', source: 'mcp:ann', text: 'status?' },
       { seq: after + 3, role: 'user', source: 'user', text: 'from the browser' },
       { seq: after + 5, role: 'assistant', source: 'model', text: 'all green\ndone' },
+      { seq: after + 6, role: 'user', source: 'user:edge-member:bo@example.com', text: 'from a member' },
     ])
     expect(value.next_seq).toBe(agent.log.length - 1)
   })
