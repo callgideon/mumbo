@@ -56,16 +56,21 @@ it('leaves a delivered follow-up to its ticket\'s worker: the main Session may s
   }
   const master = (name: string, args: Record<string, unknown>) => h!.runTool(h!.runtime.masterId, name, args)
   const decides = /its worker decides whether it belongs there/
-  // A guest's follow-up stays inferred, so its stop does not stop the work; the main Session cannot route or requeue it.
+  // The main Session cannot requeue a follow-up the worker decides; a person may still send it to Eval from the panel.
+  const sent = await settle('2', '这个也看一下')
+  await expect(master('orchestrator_trigger_requeue', { trigger_id: sent })).rejects.toThrow(decides)
+  expect(await h.api('POST', `triggers/${encodeURIComponent(sent)}/requeue`)).toMatchObject({ status: 200, body: { queued: true } })
+  await h.runtime.pump(); await h.runtime.idle()
+  expect(h.candidates()).toContain(sent)
+  await h!.route({ kind: 'ignore', trigger_id: sent, reason: 'The worker has it.' })
+  // A guest's message on the thread does not reach the worker: it goes to Eval as an inferred candidate, so its stop does not
+  // stop the work and the main Session cannot accept it.
   const guest = await settle('4', '别做了', 'ou_guest')
+  expect(h.relays(sessionId).map(item => item.trigger_id)).not.toContain(guest)
+  expect(h.candidates()).toContain(guest)
   expect(await h!.route({ kind: 'stop', ticket_id: ticket.id, trigger_id: guest })).toMatchObject({ decision: 'ignore' })
   await expect(h!.route({ kind: 'accept', trigger_id: guest, title: 'More', worktree_name: 'more', acknowledgement: 'ok' }))
-    .rejects.toThrow(decides)
-  await expect(master('orchestrator_trigger_requeue', { trigger_id: guest })).rejects.toThrow(decides)
-  // A person may still send it to Eval from the panel.
-  expect(await h.api('POST', `triggers/${encodeURIComponent(guest)}/requeue`)).toMatchObject({ status: 200, body: { queued: true } })
-  await h.runtime.pump(); await h.runtime.idle()
-  expect(h.candidates()).toContain(guest)
+    .rejects.toThrow(/explicit requests from allowed senders/)
   // Alice's follow-ups carry her authority once the worker hands them back: one goes to the other ticket, one becomes new work.
   const attach = await settle('5', '这个其实是另一件事的')
   await expect(h!.route({ kind: 'attach', ticket_id: other.ticket.id, trigger_id: attach })).rejects.toThrow(decides)
@@ -108,7 +113,7 @@ it('costs the main Session one model call for a burst of follow-ups while it wor
     master.status = busy ? 'running' : 'idle'
     h.deliveries.mockClear()
     const calls = modelCalls(h)
-    for (const id of ['2', '3', '4', '5', '6']) h.runtime.receive(followup(id, `第 ${id} 条补充`, { sender_id: 'ou_guest' }))
+    for (const id of ['2', '3', '4', '5', '6']) h.runtime.receive(followup(id, `第 ${id} 条补充`))
     await h.runtime.idle()
     expect([notices(h).length, h.candidates().length, calls()]).toEqual([5, 0, busy ? 1 : 2])
     await h.stop(); h = undefined

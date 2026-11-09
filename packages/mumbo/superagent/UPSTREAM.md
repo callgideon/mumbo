@@ -49,7 +49,19 @@ Files outside the copy changed for S1:
 
 ## S3: delivery policy
 
-`Policy.delivers` decides which comments reach a Ticket. Written by task A4.
+`Policy.delivers(trigger)` in `src/core/ports.ts` decides whether a Trigger may reach a Ticket as an Input. Upstream delivers every Trigger on a subscribed Thread, whoever sent it.
+
+- `src/policy.ts`: `settingsPolicy` delivers a person's Trigger only when `allowedSender` finds the sender on the Source's allowed list. It delivers a non-human Trigger only when its actor id is empty, as for CI, or `listedBot` finds it on the Source's bot list.
+- `src/core/intake.ts`: subscription fan-out reaches no Ticket for a Trigger the Policy does not deliver. No Ticket decides that Trigger, so it is queued for Eval and resumes no ended Ticket.
+- `src/core/tickets.ts`: `attachable` refuses such a Trigger with `notAdmissible`, reason `not_a_member` for a person and `not_human` for a bot. The `Engine.attach` `@throws` in `src/core/engine.ts` names this refusal.
+- `prompts/subscriptions.md` tells both roles that only an allowed person, a listed bot or CI reaches a Ticket, by subscription or by attach, and that an allowed sender's message resumes an ended Ticket. `tests/cards.spec.ts` pins both sentences.
+- A merged pull request still ends the Tickets that follow it through PR polling, whoever merged it, so the merge bot needs no allowed-list entry.
+- `delivers` gates only what reaches a Ticket as an Input. A worker that reads a pull request or chat thread itself still sees the text of senders who are not on the allowed list.
+- `docs/001-domain.md` (fan-out "with no check of who sent it") and `docs/002-authorization.md` (every message on a subscribed Thread reaches its Tickets; resume "regardless of who sent it") are upstream prose this entry supersedes on who reaches a Ticket.
+- Tests:
+  - The Policy fake in `tests/assessment.spec.ts` delivers every Trigger. The fake in `tests/core-engine.spec.ts` does too, and its S3 tests narrow it to `allowlisted`, the settings rule with `member` as the only allowed sender. Its two upstream tests that sent a guest's message to a Ticket (fan-out to a live Ticket, resume of an ended one) now send the member's.
+  - `tests/sources.spec.ts` checks the settings rule on GitHub comment and CI Triggers, and that a polled merged PR ends its Ticket.
+  - Upstream runtime tests whose follow-ups came from a sender off the allowed list now send them as the allowed member, or put the bot on the Feishu bot list (`tests/runtime-concurrency.spec.ts`), where the test is about something else. Where a test is about an outsider's message, it now expects no delivery: `tests/runtime.spec.ts` (no resume by a guest, a stranger's PR comment reaches no Ticket, CI with an empty actor id does) and `tests/followups.spec.ts` (a guest's message goes to Eval and the main Session cannot accept it).
 
 ## S4: person-only settings
 

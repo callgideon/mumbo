@@ -5,6 +5,8 @@ import type { Assessor, Assignment, Candidate, EngineOptions, Executor, Outbound
 
 const member = { source: 'chat', id: 'alice' }
 const guest = { source: 'chat', id: 'guest' }
+/** The settings Policy's delivery rule with `member` the only allowed sender and no listed bot. */
+const allowlisted: Policy['delivers'] = t => t.human ? t.actor.id === member.id : t.actor.id === ''
 function trigger(id: string, overrides: Partial<Trigger> = {}): Trigger {
   return { id, source: 'chat', threads: [{ source: 'chat', id: 't1' }], actor: member, human: true, at: `2026-09-23T00:00:${id.padStart(2, '0')}Z`, text: `message ${id}`, channel: { source: 'chat', thread: 't1', address: { message: id } }, meta: {}, ...overrides }
 }
@@ -31,6 +33,7 @@ function harness(policyOverrides: Partial<Policy> = {}, { emit, prepareTicket }:
     gate: (t, thread) => !t.human ? { admissible: false, reason: 'not human' } : t.actor.id === 'alice' ? { admissible: true, strength: 'explicit', basis: { via: 'listed' } } : thread.subscriptions.length ? { admissible: true, strength: 'inferred', basis: { via: 'followup' } } : { admissible: false, reason: 'not a member' },
     revalidate: () => version !== 'revoked',
     admitsInferred: rules => rules.length > 0,
+    delivers: () => true,
     ...policyOverrides,
   }
   let clock = 0
@@ -184,11 +187,11 @@ describe('eval', () => {
   })
 })
 describe('subscription fan-out', () => {
-  it('delivers a person\'s later message on a subscribed thread to the live ticket as context, and not to Eval', async () => {
-    const h = harness()
+  it('delivers an allowed sender\'s later message on a subscribed thread to the live ticket as context, and not to Eval', async () => {
+    const h = harness({ delivers: allowlisted })
     const decision = accepted(h)
     const requests = h.requests.length
-    h.engine.receive(trigger('2', { actor: guest })); h.pump()
+    h.engine.receive(trigger('2')); h.pump()
     const ticket = h.repo.tickets.get(decision.ticketId!)!
     expect(ticket.inputs).toEqual([expect.objectContaining({ kind: 'trigger', triggerId: '2' })])
     expect(ticket.undelivered).toEqual([])
@@ -202,6 +205,40 @@ describe('subscription fan-out', () => {
     // A bot's message there still goes to Eval, which the gate does not admit.
     h.engine.receive(trigger('3', { human: false })); h.pump()
     expect(h.repo.decisions.byThread('chat:t1').at(-1)).toMatchObject({ kind: 'ignore', triggerIds: ['3'] })
+  })
+  it('keeps a guest\'s message on a subscribed thread from the live ticket and queues it for Eval', () => {
+    const h = harness({ delivers: allowlisted })
+    const ticketId = accepted(h).ticketId!
+    h.engine.receive(trigger('2', { actor: guest }))
+    expect(h.repo.tickets.get(ticketId)!.inputs).toEqual([])
+    expect(h.repo.triggers.disposition('2')).toEqual({ fanout: [], at: expect.any(String) })
+    expect(h.repo.threads.get('chat:t1')!.pending).toEqual(['2'])
+  })
+  it('delivers senderless CI to the live ticket, and no unlisted bot\'s message', () => {
+    const h = harness({ delivers: allowlisted })
+    const ticketId = accepted(h).ticketId!
+    h.engine.receive(trigger('2', { human: false, actor: { source: 'chat', id: '' } }))
+    h.engine.receive(trigger('3', { human: false, actor: { source: 'chat', id: 'some-bot' } }))
+    expect(h.repo.tickets.get(ticketId)!.inputs.map(input => input.kind === 'trigger' && input.triggerId)).toEqual(['2'])
+  })
+  it('does not resume an ended ticket on a guest\'s message, which goes to Eval', () => {
+    const h = harness({ delivers: allowlisted })
+    const ticketId = accepted(h).ticketId!
+    h.engine.report(ticketId, { state: 'ready', summary: 'done' })
+    h.engine.receive(trigger('2', { actor: guest })); h.pump()
+    expect(h.repo.tickets.get(ticketId)).toMatchObject({ ended: expect.anything(), inputs: [], undelivered: [] })
+    expect(h.executor.start).toHaveBeenCalledOnce()
+    expect(h.requests.at(-1)!.triggers.map(item => item.id)).toEqual(['2'])
+  })
+  it('refuses to attach a guest\'s or an unlisted bot\'s message to a ticket', () => {
+    const h = harness({ delivers: allowlisted })
+    const ticketId = accepted(h).ticketId!
+    const threads = [{ source: 'chat', id: 'elsewhere' }]
+    h.engine.receive(trigger('2', { actor: guest, threads }))
+    h.engine.receive(trigger('3', { human: false, actor: { source: 'chat', id: 'some-bot' }, threads }))
+    expect(() => h.engine.attach(ticketId, '2')).toThrow(new UserError('notAdmissible', { reason: 'not_a_member' }))
+    expect(() => h.engine.attach(ticketId, '3')).toThrow(new UserError('notAdmissible', { reason: 'not_human' }))
+    expect(h.repo.tickets.get(ticketId)!.inputs).toEqual([])
   })
   it('keeps inputs undelivered until an assignment is running, and asks to launch one whose launch failed again', () => {
     const h = harness()
@@ -293,12 +330,12 @@ describe('resume and stop', () => {
     else h.engine.stopTicket(decision.ticketId!)
     return decision.ticketId!
   }
-  it('resumes an ended ticket on any person\'s message on its thread, under the same mandate and without a Decision', async () => {
-    const h = harness()
+  it('resumes an ended ticket on an allowed sender\'s message on its thread, under the same mandate and without a Decision', async () => {
+    const h = harness({ delivers: allowlisted })
     const ticketId = await ended(h, 'executor')
     const decisions = h.repo.decisions.byThread('chat:t1').length
     // It resumes as the message arrives, before any Eval of it.
-    h.engine.receive(trigger('2', { actor: guest }))
+    h.engine.receive(trigger('2'))
     expect(h.repo.tickets.get(ticketId)!.ended).toBeUndefined()
     h.pump()
     const ticket = h.repo.tickets.get(ticketId)!

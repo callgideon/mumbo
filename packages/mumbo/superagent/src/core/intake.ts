@@ -9,7 +9,7 @@ export type ReceiveResult = 'stored' | 'duplicate' | 'filtered'
 
 /**
  * Ingests incoming triggers from Sources, deduplicating and filtering them against SourceScope before recording thread correlations.
- * Fans listened triggers out to subscribed tickets via Tickets and queues for Eval, on its primary thread, every trigger no
+ * Fans listened triggers the Policy delivers out to subscribed tickets via Tickets and queues for Eval, on its primary thread, every trigger no
  * ticket's worker decides (see `followupOwners`).
  * Engine delegates trigger reception to this part.
  */
@@ -31,11 +31,12 @@ export class Intake extends EnginePart {
     const keys = trigger.threads.map(threadKey)
     // Track reached tickets and whether they were reached only via context threads (a ticket's own thread makes `context` false).
     const reached = new Map<string, { ticket: Ticket; context: boolean }>()
+    const delivered = this.policy().delivers(trigger)
     for (const ref of trigger.threads) {
       const thread = this.thread(ref)
       if (!thread.lastAt || trigger.at > thread.lastAt) thread.lastAt = trigger.at
       thread.correlated = [...new Set([...thread.correlated, ...keys.filter(other => other !== thread.key)])]
-      for (const ticketId of thread.subscriptions) {
+      for (const ticketId of delivered ? thread.subscriptions : []) {
         const ticket = this.repo.tickets.get(ticketId)
         // Only a person's message on a non-context thread resumes an ended ticket; bots and CI do not (the Executor re-reads
         // threads when it resumes), and a human-stopped ticket receives nothing because its Mandate was withdrawn.
@@ -53,8 +54,8 @@ export class Intake extends EnginePart {
     const fanout = [...reached.keys()], context = fanout.filter(id => reached.get(id)!.context)
     const disposition = { fanout, ...context.length ? { context } : {}, at }
     this.repo.triggers.saveDisposition(trigger.id, disposition)
-    // A person's message that no ticket decides, such as one that reached only tickets a person stopped or that follow the
-    // Thread for context, and every bot's, goes to Eval.
+    // A person's message that no ticket decides, such as one the Policy does not deliver or one that reached only tickets a
+    // person stopped or that follow the Thread for context, and every bot's, goes to Eval.
     if (!this.owners(trigger).length) this.queueForEval(trigger)
     for (const ticketId of fanout) this.tickets.wake(ticketId)
     this.emit('trigger.received', { triggerId: trigger.id, threads: trigger.threads.map(threadKey) })

@@ -104,7 +104,8 @@ export class Engine {
    * its batch wait for a fresh Eval. A note for an Input the worker already received goes out as a new Input, and so does a
    * message the ticket let go, read for context only, or had before it ended. An ended ticket resumes under its Mandate, at
    * once unless processing is paused.
-   * @throws UserError for a ticket a person stopped, which withdrew its Mandate, or one whose Mandate the Policy no longer holds.
+   * @throws UserError for a Trigger the Policy does not deliver, such as one from a sender on neither the Source's allowed list nor
+   * its bot list, for a ticket a person stopped, which withdrew its Mandate, or for one whose Mandate the Policy no longer holds.
    */
   attach(ticketId: string, triggerId: string, note?: string): Ticket {
     return this.repo.atomic(() => {

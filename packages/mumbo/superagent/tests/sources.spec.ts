@@ -5,7 +5,7 @@ import { backfillChat, consumerRetry, feishuKind, feishuTriggerId, feishuRef, fe
 import { KV } from '../src/kv.ts'
 import { apply as applyFeishu, pollThreads as pollFeishuThreads } from '../src/sources/feishu.ts'
 import { runFeishu } from '../src/sources/feishu-loops.ts'
-import { commentTrigger, githubAddress, githubChannel, issueTrigger, type GithubComment, type GithubIssue } from '../src/sources/github-trigger.ts'
+import { ciTrigger, commentTrigger, githubAddress, githubChannel, issueTrigger, type GithubComment, type GithubIssue } from '../src/sources/github-trigger.ts'
 import { claimPull, observePull, pullEndNotices, pullOf, ticketBranch, type Pull } from '../src/sources/github-pull.ts'
 import { ciCounts, ciFact, ciSummary } from '../src/sources/github-read.ts'
 import { apply as applyGithub, githubKind, pollFailure, pollRound } from '../src/sources/github.ts'
@@ -466,6 +466,25 @@ describe('github source', () => {
     expect(await observePull(h, endedPull(31, '2026-09-02T00:00:00Z'))).toBe(true)
     expect(h.store.tickets.get('t4')).toMatchObject({ ended: { outcome: 'merged' } })
     h.store.close()
+  })
+  it('ends a ticket when a polled PR it follows merges, whoever merged it', async () => {
+    const h = host()
+    h.store.tickets.save({ ...openTicket('t6'), ...pulled(41) })
+    // The merger is on no allowed list: the poll, not a comment of the merger's, ends the ticket.
+    const merged = { ...endedPull(41, '2026-09-02T00:00:00Z'), merged_by: { login: 'mumbo-bot[bot]', type: 'Bot' } }
+    expect(await observePull(h, merged)).toBe(true)
+    expect(h.store.tickets.get('t6')).toMatchObject({ ended: { by: 'executor', outcome: 'merged' } })
+    h.store.close()
+  })
+  it('delivers to tickets the comments of allowed senders and listed bots, and senderless CI, but no stranger\'s', () => {
+    const settings = SettingsSchema.parse({ policy: { sources: { github: { allowed: [{ id: 'alice' }], bots: [{ id: 'dependabot[bot]' }] } } } })
+    const policy = settingsPolicy(settings, { scope: () => ({ listened: true, observed: false }) })
+    const from = (login: string, type = 'User') =>
+      policy.delivers(commentTrigger({ id: 1, body: 'x', user: { login, type } }, { number: 7, isPr: true }, 'conversation', 'agent-bot'))
+    // The agent's own comment and the merge bot's are not delivered either.
+    expect([from('alice'), from('mallory'), from('dependabot[bot]', 'Bot'), from('mumbo-bot[bot]', 'Bot'), from('agent-bot')])
+      .toEqual([true, false, true, false, false])
+    expect(policy.delivers(ciTrigger({ number: 7, html_url: '', user: { login: 'agent-bot' } }, 1, 'CI passed'))).toBe(true)
   })
   it('writes the terminal notice in English for a request without Han characters', async () => {
     const h = host()

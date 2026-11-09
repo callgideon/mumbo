@@ -210,6 +210,8 @@ export function settingsPolicy(settings: Settings, sources: SourceScope): Policy
       return { admissible: false, reason: !allowed ? 'not_a_member' : receivable && admission === 'ignore' ? 'admission_ignored' : 'no_mention' }
     },
     admitsInferred: rules => mode === 'auto' && rules.length > 0 && rules.every(id => settings.policy.rules.some(rule => rule.enabled && rule.id === id)),
+    // An empty actor id is CI, which has no sender.
+    delivers: trigger => trigger.human ? !!allowedSender(settings, trigger.actor) : trigger.actor.id === '' || !!listedBot(settings, trigger.actor),
     revalidate(mandate: Mandate) {
       // Revalidation rules follow docs/002 (Eval path; Resume revalidates).
       const { basis } = mandate
