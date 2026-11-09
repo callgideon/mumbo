@@ -469,7 +469,7 @@ const TEXT = {
   promptSkillsGroup: ['技能', 'Skills'],
   'promptPartHint.communication': ['何时通知人、消息的写法、GitHub 首行声明、Review 的回复与 review bot', 'When to notify people, how messages read, the GitHub first line, review replies and review bots'],
   'promptPartHint.scope': ['工单何时继续、何时暂停并交草稿', 'When a Ticket goes on, and when it stops with a draft'],
-  'promptPartHint.delivery': ['PR 证据、自动合并条件、提交作者', 'PR evidence, the auto-merge condition, the commit author'],
+  'promptPartHint.delivery': ['PR 证据、评审标记、提交作者', 'PR evidence, the review marker, the commit author'],
   'promptReadBy.both': ['主 Session 和执行器 Session 都会读到。', 'The main Session and Executor Sessions read it.'],
   'promptReadBy.skill': ['Session 需要时按名字加载。', 'Sessions load it by name when they need it.'],
   'promptReadBy.orchestrator': ['只有主 Session 会读到。', 'Only the main Session reads it.'],
