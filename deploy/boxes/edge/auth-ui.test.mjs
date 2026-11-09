@@ -104,6 +104,10 @@ test('oauth2-proxy skips sign-in for exactly the requests the edge serves signed
   const routes = [...tf.matchAll(/"--skip-auth-route=([^"]*)"/g)].map(m => m[1])
   assert.equal(routes.length, 2)
   assert.ok(routes.every(r => r.startsWith('GET=^') && r.endsWith('$')), 'GET only, anchored')
+  // Client identity headers are stripped on these routes too, stated rather than left to the default.
+  assert.match(tf, /"--skip-auth-strip-headers=true"/)
+  // The ALB refuses any X-Forwarded-Uri (on which oauth2-proxy would skip sign-in) before every other rule.
+  assert.match(tf, /resource "aws_lb_listener_rule" "x_forwarded_uri" \{\s*listener_arn = aws_lb_listener\.https\.arn\s*priority\s*= 1\s*condition \{\s*http_header \{\s*http_header_name = "X-Forwarded-Uri"\s*values\s*= \["\*"\]\s*\}\s*\}\s*action \{\s*type = "fixed-response"[^}]*status_code\s*= "400"/)
   const skipped = (uri) => routes.some(r => new RegExp(r.slice('GET='.length)).test(uri))
   await serve(async (port) => {
     for (const uri of ['/oauth/consent', '/oauth/consent?authorization_id=x', '/oauth/consent?signout', '/auth-ui/supabase.js', '/auth-ui/config.js', '/auth-ui/consent.js',

@@ -47,6 +47,8 @@ variable "signin_cookie_name" {
 locals {
   public_host  = "boxes.mumbo.si"
   supabase_url = "https://qkvcouccrhyjiarkauyo.supabase.co"
+  # The project's publishable key (SUPABASE_ANON_KEY): public, the sign-in page serves it to every visitor in config.js.
+  supabase_publishable_key = "sb_publishable_hrzV3iBFsW4OOQydX9nmhA_goP8Birh"
   # oauth2-proxy's callback: Mumbo's OAuth client's redirect URI, the only one the sign-in page sends a code to.
   oauth_redirect_url = "https://${local.public_host}/oauth2/callback"
   llm_host           = "llm.boxes.mumbo.si"
@@ -185,12 +187,33 @@ resource "aws_lb_listener_rule" "old_hosts" {
   action {
     type = "redirect"
     redirect {
-      host        = local.public_host
-      port        = "443"
-      protocol    = "HTTPS"
-      path        = "/#{path}"
-      query       = "#{query}"
-      status_code = "HTTP_301"
+      host     = local.public_host
+      port     = "443"
+      protocol = "HTTPS"
+      path     = "/#{path}"
+      query    = "#{query}"
+      # Temporary: browsers cache a 301, and the hosts will be swapped (app.mumbo.si becomes the main host).
+      status_code = "HTTP_302"
+    }
+  }
+}
+# oauth2-proxy skips sign-in for any GET whose client-sent X-Forwarded-Uri matches a skip-auth route (task below), and
+# neither this ALB nor oauth2-proxy sets that header: every request carrying it is refused, before any other rule.
+resource "aws_lb_listener_rule" "x_forwarded_uri" {
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 1
+  condition {
+    http_header {
+      http_header_name = "X-Forwarded-Uri"
+      values           = ["*"]
+    }
+  }
+  action {
+    type = "fixed-response"
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "bad request"
+      status_code  = "400"
     }
   }
 }
@@ -244,8 +267,7 @@ locals {
   # Container env name -> SSM parameter under /mumbo; these are all the exec role may read.
   proxy_ssm = { OAUTH2_PROXY_CLIENT_ID = "boxes/oauth-client-id", OAUTH2_PROXY_CLIENT_SECRET = "boxes/oauth-client-secret", OAUTH2_PROXY_COOKIE_SECRET = "boxes/cookie-secret" }
   edge_ssm = merge(
-    # The Supabase publishable key, for the sign-in page; the retired web app's parameter (deploy/infra).
-    { ALLOWED_EMAILS = "boxes/allowed-emails", SUPABASE_ANON_KEY = "prod/supabase-anon-key", MUMBO_OAUTH_CLIENT_IDS = "boxes/oauth-client-id" },
+    { ALLOWED_EMAILS = "boxes/allowed-emails", MUMBO_OAUTH_CLIENT_IDS = "boxes/oauth-client-id" },
     var.github_agent_token_enabled ? { GITHUB_AGENT_TOKEN = "boxes/github-agent-token" } : {},
     var.ntfy_enabled ? { NTFY_TOPIC = "boxes/ntfy-topic" } : {},
   )
@@ -279,7 +301,12 @@ resource "aws_ecs_task_definition" "edge" {
         "--upstream-timeout=120s", # a first visit creates the box and restores its backup before answering
         # The Supabase sign-in page and its scripts (edge authUi), for visitors not signed in yet. v7.9 matches the
         # request URI with its query; the edge serves exactly these GETs on the approve host and redirects the page there.
+        # oauth2-proxy also skips sign-in for any GET whose client-sent X-Forwarded-Uri matches a route, in later versions
+        # too: the ALB rule x_forwarded_uri refuses that header and the edge does as well. On every route oauth2-proxy
+        # strips client identity headers (set explicitly here) and sets X-Forwarded-Email only from a session; the edge
+        # treats a request without it as signed out. Who may enter is decided in the edge (admitted()), never by these flags.
         "--skip-auth-route=GET=^/oauth/consent([?].*)?$", "--skip-auth-route=GET=^/auth-ui/(supabase|config|consent)[.]js$",
+        "--skip-auth-strip-headers=true",
       ]
       secrets          = [for k, p in local.proxy_ssm : { name = k, valueFrom = "${local.ssm}/${p}" }]
       logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.edge.name, awslogs-region = "us-east-1", awslogs-stream-prefix = "oauth2-proxy" } }
@@ -303,6 +330,7 @@ resource "aws_ecs_task_definition" "edge" {
         PAUSE_IDLE        = "false" # boxes stay running (founder, 2026-11-09); cost work later
         PROJECT_DOMAIN    = local.project_domain
         SUPABASE_URL      = local.supabase_url
+        SUPABASE_ANON_KEY = local.supabase_publishable_key
         # The sign-in page consents only for this client (MUMBO_OAUTH_CLIENT_IDS, below) and redirect URI.
         MUMBO_OAUTH_REDIRECT_URIS = local.oauth_redirect_url
         SIGNIN_COOKIE             = var.signin_cookie_name
@@ -352,7 +380,8 @@ resource "aws_ecs_service" "edge" {
     container_name   = "edge"
     container_port   = 8081
   }
-  depends_on = [aws_lb_listener_rule.edge]
+  # The exec role's grant first: a task whose secrets it may not read does not start.
+  depends_on = [aws_lb_listener_rule.edge, aws_iam_role_policy.exec_edge]
 }
 
 output "edge_alb" { value = aws_lb.edge.dns_name }

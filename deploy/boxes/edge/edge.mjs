@@ -704,7 +704,7 @@ const hostOf = (req) => String(req.headers.host ?? '').toLowerCase().replace(/:\
 
 /**
  * The Supabase sign-in and consent page (Supabase's OAuth authorization path /oauth/consent) and its scripts, for
- * visitors who are not signed in yet: oauth2-proxy skips sign-in for exactly these GETs (prod/edge.tf). `html` is
+ * visitors who are not signed in yet: oauth2-proxy skips sign-in for these GETs (prod/edge.tf; skippedSignin). `html` is
  * auth-ui/index.html; its inline script, style and event handler are allowed by hash. config.js carries the Supabase
  * URL and publishable key, and Mumbo's own OAuth client ids and redirect URIs, the only ones the page consents for
  * (consent.js). Returns a handler that answers and returns true for the page and its scripts, false for anything else.
@@ -732,13 +732,11 @@ export function authUi({ html, supabaseJs, consentJs, supabaseUrl, anonKey, clie
   }
 }
 
-// oauth2-proxy's --skip-auth-route GETs (prod/edge.tf). With --reverse-proxy it also skips sign-in for any request whose
-// client-sent X-Forwarded-Uri names one of them; neither it nor the ALB sets that header. A skipped request carries no
-// identity, so an email header on one did not come through sign-in.
-/** True for a request carrying X-Forwarded-Uri, which neither the ALB nor oauth2-proxy sets: with --reverse-proxy, oauth2-proxy
- *  skips sign-in for any GET whose client-sent X-Forwarded-Uri matches a skip-auth route. oauth2-proxy strips client identity
- *  headers on every route and sets X-Forwarded-Email itself for a visitor with a session, skip-auth routes included, so a
- *  request without that header is signed out. This refusal is defence in depth behind that strip. */
+/** True for a request carrying X-Forwarded-Uri, which neither the ALB nor oauth2-proxy sets. oauth2-proxy skips sign-in
+ *  for its skip-auth GETs (prod/edge.tf) and, with --reverse-proxy, for any GET whose client-sent X-Forwarded-Uri matches
+ *  one of them, in later versions too. The ALB rule x_forwarded_uri refuses that header and is the hard stop; this check
+ *  is defence in depth. oauth2-proxy strips client identity headers on every route and sets X-Forwarded-Email only from a
+ *  session, so a request without it is signed out. Who may enter is decided here (admitted()), never by oauth2-proxy flags. */
 const skippedSignin = (req) => req.headers['x-forwarded-uri'] !== undefined
 
 /** Signed-in users' traffic. The public host reaches the user's own box and p-<16 hex>.<project domain> a project's
