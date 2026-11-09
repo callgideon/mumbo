@@ -26,6 +26,7 @@ Each package adapts one outside protocol.
 
 | Package | Role |
 |---|---|
+| [`edge-member/`](edge-member/README.md) | Admits project members from the edge-signed header as non-owner principals with collaborator access |
 | [`mcp/`](mcp/README.md) | Authenticated loopback MCP server through which allowlisted people drive the host's assistant Session |
 
 -----
