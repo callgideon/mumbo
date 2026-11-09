@@ -4,7 +4,7 @@ import { latestAssignment, waitsForPerson, type Ticket, type Trigger } from '../
 import { Later } from '../src/app/effects.ts'
 import { reportRelay } from '../src/app/notices.ts'
 import { WorkerSlots, inputMessage, mandateInstructions, ticketExecution, transient, triggerMessage } from '../src/executor/dsh.ts'
-import { SettingsSchema } from '../src/policy.ts'
+import { SettingsSchema, type Settings } from '../src/policy.ts'
 import { Commands } from '../src/infra/commands.ts'
 import { deferred, waitUntil } from './fixtures/async.ts'
 import { CHAT, MEMBER, feishu, startRuntime, type Host } from './fixtures/host.ts'
@@ -52,8 +52,8 @@ it('delivers nothing to a ticket a person stopped while an earlier ticket\'s del
   const one = await h.acceptedTicket(feishu('1', '@bot 修一'))
   const two = await h.acceptedTicket(feishu('5', '@bot 修二'))
   await h.runtime.settings.pause(true, 'panel')
-  h.runtime.receive(feishu('2', '一的补充', { mentions: [], root_id: 'om_1', sender_id: 'ou_guest' }))
-  h.runtime.receive(feishu('6', '二的补充', { mentions: [], root_id: 'om_5', sender_id: 'ou_guest' }))
+  h.runtime.receive(feishu('2', '一的补充', { mentions: [], root_id: 'om_1' }))
+  h.runtime.receive(feishu('6', '二的补充', { mentions: [], root_id: 'om_5' }))
   // Tickets are processed newest-first, so holding ticket two pauses the pass before ticket one is delivered.
   const gate = deferred()
   const held = holdSession(two.sessionId, gate.promise)
@@ -69,7 +69,7 @@ it('delivers nothing to a ticket a person stopped while an earlier ticket\'s del
 it('drops a delivery whose ticket a person stopped while it waited for the worker Session', async () => {
   const one = await h.acceptedTicket(feishu('1', '@bot 修一'))
   await h.runtime.settings.pause(true, 'panel')
-  h.runtime.receive(feishu('2', '一的补充', { mentions: [], root_id: 'om_1', sender_id: 'ou_guest' }))
+  h.runtime.receive(feishu('2', '一的补充', { mentions: [], root_id: 'om_1' }))
   const gate = deferred()
   const held = holdSession(one.sessionId, gate.promise)
   const resumed = h.runtime.settings.pause(false, 'panel')
@@ -125,9 +125,12 @@ it('keeps a launch that a pause cut short queued, and finishes it once processin
 })
 
 const botMessage = () => feishu('2', 'CI 失败', { mentions: [], root_id: 'om_1', sender_id: 'cli_ci', sender_type: 'bot' })
+/** Put `botMessage`'s sender on the Feishu bot list, so its messages reach the tickets on their Threads. */
+const listingBot = (settings: Settings): Settings => ({ ...settings, policy: { ...settings.policy,
+  sources: { ...settings.policy.sources, feishu: { ...settings.policy.sources.feishu!, bots: [{ id: 'cli_ci' }] } } } })
 it('wakes an idle worker for a bot\'s Input only when a worker slot is free, and creates a worker Session someone deleted again', async () => {
   const settings = h.runtime.store.settings()
-  h.runtime.store.saveSettings({ ...settings, executor: { ...settings.executor, maxWorkers: 1 } })
+  h.runtime.store.saveSettings({ ...listingBot(settings), executor: { ...settings.executor, maxWorkers: 1 } })
   const one = await h.acceptedTicket(feishu('1', '@bot 修一'))
   h.agents.get(one.sessionId)!.status = 'idle'
   const two = await h.acceptedTicket(feishu('5', '@bot 修二'))
@@ -150,14 +153,14 @@ it('wakes an idle worker for a person\'s message at once, in the slot kept beyon
   h.agents.get(one.sessionId)!.status = 'idle'
   const two = await h.acceptedTicket(feishu('5', '@bot 修二'))
   expect(h.agents.get(two.sessionId)!.status).toBe('running')
-  h.runtime.receive(feishu('2', '一的补充', { mentions: [], root_id: 'om_1', sender_id: 'ou_guest' })); await h.runtime.idle()
+  h.runtime.receive(feishu('2', '一的补充', { mentions: [], root_id: 'om_1' })); await h.runtime.idle()
   expect(h.runtime.store.tickets.get(one.ticket.id)!.undelivered).toEqual([])
   expect(h.agents.get(one.sessionId)!.status).toBe('running')
 })
 
 it('counts a launch under way against maxWorkers, so a bot\'s Input for an idle worker waits for the slot', async () => {
   const settings = h.runtime.store.settings()
-  h.runtime.store.saveSettings({ ...settings, executor: { ...settings.executor, maxWorkers: 1, prepare: 'make worktree' } })
+  h.runtime.store.saveSettings({ ...listingBot(settings), executor: { ...settings.executor, maxWorkers: 1, prepare: 'make worktree' } })
   const one = await h.acceptedTicket(feishu('1', '@bot 修一'))
   h.agents.get(one.sessionId)!.status = 'idle'
   // Ticket two's launch holds the only slot while its prepare command runs, before its worker's Session does.
@@ -184,7 +187,7 @@ it('records on the ticket that its worker Session could not be created again', a
     if (id === one.sessionId) throw new Error('The Session store is offline')
     return h.resolveDefault(id)
   })
-  h.runtime.receive(feishu('2', '一的补充', { mentions: [], root_id: 'om_1', sender_id: 'ou_guest' })); await h.runtime.idle()
+  h.runtime.receive(feishu('2', '一的补充', { mentions: [], root_id: 'om_1' })); await h.runtime.idle()
   expect(h.runtime.store.tickets.get(one.ticket.id)).toMatchObject({ delivery: { error: expect.stringContaining('The Session store is offline') } })
 })
 
