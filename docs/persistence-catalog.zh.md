@@ -31,6 +31,7 @@
 | `event:approval/policy` | event | `26718e15e7e395bce9642dba5bbe09b3b1a4ce2213d20d566cd9207d7fc5fb78` | [`{ type: "approval/policy" }`](#persistence-type-sha256-26718e15e7e395bce9642dba5bbe09b3b1a4ce2213d20d566cd9207d7fc5fb78) |
 | `event:assistant/attempt` | event | `15d5dfdd822aa35e115afd74a8982825a493880457774e6850bc1520b50875e4` | [`{ type: "assistant/attempt" }`](#persistence-type-sha256-15d5dfdd822aa35e115afd74a8982825a493880457774e6850bc1520b50875e4) |
 | `event:assistant/message` | event | `1033093edd0db80ff410e00830b523405e00bb0c7684948e531ff65095799625` | [`{ type: "assistant/message" }`](#persistence-type-sha256-1033093edd0db80ff410e00830b523405e00bb0c7684948e531ff65095799625) |
+| `event:browser-consent/write` | event | `2980b9eb6c37399ed3b106cf3165f80e7f527850c682a24df9878f2b29c3c79d` | [`{ type: "browser-consent/write" }`](#persistence-type-sha256-2980b9eb6c37399ed3b106cf3165f80e7f527850c682a24df9878f2b29c3c79d) |
 | `event:command/done` | event | `15196447222782e773eb943c92b18316ce96b9af0f0cfddb6e57ba8274ecc5ff` | [`{ type: "command/done" }`](#persistence-type-sha256-15196447222782e773eb943c92b18316ce96b9af0f0cfddb6e57ba8274ecc5ff) |
 | `event:command/run` | event | `37184378c6439257d105c4e2022d80fc9c3a3f7c7f6ac661b00bc9f18d871006` | [`{ type: "command/run" }`](#persistence-type-sha256-37184378c6439257d105c4e2022d80fc9c3a3f7c7f6ac661b00bc9f18d871006) |
 | `event:compaction/end` | event | `b0127044ab31a702bddfd785d345f5abd7a70876746e895ce443afa3e60ddf2d` | [`{ type: "compaction/end" }`](#persistence-type-sha256-b0127044ab31a702bddfd785d345f5abd7a70876746e895ce443afa3e60ddf2d) |
@@ -323,6 +324,32 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 类型：[TokenUsage](subsystems/llm-streaming.zh.md)
 
 来源：[`packages/core/session/src/types.ts:349`](../packages/core/session/src/types.ts)
+
+### `browser-consent/*`
+
+<a id="browser-consentwrite--log-only"></a>
+
+#### `browser-consent/write` — log-only
+
+```ts persistence-catalog
+/**
+ * One browser write that consent allowed, appended when its result is final; log-only audit, never
+ * model-visible. `tool` is the upstream Playwright MCP tool name, `site` the origin of Playwright's
+ * current tab when it could be read, `grant` what allowed the write, and `outcome` whether the final
+ * tool result succeeded (`failed` includes a refusal by a later policy).
+ */
+'browser-consent/write': {
+  callId: ToolCallId
+  tool: string
+  site?: string
+  grant: BrowserWriteGrant
+  outcome: 'succeeded' | 'failed'
+}
+```
+
+类型：[ToolCallId](subsystems/core.zh.md)
+
+来源：[`packages/mumbo/browser-consent/src/types.ts:19`](../packages/mumbo/browser-consent/src/types.ts)
 
 ### `command/*`
 
@@ -1450,6 +1477,14 @@ SHA-256: `e438a9d4fb883b3e4a8d9fc8913aa1550ed50eb384bfbf943100a5605b537498`
 
 `"append"`
 
+<a id="persistence-type-sha256-c914163c995adf6f4ba3e6d488fa0a2869931475e951d068c2c62a45f231ba32"></a>
+
+### `"approval"`
+
+SHA-256: `c914163c995adf6f4ba3e6d488fa0a2869931475e951d068c2c62a45f231ba32`
+
+`"approval"`
+
 <a id="persistence-type-sha256-cd186c309e2bef305705e1d324139240f5e681f4f6a957d6a25b0225f65560df"></a>
 
 ### `"approval/asked"`
@@ -1545,6 +1580,14 @@ SHA-256: `cbca49bde16b656d5b8fbe4a8a507769f7b594c6287782b809c03814941bc5e3`
 SHA-256: `254dce209e735f9cb6f6b7aec0354712b1611759ec02af4d35a96f2081e666f6`
 
 `"blocked"`
+
+<a id="persistence-type-sha256-da187aec29ff90aff0fa4ade1e556c7b8522d674c28b0b213f5773d19c91eb40"></a>
+
+### `"browser-consent/write"`
+
+SHA-256: `da187aec29ff90aff0fa4ade1e556c7b8522d674c28b0b213f5773d19c91eb40`
+
+`"browser-consent/write"`
 
 <a id="persistence-type-sha256-d4e4d575abeb4b72d616dc65c17ac0eaa943cc135609395044c38d5afcb10e31"></a>
 
@@ -2584,6 +2627,14 @@ SHA-256: `6ba7edb6447b6a3e7947dddf5e4116c1526000c4e62882a6d65edc67ba797c2c`
 
 `"share-viewer"`
 
+<a id="persistence-type-sha256-c20beeca29897ce4076a08679ed6f1347998b254d7dc63f85daaa505ffbf0181"></a>
+
+### `"site"`
+
+SHA-256: `c20beeca29897ce4076a08679ed6f1347998b254d7dc63f85daaa505ffbf0181`
+
+`"site"`
+
 <a id="persistence-type-sha256-6ebcc2dbec9f2dabca9f668ae6d39e877899b180740570f453409db339221df3"></a>
 
 ### `"skill-catalog"`
@@ -2671,6 +2722,14 @@ SHA-256: `5ebce1317eacd2c148456627a09668e927ee15c204f0643f5ea76b46b54a2647`
 SHA-256: `0a8a062bc9c3c0d97fd97742262f2ea53dd32297f834e81114870d38ac3dc6da`
 
 `"subagent/model-selection-policy"`
+
+<a id="persistence-type-sha256-fd76feed4d7a307fc89fe24260cefa8f0918a558e58d2b589f0041d4d64954e2"></a>
+
+### `"succeeded"`
+
+SHA-256: `fd76feed4d7a307fc89fe24260cefa8f0918a558e58d2b589f0041d4d64954e2`
+
+`"succeeded"`
 
 <a id="persistence-type-sha256-511801b0a6470d98566e8385d3dffddb2b67f79fcf73ed6056f46c3cc0a245a7"></a>
 
@@ -3282,6 +3341,23 @@ SHA-256: `33341aac09312300de5a178e6cc6f6544a4876f7f710cfea55eda473c8d329ef`
 SHA-256: `84bbfdce7d2eab5b0c53e72ff7406db856c8bfd621b965b72fd86598ba493bf7`
 
 [`AssistantStreamRecord`](#persistence-type-sha256-33341aac09312300de5a178e6cc6f6544a4876f7f710cfea55eda473c8d329ef) 的数组。
+
+<a id="persistence-type-sha256-a73a94bc181067c8480a6d014b72abd4ec408f258934d7ebaf6ec39a046a44f9"></a>
+
+<a id="persistence-type-browserwritegrant"></a>
+
+<a id="persistence-type-packagesmumbobrowser-consentsrctypestsbrowserwritegrant"></a>
+
+### `BrowserWriteGrant`
+
+SHA-256: `a73a94bc181067c8480a6d014b72abd4ec408f258934d7ebaf6ec39a046a44f9`
+
+来源：[`packages/mumbo/browser-consent/src/types.ts:9`](../packages/mumbo/browser-consent/src/types.ts)
+
+以下类型之一：
+
+- `"approval"`
+- `"site"`
 
 <a id="persistence-type-sha256-ada310bf0bdb8fed51f3b56ea63f6ea6b18bbd587f04fccb63a14ab0b2a24e05"></a>
 
@@ -5731,6 +5807,17 @@ SHA-256: `1ab2ef1296f157ba96998f179bb5daa9d21a82480da2901127aeab2730797c92`
 - `"error"`
 - `"success"`
 
+<a id="persistence-type-sha256-4082fb2303621db2ddff844f8c08ba857d33b315aac9a143dc97805beed8771d"></a>
+
+### `union (2 variants)`
+
+SHA-256: `4082fb2303621db2ddff844f8c08ba857d33b315aac9a143dc97805beed8771d`
+
+以下类型之一：
+
+- `"failed"`
+- `"succeeded"`
+
 <a id="persistence-type-sha256-50cf02d875f8a1f1411f4a6fbcffab9120ccef5f74a47331fbf29480e5f68f48"></a>
 
 ### `union (2 variants)`
@@ -5955,6 +6042,22 @@ SHA-256: `1528539c63db8b23506f0209a99ce77d8ad138adfbfcee3d4769b7382d93756c`
 | `callId` | 必需 | `string` |
 | `files` | 必需 | [`PresentedFile[]`](#persistence-type-sha256-1d9cb3caa96100b18b1911fa3ff8c751ef6992971a03c5f4d9aefc1a0004a345) |
 | `turn` | 必需 | `number` |
+
+<a id="persistence-type-sha256-ed5affa67f182c8eab17b9e8845191f54dfa0129bf4181bd2cce893a7f5058a4"></a>
+
+### `{ callId, grant, outcome, site?, … }`
+
+SHA-256: `ed5affa67f182c8eab17b9e8845191f54dfa0129bf4181bd2cce893a7f5058a4`
+
+来源：[`packages/mumbo/browser-consent/src/types.ts:19`](../packages/mumbo/browser-consent/src/types.ts)
+
+| 属性 | 存在性 | 类型 |
+|---|---|---|
+| `callId` | 必需 | `string` |
+| `grant` | 必需 | [`BrowserWriteGrant`](#persistence-type-sha256-a73a94bc181067c8480a6d014b72abd4ec408f258934d7ebaf6ec39a046a44f9) |
+| `outcome` | 必需 | [`union (2 variants)`](#persistence-type-sha256-4082fb2303621db2ddff844f8c08ba857d33b315aac9a143dc97805beed8771d) |
+| `site` | 可选 | `string` |
+| `tool` | 必需 | `string` |
 
 <a id="persistence-type-sha256-45f2a07ea94573123b6ae14db787a40062dec3834f36d8be92c523d40ba28448"></a>
 
@@ -8361,6 +8464,22 @@ SHA-256: `3bec87f9e6ab3da03346f49923d3c51621debc0159df68605e543c3b2a026f90`
 | `blockType` | 必需 | [`ContentBlockType`](#persistence-type-sha256-7d65acf0a3a43a8f445ce5d3320b42eca492739fc931b2a7516bfb8368dc2c68) |
 | `index` | 必需 | `number` |
 | `type` | 必需 | `"block-start"` |
+
+<a id="persistence-type-sha256-2980b9eb6c37399ed3b106cf3165f80e7f527850c682a24df9878f2b29c3c79d"></a>
+
+<a id="persistence-type-eventbrowser-consentwrite"></a>
+
+### `{ type: "browser-consent/write" }`
+
+SHA-256: `2980b9eb6c37399ed3b106cf3165f80e7f527850c682a24df9878f2b29c3c79d`
+
+| 属性 | 存在性 | 类型 |
+|---|---|---|
+| `data` | 必需 | [`{ callId, grant, outcome, site?, … }`](#persistence-type-sha256-ed5affa67f182c8eab17b9e8845191f54dfa0129bf4181bd2cce893a7f5058a4) |
+| `ignorable` | 可选 | `true` |
+| `seq` | 必需 | `number` |
+| `time` | 必需 | `number` |
+| `type` | 必需 | `"browser-consent/write"` |
 
 <a id="persistence-type-sha256-487b65c37bfedb8b72088c4107a0a90a6249701f6b26745f6d98f9b8a22b07c7"></a>
 

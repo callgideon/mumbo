@@ -4887,6 +4887,23 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-workspace-changes -->
 
+<!-- BEGIN GENERATED config-catalog:@mumbo/browser-consent -->
+<a id="mumbobrowser-consent"></a>
+
+## `@mumbo/browser-consent`
+
+- `inject`: `tools`
+- `source`: [`packages/mumbo/browser-consent/src/index.ts:46`](../packages/mumbo/browser-consent/src/index.ts)
+
+```ts config-catalog
+/** Consent configuration. */
+export interface Config {
+  /** Origins (`https://host[:port]`) where site writes proceed without asking. */
+  readonly allowedSites: string[]
+}
+```
+<!-- END GENERATED config-catalog:@mumbo/browser-consent -->
+
 <!-- BEGIN GENERATED config-catalog:@mumbo/mcp -->
 <a id="mumbomcp"></a>
 

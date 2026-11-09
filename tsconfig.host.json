@@ -561,6 +561,7 @@
     { "path": "./packages/experimental/tool-ralph" },
     { "path": "./packages/experimental/webhook" },
     { "path": "./packages/experimental/webhook-github" },
+    { "path": "./packages/mumbo/browser-consent" },
     { "path": "./packages/mumbo/mcp" },
     { "path": "./packages/todo/tool-todo" },
     { "path": "./packages/plan/plan-mode" },

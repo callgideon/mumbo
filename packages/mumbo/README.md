@@ -1,15 +1,15 @@
 ---
-description: "The mumbo package group: deployment adapters that let people reach a running Web host from their own tools."
+description: "The mumbo package group: what a per-user box deployment adds to a running Web host, from access for people's own tools to consent for browser writes."
 kind: "package-group"
 ---
 
-# mumbo/ — reach a running host from your own tools
+# mumbo/ — packages for the per-user box platform
 
 English | [中文](README.zh.md)
 
 ## Summary
 
-The mumbo family exposes what a running Web host already does to people's own tools, behind explicit authentication. Its packages add no Session, tool, or storage behavior of their own; they adapt existing services to an outside protocol. Each package README owns its contract.
+The mumbo family holds what a per-user box deployment adds to a running Web host: authenticated access for people's own tools, and consent for the assistant's actions with a person's signed-in accounts. Each package attaches to existing services and registers no model tools. Each package README owns its contract.
 
 ## Table of Contents
 
@@ -22,10 +22,11 @@ The mumbo family exposes what a running Web host already does to people's own to
 <a id="packages"></a>
 ## Packages
 
-Each package adapts one outside protocol.
+Each package owns one deployment concern.
 
 | Package | Role |
 |---|---|
+| [`browser-consent/`](browser-consent/README.md) | Reads free, writes ask: consent and an audit record for Playwright MCP browser writes in the person's own Chromium |
 | [`mcp/`](mcp/README.md) | Authenticated loopback MCP server through which allowlisted people drive the host's assistant Session |
 
 -----
