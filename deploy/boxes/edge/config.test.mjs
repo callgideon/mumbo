@@ -5,7 +5,7 @@ import { test } from 'node:test'
 import { admitted, config } from './edge.mjs'
 
 const base = { PUBLIC_HOST: 'boxes.mumbo.si', LLM_HOST: 'llm.boxes.mumbo.si', BACKUP_BUCKET: 'backups' }
-const M1 = ['APPROVE_HOST', 'GITHUB_AGENT_LOGIN', 'REQUIRED_CHECKS', 'DAILY_TOKENS_USER', 'DAILY_TOKENS_PROJECT', 'BOX_TEMPLATE', 'PROJECT_TEMPLATE',
+const M1 = ['APPROVE_HOST', 'GITHUB_AGENT_LOGIN', 'GITHUB_AGENT_ID', 'REQUIRED_CHECKS', 'DAILY_TOKENS_USER', 'DAILY_TOKENS_PROJECT', 'BOX_TEMPLATE', 'PROJECT_TEMPLATE',
   'AUDIT_PREFIX', 'GITHUB_AGENT_TOKEN', 'GITHUB_APP_ID', 'GITHUB_APP_KEY', 'GITHUB_MERGE_TOKEN', 'NTFY_TOPIC', 'SIGNIN_COOKIE']
 /** config() with exactly `base` plus `vars` set among the variables it reads here. */
 function configWith(vars = {}) {
@@ -22,8 +22,9 @@ test('M1 settings: defaults, and secrets optional so the edge starts before they
   assert.deepEqual(c.requiredChecks, ['static', 'unit'])
   assert.equal(c.dailyTokensUser, 20_000_000); assert.equal(c.dailyTokensProject, 50_000_000)
   assert.equal(c.projectTemplate, 'mumbo-box'); assert.equal(c.auditPrefix, 'audit/approvals/')
-  for (const k of ['agentLogin', 'agentToken', 'appId', 'appKey', 'ntfyTopic']) assert.equal(c[k], undefined, k)
-  assert.equal('mergeToken' in c, false)
+  for (const k of ['agentLogin', 'agentId', 'appId', 'appKey', 'ntfyTopic']) assert.equal(c[k], undefined, k)
+  for (const k of ['mergeToken', 'agentToken']) assert.equal(k in c, false, k)
+  assert.equal('agentToken' in configWith({ GITHUB_AGENT_TOKEN: 'ghp_x' }), false, 'GITHUB_AGENT_TOKEN is not read')
   assert.equal(configWith({ BOX_TEMPLATE: 'tpl' }).projectTemplate, 'tpl')
   const set = configWith({ GITHUB_APP_ID: '5295930', GITHUB_APP_KEY: 'PEM', REQUIRED_CHECKS: ' Static , unit,' })
   assert.equal(set.appId, '5295930'); assert.equal(set.appKey, 'PEM')
@@ -85,4 +86,18 @@ test('no oauth2-proxy launch turns off its email_verified check', () => {
     new URL('./compose.yaml', import.meta.url), new URL('./up.sh', import.meta.url)]
   for (const file of [new URL('edge.tf', prod), new URL('./compose.yaml', import.meta.url)]) assert.match(readFileSync(file, 'utf8'), /--provider=oidc/, file.pathname)
   for (const file of files) assert.doesNotMatch(readFileSync(file, 'utf8'), /allow[-_]?unverified[-_]?email|email[-_]?claim|user[-_]?id[-_]?claim/i, file.pathname)
+})
+
+test('the agent is the mumbo-bot App\'s bot user: GITHUB_AGENT_ID is its numeric id, set together with GITHUB_AGENT_LOGIN', () => {
+  const c = configWith({ GITHUB_AGENT_LOGIN: 'mumbo-bot[bot]', GITHUB_AGENT_ID: '341797844' })
+  assert.equal(c.agentLogin, 'mumbo-bot[bot]')
+  assert.equal(c.agentId, 341797844)
+  for (const vars of [{ GITHUB_AGENT_LOGIN: 'mumbo-bot[bot]' }, { GITHUB_AGENT_ID: '341797844' }]) assert.throws(() => configWith(vars), /set GITHUB_AGENT_ID and GITHUB_AGENT_LOGIN together/, JSON.stringify(vars))
+  for (const id of ['abc', '0', '-1', '1.5', '1e3', ' 1', '12345678901234567']) assert.throws(() => configWith({ GITHUB_AGENT_LOGIN: 'mumbo-bot[bot]', GITHUB_AGENT_ID: id }), /GITHUB_AGENT_ID must be a numeric GitHub user id/, id)
+})
+
+test('PAGE_AFTER_MS: default 3000, and a value below 1000 or not a number stops the edge', () => {
+  assert.equal(configWith().pageAfterMs, 3000)
+  assert.equal(configWith({ PAGE_AFTER_MS: '5000' }).pageAfterMs, 5000)
+  for (const bad of ['999', 'soon', '-1', 'Infinity', '']) assert.throws(() => configWith({ PAGE_AFTER_MS: bad }), /PAGE_AFTER_MS/, bad)
 })

@@ -10,6 +10,12 @@ import { ownersOf } from './projects.mjs'
 import { UNITS, atCapacity } from './capacity.mjs'
 
 const env = (name, fallback) => process.env[name] ?? fallback ?? (() => { throw new Error(`edge: set ${name}`) })()
+/** A number setting that must be finite and at least `min`; a bad value stops the edge at start. */
+const atLeast = (name, min, fallback) => {
+  const n = Number(env(name, String(fallback)))
+  if (!Number.isFinite(n) || n < min) throw new Error(`edge: ${name} must be a number of at least ${min}`)
+  return n
+}
 const list = (value) => value.toLowerCase().split(',').map(s => s.trim()).filter(Boolean)
 /** ALLOWED_EMAILS entries: `address`, `@domain` or the exact-address deny `!local@domain`. A malformed deny entry fails at startup, since it would silently deny nobody. */
 const allowList = (value) => {
@@ -30,6 +36,13 @@ const hostname = (name, fallback) => {
   if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(value)) throw new Error(`edge: ${name} must be a bare lowercase hostname such as boxes.mumbo.si, not ${JSON.stringify(value)}`)
   return value
 }
+/** GITHUB_AGENT_ID, the agent's numeric GitHub user id, or undefined; set together with GITHUB_AGENT_LOGIN or fails. */
+const agentId = () => {
+  const id = optional('GITHUB_AGENT_ID')
+  if (!id !== !optional('GITHUB_AGENT_LOGIN')) throw new Error('edge: set GITHUB_AGENT_ID and GITHUB_AGENT_LOGIN together')
+  if (id !== undefined && !/^[1-9]\d{0,15}$/.test(id)) throw new Error(`edge: GITHUB_AGENT_ID must be a numeric GitHub user id, not ${JSON.stringify(id)}`)
+  return id && Number(id)
+}
 /** oauth2-proxy's sign-in cookie name when SIGNIN_COOKIE is unset (prod sets it from Terraform signin_cookie_name). It
  *  starts with _oauth2_proxy, so edge images older than SIGNIN_COOKIE, which strip only that prefix, strip it too. */
 const SIGNIN_COOKIE = '_oauth2_proxy_mumbo'
@@ -49,6 +62,7 @@ export const config = () => ({
   pauseIdle: env('PAUSE_IDLE', 'true') !== 'false',  // false: boxes stay running (founder, 2026-11-09); cost work comes later
   backupEveryMs: Number(env('BACKUP_MINUTES', '10')) * 60_000,
   maxRunningUnits: Number(env('MAX_RUNNING_UNITS', '0')),  // capacity units (capacity.mjs UNITS); 0: no edge-side cap, E2B's own placement errors decide
+  pageAfterMs: atLeast('PAGE_AFTER_MS', 1000, 3000),  // a page load waiting longer on a box gets the starting page
   backupConcurrency: Number(env('BACKUP_CONCURRENCY', '8')),
   allowed: allowList(env('ALLOWED_EMAILS', '')),
   egressIps: list(env('BOX_EGRESS_IPS', '')),
@@ -58,18 +72,18 @@ export const config = () => ({
   upstream: env('MODEL_UPSTREAM', 'https://api.deepseek.com'),
   childTemplates: list(env('CHILD_TEMPLATES', 'mumbo-child')),
   maxChildren: Number(env('MAX_CHILD_SANDBOXES', '10')),
-  // Approvals, GitHub and token budgets. Secrets arrive through the ECS secrets map: the agent token and ntfy topic from
-  // SSM; the id and private key of the mumbo-bot GitHub App, the only identity that merges, from Secrets Manager
-  // mumbo-boxes/github-app.
+  // Approvals, GitHub and token budgets. Secrets arrive through the ECS secrets map: the ntfy topic from SSM; the id and
+  // private key of the mumbo-bot GitHub App, which the agent writes as and the only identity that merges, from Secrets
+  // Manager mumbo-boxes/github-app.
   approveHost: env('APPROVE_HOST', `approve.${env('PUBLIC_HOST')}`),
   approverEmails: list(env('APPROVER_EMAILS', '')),  // who may merge and bind repositories; empty: nobody
-  agentLogin: optional('GITHUB_AGENT_LOGIN'),  // unset: the approvals poller is off
+  agentLogin: optional('GITHUB_AGENT_LOGIN'),  // the App's bot user, mumbo-bot[bot]
+  agentId: agentId(),  // its numeric user id, which approvals match; unset: the approvals poller is off
   requiredChecks: checkNames('REQUIRED_CHECKS', 'static,unit'),
   dailyTokensUser: Number(env('DAILY_TOKENS_USER', '20000000')),
   dailyTokensProject: Number(env('DAILY_TOKENS_PROJECT', '50000000')),
   projectTemplate: env('PROJECT_TEMPLATE', env('BOX_TEMPLATE', 'mumbo-box')),
   auditPrefix: env('AUDIT_PREFIX', 'audit/approvals/'),
-  agentToken: optional('GITHUB_AGENT_TOKEN'),
   appId: optional('GITHUB_APP_ID'),
   appKey: optional('GITHUB_APP_KEY'),
   ntfyTopic: optional('NTFY_TOPIC'),
@@ -145,6 +159,20 @@ export function roleInstructions(cfg, principal) {
     '- Projects: software and other team work lives in shared projects, each with its own coordinator. Use project_list, project_create, project_add_member and project_message (to give a project\'s coordinator work or ask for status). Do not run project code in this box.',
     '- Sandboxes (sandbox_* tools) are for quick isolated experiments.',
     '- For anything recurring or later, use the schedule tools; the box runs them while the user is away.',
+  ].join('\n')
+}
+
+/** Exists once a person box has given its first-run welcome, or had sessions before it (DESIGN.md#first-run-welcome). Under
+ *  /root/.dsh, so backups carry it with the conversation that holds the welcome. */
+export const WELCOMED = '/root/.dsh/welcomed'
+/** The first-run welcome (spec section 17a, step 5), added to the person's first prompt in a new box (startScript). */
+export function welcomeInstructions(cfg) {
+  return [
+    'This person\'s computer was just set up, and this is their first message. Before you answer it, greet them once, briefly:',
+    '- what you can do now: use the web in their own browser (they sign in to sites on the desktop), work with files, run quick experiments in sandboxes, do recurring or later work on a schedule while they are away, and start projects of their own;',
+    '- connecting their accounts comes later;',
+    `- their computer's home page is https://${cfg.publicHost}/home.`,
+    'Then answer their message.',
   ].join('\n')
 }
 
@@ -234,6 +262,28 @@ YML
 command -v xauth >/dev/null 2>&1 && echo "        xauthority: /run/x11/auth" >> /root/.mumbo/computer.overlay.yml
 CU_PATCH="--patch /root/.mumbo/computer.overlay.yml"
 fi
+` : ''}${site.desktop ? `# First-run welcome (edge welcomeInstructions): until ${WELCOMED} exists, a UserPromptSubmit hook creates it (noclobber,
+# so exactly one prompt wins) and adds the welcome to that prompt. dsh reads AGENTS.md into every new session, so the
+# role file cannot carry a once-only greeting. A box with any session log under dsh's sessions root has been used (a
+# restart, or a restore from a backup taken before the marker existed): it is marked instead of welcomed.
+if [ ! -e ${WELCOMED} ] && [ -n "$(find /root/.dsh/sessions -type f 2>/dev/null | head -n 1)" ]; then : > ${WELCOMED}; fi
+WELCOME_PATCH=
+if [ ! -e ${WELCOMED} ]; then
+cat > /root/.mumbo/welcome.json <<'JSON'
+${JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: welcomeInstructions(cfg) } })}
+JSON
+cat > /root/.mumbo/welcome-hooks.json <<'JSON'
+${JSON.stringify({ UserPromptSubmit: [{ hooks: [{ type: 'command', command: `(set -C; : > ${WELCOMED}) 2>/dev/null && cat /root/.mumbo/welcome.json || true`, timeout: 10 }] }] })}
+JSON
+cat > /root/.mumbo/welcome.overlay.yml <<'YML'
+- insert:
+    - id: first-run-welcome
+      name: '@deepseek-ai/dsh-hooks-claude-code'
+      config:
+        configPath: /root/.mumbo/welcome-hooks.json
+YML
+WELCOME_PATCH="--patch /root/.mumbo/welcome.overlay.yml"
+fi
 ` : ''}${site.desktop ? `# Desktop: the user's own Chromium (signed-in accounts live in its profile) on a virtual display, as the unprivileged
 # user browser; its debugging port stays on loopback for dsh's browser tools; noVNC on :6080 is the live view, which
 # only the edge reaches (E2B traffic token). Re-runnable: each part starts only if it is not running.
@@ -291,7 +341,7 @@ ${site.desktop ? '' : `PATH=/root/.mumbo/bin:$PATH NODE_USE_ENV_PROXY=1 NODE_EXT
 `}HOME=/root DSH_HOME=/root/.dsh DSH_AGENTS_HOME=/root/.mumbo/agents DSH_TELEMETRY_DISABLED=1 \\
 DEEPSEEK_BASE_URL=${llm}/anthropic DEEPSEEK_SEARCH_BASE_URL=${llm} DEEPSEEK_API_KEY=${token} \\
 nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\
-  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml $LINKS_PATCH${site.desktop ? ' $CU_PATCH' : ''}${memberKeyText ? ' $PROJECT_PATCH' : ''} \\
+  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml $LINKS_PATCH${site.desktop ? ' $CU_PATCH $WELCOME_PATCH' : ''}${memberKeyText ? ' $PROJECT_PATCH' : ''} \\
   --no-open --host "$ip" --port 3080 --public-url ${site.publicUrl} --trusted-host ${cfg.publicHost}${site.host === cfg.publicHost ? '' : ` --trusted-host ${site.host}`} > /root/dsh.log 2>&1 &
 `
 }
@@ -344,7 +394,7 @@ export async function inParallel(items, limit, fn) {
 }
 
 // ---- the router's view of E2B. `e2b` is the SDK module and `store` the shared state (store.mjs); both are injected.
-// A box record: { email, launch, traffic, active, extended, backedUp, paused }.
+// A box record: { email, launch, traffic, active, extended, backedUp, paused }, plus { creating, first } until creation ends.
 export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFiles, log = console.log }) {
   const LOCK_MS = 120_000
   const CREATE_STALE_MS = 15 * 60_000  // longer than a restore (11 min cap) plus dsh start
@@ -376,18 +426,20 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
 
   async function create(email) {
     if (await atCapacity(e2b, cfg, UNITS.box)) throw Object.assign(new Error('capacity'), { status: 503, capacity: true })
+    // Before the sandbox exists, so its `creating` record follows the create at once (adopt/backup race).
+    const restoreUrl = await presignGet(`${userPrefix(email)}/latest.tar.gz`)
     const box = await e2b.Sandbox.create(email.startsWith('project:') ? cfg.projectTemplate : cfg.template, {
       timeoutMs: timeout(), metadata: { user: email },
       lifecycle: { onTimeout: 'pause', autoResume: true },
       network: { allowPublicTraffic: false, maskRequestHost: boxSite(cfg, email).host },
     }).catch((e) => { throw /place sandbox|capacity|too many|concurrent/i.test(e.message) ? Object.assign(e, { capacity: true, status: 503 }) : e })
     // Recorded before the restore: other replicas then neither adopt nor back up a box whose data is half restored.
-    await store.putBox(box.sandboxId, { email, creating: Date.now(), active: Date.now(), extended: Date.now(), backedUp: Date.now(), paused: false })
+    // `first`: no backup exists, so this is the person's first set-up (the edge pages say so).
+    await store.putBox(box.sandboxId, { email, creating: Date.now(), first: !restoreUrl, active: Date.now(), extended: Date.now(), backedUp: Date.now(), paused: false })
     try {
       await box.files.write('/root/.mumbo/start.sh', startScript(cfg, signBox(edgeKey, email, box.sandboxId), boxSite(cfg, email), roleInstructions(cfg, email),
         email.startsWith('project:') ? memberKey(edgeKey, box.sandboxId).toString('base64url') : undefined, boxFiles,
         email.startsWith('project:') ? await ownersOf(store, email.slice('project:'.length)) : undefined))
-      const restoreUrl = await presignGet(`${userPrefix(email)}/latest.tar.gz`)
       if (restoreUrl) {
         const ok = await run(box, restoreCommand(restoreUrl), 660_000).then(() => true, () => false)
         say({ msg: 'restore', user: email, box: box.sandboxId, ok })
@@ -405,6 +457,11 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
   }
 
   /** The user's running box: id, dsh launch token and E2B traffic token. Creates, resumes or repairs as needed. */
+  /** True while the person has no box and no backup, or their box is still its first creation (edge pages). */
+  async function firstSetUp(email) {
+    const found = await find(email)
+    return found ? (await store.getBox(found.sandboxId))?.first === true : !(await presignGet(`${userPrefix(email)}/latest.tar.gz`))
+  }
   async function ensure(email) {
     return store.withLock(`user:${email}`, LOCK_MS, async () => {
       const found = await find(email)   // an API error throws here: never create a second box on a failed lookup
@@ -539,7 +596,7 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
       say({ level: 'error', msg: 'pause failed', box: b.id, error: e.message })
     })
   }
-  return { ensure, touch, owns, sweep, adoptRunning, forget: (id) => store.patchBox(id, { launch: undefined }) }
+  return { ensure, firstSetUp, touch, owns, sweep, adoptRunning, forget: (id) => store.patchBox(id, { launch: undefined }) }
 }
 
 // ---- who is asking. Behind oauth2-proxy (trial) the email header is trusted because only it can reach the router;
@@ -568,8 +625,9 @@ export function albIdentity({ albArn, region, fetchImpl = fetch, now = () => Dat
 
 // ---- HTTP plumbing
 const json = (res, status, value) => res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(value))
+/** An edge page; `text` is HTML, so interpolated values go through esc(). A refreshing page reloads every 5 seconds. */
 const page = (res, status, text, refresh = true) => res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...(refresh ? { refresh: '5' } : {}) })
-  .end(`<!doctype html><meta charset="utf-8"><title>mumbo</title><body style="font-family:system-ui;display:grid;place-items:center;min-height:90vh;margin:0"><p>${text}</p>`)
+  .end(`<!doctype html><meta charset="utf-8">${refresh ? '<meta http-equiv="refresh" content="5">' : ''}<title>mumbo</title><body style="font-family:system-ui;display:grid;place-items:center;min-height:90vh;margin:0"><p>${text}</p>`)
 const DROP = new Set(['connection', 'keep-alive', 'proxy-connection', 'transfer-encoding', 'upgrade', 'te', 'trailer', 'host', 'authorization', 'x-mumbo-member'])
 
 /** Which box port a main-host request goes to: the desktop live view (noVNC, :6080) under /desktop/, otherwise dsh
@@ -604,6 +662,11 @@ export function boxHeaders(cfg, incoming, target, port = '3080') {
   return out
 }
 export const esc = (v) => String(v).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
+/** The invite-only page text; names the domains the allowlist admits to join. */
+export const inviteText = (allowed) => {
+  const domains = allowed.filter(a => a.startsWith('@'))
+  return `mumbo boxes are invite-only for now. This account is not on the list yet.${domains.length ? ` Anyone with an address at ${domains.map(esc).join(' or ')} can join.` : ''}`
+}
 /** The signed-in person's home: their assistant, their desktop and the shared projects they belong to. Edge-served,
  *  so it loads without starting any box. */
 export function homePage(cfg, res, email, projects) {
@@ -689,14 +752,25 @@ export function authUi({ html, supabaseJs, consentJs, supabaseUrl, anonKey, clie
   }
 }
 
+// oauth2-proxy's --skip-auth-route GETs (prod/edge.tf). With --reverse-proxy it also skips sign-in for any request whose
+// client-sent X-Forwarded-Uri names one of them; neither it nor the ALB sets that header. A skipped request carries no
+// identity, so an email header on one did not come through sign-in.
+/** True for a request carrying X-Forwarded-Uri, which neither the ALB nor oauth2-proxy sets: with --reverse-proxy, oauth2-proxy
+ *  skips sign-in for any GET whose client-sent X-Forwarded-Uri matches a skip-auth route. oauth2-proxy strips client identity
+ *  headers on every route and sets X-Forwarded-Email itself for a visitor with a session, skip-auth routes included, so a
+ *  request without that header is signed out. This refusal is defence in depth behind that strip. */
+const skippedSignin = (req) => req.headers['x-forwarded-uri'] !== undefined
+
 /** Signed-in users' traffic. The public host reaches the user's own box and p-<16 hex>.<project domain> a project's
  *  box, for its members only; `approve` (approve-page.mjs) serves cfg.approveHost, an origin no box serves; any other host
  *  answers 404. `signin` (authUi) answers its GETs on the approve host before any identity check; GET /oauth/consent on
- *  the public host, which a box serves, redirects there. */
+ *  the public host, which a box serves, redirects there. A request or upgrade skippedSignin flags gets 400 before all that. */
 export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log = console.log }) {
   const identify = async (req) => verifyAlb
     ? (await verifyAlb(req.headers['x-amzn-oidc-data']).catch(() => undefined)) ?? ''
     : String(req.headers['x-forwarded-email'] ?? '').toLowerCase()
+  const pending = new Map()  // box key -> the in-flight ensure of this replica
+  const SLOW = Symbol('slow')
   const quiet = (p) => { Promise.resolve(p).catch(() => {}) }
   // A project box is the root of its own origin (boxSite): every path on that host, /home included, goes to its dsh.
   // undefined: a host no box serves.
@@ -706,7 +780,16 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log
     if (project) return { project, port: '3080', path: url, base: '' }
     if (host === cfg.publicHost) return boxRoute(url, cfg.projectDomain)
   }
-  const server = createServer(async (req, res) => {
+  // An unexpected throw answers 500, or closes the upgrade, instead of leaving it open. The log has the path without the
+  // query, which can carry a launch token.
+  const failed = (req, e) => log(JSON.stringify({ edge: 'error', host: hostOf(req), path: String(req.url).split('?')[0], error: e.message }))
+  const server = createServer((req, res) => onRequest(req, res).catch((e) => {
+    failed(req, e)
+    if (!res.headersSent) page(res, 500, 'Something went wrong. Reload to try again.', false); else res.destroy()
+  }))
+  server.on('upgrade', (req, socket, head) => onUpgrade(req, socket, head).catch((e) => { failed(req, e); socket.destroy() }))
+  async function onRequest(req, res) {
+    if (skippedSignin(req)) return json(res, 400, { error: 'bad request' })
     // The edge's own pages; a box's response replaces these through noFraming.
     res.setHeader('x-frame-options', 'SAMEORIGIN')
     res.setHeader('content-security-policy', "frame-ancestors 'self'")
@@ -718,7 +801,7 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log
     }
     const email = await identify(req)
     if (!email.includes('@')) return json(res, 401, { error: 'not signed in' })
-    if (!admitted(cfg.allowed, email)) return page(res, 403, 'mumbo boxes are invite-only for now. This account is not on the list yet.', false)
+    if (!admitted(cfg.allowed, email)) return page(res, 403, inviteText(cfg.allowed), false)
     const host = hostOf(req)
     if (host === cfg.approveHost && approve) return approve(req, res, email).catch((e) => {
       log(JSON.stringify({ edge: 'error', user: email, host, error: e.message }))
@@ -733,9 +816,21 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log
     if (to.port === '6080' && req.method !== 'GET' && req.method !== 'HEAD' && req.headers.origin !== `https://${host}`) return page(res, 403, 'Forbidden.', false)
     if (to.project && !(await projects?.isMember(email, to.project))) return page(res, 403, 'No such project, or you are not one of its members.', false)
     let target
-    try { target = await box.ensure(to.project ? `project:${to.project}` : email) } catch (e) {
-      log(JSON.stringify({ edge: 'error', user: email, project: to.project, error: e.message }))
-      return page(res, 503, e.capacity ? 'mumbo is at capacity right now. This page retries every few seconds.' : 'This mumbo box is starting. This page reloads in a few seconds.')
+    const key = to.project ? `project:${to.project}` : email
+    // The starting page for a person or project box that is not ready; a first set-up (no backup yet) says so.
+    const starting = async () => page(res, 503, to.project ? "Starting this project's computer. This page reloads by itself."
+      : await box.firstSetUp(email).catch(() => false) ? 'Setting up your computer, about a minute. This page reloads by itself.' : 'Starting your computer. This page reloads by itself.')
+    try {
+      let p = pending.get(key)
+      if (!p) {
+        p = box.ensure(key); pending.set(key, p)
+        p.then(() => pending.delete(key), (e) => { pending.delete(key); log(JSON.stringify({ edge: 'error', user: email, project: to.project, error: e.message })) })
+      }
+      // A page load that waits on a box shows the starting page after cfg.pageAfterMs; reloads join the same ensure.
+      target = isNavigation(req) ? await Promise.race([p, new Promise(r => setTimeout(r, cfg.pageAfterMs, SLOW).unref())]) : await p
+      if (target === SLOW) return await starting()
+    } catch (e) {
+      return e.capacity ? page(res, 503, 'mumbo is at capacity right now. This page retries every few seconds.') : starting()
     }
     const dsh = to.port === '3080'
     // On a member-capable project box a member is themselves (signed header), never the box owner.
@@ -751,8 +846,9 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log
     })
     up.on('error', (e) => { quiet(box.forget(target.id)); if (!res.headersSent) page(res, 502, 'Could not reach your box. Retrying…'); else res.destroy(); log(JSON.stringify({ edge: 'error', user: email, error: e.message })) })
     req.pipe(up)
-  })
-  server.on('upgrade', async (req, socket, head) => {
+  }
+  async function onUpgrade(req, socket, head) {
+    if (skippedSignin(req)) return socket.end('HTTP/1.1 400 Bad Request\r\n\r\n')
     // As for HTTP, only the public host's and project hosts' WebSockets reach a box; the approve host and unknown hosts
     // are refused. So is an upgrade whose Origin is not this host (browsers always send one): the sign-in cookie covers
     // every subdomain, so a project page could otherwise open the visitor's desktop, whose noVNC checks no Origin.
@@ -782,7 +878,7 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log
       up.on('error', () => socket.destroy())
       up.end()
     } catch { socket.destroy() }
-  })
+  }
   return server
 }
 
@@ -890,12 +986,14 @@ async function main() {
     await s3.send(new PutObjectCommand({ Bucket: cfg.bucket, Key: key, Body: JSON.stringify(record), ContentType: 'application/json' }))
   }
   const csrfKey = createHmac('sha256', edgeKey).update('approve-csrf').digest()
-  const approvals = approvalsService({ store, github: { agentToken: cfg.agentToken, app: { appId: cfg.appId, privateKey: cfg.appKey }, agentLogin: cfg.agentLogin, requiredChecks: cfg.requiredChecks }, notify, audit, fetchImpl: fetch, now, approveHost: cfg.approveHost, approvers: cfg.approverEmails })
-  const approve = approvePage({ approvals, halt, store, csrfKey, host: cfg.approveHost, approvers: cfg.approverEmails })
+  const app = { appId: cfg.appId, privateKey: cfg.appKey }
+  const approvals = approvalsService({ store, github: { app, agentId: cfg.agentId, requiredChecks: cfg.requiredChecks }, notify, audit, fetchImpl: fetch, now, approveHost: cfg.approveHost, approvers: cfg.approverEmails })
+  const { installationOf } = await import('./github-app.mjs')
+  const approve = approvePage({ approvals, halt, store, csrfKey, host: cfg.approveHost, approvers: cfg.approverEmails, installationOf: installationOf({ ...app, fetchImpl: fetch, now }) })
   const tokens = tokenBudget({ store, limits: { user: cfg.dailyTokensUser, project: cfg.dailyTokensProject }, now })
-  const github = githubForwarder({ store, halt, agentToken: cfg.agentToken, fetchImpl: fetch })
-  // One replica polls GitHub each minute: the 55 s lease lapses before the next tick. Off without GITHUB_AGENT_LOGIN.
-  if (cfg.agentLogin) {
+  const github = githubForwarder({ store, halt, app, fetchImpl: fetch, now })
+  // One replica polls GitHub each minute: the 55 s lease lapses before the next tick. Off without GITHUB_AGENT_ID.
+  if (cfg.agentId) {
     setInterval(() => store.lease('approvals:poll', 55_000).then(won => won && approvals.poll()).catch(e => console.error('edge: approvals poll', e.message)), 60_000).unref()
   }
 

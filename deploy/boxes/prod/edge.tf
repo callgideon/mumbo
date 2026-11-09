@@ -14,20 +14,25 @@ variable "approver_emails" {
 }
 # Optional edge secrets: the task references an SSM parameter, and the exec role may read it, only when enabled. Create
 # the parameter first; a task whose parameter is missing does not start.
-variable "github_agent_token_enabled" {
-  description = "Pass /mumbo/boxes/github-agent-token to the edge as GITHUB_AGENT_TOKEN."
-  type        = bool
-  default     = false
-}
 variable "ntfy_enabled" {
   description = "Pass /mumbo/boxes/ntfy-topic to the edge as NTFY_TOPIC."
   type        = bool
   default     = false
 }
 variable "github_agent_login" {
-  description = "GITHUB_AGENT_LOGIN: the agent machine account's GitHub login. Empty: the approvals poller is off."
+  description = "GITHUB_AGENT_LOGIN: the agent's GitHub login, the mumbo-bot App's bot user mumbo-bot[bot]. Set with github_agent_id."
   type        = string
   default     = ""
+}
+variable "github_agent_id" {
+  description = "GITHUB_AGENT_ID: the numeric user id of github_agent_login (GET /users/mumbo-bot%5Bbot%5D); approvals match the agent by it. Empty: the approvals poller is off."
+  type        = string
+  default     = ""
+  validation {
+    # The edge's config() check: both or neither, and a positive integer.
+    condition     = can(regex("^([1-9][0-9]*)?$", var.github_agent_id)) && (var.github_agent_id == "") == (var.github_agent_login == "")
+    error_message = "github_agent_id must be a numeric GitHub user id, set together with github_agent_login (or both empty)."
+  }
 }
 variable "signin_cookie_name" {
   description = "oauth2-proxy's --cookie-name and the edge's SIGNIN_COOKIE: the edge drops every cookie whose name starts with it from box requests and box Set-Cookie. It starts with _oauth2_proxy_, a prefix every edge image strips."
@@ -246,7 +251,6 @@ locals {
   edge_ssm = merge(
     # The Supabase publishable key, for the sign-in page; the retired web app's parameter (deploy/infra).
     { ALLOWED_EMAILS = "boxes/allowed-emails", SUPABASE_ANON_KEY = "prod/supabase-anon-key", MUMBO_OAUTH_CLIENT_IDS = "boxes/oauth-client-id" },
-    var.github_agent_token_enabled ? { GITHUB_AGENT_TOKEN = "boxes/github-agent-token" } : {},
     var.ntfy_enabled ? { NTFY_TOPIC = "boxes/ntfy-topic" } : {},
   )
 }
@@ -315,6 +319,7 @@ resource "aws_ecs_task_definition" "edge" {
         APPROVE_HOST         = "approve.${local.public_host}"
         APPROVER_EMAILS      = var.approver_emails
         GITHUB_AGENT_LOGIN   = var.github_agent_login
+        GITHUB_AGENT_ID      = var.github_agent_id
         REQUIRED_CHECKS      = "static,unit"
         DAILY_TOKENS_USER    = "20000000"
         DAILY_TOKENS_PROJECT = "50000000"
