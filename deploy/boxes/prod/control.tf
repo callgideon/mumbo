@@ -10,7 +10,7 @@ locals {
   }
   ecr     = "${data.aws_caller_identity.this.account_id}.dkr.ecr.us-east-1.amazonaws.com/${local.name}"
   e2b_arn = aws_secretsmanager_secret.e2b.arn
-  box_ram = 4096
+  box_ram = 8192
 }
 
 resource "aws_security_group" "api" {

@@ -1,10 +1,20 @@
 # Stage 6: the edge on Fargate behind a public ALB.
 #   boxes.mumbo.si      -> oauth2-proxy :4180 (Supabase sign-in, same client and callback as the trial) -> edge :8080 (loopback)
+#   *.boxes.mumbo.si    -> the same; the edge serves approve.boxes.mumbo.si and project boxes p-<16 hex>.boxes.mumbo.si, 404 otherwise
 #   llm.boxes.mumbo.si  -> edge model host :8081 (box token + source address = one of our NAT EIPs)
 # The edge reaches E2B by private names on the internal NLB; client-proxy header routing needs sandbox.<domain>.
 variable "edge_tag" {
   description = "Edge image tag in ECR (mumbo repo commit)."
   type        = string
+}
+variable "approver_emails" {
+  description = "APPROVER_EMAILS: who may merge agent PRs and bind repositories (comma-separated, lowercased). Empty: nobody."
+  type        = string
+}
+variable "github_agent_login" {
+  description = "GITHUB_AGENT_LOGIN: the agent machine account's GitHub login. Empty: the approvals poller is off."
+  type        = string
+  default     = ""
 }
 
 locals {
@@ -13,6 +23,11 @@ locals {
   backup_store = "mumbo-boxes-backup-${data.aws_caller_identity.this.account_id}" # created by the trial (../edge.tf); users' backups carry over
   # The shared Fargate server's names; they redirect here since it was retired (2026-11-09).
   old_hosts = ["app.mumbo.si", "api.mumbo.si"]
+  # PROJECT_DOMAIN: project boxes are p-<16 hex>.<this>. It must stay in the mumbo.si zone.
+  project_domain = "boxes.mumbo.si"
+  # Wildcard names: the approve page (approve.<public host>) and project boxes.
+  wildcards    = distinct(["*.${local.public_host}", "*.${local.project_domain}"])
+  audit_prefix = "audit/approvals/"
 }
 
 resource "aws_route53_record" "internal" {
@@ -31,16 +46,17 @@ resource "aws_route53_record" "internal" {
 data "aws_route53_zone" "public" { name = "mumbo.si" }
 resource "aws_acm_certificate" "edge" {
   domain_name               = local.public_host
-  subject_alternative_names = concat([local.llm_host], local.old_hosts)
+  subject_alternative_names = concat([local.llm_host], local.old_hosts, local.wildcards)
   validation_method         = "DNS"
   lifecycle { create_before_destroy = true }
 }
 resource "aws_route53_record" "cert" {
-  for_each = { for o in aws_acm_certificate.edge.domain_validation_options : o.domain_name => o }
+  # *.X validates with X's record. Keyed by the domain without "*.": record names are unknown until a new certificate exists.
+  for_each = { for o in aws_acm_certificate.edge.domain_validation_options : trimprefix(o.domain_name, "*.") => o... }
   zone_id  = data.aws_route53_zone.public.zone_id
-  name     = each.value.resource_record_name
-  type     = each.value.resource_record_type
-  records  = [each.value.resource_record_value]
+  name     = each.value[0].resource_record_name
+  type     = each.value[0].resource_record_type
+  records  = [each.value[0].resource_record_value]
   ttl      = 300
   # app/api validation records already exist from the old CDK certificate; ACM reuses one record per name.
   allow_overwrite = true
@@ -118,15 +134,16 @@ resource "aws_lb_listener" "https" {
   }
 }
 resource "aws_lb_listener_rule" "edge" {
-  for_each     = { user = [10, local.public_host], model = [20, local.llm_host] }
+  # [priority, host names, target group]; the llm. rule outranks the wildcard.
+  for_each     = { user = [10, [local.public_host], "user"], model = [20, [local.llm_host], "model"], subdomains = [30, local.wildcards, "user"] }
   listener_arn = aws_lb_listener.https.arn
   priority     = each.value[0]
   condition {
-    host_header { values = [each.value[1]] }
+    host_header { values = each.value[1] }
   }
   action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.edge[each.key].arn
+    target_group_arn = aws_lb_target_group.edge[each.value[2]].arn
   }
 }
 resource "aws_lb_listener_rule" "old_hosts" {
@@ -175,6 +192,7 @@ resource "aws_iam_role_policy" "edge" {
   role = aws_iam_role.edge.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [
     { Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject"], Resource = "arn:aws:s3:::${local.backup_store}/users/*" },
+    { Effect = "Allow", Action = "s3:PutObject", Resource = "arn:aws:s3:::${local.backup_store}/${local.audit_prefix}*" },
     { Effect = "Allow", Action = "s3:ListBucket", Resource = "arn:aws:s3:::${local.backup_store}" },
     { Effect = "Allow", Action = ["kms:Decrypt", "kms:GenerateDataKey"], Resource = aws_kms_key.backups.arn },
     { Effect = "Allow", Action = "ssm:GetParameter", Resource = "arn:aws:ssm:us-east-1:${data.aws_caller_identity.this.account_id}:parameter/mumbo/boxes/edge-secret" },
@@ -185,8 +203,11 @@ resource "aws_iam_role_policy" "exec_edge" {
   role = aws_iam_role.exec.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [
     { Effect = "Allow", Action = "ssm:GetParameters", Resource = "arn:aws:ssm:us-east-1:${data.aws_caller_identity.this.account_id}:parameter/mumbo/boxes/*" },
+    { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = data.aws_secretsmanager_secret.github_app.arn },
   ] })
 }
+# The mumbo-bot GitHub App (app_id, slug, private_key), created outside Terraform under the data key (kms:Decrypt in control.tf).
+data "aws_secretsmanager_secret" "github_app" { name = "${local.name}/github-app" }
 
 locals {
   ssm = "arn:aws:ssm:us-east-1:${data.aws_caller_identity.this.account_id}:parameter/mumbo/boxes"
@@ -213,6 +234,8 @@ resource "aws_ecs_task_definition" "edge" {
         "--provider=oidc", "--oidc-issuer-url=https://qkvcouccrhyjiarkauyo.supabase.co/auth/v1",
         "--redirect-url=https://${local.public_host}/oauth2/callback", "--scope=openid email", "--code-challenge-method=S256",
         "--cookie-secure=true", "--cookie-samesite=lax", "--cookie-csrf-per-request=true", "--cookie-csrf-expire=10m",
+        # One sign-in for the approve page and project boxes; the edge never forwards these cookies to a box.
+        "--cookie-domain=.${local.public_host}", "--whitelist-domain=.${local.public_host}",
         "--reverse-proxy=true", "--pass-user-headers=true", "--skip-provider-button=true", "--email-domain=*",
         "--upstream=http://127.0.0.1:8080", "--http-address=0.0.0.0:4180",
         "--upstream-timeout=120s", # a first visit creates the box and restores its backup before answering
@@ -241,10 +264,23 @@ resource "aws_ecs_task_definition" "edge" {
         MODEL_LISTEN_HOST = "0.0.0.0"
         AWS_REGION        = "us-east-1"
         PAUSE_IDLE        = "false" # boxes stay running (founder, 2026-11-09); cost work later
+        PROJECT_DOMAIN    = local.project_domain
+        # Approvals. PROJECT_TEMPLATE stays unset (it defaults to BOX_TEMPLATE) until the mumbo-project template is built.
+        APPROVE_HOST         = "approve.${local.public_host}"
+        APPROVER_EMAILS      = var.approver_emails
+        GITHUB_AGENT_LOGIN   = var.github_agent_login
+        REQUIRED_CHECKS      = "static,unit"
+        DAILY_TOKENS_USER    = "20000000"
+        DAILY_TOKENS_PROJECT = "50000000"
+        AUDIT_PREFIX         = local.audit_prefix
       } : { name = k, value = v }]
       secrets = [
         { name = "ALLOWED_EMAILS", valueFrom = "${local.ssm}/allowed-emails" },
         { name = "E2B_API_KEY", valueFrom = local.secret.TEAM_API_KEY },
+        { name = "GITHUB_AGENT_TOKEN", valueFrom = "${local.ssm}/github-agent-token" },
+        { name = "NTFY_TOPIC", valueFrom = "${local.ssm}/ntfy-topic" },
+        { name = "GITHUB_APP_ID", valueFrom = "${data.aws_secretsmanager_secret.github_app.arn}:app_id::" },
+        { name = "GITHUB_APP_KEY", valueFrom = "${data.aws_secretsmanager_secret.github_app.arn}:private_key::" },
       ]
       stopTimeout      = 60
       logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.edge.name, awslogs-region = "us-east-1", awslogs-stream-prefix = "edge" } }
@@ -285,7 +321,7 @@ output "edge_alb" { value = aws_lb.edge.dns_name }
 
 # Public names on the ALB. They replace the trial's A records (allow_overwrite); the trial no longer manages them.
 resource "aws_route53_record" "public" {
-  for_each        = toset(concat([local.public_host, local.llm_host], local.old_hosts))
+  for_each        = toset(concat([local.public_host, local.llm_host], local.old_hosts, local.wildcards))
   zone_id         = data.aws_route53_zone.public.zone_id
   name            = each.key
   type            = "A"
