@@ -69,9 +69,10 @@ const READ_PERMISSIONS = { contents: 'read', pull_requests: 'read', checks: 'rea
  */
 export function approvalsService({ store, github, notify, audit, fetchImpl, now, approveHost, approvers }) {
   const { app, agentId, requiredChecks } = github
-  const readToken = tokenCache({ app, permissions: READ_PERMISSIONS, fetchImpl, now })
-  /** GET `path` with the read-only token for `repo` alone. */
-  const read = async (repo, path) => githubJson(fetchImpl, 'GET', path, await readToken(repo, [repo]))
+  const readTokens = tokenCache({ app, permissions: READ_PERMISSIONS, fetchImpl, now })
+  /** GET `path` with the read-only token for `repo` alone; a 401 drops that token, so the next read mints another. */
+  const read = async (repo, path) => githubJson(fetchImpl, 'GET', path, await readTokens.get(repo, [repo]))
+    .catch((e) => { if (e.status === 401) readTokens.forget(repo); throw e })
   const key = (id) => `approval:${id}`
   const openSet = (project) => `approvals:open:${project}`
   const fail = (what, fields) => console.error(JSON.stringify({ edge: 'approvals', msg: what, ...fields }))

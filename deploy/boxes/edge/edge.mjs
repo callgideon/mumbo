@@ -886,7 +886,8 @@ async function main() {
   const csrfKey = createHmac('sha256', edgeKey).update('approve-csrf').digest()
   const app = { appId: cfg.appId, privateKey: cfg.appKey }
   const approvals = approvalsService({ store, github: { app, agentId: cfg.agentId, requiredChecks: cfg.requiredChecks }, notify, audit, fetchImpl: fetch, now, approveHost: cfg.approveHost, approvers: cfg.approverEmails })
-  const approve = approvePage({ approvals, halt, store, csrfKey, host: cfg.approveHost, approvers: cfg.approverEmails })
+  const { installationOf } = await import('./github-app.mjs')
+  const approve = approvePage({ approvals, halt, store, csrfKey, host: cfg.approveHost, approvers: cfg.approverEmails, installationOf: installationOf({ ...app, fetchImpl: fetch, now }) })
   const tokens = tokenBudget({ store, limits: { user: cfg.dailyTokensUser, project: cfg.dailyTokensProject }, now })
   const github = githubForwarder({ store, halt, app, fetchImpl: fetch, now })
   // One replica polls GitHub each minute: the 55 s lease lapses before the next tick. Off without GITHUB_AGENT_ID.

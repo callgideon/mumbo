@@ -18,6 +18,8 @@ const THEIRS = 'bbbbbbbbbbbbbbbb'
 const csrf = (email, day) => createHmac('sha256', KEY).update(`${email}:${day}`).digest('base64url')
 const TOKEN = csrf(FOUNDER, '2026-11-09')
 const EVIL = '"><form action=x><script>'
+/** The mumbo-bot App's installations: acme repositories share 77, elsewhere is 88, nowhere has none. */
+const installationOf = async (repo) => ({ acme: 77, elsewhere: 88 })[repo.split('/')[0]]
 
 const item = (over) => ({
   project: MINE, repo: 'acme/app', additions: 10, deletions: 2, changedFiles: 1, files: ['src/a.ts'], protected: [],
@@ -66,19 +68,19 @@ async function setup(t, { approvers = [FOUNDER] } = {}) {
   }
   const halt = { async get(email) { return email === FOUNDER && stopped }, async set(email, on) { calls.push(['halt', email, on]); stopped = on } }
   let now = NOW
-  const binds = []  // addRepo calls; `bindStatus` makes the next one fail with that status
-  let bindStatus
+  const binds = []  // addRepo calls; `bindError` makes the next one fail with those fields
+  let bindError
   const bindRepo = async (...args) => {
     binds.push(args)
-    if (bindStatus) { const status = bindStatus; bindStatus = undefined; throw Object.assign(new Error('refused'), { status }) }
+    if (bindError) { const fields = bindError; bindError = undefined; throw Object.assign(new Error('refused'), fields) }
     return addRepo(...args)
   }
-  const handler = approvePage({ approvals, halt, store, csrfKey: KEY, host: HOST, approvers, now: () => now, bindRepo })
+  const handler = approvePage({ approvals, halt, store, csrfKey: KEY, host: HOST, approvers, now: () => now, bindRepo, installationOf })
   // The signed-in email is FOUNDER unless a test names another in `x-as` (userServer passes it in production).
   const server = createServer((req, res) => handler(req, res, req.headers['x-as'] ?? FOUNDER).catch(e => res.writeHead(500).end(e.stack)))
   const port = await listen(server)
   t.after(() => server.close())
-  return { port, calls, store, skips, binds, failBind: (status) => { bindStatus = status }, setNow: (ms) => { now = ms } }
+  return { port, calls, store, skips, binds, failBind: (status, code) => { bindError = { status, code } }, setNow: (ms) => { now = ms } }
 }
 
 test('GET / shows only list(email) items with their facts, escaped, and embeds the CSRF token', async (t) => {
@@ -211,19 +213,41 @@ test('repository access: only for a project the email owns, only an owner/name r
   assert.deepEqual(await getRepos(store, THEIRS), [])
   const r = await post(port, '/repo', { project: MINE, repo: 'acme/new', csrf: TOKEN })
   assert.equal(r.headers.location, '/?m=repo_added')
-  assert.deepEqual(binds.at(-1), [store, MINE, 'acme/new', { by: FOUNDER, approvers: [FOUNDER] }], 'addRepo gets the caller and the approvers')
+  assert.deepEqual(binds.at(-1), [store, MINE, 'acme/new', { by: FOUNDER, approvers: [FOUNDER], installationOf }], 'addRepo gets the caller, the approvers and the App\'s installations')
   assert.deepEqual(await getRepos(store, MINE), ['acme/app', 'acme/new'])
   const page = (await call(port, { path: '/?m=repo_added' })).body
   assert.ok(page.includes('acme/new') && page.includes('Repository access given.'))
 
   // addRepo answers 409 for a repository bound to another project, and 403 when it refuses the caller (Amendment 4).
-  failBind(409)
+  failBind(409, 'repo_bound')
   const bound = await post(port, '/repo', { project: MINE, repo: 'acme/other', csrf: TOKEN })
   assert.equal(bound.headers.location, '/?m=repo_bound')
   assert.ok((await call(port, { path: bound.headers.location })).body.includes('class="notice">That repository already belongs to another project.'))
   failBind(403)
   assert.equal((await post(port, '/repo', { project: MINE, repo: 'acme/other', csrf: TOKEN })).status, 403)
+  // addRepo checks the App's installation: none for the repository, or another than the project's repositories.
+  for (const [repo, code, notice] of [['nowhere/app', 'repo_not_installed', 'The mumbo-bot GitHub App is not installed for that repository.'],
+    ['elsewhere/app', 'repo_other_installation', 'That repository is in another mumbo-bot App installation than this project\'s repositories.']]) {
+    const r = await post(port, '/repo', { project: MINE, repo, csrf: TOKEN })
+    assert.equal(r.headers.location, `/?m=${code}`, repo)
+    assert.ok((await call(port, { path: r.headers.location })).body.includes(`class="notice">${notice}`), repo)
+  }
   assert.deepEqual(await getRepos(store, MINE), ['acme/app', 'acme/new'])
+})
+
+test('repository access: an approver who owns the project removes a repository', async (t) => {
+  const { port, store } = await setup(t)
+  await addRepo(store, MINE, 'acme/new', { by: FOUNDER, approvers: [FOUNDER], installationOf })
+  const page = (await call(port)).body
+  assert.deepEqual(formFields(page, '/repo-remove'), [['project', MINE], ['repo', 'acme/app'], ['csrf', TOKEN]], 'one remove form per repository')
+  assert.equal((page.match(/action="\/repo-remove"/g) ?? []).length, 2)
+  assert.equal((await post(port, '/repo-remove', { project: THEIRS, repo: 'acme/app', csrf: TOKEN })).status, 403, 'a member, not the owner')
+  const r = await post(port, '/repo-remove', { project: MINE, repo: 'acme/app', csrf: TOKEN })
+  assert.equal(r.headers.location, '/?m=repo_removed')
+  assert.deepEqual(await getRepos(store, MINE), ['acme/new'])
+  assert.ok((await call(port, { path: r.headers.location })).body.includes('class="notice">Repository access removed.'))
+  assert.equal((await post(port, '/repo-remove', { project: MINE, repo: 'acme/app', csrf: TOKEN })).status, 404, 'no longer bound')
+  assert.equal((await post(port, '/repo-remove', { project: MINE, csrf: TOKEN })).status, 400, 'no repository named')
 })
 
 test('a project owner who is not an approver sees their items read-only and cannot give a repository', async (t) => {
@@ -231,9 +255,10 @@ test('a project owner who is not an approver sees their items read-only and cann
   const page = (await call(port)).body
   assert.ok(page.includes('acme/app#7') && page.includes("Agent's review (claim): "), 'items are shown')
   assert.ok(page.includes('Only approvers can merge.') && page.includes('Stop everything'))
-  for (const action of ['/grant', '/grant-low-risk', '/repo']) assert.ok(!page.includes(`action="${action}"`), `no ${action} form`)
+  for (const action of ['/grant', '/grant-low-risk', '/repo', '/repo-remove']) assert.ok(!page.includes(`action="${action}"`), `no ${action} form`)
   assert.ok(page.includes('acme/app'), 'repositories are listed')
   assert.equal((await post(port, '/repo', { project: MINE, repo: 'acme/new', csrf: TOKEN })).status, 403)
+  assert.equal((await post(port, '/repo-remove', { project: MINE, repo: 'acme/app', csrf: TOKEN })).status, 403)
   assert.deepEqual(await getRepos(store, MINE), ['acme/app'])
   assert.ok(!calls.some(([name]) => name === 'grant' || name === 'grantLowRisk'))
   assert.throws(() => approvePage({ approvals: {}, halt: {}, store, csrfKey: KEY, host: HOST }), /approvers/, 'approvers must be wired')

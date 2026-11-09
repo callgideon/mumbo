@@ -16,6 +16,9 @@ Unhandled edge errors (one log line each, with path and user). Read the lines; a
 ### edge-dropped-create
 A replica died while restoring a new box; the box was killed and the next visit restores from the backup again. One is harmless. Several mean edge tasks are being killed mid-request: check `tasks-edge`.
 
+### github-not-approved
+The mumbo-bot App's installation refused a token because it has not accepted a permission the edge asks for; project boxes get 503 on GitHub and the approvals poller lists nothing. Fix it as in "GitHub: the agent is the mumbo-bot App" below.
+
 ### api-node-unhealthy
 E2B marked a node unhealthy. Check the node: `aws ssm send-command` with `systemctl status e2b-orchestrator` and `journalctl -u e2b-orchestrator -n 100`. If it does not recover, replace it: `aws autoscaling terminate-instance-in-auto-scaling-group --instance-id <id> --no-should-decrement-desired-capacity`. Termination pauses its boxes first (`mumbo-drain`) and the boxes resume on other nodes.
 
@@ -52,18 +55,24 @@ Commit, `docker build` `deploy/boxes/edge` and push to `mumbo-boxes/edge:<commit
 `node deploy/boxes/edge/template.mjs <mumbo web image>` with `E2B_API_URL`, `E2B_SANDBOX_URL`, `E2B_API_KEY` (team key from the `mumbo-boxes/e2b` secret) and `ECR_PASSWORD`. From outside the VPC, tunnel through a node with SSM port forwarding to `api.boxes.internal:3000` and `sandbox.boxes.internal:3002`; the internal NLB admits :3002 only from the edge, so add a temporary rule for the node security group and remove it afterwards. A new template reaches a user when their box is next created.
 
 ### GitHub: the agent is the mumbo-bot App
-The coding agent writes to GitHub as `mumbo-bot[bot]`, the bot user (id 341797844) of the `mumbo-bot` App (5295930, installed on `callgideon` as installation 170921050; credentials in Secrets Manager `mumbo-boxes/github-app`). No box holds a GitHub token. The edge mints installation tokens:
+The coding agent writes to GitHub as `mumbo-bot[bot]`, the bot user (id 341797844) of the `mumbo-bot` App (5295930, owned by and installed on `callgideon` as installation 170921050; credentials in Secrets Manager `mumbo-boxes/github-app`). No box holds a GitHub token. The edge mints installation tokens:
 - the GitHub forwarder, one per project for that project's bound repositories, with contents, pull requests and issues write and checks and commit statuses read, reused until 5 minutes before it expires;
 - the approval poller, one read-only token per repository;
 - each merge, one token for that repository with contents and pull requests write, revoked after the merge.
 
-No token asks for workflows, actions or administration, so `.github/workflows` stays unwritable. A box sees 403 `no_repos` until its project has a repository (bind one on the approve page).
+No token asks for workflows, actions or administration, so `.github/workflows` stays unwritable. A failed mint is answered from the edge's cache for 30 seconds, then asked again; a token GitHub answers 401 for is dropped and minted again.
 
-**`mumbo-bot App permissions not approved: <GitHub's message>`** (box answer 503, edge log line `{"edge":"github","refused":…}`, approvals log `poll failed; items kept`): GitHub refused the mint because the installation has not accepted a permission the edge asks for. Find it with `aws logs filter-log-events --log-group-name /mumbo-boxes/edge --filter-pattern '"permissions not approved"'`. The founder fixes it:
-1. App settings (GitHub → Settings → Developer settings → GitHub Apps → mumbo-bot) → Permissions & events → Repository permissions: Issues read and write, Checks read-only, Commit statuses read-only; Actions no access; Workflows no access. Save.
-2. Approve the request on the installation: `https://github.com/organizations/callgideon/settings/installations/170921050` → Review request → Accept new permissions.
+**Before deploying an edge image with this code**, the installation must have accepted the App's permissions; otherwise every project box's GitHub request fails with 503 and the `github-not-approved` alarm fires. The founder:
+1. Opens `https://github.com/organizations/callgideon/settings/apps/mumbo-bot/permissions`. Issues read and write, Checks read-only, Commit statuses read-only and Workflows no access are already set (2026-11-09). Actions → No access is optional hardening: no token asks for it.
+2. Opens `https://github.com/organizations/callgideon/settings/installations/170921050` → Review request → Accept new permissions. On 2026-11-09 the installation held issues write, checks and statuses read, no workflows, and actions read.
 
-Check what the installation holds, read-only, with an App JWT: `GET /orgs/callgideon/installation` (its `permissions`). The next request mints again; nothing is cached after a failed mint.
+Check what the installation holds, read-only, with an App JWT: `GET /orgs/callgideon/installation` (its `permissions`).
+
+**Errors a project box sees** (each also one edge log line `{"edge":"github","refused":…}`; find one with `aws logs filter-log-events --log-group-name /mumbo-boxes/edge --filter-pattern '"<text>"'`):
+- `mumbo-bot App permissions not approved: <GitHub's message>` (503): do steps 1 and 2 above. The approvals poller logs the same text in `poll failed; items kept`.
+- `repo_not_installed: <GitHub's message>` (502): a bound repository is not in the App's installation (another owner, or a repository the installation cannot see). Remove it on the approve page (Repository access → Remove); binding checks the installation, so only a binding made before that check, or one whose repository moved, gets here.
+- `no_repos` (403): the project has no repository; bind one on the approve page. Binding refuses a repository the App is not installed for, or one in another installation than the project's repositories.
+- `mumbo-bot App refused the token (HTTP <status>): …` or `mumbo-bot token mint failed: …` (502): read GitHub's message; a rate limit says so and clears by itself.
 
 ### Restore Postgres to a point in time
 `aws rds restore-db-instance-to-point-in-time --source-db-instance-identifier mumbo-boxes-e2b --target-db-instance-identifier mumbo-boxes-e2b-restore --restore-time <UTC>` into the same subnet group and security group, then point `POSTGRES_CONNECTION_STRING` in the `mumbo-boxes/e2b` secret at the new instance and force a new deployment of api. Snapshots that newer rows point at stay in the versioned templates bucket for 14 days (review M4).

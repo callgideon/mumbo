@@ -62,10 +62,12 @@ const AGENT_PERMISSIONS = { contents: 'write', pull_requests: 'write', issues: '
  * through one `nodes(ids:)` lookup with the project's token, to an object in one of the project's repositories. A
  * request whose client has left is not forwarded, and one in flight is aborted.
  * Credentials: requests to api.github.com and github.com carry the project's App installation token, for the project's
- * bound repositories and AGENT_PERMISSIONS (github-app.mjs tokenCache: reused until 5 minutes before expiry, minted anew
- * when the bound repositories change). A project with no bound repository answers 403 `no_repos` and mints nothing. A
- * mint GitHub refuses with 403 or 422 answers 503 `mumbo-bot App permissions not approved: <GitHub's message>`, any
- * other mint failure 502; no request goes out with another token.
+ * bound repositories and AGENT_PERMISSIONS (github-app.mjs tokenCache: one mint at a time per project, reused until 5
+ * minutes before expiry, minted anew when the bound repositories change, dropped when GitHub answers 401, a failure
+ * answered for 30 s). A project with no bound repository answers 403 `no_repos` and mints nothing. A mint refused for
+ * permissions the installation has not approved answers 503 `mumbo-bot App permissions not approved: <GitHub's
+ * message>`; any other mint failure answers 502 with its cause (`repo_not_installed: …`, a rate limit, `mumbo-bot App
+ * refused the token (HTTP <status>): …`, or `mumbo-bot token mint failed: …`). No request goes out with another token.
  * @param {{ store: object, halt: { isHalted(principal: string): Promise<boolean> }, app: { appId: string | undefined, privateKey: string | undefined } | undefined, fetchImpl: typeof fetch, now?: () => number, log?: (line: string) => void, pushTimeoutMs?: number }} deps
  *   `app` without both fields answers 503 to every request; `now` is epoch ms; `pushTimeoutMs` defaults to
  *   PUSH_TIMEOUT_MS.
@@ -75,11 +77,13 @@ const AGENT_PERMISSIONS = { contents: 'write', pull_requests: 'write', issues: '
 export function githubForwarder({ store, halt, app, fetchImpl, now = Date.now, log = console.log, pushTimeoutMs = PUSH_TIMEOUT_MS }) {
   // Principals with a receive-pack in flight on this replica: one buffered push each.
   const pushing = new Set()
-  const tokenFor = app?.appId && app?.privateKey ? tokenCache({ app, permissions: AGENT_PERMISSIONS, fetchImpl, now }) : undefined
+  const tokens = app?.appId && app?.privateKey ? tokenCache({ app, permissions: AGENT_PERMISSIONS, fetchImpl, now }) : undefined
 
-  /** Resolves `ids` with `token`; returns a refusal `{ reason, status? }` unless each is an object in one of `repos`. */
-  async function outsideRepos(ids, repos, token) {
+  /** Resolves `ids` with the `project`'s `token`; returns a refusal `{ reason, status? }` unless each is an object in
+   *  one of `repos`. */
+  async function outsideRepos(ids, repos, project, token) {
     const r = await fetchImpl('https://api.github.com/graphql', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `token ${token}` }, body: JSON.stringify({ query: NODE_REPOS, variables: { ids } }) })
+    if (r.status === 401) tokens.forget(project)
     if (!r.ok) return { reason: `the node id lookup failed (HTTP ${r.status})`, status: 502 }
     const nodes = (await r.json())?.data?.nodes
     for (const [i, id] of ids.entries()) {
@@ -106,14 +110,14 @@ export function githubForwarder({ store, halt, app, fetchImpl, now = Date.now, l
     }
     const id = claim.u.startsWith('project:') ? claim.u.slice('project:'.length) : undefined
     if (!isProjectId(id)) return refuse('GitHub is only for project boxes')
-    if (!tokenFor) return void res.writeHead(503, { 'content-type': 'application/json' }).end(JSON.stringify({ message: 'Mumbo edge: GitHub is not configured' }))
+    if (!tokens) return void res.writeHead(503, { 'content-type': 'application/json' }).end(JSON.stringify({ message: 'Mumbo edge: GitHub is not configured' }))
     // Parsed once and forwarded as parsed; a path the parser rewrites (dot segments, escapes, backslashes) is refused.
     // Each branch below names its host, so any other host is refused.
     if (url.pathname !== req.url.split('?')[0] || url.pathname.split('/').slice(1).some(s => !s || s.includes('%'))) return refuse()
     const repos = (await getRepos(store, id)).map(r => r.toLowerCase())
     if (!repos.length) return refuse('no_repos: this project has no GitHub repositories')
     /** The project's token, or undefined once the mint failure is answered. */
-    const token = () => tokenFor(id, repos).catch((e) => void refuse(e.notApproved ? e.message : `mumbo-bot token mint failed: ${e.message}`, e.notApproved ? 503 : 502))
+    const token = () => tokens.get(id, repos).catch((e) => void refuse(e.code ? e.message : `mumbo-bot token mint failed: ${e.message}`, e.code === 'not_approved' ? 503 : 502))
     const ours = (owner, name) => name !== undefined && repos.includes(`${owner}/${name}`.toLowerCase().replace(/\.git$/, ''))
     const gitService = host === 'github.com' && method === 'POST' && segs.length === 3 && ours(segs[0], segs[1]) ? segs[2] : undefined
     const headers = {}
@@ -135,7 +139,7 @@ export function githubForwarder({ store, halt, app, fetchImpl, now = Date.now, l
         if (await halt.isHalted(claim.u)) return refuse(STOPPED)
         const t = await token()
         if (!t) return
-        const outside = await outsideRepos(checked.ids, repos, t)
+        const outside = await outsideRepos(checked.ids, repos, id, t)
         if (outside) return refuse(outside.reason, outside.status)
       }
       body = checked.body
@@ -184,6 +188,8 @@ export function githubForwarder({ store, halt, app, fetchImpl, now = Date.now, l
       if (e?.name === 'TimeoutError') return refuse(`GitHub did not answer the push within ${pushTimeoutMs / 1000} s`, 504)
       throw e
     }
+    // GitHub no longer takes the token (revoked, or the installation changed): the next request mints another.
+    if (upstream.status === 401 && headers.authorization) tokens.forget(id)
     const out = {}
     for (const [k, v] of upstream.headers) if (!RESPONSE_DROP.has(k)) out[k] = v
     res.writeHead(upstream.status, out)

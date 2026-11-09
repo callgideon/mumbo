@@ -9,6 +9,8 @@ locals {
     edge-pause-failed   = { group = aws_cloudwatch_log_group.edge.name, pattern = "{ $.msg = \"pause failed\" }" }
     edge-errors         = { group = aws_cloudwatch_log_group.edge.name, pattern = "{ $.edge = \"error\" }" }
     edge-dropped-create = { group = aws_cloudwatch_log_group.edge.name, pattern = "{ $.msg = \"dropped unfinished create\" }" }
+    # The forwarder's refusal and the approvals poller's failure both carry this text (github-app.mjs mintToken).
+    github-not-approved = { group = aws_cloudwatch_log_group.edge.name, pattern = "\"mumbo-bot App permissions not approved\"" }
     api-node-unhealthy  = { group = aws_cloudwatch_log_group.e2b["api"].name, pattern = "\"NodeID status changed\" \"unhealthy\"" }
   }
 }

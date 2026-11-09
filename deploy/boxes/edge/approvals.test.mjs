@@ -5,7 +5,7 @@ import { generateKeyPairSync, verify } from 'node:crypto'
 import { memoryStore } from './store.mjs'
 import { projects, addRepo } from './projects.mjs'
 import { approvalsService } from './approvals.mjs'
-import { mintToken } from './github-app.mjs'
+import { mintToken, installationOf } from './github-app.mjs'
 import { config } from './edge.mjs'
 
 const REPO = 'acme/app'
@@ -35,7 +35,8 @@ const comment = (body, user = BOT) => ({ user, body, html_url: `https://github.c
 const marker = (sha, verdict, user = BOT) => comment(`<!-- mumbo-review sha=${sha} verdict=${verdict} -->\nReview report.`, user)
 
 /** A fake api.github.com that routes on method and path; every call is recorded with its authorization and body. A
- *  read-only mint (contents: read) gets read-token, any other bot-token; `mintStatus` other than 201 refuses mints. */
+ *  read-only mint (contents: read) gets read-token, any other bot-token; `mintStatus` other than 201 refuses mints;
+ *  `unauthorized` answers 401 to reads with read-token. */
 function fakeGithub() {
   const pass = marker(SHA, 'pass')
   const gh = {
@@ -58,6 +59,7 @@ function fakeGithub() {
     const method = init.method ?? 'GET'
     gh.calls.push({ method, path, auth: init.headers.authorization, body: init.body === undefined ? undefined : JSON.parse(init.body) })
     if (gh.down) return json({ message: 'unavailable' }, 502)
+    if (gh.unauthorized && init.headers.authorization === 'Bearer read-token') return json({ message: 'Bad credentials' }, 401)
     const m = (re) => path.match(re)?.[1]
     let n
     if (method === 'GET' && path === `/repos/${REPO}/pulls`) {
@@ -92,7 +94,7 @@ async function setup({ approvers = [FOUNDER] } = {}) {
   // Seeded directly: addMember refuses non-owners (member gate), but a stored member must still not count as owner.
   await store.putDoc(`project:${project}`, { ...(await p.get(project)), members: [FOUNDER, 'member@x.com'] })
   await store.addToSet('projects:member@x.com', project)
-  await addRepo(store, project, REPO, { by: FOUNDER, approvers: [FOUNDER] })
+  await addRepo(store, project, REPO, { by: FOUNDER, approvers: [FOUNDER], installationOf: async () => 77 })
   const notes = [], audits = [], clock = { t: NOW }
   const svc = approvalsService({
     store, github: { app: { appId: '5295930', privateKey }, agentId: BOT.id, requiredChecks: ['static', 'unit'] },
@@ -128,6 +130,19 @@ test('the poller creates an item with the facts it read, for the owner only, rea
   assert.ok(reads.length && reads.every(c => c.method === 'GET' && c.auth === 'Bearer read-token'))
   await svc.poll()
   assert.equal(gh.calls.filter(c => c.method === 'POST').length, 1, 'the read token is reused')
+})
+
+test('a read GitHub answers 401 drops the cached read token; the next poll mints a new one', async (t) => {
+  const { gh, svc } = await setup()
+  await svc.poll()
+  gh.unauthorized = true
+  const errors = t.mock.method(console, 'error', () => {})
+  await svc.poll()
+  assert.match(errors.mock.calls[0].arguments[0], /HTTP 401/)
+  gh.unauthorized = false
+  await svc.poll()
+  assert.equal(gh.calls.filter(c => c.method === 'POST').length, 2)
+  assert.equal((await only(svc)).id, ID)
 })
 
 test('a mint the installation refuses stops the poll loudly, naming the permissions, and lists nothing', async (t) => {
@@ -437,17 +452,38 @@ test('mintToken refuses and revokes a grant other than asked, wider or narrower'
   }
 })
 
-test('mintToken: a mint the installation refuses (403, 422) rejects as not approved; repositories of two owners, or none, ask nothing', async () => {
-  for (const status of [403, 422]) {
+test('mintToken classifies refusals: unapproved permissions, a repository outside the installation, a rate limit, any other; repositories of two owners, or none, ask nothing', async () => {
+  for (const [status, message, headers, code, text] of [
+    [422, 'The permissions requested are not granted to this installation.', {}, 'not_approved', 'mumbo-bot App permissions not approved: The permissions requested are not granted to this installation.'],
+    [422, 'There is at least one repository that does not exist or is not accessible to the parent installation.', {}, 'repo_not_installed', 'repo_not_installed: There is at least one repository that does not exist or is not accessible to the parent installation.'],
+    [403, 'API rate limit exceeded', { 'x-ratelimit-remaining': '0' }, 'rate_limited', "mumbo-bot token mint failed: GitHub's rate limit (HTTP 403); retry later"],
+    [403, 'The permissions requested are not granted to this installation.', {}, 'refused', 'mumbo-bot App refused the token (HTTP 403): The permissions requested are not granted to this installation.'],
+    [500, undefined, {}, 'refused', 'mumbo-bot App refused the token (HTTP 500): no message'],
+  ]) {
     const gh = fakeGithub()
-    gh.mintStatus = status
-    await assert.rejects(mintToken({ appId: '5295930', privateKey, repos: [REPO], permissions: READ_PERMISSIONS, fetchImpl: gh.fetchImpl, now: () => NOW }),
-      { notApproved: true, message: 'mumbo-bot App permissions not approved: The permissions requested are not granted to this installation.' })
-    assert.equal(gh.calls.at(-1).method, 'POST', 'no token, nothing to revoke')
+    const fetchImpl = (url, init) => (init.method === 'POST' ? Promise.resolve(new Response(JSON.stringify(message ? { message } : {}), { status, headers })) : gh.fetchImpl(url, init))
+    await assert.rejects(mintToken({ appId: '5295930', privateKey, repos: [REPO], permissions: READ_PERMISSIONS, fetchImpl, now: () => NOW }), { code, message: text }, `${status} ${message}`)
+    assert.equal(gh.calls.at(-1).path, `/repos/${REPO}/installation`, 'no token, nothing to revoke')
   }
   for (const repos of [[REPO, 'other/app'], []]) {
     const gh = fakeGithub()
     await assert.rejects(mintToken({ appId: '5295930', privateKey, repos, permissions: READ_PERMISSIONS, fetchImpl: gh.fetchImpl, now: () => NOW }), /one owner's repositories/)
     assert.equal(gh.calls.length, 0)
   }
+  await assert.rejects(mintToken({ appId: '5295930', privateKey: undefined, repos: [REPO], permissions: READ_PERMISSIONS, fetchImpl: fakeGithub().fetchImpl, now: () => NOW }), /mumbo-bot App is not configured/)
+})
+
+test('installationOf: the App JWT reads the repository\'s installation id without minting; 404 is none; other failures reject', async () => {
+  const calls = []
+  const fetchImpl = async (url, init) => {
+    calls.push([init.method, new URL(url).pathname, init.headers.authorization])
+    const status = { '/repos/acme/app/installation': 200, '/repos/acme/missing/installation': 404 }[new URL(url).pathname] ?? 502
+    return new Response(JSON.stringify(status === 200 ? { id: 77 } : { message: 'no' }), { status })
+  }
+  const of = installationOf({ appId: '5295930', privateKey, fetchImpl, now: () => NOW })
+  assert.equal(await of(REPO), 77)
+  assert.equal(await of('acme/missing'), undefined)
+  await assert.rejects(of('acme/down'), /GitHub GET \/repos\/acme\/down\/installation: HTTP 502/)
+  assert.deepEqual(calls.map(([method, path]) => `${method} ${path}`), ['GET /repos/acme/app/installation', 'GET /repos/acme/missing/installation', 'GET /repos/acme/down/installation'])
+  assert.ok(calls.every(([, , auth]) => /^Bearer ey[\w-]+\.[\w-]+\.[\w-]+$/.test(auth)), 'an App JWT, never a token')
 })

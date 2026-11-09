@@ -58,11 +58,12 @@ const sendThenReset = (port, path, afterMs) => {
  * A forwarder behind a local server; project P1 has callgideon/mumbo and the claim's principal is `state.principal`.
  * Node id lookups are answered by `lookup(ids)` and recorded in `lookups`, apart from the forwarded `calls`.
  * The App's own calls (installation, token mint, revoke: Bearer authorization) are recorded in `mints`; a mint is
- * answered by `mint(asked body, nth mint, state.t)`, by default a token AGENT. `state.t` is the clock (epoch ms).
+ * answered by `mint(asked body, nth mint, state.t)`, by default a token AGENT, and the installation lookup by
+ * `installation()`. `state.t` is the clock (epoch ms).
  * `isHalted` takes `haltMs` and records each principal it is asked about in `haltChecks`; `state.settled` counts
  * handlers that have returned.
  */
-async function forwarder({ reply = ok, lookup = lookupOk, app = APP, mint = (asked, n, t) => granted(asked, 'AGENT', t), haltMs = 0, pushTimeoutMs } = {}) {
+async function forwarder({ reply = ok, lookup = lookupOk, app = APP, mint = (asked, n, t) => granted(asked, 'AGENT', t), installation = () => Response.json({ id: 77 }), haltMs = 0, pushTimeoutMs } = {}) {
   const store = memoryStore()
   await store.putDoc(`project:${P1}`, { id: P1, name: 'P1', owner: 'a@x.com', members: ['a@x.com'], createdAt: '2026-11-09T00:00:00Z', repos: ['callgideon/mumbo'] })
   const calls = [], lookups = [], mints = [], logs = [], haltChecks = [], halted = new Set(), state = { principal: ME, settled: 0, t: NOW }
@@ -73,7 +74,7 @@ async function forwarder({ reply = ok, lookup = lookupOk, app = APP, mint = (ask
       const { pathname } = new URL(url)
       const asked = init.body === undefined ? undefined : JSON.parse(init.body)
       mints.push({ method: init.method, path: pathname, auth: init.headers.authorization, body: asked })
-      if (pathname.endsWith('/installation')) return Response.json({ id: 77 })
+      if (pathname.endsWith('/installation')) return installation()
       if (init.method === 'DELETE') return new Response(null, { status: 204 })
       return mint(asked, mints.filter(m => m.method === 'POST').length, state.t)
     }
@@ -577,7 +578,7 @@ test('pass-through: a 302 comes back unfollowed; content-encoding, framing and c
 const posts = (f) => f.mints.filter(m => m.method === 'POST')
 
 test('App token: minted for the project\'s repositories with exactly the agent permissions, never workflows, actions or administration', async (t) => {
-  const f = await forwarder(); t.after(f.close)
+  const f = await forwarder({ mint: (asked, n, at) => granted(asked, n === 1 ? 'AGENT' : `T${n}`, at) }); t.after(f.close)
   assert.equal((await f.call('api.github.com/repos/callgideon/mumbo/pulls')).status, 200)
   const [installation, mint] = f.mints
   assert.equal(`${installation.method} ${installation.path}`, 'GET /repos/callgideon/mumbo/installation')
@@ -585,11 +586,41 @@ test('App token: minted for the project\'s repositories with exactly the agent p
   assert.deepEqual(mint, { method: 'POST', path: '/app/installations/77/access_tokens', auth: installation.auth, body: { repositories: ['mumbo'], permissions: AGENT_PERMISSIONS } })
   for (const k of ['workflows', 'actions', 'administration']) assert.equal(k in mint.body.permissions, false, k)
   assert.equal(f.calls[0].init.headers.authorization, 'token AGENT')
-  // Another project gets its own token, for its own repositories only.
+  // Another project gets its own token, for its own repositories only, and the first project's token stays cached.
   const [, p2] = await addProjects(f)
   f.state.principal = `project:${p2}`
   assert.equal((await f.call(`api.github.com/repos/${repoOf(p2)}/pulls`)).status, 200)
+  assert.equal(f.calls.at(-1).init.headers.authorization, 'token T2')
   assert.deepEqual(posts(f).map(m => m.body.repositories), [['mumbo'], [p2]])
+  f.state.principal = ME
+  assert.equal((await f.call('api.github.com/repos/callgideon/mumbo/pulls')).status, 200)
+  assert.equal(f.calls.at(-1).init.headers.authorization, 'token AGENT')
+  assert.equal(posts(f).length, 2, 'no mint for the first project after the second\'s')
+})
+
+test('App token: concurrent requests share one mint; a 401 from GitHub drops the cached token so the next request mints again', async (t) => {
+  let release
+  const gate = new Promise(r => { release = r })
+  let unauthorized = 0
+  const f = await forwarder({
+    mint: async (asked, n, at) => { if (n === 1) await gate; return granted(asked, `T${n}`, at) },
+    reply: () => (unauthorized-- > 0 ? Response.json({ message: 'Bad credentials' }, { status: 401 }) : ok()),
+  })
+  t.after(f.close)
+  const pending = [1, 2, 3].map(() => f.call('api.github.com/repos/callgideon/mumbo/pulls'))
+  await until(() => posts(f).length === 1)
+  release()
+  for (const r of await Promise.all(pending)) assert.equal(r.status, 200)
+  assert.equal(posts(f).length, 1, 'one mint for three requests')
+  unauthorized = 1
+  assert.equal((await f.call('api.github.com/repos/callgideon/mumbo/pulls')).status, 401, 'GitHub\'s 401 passes to the box')
+  assert.equal((await f.call('api.github.com/repos/callgideon/mumbo/pulls')).status, 200)
+  assert.equal(f.calls.at(-1).init.headers.authorization, 'token T2', 'minted again after the 401')
+  unauthorized = 1
+  assert.equal((await f.call('github.com/callgideon/mumbo/info/refs?service=git-upload-pack')).status, 401)
+  assert.equal((await f.call('github.com/callgideon/mumbo/info/refs?service=git-upload-pack')).status, 200)
+  assert.equal(f.calls.at(-1).init.headers.authorization, `Basic ${Buffer.from('x-access-token:T3').toString('base64')}`, 'git: minted again after the 401')
+  assert.equal(posts(f).length, 3)
 })
 
 test('App token: reused until 5 minutes before it expires, then minted again; a change in bound repositories mints anew', async (t) => {
@@ -624,32 +655,57 @@ test('App token: a project with no bound repositories gets 403 no_repos and noth
   assert.equal(f.mints.length + f.calls.length + f.lookups.length, 0)
 })
 
-test('App token: permissions not approved on the installation answer 503 naming GitHub\'s message, with no fallback token; other mint failures 502', async (t) => {
+test('App token: a mint refused for unapproved permissions answers 503 naming GitHub\'s message, held 30 s, with no fallback token', async (t) => {
   const message = 'The permissions requested are not granted to this installation.'
-  for (const status of [422, 403]) {
-    const f = await forwarder({ mint: () => Response.json({ message, documentation_url: 'https://docs.github.com/rest' }, { status }) }); t.after(f.close)
+  const f = await forwarder({ mint: () => Response.json({ message, documentation_url: 'https://docs.github.com/rest' }, { status: 422 }) }); t.after(f.close)
+  const r = await f.call('api.github.com/repos/callgideon/mumbo/pulls')
+  assert.equal(r.status, 503)
+  const reason = `mumbo-bot App permissions not approved: ${message}`
+  assert.deepEqual(r.json(), { message: `Mumbo edge refused GET /repos/callgideon/mumbo/pulls: ${reason}` })
+  assert.deepEqual(f.logs, [{ edge: 'github', refused: reason, principal: ME, method: 'GET', host: 'api.github.com', path: '/repos/callgideon/mumbo/pulls' }])
+  const push = await f.call('github.com/callgideon/mumbo.git/git-receive-pack', { method: 'POST', body: pkt(`${A} ${B} refs/heads/agent/a\0report-status\n`) + '0000' })
+  assert.equal(push.status, 503)
+  const mutation = await f.call('api.github.com/graphql', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: 'mutation { addComment(input: {subjectId: "I_1", body: "x"}) { clientMutationId } }' }) })
+  assert.equal(mutation.status, 503)
+  assert.equal(mutation.json().errors[0].message.endsWith(reason), true)
+  assert.equal(f.calls.length + f.lookups.length, 0, 'nothing forwarded, with no token or any other')
+  assert.equal(posts(f).length, 1, 'the failure is answered from the cache')
+  f.state.t = NOW + 30_000 - 1
+  assert.equal((await f.call('api.github.com/repos/callgideon/mumbo/pulls')).status, 503)
+  assert.equal(posts(f).length, 1, 'still held')
+  f.state.t = NOW + 30_000
+  assert.equal((await f.call('api.github.com/repos/callgideon/mumbo/pulls')).status, 503)
+  assert.equal(posts(f).length, 2, 'asked again after 30 s')
+  await f.store.putDoc(`project:${P1}`, { ...(await f.store.getDoc(`project:${P1}`)), repos: ['callgideon/mumbo', 'callgideon/docs'] })
+  assert.equal((await f.call('api.github.com/repos/callgideon/mumbo/pulls')).status, 503)
+  assert.equal(posts(f).length, 3, 'other repositories are asked at once')
+})
+
+test('App token: other mint failures answer 502 with their cause: repository not installed, rate limit, any other refusal, a token other than asked', async (t) => {
+  const answer = (status, message, headers = {}) => () => Response.json({ message }, { status, headers })
+  for (const [why, opts, reason] of [
+    ['a repository outside the installation', { mint: answer(422, 'There is at least one repository that does not exist or is not accessible to the parent installation.') },
+      'repo_not_installed: There is at least one repository that does not exist or is not accessible to the parent installation.'],
+    ['no installation for the first repository', { installation: answer(404, 'Not Found') }, 'repo_not_installed: the mumbo-bot App has no installation for callgideon/mumbo'],
+    ['a rate limit', { mint: answer(403, 'API rate limit exceeded', { 'x-ratelimit-remaining': '0' }) }, 'mumbo-bot token mint failed: GitHub\'s rate limit (HTTP 403); retry later'],
+    ['a secondary rate limit', { mint: answer(429, 'You have exceeded a secondary rate limit', { 'retry-after': '60' }) }, 'mumbo-bot token mint failed: GitHub\'s rate limit (HTTP 429); retry later'],
+    ['a 403 that is not a rate limit', { mint: answer(403, 'Resource not accessible by integration') }, 'mumbo-bot App refused the token (HTTP 403): Resource not accessible by integration'],
+    ['another 422', { mint: answer(422, 'Invalid request') }, 'mumbo-bot App refused the token (HTTP 422): Invalid request'],
+    ['a server error', { mint: answer(500, 'boom') }, 'mumbo-bot App refused the token (HTTP 500): boom'],
+    ['an installation lookup that fails', { installation: answer(502, 'bad gateway') }, 'mumbo-bot token mint failed: GitHub GET /repos/callgideon/mumbo/installation: HTTP 502'],
+  ]) {
+    const f = await forwarder(opts); t.after(f.close)
     const r = await f.call('api.github.com/repos/callgideon/mumbo/pulls')
-    assert.equal(r.status, 503, `GitHub ${status}`)
-    const reason = `mumbo-bot App permissions not approved: ${message}`
-    assert.deepEqual(r.json(), { message: `Mumbo edge refused GET /repos/callgideon/mumbo/pulls: ${reason}` })
-    assert.deepEqual(f.logs, [{ edge: 'github', refused: reason, principal: ME, method: 'GET', host: 'api.github.com', path: '/repos/callgideon/mumbo/pulls' }])
-    const push = await f.call('github.com/callgideon/mumbo.git/git-receive-pack', { method: 'POST', body: pkt(`${A} ${B} refs/heads/agent/a\0report-status\n`) + '0000' })
-    assert.equal(push.status, 503)
-    const mutation = await f.call('api.github.com/graphql', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: 'mutation { addComment(input: {subjectId: "I_1", body: "x"}) { clientMutationId } }' }) })
-    assert.equal(mutation.status, 503)
-    assert.equal(mutation.json().errors[0].message.endsWith(reason), true)
-    assert.equal(f.calls.length + f.lookups.length, 0, 'nothing forwarded, with no token or any other')
-    assert.equal(posts(f).length, 3, 'a failed mint is not cached: each request asks again')
+    assert.equal(r.status, 502, why)
+    assert.deepEqual(r.json(), { message: `Mumbo edge refused GET /repos/callgideon/mumbo/pulls: ${reason}` }, why)
+    assert.equal(f.logs[0].refused, reason, why)
+    assert.equal(f.calls.length, 0, why)
   }
-  const down = await forwarder({ mint: () => Response.json({ message: 'boom' }, { status: 500 }) }); t.after(down.close)
-  const r = await down.call('api.github.com/repos/callgideon/mumbo/pulls')
-  assert.equal(r.status, 502)
-  assert.match(r.json().message, /mumbo-bot token mint failed: GitHub POST \/app\/installations\/77\/access_tokens: HTTP 500/)
   // A token that differs from what was asked, narrower included, is revoked and never used.
   const narrow = await forwarder({ mint: (asked, n, at) => granted({ ...asked, permissions: { contents: 'write', pull_requests: 'write' } }, 'NARROW', at) }); t.after(narrow.close)
   const n = await narrow.call('api.github.com/repos/callgideon/mumbo/pulls')
   assert.equal(n.status, 502)
-  assert.match(n.json().message, /differs from what was asked/)
+  assert.match(n.json().message, /mumbo-bot token mint failed: mumbo-bot token for callgideon\/mumbo differs from what was asked/)
   assert.deepEqual(narrow.mints.at(-1), { method: 'DELETE', path: '/installation/token', auth: 'Bearer NARROW', body: undefined })
-  assert.equal(down.calls.length + narrow.calls.length, 0)
+  assert.equal(narrow.calls.length, 0)
 })
