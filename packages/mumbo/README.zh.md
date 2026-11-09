@@ -1,5 +1,5 @@
 ---
-description: "mumbo 包组：把运行中的 Web 主机连接到人们自己的工具以及其旁边的 box edge 页面的部署适配器。"
+description: "mumbo 包组：把运行中的 Web 主机连接到人们自己的工具以及其旁边的 box edge 页面的部署适配器，以及处理项目仓库的 agent。"
 kind: "package-group"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-group"
 
 ## 概述
 
-mumbo 家族把运行中的 Web 主机与其周围的平台连接起来：在明确的身份验证之后连接人们自己的工具，并连接 box edge 在主机旁提供的页面。它的包不自带会话、工具或存储行为。每个包的 README 拥有其约定。
+mumbo 家族把运行中的 Web 主机与其周围的平台连接起来：在明确的身份验证之后连接人们自己的工具，并连接 box edge 在主机旁提供的页面。这些适配器不自带会话、工具或存储行为；`superagent/` 是例外，它是在自己的会话中处理单个 GitHub 仓库的 agent 的固定副本。每个包的 README 拥有其约定。
 
 ## 目录
 
@@ -27,6 +27,7 @@ mumbo 家族把运行中的 Web 主机与其周围的平台连接起来：在明
 | [`box-links/`](box-links/README.zh.md) | 从 box 的 Web 页面通往 box 主页和桌面实时画面的侧栏链接 |
 | [`edge-member/`](edge-member/README.zh.md) | 以边缘签名的请求头把项目成员准入为拥有协作者访问权的非 owner principal |
 | [`mcp/`](mcp/README.zh.md) | 经过身份验证的 loopback MCP 服务器，白名单中的人通过它驱动主机的助手会话 |
+| [`superagent/`](superagent/README.zh.md) | 上游 superagent 的固定副本：把获授权的 GitHub 请求转为 Ticket，并在各自会话中处理每个 Ticket 的主动式 agent |
 
 -----
 

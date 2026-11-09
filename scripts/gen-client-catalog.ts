@@ -140,7 +140,8 @@ export function collectSlotEntries(scanRoot: string): SlotEntry[] {
   const files = scanSlotFiles(scanRoot, SOURCE_GLOBS)
   const declarations = files.flatMap(file => slotDeclarations(file))
   const registrations = files.flatMap(file => slotRegistrations(file))
-  const types = indexExportedTypes(scanRoot, SOURCE_GLOBS)
+  // pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md
+  const types = indexExportedTypes(scanRoot, SOURCE_GLOBS, ['packages/mumbo/superagent/**'])
   const problems = validateSlotContracts(declarations, registrations, types)
   if (problems.length > 0) {
     throw new Error(`gen-client-catalog: ${String(problems.length)} contract violation(s):\n${problems.map(problem => `  ${problem}`).join('\n')}`)

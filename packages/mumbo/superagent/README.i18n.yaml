@@ -1,0 +1,94 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/mumbo/superagent/README.md
+/:
+  en: d6382aa460dc0fe2
+  zh: 27cb4799ae2b41d2
+/mumbo-superagent:
+  en: 3726e2314076b124
+  zh: 56b6ffe7548d887c
+/mumbo-superagent/summary:
+  en: 981e30762f9b7674
+  zh: da3cb4d2354013d8
+/mumbo-superagent/table-of-contents:
+  en: a5b0d43290835d0b
+  zh: bfdd7ff89fcf9961
+/mumbo-superagent/use-this-package:
+  en: bbff250eba0f1b89
+  zh: 0a618f05cc88ee2b
+/mumbo-superagent/use-this-package/install-into-a-profile:
+  en: 4eb31eb13c0dcb59
+  zh: e7bf79bff5a0be7e
+/mumbo-superagent/use-this-package/what-you-get:
+  en: 6d9ec45fb05ac7c8
+  zh: e98362c59846772e
+/mumbo-superagent/understand-the-implementation:
+  en: 93efc97658f2cb2c
+  zh: 0fe3472ab58abf5f
+/mumbo-superagent/in-mumbo:
+  en: 5d3bf0cfff1905db
+  zh: 029a409ff50dab3d
+/mumbo-superagent/further-exploration:
+  en: e2a205fe7c72f1cf
+  zh: 1392e9d593898df7
+/mumbo-superagent/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/mumbo-superagent/model-experience/role-system-prompt:
+  en: 12d9222c6aa6c835
+  zh: e108a4d07ec1c07a
+/mumbo-superagent/model-experience/role-system-prompt/what-the-model-sees:
+  en: f56adc08fcd04ca7
+  zh: ca187f567bab78c3
+/mumbo-superagent/model-experience/role-system-prompt/what-the-model-sees/policy-section-without-enabled-rules:
+  en: 9282c3e63a3f937c
+  zh: 9282c3e63a3f937c
+/mumbo-superagent/model-experience/role-system-prompt/token-effect:
+  en: c9cda8ed58bd8954
+  zh: b905e9a484594e4c
+/mumbo-superagent/model-experience/role-system-prompt/kv-cache-effect:
+  en: cd97dc9c59945892
+  zh: 8c308dfdf5131bcb
+/mumbo-superagent/model-experience/application-tools:
+  en: 8398f9b2ac82fca5
+  zh: 32758ab808640605
+/mumbo-superagent/model-experience/application-tools/what-the-model-sees:
+  en: 6801626297e35668
+  zh: 0bdc224abf711951
+/mumbo-superagent/model-experience/application-tools/token-effect:
+  en: 3d369b0268549cb7
+  zh: de2557bba158c409
+/mumbo-superagent/model-experience/application-tools/kv-cache-effect:
+  en: 5ea5f93eb1088a81
+  zh: 8eb8a4bcf9588768
+/mumbo-superagent/model-experience/trigger-cards-and-notices:
+  en: c8d52c9eddf9def9
+  zh: a890320a54b0742f
+/mumbo-superagent/model-experience/trigger-cards-and-notices/what-the-model-sees:
+  en: b06d5b966ccbd522
+  zh: 0a53a9927c9a93d6
+/mumbo-superagent/model-experience/trigger-cards-and-notices/token-effect:
+  en: b8bd4058f65178fc
+  zh: 74264f5f015c0c4c
+/mumbo-superagent/model-experience/trigger-cards-and-notices/kv-cache-effect:
+  en: f80c1f2cf109cc55
+  zh: 3e124e8997bb24f7
+/mumbo-superagent/model-experience/source-and-team-skills:
+  en: f3853777810ea516
+  zh: 725ab0b0dab65186
+/mumbo-superagent/model-experience/source-and-team-skills/what-the-model-sees:
+  en: 75eef819bd845729
+  zh: aa93a0f5d704cbd6
+/mumbo-superagent/model-experience/source-and-team-skills/token-effect:
+  en: 200957005945bc1b
+  zh: c140e4625f7308d2
+/mumbo-superagent/model-experience/source-and-team-skills/kv-cache-effect:
+  en: 6d3a2283c5e693e6
+  zh: e1d64ada96e65e50
+/mumbo-superagent/known-limitations-and-deferred-work:
+  en: 36eb6e0b3c5e01aa
+  zh: 6ba84b9d284482a0
+/mumbo-superagent/known-limitations-and-deferred-work/dev-note:
+  en: e67f633dc6fe7773
+  zh: e88aeb617ffb74ea

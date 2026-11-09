@@ -30,14 +30,21 @@ const PATTERNS = [
   '.agents/skills/**/*.md',
 ]
 
+/** Whether a path is upstream prose of the pinned superagent copy, whose links target the upstream repository layout. */
+function isPinnedUpstreamProse(path: string): boolean {
+  // pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md
+  const normalized = path.replaceAll('\\', '/')
+  return normalized.startsWith('packages/mumbo/superagent/docs/') || normalized === 'packages/mumbo/superagent/SETUP.md'
+}
+
 /**
  * Discover authored Markdown sources, deduplicating symlinks.
- * Archived notes are excluded as sources, but links to them remain checked.
+ * Archived notes and pinned upstream prose are excluded as sources, but links to them remain checked.
  * @param scanRoot - absolute repository root; pass the same root to findViolations for matching diagnostics.
  * @returns forward-slash source paths relative to scanRoot.
  */
 export function markdownLinkSourcePaths(scanRoot: string = root): string[] {
-  return uniqueRepoFiles(scanRoot, PATTERNS, isArchivedAgentNotePath)
+  return uniqueRepoFiles(scanRoot, PATTERNS, path => isArchivedAgentNotePath(path) || isPinnedUpstreamProse(path))
     .map(file => relative(scanRoot, file.abs).replaceAll('\\', '/'))
 }
 

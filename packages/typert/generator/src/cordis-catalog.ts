@@ -126,6 +126,8 @@ export interface CordisCatalogPolicy {
   readonly inheritedServices: readonly InheritedEntry[]
   /** Maximum rendered characters per runtime type declaration. */
   readonly runtimeDeclarationMaxChars?: number
+  /** Package names whose services, events and exported types the projection leaves out. */
+  readonly excludedPackages?: ReadonlySet<string>
 }
 
 /** Complete model-level Cordis projection used by every text renderer. */
@@ -376,7 +378,7 @@ export function projectCordisCatalog(scanRoot: string, policy: CordisCatalogPoli
     faces: [targetFace],
     checkDiagnostics: false,
     caches,
-  }).discoverPackages()
+  }).discoverPackages(manifest => typeof manifest.name !== 'string' || policy.excludedPackages?.has(manifest.name) !== true)
   const packages = discovery.filter(candidate => candidate.faces.includes(targetFace))
     .map(candidate => candidate.package)
   const workspace = new WorkspaceAnalyzer({
@@ -393,7 +395,7 @@ export function projectCordisCatalog(scanRoot: string, policy: CordisCatalogPoli
     faces: [targetFace],
     checkDiagnostics: false,
     caches,
-  }).indexSourceDeclarations()
+  }).indexSourceDeclarations().filter(declaration => policy.excludedPackages?.has(declaration.package) !== true)
   const projector = new CordisCatalogProjector(face, sourceDeclarations, policy)
   return { projector, model: projector.project() }
 }

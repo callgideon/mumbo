@@ -222,6 +222,7 @@ export const SERVICE_WALK_EXEMPTIONS: Record<string, string> = {
   sidebarRight: 'client-side right-Sidebar navigation face — packages/client/ui-sidebar-right/README.md owns the API',
   sidebarRightTabs: 'client-side right-Sidebar tab-type registry — packages/client/ui-sidebar-right/README.md owns the API',
   documentPreviews: 'client-side document renderer registry — docs/subsystems/sidebar-right.md owns the API',
+  orchestrator: 'pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md — the SourceHost of its Source plugins; packages/mumbo/superagent/docs/007-architecture.md owns the API',
 }
 
 /**
@@ -1119,6 +1120,8 @@ export const CORDIS_CATALOG_POLICY: CordisCatalogPolicy = {
   foundationTypeNames: FOUNDATION_TYPE_NAMES,
   typeLinkExemptions: TYPE_LINK_EXEMPTIONS,
   runtimeServiceExclusions: new Set(['cordisInspect', 'dynamicCordisRunner']),
+  // pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md
+  excludedPackages: new Set(['@mumbo/superagent']),
   runtimeServices: [{
     key: 'timer',
     type: 'TimerService',

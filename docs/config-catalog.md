@@ -477,7 +477,7 @@ export type Config = LocalConfig
 ## `@deepseek-ai/dsh-client-connection`
 
 - `inject`: `credentials`
-- `source`: [`packages/client/connection/src/index.ts:96`](../packages/client/connection/src/index.ts)
+- `source`: [`packages/client/connection/src/index.ts:99`](../packages/client/connection/src/index.ts)
 
 ```ts config-catalog
 /** Browser authentication, request limits, and connection recovery configuration. */
@@ -4979,6 +4979,19 @@ export interface Config {
 }
 ```
 <!-- END GENERATED config-catalog:@mumbo/mcp -->
+
+<!-- BEGIN GENERATED config-catalog:@mumbo/superagent -->
+<a id="mumbosuperagent"></a>
+
+## `@mumbo/superagent`
+
+- `inject`: `agents` · `sessionController` · `sessionPersistence` · `workspaceRegistry` · `permissionPresets` · `tools` · `systemPrompt` · `skills` · `webServer` · `llm` · `subprocess`
+- `source`: [`packages/mumbo/superagent/src/deployment.ts:24`](../packages/mumbo/superagent/src/deployment.ts)
+
+```ts config-catalog
+export type DeploymentConfig = ReturnType<typeof Config>
+```
+<!-- END GENERATED config-catalog:@mumbo/superagent -->
 
 ## Loadable plugins with no config
 

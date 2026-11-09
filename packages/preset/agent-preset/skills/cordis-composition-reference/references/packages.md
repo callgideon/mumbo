@@ -345,6 +345,7 @@ Every package below exports a Cordis plugin that a bundle patch can name in a Lo
 | `@mumbo/box-links` | yes | Sidebar links to the box home page and desktop live view |
 | `@mumbo/edge-member` | yes | Project members admitted from an edge-signed header as non-owner DeepSeek Harness principals |
 | `@mumbo/mcp` | yes | Authenticated loopback MCP server for a running DeepSeek Harness web host |
+| `@mumbo/superagent` | yes | A proactive agent for one GitHub repository, as a DSH (DeepSeek Harness) bundle: it listens to GitHub and optionally Feishu, evaluates requests under a Policy, turns authorized ones into Tickets, and executes each in its own DSH Session. |
 
 ## plan
 
