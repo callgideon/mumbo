@@ -1,0 +1,34 @@
+# Bilingual-pair consistency record for 2026-11-09-connection-authenticators-and-edge-members.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-11-09-connection-authenticators-and-edge-members.md
+/agent-note-connection-authenticators-and-mumbo-project-members:
+  en: b0172a2d8327742d
+  zh: 60b8a0692809cadb
+/agent-note-connection-authenticators-and-mumbo-project-members/problem:
+  en: 968888075debf74a
+  zh: 88e275dd60567b5a
+/agent-note-connection-authenticators-and-mumbo-project-members/decision:
+  en: a15c7c13f167e5ac
+  zh: a15c7c13f167e5ac
+/agent-note-connection-authenticators-and-mumbo-project-members/decision/authenticator-seam-in-connection:
+  en: 564572a648d084f6
+  zh: 2adcbe600e431dce
+/agent-note-connection-authenticators-and-mumbo-project-members/decision/the-edge-member-principal:
+  en: cefd8baf3555d4d6
+  zh: ea197e0e27a36074
+/agent-note-connection-authenticators-and-mumbo-project-members/decision/collaborator-access:
+  en: b53d4f7db42ca311
+  zh: 2d839b37b6c7bc4b
+/agent-note-connection-authenticators-and-mumbo-project-members/decision/threat-model:
+  en: 57cb4bb84f2ecb73
+  zh: 6e62b10a89f79fd2
+/agent-note-connection-authenticators-and-mumbo-project-members/decision/owner-token-and-approvals-in-project-boxes:
+  en: 378cedd01ee67b00
+  zh: e0b7bae3ca09654b
+/agent-note-connection-authenticators-and-mumbo-project-members/alternatives-considered:
+  en: 100a3e8858ca75eb
+  zh: 106116e502f3e34c
+/agent-note-connection-authenticators-and-mumbo-project-members/consequences:
+  en: 01974810efd758c9
+  zh: a064e33df0578cdf

@@ -759,6 +759,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [],
       },
       {
+        signature: 'readonly authenticators: HostConnectionAuthenticators',
+        description: 'Non-owner authenticators consulted before browser and API credentials.',
+        parameters: [],
+      },
+      {
         signature: 'readonly browserPeer: PeerScope',
         description: 'The owner Peer every authenticated browser connection shares.',
         parameters: [],
@@ -776,15 +781,15 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection',
-        description: 'Apply Connection\'s Host/Origin checks and browser authentication to another Web route.',
+        description: 'Apply Connection\'s Host/Origin checks and owner authentication to another Web route. Such routes bypass Gateway access checks, so a request an authenticator admits as a non-owner is refused with 403.',
         parameters: [{ name: 'request', description: 'request headers from the HTTP or upgrade request.' }],
         returns: 'rejection status, or undefined when the route may accept the request.',
       },
       {
         signature: 'admit(request: ConnectionTrustRequest): PeerAdmission',
-        description: 'Admit an HTTP request against its signed browser or API credential and live Peer.',
+        description: 'Admit an HTTP request: the first registered authenticator that names a Peer wins; otherwise the signed browser or API credential and its live Peer.',
         parameters: [{ name: 'request', description: 'request headers from the HTTP or upgrade request.' }],
-        returns: 'the credential\'s Peer, or the rejection status.',
+        returns: 'the admitted Peer, or the rejection status.',
       },
       {
         signature: 'createPeer(options: { readonly principal: Principal; readonly interactions?: \'answer\' | \'none\' }): PeerScope',
@@ -799,10 +804,10 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the Peer and idempotent release, or 409 for duplicate API ownership. The carrier releases on socket termination or failed upgrade; release removes API admission synchronously without cancelling independent HTTP calls.',
       },
       {
-        signature: 'authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): boolean',
-        description: 'Authenticate one frontend index request, owning a token redirect or 401. The cookie this mints is `Secure` when the mounted Web carrier serves TLS, which only that listener\'s protocol decides.',
-        parameters: [{ name: 'request', description: 'root or configured-index HTTP request.' }, { name: 'response', description: 'response owned when the result is false.' }],
-        returns: 'true only when the frontend may serve index.html.',
+        signature: 'authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): PeerScope | undefined',
+        description: 'Authenticate one frontend index request, owning a token redirect or 401. A trusted request a registered authenticator admits is served for that Peer without minting a cookie. The cookie this mints is `Secure` when the mounted Web carrier serves TLS, which only that listener\'s protocol decides.',
+        parameters: [{ name: 'request', description: 'root or configured-index HTTP request.' }, { name: 'response', description: 'response owned when the result is undefined.' }],
+        returns: 'the Peer the index renders for, or undefined when the response was written.',
       },
       {
         signature: 'authenticatedUrl(baseUrl: string): string',
@@ -5966,6 +5971,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ConnectionAdmission = {\n    readonly peer: PeerScope;\n    readonly release: () => Promise<void>;\n} | {\n    readonly rejection: 401 | 403 | 409;\n};',
   },
   {
+    name: 'ConnectionAuthenticator',
+    declaration: 'export type ConnectionAuthenticator = (request: ConnectionTrustRequest) => PeerScope | undefined;',
+  },
+  {
     name: 'ConnectionFetchHandler',
     declaration: 'export interface ConnectionFetchHandler {\n    requestBodyMode(request: {\n        readonly method: string;\n        readonly url: URL;\n    }): ConnectionRequestBodyMode;\n    fetch(request: Request, peer: PeerScope): Promise<Response>;\n}',
   },
@@ -6704,6 +6713,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'HookRegistration',
     declaration: 'export interface HookRegistration {\n    catch(handler: AnyHook): void;\n}',
+  },
+  {
+    name: 'HostConnectionAuthenticators',
+    declaration: 'export interface HostConnectionAuthenticators {\n    register(authenticator: ConnectionAuthenticator): () => Promise<void>;\n}',
   },
   {
     name: 'HostConnectionFetch',

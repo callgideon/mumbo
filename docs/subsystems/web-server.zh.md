@@ -130,17 +130,19 @@ Host `ctx.connection` members consumed by transport-independent adapters.
 createSharedFetchHandler(channel: '/api'): ConnectionFetchHandler
 
 /**
- * Apply Connection's Host/Origin checks and browser authentication to
- * another Web route.
+ * Apply Connection's Host/Origin checks and owner authentication to another
+ * Web route. Such routes bypass Gateway access checks, so a request an
+ * authenticator admits as a non-owner is refused with 403.
  * @param request - request headers from the HTTP or upgrade request.
  * @returns rejection status, or undefined when the route may accept the request.
  */
 requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection
 
 /**
- * Admit an HTTP request against its signed browser or API credential and live Peer.
+ * Admit an HTTP request: the first registered authenticator that names a
+ * Peer wins; otherwise the signed browser or API credential and its live Peer.
  * @param request - request headers from the HTTP or upgrade request.
- * @returns the credential's Peer, or the rejection status.
+ * @returns the admitted Peer, or the rejection status.
  */
 admit(request: ConnectionTrustRequest): PeerAdmission
 
@@ -162,13 +164,14 @@ admitConnection(request: ConnectionTrustRequest): ConnectionAdmission
 
 /**
  * Authenticate one frontend index request, owning a token redirect or 401.
- * The cookie this mints is `Secure` when the mounted Web carrier serves TLS,
- * which only that listener's protocol decides.
+ * A trusted request a registered authenticator admits is served for that
+ * Peer without minting a cookie. The cookie this mints is `Secure` when the
+ * mounted Web carrier serves TLS, which only that listener's protocol decides.
  * @param request - root or configured-index HTTP request.
- * @param response - response owned when the result is false.
- * @returns true only when the frontend may serve index.html.
+ * @param response - response owned when the result is undefined.
+ * @returns the Peer the index renders for, or undefined when the response was written.
  */
-authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): boolean
+authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): PeerScope | undefined
 
 /**
  * Add the fresh process token to an ordinary Web application URL.

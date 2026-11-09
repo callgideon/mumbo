@@ -1,7 +1,7 @@
 {
   "name": "@mumbo/edge-member",
   "description": "Project members admitted from an edge-signed header as non-owner DeepSeek Harness principals",
-  "version": "0.2.1-rc.2",
+  "version": "0.2.2-rc.1",
   "private": true,
   "repository": {
     "type": "git",

@@ -4887,6 +4887,23 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-workspace-changes -->
 
+<!-- BEGIN GENERATED config-catalog:@mumbo/edge-member -->
+<a id="mumboedge-member"></a>
+
+## `@mumbo/edge-member`
+
+- `inject`: `connection` · `remoteAccess` · `workspaceRegistry`
+- `source`: [`packages/mumbo/edge-member/src/index.ts:39`](../packages/mumbo/edge-member/src/index.ts)
+
+```ts config-catalog
+/** Edge member configuration. */
+export interface Config {
+  /** This box's member key in unpadded base64url, at least 32 bytes; the edge derives it from the box id. */
+  readonly key: string
+}
+```
+<!-- END GENERATED config-catalog:@mumbo/edge-member -->
+
 <!-- BEGIN GENERATED config-catalog:@mumbo/mcp -->
 <a id="mumbomcp"></a>
 
