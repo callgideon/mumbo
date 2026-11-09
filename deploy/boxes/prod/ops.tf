@@ -1,8 +1,6 @@
 # Stage 7: alarms. Every alarm goes to one SNS topic; runbooks are in ../RUNBOOK.md, one section per alarm name.
-resource "aws_sns_topic" "alarms" {
-  name              = "${local.name}-alarms"
-  kms_master_key_id = "alias/aws/sns"
-}
+# Unencrypted on purpose: CloudWatch cannot publish to a topic under the aws/sns key, and alarm text holds no secret.
+resource "aws_sns_topic" "alarms" { name = "${local.name}-alarms" }
 
 # Log-derived signals: the edge logs one JSON line per box event; the api logs node status changes.
 locals {
