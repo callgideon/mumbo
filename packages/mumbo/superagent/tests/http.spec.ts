@@ -1,3 +1,5 @@
+import { Context } from '@deepseek-ai/cordis'
+import * as Connection from '@deepseek-ai/dsh-client-connection'
 import { expect, it } from 'vitest'
 import { z } from 'zod'
 import { registerHttp } from '../src/app/http.ts'
@@ -9,9 +11,21 @@ import { SetupError } from '../src/setup.ts'
 
 type Handler = (req: unknown, res: unknown) => Promise<void>
 type Headers = Record<string, string | undefined>
-type Admission = { peer: { principal: { kind: string; email?: string } } } | { rejection: 401 | 403 }
-const OWNER: Admission = { peer: { principal: { kind: 'owner' } } }
-const member = (email: string): Admission => ({ peer: { principal: { kind: 'edge-member', email } } })
+type Admission = { peer: { principal: { kind: string; email?: string }; signal: AbortSignal } } | { rejection: 401 | 403 }
+const admitted = (principal: { kind: string; email?: string }, signal = new AbortController().signal): Admission =>
+  ({ peer: { principal, signal } })
+const OWNER = admitted({ kind: 'owner' })
+const member = (email: string): Admission => admitted({ kind: 'edge-member', email })
+/** Send one request to a mounted `/orchestrator` handler with the default panel headers; return its status and JSON body. */
+async function send(handler: Handler, method: string, path: string, body?: unknown, headers: Headers = {}) {
+  let status = 0, text = ''
+  const chunks = body === undefined ? [] : [Buffer.from(typeof body === 'string' ? body : JSON.stringify(body))]
+  const sent = Object.fromEntries(Object.entries({ host: '127.0.0.1:3082', 'x-orchestrator-request': '1', ...headers }).filter(([,
+    value]) => value !== undefined))
+  const req = { method, url: `/orchestrator/api/${path}`, headers: sent, async *[Symbol.asyncIterator]() { yield* chunks } }
+  await handler(req, { writeHead: (code: number) => { status = code }, end: (data: string) => { text = data } })
+  return { status, body: JSON.parse(text) as Record<string, unknown> }
+}
 /**
  * Mount management HTTP routes on a fake web server and return a request helper that includes default panel headers.
  * `call.connection.admit` answers DSH admission (the owner by default) and can be swapped between calls.
@@ -21,15 +35,7 @@ function serve(runtime: Partial<Record<keyof HttpHost, unknown>>, host = '127.0.
   const connection = { admit: (_req: { headers: Headers }): Admission => OWNER }
   const ctx = { connection, webServer: { host, port: 3082, register: (route: { handler: Handler }) => { handler = route.handler; return () => {} } } }
   registerHttp(ctx as never, { ready: Promise.resolve(), machine: { panelAdmins: [] }, ...runtime } as unknown as HttpHost)
-  const call = async (method: string, path: string, body?: unknown, headers: Headers = {}) => {
-    let status = 0, text = ''
-    const chunks = body === undefined ? [] : [Buffer.from(typeof body === 'string' ? body : JSON.stringify(body))]
-    const sent = Object.fromEntries(Object.entries({ host: '127.0.0.1:3082', 'x-orchestrator-request': '1', ...headers }).filter(([,
-      value]) => value !== undefined))
-    const req = { method, url: `/orchestrator/api/${path}`, headers: sent, async *[Symbol.asyncIterator]() { yield* chunks } }
-    await handler(req, { writeHead: (code: number) => { status = code }, end: (data: string) => { text = data } })
-    return { status, body: JSON.parse(text) as Record<string, unknown> }
-  }
+  const call = (method: string, path: string, body?: unknown, headers: Headers = {}) => send(handler, method, path, body, headers)
   return Object.assign(call, { connection })
 }
 
@@ -81,9 +87,9 @@ it('runs a management request only for an admitted owner or listed panel admin t
   const call = serve({ machine: { panelAdmins: ['alice@example.com'] }, sessions: { delivery: async () => 'injected' },
     engine: { unsubscribe: (key: string) => { unsubscribed.push(key); return true } } }, '10.0.0.5')
   const box = { host: 'p-0123456789abcdef.boxes.mumbo.si', origin: 'https://p-0123456789abcdef.boxes.mumbo.si' }
-  const admitted: Headers[] = []
+  const seen: Headers[] = []
   const post = (admission: Admission, headers: Headers = {}) => {
-    call.connection.admit = req => { admitted.push(req.headers); return admission }
+    call.connection.admit = req => { seen.push(req.headers); return admission }
     return call('POST', 'threads/github%3A1/unsubscribe', undefined, { ...box, ...headers })
   }
   const refused = (status: number, error: string) => ({ status, body: { error } })
@@ -91,13 +97,16 @@ it('runs a management request only for an admitted owner or listed panel admin t
   const notAdmin = 'Management requires the owner or a panel admin'
   expect(await post({ rejection: 401 })).toEqual(refused(401, unadmitted))
   expect(await post({ rejection: 403 })).toEqual(refused(403, unadmitted))
-  expect(await post({ peer: { principal: { kind: 'share-viewer' } } })).toEqual(refused(403, notAdmin))
+  expect(await post(admitted({ kind: 'share-viewer' }))).toEqual(refused(403, notAdmin))
   expect(await post(member('bob@example.com'))).toEqual(refused(403, notAdmin))
   // Emails match exactly: no domain, suffix or case folding.
   for (const email of ['alice@example.com.evil', 'x.alice@example.com', 'Alice@example.com', '@example.com']) {
     expect(await post(member(email)), email).toEqual(refused(403, notAdmin))
   }
-  expect(await post({ peer: { principal: { kind: 'share-viewer', email: 'alice@example.com' } } })).toEqual(refused(403, notAdmin))
+  expect(await post(admitted({ kind: 'share-viewer', email: 'alice@example.com' }))).toEqual(refused(403, notAdmin))
+  // A disposed Peer, such as an expired member's, is refused even when its principal is listed.
+  expect(await post(admitted({ kind: 'edge-member', email: 'alice@example.com' }, AbortSignal.abort()))).toEqual(refused(403, notAdmin))
+  expect(await post(admitted({ kind: 'owner' }, AbortSignal.abort()))).toEqual(refused(403, notAdmin))
   expect(await post(OWNER, { 'x-orchestrator-request': undefined })).toEqual(refused(403, 'Same-origin management request required'))
   expect(await post(member('alice@example.com'), { 'x-orchestrator-request': '0' }))
     .toEqual(refused(403, 'Same-origin management request required'))
@@ -105,7 +114,7 @@ it('runs a management request only for an admitted owner or listed panel admin t
   expect(await post(OWNER)).toMatchObject({ status: 200 })
   expect(await post(member('alice@example.com'))).toMatchObject({ status: 200 })
   expect(unsubscribed).toEqual(['github:1', 'github:1'])
-  expect(admitted.at(-1)).toMatchObject({ ...box, 'x-orchestrator-request': '1' })
+  expect(seen.at(-1)).toMatchObject({ ...box, 'x-orchestrator-request': '1' })
 })
 
 it('admits no edge member while panelAdmins is empty', async () => {
@@ -113,6 +122,52 @@ it('admits no edge member while panelAdmins is empty', async () => {
   call.connection.admit = () => member('alice@example.com')
   expect(await call('POST', 'threads/github%3A1/unsubscribe')).toEqual({ status: 403,
     body: { error: 'Management requires the owner or a panel admin' } })
+})
+
+it('admits through the real DSH Connection: its Host and Origin checks, the owner cookie, a listed member and a live Peer', async () => {
+  const box = 'p-0123456789abcdef.boxes.mumbo.si'
+  const ctx = new Context()
+  let record: unknown
+  ctx.provide('credentials', { modifyRecord: async (_key: string, mutate: (current: unknown) => Promise<unknown>) =>
+    record = await mutate(record) ?? record } as never)
+  const routes = new Map<string, Handler>()
+  ctx.provide('webServer', { host: '10.0.0.5', port: 3082, protocol: 'http:', registerUpgrade: () => () => {}, tapIndex: () => () => {},
+    register: (route: { path: string; handler: Handler }) => { routes.set(route.path, route.handler); return () => { routes.delete(route.path) } } } as never)
+  const fiber = ctx.plugin({ inject: [...Connection.inject], apply: Connection.apply }, { trustedHosts: [box] })
+  await fiber.await()
+  try {
+    const connection = ctx.get('connection')!
+    // Stands in for the edge-member authenticator (whose header checks its own tests cover), but returns a member's
+    // Peer after disposal too, so the route's own live-Peer check is what refuses it.
+    const members = new Map<string, Connection.PeerScope>()
+    connection.authenticators.register(request => {
+      const email = (request.headers as Headers)['x-test-member']
+      if (email === undefined) return undefined
+      if (!members.has(email)) members.set(email, connection.createPeer({ principal: { kind: 'edge-member', email } as never }))
+      return members.get(email)
+    })
+    const unsubscribed: string[] = []
+    registerHttp(ctx, { ready: Promise.resolve(), machine: { panelAdmins: ['alice@example.com'] }, sessions: { delivery: async () => 'injected' },
+      engine: { unsubscribe: (key: string) => { unsubscribed.push(key); return true } } } as never)
+    const post = (headers: Headers) => send(routes.get('/orchestrator')!, 'POST', 'threads/github%3A1/unsubscribe', undefined,
+      { host: box, origin: `https://${box}`, ...headers })
+    const token = new URL(connection.authenticatedUrl(`https://${box}`))
+    let cookie = ''
+    connection.authorizeIndex({ method: 'GET', url: `${token.pathname}${token.search}`, headers: { host: box } },
+      { writeHead: (_status, headers) => { cookie = headers?.['set-cookie']?.split(';', 1)[0] ?? '' }, end: () => {} })
+    expect(cookie).not.toBe('')
+    expect(await post({})).toMatchObject({ status: 401 })
+    expect(await post({ host: 'evil.example', cookie })).toMatchObject({ status: 403 })
+    expect(await post({ origin: 'https://p-fedcba9876543210.boxes.mumbo.si', cookie })).toMatchObject({ status: 403 })
+    expect(await post({ 'x-test-member': 'bob@example.com' })).toMatchObject({ status: 403 })
+    expect(unsubscribed).toEqual([])
+    expect(await post({ cookie })).toMatchObject({ status: 200 })
+    expect(await post({ 'x-test-member': 'alice@example.com' })).toMatchObject({ status: 200 })
+    expect(unsubscribed).toHaveLength(2)
+    await members.get('alice@example.com')!.dispose()
+    expect(await post({ 'x-test-member': 'alice@example.com' })).toMatchObject({ status: 403 })
+    expect(unsubscribed).toHaveLength(2)
+  } finally { await fiber.dispose() }
 })
 
 it('answers a prompt save that lost a race with 409, and a settings body over 128 KiB with 400', async () => {

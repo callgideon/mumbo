@@ -23,9 +23,9 @@ Edits to the copy:
 - Documentation links in `src/deployment.ts`, `src/setup.ts`, `src/app/http.ts` and `src/client/locales.ts` are relative to the repository root (`packages/mumbo/superagent/docs/...`).
 - `docs/007-architecture.md` lists `css-modules.d.ts` and no longer lists `tests/service-script.spec.ts`. `tests/docs.spec.ts` checks `SETUP.md` as the only entry document because the package has no `README.md`.
 - Tests that read `process.cwd()` (`tests/controls.spec.tsx`, `tests/styles.spec.ts`) read relative to the spec file, so they pass from the repository root.
-- Owner-admitting `connection: { admit: ... }` on the web server fake in `tests/fixtures/host.ts`, `tests/runtime.spec.ts` and `tests/model-surface.spec.ts`.
+- `tests/fixtures/host.ts`, `tests/runtime.spec.ts` and `tests/model-surface.spec.ts` provide a `connection` service fake whose `admit` returns a live owner Peer (S2).
 - API drift against dsh `0.2.2-rc.1`:
-  - `src/app/http.ts`: the comment on the state response no longer cites `scripts/dsh-superagent`, which is not copied. `webServer.port` is `number | undefined`; an unbound port never matches a request origin.
+  - `src/app/http.ts`: the comment on the state response no longer cites `scripts/dsh-superagent`, which is not copied.
   - `src/app/resources.ts`: `SessionController.inspect` no longer exists; the ticket transcript is read through `sessionPersistence.open(id, 'read')` pages. The fakes drop `inspect`; `tests/tools.spec.ts` feeds the transcript through the fixture's persistence reader.
   - `src/app/role-models.ts`: `agent/request` may no longer change the route (the loop rejects it) and `installModelSelection` takes only a context. The recorded `model/selection` event routes the first request; only the prompt variables are still overridden. `tests/role-models.spec.ts` asserts the recorded selection and the first-request route through `AgentModel.current()` over the real `modelSelectionProjectionDefinition`.
   - `tests/sources.spec.ts`: the malformed-line Feishu test uses the `late` fake CLI so the `ready` line cannot be processed after the event lines.
@@ -47,11 +47,16 @@ Files outside the copy changed for S1:
 
 Upstream serves `/orchestrator/api/` only from a loopback Web server, to any request whose Host is `127.0.0.1:<port>` or `localhost:<port>` and that carries `x-orchestrator-request: 1`. The copy serves it on any bind address, admitted through DSH authentication.
 
-- `src/app/http.ts`: `registerHttp` no longer requires a loopback Web server, and `sameOrigin` is deleted. Each request first goes through `ctx.connection.admit`, which also applies DSH's Host and Origin checks; a rejection answers its 401 or 403. The principal must then be the owner, or an `edge-member` whose email `panelAdmins` lists exactly; anyone else gets 403. Last, a request without `x-orchestrator-request: 1` gets 403. Panel access grants no merge or approval power.
-- `src/deployment.ts`: the `panelAdmins` key, lowercased emails, default `[]`, which admits no `edge-member`; `Machine.panelAdmins` carries it. An entry that is not one lowercased address (uppercase, whitespace, `*`, `,`, or not exactly one `@`) fails at load.
+- `src/app/http.ts`: `registerHttp` no longer requires a loopback Web server, and `sameOrigin` is deleted. Each request first goes through `ctx.connection.admit`, which also applies DSH's Host and Origin checks; a rejection answers its 401 or 403. The Peer must then be live (its `signal` not aborted) and its principal the owner, or an `edge-member` whose email `panelAdmins` lists exactly; anything else gets 403. Last, a request without `x-orchestrator-request: 1` gets 403. Panel access grants no merge or approval power.
+- `src/deployment.ts`: the `panelAdmins` key, lowercased emails, default `[]`, which admits no `edge-member`; `Machine.panelAdmins` carries it. An entry that is not one lowercased address (uppercase, whitespace, `*`, `,`, or not exactly one `@`) fails at load. An unknown key's error names the valid keys instead of pointing at `docs/006-deployment.md`.
 - `src/index.ts`: injects `connection`.
-- Tests: `tests/http.spec.ts` replaces the loopback test with the admission cases. `tests/deployment.spec.ts` covers the `panelAdmins` default and validation, and `tests/fixtures/deployment.ts` sets `panelAdmins: []`. The owner-admitting `connection` fake of S1 is a service of its own in `tests/fixtures/host.ts`, `tests/runtime.spec.ts` and `tests/model-surface.spec.ts`, where `ctx.connection` reads it, instead of a field of the web server fake.
+- Tests: `tests/http.spec.ts` replaces the loopback test with the admission cases over a faked `admit`, and adds one through the real Connection plugin: its Host and Origin checks, the owner's browser cookie, a stand-in member authenticator, and a disposed member Peer. `tests/deployment.spec.ts` covers the `panelAdmins` default and validation, and `tests/fixtures/deployment.ts` sets `panelAdmins: []`. The `connection` fakes in `tests/fixtures/host.ts`, `tests/runtime.spec.ts` and `tests/model-surface.spec.ts` are services of their own, where `ctx.connection` reads them, and their owner Peer carries a `signal`.
 - Not updated: `docs/006-deployment.md` (the Management API section, its `curl` example and the configuration key table), `docs/007-architecture.md` (the `http.ts` and `http.spec.ts` rows) and `SETUP.md` step 3 still describe upstream's unauthenticated loopback access. A `curl` without a DSH browser cookie now gets 401.
+
+Files outside the copy changed for S2, because they said non-owner Peers reach no route outside the Gateway except exact routes that declare `access`:
+
+- `packages/client/connection/src/rpc.ts` (`ConnectionAuthenticator`) and `packages/client/connection/README.md` with its `README.zh.md` pair: that holds for Connection's own routes, and a route that calls `admit` itself decides which principals it serves and must refuse a Peer whose `signal` has aborted.
+- `packages/mumbo/edge-member/README.md` with its `README.zh.md` pair (Member access) and the `src/index.ts` module comment: `@mumbo/superagent` serves `/orchestrator/api/`, settings and prompt saves included, to the members `panelAdmins` lists.
 
 ## S3: delivery policy
 

@@ -236,8 +236,8 @@ function match(table: Routes, method: string, segments: string[]) {
 }
 /**
  * Mount `/orchestrator/api/` on the DSH web server. A request runs its route only when `ctx.connection.admit` admits it (which
- * also applies DSH's Host and Origin checks), its principal is the owner or an `edge-member` listed in `panelAdmins`, and it
- * carries `x-orchestrator-request: 1`; otherwise it gets the admission's 401 or 403, or 403.
+ * also applies DSH's Host and Origin checks) as a live Peer whose principal is the owner or an `edge-member` listed in
+ * `panelAdmins`, and it carries `x-orchestrator-request: 1`; otherwise it gets the admission's 401 or 403, or 403.
  * @param ctx - plugin context carrying the web server and Connection.
  * @param runtime - the orchestrator state the routes read and change.
  * @returns disposer unmounting the routes.
@@ -250,7 +250,7 @@ export function registerHttp(ctx: Context, runtime: HttpHost): () => void {
       if (!url.pathname.startsWith('/orchestrator/api/')) { res.writeHead(404); res.end(); return }
       const admission = ctx.connection.admit(req)
       if ('rejection' in admission) { json(res, admission.rejection, { error: 'DSH authentication refused this management request' }); return }
-      if (!panelAdmitted(admission.peer.principal, runtime.machine.panelAdmins)) {
+      if (admission.peer.signal.aborted || !panelAdmitted(admission.peer.principal, runtime.machine.panelAdmins)) {
         json(res, 403, { error: 'Management requires the owner or a panel admin' }); return
       }
       if (req.headers['x-orchestrator-request'] !== '1') { json(res, 403, { error: 'Same-origin management request required' }); return }
