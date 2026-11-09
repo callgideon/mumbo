@@ -55,8 +55,9 @@ The `dsh-superagent` row accepts these fields:
 | `promptMaxChars` | `100000` | Largest saved prompt configuration, in characters, from 1,000 to 1,000,000 |
 | `admissionContextMaxPages` | `10` | Pages of Thread context one assessment may read, from 1 to 100 |
 | `admissionContextTimeoutMs` | `15000` | Time limit of one context read during an assessment, from 1 to 90,000 milliseconds |
+| `panelAdmins` | `[]` | Lowercased emails of the `edge-member` principals that may use the panel and the management API besides the owner, matched exactly; an entry that is not one lowercased address fails at load |
 
-Every field except `stateDir` applies without a restart. The repository, the accounts, the Policy, the execution settings and the prompts are panel settings stored in the state database, not plugin configuration; [006 Deployment](docs/006-deployment.md) describes each one and the management API.
+`promptMaxChars`, `admissionContextMaxPages` and `admissionContextTimeoutMs` apply without a restart; a change to `stateDir` or `panelAdmins` remounts the plugin. The repository, the accounts, the Policy, the execution settings and the prompts are panel settings stored in the state database, not plugin configuration; [006 Deployment](docs/006-deployment.md) describes each one and the management API.
 
 -----
 
@@ -92,9 +93,11 @@ This package is a copy of [`dsh-superagent-prototype`](https://github.com/deepse
 Mumbo project boxes load the package through `deploy/mumbo-project.overlay.yml`, which puts `stateDir` under the DSH home and sets `panelAdmins` from `MUMBO_PANEL_ADMINS`. In Mumbo the package differs from upstream in these behaviors:
 
 - **Settings, Policy and prompts change only in the panel.** The model has no tool that changes them: `orchestrator_settings_save`, `orchestrator_policy_sync` and `orchestrator_prompts_save` are removed, and the main Session has 11 application tools.
+- **The panel admits through DSH authentication.** The panel and `/orchestrator/api/*` are served on any bind address. Each request goes through DSH Connection admission, which also applies its Host and Origin checks, and then passes only for the owner or an `edge-member` principal whose lowercased email `panelAdmins` lists exactly, so the empty default admits only the owner. A Peer whose signal has aborted, such as an expired member Peer, is refused. Other requests get 401 or 403, and a request without `x-orchestrator-request: 1` gets 403. Panel access grants no merge or approval power.
+- **Only allowed senders reach a Ticket.** A Trigger reaches a Ticket as an Input, by subscription or by attach, only when it comes from a person on the Source's allowed list, a bot on the Source's bot list, or GitHub CI: source `github`, an empty actor id and `meta.ci`. Every other message, including Feishu system, anonymous and app messages, is withheld for Eval and resumes no ended Ticket.
 - **Executors never merge.** An Executor does not merge, enable auto-merge or approve a pull request. It posts one pull request comment whose first line is the marker `<!-- mumbo-review sha=<40 lowercase hex> verdict=<pass|fail> -->` and whose second line is the automated-agent disclosure line. The box edge merges through its own approval flow and treats the marker as a claim.
 
-The upstream README is [docs/upstream-readme.md](docs/upstream-readme.md). It, [SETUP.md](SETUP.md) and the numbered documents in `docs/` are upstream prose: they describe a standalone installation with a global `dsh` and `scripts/dsh-superagent`, which this copy does not include. Where `docs/003-execution.md`, `docs/004-prompts.md`, `docs/006-deployment.md` and `SETUP.md` describe prompt-driven auto-merge, and where the upstream documents describe the three removed tools, this section supersedes them. Some repository gates exclude the copy's code or that prose; UPSTREAM.md lists each exclusion, and each is commented `pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md`.
+The upstream README is [docs/upstream-readme.md](docs/upstream-readme.md). It, [SETUP.md](SETUP.md) and the numbered documents in `docs/` are upstream prose: they describe a standalone installation with a global `dsh` and `scripts/dsh-superagent`, which this copy does not include. This section supersedes them where `docs/003-execution.md`, `docs/004-prompts.md`, `docs/006-deployment.md` and `SETUP.md` describe prompt-driven auto-merge, where `docs/006-deployment.md` and `SETUP.md` describe a loopback-only panel and management API without authentication, where `docs/001-domain.md` and `docs/002-authorization.md` deliver every message on a subscribed Thread to its Tickets with no check of who sent it, and where the upstream documents describe the three removed tools. Some repository gates exclude the copy's code or that prose; UPSTREAM.md lists each exclusion, and each is commented `pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md`.
 
 -----
 
@@ -177,8 +180,9 @@ Prefix-stable until a prompt save changes the skill set or a skill's text; the n
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **Pinned upstream copy** — upstream changes arrive only through a new copy that re-applies the UPSTREAM.md log; the JSDoc, coverage, unknown-cast and UI copy gates exclude the copy's code, so it does not meet those rules of this repository.
+- **Pinned upstream copy** — upstream changes arrive only through a new copy that re-applies the UPSTREAM.md log; several repository gates exclude the copy's code; UPSTREAM.md S1 lists them.
 - **Upstream setup instructions** — `SETUP.md` and `docs/006-deployment.md` use `scripts/dsh-superagent` and a globally installed `dsh`, which this copy does not include.
+- **Delivery gates only Ticket Inputs** — a worker that reads a pull request, a chat thread or the `trigger/` resource itself still sees the text of senders off the allowed list. A GitHub sender is identified by login, which its owner can rename and someone else can later claim, and an edited comment keeps its original author. `Tickets.wake` does not check delivery again, so an Input that reached an ended Ticket before its sender left the allowed list can still resume it.
 - **No process isolation** — both presets run with `danger-full-access` as the host's OS user; an Executor can read that user's home directory and run any program by path.
 - **State grows without bound** — nothing deletes old Triggers, Decisions, ended Tickets, outbox receipts or saved settings and prompt versions.
 - **github.com only** — GitHub Enterprise Server is not supported, and the agent must be a user account because the runtime reads its notifications.

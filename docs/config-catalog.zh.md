@@ -4968,7 +4968,7 @@ export interface Config {
 ## `@mumbo/edge-member`
 
 - `inject`: `connection` · `remoteAccess` · `workspaceRegistry` · `sessions`
-- `source`: [`packages/mumbo/edge-member/src/index.ts:45`](../packages/mumbo/edge-member/src/index.ts)
+- `source`: [`packages/mumbo/edge-member/src/index.ts:46`](../packages/mumbo/edge-member/src/index.ts)
 
 ```ts config-catalog
 /** Edge member configuration. */
@@ -5009,8 +5009,8 @@ export interface Config {
 
 ## `@mumbo/superagent`
 
-- `inject`: `agents` · `sessionController` · `sessionPersistence` · `workspaceRegistry` · `permissionPresets` · `tools` · `systemPrompt` · `skills` · `webServer` · `llm` · `subprocess`
-- `source`: [`packages/mumbo/superagent/src/deployment.ts:24`](../packages/mumbo/superagent/src/deployment.ts)
+- `inject`: `agents` · `sessionController` · `sessionPersistence` · `workspaceRegistry` · `permissionPresets` · `tools` · `systemPrompt` · `skills` · `webServer` · `connection` · `llm` · `subprocess`
+- `source`: [`packages/mumbo/superagent/src/deployment.ts:26`](../packages/mumbo/superagent/src/deployment.ts)
 
 ```ts config-catalog
 export type DeploymentConfig = ReturnType<typeof Config>

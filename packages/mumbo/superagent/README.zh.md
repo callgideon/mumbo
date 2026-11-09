@@ -55,8 +55,9 @@ pnpm dsh plugin --profile <name> remove @mumbo/superagent
 | `promptMaxChars` | `100000` | 已保存提示词配置的最大字符数，取值 1,000 到 1,000,000 |
 | `admissionContextMaxPages` | `10` | 一次评估可读取的线程上下文页数，取值 1 到 100 |
 | `admissionContextTimeoutMs` | `15000` | 评估期间一次上下文读取的时间上限，取值 1 到 90,000 毫秒 |
+| `panelAdmins` | `[]` | 除 owner 外可以使用面板和管理 API 的 `edge-member` principal 的小写邮箱，按精确匹配；不是单个小写地址的条目在加载时失败 |
 
-除 `stateDir` 外，每个字段都无需重启即可生效。仓库、账号、Policy、执行设置和提示词都是保存在状态数据库中的面板设置，而不是插件配置；[006 Deployment](docs/006-deployment.md) 说明了每一项以及管理 API。
+`promptMaxChars`、`admissionContextMaxPages` 与 `admissionContextTimeoutMs` 无需重启即可生效；修改 `stateDir` 或 `panelAdmins` 会重新挂载插件。仓库、账号、Policy、执行设置和提示词都是保存在状态数据库中的面板设置，而不是插件配置；[006 Deployment](docs/006-deployment.md) 说明了每一项以及管理 API。
 
 -----
 
@@ -92,9 +93,11 @@ pnpm dsh plugin --profile <name> remove @mumbo/superagent
 Mumbo 项目 box 通过 `deploy/mumbo-project.overlay.yml` 加载本包，该文件把 `stateDir` 放在 DSH home 之下，并用 `MUMBO_PANEL_ADMINS` 设置 `panelAdmins`。在 Mumbo 中，本包在以下行为上与上游不同：
 
 - **设置、Policy 和提示词只能在面板中修改。** 模型没有修改它们的工具：`orchestrator_settings_save`、`orchestrator_policy_sync` 与 `orchestrator_prompts_save` 已被移除，主会话有 11 个应用工具。
+- **面板通过 DSH 身份验证准入。** 面板和 `/orchestrator/api/*` 在任意绑定地址上提供服务。每个请求先经过 DSH Connection 准入（它也执行自身的 Host 与 Origin 检查），之后只有 owner，或小写邮箱被 `panelAdmins` 精确列出的 `edge-member` principal 才能通过，因此空的默认值只准入 owner。signal 已中止的 Peer（例如已过期的成员 Peer）会被拒绝。其他请求得到 401 或 403，不带 `x-orchestrator-request: 1` 的请求得到 403。面板访问权不授予合并或批准权限。
+- **只有获准的发送者能到达 Ticket。** 触发只有在来自来源允许列表中的人、来源 bot 列表中的 bot，或 GitHub CI（来源 `github`、空的 actor id 以及 `meta.ci`）时，才会通过订阅或 attach 作为输入到达 Ticket。其他所有消息，包括飞书的系统消息、匿名消息和应用消息，都被扣留以交给评估，也不会恢复已结束的 Ticket。
 - **执行器从不合并。** 执行器不合并 pull request，不启用自动合并，也不批准 pull request。它发布一条 pull request 评论，第一行是标记 `<!-- mumbo-review sha=<40 lowercase hex> verdict=<pass|fail> -->`，第二行是自动化 agent 的披露行。box 边缘通过自己的批准流程合并，并把该标记视为一种声明。
 
-上游 README 是 [docs/upstream-readme.md](docs/upstream-readme.md)。它、[SETUP.md](SETUP.md) 以及 `docs/` 中的编号文档都是上游文字：它们描述使用全局 `dsh` 与 `scripts/dsh-superagent` 的独立安装，而本副本不包含这些内容。`docs/003-execution.md`、`docs/004-prompts.md`、`docs/006-deployment.md` 与 `SETUP.md` 中描述由提示词驱动的自动合并之处，以及上游文档中描述三个已移除工具之处，以本节为准。部分仓库检查排除了副本的代码或这些文字；UPSTREAM.md 列出每项排除，每项都带有注释 `pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md`。
+上游 README 是 [docs/upstream-readme.md](docs/upstream-readme.md)。它、[SETUP.md](SETUP.md) 以及 `docs/` 中的编号文档都是上游文字：它们描述使用全局 `dsh` 与 `scripts/dsh-superagent` 的独立安装，而本副本不包含这些内容。`docs/003-execution.md`、`docs/004-prompts.md`、`docs/006-deployment.md` 与 `SETUP.md` 中描述由提示词驱动的自动合并之处，`docs/006-deployment.md` 与 `SETUP.md` 中描述只在 loopback 上提供且无身份验证的面板和管理 API 之处，`docs/001-domain.md` 与 `docs/002-authorization.md` 中不检查发送者就把已订阅线程上的每条消息投递给其 Ticket 之处，以及上游文档中描述三个已移除工具之处，以本节为准。部分仓库检查排除了副本的代码或这些文字；UPSTREAM.md 列出每项排除，每项都带有注释 `pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md`。
 
 -----
 
@@ -177,8 +180,9 @@ Policy version {version}; accept mode {mode}. The accept mode and the rules deci
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **固定的上游副本**：上游变更只能通过重新复制并重新应用 UPSTREAM.md 记录来引入；JSDoc、覆盖率、unknown 断言和 UI 文案检查排除了副本的代码，因此它不满足本仓库的这些规则。
+- **固定的上游副本**：上游变更只能通过重新复制并重新应用 UPSTREAM.md 记录来引入；若干仓库检查排除了副本的代码；UPSTREAM.md S1 列出了它们。
 - **上游设置说明**：`SETUP.md` 与 `docs/006-deployment.md` 使用 `scripts/dsh-superagent` 和全局安装的 `dsh`，本副本不包含这些内容。
+- **投递只限制 Ticket 输入**：自行读取 pull request、聊天线程或 `trigger/` 资源的 worker 仍会看到允许列表之外发送者的文本。GitHub 发送者以登录名识别，其所有者可以改名，之后他人可以占用该名称；被编辑的评论保留原作者。`Tickets.wake` 不再次检查投递，因此在发送者离开允许列表之前已到达已结束 Ticket 的输入仍可以恢复该 Ticket。
 - **没有进程隔离**：两个 preset 都以主机的操作系统用户身份、在 `danger-full-access` 下运行；执行器可以读取该用户的主目录，并按路径运行任何程序。
 - **状态无限增长**：不会删除旧的触发、决定、已结束的 Ticket、outbox 回执，以及已保存的设置与提示词版本。
 - **仅支持 github.com**：不支持 GitHub Enterprise Server，且 agent 必须是用户账号，因为运行时读取它的通知。
