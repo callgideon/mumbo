@@ -1,0 +1,26 @@
+# Loader overlay (`dsh --patch`) for a mumbo project box, applied after mumbo.overlay.yml and mumbo-personal.overlay.yml.
+# A project box holds no user accounts, its coordinator's tools run in the box with Full access, and its members are
+# trusted collaborators. No owner sits at its browser, so a turn must never wait for an approval: under Full access no
+# command needs escalation, and `never` rejects any other ask at once instead of leaving the turn waiting. A patch replaces a row's whole config, so each row restates
+# every key it keeps.
+- id: approval
+  config:
+    policy: never
+- id: permission
+  config:
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: never
+      workspace-write:
+        sandbox: workspace-write
+        approval: never
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: never
+# Project members reach this box through the mumbo edge, which signs each request with a key derived for this box.
+- insert:
+    - id: mumbo-edge-member
+      name: '@mumbo/edge-member'
+      config:
+        key: !!js process.env.MUMBO_MEMBER_KEY

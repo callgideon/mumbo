@@ -49,6 +49,7 @@ async function harness(mode: 'view' | 'write' = 'view') {
   let intercepted: GatewayRpc | undefined
   ctx.provide('connection', {
     rpc: { intercept: (_path: string, _claims: unknown, handler: GatewayRpc) => { intercepted = handler; return () => {} } },
+    fetch: { authorize: () => () => Promise.resolve() },
   } as never)
   await ctx.plugin(TypertGateway, {})
   const rpc: GatewayRpc = (endpoint, payload, signal, peer) => {

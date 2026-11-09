@@ -62,6 +62,7 @@ interface SessionLogConnection {
       readonly path: string
       readonly methods: readonly ('GET' | 'HEAD')[]
       readonly requestBody: 'buffered'
+      readonly access: { readonly action: `${string}/${string}`; readonly resources: { readonly session: string } }
       readonly fetch: (request: Request) => Promise<Response>
     }): () => Promise<void>
   }
@@ -73,7 +74,8 @@ const REQUESTED: CommandResult = {
 }
 
 /**
- * Register the `/export` command and authenticated ZIP download and Markdown copy routes.
+ * Register the `/export` command and authenticated ZIP download and Markdown copy routes; a non-owner
+ * reaches them with `sessionLog/export` or `sessionLog/markdown` on the Session the query names.
  * @param ctx - Host context carrying the human-command registry.
  * @param config - resolved compression policy.
  */
@@ -90,6 +92,8 @@ export function apply(ctx: Context, config: Config = {}): void {
     path: SESSION_LOG_EXPORT_PATH,
     methods: ['GET', 'HEAD'],
     requestBody: 'buffered',
+    // The archive also holds every subagent descendant's log, which this action on the root Session covers.
+    access: { action: 'sessionLog/export', resources: { session: 'sessionId' } },
     fetch: async (request) => {
       const response = await sessionLogExportResponse(
         ctx,
@@ -105,6 +109,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     path: SESSION_MARKDOWN_EXPORT_PATH,
     methods: ['GET', 'HEAD'],
     requestBody: 'buffered',
+    access: { action: 'sessionLog/markdown', resources: { session: 'sessionId' } },
     fetch: async (request) => {
       const response = await sessionMarkdownResponse(ctx, request)
       if (request.method === 'GET') return response

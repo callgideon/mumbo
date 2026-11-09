@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Uso do computador (Linux X11)",
+    "description": "Permite que o modelo veja e opere uma área de trabalho Linux X11 por capturas de tela, mouse e teclado; requer xdotool e ImageMagick no host."
+  }
+}

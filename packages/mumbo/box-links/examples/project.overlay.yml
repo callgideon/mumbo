@@ -1,0 +1,7 @@
+# Loader overlay (`dsh --patch`) for a project box: the home page link only,
+# because a project box has no desktop.
+- insert:
+    - id: box-links
+      name: '@mumbo/box-links'
+      config:
+        home: https://boxes.example/home

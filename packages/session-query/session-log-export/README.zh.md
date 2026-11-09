@@ -106,7 +106,7 @@ Web bundle 将本包与 Connection、`dsh-commands`、`dsh-client-ui-commands`�
 
 两条入口都会先向文档相对的 `api/session.export?...` 发出 `HEAD` 预检请求，然后把 GET 路由交给浏览器下载管理器，JavaScript 不缓冲 ZIP。一个控制器按会话持有一项进行中的下载，把并发操作折叠进该任务，并在插件释放时取消预检。根组件依据每次操作的发起顺序，从控制器按 Session 键控的快照中选择最早的未关闭条目，不维护独立弹窗队列。释放会等待所有预检结束，防止迟到响应启动浏览器保存；已经交给浏览器的下载仍由浏览器管理。
 
-Host 路由是由该功能拥有的精确 Fetch 路由贡献。Connection 应用 Host/Origin 与浏览器会话检查并桥接流式 `Response`；本包拥有查询校验、活动会话 flush、基于句柄的日志读取与附件读取、ZIP 生成和 HTTP 状态语义。
+Host 路由是由该功能拥有的精确 Fetch 路由贡献。Connection 应用 Host/Origin 与浏览器会话检查并桥接流式 `Response`。非 owner Peer 只有在 `sessionId` 查询指定的 Session 上持有路由专用 action `sessionLog/export` 时才能到达 ZIP 路由，持有 `sessionLog/markdown` 时才能到达 Markdown 路由；该 Session 上的 `sessionLog/export` 同时覆盖归档包含的子代理后代日志与附件；本包拥有查询校验、活动会话 flush、基于句柄的日志读取与附件读取、ZIP 生成和 HTTP 状态语义。
 
 ### Markdown 复制流程
 
