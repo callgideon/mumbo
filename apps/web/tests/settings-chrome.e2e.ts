@@ -131,7 +131,7 @@ describe('web e2e: settings modal and General preferences', () => {
     } finally {
       await page.unrouteAll({ behavior: 'wait' })
     }
-    await dialog.getByText(`Current version:\${version}`, { exact: true }).waitFor()
+    await dialog.getByText(`Current version:${version}`, { exact: true }).waitFor()
     // Golden of the freshly opened dialog (default zh, General active).
     const snapshot = await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd, versionCapture)
     await compareOrRefreshGolden(DIALOG_EXPECTED, snapshot, MODE)
@@ -195,7 +195,7 @@ describe('web e2e: settings modal and General preferences', () => {
     ] as const
     for (const [entryId, status] of instanceRows) {
       const row = dialog.locator(`[data-plugin-scope="preset"] [data-plugin-entry="${entryId}"]`)
-      const name = `tool-subagent, \${entryId}, \${status}`
+      const name = `tool-subagent, ${entryId}, ${status}`
       const trigger = row.getByRole('button', { name, exact: true })
       await trigger.waitFor({ timeout: 10_000 })
       expect(await trigger.getAttribute('aria-expanded')).toBe('false')

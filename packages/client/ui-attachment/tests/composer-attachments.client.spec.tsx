@@ -39,20 +39,20 @@ const t = ((key: string, params?: Readonly<Record<string, unknown>>): string => 
   }
   if (key === 'file.remove') {
     const name = params?.name
-    return `RemoveFile \${typeof name === 'string' ? name : ''}`
+    return `RemoveFile ${typeof name === 'string' ? name : ''}`
   }
   if (key === 'file.retry') {
     const name = params?.name
-    return `Retry uploading \${typeof name === 'string' ? name : ''}`
+    return `Retry uploading ${typeof name === 'string' ? name : ''}`
   }
   if (key === 'image.remove') {
     const name = params?.name
-    return `RemoveImage \${typeof name === 'string' ? name : ''}`
+    return `RemoveImage ${typeof name === 'string' ? name : ''}`
   }
   if (key === 'attachment.dropDesc') {
     const count = params?.count
     const size = params?.size
-    return `Image limit: up to \${typeof count === 'number' ? String(count) : ''} images, \${typeof size === 'string' ? size : ''}`
+    return `Image limit: up to ${typeof count === 'number' ? String(count) : ''} images, ${typeof size === 'string' ? size : ''}`
   }
   return messages[key] ?? key
 }) as ComposerAttachmentsProps['t']

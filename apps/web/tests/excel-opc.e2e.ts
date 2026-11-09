@@ -80,7 +80,7 @@ describe.skipIf(mode === 'record')('web e2e: independent-writer Excel previews',
           : name === 'orphan-drawing' ? 'conditional formatting' : 'charts, conditional formatting'
         expect(await notice.innerText()).toBe(`This preview does not support ${features} in this workbook. Open it in a system application for the full experience.`)
       }
-      rows.push(`- \${name}.xlsx: Data opened; Item copied`)
+      rows.push(`- ${name}.xlsx: Data opened; Item copied`)
     }
     expect(await sheets.getByText('hidden page', { exact: true }).isVisible()).toBe(false)
     const warning = await notice.innerText()

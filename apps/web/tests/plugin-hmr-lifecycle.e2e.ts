@@ -101,9 +101,9 @@ export function apply(ctx) {
   }
 
   async function uninstallThroughPage(panel: Locator): Promise<void> {
-    await panel.getByRole('button', { name: `Inspect \${NAME}`, exact: true }).click()
-    await panel.getByRole('button', { name: `Uninstall \${NAME}`, exact: true }).click()
-    await page.getByRole('dialog', { name: `Uninstall「\${NAME}」？` }).getByRole('button', { name: 'Uninstall', exact: true }).click()
+    await panel.getByRole('button', { name: `Inspect ${NAME}`, exact: true }).click()
+    await panel.getByRole('button', { name: `Uninstall ${NAME}`, exact: true }).click()
+    await page.getByRole('dialog', { name: `Uninstall「${NAME}」？` }).getByRole('button', { name: 'Uninstall', exact: true }).click()
     // The page leaves the removed package's details for the list.
     await panel.getByRole('heading', { name: 'Plugins', exact: true }).waitFor({ timeout: 30_000 })
     await expect.poll(() => panel.locator(`[data-plugin-package="${NAME}"]`).count(), { timeout: 30_000 }).toBe(0)
@@ -138,7 +138,7 @@ export function apply(ctx) {
     const v1 = await version('v1')
     const panel = await installThroughPage(`file:${v1}`)
     await traced(['start:v1'])
-    const toggle = panel.getByRole('switch', { name: `Enable \${NAME}`, exact: true })
+    const toggle = panel.getByRole('switch', { name: `Enable ${NAME}`, exact: true })
     await expect.poll(() => toggle.getAttribute('aria-checked'), { timeout: PLUGIN_TOGGLE_SETTLE_MS }).toBe('true')
     await toggle.click()
     await traced(['stop:v1'])
@@ -153,7 +153,7 @@ export function apply(ctx) {
     expect(upgraded, JSON.stringify(upgraded)).toMatchObject({ application: 'applied' })
     await traced(['stop:v1', 'start:v2'])
     // The page reads the upgrade from the Host's change announcement.
-    await panel.getByRole('button', { name: `Inspect \${NAME}`, exact: true }).click()
+    await panel.getByRole('button', { name: `Inspect ${NAME}`, exact: true }).click()
     await panel.getByText('v2.0.0', { exact: true }).waitFor({ timeout: 10_000 })
     await panel.getByRole('button', { name: 'Back to plugins' }).click()
   }, 90_000)
@@ -166,7 +166,7 @@ export function apply(ctx) {
     await traced(['stop:v2'])
     // Switching the broken plugin off and on again loads the same files, and the page names the missing dependency.
     const panel = await openPanel()
-    const toggle = panel.getByRole('switch', { name: `Enable \${NAME}`, exact: true })
+    const toggle = panel.getByRole('switch', { name: `Enable ${NAME}`, exact: true })
     await toggle.click()
     await expect.poll(() => toggle.getAttribute('aria-checked'), { timeout: PLUGIN_TOGGLE_SETTLE_MS }).toBe('false')
     await toggle.click()

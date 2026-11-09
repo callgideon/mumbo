@@ -71,7 +71,7 @@ describe('terminalCardModel', () => {
     const card = terminalCardModel(settled({ content: [{ type: 'text', text: `failed\n[exit code: ${code}]` }] }))
     expect(card?.card).toMatchObject({ output: 'failed', exitCode: code })
     expect(terminalExitLabel(card, enT)).toBe(`exit code ${code}`)
-    expect(terminalExitLabel(card, t)).toBe(`Exit code \${code}`)
+    expect(terminalExitLabel(card, t)).toBe(`Exit code ${code}`)
   })
 
   it('omits exit capsules without a settled foreground failure', () => {

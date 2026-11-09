@@ -405,7 +405,7 @@ it('uses the configured policy title as the native headline without repeating it
   await Promise.resolve()
   const options = native.messageBox.mock.calls[0]![1]
   expect(options.message).toBe('Configured title')
-  expect(options.detail).toBe('Configured detail\\n\\nUpdate: 1.0.1-nightly.1')
+  expect(options.detail).toBe('Configured detail\n\nUpdate: 1.0.1-nightly.1')
 })
 
 

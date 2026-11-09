@@ -416,7 +416,7 @@ it('restores repeated file, folder and Session capsules across edits, Workspace 
       await assertDraft(page, item.id, item.draft)
       await composer(page).click()
       await page.keyboard.press(EDITOR_END)
-      const suffix = ` · Edit\${round} 🧪`
+      const suffix = ` · Edit${round} 🧪`
       await page.keyboard.insertText(suffix)
       item.draft = { ...item.draft, text: item.draft.text + suffix }
       await assertDraft(page, item.id, item.draft)
@@ -461,7 +461,7 @@ it('reads a legacy string from the existing conversation key and saves ordinary 
   await composer(page).click()
   await page.keyboard.press(EDITOR_END)
   await page.keyboard.insertText(', ContinueEdit')
-  await assertDraft(page, firstId, { text: `\${legacy}, ContinueEdit`, references: [] })
+  await assertDraft(page, firstId, { text: `${legacy}, ContinueEdit`, references: [] })
   await assertUnsubmitted(scaffold, [firstId])
   expect(console.pageErrors).toEqual([])
   expect(console.warnings).toEqual([])

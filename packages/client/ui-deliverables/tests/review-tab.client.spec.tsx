@@ -389,7 +389,7 @@ describe('ReviewTab', () => {
     })
     expect(view.container.querySelector('[data-review-view]')?.getAttribute('data-review-view')).toBe('unified')
     expect(view.container.querySelectorAll('[data-diff-line]')).toHaveLength(MAX_RENDERED_LINES)
-    expect(view.container.querySelector('[data-diff-truncated]')?.textContent).toBe(`Showing the first \${MAX_RENDERED_LINES} lines`)
+    expect(view.container.querySelector('[data-diff-truncated]')?.textContent).toBe(`Showing the first ${MAX_RENDERED_LINES} lines`)
   })
 
   it('falls back to the first file for an index the summary does not list, and forgets its state with the tab', () => {

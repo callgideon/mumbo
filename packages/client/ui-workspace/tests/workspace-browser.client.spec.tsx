@@ -989,7 +989,7 @@ describe('WorkspaceBrowser', () => {
     expectVisible(5)
     const labels: string[] = []
     for (const [remaining, visible] of [[12, 10], [7, 15], [2, 17]] as const) {
-      const overflow = screen.getByRole('button', { name: `Show \${remaining} more sessions` })
+      const overflow = screen.getByRole('button', { name: `Show ${remaining} more sessions` })
       labels.push(overflow.textContent ?? '')
       expect(screen.queryByRole('button', { name: 'Show less' })).toBeNull()
       fireEvent.click(overflow)

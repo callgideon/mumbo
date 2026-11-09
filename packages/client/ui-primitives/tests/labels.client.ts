@@ -16,41 +16,41 @@ export const markdownLabels: MarkdownLabels = {
 export const diffBlockLabels: DiffBlockLabels = {
   codeLabel: 'Code block', wrapLabel: 'Line wrap', unwrapLabel: 'CancelLine wrap',
   copy: 'Copy', copied: 'Copied', collapseAria: 'Collapse diff',
-  expandAria: hidden => `Expand the remaining \${hidden} more diff lines`,
-  collapse: 'Collapse', expand: hidden => `… \${hidden}`,
+  expandAria: hidden => `Expand the remaining ${hidden} more diff lines`,
+  collapse: 'Collapse', expand: hidden => `… ${hidden}`,
 }
 
 export const readBlockLabels: ReadBlockLabels = {
   codeLabel: 'Code block', wrapLabel: 'Line wrap', unwrapLabel: 'CancelLine wrap',
-  window: (shown, total) => `Showing \${shown} / \${total}`,
+  window: (shown, total) => `Showing ${shown} / ${total}`,
   copy: 'Copy', copied: 'Copied', collapseAria: 'Collapse content',
-  expandAria: hidden => `Expand the remaining \${hidden}`,
-  collapse: 'Collapse', expand: hidden => `… \${hidden}`,
+  expandAria: hidden => `Expand the remaining ${hidden}`,
+  collapse: 'Collapse', expand: hidden => `… ${hidden}`,
 }
 
 export const searchBlockLabels: SearchBlockLabels = {
   pathsSummary: (shown, total, truncated) => truncated
-    ? `Showing \${shown} of \${total} paths`
-    : `\${shown} paths`,
+    ? `Showing ${shown} of ${total} paths`
+    : `${shown} paths`,
   matchesSummary: (shown, total, files, truncated) => truncated
-    ? `Showing \${shown} of \${total} matches · \${files} files`
-    : `\${shown} matches · \${files} files`,
+    ? `Showing ${shown} of ${total} matches · ${files} files`
+    : `${shown} matches · ${files} files`,
   copy: 'Copy', copied: 'Copied', noResults: 'No results',
   collapseAria: 'Collapse results',
-  expandAria: hidden => `Expand the remaining \${hidden} more result lines`,
-  collapse: 'Collapse', expand: hidden => `… \${hidden}`,
+  expandAria: hidden => `Expand the remaining ${hidden} more result lines`,
+  collapse: 'Collapse', expand: hidden => `… ${hidden}`,
 }
 
 export const terminalBlockLabels: TerminalBlockLabels = {
-  commandLine: line => `Command line \${line}`,
-  signal: signal => `Signal \${signal}`,
-  exitCode: code => `Exit code \${code}`,
+  commandLine: line => `Command line ${line}`,
+  signal: signal => `Signal ${signal}`,
+  exitCode: code => `Exit code ${code}`,
   noExitCode: 'no exit code',
   running: 'Running', failed: 'Failed', done: 'Done',
   copy: 'Copy', copied: 'Copied', noOutput: 'No output',
   collapseAria: 'Collapse output', collapse: 'Collapse',
-  expandAria: hidden => `Expand the remaining \${hidden} output lines`,
-  expand: hidden => `… \${hidden}`,
+  expandAria: hidden => `Expand the remaining ${hidden} output lines`,
+  expand: hidden => `… ${hidden}`,
 }
 
 export const jsonTreeLabels: JsonTreeLabels = {

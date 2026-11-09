@@ -1409,7 +1409,7 @@ describe('web e2e: shipped right Sidebar', () => {
         expect(await width(column)).toBeGreaterThan(300)
         await expect.poll(async () => await tabTitles(column)).toEqual(['File', 'Start'])
         await expect.poll(async () => await guide.locator('[data-sidebar-right-guide-entry="files"]').innerText())
-          .toBe('Workspace files\\nBrowse files in this session\'s workspace\\n⌥\\n⌘\\nP')
+          .toBe('Workspace files\nBrowse files in this session\'s workspace\n⌥\n⌘\nP')
         const fileEntry = guide.locator('[data-sidebar-right-guide-entry="files"]')
         const terminalEntry = guide.locator('[data-sidebar-right-guide-entry="terminal"]')
         for (const entry of [fileEntry, terminalEntry]) {

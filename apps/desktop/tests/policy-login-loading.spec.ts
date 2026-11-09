@@ -17,7 +17,7 @@ function open(query = ''): Document {
 }
 
 it('renders the login placeholder label from the main-process query', () => {
-  const document = open(`?label=\${encodeURIComponent('Loading sign-in page…')}`)
+  const document = open(`?label=${encodeURIComponent('Loading sign-in page…')}`)
   expect(document.getElementById('label')?.textContent).toBe('Loading sign-in page…')
   const policy = document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content') ?? ''
   // The placeholder must not be able to reach anything, so its own policy

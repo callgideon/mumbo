@@ -1445,7 +1445,7 @@ else process.exit(1);
       await viewer.click()
       await page.getByRole('menuitem', { name: 'Spreadsheet', exact: true }).click()
       await excel.getByText(extension.toUpperCase(), { exact: true }).waitFor()
-      await writeFile(join(cwd, `table.${extension}`), extension === 'csv' ? '00999,Update' : '00999\\tUpdate')
+      await writeFile(join(cwd, `table.${extension}`), extension === 'csv' ? '00999,Update' : '00999\tUpdate')
       await preview.locator('[data-textpreview-tool="reload"]').click()
       await expect.poll(() => excel.locator('.fortune-fx-input').innerText()).toBe('00999')
       await excel.locator('.fortune-sheet-overlay').click({ position: { x: 70, y: 30 } })

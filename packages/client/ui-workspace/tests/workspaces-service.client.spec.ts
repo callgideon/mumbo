@@ -808,7 +808,7 @@ describe('UiWorkspaceService', () => {
 
   describe('startSession draft initialization', () => {
     it.each<{ name: string; options: DraftInitializationOptions }>([
-      { name: 'plain text', options: { prompt: 'Draft 🧭\\nsecond line', clearPreviousDraft: true } },
+      { name: 'plain text', options: { prompt: 'Draft 🧭\nsecond line', clearPreviousDraft: true } },
       { name: 'empty text', options: { prompt: '' } },
       { name: 'clear without prompt', options: { clearPreviousDraft: true } },
       { name: 'replace without prompt', options: { whenDraftExists: 'replace' } },

@@ -254,7 +254,7 @@ describe('draft document values', () => {
 
 describe('draft documents in the input shell', () => {
   it('imports file, folder, session, repeated, and invalid references on the first document', () => {
-    const draft = documentOf('🙂 File ', file, '\\nDirectory ', folder, '\\nSessions ', session, ' again ', file, ' ', {
+    const draft = documentOf('🙂 File ', file, '\nDirectory ', folder, '\nSessions ', session, ' again ', file, ' ', {
       ...session, invalid: true,
     })
     const shell = makeShell()

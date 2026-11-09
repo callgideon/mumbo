@@ -245,7 +245,7 @@ describe('SubagentHeaderLineage', () => {
     const header = view.container.ownerDocument.querySelector<HTMLElement>('[data-subagent-section-header]')!
     expect(within(header).getByRole('heading', { name: 'Subagents' })).toBeTruthy()
     expect(within(header).queryByRole('button')).toBeNull()
-    expect(header.textContent).toBe('Subagents1 completed\\u2002·\\u20021 In progress\\u2002·\\u20021 Not running\\u2002·\\u20021 External task')
+    expect(header.textContent).toBe('Subagents1 completed\u2002·\u20021 In progress\u2002·\u20021 Not running\u2002·\u20021 External task')
     fireEvent.click(screen.getByRole('button', { name: 'Expand worker descendants' }))
     expect(header.textContent).toContain('1 In progress')
     expect(header.textContent).not.toContain('2 In progress')
@@ -1595,7 +1595,7 @@ describe('SubagentHeaderLineage', () => {
       entries: [{ id: CHILD, mode: 'one-shot', activity: 'inactive', ...label === undefined ? {} : { label } }],
     }), {}, { [CHILD]: { ...summary(CHILD, 1), parentId: PARENT, origin: 'subagent' } })
     render(<HeaderCatalog {...input} sessionId={CHILD} lineageSessionId={CHILD} />)
-    const switcher = screen.getByRole('button', { name: `Switch subagent: \${CHILD}` })
+    const switcher = screen.getByRole('button', { name: `Switch subagent: ${CHILD}` })
     fireEvent.click(switcher)
     expect(screen.getByRole('treeitem', { name: new RegExp(CHILD) })).toBeTruthy()
     expect(screen.queryByRole('heading')).toBeNull()
@@ -1618,7 +1618,7 @@ describe('SubagentHeaderLineage', () => {
     }
     render(<HeaderCatalog {...input} />)
 
-    expect(screen.getByRole('button', { name: `Switch subagent: \${CHILD}` })).toBeTruthy()
+    expect(screen.getByRole('button', { name: `Switch subagent: ${CHILD}` })).toBeTruthy()
   })
 
   it('names the breadcrumb by the agent name when the selected row has an empty description', () => {

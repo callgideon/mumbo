@@ -354,7 +354,7 @@ it('recovers system-default preview after its track ends and shows unavailable w
     expect(b.getUserMedia.mock.calls.at(-1)?.[0].audio).not.toHaveProperty('deviceId')
     b.enumerateDevices.mockResolvedValue([])
     await act(async () => { b.media.dispatchEvent(new Event('devicechange')) })
-    const unavailable = screen.getByRole<HTMLOptionElement>('option', { name: `System default（Fixture microphone） — \${zh.deviceUnavailable}` })
+    const unavailable = screen.getByRole<HTMLOptionElement>('option', { name: `System default（Fixture microphone） — ${zh.deviceUnavailable}` })
     expect(unavailable.disabled).toBe(true)
     expect(screen.queryByRole('img', { name: zh.inputLevel })).toBeNull()
   } finally { b.unmount(); await Promise.all(b.recordings.map(recording => recording.dispose())) }

@@ -20,7 +20,7 @@ async function fixture() {
   const id = SessionId('file-drag-test')
   ctx.sessions.create(id, { meta: { cwd: root, origin: 'subagent' } })
   const path = join(root, 'report.pdf')
-  const bytes = Buffer.from('%PDF-1.4\\nRaw\\n%%EOF')
+  const bytes = Buffer.from('%PDF-1.4\nRaw\n%%EOF')
   await writeFile(path, bytes)
   return { ctx, root, id, path, bytes, address: sessionFileAddress(id, 'report.pdf') }
 }

@@ -78,7 +78,7 @@ it('opens stored timing fields immediately without selecting another repeat opti
     for (const { task, repeat, field } of tasks) {
       await manager.getByRole('button', { name: task.title, exact: true }).click()
       const detail = manager.getByRole('complementary', { name: 'Task details', exact: true })
-      expect(await detail.getByRole('button', { name: `Repeat \${repeat}`, exact: true }).isVisible()).toBe(true)
+      expect(await detail.getByRole('button', { name: `Repeat ${repeat}`, exact: true }).isVisible()).toBe(true)
       const role = field === 'Weekday' ? 'group' : field === 'Interval' ? 'spinbutton' : 'button'
       expect(await detail.getByRole(role, { name: field, exact: true }).isVisible()).toBe(true)
       expect(await detail.getByRole('button', { name: 'Save changes', exact: true }).isDisabled()).toBe(true)

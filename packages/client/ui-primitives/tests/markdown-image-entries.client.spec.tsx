@@ -23,7 +23,7 @@ it('loads Desktop inline and hover previews through the file route after streami
   const path = '/work/test Image#100%.png'
   const src = fileMediaUrl('dsh-app://app/', path)!
   const images = { fileDrag, resolve: (value: string) => fileMediaUrl('dsh-app://app/', value), labels }
-  const text = `![Image](<\${encodeURI(path).replace('#', '%23')}>)\\n\\n[OpenImage](<\${encodeURI(path).replace('#', '%23')}>)`
+  const text = `![Image](<${encodeURI(path).replace('#', '%23')}>)\n\n[OpenImage](<${encodeURI(path).replace('#', '%23')}>)`
   const openFile = vi.fn()
   const content = (streaming: boolean) => <MarkdownDelegateProvider fileImages={images} openFile={openFile}>
     <MarkdownText text={text} streaming={streaming} />

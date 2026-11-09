@@ -351,7 +351,7 @@ describe.skipIf(MODE === 'record')('web e2e: bonus notice', () => {
     const panel = (await settings.textContent()) ?? ''
     const usage = await settings.getByRole('link', { name: 'View usage', exact: true }).getAttribute('href')
     observations.push(`open.get locale=${String(openGet.locale)} query=${openGet.query} served=true gets=${String(platform.gets.length - getsBefore)}`)
-    observations.push(`open.balance bonus-row=\${String(panel.includes('Granted balance'))} amount=\${String(panel.includes('¥13.00'))} dated=\${String(/\\d{4}-\\d{2}-\\d{2}/.test(panel))}`)
+    observations.push(`open.balance bonus-row=${String(panel.includes('Granted balance'))} amount=${String(panel.includes('¥13.00'))} dated=${String(/\d{4}-\d{2}-\d{2}/.test(panel))}`)
     observations.push(`open.cards-while-open=${String(await noticeCards(page).count())} acks=${String(platform.acks.length)}`)
     observations.push(`open.usage-link=${String(usage).replace(platform.origin, '{{origin}}')}`)
     expect(openGet.locale).toBe('zh_CN')

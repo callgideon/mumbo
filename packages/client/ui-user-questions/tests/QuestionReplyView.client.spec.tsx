@@ -68,7 +68,7 @@ describe('QuestionReplyView', () => {
     render(<QuestionReplyBubble data={data} t={t} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'copy' }))
-    expect(writeText).toHaveBeenCalledWith('What should we build?\\nAnswer: A dashboard')
+    expect(writeText).toHaveBeenCalledWith('What should we build?\nAnswer: A dashboard')
     // Two microtask ticks: writeClipboard's own await, then the .then that
     // lands the success chrome.
     await act(async () => {
@@ -175,6 +175,6 @@ describe('QuestionReplyView', () => {
     render(<QuestionReplyBubble data={data} t={t} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'copy' }))
-    expect(writeText).toHaveBeenCalledWith('What should we build?\\nAnswer: A dashboard')
+    expect(writeText).toHaveBeenCalledWith('What should we build?\nAnswer: A dashboard')
   })
 })

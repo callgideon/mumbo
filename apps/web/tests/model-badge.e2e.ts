@@ -61,7 +61,7 @@ describe.skipIf(MODE === 'record')('web e2e: catalog model badges', () => {
     const trigger = page.getByRole('button', { name: /^Choose models/ })
     await trigger.getByText('new', { exact: true }).waitFor()
     expect(await trigger.textContent()).toContain(`new ${NAME}`)
-    expect(await trigger.getAttribute('aria-label')).toBe(`Select model, current \${NAME}`)
+    expect(await trigger.getAttribute('aria-label')).toBe(`Select model, current ${NAME}`)
     expect(await trigger.getByText('new', { exact: true }).getAttribute('data-tone')).toBe('success')
     try {
       await trigger.click()

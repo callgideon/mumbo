@@ -20,7 +20,7 @@ afterEach(cleanup)
 const labels: MessageImageLabels = {
   image: 'Image',
   open: 'View original',
-  openNamed: label => `\${label}, click to view original`,
+  openNamed: label => `${label}, click to view original`,
   loading: 'Loading image…',
   loadFailed: 'Image failed to load; click to retry',
   lightbox: { dialog: 'Original image preview', close: 'Close original image preview' },

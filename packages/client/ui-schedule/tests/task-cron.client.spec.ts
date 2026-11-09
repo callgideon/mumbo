@@ -162,7 +162,7 @@ describe('cronPreview', () => {
     ['0 * * * 1', 'Mon every hour', 'Mon Every hour'],
     ['0 */2 * * 1', 'Mon every 2 hours', 'Mon Every 2 hours'],
     ['0-59/1 * * * *', `Every day every hour at minute ${everyMinuteEn}`,
-      `Daily at Every hour at minute \${everyMinuteZh} minutes`],
+      `Daily at Every hour at minute ${everyMinuteZh} minutes`],
     ['0-30/15 * * * *', 'Every day every hour at minute 0, 15, 30', 'Daily at Every hour at minute 0, 15, 30 minutes'],
     ['5,20,35,50 * * * *', 'Every day every hour at minute 5, 20, 35, 50', 'Daily at Every hour at minute 5, 20, 35, 50 minutes'],
     ['0,15,40 * * * *', 'Every day every hour at minute 0, 15, 40', 'Daily at Every hour at minute 0, 15, 40 minutes'],

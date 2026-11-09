@@ -191,8 +191,8 @@ it('reuses one shell during synchronous catalog retention and restores its initi
 })
 
 it('restores legacy text before a view and reuses the live draft on later shell lookups', async () => {
-  const b = await fixture('/saved legacy\\n🙂 Chinese')
-  expect(b.shell.draftSnapshot).toEqual({ text: '/saved legacy\\n🙂 Chinese', references: [] })
+  const b = await fixture('/saved legacy\n🙂 Chinese')
+  expect(b.shell.draftSnapshot).toEqual({ text: '/saved legacy\n🙂 Chinese', references: [] })
   expect(textReferences(b.shell)).toEqual([])
   expect(localStorage.getItem(b.key)).toBe(b.raw)
   b.shell.setDraft('edited before mounting a view')

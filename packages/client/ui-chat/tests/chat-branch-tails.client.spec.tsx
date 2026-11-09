@@ -756,7 +756,7 @@ describe('MessageItem arms', () => {
         } as never}
         />,
       )
-      fireEvent.click(view.getByRole('button', { name: new RegExp(`^Context injection\\\\s*\${label}$`) }))
+      fireEvent.click(view.getByRole('button', { name: new RegExp(`^Context injection\\\\s*${label}$`) }))
       expect(view.container.querySelector('[data-context-text]')?.textContent).toBe(`${form} prose`)
       expect(view.container.querySelector('[data-context-injection-body]')?.getAttribute('data-context-form'))
         .toBeNull()

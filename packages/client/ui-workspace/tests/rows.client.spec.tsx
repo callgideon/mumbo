@@ -137,7 +137,7 @@ describe('Workspace and Session hover handoff', () => {
       for (const current of order) {
         move(previous, current.anchor)
         expect(screen.getAllByRole('button', { name: /^Copy:/ })).toHaveLength(1)
-        expect(screen.getByRole('button', { name: `Copy: \${current.copy}` })).toBeTruthy()
+        expect(screen.getByRole('button', { name: `Copy: ${current.copy}` })).toBeTruthy()
         previous = current.anchor
       }
       move(previous, document.body)
@@ -147,7 +147,7 @@ describe('Workspace and Session hover handoff', () => {
       act(() => { vi.advanceTimersByTime(799) })
       expect(screen.queryAllByRole('button', { name: /^Copy:/ })).toHaveLength(0)
       act(() => { vi.advanceTimersByTime(1) })
-      expect(screen.getByRole('button', { name: `Copy: \${b.copy}` })).toBeTruthy()
+      expect(screen.getByRole('button', { name: `Copy: ${b.copy}` })).toBeTruthy()
     } finally {
       cleanup()
       vi.useRealTimers()

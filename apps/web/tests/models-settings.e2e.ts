@@ -545,8 +545,8 @@ describe('web e2e: Models settings page configures a dormant provider', () => {
     await dialog.getByText('Customized settings').click()
     for (const [position, id] of [[2, 'order-second'], [3, 'order-third']] as const) {
       await dialog.getByRole('button', { name: 'Add model', exact: true }).click()
-      await dialog.getByLabel(`Model ID \${String(position)}`, { exact: true }).fill(id)
-      await dialog.getByLabel(`Display name \${String(position)}`, { exact: true }).fill(id)
+      await dialog.getByLabel(`Model ID ${String(position)}`, { exact: true }).fill(id)
+      await dialog.getByLabel(`Display name ${String(position)}`, { exact: true }).fill(id)
     }
     await dialog.getByRole('button', { name: 'Save', exact: true }).click()
     await dialog.getByText('Saved Acme gateway (acme-gateway).', { exact: true }).waitFor()
@@ -560,7 +560,7 @@ describe('web e2e: Models settings page configures a dormant provider', () => {
       // Keep the last insertion gap inside the scrollport before native dragging starts.
       await dialog.getByRole('button', { name: 'Add model', exact: true }).scrollIntoViewIfNeeded()
       const source = dialog.getByRole('button', { name: 'Reorder model 1', exact: true })
-      const target = dialog.getByRole('button', { name: `Reorder model \${save ? '3' : '2'}`, exact: true })
+      const target = dialog.getByRole('button', { name: `Reorder model ${save ? '3' : '2'}`, exact: true })
       await source.hover()
       const from = await source.boundingBox()
       if (from === null) throw new Error('Model drag handle is not visible')
@@ -579,7 +579,7 @@ describe('web e2e: Models settings page configures a dormant provider', () => {
       expect(await dialog.locator('[data-drop-target]').evaluate(element => getComputedStyle(element).zIndex)).toBe('1')
       await page.mouse.up()
       await page.locator('body > div[inert][aria-hidden="true"]:has(button[aria-label^="Reorder model "])').waitFor({ state: 'detached' })
-      await expect.poll(() => dialog.getByLabel(`Model ID \${save ? '3' : '2'}`, { exact: true }).inputValue()).toBe('acme-large')
+      await expect.poll(() => dialog.getByLabel(`Model ID ${save ? '3' : '2'}`, { exact: true }).inputValue()).toBe('acme-large')
       await expect.poll(() => dialog.locator('[data-row-key]').evaluateAll(rows => rows.flatMap(row => row.getAnimations()).length)).toBe(0)
       expect(await readFile(path, 'utf8')).toBe(document)
       await dialog.getByRole('button', { name: save ? 'Save' : 'Cancel', exact: true }).click()
@@ -599,7 +599,7 @@ describe('web e2e: Models settings page configures a dormant provider', () => {
     await edit.click()
     await dialog.getByText('Customized settings').click()
     expect(await Promise.all([1, 2, 3].map(position =>
-      dialog.getByLabel(`Model ID \${String(position)}`, { exact: true }).inputValue(),
+      dialog.getByLabel(`Model ID ${String(position)}`, { exact: true }).inputValue(),
     ))).toEqual(['order-second', 'order-third', 'acme-large'])
     const viewport = page.viewportSize()
     if (viewport === null) throw new Error('Model ordering checks require an explicit viewport')
@@ -670,7 +670,7 @@ describe('web e2e: Models settings page configures a dormant provider', () => {
         await openSettings(mobilePage, 'zh')
         const dialog = mobilePage.getByRole('dialog', { name: 'Settings' })
         await dialog.getByRole('button', { name: 'Model', exact: true }).click()
-        const edit = dialog.getByRole('button', { name: `Edit \${provider}`, exact: true })
+        const edit = dialog.getByRole('button', { name: `Edit ${provider}`, exact: true })
         await edit.click()
         await dialog.getByText('Customized settings').click()
         const id = dialog.getByRole('textbox', { name: 'Model ID 1', exact: true })
@@ -702,7 +702,7 @@ describe('web e2e: Models settings page configures a dormant provider', () => {
         expect(scaffold.ctx.settings.describe().find(row => row.ns === 'llm-pi-ai')?.value).toMatchObject({
           providers: { [provider]: { models: [{ id: 'layout-model', name: 'phone Save renamed to' }, { id: 'next-model', name: 'next Model' }] } },
         })
-        await dialog.getByText(`Saved \${provider}.`, { exact: true }).waitFor()
+        await dialog.getByText(`Saved ${provider}.`, { exact: true }).waitFor()
         await edit.click()
         await dialog.getByText('Customized settings').click()
         await name.waitFor({ state: 'hidden' })
@@ -734,7 +734,7 @@ describe('web e2e: Models settings page configures a dormant provider', () => {
         await openSettings(touchPage, 'zh')
         const touchDialog = touchPage.getByRole('dialog', { name: 'Settings' })
         await touchDialog.getByRole('button', { name: 'Model', exact: true }).tap()
-        await touchDialog.getByRole('button', { name: `Edit \${provider}`, exact: true }).tap()
+        await touchDialog.getByRole('button', { name: `Edit ${provider}`, exact: true }).tap()
         await touchDialog.getByText('Customized settings').tap()
         const touchToggle = touchDialog.getByRole('button', { name: 'Model options 1', exact: true })
         const touchName = touchDialog.getByRole('textbox', { name: 'Display name 1', exact: true })
@@ -777,7 +777,7 @@ describe('web e2e: Models settings page configures a dormant provider', () => {
         const initialFirst = await dialog.getByLabel('Model ID 1', { exact: true }).inputValue()
         for (let position = 4; position <= 9; position++) {
           await dialog.getByRole('button', { name: 'Add model', exact: true }).click()
-          await dialog.getByLabel(`Model ID \${String(position)}`, { exact: true }).fill(`keyboard-${String(position)}`)
+          await dialog.getByLabel(`Model ID ${String(position)}`, { exact: true }).fill(`keyboard-${String(position)}`)
         }
         const source = await dialog.getByRole('button', { name: 'Reorder model 1', exact: true }).elementHandle()
         if (source === null) throw new Error('Keyboard reorder handle is missing')
@@ -785,7 +785,7 @@ describe('web e2e: Models settings page configures a dormant provider', () => {
         for (let position = 2; position <= 9; position++) {
           await keyboardPage.keyboard.press('ArrowDown')
           await expect.poll(() => source.evaluate(button => document.activeElement === button)).toBe(true)
-          expect(await source.getAttribute('aria-label')).toBe(`Reorder model \${String(position)}`)
+          expect(await source.getAttribute('aria-label')).toBe(`Reorder model ${String(position)}`)
           await expect.poll(() => source.evaluate(button => button.closest('[data-row-key]')!.getAnimations().length)).toBe(0)
           expect(await source.evaluate((button) => {
             const rect = button.getBoundingClientRect()

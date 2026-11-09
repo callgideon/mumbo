@@ -924,7 +924,7 @@ describe('web e2e: plugin manager', () => {
       await card.waitFor()
       expect((await scaffold.ctx.pluginManager.listBundles()).find(bundle => bundle.name === name)?.enabled).toBe(true)
       expect(readProfileManifest('dsh', profileDir).dependencies).toEqual(before)
-      await card.getByRole('switch', { name: `Enable \${title}`, exact: true }).click()
+      await card.getByRole('switch', { name: `Enable ${title}`, exact: true }).click()
       await card.waitFor({ state: 'hidden' })
       expect((await scaffold.ctx.pluginManager.listBundles()).find(bundle => bundle.name === name)?.enabled).toBe(false)
     }

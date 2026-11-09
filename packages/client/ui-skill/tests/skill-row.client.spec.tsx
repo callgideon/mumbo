@@ -76,7 +76,7 @@ describe('SkillRow', () => {
     fireEvent.click(row)
     expect(row.getAttribute('aria-expanded')).toBe('true')
     const card = screen.getByLabelText('Instructions')
-    expect(card.textContent).toBe('InstructionsFollow the issue workflow.\\nKeep project fields in sync.')
+    expect(card.textContent).toBe('InstructionsFollow the issue workflow.\nKeep project fields in sync.')
     expect(view.container.textContent).not.toContain('{"name":"dsh-manage-issues"}')
     fireEvent.click(screen.getByRole('button', { name: 'Inspect' }))
     expect(inspect).toHaveBeenCalledTimes(1)

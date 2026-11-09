@@ -214,7 +214,7 @@ describe('user Content Factory', () => {
     expect(view.getByText('Referenced session · Alpha、Beta')).toBeTruthy()
     expect(view.getByRole('button', { name: '▾ Extra content block' })).toBeTruthy()
     expect(view.container.querySelector('pre')?.textContent).toContain(
-      `… truncated, \${JSON.stringify(block, null, 2).length} characters total`,
+      `… truncated, ${JSON.stringify(block, null, 2).length} characters total`,
     )
   })
 

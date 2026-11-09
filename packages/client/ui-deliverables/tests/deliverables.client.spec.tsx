@@ -786,7 +786,7 @@ describe('ChangedFiles card', () => {
 })
 
 describe('producedFileMentions resolver', () => {
-  const label = (path: string) => `Open \${path}`
+  const label = (path: string) => `Open ${path}`
 
   it('does not let a legacy bare path override an ambiguous canonical basename', () => {
     const resolver = producedFileMentions(['report.txt', '/project/child/report.txt'], () => {}, label)

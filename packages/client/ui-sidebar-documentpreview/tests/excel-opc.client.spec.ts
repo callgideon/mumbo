@@ -58,7 +58,7 @@ it('retains styles, formulas, hidden sheets and notices in the combined workbook
   const sheet = result.sheets[0]!
   expect(result.sheets.map(sheet => [sheet.name, sheet.hide])).toEqual([['Data', 0], ['hidden page', 1]])
   expect(sheet.celldata!.find(cell => cell.r === 1 && cell.c === 1)!.v).toMatchObject({ v: 42, bl: 1, fc: '#112233', bg: '#FFFF00' })
-  expect(sheet.celldata!.find(cell => cell.r === 4 && cell.c === 0)!.v?.v).toBe(' <s:pic/> & Chinese😀\\n  tail ')
+  expect(sheet.celldata!.find(cell => cell.r === 4 && cell.c === 0)!.v?.v).toBe(' <s:pic/> & Chinese😀\n  tail ')
   expect(sheet.celldata!.find(cell => cell.r === 5 && cell.c === 0)!.v?.f).toBe('=SUM(B2:B3)')
   expect(sheet.config).toMatchObject({ merge: { '29_7': { r: 29, c: 7, rs: 1, cs: 3 } }, rowhidden: { 2: 0 }, colhidden: { 1: 0 } })
   expect(sheet.frozen).toMatchObject({ type: 'rangeBoth', range: { row_focus: 0, column_focus: 0 } })

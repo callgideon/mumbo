@@ -368,7 +368,7 @@ describe('GitHub provider reads', () => {
     await expect(provider(gh.run).fileText(pull(7), head, 'docs/Chinese notes/#1.md', signal)).resolves.toBe('line\n')
     expect(gh.calls).toEqual([[
       'api', '--hostname', 'github.com', '-H', 'Accept: application/vnd.github.raw+json',
-      `repos/octo/demo/contents/docs/\${encodeURIComponent('Chinese notes')}/%231.md?ref=\${head}`,
+      `repos/octo/demo/contents/docs/${encodeURIComponent('Chinese notes')}/%231.md?ref=${head}`,
     ]])
   })
 

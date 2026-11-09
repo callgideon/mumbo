@@ -487,7 +487,7 @@ describe('ScheduleCatalogAction rows', () => {
     expect(formatScheduleFrequency(item, makeTranslate(en)))
       .toBe(`Daily at ${displayed} (${zoneLabel('America/New_York', makeTranslate(managerEn))})`)
     expect(formatScheduleFrequency(item, makeTranslate(zh)))
-      .toBe(`Every day \${displayed}(\${zoneLabel('America/New_York', makeTranslate(managerZh))})`)
+      .toBe(`Every day ${displayed}(${zoneLabel('America/New_York', makeTranslate(managerZh))})`)
   })
 
   it('labels a weekly rule with its localized weekday set, clock, and zone', () => {
@@ -522,7 +522,7 @@ describe('ScheduleCatalogAction rows', () => {
     expect(formatScheduleFrequency(item, makeTranslate(en)))
       .toBe(`Mon–Fri at 09:00 (${zoneLabel('America/New_York', makeTranslate(managerEn))})`)
     expect(formatScheduleFrequency(item, makeTranslate(zh)))
-      .toBe(`Monday to Friday 09:00(\${zoneLabel('America/New_York', makeTranslate(managerZh))})`)
+      .toBe(`Monday to Friday 09:00(${zoneLabel('America/New_York', makeTranslate(managerZh))})`)
   })
 
   it('omits a cron rule zone equal to the host zone and names another zone', () => {
@@ -536,7 +536,7 @@ describe('ScheduleCatalogAction rows', () => {
     expect(formatScheduleFrequency(item, t, { system: 'UTC', label: zone => zoneLabel(zone, named) }))
       .toBe(`Every 15 minutes (${zoneLabel('Asia/Shanghai', named)})`)
     expect(formatScheduleFrequency(item, makeTranslate(zh), { system: 'UTC', label: zone => zoneLabel(zone, makeTranslate(managerZh)) }))
-      .toBe(`Every 15 minutes(\${zoneLabel('Asia/Shanghai', makeTranslate(managerZh))})`)
+      .toBe(`Every 15 minutes(${zoneLabel('Asia/Shanghai', makeTranslate(managerZh))})`)
   })
 
   it('labels a rule this parser cannot describe as Custom', () => {

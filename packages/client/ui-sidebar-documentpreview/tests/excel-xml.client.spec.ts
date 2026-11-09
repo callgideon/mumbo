@@ -21,7 +21,7 @@ describe.each([['Node', ExcelJS], ['browser bundle', browserExcel]] as const)('%
     const workbook = new parser.Workbook()
     await workbook.xlsx.load(retained.buffer, { ignoreNodes: ['drawing'] })
     const sheet = workbook.getWorksheet('Data')!
-    expect(sheet.getCell('A5').value).toBe(' <chart/> & Chinese😀\\n tail ')
+    expect(sheet.getCell('A5').value).toBe(' <chart/> & Chinese😀\n tail ')
     expect(sheet.getCell('A6').value).toEqual({ formula: 'SUM(B2:B3)', result: 57 })
     expect(sheet.getCell('B2').note).toMatchObject({ texts: [{ text: 'Generation's comment' }] })
     expect(sheet.getTable('Table1')).toMatchObject({ table: { name: 'Table1', tableRef: 'A1:B3' } })

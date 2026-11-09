@@ -242,7 +242,7 @@ describe('web e2e: shortcut reference', () => {
       await page.setViewportSize({ width: 1440, height: 1000 })
       await openSettings(page, locale === 'zh-CN' ? 'zh' : 'en')
       const viewButton = page.getByRole('button', { name: view, exact: true })
-      const viewHint = `\${locale === 'zh-CN' ? 'Open from anywhere' : 'Open from anywhere'} \${key === 'Meta' ? '⌘ /' : 'Ctrl + /'}`
+      const viewHint = `${locale === 'zh-CN' ? 'Open from anywhere' : 'Open from anywhere'} ${key === 'Meta' ? '⌘ /' : 'Ctrl + /'}`
       await viewButton.hover()
       expect(await page.getByRole('tooltip').getAttribute('aria-label')).toBe(viewHint)
       await viewButton.click()
@@ -293,7 +293,7 @@ describe('web e2e: shortcut reference', () => {
       await page.keyboard.press('Escape')
       await page.keyboard.press(referenceKey)
       const settingsCommand = locale === 'zh-CN' ? 'Open settings' : 'Open settings'
-      await dialog.getByRole('button', { name: locale === 'zh-CN' ? `Edit shortcut for \${settingsCommand}` : `Edit shortcut for ${settingsCommand}`, exact: true }).click()
+      await dialog.getByRole('button', { name: locale === 'zh-CN' ? `Edit shortcut for ${settingsCommand}` : `Edit shortcut for ${settingsCommand}`, exact: true }).click()
       await page.keyboard.press(`${key}+Shift+Comma`)
       await dialog.getByRole('group').waitFor({ state: 'hidden' })
       await page.keyboard.press('Escape')
@@ -305,7 +305,7 @@ describe('web e2e: shortcut reference', () => {
       await page.keyboard.press('Escape')
       expect(await trigger.evaluate(element => element === document.activeElement)).toBe(true)
       await page.keyboard.press(referenceKey)
-      await dialog.getByRole('button', { name: locale === 'zh-CN' ? `Edit shortcut for \${settingsCommand}` : `Edit shortcut for ${settingsCommand}`, exact: true }).click()
+      await dialog.getByRole('button', { name: locale === 'zh-CN' ? `Edit shortcut for ${settingsCommand}` : `Edit shortcut for ${settingsCommand}`, exact: true }).click()
       await dialog.getByRole('button', { name: locale === 'zh-CN' ? 'Reset to default' : 'Restore default', exact: true }).click()
       await dialog.getByRole('group').waitFor({ state: 'hidden' })
       await page.keyboard.press('Escape')

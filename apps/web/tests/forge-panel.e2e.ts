@@ -535,7 +535,7 @@ it.skipIf(MODE === 'record')('starts a Session in a worktree before its first me
   await checkoutName.waitFor({ timeout: 20_000 })
   await checkout.getByText('Worktree · From release', { exact: true }).waitFor()
   await checkoutName.hover()
-  await page.getByRole('tooltip').filter({ hasText: `Worktree(From release):\${abbreviateHomePath(directory, homedir())}` }).waitFor()
+  await page.getByRole('tooltip').filter({ hasText: `Worktree(From release):${abbreviateHomePath(directory, homedir())}` }).waitFor()
   await page.mouse.move(0, 0)
   const change = panel.locator(`[data-forge-change="${PULL}"]`)
   const title = change.getByRole('link', { name: 'Add the pull request panel', exact: true })
@@ -583,7 +583,7 @@ it.skipIf(MODE === 'record')('starts a Session in a worktree before its first me
   const envelope = await (await accepted).json() as { readonly result: unknown }
   expect(envelope.result).toMatchObject({ ok: true })
   const missing = page.locator('[data-forge-missing]')
-  await missing.getByText(`The worktree of branch \${branch} can be restored at its original location. Uncommitted changes from before the removal cannot be recovered`, { exact: true }).waitFor()
+  await missing.getByText(`The worktree of branch ${branch} can be restored at its original location. Uncommitted changes from before the removal cannot be recovered`, { exact: true }).waitFor()
   await missing.getByText('The message is sent after you restore the worktree or continue in the project', { exact: true }).waitFor()
   await expect.poll(() => checkout.getAttribute('data-missing')).toBe('')
   const turns = async (): Promise<number> => (await readPersistedEvents(scaffold, sessionId)).filter(event => event.type === 'turn/start').length
@@ -635,7 +635,7 @@ it.skipIf(MODE === 'record')('keeps the first message waiting when the worktree 
   await checkoutName.waitFor({ timeout: 20_000 })
   await checkout.getByText('Project directory', { exact: true }).waitFor()
   await checkoutName.hover()
-  await page.getByRole('tooltip').filter({ hasText: `Project directory:\${abbreviateHomePath(project, homedir())}` }).waitFor()
+  await page.getByRole('tooltip').filter({ hasText: `Project directory:${abbreviateHomePath(project, homedir())}` }).waitFor()
   expect(tripwire.pageErrors).toEqual([])
   expect(tripwire.warnings).toEqual([])
 })
@@ -1327,7 +1327,7 @@ it.skipIf(MODE === 'record')('keeps long branch details accessible by touch and 
   const chip = option.locator('[data-forge-current-branch]')
   await chip.waitFor()
   await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click()
-  for (const [locale, label] of [['zh', `Current:\${branch}`], ['en', `Current branch: ${branch}`], ['de', `Aktueller Branch: ${branch}`]] as const) {
+  for (const [locale, label] of [['zh', `Current:${branch}`], ['en', `Current branch: ${branch}`], ['de', `Aktueller Branch: ${branch}`]] as const) {
     await scaffold.ctx.settings.update('locale', { preference: locale })
     await option.getByRole('button', { name: label, exact: true }).waitFor()
     for (const width of [390, 600, 601, 700, 1280]) {
@@ -1449,7 +1449,7 @@ it.skipIf(MODE === 'record').each([120, 4000])('types a review comment beside %i
   const cdp = await page.context().newCDPSession(page)
   try {
     await cdp.send('Input.imeSetComposition', { text: 'Checks', selectionStart: 2, selectionEnd: 2 })
-    expect(await input.inputValue()).toBe('Check the boundary\\nChecks')
+    expect(await input.inputValue()).toBe('Check the boundary\nChecks')
     expect(await file.locator('[data-forge-review-thread]').count()).toBe(0)
     await cdp.send('Input.insertText', { text: 'Checks boundary conditions' })
   } finally { await cdp.detach() }

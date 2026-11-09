@@ -78,7 +78,7 @@ describe('web e2e: plugin configuration pages', () => {
 
   /** Open one official plugin's page from its card and wait for its form. */
   async function openPage(panel: Locator, title: string): Promise<void> {
-    await panel.getByRole('button', { name: `Inspect \${title}`, exact: true }).click()
+    await panel.getByRole('button', { name: `Inspect ${title}`, exact: true }).click()
     await panel.locator('[data-plugin-config]').waitFor({ timeout: 10_000 })
   }
 
@@ -99,7 +99,7 @@ describe('web e2e: plugin configuration pages', () => {
     expect(await basic.locator(':scope > ul > li').evaluateAll(cards => cards.map(card => card.getAttribute('data-plugin-item'))))
       .toEqual(['subagent', 'web-search', 'agent-loop', 'shell'])
     for (const title of ['Subagents', 'Web search and fetch', 'Agent loop', 'Terminal']) {
-      expect(await basic.getByRole('button', { name: `Inspect \${title}`, exact: true }).count()).toBe(1)
+      expect(await basic.getByRole('button', { name: `Inspect ${title}`, exact: true }).count()).toBe(1)
     }
     // A card carries the one-liner; the fields wait for the page.
     expect(await basic.getByText('Limit how long each command may run and how much it may output.', { exact: true }).count()).toBe(1)
