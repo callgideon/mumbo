@@ -24,8 +24,12 @@ import { appendDelivery } from './delivery-history.ts'
 import type { ScheduleTask } from './storage.ts'
 import type { DeliveryRetentionBounds, ScheduleDeliveryReceipt, ScheduleId, ScheduleSessionCreateSpec } from './types.ts'
 
-/** Largest delay Node timers represent without clamping. */
-export const MAX_TIMER_DELAY_MS = 2_147_483_647
+/**
+ * Longest one timer waits before the runtime re-reads wall time. Node timers follow the monotonic clock, which
+ * stands still while the host is suspended or its VM is paused and resumed from a snapshot; one long timer would
+ * then deliver late by the whole pause.
+ */
+export const WALL_CLOCK_RECHECK_MS = 60_000
 
 /** Fixed per-task delivery floor interval, timed or manual, of a target other than `new`; it matches the shortest recurrence spacing. */
 export const MIN_DELIVERY_INTERVAL_MS = MIN_EVERY_INTERVAL_SECONDS * 1_000
@@ -217,11 +221,18 @@ export class ScheduleRuntime {
         const target = Math.max(Date.parse(task.record.scheduledAt), this.nextAdmissionAt(task))
         return at === undefined ? target : Math.min(at, target)
       }, undefined)
-    if (next !== undefined) {
-      this.timer = setTimeout(() => { this.timer = undefined; this.requestDrive() },
-        Math.max(0, Math.min(next - Date.now(), MAX_TIMER_DELAY_MS)))
-      this.timer.unref()
-    }
+    if (next !== undefined) this.armAt(next)
+  }
+
+  /** Drive once wall time reaches `at`, re-reading wall time at least every WALL_CLOCK_RECHECK_MS. */
+  private armAt(at: number): void {
+    const wait = at - Date.now()
+    this.timer = setTimeout(() => {
+      this.timer = undefined
+      if (Date.now() >= at) this.requestDrive()
+      else this.armAt(at)
+    }, Math.max(0, Math.min(wait, WALL_CLOCK_RECHECK_MS)))
+    this.timer.unref()
   }
 
   /**
