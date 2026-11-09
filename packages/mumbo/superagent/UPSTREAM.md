@@ -61,4 +61,4 @@ The worker does not merge and posts the review marker comment. Written by task A
 
 ## S6: project overlay
 
-`deploy/mumbo-project.overlay.yml` is outside the copy and loads the package in project boxes. Written by task A7.
+`deploy/mumbo-project.overlay.yml` is outside the copy and loads the package in project boxes. Written by task A7. The overlay appends the bundle rows from `cordis.patch.yml` (same ids and names) and a `dsh-superagent` row setting `stateDir: dshHomePath('superagent')` and `panelAdmins` from `MUMBO_PANEL_ADMINS` (comma-separated, default `[]`). The GitHub Source repository, CLI, Policy allowlist and worker directory are set once in the panel.
