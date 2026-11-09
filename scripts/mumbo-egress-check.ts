@@ -19,7 +19,7 @@ const ALLOWED_FILES = [
   'scripts/mumbo-',
 ]
 
-const SKIP = /(^|\/)(node_modules|lib|dist|tests?)\/|\.(md|spec\.ts|test\.ts|i18n\.yaml)$|\.zh\.|(^|\/)package\.json$/
+const SKIP = /(^|\/)(node_modules|lib|dist|tests?)\/|\.(md|spec\.ts|test\.ts)$|(^|\/)package\.json$/
 const grep = spawnSync('grep', ['-rIliE', 'deepseek(svc)?\\.(com|cn|ai)', 'apps', 'packages', 'scripts', '--exclude-dir=node_modules', '--exclude-dir=lib', '--exclude-dir=dist'], { encoding: 'utf8', maxBuffer: 1 << 28 })
 const files = grep.stdout.split('\n').filter((f) => f && !SKIP.test(f))
 

@@ -1,7 +1,7 @@
 /** Readable, linked persistence schemas rendered from the fingerprint inventory. */
 
 import { githubSlug } from './verify-md-links.ts'
-import { persistenceCatalogText, type PersistenceCatalogLocale } from './persistence-catalog-text.ts'
+import { persistenceCatalogText as prose } from './persistence-catalog-text.ts'
 import { sourceKindGroups } from './persistence-source-policy.ts'
 import {
   canonicalizeSchema,
@@ -174,59 +174,56 @@ function typeExpression(
   schema: CanonicalSchema,
   index: number,
   entries: ReadonlyMap<string, TypeDisplay>,
-  locale: PersistenceCatalogLocale,
 ): string {
   const node = nodeAt(schema, index)
   if (node.kind === 'primitive') return code(node.type)
   if (node.kind === 'literal') return code(JSON.stringify(node.value))
-  if (node.kind === 'opaque') return `${code(node.reason)}${persistenceCatalogText[locale].opaque}`
+  if (node.kind === 'opaque') return `${code(node.reason)}${prose.opaque}`
   return reference(schemaDigest(canonicalizeSchema(schema.nodes, index)), entries)
 }
 
 function definition(
   entry: TypeDisplay,
   entries: ReadonlyMap<string, TypeDisplay>,
-  locale: PersistenceCatalogLocale,
   sourceLink: (source: string) => string | undefined,
   headingLevel: number,
   rendering: PersistenceSchemaRendering,
 ): string[] {
-  const text = persistenceCatalogText[locale]
   const schema = entry.type.schema
   const node = nodeAt(schema, 0)
   const lines = [...[entry.anchor, ...entry.aliases].flatMap(anchor => [`<a id="${anchor}"></a>`, '']), `${'#'.repeat(headingLevel)} ${code(entry.label)}`, '', `SHA-256: ${code(entry.type.digest)}`, '']
   if (entry.type.sources.length > 0) {
-    lines.push(`${text.sources}${entry.type.sources.map((source) => {
+    lines.push(`${prose.sources}${entry.type.sources.map((source) => {
       const href = sourceLink(sourcePath(source))
       return href === undefined ? code(source) : `[${code(source)}](${href})`
     }).join(' · ')}`, '')
   }
-  const expression = (index: number): string => typeExpression(schema, index, entries, locale)
+  const expression = (index: number): string => typeExpression(schema, index, entries)
   switch (node.kind) {
     case 'object':
-      if (node.properties.length === 0 && node.indices.length === 0) lines.push(text.emptyObject, '')
+      if (node.properties.length === 0 && node.indices.length === 0) lines.push(prose.emptyObject, '')
       else {
-        lines.push(text.propertyColumns, '|---|---|---|')
+        lines.push(prose.propertyColumns, '|---|---|---|')
         for (const property of node.properties) {
-          lines.push(`| ${code(property.name)} | ${property.optional ? text.optional : text.required} | ${expression(property.type)} |`)
+          lines.push(`| ${code(property.name)} | ${property.optional ? prose.optional : prose.required} | ${expression(property.type)} |`)
         }
-        for (const index of node.indices) lines.push(`| [${expression(index.key)}] | ${text.index} | ${expression(index.value)} |`)
+        for (const index of node.indices) lines.push(`| [${expression(index.key)}] | ${prose.index} | ${expression(index.value)} |`)
         lines.push('')
         if (rendering === 'current') {
           for (const property of node.properties) {
             const policy = property.compatibility
             if (policy === undefined) continue
-            lines.push(`${text.sourceCompatibility}${code(property.name)} — ${code(policy.policy)} v${String(policy.version)}; ${code(policy.binding)}; ${code(policy.discriminator)}; ${code(policy.unknownKinds)}.`, '',
-              `${text.attributionAdditions}${policy.attributionKinds.map(code).join(', ') || code('[]')}.`, '')
+            lines.push(`${prose.sourceCompatibility}${code(property.name)} — ${code(policy.policy)} v${String(policy.version)}; ${code(policy.binding)}; ${code(policy.discriminator)}; ${code(policy.unknownKinds)}.`, '',
+              `${prose.attributionAdditions}${policy.attributionKinds.map(code).join(', ') || code('[]')}.`, '')
           }
         }
       }
       break
-    case 'array': lines.push(`${text.arrayPrefix}${expression(node.element)}${text.arraySuffix}`, ''); break
+    case 'array': lines.push(`${prose.arrayPrefix}${expression(node.element)}${prose.arraySuffix}`, ''); break
     case 'tuple':
-      lines.push(text.positionColumns, '|---|---|---|')
+      lines.push(prose.positionColumns, '|---|---|---|')
       node.elements.forEach((element, index) => {
-        const presence = element.rest ? text.rest : element.optional ? text.optional : text.required
+        const presence = element.rest ? prose.rest : element.optional ? prose.optional : prose.required
         lines.push(`| ${String(index)} | ${presence} | ${expression(element.type)} |`)
       })
       lines.push('')
@@ -234,28 +231,28 @@ function definition(
     case 'union': {
       const groups = rendering === 'current' ? sourceKindGroups(schema.nodes, 0) : undefined
       if (groups !== undefined) {
-        lines.push(text.sourceColumns, '|---|---|---|---|')
+        lines.push(prose.sourceColumns, '|---|---|---|---|')
         for (const [kind, alternatives] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
           const rows = alternatives.map((index) => {
             const variant = nodeAt(schema, index)
             if (variant.kind !== 'object') throw new Error('persistence catalog: source group must contain objects')
             const form = variant.properties.find(property => property.name === 'form')
-            const formLabel = form === undefined ? text.notDeclared
-              : `${expression(form.type)}${form.optional ? ` (${text.optional})` : ''}`
+            const formLabel = form === undefined ? prose.notDeclared
+              : `${expression(form.type)}${form.optional ? ` (${prose.optional})` : ''}`
             const fields = variant.properties.filter(property => property.name !== 'kind' && property.name !== 'form' && !property.optional)
               .map(property => `${code(property.name)}: ${expression(property.type)}`)
-            if (variant.indices.length > 0) fields.push(text.index)
+            if (variant.indices.length > 0) fields.push(prose.index)
             return { index, formLabel, fields, digest: schemaDigest(canonicalizeSchema(schema.nodes, index)) }
           }).sort((a, b) => a.formLabel.localeCompare(b.formLabel) || a.digest.localeCompare(b.digest))
-          for (const row of rows) lines.push(`| ${code(kind)} | ${row.formLabel} | ${row.fields.join('; ') || text.none} | ${expression(row.index)} |`)
+          for (const row of rows) lines.push(`| ${code(kind)} | ${row.formLabel} | ${row.fields.join('; ') || prose.none} | ${expression(row.index)} |`)
         }
         lines.push('')
-      } else lines.push(text.oneOf, '', ...node.types.map(index => `- ${expression(index)}`), '')
+      } else lines.push(prose.oneOf, '', ...node.types.map(index => `- ${expression(index)}`), '')
       break
     }
     case 'primitive': lines.push(code(node.type), ''); break
     case 'literal': lines.push(code(JSON.stringify(node.value)), ''); break
-    case 'opaque': lines.push(`${code(node.reason)}${text.opaqueExplanation}`, ''); break
+    case 'opaque': lines.push(`${code(node.reason)}${prose.opaqueExplanation}`, ''); break
     default: assertNever(node)
   }
   return lines
@@ -264,7 +261,6 @@ function definition(
 /**
  * Render every tracked root with its exact digest and resolved type reference.
  * @param inventory - complete current-source schemas and declaration metadata.
- * @param locale - generated document language.
  * @param introduction - paragraphs before the root table; defaults to current-source links.
  * @param headingLevel - section depth within the containing reference.
  * @param rendering - explicit current mode selects structural links; omission preserves historical output.
@@ -272,16 +268,14 @@ function definition(
  */
 export function renderPersistenceSchemaIndex(
   inventory: PersistenceSchemaInventory,
-  locale: PersistenceCatalogLocale = 'en',
-  introduction: readonly string[] = [persistenceCatalogText[locale].fingerprintsIntro, persistenceCatalogText[locale].historyIntro],
+  introduction: readonly string[] = [prose.fingerprintsIntro, prose.historyIntro],
   headingLevel: 2 | 3 = 2,
   rendering: PersistenceSchemaRendering = 'historical',
 ): string {
   const entries = displays(inventory, rendering)
-  const text = persistenceCatalogText[locale]
   return [
-    `${'#'.repeat(headingLevel)} ${text.fingerprints}`, '', ...introduction.flatMap(paragraph => [paragraph, '']),
-    text.rootColumns, '|---|---|---|---|',
+    `${'#'.repeat(headingLevel)} ${prose.fingerprints}`, '', ...introduction.flatMap(paragraph => [paragraph, '']),
+    prose.rootColumns, '|---|---|---|---|',
     ...inventory.roots.map(root => `| ${code(root.key)} | ${root.kind} | ${code(root.digest)} | ${reference(root.digest, entries)} |`), '',
   ].join('\n')
 }
@@ -289,28 +283,25 @@ export function renderPersistenceSchemaIndex(
 /**
  * Render every reachable type once, with links for shared and recursive definitions.
  * @param inventory - complete current-source schemas and declaration metadata.
- * @param locale - generated document language.
- * @param sourceLink - source path to URL; undefined keeps historical locations as text.
+ * @param sourceLink - source path to URL; undefined keeps historical locations as prose.
  * @param headingLevel - section depth; individual definitions use the next heading level.
  * @param rendering - explicit current mode selects structural links and unambiguous logical aliases.
  * @returns linked Markdown definitions; historical mode preserves the original named and owning-path anchors.
  */
 export function renderPersistenceSchemaDefinitions(
   inventory: PersistenceSchemaInventory,
-  locale: PersistenceCatalogLocale = 'en',
   sourceLink: (source: string) => string | undefined = source => `../${source}`,
   headingLevel: 2 | 3 = 2,
   rendering: PersistenceSchemaRendering = 'historical',
 ): string {
   const entries = displays(inventory, rendering)
-  const text = persistenceCatalogText[locale]
   const sorted = [...entries.values()].sort((left, right) => {
     if (rendering === 'current' && left.label !== right.label) return left.label < right.label ? -1 : 1
     return left.anchor < right.anchor ? -1 : left.anchor > right.anchor ? 1 : 0
   })
   return [
-    `${'#'.repeat(headingLevel)} ${text.definitions}`, '', text.definitionsIntro, '',
-    ...sorted.flatMap(entry => definition(entry, entries, locale, sourceLink, headingLevel + 1, rendering)),
+    `${'#'.repeat(headingLevel)} ${prose.definitions}`, '', prose.definitionsIntro, '',
+    ...sorted.flatMap(entry => definition(entry, entries, sourceLink, headingLevel + 1, rendering)),
   ].join('\n')
 }
 

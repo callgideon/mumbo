@@ -17,7 +17,7 @@ export default {
   Layout: defineComponent({
     name: 'DocsLayout',
     setup() {
-      const { lang, isDark, frontmatter, site, page } = useData()
+      const { isDark, frontmatter, site, page } = useData()
       const route = useRoute()
       let viewer: MermaidViewer | undefined
       let images: ImageViewer | undefined
@@ -26,7 +26,7 @@ export default {
       let initialScroll: number | undefined
       let disposed = false
       onMounted(async () => {
-        tables = new DocumentTables(document, () => lang.value)
+        tables = new DocumentTables(document)
         // VitePress computes the initial hash position before hydration inserts table controls.
         const anchor = document.querySelector(':target')
         if (anchor) initialScroll = window.requestAnimationFrame(() => {
@@ -39,12 +39,12 @@ export default {
           import('./mermaid-viewer.ts'), import('./image-viewer.ts'), import('./media-viewer.ts'),
         ])
         if (disposed) return
-        media = new MediaViewer(document, () => lang.value)
-        viewer = installMermaidViewer(document, () => lang.value, media)
-        images = new ImageViewer(document, () => lang.value, media)
+        media = new MediaViewer(document)
+        viewer = installMermaidViewer(document, media)
+        images = new ImageViewer(document, media)
       })
       onContentUpdated(() => { tables?.refresh() })
-      watch([() => route.path, lang, isDark], () => {
+      watch([() => route.path, isDark], () => {
         viewer?.refresh()
         images?.refresh()
       }, { flush: 'post' })
@@ -61,7 +61,7 @@ export default {
         'doc-before': () => {
           const path: unknown = frontmatter.value.rawMarkdownPath
           return !page.value.isNotFound && typeof path === 'string'
-            ? h(PageMarkdownActions, { key: `${route.path}:${lang.value}:${path}`, path: `${site.value.base}${path}`, lang: lang.value })
+            ? h(PageMarkdownActions, { key: `${route.path}:${path}`, path: `${site.value.base}${path}` })
             : null
         },
       })

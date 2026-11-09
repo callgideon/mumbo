@@ -1,0 +1,6 @@
+[
+  {
+    "path": "**/locale/**/ja.json",
+    "reason": "Japanese locale (kanji are Japanese script, not Chinese)"
+  }
+]

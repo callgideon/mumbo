@@ -203,8 +203,8 @@ if (isEntry(import.meta.url)) {
   })
   appendFileSync(env.GITHUB_OUTPUT, `artifact-id=${selection?.artifactId ?? ''}\nrun-id=${selection?.runId ?? ''}\n`)
   const summary = selection
-    ? `复用 [CUA helper 构建](https://github.com/${repository}/actions/runs/${selection.runId}/attempts/${selection.attempt})，run ID \`${selection.runId}\`，artifact ID \`${selection.artifactId}\`。跳过依赖安装、编译、签名和公证。`
-    : '未找到源码逐字节一致且构建配置匹配的可用 CUA helper 产物，执行依赖安装和重新构建。'
+    ? `Reusing the [CUA helper build](https://github.com/${repository}/actions/runs/${selection.runId}/attempts/${selection.attempt}), run ID \`${selection.runId}\`, artifact ID \`${selection.artifactId}\`. Skipping dependency installation, compilation, signing, and notarization.`
+    : 'No usable CUA helper artifact has byte-identical sources and a matching build configuration; installing dependencies and rebuilding.'
   appendFileSync(env.GITHUB_STEP_SUMMARY, `${summary}\n`)
   console.log(summary)
 }

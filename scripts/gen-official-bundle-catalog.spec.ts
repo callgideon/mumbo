@@ -32,8 +32,7 @@ function fixture(): string {
     write(root, `${dir}/must-not-run.js`, "throw new Error('metadata must not evaluate a provider')")
     write(root, `${dir}/icon.svg`, '<svg xmlns="http://www.w3.org/2000/svg"/>')
     write(root, `${dir}/locale/en.json`, { meta: { title: 'Native agent', description: 'Delegate a task.' } })
-    write(root, `${dir}/locale/zh.json`, { meta: { title: '原生智能体', description: '委派任务。' } })
-    write(root, `${dir}/locale/ja.json`, { meta: { title: 'ネイティブエージェント', description: 'タスクを委派します。' } })
+    write(root, `${dir}/locale/ja.json`, { meta: { title: 'ネイティブエージェント', description: 'タスクをまかせます。' } })
     for (const language of ['es', 'fr', 'de', 'ru', 'pt']) write(root, `${dir}/locale/${language}.json`, { meta: { title: 'Native agent', description: 'Delegate a task.' } })
   }
   write(root, output, '')
@@ -53,8 +52,8 @@ describe('Official bundle catalog generation', () => {
     const entries = generateOfficialBundleCatalog(fixture())
     expect(entries.map(entry => entry.packageName)).toEqual(ON_DEMAND_BUNDLES)
     expect(entries[0]?.meta).toEqual({
-      title: { en: 'Native agent', zh: '原生智能体', ja: 'ネイティブエージェント', ...Object.fromEntries(['es', 'fr', 'de', 'ru', 'pt'].map(id => [id, 'Native agent'])) },
-      description: { en: 'Delegate a task.', zh: '委派任务。', ja: 'タスクを委派します。', ...Object.fromEntries(['es', 'fr', 'de', 'ru', 'pt'].map(id => [id, 'Delegate a task.'])) },
+      title: { en: 'Native agent', ja: 'ネイティブエージェント', ...Object.fromEntries(['es', 'fr', 'de', 'ru', 'pt'].map(id => [id, 'Native agent'])) },
+      description: { en: 'Delegate a task.', ja: 'タスクをまかせます。', ...Object.fromEntries(['es', 'fr', 'de', 'ru', 'pt'].map(id => [id, 'Delegate a task.'])) },
       icon: `data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>').toString('base64')}`,
     })
     expect(renderOfficialBundleCatalog(entries)).not.toContain('1.2.3')

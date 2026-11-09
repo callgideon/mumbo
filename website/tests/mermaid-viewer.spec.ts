@@ -16,7 +16,6 @@ vi.mock('@panzoom/panzoom', () => ({ default: panzoom.create }))
 
 let viewer: MermaidViewer | undefined
 let media: MediaViewer
-let locale = 'en-US'
 let resize: (() => void) | undefined
 let viewportWidth = 1032
 let viewportHeight = 632
@@ -27,8 +26,7 @@ const dialogMethods = new Map(['showModal', 'close'].map(name => [
 
 beforeEach(() => {
   vi.clearAllMocks()
-  locale = 'en-US'
-  media = new MediaViewer(document, () => locale)
+  media = new MediaViewer(document)
   panzoom.create.mockImplementation((_element, options) => {
     panzoom.getScale.mockReturnValue(options.startScale ?? 1)
     return panzoom
@@ -91,18 +89,17 @@ function open(): HTMLDialogElement {
 
 describe('documentation Mermaid viewer', () => {
   it.each([
-    { heading: 'Agent lifecycle', language: 'en-US', expected: 'Agent lifecycle' },
-    { heading: '  \n  ', language: 'zh-CN', expected: '图表查看器' },
-    { heading: null, language: 'en-US', expected: 'Diagram viewer' },
-  ])('uses the visible title as the dialog name for $heading', ({ heading, language, expected }) => {
+    { heading: 'Agent lifecycle', expected: 'Agent lifecycle' },
+    { heading: '  \n  ', expected: 'Diagram viewer' },
+    { heading: null, expected: 'Diagram viewer' },
+  ])('uses the visible title as the dialog name for $heading', ({ heading, expected }) => {
     render()
     if (heading !== null) {
       const h1 = document.createElement('h1')
       h1.textContent = heading
       required(document.querySelector('.vp-doc')).prepend(h1)
     }
-    locale = language
-    viewer = installMermaidViewer(document, () => locale, media)
+    viewer = installMermaidViewer(document, media)
     getByRole(document.body, 'button').click()
     const dialog = getByRole(document.body, 'dialog', { name: expected })
     const title = required(document.getElementById(required(dialog.getAttribute('aria-labelledby'))))
@@ -110,7 +107,7 @@ describe('documentation Mermaid viewer', () => {
   })
 
   it('adds one entry only after an SVG with usable dimensions renders', async () => {
-    viewer = installMermaidViewer(document, () => locale, media)
+    viewer = installMermaidViewer(document, media)
     expect(queryAllByRole(document.body, 'button')).toHaveLength(0)
     render('0 0 0 3000')
     viewer.refresh()
@@ -131,7 +128,7 @@ describe('documentation Mermaid viewer', () => {
   it('fits the natural SVG into the viewport and isolates copied styles and fragment IDs', () => {
     const source = render()
     const original = source.outerHTML
-    viewer = installMermaidViewer(document, () => locale, media)
+    viewer = installMermaidViewer(document, media)
     const dialog = open()
     expect(panzoom.create.mock.calls[0]?.[1]).toMatchObject({ startScale: 0.2, minScale: 0.1 })
     const paper = required(dialog.querySelector<HTMLElement>('.dsh-media-paper'))
@@ -155,7 +152,7 @@ describe('documentation Mermaid viewer', () => {
 
   it('connects zoom, wheel, keyboard panning and fit without dismissing a canvas click', () => {
     render()
-    viewer = installMermaidViewer(document, () => locale, media)
+    viewer = installMermaidViewer(document, media)
     const dialog = open()
     getByRole(dialog, 'button', { name: 'Zoom in' }).click()
     getByRole(dialog, 'button', { name: 'Zoom out' }).click()
@@ -177,7 +174,7 @@ describe('documentation Mermaid viewer', () => {
 
   it('wraps keyboard focus through the viewer controls in both directions', () => {
     render()
-    viewer = installMermaidViewer(document, () => locale, media)
+    viewer = installMermaidViewer(document, media)
     const dialog = open()
     const close = getByRole(dialog, 'button', { name: 'Close' })
     const zoomOut = getByRole(dialog, 'button', { name: 'Zoom out' })
@@ -194,7 +191,7 @@ describe('documentation Mermaid viewer', () => {
 
   it('shows zoom changes and reveals help on demand without retaining listeners after close', () => {
     render()
-    viewer = installMermaidViewer(document, () => locale, media)
+    viewer = installMermaidViewer(document, media)
     const dialog = open()
     const scale = required(dialog.querySelector('.dsh-media-scale'))
     const paper = required(dialog.querySelector('.dsh-media-paper'))
@@ -220,7 +217,7 @@ describe('documentation Mermaid viewer', () => {
 
   it.each(['button', 'cancel', 'refresh', 'dispose'] as const)('releases resources on %s and restores focus and scrolling', (method) => {
     render()
-    viewer = installMermaidViewer(document, () => locale, media)
+    viewer = installMermaidViewer(document, media)
     const trigger = getByRole(document.body, 'button')
     const dialog = open()
     const zoom = getByRole(dialog, 'button', { name: 'Zoom in' })
@@ -238,9 +235,9 @@ describe('documentation Mermaid viewer', () => {
     expect(panzoom.destroy).toHaveBeenCalledOnce()
   })
 
-  it('closes a replaced diagram and permits repeated opens with the updated locale', async () => {
+  it('closes a replaced diagram and permits repeated opens after a refresh', async () => {
     render()
-    viewer = installMermaidViewer(document, () => locale, media)
+    viewer = installMermaidViewer(document, media)
     open()
     render('0 0 400 200')
     await waitFor(() => {
@@ -248,17 +245,16 @@ describe('documentation Mermaid viewer', () => {
     })
     expect(panzoom.destroy).toHaveBeenCalledOnce()
     open()
-    locale = 'zh-CN'
     viewer.refresh()
-    getByRole(document.body, 'button', { name: '全屏查看图表' }).click()
-    expect(getByRole(document.body, 'dialog', { name: '图表查看器' })).toBeTruthy()
-    getByRole(document.body, 'button', { name: '关闭' }).click()
+    getByRole(document.body, 'button', { name: 'View diagram fullscreen' }).click()
+    expect(getByRole(document.body, 'dialog', { name: 'Diagram viewer' })).toBeTruthy()
+    getByRole(document.body, 'button', { name: 'Close' }).click()
     expect(panzoom.destroy).toHaveBeenCalledTimes(3)
   })
 
   it('closes when route content is removed and stops enhancing after disposal', async () => {
     render()
-    viewer = installMermaidViewer(document, () => locale, media)
+    viewer = installMermaidViewer(document, media)
     open()
     required(document.querySelector('.mermaid')).remove()
     await waitFor(() => {

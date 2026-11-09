@@ -3,34 +3,19 @@ import { defineComponent, h, nextTick, onBeforeUnmount, onMounted, ref, useId, w
 
 type CopyState = 'idle' | 'copying' | 'copied' | 'requestFailed' | 'clipboardFailed'
 
-const messages = {
-  en: {
-    copy: 'Copy page',
-    copyDescription: 'Copy page as Markdown for LLMs',
-    view: 'View as Markdown',
-    viewDescription: 'View this page as plain text',
-    newTab: 'View as Markdown (opens in a new tab)',
-    menu: 'Page actions',
-    more: 'More page actions',
-    copying: 'Copying…',
-    copied: 'Markdown copied.',
-    requestFailed: 'Could not load Markdown. Open the page actions menu and choose View as Markdown to copy it manually.',
-    clipboardFailed: 'Could not copy. Open the page actions menu and choose View as Markdown to copy it manually.',
-  },
-  zh: {
-    copy: '复制页面',
-    copyDescription: '将页面以 Markdown 格式复制给 LLMs',
-    view: '以 Markdown 格式查看',
-    viewDescription: '以纯文本查看此页面',
-    newTab: '以 Markdown 格式查看（在新标签页打开）',
-    menu: '页面操作',
-    more: '更多页面操作',
-    copying: '正在复制…',
-    copied: '已复制 Markdown。',
-    requestFailed: '无法加载 Markdown，请打开页面操作菜单，选择“以 Markdown 格式查看”后手动复制。',
-    clipboardFailed: '复制失败，请打开页面操作菜单，选择“以 Markdown 格式查看”后手动复制。',
-  },
-} satisfies Record<'en' | 'zh', Record<Exclude<CopyState, 'idle'> | 'copy' | 'copyDescription' | 'view' | 'viewDescription' | 'newTab' | 'menu' | 'more', string>>
+const labels = {
+  copy: 'Copy page',
+  copyDescription: 'Copy page as Markdown for LLMs',
+  view: 'View as Markdown',
+  viewDescription: 'View this page as plain text',
+  newTab: 'View as Markdown (opens in a new tab)',
+  menu: 'Page actions',
+  more: 'More page actions',
+  copying: 'Copying…',
+  copied: 'Markdown copied.',
+  requestFailed: 'Could not load Markdown. Open the page actions menu and choose View as Markdown to copy it manually.',
+  clipboardFailed: 'Could not copy. Open the page actions menu and choose View as Markdown to copy it manually.',
+} satisfies Record<Exclude<CopyState, 'idle'> | 'copy' | 'copyDescription' | 'view' | 'viewDescription' | 'newTab' | 'menu' | 'more', string>
 
 const icons = {
   copy: 'M9 8h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2ZM16 4V3a1 1 0 0 0-1-1H5a2 2 0 0 0-2 2v11',
@@ -46,7 +31,7 @@ function icon(name: keyof typeof icons) {
 }
 
 /**
- * Actions keyed by the owning layout to the current route and language.
+ * Actions keyed by the owning layout to the current route.
  * Server rendering exposes the raw link; mounting enables copying and the menu.
  * Clipboard writes begin in the click gesture; their data resolves on demand.
  */
@@ -54,7 +39,6 @@ export const PageMarkdownActions = defineComponent({
   name: 'PageMarkdownActions',
   props: {
     path: { type: String, required: true },
-    lang: { type: String, required: true },
   },
   setup(props) {
     const interactive = ref(false)
@@ -142,7 +126,7 @@ export const PageMarkdownActions = defineComponent({
         await clipboard.write([new ClipboardItem({ 'text/plain': content })])
         state.value = 'copied'
       } catch (_error) {
-        // Browser failures use localized feedback; their implementation-specific text is not user copy.
+        // Browser failures use fixed feedback; their implementation-specific text is not user copy.
         state.value = outcome.requestFailed ? 'requestFailed' : 'clipboardFailed'
       } finally {
         request.abort()
@@ -151,11 +135,10 @@ export const PageMarkdownActions = defineComponent({
     }
 
     return () => {
-      const text = messages[props.lang.startsWith('zh') ? 'zh' : 'en']
       if (!interactive.value) {
         return h('div', { class: 'page-markdown-actions' }, [
-          h('a', { class: 'page-markdown-static', href: props.path, target: '_blank', rel: 'noopener', 'aria-label': text.newTab },
-            [text.view, icon('external')]),
+          h('a', { class: 'page-markdown-static', href: props.path, target: '_blank', rel: 'noopener', 'aria-label': labels.newTab },
+            [labels.view, icon('external')]),
         ])
       }
       return h('div', {
@@ -175,8 +158,8 @@ export const PageMarkdownActions = defineComponent({
           h('div', { class: 'page-markdown-actions-controls' }, [
             h('button', { class: 'page-markdown-copy', type: 'button',
               'aria-disabled': state.value === 'copying', 'aria-busy': state.value === 'copying', onClick: copy },
-            [icon('copy'), state.value === 'copying' ? text.copying : text.copy]),
-            h('button', { ref: toggle, class: 'page-markdown-toggle', type: 'button', 'aria-label': text.more,
+            [icon('copy'), state.value === 'copying' ? labels.copying : labels.copy]),
+            h('button', { ref: toggle, class: 'page-markdown-toggle', type: 'button', 'aria-label': labels.more,
               'aria-haspopup': 'menu', 'aria-expanded': open.value, 'aria-controls': menuId,
               onMousedown: (event: MouseEvent) => { if (open.value) event.preventDefault() },
               onClick: () => { if (open.value) closeMenu(true); else openMenu() },
@@ -188,27 +171,27 @@ export const PageMarkdownActions = defineComponent({
               },
             }, [icon('chevron')]),
           ]),
-          open.value ? h('div', { id: menuId, role: 'menu', 'aria-label': text.menu,
+          open.value ? h('div', { id: menuId, role: 'menu', 'aria-label': labels.menu,
             class: 'page-markdown-menu', onKeydown: menuKeydown,
             // Keep focus until click activation in browsers that do not focus pressed controls.
             onMousedown: (event: MouseEvent) => { event.preventDefault() } }, [
             h('button', { ref: menuCopy, role: 'menuitem', type: 'button', tabindex: -1,
-              'aria-label': text.copy, 'aria-describedby': `${menuId}-copy`, 'aria-disabled': state.value === 'copying',
+              'aria-label': labels.copy, 'aria-describedby': `${menuId}-copy`, 'aria-disabled': state.value === 'copying',
               'aria-busy': state.value === 'copying', onClick: copy }, [
               h('span', { class: 'page-markdown-menu-icon' }, [icon('copy')]),
-              h('span', { class: 'page-markdown-menu-text' }, [h('span', { class: 'page-markdown-menu-title' }, text.copy),
-                h('span', { id: `${menuId}-copy`, class: 'page-markdown-menu-description' }, text.copyDescription)]),
+              h('span', { class: 'page-markdown-menu-text' }, [h('span', { class: 'page-markdown-menu-title' }, labels.copy),
+                h('span', { id: `${menuId}-copy`, class: 'page-markdown-menu-description' }, labels.copyDescription)]),
             ]),
             h('a', { ref: menuView, role: 'menuitem', tabindex: -1, href: props.path, target: '_blank', rel: 'noopener',
-              'aria-label': text.newTab, 'aria-describedby': `${menuId}-view`, onClick: () => { closeMenu(true) } }, [
+              'aria-label': labels.newTab, 'aria-describedby': `${menuId}-view`, onClick: () => { closeMenu(true) } }, [
               h('span', { class: 'page-markdown-menu-icon' }, [icon('markdown')]),
-              h('span', { class: 'page-markdown-menu-text' }, [h('span', { class: 'page-markdown-menu-title' }, [text.view, icon('external')]),
-                h('span', { id: `${menuId}-view`, class: 'page-markdown-menu-description' }, text.viewDescription)]),
+              h('span', { class: 'page-markdown-menu-text' }, [h('span', { class: 'page-markdown-menu-title' }, [labels.view, icon('external')]),
+                h('span', { id: `${menuId}-view`, class: 'page-markdown-menu-description' }, labels.viewDescription)]),
             ]),
           ]) : null,
         ]),
         h('p', { class: 'page-markdown-actions-status', role: 'status', 'aria-atomic': 'true' },
-          state.value === 'idle' ? '' : text[state.value]),
+          state.value === 'idle' ? '' : labels[state.value]),
       ])
     }
   },
