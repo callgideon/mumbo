@@ -12,6 +12,14 @@ resource "aws_security_group" "data" {
   description = "Postgres and Redis, reachable only from the platform security groups"
   vpc_id      = module.vpc.vpc_id
 }
+resource "aws_vpc_security_group_ingress_rule" "data" {
+  for_each                     = { for p in setproduct(["nodes", "api", "client_proxy", "edge"], [5432, 6379]) : "${p[0]}-${p[1]}" => p }
+  security_group_id            = aws_security_group.data.id
+  referenced_security_group_id = local.sg[each.value[0]]
+  ip_protocol                  = "tcp"
+  from_port                    = each.value[1]
+  to_port                      = each.value[1]
+}
 
 # ---- Postgres for E2B (teams, templates, builds, snapshots). Multi-AZ, 14-day point-in-time recovery.
 resource "aws_db_subnet_group" "e2b" {
@@ -30,7 +38,7 @@ resource "aws_db_instance" "e2b" {
   kms_key_id                   = aws_kms_key.data.arn
   db_name                      = "e2b"
   username                     = "e2b"
-  manage_master_user_password  = true
+  password                     = random_password.postgres.result # one static secret the api and setup read; rotate with an apply
   multi_az                     = true
   db_subnet_group_name         = aws_db_subnet_group.e2b.name
   vpc_security_group_ids       = [aws_security_group.data.id]
@@ -41,6 +49,11 @@ resource "aws_db_instance" "e2b" {
   copy_tags_to_snapshot        = true
   performance_insights_enabled = true
   auto_minor_version_upgrade   = true
+}
+
+resource "random_password" "postgres" {
+  length  = 40
+  special = false
 }
 
 # ---- MemoryDB for E2B (durable; TLS; ACL user with a generated password).
@@ -139,7 +152,6 @@ resource "aws_s3_bucket_lifecycle_configuration" "templates" {
 }
 
 output "postgres_endpoint" { value = aws_db_instance.e2b.address }
-output "postgres_secret_arn" { value = aws_db_instance.e2b.master_user_secret[0].secret_arn }
 output "memorydb_endpoint" { value = "${aws_memorydb_cluster.e2b.cluster_endpoint[0].address}:${aws_memorydb_cluster.e2b.cluster_endpoint[0].port}" }
 output "edge_redis_endpoint" { value = aws_elasticache_replication_group.edge.primary_endpoint_address }
 output "templates_bucket" { value = aws_s3_bucket.templates.bucket }

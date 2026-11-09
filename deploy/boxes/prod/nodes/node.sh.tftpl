@@ -1,0 +1,167 @@
+#!/bin/bash
+# Boots one sandbox node (PRODUCTION.md stage 4): host setup as E2B Embed's host-setup.sh, artifacts from our
+# bucket, mTLS files, the orchestrator under systemd (stopping pauses every box first), DNS registration, and a
+# watcher that drains the node when its Auto Scaling group terminates it. Rendered by nodes.tf.
+set -euxo pipefail
+exec > >(tee -a /var/log/mumbo-node.log) 2>&1
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -q && apt-get install -yq jq iptables curl
+snap install aws-cli --classic
+export AWS_DEFAULT_REGION=${region}
+tok=$(curl -sfX PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 300')
+id=$(curl -sf -H "X-aws-ec2-metadata-token: $tok" http://169.254.169.254/latest/meta-data/instance-id)
+ip=$(curl -sf -H "X-aws-ec2-metadata-token: $tok" http://169.254.169.254/latest/meta-data/local-ipv4)
+
+# ---- host: KVM, nbd devices, tun, hugepages for guest memory, MSS clamp.
+printf 'nbd\ntun\nkvm\n' > /etc/modules-load.d/e2b.conf
+echo "options nbd nbds_max=${nbds} max_part=16" > /etc/modprobe.d/e2b-nbd.conf
+modprobe nbd nbds_max=${nbds} max_part=16 && modprobe tun
+test -c /dev/kvm
+# The orchestrator makes /sys/fs/cgroup/e2b with +cpu +memory; at early boot systemd may not have enabled them yet.
+echo '+cpu +memory' > /sys/fs/cgroup/cgroup.subtree_control
+echo 'KERNEL=="nbd*", GROUP="disk", MODE="0660"' > /etc/udev/rules.d/97-nbd-device.rules
+udevadm control --reload && udevadm trigger
+printf 'vm.nr_hugepages=${hugepages}\nnet.ipv4.tcp_max_syn_backlog=65535\nvm.max_map_count=1048576\n' > /etc/sysctl.d/90-e2b.conf
+sysctl -q -p /etc/sysctl.d/90-e2b.conf
+test "$(cat /proc/sys/vm/nr_hugepages)" -ge ${hugepages}
+iptables -w 5 -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null ||
+  iptables -w 5 -t mangle -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+
+# ---- artifacts: our orchestrator and envd (one fork commit), E2B's pinned Firecracker, kernel and busybox.
+a=s3://${bucket}/artifacts
+install -d -m 0755 /var/lib/e2b/bin /var/lib/e2b/build-cache /fc-envd /fc-vm /orchestrator /var/run/netns /etc/e2b
+aws s3 cp --quiet $a/e2b/${e2b_sha}/orchestrator /var/lib/e2b/bin/orchestrator
+aws s3 cp --quiet $a/e2b/${e2b_sha}/envd /fc-envd/envd
+aws s3 cp --quiet $a/firecrackers/${firecracker}/amd64/firecracker /fc-versions/${firecracker}/amd64/firecracker
+aws s3 cp --quiet $a/kernels/${kernel}/amd64/vmlinux.bin /fc-kernels/${kernel}/amd64/vmlinux.bin
+aws s3 cp --quiet $a/busybox/${busybox}/amd64/busybox /fc-busybox/${busybox}/amd64/busybox
+chmod 0755 /var/lib/e2b/bin/orchestrator /fc-envd/envd /fc-versions/${firecracker}/amd64/firecracker /fc-busybox/${busybox}/amd64/busybox
+
+# ---- secrets: mTLS certificate (E2B re-reads the files every minute) and the E2B secrets.
+umask 077
+install -d -m 0700 /etc/e2b/tls
+mtls=$(aws secretsmanager get-secret-value --secret-id ${mtls_secret} --query SecretString --output text)
+jq -r .crt <<<"$mtls" > /etc/e2b/tls/tls.crt; jq -r .key <<<"$mtls" > /etc/e2b/tls/tls.key; jq -r .ca <<<"$mtls" > /etc/e2b/tls/ca.crt
+e2b=$(aws secretsmanager get-secret-value --secret-id ${e2b_secret} --query SecretString --output text)
+
+cat > /etc/e2b/orchestrator.env <<ENV
+NODE_ID=$id
+NODE_IP=$ip
+ENVIRONMENT=prod
+PROVIDER=aws
+AWS_REGION=${region}
+ORCHESTRATOR_SERVICES=orchestrator,template-manager
+GRPC_PORT=5008
+PROXY_PORT=5007
+REDIS_CLUSTER_URL=$(jq -r .REDIS_CLUSTER_URL <<<"$e2b")
+TEMPLATE_STORAGE_URL=s3://${bucket}?region=${region}
+BUILD_CACHE_STORAGE_URL=file:///var/lib/e2b/build-cache
+FIRECRACKER_VERSIONS_DIR=/fc-versions
+HOST_KERNELS_DIR=/fc-kernels
+HOST_BUSYBOX_DIR=/fc-busybox
+BUSYBOX_VERSION=${busybox}
+HOST_ENVD_PATH=/fc-envd/envd
+DEFAULT_KERNEL_VERSION=${kernel}
+DEFAULT_FIRECRACKER_VERSION=${firecracker}
+NBD_POOL_SIZE=64
+CREATE_MEMORY_REFUSAL=true
+PAUSE_ADMISSION_DISK_HEADROOM_MIB=4096
+E2B_TLS_CERT_FILE=/etc/e2b/tls/tls.crt
+E2B_TLS_KEY_FILE=/etc/e2b/tls/tls.key
+E2B_TLS_CA_FILE=/etc/e2b/tls/ca.crt
+%{ for k, v in mtls_env ~}
+${k}=${v}
+%{ endfor ~}
+ENV
+cat > /etc/e2b/node.env <<ENV
+NODE_ID=$id
+NODE_IP=$ip
+API_URL=${api_url}
+TEAM_API_KEY=$(jq -r .TEAM_API_KEY <<<"$e2b")
+ADMIN_TOKEN=$(jq -r .ADMIN_TOKEN <<<"$e2b")
+ZONE_ID=${zone_id}
+DNS_NAME=${dns_name}
+ASG=${asg}
+HOOK=${hook}
+AWS_DEFAULT_REGION=${region}
+ENV
+umask 022
+
+# ---- drain: pause every box on this node through the E2B API, then wait until none runs here.
+cat > /usr/local/bin/mumbo-drain <<'SH'
+#!/bin/bash
+# ExecStop of e2b-orchestrator: a stop, restart or termination pauses boxes (memory kept) instead of killing them.
+. /etc/e2b/node.env
+curl -sf -m 3 http://127.0.0.1:5008/health >/dev/null || { echo "mumbo-drain: orchestrator not serving; nothing to pause"; exit 0; }
+boxes() { ls /sys/fs/cgroup/e2b 2>/dev/null | sed -n 's/^sbx-\(.*\)-[^-]*$/\1/p' | sort -u; }
+boxes | xargs -r -P 4 -I{} sh -c 'echo "mumbo-drain: pause {} -> $(curl -s -o /dev/null -w %%{http_code} -m 600 -X POST -H "X-API-Key: $TEAM_API_KEY" "$API_URL/sandboxes/{}/pause")"'
+for _ in $(seq 120); do [ -z "$(boxes)" ] && { echo "mumbo-drain: node empty"; exit 0; }; sleep 5; done
+echo "mumbo-drain: boxes still running after 10 minutes: $(boxes | tr '\n' ' ')"
+SH
+
+# ---- DNS: this node is one multivalue A record under the orchestrators name; stale records are pruned.
+cat > /usr/local/bin/mumbo-dns <<'SH'
+#!/bin/bash
+# mumbo-dns up|down
+set -euo pipefail
+. /etc/e2b/node.env
+change() { aws route53 change-resource-record-sets --hosted-zone-id "$ZONE_ID" --change-batch "$(jq -nc --arg a "$1" --arg id "$2" --arg ip "$3" --arg n "$DNS_NAME" \
+  '{Changes:[{Action:$a,ResourceRecordSet:{Name:$n,Type:"A",TTL:10,SetIdentifier:$id,MultiValueAnswer:true,ResourceRecords:[{Value:$ip}]}}]}')" >/dev/null; }
+if [ "$1" = down ]; then change DELETE "$NODE_ID" "$NODE_IP" || true; exit 0; fi
+change UPSERT "$NODE_ID" "$NODE_IP"
+live=$(aws ec2 describe-instances --filters Name=instance-state-name,Values=pending,running --query 'Reservations[].Instances[].InstanceId' --output text)
+aws route53 list-resource-record-sets --hosted-zone-id "$ZONE_ID" --query "ResourceRecordSets[?Name=='$DNS_NAME.']" --output json |
+  jq -r '.[] | [.SetIdentifier, .ResourceRecords[0].Value] | @tsv' | while read -r sid sip; do
+    grep -qw "$sid" <<<"$live" || { echo "mumbo-dns: pruning $sid $sip"; change DELETE "$sid" "$sip" || true; }
+  done
+SH
+
+# ---- termination: the ASG lifecycle hook holds the instance; mark the node draining, leave DNS, pause boxes.
+cat > /usr/local/bin/mumbo-lifecycle <<'SH'
+#!/bin/bash
+. /etc/e2b/node.env
+md() { t=$(curl -sfX PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60'); curl -sf -H "X-aws-ec2-metadata-token: $t" "http://169.254.169.254/latest/meta-data/$1"; }
+# Join DNS once the orchestrator serves; the record stays across orchestrator restarts.
+until curl -sf -m 2 http://127.0.0.1:5008/health >/dev/null; do sleep 5; done
+/usr/local/bin/mumbo-dns up
+until [ "$(md autoscaling/target-lifecycle-state)" = Terminated ]; do sleep 5; done
+echo "mumbo-lifecycle: terminating; draining"
+curl -s -m 10 -X POST -H "X-Admin-Token: $ADMIN_TOKEN" -H 'content-type: application/json' -d '{"status":"draining"}' "$API_URL/nodes/$NODE_ID" -o /dev/null -w "mark draining: %%{http_code}\n" || true
+/usr/local/bin/mumbo-dns down
+systemctl stop e2b-orchestrator
+aws autoscaling complete-lifecycle-action --auto-scaling-group-name "$ASG" --lifecycle-hook-name "$HOOK" --instance-id "$NODE_ID" --lifecycle-action-result CONTINUE
+SH
+chmod 0755 /usr/local/bin/mumbo-drain /usr/local/bin/mumbo-dns /usr/local/bin/mumbo-lifecycle
+
+cat > /etc/systemd/system/e2b-orchestrator.service <<'UNIT'
+[Unit]
+Description=E2B orchestrator
+After=network-online.target
+Wants=network-online.target
+[Service]
+EnvironmentFile=/etc/e2b/orchestrator.env
+ExecStart=/var/lib/e2b/bin/orchestrator
+ExecStop=/usr/local/bin/mumbo-drain
+TimeoutStartSec=15min
+TimeoutStopSec=30min
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=1048576
+LimitMEMLOCK=infinity
+[Install]
+WantedBy=multi-user.target
+UNIT
+cat > /etc/systemd/system/mumbo-lifecycle.service <<'UNIT'
+[Unit]
+Description=Register this node in DNS; drain it when its Auto Scaling group terminates it
+After=e2b-orchestrator.service
+[Service]
+ExecStart=/usr/local/bin/mumbo-lifecycle
+Restart=always
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now e2b-orchestrator mumbo-lifecycle
+echo "mumbo-node: ready $id $ip"

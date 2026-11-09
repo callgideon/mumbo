@@ -1,7 +1,7 @@
 # Images we build: the forked E2B api (DNS discovery, callgideon/e2b-runtime) and the edge. Tags are immutable
 # commit SHAs, so a deploy names exactly what runs and a rollback is the previous tag.
 resource "aws_ecr_repository" "images" {
-  for_each             = toset(["e2b-api", "edge"])
+  for_each             = toset(["e2b-api", "e2b-client-proxy", "e2b-setup", "edge"])
   name                 = "${local.name}/${each.key}"
   image_tag_mutability = "IMMUTABLE"
   image_scanning_configuration { scan_on_push = true }
