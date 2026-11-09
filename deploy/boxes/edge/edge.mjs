@@ -159,13 +159,28 @@ cat > /root/.mumbo/sandboxes.overlay.yml <<'YML'
           Authorization: !!js '\`Bearer \${process.env.DEEPSEEK_API_KEY}\`'
 ${site.desktop ? `    - id: browser-use
       name: '@deepseek-ai/dsh-browser-use'
+` : ''}YML
+${site.desktop ? `# The user's Chromium for dsh's browser tools. With @mumbo/browser-consent in the image, writes on a site ask the
+# person first; consent mounts the Playwright MCP provider itself, so the plain provider row is used only without it.
+if [ -d /src/packages/mumbo/browser-consent ]; then
+cat >> /root/.mumbo/sandboxes.overlay.yml <<'YML'
+    - id: browser-consent
+      name: '@mumbo/browser-consent'
+      config:
+        browser:
+          mode: attach
+          endpoint: http://127.0.0.1:9222
+YML
+else
+cat >> /root/.mumbo/sandboxes.overlay.yml <<'YML'
     - id: browser-use-box-chromium
       name: '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp'
       config:
         mode: attach
         endpoint: http://127.0.0.1:9222
-` : ''}YML
-# Sidebar links to the edge's home page and desktop (@mumbo/box-links), when the image ships that package.
+YML
+fi
+` : ''}# Sidebar links to the edge's home page and desktop (@mumbo/box-links), when the image ships that package.
 LINKS_PATCH=
 if [ -d /src/packages/mumbo/box-links ]; then
 cat > /root/.mumbo/links.overlay.yml <<'YML'
@@ -178,13 +193,38 @@ ${site.desktop ? `        desktop: https://${cfg.publicHost}/desktop/
 ` : ''}YML
 LINKS_PATCH="--patch /root/.mumbo/links.overlay.yml"
 fi
-${site.desktop ? `# Desktop: the user's own Chromium (signed-in accounts live in its profile) on a virtual display, as the unprivileged
+${site.desktop ? `# Desktop control on :1 (@deepseek-ai/dsh-computer-use-x11), when the image ships the package and xdotool.
+CU_PATCH=
+if [ -d /src/packages/experimental/computer-use-x11 ] && command -v xdotool >/dev/null 2>&1; then
+cat > /root/.mumbo/computer.overlay.yml <<'YML'
+- insert:
+    - id: computer-use
+      name: '@deepseek-ai/dsh-computer-use'
+    - id: computer-use-x11
+      name: '@deepseek-ai/dsh-computer-use-x11'
+      config:
+        display: ':1'
+YML
+command -v xauth >/dev/null 2>&1 && echo "        xauthority: /run/x11/auth" >> /root/.mumbo/computer.overlay.yml
+CU_PATCH="--patch /root/.mumbo/computer.overlay.yml"
+fi
+` : ''}${site.desktop ? `# Desktop: the user's own Chromium (signed-in accounts live in its profile) on a virtual display, as the unprivileged
 # user browser; its debugging port stays on loopback for dsh's browser tools; noVNC on :6080 is the live view, which
 # only the edge reaches (E2B traffic token). Re-runnable: each part starts only if it is not running.
 if id browser >/dev/null 2>&1; then
   # E2B forwards every loopback port to the box address; the browser's debugging port and raw VNC stay box-local.
   for port in 9222 5900; do iptables -C INPUT -p tcp --dport $port ! -i lo -j DROP 2>/dev/null || iptables -I INPUT -p tcp --dport $port ! -i lo -j DROP || true; done
-  pgrep -x Xvfb >/dev/null || { su browser -s /bin/sh -c 'Xvfb :1 -screen 0 1440x900x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &'; sleep 1; su browser -s /bin/sh -c 'DISPLAY=:1 openbox >/tmp/openbox.log 2>&1 &'; }
+  # X access cookie, so only holders of /run/x11/auth (the browser user and root) can read or drive :1. su keeps the
+  # environment, so every X client below inherits XAUTHORITY. Images without xauth run :1 without one, as before.
+  XVFB_AUTH=
+  if command -v xauth >/dev/null 2>&1; then
+    mkdir -p /run/x11
+    [ -s /run/x11/auth ] || { xauth -q -f /run/x11/auth add :1 . "$(mcookie)" 2>/dev/null; chown browser /run/x11/auth; chmod 600 /run/x11/auth; }
+    export XAUTHORITY=/run/x11/auth
+    XVFB_AUTH="-auth /run/x11/auth"
+  fi
+  export XVFB_AUTH
+  pgrep -x Xvfb >/dev/null || { su browser -s /bin/sh -c 'Xvfb :1 $XVFB_AUTH -screen 0 1440x900x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &'; sleep 1; su browser -s /bin/sh -c 'DISPLAY=:1 openbox >/tmp/openbox.log 2>&1 &'; }
   pgrep -f 'remote-debugging-port=9222' >/dev/null || { rm -f /home/browser/profile/Singleton*; su browser -s /bin/sh -c 'DISPLAY=:1 chromium --user-data-dir=/home/browser/profile --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --no-first-run --no-default-browser-check --password-store=basic --start-maximized >/tmp/chromium.log 2>&1 &'; }
   pgrep -x x11vnc >/dev/null || su browser -s /bin/sh -c 'x11vnc -display :1 -localhost -forever -shared -nopw -rfbport 5900 -quiet >/tmp/x11vnc.log 2>&1 &'
   pgrep -f websockify >/dev/null || nohup websockify --web /usr/share/novnc "$ip:6080" 127.0.0.1:5900 >/tmp/websockify.log 2>&1 &
@@ -225,7 +265,7 @@ ${site.desktop ? '' : `PATH=/root/.mumbo/bin:$PATH NODE_USE_ENV_PROXY=1 NODE_EXT
 `}HOME=/root DSH_HOME=/root/.dsh DSH_AGENTS_HOME=/root/.mumbo/agents DSH_TELEMETRY_DISABLED=1 \\
 DEEPSEEK_BASE_URL=${llm}/anthropic DEEPSEEK_SEARCH_BASE_URL=${llm} DEEPSEEK_API_KEY=${token} \\
 nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\
-  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml $LINKS_PATCH${memberKeyText ? ' $PROJECT_PATCH' : ''} \\
+  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml $LINKS_PATCH${site.desktop ? ' $CU_PATCH' : ''}${memberKeyText ? ' $PROJECT_PATCH' : ''} \\
   --no-open --host "$ip" --port 3080 --public-url ${site.publicUrl} --trusted-host ${cfg.publicHost}${site.host === cfg.publicHost ? '' : ` --trusted-host ${site.host}`} > /root/dsh.log 2>&1 &
 `
 }
