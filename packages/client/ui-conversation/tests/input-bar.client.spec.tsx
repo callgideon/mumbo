@@ -561,12 +561,12 @@ describe('image draft rail', () => {
           { kind: 'string', type: 'text/plain', getAsFile: () => null },
           { kind: 'file', type: 'image/png', getAsFile: () => image },
         ],
-        getData: () => 'at the same time Paste's text',
+        getData: () => 'at the same time Paste\'s text',
       },
     })
     expect(addFiles).toHaveBeenCalledWith([image], undefined)
     // The paste lands inside the PASTE_COMMAND update; its commit is a microtask away.
-    await vi.waitFor(() => { expect(shell.snapshot.draft).toBe('at the same time Paste's text') })
+    await vi.waitFor(() => { expect(shell.snapshot.draft).toBe('at the same time Paste\'s text') })
   })
 
   it('passes known clipboard directories and keeps files whose entry metadata is unavailable', () => {

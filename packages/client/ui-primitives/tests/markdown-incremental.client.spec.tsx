@@ -351,7 +351,7 @@ describe('multibyte content', () => {
   const CJK_DOC = [
     '# title 🎉',
     '',
-    'This is a paragraph containing **bold**,`inline Code` and emoji 😀🚀 's Chinese paragraph.',
+    'This is a paragraph containing **bold**,`inline Code` and emoji 😀🚀 \'s Chinese paragraph.',
     '',
     '-List item one ✅',
     '-List item two',

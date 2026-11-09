@@ -77,11 +77,11 @@ it('shows the recorded placement once settled, not the location picked before th
 it('restores a written location after cancellation and preserves it on retry', async () => {
   const value = props({ phase: 'cancelled', data: { slot: 'page', customLocation: '쯳잧둁썧흓쩍윚겕신 Context' } })
   const { rerender } = render(<PageCardBody {...value} />)
-  expect(screen.getByRole<HTMLTextAreaElement>('textbox').value).toBe('right InspectThis session's Context')
+  expect(screen.getByRole<HTMLTextAreaElement>('textbox').value).toBe('right InspectThis session\'s Context')
   fireEvent.click(screen.getByRole('button', { name: 'Create again' }))
   await waitFor(() => { expect(value.act).toHaveBeenCalledWith('create', { slot: 'page', customLocation: '쯳잧둁썧흓쩍윚겕신 Context' }) })
   rerender(<PageCardBody {...props({ phase: 'installed', data: { slot: 'page', customLocation: '쯳잧둁썧흓쩍윚겕신 Context' } })} />)
-  expect(screen.getByText('Add to · right InspectThis session's Context')).toBeTruthy()
+  expect(screen.getByText('Add to · right InspectThis session\'s Context')).toBeTruthy()
 })
 
 it('opens the cost notice until dismissed, remembers dismissal, and allows reopening', () => {

@@ -25,12 +25,12 @@ function field(text: string, rest: Partial<SettingsFieldState> = {}): SettingsFi
 const DESCRIPTIONS: Record<string, { en: string; zh: string }> = {
   'deepseek-search-api': {
     en: 'Search API description. Uses the DeepSeek account of the current conversation, or a DeepSeek API key, and may incur API charges.',
-    zh: 'Search API Instructions. Use This session's DeepSeek Account or DeepSeek API Key, may incur charges',
+    zh: 'Search API Instructions. Use This session\'s DeepSeek Account or DeepSeek API Key, may incur charges',
   },
   'http': { en: 'Direct fetch description.', zh: 'fetch locally Instructions' },
   'deepseek-fetch-api': {
     en: 'Fetch API description. Uses the DeepSeek account of the current conversation, or a DeepSeek API key, may incur API charges.',
-    zh: 'Fetch API Instructions. Use This session's DeepSeek Account or DeepSeek API Key, may incur charges',
+    zh: 'Fetch API Instructions. Use This session\'s DeepSeek Account or DeepSeek API Key, may incur charges',
   },
 }
 

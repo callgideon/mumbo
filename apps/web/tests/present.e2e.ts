@@ -20,7 +20,7 @@ const DIR = fileURLToPath(new URL('../../../snapshots/web/present', import.meta.
 const FIXTURE = join(DIR, 'session.v4.jsonl')
 const MODE = webSnapshotMode()
 const PROMPT = 'Use one run_code program to do the following in order. Call present for missing.txt and catch its error without creating that file. '
-  + 'Use bash to run exactly `printf "DELIVERED_REPORT\\\\n" > report.txt; printf "DELIVERED_NOTE\\\\n" > notes.txt`. '
+  + 'Use bash to run exactly `printf "DELIVERED_REPORT\\n" > report.txt; printf "DELIVERED_NOTE\\n" > notes.txt`. '
   + 'Call present for report.txt and notes.txt. After present succeeds, deliberately throw the string "AFTER_PRESENT" (not an Error object) from that same run_code program. '
   + 'Do not retry the program or create any other files. Finish by mentioning `report.txt` and `notes.txt` in inline code, and put PRESENT_DONE in a separate paragraph.'
 

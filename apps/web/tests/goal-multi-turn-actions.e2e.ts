@@ -23,7 +23,7 @@ const UI_EXPECTED = join(SNAPSHOT_DIR, 'ui.expected.md')
 const UI_EXPANDED_EXPECTED = join(SNAPSHOT_DIR, 'ui-expanded.expected.md')
 const MODE = webSnapshotMode()
 
-const PROMPT = 'make two turn, each turnOutput a random package's File structure. Note that after you finish one turn, directly OutputContent, Stop, our SYSTEM will open another for you turn, and you make a similar one'
+const PROMPT = 'Do two turns. In each turn, output the file structure of one random package. Note that after you finish one turn, output the content directly and stop; our system will open another turn for you, and you do a similar one.'
 const COMMAND = `/goal ${PROMPT}`
 
 const PACKAGE_FILES: Readonly<Record<string, string>> = {

@@ -213,7 +213,7 @@ it.skipIf(MODE === 'record')('persists Bing reasoning translation across reopen 
   await panel.getByText(`v${bundleVersion}`, { exact: true }).waitFor()
   await panel.getByText(bundleVersion, { exact: true }).waitFor()
   // The bundle's detail document is shown between its components and its source.
-  await panel.locator('[data-detail-document]').getByRole('img', { name: 'Expand's Think lines translated from English to Chinese, and show“View original”button', exact: true }).waitFor()
+  await panel.locator('[data-detail-document]').getByRole('img', { name: 'Expanded Think lines translated from English to Chinese, with a "View original" button', exact: true }).waitFor()
   await compareOrRefreshGolden(join(EXPECTED, 'preferences.expected.md'),
     await captureStableAria(settings, '[data-plugin-panel]', scaffold.workspaceCwd, {
       replacements: [[BUNDLE, '{{bundle}}'], [bundleVersion, '{{version}}']],

@@ -1386,7 +1386,7 @@ describe('web e2e: plugin manager', () => {
     const install = dialog.getByRole('button', { name: 'Install', exact: true })
     expect(await install.isDisabled()).toBe(true)
     expect(await dialog.getByRole('note').textContent()).toContain('please ConfirmPluginsSource trusted')
-    expect(await dialog.getByRole('note').textContent()).toContain('on demand Install's OfficialPlugins will in RevisionConflicts with DSH not provided at the same time“Update”')
+    expect(await dialog.getByRole('note').textContent()).toContain('on demand Install\'s OfficialPlugins will in RevisionConflicts with DSH not provided at the same time“Update”')
     expect(await dialog.getByRole('note').textContent()).toContain('OtherPlugins please first Uninstall again Install new version')
     await dialog.getByRole('button', { name: 'Install guide and examples' }).click()
     // The guide carries the package-name example only; the former template strings keep their replacement reminder.

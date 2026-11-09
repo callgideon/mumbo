@@ -186,14 +186,14 @@ describe('goal command input projection', () => {
     const props = {
       node: {
         key: 'goal-command-input:two',
-        data: { commandId: 'command-goal', text: '/goal Check /goal 's syntax', time: 1_700_000_000_000 },
+        data: { commandId: 'command-goal', text: '/goal Check /goal \'s syntax', time: 1_700_000_000_000 },
       },
       t,
       renderFactorySlot: textFactories(),
     } as Parameters<typeof GoalCommandInputView>[0]
     const view = render(<GoalCommandInputView {...props} />)
     const bubble = view.getByRole('group', { name: 'Command input' })
-    expect(bubble.textContent).toBe('/goal Check /goal 's syntax')
+    expect(bubble.textContent).toBe('/goal Check /goal \'s syntax')
     const chips = [...bubble.querySelectorAll('[data-ref-chip]')]
     expect(chips.map(chip => chip.textContent)).toEqual(['/goal'])
   })

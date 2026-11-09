@@ -1396,11 +1396,11 @@ describe('TrajectoryView state', () => {
     expect(screen.queryByRole('row', { name: /SUBTOOL.*bash/ })).toBeNull()
     expect(screen.getByRole('row', { name: /TOOL.*run_code/ })).toBeTruthy()
     expect(screen.getByRole('row', { name: /TOOL.*write/ })).toBeTruthy()
-    expect(screen.getByRole('row', { name: /Collapse's Subcalls/ }).textContent).toBe('…3 tool call · bash, read, grep')
+    expect(screen.getByRole('row', { name: /Collapse\'s Subcalls/ }).textContent).toBe('…3 tool call · bash, read, grep')
     fireEvent.click(screen.getByRole('button', { name: 'Expand subcalls' }))
     expect(screen.getByRole('row', { name: /SUBTOOL.*bash/ })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Collapse subcalls' }))
-    fireEvent.keyDown(screen.getByRole('row', { name: /Collapse's Subcalls/ }), { key: 'Enter' })
+    fireEvent.keyDown(screen.getByRole('row', { name: /Collapse\'s Subcalls/ }), { key: 'Enter' })
     expect(screen.getByRole('row', { name: /SUBTOOL.*bash/ })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Collapse subcalls' }))
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search trajectory' }), { target: { value: 'bash' } })
@@ -1411,7 +1411,7 @@ describe('TrajectoryView state', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Collapse turns' }))
     view.rerender(<TrajectoryView {...props} viewRequest={{ view: 'trajectory', focus: 'grandchild' }} />)
     expect(screen.getByRole('row', { name: /SUBTOOL.*grep/ }).getAttribute('aria-selected')).toBe('true')
-    expect(screen.queryByRole('row', { name: /Collapse's/ })).toBeNull()
+    expect(screen.queryByRole('row', { name: /Collapse\'s/ })).toBeNull()
   })
 
   it.each(['click', 'Enter', ' '])('expands a subcall summary with %j', (activation) => {
@@ -1421,12 +1421,12 @@ describe('TrajectoryView state', () => {
       {...standaloneDuration()}
     />)
     fireEvent.click(screen.getByRole('button', { name: 'Collapse subcalls' }))
-    const summary = screen.getByRole('row', { name: /Collapse's Subcalls.*3 tool call/ })
+    const summary = screen.getByRole('row', { name: /Collapse\'s Subcalls.*3 tool call/ })
     expect(summary.tabIndex).toBe(0)
     if (activation === 'click') fireEvent.click(summary)
     else fireEvent.keyDown(summary, { key: activation })
     expect(screen.getAllByRole('row', { name: /SUBTOOL/ })).toHaveLength(3)
-    expect(screen.queryByRole('row', { name: /Collapse's Subcalls/ })).toBeNull()
+    expect(screen.queryByRole('row', { name: /Collapse\'s Subcalls/ })).toBeNull()
   })
 
   it.each([
@@ -1443,12 +1443,12 @@ describe('TrajectoryView state', () => {
     for (const kind of outer) {
       fireEvent.click(screen.getByRole('button', { name: `Collapse all${kind}` }))
     }
-    expect(screen.getAllByRole('row', { name: /Collapse's/ })).toHaveLength(1)
-    expect(screen.queryByRole('row', { name: /Collapse's Subcalls/ })).toBeNull()
+    expect(screen.getAllByRole('row', { name: /Collapse\'s/ })).toHaveLength(1)
+    expect(screen.queryByRole('row', { name: /Collapse\'s Subcalls/ })).toBeNull()
     for (const kind of outer.toReversed()) {
       fireEvent.click(screen.getByRole('button', { name: `Expand all${kind}` }))
     }
-    expect(screen.getByRole('row', { name: /Collapse's Subcalls/ })).toBeTruthy()
+    expect(screen.getByRole('row', { name: /Collapse\'s Subcalls/ })).toBeTruthy()
     expect(screen.getByRole('row', { name: /TOOL.*write/ })).toBeTruthy()
     expect(screen.queryByRole('row', { name: /SUBTOOL/ })).toBeNull()
   })

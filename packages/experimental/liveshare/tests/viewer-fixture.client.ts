@@ -871,7 +871,7 @@ function fixtureSettledStream(
 }
 
 /** Rendered system prompt of the fx-alpha history: surface node 0. */
-const FIXTURE_SYSTEM_PROMPT = 'You are DeepSeek Harness 's fixture an assistant. Answer concisely and call tools when needed.'
+const FIXTURE_SYSTEM_PROMPT = 'You are DeepSeek Harness \'s fixture an assistant. Answer concisely and call tools when needed.'
 
 /** fx-alpha history script: 75 turns (~150+ messages -> 4 pages at PAGE_MESSAGES=50),
  *  mixing reasoning blocks / tool call+result / context. */
@@ -3735,7 +3735,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
               return `Current model:${selection?.provider ?? 'unknown'}/${selection?.model ?? 'unknown'}`
                   + (selection?.reasoningEffort === undefined ? '' : ` · Reasoning effort:${selection.reasoningEffort}`)
             })()
-            : `Echo:${userText}. This is fixture 's streamed reply, used to verify typewriter growth and the final-draft switch.`,
+            : `Echo:${userText}. This is fixture \'s streamed reply, used to verify typewriter growth and the final-draft switch.`,
       )
       return sessionOk({ accepted: true as const })
     },

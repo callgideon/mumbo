@@ -260,7 +260,7 @@ describe('Trajectory conversation Definitions', () => {
       }
       const followup = {
         id: 'followup', role: 'user',
-        content: [{ type: 'text', text: ''s worktree, no need to go around snapshot' }],
+        content: [{ type: 'text', text: '\'s worktree, no need to go around snapshot' }],
         source: { kind: 'user' },
       }
       const events = [
@@ -309,7 +309,7 @@ describe('Trajectory conversation Definitions', () => {
         expect(turns.find(turn => turn.turn === 2)?.groups.flatMap(group =>
           group.cells.map(cell => cell.requestOnly ? '[request]' : cell.previewMarkdown).filter(Boolean))).toEqual([
           'you can directly Updatemaster',
-          ''s worktree, no need to go around snapshot',
+          '\'s worktree, no need to go around snapshot',
           'Current workspace context.',
           phase === 'waiting' ? '[request]' : 'Both inputs received.',
         ])

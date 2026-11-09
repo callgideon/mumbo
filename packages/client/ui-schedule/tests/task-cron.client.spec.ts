@@ -169,7 +169,7 @@ describe('cronPreview', () => {
     ['* 9 * * *', 'Every day every minute during hours 09', 'Daily at 09'],
     ['0-59/1 9 * * *', `Every day at minute ${everyMinuteEn} of hours 09`, `Daily at 09 o'clock Turn ${everyMinuteZh} minutes`],
     ['5,10,25,40,50 1,7,13 * * *', 'Every day at minute 5, 10, 25, 40, 50 of hours 01, 07, 13',
-      'Daily at 01, 07, 13 o'clock Turn 5, 10, 25, 40, 50 minutes'],
+      'Daily at 01, 07, 13 o\'clock Turn 5, 10, 25, 40, 50 minutes'],
     ['*/15 * * 3 *', 'Every day in March every 15 minutes', 'Every day(March) Every 15 minutes'],
   ])('describes %s', (expression, english, chinese) => {
     expect(cronPreview(parsed(expression), tEn, 'en')).toBe(english)

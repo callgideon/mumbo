@@ -85,12 +85,12 @@ describe('UserText projection', () => {
   })
 
   it('folds the wire session form to its label with the session glyph', () => {
-    const host = project('take a look @[Inspect and analyze Image](dsh-session:InNlc3Npb24tNDM0) 's conclusion')
+    const host = project('take a look @[Inspect and analyze Image](dsh-session:InNlc3Npb24tNDM0) \'s conclusion')
     const chip = host.querySelector('[data-ref-chip="session"]')!
     expect(chip.textContent).toBe('Inspect and analyze Image')
     expect(chip.getAttribute('title')).toBe('@[Inspect and analyze Image](dsh-session:InNlc3Npb24tNDM0)')
     expect(chip.querySelector('svg')).not.toBeNull()
-    expect(host.textContent).toBe('take a look Inspect and analyze Image 's conclusion')
+    expect(host.textContent).toBe('take a look Inspect and analyze Image \'s conclusion')
   })
 
   it('prefers the wire fold over the bare-token scan on the same range', () => {

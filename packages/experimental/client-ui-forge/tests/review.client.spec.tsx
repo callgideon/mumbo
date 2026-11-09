@@ -94,9 +94,9 @@ describe('review references', () => {
     expect(input).toHaveProperty('value', 'first Checks boundary\n add tests again.')
     fireEvent.change(input, { target: { value: ' \n' } })
     expect(send).toHaveProperty('disabled', true)
-    fireEvent.change(input, { target: { value: 'Modified's Content' } })
+    fireEvent.change(input, { target: { value: 'Modified\'s Content' } })
     fireEvent.click(send)
-    expect(addToInput).toHaveBeenCalledWith({ ...selection, comment: { ...selection.comment, body: 'Modified's Content' } })
+    expect(addToInput).toHaveBeenCalledWith({ ...selection, comment: { ...selection.comment, body: 'Modified\'s Content' } })
   })
   it('keeps sides, reversed ranges, and the complete hunk while refusing gaps and cross-hunk selection', () => {
     expect(selectReviewLines(file, 'R', 4, 3)).toEqual({ ...selection.comment, body: '' })

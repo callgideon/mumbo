@@ -345,7 +345,7 @@ describe('viewer session plugin', () => {
       expect(page.scopesAsked).not.toContain(OTHER)
       // The share never answered, so this page states that it could not confirm the share's state
       // rather than claiming the read-only fact an answer would have stated.
-      expect(page.blocks.get(SHARED)?.reason).toContain('unable to Confirm the Share's current Status')
+      expect(page.blocks.get(SHARED)?.reason).toContain('unable to Confirm the Share\'s current Status')
     } finally {
       await page.fiber.dispose()
     }
@@ -513,12 +513,12 @@ describe('viewer session plugin', () => {
       expect(injected.blocks.has(SHARED)).toBe(true)
       expect(injected.blocks.get(SHARED)).toBeUndefined()
       deliverGrants(injected.access, {})
-      await vi.waitFor(() => { expect(injected.blocks.get(SHARED)?.reason).toContain('unable to Confirm the Share's current Status') })
+      await vi.waitFor(() => { expect(injected.blocks.get(SHARED)?.reason).toContain('unable to Confirm the Share\'s current Status') })
     } finally { await injected.fiber.dispose() }
     const bare = await bench()
     try {
       bare.rows.set({ byId: { [SHARED]: { id: SHARED } } })
-      await vi.waitFor(() => { expect(bare.blocks.get(SHARED)?.reason).toContain('unable to Confirm the Share's current Status') })
+      await vi.waitFor(() => { expect(bare.blocks.get(SHARED)?.reason).toContain('unable to Confirm the Share\'s current Status') })
     } finally { await bare.fiber.dispose() }
   })
 

@@ -92,7 +92,7 @@ it('explains download failures on the Host machine and retains an actionable ret
   } })
   const alert = screen.getByRole('alert')
   expect(alert.textContent).toContain('Cannot download model.int8.onnx: the download address could not be resolved.')
-  expect(alert.textContent).toContain('Run DSH machine's DNS and proxy Settings')
+  expect(alert.textContent).toContain('Run DSH machine\'s DNS and proxy Settings')
   expect(alert.textContent).toContain('DownloadSource: https://mirror.example')
   expect(alert.textContent).toContain('Error code: ENOTFOUND')
   expect(alert.textContent).not.toContain('fetch failed')

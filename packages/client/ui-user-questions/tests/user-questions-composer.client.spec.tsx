@@ -1074,7 +1074,7 @@ describe('review card', () => {
     kit.actions.replace(PendingQuestion.keyOf(SID, REVIEWED_CALL), {
       index: 2,
       drafts: [
-        { selected: [], custom: 'no Commit's Draft', skipped: false },
+        { selected: [], custom: 'no Commit\'s Draft', skipped: false },
         { selected: [], custom: '', skipped: false },
         { selected: ['Code quality'], custom: '', skipped: false },
       ],
@@ -1094,7 +1094,7 @@ describe('review card', () => {
     fireEvent.click(screen.getByLabelText('Previous question'))
 
     expect(screen.getByRole('radio', { name: 'research-focused' }).getAttribute('aria-checked')).toBe('true')
-    expect(screen.queryByDisplayValue('no Commit's Draft')).toBeNull()
+    expect(screen.queryByDisplayValue('no Commit\'s Draft')).toBeNull()
   })
 
   it('closing a read-only panel withdraws it and sends nothing', () => {

@@ -182,7 +182,7 @@ describe('web e2e: plugin configuration pages', () => {
     expect(await panel.getByRole('link', { name: 'Search & Fetch guide', exact: true }).getAttribute('href'))
       .toBe('https://api-docs.deepseek.com/zh-cn/guides/search')
     // Each section shows the description its selected provider registered with the Host, in the active language.
-    expect(await searchSection.getByText('direct request Search The interface returns the title, URL and summary, with no extra CallsModel. Use This session's DeepSeek Account or DeepSeek API Key, may incur charges', { exact: true }).count()).toBe(1)
+    expect(await searchSection.getByText('direct request Search The interface returns the title, URL and summary, with no extra CallsModel. Use This session\'s DeepSeek Account or DeepSeek API Key, may incur charges', { exact: true }).count()).toBe(1)
     expect(await fetchSection.getByText('Direct request from this machine, no API Key or billing, can reach the intranet and this machine. Decode only HTML, JSON etc. Text, no execution of JavaScript, no Sign in state, Unsupported PDF; you can also try DeepSeek Fetch API', { exact: true }).count()).toBe(1)
     // The Fetch API suggestion is text, not an action.
     expect(await fetchSection.getByRole('button').count()).toBe(1)
@@ -200,7 +200,7 @@ describe('web e2e: plugin configuration pages', () => {
 
     // The Fetch API takes no settings here, so its section shows no panel.
     await choose(fetchMenu, 'DeepSeek Fetch API')
-    expect(await fetchSection.getByText('Renamed from DeepSeek Service side fetching of the public internet Page and Back to Markdown. Use This session's DeepSeek Account or DeepSeek API Key, may incur charges, and cannot reach the intranet or this machine', { exact: true }).count()).toBe(1)
+    expect(await fetchSection.getByText('Renamed from DeepSeek Service side fetching of the public internet Page and Back to Markdown. Use This session\'s DeepSeek Account or DeepSeek API Key, may incur charges, and cannot reach the intranet or this machine', { exact: true }).count()).toBe(1)
     expect(await fetchSection.getByRole('textbox').count()).toBe(0)
     expect(await fetchSection.getByRole('button').count()).toBe(1)
     await save.click()
@@ -457,7 +457,7 @@ describe('web e2e: plugin configuration pages', () => {
     await row.getByText('Running', { exact: true }).waitFor({ timeout: 10_000 })
     expect(await bundlePage.getByRole('button', { name: 'fixture action' }).count()).toBe(1)
     expect(await bundlePage.locator('[data-live-badge="bundle"]').textContent()).toBe('fixture Labels')
-    expect(await bundlePage.getByRole('region', { name: 'fixture block' }).getByText('From fixture's block Content').count()).toBe(1)
+    expect(await bundlePage.getByRole('region', { name: 'fixture block' }).getByText('From fixture\'s block Content').count()).toBe(1)
     const bundleSnapshot = await captureStableAria(page, '[data-plugin-panel]', scaffold.workspaceCwd, {
       replacements: [[FIXTURE_PLUGINS, '{{fixtures}}']],
     })
