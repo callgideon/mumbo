@@ -399,6 +399,19 @@ export function boxHeaders(cfg, incoming, target, port = '3080', siteHost = cfg.
   if (target.traffic) out['e2b-traffic-access-token'] = target.traffic
   return out
 }
+const esc = (v) => String(v).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
+/** The signed-in person's home: their assistant, their desktop and the shared projects they belong to. Edge-served,
+ *  so it loads without starting any box. */
+export function homePage(res, email, projects) {
+  const rows = projects.length
+    ? projects.map(p => `<li><a href="/p/${esc(p.id)}/">${esc(p.name)}</a> <small>${esc(p.members.length)} member${p.members.length === 1 ? '' : 's'}${p.owner === email ? ', yours' : ''}</small></li>`).join('')
+    : '<li><small>None yet. Ask your assistant to create one.</small></li>'
+  res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>mumbo</title>
+<style>body{font-family:system-ui;max-width:40rem;margin:3rem auto;padding:0 1rem;line-height:1.5}a{color:inherit}h1{font-size:1.4rem}h2{font-size:1rem;margin-top:2rem}ul{padding-left:1.2rem}small{color:#666}</style>
+<h1>mumbo</h1><p><small>Signed in as ${esc(email)}</small></p>
+<ul><li><a href="/">Your assistant</a></li><li><a href="/desktop/">Your desktop</a> <small>sign in to your accounts here</small></li></ul>
+<h2>Projects</h2><ul>${rows}</ul>`)
+}
 /** One request from the edge itself to a box's dsh through the client-proxy, as our own site's browser would send it. */
 export const boxFetcher = (cfg) => (target, siteHost, path, { method = 'GET', headers = {}, body } = {}) => new Promise((resolve, reject) => {
   const req = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method, path,
@@ -430,6 +443,7 @@ export function userServer({ cfg, box, verifyAlb, projects, log = console.log })
     const email = await identify(req)
     if (!email.includes('@')) return json(res, 401, { error: 'not signed in' })
     if (!admitted(cfg.allowed, email)) return page(res, 403, 'mumbo boxes are invite-only for now. This account is not on the list yet.', false)
+    if (req.url === '/home' || req.url === '/home/') return homePage(res, email, await projects?.list(email) ?? [])
     const to = boxRoute(req.url)
     if (to.redirect) return res.writeHead(302, { location: to.redirect, 'cache-control': 'no-store' }).end()
     // A project path reaches the project's box, for its members only (projects.mjs).

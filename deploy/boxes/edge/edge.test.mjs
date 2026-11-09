@@ -531,3 +531,20 @@ test('role instructions: assistant with write consent and desktop sign-in; coord
   assert.match(script, /DSH_AGENTS_HOME=\/root\/\.mumbo\/agents/)
   assert.ok(script.includes(`<<'MD'\n${a}\nMD`))
 })
+
+test('home page lists the assistant, desktop and the member\'s projects without starting a box, escaping names', async () => {
+  const ensured = []
+  const box = { ensure: async (p) => { ensured.push(p); return { id: 'x', token: 'T' } }, touch: async () => {}, forget: async () => {} }
+  const proj = projectStore({ store: memoryStore(), admitted: () => true, log: () => {} })
+  const { id } = await proj.create('a@x.com', '<b>Shop</b>')
+  await proj.create('c@x.com', 'Not mine')
+  const server = userServer({ cfg: { ...cfg, allowed: ['@x.com'] }, box, projects: proj, log: () => {} })
+  await new Promise(r => server.listen(0, '127.0.0.1', r))
+  try {
+    const html = await (await fetch(`http://127.0.0.1:${server.address().port}/home`, { headers: { 'x-forwarded-email': 'a@x.com' } })).text()
+    assert.ok(html.includes(`href="/p/${id}/"`) && html.includes('&#60;b&#62;Shop&#60;/b&#62;') && !html.includes('<b>Shop'))
+    assert.ok(!html.includes('Not mine'))
+    assert.ok(html.includes('href="/desktop/"'))
+    assert.deepEqual(ensured, [])
+  } finally { server.close() }
+})
