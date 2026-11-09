@@ -541,7 +541,7 @@ importers:
         specifier: link:../../vendor/schemastery
         version: link:../../vendor/schemastery
       '@mumbo/box-links':
-        specifier: workspace:~
+        specifier: workspace:*
         version: link:../../packages/mumbo/box-links
       commander:
         specifier: ^15.0.0
