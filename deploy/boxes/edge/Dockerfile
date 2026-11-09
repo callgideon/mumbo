@@ -9,7 +9,9 @@ RUN cd /tmp && npm pack @supabase/supabase-js@2.118.0 --silent && tar xzf supaba
  && echo "ee3be8de192b97cb1d73d1e95d6b82bb1f6b658c0f97c4ef757fc331996ed3d3  package/dist/umd/supabase.js" | sha256sum -c - \
  && install -D -m 0644 package/dist/umd/supabase.js /edge/auth-ui/supabase.js && rm -rf /tmp/package /tmp/*.tgz
 COPY auth-ui/index.html auth-ui/consent.js ./auth-ui/
-COPY edge.mjs store.mjs sandboxes.mjs projects.mjs template.mjs github.mjs approvals.mjs github-app.mjs approve-page.mjs halt.mjs budget.mjs notify.mjs ./
+COPY *.mjs ./
 COPY box/ ./box/
+# Every module edge.mjs imports must be in the image: a missing one crashes the task at start and ECS rolls back.
+RUN node -e "import('./edge.mjs').then(() => {}, (e) => { console.error(e.message); process.exit(1) })"
 USER node
 CMD ["node", "edge.mjs"]

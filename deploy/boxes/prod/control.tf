@@ -11,6 +11,9 @@ locals {
   ecr     = "${data.aws_caller_identity.this.account_id}.dkr.ecr.us-east-1.amazonaws.com/${local.name}"
   e2b_arn = aws_secretsmanager_secret.e2b.arn
   box_ram = 8192
+  # Free rootfs space each new template gives its boxes (E2B default_free_disk_size_mb). The stock default left a box
+  # with ~1 GB free, which dsh, the browser profile and pip/npm caches fill. 10 GiB x 12 boxes fits a node's 200 GB volume.
+  box_free_disk = 10240
 }
 
 resource "aws_security_group" "api" {
@@ -252,7 +255,7 @@ resource "aws_ecs_task_definition" "setup" {
     name             = "setup"
     image            = "${local.ecr}/e2b-setup:${var.e2b_sha}-${substr(sha256("${file("${path.module}/setup/Dockerfile")}${file("${path.module}/setup/setup.sh")}"), 0, 7)}"
     essential        = true
-    environment      = [{ name = "BOX_RAM_MB", value = tostring(local.box_ram) }]
+    environment      = [{ name = "BOX_RAM_MB", value = tostring(local.box_ram) }, { name = "BOX_FREE_DISK_MB", value = tostring(local.box_free_disk) }]
     secrets          = [for k in ["POSTGRES_CONNECTION_STRING", "TEAM_API_KEY"] : { name = k, valueFrom = local.secret[k] }]
     logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.e2b["setup"].name, awslogs-region = "us-east-1", awslogs-stream-prefix = "setup" } }
   }])
