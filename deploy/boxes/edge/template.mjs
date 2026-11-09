@@ -21,7 +21,7 @@ let tpl = Template().fromImage(image, { username: 'AWS', password: process.env.E
 // (PRODUCTION.md stage 9). The edge's start script runs them; children (mumbo-child) stay headless.
 if (name.startsWith('mumbo-box')) {
   tpl = tpl.runCmd([
-    'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xvfb openbox x11vnc novnc websockify chromium dbus-x11 fonts-noto-core fonts-noto-color-emoji fonts-noto-cjk procps && rm -rf /var/lib/apt/lists/*',
+    'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xvfb openbox x11vnc novnc websockify chromium dbus-x11 xdotool imagemagick xsel xauth fonts-noto-core fonts-noto-color-emoji fonts-noto-cjk procps && rm -rf /var/lib/apt/lists/*',
     'id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser',
   ])
 }

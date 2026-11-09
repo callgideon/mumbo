@@ -13,8 +13,8 @@ const at = (text, needle) => { const i = text.indexOf(needle); assert.ok(i >= 0,
 
 test('a user box start script is byte-for-byte what it was before project boxes grew a proxy', () => {
   const s = startScript(c, 'T', boxSite(c, 'a@x.com'), "role's", undefined, boxFiles, ['o@x.com'])
-  // sha256 of the output recorded before B7, updated once for the box-links overlay (same cfg, token T, role "role's").
-  assert.equal(createHash('sha256').update(s).digest('hex'), 'd64c56a3cc9e8502c25df75973064de19572375e7b216bb1447bc1c6a86f92e5')
+  // sha256 of the output recorded before B7, updated for the box-links and computer-use overlays and the X cookie (same cfg, token T, role "role's").
+  assert.equal(createHash('sha256').update(s).digest('hex'), '511eb7790988e02c7fe46bc1a8d0f837eb0bfd6aec0fdabb920e10e85f77849b')
 })
 
 test('box links: the overlay loads only when the image ships @mumbo/box-links; project boxes get no desktop link', () => {
@@ -25,6 +25,16 @@ test('box links: the overlay loads only when the image ships @mumbo/box-links; p
   const p = startScript({ ...c, projectDomain: 'boxes.x' }, 'T', boxSite({ ...c, projectDomain: 'boxes.x' }, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
   assert.match(p, /home: https:\/\/boxes\.x\/home\n/)
   assert.ok(!p.includes('desktop: https://'))
+})
+
+test('computer use: person boxes load it only with the package and xdotool, and :1 needs the X cookie; project boxes never', () => {
+  const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles)
+  assert.match(u, /if \[ -d \/src\/packages\/experimental\/computer-use-x11 \] && command -v xdotool/)
+  assert.match(u, /\$LINKS_PATCH \$CU_PATCH/)
+  assert.match(u, /Xvfb :1 \$XVFB_AUTH /)
+  assert.ok(at(u, 'export XAUTHORITY=/run/x11/auth') < at(u, "Xvfb :1"))
+  const p = startScript({ ...c, projectDomain: 'boxes.x' }, 'T', boxSite({ ...c, projectDomain: 'boxes.x' }, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
+  assert.ok(!p.includes('CU_PATCH') && !p.includes('computer-use'))
 })
 
 test('a project box start script has the proxy setup in order, before the member-auth block', () => {
