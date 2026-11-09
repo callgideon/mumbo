@@ -35,7 +35,7 @@ kind: "package-reference"
 | `snapshotFor(principal)` | 页面打开时的 baseline：owner 为 `{ type: 'baseline', owner: true }`，否则为该 principal 当前的 grant。 |
 | `follow(signal)` | Remote stream `remoteAccess/follow`：一个 `baseline`，之后是 `upsert` 与 `remove` 帧。owner 只收到 `{ type: 'baseline', owner: true }`。`signal` abort 或服务卸载时流结束，因此重载后的服务从新的 baseline 回答每个读者。 |
 
-role `{ name, resource, actions }` 是普通值，表示限定一种资源种类（`global` 或在 `TypertResourceMap` 中声明的种类）的 action 集合。binding `{ role, resource, condition? }` 在该 role 种类的一个资源上授予该 role。policy 根据预先载入内存的状态同步回答 `bindings(principal)` 与可选的 `explain(request)`。只有在每个已解析资源上都有某个 binding 指向该资源、其 role 列出该 action、且没有 condition 或 condition 放行时，请求才被放行。资源之间相互独立：`global` 上的授权不蕴含任何其他资源上的授权，任何资源也不蕴含另一个资源。condition 收到 `{ action, resource, args? }`，只对资源与 role 都匹配的 binding 调用；事件、快照与列表过滤时没有 `args`。`bindings()` 在每次 `decide()`、每次 `allows()` 判定与每次快照计算中各调用一次，不跨判定缓存，因此依赖时间的状态对下一次调用即时生效。
+role `{ name, resource, actions }` 是普通值，表示限定一种资源种类（`global` 或在 `TypertResourceMap` 中声明的种类）的 action 集合。binding `{ role, resource, condition? }` 在该 role 种类的一个资源上授予该 role。policy 根据预先载入内存的状态同步回答 `bindings(principal)` 与可选的 `explain(request)`。只有在每个已解析资源上都有某个 binding 指向该资源、其 role 列出该 action、且没有 condition 或 condition 放行时，请求才被放行。资源之间相互独立：`global` 上的授权不蕴含任何其他资源上的授权，任何资源也不蕴含另一个资源。condition 收到 `{ action, resource, args? }`，只对资源与 role 都匹配的 binding 调用；事件、快照、列表过滤与 exact Fetch 路由请求时没有 `args`。exact 路由请求在得到允许后仍会运行，因此 condition 对不带参数的请求必须像对快照一样保守地回答。`bindings()` 在每次 `decide()`、每次 `allows()` 判定与每次快照计算中各调用一次，不跨判定缓存，因此依赖时间的状态对下一次调用即时生效。
 
 Gateway 依次从 `@Remote` 与 `@RemoteScope` 的 `resources` 读取函数、lookup 与 Host Context adapter 的 `resource` 声明、`typert.resources` 中的默认字段或 resolver 声明解析资源，解析顺序由 [API Gateway](../gateway/README.zh.md) 负责；本包不读取任何参数字段。不指明任何资源的调用只访问 `global` 资源，因此只有 `global` 级 role 能放行；把某个 action 放进 `global` 级 role，等于允许该 principal 在调用未指明的任何资源上调用它。资源非法的调用由 Gateway 以 `resource-invalid` 拒绝，不询问 `decide()`。
 
@@ -83,7 +83,7 @@ Client 入口同步读取 index 注入在 `REMOTE_ACCESS_SNAPSHOT_KEY` 下的 ba
 - 快照与列表过滤的判定不带调用参数，因此按 `args` 细化结论的 condition 可能拒绝快照显示为允许的调用。
 - 资源读取函数与自动解析必须覆盖方法访问的全部资源；调用未指明的资源不受检查，持有已指明资源授权的 principal 可以访问它。
 - 默认资源解析按 wire 字段名匹配；给方法新增与已登记种类同名的字段，会让调用多访问该种类的资源。
-- exact Connection Fetch route 不经过 Gateway；在各路由声明自己的访问规则之前，共享 Fetch handler 对所有非 owner Peer 返回 403。
+- exact Connection Fetch route 不经过 Gateway。声明了 `access` 的路由经 Gateway 安装在 Connection 上的 authorizer 判定：以其声明的 action、作用于其查询指定的资源，且不带调用参数，因此其 condition 必须像对快照一样保守地回答；`sessionLog/export` 这类路由专用 action 不对应任何 Remote 端点，但仍会进入快照。其他 exact 路由对非 owner Peer 返回 403。
 - 交互参与（回答转发的 waterfall）仅限 owner：非 owner 的 `$events` 流只收到 policy 在事件资源上放行其 `event:<name>` action 的广播帧。
 - `api-session/added` 携带完整的 `SessionSummary`，因此被允许接收它的非 owner 也会得知其 `parentSessionId`。
 - 被授权 Session 的 cwd 与工具路径本就包含 owner 的绝对路径，因此 `$events` ready 帧向非 owner 提供完整的 `host`（含 `home`）；Gateway 不单独隐藏 `home`。

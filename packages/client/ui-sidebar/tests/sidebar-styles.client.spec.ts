@@ -97,6 +97,10 @@ describe('SidebarRoot.module.css', () => {
     expect(declarations('.root.collapsed')?.get('padding')).toBe('18px 10px 6px')
   })
 
+  it('stacks each footer action on its own row above Settings', () => {
+    expect(css).toMatch(/\n\.footerActions \{\s*display: flex;\s*flex-direction: column;\s*}/)
+  })
+
   it('moves the four upper controls while the settings seat only fades', () => {
     const animation = 'rail-in 150ms var(--ds-ease-in-out) backwards'
     for (const selector of [

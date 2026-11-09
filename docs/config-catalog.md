@@ -812,6 +812,41 @@ export interface ToolResultPruneConfig {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-compaction-tool-result-pruner -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-computer-use-x11 -->
+<a id="deepseek-aidsh-computer-use-x11"></a>
+
+## `@deepseek-ai/dsh-computer-use-x11`
+
+- `inject`: `computerUse` · `tools` · `subprocess`
+- `source`: [`packages/experimental/computer-use-x11/src/index.ts:28`](../packages/experimental/computer-use-x11/src/index.ts)
+
+```ts config-catalog
+/** X display selection, command locations and per-command bounds. */
+export interface Config {
+  /** X display name passed as `DISPLAY` to every command, such as `:1`. */
+  display: string
+  /** Absolute X authority file passed as `XAUTHORITY`; omission removes an inherited `XAUTHORITY`. */
+  xauthority?: string
+  /** `xdotool` executable: an absolute path or a name looked up on the subprocess provider's `PATH`. */
+  xdotoolPath: string
+  /** ImageMagick `import` executable: an absolute path or a name looked up on the subprocess provider's `PATH`. */
+  importPath: string
+  /** `xsel` executable that holds pasted text: an absolute path or a name looked up on the subprocess provider's `PATH`. */
+  xselPath: string
+  /** Deadline in milliseconds for each command; typing adds `typeDelayMs` per character. */
+  timeoutMs: number
+  /** Milliseconds a cancelled or timed-out command may take to exit after termination starts. */
+  graceMs: number
+  /** Maximum PNG bytes accepted from one screenshot command. */
+  maxScreenshotBytes: number
+  /** Delay in milliseconds between typed characters. */
+  typeDelayMs: number
+  /** Pointer movements dispatched between the start and end of a drag. */
+  dragSteps: number
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-computer-use-x11 -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-cordis-host-runner -->
 <a id="deepseek-aidsh-cordis-host-runner"></a>
 
@@ -4884,6 +4919,24 @@ export interface Config {
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-workspace-changes -->
+
+<!-- BEGIN GENERATED config-catalog:@mumbo/box-links -->
+<a id="mumbobox-links"></a>
+
+## `@mumbo/box-links`
+
+- `source`: [`packages/mumbo/box-links/src/config.ts:5`](../packages/mumbo/box-links/src/config.ts)
+
+```ts config-catalog
+/** Absolute links from a box's Web page to the pages the box edge serves beside it. */
+export interface Config {
+  /** Box home page: the person's assistant, desktop, and shared projects. */
+  home: string
+  /** Desktop live view; omitted for a box without a desktop, such as a project box. */
+  desktop?: string
+}
+```
+<!-- END GENERATED config-catalog:@mumbo/box-links -->
 
 <!-- BEGIN GENERATED config-catalog:@mumbo/edge-member -->
 <a id="mumboedge-member"></a>

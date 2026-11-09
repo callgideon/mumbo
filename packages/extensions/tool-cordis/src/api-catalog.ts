@@ -5981,6 +5981,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ConnectionAuthenticator = (request: ConnectionTrustRequest) => PeerScope | undefined;',
   },
   {
+    name: 'ConnectionFetchAccessRequest',
+    declaration: 'export interface ConnectionFetchAccessRequest {\n    readonly principal: Principal;\n    readonly action: `${string}/${string}`;\n    readonly resources: readonly RemoteAccessResource[];\n}',
+  },
+  {
+    name: 'ConnectionFetchAuthorizer',
+    declaration: 'export type ConnectionFetchAuthorizer = (request: ConnectionFetchAccessRequest) => boolean;',
+  },
+  {
     name: 'ConnectionFetchHandler',
     declaration: 'export interface ConnectionFetchHandler {\n    requestBodyMode(request: {\n        readonly method: string;\n        readonly url: URL;\n    }): ConnectionRequestBodyMode;\n    fetch(request: Request, peer: PeerScope): Promise<Response>;\n}',
   },
@@ -5990,7 +5998,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ConnectionFetchRoute',
-    declaration: 'export interface ConnectionFetchRoute {\n    readonly path: string;\n    readonly methods: readonly ConnectionFetchMethod[];\n    readonly requestBody: ConnectionRequestBodyMode;\n    readonly fetch: (request: Request) => Promise<Response>;\n}',
+    declaration: 'export interface ConnectionFetchRoute {\n    readonly path: string;\n    readonly methods: readonly ConnectionFetchMethod[];\n    readonly requestBody: ConnectionRequestBodyMode;\n    readonly access?: ConnectionFetchRouteAccess;\n    readonly fetch: (request: Request) => Promise<Response>;\n}',
+  },
+  {
+    name: 'ConnectionFetchRouteAccess',
+    declaration: 'export interface ConnectionFetchRouteAccess {\n    readonly action: `${string}/${string}`;\n    readonly resources: {\n        readonly [Kind in TypertResourceKind]?: string;\n    };\n}',
   },
   {
     name: 'ConnectionIndexRequest',
@@ -6726,7 +6738,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'HostConnectionFetch',
-    declaration: 'export interface HostConnectionFetch {\n    register(route: ConnectionFetchRoute): () => Promise<void>;\n}',
+    declaration: 'export interface HostConnectionFetch {\n    register(route: ConnectionFetchRoute): () => Promise<void>;\n    authorize(authorizer: ConnectionFetchAuthorizer): () => Promise<void>;\n}',
   },
   {
     name: 'HostConnectionRpc',

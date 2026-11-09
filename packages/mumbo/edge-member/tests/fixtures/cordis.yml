@@ -1,4 +1,5 @@
-# Test-only Host: the Web carrier, Connection, the Gateway with remote access, and the member plugin.
+# Test-only Host: the Web carrier, Connection, the Gateway with remote access, the browser upload and Session log
+# routes, and the member plugin.
 - id: typert-registry
   name: '@deepseek-ai/dsh-typert-registry'
 - id: remote-access
@@ -12,6 +13,10 @@
     port: 0
 - id: client-connection
   name: '@deepseek-ai/dsh-client-connection'
+- id: file-upload
+  name: '@deepseek-ai/dsh-client-file-upload'
+- id: session-log-export
+  name: '@deepseek-ai/dsh-session-log-export'
 - id: mumbo-edge-member
   name: '@mumbo/edge-member'
   config:

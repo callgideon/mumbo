@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "电脑操作（Linux X11）",
+    "description": "让模型通过截图、鼠标和键盘查看并操作 Linux X11 桌面；主机需要安装 xdotool 和 ImageMagick。"
+  }
+}

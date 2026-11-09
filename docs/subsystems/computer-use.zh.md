@@ -19,14 +19,15 @@ CUA provider 通过 `ctx.cuaAccess` 提供系统权限状态、用户主动申�
 
 ## 选择提供方
 
-在同一组合中挂载 [`dsh-computer-use`](../../packages/computer-use/computer-use/README.zh.md) 和一个提供方。两个 Cua Driver 提供方都是公开发布到 npm 的实验性包，均需显式启用。
+在同一组合中挂载 [`dsh-computer-use`](../../packages/computer-use/computer-use/README.zh.md) 和一个提供方。这些提供方都是公开发布到 npm 的实验性包，均需显式启用。
 
 | 提供方 | 运行时 |
 |---|---|
 | [Cua Driver MCP](../../packages/experimental/computer-use-cua-driver-mcp/README.zh.md) | 通过 MCP 连接已安装的 `cua-driver` 可执行文件 |
 | [Cua Driver 原生](../../packages/experimental/computer-use-cua-driver-native/README.zh.md) | 随 npm 依赖安装的平台原生运行时 |
+| [Linux X11](../../packages/experimental/computer-use-x11/README.zh.md) | 在配置的 X 显示上使用主机安装的 `xdotool`、ImageMagick `import` 和 `xsel` |
 
-各提供方提供上游工具目录。共享服务只注册名称，并拒绝任何第二个提供方，包括使用相同名称的另一个实例。服务不包含通用桌面操作方法或模型控制的选择器。
+各 Cua Driver 提供方提供上游工具目录；X11 提供方提供一个 `computer` 工具。共享服务只注册名称，并拒绝任何第二个提供方，包括使用相同名称的另一个实例。服务不包含通用桌面操作方法或模型控制的选择器。
 
 ## 生命周期和桌面共享
 

@@ -36,6 +36,8 @@ const windowsUnsupportedPackages = process.platform === 'win32'
       'packages/experimental/hooks-codex',
       'packages/terminal/terminal-bash',
       'packages/experimental/ptc-runtime-python',
+      // X11 programs and the POSIX shell fixtures standing in for them.
+      'packages/experimental/computer-use-x11',
       'packages/sandbox/sandbox-local',
       // OpenSSH multiplexing and Unix-socket helper streams require POSIX endpoints.
       'packages/ssh/*',

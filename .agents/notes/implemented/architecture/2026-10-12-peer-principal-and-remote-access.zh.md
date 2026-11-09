@@ -93,7 +93,7 @@ wireStream.open(endpoint, payload, uplink, peer: PeerScope, signal)          // 
 | Host 进程内自动化 | 需要调用 Remote 方法时用 `createPeer({ principal })` 创建自己的 Peer。目前没有这类生产调用方，因此不预置固定的 Host Peer |
 | 多 Peer | `createPeer()` 每次返回独立 Peer；liveshare 将用它为读者的每条连接建一个 Peer（在 #3854 侧接入） |
 | 交互参与 | `Peer(owner, { principal, interactions? })` 与 `createPeer()` 省略 interactions 时默认 `answer`。`none` 对所有 principal 拒绝 `$events` 与 `$events/result`；交互模式不赋予方法权限。回答型 owner 能接收并回答 waterfall，非 owner 只能接收 RBAC 授权的广播，不能回答 |
-| exact Fetch route | file-upload、present-open、media-references、session-log-export、inspector 等 exact route 不经 Gateway；共享 Fetch handler 对非 owner Peer 一律返回 403 |
+| exact Fetch route | file-upload、present-open、media-references、session-log-export、inspector 等 exact route 不经 Gateway。声明了 `access` 的路由指定一个 action 与每种资源的查询参数；在非 owner 请求运行之前，共享 Fetch handler 询问 Gateway 安装的 authorizer，由它调用 `remoteAccess.decide()`；对其他路由，非 owner Peer 一律得到 403（[exact Fetch route 访问](2026-11-09-connection-authenticators-and-edge-members.zh.md#exact-fetch-route-access)） |
 
 ### 身份类型
 
@@ -275,7 +275,7 @@ export type RemoteAccessDecision =
   | { readonly kind: 'allow' }
   | { readonly kind: 'deny'; readonly reason: string }
 
-/** Refines one binding for one action on its resource; `args` only for a concrete call. */
+/** Refines one binding for one action on its resource; `args` only for a concrete Remote call, never for an exact Fetch route request. */
 export type RemoteAccessCondition<K extends RemoteAccessResourceKind> = (request: {
   readonly action: RemoteAccessAction
   readonly resource: RemoteAccessResourceOf<K>
@@ -297,7 +297,7 @@ export interface RemoteAccessRequest<P extends Principal> {
   readonly action: RemoteAccessAction
   /** Allow only when the action is allowed on every listed resource. */
   readonly resources: readonly RemoteAccessResource[]
-  /** Named arguments of a concrete call, validated against their Typert-compiled types with lookup parameters as wire identities; absent for events, snapshots, and list filtering. */
+  /** Named arguments of a concrete Remote call, validated against their Typert-compiled types with lookup parameters as wire identities; absent for events, snapshots, list filtering, and exact Fetch route requests. */
   readonly args?: Readonly<Record<string, unknown>>
 }
 
@@ -372,7 +372,7 @@ ctx.effect(() => ctx.remoteAccess.registerPolicy('share-viewer', {
   },
 }))
 
-// Without args (snapshots, list filtering) a condition answers for the action alone.
+// Without args (snapshots, list filtering, exact Fetch route requests) a condition answers for the action alone.
 const sourceWrite = share => () => share.confined ? allow : deny('source-write-unavailable')
 const childPrompt = child => ({ action, args }) =>
   action === 'session/prompt' && args !== undefined && !child.allowsPrompt() ? deny('fork-prompt-refused') : allow
@@ -500,7 +500,7 @@ GlobalStandardProps.useWorkspaceAccess: (workspaceId: WorkspaceId, action: Remot
 |---|---|
 | principal 只能由进程内 Host 代码在创建 Peer 时给出 | `PeerScope.principal` 只读；`createPeer()` 不对应任何路由 |
 | wire 上任何字段都不能设置或覆盖 principal | principal 不来自 args、envelope、header、query 或 cookie。args 顶层多余字段被 `assertExactArguments` 拒绝；payload 必须恰为 `{ args }`；envelope 未知字段被 [`clientRequestSchema`](../../../../packages/client/connection/src/rpc-schema.ts) 丢弃；请求体内同名字段只是业务数据 |
-| 浏览器网络准入为 owner | 通过[浏览器 token 认证](../../implemented/architecture/2026-08-24-browser-token-authentication.zh.md)的连接得到 `browserPeer`；非 owner 网络 principal 只经已注册的 Connection authenticator 进入，且只由 Gateway 服务（[Connection authenticator](2026-11-09-connection-authenticators-and-edge-members.zh.md)） |
+| 浏览器网络准入为 owner | 通过[浏览器 token 认证](../../implemented/architecture/2026-08-24-browser-token-authentication.zh.md)的连接得到 `browserPeer`；非 owner 网络 principal 只经已注册的 Connection authenticator 进入，且只由 Gateway 与声明了 `access` 的 exact Fetch route 服务（[Connection authenticator](2026-11-09-connection-authenticators-and-edge-members.zh.md)） |
 | 没有隐式 Peer | Gateway 与 Connection 都不补默认 Peer；required 参数让漏传在编译期暴露 |
 | 已 dispose 的 Peer 不能再分派 | `gateway/peer-disposed` |
 | 非 owner 未经授权不能调用 | 只有 binding 的 role 显式列出该 action 且资源匹配时才放行；没有该 kind 的 policy 即拒；Gateway 依赖 `remoteAccess`，缺失时 Gateway 不启动 |
@@ -559,7 +559,7 @@ GlobalStandardProps.useWorkspaceAccess: (workspaceId: WorkspaceId, action: Remot
 - liveshare 接入（声明 `share-viewer`、每条读者连接一个 Peer、定义 role 并注册 policy、删除 `origin` / `prompt/origin` / `READ_ENDPOINTS`）：#3854 侧。
 - `session/cancel` 归属检查、fork 的 `childSessionId`、`ToolExecutionInput.turn`：不改。
 - 资源识别的精确方式（例如 Typert 生成器按 branded id 类型在请求对象中定位字段并写入描述符）：目前用 lookup 与 Context 声明的 `resource`、默认字段加 `resources` 读取函数，以后可替换资源解析而不改 policy 接口。
-- exact Fetch route 对非 owner 一律 403 是临时处理；以后由各路由声明访问规则。
+- exact Fetch route 的访问检查只从查询读取资源，且不传调用参数，因此 condition 按快照方式回答；资源位于请求体中的路由不声明 access，保持只对 owner 开放。
 - subagent `prompt` 的资源声明待定：其请求字段为 `parentSessionId` / `childSessionId`，目前解析为 `global`。生产者为进程内调用方记录 `source.principal`；没有 role 列出它，非 owner 不能经 Gateway 到达。
 - 预定义与聚合 role：出现第二种非 owner principal kind 时，由各领域包以 `@Remote({ roles })` 声明方法所属的通用 role（如 `session:viewer`），各 policy 绑定这些 role；目前 role 由业务包以显式 action 清单定义。
 
@@ -636,7 +636,7 @@ GlobalStandardProps.useWorkspaceAccess: (workspaceId: WorkspaceId, action: Remot
 | 已 dispose 的 Peer | 之后的 unary、stream 与 `$events` 分派以 `gateway/peer-disposed` 拒绝，wire payload 畸形时亦然；其名下 stream 结束；运行中的 unary 完成；不影响其他 Peer | Gateway host spec |
 | 鉴权顺序 | owner 调用任何方法照常分派且不读取 policy；没有 role 列出的方法对非 owner 以 `remote-access/denied`（`no-allow`）拒绝；访问检查早于 lookup，被拒调用不激活会话 | Gateway host spec |
 | policy 注册 | 每个非 owner principal kind 一个 policy，重复注册抛错；disposer 撤回后该 kind 以 `no-allow` 拒绝；随 fiber 撤回 | remote-access host spec |
-| 判定 | 每个资源都需要匹配的 binding（AND）；role 不含该 action、资源不相等或 condition 拒绝都不放行；拒绝原因按 condition > `explain` > `no-allow` 取；`explain` 不改变结论；condition 在调用时收到 args，在快照与列表过滤时不收；`bindings()`、condition 或 `explain()` 抛错以 `policy-failed` 拒绝，每个 policy 在两次 `invalidate()` 之间只记录一次日志，事件路径上 owner 流与共享事件源照常；`remoteAccess/follow` 对任何 principal 放行 | remote-access host spec、Gateway host spec |
+| 判定 | 每个资源都需要匹配的 binding（AND）；role 不含该 action、资源不相等或 condition 拒绝都不放行；拒绝原因按 condition > `explain` > `no-allow` 取；`explain` 不改变结论；condition 在 Remote 调用时收到 args，在快照、列表过滤与 exact Fetch 路由请求时不收；`bindings()`、condition 或 `explain()` 抛错以 `policy-failed` 拒绝，每个 policy 在两次 `invalidate()` 之间只记录一次日志，事件路径上 owner 流与共享事件源照常；`remoteAccess/follow` 对任何 principal 放行 | remote-access host spec、Gateway host spec |
 | 资源解析 | 默认字段或 resolver 得到一个资源，默认 resolver 返回数组为非法；声明了该种类 `resource` 的 lookup 参数得到其 wire 身份；Context 方法从 args 中的 Agent Context 身份得到其 session 资源且不激活 Agent，另可经 `resources` 声明其他资源；`resources` 读取函数覆盖该种类，数组为多个资源，`undefined` 为无；都没有为 `[global]`；抛错、空数组或非非空字符串（含 Context 身份）为非法，Gateway 以 `resource-invalid` 拒绝且不询问 `decide()`；未声明 `resource` 的 Context 按普通规则解析；资源与 `args` 读取校验后的参数，只有编译 codec 才移除未声明字段，JSON 参数校验失败在访问检查前返回 `gateway/input-invalid` | Gateway host spec（gateway-access） |
 | 资源注册表 | `typert.resources` 每个种类登记一个默认字段或 resolver，拒绝重复登记与 `global`，并随 fiber 撤回；配置的 lookup resolver 保留 provider 的 `resource`；Host Context adapter 保留其 `resource` | typert-registry spec |
 | 转发事件 | 非 owner 的 `$events` 流只在 `event:<name>` 于其资源上被授权时整条收到事件；未声明资源的事件按 `global` 判定；读取函数返回 `undefined` 的事件不送达非 owner，且不询问 `decide()`；owner 全部收到 | Gateway host spec（gateway-access） |

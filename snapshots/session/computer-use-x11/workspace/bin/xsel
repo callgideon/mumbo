@@ -1,0 +1,3 @@
+#!/bin/sh
+# Fixture selection owner: accepts pasted text.
+cat >/dev/null

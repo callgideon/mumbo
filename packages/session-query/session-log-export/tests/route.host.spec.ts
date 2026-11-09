@@ -1,5 +1,5 @@
 import { Context } from '@deepseek-ai/cordis'
-import { HostConnectionService } from '@deepseek-ai/dsh-client-connection'
+import { HostConnectionService, type ConnectionFetchAccessRequest } from '@deepseek-ai/dsh-client-connection'
 import type { BrowserAuth } from '@deepseek-ai/dsh-client-connection/src/browser-auth.ts'
 import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 import type { SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
@@ -13,6 +13,13 @@ import {
   apply,
   inject,
 } from '../src/index.ts'
+
+declare module '@deepseek-ai/dsh-typert-protocol' {
+  interface PrincipalMap {
+    /** Test-only non-owner caller shared by the access specs. */
+    'test-guest': { readonly kind: 'test-guest'; readonly guest: string }
+  }
+}
 
 const sid = (value: string): SessionId => value as SessionId
 
@@ -93,6 +100,31 @@ describe('Session log export Fetch route', () => {
     expect((await shared.fetch(new Request(
       `http://host${SESSION_LOG_EXPORT_PATH}?sessionId=session-1`,
     ), connection.browserPeer)).status).toBe(500)
+    await dispose()
+  })
+
+  it('serves a non-owner only with sessionLog/export on the Session the query names', async () => {
+    const { connection, dispose } = await mounted(true)
+    const decisions: ConnectionFetchAccessRequest[] = []
+    connection.fetch.authorize((request) => {
+      decisions.push(request)
+      return request.resources.every(resource => resource.kind === 'session' && resource.id === 'session-1')
+    })
+    const shared = connection.createSharedFetchHandler('/api')
+    const guest = connection.createPeer({ principal: { kind: 'test-guest', guest: 'export' } })
+    const download = (sessionId: string) => shared.fetch(new Request(
+      `http://host${SESSION_LOG_EXPORT_PATH}?sessionId=${sessionId}&includeDescendants=true`,
+    ), guest)
+
+    const granted = await download('session-1')
+    expect(granted.headers.get('content-type')).toBe('application/zip')
+    expect(strFromU8(unzipSync(new Uint8Array(await granted.arrayBuffer()))[SESSION_LOG_FILENAME] as Uint8Array))
+      .toContain('"id":"session-1"')
+    expect((await download('session-2')).status).toBe(403)
+    expect(decisions.map(({ action, resources }) => ({ action, resources }))).toEqual([
+      { action: 'sessionLog/export', resources: [{ kind: 'session', id: 'session-1' }] },
+      { action: 'sessionLog/export', resources: [{ kind: 'session', id: 'session-2' }] },
+    ])
     await dispose()
   })
 

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "コンピュータ操作（Linux X11）",
+    "description": "モデルがスクリーンショット、マウス、キーボードで Linux X11 デスクトップを確認・操作できます。ホストに xdotool と ImageMagick が必要です。"
+  }
+}
