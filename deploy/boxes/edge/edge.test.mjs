@@ -840,3 +840,18 @@ test('firstSetUp: no box and no backup, or a creating record marked first', asyn
   await t.store.putBox('b1', { email: 'a@x.com', creating: 1 })
   assert.equal(await t.b.firstSetUp('a@x.com'), false)
 })
+test('after a completed first set-up, a restart (box exists, still no backup) says Starting, not Setting up', async () => {
+  const t = await gatedServer(async () => undefined)
+  t.open(); await new Promise(r => setTimeout(r, 100))
+  await call(t.port, { headers: nav })   // completes the first create
+  assert.equal('first' in (await t.store.getBox('b1')), false)
+  assert.equal(await t.b.firstSetUp('a@x.com'), false)
+  // dsh died: the next ensure takes the repair path and rewrites the record.
+  await t.store.patchBox('b1', { launch: undefined })
+  await t.b.ensure('a@x.com')
+  assert.equal(await t.b.firstSetUp('a@x.com'), false)
+  const slow = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure: () => new Promise(() => {}), firstSetUp: t.b.firstSetUp, touch() {}, forget() {} }, log: () => {} })
+  const r = await call(await listen(slow), { headers: nav })
+  slow.close(); t.s.close()
+  assert.match(r.body, /Starting your computer/)
+})
