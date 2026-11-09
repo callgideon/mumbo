@@ -121,13 +121,6 @@ resource "aws_vpc_security_group_ingress_rule" "web" {
   cidr_ipv4         = "0.0.0.0/0"
   description       = "edge ${each.key}"
 }
-resource "aws_route53_record" "edge" {
-  for_each = toset([var.public_host, var.llm_host])
-  zone_id  = data.aws_route53_zone.mumbo.zone_id
-  name     = each.key
-  type     = "A"
-  ttl      = 300
-  records  = [local.host_ip]
-}
+# boxes.mumbo.si and llm.boxes.mumbo.si moved to the production ALB (prod/edge.tf, aws_route53_record.public).
 
 output "edge_url" { value = "https://${var.public_host}" }

@@ -257,3 +257,17 @@ resource "aws_ecs_service" "edge" {
 }
 
 output "edge_alb" { value = aws_lb.edge.dns_name }
+
+# Public names on the ALB. They replace the trial's A records (allow_overwrite); the trial no longer manages them.
+resource "aws_route53_record" "public" {
+  for_each        = toset([local.public_host, local.llm_host])
+  zone_id         = data.aws_route53_zone.public.zone_id
+  name            = each.key
+  type            = "A"
+  allow_overwrite = true
+  alias {
+    name                   = aws_lb.edge.dns_name
+    zone_id                = aws_lb.edge.zone_id
+    evaluate_target_health = false
+  }
+}
