@@ -396,7 +396,7 @@ describe.skipIf(!hasPwsh)('terminal-bash pwsh real shell', () => {
     // Char codes keep the submitted line ASCII-only, so the assertion is a
     // pure output-decode check.
     const sent = ctx.terminals.startSend(agent, created.sessionId, {
-      text: "[Console]::Write([char]0x4E2D + [char]0x6587 + ' encoding-ok')",
+      text: "[Console]::Write([char]0xD55C + [char]0xAE00 + ' encoding-ok')",
       submit: true,
     })
     const result = await sent.done
