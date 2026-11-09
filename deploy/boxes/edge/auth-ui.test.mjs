@@ -27,7 +27,7 @@ const upgrade = (host) => ({ connection: 'Upgrade', upgrade: 'websocket', origin
 /** Runs fn against a user server whose box layer records every call; returns the calls. */
 async function serve(fn) {
   const boxCalls = []
-  const box = { ensure: async (e) => { boxCalls.push(['ensure', e]); throw new Error('starting') }, touch: (id) => { boxCalls.push(['touch', id]) }, forget: (id) => { boxCalls.push(['forget', id]) } }
+  const box = { ensure: async (e) => { boxCalls.push(['ensure', e]); throw new Error('starting') }, firstSetUp: async () => false, touch: (id) => { boxCalls.push(['touch', id]) }, forget: (id) => { boxCalls.push(['forget', id]) } }
   const server = userServer({ cfg, box, signin, log: () => {} })
   const port = await listen(server)
   try { await fn(port) } finally { server.close() }
