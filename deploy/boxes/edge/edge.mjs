@@ -16,9 +16,15 @@ const checkNames = (name, fallback) => {
   if (names.length === 0) throw new Error(`edge: ${name} must name at least one check`)
   return names
 }
+/** A bare lowercase hostname with at least one dot: no scheme, port, path or trailing dot. Anything else fails at start. */
+const hostname = (name, fallback) => {
+  const value = env(name, fallback)
+  if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(value)) throw new Error(`edge: ${name} must be a bare lowercase hostname such as boxes.mumbo.si, not ${JSON.stringify(value)}`)
+  return value
+}
 export const config = () => ({
   publicHost: env('PUBLIC_HOST'),
-  projectDomain: env('PROJECT_DOMAIN', 'boxes.mumbo.si'),  // project boxes are served at p-<16 hex>.<this>
+  projectDomain: hostname('PROJECT_DOMAIN', 'boxes.mumbo.si'),  // project boxes are served at p-<16 hex>.<this>
   llmHost: env('LLM_HOST'),
   template: env('BOX_TEMPLATE', 'mumbo-box'),
   idleMs: Number(env('IDLE_MINUTES', '30')) * 60_000,
@@ -485,6 +491,15 @@ export const secureCookies = (headers) => {
   if (c) headers['set-cookie'] = c.map(v => v.replace(/;\s*domain=[^;]*/gi, '')).map(v => /;\s*secure/i.test(v) ? v : `${v}; Secure`)
   return headers
 }
+/** No other origin may frame a page from a box: a project page could otherwise show, and clickjack, the visitor's
+ *  signed-in desktop. A box's own frame-ancestors and X-Frame-Options are kept; a CSP without frame-ancestors gains ours. */
+export const noFraming = (headers) => {
+  headers['x-frame-options'] ??= 'SAMEORIGIN'
+  const csp = headers['content-security-policy']
+  if (csp === undefined) headers['content-security-policy'] = "frame-ancestors 'self'"
+  else if (!/(?:^|[;,])\s*frame-ancestors(?:\s|;|,|$)/i.test(csp)) headers['content-security-policy'] = `${csp}; frame-ancestors 'self'`
+  return headers
+}
 /** A browser with no dsh cookie and no token is sent to the token exchange, as nginx did for the shared server. */
 export const needsLaunch = (req) => req.method === 'GET' && !/(?:^|;\s*)dsh-auth-/.test(req.headers.cookie ?? '') && !new URL(req.url, 'http://x').searchParams.has('token')
 const isNavigation = (req) => req.method === 'GET' && String(req.headers.accept ?? '').includes('text/html')
@@ -508,6 +523,9 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, log = conso
     if (host === cfg.publicHost) return boxRoute(url, cfg.projectDomain)
   }
   const server = createServer(async (req, res) => {
+    // The edge's own pages; a box's response replaces these through noFraming.
+    res.setHeader('x-frame-options', 'SAMEORIGIN')
+    res.setHeader('content-security-policy', "frame-ancestors 'self'")
     if (req.url === '/edge/healthz') return json(res, 200, { ok: true })
     const email = await identify(req)
     if (!email.includes('@')) return json(res, 401, { error: 'not signed in' })
@@ -539,7 +557,7 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, log = conso
     const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: to.path, headers: { ...boxHeaders(cfg, req.headers, target, to.port), ...(member ? { 'x-mumbo-member': member } : {}) } }, (r) => {
       // A stale cookie (another account on this browser, or a recreated box) gets a fresh exchange instead of a dead end.
       if (dsh && !member && r.statusCode === 401 && isNavigation(req)) { r.resume(); return res.writeHead(302, { location: launch, 'cache-control': 'no-store' }).end() }
-      res.writeHead(r.statusCode ?? 502, secureCookies({ ...r.headers }))
+      res.writeHead(r.statusCode ?? 502, noFraming(secureCookies({ ...r.headers })))
       r.pipe(res)
     })
     up.on('error', (e) => { quiet(box.forget(target.id)); if (!res.headersSent) page(res, 502, 'Could not reach your box. Retrying…'); else res.destroy(); log(JSON.stringify({ edge: 'error', user: email, error: e.message })) })

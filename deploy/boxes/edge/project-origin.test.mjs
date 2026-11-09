@@ -31,7 +31,9 @@ async function setup(extra = {}) {
   const seen = []
   const fakeBox = createServer((req, res) => {
     seen.push({ method: req.method, path: req.url, headers: req.headers })
-    res.writeHead(req.url === '/deny' ? 401 : 200, { 'set-cookie': ['dsh-auth-p=1; Domain=.boxes.mumbo.si; Path=/; HttpOnly'] }).end('from box')
+    // Two paths send the box's own frame policy: a complete one, and a CSP without frame-ancestors.
+    const policy = { '/own-policy': { 'content-security-policy': "default-src 'self'; frame-ancestors 'none'", 'x-frame-options': 'DENY' }, '/csp': { 'content-security-policy': "default-src 'self'" } }[req.url]
+    res.writeHead(req.url === '/deny' ? 401 : 200, { 'set-cookie': ['dsh-auth-p=1; Domain=.boxes.mumbo.si; Path=/; HttpOnly'], ...policy }).end('from box')
   })
   fakeBox.on('upgrade', (req, socket) => {
     seen.push({ path: req.url, headers: req.headers })
@@ -176,8 +178,9 @@ function configFrom(vars) {
   try { return config() } finally { apply(saved) }
 }
 
+const env = { PUBLIC_HOST: 'boxes.mumbo.si', LLM_HOST: 'llm.boxes.mumbo.si', BACKUP_BUCKET: 'b', ALLOWED_EMAILS: '@x.com' }
+
 test('with PROJECT_DOMAIN=projects.example, p-<id>.projects.example is the project origin, p-<id>.boxes.mumbo.si answers 404, and links use the new domain', async () => {
-  const env = { PUBLIC_HOST: 'boxes.mumbo.si', LLM_HOST: 'llm.boxes.mumbo.si', BACKUP_BUCKET: 'b', ALLOWED_EMAILS: '@x.com' }
   assert.equal(configFrom(env).projectDomain, 'boxes.mumbo.si', 'the default changes nothing')
   const c = configFrom({ ...env, PROJECT_DOMAIN: 'projects.example' })
   const t = await setup(c)
@@ -194,5 +197,38 @@ test('with PROJECT_DOMAIN=projects.example, p-<id>.projects.example is the proje
     assert.deepEqual(boxSite(c, `project:${t.id}`), { host, publicUrl: `https://${host}/`, desktop: false })
     assert.ok(roleInstructions(c, `project:${t.id}`).includes(`Its members reach you at https://${host}/ `))
     assert.deepEqual(t.ensured, [`project:${t.id}`, `project:${t.id}`])
+  } finally { t.close() }
+})
+
+test('PROJECT_DOMAIN must be a bare lowercase hostname with a dot; anything else fails at start', () => {
+  for (const bad of ['', ' ', 'Boxes.mumbo.si', 'https://boxes.mumbo.si', 'boxes.mumbo.si:443', 'boxes.mumbo.si/x', 'boxes.mumbo.si.', '.boxes.mumbo.si', 'localhost', 'a..b', '-a.b', 'a-.b', 'a_b.example', 'boxes.mumbo.si ']) {
+    assert.throws(() => configFrom({ ...env, PROJECT_DOMAIN: bad }), /edge: PROJECT_DOMAIN must be a bare lowercase hostname/, JSON.stringify(bad))
+  }
+  for (const good of ['projects.example', 'boxes.mumbo.si', 'p1.x-y.example']) assert.equal(configFrom({ ...env, PROJECT_DOMAIN: good }).projectDomain, good)
+})
+
+test('no other origin may frame our pages: box responses on the main and project hosts and the edge\'s own pages say so; a box\'s own frame policy is kept', async () => {
+  const t = await setup()
+  const main = 'boxes.mumbo.si'
+  const framing = (r) => [r.headers['content-security-policy'], r.headers['x-frame-options']]
+  const ours = ["frame-ancestors 'self'", 'SAMEORIGIN']
+  try {
+    assert.deepEqual(framing(await call(t.port, { path: '/desktop/vnc.html?autoconnect=1', headers: { host: main } })), ours, 'the main-host desktop')
+    assert.deepEqual(framing(await call(t.port, { headers: { host: main, cookie: 'dsh-auth-x=1' } })), ours, 'the main-host dsh')
+    assert.deepEqual(framing(await call(t.port, { headers: { host: t.host } })), ours, 'a project host')
+    assert.deepEqual(framing(await call(t.port, { path: '/own-policy', headers: { host: t.host } })), ["default-src 'self'; frame-ancestors 'none'", 'DENY'], 'a box\'s own policy is kept')
+    assert.deepEqual(framing(await call(t.port, { path: '/csp', headers: { host: t.host } })), ["default-src 'self'; frame-ancestors 'self'", 'SAMEORIGIN'], 'a box CSP without frame-ancestors gains ours')
+    assert.equal(t.seen.length, 5, 'all five came from a box')
+    const edgePages = {
+      home: await call(t.port, { path: '/home', headers: { host: main } }),
+      'launch redirect': await call(t.port, { headers: { host: main } }),
+      'not signed in': await call(t.port, { headers: { host: main, 'x-forwarded-email': '' } }),
+      'not invited': await call(t.port, { headers: { host: main, 'x-forwarded-email': 'z@other.example' } }),
+      'non-member': await call(t.port, { headers: { host: t.host, 'x-forwarded-email': 'b@x.com' } }),
+      'unknown host': await call(t.port, { headers: { host: 'other.boxes.mumbo.si' } }),
+    }
+    assert.deepEqual(Object.values(edgePages).map(r => r.status), [200, 302, 401, 403, 403, 404])
+    for (const [what, r] of Object.entries(edgePages)) assert.deepEqual(framing(r), ours, what)
+    assert.equal(t.seen.length, 5, 'the edge answered those itself')
   } finally { t.close() }
 })
