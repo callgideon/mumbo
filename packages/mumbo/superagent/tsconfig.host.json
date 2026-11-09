@@ -4,6 +4,7 @@
     "rootDir": "src",
     "outDir": "lib/types",
     "tsBuildInfoFile": "lib/tsconfig.host.tsbuildinfo",
+    // pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md
     "exactOptionalPropertyTypes": false,
     "noUnusedLocals": false,
     "noUnusedParameters": false

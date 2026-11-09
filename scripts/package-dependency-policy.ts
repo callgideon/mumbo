@@ -65,8 +65,7 @@ const SAFE_HOST_DEPENDENCY_EXPORTS = {
   ],
   // The shipped profile templates are plain data; a consumer reads their bundle names only.
   '@deepseek-ai/dsh-official-bundles': ['PROFILE_TEMPLATES'],
-  // Id brands and a message deep-freeze are stateless functions over caller-owned values.
-  '@deepseek-ai/dsh-llm': ['MessageId', 'ReasoningEffortId', 'callConfigEquals', 'freezeMessage'],
+  '@deepseek-ai/dsh-llm': ['callConfigEquals'],
   '@deepseek-ai/dsh-session': ['SessionId'],
   '@deepseek-ai/dsh-session-format': ['sessionFormatLogFilename'],
   '@deepseek-ai/dsh-storage-domain': ['defineDomain'],
@@ -88,6 +87,8 @@ const PEER_REQUIRED_HOST_EXPORTS = {
   '@deepseek-ai/dsh-experimental-worktree': ['generatedWorktreeName'],
   // The forge panel matches ctx.fs failures with `instanceof FsError`.
   '@deepseek-ai/dsh-fs': ['FsError'],
+  // The superagent declares dsh-llm as a peer and builds delivered messages with the shared instance's ids and freeze.
+  '@deepseek-ai/dsh-llm': ['MessageId', 'ReasoningEffortId', 'freezeMessage'],
   '@deepseek-ai/dsh-scope': ['carrierKeyOf', 'createScope', 'scopeOf', 'scopeParentOf', 'scopeTarget'],
   // appendPluginRecord writes through the Session class's private log; pluginRecordOf is stateless.
   '@deepseek-ai/dsh-session': ['SESSION_FORMAT_VERSION', 'appendPluginRecord', 'pluginRecordOf'],

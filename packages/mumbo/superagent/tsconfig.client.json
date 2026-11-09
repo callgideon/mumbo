@@ -4,24 +4,18 @@
     "rootDir": "src",
     "outDir": "lib/types",
     "tsBuildInfoFile": "lib/tsconfig.client.tsbuildinfo",
+    // pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md
     "exactOptionalPropertyTypes": false,
     "noUnusedLocals": false,
-    "noUnusedParameters": false
+    "noUnusedParameters": false,
+    "types": [
+      "node",
+      "client-build-environment",
+      "client-assets"
+    ]
   },
   "include": [
-    "src/client",
-    "src/admission.ts",
-    "src/app/api.ts",
-    "src/core/errors.ts",
-    "src/core/reasons.ts",
-    "src/core/stage.ts",
-    "src/core/model.ts",
-    "src/limits.ts",
-    "src/navigation.ts",
-    "src/setup.ts",
-    "src/infra/text.ts",
-    "src/sources/host.ts",
-    "src/sources/kind.ts"
+    "src"
   ],
   "references": [
     {
@@ -58,7 +52,49 @@
       "path": "../../core/session"
     },
     {
-      "path": "./tsconfig.host.json"
+      "path": "../../../vendor/schemastery"
+    },
+    {
+      "path": "../../core/agent"
+    },
+    {
+      "path": "../../attachment/attachment"
+    },
+    {
+      "path": "../../client/connection/tsconfig.client.json"
+    },
+    {
+      "path": "../../host/webserver"
+    },
+    {
+      "path": "../../llm/llm"
+    },
+    {
+      "path": "../../interaction/permission-presets"
+    },
+    {
+      "path": "../../core/scope"
+    },
+    {
+      "path": "../../session/session-persistence"
+    },
+    {
+      "path": "../../settings/settings"
+    },
+    {
+      "path": "../../skill/skill"
+    },
+    {
+      "path": "../../subprocess/subprocess"
+    },
+    {
+      "path": "../../core/system-prompt"
+    },
+    {
+      "path": "../../core/tools"
+    },
+    {
+      "path": "../../workspace/workspace"
     }
   ]
 }

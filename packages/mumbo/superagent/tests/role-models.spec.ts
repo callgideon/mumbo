@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import { AgentModel, modelSelectionProjectionDefinition, type Agent } from '@deepseek-ai/dsh-agent'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { initializeRoleModel } from '../src/app/role-models.ts'
@@ -50,4 +50,12 @@ it('inherits the host when unset and fails unavailable routes before recording a
   resolve.mockRejectedValueOnce(new Error('unknown provider'))
   await expect(initializeRoleModel(ctx, agent, { provider: 'unknown', model: 'x' })).rejects.toThrow('unknown provider')
   expect(agent.session.snapshotEvents().some(event => event.type === 'model/selection')).toBe(false)
+})
+it('routes the first request of a seeded Session to the role model through the Agent model projection', async () => {
+  const { ctx, agent } = await fixture()
+  await initializeRoleModel(ctx, agent, { provider: 'worker-provider', model: 'worker-model' })
+  const state = agent.session.snapshotEvents().reduce((current, event) => modelSelectionProjectionDefinition.apply(current, event),
+    modelSelectionProjectionDefinition.init(agent.session.header, agent.session.inheritedEventCount))
+  const model = new AgentModel(() => state, agent.session, { provider: 'host', model: 'default' } as never)
+  expect(model.current()).toMatchObject({ provider: 'worker-provider', model: 'worker-model' })
 })
