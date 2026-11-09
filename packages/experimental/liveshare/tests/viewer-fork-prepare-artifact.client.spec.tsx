@@ -49,8 +49,8 @@ describe('Assembled liveshare viewer page prompting an unprepared branch', () =>
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) =>
       window.setTimeout(() => { callback(0) }, 0))
     vi.stubGlobal('cancelAnimationFrame', (id: number) => { clearTimeout(id) })
-    Object.defineProperty(navigator, 'languages', { value: ['zh-CN'], configurable: true })
-    Object.defineProperty(navigator, 'language', { value: 'zh-CN', configurable: true })
+    Object.defineProperty(navigator, 'languages', { value: ['en-US'], configurable: true })
+    Object.defineProperty(navigator, 'language', { value: 'en-US', configurable: true })
     const owner = createFixtureFaces({ viewerSourceGrant: () => ({ sessionMode: 'fork-readonly' }),
       viewerFork: true, rejectPrompt: true, rejectPromptCode: 'fork-prepare-failed' })
     owned.disposeOwner = () => { owner.dispose() }

@@ -169,9 +169,12 @@ it('keeps modal arbitration and updates locale without replacing the iframe', as
   } finally { modal.remove() }
   press()
   const frame = body.view.getByTitle('NodeJS inspector')
-  act(() => { locale.setLocale('en') })
-  expect(body.view.getByTitle('NodeJS inspector')).toBe(frame)
-  act(() => { body.view.getByRole('button', { name: 'Collapse' }).click() })
+  act(() => {
+    locale.addLanguage({ id: 'ja', label: 'にほんご', fallback: 'en' })
+    locale.setLocale('ja')
+  })
+  expect(body.view.getByTitle('NodeJS インスペクター')).toBe(frame)
+  act(() => { body.view.getByRole('button', { name: '折りたたむ' }).click() })
   expect(body.container.querySelector('section')?.hidden).toBe(true)
 })
 
