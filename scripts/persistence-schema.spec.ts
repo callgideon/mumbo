@@ -1,7 +1,8 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import ts from 'typescript'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { collectLogEvents } from './gen-persistence-catalog.ts'
 import { extractPersistenceSchema } from './persistence-schema.ts'
 import { classifyPersistenceChange, parsePersistenceSnapshot } from './persistence-changes.ts'
@@ -314,6 +315,20 @@ interface SessionEventMap {
     ['invalid generic alias', 'type Bad = ReturnType<42>; export interface Payload {value: Bad}', 'TS2344'],
   ])('rejects %s rather than weakening the schema', (_name, source, error) => {
     expect(() => extractPersistenceSchema(fixture(source))).toThrow(error)
+  })
+
+  it('treats a listed source deleted before the compiler reads it as absent', () => {
+    const root = fixture('export interface Payload {id: string}')
+    const digest = event(extractPersistenceSchema(root))
+    const probe = join(root, 'packages/domain/payload/src/probe.ts')
+    put(root, 'packages/domain/payload/src/probe.ts', 'export {}\n')
+    const read = ts.sys.readFile.bind(ts.sys)
+    const spy = vi.spyOn(ts.sys, 'readFile').mockImplementation((path, encoding) => {
+      if (resolve(path) === probe) rmSync(probe)
+      return read(path, encoding)
+    })
+    try { expect(event(extractPersistenceSchema(root))).toBe(digest) } finally { spy.mockRestore() }
+    expect(existsSync(probe)).toBe(false)
   })
 
   // Repository-wide TypeScript extraction and reachable-node hashing use the Windows coverage test budget.

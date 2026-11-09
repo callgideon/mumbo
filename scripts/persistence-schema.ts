@@ -1,6 +1,6 @@
 /** Extract complete persistent Session record types from one source-only compiler program. */
 
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, extname, relative, resolve, sep } from 'node:path'
 import ts from 'typescript'
 import { collectLogEvents } from './persistence-catalog-source.ts'
@@ -74,14 +74,18 @@ export function extractPersistenceSchema(root: string): PersistenceSchemaInvento
     strict: true,
     exactOptionalPropertyTypes: true,
   }
+  const hostFiles = hostSourceFiles(root, configPath)
+  const listed = new Set(hostFiles.map(file => resolve(file)))
   const host = ts.createCompilerHost(options)
   const originalGetSourceFile = host.getSourceFile.bind(host)
+  // A listed source deleted before the compiler reads it, such as a concurrent lint probe, is absent from the tree.
   host.getSourceFile = (path, languageVersion, onError, shouldCreateNewSourceFile) =>
     resolve(path) === filename
       ? ts.createSourceFile(filename, source, languageVersion, true)
       : originalGetSourceFile(path, languageVersion, onError, shouldCreateNewSourceFile)
+        ?? (listed.has(resolve(path)) && !existsSync(path) ? ts.createSourceFile(path, '', languageVersion, true) : undefined)
   const files = [...new Set([
-    ...hostSourceFiles(root, configPath),
+    ...hostFiles,
     ...events.map(event => resolve(root, event.source.slice(0, event.source.lastIndexOf(':')))),
   ])]
   const program = ts.createProgram({ rootNames: [filename, ...files], options, host })

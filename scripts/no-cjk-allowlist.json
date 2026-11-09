@@ -44,5 +44,25 @@
     "path": "snapshots/web/{creation,plugin}-recommendations/session.v4.jsonl",
     "line": "\\\\\"ja\\\\\":\\\\\"",
     "reason": "Recorded tool result carrying each plugin title and description in every shipped locale, including Japanese (ja)"
+  },
+  {
+    "path": "snapshots/session/office-skills-no-renderer/**",
+    "reason": "Chinese prompt and model output recorded from the live model; an English replacement needs a live re-record (pnpm run test:snapshot:record -t office-skills-no-renderer, needs DEEPSEEK_API_KEY). Remove this entry after re-recording"
+  },
+  {
+    "path": "snapshots/web/changed-files-turn/**",
+    "reason": "Chinese session, rendered UI, and workspace output recorded from the live model; an English replacement needs a live re-record of apps/web/tests/changed-files-turn.e2e.ts (needs DEEPSEEK_API_KEY). Remove this entry after re-recording"
+  },
+  {
+    "path": "snapshots/web/goal-multi-turn-actions/**",
+    "reason": "Chinese session, replay override, and rendered UI recorded from the live model; an English replacement needs a live re-record of apps/web/tests/goal-multi-turn-actions.e2e.ts (needs DEEPSEEK_API_KEY). Remove this entry after re-recording"
+  },
+  {
+    "path": "snapshots/web/present/**",
+    "reason": "Chinese session and rendered UI recorded from the live model; an English replacement needs a live re-record of apps/web/tests/present.e2e.ts (needs DEEPSEEK_API_KEY). Remove this entry after re-recording"
+  },
+  {
+    "path": "snapshots/web/present-svg/**",
+    "reason": "Chinese session, rendered UI, and model-written SVG recorded from the live model; an English replacement needs a live re-record of apps/web/tests/present-svg.e2e.ts (needs DEEPSEEK_API_KEY). Remove this entry after re-recording"
   }
 ]
