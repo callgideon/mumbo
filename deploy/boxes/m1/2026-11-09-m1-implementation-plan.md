@@ -38,6 +38,51 @@ Nothing inside a box can merge or approve.
 - Claude workers in sandboxes;
 - the MCP door.
 
+## Amendments: wave-0 rulings (mumbo-design, 2026-11-09)
+
+These override the task text below where they conflict.
+
+1. **A3 panel admins (C-02).**
+   - A3 admits a request when the Peer is the owner.
+   - It also admits one when `peer.principal.kind === 'edge-member'` and the lowercased email is in the plugin config `panelAdmins: string[]`. The default is `[]`, which fails closed. Emails must match exactly: no domain or wildcard matching.
+   - B7 sets `MUMBO_PANEL_ADMINS` (comma-separated, lowercased) from the project doc's **owners** only, never plain members.
+   - A7's overlay sets `panelAdmins: !!js (process.env.MUMBO_PANEL_ADMINS ?? '').split(',').filter(Boolean)`.
+   - A3 tests: a listed edge-member gets 200; an unlisted one gets 403; an empty list gives 403; the owner gets 200.
+   - A7 test: the empty default resolves to `[]`.
+   - Panel access gives no merge or approval power.
+2. **edge.test.mjs ownership (P27/P35).**
+   - B6, B7 and B11 add `deploy/boxes/edge/edge.test.mjs` to their Files and list by name the existing tests they rewrite.
+   - No task edits a test another task owns.
+   - When two tasks need the same test, the later wave owns it.
+3. **Low-risk grants use the SHAs the founder saw (D-01).**
+   - `grantLowRisk(email, shown)` takes the displayed `[{ id, sha }]` pairs. The form posts them, and the CSRF token covers the whole form.
+   - Merge only the pairs that are still low-risk at that exact SHA, report every skipped pair with its reason, and never merge an item that was not posted.
+   - Update the B2 and B3 tests to match.
+4. **approveHost (P20)** is an approvalsService parameter, set in B0.
+5. **Lockfile (T-B0).** B0 updates `package-lock.json`, and `docker build` must run `npm ci` cleanly.
+6. **Halt scope (D-03).**
+   - While halted, allow GET and HEAD, git-upload-pack, and GraphQL documents that contain no mutation operation.
+   - Refuse git-receive-pack, any mutation, and every other REST method.
+   - Model calls stay refused.
+   - B1 has a test for each case.
+7. **Template switch in two applies (P39).**
+   - B9 leaves `PROJECT_TEMPLATE` unset, so it defaults to `BOX_TEMPLATE`.
+   - New B10 step 6: after step 4 builds the template, set `PROJECT_TEMPLATE=mumbo-project` and apply again.
+8. **C3 after C2 (P46).** Only C3's Stop-everything step waits for C2 to finish. The rest of C3 runs alongside C2.
+9. **GraphQL content-type (D-05).** B1 returns 415 for a GraphQL request whose media type is not `application/json`, and forwards with `content-type: application/json`.
+10. **Test ownership in A4 and A5 (T-A4/T-A5).**
+    - A4 owns `core-engine.spec.ts:187–199` and `:296`.
+    - A5 owns `runtime.spec.ts:790`.
+    - Both rewrite these tests to describe the new behaviour; neither deletes them.
+
+**Outside M1: account-write consent.**
+- Today "writes ask" is advisory: the agent's root shell can reach CDP on :9222 directly.
+- Design requirement (part C, mumbo-design): consent for account writes is enforced outside the agent's reach:
+  - the agent's shell runs as a non-root user with no route to :9222;
+  - Chromium and the browser-use MCP run as their own user;
+  - an owner-match firewall rule admits only the MCP process to CDP;
+  - the MCP process enforces consent.
+
 ## How to run this plan in parallel
 
 **Branches.**
