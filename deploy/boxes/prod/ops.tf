@@ -9,6 +9,8 @@ locals {
     edge-pause-failed   = { group = aws_cloudwatch_log_group.edge.name, pattern = "{ $.msg = \"pause failed\" }" }
     edge-errors         = { group = aws_cloudwatch_log_group.edge.name, pattern = "{ $.edge = \"error\" }" }
     edge-dropped-create = { group = aws_cloudwatch_log_group.edge.name, pattern = "{ $.msg = \"dropped unfinished create\" }" }
+    # The forwarder's refusal and the approvals poller's failure both carry this text (github-app.mjs mintToken).
+    github-not-approved = { group = aws_cloudwatch_log_group.edge.name, pattern = "\"mumbo-bot App permissions not approved\"" }
     api-node-unhealthy  = { group = aws_cloudwatch_log_group.e2b["api"].name, pattern = "\"NodeID status changed\" \"unhealthy\"" }
   }
 }
@@ -33,7 +35,7 @@ locals {
     { for k, v in merge(local.tg, local.ntg) : "unhealthy-${k}" => { ns = v.ns, metric = "UnHealthyHostCount", dims = { TargetGroup = v.tg, LoadBalancer = v.lb }, stat = "Maximum", period = 60, threshold = 0, cmp = "GreaterThanThreshold", missing = "notBreaching" } },
     {
       edge-5xx        = { ns = "AWS/ApplicationELB", metric = "HTTPCode_Target_5XX_Count", dims = { LoadBalancer = aws_lb.edge.arn_suffix }, stat = "Sum", period = 300, threshold = 20, cmp = "GreaterThanThreshold", missing = "notBreaching" }
-      nodes-below-min = { ns = "AWS/AutoScaling", metric = "GroupInServiceInstances", dims = { AutoScalingGroupName = aws_autoscaling_group.nodes.name }, stat = "Minimum", period = 300, threshold = aws_autoscaling_group.nodes.min_size, cmp = "LessThanThreshold", missing = "breaching" }
+      nodes-below-min = { ns = "AWS/AutoScaling", metric = "GroupInServiceInstances", dims = { AutoScalingGroupName = aws_autoscaling_group.nodes.name }, stat = "Minimum", period = 300, threshold = var.node_count, cmp = "LessThanThreshold", missing = "breaching" }
       memorydb-memory = { ns = "AWS/MemoryDB", metric = "DatabaseMemoryUsagePercentage", dims = { ClusterName = aws_memorydb_cluster.e2b.name }, stat = "Maximum", period = 300, threshold = 75, cmp = "GreaterThanThreshold", missing = "notBreaching" }
       rds-cpu         = { ns = "AWS/RDS", metric = "CPUUtilization", dims = { DBInstanceIdentifier = aws_db_instance.e2b.identifier }, stat = "Average", period = 300, threshold = 80, cmp = "GreaterThanThreshold", missing = "notBreaching" }
       rds-storage     = { ns = "AWS/RDS", metric = "FreeStorageSpace", dims = { DBInstanceIdentifier = aws_db_instance.e2b.identifier }, stat = "Minimum", period = 300, threshold = 5e9, cmp = "LessThanThreshold", missing = "notBreaching" }

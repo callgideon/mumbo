@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs'
 import { createServer, request as httpRequest } from 'node:http'
 import { Readable, pipeline } from 'node:stream'
 import { ownersOf } from './projects.mjs'
+import { UNITS, atCapacity } from './capacity.mjs'
 
 const env = (name, fallback) => process.env[name] ?? fallback ?? (() => { throw new Error(`edge: set ${name}`) })()
 /** A number setting that must be finite and at least `min`; a bad value stops the edge at start. */
@@ -16,6 +17,12 @@ const atLeast = (name, min, fallback) => {
   return n
 }
 const list = (value) => value.toLowerCase().split(',').map(s => s.trim()).filter(Boolean)
+/** ALLOWED_EMAILS entries: `address`, `@domain` or the exact-address deny `!local@domain`. A malformed deny entry fails at startup, since it would silently deny nobody. */
+const allowList = (value) => {
+  const entries = list(value)
+  for (const e of entries) if (e.startsWith('!') && !/^![^@\s!]+@[^@\s]+$/.test(e)) throw new Error(`edge: ALLOWED_EMAILS entry ${JSON.stringify(e)} must be !local@domain`)
+  return entries
+}
 const optional = (name) => process.env[name] || undefined
 /** Required CI check names (case-sensitive). An empty list would drop the merge gate's CI requirement, so it fails. */
 const checkNames = (name, fallback) => {
@@ -29,6 +36,13 @@ const hostname = (name, fallback) => {
   if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(value)) throw new Error(`edge: ${name} must be a bare lowercase hostname such as boxes.mumbo.si, not ${JSON.stringify(value)}`)
   return value
 }
+/** GITHUB_AGENT_ID, the agent's numeric GitHub user id, or undefined; set together with GITHUB_AGENT_LOGIN or fails. */
+const agentId = () => {
+  const id = optional('GITHUB_AGENT_ID')
+  if (!id !== !optional('GITHUB_AGENT_LOGIN')) throw new Error('edge: set GITHUB_AGENT_ID and GITHUB_AGENT_LOGIN together')
+  if (id !== undefined && !/^[1-9]\d{0,15}$/.test(id)) throw new Error(`edge: GITHUB_AGENT_ID must be a numeric GitHub user id, not ${JSON.stringify(id)}`)
+  return id && Number(id)
+}
 /** oauth2-proxy's sign-in cookie name when SIGNIN_COOKIE is unset (prod sets it from Terraform signin_cookie_name). It
  *  starts with _oauth2_proxy, so edge images older than SIGNIN_COOKIE, which strip only that prefix, strip it too. */
 const SIGNIN_COOKIE = '_oauth2_proxy_mumbo'
@@ -37,6 +51,14 @@ const cookieName = (name, fallback) => {
   const value = env(name, fallback)
   if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(value)) throw new Error(`edge: ${name} must be a cookie name (token characters only), not ${JSON.stringify(value)}`)
   return value
+}
+/** Comma-separated redirect URIs, each exactly an origin and path (the form the sign-in page compares, consent.js toMumbo):
+ *  no query, fragment, default port, uppercase or missing path. None, or any other entry, fails at start. */
+const redirectUris = (name) => {
+  const uris = env(name).split(',').map(s => s.trim()).filter(Boolean)
+  const exact = (v) => { try { const u = new URL(v); return `${u.origin}${u.pathname}` === v } catch { return false } }
+  if (uris.length === 0 || !uris.every(exact)) throw new Error(`edge: ${name} must list origin-and-path URIs such as https://boxes.mumbo.si/oauth2/callback, not ${JSON.stringify(env(name))}`)
+  return uris
 }
 export const config = () => ({
   publicHost: env('PUBLIC_HOST'),
@@ -47,10 +69,10 @@ export const config = () => ({
   idleMs: Number(env('IDLE_MINUTES', '30')) * 60_000,
   pauseIdle: env('PAUSE_IDLE', 'true') !== 'false',  // false: boxes stay running (founder, 2026-11-09); cost work comes later
   backupEveryMs: Number(env('BACKUP_MINUTES', '10')) * 60_000,
-  maxRunning: Number(env('MAX_RUNNING_BOXES', '0')),  // 0: no edge-side cap; E2B's own placement errors decide
+  maxRunningUnits: Number(env('MAX_RUNNING_UNITS', '0')),  // capacity units (capacity.mjs UNITS); 0: no edge-side cap, E2B's own placement errors decide
   pageAfterMs: atLeast('PAGE_AFTER_MS', 1000, 3000),  // a page load waiting longer on a box gets the starting page
   backupConcurrency: Number(env('BACKUP_CONCURRENCY', '8')),
-  allowed: list(env('ALLOWED_EMAILS', '')),
+  allowed: allowList(env('ALLOWED_EMAILS', '')),
   egressIps: list(env('BOX_EGRESS_IPS', '')),
   dailyRequests: Number(env('DAILY_MODEL_REQUESTS', '3000')),
   proxy: new URL(env('E2B_SANDBOX_URL', 'http://127.0.0.1:3002')),
@@ -58,24 +80,25 @@ export const config = () => ({
   upstream: env('MODEL_UPSTREAM', 'https://api.deepseek.com'),
   childTemplates: list(env('CHILD_TEMPLATES', 'mumbo-child')),
   maxChildren: Number(env('MAX_CHILD_SANDBOXES', '10')),
-  // Approvals, GitHub and token budgets. Secrets arrive through the ECS secrets map: the agent token and ntfy topic from
-  // SSM; the id and private key of the mumbo-bot GitHub App, the only identity that merges, from Secrets Manager
-  // mumbo-boxes/github-app.
+  // Approvals, GitHub and token budgets. Secrets arrive through the ECS secrets map: the ntfy topic from SSM; the id and
+  // private key of the mumbo-bot GitHub App, which the agent writes as and the only identity that merges, from Secrets
+  // Manager mumbo-boxes/github-app.
   approveHost: env('APPROVE_HOST', `approve.${env('PUBLIC_HOST')}`),
   approverEmails: list(env('APPROVER_EMAILS', '')),  // who may merge and bind repositories; empty: nobody
-  agentLogin: optional('GITHUB_AGENT_LOGIN'),  // unset: the approvals poller is off
+  agentLogin: optional('GITHUB_AGENT_LOGIN'),  // the App's bot user, mumbo-bot[bot]
+  agentId: agentId(),  // its numeric user id, which approvals match; unset: the approvals poller is off
   requiredChecks: checkNames('REQUIRED_CHECKS', 'static,unit'),
   dailyTokensUser: Number(env('DAILY_TOKENS_USER', '20000000')),
   dailyTokensProject: Number(env('DAILY_TOKENS_PROJECT', '50000000')),
   projectTemplate: env('PROJECT_TEMPLATE', env('BOX_TEMPLATE', 'mumbo-box')),
   auditPrefix: env('AUDIT_PREFIX', 'audit/approvals/'),
-  agentToken: optional('GITHUB_AGENT_TOKEN'),
   appId: optional('GITHUB_APP_ID'),
   appKey: optional('GITHUB_APP_KEY'),
   ntfyTopic: optional('NTFY_TOPIC'),
   // The sign-in page (authUi) is served only when set; SUPABASE_ANON_KEY, MUMBO_OAUTH_CLIENT_IDS and
   // MUMBO_OAUTH_REDIRECT_URIS (comma-separated, exact) are then required.
   supabaseUrl: optional('SUPABASE_URL'),
+  oauthRedirectUris: optional('SUPABASE_URL') ? redirectUris('MUMBO_OAUTH_REDIRECT_URIS') : undefined,
   // The model host's OpenRouter route (OPENROUTER_PATHS): the exact model ids boxes may call, comma-separated; empty turns
   // the route off. OPENROUTER_API_KEY, from Secrets Manager mumbo-boxes/openrouter through the ECS secrets map, is then
   // required. OPENROUTER_ZDR=false allows endpoints that retain prompts; none may train on them (openrouterBody).
@@ -86,8 +109,14 @@ export const config = () => ({
   openrouterImageTokens: atLeast('OPENROUTER_IMAGE_TOKENS', 0, 1500),
 })
 
-/** Address or @domain allowlist; an empty list admits nobody. */
-export const admitted = (allowed, email) => allowed.some(a => a === email || (a.startsWith('@') && email.endsWith(a)))
+/** Address or @domain allowlist, lowercased (config()); an empty list admits nobody. The email compares lowercased. An
+ *  @domain entry matches that exact domain only: @mumbo.si admits neither x@sub.mumbo.si nor x@evil-mumbo.si. An entry
+ *  `!address` denies that exact address before any allow match. */
+export const admitted = (allowed, email) => {
+  email = email.toLowerCase()
+  return !allowed.some(a => a.startsWith('!') && a.slice(1).toLowerCase() === email)
+    && allowed.some(a => a === email || (a.startsWith('@') && email.endsWith(a)))
+}
 
 // ---- box tokens: HMAC(EDGE_SECRET) over {u: email, b: box id}. A token is honoured only while b is u's live box.
 const mac = (key, body) => createHmac('sha256', key).update(body).digest('base64url')
@@ -423,7 +452,7 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
   const dshUp = async (box) => (await run(box, "curl -s -o /dev/null -m 5 -w '%{http_code}' http://$(hostname -I | cut -d' ' -f1):3080/ || true")) !== '000'
 
   async function create(email) {
-    if (cfg.maxRunning > 0 && (await all({ state: ['running'] })).length >= cfg.maxRunning) throw Object.assign(new Error('capacity'), { status: 503, capacity: true })
+    if (await atCapacity(e2b, cfg, UNITS.box)) throw Object.assign(new Error('capacity'), { status: 503, capacity: true })
     // Before the sandbox exists, so its `creating` record follows the create at once (adopt/backup race).
     const restoreUrl = await presignGet(`${userPrefix(email)}/latest.tar.gz`)
     const box = await e2b.Sandbox.create(email.startsWith('project:') ? cfg.projectTemplate : cfg.template, {
@@ -722,7 +751,7 @@ const hostOf = (req) => String(req.headers.host ?? '').toLowerCase().replace(/:\
 
 /**
  * The Supabase sign-in and consent page (Supabase's OAuth authorization path /oauth/consent) and its scripts, for
- * visitors who are not signed in yet: oauth2-proxy skips sign-in for exactly these GETs (prod/edge.tf). `html` is
+ * visitors who are not signed in yet: oauth2-proxy skips sign-in for these GETs (prod/edge.tf; skippedSignin). `html` is
  * auth-ui/index.html; its inline script, style and event handler are allowed by hash. config.js carries the Supabase
  * URL and publishable key, and Mumbo's own OAuth client ids and redirect URIs, the only ones the page consents for
  * (consent.js). Returns a handler that answers and returns true for the page and its scripts, false for anything else.
@@ -750,13 +779,11 @@ export function authUi({ html, supabaseJs, consentJs, supabaseUrl, anonKey, clie
   }
 }
 
-// oauth2-proxy's --skip-auth-route GETs (prod/edge.tf). With --reverse-proxy it also skips sign-in for any request whose
-// client-sent X-Forwarded-Uri names one of them; neither it nor the ALB sets that header. A skipped request carries no
-// identity, so an email header on one did not come through sign-in.
-/** True for a request carrying X-Forwarded-Uri, which neither the ALB nor oauth2-proxy sets: with --reverse-proxy, oauth2-proxy
- *  skips sign-in for any GET whose client-sent X-Forwarded-Uri matches a skip-auth route. oauth2-proxy strips client identity
- *  headers on every route and sets X-Forwarded-Email itself for a visitor with a session, skip-auth routes included, so a
- *  request without that header is signed out. This refusal is defence in depth behind that strip. */
+/** True for a request carrying X-Forwarded-Uri, which neither the ALB nor oauth2-proxy sets. oauth2-proxy skips sign-in
+ *  for its skip-auth GETs (prod/edge.tf) and, with --reverse-proxy, for any GET whose client-sent X-Forwarded-Uri matches
+ *  one of them, in later versions too. The ALB rule x_forwarded_uri refuses that header and is the hard stop; this check
+ *  is defence in depth. oauth2-proxy strips client identity headers on every route and sets X-Forwarded-Email only from a
+ *  session, so a request without it is signed out. Who may enter is decided here (admitted()), never by oauth2-proxy flags. */
 const skippedSignin = (req) => req.headers['x-forwarded-uri'] !== undefined
 
 /** Signed-in users' traffic. The public host reaches the user's own box and p-<16 hex>.<project domain> a project's
@@ -785,7 +812,12 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log
     failed(req, e)
     if (!res.headersSent) page(res, 500, 'Something went wrong. Reload to try again.', false); else res.destroy()
   }))
-  server.on('upgrade', (req, socket, head) => onUpgrade(req, socket, head).catch((e) => { failed(req, e); socket.destroy() }))
+  server.on('upgrade', (req, socket, head) => {
+    // The server leaves an upgrade's socket without an error listener; a client reset while the handler waits on
+    // identity or a box would otherwise throw out of the process.
+    socket.on('error', () => socket.destroy())
+    onUpgrade(req, socket, head).catch((e) => { failed(req, e); socket.destroy() })
+  })
   async function onRequest(req, res) {
     if (skippedSignin(req)) return json(res, 400, { error: 'bad request' })
     // The edge's own pages; a box's response replaces these through noFraming.
@@ -1078,12 +1110,14 @@ async function main() {
     await s3.send(new PutObjectCommand({ Bucket: cfg.bucket, Key: key, Body: JSON.stringify(record), ContentType: 'application/json' }))
   }
   const csrfKey = createHmac('sha256', edgeKey).update('approve-csrf').digest()
-  const approvals = approvalsService({ store, github: { agentToken: cfg.agentToken, app: { appId: cfg.appId, privateKey: cfg.appKey }, agentLogin: cfg.agentLogin, requiredChecks: cfg.requiredChecks }, notify, audit, fetchImpl: fetch, now, approveHost: cfg.approveHost, approvers: cfg.approverEmails })
-  const approve = approvePage({ approvals, halt, store, csrfKey, host: cfg.approveHost, approvers: cfg.approverEmails })
+  const app = { appId: cfg.appId, privateKey: cfg.appKey }
+  const approvals = approvalsService({ store, github: { app, agentId: cfg.agentId, requiredChecks: cfg.requiredChecks }, notify, audit, fetchImpl: fetch, now, approveHost: cfg.approveHost, approvers: cfg.approverEmails })
+  const { installationOf } = await import('./github-app.mjs')
+  const approve = approvePage({ approvals, halt, store, csrfKey, host: cfg.approveHost, approvers: cfg.approverEmails, installationOf: installationOf({ ...app, fetchImpl: fetch, now }) })
   const tokens = tokenBudget({ store, limits: { user: cfg.dailyTokensUser, project: cfg.dailyTokensProject }, now })
-  const github = githubForwarder({ store, halt, agentToken: cfg.agentToken, fetchImpl: fetch })
-  // One replica polls GitHub each minute: the 55 s lease lapses before the next tick. Off without GITHUB_AGENT_LOGIN.
-  if (cfg.agentLogin) {
+  const github = githubForwarder({ store, halt, app, fetchImpl: fetch, now })
+  // One replica polls GitHub each minute: the 55 s lease lapses before the next tick. Off without GITHUB_AGENT_ID.
+  if (cfg.agentId) {
     setInterval(() => store.lease('approvals:poll', 55_000).then(won => won && approvals.poll()).catch(e => console.error('edge: approvals poll', e.message)), 60_000).unref()
   }
 
@@ -1094,7 +1128,7 @@ async function main() {
     return v
   }
   const signin = cfg.supabaseUrl ? authUi({ html: authFile('index.html'), supabaseJs: authFile('supabase.js'), consentJs: authFile('consent.js'), supabaseUrl: cfg.supabaseUrl,
-    anonKey: env('SUPABASE_ANON_KEY'), clientIds: values('MUMBO_OAUTH_CLIENT_IDS'), redirectUris: values('MUMBO_OAUTH_REDIRECT_URIS') }) : undefined
+    anonKey: env('SUPABASE_ANON_KEY'), clientIds: values('MUMBO_OAUTH_CLIENT_IDS'), redirectUris: cfg.oauthRedirectUris }) : undefined
   userServer({ cfg, box, verifyAlb, projects: proj, approve, signin }).listen(8080, listenHost, () => console.log(`edge: users on ${listenHost}:8080`))
   const { children, mcpServer } = await import('./sandboxes.mjs')
   const mcp = mcpServer({ ops: children({ e2b, cfg }), projects: proj, relay, projectDomain: cfg.projectDomain, claimOf: (info) => verifyBox(edgeKey, String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })

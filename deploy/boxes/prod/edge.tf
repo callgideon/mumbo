@@ -14,18 +14,13 @@ variable "approver_emails" {
 }
 # Optional edge secrets: the task references an SSM parameter, and the exec role may read it, only when enabled. Create
 # the parameter first; a task whose parameter is missing does not start.
-variable "github_agent_token_enabled" {
-  description = "Pass /mumbo/boxes/github-agent-token to the edge as GITHUB_AGENT_TOKEN."
-  type        = bool
-  default     = false
-}
 variable "ntfy_enabled" {
   description = "Pass /mumbo/boxes/ntfy-topic to the edge as NTFY_TOPIC."
   type        = bool
   default     = false
 }
 variable "github_agent_login" {
-  description = "GITHUB_AGENT_LOGIN: the agent machine account's GitHub login. Empty: the approvals poller is off."
+  description = "GITHUB_AGENT_LOGIN: the agent's GitHub login, the mumbo-bot App's bot user mumbo-bot[bot]. Set with github_agent_id."
   type        = string
   default     = ""
 }
@@ -38,6 +33,16 @@ variable "openrouter_zdr" {
   description = "OPENROUTER_ZDR: OpenRouter routes only to zero-data-retention endpoints. false also allows endpoints that retain prompts; none may train on them (data_collection deny, always)."
   type        = bool
   default     = true
+}
+variable "github_agent_id" {
+  description = "GITHUB_AGENT_ID: the numeric user id of github_agent_login (GET /users/mumbo-bot%5Bbot%5D); approvals match the agent by it. Empty: the approvals poller is off."
+  type        = string
+  default     = ""
+  validation {
+    # The edge's config() check: both or neither, and a positive integer.
+    condition     = can(regex("^([1-9][0-9]*)?$", var.github_agent_id)) && (var.github_agent_id == "") == (var.github_agent_login == "")
+    error_message = "github_agent_id must be a numeric GitHub user id, set together with github_agent_login (or both empty)."
+  }
 }
 variable "signin_cookie_name" {
   description = "oauth2-proxy's --cookie-name and the edge's SIGNIN_COOKIE: the edge drops every cookie whose name starts with it from box requests and box Set-Cookie. It starts with _oauth2_proxy_, a prefix every edge image strips."
@@ -57,6 +62,8 @@ variable "signin_cookie_name" {
 locals {
   public_host  = "boxes.mumbo.si"
   supabase_url = "https://qkvcouccrhyjiarkauyo.supabase.co"
+  # The project's publishable key (SUPABASE_ANON_KEY): public, the sign-in page serves it to every visitor in config.js.
+  supabase_publishable_key = "sb_publishable_hrzV3iBFsW4OOQydX9nmhA_goP8Birh"
   # oauth2-proxy's callback: Mumbo's OAuth client's redirect URI, the only one the sign-in page sends a code to.
   oauth_redirect_url = "https://${local.public_host}/oauth2/callback"
   llm_host           = "llm.boxes.mumbo.si"
@@ -195,12 +202,33 @@ resource "aws_lb_listener_rule" "old_hosts" {
   action {
     type = "redirect"
     redirect {
-      host        = local.public_host
-      port        = "443"
-      protocol    = "HTTPS"
-      path        = "/#{path}"
-      query       = "#{query}"
-      status_code = "HTTP_301"
+      host     = local.public_host
+      port     = "443"
+      protocol = "HTTPS"
+      path     = "/#{path}"
+      query    = "#{query}"
+      # Temporary: browsers cache a 301, and the hosts will be swapped (app.mumbo.si becomes the main host).
+      status_code = "HTTP_302"
+    }
+  }
+}
+# oauth2-proxy skips sign-in for any GET whose client-sent X-Forwarded-Uri matches a skip-auth route (task below), and
+# neither this ALB nor oauth2-proxy sets that header: every request carrying it is refused, before any other rule.
+resource "aws_lb_listener_rule" "x_forwarded_uri" {
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 1
+  condition {
+    http_header {
+      http_header_name = "X-Forwarded-Uri"
+      values           = ["*"]
+    }
+  }
+  action {
+    type = "fixed-response"
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "bad request"
+      status_code  = "400"
     }
   }
 }
@@ -242,7 +270,12 @@ resource "aws_iam_role_policy" "edge" {
 resource "aws_iam_role_policy" "exec_edge" {
   role = aws_iam_role.exec.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [
-    { Effect = "Allow", Action = "ssm:GetParameters", Resource = distinct([for p in values(merge(local.proxy_ssm, local.edge_ssm)) : "${local.ssm}/${p}"]) },
+    { Effect = "Allow", Action = "ssm:GetParameters", Resource = distinct(concat(
+      [for p in values(merge(local.proxy_ssm, local.edge_ssm)) : "${local.ssm}/${p}"],
+      # Remove after the plain-env revision is steady (RUNBOOK.md): edge task definitions before it read SUPABASE_ANON_KEY
+      # from this parameter, and a circuit-breaker rollback to one must still start.
+      ["${local.ssm}/prod/supabase-anon-key"],
+    )) },
     { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = concat([data.aws_secretsmanager_secret.github_app.arn], values(local.edge_secrets)) },
   ] })
 }
@@ -259,9 +292,7 @@ locals {
   # Container env name -> SSM parameter under /mumbo; these are all the exec role may read.
   proxy_ssm = { OAUTH2_PROXY_CLIENT_ID = "boxes/oauth-client-id", OAUTH2_PROXY_CLIENT_SECRET = "boxes/oauth-client-secret", OAUTH2_PROXY_COOKIE_SECRET = "boxes/cookie-secret" }
   edge_ssm = merge(
-    # The Supabase publishable key, for the sign-in page; the retired web app's parameter (deploy/infra).
-    { ALLOWED_EMAILS = "boxes/allowed-emails", SUPABASE_ANON_KEY = "prod/supabase-anon-key", MUMBO_OAUTH_CLIENT_IDS = "boxes/oauth-client-id" },
-    var.github_agent_token_enabled ? { GITHUB_AGENT_TOKEN = "boxes/github-agent-token" } : {},
+    { ALLOWED_EMAILS = "boxes/allowed-emails", MUMBO_OAUTH_CLIENT_IDS = "boxes/oauth-client-id" },
     var.ntfy_enabled ? { NTFY_TOPIC = "boxes/ntfy-topic" } : {},
   )
   # Container env name -> plain-string Secrets Manager secret; with github_app, all the secrets the exec role may read.
@@ -296,7 +327,12 @@ resource "aws_ecs_task_definition" "edge" {
         "--upstream-timeout=120s", # a first visit creates the box and restores its backup before answering
         # The Supabase sign-in page and its scripts (edge authUi), for visitors not signed in yet. v7.9 matches the
         # request URI with its query; the edge serves exactly these GETs on the approve host and redirects the page there.
+        # oauth2-proxy also skips sign-in for any GET whose client-sent X-Forwarded-Uri matches a route, in later versions
+        # too: the ALB rule x_forwarded_uri refuses that header and the edge does as well. On every route oauth2-proxy
+        # strips client identity headers (set explicitly here) and sets X-Forwarded-Email only from a session; the edge
+        # treats a request without it as signed out. Who may enter is decided in the edge (admitted()), never by these flags.
         "--skip-auth-route=GET=^/oauth/consent([?].*)?$", "--skip-auth-route=GET=^/auth-ui/(supabase|config|consent)[.]js$",
+        "--skip-auth-strip-headers=true",
       ]
       secrets          = [for k, p in local.proxy_ssm : { name = k, valueFrom = "${local.ssm}/${p}" }]
       logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.edge.name, awslogs-region = "us-east-1", awslogs-stream-prefix = "oauth2-proxy" } }
@@ -320,13 +356,20 @@ resource "aws_ecs_task_definition" "edge" {
         PAUSE_IDLE        = "false" # boxes stay running (founder, 2026-11-09); cost work later
         PROJECT_DOMAIN    = local.project_domain
         SUPABASE_URL      = local.supabase_url
+        SUPABASE_ANON_KEY = local.supabase_publishable_key
         # The sign-in page consents only for this client (MUMBO_OAUTH_CLIENT_IDS, below) and redirect URI.
         MUMBO_OAUTH_REDIRECT_URIS = local.oauth_redirect_url
         SIGNIN_COOKIE             = var.signin_cookie_name
+        # Capacity units, not boxes: a person or project box (4096 MB, edge/template.mjs) is 2, a child sandbox (2048 MB, the
+        # mumbo-child build argument) is 1. 12 boxes per node (nodes.tf hugepages) minus 2 of headroom. An edge image from before
+        # the units change reads MAX_RUNNING_BOXES (running boxes of all kinds, children too, counted as one each) instead; both stay until no such image can be rolled back to.
+        MAX_RUNNING_UNITS = tostring(2 * (12 * var.node_count - 2))
+        MAX_RUNNING_BOXES = tostring(12 * var.node_count - 2)
         # Approvals. PROJECT_TEMPLATE stays unset (it defaults to BOX_TEMPLATE) until the mumbo-project template is built.
         APPROVE_HOST         = "approve.${local.public_host}"
         APPROVER_EMAILS      = var.approver_emails
         GITHUB_AGENT_LOGIN   = var.github_agent_login
+        GITHUB_AGENT_ID      = var.github_agent_id
         REQUIRED_CHECKS      = "static,unit"
         DAILY_TOKENS_USER    = "20000000"
         DAILY_TOKENS_PROJECT = "50000000"
@@ -371,7 +414,7 @@ resource "aws_ecs_service" "edge" {
     container_name   = "edge"
     container_port   = 8081
   }
-  # New tasks read their secrets with the exec role, so its grant changes first.
+  # The exec role's grant first: a task whose secrets it may not read does not start.
   depends_on = [aws_lb_listener_rule.edge, aws_iam_role_policy.exec_edge]
 }
 

@@ -1,9 +1,9 @@
 // The box-local GitHub proxy (project boxes only). The box points HTTPS_PROXY at it, so gh, git and superagent keep
-// using github.com URLs while the agent account's token stays at the edge.
+// using github.com URLs while the agent's GitHub tokens stay at the edge.
 // - CONNECT to a GitHub host on port 443: TLS ends here, with a leaf for that host signed by the box's own CA, and
 //   each request goes to ${EDGE_GITHUB_URL}/<host><path> with `authorization: Bearer ${BOX_TOKEN}` in place of the
-//   client's. The edge's GitHub forwarder checks the box token, swaps in the agent token and allows only listed
-//   operations.
+//   client's. The edge's GitHub forwarder checks the box token, swaps in the project's mumbo-bot App token and allows
+//   only listed operations.
 // - CONNECT to anything else: a raw TCP tunnel. A plain http:// proxy request answers 400.
 // Required settings: PORT, CA_DIR (holding ca.key, mode 0600, and ca.crt; the start script creates and trusts them),
 // EDGE_GITHUB_URL (https only) and BOX_TOKEN. Optional: EDGE_TIMEOUT_MS (120000), the silence after which a request to

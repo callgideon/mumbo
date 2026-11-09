@@ -104,6 +104,10 @@ test('oauth2-proxy skips sign-in for exactly the requests the edge serves signed
   const routes = [...tf.matchAll(/"--skip-auth-route=([^"]*)"/g)].map(m => m[1])
   assert.equal(routes.length, 2)
   assert.ok(routes.every(r => r.startsWith('GET=^') && r.endsWith('$')), 'GET only, anchored')
+  // Client identity headers are stripped on these routes too, stated rather than left to the default.
+  assert.match(tf, /"--skip-auth-strip-headers=true"/)
+  // The ALB refuses any X-Forwarded-Uri (on which oauth2-proxy would skip sign-in) before every other rule.
+  assert.match(tf, /resource "aws_lb_listener_rule" "x_forwarded_uri" \{\s*listener_arn = aws_lb_listener\.https\.arn\s*priority\s*= 1\s*condition \{\s*http_header \{\s*http_header_name = "X-Forwarded-Uri"\s*values\s*= \["\*"\]\s*\}\s*\}\s*action \{\s*type = "fixed-response"[^}]*status_code\s*= "400"/)
   const skipped = (uri) => routes.some(r => new RegExp(r.slice('GET='.length)).test(uri))
   await serve(async (port) => {
     for (const uri of ['/oauth/consent', '/oauth/consent?authorization_id=x', '/oauth/consent?signout', '/auth-ui/supabase.js', '/auth-ui/config.js', '/auth-ui/consent.js',
@@ -175,7 +179,8 @@ test('a planted session in the URL is never used: fragment tokens and foreign co
   // A ?code= without this browser's PKCE verifier: supabase-js refuses it, and the page says where the link works.
   const foreign = await runPage(`${base}&code=C#${tokens}`, { ...signedOut, exchangeCodeForSession: { data: { session: null }, error: { code: 'pkce_code_verifier_not_found' } } })
   assert.deepEqual(foreign.calls.slice(1), [['history.replaceState', base], ['exchangeCodeForSession', 'C'], ['getSession']])
-  assert.match(foreign.text('msg'), /works only in the browser that asked for it/)
+  // Opening the link used its one-time code, so the page asks for a new email rather than that code.
+  assert.equal(foreign.text('msg'), 'This link was opened in a different browser from the one that asked for it. Go back to that browser and request a new email.')
   // This browser's own Google or link sign-in: the code is exchanged after the address is cleaned, then consent runs.
   const own = await runPage(`${base}&code=C`, {
     getSession: { data: { session: { user: { email: 'a@x.com' } } } },
@@ -186,19 +191,48 @@ test('a planted session in the URL is never used: fragment tokens and foreign co
     ['oauth.approveAuthorization', 'A1', { skipBrowserRedirect: true }], ['location.replace', 'https://boxes.example/oauth2/callback?code=X&state=S']])
 })
 
-test('consent: approve only Mumbo\'s own client ids, follow an earlier consent only to Mumbo\'s redirect URI, refuse the rest', () => {
-  assert.equal(consentDecision({ authorization_id: 'a', client: { id: 'c1', name: 'mumbo' }, redirect_uri: 'https://evil.example/cb' }, allowed), 'approve')
-  assert.equal(consentDecision({ client: { id: 'c2' } }, allowed), 'approve')
-  for (const id of ['c3', 'C1', ' c1', 'c1 ', '', undefined]) assert.equal(consentDecision({ client: { id } }, allowed), 'refuse', String(id))
-  // A client is decided by its id, even when a redirect_url comes with it.
-  assert.equal(consentDecision({ client: { id: 'c3' }, redirect_url: 'https://boxes.example/oauth2/callback?code=x' }, allowed), 'refuse')
-  assert.equal(consentDecision({ redirect_url: 'https://boxes.example/oauth2/callback?code=x&state=y' }, allowed), 'follow')
-  for (const url of ['https://evil.example/oauth2/callback?code=x', 'https://boxes.example/oauth2/callbackx?code=x', 'https://boxes.example.evil.example/oauth2/callback',
-    'http://boxes.example/oauth2/callback', 'https://boxes.example:8443/oauth2/callback', 'javascript:alert(1)', 'not a url', '/oauth2/callback']) {
-    assert.equal(consentDecision({ redirect_url: url }, allowed), 'refuse', url)
+test('consent: approve only Mumbo\'s own client ids with Mumbo\'s redirect URI, follow an earlier consent only to Mumbo\'s redirect URI, refuse the rest', () => {
+  const cb = 'https://boxes.example/oauth2/callback'
+  const bad = ['https://evil.example/oauth2/callback?code=x', 'https://boxes.example/oauth2/callbackx?code=x', 'https://boxes.example.evil.example/oauth2/callback',
+    'http://boxes.example/oauth2/callback', 'https://boxes.example:8443/oauth2/callback', 'javascript:alert(1)', 'not a url', '/oauth2/callback', '', 5, undefined]
+  const rows = [
+    [{ authorization_id: 'a', client: { id: 'c1', name: 'mumbo' }, redirect_uri: cb }, 'approve'],
+    [{ client: { id: 'c2' }, redirect_uri: `${cb}?x=1` }, 'approve'],
+    // A Mumbo client id is approved only toward Mumbo's redirect URI: the client could carry another one.
+    ...bad.map(u => [{ client: { id: 'c1' }, redirect_uri: u }, 'refuse']),
+    [{ client: { id: 'c1' } }, 'refuse'],
+    ...['c3', 'C1', ' c1', 'c1 ', '', undefined].map(id => [{ client: { id }, redirect_uri: cb }, 'refuse']),
+    // A client is decided by its id and redirect_uri, even when a redirect_url comes with it.
+    [{ client: { id: 'c3' }, redirect_uri: cb, redirect_url: `${cb}?code=x` }, 'refuse'],
+    [{ redirect_url: `${cb}?code=x&state=y` }, 'follow'],
+    ...bad.map(u => [{ redirect_url: u }, 'refuse']),
+    ...[undefined, null, {}].map(d => [d, 'refuse']),
+  ]
+  for (const [details, decision] of rows) assert.equal(consentDecision(details, allowed), decision, JSON.stringify(details))
+  assert.equal(consentDecision({ client: { id: 'c1' }, redirect_uri: cb }, { clientIds: [], redirectUris: [] }), 'refuse')
+  assert.equal(consentDecision({ client: { id: 'c1' }, redirect_uri: cb }, { clientIds: ['c1'], redirectUris: [] }), 'refuse')
+})
+
+test('the page goes only to Mumbo\'s redirect URI, uses only a plain authorization id, and shows no text from the link', async () => {
+  const base = 'https://approve.boxes.example/oauth/consent?authorization_id=A1'
+  const signedIn = { getSession: { data: { session: { user: { email: 'a@x.com' } } } } }
+  const pending = { 'oauth.getAuthorizationDetails': { data: { client: { id: 'c1' }, redirect_uri: 'https://boxes.example/oauth2/callback' } } }
+  // Approving returns a redirect_url elsewhere: the page stays.
+  const approved = await runPage(base, { ...signedIn, ...pending, 'oauth.approveAuthorization': { data: { redirect_url: 'https://evil.example/oauth2/callback?code=X' } } })
+  assert.equal(approved.calls.at(-1)[0], 'oauth.approveAuthorization')
+  assert.equal(approved.text('msg'), 'Authorization failed. Try again from the app address.')
+  // An earlier consent is followed to Mumbo's redirect URI.
+  const followed = await runPage(base, { ...signedIn, 'oauth.getAuthorizationDetails': { data: { redirect_url: 'https://boxes.example/oauth2/callback?code=X' } } })
+  assert.deepEqual(followed.calls.at(-1), ['location.replace', 'https://boxes.example/oauth2/callback?code=X'])
+  // An authorization id that is not a plain token reaches no Supabase path.
+  for (const id of ['..', '.', '../../user', 'a/b', 'a%2Fb', 'a.b', 'a?b', 'A1 ', '']) {
+    const r = await runPage(`https://approve.boxes.example/oauth/consent?authorization_id=${encodeURIComponent(id)}`, { ...signedIn, ...pending })
+    assert.deepEqual(r.calls.map(c => c[0]), ['createClient'], id)
+    assert.equal(r.text('msg'), 'Open mumbo from its address to sign in.', id)
   }
-  for (const details of [undefined, null, {}, { redirect_url: 5 }]) assert.equal(consentDecision(details, allowed), 'refuse', JSON.stringify(details))
-  assert.equal(consentDecision({ client: { id: 'c1' } }, { clientIds: [], redirectUris: [] }), 'refuse')
+  // Error parameters from the link get fixed text.
+  const failed = await runPage(`${base}&error=server_error&error_description=${encodeURIComponent('Your account is locked. Call +1 555 0100.')}`, { getSession: { data: { session: null } } })
+  assert.equal(failed.text('msg'), 'Sign-in failed. Try again.')
 })
 
 test('the edge serves the same page as deploy/auth-ui (a copy: that file is outside the edge build context)', () => {
