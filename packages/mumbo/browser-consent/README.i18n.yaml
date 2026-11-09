@@ -1,0 +1,52 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/mumbo/browser-consent/README.md
+/:
+  en: c58d39cf37436287
+  zh: 5a9984db3c73d630
+/mumbo-browser-consent:
+  en: 10b70472a26f18fd
+  zh: 8bf2d513f1a4f5af
+/mumbo-browser-consent/summary:
+  en: 5153a04772e6fb40
+  zh: 1da9cf06f8d93dae
+/mumbo-browser-consent/table-of-contents:
+  en: c5e68abca298fcdf
+  zh: 11c1323a0b711dc3
+/mumbo-browser-consent/configuration:
+  en: 07e8b4c8162be83b
+  zh: 1e66ede49c6d2b97
+/mumbo-browser-consent/decisions:
+  en: 84edbfb33364f349
+  zh: 6333a96cce4db9b2
+/mumbo-browser-consent/provider-ownership:
+  en: 4192d8ebb85a461a
+  zh: c59c973edba55bbe
+/mumbo-browser-consent/audit-record:
+  en: 47351309b429792c
+  zh: 708906d11222734d
+/mumbo-browser-consent/composition:
+  en: ab7f755e1505d989
+  zh: ffa3b40ec8edf09a
+/mumbo-browser-consent/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/mumbo-browser-consent/model-experience/denied-browser-write:
+  en: 6c3b0904f6b53d35
+  zh: e781608e00dc3451
+/mumbo-browser-consent/model-experience/denied-browser-write/what-the-model-sees:
+  en: 46a1e3a0bc15bf45
+  zh: aa97dd91615ce90d
+/mumbo-browser-consent/model-experience/denied-browser-write/token-effect:
+  en: 061629b57f8966fb
+  zh: be2c8d57b5f4f7a3
+/mumbo-browser-consent/model-experience/denied-browser-write/kv-cache-effect:
+  en: fb49c87d0cf71ca9
+  zh: 4fdbeac5434f777f
+/mumbo-browser-consent/known-limitations-and-deferred-work:
+  en: 402229f094723947
+  zh: 6889ec2c280d8dcd
+/mumbo-browser-consent/known-limitations-and-deferred-work/dev-note:
+  en: e67f633dc6fe7773
+  zh: e88aeb617ffb74ea

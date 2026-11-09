@@ -4938,6 +4938,28 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@mumbo/box-links -->
 
+<!-- BEGIN GENERATED config-catalog:@mumbo/browser-consent -->
+<a id="mumbobrowser-consent"></a>
+
+## `@mumbo/browser-consent`
+
+- `inject`: `browserUse` · `agents` · `tools` · `systemPrompt` · `workingDirectory`
+- `refs`: [`PlaywrightBrowser`](../packages/experimental/browser-use-playwright-mcp/src/index.ts)
+- `source`: [`packages/mumbo/browser-consent/src/index.ts:56`](../packages/mumbo/browser-consent/src/index.ts)
+
+```ts config-catalog
+/** Consent configuration. */
+export interface Config {
+  /** Playwright MCP provider settings; the plugin mounts the provider with them. */
+  readonly browser: PlaywrightBrowser.Config
+  /** Origins (`https://host[:port]`) where site writes proceed without asking. */
+  readonly allowedSites: string[]
+  /** Milliseconds a write waits for the person's answer before it is denied as unanswered. */
+  readonly approvalTimeoutMs: number
+}
+```
+<!-- END GENERATED config-catalog:@mumbo/browser-consent -->
+
 <!-- BEGIN GENERATED config-catalog:@mumbo/edge-member -->
 <a id="mumboedge-member"></a>
 
