@@ -53,7 +53,7 @@ Files outside the copy changed for S1:
 
 ## S4: person-only settings
 
-Settings changes require a person principal. Written by task A5.
+Settings, Policy and prompts change only in the panel. The router no longer has `orchestrator_settings_save`, `orchestrator_policy_sync` or `orchestrator_prompts_save`, and the `prompt-preview/<id>` resource is gone (`src/app/tools/main.ts`, `src/app/resources.ts`). `SettingsOrigin` still includes `'tool'`, which nothing sends now. Tests save through the panel API; docs 004 and 007 updated.
 
 ## S5: no merge, review marker
 
