@@ -28,14 +28,36 @@ const NODES = {
 }
 const lookupOk = (ids) => Response.json({ data: { nodes: ids.map(i => NODES[i] ?? null) }, ...(ids.every(i => NODES[i]) ? {} : { errors: [{ type: 'NOT_FOUND' }] }) })
 
+const until = async (cond) => { while (!cond()) await new Promise(r => setTimeout(r, 5)) }
+// Projects for the push tests: P1 (callgideon/mumbo) plus three more, each with its own repository.
+const repoOf = (id) => (id === P1 ? 'callgideon/mumbo' : `callgideon/${id}`)
+const addProjects = async (f) => {
+  const others = ['p2', 'p3', 'p4'].map(p => p.repeat(8))
+  for (const id of others) await f.store.putDoc(`project:${id}`, { id, name: id, owner: 'a@x.com', members: ['a@x.com'], createdAt: '2026-11-09T00:00:00Z', repos: [repoOf(id)] })
+  return [P1, ...others]
+}
+const pushAs = (f, id) => {
+  f.state.principal = `project:${id}`
+  return f.call(`github.com/${repoOf(id)}.git/git-receive-pack`, { method: 'POST', body: pkt(`${A} ${B} refs/heads/agent/a\0report-status\n`) + '0000' })
+}
+const sendThenReset = (port, path, afterMs) => {
+  const q = request({ host: '127.0.0.1', port, method: 'POST', path: `/github/${path}`, headers: { 'content-type': 'application/json', 'content-length': '100' } })
+  q.on('error', () => {})  // reset on purpose
+  q.flushHeaders()
+  setTimeout(() => q.destroy(), afterMs)
+}
+
 /**
  * A forwarder behind a local server; project P1 has callgideon/mumbo and the claim's principal is `state.principal`.
  * Node id lookups are answered by `lookup(ids)` and recorded in `lookups`, apart from the forwarded `calls`.
+ * `isHalted` takes `haltMs` and records each principal it is asked about in `haltChecks`; `state.settled` counts
+ * handlers that have returned.
  */
-async function forwarder({ reply = ok, lookup = lookupOk, agentToken = 'AGENT' } = {}) {
+async function forwarder({ reply = ok, lookup = lookupOk, agentToken = 'AGENT', haltMs = 0, pushTimeoutMs } = {}) {
   const store = memoryStore()
   await store.putDoc(`project:${P1}`, { id: P1, name: 'P1', owner: 'a@x.com', members: ['a@x.com'], createdAt: '2026-11-09T00:00:00Z', repos: ['callgideon/mumbo'] })
-  const calls = [], lookups = [], logs = [], halted = new Set(), state = { principal: ME }
+  const calls = [], lookups = [], logs = [], haltChecks = [], halted = new Set(), state = { principal: ME, settled: 0 }
+  const isHalted = async (u) => { haltChecks.push(u); if (haltMs) await new Promise(r => setTimeout(r, haltMs)); return halted.has(u) }
   // Records each call with its body read into a Buffer; `streamed` says the forwarder sent a stream, not a buffer.
   const fetchImpl = async (url, init) => {
     const body = init.body == null ? undefined : Buffer.from(await new Response(init.body).arrayBuffer())
@@ -47,8 +69,8 @@ async function forwarder({ reply = ok, lookup = lookupOk, agentToken = 'AGENT' }
     calls.push({ url, init: { ...init, body }, streamed: init.body instanceof ReadableStream })
     return reply(url, init)
   }
-  const forward = githubForwarder({ store, halt: { isHalted: async (u) => halted.has(u) }, agentToken, fetchImpl, log: (line) => logs.push(JSON.parse(line)) })
-  const server = createServer((req, res) => forward(req, res, { u: state.principal, b: 'b1' }))
+  const forward = githubForwarder({ store, halt: { isHalted }, agentToken, fetchImpl, log: (line) => logs.push(JSON.parse(line)), pushTimeoutMs })
+  const server = createServer((req, res) => forward(req, res, { u: state.principal, b: 'b1' }).finally(() => { state.settled++ }))
   await new Promise(r => server.listen(0, '127.0.0.1', r))
   const port = server.address().port
   const call = (path, { method = 'GET', headers = {}, body } = {}) => new Promise((resolve, reject) => {
@@ -59,7 +81,7 @@ async function forwarder({ reply = ok, lookup = lookupOk, agentToken = 'AGENT' }
     })
     req.on('error', reject); req.end(body)
   })
-  return { call, calls, lookups, logs, halted, state, store, port, close: () => { server.closeAllConnections(); server.close() } }
+  return { call, calls, lookups, logs, haltChecks, halted, state, store, port, close: () => { server.closeAllConnections(); server.close() } }
 }
 
 test('reads: a project repository is read with the agent token; the box token and x-api-key stay behind', async (t) => {
@@ -402,23 +424,60 @@ test('at most 3 buffered pushes per replica: a fourth project\'s push answers 42
   const gate = new Promise(r => { open = r })
   const f = await forwarder({ reply: async (url) => { if (url.endsWith('/git-receive-pack')) await gate; return ok() } })
   t.after(f.close)
-  const projects = [P1, ...['p2', 'p3', 'p4'].map(p => p.repeat(8))]
-  for (const id of projects.slice(1)) await f.store.putDoc(`project:${id}`, { id, name: id, owner: 'a@x.com', members: ['a@x.com'], createdAt: '2026-11-09T00:00:00Z', repos: [`callgideon/${id}`] })
-  const repo = (id) => (id === P1 ? 'callgideon/mumbo' : `callgideon/${id}`)
-  const body = pkt(`${A} ${B} refs/heads/agent/a\0report-status\n`) + '0000'
-  const push = (id) => { f.state.principal = `project:${id}`; return f.call(`github.com/${repo(id)}.git/git-receive-pack`, { method: 'POST', body }) }
+  const projects = await addProjects(f)
   const pending = []
   for (const id of projects.slice(0, 3)) {
-    pending.push(push(id))
-    while (f.calls.length < pending.length) await new Promise(r => setTimeout(r, 5))
+    pending.push(pushAs(f, id))
+    await until(() => f.calls.length === pending.length)
   }
-  const fourth = await push(projects[3])
+  const fourth = await pushAs(f, projects[3])
   assert.equal(fourth.status, 429)
   assert.match(fourth.json().message, /taking 3 other pushes/)
   open()
   for (const p of pending) assert.equal((await p).status, 200)
-  assert.equal((await push(projects[3])).status, 200)
+  assert.equal((await pushAs(f, projects[3])).status, 200)
   assert.equal(f.calls.length, 4)
+})
+
+test('pushes whose clients reset during the checks hold no slot: the same project and another push afterwards', { timeout: 10_000 }, async (t) => {
+  const f = await forwarder({ haltMs: 100 }); t.after(f.close)
+  const projects = await addProjects(f)
+  for (const [i, id] of projects.slice(0, 3).entries()) {
+    f.state.principal = `project:${id}`
+    sendThenReset(f.port, `github.com/${repoOf(id)}.git/git-receive-pack`, 20)  // resets during the 100 ms halt check
+    await until(() => f.haltChecks.length === i + 1)
+  }
+  await until(() => f.state.settled === 3)
+  assert.equal((await pushAs(f, P1)).status, 200, 'the same project')
+  assert.equal((await pushAs(f, projects[3])).status, 200, 'a fourth project, under the replica cap')
+  assert.equal(f.calls.length, 2)
+})
+
+test('a push GitHub does not answer gets 504 after pushTimeoutMs, and its slot frees', { timeout: 10_000 }, async (t) => {
+  let stalls = 1, signal
+  const f = await forwarder({ pushTimeoutMs: 100, reply: (url, init) => {
+    if (!url.endsWith('/git-receive-pack') || stalls-- <= 0) return ok()
+    signal = init.signal
+    return new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason)))
+  } })
+  t.after(f.close)
+  const stalled = await pushAs(f, P1)
+  assert.equal(stalled.status, 504)
+  assert.match(stalled.json().message, /GitHub did not answer the push within 0\.1 s/)
+  assert.equal(signal.reason.name, 'TimeoutError')
+  assert.equal((await pushAs(f, P1)).status, 200, 'the slot is free')
+})
+
+test('a mutation whose client leaves during the node lookup is not forwarded', { timeout: 10_000 }, async (t) => {
+  const f = await forwarder({ lookup: async (ids) => { await new Promise(r => setTimeout(r, 100)); return lookupOk(ids) } })
+  t.after(f.close)
+  const q = request({ host: '127.0.0.1', port: f.port, method: 'POST', path: '/github/api.github.com/graphql', headers: { 'content-type': 'application/json' } })
+  q.on('error', () => {})  // destroyed on purpose
+  q.end(JSON.stringify({ query: 'mutation { addComment(input: {subjectId: "I_1", body: "x"}) { clientMutationId } }' }))
+  await until(() => f.lookups.length === 1)
+  q.destroy()
+  await until(() => f.state.settled === 1)
+  assert.equal(f.calls.length, 0)
 })
 
 test('a client that leaves mid-response cancels the upstream body', { timeout: 10_000 }, async (t) => {

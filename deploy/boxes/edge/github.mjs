@@ -2,7 +2,7 @@
 // codeload.github.com or objects.githubusercontent.com). The box authenticates with its box token, already verified
 // by modelServer; the edge holds the agent token and forwards only what its rules allow (design section 9): reads on
 // the project's repositories, comments and pull requests short of merging or retargeting, and pushes to agent/* only.
-import { Readable, pipeline } from 'node:stream'
+import { Readable, finished, pipeline } from 'node:stream'
 import { Kind, parse, print, valueFromASTUntyped, visit } from 'graphql'
 import { getRepos, isProjectId } from './projects.mjs'
 
@@ -16,6 +16,9 @@ const PUSH_MAX = 256 * 1024 * 1024
 const JSON_MAX = 1024 * 1024
 // Buffered pushes in flight on one replica, any project: 3 × PUSH_MAX = 768 MB of the 2048 MB edge task.
 const MAX_CONCURRENT_PUSHES = 3
+// A push GitHub has not answered within this long is abandoned with 504, freeing its slot: 256 MB at 1 MB/s takes about
+// 4 minutes to send, leaving GitHub as long again to receive and check it.
+const PUSH_TIMEOUT_MS = 10 * 60_000
 // parse() aborts past this many tokens, a few MB of heap; the documents gh and superagent send have a few hundred.
 const GRAPHQL_MAX_TOKENS = 50_000
 // Node ids one request's mutations may name, all resolved in one nodes(ids:) lookup (GitHub takes at most 100).
@@ -48,17 +51,18 @@ const STOPPED = 'stopped by the founder'
 
 /**
  * The GitHub forwarder. Refusals answer 403 (400 for a GraphQL document that does not parse, 413 past a body cap,
- * 415 for GraphQL not sent as application/json, 429 for a second push from a project or past MAX_CONCURRENT_PUSHES) and
- * log one line
+ * 415 for GraphQL not sent as application/json, 429 for a second push from a project or past MAX_CONCURRENT_PUSHES,
+ * 504 for a push GitHub has not answered within `pushTimeoutMs`) and log one line
  * `{ edge: 'github', refused, principal, method, host, path }`. While `halt.isHalted(principal)`, only GET and HEAD,
  * git-upload-pack and GraphQL documents without a mutation pass. Every node id a GraphQL mutation names must resolve,
- * through one `nodes(ids:)` lookup with the agent token, to an object in one of the project's repositories.
- * @param {{ store: object, halt: { isHalted(principal: string): Promise<boolean> }, agentToken: string | undefined, fetchImpl: typeof fetch, log?: (line: string) => void }} deps
- *   `agentToken` unset answers 503 to every request.
+ * through one `nodes(ids:)` lookup with the agent token, to an object in one of the project's repositories. A request
+ * whose client has left is not forwarded, and one in flight is aborted.
+ * @param {{ store: object, halt: { isHalted(principal: string): Promise<boolean> }, agentToken: string | undefined, fetchImpl: typeof fetch, log?: (line: string) => void, pushTimeoutMs?: number }} deps
+ *   `agentToken` unset answers 503 to every request; `pushTimeoutMs` defaults to PUSH_TIMEOUT_MS.
  * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, claim: { u: string, b: string }) => Promise<void>}
  *   handles one request; `claim` is the verified box token (`u` the principal, `b` the box id).
  */
-export function githubForwarder({ store, halt, agentToken, fetchImpl, log = console.log }) {
+export function githubForwarder({ store, halt, agentToken, fetchImpl, log = console.log, pushTimeoutMs = PUSH_TIMEOUT_MS }) {
   // Principals with a receive-pack in flight on this replica: one buffered push each.
   const pushing = new Set()
 
@@ -75,6 +79,9 @@ export function githubForwarder({ store, halt, agentToken, fetchImpl, log = cons
   }
 
   return async (req, res, claim) => {
+    // Registered before any await: finished() also fires for a response that closed before this handler ran.
+    const left = new AbortController()
+    finished(res, () => left.abort())
     const { method } = req
     const url = new URL(req.url, 'http://edge')
     const [, , host, ...segs] = url.pathname.split('/')
@@ -133,8 +140,11 @@ export function githubForwarder({ store, halt, agentToken, fetchImpl, log = cons
       if (await halt.isHalted(claim.u)) return refuse(STOPPED)
       if (pushing.has(claim.u)) return refuse('another push from this project is in progress', 429)
       if (pushing.size >= MAX_CONCURRENT_PUSHES) return refuse(`the edge is taking ${MAX_CONCURRENT_PUSHES} other pushes; try again shortly`, 429)
+      // The client may have left during the awaits above. Otherwise `left` has not fired yet (it fires only once the
+      // response has closed), so its abort frees the slot whether the push ends, fails, times out or is abandoned.
+      if (res.destroyed || left.signal.aborted) return
       pushing.add(claim.u)
-      res.once('close', () => pushing.delete(claim.u))
+      left.signal.addEventListener('abort', () => pushing.delete(claim.u), { once: true })
       body = await readBody(req, PUSH_MAX)
       if (!body) return refuse('body over 256 MB', 413)
       const why = body.length === 4 && body.toString('latin1') === '0000' ? undefined : pushRefusal(body)
@@ -143,10 +153,18 @@ export function githubForwarder({ store, halt, agentToken, fetchImpl, log = cons
 
     if (host === 'api.github.com') headers.authorization = `token ${agentToken}`
     else if (host === 'github.com') headers.authorization = `Basic ${Buffer.from(`x-access-token:${agentToken}`).toString('base64')}`
-    // A client that leaves aborts the upstream request, so an abandoned push frees its buffer with its slot.
-    const left = new AbortController()
-    res.once('close', () => left.abort())
-    const upstream = await fetchImpl(`https://${host}${path}${url.search}`, { method, headers, body, duplex: 'half', redirect: 'manual', signal: left.signal })
+    // A client that left during the checks gets nothing forwarded; one that leaves later aborts the upstream request,
+    // so an abandoned push frees its buffer with its slot.
+    if (res.destroyed) return
+    const signal = gitService === 'git-receive-pack' ? AbortSignal.any([left.signal, AbortSignal.timeout(pushTimeoutMs)]) : left.signal
+    let upstream
+    try {
+      upstream = await fetchImpl(`https://${host}${path}${url.search}`, { method, headers, body, duplex: 'half', redirect: 'manual', signal })
+    } catch (e) {
+      if (res.destroyed) return  // the client left and aborted the request: no one to answer
+      if (e?.name === 'TimeoutError') return refuse(`GitHub did not answer the push within ${pushTimeoutMs / 1000} s`, 504)
+      throw e
+    }
     const out = {}
     for (const [k, v] of upstream.headers) if (!RESPONSE_DROP.has(k)) out[k] = v
     res.writeHead(upstream.status, out)
