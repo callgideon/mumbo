@@ -1,5 +1,6 @@
-// Shared state for edge replicas: box records, per-user locks, daily budgets, the sweep leader, and small documents
-// and sets (projects and their members).
+// Shared state for edge replicas: box records, per-user locks, daily budgets and token counters, the sweep and poll
+// leaders, and small documents and sets (projects, their members and repositories, approvals). TTLs are milliseconds,
+// except increment's seconds.
 // memoryStore serves tests and a single replica; redisStore serves production (ElastiCache, TLS).
 import { randomUUID } from 'node:crypto'
 
@@ -25,6 +26,8 @@ export function memoryStore() {
     async deleteBox(id) { boxes.delete(id) },
     async listBoxes() { return [...boxes].map(([id, b]) => ({ id, ...b })) },
     async increment(key, ttlSeconds) { const n = (counters.get(key) ?? 0) + 1; counters.set(key, n); void ttlSeconds; return n },
+    async incrementBy(key, n, ttlMs) { const v = (counters.get(key) ?? 0) + n; counters.set(key, v); void ttlMs; return v },
+    async getCount(key) { return counters.get(key) ?? 0 },
     async lease(key, ttlMs) { return take(key, ttlMs) },
     async release(key) { leases.delete(key) },
     async withLock(key, ttlMs, fn) {
@@ -36,7 +39,9 @@ export function memoryStore() {
     },
     async getDoc(key) { const v = docs.get(key); return v && structuredClone(v) },
     async putDoc(key, value) { docs.set(key, structuredClone(value)) },
+    async deleteDoc(key) { docs.delete(key) },
     async addToSet(key, member) { if (!sets.has(key)) sets.set(key, new Set()); sets.get(key).add(member) },
+    async removeFromSet(key, member) { sets.get(key)?.delete(member) },
     async setMembers(key) { return [...(sets.get(key) ?? [])] },
     async close() {},
   }
@@ -69,6 +74,12 @@ export function redisStore(client) {
       const [n] = await client.multi().incr(key).expire(key, ttlSeconds).exec()
       return Number(n)
     },
+    /** Adds n and returns the new total; the key expires ttlMs after its last increment. */
+    async incrementBy(key, n, ttlMs) {
+      const [v] = await client.multi().incrBy(key, n).pExpire(key, ttlMs).exec()
+      return Number(v)
+    },
+    async getCount(key) { return Number(await client.get(key) ?? 0) },
     async lease(key, ttlMs) { return (await client.set(key, randomUUID(), { NX: true, PX: ttlMs })) === 'OK' },
     async release(key) { await client.del(key) },
     async withLock(key, ttlMs, fn) {
@@ -81,7 +92,9 @@ export function redisStore(client) {
     },
     async getDoc(key) { const v = await client.get(`doc:${key}`); return v ? JSON.parse(v) : undefined },
     async putDoc(key, value) { await client.set(`doc:${key}`, JSON.stringify(value)) },
+    async deleteDoc(key) { await client.del(`doc:${key}`) },
     async addToSet(key, member) { await client.sAdd(`set:${key}`, member) },
+    async removeFromSet(key, member) { await client.sRem(`set:${key}`, member) },
     async setMembers(key) { return client.sMembers(`set:${key}`) },
     async close() { await client.quit() },
   }

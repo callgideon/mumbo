@@ -1,6 +1,8 @@
 // Shared projects (deploy/boxes/ASSISTANT.md, option B). A project has its own box, owned by the principal
 // `project:<id>` and running dsh as the coordinator; its members are signed-in users. Membership lives in the edge
-// store: doc `project:<id>` = { id, name, owner, members, createdAt } and set `projects:<email>` = ids.
+// store: doc `project:<id>` = { id, name, owner, members, createdAt, repos? } and set `projects:<email>` = ids.
+// `repos` (`owner/name`) are the GitHub repositories the project may use through the edge; set `projects:with-repos`
+// lists every project that has one, for the approvals poller.
 import { randomBytes, randomUUID } from 'node:crypto'
 
 const fail = (status, message) => Object.assign(new Error(message), { status })
@@ -8,11 +10,35 @@ const fail = (status, message) => Object.assign(new Error(message), { status })
 export const projectId = () => randomBytes(8).toString('hex')
 export const isProjectId = (id) => typeof id === 'string' && /^[a-z0-9]{16}$/.test(id)
 export const projectPrincipal = (id) => `project:${id}`
+const projectDoc = (store, id) => (isProjectId(id) ? store.getDoc(`project:${id}`) : undefined)
+
+/** The project's repositories (`owner/name`); [] when it has none or does not exist. */
+export const getRepos = async (store, projectId) => (await projectDoc(store, projectId))?.repos ?? []
+/** Gives the project a repository, once (names compare case-insensitively, as on GitHub). Fails with 404 for an
+ *  unknown project and 400 for a name that is not `owner/name`. */
+export async function addRepo(store, projectId, repo) {
+  if (typeof repo !== 'string' || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) throw fail(400, `${repo} is not a repository name (owner/name)`)
+  const p = await projectDoc(store, projectId)
+  if (!p) throw fail(404, `no project ${projectId}`)
+  const repos = p.repos ?? []
+  if (!repos.some(r => r.toLowerCase() === repo.toLowerCase())) await store.putDoc(`project:${projectId}`, { ...p, repos: [...repos, repo] })
+  await store.addToSet('projects:with-repos', projectId)
+}
+/** Ids of the projects that have at least one repository. */
+export const projectsWithRepos = (store) => store.setMembers('projects:with-repos')
+/** The project's owners (one today); [] for an unknown project. */
+export const ownersOf = async (store, projectId) => { const p = await projectDoc(store, projectId); return p ? [p.owner] : [] }
+/** Ids of the projects the email owns (not those it is only a member of). */
+export async function projectsOwnedBy(store, email) {
+  const out = []
+  for (const id of await store.setMembers(`projects:${email}`)) if ((await projectDoc(store, id))?.owner === email) out.push(id)
+  return out
+}
 
 /** Project records and membership. `admitted(email)` is the edge allowlist; a member must pass it too. */
 export function projects({ store, admitted, log = console.log }) {
   const say = (fields) => log(JSON.stringify({ edge: 'project', ...fields }))
-  const get = (id) => (isProjectId(id) ? store.getDoc(`project:${id}`) : undefined)
+  const get = (id) => projectDoc(store, id)
   return {
     get,
     async isMember(email, id) { return (await get(id))?.members.includes(email) ?? false },

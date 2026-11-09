@@ -1,0 +1,5 @@
+#!/bin/sh
+# Placeholder until B8: the gh wrapper (/root/.mumbo/bin/gh in project boxes), which will send gh through the box-local
+# GitHub proxy. The edge reads this file at start and hands it to startScript as boxFiles.gh.
+echo 'mumbo: the gh wrapper is not installed yet' >&2
+exit 1

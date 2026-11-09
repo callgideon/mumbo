@@ -13,6 +13,8 @@ const proj = projects({ store, admitted: (e) => e.endsWith('@mumbo.si'), log: ()
 const user = `e2e-${Date.now()}@mumbo.si`
 const { id } = await proj.create(user, 'e2e project')
 const server = userServer({ cfg, box, projects: proj, log: (l) => console.log('  log', l) })
+// The router serves only the public host, and fetch cannot set Host.
+for (const event of ['request', 'upgrade']) server.prependListener(event, (req) => { req.headers.host = cfg.publicHost })
 await new Promise(r => server.listen(0, '127.0.0.1', r))
 const base = `http://127.0.0.1:${server.address().port}`
 const H = { 'x-forwarded-email': user, accept: 'text/html' }
