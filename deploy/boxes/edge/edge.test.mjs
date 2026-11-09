@@ -269,6 +269,24 @@ test('an unexpected throw answers 500 or closes the upgrade, and the log has the
   }
 })
 
+test('a client reset while an upgrade waits on its box destroys the socket and does not throw out of the edge', async () => {
+  let waiting
+  const ensured = new Promise(r => { waiting = r })
+  const s = userServer({ cfg, box: { ensure: () => { waiting(); return new Promise(() => {}) }, touch() {}, forget() {} }, log: () => {} })
+  let socket
+  s.on('upgrade', (_, sock) => { socket = sock })
+  const port = await listen(s)
+  const client = request({ host: '127.0.0.1', port, path: '/', headers: { host: cfg.publicHost, connection: 'Upgrade', upgrade: 'websocket', origin: `https://${cfg.publicHost}`, 'x-forwarded-email': 'a@x.com' } })
+  const ended = new Promise(r => { client.on('error', (e) => r(e.code)); client.on('upgrade', () => r('upgraded')); client.on('response', () => r('response')) })
+  client.end()
+  await ensured
+  // An error with no listener would throw here, as it would out of the edge process.
+  assert.doesNotThrow(() => socket.emit('error', Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' })))
+  assert.ok(socket.destroyed)
+  assert.equal(await ended, 'ECONNRESET')
+  s.close()
+})
+
 test('locks serialise per key and are released after errors', async () => {
   const store = memoryStore(); const order = []
   await Promise.all([1, 2, 3].map(i => store.withLock('u', 5_000, async () => { order.push(`in${i}`); await new Promise(r => setTimeout(r, 10)); order.push(`out${i}`) })))

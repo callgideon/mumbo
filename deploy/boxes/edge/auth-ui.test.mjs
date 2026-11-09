@@ -179,7 +179,8 @@ test('a planted session in the URL is never used: fragment tokens and foreign co
   // A ?code= without this browser's PKCE verifier: supabase-js refuses it, and the page says where the link works.
   const foreign = await runPage(`${base}&code=C#${tokens}`, { ...signedOut, exchangeCodeForSession: { data: { session: null }, error: { code: 'pkce_code_verifier_not_found' } } })
   assert.deepEqual(foreign.calls.slice(1), [['history.replaceState', base], ['exchangeCodeForSession', 'C'], ['getSession']])
-  assert.match(foreign.text('msg'), /works only in the browser that asked for it/)
+  // Opening the link used its one-time code, so the page asks for a new email rather than that code.
+  assert.equal(foreign.text('msg'), 'This link was opened in a different browser from the one that asked for it. Go back to that browser and request a new email.')
   // This browser's own Google or link sign-in: the code is exchanged after the address is cleaned, then consent runs.
   const own = await runPage(`${base}&code=C`, {
     getSession: { data: { session: { user: { email: 'a@x.com' } } } },

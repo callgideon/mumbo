@@ -255,7 +255,12 @@ resource "aws_iam_role_policy" "edge" {
 resource "aws_iam_role_policy" "exec_edge" {
   role = aws_iam_role.exec.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [
-    { Effect = "Allow", Action = "ssm:GetParameters", Resource = distinct([for p in values(merge(local.proxy_ssm, local.edge_ssm)) : "${local.ssm}/${p}"]) },
+    { Effect = "Allow", Action = "ssm:GetParameters", Resource = distinct(concat(
+      [for p in values(merge(local.proxy_ssm, local.edge_ssm)) : "${local.ssm}/${p}"],
+      # Remove after the plain-env revision is steady (RUNBOOK.md): edge task definitions before it read SUPABASE_ANON_KEY
+      # from this parameter, and a circuit-breaker rollback to one must still start.
+      ["${local.ssm}/prod/supabase-anon-key"],
+    )) },
     { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = data.aws_secretsmanager_secret.github_app.arn },
   ] })
 }

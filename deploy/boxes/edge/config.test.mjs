@@ -6,7 +6,7 @@ import { config } from './edge.mjs'
 
 const base = { PUBLIC_HOST: 'boxes.mumbo.si', LLM_HOST: 'llm.boxes.mumbo.si', BACKUP_BUCKET: 'backups' }
 const M1 = ['APPROVE_HOST', 'GITHUB_AGENT_LOGIN', 'REQUIRED_CHECKS', 'DAILY_TOKENS_USER', 'DAILY_TOKENS_PROJECT', 'BOX_TEMPLATE', 'PROJECT_TEMPLATE',
-  'AUDIT_PREFIX', 'GITHUB_AGENT_TOKEN', 'GITHUB_APP_ID', 'GITHUB_APP_KEY', 'GITHUB_MERGE_TOKEN', 'NTFY_TOPIC', 'SIGNIN_COOKIE']
+  'AUDIT_PREFIX', 'GITHUB_AGENT_TOKEN', 'GITHUB_APP_ID', 'GITHUB_APP_KEY', 'GITHUB_MERGE_TOKEN', 'NTFY_TOPIC', 'SIGNIN_COOKIE', 'SUPABASE_URL', 'MUMBO_OAUTH_REDIRECT_URIS']
 /** config() with exactly `base` plus `vars` set among the variables it reads here. */
 function configWith(vars = {}) {
   const all = { ...Object.fromEntries(M1.map(k => [k, undefined])), ...base, ...vars }
@@ -52,4 +52,16 @@ test('PAGE_AFTER_MS: default 3000, and a value below 1000 or not a number stops 
   assert.equal(configWith().pageAfterMs, 3000)
   assert.equal(configWith({ PAGE_AFTER_MS: '5000' }).pageAfterMs, 5000)
   for (const bad of ['999', 'soon', '-1', 'Infinity', '']) assert.throws(() => configWith({ PAGE_AFTER_MS: bad }), /PAGE_AFTER_MS/, bad)
+})
+
+test('MUMBO_OAUTH_REDIRECT_URIS: with SUPABASE_URL, exact origin-and-path URIs only; anything else stops the edge', () => {
+  const sb = { SUPABASE_URL: 'https://ref.supabase.co' }
+  assert.equal(configWith({ MUMBO_OAUTH_REDIRECT_URIS: 'not read' }).oauthRedirectUris, undefined)
+  assert.deepEqual(configWith({ ...sb, MUMBO_OAUTH_REDIRECT_URIS: ' https://boxes.mumbo.si/oauth2/callback , https://approve.app.mumbo.si/cb,' }).oauthRedirectUris,
+    ['https://boxes.mumbo.si/oauth2/callback', 'https://approve.app.mumbo.si/cb'])
+  for (const bad of [undefined, '', ' , ', 'https://boxes.mumbo.si', 'https://boxes.mumbo.si/oauth2/callback?x=1', 'https://boxes.mumbo.si/oauth2/callback?', 'https://boxes.mumbo.si/oauth2/callback#x',
+    'https://Boxes.mumbo.si/oauth2/callback', 'https://boxes.mumbo.si:443/oauth2/callback', 'https://boxes.mumbo.si/a/../oauth2/callback', '/oauth2/callback', 'not a url',
+    'https://boxes.mumbo.si/oauth2/callback,https://boxes.mumbo.si/x?y']) {
+    assert.throws(() => configWith({ ...sb, MUMBO_OAUTH_REDIRECT_URIS: bad }), /MUMBO_OAUTH_REDIRECT_URIS/, String(bad))
+  }
 })

@@ -201,7 +201,7 @@ $('back').addEventListener('click', () => {
   if (data.session) return authorize()
   if (exchange.error) {
     return say(exchange.error.code === 'pkce_code_verifier_not_found'
-      ? 'A sign-in link works only in the browser that asked for it. Enter the code from the email there instead.' : 'Sign-in failed. Try again.', true)
+      ? 'This link was opened in a different browser from the one that asked for it. Go back to that browser and request a new email.' : 'Sign-in failed. Try again.', true)
   }
   // Fixed text: the error parameters come from whoever wrote the link.
   if (query.has('error') || query.has('error_description')) say('Sign-in failed. Try again.', true)

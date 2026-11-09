@@ -38,6 +38,14 @@ const cookieName = (name, fallback) => {
   if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(value)) throw new Error(`edge: ${name} must be a cookie name (token characters only), not ${JSON.stringify(value)}`)
   return value
 }
+/** Comma-separated redirect URIs, each exactly an origin and path (the form the sign-in page compares, consent.js toMumbo):
+ *  no query, fragment, default port, uppercase or missing path. None, or any other entry, fails at start. */
+const redirectUris = (name) => {
+  const uris = env(name).split(',').map(s => s.trim()).filter(Boolean)
+  const exact = (v) => { try { const u = new URL(v); return `${u.origin}${u.pathname}` === v } catch { return false } }
+  if (uris.length === 0 || !uris.every(exact)) throw new Error(`edge: ${name} must list origin-and-path URIs such as https://boxes.mumbo.si/oauth2/callback, not ${JSON.stringify(env(name))}`)
+  return uris
+}
 export const config = () => ({
   publicHost: env('PUBLIC_HOST'),
   projectDomain: hostname('PROJECT_DOMAIN', 'boxes.mumbo.si'),  // project boxes are served at p-<16 hex>.<this>
@@ -76,6 +84,7 @@ export const config = () => ({
   // The sign-in page (authUi) is served only when set; SUPABASE_ANON_KEY, MUMBO_OAUTH_CLIENT_IDS and
   // MUMBO_OAUTH_REDIRECT_URIS (comma-separated, exact) are then required.
   supabaseUrl: optional('SUPABASE_URL'),
+  oauthRedirectUris: optional('SUPABASE_URL') ? redirectUris('MUMBO_OAUTH_REDIRECT_URIS') : undefined,
 })
 
 /** Address or @domain allowlist; an empty list admits nobody. */
@@ -765,7 +774,12 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log
     failed(req, e)
     if (!res.headersSent) page(res, 500, 'Something went wrong. Reload to try again.', false); else res.destroy()
   }))
-  server.on('upgrade', (req, socket, head) => onUpgrade(req, socket, head).catch((e) => { failed(req, e); socket.destroy() }))
+  server.on('upgrade', (req, socket, head) => {
+    // The server leaves an upgrade's socket without an error listener; a client reset while the handler waits on
+    // identity or a box would otherwise throw out of the process.
+    socket.on('error', () => socket.destroy())
+    onUpgrade(req, socket, head).catch((e) => { failed(req, e); socket.destroy() })
+  })
   async function onRequest(req, res) {
     if (skippedSignin(req)) return json(res, 400, { error: 'bad request' })
     // The edge's own pages; a box's response replaces these through noFraming.
@@ -980,7 +994,7 @@ async function main() {
     return v
   }
   const signin = cfg.supabaseUrl ? authUi({ html: authFile('index.html'), supabaseJs: authFile('supabase.js'), consentJs: authFile('consent.js'), supabaseUrl: cfg.supabaseUrl,
-    anonKey: env('SUPABASE_ANON_KEY'), clientIds: values('MUMBO_OAUTH_CLIENT_IDS'), redirectUris: values('MUMBO_OAUTH_REDIRECT_URIS') }) : undefined
+    anonKey: env('SUPABASE_ANON_KEY'), clientIds: values('MUMBO_OAUTH_CLIENT_IDS'), redirectUris: cfg.oauthRedirectUris }) : undefined
   userServer({ cfg, box, verifyAlb, projects: proj, approve, signin }).listen(8080, listenHost, () => console.log(`edge: users on ${listenHost}:8080`))
   const { children, mcpServer } = await import('./sandboxes.mjs')
   const mcp = mcpServer({ ops: children({ e2b, cfg }), projects: proj, relay, projectDomain: cfg.projectDomain, claimOf: (info) => verifyBox(edgeKey, String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })

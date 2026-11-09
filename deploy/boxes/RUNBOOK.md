@@ -48,6 +48,8 @@ Postgres is busy or short of space. Storage grows automatically up to 500 GB; CP
 ### Ship a new edge
 Commit, `docker build` `deploy/boxes/edge` and push to `mumbo-boxes/edge:<commit>`, set `edge_tag`, apply.
 
+Pending after the edge revision that reads `SUPABASE_ANON_KEY` as a plain value is steady (deployment completed, no rollback): delete the `prod/supabase-anon-key` entry from `aws_iam_role_policy.exec_edge` in `prod/edge.tf` and apply. Until then the exec role keeps that grant, so a circuit-breaker rollback to an older edge task definition, which reads the key from SSM, can still start.
+
 ### Rebuild the box template
 `node deploy/boxes/edge/template.mjs <mumbo web image>` with `E2B_API_URL`, `E2B_SANDBOX_URL`, `E2B_API_KEY` (team key from the `mumbo-boxes/e2b` secret) and `ECR_PASSWORD`. From outside the VPC, tunnel through a node with SSM port forwarding to `api.boxes.internal:3000` and `sandbox.boxes.internal:3002`; the internal NLB admits :3002 only from the edge, so add a temporary rule for the node security group and remove it afterwards. A new template reaches a user when their box is next created.
 
