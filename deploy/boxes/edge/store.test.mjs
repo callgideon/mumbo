@@ -22,10 +22,11 @@ async function contract(store) {
 
 test('memory store: incrementBy, getCount, deleteDoc, removeFromSet', () => contract(memoryStore()))
 
-test('redis store: incrementBy, getCount, deleteDoc, removeFromSet, and incrementBy sets a millisecond expiry', { skip: !process.env.REDIS_URL && 'set REDIS_URL to run' }, async () => {
+// Flushes the database: only a disposable Redis named by TEST_REDIS_URL, never REDIS_URL (the edge's, as offboarding exports it).
+test('redis store: incrementBy, getCount, deleteDoc, removeFromSet, and incrementBy sets a millisecond expiry', { skip: !process.env.TEST_REDIS_URL && 'set TEST_REDIS_URL to a disposable Redis to run' }, async () => {
   const { createClient } = await import('redis')
   // Database 1: node --test runs files in parallel, and edge.test.mjs flushes database 0.
-  const client = createClient({ url: process.env.REDIS_URL, database: 1 }); await client.connect(); await client.flushDb()
+  const client = createClient({ url: process.env.TEST_REDIS_URL, database: 1 }); await client.connect(); await client.flushDb()
   const store = redisStore(client)
   try {
     await contract(store)

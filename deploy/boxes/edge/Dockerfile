@@ -11,7 +11,8 @@ RUN cd /tmp && npm pack @supabase/supabase-js@2.118.0 --silent && tar xzf supaba
 COPY auth-ui/index.html auth-ui/consent.js ./auth-ui/
 COPY *.mjs ./
 COPY box/ ./box/
-# Every module edge.mjs imports must be in the image: a missing one crashes the task at start and ECS rolls back.
-RUN node -e "import('./edge.mjs').then(() => {}, (e) => { console.error(e.message); process.exit(1) })"
+# Every module and file main() loads must be in the image: a missing one crashes the task at start and ECS rolls back.
+# The check (edge.mjs imageCheck) imports every module, the dynamically imported ones too, and reads runtimeFiles().
+RUN node edge.mjs --check
 USER node
 CMD ["node", "edge.mjs"]

@@ -3,7 +3,7 @@
 // :8080 is reached only through oauth2-proxy (X-Forwarded-Email is trusted); :8081 serves the model host and
 // accepts only box tokens. Design, review fixes and failure handling: deploy/boxes/DESIGN.md.
 import { createHash, createHmac, createVerify, timingSafeEqual } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { createServer, request as httpRequest } from 'node:http'
 import { Readable, pipeline } from 'node:stream'
 import { ownersOf } from './projects.mjs'
@@ -1117,6 +1117,30 @@ export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, mcp, g
   }
 }
 
+/** Files main() reads, by name, beside this module: the box/ texts for project boxes and the auth-ui/ sign-in page. */
+export const runtimeFiles = () => ({
+  proxy: new URL('./box/github-local-proxy.mjs', import.meta.url),
+  gh: new URL('./box/gh', import.meta.url),
+  html: new URL('./auth-ui/index.html', import.meta.url),
+  supabaseJs: new URL('./auth-ui/supabase.js', import.meta.url),
+  consentJs: new URL('./auth-ui/consent.js', import.meta.url),
+})
+
+/**
+ * `node edge.mjs --check`, run by the Dockerfile: rejects unless this directory holds everything main() loads. It imports
+ * every top-level .mjs except tests and e2e scripts, then every module those name in a dynamic import (main() loads its
+ * own only after start), and reads every runtimeFiles() entry.
+ * @returns {Promise<string[]>} the modules imported.
+ */
+export async function imageCheck() {
+  const own = readdirSync(new URL('.', import.meta.url)).filter(f => f.endsWith('.mjs') && !/\.(test|e2e)\.mjs$/.test(f)).map(f => `./${f}`)
+  const dynamic = own.flatMap(m => [...readFileSync(new URL(m, import.meta.url), 'utf8').matchAll(/\bimport\('([^']+)'\)/g)].map(x => x[1]))
+  const all = [...new Set([...own, ...dynamic])]
+  for (const m of all) await import(m)
+  for (const u of Object.values(runtimeFiles())) readFileSync(u)
+  return all
+}
+
 // ---- process wiring: secrets come from SSM / Secrets Manager through the host's instance role.
 async function main() {
   const cfg = config()
@@ -1144,8 +1168,10 @@ async function main() {
     try { await s3.send(new HeadObjectCommand({ Bucket: cfg.bucket, Key: key })) } catch (e) { if (e.name === 'NotFound') return undefined; throw e }
     return getSignedUrl(s3, new GetObjectCommand({ Bucket: cfg.bucket, Key: key }), { expiresIn: 900 })
   }
+  const files = runtimeFiles()
+  const read = (name) => readFileSync(files[name], 'utf8')
   // For project boxes' start script; read here so a missing file stops the edge at start.
-  const boxFiles = { proxy: readFileSync(new URL('./box/github-local-proxy.mjs', import.meta.url), 'utf8'), gh: readFileSync(new URL('./box/gh', import.meta.url), 'utf8') }
+  const boxFiles = { proxy: read('proxy'), gh: read('gh') }
   const box = boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFiles })
   const verifyAlb = process.env.ALB_ARN ? albIdentity({ albArn: env('ALB_ARN'), region }) : undefined
   const listenHost = env('LISTEN_HOST', '127.0.0.1')  // beyond loopback only behind an ALB, where identity is the ALB token
@@ -1186,13 +1212,12 @@ async function main() {
     setInterval(() => store.lease('approvals:poll', 55_000).then(won => won && approvals.poll()).catch(e => console.error('edge: approvals poll', e.message)), 60_000).unref()
   }
 
-  const authFile = (name) => readFileSync(new URL(`./auth-ui/${name}`, import.meta.url), 'utf8')
   const values = (name) => {
     const v = env(name).split(',').map(s => s.trim()).filter(Boolean)
     if (v.length === 0) throw new Error(`edge: ${name} must name at least one value`)
     return v
   }
-  const signin = cfg.supabaseUrl ? authUi({ html: authFile('index.html'), supabaseJs: authFile('supabase.js'), consentJs: authFile('consent.js'), supabaseUrl: cfg.supabaseUrl,
+  const signin = cfg.supabaseUrl ? authUi({ html: read('html'), supabaseJs: read('supabaseJs'), consentJs: read('consentJs'), supabaseUrl: cfg.supabaseUrl,
     anonKey: env('SUPABASE_ANON_KEY'), clientIds: values('MUMBO_OAUTH_CLIENT_IDS'), redirectUris: cfg.oauthRedirectUris }) : undefined
   userServer({ cfg, box, verifyAlb, projects: proj, approve, signin }).listen(8080, listenHost, () => console.log(`edge: users on ${listenHost}:8080`))
   const { children, mcpServer } = await import('./sandboxes.mjs')
@@ -1201,4 +1226,7 @@ async function main() {
     .listen(8081, modelHost, () => console.log(`edge: model host on ${modelHost}:8081`))
 }
 
-if (process.argv[1] === new URL(import.meta.url).pathname) main().catch((e) => { console.error('edge: fatal', e); process.exit(1) })
+if (process.argv[1] === new URL(import.meta.url).pathname) {
+  const run = process.argv[2] === '--check' ? imageCheck().then(m => console.log(`edge: image check passed (${m.length} modules)`)) : main()
+  run.catch((e) => { console.error('edge: fatal', e); process.exit(1) })
+}

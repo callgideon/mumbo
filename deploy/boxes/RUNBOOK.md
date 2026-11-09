@@ -13,6 +13,9 @@ An idle box could not be paused. E2B's own timeout pauses it 15 minutes later re
 ### edge-errors
 Unhandled edge errors (one log line each, with path and user). Read the lines; a burst after a deploy means roll back `edge_tag` in `terraform.tfvars` and apply.
 
+### edge-deploy-failed
+Not a CloudWatch alarm: the EventBridge rule `mumbo-boxes-edge-deploy-failed` sends ECS's `SERVICE_DEPLOYMENT_FAILED` event for the edge service to the alarm topic as raw event JSON (`detail.reason` names the cause). The deployment circuit breaker stopped the rollout and rolls the service back to the previous task definition, so the edge keeps serving the old image while `edge_tag` in `prod/terraform.tfvars` names the failed one. Handle it as in "Ship a new edge", step 6.
+
 ### edge-dropped-create
 A replica died while restoring a new box; the box was killed and the next visit restores from the backup again. One is harmless. Several mean edge tasks are being killed mid-request: check `tasks-edge`.
 
@@ -21,6 +24,17 @@ The mumbo-bot App's installation refused a token because it has not accepted a p
 
 ### api-node-unhealthy
 E2B marked a node unhealthy. Check the node: `aws ssm send-command` with `systemctl status e2b-orchestrator` and `journalctl -u e2b-orchestrator -n 100`. If it does not recover, replace it: `aws autoscaling terminate-instance-in-auto-scaling-group --instance-id <id> --no-should-decrement-desired-capacity`. Termination pauses its boxes first (`mumbo-drain`) and the boxes resume on other nodes.
+
+### node-disk
+The fullest node's root volume is over 75% used (CloudWatch agent `disk_used_percent` on `/`, namespace `mumbo/boxes/nodes`). Act before it fills: a node refuses a pause unless its disk can take the box's snapshot and keep 4096 MiB free (`PAUSE_ADMISSION_DISK_HEADROOM_MIB` in `prod/nodes/node.sh.tftpl`), so a full node can neither pause idle boxes nor drain. Find the node and what fills it:
+```sh
+aws cloudwatch get-metric-data --start-time $(date -u -d '-15 min' +%FT%TZ) --end-time $(date -u +%FT%TZ) --query 'MetricDataResults[].[Label,Values[0]]' --output text \
+  --metric-data-queries '[{"Id":"d","Period":300,"Expression":"SELECT MAX(disk_used_percent) FROM SCHEMA(\"mumbo/boxes/nodes\", AutoScalingGroupName, InstanceId, device, fstype, path) WHERE path = '"'/'"' GROUP BY InstanceId"}]'
+CMD=$(aws ssm send-command --instance-ids <instance id> --document-name AWS-RunShellScript --query Command.CommandId --output text \
+  --parameters 'commands=["df -h /","du -xsh /orchestrator/* /var/lib/e2b/build-cache /var/log 2>/dev/null | sort -h | tail"]')
+aws ssm get-command-invocation --command-id $CMD --instance-id <instance id> --query StandardOutputContent --output text
+```
+(`date -d` is GNU date; on macOS use `date -u -v-15M +%FT%TZ`.) `/orchestrator` holds the running boxes' disks and memory, the template cache and snapshots in transit; `/var/lib/e2b/build-cache` holds template build layers. Replace the node while it can still drain: `aws autoscaling terminate-instance-in-auto-scaling-group --instance-id <id> --no-should-decrement-desired-capacity`; its boxes pause and resume on the other nodes, and the replacement starts empty. If every node fills, the volume is too small for the boxes per node: raise `volume_size` ("Node disk size").
 
 ### edge-5xx
 More than 20 edge 5xx in 5 minutes. 503s are capacity or a box starting; 502s are the edge or a box not answering. Check `unhealthy-*`, `tasks-*` and `nodes-below-min` first.
@@ -63,10 +77,8 @@ The edge also gets `MAX_RUNNING_BOXES = 12 * node_count - 2`, read only by edge 
    aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names mumbo-boxes-nodes \
      --query 'AutoScalingGroups[0].[DesiredCapacity,length(Instances[?LifecycleState==`InService`])]'
    ```
-   The edge rollout must show one `PRIMARY` deployment, `COMPLETED`, on the new task definition revision:
+   The edge rollout must end on the new task definition revision: run `edge_rollout` ("Ship a new edge", step 4) and continue only when it returns 0. Then read the cap the revision carries:
    ```sh
-   aws ecs describe-services --cluster mumbo-boxes-e2b --services edge \
-     --query 'services[0].deployments[].[status,taskDefinition,rolloutState,runningCount]'
    aws ecs describe-task-definition --task-definition mumbo-boxes-edge \
      --query "taskDefinition.containerDefinitions[?name=='edge'].environment[] | [?starts_with(name, 'MAX_RUNNING')]"
    ```
@@ -140,12 +152,103 @@ Deleting a box and its backup does not remove the person's access. A domain-admi
 6. The edge drops its Redis record of a killed box on its next sweep. The person's chats and files live in the box and its backup, which step 4 removes. Not removed: the audit records of approvals (`audit/approvals/` in the backup bucket, kept on purpose), and pause snapshots of a box that was paused. Those are objects named by an E2B build UUID (`<uuid>/memfile`, `rootfs.ext4`) in the templates bucket (`mumbo-boxes-templates-<account id>`), not by the person; the bucket's lifecycle rule expires only noncurrent versions (14 days), so a current snapshot object does not expire. Whether E2B deletes those objects when a sandbox is killed is not verified; treat them as retained until the boxes session confirms or adds a cleanup.
 
 ### Ship a new edge
-Commit, `docker build` `deploy/boxes/edge` and push to `mumbo-boxes/edge:<commit>`, set `edge_tag`, apply.
+Run from the repository root. The image is built from `git archive` of the commit, so it holds exactly that commit's `deploy/boxes/edge` (no uncommitted edit or untracked file) and matches its tag; `.dockerignore` keeps tests, `offboard.mjs`, `node_modules` and `.env` out. The build runs `node edge.mjs --check` (`imageCheck` in `edge/edge.mjs`), which fails when a module, a dynamically imported module or a file `main()` reads (`runtimeFiles()`) is missing from the image.
+1. Build and push (ECR tags are immutable, so a pushed tag always names that commit's image):
+   ```sh
+   C=$(git rev-parse --short=10 <commit>)
+   REG=$(aws sts get-caller-identity --query Account --output text).dkr.ecr.us-east-1.amazonaws.com
+   B=$(mktemp -d) && git archive "$C" deploy/boxes/edge | tar -x -C "$B"
+   aws ecr get-login-password --region us-east-1 | docker login -u AWS --password-stdin "$REG"
+   docker build --platform linux/amd64 -t "$REG/mumbo-boxes/edge:$C" "$B/deploy/boxes/edge" && docker push "$REG/mumbo-boxes/edge:$C"
+   rm -rf "$B"
+   ```
+2. Set `edge_tag = "<C>"` in `deploy/boxes/prod/terraform.tfvars` and run `terraform -chdir=deploy/boxes/prod plan`. Expect `aws_ecs_task_definition.edge` (replaced) and `aws_ecs_service.edge` (updated); read every other line.
+3. Apply. The apply returns once ECS has the new task definition, before any task of it runs.
+4. Wait for the rollout. Define `edge_rollout` once per shell (bash or zsh):
+   ```sh
+   edge_rollout() {
+     td=$(aws ecs describe-task-definition --task-definition mumbo-boxes-edge --query taskDefinition.taskDefinitionArn --output text) || return 1
+     echo "edge_rollout: waiting for $td"
+     while sleep 15; do
+       d=$(aws ecs describe-services --cluster mumbo-boxes-e2b --services edge \
+         --query 'services[0].deployments[].[status,taskDefinition,rolloutState,runningCount]' --output text) || return 1
+       echo "$d"
+       echo "$d" | awk -v td="$td" '$3 == "FAILED" || ($1 == "PRIMARY" && $3 == "COMPLETED" && $2 != td) {bad = 1} END {exit !bad}' \
+         && { echo "edge_rollout: ROLLED BACK, the edge is not on $td"; return 1; }
+       echo "$d" | awk -v td="$td" '{n++} $1 == "PRIMARY" && $2 == td && $3 == "COMPLETED" {ok++} END {exit !(n == 1 && ok == 1)}' \
+         && { echo "edge_rollout: done on $td"; return 0; }
+     done
+   }
+   edge_rollout
+   ```
+   `td` is the newest active revision of family `mumbo-boxes-edge`, the one the apply registered. Each line printed is a deployment: status, task definition, rollout state, running tasks. It returns 0 when exactly one deployment is left, `PRIMARY` and `COMPLETED` on `td`, and 1 on a rollback: a `FAILED` deployment, or a `PRIMARY` deployment `COMPLETED` on an older revision. Stop it with Ctrl-C if it neither completes nor fails within 30 minutes, and read the events of step 6.
+5. Only after it returns 0, commit `terraform.tfvars` (`deploy(boxes): ship edge <C>`).
+6. Rollback (`edge_rollout` returned 1, or the `edge-deploy-failed` notification): the circuit breaker put the previous revision back. Read why; a task that crashes at start logs its error as its last lines:
+   ```sh
+   aws ecs describe-services --cluster mumbo-boxes-e2b --services edge --query 'services[0].events[:5].[createdAt,message]' --output text
+   aws logs tail /mumbo-boxes/edge --since 30m | tail -50
+   ```
+   Then set `edge_tag` back to the tag of the revision that runs, so a later apply does not deploy the failed image again, apply, and run `edge_rollout`:
+   ```sh
+   aws ecs describe-task-definition --task-definition "$(aws ecs describe-services --cluster mumbo-boxes-e2b --services edge --query 'services[0].taskDefinition' --output text)" \
+     --query "taskDefinition.containerDefinitions[?name=='edge'].image" --output text
+   ```
+   Fix the cause in a new commit and ship that from step 1.
 
 Pending after the edge revision that reads `SUPABASE_ANON_KEY` as a plain value is steady (deployment completed, no rollback): delete the `prod/supabase-anon-key` entry from `aws_iam_role_policy.exec_edge` in `prod/edge.tf` and apply. Until then the exec role keeps that grant, so a circuit-breaker rollback to an older edge task definition, which reads the key from SSM, can still start.
 
 ### Rebuild the box template
-`node deploy/boxes/edge/template.mjs <mumbo web image>` with `E2B_API_URL`, `E2B_SANDBOX_URL`, `E2B_API_KEY` (team key from the `mumbo-boxes/e2b` secret) and `ECR_PASSWORD`. From outside the VPC, tunnel through a node with SSM port forwarding to `api.boxes.internal:3000` and `sandbox.boxes.internal:3002`; the internal NLB admits :3002 only from the edge, so add a temporary rule for the node security group and remove it afterwards. A new template reaches a user when their box is next created.
+`node deploy/boxes/edge/template.mjs <mumbo web image>` with `E2B_API_URL`, `E2B_SANDBOX_URL`, `E2B_API_KEY` (team key from the `mumbo-boxes/e2b` secret) and `ECR_PASSWORD`. The script ends with a smoke box whose line reads `app clean 2 <MiB free on />`; it exits 1 when the free space is below `MIN_AVAIL_MB` (default 9216, 9 GiB). The new build is already the template's by then, so on a failure fix the cause (usually `box_step_disk`, "Changing E2B limits") and rebuild before boxes are created from it. From outside the VPC, tunnel through a node with SSM port forwarding to `api.boxes.internal:3000` and `sandbox.boxes.internal:3002`; the internal NLB admits :3002 only from the edge, so add a temporary rule for the node security group and remove it afterwards. A new template reaches a user when their box is next created.
+
+### Changing E2B limits (box disk, RAM)
+`box_ram`, `box_free_disk` and `box_step_disk` in `prod/control.tf` reach E2B only through the setup task, which assigns them to the team limits (`setup/setup.sh`: `max_ram_mb`, `disk_mb = box_free_disk + box_step_disk`, `default_free_disk_size_mb = box_free_disk`). They reach a box only through a template built afterwards: a box keeps the disk of the build it was created from. Run from the repository root, with the tunnels and variables of "Rebuild the box template" for step 4.
+1. The setup image is tagged `<e2b_sha>-<hash of setup/Dockerfile and setup/setup.sh>`. Check whether that image exists:
+   ```sh
+   SHA=$(sed -n 's/^e2b_sha *= *"\([0-9a-f]*\)".*/\1/p' deploy/boxes/prod/terraform.tfvars)
+   TAG=$SHA-$(cat deploy/boxes/prod/setup/Dockerfile deploy/boxes/prod/setup/setup.sh | sha256sum | cut -c1-7)
+   aws ecr describe-images --repository-name mumbo-boxes/e2b-setup --image-ids imageTag=$TAG >/dev/null 2>&1 && echo "have $TAG" || echo "build $TAG"
+   ```
+   On `build`, check out `$SHA` in the fork and run `deploy/boxes/prod/setup/build.sh <fork checkout>`; it must print `$SHA`. It also rebuilds the api, client-proxy and node binaries of the same commit: the images report `already pushed`, and the node binaries in S3 are replaced by a build of the same commit, which nodes read only at boot.
+2. `terraform -chdir=deploy/boxes/prod apply -target=aws_ecs_task_definition.setup`. The plan must replace only that task definition (its environment, and its image when setup.sh changed).
+3. `deploy/boxes/prod/setup/run.sh`. It must exit 0; its log ends with one `setup: team|<team id>|disk_mb|…|default_free_disk_size_mb|…|max_ram_mb|…` line per team, showing the values from `control.tf`, then `setup: done`.
+4. Rebuild every template. List them with the size each was built with:
+   ```sh
+   curl -s -H "X-API-Key: $E2B_API_KEY" "$E2B_API_URL/templates" | jq -r '.[] | [.aliases[0], .memoryMB, .cpuCount, .diskSizeMB] | @tsv'
+   ```
+   For each, `node deploy/boxes/edge/template.mjs <image> <alias> <memoryMB> <cpuCount>`, with the web image the template was last built from (HANDOFF-impl.md names it; a limits change is no occasion to ship a new web image). Each must pass its smoke check. Listed again, each template's `diskSizeMB` has grown by the `disk_mb` change.
+5. Move existing boxes to the new builds ("Moving a box to a new template build").
+
+**How `box_step_disk` was sized.** E2B gives a build `disk_mb` of free space after its own provisioning and before the template's steps (`template.mjs` `runCmd`), and the steps' installs come out of it. They were measured on 2026-11-09 by running them in `node:24-bookworm` (the web image's base, `deploy/Dockerfile`) after the web image's and E2B's provisioning packages, comparing `du -sxm /` before and after: mumbo-box (desktop packages and Chromium) 1007 MiB, mumbo-project (git, gh) 41 MiB, mumbo-child no steps. `box_step_disk = 2048` adds about 1 GiB of margin for package growth, so a mumbo-box build leaves about 11 GiB free. After any build the real figure is `disk_mb` minus the free MiB of the smoke line; raise `box_step_disk` when it nears 2048 or when `template.mjs` gains steps.
+
+### Moving a box to a new template build
+A box keeps its rootfs, so it keeps the disk and the software of the build it was created from. List boxes and their disk sizes (with the variables of "Rebuild the box template"; one page holds 100):
+```sh
+curl -s -H "X-API-Key: $E2B_API_KEY" "$E2B_API_URL/v2/sandboxes?state=running,paused&limit=100" \
+  | jq -r '.[] | [.sandboxID, .alias, .diskSizeMB, (.metadata.user // ("child of " + .metadata.owner)), .startedAt] | @tsv'
+```
+A box (metadata `user`: an email, or `project:<id>` for a project box) whose `diskSizeMB` is below its template's in the templates listing is on an older build. Children (metadata `owner`) are short-lived; leave them. The edge recreates a missing box from its backup at the next visit, so moving a box is: back it up, kill it, let the next visit restore it.
+1. Ask the person (for a project box, its members) to stop working in it: no agent turn running, nothing unsaved. Then wait for the box's next backup; the sweep backs up every `BACKUP_MINUTES` (10, the default, in production). The newest line must be later than the moment they stopped:
+   ```sh
+   aws logs filter-log-events --log-group-name /mumbo-boxes/edge --start-time $(( ($(date +%s) - 1800) * 1000 )) \
+     --filter-pattern '{ $.msg = "backup" && $.box = "<sandbox id>" }' --query 'events[].message' --output text
+   ```
+2. Kill it, with the E2B tunnel and variables of "Offboarding a person" step 4: `(cd deploy/boxes/edge && node -e "import('e2b').then(({Sandbox})=>Sandbox.kill('<sandbox id>'))")`.
+3. The next visit (a project box: a member opening the project) creates a box from the current template and restores the backup into it; the edge drops its record of the old box on its next sweep. In the listing, the new box has the template's `diskSizeMB`.
+
+A move keeps what the backup holds (`backupCommand` in `edge/edge.mjs`): `/root/.dsh` (Sessions, settings, schedules; SQLite as consistent copies), `/root/projects` without `node_modules`, and `/home/browser/profile` without caches. It loses everything else: work after the last backup, running processes (terminals, dev servers, an agent turn in progress), `node_modules` (reinstall), whatever was installed or written outside those paths (`apt`, `pip` or global `npm` installs, `/root` dotfiles such as `.gitconfig` or `.ssh`, `/tmp`), and browser caches. The sandbox id changes.
+
+### Node disk size
+`volume_size` in `prod/nodes.tf` (500 GiB gp3; IOPS and throughput are set separately) is part of the launch template, so only nodes launched afterwards get it; running nodes keep their volume. To roll it out:
+1. Apply the change alone. The plan must show only `aws_launch_template.nodes` (`volume_size`) and `aws_autoscaling_group.nodes` (its launch template version); no node changes.
+2. Replace every node through blue/green: "Adding nodes" step 5 with `e2b_sha` unchanged, `node_count = 2N`, then N, where N is the current `node_count`.
+3. Check that every node in service has the new size:
+   ```sh
+   IDS=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names mumbo-boxes-nodes \
+     --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`].InstanceId' --output text | tr '\t' ',')
+   aws ec2 describe-volumes --filters Name=attachment.instance-id,Values=$IDS \
+     --query 'Volumes[].[Attachments[0].InstanceId,Size,VolumeType,Iops,Throughput]' --output text
+   ```
+   Every line must show the new size, `gp3`, 6000 and 400.
 
 ### Model routes
 Boxes reach models only through the edge model host (`llm.` host, port 8081), with their box token as the API key; every route checks the token, the source address (`BOX_EGRESS_IPS`), the founder's stop switch, the daily request budget (`DAILY_MODEL_REQUESTS`) and the daily token budget (`DAILY_TOKENS_USER`, `DAILY_TOKENS_PROJECT`; usage read from each response), and swaps the token for the edge's own key.
