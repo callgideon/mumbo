@@ -1,0 +1,93 @@
+/**
+ * The project-box overlay in a real Loader composition: the composed rows are rendered to a cordis.yml and booted through
+ * the Loader, so `!!js` expressions resolve against the entry context, and the real `Config` schema and `machineOf` judge
+ * the `dsh-superagent` row. Only the Runtime and the services it needs are stubbed.
+ */
+
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { Context } from '@deepseek-ai/cordis'
+import Group from '@deepseek-ai/cordis-plugin-group'
+import Include from '@deepseek-ai/cordis-plugin-include'
+import Loader from '@deepseek-ai/cordis-plugin-loader'
+import { loadOverlayPatches, renderConfigDump } from '@deepseek-ai/dsh-app-boot'
+import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { Config, machineOf, type DeploymentConfig } from '../../../packages/mumbo/superagent/src/deployment.ts'
+
+const root = resolve(import.meta.dirname, '../../..')
+let context: Context | undefined
+let dir: string | undefined
+
+afterEach(async () => {
+  await context?.fiber.dispose()
+  context = undefined
+  if (dir !== undefined) rmSync(dir, { recursive: true, force: true })
+  dir = undefined
+  vi.unstubAllEnvs()
+})
+
+/** Boot the project overlay's rows; returns the machine settings `dsh-superagent` resolved, or the failure that stopped it. */
+async function boot(panelAdmins: string | undefined): Promise<{ home: string; stateDir?: string; panelAdmins?: unknown; rejection?: string }> {
+  dir = mkdtempSync(join(tmpdir(), 'dsh-project-loader-'))
+  const home = join(dir, 'home')
+  vi.stubEnv('DSH_HOME', home)
+  if (panelAdmins === undefined) vi.stubEnv('MUMBO_PANEL_ADMINS', '')
+  else vi.stubEnv('MUMBO_PANEL_ADMINS', panelAdmins)
+  vi.stubEnv('MUMBO_MEMBER_KEY', 'unused')
+  const base = join(dir, 'base.yml')
+  writeFileSync(base, '[]\n')
+  const dump = renderConfigDump('dsh', base, [
+    { label: 'mumbo-project.overlay.yml', patches: loadOverlayPatches('dsh', join(root, 'deploy/mumbo-project.overlay.yml')) },
+  ], () => {})
+  const config = join(dir, 'cordis.yml')
+  writeFileSync(config, dump)
+
+  const seen: { stateDir?: string; panelAdmins?: unknown; rejection?: string } = {}
+  const superagent = {
+    name: 'dsh-superagent',
+    Config,
+    apply(_ctx: Context, resolved: DeploymentConfig) {
+      seen.stateDir = resolved.stateDir
+      seen.panelAdmins = (resolved as { panelAdmins?: unknown }).panelAdmins
+      try {
+        machineOf(resolved)
+      } catch (error) {
+        // The plugin refuses keys its Config does not list; kept so the test reports it after the other assertions.
+        seen.rejection = String(error)
+      }
+    },
+  }
+  context = new Context()
+  context.provide('dshHomePath', dshHomePath)
+  await context.plugin(Loader)
+  const loader = context.loader
+  loader.builtins.group = Group
+  loader.builtins.include = class FixtureInclude extends Include {
+    override import(specifier: string, getOuterStack?: () => string[]): unknown {
+      if (specifier.startsWith('cordis:')) return super.import(specifier, getOuterStack)
+      return specifier === '@mumbo/superagent' ? superagent : { apply() {} }
+    }
+  }
+  await loader.create({ name: 'cordis:include', config: { path: pathToFileURL(config).href } })
+  await loader.await()
+  const entry = [...loader.entries()].find(candidate => candidate.options.id === 'dsh-superagent')
+  expect(entry, 'dsh-superagent row').toBeDefined()
+  expect(entry!.fiber, 'dsh-superagent started').toBeDefined()
+  return { home, ...seen }
+}
+
+describe('project-box overlay in the real Loader', () => {
+  it.each([
+    ['unset', undefined, []],
+    ['a comma list', 'a@x.io,b@x.io', ['a@x.io', 'b@x.io']],
+  ])('loads dsh-superagent under DSH_HOME with panelAdmins from %s', { timeout: 60_000 }, async (_name, env, expected) => {
+    const result = await boot(env)
+    expect(result.stateDir).toBe(join(result.home, 'superagent'))
+    expect(result.panelAdmins).toEqual(expected)
+    // Passes once A3 adds `panelAdmins` to the plugin Config; until then `machineOf` rejects the key.
+    expect(result.rejection).toBeUndefined()
+  })
+})
