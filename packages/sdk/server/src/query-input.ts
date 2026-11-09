@@ -5,7 +5,7 @@ import { builtinCommandName, resolveCommand } from '@deepseek-ai/dsh-commands/bu
 
 /**
  * Recognize compact, explicit permission changes, plan, and goal by their definition identities.
- * Canonical and Chinese aliases follow the effective registered name; unrelated exact names remain prompts.
+ * Canonical names and aliases follow the effective registered name; unrelated exact names remain prompts.
  * Other text remains a prompt.
  * @param text - original input; the caller preserves it on the ordinary-prompt path.
  * @param commands - exact receiving Agent's current command descriptors.
