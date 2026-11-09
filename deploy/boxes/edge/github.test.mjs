@@ -12,13 +12,39 @@ const ME = `project:${P1}`
 const A = 'a'.repeat(40), B = 'b'.repeat(40), Z = '0'.repeat(40)
 const pkt = (s) => (s.length + 4).toString(16).padStart(4, '0') + s
 const ok = () => new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
+// GitHub's answer to the forwarder's nodes(ids:) lookup: a type outside its fragments comes back with __typename only.
+const mumbo = { nameWithOwner: 'callgideon/mumbo' }
+const NODES = {
+  R_1: { __typename: 'Repository', nameWithOwner: 'CallGideon/Mumbo' },
+  PR_1: { __typename: 'PullRequest', repository: mumbo },
+  I_1: { __typename: 'Issue', repository: mumbo },
+  IC_1: { __typename: 'IssueComment', repository: mumbo },
+  RC_1: { __typename: 'PullRequestReviewComment', repository: mumbo },
+  R_OTHER: { __typename: 'Repository', nameWithOwner: 'callgideon/other' },
+  I_OTHER: { __typename: 'Issue', repository: { nameWithOwner: 'callgideon/other' } },
+  U_1: { __typename: 'User' },
+}
+const lookupOk = (ids) => Response.json({ data: { nodes: ids.map(i => NODES[i] ?? null) }, ...(ids.every(i => NODES[i]) ? {} : { errors: [{ type: 'NOT_FOUND' }] }) })
 
-/** A forwarder behind a local server; project P1 has callgideon/mumbo and the claim's principal is `state.principal`. */
-async function forwarder({ reply = ok, agentToken = 'AGENT' } = {}) {
+/**
+ * A forwarder behind a local server; project P1 has callgideon/mumbo and the claim's principal is `state.principal`.
+ * Node id lookups are answered by `lookup(ids)` and recorded in `lookups`, apart from the forwarded `calls`.
+ */
+async function forwarder({ reply = ok, lookup = lookupOk, agentToken = 'AGENT' } = {}) {
   const store = memoryStore()
   await store.putDoc(`project:${P1}`, { id: P1, name: 'P1', owner: 'a@x.com', members: ['a@x.com'], createdAt: '2026-11-09T00:00:00Z', repos: ['callgideon/mumbo'] })
-  const calls = [], logs = [], halted = new Set(), state = { principal: ME }
-  const fetchImpl = async (url, init) => { calls.push({ url, init }); return reply(url, init) }
+  const calls = [], lookups = [], logs = [], halted = new Set(), state = { principal: ME }
+  // Records each call with its body read into a Buffer; `streamed` says the forwarder sent a stream, not a buffer.
+  const fetchImpl = async (url, init) => {
+    const body = init.body == null ? undefined : Buffer.from(await new Response(init.body).arrayBuffer())
+    const gql = url === 'https://api.github.com/graphql' ? JSON.parse(body) : undefined
+    if (gql?.query.startsWith('query($ids: [ID!]!) { nodes(ids: $ids)')) {
+      lookups.push({ ids: gql.variables.ids, authorization: init.headers.authorization })
+      return lookup(gql.variables.ids)
+    }
+    calls.push({ url, init: { ...init, body }, streamed: init.body instanceof ReadableStream })
+    return reply(url, init)
+  }
   const forward = githubForwarder({ store, halt: { isHalted: async (u) => halted.has(u) }, agentToken, fetchImpl, log: (line) => logs.push(JSON.parse(line)) })
   const server = createServer((req, res) => forward(req, res, { u: state.principal, b: 'b1' }))
   await new Promise(r => server.listen(0, '127.0.0.1', r))
@@ -31,7 +57,7 @@ async function forwarder({ reply = ok, agentToken = 'AGENT' } = {}) {
     })
     req.on('error', reject); req.end(body)
   })
-  return { call, calls, logs, halted, state, port, close: () => { server.closeAllConnections(); server.close() } }
+  return { call, calls, lookups, logs, halted, state, port, close: () => { server.closeAllConnections(); server.close() } }
 }
 
 test('reads: a project repository is read with the agent token; the box token and x-api-key stay behind', async (t) => {
@@ -149,16 +175,25 @@ test('GraphQL: listed mutations by field name only, no fragments, every operatio
     ['mutation { createCommitOnBranch(input: {}) { clientMutationId } }'],
     ['mutation { addComment(input: {subjectId: "I_1", body: "x"}) { clientMutationId } __typename }'],
     ['subscription { addComment(input: {subjectId: "I_1", body: "x"}) { clientMutationId } }'],
-    ['mutation { createPullRequest('],
+    // Reopening: updatePullRequest may set state only to CLOSED, inline, in variables or in a variable's default.
+    ['mutation { updatePullRequest(input: {pullRequestId: "PR_1", state: OPEN}) { clientMutationId } }'],
+    ['mutation($i: UpdatePullRequestInput!) { updatePullRequest(input: $i) { clientMutationId } }', { i: { pullRequestId: 'PR_1', state: 'OPEN' } }],
+    ['mutation($s: PullRequestUpdateState) { updatePullRequest(input: {pullRequestId: "PR_1", state: $s}) { clientMutationId } }', { s: 'OPEN' }],
+    ['mutation($i: UpdatePullRequestInput = {pullRequestId: "PR_1", state: OPEN}) { updatePullRequest(input: $i) { clientMutationId } }'],
   ]
   for (const [query, variables, operationName] of refused) {
     const r = await gql(query, variables, operationName)
     assert.equal(r.status, 403, query)
     assert.match(r.json().errors[0].message, /^Mumbo edge refused POST \/graphql: /, query)
   }
-  for (const body of ['[{"query":"{ viewer { login } }"}]', 'nope', '{"query":1}', 'null']) {
-    assert.equal((await f.call('api.github.com/graphql', { method: 'POST', headers: { 'content-type': 'application/json' }, body })).status, 403, body)
+  const post = (body) => f.call('api.github.com/graphql', { method: 'POST', headers: { 'content-type': 'application/json' }, body })
+  // variables as a JSON string would reach GitHub unread: the escape hides baseRefName from a text search.
+  const hidden = String.raw`{"query":"mutation($i: UpdatePullRequestInput!){updatePullRequest(input:$i){clientMutationId}}","variables":"{\"i\":{\"pullRequestId\":\"PR_1\",\"baseRef\\u004eame\":\"dev\"}}"}`
+  assert.equal(typeof JSON.parse(hidden).variables, 'string')
+  for (const body of [hidden, '{"query":"{ viewer { login } }","variables":[]}', '{"query":"{ viewer { login } }","variables":1}', '{"query":"{ viewer { login } }","operationName":1}', '[{"query":"{ viewer { login } }"}]', 'nope', '{"query":1}', 'null']) {
+    assert.equal((await post(body)).status, 403, body)
   }
+  assert.equal((await post('{"query":"mutation { createPullRequest("}')).status, 400, 'a query that does not parse')
   for (const type of ['text/plain', 'application/graphql', 'application/x-www-form-urlencoded', '']) {
     const r = await gql('{ viewer { login } }', undefined, undefined, type)
     assert.equal(r.status, 415, type)
@@ -175,6 +210,72 @@ test('GraphQL: listed mutations by field name only, no fragments, every operatio
   assert.equal((await gql('{ viewer { login } }')).status, 200)
   assert.equal((await gql('mutation { updatePullRequest(input: {pullRequestId: "PR_1", title: "t"}) { clientMutationId } markPullRequestReadyForReview(input: {pullRequestId: "PR_1"}) { clientMutationId } }')).status, 200)
   assert.equal((await gql('{ viewer { login } }', undefined, undefined, 'Application/JSON')).status, 200)
+  assert.equal((await post('{"query":"{ viewer { login } }","variables":null,"operationName":null}')).status, 200)
+  assert.equal((await gql('mutation { updatePullRequest(input: {pullRequestId: "PR_1", state: CLOSED}) { clientMutationId } }')).status, 200)
+  assert.equal((await gql('mutation($i: UpdatePullRequestInput!) { updatePullRequest(input: $i) { clientMutationId } }', { i: { pullRequestId: 'PR_1', state: 'CLOSED' } })).status, 200)
+})
+
+test('GraphQL mutations stay in the project repositories: every node id, inline or in variables, resolves there', async (t) => {
+  const f = await forwarder(); t.after(f.close)
+  const gql = (query, variables) => f.call('api.github.com/graphql', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query, variables }) })
+  const comment = (subject) => `mutation { addComment(input: {subjectId: "${subject}", body: "x"}) { clientMutationId } }`
+  const byVariable = 'mutation($i: AddCommentInput!) { addComment(input: $i) { clientMutationId } }'
+  for (const [why, query, variables] of [
+    ['addComment on another repository\'s issue', comment('I_OTHER')],
+    ['createPullRequest in another repository', 'mutation { createPullRequest(input: {repositoryId: "R_OTHER", baseRefName: "main", headRefName: "agent/a", title: "t"}) { clientMutationId } }'],
+    ['a head repository elsewhere', 'mutation { createPullRequest(input: {repositoryId: "R_1", headRepositoryId: "R_OTHER", baseRefName: "main", headRefName: "agent/a", title: "t"}) { clientMutationId } }'],
+    ['an id passed through variables', byVariable, { i: { subjectId: 'I_OTHER', body: 'x' } }],
+    ['an id in a variable default', 'mutation($s: ID = "I_OTHER") { addComment(input: {subjectId: $s, body: "x"}) { clientMutationId } }'],
+    ['one of two mutations elsewhere', `mutation { a: addComment(input: {subjectId: "I_1", body: "x"}) { clientMutationId } b: addComment(input: {subjectId: "I_OTHER", body: "x"}) { clientMutationId } }`],
+    ['a node type outside the list (User)', comment('U_1')],
+    ['a reviewer by user id', 'mutation { requestReviews(input: {pullRequestId: "PR_1", userIds: ["U_1"]}) { clientMutationId } }'],
+    ['an id that does not resolve', comment('NOPE')],
+  ]) {
+    const r = await gql(query, variables)
+    assert.equal(r.status, 403, why)
+    assert.match(r.json().errors[0].message, /is not in this project's repositories/, why)
+  }
+  assert.equal(f.calls.length, 0)
+  const looked = f.lookups.length
+  for (const [why, query, variables] of [
+    ['a mutation with no node id', 'mutation { addComment(input: {body: "x"}) { clientMutationId } }'],
+    ['a mutation with no input', 'mutation { markPullRequestReadyForReview { clientMutationId } }'],
+    ['an input key that is neither a known scalar nor an id', 'mutation { addComment(input: {subjectId: "I_1", body: "x", subject: "I_OTHER"}) { clientMutationId } }'],
+    ['an id key holding an object', byVariable, { i: { subjectId: { id: 'I_1' }, body: 'x' } }],
+    ['an argument besides input', 'mutation { addComment(input: {subjectId: "I_1", body: "x"}, extra: 1) { clientMutationId } }'],
+    ['more than 50 node ids', `mutation { updatePullRequest(input: {pullRequestId: "PR_1", labelIds: [${Array.from({ length: 50 }, (_, i) => `"L_${i}"`).join(', ')}]}) { clientMutationId } }`],
+  ]) assert.equal((await gql(query, variables)).status, 403, why)
+  assert.equal(f.lookups.length, looked, 'refused before any lookup')
+
+  assert.equal((await gql(byVariable, { i: { subjectId: 'I_1', body: 'x', clientMutationId: 'c1' } })).status, 200)
+  assert.deepEqual(f.lookups.at(-1), { ids: ['I_1'], authorization: 'token AGENT' })
+  assert.equal((await gql('mutation { a: updateIssueComment(input: {id: "IC_1", body: "x"}) { clientMutationId } b: addReaction(input: {subjectId: "RC_1", content: EYES}) { clientMutationId } c: createPullRequest(input: {repositoryId: "R_1", baseRefName: "main", headRefName: "agent/a", title: "t"}) { clientMutationId } d: addComment(input: {subjectId: "PR_1", body: "x"}) { clientMutationId } }')).status, 200)
+  assert.deepEqual(f.lookups.at(-1).ids, ['IC_1', 'RC_1', 'R_1', 'PR_1'], 'one lookup for every id in the document')
+  const reads = f.lookups.length
+  assert.equal((await gql('{ repository(owner: "callgideon", name: "other") { id } }')).status, 200, 'reads stay unscoped')
+  assert.equal(f.lookups.length, reads)
+  assert.equal(f.calls.length, 3)
+
+  const down = await forwarder({ lookup: () => new Response('busy', { status: 502 }) }); t.after(down.close)
+  assert.equal((await down.call('api.github.com/graphql', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: comment('I_1') }) })).status, 502)
+  assert.equal(down.calls.length, 0, 'a failed lookup forwards nothing')
+})
+
+test('JSON bodies stop at 1 MiB and GraphQL documents at 50000 tokens, so one request cannot exhaust the edge', { timeout: 10_000 }, async (t) => {
+  const f = await forwarder(); t.after(f.close)
+  const json = { 'content-type': 'application/json' }
+  const pad = (n) => JSON.stringify({ query: '{ viewer { login } }', pad: 'x'.repeat(n) })
+  const fits = pad(1024 * 1024 - pad(0).length)
+  assert.equal(Buffer.byteLength(fits), 1024 * 1024)
+  assert.equal((await f.call('api.github.com/graphql', { method: 'POST', headers: json, body: fits })).status, 200)
+  const over = await f.call('api.github.com/graphql', { method: 'POST', headers: json, body: pad(1024 * 1024 - pad(0).length + 1) })
+  assert.equal(over.status, 413)
+  assert.equal(over.headers.connection, 'close')
+  assert.equal((await f.call('api.github.com/repos/callgideon/mumbo/issues/5/comments', { method: 'POST', headers: json, body: JSON.stringify({ body: 'x'.repeat(1024 * 1024) }) })).status, 413)
+  const tokens = await f.call('api.github.com/graphql', { method: 'POST', headers: json, body: JSON.stringify({ query: `{ ${'a '.repeat(50_000)}}` }) })
+  assert.equal(tokens.status, 400)
+  assert.match(tokens.json().errors[0].message, /50000 tokens/)
+  assert.equal(f.calls.length, 1)
 })
 
 test('git: a push updates refs/heads/agent/* only, unencoded; the probe, fetches and ref adverts pass', async (t) => {
@@ -212,6 +313,8 @@ test('git: a push updates refs/heads/agent/* only, unencoded; the probe, fetches
   assert.equal((await f.call('github.com/callgideon/mumbo/git-upload-pack', { method: 'POST', headers: { 'content-type': 'application/x-git-upload-pack-request', 'content-encoding': 'gzip', 'git-protocol': 'version=2' }, body: want })).status, 200)
   assert.equal(f.calls.at(-1).url, 'https://github.com/callgideon/mumbo/git-upload-pack')
   assert.deepEqual(Buffer.from(f.calls.at(-1).init.body), want)
+  assert.equal(f.calls.at(-1).streamed, true, 'a fetch request is streamed, never buffered')
+  assert.equal(f.calls[0].streamed, false, 'a push is buffered for its checks')
   assert.equal(f.calls.at(-1).init.headers['content-encoding'], 'gzip', 'git gzips larger fetch requests')
   assert.equal(f.calls.at(-1).init.headers['git-protocol'], 'version=2')
   assert.equal((await f.call('github.com/callgideon/other/git-upload-pack', { method: 'POST', body: want })).status, 403)
@@ -229,6 +332,38 @@ test('a body declared over 256 MB answers 413 without being read', { timeout: 10
   })
   assert.equal(status, 413)
   assert.equal(f.calls.length, 0)
+})
+
+test('one push at a time per project: a second concurrent push answers 429, and the slot frees when the first ends', { timeout: 10_000 }, async (t) => {
+  let open
+  const gate = new Promise(r => { open = r })
+  const f = await forwarder({ reply: async (url) => { if (url.endsWith('/git-receive-pack')) await gate; return ok() } })
+  t.after(f.close)
+  const body = pkt(`${A} ${B} refs/heads/agent/a\0report-status\n`) + '0000'
+  const push = () => f.call('github.com/callgideon/mumbo.git/git-receive-pack', { method: 'POST', body })
+  const first = push()
+  while (f.calls.length === 0) await new Promise(r => setTimeout(r, 5))
+  const second = await push()
+  assert.equal(second.status, 429)
+  assert.match(second.json().message, /another push/)
+  assert.equal((await f.call('api.github.com/repos/callgideon/mumbo/pulls')).status, 200, 'other requests are not held up')
+  open()
+  assert.equal((await first).status, 200)
+  assert.equal((await push()).status, 200)
+  assert.equal(f.calls.filter(c => c.url.endsWith('/git-receive-pack')).length, 2)
+})
+
+test('a client that leaves mid-response cancels the upstream body', { timeout: 10_000 }, async (t) => {
+  let cancelled
+  const done = new Promise(r => { cancelled = r })
+  const f = await forwarder({ reply: () => new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('first')) }, cancel: () => cancelled() })) })
+  t.after(f.close)
+  await new Promise((resolve) => {
+    const req = request({ host: '127.0.0.1', port: f.port, path: '/github/codeload.github.com/callgideon/mumbo/tar.gz/refs/heads/main' }, (res) => res.once('data', () => { req.destroy(); resolve() }))
+    req.on('error', () => {})  // destroyed on purpose
+    req.end()
+  })
+  await done
 })
 
 test('caller and stop switch: only project principals; a halted project reads, fetches and queries but writes nothing', async (t) => {

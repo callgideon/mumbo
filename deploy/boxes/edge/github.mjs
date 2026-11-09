@@ -2,15 +2,22 @@
 // codeload.github.com or objects.githubusercontent.com). The box authenticates with its box token, already verified
 // by modelServer; the edge holds the agent token and forwards only what its rules allow (design section 9): reads on
 // the project's repositories, comments and pull requests short of merging or retargeting, and pushes to agent/* only.
-import { Readable } from 'node:stream'
-import { Kind, parse, print } from 'graphql'
+import { Readable, pipeline } from 'node:stream'
+import { Kind, parse, print, valueFromASTUntyped } from 'graphql'
 import { getRepos, isProjectId } from './projects.mjs'
 
 // content-length is left to fetch, which frames the body actually sent (GraphQL and pull request edits are re-serialized).
 const REQUEST_HEADERS = ['accept', 'content-type', 'user-agent', 'x-github-api-version', 'git-protocol']
 // The set modelServer drops: fetch has decoded the body, the edge frames its own reply, and GitHub sets no box cookies.
 const RESPONSE_DROP = new Set(['content-encoding', 'content-length', 'transfer-encoding', 'connection', 'set-cookie'])
-const MAX_BODY = 256 * 1024 * 1024
+// Pushes carry packs. JSON bodies (GraphQL, REST writes) are small, and graphql-js parse() costs about 240 bytes of heap
+// per source byte (10 MB of `query { a a a … }` took 2.4 GB), so their cap keeps one request far inside the edge's 2 GB.
+const PUSH_MAX = 256 * 1024 * 1024
+const JSON_MAX = 1024 * 1024
+// parse() aborts past this many tokens, a few MB of heap; the documents gh and superagent send have a few hundred.
+const GRAPHQL_MAX_TOKENS = 50_000
+// Node ids one request's mutations may name, all resolved in one nodes(ids:) lookup (GitHub takes at most 100).
+const MAX_NODE_IDS = 50
 // REST writes on a project repository, as `<METHOD> <path after /repos/{owner}/{name}>`.
 const WRITES = [
   /^POST \/issues\/\d+\/comments$/,
@@ -25,18 +32,42 @@ const WRITES = [
 ]
 const PULL_EDIT = /^PATCH \/pulls\/\d+$/
 const MUTATIONS = new Set(['createPullRequest', 'updatePullRequest', 'markPullRequestReadyForReview', 'convertPullRequestToDraft', 'addComment', 'updateIssueComment', 'addReaction', 'requestReviews'])
+// A mutation's input keys, classified by name: these scalars, or node ids (`id`, `ids`, `*Id`, `*Ids`, as GitHub's
+// schema names every ID input). Any other key is refused, so an id under a key this list does not know is never
+// forwarded unchecked.
+const SCALAR_INPUTS = new Set(['clientMutationId', 'title', 'body', 'baseRefName', 'headRefName', 'draft', 'maintainerCanModify', 'state', 'content', 'union'])
+const ID_KEY = /^(id|ids)$|Ids?$/
+// The node types a mutation may touch, each with its repository; any other type resolves to no repository.
+const NODE_REPOS = `query($ids: [ID!]!) { nodes(ids: $ids) { __typename ... on Repository { nameWithOwner } ${['PullRequest', 'Issue', 'IssueComment', 'PullRequestReviewComment'].map(t => `... on ${t} { repository { nameWithOwner } }`).join(' ')} } }`
 const STOPPED = 'stopped by the founder'
 
 /**
- * The GitHub forwarder. Refusals answer 403 (415 for GraphQL not sent as application/json, 413 past 256 MB) and log one
- * line `{ edge: 'github', refused, principal, method, host, path }`. While `halt.isHalted(principal)`, only GET and
- * HEAD, git-upload-pack and GraphQL documents without a mutation pass.
+ * The GitHub forwarder. Refusals answer 403 (400 for a GraphQL document that does not parse, 413 past a body cap,
+ * 415 for GraphQL not sent as application/json, 429 for a second push in flight) and log one line
+ * `{ edge: 'github', refused, principal, method, host, path }`. While `halt.isHalted(principal)`, only GET and HEAD,
+ * git-upload-pack and GraphQL documents without a mutation pass. Every node id a GraphQL mutation names must resolve,
+ * through one `nodes(ids:)` lookup with the agent token, to an object in one of the project's repositories.
  * @param {{ store: object, halt: { isHalted(principal: string): Promise<boolean> }, agentToken: string | undefined, fetchImpl: typeof fetch, log?: (line: string) => void }} deps
  *   `agentToken` unset answers 503 to every request.
  * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, claim: { u: string, b: string }) => Promise<void>}
  *   handles one request; `claim` is the verified box token (`u` the principal, `b` the box id).
  */
 export function githubForwarder({ store, halt, agentToken, fetchImpl, log = console.log }) {
+  // Principals with a receive-pack in flight on this replica: one buffered push each.
+  const pushing = new Set()
+
+  /** Resolves `ids`; returns a refusal `{ reason, status? }` unless each is an object in one of `repos`. */
+  async function outsideRepos(ids, repos) {
+    const r = await fetchImpl('https://api.github.com/graphql', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `token ${agentToken}` }, body: JSON.stringify({ query: NODE_REPOS, variables: { ids } }) })
+    if (!r.ok) return { reason: `the node id lookup failed (HTTP ${r.status})`, status: 502 }
+    const nodes = (await r.json())?.data?.nodes
+    for (const [i, id] of ids.entries()) {
+      const n = nodes?.[i]
+      const repo = n?.__typename === 'Repository' ? n.nameWithOwner : n?.repository?.nameWithOwner
+      if (typeof repo !== 'string' || !repos.includes(repo.toLowerCase())) return { reason: `node ${id} (${n?.__typename ?? 'not found'}) is not in this project's repositories` }
+    }
+  }
+
   return async (req, res, claim) => {
     const { method } = req
     const url = new URL(req.url, 'http://edge')
@@ -68,29 +99,36 @@ export function githubForwarder({ store, halt, agentToken, fetchImpl, log = cons
       if (!readable(host, segs, url, ours)) return refuse()
     } else if (graphql && method === 'POST') {
       if (String(req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase() !== 'application/json') return refuse('GraphQL takes application/json', 415)
-      const raw = await readBody(req)
-      if (!raw) return refuse('body over 256 MB', 413)
+      const raw = await readBody(req, JSON_MAX)
+      if (!raw) return refuse('body over 1 MiB', 413)
       const checked = checkGraphql(raw.toString('utf8'))
-      if (checked.refused) return refuse(checked.refused)
-      if (checked.mutates && await halt.isHalted(claim.u)) return refuse(STOPPED)
+      if (checked.refused) return refuse(checked.refused, checked.status)
+      // Only mutations name node ids (each must name one), so a document with none is reads only.
+      if (checked.ids.length) {
+        if (await halt.isHalted(claim.u)) return refuse(STOPPED)
+        const outside = await outsideRepos(checked.ids, repos)
+        if (outside) return refuse(outside.reason, outside.status)
+      }
       body = checked.body
       headers['content-type'] = 'application/json'
     } else if (host === 'api.github.com' && segs[0] === 'repos' && ours(segs[1], segs[2])) {
       const rule = `${method} /${segs.slice(3).join('/')}`
       if (!WRITES.some(w => w.test(rule))) return refuse()
       if (await halt.isHalted(claim.u)) return refuse(STOPPED)
-      body = await readBody(req)
-      if (!body) return refuse('body over 256 MB', 413)
+      body = await readBody(req, JSON_MAX)
+      if (!body) return refuse('body over 1 MiB', 413)
       if (PULL_EDIT.test(rule) && !(body = pullEdit(body))) return refuse('a pull request edit may change only title, body and state "closed"')
     } else if (gitService === 'git-upload-pack') {
-      body = await readBody(req)
-      if (!body) return refuse('body over 256 MB', 413)
-      // git gzips fetch requests over 1 KB; the body is passed through unread.
+      // Streamed unread; git gzips fetch requests over 1 KB.
+      body = Readable.toWeb(req)
       if (req.headers['content-encoding'] !== undefined) headers['content-encoding'] = req.headers['content-encoding']
     } else if (gitService === 'git-receive-pack') {
       if (req.headers['content-encoding'] !== undefined) return refuse('an encoded push is refused')
       if (await halt.isHalted(claim.u)) return refuse(STOPPED)
-      body = await readBody(req)
+      if (pushing.has(claim.u)) return refuse('another push from this project is in progress', 429)
+      pushing.add(claim.u)
+      res.once('close', () => pushing.delete(claim.u))
+      body = await readBody(req, PUSH_MAX)
       if (!body) return refuse('body over 256 MB', 413)
       const why = body.length === 4 && body.toString('latin1') === '0000' ? undefined : pushRefusal(body)
       if (why) return refuse(why)
@@ -98,12 +136,16 @@ export function githubForwarder({ store, halt, agentToken, fetchImpl, log = cons
 
     if (host === 'api.github.com') headers.authorization = `token ${agentToken}`
     else if (host === 'github.com') headers.authorization = `Basic ${Buffer.from(`x-access-token:${agentToken}`).toString('base64')}`
-    const upstream = await fetchImpl(`https://${host}${path}${url.search}`, { method, headers, body, redirect: 'manual' })
+    // A client that leaves aborts the upstream request, so an abandoned push frees its buffer with its slot.
+    const left = new AbortController()
+    res.once('close', () => left.abort())
+    const upstream = await fetchImpl(`https://${host}${path}${url.search}`, { method, headers, body, duplex: 'half', redirect: 'manual', signal: left.signal })
     const out = {}
     for (const [k, v] of upstream.headers) if (!RESPONSE_DROP.has(k)) out[k] = v
     res.writeHead(upstream.status, out)
     if (upstream.body === null) return void res.end()
-    Readable.fromWeb(upstream.body).on('error', () => res.destroy()).pipe(res)
+    // pipeline cancels the upstream body when the client leaves; once headers are sent there is no one to tell.
+    pipeline(Readable.fromWeb(upstream.body), res, () => {})
   }
 }
 
@@ -120,47 +162,71 @@ function readable(host, segs, url, ours) {
   return false
 }
 
-/** Resolves the body, or undefined past MAX_BODY (the rest is read and dropped until the 413 closes the connection). */
-function readBody(req) {
+/** Resolves the body, or undefined past `max` bytes (the rest is read and dropped until the 413 closes the connection). */
+function readBody(req, max) {
   return new Promise((resolve, reject) => {
-    if (Number(req.headers['content-length']) > MAX_BODY) return resolve(undefined)
+    if (Number(req.headers['content-length']) > max) return resolve(undefined)
     const chunks = []; let size = 0
-    req.on('data', (c) => { size += c.length; if (size <= MAX_BODY) chunks.push(c); else resolve(undefined) })
+    req.on('data', (c) => { size += c.length; if (size <= max) chunks.push(c); else resolve(undefined) })
     req.on('end', () => resolve(Buffer.concat(chunks)))
     req.on('error', reject)
   })
 }
 
+const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
+
 /** A `PATCH /pulls/{n}` body re-serialized when it changes only title, body and state "closed"; otherwise undefined. */
 function pullEdit(buf) {
   let v
   try { v = JSON.parse(buf.toString('utf8')) } catch { return undefined }  // not JSON: refused like any other body
-  const ok = v !== null && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).every(k => k === 'title' || k === 'body' || (k === 'state' && v.state === 'closed'))
+  const ok = isObject(v) && Object.keys(v).every(k => k === 'title' || k === 'body' || (k === 'state' && v.state === 'closed'))
   return ok ? JSON.stringify(v) : undefined
 }
 
 /**
- * Checks a GraphQL request: every operation, whatever operationName picks. Mutations may hold only allowed top-level
- * fields, by field name (never alias), and no fragments. Returns `{ refused }` or `{ body, mutates }`, where `body` is
- * the printed document with variables and operationName, so GitHub runs exactly what was checked.
+ * Checks a GraphQL request: every operation, whatever operationName picks. A mutation may hold only allowed top-level
+ * fields, by field name (never alias), and no fragments. Each field's `input`, with variables and their defaults
+ * resolved, holds only known keys and names at least one node id; updatePullRequest may not set baseRefName or reopen.
+ * Returns `{ refused, status? }` or `{ ids, body }`: the node ids to resolve, and the printed document with variables
+ * and operationName, so GitHub runs exactly what was checked.
  */
 function checkGraphql(text) {
   let req, doc
   try { req = JSON.parse(text) } catch { return { refused: 'the body is not JSON' } }
-  if (req === null || typeof req !== 'object' || Array.isArray(req) || typeof req.query !== 'string') return { refused: 'the body must be a JSON object with a string query' }
-  try { doc = parse(req.query) } catch (e) { return { refused: `the query does not parse (${e.message})` } }
-  let mutates = false
+  if (!isObject(req) || typeof req.query !== 'string') return { refused: 'the body must be a JSON object with a string query' }
+  // A string would reach GitHub unread, its escapes hiding names from the checks below.
+  if (req.variables != null && !isObject(req.variables)) return { refused: 'variables must be a JSON object' }
+  if (req.operationName != null && typeof req.operationName !== 'string') return { refused: 'operationName must be a string' }
+  try { doc = parse(req.query, { maxTokens: GRAPHQL_MAX_TOKENS }) } catch (e) { return { refused: `the query does not parse (${e.message})`, status: 400 } }
+  const ids = new Set()
   for (const def of doc.definitions) {
     if (def.kind !== Kind.OPERATION_DEFINITION || def.operation === 'query') continue
     if (def.operation !== 'mutation') return { refused: `a ${def.operation} is not allowed` }
-    mutates = true
+    // What GitHub binds: each declared default, replaced by any value sent (null included).
+    const vars = { ...Object.fromEntries(def.variableDefinitions.filter(v => v.defaultValue).map(v => [v.variable.name.value, valueFromASTUntyped(v.defaultValue)])), ...req.variables }
     for (const sel of def.selectionSet.selections) {
       if (sel.kind !== Kind.FIELD) return { refused: 'a mutation may not use fragments' }
-      if (!MUTATIONS.has(sel.name.value)) return { refused: `mutation ${sel.name.value} is not allowed` }
-      if (sel.name.value === 'updatePullRequest' && (req.query.includes('baseRefName') || JSON.stringify(req.variables ?? null).includes('baseRefName'))) return { refused: 'updatePullRequest may not change baseRefName' }
+      const name = sel.name.value
+      if (!MUTATIONS.has(name)) return { refused: `mutation ${name} is not allowed` }
+      if (sel.arguments.length > 1 || sel.arguments.some(a => a.name.value !== 'input')) return { refused: `${name} takes only input` }
+      const input = (sel.arguments[0] && valueFromASTUntyped(sel.arguments[0].value, vars)) ?? {}
+      if (!isObject(input)) return { refused: `${name} input must be an object` }
+      let named = 0
+      for (const [k, v] of Object.entries(input)) {
+        if (SCALAR_INPUTS.has(k)) continue
+        if (!ID_KEY.test(k)) return { refused: `${name} input ${k} is not allowed` }
+        const list = v === null ? [] : [v].flat()
+        if (!list.every(x => typeof x === 'string')) return { refused: `${name} ${k} must hold node ids` }
+        for (const x of list) ids.add(x)
+        named += list.length
+      }
+      if (!named) return { refused: `${name} names no node id` }
+      if (name === 'updatePullRequest' && (req.query.includes('baseRefName') || JSON.stringify(req.variables ?? null).includes('baseRefName'))) return { refused: 'updatePullRequest may not change baseRefName' }
+      if (name === 'updatePullRequest' && input.state != null && input.state !== 'CLOSED') return { refused: 'updatePullRequest may set state only to CLOSED' }
     }
   }
-  return { mutates, body: JSON.stringify({ query: print(doc), variables: req.variables, operationName: req.operationName }) }
+  if (ids.size > MAX_NODE_IDS) return { refused: `mutations may name at most ${MAX_NODE_IDS} node ids` }
+  return { ids: [...ids], body: JSON.stringify({ query: print(doc), variables: req.variables, operationName: req.operationName }) }
 }
 
 /**
