@@ -7,18 +7,18 @@ import ExcelJS from 'exceljs'
  */
 export async function excelFixture(): Promise<Uint8Array<ArrayBuffer>> {
   const workbook = new ExcelJS.Workbook()
-  const sheet = workbook.addWorksheet('quarterly budget', { views: [{ state: 'frozen', xSplit: 1, ySplit: 2 }] })
+  const sheet = workbook.addWorksheet('퍣횦뤼쟳', { views: [{ state: 'frozen', xSplit: 1, ySplit: 2 }] })
   sheet.columns = [{ width: 24 }, { width: 18 }, { width: 18 }, { width: 18 }]
   sheet.mergeCells('A1:D1')
-  sheet.getCell('A1').value = 'DeepSeek · Project budget'
+  sheet.getCell('A1').value = 'DeepSeek · 뤱썊뤼쟳'
   sheet.getCell('A1').font = { name: 'Arial', size: 18, bold: true, color: { argb: 'FFFFFFFF' } }
   sheet.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3B5CCC' } }
   sheet.getCell('A1').alignment = { horizontal: 'center', vertical: 'middle' }
   sheet.getRow(1).height = 36
-  sheet.getRow(2).values = ['project', 'budget', 'Spending', 'Execution rate']
-  sheet.getRow(3).values = ['design', 12000, 9600, { formula: 'C3/B3', result: 0.8 }]
-  sheet.getRow(4).values = ['R&D', 45000, 31500, { formula: 'C4/B4', result: 0.7 }]
-  sheet.getRow(5).values = ['Total', { formula: 'SUM(B3:B4)', result: 57000 }, { formula: 'SUM(C3:C4)', result: 41100 }, { formula: 'C5/B5', result: 41100 / 57000 }]
+  sheet.getRow(2).values = ['뤱썊', '뤼쟳', '놋짺', '껃풨뿣']
+  sheet.getRow(3).values = ['걶걙', 12000, 9600, { formula: 'C3/B3', result: 0.8 }]
+  sheet.getRow(4).values = ['쑰쯑', 45000, 31500, { formula: 'C4/B4', result: 0.7 }]
+  sheet.getRow(5).values = ['찈걙', { formula: 'SUM(B3:B4)', result: 57000 }, { formula: 'SUM(C3:C4)', result: 41100 }, { formula: 'C5/B5', result: 41100 / 57000 }]
   for (let row = 2; row <= 5; row += 1) {
     sheet.getRow(row).height = 28
     for (let column = 1; column <= 4; column += 1) {
@@ -31,12 +31,12 @@ export async function excelFixture(): Promise<Uint8Array<ArrayBuffer>> {
       if (row > 2 && column > 1) cell.numFmt = column === 4 ? '0.0%' : '#,##0.00'
     }
   }
-  const details = workbook.addWorksheet('formulas and formats')
+  const details = workbook.addWorksheet('쥬휏옎뒘휏')
   details.getCell('A1').value = { formula: '_xlfn.XLOOKUP(1,{1},{42})', result: 42 }
   details.getCell('A2').value = { formula: 'SUM(1,2)' }
   details.getCell('B1').value = new Date('2026-09-16T00:00:00Z')
   details.getCell('B1').numFmt = 'yyyy-mm-dd'
-  details.getCell('C1').value = { richText: [{ text: 'Rich text', font: { bold: true } }, { text: ' example', font: { italic: true } }] }
+  details.getCell('C1').value = { richText: [{ text: '폌뇣뎈', font: { bold: true } }, { text: ' 얖잋', font: { italic: true } }] }
   details.getCell('D1').value = { text: 'Link text', hyperlink: 'https://example.com' }
   // ExcelJS's reader permits rich text here even though its hyperlink declaration requires a string.
   details.getCell('D2').value = { text: { richText: [{ text: 'Rich', font: { bold: true } }, { text: ' link' }] }, hyperlink: 'https://example.com' } as never
@@ -49,7 +49,7 @@ export async function excelFixture(): Promise<Uint8Array<ArrayBuffer>> {
   details.getRow(7).height = 40
   details.getRow(7).hidden = true
   details.getColumn(5).hidden = true
-  workbook.addWorksheet('hidden page', { state: 'hidden' }).getCell('A1').value = 'Hidden data'
+  workbook.addWorksheet('띈툫뤭', { state: 'hidden' }).getCell('A1').value = 'Hidden data'
   return new Uint8Array(await workbook.xlsx.writeBuffer())
 }
 
@@ -71,28 +71,28 @@ export async function excelHtmlFixture(): Promise<Uint8Array<ArrayBuffer>> {
 /** Build a meeting-minutes workbook whose formulas have no cached results. */
 export async function meetingMinutesFixture(): Promise<Uint8Array<ArrayBuffer>> {
   const workbook = new ExcelJS.Workbook()
-  const info = workbook.addWorksheet('meeting info')
-  info.getCell('A1').value = 'meeting minutes'
+  const info = workbook.addWorksheet('윚걦쟡곋')
+  info.getCell('A1').value = '윚걦쬆헝'
   info.getCell('B11').value = { formula: 'IF(OR(B9="",B10=""),"",ROUND((B10-B9)*1440,0))' }
-  const agenda = workbook.addWorksheet('meeting agenda')
+  const agenda = workbook.addWorksheet('윚걦걦왧')
   agenda.getCell('D16').value = { formula: 'SUM(D4:D15)' }
   agenda.getCell('E16').value = { formula: 'SUM(E4:E15)' }
-  workbook.addWorksheet('resolutions')
-  const actions = workbook.addWorksheet('Action plan')
+  workbook.addWorksheet('즳걦욋뤱')
+  const actions = workbook.addWorksheet('풨쪨걙쨒')
   for (let row = 4; row <= 23; row += 1) {
-    actions.getCell(`I${row}`).value = { formula: `IF(AND($E${row}<>"",$E${row}<TODAY(),$G${row}<>"Completed",$G${row}<>"Cancelled"),TODAY()-$E${row},"")` }
+    actions.getCell(`I${row}`).value = { formula: `IF(AND($E${row}<>"",$E${row}<TODAY(),$G${row}<>"헲펌깬",$G${row}<>"헲쯖매"),TODAY()-$E${row},"")` }
   }
-  workbook.addWorksheet('Questions to confirm')
-  workbook.addWorksheet('risks and dependencies')
-  const dashboard = workbook.addWorksheet('Stats board')
-  dashboard.getCell('A1').value = 'meeting minutes · Stats board'
-  dashboard.getCell('A5').value = 'Not started'
-  dashboard.getCell('B5').value = { formula: 'COUNTIF(Action plan!$G$4:$G$23,$A5)' }
+  workbook.addWorksheet('힅쓊걜뚦륐')
+  workbook.addWorksheet('릆뜡옎잝긎')
+  const dashboard = workbook.addWorksheet('쬻걙썧돛')
+  dashboard.getCell('A1').value = '윚걦쬆헝 · 쬻걙썧돛'
+  dashboard.getCell('A5').value = '뎆휀퇋'
+  dashboard.getCell('B5').value = { formula: 'COUNTIF(풨쪨걙쨒!$G$4:$G$23,$A5)' }
   dashboard.getCell('C5').value = { formula: 'IF($B5=0,"",REPT("█",MAX(1,ROUND($B5/MAX(1,$B$5)*16,0))))' }
   dashboard.getCell('D5').value = { formula: 'IFERROR($B5/$B$10,0)' }
   dashboard.getCell('D5').numFmt = '0%'
   dashboard.getCell('B10').value = { formula: 'SUM(B5:B9)' }
-  workbook.addWorksheet('Filling instructions')
+  workbook.addWorksheet('큫즙견뉪')
   return new Uint8Array(await workbook.xlsx.writeBuffer())
 }
 

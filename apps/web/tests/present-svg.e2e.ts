@@ -17,7 +17,7 @@ import {
 import { connectFreshWorkspaceZh, ZH_BROWSER_LOCALE } from './support.ts'
 
 const DIR = fileURLToPath(new URL('../../../snapshots/web/present-svg', import.meta.url))
-const FIXTURE = join(DIR, 'session.v3.jsonl')
+const FIXTURE = join(DIR, 'session.v4.jsonl')
 const MODE = webSnapshotMode()
 const RECORD_PROMPT = 'Draw a simple SVG representing the von Neumann architecture, Save for von-neumann.svg, and provide a standalone File card for convenience Open.'
 const FILE = 'von-neumann.svg'

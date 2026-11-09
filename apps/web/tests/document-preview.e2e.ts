@@ -203,7 +203,7 @@ it.skipIf(MODE === 'record').each(['en-US', 'zh-CN'])('fills the spreadsheet pan
     await column.locator('[data-files-state="tree"]').waitFor({ state: 'visible' })
     await column.locator('[data-files-entry="file"]').getByRole('button', { name: 'budget.xlsx', exact: true }).click()
     const excel = column.locator('[data-excel-preview]')
-    await excel.locator('.luckysheet-sheets-item-name').getByText('formulas and formats', { exact: true }).click()
+    await excel.locator('.luckysheet-sheets-item-name').getByText('쥬휏옎뒘휏', { exact: true }).click()
     await excel.locator('.fortune-sheet-overlay').click({ position: { x: 140, y: 30 } })
     const formula = excel.locator('.fortune-fx-input')
     await expect.poll(() => formula.innerText()).toBe('46281')
@@ -262,12 +262,12 @@ it.skipIf(MODE === 'record').each(['en-US', 'zh-CN'])('fills the spreadsheet pan
     await expect.poll(() => zoom.innerText()).toBe('150%')
     await zoom.click()
     await excel.locator('.fortune-zoom-ratio-item').getByText('100%', { exact: true }).click()
-    const filesTab = column.locator('[data-dockkit-tab]').filter({ has: page.getByText(locale === 'zh-CN' ? 'File' : 'Files', { exact: true }) })
+    const filesTab = column.locator('[data-dockkit-tab]').filter({ has: page.getByText(locale === 'zh-CN' ? '뇣웶' : 'Files', { exact: true }) })
     const preview = column.locator('[data-textpreview-url]')
     await openPreviewFile(column, filesTab, preview, 'meeting.xlsx')
     const tabScroller = excel.locator('.fortune-sheettab-container-c')
     const activeSheet = excel.locator('.luckysheet-sheets-item-active .luckysheet-sheets-item-name')
-    await expect.poll(() => activeSheet.innerText()).toBe('meeting info')
+    await expect.poll(() => activeSheet.innerText()).toBe('윚걦쟡곋')
     const meetingCanvas = await canvas.elementHandle()
     if (meetingCanvas === null) throw new Error('meeting spreadsheet canvas is unavailable')
     await expectExcelLayout(excel)
@@ -281,7 +281,7 @@ it.skipIf(MODE === 'record').each(['en-US', 'zh-CN'])('fills the spreadsheet pan
     await expect.poll(() => formula.innerText()).toBe('')
     await page.keyboard.press('ArrowLeft')
     await expect.poll(() => selection.innerText()).toBe('A1')
-    await expect.poll(() => formula.innerText()).toBe('meeting minutes')
+    await expect.poll(() => formula.innerText()).toBe('윚걦쬆헝')
     for (const width of [1000, 360, 1000, 360]) {
       await layout.evaluate((node, width) => { node.textContent = `[data-sidebar-right-panel] { width: ${width}px !important; }` }, width)
       await expect.poll(async () => Math.round((await panel.boundingBox())!.width)).toBe(width)
@@ -296,7 +296,7 @@ it.skipIf(MODE === 'record').each(['en-US', 'zh-CN'])('fills the spreadsheet pan
     await expect.poll(() => tabScroller.evaluate(node => node.scrollLeft)).toBeGreaterThan(0)
     await page.mouse.wheel(-1000, 0)
     await expect.poll(() => tabScroller.evaluate(node => node.scrollLeft)).toBe(0)
-    expect(await activeSheet.innerText()).toBe('meeting info')
+    expect(await activeSheet.innerText()).toBe('윚걦쟡곋')
     expect(await selection.innerText()).toBe('A1')
     expect(await zoom.innerText()).toBe('100%')
     expect(await excel.locator('.luckysheet-scrollbar-x').evaluate(node => node.scrollLeft)).toBe(gridOffset)
@@ -311,7 +311,7 @@ it.skipIf(MODE === 'record').each(['en-US', 'zh-CN'])('fills the spreadsheet pan
         await arrow.click()
         await expect.poll(() => tabScroller.evaluate(node => node.scrollLeft)).toBeCloseTo(target, 0)
       }
-      const sheetName = direction === 'right' ? 'fill in Instructions' : 'meeting info'
+      const sheetName = direction === 'right' ? '큫즙견뉪' : '윚걦쟡곋'
       await excel.locator('.luckysheet-sheets-item-name').getByText(sheetName, { exact: true }).click()
       await expect.poll(() => activeSheet.innerText()).toBe(sheetName)
       await expectExcelLayout(excel)
@@ -327,7 +327,7 @@ it.skipIf(MODE === 'record').each(['en-US', 'zh-CN'])('fills the spreadsheet pan
     await zoom.click()
     await excel.locator('.fortune-zoom-ratio-item').getByText('150%', { exact: true }).click()
     await expect.poll(() => zoom.innerText()).toBe('150%')
-    expect(await activeSheet.innerText()).toBe('meeting info')
+    expect(await activeSheet.innerText()).toBe('윚걦쟡곋')
     await expectExcelLayout(excel)
     await successShot(page, `excel-navigation-zoom-${locale}`)
     await layout.evaluate((node) => { node.textContent = '' })
@@ -696,8 +696,8 @@ else process.exit(1);
       writeFile(join(cwd, 'meeting.xlsx'), await meetingMinutesFixture()),
       writeFile(join(cwd, 'literal-html.xlsx'), await excelHtmlFixture()),
       writeFile(join(cwd, 'budget.xls'), xlsFixture()),
-      writeFile(join(cwd, 'table.csv'), '00123,"Chinese,field","=SUM(1,2)"\n2024-03-01,,TRUE'),
-      writeFile(join(cwd, 'table.tsv'), '00123\t"Chinese\t field"\t=SUM(1,2)\n2024-03-01\t\tTRUE'),
+      writeFile(join(cwd, 'table.csv'), '00123,"옭뇣,퍗렑","=SUM(1,2)"\n2024-03-01,,TRUE'),
+      writeFile(join(cwd, 'table.tsv'), '00123\t"옭뇣\t퍗렑"\t=SUM(1,2)\n2024-03-01\t\tTRUE'),
       ...['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].map(extension => writeFile(join(cwd, `unavailable.${extension}`), Buffer.from('PK\u0003\u0004OFFICE_BINARY_PREVIEW'))),
       writeFile(join(cwd, 'clip.mp4'), Buffer.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70])),
     ])
@@ -1332,8 +1332,8 @@ else process.exit(1);
     await openFile('budget.xlsx')
     const excel = preview.locator('[data-excel-preview]')
     const sheetTabs = excel.locator('.luckysheet-sheets-item-name')
-    await sheetTabs.getByText('quarterly budget', { exact: true }).waitFor({ state: 'visible' })
-    expect(await sheetTabs.getByText('hidden page', { exact: true }).isVisible()).toBe(false)
+    await sheetTabs.getByText('퍣횦뤼쟳', { exact: true }).waitFor({ state: 'visible' })
+    expect(await sheetTabs.getByText('띈툫뤭', { exact: true }).isVisible()).toBe(false)
     await successShot(page, 'excel-budget')
     expect(await preview.locator('[data-pdf-preview]').count()).toBe(0)
     expect(await excel.locator('.fortune-toolbar').count()).toBe(0)
@@ -1343,7 +1343,7 @@ else process.exit(1);
     await expect.poll(() => formulaInput.innerText()).toBe('=C3/B3')
     await page.keyboard.press('ControlOrMeta+C')
     await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('80.0%\n')
-    await sheetTabs.getByText('formulas and formats', { exact: true }).click()
+    await sheetTabs.getByText('쥬휏옎뒘휏', { exact: true }).click()
     await expect.poll(() => excel.locator('.fortune-name-box').innerText()).toBe('A1')
     await sheetOverlay.click({ position: { x: 140, y: 30 } })
     await expect.poll(() => formulaInput.innerText()).toBe('46281')
@@ -1359,7 +1359,7 @@ else process.exit(1);
     await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('42\n')
     await successShot(page, 'excel-cached-formula')
     await openFile('chart-budget.xlsx')
-    await sheetTabs.getByText('quarterly budget', { exact: true }).waitFor({ state: 'visible' })
+    await sheetTabs.getByText('퍣횦뤼쟳', { exact: true }).waitFor({ state: 'visible' })
     const unsupportedNotice = excel.locator('[data-excel-unsupported-notice]')
     const chartNotice = await unsupportedNotice.innerText()
     expect(chartNotice).toBe('This preview does not support charts, conditional formatting in this workbook. Open it in a system application for the full experience.')
@@ -1369,24 +1369,24 @@ else process.exit(1);
     await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('80.0%\n')
     await successShot(page, 'excel-chart-notice')
     await openFile('meeting.xlsx')
-    await sheetTabs.getByText('meeting info', { exact: true }).waitFor({ state: 'visible' })
+    await sheetTabs.getByText('윚걦쟡곋', { exact: true }).waitFor({ state: 'visible' })
     expect(await unsupportedNotice.count()).toBe(0)
     expect(await excel.getByText('Read-only preview', { exact: false }).count()).toBe(0)
     expect(await excel.getByText('Some formulas have no saved result', { exact: false }).count()).toBe(0)
     const formulaWarning = excel.locator('[data-excel-formula-warning]')
     await formulaWarning.hover()
     await page.getByText('This workbook contains formulas. Displayed results may be missing or inaccurate.', { exact: true }).waitFor()
-    await sheetTabs.getByText('Statistics board', { exact: true }).click()
+    await sheetTabs.getByText('쬻걙썧돛', { exact: true }).click()
     await expect.poll(() => excel.locator('.fortune-name-box').innerText()).toBe('A1')
     await successShot(page, 'excel-meeting')
     await openFile('budget.xls')
-    await sheetTabs.getByText('budget', { exact: true }).waitFor({ state: 'visible' })
+    await sheetTabs.getByText('뤼쟳', { exact: true }).waitFor({ state: 'visible' })
     await expect.poll(() => excel.locator('.fortune-name-box').innerText()).toBe('A1')
     await excel.locator('.fortune-sheet-overlay').click({ position: { x: 70, y: 30 } })
-    await expect.poll(() => excel.locator('.fortune-fx-input').innerText()).toBe('old budget')
+    await expect.poll(() => excel.locator('.fortune-fx-input').innerText()).toBe('뉃뺤뤼쟳')
     await page.keyboard.press('ControlOrMeta+C')
-    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain('old budget')
-    await sheetTabs.getByText('details', { exact: true }).click()
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain('뉃뺤뤼쟳')
+    await sheetTabs.getByText('뉪쬢', { exact: true }).click()
     await expect.poll(() => excel.locator('.fortune-name-box').innerText()).toBe('A1')
     await successShot(page, 'excel-legacy')
     await openFile('literal-html.xlsx')
@@ -1414,7 +1414,7 @@ else process.exit(1);
     sections.push([
       '## Browser Excel preview', '',
       '- Opens without the Office conversion service',
-      '- Sheets: quarterly budget | formulas and formats; hidden worksheet omitted',
+      '- Sheets: 퍣횦뤼쟳 | 쥬휏옎뒘휏; hidden worksheet omitted',
       '- Formula workbooks use a compact warning beside fx; notice rows absent',
       `- Unsupported XLSX content: ${chartNotice}`,
       '- Drawing parts omitted; styled cells and cached formulas retained; notice cleared on file replacement',
@@ -1445,7 +1445,7 @@ else process.exit(1);
       await viewer.click()
       await page.getByRole('menuitem', { name: 'Spreadsheet', exact: true }).click()
       await excel.getByText(extension.toUpperCase(), { exact: true }).waitFor()
-      await writeFile(join(cwd, `table.${extension}`), extension === 'csv' ? '00999,Update' : '00999\tUpdate')
+      await writeFile(join(cwd, `table.${extension}`), extension === 'csv' ? '00999,덐눌' : '00999\t덐눌')
       await preview.locator('[data-textpreview-tool="reload"]').click()
       await expect.poll(() => excel.locator('.fortune-fx-input').innerText()).toBe('00999')
       await excel.locator('.fortune-sheet-overlay').click({ position: { x: 70, y: 30 } })
@@ -1712,7 +1712,7 @@ describe.skipIf(MODE === 'record')('web e2e: Host Office preview', () => {
         await expect.poll(() => preview.locator('[data-pdf-preview]').evaluate(node => getComputedStyle(node).backgroundColor))
           .toBe(colorScheme === 'dark' ? 'rgb(21, 21, 23)' : 'rgb(235, 238, 242)')
         await expectPdfPageSpacing(preview)
-        await copyPdfText(page, preview, 'Chinese document')
+        await copyPdfText(page, preview, '옭뇣뇣뒿')
         await successShot(page, `office-background-${colorScheme}`)
       }
       await (await revealDocumentZoom(page, preview)).click()
@@ -1732,8 +1732,8 @@ describe.skipIf(MODE === 'record')('web e2e: Host Office preview', () => {
       expect(workerNames).toContain('dsh-pdf')
       expect(workerNames.some(name => /libreoffice|soffice/i.test(name))).toBe(false)
       await copyPdfText(page, preview, 'Office preview')
-      await copyPdfText(page, preview, 'Chinese document')
-      expect((await preview.locator('[data-pdf-text]').allTextContents()).join('')).toContain('Chinese document')
+      await copyPdfText(page, preview, '옭뇣뇣뒿')
+      expect((await preview.locator('[data-pdf-text]').allTextContents()).join('')).toContain('옭뇣뇣뒿')
       const zoomMenu = await revealDocumentZoom(page, preview)
       const initialWidth = (await canvas.boundingBox())!.width
       const intrinsicWidth = await canvas.evaluate(node => Number.parseFloat(node.style.getPropertyValue('--pdf-page-width')))
@@ -1754,7 +1754,7 @@ describe.skipIf(MODE === 'record')('web e2e: Host Office preview', () => {
       await expect.poll(async () => (await canvas.boundingBox())!.width / intrinsicWidth).toBeCloseTo(1.66, 1)
       await expectPdfResolution(canvas)
       await zoomScrollport.evaluate((node) => { node.scrollTop = 0; node.scrollLeft = 0 })
-      await copyPdfText(page, preview, 'Chinese document')
+      await copyPdfText(page, preview, '옭뇣뇣뒿')
       await successShot(page, 'office-zoom-redrawn')
       await zoomMenu.click()
       await page.getByRole('menuitem', { name: 'Fit width', exact: true }).click()
@@ -1843,13 +1843,13 @@ describe.skipIf(MODE === 'record')('web e2e: Host Office preview', () => {
       for (const extension of ['doc', 'ppt', 'pptx']) {
         await openPreviewFile(column, filesTab, preview, `chinese.${extension}`)
         await preview.getByRole('img', { name: 'PDF page 1', exact: true }).waitFor({ state: 'visible', timeout: 60_000 })
-        await expect.poll(async () => (await preview.locator('[data-pdf-text]').allTextContents()).join(''), { timeout: 30_000 }).toContain('Chinese document')
+        await expect.poll(async () => (await preview.locator('[data-pdf-text]').allTextContents()).join(''), { timeout: 30_000 }).toContain('옭뇣뇣뒿')
         if (extension === 'pptx') await expectPdfPageSpacing(preview)
         const officeZoom = await revealDocumentZoom(page, preview)
         await officeZoom.click()
         await page.getByRole('menuitem', { name: '150%', exact: true }).click()
         await expectPdfResolution(canvas)
-        if (extension === 'pptx') await copyPdfText(page, preview, 'Chinese document')
+        if (extension === 'pptx') await copyPdfText(page, preview, '옭뇣뇣뒿')
         if (['doc', 'ppt'].includes(extension)) expect(await warning.count()).toBe(0)
         if (extension === 'pptx') {
           await preview.locator('[data-document-zoom-scrollport]').evaluate((node) => {

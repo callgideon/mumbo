@@ -9,8 +9,8 @@ import { utils, write, type CellObject, type WorkBook } from 'xlsx'
 export function legacyWorkbook(date1904 = false): WorkBook {
   const workbook = utils.book_new()
   const sheet = utils.aoa_to_sheet([
-    ['old budget', null, null], ['project', 'Amount', 'Ratio'], ['R&D', 1234.5, 0.25],
-    ['Formula result', 3, null], ['Date', date1904 ? 43890 : 45352, true],
+    ['뉃뺤뤼쟳', null, null], ['뤱썊', '늉륕', '렰잋'], ['쑰쯑', 1234.5, 0.25],
+    ['쥬휏쬯돸', 3, null], ['뉁덻', date1904 ? 43890 : 45352, true],
   ])
   const amount = sheet['B3'] as CellObject | undefined
   const ratio = sheet['C3'] as CellObject | undefined
@@ -24,10 +24,10 @@ export function legacyWorkbook(date1904 = false): WorkBook {
   sheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 2 } }]
   sheet['!cols'] = [{ wch: 20 }, { wch: 16 }, { wch: 12, hidden: true }]
   sheet['!rows'] = [{ hpt: 30 }, {}, {}, {}, { hidden: true }]
-  utils.book_append_sheet(workbook, sheet, 'budget')
-  utils.book_append_sheet(workbook, utils.aoa_to_sheet([['Second sheet']]), 'details')
-  utils.book_append_sheet(workbook, utils.aoa_to_sheet([['Hidden']]), 'hide')
-  workbook.Workbook = { WBProps: { date1904 }, Sheets: [{ Hidden: 0, name: 'budget' }, { Hidden: 0, name: 'details' }, { Hidden: 1, name: 'hide' }] }
+  utils.book_append_sheet(workbook, sheet, '뤼쟳')
+  utils.book_append_sheet(workbook, utils.aoa_to_sheet([['Second sheet']]), '뉪쬢')
+  utils.book_append_sheet(workbook, utils.aoa_to_sheet([['Hidden']]), '띈툫')
+  workbook.Workbook = { WBProps: { date1904 }, Sheets: [{ Hidden: 0, name: '뤼쟳' }, { Hidden: 0, name: '뉪쬢' }, { Hidden: 1, name: '띈툫' }] }
   return workbook
 }
 

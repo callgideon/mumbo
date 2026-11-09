@@ -18,7 +18,7 @@ import {
 import { openSettings, connectFreshWorkspaceZh, expandOwningTurnProcess, ZH_BROWSER_LOCALE } from './support.ts'
 
 const DIR = fileURLToPath(new URL('../../../snapshots/web/changed-files-turn', import.meta.url))
-const FIXTURE = join(DIR, 'session.v3.jsonl')
+const FIXTURE = join(DIR, 'session.v4.jsonl')
 const MODE = webSnapshotMode()
 const PROMPT = 'no need to first InspectDirectory; just do four things directly: change the intro.md title "Sample project" in it to "Project Instructions", New src/util.ts export a two-number addition add function, New app.local write one line mode=demo, and finally Open in bash at notes.txt end append one line done.'
 
