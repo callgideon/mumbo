@@ -68,3 +68,20 @@ test('allow is false at or over the limit; project and user limits are separate'
   await store.incrementBy(key('project:p1'), 4000, 1)
   assert.equal(await t.allow('project:p1'), false)
 })
+
+const textDelta = (text) => ev({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } })
+
+test('cancelling after 3 text deltas of 30 chars charges the estimate on top of the input', async () => {
+  const { store, t } = make()
+  const body = new ReadableStream({ start(c) { for (const p of [start, textDelta('a'.repeat(10)), textDelta('b'.repeat(10)), textDelta('c'.repeat(10))]) c.enqueue(enc.encode(p)) } })
+  const reader = t.meter('a@x.co', body, 'text/event-stream').getReader()
+  for (let i = 0; i < 4; i++) await reader.read()
+  await reader.cancel()
+  assert.equal(await store.getCount(key('a@x.co')), 130)
+})
+
+test('a completed stream with a final usage charges only the real figure', async () => {
+  const { store, t } = make()
+  await drain(t.meter('a@x.co', stream(start, textDelta('x'.repeat(3000)), delta), 'text/event-stream'))
+  assert.equal(await store.getCount(key('a@x.co')), 170)
+})
