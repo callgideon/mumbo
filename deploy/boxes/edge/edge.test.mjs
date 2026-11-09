@@ -629,3 +629,11 @@ test('relay to a member-capable box sends the member header and no owner sign-in
   await relay.message('a@x.com', id, 'hi')
   assert.ok(calls.every(c => c.member === 'hdr-for-a@x.com' && c.cookie === undefined && !c.path.startsWith('/?token=')))
 })
+
+test('the sign-in cookie never reaches a box, and boxes cannot set parent-domain cookies', () => {
+  const h = boxHeaders(cfg, { cookie: '_oauth2_proxy=a; _oauth2_proxy_1=b; dsh-auth-x=c' }, { id: 'b' })
+  assert.equal(h.cookie, 'dsh-auth-x=c')
+  assert.equal(boxHeaders(cfg, { cookie: '_oauth2_proxy=a' }, { id: 'b' }).cookie, undefined)
+  const out = secureCookies({ 'set-cookie': ['s=1; Domain=.boxes.mumbo.si; Path=/', 't=2; path=/; domain=boxes.mumbo.si; HttpOnly'] })['set-cookie']
+  assert.deepEqual(out, ['s=1; Path=/; Secure', 't=2; path=/; HttpOnly; Secure'])
+})

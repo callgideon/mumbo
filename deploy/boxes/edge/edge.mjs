@@ -417,6 +417,11 @@ export function boxRoute(url) {
 export function boxHeaders(cfg, incoming, target, port = '3080', siteHost = cfg.publicHost) {
   const out = {}
   for (const [k, v] of Object.entries(incoming)) if (!DROP.has(k) && !k.startsWith('x-forwarded-') && !k.startsWith('e2b-')) out[k] = v
+  // The sign-in cookie (oauth2-proxy) never reaches a box: a box that saw it could replay it as the signed-in person.
+  if (out.cookie !== undefined) {
+    const kept = String(out.cookie).split(';').map(c => c.trim()).filter(c => c && !c.startsWith('_oauth2_proxy'))
+    if (kept.length) out.cookie = kept.join('; '); else delete out.cookie
+  }
   out.host = `sandbox.${cfg.publicHost}`
   out['e2b-sandbox-id'] = target.id
   out['e2b-sandbox-port'] = port
@@ -450,10 +455,11 @@ export const boxFetcher = (cfg) => (target, siteHost, path, { method = 'GET', he
   req.on('error', reject)
   req.end(body)
 })
-/** dsh listens on plain HTTP inside the box, so its cookies lack Secure; the edge adds it. */
+/** dsh listens on plain HTTP inside the box, so its cookies lack Secure; the edge adds it and drops any Domain. */
 export const secureCookies = (headers) => {
   const c = headers['set-cookie']
-  if (c) headers['set-cookie'] = c.map(v => /;\s*secure/i.test(v) ? v : `${v}; Secure`)
+  // Host-only: a box may not set a cookie for the parent domain, which other boxes and the sign-in share.
+  if (c) headers['set-cookie'] = c.map(v => v.replace(/;\s*domain=[^;]*/gi, '')).map(v => /;\s*secure/i.test(v) ? v : `${v}; Secure`)
   return headers
 }
 /** A browser with no dsh cookie and no token is sent to the token exchange, as nginx did for the shared server. */
