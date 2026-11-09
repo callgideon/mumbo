@@ -343,7 +343,7 @@ describe('package payload constraints', () => {
   it.each([
     { exports: { './locale/*.json': './locale/*.json' }, resources: ['locale/*.json'] },
     { exports: { './search/locale/*.json': './resources/search/*.json' }, resources: ['resources/search/*.json'] },
-    { exports: { './locale/en.json': './locale/en.json', './locale/zh.json': './locale/zh.json' }, resources: ['locale/en.json', 'locale/zh.json'] },
+    { exports: { './locale/en.json': './locale/en.json', './locale/es.json': './locale/es.json' }, resources: ['locale/en.json', 'locale/es.json'] },
     { exports: { './locale/*.json': { default: './locale/*.json' } }, resources: ['locale/*.json'] },
     { exports: { './locale/*.json': './locale/*.json', './search/locale/*.json': './locale/*.json' }, resources: ['locale/*.json'] },
     { exports: { './search/locale/*.json': './z/*.json', './locale/*.json': './a/*.json' }, resources: ['a/*.json', 'z/*.json'] },
@@ -377,10 +377,10 @@ describe('package payload constraints', () => {
     mkdirSync(join(dir, 'docs/guide'), { recursive: true })
     mkdirSync(join(dir, 'locale'))
     writeFileSync(join(dir, 'docs/DETAIL.md'), '')
-    writeFileSync(join(dir, 'docs/guide/DETAIL.zh.md'), '')
+    writeFileSync(join(dir, 'docs/guide/DETAIL.es.md'), '')
     writeFileSync(join(dir, 'docs/DETAIL.fr.md'), '')
     writeFileSync(join(dir, 'locale/en.json'), JSON.stringify({ meta: { title: 'T', detail: 'docs/DETAIL.md' } }))
-    writeFileSync(join(dir, 'locale/zh.json'), JSON.stringify({ meta: { title: 'T', detail: 'docs/guide/DETAIL.zh.md' } }))
+    writeFileSync(join(dir, 'locale/es.json'), JSON.stringify({ meta: { title: 'T', detail: 'docs/guide/DETAIL.es.md' } }))
     writeFileSync(join(dir, 'locale/fr.json'), JSON.stringify({ meta: { title: 'T', detail: 'docs/DETAIL.fr.md' } }))
     writeFileSync(join(dir, 'locale/de.json'), JSON.stringify({ meta: { title: 'T' } }))
     writeFileSync(join(dir, 'locale/ja.json'), '{')
@@ -425,7 +425,7 @@ describe('package payload constraints', () => {
         './config.json': './config.json',
         './locale/README.md': './locale/README.md',
         './locale/en.json': './metadata.js',
-        './locale/zh.json': null,
+        './locale/es.json': null,
         './locale/fr.json': { types: './locale/fr.d.ts' },
       },
     })).toEqual(['lib/index.js', 'lib/types/**/*.d.ts'])

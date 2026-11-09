@@ -89,17 +89,13 @@ describe('concrete terminology policy', () => {
     expect(findConcreteTermViolations(`docs/persistence-changes/historical-formats/v${version}.schema.json`, blockedTerm)).toEqual([])
   })
 
-  it('preserves historical identifiers in section keys of a canonical historical-format pairing record', () => {
-    expect(findConcreteTermViolations('docs/persistence-changes/historical-formats/v1.i18n.yaml', blockedTerm)).toEqual([])
-  })
-
   it.each([
     'docs/persistence-changes/historical-formats/v00.schema.json',
     'docs/persistence-changes/historical-formats/v01.schema.json',
     'docs/persistence-changes/historical-formats/v-1.schema.json',
     'docs/persistence-changes/historical-formats/v1.zh.schema.json',
     'docs/persistence-changes/historical-formats/v1.schema.json.backup',
-    'docs/persistence-changes/historical-formats/v1.zh.i18n.yaml',
+    'docs/persistence-changes/historical-formats/v1.i18n.yaml',
     'docs/persistence-changes/historical-formats/V1.schema.json',
     'docs/persistence-changes/historical-formats/versions/v1.schema.json',
     'docs/persistence-changes/historical-formats-extra/v1.schema.json',
@@ -109,8 +105,8 @@ describe('concrete terminology policy', () => {
     expect(findConcreteTermViolations(file, blockedTerm)).toEqual([{ file, line: 1 }])
   })
 
-  it.each(['md', 'zh.md'])('exempts only generated historical schema lines in %s references', (suffix) => {
-    const file = `docs/persistence-changes/historical-formats/v2.${suffix}`
+  it('exempts only generated historical schema lines in references', () => {
+    const file = 'docs/persistence-changes/historical-formats/v2.md'
     for (const newline of ['\n', '\r\n']) {
       expect(findConcreteTermViolations(file, [
         `Authored ${blockedTerm}.`,
@@ -127,14 +123,13 @@ describe('concrete terminology policy', () => {
     'docs/persistence-changes/historical-formats/v00.md',
     'docs/persistence-changes/historical-formats/v01.zh.md',
     'docs/persistence-changes/historical-formats/v-1.md',
-    'docs/persistence-changes/historical-formats/v1.zh.zh.md',
+    'docs/persistence-changes/historical-formats/v1.zh.md',
     'docs/persistence-changes/historical-formats/v1.md.backup',
     'docs/persistence-changes/historical-formats/V1.md',
     'docs/persistence-changes/historical-formats/README.md',
     'docs/persistence-changes/historical-formats-extra/v1.md',
     'docs/other/persistence-changes/historical-formats/v1.zh.md',
     'docs/persistence-catalog.md',
-    'docs/persistence-catalog.zh.md',
     'docs/persistence-schema.json',
   ])('keeps generated-looking content strict outside canonical historical reference path %s', (file) => {
     expect(findConcreteTermViolations(file, [

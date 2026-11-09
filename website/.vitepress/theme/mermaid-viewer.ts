@@ -1,14 +1,11 @@
 /** Full-viewport viewing of asynchronously rendered documentation diagrams. */
 import { labelButton, type MediaViewer, viewerButton } from './media-viewer.ts'
 
-const messages = {
-  en: { open: 'View diagram fullscreen', title: 'Diagram viewer' },
-  zh: { open: '全屏查看图表', title: '图表查看器' },
-}
+const copy = { open: 'View diagram fullscreen', title: 'Diagram viewer' }
 
 /** Theme-owned resources; source SVG replacement automatically closes the current view. */
 export interface MermaidViewer {
-  /** Close the view and update entries after a route, language, or theme change. */
+  /** Close the view and update entries after a route or theme change. */
   refresh(): void
   /** Remove entries, observers, listeners, the dialog, and the page scroll lock. */
   dispose(): void
@@ -25,12 +22,11 @@ function dimensions(svg: SVGSVGElement): { width: number; height: number } | und
 /**
  * Enhance rendered Mermaid SVGs without modifying the canonical Markdown or renderer.
  * @param doc Browser document containing VitePress content.
- * @param language Current VitePress language, read again when entries refresh.
  * @param viewer Shared modal owner for images and diagrams.
  * @returns Resources owned by the mounted theme.
  */
 export function installMermaidViewer(
-  doc: Document, language: () => string, viewer: Pick<MediaViewer, 'open'>,
+  doc: Document, viewer: Pick<MediaViewer, 'open'>,
 ): MermaidViewer {
   const entries = new Map<Element, { svg: SVGSVGElement; button: HTMLButtonElement }>()
   let active: SVGSVGElement | undefined
@@ -41,7 +37,6 @@ export function installMermaidViewer(
     active = undefined
   }
   const scan = (): void => {
-    const copy = language().startsWith('zh') ? messages.zh : messages.en
     const containers = new Set(doc.querySelectorAll('.vp-doc .mermaid'))
     for (const [container, entry] of entries) {
       if (!containers.has(container) || container.querySelector('svg:not(.dsh-media-icon)') !== entry.svg || !entry.button.isConnected) {
@@ -65,7 +60,6 @@ export function installMermaidViewer(
         closeActive()
         const size = dimensions(svg)
         if (!size) return
-        const copy = language().startsWith('zh') ? messages.zh : messages.en
         close = viewer.open({
           element: svg.cloneNode(true) as SVGSVGElement,
           ...size,

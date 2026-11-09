@@ -1,18 +1,11 @@
 /** Shared modal, focus, and pan/zoom controls for documentation images and diagrams. */
 import Panzoom from '@panzoom/panzoom'
 
-const messages = {
-  en: {
-    zoomIn: 'Zoom in', zoomOut: 'Zoom out', fit: 'Fit view', original: 'Original size (100%), currently {scale}',
-    close: 'Close', helpLabel: 'Viewer help',
-    help: 'Scroll or pinch to zoom · Drag or use arrow keys to pan · Esc to close',
-  },
-  zh: {
-    zoomIn: '放大', zoomOut: '缩小', fit: '适应窗口', original: '原始尺寸（100%），当前{scale}',
-    close: '关闭', helpLabel: '查看器帮助',
-    help: '滚轮或双指缩放 · 拖动或方向键平移 · Esc 关闭',
-  },
-} satisfies Record<string, Record<string, string>>
+const copy = {
+  zoomIn: 'Zoom in', zoomOut: 'Zoom out', fit: 'Fit view', original: 'Original size (100%), currently {scale}',
+  close: 'Close', helpLabel: 'Viewer help',
+  help: 'Scroll or pinch to zoom · Drag or use arrow keys to pan · Esc to close',
+}
 
 const icons = {
   open: 'M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7',
@@ -70,9 +63,8 @@ export class MediaViewer {
 
   /**
    * @param doc Browser document containing the viewer's triggers.
-   * @param language Current VitePress language, read when opening the modal.
    */
-  constructor(private readonly doc: Document, private readonly language: () => string) {}
+  constructor(private readonly doc: Document) {}
 
   /** Close the active modal and release its observers, listeners, and scroll lock. */
   close(): void {
@@ -89,7 +81,6 @@ export class MediaViewer {
   open(content: MediaContent, trigger: HTMLElement, onClose: () => void): () => void {
     this.close()
     const doc = this.doc
-    const copy = this.language().startsWith('zh') ? messages.zh : messages.en
     const dialog = doc.createElement('dialog')
     dialog.className = 'dsh-media-viewer'
     dialog.setAttribute('aria-labelledby', 'dsh-media-title')
