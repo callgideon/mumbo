@@ -87,17 +87,15 @@ const PEER_REQUIRED_HOST_EXPORTS = {
   '@deepseek-ai/dsh-experimental-worktree': ['generatedWorktreeName'],
   // The forge panel matches ctx.fs failures with `instanceof FsError`.
   '@deepseek-ai/dsh-fs': ['FsError'],
-  // The superagent declares dsh-llm as a peer and builds delivered messages with the shared instance's ids and freeze.
-  '@deepseek-ai/dsh-llm': ['MessageId', 'ReasoningEffortId', 'freezeMessage'],
+  // The superagent builds delivered messages with the shared instance's ids and freeze; the edge-member Host half mints its
+  // notices with the message factory of the LLM package the agent loop admits them through.
+  '@deepseek-ai/dsh-llm': ['MessageId', 'ReasoningEffortId', 'createUserMessage', 'freezeMessage'],
   '@deepseek-ai/dsh-scope': ['carrierKeyOf', 'createScope', 'scopeOf', 'scopeParentOf', 'scopeTarget'],
   // appendPluginRecord writes through the Session class's private log; pluginRecordOf is stateless.
   '@deepseek-ai/dsh-session': ['SESSION_FORMAT_VERSION', 'appendPluginRecord', 'pluginRecordOf'],
   '@deepseek-ai/dsh-session-persistence': ['SessionPersistenceNotFoundError'],
   // Readers recognize a deadline's TimeoutReason only by `instanceof` against their own copy.
   '@deepseek-ai/dsh-timeout': ['deadline'],
-  // The edge-member Host half mints its notices with the message factory of the LLM package the agent loop
-  // admits them through.
-  '@deepseek-ai/dsh-llm': ['createUserMessage'],
 } as const satisfies HostDependencyExports
 
 /** Exact import specifier to reviewed runtime exports. */
