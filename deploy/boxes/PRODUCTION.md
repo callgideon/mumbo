@@ -8,6 +8,21 @@ This is the production platform for per-user boxes: E2B across many EC2 machines
 - Self-hosted from the start; data stays in our AWS account; operated by a team of agents, so every operation has a runbook and an alarm.
 - Boxes are paused with their memory when idle. Agents get box forks and small sandboxes (stage 8).
 
+## Requirements added 2026-11-09
+
+Each user's box is their personal computer in the cloud. They sign in to their own social and web accounts there and keep their files. A personal assistant agent runs in the box per user. It:
+- uses the box's desktop and browser (computer use and browser use), including the user's signed-in accounts, only when the user permits or asks;
+- starts, updates and manages the user's running projects by coordinating with a project coordinator agent.
+
+What this changes:
+- **Box size.** A desktop and a browser need 4 GiB of guest memory, not 2. A node's 48 GiB hugepage pool holds 12 running boxes; paused boxes cost only S3. E2B's `max_ram_mb` limit is raised to match.
+- **Signed-in accounts are the user's secrets.** The browser profile (cookies, sessions) lives on the box disk, is kept across pauses with memory, and is in every backup. Backups move to KMS encryption with a key only the edge role can use. Server keys still never enter a box (R4).
+- **Login by the user, in the box's own browser.** One persistent Chromium per box with a fixed profile. The user signs in (2FA included) through a live view of that browser in the web app. The agent attaches to the same browser over CDP (dsh's Playwright or Chrome DevTools MCP browser-use provider). Linux computer use needs a provider: dsh's CUA provider is macOS-only today.
+- **Consent per account action.** Acting with a signed-in account (posting, sending, buying) asks the user unless they granted it for that site. Every such action is logged with user, site and action.
+- **The assistant must act while the user is away.** A paused box cannot run a scheduled task. The edge wakes a box at its next scheduled time (dsh's schedule package records it), so idle boxes still pause.
+- **Projects run in their own sandboxes.** The project coordinator starts, updates and stops project sandboxes (stage 8) that the assistant can see and control. A project never runs inside the box holding the user's accounts.
+- **Egress IP.** All boxes leave through 3 shared NAT addresses. Sites may challenge logins from shared datacenter addresses. A per-user dedicated egress address is the upgrade if accounts get flagged.
+
 ## Architecture
 
 ```mermaid
@@ -41,6 +56,8 @@ flowchart LR
 | 6 | **Edge on ECS:** public ALB with OIDC (Supabase), llm host rule, edge × 2 with ElastiCache, `BOX_EGRESS_IPS` = NAT EIPs; template build on a node | Browser test: sign in, chat with bash, model calls proxied |
 | 7 | **Operations:** CloudWatch alarms (orphan kills, backup age, hugepage pool, node not ready, Redis failover, 5xx); runbooks; drills (hard-kill a node mid-upload, orchestrator N→N+1, RDS restore); cut `boxes.mumbo.si` over, then `app.mumbo.si`, and retire Fargate and the trial | All drills pass; alarms fire in tests |
 | 8 | **Agent sandboxes:** a fork/child-sandbox subagent provider in the harness; per-user sandbox caps | Agent fans out 10 sandboxes |
+| 9 | **Personal computer:** box template with a desktop (Xvfb, window manager) and a persistent Chromium with CDP; live view of the desktop in the web app; browser-use provider attached to the box browser; Linux computer-use provider; consent policy and audit log for account actions; KMS backups; wake-on-schedule in the edge | User signs in to a site in the live view; after a pause and a resume on another node, the assistant posts with that account only after the user approves |
+| 10 | **Assistant and project coordinator:** the always-on assistant session per user; the coordinator agent that owns project sandboxes (start, update, stop, status) and that the assistant directs | The assistant starts a project, the coordinator runs it in its own sandbox, and the assistant reports its status |
 
 ## Review findings carried into the build (design review, 2026-11-08)
 
