@@ -5,7 +5,7 @@ import * as e2b from 'e2b'
 import { boxes, userServer } from './edge.mjs'
 import { memoryStore } from './store.mjs'
 import { projects } from './projects.mjs'
-const cfg = { publicHost: 'boxes.mumbo.si', projectDomain: 'boxes.mumbo.si', llmHost: 'llm.boxes.mumbo.si', template: 'mumbo-box', idleMs: 3600_000, backupEveryMs: 3600_000, maxRunning: 0,
+const cfg = { publicHost: 'boxes.mumbo.si', projectDomain: 'boxes.mumbo.si', llmHost: 'llm.boxes.mumbo.si', template: 'mumbo-box', idleMs: 3600_000, backupEveryMs: 3600_000, maxRunningUnits: 0,
   allowed: ['@mumbo.si'], egressIps: [], proxy: new URL(process.env.E2B_SANDBOX_URL), bucket: 'unused', pauseIdle: false }
 const store = memoryStore()
 const box = boxes({ e2b, store, cfg, edgeKey: 'e2e-key', presignGet: async () => undefined, presignPut: async () => 'http://127.0.0.1:9/none', log: () => {} })

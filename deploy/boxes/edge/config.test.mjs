@@ -48,12 +48,13 @@ test('rollback safety: the pre-B13 edge filter strips the default sign-in cookie
   for (const name of [tfDefault, configWith().signinCookie]) assert.equal(preB13(`${name}=a; ${name}_1=b; dsh-auth-x=d`), 'dsh-auth-x=d', name)
 })
 
-test('capacity: node_count drives both the node group and the edge cap (12 per node minus 2, max 10 nodes)', () => {
+test('capacity: node_count drives both the node group and the edge cap (24 units per node minus 4, max 10 nodes)', () => {
   const tf = (f) => readFileSync(new URL(`../prod/${f}`, import.meta.url), 'utf8')
-  assert.match(tf('edge.tf'), /MAX_RUNNING_BOXES\s*=\s*tostring\(12 \* var\.node_count - 2\)/)
+  assert.match(tf('edge.tf'), /MAX_RUNNING_UNITS\s*=\s*tostring\(2 \* \(12 \* var\.node_count - 2\)\)/)
+  assert.match(tf('nodes.tf'), /min_size\s*=\s*var\.node_count/)
   assert.match(tf('nodes.tf'), /desired_capacity\s*=\s*var\.node_count/)
   assert.doesNotMatch(tf('nodes.tf'), /ignore_changes\s*=\s*\[desired_capacity\]/)
   assert.match(tf('nodes.tf'), /node_max_size = 10\b/)
   assert.match(tf('nodes.tf'), /var\.node_count <= 10/)
-  assert.equal(configWith({ MAX_RUNNING_BOXES: String(12 * 2 - 2) }).maxRunning, 22)
+  assert.equal(configWith({ MAX_RUNNING_UNITS: String(2 * (12 * 2 - 2)) }).maxRunningUnits, 44)
 })

@@ -296,7 +296,9 @@ resource "aws_ecs_task_definition" "edge" {
         PAUSE_IDLE        = "false" # boxes stay running (founder, 2026-11-09); cost work later
         PROJECT_DOMAIN    = local.project_domain
         SIGNIN_COOKIE     = var.signin_cookie_name
-        MAX_RUNNING_BOXES = tostring(12 * var.node_count - 2) # 12 running 4096 MB boxes per node (nodes.tf hugepages), 2 of headroom
+        # Capacity units, not boxes: a person or project box (4096 MB, edge/template.mjs) is 2, a child sandbox (2048 MB, the
+        # mumbo-child build argument) is 1. 12 boxes per node (nodes.tf hugepages) minus 2 of headroom.
+        MAX_RUNNING_UNITS = tostring(2 * (12 * var.node_count - 2))
         # Approvals. PROJECT_TEMPLATE stays unset (it defaults to BOX_TEMPLATE) until the mumbo-project template is built.
         APPROVE_HOST         = "approve.${local.public_host}"
         APPROVER_EMAILS      = var.approver_emails

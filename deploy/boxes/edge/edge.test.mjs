@@ -6,7 +6,7 @@ import { inParallel, signBox, verifyBox, userPrefix, budget, needsLaunch, boxHea
 import { memoryStore, redisStore } from './store.mjs'
 import { generateKeyPairSync, createSign } from 'node:crypto'
 
-const cfg = { publicHost: 'boxes.example', projectDomain: 'boxes.example', llmHost: 'llm.example', template: 'mumbo-box', idleMs: 60_000, backupEveryMs: 600_000, maxRunning: 5, allowed: ['@x.com'], egressIps: [], signinCookie: '_oauth2_proxy_mumbo', proxy: new URL('http://127.0.0.1:1'), upstream: 'https://model.example' }
+const cfg = { publicHost: 'boxes.example', projectDomain: 'boxes.example', llmHost: 'llm.example', template: 'mumbo-box', idleMs: 60_000, backupEveryMs: 600_000, maxRunningUnits: 10, allowed: ['@x.com'], egressIps: [], signinCookie: '_oauth2_proxy_mumbo', proxy: new URL('http://127.0.0.1:1'), upstream: 'https://model.example' }
 const listen = (server) => new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port)))
 const call = (port, { method = 'GET', path = '/', headers = {}, body } = {}) => new Promise((resolve, reject) => {
   const req = request({ host: '127.0.0.1', port, method, path, headers: { host: cfg.publicHost, ...headers } }, (res) => {
@@ -121,7 +121,7 @@ test('idle boxes are backed up, then paused; their tokens stop working', async (
 
 test('box creation stops at the running-box cap', async () => {
   const e2b = fakeE2B()
-  const b = boxes({ e2b, store: memoryStore(), cfg: { ...cfg, maxRunning: 1 }, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'P', log: () => {} })
+  const b = boxes({ e2b, store: memoryStore(), cfg: { ...cfg, maxRunningUnits: 2 }, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'P', log: () => {} })
   await b.ensure('a@x.com')
   e2b.Sandbox.list = () => ({ hasNext: true, nextItems: async function () { this.hasNext = false; return e2b.made.map(m => ({ sandboxId: m.id, state: 'running', startedAt: '1', metadata: { user: 'a@x.com' } })).filter(() => true) } })
   const findFor = e2b.Sandbox.list
@@ -703,4 +703,37 @@ test('model host: a client that drops mid-stream cancels the upstream and the me
     assert.equal(cancelled, true, 'upstream stream cancelled')
     assert.equal(await store.getCount('tokens:2026-11-09:a@x.com'), 100)
   } finally { s.close() }
+})
+
+test('capacity counts a box at 2 units and a running child at 1, and refuses past the limit', async () => {
+  const { runningUnits, atCapacity, UNITS } = await import('./capacity.mjs')
+  const list = (items) => ({ Sandbox: { list: () => { let more = true; return { get hasNext() { return more }, nextItems: async () => { more = false; return items } } } } })
+  const e2b = list([{ metadata: { user: 'a@x.com' } }, { metadata: { user: 'project:p' } }, { metadata: { owner: 'a@x.com' } }, { metadata: { owner: 'a@x.com' } }])
+  assert.equal(await runningUnits(e2b), 6)
+  assert.equal(await atCapacity(e2b, { maxRunningUnits: 7 }, UNITS.child), false)
+  assert.equal(await atCapacity(e2b, { maxRunningUnits: 7 }, UNITS.box), true)
+  assert.equal(await atCapacity(e2b, { maxRunningUnits: 0 }, UNITS.box), false, '0 is no cap')
+})
+
+test('child creation goes through the same unit cap', async () => {
+  const { children } = await import('./sandboxes.mjs')
+  const running = [{ metadata: { user: 'a@x.com' } }, { metadata: { user: 'b@x.com' } }, { metadata: { owner: 'b@x.com' } }]  // 5 units
+  const created = []
+  const e2b = { Sandbox: {
+    list: ({ query }) => { let more = true; return { get hasNext() { return more }, nextItems: async () => { more = false; return running.filter(s => !query.metadata || s.metadata.owner === query.metadata.owner) } } },
+    create: async (t, o) => { created.push(t); running.push({ metadata: o.metadata }); return { sandboxId: 'c' + created.length } },
+  } }
+  const ops = children({ e2b, cfg: { childTemplates: ['mumbo-child'], maxChildren: 10, maxRunningUnits: 7 }, log: () => {} })
+  await ops.create('a@x.com', 'p'); await ops.create('a@x.com', 'p')  // 6 then 7 units
+  await assert.rejects(ops.create('a@x.com', 'p'), /capacity/)
+  assert.equal(created.length, 2)
+})
+
+test('a !address entry denies exactly that address, before any allow match', () => {
+  const list = ['@mumbo.si', '!a@mumbo.si']
+  assert.equal(admitted(list, 'a@mumbo.si'), false)
+  assert.equal(admitted(list, 'A@Mumbo.si'), false)
+  assert.ok(admitted(list, 'aa@mumbo.si'), 'a longer local part is not denied')
+  assert.ok(admitted(list, 'b@mumbo.si'))
+  assert.equal(admitted(['!a@mumbo.si', 'a@mumbo.si'], 'a@mumbo.si'), false, 'order does not matter')
 })

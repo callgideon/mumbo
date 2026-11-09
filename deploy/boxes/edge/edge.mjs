@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs'
 import { createServer, request as httpRequest } from 'node:http'
 import { Readable, pipeline } from 'node:stream'
 import { ownersOf } from './projects.mjs'
+import { UNITS, atCapacity } from './capacity.mjs'
 
 const env = (name, fallback) => process.env[name] ?? fallback ?? (() => { throw new Error(`edge: set ${name}`) })()
 const list = (value) => value.toLowerCase().split(',').map(s => s.trim()).filter(Boolean)
@@ -41,7 +42,7 @@ export const config = () => ({
   idleMs: Number(env('IDLE_MINUTES', '30')) * 60_000,
   pauseIdle: env('PAUSE_IDLE', 'true') !== 'false',  // false: boxes stay running (founder, 2026-11-09); cost work comes later
   backupEveryMs: Number(env('BACKUP_MINUTES', '10')) * 60_000,
-  maxRunning: Number(env('MAX_RUNNING_BOXES', '0')),  // 0: no edge-side cap; E2B's own placement errors decide
+  maxRunningUnits: Number(env('MAX_RUNNING_UNITS', '0')),  // capacity units (capacity.mjs UNITS); 0: no edge-side cap, E2B's own placement errors decide
   backupConcurrency: Number(env('BACKUP_CONCURRENCY', '8')),
   allowed: list(env('ALLOWED_EMAILS', '')),
   egressIps: list(env('BOX_EGRESS_IPS', '')),
@@ -68,8 +69,8 @@ export const config = () => ({
   ntfyTopic: optional('NTFY_TOPIC'),
 })
 
-/** Address or @domain allowlist; an empty list admits nobody. */
-export const admitted = (allowed, email) => allowed.some(a => a === email || (a.startsWith('@') && email.endsWith(a)))
+/** Address or @domain allowlist; an empty list admits nobody. An entry `!address` denies that exact address (case-insensitive) before any allow match. */
+export const admitted = (allowed, email) => !allowed.some(a => a.startsWith('!') && a.slice(1).toLowerCase() === email.toLowerCase()) && allowed.some(a => a === email || (a.startsWith('@') && email.endsWith(a)))
 
 // ---- box tokens: HMAC(EDGE_SECRET) over {u: email, b: box id}. A token is honoured only while b is u's live box.
 const mac = (key, body) => createHmac('sha256', key).update(body).digest('base64url')
@@ -359,7 +360,7 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
   const dshUp = async (box) => (await run(box, "curl -s -o /dev/null -m 5 -w '%{http_code}' http://$(hostname -I | cut -d' ' -f1):3080/ || true")) !== '000'
 
   async function create(email) {
-    if (cfg.maxRunning > 0 && (await all({ state: ['running'] })).length >= cfg.maxRunning) throw Object.assign(new Error('capacity'), { status: 503, capacity: true })
+    if (await atCapacity(e2b, cfg, UNITS.box)) throw Object.assign(new Error('capacity'), { status: 503, capacity: true })
     const box = await e2b.Sandbox.create(email.startsWith('project:') ? cfg.projectTemplate : cfg.template, {
       timeoutMs: timeout(), metadata: { user: email },
       lifecycle: { onTimeout: 'pause', autoResume: true },

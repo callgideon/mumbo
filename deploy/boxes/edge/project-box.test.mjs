@@ -82,7 +82,7 @@ test('create() starts a project box from projectTemplate with the owners as pane
     },
   }
   const store = memoryStore()
-  const cfg = { ...c, template: 'T-user', projectTemplate: 'T-project', idleMs: 1000, maxRunning: 0 }
+  const cfg = { ...c, template: 'T-user', projectTemplate: 'T-project', idleMs: 1000, maxRunningUnits: 0 }
   const { id } = await projects({ store, admitted: () => true, log: () => {} }).create('Owner@x.com', 'P')
   const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'P', boxFiles, log: () => {} })
   await b.ensure(`project:${id}`)

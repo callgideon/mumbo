@@ -8,7 +8,7 @@ variable "e2b_sha" {
 }
 
 variable "node_count" {
-  description = "Sandbox nodes (ASG desired capacity). The edge admits 12 running boxes per node (4096 MB person boxes on 48 GiB of guest hugepages) minus 2 of headroom: MAX_RUNNING_BOXES = 12 * node_count - 2."
+  description = "Sandbox nodes: the ASG min and desired capacity (and so the nodes-below-min alarm threshold). The edge cap is MAX_RUNNING_UNITS = 2 * (12 * node_count - 2) capacity units: a 4096 MB person or project box is 2 units (edge/template.mjs memoryMB) and a 2048 MB child sandbox is 1 (the mumbo-child build argument), 12 boxes per node on 48 GiB of guest hugepages, minus 2 boxes of headroom."
   type        = number
   default     = 2
   validation {
@@ -18,14 +18,14 @@ variable "node_count" {
 }
 
 locals {
-  node_max_size = 10 # the node group max_size; node_count validates against it
-  node_type   = "r8i.2xlarge" # 8 vCPU, 64 GiB
-  hugepages   = 24576         # 48 GiB of 2 MiB pages for guests: 12 running 4 GiB boxes (review M5)
-  firecracker = "v1.14-0.2.0"
-  kernel      = "vmlinux-6.1.177_5008931"
-  busybox     = "1.36.1"
-  orch_dns    = "orchestrators.boxes.internal"
-  hook        = "drain"
+  node_max_size = 10            # the node group max_size; node_count validates against it
+  node_type     = "r8i.2xlarge" # 8 vCPU, 64 GiB
+  hugepages     = 24576         # 48 GiB of 2 MiB pages for guests: 12 running 4 GiB boxes (review M5)
+  firecracker   = "v1.14-0.2.0"
+  kernel        = "vmlinux-6.1.177_5008931"
+  busybox       = "1.36.1"
+  orch_dns      = "orchestrators.boxes.internal"
+  hook          = "drain"
 }
 
 resource "aws_security_group" "nodes" {
@@ -131,7 +131,7 @@ resource "aws_launch_template" "nodes" {
 
 resource "aws_autoscaling_group" "nodes" {
   name                      = "${local.name}-nodes"
-  min_size                  = min(2, var.node_count)
+  min_size                  = var.node_count
   max_size                  = local.node_max_size
   desired_capacity          = var.node_count
   vpc_zone_identifier       = module.vpc.private_subnets
