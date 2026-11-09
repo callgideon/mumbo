@@ -63,9 +63,10 @@ export function children({ e2b, cfg, log = console.log }) {
 
 /**
  * Node request handler for the MCP endpoint. `claimOf(req)` returns the caller's verified {u, b}; the model host
- * checks the token, ownership and source address before calling this.
+ * checks the token, ownership and source address before calling this. `projectDomain` (config PROJECT_DOMAIN) names
+ * where project boxes are served, p-<id>.<projectDomain>.
  */
-export function mcpServer({ ops, projects, relay, claimOf }) {
+export function mcpServer({ ops, projects, relay, projectDomain, claimOf }) {
   const tool = (claim, fn) => async (args) => {
     try {
       return { content: [{ type: 'text', text: JSON.stringify(await fn(claim, args), null, 2) }] }
@@ -103,7 +104,7 @@ export function mcpServer({ ops, projects, relay, claimOf }) {
     if (projects && claim && !claim.u.startsWith('project:')) {
       const pid = z.string().describe('Project id from project_create or project_list')
       mcp.registerTool('project_create', {
-        description: 'Create a shared project. It gets its own box with a coordinator agent at https://<this site>/p/<id>/; you are its owner and first member.',
+        description: `Create a shared project. It gets its own box with a coordinator agent at https://p-<id>.${projectDomain}/; you are its owner and first member.`,
         inputSchema: z.object({ name: z.string().min(1).max(80) }),
       }, tool(claim, (c, a) => projects.create(c.u, a.name)))
       mcp.registerTool('project_list', { description: 'List the projects you are a member of.', inputSchema: z.object({}) }, tool(claim, (c) => projects.list(c.u)))

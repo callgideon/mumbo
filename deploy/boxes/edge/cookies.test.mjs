@@ -65,7 +65,7 @@ test('a WebSocket upgrade reaches the box without the sign-in cookie, and its 10
   const server = userServer({ cfg, box, log: () => {} })
   const port = await listen(server)
   try {
-    const ws = await call(port, { host: 'boxes.mumbo.si', 'x-forwarded-email': 'a@x.com', cookie: '_oauth2_proxy=a; dsh-auth-x=c', connection: 'Upgrade', upgrade: 'websocket' }, { upgrade: true })
+    const ws = await call(port, { host: 'boxes.mumbo.si', origin: 'https://boxes.mumbo.si', 'x-forwarded-email': 'a@x.com', cookie: '_oauth2_proxy=a; dsh-auth-x=c', connection: 'Upgrade', upgrade: 'websocket' }, { upgrade: true })
     assert.ok(ws.upgraded, JSON.stringify(ws))
     assert.equal(seen[0].cookie, 'dsh-auth-x=c')
     assert.deepEqual(ws.headers['set-cookie'], ['t=1; Path=/; Secure', 'u=2; Path=/; Secure'])

@@ -17,8 +17,15 @@ const checkNames = (name, fallback) => {
   if (names.length === 0) throw new Error(`edge: ${name} must name at least one check`)
   return names
 }
+/** A bare lowercase hostname with at least one dot: no scheme, port, path or trailing dot. Anything else fails at start. */
+const hostname = (name, fallback) => {
+  const value = env(name, fallback)
+  if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(value)) throw new Error(`edge: ${name} must be a bare lowercase hostname such as boxes.mumbo.si, not ${JSON.stringify(value)}`)
+  return value
+}
 export const config = () => ({
   publicHost: env('PUBLIC_HOST'),
+  projectDomain: hostname('PROJECT_DOMAIN', 'boxes.mumbo.si'),  // project boxes are served at p-<16 hex>.<this>
   llmHost: env('LLM_HOST'),
   template: env('BOX_TEMPLATE', 'mumbo-box'),
   idleMs: Number(env('IDLE_MINUTES', '30')) * 60_000,
@@ -75,8 +82,8 @@ export { budget } from './budget.mjs'
 
 /**
  * Where a box is served. A user's box is the site root with a desktop; a project box (principal `project:<id>`) is
- * served under /p/<id>/ with its own masked host, so its dsh cookie name differs from the user's box, and no desktop:
- * it never holds anyone's signed-in browser.
+ * the root of its own origin, p-<id>.<project domain>, so script it serves cannot drive the user's box, and has no
+ * desktop: it never holds anyone's signed-in browser.
  */
 // ---- project members (dsh @mumbo/edge-member). Each project box gets its own key, HMAC(edge key, "member:" + box id),
 // as MUMBO_MEMBER_KEY (unpadded base64url of the 32 bytes); the edge signs x-mumbo-member with it on every request:
@@ -95,7 +102,7 @@ export function roleInstructions(cfg, principal) {
   if (project) return [
     '# Project coordinator',
     '',
-    `You coordinate the shared mumbo project ${project}. Its members reach you at https://${cfg.publicHost}/p/${project}/ and through their own assistants; a message relayed by an assistant starts with [from <email>].`,
+    `You coordinate the shared mumbo project ${project}. Its members reach you at ${boxSite(cfg, principal).publicUrl} and through their own assistants; a message relayed by an assistant starts with [from <email>].`,
     '',
     '- Keep the project in /root/projects. Run installs, builds, servers and tests in sandboxes (sandbox_* tools), not in this box.',
     '- Plan the work, report progress to the member who asked, and ask them when a decision or an account is needed.',
@@ -119,7 +126,7 @@ export function boxSite(cfg, principal) {
   const id = principal.startsWith('project:') ? principal.slice('project:'.length) : undefined
   return id === undefined
     ? { host: cfg.publicHost, publicUrl: `https://${cfg.publicHost}/`, desktop: true }
-    : { host: `p-${id}.${cfg.publicHost}`, publicUrl: `https://${cfg.publicHost}/p/${id}/`, desktop: false }
+    : { host: `p-${id}.${cfg.projectDomain}`, publicUrl: `https://p-${id}.${cfg.projectDomain}/`, desktop: false }
 }
 
 // ---- inside a box. It never sees a server secret: its DeepSeek key is its own box token, valid only via LLM_HOST.
@@ -486,16 +493,18 @@ const page = (res, status, text, refresh = true) => res.writeHead(status, { 'con
   .end(`<!doctype html><meta charset="utf-8"><title>mumbo</title><body style="font-family:system-ui;display:grid;place-items:center;min-height:90vh;margin:0"><p>${text}</p>`)
 const DROP = new Set(['connection', 'keep-alive', 'proxy-connection', 'transfer-encoding', 'upgrade', 'te', 'trailer', 'host', 'authorization', 'x-mumbo-member'])
 
-/** Headers for the box: client headers minus hop-by-hop, identity and E2B headers, plus E2B routing for this box only. */
-/** Which box port a request goes to: the desktop live view (noVNC, :6080) under /desktop/, otherwise dsh (:3080). */
-export function boxRoute(url) {
-  const p = /^\/p\/([a-z0-9]{16})(\/.*)?$/.exec(url)
-  if (p) return p[2] ? { project: p[1], port: '3080', path: p[2], base: `/p/${p[1]}` } : { redirect: `/p/${p[1]}/` }
+/** Which box port a main-host request goes to: the desktop live view (noVNC, :6080) under /desktop/, otherwise dsh
+ *  (:3080). The old project path /p/<id>/… redirects to the project's own origin (boxSite). */
+export function boxRoute(url, projectDomain) {
+  const p = /^\/p\/([0-9a-f]{16})(\/.*)?$/.exec(url)
+  if (p) return { redirect: `https://p-${p[1]}.${projectDomain}${p[2] ?? '/'}` }
   if (url === '/desktop' || url === '/desktop/') return { redirect: '/desktop/vnc.html?autoconnect=1&resize=remote&path=desktop/websockify' }
   if (url.startsWith('/desktop/')) return { port: '6080', path: url.slice('/desktop'.length), base: '' }
   return { port: '3080', path: url, base: '' }
 }
-export function boxHeaders(cfg, incoming, target, port = '3080', siteHost = cfg.publicHost) {
+/** Headers for the box: client headers minus hop-by-hop, identity and E2B headers, plus E2B routing for this box only.
+ *  The browser's Origin passes unchanged; dsh accepts it only when it equals the box's masked host (boxSite). */
+export function boxHeaders(cfg, incoming, target, port = '3080') {
   const out = {}
   for (const [k, v] of Object.entries(incoming)) if (!DROP.has(k) && !k.startsWith('x-forwarded-') && !k.startsWith('e2b-')) out[k] = v
   // The sign-in cookie (oauth2-proxy) never reaches a box: a box that saw it could replay it as the signed-in person.
@@ -506,18 +515,15 @@ export function boxHeaders(cfg, incoming, target, port = '3080', siteHost = cfg.
   out.host = `sandbox.${cfg.publicHost}`
   out['e2b-sandbox-id'] = target.id
   out['e2b-sandbox-port'] = port
-  // dsh accepts a browser Origin only when it equals the Host it sees, and a project box sees its own masked host.
-  // Our own site's origin is translated to it; any other origin passes unchanged, so dsh still refuses it.
-  if (siteHost !== cfg.publicHost && out.origin === `https://${cfg.publicHost}`) out.origin = `https://${siteHost}`
   if (target.traffic) out['e2b-traffic-access-token'] = target.traffic
   return out
 }
 export const esc = (v) => String(v).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 /** The signed-in person's home: their assistant, their desktop and the shared projects they belong to. Edge-served,
  *  so it loads without starting any box. */
-export function homePage(res, email, projects) {
+export function homePage(cfg, res, email, projects) {
   const rows = projects.length
-    ? projects.map(p => `<li><a href="/p/${esc(p.id)}/">${esc(p.name)}</a> <small>${esc(p.members.length)} member${p.members.length === 1 ? '' : 's'}${p.owner === email ? ', yours' : ''}</small></li>`).join('')
+    ? projects.map(p => `<li><a href="${esc(boxSite(cfg, `project:${p.id}`).publicUrl)}">${esc(p.name)}</a> <small>${esc(p.members.length)} member${p.members.length === 1 ? '' : 's'}${p.owner === email ? ', yours' : ''}</small></li>`).join('')
     : '<li><small>None yet. Ask your assistant to create one.</small></li>'
   res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>mumbo</title>
 <style>body{font-family:system-ui;max-width:40rem;margin:3rem auto;padding:0 1rem;line-height:1.5}a{color:inherit}h1{font-size:1.4rem}h2{font-size:1rem;margin-top:2rem}ul{padding-left:1.2rem}small{color:#666}</style>
@@ -525,10 +531,11 @@ export function homePage(res, email, projects) {
 <ul><li><a href="/">Your assistant</a></li><li><a href="/desktop/">Your desktop</a> <small>sign in to your accounts here</small></li></ul>
 <h2>Projects</h2><ul>${rows}</ul>`)
 }
-/** One request from the edge itself to a box's dsh through the client-proxy, as our own site's browser would send it. */
+/** One request from the edge itself to a box's dsh through the client-proxy, as a browser on the box's own origin
+ *  (`siteHost`, boxSite) would send it. */
 export const boxFetcher = (cfg) => (target, siteHost, path, { method = 'GET', headers = {}, body, member } = {}) => new Promise((resolve, reject) => {
   const req = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method, path,
-    headers: { ...boxHeaders(cfg, { ...headers, origin: `https://${cfg.publicHost}`, ...(body ? { 'content-length': Buffer.byteLength(body) } : {}) }, target, '3080', siteHost), ...(member ? { 'x-mumbo-member': member } : {}) } }, (r) => {
+    headers: { ...boxHeaders(cfg, { ...headers, origin: `https://${siteHost}`, ...(body ? { 'content-length': Buffer.byteLength(body) } : {}) }, target, '3080'), ...(member ? { 'x-mumbo-member': member } : {}) } }, (r) => {
     const chunks = []
     r.on('data', c => chunks.push(c)).on('end', () => resolve({ status: r.statusCode, setCookie: r.headers['set-cookie'] ?? [], body: Buffer.concat(chunks).toString() }))
   })
@@ -543,20 +550,41 @@ export const secureCookies = (headers) => {
   if (c) headers['set-cookie'] = c.map(v => v.replace(/;\s*domain=[^;]*/gi, '')).map(v => /;\s*secure/i.test(v) ? v : `${v}; Secure`)
   return headers
 }
+/** No other origin may frame a page from a box: a project page could otherwise show, and clickjack, the visitor's
+ *  signed-in desktop. A box's own frame-ancestors and X-Frame-Options are kept; a CSP without frame-ancestors gains ours. */
+export const noFraming = (headers) => {
+  headers['x-frame-options'] ??= 'SAMEORIGIN'
+  const csp = headers['content-security-policy']
+  if (csp === undefined) headers['content-security-policy'] = "frame-ancestors 'self'"
+  else if (!/(?:^|[;,])\s*frame-ancestors(?:\s|;|,|$)/i.test(csp)) headers['content-security-policy'] = `${csp}; frame-ancestors 'self'`
+  return headers
+}
 /** A browser with no dsh cookie and no token is sent to the token exchange, as nginx did for the shared server. */
 export const needsLaunch = (req) => req.method === 'GET' && !/(?:^|;\s*)dsh-auth-/.test(req.headers.cookie ?? '') && !new URL(req.url, 'http://x').searchParams.has('token')
 const isNavigation = (req) => req.method === 'GET' && String(req.headers.accept ?? '').includes('text/html')
 /** The request's Host, lowercased and without a port. */
 const hostOf = (req) => String(req.headers.host ?? '').toLowerCase().replace(/:\d+$/, '')
 
-/** Signed-in users' traffic. Only the public host reaches boxes; `approve` (approve-page.mjs) serves cfg.approveHost,
- *  an origin no box serves; any other host answers 404. */
+/** Signed-in users' traffic. The public host reaches the user's own box and p-<16 hex>.<project domain> a project's
+ *  box, for its members only; `approve` (approve-page.mjs) serves cfg.approveHost, an origin no box serves; any other host
+ *  answers 404. */
 export function userServer({ cfg, box, verifyAlb, projects, approve, log = console.log }) {
   const identify = async (req) => verifyAlb
     ? (await verifyAlb(req.headers['x-amzn-oidc-data']).catch(() => undefined)) ?? ''
     : String(req.headers['x-forwarded-email'] ?? '').toLowerCase()
   const quiet = (p) => { Promise.resolve(p).catch(() => {}) }
+  // A project box is the root of its own origin (boxSite): every path on that host, /home included, goes to its dsh.
+  // undefined: a host no box serves.
+  const routeOf = (host, url) => {
+    const label = host.endsWith(`.${cfg.projectDomain}`) ? host.slice(0, -cfg.projectDomain.length - 1) : ''
+    const project = /^p-([0-9a-f]{16})$/.exec(label)?.[1]
+    if (project) return { project, port: '3080', path: url, base: '' }
+    if (host === cfg.publicHost) return boxRoute(url, cfg.projectDomain)
+  }
   const server = createServer(async (req, res) => {
+    // The edge's own pages; a box's response replaces these through noFraming.
+    res.setHeader('x-frame-options', 'SAMEORIGIN')
+    res.setHeader('content-security-policy', "frame-ancestors 'self'")
     if (req.url === '/edge/healthz') return json(res, 200, { ok: true })
     const email = await identify(req)
     if (!email.includes('@')) return json(res, 401, { error: 'not signed in' })
@@ -566,12 +594,14 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, log = conso
       log(JSON.stringify({ edge: 'error', user: email, host, error: e.message }))
       if (!res.headersSent) page(res, 500, 'The approve page failed. Reload to try again.', false); else res.destroy()
     })
-    if (host !== cfg.publicHost) return page(res, 404, 'Not found.', false)
-    if (req.url === '/home' || req.url === '/home/') return homePage(res, email, await projects?.list(email) ?? [])
-    const to = boxRoute(req.url)
+    const to = routeOf(host, req.url)
+    if (!to) return page(res, 404, 'Not found.', false)
+    if (!to.project && (req.url === '/home' || req.url === '/home/')) return homePage(cfg, res, email, await projects?.list(email) ?? [])
     if (to.redirect) return res.writeHead(302, { location: to.redirect, 'cache-control': 'no-store' }).end()
-    // A project path reaches the project's box, for its members only (projects.mjs).
-    if (to.project && !(await projects?.isMember(email, to.project))) return page(res, 404, 'No such project, or you are not one of its members.', false)
+    // dsh refuses a cross-origin /api request itself; the desktop (websockify) checks no Origin, so anything but a read
+    // must come from its own page.
+    if (to.port === '6080' && req.method !== 'GET' && req.method !== 'HEAD' && req.headers.origin !== `https://${host}`) return page(res, 403, 'Forbidden.', false)
+    if (to.project && !(await projects?.isMember(email, to.project))) return page(res, 403, 'No such project, or you are not one of its members.', false)
     let target
     try { target = await box.ensure(to.project ? `project:${to.project}` : email) } catch (e) {
       log(JSON.stringify({ edge: 'error', user: email, project: to.project, error: e.message }))
@@ -583,27 +613,30 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, log = conso
     const launch = `${to.base}/?token=${target.token}`
     if (dsh && !member && needsLaunch(req)) return res.writeHead(302, { location: launch, 'cache-control': 'no-store' }).end()
     quiet(box.touch(target.id))
-    const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: to.path, headers: { ...boxHeaders(cfg, req.headers, target, to.port, boxSite(cfg, to.project ? `project:${to.project}` : email).host), ...(member ? { 'x-mumbo-member': member } : {}) } }, (r) => {
+    const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: to.path, headers: { ...boxHeaders(cfg, req.headers, target, to.port), ...(member ? { 'x-mumbo-member': member } : {}) } }, (r) => {
       // A stale cookie (another account on this browser, or a recreated box) gets a fresh exchange instead of a dead end.
       if (dsh && !member && r.statusCode === 401 && isNavigation(req)) { r.resume(); return res.writeHead(302, { location: launch, 'cache-control': 'no-store' }).end() }
-      res.writeHead(r.statusCode ?? 502, secureCookies({ ...r.headers }))
+      res.writeHead(r.statusCode ?? 502, noFraming(secureCookies({ ...r.headers })))
       r.pipe(res)
     })
     up.on('error', (e) => { quiet(box.forget(target.id)); if (!res.headersSent) page(res, 502, 'Could not reach your box. Retrying…'); else res.destroy(); log(JSON.stringify({ edge: 'error', user: email, error: e.message })) })
     req.pipe(up)
   })
   server.on('upgrade', async (req, socket, head) => {
-    // As for HTTP, only the public host's WebSockets reach a box; the approve host and unknown hosts are refused.
-    if (hostOf(req) !== cfg.publicHost) return socket.destroy()
+    // As for HTTP, only the public host's and project hosts' WebSockets reach a box; the approve host and unknown hosts
+    // are refused. So is an upgrade whose Origin is not this host (browsers always send one): the sign-in cookie covers
+    // every subdomain, so a project page could otherwise open the visitor's desktop, whose noVNC checks no Origin.
+    const host = hostOf(req)
+    const to = routeOf(host, req.url)
+    if (!to || req.headers.origin !== `https://${host}`) return socket.destroy()
     const email = await identify(req)
     if (!email.includes('@') || !admitted(cfg.allowed, email)) return socket.destroy()
     try {
-      const to = boxRoute(req.url)
       if (to.redirect || (to.project && !(await projects?.isMember(email, to.project)))) return socket.destroy()
       const target = await box.ensure(to.project ? `project:${to.project}` : email)
       quiet(box.touch(target.id))
       const member = to.project && target.member ? target.member(email) : undefined
-      const headers = { ...boxHeaders(cfg, req.headers, target, to.port, boxSite(cfg, to.project ? `project:${to.project}` : email).host), ...(member ? { 'x-mumbo-member': member } : {}), connection: 'Upgrade', upgrade: req.headers.upgrade ?? 'websocket' }
+      const headers = { ...boxHeaders(cfg, req.headers, target, to.port), ...(member ? { 'x-mumbo-member': member } : {}), connection: 'Upgrade', upgrade: req.headers.upgrade ?? 'websocket' }
       const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: to.path, headers })
       up.on('upgrade', (r, upSocket, upHead) => {
         const lines = Object.entries(secureCookies({ ...r.headers })).flatMap(([k, v]) => [v].flat().map(x => `${k}: ${x}`))
@@ -738,7 +771,7 @@ async function main() {
 
   userServer({ cfg, box, verifyAlb, projects: proj, approve }).listen(8080, listenHost, () => console.log(`edge: users on ${listenHost}:8080`))
   const { children, mcpServer } = await import('./sandboxes.mjs')
-  const mcp = mcpServer({ ops: children({ e2b, cfg }), projects: proj, relay, claimOf: (info) => verifyBox(edgeKey, String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
+  const mcp = mcpServer({ ops: children({ e2b, cfg }), projects: proj, relay, projectDomain: cfg.projectDomain, claimOf: (info) => verifyBox(edgeKey, String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
   modelServer({ cfg, edgeKey, modelKey, allow: budget(store, cfg.dailyRequests), owns: box.owns, touch: box.touch, mcp, github, halt, tokens })
     .listen(8081, modelHost, () => console.log(`edge: model host on ${modelHost}:8081`))
 }
