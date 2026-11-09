@@ -124,7 +124,7 @@ Remote 路由提供 `create`、`list`、`catalog`、`view`、`history`、`edit`�
 <a id="host-delivery"></a>
 ## 宿主投递
 
-一个 Host 定时器驱动活动任务。运行时与管理写入共用一个 FIFO。已有和预留 Session 通过 `schedule/resolve-agent` 解析，由嵌入环境拥有激活，已注入的 Web 控制器作为后备。复用 Session 的任务占用执行槽，直到目标 Agent 空闲；期间发生的时点会合并。`new` 目标允许多个执行并行。到期且投向相同已有 Session 的重复记录共享一条消息；`after` 和 `at` 单独投递。
+一个 Host 定时器驱动活动任务。它至少每分钟重新读取一次墙上时间，并且只在下一个任务到期时驱动，因此挂起过的主机或从快照恢复的虚拟机会在唤醒后一分钟内交付。运行时与管理写入共用一个 FIFO。已有和预留 Session 通过 `schedule/resolve-agent` 解析，由嵌入环境拥有激活，已注入的 Web 控制器作为后备。复用 Session 的任务占用执行槽，直到目标 Agent 空闲；期间发生的时点会合并。`new` 目标允许多个执行并行。到期且投向相同已有 Session 的重复记录共享一条消息；`after` 和 `at` 单独投递。
 
 定时与手动投递均遵守单任务 60 秒最小间隔。`newSessionIntervalSeconds` 可为 `new` 目标提高间隔，最多一周。已存后继时点保持间隔时，下界从上次发生时点计算；否则从上次确认计算，因此投递延迟不会移动规则锚点。读取仅在适用时暴露 `executionActive` 和 `deliveryFloorEndsAt`。
 
