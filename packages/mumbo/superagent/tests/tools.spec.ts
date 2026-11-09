@@ -431,6 +431,14 @@ it('syncs a Policy through the panel with the whole Policy', async () => {
   const { status, body } = await h.api('POST', 'policy-sync/feishu')
   expect(status).toBe(200)
   expect(JSON.stringify(body)).toContain('Bob')
+  const allowed = JSON.stringify(h.runtime.store.settings().policy.sources.feishu?.allowed)
+  expect(allowed).toContain('ou_bob')
+  expect(allowed).toContain('ou_alice')
+})
+
+it('no longer offers the prompt-preview resource', async () => {
+  expect(RESOURCES.map(resource => resource.name)).not.toContain('prompt-preview/<id>')
+  await expect(read('prompt-preview/abc')).rejects.toThrow()
 })
 
 it('shows an Executor Session no id it cannot read: no Decision, no other ticket, no Trigger its ticket did not reach', async () => {

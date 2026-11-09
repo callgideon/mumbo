@@ -777,7 +777,7 @@ it('finds triggers by #PR number, GitHub link prefix and Feishu message id', asy
   expect(search(viewsOf(runtime), 'https://x/y?id=om_30', new TextCache(0)).items.map(item => item.id)).toContain(message.id)
 })
 
-it('keeps pages of Source reads, prompt previews and Feishu message links in memory, outside the kv area', async () => {
+it('keeps pages of Source reads and Feishu message links in memory, outside the kv area', async () => {
   const message = feishu('30', '随便说说', { mentions: [] })
   await receive(message)
   const link = 'https://applink.feishu.cn/client/message/link/open?token=t30'
@@ -785,8 +785,7 @@ it('keeps pages of Source reads, prompt previews and Feishu message links in mem
   expect(await runTool(runtime.masterId, 'orchestrator_read', { resource: `trigger/${message.id}` })).toMatchObject({ source_url: link })
   // An AppLink is found by the links read since dsh-superagent started.
   expect((await api('GET', `search?q=${encodeURIComponent(link)}`)).body).toMatchObject({ items: [expect.objectContaining({ id: message.id })] })
-  await api('POST', 'prompts/preview', runtime.prompts.current().config)
-  expect(runtime.store.keys('').filter(name => /-read:|source-link:|prompt-preview\//.test(name))).toEqual([])
+  expect(runtime.store.keys('').filter(name => /-read:|source-link:/.test(name))).toEqual([])
 })
 
 it('reads resources recorded under the pre-vocabulary names', async () => {
