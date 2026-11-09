@@ -559,3 +559,73 @@ test('never-pause keepalive drops a box E2B no longer has', async () => {
   await b.sweep(Date.now() + 6 * 60_000)
   assert.equal(await store.getBox(id), undefined)
 })
+
+// ---- project members (dsh @mumbo/edge-member)
+test('member header: exact format, signed with the per-box key, 5 minutes', async () => {
+  const { memberKey, memberHeader } = await import('./edge.mjs')
+  const { createHmac } = await import('node:crypto')
+  const key = memberKey('edge-secret', 'box1')
+  assert.equal(key.length, 32)
+  assert.deepEqual(key, createHmac('sha256', 'edge-secret').update('member:box1').digest())
+  const h = memberHeader(key, 'A@X.com', 1_000_000_000)
+  const [e, exp, mac] = h.split('.')
+  assert.equal(Buffer.from(e, 'base64url').toString(), 'a@x.com')
+  assert.equal(Number(exp), 1_000_300)
+  assert.equal(mac, createHmac('sha256', key).update(`${e}.${exp}`).digest('base64url'))
+  assert.ok(!h.includes('='))
+})
+
+test('project start script carries the member key and loads the project overlay only when the image has it', async () => {
+  const c = { llmHost: 'l', publicHost: 'boxes.x' }
+  const { boxSite } = await import('./edge.mjs')
+  const p = startScript(c, 'T', boxSite(c, 'project:0123456789abcdef'), 'role', 'KEYTEXT')
+  assert.match(p, /export MUMBO_MEMBER_KEY=KEYTEXT/)
+  assert.match(p, /if \[ -f \/src\/deploy\/mumbo-project\.overlay\.yml \]; then PROJECT_PATCH="--patch \/src\/deploy\/mumbo-project\.overlay\.yml"; touch \/root\/\.mumbo\/member-auth; else rm -f \/root\/\.mumbo\/member-auth; fi/)
+  assert.match(p, /sandboxes\.overlay\.yml \$PROJECT_PATCH/)
+  const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role')
+  assert.ok(!u.includes('MUMBO_MEMBER_KEY') && !u.includes('PROJECT_PATCH'))
+})
+
+test('routing: browser member headers are stripped; member-capable project boxes get the member, never the owner token', async () => {
+  const { memberKey, memberHeader } = await import('./edge.mjs')
+  const seen = []
+  const upstream = createServer((req, res) => { seen.push({ path: req.url, member: req.headers['x-mumbo-member'] }); res.writeHead(req.url === '/deny' ? 401 : 200).end('ok') })
+  await new Promise(r => upstream.listen(0, '127.0.0.1', r))
+  const key = memberKey('k', 'pbox')
+  const proj = projectStore({ store: memoryStore(), admitted: () => true, log: () => {} })
+  const capable = (await proj.create('a@x.com', 'Capable')).id
+  const legacy = (await proj.create('a@x.com', 'Legacy')).id
+  const box = { ensure: async (p) => p === `project:${capable}` ? { id: 'pbox', token: 'OWNER', member: (e) => memberHeader(key, e) } : { id: p === 'a@x.com' ? 'ubox' : 'lbox', token: 'OWNER' }, touch: async () => {}, forget: async () => {} }
+  const server = userServer({ cfg: { ...cfg, allowed: ['@x.com'], proxy: new URL(`http://127.0.0.1:${upstream.address().port}`) }, box, projects: proj, log: () => {} })
+  await new Promise(r => server.listen(0, '127.0.0.1', r))
+  const base = `http://127.0.0.1:${server.address().port}`
+  const go = (path, extra = {}) => fetch(base + path, { headers: { 'x-forwarded-email': 'a@x.com', accept: 'text/html', cookie: 'dsh-auth-x=1', ...extra }, redirect: 'manual' })
+  try {
+    await go('/', { 'x-mumbo-member': 'forged' })
+    assert.equal(seen.at(-1).member, undefined, 'a browser-sent member header never reaches a box')
+    const r = await fetch(`${base}/p/${capable}/`, { headers: { 'x-forwarded-email': 'a@x.com', accept: 'text/html' }, redirect: 'manual' })
+    assert.equal(r.status, 200, 'no owner launch redirect for a member')
+    const [e, , mac] = seen.at(-1).member.split('.')
+    assert.equal(Buffer.from(e, 'base64url').toString(), 'a@x.com'); assert.ok(mac)
+    assert.equal((await go(`/p/${capable}/deny`)).status, 401, 'a member 401 is not turned into an owner launch')
+    const old = await fetch(`${base}/p/${legacy}/`, { headers: { 'x-forwarded-email': 'a@x.com', accept: 'text/html' }, redirect: 'manual' })
+    assert.equal(old.headers.get('location'), `/p/${legacy}/?token=OWNER`, 'a box without the member plugin keeps the launch flow')
+  } finally { server.close(); upstream.close() }
+})
+
+test('relay to a member-capable box sends the member header and no owner sign-in', async () => {
+  const { projectRelay } = await import('./projects.mjs')
+  const store = memoryStore()
+  const proj = projectStore({ store, admitted: () => true, log: () => {} })
+  const { id } = await proj.create('a@x.com', 'P')
+  const calls = []
+  const boxFetch = async (target, host, path, init) => {
+    calls.push({ path, member: init.member, cookie: init.headers?.cookie })
+    const req = JSON.parse(init.body)
+    return { status: 200, setCookie: [], body: JSON.stringify({ result: { ok: true, value: req.method === 'session/create' ? { sessionId: 'S' } : { accepted: true } } }) }
+  }
+  const box = { ensure: async () => ({ id: 'pbox', token: 'OWNER', member: (e) => `hdr-for-${e}` }) }
+  const relay = projectRelay({ store, projects: proj, box, boxFetch, siteHostOf: () => 'h', log: () => {} })
+  await relay.message('a@x.com', id, 'hi')
+  assert.ok(calls.every(c => c.member === 'hdr-for-a@x.com' && c.cookie === undefined && !c.path.startsWith('/?token=')))
+})

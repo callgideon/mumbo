@@ -56,6 +56,15 @@ export function budget(store, limit) {
  * served under /p/<id>/ with its own masked host, so its dsh cookie name differs from the user's box, and no desktop:
  * it never holds anyone's signed-in browser.
  */
+// ---- project members (dsh @mumbo/edge-member). Each project box gets its own key, HMAC(edge key, "member:" + box id),
+// as MUMBO_MEMBER_KEY (unpadded base64url of the 32 bytes); the edge signs x-mumbo-member with it on every request:
+// <b64url email>.<expiry s>.<b64url HMAC-SHA256(key, "<b64url email>.<expiry>")>, valid 5 minutes.
+export const memberKey = (edgeKey, boxId) => createHmac('sha256', edgeKey).update(`member:${boxId}`).digest()
+export function memberHeader(key, email, now = Date.now()) {
+  const body = `${Buffer.from(email.toLowerCase()).toString('base64url')}.${Math.floor(now / 1000) + 300}`
+  return `${body}.${createHmac('sha256', key).update(body).digest('base64url')}`
+}
+
 /** The standing instructions for the box's agents (dsh agent-instructions, user-global chain). Edge-owned and
  *  rewritten on every start; the user's own instructions belong in $DSH_HOME/AGENTS.md. Founder decisions: account
  *  reads are free and writes ask; projects are shared and coordinated in their own box (ASSISTANT.md). */
@@ -92,7 +101,7 @@ export function boxSite(cfg, principal) {
 }
 
 // ---- inside a box. It never sees a server secret: its DeepSeek key is its own box token, valid only via LLM_HOST.
-export function startScript(cfg, token, site = boxSite(cfg, ''), role = '') {
+export function startScript(cfg, token, site = boxSite(cfg, ''), role = '', memberKeyText) {
   const llm = `https://${cfg.llmHost}`
   return `#!/bin/sh
 # Start dsh web for this box's user. Re-runnable: the router calls it again when dsh is found dead.
@@ -134,11 +143,16 @@ if id browser >/dev/null 2>&1; then
   pgrep -x x11vnc >/dev/null || su browser -s /bin/sh -c 'x11vnc -display :1 -localhost -forever -shared -nopw -rfbport 5900 -quiet >/tmp/x11vnc.log 2>&1 &'
   pgrep -f websockify >/dev/null || nohup websockify --web /usr/share/novnc "$ip:6080" 127.0.0.1:5900 >/tmp/websockify.log 2>&1 &
 fi
+` : ''}${memberKeyText ? `# Project box: members sign in with the edge's x-mumbo-member header when the image ships the project overlay
+# (@mumbo/edge-member); the marker tells the edge to use it instead of the owner launch token.
+PROJECT_PATCH=
+if [ -f /src/deploy/mumbo-project.overlay.yml ]; then PROJECT_PATCH="--patch /src/deploy/mumbo-project.overlay.yml"; touch /root/.mumbo/member-auth; else rm -f /root/.mumbo/member-auth; fi
+export MUMBO_MEMBER_KEY=${memberKeyText}
 ` : ''}cd /src
 HOME=/root DSH_HOME=/root/.dsh DSH_AGENTS_HOME=/root/.mumbo/agents DSH_TELEMETRY_DISABLED=1 \\
 DEEPSEEK_BASE_URL=${llm}/anthropic DEEPSEEK_SEARCH_BASE_URL=${llm} DEEPSEEK_API_KEY=${token} \\
 nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\
-  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml \\
+  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml${memberKeyText ? ' $PROJECT_PATCH' : ''} \\
   --no-open --host "$ip" --port 3080 --public-url ${site.publicUrl} --trusted-host ${cfg.publicHost}${site.host === cfg.publicHost ? '' : ` --trusted-host ${site.host}`} > /root/dsh.log 2>&1 &
 `
 }
@@ -191,6 +205,7 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, log = 
     }
     throw Object.assign(new Error('dsh did not start'), { status: 503 })
   }
+  const memberAuth = async (box) => (await run(box, 'test -f /root/.mumbo/member-auth && echo yes || true')) === 'yes'
   const dshUp = async (box) => (await run(box, "curl -s -o /dev/null -m 5 -w '%{http_code}' http://$(hostname -I | cut -d' ' -f1):3080/ || true")) !== '000'
 
   async function create(email) {
@@ -203,7 +218,8 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, log = 
     // Recorded before the restore: other replicas then neither adopt nor back up a box whose data is half restored.
     await store.putBox(box.sandboxId, { email, creating: Date.now(), active: Date.now(), extended: Date.now(), backedUp: Date.now(), paused: false })
     try {
-      await box.files.write('/root/.mumbo/start.sh', startScript(cfg, signBox(edgeKey, email, box.sandboxId), boxSite(cfg, email), roleInstructions(cfg, email)))
+      await box.files.write('/root/.mumbo/start.sh', startScript(cfg, signBox(edgeKey, email, box.sandboxId), boxSite(cfg, email), roleInstructions(cfg, email),
+        email.startsWith('project:') ? memberKey(edgeKey, box.sandboxId).toString('base64url') : undefined))
       const restoreUrl = await presignGet(`${userPrefix(email)}/latest.tar.gz`)
       if (restoreUrl) {
         const ok = await run(box, restoreCommand(restoreUrl), 660_000).then(() => true, () => false)
@@ -211,7 +227,7 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, log = 
       }
       await run(box, 'chmod +x /root/.mumbo/start.sh && /root/.mumbo/start.sh')
       const now = Date.now()
-      await store.putBox(box.sandboxId, { email, launch: await launchToken(box), traffic: box.trafficAccessToken, active: now, extended: now, backedUp: now, paused: false })
+      await store.putBox(box.sandboxId, { email, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), active: now, extended: now, backedUp: now, paused: false })
       say({ msg: 'created', user: email, box: box.sandboxId })
       return box.sandboxId
     } catch (error) {
@@ -238,7 +254,7 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, log = 
             await run(box, '/root/.mumbo/start.sh')
           }
           const now = Date.now()
-          await store.putBox(id, { email, launch: await launchToken(box), traffic: box.trafficAccessToken, active: now, extended: now, backedUp: known?.backedUp ?? 0, paused: false })
+          await store.putBox(id, { email, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), active: now, extended: now, backedUp: known?.backedUp ?? 0, paused: false })
         } catch (error) {
           // A snapshot that cannot be resumed (its node died before the upload finished, or dsh never comes back)
           // must not strand the user: drop it and rebuild from the latest S3 backup.
@@ -252,7 +268,12 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, log = 
       return pick(id)
     })
   }
-  const pick = async (id) => { const b = await store.getBox(id); return { id, token: b.launch, traffic: b.traffic } }
+  const pick = async (id) => {
+    const b = await store.getBox(id)
+    // A project box whose image runs @mumbo/edge-member: members get a signed header, never the owner launch token.
+    const member = b.memberAuth ? (email) => memberHeader(memberKey(edgeKey, id), email) : undefined
+    return { id, token: b.launch, traffic: b.traffic, ...(member ? { member } : {}) }
+  }
 
   /** Record activity (a browser request, a WebSocket frame or a model call) and push E2B's own pause timer out. */
   async function touch(id) {
@@ -334,7 +355,7 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, log = 
     await store.withLock(`user:${b.email}`, LOCK_MS, async () => {
       const box = await e2b.Sandbox.connect(b.id, { timeoutMs: timeout() })
       await run(box, '/root/.mumbo/start.sh')
-      await store.patchBox(b.id, { paused: false, wakeAt: undefined, active: now, extended: now, launch: await launchToken(box), traffic: box.trafficAccessToken })
+      await store.patchBox(b.id, { paused: false, wakeAt: undefined, active: now, extended: now, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box) })
       say({ msg: 'woke for schedule', user: b.email, box: b.id })
     }).catch(e => say({ level: 'error', msg: 'wake failed', user: b.email, box: b.id, error: e.message }))
   }
@@ -382,7 +403,7 @@ export function albIdentity({ albArn, region, fetchImpl = fetch, now = () => Dat
 const json = (res, status, value) => res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(value))
 const page = (res, status, text, refresh = true) => res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...(refresh ? { refresh: '5' } : {}) })
   .end(`<!doctype html><meta charset="utf-8"><title>mumbo</title><body style="font-family:system-ui;display:grid;place-items:center;min-height:90vh;margin:0"><p>${text}</p>`)
-const DROP = new Set(['connection', 'keep-alive', 'proxy-connection', 'transfer-encoding', 'upgrade', 'te', 'trailer', 'host', 'authorization'])
+const DROP = new Set(['connection', 'keep-alive', 'proxy-connection', 'transfer-encoding', 'upgrade', 'te', 'trailer', 'host', 'authorization', 'x-mumbo-member'])
 
 /** Headers for the box: client headers minus hop-by-hop, identity and E2B headers, plus E2B routing for this box only. */
 /** Which box port a request goes to: the desktop live view (noVNC, :6080) under /desktop/, otherwise dsh (:3080). */
@@ -419,9 +440,9 @@ export function homePage(res, email, projects) {
 <h2>Projects</h2><ul>${rows}</ul>`)
 }
 /** One request from the edge itself to a box's dsh through the client-proxy, as our own site's browser would send it. */
-export const boxFetcher = (cfg) => (target, siteHost, path, { method = 'GET', headers = {}, body } = {}) => new Promise((resolve, reject) => {
+export const boxFetcher = (cfg) => (target, siteHost, path, { method = 'GET', headers = {}, body, member } = {}) => new Promise((resolve, reject) => {
   const req = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method, path,
-    headers: boxHeaders(cfg, { ...headers, origin: `https://${cfg.publicHost}`, ...(body ? { 'content-length': Buffer.byteLength(body) } : {}) }, target, '3080', siteHost) }, (r) => {
+    headers: { ...boxHeaders(cfg, { ...headers, origin: `https://${cfg.publicHost}`, ...(body ? { 'content-length': Buffer.byteLength(body) } : {}) }, target, '3080', siteHost), ...(member ? { 'x-mumbo-member': member } : {}) } }, (r) => {
     const chunks = []
     r.on('data', c => chunks.push(c)).on('end', () => resolve({ status: r.statusCode, setCookie: r.headers['set-cookie'] ?? [], body: Buffer.concat(chunks).toString() }))
   })
@@ -460,12 +481,14 @@ export function userServer({ cfg, box, verifyAlb, projects, log = console.log })
       return page(res, 503, e.capacity ? 'mumbo is at capacity right now. This page retries every few seconds.' : 'This mumbo box is starting. This page reloads in a few seconds.')
     }
     const dsh = to.port === '3080'
+    // On a member-capable project box a member is themselves (signed header), never the box owner.
+    const member = to.project && target.member ? target.member(email) : undefined
     const launch = `${to.base}/?token=${target.token}`
-    if (dsh && needsLaunch(req)) return res.writeHead(302, { location: launch, 'cache-control': 'no-store' }).end()
+    if (dsh && !member && needsLaunch(req)) return res.writeHead(302, { location: launch, 'cache-control': 'no-store' }).end()
     quiet(box.touch(target.id))
-    const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: to.path, headers: boxHeaders(cfg, req.headers, target, to.port, boxSite(cfg, to.project ? `project:${to.project}` : email).host) }, (r) => {
+    const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: to.path, headers: { ...boxHeaders(cfg, req.headers, target, to.port, boxSite(cfg, to.project ? `project:${to.project}` : email).host), ...(member ? { 'x-mumbo-member': member } : {}) } }, (r) => {
       // A stale cookie (another account on this browser, or a recreated box) gets a fresh exchange instead of a dead end.
-      if (dsh && r.statusCode === 401 && isNavigation(req)) { r.resume(); return res.writeHead(302, { location: launch, 'cache-control': 'no-store' }).end() }
+      if (dsh && !member && r.statusCode === 401 && isNavigation(req)) { r.resume(); return res.writeHead(302, { location: launch, 'cache-control': 'no-store' }).end() }
       res.writeHead(r.statusCode ?? 502, secureCookies({ ...r.headers }))
       r.pipe(res)
     })
@@ -480,7 +503,8 @@ export function userServer({ cfg, box, verifyAlb, projects, log = console.log })
       if (to.redirect || (to.project && !(await projects?.isMember(email, to.project)))) return socket.destroy()
       const target = await box.ensure(to.project ? `project:${to.project}` : email)
       quiet(box.touch(target.id))
-      const headers = { ...boxHeaders(cfg, req.headers, target, to.port, boxSite(cfg, to.project ? `project:${to.project}` : email).host), connection: 'Upgrade', upgrade: req.headers.upgrade ?? 'websocket' }
+      const member = to.project && target.member ? target.member(email) : undefined
+      const headers = { ...boxHeaders(cfg, req.headers, target, to.port, boxSite(cfg, to.project ? `project:${to.project}` : email).host), ...(member ? { 'x-mumbo-member': member } : {}), connection: 'Upgrade', upgrade: req.headers.upgrade ?? 'websocket' }
       const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: to.path, headers })
       up.on('upgrade', (r, upSocket, upHead) => {
         socket.write(`HTTP/1.1 101 Switching Protocols\r\n${Object.entries(r.headers).map(([k, v]) => `${k}: ${v}`).join('\r\n')}\r\n\r\n`)

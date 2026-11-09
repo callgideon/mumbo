@@ -67,12 +67,20 @@ export function projectRelay({ store, projects, box, boxFetch, siteHostOf, log =
     cookies.set(target.id, cookie)
     return cookie
   }
-  async function rpc(target, host, method, request) {
+  async function rpc(target, host, method, request, member) {
     const call = async (cookie) => boxFetch(target, host, `/api/${method}`, {
       method: 'POST',
-      headers: { cookie, 'content-type': 'application/json' },
+      headers: { ...(cookie ? { cookie } : {}), 'content-type': 'application/json' },
       body: JSON.stringify({ type: 'client-request', rpcId: randomUUID(), method, payload: { args: { request } } }),
+      // A member-capable box gets the member themselves (dsh records them as the principal), not the owner.
+      ...(target.member ? { member: target.member(member) } : {}),
     })
+    if (target.member) {
+      const r = await call()
+      const out = r.status === 200 ? JSON.parse(r.body).result : undefined
+      if (!out?.ok) throw fail(502, `${method} failed: ${out?.error?.message ?? `HTTP ${r.status}`}`)
+      return out.value
+    }
     let r = await call(cookies.get(target.id) ?? await signIn(target, host))
     if (r.status === 401) r = await call(await signIn(target, host))
     const out = r.status === 200 ? JSON.parse(r.body).result : undefined
@@ -89,10 +97,10 @@ export function projectRelay({ store, projects, box, boxFetch, siteHostOf, log =
       const host = siteHostOf(principal)
       let sessionId = p.coordinatorSessionId
       if (!sessionId) {
-        sessionId = (await rpc(target, host, 'session/create', { cwd: '/root/projects' })).sessionId
+        sessionId = (await rpc(target, host, 'session/create', { cwd: '/root/projects' }, member)).sessionId
         await store.putDoc(`project:${id}`, { ...(await projects.get(id)), coordinatorSessionId: sessionId })
       }
-      await rpc(target, host, 'session/prompt', { requestId: randomUUID(), sessionId, mode: 'queue', content: [{ type: 'text', text: `[from ${member}] ${text.trim()}` }] })
+      await rpc(target, host, 'session/prompt', { requestId: randomUUID(), sessionId, mode: 'queue', content: [{ type: 'text', text: `[from ${member}] ${text.trim()}` }] }, member)
       say({ msg: 'delivered', project: id, member, session: sessionId })
       return { delivered: true, project: id, coordinatorSession: sessionId }
     },
