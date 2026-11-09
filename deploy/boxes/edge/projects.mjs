@@ -63,6 +63,8 @@ export function projects({ store, admitted, log = console.log }) {
       if (!p?.members.includes(by)) throw fail(404, `no project ${id} of yours`)
       if (p.owner !== by) throw fail(403, 'only the project owner adds members')
       email = String(email).trim().toLowerCase()
+      // Member gate (B12): until agent containment lands, a member could read the box's secrets; only owners get in.
+      if (email !== p.owner) throw Object.assign(fail(403, 'Projects take more members once agent containment lands.'), { code: 'member_gate' })
       if (!admitted(email)) throw fail(400, `${email} is not allowed to use mumbo yet`)
       if (!p.members.includes(email)) {
         p.members.push(email)
