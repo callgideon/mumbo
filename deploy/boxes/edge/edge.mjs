@@ -66,6 +66,9 @@ export const config = () => ({
   appId: optional('GITHUB_APP_ID'),
   appKey: optional('GITHUB_APP_KEY'),
   ntfyTopic: optional('NTFY_TOPIC'),
+  // The sign-in page (authUi) is served only when set; SUPABASE_ANON_KEY, MUMBO_OAUTH_CLIENT_IDS and
+  // MUMBO_OAUTH_REDIRECT_URIS (comma-separated, exact) are then required.
+  supabaseUrl: optional('SUPABASE_URL'),
 })
 
 /** Address or @domain allowlist; an empty list admits nobody. */
@@ -643,10 +646,41 @@ const isNavigation = (req) => req.method === 'GET' && String(req.headers.accept 
 /** The request's Host, lowercased and without a port. */
 const hostOf = (req) => String(req.headers.host ?? '').toLowerCase().replace(/:\d+$/, '')
 
+/**
+ * The Supabase sign-in and consent page (Supabase's OAuth authorization path /oauth/consent) and its scripts, for
+ * visitors who are not signed in yet: oauth2-proxy skips sign-in for exactly these GETs (prod/edge.tf). `html` is
+ * auth-ui/index.html; its inline script, style and event handler are allowed by hash. config.js carries the Supabase
+ * URL and publishable key, and Mumbo's own OAuth client ids and redirect URIs, the only ones the page consents for
+ * (consent.js). Returns a handler that answers and returns true for the page and its scripts, false for anything else.
+ */
+export function authUi({ html, supabaseJs, consentJs, supabaseUrl, anonKey, clientIds, redirectUris }) {
+  const hashes = (re) => [...html.matchAll(re)].map(m => `'sha256-${createHash('sha256').update(m[1]).digest('base64')}'`).join(' ')
+  const csp = [
+    "default-src 'none'",
+    `script-src 'self' ${hashes(/<script>([\s\S]*?)<\/script>/g)} 'unsafe-hashes' ${hashes(/\son[a-z]+="([^"]*)"/g)}`,
+    `style-src ${hashes(/<style>([\s\S]*?)<\/style>/g)}`,
+    `connect-src ${new URL(supabaseUrl).origin}`,
+    "base-uri 'none'", "form-action 'none'", "frame-ancestors 'none'",
+  ].join('; ')
+  const js = 'text/javascript; charset=utf-8'
+  const files = new Map([
+    ['/auth-ui/supabase.js', [js, supabaseJs]],
+    ['/auth-ui/config.js', [js, `const MUMBO = ${JSON.stringify({ url: supabaseUrl, anonKey, clientIds, redirectUris })}\n`]],
+    ['/auth-ui/consent.js', [js, consentJs]],
+  ])
+  return (req, res) => {
+    const file = req.url.split('?')[0] === '/oauth/consent' ? ['text/html; charset=utf-8', html] : files.get(req.url)
+    if (!file) return false
+    res.writeHead(200, { 'content-type': file[0], 'cache-control': 'no-store', 'content-security-policy': csp, 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff' }).end(file[1])
+    return true
+  }
+}
+
 /** Signed-in users' traffic. The public host reaches the user's own box and p-<16 hex>.<project domain> a project's
  *  box, for its members only; `approve` (approve-page.mjs) serves cfg.approveHost, an origin no box serves; any other host
- *  answers 404. */
-export function userServer({ cfg, box, verifyAlb, projects, approve, log = console.log }) {
+ *  answers 404. `signin` (authUi) answers its GETs on the approve host before any identity check; GET /oauth/consent on
+ *  the public host, which a box serves, redirects there. */
+export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log = console.log }) {
   const identify = async (req) => verifyAlb
     ? (await verifyAlb(req.headers['x-amzn-oidc-data']).catch(() => undefined)) ?? ''
     : String(req.headers['x-forwarded-email'] ?? '').toLowerCase()
@@ -664,6 +698,11 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, log = conso
     res.setHeader('x-frame-options', 'SAMEORIGIN')
     res.setHeader('content-security-policy', "frame-ancestors 'self'")
     if (req.url === '/edge/healthz') return json(res, 200, { ok: true })
+    // The sign-in page holds the visitor's Supabase session, so it lives on the approve host, an origin no box serves.
+    if (signin && req.method === 'GET') {
+      if (hostOf(req) === cfg.publicHost && req.url.split('?')[0] === '/oauth/consent') return res.writeHead(302, { location: `https://${cfg.approveHost}${req.url}`, 'cache-control': 'no-store' }).end()
+      if (hostOf(req) === cfg.approveHost && signin(req, res)) return
+    }
     const email = await identify(req)
     if (!email.includes('@')) return json(res, 401, { error: 'not signed in' })
     if (!admitted(cfg.allowed, email)) return page(res, 403, 'mumbo boxes are invite-only for now. This account is not on the list yet.', false)
@@ -847,7 +886,15 @@ async function main() {
     setInterval(() => store.lease('approvals:poll', 55_000).then(won => won && approvals.poll()).catch(e => console.error('edge: approvals poll', e.message)), 60_000).unref()
   }
 
-  userServer({ cfg, box, verifyAlb, projects: proj, approve }).listen(8080, listenHost, () => console.log(`edge: users on ${listenHost}:8080`))
+  const authFile = (name) => readFileSync(new URL(`./auth-ui/${name}`, import.meta.url), 'utf8')
+  const values = (name) => {
+    const v = env(name).split(',').map(s => s.trim()).filter(Boolean)
+    if (v.length === 0) throw new Error(`edge: ${name} must name at least one value`)
+    return v
+  }
+  const signin = cfg.supabaseUrl ? authUi({ html: authFile('index.html'), supabaseJs: authFile('supabase.js'), consentJs: authFile('consent.js'), supabaseUrl: cfg.supabaseUrl,
+    anonKey: env('SUPABASE_ANON_KEY'), clientIds: values('MUMBO_OAUTH_CLIENT_IDS'), redirectUris: values('MUMBO_OAUTH_REDIRECT_URIS') }) : undefined
+  userServer({ cfg, box, verifyAlb, projects: proj, approve, signin }).listen(8080, listenHost, () => console.log(`edge: users on ${listenHost}:8080`))
   const { children, mcpServer } = await import('./sandboxes.mjs')
   const mcp = mcpServer({ ops: children({ e2b, cfg }), projects: proj, relay, projectDomain: cfg.projectDomain, claimOf: (info) => verifyBox(edgeKey, String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
   modelServer({ cfg, edgeKey, modelKey, allow: budget(store, cfg.dailyRequests), owns: box.owns, touch: box.touch, mcp, github, halt, tokens })
