@@ -3559,7 +3559,7 @@ Attribution-only additions: `action-cards`, `tmux-context`, `user-question-reply
 
 SHA-256: `de5b34128b6ab550240b161e9b56b872c93ccb9358818642304bcaa82f8ab1d9`
 
-Sources: [`packages/mumbo/edge-member/src/index.ts:33`](../packages/mumbo/edge-member/src/index.ts)
+Sources: [`packages/mumbo/edge-member/src/index.ts:34`](../packages/mumbo/edge-member/src/index.ts)
 
 | Property | Presence | Type |
 |---|---|---|
