@@ -54,8 +54,8 @@ function json(res: ServerResponse, payload: unknown): void {
   res.end(JSON.stringify(payload))
 }
 
-const googlePayload = [[['你好', 'Hello', null, null], ['，世界。', 'world', null, null]], null, 'en']
-const bingPayload = [{ translations: [{ text: '你好，世界。', to: 'zh-Hans' }] }]
+const googlePayload = [[['hello', 'Hello', null, null], [', world.', 'world', null, null]], null, 'en']
+const bingPayload = [{ translations: [{ text: 'Hello, world.', to: 'zh-Hans' }] }]
 
 describe('anonymous translator', () => {
   it('uses explicitly selected Google with automatic detection and combines translated segments', async () => {
@@ -63,7 +63,7 @@ describe('anonymous translator', () => {
     const spec = translator.resolve({ text: 'Hello world.', targetLanguage: 'zh', provider: 'google' })
     expect(spec).toEqual({ text: 'Hello world.', targetLanguage: 'zh', sourceLanguage: 'auto', provider: 'google' })
     expect(translator.maxTextChars).toBe(4000)
-    expect(await translator.translate(spec)).toBe('你好，世界。')
+    expect(await translator.translate(spec)).toBe('Hello, world.')
     const request = requests[0]!
     expect(request.method).toBe('POST')
     expect(request.headers['content-type']).toBe('application/x-www-form-urlencoded')
@@ -78,22 +78,22 @@ describe('anonymous translator', () => {
       json(res, req.url?.startsWith('/bing') ? bingPayload : googlePayload)
     })
     expect(translator.resolve({ text: 'hello', targetLanguage: 'zh-Hans' }).provider).toBe('bing')
-    expect(await translator.translate(translator.resolve({ text: 'hello', targetLanguage: 'zh-Hans' }))).toBe('你好，世界。')
+    expect(await translator.translate(translator.resolve({ text: 'hello', targetLanguage: 'zh-Hans' }))).toBe('Hello, world.')
     expect(requests[0]!.url.searchParams.has('from')).toBe(false)
-    expect(await translator.translate(translator.resolve({ text: 'hello', targetLanguage: 'en', sourceLanguage: 'zh-Hant' }))).toBe('你好，世界。')
+    expect(await translator.translate(translator.resolve({ text: 'hello', targetLanguage: 'en', sourceLanguage: 'zh-Hant' }))).toBe('Hello, world.')
     const explicit = requests[1]!
     expect(explicit.method).toBe('POST')
     expect(explicit.headers['content-type']).toBe('application/json')
     expect(JSON.parse(explicit.body)).toEqual(['hello'])
     expect(Object.fromEntries(explicit.url.searchParams)).toEqual({ from: 'zh-Hant', to: 'en', isEnterpriseClient: 'false' })
-    expect(await translator.translate(translator.resolve({ text: 'hello', targetLanguage: 'zh-TW', sourceLanguage: 'en', provider: 'google' }))).toBe('你好，世界。')
+    expect(await translator.translate(translator.resolve({ text: 'hello', targetLanguage: 'zh-TW', sourceLanguage: 'en', provider: 'google' }))).toBe('Hello, world.')
     expect(new URLSearchParams(requests[2]!.body).get('tl')).toBe('zh-TW')
     expect(new URLSearchParams(requests[2]!.body).get('sl')).toBe('en')
   })
 
   it('maps Simplified and Traditional tags to Bing language codes', async () => {
     const { translator, requests } = await fixture((_req, res) => { json(res, bingPayload) })
-    await translator.translate(translator.resolve({ text: '你好', targetLanguage: 'zh-HK', sourceLanguage: 'zh-CN', provider: 'bing' }))
+    await translator.translate(translator.resolve({ text: 'hello', targetLanguage: 'zh-HK', sourceLanguage: 'zh-CN', provider: 'bing' }))
     expect(Object.fromEntries(requests[0]!.url.searchParams)).toEqual({ from: 'zh-Hans', to: 'zh-Hant', isEnterpriseClient: 'false' })
   })
 
@@ -154,10 +154,10 @@ describe('anonymous translator', () => {
   })
 
   it('enforces response-byte limits on multibyte text at and below the exact limit', async () => {
-    const payload = [[['中']]]
+    const payload = [[['in']]]
     const bytes = Buffer.byteLength(JSON.stringify(payload))
     const exact = await fixture((_req, res) => { json(res, payload) }, { maxResponseBytes: bytes })
-    expect(await exact.translator.translate(exact.translator.resolve({ text: 'hello', targetLanguage: 'zh', provider: 'google' }))).toBe('中')
+    expect(await exact.translator.translate(exact.translator.resolve({ text: 'hello', targetLanguage: 'zh', provider: 'google' }))).toBe('in')
     const short = await fixture((_req, res) => { json(res, payload) }, { maxResponseBytes: bytes - 1 })
     await expect(short.translator.translate(short.translator.resolve({ text: 'hello', targetLanguage: 'zh', provider: 'google' })))
       .rejects.toThrow(expect.objectContaining({ code: 'TRANSLATION_RESPONSE_LIMIT' }))
@@ -227,7 +227,7 @@ describe('anonymous translator', () => {
     })
     cleanups.push(async () => { await ctx.fiber.dispose() })
     expect(ctx.translator.resolve({ text: 'Hello world.', targetLanguage: 'zh' }).provider).toBe('bing')
-    expect(await ctx.translator.translate(ctx.translator.resolve({ text: 'Hello world.', targetLanguage: 'zh' }))).toBe('你好，世界。')
+    expect(await ctx.translator.translate(ctx.translator.resolve({ text: 'Hello world.', targetLanguage: 'zh' }))).toBe('Hello, world.')
     expect(requests).toHaveLength(1)
     expect(requests[0]!.method).toBe('POST')
     expect(requests[0]!.url.searchParams.get('to')).toBe('zh-Hans')

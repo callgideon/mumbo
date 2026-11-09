@@ -359,20 +359,20 @@ describe('composer stats pills', () => {
     const { source } = makeSource({ nodes: [timedStep()] })
     const view = render(<StatsPills {...props(source, { tokenUsage: tokenUsage(9_995, 5) })} t={t} />)
     const [timePill, usagePill] = [...view.getAllByRole('button')] as [HTMLElement, HTMLElement]
-    expect(timePill.textContent).toBe('1 轮 1 步·20 tok/s')
+    expect(timePill.textContent).toBe('1 turns 1 steps·20 tok/s')
     // Whole-log total 9995 + 5 + 1 compacts to 10K.
-    expect(usagePill.textContent).toBe('10K tok·缓存命中 99.95%')
+    expect(usagePill.textContent).toBe('10K tok·Cache hit 99.95%')
     fireEvent.click(timePill)
     const timeDialog = view.getByRole('dialog')
-    expect(timeDialog.getAttribute('aria-label')).toBe('会话统计')
-    expect(timeDialog.textContent).toContain('模型用时3.8秒')
-    expect(timeDialog.textContent).toContain('首 token 平均（TTFT）0.8秒')
-    expect(timeDialog.textContent).toContain('输出速度（TPS）20 tok/s')
+    expect(timeDialog.getAttribute('aria-label')).toBe('Session statistics')
+    expect(timeDialog.textContent).toContain('LLM time3.8 sec')
+    expect(timeDialog.textContent).toContain('Avg time to first token (TTFT)0.8 sec')
+    expect(timeDialog.textContent).toContain('Tokens per second (TPS)20 tok/s')
     fireEvent.keyDown(document, { key: 'Escape' })
     fireEvent.click(usagePill)
     const usageDialog = view.getByRole('dialog')
-    expect(usageDialog.getAttribute('aria-label')).toBe('Token 用量')
-    expect(usageDialog.textContent).toContain('未缓存输入5 tok')
+    expect(usageDialog.getAttribute('aria-label')).toBe('Token usage')
+    expect(usageDialog.textContent).toContain('Uncached input5 tok')
   })
 
   describe('full reading of a cut-off pill', () => {
@@ -488,7 +488,7 @@ describe('composer stats pills', () => {
   })
 
   it('renders whole-log speed and dialog figures from the projection, not the loaded window', () => {
-    // The 加载更早 hazard beyond counts: the pill's speed segment and the
+    // The Load earlier hazard beyond counts: the pill's speed segment and the
     // dialog's time split, TTFT, and throughput must not grow per loaded page
     // either. An untimed 1-node window renders the projection's whole-log figures.
     const { source } = makeSource({ nodes: [assistant(1, 1)] })

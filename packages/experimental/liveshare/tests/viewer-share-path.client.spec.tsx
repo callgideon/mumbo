@@ -21,7 +21,7 @@ import { apply, inject } from '../src/client/viewer-share-path.tsx'
 
 const SESSION = 'reader' as SessionId
 const ADDRESS = `dsh-resource://file/session/${SESSION}/src/a.ts`
-const UNAVAILABLE = '此页面无法打开工作区文件：分享提供的是文件路径，不是文件内容。'
+const UNAVAILABLE = 'This page cannot open workspace files: a share hands over file paths, not file contents.'
 const SHORTCUT_CATALOG: readonly never[] = []
 let runtime: SlotTestRuntime | undefined
 

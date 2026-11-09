@@ -65,7 +65,7 @@ function providePresentation(ctx: Context): PresentationCapture {
       return () => { capture.localeDisposed = true }
     },
     // Minimal bound-translate fake: zh dictionary lookup, key passthrough on miss.
-    bind: () => (key: string) => key === 'menu.userOnly' ? '仅用户' : key,
+    bind: () => (key: string) => key === 'menu.userOnly' ? 'user-only' : key,
   })
   return capture
 }
@@ -144,14 +144,14 @@ describe('apply', () => {
       namespace: 'skill', dictionaries: {
         es, fr, de, ru, pt,
         zh: {
-          'row.title': '加载技能',
-          'row.running': '正在加载 skill',
-          'row.preparing': '准备加载技能',
-          'row.failed': 'skill 加载失败',
-          'row.stopped': 'skill 加载已中止',
-          'row.instructions': '说明',
-          'row.inspect': '查看',
-          'menu.userOnly': '仅用户',
+          'row.title': 'Skill',
+          'row.running': 'Loading skill',
+          'row.preparing': 'Preparing to load a skill',
+          'row.failed': 'Skill load failed',
+          'row.stopped': 'Skill load stopped',
+          'row.instructions': 'Instructions',
+          'row.inspect': 'Inspect',
+          'menu.userOnly': 'user-only',
         },
         en: {
           'row.title': 'Skill',
@@ -165,13 +165,13 @@ describe('apply', () => {
         },
         ja: {
           'row.title': 'スキル',
-          'row.running': 'スキルを読み込み中',
-          'row.preparing': 'スキルの読み込みを準備中',
-          'row.failed': 'スキルの読み込みに失敗しました',
-          'row.stopped': 'スキルの読み込みが停止しました',
-          'row.instructions': '手順',
-          'row.inspect': '詳細を確認',
-          'menu.userOnly': 'ユーザー専用',
+          'row.running': 'スキルをyomuみkomiみin',
+          'row.preparing': 'スキルのyomuみkomiみをjunbichuu',
+          'row.failed': 'スキルのyomuみkomiみにshippaiしました',
+          'row.stopped': 'スキルのyomuみkomiみがStopしました',
+          'row.instructions': 'tejun',
+          'row.inspect': 'shousaiをkakunin',
+          'menu.userOnly': 'ユーザーsenyou',
         },
       },
     }])
@@ -485,7 +485,7 @@ describe('user-only marking', () => {
     const candidates = await source.candidates(proj('s1'), req(''))
     expect(candidates).toEqual([
       { name: 'shared-skill', description: 'both surfaces' },
-      { name: 'user-only-skill', description: '仅用户 · user surface only' },
+      { name: 'user-only-skill', description: 'user-only · user surface only' },
     ])
   })
 })

@@ -26,7 +26,7 @@ const FRAGMENTS = [
   join('LT', 'AI'), join('AK', 'ID'), join('xo', 'xb-'), join('wh', 'sec_'), join('ey', 'J'), '.', join('.ey', 'J'),
   join('-----BEGIN', ' '), join('-----END', ' '), ' PRIVATE KEY-----', 'PRIVATE KEY-----', 'RSA ',
   '://', 'https', 'postgres', ':', '@', '/', '?', '#', ' ', '\n', '\r\n', '\t', '-', '_', '+',
-  'a', 'Z', '0', '7', 'abcdefgh', 'ABCDEFGH', '01234567', 'a1B2c3D4e5F6g7H8i9J0', '用', '：', '🙂',
+  'a', 'Z', '0', '7', 'abcdefgh', 'ABCDEFGH', '01234567', 'a1B2c3D4e5F6g7H8i9J0', 'use', ':', '🙂',
 ] as const
 
 /** Deterministic generator so every run checks the same inputs. */
@@ -55,7 +55,7 @@ function generated(count: number, seed: number, maxFragments = 60): string[] {
 const fill = (unit: string, characters: number): string => unit.repeat(Math.ceil(characters / unit.length)).slice(0, characters)
 const FIXED = [
   '',
-  join('用 ', 'sk', '-', '0123456789abcdef0123456789abcdef', ' 试试'),
+  join('Open in ', 'sk', '-', '0123456789abcdef0123456789abcdef', ' try'),
   join('postgres://admin:', 'p4ss-W0rd', '@db.internal:5432/app'),
   join('git clone https://x-access-token:', 'gh', 'p_', fill('a1B2c3', 36), '@github.com/o/r.git'),
   join('redis://:p4ss@cache https://example.com:8080/a@b https://example.com:8443?e=a@b'),

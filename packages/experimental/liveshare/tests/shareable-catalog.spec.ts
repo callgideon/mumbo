@@ -65,7 +65,7 @@ describe('shareableViewerCatalog', () => {
     expect(groups[0]).toMatchObject({
       plugin: 'forgePanel',
       package: '@deepseek-ai/dsh-experimental-client-ui-forge',
-      titles: { zh: '变更请求面板', en: 'Change request panel' },
+      titles: { zh: 'Change request panel', en: 'Change request panel' },
     })
   })
 
@@ -170,12 +170,12 @@ describe('shareableViewerCatalog', () => {
     const groups = shareableViewerCatalog(local, () => ({
       package: '@fixture/bundle',
       bundle: '@fixture/bundle',
-      titles: { zh: '变更请求与工作树' },
+      titles: { zh: 'Change requests & worktrees' },
     }))
     expect(groups).toEqual([{
       plugin: '@fixture/bundle',
       package: '@fixture/bundle',
-      titles: { zh: '变更请求与工作树' },
+      titles: { zh: 'Change requests & worktrees' },
       endpoints: ['forgePanel/follow', 'worktree/create'],
     }])
   })
@@ -215,12 +215,12 @@ describe('readTitles', () => {
   it('keeps every readable title and skips missing or invalid locale files', () => {
     const root = fixture({
       'locale/en.json': '{"meta":{"title":"Mek Git"}}',
-      'locale/zh.json': '{"meta":{"title":"Mek 仓库"}}',
+      'locale/zh.json': '{"meta":{"title":"Mek Repository"}}',
       'locale/ja.json': '{not json',
       'locale/es.json': '{"meta":{"title":42}}',
       'locale/fr.json': '{"meta":{"title":""}}',
     })
-    expect(readTitles(root)).toEqual({ en: 'Mek Git', zh: 'Mek 仓库' })
+    expect(readTitles(root)).toEqual({ en: 'Mek Git', zh: 'Mek Repository' })
   })
 
   it('returns undefined when the package ships no title', () => {

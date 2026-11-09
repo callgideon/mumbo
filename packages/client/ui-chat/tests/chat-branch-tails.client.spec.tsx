@@ -108,20 +108,20 @@ describe('MessageItem arms', () => {
     const view = render(
       <MessageItem
         t={t}
-        referenceLabels={['你好']}
+        referenceLabels={['hello']}
         node={{
           kind: 'user',
           seq: 1,
           time: 1_000,
-          content: [{ type: 'text', text: '@你好这个在讲啥' }] as never,
+          content: [{ type: 'text', text: '@hello what is this about' }] as never,
           source: null,
         }}
       />,
     )
-    expect(view.container.querySelector('[data-ref-chip="session"]')?.textContent).toBe('你好')
+    expect(view.container.querySelector('[data-ref-chip="session"]')?.textContent).toBe('hello')
     expect(view.container.querySelector('[data-ref-chip="session"] svg')).not.toBeNull()
-    expect(view.getByText('这个在讲啥')).toBeTruthy()
-    expect(view.getByText('引用会话 · 你好')).toBeTruthy()
+    expect(view.getByText('what is this about')).toBeTruthy()
+    expect(view.getByText('Referenced session · hello')).toBeTruthy()
   })
 
   it('renders the complete metadata-confirmed multi-word session label', () => {
@@ -140,7 +140,7 @@ describe('MessageItem arms', () => {
     )
     expect(view.container.querySelector('[data-ref-chip="session"]')?.textContent).toBe('Research notes')
     expect(view.getByText('what changed?')).toBeTruthy()
-    expect(view.getByText('引用会话 · Research notes')).toBeTruthy()
+    expect(view.getByText('Referenced session · Research notes')).toBeTruthy()
   })
 
   it('renders no-extension paths as files and leaves sentence punctuation outside the reference', () => {
@@ -193,15 +193,15 @@ describe('MessageItem arms', () => {
       />,
     )
     expect(screen.getByText('14:24')).toBeTruthy()
-    expect(screen.getByRole('button', { name: '复制' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeTruthy()
     const stack = view.getByText('hello bubble').closest('div')?.parentElement
     expect(stack?.parentElement).toBe(view.container.firstElementChild)
     expect(stack?.contains(screen.getByText('14:24'))).toBe(false)
-    expect(stack?.contains(screen.getByRole('button', { name: '复制' }))).toBe(false)
-    expect(stack?.nextElementSibling?.contains(screen.getByRole('button', { name: '复制' }))).toBe(true)
-    expect(screen.queryByRole('button', { name: '在新对话中分支' })).toBeNull()
-    expect(screen.queryByRole('button', { name: '编辑' })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: '复制' }))
+    expect(stack?.contains(screen.getByRole('button', { name: 'Copy' }))).toBe(false)
+    expect(stack?.nextElementSibling?.contains(screen.getByRole('button', { name: 'Copy' }))).toBe(true)
+    expect(screen.queryByRole('button', { name: 'Branch into a new conversation' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
     expect(writeText).toHaveBeenCalledWith('hello bubble')
   })
 
@@ -223,7 +223,7 @@ describe('MessageItem arms', () => {
       }}
       />,
     )
-    fireEvent.click(screen.getByRole('button', { name: '复制' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
     expect(exec).toHaveBeenCalledWith('copy')
   })
 
@@ -240,13 +240,13 @@ describe('MessageItem arms', () => {
       }}
       />,
     )
-    fireEvent.click(screen.getByRole('button', { name: '复制' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
     await act(async () => {
       await Promise.resolve()
       await Promise.resolve()
     })
-    expect(screen.getByRole('button', { name: '复制' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: '复制成功' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Copied' })).toBeNull()
   })
 
   it('copy swaps to the check success chrome, gates re-clicks, and reverts after a second', async () => {
@@ -264,7 +264,7 @@ describe('MessageItem arms', () => {
       }}
       />,
     )
-    const copy = screen.getByRole('button', { name: '复制' })
+    const copy = screen.getByRole('button', { name: 'Copy' })
     fireEvent.click(copy)
     fireEvent.click(copy)
     expect(writeText).toHaveBeenCalledTimes(1)
@@ -274,11 +274,11 @@ describe('MessageItem arms', () => {
       await Promise.resolve()
       await Promise.resolve()
     })
-    const done = screen.getByRole('button', { name: '复制成功' })
+    const done = screen.getByRole('button', { name: 'Copied' })
     fireEvent.click(done)
     expect(writeText).toHaveBeenCalledTimes(1)
     act(() => { vi.advanceTimersByTime(1000) })
-    expect(screen.getByRole('button', { name: '复制' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeTruthy()
   })
 
   it('clears copy feedback work when the message unmounts', async () => {
@@ -297,7 +297,7 @@ describe('MessageItem arms', () => {
       }}
       />,
     )
-    fireEvent.click(screen.getByRole('button', { name: '复制' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
     view.unmount()
     await act(async () => {
       finishWrite()
@@ -318,12 +318,12 @@ describe('MessageItem arms', () => {
       configurable: true,
       value: { writeText: vi.fn().mockResolvedValue(undefined) },
     })
-    fireEvent.click(screen.getByRole('button', { name: '复制' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
     await act(async () => {
       await Promise.resolve()
       await Promise.resolve()
     })
-    expect(screen.getByRole('button', { name: '复制成功' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Copied' })).toBeTruthy()
     mounted.unmount()
     expect(vi.getTimerCount()).toBe(0)
   })
@@ -341,12 +341,12 @@ describe('MessageItem arms', () => {
       } as never}
       />,
     )
-    expect(view.queryByText('插话')).toBeNull()
+    expect(view.queryByText('interject')).toBeNull()
     expect(view.getByText('steer!')).toBeTruthy()
-    expect(view.getByText(/附加内容块/)).toBeTruthy()
-    fireEvent.click(view.getByRole('button', { name: '复制' }))
+    expect(view.getByText(/Extra content block/)).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: 'Copy' }))
     expect(writeText).toHaveBeenCalledWith('steer!')
-    expect(view.queryByRole('button', { name: '在新对话中分支' })).toBeNull()
+    expect(view.queryByRole('button', { name: 'Branch into a new conversation' })).toBeNull()
   })
 
   it('context uses the Tool calls disclosure chrome and keeps its body collapsed by default', () => {
@@ -361,7 +361,7 @@ describe('MessageItem arms', () => {
       } as never}
       />,
     )
-    const disclosure = ctxView.getByRole('button', { name: /^上下文注入\s*fixture$/ })
+    const disclosure = ctxView.getByRole('button', { name: /^Context injection\s*fixture$/ })
     expect(disclosure.getAttribute('aria-expanded')).toBe('false')
     expect(ctxView.container.querySelector('[data-context-injection-body]')).toBeNull()
     expect(ctxView.container.querySelector('svg')).not.toBeNull()
@@ -402,9 +402,9 @@ describe('MessageItem arms', () => {
       } as never}
       />,
     )
-    fireEvent.click(view.getByRole('button', { name: /^上下文注入\s*AGENTS\.md, sub\/AGENTS\.md$/ }))
+    fireEvent.click(view.getByRole('button', { name: /^Context injection\s*AGENTS\.md, sub\/AGENTS\.md$/ }))
     const files = [...view.container.querySelectorAll('[data-context-files] li')].map(node => node.textContent)
-    expect(files).toEqual(['AGENTS.md已载入', 'sub/AGENTS.md已移除'])
+    expect(files).toEqual(['AGENTS.mdloaded', 'sub/AGENTS.mdremoved'])
     // The `<system-reminder>` framing is part of what the model read, so the
     // body keeps it verbatim rather than presenting a cleaned-up excerpt.
     expect(view.container.querySelector('[data-context-text]')?.textContent)
@@ -430,9 +430,9 @@ describe('MessageItem arms', () => {
       } as never}
       />,
     )
-    fireEvent.click(view.getByRole('button', { name: /^上下文注入\s*new\/AGENTS\.md, old\/AGENTS\.md$/ }))
+    fireEvent.click(view.getByRole('button', { name: /^Context injection\s*new\/AGENTS\.md, old\/AGENTS\.md$/ }))
     const files = [...view.container.querySelectorAll('[data-context-files] li')].map(node => node.textContent)
-    expect(files).toEqual(['new/AGENTS.md已新增', 'old/AGENTS.md已更新'])
+    expect(files).toEqual(['new/AGENTS.mdadded', 'old/AGENTS.mdupdated'])
   })
 
   it('keeps an interleaved unknown block in the order the model received it', () => {
@@ -451,10 +451,10 @@ describe('MessageItem arms', () => {
       } as never}
       />,
     )
-    fireEvent.click(view.getByRole('button', { name: '上下文注入' }))
+    fireEvent.click(view.getByRole('button', { name: 'Context injection' }))
     const texts = [...view.container.querySelectorAll('[data-context-text]')].map(node => node.textContent)
     expect(texts).toEqual(['before', 'after'])
-    expect(view.getByText(/未知内容块/)).toBeTruthy()
+    expect(view.getByText(/Unknown content block/)).toBeTruthy()
   })
 
   it('the catalog form lists its durable entries instead of the model-facing prose', () => {
@@ -473,7 +473,7 @@ describe('MessageItem arms', () => {
       } as never}
       />,
     )
-    fireEvent.click(view.getByRole('button', { name: /^上下文注入\s*skill-catalog$/ }))
+    fireEvent.click(view.getByRole('button', { name: /^Context injection\s*skill-catalog$/ }))
     const entries = [...view.container.querySelectorAll('[data-context-entries] li')].map(node => node.textContent)
     expect(entries).toEqual(['a-skillDoes A', 'b-skillDoes B'])
     expect(view.container.querySelector('[data-context-text]')).toBeNull()
@@ -497,8 +497,8 @@ describe('MessageItem arms', () => {
       } as never}
       />,
     )
-    fireEvent.click(view.getByRole('button', { name: /^上下文注入\s*skill-catalog$/ }))
-    expect(view.container.querySelector('[data-context-catalog-update]')?.textContent).toBe('替换目录')
+    fireEvent.click(view.getByRole('button', { name: /^Context injection\s*skill-catalog$/ }))
+    expect(view.container.querySelector('[data-context-catalog-update]')?.textContent).toBe('Replacement catalog')
   })
 
   it('a partially unreadable catalog falls back whole rather than showing a short list', () => {
@@ -519,7 +519,7 @@ describe('MessageItem arms', () => {
       } as never}
       />,
     )
-    fireEvent.click(view.getByRole('button', { name: /^上下文注入\s*skill-catalog$/ }))
+    fireEvent.click(view.getByRole('button', { name: /^Context injection\s*skill-catalog$/ }))
     expect(view.container.querySelector('[data-context-entries]')).toBeNull()
     expect(view.container.querySelector('[data-context-text]')?.textContent).toBe('catalog prose')
     // The marker reports what rendered, not what was declared.
@@ -539,7 +539,7 @@ describe('MessageItem arms', () => {
       } as never}
       />,
     )
-    fireEvent.click(view.getByRole('button', { name: /^上下文注入\s*agent-instructions$/ }))
+    fireEvent.click(view.getByRole('button', { name: /^Context injection\s*agent-instructions$/ }))
     expect(view.container.querySelector('[data-context-files]')).toBeNull()
     expect(view.container.querySelector('[data-context-text]')?.textContent).toBe('instruction prose')
     expect(view.container.querySelector('[data-context-fields]')).not.toBeNull()
@@ -559,7 +559,7 @@ describe('MessageItem arms', () => {
       } as never}
       />,
     )
-    fireEvent.click(view.getByRole('button', { name: '上下文注入' }))
+    fireEvent.click(view.getByRole('button', { name: 'Context injection' }))
     expect(view.container.querySelector('[data-context-text]')?.textContent).toBe('firstsecond')
   })
 
@@ -575,9 +575,9 @@ describe('MessageItem arms', () => {
       } as never}
       />,
     )
-    fireEvent.click(view.getByRole('button', { name: /^上下文注入\s*plugin$/ }))
+    fireEvent.click(view.getByRole('button', { name: /^Context injection\s*plugin$/ }))
     expect(view.container.querySelector('[data-context-fields] dd')?.textContent)
-      .toMatch(/… 已截断，共 \d+ 字符$/)
+      .toMatch(/… truncated, \d+ characters total$/)
   })
 
   it('an empty replacement catalog stays a catalog: it retires every earlier name', () => {
@@ -594,8 +594,8 @@ describe('MessageItem arms', () => {
       } as never}
       />,
     )
-    fireEvent.click(view.getByRole('button', { name: /^上下文注入\s*skill-catalog$/ }))
-    expect(view.container.querySelector('[data-context-catalog-update]')?.textContent).toBe('替换目录')
+    fireEvent.click(view.getByRole('button', { name: /^Context injection\s*skill-catalog$/ }))
+    expect(view.container.querySelector('[data-context-catalog-update]')?.textContent).toBe('Replacement catalog')
     expect(view.container.querySelectorAll('[data-context-entries] li')).toHaveLength(0)
     expect(view.container.querySelector('[data-context-injection-body]')?.getAttribute('data-context-form'))
       .toBe('catalog')
@@ -613,7 +613,7 @@ describe('MessageItem arms', () => {
       } as never}
       />,
     )
-    fireEvent.click(view.getByRole('button', { name: /^上下文注入\s*skill-catalog$/ }))
+    fireEvent.click(view.getByRole('button', { name: /^Context injection\s*skill-catalog$/ }))
     expect(view.container.querySelector('[data-context-entries]')).toBeNull()
     expect(view.container.querySelector('[data-context-text]')?.textContent).toBe('catalog prose')
   })
@@ -629,9 +629,9 @@ describe('MessageItem arms', () => {
       } as never}
       />,
     )
-    fireEvent.click(view.getByRole('button', { name: /^上下文注入\s*skill-catalog$/ }))
+    fireEvent.click(view.getByRole('button', { name: /^Context injection\s*skill-catalog$/ }))
     expect(view.container.querySelectorAll('[data-context-entries] li')).toHaveLength(200)
-    expect(view.container.querySelector('[data-context-entries-truncated]')?.textContent).toBe('…还有 5 条')
+    expect(view.container.querySelector('[data-context-entries-truncated]')?.textContent).toBe('… 5 more')
   })
 
   it('a catalog keeps a content block this version does not know', () => {
@@ -646,8 +646,8 @@ describe('MessageItem arms', () => {
       } as never}
       />,
     )
-    fireEvent.click(view.getByRole('button', { name: /^上下文注入\s*skill-catalog$/ }))
-    expect(view.getByText(/未知内容块/)).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: /^Context injection\s*skill-catalog$/ }))
+    expect(view.getByText(/Unknown content block/)).toBeTruthy()
   })
 
   it('an instruction change with an unrecognized action falls back whole', () => {
@@ -664,7 +664,7 @@ describe('MessageItem arms', () => {
       } as never}
       />,
     )
-    fireEvent.click(view.getByRole('button', { name: /^上下文注入\s*agent-instructions$/ }))
+    fireEvent.click(view.getByRole('button', { name: /^Context injection\s*agent-instructions$/ }))
     expect(view.container.querySelector('[data-context-files]')).toBeNull()
     expect(view.container.querySelector('[data-context-text]')?.textContent).toBe('instruction prose')
   })
@@ -680,7 +680,7 @@ describe('MessageItem arms', () => {
       } as never}
       />,
     )
-    fireEvent.click(view.getByRole('button', { name: /^上下文注入\s*later$/ }))
+    fireEvent.click(view.getByRole('button', { name: /^Context injection\s*later$/ }))
     const fields = [...view.container.querySelectorAll('[data-context-fields] dt')].map(node => node.textContent)
     expect(fields).toEqual(['form'])
   })
@@ -701,7 +701,7 @@ describe('MessageItem arms', () => {
       } as never}
       />,
     )
-    fireEvent.click(view.getByRole('button', { name: /^上下文注入\s*@deepseek-ai\/dsh-system-prompt$/ }))
+    fireEvent.click(view.getByRole('button', { name: /^Context injection\s*@deepseek-ai\/dsh-system-prompt$/ }))
     const rows = [...view.container.querySelectorAll('[data-context-sections] div')].map(node => node.textContent)
     expect(rows).toEqual(['sandbox:policyworkspace-write', 'workspace/repo'])
   })
@@ -735,7 +735,7 @@ describe('MessageItem arms', () => {
       />,
     )
     expect(view.container.querySelector('[data-context-summary]')).toBeNull()
-    fireEvent.click(view.getByRole('button', { name: /^上下文注入\s*tool-jobs$/ }))
+    fireEvent.click(view.getByRole('button', { name: /^Context injection\s*tool-jobs$/ }))
     expect(view.container.querySelector('[data-context-fields]')).not.toBeNull()
   })
 
@@ -756,7 +756,7 @@ describe('MessageItem arms', () => {
         } as never}
         />,
       )
-      fireEvent.click(view.getByRole('button', { name: new RegExp(`^上下文注入\\s*${label}$`) }))
+      fireEvent.click(view.getByRole('button', { name: new RegExp(`^Context injection\\\\s*\${label}$`) }))
       expect(view.container.querySelector('[data-context-text]')?.textContent).toBe(`${form} prose`)
       expect(view.container.querySelector('[data-context-injection-body]')?.getAttribute('data-context-form'))
         .toBeNull()
@@ -773,9 +773,9 @@ describe('MessageItem arms', () => {
       } as never}
       />,
     )
-    fireEvent.click(view.getByRole('button', { name: /^上下文注入\s*plugin$/ }))
+    fireEvent.click(view.getByRole('button', { name: /^Context injection\s*plugin$/ }))
     expect(view.container.querySelector('[data-context-snapshot-supersedes]')?.textContent)
-      .toBe('取代先前的快照')
+      .toBe('Supersedes earlier snapshots')
   })
 
   it('a relay names the agent that sent it above what it said', () => {
@@ -790,8 +790,8 @@ describe('MessageItem arms', () => {
       } as never}
       />,
     )
-    fireEvent.click(view.getByRole('button', { name: /^上下文注入\s*agent-message$/ }))
-    expect(view.container.querySelector('[data-context-relay-sender]')?.textContent).toBe('来自会话 child-7')
+    fireEvent.click(view.getByRole('button', { name: /^Context injection\s*agent-message$/ }))
+    expect(view.container.querySelector('[data-context-relay-sender]')?.textContent).toBe('FromSessions child-7')
     expect(view.container.querySelector('[data-context-text]')?.textContent).toBe('child report body')
   })
 
@@ -808,19 +808,19 @@ describe('MessageItem arms', () => {
           form: 'recall',
           version: 1,
           references: [
-            { label: '重构 loader', retainedMessages: 18, omittedMessages: 42, truncated: true },
-            { label: '修 CI', retainedMessages: 3, omittedMessages: 0, truncated: false },
+            { label: 'refactor loader', retainedMessages: 18, omittedMessages: 42, truncated: true },
+            { label: 'fix CI', retainedMessages: 3, omittedMessages: 0, truncated: false },
           ],
         },
-        producer: { role: 'recall', label: '重构 loader, 修 CI' },
+        producer: { role: 'recall', label: 'refactor loader, fix CI' },
         form: 'recall',
       } as never}
       />,
     )
     expect(view.container.querySelector('[data-context-recall-icon]')).not.toBeNull()
-    fireEvent.click(view.getByRole('button', { name: /^跨会话召回\s*重构 loader, 修 CI$/ }))
+    fireEvent.click(view.getByRole('button', { name: /^Session recall\s*refactor loader, fix CI$/ }))
     const rows = [...view.container.querySelectorAll('[data-context-recalls] li')].map(node => node.textContent)
-    expect(rows).toEqual(['重构 loader保留 18 条 · 省略 42 条已截断', '修 CI保留 3 条 · 省略 0 条'])
+    expect(rows).toEqual(['refactor loader18 kept · 42 moretruncated', 'fix CI3 kept · 0 more'])
     expect(view.container.querySelector('[data-context-text]')?.textContent).toBe('recalled material')
   })
 
@@ -828,27 +828,27 @@ describe('MessageItem arms', () => {
     const unknownView = render(
       <MessageItem t={t} node={{ kind: 'unknown', seq: 4, type: 'surface/next', data: { x: 1 } } as never} />,
     )
-    expect(unknownView.getByText(/未知 surface 事件：surface\/next/)).toBeTruthy()
+    expect(unknownView.getByText(/Unknown surface event: surface\/next/)).toBeTruthy()
   })
 
   it('a compaction marker discloses its summary and never shows the framed checkpoint', () => {
     const view = render(
       <MessageItem t={t} node={{
         kind: 'compaction', seq: 5, time: 1_000,
-        summary: '## 摘要标题\n\n保留的事实。',
+        summary: '## summary title\n\n preserved facts.',
         summaryEventSeq: 4,
         shadowedItemCount: 16,
         shadowedTokenCount: 11_309,
       }}
       />,
     )
-    const row = view.getByRole('button', { name: /上下文已压缩/ })
+    const row = view.getByRole('button', { name: /Context compacted/ })
     expect(row.getAttribute('aria-expanded')).toBe('false')
-    expect(view.getByText('已压缩 16 条历史记录（约 11309 tokens）')).toBeTruthy()
-    expect(view.queryByText(/保留的事实/)).toBeNull()
+    expect(view.getByText('Compacted 16 history items (~11309 tokens)')).toBeTruthy()
+    expect(view.queryByText(/preserved facts/)).toBeNull()
     fireEvent.click(row)
     expect(row.getAttribute('aria-expanded')).toBe('true')
-    expect(view.getByRole('heading', { name: '摘要标题' })).toBeTruthy()
+    expect(view.getByRole('heading', { name: 'summary title' })).toBeTruthy()
     fireEvent.click(row)
     expect(row.getAttribute('aria-expanded')).toBe('false')
   })
@@ -857,7 +857,7 @@ describe('MessageItem arms', () => {
     const view = render(
       <MessageItem t={t} node={{
         kind: 'compaction', seq: 5, time: 1_000,
-        summary: '## 摘要标题\n\n保留的事实。',
+        summary: '## summary title\n\n preserved facts.',
         summaryEventSeq: 4,
         shadowedItemCount: 16,
         shadowedTokenCount: 11_309,
@@ -867,7 +867,7 @@ describe('MessageItem arms', () => {
     // Collapsed there is no body sibling, so the rule's `:has(.compactionBody)`
     // gate never matches.
     expect(view.container.querySelector('[class*="compactionRow"] [class*="compactionBody"]')).toBeNull()
-    fireEvent.click(view.getByRole('button', { name: /上下文已压缩/ }))
+    fireEvent.click(view.getByRole('button', { name: /Context compacted/ }))
     expect(view.container.querySelector('[class*="compactionRow"] [class*="compactionBody"]')).not.toBeNull()
   })
 
@@ -876,10 +876,10 @@ describe('MessageItem arms', () => {
       kind: 'compaction', seq: 6, time: 1_000, summary: null,
       summaryEventSeq: null, shadowedItemCount: null, shadowedTokenCount: null,
     }} />)
-    const row = view.getByRole('button', { name: /上下文已压缩/ })
+    const row = view.getByRole('button', { name: /Context compacted/ })
     expect(row).toHaveProperty('disabled', true)
     expect(row.getAttribute('aria-expanded')).toBeNull()
-    expect(view.getByText('压缩摘要不可用')).toBeTruthy()
+    expect(view.getByText('Compaction summary unavailable')).toBeTruthy()
     fireEvent.click(row) // a disabled control stays collapsed
     expect(row.getAttribute('aria-expanded')).toBeNull()
   })
@@ -904,7 +904,7 @@ describe('MessageItem arms', () => {
           retry: 1,
           maxRetries: 2,
           delayMs: 2_500.4,
-          failure: { code: 'TRANSPORT', message: '连接被重置' },
+          failure: { code: 'TRANSPORT', message: 'connection was reset' },
         }}
       />,
     )
@@ -912,14 +912,14 @@ describe('MessageItem arms', () => {
     const summary = view.container.querySelector('summary')
     expect(details?.open).toBe(false)
     expect(details?.dataset.active).toBe('true')
-    expect(view.getByRole('status').textContent).toBe('正在重试模型请求（1/2） · 3s')
-    expect(view.getByText('重试延迟：').parentElement?.textContent).toBe('重试延迟：2500毫秒')
-    expect(view.getByText('失败原因：').parentElement?.textContent).toBe('失败原因：连接被重置')
+    expect(view.getByRole('status').textContent).toBe('Retrying model request(1/2) · 3s')
+    expect(view.getByText('Retry delay: ').parentElement?.textContent).toBe('Retry delay: 2500ms')
+    expect(view.getByText('Failure reason: ').parentElement?.textContent).toBe('Failure reason: connection was reset')
 
     act(() => { vi.advanceTimersByTime(1_100) })
-    expect(view.getByRole('status').textContent).toBe('正在重试模型请求（1/2） · 2s')
+    expect(view.getByRole('status').textContent).toBe('Retrying model request(1/2) · 2s')
     act(() => { vi.advanceTimersByTime(1_000) })
-    expect(view.getByRole('status').textContent).toBe('正在重试模型请求（1/2） · 1s')
+    expect(view.getByRole('status').textContent).toBe('Retrying model request(1/2) · 1s')
 
     view.rerender(
       <MessageItem
@@ -938,11 +938,11 @@ describe('MessageItem arms', () => {
           retry: 2,
           maxRetries: 2,
           delayMs: 3_500.4,
-          failure: { code: 'TRANSPORT', message: '再次断开' },
+          failure: { code: 'TRANSPORT', message: 'disconnect again' },
         }}
       />,
     )
-    expect(view.getByRole('status').textContent).toBe('正在重试模型请求（2/2） · 4s')
+    expect(view.getByRole('status').textContent).toBe('Retrying model request(2/2) · 4s')
 
     if (summary === null) throw new Error('retry summary missing')
     fireEvent.click(summary)
@@ -963,12 +963,12 @@ describe('MessageItem arms', () => {
         retry: 2,
         maxRetries: 2,
         delayMs: 3_500.4,
-        failure: { code: 'TRANSPORT', message: '再次断开' },
+        failure: { code: 'TRANSPORT', message: 'disconnect again' },
       }}
       />,
     )
     expect(details?.dataset.active).toBeUndefined()
-    expect(view.getByRole('status').textContent).toBe('已重试模型请求（2/2） · 4s')
+    expect(view.getByRole('status').textContent).toBe('Retried model request(2/2) · 4s')
 
     view.rerender(
       <MessageItem t={t} node={{
@@ -984,11 +984,11 @@ describe('MessageItem arms', () => {
         policyKey: 'mock-always',
         retry: 3,
         delayMs: 3_500.4,
-        failure: { code: 'TRANSPORT', message: '继续重试' },
+        failure: { code: 'TRANSPORT', message: 'ContinueRetry' },
       }}
       />,
     )
-    expect(view.getByRole('status').textContent).toBe('已重试模型请求（3/∞） · 4s')
+    expect(view.getByRole('status').textContent).toBe('Retried model request(3/∞) · 4s')
 
     view.rerender(
       <MessageItem t={t} node={{
@@ -1005,11 +1005,11 @@ describe('MessageItem arms', () => {
         retry: 1,
         maxRetries: 2,
         delayMs: 3_500.4,
-        failure: { code: 'TRANSPORT', message: '用户取消' },
+        failure: { code: 'TRANSPORT', message: 'USERCancel' },
       }}
       />,
     )
-    expect(view.getByRole('status').textContent).toBe('模型请求重试已取消（1/2） · 4s')
+    expect(view.getByRole('status').textContent).toBe('Model request retry cancelled(1/2) · 4s')
   })
 
 })
@@ -1022,11 +1022,11 @@ describe('formatMessageClock', () => {
   })
 
   it('prefixes month and day across days in the same year', () => {
-    expect(formatMessageClock(new Date(2026, 0, 1, 14, 24).getTime(), t, now)).toBe('1月1日 14:24')
+    expect(formatMessageClock(new Date(2026, 0, 1, 14, 24).getTime(), t, now)).toBe('1 mo 1 day 14:24')
   })
 
   it('prefixes year, month, and day across years', () => {
-    expect(formatMessageClock(new Date(2025, 11, 31, 9, 5).getTime(), t, now)).toBe('2025年12月31日 09:05')
+    expect(formatMessageClock(new Date(2025, 11, 31, 9, 5).getTime(), t, now)).toBe('2025 yr 12 mo 31 day 09:05')
   })
 
   it('arms the next local midnight from an in-day instant', () => {
@@ -1060,7 +1060,7 @@ describe('useCalendarDay boundary refresh', () => {
     act(() => {
       vi.advanceTimersByTime(msUntilNextLocalMidnight(dayStart) + 1)
     })
-    expect(screen.getByText('7月29日 14:24')).toBeTruthy()
+    expect(screen.getByText('7 mo 29 day 14:24')).toBeTruthy()
   })
 })
 
@@ -1102,13 +1102,13 @@ describe('small branch tails', () => {
     )
     // The untimed counts pill renders static, so the usage pill is the only button.
     const [usagePill] = [...view.getAllByRole('button')] as [HTMLElement]
-    expect(view.getByText('1 轮 1 步').closest('button')).toBeNull()
+    expect(view.getByText('1 turns 1 steps').closest('button')).toBeNull()
     expect(usagePill.textContent).toBe('10 tok')
     // Pure output accounting still reaches the usage pill's click-open dialog rows.
     fireEvent.click(usagePill)
     const dialog = view.getByRole('dialog')
-    expect(dialog.textContent).toContain('输出10 tok')
-    expect(dialog.textContent).not.toContain('缓存命中')
+    expect(dialog.textContent).toContain('Output10 tok')
+    expect(dialog.textContent).not.toContain('Cache hit')
   })
 })
 

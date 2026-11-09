@@ -75,7 +75,7 @@ describe('sourceFacts', () => {
 
 describe('indexLabel', () => {
   it('uses the market title, else the host, else the URL as written', () => {
-    expect(indexLabel({ url: 'https://a.example/i.json', title: { en: 'A', zh: '甲' } }, resolveText)).toBe('甲')
+    expect(indexLabel({ url: 'https://a.example/i.json', title: { en: 'A', zh: 'A' } }, resolveText)).toBe('A')
     expect(indexLabel({ url: 'https://a.example/i.json' }, resolveText)).toBe('a.example')
     expect(indexLabel({ url: 'https://[' }, resolveText)).toBe('https://[')
   })

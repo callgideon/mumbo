@@ -5,7 +5,7 @@ describe('bundleTitleMap', () => {
   it('maps a component row to its bundle identity and marks profile bundles as core', () => {
     const bundles: BundleTitleBundle[] = [
       { name: '@deepseek-ai/dsh-base', meta: { title: 'DSH' }, rows: [{ moduleName: '@fixture/base-component' }] },
-      { name: '@fixture/forge-bundle', meta: { title: { zh: '变更请求与工作树', en: 'Change requests' } },
+      { name: '@fixture/forge-bundle', meta: { title: { zh: 'Change requests & worktrees', en: 'Change requests' } },
         rows: [{ moduleName: '@deepseek-ai/dsh-experimental-client-ui-forge' }] },
     ]
     const titles = bundleTitleMap(bundles)
@@ -17,7 +17,7 @@ describe('bundleTitleMap', () => {
     expect(titles.get('@deepseek-ai/dsh-experimental-client-ui-forge')).toEqual({
       name: '@fixture/forge-bundle',
       core: false,
-      titles: { zh: '变更请求与工作树', en: 'Change requests' },
+      titles: { zh: 'Change requests & worktrees', en: 'Change requests' },
     })
   })
 

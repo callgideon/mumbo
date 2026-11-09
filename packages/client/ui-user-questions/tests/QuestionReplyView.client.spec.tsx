@@ -47,7 +47,7 @@ const data = {
 describe('QuestionReplyView', () => {
   it('names answered batches in Japanese', () => {
     render(<QuestionReplyBubble data={data} t={makeTranslate(ja)} />)
-    expect(screen.getByRole('group', { name: '質問と回答' })).toBeTruthy()
+    expect(screen.getByRole('group', { name: 'shitsumonとAnswer' })).toBeTruthy()
   })
 
   it('shows paired questions and answers immediately without auxiliary option content', () => {
@@ -57,7 +57,7 @@ describe('QuestionReplyView', () => {
     expect(screen.queryByText('Choose the first milestone.')).toBeNull()
     expect(screen.queryByText('A focused web surface.')).toBeNull()
     expect(screen.queryByText('A CLI')).toBeNull()
-    expect(screen.queryByRole('button', { name: /展开问题详情/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Expand question Details/ })).toBeNull()
     expect(screen.getByRole('button', { name: 'copy' })).toBeTruthy()
     expect(screen.getByText(/\d{2}:\d{2}/)).toBeTruthy()
   })
@@ -68,7 +68,7 @@ describe('QuestionReplyView', () => {
     render(<QuestionReplyBubble data={data} t={t} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'copy' }))
-    expect(writeText).toHaveBeenCalledWith('What should we build?\n回答：A dashboard')
+    expect(writeText).toHaveBeenCalledWith('What should we build?\\nAnswer: A dashboard')
     // Two microtask ticks: writeClipboard's own await, then the .then that
     // lands the success chrome.
     await act(async () => {
@@ -81,7 +81,7 @@ describe('QuestionReplyView', () => {
 
   it('renders through the conversation.chat.node slot with the same bubble', () => {
     renderView(data)
-    expect(screen.getByRole('group', { name: '问题与回答' }).getAttribute('data-question-reply')).toBe('call-reply')
+    expect(screen.getByRole('group', { name: 'Questions and answers' }).getAttribute('data-question-reply')).toBe('call-reply')
   })
 
   it('shows a distinct header, marks an unanswered question skipped, and falls back to the raw text', () => {
@@ -98,7 +98,7 @@ describe('QuestionReplyView', () => {
     />)
     expect(screen.getByText('Goal')).toBeTruthy()
     expect(screen.queryByText('None')).toBeNull()
-    expect(screen.getAllByText('已跳过')).toHaveLength(2)
+    expect(screen.getAllByText('Skipped')).toHaveLength(2)
     cleanup()
 
     render(<QuestionReplyBubble data={{ ...data, questions: [], answers: [], text: 'raw reply text' }} t={t} />)
@@ -175,6 +175,6 @@ describe('QuestionReplyView', () => {
     render(<QuestionReplyBubble data={data} t={t} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'copy' }))
-    expect(writeText).toHaveBeenCalledWith('What should we build?\n回答：A dashboard')
+    expect(writeText).toHaveBeenCalledWith('What should we build?\\nAnswer: A dashboard')
   })
 })

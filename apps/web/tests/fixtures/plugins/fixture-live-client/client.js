@@ -15,9 +15,9 @@ window.__ModuleLoader__.load({
         counters.liveMounts = String(Number(counters.liveMounts ?? 0) + 1)
         ctx.effect(() => ctx.locale.register('fixtureLive', {
           zh: {
-            active: '动态插件已启用', configSummary: '示例配置项', configForm: '动态插件配置', configField: '问候语', configSave: '保存',
-            action: '夹具操作', badge: '夹具标签', section: '夹具区块', sectionBody: '来自夹具的区块内容',
-            exportSession: '导出会话', copySessionId: '复制会话 ID',
+            active: 'Dynamic plugin enabled', configSummary: 'sample config item', configForm: 'Dynamic plugin configuration', configField: 'greeting', configSave: 'Save',
+            action: 'fixture action', badge: 'Fixture tag', section: 'fixture block', sectionBody: 'Block content from the fixture',
+            exportSession: 'Export session', copySessionId: 'Copy session ID',
           },
           en: {
             active: 'Live plugin enabled', configSummary: 'An example setting', configForm: 'Live plugin configuration', configField: 'Greeting', configSave: 'Save',

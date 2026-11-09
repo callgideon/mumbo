@@ -35,14 +35,14 @@ describe('SecretText', () => {
   it('reveals and hides the value from its own control', () => {
     const view = render(<SecretText {...props(KEY, true)} />)
     const run = view.container.querySelector('[data-secret]')!
-    const reveal = view.getByRole('button', { name: '显示密钥' })
+    const reveal = view.getByRole('button', { name: 'Show secret' })
     expect(run.textContent).toBe(masked(KEY))
     expect(reveal.getAttribute('aria-pressed')).toBe('false')
     expect(reveal.querySelector('svg')).not.toBeNull()
 
     fireEvent.click(reveal)
     expect(run.textContent).toBe(KEY)
-    const hide = view.getByRole('button', { name: '隐藏密钥' })
+    const hide = view.getByRole('button', { name: 'Hide secret' })
     expect(hide.getAttribute('aria-pressed')).toBe('true')
 
     fireEvent.click(hide)

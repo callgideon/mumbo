@@ -62,15 +62,15 @@ describe('viewer Session lineage', () => {
     const page = await bench()
     const view = page.marker({ forkLineage: { origin: 'fork', workspaceReadOnly: true, sourceSessionId } })
     fireEvent.pointerEnter(view.container.querySelector('span') as HTMLElement)
-    expect(view.container.textContent).toContain('分叉会话')
+    expect(view.container.textContent).toContain('Fork session')
   })
 
   it('marks a branch with the title its source Session carries', async () => {
     const page = await bench()
     const view = page.marker({ forkLineage: {
       origin: 'fork', workspaceReadOnly: true, sourceSessionId: 'fx-source',
-    } }, '上游会话')
+    } }, 'upstream Sessions')
     fireEvent.pointerEnter(view.container.querySelector('span') as HTMLElement)
-    expect(view.container.textContent).toContain('来自「上游会话」的分支')
+    expect(view.container.textContent).toContain('Forked from “upstream Sessions”')
   })
 })

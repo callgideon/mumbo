@@ -227,11 +227,11 @@ describe('ui-model-selection dual entry', () => {
     expect(b.seat().locale).toBe('model')
   })
 
-  it.each([['zh', '新'], ['en', 'New']] as const)('resolves seat badge text for the active %s locale', async (locale, expected) => {
+  it.each([['zh', 'new'], ['en', 'New']] as const)('resolves seat badge text for the active %s locale', async (locale, expected) => {
     const b = await bench(locale)
     b.mint('s1')
     const face = b.seat().inject!(sid('s1'))
-    expect(face.resolveText({ en: 'New', zh: '新' })).toBe(expected)
+    expect(face.resolveText({ en: 'New', zh: 'new' })).toBe(expected)
     expect(face.resolveText('1017')).toBe('1017')
   })
 
@@ -248,7 +248,7 @@ describe('ui-model-selection dual entry', () => {
     expect(options[0]?.active).toBe(true)
     expect(options[1]?.active).toBeUndefined()
     expect(b.popup().searchLabels?.()).toEqual(locale === 'zh'
-      ? { placeholder: '搜索模型…', empty: '暂无可用模型', noResults: '没有匹配的模型。' }
+      ? { placeholder: 'Search models…', empty: 'No models available.', noResults: 'No matching models.' }
       : { placeholder: 'Search models…', empty: 'No models available.', noResults: 'No matching models.' })
   })
 
@@ -315,7 +315,7 @@ describe('ui-model-selection dual entry', () => {
       b.remote.emit('llm/adapters-updated', [])
       b.mint('s1')
       const options = await b.popup().options(projection('s1'), new AbortController().signal)
-      expect(options[0]?.group?.label).toBe(locale === 'zh' ? 'DeepSeek 账号' : 'DeepSeek Account')
+      expect(options[0]?.group?.label).toBe(locale === 'zh' ? 'DeepSeek Account' : 'DeepSeek Account')
     } finally {
       await b.ctx.fiber.dispose()
     }

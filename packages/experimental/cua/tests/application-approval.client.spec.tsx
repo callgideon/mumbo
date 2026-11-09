@@ -29,8 +29,8 @@ it('leaves ordinary questions, plan reviews and other approval intents to their 
 it.each(['allow', 'reject', 'always'] as const)('returns the exact %s option from the shared card', async (choice) => {
   const intent: ApprovalIntent = {
     kind: 'approval', approve: 'task-value', reject: 'deny-value', always: 'saved-value',
-    subject: { name: 'Calculator' }, display: { question: { en: 'Allow?', zh: '允许吗？' },
-      detail: { en: 'Scope', zh: '本次任务' }, approve: { en: 'Task', zh: '本次任务允许' } },
+    subject: { name: 'Calculator' }, display: { question: { en: 'Allow?', zh: 'Allow?' },
+      detail: { en: 'Scope', zh: 'this time To-dos' }, approve: { en: 'Task', zh: 'this time To-dosAllow' } },
   }
   const item: AskUserQuestionItem = { id: 'cua-app-access', question: 'English question', detail: 'English detail', intent }
   const pending = new PendingQuestion('s1' as SessionId, [item])
@@ -41,7 +41,7 @@ it.each(['allow', 'reject', 'always'] as const)('returns the exact %s option fro
     t: makeTranslate(zh), resolveText: text => text.zh ?? text.en } as ApplicationApprovalProps} />)
   const [name, card] = factory.mock.calls[0]!
   expect(name).toBe('conversation.approval.card')
-  expect(card).toMatchObject({ title: '允许吗？', description: '本次任务', allowLabel: '本次任务允许', subject: { name: 'Calculator' } })
+  expect(card).toMatchObject({ title: 'Allow?', description: 'this time To-dos', allowLabel: 'this time To-dosAllow', subject: { name: 'Calculator' } })
   expect(card.canAnswer()).toBe(true)
   expect(card.warning).toEqual({ label: zh.approvalRisks, title: zh.approvalRiskTitle, detail: zh.approvalRiskNotice })
   await ({ allow: card.onAllow, reject: card.onReject, always: card.onAlways! })[choice]()

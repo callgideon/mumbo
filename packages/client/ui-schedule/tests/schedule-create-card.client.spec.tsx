@@ -251,13 +251,13 @@ describe('ScheduleCreateCard', () => {
 
   it('opens the task in the active locale', () => {
     render(<ScheduleCreateCard {...props(settled(dailyTask), vi.fn(), makeTranslate(zh))} />)
-    expect(screen.getByRole('button', { name: '打开任务详情：Check the deployment' })).toBeDefined()
-    expect(screen.getByRole('button', { name: '打开' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'OpenTask details: Check the deployment' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Open' })).toBeDefined()
   })
 
   it('shows the weekly frequency in the active locale', () => {
     render(<ScheduleCreateCard {...props(settled(weeklyTask), vi.fn(), makeTranslate(zh))} />)
-    expect(screen.getByText(`每周一、三 09:00（${zoneLabel('Asia/Shanghai', makeTranslate(zh))}）`)).toBeDefined()
+    expect(screen.getByText(`each Mon, three 09:00(${zoneLabel('Asia/Shanghai', makeTranslate(zh))})`)).toBeDefined()
   })
 
   it('keeps a pending call as a title row with no open action and no result body', () => {

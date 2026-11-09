@@ -112,7 +112,7 @@ it.each(['macos', 'windows'] as const)('shows the reference, filters labels and 
   expect(screen.queryByRole('tooltip')).toBeNull()
   act(() => { catalog.set([]) })
   expect(opener.hasAttribute('aria-keyshortcuts')).toBe(false)
-  expect(makeTranslate(zh)('title')).toBe('快捷键')
+  expect(makeTranslate(zh)('title')).toBe('Keyboard shortcuts')
 })
 
 
@@ -225,12 +225,12 @@ it('keeps core actions in product order across registration, remount and label c
   act(() => { catalog.set([...extensions, ...[...commands].reverse()]); fixedCatalog.set(fixed) })
   expect(labels(en.application)).toEqual(expected)
   act(() => {
-    catalog.set([...commands, ...extensions].map(row => ({ ...row, label: `操作：${row.label}` })))
-    fixedCatalog.set(fixed.map(row => ({ ...row, label: `操作：${row.label}` })))
-    store.actions.search('操作')
+    catalog.set([...commands, ...extensions].map(row => ({ ...row, label: `Action:${row.label}` })))
+    fixedCatalog.set(fixed.map(row => ({ ...row, label: `Action:${row.label}` })))
+    store.actions.search('operation')
   })
-  expect(labels(en.application)).toEqual(expected.map(label => `操作：${label}`))
-  expect(labels(en.input)).toEqual(['操作：Newline', '操作：Send', '操作：Stop reply'])
+  expect(labels(en.application)).toEqual(expected.map(label => `Action:${label}`))
+  expect(labels(en.input)).toEqual(['Action: Newline', 'Action: Send', 'Action: Stop reply'])
 })
 
 it('keeps product order for tied searches while prioritizing stronger matches', () => {
@@ -258,8 +258,8 @@ it.each((['web', 'desktop'] as const).flatMap(runtime => (['invalid', 'future'] 
   const text = screen.getByRole('alert').textContent
   expect(text).toContain(runtime === 'web' ? 'dsh.keybindings.v1' : 'userData/keybindings.json')
   expect(text).toContain(error === 'future'
-    ? dictionary === en ? 'Upgrade Harness' : '升级 Harness'
-    : dictionary === en ? 'Back up and repair' : '先备份并修复')
+    ? dictionary === en ? 'Upgrade Harness' : 'upgrade Harness'
+    : dictionary === en ? 'Back up and repair' : 'back up first and Repair')
   expect(text).toContain(dictionary['using-accepted'])
   const reset = screen.getByRole('button', { name: dictionary['reset-all'] })
   expect(reset.hasAttribute('disabled')).toBe(true)
@@ -281,9 +281,9 @@ it('shows mounted fixed actions as searchable read-only rows and follows their l
   expect(screen.queryByRole('button', { name: 'Edit shortcut for Stop reply' })).toBeNull()
   act(() => { store.actions.search('response.stop') })
   expect(screen.getAllByRole('listitem')).toHaveLength(1)
-  act(() => { fixedCatalog.set([{ ...stop, label: '停止回复' }]) })
+  act(() => { fixedCatalog.set([{ ...stop, label: 'Stop reply' }]) })
   expect(screen.queryByText('Stop reply')).toBeNull()
-  expect(screen.getByText('停止回复')).toBeTruthy()
+  expect(screen.getByText('Stop reply')).toBeTruthy()
   act(() => { fixedCatalog.set([]) })
   expect(screen.queryAllByRole('listitem')).toHaveLength(0)
 })

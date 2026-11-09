@@ -42,38 +42,38 @@ const ROWS: readonly StatusRow[] = [
   {
     facts: { notFound: true },
     status: 'invalid',
-    message: '链接无效，或这条分享已被删除。',
-    action: { kind: 'directory', label: '回到分享列表' },
+    message: 'This link is not valid, or that share was deleted.',
+    action: { kind: 'directory', label: 'Back to shares' },
   },
   {
     facts: { ownerOnline: false },
     status: 'offline',
-    message: '分享者当前不在线，会自动重连。',
-    action: { kind: 'retry', label: '重试' },
+    message: 'The owner is offline right now; this page reconnects automatically.',
+    action: { kind: 'retry', label: 'Retry' },
   },
   {
     facts: { reason: 'share-stopped' },
     status: 'stopped',
-    message: '分享者已停止这条分享。',
-    action: { kind: 'directory', label: '回到分享列表' },
+    message: 'The owner stopped this share.',
+    action: { kind: 'directory', label: 'Back to shares' },
   },
   {
     facts: { reason: 'share-expired' },
     status: 'expired',
-    message: '这条分享已过期。',
-    action: { kind: 'directory', label: '回到分享列表' },
+    message: 'This share expired.',
+    action: { kind: 'directory', label: 'Back to shares' },
   },
   {
     facts: { unauthenticated: true },
     status: 'reauthenticate',
-    message: '登录已过期。',
-    action: { kind: 'sign-in', label: '重新登录' },
+    message: 'Your sign-in expired.',
+    action: { kind: 'sign-in', label: 'Sign in again' },
   },
   {
     facts: { unreachable: true },
     status: 'unavailable',
-    message: '服务暂时不可用，正在重试。',
-    action: { kind: 'reload', label: '刷新' },
+    message: 'The share service is unavailable right now; retrying.',
+    action: { kind: 'reload', label: 'Reload' },
   },
 ]
 
@@ -192,7 +192,7 @@ describe('viewer status', () => {
     await fiber.await()
     try {
       await vi.waitFor(() => {
-        expect(document.getElementById(MESSAGE_ID)?.textContent).toBe('分享者当前不在线，会自动重连。')
+        expect(document.getElementById(MESSAGE_ID)?.textContent).toBe('The owner is offline right now; this page reconnects automatically.')
       })
 
       // The statement is plain DOM rather than a slot-rendered surface, so a language switch repaints
@@ -208,14 +208,14 @@ describe('viewer status', () => {
       context = { capabilities: { sessionMode: 'view', sessionModeReason: 'share-stopped', online: true } }
       await act(async () => { window.dispatchEvent(new Event('focus')) })
       await vi.waitFor(() => {
-        expect(document.getElementById(MESSAGE_ID)?.textContent).toBe('分享者已停止这条分享。')
+        expect(document.getElementById(MESSAGE_ID)?.textContent).toBe('The owner stopped this share.')
       })
 
       // A reader the Relay does not know: the link is the thing to check, and the page says so.
       notFound = true
       await act(async () => { window.dispatchEvent(new Event('focus')) })
       await vi.waitFor(() => {
-        expect(document.getElementById(MESSAGE_ID)?.textContent).toBe('链接无效，或这条分享已被删除。')
+        expect(document.getElementById(MESSAGE_ID)?.textContent).toBe('This link is not valid, or that share was deleted.')
       })
     } finally {
       await fiber.dispose()
@@ -252,7 +252,7 @@ describe('viewer status', () => {
     try {
       await vi.waitFor(() => {
         // An unreadable share is not confirmed read-only, and no pending-approval state exists to claim.
-        expect(document.getElementById(MESSAGE_ID)?.textContent).toBe('正在连接分享…')
+        expect(document.getElementById(MESSAGE_ID)?.textContent).toBe('Connecting to the share…')
         expect(asked.length).toBeGreaterThan(0)
       })
       expect(document.querySelector('button[data-liveshare-action="request-access"]')).toBeNull()

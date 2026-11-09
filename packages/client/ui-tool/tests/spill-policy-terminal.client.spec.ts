@@ -133,7 +133,7 @@ describe.each([
       { outcome: 'terminating signal', marker: '\n[killed by signal: SIGTERM]' },
       { outcome: 'markerless output', marker: '' },
     ])('keeps a spilled $outcome result generic', async ({ marker }) => {
-      const original = 'HEAD 雪\n'.repeat(200) + marker
+      const original = 'HEAD snow\n'.repeat(200) + marker
       const { block, saves } = await executeShell(original, nested, name)
       expect(saves).toHaveLength(1)
       expect(saves[0]!.input).toMatchObject({
@@ -154,7 +154,7 @@ describe.each([
     })
 
     it('keeps a notice-only result generic when no preview fits', async () => {
-      const original = '雪'.repeat(1_000) + '\n[exit code: 9]'
+      const original = 'snow'.repeat(1_000) + '\n[exit code: 9]'
       const notice = formatSpillNotice({ kind: 'exact', count: Buffer.byteLength(original, 'utf8') }, spillReference)
       const { block, saves } = await executeShell(original, nested, name, estimateContent([{ type: 'text', text: notice }]))
       expect(block.content).toEqual([{ type: 'text', text: notice }])

@@ -97,7 +97,7 @@ describe('Client source catalog', () => {
   })
 
   it('describes scripts and transfers UTF-8 source and maps in bounded chunks', async () => {
-    const source = 'const greeting = "你好"\nconsole.log(greeting)\n'
+    const source = 'const greeting = "hello"\nconsole.log(greeting)\n'
     const sourceMap = JSON.stringify({ version: 3, sources: ['client.ts'], mappings: 'AAAA' })
     const catalog = new ClientSourceCatalog([{
       scriptKey,

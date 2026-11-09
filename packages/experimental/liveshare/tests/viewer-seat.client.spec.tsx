@@ -48,9 +48,9 @@ const catalog = {
     id: 'internal',
     models: [{
       id: 'dsv41f',
-      name: '内网 DSV41F',
+      name: 'intranet DSV41F',
       reasoning: {
-        efforts: [{ id: 'low', name: '低强度' }, { id: 'high', name: '高强度' }],
+        efforts: [{ id: 'low', name: 'low effort' }, { id: 'high', name: 'high effort' }],
         defaultEffort: 'low',
       },
     }],
@@ -69,8 +69,8 @@ describe('viewer model seat', () => {
       />,
     )
 
-    const seat = await screen.findByText(/内网 DSV41F/)
-    expect(seat.textContent).toBe('内网 DSV41F · 高强度')
+    const seat = await screen.findByText(/intranet DSV41F/)
+    expect(seat.textContent).toBe('intranet DSV41F · high effort')
     // The restriction is visible copy, not only the tooltip.
     expect(document.body.textContent).toContain(zh['viewer.model.locked'])
     const element = document.querySelector('[data-liveshare-viewer-seat="model"]')
@@ -91,7 +91,7 @@ describe('viewer model seat', () => {
       />,
     )
 
-    expect((await screen.findByText(/内网 DSV41F/)).textContent).toBe('内网 DSV41F · 低强度')
+    expect((await screen.findByText(/intranet DSV41F/)).textContent).toBe('intranet DSV41F · low effort')
   })
 
   it('states the raw effort id when the catalog names no level, and no effort when nothing states one', async () => {
@@ -102,7 +102,7 @@ describe('viewer model seat', () => {
         catalog={() => Promise.resolve(catalog)}
       />,
     )
-    expect((await screen.findByText(/内网 DSV41F/)).textContent).toBe('内网 DSV41F · future')
+    expect((await screen.findByText(/intranet DSV41F/)).textContent).toBe('intranet DSV41F · future')
     unmount()
 
     render(

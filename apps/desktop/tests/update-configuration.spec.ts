@@ -30,8 +30,8 @@ it('only exposes a permission hint for a known filesystem permission failure', (
 it('keeps settings errors concise and cleanup recovery distinct', () => {
   expect(configurationMessage('read', en)).toBe('Settings file error; updates are paused')
   expect(configurationMessage('format', en)).toBe('Settings file error; updates are paused')
-  expect(configurationMessage('channel', zh)).toBe('配置文件异常，更新已暂停')
-  expect(configurationMessage('cleanup', zh)).toContain('请重启应用')
+  expect(configurationMessage('channel', zh)).toBe('Settings file error; updates are paused')
+  expect(configurationMessage('cleanup', zh)).toContain('please RestartApplication')
   expect(configurationMessage('cleanup', en)).not.toContain('settings file')
 })
 

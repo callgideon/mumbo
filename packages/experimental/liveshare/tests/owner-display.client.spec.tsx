@@ -40,25 +40,25 @@ function sharesWithIdentity(answer: () => Promise<unknown>): never {
 
 describe('owner display', () => {
   it('shows the owner name for the owner own subject and falls back otherwise', () => {
-    rememberOwnerDisplay({ subjectId: 'subject-42', displayName: '许翰翔' })
-    expect(attribution().textContent).toBe('许翰翔')
+    rememberOwnerDisplay({ subjectId: 'subject-42', displayName: 'Alice' })
+    expect(attribution().textContent).toBe('Alice')
     expect(attribution().querySelector('[data-liveshare-origin="subject-42"]')).not.toBeNull()
     // Repeating the same facts does not create a second store update, and clearing restores the id.
-    rememberOwnerDisplay({ subjectId: 'subject-42', displayName: '许翰翔' })
+    rememberOwnerDisplay({ subjectId: 'subject-42', displayName: 'Alice' })
     forgetOwnerDisplay()
     expect(attribution().textContent).toBe('subject-42')
   })
 
   it('records a verified identity, and clears on a refusal or an unverified answer', async () => {
     await expect(rememberOwnerIdentity(sharesWithIdentity(async () => ({
-      ok: true, value: { state: 'verified', relay: '', displayName: '许翰翔', subjectId: 'subject-42' },
+      ok: true, value: { state: 'verified', relay: '', displayName: 'Alice', subjectId: 'subject-42' },
     })))).resolves.toBeUndefined()
-    expect(attribution().textContent).toBe('许翰翔')
+    expect(attribution().textContent).toBe('Alice')
 
     await rememberOwnerIdentity(sharesWithIdentity(async () => ({ ok: false, error: { code: 'x' } })))
     expect(attribution().textContent).toBe('subject-42')
 
-    rememberOwnerDisplay({ subjectId: 'subject-42', displayName: '许翰翔' })
+    rememberOwnerDisplay({ subjectId: 'subject-42', displayName: 'Alice' })
     await rememberOwnerIdentity(sharesWithIdentity(async () => ({ ok: true, value: { state: 'unverified', relay: '' } })))
     expect(attribution().textContent).toBe('subject-42')
   })

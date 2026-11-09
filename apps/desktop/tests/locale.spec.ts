@@ -5,7 +5,7 @@ import { en, formatDesktopMessage, resolveDesktopLocale, resolveDesktopStartupLo
 describe('desktop locale dictionaries', () => {
   it('uses the same concise Chinese configuration error in the toast and details', () => {
     for (const message of [zh.updateConfigurationRead, zh.updateConfigurationFormat, zh.updateConfigurationChannel]) {
-      expect(message).toBe('配置文件异常，更新已暂停')
+      expect(message).toBe('Settings file error; updates are paused')
     }
   })
 

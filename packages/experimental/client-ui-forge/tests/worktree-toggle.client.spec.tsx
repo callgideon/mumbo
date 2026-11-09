@@ -140,7 +140,7 @@ describe('WorktreeToggle checkbox', () => {
 
   it.each([
     ['en', en, 'Current branch: main', 'Not on a branch · 0a1b2c3'],
-    ['zh', zh, '当前分支：main', '未在分支上 · 0a1b2c3'],
+    ['zh', zh, 'Current：main', 'Not on a branch · 0a1b2c3'],
   ] as const)('names the branch and detached checkout in an informational tooltip (%s)', (_locale, copy, branchLabel, detachedLabel) => {
     const b = option(editable(), makeTranslate(copy))
     const chip = b.view.getByRole('button', { name: branchLabel })

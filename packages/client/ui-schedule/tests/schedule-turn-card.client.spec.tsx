@@ -577,8 +577,8 @@ describe('ScheduleTurnCard', () => {
     render(<ScheduleTurnCard {...cardProps(
       [settledBlock(weeklyTask)], openTaskDetail, makeTranslate(zh),
     )} />)
-    expect(screen.getByText(`每周一、三 09:00（${zoneLabel('Asia/Shanghai', makeTranslate(zh))}）`)).toBeDefined()
-    fireEvent.click(screen.getByRole('button', { name: '打开任务详情：Check the deployment' }))
+    expect(screen.getByText(`each Mon, three 09:00(${zoneLabel('Asia/Shanghai', makeTranslate(zh))})`)).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'OpenTask details: Check the deployment' }))
     expect(openTaskDetail).toHaveBeenCalledExactlyOnceWith('task-weekly' as ScheduleId)
   })
 

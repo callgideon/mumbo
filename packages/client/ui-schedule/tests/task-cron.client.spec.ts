@@ -41,7 +41,7 @@ describe('Vixie star flags mirrored from the Host', () => {
     const conjunction = cronPreview(parsed('0 9 */2 * 1'), tEn, 'en')
     expect(conjunction).toContain(' and ')
     expect(conjunction).not.toContain(' or ')
-    expect(cronPreview(parsed('0 9 */2 * 1'), tZh, 'zh-CN')).toContain('且')
+    expect(cronPreview(parsed('0 9 */2 * 1'), tZh, 'zh-CN')).toContain('and')
     // Without a star on either side the fields stay alternatives.
     expect(cronPreview(parsed('0 9 1 * 1'), tEn, 'en')).toContain(' or ')
   })
@@ -60,7 +60,7 @@ describe('Vixie star flags mirrored from the Host', () => {
     expect(cronPreview(parsed('0 9 1 * 0-6'), tEn, 'en')).toBe('Every day at 09:00')
     // Neither side covers every value: both are named as alternatives.
     expect(cronPreview(parsed('0 9 1,2 * 1,3'), tEn, 'en')).toBe('Day 1, 2 of every month or Mon, Wed at 09:00')
-    expect(cronPreview(parsed('0 9 1,2 * 1,3'), tZh, 'zh-CN')).toBe('每月 1、2 日或周一、周三 09:00')
+    expect(cronPreview(parsed('0 9 1,2 * 1,3'), tZh, 'zh-CN')).toBe('Monthly on day 1, 2 of every month or Mon, Wed 09:00')
   })
 })
 
@@ -136,41 +136,41 @@ describe('parseCronExpression', () => {
 describe('cronPreview', () => {
   // Every minute of an hour, as each locale's list separator spells it.
   const everyMinuteEn = Array.from({ length: 60 }, (_value, index) => index).join(', ')
-  const everyMinuteZh = Array.from({ length: 60 }, (_value, index) => index).join('、')
+  const everyMinuteZh = Array.from({ length: 60 }, (_value, index) => index).join(',')
   it.each([
-    ['0 9 * * 1-5', 'Mon–Fri at 09:00', '周一至周五 09:00'],
-    ['0 9 * * *', 'Every day at 09:00', '每天 09:00'],
-    ['*/15 * * * *', 'Every 15 minutes', '每 15 分钟'],
-    ['* * * * *', 'Every minute', '每分钟'],
-    ['0 9 * * 1,3', 'Mon, Wed at 09:00', '周一、周三 09:00'],
-    ['0 9 * * 1-3,6', 'Mon–Wed, Sat at 09:00', '周一至周三、周六 09:00'],
-    ['0 9 * * 0', 'Sun at 09:00', '周日 09:00'],
-    ['0 9 * * 6,7', 'Sat, Sun at 09:00', '周六、周日 09:00'],
-    ['30 8 1 * *', 'Day 1 of every month at 08:30', '每月 1 日 08:30'],
-    ['0 9 1,15 * *', 'Day 1, 15 of every month at 09:00', '每月 1、15 日 09:00'],
-    ['0 9 1 3 *', 'Day 1 of every month in March at 09:00', '每月 1 日（三月） 09:00'],
-    ['0 9 1 * 1', 'Day 1 of every month or Mon at 09:00', '每月 1 日或周一 09:00'],
-    ['0 9 * 1,12 *', 'Every day in January, December at 09:00', '每天（一月、十二月） 09:00'],
-    ['* 9-17 * * *', 'Every day every minute during hours 09–17', '每天 09 至 17 点的每分钟'],
-    ['*/15 9-17 * * *', 'Every day every 15 minutes during hours 09–17', '每天 09 至 17 点内每 15 分钟'],
-    ['0 9,15 * * *', 'Every day at 09:00, 15:00', '每天 09:00、15:00'],
-    ['0,30 * * * *', 'Every 30 minutes', '每 30 分钟'],
-    ['0 * * * *', 'Every hour', '每小时'],
-    ['0 */2 * * *', 'Every 2 hours', '每 2 小时'],
+    ['0 9 * * 1-5', 'Mon–Fri at 09:00', 'Monday to Friday 09:00'],
+    ['0 9 * * *', 'Every day at 09:00', 'Every day 09:00'],
+    ['*/15 * * * *', 'Every 15 minutes', 'Every 15 minutes'],
+    ['* * * * *', 'Every minute', 'Every minute'],
+    ['0 9 * * 1,3', 'Mon, Wed at 09:00', 'Mon, Wed 09:00'],
+    ['0 9 * * 1-3,6', 'Mon–Wed, Sat at 09:00', 'Mon to Wed, Sat 09:00'],
+    ['0 9 * * 0', 'Sun at 09:00', 'Sun 09:00'],
+    ['0 9 * * 6,7', 'Sat, Sun at 09:00', 'Sat, Sun 09:00'],
+    ['30 8 1 * *', 'Day 1 of every month at 08:30', 'Monthly on day 1 at 08:30'],
+    ['0 9 1,15 * *', 'Day 1, 15 of every month at 09:00', 'Monthly on day 1, 15 at 09:00'],
+    ['0 9 1 3 *', 'Day 1 of every month in March at 09:00', 'Monthly on day 1 of every month(March) 09:00'],
+    ['0 9 1 * 1', 'Day 1 of every month or Mon at 09:00', 'Monthly on day 1 of every month or Mon 09:00'],
+    ['0 9 * 1,12 *', 'Every day in January, December at 09:00', 'Every day(January, December) 09:00'],
+    ['* 9-17 * * *', 'Every day every minute during hours 09–17', 'Daily at 09–17'],
+    ['*/15 9-17 * * *', 'Every day every 15 minutes during hours 09–17', 'Daily at 09–17 within Every 15 minutes'],
+    ['0 9,15 * * *', 'Every day at 09:00, 15:00', 'Every day 09:00, 15:00'],
+    ['0,30 * * * *', 'Every 30 minutes', 'Every 30 minutes'],
+    ['0 * * * *', 'Every hour', 'Every hour'],
+    ['0 */2 * * *', 'Every 2 hours', 'Every 2 hours'],
     // A restricted day phrase joins the repetition into one sentence, so the
     // interval is spelled in its lower-case form instead of as a second title.
-    ['0 * * * 1', 'Mon every hour', '周一 每小时'],
-    ['0 */2 * * 1', 'Mon every 2 hours', '周一 每 2 小时'],
+    ['0 * * * 1', 'Mon every hour', 'Mon Every hour'],
+    ['0 */2 * * 1', 'Mon every 2 hours', 'Mon Every 2 hours'],
     ['0-59/1 * * * *', `Every day every hour at minute ${everyMinuteEn}`,
-      `每天 每小时的第 ${everyMinuteZh} 分钟`],
-    ['0-30/15 * * * *', 'Every day every hour at minute 0, 15, 30', '每天 每小时的第 0、15、30 分钟'],
-    ['5,20,35,50 * * * *', 'Every day every hour at minute 5, 20, 35, 50', '每天 每小时的第 5、20、35、50 分钟'],
-    ['0,15,40 * * * *', 'Every day every hour at minute 0, 15, 40', '每天 每小时的第 0、15、40 分钟'],
-    ['* 9 * * *', 'Every day every minute during hours 09', '每天 09 点的每分钟'],
-    ['0-59/1 9 * * *', `Every day at minute ${everyMinuteEn} of hours 09`, `每天 09 点的第 ${everyMinuteZh} 分钟`],
+      `Daily at Every hour at minute \${everyMinuteZh} minutes`],
+    ['0-30/15 * * * *', 'Every day every hour at minute 0, 15, 30', 'Daily at Every hour at minute 0, 15, 30 minutes'],
+    ['5,20,35,50 * * * *', 'Every day every hour at minute 5, 20, 35, 50', 'Daily at Every hour at minute 5, 20, 35, 50 minutes'],
+    ['0,15,40 * * * *', 'Every day every hour at minute 0, 15, 40', 'Daily at Every hour at minute 0, 15, 40 minutes'],
+    ['* 9 * * *', 'Every day every minute during hours 09', 'Daily at 09'],
+    ['0-59/1 9 * * *', `Every day at minute ${everyMinuteEn} of hours 09`, `Daily at 09 o'clock Turn ${everyMinuteZh} minutes`],
     ['5,10,25,40,50 1,7,13 * * *', 'Every day at minute 5, 10, 25, 40, 50 of hours 01, 07, 13',
-      '每天 01、07、13 点的第 5、10、25、40、50 分钟'],
-    ['*/15 * * 3 *', 'Every day in March every 15 minutes', '每天（三月） 每 15 分钟'],
+      'Daily at 01, 07, 13 o'clock Turn 5, 10, 25, 40, 50 minutes'],
+    ['*/15 * * 3 *', 'Every day in March every 15 minutes', 'Every day(March) Every 15 minutes'],
   ])('describes %s', (expression, english, chinese) => {
     expect(cronPreview(parsed(expression), tEn, 'en')).toBe(english)
     expect(cronPreview(parsed(expression), tZh, 'zh-CN')).toBe(chinese)

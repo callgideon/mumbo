@@ -7,9 +7,9 @@
  */
 export function desktopPublishQualificationError(qualification) {
   const remedy = qualification === 'unsigned'
-    ? '该包未签名（unsigned）。请重新运行 Windows 打包并选择 signing=signed。'
+    ? 'This package is unsigned. Re-run Windows packaging and select signing=signed.'
     : qualification === 'unnotarized'
-      ? '该包跳过了公证（unnotarized）。请重新运行 macOS 打包，取消勾选“跳过公证”，完成公证和 stapling。'
+      ? 'This package skipped notarization (unnotarized). Re-run macOS packaging, clear the "skip notarization" option, and complete notarization and stapling.'
       : undefined
-  return remedy && `desktop publish: ${remedy}当前产物仅限内部调试，不能发布到 test 或 production，也不能用于自动更新。打包成功后使用新的 run ID / attempt 发布；重跑当前发布任务无效。`
+  return remedy && `desktop publish: ${remedy} This artifact is for internal debugging only and cannot be published to test or production or used for automatic updates. After packaging succeeds, publish with the new run ID / attempt; re-running the current publish job has no effect.`
 }

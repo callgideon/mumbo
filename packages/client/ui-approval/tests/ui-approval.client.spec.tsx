@@ -235,14 +235,14 @@ describe('approval Remote Event consumer', () => {
       toolName: 'bash',
       callId: 'call-1',
       reason: 'needs access',
-      displayReason: { en: 'Display reason', zh: '展示原因' },
+      displayReason: { en: 'Display reason', zh: 'show Reason' },
       signal: controller.signal,
     }, next)
     const pending = bench.pending.getSnapshot()[0]!
     const { options, component } = bench.registration()
 
     expect(component).toBe(ApprovalPanel)
-    expect(pending.displayReason).toEqual({ en: 'Display reason', zh: '展示原因' })
+    expect(pending.displayReason).toEqual({ en: 'Display reason', zh: 'show Reason' })
     expect(options.inject().resolveReason(pending.displayReason!)).toBe('Display reason')
     expect(options.select({ pendingInteraction: undefined })).toBeNull()
     expect(options.select({ pendingInteraction: pending })).toBe(pending)
@@ -388,14 +388,14 @@ describe('ApprovalPanel', () => {
     const pending = new PendingApproval(id('s1'), {
       toolName: 'bash',
       reason: 'audit reason',
-      displayReason: { en: 'English explanation', zh: '中文说明' },
+      displayReason: { en: 'English explanation', zh: 'ChineseInstructions' },
     })
     const props = panelProps(pending)
     const view = render(<ApprovalPanel {...props} />)
     expect(screen.getByText('English explanation')).toBeTruthy()
     expect(screen.queryByText('audit reason')).toBeNull()
     view.rerender(<ApprovalPanel {...props} resolveReason={reason => reason['zh']!} />)
-    expect(screen.getByText('中文说明')).toBeTruthy()
+    expect(screen.getByText('ChineseInstructions')).toBeTruthy()
     expect(pending.reason).toBe('audit reason')
   })
 

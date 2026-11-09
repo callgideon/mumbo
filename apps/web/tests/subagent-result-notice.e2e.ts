@@ -18,11 +18,11 @@ const DIR = fileURLToPath(new URL('./expected/subagent-result-notice/', import.m
 const MODE = webSnapshotMode()
 const OUTPUT = '## Research result\nThe original child reply stays available.'
 const OUTCOMES = [
-  { reason: 'completed', en: 'Subagent run completed', zh: '子智能体已完成任务' },
-  { reason: 'aborted', en: 'Subagent run stopped', zh: '子智能体任务已停止' },
-  { reason: 'error', en: 'Subagent run failed', zh: '子智能体执行失败' },
-  { reason: 'max-tokens', en: 'Subagent reached the token limit', zh: '子智能体已达 token 上限' },
-  { reason: 'refusal', en: 'Subagent declined the task', zh: '子智能体拒绝执行' },
+  { reason: 'completed', en: 'Subagent run completed', zh: 'Subagent run completed' },
+  { reason: 'aborted', en: 'Subagent run stopped', zh: 'Subagent run stopped' },
+  { reason: 'error', en: 'Subagent run failed', zh: 'Subagent run failed' },
+  { reason: 'max-tokens', en: 'Subagent reached the token limit', zh: 'Subagent reached the token limit' },
+  { reason: 'refusal', en: 'Subagent declined the task', zh: 'Subagent declined the task' },
 ] as const satisfies readonly { reason: SubagentStopReason; en: string; zh: string }[]
 
 describe.skipIf(MODE === 'record')('web e2e: subagent result notices', () => {
@@ -72,7 +72,7 @@ describe.skipIf(MODE === 'record')('web e2e: subagent result notices', () => {
         message: createSettlementMessage(childId, 'agent-1', { stopReason: 'completed', output: [] }),
       })
       notices.push({
-        title: locale === 'en' ? 'Subtask status updated' : '子任务状态更新',
+        title: locale === 'en' ? 'Subtask status updated' : 'Subtask status updated',
         message: createUserMessage({
           source: { kind: 'subagent-settled', form: 'notice', senderSessionId: childId, summary: 'Background subagent finished.' },
           content: [{ type: 'text', text: 'Background subagent finished.' }],

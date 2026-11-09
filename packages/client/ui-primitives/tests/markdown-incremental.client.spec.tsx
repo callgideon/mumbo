@@ -349,24 +349,24 @@ describe('freeze dynamics around frontier-sensitive constructs', () => {
 
 describe('multibyte content', () => {
   const CJK_DOC = [
-    '# 标题 🎉',
+    '# title 🎉',
     '',
-    '这是一段包含 **加粗**、`行内代码` 与表情 😀🚀 的中文段落。',
+    'This is a paragraph containing **bold**,`inline Code` and emoji 😀🚀 's Chinese paragraph.',
     '',
-    '- 列表项一 ✅',
-    '- 列表项二',
+    '-List item one ✅',
+    '-List item two',
     '',
-    '> 引用一行,带表情 🐟',
+    '> Quote one line,with emoji 🐟',
     '',
     '```',
-    '中文代码 🎯',
+    'ChineseCode 🎯',
     '```',
     '',
-    '| 键 | 值 |',
+    '| key | value |',
     '| --- | --- |',
-    '| 甲 | 乙 |',
+    '| A | B |',
     '',
-    '结尾段落,足够多的块让前面全部冻结。🌊',
+    'Closing paragraph,Enough blocks to let the earlier ones All freeze.🌊',
   ].join('\n')
 
   it('code-unit chunking (splitting surrogate pairs mid-stream) matches fresh renders', () => {

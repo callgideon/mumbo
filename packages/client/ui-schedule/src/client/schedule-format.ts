@@ -339,7 +339,7 @@ export function formatScheduleFrequency(
  * cards use.
  *
  * The month is a locale-owned name, not a zero-padded number: `en` renders
- * `Dec 31, 9:00 AM` and `zh-CN` renders `12月31日 09:00`, so neither locale can
+ * `Dec 31, 9:00 AM` and `zh-CN` renders `12/31 09:00`, so neither locale can
  * produce a `12-31` string. The year appears only when the instant falls outside
  * the current year in the displayed zone, so a same-year target or delivery
  * stays compact while an older record still dates itself.
@@ -399,7 +399,7 @@ function statesYear(locale: string): boolean {
  * reader's zone: the instant is the same one, and the reader compares it with
  * their own clock. The locale owns the month name, the field order, and the
  * separators, so the stamp reads `Sep 19, 2026, 15:51` in English and
- * `9月19日 15:51` in Chinese.
+ * `09/19 15:51` in Chinese.
  *
  * Whether a bare date reads the year is a per-language typographic choice, and
  * the languages the design pins are stated in {@link YEAR_LANGUAGES} and
@@ -429,7 +429,7 @@ export function formatScheduleAbsolute(scheduledAt: string, locale: string): str
  *
  * A delivery floor lasts from one minute to one week, so the clock reads to the
  * second and the month and day appear only for another day: `15:51:37` today,
- * and `Oct 20, 15:51:37` in English or `10月20日 15:51:37` in Chinese otherwise.
+ * and `Oct 20, 15:51:37` in English or `10/20 15:51:37` in Chinese otherwise.
  * @param at - epoch milliseconds when the action becomes available.
  * @param locale - BCP-47 locale owning the month name, field order, and clock.
  * @param now - current epoch milliseconds.

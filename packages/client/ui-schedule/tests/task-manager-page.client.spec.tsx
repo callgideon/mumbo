@@ -223,8 +223,8 @@ function detailViewLabels(dictionary: Dictionary) {
       empty: 'No delivery record available',
     }
     : {
-      tablist: '任务详情视图', rules: '规则', records: '任务运行记录',
-      empty: '暂无任务运行记录',
+      tablist: 'Task detail views', rules: 'Rules', records: 'Records',
+      empty: 'No delivery record available',
     }
 }
 
@@ -403,11 +403,11 @@ function remoteCatalog() {
 
 describe.each([['English', en], ['Chinese', zh]] as const)('original Session availability in %s', (_name, dictionary) => {
   it.each([
-    ['Session list pending', { ...sessions, phase: 'pending' as const }, workspaces, 'Loading linked session information.', '正在加载关联会话信息'],
-    ['Workspace list pending', sessions, { ...workspaces, phase: 'pending' as const }, 'Loading linked session information.', '正在加载关联会话信息'],
-    ['archived', sessions, { ...workspaces, archivedSessionIds: [alpha] }, 'The linked session is archived.', '关联会话已归档'],
-    ['missing', { ...sessions, ids: [], byId: {} }, workspaces, 'The linked session is unavailable.', '关联会话当前不可用'],
-    ['archive read failed', sessions, { ...workspaces, state: 'error' as const, error: new RemoteError('gateway/internal', 'Archive unavailable', {}) }, 'The linked session is unavailable.', '关联会话当前不可用'],
+    ['Session list pending', { ...sessions, phase: 'pending' as const }, workspaces, 'Loading linked session information.', 'Loading linked session information.'],
+    ['Workspace list pending', sessions, { ...workspaces, phase: 'pending' as const }, 'Loading linked session information.', 'Loading linked session information.'],
+    ['archived', sessions, { ...workspaces, archivedSessionIds: [alpha] }, 'The linked session is archived.', 'The linked session is archived.'],
+    ['missing', { ...sessions, ids: [], byId: {} }, workspaces, 'The linked session is unavailable.', 'The linked session is unavailable.'],
+    ['archive read failed', sessions, { ...workspaces, state: 'error' as const, error: new RemoteError('gateway/internal', 'Archive unavailable', {}) }, 'The linked session is unavailable.', 'The linked session is unavailable.'],
   ] satisfies [string, SessionListState, WorkspaceSnapshot, string, string][])('disables navigation while %s without hiding the task', (_reason, sessionState, workspaceState, english, chinese) => {
     const { props } = mount({ records: [ended] }, dictionary, {
       useSessions: select => select(sessionState), useWorkspaces: select => select(workspaceState),
@@ -613,7 +613,7 @@ describe('Task manager catalog', () => {
     expect(document.activeElement).toBe(row)
     h.view.rerender(<TaskManagerPage {...h.props} t={makeTranslate(zh)} />)
     expect(screen.getByRole('button', {
-      name: 'Check metrics', description: /^每 5 分钟.*下次计划时间：/,
+      name: 'Check metrics', description: /^Every 5 minutes.*Next scheduled time: /,
     })).toBe(row)
     expect(time.textContent).toBe(absoluteNextRun(every.scheduledAt, zh))
     expect(relativeText(metadata)).toBe(relativeNextRun(every.scheduledAt, zh))
@@ -651,7 +651,7 @@ describe('Task manager catalog', () => {
   })
 
   it('states the time remaining until the next run in each locale', () => {
-    // The row and the detail state a duration, not a date: zh reads `2小时后`
+    // The row and the detail state a duration, not a date: zh reads `2hour after`
     // and en reads `in 2 hours`, and neither renders a clock time for it.
     const soon: Entry = {
       ...at, title: 'Two hours out', prompt: 'Two hours out',
@@ -659,7 +659,7 @@ describe('Task manager catalog', () => {
     }
     for (const dictionary of [en, zh]) {
       const h = mount({ records: [soon] }, dictionary)
-      const expected = dictionary === en ? 'in 2 hours' : '2小时后'
+      const expected = dictionary === en ? 'in 2 hours' : '2hour after'
       const row = screen.getByRole('button', { name: 'Two hours out' })
       const summary = row.querySelector<HTMLElement>(`.${css.rowSummary!}`)?.textContent ?? ''
       expect(summary).toContain(expected)
@@ -786,7 +786,7 @@ describe('Task manager catalog', () => {
 
   it.each([
     { dictionary: en, frequency: 'Daily at 23:00' },
-    { dictionary: zh, frequency: '每天 23:00' },
+    { dictionary: zh, frequency: 'Every day 23:00' },
   ])('classifies daily wall-clock rules as repeating and omits the device zone: $frequency', ({ dictionary, frequency }) => {
     mount({ records: [...records, daily] }, dictionary)
     const list = screen.getByRole('list', { name: dictionary['list.label'] })
@@ -1421,7 +1421,7 @@ describe('Task manager details', () => {
     expect(visibleText(detail, dictionary['detail.nextRun'])).toHaveLength(0)
     expect(nextRunTime(detail)).toBeNull()
     expect(row.textContent).not.toContain(dictionary['list.nextPrefix'])
-    expect(detail.textContent).not.toMatch(/execution completed|completed successfully|execution succeeded|执行已完成|执行成功/i)
+    expect(detail.textContent).not.toMatch(/execution completed|completed successfully|execution succeeded|run completed|Run succeeded/i)
     const link = within(detail.querySelector('footer')!).getByRole('button', { name: dictionary['detail.openSession'] })
     fireEvent.click(link)
     expect(h.props.onOpenSession).toHaveBeenCalledExactlyOnceWith(alpha)
@@ -1432,12 +1432,12 @@ describe('Task manager details', () => {
     expect(occurrence?.textContent).toBe(deliveryText(delivery.scheduledAt, dictionary))
     // The occurrence names its month in the active locale and never shows the
     // retired zero-padded `MM-DD` pair.
-    expect(occurrence?.textContent ?? '').toMatch(/[A-Za-z]{3,}|月/)
+    expect(occurrence?.textContent ?? '').toMatch(/[A-Za-z]{3,}|mo/)
     expect(occurrence?.textContent ?? '').not.toMatch(/\d{2}-\d{2}/)
     expect(receipt.querySelector('details')).toBeNull()
     expect(within(receipt).getAllByRole('button').map(button => button.textContent)).toEqual([alpha])
     expect(receipt.querySelectorAll('time')).toHaveLength(1)
-    expect(within(detail).queryByRole('region', { name: /history|历史/i })).toBeNull()
+    expect(within(detail).queryByRole('region', { name: /history|history/i })).toBeNull()
     // The linked-Session footer stays under Records.
     expect(within(detail.querySelector('footer')!).getByRole('button', { name: dictionary['detail.openSession'] })).toBeDefined()
     expect(h.props.onDelete).not.toHaveBeenCalled()
@@ -1666,20 +1666,20 @@ describe('Task manager details', () => {
 
   it('renders Chinese labels and local time without translating stored user data', () => {
     mount({}, zh)
-    expect(screen.getByRole('heading', { level: 1, name: '自动化任务' })).toBeDefined()
-    expect(screen.getByRole('searchbox', { name: '搜索任务' })).toBeDefined()
-    const statuses = screen.getByRole('group', { name: '任务状态' })
-    expect(within(statuses).getAllByRole('button')[0]?.textContent).toBe('已开启')
+    expect(screen.getByRole('heading', { level: 1, name: 'Automation tasks' })).toBeDefined()
+    expect(screen.getByRole('searchbox', { name: 'Search tasks' })).toBeDefined()
+    const statuses = screen.getByRole('group', { name: 'Task status' })
+    expect(within(statuses).getAllByRole('button')[0]?.textContent).toBe('Enabled')
     fireEvent.click(screen.getByRole('button', { name: 'Check metrics' }))
-    const detail = screen.getByRole('complementary', { name: '任务详情' })
+    const detail = screen.getByRole('complementary', { name: 'Task details' })
     expect(within(detail).getByRole('button', { name: `${zh['rule.repeat']} ${zh['rule.everyMinutes']}` })).toBeDefined()
     expect(within(detail).getByRole('spinbutton', { name: zh['host.interval'] }).getAttribute('value')).toBe('5')
     expect(nextRunTime(detail)?.textContent).toBe(absoluteNextRun(every.scheduledAt, zh))
     expect(relativeText(detail)).toBe(relativeNextRun(every.scheduledAt, zh))
     chooseDelete(zh)
-    expect(screen.getByRole('dialog', { name: '删除此任务？' })).toBeDefined()
-    expect(screen.getByRole('button', { name: '确认删除' })).toBeDefined()
-    fireEvent.click(screen.getByRole('button', { name: '关闭删除确认' }))
+    expect(screen.getByRole('dialog', { name: 'Delete this task?' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Confirm deletion' })).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Close deletion confirmation' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(screen.getByRole('button', { name: zh['detail.openSession'] })).toBeDefined()
   })
@@ -1696,7 +1696,7 @@ describe('Task manager details', () => {
     h.view.rerender(<TaskManagerPage {...h.props} t={makeTranslate(zh)} />)
     expect(time?.textContent).toBe(absoluteNextRun(at.scheduledAt, zh))
     expect(relativeText(row)).toBe(relativeNextRun(at.scheduledAt, zh))
-    expect(screen.getByRole('heading', { level: 1, name: '自动化任务' })).toBeDefined()
+    expect(screen.getByRole('heading', { level: 1, name: 'Automation tasks' })).toBeDefined()
   })
 
   it('states the next run in the device zone even when the rule stores another one', () => {

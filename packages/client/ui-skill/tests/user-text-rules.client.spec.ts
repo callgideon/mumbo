@@ -40,7 +40,7 @@ describe('skillReferenceRule', () => {
 
   it('recognizes only names explicitly resolved for this message', () => {
     const evaluate = setup()
-    const text = '用 /review 再 /test-skill\n/review'
+    const text = 'Open in /review again /test-skill\n/review'
     const input = Object.freeze({ text, facts: Object.freeze({ skillNames: Object.freeze(['review', 'test-skill', 'review']) }) })
     const nodes = evaluate(input)
     expect(nodes.filter(node => node.id === 'skill').map(node => ({ raw: text.slice(node.start, node.end), data: node.data }))).toEqual([
@@ -54,7 +54,7 @@ describe('skillReferenceRule', () => {
 
   it('requires whitespace or text boundaries and never strips attached punctuation', () => {
     const evaluate = setup()
-    const text = '/x /x.md /x/path /path /x。 /x, (/x) prefix/x\t/x\n/x'
+    const text = '/x /x.md /x/path /path /x. /x, (/x) prefix/x\t/x\n/x'
     const nodes = evaluate({ text, facts: { skillNames: ['x'] } })
     expect(nodes.filter(node => node.id === 'skill').map(node => [node.start, node.end, text.slice(node.start, node.end)])).toEqual([
       [0, 2, '/x'], [text.indexOf('\t/x') + 1, text.indexOf('\t/x') + 3, '/x'],
@@ -62,9 +62,9 @@ describe('skillReferenceRule', () => {
     ])
     for (const input of [
       { text: '/path /x.md /x', facts: {} },
-      { text: '/path /x.md /x。', facts: { skillNames: ['x'] } },
-      { text: '/nfs-hg/path /root-dir/ /plan.md /plan。', facts: { skillNames: ['nfs-hg', 'root-dir', 'plan'] } },
-      { text: '/plan.md /nfs-hg/path /plan。', facts: { skillNames: ['plan.md', 'nfs-hg/path', 'plan。'] } },
+      { text: '/path /x.md /x.', facts: { skillNames: ['x'] } },
+      { text: '/nfs-hg/path /root-dir/ /plan.md /plan.', facts: { skillNames: ['nfs-hg', 'root-dir', 'plan'] } },
+      { text: '/plan.md /nfs-hg/path /plan.', facts: { skillNames: ['plan.md', 'nfs-hg/path', 'plan.'] } },
     ]) {
       expect(evaluate(input).every(node => node.id === 'text')).toBe(true)
     }

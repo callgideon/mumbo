@@ -66,7 +66,7 @@ const SNAPSHOT = {
   agentPresets: [
     {
       id: 'standard',
-      name: '标准模式',
+      name: 'Standard mode',
       isDefault: true,
       rows: [
         { entryId: 'bash', moduleName: '@deepseek-ai/dsh-tool-bash', enabled: true, fiberPhase: 'active' },
@@ -92,7 +92,7 @@ const SNAPSHOT = {
         { entryId: 'fs', moduleName: '@deepseek-ai/dsh-tool-fs', enabled: 'conditional', fiberPhase: null },
       ],
     },
-    { id: 'shattered', name: '坏预设', isDefault: false, broken: 'the composition file is missing', rows: [] },
+    { id: 'shattered', name: 'bad preset', isDefault: false, broken: 'the composition file is missing', rows: [] },
   ],
 } as unknown as Snapshot
 
@@ -153,7 +153,7 @@ describe('PluginInventorySettingsTab', () => {
     const { locale, pageProps } = localizedProps(async () => ({
       entries: [{
         entryId: 'include:navigation' as PluginEntryId, moduleName: '@acme/dsh-navigation', enabled: true, fiberPhase: null,
-        meta: { title: { en: 'dsh-Navigation', zh: 'dsh-导航' } },
+        meta: { title: { en: 'dsh-Navigation', zh: 'dsh-Navigation' } },
       }],
     }))
     const view = render(<PluginInventorySettingsTab {...pageProps} />)
@@ -162,7 +162,7 @@ describe('PluginInventorySettingsTab', () => {
     expect(screen.getByRole('button', { name: 'dsh-Navigation, include:navigation, Enabled' })).toBeTruthy()
     locale.setLocale('zh')
     view.rerender(<PluginInventorySettingsTab {...pageProps} />)
-    expect(screen.getByRole('button', { name: 'dsh-导航, include:navigation, 已启用' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'dsh-Navigation, include:navigation, Enabled' })).toBeTruthy()
   })
 
   it('localizes global and preset metadata at render time while preserving identities and query state', async () => {
@@ -172,8 +172,8 @@ describe('PluginInventorySettingsTab', () => {
       entries: [{
         entryId: 'include:global-navigation' as PluginEntryId, moduleName: '@acme/navigation', enabled: true, fiberPhase: 'active',
         meta: {
-          title: { en: 'Navigation', zh: '导航' },
-          description: { en: 'Global navigation controls', zh: '全局导航控件' },
+          title: { en: 'Navigation', zh: 'Navigation' },
+          description: { en: 'Global navigation controls', zh: 'global Navigation control' },
           error: globalError,
         },
       }],
@@ -182,8 +182,8 @@ describe('PluginInventorySettingsTab', () => {
         rows: [{
           entryId: 'include:preset-runner', moduleName: '@acme/runner', enabled: true, fiberPhase: null,
           meta: {
-            title: { en: 'Session runner', zh: '会话执行器' },
-            description: { en: 'Run per session', zh: '运行会话命令' },
+            title: { en: 'Session runner', zh: 'Sessions executor' },
+            description: { en: 'Run per session', zh: 'RunSessions command' },
             error: presetError,
           },
         }],
@@ -213,21 +213,21 @@ describe('PluginInventorySettingsTab', () => {
     view.rerender(<PluginInventorySettingsTab {...pageProps} />)
     expect(screen.getByText(zh.presetSubtitle).textContent).toBe(zh.presetSubtitle)
     expect(screen.getByText(zh.globalSubtitle).textContent).toBe(zh.globalSubtitle)
-    expect(screen.getByRole('button', { name: '导航, include:global-navigation, 已启用' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '会话执行器, include:preset-runner, 已启用' })).toBeTruthy()
-    expect(screen.getByText('全局导航控件')).toBeTruthy()
-    expect(screen.getByText('运行会话命令')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Navigation, include:global-navigation, Enabled' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Sessions executor, include:preset-runner, Enabled' })).toBeTruthy()
+    expect(screen.getByText('global Navigation control')).toBeTruthy()
+    expect(screen.getByText('RunSessions command')).toBeTruthy()
     expect(screen.getByText(zh.metadataError.replace('{error}', presetError))).toBeTruthy()
     expect(view.container.querySelector('[data-loader-entry]')?.textContent).toBe('include:preset-runner')
     const search = screen.getByRole('searchbox', { name: zh.search })
-    for (const query of ['导航', '全局导航控件', '@acme/navigation', 'include:global-navigation']) {
+    for (const query of ['Navigation', 'global Navigation control', '@acme/navigation', 'include:global-navigation']) {
       fireEvent.change(search, { target: { value: query } })
       expect(screen.getAllByRole('listitem')).toHaveLength(1)
-      expect(screen.getByRole('button', { name: '导航, include:global-navigation, 已启用' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Navigation, include:global-navigation, Enabled' })).toBeTruthy()
     }
-    fireEvent.change(search, { target: { value: '运行会话命令' } })
+    fireEvent.change(search, { target: { value: 'RunSessions command' } })
     expect(screen.getAllByRole('listitem')).toHaveLength(1)
-    expect(screen.getByRole('button', { name: '会话执行器, include:preset-runner, 已启用' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Sessions executor, include:preset-runner, Enabled' })).toBeTruthy()
     fireEvent.change(search, { target: { value: 'Run per session' } })
     expect(screen.getByText(zh.emptySearch)).toBeTruthy()
     locale.setLocale('en')
@@ -245,11 +245,11 @@ describe('PluginInventorySettingsTab', () => {
       },
       {
         entryId: 'include:commands' as PluginEntryId, moduleName: '@acme/dsh-sidebar/commands', enabled: true, fiberPhase: null,
-        meta: { title: { en: 'English title' }, description: { en: 'Package description.', zh: '中文命令说明。' } },
+        meta: { title: { en: 'English title' }, description: { en: 'Package description.', zh: 'Chinese command Instructions.' } },
       },
       {
         entryId: 'include:theme' as PluginEntryId, moduleName: '@acme/dsh-theme/client', enabled: true, fiberPhase: null,
-        meta: { title: { en: '@acme/dsh-theme', zh: '主题插件' }, description: { en: '', zh: '中文主题说明。' } },
+        meta: { title: { en: '@acme/dsh-theme', zh: 'topic Plugins' }, description: { en: '', zh: 'Chinese topic Instructions.' } },
       },
     ]
     const snapshot: Snapshot = scope === 'global'
@@ -266,25 +266,25 @@ describe('PluginInventorySettingsTab', () => {
     expect(screen.getByText('Package description.')).toBeTruthy()
     const theme = screen.getByRole('button', { name: '@acme/dsh-theme, include:theme, Enabled' })
     expect(theme.getAttribute('aria-describedby')).toBeNull()
-    expect(screen.queryByText('中文主题说明。')).toBeNull()
+    expect(screen.queryByText('Chinese topic Instructions.')).toBeNull()
 
     locale.setLocale('zh')
     view.rerender(<PluginInventorySettingsTab {...pageProps} />)
     for (const [name, description] of [
-      ['sidebar/navigation, include:navigation, 已启用', 'Navigation description.'],
-      ['English title, include:commands, 已启用', '中文命令说明。'],
-      ['主题插件, include:theme, 已启用', '中文主题说明。'],
+      ['sidebar/navigation, include:navigation, Enabled', 'Navigation description.'],
+      ['English title, include:commands, Enabled', 'Chinese command Instructions.'],
+      ['topic Plugins, include:theme, Enabled', 'Chinese topic Instructions.'],
     ] as const) {
       const card = screen.getByRole('button', { name })
       expect(screen.getByText(description)).toBeTruthy()
       expect(document.getElementById(card.getAttribute('aria-describedby')!)?.textContent).toBe(description)
     }
     expect(screen.queryByText('Package description.')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: '主题插件, include:theme, 已启用' }))
+    fireEvent.click(screen.getByRole('button', { name: 'topic Plugins, include:theme, Enabled' }))
     expect(view.container.querySelector('[data-loader-entry]')?.textContent).toBe('include:theme')
     expect(screen.getByText(zh.moduleLabel).nextElementSibling?.textContent).toBe('@acme/dsh-theme/client')
 
-    fireEvent.change(screen.getByRole('searchbox', { name: zh.search }), { target: { value: '中文主题说明。' } })
+    fireEvent.change(screen.getByRole('searchbox', { name: zh.search }), { target: { value: 'Chinese topic Instructions.' } })
     expect(screen.getAllByRole('listitem')).toHaveLength(1)
     locale.setLocale('en')
     view.rerender(<PluginInventorySettingsTab {...pageProps} />)
@@ -316,12 +316,12 @@ describe('PluginInventorySettingsTab', () => {
     const view = await renderReady()
 
     const switcher = screen.getByRole('button', { name: en.switcherLabel })
-    expect(switcher.textContent).toBe('标准模式 (default)')
+    expect(switcher.textContent).toBe('Standard mode (default)')
     fireEvent.click(switcher)
     expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual([
-      '标准模式 (default)',
+      'Standard mode (default)',
       'ptc',
-      '坏预设 (failed to load)',
+      'bad preset (failed to load)',
     ])
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.queryAllByRole('menuitem')).toHaveLength(0)
@@ -346,7 +346,7 @@ describe('PluginInventorySettingsTab', () => {
     // A preset row expands into its source facts.
     fireEvent.click(screen.getByRole('button', { name: 'pwsh, Conditional' }))
     expect(screen.getByText(en.fromPreset)).toBeTruthy()
-    expect(screen.getByText('标准模式')).toBeTruthy()
+    expect(screen.getByText('Standard mode')).toBeTruthy()
     expect(screen.getByText(en.condition)).toBeTruthy()
     expect(screen.getByText('process.platform === \'win32\'')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'pwsh, Conditional' }))
@@ -459,7 +459,7 @@ describe('PluginInventorySettingsTab', () => {
     fireEvent.click(screen.getByRole('button', { name: 'tool-bash, bash-host, Via presets' }))
     expect(screen.getByText(en.presetProvidedDetail)).toBeTruthy()
     expect(screen.getByText(en.enabledIn)).toBeTruthy()
-    expect(screen.getByText('标准模式 · ptc')).toBeTruthy()
+    expect(screen.getByText('Standard mode · ptc')).toBeTruthy()
 
     // The failed global card reports its runtime state.
     fireEvent.click(screen.getByRole('button', { name: 'telemetry, Failed' }))
@@ -491,7 +491,7 @@ describe('PluginInventorySettingsTab', () => {
     // An unnamed preset labels its source by id.
     expect(screen.getByText(en.fromPreset).nextElementSibling?.textContent).toBe('ptc')
 
-    pickPreset('坏预设 (failed to load)')
+    pickPreset('bad preset (failed to load)')
     expect(screen.getByRole('alert').textContent).toBe('the composition file is missing')
     expect(view.container.querySelectorAll('[data-plugin-scope="preset"] li')).toHaveLength(0)
   })
@@ -532,7 +532,7 @@ describe('PluginInventorySettingsTab', () => {
     expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual([
       'Localized standard (default)',
       'Localized ptc',
-      '坏预设 (failed to load)',
+      'bad preset (failed to load)',
     ])
     fireEvent.keyDown(document, { key: 'Escape' })
 

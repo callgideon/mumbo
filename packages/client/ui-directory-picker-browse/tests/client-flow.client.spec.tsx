@@ -164,7 +164,7 @@ describe('directory-picker-browse client half', () => {
       // The zh registration rolled back with the failure: once the rival
       // leaves, a fresh registrant owns the whole namespace again.
       disposeRival()
-      const disposeZh = locale.register('directory-browser', 'zh', { 'browser.title': '空闲' })
+      const disposeZh = locale.register('directory-browser', 'zh', { 'browser.title': 'Idle' })
       disposeZh()
     } finally {
       await new Promise(resolve => setTimeout(resolve, 0))
@@ -179,9 +179,9 @@ describe('directory-picker-browse client half', () => {
     const entry = b.slots.entries(HOLES[0])[0]!
     const injected = (entry.inject as () => { t: (key: string) => string })()
     // zh is the shipped default locale.
-    expect(injected.t('browser.title')).toBe('选择工作区目录')
-    expect(injected.t('browser.newFolder')).toBe('新建文件夹')
-    expect(injected.t('browser.showHidden')).toBe('显示隐藏文件')
+    expect(injected.t('browser.title')).toBe('Choose workspaceDirectory')
+    expect(injected.t('browser.newFolder')).toBe('NewFile folder')
+    expect(injected.t('browser.showHidden')).toBe('show hidden File')
   })
 
   it('drives the injected browse calls through the hole entry', async () => {

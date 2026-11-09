@@ -32,7 +32,7 @@ it('keeps the window visible until confirmation and remembers acknowledgement ac
   expect(f.hide).not.toHaveBeenCalled()
   expect(existsSync(f.markerPath)).toBe(false)
   expect(f.show).toHaveBeenCalledExactlyOnceWith({ type: 'info', title: 'DeepSeek Harness',
-    message: '正在运行的任务不会中断，可在系统托盘中重新打开窗口', buttons: ['确认'], defaultId: 0, cancelId: -1 })
+    message: 'Running tasks will continue. You can reopen the window from the system tray.', buttons: ['Confirm'], defaultId: 0, cancelId: -1 })
   expect(f.focus).toHaveBeenCalledOnce()
   f.response.resolve({ response: 0, checkboxChecked: false })
   await vi.waitFor(() => { expect(f.hide).toHaveBeenCalledOnce() })

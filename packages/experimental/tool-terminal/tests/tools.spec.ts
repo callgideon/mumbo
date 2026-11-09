@@ -428,12 +428,12 @@ describe('tool-terminal foreground API', () => {
 
 describe('sendSource', () => {
   it('reads nothing before the send starts and counts delivered bytes afterwards', () => {
-    const reads: TerminalSendRead[] = [{ delta: '界', truncated: false }, { delta: '', truncated: true }]
+    const reads: TerminalSendRead[] = [{ delta: 'world', truncated: false }, { delta: '', truncated: true }]
     const send: { operation?: TerminalSendOperation } = {}
     const source = sendSource(() => send.operation)
     expect(source.read(0)).toEqual({ text: '', nextOffset: 0, lossy: false })
     send.operation = { readOutput: () => reads.shift()!, cancel: () => false, done: new Promise(() => {}) }
-    expect(source.read(0)).toEqual({ text: '界', nextOffset: 3, lossy: false })
+    expect(source.read(0)).toEqual({ text: 'world', nextOffset: 3, lossy: false })
     // A truncated delta carries the same marker the foreground read shows.
     expect(source.read(3)).toEqual({ text: '[output truncated]', nextOffset: 21, lossy: false })
   })
@@ -455,11 +455,11 @@ describe('tool-terminal task integration', () => {
   it('bounds foreground and background results after terminal and task metadata', async () => {
     const { ctx, agent, stub } = await setup(true, { maxResultBytes: 64 })
     await call(ctx, 'terminal_open', { type: 'stub' }, agent)
-    stub.sessions[0]!.viewport = '界'.repeat(100)
+    stub.sessions[0]!.viewport = 'world'.repeat(100)
     const foreground = await call(ctx, 'terminal_send', { sessionId: 'pty-1', text: 'foreground' }, agent)
     expect(Buffer.byteLength(text(foreground))).toBeLessThanOrEqual(64)
 
-    stub.sessions[0]!.delta = '界'.repeat(100)
+    stub.sessions[0]!.delta = 'world'.repeat(100)
     stub.sessions[0]!.deltaTruncated = true
     const started = await call(ctx, 'terminal_send', { sessionId: 'pty-1', text: 'background', run_in_background: true }, agent)
     const background = await call(ctx, 'job_output', { job_id: backgroundJobId(started), wait: true }, agent)

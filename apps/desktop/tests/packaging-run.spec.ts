@@ -9,7 +9,7 @@ const environment = Object.fromEntries(Object.entries(process.env)
 
 describe('packaging run records', () => {
   it('redacts credential values across every byte split', () => {
-    const secret = 'test-口令-!secret'
+    const secret = 'test-passphrase-!secret'
     const bytes = Buffer.from(`before ${secret} after`)
     for (let split = 0; split <= bytes.length; split++) {
       let output = ''

@@ -20,13 +20,13 @@ it('keeps the automation title intact before moving New to another line', async 
           const page = await context.newPage()
           const consoleWatch = watchConsole(page)
           await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-          const title = language === 'en' ? 'Automation tasks' : '自动化任务'
+          const title = language === 'en' ? 'Automation tasks' : 'Automation task'
           await page.getByRole('button', { name: title, exact: true }).click()
           const panel = page.getByTestId('task-manager-page')
           const heading = panel.getByRole('heading', { name: title, exact: true })
           await heading.waitFor()
           const header = heading.locator('..')
-          const create = header.getByRole('button', { name: language === 'en' ? 'New' : '新建', exact: true })
+          const create = header.getByRole('button', { name: language === 'en' ? 'New' : 'New', exact: true })
           await page.evaluate(() => document.fonts.ready)
           await create.focus()
           for (const width of [1680, 800, 520, 440, 390, 430, 1024]) {

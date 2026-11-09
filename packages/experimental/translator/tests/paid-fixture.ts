@@ -29,7 +29,7 @@ export interface NativeRequest {
 }
 
 /** Native SSE text reply; alternate stop reasons exercise incomplete output. */
-export function replyEvents(text = '翻译结果', stop = 'end_turn'): Record<string, unknown>[] {
+export function replyEvents(text = 'Translation result', stop = 'end_turn'): Record<string, unknown>[] {
   return [
     { type: 'message_start', message: { id: 'translation-response', model: 'deepseek-flash', usage: { input_tokens: 3, output_tokens: 0 } } },
     { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },

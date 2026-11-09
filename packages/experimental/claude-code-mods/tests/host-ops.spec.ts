@@ -233,7 +233,7 @@ describe('the store limit', () => {
     expect(await call('store.keys', {})).toEqual(['ok'])
     await expect(call('store.set', { key: 'big', value: 'x'.repeat(STORE_MAX_BYTES) })).rejects.toThrow(/would exceed/)
     // The limit counts UTF-8 bytes: 1.5 Mi CJK characters are 4.5 MiB of JSON.
-    await expect(call('store.set', { key: 'cjk', value: '中'.repeat(1.5 * 1024 * 1024) })).rejects.toThrow(/would exceed/)
+    await expect(call('store.set', { key: 'cjk', value: 'in'.repeat(1.5 * 1024 * 1024) })).rejects.toThrow(/would exceed/)
     expect(await call('store.set', { key: 'ascii', value: 'y'.repeat(1.5 * 1024 * 1024) })).toBeUndefined()
     await call('store.delete', { key: 'ascii' })
     // Concurrent writes to one plugin's record are serialized, so neither update is lost.

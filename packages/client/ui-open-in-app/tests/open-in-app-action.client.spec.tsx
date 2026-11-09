@@ -126,7 +126,7 @@ describe('OpenInAppAction launching', () => {
     const b = bench({ apps: ['finder', 'cursor', 'terminal'], absolutePath: '/w/dir' })
     render(<OpenInAppAction {...b.props} />)
     fireEvent.click(screen.getByRole('button', { name: zh['path.more'] }))
-    expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['访达（默认）', 'Cursor', '终端'])
+    expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Finder（Default）', 'Cursor', 'Terminal'])
     expect(screen.queryByText(zh['path.reveal'])).toBeNull()
     await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: 'Cursor' })) })
     expect(b.launch).toHaveBeenCalledWith('cursor', '/w/dir')

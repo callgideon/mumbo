@@ -56,13 +56,13 @@ describe('viewer endpoint catalog', () => {
     expect(readOfferedPlugins([{
       plugin: 'ui-chat',
       endpoints: ['ui-chat/send'],
-      titles: { zh: '聊天', en: '' },
-      descriptions: { 'ui-chat/send': '发送消息', 'ui-chat/empty': '' },
+      titles: { zh: 'Chat', en: '' },
+      descriptions: { 'ui-chat/send': 'Send message', 'ui-chat/empty': '' },
     }])).toEqual([{
       plugin: 'ui-chat',
       endpoints: ['ui-chat/send'],
-      titles: { zh: '聊天' },
-      descriptions: { 'ui-chat/send': '发送消息' },
+      titles: { zh: 'Chat' },
+      descriptions: { 'ui-chat/send': 'Send message' },
     }])
     expect(readOfferedPlugins([{
       plugin: 'plain', endpoints: ['plain/send'], titles: ['bad'], descriptions: { only: '' },

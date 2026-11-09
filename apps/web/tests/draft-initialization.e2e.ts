@@ -11,8 +11,8 @@ import { launchWebScaffold, watchConsole, type WebScaffold } from './scaffold.ts
 import { newEnglishPage, writeComposerDraft } from './support.ts'
 
 const SCREENSHOTS = fileURLToPath(new URL('../../../.artifacts/screenshots', import.meta.url))
-const FILE_NAME = 'notes 雪.md'
-const FILE_BODY = '# Draft reference preview\n\nUnsubmitted file reference: 雪 🧭.\n'
+const FILE_NAME = 'notes snow.md'
+const FILE_BODY = '# Draft reference preview\n\nUnsubmitted file reference: snow 🧭.\n'
 const SETTLE = { timeout: 20_000 }
 
 // This Host-plane spec cannot import the Client program's Cordis declarations.
@@ -250,15 +250,15 @@ async function launchDraftFixture(beforeBrowserOpen?: (page: Page, scaffold: Web
 
 function structuredDraft(sessionId: SessionId, title: string): DraftSnapshot {
   const file = `@"${FILE_NAME}"`
-  const folder = '@"目录/"'
-  const session = formatSessionReferenceMention({ sessionId, label: '关联会话 🧩' })
+  const folder = '@"Directory/"'
+  const session = formatSessionReferenceMention({ sessionId, label: 'Linked session 🧩' })
   const references: DraftSnapshot['references'] = []
-  let text = `${title} 🧭 e\u0301 雪\n`
+  let text = `${title} 🧭 e\u0301 snow\n`
   for (let repeat = 0; repeat < 2; repeat++) {
     for (const item of [
       { ref: file, label: FILE_NAME, appearance: 'file' },
-      { ref: folder, label: '目录/', appearance: 'folder' },
-      { ref: session, label: '关联会话 🧩', appearance: 'session' },
+      { ref: folder, label: 'Directory/', appearance: 'folder' },
+      { ref: session, label: 'Linked session 🧩', appearance: 'session' },
     ] as const) {
       references.push({
         ...item, offset: text.length, length: item.ref.length,
@@ -269,13 +269,13 @@ function structuredDraft(sessionId: SessionId, title: string): DraftSnapshot {
     text += '\n'
   }
   // Equal mention text without a reference entry remains ordinary text.
-  text += `普通文字 ${file}，末尾 🦉`
+  text += `plain text ${file}, at the end 🦉`
   return { text, references }
 }
 
 it('preserves drafts through explicit Workspace draft navigation and treats empty prompts according to clearPreviousDraft', async () => {
   const { scaffold, page, console, first, firstId, second } = await launchDraftFixture()
-  const initial = { text: '纯文字 🧭\n第二行 e\u0301', references: [] }
+  const initial = { text: 'plain text 🧭\n second line e\u0301', references: [] }
   await initialize(page, initial.text, second.id)
   await expect.poll(() => second.sessionIds.length, SETTLE).toBe(1)
   const secondId = second.sessionIds[0]!
@@ -286,7 +286,7 @@ it('preserves drafts through explicit Workspace draft navigation and treats empt
   await reopenWorkspaceDraft(page, second, secondId)
   await assertDraft(page, secondId, initial)
   await reopenWorkspaceDraft(page, first, firstId)
-  await initialize(page, '已有草稿不能被覆盖', second.id)
+  await initialize(page, 'already has Draft must not be overwritten', second.id)
   await assertDraft(page, secondId, initial)
   expect(second.sessionIds).toEqual([secondId])
   await reopenWorkspaceDraft(page, first, firstId)
@@ -297,7 +297,7 @@ it('preserves drafts through explicit Workspace draft navigation and treats empt
   await reopenWorkspaceDraft(page, first, firstId)
   await initialize(page, '', second.id, false)
   await assertDraft(page, secondId, EMPTY)
-  const replacement = { text: '显式替换 🧪', references: [] }
+  const replacement = { text: 'explicit Substitutions 🧪', references: [] }
   await initialize(page, replacement.text, undefined, true)
   await assertDraft(page, secondId, replacement)
   expect(second.sessionIds).toEqual([secondId])
@@ -340,15 +340,15 @@ it('rebuilds a claimed command chip from the stored draft after reload without s
 it('restores repeated file, folder and Session capsules across edits, Workspace switches and reload without submitting', async () => {
   const { scaffold, page, console, first, firstId, second } = await launchDraftFixture()
   for (const workspace of [first, second]) {
-    await mkdir(join(workspace.path, '目录'))
+    await mkdir(join(workspace.path, 'Directory'))
     await writeFile(join(workspace.path, FILE_NAME), FILE_BODY)
   }
   await initialize(page, '', second.id)
   await expect.poll(() => second.sessionIds.length, SETTLE).toBe(1)
   const secondId = second.sessionIds[0]!
   await assertDraft(page, secondId, EMPTY)
-  const firstDraft = structuredDraft(secondId, '工作区甲')
-  const secondDraft = structuredDraft(firstId, '工作区乙')
+  const firstDraft = structuredDraft(secondId, 'Workspace A')
+  const secondDraft = structuredDraft(firstId, 'Workspace B')
   await restoreStoredDrafts(page, [
     { sessionId: firstId, draft: firstDraft },
     { sessionId: secondId, draft: secondDraft },
@@ -366,40 +366,40 @@ it('restores repeated file, folder and Session capsules across edits, Workspace 
       "capsules": [
         {
           "editable": "false",
-          "label": "notes 雪.md",
+          "label": "notes snow.md",
           "source": "reference",
         },
         {
           "editable": "false",
-          "label": "目录/",
+          "label": "Directory/",
           "source": "reference",
         },
         {
           "editable": "false",
-          "label": "关联会话 🧩",
+          "label": "Linked session 🧩",
           "source": "reference",
         },
         {
           "editable": "false",
-          "label": "notes 雪.md",
+          "label": "notes snow.md",
           "source": "reference",
         },
         {
           "editable": "false",
-          "label": "目录/",
+          "label": "Directory/",
           "source": "reference",
         },
         {
           "editable": "false",
-          "label": "关联会话 🧩",
+          "label": "Linked session 🧩",
           "source": "reference",
         },
       ],
       "paragraphs": [
-        "工作区乙 🧭 é 雪",
-        "notes 雪.md 目录/ 关联会话 🧩 ",
-        "notes 雪.md 目录/ 关联会话 🧩 ",
-        "普通文字 @\"notes 雪.md\"，末尾 🦉",
+        "Workspace B 🧭 é snow",
+        "notes snow.md Directory/ Linked session 🧩 ",
+        "notes snow.md Directory/ Linked session 🧩 ",
+        "plain text @\"notes snow.md\", at the end 🦉",
       ],
     }
   `)
@@ -416,7 +416,7 @@ it('restores repeated file, folder and Session capsules across edits, Workspace 
       await assertDraft(page, item.id, item.draft)
       await composer(page).click()
       await page.keyboard.press(EDITOR_END)
-      const suffix = ` · 编辑${round} 🧪`
+      const suffix = ` · Edit\${round} 🧪`
       await page.keyboard.insertText(suffix)
       item.draft = { ...item.draft, text: item.draft.text + suffix }
       await assertDraft(page, item.id, item.draft)
@@ -430,7 +430,7 @@ it('restores repeated file, folder and Session capsules across edits, Workspace 
   }
   await composer(page).locator('[data-composer-chip]').first().click()
   await expect.poll(() => page.locator('[data-document-markdown]').textContent(), SETTLE)
-    .toContain('Unsubmitted file reference: 雪 🧭.')
+    .toContain('Unsubmitted file reference: snow 🧭.')
   await assertDraft(page, secondId, drafts[1]!.draft)
   await startSession(page, undefined, { clearPreviousDraft: true })
   await assertDraft(page, secondId, EMPTY)
@@ -451,7 +451,7 @@ it('restores repeated file, folder and Session capsules across edits, Workspace 
 
 it('reads a legacy string from the existing conversation key and saves ordinary edits as a structured draft', async () => {
   const { scaffold, page, console, firstId } = await launchDraftFixture()
-  const legacy = '旧字符串草稿 🧭\n普通 @notes，不是胶囊'
+  const legacy = 'old string Draft 🧭\n plain @notes, not a capsule'
   await restoreStoredDrafts(page, [{ sessionId: firstId, draft: legacy }])
   await expect.poll(() => selectedSession(page), SETTLE).toBe(firstId)
   await composer(page).waitFor()
@@ -460,8 +460,8 @@ it('reads a legacy string from the existing conversation key and saves ordinary 
   expect(await composer(page).locator('[data-composer-chip]').count()).toBe(0)
   await composer(page).click()
   await page.keyboard.press(EDITOR_END)
-  await page.keyboard.insertText('，继续编辑')
-  await assertDraft(page, firstId, { text: `${legacy}，继续编辑`, references: [] })
+  await page.keyboard.insertText(', ContinueEdit')
+  await assertDraft(page, firstId, { text: `\${legacy}, ContinueEdit`, references: [] })
   await assertUnsubmitted(scaffold, [firstId])
   expect(console.pageErrors).toEqual([])
   expect(console.warnings).toEqual([])
@@ -570,10 +570,10 @@ it('rematches the current draft after a delayed real skills catalog without repl
 it('carries all reference capsules through the real Workspace picker and leaves the source draft empty', async () => {
   const { scaffold, page, console, first, firstId, second } = await launchDraftFixture()
   for (const workspace of [first, second]) {
-    await mkdir(join(workspace.path, '目录'))
+    await mkdir(join(workspace.path, 'Directory'))
     await writeFile(join(workspace.path, FILE_NAME), FILE_BODY)
   }
-  const draft = structuredDraft(firstId, '切换工作区携带')
+  const draft = structuredDraft(firstId, 'switch Workspace carries')
   await restoreStoredDrafts(page, [{ sessionId: firstId, draft }])
   await assertDraft(page, firstId, draft)
   await page.getByRole('button', { name: 'Choose workspace', exact: true }).click()
@@ -591,7 +591,7 @@ it('carries all reference capsules through the real Workspace picker and leaves 
   await assertDraft(page, secondId, draft)
   await composer(page).locator('[data-composer-chip]').first().click()
   await expect.poll(() => page.locator('[data-document-markdown]').textContent(), SETTLE)
-    .toContain('Unsubmitted file reference: 雪 🧭.')
+    .toContain('Unsubmitted file reference: snow 🧭.')
   await assertUnsubmitted(scaffold, [firstId, secondId])
   expect(console.pageErrors).toEqual([])
   expect(console.warnings).toEqual([])
@@ -599,11 +599,11 @@ it('carries all reference capsules through the real Workspace picker and leaves 
 
 it('applies a parameter transition matrix to one reusable target without changing another Workspace draft', async () => {
   const { scaffold, page, console, first, firstId, second } = await launchDraftFixture()
-  const source = structuredDraft(firstId, '源草稿保持不变')
-  const structured = structuredDraft(firstId, '目标结构草稿')
-  const restored = structuredDraft(firstId, '目标恢复草稿')
-  const replacement = { text: '目标替换文字 🧭', references: [] }
-  const plain = { text: '已有目标文字 🧭', references: [] }
+  const source = structuredDraft(firstId, 'source Draft unchanged')
+  const structured = structuredDraft(firstId, 'Goal structure Draft')
+  const restored = structuredDraft(firstId, 'GoalRestoreDraft')
+  const replacement = { text: 'GoalSubstitutions text 🧭', references: [] }
+  const plain = { text: 'already has Goal text 🧭', references: [] }
   const literalReferences = { text: structured.text, references: [] }
   await initialize(page, '', second.id, true)
   await expect.poll(() => second.sessionIds.length, SETTLE).toBe(1)
@@ -666,8 +666,8 @@ it.each(['older-first', 'newer-first'] as const)(
     const thirdPath = await mkdtemp(join(scaffold.workspaceCwd, 'draft-latest-'))
     const third = await scaffold.ctx.workspaceRegistry.create(thirdPath, 'Draft latest')
     await page.getByText(third.title, { exact: true }).first().waitFor()
-    const source = structuredDraft(firstId, '交错请求的源草稿')
-    const latest = { text: '只有最后目标收到文字草稿 🧭', references: [] }
+    const source = structuredDraft(firstId, 'source of interleaved requests Draft')
+    const latest = { text: 'only the last Goal received text Draft 🧭', references: [] }
     await restoreStoredDrafts(page, [{ sessionId: firstId, draft: source }])
     await assertDraft(page, firstId, source)
 
@@ -710,7 +710,7 @@ it.each(['older-first', 'newer-first'] as const)(
       await page.evaluate(() => new Promise<undefined>(resolve => requestAnimationFrame(() => { resolve(undefined) })))
     }
 
-    await startSession(page, second.id, { prompt: '过期请求不得写入任何草稿', clearPreviousDraft: true })
+    await startSession(page, second.id, { prompt: 'stale requests must not Write any Draft', clearPreviousDraft: true })
     await expect.poll(() => older.response?.status, SETTLE).toBe(200)
     await expect.poll(() => second.sessionIds.length, SETTLE).toBe(1)
     const secondId = second.sessionIds[0]!

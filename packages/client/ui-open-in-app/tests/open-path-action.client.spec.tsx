@@ -89,7 +89,7 @@ describe('OpenPathAction gestures', () => {
     expect(screen.queryByRole('menu')).toBeNull()
     expect(b.openPath).not.toHaveBeenCalled()
     fireEvent.click(more)
-    await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: 'Music（默认）' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: 'Music（Default）' })) })
     expect(b.openPath).toHaveBeenLastCalledWith(ABSOLUTE_PATH, 'open', '/Music.app')
   })
 
@@ -158,7 +158,7 @@ it('shows the default icon and current application list, and selects an applicat
   await act(async () => {})
   expect(view.container.querySelector('[data-open-path-open] img')?.getAttribute('src')).toBe(icon)
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['path.more'] })) })
-  expect(screen.getByRole('menuitem', { name: 'Music（默认）' })).toBeTruthy()
+  expect(screen.getByRole('menuitem', { name: 'Music（Default）' })).toBeTruthy()
   await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: 'Player' })) })
   expect(b.openPath).toHaveBeenLastCalledWith(ABSOLUTE_PATH, 'open', '/Player.app')
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: t('open.title', { app: 'Music' }) })) })
@@ -176,8 +176,8 @@ it('ignores an obsolete file query and refreshes the default application when th
   view.rerender(<OpenPathAction {...b.props} absolutePath="/other.mp3" applications={applications} />)
   await act(async () => { old.resolve([{ id: '/Old.app', name: 'Old', default: true, icon: null }]) })
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['path.more'] })) })
-  expect(screen.queryByRole('menuitem', { name: 'Old（默认）' })).toBeNull()
-  expect(screen.getByRole('menuitem', { name: 'Player（默认）' })).toBeTruthy()
+  expect(screen.queryByRole('menuitem', { name: 'Old（Default）' })).toBeNull()
+  expect(screen.getByRole('menuitem', { name: 'Player（Default）' })).toBeTruthy()
   expect(applications.mock.calls[0]![1].aborted).toBe(true)
   expect(applications).toHaveBeenLastCalledWith('/other.mp3', expect.any(AbortSignal))
 })
@@ -188,7 +188,7 @@ it('keeps reveal last and makes it the default when the file query fails', async
   await act(async () => {})
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['path.more'] })) })
   const items = screen.getAllByRole('menuitem')
-  expect(items.map(item => item.textContent)).toEqual([zh['path.appsError'], '显示文件位置（默认）'])
+  expect(items.map(item => item.textContent)).toEqual([zh['path.appsError'], 'Show file location（Default）'])
   expect(items[0]).toHaveProperty('disabled', true)
   await act(async () => { fireEvent.click(items[1]!) })
   expect(b.openPath).toHaveBeenLastCalledWith(ABSOLUTE_PATH, 'reveal', undefined)
@@ -202,7 +202,7 @@ it('opens with the first registered application when none is marked default', as
   await act(async () => { fireEvent.click(main) })
   expect(b.openPath).toHaveBeenLastCalledWith(ABSOLUTE_PATH, 'open', '/Player.app')
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['path.more'] })) })
-  expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Player（默认）', zh['path.reveal']])
+  expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Player（Default）', zh['path.reveal']])
 })
 
 it('uses reveal as the default only when no application is registered', async () => {
@@ -266,8 +266,8 @@ it('uses the same application menu in the prominent empty-state control', async 
   // The large control scales the menu chevron up from the compact 10px glyph.
   expect(screen.getByRole('button', { name: zh['path.more'] }).querySelector('svg')?.getAttribute('width')).toBe('14')
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['path.more'] })) })
-  expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Music（默认）', zh['path.reveal']])
-  await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: 'Music（默认）' })) })
+  expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Music（Default）', zh['path.reveal']])
+  await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: 'Music（Default）' })) })
   expect(b.openPath).toHaveBeenLastCalledWith(ABSOLUTE_PATH, 'open', '/Music.app')
 })
 

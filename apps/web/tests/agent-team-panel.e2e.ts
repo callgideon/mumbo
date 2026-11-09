@@ -30,10 +30,10 @@ const RECEIPT_LOCALES = [
   },
   {
     language: 'Chinese', code: 'zh', browserLocale: 'zh-CN', connect: connectFreshWorkspaceZh,
-    modelButton: /^选择模型/u, toggle: '启用智能体团队协作', title: '智能体团队协作',
-    enabled: '已开启', disabled: '已停用',
-    suggestions: '触发候选建议', commandLabel: '智能体团队协作',
-    failure: '执行失败：Use /team on or /team off.',
+    modelButton: /^Choose models/u, toggle: 'Enable agent teamwork', title: 'Agent teamwork',
+    enabled: 'Enabled', disabled: 'Disabled',
+    suggestions: 'Trigger suggestions', commandLabel: 'Agent teamwork',
+    failure: 'Failed: Use /team on or /team off.',
   },
 ] as const
 
@@ -974,15 +974,15 @@ it('shows the Chinese empty subagent section above compact shared tasks', async 
     const agent = scaffold.ctx.agents.list()[0]!
     await scaffold.ctx.agentTeams.setEnabled(agent, true)
     await scaffold.ctx.agentTeams.createTask(agent, {
-      subject: '准备协作', description: '先准备共享任务，再创建子智能体。',
+      subject: 'prepare to collaborate', description: 'prepare first Shared tasks, then Create subagent.',
     })
-    await page.getByRole('button', { name: '0 个子智能体', exact: true }).click()
+    await page.getByRole('button', { name: '0 subagent', exact: true }).click()
     const panel = page.locator('[data-subagent-panel]')
-    await panel.getByText('暂无子智能体', { exact: true }).waitFor()
-    expect(await panel.locator('[data-subagent-section-header]').textContent()).toBe('子智能体')
+    await panel.getByText('No subagents', { exact: true }).waitFor()
+    expect(await panel.locator('[data-subagent-section-header]').textContent()).toBe('Subagents')
     expect(await panel.locator('[data-subagent-section-header] button, h3 button').count()).toBe(0)
     expect(await panel.evaluate(element => element.getBoundingClientRect().width)).toBe(360)
-    await panel.getByRole('heading', { name: '共享任务 1 待处理', exact: true }).waitFor()
+    await panel.getByRole('heading', { name: 'Shared tasks 1 Pending', exact: true }).waitFor()
     expect(await panel.locator('[data-team-task-details]').count()).toBe(0)
   })
 })
@@ -1003,21 +1003,21 @@ it('uses the Chinese collaboration name in the switch and disable confirmation',
     if (selection === undefined) throw new Error('Chinese Team fixture has no model')
     agent.session.append('request/header', { header: { config: selection }, reason: 'initial' })
     await scaffold.ctx.sessions.flush(agent.session)
-    await page.getByRole('button', { name: /^选择模型/u }).click()
-    const toggle = page.getByRole('switch', { name: '启用智能体团队协作', exact: true })
+    await page.getByRole('button', { name: /^Choose models/u }).click()
+    const toggle = page.getByRole('switch', { name: 'Enable agent teamwork', exact: true })
     await expect.poll(() => toggle.getAttribute('aria-checked')).toBe('true')
-    await page.getByRole('button', { name: '关于智能体团队协作', exact: true }).waitFor()
+    await page.getByRole('button', { name: 'About agent teamwork', exact: true }).waitFor()
     expect(await toggle.evaluate(element => element.parentElement!.scrollWidth <= element.parentElement!.clientWidth)).toBe(true)
     const menu = await captureStableAria(page, '[role="menu"]', scaffold.workspaceCwd)
     await toggle.click()
-    const dialog = page.getByRole('dialog', { name: '确认停用智能体团队协作？', exact: true })
+    const dialog = page.getByRole('dialog', { name: 'Disable agent teamwork?', exact: true })
     await dialog.waitFor()
-    await dialog.getByText('对话过程中停用智能体团队协作，将停止共享任务工具和团队协调指令。', { exact: true }).waitFor()
+    await dialog.getByText('Disabling agent teamwork during a conversation stops the use of shared task tools and team coordination instructions.', { exact: true }).waitFor()
     await assertWarningDialogLayout(dialog)
     const confirmation = await captureStableAria(page, '[aria-modal="true"]', scaffold.workspaceCwd)
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'collaboration.zh.expected.md'),
       `## Menu\n\n${menu}\n\n## Confirmation\n\n${confirmation}`, MODE)
-    await dialog.getByRole('button', { name: '取消', exact: true }).click()
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
     expect(scaffold.ctx.agentTeams.isEnabled(agent)).toBe(true)
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])

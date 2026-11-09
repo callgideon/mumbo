@@ -50,7 +50,7 @@ const LISTING: MarketSearchResult = {
   fetchedAt: 1,
   total: 6,
   nextOffset: null,
-  title: { en: 'Alpha index', zh: '甲索引' },
+  title: { en: 'Alpha index', zh: 'index A' },
   metadata: {
     categories: { tools: { title: 'Tools' }, themes: { title: 'Themes' } },
     labels: { official: { title: 'Official' }, beta: { title: 'Beta' } },
@@ -58,7 +58,7 @@ const LISTING: MarketSearchResult = {
   },
   entries: [
     entry('dsh-a', {
-      title: { en: 'Alpha', zh: '甲' }, description: 'Does A', author: 'Jane', icon: 'https://cdn.example/a.png',
+      title: { en: 'Alpha', zh: 'A' }, description: 'Does A', author: 'Jane', icon: 'https://cdn.example/a.png',
       homepage: 'https://example.com/alpha#readme', repository: { url: 'https://github.com/o/plugins', directory: 'packages/a' },
     }, { category: 'tools', labels: ['official', 'beta'], sortKeys: { downloads: 1 } }, {
       source: { type: 'npm', registry: 'https://r.example/' }, install: { spec: 'dsh-a@1.0.0', registry: 'https://r.example/' },
@@ -454,9 +454,9 @@ describe('DiscoverSection', () => {
 
   it('renders the Chinese copy and dates', () => {
     renderTab({}, zh)
-    expect(screen.getByRole('button', { name: '切换插件索引，当前为 甲索引' })).toBeTruthy()
-    expect(card('dsh-a').getByText('甲')).toBeTruthy()
-    expect(card('dsh-a').getByText(/^1\.0\.0 · Jane · 2026年9月/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Switch plugin index, currently index A' })).toBeTruthy()
+    expect(card('dsh-a').getByText('A')).toBeTruthy()
+    expect(card('dsh-a').getByText(/^1\.0\.0 · Jane · 2026 yr 9 mo/)).toBeTruthy()
     expect(card('dsh-b').getByText(zh.statusInstalled)).toBeTruthy()
   })
 })

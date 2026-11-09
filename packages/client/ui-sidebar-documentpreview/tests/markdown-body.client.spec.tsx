@@ -125,8 +125,8 @@ describe('MarkdownBody', () => {
     expect(view.getByRole('button', { name: 'Copy' })).toBeDefined()
     dictionary = zh
     view.rerender(<MarkdownBody {...props(value, t)} />)
-    expect(view.getByRole('button', { name: '复制' })).toBeDefined()
-    expect(view.getByRole('heading', { name: '脚注' })).toBeDefined()
+    expect(view.getByRole('button', { name: 'Copy' })).toBeDefined()
+    expect(view.getByRole('heading', { name: 'Footnotes' })).toBeDefined()
   })
 
   it('renders leading YAML frontmatter as fields instead of a heading', async () => {

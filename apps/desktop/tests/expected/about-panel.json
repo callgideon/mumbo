@@ -14,7 +14,7 @@
   },
   "darwin:zh-CN": {
     "menu": [
-      { "label": "关于 DeepSeek Harness", "role": "about" },
+      { "label": "About DeepSeek Harness", "role": "about" },
       { "type": "separator" }
     ],
     "options": {
@@ -27,7 +27,7 @@
   },
   "win32:zh-CN": {
     "menu": [
-      { "label": "关于 DeepSeek Harness" },
+      { "label": "About DeepSeek Harness" },
       { "type": "separator" }
     ],
     "options": {

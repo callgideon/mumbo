@@ -43,9 +43,9 @@ describe('DesktopQuitConfirmation', () => {
     const f = setup('darwin', async () => ({ activeTasks: true, scheduledTasks: true }))
     expect(await f.confirmation.confirm()).toBe(true)
     expect(f.shown).toEqual([{
-      type: 'warning', title: 'DeepSeek Harness', message: '退出 DeepSeek Harness？',
-      detail: '当前正在运行的任务将会中断，且应用关闭期间，定时任务不会运行',
-      buttons: ['退出', '取消'], defaultId: 0, cancelId: 1, noLink: true,
+      type: 'warning', title: 'DeepSeek Harness', message: 'Quit DeepSeek Harness?',
+      detail: 'Running tasks will be interrupted, and scheduled tasks will not run while the app is closed.',
+      buttons: ['Quit', 'Cancel'], defaultId: 0, cancelId: 1, noLink: true,
     }])
   })
 
@@ -65,7 +65,7 @@ describe('DesktopQuitConfirmation', () => {
     const f = setup('darwin', async () => { throw new Error('desktop quit: inspection timed out') })
     f.answer(1)
     expect(await f.confirmation.confirm()).toBe(false)
-    expect(f.shown.map(options => options.detail)).toEqual(['当前正在运行的任务将会中断'])
+    expect(f.shown.map(options => options.detail)).toEqual(['Running tasks will be interrupted.'])
     expect(console.warn).toHaveBeenCalledWith('desktop quit: task inspection unavailable', expect.any(Error))
   })
 

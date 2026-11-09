@@ -22,7 +22,7 @@ afterEach(cleanup)
 const markdown = '# Keep this plan\n\n## Goal\n\n- Review\n- Implement'
 const call = { type: 'tool/call', seq: 12, data: { turn: 1, name: 'exit_plan_mode', callId: 'call:1', arguments: JSON.stringify({ plan: markdown }) } }
 const plan = submittedPlan(call)!
-const target = { session: { kind: 'session' as const, sessionId: 'session / 中文' as SessionId }, callId: plan.callId }
+const target = { session: { kind: 'session' as const, sessionId: 'session / Chinese' as SessionId }, callId: plan.callId }
 const t = makeTranslate(en, commonEn)
 
 function planHook(plans: readonly typeof plan[]): Parameters<typeof PlanCards>[0]['usePlans'] {
@@ -64,7 +64,7 @@ describe('submitted plan identity', () => {
   it('round-trips opaque identifiers and refuses malformed addresses', () => {
     expect(parsePlanAddress(planAddress(target))).toEqual(target)
     for (const mode of ['one-shot', 'continuable'] as const) {
-      const child = { session: { kind: 'subagent' as const, parentSessionId: target.session.sessionId, childSessionId: 'child / 中文' as SessionId, mode }, callId: plan.callId }
+      const child = { session: { kind: 'subagent' as const, parentSessionId: target.session.sessionId, childSessionId: 'child / Chinese' as SessionId, mode }, callId: plan.callId }
       expect(parsePlanAddress(planAddress(child))).toEqual(child)
     }
     for (const address of ['file:///plan.md', 'dsh-resource://plan/s/c/extra', 'dsh-resource://plan/s/%XX', 'dsh-resource://plan/s/c?text=x',

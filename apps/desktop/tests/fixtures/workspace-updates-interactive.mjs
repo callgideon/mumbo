@@ -9,7 +9,7 @@ import { join } from 'node:path'
  * @returns {Promise<void>} Resolves after operator exit and removal of control listeners.
  */
 export async function runInteractiveUpdates({ mainWindow, server, fixture, checkMenu, control, root }) {
-  const panel = new BrowserWindow({ title: '本地升级验收控制', width: 640, height: 460,
+  const panel = new BrowserWindow({ title: 'Local update acceptance controls', width: 640, height: 460,
     webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true } })
   const finished = Promise.withResolvers()
   const finish = () => finished.resolve()
@@ -19,53 +19,53 @@ export async function runInteractiveUpdates({ mainWindow, server, fixture, check
   const originalInstall = fixture.updater.quitAndInstall
   fixture.updater.quitAndInstall = (...args) => {
     fixture.installations.push(args)
-    void dialog.showMessageBox(panel, { type: 'info', title: '本地验收结束',
-      message: '已完成下载、校验、安装确认和任务收尾。',
-      detail: '安装器调用已拦截，未安装或重启到新版本。确认后退出本轮演练；重新运行命令可开始下一轮。',
-      buttons: ['结束演练'] }).then(finish).catch(finish)
+    void dialog.showMessageBox(panel, { type: 'info', title: 'Local acceptance finished',
+      message: 'Download, verification, install confirmation, and task wrap-up are complete.',
+      detail: 'The installer call was intercepted; nothing was installed and the app did not restart into the new version. Confirm to end this drill; rerun the command to start another round.',
+      buttons: ['end the drill'] }).then(finish).catch(finish)
   }
   const action = (label, operation) => ({ label, click: () => {
     if (closing) return
     void Promise.resolve().then(operation).catch(error => {
       console.error(error)
-      if (!panel.isDestroyed()) dialog.showErrorBox('本地验收操作失败', String(error))
+      if (!panel.isDestroyed()) dialog.showErrorBox('Local acceptance action failed', String(error))
     })
   } })
   const select = mode => server.select(mode, '0.1.6-nightly.1')
   select('hold-download')
   const check = () => checkMenu.click()
   panel.setMenu(Menu.buildFromTemplate([
-    { label: '更新场景', submenu: [
-      action('普通更新（点击下载后保持进度）', () => { server.policy('clear'); select('hold-download'); check() }),
-      action('强制更新（点击下载后保持进度）', () => { server.policy('force'); select('hold-download'); check() }),
-      action('放行当前下载 → 校验与安装确认', () => server.release()),
+    { label: 'Update scenario', submenu: [
+      action('Normal update (progress is kept after clicking download)', () => { server.policy('clear'); select('hold-download'); check() }),
+      action('Forced update (progress is kept after clicking download)', () => { server.policy('force'); select('hold-download'); check() }),
+      action('Allow the current download → Verification and install confirmation', () => server.release()),
       { type: 'separator' },
-      action('下一次下载：校验失败', () => select('corrupt')),
-      action('下一次下载：404 失败', () => select('download-404')),
-      action('下一次下载：恢复正常', () => select('healthy')),
-      action('检查失败', () => { select('feed-404'); check() }),
-      action('没有可用更新（未下载前使用）', () => { server.select('healthy', '0.1.5-rc.1'); check() }),
-      action('解除强更阻塞', () => { server.policy('clear'); check() }),
+      action('Next download: verification fails', () => select('corrupt')),
+      action('Next download: 404 fails', () => select('download-404')),
+      action('Next download: back to normal', () => select('healthy')),
+      action('Check failed', () => { select('feed-404'); check() }),
+      action('No update available (use before downloading)', () => { server.select('healthy', '0.1.5-rc.1'); check() }),
+      action('Clear forced-update block', () => { server.policy('clear'); check() }),
     ] },
-    { label: '任务状态', submenu: [
-      action('添加排队任务', () => control('queue')),
-      action('清空排队任务', () => control('clear')),
-      action('模拟任务停止失败（本轮有效）', () => control('hold-shutdown')),
+    { label: 'Task status', submenu: [
+      action('Add queued task', () => control('queue')),
+      action('Clear queued tasks', () => control('clear')),
+      action('Simulate task stop failure (this round only)', () => control('hold-shutdown')),
     ] },
-    { label: '窗口', submenu: [
-      action('返回应用', () => { mainWindow.restore(); mainWindow.show(); mainWindow.focus() }),
-      action('结束演练', finish),
+    { label: 'window', submenu: [
+      action('Back to app', () => { mainWindow.restore(); mainWindow.show(); mainWindow.focus() }),
+      action('end the drill', finish),
     ] },
   ]))
   try {
     await panel.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html><html lang="zh-CN">
       <meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
       <style>body{font:16px/1.8 system-ui;padding:24px;color:#222}h2{margin-top:0}strong{color:#165dff}</style>
-      <h2>手动升级验收 · 不执行安装器</h2>
-      <p>使用本窗口顶部的<strong>更新场景</strong>菜单选择普通更新或强制更新，再到应用里点击下载。</p>
-      <p>下载会保持进度，供你查看。回到这里选择<strong>放行当前下载</strong>，才会进入校验和安装确认。</p>
-      <p>用<strong>任务状态</strong>菜单添加排队任务，查看安装前的任务警告。失败模式须在下载前选择。</p>
-      <p>数据和更新服务器均为本地隔离测试。下载地址为示例地址。关闭此窗口结束演练；重跑命令重置状态。</p>
+      <h2>Manual update acceptance · The installer is not run</h2>
+      <p>Use the<strong>Update scenario</strong>menu at the top of this window to choose a normal or forced update, then click download in the app.</p>
+      <p>Download keeps its progress so you can inspect it. Come back here and choose<strong>Allow the current download</strong>to enter verification and install confirmation.</p>
+      <p>use<strong>Task status</strong>menu to add queued tasks and see the pre-install task warning. Choose a failure mode before downloading.</p>
+      <p>The data and update servers are local isolated test servers. The download URL is a sample address. Close this window to end the drill; rerun the command to reset state.</p>
       </html>`)}`)
     console.log(`Interactive updater ready: ${root}`)
     await finished.promise

@@ -29,7 +29,7 @@ async function bench(language: 'zh' | 'en' | 'ja' = 'zh') {
   const runtime = await SlotTestRuntime.create()
   onTestFinished(() => runtime.dispose())
   const locale = new LocaleRuntime(runtime.ctx)
-  onTestFinished(locale.addLanguage({ id: 'ja', label: '日本語', fallback: 'en' }))
+  onTestFinished(locale.addLanguage({ id: 'ja', label: 'Japanese', fallback: 'en' }))
   locale.setLocale(language)
   runtime.ctx.provide('locale', locale)
   runtime.slots.installLocale(locale)
@@ -44,7 +44,7 @@ it('keeps the Host entry empty', () => { applyHost() })
 
 it('retains bytes after source unmount and releases on the detached node dragend', async () => {
   const { service, owner, runtime } = await bench()
-  const file = new File(['pdf-original'], '报告.pdf', { type: 'application/pdf' })
+  const file = new File(['pdf-original'], 'report.pdf', { type: 'application/pdf' })
   const source = render(<DraggableImage fileDrag={service.actions} src="blob:original" name={file.name} original={file} alt="original" />)
   const node = source.getByRole('img')
   const data = transfer()
@@ -55,7 +55,7 @@ it('retains bytes after source unmount and releases on the detached node dragend
   const received = service.read(data)!
   expect(received.name).toBe(file.name)
   expect(await received.text()).toBe('pdf-original')
-  expect(data.getData('DownloadURL')).toBe('application/pdf:报告.pdf:blob:transfer')
+  expect(data.getData('DownloadURL')).toBe('application/pdf:report.pdf:blob:transfer')
   expect(service.read(transfer('foreign'))).toBeUndefined()
   node.dispatchEvent(new Event('dragend'))
   expect(service.read(data)).toBeUndefined()
@@ -66,9 +66,9 @@ it('retains bytes after source unmount and releases on the detached node dragend
 })
 
 it.each([
-  ['zh', '拖放失败，请重试'],
+  ['zh', 'Drag failed. Try again.'],
   ['en', 'Drag failed. Try again.'],
-  ['ja', 'ドラッグ＆ドロップに失敗しました。もう一度お試しください。'],
+  ['ja', 'ドラッグ&ドロップにshippaiしました.もうichidoおtameしください.'],
 ] as const)('reports a late native failure after source unmount in %s', async (language, message) => {
   const pending = Promise.withResolvers<boolean>()
   const handle = 'handle' as FileDragHandle

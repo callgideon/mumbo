@@ -59,7 +59,7 @@ async function bench(collapsed = false, track?: TrackProductEvent) {
       if (track !== undefined) ctx.provide('productAnalytics', { track } as never)
       ctx.effect(() => locale.register('common', { zh: commonZh, en: commonEn }), 'panel test: common locale')
       ctx.effect(() => locale.register('sidebar-panel-test', {
-        zh: { alpha: '甲面板' }, en: { alpha: 'Alpha panel' },
+        zh: { alpha: 'panel A' }, en: { alpha: 'Alpha panel' },
       }), 'panel test: panel locale')
       ctx.slots.installLocale(locale)
       ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: 'conversation' }, () => (
@@ -270,7 +270,7 @@ describe('sidebar global panels', () => {
     const entries = runtime.slots.entries('sidebar.panellist')
     act(() => { locale.setLocale('zh') })
     await waitFor(() => {
-      expect(within(navigation).getByRole('button', { name: '甲面板' }).textContent).toBe('甲面板')
+      expect(within(navigation).getByRole('button', { name: 'panel A' }).textContent).toBe('panel A')
     })
     expect(within(navigation).getByRole('button', { name: 'Beta panel' }).textContent).toBe('Beta panel')
     expect(runtime.slots.entries('sidebar.panellist')).toBe(entries)
@@ -325,7 +325,7 @@ describe('sidebar global panels', () => {
     act(() => { locale.setLocale('zh') })
     expect(view.queryByRole('navigation')).toBeNull()
     await runtime.mount({ inject: [...inject], apply })
-    const restored = await view.findByRole('button', { name: '甲面板' })
+    const restored = await view.findByRole('button', { name: 'panel A' })
     expect(restored.getAttribute('aria-current')).toBe('page')
     const icon = within(restored).getByTestId(`${ALPHA}-icon`)
     expect(icon.getAttribute('data-active')).toBe('true')

@@ -332,14 +332,14 @@ describe('ReadImageRow keyed toolview', () => {
     const view = render(<ReadImageRow {...rowProps(settled({ meta: imageMeta({ path: '/w/app/shots/card.png' }) }), stubRenderSlot())} />)
     toggleRow(view)
     const lines = [...view.container.querySelectorAll('[class*="imageMeta"] > div')].map(line => line.textContent)
-    expect(lines).toEqual(['/w/app/shots/card.png', '1496x260px，24588 字节'])
+    expect(lines).toEqual(['/w/app/shots/card.png', '1496x260px，24588 bytes'])
   })
 
   it('names the original size of a downscaled image', () => {
     const downscaled = { ...sampleImage, originalDimensions: { width: 2992, height: 520 } }
     const view = render(<ReadImageRow {...rowProps(settled({ content: withImage(downscaled) } as never), stubRenderSlot())} />)
     toggleRow(view)
-    expect(view.container.textContent).toContain('1496x260px（由 2992x520px 缩小），24588 字节')
+    expect(view.container.textContent).toContain('1496x260px (downscaled from 2992x520px), 24588 bytes')
   })
 
   it('keeps appended non-envelope text under the picture', () => {
@@ -358,7 +358,7 @@ describe('ReadImageRow keyed toolview', () => {
     toggleRow(view)
     expect(emptySlot).toHaveBeenCalled()
     expect(view.container.querySelector('[data-images]')).toBeNull()
-    expect(view.container.textContent).toContain('1496x260px，24588 字节')
+    expect(view.container.textContent).toContain('1496x260px，24588 bytes')
   })
 
   it('degrades to the text body when neither the slot nor the loader is supplied', () => {

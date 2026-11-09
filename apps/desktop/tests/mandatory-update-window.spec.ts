@@ -208,8 +208,8 @@ it('rebinds policy updates and reloads to a replacement Windows main window', ()
 it.each(['darwin', 'win32'] as const)('includes the installation wait notice only on Windows: %s', (platform) => {
   const f = setup(platform)
   expect(f.view().locale.messages.mandatoryReadyDetail).toBe(platform === 'win32'
-    ? '更新期间应用将暂时关闭，完成后会自动打开。\n\n更新可能需要一些时间，请耐心等待，期间请勿重复启动应用。'
-    : '更新期间应用将暂时关闭，完成后会自动打开。')
+    ? 'The app will close during the update and reopen automatically when it is complete.\n\nUpdate may take some Time; please wait and do not Repeat start Application.'
+    : 'The app will close during the update and reopen automatically when it is complete.')
 })
 
 it('updates the same macOS view in the background without showing or focusing the owner', () => {
@@ -271,8 +271,8 @@ it('defers native recovery until foreground and opens the policy download page w
   f.owner.emit('focus')
   expect(native.messageBox).toHaveBeenCalledOnce()
   expect(native.messageBox).toHaveBeenCalledWith(f.owner, expect.objectContaining({
-    message: '请更新后继续使用', cancelId: -1,
-    buttons: ['打开下载页面', '退出'],
+    message: 'Update to continue', cancelId: -1,
+    buttons: ['Open download page', 'Quit'],
   }))
   expect(native.messageBox.mock.calls[0]![1].detail).toContain('1.0.1-nightly.1')
   answer.resolve({ response: 0 })
@@ -355,7 +355,7 @@ it.each([undefined, 'https://unapproved.example.com/download'])('omits native do
   window.loadURL.mockRejectedValueOnce(new Error('local recovery failed'))
   window.webContents.emit('render-process-gone')
   await Promise.resolve()
-  expect(native.messageBox.mock.calls[0]![1].buttons).toEqual(['退出'])
+  expect(native.messageBox.mock.calls[0]![1].buttons).toEqual(['Quit'])
   expect(native.messageBox.mock.calls[0]![1].cancelId).toBe(-1)
   expect(native.open).not.toHaveBeenCalled()
 })
@@ -389,7 +389,7 @@ it('reports a browser-opening failure in the native fallback without claiming do
   await Promise.resolve()
   answer.resolve({ response: 0 })
   await vi.waitFor(() => { expect(native.messageBox).toHaveBeenCalledTimes(2) })
-  expect(native.messageBox.mock.calls[1]![1].detail).toContain('无法打开下载页面，请重试')
+  expect(native.messageBox.mock.calls[1]![1].detail).toContain('Could not open the download page. Please try again.')
   expect(f.view().policy.blocking).toBe(true)
   expect(f.install).not.toHaveBeenCalled()
 })
@@ -405,7 +405,7 @@ it('uses the configured policy title as the native headline without repeating it
   await Promise.resolve()
   const options = native.messageBox.mock.calls[0]![1]
   expect(options.message).toBe('Configured title')
-  expect(options.detail).toBe('Configured detail\n\n新版本：1.0.1-nightly.1')
+  expect(options.detail).toBe('Configured detail\\n\\nUpdate: 1.0.1-nightly.1')
 })
 
 

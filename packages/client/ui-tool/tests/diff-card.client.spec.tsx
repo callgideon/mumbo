@@ -257,7 +257,7 @@ describe('FileMutationRow diff card', () => {
     expect(model.state).toBe('error')
     expect(model.errorSummary).toBe('Patch stopped after 1 of 3 operations.')
     const view = render(<FileMutationRow {...rowProps(block, 'apply_patch')} />)
-    expect(view.getByText('编辑')).toBeTruthy()
+    expect(view.getByText('Edit')).toBeTruthy()
     toggleRow(view)
     expect(view.container.querySelectorAll('[data-diff]').length).toBeGreaterThan(0)
     expect(view.getByText('created')).toBeTruthy()
@@ -337,7 +337,7 @@ describe('FileMutationRow diff card', () => {
     toggleRow(view)
     expect(view.container.querySelector('[data-diff]')).not.toBeNull()
     expect(view.getByText('hello fixture')).toBeTruthy()
-    expect(view.getByRole('button', { name: '复制' })).toBeTruthy()
+    expect(view.getByRole('button', { name: 'Copy' })).toBeTruthy()
   })
 
   it('the summary is a path link that opens the tool path through the host', () => {
@@ -415,7 +415,7 @@ describe('FileMutationRow diff card', () => {
     }))} />)
     expect(view.container.querySelector('[data-state="stopped"]')).not.toBeNull()
     expect(view.container.querySelector('[data-state="stopped"] svg')).not.toBeNull()
-    expect(view.getByText('已停止').className).toContain('visuallyHidden')
+    expect(view.getByText('Stopped').className).toContain('visuallyHidden')
     expect(view.container.querySelector('[class*="_stoppedSummary_"]')?.textContent).toBe('notes/demo.txt')
   })
 

@@ -95,13 +95,13 @@ it('presses a button with the generation it was drawn in and shows the failure o
   b.press.mockImplementationOnce(() => Promise.reject(new Error('gone')))
   fireEvent.click(screen.getByRole('button', { name: /Cancel/ }))
   await act(async () => { await Promise.resolve() })
-  expect(screen.getByRole('status').textContent).toBe('按钮操作失败：gone')
+  expect(screen.getByRole('status').textContent).toBe('The button failed: gone')
 
   // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- a press rejected with a bare value is the scenario.
   b.press.mockImplementationOnce(() => Promise.reject('text failure'))
   fireEvent.click(screen.getByRole('button', { name: /Cancel/ }))
   await act(async () => { await Promise.resolve() })
-  expect(screen.getByRole('status').textContent).toBe('按钮操作失败：text failure')
+  expect(screen.getByRole('status').textContent).toBe('The button failed: text failure')
 })
 
 it('disables every button while a press is in flight', async () => {

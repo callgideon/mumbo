@@ -27,8 +27,8 @@ it('disables unsupported bundles, shows the Host restriction, and refuses direct
   const page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: ZH_BROWSER_LOCALE })
   await page.goto(scaffold.authenticatedUrl)
   await connectFreshWorkspaceZh(page, scaffold.workspaceCwd)
-  await page.getByRole('navigation', { name: '全局面板' }).getByRole('button', { name: '插件', exact: true }).click()
-  const reason = '此插件不支持运行 DSH 的主机操作系统'
+  await page.getByRole('navigation', { name: 'Global panels' }).getByRole('button', { name: 'Plugins', exact: true }).click()
+  const reason = 'This plugin does not support the operating system running DSH.'
   const card = page.locator(`[data-plugin-package="${name}"]`)
   await card.getByText(reason, { exact: true }).waitFor()
   expect(await card.getByRole('switch').isEnabled()).toBe(false)
@@ -42,7 +42,7 @@ it('disables unsupported bundles, shows the Host restriction, and refuses direct
   expect(beforeRuntime).toBeTypeOf('number')
   expect(scaffold.ctx.ptcRuntime.programFormat).toBe('function-body')
   const names = [name]
-  await page.locator('[data-plugin-panel]').getByRole('button', { name: '更多', exact: true }).click()
+  await page.locator('[data-plugin-panel]').getByRole('button', { name: 'More', exact: true }).click()
   const cua = page.locator('[data-plugin-package="@deepseek-ai/dsh-cua-bundle"]')
   expect(await cua.count()).toBe(process.platform === 'darwin' ? 1 : 0)
   if (process.platform !== 'darwin') {

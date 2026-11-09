@@ -36,14 +36,14 @@ describe.skipIf(MODE === 'record')('web e2e: refused New Session', () => {
         ])
         // Startup prepares the default Workspace, and its own blank-Session
         // attempt is refused without a notice: the hero stays on the picker.
-        await page.getByRole('button', { name: '选择工作区', exact: true }).waitFor()
+        await page.getByRole('button', { name: 'Choose workspace', exact: true }).waitFor()
         await expect.poll(() => scaffold.ctx.workspaceRegistry.list().length).toBe(1)
         expect(scaffold.ctx.sessions.list()).toEqual([])
         expect(await page.getByRole('alert').count()).toBe(0)
 
-        await page.getByRole('treeitem').filter({ hasText: '默认工作区' }).hover()
-        await page.getByRole('button', { name: '在“默认工作区”中新建会话', exact: true }).click()
-        const notice = page.getByRole('alert').filter({ hasText: '新建会话失败' })
+        await page.getByRole('treeitem').filter({ hasText: 'Default workspace' }).hover()
+        await page.getByRole('button', { name: 'New session in Default workspace', exact: true }).click()
+        const notice = page.getByRole('alert').filter({ hasText: 'New sessionFailed' })
         await notice.waitFor()
         await compareOrRefreshGolden(NOTICE_EXPECTED, await notice.ariaSnapshot(), MODE)
         expect(scaffold.ctx.sessions.list()).toEqual([])

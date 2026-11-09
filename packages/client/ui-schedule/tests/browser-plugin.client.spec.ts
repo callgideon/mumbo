@@ -523,7 +523,7 @@ describe('ui-schedule browser half', () => {
     ctx.locale.setLocale('en')
     expect(resolveSlotLabel(panel.options.label)).toBe('Automation tasks')
     ctx.locale.setLocale('zh')
-    expect(resolveSlotLabel(panel.options.label)).toBe('自动化任务')
+    expect(resolveSlotLabel(panel.options.label)).toBe('Automation tasks')
     const face = injectedFace(entry, undefined as never) as TaskManagerInjected
     const dispose = face.hooks.catalog.subscribe(vi.fn())
     try {

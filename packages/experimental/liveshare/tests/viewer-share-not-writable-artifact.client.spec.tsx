@@ -82,7 +82,7 @@ describe('Assembled liveshare viewer page on a share that stopped allowing write
     }, { timeout: 15_000 })
     // The shared Session is running, so this reader's draft is what the primary action sends or steers:
     // whichever the page offers here, it is the prompt the Host answers.
-    await inputFixture.send('fx-alpha', 'hello', '排队发送')
+    await inputFixture.send('fx-alpha', 'hello', 'Queue message')
 
     // The reader sees the Host's message with its stable code, and the composer keeps the draft rather
     // than reporting a write that landed.

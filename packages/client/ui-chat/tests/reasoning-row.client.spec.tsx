@@ -62,7 +62,7 @@ describe('AssistantMarkdown reasoning blocks', () => {
     const earlierToggle = view.getByRole('button')
     const earlierRow = earlierToggle.closest('[data-variant="think"]')
     expect(earlierRow?.getAttribute('data-state')).toBe('ok')
-    expect(view.queryByText('运行中')).toBeNull()
+    expect(view.queryByText('Running')).toBeNull()
     fireEvent.click(earlierToggle)
     const earlierBody = view.getByText('Earlier body')
 
@@ -101,7 +101,7 @@ describe('AssistantMarkdown reasoning blocks', () => {
     const view = render(<AssistantMarkdown {...props} blocks={blocks} groupPart="reasoning" streaming={false} interrupted />)
     expect(view.queryAllByRole('button')).toHaveLength(text.trim() === '' ? 0 : 1)
     expect(view.getByText(t('message.stopped'))).toBeTruthy()
-    expect(view.queryByText('运行中')).toBeNull()
+    expect(view.queryByText('Running')).toBeNull()
   })
 
   it('keeps non-blank rows and their expanded bodies across modes, excluding them from the response part', () => {
@@ -226,7 +226,7 @@ describe('ReasoningRow', () => {
         t={t} blocks={[reasoning]} streaming loadImage={unusedImageLoader} />,
     )
     expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
-    fireEvent.click(view.getByText('思考'))
+    fireEvent.click(view.getByText('Think'))
     view.rerender(
       <AssistantMarkdown renderSlot={renderSlot} useDisclosure={useDisclosure} useGroupAction={useSearchableHidden}
         usePresentation={useDetailedPresentation}
@@ -240,7 +240,7 @@ describe('ReasoningRow', () => {
     )
     expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('true')
     expect(view.getByText(/Check persistence/)).toBeTruthy()
-    fireEvent.click(view.getByText('思考'))
+    fireEvent.click(view.getByText('Think'))
     expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
   })
 
@@ -254,7 +254,7 @@ describe('ReasoningRow', () => {
         loadImage={unusedImageLoader}
       />,
     )
-    expect(view.getByText('运行中')).toBeTruthy()
+    expect(view.getByText('Running')).toBeTruthy()
     expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
     expect(view.getByText('Newest reasoning tokens').closest('[data-streaming]')?.getAttribute('data-streaming'))
       .toBe('true')
@@ -296,7 +296,7 @@ describe('ReasoningRow', () => {
     )
     const settledSummary = view.getByText('Inspect the session')
     expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
-    expect(view.queryByText('运行中')).toBeNull()
+    expect(view.queryByText('Running')).toBeNull()
     expect(settledSummary.closest('[data-streaming]')).toBeNull()
   })
 
@@ -316,7 +316,7 @@ describe('ReasoningRow', () => {
     expect(row.getAttribute('aria-expanded')).toBe('true')
     expect(view.getByText(/Check persistence/)).toBeTruthy()
 
-    fireEvent.click(view.getByText('思考'))
+    fireEvent.click(view.getByText('Think'))
     expect(row.getAttribute('aria-expanded')).toBe('false')
   })
 
@@ -345,7 +345,7 @@ describe('ReasoningRow', () => {
     expect(view.getByText('Comparing checkout and merge bases')).toBeTruthy()
     expect(view.queryByText('**Comparing checkout and merge bases**')).toBeNull()
 
-    fireEvent.click(view.getByText('思考'))
+    fireEvent.click(view.getByText('Think'))
     expect(view.getByText('Comparing checkout and merge bases').tagName).toBe('STRONG')
     expect(view.container.querySelector('[class*="thinkBody"]')?.textContent).not.toContain('**')
   })
@@ -372,7 +372,7 @@ describe('ReasoningRow', () => {
     expect(compact?.querySelectorAll('h1, h2, h3, h4, h5, h6')).toHaveLength(6)
     expect(compact?.querySelector('p')?.textContent).toBe('Reasoning body.')
 
-    fireEvent.click(view.getByText('思考'))
+    fireEvent.click(view.getByText('Think'))
     expect(view.getByText('# Section 1').tagName).toBe('SPAN')
     expect(view.queryByRole('heading')).toBeNull()
   })
@@ -388,7 +388,7 @@ describe('ReasoningRow', () => {
         loadImage={unusedImageLoader}
       />,
     )
-    fireEvent.click(view.getByText('思考'))
+    fireEvent.click(view.getByText('Think'))
     const heading = view.getByRole('heading', { name: 'Investigation' })
     const emphasis = view.getByText('Check persistence')
     const text = first + Array.from({ length: 8 }, (_, index) => `Paragraph ${index}.`).join('\n\n')
@@ -416,7 +416,7 @@ describe('ReasoningRow', () => {
         loadImage={unusedImageLoader}
       />,
     )
-    fireEvent.click(view.getByText('思考'))
+    fireEvent.click(view.getByText('Think'))
     expect(view.getAllByText(/Inspect the session/)).toHaveLength(1)
     expect(view.queryByText('IN')).toBeNull()
     expect(view.container.querySelector('[class*="ioCard"]')).toBeNull()
@@ -438,7 +438,7 @@ describe('ReasoningRow', () => {
     )
     // Collapsed: no `data-open`, so the sticky rule's gate never matches.
     expect(view.container.querySelector('[data-variant="think"] [data-open]')).toBeNull()
-    fireEvent.click(view.getByText('思考'))
+    fireEvent.click(view.getByText('Think'))
     expect(
       view.container.querySelector(
         '[data-variant="think"][data-expanded] [data-open] [data-disclosure-header]',

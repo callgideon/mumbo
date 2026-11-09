@@ -20,9 +20,9 @@ const SESSION_TITLE = 'Session action extension'
 async function openInventory(page: Page, url: string) {
   await page.goto(url, { waitUntil: 'load' })
   await openSettings(page, 'zh')
-  const dialog = page.getByRole('dialog', { name: '设置' })
-  await dialog.getByRole('button', { name: '内置插件', exact: true }).click()
-  await dialog.getByRole('searchbox', { name: '搜索插件' }).waitFor()
+  const dialog = page.getByRole('dialog', { name: 'Settings' })
+  await dialog.getByRole('button', { name: 'Built-in plugins', exact: true }).click()
+  await dialog.getByRole('searchbox', { name: 'Search plugins' }).waitFor()
   return dialog
 }
 
@@ -260,7 +260,7 @@ it('synchronizes two pages, disposes effects and restores an offline page from t
     await compareOrRefreshGolden(join(EXPECTED, 'enabled.expected.md'), await captureStableAria(page, '[data-live-client]', scaffold.workspaceCwd), webSnapshotMode())
 
     // The inventory filter is page-owned state that live composition must preserve.
-    const draft = otherInventory.getByRole('searchbox', { name: '搜索插件' })
+    const draft = otherInventory.getByRole('searchbox', { name: 'Search plugins' })
     await draft.fill('unfinished-filter')
     await toggle()
     for (const target of [page, other]) {
@@ -319,7 +319,7 @@ it('keeps a failed client download local and retries without changing Host enabl
     expect(await page.locator('[data-live-client]').count()).toBe(0)
     expect(scaffold.ctx.clientModules.graph().entries.some(row => row.id === '@fixture/live-client')).toBe(true)
     await page.unroute(bundle)
-    await failure.getByRole('button', { name: '重试本页面同步' }).click()
+    await failure.getByRole('button', { name: 'Retry this page' }).click()
     await page.locator('[data-live-client]').waitFor()
     await expect.poll(() => failure.count()).toBe(0)
     expect(scaffold.ctx.loader.resolve(entryId).fiber?.state).toBe(2)
@@ -347,17 +347,17 @@ it('recovers an uncreated client entry with rebuilt factory code without navigat
     const page = await browser.newPage({ locale: ZH_BROWSER_LOCALE })
     onTestFailed(() => saveFailureShot(page, 'web-e2e-client-factory-rebuild'))
     const inventory = await openInventory(page, scaffold.authenticatedUrl)
-    const draft = inventory.getByRole('searchbox', { name: '搜索插件' })
+    const draft = inventory.getByRole('searchbox', { name: 'Search plugins' })
     await draft.fill('unfinished-filter')
     let navigations = 0
     page.on('framenavigated', () => { navigations++ })
     const entryId = await scaffold.ctx.loader.create({ name: '@fixture/live-client' })
     const failure = page.locator('[data-client-sync-failure]')
     await failure.getByText(/fixture r0 factory failed/).waitFor()
-    const rebuilt = source.replace('动态插件已启用', '动态插件 r1 已启用').replace('Live plugin enabled', 'Live plugin r1 enabled')
+    const rebuilt = source.replace('dynamic PluginsEnabled', 'dynamic Plugin r1 Enabled').replace('Live plugin enabled', 'Live plugin r1 enabled')
     await writeFile(file, rebuilt)
     scaffold.ctx.clientModules.rebuilt('@fixture/live-client')
-    await page.getByText('动态插件 r1 已启用', { exact: true }).waitFor()
+    await page.getByText('dynamic Plugin r1 Enabled', { exact: true }).waitFor()
     await expect.poll(() => failure.count()).toBe(0)
     await compareOrRefreshGolden(join(EXPECTED, 'recovered.expected.md'), await captureStableAria(page, '[data-live-client]', scaffold.workspaceCwd), webSnapshotMode())
     expect(await draft.inputValue()).toBe('unfinished-filter')
@@ -381,7 +381,7 @@ it('reports bootstrap rebuilds without remounting the settings page or navigatin
     const console = watchConsole(page)
     onTestFailed(() => saveFailureShot(page, 'web-e2e-client-bootstrap-rebuild'))
     const inventory = await openInventory(page, scaffold.authenticatedUrl)
-    const draft = inventory.getByRole('searchbox', { name: '搜索插件' })
+    const draft = inventory.getByRole('searchbox', { name: 'Search plugins' })
     await draft.fill('unfinished-filter')
     const originalInput = await draft.elementHandle()
     let navigations = 0
@@ -393,7 +393,7 @@ it('reports bootstrap rebuilds without remounting the settings page or navigatin
     scaffold.ctx.clientModules.rebuilt('@deepseek-ai/dsh-client-modules')
     const failure = page.locator('[data-client-sync-failure]')
     await failure.getByText(/replacing bootstrap module .* requires a page reload/).waitFor()
-    await failure.getByRole('button', { name: '重试本页面同步' }).click()
+    await failure.getByRole('button', { name: 'Retry this page' }).click()
     await failure.getByText(/replacing bootstrap module .* requires a page reload/).waitFor()
     await compareOrRefreshGolden(join(EXPECTED, 'bootstrap-rebuild.expected.md'), await captureStableAria(page, '[data-client-sync-failure]', scaffold.workspaceCwd), webSnapshotMode())
     expect(await originalInput!.evaluate(input => input.isConnected)).toBe(true)

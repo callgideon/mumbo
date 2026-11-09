@@ -255,12 +255,12 @@ describe('Trajectory conversation Definitions', () => {
     (phase) => {
       const steer = {
         id: 'retained-steer', role: 'user',
-        content: [{ type: 'text', text: '你可以直接更新master' }],
+        content: [{ type: 'text', text: 'you can directly Updatemaster' }],
         source: { kind: 'user' },
       }
       const followup = {
         id: 'followup', role: 'user',
-        content: [{ type: 'text', text: '的worktree，不用绕弯子拉snapshot' }],
+        content: [{ type: 'text', text: ''s worktree, no need to go around snapshot' }],
         source: { kind: 'user' },
       }
       const events = [
@@ -308,8 +308,8 @@ describe('Trajectory conversation Definitions', () => {
         const turns = deriveTrajectoryLayout({ ...current, nodes: current.eventNodes }, t)
         expect(turns.find(turn => turn.turn === 2)?.groups.flatMap(group =>
           group.cells.map(cell => cell.requestOnly ? '[request]' : cell.previewMarkdown).filter(Boolean))).toEqual([
-          '你可以直接更新master',
-          '的worktree，不用绕弯子拉snapshot',
+          'you can directly Updatemaster',
+          ''s worktree, no need to go around snapshot',
           'Current workspace context.',
           phase === 'waiting' ? '[request]' : 'Both inputs received.',
         ])

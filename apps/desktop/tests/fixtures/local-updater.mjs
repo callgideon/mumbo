@@ -287,7 +287,7 @@ async function main() {
             throw error
           }
         }
-        await until("document.getElementById('title')?.textContent === '需要更新'")
+        await until("document.getElementById('title')?.textContent === 'Update required'")
         assert.equal(await contents.executeJavaScript("document.querySelector('#title b') === null"), true)
         if (process.platform === 'win32') {
           assert.equal(window, parent)
@@ -297,11 +297,11 @@ async function main() {
         assert.equal(window.isDestroyed(), false)
         assert.equal(f.installations.length, 0)
         await contents.executeJavaScript("document.getElementById('page').click()")
-        await until("document.getElementById('browser-message').textContent.includes('无法打开浏览器')")
+        await until("document.getElementById('browser-message').textContent.includes('Could not open the browser')")
         assert.deepEqual(opened, ['https://downloads.example.com/desktop'])
         await contents.executeJavaScript("document.getElementById('copy').click()")
         await copyComplete.promise
-        await until("document.getElementById('copy').textContent === '已复制链接'")
+        await until("document.getElementById('copy').textContent === 'Link copied'")
         assert.deepEqual(copied, opened)
         await f.coordinator.check()
         modal.sync()
@@ -311,7 +311,7 @@ async function main() {
         assert.equal(f.coordinator.state.phase, 'downloading')
         assert.equal(await contents.executeJavaScript("document.getElementById('page').hidden"), true)
         server.release()
-        await until("document.getElementById('update').textContent === '停止任务并更新' && !document.getElementById('update').disabled")
+        await until("document.getElementById('update').textContent === 'Stop tasks and update' && !document.getElementById('update').disabled")
         assert.equal(f.installations.length, 0)
         assert.equal(modal.confirmationWindow, window)
         server.policy('stall')
@@ -325,7 +325,7 @@ async function main() {
         })`)
         assert.deepEqual(snapshot, JSON.parse(await readFile(new URL('../expected/mandatory-update-zh.json', import.meta.url), 'utf8')))
         await contents.executeJavaScript("document.getElementById('later').click()")
-        await until("document.getElementById('update').textContent === '继续安装更新' && !document.getElementById('update').disabled")
+        await until("document.getElementById('update').textContent === 'Continue installing the update' && !document.getElementById('update').disabled")
         assert.equal(f.installations.length, 0)
         let capture
         try { capture = await contents.capturePage() }

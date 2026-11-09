@@ -46,7 +46,7 @@ describe('ordinary whitespace matchers', () => {
     expect(trimWhitespaceRule.order).toBeLessThan(collapseWhitespaceRule.order)
   })
 
-  it.each(['', '  原文\r\n\t🙂e\u0301  '])('keeps missing switches as a cached no-match result for %j', (text) => {
+  it.each(['', '  original text\r\n\t🙂e\u0301  '])('keeps missing switches as a cached no-match result for %j', (text) => {
     const k = setup()
     const original = k.evaluate({ text, facts: {} })
     expect(visible(original)).toBe(text)
@@ -108,11 +108,11 @@ describe('ordinary whitespace matchers', () => {
     const reference = vi.fn(sessionReferenceRule.match)
     const k = setup([{ ...sessionReferenceRule, order: 100_000, match: reference }])
     const wire = '@[two  words](dsh-session:x)'
-    const text = ` \t🙂甲\n ${wire} \r\n乙 \t`
+    const text = ` \t🙂A\n ${wire} \r\n B \t`
     const original = k.evaluate({ text, facts: {} })
     reference.mockClear()
     const nodes = k.evaluate({ text, facts: { collapseWhitespace: true, trimWhitespace: true } })
-    expect(visible(nodes)).toBe('🙂甲 [session] 乙')
+    expect(visible(nodes)).toBe('🙂A [session] B')
     expect(nodes.find(node => node.id === 'session')).toBe(original.find(node => node.id === 'session'))
     expect(nodes.find(node => node.id === 'session')?.data).toEqual({ label: 'two  words' })
     expect(reference).not.toHaveBeenCalled()
@@ -120,9 +120,9 @@ describe('ordinary whitespace matchers', () => {
   })
 
   it.each([
-    [' \t🙂 \n甲  👨‍👩‍👧‍👦\t 乙🇨🇳 \t', '🙂 甲 👨‍👩‍👧‍👦 乙🇨🇳'],
-    ['\u00a0甲\r\n乙\u3000', '甲 乙'],
-    ['甲 乙123', '甲 乙123'],
+    [' \t🙂 \n A  👨‍👩‍👧‍👦\t B🇨🇳 \t', '🙂 A 👨‍👩‍👧‍👦 B🇨🇳'],
+    ['\u00a0 A\r\n B\u3000', 'A B'],
+    ['A B 123', 'A B 123'],
     ['', ''],
   ])('preserves emoji and collapses original whitespace in %j', (text, expected) => {
     const k = setup()
@@ -137,7 +137,7 @@ describe('ordinary whitespace matchers', () => {
 
   it('ignores unrelated Facts without limiting long original text', () => {
     const k = setup()
-    const text = `  ${'原文🙂\n'.repeat(100)}  `
+    const text = `  ${'original text🙂\n'.repeat(100)}  `
     const facts = { collapseWhitespace: true, trimWhitespace: true }
     const nodes = k.evaluate({ text, facts })
     k.trim.mockClear(); k.collapse.mockClear()
@@ -149,16 +149,16 @@ describe('ordinary whitespace matchers', () => {
 
   it('keeps unchanged output identity when enabled matchers find no replacement', () => {
     const k = setup()
-    const input = { text: '甲 乙123', facts: {} }
+    const input = { text: 'A B 123', facts: {} }
     const original = k.evaluate(input)
     expect(k.evaluate({ ...input, facts: { collapseWhitespace: true, trimWhitespace: true } })).toBe(original)
   })
 
   it.each([
     [' \n@[a](dsh-session:x) \t @[b](dsh-session:y) \t', '[session] \t [session]'],
-    ['@[a](dsh-session:x) \t 甲 \n @[b](dsh-session:y)', '[session] \t 甲 \n [session]'],
-    ['@[a](dsh-session:x) \t 甲 \n', '[session] \t 甲'],
-    [' \t 甲 \n @[b](dsh-session:y)', '甲 \n [session]'],
+    ['@[a](dsh-session:x) \t A \n @[b](dsh-session:y)', '[session] \t A \n [session]'],
+    ['@[a](dsh-session:x) \t A \n', '[session] \t A'],
+    [' \t A \n @[b](dsh-session:y)', 'A \n [session]'],
   ])('does not trim through references or delete internal spacing in %s', (text, expected) => {
     const k = setup([sessionReferenceRule])
     const nodes = k.evaluate({ text, facts: { trimWhitespace: true } })

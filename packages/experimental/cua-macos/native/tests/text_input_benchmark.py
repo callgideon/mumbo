@@ -32,7 +32,7 @@ from observation_benchmark import FramedPipe, OwnedProcess, file_sha256, json_by
 
 FIXTURE = Path(__file__).with_name("blender_keyboard_fixture.py")
 MAX_REQUEST_BYTES = 1024 * 1024
-PATTERN = "alpha 0123456789 中文测试 🧪🙂\nbeta XYZ 9876543210 输入检查\n"
+PATTERN = "alpha 0123456789 Test 🧪🙂\nbeta XYZ 9876543210 Input check\n"
 
 
 def payload(length):

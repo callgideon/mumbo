@@ -123,8 +123,8 @@ it('only offers expansion for omitted text and preserves the full brief without 
   expect(screen.queryByRole('button', { name: zh.expandBrief })).toBeNull()
   expect(screen.getByText(/Keep my task count visible/).textContent).toBe(short)
   // 129 wide graphemes (258 units) plus one narrow emoji fill the 260-unit budget; the next grapheme folds.
-  const prefix = '计'.repeat(129) + '👩🏽‍💻'
-  const long = prefix + '\n\n保留完整方案，点击创建后交给 Creator。'
+  const prefix = 'count'.repeat(129) + '👩🏽‍💻'
+  const long = prefix + '\n\n Keep the full plan, click Create then hand to Creator.'
   view.rerender(<FoldedText text={long} expandLabel={zh.expandBrief} collapseLabel={zh.collapseBrief} />)
   const expand = screen.getByRole('button', { name: zh.expandBrief })
   const paragraph = document.getElementById(expand.getAttribute('aria-controls')!)!

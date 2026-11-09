@@ -18,7 +18,7 @@ it('uses the confirmed Chinese language for recovery before Host settings are av
   writeDesktopLocaleCache(directory, 'zh-CN')
   const cached = readDesktopLocaleCache(directory)
   const locale = cached === undefined ? resolveDesktopStartupLocale(null, ['en-US']) : resolveDesktopLocale(cached)
-  expect(locale.messages.fatalSummary).toBe('应用无法启动或已意外停止。')
+  expect(locale.messages.fatalSummary).toBe('The application could not start or stopped unexpectedly.')
   writeDesktopLocaleCache(directory, 'en')
   expect(readDesktopLocaleCache(directory)).toBe('en')
 })
@@ -29,7 +29,7 @@ it('uses the confirmed Japanese language for recovery before Host settings are a
   const cached = readDesktopLocaleCache(directory)
   const locale = cached === undefined ? resolveDesktopStartupLocale(null, ['en-US']) : resolveDesktopLocale(cached)
   expect(locale.id).toBe('ja')
-  expect(locale.messages.getDiagnosticReport).toBe('診断レポートを取得')
+  expect(locale.messages.getDiagnosticReport).toBe('shindanレポートをshutoku')
 })
 
 it.each(SHIPPED_LOCALE_IDS)('restores the confirmed shipped language %s before Host settings are available', (id) => {

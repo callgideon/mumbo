@@ -36,14 +36,14 @@ describe('rankByName', () => {
 
   it('matches the display label as a second key and keeps the stronger alignment', () => {
     const items = [
-      { name: 'goal', label: '目标' },
-      { name: 'plan', label: '计划' },
-      { name: 'permission', label: '权限' },
+      { name: 'goal', label: 'Goal' },
+      { name: 'plan', label: 'Plan' },
+      { name: 'permission', label: 'Permission' },
     ]
-    expect(names(rankByName(items, '目标'))).toEqual(['goal'])
+    expect(names(rankByName(items, 'Goal'))).toEqual(['goal'])
     expect(names(rankByName(items, 'goal'))).toEqual(['goal'])
     expect(names(rankByName(items, 'p'))).toEqual(['plan', 'permission'])
-    expect(names(rankByName(items, '划'))).toEqual(['plan'])
+    expect(names(rankByName(items, 'stroke'))).toEqual(['plan'])
     // A label prefix hit ranks like a name prefix hit.
     expect(names(rankByName([{ name: 'xplan', label: 'plan' }, { name: 'plant' }], 'pla'))).toEqual(['xplan', 'plant'])
   })

@@ -124,7 +124,7 @@ describe('TeamBoard', () => {
     expect(row().querySelector('[data-icon="dsw-icon-chevron-down-outline-regular"]')).toBeTruthy()
     expect(screen.queryByText(task.description)).toBeNull()
     expect(screen.queryByText(zh.owner)).toBeNull()
-    expect(screen.queryByRole('button', { name: '展开' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Expand' })).toBeNull()
   })
 
   it('expands the full description before the owner and keeps only one task open', () => {
@@ -281,7 +281,7 @@ describe('TeamBoard', () => {
   it('keeps failures beside valid tasks but shows only an alert without visible tasks', () => {
     const b = bench({ value: { ...team, failure: 'revision is not contiguous' } })
     const view = render(<TeamBoard {...b.props} />)
-    expect(screen.getByRole('alert').textContent).toBe('任务记录无效：revision is not contiguous')
+    expect(screen.getByRole('alert').textContent).toBe('Invalid persisted task record: revision is not contiguous')
     expect(row()).toBeTruthy()
     expect(screen.getByRole('heading')).toBeTruthy()
     for (const tasks of [[], [{ ...task, status: 'deleted' as const }]]) {
@@ -290,7 +290,7 @@ describe('TeamBoard', () => {
         subagentCatalog: [{ id: WORKER, createdAt: 0, mode: 'continuable', label: 'Worker' }],
       } })
       const alert = screen.getByRole('alert')
-      expect(alert.textContent).toBe('任务记录无效：invalid task')
+      expect(alert.textContent).toBe('Invalid persisted task record: invalid task')
       expect(screen.getAllByRole('alert')).toHaveLength(1)
       expect(view.container.textContent).toBe(alert.textContent)
       expect(view.container.querySelector('[data-with-members="true"]')).toBeNull()

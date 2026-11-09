@@ -74,7 +74,7 @@ describe('Session Inspector Sidebar tab', () => {
     expect(tabs.get('nodejs-inspector')).toBeUndefined()
     ctx.locale.setLocale('zh')
     expect(tabs.get(KIND)?.title('')).toBe(zh['tab.title'])
-    expect(tabs.guide()[0]?.description?.()).toBe('在侧边栏分析当前会话原始日志和聊天分组数据')
+    expect(tabs.guide()[0]?.description?.()).toBe('Analyze raw logs and grouped chat messages for the current session in the sidebar.')
     await fiber.dispose()
     expect(entries()).toEqual([])
     expect(tabs.get(KIND)).toBeUndefined()

@@ -31,10 +31,10 @@ const PATCH = [
   '-b',
   '+B',
   ' c',
-  'diff --git a/中文.md b/中文.md',
+  'diff --git a/Chinese.md b/Chinese.md',
   'index 587be6b..975fbec 100644',
-  '--- a/中文.md',
-  '+++ b/中文.md',
+  '--- a/Chinese.md',
+  '+++ b/Chinese.md',
   '@@ -1 +1 @@',
   '-x',
   '+y',
@@ -68,7 +68,7 @@ describe('parseDiff', () => {
       ['new.txt', 'old.txt', 'renamed', false, false, 0, 0],
       ['quo"te.txt', null, 'modified', false, false, 1, 0],
       ['with space.txt', null, 'modified', false, false, 1, 1],
-      ['中文.md', null, 'modified', false, false, 1, 1],
+      ['Chinese.md', null, 'modified', false, false, 1, 1],
       ['empty.txt', null, 'added', false, false, 0, 0],
       ['nonl.txt', null, 'added', false, false, 1, 0],
       ['gone.txt', null, 'deleted', false, false, 0, 2],
@@ -120,12 +120,12 @@ describe('untrackedFile', () => {
 
 describe('parseNumstat', () => {
   it('reads counts, binary files, and renames whose paths follow in separate fields', () => {
-    const output = ['3\t1\tsrc/a.ts', '-\t-\tlogo.png', '0\t0\t', 'old name.txt', 'new\tname.txt', '12\t0\tdocs/中文.md', ''].join('\0')
+    const output = ['3\t1\tsrc/a.ts', '-\t-\tlogo.png', '0\t0\t', 'old name.txt', 'new\tname.txt', '12\\t0\\tdocs/Chinese.md', ''].join('\0')
     expect(parseNumstat(output)).toEqual([
       { path: 'src/a.ts', additions: 3, deletions: 1, binary: false },
       { path: 'logo.png', additions: 0, deletions: 0, binary: true },
       { path: 'new\tname.txt', additions: 0, deletions: 0, binary: false },
-      { path: 'docs/中文.md', additions: 12, deletions: 0, binary: false },
+      { path: 'docs/Chinese.md', additions: 12, deletions: 0, binary: false },
     ])
     expect(parseNumstat('')).toEqual([])
   })

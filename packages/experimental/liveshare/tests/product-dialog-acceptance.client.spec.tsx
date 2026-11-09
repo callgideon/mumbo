@@ -82,7 +82,7 @@ async function showDialog(
   existingItem: Record<string, unknown> = existing,
   onManage?: () => void,
   identity: OwnerIdentityStatus | Promise<OwnerIdentityStatus> = {
-    state: 'verified', relay: RELAY, displayName: '许翰翔',
+    state: 'verified', relay: RELAY, displayName: 'Alice',
   },
   identityPending?: Promise<OwnerIdentityStatus>,
   shareExtra?: Partial<CreatedShare>,
@@ -203,7 +203,7 @@ describe('Liveshare dialog product acceptance', () => {
             : {}
           return Promise.resolve(options.redeem(body.code ?? '', body.state ?? ''))
         }
-        identity = { state: 'verified', relay: RELAY, displayName: '许翰翔' }
+        identity = { state: 'verified', relay: RELAY, displayName: 'Alice' }
         return Promise.resolve(Response.json(identity))
       }
       if (input === 'api/liveshare.ownerLoginCancel') return Promise.resolve(Response.json({ ok: true }))
@@ -284,15 +284,15 @@ describe('Liveshare dialog product acceptance', () => {
     )
     // What the row states afterwards is the host's own answer, read back rather than assumed from the
     // popup's message.
-    expect(await screen.findByText('许翰翔')).toBeDefined()
+    expect(await screen.findByText('Alice')).toBeDefined()
   })
 
   it('[P1] lets a verified owner verify again, and never re-issues a credential on its own', async () => {
     const { fetcher, popup, open } = await showLoginDialog({
-      state: 'verified', relay: RELAY, displayName: '许翰翔',
+      state: 'verified', relay: RELAY, displayName: 'Alice',
     })
     // A verified owner keeps the credential in force and is not signed in again behind their back.
-    expect(await screen.findByText('许翰翔')).toBeDefined()
+    expect(await screen.findByText('Alice')).toBeDefined()
     expect(fetcher.mock.calls.some(([input]) => input === 'api/liveshare.ownerLoginStart')).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
     // The same transaction an unverified owner gets, and the row still states the identity in force
@@ -300,7 +300,7 @@ describe('Liveshare dialog product acceptance', () => {
     await screen.findByText('Finish signing in in the window that opened.')
     expect(open).toHaveBeenCalledOnce()
     expect(popup.location.href).toBe('https://relay.example.test/__liveshare/auth/start?state=s1')
-    expect(screen.getByText('许翰翔')).toBeDefined()
+    expect(screen.getByText('Alice')).toBeDefined()
   })
 
   it('states a verification window the browser refused to open', async () => {
@@ -363,18 +363,18 @@ describe('Liveshare dialog product acceptance', () => {
     await act(async () => {
       render(<LiveshareShareDialog
         sessionId={'session' as SessionId}
-        sessionTitle="验收会话"
+        sessionTitle="acceptance Sessions"
         defaultRelay={RELAY}
         shares={host.shares}
         onClose={() => {}}
         t={zhTranslate}
       />)
     })
-    expect(screen.getByText('分享会话')).toBeDefined()
+    expect(screen.getByText('Share session')).toBeDefined()
     // The dialog states the tier it will grant, not a fixed description of what a share shows.
-    expect(screen.getByText(/^仅可查看：/u)).toBeDefined()
-    expect(document.body.textContent).not.toContain('历史消息、工具输出、文件路径与附件')
-    expect(screen.getByRole('button', { name: '创建分享' })).toBeDefined()
+    expect(screen.getByText(/^Read only:/u)).toBeDefined()
+    expect(document.body.textContent).not.toContain('history Message, ToolOutput, file path and Attachments')
+    expect(screen.getByRole('button', { name: 'Create share' })).toBeDefined()
   })
 
   it('[P1] opens global share management as a separate owner flow', async () => {
@@ -404,17 +404,17 @@ describe('Liveshare dialog product acceptance', () => {
     await showDialog(200, false, () => {}, existing, undefined, {
       state: 'verified',
       relay: RELAY,
-      displayName: '许翰翔',
+      displayName: 'Alice',
       avatarUrl: 'https://avatar.example.test/owner.png',
     })
-    expect(await screen.findByText('许翰翔')).toBeDefined()
+    expect(await screen.findByText('Alice')).toBeDefined()
     expect(document.querySelector('img')?.getAttribute('src')).toBe('https://avatar.example.test/owner.png')
 
     cleanup()
     await showDialog(200, false, () => {}, existing, undefined, {
-      state: 'verified', relay: RELAY, displayName: '许翰翔',
+      state: 'verified', relay: RELAY, displayName: 'Alice',
     })
-    expect(await screen.findByText('许翰翔')).toBeDefined()
+    expect(await screen.findByText('Alice')).toBeDefined()
     expect(document.querySelector('img')).toBeNull()
   })
 
@@ -422,14 +422,14 @@ describe('Liveshare dialog product acceptance', () => {
     await showDialog(200, false, () => {}, existing, undefined, {
       state: 'verified',
       relay: RELAY,
-      displayName: '许翰翔',
+      displayName: 'Alice',
       subjectId: 'feishu:tenant:ou_9f2c4d',
       expiresAt: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
       renewed: true,
     })
-    expect(await screen.findByText('许翰翔')).toBeDefined()
+    expect(await screen.findByText('Alice')).toBeDefined()
     // The credential detail is a tooltip on the name rather than a stacked line in the panel.
-    expect(screen.getByText('许翰翔').getAttribute('title')).toContain('Valid until ')
+    expect(screen.getByText('Alice').getAttribute('title')).toContain('Valid until ')
     expect(screen.getByRole('button', { name: 'Create share' })).toHaveProperty('disabled', false)
   })
 
@@ -450,7 +450,7 @@ describe('Liveshare dialog product acceptance', () => {
     await showDialog(200, false, () => {}, existing, undefined, {
       state: 'verified',
       relay: 'https://other.example.test',
-      displayName: '许翰翔',
+      displayName: 'Alice',
     })
     expect(await screen.findByText(
       'The current sign-in belongs to another Relay address. Sign in again on this address.',
@@ -478,9 +478,9 @@ describe('Liveshare dialog product acceptance', () => {
     expect(screen.getByRole('button', { name: 'Retry' })).toBeDefined()
     // The verified answer replaces it for the same address; the row never kept a status silently.
     await act(async () => {
-      pending.resolve({ state: 'verified', relay: RELAY, displayName: '许翰翔' })
+      pending.resolve({ state: 'verified', relay: RELAY, displayName: 'Alice' })
     })
-    expect(await screen.findByText('许翰翔')).toBeDefined()
+    expect(await screen.findByText('Alice')).toBeDefined()
     expect(screen.getByRole('button', { name: 'Create share' })).toHaveProperty('disabled', false)
   })
 
@@ -747,7 +747,7 @@ async function showControlled(control: {
   const host = ownerSharesDouble({
     list: async () => accepted({ shares: (control.rows ?? []) as never }),
     relay: async () => accepted({ effective }),
-    identity: async () => accepted(control.identity ?? { state: 'verified', relay: effective, displayName: '许翰翔' }),
+    identity: async () => accepted(control.identity ?? { state: 'verified', relay: effective, displayName: 'Alice' }),
     ...control.overrides,
   })
   await act(async () => {
@@ -767,7 +767,7 @@ async function showControlled(control: {
 function identityFor(relay: string) {
   return async (request: { readonly relay?: string }) => accepted(
     request.relay === relay
-      ? { state: 'verified' as const, relay, displayName: '许翰翔' }
+      ? { state: 'verified' as const, relay, displayName: 'Alice' }
       : { state: 'unverified' as const, relay: request.relay ?? '' },
   )
 }
@@ -1024,12 +1024,12 @@ describe('Liveshare dialog stored-record branches', () => {
     const identity = vi.fn(async () => accepted(await pending.promise))
     await showControlled({ overrides: { identity } })
     cleanup()
-    await act(async () => { pending.resolve({ state: 'verified', relay: RELAY, displayName: '许翰翔' }) })
+    await act(async () => { pending.resolve({ state: 'verified', relay: RELAY, displayName: 'Alice' }) })
     expect(identity).toHaveBeenCalled()
   })
 
   it('ignores a focus while the page is hidden', async () => {
-    const identity = vi.fn(async () => accepted({ state: 'verified' as const, relay: RELAY, displayName: '许翰翔' }))
+    const identity = vi.fn(async () => accepted({ state: 'verified' as const, relay: RELAY, displayName: 'Alice' }))
     await showControlled({ overrides: { identity } })
     await vi.waitFor(() => { expect(identity).toHaveBeenCalledTimes(1) })
     Object.defineProperty(document, 'hidden', { configurable: true, value: true })
@@ -1318,13 +1318,13 @@ describe('Liveshare dialog stored-record branches', () => {
   it('states an expiry without claiming a renewal', async () => {
     await showControlled({
       identity: {
-        state: 'verified', relay: RELAY, displayName: '许翰翔',
+        state: 'verified', relay: RELAY, displayName: 'Alice',
         expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
       },
     })
 
-    expect(await screen.findByText('许翰翔')).toBeDefined()
-    const title = screen.getByText('许翰翔').getAttribute('title') ?? ''
+    expect(await screen.findByText('Alice')).toBeDefined()
+    const title = screen.getByText('Alice').getAttribute('title') ?? ''
     expect(title).toContain('Valid until ')
     expect(title).not.toContain(en['dialog.identity.renewed'])
   })

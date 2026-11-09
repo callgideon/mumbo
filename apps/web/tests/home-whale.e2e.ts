@@ -108,14 +108,14 @@ describe('official home whale in the default web profile', () => {
 
   it('keeps native draft editing independent of the decoration', async () => {
     const input = page.locator('[data-composer-input]')
-    await input.fill('保留这个试用草稿')
+    await input.fill('keep this trial Draft')
     const canvas = page.locator('[data-home-whale]')
     const idleFrame = await canvas.evaluate((node: HTMLCanvasElement) => node.toDataURL())
     await input.click()
     // Observe several normal animation frames while focus stays in the composer.
     await page.waitForTimeout(300)
     expect(await canvas.evaluate((node: HTMLCanvasElement) => node.toDataURL())).toBe(idleFrame)
-    expect(await input.innerText()).toBe('保留这个试用草稿')
+    expect(await input.innerText()).toBe('keep this trial Draft')
     await input.press('ControlOrMeta+A')
     await input.press('Backspace')
   })

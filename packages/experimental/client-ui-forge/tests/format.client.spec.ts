@@ -23,7 +23,7 @@ describe('formatDuration', () => {
   })
 
   it('uses the dictionary of the current language', () => {
-    expect(formatDuration(65_000, makeTranslate(zh))).toBe('1 分 5 秒')
+    expect(formatDuration(65_000, makeTranslate(zh))).toBe('1m 5s')
   })
 })
 

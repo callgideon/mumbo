@@ -157,7 +157,7 @@ describe('viewer page state lifetime', () => {
         ? Response.json({
           ownerDisplayName: 'Owner',
           dshVersion: '0.1.5-rc.2',
-          viewer: { providerId: 'oidc', subjectId: 'subject-42', displayName: '许翰翔' },
+          viewer: { providerId: 'oidc', subjectId: 'subject-42', displayName: 'Alice' },
           capabilities: { sessionMode: 'write', online: true },
         })
         : Response.json({ release_id: 'release-7' }))
@@ -170,7 +170,7 @@ describe('viewer page state lifetime', () => {
           owner: 'Owner',
           dshVersion: '0.1.5-rc.2',
           viewerSubjectId: 'subject-42',
-          viewerDisplayName: '许翰翔',
+          viewerDisplayName: 'Alice',
         })
         expect(viewerStatus.getSnapshot()).toBe('ready')
       })
@@ -345,7 +345,7 @@ describe('viewer session plugin', () => {
       expect(page.scopesAsked).not.toContain(OTHER)
       // The share never answered, so this page states that it could not confirm the share's state
       // rather than claiming the read-only fact an answer would have stated.
-      expect(page.blocks.get(SHARED)?.reason).toContain('无法确认该分享的当前状态')
+      expect(page.blocks.get(SHARED)?.reason).toContain('unable to Confirm the Share's current Status')
     } finally {
       await page.fiber.dispose()
     }
@@ -371,7 +371,7 @@ describe('viewer session plugin', () => {
         capabilities: { sessionMode: 'view', sessionModeReason: 'fork-not-permitted' },
       })
       page.access.push({ type: 'upsert', grant: { resource: { kind: 'session', id: CHILD }, actions: [] } })
-      expect(page.blocks.get(CHILD)?.reason).toBe('分享者未允许分支此会话')
+      expect(page.blocks.get(CHILD)?.reason).toBe('The owner does not allow branching this Session')
       expect(page.blocks.get(SHARED)).toBeUndefined()
     } finally {
       await page.fiber.dispose()
@@ -410,19 +410,19 @@ describe('viewer session plugin', () => {
         capabilities: { sessionMode: 'view', sessionModeReason: 'share-stopped' },
       })
       deliverGrants(page.access, {})
-      expect(page.blocks.get(SHARED)?.reason).toBe('分享已停止')
-      expect(page.blocks.get(CHILD)?.reason).toBe('分享已停止')
+      expect(page.blocks.get(SHARED)?.reason).toBe('Sharing stopped')
+      expect(page.blocks.get(CHILD)?.reason).toBe('Sharing stopped')
 
       // Expiry reads the same way, and a deployment that cannot fork at all leaves the shared Session
       // stating that it is read-only.
       publishViewerCapabilities({
         capabilities: { sessionMode: 'view', sessionModeReason: 'share-expired' },
       })
-      expect(page.blocks.get(SHARED)?.reason).toBe('分享已过期')
+      expect(page.blocks.get(SHARED)?.reason).toBe('The share expired')
       publishViewerCapabilities({
         capabilities: { sessionMode: 'view', sessionModeReason: 'fork-not-implemented' },
       })
-      expect(page.blocks.get(SHARED)?.reason).toContain('仅可查看')
+      expect(page.blocks.get(SHARED)?.reason).toContain('Read only')
     } finally {
       await page.fiber.dispose()
     }
@@ -443,8 +443,8 @@ describe('viewer session plugin', () => {
         capabilities: { sessionMode: 'view', sessionModeReason: 'viewer-not-authorized' },
       })
       deliverGrants(page.access, {})
-      expect(page.blocks.get(SHARED)?.reason).toBe('你的账号已无权访问该分享')
-      expect(page.blocks.get(CHILD)?.reason).toBe('你的账号已无权访问该分享')
+      expect(page.blocks.get(SHARED)?.reason).toBe('Your account no longer has access to this share')
+      expect(page.blocks.get(CHILD)?.reason).toBe('Your account no longer has access to this share')
     } finally {
       await page.fiber.dispose()
     }
@@ -478,7 +478,7 @@ describe('viewer session plugin', () => {
         capabilities: { sessionMode: 'view', ...(reason === undefined ? {} : { sessionModeReason: reason }) },
       })
       page.access.push({ type: 'remove', resource: { kind: 'session', id: CHILD } })
-      expect(page.blocks.get(CHILD)?.reason).toBe('分享者未允许分支此会话')
+      expect(page.blocks.get(CHILD)?.reason).toBe('The owner does not allow branching this Session')
     } finally { await page.fiber.dispose() }
   })
 
@@ -490,7 +490,7 @@ describe('viewer session plugin', () => {
       listRows(page, { ownFork: true })
       expect(page.blocks.get(CHILD)).toBeUndefined()
       page.access.push({ type: 'remove', resource: { kind: 'session', id: CHILD } })
-      expect(page.blocks.get(CHILD)?.reason).toContain('分享者未允许分支此会话')
+      expect(page.blocks.get(CHILD)?.reason).toContain('The owner does not allow branching this Session')
       page.access.push({ type: 'upsert', grant: { resource: { kind: 'session', id: CHILD }, actions: WRITES } })
       expect(page.blocks.get(CHILD)).toBeUndefined()
       // A list change re-reads the same answers and keeps them.
@@ -513,12 +513,12 @@ describe('viewer session plugin', () => {
       expect(injected.blocks.has(SHARED)).toBe(true)
       expect(injected.blocks.get(SHARED)).toBeUndefined()
       deliverGrants(injected.access, {})
-      await vi.waitFor(() => { expect(injected.blocks.get(SHARED)?.reason).toContain('无法确认该分享的当前状态') })
+      await vi.waitFor(() => { expect(injected.blocks.get(SHARED)?.reason).toContain('unable to Confirm the Share's current Status') })
     } finally { await injected.fiber.dispose() }
     const bare = await bench()
     try {
       bare.rows.set({ byId: { [SHARED]: { id: SHARED } } })
-      await vi.waitFor(() => { expect(bare.blocks.get(SHARED)?.reason).toContain('无法确认该分享的当前状态') })
+      await vi.waitFor(() => { expect(bare.blocks.get(SHARED)?.reason).toContain('unable to Confirm the Share's current Status') })
     } finally { await bare.fiber.dispose() }
   })
 

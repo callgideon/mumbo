@@ -17,7 +17,7 @@ export const ACTION = 'enable_official_plugin'
 export const bundle: BundleInfo = {
   name: 'official-search', official: true, optional: true, availability: 'installation',
   enabled: false, installed: false, removable: false, updatable: false, rows: [], overrides: [],
-  meta: { title: { en: 'Search', zh: '搜索' }, description: 'Search past conversations.' },
+  meta: { title: { en: 'Search', zh: 'Search' }, description: 'Search past conversations.' },
 }
 /** Text of an accepted `enable_official_plugin` call's result. */
 export const RESULT_TEXT = 'Card shown below your answer. Do not restate it. End with at most one short invitation in the user’s language to click '

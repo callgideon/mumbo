@@ -57,14 +57,14 @@ it('omits unknown directories and follows metadata, locale and applications with
   b.controller.choose('cursor')
   expect(menu.source.getSnapshot()[0]?.children?.map(row => row.label)).toEqual(['Finder', 'Cursor'])
   b.locale.setLocale('zh')
-  expect(menu.source.getSnapshot()[0]?.label).toBe('在应用中打开')
+  expect(menu.source.getSnapshot()[0]?.label).toBe('Open in')
   expect(header.source.getSnapshot()[0]?.children?.[1]?.label).toBe('Cursor')
   b.controller.apps.set(['cursor', 'unknown', 'finder'])
-  expect(menu.source.getSnapshot()[0]?.children?.map(row => row.label)).toEqual(['Cursor', '访达'])
+  expect(menu.source.getSnapshot()[0]?.children?.map(row => row.label)).toEqual(['Cursor', 'Finder'])
   b.controller.apps.set(['finder'])
   expect(menu.source.getSnapshot()[0]?.children).toHaveLength(1)
   expect(menu.source.getSnapshot()[0]?.children?.[0]).toMatchObject({
-    label: '访达', icon: { key: 'open-in-app.application', src: 'open-in-app/icon/finder' },
+    label: 'Finder', icon: { key: 'open-in-app.application', src: 'open-in-app/icon/finder' },
   })
   b.controller.apps.set([])
   expect(menu.source.getSnapshot()).toEqual([])

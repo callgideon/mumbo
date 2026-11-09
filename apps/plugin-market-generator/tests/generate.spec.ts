@@ -109,7 +109,7 @@ it('lists every bundle version from the registry document that is neither deprec
         tarball: await pack({
           'package.json': bundleManifest('dsh-a', '2.0.0-rc.1', { author: { name: 'Jane Doe' }, icon: 'icon.png', homepage: 'https://example.com/dsh-a', repository: { type: 'git', url: 'git+https://github.com/jane/plugins.git', directory: 'packages/a' }, keywords: ['alpha', '', 'alpha'] }),
           'locale/en.json': JSON.stringify({ meta: { title: 'Alpha' } }),
-          'locale/zh.json': JSON.stringify({ meta: { title: '甲' } }),
+          'locale/zh.json': JSON.stringify({ meta: { title: 'A' } }),
           'locale/x_y.json': '{}',
           'icon.png': new Uint8Array(100),
           'node_modules/dep/package.json': '{}',
@@ -137,7 +137,7 @@ it('lists every bundle version from the registry document that is neither deprec
   expect(first.index).toMatchObject({ format: 1, title: 'Test Market', description: 'For tests' })
   expect(first.index.plugins).toEqual([
     {
-      name: 'dsh-a', title: { en: 'Alpha', zh: '甲' }, icon: expect.stringMatching(/^icons\/[0-9a-f]{16}\.png$/u) as string, author: 'Jane Doe', homepage: 'https://example.com/dsh-a',
+      name: 'dsh-a', title: { en: 'Alpha', zh: 'A' }, icon: expect.stringMatching(/^icons\/[0-9a-f]{16}\.png$/u) as string, author: 'Jane Doe', homepage: 'https://example.com/dsh-a',
       repository: { url: 'https://github.com/jane/plugins', directory: 'packages/a' },
       metadata: { keywords: ['alpha', '', 'alpha'] },
       versions: [

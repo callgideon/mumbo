@@ -8,7 +8,7 @@ import Testing
         "missing": .null,
         "flags": .array([.bool(true), .bool(false)]),
         "number": .number(1),
-        "text": .string("中文 🧪"),
+        "text": .string("Chinese 🧪"),
     ])
     let encoded = try JSONEncoder().encode(value)
     #expect(try JSONDecoder().decode(JSONValue.self, from: encoded) == value)

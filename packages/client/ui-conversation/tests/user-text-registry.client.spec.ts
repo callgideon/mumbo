@@ -81,7 +81,7 @@ describe('UserTextRegistry candidate rules', () => {
     const evaluate = registry.createEvaluator()
     expectTypeOf(evaluate).toEqualTypeOf<UserTextEvaluator>()
     expect(evaluate({ text: '', facts: {} })).toEqual([])
-    const text = '  原文\r\n\t🙂e\u0301 /path @name  '
+    const text = '  original text\r\n\t🙂e\u0301 /path @name  '
     const nodes = evaluate({ text, facts: {} })
     expect(nodes).toEqual([plain(text)])
     expect(match.mock.calls.map(([text, from]) => [text, from])).toEqual([['', 0], [text, 0]])
@@ -153,7 +153,7 @@ describe('UserTextRegistry candidate rules', () => {
       if (from > 0) return undefined
       const label = context.read('testLabel') ?? 'same'
       const version = context.read('testOther') ?? 0
-      const nested = { values: ['文字', 3, true, null] }
+      const nested = { values: ['text', 3, true, null] }
       return { id: 'test.annotation', start: 0, end: 3, data: version % 2 ? { nested, label } : { label, nested } }
     })
     registry.register({ id: 'test.annotation', order: 0, match })
@@ -273,12 +273,12 @@ describe('sessionReferenceRule', () => {
     const { sessionReferenceRule } = await import('../src/client/user-text/session-reference-rule.ts')
     const { registry } = setup()
     registry.register(sessionReferenceRule)
-    const wire = '@[查看并分析图片](dsh-session:InNlc3Npb24tNDM0)'
-    const text = `看看 ${wire} 的结论`
+    const wire = '@[Inspect and analyze Image](dsh-session:InNlc3Npb24tNDM0)'
+    const text = `take a look ${wire} 's conclusion`
     const nodes = registry.createEvaluator()({ text, facts: {} })
     expect(nodes).toEqual([
-      plain('看看 '), { id: 'session', start: 3, end: 3 + wire.length, data: { label: '查看并分析图片' } },
-      plain(' 的结论', 3 + wire.length),
+      plain('take a look '), { id: 'session', start: 3, end: 3 + wire.length, data: { label: 'Inspect and analyze Image' } },
+      plain(' 's conclusion', 3 + wire.length),
     ])
     assertCoverage(text, nodes)
   })
@@ -288,15 +288,15 @@ describe('sessionReferenceRule', () => {
     const { registry } = setup()
     registry.register(sessionReferenceRule)
     const evaluate = registry.createEvaluator()
-    const text = '@会话一 收尾 @会话一， @会话 @未知'
-    const nodes = evaluate({ text, facts: { sessionLabels: ['会话', '会话一', '会话一'] } })
+    const text = '@Sessions one wrap-up @Sessions one, @Sessions @Unknown'
+    const nodes = evaluate({ text, facts: { sessionLabels: ['Sessions', 'Sessions one', 'Sessions one'] } })
     expect(nodes.filter(node => node.id === 'session').map(node => ({ raw: text.slice(node.start, node.end), data: node.data })))
       .toEqual([
-        { raw: '@会话一', data: { label: '会话一' } }, { raw: '@会话一', data: { label: '会话一' } },
-        { raw: '@会话', data: { label: '会话' } },
+        { raw: '@Sessions one', data: { label: 'Sessions one' } }, { raw: '@Sessions one', data: { label: 'Sessions one' } },
+        { raw: '@Sessions', data: { label: 'Sessions' } },
       ])
     assertCoverage(text, nodes)
-    expect(evaluate({ text: '@会话', facts: {} })).toEqual([plain('@会话')])
+    expect(evaluate({ text: '@Sessions', facts: {} })).toEqual([plain('@Sessions')])
   })
 
   it('prefers complete wire syntax over an overlapping supplied label', async () => {

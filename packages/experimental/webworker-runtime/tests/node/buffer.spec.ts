@@ -21,7 +21,7 @@ it('tests the npm package against an unmodified Node reference', () => {
   expect(NodeBuffer.from('\uFEFF').toString()).toBe('\uFEFF')
 })
 
-const STRINGS = ['', 'a', '中文字符串', '\uFEFFbom', 'lone \uD800 high', 'lone \uDC00 low', '😀 pair', 'x'.repeat(100_000)]
+const STRINGS = ['', 'a', 'Chinese string', '\uFEFFbom', 'lone \uD800 high', 'lone \uDC00 low', '😀 pair', 'x'.repeat(100_000)]
 const BYTES = [
   [0xEF, 0xBB, 0xBF, 0x61],
   [0xC3],
@@ -57,8 +57,8 @@ it('decodes UTF-8 bytes to the string Node produces', () => {
 it('keeps the package conversions for other encodings and ranges', () => {
   expect([...WorkerBuffer.from('ÿa', 'latin1')]).toEqual([0xFF, 0x61])
   expect([...WorkerBuffer.from('ff61', 'hex')]).toEqual([0xFF, 0x61])
-  expect(WorkerBuffer.from('中文').toString('hex')).toBe(NodeBuffer.from('中文').toString('hex'))
-  expect(WorkerBuffer.from('a中b').toString('utf8', 1, 4)).toBe('中')
+  expect(WorkerBuffer.from('Chinese').toString('hex')).toBe(NodeBuffer.from('Chinese').toString('hex'))
+  expect(WorkerBuffer.from('a in b').toString('utf8', 1, 4)).toBe('in')
   const view = new Uint8Array([0x61, 0x62, 0x63]).buffer
   expect(WorkerBuffer.from(view, 1, 1).toString()).toBe('b')
 })

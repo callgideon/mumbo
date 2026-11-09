@@ -141,7 +141,7 @@ describe('goal command input projection', () => {
       renderFactorySlot: textFactories(),
     } as Parameters<typeof GoalCommandInputView>[0]
     const view = render(<GoalCommandInputView {...props} />)
-    const bubble = view.getByRole('group', { name: '指令输入' })
+    const bubble = view.getByRole('group', { name: 'Command input' })
 
     expect(bubble.textContent).toBe('/goal ship it')
     expect(within(bubble).queryByRole('button')).toBeNull()
@@ -162,7 +162,7 @@ describe('goal command input projection', () => {
     expect(commands).toHaveLength(2)
     expect(commands[0]).toEqual([{ start: 0, end: 5, name: 'goal' }])
     expect(commands[1]).toBe(commands[0])
-    expect(view.getByRole('group', { name: '指令输入' }).textContent).toBe('/goal ship it')
+    expect(view.getByRole('group', { name: 'Command input' }).textContent).toBe('/goal ship it')
   })
 
   it('renders a bare /goal as one command chip and nothing else', () => {
@@ -176,7 +176,7 @@ describe('goal command input projection', () => {
       renderFactorySlot: textFactories(),
     } as Parameters<typeof GoalCommandInputView>[0]
     const view = render(<GoalCommandInputView {...props} />)
-    const bubble = view.getByRole('group', { name: '指令输入' })
+    const bubble = view.getByRole('group', { name: 'Command input' })
     expect(bubble.textContent).toBe('/goal')
     expect([...bubble.querySelectorAll('[data-ref-chip]')].map(chip => chip.textContent)).toEqual(['/goal'])
   })
@@ -186,14 +186,14 @@ describe('goal command input projection', () => {
     const props = {
       node: {
         key: 'goal-command-input:two',
-        data: { commandId: 'command-goal', text: '/goal 检查 /goal 的语法', time: 1_700_000_000_000 },
+        data: { commandId: 'command-goal', text: '/goal Check /goal 's syntax', time: 1_700_000_000_000 },
       },
       t,
       renderFactorySlot: textFactories(),
     } as Parameters<typeof GoalCommandInputView>[0]
     const view = render(<GoalCommandInputView {...props} />)
-    const bubble = view.getByRole('group', { name: '指令输入' })
-    expect(bubble.textContent).toBe('/goal 检查 /goal 的语法')
+    const bubble = view.getByRole('group', { name: 'Command input' })
+    expect(bubble.textContent).toBe('/goal Check /goal 's syntax')
     const chips = [...bubble.querySelectorAll('[data-ref-chip]')]
     expect(chips.map(chip => chip.textContent)).toEqual(['/goal'])
   })

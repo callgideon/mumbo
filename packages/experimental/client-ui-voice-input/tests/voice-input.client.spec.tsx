@@ -17,7 +17,7 @@ import { captureFixture } from './audio-fixture.client.ts'
 beforeEach(() => { vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1)); vi.stubGlobal('cancelAnimationFrame', vi.fn()) })
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals() })
 const id = 'sensevoice-local' as SpeechProviderId
-const transcript: Transcript = { text: '检查 TypeScript 类型', audioSeconds: 2, inferenceSeconds: 0.4 }
+const transcript: Transcript = { text: 'Checks TypeScript Type', audioSeconds: 2, inferenceSeconds: 0.4 }
 function fixture(recording?: Recording, navigable = true) {
   const capture = Object.assign(new Recording(() => {}), { start: vi.fn<Recording['start']>(async () => {}), stop: vi.fn(async () => new Uint8Array(48)),
     amplitude: () => 0, dispose: vi.fn(async () => {}) })
@@ -49,7 +49,7 @@ function stop(): void { fireEvent.click(screen.getByRole('button', { name: zh.st
 it('clicks to record, shows measured audio, and stops to insert without sending or a popup', async () => {
   const b = fixture()
   fireEvent.pointerEnter(screen.getByRole('button', { name: zh.start }).parentElement!)
-  expect((await screen.findByRole('tooltip')).textContent).toBe('听写')
+  expect((await screen.findByRole('tooltip')).textContent).toBe('Dictate')
   fireEvent.mouseDown(screen.getByRole('button', { name: zh.start }))
   await start()
   expect(b.props.onActiveChange).toHaveBeenLastCalledWith(true)
@@ -136,7 +136,7 @@ it('keeps empty-speech and service errors inside the toolbar with retry and dism
   await screen.findByRole('button', { name: zh.stop })
   b.transcribe.mockResolvedValueOnce({ ok: false, error: new RemoteError('gateway/internal', 'offline', {}) })
   stop()
-  await screen.findByText('语音识别失败：offline')
+  await screen.findByText('Speech recognitionFailed：offline')
   fireEvent.click(screen.getByRole('button', { name: zh.cancel }))
   expect(screen.getByRole('button', { name: zh.start })).toBeTruthy()
 })
@@ -144,14 +144,14 @@ it('keeps empty-speech and service errors inside the toolbar with retry and dism
 it.each([new RecordingError('permission'), new Error('device lost'), 'device lost'])('handles capture failure locally (%s)', async (failure) => {
   const b = fixture(); b.capture.start.mockRejectedValueOnce(failure)
   fireEvent.click(screen.getByRole('button', { name: zh.start }))
-  await screen.findByText(failure instanceof RecordingError ? zh.permission : '语音识别失败：device lost')
+  await screen.findByText(failure instanceof RecordingError ? zh.permission : 'Speech recognitionFailed：device lost')
   expect(b.inputActions.notify).not.toHaveBeenCalled()
 })
 
 it.each([new RecordingError('empty'), new Error('decode failed'), 'decode failed'])('handles conversion failure locally (%s)', async (failure) => {
   const b = fixture(); b.capture.stop.mockRejectedValueOnce(failure)
   await start(); stop()
-  await screen.findByText(failure instanceof RecordingError ? zh.empty : '语音识别失败：decode failed')
+  await screen.findByText(failure instanceof RecordingError ? zh.empty : 'Speech recognitionFailed：decode failed')
   expect(b.capture.dispose).toHaveBeenCalledOnce()
   expect(b.inputActions.insertText).not.toHaveBeenCalled()
 })

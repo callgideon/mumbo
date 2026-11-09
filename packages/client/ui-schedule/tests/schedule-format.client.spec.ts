@@ -276,7 +276,7 @@ describe('formatAvailableAt', () => {
     expect(formatAvailableAt(today, 'en', now)).toBe('15:51:37')
     expect(formatAvailableAt(today, 'zh-CN', now)).toBe('15:51:37')
     expect(formatAvailableAt(tomorrow, 'en', now)).toBe('Oct 20, 15:51:37')
-    expect(formatAvailableAt(tomorrow, 'zh-CN', now)).toBe('10月20日 15:51:37')
+    expect(formatAvailableAt(tomorrow, 'zh-CN', now)).toBe('10 mo 20 day 15:51:37')
   })
 
   it('reads the first hour of the day as 00, not 24', () => {
@@ -290,18 +290,18 @@ describe('formatScheduleNextRun', () => {
     new Intl.DateTimeFormat('en-US', { year: 'numeric', timeZone }).format(Date.now())
 
   // The month is a locale-owned name plus the locale's own clock: en writes
-  // `Oct 1, 3:00 PM` and zh-CN writes `10月1日 23:00`. Neither locale can emit
+  // `Oct 1, 3:00 PM` and zh-CN writes `10 mo 1 day 23:00`. Neither locale can emit
   // the retired zero-padded `MM-DD` pair.
   it('names the month and the clock field pair in each locale, in the given zone', () => {
     expect(formatScheduleNextRun(`${yearIn('UTC')}-10-01T15:00:00.000Z`, 'en', 'UTC')).toBe('Oct 1, 3:00 PM')
     expect(formatScheduleNextRun(`${yearIn('Asia/Shanghai')}-10-01T15:00:00.000Z`, 'en', 'Asia/Shanghai')).toBe('Oct 1, 11:00 PM')
-    expect(formatScheduleNextRun(`${yearIn('UTC')}-12-31T15:00:00.000Z`, 'zh-CN', 'UTC')).toBe('12月31日 15:00')
-    expect(formatScheduleNextRun(`${yearIn('Asia/Shanghai')}-12-31T15:00:00.000Z`, 'zh-CN', 'Asia/Shanghai')).toBe('12月31日 23:00')
+    expect(formatScheduleNextRun(`${yearIn('UTC')}-12-31T15:00:00.000Z`, 'zh-CN', 'UTC')).toBe('12 mo 31 day 15:00')
+    expect(formatScheduleNextRun(`${yearIn('Asia/Shanghai')}-12-31T15:00:00.000Z`, 'zh-CN', 'Asia/Shanghai')).toBe('12 mo 31 day 23:00')
   })
 
   it('adds the year when the instant falls outside the display zone\'s current year', () => {
     expect(formatScheduleNextRun('2001-10-01T15:00:00.000Z', 'en', 'UTC')).toBe('Oct 1, 2001, 3:00 PM')
-    expect(formatScheduleNextRun('2001-10-01T15:00:00.000Z', 'zh-CN', 'Asia/Shanghai')).toBe('2001年10月1日 23:00')
+    expect(formatScheduleNextRun('2001-10-01T15:00:00.000Z', 'zh-CN', 'Asia/Shanghai')).toBe('2001 yr 10 mo 1 day 23:00')
   })
 
   it('matches the universal card field pair and never emits a padded month-day pair', () => {
@@ -314,9 +314,9 @@ describe('formatScheduleNextRun', () => {
       expect(shown).toBe(expected(locale, timeZone))
       // No two-digit month-day pair, whatever separators the locale uses.
       expect(shown).not.toMatch(/\d{2}-\d{2}/)
-      // The name and the clock are both present: a month word or 月, an hour
+      // The name and the clock are both present: a month word or mo, an hour
       // marker, and a day number.
-      expect(shown).toMatch(locale === 'zh-CN' ? /月\s*\d{1,2}日/ : /[A-Za-z]{3}/)
+      expect(shown).toMatch(locale === 'zh-CN' ? /mo\s*\d{1,2}day/ : /[A-Za-z]{3}/)
       expect(shown).toMatch(/\d{1,2}:\d{2}/)
     }
   })

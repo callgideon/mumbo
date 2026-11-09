@@ -211,10 +211,10 @@ describe('user Content Factory', () => {
       `… truncated, ${JSON.stringify(block, null, 2).length} characters total`,
     )
     act(() => { b.locale.setLocale('zh') })
-    expect(view.getByText('引用会话 · Alpha、Beta')).toBeTruthy()
-    expect(view.getByRole('button', { name: '▾ 附加内容块' })).toBeTruthy()
+    expect(view.getByText('Referenced session · Alpha、Beta')).toBeTruthy()
+    expect(view.getByRole('button', { name: '▾ Extra content block' })).toBeTruthy()
     expect(view.container.querySelector('pre')?.textContent).toContain(
-      `… 已截断，共 ${JSON.stringify(block, null, 2).length} 字符`,
+      `… truncated, \${JSON.stringify(block, null, 2).length} characters total`,
     )
   })
 

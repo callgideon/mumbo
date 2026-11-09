@@ -242,7 +242,7 @@ export async function revealNavigationDrawer(page: Page, locale: 'en' | 'zh' | '
   const closed = page.locator('[data-sidebar-drawer][data-sidebar-collapsed]')
   if (await closed.count() === 0) return
   await page.locator('[data-shell-leading]').getByRole('button', {
-    name: { en: 'Open sidebar', zh: '打开侧边栏', ja: 'サイドバーを開く' }[locale], exact: true,
+    name: { en: 'Open sidebar', zh: 'Open sidebar', ja: 'サイドバーをhirakuく' }[locale], exact: true,
   }).click()
   await closed.waitFor({ state: 'detached' })
 }
@@ -294,16 +294,16 @@ export async function connectFreshWorkspace(page: Page, root: string, name = 'wo
 export async function connectFreshWorkspaceZh(page: Page, root: string, name = 'workspace', modelAvailable = true): Promise<void> {
   mkdirSync(join(root, name), { recursive: true })
   await revealNavigationDrawer(page, 'zh')
-  await page.getByRole('button', { name: '添加工作区', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: '选择工作区目录' })
+  await page.getByRole('button', { name: 'Add workspace', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Select workspace directory' })
   await dialog.waitFor({ timeout: 10_000 })
-  await dialog.getByRole('button', { name: '编辑路径' }).click()
-  const pathInput = dialog.getByRole('textbox', { name: '编辑路径' })
+  await dialog.getByRole('button', { name: 'Edit path' }).click()
+  const pathInput = dialog.getByRole('textbox', { name: 'Edit path' })
   await pathInput.fill(join(root, name))
   await pathInput.press('Enter')
-  await dialog.getByRole('button', { name: '打开', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Open', exact: true }).click()
   const editable = modelAvailable ? '[contenteditable="true"]' : ''
-  await page.locator(`[data-composer-input]${editable}[data-placeholder="描述你想要构建的内容, / 调用指令, @ 文件或对话"]`)
+  await page.locator(`[data-composer-input]${editable}[data-placeholder="Describe what you want to build, / Invoke command, @ files or conversations"]`)
     .waitFor({ timeout: 15_000 })
 }
 
@@ -394,14 +394,14 @@ export function conversationContextKey(kind: string, id: string): string {
  * @param locale - current UI language.
  */
 export async function openSettings(page: Page, locale: 'en' | 'zh' | 'ja'): Promise<void> {
-  const labels = { en: ['Account menu', 'Settings'], zh: ['账号菜单', '设置'], ja: ['アカウントメニュー', '設定'] } as const
+  const labels = { en: ['Account menu', 'Settings'], zh: ['Account menu', 'Settings'], ja: ['アカウントメニュー', 'settei'] } as const
   const trigger = page.getByRole('button', {
     name: labels[locale][0], exact: true, includeHidden: true,
   })
   await trigger.waitFor({ state: 'attached' })
   await revealNavigationDrawer(page, locale)
   if (!await trigger.isVisible()) {
-    await page.getByRole('button', { name: { en: 'Open sidebar', zh: '打开侧边栏', ja: 'サイドバーを開く' }[locale], exact: true }).click()
+    await page.getByRole('button', { name: { en: 'Open sidebar', zh: 'Open sidebar', ja: 'サイドバーをhirakuく' }[locale], exact: true }).click()
   }
   await trigger.click()
   await page.getByRole('menuitem', { name: labels[locale][1], exact: true }).click()

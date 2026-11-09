@@ -31,7 +31,7 @@ it('renders only available mode and waits for persisted state before displaying 
   const view = render(<TeamModeToggle {...props(undefined, select)} />)
   expect(screen.queryByRole('switch')).toBeNull()
   view.rerender(<TeamModeToggle {...props(false, select)} />)
-  const toggle = screen.getByRole('switch', { name: '启用智能体团队协作' })
+  const toggle = screen.getByRole('switch', { name: 'Enable agent teamwork' })
   fireEvent.click(toggle)
   expect(select).toHaveBeenCalledWith(true)
   expect(toggle.getAttribute('aria-checked')).toBe('false')

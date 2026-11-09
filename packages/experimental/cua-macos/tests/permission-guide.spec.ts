@@ -28,9 +28,9 @@ it('matches language variants and falls back to English for unsupported language
   const parameters = createPermissionParameters(2000)
   expect(parameters('requestPermission', 'accessibility', 'ZH-CN')).toEqual({
     permission: 'accessibility', pollIntervalMs: 2000,
-    instruction: '将 {application} 拖入上方列表以允许辅助功能', backLabel: '返回', finderLabel: '在 Finder 中显示',
-    unavailableMessage: '找不到此应用。请重新启用 Computer Use 后重试',
-    settingsMessage: '请手动打开系统设置 > 隐私与安全性 > 辅助功能',
+    instruction: 'Merge {application} drag into the list above to AllowAccessibility', backLabel: 'return', finderLabel: 'Show in Finder',
+    unavailableMessage: 'cannot find this Application. Please Enable Computer Use after Retry',
+    settingsMessage: 'please manually Open System Settings > Privacy and security > Accessibility',
   })
   expect(parameters('requestPermission', 'screenRecording', 'it')).toEqual(parameters('requestPermission', 'screenRecording', 'en'))
   expect(() => PermissionGuideParameters.parse({ ...parameters('requestPermission', 'accessibility', 'en'), pollIntervalMs: 0 })).toThrow()

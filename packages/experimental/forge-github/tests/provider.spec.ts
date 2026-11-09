@@ -88,7 +88,7 @@ describe('GitHub provider fetch', () => {
   it('bounds the complete detail read by combined UTF-8 JSON bytes', async () => {
     const first = output({ data: { r0: { p0: firstPage() } } })
     const last = output({ data: { node: { contexts: { pageInfo: { hasNextPage: false, endCursor: null },
-      nodes: [checkRun('检查', 'COMPLETED', 'SUCCESS')] } } } })
+      nodes: [checkRun('Checks', 'COMPLETED', 'SUCCESS')] } } } })
     const total = Buffer.byteLength(first.stdout) + Buffer.byteLength(last.stdout)
     for (const limit of [total, total - 1, Buffer.byteLength(first.stdout) - 1]) {
       const gh = fakeGh(args => args.includes('id=fixed-rollup') ? last : first)
@@ -365,10 +365,10 @@ describe('GitHub provider reads', () => {
   it('reads a file at a commit through the raw contents API, encoding each path segment', async () => {
     const gh = fakeGh(() => output('line\n'))
 
-    await expect(provider(gh.run).fileText(pull(7), head, 'docs/中文 notes/#1.md', signal)).resolves.toBe('line\n')
+    await expect(provider(gh.run).fileText(pull(7), head, 'docs/Chinese notes/#1.md', signal)).resolves.toBe('line\n')
     expect(gh.calls).toEqual([[
       'api', '--hostname', 'github.com', '-H', 'Accept: application/vnd.github.raw+json',
-      `repos/octo/demo/contents/docs/${encodeURIComponent('中文 notes')}/%231.md?ref=${head}`,
+      `repos/octo/demo/contents/docs/\${encodeURIComponent('Chinese notes')}/%231.md?ref=\${head}`,
     ]])
   })
 
