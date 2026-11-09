@@ -444,18 +444,16 @@ test('with PAUSE_IDLE=false idle boxes stay running: no pause, backups only when
 // ---- shared projects (projects.mjs)
 import { projects as projectStore } from './projects.mjs'
 
-test('projects: owner creates, adds allowlisted members only, lists per member', async () => {
+test('projects: owner creates and lists; adding a second member is refused by the member gate', async () => {
   const p = projectStore({ store: memoryStore(), admitted: (e) => e.endsWith('@x.com'), log: () => {} })
   const { id } = await p.create('a@x.com', ' Landing page ')
   assert.match(id, /^[a-z0-9]{16}$/)
   assert.equal((await p.list('a@x.com'))[0].name, 'Landing page')
   await assert.rejects(p.addMember('b@x.com', id, 'c@x.com'), (e) => e.status === 404)
-  await p.addMember('a@x.com', id, 'B@x.com')
-  assert.equal(await p.isMember('b@x.com', id), true)
-  await assert.rejects(p.addMember('b@x.com', id, 'c@x.com'), (e) => e.status === 403)
-  await assert.rejects(p.addMember('a@x.com', id, 'eve@evil.com'), /not allowed/)
-  assert.deepEqual((await p.list('b@x.com')).map(x => x.id), [id])
-  assert.deepEqual(await p.list('c@x.com'), [])
+  await assert.rejects(p.addMember('a@x.com', id, 'B@x.com'), (e) => e.status === 403 && e.code === 'member_gate' && e.message === 'Projects take more members once agent containment lands.')
+  assert.equal(await p.isMember('b@x.com', id), false)
+  assert.deepEqual((await p.list('a@x.com')).map(x => x.id), [id])
+  assert.deepEqual(await p.list('b@x.com'), [])
   assert.equal(await p.isMember('a@x.com', 'not-an-id'), false)
 })
 
