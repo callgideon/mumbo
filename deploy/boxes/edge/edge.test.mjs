@@ -259,3 +259,31 @@ test('inParallel keeps order and never exceeds the limit', async () => {
   assert.deepEqual(out, [2, 4, 6, 8, 10])
   assert.equal(peak, 2)
 })
+
+test('a box being restored is neither backed up nor started by another replica, and an abandoned create is dropped', async () => {
+  const e2b = fakeE2B(); const ran = []; const killed = []
+  let release; const restoring = new Promise(r => { release = r })
+  e2b.Sandbox.create = async (tpl, opts) => {
+    const id = `b${e2b.made.length + 1}`; e2b.made.push({ id, opts })
+    return { sandboxId: id, files: { write: async () => {} }, kill: async () => {}, commands: { run: async (c) => { if (c.includes('GET-URL')) await restoring; return { stdout: c.includes('dsh.log') ? 'launch123' : '' } } } }
+  }
+  e2b.Sandbox.list = () => ({ hasNext: true, nextItems: async function () { this.hasNext = false; return e2b.made.map(m => ({ sandboxId: m.id, state: 'running', startedAt: '1', metadata: { user: 'a@x.com' } })) } })
+  e2b.Sandbox.connect = async (id) => ({ sandboxId: id, commands: { run: async (c) => { ran.push(c); return { stdout: '' } } } })
+  e2b.Sandbox.kill = async (id) => { killed.push(id) }
+  const store = memoryStore()
+  const a = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => 'GET-URL', presignPut: async () => 'PUT', log: () => {} })
+  const other = boxes({ e2b, store, cfg: { ...cfg }, edgeKey: 'k', presignGet: async () => 'GET-URL', presignPut: async () => 'PUT', log: () => {} })
+  const first = a.ensure('a@x.com')
+  await new Promise(r => setTimeout(r, 20))
+  await other.sweep(Date.now() + cfg.backupEveryMs + 1)
+  assert.equal(ran.length, 0, 'no backup of a half-restored box')
+  release(); const { id } = await first
+  assert.equal((await store.getBox(id)).creating, undefined)
+
+  // A create whose replica died mid-restore: the record stays `creating` and is dropped after 15 minutes.
+  await store.putBox('dead', { email: 'b@x.com', creating: Date.now(), active: Date.now(), extended: Date.now(), backedUp: Date.now(), paused: false })
+  await store.release('sweep')
+  await other.sweep(Date.now() + 16 * 60_000)
+  assert.deepEqual(killed, ['dead'])
+  assert.equal(await store.getBox('dead'), undefined)
+})

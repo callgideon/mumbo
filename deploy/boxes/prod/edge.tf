@@ -191,6 +191,7 @@ resource "aws_ecs_task_definition" "edge" {
         "--cookie-secure=true", "--cookie-samesite=lax", "--cookie-csrf-per-request=true", "--cookie-csrf-expire=10m",
         "--reverse-proxy=true", "--pass-user-headers=true", "--skip-provider-button=true", "--email-domain=*",
         "--upstream=http://127.0.0.1:8080", "--http-address=0.0.0.0:4180",
+        "--upstream-timeout=120s", # a first visit creates the box and restores its backup before answering
       ]
       secrets = [
         { name = "OAUTH2_PROXY_CLIENT_ID", valueFrom = "${local.ssm}/oauth-client-id" },

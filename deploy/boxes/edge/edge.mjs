@@ -84,6 +84,7 @@ export async function inParallel(items, limit, fn) {
 // A box record: { email, launch, traffic, active, extended, backedUp, paused }.
 export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, log = console.log }) {
   const LOCK_MS = 120_000
+  const CREATE_STALE_MS = 15 * 60_000  // longer than a restore (11 min cap) plus dsh start
   const say = (fields) => log(JSON.stringify({ edge: 'box', ...fields }))
   const run = (box, cmd, timeoutMs = 60_000) => box.commands.run(cmd, { timeoutMs }).then(r => r.stdout.trim())
   const timeout = () => cfg.idleMs + 15 * 60_000
@@ -116,6 +117,8 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, log = 
       lifecycle: { onTimeout: 'pause', autoResume: true },
       network: { allowPublicTraffic: false, maskRequestHost: cfg.publicHost },
     }).catch((e) => { throw /place sandbox|capacity|too many|concurrent/i.test(e.message) ? Object.assign(e, { capacity: true, status: 503 }) : e })
+    // Recorded before the restore: other replicas then neither adopt nor back up a box whose data is half restored.
+    await store.putBox(box.sandboxId, { email, creating: Date.now(), active: Date.now(), extended: Date.now(), backedUp: Date.now(), paused: false })
     try {
       await box.files.write('/root/.mumbo/start.sh', startScript(cfg, signBox(edgeKey, email, box.sandboxId)))
       const restoreUrl = await presignGet(`${userPrefix(email)}/latest.tar.gz`)
@@ -130,6 +133,7 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, log = 
       return box.sandboxId
     } catch (error) {
       await box.kill().catch(() => {})  // nothing in it yet except the restored backup, which stays in S3
+      await store.deleteBox(box.sandboxId)
       throw error
     }
   }
@@ -141,6 +145,8 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, log = 
       if (found === undefined) return pick(await create(email))
       const id = found.sandboxId
       const known = await store.getBox(id)
+      // Another replica is still creating it (the user lock can expire during a long restore): wait, do not start it.
+      if (known?.creating) throw Object.assign(new Error('box is being created'), { status: 503 })
       if (found.state === 'paused' || !known || known.paused || !known.launch) {
         try {
           const box = await e2b.Sandbox.connect(id, { timeoutMs: timeout() })
@@ -206,7 +212,15 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, log = 
     if (!(await store.lease('sweep', 15 * 60_000))) return
     try {
       await adoptRunning(now).catch(e => say({ level: 'warn', msg: 'adopt failed', error: e.message }))
-      const due = (await store.listBoxes()).filter(b => !b.paused && (now - b.active >= cfg.idleMs || now - b.backedUp >= cfg.backupEveryMs))
+      const listed = await store.listBoxes()
+      // A create that never finished (its replica died mid-restore) holds only a partial restore: drop it so the
+      // next visit restores again from the backup, which no backup of the partial box has overwritten.
+      for (const b of listed.filter(x => x.creating && now - x.creating >= CREATE_STALE_MS)) {
+        await e2b.Sandbox.kill(b.id).catch(() => {})
+        await store.deleteBox(b.id)
+        say({ level: 'warn', msg: 'dropped unfinished create', user: b.email, box: b.id })
+      }
+      const due = listed.filter(b => !b.paused && !b.creating && (now - b.active >= cfg.idleMs || now - b.backedUp >= cfg.backupEveryMs))
       // Backups run in parallel (bounded) and take no user lock, so a long upload never blocks that user's visit.
       await inParallel(due, cfg.backupConcurrency ?? 8, b => backup(b.id, b).then(() => true, async (e) => {
         await store.patchBox(b.id, { backedUp: now - cfg.backupEveryMs + 5 * 60_000 })  // retry in 5 minutes
