@@ -188,7 +188,7 @@ const TEXT = {
   dispositionEvaluating: ['评估进行中', 'Eval running'],
   dispositionFanout: ['扇出到 {count} 个工单', 'Fanned out to {count} Tickets'],
   dispositionDelivered: ['已送达工单', 'Delivered to Ticket'],
-  dispositionDeliveredHint: ['有人在已有工单的线程上跟进时，消息直接送达工单的执行器，不经评估，也不产生决定。', 'A person\'s follow-up on a Thread with a Ticket goes straight to the Ticket\'s Executor, with no Eval and no Decision.'],
+  dispositionDeliveredHint: ['允许名单中的人、列出的机器人或 GitHub CI 在已有工单的线程上跟进时，消息直接送达工单的执行器，不经评估，也不产生决定。', 'A follow-up from an allowlisted person, a listed bot or GitHub CI on a Thread with a Ticket goes straight to the Ticket\'s Executor, with no Eval and no Decision.'],
   handedBack: ['“{ticket}”的执行器把这条触发交回评估：{reason}', 'The Executor of “{ticket}” handed it back for an Eval: {reason}'],
   inputHandedBack: ['已交回评估：{reason}', 'Handed back for an Eval: {reason}'],
   contextOnly: ['仅作上下文', 'Context only'],
