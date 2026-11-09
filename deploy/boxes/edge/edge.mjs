@@ -37,6 +37,7 @@ export const config = () => ({
   // SSM; the id and private key of the mumbo-bot GitHub App, the only identity that merges, from Secrets Manager
   // mumbo-boxes/github-app.
   approveHost: env('APPROVE_HOST', `approve.${env('PUBLIC_HOST')}`),
+  approverEmails: list(env('APPROVER_EMAILS', '')),  // who may merge and bind repositories; empty: nobody
   agentLogin: optional('GITHUB_AGENT_LOGIN'),  // unset: the approvals poller is off
   requiredChecks: checkNames('REQUIRED_CHECKS', 'static,unit'),
   dailyTokensUser: Number(env('DAILY_TOKENS_USER', '20000000')),
@@ -667,8 +668,8 @@ async function main() {
     await s3.send(new PutObjectCommand({ Bucket: cfg.bucket, Key: key, Body: JSON.stringify(record), ContentType: 'application/json' }))
   }
   const csrfKey = createHmac('sha256', edgeKey).update('approve-csrf').digest()
-  const approvals = approvalsService({ store, github: { agentToken: cfg.agentToken, app: { appId: cfg.appId, privateKey: cfg.appKey }, agentLogin: cfg.agentLogin, requiredChecks: cfg.requiredChecks }, notify, audit, fetchImpl: fetch, now, approveHost: cfg.approveHost })
-  const approve = approvePage({ approvals, halt, store, csrfKey, host: cfg.approveHost })
+  const approvals = approvalsService({ store, github: { agentToken: cfg.agentToken, app: { appId: cfg.appId, privateKey: cfg.appKey }, agentLogin: cfg.agentLogin, requiredChecks: cfg.requiredChecks }, notify, audit, fetchImpl: fetch, now, approveHost: cfg.approveHost, approvers: cfg.approverEmails })
+  const approve = approvePage({ approvals, halt, store, csrfKey, host: cfg.approveHost, approvers: cfg.approverEmails })
   const tokens = tokenBudget({ store, limits: { user: cfg.dailyTokensUser, project: cfg.dailyTokensProject }, now })
   const github = githubForwarder({ store, halt, agentToken: cfg.agentToken, fetchImpl: fetch })
   // One replica polls GitHub each minute: the 55 s lease lapses before the next tick. Off without GITHUB_AGENT_LOGIN.

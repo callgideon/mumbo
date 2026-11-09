@@ -14,16 +14,20 @@ const projectDoc = (store, id) => (isProjectId(id) ? store.getDoc(`project:${id}
 
 /** The project's repositories (`owner/name`); [] when it has none or does not exist. */
 export const getRepos = async (store, projectId) => (await projectDoc(store, projectId))?.repos ?? []
-/** Gives the project a repository, once (names compare case-insensitively, as on GitHub). A repository belongs to at
- *  most one project, because that project's owners approve its merges. Fails with 404 for an unknown project, 400 for
- *  a name that is not `owner/name`, and 409 (`code: 'repo_bound'`) for a repository another project already has. */
-export async function addRepo(store, projectId, repo) {
+/** Gives the project a repository, once (names compare case-insensitively, as on GitHub). Only `by` in `approvers`
+ *  (APPROVER_EMAILS), owning the project, may do it; a repository belongs to at most one project, because that
+ *  project's owner approves its merges. Fails with 400 for a name that is not `owner/name`, 403 when `by` is not an
+ *  approver or not the owner, 404 for an unknown project, and 409 (`code: 'repo_bound'`) for a repository another
+ *  project already has. */
+export async function addRepo(store, projectId, repo, { by, approvers = [] } = {}) {
   if (typeof repo !== 'string' || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) throw fail(400, `${repo} is not a repository name (owner/name)`)
+  if (!approvers.includes(by)) throw fail(403, 'only an approver binds repositories')
   const same = (r) => r.toLowerCase() === repo.toLowerCase()
   // ponytail: one lock for every binding, so two projects cannot both take a repository; adding repositories is rare.
   await store.withLock('projects:repos', 10_000, async () => {
     const p = await projectDoc(store, projectId)
     if (!p) throw fail(404, `no project ${projectId}`)
+    if (p.owner !== by) throw fail(403, 'only the project owner binds its repositories')
     for (const other of await projectsWithRepos(store)) {
       if (other !== projectId && (await getRepos(store, other)).some(same)) throw Object.assign(fail(409, `${repo} already belongs to another project`), { code: 'repo_bound' })
     }

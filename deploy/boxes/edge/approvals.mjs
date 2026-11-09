@@ -28,8 +28,8 @@ const MERGE_PERMISSIONS = { contents: 'write', pull_requests: 'write' }
  * @property {number} changedFiles - GitHub's `changed_files`.
  * @property {string[]} files
  * @property {string[]} protected - protected paths touched, including a renamed file's previous path.
- * @property {Record<string, string>} checks - required check name to its newest run's conclusion, its status while
- *   running, or `missing`.
+ * @property {Record<string, string>} checks - required check name to its newest GitHub Actions run's conclusion, its
+ *   status while running, or `missing`; runs from any other App are ignored.
  * @property {boolean} checksGreen
  * @property {{ verdict: 'pass'|'fail', url: string, excerpt: string } | null} review - the agent's newest review marker
  *   for `sha`, or null; `excerpt` is the comment's first 400 characters after the marker line (the agent's claim).
@@ -44,15 +44,16 @@ const MERGE_PERMISSIONS = { contents: 'write', pull_requests: 'write' }
  * @property {boolean} merged
  * @property {string} sha
  * @property {'not_found'|'not_owner'|'sha_moved'|'not_low_risk'|'checks_not_green'|'not_candidate'|'github_error'} [reason] - why it
- *   did not merge; `not_low_risk` comes only from grantLowRisk.
+ *   did not merge; `not_owner` also covers an owner who is not an approver; `not_low_risk` comes only from grantLowRisk.
  */
 
 /**
  * The approval service.
  * @param {{ store: object, github: { agentToken: string | undefined, app: { appId: string | undefined, privateKey: string | undefined }, agentLogin: string | undefined, requiredChecks: string[] },
  *   notify: (message: { title: string, body: string, click: string }) => Promise<void>, audit: (record: object) => Promise<void>,
- *   fetchImpl: typeof fetch, now: () => number, approveHost: string }} deps - `now` is epoch ms; notifications link to
- *   `https://<approveHost>/`.
+ *   fetchImpl: typeof fetch, now: () => number, approveHost: string, approvers: string[] }} deps - `now` is epoch ms;
+ *   notifications link to `https://<approveHost>/`; `approvers` (APPROVER_EMAILS, lowercased) are the only emails that
+ *   may grant, and only for projects they own; an empty list lets nobody merge.
  * @returns {{ poll(): Promise<void>, list(email: string): Promise<Approval[]>, grant(email: string, id: string, sha: string): Promise<GrantResult>, grantLowRisk(email: string, shown: { id: string, sha: string }[]): Promise<GrantResult[]> }}
  *   `poll` refreshes the queue from GitHub; a repository GitHub does not answer for keeps its items, and an item stays
  *   with the project that first listed it. `list` gives the items of the projects `email` owns. `grant` merges item
@@ -61,7 +62,7 @@ const MERGE_PERMISSIONS = { contents: 'write', pull_requests: 'write' }
  *   `shown` pairs (what the founder's page displayed) that are still low-risk at that exact SHA, in order, and gives
  *   one result per pair.
  */
-export function approvalsService({ store, github, notify, audit, fetchImpl, now, approveHost }) {
+export function approvalsService({ store, github, notify, audit, fetchImpl, now, approveHost, approvers }) {
   const { agentToken, app, agentLogin, requiredChecks } = github
   const login = agentLogin?.toLowerCase()
   const read = (path) => githubJson(fetchImpl, 'GET', path, agentToken)
@@ -87,7 +88,8 @@ export function approvalsService({ store, github, notify, audit, fetchImpl, now,
     const { check_runs: runs } = await read(`/repos/${repo}/commits/${sha}/check-runs?per_page=100`)
     const checks = {}
     for (const name of requiredChecks) {
-      const newest = runs.filter(r => r.name === name).sort((a, b) => b.id - a.id)[0]
+      // Only GitHub Actions runs count: another App, or a token with checks access, could post a run with the same name.
+      const newest = runs.filter(r => r.name === name && r.app?.slug === 'github-actions').sort((a, b) => b.id - a.id)[0]
       checks[name] = newest ? (newest.conclusion ?? newest.status) : 'missing'
     }
     return { checks, green: requiredChecks.every(name => checks[name] === 'success') }
@@ -144,7 +146,7 @@ export function approvalsService({ store, github, notify, audit, fetchImpl, now,
     const no = (reason) => ({ id, merged: false, sha, reason })
     const doc = await store.getDoc(key(id))
     if (!doc) return no('not_found')
-    if (!(await ownersOf(store, doc.project)).includes(email)) return no('not_owner')
+    if (!approvers.includes(email) || !(await ownersOf(store, doc.project)).includes(email)) return no('not_owner')
     if (sha !== doc.sha) return no('sha_moved')
     if (lowRiskOnly && !doc.lowRisk) return no('not_low_risk')
     let checks, mergeCommitSha

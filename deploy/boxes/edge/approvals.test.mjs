@@ -6,6 +6,7 @@ import { memoryStore } from './store.mjs'
 import { projects, addRepo } from './projects.mjs'
 import { approvalsService } from './approvals.mjs'
 import { mintRepoToken } from './github-app.mjs'
+import { config } from './edge.mjs'
 
 const REPO = 'acme/app'
 const ID = 'acme/app#1'
@@ -24,7 +25,7 @@ const pull = (n, over = {}) => ({
   additions: 10, deletions: 2, changed_files: 1, ...over,
 })
 const file = (filename, extra = {}) => ({ filename, additions: 1, deletions: 0, ...extra })
-const run = (name, conclusion = 'success', id = 1) => ({ id, name, status: 'completed', conclusion })
+const run = (name, conclusion = 'success', id = 1, app = 'github-actions') => ({ id, name, status: 'completed', conclusion, app: { slug: app } })
 let comments = 0
 const comment = (body, login = AGENT) => ({ user: { login }, body, html_url: `https://github.com/${REPO}/pull/1#issuecomment-${++comments}` })
 const marker = (sha, verdict, login = AGENT) => comment(`<!-- mumbo-review sha=${sha} verdict=${verdict} -->\nReview report.`, login)
@@ -73,19 +74,19 @@ function fakeGithub() {
   return gh
 }
 
-/** A project owned by FOUNDER (with a plain member) that has REPO, and the service over a fake GitHub. */
-async function setup() {
+/** A project owned by FOUNDER (with a plain member) that has REPO, and the service over a fake GitHub; FOUNDER is the approver. */
+async function setup({ approvers = [FOUNDER] } = {}) {
   const gh = fakeGithub()
   const store = memoryStore()
   const p = projects({ store, admitted: () => true, log: () => {} })
   const { id: project } = await p.create(FOUNDER, 'App')
   await p.addMember(FOUNDER, project, 'member@x.com')
-  await addRepo(store, project, REPO)
+  await addRepo(store, project, REPO, { by: FOUNDER, approvers: [FOUNDER] })
   const notes = [], audits = [], clock = { t: NOW }
   const svc = approvalsService({
     store, github: { agentToken: 'agent-token', app: { appId: '5295930', privateKey }, agentLogin: AGENT, requiredChecks: ['static', 'unit'] },
     notify: async (message) => { notes.push(message) }, audit: async (record) => { audits.push(record) },
-    fetchImpl: gh.fetchImpl, now: () => clock.t, approveHost: 'approve.boxes.mumbo.si',
+    fetchImpl: gh.fetchImpl, now: () => clock.t, approveHost: 'approve.boxes.mumbo.si', approvers,
   })
   return { gh, store, project, svc, notes, audits, clock }
 }
@@ -140,8 +141,10 @@ for (const [name, change, expect] of [
   ['a file at the repository root', (gh) => { gh.files[1] = [file('README.md')] }, { protected: ['README.md'] }],
   ['200 changed lines', (gh) => { Object.assign(gh.pulls[0], { additions: 150, deletions: 50 }) }, {}],
   ['a red required check', (gh) => { gh.runs[SHA] = [run('static'), run('unit', 'failure')] }, { checks: { static: 'success', unit: 'failure' }, checksGreen: false }],
-  ['a required check still running', (gh) => { gh.runs[SHA] = [run('static'), { id: 2, name: 'unit', status: 'in_progress', conclusion: null }] }, { checks: { static: 'success', unit: 'in_progress' } }],
+  ['a required check still running', (gh) => { gh.runs[SHA] = [run('static'), { id: 2, name: 'unit', status: 'in_progress', conclusion: null, app: { slug: 'github-actions' } }] }, { checks: { static: 'success', unit: 'in_progress' } }],
   ['a missing required check', (gh) => { gh.runs[SHA] = [run('static')] }, { checks: { static: 'success', unit: 'missing' } }],
+  ['a required check from an App other than GitHub Actions', (gh) => { gh.runs[SHA] = [run('static'), run('unit', 'failure', 1), run('unit', 'success', 2, 'agent-bot')] },
+    { checks: { static: 'success', unit: 'failure' } }],
 ]) {
   test(`not low-risk: ${name}`, async () => {
     const { gh, svc } = await setup()
@@ -308,7 +311,7 @@ test('grantLowRisk merges only the shown pairs still low-risk at that SHA, and r
 })
 
 test('an item stays with the project that first listed it, even when stored data binds its repository to a second project', async (t) => {
-  const { gh, store, svc, project } = await setup()
+  const { gh, store, svc, project } = await setup({ approvers: [FOUNDER, 'mallory@x.com'] })
   const { id: other } = await projects({ store, admitted: () => true, log: () => {} }).create('mallory@x.com', 'Mine')
   // addRepo refuses this binding (projects.test.mjs); write it directly, as legacy or corrupted data would hold it.
   await store.putDoc(`project:${other}`, { ...(await store.getDoc(`project:${other}`)), repos: [REPO] })
@@ -322,6 +325,31 @@ test('an item stays with the project that first listed it, even when stored data
   assert.deepEqual(await svc.grant('mallory@x.com', ID, SHA), { id: ID, merged: false, sha: SHA, reason: 'not_owner' })
   assert.equal(gh.calls.filter(c => c.method === 'PUT').length, 0)
   assert.equal(errors.mock.callCount(), 2)  // one "not rebound" line per poll
+})
+
+test('only an approver who owns the project merges: an owner who is not an approver, and an approver who is not the owner, get not_owner', async () => {
+  const { gh, svc, audits } = await setup({ approvers: ['member@x.com'] })
+  await svc.poll()
+  const before = gh.calls.length
+  assert.deepEqual(await svc.grant(FOUNDER, ID, SHA), { id: ID, merged: false, sha: SHA, reason: 'not_owner' })
+  assert.deepEqual(await svc.grantLowRisk(FOUNDER, [{ id: ID, sha: SHA }]), [{ id: ID, merged: false, sha: SHA, reason: 'not_owner' }])
+  assert.deepEqual(await svc.grant('member@x.com', ID, SHA), { id: ID, merged: false, sha: SHA, reason: 'not_owner' })
+  assert.equal(gh.calls.length, before)
+  assert.deepEqual(audits, [])
+  assert.equal((await only(svc)).id, ID)
+})
+
+test('APPROVER_EMAILS: comma-separated and lowercased; unset or empty means nobody', () => {
+  const vars = { PUBLIC_HOST: 'boxes.mumbo.si', LLM_HOST: 'llm.boxes.mumbo.si', BACKUP_BUCKET: 'backups', APPROVER_EMAILS: undefined }
+  const saved = Object.fromEntries(Object.keys(vars).map(k => [k, process.env[k]]))
+  const apply = (values) => { for (const [k, v] of Object.entries(values)) if (v === undefined) delete process.env[k]; else process.env[k] = v }
+  try {
+    apply(vars)
+    assert.deepEqual(config().approverEmails, [])
+    for (const empty of ['', ' , ']) { process.env.APPROVER_EMAILS = empty; assert.deepEqual(config().approverEmails, [], empty) }
+    process.env.APPROVER_EMAILS = ' Founder@X.com,b@x.com, '
+    assert.deepEqual(config().approverEmails, ['founder@x.com', 'b@x.com'])
+  } finally { apply(saved) }
 })
 
 // ---- mumbo-bot repository tokens
