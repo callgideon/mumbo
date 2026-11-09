@@ -667,3 +667,27 @@ test('the sign-in cookie never reaches a box, and boxes cannot set parent-domain
   const out = secureCookies({ 'set-cookie': ['s=1; Domain=.boxes.mumbo.si; Path=/', 't=2; path=/; domain=boxes.mumbo.si; HttpOnly'] })['set-cookie']
   assert.deepEqual(out, ['s=1; Path=/; Secure', 't=2; path=/; HttpOnly; Secure'])
 })
+
+test('model host: a client that drops mid-stream cancels the upstream and the metered stream charges', async () => {
+  const { tokenBudget } = await import('./budget.mjs')
+  const store = memoryStore()
+  const tokens = tokenBudget({ store, limits: { user: 1e9, project: 1e9 }, now: () => Date.parse('2026-11-09T12:00:00Z') })
+  const enc = new TextEncoder()
+  const ev = (o) => enc.encode(`data: ${JSON.stringify(o)}\n\n`)
+  let cancelled = false
+  const fetchImpl = async () => new Response(new ReadableStream({
+    start(c) { c.enqueue(ev({ type: 'message_start', message: { usage: { input_tokens: 100 } } })) },
+    cancel() { cancelled = true },
+  }), { status: 200, headers: { 'content-type': 'text/event-stream' } })
+  const s = modelServer({ cfg, edgeKey: 'k', modelKey: 'SERVER', owns: async () => true, touch: () => {}, fetchImpl, log: () => {}, allow: async () => true, tokens })
+  const port = await listen(s)
+  try {
+    await new Promise((resolve, reject) => {
+      const r = request({ port, method: 'POST', path: '/anthropic/v1/messages', headers: { 'x-api-key': signBox('k', 'a@x.com', 'b1') } }, (res) => res.once('data', () => { r.destroy(); resolve() }))
+      r.on('error', () => {}); r.end('{}')
+    })
+    for (let i = 0; i < 50 && !cancelled; i++) await new Promise((r) => setTimeout(r, 20))
+    assert.equal(cancelled, true, 'upstream stream cancelled')
+    assert.equal(await store.getCount('tokens:2026-11-09:a@x.com'), 100)
+  } finally { s.close() }
+})

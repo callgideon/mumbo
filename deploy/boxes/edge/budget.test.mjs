@@ -85,3 +85,12 @@ test('a completed stream with a final usage charges only the real figure', async
   await drain(t.meter('a@x.co', stream(start, textDelta('x'.repeat(3000)), delta), 'text/event-stream'))
   assert.equal(await store.getCount(key('a@x.co')), 170)
 })
+
+test('a failed upstream read still charges what was streamed, then errors the stream', async () => {
+  const { store, t } = make()
+  const body = new ReadableStream({ start(c) { c.enqueue(enc.encode(start + textDelta('z'.repeat(30)))); setTimeout(() => c.error(new Error('upstream reset')), 20) } })
+  const reader = t.meter('a@x.co', body, 'text/event-stream').getReader()
+  await reader.read()
+  await assert.rejects(reader.read(), /upstream reset/)
+  assert.equal(await store.getCount(key('a@x.co')), 130)
+})

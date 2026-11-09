@@ -88,7 +88,9 @@ export function tokenBudget({ store, limits, now }) {
       const reader = webBody.getReader()
       return new ReadableStream({
         async pull(controller) {
-          const { done, value } = await reader.read()
+          let result
+          try { result = await reader.read() } catch (err) { await finish(); throw err }
+          const { done, value } = result
           if (done) { await finish(); controller.close(); return }
           pending += decoder.decode(value, { stream: true })
           await lines(false)

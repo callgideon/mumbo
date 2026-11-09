@@ -5,7 +5,7 @@
 import { createHash, createHmac, createVerify, timingSafeEqual } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { createServer, request as httpRequest } from 'node:http'
-import { Readable } from 'node:stream'
+import { Readable, pipeline } from 'node:stream'
 
 const env = (name, fallback) => process.env[name] ?? fallback ?? (() => { throw new Error(`edge: set ${name}`) })()
 const list = (value) => value.toLowerCase().split(',').map(s => s.trim()).filter(Boolean)
@@ -605,7 +605,8 @@ export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, mcp, g
     res.writeHead(upstream.status, out)
     if (upstream.body === null) return void res.end()
     const body = tokens ? tokens.meter(claim.u, upstream.body, upstream.headers.get('content-type')) : upstream.body
-    Readable.fromWeb(body).on('error', () => res.destroy()).pipe(res)
+    // pipeline destroys the source when the client closes, so a dropped connection cancels the metered stream.
+    pipeline(Readable.fromWeb(body), res, () => {})
   }
 }
 
