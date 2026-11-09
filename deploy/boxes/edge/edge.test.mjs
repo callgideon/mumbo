@@ -392,7 +392,7 @@ test('desktop live view: /desktop/ goes to the box\'s noVNC port, everything els
 test('backups carry the browser profile without caches or profile locks, and tolerate its absence', async () => {
   const { backupCommand } = await import('./edge.mjs')
   const c = backupCommand('URL')
-  assert.match(c, /ls -d root\/\.dsh root\/projects home\/browser\/profile 2>\/dev\/null/)
+  assert.match(c, /ls -d root\/\.dsh root\/projects root\/\.mumbo-sqlite home\/browser\/profile 2>\/dev\/null/)
   for (const x of ['Singleton*', '*/Cache', '*/Code Cache', '*/GPUCache']) assert.ok(c.includes(`--exclude='home/browser/profile/${x}'`), x)
 })
 

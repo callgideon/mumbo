@@ -178,10 +178,32 @@ nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\
   --no-open --host "$ip" --port 3080 --public-url ${site.publicUrl} --trusted-host ${cfg.publicHost}${site.host === cfg.publicHost ? '' : ` --trusted-host ${site.host}`} > /root/dsh.log 2>&1 &
 `
 }
+/** VACUUM INTO a `.snap` copy of every SQLite database under .dsh and projects (the live files are WAL-mode and cannot be tarred consistently). Any failure aborts the backup. */
+const SNAPSHOT_JS = `const { DatabaseSync } = require("node:sqlite"), fs = require("fs"), path = require("path"), Q = String.fromCharCode(39)
+const [home, out] = process.argv.slice(1)
+for (const d of [".dsh", "projects"]) {
+  if (!fs.existsSync(path.join(home, d))) continue
+  for (const e of fs.readdirSync(path.join(home, d), { recursive: true, withFileTypes: true })) {
+    if (!e.isFile() || !/\\.(sqlite|db)$/.test(e.name)) continue
+    const src = path.join(e.parentPath, e.name), dst = path.join(out, path.relative(home, src) + ".snap")
+    fs.mkdirSync(path.dirname(dst), { recursive: true })
+    const db = new DatabaseSync(src)
+    db.exec("VACUUM INTO " + Q + dst.replaceAll(Q, Q + Q) + Q)
+    db.close()
+  }
+}`
 /** Upload chats, projects and the browser profile (signed-in accounts; caches and locks excluded) to a presigned S3 PUT. Runs inside the box; S3 refuses a streamed (chunked) body,
- *  so the archive goes to a temporary file first. Extraction on restore also stays inside the box. */
-export const backupCommand = (url) => `set -e; f=$(mktemp /tmp/mumbo-backup.XXXXXX); trap 'rm -f "$f"' EXIT; tar -C / --exclude=node_modules --exclude='*.sqlite-wal' --exclude='*.sqlite-shm' --exclude='home/browser/profile/Singleton*' --exclude='home/browser/profile/*/Cache' --exclude='home/browser/profile/*/Code Cache' --exclude='home/browser/profile/*/GPUCache' --exclude='home/browser/profile/*/Service Worker/CacheStorage' -czf "$f" $(cd / && ls -d root/.dsh root/projects home/browser/profile 2>/dev/null); curl -fsS -m 600 -X PUT -H 'content-type: application/gzip' --upload-file "$f" '${url}'`
-export const restoreCommand = (url) => `curl -fsS -m 600 '${url}' | tar -C / -xzf -`
+ *  so the archive goes to a temporary file first. SQLite databases travel as consistent `.snap` copies under root/.mumbo-sqlite. Extraction on restore also stays inside the box.
+ *  `root` (default `/`) is the filesystem root, for tests. */
+export const backupCommand = (url, root = '/') => {
+  const r = root.replace(/\/+$/, ''), snap = `${r}/root/.mumbo-sqlite`
+  return `set -e; f=$(mktemp /tmp/mumbo-backup.XXXXXX); trap 'rm -f "$f"; rm -rf '${snap}'' EXIT; rm -rf '${snap}'; node -e '${SNAPSHOT_JS}' '${r}/root' '${snap}'; tar -C '${root}' --exclude=node_modules --exclude='*.sqlite' --exclude='*.db' --exclude='*-wal' --exclude='*-shm' --exclude='*-journal' --exclude='home/browser/profile/Singleton*' --exclude='home/browser/profile/*/Cache' --exclude='home/browser/profile/*/Code Cache' --exclude='home/browser/profile/*/GPUCache' --exclude='home/browser/profile/*/Service Worker/CacheStorage' -czf "$f" $(cd '${root}' && ls -d root/.dsh root/projects root/.mumbo-sqlite home/browser/profile 2>/dev/null); curl -fsS -m 600 -X PUT -H 'content-type: application/gzip' --upload-file "$f" '${url}'; rm -rf '${snap}'`
+}
+/** Download and unpack a backup, then move each `.snap` back over its database path. Runs before dsh starts. */
+export const restoreCommand = (url, root = '/') => {
+  const r = root.replace(/\/+$/, ''), snap = `${r}/root/.mumbo-sqlite`
+  return `set -e; curl -fsS -m 600 '${url}' | tar -C '${root}' -xzf -; if [ -d '${snap}' ]; then (cd '${snap}' && find . -name '*.snap' -type f) | while IFS= read -r p; do d='${r}/root/'"\${p#./}"; d="\${d%.snap}"; rm -f "$d-wal" "$d-shm"; mv '${snap}'/"$p" "$d"; done; rm -rf '${snap}'; fi`
+}
 
 /** Prints the earliest next run (epoch ms) of the box's active dsh scheduled tasks, or nothing. Reads both storage
  *  backends (JSON file, SQLite table u_schedule_tasks); runs inside the box with its own Node. */
