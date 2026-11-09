@@ -7,4 +7,3 @@ head:
 ---
 
 # DeepSeek Harness
-
