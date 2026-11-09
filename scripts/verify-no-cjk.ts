@@ -1,6 +1,8 @@
 /**
  * Reject CJK Unified Ideographs (U+3400–U+9FFF, U+F900–U+FAFF,
- * U+20000–U+2FFFF) in every tracked text file. A file containing a NUL byte
+ * U+20000–U+2FFFF) in the working-tree text of every file committed at HEAD.
+ * Paths only staged, such as the upstream workflow files mumbo-ci restores
+ * for other gates, are not scanned until committed. A file containing a NUL byte
  * is binary and skipped; symbolic links are skipped because their target is
  * scanned on its own. Each `scripts/no-cjk-allowlist.json` entry names a path
  * or glob, optional line and block regular expressions, and a required reason;
@@ -98,19 +100,19 @@ export function findCjkLines(file: string, content: Buffer): CjkViolation[] {
 }
 
 /**
- * Scan every tracked file of a Git work tree.
+ * Scan every file committed at HEAD of a Git work tree.
  * @param repoRoot - Work tree root.
  * @returns Violations in path order and the number of files read.
  */
 export function scanTrackedFiles(repoRoot: string): { violations: CjkViolation[]; scanned: number } {
-  const files = execFileSync('git', ['ls-files', '-z'], { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 28 })
+  const files = execFileSync('git', ['ls-tree', '-r', '-z', '--name-only', 'HEAD'], { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 28 })
     .split('\0').filter(file => file !== '').sort()
   const violations: CjkViolation[] = []
   let scanned = 0
   for (const file of files) {
     const absolute = resolve(repoRoot, file)
     const stats = lstatSync(absolute, { throwIfNoEntry: false })
-    // Deleted-but-staged paths, symbolic links, and submodule directories have no text of their own.
+    // Paths deleted from the work tree, symbolic links, and submodule directories have no text of their own.
     if (stats?.isFile() !== true) continue
     scanned++
     violations.push(...findCjkLines(file, readFileSync(absolute)))
@@ -165,10 +167,10 @@ export function verifyNoCjk(repoRoot: string): { failures: string[]; scanned: nu
 if (import.meta.filename === resolve(process.argv[1] ?? '')) {
   const { failures, scanned } = verifyNoCjk(root)
   if (failures.length > 0) {
-    console.error(`verify-no-cjk: ${String(failures.length)} failure(s) in ${String(scanned)} tracked file(s). Write English, or add a reasoned entry to ${ALLOWLIST_PATH}:`)
+    console.error(`verify-no-cjk: ${String(failures.length)} failure(s) in ${String(scanned)} committed file(s). Write English, or add a reasoned entry to ${ALLOWLIST_PATH}:`)
     for (const failure of failures) console.error(`  ${failure}`)
     process.exitCode = 1
   } else {
-    console.log(`verify-no-cjk: ${String(scanned)} tracked file(s) contain no CJK ideographs outside the allowlist.`)
+    console.log(`verify-no-cjk: ${String(scanned)} committed file(s) contain no CJK ideographs outside the allowlist.`)
   }
 }

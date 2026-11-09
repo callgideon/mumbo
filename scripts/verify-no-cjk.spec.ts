@@ -27,8 +27,13 @@ function fixture(files: Record<string, string | Buffer>, allowlist: readonly Cjk
   execFileSync('git', ['init', '--quiet'], { cwd: root })
   write(root, 'scripts/no-cjk-allowlist.json', `${JSON.stringify(allowlist)}\n`)
   for (const [file, contents] of Object.entries(files)) write(root, file, contents)
-  execFileSync('git', ['add', '.'], { cwd: root })
+  commit(root)
   return root
+}
+
+function commit(root: string): void {
+  execFileSync('git', ['add', '.'], { cwd: root })
+  execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '--no-verify', '-m', 'fixture'], { cwd: root })
 }
 
 describe('findCjkLines', () => {
@@ -54,13 +59,21 @@ describe('verify-no-cjk', () => {
     expect(verifyNoCjk(root)).toEqual({ scanned: 3, failures: [`docs/guide.md:3: ${IDEOGRAPH}`] })
   })
 
-  it('passes a clean tree and ignores untracked, binary, and symbolic-link paths', () => {
+  it('passes a clean tree and ignores untracked, staged-only, binary, and symbolic-link paths', () => {
     const root = fixture({ 'docs/clean.md': '# Clean\n', 'assets/image.png': Buffer.concat([Buffer.from([0]), Buffer.from(IDEOGRAPH)]) })
-    write(root, 'untracked.md', IDEOGRAPH)
     write(root, 'linked/target.md', '# Target\n')
     symlinkSync('../docs/clean.md', join(root, 'linked/alias.md'))
-    execFileSync('git', ['add', 'linked'], { cwd: root })
+    commit(root)
+    write(root, 'untracked.md', IDEOGRAPH)
+    write(root, '.github/workflows/upstream.yml', `description: '${IDEOGRAPH}'\n`)
+    execFileSync('git', ['add', '.github'], { cwd: root })
     expect(verifyNoCjk(root).failures).toEqual([])
+  })
+
+  it('scans the working-tree text of committed paths', () => {
+    const root = fixture({ 'docs/guide.md': '# Guide\n' })
+    write(root, 'docs/guide.md', `# ${IDEOGRAPH}\n`)
+    expect(verifyNoCjk(root).failures).toEqual([`docs/guide.md:1: # ${IDEOGRAPH}`])
   })
 
   it('accepts an allowlisted path and line pattern but still rejects other lines', () => {
