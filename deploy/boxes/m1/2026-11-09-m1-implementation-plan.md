@@ -168,7 +168,7 @@ Nothing inside a box can merge or approve.
 - [ ] Read it once on your own machine and subscribe to it on `ntfy.sh` in the ntfy phone app.
 
 ### F4: Merge and deploy Track A
-- [ ] When A8's PR is green, merge it into `main`. CodeBuild builds `mumbo-web-prod` from `main`.
+- [ ] Merge PR #16 first. Then, when A8's PR is green, merge it into `main`. CodeBuild builds `mumbo-web-prod` from `main`.
 - [ ] Tell the implementing session the image tag.
 - [ ] After B10 changes the sign-in cookie domain, sign out of `boxes.mumbo.si` once and sign back in.
 
@@ -195,7 +195,7 @@ All Track A tasks branch from `origin/main`. Paths are relative to `packages/mum
   - `tsconfig.base.json`: add hand-written paths next to `@mumbo/mcp` (about :417);
   - `tsconfig.host.json`: add a reference to `./packages/mumbo/superagent/tsconfig.host.json` (near :564);
   - `tsconfig.client.json`: add a reference to `./packages/mumbo/superagent/tsconfig.client.json`;
-  - `apps/cli/package.json`: add `"@mumbo/superagent": "workspace:*"`;
+  - root `package.json` `devDependencies`: `"@mumbo/superagent": "workspace:*"`. Not apps/cli, which is the published @deepseek-ai/dsh; the release scripts reject @mumbo deps (fabd7a2777). Same pattern as #16 and #17;
   - `.oxlintrc.json` **and** `.oxlintrc.staged.json`: add `packages/mumbo/superagent/**` to `ignorePatterns`. Do this before the first commit, because lefthook's staged oxlint `--fix` would rewrite upstream code;
   - `pnpm-lock.yaml`.
 - **Modify the copy:**
@@ -242,7 +242,7 @@ All Track A tasks branch from `origin/main`. Paths are relative to `packages/mum
 - [ ] **Step 5:** Run `pnpm vitest run packages/mumbo/superagent/tests`. Expected: PASS. The jsdom specs carry `// @vitest-environment jsdom`.
 - [ ] **Step 6:** Run `pnpm run build:artifacts && pnpm run build:check`. Expected: success, with `lib/index.js` and the client bundle present.
 - [ ] **Step 7:** Commit:
-  - `git add -A packages/mumbo/superagent tsconfig.base.json tsconfig.host.json tsconfig.client.json apps/cli/package.json .oxlintrc.json .oxlintrc.staged.json pnpm-lock.yaml`
+  - `git add -A packages/mumbo/superagent tsconfig.base.json tsconfig.host.json tsconfig.client.json package.json .oxlintrc.json .oxlintrc.staged.json pnpm-lock.yaml`
   - `LEFTHOOK=0 git commit -m "feat(mumbo): add @mumbo/superagent, a pinned copy of dsh-superagent-prototype 8c32a9d (S1)"`
 
 ### A2: Repository gates and docs
@@ -385,22 +385,23 @@ Report ready with the PR link and the head commit; do not wait for the merge.
 
 ### A7: Project-box overlay (S6)
 
-**Files:** create `deploy/mumbo-project.overlay.yml` and `apps/cli/tests/project-overlay.spec.ts`.
+**Files:** extend the `deploy/mumbo-project.overlay.yml` that PR #16 creates; extend #16's overlay test if it has one, otherwise create `apps/cli/tests/project-overlay.spec.ts`. Branch A7 from #16's head and rebase after #16 merges.
 
 **Interfaces:**
-- Produces: the overlay that B7 loads for project boxes, after `mumbo.overlay.yml`, `mumbo-personal.overlay.yml` and the box's `sandboxes.overlay.yml`. It contains:
-  - a header comment: project boxes only;
+- Produces: the overlay that B7 loads for project boxes, after `mumbo.overlay.yml`, `mumbo-personal.overlay.yml` and the box's `sandboxes.overlay.yml`. Leave #16's rows (`approval: never`, the permission presets, the `@mumbo/edge-member` row) unchanged. Append below them:
   - `- insert:` with the bundle's rows, copied from `packages/mumbo/superagent/cordis.patch.yml` with the same ids and the renamed names;
   - `- id: dsh-superagent`, with `config.stateDir: !!js dshHomePath('superagent')`;
   - a comment that the GitHub Source repository, CLI, Policy allowlist and worker directory are set once in the panel.
-- It has **no** `approval` or `permission` rows. Superagent pins `danger-full-access`, under which bash asks only on sandbox-escalation requests (`packages/shell/tool-bash/src/index.ts:218-241`), and delegated children pin `never`.
 
 - [ ] **Step 1:** Write the test using `loadProfile('dsh', 'web', …)`, `composeEntries` and `loadOverlayPatches`, applying the three overlays in that order. Follow the pattern in `apps/cli/tests/profile-mcp.spec.ts`. Assert:
   - `dsh-superagent`, `dsh-superagent-github`, `dsh-superagent-worker-preset` and `dsh-superagent-router-preset` are present and enabled;
   - `dsh-superagent-feishu` is disabled;
   - `stateDir` evaluates to `<DSH_HOME>/superagent`;
   - the inserted rows deep-equal the bundle patch rows;
-  - `mumbo.overlay.yml` rows still apply (`deepseek-account` disabled).
+  - `mumbo.overlay.yml` rows still apply (`deepseek-account` disabled);
+  - #16's `@mumbo/edge-member` row is present;
+  - the composed profile loads with no preset mismatch (approval and the presets agree on `never`).
+- Condition (root devDependency): this test and A8's smoke run must show the `@mumbo/superagent` rows resolving. If they don't, stop and tell the `mumbo` session.
 - [ ] **Step 2:** Run `pnpm vitest run apps/cli/tests/project-overlay.spec.ts`. Expected: FAIL.
 - [ ] **Step 3:** Write the overlay.
 - [ ] **Step 4:** Run the test. Expected: PASS.
@@ -415,7 +416,7 @@ Report ready with the PR link and the head commit; do not wait for the merge.
   - Expected: no loopback error.
   - `curl -s -o /dev/null -w '%{http_code}' -H 'x-orchestrator-request: 1' http://<ip>:<port>/orchestrator/api/<a GET route from the http.ts table>` → `401`, or `403` when the host isn't trusted.
   - The panel, opened from the launch URL, shows "The GitHub Source names no repository."
-- [ ] **Step 4:** Push `m1/superagent` and open the PR to `main`. Tell the founder it is ready for F4.
+- [ ] **Step 4:** Push `m1/superagent` and open the PR to `main`. The founder merges PR #16 before this PR. Tell the founder it is ready for F4.
 
 ### A9: Egress check in PR CI (wave 0)
 
