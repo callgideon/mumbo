@@ -174,7 +174,11 @@ mkdir -p /root/.mumbo/ca /root/.mumbo/bin
 # One start at a time: the router can re-run this script while a first run is still setting up the CA or the proxy.
 (
 flock 9
-if ! { [ -f /root/.mumbo/ca/ca.crt ] && [ -f /root/.mumbo/ca/ca.key ] && [ "$(openssl x509 -noout -pubkey -in /root/.mumbo/ca/ca.crt)" = "$(openssl pkey -pubout -in /root/.mumbo/ca/ca.key)" ]; }; then
+a=$(openssl x509 -noout -pubkey -in /root/.mumbo/ca/ca.crt 2>/dev/null || true)
+b=$(openssl pkey -pubout -in /root/.mumbo/ca/ca.key 2>/dev/null || true)
+if [ -z "$a" ] || [ "$a" != "$b" ]; then
+  pkill -f github-local-proxy.mjs || true
+  rm -rf /root/.mumbo/ca/leaf
   openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj /CN=mumbo-box -keyout /root/.mumbo/ca/ca.key.tmp -out /root/.mumbo/ca/ca.crt.tmp
   chmod 600 /root/.mumbo/ca/ca.key.tmp
   mv /root/.mumbo/ca/ca.key.tmp /root/.mumbo/ca/ca.key

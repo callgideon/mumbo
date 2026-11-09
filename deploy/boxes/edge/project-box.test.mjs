@@ -37,7 +37,7 @@ test('a project box start script has the proxy setup in order, before the member
   assert.deepEqual(order, [...order].sort((a, b) => a - b))
   assert.match(s, /\(\nflock 9\n/)
   assert.match(s, /\) 9>\/root\/\.mumbo\/ca\.lock\n/)
-  assert.match(s, /openssl x509 -noout -pubkey -in \/root\/\.mumbo\/ca\/ca\.crt\)" = "\$\(openssl pkey -pubout -in \/root\/\.mumbo\/ca\/ca\.key\)/)
+  assert.match(s, /a=\$\(openssl x509 -noout -pubkey -in \/root\/\.mumbo\/ca\/ca\.crt [^\n]*\|\| true\)\nb=\$\(openssl pkey -pubout -in \/root\/\.mumbo\/ca\/ca\.key [^\n]*\|\| true\)\nif \[ -z "\$a" \] \|\| \[ "\$a" != "\$b" \]; then\n  pkill -f github-local-proxy\.mjs \|\| true\n  rm -rf \/root\/\.mumbo\/ca\/leaf\n  openssl req/)
   assert.match(s, /mv \/root\/\.mumbo\/ca\/ca\.key\.tmp .*\n.*mv \/root\/\.mumbo\/ca\/ca\.crt\.tmp/)
   assert.match(s, /9>&- &\n/)
   assert.match(s, /MUMBO_PANEL_ADMINS='o@x\.com,p@x\.com' /)
