@@ -117,7 +117,7 @@ describe('DeepSeekSearchApiProvider request mapping', () => {
 
   it.each([
     ['the collapsed question', '  How do\n\tI  install it?  ', 'How do I install it?'],
-    ['the first 128 characters', `${'问'.repeat(127)}题题`, `${'问'.repeat(127)}题`],
+    ['the first 128 characters', `${'질'.repeat(127)}문문`, `${'질'.repeat(127)}문`],
     ['whole surrogate pairs', `${'a'.repeat(127)}😀😀`, `${'a'.repeat(127)}😀`],
   ])('sends %s as ori_question', async (_case, question, expected) => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse(searchResponse()))

@@ -432,7 +432,7 @@ describe('Web session model selection', () => {
     const { ctx } = await harness()
     ctx.llm.registerAdapter(['plain'], new CatalogAdapter('Plain', [
       { provider: 'plain', id: 'plain-model', name: 'Plain Model' },
-      { provider: 'plain', id: 'badged-model', name: 'Badged Model', badge: { text: { en: 'New', zh: '新' }, tone: 'info' } },
+      { provider: 'plain', id: 'badged-model', name: 'Badged Model', badge: { text: { en: 'New', ja: 'ニュー' }, tone: 'info' } },
     ]))
     ctx.llm.registerAdapter(['described-reasoning'], new CatalogAdapter('Described Reasoning', [
       { provider: 'described-reasoning', id: 'reasoning-model', name: 'Reasoning Model' },
@@ -454,7 +454,7 @@ describe('Web session model selection', () => {
     expect(catalog.groups).toEqual(expect.arrayContaining([
       { id: 'plain', name: 'Plain', models: [
         { id: 'plain-model', name: 'Plain Model' },
-        { id: 'badged-model', name: 'Badged Model', badge: { text: { en: 'New', zh: '新' }, tone: 'info' } },
+        { id: 'badged-model', name: 'Badged Model', badge: { text: { en: 'New', ja: 'ニュー' }, tone: 'info' } },
       ] },
       {
         id: 'described-reasoning',

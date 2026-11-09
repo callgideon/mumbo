@@ -37,7 +37,7 @@ describe('shared DeepSeek credentials', () => {
     } finally { await ctx.fiber.dispose() }
   })
 
-  it.each(['bad key', '非法密钥', 'bad\nkey', '   '])('rejects malformed environment keys without exposing the value: %j', async (value) => {
+  it.each(['bad key', '잘못된키', 'bad\nkey', '   '])('rejects malformed environment keys without exposing the value: %j', async (value) => {
     const ctx = context(value)
     try {
       await expect(resolveDeepSeekApiKey(ctx, ref)).rejects.toMatchObject({ code: 'INVALID_CREDENTIAL' })

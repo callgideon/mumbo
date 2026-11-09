@@ -372,12 +372,12 @@ it('releases the UTF-8 input budget only on acknowledgement', async () => {
   const h = fixture()
   vi.mocked(h.remote.environment).mockResolvedValue(success({ ...environment, maxInputBytes: 6 }))
   await connected(h.model)
-  h.model.write('界界')
+  h.model.write('계계')
   await expect.poll(() => h.sent[0]?.length).toBe(1)
   h.attachments[0]!.push({ type: 'ack', sequence: 1 })
   h.attachments[0]!.push({ type: 'state', info: { ...info, cols: 90 }, writable: true })
   await expect.poll(() => h.model.state.getSnapshot().info?.cols).toBe(90)
-  h.model.write('界界')
+  h.model.write('계계')
   await expect.poll(() => h.sent[0]?.length).toBe(2)
   h.model.write('a')
   expect(h.model.state.getSnapshot()).toMatchObject({ phase: 'failed', issue: 'inputFull' })
@@ -477,13 +477,13 @@ function inputWindow(maxBytes: number): RemoteUplinkWindow {
 
 it('waits for complete-frame capacity and sends queued write and resize commands in order', async () => {
   const commands: TerminalInput[] = [
-    { type: 'write', sequence: 1, data: '\u0001界' },
+    { type: 'write', sequence: 1, data: '\u0001계' },
     { type: 'resize', sequence: 2, cols: 90, rows: 25 },
     { type: 'write', sequence: 3, data: 'last' },
   ]
   const h = fixture(undefined, inputWindow(Math.max(...commands.map(encodedFrame))))
   await connected(h.model)
-  h.model.write('\u0001界')
+  h.model.write('\u0001계')
   h.model.resize(90, 25)
   h.model.write('last')
   await expect.poll(() => h.sent[0]).toEqual(commands.slice(0, 1))

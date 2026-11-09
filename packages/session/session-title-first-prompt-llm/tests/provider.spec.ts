@@ -137,7 +137,7 @@ describe('first-prompt LLM title provider', () => {
   it('frames the first message as data and logs the exact system and input', async () => {
     const { ctx, adapter } = await harness()
     const session = ctx.sessions.create(SessionId('first-logging'))
-    const first = appendHumanPrompt(session, 'Room "quote" and 番茄')
+    const first = appendHumanPrompt(session, 'Room "quote" and 토마토')
 
     await ctx.sessionTitle.refresh(session)
 
@@ -145,7 +145,7 @@ describe('first-prompt LLM title provider', () => {
     const prompt = options.messages[0]?.content[0]
     expect(prompt?.type === 'text' && prompt.text).toBe(
       `Generate the session title from this JSON array of human messages:\n${JSON.stringify([
-        { seq: first.seq, text: 'Room "quote" and 番茄' },
+        { seq: first.seq, text: 'Room "quote" and 토마토' },
       ])}`,
     )
     expect(options.system).toBe(SYSTEM)

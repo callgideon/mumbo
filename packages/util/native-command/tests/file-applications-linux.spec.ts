@@ -12,7 +12,7 @@ async function fixture() {
   onTestFinished(() => rm(root, { recursive: true, force: true }))
   await mkdir(join(root, 'applications', 'nested'), { recursive: true })
   await mkdir(join(root, 'pixmaps'))
-  await writeFile(join(root, 'applications', 'player.desktop'), '[Desktop Entry]\nName=Player\nName[zh_CN]=播放器\nIcon=player\nExec=player %f\n[Desktop Action Extra]\nName=Wrong\n')
+  await writeFile(join(root, 'applications', 'player.desktop'), '[Desktop Entry]\nName=Player\nName[zh_CN]=플레이어\nIcon=player\nExec=player %f\n[Desktop Action Extra]\nName=Wrong\n')
   await writeFile(join(root, 'applications', 'nested', 'other.desktop'), '[Desktop Entry]\nName=Other\nExec=other %f\n')
   await writeFile(join(root, 'pixmaps', 'player.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
   const run = vi.fn<NativeCommandRunner>(async (command, args) => ({
@@ -27,7 +27,7 @@ it('deduplicates GIO handlers, resolves nested ids, localizes names, and reuses 
   const signal = new AbortController().signal
   const apps = await nativeFileApplications('/file.mp3', signal, facts)
   expect(apps).toEqual([
-    { id: join(root, 'applications', 'player.desktop'), name: '播放器', default: true, icon: expect.stringMatching(/^data:image\/svg\+xml;base64,/) as string },
+    { id: join(root, 'applications', 'player.desktop'), name: '플레이어', default: true, icon: expect.stringMatching(/^data:image\/svg\+xml;base64,/) as string },
     { id: join(root, 'applications', 'nested', 'other.desktop'), name: 'Other', default: false, icon: null },
   ])
   await openNativeFileApplication('/file.mp3', apps[0]!.id, signal, facts)

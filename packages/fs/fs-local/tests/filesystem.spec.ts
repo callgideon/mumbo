@@ -661,10 +661,10 @@ describe('writeText', () => {
     await remountWithDiffLimit(8)
     await writeFile(join(dir, 'cjk.txt'), 'tiny')
     const target = await fs.resolve('cjk.txt')
-    const outcome = await fs.writeText(target, '你好吗')
+    const outcome = await fs.writeText(target, '안녕하세요')
     expect(outcome.operation).toBe('update')
     expect(outcome.before).toBeNull()
-    expect(outcome.after).toBe('你好吗')
+    expect(outcome.after).toBe('안녕하세요')
   })
 
   it('an overwrite with BOTH sides below the whole-file bound keeps its contextual before basis', async () => {

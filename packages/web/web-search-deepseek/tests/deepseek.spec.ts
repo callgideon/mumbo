@@ -188,7 +188,7 @@ describe('DeepSeekSearchProvider availability', () => {
 })
 
 describe('DeepSeekSearchProvider request mapping', () => {
-  it.each(['bad key', '非法密钥'])('rejects malformed referenced keys before a legacy request: %s', async (value) => {
+  it.each(['bad key', '잘못된키'])('rejects malformed referenced keys before a legacy request: %s', async (value) => {
     const ctx = new Context()
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)

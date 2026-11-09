@@ -30,7 +30,7 @@ it.each([false, true])('uses Messages, schema=%s', async (schema) => {
   const connection = resolveAdapterOptions(schema ? plainOptions(Config(raw)) : raw)
   const response = await assemble(adapter(() => connection).stream(options()))
 
-  expect(response.message.content).toEqual([{ type: 'text', text: 'Hello 世界' }])
+  expect(response.message.content).toEqual([{ type: 'text', text: 'Hello 세계' }])
   expect(http.requests).toHaveLength(1)
   expect(http.requests[0]).toMatchObject({
     path: '/anthropic/v1/messages',

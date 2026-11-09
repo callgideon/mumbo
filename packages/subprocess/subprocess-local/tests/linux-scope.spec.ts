@@ -284,7 +284,7 @@ describe('Linux native capability selection', () => {
   })
 
   it.skipIf(process.platform !== 'linux')('reads a real listening socket from the kernel socket table', async () => {
-    const runtime = mkdtempSync(join(tmpdir(), 'dsh-运行时-'))
+    const runtime = mkdtempSync(join(tmpdir(), 'dsh-런타임-'))
     directories.push(runtime)
     mkdirSync(join(runtime, 'systemd'))
     const server = createServer()
@@ -310,7 +310,7 @@ describe('Linux native capability selection', () => {
   })
 
   it('matches a socket path outside ASCII in the kernel socket table', () => {
-    const runtime = mkdtempSync(join(tmpdir(), 'dsh-运行时-'))
+    const runtime = mkdtempSync(join(tmpdir(), 'dsh-런타임-'))
     directories.push(runtime)
     const table = join(runtime, 'unix')
     writeFileSync(table, `0000000048ab7e3a: 00000002 00000000 00010000 0001 01 77 ${join(runtime, 'systemd', 'private')}\n`)

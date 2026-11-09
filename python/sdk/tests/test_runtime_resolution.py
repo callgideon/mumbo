@@ -260,7 +260,7 @@ def test_python_dsh_command_executes_the_bundled_cli(
 @pytest.mark.parametrize("returncode", [0, 37, 513])
 def test_windows_console_waits_and_forwards_runtime_status(monkeypatch: pytest.MonkeyPatch, returncode: int) -> None:
     monkeypatch.setenv("DSH_HOME", "/explicit/home")
-    monkeypatch.setattr(runtime, "sys", SimpleNamespace(platform="win32", argv=["dsh", "plugin", "argument with spaces", "中文"]))
+    monkeypatch.setattr(runtime, "sys", SimpleNamespace(platform="win32", argv=["dsh", "plugin", "argument with spaces", "한글"]))
     monkeypatch.setattr(runtime, "resolve_bundled_launch_args", lambda: ("runtime.exe",))
     called = []
 
@@ -276,7 +276,7 @@ def test_windows_console_waits_and_forwards_runtime_status(monkeypatch: pytest.M
     with pytest.raises(SystemExit) as result:
         main()
     assert result.value.code == returncode
-    assert called == [(("runtime.exe", "plugin", "argument with spaces", "中文"), {"env": os.environ})]
+    assert called == [(("runtime.exe", "plugin", "argument with spaces", "한글"), {"env": os.environ})]
 
 
 @pytest.mark.parametrize("returncode", [0, 37, pytest.param(513, marks=pytest.mark.skipif(sys.platform != "win32", reason="POSIX truncates process exit codes to eight bits"))])
@@ -286,22 +286,22 @@ def test_windows_console_branch_preserves_real_child_io_and_completion(tmp_path:
     child.write_text(
         "import pathlib,sys\n"
         "assert sys.argv[1] == 'argument with spaces'\n"
-        "assert sys.argv[2] == '中文'\n"
-        "print('stdout-中文', flush=True)\n"
-        "print('stderr-中文', file=sys.stderr, flush=True)\n"
+        "assert sys.argv[2] == '한글'\n"
+        "print('stdout-한글', flush=True)\n"
+        "print('stderr-한글', file=sys.stderr, flush=True)\n"
         f"pathlib.Path({str(sentinel)!r}).write_text('done')\n"
         f"raise SystemExit({returncode})\n", encoding="utf-8",
     )
     driver = (
         "import deepseek_harness_runtime as runtime; from types import SimpleNamespace; "
-        f"runtime.sys = SimpleNamespace(platform='win32', argv=['dsh', 'argument with spaces', '中文']); "
+        f"runtime.sys = SimpleNamespace(platform='win32', argv=['dsh', 'argument with spaces', '한글']); "
         f"runtime.resolve_bundled_launch_args = lambda: ({sys.executable!r}, {str(child)!r}); runtime.main()"
     )
     result = subprocess.run([sys.executable, "-c", driver], capture_output=True, text=True, encoding="utf-8",
                             env={**os.environ, "DSH_HOME": str(tmp_path), "PYTHONIOENCODING": "utf-8"}, timeout=15)
     assert result.returncode == returncode, result.stderr
-    assert result.stdout == "stdout-中文\n"
-    assert result.stderr == "stderr-中文\n"
+    assert result.stdout == "stdout-한글\n"
+    assert result.stderr == "stderr-한글\n"
     assert sentinel.read_text() == "done"
 
 
@@ -339,7 +339,7 @@ def test_runtime_starts_independently_of_office_engine(
 def test_explicit_download_uses_runtime_without_a_harness_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, function, resource: str,
 ) -> None:
-    root = tmp_path / "中文缓存"
+    root = tmp_path / "한글캐시"
     root.mkdir()
     _resource_sidecars(root / "deepseek-harness-sdk-runtime-linux-x64")
     monkeypatch.setattr(runtime, "_current_platform_tag", lambda: "linux-x64")
@@ -350,15 +350,15 @@ def test_explicit_download_uses_runtime_without_a_harness_home(
     monkeypatch.delenv("DSH_HOME", raising=False)
     monkeypatch.setattr(runtime, "resolve_bundled_launch_args", lambda: (sys.executable, str(script)))
     assert function() == destination
-    script.write_text("import sys\nsys.stderr.buffer.write('下载失败'.encode('utf-8'))\nsys.exit(2)\n", encoding="utf-8")
-    with pytest.raises(RuntimeError, match="下载失败"):
+    script.write_text("import sys\nsys.stderr.buffer.write('다운로드 실패'.encode('utf-8'))\nsys.exit(2)\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="다운로드 실패"):
         function()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="LC_ALL=C is a POSIX locale fixture")
 def test_download_decodes_utf8_in_an_ascii_locale(tmp_path: Path) -> None:
     script = tmp_path / "download.py"
-    destination = tmp_path / "中文缓存"
+    destination = tmp_path / "한글캐시"
     script.write_text("import sys\nsys.stdout.buffer.write(" + json.dumps(str(destination), ensure_ascii=False).encode('utf-8').__repr__() + ")\n", encoding="utf-8")
     code = ("import sys,locale,deepseek_harness_runtime as r; "
             "assert locale.getpreferredencoding(False).lower() not in ('utf-8','utf8'); "

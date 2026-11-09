@@ -4,7 +4,7 @@ import { defaultWorkspaceDirectory, validateDocumentsDirectory } from '../src/de
 
 describe('system Documents directory', () => {
   it.each([
-    ['darwin', '/Users/a/文档/\n', '/Users/a/文档/deepseek-harness/default-workspace', 'osascript'],
+    ['darwin', '/Users/a/문서/\n', '/Users/a/문서/deepseek-harness/default-workspace', 'osascript'],
     ['win32', 'D:\\Redirected Documents\r\n', 'D:\\Redirected Documents\\deepseek-harness\\default-workspace', 'powershell.exe'],
     ['linux', '/home/a/My Documents\n', '/home/a/My Documents/deepseek-harness/default-workspace', 'xdg-user-dir'],
   ] as const)('uses the %s account directory and preserves spaces and Unicode', async (platform, stdout, path, command) => {

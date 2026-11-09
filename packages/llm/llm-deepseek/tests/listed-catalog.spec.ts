@@ -141,7 +141,7 @@ describe('with a listing', () => {
   })
 
   it('collects badges of offered models only and reports a dropped badge', () => {
-    const badge = { text: { en: 'New', zh: '新' }, tone: 'info' }
+    const badge = { text: { en: 'New', ja: 'ニュー' }, tone: 'info' }
     const catalog = resolve([
       { ...FLASH, ...shows(badge) },
       { ...PRO, ...shows({ text: '' }) },

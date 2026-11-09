@@ -152,7 +152,7 @@ describe('explicit product telemetry', () => {
 
   it.each([
     { endpoint: 'broken' }, { endpoint: 'ftp://collector.test/logs' },
-    { channel: '' }, { channel: 'bad\nchannel' }, { channel: '中文' }, { timeoutMillis: 0 },
+    { channel: '' }, { channel: 'bad\nchannel' }, { channel: '한글' }, { timeoutMillis: 0 },
     { maxExportBatchSize: 0 }, { maxExportBatchSize: 2, maxQueueSize: 1 },
     { maxQueueSize: -1 }, { scheduledDelayMillis: 0 }, { exportTimeoutMillis: Infinity },
     { shutdownTimeoutMillis: 2_147_483_648 },

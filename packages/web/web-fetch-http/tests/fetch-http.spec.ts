@@ -199,10 +199,10 @@ describe('HttpFetchProvider charset recovery', () => {
   it.each(['utf-8,gbk', 'gbk,utf8', 'not-a-charset, utf-8'])('decodes UTF-8 HTML declared as %s', async (charset) => {
     handler = (_req, res) => {
       res.writeHead(200, { 'content-type': `text/html; charset=${charset}` })
-      res.end('<meta charset="UTF-8"><p>你好</p>')
+      res.end('<meta charset="UTF-8"><p>안녕</p>')
     }
     const result = await provider().fetch({ url: base })
-    expect(result.body).toEqual({ kind: 'html', content: '<meta charset="UTF-8"><p>你好</p>' })
+    expect(result.body).toEqual({ kind: 'html', content: '<meta charset="UTF-8"><p>안녕</p>' })
     expect(result.truncated).toBe(false)
   })
 
@@ -234,12 +234,12 @@ describe('HttpFetchProvider charset recovery', () => {
     }))
   })
 
-  it('keeps single-label GBK decoding', async () => {
+  it('keeps single-label EUC-KR decoding', async () => {
     handler = (_req, res) => {
-      res.writeHead(200, { 'content-type': 'text/plain; charset=gbk' })
-      res.end(Buffer.from([0xD6, 0xD0, 0xCE, 0xC4]))
+      res.writeHead(200, { 'content-type': 'text/plain; charset=euc-kr' })
+      res.end(Buffer.from([0xC7, 0xD1, 0xB1, 0xDB]))
     }
-    expect((await provider().fetch({ url: base })).body.content).toBe('中文')
+    expect((await provider().fetch({ url: base })).body.content).toBe('한글')
   })
 
   it('keeps replacement decoding for a single declared charset', async () => {
@@ -251,16 +251,16 @@ describe('HttpFetchProvider charset recovery', () => {
   })
 
   it.each([
-    ['中文', 5, true],
-    ['中文', 3, true],
-    ['中', 3, false],
+    ['한글', 5, true],
+    ['한글', 3, true],
+    ['한', 3, false],
   ] as const)('returns complete UTF-8 characters for %j with byte cap %i (truncated: %s)', async (body, maxResponseBytes, truncated) => {
     handler = (_req, res) => {
       res.writeHead(200, { 'content-type': 'text/plain; charset=gbk,utf-8' })
       res.end(body)
     }
     const result = await provider({ maxResponseBytes }).fetch({ url: base })
-    expect(result.body.content).toBe('中')
+    expect(result.body.content).toBe('한')
     expect(result.truncated).toBe(truncated)
   })
 
@@ -287,7 +287,7 @@ describe('HttpFetchProvider charset recovery', () => {
   })
 
   it('uses UTF-8 even when a long body also forms valid GBK', async () => {
-    // C2 A9 represents © in UTF-8 and 漏 in GBK; length cannot disambiguate it.
+    // C2 A9 represents © in UTF-8 and a different Han character in GBK; length cannot disambiguate it.
     handler = (_req, res) => {
       res.writeHead(200, { 'content-type': 'text/plain; charset=gbk,utf-8' })
       res.end('©'.repeat(1000))

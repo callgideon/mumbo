@@ -400,7 +400,7 @@ describe.skipIf(!hasPwsh)('terminal-bash pwsh real shell', () => {
       submit: true,
     })
     const result = await sent.done
-    expect(result.viewport).toContain('中文 encoding-ok')
+    expect(result.viewport).toContain('한글 encoding-ok')
     await ctx.terminals.kill(agent, created.sessionId)
   }, 30_000)
 })

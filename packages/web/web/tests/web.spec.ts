@@ -81,7 +81,7 @@ describe('WebRuntime provider listing', () => {
     expect(web.listProviders()).toEqual({ search: [], fetch: [] })
     web.registerSearchProvider({ ...makeSearchProvider('b', available, () => Promise.resolve(searchResult('b'))), title: 'B search' })
     const disposeA = web.registerSearchProvider(makeSearchProvider('a', unavailable, () => Promise.resolve(searchResult('a'))))
-    const description = { en: 'Fetches from this machine.', zh: '本机获取' }
+    const description = { en: 'Fetches from this machine.', ja: 'ローカルしゅとく' }
     web.registerFetchProvider({ ...makeFetchProvider('http', available, fetchResult('http')), title: 'Direct fetch', description })
     expect(web.listProviders()).toEqual({
       search: [{ id: 'b', title: 'B search' }, { id: 'a' }],

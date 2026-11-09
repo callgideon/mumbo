@@ -34,7 +34,7 @@ describe('session title normalization', () => {
     expect(normalizeSessionTitle('\u001B]0;stolen\u0007  Hello\t brave\nnew world  ', 80))
       .toBe('Hello brave new world')
     expect(fallbackSessionTitle('one two three four', 3, 80)).toBe('one two three')
-    expect(fallbackSessionTitle('你好世界', 5, 7)).toBe('你好')
+    expect(fallbackSessionTitle('안녕하세', 5, 7)).toBe('안녕')
     expect(Buffer.byteLength(fallbackSessionTitle('😀😀', 5, 5), 'utf8')).toBe(4)
   })
 

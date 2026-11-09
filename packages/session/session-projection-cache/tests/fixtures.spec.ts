@@ -127,7 +127,7 @@ async function placeDoc(root: string, id: string, name: string): Promise<Fixture
  */
 async function assertRewrite(ctx: Context, root: string, id: SessionId): Promise<void> {
   const session = ctx.sessions.create(id)
-  session.append('fixtures-test/set-title', { title: '重写标题' })
+  session.append('fixtures-test/set-title', { title: 'rewritten title' })
   await ctx.sessionProjectionCache.write(session)
   const path = join(root, projectionCacheDomainSpec.name, 'sessions', `${id}.json`)
   const doc = JSON.parse(await readFile(path, 'utf8')) as FixtureDoc
@@ -137,7 +137,7 @@ async function assertRewrite(ctx: Context, root: string, id: SessionId): Promise
     isSeeded: false,
     inheritedEventCount: 0,
   })
-  expect(doc.record.rows['title']?.val).toBe('重写标题')
+  expect(doc.record.rows['title']?.val).toBe('rewritten title')
 }
 
 afterEach(async () => {

@@ -746,8 +746,8 @@ describe('Host Remote event routing', () => {
     expect(session.getSnapshot().running).toBe(true)
     expect(manager.getListSnapshot().items[0]?.running).toBe(true)
 
-    manager.handleSessionError(S1, '炸了')
-    expect(session.getSnapshot().lastAgentError).toBe('炸了')
+    manager.handleSessionError(S1, 'blew up')
+    expect(session.getSnapshot().lastAgentError).toBe('blew up')
 
     manager.handleSessionRemoved(S1)
     expect(manager.getListSnapshot().items).toHaveLength(0)
@@ -1303,7 +1303,7 @@ describe('remaining branches', () => {
   it('ignores Host status and error events for sessions without an instance', ({ mock, remote }) => {
     const manager = makeManager(mock, remote)
     manager.handleSessionStatus(S2, true)
-    manager.handleSessionError(S2, '无实例')
+    manager.handleSessionError(S2, 'no instance')
   })
 
   it('keeps list-entry identity for unchanged rows across an unrelated list change', async ({ mock, remote }) => {

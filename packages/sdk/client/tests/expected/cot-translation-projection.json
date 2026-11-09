@@ -43,7 +43,7 @@
       "ignorable": true,
       "data": {
         "requestSeq": 3,
-        "text": "翻译结果"
+        "text": "translated result"
       }
     }
   ],
@@ -95,7 +95,7 @@
         "ignorable": true,
         "data": {
           "requestSeq": 3,
-          "text": "翻译结果"
+          "text": "translated result"
         }
       }
     }
