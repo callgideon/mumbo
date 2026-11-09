@@ -548,3 +548,14 @@ test('home page lists the assistant, desktop and the member\'s projects without 
     assert.deepEqual(ensured, [])
   } finally { server.close() }
 })
+
+test('never-pause keepalive drops a box E2B no longer has', async () => {
+  const e2b = fakeE2B()
+  e2b.Sandbox.setTimeout = async (id) => { throw new Error(`Sandbox ${id} not found`) }
+  const store = memoryStore()
+  const b = boxes({ e2b, store, cfg: { ...cfg, pauseIdle: false }, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'PUT', log: () => {} })
+  const { id } = await b.ensure('a@x.com')
+  await store.patchBox(id, { backedUp: Date.now() + 3600_000 })
+  await b.sweep(Date.now() + 6 * 60_000)
+  assert.equal(await store.getBox(id), undefined)
+})

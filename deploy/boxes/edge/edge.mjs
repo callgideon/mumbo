@@ -307,6 +307,8 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, log = 
       const due = listed.filter(b => !b.paused && !b.creating && (idle(b) || now - b.backedUp >= cfg.backupEveryMs))
       // Backups run in parallel (bounded) and take no user lock, so a long upload never blocks that user's visit.
       await inParallel(due, cfg.backupConcurrency ?? 8, b => backup(b.id, b).then(() => true, async (e) => {
+        // A box E2B no longer has cannot be backed up again; its last backup stays the user's restore point.
+        if (/not found/i.test(e.message)) { await store.deleteBox(b.id); say({ level: 'warn', msg: 'dropped missing box', user: b.email, box: b.id }); return false }
         await store.patchBox(b.id, { backedUp: now - cfg.backupEveryMs + 5 * 60_000 })  // retry in 5 minutes
         say({ level: 'error', msg: 'backup failed', user: b.email, box: b.id, error: e.message })
         return false
@@ -315,7 +317,11 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, log = 
       // Never-pause mode: keep E2B's own timer (onTimeout: pause) from pausing a box nobody is using.
       if (cfg.pauseIdle === false) {
         await inParallel(listed.filter(b => !b.paused && !b.creating && now - b.extended >= 5 * 60_000), cfg.backupConcurrency ?? 8,
-          b => e2b.Sandbox.setTimeout(b.id, timeout()).then(() => store.patchBox(b.id, { extended: now }), e => say({ level: 'warn', msg: 'keepalive failed', box: b.id, error: e.message })))
+          b => e2b.Sandbox.setTimeout(b.id, timeout()).then(() => store.patchBox(b.id, { extended: now }), async (e) => {
+            // A box E2B no longer has (killed outside the edge) is dropped; the next visit creates it from its backup.
+            if (/not found/i.test(e.message)) { await store.deleteBox(b.id); return say({ level: 'warn', msg: 'dropped missing box', user: b.email, box: b.id }) }
+            say({ level: 'warn', msg: 'keepalive failed', box: b.id, error: e.message })
+          }))
       }
       for (const b of listed.filter(x => x.paused && x.wakeAt && x.wakeAt <= now + 60_000)) await wake(b, now)
     } finally {
