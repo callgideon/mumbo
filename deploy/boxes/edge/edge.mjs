@@ -759,7 +759,15 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log
     if (project) return { project, port: '3080', path: url, base: '' }
     if (host === cfg.publicHost) return boxRoute(url, cfg.projectDomain)
   }
-  const server = createServer(async (req, res) => {
+  // An unexpected throw answers 500, or closes the upgrade, instead of leaving it open. The log has the path without the
+  // query, which can carry a launch token.
+  const failed = (req, e) => log(JSON.stringify({ edge: 'error', host: hostOf(req), path: String(req.url).split('?')[0], error: e.message }))
+  const server = createServer((req, res) => onRequest(req, res).catch((e) => {
+    failed(req, e)
+    if (!res.headersSent) page(res, 500, 'Something went wrong. Reload to try again.', false); else res.destroy()
+  }))
+  server.on('upgrade', (req, socket, head) => onUpgrade(req, socket, head).catch((e) => { failed(req, e); socket.destroy() }))
+  async function onRequest(req, res) {
     if (skippedSignin(req)) return json(res, 400, { error: 'bad request' })
     // The edge's own pages; a box's response replaces these through noFraming.
     res.setHeader('x-frame-options', 'SAMEORIGIN')
@@ -817,8 +825,8 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log
     })
     up.on('error', (e) => { quiet(box.forget(target.id)); if (!res.headersSent) page(res, 502, 'Could not reach your box. Retrying…'); else res.destroy(); log(JSON.stringify({ edge: 'error', user: email, error: e.message })) })
     req.pipe(up)
-  })
-  server.on('upgrade', async (req, socket, head) => {
+  }
+  async function onUpgrade(req, socket, head) {
     if (skippedSignin(req)) return socket.end('HTTP/1.1 400 Bad Request\r\n\r\n')
     // As for HTTP, only the public host's and project hosts' WebSockets reach a box; the approve host and unknown hosts
     // are refused. So is an upgrade whose Origin is not this host (browsers always send one): the sign-in cookie covers
@@ -849,7 +857,7 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log
       up.on('error', () => socket.destroy())
       up.end()
     } catch { socket.destroy() }
-  })
+  }
   return server
 }
 
