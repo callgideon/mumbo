@@ -25,6 +25,7 @@ The mumbo family connects a running Web host to the platform around it: people's
 | Package | Role |
 |---|---|
 | [`box-links/`](box-links/README.md) | Sidebar links from a box's Web page to the box home page and desktop live view |
+| [`edge-member/`](edge-member/README.md) | Admits project members from the edge-signed header as non-owner principals with collaborator access |
 | [`mcp/`](mcp/README.md) | Authenticated loopback MCP server through which allowlisted people drive the host's assistant Session |
 
 -----

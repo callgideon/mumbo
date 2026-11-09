@@ -417,6 +417,7 @@
       "@mumbo/box-links": ["./packages/mumbo/box-links/src/index.ts"],
       "@mumbo/box-links/client": ["./packages/mumbo/box-links/src/client/index.ts"],
       "@mumbo/mcp": ["./packages/mumbo/mcp/src/index.ts"],
+      "@mumbo/edge-member": ["./packages/mumbo/edge-member/src/index.ts"],
       // BEGIN generated package aliases — pnpm run gen-tsconfig-paths
       "@deepseek-ai/dsh-acp": ["./packages/acp/acp/src"],
       "@deepseek-ai/dsh-acp-app": ["./packages/bundle/acp-app/src"],

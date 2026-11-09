@@ -25,6 +25,7 @@ mumbo 家族把运行中的 Web 主机与其周围的平台连接起来：在明
 | 包 | 职责 |
 |---|---|
 | [`box-links/`](box-links/README.zh.md) | 从 box 的 Web 页面通往 box 主页和桌面实时画面的侧栏链接 |
+| [`edge-member/`](edge-member/README.zh.md) | 以边缘签名的请求头把项目成员准入为拥有协作者访问权的非 owner principal |
 | [`mcp/`](mcp/README.zh.md) | 经过身份验证的 loopback MCP 服务器，白名单中的人通过它驱动主机的助手会话 |
 
 -----

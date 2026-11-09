@@ -16,6 +16,8 @@ import { API_PATH } from './api-path.ts'
 import type { BrowserAuth } from './browser-auth.ts'
 import { Peer } from './peer.ts'
 import type {
+  ConnectionAuthenticator,
+  HostConnectionAuthenticators,
   PeerAdmission,
   ConnectionAdmission,
   ConnectionIndexRequest,
@@ -75,6 +77,7 @@ export class HostConnectionService extends Service implements HostConnectionHand
   private disposed = false
   private readonly interceptors = new Map<string, ConnectionRpcInterceptor>()
   private readonly fetchRoutes = new Map<string, RegisteredFetchRoute>()
+  private readonly authenticatorList: ConnectionAuthenticator[] = []
 
   readonly allowsRemoteAuthorities: boolean
 
@@ -119,16 +122,33 @@ export class HostConnectionService extends Service implements HostConnectionHand
     }
   }
 
-  /** Apply the Host/Origin fence and require an authenticated live Peer. */
-  requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection {
-    const admission = this.admit(request)
-    return 'rejection' in admission ? admission.rejection : undefined
+  /** Non-owner authenticator registry scoped to the Context reading this service. */
+  get authenticators(): HostConnectionAuthenticators {
+    const owner = this.ctx
+    return {
+      register: authenticator => owner.effect(() => {
+        this.authenticatorList.push(authenticator)
+        return () => {
+          this.authenticatorList.splice(this.authenticatorList.indexOf(authenticator), 1)
+        }
+      }, 'client-connection: authenticator'),
+    }
   }
 
-  /** Browser requests share an owner Peer; API HTTP does not depend on an attached socket. */
+  /** Apply the Host/Origin fence and require an authenticated live owner Peer. */
+  requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection {
+    const admission = this.admit(request)
+    if ('rejection' in admission) return admission.rejection
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+    return admission.peer.principal.kind === 'owner' ? undefined : 403
+  }
+
+  /** Authenticators first; browser requests share an owner Peer; API HTTP does not depend on an attached socket. */
   admit(request: ConnectionTrustRequest): PeerAdmission {
     if (!this.isTrusted(request)) return { rejection: 403 }
     if (this.disposed) return { rejection: 401 }
+    const authenticated = this.authenticate(request)
+    if (authenticated !== undefined) return { peer: authenticated }
     const secure = this.owner.get('webServer')?.protocol === 'https:'
     if (this.browserAuth.isAuthenticated(request, secure)) return { peer: this.browserPeer }
     const id = this.browserAuth.authenticateApi(request, secure)
@@ -161,6 +181,21 @@ export class HostConnectionService extends Service implements HostConnectionHand
     }
   }
 
+  private authenticate(request: ConnectionTrustRequest): PeerScope | undefined {
+    for (const authenticator of this.authenticatorList) {
+      let peer: PeerScope | undefined
+      try {
+        peer = authenticator(request)
+      } catch (error) {
+        // A faulty authenticator must not break owner admission; the request continues to the next check.
+        this.owner.logger.warn('client-connection: an authenticator failed; passing the request on', error)
+        continue
+      }
+      if (peer !== undefined) return peer
+    }
+    return undefined
+  }
+
   private isTrusted(request: ConnectionTrustRequest): boolean {
     const carrier = this.owner.get('webServer')
     return isTrustedApiRequest(request, this.trustedHosts, carrier?.host, carrier?.protocol ?? 'http:')
@@ -188,10 +223,19 @@ export class HostConnectionService extends Service implements HostConnectionHand
   }
 
   /**
-   * Authenticate an index request; native TLS listeners mint Secure cookies.
+   * Authenticate an owner index request; native TLS listeners mint Secure cookies.
    */
   authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): boolean {
     return this.browserAuth.authorizeIndex(request, response, this.ctx.get('webServer')?.protocol === 'https:')
+  }
+
+  /** Admit an index request for an authenticator's Peer, else for the owner's browser Peer. */
+  admitIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): PeerScope | undefined {
+    if (!this.disposed && this.isTrusted(request)) {
+      const authenticated = this.authenticate(request)
+      if (authenticated !== undefined) return authenticated
+    }
+    return this.authorizeIndex(request, response) ? this.browserPeer : undefined
   }
 
   /** Add this process's launch token to the clean application URL. */
@@ -265,6 +309,13 @@ export class HostConnectionService extends Service implements HostConnectionHand
         if ('rejection' in admission) {
           res.writeHead(admission.rejection)
           res.end(admission.rejection === 401 ? 'unauthorized' : 'forbidden')
+          return
+        }
+        // Dedicated channels bypass Gateway access checks, so only the owner reaches them.
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+        if (admission.peer.principal.kind !== 'owner') {
+          res.writeHead(403)
+          res.end('forbidden')
           return
         }
         await bridge(req, res, fetchHandler, admission.peer)

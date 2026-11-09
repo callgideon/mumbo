@@ -42,15 +42,28 @@ const messageData = z.object({
 
 /** An `assistant/message` event logs its message under `message`, beside the turn's settlement. */
 const assistantData = z.object({ message: messageData })
+/** A logged Host principal that names a person by email, such as `edge-member`. */
+const namedPrincipal = z.object({ kind: z.string(), email: z.string() })
 
 /** One message as `agent_read` reports it. */
 interface ReadMessage {
   readonly seq: number
   readonly role: 'user' | 'assistant'
-  /** `<kind>:<principal>` when the source names a person, else the source kind. */
+  /** `<kind>:<principal label>` when the source names a person, else the source kind. */
   readonly source: string
   /** Fenced text blocks joined by newlines. */
   readonly text: string
+}
+
+/**
+ * Name the person a source records: an MCP handle, or a non-owner Host principal such as a mumbo project member.
+ * @param principal - the source's `principal` field as logged.
+ * @returns `<handle>` or `<principal kind>:<email>`, or undefined when the source names nobody.
+ */
+function principalLabel(principal: unknown): string | undefined {
+  if (typeof principal === 'string') return principal
+  const parsed = namedPrincipal.safeParse(principal)
+  return parsed.success ? `${parsed.data.kind}:${parsed.data.email}` : undefined
 }
 
 /**
@@ -61,14 +74,15 @@ interface ReadMessage {
 function toMessage(event: SessionWireEvent, includeContext: boolean): ReadMessage[] {
   if (!MESSAGE_TYPES.has(event.type) || event.surfaceOp !== 'append') return []
   const { content, source } = event.type === 'user/message' ? messageData.parse(event.data) : assistantData.parse(event.data).message
-  const fromPerson = source.kind === 'user' || typeof source.principal === 'string'
+  const person = principalLabel(source.principal)
+  const fromPerson = source.kind === 'user' || person !== undefined
   if (event.type === 'user/message' && !fromPerson && !includeContext) return []
   const text = content.flatMap(block => block.type === 'text' && typeof block.text === 'string' ? [block.text] : []).join('\n')
   if (text === '') return []
   return [{
     seq: event.seq,
     role: event.type === 'user/message' ? 'user' : 'assistant',
-    source: typeof source.principal === 'string' ? `${source.kind}:${source.principal}` : source.kind,
+    source: person === undefined ? source.kind : `${source.kind}:${person}`,
     text: fence(text),
   }]
 }
