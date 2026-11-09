@@ -483,7 +483,7 @@ test('project boxes: own masked host and public path, no desktop or browser tool
   const c = { llmHost: 'llm.x', publicHost: 'boxes.x' }
   const site = boxSite(c, 'project:0123456789abcdef')
   assert.deepEqual(site, { host: 'p-0123456789abcdef.boxes.x', publicUrl: 'https://boxes.x/p/0123456789abcdef/', desktop: false })
-  const script = startScript(c, 'T', site)
+  const script = startScript(c, 'T', site, '', undefined, { proxy: 'P', gh: 'G' })
   assert.ok(!script.includes('browser-use') && !script.includes('chromium'))
   assert.match(script, /--trusted-host boxes\.x --trusted-host p-0123456789abcdef\.boxes\.x/)
   assert.deepEqual(boxSite(c, 'a@x.com'), { host: 'boxes.x', publicUrl: 'https://boxes.x/', desktop: true })
@@ -608,7 +608,7 @@ test('member header: exact format, signed with the per-box key, 5 minutes', asyn
 test('project start script carries the member key and loads the project overlay only when the image has it', async () => {
   const c = { llmHost: 'l', publicHost: 'boxes.x' }
   const { boxSite } = await import('./edge.mjs')
-  const p = startScript(c, 'T', boxSite(c, 'project:0123456789abcdef'), 'role', 'KEYTEXT')
+  const p = startScript(c, 'T', boxSite(c, 'project:0123456789abcdef'), 'role', 'KEYTEXT', { proxy: 'P', gh: 'G' })
   assert.match(p, /export MUMBO_MEMBER_KEY=KEYTEXT/)
   assert.match(p, /if \[ -f \/src\/deploy\/mumbo-project\.overlay\.yml \]; then PROJECT_PATCH="--patch \/src\/deploy\/mumbo-project\.overlay\.yml"; touch \/root\/\.mumbo\/member-auth; else rm -f \/root\/\.mumbo\/member-auth; fi/)
   assert.match(p, /sandboxes\.overlay\.yml \$PROJECT_PATCH/)
