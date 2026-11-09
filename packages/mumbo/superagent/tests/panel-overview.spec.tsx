@@ -122,8 +122,8 @@ it('words a refused retry by its code', async () => {
   expect(document.querySelector('.dt-toast')?.textContent).toBe(en['userError.notRetryable'])
 })
 
-it('shows the overview in English', async () => {
-  await mount(en)
+it('titles the overview sections, stages and flow counts from the dictionary', async () => {
+  await mount()
   expect(all('.dt-section-title').map(title => title.textContent)).toEqual([`${en.pendingTickets}2`, `${en.problems}2`,
     `${en.lastDay}${en.details}`, `${en['term.executor']}${en.details}`])
   expect(all('.dt-cards .dt-ticket-stage').map(item => item.textContent)).toEqual([en['stage.answer'], en['stage.failed']])

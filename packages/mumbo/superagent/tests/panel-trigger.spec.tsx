@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { expect, it, onTestFinished, vi } from 'vitest'
 import { en } from '../src/client/locales.ts'
-import { usePanel, mount, remount, settle, all, find, click, text, at } from './fixtures/panel.tsx'
+import { usePanel, mount, settle, all, find, click, text, at } from './fixtures/panel.tsx'
 import { server, trigger, threadSummary, ticketSummary } from './fixtures/panel-server.tsx'
 
 usePanel()
@@ -90,9 +90,6 @@ it('shows a follow-up delivered to its Ticket without an Eval, a hand-back with 
   expect(document.querySelector(`.dt-tag[title="${en.dispositionDeliveredHint}"]`)).not.toBeNull()
   expect(all('.dt-list .dt-ticket').map(row => [row.querySelector('.dt-open')?.textContent, row.querySelector('.dt-tag')?.textContent]))
     .toEqual([['fix regression', undefined], ['related ticket', en.contextOnly]])
-  await remount(en)
-  expect(events()[1]).toEqual(['message f1', [en.dispositionDelivered], undefined])
-  expect(events()[0]![2]).toBe('The Executor of “fix regression” handed it back for an Eval: Asks for a new page')
 })
 
 /** Simulate a Thread with `count` Triggers 1 minute apart, paged 50 at a time via `before` or `around` cursors. */

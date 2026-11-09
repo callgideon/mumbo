@@ -44,7 +44,7 @@ it('returns to the exact page after a remount of the main panel', async () => {
 })
 
 it('shows the domain terms and lists them with their meanings in the (?) glossary', async () => {
-  await mount(en)
+  await mount()
   expect(all('[role="tab"]').map(tab => tab.textContent)).toEqual(['Overview', 'Source', 'Trigger', 'Eval', 'Execution', 'Settings'])
   await click('Glossary')
   const dialog = document.querySelector('[role="dialog"]')!

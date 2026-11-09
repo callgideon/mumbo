@@ -190,10 +190,10 @@ it('lists each Source\'s bots next to its people and saves them, and sets the Gi
   expect(server.settings.policy.sources.github!.bots).toEqual([{ id: 'dependabot[bot]' }])
 })
 
-it('shows the GitHub Source\'s switches for what it receives across the repository, and the admission rows they open, in English', async () => {
+it('shows the GitHub Source\'s switches for what it receives across the repository, and the admission rows they open', async () => {
   server.settings.sources.github = { ...server.settings.sources.github!, config: { ...server.settings.sources.github!.config,
     observeIssues: true, observeCi: true } }
-  await mount(en)
+  await mount()
   await click(tab(en['tab.settings']))
   const github = all('.dt-card').find(card => card.querySelector('.dt-card-title')?.textContent === 'GitHub')!
   expect([...github.querySelectorAll('.dt-switch-row')].map(row => [row.textContent, row.querySelector('[role="switch"]')

@@ -172,12 +172,12 @@ async function drive(host: Host) {
   const a = routed.results[0]!.ticket!.ticket_id
   const answer = { trigger_id: request.id, purpose: 'answer', text: 'is configuration.' }
   const refusal = await run(master, 'orchestrator_reply', answer).then(() => '', (error: Error) => error.message)
-  const proposal = feishu('5', 'change the subtitle to“browse the web”', { mentions: [] })
+  const proposal = feishu('5', 'change the subtitle to "browse the web"', { mentions: [] })
   await runtime.receive(proposal)
   vi.spyOn(Commands.prototype, 'lark').mockResolvedValue({ items: [{ message_id: 'om_5', chat_id: CHAT }] })
   await run(master, 'orchestrator_eval', { trigger_id: proposal.id })
   const proactive = (await run(master, 'orchestrator_eval_decide', { trigger_id: proposal.id, decision: 'accept', title: 'wording revision', worktree_name: 'copy-fix',
-    scope: 'change the subtitle', reason: 'explicit copy change', intent_evidence: 'quoted', acknowledgement: 'Got it, changing the subtitle to“browse the web”。',
+    scope: 'change the subtitle', reason: 'explicit copy change', intent_evidence: 'quoted', acknowledgement: 'Got it, changing the subtitle to "browse the web".',
     rule_assessments: [{ rule_id: 'copy', matched: true, reason: 'copy change' }, { rule_id: 'visual', matched: false, reason: 'not visual' }],
     direction: { implementation_requested: true, target_basis: 'specified', requires_design_decision: false, evidence: 'it names the text' } })).ticket as { ticket_id: string }
   const b = proactive.ticket_id

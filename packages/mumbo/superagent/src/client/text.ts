@@ -7,7 +7,9 @@ import { reasonText, type Reason } from '../core/reasons.ts'
 
 export type T = Translate<DshSuperagentKey>
 export const errorText = (failure: unknown): string => failure instanceof Error ? failure.message : String(failure)
-export const localized = (t: T, text: string | undefined): string => text ?? ''
+/** A thread fact a Source stored before the copy became English only holds `{ zh, en }`; its English side is shown. */
+type StoredText = string | { readonly en: string }
+export const localized = (t: T, text: StoredText | undefined): string => typeof text === 'object' ? text.en : text ?? ''
 export const actorName = (t: T, actor: { name?: string } | undefined): string => actor?.name ? localized(t, actor.name)
   : t('automatedNotice')
 export function valueLabel(t: T, group: string, key: string | undefined): string {

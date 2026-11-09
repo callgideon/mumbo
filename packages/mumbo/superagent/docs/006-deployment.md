@@ -247,7 +247,7 @@ The worker and router presets move shell commands to the background after 5 seco
 
 ## Troubleshooting
 
-Setup problems appear on the overview with a link to the fix, in the panel's language; the log and the API show the English text below.
+Setup problems appear on the overview with a link to the fix; the panel, the log and the API show the English text below.
 
 | Symptom | Cause and fix |
 | --- | --- |

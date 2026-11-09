@@ -264,7 +264,7 @@ it('fans a person\'s later thread message out to the live worker as context and 
 it('assesses a proactive observation in the orchestrator Session and creates the ticket only on a positive auto-mode decision', async () => {
   const observe = (mode: 'observe' | 'auto') => runtime.settings.save('eval', { ...runtime.store.settings().eval, mode }, runtime.store.blockRevision('eval'), 'panel')
   await observe('observe')
-  const trigger = feishu('3', 'this wording is odd, change it to “browse the web”', { mentions: [] })
+  const trigger = feishu('3', 'this wording is odd, change it to "browse the web"', { mentions: [] })
   await receive(trigger)
   const candidate = relays(runtime.masterId).at(-1)!
   expect(candidate).toMatchObject({ kind: 'candidate', strength: 'inferred', mode: 'observe', next_action: expect.stringContaining('orchestrator_eval') })
@@ -273,14 +273,14 @@ it('assesses a proactive observation in the orchestrator Session and creates the
   // The rules are in the main Session's Policy section; the context names the Policy version it was built from.
   expect(details).not.toHaveProperty('rules')
   expect(details).toMatchObject({ trigger_id: trigger.id, strength: 'inferred', policy_version: policyVersion(runtime.store.settings()), thread: expect.objectContaining({ complete: true, loaded_messages: 0 }) })
-  const decision = (id: string) => ({ trigger_id: id, decision: 'accept', title: 'wording revision', worktree_name: 'copy-fix', scope: 'change the subtitle', reason: 'explicit copy change', intent_evidence: 'quoted', acknowledgement: 'Got it, changing the subtitle to“browse the web”。',
+  const decision = (id: string) => ({ trigger_id: id, decision: 'accept', title: 'wording revision', worktree_name: 'copy-fix', scope: 'change the subtitle', reason: 'explicit copy change', intent_evidence: 'quoted', acknowledgement: 'Got it, changing the subtitle to "browse the web".',
     rule_assessments: [{ rule_id: 'copy', matched: true, reason: 'copy change' }, { rule_id: 'visual', matched: false, reason: 'not visual' }],
     direction: { implementation_requested: true, target_basis: 'specified', requires_design_decision: false, evidence: 'the message names the replacement' } })
   expect(await runTool(runtime.masterId, 'orchestrator_eval_decide', decision(trigger.id))).toMatchObject({ decision: 'ignore', reason: expect.stringContaining('Observe mode') })
   expect(runtime.store.tickets.list()).toEqual([])
   expect(runtime.store.decisions.byThread(`feishu:${CHAT}:om_3`)[0]!.audit).toMatchObject({ would_accept: true, proposal: { title: 'wording revision' } })
   await observe('auto')
-  const again = feishu('5', 'change the subtitle to“browse the web”', { mentions: [] })
+  const again = feishu('5', 'change the subtitle to "browse the web"', { mentions: [] })
   await receive(again)
   await runTool(runtime.masterId, 'orchestrator_eval', { trigger_id: again.id })
   const accepted = await runTool(runtime.masterId, 'orchestrator_eval_decide', decision(again.id))
@@ -621,7 +621,7 @@ it('records each settings save with its policy change and the open tickets told 
 })
 
 it('refuses an accept through orchestrator_route for inferred candidates so proactive work always goes through Eval', async () => {
-  const observed = feishu('21', 'this wording is odd, change it to “browse the web”', { mentions: [] })
+  const observed = feishu('21', 'this wording is odd, change it to "browse the web"', { mentions: [] })
   await receive(observed)
   await expect(route({ kind: 'accept', trigger_id: observed.id, title: 'x', worktree_name: 'copy-fix', acknowledgement: 'x' })).rejects.toThrow('explicit requests from allowed senders')
   expect(runtime.store.tickets.list()).toEqual([])

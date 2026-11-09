@@ -139,7 +139,7 @@ it('keeps what a person types in the Execution settings, converting it once on s
   expect(server.settings.executor).toMatchObject({ blockedCommands: ['gh-personal', 'gh-other'], directory: '/srv/my work', maxWorkers: 2 })
 })
 
-it('says why an Input was not delivered on its Ticket\'s page, in either language', async () => {
+it('says why an Input was not delivered on its Ticket\'s page', async () => {
   const t1 = server.ticketDetails.t1!
   server.ticketDetails.t1 = { ...t1, stage: 'person', action: 'delivery', deliveryError: 'feishu: message recalled' }
   at({ page: 'execution', id: 't1' })
@@ -149,11 +149,6 @@ it('says why an Input was not delivered on its Ticket\'s page, in either languag
   expect(text()).toContain(en.inputRetryHint)
   expect(text()).not.toContain(en.inputWaitingHint)
   expect(document.querySelector('.dt-status-line')?.textContent).toMatch(/Sep \d+/)
-  await remount(en)
-  expect(document.querySelector('.dt-status-line')?.textContent).toMatch(/Sep \d+/)
-  expect(document.querySelector('.dt-status-line .dt-stage')?.textContent).toBe(en['stage.delivery'])
-  expect(document.querySelector('.dt-banner.dt-danger')?.textContent).toBe(`${en.deliveryFailedPrefix}feishu: message recalled`)
-  expect(text()).toContain(en.inputRetryHint)
 })
 
 it('tells a Ticket or Thread that does not exist from a dsh-superagent that is not answering', async () => {
@@ -188,11 +183,6 @@ it('gives a Ticket a bot\'s message started its basis, marks a Thread it follows
   expect(all('.dt-list .dt-ticket').map(row => row.querySelector('.dt-tag')?.textContent)).toEqual([undefined, en.contextOnly])
   await click(en.deliveredInputs.replace('{count}', '1'))
   expect(text()).toContain('Handed back for an Eval: Asks for a new page')
-  await remount(en)
-  expect(facts()).toEqual(expect.arrayContaining([[en['basis.bot'], en.yes]]))
-  expect(all('.dt-list .dt-ticket').map(row => row.querySelector('.dt-tag')?.textContent)).toEqual([undefined, en.contextOnly])
-  await click(en.deliveredInputs.replace('{count}', '1'))
-  expect(text()).toContain('Handed back for an Eval: Asks for a new page')
 })
 
 it('words an ended Ticket by its outcome, on its row and its page, with a person\'s reason after it', async () => {
@@ -210,7 +200,7 @@ it('words an ended Ticket by its outcome, on its row and its page, with a person
   expect(text()).not.toContain('The Executor ended')
   server.ticketDetails.t3 = { ...server.ticketDetails.t3, ended: { at: '2026-09-21T00:00:00Z', by: 'human', outcome: 'stopped',
     reason: 'no longer needed' } }
-  await remount(en)
+  await remount()
   expect(all('.dt-hint').map(hint => hint.textContent).find(line => line?.includes(en['outcome.stopped']))).toMatch(/Stopped by a person: no longer needed$/)
 })
 

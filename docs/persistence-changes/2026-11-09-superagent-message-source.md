@@ -5,8 +5,6 @@ kind: persistence-change
 
 # 2026-11-09-superagent-message-source
 
-English | [中文](2026-11-09-superagent-message-source.zh.md)
-
 ## Summary
 
 Adds the dsh-superagent message source: a user-role message the @mumbo/superagent runtime delivers to its main Session or an Executor Session, form relay for a Trigger card or report it queues or steers, and form notice with its one-line summary for a notice it injects without starting a turn.

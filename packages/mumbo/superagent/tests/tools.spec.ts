@@ -190,7 +190,7 @@ it('refuses alone an item that lacks a field its kind needs or breaks a field\'s
 
 it('decides a candidate\'s batch with its card\'s trigger: a second accept keeps the first, and no other decision contradicts it', async () => {
   await h.runtime.settings.pause(true, 'panel')
-  const first = feishu('1', '@bot home page title'), second = feishu('2', '@bot change it to “browse the web”', { root_id: 'om_1' })
+  const first = feishu('1', '@bot home page title'), second = feishu('2', '@bot change it to "browse the web"', { root_id: 'om_1' })
   h.runtime.receive(first); h.runtime.receive(second)
   await h.runtime.settings.pause(false, 'panel')
   await h.runtime.pump(); await h.runtime.idle()
@@ -472,7 +472,7 @@ it('marks the threads a worker follows for context apart from those a Source bou
 it('gives a worker the other messages of the request its ticket was accepted from, in its first message and on its ticket', async () => {
   // Pause while receiving two messages so they are evaluated as a single batch.
   await h.runtime.settings.pause(true, 'panel')
-  const first = feishu('1', '@bot home page title'), second = feishu('2', '@bot change it to “browse the web”', { root_id: 'om_1' })
+  const first = feishu('1', '@bot home page title'), second = feishu('2', '@bot change it to "browse the web"', { root_id: 'om_1' })
   await h.runtime.receive(first); await h.runtime.receive(second)
   await h.runtime.settings.pause(false, 'panel')
   await h.runtime.pump(); await h.runtime.idle()

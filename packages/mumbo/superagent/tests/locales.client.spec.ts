@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest'
 import type { EffectKind } from '../src/app/effects.ts'
 import { en, type DshSuperagentKey } from '../src/client/locales.ts'
-import { reasonLabel, type T } from '../src/client/text.ts'
+import { localized, reasonLabel, type T } from '../src/client/text.ts'
 import { REASONS, USER_ERRORS } from '../src/core/index.ts'
 
 it('has text for every key', () => {
@@ -30,6 +30,14 @@ it('names every health entry of dsh-superagent itself, which the overview shows 
 
 it('words every refusal the host words by code', () => {
   expect(Object.keys(USER_ERRORS).filter(code => !en[`userError.${code}` as DshSuperagentKey])).toEqual([])
+})
+
+it('shows a text as written, and the English side of a thread fact stored with both languages', () => {
+  const t = ((key: DshSuperagentKey) => en[key]) as T
+  const stored = { zh: 'legacy text', en: 'Auto-merge' }
+  expect(localized(t, stored)).toBe('Auto-merge')
+  expect(localized(t, 'CI failed')).toBe('CI failed')
+  expect(localized(t, undefined)).toBe('')
 })
 
 it('has words for every reason code the core records', () => {

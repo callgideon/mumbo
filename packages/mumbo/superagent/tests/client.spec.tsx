@@ -68,7 +68,7 @@ it('opens a listed Session through the workspace from the main panel', async () 
   view.dispose()
 })
 
-it('reports a Session missing from the catalog in the interface language', async () => {
+it('reports a Session missing from the catalog', async () => {
   serve()
   const { ctx, main } = fixture([])
   const view = await render(main, { t })

@@ -10,7 +10,7 @@ Upstream targets dsh `0.2.1-alpha.2` and builds as a standalone package. The cop
 
 Files not copied: upstream `tsdown.config.ts`, `vitest.config.ts`, `pnpm-lock.yaml`, `scripts/` and `tests/service-script.spec.ts`. Upstream `README.md` is `docs/upstream-readme.md`.
 
-Added: `package.json`, `tsconfig.json`, `tsconfig.host.json`, `tsconfig.client.json`, `tsdown.config.ts`, `src/client/css-modules.d.ts` (replaces `src/client/css.d.ts`), the package `README.md`, the plugin metadata `locale/{es,fr,de,ru,pt}.json`, and this file. Removed: upstream `locale/zh.json`.
+Added: `package.json`, `tsconfig.json`, `tsconfig.host.json`, `tsconfig.client.json`, `tsdown.config.ts`, `src/client/css-modules.d.ts` (replaces `src/client/css.d.ts`), the package `README.md`, the plugin metadata `locale/{ja,es,fr,de,ru,pt}.json`, and this file. Removed: upstream `locale/zh.json`.
 
 Edits to the copy:
 
@@ -33,12 +33,15 @@ Edits to the copy:
 - Test typing under the root aggregates: specs and fixtures that import `src/client` are `tests/*.client.spec.ts` (`draft`, `prompt-config`, `markdown`, `navigation`, `locales`) or `.tsx` (`tests/marks.spec.tsx`, `tests/fixtures/panel-server.tsx`, which the aggregates do not check); `<T>(` in `panel-server.tsx` is `<T,>(`. `tests/fixtures/deployment.ts` accepts `undefined` overrides. `exactOptionalPropertyTypes` and unused-name errors in `cards`, `runtime`, `sources`, `feishu-read`, `model-surface`, `store`, `fixtures/host.ts` and `fixtures/panel-server.tsx` are fixed in place (`as never` on fixture objects, unused names removed, `ConfigFormSnapshot.mode` dropped).
 - `package.json` also lists the Cordis include, group and loader plugins as development dependencies, which `tests/bundle-patch.spec.ts` loads.
 - English only: the copy has no Chinese text.
-  - `src/client/locales.ts` holds one English dictionary, `en`, registered for the `en` locale only (other locales fall back to it); the `zh` dictionary, the glossary's second-language column and its `glossaryChinese`/`glossaryEnglish` headers (now `glossaryTerm`) are gone.
-  - The `{ zh, en }` labels, hints, titles, descriptions and facts of `src/sources/*.ts`, `src/app/execution-environment.ts` and `src/app/views/*.ts` are English strings; the `Localized` interface (`src/sources/kind.ts`) and the bilingual `Text` type (`src/core/model.ts`) are replaced by `string`, and `localized` in `src/client/text.ts` returns its text.
+  - `src/client/locales.ts` holds one English dictionary, `en`, registered for the `en` locale only (other locales fall back to it); the `zh` dictionary, the glossary's second-language column and its `glossaryChinese`/`glossaryEnglish` headers (now `glossaryTerm`) are gone. `reasonLabel` (`src/client/text.ts`) joins reasons with `; `.
+  - The `{ zh, en }` labels, hints, titles, descriptions and facts of `src/sources/*.ts`, `src/app/execution-environment.ts` and `src/app/views/*.ts` are English strings; the `Localized` interface (`src/sources/kind.ts`) and the bilingual `Text` type (`src/core/model.ts`) are replaced by `string`. `localized` in `src/client/text.ts` returns its text, or the `en` side of a thread fact stored as `{ zh, en }` before this change (`tests/locales.client.spec.ts`).
+  - `src/client/text.ts` keeps the `lang` dictionary key, now always `en`, so the `zh-CN` branch of `timeLocale` is dead.
+  - The comments on `failure` (`src/app/http.ts`) and `HEALTH_TEXT` (`src/sources/host.ts`) no longer mention an interface language.
   - `pullEndNotices` (`src/sources/github-pull.ts`) writes its notice in English and no longer takes the request text.
   - `cordis.patch.yml`: the preset names are `dsh-superagent worker` and `dsh-superagent router`, with English descriptions.
-  - Docs: the glossary of `docs/001-domain.md` has no Chinese column; `docs/002-authorization.md`, `docs/005-panel.md` and the `docs/008-cookbook.md` examples use the English labels.
-  - Tests use English data and assert the English copy.
+  - Docs: the glossary of `docs/001-domain.md` has no Chinese column; `docs/002-authorization.md`, `docs/005-panel.md` and the `docs/008-cookbook.md` examples use the English labels; `docs/006-deployment.md` (setup problems) and `docs/007-architecture.md` (the `locales.ts` and `locales.client.spec.ts` rows, fixed refusals) no longer describe two languages.
+  - Tests use English data and assert the English copy; the tests that compared the two languages assert the English text once.
+  - `locale/ja.json` stays; it is the only file in the copy with CJK ideographs.
 - Panel specs: `tests/fixtures/panel.tsx` and the nine `tests/panel-*.spec.tsx` import `./fixtures/panel-server.tsx` (renamed from `.ts`). `tests/panel-deployment.spec.tsx` no longer publishes `mode: 'memory'` in the read-only scenario (line 108); the snapshot has no `mode`, and `writable: false` selects the read-only hint.
 
 Files outside the copy changed for S1:
@@ -48,11 +51,11 @@ Files outside the copy changed for S1:
 - `.oxlintrc.json` and `.oxlintrc.staged.json`: `ignorePatterns` entry for `packages/mumbo/superagent/**`.
 - `package.json`: root `devDependencies` entry `@mumbo/superagent`, so a Host started from the repository resolves the plugin named in a `--patch` overlay. `apps/cli/package.json` is unchanged because the published CLI must not depend on a private package.
 - `pnpm-lock.yaml`: the new workspace importer.
-- `scripts/package-dependency-policy.ts`: `scopeParentOf` is classified peer-required for `@deepseek-ai/dsh-scope`; `src/app/sessions.ts` reads the scope chain, which is module state of the shared instance.
+- `scripts/package-dependency-policy.ts`: `scopeParentOf` is classified peer-required for `@deepseek-ai/dsh-scope`; `src/app/sessions.ts` reads the scope chain, which is module state of the shared instance. `MessageId`, `ReasoningEffortId` and `freezeMessage` are peer-required for `@deepseek-ai/dsh-llm`, because `src/app/delivery.ts` and `src/app/role-models.ts` build messages with the shared instance's ids and freeze; that row also holds `@mumbo/edge-member`'s `createUserMessage`.
 - Repository gate exclusions, each commented `pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md`: the coverage `exclude` in `vitest.config.ts`; the scans of `scripts/verify-export-jsdoc.ts`, `scripts/verify-client-ui-i18n.ts`, `scripts/verify-no-unknown-casts.ts`, `scripts/verify-doc-refs.ts` and `scripts/locale-dictionary-parity.spec.ts`; `docs/**` and `SETUP.md` as link sources in `scripts/verify-md-links.ts`; the exported-type index of `scripts/gen-client-catalog.ts`; and, in `scripts/gen-cordis-catalog.ts`, `excludedPackages` (a field of `CordisCatalogPolicy` in `packages/typert/generator/src/cordis-catalog.ts`) and the `orchestrator` entry of `SERVICE_WALK_EXEMPTIONS`.
 - `scripts/product-package-policy.ts`: `optional` classification.
-- `packages/mumbo/README.md` and its pair: the package row.
-- `docs/persistence-changes/2026-11-09-superagent-message-source.md` and its siblings: the `dsh-superagent` message source.
+- `packages/mumbo/README.md`: the package row, and the Summary names `superagent/` as the package that registers model tools. Its `README.zh.md` pair and record stay as on main; this package ships no Chinese.
+- `docs/persistence-changes/2026-11-09-superagent-message-source.md` and `.schema.json`: the `dsh-superagent` message source, with no Chinese pair.
 
 ## S2: management API admission
 
