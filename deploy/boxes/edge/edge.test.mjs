@@ -604,7 +604,7 @@ test('project start script carries the member key and loads the project overlay 
   const p = startScript(c, 'T', boxSite(c, 'project:0123456789abcdef'), 'role', 'KEYTEXT', { proxy: 'P', gh: 'G' })
   assert.match(p, /export MUMBO_MEMBER_KEY=KEYTEXT/)
   assert.match(p, /if \[ -f \/src\/deploy\/mumbo-project\.overlay\.yml \]; then PROJECT_PATCH="--patch \/src\/deploy\/mumbo-project\.overlay\.yml"; touch \/root\/\.mumbo\/member-auth; else rm -f \/root\/\.mumbo\/member-auth; fi/)
-  assert.match(p, /sandboxes\.overlay\.yml \$PROJECT_PATCH/)
+  assert.match(p, /sandboxes\.overlay\.yml \$LINKS_PATCH \$PROJECT_PATCH/)
   const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role')
   assert.ok(!u.includes('MUMBO_MEMBER_KEY') && !u.includes('PROJECT_PATCH'))
 })

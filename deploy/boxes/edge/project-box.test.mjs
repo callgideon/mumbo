@@ -13,8 +13,18 @@ const at = (text, needle) => { const i = text.indexOf(needle); assert.ok(i >= 0,
 
 test('a user box start script is byte-for-byte what it was before project boxes grew a proxy', () => {
   const s = startScript(c, 'T', boxSite(c, 'a@x.com'), "role's", undefined, boxFiles, ['o@x.com'])
-  // sha256 of the output recorded from the script before B7 (same cfg, token T, role "role's").
-  assert.equal(createHash('sha256').update(s).digest('hex'), 'e45f9296d5ce13071ffd5914aec541968d2013eada0a9b68404f2bed104c363d')
+  // sha256 of the output recorded before B7, updated once for the box-links overlay (same cfg, token T, role "role's").
+  assert.equal(createHash('sha256').update(s).digest('hex'), 'd64c56a3cc9e8502c25df75973064de19572375e7b216bb1447bc1c6a86f92e5')
+})
+
+test('box links: the overlay loads only when the image ships @mumbo/box-links; project boxes get no desktop link', () => {
+  const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles)
+  assert.match(u, /if \[ -d \/src\/packages\/mumbo\/box-links \]; then/)
+  assert.match(u, /home: https:\/\/boxes\.x\/home\n        desktop: https:\/\/boxes\.x\/desktop\//)
+  assert.match(u, /sandboxes\.overlay\.yml \$LINKS_PATCH /)
+  const p = startScript({ ...c, projectDomain: 'boxes.x' }, 'T', boxSite({ ...c, projectDomain: 'boxes.x' }, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
+  assert.match(p, /home: https:\/\/boxes\.x\/home\n/)
+  assert.ok(!p.includes('desktop: https://'))
 })
 
 test('a project box start script has the proxy setup in order, before the member-auth block', () => {

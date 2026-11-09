@@ -165,6 +165,19 @@ ${site.desktop ? `    - id: browser-use
         mode: attach
         endpoint: http://127.0.0.1:9222
 ` : ''}YML
+# Sidebar links to the edge's home page and desktop (@mumbo/box-links), when the image ships that package.
+LINKS_PATCH=
+if [ -d /src/packages/mumbo/box-links ]; then
+cat > /root/.mumbo/links.overlay.yml <<'YML'
+- insert:
+    - id: box-links
+      name: '@mumbo/box-links'
+      config:
+        home: https://${cfg.publicHost}/home
+${site.desktop ? `        desktop: https://${cfg.publicHost}/desktop/
+` : ''}YML
+LINKS_PATCH="--patch /root/.mumbo/links.overlay.yml"
+fi
 ${site.desktop ? `# Desktop: the user's own Chromium (signed-in accounts live in its profile) on a virtual display, as the unprivileged
 # user browser; its debugging port stays on loopback for dsh's browser tools; noVNC on :6080 is the live view, which
 # only the edge reaches (E2B traffic token). Re-runnable: each part starts only if it is not running.
@@ -212,7 +225,7 @@ ${site.desktop ? '' : `PATH=/root/.mumbo/bin:$PATH NODE_USE_ENV_PROXY=1 NODE_EXT
 `}HOME=/root DSH_HOME=/root/.dsh DSH_AGENTS_HOME=/root/.mumbo/agents DSH_TELEMETRY_DISABLED=1 \\
 DEEPSEEK_BASE_URL=${llm}/anthropic DEEPSEEK_SEARCH_BASE_URL=${llm} DEEPSEEK_API_KEY=${token} \\
 nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\
-  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml${memberKeyText ? ' $PROJECT_PATCH' : ''} \\
+  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml $LINKS_PATCH${memberKeyText ? ' $PROJECT_PATCH' : ''} \\
   --no-open --host "$ip" --port 3080 --public-url ${site.publicUrl} --trusted-host ${cfg.publicHost}${site.host === cfg.publicHost ? '' : ` --trusted-host ${site.host}`} > /root/dsh.log 2>&1 &
 `
 }
