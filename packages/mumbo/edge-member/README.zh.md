@@ -55,11 +55,11 @@ kind: "package-reference"
 
 | 资源 | 操作 |
 |---|---|
-| `global` | `session/create`、`session/list`、`session/search`、`session/control`、`session/modelCatalog`、`session/canOpenWorkspacePath`、`agentPresets/list`、`llm/listProviders`、`llm/listConfigurableProviders`、`web/listProviders`、`commands/list`、`workspace/follow`、`mediaReferences/read` |
+| `global` | `session/create`、`session/list`、`session/search`、`session/control`、`session/modelCatalog`、`session/canOpenWorkspacePath`、`agentPresets/list`、`llm/listProviders`、`llm/listConfigurableProviders`、`web/listProviders`、`commands/list`、`workspace/follow` |
 | 每个 Workspace | `workspace/follow`、`session/create` |
-| Workspace 列出的每个 Session 与每个存活 Session | 分页、跟随、projection、状态、事件、附件、作业（`job/list`）、工作区文件（`workspaceFiles/list`、`workspaceFiles/changes`）、`fileUploads/upload`、`sessionLog/export`、`sessionLog/markdown`、`session/prompt`、`session/cancel`、用于复用空白 Session 的 `session/create`、`userQuestions/answer`、`userQuestions/attachWait`、技能、目标、工具结果与转发的 `api-session/*` 通知 |
+| Workspace 列出的每个 Session 与每个存活 Session | 分页、跟随、projection、状态、事件、附件、作业（`job/list`）、工作区文件（`workspaceFiles/list`、`workspaceFiles/changes`）、`fileUploads/upload`、`fileUploads/uploadBinary`、`sessionLog/export`、`sessionLog/markdown`、`session/prompt`、`session/cancel`、用于复用空白 Session 的 `session/create`、`userQuestions/answer`、`userQuestions/attachWait`、技能、目标、工具结果与转发的 `api-session/*` 通知 |
 
-存活 Session 包括运行中的子代理子 Session。远程访问拒绝其他所有操作，包括设置、凭据、插件、fork、重命名、模型选择（它同时保存 owner 的默认模型）、队列编辑与 Workspace 管理；队列编辑会保留被编辑消息的来源，因而会把一个人的文本记录为另一个人的。在 Gateway 之外的 exact Fetch 路由中，成员可以到达四个：经其指定 Session 上的 `fileUploads/upload` 到达浏览器二进制上传 `/api/session/uploadFileBinary`，经 `mediaReferences/read` 到达文件媒体引用 `/api/file`，经其指定 Session 上的 `sessionLog/export` 与 `sessionLog/markdown` 到达 Session 日志下载 `/api/session.export` 与 Markdown 复制 `/api/session.markdown`。其他所有 exact 路由（包括变更摘要与在盒子上打开文件）、专用 RPC 通道与 Gateway 之外的其他路由返回 403。创建或释放 Session 时，以及 Workspace 域变化提交之后，插件重建绑定并调用 `remoteAccess.invalidate()`，使成员的访问快照跟随这两个列表；注册表在其实体持有新列表之前发出变化，因此该重建在发出变化的写入完成后运行。
+存活 Session 包括运行中的子代理子 Session。远程访问拒绝其他所有操作，包括设置、凭据、插件、fork、重命名、模型选择（它同时保存 owner 的默认模型）、队列编辑与 Workspace 管理；队列编辑会保留被编辑消息的来源，因而会把一个人的文本记录为另一个人的。在 Gateway 之外的 exact Fetch 路由中，成员可以到达三个，均作用于其 `sessionId` 查询指定的 Session：经 `fileUploads/uploadBinary` 到达浏览器二进制上传 `/api/session/uploadFileBinary`，经 `sessionLog/export` 与 `sessionLog/markdown` 到达 Session 日志下载 `/api/session.export` 与 Markdown 复制 `/api/session.markdown`。其他所有 exact 路由（包括文件媒体引用 `/api/file`、变更摘要与在盒子上打开文件）、专用 RPC 通道与 Gateway 之外的其他路由返回 403。创建或释放 Session 时，以及 Workspace 域变化提交之后，插件重建绑定并调用 `remoteAccess.invalidate()`，使成员的访问快照跟随这两个列表；注册表在其实体持有新列表之前发出变化，因此该重建在发出变化的写入完成后运行。
 
 <a id="member-attribution"></a>
 ## 成员署名
@@ -99,7 +99,7 @@ The next message is from project member <email>.
 <a id="known-limitations-and-deferred-work"></a>
 
 - **成员指挥的代码以盒子的权限运行** — 成员的提示会运行协调者的工具；在完全访问且审批为 `never` 时，这些工具可以读取盒子内的成员密钥与 owner cookie 的签名记录。访问策略让成员无法调用设置、凭据与插件，并为其消息署名，但无法约束指挥代理提升权限的成员。在盒子以独立身份运行工具之前，应把成员视为可信的协作者。
-- **`/api/file` 可读取盒子能读取的任何文件** — `global` 上的 `mediaReferences/read` 让成员的浏览器读取盒子文件系统提供方能读取的每个普通文件（不超过图片字节上限），包括成员密钥与 owner cookie 的签名记录，且读取不留下 Session 日志条目。代理的工具已经赋予成员这种能力；项目盒子约束其工具后，应从 `MEMBER_GLOBAL_ROLE` 移除该 action。
+- **媒体引用不会为成员渲染** — `/api/file` 可读取盒子能读取的任何文件，包括 `/root/.mumbo/start.sh`、dsh 日志中的 owner 启动 token 以及每个 Session 日志，因此没有任何成员角色授予其 `hostFiles/readAny`。等到该路由能把非 owner 限定在某个 Session 的工作区根目录时才会向成员开放，这需要缺失的接口：`ConnectionFetchRoute.fetch` 收不到 Peer。
 - **成员无法在页面中打开已结束的子代理记录** — 子代理的子 Session 只在存活时被授权，因为没有 Workspace 列出它；已授权 Session 的日志下载仍包含每个子代理后代的日志。
 - **交付物路由只对 owner 开放** — 变更摘要、比较以及打开声明或变更的文件（`/api/changes.*`、`/api/present.*`）对成员返回 403。
 - **回答不携带成员** — `userQuestions/answer` 不记录 principal，因此模型无法分辨是哪个成员回答了问题。

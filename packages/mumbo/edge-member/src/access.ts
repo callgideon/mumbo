@@ -10,8 +10,8 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 
 /**
  * Host-wide reads a collaborator's page needs, and starting a Session; list and follow results are filtered per
- * Session and Workspace. `mediaReferences/read` lets the page render the files a transcript references through
- * `/api/file`, which reads any file the box's filesystem provider can read.
+ * Session and Workspace. `hostFiles/readAny` is excluded: `/api/file` reads any file the box can read, including
+ * its secrets and every Session log.
  */
 export const MEMBER_GLOBAL_ROLE: RemoteAccessRole<'global'> = {
   name: 'mumbo:member-global',
@@ -21,7 +21,6 @@ export const MEMBER_GLOBAL_ROLE: RemoteAccessRole<'global'> = {
     'commands/list',
     'llm/listConfigurableProviders',
     'llm/listProviders',
-    'mediaReferences/read',
     'session/canOpenWorkspacePath',
     'session/control',
     'session/create',
@@ -45,6 +44,7 @@ export const MEMBER_SESSION_ROLE: RemoteAccessRole<'session'> = {
   actions: [
     'commands/list',
     'fileUploads/upload',
+    'fileUploads/uploadBinary',
     'goals/get',
     'job/list',
     'session/attachment',

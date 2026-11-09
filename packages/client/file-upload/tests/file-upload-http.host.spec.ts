@@ -159,17 +159,12 @@ describe('background file upload Fetch route', () => {
 })
 
 describe('background file upload route access', () => {
-  it('serves a non-owner only with fileUploads/upload on the Session the query names', async () => {
+  function mount(saveFileStream: (input: { readonly data: AsyncIterable<Uint8Array>; readonly signal?: AbortSignal }) => Promise<unknown>) {
     const ctx = new Context()
     onTestFinished(() => ctx.fiber.dispose())
     const agent = { id: 's1', session: { header: {} } }
     ctx.provide('agents', { get: (id: string) => id === agent.id ? agent : undefined } as never)
-    const saveFileStream = vi.fn(async (input: { readonly data: AsyncIterable<Uint8Array> }) => {
-      let bytes = 0
-      for await (const chunk of input.data) bytes += chunk.byteLength
-      return { attachmentId: 'file-1', name: 'file', bytes }
-    })
-    ctx.provide('attachments', { saveFileStream } as never)
+    ctx.provide('attachments', { saveFileStream, isAttachmentError: () => false } as never)
     ctx.provide('commands', { registerFileReceiptResolver: () => () => {} } as never)
     const connection = new HostConnectionService(ctx, [], {} as BrowserAuth)
     new FileUploadsService(ctx)
@@ -183,14 +178,38 @@ describe('background file upload route access', () => {
     const post = (sessionId: string) => shared.fetch(request({
       sessionId, contentType: 'application/octet-stream', body: Uint8Array.of(1, 2, 3),
     }), guest)
+    return { decisions, guest, post }
+  }
+
+  it('serves a non-owner only with fileUploads/uploadBinary on the Session the query names', async () => {
+    const saveFileStream = vi.fn(async (input: { readonly data: AsyncIterable<Uint8Array> }) => {
+      let bytes = 0
+      for await (const chunk of input.data) bytes += chunk.byteLength
+      return { attachmentId: 'file-1', name: 'file', bytes }
+    })
+    const { decisions, post } = mount(saveFileStream)
 
     const granted = await post('s1')
     expect(await granted.json()).toMatchObject({ ok: true, value: { file: { bytes: 3 } } })
     expect((await post('s2')).status).toBe(403)
     expect(saveFileStream).toHaveBeenCalledOnce()
     expect(decisions.map(({ action, resources }) => ({ action, resources }))).toEqual([
-      { action: 'fileUploads/upload', resources: [{ kind: 'session', id: 's1' }] },
-      { action: 'fileUploads/upload', resources: [{ kind: 'session', id: 's2' }] },
+      { action: 'fileUploads/uploadBinary', resources: [{ kind: 'session', id: 's1' }] },
+      { action: 'fileUploads/uploadBinary', resources: [{ kind: 'session', id: 's2' }] },
     ])
+  })
+
+  it('aborts a non-owner\'s running upload when its Peer is disposed', async () => {
+    const started = Promise.withResolvers<AbortSignal>()
+    const { guest, post } = mount(async (input) => {
+      const signal = input.signal!
+      started.resolve(signal)
+      await new Promise((_resolve, reject) => { signal.addEventListener('abort', () => { reject(new Error('upload aborted')) }, { once: true }) })
+    })
+    const running = post('s1')
+    const signal = await started.promise
+    await guest.dispose()
+    expect(signal.aborted).toBe(true)
+    expect(await (await running).json()).toMatchObject({ ok: false, error: { code: 'gateway/internal' } })
   })
 })

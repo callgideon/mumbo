@@ -125,7 +125,7 @@ describe('Connection exact Fetch routes', () => {
 })
 
 describe('Connection exact Fetch route access', () => {
-  const SESSION_ACCESS = { action: 'fileUploads/upload', resources: { session: 'sessionId' } } as const
+  const SESSION_ACCESS = { action: 'fileUploads/uploadBinary', resources: { session: 'sessionId' } } as const
 
   async function guarded(access: ConnectionFetchRoute['access']): Promise<{
     readonly connection: HostConnectionService
@@ -154,7 +154,7 @@ describe('Connection exact Fetch route access', () => {
 
     expect(await get('?sessionId=granted', guest)).toBe(200)
     expect(authorizer).toHaveBeenLastCalledWith({
-      principal: GUEST, action: 'fileUploads/upload', resources: [{ kind: 'session', id: 'granted' }],
+      principal: GUEST, action: 'fileUploads/uploadBinary', resources: [{ kind: 'session', id: 'granted' }],
     })
     expect(await get('?sessionId=other', guest)).toBe(403)
     expect(route).toHaveBeenCalledOnce()
@@ -176,12 +176,12 @@ describe('Connection exact Fetch route access', () => {
   })
 
   it('names the global resource for an empty resource map', async () => {
-    const { connection, get, dispose } = await guarded({ action: 'mediaReferences/read', resources: {} })
+    const { connection, get, dispose } = await guarded({ action: 'hostFiles/readAny', resources: {} })
     const authorizer = vi.fn(() => true)
     connection.fetch.authorize(authorizer)
 
     expect(await get('?path=/tmp/a.png', connection.createPeer({ principal: GUEST }))).toBe(200)
-    expect(authorizer).toHaveBeenCalledWith({ principal: GUEST, action: 'mediaReferences/read', resources: [{ kind: 'global' }] })
+    expect(authorizer).toHaveBeenCalledWith({ principal: GUEST, action: 'hostFiles/readAny', resources: [{ kind: 'global' }] })
     await dispose()
   })
 
@@ -215,6 +215,61 @@ describe('Connection exact Fetch route access', () => {
     expect(await declared.get('?sessionId=granted', declared.connection.createPeer({ principal: GUEST }))).toBe(403)
     expect(declared.route).not.toHaveBeenCalled()
     await declared.dispose()
+  })
+
+  it('rejects a route that declares the action remote access allows for every principal', async () => {
+    const { connection, dispose } = await mounted()
+    expect(() => connection.fetch.register({
+      path: '/api/session.markdown', methods: ['GET'], requestBody: 'buffered',
+      access: { action: 'remoteAccess/follow', resources: { session: 'sessionId' } },
+      fetch: async () => new Response('served'),
+    })).toThrow('universally allowed action remoteAccess/follow')
+    await dispose()
+  })
+
+  it('logs a throwing authorizer and refuses the request', async () => {
+    const ctx = new Context()
+    const fiber = ctx.plugin((pluginCtx) => { new HostConnectionService(pluginCtx, [], {} as BrowserAuth) })
+    await fiber.await()
+    const connection = ctx.get('connection') as HostConnectionService
+    const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
+    const route = vi.fn(async () => new Response('served'))
+    connection.fetch.register({ path: '/api/session/uploadFileBinary', methods: ['GET'], requestBody: 'buffered', access: SESSION_ACCESS, fetch: route })
+    connection.fetch.authorize(() => { throw new Error('broken authorizer') })
+    const response = await connection.createSharedFetchHandler('/api').fetch(
+      new Request('http://host/api/session/uploadFileBinary?sessionId=granted'), connection.createPeer({ principal: GUEST }))
+    expect(response.status).toBe(403)
+    expect(route).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledWith('client-connection: the exact Fetch route authorizer failed; refusing the request', expect.any(Error))
+    await fiber.dispose()
+  })
+
+  it('aborts a non-owner\'s running route work when its Peer is disposed, and hands the owner its own request', async () => {
+    const { connection, dispose } = await mounted()
+    const seen: Request[] = []
+    connection.fetch.register({
+      path: '/api/session/uploadFileBinary', methods: ['GET'], requestBody: 'buffered', access: SESSION_ACCESS,
+      fetch: async (request) => {
+        seen.push(request)
+        if (new URL(request.url).searchParams.get('hold') === null) return new Response('served')
+        await new Promise((resolve) => { request.signal.addEventListener('abort', resolve, { once: true }) })
+        return new Response('aborted', { status: 499 })
+      },
+    })
+    connection.fetch.authorize(() => true)
+    const shared = connection.createSharedFetchHandler('/api')
+    const owner = new Request('http://host/api/session/uploadFileBinary')
+    await shared.fetch(owner, connection.browserPeer)
+    expect(seen[0]).toBe(owner)
+
+    const guest = connection.createPeer({ principal: GUEST })
+    const running = shared.fetch(new Request('http://host/api/session/uploadFileBinary?sessionId=granted&hold=1'), guest)
+    await vi.waitFor(() => { expect(seen).toHaveLength(2) })
+    expect(seen[1]!.signal.aborted).toBe(false)
+    await guest.dispose()
+    expect((await running).status).toBe(499)
+    expect(seen[1]!.signal.aborted).toBe(true)
+    await dispose()
   })
 
   it('installs one authorizer at a time and removes it with its registering fiber', async () => {

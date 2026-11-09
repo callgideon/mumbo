@@ -1,8 +1,8 @@
 /**
  * The member plugin in a real Loader composition: Web carrier, Connection, Gateway, remote access, and the browser
- * upload route. A request carrying the edge-signed header reaches Remote methods and the upload route as the
- * `edge-member` principal on the Sessions the Workspace list holds; a tampered, expired, or missing header is not a
- * member, and a member reaches no settings method.
+ * upload and Session log routes. A request carrying the edge-signed header reaches Remote methods and those routes
+ * as the `edge-member` principal on the Sessions the Workspace list holds; a tampered, expired, or missing header is
+ * not a member, and a member reaches no settings method.
  */
 
 import { randomBytes } from 'node:crypto'
@@ -13,15 +13,24 @@ import Group from '@deepseek-ai/cordis-plugin-group'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import TypertGatewayService from '@deepseek-ai/dsh-api-gateway'
-import RemoteAccessService from '@deepseek-ai/dsh-api-remote-access'
+import RemoteAccessService, { type RemoteAccessRole } from '@deepseek-ai/dsh-api-remote-access'
 import * as Connection from '@deepseek-ai/dsh-client-connection'
 import FileUploads from '@deepseek-ai/dsh-client-file-upload'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
+import { SESSION_FORMAT_VERSION, type SessionHeader } from '@deepseek-ai/dsh-session'
+import * as SessionLogExport from '@deepseek-ai/dsh-session-log-export'
 import { Remote, TypertRemoteService, principalOf, type Principal } from '@deepseek-ai/dsh-typert-protocol'
 import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as EdgeMember from '../src/index.ts'
 import { signMemberHeader } from '../src/header.ts'
+
+declare module '@deepseek-ai/dsh-typert-protocol' {
+  interface PrincipalMap {
+    /** Test-only non-owner caller shared by the access specs. */
+    'test-guest': { readonly kind: 'test-guest'; readonly guest: string }
+  }
+}
 
 const CONFIG = fileURLToPath(new URL('./fixtures/cordis.yml', import.meta.url))
 const KEY = randomBytes(32)
@@ -93,7 +102,21 @@ async function boot(): Promise<{ readonly origin: string; readonly probe: Prompt
   // One Workspace holding one Session; the policy grants over exactly this list.
   context.provide('workspaceRegistry', { list: () => [{ id: 'w1', sessionIds: workspaceSessions }] } as never)
   // One live subagent child Session that no Workspace lists.
-  context.provide('sessions', { list: () => [{ id: 'child' }] } as never)
+  context.provide('sessions', { list: () => [{ id: 'child' }], get: () => undefined } as never)
+  // Every Session id names a stored, empty Session, so only access decides which log is exported.
+  const header = (id: string): SessionHeader => ({
+    version: SESSION_FORMAT_VERSION, id: id as SessionHeader['id'], createdAt: 1, isSeeded: false, cwd: '/workspace', delegationDepth: 0,
+  })
+  context.provide('sessionQuery', {
+    traceSession: async () => ({ descendants: [] }),
+    readSession: async (id: string) => ({ session: header(id), inheritedEventCount: 0, events: [] }),
+  } as never)
+  context.provide('sessionPersistence', {
+    stat: async (id: string) => ({ header: header(id) }),
+    open: async (id: string) => ({
+      id, header: header(id), access: 'read', read: async () => ({ eventState: 'detached', events: [] }), close: async () => {},
+    }),
+  } as never)
   // Every Session id resolves to a live ordinary Agent, so only access decides which upload is stored.
   const agents = new Map<string, object>()
   context.provide('agents', {
@@ -112,8 +135,9 @@ async function boot(): Promise<{ readonly origin: string; readonly probe: Prompt
       storedFiles.push(input.name ?? 'file')
       return { attachmentId: 'file-1', name: input.name ?? 'file', bytes }
     },
+    readImage: async () => { throw new Error('fixture has no images') },
   } as never)
-  context.provide('commands', { registerFileReceiptResolver: () => () => {} } as never)
+  context.provide('commands', { registerFileReceiptResolver: () => () => {}, register: () => () => {} } as never)
   await context.plugin(Loader)
   const modules = new Map<string, object>([
     ['@deepseek-ai/dsh-typert-registry', TypertRegistry],
@@ -122,6 +146,7 @@ async function boot(): Promise<{ readonly origin: string; readonly probe: Prompt
     ['@deepseek-ai/dsh-host-webserver', WebServer],
     ['@deepseek-ai/dsh-client-connection', Connection],
     ['@deepseek-ai/dsh-client-file-upload', FileUploads],
+    ['@deepseek-ai/dsh-session-log-export', SessionLogExport],
     ['@mumbo/edge-member', EdgeMember],
   ])
   const loader = context.loader
@@ -213,6 +238,37 @@ describe('real Loader composition', () => {
     expect(storedFiles).toEqual(['notes.txt'])
   })
 
+  it('refuses the binary upload route to a principal that holds only the encoded upload action', { timeout: 60_000 }, async () => {
+    await boot()
+    const encodedOnly: RemoteAccessRole<'session'> = { name: 'test:encoded-upload', resource: 'session', actions: ['fileUploads/upload'] }
+    context!.remoteAccess.registerPolicy('test-guest', { bindings: () => [{ role: encodedOnly, resource: { kind: 'session', id: 's1' as SessionHeader['id'] } }] })
+    const guest = context!.connection.createPeer({ principal: { kind: 'test-guest', guest: 'viewer' } })
+    const response = await context!.connection.createSharedFetchHandler('/api').fetch(new Request(
+      'http://127.0.0.1/api/session/uploadFileBinary?sessionId=s1&name=viewer.bin',
+      { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: Uint8Array.of(1) },
+    ), guest)
+    expect(response.status).toBe(403)
+    expect(storedFiles).toEqual([])
+  })
+
+  it('lets a member download and copy only a granted Session log, by GET and HEAD', { timeout: 60_000 }, async () => {
+    const { origin } = await boot()
+    const header = signMemberHeader(KEY, 'ann@example.com', now() + 300)
+    const request = (route: string, sessionId: string, method = 'GET') =>
+      fetch(`${origin}/api/${route}?sessionId=${sessionId}&includeDescendants=true`, { method, headers: { 'x-mumbo-member': header } })
+    const archive = await request('session.export', 's1')
+    expect(archive.headers.get('content-type')).toBe('application/zip')
+    expect((await archive.arrayBuffer()).byteLength).toBeGreaterThan(0)
+    const markdown = await request('session.markdown', 's1')
+    expect(markdown.headers.get('content-type')).toBe('text/markdown; charset=utf-8')
+    await markdown.text()
+    const head = await request('session.export', 's1', 'HEAD')
+    expect(head.status).toBe(200)
+    for (const [route, method] of [['session.export', 'GET'], ['session.markdown', 'GET'], ['session.markdown', 'HEAD']] as const) {
+      expect((await request(route, 's2', method)).status, `${method} ${route}`).toBe(403)
+    }
+  })
+
   it('refuses a member a Session no Workspace lists, and every settings method', { timeout: 60_000 }, async () => {
     const { origin, probe } = await boot()
     const header = signMemberHeader(KEY, 'ann@example.com', now() + 300)
@@ -250,10 +306,12 @@ describe('real Loader composition', () => {
       { kind: 'session', id: 'child' },
     ]))
     const s1 = 'grants' in snapshot ? snapshot.grants.find(grant => grant.resource.kind === 'session' && grant.resource.id === 's1') : undefined
-    expect(s1?.actions).toEqual(expect.arrayContaining(['session/prompt', 'fileUploads/upload', 'sessionLog/export', 'sessionLog/markdown']))
+    expect(s1?.actions).toEqual(expect.arrayContaining([
+      'session/prompt', 'fileUploads/upload', 'fileUploads/uploadBinary', 'sessionLog/export', 'sessionLog/markdown',
+    ]))
     expect(s1?.actions).not.toContain('session/updateQueue')
     const global = 'grants' in snapshot ? snapshot.grants.find(grant => grant.resource.kind === 'global') : undefined
-    expect(global?.actions).toContain('mediaReferences/read')
+    expect(global?.actions).not.toContain('hostFiles/readAny')
   })
 
   it('rebuilds member grants after a Workspace change has committed', { timeout: 60_000 }, async () => {

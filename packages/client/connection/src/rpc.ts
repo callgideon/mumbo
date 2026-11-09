@@ -156,8 +156,9 @@ export type ConnectionRequestBodyMode = 'buffered' | 'streaming'
 export interface ConnectionFetchRouteAccess {
   /**
    * Action a policy role must list on every resource: the Remote endpoint the
-   * route mirrors, such as `fileUploads/upload`, or a route-specific
-   * `<namespace>/<name>` that names no Remote endpoint.
+   * route mirrors, or a route-specific `<namespace>/<name>` that names no
+   * Remote endpoint, such as `fileUploads/uploadBinary`. Registration rejects
+   * `remoteAccess/follow`, which remote access allows for every principal.
    */
   readonly action: `${string}/${string}`
   /**
@@ -187,7 +188,8 @@ export interface ConnectionFetchRoute {
   /**
    * Handle one request after the physical carrier has applied its trust and
    * authentication policy: an owner request, or a non-owner request that
-   * `access` and the installed authorizer allowed.
+   * `access` and the installed authorizer allowed. A non-owner request's
+   * signal also aborts once its Peer is disposed.
    */
   readonly fetch: (request: Request) => Promise<Response>
 }
@@ -220,7 +222,8 @@ export interface HostConnectionFetch {
   register(route: ConnectionFetchRoute): () => Promise<void>
   /**
    * Install the one authorizer that decides non-owner requests to routes
-   * declaring `access`; a second installation throws.
+   * declaring `access`; a second installation throws, and an authorizer that
+   * throws is logged and refuses the request.
    * @param authorizer - synchronous access decision, such as the Gateway's remote-access check.
    * @returns asynchronous disposer removing the authorizer.
    */

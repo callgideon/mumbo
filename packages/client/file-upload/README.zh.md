@@ -44,7 +44,7 @@ kind: "package-reference"
 
 Client 插件提供 `ctx.fileUpload`。其 `upload()` 方法接收所属 Session 标识，组装原始路由请求，并为精确字节调用生成的 Remote。提供方只读取一次可选的 Cordis 启动前 `__DSH_FILE_UPLOAD__` 钩子。没有该钩子时，每个 Blob 或 stream 请求拥有一个短期 Worker，并在完成、失败或取消后释放。存在该钩子时，服务通过页面自己提供的 Fetch 载体发送请求体；Web Worker runtime 会通过请求帧转移 stream 请求体，再以带背压的分片形式交给 Host HTTP bridge。
 
-Host 插件提供 `ctx.fileUploads`。它拥有经过认证的流式路由、编码 Remote 兜底、命令凭证解析器与暂存凭证生命周期；编码准入、附件错误识别与字节存储仍由 `ctx.attachments` 提供。非 owner Peer 只有在远程访问于其 `sessionId` 查询指定的 Session 上允许 `fileUploads/upload`（编码 Remote 的 action）时才能到达流式路由；该授权同时覆盖文件与图片上传。带 `mediaType` 查询参数的原始上传最多读取部署配置的单张图片与单条消息图片字节上限中较小的一个，并通过 `ctx.attachments.saveImages` 存储图片；该凭证记录上传的字节数，在 prompt 准入时解析为这张图片，这些字节计入单条消息的图片总字节上限；命令只接受文件凭证。取消的图片上传不会取得凭证：存储开始前取消不存储任何内容，已开始存储的图片会保留。Host 调用方传入具有运行时所属上下文的 Agent；凭证表以该 Agent 的准确 Session 对象为键。Session Controller 注册可恢复休眠普通 Agent 的解析器，并在 prompt 准入时消费凭证。Prompt 投递通过可释放事务持有每个凭证绑定。成功投递提交事务前，释放会恢复原绑定；提交后，队列或历史观察会退休该凭证。
+Host 插件提供 `ctx.fileUploads`。它拥有经过认证的流式路由、编码 Remote 兜底、命令凭证解析器与暂存凭证生命周期；编码准入、附件错误识别与字节存储仍由 `ctx.attachments` 提供。非 owner Peer 只有在远程访问于其 `sessionId` 查询指定的 Session 上允许 `fileUploads/uploadBinary` 时才能到达流式路由；该授权同时覆盖文件与图片上传。该 action 与编码 Remote 的 `fileUploads/upload` 不同，因为该路由以流式传输且没有总字节上限，所以授权编码上传的策略并不授权流式上传。带 `mediaType` 查询参数的原始上传最多读取部署配置的单张图片与单条消息图片字节上限中较小的一个，并通过 `ctx.attachments.saveImages` 存储图片；该凭证记录上传的字节数，在 prompt 准入时解析为这张图片，这些字节计入单条消息的图片总字节上限；命令只接受文件凭证。取消的图片上传不会取得凭证：存储开始前取消不存储任何内容，已开始存储的图片会保留。Host 调用方传入具有运行时所属上下文的 Agent；凭证表以该 Agent 的准确 Session 对象为键。Session Controller 注册可恢复休眠普通 Agent 的解析器，并在 prompt 准入时消费凭证。Prompt 投递通过可释放事务持有每个凭证绑定。成功投递提交事务前，释放会恢复原绑定；提交后，队列或历史观察会退休该凭证。
 
 | 文件 | 职责 |
 |---|---|

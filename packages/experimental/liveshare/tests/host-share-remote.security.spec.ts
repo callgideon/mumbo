@@ -60,6 +60,7 @@ async function harness(): Promise<Harness> {
         void route
         return () => {}
       },
+      authorize: () => () => Promise.resolve(),
     },
     rpc: { intercept: () => () => {} },
     createPeer: (options: ConstructorParameters<typeof Peer>[1]) => new Peer(ctx, options),

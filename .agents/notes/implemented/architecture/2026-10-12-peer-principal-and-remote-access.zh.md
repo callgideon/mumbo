@@ -275,7 +275,7 @@ export type RemoteAccessDecision =
   | { readonly kind: 'allow' }
   | { readonly kind: 'deny'; readonly reason: string }
 
-/** Refines one binding for one action on its resource; `args` only for a concrete call. */
+/** Refines one binding for one action on its resource; `args` only for a concrete Remote call, never for an exact Fetch route request. */
 export type RemoteAccessCondition<K extends RemoteAccessResourceKind> = (request: {
   readonly action: RemoteAccessAction
   readonly resource: RemoteAccessResourceOf<K>
@@ -297,7 +297,7 @@ export interface RemoteAccessRequest<P extends Principal> {
   readonly action: RemoteAccessAction
   /** Allow only when the action is allowed on every listed resource. */
   readonly resources: readonly RemoteAccessResource[]
-  /** Named arguments of a concrete call, validated against their Typert-compiled types with lookup parameters as wire identities; absent for events, snapshots, and list filtering. */
+  /** Named arguments of a concrete Remote call, validated against their Typert-compiled types with lookup parameters as wire identities; absent for events, snapshots, list filtering, and exact Fetch route requests. */
   readonly args?: Readonly<Record<string, unknown>>
 }
 
@@ -372,7 +372,7 @@ ctx.effect(() => ctx.remoteAccess.registerPolicy('share-viewer', {
   },
 }))
 
-// Without args (snapshots, list filtering) a condition answers for the action alone.
+// Without args (snapshots, list filtering, exact Fetch route requests) a condition answers for the action alone.
 const sourceWrite = share => () => share.confined ? allow : deny('source-write-unavailable')
 const childPrompt = child => ({ action, args }) =>
   action === 'session/prompt' && args !== undefined && !child.allowsPrompt() ? deny('fork-prompt-refused') : allow
@@ -636,7 +636,7 @@ GlobalStandardProps.useWorkspaceAccess: (workspaceId: WorkspaceId, action: Remot
 | 已 dispose 的 Peer | 之后的 unary、stream 与 `$events` 分派以 `gateway/peer-disposed` 拒绝，wire payload 畸形时亦然；其名下 stream 结束；运行中的 unary 完成；不影响其他 Peer | Gateway host spec |
 | 鉴权顺序 | owner 调用任何方法照常分派且不读取 policy；没有 role 列出的方法对非 owner 以 `remote-access/denied`（`no-allow`）拒绝；访问检查早于 lookup，被拒调用不激活会话 | Gateway host spec |
 | policy 注册 | 每个非 owner principal kind 一个 policy，重复注册抛错；disposer 撤回后该 kind 以 `no-allow` 拒绝；随 fiber 撤回 | remote-access host spec |
-| 判定 | 每个资源都需要匹配的 binding（AND）；role 不含该 action、资源不相等或 condition 拒绝都不放行；拒绝原因按 condition > `explain` > `no-allow` 取；`explain` 不改变结论；condition 在调用时收到 args，在快照与列表过滤时不收；`bindings()`、condition 或 `explain()` 抛错以 `policy-failed` 拒绝，每个 policy 在两次 `invalidate()` 之间只记录一次日志，事件路径上 owner 流与共享事件源照常；`remoteAccess/follow` 对任何 principal 放行 | remote-access host spec、Gateway host spec |
+| 判定 | 每个资源都需要匹配的 binding（AND）；role 不含该 action、资源不相等或 condition 拒绝都不放行；拒绝原因按 condition > `explain` > `no-allow` 取；`explain` 不改变结论；condition 在 Remote 调用时收到 args，在快照、列表过滤与 exact Fetch 路由请求时不收；`bindings()`、condition 或 `explain()` 抛错以 `policy-failed` 拒绝，每个 policy 在两次 `invalidate()` 之间只记录一次日志，事件路径上 owner 流与共享事件源照常；`remoteAccess/follow` 对任何 principal 放行 | remote-access host spec、Gateway host spec |
 | 资源解析 | 默认字段或 resolver 得到一个资源，默认 resolver 返回数组为非法；声明了该种类 `resource` 的 lookup 参数得到其 wire 身份；Context 方法从 args 中的 Agent Context 身份得到其 session 资源且不激活 Agent，另可经 `resources` 声明其他资源；`resources` 读取函数覆盖该种类，数组为多个资源，`undefined` 为无；都没有为 `[global]`；抛错、空数组或非非空字符串（含 Context 身份）为非法，Gateway 以 `resource-invalid` 拒绝且不询问 `decide()`；未声明 `resource` 的 Context 按普通规则解析；资源与 `args` 读取校验后的参数，只有编译 codec 才移除未声明字段，JSON 参数校验失败在访问检查前返回 `gateway/input-invalid` | Gateway host spec（gateway-access） |
 | 资源注册表 | `typert.resources` 每个种类登记一个默认字段或 resolver，拒绝重复登记与 `global`，并随 fiber 撤回；配置的 lookup resolver 保留 provider 的 `resource`；Host Context adapter 保留其 `resource` | typert-registry spec |
 | 转发事件 | 非 owner 的 `$events` 流只在 `event:<name>` 于其资源上被授权时整条收到事件；未声明资源的事件按 `global` 判定；读取函数返回 `undefined` 的事件不送达非 owner，且不询问 `decide()`；owner 全部收到 | Gateway host spec（gateway-access） |

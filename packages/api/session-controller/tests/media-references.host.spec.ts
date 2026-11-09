@@ -262,7 +262,7 @@ describe('SessionMediaReferences /api/file', () => {
     expect(route.unregister).toHaveBeenCalledTimes(1)
   })
 
-  it('serves a non-owner only with mediaReferences/read on the global resource', async () => {
+  it('serves a non-owner only with hostFiles/readAny on the global resource', async () => {
     const ctx = new Context()
     contexts.push(ctx)
     const connection = new HostConnectionService(ctx, [], {} as BrowserAuth)
@@ -288,6 +288,6 @@ describe('SessionMediaReferences /api/file', () => {
     allowed = false
     expect((await shared.fetch(new Request(url), guest)).status).toBe(403)
     expect(decisions.map(({ action, resources }) => ({ action, resources })))
-      .toEqual(Array(3).fill({ action: 'mediaReferences/read', resources: [{ kind: 'global' }] }))
+      .toEqual(Array(3).fill({ action: 'hostFiles/readAny', resources: [{ kind: 'global' }] }))
   })
 })

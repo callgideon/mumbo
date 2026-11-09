@@ -40,6 +40,7 @@ import type {
 const INVALID_REQUEST_RPC_ID = RpcId('invalid-request')
 const CHANNEL_PATTERN = /^\/[A-Za-z0-9._~-]+$/
 const ENDPOINT_SEGMENT_PATTERN = /^[A-Za-z0-9_$.-]+$/
+const UNIVERSAL_ACTION = 'remoteAccess/follow'
 const GLOBAL_RESOURCES: readonly RemoteAccessResource[] = Object.freeze([Object.freeze({ kind: 'global' })])
 
 interface PeerRecord {
@@ -274,10 +275,12 @@ export class HostConnectionService extends Service implements HostConnectionHand
         if (route?.methods.has(request.method) === true) {
           // Exact routes bypass the Gateway; a non-owner reaches only a route whose declared access allows it.
           // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
-          if (peer.principal.kind !== 'owner' && !this.allowsRoute(route.access, request, peer)) {
+          if (peer.principal.kind === 'owner') return route.fetch(request)
+          if (!this.allowsRoute(route.access, request, peer)) {
             return Promise.resolve(new Response('forbidden', { status: 403 }))
           }
-          return route.fetch(request)
+          // A non-owner's route work ends with its Peer, as its Gateway streams do.
+          return route.fetch(new Request(request, { signal: AbortSignal.any([request.signal, peer.signal]) }))
         }
         const endpoint = endpointFromPath(channel, pathname)
         const interceptor = this.interceptors.get(channel)
@@ -294,7 +297,14 @@ export class HostConnectionService extends Service implements HostConnectionHand
     const authorizer = this.fetchAuthorizer
     if (access === undefined || authorizer === undefined || peer.signal.aborted) return false
     const resources = queryResources(access, new URL(request.url).searchParams)
-    return resources !== undefined && authorizer({ principal: peer.principal, action: access.action, resources })
+    if (resources === undefined) return false
+    try {
+      return authorizer({ principal: peer.principal, action: access.action, resources })
+    } catch (error) {
+      // A faulty authorizer cannot allow a request; the caller answers 403.
+      this.owner.logger.warn('client-connection: the exact Fetch route authorizer failed; refusing the request', error)
+      return false
+    }
   }
 
   private registerFetchRoute(
@@ -498,5 +508,9 @@ function assertFetchRoute(route: ConnectionFetchRoute): void {
   const methods = new Set(route.methods)
   if (methods.size !== route.methods.length) {
     throw new Error(`connection: exact Fetch route ${JSON.stringify(route.path)} repeats a method`)
+  }
+  // Remote access allows its snapshot endpoint for every principal, so it would open the route to every non-owner.
+  if (route.access?.action === UNIVERSAL_ACTION) {
+    throw new Error(`connection: exact Fetch route ${JSON.stringify(route.path)} declares the universally allowed action ${UNIVERSAL_ACTION}`)
   }
 }

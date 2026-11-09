@@ -275,7 +275,7 @@ export type RemoteAccessDecision =
   | { readonly kind: 'allow' }
   | { readonly kind: 'deny'; readonly reason: string }
 
-/** Refines one binding for one action on its resource; `args` only for a concrete call. */
+/** Refines one binding for one action on its resource; `args` only for a concrete Remote call, never for an exact Fetch route request. */
 export type RemoteAccessCondition<K extends RemoteAccessResourceKind> = (request: {
   readonly action: RemoteAccessAction
   readonly resource: RemoteAccessResourceOf<K>
@@ -297,7 +297,7 @@ export interface RemoteAccessRequest<P extends Principal> {
   readonly action: RemoteAccessAction
   /** Allow only when the action is allowed on every listed resource. */
   readonly resources: readonly RemoteAccessResource[]
-  /** Named arguments of a concrete call, validated against their Typert-compiled types with lookup parameters as wire identities; absent for events, snapshots, and list filtering. */
+  /** Named arguments of a concrete Remote call, validated against their Typert-compiled types with lookup parameters as wire identities; absent for events, snapshots, list filtering, and exact Fetch route requests. */
   readonly args?: Readonly<Record<string, unknown>>
 }
 
@@ -372,7 +372,7 @@ ctx.effect(() => ctx.remoteAccess.registerPolicy('share-viewer', {
   },
 }))
 
-// Without args (snapshots, list filtering) a condition answers for the action alone.
+// Without args (snapshots, list filtering, exact Fetch route requests) a condition answers for the action alone.
 const sourceWrite = share => () => share.confined ? allow : deny('source-write-unavailable')
 const childPrompt = child => ({ action, args }) =>
   action === 'session/prompt' && args !== undefined && !child.allowsPrompt() ? deny('fork-prompt-refused') : allow
@@ -636,7 +636,7 @@ The review rule's home is the "`@Remote` marks capability methods" section of [R
 | Disposed Peers | Later unary, stream, and `$events` dispatches fail with `gateway/peer-disposed`, also when the wire payload is malformed; its streams end; a running unary call completes; other Peers are unaffected | Gateway host spec |
 | Check order | The owner calls any method normally without reading a policy; a method no role lists refuses non-owners with `remote-access/denied` (`no-allow`); the access check precedes lookups, so a refused call activates no Session | Gateway host spec |
 | Policy registration | One policy per non-owner principal kind, and a second registration throws; once the disposer withdraws it, that kind is refused with `no-allow`; it is withdrawn with its fiber | remote-access host spec |
-| Decisions | Every resource needs a matching binding (AND); a role without the action, an unequal resource, or a refusing condition does not allow; the refusal reason follows condition > `explain` > `no-allow`; `explain` never changes the decision; conditions receive args for calls but not for snapshots and list filtering; a throwing `bindings()`, condition, or `explain()` refuses with `policy-failed`, each policy is logged once between `invalidate()` calls, and on the event path the owner stream and the shared event source continue; `remoteAccess/follow` is allowed for every principal | remote-access host spec, Gateway host spec |
+| Decisions | Every resource needs a matching binding (AND); a role without the action, an unequal resource, or a refusing condition does not allow; the refusal reason follows condition > `explain` > `no-allow`; `explain` never changes the decision; conditions receive args for Remote calls but not for snapshots, list filtering, and exact Fetch route requests; a throwing `bindings()`, condition, or `explain()` refuses with `policy-failed`, each policy is logged once between `invalidate()` calls, and on the event path the owner stream and the shared event source continue; `remoteAccess/follow` is allowed for every principal | remote-access host spec, Gateway host spec |
 | Resource resolution | A default field or resolver yields one resource; a default resolver returning an array is invalid; a lookup parameter that declares that kind as its `resource` yields its wire identity; a Context method gets its Session resource from the Agent Context identity in args without activating the Agent, and may declare other resources through `resources`; a `resources` reader overrides its kind, an array yields several resources, and `undefined` none; with nothing the call is `[global]`; a throw, an empty array, or a value that is not a non-empty string (including a Context identity) is invalid, refused by the Gateway with `resource-invalid` without asking `decide()`; a Context that declares no `resource` resolves by the ordinary rules; resources and `args` read the validated arguments, with undeclared fields stripped only by compiled codecs, and a JSON argument failing validation returns `gateway/input-invalid` before the access check | Gateway host spec (gateway-access) |
 | Resource registry | `typert.resources` registers one default field or resolver per kind, rejects a second registration and `global`, and withdraws the registration with its fiber; a configured lookup resolver keeps the provider's `resource`; a Host Context adapter keeps its `resource` | typert-registry spec |
 | Forwarded events | A non-owner `$events` stream receives an event, whole, only when `event:<name>` is granted on its resources; an event that declares no resources is decided on `global`; an event whose reader returns `undefined` does not reach non-owners, and `decide()` is not asked; the owner receives all | Gateway host spec (gateway-access) |

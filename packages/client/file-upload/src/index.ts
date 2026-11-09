@@ -81,8 +81,8 @@ export class FileUploads extends TypertRemoteService {
         path: FILE_UPLOAD_PATH,
         methods: ['POST'],
         requestBody: 'streaming',
-        // The same action as the encoded Remote upload, on the Session the route stages its receipt under.
-        access: { action: 'fileUploads/upload', resources: { session: 'sessionId' } },
+        // Its own action, not the encoded Remote's: this route streams without an aggregate cap.
+        access: { action: 'fileUploads/uploadBinary', resources: { session: 'sessionId' } },
         fetch: request => handleFileUploadHttp(this, request),
       }),
       'file-upload: streaming route',
