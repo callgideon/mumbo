@@ -176,6 +176,7 @@ resource "aws_iam_role_policy" "edge" {
   policy = jsonencode({ Version = "2012-10-17", Statement = [
     { Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject"], Resource = "arn:aws:s3:::${local.backup_store}/users/*" },
     { Effect = "Allow", Action = "s3:ListBucket", Resource = "arn:aws:s3:::${local.backup_store}" },
+    { Effect = "Allow", Action = ["kms:Decrypt", "kms:GenerateDataKey"], Resource = aws_kms_key.backups.arn },
     { Effect = "Allow", Action = "ssm:GetParameter", Resource = "arn:aws:ssm:us-east-1:${data.aws_caller_identity.this.account_id}:parameter/mumbo/boxes/edge-secret" },
     { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = "arn:aws:secretsmanager:us-east-1:${data.aws_caller_identity.this.account_id}:secret:mumbo/prod/deepseek-api-key-*" },
   ] })
