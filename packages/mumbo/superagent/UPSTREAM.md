@@ -56,7 +56,9 @@ Files outside the copy changed for S1:
 - `src/core/tickets.ts`: `attachable` refuses such a Trigger with `notAdmissible`, reason `not_a_member` for a person and `not_human` for a bot. The `Engine.attach` `@throws` in `src/core/engine.ts` names this refusal.
 - `prompts/subscriptions.md` tells both roles that only an allowed person, a listed bot or CI reaches a Ticket, by subscription or by attach, and that an allowed sender's message resumes an ended Ticket. `tests/cards.spec.ts` pins both sentences.
 - A merged pull request still ends the Tickets that follow it through PR polling, whoever merged it, so the merge bot needs no allowed-list entry.
+- `prompts/orchestrator.md` tells the main Session that only an allowed sender's message (an allowlisted person or a listed bot) or senderless CI on a subscribed thread goes to the workers, and that an allowlisted person's message resumes an ended Ticket. `tests/cards.spec.ts` pins both sentences.
 - `delivers` gates only what reaches a Ticket as an Input. A worker that reads a pull request or chat thread itself still sees the text of senders who are not on the allowed list.
+- Known limit: `Tickets.wake` does not check `delivers` again. An Input that reached an ended Ticket before its sender left the allowed list can still resume that Ticket while its Mandate revalidates.
 - `docs/001-domain.md` (fan-out "with no check of who sent it") and `docs/002-authorization.md` (every message on a subscribed Thread reaches its Tickets; resume "regardless of who sent it") are upstream prose this entry supersedes on who reaches a Ticket.
 - Tests:
   - The Policy fake in `tests/assessment.spec.ts` delivers every Trigger. The fake in `tests/core-engine.spec.ts` does too, and its S3 tests narrow it to `allowlisted`, the settings rule with `member` as the only allowed sender. Its two upstream tests that sent a guest's message to a Ticket (fan-out to a live Ticket, resume of an ended one) now send the member's.
