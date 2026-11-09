@@ -116,6 +116,20 @@ Today a project member can make the coordinator read the box token, `MUMBO_MEMBE
   - `project_add_member` over MCP also gives 403.
 - **Removal:** the containment PR deletes the gate and its test.
 
+## Amendment 5: English only (founder, 2026-11-09)
+
+"No Chinese anywhere." A repo-wide removal is a separate PR (`chore/english-only`, mumbo-impl): `*.zh.*` docs, bilingual records and gates, the website and product `zh` locales, Chinese in code, fixtures and vendor, plus a `no-cjk` CI gate. Track A follows it:
+
+1. **A2:** no `packages/mumbo/superagent/README.zh.md` or `README.i18n.yaml`, and no rows in `packages/mumbo/README.zh.md` or its record. Remove any that were added. Coordinate with the repo-wide removal instead of satisfying bilingual gates with Chinese files.
+2. **The copy (S1):** translate the user-visible Chinese to English and log it in `UPSTREAM.md` S1:
+   - the preset `name` and `description` in `cordis.patch.yml` (for example "dsh-superagent 执行器" → "dsh-superagent worker", "dsh-superagent 主 Session" → "dsh-superagent router"), and the same rows in `deploy/mumbo-project.overlay.yml`;
+   - the `zh` halves of label and hint objects in `src/sources/*.ts` and the client;
+   - `locale/zh.json`, following the repo-wide decision;
+   - Chinese files or sections in the copied upstream docs.
+   Afterwards `grep -rP '\p{Han}' packages/mumbo/superagent deploy/mumbo-project.overlay.yml` finds nothing.
+3. **A7:** the overlay test compares the inserted rows to the bundle patch rows, so both change together.
+4. **A8:** the PR title and body are in English, including the AI Usage headers ("| Stage | Level | AI involvement | Decision record |").
+
 ## Amendment 4: wave-1 deep-review rulings (mumbo-design, 2026-11-09)
 
 1. **Only approvers merge and bind repositories (B2, B3, B9).**

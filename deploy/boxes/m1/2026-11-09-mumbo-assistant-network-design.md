@@ -483,6 +483,43 @@ Reference mockups (sample data): `mumbo-mockups-v2.html`.
 - Recorded-session snapshots for each node preset (repository rule).
 - A health line in the digest across all nodes: stale Tickets, failed workers, budget used, last backup.
 
+## 17a. Accounts and sign-up **[founder: 2026-11-09]**
+
+**Who.** The founder is `hi@mumbo.si`, the only approver (`APPROVER_EMAILS`). Anyone with a **verified** `@mumbo.si` or `@cambrialabs.ai` email may sign up, and each person gets their own box automatically. **[founder]**
+
+**Flow:**
+1. **Sign-in page.** A signed-out visit to `boxes.mumbo.si` reaches the Supabase sign-in page, with two choices: "Continue with Google" and "Email me a sign-in link". The first sign-in creates the account, so there is no separate sign-up form and there are no passwords. **[my call]**
+2. **Verified emails only.**
+   - Google verifies its own accounts. An email link is verified by the click.
+   - oauth2-proxy refuses tokens without `email_verified`. It is never run with `--insecure-oidc-allow-unverified-email`.
+3. **Domain check.** The edge admits by domain: `ALLOWED_EMAILS` gains `@mumbo.si` and `@cambrialabs.ai`, matched as a suffix including the `@`.
+   - Anyone else sees the invite-only page, which names the domains that can join.
+4. **First visit.** The edge creates the person's box (the existing `ensure()`). The page says "Setting up your computer, about a minute" on first creation and "Starting your computer" on later starts, and refreshes itself.
+5. **First open.** The assistant greets the person once. It says what it can do now and that connecting accounts and projects comes later, and links the box's home page.
+6. **What each account gets:**
+   - one box (2 vCPU / 4 GiB) with a desktop and browser;
+   - backups every 10 minutes;
+   - a daily model budget (`DAILY_TOKENS_USER`);
+   - up to 10 child sandboxes;
+   - the assistant.
+   - People may create projects. Repository grants and merge approvals stay with the founder until the multi-user design (part D), and projects stay owner-only (B12).
+
+**Isolation.** Other users are colleagues, each in their own VM. The edge routes every person only to their own box, so one person's box never serves pages to another person.
+
+**Capacity** **[my call]**:
+- A node holds 12 boxes, and boxes never pause, so each account holds a box permanently.
+- The edge sets `MAX_RUNNING_BOXES` to 12 × nodes, minus a headroom of 2. When it is full, newcomers see the capacity page, and the operator adds nodes (the node group allows up to 10).
+- Scaling automatically on box count comes later.
+
+**Leaving.** A runbook command deletes a person's box and backups. An account disabled in Google Workspace can no longer sign in.
+
+**Acceptance:**
+- a new `@cambrialabs.ai` account signs in with Google, gets a ready box, and the assistant's welcome appears;
+- a new `@mumbo.si` account does the same by email link;
+- an email account that never clicked its confirmation link is refused;
+- a `gmail.com` account gets the invite-only page;
+- with the cap reached, the next newcomer gets the capacity page.
+
 ## 18. Milestones **[founder: A, then B, then C; my call on the cut]**
 
 | Milestone | Contents | Done when |
