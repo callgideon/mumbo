@@ -42,6 +42,7 @@ export const config = () => ({
   pauseIdle: env('PAUSE_IDLE', 'true') !== 'false',  // false: boxes stay running (founder, 2026-11-09); cost work comes later
   backupEveryMs: Number(env('BACKUP_MINUTES', '10')) * 60_000,
   maxRunning: Number(env('MAX_RUNNING_BOXES', '0')),  // 0: no edge-side cap; E2B's own placement errors decide
+  pageAfterMs: Number(env('PAGE_AFTER_MS', '3000')),  // a page load waiting longer on a box gets the starting page
   backupConcurrency: Number(env('BACKUP_CONCURRENCY', '8')),
   allowed: list(env('ALLOWED_EMAILS', '')),
   egressIps: list(env('BOX_EGRESS_IPS', '')),
@@ -328,7 +329,7 @@ export async function inParallel(items, limit, fn) {
 }
 
 // ---- the router's view of E2B. `e2b` is the SDK module and `store` the shared state (store.mjs); both are injected.
-// A box record: { email, launch, traffic, active, extended, backedUp, paused }.
+// A box record: { email, launch, traffic, active, extended, backedUp, paused }, plus { creating, first } until creation ends.
 export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFiles, log = console.log }) {
   const LOCK_MS = 120_000
   const CREATE_STALE_MS = 15 * 60_000  // longer than a restore (11 min cap) plus dsh start
@@ -360,12 +361,13 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
 
   async function create(email) {
     if (cfg.maxRunning > 0 && (await all({ state: ['running'] })).length >= cfg.maxRunning) throw Object.assign(new Error('capacity'), { status: 503, capacity: true })
+    // Before the sandbox exists, so its `creating` record follows the create at once (adopt/backup race).
+    const restoreUrl = await presignGet(`${userPrefix(email)}/latest.tar.gz`)
     const box = await e2b.Sandbox.create(email.startsWith('project:') ? cfg.projectTemplate : cfg.template, {
       timeoutMs: timeout(), metadata: { user: email },
       lifecycle: { onTimeout: 'pause', autoResume: true },
       network: { allowPublicTraffic: false, maskRequestHost: boxSite(cfg, email).host },
     }).catch((e) => { throw /place sandbox|capacity|too many|concurrent/i.test(e.message) ? Object.assign(e, { capacity: true, status: 503 }) : e })
-    const restoreUrl = await presignGet(`${userPrefix(email)}/latest.tar.gz`).catch(async (e) => { await box.kill().catch(() => {}); throw e })
     // Recorded before the restore: other replicas then neither adopt nor back up a box whose data is half restored.
     // `first`: no backup exists, so this is the person's first set-up (the edge pages say so).
     await store.putBox(box.sandboxId, { email, creating: Date.now(), first: !restoreUrl, active: Date.now(), extended: Date.now(), backedUp: Date.now(), paused: false })
@@ -391,12 +393,9 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
 
   /** The user's running box: id, dsh launch token and E2B traffic token. Creates, resumes or repairs as needed. */
   async function ensure(email) {
-    try { return await ensureLocked(email) } catch (error) {
-      error.first ??= await firstSetUp(email).catch(() => false)
-      throw error
-    }
+    return ensureLocked(email)
   }
-  /** True while the person has no box and no backup, or their box is still its first creation. */
+  /** True while the person has no box and no backup, or their box is still its first creation (edge pages). */
   async function firstSetUp(email) {
     const found = await find(email)
     return found ? (await store.getBox(found.sandboxId))?.first === true : !(await presignGet(`${userPrefix(email)}/latest.tar.gz`))
@@ -535,7 +534,7 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
       say({ level: 'error', msg: 'pause failed', box: b.id, error: e.message })
     })
   }
-  return { ensure, touch, owns, sweep, adoptRunning, forget: (id) => store.patchBox(id, { launch: undefined }) }
+  return { ensure, firstSetUp, touch, owns, sweep, adoptRunning, forget: (id) => store.patchBox(id, { launch: undefined }) }
 }
 
 // ---- who is asking. Behind oauth2-proxy (trial) the email header is trusted because only it can reach the router;
@@ -668,6 +667,8 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, log = conso
   const identify = async (req) => verifyAlb
     ? (await verifyAlb(req.headers['x-amzn-oidc-data']).catch(() => undefined)) ?? ''
     : String(req.headers['x-forwarded-email'] ?? '').toLowerCase()
+  const pending = new Map()  // box key -> the in-flight ensure of this replica
+  const SLOW = Symbol('slow')
   const quiet = (p) => { Promise.resolve(p).catch(() => {}) }
   // A project box is the root of its own origin (boxSite): every path on that host, /home included, goes to its dsh.
   // undefined: a host no box serves.
@@ -699,10 +700,21 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, log = conso
     if (to.port === '6080' && req.method !== 'GET' && req.method !== 'HEAD' && req.headers.origin !== `https://${host}`) return page(res, 403, 'Forbidden.', false)
     if (to.project && !(await projects?.isMember(email, to.project))) return page(res, 403, 'No such project, or you are not one of its members.', false)
     let target
-    try { target = await box.ensure(to.project ? `project:${to.project}` : email) } catch (e) {
+    const key = to.project ? `project:${to.project}` : email
+    try {
+      let p = pending.get(key)
+      if (!p) { p = box.ensure(key); pending.set(key, p); p.then(() => pending.delete(key), () => pending.delete(key)) }
+      // A page load that waits on a box shows the starting page after cfg.pageAfterMs; reloads join the same ensure.
+      target = isNavigation(req) ? await Promise.race([p, new Promise(r => setTimeout(r, cfg.pageAfterMs, SLOW).unref())]) : await p
+      if (target === SLOW) {
+        p.catch((e) => log(JSON.stringify({ edge: 'error', user: email, project: to.project, error: e.message })))
+        if (to.project) return page(res, 503, "Starting this project's computer. This page reloads by itself.")
+        return page(res, 503, await box.firstSetUp(email).catch(() => false) ? 'Setting up your computer, about a minute. This page reloads by itself.' : 'Starting your computer. This page reloads by itself.')
+      }
+    } catch (e) {
       log(JSON.stringify({ edge: 'error', user: email, project: to.project, error: e.message }))
       return page(res, 503, e.capacity ? 'mumbo is at capacity right now. This page retries every few seconds.'
-        : e.first ? 'Setting up your computer, about a minute. This page reloads by itself.' : 'Starting your computer. This page reloads by itself.')
+        : to.project ? "Starting this project's computer. This page reloads by itself." : 'Starting your computer. This page reloads by itself.')
     }
     const dsh = to.port === '3080'
     // On a member-capable project box a member is themselves (signed header), never the box owner.

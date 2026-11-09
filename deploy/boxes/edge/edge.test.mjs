@@ -6,7 +6,7 @@ import { inParallel, signBox, verifyBox, userPrefix, budget, needsLaunch, boxHea
 import { memoryStore, redisStore } from './store.mjs'
 import { generateKeyPairSync, createSign } from 'node:crypto'
 
-const cfg = { publicHost: 'boxes.example', projectDomain: 'boxes.example', llmHost: 'llm.example', template: 'mumbo-box', idleMs: 60_000, backupEveryMs: 600_000, maxRunning: 5, allowed: ['@x.com'], egressIps: [], signinCookie: '_oauth2_proxy_mumbo', proxy: new URL('http://127.0.0.1:1'), upstream: 'https://model.example' }
+const cfg = { pageAfterMs: 3000, publicHost: 'boxes.example', projectDomain: 'boxes.example', llmHost: 'llm.example', template: 'mumbo-box', idleMs: 60_000, backupEveryMs: 600_000, maxRunning: 5, allowed: ['@x.com'], egressIps: [], signinCookie: '_oauth2_proxy_mumbo', proxy: new URL('http://127.0.0.1:1'), upstream: 'https://model.example' }
 const listen = (server) => new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port)))
 const call = (port, { method = 'GET', path = '/', headers = {}, body } = {}) => new Promise((resolve, reject) => {
   const req = request({ host: '127.0.0.1', port, method, path, headers: { host: cfg.publicHost, ...headers } }, (res) => {
@@ -725,33 +725,79 @@ test('invite-only page without domain entries keeps the plain text', async () =>
   const r = await pageOf({ ...cfg, allowed: ['a@x.com'] }, async () => assert.fail('no box'), 'z@other.com')
   assert.match(r.body, /invite-only/)
 })
-test('first create shows the set-up page, a later start the starting page; both refresh and are not cached', async () => {
-  const first = await pageOf(cfg, async () => { throw Object.assign(new Error('x'), { first: true }) })
-  assert.match(first.body, /Setting up your computer, about a minute/)
-  const later = await pageOf(cfg, async () => { throw Object.assign(new Error('x'), { first: false }) })
-  assert.match(later.body, /Starting your computer/)
-  for (const r of [first, later]) {
-    assert.equal(r.status, 503)
-    assert.equal(r.headers.refresh, '5')
-    assert.match(r.body, /<meta http-equiv="refresh" content="5">/)
-    assert.equal(r.headers['cache-control'], 'no-store')
+const nav = { 'x-forwarded-email': 'a@x.com', accept: 'text/html', cookie: 'dsh-auth-x=1' }
+// A fake E2B whose Sandbox.create waits for `gate`; counts creates.
+const gated = () => {
+  let open; const gate = new Promise(r => { open = r })
+  const e2b = fakeE2B(); const made = e2b.Sandbox.create; let creates = 0
+  e2b.Sandbox.create = async (...a) => { creates++; await gate; return made(...a) }
+  return { e2b, open, creates: () => creates }
+}
+const gatedServer = async (presign, email = 'a@x.com') => {
+  const g = gated(); const store = memoryStore()
+  const b = boxes({ e2b: g.e2b, store, cfg, edgeKey: 'k', presignGet: presign, presignPut: async () => 'P', log: () => {} })
+  const s = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: b, log: () => {} })
+  return { ...g, b, store, s, port: await listen(s) }
+}
+test('first visit: the set-up page within the delay, a reload joins the same create, then the box answers', async () => {
+  const t = await gatedServer(async () => undefined)
+  const one = await call(t.port, { headers: nav })
+  assert.equal(one.status, 503)
+  assert.match(one.body, /Setting up your computer, about a minute/)
+  assert.equal(one.headers.refresh, '5')
+  assert.match(one.body, /<meta http-equiv="refresh" content="5">/)
+  assert.equal(one.headers['cache-control'], 'no-store')
+  assert.match((await call(t.port, { headers: nav })).body, /Setting up your computer/)
+  assert.equal(t.creates(), 1)
+  assert.equal((await t.store.getBox('b1')), undefined)
+  t.open(); await new Promise(r => setTimeout(r, 100))
+  // The box exists; the request now goes on to it (the test proxy is unreachable, so 502 proves it got that far).
+  assert.equal((await call(t.port, { headers: nav })).status, 502)
+  assert.equal(t.creates(), 1)
+  assert.equal('first' in (await t.store.getBox('b1')), false)
+  t.s.close()
+})
+test('later start (a backup exists) shows the starting page', async () => {
+  const t = await gatedServer(async () => 'GET-URL')
+  const one = await call(t.port, { headers: nav })
+  assert.match(one.body, /Starting your computer/)
+  assert.doesNotMatch(one.body, /Setting up/)
+  t.open(); t.s.close()
+})
+test('create records first only while it runs: true without a backup, false with one', async () => {
+  for (const [url, first] of [[undefined, true], ['GET-URL', false]]) {
+    const e2b = fakeE2B(); const store = memoryStore(); let release; const hold = new Promise(r => { release = r })
+    const mk = e2b.Sandbox.create
+    e2b.Sandbox.create = async (...a) => { const b = await mk(...a); const run = b.commands.run; b.commands.run = async (c) => { if (c.includes('chmod +x')) await hold; return run(c) }; return b }
+    const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => url, presignPut: async () => 'P', log: () => {} })
+    const done = b.ensure('a@x.com')
+    await new Promise(r => setTimeout(r, 60))
+    assert.equal((await store.getBox('b1')).creating > 0, true)
+    assert.equal((await store.getBox('b1')).first, first)
+    release(); await done
+    assert.equal('first' in (await store.getBox('b1')), false)
   }
 })
-test('capacity page is kept', async () => {
-  const r = await pageOf(cfg, async () => { throw Object.assign(new Error('capacity'), { capacity: true, first: true }) })
+test('a non-navigation request still waits for the box', async () => {
+  const t = await gatedServer(async () => undefined)
+  let status; const req = call(t.port, { headers: { 'x-forwarded-email': 'a@x.com', cookie: 'dsh-auth-x=1' } }).then(r => { status = r.status })
+  await new Promise(r => setTimeout(r, 150))
+  assert.equal(status, undefined)
+  t.open(); await req
+  assert.equal(status, 502)
+  t.s.close()
+})
+test('capacity page is kept and needs no first-set-up lookup', async () => {
+  const s = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure: async () => { throw Object.assign(new Error('capacity'), { capacity: true }) }, firstSetUp: async () => assert.fail('no lookup'), touch() {}, forget() {} }, log: () => {} })
+  const r = await call(await listen(s), { headers: nav })
+  s.close()
   assert.match(r.body, /at capacity/)
 })
-test('ensure marks a failure as first set-up only for a person with no box and no backup', async () => {
-  const mk = (presign, e2b = fakeE2B()) => boxes({ e2b, store: memoryStore(), cfg, edgeKey: 'k', presignGet: presign, presignPut: async () => 'P', log: () => {} })
-  const failing = () => { const e2b = fakeE2B(); e2b.Sandbox.create = async () => { throw new Error('boom') }; return e2b }
-  await assert.rejects(mk(async () => undefined, failing()).ensure('a@x.com'), (e) => e.first === true)
-  await assert.rejects(mk(async () => 'GET-URL', failing()).ensure('a@x.com'), (e) => e.first === false)
-  // A box another replica is still creating for a first-time person.
-  const store = memoryStore(); const e2b = fakeE2B()
-  const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'P', log: () => {} })
-  e2b.made.push({ id: 'b1' })
-  await store.putBox('b1', { email: 'a@x.com', creating: Date.now(), first: true })
-  await assert.rejects(b.ensure('a@x.com'), (e) => e.first === true)
-  await store.putBox('b1', { email: 'a@x.com', creating: Date.now() })
-  await assert.rejects(b.ensure('a@x.com'), (e) => e.first === false)
+test('project routes get neutral text, never the person texts', async () => {
+  const id = '0123456789abcdef'
+  const s = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure: () => new Promise(() => {}), firstSetUp: async () => assert.fail('no lookup'), touch() {}, forget() {} }, projects: { isMember: async () => true }, log: () => {} })
+  const r = await call(await listen(s), { headers: { ...nav, host: `p-${id}.${cfg.projectDomain}` } })
+  s.close()
+  assert.match(r.body, /Starting this project's computer/)
+  assert.doesNotMatch(r.body, /your computer/)
 })
