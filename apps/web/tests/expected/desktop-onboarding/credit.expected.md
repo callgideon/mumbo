@@ -1,7 +1,7 @@
-- region "准备可用额度":
-  - heading "准备可用额度" [level=1]
-  - paragraph: DeepSeek Harness 执行任务时，会根据模型与工具使用的 token 量扣除额度。请提前添加额度，避免任务在执行过程中被迫中断。你的余额只会在 Agent 实际执行任务时消耗。
-  - button "去充值"
-  - button "下一步"
-  - button "上一步"
-  - button "跳过"
+- region "Add credits":
+  - heading "Add credits" [level=1]
+  - paragraph: DeepSeek Harness charges credits based on the tokens used by models and tools. Add credits in advance to keep your tasks running without interruption. Your balance is only used while the agent is working on a task.
+  - button "Add credits"
+  - button "Next"
+  - button "Back"
+  - button "Skip"

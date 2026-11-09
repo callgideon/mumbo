@@ -3,7 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { createElement, type ComponentProps, type ReactNode } from 'react'
 import { onTestFinished } from 'vitest'
 import { bindSnapshotSelector, contextMenuHook, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
-import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
+import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
 import type { UserTextInput, UserTextNodeOwnerProps } from '../src/client/contract/slots.ts'
 import type { UserTextNode } from '../src/client/contract/user-text.ts'
 import { UserTextRegistry } from '../src/client/conversation/user-text-registry.ts'
@@ -16,7 +16,7 @@ import { skillReferenceRule } from '../../ui-skill/src/client/user-text-rules.ts
 import { SkillReference } from '../../ui-skill/src/client/SkillReference.tsx'
 import { fileReferenceRule, folderReferenceRule } from '../../ui-reference/src/client/user-text-rules.ts'
 import { FileReference, FolderReference } from '../../ui-reference/src/client/FileReference.tsx'
-import { zh as referenceZh } from '../../ui-reference/src/client/locales.ts'
+import { en as referenceEn } from '../../ui-reference/src/client/locales.ts'
 import { createSecretRule } from '../../ui-secret-mask/src/client/secret-rule.ts'
 import { SecretText } from '../../ui-secret-mask/src/client/SecretText.tsx'
 import { goalCommandReferenceRule } from '../../ui-goal/src/client/user-text-rules.ts'
@@ -52,7 +52,7 @@ export function createUserTextFixture(actions: UserTextFixtureActions = {}): (in
   const reportTransformFailure = (error: unknown): never => { throw error }
   const openFile = actions.openFile ?? (() => { throw new Error('This fixture has no file navigation action') })
   const openSkill = actions.openSkill ?? (() => { throw new Error('This fixture has no skill navigation action') })
-  const t = makeTranslate(referenceZh, commonZh)
+  const t = makeTranslate(referenceEn, commonEn)
   const renderSlot: UserTextProps['renderSlot'] = (name: string, input: object, options?: { fallback?: ReactNode }) => {
     if (name !== 'conversation.user.text.node') throw new Error(`Unexpected UserText Slot: ${name}`)
     const owner = input as UserTextNodeOwnerProps & { node: UserTextNode }

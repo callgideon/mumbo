@@ -20,7 +20,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'locale'],
       apply(ctx) {
         const labels = { title: 'Bottom content', input: 'Bottom input', grow: 'Grow bottom', collapse: 'Collapse bottom' }
-        ctx.effect(() => ctx.locale.register('fixtureBottom', { en: labels, zh: labels }))
+        ctx.effect(() => ctx.locale.register('fixtureBottom', { en: labels }))
         ctx.slots.inject('shell.bottom', () => ctx.slots.register({
           name: 'shell.bottom', locale: 'fixtureBottom',
         }, Bottom))

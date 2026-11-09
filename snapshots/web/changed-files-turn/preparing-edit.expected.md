@@ -1,1 +1,1 @@
-- text: 正在准备调用 编辑 intro.md
+- text: Preparing tool call Edit intro.md

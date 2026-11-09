@@ -14,7 +14,7 @@ import { ScheduleTaskTab, type ScheduleTaskTabProps } from '../src/client/Schedu
 import { ScheduleTaskTabTitle, type ScheduleTaskTabTitleProps } from '../src/client/ScheduleTaskTabTitle.tsx'
 import { TaskTabBindings, type TaskTabPage } from '../src/client/task-tab-bindings.ts'
 import { createEditorStore } from '../src/client/editor-store.ts'
-import { en, zh } from '../src/client/task-manager-locales.ts'
+import { en } from '../src/client/task-manager-locales.ts'
 import css from '../src/client/TaskManagerPage.module.css'
 
 type Entry = ScheduleCatalogEntry
@@ -83,7 +83,7 @@ function tabInfo(params: unknown, revision = 1): SidebarRightTabInfo {
 function mount(
   initial: Partial<CatalogSnapshot<Entry>> = {},
   params: unknown = { sessionId: SESSION, id: at.id },
-  dictionary: typeof en | typeof zh = en,
+  dictionary: typeof en = en,
   sessionState: SessionListState = sessions,
   overrides: Partial<ScheduleTaskTabProps> = {},
 ) {
@@ -169,7 +169,7 @@ function boundTo(id: ScheduleId): TaskTabBindings {
   return bindings
 }
 
-describe.each([['English', en], ['Chinese', zh]] as const)('task tab body in %s', (_name, dictionary) => {
+describe.each([['English', en]] as const)('task tab body in %s', (_name, dictionary) => {
   it('opens stored weekly controls immediately and restores them after viewing records', () => {
     const { rrule: _rrule, kind: _kind, ...common } = at
     mount({ records: [{ ...common, kind: 'weekly', time: '09:30:00.000', timeZone: 'UTC', weekdays: [1, 5] }] },

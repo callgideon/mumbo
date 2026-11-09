@@ -12,7 +12,7 @@ import { TranscriptViewRow, type TranscriptViewRowProps } from '../src/client/se
 import { PerformanceUsageRow } from '../src/client/settings/PerformanceUsageRow.tsx'
 import type { LinkOpening, PerformanceUsageMode, TranscriptViewMode } from '../src/chat-settings.ts'
 import { LinkOpeningRow } from '../src/client/settings/LinkOpeningRow.tsx'
-import { en, zh } from '../src/client/locale.ts'
+import { en, fr } from '../src/client/locale.ts'
 import type { CollapseTiming, FoldedReplies } from '../src/client/presentation-policy.ts'
 
 afterEach(cleanup)
@@ -36,7 +36,7 @@ function noPendingInteraction() {
 // The resource hook the resources plugin merges into GlobalStandardProps; this row reads no address.
 const useResource = (() => ({ status: 'none' as const, value: undefined, failure: undefined })) as GlobalStandardProps['useResource']
 
-function mount(mode: TranscriptViewMode = 'standard', dictionary: typeof en | typeof zh = en) {
+function mount(mode: TranscriptViewMode = 'standard', dictionary: typeof en | typeof fr = en) {
   const source = createSnapshotStore<TranscriptViewMode>(mode)
   const collapseTiming = createSnapshotStore<CollapseTiming>('completion')
   const foldedReplies = createSnapshotStore<FoldedReplies>('all')
@@ -75,7 +75,7 @@ describe('TranscriptViewRow', () => {
   it.each([
     [en, 'Work details', 'When to Collapse Work Details',
       'Choose when to automatically collapse work details', 'On completion', 'On next message'],
-    [zh, '工作步骤展示', '工作步骤收起时机', '选择何时自动收起工作步骤', '回答结束后', '下次有新消息时'],
+    [fr, 'Détails du travail', 'Quand réduire les détails du travail', 'Choisissez quand réduire automatiquement les détails du travail', 'À la fin', 'Au prochain message'],
   ] as const)('selects either collapse timing independently with localized labels (%s)', (dictionary, detailTitle, title, description, completion, nextInput) => {
     const b = mount('standard', dictionary)
     const titleElement = screen.getByText(title)
@@ -99,10 +99,10 @@ describe('TranscriptViewRow', () => {
 
   it.each([
     [en, 'Replies After Collapse', 'Choose which assistant replies stay visible when work details collapse', 'All replies', 'Final answer only'],
-    [zh, '收起后显示的回复', '工作步骤收起后，保留哪些助手回复', '全部回复', '仅最终回答'],
+    [fr, 'Réponses après le repli', 'Choisissez quelles réponses de l\'assistant restent visibles lorsque les détails du travail sont réduits', 'Toutes les réponses', 'Réponse finale seulement'],
   ] as const)('selects which replies stay visible below collapse timing (%s)', (dictionary, title, description, all, final) => {
     const b = mount('standard', dictionary)
-    const timingTitle = dictionary === en ? 'When to Collapse Work Details' : '工作步骤收起时机'
+    const timingTitle = dictionary === en ? 'When to Collapse Work Details' : 'Quand réduire les détails du travail'
     expect(screen.getByText(timingTitle).compareDocumentPosition(screen.getByText(title)) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
     expect(screen.getByText(description)).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: all }))
@@ -180,20 +180,20 @@ describe('TranscriptViewRow', () => {
     expect(screen.queryByRole('menuitem', { name: 'Compact' })).toBeNull()
   })
 
-  it('shows all four work-detail values in Chinese', () => {
-    const b = mount('compact', zh)
-    expect(screen.getByText('工作步骤展示')).toBeDefined()
-    expect(screen.getByText('选择希望看到多少工具调用细节')).toBeDefined()
-    fireEvent.click(screen.getByRole('button', { name: '简洁' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '标准' }))
+  it('shows all four work-detail values in English', () => {
+    const b = mount('compact', fr)
+    expect(screen.getByText('Détails du travail')).toBeDefined()
+    expect(screen.getByText('Choisissez le niveau de détails à afficher pour les appels d\'outils')).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Compacte' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Norme' }))
     expect(b.setTranscriptView).toHaveBeenLastCalledWith('standard')
-    fireEvent.click(screen.getByRole('button', { name: '标准' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '详细' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Norme' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Détaillé' }))
     expect(b.setTranscriptView).toHaveBeenLastCalledWith('detailed')
-    fireEvent.click(screen.getByRole('button', { name: '详细' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '完全展开' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Détaillé' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Verbeux' }))
     expect(b.setTranscriptView).toHaveBeenLastCalledWith('verbose')
-    expect(screen.getByRole('button', { name: '完全展开' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Verbeux' })).toBeDefined()
   })
 
   it('returns focus before publishing a mode change without refocusing after the menu closes', async () => {
@@ -243,7 +243,7 @@ describe('LinkOpeningRow', () => {
 
   it.each([
     [en, 'Open chat links in', 'Choose where to open web links', 'In-App Sidebar', 'Default Browser'],
-    [zh, '网页链接默认打开方式', '对话中网页链接的打开位置', '应用内侧边栏', '默认浏览器'],
+    [fr, 'Ouvrir les liens de discussion dans', 'Choisissez où ouvrir les liens Web', 'Barre latérale dans l\'application', 'Navigateur par défaut'],
   ] as const)('selects either destination using localized labels (%s)', (dictionary, title, description, sidebar, newTab) => {
     const b = mount('compact', dictionary)
     const source = createSnapshotStore<LinkOpening>('sidebar')

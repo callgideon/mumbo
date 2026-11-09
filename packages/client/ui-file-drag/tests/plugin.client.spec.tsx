@@ -22,13 +22,14 @@ function transfer(token = ''): DataTransfer {
   })
 }
 
-async function bench(language: 'zh' | 'en' | 'ja' = 'zh') {
+async function bench(language: 'de' | 'en' | 'ja' = 'de') {
   revokeUrl.mockReset()
   vi.stubGlobal('File', NodeFile)
   vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:transfer'), revokeObjectURL: revokeUrl }))
   const runtime = await SlotTestRuntime.create()
   onTestFinished(() => runtime.dispose())
   const locale = new LocaleRuntime(runtime.ctx)
+  locale.addLanguage({ id: 'de', label: 'Deutsch', fallback: 'en' })
   onTestFinished(locale.addLanguage({ id: 'ja', label: '日本語', fallback: 'en' }))
   locale.setLocale(language)
   runtime.ctx.provide('locale', locale)
@@ -66,7 +67,7 @@ it('retains bytes after source unmount and releases on the detached node dragend
 })
 
 it.each([
-  ['zh', '拖放失败，请重试'],
+  ['de', 'Ziehen ist fehlgeschlagen. Versuchen Sie es erneut.'],
   ['en', 'Drag failed. Try again.'],
   ['ja', 'ドラッグ＆ドロップに失敗しました。もう一度お試しください。'],
 ] as const)('reports a late native failure after source unmount in %s', async (language, message) => {

@@ -41,43 +41,6 @@ export const en = {
 }
 /** Keys shared by all supported locale dictionaries. */
 export type CuaPermissionLocaleKey = keyof typeof en
-/** Chinese permission-page dictionary. */
-export const zh: Record<CuaPermissionLocaleKey, string> = {
-  approvalRisks: '风险提示',
-  approvalRiskTitle: 'Computer Use 风险提示',
-  approvalRiskNotice: '智能体只能访问你已授权的应用，并可在后台读取应用内容、操作应用。\n\n网络游戏、即时通讯等应用可能对自动化操作有所限制。违反相关规则可能导致你在该应用中的账号被暂停使用或封禁。\n\n请自行承担使用风险。如需停止自动化操作，可随时点击 DeepSeek Harness 中的停止按钮。',
-  title: '给 Computer Use 授权', applicationsTitle: '管理 Computer Use 可访问的应用', setupTitle: '使用 Computer Use 前需要设置',
-  setupBody: 'Computer Use 插件已开启。使用前请切换到 PTC 模式，并授予辅助功能和屏幕录制权限。请前往插件详情页完成设置。',
-  setupQueryFailed: 'Computer Use 插件已开启，但暂时无法检测系统权限。请前往插件详情页查看原因并重试。',
-  defaultTitle: '新会话默认模式',
-  defaultBody: 'Computer Use 仅在 PTC 模式中可用。',
-  defaultConfirm: '设为 PTC', defaultSet: '已设为 PTC',
-  defaultUnavailable: '无法读取默认模式，请在设置中检查',
-  defaultReadOnly: '默认模式设置为只读',
-  defaultNotSaved: '默认模式未保存，请重试',
-  defaultFailed: '无法切换默认模式：{message}',
-  persistentTitle: 'PTC 执行方式',
-  persistentBody: '跨工具调用保留变量和应用对象。切换会重启 PTC 执行器。',
-  persistentConfirm: '设为持久化', persistentSet: '已设为持久化',
-  persistentUnavailable: '无法读取 PTC 执行方式，请在设置中检查',
-  persistentReadOnly: 'PTC 执行方式设置为只读',
-  persistentNotSaved: 'PTC 执行方式未保存，请重试',
-  persistentFailed: '无法切换 PTC 执行方式：{message}',
-  openSetup: '前往设置', later: '稍后', close: '关闭',
-  accessibility: '辅助功能', screenRecording: '屏幕录制',
-  accessibilityUse: '读取界面控件、点击和输入文字', screenRecordingUse: '截取所选应用的窗口',
-  accessibilityPermission: '在系统设置中允许 {application} 读取界面、点击和输入。',
-  screenRecordingPermission: '在系统设置中允许 {application} 截取应用窗口。',
-  permissionHint: '在系统设置中管理辅助功能和屏幕录制权限',
-  granted: '已允许', unknown: '未确认', request: '申请权限', settings: '打开系统设置', retry: '重试',
-  allowedApps: '始终允许的应用',
-  blockedApps: '不允许访问的应用', retryApproval: '允许再次询问',
-  retryAllowed: '下次选择此应用时将重新询问，当前尚未授权',
-  noApps: '暂无始终允许或不允许访问的应用。',
-  revoke: '撤销', revoked: '已撤销应用访问权限', requested: '请按系统设置底部的引导完成授权', opened: '已打开系统设置',
-  applicationsFailed: '无法读取应用授权：{message}', iconsFailed: '无法读取应用图标：{message}',
-  failed: '无法更新权限：{message}', queryFailed: '无法检测权限：{message}',
-}
 
 /** Japanese copy, checked against the English keys. */
 export const ja = {

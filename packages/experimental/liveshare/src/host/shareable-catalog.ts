@@ -31,7 +31,7 @@ export const EXCLUDED_SHARE_NAMESPACES: ReadonlySet<string> = new Set([
 ])
 
 /** Languages the owner-facing dialog can display. */
-const TITLE_LANGUAGES = ['en', 'zh', 'ja', 'es', 'fr', 'de', 'ru', 'pt'] as const
+const TITLE_LANGUAGES = ['en', 'ja', 'es', 'fr', 'de', 'ru', 'pt'] as const
 
 /** What one package contributes to a catalog group. */
 export interface PluginMetadata {

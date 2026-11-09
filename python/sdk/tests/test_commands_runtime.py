@@ -354,7 +354,7 @@ def test_compact_without_history_returns_without_a_model_turn(tmp_path: Path) ->
         session = runtime.harness.start_session(_SESSION_ID)
         observer = runtime.harness.client.subscribe_session_notifications(_SESSION_ID)
         try:
-            execution = runtime.call(session.run, " \n/压缩\t ")
+            execution = runtime.call(session.run, " \n/compact\t ")
             done = runtime.call(_wait_command_done, observer.next)
         except BaseException:
             # Wake a timed-out observer before unregistering its otherwise blocking queue.

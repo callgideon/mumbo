@@ -54,9 +54,9 @@ it('localizes caption entries and removes the menu on disposal', () => {
   const host = document.querySelector('[data-windows-menu]')!
   const bar = host.shadowRoot!.querySelector('[role=menubar]')!
   expect(bar.outerHTML).toMatchSnapshot('english')
-  document.documentElement.lang = 'zh-CN'
+  document.documentElement.lang = 'de'
   menu.update()
-  expect(bar.outerHTML).toMatchSnapshot('chinese')
+  expect(bar.outerHTML).toMatchSnapshot('german')
   menu.dispose()
   menu = undefined
   expect(document.querySelector('[data-windows-menu]')).toBeNull()

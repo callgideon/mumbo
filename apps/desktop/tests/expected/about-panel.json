@@ -12,9 +12,9 @@
       "iconPath": "<app icon>"
     }
   },
-  "darwin:zh-CN": {
+  "darwin:de": {
     "menu": [
-      { "label": "关于 DeepSeek Harness", "role": "about" },
+      { "label": "Über DeepSeek Harness", "role": "about" },
       { "type": "separator" }
     ],
     "options": {
@@ -25,9 +25,9 @@
       "iconPath": "<app icon>"
     }
   },
-  "win32:zh-CN": {
+  "win32:de": {
     "menu": [
-      { "label": "关于 DeepSeek Harness" },
+      { "label": "Über DeepSeek Harness" },
       { "type": "separator" }
     ],
     "options": {

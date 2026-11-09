@@ -14,7 +14,7 @@ import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client
 import type { ConnectionState } from '@deepseek-ai/dsh-client-connection/client'
 import type { RemoteAccessFrame, TypertResourceKind } from '@deepseek-ai/dsh-api-remote-access/client'
 import { ClientAccessState } from '@deepseek-ai/dsh-api-remote-access/src/client/state.ts'
-import { en, NS, zh } from '../src/client/locales.ts'
+import { en, NS, fr } from '../src/client/locales.ts'
 
 /** Scripted access snapshot of one viewer page. */
 export interface ViewerRemoteAccess {
@@ -68,10 +68,11 @@ export function provideViewerConnection(ctx: Context): SnapshotStore<ConnectionS
  * @param language - Language the mounted surfaces state their copy in.
  * @returns The provided registry, for a case that switches language mid-test.
  */
-export function provideViewerLocale(ctx: Context, language: 'zh' | 'en' = 'zh'): LocaleRuntime {
+export function provideViewerLocale(ctx: Context, language: 'fr' | 'en' = 'en'): LocaleRuntime {
   const locale = new LocaleRuntime(ctx)
+  locale.addLanguage({ id: 'fr', label: 'Français', fallback: 'en' })
   ctx.provide('locale', locale)
-  locale.register(NS, { zh, en })
+  locale.register(NS, { fr, en })
   locale.setLocale(language)
   return locale
 }

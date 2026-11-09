@@ -1,40 +1,40 @@
-- dialog "设置":
-  - text: 设置
+- dialog "Einstellungen":
+  - text: Einstellungen
   - navigation:
-    - button "通用设置"
-    - button "模型"
-    - button "内置插件"
-    - button "Agent 预设"
-  - button "打开配置文件"
-  - button "关闭"
-  - text: 权限 选择新会话的默认权限模式
-  - button "工作区内修改"
-  - text: 语言
-  - button "中文"
-  - text: 外观
-  - button "浅色"
-  - button "深色"
-  - button "跟随系统" [pressed]
-  - text: 字号大小 仅影响会话内容的字号 14
-  - button "增大字号"
-  - button "减小字号"
+    - button "Allgemein"
+    - button "Modelle"
+    - button "Integrierte Plugins"
+    - button "Agentenvoreinstellungen"
+  - button "Konfigurationsdatei öffnen"
+  - button "Schließen"
+  - text: Erlaubnis Wählen Sie den Standardberechtigungsmodus für neue Sitzungen
+  - button "Arbeitsbereich schreiben"
+  - text: Sprache
+  - button "Deutsch"
+  - text: Aussehen
+  - button "Hell"
+  - button "Dunkel"
+  - button "System" [pressed]
+  - text: Schriftgröße Betrifft nur Konversationsinhalte 14
+  - button "Schriftgröße erhöhen"
+  - button "Schriftgröße verringern"
   - text: px
-  - button "更多字体设置"
-  - text: 工作步骤展示 选择希望看到多少工具调用细节
-  - button "标准"
-  - text: 工作步骤收起时机 选择何时自动收起工作步骤
-  - button "回答结束后"
-  - text: 收起后显示的回复 工作步骤收起后，保留哪些助手回复
-  - button "全部回复"
-  - text: 显示代码工作视图 开启后，显示轨迹、本轮代码差异，可选择完整的 Agent 预设切换
-  - switch "显示代码工作视图" [checked]
-  - text: 快捷键
-  - paragraph: 查看和编辑当前可用的快捷键和输入操作
-  - button "编辑快捷键"
-  - text: 繁忙时的发送行为 智能体运行时 Enter 键和发送按钮的行为；Cmd/Ctrl+Enter 使用另一行为
-  - button "排队发送"
-  - text: 性能与用量 选择性能与用量信息展示的详细程度
-  - button "详细"
-  - text: 在使用官方模型 API 时上传 Session Log 帮助改进 DeepSeek 模型与产品
-  - switch "在使用官方模型 API 时上传 Session Log"
-  - text: 当前版本：{{version}}
+  - button "Weitere Schriftarteinstellungen"
+  - text: Arbeitsdetails Wählen Sie aus, wie viele Details für Werkzeugaufrufe angezeigt werden sollen
+  - button "Standard"
+  - text: Wann Arbeitsdetails minimiert werden sollten Wählen Sie aus, wann Arbeitsdetails automatisch ausgeblendet werden sollen
+  - button "Nach Fertigstellung"
+  - text: Antworten nach dem Einklappen Wählen Sie aus, welche Assistentenantworten sichtbar bleiben, wenn die Arbeitsdetails ausgeblendet werden
+  - button "Alle Antworten"
+  - text: Codieransicht anzeigen Zeigt Ausführungsverlauf, Codeunterschiede und alle Agentenvoreinstellungen an
+  - switch "Codieransicht anzeigen" [checked]
+  - text: Tastaturkürzel
+  - paragraph: Verfügbare Verknüpfungen und Eingabeaktionen anzeigen und bearbeiten
+  - button "Verknüpfungen bearbeiten"
+  - text: Sendeverhalten, während beschäftigt ist Was die Eingabetaste und die Schaltfläche „Senden“ bewirken, während der Agent ausgeführt wird; Cmd/Strg+Enter verwendet das andere Verhalten
+  - button "Warteschlange"
+  - text: Leistung und Nutzung Wählen Sie aus, wie viele Leistungs- und Nutzungsinformationen angezeigt werden sollen
+  - button "Ausführlich"
+  - text: Laden Sie das Sitzungsprotokoll hoch, wenn Sie das offizielle Modell API verwenden Helfen Sie mit, DeepSeek-Modelle und -Produkte zu verbessern.
+  - switch "Laden Sie das Sitzungsprotokoll hoch, wenn Sie das offizielle Modell API verwenden"
+  - text: "Aktuelle Version: {{version}}"

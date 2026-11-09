@@ -1,0 +1,1 @@
+Se déconnecterLes tâches sont actuellement en cours d'exécution. La déconnexion les interrompra. Se déconnecter maintenant ?AnnulerSe déconnecter

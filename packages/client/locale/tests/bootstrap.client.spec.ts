@@ -27,8 +27,9 @@ describe('native locale initialization', () => {
     const ctx = new Context()
     const host = stubConfigForm<LocaleSettings>()
     try {
-      const locale = new LocaleRuntime(ctx, host.scope, { languages: ['ja-JP', 'zh-Hant', 'en-US'], preference: null })
-      expect(locale.getSnapshot().active).toBe('zh')
+      const locale = new LocaleRuntime(ctx, host.scope, { languages: ['ja-JP', 'de-AT', 'en-US'], preference: null })
+      locale.addLanguage({ id: 'de', label: 'Deutsch', fallback: 'en' })
+      expect(locale.getSnapshot().active).toBe('de')
       expect(host.set).not.toHaveBeenCalled()
       locale.setLocale('en')
       expect(host.set).toHaveBeenCalledExactlyOnceWith('preference', 'en')
@@ -40,11 +41,11 @@ describe('native locale initialization', () => {
   it('keeps the stored choice while dictionaries and languages register', async () => {
     const ctx = new Context()
     try {
-      const locale = new LocaleRuntime(ctx, undefined, { languages: ['zh-CN'], preference: 'en' })
+      const locale = new LocaleRuntime(ctx, undefined, { languages: ['de-DE'], preference: 'en' })
       expect(locale.getSnapshot().active).toBe('en')
       locale.register('native-test', 'en', {})
       expect(locale.getSnapshot().active).toBe('en')
-      locale.addLanguage({ id: 'ja', label: '日本語', fallback: 'en' })
+      locale.addLanguage({ id: 'ja', label: 'にほんご', fallback: 'en' })
       expect(locale.getSnapshot().active).toBe('en')
     } finally {
       await ctx.fiber.dispose()
@@ -55,11 +56,11 @@ describe('native locale initialization', () => {
     const ctx = new Context()
     try {
       const locale = new LocaleRuntime(ctx, undefined, { languages: ['zh-CN'], preference: 'ja' })
-      expect(locale.getSnapshot().active).toBe('zh')
-      const remove = locale.addLanguage({ id: 'ja', label: '日本語', fallback: 'en' })
+      expect(locale.getSnapshot().active).toBe('en')
+      const remove = locale.addLanguage({ id: 'ja', label: 'にほんご', fallback: 'en' })
       expect(locale.getSnapshot().active).toBe('ja')
       remove()
-      expect(locale.getSnapshot().active).toBe('zh')
+      expect(locale.getSnapshot().active).toBe('en')
     } finally {
       await ctx.fiber.dispose()
     }
@@ -67,7 +68,7 @@ describe('native locale initialization', () => {
 
   it('validates the preload response before reading its fields', () => {
     expect(parseLocaleBootstrap({ languages: ['en-US'], preference: null })).toEqual({ languages: ['en-US'], preference: null })
-    expect(parseLocaleBootstrap({ languages: [], preference: 'zh' }).preference).toBe('zh')
+    expect(parseLocaleBootstrap({ languages: [], preference: 'de' }).preference).toBe('de')
     for (const value of [null, {}, { languages: 'en', preference: null }, { languages: [42], preference: null }, { languages: [], preference: 42 }]) {
       expect(() => parseLocaleBootstrap(value)).toThrow('invalid native initialization data')
     }

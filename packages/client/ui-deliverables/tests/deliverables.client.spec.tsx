@@ -36,7 +36,7 @@ import {
   selectProducedFiles, type DeliverablesTurnData,
 } from '../src/client/turn-deliverables.ts'
 import { apply, inject } from '../src/client/index.ts'
-import { en, zh } from '../src/client/locales.ts'
+import { en, fr } from '../src/client/locales.ts'
 import { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SessionEvent } from '@deepseek-ai/dsh-session/types'
 
@@ -581,7 +581,7 @@ describe('ChangedFiles card', () => {
     return { props, openFile, view }
   }
 
-  it.each([en, zh])('shows one edited filename without a list and opens its review', (locale) => {
+  it.each([en, fr])('shows one edited filename without a list and opens its review', (locale) => {
     const single = servedStore({ turn: 1, files: [changedFile('src/example.scss', 3, 1)], total: 1, added: 3, deleted: 1 })
     const { props, view } = renderCard(new PresentedOpenController(), locale, { changes, presented: [] }, single)
     const t = makeTranslate(locale)
@@ -730,20 +730,20 @@ describe('ChangedFiles card', () => {
 
   it('opens the review the same way without a desktop', () => {
     const controller = new PresentedOpenController()
-    const { openFile, props, view } = renderCard(controller, zh)
+    const { openFile, props, view } = renderCard(controller, fr)
     controller.host.set('error')
-    view.rerender(<Deliverables {...props} matched={{ changes, presented: [] }} openFile={openFile} sessionId={SessionId('child-session')} t={makeTranslate(zh)} />)
-    expect(view.getByRole('button', { name: '在侧边栏查看本轮改动' })).toBeTruthy()
+    view.rerender(<Deliverables {...props} matched={{ changes, presented: [] }} openFile={openFile} sessionId={SessionId('child-session')} t={makeTranslate(fr)} />)
+    expect(view.getByRole('button', { name: 'Consultez les modifications de ce tour dans la barre latérale' })).toBeTruthy()
     controller.host.set({ name: 'server', available: false, fileManager: null })
-    view.rerender(<Deliverables {...props} matched={{ changes, presented: [] }} openFile={openFile} sessionId={SessionId('child-session')} t={makeTranslate(zh)} />)
-    expect(view.getByText('已编辑 11 个文件')).toBeTruthy()
-    fireEvent.click(view.getByRole('button', { name: '在侧边栏查看本轮改动' }))
+    view.rerender(<Deliverables {...props} matched={{ changes, presented: [] }} openFile={openFile} sessionId={SessionId('child-session')} t={makeTranslate(fr)} />)
+    expect(view.getByText('Fichiers 11 modifiés')).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: 'Consultez les modifications de ce tour dans la barre latérale' }))
     expect(props.openChangesReview).toHaveBeenLastCalledWith({ sessionId: 'child-session', seq: 5, turn: 1 }, 0)
-    fireEvent.click(view.getByRole('button', { name: '查看 config/design-token 的改动' }))
+    fireEvent.click(view.getByRole('button', { name: 'Afficher les modifications apportées à config/design-token' }))
     expect(props.openChangesReview).toHaveBeenLastCalledWith({ sessionId: 'child-session', seq: 5, turn: 1 }, 0)
     expect(openFile).not.toHaveBeenCalled()
     expect(props.openChanged).not.toHaveBeenCalled()
-    expect(view.getByRole('button', { name: '展开全部 5 个改动文件' }).textContent).toContain('全部 5 个文件')
+    expect(view.getByRole('button', { name: 'Afficher tous les fichiers modifiés 5' }).textContent).toContain('Tous les fichiers 5')
   })
 
   it('preserves expanded rows when the served announcement changes', () => {
@@ -786,7 +786,7 @@ describe('ChangedFiles card', () => {
 })
 
 describe('producedFileMentions resolver', () => {
-  const label = (path: string) => `打开 ${path}`
+  const label = (path: string) => `Ouvrir ${path}`
 
   it('does not let a legacy bare path override an ambiguous canonical basename', () => {
     const resolver = producedFileMentions(['report.txt', '/project/child/report.txt'], () => {}, label)
@@ -823,7 +823,7 @@ describe('producedFileMentions resolver', () => {
     )
     // Unique basename resolves to its full path; the full path rides title.
     const byBasename = resolver.resolve('index.html')
-    expect(byBasename?.label).toBe('打开 out/index.html')
+    expect(byBasename?.label).toBe('Ouvrir out/index.html')
     expect(byBasename?.title).toBe('out/index.html')
     byBasename?.open()
     expect(opened).toEqual(['out/index.html'])

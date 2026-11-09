@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {} from '../src/client/index.ts'
 import { LiveshareShareDialog, type LiveshareShareDialogProps } from '../src/client/ShareDialog.tsx'
-import { en, zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 import css from '../src/client/ShareDialog.module.css'
 import type {
   CreatedShare, OwnerIdentityStatus, OwnerRelayState, RelayConnectivityView, RelayPublishView, SharePermissions,
@@ -350,31 +350,6 @@ describe('Liveshare dialog product acceptance', () => {
     await screen.findByText(en['dialog.identity.loginWaiting'])
     for (const fire of expired.intervals) fire()
     expect(await screen.findByText(en['dialog.identity.loginExpired'])).toBeDefined()
-  })
-
-  it('[P1] both locales define the same copy and the Chinese flow renders it', async () => {
-    expect(Object.keys(zh).sort()).toEqual(Object.keys(en).sort())
-    const zhTranslate: LiveshareShareDialogProps['t'] = (key, params) => {
-      let result: string = (zh as Readonly<Record<string, string>>)[key] ?? key
-      for (const [name, value] of Object.entries(params ?? {})) result = result.replace(`{${name}}`, String(value))
-      return result
-    }
-    const host = ownerSharesDouble()
-    await act(async () => {
-      render(<LiveshareShareDialog
-        sessionId={'session' as SessionId}
-        sessionTitle="验收会话"
-        defaultRelay={RELAY}
-        shares={host.shares}
-        onClose={() => {}}
-        t={zhTranslate}
-      />)
-    })
-    expect(screen.getByText('分享会话')).toBeDefined()
-    // The dialog states the tier it will grant, not a fixed description of what a share shows.
-    expect(screen.getByText(/^仅可查看：/u)).toBeDefined()
-    expect(document.body.textContent).not.toContain('历史消息、工具输出、文件路径与附件')
-    expect(screen.getByRole('button', { name: '创建分享' })).toBeDefined()
   })
 
   it('[P1] opens global share management as a separate owner flow', async () => {

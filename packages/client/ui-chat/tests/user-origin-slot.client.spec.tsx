@@ -9,19 +9,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from '@testing-library/react'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
-import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
+import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
 import type {
   ChatConversationViewNode, SteeringMessageNode, UserMessageNode,
 } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type { ChatNodeViewProps, UserContentInput } from '../src/client/contract/slots.ts'
 import { UserMessageNodeView } from '../src/client/chat/MessageItem.tsx'
-import { zh } from '../src/client/locale.ts'
+import { en } from '../src/client/locale.ts'
 import { createUserContentFixture } from './user-content-component-fixture.tsx'
 import { unusedImageLoader } from './reasoning-component-fixture.tsx'
 
 afterEach(cleanup)
 
-const t: ChatNodeViewProps['t'] = makeTranslate(zh, commonZh)
+const t: ChatNodeViewProps['t'] = makeTranslate(en, commonEn)
 type UserSlots = PropsRenderSlots<'conversation.chat.user.before'>
 const userSlots: UserSlots = {
   renderSlot: () => null,
@@ -78,7 +78,7 @@ const steeringData: SteeringMessageNode = {
 
 describe('official user renderer origin seat', () => {
   it('renders the source chain above the bubble and passes the durable source', () => {
-    const renderSlotChain = vi.fn(() => <span data-test-origin="">来自会话分享</span>)
+    const renderSlotChain = vi.fn(() => <span data-test-origin="">FromSessionsShare</span>)
     const view = render(<UserMessageNodeView {...viewProps(userData)} {...userSlots} renderSlotChain={renderSlotChain} />)
     const row = view.container.firstElementChild as HTMLElement
     const origin = row.querySelector('[data-test-origin]')
@@ -96,13 +96,13 @@ describe('official user renderer origin seat', () => {
   it('preserves the bubble, text and actions across empty and occupied chain output', () => {
     const props = viewProps(userData)
     const absent = vi.fn(() => null)
-    const occupied = vi.fn(() => <span data-test-origin="">来自会话分享</span>)
+    const occupied = vi.fn(() => <span data-test-origin="">FromSessionsShare</span>)
     const empty = vi.fn(() => null)
     const view = render(<UserMessageNodeView {...props} {...userSlots} renderSlotChain={absent} />)
     const row = view.container.firstElementChild
     const bubble = view.container.querySelector('[data-message-bubble]')
     const text = view.getByText('hello').firstChild
-    const copy = view.getByRole('button', { name: '复制' })
+    const copy = view.getByRole('button', { name: 'Copy' })
     const actions = copy.closest('[data-clock]')
     expect(bubble).not.toBeNull()
     expect(text?.nodeType).toBe(Node.TEXT_NODE)
@@ -114,7 +114,7 @@ describe('official user renderer origin seat', () => {
       expect(view.container.firstElementChild).toBe(row)
       expect(view.container.querySelector('[data-message-bubble]')).toBe(bubble)
       expect(view.getByText('hello').firstChild).toBe(text)
-      expect(view.getByRole('button', { name: '复制' })).toBe(copy)
+      expect(view.getByRole('button', { name: 'Copy' })).toBe(copy)
       expect(copy.closest('[data-clock]')).toBe(actions)
       expect(view.container.querySelector('[data-test-origin]') !== null).toBe(renderSlotChain === occupied)
     }

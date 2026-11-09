@@ -5,17 +5,17 @@ import { cleanup, render } from '@testing-library/react'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import { SessionId } from '@deepseek-ai/dsh-session/types'
 import { makeTranslate, SlotTestRuntime } from '@deepseek-ai/dsh-client-test-runtime'
-import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
+import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
 import type { MessageImagesOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { AssistantMarkdown, type AssistantMarkdownProps } from '../src/client/chat/AssistantMarkdown.tsx'
 import { useDetailedPresentation } from './presentation-fixture.client.ts'
 import { useDisclosure } from '../src/client/chat/use-disclosure.ts'
 import { useSearchableHidden } from '../src/client/chat/searchable-hidden.ts'
-import { zh } from '../src/client/locale.ts'
+import { en } from '../src/client/locale.ts'
 
 afterEach(cleanup)
 
-const t = makeTranslate(zh, commonZh)
+const t = makeTranslate(en, commonEn)
 
 const attachment = {
   attachmentId: AttachmentId(`sha256:${'a'.repeat(64)}`),

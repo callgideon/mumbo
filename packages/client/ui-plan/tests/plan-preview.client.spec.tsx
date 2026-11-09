@@ -10,7 +10,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
-import { en, zh } from '../src/client/locales.ts'
+import { en, fr } from '../src/client/locales.ts'
 import { PlanCards, PlanReviewOpen } from '../src/client/PlanCard.tsx'
 import { PlanPreview, PlanTitle } from '../src/client/PlanPreview.tsx'
 import { planAddress, parsePlanAddress, submittedPlan } from '../src/client/plan.ts'
@@ -204,7 +204,7 @@ it('updates plan cards only for their Turn’s plan data and preserves invocatio
 
 describe('plan entry points and document', () => {
   it('opens the exact persistent card in either locale', () => {
-    for (const dictionary of [en, zh]) {
+    for (const dictionary of [en, fr]) {
       const openPlan = vi.fn()
       const props = { turn: { turn: 1 }, usePlans: planHook([plan]), seq: 30,
         t: makeTranslate(dictionary, commonEn), openPlan,
@@ -323,7 +323,7 @@ describe('plan entry points and document', () => {
     render(<PlanTitle {...props as unknown as Parameters<typeof PlanTitle>[0]} />)
     expect(screen.getByText('Plan')).toBeTruthy()
   })
-  it.each([en, zh])('localizes plan failures and unavailable providers', (dictionary) => {
+  it.each([en, fr])('localizes plan failures and unavailable providers', (dictionary) => {
     const props = { t: makeTranslate(dictionary, commonEn),
       useTabInfo: () => ({ tab: { title: 'Plan', navigation: { address: planAddress(target) } } }),
     }

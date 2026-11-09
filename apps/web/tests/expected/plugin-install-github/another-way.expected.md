@@ -1,14 +1,14 @@
-- dialog "添加插件":
-  - heading "添加插件" [level=2]
-  - button "关闭"
-  - textbox "插件包名":
-    - /placeholder: 例如 dsh-plugin-whale-pet
-  - button "收起引导" [expanded]
-  - button "安装源 中国大陆镜像源"
+- dialog "Add plugin":
+  - heading "Add plugin" [level=2]
+  - button "Close"
+  - textbox "Plugin package name":
+    - /placeholder: for example dsh-plugin-whale-pet
+  - button "Hide the guide" [expanded]
+  - button "Registry Mainland China mirror"
   - list:
     - listitem:
-      - text: 填入插件 npm 包名 插件包名即 npm 包名（如 dsh-xxx 或 @作者/插件名），社区插件的 README 安装命令中 dsh plugin add 或 pnpm add 之后的部分。 示例：
+      - text: "Enter the plugin's npm package name The plugin package name is the npm package name (like dsh-xxx or @author/plugin): the part after dsh plugin add or pnpm add in a community plugin's README install command. Example:"
       - code: dsh-plugin-whale-pet
-      - button "填入示例 dsh-plugin-whale-pet": 填入示例
-  - note: 请确认插件来源可信。插件在本机以你的权限运行，来源不明的插件可能损坏 DeepSeek Harness，或读取和泄露你的数据。 按需安装的官方插件会在版本与 DSH 不同时提供“更新”。其他插件请先卸载再安装新版。
-  - button "安装" [disabled]
+      - button "Use the example dsh-plugin-whale-pet": Use example
+  - note: "Install only plugins you trust: they run with your permissions and can damage DeepSeek Harness or leak your data. On-demand official plugins offer Update when their version differs from DSH. To update other plugins, uninstall and reinstall them."
+  - button "Install" [disabled]

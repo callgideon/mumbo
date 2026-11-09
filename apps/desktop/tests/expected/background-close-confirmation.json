@@ -1,5 +1,5 @@
 {
-  "message": "正在运行的任务不会中断，可在系统托盘中重新打开窗口",
-  "buttons": ["确认"],
+  "message": "Running tasks will continue. You can reopen the window from the system tray.",
+  "buttons": ["Confirm"],
   "detailHidden": true
 }

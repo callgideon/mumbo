@@ -5,60 +5,60 @@ import { Context } from '@deepseek-ai/cordis'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { describe, expect, it } from 'vitest'
 import {
-  en, NS, viewerReasonText, viewerRefusalText, zh, type LiveshareKey,
+  en, fr, NS, viewerReasonText, viewerRefusalText, type LiveshareKey,
 } from '../src/client/locales.ts'
 
 // The page's copy comes from the client locale seat, the same one the owner's dialogs use, so the
 // reader's chosen language decides it. Bind it the way the served page's client tree does.
 const locale = new LocaleRuntime(new Context())
-locale.register(NS, { zh, en })
-locale.setLocale('zh')
+locale.addLanguage({ id: 'fr', label: 'Français', fallback: 'en' })
+locale.register(NS, { en, fr })
 const t = locale.bind(NS)
 
 describe('viewer reason copy', () => {
   it('states a known reason code in the reader\'s language', () => {
-    expect(viewerReasonText(t, 'share-stopped')).toBe(zh['viewer.reason.share-stopped'])
-    expect(viewerReasonText(t, 'fork-not-permitted')).toBe(zh['viewer.reason.fork-not-permitted'])
-    // The reader's own language wins over the browser's: a language chosen in Settings decides.
-    locale.setLocale('en')
     expect(viewerReasonText(t, 'share-stopped')).toBe(en['viewer.reason.share-stopped'])
-    locale.setLocale('zh')
+    expect(viewerReasonText(t, 'fork-not-permitted')).toBe(en['viewer.reason.fork-not-permitted'])
+    // The reader's own language wins over the browser's: a language chosen in Settings decides.
+    locale.setLocale('fr')
+    expect(viewerReasonText(t, 'share-stopped')).toBe(fr['viewer.reason.share-stopped'])
+    locale.setLocale('en')
   })
 
   it('states a branch the Host created without limits as unusable, and a reused request as no branch', () => {
     // The Host made the child but could not install its read-only limits: the reader is told the branch
     // exists and cannot be used, never that nothing was created and never that it can be driven.
     expect(viewerReasonText(t, 'fork-enforcement-failed'))
-      .toBe('分支会话已创建，但沙箱限制安装失败，无法使用')
+      .toBe('The branch Session was created, but its sandbox limits could not be installed, so it cannot be used')
     // One request naming a prefix its earlier request did not is refused instead of making a second
     // child, so the reader is told no new Session came out of it.
     expect(viewerReasonText(t, 'fork-operation-conflict'))
-      .toBe('这次分支请求指定的前缀与之前那次不同，未再新建会话')
+      .toBe('This branch request named a different prefix than the earlier one, so no new Session was created')
     // The branch the reader already owns stayed where it was; what failed is the Host's preparation of
     // it, and the same code answers a prompt into that branch and a stop of it, so the copy names the
     // action the reader asked for rather than a message in particular.
     expect(viewerReasonText(t, 'fork-prepare-failed'))
-      .toBe('Host 未能准备好此分支，本次操作没有执行')
+      .toBe('The Host could not prepare this branch, so this action did not run')
     // The two refusals a source write comes back with: the owner's share no longer allows writing it,
     // and the Host cannot confine it. Neither states what became of the request, because the Host
     // re-checks both after the dispatch — a refusal here is not a rollback.
-    expect(viewerReasonText(t, 'share-not-writable')).toBe('分享者已不允许写入此会话')
+    expect(viewerReasonText(t, 'share-not-writable')).toBe('The owner does not allow writing this Session')
     expect(viewerReasonText(t, 'source-write-unavailable'))
-      .toBe('此 Host 未能限制共享会话的执行，因此无法驱动它')
+      .toBe('This Host could not confine the shared Session, so it cannot drive it')
   })
 
   it('states the reason it knows with the stable code, and never the Host\u2019s own words', () => {
     // The page states its own reason for a code it knows, with that code beside it so a reader can
     // quote what was refused.
-    expect(viewerRefusalText(t, 'fork-not-permitted')).toBe('分享者未允许分支此会话 (fork-not-permitted)')
+    expect(viewerRefusalText(t, 'fork-not-permitted')).toBe('The owner does not allow branching this Session (fork-not-permitted)')
     expect(viewerRefusalText(t, 'fork-prepare-failed'))
-      .toBe('Host 未能准备好此分支，本次操作没有执行 (fork-prepare-failed)')
+      .toBe('The Host could not prepare this branch, so this action did not run (fork-prepare-failed)')
     // The composer's own draft and the Stop it offers come back with these two codes, so both are
     // stated the same way: this page's reason with the Host's stable code beside it.
     expect(viewerRefusalText(t, 'share-not-writable'))
-      .toBe('分享者已不允许写入此会话 (share-not-writable)')
+      .toBe('The owner does not allow writing this Session (share-not-writable)')
     expect(viewerRefusalText(t, 'source-write-unavailable'))
-      .toBe('此 Host 未能限制共享会话的执行，因此无法驱动它 (source-write-unavailable)')
+      .toBe('This Host could not confine the shared Session, so it cannot drive it (source-write-unavailable)')
   })
 
   it('states no refusal for a code it does not know', () => {
@@ -67,20 +67,20 @@ describe('viewer reason copy', () => {
   })
 
   it('names both languages for every reason code the page maps', () => {
-    const keys = Object.keys(zh).filter(key => key.startsWith('viewer.reason.'))
+    const keys = Object.keys(en).filter(key => key.startsWith('viewer.reason.'))
     expect(keys.length).toBeGreaterThan(0)
-    for (const language of ['zh', 'en'] as const) {
+    for (const language of ['fr', 'en'] as const) {
       locale.setLocale(language)
-      const dictionary: Readonly<Record<string, string>> = language === 'zh' ? zh : en
+      const dictionary: Readonly<Record<string, string>> = language === 'fr' ? fr : en
       for (const key of keys) {
         const code = key.slice('viewer.reason.'.length)
         expect(viewerReasonText(t, code), `${language} ${code}`)
           .toBe(dictionary[key as LiveshareKey])
-        expect(zh[key as LiveshareKey]).toBeTruthy()
+        expect(fr[key as LiveshareKey]).toBeTruthy()
         expect(en[key as LiveshareKey]).toBeTruthy()
       }
     }
-    locale.setLocale('zh')
+    locale.setLocale('en')
   })
 
   it('states a code it does not know instead of inventing copy', () => {

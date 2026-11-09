@@ -1,0 +1,10 @@
+DeepSeek Harness ist nicht verfügbar
+Die Anwendung konnte nicht gestartet werden oder wurde unerwartet gestoppt.
+Desktop Host failed
+Plugin initialization failed
+Der Diagnosebericht konnte nicht gespeichert werden. Sie können bei einer Supportanfrage einen Screenshot dieses Dialogs bereitstellen.
+
+Wenn Anwendungsdateien fehlen oder beschädigt sind, schließen Sie die Anwendung und installieren Sie sie erneut. Ihre Aufgaben werden separat gespeichert.
+Beenden
+Neustart
+Deaktivieren Sie Plugins von Drittanbietern, sichern Sie den Profil-Patch und starten Sie neu

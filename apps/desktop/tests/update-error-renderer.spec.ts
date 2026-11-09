@@ -22,7 +22,7 @@ function page(name: string) {
   return { dom, document, element, run }
 }
 
-it.each(['en', 'zh-CN'])('keeps ordinary diagnostics folded, text-only, and keyboard-accessible: %s', async (language) => {
+it.each(['en', 'de'])('keeps ordinary diagnostics folded, text-only, and keyboard-accessible: %s', async (language) => {
   const p = page('update-dialog')
   const locale = resolveDesktopLocale(language)
   const state: UpdateDialogView = { revision: 1, locale: locale.id, title: locale.messages.updateFailedTitle,
@@ -77,7 +77,7 @@ it.each(['en', 'zh-CN'])('keeps ordinary diagnostics folded, text-only, and keyb
 
 it('keeps mandatory diagnostics expandable without clearing the block or authorizing installation', async () => {
   const p = page('mandatory-update')
-  const locale = resolveDesktopLocale('zh-CN')
+  const locale = resolveDesktopLocale('de')
   const initial: MandatoryUpdateView = { locale, deferred: false, policy: { blocking: true, checking: false },
     update: { phase: 'error', failedOperation: 'install', preparationFailure: 'stop-failed', version: '0.1.6-nightly.1',
       message: 'different shell locale', technicalDetails: 'exit 0; shutdown acknowledged false' } }
@@ -95,9 +95,9 @@ it('keeps mandatory diagnostics expandable without clearing the block or authori
   expect([p.element('error').textContent, p.element('technical-details-label').textContent,
     p.element('update').textContent]).toMatchInlineSnapshot(`
       [
-        "未能安全停止任务，更新尚未安装，请稍后重试。",
-        "查看技术详情",
-        "重试更新",
+        "Die Aufgaben konnten nicht sicher gestoppt werden. Das Update wurde nicht installiert. Bitte versuchen Sie es später noch einmal.",
+        "Technische Details anzeigen",
+        "Update erneut versuchen",
       ]
     `)
   p.element('technical-details-label').click()
@@ -129,7 +129,7 @@ it('keeps mandatory diagnostics expandable without clearing the block or authori
 
 function mandatoryPage(update: MandatoryUpdateView['update']) {
   const p = page('mandatory-update')
-  const initial: MandatoryUpdateView = { locale: resolveDesktopLocale('zh'), deferred: false,
+  const initial: MandatoryUpdateView = { locale: resolveDesktopLocale('de'), deferred: false,
     policy: { blocking: true, checking: false, title: '需要更新', page: 'https://downloads.example.com/desktop' }, update }
   const action = vi.fn(async () => {})
   let publish!: (view: MandatoryUpdateView) => void
@@ -153,19 +153,19 @@ it('uses client copy and retry when optional policy fields are absent', async ()
 
 it('uses the same modal for download, verification, inspected confirmation and task-aware restart', async () => {
   const p = mandatoryPage({ phase: 'available', version: '1.0.1-nightly.1' })
-  await expect.poll(() => p.element('update').textContent).toBe('下载更新')
+  await expect.poll(() => p.element('update').textContent).toBe('Update herunterladen')
   const modal = p.document.querySelector('main')
   const pending = Promise.withResolvers<undefined>()
   p.action.mockReturnValueOnce(pending.promise)
   p.element('update').focus()
   p.element('update').click()
   p.publish({ ...p.initial, update: { phase: 'verifying', version: '1.0.1-nightly.1' } })
-  expect(p.element('status').textContent).toBe('正在校验更新文件…')
+  expect(p.element('status').textContent).toBe('Aktualisierungsdateien werden überprüft…')
   expect(p.element('update').hidden).toBe(true)
   p.publish({ ...p.initial, update: { phase: 'installing', version: '1.0.1-nightly.1' },
     confirmation: { active: false, version: '1.0.1-nightly.1', revision: 1 } })
   expect(p.document.activeElement?.id).not.toBe('update')
-  expect(p.element('update').textContent).toBe('安装并重启')
+  expect(p.element('update').textContent).toBe('Installieren und neu starten')
   expect((p.element('update') as HTMLButtonElement).disabled).toBe(false)
   expect(p.element('page').hidden).toBe(true)
   expect(p.element('refresh').hidden).toBe(true)
@@ -180,18 +180,18 @@ it('uses the same modal for download, verification, inspected confirmation and t
   expect(p.action).toHaveBeenLastCalledWith('install', '1.0.1-nightly.1', 1)
   pending.resolve(undefined)
   p.publish({ ...p.initial, update: { phase: 'installing' }, restart: 'preparing' })
-  expect(p.element('detail').textContent).toBe('应用即将重启，请稍候。')
+  expect(p.element('detail').textContent).toBe('Die App wird in Kürze neu gestartet. Bitte warten.')
   p.publish({ ...p.initial, update: { phase: 'installing' }, restart: 'stopping-tasks' })
-  expect(p.element('detail').textContent).toBe('正在停止任务…')
+  expect(p.element('detail').textContent).toBe('Aufgaben stoppen…')
   expect(p.document.querySelector('main')).toBe(modal)
 })
 
 it('reveals the complete selectable address only after copy failure, without replacing updater diagnostics', async () => {
   const p = mandatoryPage({ phase: 'error', failedOperation: 'download', message: 'HASH_MISMATCH' })
-  await expect.poll(() => p.element('error').textContent).toBe('更新文件下载或准备失败，请重试。')
+  await expect.poll(() => p.element('error').textContent).toBe('Die Update-Dateien konnten nicht heruntergeladen oder vorbereitet werden. Bitte versuchen Sie es erneut.')
   const originalError = p.element('error').textContent
   p.publish({ ...p.initial, navigation: { page: 'requested' } })
-  expect(p.element('browser-message').textContent).toBe('页面未打开？')
+  expect(p.element('browser-message').textContent).toBe('Seite wurde nicht geöffnet?')
   expect(p.element('manual-copy').hidden).toBe(true)
   p.publish({ ...p.initial, navigation: { page: 'failed', copy: 'failed' } })
   expect(p.element('manual-copy').hidden).toBe(false)
@@ -199,24 +199,24 @@ it('reveals the complete selectable address only after copy failure, without rep
   expect((p.element('address') as HTMLTextAreaElement).readOnly).toBe(true)
   expect(p.element('error').textContent).toBe(originalError)
   expect(p.element('technical-details-content').textContent).toBe('HASH_MISMATCH')
-  expect(p.element('copy-message').textContent).toBe('复制失败，请手动选择并复制下方链接。')
+  expect(p.element('copy-message').textContent).toBe('Der Link konnte nicht kopiert werden. Wählen Sie es aus und kopieren Sie es unten.')
   p.publish({ ...p.initial, navigation: { page: 'failed', copy: 'copied' } })
   expect(p.element('manual-copy').hidden).toBe(true)
   expect((p.element('address') as HTMLTextAreaElement).value).toBe('')
-  expect(p.element('copy').textContent).toBe('链接已复制')
+  expect(p.element('copy').textContent).toBe('Link kopiert')
   expect(p.action).not.toHaveBeenCalled()
 })
 
 it('renders server markup literally in a dedicated safety case', async () => {
   const p = mandatoryPage({ phase: 'available', version: '1.0.1-nightly.1' })
-  await expect.poll(() => p.element('update').textContent).toBe('下载更新')
+  await expect.poll(() => p.element('update').textContent).toBe('Update herunterladen')
   p.publish({ ...p.initial, policy: { ...p.initial.policy, title: '<b>请更新</b>', detail: '<img src=x onerror=alert(1)>' } })
   expect(p.element('title').textContent).toBe('<b>请更新</b>')
   expect(p.element('title').childElementCount).toBe(0)
   expect(p.element('detail').childElementCount).toBe(0)
 })
 
-it.each(['en', 'zh-CN'])('records mandatory update guidance and actions across its states: %s', async (language) => {
+it.each(['en', 'de'])('records mandatory update guidance and actions across its states: %s', async (language) => {
   const p = page('mandatory-update')
   const locale = resolveDesktopLocale(language)
   const base: MandatoryUpdateView = { locale, deferred: false, policy: { blocking: true, checking: false,
@@ -244,7 +244,7 @@ it.each(['en', 'zh-CN'])('records mandatory update guidance and actions across i
   await expect(JSON.stringify(snapshots, null, 2) + '\n').toMatchFileSnapshot(`./expected/update-guidance-${language}.json`)
 })
 
-it.each(['en', 'zh-CN'])('shows fullscreen recovery guidance directly in the mandatory update page: %s', async (language) => {
+it.each(['en', 'de'])('shows fullscreen recovery guidance directly in the mandatory update page: %s', async (language) => {
   const p = page('mandatory-update')
   const locale = resolveDesktopLocale(language)
   const state: MandatoryUpdateView = { locale, deferred: false, policy: { blocking: true, checking: false },
@@ -262,7 +262,7 @@ it.each(['en', 'zh-CN'])('shows fullscreen recovery guidance directly in the man
 
 it('offers configuration recovery from a mandatory update error', async () => {
   const p = page('mandatory-update')
-  const locale = resolveDesktopLocale('zh-CN')
+  const locale = resolveDesktopLocale('de')
   const state: MandatoryUpdateView = { locale, deferred: false, policy: { blocking: true, checking: false },
     update: { phase: 'error', failedOperation: 'configuration', message: 'settings parse failure', technicalDetails: 'diagnostic' } }
   const action = vi.fn(async () => {})
@@ -281,7 +281,7 @@ it('offers configuration recovery from a mandatory update error', async () => {
 
 it('accepts another response after a keep-open action publishes its next revision', async () => {
   const p = page('update-dialog')
-  const locale = resolveDesktopLocale('zh-CN')
+  const locale = resolveDesktopLocale('de')
   let state: UpdateDialogView = { revision: 1, locale: locale.id, title: 'Settings', message: 'Settings error', detail: '',
     buttons: ['Reload', 'Show file', 'Close'], cancelId: 2, closeLabel: 'Close', technicalDetails: '', technicalDetailsLabel: '' }
   let publish!: (view: UpdateDialogView | null) => void

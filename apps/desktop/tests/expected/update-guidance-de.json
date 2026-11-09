@@ -1,0 +1,49 @@
+[
+  {
+    "title": "Aktualisieren, um fortzufahren",
+    "detail": "Diese Version wird nicht mehr unterstützt. Aktualisieren, um fortzufahren. Laufende Aufgaben werden so lange ausgeführt, bis Sie die Installation bestätigen und neu starten.",
+    "version": "Neue Version: 0.1.7-alpha.2",
+    "update": "Update herunterladen"
+  },
+  {
+    "title": "Update bereit",
+    "detail": "Die App wird während des Updates geschlossen und nach Abschluss automatisch wieder geöffnet.",
+    "version": "Neue Version: 0.1.7-alpha.2",
+    "update": "Installieren und neu starten"
+  },
+  {
+    "title": "Aufgaben sind noch in Bearbeitung",
+    "detail": "Durch die Aktualisierung werden die laufenden Aufgaben gestoppt und die App neu gestartet. Weitermachen?",
+    "version": "Neue Version: 0.1.7-alpha.2",
+    "update": "Aufgaben beenden und Update installieren",
+    "later": "Später aktualisieren"
+  },
+  {
+    "title": "Update bereit",
+    "detail": "Laufende Aufgaben werden weiterhin ausgeführt. Schließen Sie das Update ab, bevor Sie die App erneut verwenden.",
+    "version": "Neue Version: 0.1.7-alpha.2",
+    "update": "Update fortsetzen"
+  },
+  {
+    "title": "Neustart wird vorbereitet…",
+    "detail": "Aufgaben stoppen…",
+    "version": "Neue Version: 0.1.7-alpha.2"
+  },
+  {
+    "title": "Aktualisieren, um fortzufahren",
+    "detail": "Diese Version wird nicht mehr unterstützt. Aktualisieren, um fortzufahren. Laufende Aufgaben werden so lange ausgeführt, bis Sie die Installation bestätigen und neu starten.",
+    "version": "Neue Version: 0.1.7-alpha.2",
+    "error": "Das Update wurde nicht installiert. Überprüfen Sie die Aufgaben erneut und versuchen Sie es erneut.",
+    "update": "Update erneut versuchen",
+    "page": "Von der offiziellen Website herunterladen"
+  },
+  {
+    "title": "Aktualisieren, um fortzufahren",
+    "detail": "Diese Version wird nicht mehr unterstützt. Aktualisieren, um fortzufahren. Laufende Aufgaben werden so lange ausgeführt, bis Sie die Installation bestätigen und neu starten.",
+    "version": "",
+    "error": "Es wurde kein kompatibles Update gefunden. Überprüfen Sie es erneut oder wenden Sie sich an den Support.",
+    "page": "Offizielle Downloadseite erneut öffnen",
+    "browser-message": "Die offizielle Download-Seite konnte nicht geöffnet werden. Kopieren Sie den Link und öffnen Sie ihn in Ihrem Browser.",
+    "copy-message": "Der Link konnte nicht kopiert werden. Wählen Sie es aus und kopieren Sie es unten."
+  }
+]

@@ -1,39 +1,38 @@
-- button "返回插件": 插件
-- button "卸载 @fixture/bundle": 卸载
+- button "Back to plugins": Plugins
+- button "Uninstall @fixture/bundle": Uninstall
 - status
-- switch "启用 @fixture/bundle"
+- switch "Enable @fixture/bundle"
 - heading "@fixture/bundle" [level=3]
 - text: v0.0.1
 - paragraph:
   - code: "@fixture/bundle"
 - paragraph: Registry description for the fixture bundle.
-- region "详细介绍":
+- region "Details":
   - heading "Fixture bundle" [level=1]
   - paragraph: English | 中文
   - paragraph:
     - text: Registry fixture for the Web plugin-manager tests. It declares no
     - code: meta.detail
     - text: ", so its page shows this README."
-- heading "包含的组件" [level=4]
-- text: 共 3 个 · 3 已停用
+- heading "Components" [level=4]
+- text: 3 total · 3 off
 - list:
   - listitem:
     - text: "@fixture/bundle Registry description for the fixture bundle."
     - code: fixture-row
-    - text: 已关闭
+    - text: "Off"
   - listitem:
-    - text: 文件搜索 搜索工作区中的文件。
+    - text: File Search
     - code: fixture-search
     - code: "@fixture/bundle/search"
-    - text: 已关闭
+    - text: "Off"
   - listitem:
-    - text: 代码审查 审查工作区中的改动。
+    - text: "@fixture/bundle/review"
     - code: fixture-review
-    - code: "@fixture/bundle/review"
-    - text: 已关闭
-- heading "来源信息" [level=4]
-- term: 代码来源
+    - text: "Off"
+- heading "Source" [level=4]
+- term: Code source
 - definition:
   - code: file:{{fixtures}}/fixture-bundle
-- term: 当前版本
+- term: Current version
 - definition: 0.0.1

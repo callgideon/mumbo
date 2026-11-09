@@ -55,7 +55,7 @@ def _answer(request: UserQuestionRequest, choice: str, feedback: str | None = No
 def test_bare_plan_and_off_change_only_plan_state_without_a_model_request(tmp_path: Path) -> None:
     with _runtime(tmp_path, [], initial_permission="workspace-write") as runtime:
         session = runtime.harness.start_session(_SESSION_ID)
-        on = _command(runtime, session, " \n/计划\t ")
+        on = _command(runtime, session, " \n/plan\t ")
         off = _command(runtime, session, "/plan off")
         repeated = _command(runtime, session, "/plan off")
         assert runtime.model.captured() == []
@@ -74,11 +74,11 @@ def test_bare_plan_and_off_change_only_plan_state_without_a_model_request(tmp_pa
 def test_plan_body_uses_native_input_then_off_removes_guidance_but_keeps_exit_tool(tmp_path: Path) -> None:
     with _runtime(tmp_path, [_Completion("PLAN_READY"), _Completion("AFTER_OFF")], initial_permission="workspace-write") as runtime:
         session = runtime.harness.start_session(_SESSION_ID)
-        execution = _command(runtime, session, "/计划  Design this change without tools. ")
+        execution = _command(runtime, session, "/plan  Design this change without tools. ")
         _wait_activity(runtime, session)
         first = runtime.model.captured()[0]
         assert "Design this change without tools." in _request_texts(first)
-        assert "/计划  Design this change without tools. " not in _request_texts(first)
+        assert "/plan  Design this change without tools. " not in _request_texts(first)
         assert _GUIDANCE in _effective_system(first)
         assert "Do not edit or write files" in _effective_system(first)
         assert {"exit_plan_mode", "write", "edit"} <= _tool_names(first)

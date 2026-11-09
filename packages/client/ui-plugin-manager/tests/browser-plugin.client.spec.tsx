@@ -18,7 +18,7 @@ import { PluginsPanelIcon } from '../src/client/PluginsPanelIcon.tsx'
 import type { PluginManagerFace } from '../src/client/manager-store.ts'
 import type { createNavigationStore } from '../src/client/navigation-store.ts'
 
-usePinnedBrowserLanguages('zh-CN')
+usePinnedBrowserLanguages('de-DE')
 beforeEach(() => { localStorage.clear() })
 afterEach(cleanup)
 
@@ -70,6 +70,7 @@ async function bench(allows: ((action: string) => boolean) | 'switchable' = () =
   const access = allows === 'switchable' ? new SwitchableAccess(ctx) : undefined
   if (allows !== 'switchable') new StaticRemoteAccess(ctx, allows)
   const locale = new LocaleRuntime(ctx)
+  locale.addLanguage({ id: 'de', label: 'Deutsch', fallback: 'en' })
   ctx.provide('locale', locale)
   class LocaleHolder extends Service {
     constructor(serviceCtx: Context) {
@@ -258,7 +259,7 @@ describe('ui-plugin-manager browser plugin', () => {
     expect(glyph.container.querySelector('svg')?.getAttribute('width')).toBe('18')
     expect(icon.options).toMatchObject({ id: PANEL_ID, order: 0 })
     expect(icon.locale).toBe(NS)
-    expect(resolveSlotLabel(icon.options.label)).toBe('插件')
+    expect(resolveSlotLabel(icon.options.label)).toBe('Plugins')
     // The page declares the slots a plugin's configuration arrives through, and binds their projection beside its state.
     expect(b.slots.spec('plugins.add.actions')).toMatchObject({ kind: 'list', scope: 'root' })
     expect(b.slots.spec('plugins.item')).toMatchObject({ kind: 'list', scope: 'root' })
@@ -279,11 +280,11 @@ describe('ui-plugin-manager browser plugin', () => {
     expect(overlayFace.dismissNotice).toBe(face.dismissNotice)
     expect(Object.keys(overlayFace).sort()).toEqual(['dismissNotice', 'hooks'])
     expect(Object.keys(overlayFace.hooks)).toEqual(['pluginManager'])
-    const text = { en: 'Local tools', zh: '本地工具' }
-    expect(face.resolveText(text)).toBe('本地工具')
+    const text = { en: 'Local tools', de: 'Lokale Werkzeuge' }
+    expect(face.resolveText(text)).toBe('Lokale Werkzeuge')
     b.locale.setLocale('en')
     expect(face.resolveText(text)).toBe('Local tools')
-    b.locale.setLocale('zh')
+    b.locale.setLocale('de')
     expect(face.hooks.configLedger.getSnapshot()).toEqual({ items: [], bundles: new Set(), rows: new Set() })
     // A Host change before the first render is not a reason to read.
     b.remote.emit('plugin-manager/changed', [{ reason: 'install' }])
@@ -299,7 +300,7 @@ describe('ui-plugin-manager browser plugin', () => {
     const loadedDetails = face.hooks.bundleDetails.getSnapshot()
     face.retryDetail('dsh-a', '1.0.0', 'en', false)
     expect(face.detailImage('dsh-a', 'README.md', 'a.png', false)).toContain('api/plugin-manager/detail-file?bundle=dsh-a')
-    expect(face.hooks.locale.getSnapshot().active).toBe('zh')
+    expect(face.hooks.locale.getSnapshot().active).toBe('de')
     b.remote.emit('plugin-manager/changed', [{ reason: 'bundle' }])
     await vi.waitFor(() => { expect(b.list).toHaveBeenCalledTimes(2) })
     expect(face.hooks.bundleDetails.getSnapshot()).toEqual(loadedDetails)

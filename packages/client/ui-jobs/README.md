@@ -53,7 +53,7 @@ One slot entry in the header actions band (after the preset label) renders the t
 |---|---|
 | [`src/client/JobListAction.tsx`](src/client/JobListAction.tsx) | The job list: sections, durations, panels |
 | [`src/client/index.ts`](src/client/index.ts) | Slot registration and the dictionaries |
-| [`src/client/locales.ts`](src/client/locales.ts) | The `job` namespace copy (zh source of truth) |
+| [`src/client/locales.ts`](src/client/locales.ts) | The `job` namespace copy (English source of truth) |
 
 Background-job rows follow the [standard menu edge geometry](../../../docs/ui-radius.md#nested-hover); controls inside a filled running row retain compact corners.
 

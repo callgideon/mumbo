@@ -150,7 +150,6 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 const en: LocaleDictOf<typeof NS> = { export: 'Export {title}' }
-const zh: LocaleDictOf<typeof NS> = { export: 'Export {title}' }
 
 interface ExportRowInjected {
   exportSession: (sessionId: SessionId) => void
@@ -173,7 +172,7 @@ function ExportRow({ sessionId, displayTitle, useMenuOpenState, exportSession, t
 export const inject = ['slots', 'locale']
 
 export function apply(ctx: Context): void {
-  ctx.effect(() => ctx.locale.register(NS, { en, zh }), 'acme-session-actions: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { en }), 'acme-session-actions: dictionaries')
 
   // Order 500 places the row after the shipped Archive (400); `separatorBefore` opens the plugin group.
   ctx.slots.inject('sidebar.workspaces.session.menu.item', () => ctx.slots.register({

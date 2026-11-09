@@ -24,7 +24,7 @@ import {
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { SessionListState, SessionSnapshot } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { ContextPressureProjection } from '@deepseek-ai/dsh-token-meter/client'
-import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
+import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId, SessionSeq } from '@deepseek-ai/dsh-session/types'
 import type { SubmitOutcome } from '../src/client/contract/input.ts'
@@ -36,7 +36,7 @@ import type {
 import type { DraftAttachmentId } from '../src/client/contract/input.ts'
 import { InputBar } from '../src/client/skeleton/InputBar.tsx'
 import type { InputBarProps } from '../src/client/skeleton/InputBar.tsx'
-import { en, zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 
 // Every fixture carries the resource hook the resources plugin merges into GlobalStandardProps.
 const useResource = (() => ({ status: 'none' as const, value: undefined, failure: undefined })) as GlobalStandardProps['useResource']
@@ -227,7 +227,7 @@ function bench(over?: BenchOptions) {
     useMenuLauncher: bindSnapshotSelector(menuLauncher),
     stop,
     // Mirrors the real lookup chain (conversation namespace, then common).
-    t: over?.t ?? makeTranslate(zh, commonZh),
+    t: over?.t ?? makeTranslate(en, commonEn),
     renderSlot,
     variant: over?.variant ?? 'composer',
     ...(over?.inert === true ? { disabled: true } : {}),
@@ -256,15 +256,15 @@ function bench(over?: BenchOptions) {
     : over?.fileUploads?.[attachment.id] !== undefined && over.fileUploads[attachment.id]?.status !== 'ready')
   const plainMessageDraft = sendableDraft && !uploadsPending && !(over?.draft?.trimStart().startsWith('/') ?? false)
   const primaryLabel = primaryStops
-    ? '停止生成'
+    ? 'Stop generating'
     : over?.retryableFailure !== undefined && !sendableDraft && over.running !== true && over.subagent === undefined && !composerLocked
       && !(over.nextStep ?? []).some(message => message.source.kind === 'user')
-      ? '继续生成'
+      ? 'Continue generating'
       : over?.running === true && steeringAvailable && !composerLocked && plainMessageDraft
-        ? (over.busyEnter === 'steer' ? '插话发送' : '排队发送')
-        : '发送消息'
+        ? (over.busyEnter === 'steer' ? 'Steer message' : 'Queue message')
+        : 'Send message'
   const button = view.container.querySelector<HTMLButtonElement>(`button[aria-label="${primaryLabel}"]`)!
-  const interruptButton = view.container.querySelector<HTMLButtonElement>('button[aria-label="停止生成"]')
+  const interruptButton = view.container.querySelector<HTMLButtonElement>('button[aria-label="Stop generating"]')
   return {
     view, textarea, button, interruptButton, props, sink, shell, wiring: shell, session, stop, removeAttachment, slotCalls,
     menuLauncher, busyEnter, stopShortcut, retry,
@@ -282,7 +282,7 @@ it('offers the play action only for an empty, idle composer with an eligible fai
   expect(b.retry).toHaveBeenCalledExactlyOnceWith(2)
   expect(b.sink).not.toHaveBeenCalled()
   await act(async () => { b.shell.setDraft('A new instruction') })
-  const send = b.view.getByRole('button', { name: '发送消息' })
+  const send = b.view.getByRole('button', { name: 'Send message' })
   fireEvent.click(send)
   await vi.waitFor(() => { expect(b.sink).toHaveBeenCalledOnce() })
   expect(b.sink.mock.calls[0]?.[0]).toBe('A new instruction')
@@ -295,7 +295,7 @@ it.each([
   { nextStep: [row('new instruction')] },
 ])('keeps the continue action unavailable with %j', (options) => {
   const b = bench({ ...options, retryableFailure: 2 as SessionSeq })
-  expect(b.view.queryByRole('button', { name: '继续生成' })).toBeNull()
+  expect(b.view.queryByRole('button', { name: 'Continue generating' })).toBeNull()
 })
 
 function attachmentOwner(slotCalls: readonly { key: string; owner: unknown }[]): ComposerAttachmentsOwnerProps {
@@ -535,7 +535,7 @@ describe('image draft rail', () => {
       attachmentOwner(slotCalls).onAddFiles([image, unsupported], directory ? new Set([unsupported]) : undefined)
     })
     expect(addFiles).not.toHaveBeenCalled()
-    expect(view.getByRole('alert').textContent).toContain('仅支持 PNG、JPG、WebP、GIF 格式的图片')
+    expect(view.getByRole('alert').textContent).toContain('Only PNG, JPG, WebP, and GIF images are supported')
     expect(shell.snapshot.draft).toBe('保留草稿')
   })
 
@@ -611,13 +611,13 @@ describe('image draft rail', () => {
     // Count: three at once over a two-image limit → the whole batch refused.
     const overCount = bench({ ...session, addFiles: vi.fn(() => null), imageLimits: limits })
     intake(overCount, [png(8, 'a.png'), png(8, 'b.png'), png(8, 'c.png')])
-    expect(overCount.view.getByRole('alert').textContent).toContain('一条消息最多添加 2 张图片')
+    expect(overCount.view.getByRole('alert').textContent).toContain('A message can include up to 2 images')
     expect(overCount.props.addFiles).not.toHaveBeenCalled()
     cleanup()
     // Per-file bytes.
     const overFile = bench({ ...session, addFiles: vi.fn(() => null), imageLimits: limits })
     intake(overFile, [png(1024 * 1024 + 1, 'big.png')])
-    expect(overFile.view.getByRole('alert').textContent).toContain('单张图片不能超过 1MB')
+    expect(overFile.view.getByRole('alert').textContent).toContain('Each image must be smaller than 1MB')
     expect(overFile.props.addFiles).not.toHaveBeenCalled()
     cleanup()
     // Aggregate bytes across the existing rail plus the new batch.
@@ -625,7 +625,7 @@ describe('image draft rail', () => {
     const attachment = { kind: 'image' as const, id: 'draft-1' as DraftAttachmentId, file: held, previewUrl: 'blob:held' }
     const overTotal = bench({ ...session, addFiles: vi.fn(() => null), imageLimits: limits, attachments: [attachment] })
     intake(overTotal, [png(1024 * 1024, 'more.png')])
-    expect(overTotal.view.getByRole('alert').textContent).toContain('图片总大小超过 2MB')
+    expect(overTotal.view.getByRole('alert').textContent).toContain('Images exceed 2MB in total; remove some and try again')
     expect(overTotal.props.addFiles).not.toHaveBeenCalled()
     cleanup()
     // Within every limit: the batch passes through to addFiles.
@@ -637,7 +637,7 @@ describe('image draft rail', () => {
   })
 
   it('announces the format problem before any limit when the batch holds a non-image', () => {
-    const addFiles = vi.fn(() => '仅支持 PNG、JPG、WebP、GIF 格式的图片')
+    const addFiles = vi.fn(() => 'Only PNG, JPG, WebP, and GIF images are supported')
     const result = bench({
       addFiles,
       imageLimits: {
@@ -656,7 +656,7 @@ describe('image draft rail', () => {
     ]
     act(() => { attachmentOwner(result.slotCalls).onAddFiles(files) })
     expect(addFiles).toHaveBeenCalledWith(files, undefined)
-    expect(result.view.getByRole('alert').textContent).toContain('仅支持 PNG、JPG、WebP、GIF 格式的图片')
+    expect(result.view.getByRole('alert').textContent).toContain('Only PNG, JPG, WebP, and GIF images are supported')
   })
 
   it('projects display-ready limits into the attachment slot', () => {
@@ -676,13 +676,13 @@ describe('image draft rail', () => {
 
   it('forwards dropped directories to addFiles and announces its refusal', () => {
     const addFiles = vi.fn((_files: readonly File[], directories?: ReadonlySet<File>) =>
-      directories !== undefined && directories.size > 0 ? '只有桌面端支持添加文件夹，浏览器里请添加单个文件' : null)
+      directories !== undefined && directories.size > 0 ? 'Folders can only be added in the desktop app; add individual files in the browser' : null)
     const result = bench({ addFiles })
     const folder = new File([], 'project')
     const note = new File([Uint8Array.of(1)], 'notes.md', { type: 'text/markdown' })
     act(() => { attachmentOwner(result.slotCalls).onAddFiles([folder, note], new Set([folder])) })
     expect(addFiles).toHaveBeenCalledWith([folder, note], new Set([folder]))
-    expect(result.view.getByRole('alert').textContent).toContain('只有桌面端支持添加文件夹')
+    expect(result.view.getByRole('alert').textContent).toContain('Folders can only be added in the desktop app; add individual files in the browser')
   })
 
   it('announces server attachment rejections as product copy, other codes as developer text', () => {
@@ -691,10 +691,10 @@ describe('image draft rail', () => {
       error: new RemoteError('session/attachment-invalid', 'raw wire text', { reason }),
     })
     const model = bench({ promptError: attachmentError('MODEL_DOES_NOT_SUPPORT_IMAGES') })
-    expect(model.view.getByRole('alert').textContent).toContain('当前模型不支持图片，请切换支持图片的模型')
+    expect(model.view.getByRole('alert').textContent).toContain('The current model does not support images; switch to a model that does')
     cleanup()
     const unknown = bench({ promptError: attachmentError('ATTACHMENT_NOT_REFERENCED') })
-    expect(unknown.view.getByRole('alert').textContent).toContain('图片发送失败（ATTACHMENT_NOT_REFERENCED）')
+    expect(unknown.view.getByRole('alert').textContent).toContain('Sending images failed (ATTACHMENT_NOT_REFERENCED); re-add them and try again')
     cleanup()
     // A subagent refusal uses the same product copy for the same reason.
     const subagent = bench({
@@ -705,7 +705,7 @@ describe('image draft rail', () => {
         }),
       },
     })
-    expect(subagent.view.getByRole('alert').textContent).toContain('当前模型不支持图片，请切换支持图片的模型')
+    expect(subagent.view.getByRole('alert').textContent).toContain('The current model does not support images; switch to a model that does')
     cleanup()
     const other = bench({
       promptError: { op: 'send', error: new RemoteError('gateway/internal', 'boom', {}) },
@@ -727,7 +727,7 @@ describe('image draft rail', () => {
     ]
     const result = bench({ attachments })
     const { view, textarea, sink, removeAttachment } = result
-    expect((view.getByRole('button', { name: '发送消息' }) as HTMLButtonElement).disabled).toBe(false)
+    expect((view.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled).toBe(false)
     const owner = attachmentOwner(result.slotCalls)
     act(() => { owner.onRemoveAttachment('draft-2' as DraftAttachmentId) })
     expect(removeAttachment).toHaveBeenCalledWith('draft-2')
@@ -737,13 +737,13 @@ describe('image draft rail', () => {
     expect(sink).toHaveBeenCalledWith('', ['draft-1'], 'queue', expect.any(AbortSignal), expect.any(Function))
     // The rail keeps the sent image, and Send shows progress, until the Host accepts the message.
     expect(attachmentOwner(result.slotCalls).attachments).toEqual([attachments[0]])
-    const sending = view.getByRole('button', { name: '正在发送消息' }) as HTMLButtonElement
+    const sending = view.getByRole('button', { name: 'Sending message' }) as HTMLButtonElement
     expect(sending.disabled).toBe(true)
     expect(sending.getAttribute('aria-busy')).toBe('true')
     expect(sending.hasAttribute('data-sending')).toBe(true)
     await act(async () => { settle({ kind: 'success' }) })
     expect(attachmentOwner(result.slotCalls).attachments).toEqual([])
-    expect(view.getByRole('button', { name: '发送消息' }).getAttribute('aria-busy')).toBe('false')
+    expect(view.getByRole('button', { name: 'Send message' }).getAttribute('aria-busy')).toBe('false')
   })
 
   it('keeps an image-only draft in the rail when its admission fails', async () => {
@@ -767,7 +767,7 @@ describe('image draft rail', () => {
   it('announces an image-intake rejection as a fading toast, repeatable for the same reason', () => {
     vi.useFakeTimers()
     try {
-      const addFiles = vi.fn(() => '仅支持 PNG、JPG、WebP、GIF 格式的图片')
+      const addFiles = vi.fn(() => 'Only PNG, JPG, WebP, and GIF images are supported')
       const { view, textarea } = bench({ addFiles })
       const paste = () => {
         fireEvent.paste(textarea, {
@@ -778,12 +778,12 @@ describe('image draft rail', () => {
         })
       }
       paste()
-      expect(view.getByRole('alert').textContent).toContain('仅支持 PNG、JPG、WebP、GIF 格式的图片')
+      expect(view.getByRole('alert').textContent).toContain('Only PNG, JPG, WebP, and GIF images are supported')
       act(() => { vi.advanceTimersByTime(4000) })
       expect(view.queryByRole('alert')).toBeNull()
       // The identical rejection re-announces: the toast is keyed per show.
       paste()
-      expect(view.getByRole('alert').textContent).toContain('仅支持 PNG、JPG、WebP、GIF 格式的图片')
+      expect(view.getByRole('alert').textContent).toContain('Only PNG, JPG, WebP, and GIF images are supported')
     } finally {
       vi.useRealTimers()
     }
@@ -807,34 +807,34 @@ describe('image draft rail', () => {
   })
 
   it('announces a rejected attachment-slot intake through the same toast', () => {
-    const addFiles = vi.fn(() => '图片读取服务不可用')
+    const addFiles = vi.fn(() => 'ImageReadServiceUnavailable')
     const result = bench({ addFiles })
     act(() => {
       attachmentOwner(result.slotCalls).onAddFiles([
         new File([Uint8Array.of(1)], 'x.png', { type: 'image/png' }),
       ])
     })
-    expect(result.view.getByRole('alert').textContent).toContain('图片读取服务不可用')
+    expect(result.view.getByRole('alert').textContent).toContain('ImageReadServiceUnavailable')
   })
 })
 
 describe('Enter semantics', () => {
   it('advertises the empty-draft whole-queue steering gesture when it is available', () => {
     const { placeholder } = bench({ running: true, queue: [row('q-1')], steerQueue: vi.fn() })
-    expect(placeholder).toBe('Cmd/Ctrl+Enter 插话发送全部排队消息')
+    expect(placeholder).toBe('Cmd/Ctrl+Enter steers all queued messages')
     expect(bench({
       running: true,
       queue: [row('q-1')],
       subagent: {
         address: { parentSessionId: 'parent' as SessionId, childSessionId: SID, mode: 'continuable' },
       },
-    }).placeholder).toBe('Cmd/Ctrl+Enter 插话发送全部排队消息')
+    }).placeholder).toBe('Cmd/Ctrl+Enter steers all queued messages')
   })
 
   it('keeps the owning placeholder or ordinary guidance when whole-queue steering is unavailable', () => {
-    expect(bench({ running: true }).placeholder).toBe('发消息或创建任务, / 调用指令, @ 文件或对话')
-    expect(bench({ queue: [row('q-1')] }).placeholder).toBe('发消息或创建任务, / 调用指令, @ 文件或对话')
-    expect(bench({ running: true, queue: [row('q-1')], draft: '消息' }).placeholder).toBe('发消息或创建任务, / 调用指令, @ 文件或对话')
+    expect(bench({ running: true }).placeholder).toBe('Message or run a task, / commands, @ files or sessions')
+    expect(bench({ queue: [row('q-1')] }).placeholder).toBe('Message or run a task, / commands, @ files or sessions')
+    expect(bench({ running: true, queue: [row('q-1')], draft: 'Message' }).placeholder).toBe('Message or run a task, / commands, @ files or sessions')
     expect(bench({
       running: true,
       queue: [row('q-1')],
@@ -846,14 +846,14 @@ describe('Enter semantics', () => {
       running: true,
       queue: [row('q-1')],
       commandMenuOpen: true,
-    }).placeholder).toBe('发消息或创建任务, / 调用指令, @ 文件或对话')
+    }).placeholder).toBe('Message or run a task, / commands, @ files or sessions')
     // The steer hint intentionally outranks the plan placeholder: while it
     // shows, the whole-queue gesture is genuinely available in plan mode.
     expect(bench({
       running: true,
       queue: [row('q-1')],
       plan: { active: true, pending: false },
-    }).placeholder).toBe('Cmd/Ctrl+Enter 插话发送全部排队消息')
+    }).placeholder).toBe('Cmd/Ctrl+Enter steers all queued messages')
   })
 
   it('an open command menu withholds the whole-queue steering gesture', () => {
@@ -1077,7 +1077,7 @@ describe('Enter semantics', () => {
 
 describe('running and lock semantics', () => {
   it.each([
-    { messages: zh, label: '停止生成', trigger: 'hover' },
+    { messages: en, label: 'Stop generating', trigger: 'hover' },
     { messages: en, label: 'Stop generating', trigger: 'focus' },
   ])('shows the registered Stop sequence on $trigger and removes it when unavailable', ({ messages, label, trigger }) => {
     vi.useFakeTimers()
@@ -1118,7 +1118,7 @@ describe('running and lock semantics', () => {
         fireEvent.pointerLeave(control)
         act(() => { vi.advanceTimersByTime(500) })
       }
-      expect(shown).toEqual(expect.arrayContaining(['添加文件或调用指令', '停止生成']))
+      expect(shown).toEqual(expect.arrayContaining(['Add files or run commands', 'Stop generating']))
     } finally {
       vi.useRealTimers()
     }
@@ -1130,12 +1130,12 @@ describe('running and lock semantics', () => {
       const { button, view, session } = bench({ running: true })
       fireEvent.pointerEnter(button)
       act(() => { vi.advanceTimersByTime(500) })
-      expect(view.getByRole('tooltip').getAttribute('aria-label')).toBe('停止生成 Esc Esc')
+      expect(view.getByRole('tooltip').getAttribute('aria-label')).toBe('Stop generating Esc Esc')
 
       // Disabling a hovered native button need not deliver mouseleave.
       act(() => { session.set(snapshotOf({ running: false })) })
       expect(button.disabled).toBe(true)
-      expect(button.getAttribute('aria-label')).toBe('发送消息')
+      expect(button.getAttribute('aria-label')).toBe('Send message')
       expect(view.queryByRole('tooltip')).toBeNull()
     } finally {
       vi.useRealTimers()
@@ -1145,19 +1145,19 @@ describe('running and lock semantics', () => {
   it('running switches the primary between Stop and Queue Send with the draft', async () => {
     const { textarea, button, stop, sink, shell } = bench({ running: true })
     expect(textarea.getAttribute('aria-disabled')).not.toBe('true')
-    expect(button.getAttribute('aria-label')).toBe('停止生成')
+    expect(button.getAttribute('aria-label')).toBe('Stop generating')
     fireEvent.click(button)
     expect(stop).toHaveBeenCalledTimes(1)
 
     writeDraft(shell, '排队消息')
-    expect(button.getAttribute('aria-label')).toBe('排队发送')
+    expect(button.getAttribute('aria-label')).toBe('Queue message')
     writeDraft(shell, '   ')
-    expect(button.getAttribute('aria-label')).toBe('停止生成')
+    expect(button.getAttribute('aria-label')).toBe('Stop generating')
     writeDraft(shell, '排队消息2')
-    expect(button.getAttribute('aria-label')).toBe('排队发送')
+    expect(button.getAttribute('aria-label')).toBe('Queue message')
     fireEvent.click(button)
     expect(sink).toHaveBeenCalledWith('排队消息2', [], 'queue', expect.any(AbortSignal), expect.any(Function))
-    await vi.waitFor(() => { expect(button.getAttribute('aria-label')).toBe('停止生成') })
+    await vi.waitFor(() => { expect(button.getAttribute('aria-label')).toBe('Stop generating') })
     expect(stop).toHaveBeenCalledTimes(1)
   })
 
@@ -1166,29 +1166,29 @@ describe('running and lock semantics', () => {
     let settle!: (outcome: SubmitOutcome) => void
     sink.mockImplementationOnce(() => new Promise<SubmitOutcome>((resolve) => { settle = resolve }))
     fireEvent.keyDown(textarea, { key: 'Enter' })
-    const sending = view.getByRole('button', { name: '正在发送消息' }) as HTMLButtonElement
+    const sending = view.getByRole('button', { name: 'Sending message' }) as HTMLButtonElement
     expect(sending.disabled).toBe(true)
-    fireEvent.click(view.getByRole('button', { name: '停止生成' }))
+    fireEvent.click(view.getByRole('button', { name: 'Stop generating' }))
     expect(stop).toHaveBeenCalledTimes(1)
 
     await act(async () => { settle({ kind: 'success' }) })
 
-    expect(view.queryByRole('button', { name: '正在发送消息' })).toBeNull()
-    expect(view.getAllByRole('button', { name: '停止生成' })).toHaveLength(1)
+    expect(view.queryByRole('button', { name: 'Sending message' })).toBeNull()
+    expect(view.getAllByRole('button', { name: 'Stop generating' })).toHaveLength(1)
   })
 
   it('running Send follows the busy-state Steer preference and labels the delivery', () => {
     const { button, sink } = bench({ running: true, busyEnter: 'steer', draft: '按钮插话' })
-    expect(button.getAttribute('aria-label')).toBe('插话发送')
+    expect(button.getAttribute('aria-label')).toBe('Steer message')
     fireEvent.click(button)
     expect(sink).toHaveBeenCalledWith('按钮插话', [], 'steer', expect.any(AbortSignal), expect.any(Function))
   })
 
   it('running Send relabels when the busy-state preference changes live', () => {
     const { button, busyEnter, sink } = bench({ running: true, draft: '跟随设置' })
-    expect(button.getAttribute('aria-label')).toBe('排队发送')
+    expect(button.getAttribute('aria-label')).toBe('Queue message')
     act(() => { busyEnter.set('steer') })
-    expect(button.getAttribute('aria-label')).toBe('插话发送')
+    expect(button.getAttribute('aria-label')).toBe('Steer message')
     fireEvent.click(button)
     expect(sink).toHaveBeenCalledWith('跟随设置', [], 'steer', expect.any(AbortSignal), expect.any(Function))
   })
@@ -1197,7 +1197,7 @@ describe('running and lock semantics', () => {
     // An unclaimed `/` line adjudicates on submit; a claimed command executes
     // instead of delivering a message. Neither click is a Queue/Steer delivery.
     const slash = bench({ running: true, busyEnter: 'steer', draft: '/goal inspect' })
-    expect(slash.button.getAttribute('aria-label')).toBe('发送消息')
+    expect(slash.button.getAttribute('aria-label')).toBe('Send message')
     expect(slash.button.disabled).toBe(false)
 
     const claimed = bench({ running: true, busyEnter: 'steer' })
@@ -1209,9 +1209,9 @@ describe('running and lock semantics', () => {
       )
     })
     expect(claimed.shell.snapshot.phase).toBe('claimed')
-    const button = claimed.view.container.querySelector<HTMLButtonElement>('button[aria-label="发送消息"]')
+    const button = claimed.view.container.querySelector<HTMLButtonElement>('button[aria-label="Send message"]')
     expect(button).not.toBeNull()
-    expect(claimed.view.container.querySelector('button[aria-label="插话发送"]')).toBeNull()
+    expect(claimed.view.container.querySelector('button[aria-label="Steer message"]')).toBeNull()
   })
 
   it('running Send keeps the plain label while a file upload is still pending', () => {
@@ -1220,7 +1220,7 @@ describe('running and lock semantics', () => {
       running: true, busyEnter: 'steer', draft: '带附件', attachments: [file],
       fileUploads: { [file.id]: { status: 'uploading', loaded: 0 } },
     })
-    expect(pending.button.getAttribute('aria-label')).toBe('发送消息')
+    expect(pending.button.getAttribute('aria-label')).toBe('Send message')
     expect(pending.button.disabled).toBe(true)
 
     // A failed upload holds the same gate until it is retried or removed.
@@ -1228,14 +1228,14 @@ describe('running and lock semantics', () => {
       running: true, busyEnter: 'steer', draft: '带附件', attachments: [file],
       fileUploads: { [file.id]: { status: 'error', message: 'upload failed' } },
     })
-    expect(failed.button.getAttribute('aria-label')).toBe('发送消息')
+    expect(failed.button.getAttribute('aria-label')).toBe('Send message')
     expect(failed.button.disabled).toBe(true)
 
     const ready = bench({
       running: true, busyEnter: 'steer', draft: '带附件', attachments: [file],
       fileUploads: { [file.id]: { status: 'ready', receiptId: 'receipt-1' as never, file: { kind: 'file' } as never } },
     })
-    expect(ready.button.getAttribute('aria-label')).toBe('插话发送')
+    expect(ready.button.getAttribute('aria-label')).toBe('Steer message')
     expect(ready.button.disabled).toBe(false)
   })
 
@@ -1250,12 +1250,12 @@ describe('running and lock semantics', () => {
       running: true, busyEnter: 'steer', draft: '带图', attachments: [image],
       fileUploads: { [image.id]: { status: 'uploading', loaded: 0 } },
     })
-    expect(uploading.button.getAttribute('aria-label')).toBe('发送消息')
+    expect(uploading.button.getAttribute('aria-label')).toBe('Send message')
     expect(uploading.button.disabled).toBe(true)
 
     // A subagent continuation's image has no upload and travels inline.
     const inline = bench({ running: true, busyEnter: 'steer', draft: '带图', attachments: [image] })
-    expect(inline.button.getAttribute('aria-label')).toBe('插话发送')
+    expect(inline.button.getAttribute('aria-label')).toBe('Steer message')
     expect(inline.button.disabled).toBe(false)
   })
 
@@ -1282,9 +1282,9 @@ describe('running and lock semantics', () => {
       cleanup()
       return text
     }
-    expect(enterWith({ status: 'uploading', loaded: 0 })).toContain('文件还在上传，请等待上传完成后发送')
-    expect(enterWith({ status: 'error', message: 'offline' })).toContain('上传失败，点击重试')
-    const refusal = '图片宽高不能超过 2000px，请缩小后重试'
+    expect(enterWith({ status: 'uploading', loaded: 0 })).toContain('Files are still uploading; send after they finish')
+    expect(enterWith({ status: 'error', message: 'offline' })).toContain('Upload failed; click to retry')
+    const refusal = 'Image sides must be at most 2000px; downscale it and try again'
     expect(enterWith({ status: 'error', message: 'too wide', reason: 'IMAGE_DIMENSION_TOO_LARGE' })).toContain(refusal)
     // The attachments slot receives the same localized explanation for its thumbnail.
     const owner = attachmentOwner(bench({ attachments: [image], imageLimits: limits }).slotCalls)
@@ -1293,7 +1293,7 @@ describe('running and lock semantics', () => {
 
   it('idle Send keeps the plain label regardless of the busy-state preference', () => {
     const { button, sink } = bench({ busyEnter: 'steer', draft: '空闲发送' })
-    expect(button.getAttribute('aria-label')).toBe('发送消息')
+    expect(button.getAttribute('aria-label')).toBe('Send message')
     fireEvent.click(button)
     expect(sink).toHaveBeenCalledWith('空闲发送', [], 'queue', expect.any(AbortSignal), expect.any(Function))
   })
@@ -1306,10 +1306,10 @@ describe('running and lock semantics', () => {
       previewUrl: 'blob:pixel',
     }
     const { button, sink } = bench({ running: true, attachments: [attachment] })
-    expect(button.getAttribute('aria-label')).toBe('排队发送')
+    expect(button.getAttribute('aria-label')).toBe('Queue message')
     fireEvent.click(button)
     expect(sink).toHaveBeenCalledWith('', ['draft-1'], 'queue', expect.any(AbortSignal), expect.any(Function))
-    await vi.waitFor(() => { expect(button.getAttribute('aria-label')).toBe('停止生成') })
+    await vi.waitFor(() => { expect(button.getAttribute('aria-label')).toBe('Stop generating') })
   })
 
   it('running blocked composer keeps Stop with a retained draft', () => {
@@ -1321,7 +1321,7 @@ describe('running and lock semantics', () => {
     })
     expect(textarea.getAttribute('aria-disabled')).toBe('true')
     expect(textarea.getAttribute('data-placeholder')).toBe('请选择可用模型')
-    expect(button.getAttribute('aria-label')).toBe('停止生成')
+    expect(button.getAttribute('aria-label')).toBe('Stop generating')
     expect(button.disabled).toBe(false)
     fireEvent.click(button)
     expect(stop).toHaveBeenCalledTimes(1)
@@ -1343,30 +1343,30 @@ describe('running and lock semantics', () => {
       blocked: { reason: '只读查看：本页由 owner 分享，无法发送消息' },
       placeholder: '只读查看：本页由 owner 分享，无法发送消息',
     })
-    expect(view.container.querySelector('button[aria-label="停止生成"]')).toBeNull()
-    expect(view.container.querySelector('button[aria-label="发送消息"]')).toBeNull()
+    expect(view.container.querySelector('button[aria-label="Stop generating"]')).toBeNull()
+    expect(view.container.querySelector('button[aria-label="Send message"]')).toBeNull()
     expect(stop).not.toHaveBeenCalled()
   })
 
   it('a running composer whose access excludes only prompting keeps Stop but offers no busy Send', () => {
     const empty = bench({ running: true, deniedEndpoints: ['session/prompt'] })
-    expect(empty.view.getByLabelText('停止生成')).toBeTruthy()
+    expect(empty.view.getByLabelText('Stop generating')).toBeTruthy()
     cleanup()
     // A draft would make the primary action the busy Send, which the snapshot excludes.
     const drafted = bench({ running: true, deniedEndpoints: ['session/prompt'], draft: '排到下一轮' })
-    expect(drafted.view.container.querySelector('button[aria-label="排队发送"]')).toBeNull()
+    expect(drafted.view.container.querySelector('button[aria-label="Queue message"]')).toBeNull()
   })
 
   it('an idle composer whose access excludes prompting offers no Send', () => {
     const { view } = bench({ deniedEndpoints: ['session/prompt'], draft: 'hello' })
-    expect(view.container.querySelector('button[aria-label="发送消息"]')).toBeNull()
+    expect(view.container.querySelector('button[aria-label="Send message"]')).toBeNull()
   })
 
   it('a composer whose access has no answer yet keeps its ordinary Send', () => {
     const { view, props } = bench({ draft: 'hello' })
     // Without a bound Session the Session-scope Hook answers undefined, which denies nothing.
     view.rerender(<InputBar {...props} useAccess={() => undefined} />)
-    expect(view.getByLabelText('发送消息')).toBeTruthy()
+    expect(view.getByLabelText('Send message')).toBeTruthy()
   })
 
   it('running Cmd/Ctrl+Enter uses the opposite of the busy-state Enter preference', () => {
@@ -1391,7 +1391,7 @@ describe('running and lock semantics', () => {
         },
       },
     })
-    expect(button.getAttribute('aria-label')).toBe('排队发送')
+    expect(button.getAttribute('aria-label')).toBe('Queue message')
     expect(interruptButton).not.toBeNull()
     expect(textarea.getAttribute('aria-disabled')).not.toBe('true')
     expect(view.container.querySelector<HTMLInputElement>('input[type="file"]')?.disabled).toBe(true)
@@ -1417,14 +1417,14 @@ describe('running and lock semantics', () => {
       },
     }
     const { button, sink } = bench({ running: true, busyEnter: 'steer', draft: '子代理插话', subagent })
-    expect(button.getAttribute('aria-label')).toBe('插话发送')
+    expect(button.getAttribute('aria-label')).toBe('Steer message')
     fireEvent.click(button)
     expect(sink).toHaveBeenCalledWith('子代理插话', [], 'steer', expect.any(AbortSignal), expect.any(Function))
 
     // No draft: the child has no Stop seat to fall back to, so its disabled
     // Send keeps the plain label instead of naming a delivery it cannot make.
     const empty = bench({ running: true, busyEnter: 'steer', subagent })
-    expect(empty.button.getAttribute('aria-label')).toBe('发送消息')
+    expect(empty.button.getAttribute('aria-label')).toBe('Send message')
     expect(empty.button.disabled).toBe(true)
   })
 
@@ -1495,7 +1495,7 @@ describe('running and lock semantics', () => {
         },
       },
     })
-    expect(button.getAttribute('aria-label')).toBe('发送消息')
+    expect(button.getAttribute('aria-label')).toBe('Send message')
     expect(interruptButton).toBeNull()
     expect(stop).not.toHaveBeenCalled()
   })
@@ -1524,8 +1524,8 @@ describe('running and lock semantics', () => {
   it('disabled (session removed) locks the textarea and chrome', () => {
     const { textarea, view } = bench({ disabled: true })
     expect(textarea.getAttribute('aria-disabled')).toBe('true')
-    expect(placeholderOf(view.container)).toBe('会话不可用')
-    expect((view.getByLabelText('添加文件或调用指令') as HTMLButtonElement).disabled).toBe(true)
+    expect(placeholderOf(view.container)).toBe('Session unavailable')
+    expect((view.getByLabelText('Add files or run commands') as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('idle primary sends and disables on empty draft', () => {
@@ -1543,7 +1543,7 @@ describe('running and lock semantics', () => {
     textarea.focus = (options?: FocusOptions) => { focused.push(options?.preventScroll) }
     act(() => { first.session.set(snapshotOf({ removed: false })) })
     expect(focused).toEqual([true])
-    fireEvent.mouseDown(first.view.container.querySelector('button[aria-label="发送消息"]')!)
+    fireEvent.mouseDown(first.view.container.querySelector('button[aria-label="Send message"]')!)
     expect(focused).toEqual([true, true])
   })
 
@@ -1714,9 +1714,9 @@ describe('running and lock semantics', () => {
   })
 
   it('disabled state shows the unavailable placeholder; custom placeholder wins', () => {
-    expect(bench({ disabled: true }).placeholder).toBe('会话不可用')
+    expect(bench({ disabled: true }).placeholder).toBe('Session unavailable')
     const live = bench()
-    expect(live.placeholder).toBe('发消息或创建任务, / 调用指令, @ 文件或对话')
+    expect(live.placeholder).toBe('Message or run a task, / commands, @ files or sessions')
     const custom = bench({ placeholder: 'Custom placeholder' })
     expect(custom.placeholder).toBe('Custom placeholder')
   })
@@ -1727,13 +1727,13 @@ describe('running and lock semantics', () => {
       inert: true,
       workspacePickerOpen: false,
       onRequestWorkspace,
-      placeholder: '选择一个工作区开始',
+      placeholder: 'Choose a workspace to start',
     })
     expect(textarea.getAttribute('aria-disabled')).not.toBe('true')
     expect(editableOf(textarea)).toBe(false)
     expect(textarea.getAttribute('aria-haspopup')).toBe('menu')
     expect(textarea.getAttribute('aria-expanded')).toBe('false')
-    expect((view.getByLabelText('添加文件或调用指令') as HTMLButtonElement).disabled).toBe(true)
+    expect((view.getByLabelText('Add files or run commands') as HTMLButtonElement).disabled).toBe(true)
 
     fireEvent.click(textarea)
     fireEvent.keyDown(textarea, { key: 'Enter' })
@@ -1757,13 +1757,13 @@ describe('running and lock semantics', () => {
 
   it('the plan projection swaps the placeholder while its effective target is plan mode', () => {
     const active = bench({ plan: { active: true, pending: false } })
-    expect(active.placeholder).toBe('描述你的任务以生成计划')
+    expect(active.placeholder).toBe('describe your task to generate plan')
     // /plan just ran: pending entry already reads as the plan target.
     const entering = bench({ plan: { active: false, pending: true } })
-    expect(entering.placeholder).toBe('描述你的任务以生成计划')
+    expect(entering.placeholder).toBe('describe your task to generate plan')
     // Pending exit: target is default again.
     const leaving = bench({ plan: { active: true, pending: true } })
-    expect(leaving.placeholder).toBe('发消息或创建任务, / 调用指令, @ 文件或对话')
+    expect(leaving.placeholder).toBe('Message or run a task, / commands, @ files or sessions')
     // Owner placeholder outranks the plan swap.
     const custom = bench({ plan: { active: true, pending: false }, placeholder: 'Custom placeholder' })
     expect(custom.placeholder).toBe('Custom placeholder')
@@ -1789,7 +1789,7 @@ describe('machine pending lock', () => {
     expect(shell.snapshot.phase).toBe('submitting')
     const textarea = view.container.querySelector<HTMLDivElement>('[data-composer-input]')!
     expect(editableOf(textarea)).toBe(false)
-    expect(view.container.querySelector<HTMLButtonElement>('button[aria-label="发送消息"]')!.disabled).toBe(true)
+    expect(view.container.querySelector<HTMLButtonElement>('button[aria-label="Send message"]')!.disabled).toBe(true)
   })
 })
 
@@ -1805,12 +1805,12 @@ describe('decorations', () => {
     act(() => {
       shell.setDraft('/goal ')
       shell.beginCommand(
-        { name: 'goal', token: '/goal ', hint: '目标内容', submit: () => Promise.resolve({ kind: 'success' as const }) },
+        { name: 'goal', token: '/goal ', hint: 'Goal objective', submit: () => Promise.resolve({ kind: 'success' as const }) },
         { start: 0, end: 6, draftRev: shell.snapshot.draftRev },
       )
     })
     expect(commandChipOf(view.container)?.textContent).toBe('/goal')
-    expect(textarea.style.getPropertyValue('--dsh-composer-hint')).toBe(JSON.stringify('目标内容'))
+    expect(textarea.style.getPropertyValue('--dsh-composer-hint')).toBe(JSON.stringify('Goal objective'))
     // Args typed: the hint disappears, the chip stays.
     act(() => { shell.actions.insertText('发布', shell.actions.captureInsertion()) })
     expect(shell.snapshot.draft).toBe('/goal 发布')
@@ -1827,7 +1827,7 @@ describe('decorations', () => {
         { start: 0, end: 6, draftRev: shell.snapshot.draftRev },
       )
     })
-    expect(textarea.style.getPropertyValue('--dsh-composer-hint')).toBe(JSON.stringify('输入目标，智能体将持续执行'))
+    expect(textarea.style.getPropertyValue('--dsh-composer-hint')).toBe(JSON.stringify('describe the objective for a long-running task'))
   })
 
   it('the hint lookup keys on the claim name, so a localized claim token keeps the locale entry', () => {
@@ -1839,7 +1839,7 @@ describe('decorations', () => {
         { start: 0, end: 4, draftRev: shell.snapshot.draftRev },
       )
     })
-    expect(textarea.style.getPropertyValue('--dsh-composer-hint')).toBe(JSON.stringify('输入目标，智能体将持续执行'))
+    expect(textarea.style.getPropertyValue('--dsh-composer-hint')).toBe(JSON.stringify('describe the objective for a long-running task'))
   })
 
   it('suppresses placeholders throughout native composition, including a temporarily empty draft', async () => {
@@ -1858,7 +1858,7 @@ describe('decorations', () => {
     act(() => {
       shell.setDraft('/目标 ')
       shell.beginCommand(
-        { name: 'goal', token: '/目标 ', hint: '目标内容', submit: () => Promise.resolve({ kind: 'success' as const }) },
+        { name: 'goal', token: '/目标 ', hint: 'Goal objective', submit: () => Promise.resolve({ kind: 'success' as const }) },
         { start: 0, end: 4, draftRev: shell.snapshot.draftRev },
       )
     })
@@ -2027,13 +2027,13 @@ describe('insertText (scoped event body)', () => {
 })
 
 describe('strips and variants', () => {
-  it.each([zh, en])('shows localized guidance when another writer owns the Session', (dictionary) => {
+  it.each([en, en])('shows localized guidance when another writer owns the Session', (dictionary) => {
     const send = bench({
       promptError: {
         op: 'send',
         error: new RemoteError('session/writer-held', 'internal writer diagnostic', { sessionId: SID }),
       },
-      t: makeTranslate(dictionary, commonZh),
+      t: makeTranslate(dictionary, commonEn),
     })
     expect(send.view.getByRole('alert').textContent).toBe(dictionary['error.sessionInUse'])
   })
@@ -2099,7 +2099,7 @@ describe('strips and variants', () => {
 describe('command launcher chrome and control seats', () => {
   it('renders the command launcher and dispatches every empty control seat', () => {
     const { view, slotCalls } = bench()
-    expect(view.getByLabelText('添加文件或调用指令')).toBeTruthy()
+    expect(view.getByLabelText('Add files or run commands')).toBeTruthy()
     // Capability absent (no permission slot entry): the chip renders nothing.
     expect(view.queryByLabelText(/^访问模式/)).toBeNull()
     // Every seat dispatched, nothing rendered (render passes may repeat; the
@@ -2118,7 +2118,7 @@ describe('command launcher chrome and control seats', () => {
     const toggleCommandMenu = vi.fn()
     const { view, shell, menuLauncher } = bench({ draft: 'draft text', toggleCommandMenu })
     act(() => { shell.editor.update(() => { $selectDetectSpan({ start: 2, end: 7 }) }, { discrete: true }) })
-    const launcher = view.getByLabelText('添加文件或调用指令')
+    const launcher = view.getByLabelText('Add files or run commands')
     expect(launcher.getAttribute('aria-expanded')).toBe('false')
     fireEvent.click(launcher)
     expect(toggleCommandMenu).toHaveBeenCalledExactlyOnceWith({ start: 2, end: 7 })
@@ -2129,16 +2129,16 @@ describe('command launcher chrome and control seats', () => {
   it('follows the access answers over a running Session, and restores the actions when they return', () => {
     const { view, props } = bench({ running: true })
     // While the page may stop the running Session, the primary action is its Stop.
-    expect(view.getByLabelText('停止生成')).toBeTruthy()
+    expect(view.getByLabelText('Stop generating')).toBeTruthy()
 
     // The access snapshot now excludes the Session's writes: the bar offers neither Stop nor Send.
     view.rerender(<InputBar {...props} useAccess={() => false} />)
-    expect(view.queryByLabelText('停止生成')).toBeNull()
-    expect(view.queryByLabelText('发送消息')).toBeNull()
+    expect(view.queryByLabelText('Stop generating')).toBeNull()
+    expect(view.queryByLabelText('Send message')).toBeNull()
 
     // The answers return: the bar offers the action the page holds again.
     view.rerender(<InputBar {...props} />)
-    expect(view.getByLabelText('停止生成')).toBeTruthy()
+    expect(view.getByLabelText('Stop generating')).toBeTruthy()
   })
 
   it('opening the command menu from the button puts the keyboard in the editor first', () => {
@@ -2148,7 +2148,7 @@ describe('command launcher chrome and control seats', () => {
     // menu is a combobox whose arrows live on the editor.
     textarea.blur()
     expect(document.activeElement).not.toBe(textarea)
-    fireEvent.click(view.getByLabelText('添加文件或调用指令'))
+    fireEvent.click(view.getByLabelText('Add files or run commands'))
     expect(document.activeElement).toBe(textarea)
     expect(toggleCommandMenu).toHaveBeenCalledTimes(1)
   })
@@ -2179,10 +2179,10 @@ describe('command launcher chrome and control seats', () => {
 
   it('disabled locks the command launcher while running does not', () => {
     const { view } = bench({ disabled: true })
-    expect((view.getByLabelText('添加文件或调用指令') as HTMLButtonElement).disabled).toBe(true)
+    expect((view.getByLabelText('Add files or run commands') as HTMLButtonElement).disabled).toBe(true)
     cleanup()
     const live = bench({ running: true })
-    expect((live.view.getByLabelText('添加文件或调用指令') as HTMLButtonElement).disabled).toBe(false)
+    expect((live.view.getByLabelText('Add files or run commands') as HTMLButtonElement).disabled).toBe(false)
   })
 })
 
@@ -2198,7 +2198,7 @@ it('lets a toolbar activity replace accessories without replacing the draft edit
   expect(view.queryByRole('button', { name: 'model choice' })).toBeNull()
   expect(view.getByRole('textbox')).toBe(editor)
   expect(editor.textContent).toBe('keep this draft')
-  expect(view.getByRole('button', { name: '发送消息' })).toBeTruthy()
+  expect(view.getByRole('button', { name: 'Send message' })).toBeTruthy()
   fireEvent.click(view.getByRole('button', { name: 'close activity' }))
   expect(view.getByRole('button', { name: 'model choice' })).toBeTruthy()
 })
@@ -2210,17 +2210,17 @@ it('places context usage below the composer and hides it until the activity clos
       <button onClick={() => { owner.onActiveChange(false) }}>close activity</button>
     </>,
   })
-  const meter = view.getByRole('button', { name: '上下文已用 25%' })
+  const meter = view.getByRole('button', { name: '25% of context used' })
   const microphone = view.getByRole('button', { name: 'microphone' })
   expect(microphone.compareDocumentPosition(meter) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   fireEvent.click(meter)
-  expect(view.getByRole('dialog', { name: '上下文已用' })).toBeTruthy()
+  expect(view.getByRole('dialog', { name: 'of context used' })).toBeTruthy()
   fireEvent.click(microphone)
-  expect(view.queryByRole('dialog', { name: '上下文已用' })).toBeNull()
-  expect(view.queryByRole('button', { name: '上下文已用 25%' })).toBeNull()
-  expect(view.getByRole('button', { name: '发送消息' })).toBeTruthy()
+  expect(view.queryByRole('dialog', { name: 'of context used' })).toBeNull()
+  expect(view.queryByRole('button', { name: '25% of context used' })).toBeNull()
+  expect(view.getByRole('button', { name: 'Send message' })).toBeTruthy()
   fireEvent.click(view.getByRole('button', { name: 'close activity' }))
-  fireEvent.click(view.getByRole('button', { name: '上下文已用 25%' }))
-  expect(view.getByRole('dialog', { name: '上下文已用' })).toBeTruthy()
-  expect(view.getByRole('button', { name: '发送消息' })).toBeTruthy()
+  fireEvent.click(view.getByRole('button', { name: '25% of context used' }))
+  expect(view.getByRole('dialog', { name: 'of context used' })).toBeTruthy()
+  expect(view.getByRole('button', { name: 'Send message' })).toBeTruthy()
 })

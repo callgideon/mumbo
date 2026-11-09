@@ -1,6 +1,6 @@
-- dialog "无法访问 GitHub":
-  - heading "无法访问 GitHub" [level=2]
-  - button "关闭"
-  - paragraph: 请尝试其他安装来源。
-  - button "取消"
-  - button "改用国内镜像"
+- dialog "Cannot access GitHub":
+  - heading "Cannot access GitHub" [level=2]
+  - button "Close"
+  - paragraph: Try another installation source.
+  - button "Cancel"
+  - button "Use mainland China mirror"

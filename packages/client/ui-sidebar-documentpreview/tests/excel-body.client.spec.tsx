@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, expect, it, vi } from 'vitest'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { Config } from '../src/config.ts'
-import { en, zh } from '../src/client/excel/locales.ts'
+import { en, fr } from '../src/client/excel/locales.ts'
 import type { ExcelBodyProps, LoadedExcelBodyProps } from '../src/client/excel/LazyExcelBody.tsx'
 
 const mocked = vi.hoisted(() => ({ parse: vi.fn(), workbook: vi.fn((_props: unknown) => null) }))
@@ -76,7 +76,7 @@ it('opens the formula warning by touch and closes it on an outside press', async
   expect(document.querySelector('[role="tooltip"]')).toBeNull()
 })
 
-it.each([en, zh])('lists only detected unsupported content and clears the notice on file replacement', async (dictionary) => {
+it.each([en, fr])('lists only detected unsupported content and clears the notice on file replacement', async (dictionary) => {
   const t = makeTranslate(dictionary)
   mocked.parse.mockResolvedValueOnce({ ...formulaValue, unsupportedFeatures: ['charts', 'images', 'shapes', 'conditionalFormatting'] })
     .mockResolvedValueOnce(value)

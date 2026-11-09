@@ -1,9 +1,9 @@
-- dialog "选择模型":
-  - heading "选择模型" [level=2]
-  - button "关闭"
-  - paragraph: 以下是模型提供商的可用模型，勾选的模型即为模型列表。
-  - searchbox "搜索模型"
-  - button "取消全选"
+- dialog "Choose models":
+  - heading "Choose models" [level=2]
+  - button "Close"
+  - paragraph: These are the models this provider has available. Checked models make up the list.
+  - searchbox "Search models"
+  - button "Deselect all"
   - list:
     - listitem:
       - checkbox "MiniMax-M2.7" [checked]
@@ -14,5 +14,5 @@
     - listitem:
       - checkbox "MiniMax-M3" [checked]
       - text: MiniMax-M3
-  - button "取消"
-  - button "更新列表"
+  - button "Cancel"
+  - button "Update list"

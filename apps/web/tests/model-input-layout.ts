@@ -15,11 +15,11 @@ export async function assertModelInputLayout(page: Page, editor: Locator): Promi
   const entry = editor.locator('[data-row-key]').first()
   const originalStyle = await entry.getAttribute('style')
   const check = async (): Promise<void> => {
-    const id = await editor.getByLabel('模型 ID 1', { exact: true }).boundingBox()
-    const name = await editor.getByRole('textbox', { name: '显示名称 1', exact: true }).boundingBox()
-    const context = await editor.getByLabel('上下文窗口 1', { exact: true }).boundingBox()
-    const output = await editor.getByLabel('最大输出 token 数 1', { exact: true }).boundingBox()
-    const types = await editor.getByRole('group', { name: '输入类型 1' }).boundingBox()
+    const id = await editor.getByLabel('Model ID 1', { exact: true }).boundingBox()
+    const name = await editor.getByRole('textbox', { name: 'Display name 1', exact: true }).boundingBox()
+    const context = await editor.getByLabel('Context window 1', { exact: true }).boundingBox()
+    const output = await editor.getByLabel('Max output tokens 1', { exact: true }).boundingBox()
+    const types = await editor.getByRole('group', { name: 'Input types 1' }).boundingBox()
     if (id === null || name === null || context === null || output === null || types === null) {
       throw new Error('Expanded model fields are not visible')
     }
@@ -48,7 +48,7 @@ export async function assertModelInputLayout(page: Page, editor: Locator): Promi
       expect(Math.abs(id.y - name.y)).toBeLessThan(1)
       expect(name.x).toBeGreaterThanOrEqual(id.x + id.width)
     }
-    const overflowing = await editor.getByRole('region', { name: '模型目录', exact: true }).evaluate((region) => {
+    const overflowing = await editor.getByRole('region', { name: 'Models', exact: true }).evaluate((region) => {
       const widths = []
       for (let element: Element | null = region; element !== null; element = element.parentElement) {
         if (element === region || /auto|scroll/.test(getComputedStyle(element).overflowY)) {

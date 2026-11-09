@@ -36,7 +36,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
-usePinnedBrowserLanguages('zh-CN')
+usePinnedBrowserLanguages('en-US')
 
 const ROOT = 'root-1' as SessionId
 
@@ -166,9 +166,10 @@ async function bench(renderQuote = false) {
 }
 
 describe('Conversation inject API', () => {
-  it.each(['zh', 'en'])('submits empty continuation input in the %s locale', async (locale) => {
+  it.each(['de', 'en'])('submits empty continuation input in the %s locale', async (locale) => {
     const b = await bench()
     onTestFinished(() => b.runtime.dispose())
+    onTestFinished(b.runtime.ctx.locale.addLanguage({ id: 'de', label: 'Deutsch', fallback: 'en' }))
     await b.runtime.sessions.replaceEvents(ROOT, continuationTurn({ kind: 'error', error: { code: 'SERVER', message: 'busy' } }))
     await b.runtime.sessions.setProjection(ROOT, 'conversationContinuation', SessionSeq(5))
     const composer = b.composerApi(ROOT)
@@ -310,7 +311,7 @@ describe('Conversation inject API', () => {
     await vi.waitFor(() => { expect(contributions.has('file')).toBe(true) })
     const file = contributions.get('file')!
     const target = { sessionId: ROOT }
-    expect(file.label!()).toBe('文件')
+    expect(file.label!()).toBe('File')
     expect(file.available(target)).toBe(false)
     expect(file.available({ sessionId: 'missing' as SessionId })).toBe(false)
     if (file.ui.kind !== 'action') throw new Error('File must be an action')
@@ -560,7 +561,7 @@ describe('Conversation inject API', () => {
     const browser = await bench()
     const folder = new File([], 'project')
     expect(browser.composerApi(ROOT).addFiles?.([folder], new Set([folder])))
-      .toBe('只有桌面端支持添加文件夹，浏览器里请添加单个文件')
+      .toBe('Folders can only be added in the desktop app; add individual files in the browser')
     expect(browser.inputApi(ROOT).state.getSnapshot().attachmentIds).toEqual([])
     await browser.runtime.dispose()
 
@@ -582,7 +583,7 @@ describe('Conversation inject API', () => {
       // A directory the shell cannot name is refused even with the bridge present.
       const nameless = new File([], 'nameless')
       expect(composer.addFiles?.([nameless], new Set([nameless])))
-        .toBe('无法获取文件夹路径，请重新拖入')
+        .toBe('Could not obtain the folder path; drag it in again')
       await desktop.runtime.dispose()
     } finally {
       vi.unstubAllGlobals()
@@ -634,7 +635,7 @@ describe('Conversation inject API', () => {
     actions.setDraft('keep this text')
     for (const name of ['bad"name', 'bad\nname']) {
       const files = [new File([], 'good.txt'), new File([], name)]
-      expect(b.composerApi(ROOT).addFiles?.(files)).toBe('路径含有无法引用的字符，请改名后再试')
+      expect(b.composerApi(ROOT).addFiles?.(files)).toBe('The path contains characters a reference cannot carry; rename it and try again')
       expect(state.getSnapshot().draft).toBe('keep this text')
       expect(state.getSnapshot().attachmentIds).toEqual([])
       expect(b.rootUpload).not.toHaveBeenCalled()

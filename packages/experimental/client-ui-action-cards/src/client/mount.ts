@@ -11,7 +11,7 @@ import type { TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
 import { ActionCardTail, type TailInjected } from './Card.tsx'
 import { ProposeRow } from './ProposeRow.tsx'
 import { ActionCardRegistry } from './registry.ts'
-import { de, en, es, fr, ja, pt, ru, zh, type ActionCardKey } from './locales.ts'
+import { de, en, es, fr, ja, pt, ru, type ActionCardKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap { actionCards: ActionCardKey }
@@ -44,7 +44,7 @@ export async function mountActionCards(ctx: Context, contribution: TypertRemoteC
 }
 
 function registerUi(ctx: Context, registry: ActionCardRegistry): void {
-  ctx.effect(() => ctx.locale.register('actionCards', { en, zh, ja, es, fr, de, ru, pt }), 'action-cards: locale')
+  ctx.effect(() => ctx.locale.register('actionCards', { en, ja, es, fr, de, ru, pt }), 'action-cards: locale')
   ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({
     name: 'conversation.chat.turnTail', id: '@deepseek-ai/dsh-client-ui-action-cards', locale: 'actionCards',
     inject: (sessionId: SessionId): TailInjected => ({

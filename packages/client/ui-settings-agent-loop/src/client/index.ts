@@ -16,7 +16,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import { AgentLoopCard } from './AgentLoopCard.tsx'
 import { AGENT_LOOP_NS, AgentLoopCardController } from './agent-loop-card-controller.ts'
-import { en, ja, es, fr, de, ru, pt, zh, type AgentLoopSettingsLocaleKey } from './locales.ts'
+import { en, ja, es, fr, de, ru, pt, type AgentLoopSettingsLocaleKey } from './locales.ts'
 
 export type { AgentLoopCardProps } from './AgentLoopCard.tsx'
 export type { AgentLoopCardFace, AgentLoopCardState, AgentLoopSettings } from './agent-loop-card-controller.ts'
@@ -40,7 +40,7 @@ export const inject = ['slots', 'locale', 'configForms']
  * @param ctx - the browser plugin context.
  */
 export function apply(ctx: ClientContext): void {
-  ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }), 'ui-settings-agent-loop: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { en, ja, es, fr, de, ru, pt }), 'ui-settings-agent-loop: dictionaries')
   const t = ctx.locale.bind(NS)
   const card = new AgentLoopCardController(ctx.configForms.get(AGENT_LOOP_NS))
   ctx.effect(() => () => { card.dispose() }, 'ui-settings-agent-loop: form subscription')

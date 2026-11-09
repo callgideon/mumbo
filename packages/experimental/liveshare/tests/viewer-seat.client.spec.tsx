@@ -16,12 +16,13 @@ import { ViewerModelSeat } from '../src/client/viewer-model.tsx'
 import { ViewerPermissionSeat } from '../src/client/viewer-permission.tsx'
 import { ViewerSeat } from '../src/client/viewer-seat.tsx'
 import { viewerCapabilities } from '../src/client/viewer-capabilities.ts'
-import { en, NS, zh } from '../src/client/locales.ts'
+import { en, NS, fr } from '../src/client/locales.ts'
 
 // The seats read their copy through the locale seat the served page's client tree provides.
 const locale = new LocaleRuntime(new Context())
-locale.register(NS, { zh, en })
-locale.setLocale('zh')
+locale.addLanguage({ id: 'fr', label: 'Français', fallback: 'en' })
+locale.register(NS, { fr, en })
+locale.setLocale('fr')
 const t = locale.bind(NS)
 
 afterEach(() => {
@@ -72,7 +73,7 @@ describe('viewer model seat', () => {
     const seat = await screen.findByText(/内网 DSV41F/)
     expect(seat.textContent).toBe('内网 DSV41F · 高强度')
     // The restriction is visible copy, not only the tooltip.
-    expect(document.body.textContent).toContain(zh['viewer.model.locked'])
+    expect(document.body.textContent).toContain(fr['viewer.model.locked'])
     const element = document.querySelector('[data-liveshare-viewer-seat="model"]')
     expect(element?.tagName).toBe('SPAN')
     expect(element?.getAttribute('aria-disabled')).toBe('true')
@@ -163,8 +164,8 @@ describe('viewer permission seat', () => {
     render(<ViewerPermissionSeat t={t} locked capabilities={viewerCapabilities} />)
 
     const element = document.querySelector('[data-liveshare-viewer-seat="permission"]')
-    expect(element?.textContent).toContain(zh['dialog.sessionMode.write'])
-    expect(element?.textContent).toContain(zh['viewer.permission.locked'])
+    expect(element?.textContent).toContain(fr['dialog.sessionMode.write'])
+    expect(element?.textContent).toContain(fr['viewer.permission.locked'])
     expect(element?.tagName).toBe('SPAN')
     expect(element?.getAttribute('aria-disabled')).toBe('true')
     expect(element?.querySelector('button, select, input, [role="button"], [role="combobox"], [tabindex]')).toBeNull()
@@ -177,8 +178,8 @@ describe('viewer permission seat', () => {
     render(<ViewerPermissionSeat t={t} locked capabilities={viewerCapabilities} />)
 
     const element = document.querySelector('[data-liveshare-viewer-seat="permission"]')
-    expect(element?.textContent).toContain(zh['viewer.permission.unconfirmed'])
-    expect(element?.textContent).not.toContain(zh['dialog.sessionMode.view'])
+    expect(element?.textContent).toContain(fr['viewer.permission.unconfirmed'])
+    expect(element?.textContent).not.toContain(fr['dialog.sessionMode.view'])
   })
 })
 

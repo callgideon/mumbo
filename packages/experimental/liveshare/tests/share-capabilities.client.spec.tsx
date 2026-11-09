@@ -24,19 +24,19 @@ describe('plugin names', () => {
   const group: OfferedPlugin = {
     plugin: 'forgePanel',
     package: '@deepseek-ai/dsh-experimental-client-ui-forge',
-    titles: { zh: '变更请求面板', en: 'Change request panel' },
+    titles: { de: 'Panel für Änderungsanfragen', en: 'Change request panel' },
     endpoints: ['forgePanel/follow'],
   }
 
   it('prefers the active language, then English, then the package segment', () => {
-    expect(pluginDisplayName(group, 'zh')).toBe('变更请求面板')
+    expect(pluginDisplayName(group, 'de')).toBe('Panel für Änderungsanfragen')
     expect(pluginDisplayName(group, 'fr')).toBe('Change request panel')
     expect(pluginDisplayName({
       plugin: 'officeToPdf',
       package: '@deepseek-ai/dsh-office-to-pdf',
       titles: { en: 'office-to-pdf' },
       endpoints: ['officeToPdf/render'],
-    }, 'zh')).toBe('Office to pdf')
+    }, 'de')).toBe('Office to pdf')
     expect(pluginDisplayName({ plugin: 'forgePanel', endpoints: [] }, 'en')).toBe('Forge panel')
   })
 

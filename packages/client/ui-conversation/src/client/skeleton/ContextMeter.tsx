@@ -21,7 +21,7 @@ const CIRCUMFERENCE = 2 * Math.PI * RADIUS
 /**
  * Marker the localized occupancy sentence is split on, so the panel headline
  * keeps the reading in its own tone while each locale still owns the word
- * order (`45% of context used` / `上下文已用 45%`).
+ * order (`45% of context used`, or the label first where a language leads with it).
  */
 const READING_SLOT = '\u0000'
 

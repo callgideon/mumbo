@@ -3,64 +3,8 @@
 /** Namespace owned by the Session Inspector plugin. */
 export const NS = 'session-inspector'
 
-/** Simplified Chinese labels and dictionary keys. */
-export const zh = {
-  'tab.title': '会话数据诊断',
-  'tab.description': '在侧边栏分析当前会话原始日志和聊天分组数据',
-  'view.presentation': '展示形式',
-  'view.sessionLog': '原始数据',
-  'view.chatNode': '对话分组',
-  'picker.pick': '在对话面板中选取元素',
-  'picker.cancel': '取消选取 (Esc)',
-  'picker.instructions': '在左侧 Chat 中悬停预览，点击选取；Esc 取消。',
-  'picker.noMatch': '当前表格没有匹配记录，请选择其他元素或按 Esc 取消。',
-  'picker.noChat': '请先在主区域打开当前 Session 的 Chat。',
-  'table.id': '序号',
-  'table.type': '类型',
-  'filter.title': '筛选类型',
-  'filter.input': '类型关键词',
-  'filter.placeholder': '输入类型片段，如 delta',
-  'filter.help': '默认包含匹配（*关键词*）；Enter 确认，Esc 取消。',
-  'filter.candidates': '类型候选',
-  'filter.loading': '正在查找候选…',
-  'filter.failed': '无法获取类型候选。',
-  'filter.noCandidates': '没有匹配候选，仍可确认当前关键词。',
-  'filter.clear': '清空',
-  'filter.cancel': '取消',
-  'filter.apply': '确认筛选',
-  'filter.context': '匹配记录的父级上下文',
-  'table.location': 'T/S',
-  'table.time': '时间 (UTC)',
-  'table.data': '数据',
-  'table.older': '加载更早',
-  'table.loading': '加载中…',
-  'table.latest': '跟踪最新',
-  'table.empty': '暂无记录',
-  'table.raw': '原始数据',
-  'table.rawError': '无法序列化这条记录，可以选择其他记录继续查看。',
-  'table.resizeDetails': '调整原始数据面板高度',
-  'table.close': '关闭',
-  'table.expand': '展开子行',
-  'table.collapse': '收起子行',
-  'table.removed': '该记录已移除或结算，请选择当前记录。',
-  'object.node': 'Node',
-  'object.nodeData': 'Node Data',
-  'object.group': 'Group',
-  'object.groupData': 'Group Data',
-  'object.turn': 'Turn',
-  'object.turnData': 'Turn Data',
-  'object.step': 'Step',
-  'object.stepData': 'Step Data',
-  'object.accessor': '[Getter / Setter，未执行]',
-  'object.empty': '空',
-  'object.absent': '[空槽]',
-  'object.properties': '其他属性',
-  'object.more': '显示更多',
-  'object.navigation': '原始数据导航',
-} as const
-
 /** Dictionary keys accepted by this plugin's translator. */
-export type SessionInspectorKey = keyof typeof zh
+export type SessionInspectorKey = keyof typeof en
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -69,8 +13,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
-/** English labels, checked against the Chinese key set. */
-export const en: Record<SessionInspectorKey, string> = {
+/** English labels (the key-set source of truth). */
+export const en = {
   'tab.title': 'Session log',
   'tab.description': 'Analyze raw logs and grouped chat messages for the current session in the sidebar.',
   'view.presentation': 'Presentation',
@@ -123,7 +67,7 @@ export const en: Record<SessionInspectorKey, string> = {
   'object.properties': 'Other properties',
   'object.more': 'Show more',
   'object.navigation': 'Raw data navigation',
-}
+} satisfies Record<string, string>
 
 /** Japanese copy, checked against the English keys. */
 export const ja = {

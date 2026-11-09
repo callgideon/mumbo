@@ -1,22 +1,23 @@
-/** Plugin feature previews are one fixed-canvas English SVG, beside their detail document. */
+/** Plugin feature previews are one fixed-canvas English SVG beside their detail document. */
 import { globSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, extname, join } from 'node:path'
 import { JSDOM } from 'jsdom'
 import { expect, it, onTestFinished } from 'vitest'
 
 const root = `${import.meta.dirname}/..`
 const svgPaths = globSync('packages/*/*/docs/*.svg', { cwd: root }).sort()
-/** Size of one preview, as the standalone bundle and Host routes both serve the file. */
+/** Size limit for one preview, as the standalone bundle and Host routes both serve the file individually. */
 const MAX_PREVIEW_BYTES = 1024 * 1024
 
-it('keeps every preview a self-contained 640×300 English SVG', () => {
+it('keeps every preview a self-contained 640×300 SVG', () => {
   // Guard against a narrowed corpus: each preview moved into a bundle's docs directory stays checked.
   expect(svgPaths.length).toBeGreaterThan(0)
   const browser = new JSDOM('')
   onTestFinished(() => { browser.window.close() })
   const parser = new browser.window.DOMParser()
   for (const path of svgPaths) {
-    expect(path.endsWith('.zh.svg'), `${path}: previews are English only`).toBe(false)
+    expect(extname(path), path).toBe('.svg')
+    expect(basename(path, '.svg'), path).not.toMatch(/\.[a-z]{2}(?:-[A-Za-z]+)?$/u)
     const svg = readFileSync(join(root, path), 'utf8')
     expect(Buffer.byteLength(svg), path).toBeLessThanOrEqual(MAX_PREVIEW_BYTES)
     const document = parser.parseFromString(svg, 'image/svg+xml')

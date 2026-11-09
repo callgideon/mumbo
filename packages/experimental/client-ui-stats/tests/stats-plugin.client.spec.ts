@@ -19,7 +19,7 @@ import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import type { StoredEntry } from '@deepseek-ai/dsh-client-ui-slots'
-import { de, en, es, fr, ja, NS, pt, ru, zh } from '../src/client/locales.ts'
+import { de, en, es, fr, ja, NS, pt, ru } from '../src/client/locales.ts'
 import type {
   StatsCall, StatsContribution, StatsSnapshot, StatsStepMetrics, StatsStepState, StatsViewNode,
 } from '../src/client/stats-contract.ts'
@@ -182,7 +182,7 @@ async function mountPlugin(): Promise<PluginBench> {
     },
   }
   ctx.provide('sessions', { binding: (id: SessionId) => (id === SID ? sessionBinding : undefined) } as never)
-  ctx.provide('locale', { register: localeRegister, bind: () => makeTranslate(zh) } as never)
+  ctx.provide('locale', { register: localeRegister, bind: () => makeTranslate(en) } as never)
   ctx.provide('uiConversation', {
     binding,
     imageUrl,
@@ -389,7 +389,7 @@ function locatedUpdate(event: SessionEventLike, location: ConversationLocation):
 describe('browser plugin registration', () => {
   it('registers the performance tab, dictionaries, Definitions, and view target', async () => {
     const bench = await mountPlugin()
-    expect(bench.localeRegister).toHaveBeenCalledWith(NS, { zh, en, ja, de, es, fr, pt, ru })
+    expect(bench.localeRegister).toHaveBeenCalledWith(NS, { en, ja, de, es, fr, pt, ru })
     expect(bench.events.map(definition => definition.kind)).toEqual([
       'stats-step', 'stats-prompt', 'stats-turn-end', 'stats-code-mode', 'stats-compaction', 'stats-event',
     ])
@@ -400,7 +400,7 @@ describe('browser plugin registration', () => {
     expect(registered.component).toBe(StatsView)
     expect(registered.options).toMatchObject({ id: 'stats', order: 40 })
     expect(registered.locale).toBe(NS)
-    expect(resolveSlotLabel(registered.options.label)).toBe('统计')
+    expect(resolveSlotLabel(registered.options.label)).toBe('Statistics')
     await bench.fiber.dispose()
     expect(bench.entries()).toEqual([])
     // The dictionary registration rides the plugin fiber effect; Definitions and
@@ -534,7 +534,7 @@ describe('host entry', () => {
 
 describe('locale dictionaries', () => {
   it('ships the same key set in both languages', () => {
-    expect(Object.keys(en).sort()).toEqual(Object.keys(zh).sort())
+    expect(Object.keys(en).sort()).toEqual(Object.keys(en).sort())
     expect(Object.values(en).every(value => value !== '')).toBe(true)
     expect(en['view.stats']).toBe('Statistics')
     expect(en['summary']).toContain('{turns}')
@@ -960,20 +960,20 @@ describe('conversation Definitions', () => {
     })
     expect(prompt.match(runtime)).toEqual({ id: `${runtime.seq}`, role: 'start' })
     const user = event('user/message', {
-      role: 'user', id: 'u6', content: [{ type: 'text', text: '继续' }, { type: 'image', attachment: IMAGE }], source: { kind: 'user' },
+      role: 'user', id: 'u6', content: [{ type: 'text', text: 'Continue' }, { type: 'image', attachment: IMAGE }], source: { kind: 'user' },
     })
     expect(prompt.match(user)).toEqual({ id: `${user.seq}`, role: 'start' })
     const match = locatedStart(user, turnAt(9))
     const state = prompt.start(contextOf(prompt, undefined), match, reader)
     expect(state.turn).toBe(9)
     expect(state.mark).toBe('prompt')
-    expect(state.prompt).toBe('继续')
+    expect(state.prompt).toBe('Continue')
     expect(state.images).toEqual([IMAGE])
     expect(state.trigger).toBe('user')
     const node = prompt.buildViewNode!({
       ...contextOf(prompt, state, [match], match),
     }) as StatsViewNode
-    expect(node.data).toEqual({ kind: 'prompt', turn: 9, prompt: '继续', images: [IMAGE], source: 'user', sender: null })
+    expect(node.data).toEqual({ kind: 'prompt', turn: 9, prompt: 'Continue', images: [IMAGE], source: 'user', sender: null })
     const context: ConversationNodeContext<StatsStepState> & { readonly state: StatsStepState } = {
       ...contextOf(prompt, state, [match], match),
       state,

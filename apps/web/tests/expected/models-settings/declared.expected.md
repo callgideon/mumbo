@@ -1,22 +1,22 @@
-- dialog "设置":
-  - text: 设置
+- dialog "Settings":
+  - text: Settings
   - navigation:
-    - button "通用设置"
-    - button "模型"
-    - button "内置插件"
-    - button "Agent 预设"
-  - button "打开配置文件"
-  - button "关闭"
-  - heading "模型" [level=2]
-  - paragraph: 填入各提供商的 API 密钥即可使用其模型。
+    - button "General"
+    - button "Models"
+    - button "Built-in plugins"
+    - button "Agent presets"
+  - button "Open configuration file"
+  - button "Close"
+  - heading "Models" [level=2]
+  - paragraph: Enter your API keys to use models from the following providers.
   - list:
     - listitem:
       - text: minimax-cn
-      - img "API 密钥已配置"
-      - button "编辑 minimax-cn": 编辑
-      - button "删除 minimax-cn": 删除
+      - img "API key configured"
+      - button "Edit minimax-cn": Edit
+      - button "Delete minimax-cn": Delete
     - listitem:
-      - text: Acme Gateway 自定义
-      - button "编辑 Acme Gateway (acme-gateway)": 编辑
-      - button "删除 Acme Gateway (acme-gateway)": 删除
-  - button "添加模型提供商"
+      - text: Acme Gateway Custom
+      - button "Edit Acme Gateway (acme-gateway)": Edit
+      - button "Delete Acme Gateway (acme-gateway)": Delete
+  - button "Add model provider"

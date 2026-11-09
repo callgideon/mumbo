@@ -1,0 +1,44 @@
+[
+  {
+    "label": "Über DeepSeek Harness",
+    "role": "about"
+  },
+  {
+    "type": "separator"
+  },
+  {
+    "label": "Nach Updates suchen…"
+  },
+  {
+    "label": "dsh-Befehl verwalten…"
+  },
+  {
+    "type": "separator"
+  },
+  {
+    "role": "toggleDevTools",
+    "label": "Entwicklertools"
+  },
+  {
+    "type": "separator"
+  },
+  {
+    "role": "hide",
+    "label": "DeepSeek Harness ausblenden"
+  },
+  {
+    "role": "hideOthers",
+    "label": "Andere ausblenden"
+  },
+  {
+    "role": "unhide",
+    "label": "Alle einblenden"
+  },
+  {
+    "type": "separator"
+  },
+  {
+    "role": "quit",
+    "label": "DeepSeek Harness beenden"
+  }
+]

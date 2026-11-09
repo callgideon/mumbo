@@ -1,5 +1,5 @@
-- group "模型与推理等级":
-  - menu "模型":
+- group "Model and reasoning effort":
+  - menu "Model":
     - group "DeepSeek":
       - text: DeepSeek
       - menuitemradio "Messages Flash" [checked]

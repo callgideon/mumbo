@@ -785,12 +785,12 @@ it.each([true, false])('uses configured grants without requesting a human answer
 it('routes permission actions through the macOS provider with the Client language and configured interval', async () => {
   const f = await setup()
   native.request.mockResolvedValueOnce({ accessibility: false, screenRecording: false, helper: { pid: 9 }, parent: { pid: 8 } })
-  await f.ctx.cuaAccess.requestPermission('accessibility', 'zh')
+  await f.ctx.cuaAccess.requestPermission('accessibility', 'de')
   expect(native.request).toHaveBeenLastCalledWith('requestPermission', {
     permission: 'accessibility', pollIntervalMs: 1000,
-    instruction: '将 {application} 拖入上方列表以允许辅助功能', backLabel: '返回', finderLabel: '在 Finder 中显示',
-    unavailableMessage: '找不到此应用。请重新启用 Computer Use 后重试',
-    settingsMessage: '请手动打开系统设置 > 隐私与安全性 > 辅助功能',
+    instruction: 'Ziehe {application} in die Liste oben, um Barrierefreiheit zu erlauben', backLabel: 'Zurück', finderLabel: 'Im Finder anzeigen',
+    unavailableMessage: 'Anwendung nicht verfügbar. Aktiviere Computer Use erneut.',
+    settingsMessage: 'Öffne Systemeinstellungen > Datenschutz & Sicherheit > Barrierefreiheit.',
   }, expect.any(AbortSignal))
   native.request.mockResolvedValueOnce({ opened: true })
   await f.ctx.cuaAccess.openSettings('screenRecording', 'en')

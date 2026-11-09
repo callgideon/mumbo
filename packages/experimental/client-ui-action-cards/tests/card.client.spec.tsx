@@ -7,7 +7,7 @@ import { SessionId, SessionSeq } from '@deepseek-ai/dsh-session/types'
 import type { ActionCardDecision, ActionCardResult, ActionCardView } from '@deepseek-ai/dsh-action-cards/types'
 import { ActionCard, ActionCardTail, FoldedText } from '../src/client/Card.tsx'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
-import { en, zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 import type { ActionCardBodyProps, RegisteredBody } from '../src/client/registry.ts'
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
@@ -16,12 +16,12 @@ type CardProps = ComponentProps<typeof ActionCard>
 const callId = ToolCallId('card-1')
 const proposal = { callId, turn: 3, action: 'test_action', title: 'Counter', brief: 'Keep my task count visible.', details: { value: 'a' } }
 
-function props(bodies: ReadonlyMap<string, RegisteredBody> = new Map(), decision?: ActionCardDecision, chinese = false): CardProps {
+function props(bodies: ReadonlyMap<string, RegisteredBody> = new Map(), decision?: ActionCardDecision): CardProps {
   return { proposal, decision, sessionId: SessionId('session-1'),
     act: vi.fn(async (): Promise<ActionCardResult | undefined> => ({ status: 'settled', decision: { callId, action: 'test_action', phase: 'dismissed' } })),
     bind: vi.fn(() => (key: string) => `body:${key}`),
     useBodies: selector => selector(bodies),
-    t: makeTranslate(chinese ? zh : en) }
+    t: makeTranslate(en) }
 }
 
 it('places the card admitted in its turn once the turn has ended with an answer, and leaves other turns empty', () => {
@@ -78,24 +78,24 @@ it('renders a registered body with the frame summary, the fold, its own translat
 })
 
 it('offers only Not now for a card whose kind registered no body, and reports refusals and lost replies', async () => {
-  const value = props(new Map(), undefined, true)
+  const value = props(new Map(), undefined)
   const pending = Promise.withResolvers<ActionCardResult | undefined>()
   value.act = vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValueOnce(undefined)
     .mockRejectedValueOnce(new Error('disconnected')).mockResolvedValueOnce({ status: 'unconfirmed', reason: 'closing' })
     .mockResolvedValueOnce({ status: 'accepted' })
   render(<ActionCard {...value} />)
   expect(screen.getByRole('region', { name: 'Counter' }).textContent).toContain('Keep my task count visible.')
-  const dismiss = screen.getByRole('button', { name: zh.dismiss })
+  const dismiss = screen.getByRole('button', { name: en.dismiss })
   fireEvent.click(dismiss)
   expect(dismiss.hasAttribute('disabled')).toBe(true)
   expect(value.act).toHaveBeenCalledWith(callId, 'dismiss', undefined)
   await act(async () => { pending.resolve({ status: 'refused', reason: 'unknown' }) })
-  expect(screen.getByRole('alert').textContent).toBe(zh.unavailable)
-  for (const text of [zh.transport, zh.transport, zh.unavailable]) {
-    fireEvent.click(screen.getByRole('button', { name: zh.dismiss }))
+  expect(screen.getByRole('alert').textContent).toBe(en.unavailable)
+  for (const text of [en.transport, en.transport, en.unavailable]) {
+    fireEvent.click(screen.getByRole('button', { name: en.dismiss }))
     await vi.waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(text) })
   }
-  fireEvent.click(screen.getByRole('button', { name: zh.dismiss }))
+  fireEvent.click(screen.getByRole('button', { name: en.dismiss }))
   await vi.waitFor(() => { expect(screen.queryByRole('alert')).toBeNull() })
 })
 
@@ -119,23 +119,23 @@ it.each([['dismissed', en.dismissed], ['replaced', en.replaced], ['finished', un
 it('only offers expansion for omitted text and preserves the full brief without layout measurement', () => {
   vi.stubGlobal('ResizeObserver', undefined)
   const short = 'Keep my task count visible.\n\nPersist across conversations.\nVerify removal.'
-  const view = render(<FoldedText text={short} expandLabel={zh.expandBrief} collapseLabel={zh.collapseBrief} />)
-  expect(screen.queryByRole('button', { name: zh.expandBrief })).toBeNull()
+  const view = render(<FoldedText text={short} expandLabel={en.expandBrief} collapseLabel={en.collapseBrief} />)
+  expect(screen.queryByRole('button', { name: en.expandBrief })).toBeNull()
   expect(screen.getByText(/Keep my task count visible/).textContent).toBe(short)
   // 129 wide graphemes (258 units) plus one narrow emoji fill the 260-unit budget; the next grapheme folds.
   const prefix = '计'.repeat(129) + '👩🏽‍💻'
   const long = prefix + '\n\n保留完整方案，点击创建后交给 Creator。'
-  view.rerender(<FoldedText text={long} expandLabel={zh.expandBrief} collapseLabel={zh.collapseBrief} />)
-  const expand = screen.getByRole('button', { name: zh.expandBrief })
+  view.rerender(<FoldedText text={long} expandLabel={en.expandBrief} collapseLabel={en.collapseBrief} />)
+  const expand = screen.getByRole('button', { name: en.expandBrief })
   const paragraph = document.getElementById(expand.getAttribute('aria-controls')!)!
   expect(paragraph.textContent).toBe(prefix + '…')
   expect(expand.getAttribute('aria-expanded')).toBe('false')
   fireEvent.click(expand)
-  expect(screen.getByRole('button', { name: zh.collapseBrief }).getAttribute('aria-expanded')).toBe('true')
+  expect(screen.getByRole('button', { name: en.collapseBrief }).getAttribute('aria-expanded')).toBe('true')
   expect(paragraph.textContent).toBe(long)
-  fireEvent.click(screen.getByRole('button', { name: zh.collapseBrief }))
+  fireEvent.click(screen.getByRole('button', { name: en.collapseBrief }))
   expect(paragraph.textContent).toBe(prefix + '…')
-  view.rerender(<FoldedText text={prefix} expandLabel={zh.expandBrief} collapseLabel={zh.collapseBrief} />)
-  expect(screen.queryByRole('button', { name: zh.expandBrief })).toBeNull()
+  view.rerender(<FoldedText text={prefix} expandLabel={en.expandBrief} collapseLabel={en.collapseBrief} />)
+  expect(screen.queryByRole('button', { name: en.expandBrief })).toBeNull()
   expect(paragraph.textContent).toBe(prefix)
 })

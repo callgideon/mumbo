@@ -15,7 +15,7 @@ import { AttachmentId, type ImageAttachmentRef } from '@deepseek-ai/dsh-attachme
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { bindSnapshotSelector, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { StatsView } from '../src/client/StatsView.tsx'
-import { zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 import css from '../src/client/stats.module.css'
 import {
   barShare, formatChars, formatClock, formatDateTime, formatDateTimeMs, formatDateTimeShort, formatMs, formatPercent,
@@ -28,10 +28,10 @@ import type {
   LoadOlderResult,
 } from '../src/client/stats-contract.ts'
 
-const t = makeTranslate(zh)
+const t = makeTranslate(en)
 
 /** Translate one dictionary key with its interpolation params. */
-function say(key: keyof typeof zh, params?: Record<string, unknown>): string {
+function say(key: keyof typeof en, params?: Record<string, unknown>): string {
   return t(key, params)
 }
 
@@ -682,7 +682,7 @@ describe('turn rows', () => {
           prompt: 'Background subagent 10a0dbaa-08dd-4e3f-838d-d6f84b36babe finished and will do no further work.',
           promptSource: 'subagent-settled',
         }),
-        turn({ turn: 3, prompt: 'Team message from stack-rebase: P2 已合并', promptSource: 'team-message', promptSender: 'stack-rebase' }),
+        turn({ turn: 3, prompt: 'Team message from stack-rebase: P2 Merged', promptSource: 'team-message', promptSender: 'stack-rebase' }),
       ],
       stepCount: 3,
     })
@@ -696,7 +696,7 @@ describe('turn rows', () => {
     expect(second.textContent).toContain('and will do no further work.')
     const third = cellsOf(rowWithPrefix(say('turn.label', { turn: 3 })))[1] as HTMLTableCellElement
     expect(third.textContent).toContain(`${say('trigger.team-message')} · stack-rebase`)
-    expect(third.textContent).toContain('P2 已合并')
+    expect(third.textContent).toContain('P2 Merged')
     expect(third.textContent).not.toContain('Team message from')
   })
 
@@ -1008,7 +1008,7 @@ describe('turn rows', () => {
     expect(screen.getByText(say('event.system.detail', {
       action: say('event.system.clear'), chars: formatChars(0),
     }))).toBeTruthy()
-    expect(screen.getAllByText(/新增 read|added read/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/read added|added read/).length).toBeGreaterThan(0)
     expect(screen.getByText(say('event.prune.detail', { tokens: formatTokens(4_000) }))).toBeTruthy()
     expect(screen.getAllByText(say('event.request-context'))).toHaveLength(3)
     expect(screen.getByText(say('event.context.detail', { provider: 'p', model: 'm', mode: 'in-history' }))).toBeTruthy()
@@ -1322,7 +1322,7 @@ describe('step rows', () => {
     const firstDid = cellsOf(stepRow(1))[2] as HTMLTableCellElement
     expect(within(firstDid).getByText('×2')).toBeTruthy()
     expect(within(firstDid).getByText(say('did.lines', { lines: '3' }))).toBeTruthy()
-    expect(within(firstDid).getByText('+2 行')).toBeTruthy()
+    expect(within(firstDid).getByText('+2 lines')).toBeTruthy()
     expect(within(firstDid).getByText('/a')).toBeTruthy()
     expect(within(firstDid).getByText(say('did.chars', { chars: formatChars(300) }))).toBeTruthy()
     expect(within(firstDid).getAllByText('·')).toHaveLength(2)
@@ -1331,8 +1331,8 @@ describe('step rows', () => {
     const mixed = cellsOf(stepRow(2))[2] as HTMLTableCellElement
     expect(within(mixed).getByText('+1')).toBeTruthy()
     expect(within(mixed).getByText('−2')).toBeTruthy()
-    expect(within(cellsOf(stepRow(3))[2] as HTMLTableCellElement).getByText('+3 行')).toBeTruthy()
-    expect(within(cellsOf(stepRow(4))[2] as HTMLTableCellElement).getByText('−4 行')).toBeTruthy()
+    expect(within(cellsOf(stepRow(3))[2] as HTMLTableCellElement).getByText('+3 lines')).toBeTruthy()
+    expect(within(cellsOf(stepRow(4))[2] as HTMLTableCellElement).getByText('−4 lines')).toBeTruthy()
 
     const zero = cellsOf(stepRow(5))[2] as HTMLTableCellElement
     expect(within(zero).getByText('mystery')).toBeTruthy()
@@ -1826,7 +1826,7 @@ describe('step filters', () => {
     expect(screen.getByText(say('steps.total', { total: 25 }))).toBeTruthy()
     expect(stepRows()).toHaveLength(24)
     expect(stepRow(2)).toBeTruthy()
-    expect(bodyRows().some(row => (row.textContent ?? '').startsWith(say('step.label', { step: 1 })))).toBe(false)
+    expect(bodyRows().some(row => cellsOf(row)[0]?.textContent === say('step.label', { step: 1 }))).toBe(false)
 
     const readChip = (): HTMLElement => screen.getByRole('button', { name: 'read ×2' })
     expect(readChip().getAttribute('aria-pressed')).toBe('false')
