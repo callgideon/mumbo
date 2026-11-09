@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-10-07-memory-limited-benchmarks.zh.md)
-
 ## Problem
 
 Benchmarks run on hosted runners with 16 GB of memory and on developer machines with more. Neither shows how DSH behaves on a machine with 4 GB or 8 GB available, where the Host, Chromium, and page cache share one memory budget.

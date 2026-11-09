@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-client-ui-brand-official
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 This package supplies a click-triggered pixel whale on the blank home and gives an `official` client build the DeepSeek Harness sidebar artwork. The shipped Web and Desktop compositions load it by default. Other build profiles retain their existing branding. The hero mark stays on its animated fish fallback. The background owns only temporary canvas resources and adds no model requests.

@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-10-12-local-gate-speedups.zh.md)
-
 ## Problem
 
 On the baseline, master at the merge of #6013, local runs of the Git hooks, `pnpm run test`, `test:docs`, and `doc-sync` spend most of their wall time on work that their results do not depend on:

@@ -5,8 +5,6 @@ kind: persistence-change
 
 # 2026-10-27-retry-control-input
 
-English | [中文](2026-10-27-retry-control-input.zh.md)
-
 ## Summary
 
 Add the retry message source for empty Session API continuation prompts; ordinary user/message records retain the input identity and caller metadata.

@@ -5,8 +5,6 @@ kind: persistence-change
 
 # 2026-11-02-team-task-owner-names
 
-English | [中文](2026-11-02-team-task-owner-names.zh.md)
-
 ## Summary
 
 Adds optional ownerName to durable Team task snapshots, captured with ownerId during claim or reassignment and cleared with it when ownership ends.

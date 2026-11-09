@@ -18,8 +18,6 @@ The generator fills the machine declaration, schema companion, and consistency r
 ````markdown
 # Persistence change: <specific persisted change>
 
-English | [中文](YYYY-MM-DD-slug.zh.md)
-
 ## Summary
 
 Describe the mechanically detected change and its version decision.

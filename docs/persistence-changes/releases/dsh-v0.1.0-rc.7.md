@@ -5,8 +5,6 @@ kind: persistence-release
 
 # Persistence release: dsh-v0.1.0-rc.7
 
-English | [中文](dsh-v0.1.0-rc.7.zh.md)
-
 ## Summary
 
 assistant/chunk replayState changes from unknown to an object with required response and optional blocks. The writer format remains 0.
@@ -70,7 +68,7 @@ Detected 1 changed root and 1 structural difference. The review requirement belo
 <a id="verification"></a>
 ## Verification
 
-Extraction passed canonical-graph, root-digest, and reachable-type-digest validation, permitting the original optional `surfaceOp` only for historical surface events. The in-tree check reconstructs each tag from its predecessor and verifies before/after values, snapshot coverage, and bilingual machine declarations.
+Extraction passed canonical-graph, root-digest, and reachable-type-digest validation, permitting the original optional `surfaceOp` only for historical surface events. The in-tree check reconstructs each tag from its predecessor and verifies before/after values, snapshot coverage, and machine declarations.
 
 ```sh
 pnpm run verify-persistence-releases

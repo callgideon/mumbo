@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-client-ui-permission-presets
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 Choose permission presets for the current Web session or future sessions. General settings changes only the future default; the composer and `/permission` pickers switch the current session. Default Web offers Read Only, Workspace Write, and Full access. Explicitly loading the experimental Auto integration adds Auto review with an `EXP` badge to current-session pickers. Visible Full access and Auto selections require their own risk acknowledgement; a complete `/permission <preset>` command executes directly. The host confirms each change through the Session projection.
@@ -31,7 +29,7 @@ In narrow browser settings, the default-permission label uses a smaller gutter b
 
 ### The picker
 
-A pick submits the `/permission <preset>` command line. The argument-bearing form (`/permission <preset>` typed directly) still switches directly; the decoration replaces only the bare invocation. The built-in labels are `Read Only`, `Workspace Write`, `Full access`, and `Auto review` in English and `仅可查看`, `工作区内修改`, `完全权限`, and `自动审查` in Chinese. Explicit host labels remain unchanged, unknown kebab-case names render in title case, and `auto` carries an `EXP` badge in menu options plus an experimental-risk confirmation. The selected composer control shows the mode without the badge. `custom` is display state, never a target.
+A pick submits the `/permission <preset>` command line. The argument-bearing form (`/permission <preset>` typed directly) still switches directly; the decoration replaces only the bare invocation. The built-in labels are `Read Only`, `Workspace Write`, `Full access`, and `Auto review`. Explicit host labels remain unchanged, unknown kebab-case names render in title case, and `auto` carries an `EXP` badge in menu options plus an experimental-risk confirmation. The selected composer control shows the mode without the badge. `custom` is display state, never a target.
 
 When the live catalog withdraws a preset, the composer closes its pending confirmation and shows the Session's current value instead of an unavailable optimistic pick. Every catalog invalidation — the payload-free notification or a connection-generation change — closes an open slash picker or its confirmation without consuming the draft, while publishing the result of a read the picker waits for leaves it open with its failure and retry state; reopening reads the current catalog. A submitted command remains busy until its response settles.
 

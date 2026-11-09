@@ -6,8 +6,8 @@ Use this workflow in the main conversation to plan an optional new page or small
 
 Propose a page in these cases:
 
-- The user asks for a page, tab, panel, tool or interface in this app, or says they want something to keep, revisit or update later (“以后每次”, “能不能一直”, “希望能有”). One-off use still qualifies when the interface is explicitly requested.
-- Your answer is a table, list or chart, and the user has said the data will keep changing or that they will interact with it (“每周更新”, “我来改状态”, “要勾选”). The continuation must come from the user's own words; a table alone, or data that merely looks dynamic, is not enough. Deliver the requested answer first, then offer the page.
+- The user asks for a page, tab, panel, tool or interface in this app, or says they want something to keep, revisit or update later (“from now on every time”, “can it always”, “I wish there were”). One-off use still qualifies when the interface is explicitly requested.
+- Your answer is a table, list or chart, and the user has said the data will keep changing or that they will interact with it (“weekly update”, “I will change the status”, “needs checkboxes”). The continuation must come from the user's own words; a table alone, or data that merely looks dynamic, is not enough. Deliver the requested answer first, then offer the page.
 - The user wants to keep watching live data of this app itself (a Session's usage, a running task's output, files changing in the workspace). A text answer cannot stay current, so a page qualifies even without the words above; name the data source in the brief and leave how it is read to the Creator.
 
 Do not propose a page in these cases:
@@ -50,15 +50,15 @@ Supplying data in this conversation does not make a record Session-bound.
 To propose, call `propose_action` once, in the same turn as loading this skill, with `action: "create_personalized_page"`, `title`, `brief` and `details` holding `slot` and, when there is supplied content, `initialContent`. The call is the submission: the card appears below your answer; a refused call creates no card, and its error says why. Then write your final answer. One proposal per turn, and one unstarted card per conversation: if a card is still waiting, do not propose another; a new proposal replaces it only when the user changed the plan. Plan-only and read-only requests still get a card; do not ask for approval instead of proposing it. Only clicking Create starts the background Creator; do not wait, poll, claim installation or ask for a report-back. Answer any direct question; the call's result says how to end the answer. Do not repeat the plan, list extra features, narrate the call or mention schema names.
 
 ```json
-{"action":"create_personalized_page","title":"本次验收清单","brief":"在当前会话右侧展示验收清单，可勾选和取消，状态随会话保存。","details":{"slot":"sidebar-right","initialContent":"1. 导出成功\n2. 断网提示清楚"}}
+{"action":"create_personalized_page","title":"Acceptance checklist for this session","brief":"Show an acceptance checklist beside the current session, with items that can be checked and unchecked, and keep the state with the session.","details":{"slot":"sidebar-right","initialContent":"1. Export succeeds\n2. Offline notice is clear"}}
 ```
 
 ## Examples
 
-- “想有个地方放书签，以后自己加标题和网址；旧的不用导入。” → `brief`: “提供一个可反复打开的书签页，手动新增标题和网址并保存到本机，从空白开始。” No `initialContent`. `sidebar-left`.
-- “当前会话旁放验收清单，能勾选和取消，状态跟着会话。条目：导出成功；断网提示清楚。” → `brief`: “在当前会话右侧展示验收清单，可勾选和取消，状态随会话保存。” `initialContent`: “1. 导出成功\n2. 断网提示清楚”. `sidebar-right`.
-- “这三周 bug 数 12、9、15，说说趋势。以后每周我把新数字贴给你，想自己更新着看。” → answer the trend first, then `brief`: “按周手动录入 bug 数并展示各周变化，保存到本机。” `initialContent`: “第 1 周 12，第 2 周 9，第 3 周 15”. `sidebar-left`.
-- “我想用语音说话代替打字。” → the catalog lists 语音输入; explain it and where to enable it; no card.
-- “把我之前做的读书页评分改成五星。” → explain the change to that page; no card and no copy.
-- “帮我把这句话翻成英文：我想要一个所有会话都能打开的读书页。” → translate only; no card.
-- “把三个方案排成表格比较一下，看完就行。” → the table only; no card.
+- “I want a place for bookmarks; I will add titles and URLs myself later; no need to import the old ones.” → `brief`: “Provide a bookmarks page that can be reopened repeatedly, where titles and URLs are added manually and saved on this machine, starting empty.” No `initialContent`. `sidebar-left`.
+- “Put an acceptance checklist next to the current session, checkable and uncheckable, with state following the session. Items: export succeeds; offline notice is clear.” → `brief`: “Show an acceptance checklist beside the current session, with items that can be checked and unchecked, and keep the state with the session.” `initialContent`: “1. Export succeeds\n2. Offline notice is clear”. `sidebar-right`.
+- “The bug counts for the last three weeks are 12, 9, 15; tell me the trend. From now on I will paste the new number to you each week and want to keep updating it myself.” → answer the trend first, then `brief`: “Enter the bug count manually each week and show the change per week, saved on this machine.” `initialContent`: “Week 1: 12, week 2: 9, week 3: 15”. `sidebar-left`.
+- “I want to speak instead of typing.” → the catalog lists voice input; explain it and where to enable it; no card.
+- “Change the rating on the reading page I made earlier to five stars.” → explain the change to that page; no card and no copy.
+- “Translate this sentence into English: I want a reading page that every session can open.” → translate only; no card.
+- “Lay out the three options in a table to compare; I only need to read it.” → the table only; no card.

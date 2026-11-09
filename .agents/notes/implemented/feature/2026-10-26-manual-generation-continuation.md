@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-10-26-manual-generation-continuation.zh.md)
-
 ## Problem
 
 Users need another request after a model failure without inserting an artificial instruction. Browser paging can omit the failed turn's start, and streaming must not repeatedly copy history.

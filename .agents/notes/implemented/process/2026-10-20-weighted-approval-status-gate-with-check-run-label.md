@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-10-20-weighted-approval-status-gate-with-check-run-label.zh.md)
-
 ## Problem
 
 The `weighted approval` commit status is the record this repository's branch rules require, and below the approval threshold it stays `pending`. A commit status has no action-required state, so readers cannot tell an approval wait from running work.

@@ -5,8 +5,6 @@ kind: persistence-change
 
 # 2026-11-09-browser-consent-write
 
-English | [中文](2026-11-09-browser-consent-write.zh.md)
-
 ## Summary
 
 Adds browser-consent/write: the log-only audit record @mumbo/browser-consent appends for each browser write it allowed, with the site, upstream tool, grant, and outcome.

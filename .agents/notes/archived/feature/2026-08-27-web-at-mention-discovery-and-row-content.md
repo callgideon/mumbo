@@ -3,8 +3,6 @@
 Status: implemented
 Archived: 2026-09-04
 
-English | [中文](2026-08-27-web-at-mention-discovery-and-row-content.zh.md)
-
 ## Problem
 
 Typing after `@` in the Web composer was slow, and the menu it filled was padded with text that distinguished nothing. Three defects sat behind that, all reachable from one keystroke.
@@ -29,7 +27,7 @@ Folding a title from a log costs the whole log, and this call sits under every k
 
 **A drill publishes a breadcrumb; typing a path does not.** `InputTriggerSource` gains an optional synchronous `header(session, req)` hook returning crumbs, re-polled on every hit with the live query and a pipeline-owned `drilled` flag. The flag is set only when the drill's edit actually reached the draft — a refused edit leaves it clear, so a header never names a directory nobody descended into — and it survives further typing until the menu closes. `CandidateRequest` carries the same flag. Crumbs ride their own snapshot store beside the menu store, so the frozen menu reducer stays unaware of them, and a crumb pick routes through `onPick` with `action: 'drill'` — returning to a step and descending into one are one outcome. `MenuView` renders the header above its scrolling viewport and moves `role="listbox"` onto that viewport, because a breadcrumb is not an option and a listbox may not carry one.
 
-The zh composer placeholder says `文件或对话`, matching the `对话` section title the same menu already shows.
+The Chinese composer placeholder names files and sessions, matching the sessions section title the same menu already shows.
 
 ## Alternatives considered
 

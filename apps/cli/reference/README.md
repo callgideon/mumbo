@@ -1,7 +1,5 @@
 # `dsh` CLI behavior reference
 
-English | [中文](README.zh.md)
-
 This reference defines the profile, plugin-management, and config-dump command modes. Argv is parsed once through [`src/args.ts`](../src/args.ts), and [`src/bin.ts`](../src/bin.ts) dynamically imports only the selected runner.
 
 The [generated command help](../../../docs/cli-help.md) contains complete launcher, plugin-management, and shipped-profile help. Run `pnpm run gen-cli-help` to refresh it; `pnpm run verify-cli-help` checks it against the current CLI.
@@ -132,7 +130,7 @@ The base-backed modes treat the invoking directory as the default workspace root
 
 New sessions in base-backed profiles default to the `workspace-write` permission preset. Bash and filesystem mutations are restricted to the session workspace and platform temporary roots; reads and network access are not confined, while process visibility depends on the selected sandbox backend — bwrap runs commands in a private PID namespace that hides host processes, and Landlock and Seatbelt leave host process visibility unchanged. `DSH_PERMISSION_MODE` changes the process fallback. Stored General-settings permissions affect later Web sessions, not an already-open one. The standalone `sdk-minimal` tree instead pins `danger-full-access` and mounts no approval or permission-settings service.
 
-Web, headless, and SDK inherit native tool execution from the base bundle; use a [PTC overlay](../config/examples/ptc.yml) to select PTC. The shipped `minimal` agent preset keeps that deployment presentation, fixes the complete system prompt to `You are a helpful software engineer assistant.`, and provides the platform-selected persistent shell, `read_image`, and `working_directory`. It supports automatic context compaction and the human `/compact` command. Select 极简模式 when creating a Web session; the shared browser, workspace, persistence, sandbox, and permission host remains in place.
+Web, headless, and SDK inherit native tool execution from the base bundle; use a [PTC overlay](../config/examples/ptc.yml) to select PTC. The shipped `minimal` agent preset keeps that deployment presentation, fixes the complete system prompt to `You are a helpful software engineer assistant.`, and provides the platform-selected persistent shell, `read_image`, and `working_directory`. It supports automatic context compaction and the human `/compact` command. Select the minimal mode when creating a Web session; the shared browser, workspace, persistence, sandbox, and permission host remains in place.
 
 ## Shared deployment behavior
 

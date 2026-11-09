@@ -3,8 +3,6 @@
 Status: implemented
 Archived: 2026-09-30
 
-English | [中文](2026-09-02-project-local-issue-planning-fields.zh.md)
-
 ## Problem
 
 The Issue lifecycle workflow needs structured planning metadata, but organization Issue fields require a separate GitHub App permission from organization Projects. A workflow token with Project write access can read and update Project custom fields while GitHub rejects Issue-field reads, so using both storage systems makes one policy depend on two independently administered permission sets.
@@ -13,7 +11,7 @@ Priority, impact, cost, and dates are used to plan work in `DSH Issue Management
 
 ## Decision
 
-The `DSH Issue Management` Project owns `Priority`, `Severity`, `Cost`, `Start Date`, and `Target Date` as Project custom fields. `Severity` uses the option meanings from the organization `影响面` field, and `Cost` uses the option meanings from `解决代价`.
+The `DSH Issue Management` Project owns `Priority`, `Severity`, `Cost`, `Start Date`, and `Target Date` as Project custom fields. `Severity` uses the option meanings from the organization impact-scope field, and `Cost` uses the option meanings from the resolution-cost field.
 
 Repository policy resolves `Priority` and `Start Date` from the configured Project. It rejects an Issue-backed field or the wrong data type, reads Priority from the Project item, and writes Start Date through `updateProjectV2ItemFieldValue`. Organization Issue fields are retained only as `Legacy ...` migration sources and are not read by repository workflows.
 

@@ -3,15 +3,13 @@
 Status: implemented
 Archived: 2026-09-04
 
-English | [中文](2026-08-25-rename-code-mode-to-ptc.zh.md)
-
 ## Problem
 
-The tool-registry presentation mode that exposes tools through a generated SDK and the `run_code` transport shipped under the name Code Mode, while the client preset that selects it already shipped as "PTC mode" (locale `presetPtcName: 'PTC mode'`, zh `PTC 模式`). One feature had two names: config values, plugin and event names, files, and documentation said `code`/`code-mode`, and the user-facing name said "PTC mode". A pre-release rename must update every reference together — no compatibility aliases.
+The tool-registry presentation mode that exposes tools through a generated SDK and the `run_code` transport shipped under the name Code Mode, while the client preset that selects it already shipped as "PTC mode" (locale `presetPtcName: 'PTC mode'`). One feature had two names: config values, plugin and event names, files, and documentation said `code`/`code-mode`, and the user-facing name said "PTC mode". A pre-release rename must update every reference together — no compatibility aliases.
 
 ## Decision
 
-The feature is renamed to PTC (programmatic tool calls). Code identifiers use `ptc` — the transport is not a sibling of plan-mode, so the identifier does not carry `-mode`. User-facing prose keeps "PTC mode" (EN) / "PTC 模式" (zh), matching the shipped preset name.
+The feature is renamed to PTC (programmatic tool calls). Code identifiers use `ptc` — the transport is not a sibling of plan-mode, so the identifier does not carry `-mode`. User-facing prose keeps "PTC mode", matching the shipped preset name.
 
 Renamed in this PR:
 
@@ -20,7 +18,7 @@ Renamed in this PR:
 - source and test files `code-mode.ts` → `ptc.ts` and friends; root demo `demo:code-mode` → `demo:ptc` (`scripts/demo-ptc.mjs`)
 - the dispatch waterfall `tools/code-dispatch-log` → `tools/ptc-dispatch-log` and types `CodeDispatch*` → `PtcDispatch*`
 - prompt rule `tools:code-only` → `tools:ptc-only`
-- prose "Code Mode" → "PTC mode" / "PTC 模式" in docs, READMEs, and the eight implemented Agent Notes whose topic names the feature (those files were renamed in place)
+- prose "Code Mode" → "PTC mode" in docs, READMEs, and the eight implemented Agent Notes whose topic names the feature (those files were renamed in place)
 
 The session-persistent vocabulary remains deferred: the durable event types `tool/code-dispatch` / `tool/code-dispatch-start`, the logged plugin name `tools-code-mode`, and the sub-call id segment `:code:`. Renaming those values is a structural Session-format change and requires its own adjacent edge after the identity v0-to-v1 foundation.
 
