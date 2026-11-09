@@ -48,8 +48,8 @@ describe('Assembled liveshare viewer page on a branch the Host could not limit',
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) =>
       window.setTimeout(() => { callback(0) }, 0))
     vi.stubGlobal('cancelAnimationFrame', (id: number) => { clearTimeout(id) })
-    Object.defineProperty(navigator, 'languages', { value: ['zh-CN'], configurable: true })
-    Object.defineProperty(navigator, 'language', { value: 'zh-CN', configurable: true })
+    Object.defineProperty(navigator, 'languages', { value: ['en-US'], configurable: true })
+    Object.defineProperty(navigator, 'language', { value: 'en-US', configurable: true })
     const owner = createFixtureFaces({ viewerSourceGrant: () => ({ sessionMode: 'fork-readonly' }),
       viewerFork: true, forkRefusal: 'fork-enforcement-failed' })
     owned.disposeOwner = () => { owner.dispose() }
@@ -89,7 +89,7 @@ describe('Assembled liveshare viewer page on a branch the Host could not limit',
     // The shared Client conversation surface no longer states branch refusals through a notice;
     // settle the local RPC round trip and read the view the refusal left behind.
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)) })
-    expect(document.body.textContent).not.toContain('failed to DoneBranch')
+    expect(document.body.textContent).not.toContain('Could not complete the branch')
     expect(screen.queryByText('Branch')).toBeNull()
     expect(document.querySelector('[contenteditable="true"]')).toBeNull()
     expect(document.body.textContent).toContain('Read only')

@@ -223,11 +223,11 @@ describe('all-messages LLM title provider', () => {
     ctx.llm.registerAdapter(['title-route'], adapter)
     await ctx.plugin(providerPlugin, LLM_CONFIG)
     const session = ctx.sessions.create(SessionId('absent-current-title'))
-    const message = appendHumanPrompt(session, 'times')
+    const message = appendHumanPrompt(session, '토')
 
     await ctx.sessionTitle.refresh(session)
 
-    expect(textOf(adapter.requests[0])).toBe(initialInput([{ seq: message.seq, text: 'times' }]))
+    expect(textOf(adapter.requests[0])).toBe(initialInput([{ seq: message.seq, text: '토' }]))
     expect(adapter.requests[0]?.system).toBe(SYSTEM_BASE)
   })
 

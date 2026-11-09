@@ -89,7 +89,7 @@ describe('Assembled liveshare viewer page on a refused branch request', () => {
     // The shared Client conversation surface no longer states branch refusals through a notice;
     // settle the local RPC round trip and read the view the refusal left behind.
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)) })
-    expect(document.body.textContent).not.toContain('failed to DoneBranch')
+    expect(document.body.textContent).not.toContain('Could not complete the branch')
     expect(screen.queryByText('Branch')).toBeNull()
     expect(document.querySelector('[contenteditable="true"]')).toBeNull()
     expect(document.body.textContent).toContain('Read only')

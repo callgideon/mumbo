@@ -2,7 +2,7 @@ import { externalTestParent } from '../../../subagent/subagent/tests/external-ac
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { Context } from '@deepseek-ai/cordis'
+import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import SessionStore from '@deepseek-ai/dsh-session'
@@ -12,23 +12,10 @@ import FileSystem from '@deepseek-ai/dsh-fs-local'
 import Subprocess from '@deepseek-ai/dsh-subprocess-local'
 import Sandbox from '@deepseek-ai/dsh-sandbox-local'
 import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
-import { SandboxUnavailableError, type SandboxMode } from '@deepseek-ai/dsh-sandbox'
+import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import NodePtcRuntime from '@deepseek-ai/dsh-ptc-runtime-node'
 import type { Config as NodeRuntimeConfig } from '@deepseek-ai/dsh-ptc-runtime-node'
 import { onTestFinished } from 'vitest'
-
-/** Probe the sandbox independently so workflow launch failures cannot skip confined-mode tests. */
-export async function probeSandbox(): Promise<boolean> {
-  const probe = new Context()
-  try {
-    await probe.plugin(Sandbox, {})
-    await probe.sandbox.confine([process.execPath, '--version'], { mode: 'read-only', workspaceRoot: process.cwd() })
-    return true
-  } catch (error: unknown) {
-    if (error instanceof SandboxUnavailableError) return false
-    throw error
-  } finally { await probe.fiber.dispose() }
-}
 
 /** Mount real Node execution services with a private working directory and awaited cleanup. */
 export async function mountPtcRuntime(ctx: Context, mode: SandboxMode = 'danger-full-access', executionMode: NodeRuntimeConfig['executionMode'] = 'per-call') {

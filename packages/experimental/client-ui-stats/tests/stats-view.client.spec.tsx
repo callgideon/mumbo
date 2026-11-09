@@ -1266,7 +1266,7 @@ describe('step rows', () => {
     const fourth = cellsOf(stepRow(4))
     expect(fourth[3]?.textContent).toBe(formatTokensShort(1_500))
     expect(fourth[3]?.getAttribute('title')).toBeNull()
-    expect(timeTitle(stepRow(4))).not.toContain('in Back')
+    expect(timeTitle(stepRow(4))).not.toContain(say('bar.gap', { value: '' }).trim())
 
     const fifth = cellsOf(stepRow(5))
     expect(fifth[3]?.textContent).toBe(formatTokensShort(900))

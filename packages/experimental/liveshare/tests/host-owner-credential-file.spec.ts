@@ -30,9 +30,9 @@ describe('stored owner credential file', () => {
     const file = workspace()
     const stored = {
       relay: 'https://relay.example',
-      credential: credential({ expiresAt: 1_800_000_000_000, displayName: 'Alice', subjectId: 'ou_owner' }),
+      credential: credential({ expiresAt: 1_800_000_000_000, displayName: 'Ελένη', subjectId: 'ou_owner' }),
       expiresAt: '2027-01-15T08:00:00.000Z',
-      displayName: 'Alice',
+      displayName: 'Ελένη',
       subjectId: 'ou_owner',
       avatarUrl: 'https://cdn.example/owner.png',
     }
@@ -98,12 +98,12 @@ describe('decoding a credential payload', () => {
   it('reads the identity facts a signed payload carries', () => {
     expect(decodeOwnerCredential(credential({
       expiresAt: 1_767_225_600_000,
-      displayName: 'Alice',
+      displayName: 'Ελένη',
       subjectId: 'ou_owner',
       avatarUrl: 'https://cdn.example/owner.png',
     }))).toEqual({
       expiresAt: '2026-01-01T00:00:00.000Z',
-      displayName: 'Alice',
+      displayName: 'Ελένη',
       subjectId: 'ou_owner',
       avatarUrl: 'https://cdn.example/owner.png',
     })

@@ -400,7 +400,7 @@ describe('experimental Inspector Client plugin', () => {
         rev: 'bundle-rev',
       }],
     })
-    const source = 'const clientBundleMarker = "hello"\n//# sourceMappingURL=??@deepseek-ai/dsh-experimental-inspector/client.js.map&rev=bundle-rev\n'
+    const source = 'const clientBundleMarker = "안녕"\n//# sourceMappingURL=??@deepseek-ai/dsh-experimental-inspector/client.js.map&rev=bundle-rev\n'
     const sourceMap = '{"version":3,"sources":["client/index.ts"]}'
     globalThis.fetch = vi.fn(async (input: string | URL | Request) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url

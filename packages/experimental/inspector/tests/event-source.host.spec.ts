@@ -11,7 +11,7 @@ describe('InspectorEventSourceParser', () => {
     expect(parser.push(encoder.encode(': ignored\rid:first\revent: update\rdata: one\r'))).toEqual([])
 
     const unicode = encoder.encode('\ndata: two 읠\r\n\r\n')
-    const split = unicode.indexOf(0xe4) + 1
+    const split = unicode.indexOf(0xec) + 1
     expect(parser.push(unicode.subarray(0, split))).toEqual([])
     expect(parser.push(unicode.subarray(split))).toEqual([{
       eventName: 'update',

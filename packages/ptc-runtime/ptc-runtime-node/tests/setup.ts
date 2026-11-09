@@ -6,22 +6,9 @@ import Subprocess from '@deepseek-ai/dsh-subprocess-local'
 import Sandbox from '@deepseek-ai/dsh-sandbox-local'
 import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
 import SessionProjections from '@deepseek-ai/dsh-session-projection'
-import { SandboxUnavailableError, type SandboxMode } from '@deepseek-ai/dsh-sandbox'
+import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import NodeRuntime from '../src/index.ts'
 import type { Config } from '../src/index.ts'
-
-/** Probe the sandbox independently so Node-runtime launch failures cannot skip enforcement tests. */
-export async function probeSandbox(): Promise<boolean> {
-  const probe = new Context()
-  try {
-    await probe.plugin(Sandbox, {})
-    await probe.sandbox.confine([process.execPath, '--version'], { mode: 'read-only', workspaceRoot: process.cwd() })
-    return true
-  } catch (error: unknown) {
-    if (error instanceof SandboxUnavailableError) return false
-    throw error
-  } finally { await probe.fiber.dispose() }
-}
 
 export async function mountRuntime(ctx: Context, config: Config = {}, policy: { mode?: SandboxMode; workspaceRoot?: string } = {}) {
   onTestFinished(async () => { await ctx.fiber.dispose() })

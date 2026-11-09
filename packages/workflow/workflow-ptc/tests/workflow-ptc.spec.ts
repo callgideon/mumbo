@@ -13,9 +13,7 @@ import PtcWorkflowEngine, { type Config } from '../src/index.ts'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 
-import { fakeParent, mountPtcRuntime, probeSandbox } from './setup.ts'
-
-const sandboxUsable = await probeSandbox()
+import { fakeParent, mountPtcRuntime } from './setup.ts'
 
 /** Bound observations of process startup and host callbacks on shared CI runners. */
 function waitFor(assertion: () => void, timeout = 60_000): Promise<void> {
@@ -887,7 +885,7 @@ describe('dsh-workflow-ptc', { timeout: 120_000 }, () => {
   })
 
   describe('process failure and pending child cleanup', () => {
-    it.skipIf(!sandboxUsable)('waits for a late provider publication to release its file after cancellation', async () => {
+    it('waits for a late provider publication to release its file after cancellation', async () => {
       const ctx = new Context()
       const { root } = await mountPtcRuntime(ctx, 'read-only')
       provideWorkingDirectoryFixture(ctx)
