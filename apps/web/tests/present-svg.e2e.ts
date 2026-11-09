@@ -209,7 +209,7 @@ describe('web e2e: requested SVG is explicitly delivered', () => {
     expect(tripwire.warnings, connectionDiagnostics.join('\n')).toEqual([])
   })
 
-  it.skipIf(MODE === 'record')('replays the delivered file and Chinese conversation', async () => {
+  it.skipIf(MODE === 'record')('replays the delivered file and the conversation', async () => {
     await assertFinalWorkspaceSnapshot(DIR, cwd)
     expect(await page.locator('[data-presented-file] [data-open-target]').count()).toBe(0)
     // Delivery owns the transcript; navigation and composer chrome have separate scenarios.
