@@ -12,6 +12,7 @@ const ID = 'acme/app#1'
 const SHA = 'a'.repeat(40)
 const NEW = 'b'.repeat(40)
 const OLD = 'c'.repeat(40)
+const MERGED = 'd'.repeat(40)
 const AGENT = 'mumbo-agent'
 const FOUNDER = 'founder@x.com'
 const NOW = Date.UTC(2026, 10, 9, 12)
@@ -62,7 +63,11 @@ function fakeGithub() {
     if (method === 'GET' && path === `/repos/${REPO}/installation`) return json({ id: 77 })
     if (method === 'POST' && path === '/app/installations/77/access_tokens') return json(gh.grantFor(JSON.parse(init.body)), 201)
     if (method === 'DELETE' && path === '/installation/token') return json(null, 204)
-    if (method === 'PUT' && m(/^\/repos\/acme\/app\/pulls\/(\d+)\/merge$/)) return json({ merged: gh.mergeStatus === 200 }, gh.mergeStatus)
+    if (method === 'PUT' && (n = m(/^\/repos\/acme\/app\/pulls\/(\d+)\/merge$/))) {
+      // GitHub's precondition: the merge names the PR's current head, or it answers 409.
+      if (JSON.parse(init.body).sha !== gh.pulls.find(p => p.number === Number(n)).head.sha) return json({ message: 'Head branch was modified' }, 409)
+      return json({ merged: gh.mergeStatus === 200, sha: MERGED }, gh.mergeStatus)
+    }
     return json({ message: `unrouted ${method} ${path}` }, 500)
   }
   return gh
@@ -259,18 +264,18 @@ test('grant merges at the SHA with a minted App token, never the agent token, re
   assert.equal(merge.auth, 'Bearer bot-token')
   assert.equal(revoke.auth, 'Bearer bot-token')
   assert.deepEqual(audits, [{
-    at: new Date(NOW + 60_000).toISOString(), email: FOUNDER, id: ID, sha: SHA, ruleVersion: 1, lowRisk: true, files: ['src/a.js'],
+    at: new Date(NOW + 60_000).toISOString(), email: FOUNDER, via: 'grant', id: ID, sha: SHA, mergeCommitSha: MERGED, ruleVersion: 1, lowRisk: true, files: ['src/a.js'],
     checks: { static: 'success', unit: 'success' }, review: { verdict: 'pass', url: gh.pass.html_url, excerpt: 'Review report.' }, firstSeen: NOW,
   }])
   assert.deepEqual(await svc.list(FOUNDER), [])
 })
 
-test('a 409 merge answers sha_moved and re-polls the PR at its new head; another failure is github_error; both revoke', async (t) => {
+test('a head that moved after showing: the merge names the shown SHA, GitHub refuses it, sha_moved re-polls at the new head; another failure is github_error; both revoke', async (t) => {
   const { gh, svc, audits } = await setup()
   await svc.poll()
   gh.pulls[0].head.sha = NEW
-  gh.mergeStatus = 409
   assert.deepEqual(await svc.grant(FOUNDER, ID, SHA), { id: ID, merged: false, sha: SHA, reason: 'sha_moved' })
+  assert.deepEqual(gh.calls.filter(c => c.method === 'PUT').map(c => c.body), [{ sha: SHA, merge_method: 'merge' }])
   assert.equal(gh.calls.filter(c => c.method === 'DELETE').length, 1)
   assert.equal((await only(svc)).sha, NEW)
   t.mock.method(console, 'error', () => {})
@@ -282,7 +287,7 @@ test('a 409 merge answers sha_moved and re-polls the PR at its new head; another
 })
 
 test('grantLowRisk merges only the shown pairs still low-risk at that SHA, and reports each skipped pair', async () => {
-  const { gh, svc } = await setup()
+  const { gh, svc, audits } = await setup()
   gh.pulls.push(pull(2), pull(3), pull(4))
   gh.files[2] = [file('deploy/main.tf')]
   for (const n of [3, 4]) gh.files[n] = gh.files[1]
@@ -298,7 +303,25 @@ test('grantLowRisk merges only the shown pairs still low-risk at that SHA, and r
   ])
   assert.deepEqual(await svc.grantLowRisk('member@x.com', [{ id: 'acme/app#3', sha: SHA }]), [{ id: 'acme/app#3', merged: false, sha: SHA, reason: 'not_owner' }])
   assert.deepEqual(gh.calls.filter(c => c.method === 'PUT').map(c => c.path), ['/repos/acme/app/pulls/1/merge'])
+  assert.deepEqual(audits.map(a => [a.id, a.via, a.mergeCommitSha]), [[ID, 'grantLowRisk', MERGED]])
   assert.deepEqual((await svc.list(FOUNDER)).map(i => i.id), ['acme/app#2', 'acme/app#3', 'acme/app#4'])
+})
+
+test('an item stays with the project that first listed it, even when stored data binds its repository to a second project', async (t) => {
+  const { gh, store, svc, project } = await setup()
+  const { id: other } = await projects({ store, admitted: () => true, log: () => {} }).create('mallory@x.com', 'Mine')
+  // addRepo refuses this binding (projects.test.mjs); write it directly, as legacy or corrupted data would hold it.
+  await store.putDoc(`project:${other}`, { ...(await store.getDoc(`project:${other}`)), repos: [REPO] })
+  await store.addToSet('projects:with-repos', other)
+  await store.addToSet(`approvals:open:${other}`, ID)
+  const errors = t.mock.method(console, 'error', () => {})
+  await svc.poll()
+  await svc.poll()
+  assert.equal((await only(svc)).project, project)
+  assert.deepEqual(await svc.list('mallory@x.com'), [])
+  assert.deepEqual(await svc.grant('mallory@x.com', ID, SHA), { id: ID, merged: false, sha: SHA, reason: 'not_owner' })
+  assert.equal(gh.calls.filter(c => c.method === 'PUT').length, 0)
+  assert.equal(errors.mock.callCount(), 2)  // one "not rebound" line per poll
 })
 
 // ---- mumbo-bot repository tokens
@@ -325,6 +348,7 @@ test('mintRepoToken refuses and revokes a grant wider than asked', async () => {
     { repositories: [{ full_name: REPO }, { full_name: 'acme/other' }] },
     { repositories: [{ full_name: 'evil/app' }] },
     { repositories: undefined },
+    { permissions: undefined },
   ]) {
     const gh = fakeGithub()
     gh.grantFor = (asked) => ({ token: 'bot-token', repositories: [{ full_name: REPO }], permissions: asked.permissions, ...wide })

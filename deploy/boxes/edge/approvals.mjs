@@ -54,9 +54,10 @@ const MERGE_PERMISSIONS = { contents: 'write', pull_requests: 'write' }
  *   fetchImpl: typeof fetch, now: () => number, approveHost: string }} deps - `now` is epoch ms; notifications link to
  *   `https://<approveHost>/`.
  * @returns {{ poll(): Promise<void>, list(email: string): Promise<Approval[]>, grant(email: string, id: string, sha: string): Promise<GrantResult>, grantLowRisk(email: string, shown: { id: string, sha: string }[]): Promise<GrantResult[]> }}
- *   `poll` refreshes the queue from GitHub; a repository GitHub does not answer for keeps its items. `list` gives the
- *   items of the projects `email` owns. `grant` merges item `id` only at `sha`, after re-reading the PR and its checks,
- *   then audits and removes it; a moved head answers `sha_moved` and re-reads that PR. `grantLowRisk` grants only the
+ *   `poll` refreshes the queue from GitHub; a repository GitHub does not answer for keeps its items, and an item stays
+ *   with the project that first listed it. `list` gives the items of the projects `email` owns. `grant` merges item
+ *   `id` only at `sha`, after re-reading the PR and its checks, then audits it (with `via` and `mergeCommitSha`) and
+ *   removes it; a moved head answers `sha_moved` and re-reads that PR. `grantLowRisk` grants only the
  *   `shown` pairs (what the founder's page displayed) that are still low-risk at that exact SHA, in order, and gives
  *   one result per pair.
  */
@@ -100,6 +101,9 @@ export function approvalsService({ store, github, notify, audit, fetchImpl, now,
   /** Reads the facts of `listed` (a candidate as GitHub listed it) and saves its item, unless its head moved meanwhile. */
   async function refresh(project, repo, listed) {
     const id = `${repo}#${listed.number}`
+    const old = await store.getDoc(key(id))
+    // addRepo binds a repository to one project; an item never moves, even if stored data binds the repo twice.
+    if (old && old.project !== project) return fail('item belongs to another project; not rebound', { id, project, owner: old.project })
     const files = await pages(`/repos/${repo}/pulls/${listed.number}/files`)
     const pr = await read(`/repos/${repo}/pulls/${listed.number}`)
     if (!isCandidate(pr)) return drop(project, id)
@@ -116,7 +120,6 @@ export function approvalsService({ store, github, notify, audit, fetchImpl, now,
     const touched = [...new Set(files.flatMap(f => [f.filename, f.previous_filename]).filter(p => p && isProtected(p)))]
     const lines = pr.additions + pr.deletions
     const lowRisk = green && review?.verdict === 'pass' && lines < 200 && files.length === pr.changed_files && touched.length === 0
-    const old = await store.getDoc(key(id))
     let notifiedSha = old?.notifiedSha
     if (notifiedSha !== sha) {
       try {
@@ -144,7 +147,7 @@ export function approvalsService({ store, github, notify, audit, fetchImpl, now,
     if (!(await ownersOf(store, doc.project)).includes(email)) return no('not_owner')
     if (sha !== doc.sha) return no('sha_moved')
     if (lowRiskOnly && !doc.lowRisk) return no('not_low_risk')
-    let checks
+    let checks, mergeCommitSha
     try {
       if (!isCandidate(await read(`/repos/${doc.repo}/pulls/${doc.number}`))) return no('not_candidate')
       const state = await checksOf(doc.repo, sha)
@@ -160,11 +163,16 @@ export function approvalsService({ store, github, notify, audit, fetchImpl, now,
         return no('sha_moved')
       }
       if (!r.ok) throw new Error(`GitHub PUT merge: HTTP ${r.status}`)
+      // The merge happened; an unreadable answer leaves only the commit unrecorded.
+      mergeCommitSha = (await r.json().catch(() => undefined))?.sha ?? null
     } catch (e) {
       fail('grant failed', { id, sha, error: e.message })
       return no('github_error')
     }
-    const record = { at: new Date(now()).toISOString(), email, id, sha, ruleVersion: doc.ruleVersion, lowRisk: doc.lowRisk, files: doc.files, checks, review: doc.review, firstSeen: doc.firstSeen }
+    const record = {
+      at: new Date(now()).toISOString(), email, via: lowRiskOnly ? 'grantLowRisk' : 'grant', id, sha, mergeCommitSha,
+      ruleVersion: doc.ruleVersion, lowRisk: doc.lowRisk, files: doc.files, checks, review: doc.review, firstSeen: doc.firstSeen,
+    }
     // The merge happened: an audit write that fails is logged, and the edge's audit has already logged the record.
     await audit(record).catch(e => fail('audit write failed', { id, sha, error: e.message }))
     await drop(doc.project, id)
@@ -195,7 +203,7 @@ export function approvalsService({ store, github, notify, audit, fetchImpl, now,
     async list(email) {
       const out = []
       for (const project of await projectsOwnedBy(store, email)) {
-        for (const id of await store.setMembers(openSet(project))) { const doc = await store.getDoc(key(id)); if (doc) out.push(doc) }
+        for (const id of await store.setMembers(openSet(project))) { const doc = await store.getDoc(key(id)); if (doc?.project === project) out.push(doc) }
       }
       return out
     },

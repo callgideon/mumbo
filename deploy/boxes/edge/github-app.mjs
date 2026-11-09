@@ -37,7 +37,7 @@ export async function githubJson(fetchImpl, method, path, token, body) {
  *   `repo` is `owner/name`; `privateKey` is the App's PEM; `now` is epoch ms.
  * @returns {Promise<{ token: string, revoke(): Promise<void> }>} a token for `repo` only, with no permission beyond
  *   `permissions` plus `metadata: read`; `revoke` invalidates it. Rejects, after revoking, when GitHub grants another
- *   repository or a permission that was not asked for.
+ *   repository or a permission that was not asked for, or names no permissions.
  */
 export async function mintRepoToken({ appId, privateKey, repo, permissions, fetchImpl, now }) {
   const t = Math.floor(now() / 1000)
@@ -48,7 +48,8 @@ export async function mintRepoToken({ appId, privateKey, repo, permissions, fetc
   const revoke = async () => { await githubJson(fetchImpl, 'DELETE', '/installation/token', grant.token) }
   // The request names the repository without its owner, so the answer's full name is compared, owner included.
   const repos = (grant.repositories ?? []).map(r => String(r.full_name).toLowerCase())
-  const wider = Object.entries(grant.permissions ?? {}).some(([k, v]) => permissions[k] !== v && !(k === 'metadata' && v === 'read'))
+  // An answer that names no permissions cannot be shown to be narrow, so it counts as wider.
+  const wider = !grant.permissions || Object.entries(grant.permissions).some(([k, v]) => permissions[k] !== v && !(k === 'metadata' && v === 'read'))
   if (repos.length !== 1 || repos[0] !== repo.toLowerCase() || wider) {
     await revoke().catch((e) => { throw new Error(`mumbo-bot token for ${repo} was wider than asked, and revoking it failed: ${e.message}`) })
     throw new Error(`mumbo-bot token for ${repo} was wider than asked (repositories or permissions); revoked`)

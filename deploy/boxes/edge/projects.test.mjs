@@ -33,6 +33,26 @@ test('addRepo refuses an unknown project and a name that is not owner/name', asy
   assert.deepEqual(await projectsWithRepos(store), [])
 })
 
+test('a repository bound to one project cannot be bound to another, in any letter case; its binding is unchanged', async () => {
+  const store = memoryStore()
+  const p = projects({ store, admitted: () => true, log: () => {} })
+  const { id: founder } = await p.create('a@x.com', 'Founder')
+  const { id: other } = await p.create('m@x.com', 'Other')
+  await addRepo(store, founder, 'callgideon/mumbo')
+  for (const repo of ['callgideon/mumbo', 'CallGideon/MUMBO']) {
+    await assert.rejects(addRepo(store, other, repo), (e) => e.status === 409 && e.code === 'repo_bound' && /already belongs to another project/.test(e.message), repo)
+  }
+  await addRepo(store, founder, 'CallGideon/Mumbo')
+  assert.deepEqual(await getRepos(store, founder), ['callgideon/mumbo'])
+  assert.deepEqual(await getRepos(store, other), [])
+  assert.deepEqual(await projectsWithRepos(store), [founder])
+  // Two projects racing for one repository, each reading the other's repositories before either writes: exactly one gets it.
+  await addRepo(store, other, 'm/own')
+  const slow = { ...store, getDoc: async (k) => { const v = await store.getDoc(k); await new Promise(r => setTimeout(r, 5)); return v } }
+  const results = await Promise.allSettled([addRepo(slow, founder, 'callgideon/site'), addRepo(slow, other, 'callgideon/site')])
+  assert.deepEqual(results.map(r => r.status).sort(), ['fulfilled', 'rejected'])
+})
+
 test('ownersOf and projectsOwnedBy follow the owner field, not membership', async () => {
   const store = memoryStore()
   const p = projects({ store, admitted: () => true, log: () => {} })
