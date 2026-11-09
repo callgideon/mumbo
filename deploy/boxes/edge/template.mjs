@@ -5,7 +5,7 @@
 import { Sandbox, Template } from 'e2b'
 const image = process.argv[2] ?? (() => { throw new Error('pass the ECR image URI') })()
 const tpl = Template().fromImage(image, { username: 'AWS', password: process.env.ECR_PASSWORD }).setUser('root')
-const info = await Template.build(tpl, 'mumbo-box', { cpuCount: 2, memoryMB: 2048 })
+const info = await Template.build(tpl, 'mumbo-box', { cpuCount: 2, memoryMB: 4096 })
 console.log('built', info.templateId, info.buildId)
 // Smoke: a box from the template has the app, no prior user data, and curl for backups.
 const s = await Sandbox.create('mumbo-box', { timeoutMs: 120_000 })

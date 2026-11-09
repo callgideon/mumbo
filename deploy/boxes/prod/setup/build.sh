@@ -8,7 +8,8 @@ acct=$(aws sts get-caller-identity --query Account --output text); reg=$acct.dkr
 aws ecr get-login-password --region us-east-1 | docker login -u AWS --password-stdin "$reg" >/dev/null
 cd "$fork/packages"
 mig=$(ls db/migrations | sed 's/_.*//' | sort | tail -n 1)
-push() { docker tag "$1" "$reg/mumbo-boxes/$2:$sha"; docker push -q "$reg/mumbo-boxes/$2:$sha" >/dev/null 2>&1 || echo "  $2:$sha already pushed"; }
+# push <local image> <repo>: pushes under the local image's tag.
+push() { local t=${1##*:}; docker tag "$1" "$reg/mumbo-boxes/$2:$t"; docker push -q "$reg/mumbo-boxes/$2:$t" >/dev/null 2>&1 || echo "  $2:$t already pushed"; }
 docker build -q -f api/Dockerfile --build-arg COMMIT_SHA="$sha" --build-arg VERSION="mumbo-$sha" --build-arg EXPECTED_MIGRATION_TIMESTAMP="$mig" -t "e2b-api:$sha" . >/dev/null && push "e2b-api:$sha" e2b-api
 docker build -q -f client-proxy/Dockerfile --build-arg COMMIT_SHA="$sha" -t "e2b-client-proxy:$sha" . >/dev/null && push "e2b-client-proxy:$sha" e2b-client-proxy
 cp "$here/setup.sh" ./setup.sh; trap 'rm -f "$fork/packages/setup.sh"' EXIT

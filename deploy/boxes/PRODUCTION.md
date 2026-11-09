@@ -51,8 +51,8 @@ flowchart LR
 | 1 | **E2B fork:** `dns` discovery provider plus image build to our ECR | Unit test; api lists two node IPs from one DNS name |
 | 2 | **Network and data:** VPC 10.20/16 in 3 AZs with NAT per AZ; RDS Postgres Multi-AZ with PITR; MemoryDB for E2B; ElastiCache for the edge; S3 templates bucket (versioned, Bucket Keys); KMS | `terraform plan` clean; RDS restore drill documented |
 | 3 | **mTLS:** private CA and certificates for api, client-proxy and orchestrator (Secrets Manager), `required` on gRPC and peers. Code: `prod/tls.tf`, `prod/mtls/`; `prod/mtls/check.sh <fork>` runs the issued certificates through E2B's own mtls package | Handshake refused without a client certificate (check.sh, passing) |
-| 4 | **Sandbox nodes:** AMI (Ubuntu 24.04, hugepages and nbds at boot, Firecracker and kernel versions retained); systemd orchestrator that drains, not kills, on SIGTERM; Route53 private registration; ASG with lifecycle hook and drain Lambda | Two nodes registered; box created, paused on node A, resumed on node B |
-| 5 | **Control plane:** api and client-proxy × 2 on ECS behind an internal NLB; migrations as one-shot ECS tasks; `Recreate`-style deploys | E2B SDK smoke test passes through the NLB |
+| 4 | **Sandbox nodes:** r8i.2xlarge from stock Ubuntu 24.04 (`prod/nodes/node.sh.tftpl`: hugepages, nbd, IP forwarding before the orchestrator starts, our orchestrator and envd, mTLS files); orchestrator under systemd whose stop marks the node draining and pauses every box (`mumbo-drain`); one multivalue A record per node; ASG with a lifecycle hook the node completes itself. Live, 2026-11-09 | **Passed** (`prod/check/move.mjs`): box paused on node A (snapshot 21 s), resumed on node B in 2.3 s with disk and running processes kept |
+| 5 | **Control plane:** api and client-proxy × 2 on Fargate behind an internal NLB (`prod/control.tf`); `setup` one-shot task (migrations, team, API key, limits); rolling deploys with circuit breaker. Images and node binaries from one fork commit (`prod/setup/build.sh`, pinned in `prod/terraform.tfvars`). Live, 2026-11-09 | **Passed:** `mumbo-box` template built (4 GiB) and box commands run through the NLB |
 | 6 | **Edge on ECS:** public ALB with OIDC (Supabase), llm host rule, edge × 2 with ElastiCache, `BOX_EGRESS_IPS` = NAT EIPs; template build on a node | Browser test: sign in, chat with bash, model calls proxied |
 | 7 | **Operations:** CloudWatch alarms (orphan kills, backup age, hugepage pool, node not ready, Redis failover, 5xx); runbooks; drills (hard-kill a node mid-upload, orchestrator N→N+1, RDS restore); cut `boxes.mumbo.si` over, then `app.mumbo.si`, and retire Fargate and the trial | All drills pass; alarms fire in tests |
 | 8 | **Agent sandboxes:** a fork/child-sandbox subagent provider in the harness; per-user sandbox caps | Agent fans out 10 sandboxes |
@@ -68,8 +68,16 @@ flowchart LR
 - **M3. Backups** run in parallel without the user lock. Done.
 - **M4.** Versioned templates bucket and an RDS PITR drill.
 - **M5.** Plan 12–16 boxes per node until measured. Keep one warm spare node. Capacity comes from E2B errors.
-- Cut for v1: ClickHouse (empty DSN means noop), volumes (`VOLUME_TOKEN_ENABLED=false`), the dashboard, Loki/vector (CloudWatch agent instead), a dedicated build ASG.
+- Cut for v1: ClickHouse (the api requires a log store, so `LOKI_URL` points at nothing; API reads of sandbox and build logs fail until ClickHouse is added), volumes (`VOLUME_TOKEN_ENABLED=false`), the dashboard, Loki/vector (CloudWatch agent instead), a dedicated build ASG.
 
 ## Cost (estimate, us-east-1, on-demand)
 
 About $2–2.5k a month at the minimum footprint: 3 sandbox nodes, control plane, RDS Multi-AZ, MemoryDB, ElastiCache, NAT in 3 AZs, ALB/NLB, logs. Each further r8i.2xlarge node is about $460 a month for 12–16 running boxes. Paused boxes cost only S3.
+
+## Found while building stages 4 and 5
+
+- **DNS discovery must name nodes.** A build records the node it ran on and asks that node for status; with no NodeID every node matched. Nodes are named by address, and each orchestrator's `NODE_ID` is the same address (fork `1619623fc`).
+- **MemoryDB needs an ACL username,** which E2B's cluster client could not pass. `REDIS_CLUSTER_URL` now takes `rediss://user:password@host` (fork `644d3c875`).
+- **A bare host needs `net.ipv4.ip_forward=1` before the orchestrator starts.** Its sandbox network namespaces copy the value when created; Docker set it on the Embed host.
+- **Draining reaches api replicas on their next sync (10 s).** `mumbo-drain` waits 20 s after marking the node, then pauses until the node is empty.
+- **`pause()` returns while the snapshot is still being written** (about 20 s for a 4 GiB box). A resume in that window restores in place on the same node.
