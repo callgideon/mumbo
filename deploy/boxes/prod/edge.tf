@@ -10,6 +10,19 @@ variable "edge_tag" {
 variable "approver_emails" {
   description = "APPROVER_EMAILS: who may merge agent PRs and bind repositories (comma-separated, lowercased). Empty: nobody."
   type        = string
+  default     = ""
+}
+# Optional edge secrets: the task references an SSM parameter, and the exec role may read it, only when enabled. Create
+# the parameter first; a task whose parameter is missing does not start.
+variable "github_agent_token_enabled" {
+  description = "Pass /mumbo/boxes/github-agent-token to the edge as GITHUB_AGENT_TOKEN."
+  type        = bool
+  default     = false
+}
+variable "ntfy_enabled" {
+  description = "Pass /mumbo/boxes/ntfy-topic to the edge as NTFY_TOPIC."
+  type        = bool
+  default     = false
 }
 variable "github_agent_login" {
   description = "GITHUB_AGENT_LOGIN: the agent machine account's GitHub login. Empty: the approvals poller is off."
@@ -202,7 +215,7 @@ resource "aws_iam_role_policy" "edge" {
 resource "aws_iam_role_policy" "exec_edge" {
   role = aws_iam_role.exec.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [
-    { Effect = "Allow", Action = "ssm:GetParameters", Resource = "arn:aws:ssm:us-east-1:${data.aws_caller_identity.this.account_id}:parameter/mumbo/boxes/*" },
+    { Effect = "Allow", Action = "ssm:GetParameters", Resource = [for p in values(merge(local.proxy_ssm, local.edge_ssm)) : "${local.ssm}/${p}"] },
     { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = data.aws_secretsmanager_secret.github_app.arn },
   ] })
 }
@@ -211,6 +224,13 @@ data "aws_secretsmanager_secret" "github_app" { name = "${local.name}/github-app
 
 locals {
   ssm = "arn:aws:ssm:us-east-1:${data.aws_caller_identity.this.account_id}:parameter/mumbo/boxes"
+  # Container env name -> SSM parameter under /mumbo/boxes; these are all the exec role may read.
+  proxy_ssm = { OAUTH2_PROXY_CLIENT_ID = "oauth-client-id", OAUTH2_PROXY_CLIENT_SECRET = "oauth-client-secret", OAUTH2_PROXY_COOKIE_SECRET = "cookie-secret" }
+  edge_ssm = merge(
+    { ALLOWED_EMAILS = "allowed-emails" },
+    var.github_agent_token_enabled ? { GITHUB_AGENT_TOKEN = "github-agent-token" } : {},
+    var.ntfy_enabled ? { NTFY_TOPIC = "ntfy-topic" } : {},
+  )
 }
 resource "aws_ecs_task_definition" "edge" {
   family                   = "${local.name}-edge"
@@ -240,11 +260,7 @@ resource "aws_ecs_task_definition" "edge" {
         "--upstream=http://127.0.0.1:8080", "--http-address=0.0.0.0:4180",
         "--upstream-timeout=120s", # a first visit creates the box and restores its backup before answering
       ]
-      secrets = [
-        { name = "OAUTH2_PROXY_CLIENT_ID", valueFrom = "${local.ssm}/oauth-client-id" },
-        { name = "OAUTH2_PROXY_CLIENT_SECRET", valueFrom = "${local.ssm}/oauth-client-secret" },
-        { name = "OAUTH2_PROXY_COOKIE_SECRET", valueFrom = "${local.ssm}/cookie-secret" },
-      ]
+      secrets          = [for k, p in local.proxy_ssm : { name = k, valueFrom = "${local.ssm}/${p}" }]
       logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.edge.name, awslogs-region = "us-east-1", awslogs-stream-prefix = "oauth2-proxy" } }
     },
     {
@@ -274,14 +290,11 @@ resource "aws_ecs_task_definition" "edge" {
         DAILY_TOKENS_PROJECT = "50000000"
         AUDIT_PREFIX         = local.audit_prefix
       } : { name = k, value = v }]
-      secrets = [
-        { name = "ALLOWED_EMAILS", valueFrom = "${local.ssm}/allowed-emails" },
+      secrets = concat([for k, p in local.edge_ssm : { name = k, valueFrom = "${local.ssm}/${p}" }], [
         { name = "E2B_API_KEY", valueFrom = local.secret.TEAM_API_KEY },
-        { name = "GITHUB_AGENT_TOKEN", valueFrom = "${local.ssm}/github-agent-token" },
-        { name = "NTFY_TOPIC", valueFrom = "${local.ssm}/ntfy-topic" },
         { name = "GITHUB_APP_ID", valueFrom = "${data.aws_secretsmanager_secret.github_app.arn}:app_id::" },
         { name = "GITHUB_APP_KEY", valueFrom = "${data.aws_secretsmanager_secret.github_app.arn}:private_key::" },
-      ]
+      ])
       stopTimeout      = 60
       logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.edge.name, awslogs-region = "us-east-1", awslogs-stream-prefix = "edge" } }
     },
