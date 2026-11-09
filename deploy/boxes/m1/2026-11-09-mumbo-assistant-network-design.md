@@ -90,6 +90,9 @@ These are collected from M1 on.
   - For approval purposes, everything inside a box or sandbox counts as possibly compromised: dsh, superagent, the model and workers. Agent-run code and model-read content both live there.
   - Evidence: dsh's launch token sits in `/root/dsh.log`, superagent's local API only checks request headers, and shell tools run as root.
 - **The founder's box** holds the signed-in browser (stage 9). No project code runs there.
+  - **Consent for account writes must be enforced outside the agent's reach (part C requirement).**
+    - Today the assistant has a root shell, so it can drive Chromium's CDP port (127.0.0.1:9222) directly, and "writes ask" is advisory.
+    - Direction: the agent's shell runs as a non-root user with no route to CDP. Chromium and the browser-use MCP run as their own user. An owner-match firewall rule admits only that MCP process to CDP, and the MCP process enforces consent.
 - **A project box** holds one project's code and a project token. It holds no person's accounts or secrets.
   - It is served on its own origin, `p-<id>.boxes.mumbo.si`, never under the founder's origin. Otherwise script it serves could drive the founder's box.
 - **Content from anyone not on a node's allowlist is data,** never instructions and never an explicit request. Examples: a stranger's GitHub comment, a fetched web page, a forwarded message.
@@ -146,7 +149,7 @@ For mumbo's own development the founder only dumps ideas and asks for updates; t
   - fewer than 200 changed lines;
   - no protected path touched.
   - **Protected paths are never low-risk:** `.github/`, `deploy/`, the edge, the egress check, approval, policy and intake code, the superagent copy, package manifests and lockfiles.
-  - "Approve all low-risk" approves only the items that pass this rule on the edge.
+  - "Approve all low-risk" approves only the items the page showed, at the commits it showed, that still pass this rule on the edge. Items whose head moved are skipped and reported.
 - **Grant.** Only the founder can grant, signed in through the edge's OIDC sign-in.
   - The approval page lives on a **separate origin that no box serves**, `approve.boxes.mumbo.si`, so script served from a box cannot click it.
     - The sign-in proxy's cookie covers `.boxes.mumbo.si`, so one sign-in serves both hosts.
@@ -161,6 +164,7 @@ For mumbo's own development the founder only dumps ideas and asks for updates; t
   - M1 uses ntfy: the edge posts to a secret topic, and the founder subscribes in the ntfy app. Web Push can replace it later. **[my call]**
 - **Stop everything.** The same page has one switch.
   - While it is on, the edge refuses model calls and GitHub writes for all of the founder's boxes and projects. Running work stops at its next call.
+  - GitHub reads (fetches and GraphQL queries) still pass, so a stopped project can still be inspected.
   - `@mumbo/mcp`'s `runs_halt` remains the equivalent inside a box.
 - **Recovery.** The approval page also works when a box is down. It shows box health and the last backup, and, once section 13 exists, offers "restore previous template".
 
@@ -428,6 +432,8 @@ Reference mockups (sample data): `mumbo-mockups-v2.html`.
   - The Assistant is pinned on top, and sessions are grouped by project.
 - **Assistant chat** is the existing chat, with tool rows such as "File context · bitlane".
 - **Superagent's panel** stays available in each project box for detailed supervision.
+  - Only the project's owners can open it. They arrive as edge members, and the box lists them in `panelAdmins` from the project's owner list; the list is empty, and so closed, by default.
+  - The panel can change settings and Policy, but never merge or approve.
 - **Phone** uses the same Web client below 768px, with the sidebar as a drawer.
 
 ## 16. Data and privacy **[my call; flagged]**
