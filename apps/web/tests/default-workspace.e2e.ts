@@ -99,18 +99,17 @@ describe.skipIf(MODE === 'record')('web e2e: default Workspace', () => {
     onTestFinished(() => scaffold.close())
     const parent = join(scaffold.workspaceCwd, 'Documents', 'deepseek-harness')
     await mkdir(parent, { recursive: true })
-    // A Chinese reader gets the same fixed directory name, so the same occupant conflicts.
     await writeFile(join(parent, 'default-workspace'), 'occupied')
     const chosen = join(scaffold.workspaceCwd, 'chosen')
     await mkdir(chosen)
     const browser = await chromium.launch()
     try {
-      const page = await browser.newPage({ locale: 'zh-CN', timezoneId: 'Asia/Shanghai' })
+      const page = await browser.newPage({ locale: 'en-US', timezoneId: 'Asia/Shanghai' })
       const tripwire = watchConsole(page)
       try {
         await page.goto(scaffold.authenticatedUrl)
         const input = page.locator('[data-composer-input][contenteditable="true"]').first()
-        const notice = page.getByRole('alert').filter({ hasText: '无法创建默认工作区' })
+        const notice = page.getByRole('alert').filter({ hasText: 'Unable to create default workspace' })
         await notice.waitFor()
         expect(scaffold.ctx.workspaceRegistry.list()).toEqual([])
         expect(scaffold.ctx.sessions.list()).toEqual([])

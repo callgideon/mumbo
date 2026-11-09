@@ -4,7 +4,7 @@ import type { Browser, Locator, Page } from 'playwright'
 import { chromium, webkit } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import { launchWebScaffold, watchConsole, webSnapshotMode, type WebScaffold } from './scaffold.ts'
-import { ZH_BROWSER_LOCALE, connectFreshWorkspaceZh, saveFailureShot } from './support.ts'
+import { saveFailureShot, connectFreshWorkspace } from './support.ts'
 
 declare global {
   interface Window {
@@ -116,7 +116,7 @@ describe.skipIf(webSnapshotMode() === 'record').each([
       }])),
     })
     browser = await engine.launch()
-    page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: ZH_BROWSER_LOCALE })
+    page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: 'en-US' })
     await page.addInitScript(() => {
       window.__modelMenuRectReads = 0
       // oxlint-disable-next-line typescript/unbound-method -- The wrapper supplies the original Element receiver below.
@@ -132,7 +132,7 @@ describe.skipIf(webSnapshotMode() === 'record').each([
     tripwire = watchConsole(page)
     await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
-    await connectFreshWorkspaceZh(page, scaffold.workspaceCwd)
+    await connectFreshWorkspace(page, scaffold.workspaceCwd)
   })
 
   afterAll(async () => {
@@ -150,21 +150,21 @@ describe.skipIf(webSnapshotMode() === 'record').each([
     for (const entry of ['button', 'command'] as const) {
       const composer = page.locator('[data-composer-input]').first()
       const surface = entry === 'button'
-        ? page.getByRole('group', { name: '模型与推理等级', exact: true })
-        : page.locator('[aria-label="/model 选项"]')
+        ? page.getByRole('group', { name: 'Model and reasoning effort', exact: true })
+        : page.locator('[aria-label="/model options"]')
       const viewport = entry === 'button'
-        ? surface.getByRole('menu', { name: '模型', exact: true })
+        ? surface.getByRole('menu', { name: 'Model', exact: true })
         : surface.getByRole('listbox')
       const search = entry === 'button'
-        ? page.getByRole('searchbox', { name: '搜索模型…', exact: true })
-        : page.getByRole('textbox', { name: '筛选选项', exact: true })
+        ? page.getByRole('searchbox', { name: 'Search models…', exact: true })
+        : page.getByRole('textbox', { name: 'Filter options', exact: true })
       const open = async (): Promise<void> => {
         if (entry === 'button') {
-          await page.getByRole('button', { name: /^选择模型/ }).click()
-          await page.getByRole('menuitem', { name: /^模型/ }).click()
+          await page.getByRole('button', { name: /^Select model/ }).click()
+          await page.getByRole('menuitem', { name: /^Model/ }).click()
         } else {
-          await page.getByRole('button', { name: '添加文件或调用指令', exact: true }).click()
-          await page.getByRole('option', { name: /^模型/ }).click()
+          await page.getByRole('button', { name: 'Add files or run commands', exact: true }).click()
+          await page.getByRole('option', { name: /^Model/ }).click()
         }
         await expect.poll(() => readGroups(viewport)).toEqual(EXPECTED_GROUPS)
         await expect.poll(() => search.evaluate(node => node === node.ownerDocument.activeElement)).toBe(true)
@@ -294,9 +294,9 @@ describe.skipIf(webSnapshotMode() === 'record').each([
     const cdp = await page.context().newCDPSession(page)
     try {
       await page.setViewportSize({ width: 402, height: 874 })
-      await page.getByRole('button', { name: /^选择模型/ }).click()
-      await page.getByRole('menuitem', { name: /^模型/ }).click()
-      const panel = page.getByRole('group', { name: '模型与推理等级', exact: true })
+      await page.getByRole('button', { name: /^Select model/ }).click()
+      await page.getByRole('menuitem', { name: /^Model/ }).click()
+      const panel = page.getByRole('group', { name: 'Model and reasoning effort', exact: true })
       for (const height of [874, 500]) {
         await cdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 })
         await page.setViewportSize({ width: 402, height })
@@ -316,7 +316,7 @@ describe.skipIf(webSnapshotMode() === 'record').each([
             Math.abs(rect.right - anchor.right - before.rightGap), Math.abs(anchor.top - rect.bottom - before.bottomGap))
         }, unzoomed)).toBeLessThan(1)
         expect(await panel.evaluate(node => node.getBoundingClientRect().width > window.visualViewport!.width)).toBe(true)
-        const models = page.getByRole('menu', { name: '模型', exact: true })
+        const models = page.getByRole('menu', { name: 'Model', exact: true })
         const names = models.locator('[data-model-id]').locator('..')
         expect(await names.evaluateAll(labels => labels.every(label =>
           getComputedStyle(label).textOverflow === 'ellipsis'))).toBe(true)
@@ -352,9 +352,9 @@ describe.skipIf(webSnapshotMode() === 'record').each([
     const cdp = await page.context().newCDPSession(page)
     try {
       await page.setViewportSize({ width: 1440, height: 1000 })
-      const trigger = page.getByRole('button', { name: /^选择模型/ })
+      const trigger = page.getByRole('button', { name: /^Select model/ })
       await trigger.click()
-      const menu = page.getByRole('menu', { name: '模型与推理等级', exact: true })
+      const menu = page.getByRole('menu', { name: 'Model and reasoning effort', exact: true })
       await cdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1.5 })
       await expect.poll(() => page.evaluate(() => window.visualViewport!.scale)).toBe(1.5)
       await frames(page)
@@ -404,13 +404,13 @@ describe.skipIf(webSnapshotMode() === 'record').each([
       for (const { height, scrolls } of [{ height: 500, scrolls: false }, { height: 350, scrolls: true }]) {
         await cdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 })
         await page.setViewportSize({ width: 402, height })
-        await page.getByRole('button', { name: /^选择模型/ }).click()
-        await page.getByRole('menuitem', { name: /^推理等级/ }).click()
-        const menu = page.getByRole('menu', { name: '模型与推理等级', exact: true })
+        await page.getByRole('button', { name: /^Select model/ }).click()
+        await page.getByRole('menuitem', { name: /^Effort/ }).click()
+        const menu = page.getByRole('menu', { name: 'Model and reasoning effort', exact: true })
         await menu.getByRole('menuitemradio').first().click()
         await expect.poll(() => scaffold.ctx.agentDefaultModel.currentSelection().reasoningEffort).toBeUndefined()
-        await page.getByRole('button', { name: /^选择模型/ }).click()
-        await page.getByRole('menuitem', { name: /^推理等级/ }).click()
+        await page.getByRole('button', { name: /^Select model/ }).click()
+        await page.getByRole('menuitem', { name: /^Effort/ }).click()
         const last = menu.getByRole('menuitemradio').last()
         await expect.poll(() => last.getAttribute('aria-checked')).toBe('false')
         await cdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2.5 })

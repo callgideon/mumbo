@@ -1,1 +1,1 @@
-- text: 正在准备调用 写入 src/util.ts
+- text: Preparing tool call Write src/util.ts

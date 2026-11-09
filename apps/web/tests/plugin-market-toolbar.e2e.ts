@@ -7,7 +7,6 @@ import { chromium, type Locator } from 'playwright'
 import { expect, it } from 'vitest'
 import type {} from '@deepseek-ai/dsh-plugin-market'
 import { compareOrRefreshGolden, launchWebScaffold, watchConsole, webSnapshotMode } from './scaffold.ts'
-import { ZH_BROWSER_LOCALE } from './support.ts'
 
 const EXPECTED = fileURLToPath(new URL('./expected/plugin-market/toolbar-responsive.expected.md', import.meta.url))
 const INDEX = new URL('./fixtures/plugin-market/toolbar.index.json', import.meta.url)
@@ -75,16 +74,16 @@ it('keeps Discover controls reachable when the toolbar wraps and retains search 
       await scaffold.ctx.pluginMarket.setIndexes([`http://127.0.0.1:${address.port}/index.json`])
       const browser = await chromium.launch()
       try {
-        const page = await browser.newPage({ viewport: { width: 1280, height: 844 }, locale: ZH_BROWSER_LOCALE, reducedMotion: 'reduce' })
+        const page = await browser.newPage({ viewport: { width: 1280, height: 844 }, locale: 'en-US', reducedMotion: 'reduce' })
         const consoleWatch = watchConsole(page)
         await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-        await page.getByRole('button', { name: '插件', exact: true }).click()
-        await page.getByRole('tab', { name: '发现', exact: true }).click()
+        await page.getByRole('button', { name: 'Plugins', exact: true }).click()
+        await page.getByRole('tab', { name: 'Discover', exact: true }).click()
         await page.locator('[data-market-entry="dsh-toolbar-layout-fixture"]').waitFor()
-        await page.getByRole('button', { name: '收起侧边栏', exact: true }).click()
+        await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click()
         await page.evaluate(() => document.fonts.ready)
         const toolbar = page.locator('[data-discover-toolbar]')
-        const search = toolbar.getByRole('searchbox', { name: '搜索插件' })
+        const search = toolbar.getByRole('searchbox', { name: 'Search plugins' })
         await search.focus()
         const facts: string[] = []
         for (const width of [390, 430, 768, 1280]) {

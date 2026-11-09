@@ -1,19 +1,19 @@
-- dialog "已安装":
-  - button "关闭"
-  - status: 已安装
+- dialog "Installed":
+  - button "Close"
+  - status: Installed
   - paragraph: mirrored-package
-  - paragraph: 版本 2.0.0
-  - button "收起安装详情" [expanded]
-  - paragraph: 安装位置：{{cwd}}/.dsh-home/profiles/scaffold
-  - paragraph: 第 1 次 · 中国大陆镜像源
-  - text: 失败 $
-  - group "命令第 1 行": pnpm add mirrored-package --registry=https://registry.npmmirror.com/
-  - text: 退出码 1
-  - button "复制"
+  - paragraph: Version 2.0.0
+  - button "Hide install details" [expanded]
+  - paragraph: Installs into {{cwd}}/.dsh-home/profiles/scaffold
+  - paragraph: Attempt 1 · Mainland China mirror
+  - text: Failed $
+  - group "Command line 1": pnpm add mirrored-package --registry=https://registry.npmmirror.com/
+  - text: exit code 1
+  - button "Copy"
   - text: "ERR_PNPM_META_FETCH_FAIL GET https://registry.npmmirror.com/mirrored-package: socket hang up"
-  - paragraph: 第 2 次 · npm 官方源
-  - text: 已完成 $ pnpm add mirrored-package
-  - button "复制"
+  - paragraph: Attempt 2 · Official npm registry
+  - text: Done $ pnpm add mirrored-package
+  - button "Copy"
   - text: Installed from the registry pnpm names
-  - paragraph: 完整日志：{{cwd}}/.dsh-home/profiles/scaffold/.plugin-manager/logs/operation-{{suffix}}/pnpm.log
-  - button "立即启用"
+  - paragraph: "Full log: {{cwd}}/.dsh-home/profiles/scaffold/.plugin-manager/logs/operation-{{suffix}}/pnpm.log"
+  - button "Enable now"

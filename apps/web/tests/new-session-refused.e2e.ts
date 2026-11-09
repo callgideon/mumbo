@@ -27,7 +27,7 @@ describe.skipIf(MODE === 'record')('web e2e: refused New Session', () => {
     onTestFinished(() => scaffold.close())
     const browser = await chromium.launch()
     try {
-      const page = await browser.newPage({ locale: 'zh-CN', timezoneId: 'Asia/Shanghai' })
+      const page = await browser.newPage({ locale: 'en-US', timezoneId: 'Asia/Shanghai' })
       const tripwire = watchConsole(page)
       try {
         await Promise.all([
@@ -43,7 +43,7 @@ describe.skipIf(MODE === 'record')('web e2e: refused New Session', () => {
 
         await page.getByRole('treeitem').filter({ hasText: 'Default workspace' }).hover()
         await page.getByRole('button', { name: 'New session in Default workspace', exact: true }).click()
-        const notice = page.getByRole('alert').filter({ hasText: 'New sessionFailed' })
+        const notice = page.getByRole('alert').filter({ hasText: 'New session failed' })
         await notice.waitFor()
         await compareOrRefreshGolden(NOTICE_EXPECTED, await notice.ariaSnapshot(), MODE)
         expect(scaffold.ctx.sessions.list()).toEqual([])

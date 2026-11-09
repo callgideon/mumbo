@@ -1,26 +1,26 @@
-- button "返回插件": 插件
-- button "夹具操作"
-- button "卸载 @fixture/live-client": 卸载
+- button "Back to plugins": Plugins
+- button "Fixture action"
+- button "Uninstall @fixture/live-client": Uninstall
 - status
-- switch "启用 @fixture/live-client" [checked]
+- switch "Enable @fixture/live-client" [checked]
 - heading "@fixture/live-client" [level=3]
-- text: v0.0.1 夹具标签
+- text: v0.0.1 Fixture badge
 - paragraph:
   - code: "@fixture/live-client"
-- heading "包含的组件" [level=4]
-- text: 共 1 个 · 1 运行中
+- heading "Components" [level=4]
+- text: 1 total · 1 running
 - list:
   - listitem:
-    - button "配置 @fixture/live-client": "@fixture/live-client"
+    - button "Configure @fixture/live-client": "@fixture/live-client"
     - code: fixture-live-client
-    - text: 运行中
-    - switch "启用组件 @fixture/live-client" [checked]
-- heading "来源信息" [level=4]
-- term: 代码来源
+    - text: Running
+    - switch "Enable component @fixture/live-client" [checked]
+- heading "Source" [level=4]
+- term: Code source
 - definition:
   - code: file:{{fixtures}}/fixture-live-client
-- term: 当前版本
+- term: Current version
 - definition: 0.0.1
-- region "夹具区块":
-  - heading "夹具区块" [level=4]
-  - paragraph: 来自夹具的区块内容
+- region "Fixture section":
+  - heading "Fixture section" [level=4]
+  - paragraph: Section content from the fixture

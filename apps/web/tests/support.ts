@@ -15,7 +15,7 @@ export const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url))
 /**
  * Read the `meta.description` an experimental bundle's plugin page shows for one locale.
  * @param bundle - Package directory under `packages/experimental`.
- * @param locale - Locale resource name, such as `en` or `zh`.
+ * @param locale - Locale resource name, such as `en` or `ja`.
  * @returns The description text from `locale/<locale>.json`.
  */
 export function experimentalBundleDescription(bundle: string, locale: string): string {

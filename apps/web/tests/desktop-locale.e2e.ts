@@ -21,7 +21,7 @@ describe.skipIf(MODE === 'record')('web e2e: native and Client locale preference
   let page: Page
   let tripwire: ReturnType<typeof watchConsole>
   const reported: string[] = []
-  let languages = ['it-IT', 'zh-CN', 'en-US']
+  let languages = ['it-IT', 'zh-CN', 'de-DE', 'en-US']
 
   beforeAll(async () => {
     scaffold = await launchWebScaffold()
@@ -55,14 +55,16 @@ describe.skipIf(MODE === 'record')('web e2e: native and Client locale preference
   it('uses OS languages without saving them, then shares an explicit choice across reloads', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-desktop-locale'))
     await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-    await openSettings(page, 'en')
-    const zhDialog = page.getByRole('dialog', { name: 'Settings', exact: true })
-    await zhDialog.getByRole('button', { name: 'English', exact: true }).waitFor()
-    await expect.poll(() => reported).toEqual(['zh'])
+    // zh-CN names no shipped language, so the first shipped OS language applies.
+    await page.getByRole('button', { name: 'Kontomenü', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Einstellungen', exact: true }).click()
+    const deDialog = page.getByRole('dialog', { name: 'Einstellungen', exact: true })
+    await deDialog.getByRole('button', { name: 'Deutsch', exact: true }).waitFor()
+    await expect.poll(() => reported).toEqual(['de'])
     expect(scaffold.ctx.settings.describe().find(row => row.ns === 'locale')!.value).toEqual({})
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'automatic.expected.md'),
       await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd, versionCapture), MODE)
-    languages = ['ja-JP', 'zh-CN', 'en-US']
+    languages = ['ja-JP', 'de-DE', 'en-US']
     const automaticWarnings = tripwire.warnings.length
     reported.length = 0
     await page.reload({ waitUntil: 'load' })

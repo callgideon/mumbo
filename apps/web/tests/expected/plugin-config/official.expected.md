@@ -1,54 +1,54 @@
-- heading "插件" [level=1]
-- text: 安装、启用和配置插件
-- button "插件说明"
-- button "刷新"
-- group "添加插件":
-  - button "添加插件"
-  - button "选择添加插件方式"
-- heading "内置插件配置" [level=3]
+- heading "Plugins" [level=1]
+- text: Install, enable, and configure plugins
+- button "About plugins"
+- button "Refresh"
+- group "Add plugin":
+  - button "Add plugin"
+  - button "Choose how to add a plugin"
+- heading "Built-in plugin settings" [level=3]
 - list:
   - listitem:
-    - button "查看 子智能体": 子智能体
-    - text: 设置子智能体的递归层级、数量和模型。
+    - button "View Subagent": Subagent
+    - text: Set Subagent recursion depth, count, and models.
   - listitem:
-    - button "查看 网页搜索与获取": 网页搜索与获取
-    - text: 选择网页搜索与网页获取使用的提供方。
+    - button "View Web search and fetch": Web search and fetch
+    - text: Choose the providers web search and web fetch use.
   - listitem:
-    - button "查看 Agent 循环": Agent 循环
-    - text: 控制 Agent 派发工具调用的方式。
+    - button "View Agent loop": Agent loop
+    - text: Control how the Agent dispatches tool calls.
   - listitem:
-    - button "查看 终端": 终端
-    - text: 限制每条命令最多能跑多久、最多输出多少内容。
-- heading "实验性插件" [level=3]
-- button "更多"
+    - button "View Shell": Shell
+    - text: Limit how long each command may run and how much it may output.
+- heading "Experimental plugins" [level=3]
+- button "More"
 - list:
   - listitem:
-    - button "查看 语音输入": 语音输入
-    - text: 实验性 在本机使用 SenseVoice 转写录音，首次使用需安装依赖。
+    - button "View Voice input": Voice input
+    - text: Experimental Transcribe recordings locally with SenseVoice; first use requires installing dependencies.
     - status
-    - switch "启用 语音输入"
+    - switch "Enable Voice input"
   - listitem:
-    - button "查看 自定义插件索引": 自定义插件索引
-    - text: 实验性 在插件页添加“发现”标签页，从你添加的插件索引中浏览和安装插件。
+    - button "View Custom plugin indexes": Custom plugin indexes
+    - text: Experimental Adds a Discover tab to Plugins, where you browse and install plugins from plugin indexes you add.
     - status
-    - switch "启用 自定义插件索引"
+    - switch "Enable Custom plugin indexes"
   - listitem:
-    - button "查看 自动授权审查": 自动授权审查
-    - text: 实验性 提供“自动审查”访问模式：每次工具调用前，由模型对照你的要求检查，获准的调用立即运行，被拒绝的调用等你审批。
+    - button "View Auto authorization review": Auto authorization review
+    - text: "Experimental Adds an Auto review access mode: before each tool call, a model checks it against what you asked for, runs allowed calls at once, and holds denied calls for your approval."
     - status
-    - switch "启用 自动授权审查"
+    - switch "Enable Auto authorization review"
   - listitem:
-    - button "查看 变更请求与工作树": 变更请求与工作树
-    - text: 实验性 在会话侧栏集中跟踪关联的 GitHub PR：查看检查状态、评审意见与代码差异，并把修改建议交给智能体继续处理。也可查看本地改动，用独立工作树隔离任务。GitHub 功能需要本机安装 gh 并登录。
+    - button "View Change requests & worktrees": Change requests & worktrees
+    - text: "Experimental Keep linked GitHub pull requests beside your conversation: follow checks and reviews, inspect diffs, and send feedback to the agent. Review local changes and use a separate worktree to isolate each task. GitHub features require the gh CLI installed and signed in on the host."
     - status
-    - switch "启用 变更请求与工作树"
-- heading "已安装插件" [level=3]
+    - switch "Enable Change requests & worktrees"
+- heading "Installed plugins" [level=3]
 - list:
   - listitem:
-    - button "查看 @fixture/live-client": "@fixture/live-client"
+    - button "View @fixture/live-client": "@fixture/live-client"
     - status
-    - switch "启用 @fixture/live-client"
+    - switch "Enable @fixture/live-client"
   - listitem:
-    - button "查看 dsh-web-scaffold-defaults": dsh-web-scaffold-defaults
+    - button "View dsh-web-scaffold-defaults": dsh-web-scaffold-defaults
     - status
-    - switch "启用 dsh-web-scaffold-defaults" [checked]
+    - switch "Enable dsh-web-scaffold-defaults" [checked]

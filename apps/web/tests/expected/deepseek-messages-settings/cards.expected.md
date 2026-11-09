@@ -1,49 +1,49 @@
-- dialog "设置":
-  - text: 设置
+- dialog "Settings":
+  - text: Settings
   - navigation:
-    - button "通用设置"
-    - button "模型"
-    - button "内置插件"
-    - button "Agent 预设"
-  - button "打开配置文件"
-  - button "关闭"
-  - heading "模型" [level=2]
-  - paragraph: 填入各提供商的 API 密钥即可使用其模型。
+    - button "General"
+    - button "Models"
+    - button "Built-in plugins"
+    - button "Agent presets"
+  - button "Open configuration file"
+  - button "Close"
+  - heading "Models" [level=2]
+  - paragraph: Enter your API keys to use models from the following providers.
   - list:
     - listitem:
       - text: DeepSeek
-      - img "API 密钥已配置"
-      - button "编辑 DeepSeek (deepseek-official)": 编辑
-      - text: DeepSeek deepseek-official API 密钥
-      - button "认证说明": "?"
-      - textbox "API 密钥":
-        - /placeholder: 留空使用已保存凭据
+      - img "API key configured"
+      - button "Edit DeepSeek (deepseek-official)": Edit
+      - text: DeepSeek deepseek-official API key
+      - button "Authentication details": "?"
+      - textbox "API key":
+        - /placeholder: Leave blank to use saved credentials
       - group:
-        - text: 自定义设置 API 地址
-        - textbox "API 地址":
-          - /placeholder: https://api.deepseek.com/anthropic（默认使用环境 DEEPSEEK_BASE_URL）
-        - text: 请填写兼容 Anthropic Messages 协议的 API 地址。
-        - region "模型目录":
-          - text: 模型目录 正在使用适配器默认模型
-          - button "调整模型顺序 1"
-          - textbox "模型 ID 1":
-            - /placeholder: 模型 ID
+        - text: Customized settings Base URL
+        - textbox "Base URL":
+          - /placeholder: https://api.deepseek.com/anthropic (Default to use DEEPSEEK_BASE_URL)
+        - text: Use an API endpoint compatible with Anthropic Messages.
+        - region "Models":
+          - text: Models Using the adapter defaults
+          - button "Reorder model 1"
+          - textbox "Model ID 1":
+            - /placeholder: Model ID
             - text: deepseek-flash
-          - button "模型选项 1"
-          - button "删除模型 1"
-          - textbox "显示名称 1":
-            - /placeholder: 显示名称
+          - button "Model options 1"
+          - button "Delete model 1"
+          - textbox "Display name 1":
+            - /placeholder: Display name
             - text: DeepSeek-V4.1-Flash
-          - button "调整模型顺序 2"
-          - textbox "模型 ID 2":
-            - /placeholder: 模型 ID
+          - button "Reorder model 2"
+          - textbox "Model ID 2":
+            - /placeholder: Model ID
             - text: deepseek-v4-pro
-          - button "模型选项 2"
-          - button "删除模型 2"
-          - textbox "显示名称 2":
-            - /placeholder: 显示名称
+          - button "Model options 2"
+          - button "Delete model 2"
+          - textbox "Display name 2":
+            - /placeholder: Display name
             - text: DeepSeek-V4-Pro
-          - button "添加模型"
-      - button "取消"
-      - button "保存"
-  - button "添加模型提供商"
+          - button "Add model"
+      - button "Cancel"
+      - button "Apply"
+  - button "Add model provider"

@@ -18,24 +18,24 @@ const DIR = fileURLToPath(new URL('./expected/subagent-result-notice/', import.m
 const MODE = webSnapshotMode()
 const OUTPUT = '## Research result\nThe original child reply stays available.'
 const OUTCOMES = [
-  { reason: 'completed', en: 'Subagent run completed', zh: 'Subagent run completed' },
-  { reason: 'aborted', en: 'Subagent run stopped', zh: 'Subagent run stopped' },
-  { reason: 'error', en: 'Subagent run failed', zh: 'Subagent run failed' },
-  { reason: 'max-tokens', en: 'Subagent reached the token limit', zh: 'Subagent reached the token limit' },
-  { reason: 'refusal', en: 'Subagent declined the task', zh: 'Subagent declined the task' },
-] as const satisfies readonly { reason: SubagentStopReason; en: string; zh: string }[]
+  { reason: 'completed', en: 'Subagent run completed' },
+  { reason: 'aborted', en: 'Subagent run stopped' },
+  { reason: 'error', en: 'Subagent run failed' },
+  { reason: 'max-tokens', en: 'Subagent reached the token limit' },
+  { reason: 'refusal', en: 'Subagent declined the task' },
+] as const satisfies readonly { reason: SubagentStopReason; en: string }[]
 
 describe.skipIf(MODE === 'record')('web e2e: subagent result notices', () => {
   let browser: Browser
   beforeAll(async () => { browser = await chromium.launch() })
   afterAll(async () => { await browser?.close() })
 
-  it.each(['en', 'zh'] as const)('shows recorded outcomes and preserves notice bodies in %s', async (locale) => {
+  it.each(['en'] as const)('shows recorded outcomes and preserves notice bodies in %s', async (locale) => {
     const scaffold = await launchWebScaffold()
     let context: BrowserContext | undefined
     try {
       context = await browser.newContext({
-        locale: locale === 'en' ? 'en-US' : 'zh-CN', timezoneId: 'Asia/Shanghai', viewport: { width: 1280, height: 900 },
+        locale: 'en-US', timezoneId: 'Asia/Shanghai', viewport: { width: 1280, height: 900 },
       })
       const page = await context.newPage()
       const tripwire = watchConsole(page)
@@ -72,7 +72,7 @@ describe.skipIf(MODE === 'record')('web e2e: subagent result notices', () => {
         message: createSettlementMessage(childId, 'agent-1', { stopReason: 'completed', output: [] }),
       })
       notices.push({
-        title: locale === 'en' ? 'Subtask status updated' : 'Subtask status updated',
+        title: 'Subtask status updated',
         message: createUserMessage({
           source: { kind: 'subagent-settled', form: 'notice', senderSessionId: childId, summary: 'Background subagent finished.' },
           content: [{ type: 'text', text: 'Background subagent finished.' }],
@@ -124,6 +124,6 @@ describe.skipIf(MODE === 'record')('web e2e: subagent result notices', () => {
   })
 
   it('keeps the fixture inventory closed', async () => {
-    await assertFixtureInventory(DIR, ['en.expected.md', 'zh.expected.md'])
+    await assertFixtureInventory(DIR, ['en.expected.md'])
   })
 })

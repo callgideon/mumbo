@@ -1,12 +1,13 @@
-- button "返回插件": 插件
-- button "卸载 @fixture/missing-bundle": 卸载
+- button "Back to plugins": Plugins
+- button "Uninstall @fixture/missing-bundle": Uninstall
 - status
-- switch "启用 @fixture/missing-bundle" [checked]
+- switch "Enable @fixture/missing-bundle" [checked]
 - heading "@fixture/missing-bundle" [level=3]
-- text: 异常 未安装
+- text: Problem Not installed
 - paragraph:
   - code: "@fixture/missing-bundle"
-- status: "原因: dsh: cannot resolve profile bundle \"@fixture/missing-bundle\" from the dsh installation or {{home}}/profiles/scaffold; run 'dsh plugin --profile scaffold install' if its dependency is not installed"
-- heading "来源信息" [level=4]
-- term: 代码来源
-- definition: 未安装
+- status: "Reason: dsh: cannot resolve profile bundle \"@fixture/missing-bundle\" from the dsh installation or {{home}}/profiles/scaffold; run 'dsh plugin --profile scaffold install' if its dependency is not installed"
+- status "Reading details"
+- heading "Source" [level=4]
+- term: Code source
+- definition: Not installed
