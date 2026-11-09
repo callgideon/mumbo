@@ -42,12 +42,11 @@ export const RESOURCES: readonly { name: string; holds: string; executor?: true 
     executor: true },
   { name: 'settings', holds: 'settings by block, each with the revision a save names: the small blocks whole, the Policy and the Source '
     + 'instances summarized' },
-  { name: 'settings/<block>', holds: 'one settings block whole, as orchestrator_settings_save takes it: policy, eval, executor, pause or '
+  { name: 'settings/<block>', holds: 'one settings block whole, as the panel saves it: policy, eval, executor, pause or '
     + 'source:<id>' },
   { name: 'prompts', holds: 'the prompt revision each Session reads, the skills, and the saved versions' },
   { name: 'prompts/<revision>', holds: 'one prompt version by number, or current, the one the Session works under', executor: true },
   { name: 'prompts/defaults', holds: 'the built-in prompt configuration, and the built-in parts by the key an override names' },
-  { name: 'prompt-preview/<id>', holds: 'a composed prompt that orchestrator_prompts_save previewed' },
   { name: 'models', holds: 'model providers, the DSH default and each role\'s model' },
   { name: 'models/<provider>', holds: 'one provider\'s models' },
   { name: 'feishu/<trigger-id>/…', holds: 'a Feishu original, as the dsh-superagent-feishu skill describes', executor: true },
@@ -191,11 +190,6 @@ const ROUTES: readonly Route[] = [
       : /^\d+$/.test(rest) ? (Number(rest) === 0 && prompts.current().revision === 0 ? prompts.current() : prompts.version(Number(rest))) : undefined
     if (!version || (ticketId && !host.mayRead(sessionId, version.revision))) throw new Error('Unknown or inaccessible prompt version')
     return text({ ...read, resource: rest === 'current' ? `prompts/${version.revision}` : resource }, JSON.stringify(version))
-  }],
-  ['prompt-preview/', read => {
-    const body = main(read).pages.get(`${read.sessionId}:${read.resource}`)
-    if (body === undefined) throw new Error('Unknown preview for this Session')
-    return text(read, body)
   }],
   ['models', async read => {
     const host = main(read), catalog = await host.context.sessionController.modelCatalog(), settings = host.store.settings()
