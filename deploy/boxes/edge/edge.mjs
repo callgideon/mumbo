@@ -102,6 +102,12 @@ nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\
 export const backupCommand = (url) => `set -e; f=$(mktemp /tmp/mumbo-backup.XXXXXX); trap 'rm -f "$f"' EXIT; tar -C / --exclude=node_modules --exclude='*.sqlite-wal' --exclude='*.sqlite-shm' --exclude='home/browser/profile/Singleton*' --exclude='home/browser/profile/*/Cache' --exclude='home/browser/profile/*/Code Cache' --exclude='home/browser/profile/*/GPUCache' --exclude='home/browser/profile/*/Service Worker/CacheStorage' -czf "$f" $(cd / && ls -d root/.dsh root/projects home/browser/profile 2>/dev/null); curl -fsS -m 600 -X PUT -H 'content-type: application/gzip' --upload-file "$f" '${url}'`
 export const restoreCommand = (url) => `curl -fsS -m 600 '${url}' | tar -C / -xzf -`
 
+/** Prints the earliest next run (epoch ms) of the box's active dsh scheduled tasks, or nothing. Reads both storage
+ *  backends (JSON file, SQLite table u_schedule_tasks); runs inside the box with its own Node. */
+export const NEXT_WAKE_COMMAND = `node -e 'const fs=require("fs"),t=[];try{for(const v of Object.values(JSON.parse(fs.readFileSync("/root/.dsh/storages/schedule.json")).tables?.tasks??{}))t.push(v)}catch{}
+try{const{DatabaseSync}=require("node:sqlite");for(const f of fs.readdirSync("/root/.dsh",{recursive:true}).filter(f=>/\\.db$/.test(f))){try{const db=new DatabaseSync("/root/.dsh/"+f,{readOnly:true});for(const r of db.prepare("select value from u_schedule_tasks").all())t.push(JSON.parse(r.value));db.close()}catch{}}}catch{}
+const n=t.filter(x=>x.status==="active").map(x=>Date.parse(x.record?.scheduledAt)).filter(Number.isFinite).sort((a,b)=>a-b)[0];if(n)console.log(n)'`
+
 /** Run fn over items with at most `limit` in flight. */
 export async function inParallel(items, limit, fn) {
   const out = []
@@ -260,15 +266,28 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, log = 
         return false
       }))
       for (const b of due.filter(x => now - x.active >= cfg.idleMs)) await pauseIdle(b)
+      for (const b of listed.filter(x => x.paused && x.wakeAt && x.wakeAt <= now + 60_000)) await wake(b, now)
     } finally {
       await store.release('sweep').catch(() => {})
     }
   }
+  /** Resume a paused box for a scheduled task. dsh restarts: its timers ran on a clock that stood still while the
+   *  box was paused, and a fresh start delivers every task already due. The box pauses again once idle. */
+  async function wake(b, now) {
+    await store.withLock(`user:${b.email}`, LOCK_MS, async () => {
+      const box = await e2b.Sandbox.connect(b.id, { timeoutMs: timeout() })
+      await run(box, '/root/.mumbo/start.sh')
+      await store.patchBox(b.id, { paused: false, wakeAt: undefined, active: now, extended: now, launch: await launchToken(box), traffic: box.trafficAccessToken })
+      say({ msg: 'woke for schedule', user: b.email, box: b.id })
+    }).catch(e => say({ level: 'error', msg: 'wake failed', user: b.email, box: b.id, error: e.message }))
+  }
   async function pauseIdle(b) {
     await store.withLock(`user:${b.email}`, LOCK_MS, async () => {
+      // A paused box cannot run its scheduled tasks, so remember when the next one is due and wake the box then.
+      const wakeAt = await e2b.Sandbox.connect(b.id, { timeoutMs: timeout() }).then(box => run(box, NEXT_WAKE_COMMAND, 30_000)).then(Number).catch(() => 0) || undefined
       await e2b.Sandbox.pause(b.id)
-      await store.patchBox(b.id, { paused: true })
-      say({ msg: 'paused', user: b.email, box: b.id })
+      await store.patchBox(b.id, { paused: true, wakeAt })
+      say({ msg: 'paused', user: b.email, box: b.id, wakeAt: wakeAt && new Date(wakeAt).toISOString() })
     }).catch(async (e) => {
       // A box E2B no longer has is dropped; anything else is retried next sweep.
       if (/not found/i.test(e.message)) await store.deleteBox(b.id)

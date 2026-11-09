@@ -365,3 +365,27 @@ test('backups carry the browser profile without caches or profile locks, and tol
   assert.match(c, /ls -d root\/\.dsh root\/projects home\/browser\/profile 2>\/dev\/null/)
   for (const x of ['Singleton*', '*/Cache', '*/Code Cache', '*/GPUCache']) assert.ok(c.includes(`--exclude='home/browser/profile/${x}'`), x)
 })
+
+test('an idle box is paused with its next scheduled run and woken for it, restarting dsh', async () => {
+  const { NEXT_WAKE_COMMAND } = await import('./edge.mjs')
+  const e2b = fakeE2B(); const ran = []; const paused = []
+  const due = Date.now() + 3 * 3600_000
+  e2b.Sandbox.pause = async (id) => { paused.push(id) }
+  const realConnect = e2b.Sandbox.connect
+  e2b.Sandbox.connect = async (id) => { const b = await realConnect(id); b.commands.run = async (c) => { ran.push(c); return { stdout: c === NEXT_WAKE_COMMAND ? String(due) : c.includes('dsh.log') ? 'launch456' : '' } }; return b }
+  const store = memoryStore()
+  const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'PUT', log: () => {} })
+  const { id } = await b.ensure('a@x.com')
+  await b.sweep(Date.now() + cfg.idleMs + 1)
+  assert.deepEqual(paused, [id])
+  assert.equal((await store.getBox(id)).wakeAt, due)
+  ran.length = 0
+  await store.release('sweep')
+  await b.sweep(due - 2 * 60_000)  // not yet due: stays paused
+  assert.equal((await store.getBox(id)).paused, true)
+  await store.release('sweep')
+  await b.sweep(due - 30_000)
+  const rec = await store.getBox(id)
+  assert.equal(rec.paused, false); assert.equal(rec.wakeAt, undefined); assert.equal(rec.launch, 'launch456')
+  assert.ok(ran.includes('/root/.mumbo/start.sh'))
+})
