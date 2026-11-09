@@ -46,6 +46,12 @@
   cursor: default;
 }
 
+/* A page that may not select the model states it: usual ink, no chevron, symmetric inset. */
+.trigger[data-read-only] {
+  padding-right: 8px;
+  color: var(--dsw-alias-label-secondary);
+}
+
 .triggerLabel {
   min-width: 0;
   overflow: hidden;

@@ -36,12 +36,26 @@ function deferred<T>() {
 }
 
 describe('SettingsDescribeMirror', () => {
+  it('issues no read while the page may not read the settings document', async () => {
+    const describeCall = vi.fn().mockResolvedValue(described([view('theme')]))
+    let readable = false
+    const mirror = new SettingsDescribeMirror(ctxWith(describeCall), () => readable)
+    await mirror.load()
+    await mirror.ensure()
+    expect(describeCall).not.toHaveBeenCalled()
+    expect(mirror.getSnapshot()).toEqual({ status: 'idle', view: undefined, error: null })
+    readable = true
+    await mirror.ensure()
+    expect(describeCall).toHaveBeenCalledTimes(1)
+    expect(mirror.getSnapshot().status).toBe('ready')
+  })
+
   it('folds loads before the wire read into it, and mid-flight loads into one rerun', async () => {
     const gate = deferred<Answer<SettingsDescribeView>>()
     const describeCall = vi.fn()
       .mockReturnValueOnce(gate.promise)
       .mockResolvedValue(described([view('theme', 1)]))
-    const mirror = new SettingsDescribeMirror(ctxWith(describeCall))
+    const mirror = new SettingsDescribeMirror(ctxWith(describeCall), () => true)
     const first = mirror.load()
     // Issued before the wire read goes out: covered by that read, no rerun.
     const early = mirror.load()
@@ -62,7 +76,7 @@ describe('SettingsDescribeMirror', () => {
       .mockResolvedValueOnce(described([view('theme', 2)]))
       .mockRejectedValueOnce(new Error('host gone'))
       .mockResolvedValueOnce(rejected('busy'))
-    const mirror = new SettingsDescribeMirror(ctxWith(describeCall))
+    const mirror = new SettingsDescribeMirror(ctxWith(describeCall), () => true)
     await mirror.load()
     expect(mirror.getSnapshot()).toMatchObject({ status: 'ready', error: null })
     await mirror.load()
@@ -77,7 +91,7 @@ describe('SettingsDescribeMirror', () => {
     const describeCall = vi.fn()
       .mockRejectedValueOnce(new Error('offline'))
       .mockResolvedValueOnce(described([view('theme', 1)]))
-    const mirror = new SettingsDescribeMirror(ctxWith(describeCall))
+    const mirror = new SettingsDescribeMirror(ctxWith(describeCall), () => true)
     await mirror.ensure()
     expect(mirror.getSnapshot()).toMatchObject({ status: 'idle', view: undefined, error: 'offline' })
     await mirror.ensure()
@@ -87,7 +101,7 @@ describe('SettingsDescribeMirror', () => {
 
   it('treats ensure as a no-op once ready', async () => {
     const describeCall = vi.fn().mockResolvedValue(described([view('theme', 1)]))
-    const mirror = new SettingsDescribeMirror(ctxWith(describeCall))
+    const mirror = new SettingsDescribeMirror(ctxWith(describeCall), () => true)
     await mirror.ensure()
     await mirror.ensure()
     await mirror.ensure()
@@ -97,7 +111,7 @@ describe('SettingsDescribeMirror', () => {
   it('acceptView folds one write answer into the held view without a wire read', async () => {
     const describeCall = vi.fn()
       .mockResolvedValueOnce(described([view('theme', 1), view('locale', 4)]))
-    const mirror = new SettingsDescribeMirror(ctxWith(describeCall))
+    const mirror = new SettingsDescribeMirror(ctxWith(describeCall), () => true)
     await mirror.load()
     const seen: number[] = []
     mirror.subscribe(() => { seen.push(mirror.namespace('theme')?.revision ?? -1) })
@@ -110,14 +124,14 @@ describe('SettingsDescribeMirror', () => {
 
   it('acceptView before any answer is a no-op instead of inventing a document', () => {
     const describeCall = vi.fn()
-    const mirror = new SettingsDescribeMirror(ctxWith(describeCall))
+    const mirror = new SettingsDescribeMirror(ctxWith(describeCall), () => true)
     mirror.acceptView(view('theme', 1))
     expect(mirror.getSnapshot()).toEqual({ status: 'idle', view: undefined, error: null })
   })
 
   it('acceptView appends a namespace the held view has not seen yet', async () => {
     const describeCall = vi.fn().mockResolvedValueOnce(described([view('theme', 1)]))
-    const mirror = new SettingsDescribeMirror(ctxWith(describeCall))
+    const mirror = new SettingsDescribeMirror(ctxWith(describeCall), () => true)
     await mirror.load()
     mirror.acceptView(view('fresh-ns', 0))
     expect(mirror.namespace('fresh-ns')).toBeDefined()
@@ -129,7 +143,7 @@ describe('SettingsDescribeMirror', () => {
     // a load() in the one-microtask gap after the rerun check marked a rerun
     // nobody read, and that refresh never reached the wire.
     const describeCall = vi.fn().mockResolvedValue(described([view('theme', 1)]))
-    const mirror = new SettingsDescribeMirror(ctxWith(describeCall))
+    const mirror = new SettingsDescribeMirror(ctxWith(describeCall), () => true)
     void mirror.load()
     await vi.waitFor(() => { expect(describeCall).toHaveBeenCalledTimes(1) })
     void mirror.load()
@@ -141,7 +155,7 @@ describe('SettingsDescribeMirror', () => {
   it('starts no second run for a load issued inside the loading publish', async () => {
     const gate = deferred<Answer<SettingsDescribeView>>()
     const describeCall = vi.fn().mockReturnValue(gate.promise)
-    const mirror = new SettingsDescribeMirror(ctxWith(describeCall))
+    const mirror = new SettingsDescribeMirror(ctxWith(describeCall), () => true)
     let reentered = false
     const unsubscribe = mirror.subscribe(() => {
       if (reentered) return
@@ -161,7 +175,7 @@ describe('SettingsDescribeMirror', () => {
 
   it('lets the first read cover a write folded inside the loading publish', async () => {
     const describeCall = vi.fn().mockResolvedValue(described([view('theme', 2)]))
-    const mirror = new SettingsDescribeMirror(ctxWith(describeCall))
+    const mirror = new SettingsDescribeMirror(ctxWith(describeCall), () => true)
     const unsubscribe = mirror.subscribe(() => {
       unsubscribe()
       mirror.acceptView(view('theme', 2))
@@ -180,7 +194,7 @@ describe('SettingsDescribeMirror', () => {
       .mockResolvedValueOnce(described([view('theme', 4), view('locale', 1)]))
       .mockReturnValueOnce(slow.promise)
       .mockResolvedValueOnce(described([view('theme', 5), view('locale', 2)]))
-    const mirror = new SettingsDescribeMirror(ctxWith(describeCall))
+    const mirror = new SettingsDescribeMirror(ctxWith(describeCall), () => true)
     await mirror.load()
     expect(describeCall).toHaveBeenCalledTimes(1)
     const stale = mirror.load()
@@ -198,7 +212,7 @@ describe('SettingsDescribeMirror', () => {
     const describeCall = vi.fn()
       .mockReturnValueOnce(slow.promise)
       .mockResolvedValueOnce(described([view('theme', 2)]))
-    const mirror = new SettingsDescribeMirror(ctxWith(describeCall))
+    const mirror = new SettingsDescribeMirror(ctxWith(describeCall), () => true)
     const loading = mirror.load()
     await Promise.resolve()
     mirror.acceptView(view('theme', 2))

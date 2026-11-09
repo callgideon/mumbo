@@ -209,7 +209,7 @@ function firstMutate(mutate: ReturnType<typeof vi.fn>): MutateCall {
 async function mountSection(options: Parameters<typeof scriptedFace>[0] = {}) {
   const scripted = scriptedFace(options)
   const controller = new ModelsSettingsStore(
-    ctxWith(scripted.face), settingsSchema, new SettingsDescribeMirror(ctxWith(scripted.face)))
+    ctxWith(scripted.face), settingsSchema, new SettingsDescribeMirror(ctxWith(scripted.face), () => true))
   await controller.load()
   const injected: ModelsSectionProps = {
     controller,
@@ -935,7 +935,7 @@ describe('provider rows', () => {
       settingsPath: ['providers', 'openai'],
     }]))) as never
     const controller = new ModelsSettingsStore(
-      ctxWith(scripted.face), settingsSchema, new SettingsDescribeMirror(ctxWith(scripted.face)))
+      ctxWith(scripted.face), settingsSchema, new SettingsDescribeMirror(ctxWith(scripted.face), () => true))
     await controller.load()
     render(<ModelsSection
       controller={controller}

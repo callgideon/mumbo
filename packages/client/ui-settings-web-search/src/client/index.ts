@@ -18,6 +18,8 @@ import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 // Type-only: the ctx.remote Context merge and the forwarded-event key face.
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
+// Type-only: pulls the remoteAccess service merge (ctx.remoteAccess).
+import type {} from '@deepseek-ai/dsh-api-remote-access/client'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import { WebSearchCard } from './WebSearchCard.tsx'
 import { WEB_API_NS, WEB_NS, WEB_SEARCH_NS, WebSearchCardController } from './web-search-card-controller.ts'
@@ -40,36 +42,31 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 export const NS = 'settings.webSearch'
 
 /** Required services (cordis fiber inject). */
-export const inject = ['slots', 'locale', 'remote', 'remote.credentials', 'remote.web', 'configForms']
+export const inject = ['slots', 'locale', 'remote', 'remote.credentials', 'remote.web', 'configForms', 'remoteAccess']
 
 /**
- * Mount the web search and fetch settings page while the Host serves the `web` namespace.
+ * Mount the web search and fetch settings page while the Host serves the `web` namespace and the
+ * current Peer may read the key's credential state; a page without `credentials/describe` reads nothing.
  * @param ctx - the browser plugin context.
  */
 export function apply(ctx: ClientContext): void {
   const t = ctx.locale.bind(NS)
   ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }), 'ui-settings-web-search: dictionaries')
-  const card = new WebSearchCardController({
-    web: ctx.configForms.get(WEB_NS), api: ctx.configForms.get(WEB_API_NS), legacy: ctx.configForms.get(WEB_SEARCH_NS),
-  }, ctx)
-  ctx.effect(() => () => { card.dispose() }, 'ui-settings-web-search: form subscription')
-  // The credentials the page reports are not part of any settings section, so
-  // no scope publishes when one is written. This is the only signal
-  // that a key written on another surface reached the Host.
-  ctx.effect(
-    () => ctx.remote.$on('credentials/reference-updated', (ref) => { card.refreshCredential(ref) }),
-    'ui-settings-web-search: credential invalidations',
-  )
-  // Plugins register and retract providers without touching any settings
-  // section, and a reconnected Host may hold a different set.
-  ctx.effect(() => {
-    const disposers = [
-      ctx.remote.$on('web/providers-changed', () => { card.refreshProviders() }),
-      ctx.on('connection/reset', () => { card.refreshProviders() }),
-    ]
-    return () => { for (const dispose of disposers) dispose() }
-  }, 'ui-settings-web-search: provider invalidations')
-  ctx.effect(() => ctx.configForms.whileServed([WEB_NS], () => ctx.slots.inject('plugins.item', () => ctx.slots.register({
-    name: 'plugins.item', id: 'web-search', order: 20, label: () => t('title'), locale: NS, inject: () => card.inject(),
-  }, WebSearchCard))), 'ui-settings-web-search: page')
+  ctx.remoteAccess.whenAccess('credentials/describe', function* () {
+    const card = new WebSearchCardController({
+      web: ctx.configForms.get(WEB_NS), api: ctx.configForms.get(WEB_API_NS), legacy: ctx.configForms.get(WEB_SEARCH_NS),
+    }, ctx)
+    yield () => { card.dispose() }
+    // The credentials the page reports are not part of any settings section, so
+    // no scope publishes when one is written. This is the only signal
+    // that a key written on another surface reached the Host.
+    yield ctx.remote.$on('credentials/reference-updated', (ref) => { card.refreshCredential(ref) })
+    // Plugins register and retract providers without touching any settings
+    // section, and a reconnected Host may hold a different set.
+    yield ctx.remote.$on('web/providers-changed', () => { card.refreshProviders() })
+    yield ctx.on('connection/reset', () => { card.refreshProviders() })
+    yield ctx.configForms.whileServed([WEB_NS], () => ctx.slots.inject('plugins.item', () => ctx.slots.register({
+      name: 'plugins.item', id: 'web-search', order: 20, label: () => t('title'), locale: NS, inject: () => card.inject(),
+    }, WebSearchCard)))
+  })
 }

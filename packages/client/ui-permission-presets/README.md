@@ -25,7 +25,7 @@ Choose permission presets for the current Web session or future sessions. Genera
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount this plugin alongside the settings, commands, and conversation packages. General settings receives the future-default row; the composer receives the `conversation.input.permission` control, and bare `/permission` opens the slash picker. Current-session controls require both the Session projection and a complete catalog snapshot. A permission-less composition exposes neither current-session controls nor the Settings row.
+Mount this plugin alongside the settings, commands, and conversation packages. General settings receives the future-default row; the composer receives the `conversation.input.permission` control, and bare `/permission` opens the slash picker. Current-session controls require both the Session projection and a complete catalog snapshot. A permission-less composition exposes neither current-session controls nor the Settings row. A page whose Peer may not call `permissionPresets/catalog`, such as a project member's, registers none of the three surfaces and issues no catalog read.
 
 In narrow browser settings, the default-permission label uses a smaller gutter before its control. Windows and macOS desktop windows retain the standard spacing.
 

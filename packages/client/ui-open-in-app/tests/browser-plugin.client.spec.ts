@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createElement } from 'react'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { bindSnapshotSelector, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
+import { bindSnapshotSelector, makeTranslate, StaticRemoteAccess } from '@deepseek-ai/dsh-client-test-runtime'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { isMobileDevice } from '@deepseek-ai/dsh-client-ui-primitives'
 /**
@@ -56,9 +56,10 @@ const remote = {
 }
 
 /** Boot the browser half over a real slot tree that declares the header list and the document-preview seats. */
-async function bench() {
+async function bench(allows: (action: string) => boolean = () => true) {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
+  new StaticRemoteAccess(ctx, allows)
   ctx.slots.register({
     name: 'root',
     children: {
@@ -271,7 +272,7 @@ describe('open-in-app browser half', () => {
   })
 
   it('declares the services it binds', () => {
-    expect(inject).toEqual(['contextMenus', 'sidebarRight', 'sidebarRightTabs', 'sessions', 'slots', 'locale', 'remote', 'remote.session', 'remote.workspaceFiles', 'shortcuts', 'layout'])
+    expect(inject).toEqual(['contextMenus', 'sidebarRight', 'sidebarRightTabs', 'sessions', 'slots', 'locale', 'remote', 'remote.session', 'remote.workspaceFiles', 'shortcuts', 'layout', 'remoteAccess'])
   })
 
   it('does not open a retained workspace while a global panel hides the Session header', async () => {
@@ -395,6 +396,21 @@ describe('open-in-app browser half', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ app: 'cursor', path: '/w/dir' }),
     })
+    await fiber.dispose()
+  })
+
+  it('probes no Host application and offers none on a page that may not open Host paths', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ apps: ['finder'] }), { status: 200 }))
+    vi.stubGlobal('fetch', fetcher)
+    const allows = vi.fn((action: string) => action !== 'session/openWorkspacePath')
+    const { ctx, fiber } = await bench(allows)
+    const entry = ctx.slots.entries('sidebar.right.tab.files.actions')[0]
+    const injected: Partial<OpenInAppActionInjected> | undefined = entry?.inject?.()
+    if (injected?.hooks === undefined) throw new Error('expected the injected open-in-app hooks')
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(allows).toHaveBeenCalledWith('session/openWorkspacePath')
+    expect(fetcher).not.toHaveBeenCalled()
+    expect(injected.hooks.openInAppApps.getSnapshot()).toBeNull()
     await fiber.dispose()
   })
 

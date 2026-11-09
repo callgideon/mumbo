@@ -77,7 +77,7 @@ function mount(
     },
   }
   const ctx = { remote: api } as never
-  const mirror = new SettingsDescribeMirror(ctx)
+  const mirror = new SettingsDescribeMirror(ctx, () => true)
   const scope = new ConfigFormController<WelcomeSection>(
     ctx,
     { namespace: WELCOME_NOTICE_SETTINGS_NAMESPACE, decode: decodeWelcomeSection },

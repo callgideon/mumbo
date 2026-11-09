@@ -56,15 +56,17 @@ interface EffortChoice {
 
 /**
  * Render the composer model seat.
- * @param props - owner share (locked) + injected face (shared directory
- * store/verbs) + the standard locale seat.
+ * @param props - owner share (locked), the Session access Hook, injected face
+ * (shared directory store/verbs), and the standard locale seat.
  * @returns the trigger and, while open, the two-level menu.
  */
 export function ModelSelect(
-  { locked, available, directory, load, select, resolveText, t, renderSlot }:
-  ModelSelectInjected & Pick<PropsRuntime<'conversation.input.model'>, 'locked'> & PropsLocale<'model'>
+  { locked, useAccess, available, directory, load, select, resolveText, t, renderSlot }:
+  ModelSelectInjected & Pick<PropsRuntime<'conversation.input.model'>, 'locked' | 'useAccess'> & PropsLocale<'model'>
     & Omit<PropsRenderSlots<'conversation.input.model.label' | 'conversation.input.model.options'>, 'SessionProvider'>,
 ) {
+  // A page that may not select this Session's model still reads it, on a chevron-less trigger that opens no menu.
+  const selectable = useAccess('session/selectModel')
   const state = useSyncExternalStore(
     fn => directory.subscribe(fn),
     () => directory.getSnapshot(),
@@ -453,8 +455,9 @@ export function ModelSelect(
         title={triggerLabel}
         aria-busy={busy}
         data-selection-focus={selectionFocus ? '' : undefined}
+        data-read-only={selectable ? undefined : ''}
         onBlur={() => { setSelectionFocus(false) }}
-        disabled={locked}
+        disabled={locked || !selectable}
         onClick={() => {
           if (open) {
             close(true)
@@ -470,7 +473,7 @@ export function ModelSelect(
         {effortLabel !== undefined && <span className={css.triggerEffort}>{effortLabel}</span>}
         {busy
           ? <StateDot state="ongoing" />
-          : <IconChevronDownOutlineRegular className={clsx(css.chevron, open && css.chevronOpen)} />}
+          : selectable && <IconChevronDownOutlineRegular className={clsx(css.chevron, open && css.chevronOpen)} />}
       </button>
 
       {/* Portaled to body (Menu primitive's portal mode) so the sidebar and

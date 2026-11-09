@@ -27,6 +27,8 @@ Open a Session’s directory through **Open in** in its Header More menu or its 
 
 Mount this plugin in the Web composition beside [`dsh-host-open-in-app`](../../host/open-in-app/README.md); this row takes no config. A known Session directory and at least one installed, localized catalog application enable its Open in submenu. The document preview of [`ui-sidebar-documentpreview`](../ui-sidebar-documentpreview/README.md) shows file controls when the Host reports a desktop through `session.canOpenWorkspacePath`; removing this row removes all its controls and menu contributions.
 
+The installed-application probe and the launch are Host routes that answer only the owner. The plugin probes installed applications only while the page's Peer may call `session/openWorkspacePath`, the Remote action that opens a Host path in a Host application; a page without it, such as a project member's, sends no probe and offers no Open in application.
+
 The Header entry uses the More button owned by [`ui-conversation`](../ui-conversation/README.md), with shared button behavior from [`ui-context-menu`](../ui-context-menu/README.md). Open in remains available there without the export plugin; this package supplies menu items rather than its own Header button.
 
 ### What to expect

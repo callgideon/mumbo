@@ -45,6 +45,8 @@ Both entries group models by provider, with DeepSeek Account first and DeepSeek 
 
 The composer replaces the model and effort text with the Models icon when the expanded controls cannot share one line, and restores the text when space permits. The full selection remains available in the trigger's accessible name, tooltip, and menu.
 
+A page whose Session access does not list `session/selectModel` still shows the current model and effort in the trigger's usual color, without its chevron, on a disabled trigger that opens no menu.
+
 ### Model label extensions
 
 `conversation.input.model.label` is a session-scoped, inline `single` slot for the composer trigger (`placement: 'trigger'`), the root menu's current value (`'menu'`), and each model option (`'option'`). Its owner props provide `provider: { id, name }`, the exact catalog `model`, `placement`, and `selected`. Provider names are localized display names; match channels by `provider.id`, and identify a model by the provider/model ID pair. Connection URLs and credentials are not passed to the slot.

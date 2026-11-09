@@ -18,6 +18,7 @@ import type {
 // Type-only: resolves the `ctx.remote.$on` surface.
 import type {} from '@deepseek-ai/dsh-api-gateway/client'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
+import { StaticRemoteAccess } from '@deepseek-ai/dsh-client-test-runtime'
 import * as NodeHalf from '../src/index.ts'
 import * as ClientHalf from '../src/client/index.ts'
 
@@ -39,6 +40,8 @@ interface Bench {
     packageId: CordisDynamicPackageId
     pluginRunId: CordisDynamicPluginRunId
   } }
+  /** Inspect manifests the host received, one provider-id list per sync. */
+  synced: string[][]
   /** Resolutions the host received. */
   resolved: { requestId: string; resolution: unknown }[]
   /** What the namespace received. */
@@ -69,8 +72,9 @@ interface Bench {
 }
 
 /** Mount the browser half over a module table and a loader standing on real fibers. */
-async function boot(ctx = new Context()): Promise<Bench> {
+async function boot(ctx = new Context(), allows: (action: string) => boolean = () => true): Promise<Bench> {
   await ctx.plugin(SlotRegistry)
+  new StaticRemoteAccess(ctx, allows)
   const factories = new Map<string, () => unknown>()
   const fibers = new Map<string, { fiber: unknown }>()
   let next = 0
@@ -111,8 +115,12 @@ async function boot(ctx = new Context()): Promise<Bench> {
   // Every generated Remote method resolves to a RemoteResult: the carrier folds
   // its own failures into the error branch, and only an assembly fault rejects.
   const answered = <T>(value: T): Promise<{ ok: true; value: T }> => Promise.resolve({ ok: true as const, value })
+  const synced: string[][] = []
   const namespace = {
-    syncInspectManifest: () => answered(null),
+    syncInspectManifest: (providers: readonly { id: string }[]) => {
+      synced.push(providers.map(provider => provider.id))
+      return answered(null)
+    },
     resolveInspectQuery: () => answered({ accepted: true }),
     runHostHalf: () => answered({
       ok: true, pluginId: PLUGIN, packageId: PACKAGE, pluginRunId: RUN, waitingFor: [], startedHere: true,
@@ -175,6 +183,7 @@ async function boot(ctx = new Context()): Promise<Bench> {
   return {
     ctx,
     source,
+    synced,
     resolved,
     invoked,
     invokeResult,
@@ -194,6 +203,27 @@ async function boot(ctx = new Context()): Promise<Bench> {
 }
 
 describe('browser half', () => {
+  it('publishes its inspect providers, again after a reconnect, while the page may sync them', async () => {
+    const bench = await boot()
+    await bench.settle()
+    expect(bench.synced).toHaveLength(1)
+    expect(bench.synced[0]!.length).toBeGreaterThan(0)
+    bench.ctx.emit('connection/reset')
+    await bench.settle()
+    expect(bench.synced).toHaveLength(2)
+    await bench.dispose()
+  })
+
+  it('publishes no inspect manifest from a page that may not sync one', async () => {
+    const allows = vi.fn((action: string) => action !== 'dynamicCordisRunner/syncInspectManifest')
+    const bench = await boot(new Context(), allows)
+    bench.ctx.emit('connection/reset')
+    await bench.settle()
+    expect(allows).toHaveBeenCalledWith('dynamicCordisRunner/syncInspectManifest')
+    expect(bench.synced).toEqual([])
+    await bench.dispose()
+  })
+
   it('installs the shared Timer and disposes scheduled work with its consumer', async () => {
     const moduleLoader = Object.getOwnPropertyDescriptor(globalThis, '__ModuleLoader__')
     const ctx = new Context()

@@ -16,6 +16,8 @@ import type {
   ApprovalRequestId, CordisDynamicPluginId, DynamicCordisInvokeResult,
   DynamicCordisInventoryRow,
 } from '@deepseek-ai/dsh-api-remotes/client'
+// Type-only: pulls the remoteAccess service merge (ctx.remoteAccess).
+import type {} from '@deepseek-ai/dsh-api-remote-access/client'
 import type { ClientModuleSystem } from '@deepseek-ai/dsh-client-modules/client'
 import type { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
@@ -174,11 +176,12 @@ export const name = 'cordis-client-runner'
 
 /**
  * Required services: the loader/module chain for entries, the slot registry for
- * contributions, and the `dynamicCordisRunner` Remote namespace. Declaring the
- * namespace parks this plugin until the host side exists, so a page never loads
- * a browser half whose host half it could not reach.
+ * contributions, the `dynamicCordisRunner` Remote namespace, and the access
+ * answer that decides whether this page publishes inspect providers. Declaring
+ * the namespace parks this plugin until the host side exists, so a page never
+ * loads a browser half whose host half it could not reach.
  */
-export const inject = ['loader', 'modules', 'slots', 'remote', 'remote.dynamicCordisRunner']
+export const inject = ['loader', 'modules', 'slots', 'remote', 'remote.dynamicCordisRunner', 'remoteAccess']
 
 /**
  * Client plugin body: build the runner and subscribe the dispatch family.
@@ -197,10 +200,11 @@ export function apply(ctx: Context): void {
     },
   })
   provideClientCordisInspect(ctx, inspect)
-  for (const provider of clientInspectProviders(ctx)) {
-    ctx.effect(() => inspect.register(provider), `cordis-client-runner: inspect ${provider.manifest.id}`)
-  }
-  ctx.on('connection/reset', () => { inspect.publish() })
+  // A page that may not publish its inspect manifest, such as a project member's, registers no provider.
+  ctx.remoteAccess.whenAccess('dynamicCordisRunner/syncInspectManifest', function* () {
+    for (const provider of clientInspectProviders(ctx)) yield inspect.register(provider)
+    yield ctx.on('connection/reset', () => { inspect.publish() })
+  })
 
   const runner = new DynamicCordisPackageRunner({
     ctx,

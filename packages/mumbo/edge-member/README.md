@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@mumbo/edge-member` lets the people of a mumbo shared project act in the project box as themselves. The mumbo edge signs each proxied request with a member header; this plugin registers a [Connection authenticator](../../client/connection/README.md) that admits a correctly signed request as the `edge-member` principal, and a [remote access](../../api/remote-access/README.md) policy that grants members the Session actions a collaborator needs. A member's prompt is recorded with `principal: { kind: 'edge-member', email }`, and the model reads a notice naming the member before it. The design and threat model are in the [Agent Note](../../../.agents/notes/implemented/architecture/2026-11-09-connection-authenticators-and-edge-members.md).
+`@mumbo/edge-member` lets the people of a mumbo shared project act in the project box as themselves. The mumbo edge signs each proxied request with a member header; this plugin registers a [Connection authenticator](../../client/connection/README.md) that admits a correctly signed request as the `edge-member` principal, and a [remote access](../../api/remote-access/README.md) policy that grants members the Session actions a collaborator needs. A member's prompt is recorded with `principal: { kind: 'edge-member', email }`, the model reads a notice naming the member before it, and the Web page shows the member's address above it. The design and threat model are in the [Agent Note](../../../.agents/notes/implemented/architecture/2026-11-09-connection-authenticators-and-edge-members.md).
 
 ## Table of Contents
 
@@ -66,6 +66,8 @@ Live Sessions include subagent children while they run. Remote access refuses ev
 
 Before each entering message an `edge-member` Peer submitted, an `agent/pre-step` listener inserts one user-role notice with source `{ kind: 'mumbo-member', form: 'notice', summary }`. The notice enters the Session log with the message, so the coordinator model sees who wrote each message and a resumed Session replays the same request. Owner messages and other sources pass unchanged.
 
+The package's browser half shows the member's address above each user message a member sent, on the owner's page and on every member's page, through Chat's `conversation.chat.user.before` seat; owner messages and other principal kinds show no line. The notice renders like every other context notice: a collapsed context-injection row in the member's turn that names its source and summary.
+
 <a id="composition"></a>
 ## Composition
 
@@ -101,6 +103,7 @@ Append-only. The notice enters with the message it precedes, after the Session's
 - **Members direct code that runs with the box's power** — a member's prompt runs the coordinator's tools; under Full access with approval `never`, those tools can read the member key and the owner's cookie signing record inside the box. The access policy keeps members off settings, credentials, and plugin calls and attributes their messages, but it does not contain a member who directs the agent to escalate. Treat members as trusted collaborators until the box runs tools under a separate identity.
 - **Finished subagent transcripts are closed to members** — a subagent's child Session is granted only while it is live, because no Workspace lists it.
 - **Browser uploads and file previews are owner-only** — the browser uploads through the exact route `/api/session/uploadFileBinary` and previews files through `/api/file`, and exact routes answer 403 to non-owners.
+- **Steering messages show no author line** — Chat renders the message-source seat only on user rows that open a turn, so a member message admitted while a turn runs shows no address; its notice row still names the member.
 - **Answers carry no member** — `userQuestions/answer` records no principal, so the model cannot tell which member answered a question.
 - **Removal is not immediate** — the box holds no member list; a member the edge removes keeps access until the last header minted for that member expires, at most ten minutes later.
 - **No clock-skew allowance** — the box refuses a header whose expiry is past or more than 600 seconds ahead by its own clock, so the box and edge clocks must agree within five minutes.

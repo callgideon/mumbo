@@ -6,6 +6,8 @@ import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
+// Type-only: pulls the remoteAccess service merge (ctx.remoteAccess).
+import type {} from '@deepseek-ai/dsh-api-remote-access/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from './events.ts'
@@ -33,9 +35,9 @@ export type {
 } from './events.ts'
 export type { CordisKey } from './locales.ts'
 
-/** Required services for historical cards, the panel, and Remote lifecycle actions. */
+/** Required services for historical cards, the panel, Remote lifecycle actions, and the inventory access answer. */
 export const inject = [
-  'slots', 'locale', 'remote', 'remote.dynamicCordisRunner', 'dynamicCordisRunner',
+  'slots', 'locale', 'remote', 'remote.dynamicCordisRunner', 'dynamicCordisRunner', 'remoteAccess',
 ]
 
 /** Mount every Cordis browser surface over the shared Host inventory. */
@@ -72,46 +74,50 @@ export function apply(ctx: ClientContext): void {
     if (snapshot.read) runner.reconcileApprovals(snapshot.rows)
   }), 'ui-cordis: reconcile pending approvals')
 
-  ctx.remote.$on('cordis/dynamic-package', () => { inventory.refresh() })
-  ctx.remote.$on('cordis/dynamic-retract', () => { inventory.refresh() })
-  ctx.remote.$on('cordis/request-run', (request) => {
-    if (!inventory.getSnapshot().rows.some(row => row.pluginId === request.pluginId)) inventory.refresh()
-  })
-  ctx.remote.$on('cordis/request-run-resolved', () => { inventory.refresh() })
-  ctx.on('connection/reset', () => {
-    inventory.reset()
+  // The panel and every inventory read follow access to the inventory; historical cards render without it.
+  ctx.remoteAccess.whenAccess('dynamicCordisRunner/inventory', function* () {
+    yield ctx.remote.$on('cordis/dynamic-package', () => { inventory.refresh() })
+    yield ctx.remote.$on('cordis/dynamic-retract', () => { inventory.refresh() })
+    yield ctx.remote.$on('cordis/request-run', (request) => {
+      if (!inventory.getSnapshot().rows.some(row => row.pluginId === request.pluginId)) inventory.refresh()
+    })
+    yield ctx.remote.$on('cordis/request-run-resolved', () => { inventory.refresh() })
+    yield ctx.on('connection/reset', () => {
+      inventory.reset()
+      inventory.refresh()
+    })
+
+    yield ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
+      name: 'sidebar.footer.action',
+      id: 'cordis-panel',
+      locale: NS,
+      inject: (): CordisPanelFace => ({
+        hooks: {
+          inventory,
+          activeRuns: runner.activeRuns,
+          runErrors: runner.lastRunError,
+          loaded,
+          renderFailures: runner.renderFailures,
+        },
+        onApprove: (requestId, approveFutureVersions) => runner.approve(requestId, approveFutureVersions),
+        onDecline: requestId => runner.decline(requestId),
+        onRun: request => runner.startUserRun(request),
+        onStop: async (sessionId, pluginId) => {
+          const result = await port.stop(sessionId, pluginId)
+          inventory.refresh()
+          return result
+        },
+        onRemove: async (sessionId, pluginId) => {
+          const result = await port.remove(sessionId, pluginId)
+          if (result.ok) inventory.retire(pluginId)
+          inventory.refresh()
+          return result
+        },
+        onRefresh: () => { inventory.refresh() },
+      }),
+    }, CordisPanel))
     inventory.refresh()
   })
-
-  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
-    name: 'sidebar.footer.action',
-    id: 'cordis-panel',
-    locale: NS,
-    inject: (): CordisPanelFace => ({
-      hooks: {
-        inventory,
-        activeRuns: runner.activeRuns,
-        runErrors: runner.lastRunError,
-        loaded,
-        renderFailures: runner.renderFailures,
-      },
-      onApprove: (requestId, approveFutureVersions) => runner.approve(requestId, approveFutureVersions),
-      onDecline: requestId => runner.decline(requestId),
-      onRun: request => runner.startUserRun(request),
-      onStop: async (sessionId, pluginId) => {
-        const result = await port.stop(sessionId, pluginId)
-        inventory.refresh()
-        return result
-      },
-      onRemove: async (sessionId, pluginId) => {
-        const result = await port.remove(sessionId, pluginId)
-        if (result.ok) inventory.retire(pluginId)
-        inventory.refresh()
-        return result
-      },
-      onRefresh: () => { inventory.refresh() },
-    }),
-  }, CordisPanel))
 
   const cardFace = (): CordisCardFace => ({ hooks: { inventory, loaded } })
   ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
@@ -143,6 +149,4 @@ export function apply(ctx: ClientContext): void {
       name: 'tool.call.toolview', key: 'cordis_undefine', locale: NS,
     }, CordisActionRow)
   })
-
-  inventory.refresh()
 }

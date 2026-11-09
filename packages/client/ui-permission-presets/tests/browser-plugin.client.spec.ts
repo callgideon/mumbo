@@ -12,7 +12,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
-import { TestRemote } from '@deepseek-ai/dsh-client-test-runtime'
+import { TestRemote, StaticRemoteAccess } from '@deepseek-ai/dsh-client-test-runtime'
 import { remoteDefaultResponses } from '@deepseek-ai/dsh-client-test-runtime/src/assembly/remote-default-responses.ts'
 import { RemoteMock } from '@deepseek-ai/dsh-remote-mock'
 import { apply as settingsApply, inject as settingsInject } from '@deepseek-ai/dsh-client-ui-settings/client'
@@ -45,7 +45,7 @@ const CATALOG: PermissionCatalog = {
   ],
 }
 
-async function bench() {
+async function bench(allows: (action: string) => boolean = () => true) {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry)
   const locale = new LocaleRuntime(ctx)
@@ -82,6 +82,7 @@ async function bench() {
       'conversation.input.permission': { kind: 'single', scope: 'session' },
     },
   } as never, () => null)
+  new StaticRemoteAccess(ctx, allows)
   await ctx.plugin({ inject: [...settingsInject], apply: settingsApply }).await()
   let decoration: CommandDecoration | undefined
   const dismissed: string[] = []
@@ -123,7 +124,7 @@ async function bench() {
   })
   const fiber = ctx.plugin({ inject: [...inject], apply })
   await fiber.await()
-  await vi.waitFor(() => { expect(catalogCalls).toBe(1) })
+  if (allows('permissionPresets/catalog')) await vi.waitFor(() => { expect(catalogCalls).toBe(1) })
   return {
     ctx, fiber, locale, values, commands, remote, dismissed,
     catalogCalls: () => catalogCalls,
@@ -154,6 +155,16 @@ async function bench() {
 }
 
 describe('ui-permission browser plugin', () => {
+  it('reads no catalog and offers no permission surface on a page that may not read the catalog', async () => {
+    const b = await bench(action => action !== 'permissionPresets/catalog')
+    b.remote.emit('permission-presets/catalog-changed', [])
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(b.catalogCalls()).toBe(0)
+    expect(b.decoration()).toBeUndefined()
+    expect(b.permissionRow()).toBeUndefined()
+    expect(b.permissionSelect()).toBeUndefined()
+  })
+
   it('dismisses stale slash choices on a catalog invalidation and removes that subscription on disposal', async () => {
     const b = await bench()
     const initial = b.dismissed.length

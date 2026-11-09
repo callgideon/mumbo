@@ -9,6 +9,8 @@
  * package owns its own strings.
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
+// Type-only: pulls the remoteAccess service merge (ctx.remoteAccess).
+import type {} from '@deepseek-ai/dsh-api-remote-access/client'
 // Type-only: pulls the SlotMap merge declaring the directory-flow holes.
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 // Type-only: pulls the SlotRegistry service merge (ctx.slots).
@@ -19,13 +21,14 @@ import { BrowseDirectoryFlow } from './flow.ts'
 /** Locale namespace owning the browser dialog's copy. */
 const LOCALE_NS = 'directory-browser'
 
-/** Required services (cordis fiber inject): the slot registry, workspace UI service, and locale. */
-export const inject = ['slots', 'uiWorkspace', 'locale']
+/** Required services (cordis fiber inject): the slot registry, workspace UI service, locale, and access. */
+export const inject = ['slots', 'uiWorkspace', 'locale', 'remoteAccess']
 
 /**
- * Client plugin body: register the dialog's dictionaries and the browse flow
- * into both directory-flow holes through `slots.inject()` because the
- * ui-workspace entries may activate later or replace their declarations.
+ * Client plugin body: register the dialog's dictionaries and, while the
+ * current Peer may list Host directories, the browse flow into both
+ * directory-flow holes through `slots.inject()` because the ui-workspace
+ * entries may activate later or replace their declarations.
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
@@ -173,13 +176,14 @@ export function apply(ctx: ClientContext): void {
   // Both declaration lifetimes must be live before the pair installs; the
   // generator makes the two registrations one transactional effect. The
   // outer/inner nesting order is arbitrary; neither hole has precedence.
-  ctx.slots.inject('conversation.hero.workspace.directoryFlow', () =>
-    ctx.slots.inject('sidebar.workspaces.directoryFlow', function* () {
-      yield ctx.slots.register({
-        name: 'conversation.hero.workspace.directoryFlow', inject: injected,
-      }, BrowseDirectoryFlow)
-      yield ctx.slots.register({
-        name: 'sidebar.workspaces.directoryFlow', inject: injected,
-      }, BrowseDirectoryFlow)
-    }))
+  ctx.remoteAccess.whenAccess('directoryPicker/list', () =>
+    ctx.slots.inject('conversation.hero.workspace.directoryFlow', () =>
+      ctx.slots.inject('sidebar.workspaces.directoryFlow', function* () {
+        yield ctx.slots.register({
+          name: 'conversation.hero.workspace.directoryFlow', inject: injected,
+        }, BrowseDirectoryFlow)
+        yield ctx.slots.register({
+          name: 'sidebar.workspaces.directoryFlow', inject: injected,
+        }, BrowseDirectoryFlow)
+      })))
 }
