@@ -12,26 +12,29 @@
   en: a15c7c13f167e5ac
   zh: a15c7c13f167e5ac
 /agent-note-connection-authenticators-and-mumbo-project-members/decision/authenticator-seam-in-connection:
-  en: a98d4164a557a905
-  zh: c8e03352f2d57d22
+  en: 1863a963728aaa7f
+  zh: 078094be48607172
+/agent-note-connection-authenticators-and-mumbo-project-members/decision/exact-fetch-route-access:
+  en: 68815b884cbaddf7
+  zh: 2e8ce8448e34ce07
 /agent-note-connection-authenticators-and-mumbo-project-members/decision/the-edge-member-principal:
   en: 832c942aec63b521
   zh: b47f29bd62626809
 /agent-note-connection-authenticators-and-mumbo-project-members/decision/collaborator-access:
-  en: a4a84545f756bc68
-  zh: 5221c6a01b4c09e3
+  en: 4cc432c8db9da402
+  zh: 0210090becac2a2a
 /agent-note-connection-authenticators-and-mumbo-project-members/decision/member-attribution:
   en: 60075aa1393a5f31
   zh: dca0e2fb1e0a33e8
 /agent-note-connection-authenticators-and-mumbo-project-members/decision/threat-model:
-  en: 057032e4d793965c
-  zh: 98e317b8d32fdd5d
+  en: 4f2c795dddfd04a0
+  zh: 26128dd6b5212f51
 /agent-note-connection-authenticators-and-mumbo-project-members/decision/owner-token-and-approvals-in-project-boxes:
   en: 378cedd01ee67b00
   zh: e0b7bae3ca09654b
 /agent-note-connection-authenticators-and-mumbo-project-members/alternatives-considered:
-  en: 9154c4f8bacf5e0a
-  zh: 463aa694489ad5d0
+  en: 3c9807621ce5103a
+  zh: 9110d813f41e1721
 /agent-note-connection-authenticators-and-mumbo-project-members/consequences:
-  en: c8e70d92b36b5fd2
-  zh: 08bddc26d6a86630
+  en: 57d55f28e347d6f8
+  zh: b41053dcdf00da8c

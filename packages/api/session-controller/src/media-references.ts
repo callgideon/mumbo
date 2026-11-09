@@ -1,7 +1,8 @@
 /**
  * Authenticated GET/HEAD /api/file reads bounded file responses through
  * the composed filesystem provider. Paths and MIME types do not restrict access;
- * the connection service authenticates requests before this handler. A request
+ * the connection service authenticates requests before this handler, and a
+ * non-owner reaches it only with `hostFiles/readAny` on `global`. A request
  * without the current `v` version is redirected, uncached, to the versioned URL,
  * whose response is cacheable indefinitely.
  * @module @deepseek-ai/dsh-api-session-controller/media-references
@@ -67,8 +68,9 @@ async function serveFile(request: Request, fs: FileSystem, maxBytes: number): Pr
 }
 
 /**
- * File-display contribution. The connection service supplies authentication;
- * `ctx.fs` supplies the execution world's paths, reads, and access policy.
+ * File-display contribution. The connection service supplies authentication
+ * and the non-owner `hostFiles/readAny` check on `global`; `ctx.fs`
+ * supplies the execution world's paths, reads, and access policy.
  */
 export const SessionMediaReferences = {
   inject: ['connection', 'fs', 'attachments'],
@@ -78,6 +80,10 @@ export const SessionMediaReferences = {
       path: '/api/file',
       methods: ['GET', 'HEAD'],
       requestBody: 'buffered',
+      // Any path the filesystem provider can read, so the route touches no narrower resource than `global`.
+      // FIXME: confine a non-owner to one Session's workspace root, as workspaceFiles.confine does; that needs
+      // the Peer, which ConnectionFetchRoute.fetch does not receive, so members cannot render media references.
+      access: { action: 'hostFiles/readAny', resources: {} },
       fetch: request => serveFile(request, ctx.fs, maxBytes),
     }), 'session-controller: /api/file')
   },

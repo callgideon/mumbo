@@ -3,9 +3,18 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import { HostConnectionService, type ConnectionFetchAccessRequest } from '@deepseek-ai/dsh-client-connection'
+import type { BrowserAuth } from '@deepseek-ai/dsh-client-connection/src/browser-auth.ts'
 import { FsError, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
 import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
 import { SessionMediaReferences } from '../src/media-references.ts'
+
+declare module '@deepseek-ai/dsh-typert-protocol' {
+  interface PrincipalMap {
+    /** Test-only non-owner caller shared by the access specs. */
+    'test-guest': { readonly kind: 'test-guest'; readonly guest: string }
+  }
+}
 
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4])
 const DEFAULT_LIMIT = 20 * 1024 * 1024
@@ -251,5 +260,34 @@ describe('SessionMediaReferences /api/file', () => {
     const route = await mount()
     await route.dispose()
     expect(route.unregister).toHaveBeenCalledTimes(1)
+  })
+
+  it('serves a non-owner only with hostFiles/readAny on the global resource', async () => {
+    const ctx = new Context()
+    contexts.push(ctx)
+    const connection = new HostConnectionService(ctx, [], {} as BrowserAuth)
+    ctx.provide('attachments', { imageLimits: { maxImageBytes: DEFAULT_LIMIT } } as never)
+    await ctx.plugin(LocalFileSystem, { cwd: root }).await()
+    await ctx.plugin(SessionMediaReferences).await()
+    let allowed = true
+    const decisions: ConnectionFetchAccessRequest[] = []
+    connection.fetch.authorize((request) => {
+      decisions.push(request)
+      return allowed
+    })
+    const shared = connection.createSharedFetchHandler('/api')
+    const guest = connection.createPeer({ principal: { kind: 'test-guest', guest: 'media' } })
+    const path = join(root, 'shown.png')
+    await writeFile(path, PNG_BYTES)
+    const url = `http://127.0.0.1/api/file?path=${encodeURIComponent(path)}`
+
+    const redirect = await shared.fetch(new Request(url), guest)
+    expect(redirect.status).toBe(302)
+    const versioned = await shared.fetch(new Request(new URL(redirect.headers.get('location')!, url)), guest)
+    expect(await responseBytes(versioned)).toEqual(PNG_BYTES)
+    allowed = false
+    expect((await shared.fetch(new Request(url), guest)).status).toBe(403)
+    expect(decisions.map(({ action, resources }) => ({ action, resources })))
+      .toEqual(Array(3).fill({ action: 'hostFiles/readAny', resources: [{ kind: 'global' }] }))
   })
 })

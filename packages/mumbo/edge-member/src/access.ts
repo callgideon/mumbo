@@ -10,7 +10,8 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 
 /**
  * Host-wide reads a collaborator's page needs, and starting a Session; list and follow results are filtered per
- * Session and Workspace.
+ * Session and Workspace. `hostFiles/readAny` is excluded: `/api/file` reads any file the box can read, including
+ * its secrets and every Session log.
  */
 export const MEMBER_GLOBAL_ROLE: RemoteAccessRole<'global'> = {
   name: 'mumbo:member-global',
@@ -32,9 +33,10 @@ export const MEMBER_GLOBAL_ROLE: RemoteAccessRole<'global'> = {
 }
 
 /**
- * Reading, following, prompting, and stopping one Session, reading its jobs and workspace files, answering its
- * questions, and reusing it as a blank Session. Queue edits are excluded: an edit keeps the edited message's
- * source, so it would record one person's text as another's.
+ * Reading, following, prompting, and stopping one Session, reading its jobs and workspace files, uploading files
+ * for it through the Remote or the browser's binary route, downloading its log archive and copying it as Markdown,
+ * answering its questions, and reusing it as a blank Session. Queue edits are excluded: an edit keeps the edited
+ * message's source, so it would record one person's text as another's.
  */
 export const MEMBER_SESSION_ROLE: RemoteAccessRole<'session'> = {
   name: 'mumbo:member-session',
@@ -42,6 +44,7 @@ export const MEMBER_SESSION_ROLE: RemoteAccessRole<'session'> = {
   actions: [
     'commands/list',
     'fileUploads/upload',
+    'fileUploads/uploadBinary',
     'goals/get',
     'job/list',
     'session/attachment',
@@ -60,6 +63,8 @@ export const MEMBER_SESSION_ROLE: RemoteAccessRole<'session'> = {
     'session/search',
     'session/state',
     'session/wait',
+    'sessionLog/export',
+    'sessionLog/markdown',
     'skills/list',
     'toolResults/watch',
     'userQuestions/answer',
