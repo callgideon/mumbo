@@ -492,7 +492,7 @@ This change does not promise to preserve differences expressed only through a Ho
 - Session Controller and Client README/JSDoc contracts describe the raw journal and Client presentation owner.
 - The tool cookbook documents the Web Client integration path.
 - This Agent Note is the decision owner; retained Host presenter notes keep their independent decisions.
-- Authored Remote types, dependencies, READMEs, pairing records, and generated references remain synchronized.
+- Authored Remote types, dependencies, READMEs, and generated references remain synchronized.
 
 ## Verification Matrix
 

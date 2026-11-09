@@ -12,7 +12,7 @@ The CLI reference captures the supported `dsh` launcher's help, the plugin forwa
 
 Generation uses temporary Harness and Agents homes. Help exits before application work starts and requires no server or model. The plugin forwarder exposes its own help before pnpm arguments; flags after the pnpm command remain pnpm input.
 
-The generated bilingual pages retain CLI output in its original language. `verify-cli-help` compares the complete pages and pairing record and runs with the documentation checks.
+The generated `docs/cli-help.md` page retains CLI output verbatim. `verify-cli-help` compares the complete page and runs with the documentation checks.
 
 ## Alternatives considered
 
