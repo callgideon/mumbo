@@ -224,10 +224,10 @@ describe('SessionRenameDialog', () => {
     const pending = Promise.withResolvers<undefined>()
     const renameSession = vi.fn(() => pending.promise)
     const { settleSessionRename, ask } = renameDialog(renameSession)
-    ask('one', '旧标题')
+    ask('one', 'old title')
     expect(screen.getByRole('dialog', { name: 'Renommer la session' })).toBeTruthy()
     const input = screen.getByLabelText<HTMLInputElement>('Nom de la séance')
-    expect(input.value).toBe('旧标题')
+    expect(input.value).toBe('old title')
     // Confirming the current title is allowed (that gesture pins an automatic
     // title); a blank draft is not, by button or by Enter.
     expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Renommer' }).disabled).toBe(false)
@@ -235,9 +235,9 @@ describe('SessionRenameDialog', () => {
     expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Renommer' }).disabled).toBe(true)
     fireEvent.keyDown(input, { key: 'Enter' })
     expect(renameSession).not.toHaveBeenCalled()
-    fireEvent.change(input, { target: { value: '  新标题  ' } })
+    fireEvent.change(input, { target: { value: '  new title  ' } })
     fireEvent.click(screen.getByRole('button', { name: 'Renommer' }))
-    expect(renameSession).toHaveBeenCalledWith(sid('one'), '新标题')
+    expect(renameSession).toHaveBeenCalledWith(sid('one'), 'new title')
     // While the Host call is pending the input locks and closing is blocked.
     expect(input.disabled).toBe(true)
     fireEvent.keyDown(document, { key: 'Escape' })

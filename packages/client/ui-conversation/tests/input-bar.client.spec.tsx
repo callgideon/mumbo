@@ -511,11 +511,11 @@ describe('image draft rail', () => {
     fireEvent.paste(textarea, {
       clipboardData: {
         items: [{ kind: 'file', type: image.type, getAsFile: () => image }],
-        getData: () => '一起发送的文字',
+        getData: () => 'text sent together',
       },
     })
     expect(addFiles).toHaveBeenCalledWith([image], undefined)
-    await vi.waitFor(() => { expect(shell.snapshot.draft).toBe('一起发送的文字') })
+    await vi.waitFor(() => { expect(shell.snapshot.draft).toBe('text sent together') })
     expect(attachmentOwner(slotCalls).canAcceptDrop).toBe(true)
     act(() => { attachmentOwner(slotCalls).onAddFiles([image]) })
     expect(addFiles).toHaveBeenCalledTimes(2)
@@ -529,14 +529,14 @@ describe('image draft rail', () => {
     ['a directory', new File([], 'folder.png', { type: 'image/png' }), true],
   ])('refuses the entire child attachment batch containing %s', (_name, unsupported, directory) => {
     const addFiles = vi.fn(() => null)
-    const { slotCalls, view, shell } = bench({ subagent: CONTINUABLE_CHILD, addFiles, draft: '保留草稿' })
+    const { slotCalls, view, shell } = bench({ subagent: CONTINUABLE_CHILD, addFiles, draft: 'keep Draft' })
     const image = new File([Uint8Array.of(1)], 'pixel.png', { type: 'image/png' })
     act(() => {
       attachmentOwner(slotCalls).onAddFiles([image, unsupported], directory ? new Set([unsupported]) : undefined)
     })
     expect(addFiles).not.toHaveBeenCalled()
     expect(view.getByRole('alert').textContent).toContain('Only PNG, JPG, WebP, and GIF images are supported')
-    expect(shell.snapshot.draft).toBe('保留草稿')
+    expect(shell.snapshot.draft).toBe('keep Draft')
   })
 
   it.each([
@@ -561,12 +561,12 @@ describe('image draft rail', () => {
           { kind: 'string', type: 'text/plain', getAsFile: () => null },
           { kind: 'file', type: 'image/png', getAsFile: () => image },
         ],
-        getData: () => '同时粘贴的文字',
+        getData: () => 'at the same time Paste\'s text',
       },
     })
     expect(addFiles).toHaveBeenCalledWith([image], undefined)
     // The paste lands inside the PASTE_COMMAND update; its commit is a microtask away.
-    await vi.waitFor(() => { expect(shell.snapshot.draft).toBe('同时粘贴的文字') })
+    await vi.waitFor(() => { expect(shell.snapshot.draft).toBe('at the same time Paste\'s text') })
   })
 
   it('passes known clipboard directories and keeps files whose entry metadata is unavailable', () => {
@@ -757,11 +757,11 @@ describe('image draft rail', () => {
     sink.mockImplementationOnce(() => new Promise<SubmitOutcome>((resolve) => { fail = resolve }))
     fireEvent.keyDown(textarea, { key: 'Enter' })
     expect(attachmentOwner(result.slotCalls).attachments).toEqual([attachments[0]])
-    await act(async () => { fail({ kind: 'error', text: '图片发送失败' }) })
+    await act(async () => { fail({ kind: 'error', text: 'Image send Failed' }) })
     await vi.waitFor(() => {
       expect(attachmentOwner(result.slotCalls).attachments).toEqual([attachments[0]])
     })
-    expect(result.view.getByRole('alert').textContent).toContain('图片发送失败')
+    expect(result.view.getByRole('alert').textContent).toContain('Image send Failed')
   })
 
   it('announces an image-intake rejection as a fading toast, repeatable for the same reason', () => {
@@ -838,8 +838,8 @@ describe('Enter semantics', () => {
     expect(bench({
       running: true,
       queue: [row('q-1')],
-      placeholder: '上层指定提示',
-    }).placeholder).toBe('上层指定提示')
+      placeholder: 'specified by upper layer Warnings',
+    }).placeholder).toBe('specified by upper layer Warnings')
     // The command menu owns Enter while open: neither the hint nor the
     // gesture may claim the chord.
     expect(bench({
@@ -971,9 +971,9 @@ describe('Enter semantics', () => {
 
   it('draft content outranks the queue: accelerated Enter steers the draft only', () => {
     const steerQueue = vi.fn()
-    const { textarea, sink } = bench({ running: true, queue: [row('q-1')], draft: '插话', steerQueue })
+    const { textarea, sink } = bench({ running: true, queue: [row('q-1')], draft: 'interject', steerQueue })
     fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true })
-    expect(sink).toHaveBeenCalledWith('插话', [], 'steer', expect.any(AbortSignal), expect.any(Function))
+    expect(sink).toHaveBeenCalledWith('interject', [], 'steer', expect.any(AbortSignal), expect.any(Function))
     expect(steerQueue).not.toHaveBeenCalled()
   })
 
@@ -1149,20 +1149,20 @@ describe('running and lock semantics', () => {
     fireEvent.click(button)
     expect(stop).toHaveBeenCalledTimes(1)
 
-    writeDraft(shell, '排队消息')
+    writeDraft(shell, 'queued Message')
     expect(button.getAttribute('aria-label')).toBe('Queue message')
     writeDraft(shell, '   ')
     expect(button.getAttribute('aria-label')).toBe('Stop generating')
-    writeDraft(shell, '排队消息2')
+    writeDraft(shell, 'queued Message2')
     expect(button.getAttribute('aria-label')).toBe('Queue message')
     fireEvent.click(button)
-    expect(sink).toHaveBeenCalledWith('排队消息2', [], 'queue', expect.any(AbortSignal), expect.any(Function))
+    expect(sink).toHaveBeenCalledWith('queued Message2', [], 'queue', expect.any(AbortSignal), expect.any(Function))
     await vi.waitFor(() => { expect(button.getAttribute('aria-label')).toBe('Stop generating') })
     expect(stop).toHaveBeenCalledTimes(1)
   })
 
   it('running keeps Stop beside the sending control until the Host accepts the message', async () => {
-    const { view, textarea, stop, sink } = bench({ running: true, draft: '排队消息' })
+    const { view, textarea, stop, sink } = bench({ running: true, draft: 'queued Message' })
     let settle!: (outcome: SubmitOutcome) => void
     sink.mockImplementationOnce(() => new Promise<SubmitOutcome>((resolve) => { settle = resolve }))
     fireEvent.keyDown(textarea, { key: 'Enter' })
@@ -1178,19 +1178,19 @@ describe('running and lock semantics', () => {
   })
 
   it('running Send follows the busy-state Steer preference and labels the delivery', () => {
-    const { button, sink } = bench({ running: true, busyEnter: 'steer', draft: '按钮插话' })
+    const { button, sink } = bench({ running: true, busyEnter: 'steer', draft: 'button interject' })
     expect(button.getAttribute('aria-label')).toBe('Steer message')
     fireEvent.click(button)
-    expect(sink).toHaveBeenCalledWith('按钮插话', [], 'steer', expect.any(AbortSignal), expect.any(Function))
+    expect(sink).toHaveBeenCalledWith('button interject', [], 'steer', expect.any(AbortSignal), expect.any(Function))
   })
 
   it('running Send relabels when the busy-state preference changes live', () => {
-    const { button, busyEnter, sink } = bench({ running: true, draft: '跟随设置' })
+    const { button, busyEnter, sink } = bench({ running: true, draft: 'follow Settings' })
     expect(button.getAttribute('aria-label')).toBe('Queue message')
     act(() => { busyEnter.set('steer') })
     expect(button.getAttribute('aria-label')).toBe('Steer message')
     fireEvent.click(button)
-    expect(sink).toHaveBeenCalledWith('跟随设置', [], 'steer', expect.any(AbortSignal), expect.any(Function))
+    expect(sink).toHaveBeenCalledWith('follow Settings', [], 'steer', expect.any(AbortSignal), expect.any(Function))
   })
 
   it('running Send keeps the plain label for a slash line and a claimed command', () => {
@@ -1217,7 +1217,7 @@ describe('running and lock semantics', () => {
   it('running Send keeps the plain label while a file upload is still pending', () => {
     const file = { kind: 'file' as const, id: 'file-1' as DraftAttachmentId, file: new File(['x'], 'note.txt', { type: 'text/plain' }) }
     const pending = bench({
-      running: true, busyEnter: 'steer', draft: '带附件', attachments: [file],
+      running: true, busyEnter: 'steer', draft: 'with Attachments', attachments: [file],
       fileUploads: { [file.id]: { status: 'uploading', loaded: 0 } },
     })
     expect(pending.button.getAttribute('aria-label')).toBe('Send message')
@@ -1225,14 +1225,14 @@ describe('running and lock semantics', () => {
 
     // A failed upload holds the same gate until it is retried or removed.
     const failed = bench({
-      running: true, busyEnter: 'steer', draft: '带附件', attachments: [file],
+      running: true, busyEnter: 'steer', draft: 'with Attachments', attachments: [file],
       fileUploads: { [file.id]: { status: 'error', message: 'upload failed' } },
     })
     expect(failed.button.getAttribute('aria-label')).toBe('Send message')
     expect(failed.button.disabled).toBe(true)
 
     const ready = bench({
-      running: true, busyEnter: 'steer', draft: '带附件', attachments: [file],
+      running: true, busyEnter: 'steer', draft: 'with Attachments', attachments: [file],
       fileUploads: { [file.id]: { status: 'ready', receiptId: 'receipt-1' as never, file: { kind: 'file' } as never } },
     })
     expect(ready.button.getAttribute('aria-label')).toBe('Steer message')
@@ -1247,14 +1247,14 @@ describe('running and lock semantics', () => {
       previewUrl: 'blob:shot',
     }
     const uploading = bench({
-      running: true, busyEnter: 'steer', draft: '带图', attachments: [image],
+      running: true, busyEnter: 'steer', draft: 'with image', attachments: [image],
       fileUploads: { [image.id]: { status: 'uploading', loaded: 0 } },
     })
     expect(uploading.button.getAttribute('aria-label')).toBe('Send message')
     expect(uploading.button.disabled).toBe(true)
 
     // A subagent continuation's image has no upload and travels inline.
-    const inline = bench({ running: true, busyEnter: 'steer', draft: '带图', attachments: [image] })
+    const inline = bench({ running: true, busyEnter: 'steer', draft: 'with image', attachments: [image] })
     expect(inline.button.getAttribute('aria-label')).toBe('Steer message')
     expect(inline.button.disabled).toBe(false)
   })
@@ -1275,7 +1275,7 @@ describe('running and lock semantics', () => {
       previewUrl: 'blob:wide',
     }
     const enterWith = (upload: NonNullable<BenchOptions['fileUploads']>[string]): string | null => {
-      const result = bench({ draft: '带图', attachments: [image], fileUploads: { [image.id]: upload }, imageLimits: limits })
+      const result = bench({ draft: 'with image', attachments: [image], fileUploads: { [image.id]: upload }, imageLimits: limits })
       fireEvent.keyDown(result.textarea, { key: 'Enter' })
       expect(result.sink).not.toHaveBeenCalled()
       const text = result.view.getByRole('alert').textContent
@@ -1292,10 +1292,10 @@ describe('running and lock semantics', () => {
   })
 
   it('idle Send keeps the plain label regardless of the busy-state preference', () => {
-    const { button, sink } = bench({ busyEnter: 'steer', draft: '空闲发送' })
+    const { button, sink } = bench({ busyEnter: 'steer', draft: 'Idle send' })
     expect(button.getAttribute('aria-label')).toBe('Send message')
     fireEvent.click(button)
-    expect(sink).toHaveBeenCalledWith('空闲发送', [], 'queue', expect.any(AbortSignal), expect.any(Function))
+    expect(sink).toHaveBeenCalledWith('Idle send', [], 'queue', expect.any(AbortSignal), expect.any(Function))
   })
 
   it('running treats an attachment-only draft as Send', async () => {
@@ -1315,12 +1315,12 @@ describe('running and lock semantics', () => {
   it('running blocked composer keeps Stop with a retained draft', () => {
     const { button, sink, stop, textarea } = bench({
       running: true,
-      draft: '保留的草稿',
-      blocked: { reason: '请选择可用模型' },
-      placeholder: '请选择可用模型',
+      draft: 'preserved Draft',
+      blocked: { reason: 'please select Available models' },
+      placeholder: 'please select Available models',
     })
     expect(textarea.getAttribute('aria-disabled')).toBe('true')
-    expect(textarea.getAttribute('data-placeholder')).toBe('请选择可用模型')
+    expect(textarea.getAttribute('data-placeholder')).toBe('please select Available models')
     expect(button.getAttribute('aria-label')).toBe('Stop generating')
     expect(button.disabled).toBe(false)
     fireEvent.click(button)
@@ -1329,9 +1329,9 @@ describe('running and lock semantics', () => {
   })
 
   it('running plain Enter follows the busy-state Steer preference', () => {
-    const { textarea, sink } = bench({ running: true, busyEnter: 'steer', draft: '直接插话' })
+    const { textarea, sink } = bench({ running: true, busyEnter: 'steer', draft: 'interject directly' })
     fireEvent.keyDown(textarea, { key: 'Enter' })
-    expect(sink).toHaveBeenCalledWith('直接插话', [], 'steer', expect.any(AbortSignal), expect.any(Function))
+    expect(sink).toHaveBeenCalledWith('interject directly', [], 'steer', expect.any(AbortSignal), expect.any(Function))
   })
 
   it('a running composer whose access excludes prompting and stopping offers neither Stop nor Send', () => {
@@ -1340,8 +1340,8 @@ describe('running and lock semantics', () => {
       // The bar is handed a live Stop handler all the same, so what withholds the action is the access
       // answer and not a missing face.
       deniedEndpoints: ['session/prompt', 'session/cancel'],
-      blocked: { reason: '只读查看：本页由 owner 分享，无法发送消息' },
-      placeholder: '只读查看：本页由 owner 分享，无法发送消息',
+      blocked: { reason: 'read-only Inspect: this page Renamed from owner, The message could not be sent' },
+      placeholder: 'read-only Inspect: this page Renamed from owner, The message could not be sent',
     })
     expect(view.container.querySelector('button[aria-label="Stop generating"]')).toBeNull()
     expect(view.container.querySelector('button[aria-label="Send message"]')).toBeNull()
@@ -1353,7 +1353,7 @@ describe('running and lock semantics', () => {
     expect(empty.view.getByLabelText('Stop generating')).toBeTruthy()
     cleanup()
     // A draft would make the primary action the busy Send, which the snapshot excludes.
-    const drafted = bench({ running: true, deniedEndpoints: ['session/prompt'], draft: '排到下一轮' })
+    const drafted = bench({ running: true, deniedEndpoints: ['session/prompt'], draft: 'queue for the next round' })
     expect(drafted.view.container.querySelector('button[aria-label="Queue message"]')).toBeNull()
   })
 
@@ -1370,9 +1370,9 @@ describe('running and lock semantics', () => {
   })
 
   it('running Cmd/Ctrl+Enter uses the opposite of the busy-state Enter preference', () => {
-    const meta = bench({ running: true, busyEnter: 'steer', draft: '排到下一轮' })
+    const meta = bench({ running: true, busyEnter: 'steer', draft: 'queue for the next round' })
     fireEvent.keyDown(meta.textarea, { key: 'Enter', metaKey: true })
-    expect(meta.sink).toHaveBeenCalledWith('排到下一轮', [], 'queue', expect.any(AbortSignal), expect.any(Function))
+    expect(meta.sink).toHaveBeenCalledWith('queue for the next round', [], 'queue', expect.any(AbortSignal), expect.any(Function))
 
     const ctrl = bench({ running: true, busyEnter: 'steer', draft: 'also queue' })
     fireEvent.keyDown(ctrl.textarea, { key: 'Enter', ctrlKey: true })
@@ -1382,7 +1382,7 @@ describe('running and lock semantics', () => {
   it('running continuable subagent keeps Send beside an independent Stop', () => {
     const { button, interruptButton, textarea, sink, stop, view, slotCalls, shell } = bench({
       running: true,
-      draft: '后续消息',
+      draft: 'follow-up Message',
       subagent: {
         address: {
           parentSessionId: 'parent' as SessionId,
@@ -1403,7 +1403,7 @@ describe('running and lock semantics', () => {
     expect(click).not.toHaveBeenCalled()
     click.mockRestore()
     fireEvent.click(button)
-    expect(sink).toHaveBeenCalledWith('后续消息', [], 'queue', expect.any(AbortSignal), expect.any(Function))
+    expect(sink).toHaveBeenCalledWith('follow-up Message', [], 'queue', expect.any(AbortSignal), expect.any(Function))
     fireEvent.click(interruptButton!)
     expect(stop).toHaveBeenCalledTimes(1)
   })
@@ -1416,10 +1416,10 @@ describe('running and lock semantics', () => {
         mode: 'continuable' as const,
       },
     }
-    const { button, sink } = bench({ running: true, busyEnter: 'steer', draft: '子代理插话', subagent })
+    const { button, sink } = bench({ running: true, busyEnter: 'steer', draft: 'subagent interject', subagent })
     expect(button.getAttribute('aria-label')).toBe('Steer message')
     fireEvent.click(button)
-    expect(sink).toHaveBeenCalledWith('子代理插话', [], 'steer', expect.any(AbortSignal), expect.any(Function))
+    expect(sink).toHaveBeenCalledWith('subagent interject', [], 'steer', expect.any(AbortSignal), expect.any(Function))
 
     // No draft: the child has no Stop seat to fall back to, so its disabled
     // Send keeps the plain label instead of naming a delivery it cannot make.
@@ -1486,7 +1486,7 @@ describe('running and lock semantics', () => {
   it('running one-shot subagent never exposes Stop', () => {
     const { button, interruptButton, stop } = bench({
       running: true,
-      draft: '不可停止',
+      draft: 'cannot Stop',
       subagent: {
         address: {
           parentSessionId: 'parent' as SessionId,
@@ -1812,8 +1812,8 @@ describe('decorations', () => {
     expect(commandChipOf(view.container)?.textContent).toBe('/goal')
     expect(textarea.style.getPropertyValue('--dsh-composer-hint')).toBe(JSON.stringify('Goal objective'))
     // Args typed: the hint disappears, the chip stays.
-    act(() => { shell.actions.insertText('发布', shell.actions.captureInsertion()) })
-    expect(shell.snapshot.draft).toBe('/goal 发布')
+    act(() => { shell.actions.insertText('release', shell.actions.captureInsertion()) })
+    expect(shell.snapshot.draft).toBe('/goal release')
     expect(textarea.style.getPropertyValue('--dsh-composer-hint')).toBe('')
     expect(commandChipOf(view.container)).not.toBeNull()
   })
@@ -1833,9 +1833,9 @@ describe('decorations', () => {
   it('the hint lookup keys on the claim name, so a localized claim token keeps the locale entry', () => {
     const { shell, textarea } = bench()
     act(() => {
-      shell.setDraft('/目标 ')
+      shell.setDraft('/Goal ')
       shell.beginCommand(
-        { name: 'goal', token: '/目标 ', hint: '[<objective>|clear|edit <objective>|pause|resume]', submit: () => Promise.resolve({ kind: 'success' as const }) },
+        { name: 'goal', token: '/Goal ', hint: '[<objective>|clear|edit <objective>|pause|resume]', submit: () => Promise.resolve({ kind: 'success' as const }) },
         { start: 0, end: 4, draftRev: shell.snapshot.draftRev },
       )
     })
@@ -1856,18 +1856,18 @@ describe('decorations', () => {
     expect(textarea.hasAttribute('data-composer-composing')).toBe(false)
 
     act(() => {
-      shell.setDraft('/目标 ')
+      shell.setDraft('/Goal ')
       shell.beginCommand(
-        { name: 'goal', token: '/目标 ', hint: 'Goal objective', submit: () => Promise.resolve({ kind: 'success' as const }) },
+        { name: 'goal', token: '/Goal ', hint: 'Goal objective', submit: () => Promise.resolve({ kind: 'success' as const }) },
         { start: 0, end: 4, draftRev: shell.snapshot.draftRev },
       )
     })
     fireEvent.compositionStart(textarea)
-    act(() => { shell.setDraft('/目标 z') })
-    act(() => { shell.setDraft('/目标 ') })
+    act(() => { shell.setDraft('/Goal z') })
+    act(() => { shell.setDraft('/Goal ') })
     expect(textarea.hasAttribute('data-composer-composing')).toBe(true)
-    fireEvent.compositionEnd(textarea, { data: '这' })
-    act(() => { shell.setDraft('/目标 这') })
+    fireEvent.compositionEnd(textarea, { data: 'this' })
+    act(() => { shell.setDraft('/Goal this') })
     await act(async () => {})
     expect(textarea.hasAttribute('data-composer-composing')).toBe(false)
     expect(textarea.style.getPropertyValue('--dsh-composer-hint')).toBe('')
@@ -1876,22 +1876,22 @@ describe('decorations', () => {
   it('an inserted reference renders a real chip capsule with its icon and label', () => {
     const { view, shell } = bench()
     const reference = {
-      source: 'reference', ref: 'w1', label: '会话一', appearance: 'session' as const, clipboardText: '@w1',
+      source: 'reference', ref: 'w1', label: 'Sessions one', appearance: 'session' as const, clipboardText: '@w1',
     }
     act(() => {
-      shell.setDraft('参考 @w1 内容')
+      shell.setDraft('Allow roughly @w1 Content')
       shell.insertReference(
         reference,
         { start: 3, end: 6, draftRev: shell.snapshot.draftRev },
       )
     })
     const chip = view.container.querySelector('[data-composer-chip]')
-    expect(chip?.textContent).toBe('会话一')
+    expect(chip?.textContent).toBe('Sessions one')
     expect(chip?.querySelector('svg')).not.toBeNull()
     expect(chip?.getAttribute('contenteditable')).toBe('false')
     expect(shell.snapshot.occurrences).toHaveLength(1)
     // The draft IS the clipboard projection; the label lives in the chip DOM.
-    expect(shell.snapshot.draft).toBe('参考 @w1 内容')
+    expect(shell.snapshot.draft).toBe('Allow roughly @w1 Content')
     expect(shell.snapshot.occurrences[0]).toMatchObject({ offset: 3, length: 3 })
   })
 
@@ -1900,7 +1900,7 @@ describe('decorations', () => {
     act(() => {
       shell.setDraft('@w1')
       shell.insertReference({
-        source: 'reference', ref: 'w1', label: '会话一', appearance: 'session', clipboardText: '@w1',
+        source: 'reference', ref: 'w1', label: 'Sessions one', appearance: 'session', clipboardText: '@w1',
       }, { start: 0, end: 3, draftRev: shell.snapshot.draftRev })
     })
     const chip = view.container.querySelector('[data-composer-chip]')
@@ -1917,9 +1917,9 @@ describe('decorations', () => {
     // removes the whole occurrence — is checkable here.
     const { shell } = bench()
     act(() => {
-      shell.setDraft('前 @w1 后')
+      shell.setDraft('before @w1 after')
       shell.insertReference({
-        source: 'reference', ref: 'w1', label: '会话一', appearance: 'session', clipboardText: '@w1',
+        source: 'reference', ref: 'w1', label: 'Sessions one', appearance: 'session', clipboardText: '@w1',
       }, { start: 2, end: 5, draftRev: shell.snapshot.draftRev })
     })
     expect(shell.snapshot.occurrences).toHaveLength(1)
@@ -1928,15 +1928,15 @@ describe('decorations', () => {
         expect($replaceDetectSpanWithText({ start: 2, end: 3 }, '')).toBe(true)
       }, { discrete: true })
     })
-    expect(shell.snapshot).toMatchObject({ draft: '前  后', occurrences: [] })
+    expect(shell.snapshot).toMatchObject({ draft: 'before  after', occurrences: [] })
   })
 
   it('copy and cut expand a selected chip to its clipboard projection natively', async () => {
     const { shell, textarea } = bench()
     act(() => {
-      shell.setDraft('前 @w1 后')
+      shell.setDraft('before @w1 after')
       shell.insertReference({
-        source: 'reference', ref: 'w1', label: '会话一', appearance: 'session', clipboardText: '@w1',
+        source: 'reference', ref: 'w1', label: 'Sessions one', appearance: 'session', clipboardText: '@w1',
       }, { start: 2, end: 5, draftRev: shell.snapshot.draftRev })
       // Select the chip plus its flanking spaces: detect [1, 4).
       shell.editor.update(() => { $selectDetectSpan({ start: 1, end: 4 }) }, { discrete: true })
@@ -1944,14 +1944,14 @@ describe('decorations', () => {
     const setData = vi.fn()
     fireEvent.copy(textarea, { clipboardData: { setData, getData: () => '' } })
     expect(setData).toHaveBeenCalledWith('text/plain', ' @w1 ')
-    expect(shell.snapshot.draft).toBe('前 @w1 后')
+    expect(shell.snapshot.draft).toBe('before @w1 after')
 
     act(() => {
       shell.editor.update(() => { $selectDetectSpan({ start: 1, end: 4 }) }, { discrete: true })
     })
     fireEvent.cut(textarea, { clipboardData: { setData, getData: () => '' } })
     await vi.waitFor(() => {
-      expect(shell.snapshot).toMatchObject({ draft: '前后', occurrences: [] })
+      expect(shell.snapshot).toMatchObject({ draft: 'before and after', occurrences: [] })
     })
     expect(setData).toHaveBeenLastCalledWith('text/plain', ' @w1 ')
   })
@@ -2059,8 +2059,8 @@ describe('strips and variants', () => {
     vi.useFakeTimers()
     try {
       const { view, shell } = bench()
-      act(() => { shell.notify('error', '命令失败了') })
-      expect(view.getByRole('alert').textContent).toContain('命令失败了')
+      act(() => { shell.notify('error', 'command Failed done') })
+      expect(view.getByRole('alert').textContent).toContain('command Failed done')
       expect(view.queryByRole('status')).toBeNull()
       act(() => { vi.advanceTimersByTime(4000) })
       expect(view.queryByRole('alert')).toBeNull()
@@ -2071,8 +2071,8 @@ describe('strips and variants', () => {
 
   it('renders an information notice from the machine store as a status strip', () => {
     const { view, shell } = bench()
-    act(() => { shell.notify('info', '命令完成了') })
-    expect(view.getByRole('status').textContent).toBe('命令完成了')
+    act(() => { shell.notify('info', 'command Done done') })
+    expect(view.getByRole('status').textContent).toBe('command Done done')
     expect(view.queryByRole('alert')).toBeNull()
   })
 
@@ -2101,7 +2101,7 @@ describe('command launcher chrome and control seats', () => {
     const { view, slotCalls } = bench()
     expect(view.getByLabelText('Add files or run commands')).toBeTruthy()
     // Capability absent (no permission slot entry): the chip renders nothing.
-    expect(view.queryByLabelText(/^访问模式/)).toBeNull()
+    expect(view.queryByLabelText(/^access mode/)).toBeNull()
     // Every seat dispatched, nothing rendered (render passes may repeat; the
     // seat set is the contract).
     expect([...new Set(slotCalls.map(c => c.key))]).toEqual([

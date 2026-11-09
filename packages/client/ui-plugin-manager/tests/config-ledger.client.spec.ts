@@ -67,10 +67,10 @@ describe('configLedgerSource', () => {
       rows: new Set(['dsh-x#row']),
     })
     // A label thunk is re-read when the locale moves, not before.
-    title = '终端'
+    title = 'Terminal'
     expect(source.getSnapshot().items[0]?.label).toBe('Shell')
     b.setLocale()
-    expect(source.getSnapshot().items[0]?.label).toBe('终端')
+    expect(source.getSnapshot().items[0]?.label).toBe('Terminal')
   })
 
   it('lists an entry without a label under an empty title and skips a keyed entry without a key', () => {

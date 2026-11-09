@@ -297,7 +297,7 @@ async function qualify() {
     console.log('workspace qualification: mandatory check dispatched')
     const mandatory = await windowAt('dsh-app://shell/mandatory-update.html')
     console.log('workspace qualification: mandatory window loaded')
-    await documentReady(mandatory, `document.getElementById('title')?.textContent === '需要更新'`)
+    await documentReady(mandatory, `document.getElementById('title')?.textContent === 'Update required'`)
     console.log('workspace qualification: mandatory title rendered')
     assert.equal(await mandatory.webContents.executeJavaScript(`document.getElementById('title').children.length`), 0)
     assert.equal(mandatory.isModal(), false)

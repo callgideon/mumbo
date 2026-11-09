@@ -130,7 +130,7 @@ it('keeps mandatory diagnostics expandable without clearing the block or authori
 function mandatoryPage(update: MandatoryUpdateView['update']) {
   const p = page('mandatory-update')
   const initial: MandatoryUpdateView = { locale: resolveDesktopLocale('de'), deferred: false,
-    policy: { blocking: true, checking: false, title: '需要更新', page: 'https://downloads.example.com/desktop' }, update }
+    policy: { blocking: true, checking: false, title: 'need Update', page: 'https://downloads.example.com/desktop' }, update }
   const action = vi.fn(async () => {})
   let publish!: (view: MandatoryUpdateView) => void
   Object.defineProperty(p.dom.window, 'dshMandatoryUpdate', { value: {
@@ -210,8 +210,8 @@ it('reveals the complete selectable address only after copy failure, without rep
 it('renders server markup literally in a dedicated safety case', async () => {
   const p = mandatoryPage({ phase: 'available', version: '1.0.1-nightly.1' })
   await expect.poll(() => p.element('update').textContent).toBe('Update herunterladen')
-  p.publish({ ...p.initial, policy: { ...p.initial.policy, title: '<b>请更新</b>', detail: '<img src=x onerror=alert(1)>' } })
-  expect(p.element('title').textContent).toBe('<b>请更新</b>')
+  p.publish({ ...p.initial, policy: { ...p.initial.policy, title: '<b>please Update</b>', detail: '<img src=x onerror=alert(1)>' } })
+  expect(p.element('title').textContent).toBe('<b>please Update</b>')
   expect(p.element('title').childElementCount).toBe(0)
   expect(p.element('detail').childElementCount).toBe(0)
 })

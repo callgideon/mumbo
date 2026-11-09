@@ -192,7 +192,7 @@ it('removes the command and frame on unload and starts a fresh closed panel on r
 it('uses Japanese panel and shortcut labels through the production registration', async () => {
   const { runtime, locale, body } = await setup()
   act(() => {
-    locale.addLanguage({ id: 'ja', label: '日本語', fallback: 'en' })
+    locale.addLanguage({ id: 'ja', label: 'Japanese', fallback: 'en' })
     locale.setLocale('ja')
   })
   press()

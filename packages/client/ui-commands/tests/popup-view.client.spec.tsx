@@ -105,7 +105,7 @@ describe('PopupSelectView', () => {
   })
 
   it('uses command-owned search copy and resets to generic copy for the next popup', async () => {
-    const labels = { placeholder: 'Search models…', empty: '没有可用的模型。', noResults: 'No matching models.' }
+    const labels = { placeholder: 'Search models…', empty: 'no available Model.', noResults: 'No matching models.' }
     const searchLabels = vi.fn(() => labels)
     const { popup, search } = await mountOpen({ searchLabels })
     expect(search.getAttribute('placeholder')).toBe(labels.placeholder)

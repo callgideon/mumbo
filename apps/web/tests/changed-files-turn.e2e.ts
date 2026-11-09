@@ -18,14 +18,14 @@ import {
 import { openSettings, expandOwningTurnProcess, connectFreshWorkspace } from './support.ts'
 
 const DIR = fileURLToPath(new URL('../../../snapshots/web/changed-files-turn', import.meta.url))
-const FIXTURE = join(DIR, 'session.v3.jsonl')
+const FIXTURE = join(DIR, 'session.v4.jsonl')
 const MODE = webSnapshotMode()
-const PROMPT = '不用先查看目录，直接做四件事：把 intro.md 里的标题「示例项目」改成「项目说明」，新建 src/util.ts 导出一个两数相加的 add 函数，新建 app.local 写一行 mode=demo，最后用 bash 在 notes.txt 末尾追加一行 done。'
+const PROMPT = 'Skip viewing the directory and do four things directly: change the heading "Sample project" in intro.md to "Project notes", create src/util.ts exporting an add function that adds two numbers, create app.local with one line mode=demo, and finally use bash to append one line "done" to the end of notes.txt.'
 
 /** Seed a committed repository so the turn's own edits are the only difference between its snapshots; `*.local` stays ignored. */
 async function seedRepository(cwd: string): Promise<void> {
   await mkdir(cwd, { recursive: true })
-  await writeFile(join(cwd, 'intro.md'), '# 示例项目\n\n一个用于演示的仓库。\n')
+  await writeFile(join(cwd, 'intro.md'), '# Sample project\n\nA repository used for demos.\n')
   await writeFile(join(cwd, 'notes.txt'), 'start\n')
   await writeFile(join(cwd, '.gitignore'), '*.local\n')
   const git = (...args: string[]) => execFileSync('git', ['-c', 'user.email=seed@example.com', '-c', 'user.name=seed', '-c', 'commit.gpgsign=false', ...args], { cwd, stdio: 'ignore' })
@@ -503,8 +503,8 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
     expect(await compareTool.locator('svg').evaluate(icon => getComputedStyle(icon).transform)).toBe('none')
     await compareTool.click()
     await review.locator('[data-review-view="split"]').waitFor({ state: 'visible' })
-    await expect.poll(() => drawn(review.locator('[data-diff-side="left"]'))).toEqual(['del:1# 示例项目', 'context:2', 'context:3一个用于演示的仓库。'])
-    expect(await drawn(review.locator('[data-diff-side="right"]'))).toEqual(['del:1# 项目说明', 'context:2', 'context:3一个用于演示的仓库。'])
+    await expect.poll(() => drawn(review.locator('[data-diff-side="left"]'))).toEqual(['del:1# Sample project', 'context:2', 'context:3A repository used for demos.'])
+    expect(await drawn(review.locator('[data-diff-side="right"]'))).toEqual(['del:1# Project notes', 'context:2', 'context:3A repository used for demos.'])
     // Constrain the recorded three-row diff to exercise unequal horizontal ranges and classic scrollbars.
     const scrollLayout = await page.addStyleTag({ content: `
       [data-changes-review] { height: 120px !important; }
@@ -544,7 +544,7 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
     }
     await review.getByRole('button', { name: 'Wrap lines' }).click()
     await review.locator('[data-review-view][data-review-wrap]').waitFor({ state: 'visible' })
-    await expect.poll(() => drawn(review)).toEqual(['del:1# 示例项目1# 项目说明', 'context:22', 'context:3一个用于演示的仓库。3一个用于演示的仓库。'])
+    await expect.poll(() => drawn(review)).toEqual(['del:1# Sample project1# Project notes', 'context:22', 'context:3A repository used for demos.3A repository used for demos.'])
     const wrappedAddition = review.locator('[data-diff-line="del"] > span').nth(1)
     const wrappedAdditionRule = await wrappedAddition.evaluate((cell) => {
       const number = cell.children[0]

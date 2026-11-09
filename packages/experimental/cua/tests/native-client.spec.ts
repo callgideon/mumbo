@@ -79,9 +79,9 @@ describe('native helper transport', () => {
   it('accepts split UTF-8 replies and preserves native refusal codes without closing the connection', async () => {
     const f = fixture()
     const first = f.client.request('listApps', {}, new AbortController().signal)
-    const bytes = Buffer.from(JSON.stringify({ id: f.id(), result: [{ name: '编辑器' }] }) + '\n')
+    const bytes = Buffer.from(JSON.stringify({ id: f.id(), result: [{ name: 'Edit tool' }] }) + '\n')
     for (const byte of bytes) f.stdout.write(Buffer.from([byte]))
-    expect(await first).toEqual([{ name: '编辑器' }])
+    expect(await first).toEqual([{ name: 'Edit tool' }])
     const second = f.client.request('click', { appHandle: 'app-one' }, new AbortController().signal)
     const rejected = expect(second).rejects.toMatchObject({ name: 'NativeError', code: 'STALE_SNAPSHOT', message: 'STALE_SNAPSHOT: Refresh observation' })
     f.reply({ id: f.id(), error: { code: 'STALE_SNAPSHOT', message: 'Refresh observation' } })

@@ -393,7 +393,7 @@ describe('ToolRow', () => {
     expect(view.getAllByText('end')).toHaveLength(1)
     expect(view.getByText('old', { exact: true })).toBeTruthy()
     expect(view.getByText('new', { exact: true })).toBeTruthy()
-    expect(view.queryByRole('button', { name: /展开其余/ })).toBeNull()
+    expect(view.queryByRole('button', { name: /Expand rest/ })).toBeNull()
   })
 
   it('formats the argument body only while expanding it', () => {
@@ -468,7 +468,7 @@ describe('ToolRow', () => {
 
   it('a file path without onOpenFile renders a plain summary on an expandable row', () => {
     const view = render(
-      <ToolRow {...rowProps} variant="write" title="Write" summary="作文.md" filePath="作文.md" />,
+      <ToolRow {...rowProps} variant="write" title="Write" summary="essay.md" filePath="essay.md" />,
     )
     expect(view.container.querySelector('button')).toBeNull()
     const row = view.getByRole('button')

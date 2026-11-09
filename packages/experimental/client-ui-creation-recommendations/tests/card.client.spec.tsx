@@ -48,10 +48,10 @@ it('requires a written location, preserves its draft, and passes only the chosen
   fireEvent.click(screen.getByRole('menuitem', { name: /Write your own/ }))
   const input = screen.getByRole('textbox', { name: en.customLabel })
   expect(screen.getByRole('button', { name: 'Create' }).hasAttribute('disabled')).toBe(true)
-  fireEvent.change(input, { target: { value: '  左侧入口打开全屏日历  ' } })
+  fireEvent.change(input, { target: { value: '  헦잧쥥쯣꺯휀쥨푏뉁쮆  ' } })
   expect(value.act).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole('button', { name: 'Create' }))
-  await waitFor(() => { expect(value.act).toHaveBeenCalledWith('create', { slot: 'sidebar-right', customLocation: '左侧入口打开全屏日历' }) })
+  await waitFor(() => { expect(value.act).toHaveBeenCalledWith('create', { slot: 'sidebar-right', customLocation: '헦잧쥥쯣꺯휀쥨푏뉁쮆' }) })
   rerender(<PageCardBody {...value} />)
   fireEvent.click(screen.getByRole('button', { name: 'Add to: Write your own' }))
   fireEvent.click(screen.getByRole('menuitem', { name: /Global page/ }))
@@ -60,7 +60,7 @@ it('requires a written location, preserves its draft, and passes only the chosen
   await waitFor(() => { expect(value.act).toHaveBeenLastCalledWith('create', { slot: 'sidebar-left' }) })
   fireEvent.click(screen.getByRole('button', { name: 'Add to: Global page' }))
   fireEvent.click(screen.getByRole('menuitem', { name: /Write your own/ }))
-  expect(screen.getByRole<HTMLTextAreaElement>('textbox').value).toBe('  左侧入口打开全屏日历  ')
+  expect(screen.getByRole<HTMLTextAreaElement>('textbox').value).toBe('  left entry OpenFullscreen calendar  ')
 })
 
 it('shows the recorded placement once settled, not the location picked before the decision', () => {
@@ -75,13 +75,13 @@ it('shows the recorded placement once settled, not the location picked before th
 })
 
 it('restores a written location after cancellation and preserves it on retry', async () => {
-  const value = props({ phase: 'cancelled', data: { slot: 'page', customLocation: '右侧查看当前会话的 Context' } })
+  const value = props({ phase: 'cancelled', data: { slot: 'page', customLocation: '쯳잧둁썧흓쩍윚겕신 Context' } })
   const { rerender } = render(<PageCardBody {...value} />)
-  expect(screen.getByRole<HTMLTextAreaElement>('textbox').value).toBe('右侧查看当前会话的 Context')
+  expect(screen.getByRole<HTMLTextAreaElement>('textbox').value).toBe('right InspectThis session\'s Context')
   fireEvent.click(screen.getByRole('button', { name: 'Create again' }))
-  await waitFor(() => { expect(value.act).toHaveBeenCalledWith('create', { slot: 'page', customLocation: '右侧查看当前会话的 Context' }) })
-  rerender(<PageCardBody {...props({ phase: 'installed', data: { slot: 'page', customLocation: '右侧查看当前会话的 Context' } })} />)
-  expect(screen.getByText('Add to · 右侧查看当前会话的 Context')).toBeTruthy()
+  await waitFor(() => { expect(value.act).toHaveBeenCalledWith('create', { slot: 'page', customLocation: '쯳잧둁썧흓쩍윚겕신 Context' }) })
+  rerender(<PageCardBody {...props({ phase: 'installed', data: { slot: 'page', customLocation: '쯳잧둁썧흓쩍윚겕신 Context' } })} />)
+  expect(screen.getByText('Add to · right InspectThis session\'s Context')).toBeTruthy()
 })
 
 it('opens the cost notice until dismissed, remembers dismissal, and allows reopening', () => {
@@ -244,12 +244,12 @@ it('keeps uncertain actions recoverable on refusal and connection loss', async (
 it('shows supplied initial content as folded data below the plan and omits it otherwise', () => {
   const view = render(<PageCardBody {...props()} />)
   expect(screen.queryByText('Starts with')).toBeNull()
-  const items = '1. 导出成功\n2. 断网提示清楚'
+  const items = '1. 폼짺깬쪟\n2. 눉쮭뀬얖멡떶'
   view.rerender(<PageCardBody {...props(undefined, false, { slot: 'sidebar-right', initialContent: items })} />)
   expect(screen.getByText('Starts with')).toBeTruthy()
-  expect(screen.getByText(/导出成功/).textContent).toBe(items)
+  expect(screen.getByText(/export success/).textContent).toBe(items)
   expect(screen.queryByRole('button', { name: 'View all content' })).toBeNull()
-  view.rerender(<PageCardBody {...props(undefined, false, { slot: 'sidebar-right', initialContent: '条'.repeat(131) })} />)
+  view.rerender(<PageCardBody {...props(undefined, false, { slot: 'sidebar-right', initialContent: '뎽'.repeat(131) })} />)
   fireEvent.click(screen.getByRole('button', { name: 'View all content' }))
   expect(screen.getByRole('button', { name: 'Collapse content' }).getAttribute('aria-expanded')).toBe('true')
 })

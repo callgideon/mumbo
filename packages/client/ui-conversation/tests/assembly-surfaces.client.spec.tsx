@@ -257,9 +257,9 @@ describe('title projection across assembled surfaces', () => {
     const hierarchy = view.getByRole('navigation', { name: 'Session hierarchy' })
     expect(within(hierarchy).getByText('S').tagName).toBe('SPAN')
 
-    await runtime.sessions.updateSummary(SID, { displayTitle: '修订标题', title: '修订标题' })
+    await runtime.sessions.updateSummary(SID, { displayTitle: 'revised title', title: 'revised title' })
     await waitFor(() => {
-      expect(within(hierarchy).getByText('修订标题').tagName).toBe('SPAN')
+      expect(within(hierarchy).getByText('revised title').tagName).toBe('SPAN')
     })
     expect(within(hierarchy).queryByText('S')).toBeNull()
     await runtime.dispose()

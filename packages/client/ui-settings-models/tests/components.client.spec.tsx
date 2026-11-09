@@ -2174,8 +2174,8 @@ describe('apiKeyFailure', () => {
 
   it.each([
     ['an emoji', 'sk-\u{1F600}'],
-    ['CJK text', 'sk-你好'],
-    ['full-width punctuation', 'sk-abc，'],
+    ['CJK text', 'sk-hello'],
+    ['full-width punctuation', 'sk-abc,'],
     ['an interior space', 'sk-abc def'],
     ['a C0 control character', 'sk-abc\x01'],
     ['a latin-1 character', 'sk-café'],

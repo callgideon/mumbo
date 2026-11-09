@@ -170,12 +170,12 @@ describe('shareableViewerCatalog', () => {
     const groups = shareableViewerCatalog(local, () => ({
       package: '@fixture/bundle',
       bundle: '@fixture/bundle',
-      titles: { zh: '变更请求与工作树' },
+      titles: { zh: 'Change requests & worktrees' },
     }))
     expect(groups).toEqual([{
       plugin: '@fixture/bundle',
       package: '@fixture/bundle',
-      titles: { zh: '变更请求与工作树' },
+      titles: { zh: 'Change requests & worktrees' },
       endpoints: ['forgePanel/follow', 'worktree/create'],
     }])
   })

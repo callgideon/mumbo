@@ -13,7 +13,7 @@ describe('owner identity status', () => {
     const status = readOwnerIdentity({
       state: 'verified',
       relay: RELAY,
-      displayName: '许翰翔',
+      displayName: 'Alice',
       subjectId: 'feishu:tenant:ou_9f2c',
       avatarUrl: 'https://cdn.example/owner.png',
       expiresAt: '2026-09-11T22:00:00Z',
@@ -22,7 +22,7 @@ describe('owner identity status', () => {
     expect(status).toEqual({
       state: 'verified',
       relay: RELAY,
-      displayName: '许翰翔',
+      displayName: 'Alice',
       subjectId: 'feishu:tenant:ou_9f2c',
       avatarUrl: 'https://cdn.example/owner.png',
       expiresAt: '2026-09-11T22:00:00Z',
@@ -43,7 +43,7 @@ describe('owner identity status', () => {
 
   it('refuses to reuse a status read for another Relay address', () => {
     const status = readOwnerIdentity({
-      state: 'verified', relay: 'https://other.example.test', displayName: '许翰翔',
+      state: 'verified', relay: 'https://other.example.test', displayName: 'Alice',
     }, RELAY)
     expect(status.state).toBe('relay-changed')
     expect(status.relay).toBe(RELAY)

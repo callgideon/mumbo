@@ -57,7 +57,7 @@ describe('QuestionReplyView', () => {
     expect(screen.queryByText('Choose the first milestone.')).toBeNull()
     expect(screen.queryByText('A focused web surface.')).toBeNull()
     expect(screen.queryByText('A CLI')).toBeNull()
-    expect(screen.queryByRole('button', { name: /展开问题详情/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Expand question Details/ })).toBeNull()
     expect(screen.getByRole('button', { name: 'copy' })).toBeTruthy()
     expect(screen.getByText(/\d{2}:\d{2}/)).toBeTruthy()
   })

@@ -197,7 +197,7 @@ const retry = (seq: number): ModelRetryNode => ({
   retryState: 'scheduled',
   provider: 'mock', mode: 'normal', policyKey: 'mock-normal',
   retry: 1, maxRetries: 2, delayMs: 450,
-  failure: { code: 'TRANSPORT', message: '连接被重置' },
+  failure: { code: 'TRANSPORT', message: 'connection was reset' },
 })
 const turnError = (seq: number, code?: string): TurnErrorNode => ({
   kind: 'turn-error', seq, time: seq * 1_000, turn: 1, step: 0,
@@ -219,12 +219,12 @@ const runningCall = (callId: string, name = 'bash'): StartedToolCall => ({
 })
 const command = (over: Partial<CommandNode> = {}): CommandNode => ({
   kind: 'command', seq: 5, time: 5_000, commandId: 'cmd-1' as CommandNode['commandId'],
-  name: 'plan', args: '', outcome: { kind: 'success', text: '已进入 plan mode' },
+  name: 'plan', args: '', outcome: { kind: 'success', text: 'entered plan mode' },
   ...over,
 })
 const compaction = (over: Partial<CompactionSummaryNode> = {}): CompactionSummaryNode => ({
   kind: 'compaction', seq: 8, time: 8_000,
-  summary: '## 压缩摘要\n\n保留的事实。',
+  summary: '## Compact summary\n\n preserved facts.',
   summaryEventSeq: 7,
   shadowedItemCount: 16,
   shadowedTokenCount: 11_309,
@@ -2111,21 +2111,21 @@ describe('ChatView', () => {
         pendingSubmissions: [
           {
             requestId: 'req-1' as never, placement: 'transcript',
-            time: 5_000, text: '即发即显', attachments: [],
+            time: 5_000, text: 'instant display', attachments: [],
           },
         ],
       },
     )
     const view = render(<h.ChatView {...h.props} />)
-    expect(view.getByText('即发即显').closest('[data-submission-echo]')).not.toBeNull()
-    const echo = view.getByText('即发即显').closest('[data-submission-echo]')
+    expect(view.getByText('instant display').closest('[data-submission-echo]')).not.toBeNull()
+    const echo = view.getByText('instant display').closest('[data-submission-echo]')
     act(() => { h.setSession({ testInbox: { 'next-step': [], 'next-turn': [{
       id: 'idle-occurrence' as never, role: 'user', source: { kind: 'user', rpcId: 'req-1' as never },
-      content: [{ type: 'text', text: '即发即显' }],
+      content: [{ type: 'text', text: 'instant display' }],
     }] } }) })
-    expect(view.getByText('即发即显').closest('[data-submission-echo]')).toBe(echo)
+    expect(view.getByText('instant display').closest('[data-submission-echo]')).toBe(echo)
     act(() => { h.setSession({ testInbox: { 'next-step': [], 'next-turn': [] } }) })
-    expect(view.getByText('即发即显').closest('[data-submission-echo]')).toBe(echo)
+    expect(view.getByText('instant display').closest('[data-submission-echo]')).toBe(echo)
 
     // The durable node arrives while the echo is STILL in the session
     // snapshot: the render-time rpcId dedupe keeps exactly one bubble.
@@ -2135,18 +2135,18 @@ describe('ChatView', () => {
           assistant(1, 'working'),
           {
             kind: 'user', seq: 2, time: 2_000,
-            content: [{ type: 'text', text: '即发即显' }] as never,
+            content: [{ type: 'text', text: 'instant display' }] as never,
             source: { kind: 'user', rpcId: 'req-1' },
           },
         ],
       })
     })
-    expect(view.getAllByText('即发即显')).toHaveLength(1)
+    expect(view.getAllByText('instant display')).toHaveLength(1)
     expect(view.container.querySelector('[data-submission-echo]')).toBeNull()
 
     // The delayed snapshot retirement changes nothing visible.
     act(() => { h.setSession({ pendingSubmissions: [] }) })
-    expect(view.getAllByText('即发即显')).toHaveLength(1)
+    expect(view.getAllByText('instant display')).toHaveLength(1)
   })
 
   it.each(['compact', 'standard', 'detailed'] as const)(
@@ -2380,7 +2380,7 @@ describe('ChatView', () => {
           requestId: 'req-steer' as never,
           placement: 'steering',
           time: 5_500,
-          text: '带图纠偏',
+          text: 'steer with image',
           attachments: [{
             type: 'image', value: { previewUrl: 'blob:steer-preview', name: 'steer.png' },
           }],
@@ -2388,34 +2388,34 @@ describe('ChatView', () => {
       },
     )
     const view = render(<h.ChatView {...h.props} />)
-    const local = view.getByText('带图纠偏').closest('[data-submission-echo]')
+    const local = view.getByText('steer with image').closest('[data-submission-echo]')
     expect(local?.hasAttribute('data-pending-steering')).toBe(true)
 
     act(() => {
       h.setSession({
         testInbox: { 'next-turn': [], 'next-step': [{
           id: 'steer-occurrence' as never,
-          content: [{ type: 'text', text: '带图纠偏' }],
+          content: [{ type: 'text', text: 'steer with image' }],
 
           role: 'user', source: { kind: 'user', rpcId: 'req-steer' as never },
         }] },
       })
     })
-    expect(view.getAllByText('带图纠偏')).toHaveLength(1)
+    expect(view.getAllByText('steer with image')).toHaveLength(1)
     expect(view.container.querySelector('[data-submission-echo]')).toBe(local)
     expect(view.container.querySelectorAll('[data-pending-steering]')).toHaveLength(1)
 
     act(() => { h.setSession({ testInbox: { 'next-turn': [], 'next-step': [] } }) })
     expect(view.container.querySelector('[data-submission-echo]')).toBe(local)
-    expect(view.getAllByText('带图纠偏')).toHaveLength(1)
+    expect(view.getAllByText('steer with image')).toHaveLength(1)
 
     act(() => { h.setChat({ nodes: [assistant(1, 'working'), {
-      ...steering(2, '带图纠偏', 1), source: { kind: 'user', rpcId: 'req-steer' as never },
+      ...steering(2, 'steer with image', 1), source: { kind: 'user', rpcId: 'req-steer' as never },
     }] }) })
-    expect(view.getAllByText('带图纠偏')).toHaveLength(1)
+    expect(view.getAllByText('steer with image')).toHaveLength(1)
     expect(view.container.querySelector('[data-submission-echo]')).toBeNull()
     act(() => { h.setSession({ pendingSubmissions: [] }) })
-    expect(view.getAllByText('带图纠偏')).toHaveLength(1)
+    expect(view.getAllByText('steer with image')).toHaveLength(1)
   })
 
   it('keeps Host Inbox order across local and other-client steering without remounting the local echo', () => {
@@ -2624,7 +2624,7 @@ describe('ChatView', () => {
     // neither a recharge affordance nor a toast of its own.
     expect(view.queryByRole('alert')).toBeNull()
     expect(view.queryByRole('dialog')).toBeNull()
-    expect(view.queryByRole('button', { name: '去充值' })).toBeNull()
+    expect(view.queryByRole('button', { name: 'Add credits' })).toBeNull()
   })
 
   it('renders the max-tokens notice with localized guidance, distinct from turn errors', () => {
@@ -3543,7 +3543,7 @@ describe('ChatView', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(view.queryByRole('dialog')).toBeNull()
     const footer = view.container.querySelector<HTMLElement>('[data-turn-tail="1"]')!
-    expect(within(footer).queryByRole('button', { name: /用时/ })).toBeNull()
+    expect(within(footer).queryByRole('button', { name: /Completed in/ })).toBeNull()
     expect(turnProcessControl(view.container)?.textContent).toBe('Completed in 19s')
     act(() => { h.setPerformanceUsage('compact') })
     expect(view.queryByRole('button', { name: /Usage/ })).toBeNull()
@@ -3581,7 +3581,7 @@ describe('ChatView', () => {
     })
     const view = render(<h.ChatView {...h.props} />)
     const footer = view.container.querySelector<HTMLElement>('[data-turn-tail="1"]')!
-    expect(within(footer).queryByRole('button', { name: /用时/ })).toBeNull()
+    expect(within(footer).queryByRole('button', { name: /Completed in/ })).toBeNull()
     expect(turnProcessControl(view.container)?.textContent).toBe('Completed in 19s')
     expect(view.queryByRole('button', { name: /Usage/ })).toBeNull()
   })
@@ -3629,7 +3629,7 @@ describe('ChatView', () => {
       turnEnds: new Map([[1, 16]]),
     })
     const view = render(<h.ChatView {...h.props} />)
-    expect(view.queryByText(/用时/)).toBeNull()
+    expect(view.queryByText(/Completed in/)).toBeNull()
   })
 
   it('enables fork only on the finalized assistant at the completed transcript tail', () => {
@@ -4610,7 +4610,7 @@ describe('ChatView', () => {
     expect(view.getByText('plan')).toBeTruthy()
     expect(view.queryByText('/plan')).toBeNull()
     expect(view.queryByText('/plan now')).toBeNull()
-    expect(view.getByText('已进入 plan mode')).toBeTruthy()
+    expect(view.getByText('entered plan mode')).toBeTruthy()
 
     // Error outcome flips the row state; a text-less error gets the default copy.
     const failed = makeHarness({
@@ -4671,11 +4671,11 @@ describe('ChatView', () => {
     expect(row.getAttribute('aria-expanded')).toBe('false')
     expect(row.querySelector('[data-compaction-icon="context"]')).not.toBeNull()
     expect(row.querySelector('[data-compaction-disclosure="collapsed"]')).not.toBeNull()
-    expect(view.queryByText('保留的事实。')).toBeNull()
+    expect(view.queryByText('preserved facts.')).toBeNull()
     fireEvent.click(row)
     expect(row.getAttribute('aria-expanded')).toBe('true')
     expect(row.querySelector('[data-compaction-disclosure="expanded"]')).not.toBeNull()
-    expect(view.getByRole('heading', { name: '压缩摘要' })).toBeTruthy()
+    expect(view.getByRole('heading', { name: 'Compact summary' })).toBeTruthy()
   })
 
   it('keeps /compact no-history and error settlements on the generic command row', () => {

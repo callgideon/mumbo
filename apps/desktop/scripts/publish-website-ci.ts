@@ -104,13 +104,13 @@ export async function publishWebsiteCi(mode: 'upload' | 'purge', env: NodeJS.Pro
   })
   const details = `${publicUrl}\nTask: ${result.jobId ?? 'unknown'}\nObserved: ${result.observedAt}\n${result.diagnostic ?? ''}\n`
   if (result.status === 'unknown') {
-    const acceptance = result.jobId ? '刷新已提交，执行结果未确认' : '刷新提交未确认，可能尚未提交'
-    process.stdout.write(`::warning title=官网缓存刷新结果未确认::官网资源已上传；${acceptance}。请核对 EdgeOne 任务记录后人工恢复。\n${details}`)
+    const acceptance = result.jobId ? 'Refresh submitted; result not confirmed' : 'Refresh submission not confirmed; it may not have been submitted'
+    process.stdout.write(`::warning title=Website cache refresh result not confirmed::Website assets were uploaded; ${acceptance}. Check the EdgeOne task records and recover manually.\n${details}`)
     if (env.GITHUB_STEP_SUMMARY) {
       let existing = ''
       try { existing = await readFile(env.GITHUB_STEP_SUMMARY, 'utf8') }
       catch (error) { if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error }
-      await writeFile(env.GITHUB_STEP_SUMMARY, `# ⚠ 官网资源已上传，缓存刷新结果未确认\n\n${acceptance}\n\n${details}${existing ? `\n${existing}` : ''}`)
+      await writeFile(env.GITHUB_STEP_SUMMARY, `# ⚠ Website assets uploaded; cache refresh result not confirmed\n\n${acceptance}\n\n${details}${existing ? `\n${existing}` : ''}`)
     }
   } else {
     process.stdout.write(`Website cache purge completed\n${details}`)

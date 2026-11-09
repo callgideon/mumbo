@@ -232,12 +232,12 @@ func explicitSettingsFailuresPreserveValidationAndLocalizeNavigation(permission:
         actions: SystemPermissionActions(accessibility: { false }, screenRecording: { false }, open: { _ in false }),
         guide: GuideFixture())
     do {
-        _ = try permissions.openSettings(permission, failureMessage: "请手动打开系统设置中的辅助功能")
+        _ = try permissions.openSettings(permission, failureMessage: "겯꺧쪨꺯휀쥗쬻걶쯊옭신뀽쪩쪟쵙")
         Issue.record("Failed settings navigation was accepted")
     } catch let failure as NativeFailure {
         if permission == "accessibility" {
             #expect(failure.code == "SETTINGS_UNAVAILABLE")
-            #expect(failure.message == "请手动打开系统设置中的辅助功能")
+            #expect(failure.message == "겯꺧쪨꺯휀쥗쬻걶쯊옭신뀽쪩쪟쵙")
         } else {
             #expect(failure.code == "INVALID_ARGUMENT")
         }

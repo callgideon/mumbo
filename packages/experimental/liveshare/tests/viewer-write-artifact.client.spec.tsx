@@ -147,7 +147,7 @@ describe('Assembled liveshare viewer page on a writable share', () => {
     await waitFor(() => { expect(screen.queryByRole('button', { name: 'Stop generating' })).toBeNull() })
     expect(owner.cancellations).toEqual(['fx-alpha'])
 
-    const userText = 'source artifact typing → Send 精确消息'
+    const userText = 'source artifact typing → Send exact Message'
     await inputFixture.send('fx-alpha', userText, 'Send message')
     await waitFor(() => { expect(owner?.prompts).toHaveLength(1) })
     const request = owner.prompts[0]
@@ -157,7 +157,7 @@ describe('Assembled liveshare viewer page on a writable share', () => {
     promptEcho(owner.history('fx-alpha'), request)
     expect(document.querySelector('[contenteditable="true"]')?.textContent).toBe('')
     await act(async () => { owner?.completeReply('fx-alpha') })
-    const replyText = `回声：${userText}。这是 fixture 的流式回复，用于验证打字机增长与定稿切换。`
+    const replyText = `Echo:${userText}. This is fixture 's streamed reply, used to verify typewriter growth and the final-draft switch.`
     await waitFor(() => { expect(document.body.textContent).toContain(replyText) }, { timeout: 15_000 })
     expect(owner.history('fx-alpha').filter(event => event.type === 'assistant/message'
       && event.data.message.content.some(block => block.type === 'text' && block.text === replyText))).toHaveLength(1)

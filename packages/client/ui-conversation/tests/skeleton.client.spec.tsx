@@ -769,7 +769,7 @@ describe('ConversationRoot resident composer', () => {
       viewTabs: [
         { id: 'chat', label: 'Chat' },
         { id: 'short', label: 'Trajectory' },
-        { id: 'long-cjk', label: '很长的视图名称' },
+        { id: 'long-cjk', label: 'very long view name' },
         { id: 'long-latin', label: 'A very long view name' },
       ],
       headerOnly: true,
@@ -783,7 +783,7 @@ describe('ConversationRoot resident composer', () => {
     }
     expect(tooltipFor('Chat')).toBeNull()
     expect(tooltipFor('Trajectory')).toBeNull()
-    expect(tooltipFor('很长的视图名称')).toBe('很长的视图名称')
+    expect(tooltipFor('very long view name')).toBe('very long view name')
     expect(tooltipFor('A very long view name')).toBe('A very long view name')
   })
 

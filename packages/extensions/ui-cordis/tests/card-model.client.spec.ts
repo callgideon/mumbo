@@ -6,7 +6,7 @@ import type { StartedToolCall, ToolResultNode } from '@deepseek-ai/dsh-client-ui
 import { PartialArguments } from '@deepseek-ai/dsh-util-values'
 import { cordisActionCard, cordisDefineCard } from '../src/client/card-model.ts'
 
-const ARGS = '{"name":"clock","purpose":"顶栏时钟","code":{"client":"return {}","host":"harness.handle(\'now\', () => Date.now())"}}'
+const ARGS = '{"name":"clock","purpose":"top-bar clock","code":{"client":"return {}","host":"harness.handle(\'now\', () => Date.now())"}}'
 
 function running(over: Partial<StartedToolCall> = {}): StartedToolCall {
   const argsRaw = over.argsRaw ?? ARGS
@@ -31,7 +31,7 @@ describe('cordisDefineCard', () => {
   it('reads name, purpose and both code halves off the call arguments', () => {
     const card = cordisDefineCard(running())
     expect(card).toMatchObject({
-      name: 'clock', purpose: '顶栏时钟', clientCode: 'return {}', state: 'running', output: null,
+      name: 'clock', purpose: 'top-bar clock', clientCode: 'return {}', state: 'running', output: null,
     })
     expect(card.hostCode).toContain('harness.handle')
     // The host mints the id during define, so an unsettled call has none and the
@@ -78,8 +78,8 @@ describe('cordisDefineCard', () => {
   })
 
   it('keeps the raw first line as the name when the arguments carry none', () => {
-    expect(cordisDefineCard(running({ argsRaw: '{"purpose":"顶栏时钟"}' })).name).toBe('{"purpose":"顶栏时钟"}')
-    expect(cordisDefineCard(running({ argsRaw: '{"name":"","purpose":"顶栏时钟"}' })).name).toBe('{"name":"","purpose":"顶栏时钟"}')
+    expect(cordisDefineCard(running({ argsRaw: '{"purpose":"top-bar clock"}' })).name).toBe('{"purpose":"top-bar clock"}')
+    expect(cordisDefineCard(running({ argsRaw: '{"name":"","purpose":"top-bar clock"}' })).name).toBe('{"name":"","purpose":"top-bar clock"}')
   })
 
   it('reports an unknown name when the event window cut the call head', () => {

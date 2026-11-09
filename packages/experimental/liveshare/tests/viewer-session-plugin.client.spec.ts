@@ -157,7 +157,7 @@ describe('viewer page state lifetime', () => {
         ? Response.json({
           ownerDisplayName: 'Owner',
           dshVersion: '0.1.5-rc.2',
-          viewer: { providerId: 'oidc', subjectId: 'subject-42', displayName: '许翰翔' },
+          viewer: { providerId: 'oidc', subjectId: 'subject-42', displayName: 'Alice' },
           capabilities: { sessionMode: 'write', online: true },
         })
         : Response.json({ release_id: 'release-7' }))
@@ -170,7 +170,7 @@ describe('viewer page state lifetime', () => {
           owner: 'Owner',
           dshVersion: '0.1.5-rc.2',
           viewerSubjectId: 'subject-42',
-          viewerDisplayName: '许翰翔',
+          viewerDisplayName: 'Alice',
         })
         expect(viewerStatus.getSnapshot()).toBe('ready')
       })

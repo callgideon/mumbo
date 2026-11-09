@@ -45,7 +45,7 @@ it('keeps the Host entry empty', () => { applyHost() })
 
 it('retains bytes after source unmount and releases on the detached node dragend', async () => {
   const { service, owner, runtime } = await bench()
-  const file = new File(['pdf-original'], '报告.pdf', { type: 'application/pdf' })
+  const file = new File(['pdf-original'], 'report.pdf', { type: 'application/pdf' })
   const source = render(<DraggableImage fileDrag={service.actions} src="blob:original" name={file.name} original={file} alt="original" />)
   const node = source.getByRole('img')
   const data = transfer()
@@ -56,7 +56,7 @@ it('retains bytes after source unmount and releases on the detached node dragend
   const received = service.read(data)!
   expect(received.name).toBe(file.name)
   expect(await received.text()).toBe('pdf-original')
-  expect(data.getData('DownloadURL')).toBe('application/pdf:报告.pdf:blob:transfer')
+  expect(data.getData('DownloadURL')).toBe('application/pdf:report.pdf:blob:transfer')
   expect(service.read(transfer('foreign'))).toBeUndefined()
   node.dispatchEvent(new Event('dragend'))
   expect(service.read(data)).toBeUndefined()

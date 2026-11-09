@@ -172,14 +172,14 @@ describe('MenuView', () => {
         items: [
           { name: 'Folder · src/', section: 'Files & folders' },
           { name: 'File · README.md', section: 'Files & folders' },
-          { name: 'Session · Research', section: '对话' },
+          { name: 'Session · Research', section: 'Chat' },
         ],
       }],
       highlight: { source: 'reference', index: 0 },
     }))
     expect(screen.queryByText('reference')).toBeNull()
     expect(screen.getAllByText('Files & folders')).toHaveLength(1)
-    expect(screen.getAllByText('对话')).toHaveLength(1)
+    expect(screen.getAllByText('Chat')).toHaveLength(1)
     const options = screen.getAllByRole('option')
     expect(options.map(option => option.textContent)).toEqual([
       'Folder · src/',

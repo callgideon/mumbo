@@ -35,47 +35,47 @@ export async function desktopPublicationSummary(
     let size = 0
     const bytes = file.contents === undefined ? createReadStream(file.path) : [Buffer.from(file.contents)]
     for await (const chunk of bytes) { size += chunk.length; hash.update(chunk) }
-    files.push(row(link(url(file.key), file.filename), `${size} 字节 | ${code(hash.digest('hex'))}`))
+    files.push(row(link(url(file.key), file.filename), `${size} bytes | ${code(hash.digest('hex'))}`))
   }
   const installerExtension = plan.target === 'win-x64' ? '.exe' : '.dmg'
   const installers = plan.artifacts.filter(file => !file.channelMetadata && file.filename.endsWith(installerExtension))
   const feeds = plan.artifacts.filter(file => file.channelMetadata)
   const runUrl = `https://github.com/${source.repository}/actions/runs/${source.runId}/attempts/${source.attempt}`
   const environment = plan.environment === 'test' ? 'desktop-test' : 'desktop-production'
-  const tag = plan.environment === 'production' ? code(`desktop-v${plan.version}`) : '不创建（test 环境）'
+  const tag = plan.environment === 'production' ? code(`desktop-v${plan.version}`) : 'Not created (test environment)'
   return [
-    '', '## 发布前确认', '',
-    `核对以下信息后，点击 **Review deployments**，选择 ${code(environment)} 并点击 **Approve and deploy**；信息有误请点击 **Reject**。`, '',
-    '| 项目 | 发布信息 |', '| --- | --- |',
-    row('发布环境', code(plan.environment)),
-    row('版本号', code(plan.version)),
-    row('升级通道', code(source.channel)),
+    '', '## Confirm before publishing', '',
+    `After checking the information below, click **Review deployments**, select ${code(environment)}, and click **Approve and deploy**; if anything is wrong, click **Reject**.`, '',
+    '| Item | Release information |', '| --- | --- |',
+    row('Environment', code(plan.environment)),
+    row('Version', code(plan.version)),
+    row('Update channel', code(source.channel)),
     ...feeds.map((feed) => {
       const metadata = z.object({ stagingPercentage: z.number().optional() }).parse(load(feed.contents!))
-      return row('更新灰度比例', metadata.stagingPercentage === undefined ? '全量（未设置）' : `${metadata.stagingPercentage}%`)
+      return row('Staged rollout percentage', metadata.stagingPercentage === undefined ? 'Full (not set)' : `${metadata.stagingPercentage}%`)
     }),
-    row('平台', code(plan.target)),
-    ...(plan.environment === 'test' ? [row('测试 release ID', `${code(source.testReleaseId!)}<br>测试下载路径的随机前缀，用于降低地址被猜到的可能性；连续升级测试需使用相同值。`)] : []),
-    row('下载地址预览', `${installers.map(file => link(url(file.key))).join('<br>')}<br>发布后的目标地址，审批前不保证可下载。`),
-    row('升级 YAML', `${feeds.map(file => link(url(file.key))).join('<br>')}<br>本次发布将更新此文件；审批前可能不存在或仍指向旧版本。`),
-    row('打包来源', `${link(runUrl, `查看打包运行 #${source.runId} · 第 ${source.attempt} 次尝试`)}<br>源码：${code(`${source.sourceRef} @ ${source.commit}`)}<br>打包机器：${code(source.runnerName)}`),
-    row('签名与公证', plan.target === 'win-x64' ? 'EXE 签名校验通过' : 'DMG 校验通过<br>ZIP 内应用校验通过'),
-    ...(uploadWebsite && plan.environment === 'production' ? [row('官网固定安装包',
-      `${link(desktopWebsiteInstallerUrl(plan.target))}<br>替换为版本 ${code(plan.version)}；已有安装包会被替换，无防降级保护；官网上传与刷新在后续 job 中执行，可能需另行审批。`)] : []),
-    row('Git tag', tag), '', '### 批准后将执行', '',
-    '1. 重新校验产物与发布目标；若与审批摘要不一致则停止。',
-    '2. 上传缺少的文件，跳过内容一致的已有文件；发现内容冲突则停止。',
-    '3. 更新上述升级 YAML，并保存发布记录。',
-    ...(plan.environment === 'production' ? ['4. 为实际打包提交创建上述 Git tag；若 tag 创建失败，记录“已发布，待补 tag”。'] : []), '',
-    ...(plan.environment === 'test' ? ['**本次只发布 test，不修改 production。**', ''] : []),
-    '<details>', '<summary>技术详情与文件清单</summary>', '',
-    `COS 存储桶：${code(plan.bucket)}`, '',
+    row('Platform', code(plan.target)),
+    ...(plan.environment === 'test' ? [row('Test release ID', `${code(source.testReleaseId!)}<br>Random prefix of the test download path, used to make the address harder to guess; consecutive upgrade tests must use the same value.`)] : []),
+    row('Download URL preview', `${installers.map(file => link(url(file.key))).join('<br>')}<br>Target addresses after publishing; downloads are not guaranteed before approval.`),
+    row('Update YAML', `${feeds.map(file => link(url(file.key))).join('<br>')}<br>This release will update this file; before approval it may not exist or may still point to the old version.`),
+    row('Package source', `${link(runUrl, `View packaging run #${source.runId} · attempt ${source.attempt}`)}<br>Source: ${code(`${source.sourceRef} @ ${source.commit}`)}<br>Packaging machine: ${code(source.runnerName)}`),
+    row('Signing and notarization', plan.target === 'win-x64' ? 'EXE signature verified' : 'DMG verified<br>App inside ZIP verified'),
+    ...(uploadWebsite && plan.environment === 'production' ? [row('Pinned website installer',
+      `${link(desktopWebsiteInstallerUrl(plan.target))}<br>Replaced with version ${code(plan.version)}; the existing installer will be replaced, with no downgrade protection; the website upload and refresh run in a later job and may need separate approval.`)] : []),
+    row('Git tag', tag), '', '### Runs after approval', '',
+    '1. Re-verify the artifacts and release target; stop if they differ from the approval digest.',
+    '2. Upload missing files and skip existing files with identical content; stop on a content conflict.',
+    '3. Update the update YAML above and save the release record.',
+    ...(plan.environment === 'production' ? ['4. Create the Git tag above for the commit that was actually packaged; if tag creation fails, record "published, tag pending".'] : []), '',
+    ...(plan.environment === 'test' ? ['**This release publishes to test only and does not modify production.**', ''] : []),
+    '<details>', '<summary>Technical details and file list</summary>', '',
+    `COS bucket: ${code(plan.bucket)}`, '',
     ...(plan.environment === 'test' ? [
-      'release ID 取自原打包产物清单。打包时优先使用表单 `test_release_id`；留空则使用机器 `presets/test.env` 中的 `DOWNLOAD_TEST_RELEASE_ID`。发布时不重新选择。', '',
+      'The release ID comes from the original package manifest. When packaging, the form field `test_release_id` takes precedence; if left empty, `DOWNLOAD_TEST_RELEASE_ID` from the machine `presets/test.env` is used. It is not re-selected at publish time.', '',
     ] : []),
-    `审批摘要 SHA-256：${code(approval)}`, '',
-    `共 ${plan.artifacts.length} 个文件；大小及 SHA-256 对应实际上传字节，包括更新后的 YAML 内容。`, '',
-    '| 文件 | 大小 | SHA-256 |', '| --- | --- | --- |', ...files, '', '</details>', '',
-    '若仓库为公开仓库，此摘要中的下载路径及 test 发布的 release ID 也会公开。随机前缀不能替代访问鉴权。', '',
+    `Approval digest SHA-256: ${code(approval)}`, '',
+    `${plan.artifacts.length} files in total; sizes and SHA-256 correspond to the bytes actually uploaded, including the updated YAML content.`, '',
+    '| File | Size | SHA-256 |', '| --- | --- | --- |', ...files, '', '</details>', '',
+    'If the repository is public, the download paths in this summary and the release ID of a test release are also public. A random prefix is not a substitute for access authentication.', '',
   ].join('\n')
 }

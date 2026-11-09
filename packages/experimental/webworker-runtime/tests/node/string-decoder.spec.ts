@@ -15,8 +15,8 @@ it('loads the npm decoder through both worker builtin names', () => {
 describe('streamed string decoding', () => {
   it('retains UTF-8 characters split across incoming chunks', () => {
     const decoder = new StringDecoder('utf8')
-    expect(decoder.write(Buffer.from([0xe4, 0xbd]))).toBe('')
-    expect(decoder.write(Buffer.from([0xa0, 0xf0, 0x9f]))).toBe('你')
+    expect(decoder.write(Buffer.from([0xea, 0xb0]))).toBe('')
+    expect(decoder.write(Buffer.from([0x80, 0xf0, 0x9f]))).toBe('가')
     expect(decoder.end(Buffer.from([0x8c, 0x8a]))).toBe('🌊')
   })
 
@@ -28,7 +28,7 @@ describe('streamed string decoding', () => {
 
   it('flushes an incomplete final UTF-8 character as a replacement', () => {
     const decoder = new StringDecoder('utf8')
-    expect(decoder.write(Buffer.from([0xe4, 0xbd]))).toBe('')
+    expect(decoder.write(Buffer.from([0xea, 0xb0]))).toBe('')
     expect(decoder.end()).toBe('�')
   })
 })

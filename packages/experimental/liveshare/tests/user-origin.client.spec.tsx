@@ -34,7 +34,7 @@ const SHARED = {
 /** A source that recorded the Relay display name beside the subject. */
 const SHARED_NAMED = {
   ...SHARED,
-  principal: { ...SHARED.principal, actor: { ...SHARED.principal.actor, displayName: '许翰翔' } },
+  principal: { ...SHARED.principal, actor: { ...SHARED.principal.actor, displayName: 'Alice' } },
 }
 
 /** The same source by the owner, and a source with no principal at all. */
@@ -69,7 +69,7 @@ describe('shareViewerSubject', () => {
   })
 
   it('states the recorded display name and ignores a malformed one', () => {
-    expect(shareViewerAuthor(SHARED_NAMED)).toEqual({ subjectId: 'subject-42', displayName: '许翰翔' })
+    expect(shareViewerAuthor(SHARED_NAMED)).toEqual({ subjectId: 'subject-42', displayName: 'Alice' })
     expect(shareViewerAuthor({
       ...SHARED,
       principal: { ...SHARED.principal, actor: { ...SHARED.principal.actor, displayName: '  ' } },
@@ -91,7 +91,7 @@ describe('shared-session origin chain', () => {
     expect(entries[0]?.locale).toBe(NS)
     const select = entries[0]?.select as (owner: { source: unknown; kind: 'user' | 'steering' }) => unknown
     expect(select({ source: SHARED, kind: 'user' })).toEqual({ subjectId: 'subject-42' })
-    expect(select({ source: SHARED_NAMED, kind: 'user' })).toEqual({ subjectId: 'subject-42', displayName: '许翰翔' })
+    expect(select({ source: SHARED_NAMED, kind: 'user' })).toEqual({ subjectId: 'subject-42', displayName: 'Alice' })
     expect(select({ source: OWNER, kind: 'user' })).toBeNull()
     expect(select({ source: SHARED, kind: 'steering' })).toBeNull()
     expect(select({ source: { kind: 'user', principal: { kind: 'owner' } }, kind: 'user' })).toBeNull()
@@ -105,10 +105,10 @@ describe('shared-session origin chain', () => {
       .toBe('D’une session partagée [subject-42]')
     view.unmount()
     const named = render(createElement(SharedSessionOrigin, {
-      matched: { subjectId: 'subject-42', displayName: '许翰翔' }, t: translate('en'),
+      matched: { subjectId: 'subject-42', displayName: 'Alice' }, t: translate('en'),
     } as never))
     expect(named.container.querySelector('[data-liveshare-origin="subject-42"]')?.textContent)
-      .toBe('From a shared session [许翰翔]')
+      .toBe('From a shared session [Alice]')
   })
 
   it('defines the shared-session line in every dictionary', () => {

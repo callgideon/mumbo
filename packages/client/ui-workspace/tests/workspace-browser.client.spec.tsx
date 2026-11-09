@@ -1354,7 +1354,7 @@ describe('WorkspaceBrowser', () => {
     expect(screen.getByText('child-s').closest('[role="treeitem"]')?.getAttribute('draggable')).toBe('true')
   })
 
-  it('expands the target group before starting a session from its ＋', () => {
+  it('expands the target group before starting a session from its +', () => {
     const startSession = vi.fn()
     const b = mount({
       useSessions: hook(sessionState([summary('alpha-s', 1)])),
@@ -1371,7 +1371,7 @@ describe('WorkspaceBrowser', () => {
     expect(startSession).toHaveBeenCalledWith(wid('alpha'))
   })
 
-  it('auto-expands the Ungrouped bucket for a loose current session; its header has no menu and its ＋ is inert', () => {
+  it('auto-expands the Ungrouped bucket for a loose current session; its header has no menu and its + is inert', () => {
     const startSession = vi.fn()
     mount({
       useSessions: hook(sessionState([summary('loose', 1)], { main: sid('loose') })),

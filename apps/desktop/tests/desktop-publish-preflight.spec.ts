@@ -2,11 +2,11 @@ import { expect, it } from 'vitest'
 import { preflightDesktopPublish } from '../scripts/preflight-desktop-publish.mjs'
 
 it.each([
-  ['macos-x64-unnotarized-debug-1.0.0-42-2', '跳过了公证'],
-  ['macos-arm64-unnotarized-debug-1.0.0-42-2', '跳过了公证'],
-  ['macos-arm64-unnotarized-debug-1.0.0-42-2.zip', '跳过了公证'],
-  ['windows-x64-unsigned-1.0.0-42-2.zip', '未签名'],
-  ['windows-x64-unsigned-1.0.0-42-2', '未签名'],
+  ['macos-x64-unnotarized-debug-1.0.0-42-2', 'Skip notarized'],
+  ['macos-arm64-unnotarized-debug-1.0.0-42-2', 'Skip notarized'],
+  ['macos-arm64-unnotarized-debug-1.0.0-42-2.zip', 'Skip notarized'],
+  ['windows-x64-unsigned-1.0.0-42-2.zip', 'unsigned'],
+  ['windows-x64-unsigned-1.0.0-42-2', 'unsigned'],
 ])('rejects %s from paginated artifact metadata with rebuilding instructions', (name, reason) => {
   const paths: string[] = []
   expect(() => preflightDesktopPublish('owner/repo', { package_run_id: '42' }, (path, paginate) => {

@@ -6,7 +6,7 @@ import { GhTimeoutError, GhUnavailableError, type GhRunner } from '../src/gh.ts'
 
 const ref = { repository: { forge: 'github', host: 'github.com', owner: 'octo', name: 'demo' }, number: 7 }
 const head = 'a'.repeat(40)
-const comment = { path: 'src/space name.ts', side: 'L' as const, startLine: 3, endLine: 5, body: 'Check `$(secret)`\n第二行' }
+const comment = { path: 'src/space name.ts', side: 'L' as const, startLine: 3, endLine: 5, body: 'Check `$(secret)`\n second line' }
 const single: ForgeReviewRequest = { kind: 'comment', headSha: head, comment }
 const success = { exitCode: 0, stdout: JSON.stringify({ html_url: 'https://github.com/octo/demo/pull/7#discussion_r1' }), stderr: '' }
 function fixture() {

@@ -19,12 +19,12 @@ it('routes the exact successful attempt to its registered machine', () => {
 })
 
 it.each(['test', 'production'])('explains how to rebuild debugging packages for %s', (preset) => {
-  for (const [qualification, remedy] of [['unsigned', 'signing=signed'], ['unnotarized', '取消勾选“跳过公证”']]) {
+  for (const [qualification, remedy] of [['unsigned', 'signing=signed'], ['unnotarized', 'Cancel check“Skip notarization”']]) {
     const f = fixture()
     f.source.preset = preset
     f.source.qualification = qualification!
     expect(() => resolveDesktopPublishRoute('owner/repo', f.run, { source: f.source }, f.jobs, f.routes)).toThrow(remedy)
-    expect(() => resolveDesktopPublishRoute('owner/repo', f.run, { source: f.source }, f.jobs, f.routes)).toThrow('重跑当前发布任务无效')
+    expect(() => resolveDesktopPublishRoute('owner/repo', f.run, { source: f.source }, f.jobs, f.routes)).toThrow('rerun the current release To-dos invalid')
   }
 })
 

@@ -23,14 +23,14 @@ const MODE = webSnapshotMode()
 const SEED_ID = 'markdown-cjk-strong-web-e2e'
 const DONE = 'CJK_STRONG_DONE'
 const CASES = [
-  ['**注意：**内容', '注意：', '注意：内容'],
-  ['**Notice:**内容', 'Notice:', 'Notice:内容'],
-  ['**事件中间件（waterfall）**实现', '事件中间件（waterfall）', '事件中间件（waterfall）实现'],
-  ['**事件中间件(waterfall)**实现', '事件中间件(waterfall)', '事件中间件(waterfall)实现'],
-  ['**句号。**后续', '句号。', '句号。后续'],
-  ['**Period.**后续', 'Period.', 'Period.后续'],
-  ['**提醒！**继续', '提醒！', '提醒！继续'],
-  ['**Warning!**继续', 'Warning!', 'Warning!继续'],
+  ['**륄굫：**즅펹', '륄굫：', '륄굫：즅펹'],
+  ['**Notice:**즅펹', 'Notice:', 'Notice:즅펹'],
+  ['**욋웶옭뚬웶（waterfall）**펞쀌', '욋웶옭뚬웶（waterfall）', '욋웶옭뚬웶（waterfall）펞쀌'],
+  ['**욋웶옭뚬웶(waterfall)**펞쀌', '욋웶옭뚬웶(waterfall)', '욋웶옭뚬웶(waterfall)펞쀌'],
+  ['**쯥쯷。**찎쭉', '쯥쯷。', '쯥쯷。찎쭉'],
+  ['**Period.**찎쭉', 'Period.', 'Period.찎쭉'],
+  ['**뀬뉊！**쭃쭉', '뀬뉊！', '뀬뉊！쭃쭉'],
+  ['**Warning!**쭃쭉', 'Warning!', 'Warning!쭃쭉'],
 ] as const
 
 /** Build one settled assistant reply covering CJK-adjacent strong punctuation boundaries. */

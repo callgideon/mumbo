@@ -406,12 +406,12 @@ describe('turn grouping', () => {
       stepNode(later),
       stepNode(one),
       stepNode(two),
-      promptNode(8, '问题', [imageRef('sha256:a'), imageRef('sha256:b')]),
+      promptNode(8, 'question', [imageRef('sha256:a'), imageRef('sha256:b')]),
       endNode(9, 31_000, 'interrupted'),
     ])
     expect(turns.map(turn => turn.turn)).toEqual([8, 9])
     expect(turns[0]?.steps.map(step => step.step)).toEqual([1, 2])
-    expect(turns[0]?.prompt).toBe('问题')
+    expect(turns[0]?.prompt).toBe('question')
     expect(turns[0]?.promptImages).toEqual([imageRef('sha256:a'), imageRef('sha256:b')])
     expect(turns[1]?.interrupted).toBe(true)
   })

@@ -598,7 +598,7 @@ describe('Conversation inject API', () => {
     const composer = b.composerApi(ROOT)
     const editor = composer.keyboard!.editor
     const { state, actions } = b.inputApi(ROOT)
-    actions.setDraft('读取')
+    actions.setDraft('Read')
     editor.update(() => {
       const text = $getRoot().getAllTextNodes()[0]
       if (text === undefined || !$isTextNode(text)) throw new Error('expected text selection')
@@ -619,7 +619,7 @@ describe('Conversation inject API', () => {
       })), getData: () => '',
     } })
     editor.update(() => { editor.dispatchCommand(PASTE_COMMAND, event) }, { discrete: true })
-    expect(state.getSnapshot().draft).toBe('读取 @a.txt @"my project/" @b.txt ')
+    expect(state.getSnapshot().draft).toBe('Read @a.txt @"my project/" @b.txt ')
     const renderText = createUserTextFixture()
     const view = render(<div>{renderText({ text: state.getSnapshot().draft, facts: {} })}</div>)
     expect(view.container.querySelector('[data-ref-chip="folder"]')?.textContent).toBe('my project')

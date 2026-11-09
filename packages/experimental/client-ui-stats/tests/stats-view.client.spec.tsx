@@ -656,7 +656,7 @@ describe('turn rows', () => {
   it('names the sending agent on team-message triggers', () => {
     mount({
       turns: [turn({
-        prompt: 'Team message from hfai-deploy: P1 已 rebase 完成',
+        prompt: 'Team message from hfai-deploy: P1 already rebase Done',
         promptSource: 'team-message',
         promptSender: 'hfai-deploy',
       })],
@@ -664,9 +664,9 @@ describe('turn rows', () => {
     })
     const cell = cellsOf(rowWithPrefix(say('turn.label', { turn: 1 })))[1] as HTMLTableCellElement
     expect(cell.textContent).toContain(`${say('trigger.team-message')} · hfai-deploy`)
-    expect(cell.textContent).toContain('P1 已 rebase 完成')
+    expect(cell.textContent).toContain('P1 already rebase Done')
     expect(cell.textContent).not.toContain('Team message from')
-    expect(cell.getAttribute('title')).toBe('Team message from hfai-deploy: P1 已 rebase 完成')
+    expect(cell.getAttribute('title')).toBe('Team message from hfai-deploy: P1 already rebase Done')
   })
 
   it('shows the frame label and body without opaque session ids', () => {
@@ -674,7 +674,7 @@ describe('turn rows', () => {
       turns: [
         turn({
           turn: 1,
-          prompt: 'Agent 52224ac7-b02b-4d25-8c6e-123456789abc sent a message: 请检查构建',
+          prompt: 'Agent 52224ac7-b02b-4d25-8c6e-123456789abc sent a message: please Checks build',
           promptSource: 'agent-message',
         }),
         turn({
@@ -689,7 +689,7 @@ describe('turn rows', () => {
     const first = cellsOf(rowWithPrefix(say('turn.label', { turn: 1 })))[1] as HTMLTableCellElement
     expect(first.textContent).toContain(say('trigger.agent-message'))
     expect(first.textContent).not.toContain('52224ac7')
-    expect(first.textContent).toContain('请检查构建')
+    expect(first.textContent).toContain('please Checks build')
     const second = cellsOf(rowWithPrefix(say('turn.label', { turn: 2 })))[1] as HTMLTableCellElement
     expect(second.textContent).toContain(say('trigger.subagent-settled'))
     expect(second.textContent).not.toContain('10a0dbaa')
@@ -735,7 +735,7 @@ describe('turn rows', () => {
     const did = cellsOf(rowWithPrefix(say('turn.label', { turn: 1 })))[2] as HTMLTableCellElement
     expect(within(did).queryByText(say('did.more', { count: 1 }))).toBeNull()
     expect(within(did).queryByText(say('tool.failed', { count: 1 }))).toBeNull()
-    expect(within(did).queryByText(/字符/)).toBeNull()
+    expect(within(did).queryByText(/characters/)).toBeNull()
     expect(did.getAttribute('title')).toBe(say('did.title', { calls: 3, tools: 'read ×1 · edit ×1 · write ×1' }))
   })
 
@@ -1266,7 +1266,7 @@ describe('step rows', () => {
     const fourth = cellsOf(stepRow(4))
     expect(fourth[3]?.textContent).toBe(formatTokensShort(1_500))
     expect(fourth[3]?.getAttribute('title')).toBeNull()
-    expect(timeTitle(stepRow(4))).not.toContain('距上一步')
+    expect(timeTitle(stepRow(4))).not.toContain('in Back')
 
     const fifth = cellsOf(stepRow(5))
     expect(fifth[3]?.textContent).toBe(formatTokensShort(900))
@@ -1339,7 +1339,7 @@ describe('step rows', () => {
     expect(within(zero).getByText('bash')).toBeTruthy()
     expect(within(zero).queryByText('write')).toBeNull()
     expect(within(zero).queryByText(say('did.lines', { lines: formatTokens(0) }))).toBeNull()
-    expect(within(zero).queryByText(/字符/)).toBeNull()
+    expect(within(zero).queryByText(/characters/)).toBeNull()
 
     expect(within(cellsOf(stepRow(6))[2] as HTMLTableCellElement).getByText('?')).toBeTruthy()
     // An empty tool name hashes to a tone instead of falling back to the marker.
@@ -1356,7 +1356,7 @@ describe('step rows', () => {
     fireEvent.click(stepRow(1))
     const detail = detailRow()
     expect(detail.textContent).toContain(say('detail.calls', { count: 1 }))
-    expect(detail.textContent).not.toContain('还有')
+    expect(detail.textContent).not.toContain('remaining')
   })
 })
 

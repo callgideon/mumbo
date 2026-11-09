@@ -287,7 +287,7 @@ async function main() {
             throw error
           }
         }
-        await until("document.getElementById('title')?.textContent === '需要更新'")
+        await until("document.getElementById('title')?.textContent === 'Update required'")
         assert.equal(await contents.executeJavaScript("document.querySelector('#title b') === null"), true)
         if (process.platform === 'win32') {
           assert.equal(window, parent)

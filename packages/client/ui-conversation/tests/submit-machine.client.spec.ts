@@ -244,15 +244,15 @@ describe('submit-machine: claimed lifecycle', () => {
 
   it('re-enters claimed when a history restore brings the command chip back', () => {
     const m = new SubmitMachine()
-    const claim = { ...claimOf('goal'), token: '/目标 ' }
+    const claim = { ...claimOf('goal'), token: '/Goal ' }
     m.dispatch({ type: 'draft-changed', command: claim })
     expect(m.state.phase).toBe('claimed')
-    expect(m.state.claim?.token).toBe('/目标 ')
+    expect(m.state.claim?.token).toBe('/Goal ')
   })
 
   it.each([
-    ['goal', '/goal '], ['goal', '/目标 '], ['plan', '/plan '], ['plan', '/计划 '],
-    ['feedback', '/feedback '], ['feedback', '/反馈 '],
+    ['goal', '/goal '], ['goal', '/Goal '], ['plan', '/plan '], ['plan', '/Plan '],
+    ['feedback', '/feedback '], ['feedback', '/Feedback '],
   ])('submits %s claimed as %s without its separator with an empty argument', (name, token) => {
     const m = new SubmitMachine()
     const claim = { ...claimOf(name), token }
@@ -267,9 +267,9 @@ describe('submit-machine: claimed lifecycle', () => {
 
   it('reads arguments typed directly against the chip without a separator', () => {
     const m = new SubmitMachine()
-    m.dispatch({ type: 'claim', claim: { ...claimOf('goal'), token: '/目标 ' } })
-    const fx = m.dispatch({ type: 'enter', mode: 'queue', draft: '/目标发布', occurrences: [], quotes: [], attachmentIds: [] })
-    expect(effectAt(fx, 0, 'begin-submit').args).toBe('发布')
+    m.dispatch({ type: 'claim', claim: { ...claimOf('goal'), token: '/Goal ' } })
+    const fx = m.dispatch({ type: 'enter', mode: 'queue', draft: '/Goal release', occurrences: [], quotes: [], attachmentIds: [] })
+    expect(effectAt(fx, 0, 'begin-submit').args).toBe('release')
   })
 
   it('explicit release returns to plain when nothing is in flight', () => {
@@ -425,7 +425,7 @@ describe('decorations: scanTextRefs', () => {
   })
 
   it('a "/" token glued to punctuation is not a reference: the host gesture is whitespace-bounded', () => {
-    expect(scanTextRefs('/goal。 then /goal, now', lexicon)).toEqual([])
+    expect(scanTextRefs('/goal. then /goal, now', lexicon)).toEqual([])
   })
 
   it('word boundary: a trigger glued to text never matches', () => {

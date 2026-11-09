@@ -275,8 +275,8 @@ describe('parseAnsiLines: erase and column arithmetic', () => {
   })
 
   it('counts a wide character as the two columns a terminal advances', () => {
-    // `中` occupies two cells, so a two-character redraw covers exactly it.
-    expect(onlySpan('中x\rab')).toEqual({ text: 'abx', style: undefined })
+    // `중` occupies two cells, so a two-character redraw covers exactly it.
+    expect(onlySpan('중x\rab')).toEqual({ text: 'abx', style: undefined })
   })
 
   it('does not accumulate a cursor or erase sequence into a cell style', () => {
@@ -335,12 +335,12 @@ describe('parseAnsiLines: line-end state and column widths', () => {
   })
 
   it('blanks a wide character\'s spacer once its lead cell is overwritten', () => {
-    // Verified in a real terminal: `中x` redrawn with `A` shows `A x` — the wide
+    // Verified in a real terminal: `중x` redrawn with `A` shows `A x` — the wide
     // glyph's second cell becomes a blank rather than closing the gap, so the
     // `x` keeps column 3.
-    expect(onlySpan('中x\rA')).toEqual({ text: 'A x', style: undefined })
+    expect(onlySpan('중x\rA')).toEqual({ text: 'A x', style: undefined })
     // Covering both of its columns leaves no spacer behind.
-    expect(onlySpan('中x\rab')).toEqual({ text: 'abx', style: undefined })
+    expect(onlySpan('중x\rab')).toEqual({ text: 'abx', style: undefined })
   })
 
   it('replays an erase whose parameters carry a semicolon', () => {
@@ -442,18 +442,18 @@ describe('parseAnsiLines: bounded state and true widths', () => {
   })
 
   it('clears the lead when the write lands on the spacer itself', () => {
-    // Two backspaces from after `中x` stop ON the wide glyph's second cell;
+    // Two backspaces from after `중x` stop ON the wide glyph's second cell;
     // writing there blanks the lead through the spacer side of the pair clear,
     // so the glyph cannot survive as half a character.
-    expect(onlySpan(`中x${BS}${BS}A`)).toEqual({ text: ' Ax', style: undefined })
+    expect(onlySpan(`중x${BS}${BS}A`)).toEqual({ text: ' Ax', style: undefined })
   })
 
   it('keeps a surviving spacer as a blank when its lead was replaced by a spacer', () => {
-    // `好` written over the first glyph's spacer puts its own spacer on the
+    // `좋` written over the first glyph's spacer puts its own spacer on the
     // second glyph's lead cell — a write that goes down without a pair clear.
     // The second glyph's spacer survives with a dead lead and must emit a
     // blank, or everything after it shifts one column left.
-    expect(onlySpan(`中中${BS}${BS}${BS}好`)).toEqual({ text: ' 好 ', style: undefined })
+    expect(onlySpan(`중중${BS}${BS}${BS}좋`)).toEqual({ text: ' 좋 ', style: undefined })
   })
 
   it('blanks both halves of a wide pair when either is overwritten', () => {

@@ -68,7 +68,7 @@ final class CapabilitiesFixture: NSObject, NSApplicationDelegate, NSWindowDelega
         text.isRichText = true
         text.isEditable = true
         text.font = .systemFont(ofSize: 18)
-        text.string = "第一😀 target，第二😀 target."
+        text.string = "있였😀 target，있욌😀 target."
         text.setAccessibilityIdentifier("dsh-cua-rich-text")
         text.setAccessibilityLabel("Rich text fixture")
         text.delegate = self

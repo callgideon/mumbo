@@ -32,9 +32,9 @@ const CATALOG = {
     id: 'internal',
     models: [{
       id: 'dsv41f',
-      name: '内网 DSV41F',
+      name: 'intranet DSV41F',
       reasoning: {
-        efforts: [{ id: 'low', name: '低强度' }, { id: 'high', name: '高强度' }],
+        efforts: [{ id: 'low', name: 'low effort' }, { id: 'high', name: 'high effort' }],
         defaultEffort: 'low',
       },
     }],

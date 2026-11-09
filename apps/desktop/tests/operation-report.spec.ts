@@ -57,7 +57,7 @@ it('omits oldest records to fit the output budget, counting UTF-8 bytes and all 
   const records = Array.from({ length: 20 }, (_, index) => ({
     runId: 'c254ab28-97c9-4382-95e6-2db9c66f98c8', transportDropped: 0,
     operation: { id: 'c254ab28-97c9-4382-95e6-2db9c66f98c9', time: '2026-10-19T00:00:00.000Z',
-      reason: 'bundle', phase: 'started', target: `测试插件-${index}`, stage: 'enable' },
+      reason: 'bundle', phase: 'started', target: `test Plugins-${index}`, stage: 'enable' },
   }))
   await writeFile(join(directory, 'operations.jsonl'), records.map(record => JSON.stringify(record)).join('\n') + '\n')
   expect(await appendOperationReport(report, directory, { ...limits, outputBytes: 1024 }, new AbortController().signal, null)).toBe(true)
@@ -69,5 +69,5 @@ it('omits oldest records to fit the output budget, counting UTF-8 bytes and all 
   }
   expect(summary.outputRecordsOmitted).toBeGreaterThan(0)
   expect(summary.records.length + summary.outputRecordsOmitted).toBe(20)
-  expect(summary.records[0]?.operation.target).toBe('测试插件-19')
+  expect(summary.records[0]?.operation.target).toBe('test Plugins-19')
 })

@@ -564,13 +564,13 @@ describe('snapshot builder', () => {
     expect(builder.apply({ upserts: [], timeline: { turnOrder: [], turns: new Map() } })).toBe(first)
     const upserted = builder.apply({
       upserts: [
-        node('stats-prompt:1:0', { kind: 'prompt', turn: 1, prompt: '问', images: [IMAGE], source: 'user', sender: null }),
+        node('stats-prompt:1:0', { kind: 'prompt', turn: 1, prompt: 'ask', images: [IMAGE], source: 'user', sender: null }),
         node('stats-step:1:1', { kind: 'step', metrics: measuredStep(1, 1, 1_000, 1_800) }),
         node('stats-turn-end:1:100000', { kind: 'end', turn: 1, closeKind: 'completed', endTime: 1_800 }),
       ],
       timeline: { turnOrder: [1], turns: new Map() },
     })
-    expect(upserted.turns[0]?.prompt).toBe('问')
+    expect(upserted.turns[0]?.prompt).toBe('ask')
     expect(upserted.stepCount).toBe(1)
   })
 
@@ -589,7 +589,7 @@ describe('conversation Definitions', () => {
     const snapshot = assemble(definitions, [
       entry(event('turn/start', { turn: 1 })),
       entry(event('user/message', {
-        role: 'user', id: 'u1', content: [{ type: 'text', text: '看看这个' }, { type: 'image', attachment: IMAGE }], source: { kind: 'user' },
+        role: 'user', id: 'u1', content: [{ type: 'text', text: 'look at this' }, { type: 'image', attachment: IMAGE }], source: { kind: 'user' },
       })),
       entry(event('step/start', { turn: 1, step: 1 }, 2_000)),
       transient(1, 1, delta, 2_100),
@@ -612,7 +612,7 @@ describe('conversation Definitions', () => {
     expect(snapshot?.turns).toHaveLength(1)
     expect(snapshot?.stepCount).toBe(1)
     const turn = snapshot!.turns[0]!
-    expect(turn.prompt).toBe('看看这个')
+    expect(turn.prompt).toBe('look at this')
     expect(turn.promptImages).toEqual([IMAGE])
     expect(turn.interrupted).toBe(false)
     expect(turn.steps[0]?.startTime).toBe(2_000)
@@ -660,7 +660,7 @@ describe('conversation Definitions', () => {
     const definitions = await registeredDefinitions()
     const snapshot = assemble(definitions, [
       entry(event('user/message', {
-        role: 'user', id: 'u2', content: [{ type: 'text', text: '问题' }], source: { kind: 'user' },
+        role: 'user', id: 'u2', content: [{ type: 'text', text: 'question' }], source: { kind: 'user' },
       })),
       entry(event('assistant/message', {
         turn: 4,
@@ -985,7 +985,7 @@ describe('conversation Definitions', () => {
     const definitions = await registeredDefinitions()
     const prompt = definitions[1] as ConversationNodeDefinition<StatsStepState>
     const user = event('user/message', {
-      role: 'user', id: 'u7', content: [{ type: 'text', text: '问题' }], source: { kind: 'user' },
+      role: 'user', id: 'u7', content: [{ type: 'text', text: 'question' }], source: { kind: 'user' },
     })
     const located = locatedStart(user, stepAt(4, 1))
     const state = prompt.start(contextOf(prompt, undefined), located, reader)
@@ -1004,7 +1004,7 @@ describe('conversation Definitions', () => {
     const definitions = await registeredDefinitions()
     const prompt = definitions[1] as ConversationNodeDefinition<StatsStepState>
     const user = event('user/message', {
-      role: 'user', id: 'u8', content: [{ type: 'text', text: '问题' }], source: { kind: 'user' },
+      role: 'user', id: 'u8', content: [{ type: 'text', text: 'question' }], source: { kind: 'user' },
     })
     const match = locatedStart(user, turnAt(3))
     const state = { ...prompt.start(contextOf(prompt, undefined), match, reader), trigger: null }

@@ -46,9 +46,9 @@ beforeEach(() => {
   Object.defineProperty(document, 'fonts', { configurable: true, value: new EventTarget() })
 })
 const TODOS: TodoItem[] = [
-  { content: '梳理需求', status: 'completed' },
-  { content: '实现 fixture 样本', status: 'in_progress' },
-  { content: '浏览器验收', status: 'pending' },
+  { content: 'sort out requirements', status: 'completed' },
+  { content: 'implement fixture sample', status: 'in_progress' },
+  { content: 'Browser acceptance', status: 'pending' },
 ]
 
 const todoResult = (seq: number): ToolResultNode => ({

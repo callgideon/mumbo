@@ -588,7 +588,7 @@ describe('ChangedFiles card', () => {
     const card = view.container.querySelector('[data-changed-files]')!
     expect(within(card as HTMLElement).getByText(t('changes.singleTitle', { name: 'example.scss' }))).toBeTruthy()
     expect(card.querySelector('ul')).toBeNull()
-    expect(view.queryByRole('button', { name: /Show all|Collapse changed|展开全部|收起改动/ })).toBeNull()
+    expect(view.queryByRole('button', { name: /Show all|Collapse changed|Expand all|Collapse changes/ })).toBeNull()
     expect(card.querySelector('svg [data-file-type-mark]')?.children).toHaveLength(3)
     const open = view.getByRole('button', { name: t('changes.viewDiff', { name: 'src/example.scss' }) })
     expect(open.getAttribute('aria-describedby')).toBeTruthy()
