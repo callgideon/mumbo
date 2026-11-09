@@ -142,6 +142,20 @@ export function roleInstructions(cfg, principal) {
   ].join('\n')
 }
 
+/** Exists once a person box has given its first-run welcome, or had sessions before it (DESIGN.md#first-run-welcome). Under
+ *  /root/.dsh, so backups carry it with the conversation that holds the welcome. */
+export const WELCOMED = '/root/.dsh/welcomed'
+/** The first-run welcome (spec section 17a, step 5), added to the person's first prompt in a new box (startScript). */
+export function welcomeInstructions(cfg) {
+  return [
+    'This person\'s computer was just set up, and this is their first message. Before you answer it, greet them once, briefly:',
+    '- what you can do now: use the web in their own browser (they sign in to sites on the desktop), work with files, run quick experiments in sandboxes, do recurring or later work on a schedule while they are away, and start projects of their own;',
+    '- connecting their accounts comes later;',
+    `- their computer's home page is https://${cfg.publicHost}/home.`,
+    'Then answer their message.',
+  ].join('\n')
+}
+
 export function boxSite(cfg, principal) {
   const id = principal.startsWith('project:') ? principal.slice('project:'.length) : undefined
   return id === undefined
@@ -228,6 +242,28 @@ YML
 command -v xauth >/dev/null 2>&1 && echo "        xauthority: /run/x11/auth" >> /root/.mumbo/computer.overlay.yml
 CU_PATCH="--patch /root/.mumbo/computer.overlay.yml"
 fi
+` : ''}${site.desktop ? `# First-run welcome (edge welcomeInstructions): until ${WELCOMED} exists, a UserPromptSubmit hook creates it (noclobber,
+# so exactly one prompt wins) and adds the welcome to that prompt. dsh reads AGENTS.md into every new session, so the
+# role file cannot carry a once-only greeting. A box with any session log under dsh's sessions root has been used (a
+# restart, or a restore from a backup taken before the marker existed): it is marked instead of welcomed.
+if [ ! -e ${WELCOMED} ] && [ -n "$(find /root/.dsh/sessions -type f 2>/dev/null | head -n 1)" ]; then : > ${WELCOMED}; fi
+WELCOME_PATCH=
+if [ ! -e ${WELCOMED} ]; then
+cat > /root/.mumbo/welcome.json <<'JSON'
+${JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: welcomeInstructions(cfg) } })}
+JSON
+cat > /root/.mumbo/welcome-hooks.json <<'JSON'
+${JSON.stringify({ UserPromptSubmit: [{ hooks: [{ type: 'command', command: `(set -C; : > ${WELCOMED}) 2>/dev/null && cat /root/.mumbo/welcome.json || true`, timeout: 10 }] }] })}
+JSON
+cat > /root/.mumbo/welcome.overlay.yml <<'YML'
+- insert:
+    - id: first-run-welcome
+      name: '@deepseek-ai/dsh-hooks-claude-code'
+      config:
+        configPath: /root/.mumbo/welcome-hooks.json
+YML
+WELCOME_PATCH="--patch /root/.mumbo/welcome.overlay.yml"
+fi
 ` : ''}${site.desktop ? `# Desktop: the user's own Chromium (signed-in accounts live in its profile) on a virtual display, as the unprivileged
 # user browser; its debugging port stays on loopback for dsh's browser tools; noVNC on :6080 is the live view, which
 # only the edge reaches (E2B traffic token). Re-runnable: each part starts only if it is not running.
@@ -285,7 +321,7 @@ ${site.desktop ? '' : `PATH=/root/.mumbo/bin:$PATH NODE_USE_ENV_PROXY=1 NODE_EXT
 `}HOME=/root DSH_HOME=/root/.dsh DSH_AGENTS_HOME=/root/.mumbo/agents DSH_TELEMETRY_DISABLED=1 \\
 DEEPSEEK_BASE_URL=${llm}/anthropic DEEPSEEK_SEARCH_BASE_URL=${llm} DEEPSEEK_API_KEY=${token} \\
 nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\
-  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml $LINKS_PATCH${site.desktop ? ' $CU_PATCH' : ''}${memberKeyText ? ' $PROJECT_PATCH' : ''} \\
+  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml $LINKS_PATCH${site.desktop ? ' $CU_PATCH $WELCOME_PATCH' : ''}${memberKeyText ? ' $PROJECT_PATCH' : ''} \\
   --no-open --host "$ip" --port 3080 --public-url ${site.publicUrl} --trusted-host ${cfg.publicHost}${site.host === cfg.publicHost ? '' : ` --trusted-host ${site.host}`} > /root/dsh.log 2>&1 &
 `
 }
