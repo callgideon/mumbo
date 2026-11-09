@@ -11,6 +11,8 @@ locals {
   public_host  = "boxes.mumbo.si"
   llm_host     = "llm.boxes.mumbo.si"
   backup_store = "mumbo-boxes-backup-${data.aws_caller_identity.this.account_id}" # created by the trial (../edge.tf); users' backups carry over
+  # The shared Fargate server's names; they redirect here since it was retired (2026-11-09).
+  old_hosts = ["app.mumbo.si", "api.mumbo.si"]
 }
 
 resource "aws_route53_record" "internal" {
@@ -29,7 +31,7 @@ resource "aws_route53_record" "internal" {
 data "aws_route53_zone" "public" { name = "mumbo.si" }
 resource "aws_acm_certificate" "edge" {
   domain_name               = local.public_host
-  subject_alternative_names = [local.llm_host]
+  subject_alternative_names = concat([local.llm_host], local.old_hosts)
   validation_method         = "DNS"
   lifecycle { create_before_destroy = true }
 }
@@ -40,6 +42,8 @@ resource "aws_route53_record" "cert" {
   type     = each.value.resource_record_type
   records  = [each.value.resource_record_value]
   ttl      = 300
+  # app/api validation records already exist from the old CDK certificate; ACM reuses one record per name.
+  allow_overwrite = true
 }
 resource "aws_acm_certificate_validation" "edge" {
   certificate_arn         = aws_acm_certificate.edge.arn
@@ -125,6 +129,25 @@ resource "aws_lb_listener_rule" "edge" {
     target_group_arn = aws_lb_target_group.edge[each.key].arn
   }
 }
+resource "aws_lb_listener_rule" "old_hosts" {
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 5
+  condition {
+    host_header { values = local.old_hosts }
+  }
+  action {
+    type = "redirect"
+    redirect {
+      host        = local.public_host
+      port        = "443"
+      protocol    = "HTTPS"
+      path        = "/#{path}"
+      query       = "#{query}"
+      status_code = "HTTP_301"
+    }
+  }
+}
+
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.edge.arn
   port              = 80
@@ -261,7 +284,7 @@ output "edge_alb" { value = aws_lb.edge.dns_name }
 
 # Public names on the ALB. They replace the trial's A records (allow_overwrite); the trial no longer manages them.
 resource "aws_route53_record" "public" {
-  for_each        = toset([local.public_host, local.llm_host])
+  for_each        = toset(concat([local.public_host, local.llm_host], local.old_hosts))
   zone_id         = data.aws_route53_zone.public.zone_id
   name            = each.key
   type            = "A"
