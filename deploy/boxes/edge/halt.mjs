@@ -1,16 +1,25 @@
 // Stop everything (design section 5): one switch per person. While it is on, the edge refuses model calls and GitHub
 // writes for that person and every project they own.
+import { ownersOf } from './projects.mjs'
+
+const key = (email) => `halt:${email.toLowerCase()}`
 
 /**
- * Stub until B4: nothing is halted.
+ * Halt switch stored as doc `halt:<email>` = `{ on, at }`; reads are uncached.
  * @param {{ store: object }} deps
  * @returns {{ isHalted(principal: string): Promise<boolean>, get(email: string): Promise<boolean>, set(email: string, on: boolean): Promise<void> }}
- *   `isHalted` takes an email or a `project:<id>` principal; `get` and `set` read and change that person's switch.
+ *   `isHalted` takes an email or a `project:<id>` principal; a project is halted when any of its owners is.
+ *   `get` and `set` read and change one person's switch.
  */
 export function haltService({ store }) {
+  const get = async (email) => (await store.getDoc(key(email)))?.on === true
   return {
-    async isHalted(principal) { return false },
-    async get(email) { throw new Error('not implemented') },
-    async set(email, on) { throw new Error('not implemented') },
+    get,
+    async set(email, on) { await store.putDoc(key(email), { on, at: Date.now() }) },
+    async isHalted(principal) {
+      if (!principal.startsWith('project:')) return get(principal)
+      for (const owner of await ownersOf(store, principal.slice('project:'.length))) if (await get(owner)) return true
+      return false
+    },
   }
 }
