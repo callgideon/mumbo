@@ -216,6 +216,7 @@ resource "aws_ecs_task_definition" "edge" {
         LISTEN_HOST       = "127.0.0.1"
         MODEL_LISTEN_HOST = "0.0.0.0"
         AWS_REGION        = "us-east-1"
+        PAUSE_IDLE        = "false" # boxes stay running (founder, 2026-11-09); cost work later
       } : { name = k, value = v }]
       secrets = [
         { name = "ALLOWED_EMAILS", valueFrom = "${local.ssm}/allowed-emails" },

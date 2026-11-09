@@ -1,13 +1,38 @@
 # mumbo boxes: personal assistant and project coordinator (stage 10 proposal)
 
-Status: proposal for the founder, 2026-11-09. Builds on stages 8 (child sandboxes) and 9 (the box as the user's computer). Nothing here is built yet. The four decisions at the end are the founder's.
+Status: design, 2026-11-09; decisions taken (below). Builds on stages 8 (child sandboxes) and 9 (the box as the user's computer).
 
 ## What the user gets
 
 - **One assistant per user,** always reachable at `boxes.mumbo.si`. It knows the user's accounts, files and projects, acts in the user's browser when permitted, and runs scheduled work while the user is away.
 - **Projects,** each with its own coordinator agent and its own sandbox. The user asks the assistant ("start a landing page for X", "update the API project", "what's the status of everything?"); the assistant hands the work to the project's coordinator and reports back.
 
-## Roles
+## Decisions (founder, 2026-11-09)
+
+1. Project sandboxes persist: paused with memory when idle, backed up.
+2. Several people may work on one project, so the coordinator placement is decided by the analysis below.
+3. Account actions: reads are free; writes (post, send, buy, change settings) ask unless allowed for that site and kind.
+4. Boxes never pause for now; cost optimization comes later.
+
+## Shared projects: where the coordinator lives
+
+**Requirements.** A project has several members, each with their own assistant and signed-in accounts. The coordinator must be shared and durable, reachable by every member and every member's assistant, attribute each request to its member, and never see any member's accounts or secrets. Losing or pausing one member's box must not stop the project.
+
+| Option | Shared and durable | No member's accounts or secrets | Attribution | Verdict |
+|---|---|---|---|---|
+| A. In one member's box | No: the project depends on that box; others act through its owner | No: that box holds the owner's signed-in browser | Everyone appears as the owner | Rejected |
+| B. In a project box: the same box template, owned by the project, running its own dsh as the coordinator | Yes: its own box, persisted, backed up | Yes: no browser profile, model access through the edge with a project token | The edge names the member on every message it relays | **Recommended** |
+| C. A coordinator service inside the edge | Yes | Yes | Yes | Rejected: rebuilds an agent runtime outside dsh |
+
+**Option B, modular:**
+- **One box layer for two kinds of owner.** The edge keys boxes by principal, `user:<email>` or `project:<id>`, instead of by email. Create, resume, backup, wake and drain stay one code path; a project box uses the same template with a project overlay (coordinator preset, no browser).
+- **Membership lives in the edge store:** project → members (owner or member). Members open `https://boxes.mumbo.si/p/<id>/` and reach the project box's dsh directly; non-members get 403.
+- **Assistants reach projects through edge tools** on the same MCP endpoint as stage 8: `project_list`, `project_create`, `project_message` and `project_status`. `project_message` relays the request into the coordinator's session, prefixed with the member's identity. Delivering into a session over dsh's remote API is an open item to confirm.
+- **Project work runs in project-owned sandboxes** (stage 8 tools scoped to the project), never in a member's box.
+- **A member's assistant never gains the project's tools beyond messaging,** and the coordinator never gains a member's browser.
+
+## Roles (single-member view; with option B the coordinator row moves into the project box)
+
 
 | Role | Runs where | Has | Never has |
 |---|---|---|---|
@@ -37,10 +62,3 @@ Why the coordinator lives in the box and the code lives outside: one dsh per use
 | Home view | web client | The assistant session first, a projects panel, a link to the desktop live view. |
 
 Order: persistent project sandboxes and project tools (edge only, testable now) → presets (box start script) → consent → home view.
-
-## Decisions for the founder
-
-1. **Project sandboxes persist** (paused with memory when idle, backed up) — recommended — **or are disposable** (rebuilt from the repo each time; cheaper, slower to resume, nothing lost only if everything is in git).
-2. **Coordinators run in the user's box** (one dsh, recommended) **or inside each project sandbox** (each project fully self-contained, but each sandbox then needs its own model access and the user's approvals in several places).
-3. **Default for account actions:** ask every time until the user allows a site (recommended), or allow reads and ask for writes only.
-4. **"Always on" means scheduled wake-ups** (box paused between tasks, recommended) **or a box that never pauses** (instant, about $40–60 a month per user at 4 GiB).

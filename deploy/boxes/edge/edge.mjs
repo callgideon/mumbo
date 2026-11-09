@@ -13,6 +13,7 @@ export const config = () => ({
   llmHost: env('LLM_HOST'),
   template: env('BOX_TEMPLATE', 'mumbo-box'),
   idleMs: Number(env('IDLE_MINUTES', '30')) * 60_000,
+  pauseIdle: env('PAUSE_IDLE', 'true') !== 'false',  // false: boxes stay running (founder, 2026-11-09); cost work comes later
   backupEveryMs: Number(env('BACKUP_MINUTES', '10')) * 60_000,
   maxRunning: Number(env('MAX_RUNNING_BOXES', '0')),  // 0: no edge-side cap; E2B's own placement errors decide
   backupConcurrency: Number(env('BACKUP_CONCURRENCY', '8')),
@@ -258,14 +259,20 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, log = 
         await store.deleteBox(b.id)
         say({ level: 'warn', msg: 'dropped unfinished create', user: b.email, box: b.id })
       }
-      const due = listed.filter(b => !b.paused && !b.creating && (now - b.active >= cfg.idleMs || now - b.backedUp >= cfg.backupEveryMs))
+      const idle = (b) => cfg.pauseIdle !== false && now - b.active >= cfg.idleMs
+      const due = listed.filter(b => !b.paused && !b.creating && (idle(b) || now - b.backedUp >= cfg.backupEveryMs))
       // Backups run in parallel (bounded) and take no user lock, so a long upload never blocks that user's visit.
       await inParallel(due, cfg.backupConcurrency ?? 8, b => backup(b.id, b).then(() => true, async (e) => {
         await store.patchBox(b.id, { backedUp: now - cfg.backupEveryMs + 5 * 60_000 })  // retry in 5 minutes
         say({ level: 'error', msg: 'backup failed', user: b.email, box: b.id, error: e.message })
         return false
       }))
-      for (const b of due.filter(x => now - x.active >= cfg.idleMs)) await pauseIdle(b)
+      for (const b of due.filter(idle)) await pauseIdle(b)
+      // Never-pause mode: keep E2B's own timer (onTimeout: pause) from pausing a box nobody is using.
+      if (cfg.pauseIdle === false) {
+        await inParallel(listed.filter(b => !b.paused && !b.creating && now - b.extended >= 5 * 60_000), cfg.backupConcurrency ?? 8,
+          b => e2b.Sandbox.setTimeout(b.id, timeout()).then(() => store.patchBox(b.id, { extended: now }), e => say({ level: 'warn', msg: 'keepalive failed', box: b.id, error: e.message })))
+      }
       for (const b of listed.filter(x => x.paused && x.wakeAt && x.wakeAt <= now + 60_000)) await wake(b, now)
     } finally {
       await store.release('sweep').catch(() => {})

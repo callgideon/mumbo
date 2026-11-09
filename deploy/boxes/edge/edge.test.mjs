@@ -389,3 +389,24 @@ test('an idle box is paused with its next scheduled run and woken for it, restar
   assert.equal(rec.paused, false); assert.equal(rec.wakeAt, undefined); assert.equal(rec.launch, 'launch456')
   assert.ok(ran.includes('/root/.mumbo/start.sh'))
 })
+
+test('with PAUSE_IDLE=false idle boxes stay running: no pause, backups only when stale, E2B timer kept extended', async () => {
+  const e2b = fakeE2B(); const ran = []; const paused = []; const extended = []
+  e2b.Sandbox.pause = async (id) => { paused.push(id) }
+  e2b.Sandbox.setTimeout = async (id) => { extended.push(id) }
+  const realConnect = e2b.Sandbox.connect
+  e2b.Sandbox.connect = async (id) => { const b = await realConnect(id); b.commands.run = async (c) => { ran.push(c); return { stdout: '' } }; return b }
+  const store = memoryStore()
+  const b = boxes({ e2b, store, cfg: { ...cfg, pauseIdle: false }, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'PUT', log: () => {} })
+  const { id } = await b.ensure('a@x.com')
+  const t = Date.now() + Math.max(cfg.idleMs, 5 * 60_000) + 1  // idle, and past the 5-minute keepalive interval
+  await store.patchBox(id, { backedUp: t - 1000 })
+  await b.sweep(t)
+  assert.deepEqual(paused, [])
+  assert.equal(ran.filter(c => c.includes("'PUT'")).length, 0, 'fresh backup: none taken although idle')
+  assert.deepEqual(extended, [id])
+  await store.release('sweep')
+  await b.sweep(t + cfg.backupEveryMs)
+  assert.equal(ran.filter(c => c.includes("'PUT'")).length, 1, 'stale backup: taken')
+  assert.deepEqual(paused, [])
+})
