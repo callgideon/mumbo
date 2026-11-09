@@ -12,7 +12,7 @@ function fixture() {
   return directory
 }
 
-it('uses the confirmed Chinese language for recovery before Host settings are available', () => {
+it('uses the confirmed German language for recovery before Host settings are available', () => {
   const directory = fixture()
   expect(readDesktopLocaleCache(directory)).toBeUndefined()
   writeDesktopLocaleCache(directory, 'de')
