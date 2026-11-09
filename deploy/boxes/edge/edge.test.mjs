@@ -505,8 +505,24 @@ test('project tools are offered to a person\'s box and not to a project box', as
   } finally { server.close() }
 })
 
-test('box requests carry the browser Origin unchanged, so a box\'s dsh compares it with its own host', () => {
-  for (const origin of [`https://${cfg.publicHost}`, `https://p-0123456789abcdef.${cfg.publicHost}`, 'https://evil.example']) assert.equal(boxHeaders(cfg, { origin }, { id: 'pb' }).origin, origin)
+test('box requests drop a same-origin Origin, which a box masked with a former host name would refuse; any other Origin passes unchanged for its dsh to refuse', () => {
+  const p = 'p-0123456789abcdef.app.mumbo.si'
+  for (const [host, origin] of [['app.mumbo.si', 'https://app.mumbo.si'], ['App.Mumbo.Si:443', 'https://app.mumbo.si'], [p, `https://${p}`]]) {
+    assert.equal('origin' in boxHeaders(cfg, { host, origin }, { id: 'b' }), false, `${host} from ${origin}`)
+  }
+  for (const [host, origin] of [['app.mumbo.si', `https://${p}`], [p, 'https://app.mumbo.si'], ['app.mumbo.si', 'http://app.mumbo.si'], ['app.mumbo.si', 'https://app.mumbo.si:8443'],
+    ['app.mumbo.si', 'https://boxes.mumbo.si'], ['app.mumbo.si', 'null'], ['app.mumbo.si', 'https://evil.example'], [undefined, 'https://app.mumbo.si']]) {
+    assert.equal(boxHeaders(cfg, { host, origin }, { id: 'b' }).origin, origin, `${host} from ${origin}`)
+  }
+})
+
+test('model host: llm.app.mumbo.si and llm.boxes.mumbo.si are both served, since running boxes keep the name they started with', async () => {
+  const fetchImpl = async () => new Response('{"data":[]}', { status: 200, headers: { 'content-type': 'application/json' } })
+  const s = modelServer({ cfg, edgeKey: 'k', modelKey: 'SERVER', allow: async () => true, owns: async () => true, touch: () => {}, fetchImpl, log: () => {} })
+  const port = await listen(s)
+  try {
+    for (const host of ['llm.app.mumbo.si', 'llm.boxes.mumbo.si']) assert.equal((await call(port, { path: '/models', headers: { host, 'x-api-key': signBox('k', 'a@x.com', 'b1') } })).status, 200, host)
+  } finally { s.close() }
 })
 
 test('project relay: signs in once, creates the coordinator session once, re-signs after 401, members only', async () => {
@@ -568,6 +584,8 @@ test('home page lists the assistant, desktop and the member\'s projects without 
     assert.ok(html.includes(`href="https://p-${id}.boxes.example/"`) && html.includes('&#60;b&#62;Shop&#60;/b&#62;') && !html.includes('<b>Shop'))
     assert.ok(!html.includes('Not mine'))
     assert.ok(html.includes('href="/desktop/"'))
+    // A former project host (p-<id>.boxes.mumbo.si) answers 301 to /home with its query kept.
+    assert.equal((await call(port, { path: '/home/?token=x', headers: { 'x-forwarded-email': 'a@x.com' } })).body, html)
     assert.deepEqual(ensured, [])
   } finally { server.close() }
 })
@@ -659,7 +677,7 @@ test('relay to a member-capable box sends the member header and no owner sign-in
     for (const { headers: h } of seen) {
       assert.equal(h['x-mumbo-member'], 'hdr-for-a@x.com')
       assert.equal(h.cookie, undefined)
-      assert.equal(h.origin, `https://p-${id}.boxes.example`, 'the origin of the project\'s own host')
+      assert.equal(h.origin, undefined, 'a same-origin request, so a box masked with a former host name accepts it too')
       assert.equal(h['e2b-sandbox-id'], 'pbox')
     }
   } finally { upstream.close() }

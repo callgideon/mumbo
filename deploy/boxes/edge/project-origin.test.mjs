@@ -126,6 +126,22 @@ test('an HTTP request from Origin: https://boxes.mumbo.si reaches the project bo
   } finally { t.close() }
 })
 
+test('on app.mumbo.si, same-origin requests and upgrades reach the user and project boxes without Origin, other Origins unchanged', async () => {
+  // Boxes created before the move are masked as boxes.mumbo.si and p-<id>.boxes.mumbo.si; their dsh would refuse Origin: https://app.mumbo.si.
+  const t = await setup({ publicHost: 'app.mumbo.si', projectDomain: 'app.mumbo.si', approveHost: 'approve.app.mumbo.si' })
+  const main = 'app.mumbo.si'
+  try {
+    await call(t.port, { method: 'POST', path: '/api/x', headers: { host: main, origin: `https://${main}`, cookie: 'dsh-auth-x=1' } })
+    await call(t.port, { method: 'POST', path: '/api/x', headers: { host: t.host, origin: `https://${t.host}` } })
+    assert.ok((await call(t.port, { path: '/api/remote.mux', headers: { host: main, origin: `https://${main}`, ...upgrade } })).upgraded)
+    assert.ok((await call(t.port, { path: '/api/remote.mux', headers: { host: t.host, origin: `https://${t.host}`, ...upgrade } })).upgraded)
+    await call(t.port, { method: 'POST', path: '/api/x', headers: { host: main, origin: `https://${t.host}`, cookie: 'dsh-auth-x=1' } })
+    await call(t.port, { method: 'POST', path: '/api/x', headers: { host: t.host, origin: 'https://boxes.mumbo.si' } })
+    assert.deepEqual(t.seen.map(s => [s.headers['e2b-sandbox-id'], s.headers.origin]),
+      [['ubox', undefined], ['pbox', undefined], ['ubox', undefined], ['pbox', undefined], ['ubox', `https://${t.host}`], ['pbox', 'https://boxes.mumbo.si']])
+  } finally { t.close() }
+})
+
 test('an upgrade from another origin, or with none, is refused, so a project page cannot open the visitor\'s desktop; same-origin upgrades work', async () => {
   const t = await setup()
   const main = 'boxes.mumbo.si'
@@ -181,7 +197,7 @@ function configFrom(vars) {
 const env = { PUBLIC_HOST: 'boxes.mumbo.si', LLM_HOST: 'llm.boxes.mumbo.si', BACKUP_BUCKET: 'b', ALLOWED_EMAILS: '@x.com' }
 
 test('with PROJECT_DOMAIN=projects.example, p-<id>.projects.example is the project origin, p-<id>.boxes.mumbo.si answers 404, and links use the new domain', async () => {
-  assert.equal(configFrom(env).projectDomain, 'boxes.mumbo.si', 'the default changes nothing')
+  assert.equal(configFrom(env).projectDomain, env.PUBLIC_HOST, 'unset: the public host')
   const c = configFrom({ ...env, PROJECT_DOMAIN: 'projects.example' })
   const t = await setup(c)
   const host = `p-${t.id}.projects.example`, old = `p-${t.id}.boxes.mumbo.si`

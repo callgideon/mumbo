@@ -20,7 +20,7 @@ const checkNames = (name, fallback) => {
 /** A bare lowercase hostname with at least one dot: no scheme, port, path or trailing dot. Anything else fails at start. */
 const hostname = (name, fallback) => {
   const value = env(name, fallback)
-  if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(value)) throw new Error(`edge: ${name} must be a bare lowercase hostname such as boxes.mumbo.si, not ${JSON.stringify(value)}`)
+  if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(value)) throw new Error(`edge: ${name} must be a bare lowercase hostname such as app.mumbo.si, not ${JSON.stringify(value)}`)
   return value
 }
 /** oauth2-proxy's sign-in cookie name when SIGNIN_COOKIE is unset (prod sets it from Terraform signin_cookie_name). It
@@ -34,7 +34,7 @@ const cookieName = (name, fallback) => {
 }
 export const config = () => ({
   publicHost: env('PUBLIC_HOST'),
-  projectDomain: hostname('PROJECT_DOMAIN', 'boxes.mumbo.si'),  // project boxes are served at p-<16 hex>.<this>
+  projectDomain: hostname('PROJECT_DOMAIN', env('PUBLIC_HOST')),  // project boxes are served at p-<16 hex>.<this>
   llmHost: env('LLM_HOST'),
   signinCookie: cookieName('SIGNIN_COOKIE', SIGNIN_COOKIE),  // oauth2-proxy's --cookie-name; see isSignin
   template: env('BOX_TEMPLATE', 'mumbo-box'),
@@ -574,10 +574,14 @@ export function boxRoute(url, projectDomain) {
  *  SIGNIN_COOKIE still hold. */
 const isSignin = (cfg, cookie) => [cfg.signinCookie ?? SIGNIN_COOKIE, '_oauth2_proxy'].some(p => cookie.split('=')[0].trim().startsWith(p))
 /** Headers for the box: client headers minus hop-by-hop, identity and E2B headers, plus E2B routing for this box only.
- *  The browser's Origin passes unchanged; dsh accepts it only when it equals the box's masked host (boxSite). */
+ *  A same-origin Origin (https://<the request's Host>) is dropped: a box created before PUBLIC_HOST or PROJECT_DOMAIN
+ *  changed keeps the former name as its masked host, and its dsh would refuse that Origin. Without an Origin, dsh's
+ *  Host fence binds the request. Any other Origin passes unchanged; dsh accepts it only when it equals the box's
+ *  masked host (boxSite). */
 export function boxHeaders(cfg, incoming, target, port = '3080') {
   const out = {}
   for (const [k, v] of Object.entries(incoming)) if (!DROP.has(k) && !k.startsWith('x-forwarded-') && !k.startsWith('e2b-')) out[k] = v
+  if (out.origin === `https://${hostOf({ headers: incoming })}`) delete out.origin
   // The sign-in cookie (oauth2-proxy) never reaches a box: a box that saw it could replay it as the signed-in person.
   // Every box request goes through here: HTTP, WebSocket upgrades and the relay (boxFetcher).
   if (out.cookie !== undefined) {
@@ -607,7 +611,7 @@ export function homePage(cfg, res, email, projects) {
  *  (`siteHost`, boxSite) would send it. */
 export const boxFetcher = (cfg) => (target, siteHost, path, { method = 'GET', headers = {}, body, member } = {}) => new Promise((resolve, reject) => {
   const req = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method, path,
-    headers: { ...boxHeaders(cfg, { ...headers, origin: `https://${siteHost}`, ...(body ? { 'content-length': Buffer.byteLength(body) } : {}) }, target, '3080'), ...(member ? { 'x-mumbo-member': member } : {}) } }, (r) => {
+    headers: { ...boxHeaders(cfg, { ...headers, host: siteHost, origin: `https://${siteHost}`, ...(body ? { 'content-length': Buffer.byteLength(body) } : {}) }, target, '3080'), ...(member ? { 'x-mumbo-member': member } : {}) } }, (r) => {
     const chunks = []
     r.on('data', c => chunks.push(c)).on('end', () => resolve({ status: r.statusCode, setCookie: r.headers['set-cookie'] ?? [], body: Buffer.concat(chunks).toString() }))
   })
@@ -713,7 +717,7 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log
     })
     const to = routeOf(host, req.url)
     if (!to) return page(res, 404, 'Not found.', false)
-    if (!to.project && (req.url === '/home' || req.url === '/home/')) return homePage(cfg, res, email, await projects?.list(email) ?? [])
+    if (!to.project && /^\/home\/?(?:\?|$)/.test(req.url)) return homePage(cfg, res, email, await projects?.list(email) ?? [])
     if (to.redirect) return res.writeHead(302, { location: to.redirect, 'cache-control': 'no-store' }).end()
     // dsh refuses a cross-origin /api request itself; the desktop (websockify) checks no Origin, so anything but a read
     // must come from its own page.
