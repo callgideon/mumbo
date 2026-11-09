@@ -1,6 +1,6 @@
 // node --test: the edge's M1 settings from the environment.
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { admitted, config } from './edge.mjs'
 
@@ -57,11 +57,12 @@ test('ALLOWED_EMAILS: comma-separated, trimmed and lowercased; empty admits nobo
 })
 
 test('no oauth2-proxy launch turns off its email_verified check', () => {
-  // The edge never sees the ID token, so oauth2-proxy alone refuses email_verified=false. v7.9.0 checks it only while the
-  // email claim is `email` and --insecure-oidc-allow-unverified-email is off (providers/provider_data.go, buildSessionFromClaims).
-  const read = (file) => readFileSync(new URL(file, import.meta.url), 'utf8')
-  for (const file of ['../prod/edge.tf', './compose.yaml']) assert.match(read(file), /--provider=oidc/, file)
-  for (const file of ['../prod/edge.tf', './compose.yaml', './up.sh']) {
-    assert.doesNotMatch(read(file), /allow[-_]?unverified[-_]?email|email[-_]?claim/i, file)
-  }
+  // The edge never sees the ID token, so oauth2-proxy alone refuses email_verified=false. v7.9.0 checks it only while
+  // --insecure-oidc-allow-unverified-email is off and the email claim is `email`, which --oidc-email-claim and its
+  // deprecated alias --user-id-claim change (providers/provider_data.go buildSessionFromClaims, providers/providers.go).
+  const prod = new URL('../prod/', import.meta.url)
+  const files = [...readdirSync(prod).filter(f => f.endsWith('.tf') || f === 'terraform.tfvars').map(f => new URL(f, prod)),
+    new URL('./compose.yaml', import.meta.url), new URL('./up.sh', import.meta.url)]
+  for (const file of [new URL('edge.tf', prod), new URL('./compose.yaml', import.meta.url)]) assert.match(readFileSync(file, 'utf8'), /--provider=oidc/, file.pathname)
+  for (const file of files) assert.doesNotMatch(readFileSync(file, 'utf8'), /allow[-_]?unverified[-_]?email|email[-_]?claim|user[-_]?id[-_]?claim/i, file.pathname)
 })
