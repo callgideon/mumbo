@@ -89,10 +89,7 @@
     <form id="email-form" class="stack">
       <label class="visually-hidden" for="email">Email</label>
       <input id="email" type="email" required autocomplete="email" placeholder="you@example.com">
-      <label class="visually-hidden" for="password">Password</label>
-      <input id="password" type="password" autocomplete="current-password" placeholder="Password" hidden>
-      <button class="secondary" id="email-submit" type="submit">Continue with email</button>
-      <button class="link" id="password-toggle" type="button">Use a password instead</button>
+      <button class="secondary" id="email-submit" type="submit">Email me a sign-in link</button>
     </form>
   </section>
 
@@ -112,9 +109,11 @@
 </main>
 <script src="/auth-ui/supabase.js"></script>
 <script src="/auth-ui/config.js"></script>
+<script src="/auth-ui/consent.js"></script>
 <script>
 // Login and consent page for the Supabase OAuth server, served at the project's authorization path /oauth/consent.
-// First-party client: consent is approved automatically. Who may enter the web app is decided by the gate allowlist, not here.
+// Consent is given automatically to Mumbo's own OAuth clients only (consent.js); any other client is refused. Who may
+// enter is decided by the gate allowlist, not here. The page talks only to Supabase.
 const sb = supabase.createClient(MUMBO.url, MUMBO.anonKey)
 const authorizationId = new URLSearchParams(location.search).get('authorization_id')
 const $ = (id) => document.getElementById(id)
@@ -126,22 +125,17 @@ const returnUrl = `${location.origin}${location.pathname}?authorization_id=${enc
 
 async function authorize() {
   say('Signing you in…')
-  // Desktop app sign-in (deploy/gateway.mjs): limited to GATEWAY_ALLOWED_EMAILS, separately from the web app gate.
-  if (authorizationId.startsWith('dsh.')) {
-    const { data } = await sb.auth.getSession()
-    const response = await fetch('/dsh/approve', { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ aid: authorizationId.slice(4), access_token: data.session?.access_token }) })
-    const result = await response.json().catch(() => ({}))
-    if (!response.ok || !result.redirect) return say(result.error ?? 'Sign-in failed. Try again from the mumbo app.', true)
-    $('start').hidden = true
-    $('title').textContent = 'You’re signed in'
-    $('subtitle').textContent = 'Returning to the mumbo app…'
-    say('')
-    return location.replace(result.redirect)
-  }
   const details = await sb.auth.oauth.getAuthorizationDetails(authorizationId)
   if (details.error) return say(details.error.message, true)
-  const next = details.data.redirect_url ?? (await sb.auth.oauth.approveAuthorization(authorizationId)).data?.redirect_url
+  const decision = consentDecision(details.data, MUMBO)
+  if (decision === 'refuse') {
+    $('start').hidden = true
+    $('code-form').hidden = true
+    $('title').textContent = 'This application is not allowed'
+    $('subtitle').textContent = 'mumbo signs you in only to mumbo itself.'
+    return say('')
+  }
+  const next = decision === 'follow' ? details.data.redirect_url : (await sb.auth.oauth.approveAuthorization(authorizationId, { skipBrowserRedirect: true })).data?.redirect_url
   if (!next) return say('Authorization failed. Try again from the app address.', true)
   location.replace(next)
 }
@@ -151,33 +145,17 @@ $('google').addEventListener('click', () => {
   sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: returnUrl } })
 })
 
-let passwordMode = false
-$('password-toggle').addEventListener('click', () => {
-  passwordMode = !passwordMode
-  $('password').hidden = !passwordMode
-  $('password').required = passwordMode
-  $('email-submit').textContent = passwordMode ? 'Sign in' : 'Continue with email'
-  $('password-toggle').textContent = passwordMode ? 'Email me a code instead' : 'Use a password instead'
-  say('')
-})
-
 $('email-form').addEventListener('submit', async (e) => {
   e.preventDefault()
   email = $('email').value.trim()
   busy($('email-form'), true)
-  if (passwordMode) {
-    const { error } = await sb.auth.signInWithPassword({ email, password: $('password').value })
-    busy($('email-form'), false)
-    if (error) return say('Email or password is incorrect.', true)
-    return authorize()
-  }
   const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: returnUrl } })
   busy($('email-form'), false)
-  if (error) return say('Could not send a code. Check the address and try again.', true)
+  if (error) return say('Could not send a sign-in link. Check the address and try again.', true)
   $('start').hidden = true
   $('code-form').hidden = false
   $('title').textContent = 'Check your email'
-  $('subtitle').textContent = `Enter the code sent to ${email}.`
+  $('subtitle').textContent = `Open the sign-in link sent to ${email}, or enter its code here.`
   say('')
   $('code').focus()
 })
