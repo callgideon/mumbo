@@ -444,6 +444,29 @@ describe('Gateway access checks', () => {
     expect(await payloadSibling.json()).toMatchObject({ result: { ok: false } })
     expect(fixture.principals).toEqual([GUEST])
   })
+  it('decides a non-owner request to an exact Fetch route by its declared action and query resources', async () => {
+    const { ctx, hold } = await setup({ connection: true })
+    const route = vi.fn(async () => new Response('served'))
+    ctx.connection.fetch.register({
+      path: '/api/accessFixture.download', methods: ['GET'], requestBody: 'buffered',
+      access: { action: 'accessFixture/read', resources: { 'test-shelf': 'shelfId' } },
+      fetch: route,
+    })
+    hold(shelf('s1'))
+    const decisions = recordDecisions()
+    const shared = ctx.connection.createSharedFetchHandler('/api')
+    const guest = ctx.connection.createPeer({ principal: GUEST })
+    const download = async (shelfId: string): Promise<number> =>
+      (await shared.fetch(new Request(`http://host/api/accessFixture.download?shelfId=${shelfId}`), guest)).status
+
+    expect(await download('s1')).toBe(200)
+    expect(await download('s2')).toBe(403)
+    expect(route).toHaveBeenCalledOnce()
+    expect(decisions()).toEqual([
+      { action: 'accessFixture/read', resources: [shelf('s1')] },
+      { action: 'accessFixture/read', resources: [shelf('s2')] },
+    ])
+  })
 })
 
 describe('Gateway access checks on Typert-validated arguments', () => {

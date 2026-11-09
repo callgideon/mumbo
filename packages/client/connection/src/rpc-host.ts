@@ -2,7 +2,7 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
-import type { PeerId, PeerScope, Principal } from '@deepseek-ai/dsh-typert-protocol'
+import type { PeerId, PeerScope, Principal, RemoteAccessResource } from '@deepseek-ai/dsh-typert-protocol'
 import type { ConnectionInteractions } from './connect-protocol.ts'
 import {
   RpcId,
@@ -16,8 +16,12 @@ import { API_PATH } from './api-path.ts'
 import type { BrowserAuth } from './browser-auth.ts'
 import { Peer } from './peer.ts'
 import type {
+  ConnectionAuthenticator,
+  HostConnectionAuthenticators,
   PeerAdmission,
   ConnectionAdmission,
+  ConnectionFetchAuthorizer,
+  ConnectionFetchRouteAccess,
   ConnectionIndexRequest,
   ConnectionIndexResponse,
   ConnectionFetchRoute,
@@ -36,6 +40,8 @@ import type {
 const INVALID_REQUEST_RPC_ID = RpcId('invalid-request')
 const CHANNEL_PATTERN = /^\/[A-Za-z0-9._~-]+$/
 const ENDPOINT_SEGMENT_PATTERN = /^[A-Za-z0-9_$.-]+$/
+const UNIVERSAL_ACTION = 'remoteAccess/follow'
+const GLOBAL_RESOURCES: readonly RemoteAccessResource[] = Object.freeze([Object.freeze({ kind: 'global' })])
 
 interface PeerRecord {
   readonly peer: Peer
@@ -50,6 +56,7 @@ interface ConnectionRpcInterceptor {
 interface RegisteredFetchRoute {
   readonly methods: ReadonlySet<string>
   readonly requestBody: ConnectionFetchRoute['requestBody']
+  readonly access: ConnectionFetchRoute['access']
   readonly fetch: ConnectionFetchRoute['fetch']
 }
 
@@ -75,6 +82,8 @@ export class HostConnectionService extends Service implements HostConnectionHand
   private disposed = false
   private readonly interceptors = new Map<string, ConnectionRpcInterceptor>()
   private readonly fetchRoutes = new Map<string, RegisteredFetchRoute>()
+  private fetchAuthorizer: ConnectionFetchAuthorizer | undefined
+  private readonly authenticatorList: ConnectionAuthenticator[] = []
 
   readonly allowsRemoteAuthorities: boolean
 
@@ -116,19 +125,43 @@ export class HostConnectionService extends Service implements HostConnectionHand
     const owner = this.ctx
     return {
       register: route => this.registerFetchRoute(owner, route),
+      authorize: authorizer => owner.effect(() => {
+        if (this.fetchAuthorizer !== undefined) {
+          throw new Error('connection: an exact Fetch route authorizer is already installed')
+        }
+        this.fetchAuthorizer = authorizer
+        return () => { this.fetchAuthorizer = undefined }
+      }, 'client-connection: exact Fetch route authorizer'),
     }
   }
 
-  /** Apply the Host/Origin fence and require an authenticated live Peer. */
-  requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection {
-    const admission = this.admit(request)
-    return 'rejection' in admission ? admission.rejection : undefined
+  /** Non-owner authenticator registry scoped to the Context reading this service. */
+  get authenticators(): HostConnectionAuthenticators {
+    const owner = this.ctx
+    return {
+      register: authenticator => owner.effect(() => {
+        this.authenticatorList.push(authenticator)
+        return () => {
+          this.authenticatorList.splice(this.authenticatorList.indexOf(authenticator), 1)
+        }
+      }, 'client-connection: authenticator'),
+    }
   }
 
-  /** Browser requests share an owner Peer; API HTTP does not depend on an attached socket. */
+  /** Apply the Host/Origin fence and require an authenticated live owner Peer. */
+  requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection {
+    const admission = this.admit(request)
+    if ('rejection' in admission) return admission.rejection
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+    return admission.peer.principal.kind === 'owner' ? undefined : 403
+  }
+
+  /** Authenticators first; browser requests share an owner Peer; API HTTP does not depend on an attached socket. */
   admit(request: ConnectionTrustRequest): PeerAdmission {
     if (!this.isTrusted(request)) return { rejection: 403 }
     if (this.disposed) return { rejection: 401 }
+    const authenticated = this.authenticate(request)
+    if (authenticated !== undefined) return { peer: authenticated }
     const secure = this.owner.get('webServer')?.protocol === 'https:'
     if (this.browserAuth.isAuthenticated(request, secure)) return { peer: this.browserPeer }
     const id = this.browserAuth.authenticateApi(request, secure)
@@ -161,6 +194,21 @@ export class HostConnectionService extends Service implements HostConnectionHand
     }
   }
 
+  private authenticate(request: ConnectionTrustRequest): PeerScope | undefined {
+    for (const authenticator of this.authenticatorList) {
+      let peer: PeerScope | undefined
+      try {
+        peer = authenticator(request)
+      } catch (error) {
+        // A faulty authenticator must not break owner admission; the request continues to the next check.
+        this.owner.logger.warn('client-connection: an authenticator failed; passing the request on', error)
+        continue
+      }
+      if (peer !== undefined) return peer
+    }
+    return undefined
+  }
+
   private isTrusted(request: ConnectionTrustRequest): boolean {
     const carrier = this.owner.get('webServer')
     return isTrustedApiRequest(request, this.trustedHosts, carrier?.host, carrier?.protocol ?? 'http:')
@@ -188,10 +236,19 @@ export class HostConnectionService extends Service implements HostConnectionHand
   }
 
   /**
-   * Authenticate an index request; native TLS listeners mint Secure cookies.
+   * Authenticate an owner index request; native TLS listeners mint Secure cookies.
    */
   authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): boolean {
     return this.browserAuth.authorizeIndex(request, response, this.ctx.get('webServer')?.protocol === 'https:')
+  }
+
+  /** Admit an index request for an authenticator's Peer, else for the owner's browser Peer. */
+  admitIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): PeerScope | undefined {
+    if (!this.disposed && this.isTrusted(request)) {
+      const authenticated = this.authenticate(request)
+      if (authenticated !== undefined) return authenticated
+    }
+    return this.authorizeIndex(request, response) ? this.browserPeer : undefined
   }
 
   /** Add this process's launch token to the clean application URL. */
@@ -216,10 +273,14 @@ export class HostConnectionService extends Service implements HostConnectionHand
         const pathname = new URL(request.url).pathname
         const route = this.fetchRoutes.get(pathname)
         if (route?.methods.has(request.method) === true) {
-          // Exact routes bypass Gateway access checks, so only the owner reaches them.
+          // Exact routes bypass the Gateway; a non-owner reaches only a route whose declared access allows it.
           // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
-          if (peer.principal.kind !== 'owner') return Promise.resolve(new Response('forbidden', { status: 403 }))
-          return route.fetch(request)
+          if (peer.principal.kind === 'owner') return route.fetch(request)
+          if (!this.allowsRoute(route.access, request, peer)) {
+            return Promise.resolve(new Response('forbidden', { status: 403 }))
+          }
+          // A non-owner's route work ends with its Peer, as its Gateway streams do.
+          return route.fetch(new Request(request, { signal: AbortSignal.any([request.signal, peer.signal]) }))
         }
         const endpoint = endpointFromPath(channel, pathname)
         const interceptor = this.interceptors.get(channel)
@@ -231,6 +292,21 @@ export class HostConnectionService extends Service implements HostConnectionHand
     }
   }
 
+  /** Default deny: no access, no authorizer, a disposed Peer, or an unresolvable resource refuses. */
+  private allowsRoute(access: ConnectionFetchRouteAccess | undefined, request: Request, peer: PeerScope): boolean {
+    const authorizer = this.fetchAuthorizer
+    if (access === undefined || authorizer === undefined || peer.signal.aborted) return false
+    const resources = queryResources(access, new URL(request.url).searchParams)
+    if (resources === undefined) return false
+    try {
+      return authorizer({ principal: peer.principal, action: access.action, resources })
+    } catch (error) {
+      // A faulty authorizer cannot allow a request; the caller answers 403.
+      this.owner.logger.warn('client-connection: the exact Fetch route authorizer failed; refusing the request', error)
+      return false
+    }
+  }
+
   private registerFetchRoute(
     owner: Context,
     route: ConnectionFetchRoute,
@@ -239,6 +315,7 @@ export class HostConnectionService extends Service implements HostConnectionHand
     const registered: RegisteredFetchRoute = {
       methods: new Set(route.methods),
       requestBody: route.requestBody,
+      access: route.access,
       fetch: route.fetch,
     }
     return owner.effect(() => {
@@ -265,6 +342,13 @@ export class HostConnectionService extends Service implements HostConnectionHand
         if ('rejection' in admission) {
           res.writeHead(admission.rejection)
           res.end(admission.rejection === 401 ? 'unauthorized' : 'forbidden')
+          return
+        }
+        // Dedicated channels bypass Gateway access checks, so only the owner reaches them.
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+        if (admission.peer.principal.kind !== 'owner') {
+          res.writeHead(403)
+          res.end('forbidden')
           return
         }
         await bridge(req, res, fetchHandler, admission.peer)
@@ -369,6 +453,22 @@ function endpointFromPath(channel: string, pathname: string): string | undefined
   return endpoint
 }
 
+/**
+ * Read the resources one exact-route request names in its query.
+ * @returns the global resource alone for an empty map; `undefined` when a
+ *   listed parameter is missing, empty, or repeated.
+ */
+function queryResources(access: ConnectionFetchRouteAccess, query: URLSearchParams): readonly RemoteAccessResource[] | undefined {
+  const resources: RemoteAccessResource[] = []
+  for (const [kind, parameter] of Object.entries<string>(access.resources)) {
+    const values = query.getAll(parameter)
+    if (values.length !== 1 || values[0] === '') return undefined
+    // Kinds are keys of the merged resource map that the route's declaration was typed against.
+    resources.push({ kind, id: values[0] } as RemoteAccessResource)
+  }
+  return resources.length === 0 ? GLOBAL_RESOURCES : resources
+}
+
 function errorResponse(rpcId: RpcIdType, error: ConnectionRpcFailure): Response {
   return fullResponse(rpcId, { ok: false, error })
 }
@@ -408,5 +508,9 @@ function assertFetchRoute(route: ConnectionFetchRoute): void {
   const methods = new Set(route.methods)
   if (methods.size !== route.methods.length) {
     throw new Error(`connection: exact Fetch route ${JSON.stringify(route.path)} repeats a method`)
+  }
+  // Remote access allows its snapshot endpoint for every principal, so it would open the route to every non-owner.
+  if (route.access?.action === UNIVERSAL_ACTION) {
+    throw new Error(`connection: exact Fetch route ${JSON.stringify(route.path)} declares the universally allowed action ${UNIVERSAL_ACTION}`)
   }
 }

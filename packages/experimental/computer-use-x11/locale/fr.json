@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Utilisation de l’ordinateur (Linux X11)",
+    "description": "Permet au modèle de voir et d’utiliser un bureau Linux X11 par captures d’écran, souris et clavier ; nécessite xdotool et ImageMagick sur l’hôte."
+  }
+}

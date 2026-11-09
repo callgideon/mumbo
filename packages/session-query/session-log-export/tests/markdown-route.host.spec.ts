@@ -1,5 +1,5 @@
 import { Context } from '@deepseek-ai/cordis'
-import { HostConnectionService } from '@deepseek-ai/dsh-client-connection'
+import { HostConnectionService, type ConnectionFetchAccessRequest } from '@deepseek-ai/dsh-client-connection'
 import type { BrowserAuth } from '@deepseek-ai/dsh-client-connection/src/browser-auth.ts'
 import type { MessageId } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent, SessionHeader, SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
@@ -11,6 +11,13 @@ import { brandNumber, brandString } from '@deepseek-ai/dsh-brand'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { apply, inject } from '../src/index.ts'
 import { SESSION_MARKDOWN_EXPORT_PATH } from '../src/routes.ts'
+
+declare module '@deepseek-ai/dsh-typert-protocol' {
+  interface PrincipalMap {
+    /** Test-only non-owner caller shared by the access specs. */
+    'test-guest': { readonly kind: 'test-guest'; readonly guest: string }
+  }
+}
 
 const SESSION_ID = 'session-markdown-route' as SessionId
 
@@ -134,6 +141,26 @@ describe('Session Markdown Fetch route', () => {
     )).status).toBe(404)
   })
 
+
+  it('serves a non-owner only with sessionLog/markdown on the Session the query names', async () => {
+    const { shared, connection, dispose } = await mounted(query())
+    const decisions: ConnectionFetchAccessRequest[] = []
+    connection.fetch.authorize((request) => {
+      decisions.push(request)
+      return request.resources.every(resource => resource.kind === 'session' && resource.id === SESSION_ID)
+    })
+    const guest = connection.createPeer({ principal: { kind: 'test-guest', guest: 'markdown' } })
+    const copy = (sessionId: string) =>
+      shared.fetch(request(`${SESSION_MARKDOWN_EXPORT_PATH}?sessionId=${sessionId}`), guest)
+
+    expect(await (await copy(SESSION_ID)).text()).toContain('Route answer')
+    expect((await copy('session-other')).status).toBe(403)
+    expect(decisions.map(({ action, resources }) => ({ action, resources }))).toEqual([
+      { action: 'sessionLog/markdown', resources: [{ kind: 'session', id: SESSION_ID }] },
+      { action: 'sessionLog/markdown', resources: [{ kind: 'session', id: 'session-other' }] },
+    ])
+    await dispose()
+  })
 
   it('emits the actual selected artifact path from persistence metadata', async () => {
     const sourcePath = '/tmp/project/session.v4.jsonl'

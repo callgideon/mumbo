@@ -776,8 +776,8 @@
   flex: 1;
 }
 
-/* Footer seats: additive actions stack above Settings. Each occupant owns its
-   button geometry and hover chrome. */
+/* Footer seats: additive actions stack above Settings, one occupant per row.
+   Each occupant owns its button geometry and hover chrome. */
 .footArea {
   flex: none;
   display: flex;
@@ -793,6 +793,7 @@
 
 .footerActions {
   display: flex;
+  flex-direction: column;
 }
 
 .collapsed .footArea {

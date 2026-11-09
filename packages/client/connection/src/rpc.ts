@@ -1,7 +1,7 @@
 /** Generic unary RPC contracts shared by the Host and Client Connection halves. */
 
 import type { Branded } from '@deepseek-ai/dsh-brand'
-import type { PeerScope, Principal } from '@deepseek-ai/dsh-typert-protocol'
+import type { PeerScope, Principal, RemoteAccessResource, TypertResourceKind } from '@deepseek-ai/dsh-typert-protocol'
 
 /** Correlation id minted by a caller and echoed by the Connection response. */
 export type RpcId = Branded<'rpc-id'>
@@ -149,6 +149,27 @@ export type ConnectionFetchMethod = 'GET' | 'HEAD' | 'POST'
 /** How the node:http bridge presents one request body to its Fetch route. */
 export type ConnectionRequestBodyMode = 'buffered' | 'streaming'
 
+/**
+ * The remote-access action and resources a non-owner request to one exact
+ * Fetch route is checked against before the route runs.
+ */
+export interface ConnectionFetchRouteAccess {
+  /**
+   * Action a policy role must list on every resource: the Remote endpoint the
+   * route mirrors, or a route-specific `<namespace>/<name>` that names no
+   * Remote endpoint, such as `fileUploads/uploadBinary`. Registration rejects
+   * `remoteAccess/follow`, which remote access allows for every principal.
+   */
+  readonly action: `${string}/${string}`
+  /**
+   * The query parameter naming each resource the request touches, keyed by
+   * resource kind. A non-owner request is refused unless it carries each
+   * listed parameter exactly once with a non-empty value. An empty map means
+   * the route touches the `global` resource.
+   */
+  readonly resources: { readonly [Kind in TypertResourceKind]?: string }
+}
+
 /** One exact, transport-independent Fetch route owned by a Host feature. */
 export interface ConnectionFetchRoute {
   /** Absolute path below `/api`; query parameters remain available on the request URL. */
@@ -158,21 +179,83 @@ export interface ConnectionFetchRoute {
   /** Buffered requests obey the configured JSON cap; streaming requests arrive with backpressure and no aggregate cap. */
   readonly requestBody: ConnectionRequestBodyMode
   /**
+   * How a non-owner Peer may reach this route. Without it, or without an
+   * installed authorizer, the shared handler answers 403 to every non-owner.
+   * The route's own `fetch` must read each resource from the same query
+   * parameter, so the checked resource is the one it serves.
+   */
+  readonly access?: ConnectionFetchRouteAccess
+  /**
    * Handle one request after the physical carrier has applied its trust and
-   * authentication policy. Only owner Peers reach an exact route; the shared
-   * handler answers 403 for every other principal.
+   * authentication policy: an owner request, or a non-owner request that
+   * `access` and the installed authorizer allowed. A non-owner request's
+   * signal also aborts once its Peer is disposed.
    */
   readonly fetch: (request: Request) => Promise<Response>
 }
+
+/** One non-owner request to an exact Fetch route, with the resources its query names. */
+export interface ConnectionFetchAccessRequest {
+  /** The admitted Peer's principal; never the owner. */
+  readonly principal: Principal
+  /** The route's declared `access.action`. */
+  readonly action: `${string}/${string}`
+  /** Every resource the request touches; never empty. */
+  readonly resources: readonly RemoteAccessResource[]
+}
+
+/**
+ * Decide one non-owner request to an exact Fetch route; called synchronously
+ * before the route runs, without call arguments.
+ * @param request - the caller's principal, the route's action, and the resources its query names.
+ * @returns true only when the principal may take the action on every resource.
+ */
+export type ConnectionFetchAuthorizer = (request: ConnectionFetchAccessRequest) => boolean
 
 /** Host registry for exact Fetch routes that cannot use JSON Remote invocation. */
 export interface HostConnectionFetch {
   /**
    * Register one exact route on the shared API channel.
-   * @param route - path, methods, and Fetch-shaped implementation.
+   * @param route - path, methods, optional non-owner access, and Fetch-shaped implementation.
    * @returns asynchronous disposer removing this exact contribution.
    */
   register(route: ConnectionFetchRoute): () => Promise<void>
+  /**
+   * Install the one authorizer that decides non-owner requests to routes
+   * declaring `access`; a second installation throws, and an authorizer that
+   * throws is logged and refuses the request.
+   * @param authorizer - synchronous access decision, such as the Gateway's remote-access check.
+   * @returns asynchronous disposer removing the authorizer.
+   */
+  authorize(authorizer: ConnectionFetchAuthorizer): () => Promise<void>
+}
+
+/**
+ * Admit one trusted request as a non-owner Peer from a credential the
+ * authenticator owns, such as a signed proxy header.
+ *
+ * Connection calls it synchronously after its Host/Origin fence and before
+ * browser and API credentials. Returning undefined passes the request on to
+ * the next authenticator and then to owner authentication; an authenticator
+ * never refuses a request, and one that throws is logged and passed over. The
+ * returned Peer must carry a non-owner principal; its creator owns its
+ * disposal, and a disposed Peer is refused at dispatch. Only the Gateway and
+ * exact Fetch routes that declare `access` serve non-owner Peers; other exact
+ * routes, dedicated RPC channels, and routes guarded by `requestRejection`
+ * answer them 403.
+ * @param request - request headers from the HTTP or upgrade request.
+ * @returns the Peer this credential speaks for, or undefined when the request carries none.
+ */
+export type ConnectionAuthenticator = (request: ConnectionTrustRequest) => PeerScope | undefined
+
+/** Host registry for non-owner authenticators consulted by admission. */
+export interface HostConnectionAuthenticators {
+  /**
+   * Register one authenticator; registration order decides which one answers first.
+   * @param authenticator - synchronous credential check returning a non-owner Peer.
+   * @returns asynchronous disposer removing this authenticator.
+   */
+  register(authenticator: ConnectionAuthenticator): () => Promise<void>
 }
 
 /** Host registry for logical RPC channels carried by the current transport. */
@@ -208,6 +291,8 @@ export interface HostConnectionHandle {
   readonly rpc: HostConnectionRpc
   /** Exact Fetch routes for streaming or browser-native responses. */
   readonly fetch: HostConnectionFetch
+  /** Non-owner authenticators consulted before browser and API credentials. */
+  readonly authenticators: HostConnectionAuthenticators
   /** The owner Peer every authenticated browser connection shares. */
   readonly browserPeer: PeerScope
 
@@ -225,17 +310,19 @@ export interface HostConnectionHandle {
   createSharedFetchHandler(channel: '/api'): ConnectionFetchHandler
 
   /**
-   * Apply Connection's Host/Origin checks and browser authentication to
-   * another Web route.
+   * Apply Connection's Host/Origin checks and owner authentication to another
+   * Web route. Such routes bypass Gateway access checks, so a request an
+   * authenticator admits as a non-owner is refused with 403.
    * @param request - request headers from the HTTP or upgrade request.
    * @returns rejection status, or undefined when the route may accept the request.
    */
   requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection
 
   /**
-   * Admit an HTTP request against its signed browser or API credential and live Peer.
+   * Admit an HTTP request: the first registered authenticator that names a
+   * Peer wins; otherwise the signed browser or API credential and its live Peer.
    * @param request - request headers from the HTTP or upgrade request.
-   * @returns the credential's Peer, or the rejection status.
+   * @returns the admitted Peer, or the rejection status.
    */
   admit(request: ConnectionTrustRequest): PeerAdmission
 
@@ -256,14 +343,27 @@ export interface HostConnectionHandle {
   admitConnection(request: ConnectionTrustRequest): ConnectionAdmission
 
   /**
-   * Authenticate one frontend index request, owning a token redirect or 401.
-   * The cookie this mints is `Secure` when the mounted Web carrier serves TLS,
-   * which only that listener's protocol decides.
+   * Authenticate one frontend index request for the owner, owning a token
+   * redirect or 401. Authenticators are not consulted, so a route that serves
+   * only the owner can rely on a true result. The cookie this mints is
+   * `Secure` when the mounted Web carrier serves TLS, which only that
+   * listener's protocol decides.
    * @param request - root or configured-index HTTP request.
    * @param response - response owned when the result is false.
-   * @returns true only when the frontend may serve index.html.
+   * @returns true only when the frontend may serve index.html to the owner.
    */
   authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): boolean
+
+  /**
+   * Admit one frontend index request for any principal: a trusted request a
+   * registered authenticator admits renders for that Peer without a cookie;
+   * every other request goes through {@link authorizeIndex} and renders for
+   * `browserPeer`.
+   * @param request - root or configured-index HTTP request.
+   * @param response - response owned when the result is undefined.
+   * @returns the Peer the index renders for, or undefined when the response was written.
+   */
+  admitIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): PeerScope | undefined
 
   /**
    * Add the fresh process token to an ordinary Web application URL.
@@ -286,7 +386,7 @@ export interface ConnectionFetchHandler {
    * Dispatch one already-authenticated request.
    * @param request - Fetch request below the shared channel.
    * @param peer - Peer to dispatch as; required, never defaulted.
-   * @returns the registered response, a 403 response for an exact route and a non-owner Peer, or a 404 response.
+   * @returns the registered response, a 403 response for an exact route that refuses a non-owner Peer, or a 404 response.
    */
   fetch(request: Request, peer: PeerScope): Promise<Response>
 }

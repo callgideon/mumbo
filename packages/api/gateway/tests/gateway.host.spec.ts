@@ -146,6 +146,10 @@ class FakeConnectionService extends Service {
     }
   }
 
+  get fetch() {
+    return { authorize: () => () => Promise.resolve() }
+  }
+
   requestRejection(): undefined {
     return undefined
   }

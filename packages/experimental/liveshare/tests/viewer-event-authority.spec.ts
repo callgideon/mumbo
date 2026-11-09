@@ -30,7 +30,7 @@ describe('viewer forwarded interactions', () => {
     onTestFinished(() => ctx.fiber.dispose())
     await ctx.plugin(TypertRegistry)
     await ctx.plugin(RemoteAccessService)
-    ctx.provide('connection', { rpc: { intercept: () => () => {} } } as never)
+    ctx.provide('connection', { rpc: { intercept: () => () => {} }, fetch: { authorize: () => () => Promise.resolve() } } as never)
     await ctx.plugin(TypertGateway, {})
     const ownChild: ForkRecord = {
       childSessionId: 'own-child', shareId: 'share', sourceSessionId: 'source', boundary: 1, creator: actor, createdAt: '',
@@ -111,6 +111,7 @@ describe('viewer forwarded interactions', () => {
     let dispatch: GatewayRpc | undefined
     ctx.provide('connection', {
       rpc: { intercept: (_path: string, _claims: unknown, handler: GatewayRpc) => { dispatch = handler; return () => {} } },
+      fetch: { authorize: () => () => Promise.resolve() },
     } as never)
     await ctx.plugin(TypertGateway, {})
     const outcome = Promise.withResolvers<unknown>()

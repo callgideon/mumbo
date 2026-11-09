@@ -1,0 +1,3 @@
+#!/bin/sh
+# Fixture display: reports a 40x24 screen and accepts every input command.
+if [ "$1" = getdisplaygeometry ]; then echo "40 24"; fi

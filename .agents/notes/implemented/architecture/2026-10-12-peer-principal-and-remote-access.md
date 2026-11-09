@@ -93,7 +93,7 @@ wireStream.open(endpoint, payload, uplink, peer: PeerScope, signal)          // 
 | In-process Host automation | Code that calls Remote methods creates its own Peer with `createPeer({ principal })`. No production caller exists yet, so no fixed Host Peer is pre-provisioned |
 | Multiple Peers | Each `createPeer()` returns an independent Peer; liveshare is to create one per viewer connection (wired on the #3854 side) |
 | Interaction participation | `Peer(owner, { principal, interactions? })` and `createPeer()` default omitted `interactions` to `answer`. `none` refuses `$events` and `$events/result` for every principal, even owner; this is independent of method-level RBAC. Answering owner Peers receive waterfalls, and non-owner Peers receive only RBAC-authorized broadcasts and cannot answer |
-| Exact Fetch routes | Exact routes such as file-upload, present-open, media-references, session-log-export, and inspector bypass the Gateway; the shared Fetch handler answers 403 to every non-owner Peer |
+| Exact Fetch routes | Exact routes such as file-upload, present-open, media-references, session-log-export, and inspector bypass the Gateway. A route that declares `access` names one action and the query parameter of each resource; the shared Fetch handler asks the authorizer the Gateway installs, which calls `remoteAccess.decide()`, before a non-owner request runs, and answers 403 to a non-owner Peer for every other route ([exact Fetch route access](2026-11-09-connection-authenticators-and-edge-members.md#exact-fetch-route-access)) |
 
 ### Identity types
 
@@ -275,7 +275,7 @@ export type RemoteAccessDecision =
   | { readonly kind: 'allow' }
   | { readonly kind: 'deny'; readonly reason: string }
 
-/** Refines one binding for one action on its resource; `args` only for a concrete call. */
+/** Refines one binding for one action on its resource; `args` only for a concrete Remote call, never for an exact Fetch route request. */
 export type RemoteAccessCondition<K extends RemoteAccessResourceKind> = (request: {
   readonly action: RemoteAccessAction
   readonly resource: RemoteAccessResourceOf<K>
@@ -297,7 +297,7 @@ export interface RemoteAccessRequest<P extends Principal> {
   readonly action: RemoteAccessAction
   /** Allow only when the action is allowed on every listed resource. */
   readonly resources: readonly RemoteAccessResource[]
-  /** Named arguments of a concrete call, validated against their Typert-compiled types with lookup parameters as wire identities; absent for events, snapshots, and list filtering. */
+  /** Named arguments of a concrete Remote call, validated against their Typert-compiled types with lookup parameters as wire identities; absent for events, snapshots, list filtering, and exact Fetch route requests. */
   readonly args?: Readonly<Record<string, unknown>>
 }
 
@@ -372,7 +372,7 @@ ctx.effect(() => ctx.remoteAccess.registerPolicy('share-viewer', {
   },
 }))
 
-// Without args (snapshots, list filtering) a condition answers for the action alone.
+// Without args (snapshots, list filtering, exact Fetch route requests) a condition answers for the action alone.
 const sourceWrite = share => () => share.confined ? allow : deny('source-write-unavailable')
 const childPrompt = child => ({ action, args }) =>
   action === 'session/prompt' && args !== undefined && !child.allowsPrompt() ? deny('fork-prompt-refused') : allow
@@ -391,7 +391,7 @@ Every call path (HTTP `/api`, WebSocket streams, in-process `fetch(request, peer
 
 | Step | Action | Failure |
 |---|---|---|
-| 1 | Admission yields the Peer: network paths from Connection `admit()` (`browserPeer`), in-process paths from the caller. The Gateway checks `peer.signal` before it reads the wire payload | Failed network admission answers HTTP 401 / 403 without entering the Gateway; a disposed Peer: `gateway/peer-disposed` |
+| 1 | Admission yields the Peer: network paths from Connection `admit()` (a registered authenticator's non-owner Peer, else `browserPeer` or an API Peer), in-process paths from the caller. The Gateway checks `peer.signal` before it reads the wire payload | Failed network admission answers HTTP 401 / 403 without entering the Gateway; a disposed Peer: `gateway/peer-disposed` |
 | 2 | Resolve the endpoint and validate the argument field set (`resolveDescriptor`, `assertExactArguments`), then validate the JSON arguments against their Typert-compiled types, decoding each once | `gateway/invocation-unavailable`, `gateway/ambiguous-endpoint`, `gateway/definition-unavailable`; extra or missing fields: `gateway/arguments-invalid`; a JSON argument failing validation: `gateway/input-invalid` (for owners and non-owners alike, before the access check) |
 | 3 | Owner pass-through: for `principal.kind === 'owner'` go straight to step 5 | — |
 | 4 | Non-owner: the Gateway resolves resources from the arguments validated in step 2 (`resources` readers, then lookup parameters and the `resource` a Context declares, then the registered default field or resolver; lookup and Context identities are wire identities, and neither a lookup nor the Context is resolved), then asks `remoteAccess.decide({ principal, action: endpoint, resources, args })` with the validated arguments as `args`; invalid resources are refused with `resource-invalid` without asking `decide()`; a `deny` decision becomes the thrown error | `remote-access/denied` with details `{ action, reason }` |
@@ -500,7 +500,7 @@ GlobalStandardProps.useWorkspaceAccess: (workspaceId: WorkspaceId, action: Remot
 |---|---|
 | Only in-process Host code supplies a principal, when it creates a Peer | `PeerScope.principal` is read-only; `createPeer()` has no route |
 | No wire field can set or override a principal | Principals never come from args, the envelope, headers, the query, or cookies. Extra top-level args fields fail `assertExactArguments`; the payload must be exactly `{ args }`; [`clientRequestSchema`](../../../../packages/client/connection/src/rpc-schema.ts) drops unknown envelope fields; a same-named field inside a request body is business data |
-| Browser network admission yields the owner | Connections that pass [browser token authentication](../../implemented/architecture/2026-08-24-browser-token-authentication.md) receive `browserPeer` |
+| Browser network admission yields the owner | Connections that pass [browser token authentication](../../implemented/architecture/2026-08-24-browser-token-authentication.md) receive `browserPeer`; a non-owner network principal enters only through a registered Connection authenticator, and only the Gateway and exact Fetch routes that declare `access` serve it ([Connection authenticators](2026-11-09-connection-authenticators-and-edge-members.md)) |
 | No implicit Peer | Neither the Gateway nor Connection supplies a default Peer; required parameters expose a missing Peer at compile time |
 | A disposed Peer cannot dispatch | `gateway/peer-disposed` |
 | A non-owner cannot call without authorization | A call is allowed only when a binding's role explicitly lists the action and its resource matches; a kind without a policy is refused; the Gateway depends on `remoteAccess` and does not start without it |
@@ -559,7 +559,7 @@ The review rule's home is the "`@Remote` marks capability methods" section of [R
 - Liveshare integration (declaring `share-viewer`, one Peer per viewer connection, defining roles and registering a policy, removing `origin` / `prompt/origin` / `READ_ENDPOINTS`) happens on the #3854 side.
 - `session/cancel` ownership checks, the fork `childSessionId`, and `ToolExecutionInput.turn` do not change.
 - Precise resource recognition (for example, the Typert generator locating request fields by branded id type and writing them into descriptors): this change uses the `resource` that lookups and Contexts declare, default fields, and `resources` readers, and resource resolution can later be replaced without changing the policy interface.
-- Answering 403 to every non-owner on exact Fetch routes is temporary; each route is to declare its own access rule later.
+- Exact Fetch route access reads resources only from the query and passes no call arguments, so a condition answers as for a snapshot; a route whose resource travels in its body declares no access and stays owner-only.
 - The resource declaration of subagent `prompt` is open: its request fields are `parentSessionId` / `childSessionId`, so it currently resolves to `global`. The producer records `source.principal` for in-process callers; no role lists it, so non-owners cannot reach it through the Gateway.
 - Predefined and aggregate roles: when a second non-owner principal kind appears, domain packages declare the generic roles a method belongs to (such as `session:viewer`) with `@Remote({ roles })`, and each policy binds those roles; roles are currently defined by the business package as explicit action lists.
 
@@ -636,7 +636,7 @@ The review rule's home is the "`@Remote` marks capability methods" section of [R
 | Disposed Peers | Later unary, stream, and `$events` dispatches fail with `gateway/peer-disposed`, also when the wire payload is malformed; its streams end; a running unary call completes; other Peers are unaffected | Gateway host spec |
 | Check order | The owner calls any method normally without reading a policy; a method no role lists refuses non-owners with `remote-access/denied` (`no-allow`); the access check precedes lookups, so a refused call activates no Session | Gateway host spec |
 | Policy registration | One policy per non-owner principal kind, and a second registration throws; once the disposer withdraws it, that kind is refused with `no-allow`; it is withdrawn with its fiber | remote-access host spec |
-| Decisions | Every resource needs a matching binding (AND); a role without the action, an unequal resource, or a refusing condition does not allow; the refusal reason follows condition > `explain` > `no-allow`; `explain` never changes the decision; conditions receive args for calls but not for snapshots and list filtering; a throwing `bindings()`, condition, or `explain()` refuses with `policy-failed`, each policy is logged once between `invalidate()` calls, and on the event path the owner stream and the shared event source continue; `remoteAccess/follow` is allowed for every principal | remote-access host spec, Gateway host spec |
+| Decisions | Every resource needs a matching binding (AND); a role without the action, an unequal resource, or a refusing condition does not allow; the refusal reason follows condition > `explain` > `no-allow`; `explain` never changes the decision; conditions receive args for Remote calls but not for snapshots, list filtering, and exact Fetch route requests; a throwing `bindings()`, condition, or `explain()` refuses with `policy-failed`, each policy is logged once between `invalidate()` calls, and on the event path the owner stream and the shared event source continue; `remoteAccess/follow` is allowed for every principal | remote-access host spec, Gateway host spec |
 | Resource resolution | A default field or resolver yields one resource; a default resolver returning an array is invalid; a lookup parameter that declares that kind as its `resource` yields its wire identity; a Context method gets its Session resource from the Agent Context identity in args without activating the Agent, and may declare other resources through `resources`; a `resources` reader overrides its kind, an array yields several resources, and `undefined` none; with nothing the call is `[global]`; a throw, an empty array, or a value that is not a non-empty string (including a Context identity) is invalid, refused by the Gateway with `resource-invalid` without asking `decide()`; a Context that declares no `resource` resolves by the ordinary rules; resources and `args` read the validated arguments, with undeclared fields stripped only by compiled codecs, and a JSON argument failing validation returns `gateway/input-invalid` before the access check | Gateway host spec (gateway-access) |
 | Resource registry | `typert.resources` registers one default field or resolver per kind, rejects a second registration and `global`, and withdraws the registration with its fiber; a configured lookup resolver keeps the provider's `resource`; a Host Context adapter keeps its `resource` | typert-registry spec |
 | Forwarded events | A non-owner `$events` stream receives an event, whole, only when `event:<name>` is granted on its resources; an event that declares no resources is decided on `global`; an event whose reader returns `undefined` does not reach non-owners, and `decide()` is not asked; the owner receives all | Gateway host spec (gateway-access) |

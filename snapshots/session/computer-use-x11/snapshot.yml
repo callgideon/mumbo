@@ -1,0 +1,11 @@
+version: 1
+scenario: computer-use-x11
+profile: headless
+composition: computer-use-x11
+recording: authored
+platform: posix
+header:
+  class: computer-use-x11
+  pin: true
+replay:
+  override: true
