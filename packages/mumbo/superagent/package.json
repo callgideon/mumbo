@@ -32,10 +32,7 @@
     "./locale/*.json": "./locale/*.json"
   },
   "files": [
-    "lib/index.js",
-    "lib/client.js",
-    "lib/github-watch.js",
-    "lib/feishu-watch.js",
+    "lib/*.js",
     "lib/types/**/*.d.ts",
     "cordis.patch.yml",
     "locale/*.json",

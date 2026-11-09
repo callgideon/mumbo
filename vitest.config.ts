@@ -413,6 +413,8 @@ export default defineConfig({
         // Command executor lifecycle branches need the same maturing lanes.
         // TODO(gui): cover and remove with the client test lane above.
         'packages/interaction/commands/src/index.ts',
+        // pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md
+        'packages/mumbo/superagent/src/**/*.{ts,tsx}',
         ...windowsUnsupportedCoveragePackages.map(path => `${path}/src/**/*.ts`),
         ...windowsOnlyCoverageExclusions,
         ...windowsRunnerCoverageExclusions,

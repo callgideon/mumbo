@@ -117,12 +117,15 @@ export function scanSlotFiles(scanRoot: string, patterns: readonly string[]): Sc
  * documentation IS the teaching material a registrant needs.
  * @param scanRoot - repository root the patterns resolve against.
  * @param patterns - glob(s) selecting the TypeScript/TSX files to index.
+ * @param exclude - glob(s) of files the index leaves out.
  * @returns name → declaration, with names declared more than once dropped as ambiguous.
  */
-export function indexExportedTypes(scanRoot: string, patterns: readonly string[]): Map<string, TypeDeclaration> {
+export function indexExportedTypes(
+  scanRoot: string, patterns: readonly string[], exclude: readonly string[] = [],
+): Map<string, TypeDeclaration> {
   const index = new Map<string, TypeDeclaration>()
   const ambiguous = new Set<string>()
-  const rels = [...new Set(globSync(patterns as string[], { cwd: scanRoot })
+  const rels = [...new Set(globSync(patterns as string[], { cwd: scanRoot, exclude })
     .map(path => path.split(sep).join('/')))].sort()
   for (const rel of rels) {
     const abs = resolve(scanRoot, rel)

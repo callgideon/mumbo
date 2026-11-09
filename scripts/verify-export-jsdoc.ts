@@ -566,7 +566,8 @@ function loadCompilerOptions(scanRoot: string): ts.CompilerOptions {
  */
 export function collectExportJsdocViolations(scanRoot: string = root): string[] {
   const violations: string[] = []
-  const rels = globSync('packages/*/*/src/**/*.ts', { cwd: scanRoot })
+  // pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md
+  const rels = globSync('packages/*/*/src/**/*.ts', { cwd: scanRoot, exclude: ['packages/mumbo/superagent/**'] })
     .map(path => path.split(sep).join('/'))
     .sort()
   const program = ts.createProgram(rels.map(rel => resolve(scanRoot, rel)), loadCompilerOptions(scanRoot))

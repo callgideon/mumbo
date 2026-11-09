@@ -3,20 +3,20 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/mumbo/README.md
 /:
-  en: 1ed97adb767078eb
-  zh: 61d331d90207e97b
+  en: 7f82a2a28abc6962
+  zh: d8e8973f343bdc41
 /mumbo-connect-a-running-host-to-the-mumbo-platform:
   en: 1321c86214dc5b94
   zh: 17efc75fe97163ec
 /mumbo-connect-a-running-host-to-the-mumbo-platform/summary:
-  en: 327dc5561cb2cd6e
-  zh: 0278a34d64c8be28
+  en: 0beb0a7885623e3f
+  zh: 9cfc1c0fe685cb44
 /mumbo-connect-a-running-host-to-the-mumbo-platform/table-of-contents:
   en: 1eb35b015a6c423f
   zh: a8a3dceee2c9e943
 /mumbo-connect-a-running-host-to-the-mumbo-platform/packages:
-  en: 6469a1c976e03b88
-  zh: 13ed3c325bd85ab5
+  en: 66085e8dfd1bbf5f
+  zh: 124d06e6cb190d1d
 /mumbo-connect-a-running-host-to-the-mumbo-platform/related-documentation:
   en: fdf8745cfbc9d4d4
   zh: cf0106897fe3785b

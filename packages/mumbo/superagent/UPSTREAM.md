@@ -2,7 +2,7 @@
 
 `@mumbo/superagent` is a pinned copy of https://github.com/deepseek-ai/dsh-superagent-prototype at commit `8c32a9dc5d72c033816c6a8110b37f40cf94fba4`, MIT licensed (see `LICENSE`).
 
-Every change to the copy is an entry below. A path outside `packages/mumbo/superagent/` that exists for the copy is listed too. Oxlint ignores `packages/mumbo/superagent/**`. Task A2 adds the remaining gate exclusions, each commented `pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md`.
+Every change to the copy is an entry below. A path outside `packages/mumbo/superagent/` that exists for the copy is listed too. Oxlint ignores `packages/mumbo/superagent/**`; S1 lists the other repository gate exclusions.
 
 ## S1: port and packaging
 
@@ -10,18 +10,18 @@ Upstream targets dsh `0.2.1-alpha.2` and builds as a standalone package. The cop
 
 Files not copied: upstream `tsdown.config.ts`, `vitest.config.ts`, `pnpm-lock.yaml`, `scripts/` and `tests/service-script.spec.ts`. Upstream `README.md` is `docs/upstream-readme.md`.
 
-Added: `package.json`, `tsconfig.json`, `tsconfig.host.json`, `tsconfig.client.json`, `tsdown.config.ts`, `src/client/css-modules.d.ts` (replaces `src/client/css.d.ts`) and this file.
+Added: `package.json`, `tsconfig.json`, `tsconfig.host.json`, `tsconfig.client.json`, `tsdown.config.ts`, `src/client/css-modules.d.ts` (replaces `src/client/css.d.ts`), the package README pair `README.md`, `README.zh.md` and `README.i18n.yaml`, the plugin metadata `locale/{ja,es,fr,de,ru,pt}.json`, and this file.
 
 Edits to the copy:
 
-- `package.json`: private `@mumbo/superagent` at the repository version `0.2.2-rc.1`; `workspace:*` and `workspace:~` dependency ranges; the packages `cordis.patch.yml` names are `dependencies`; `@deepseek-ai/dsh-client-connection` as peer and dev dependency; `lib/types` declarations.
+- `package.json`: private `@mumbo/superagent` at the repository version `0.2.2-rc.1`; `workspace:*` and `workspace:~` dependency ranges; the packages `cordis.patch.yml` names are `dependencies`; `@deepseek-ai/dsh-client-connection` as peer and dev dependency; `lib/types` declarations; `files` lists `lib/*.js`, which includes the chunks the three entries share.
 - `tsconfig.json` is solution-only. `tsconfig.host.json` and `tsconfig.client.json` turn off `exactOptionalPropertyTypes`, `noUnusedLocals` and `noUnusedParameters`, which upstream never enabled (commented in each file). The host leaf excludes `src/client` and `src/navigation.ts` (client only). The client leaf includes all of `src` with Node types and the union of both leaves' references, because the shared client modules import host view types; it does not reference the host leaf.
 - `src/index.ts`: `import type {} from '@deepseek-ai/dsh-client-connection'`.
 - `src/infra/paths.ts`: `packageRoot()` matches `@mumbo/superagent`.
 - `cordis.patch.yml`: the plugin row names are `@mumbo/superagent`, `@mumbo/superagent/github-watch` and `@mumbo/superagent/feishu-watch`. Row ids and preset ids are unchanged.
 - `src/client/provider.tsx`: the stylesheet import is `?inline`, as `packages/client/tsdown.client.ts` provides.
 - Documentation links in `src/deployment.ts`, `src/setup.ts`, `src/app/http.ts` and `src/client/locales.ts` are relative to the repository root (`packages/mumbo/superagent/docs/...`).
-- `docs/007-architecture.md` lists `css-modules.d.ts` and no longer lists `tests/service-script.spec.ts`. `tests/docs.spec.ts` checks `SETUP.md` as the only entry document because the package has no `README.md`.
+- `docs/007-architecture.md` lists `css-modules.d.ts` and no longer lists `tests/service-script.spec.ts`. `tests/docs.spec.ts` checks `SETUP.md` as the only entry document because `README.md` is this repository's package README, not an upstream document.
 - Tests that read `process.cwd()` (`tests/controls.spec.tsx`, `tests/styles.spec.ts`) read relative to the spec file, so they pass from the repository root.
 - Owner-admitting `connection: { admit: ... }` on the web server fake in `tests/fixtures/host.ts`, `tests/runtime.spec.ts` and `tests/model-surface.spec.ts`.
 - API drift against dsh `0.2.2-rc.1`:
@@ -42,6 +42,10 @@ Files outside the copy changed for S1:
 - `package.json`: root `devDependencies` entry `@mumbo/superagent`, so a Host started from the repository resolves the plugin named in a `--patch` overlay. `apps/cli/package.json` is unchanged because the published CLI must not depend on a private package.
 - `pnpm-lock.yaml`: the new workspace importer.
 - `scripts/package-dependency-policy.ts`: `scopeParentOf` is classified peer-required for `@deepseek-ai/dsh-scope`; `src/app/sessions.ts` reads the scope chain, which is module state of the shared instance.
+- Repository gate exclusions, each commented `pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md`: the coverage `exclude` in `vitest.config.ts`; the scans of `scripts/verify-export-jsdoc.ts`, `scripts/verify-client-ui-i18n.ts`, `scripts/verify-no-unknown-casts.ts`, `scripts/verify-doc-refs.ts` and `scripts/locale-dictionary-parity.spec.ts`; `docs/**` and `SETUP.md` as link sources in `scripts/verify-md-links.ts`; the exported-type index of `scripts/gen-client-catalog.ts`; and, in `scripts/gen-cordis-catalog.ts`, `excludedPackages` (a field of `CordisCatalogPolicy` in `packages/typert/generator/src/cordis-catalog.ts`) and the `orchestrator` entry of `SERVICE_WALK_EXEMPTIONS`.
+- `scripts/product-package-policy.ts`: `optional` classification.
+- `packages/mumbo/README.md` and its pair: the package row.
+- `docs/persistence-changes/2026-11-09-superagent-message-source.md` and its siblings: the `dsh-superagent` message source.
 
 ## S2: management API admission
 

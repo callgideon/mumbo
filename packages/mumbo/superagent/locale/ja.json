@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Superagent",
+    "description": "1 つの GitHub リポジトリを監視し、承認されたリクエストを Ticket に変換して、それぞれを専用の DSH セッションで実行します。"
+  }
+}
