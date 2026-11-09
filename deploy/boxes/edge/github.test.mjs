@@ -22,7 +22,9 @@ const NODES = {
   RC_1: { __typename: 'PullRequestReviewComment', repository: mumbo },
   R_OTHER: { __typename: 'Repository', nameWithOwner: 'callgideon/other' },
   I_OTHER: { __typename: 'Issue', repository: { nameWithOwner: 'callgideon/other' } },
+  PR_OTHER: { __typename: 'PullRequest', repository: { nameWithOwner: 'callgideon/other' } },
   U_1: { __typename: 'User' },
+  L_1: { __typename: 'Label' },
 }
 const lookupOk = (ids) => Response.json({ data: { nodes: ids.map(i => NODES[i] ?? null) }, ...(ids.every(i => NODES[i]) ? {} : { errors: [{ type: 'NOT_FOUND' }] }) })
 
@@ -228,7 +230,8 @@ test('GraphQL mutations stay in the project repositories: every node id, inline 
     ['an id in a variable default', 'mutation($s: ID = "I_OTHER") { addComment(input: {subjectId: $s, body: "x"}) { clientMutationId } }'],
     ['one of two mutations elsewhere', `mutation { a: addComment(input: {subjectId: "I_1", body: "x"}) { clientMutationId } b: addComment(input: {subjectId: "I_OTHER", body: "x"}) { clientMutationId } }`],
     ['a node type outside the list (User)', comment('U_1')],
-    ['a reviewer by user id', 'mutation { requestReviews(input: {pullRequestId: "PR_1", userIds: ["U_1"]}) { clientMutationId } }'],
+    ['a label', 'mutation { updatePullRequest(input: {pullRequestId: "PR_1", labelIds: ["L_1"]}) { clientMutationId } }'],
+    ['an assignee (user ids resolve outside requestReviews)', 'mutation { updatePullRequest(input: {pullRequestId: "PR_1", assigneeIds: ["U_1"]}) { clientMutationId } }'],
     ['an id that does not resolve', comment('NOPE')],
   ]) {
     const r = await gql(query, variables)
@@ -259,6 +262,35 @@ test('GraphQL mutations stay in the project repositories: every node id, inline 
   const down = await forwarder({ lookup: () => new Response('busy', { status: 502 }) }); t.after(down.close)
   assert.equal((await down.call('api.github.com/graphql', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: comment('I_1') }) })).status, 502)
   assert.equal(down.calls.length, 0, 'a failed lookup forwards nothing')
+})
+
+test('requestReviews is scoped by its pull request; reviewer user, team and bot ids are not resolved', async (t) => {
+  const f = await forwarder(); t.after(f.close)
+  const review = (input) => f.call('api.github.com/graphql', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: `mutation { requestReviews(input: {${input}}) { clientMutationId } }` }) })
+  assert.equal((await review('pullRequestId: "PR_1", userIds: ["U_1"], teamIds: ["T_1"], botIds: ["B_1"], union: true')).status, 200)
+  assert.deepEqual(f.lookups.at(-1).ids, ['PR_1'], 'only the pull request is resolved')
+  assert.equal(f.calls.length, 1)
+  for (const [why, input] of [
+    ['another repository\'s pull request', 'pullRequestId: "PR_OTHER", userIds: ["U_1"]'],
+    ['a pull request id that does not resolve', 'pullRequestId: "NOPE", userIds: ["U_1"]'],
+    ['an id key other than the reviewer ids (still resolved)', 'pullRequestId: "PR_1", labelIds: ["L_1"]'],
+  ]) {
+    const r = await review(input)
+    assert.equal(r.status, 403, why)
+    assert.match(r.json().errors[0].message, /is not in this project's repositories/, why)
+  }
+  // The exception is requestReviews only: the same key on another mutation is resolved, and a User is refused.
+  const elsewhere = await f.call('api.github.com/graphql', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: 'mutation { updatePullRequest(input: {pullRequestId: "PR_1", userIds: ["U_1"]}) { clientMutationId } }' }) })
+  assert.equal(elsewhere.status, 403)
+  assert.match(elsewhere.json().errors[0].message, /node U_1 \(User\) is not in this project's repositories/)
+  const looked = f.lookups.length
+  for (const [why, input] of [
+    ['no pullRequestId', 'userIds: ["U_1"]'],
+    ['no pullRequestId, another id key in the project instead', 'subjectId: "I_1", userIds: ["U_1"]'],
+    ['reviewer ids that are not strings', 'pullRequestId: "PR_1", userIds: [1]'],
+  ]) assert.equal((await review(input)).status, 403, why)
+  assert.equal(f.lookups.length, looked, 'refused before any lookup')
+  assert.equal(f.calls.length, 1)
 })
 
 test('JSON bodies stop at 1 MiB and GraphQL documents at 50000 tokens, so one request cannot exhaust the edge', { timeout: 10_000 }, async (t) => {

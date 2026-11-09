@@ -37,6 +37,9 @@ const MUTATIONS = new Set(['createPullRequest', 'updatePullRequest', 'markPullRe
 // forwarded unchecked.
 const SCALAR_INPUTS = new Set(['clientMutationId', 'title', 'body', 'baseRefName', 'headRefName', 'draft', 'maintainerCanModify', 'state', 'content', 'union'])
 const ID_KEY = /^(id|ids)$|Ids?$/
+// requestReviews only: these name people, teams and bots, not repository objects, so they are not resolved; the
+// mutation is scoped by its pullRequestId alone. Everywhere else such ids resolve and are refused.
+const REVIEWER_IDS = new Set(['userIds', 'teamIds', 'botIds'])
 // The node types a mutation may touch, each with its repository; any other type resolves to no repository.
 const NODE_REPOS = `query($ids: [ID!]!) { nodes(ids: $ids) { __typename ... on Repository { nameWithOwner } ${['PullRequest', 'Issue', 'IssueComment', 'PullRequestReviewComment'].map(t => `... on ${t} { repository { nameWithOwner } }`).join(' ')} } }`
 const STOPPED = 'stopped by the founder'
@@ -217,9 +220,11 @@ function checkGraphql(text) {
         if (!ID_KEY.test(k)) return { refused: `${name} input ${k} is not allowed` }
         const list = v === null ? [] : [v].flat()
         if (!list.every(x => typeof x === 'string')) return { refused: `${name} ${k} must hold node ids` }
+        if (name === 'requestReviews' && REVIEWER_IDS.has(k)) continue
         for (const x of list) ids.add(x)
         named += list.length
       }
+      if (name === 'requestReviews' && typeof input.pullRequestId !== 'string') return { refused: 'requestReviews needs a pullRequestId' }
       if (!named) return { refused: `${name} names no node id` }
       if (name === 'updatePullRequest' && (req.query.includes('baseRefName') || JSON.stringify(req.variables ?? null).includes('baseRefName'))) return { refused: 'updatePullRequest may not change baseRefName' }
       if (name === 'updatePullRequest' && input.state != null && input.state !== 'CLOSED') return { refused: 'updatePullRequest may set state only to CLOSED' }
