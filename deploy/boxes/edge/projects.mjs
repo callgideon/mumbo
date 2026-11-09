@@ -1,7 +1,7 @@
 // Shared projects (deploy/boxes/ASSISTANT.md, option B). A project has its own box, owned by the principal
 // `project:<id>` and running dsh as the coordinator; its members are signed-in users. Membership lives in the edge
 // store: doc `project:<id>` = { id, name, owner, members, createdAt } and set `projects:<email>` = ids.
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 
 const fail = (status, message) => Object.assign(new Error(message), { status })
 /** Project ids are lowercase letters and digits, so they fit a hostname label (`p-<id>.<public host>`). */
@@ -45,6 +45,56 @@ export function projects({ store, admitted, log = console.log }) {
         say({ msg: 'member added', project: id, member: email, by })
       }
       return { id, members: p.members }
+    },
+  }
+}
+
+/**
+ * Delivers a member's message into the project's coordinator session. The project box is ensured (created or
+ * resumed); the edge signs in to its dsh with the box's launch token like a browser, keeps the cookie, creates the
+ * coordinator session once (its id lives on the project record) and prompts it over dsh's unary RPC
+ * (`POST api/session/prompt`). The member is named in the message text; per-member dsh principals come later.
+ * `boxFetch(target, siteHost, path, init)` sends one request to the box through the client-proxy and resolves
+ * { status, setCookie, body }.
+ */
+export function projectRelay({ store, projects, box, boxFetch, siteHostOf, log = console.log }) {
+  const cookies = new Map()  // box id -> dsh cookie
+  const say = (fields) => log(JSON.stringify({ edge: 'relay', ...fields }))
+  async function signIn(target, host) {
+    const r = await boxFetch(target, host, `/?token=${target.token}`, { method: 'GET' })
+    const cookie = (r.setCookie ?? []).map(c => c.split(';')[0]).find(c => c.startsWith('dsh-auth-'))
+    if (!cookie) throw fail(502, `project box sign-in failed (${r.status})`)
+    cookies.set(target.id, cookie)
+    return cookie
+  }
+  async function rpc(target, host, method, request) {
+    const call = async (cookie) => boxFetch(target, host, `/api/${method}`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'client-request', rpcId: randomUUID(), method, payload: { args: { request } } }),
+    })
+    let r = await call(cookies.get(target.id) ?? await signIn(target, host))
+    if (r.status === 401) r = await call(await signIn(target, host))
+    const out = r.status === 200 ? JSON.parse(r.body).result : undefined
+    if (!out?.ok) throw fail(502, `${method} failed: ${out?.error?.message ?? `HTTP ${r.status}`}`)
+    return out.value
+  }
+  return {
+    async message(member, id, text) {
+      if (typeof text !== 'string' || !text.trim()) throw fail(400, 'the message is empty')
+      const p = await projects.get(id)
+      if (!p?.members.includes(member)) throw fail(404, `no project ${id} of yours`)
+      const principal = projectPrincipal(id)
+      const target = await box.ensure(principal)
+      const host = siteHostOf(principal)
+      let sessionId = p.coordinatorSessionId
+      if (!sessionId) {
+        sessionId = (await rpc(target, host, 'session/create', { cwd: '/root/projects' })).sessionId
+        await store.putDoc(`project:${id}`, { ...(await projects.get(id)), coordinatorSessionId: sessionId })
+      }
+      await rpc(target, host, 'session/prompt', { requestId: randomUUID(), sessionId, mode: 'queue', content: [{ type: 'text', text: `[from ${member}] ${text.trim()}` }] })
+      say({ msg: 'delivered', project: id, member, session: sessionId })
+      return { delivered: true, project: id, coordinatorSession: sessionId }
     },
   }
 }

@@ -485,3 +485,32 @@ test('a project box gets our own origin translated to its masked host; foreign o
   assert.equal(boxHeaders(cfg, { origin: 'https://evil.example' }, t, '3080', `p-x.${cfg.publicHost}`).origin, 'https://evil.example')
   assert.equal(boxHeaders(cfg, { origin: `https://${cfg.publicHost}` }, t).origin, `https://${cfg.publicHost}`)
 })
+
+test('project relay: signs in once, creates the coordinator session once, re-signs after 401, members only', async () => {
+  const { projectRelay } = await import('./projects.mjs')
+  const store = memoryStore()
+  const proj = projectStore({ store, admitted: () => true, log: () => {} })
+  const { id } = await proj.create('a@x.com', 'P')
+  const calls = []; let expire = false
+  const boxFetch = async (target, host, path, init) => {
+    calls.push(`${init.method} ${path}`)
+    if (path.startsWith('/?token=')) return { status: 303, setCookie: ['dsh-auth-abc=v1; Path=/; HttpOnly'], body: '' }
+    if (expire) { expire = false; return { status: 401, setCookie: [], body: '' } }
+    const req = JSON.parse(init.body)
+    assert.equal(init.headers.cookie, 'dsh-auth-abc=v1'); assert.equal(host, `p-${id}.boxes.example`)
+    const value = req.method === 'session/create' ? { sessionId: 'S1' } : { accepted: true }
+    if (req.method === 'session/prompt') { assert.equal(req.payload.args.request.sessionId, 'S1'); assert.match(req.payload.args.request.content[0].text, /^\[from a@x\.com\] /) }
+    return { status: 200, setCookie: [], body: JSON.stringify({ type: 'server-response', rpcId: req.rpcId, result: { ok: true, value } }) }
+  }
+  const box = { ensure: async (p) => ({ id: 'pbox', token: 'TOK', principal: p }) }
+  const relay = projectRelay({ store, projects: proj, box, boxFetch, siteHostOf: () => `p-${id}.boxes.example`, log: () => {} })
+  assert.deepEqual(await relay.message('a@x.com', id, ' hi '), { delivered: true, project: id, coordinatorSession: 'S1' })
+  await relay.message('a@x.com', id, 'again')
+  assert.equal(calls.filter(c => c.startsWith('GET /?token=')).length, 1)
+  assert.equal(calls.filter(c => c === 'POST /api/session/create').length, 1)
+  expire = true
+  await relay.message('a@x.com', id, 'after expiry')
+  assert.equal(calls.filter(c => c.startsWith('GET /?token=')).length, 2)
+  await assert.rejects(relay.message('b@x.com', id, 'hi'), (e) => e.status === 404)
+  await assert.rejects(relay.message('a@x.com', id, '  '), (e) => e.status === 400)
+})

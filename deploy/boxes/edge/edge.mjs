@@ -367,6 +367,17 @@ export function boxHeaders(cfg, incoming, target, port = '3080', siteHost = cfg.
   if (target.traffic) out['e2b-traffic-access-token'] = target.traffic
   return out
 }
+/** One request from the edge itself to a box's dsh through the client-proxy, as our own site's browser would send it. */
+export const boxFetcher = (cfg) => (target, siteHost, path, { method = 'GET', headers = {}, body } = {}) => new Promise((resolve, reject) => {
+  const req = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method, path,
+    headers: boxHeaders(cfg, { ...headers, origin: `https://${cfg.publicHost}`, ...(body ? { 'content-length': Buffer.byteLength(body) } : {}) }, target, '3080', siteHost) }, (r) => {
+    const chunks = []
+    r.on('data', c => chunks.push(c)).on('end', () => resolve({ status: r.statusCode, setCookie: r.headers['set-cookie'] ?? [], body: Buffer.concat(chunks).toString() }))
+  })
+  req.setTimeout(60_000, () => req.destroy(new Error('box request timed out')))
+  req.on('error', reject)
+  req.end(body)
+})
 /** dsh listens on plain HTTP inside the box, so its cookies lack Secure; the edge adds it. */
 export const secureCookies = (headers) => {
   const c = headers['set-cookie']
@@ -508,11 +519,12 @@ async function main() {
   const modelHost = env('MODEL_LISTEN_HOST', listenHost)
   setInterval(() => box.sweep().catch(e => console.error('edge: sweep', e.message)), 60_000).unref()
   if (listenHost !== '127.0.0.1' && !verifyAlb) throw new Error('edge: LISTEN_HOST beyond loopback needs ALB_ARN (the email header is only trusted from oauth2-proxy)')
-  const { projects: projectStore } = await import('./projects.mjs')
+  const { projects: projectStore, projectRelay } = await import('./projects.mjs')
   const proj = projectStore({ store, admitted: (e) => admitted(cfg.allowed, e) })
+  const relay = projectRelay({ store, projects: proj, box, boxFetch: boxFetcher(cfg), siteHostOf: (p) => boxSite(cfg, p).host })
   userServer({ cfg, box, verifyAlb, projects: proj }).listen(8080, listenHost, () => console.log(`edge: users on ${listenHost}:8080`))
   const { children, mcpServer } = await import('./sandboxes.mjs')
-  const mcp = mcpServer({ ops: children({ e2b, cfg }), projects: proj, claimOf: (info) => verifyBox(edgeKey, String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
+  const mcp = mcpServer({ ops: children({ e2b, cfg }), projects: proj, relay, claimOf: (info) => verifyBox(edgeKey, String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
   modelServer({ cfg, edgeKey, modelKey, allow: budget(store, cfg.dailyRequests), owns: box.owns, touch: box.touch, mcp })
     .listen(8081, modelHost, () => console.log(`edge: model host on ${modelHost}:8081`))
 }

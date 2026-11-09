@@ -65,7 +65,7 @@ export function children({ e2b, cfg, log = console.log }) {
  * Node request handler for the MCP endpoint. `claimOf(req)` returns the caller's verified {u, b}; the model host
  * checks the token, ownership and source address before calling this.
  */
-export function mcpServer({ ops, projects, claimOf }) {
+export function mcpServer({ ops, projects, relay, claimOf }) {
   const tool = (claim, fn) => async (args) => {
     try {
       return { content: [{ type: 'text', text: JSON.stringify(await fn(claim, args), null, 2) }] }
@@ -111,6 +111,12 @@ export function mcpServer({ ops, projects, claimOf }) {
         description: 'Add a person (by email) to a project you own.',
         inputSchema: z.object({ id: pid, email: z.string() }),
       }, tool(claim, (c, a) => projects.addMember(c.u, a.id, a.email)))
+      if (relay) {
+        mcp.registerTool('project_message', {
+          description: "Send a message to a project's coordinator agent, as you. It starts the project's box if needed and queues the message in the coordinator's conversation; the reply appears there, at the project's page.",
+          inputSchema: z.object({ id: pid, message: z.string().min(1) }),
+        }, tool(claim, (c, a) => relay.message(c.u, a.id, a.message)))
+      }
     }
     return mcp
   })
