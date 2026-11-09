@@ -99,6 +99,7 @@ These are collected from M1 on.
   - **Before a project can have a second person** (the B12 gate), two things must be true:
     - agent containment (below);
     - project boxes served on a separate registrable domain, so they cannot toss same-site cookies onto `boxes.mumbo.si`. The project domain is a config value (`PROJECT_DOMAIN`).
+      - This also covers cookies that a box's own page script plants through `document.cookie` (for example a sign-in-named cookie on its own host), which the edge cannot filter. A `__Host-`-prefixed per-host sign-in cookie is the alternative, if a separate domain is not taken.
 - **Approvals and repository grants belong to the founder.** Only emails in `APPROVER_EMAILS` may grant or bind a repository to a project. A repository belongs to at most one project, so ownership of a self-service project never reaches the organization-wide App.
 - **CI must not trust the code it runs.**
   - Agent branches run in CI, so the repository's default workflow permissions are read-only, with `permissions: contents: read` and `persist-credentials: false`.
