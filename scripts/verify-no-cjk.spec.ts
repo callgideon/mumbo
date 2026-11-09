@@ -37,6 +37,12 @@ describe('findCjkLines', () => {
     expect(findCjkLines('doc.md', Buffer.from(text)).map(violation => violation.line)).toEqual([2, 3, 4])
   })
 
+  it('records the enclosing column-0 line of each violation as its block', () => {
+    const text = ['/** Docs. */', 'export const ja = {', `  a: '${IDEOGRAPH}',`, '}', `export const zh = { a: '${IDEOGRAPH}' }`, IDEOGRAPH].join('\n')
+    expect(findCjkLines('locales.ts', Buffer.from(text)).map(violation => violation.block))
+      .toEqual(['export const ja = {', `export const zh = { a: '${IDEOGRAPH}' }`, IDEOGRAPH])
+  })
+
   it('skips binary content', () => {
     expect(findCjkLines('image.png', Buffer.concat([Buffer.from([0x89, 0x50, 0x00]), Buffer.from(IDEOGRAPH)]))).toEqual([])
   })
@@ -77,6 +83,14 @@ describe('verify-no-cjk', () => {
     expect(verifyNoCjk(root).failures).toEqual([`packages/c/locale/en.json:1: {"title":"${IDEOGRAPH}"}`])
   })
 
+  it('accepts lines inside a matching block and rejects the same text inside another block', () => {
+    const root = fixture(
+      { 'src/locales.ts': ['export const ja = {', `  a: '${IDEOGRAPH}',`, '}', 'export const zh = {', `  a: '${IDEOGRAPH}',`, '}', ''].join('\n') },
+      [{ path: 'src/*.ts', block: '^export const ja\\b', reason: 'Japanese dictionary.' }],
+    )
+    expect(verifyNoCjk(root).failures).toEqual([`src/locales.ts:5: a: '${IDEOGRAPH}',`])
+  })
+
   it('rejects exact, line, and glob entries that allow nothing', () => {
     const root = fixture(
       { 'docs/guide.md': `${IDEOGRAPH}\n` },
@@ -85,17 +99,19 @@ describe('verify-no-cjk', () => {
         { path: 'docs/removed.md', reason: 'Stale.' },
         { path: 'docs/guide.md', line: '^never$', reason: 'Stale pattern.' },
         { path: '**/locale/**/ja.json', reason: 'No Japanese locale.' },
+        { path: 'docs/guide.md', block: '^never$', reason: 'Stale block.' },
       ],
     )
     expect(verifyNoCjk(root).failures).toEqual([
       'scripts/no-cjk-allowlist.json: entry "docs/removed.md" allows nothing; remove it',
       'scripts/no-cjk-allowlist.json: entry "docs/guide.md" (line "^never$") allows nothing; remove it',
       'scripts/no-cjk-allowlist.json: entry "**/locale/**/ja.json" allows nothing; remove it',
+      'scripts/no-cjk-allowlist.json: entry "docs/guide.md" (block "^never$") allows nothing; remove it',
     ])
   })
 
   it('matches a bracketed exact path literally', () => {
-    const violation = { file: 'apps/web/[id].tsx', line: 1, text: IDEOGRAPH }
+    const violation = { file: 'apps/web/[id].tsx', line: 1, text: IDEOGRAPH, block: IDEOGRAPH }
     expect(applyCjkAllowlist([violation], [{ path: 'apps/web/[id].tsx', reason: 'Fixture.' }]))
       .toEqual({ remaining: [], unused: [] })
   })
@@ -109,6 +125,8 @@ describe('parseCjkAllowlist', () => {
     ['[{"path":"","reason":"r"}]', 'path must be a non-empty string'],
     ['[{"path":"a.md","reason":"r","note":"x"}]', 'unsupported field(s) note'],
     ['[{"path":"a.md","reason":"r","line":"("}]', 'line is not a valid regular expression'],
+    ['[{"path":"a.md","reason":"r","block":"("}]', 'block is not a valid regular expression'],
+    ['[{"path":"a.md","reason":"r","block":""}]', 'block must be a non-empty regular expression'],
   ])('rejects %s', (content, message) => {
     expect(() => parseCjkAllowlist(content)).toThrow(message)
   })

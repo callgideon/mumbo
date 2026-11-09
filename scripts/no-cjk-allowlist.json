@@ -9,7 +9,13 @@
   },
   {
     "path": "{apps,packages}/**/src/**/{*locales,locale,locales/*}.ts",
-    "reason": "Per-language dictionary modules; their CJK lines are the shipped Japanese (ja) dictionaries"
+    "block": "^export const (?:ja|[a-z]\\w*Ja)\\b",
+    "reason": "Japanese (ja) dictionaries of per-language dictionary modules; the block pattern keeps CJK in any other dictionary, such as a zh dictionary from an upstream sync, failing"
+  },
+  {
+    "path": "packages/client/ui-context-menu/src/client/locales.ts",
+    "line": "^\\s*ja: \\{",
+    "reason": "Inline Japanese (ja) context-menu feedback"
   },
   {
     "path": "packages/client/locale/src/client/index.ts",

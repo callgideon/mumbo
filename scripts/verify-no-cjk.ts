@@ -3,8 +3,8 @@
  * U+20000–U+2FFFF) in every tracked text file. A file containing a NUL byte
  * is binary and skipped; symbolic links are skipped because their target is
  * scanned on its own. Each `scripts/no-cjk-allowlist.json` entry names a path
- * or glob, an optional line regular expression, and a required reason; an
- * entry that allows nothing fails so stale exceptions cannot accumulate.
+ * or glob, optional line and block regular expressions, and a required reason;
+ * an entry that allows nothing fails so stale exceptions cannot accumulate.
  */
 
 import { execFileSync } from 'node:child_process'
@@ -21,6 +21,8 @@ export interface CjkAllowEntry {
   path: string
   /** Regular expression an allowed line must match; every line of a matched path when absent. */
   line?: string
+  /** Regular expression the allowed line's {@link CjkViolation.block} must match; any block when absent. */
+  block?: string
   /** Why the text stays. */
   reason: string
 }
@@ -33,6 +35,12 @@ export interface CjkViolation {
   line: number
   /** The line's text. */
   text: string
+  /**
+   * The nearest line at or above this one that starts in column 0 with a
+   * character other than a closing bracket, such as `export const ja = {`;
+   * empty when none.
+   */
+  block: string
 }
 
 /**
@@ -49,20 +57,27 @@ export function parseCjkAllowlist(content: string): CjkAllowEntry[] {
     const label = `${ALLOWLIST_PATH}[${String(index)}]`
     if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) throw new Error(`${label}: expected an object`)
     const fields = entry as Record<string, unknown>
-    const unknown = Object.keys(fields).filter(key => key !== 'path' && key !== 'line' && key !== 'reason')
+    const unknown = Object.keys(fields).filter(key => key !== 'path' && key !== 'line' && key !== 'block' && key !== 'reason')
     if (unknown.length > 0) throw new Error(`${label}: unsupported field(s) ${unknown.join(', ')}`)
-    const { path, line, reason } = fields
+    const { path, reason } = fields
     if (typeof path !== 'string' || path.trim() === '') throw new Error(`${label}: path must be a non-empty string`)
     if (typeof reason !== 'string' || reason.trim() === '') throw new Error(`${label}: reason must be a non-empty string`)
-    if (line === undefined) return { path, reason }
-    if (typeof line !== 'string' || line === '') throw new Error(`${label}: line must be a non-empty regular expression`)
-    try {
-      RegExp(line, 'u')
-    } catch (error) {
-      throw new Error(`${label}: line is not a valid regular expression: ${String(error)}`)
-    }
-    return { path, line, reason }
+    const line = pattern(fields, 'line', label)
+    const block = pattern(fields, 'block', label)
+    return { path, ...(line === undefined ? {} : { line }), ...(block === undefined ? {} : { block }), reason }
   })
+}
+
+function pattern(fields: Record<string, unknown>, key: 'line' | 'block', label: string): string | undefined {
+  const value = fields[key]
+  if (value === undefined) return undefined
+  if (typeof value !== 'string' || value === '') throw new Error(`${label}: ${key} must be a non-empty regular expression`)
+  try {
+    RegExp(value, 'u')
+  } catch (error) {
+    throw new Error(`${label}: ${key} is not a valid regular expression: ${String(error)}`)
+  }
+  return value
 }
 
 /**
@@ -75,7 +90,11 @@ export function findCjkLines(file: string, content: Buffer): CjkViolation[] {
   if (content.includes(0)) return []
   const text = content.toString('utf8')
   if (!CJK.test(text)) return []
-  return text.split(/\r?\n/u).flatMap((line, index) => CJK.test(line) ? [{ file, line: index + 1, text: line }] : [])
+  let block = ''
+  return text.split(/\r?\n/u).flatMap((line, index) => {
+    if (/^[^\s)\]}]/u.test(line)) block = line
+    return CJK.test(line) ? [{ file, line: index + 1, text: line, block }] : []
+  })
 }
 
 /**
@@ -102,6 +121,7 @@ export function scanTrackedFiles(repoRoot: string): { violations: CjkViolation[]
 function allows(entry: CjkAllowEntry, violation: CjkViolation): boolean {
   return (entry.path === violation.file || posix.matchesGlob(violation.file, entry.path))
     && (entry.line === undefined || new RegExp(entry.line, 'u').test(violation.text))
+    && (entry.block === undefined || new RegExp(entry.block, 'u').test(violation.block))
 }
 
 /**
@@ -137,7 +157,7 @@ export function verifyNoCjk(repoRoot: string): { failures: string[]; scanned: nu
     scanned,
     failures: [
       ...remaining.map(violation => `${violation.file}:${String(violation.line)}: ${violation.text.trim().slice(0, 120)}`),
-      ...unused.map(entry => `${ALLOWLIST_PATH}: entry ${JSON.stringify(entry.path)}${entry.line === undefined ? '' : ` (line ${JSON.stringify(entry.line)})`} allows nothing; remove it`),
+      ...unused.map(entry => `${ALLOWLIST_PATH}: entry ${JSON.stringify(entry.path)}${entry.line === undefined ? '' : ` (line ${JSON.stringify(entry.line)})`}${entry.block === undefined ? '' : ` (block ${JSON.stringify(entry.block)})`} allows nothing; remove it`),
     ],
   }
 }
