@@ -171,19 +171,25 @@ fi
 ` : ''}${site.desktop ? '' : `# Project box: a TLS-terminating GitHub proxy on loopback (its own CA, trusted system-wide) aims git and gh at the edge's
 # forwarder with this box's token (edge/box/github-local-proxy.mjs); dsh and its children reach GitHub only through it.
 mkdir -p /root/.mumbo/ca /root/.mumbo/bin
-if [ ! -f /root/.mumbo/ca/ca.crt ]; then
-  openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj /CN=mumbo-box -keyout /root/.mumbo/ca/ca.key -out /root/.mumbo/ca/ca.crt
-  chmod 600 /root/.mumbo/ca/ca.key
+# One start at a time: the router can re-run this script while a first run is still setting up the CA or the proxy.
+(
+flock 9
+if ! { [ -f /root/.mumbo/ca/ca.crt ] && [ -f /root/.mumbo/ca/ca.key ] && [ "$(openssl x509 -noout -pubkey -in /root/.mumbo/ca/ca.crt)" = "$(openssl pkey -pubout -in /root/.mumbo/ca/ca.key)" ]; }; then
+  openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj /CN=mumbo-box -keyout /root/.mumbo/ca/ca.key.tmp -out /root/.mumbo/ca/ca.crt.tmp
+  chmod 600 /root/.mumbo/ca/ca.key.tmp
+  mv /root/.mumbo/ca/ca.key.tmp /root/.mumbo/ca/ca.key
+  mv /root/.mumbo/ca/ca.crt.tmp /root/.mumbo/ca/ca.crt
   cp /root/.mumbo/ca/ca.crt /usr/local/share/ca-certificates/mumbo-box.crt
   update-ca-certificates
 fi
 echo ${b64(boxFiles.proxy)} | base64 -d > /root/.mumbo/bin/github-local-proxy.mjs
 echo ${b64(boxFiles.gh)} | base64 -d > /root/.mumbo/bin/gh
 chmod 0755 /root/.mumbo/bin/github-local-proxy.mjs /root/.mumbo/bin/gh
-pgrep -f github-local-proxy.mjs >/dev/null || PORT=8899 CA_DIR=/root/.mumbo/ca EDGE_GITHUB_URL=${llm}/github BOX_TOKEN=${token} nohup node /root/.mumbo/bin/github-local-proxy.mjs >/root/github-proxy.log 2>&1 &
+pgrep -f github-local-proxy.mjs >/dev/null || PORT=8899 CA_DIR=/root/.mumbo/ca EDGE_GITHUB_URL=${llm}/github BOX_TOKEN=${token} nohup node /root/.mumbo/bin/github-local-proxy.mjs >/root/github-proxy.log 2>&1 9>&- &
 up=
 for i in $(seq 20); do curl -s -o /dev/null -m 1 http://127.0.0.1:8899/ && up=1 || { [ $? -ne 7 ] && up=1; }; [ -n "$up" ] && break; sleep 0.5; done
 [ -n "$up" ] || { echo 'github proxy did not start' >&2; exit 1; }
+) 9>/root/.mumbo/ca.lock
 `}${memberKeyText ? `# Project box: members sign in with the edge's x-mumbo-member header when the image ships the project overlay
 # (@mumbo/edge-member); the marker tells the edge to use it instead of the owner launch token.
 PROJECT_PATCH=

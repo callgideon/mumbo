@@ -20,7 +20,7 @@ test('a user box start script is byte-for-byte what it was before project boxes 
 test('a project box start script has the proxy setup in order, before the member-auth block', () => {
   const s = startScript(c, 'TOK', boxSite(c, 'project:0123456789abcdef'), 'role', 'KEYTEXT', boxFiles, ['O@x.com', 'p@x.com'])
   const order = [
-    'if [ ! -f /root/.mumbo/ca/ca.crt ]',
+    'flock 9',
     'openssl req -x509',
     '/usr/local/share/ca-certificates/mumbo-box.crt',
     'update-ca-certificates',
@@ -35,6 +35,11 @@ test('a project box start script has the proxy setup in order, before the member
     '$PROJECT_PATCH',
   ].map(n => at(s, n))
   assert.deepEqual(order, [...order].sort((a, b) => a - b))
+  assert.match(s, /\(\nflock 9\n/)
+  assert.match(s, /\) 9>\/root\/\.mumbo\/ca\.lock\n/)
+  assert.match(s, /openssl x509 -noout -pubkey -in \/root\/\.mumbo\/ca\/ca\.crt\)" = "\$\(openssl pkey -pubout -in \/root\/\.mumbo\/ca\/ca\.key\)/)
+  assert.match(s, /mv \/root\/\.mumbo\/ca\/ca\.key\.tmp .*\n.*mv \/root\/\.mumbo\/ca\/ca\.crt\.tmp/)
+  assert.match(s, /9>&- &\n/)
   assert.match(s, /MUMBO_PANEL_ADMINS='o@x\.com,p@x\.com' /)
   assert.ok(!/HTTP_PROXY/.test(s.replace('HTTPS_PROXY', '')), 'no plain HTTP_PROXY')
   assert.match(s, /touch \/root\/\.mumbo\/member-auth/)
