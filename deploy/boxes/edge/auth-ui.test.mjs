@@ -4,12 +4,14 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { request } from 'node:http'
 import { test } from 'node:test'
+import { runInNewContext } from 'node:vm'
 import { authUi, userServer } from './edge.mjs'
 
 const cfg = { publicHost: 'boxes.example', projectDomain: 'boxes.example', approveHost: 'approve.boxes.example', allowed: ['@x.com'], signinCookie: '_oauth2_proxy_mumbo', proxy: new URL('http://127.0.0.1:1') }
 const read = (name) => readFileSync(new URL(`./auth-ui/${name}`, import.meta.url), 'utf8')
 const html = read('index.html')
 const consentJs = read('consent.js')
+const inline = /<script>([\s\S]*?)<\/script>/.exec(html)[1]
 const anonKey = 'key"</script> '
 const allowed = { clientIds: ['c1', 'c2'], redirectUris: ['https://boxes.example/oauth2/callback'] }
 const signin = authUi({ html, supabaseJs: '/* supabase-js */', consentJs, supabaseUrl: 'https://ref.supabase.co', anonKey, ...allowed })
@@ -49,7 +51,6 @@ test('signed out, GET /oauth/consent on the approve host serves the sign-in page
       assert.match(csp, /(^|; )connect-src https:\/\/ref\.supabase\.co(;|$)/)
       assert.match(csp, /(^|; )frame-ancestors 'none'(;|$)/)
       assert.doesNotMatch(csp, /unsafe-inline|unsafe-eval|\*/)
-      const inline = /<script>([\s\S]*?)<\/script>/.exec(html)[1]
       assert.ok(csp.includes(`'sha256-${createHash('sha256').update(inline).digest('base64')}'`), 'the inline script is allowed by hash')
     }
     assert.equal((await call(port, { path: '/oauth/consent?signout' })).status, 200)
@@ -78,6 +79,8 @@ test('the page\'s scripts: the pinned supabase-js, the consent decision and a co
     assert.equal(conf.status, 200); assert.equal(conf.headers['cache-control'], 'no-store')
     assert.deepEqual(new Function(`${conf.body}; return MUMBO`)(), { url: 'https://ref.supabase.co', anonKey, ...allowed })
   })
+  // PKCE, and nothing read from the URL by supabase-js (the page's own init exchanges a ?code=).
+  assert.deepEqual((await runPage('https://approve.boxes.example/oauth/consent')).calls[0], ['createClient', 'https://ref.supabase.co', 'anon', { auth: { flowType: 'pkce', detectSessionInUrl: false } }])
 })
 
 test('other methods, paths and hosts fall through to the signed-in router', async () => {
@@ -134,6 +137,53 @@ test('a client X-Forwarded-Uri, on which oauth2-proxy skips sign-in for any path
     assert.ok((await call(port, { host: cfg.publicHost, headers: { ...email, ...upgrade(cfg.publicHost) } })).error)
   })
   assert.deepEqual(reached, [['ensure', 'a@x.com'], ['ensure', 'a@x.com']])
+})
+
+/**
+ * Runs the page's scripts (consent.js, then the inline script) at `href` with a fake DOM and a fake supabase-js whose
+ * auth calls are recorded and answered from `answers` by name (default { data: {}, error: null }). Resolves once the
+ * page's start-up has settled, with the calls (createClient, auth and oauth methods, history and location) and the texts.
+ */
+async function runPage(href, answers = {}) {
+  const calls = []
+  const answer = (name) => (...args) => { calls.push([name, ...args]); return Promise.resolve(answers[name] ?? { data: {}, error: null }) }
+  const auth = (prefix) => new Proxy({}, { get: (_, k) => (prefix === '' && k === 'oauth' ? auth('oauth.') : answer(prefix + String(k))) })
+  const els = new Map()
+  const el = () => ({ hidden: false, disabled: false, textContent: '', value: '', classList: { toggle() {} }, addEventListener() {}, querySelectorAll: () => [], focus() {} })
+  const url = new URL(href)
+  runInNewContext(`${consentJs}\n${inline}`, {
+    MUMBO: { url: 'https://ref.supabase.co', anonKey: 'anon', ...allowed },
+    supabase: { createClient: (...args) => { calls.push(['createClient', ...args]); return { auth: auth('') } } },
+    document: { getElementById: (id) => els.get(id) ?? els.set(id, el()).get(id) },
+    location: { origin: url.origin, pathname: url.pathname, search: url.search, hash: url.hash, href, replace: (u) => { calls.push(['location.replace', u]) } },
+    history: { replaceState: (_, __, u) => { calls.push(['history.replaceState', u]) } },
+    URL, URLSearchParams,
+  })
+  await new Promise(r => setImmediate(r))
+  return { calls: JSON.parse(JSON.stringify(calls)), text: (id) => els.get(id)?.textContent }
+}
+
+test('a planted session in the URL is never used: fragment tokens and foreign codes set no session and consent to nothing', async () => {
+  const base = 'https://approve.boxes.example/oauth/consent?authorization_id=A1'
+  const tokens = 'access_token=AT&refresh_token=RT&expires_in=3600&token_type=bearer&type=magiclink'
+  const signedOut = { getSession: { data: { session: null } } }
+  for (const href of [`${base}#${tokens}`, `${base}&${tokens}`, `${base}#code=C`, `${base}&error=x&error_description=y#${tokens}`]) {
+    const { calls } = await runPage(href, signedOut)
+    // The address keeps only the authorization id; nothing but getSession reaches Supabase.
+    assert.deepEqual(calls.slice(1), [['history.replaceState', base], ['getSession']], href)
+  }
+  // A ?code= without this browser's PKCE verifier: supabase-js refuses it, and the page says where the link works.
+  const foreign = await runPage(`${base}&code=C#${tokens}`, { ...signedOut, exchangeCodeForSession: { data: { session: null }, error: { code: 'pkce_code_verifier_not_found' } } })
+  assert.deepEqual(foreign.calls.slice(1), [['history.replaceState', base], ['exchangeCodeForSession', 'C'], ['getSession']])
+  assert.match(foreign.text('msg'), /works only in the browser that asked for it/)
+  // This browser's own Google or link sign-in: the code is exchanged after the address is cleaned, then consent runs.
+  const own = await runPage(`${base}&code=C`, {
+    getSession: { data: { session: { user: { email: 'a@x.com' } } } },
+    'oauth.getAuthorizationDetails': { data: { client: { id: 'c1' }, redirect_uri: 'https://boxes.example/oauth2/callback' } },
+    'oauth.approveAuthorization': { data: { redirect_url: 'https://boxes.example/oauth2/callback?code=X&state=S' } },
+  })
+  assert.deepEqual(own.calls.slice(1), [['history.replaceState', base], ['exchangeCodeForSession', 'C'], ['getSession'], ['oauth.getAuthorizationDetails', 'A1'],
+    ['oauth.approveAuthorization', 'A1', { skipBrowserRedirect: true }], ['location.replace', 'https://boxes.example/oauth2/callback?code=X&state=S']])
 })
 
 test('consent: approve only Mumbo\'s own client ids, follow an earlier consent only to Mumbo\'s redirect URI, refuse the rest', () => {
