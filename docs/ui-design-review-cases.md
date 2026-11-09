@@ -4,8 +4,6 @@ description: "Design judgment for DSH: alignment, spatial grouping, hierarchy, s
 
 # UI design principles and review cases
 
-English | [中文](ui-design-review-cases.zh.md)
-
 ## Summary
 
 Consult the relevant cases when a design relationship is unclear. Ordinary changes inspect affected relationships in page/modal context; they do not require every case, an inventory or a full-page audit. The whole-interface review sections apply when a comprehensive review is explicitly requested. Examples explain transferable principles rather than coverage. See the [review cookbook](cookbook/reviewing-ui-design.md) for optional detailed methods and the owning workflow for effort levels.

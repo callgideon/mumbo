@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-30-session-list-host-fairness.zh.md)
-
 ## Problem
 
 Large cached projection states can monopolize the Host while a Session list is assembled. Yielding after every row avoids that batch stall but adds thousands of event-loop round trips when a list contains many cheap rows. Row count alone is not a useful scheduling budget.

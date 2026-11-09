@@ -5,8 +5,6 @@ description: "Retained Node PTC uses cooperative stop on timeout or cancellation
 
 # Retained PTC timeout recovery
 
-English | [中文](guide.zh.md)
-
 ## Change
 
 Timeouts and cancellation in `persistent-in-memory` mode and `vm-script` with `scriptPersistence: true` request cooperative stop. Previously, they always cleared the environment. Canceled tool calls throw, allowing `catch` and `finally` to run. Stop acknowledgment waits for the evaluation to settle and preserves variables and earlier mutations. The host waits up to `stopGraceMs` (default `3000`) for acknowledgment, then terminates the managed process range if acknowledgment is missing or fails. A blocked loop therefore still loses state. Temporary execution continues to terminate its process.

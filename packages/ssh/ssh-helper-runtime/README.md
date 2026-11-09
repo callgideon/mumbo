@@ -5,8 +5,6 @@ kind: "package-library"
 
 # @deepseek-ai/dsh-ssh-helper-runtime
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 Run the SSH helper on a remote machine without installing Node or npm packages. Each archive includes the executable, its native resources and integrity metadata. The private carrier supports managed processes, terminals, sandboxing and an embedded PTC worker through the existing SSH providers. Project commands still use the remote machine’s own development tools.

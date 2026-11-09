@@ -3,8 +3,6 @@
 Status: implemented
 Archived: 2026-09-04
 
-English | [中文](2026-08-10-web-session-log-export.zh.md)
-
 ## Problem
 
 The Trajectory view had no way to hand a debugging artifact to a human: the raw session log lived on disk and in the host, the client history face served folded projections (not raw entries), and a session with subagents spans many independent session logs. A bug report needs the complete raw log of the whole tree, in a shape that survives being emailed around.
@@ -27,5 +25,5 @@ The Trajectory view had no way to hand a debugging artifact to a human: the raw 
 
 - Export fidelity: immediately before reading each live root or descendant, the exporter crosses the authoritative `SessionStore.flush` durability barrier; every exported file represents that validated durable logical log in the same current JSONL form, independent of backend framing. A live session may append again after its read, so the archive is a per-session read-boundary snapshot rather than one atomic tree snapshot. The archive name is `dsh-session-<sanitized-id>.zip` and archive paths sanitize ids before they can shape entries.
 - The export needs no seam capability: each log is read through a persistence read handle and serialized here as canonical JSONL, so any mounted backend exports identically ([export and pre-release trims](../simplification/2026-08-27-persistence-export-and-pre-release-trims.md) records the removal of the earlier verbatim-artifact surface). Absence is decided by a `stat` preflight (absent session → 404). `session-log-export` registers one exact Host-only Fetch route with Connection; no Remote descriptor or JSON envelope represents the streamed response.
-- Fixture mode (no host) answers 404 for the export, which the browser reports as a failed download; the navigation-panes golden snapshot includes the 导出 button.
+- Fixture mode (no host) answers 404 for the export, which the browser reports as a failed download; the navigation-panes golden snapshot includes the Export button.
 - Deferred: transcript.md and a report/feedback bundle remain future work; the stable per-session JSONL and manifest-free layout keep that extension cheap.

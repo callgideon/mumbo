@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-10-29-retained-ptc-interruption.zh.md)
-
 ## Problem
 
 Terminating a retained Node process on every timeout or cancellation loses unrelated application objects and imported modules. A control handler on the evaluation thread cannot stop a synchronous loop. The [in-memory execution decision](2026-09-23-best-effort-persistent-ptc.md) still owns disposable state and Session behavior; this decision replaces its timeout and cancellation cleanup policy.

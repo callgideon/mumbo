@@ -5,8 +5,6 @@ description: "Custom Web compositions must provide context menus for Session act
 
 # Session Header menus and export dialogs
 
-English | [中文](guide.zh.md)
-
 ## Change
 
 The browser half of `@deepseek-ai/dsh-session-log-export` requires `contextMenus` to contribute copy, download, and feedback actions. Custom Web compositions without a context-menu provider must add one or these client actions cannot activate. The default Web composition already includes it. The Header More button belongs to `ui-conversation`, so removing the export plugin does not remove other registered Header actions such as Open in. The button hides when no Header-menu providers are registered.

@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @mumbo/edge-member
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 `@mumbo/edge-member` lets the people of a mumbo shared project act in the project box as themselves. The mumbo edge signs each proxied request with a member header; this plugin registers a [Connection authenticator](../../client/connection/README.md) that admits a correctly signed request as the `edge-member` principal, and a [remote access](../../api/remote-access/README.md) policy that grants members the Session actions a collaborator needs. A member's prompt is recorded with `principal: { kind: 'edge-member', email }`, the model reads a notice naming the member before it, and the Web page shows the member's address above it. The design and threat model are in the [Agent Note](../../../.agents/notes/implemented/architecture/2026-11-09-connection-authenticators-and-edge-members.md).

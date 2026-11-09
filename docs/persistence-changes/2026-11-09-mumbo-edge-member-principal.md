@@ -5,8 +5,6 @@ kind: persistence-change
 
 # 2026-11-09-mumbo-edge-member-principal
 
-English | [中文](2026-11-09-mumbo-edge-member-principal.zh.md)
-
 ## Summary
 
 Adds the mumbo edge-member principal, the lowercased email of a project member the mumbo edge signed in, to the user-rpc and retry-rpc message sources of prompts that member submits, and the mumbo-member notice source that names that member before each such message.

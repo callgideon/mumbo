@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @mumbo/box-links
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 `@mumbo/box-links` adds a Home link and, when configured, a Desktop link at the foot of the Web sidebar, above the account menu. Home opens the box home page with the person's assistant, desktop, and shared projects; Desktop opens the live view of the box's desktop. Both open in a new tab, so the conversation, its draft, and the page's connection stay open. Without this plugin's row the sidebar shows neither link.

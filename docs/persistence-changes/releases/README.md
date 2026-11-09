@@ -4,8 +4,6 @@ description: "Browse Session persistence-type changes across every captured DSH 
 
 # Persistence changes across DSH prereleases
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 This archive provides an approximate historical view of 26 DSH alpha/RC tags and their 25 adjacent transitions. Each release includes a short explanation, source tag, before/after digests, and complete snapshots of changed types for reading and format validation. It does not establish historical runtime compatibility or replace [current-source acknowledgements](../README.md).
@@ -61,7 +59,7 @@ The [manifest](manifest.json) records every DSH alpha/RC tag captured on 2026-09
 <a id="files"></a>
 ## Files and scope
 
-Each tag has an English/Chinese record with `kind: persistence-release`, a pairing sidecar, and `.schema.json`. Its machine declaration contains the tag, immediate predecessor, observed writer version, and each changed root’s before/after digest. The first snapshot contains every root; later snapshots retain only changed roots that remain present and all their reachable types. Deletions use a null after value; unchanged releases retain empty changes and snapshots.
+Each tag has a record with `kind: persistence-release` and a `.schema.json`. Its machine declaration contains the tag, immediate predecessor, observed writer version, and each changed root’s before/after digest. The first snapshot contains every root; later snapshots retain only changed roots that remain present and all their reachable types. Deletions use a null after value; unchanged releases retain empty changes and snapshots.
 
 Snapshots cover the logical Session header, physical JSONL header, event envelope, and every first-party event and transitive reference at that tag. Type counts include only definitions reachable after normalization. Historical source references retain file paths without line numbers.
 
@@ -81,16 +79,16 @@ Digests describe normalized reconstructed types, not verbatim source text or rep
 <a id="verification"></a>
 ## Verification
 
-All 26 snapshots passed canonical-graph, root-digest, and reachable-type-digest validation. The release-archive check reads only the manifest, records, and snapshots in this tree, without Git, network access, or old-version checkouts; it validates manifest coverage, predecessors, before/after values, snapshot type completeness, and bilingual machine declarations.
+All 26 snapshots passed canonical-graph, root-digest, and reachable-type-digest validation. The release-archive check reads only the manifest, records, and snapshots in this tree, without Git, network access, or old-version checkouts; it validates manifest coverage, predecessors, before/after values, snapshot type completeness, and machine declarations.
 
 ```sh
 pnpm run verify-persistence-releases
 pnpm run doc-sync
 ```
 
-The marker-delimited index, inventory cells, and structural-change facts are generated from the snapshots. Default verification rejects stale facts. Run `pnpm run verify-persistence-releases --write` to refresh those regions and pairing records after validating all machine data; authored summaries, source evidence, machine declarations, and schema files are preserved.
+The marker-delimited index, inventory cells, and structural-change facts are generated from the snapshots. Default verification rejects stale facts. Run `pnpm run verify-persistence-releases --write` to refresh those regions after validating all machine data; authored summaries, source evidence, machine declarations, and schema files are preserved.
 
-Tag completeness is relative to the manifest’s captured scope; offline checks do not discover later tags automatically. Standard documentation checks validate pairing records and Markdown links. The [format template](../../../.agents/skills/dsh-doc/templates/persistence-release.md) defines each record’s fields.
+Tag completeness is relative to the manifest’s captured scope; offline checks do not discover later tags automatically. Standard documentation checks validate Markdown links. The [format template](../../../.agents/skills/dsh-doc/templates/persistence-release.md) defines each record’s fields.
 
 <a id="dev-note"></a>
 ## Dev Note

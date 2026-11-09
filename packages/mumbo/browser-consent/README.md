@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @mumbo/browser-consent
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 `@mumbo/browser-consent` enforces "reads are free, writes ask" for the model's browser tools in the person's own signed-in Chromium. It mounts the Playwright MCP browser provider itself, so those tools exist only while consent is loaded with a valid configuration. Navigation and page reads pass. A click, typing, form fill, or similar action on the current tab proceeds without asking only when that tab's origin is in `allowedSites`; every other write asks the person once through the approval service, showing its arguments. Each allowed write is recorded in the Session log with its site, tool, and outcome.

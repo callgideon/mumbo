@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-10-02-plugin-market-index-format.zh.md)
-
 ## Problem
 
 DSH installs third-party bundles only from a spec the user already knows: an npm name, a Git URL, a tarball, or a local path. Nothing lets a user browse installable bundles. No official market exists, and one may be added later, so a market mechanism must work with indexes that third parties publish.
@@ -23,25 +21,25 @@ The market reuses npm's package names, versions, ranges, distribution tags, and 
 ```json
 {
   "format": 1,
-  "title": { "en": "Example Market", "zh": "示例市场" },
-  "description": { "en": "Community DSH bundles", "zh": "社区 DSH bundle" },
+  "title": { "en": "Example Market", "es": "Mercado de ejemplo" },
+  "description": { "en": "Community DSH bundles", "es": "Bundles de DSH de la comunidad" },
   "metadata": {
     "categories": {
-      "productivity": { "title": { "en": "Productivity", "zh": "效率" } }
+      "productivity": { "title": { "en": "Productivity", "es": "Productividad" } }
     },
     "labels": {
-      "official": { "title": { "en": "Official", "zh": "官方" } }
+      "official": { "title": { "en": "Official", "es": "Oficial" } }
     },
     "sortKeys": {
-      "downloads": { "title": { "en": "Downloads", "zh": "下载量" }, "order": "desc" },
-      "rating": { "title": { "en": "Rating", "zh": "评分" }, "order": "desc" }
+      "downloads": { "title": { "en": "Downloads", "es": "Descargas" }, "order": "desc" },
+      "rating": { "title": { "en": "Rating", "es": "Valoración" }, "order": "desc" }
     }
   },
   "plugins": [
     {
       "name": "@example/dsh-auto-review",
-      "title": { "en": "Auto Review", "zh": "自动审查" },
-      "description": { "en": "Per-tool LLM authorization review", "zh": "逐工具 LLM 授权审查" },
+      "title": { "en": "Auto Review", "es": "Revisión automática" },
+      "description": { "en": "Per-tool LLM authorization review", "es": "Revisión de autorización por herramienta con LLM" },
       "icon": "icons/auto-review.svg",
       "author": "Example Labs",
       "homepage": "https://example.com/dsh-auto-review",
