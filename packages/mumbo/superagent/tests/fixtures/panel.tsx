@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { expect, vi } from 'vitest'
 import { App } from '../../src/client/app.tsx'
 import { usePageForm } from '../../src/client/deployment.tsx'
-import { zh } from '../../src/client/locales.ts'
+import { en } from '../../src/client/locales.ts'
 import type { T } from '../../src/client/text.ts'
 import { server, usePanelServer } from './panel-server.tsx'
 
@@ -35,13 +35,13 @@ export async function settle() {
   })
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
 }
-export async function mount(dictionary: Record<string, string> = zh) {
+export async function mount(dictionary: Record<string, string> = en) {
   container = document.createElement('div'); document.body.append(container)
   root = createRoot(container)
   await act(async () => { root!.render(<Panel t={translator(dictionary)} />) })
   await settle()
 }
-export async function remount(dictionary: Record<string, string> = zh) { unmount(); await mount(dictionary) }
+export async function remount(dictionary: Record<string, string> = en) { unmount(); await mount(dictionary) }
 
 export const all = (selector: string) => [...document.querySelectorAll<HTMLElement>(selector)]
 const CONTROLS = 'button, [role="button"], [role="tab"], [role="switch"], a'

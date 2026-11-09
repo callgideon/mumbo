@@ -6,24 +6,23 @@ import type { Deployment } from '../deployment.ts'
 import type { Commands } from '../infra/commands.ts'
 import type { SourceContext, SourceHost } from './host.ts'
 
-export interface Localized { zh: string; en: string }
 /** `advanced` folds a rarely changed field (such as a polling tunable) behind the card's Advanced section. */
-interface FieldBase { key: string; label: Localized; hint?: Localized; advanced?: true }
+interface FieldBase { key: string; label: string; hint?: string; advanced?: true }
 /**
  * Configuration field specification; `rows` edits a list of records keyed by its first column, `choose` picks from
  * resolved source labels, and `fact` displays a read-only value from `facts`.
  */
 export type FieldSpec =
   | FieldBase & { type: 'switch' }
-  | FieldBase & { type: 'select'; options: { value: string; label: Localized }[] }
+  | FieldBase & { type: 'select'; options: { value: string; label: string }[] }
   | FieldBase & { type: 'number'; min: number; max: number }
-  | FieldBase & { type: 'text'; pattern?: string; readonly?: boolean; choose?: Localized }
+  | FieldBase & { type: 'text'; pattern?: string; readonly?: boolean; choose?: string }
   | FieldBase & { type: 'fact'; settings?: 'deployment' }
-  | FieldBase & { type: 'rows'; columns: ({ key: string; label: Localized; type: 'text'; pattern?: string; optional?: boolean; choose?: Localized; refresh?: Localized } | { key: string; label: Localized; type: 'select'; options: { value: string; label: Localized }[] })[] }
+  | FieldBase & { type: 'rows'; columns: ({ key: string; label: string; type: 'text'; pattern?: string; optional?: boolean; choose?: string; refresh?: string } | { key: string; label: string; type: 'select'; options: { value: string; label: string }[] })[] }
 
-export interface VariableSpec { key: string; description: Localized }
+export interface VariableSpec { key: string; description: string }
 export interface EnvironmentInput<C> { deployment: Deployment; config: C; trigger?: Trigger }
-export interface AdmissionRowView { id: string; label: Localized | string; note: Localized; cells: { listedUnaddressed: boolean; unlistedAddressed: boolean; unlistedUnaddressed: boolean } }
+export interface AdmissionRowView { id: string; label: string; note: string; cells: { listedUnaddressed: boolean; unlistedAddressed: boolean; unlistedUnaddressed: boolean } }
 /** Policy extension for a source kind, defining allowed senders, admission table rows, and optional external roster sync. */
 export interface SourcePolicyPart<P extends Record<string, unknown>> {
   /** Validates the Source's part of the Policy, including `allowed` (senders who may originate work). */
@@ -31,16 +30,16 @@ export interface SourcePolicyPart<P extends Record<string, unknown>> {
   /** Form fields of the policy part; the first is `allowed`. */
   fields: FieldSpec[]
   /** Describes what the Source marks as addressed to the agent, which an allowed sender's explicit request requires. */
-  explicit: Localized
+  explicit: string
   /** Fallback display labels for unlisted human or bot senders when raw sender IDs are not human-readable. */
-  unnamed?: { person: Localized; bot: Localized }
+  unnamed?: { person: string; bot: string }
   /** Receiving scopes of the Policy's admission table under `config` (matching `scope().row`); kinds without `rows` use the table's defaults. */
   rows?(config: Record<string, unknown>): AdmissionRowView[]
   /** Optional external roster sync (such as chat members); `ready` reports whether `part` names a target to refresh from. */
-  sync?: { label: Localized; ready(part: P): boolean; run(host: SourceHost, part: P, signal: AbortSignal): Promise<P> }
+  sync?: { label: string; ready(part: P): boolean; run(host: SourceHost, part: P, signal: AbortSignal): Promise<P> }
 }
 /** UI link for a channel address; `triggerId` names the Trigger whose own deep link is preferred when available. */
-export interface ChannelLink { url: string; label: Localized; triggerId?: string }
+export interface ChannelLink { url: string; label: string; triggerId?: string }
 export type ChannelLinks = Partial<Pick<Deployment, 'repository' | 'feishu'>>
 /** Outbound messaging adapter for a source kind's threads. */
 export interface SourceChannel<C> {
@@ -85,10 +84,10 @@ export interface TriggerContext {
 export interface SourceKind<C extends Record<string, unknown> = Record<string, unknown>> {
   /** Stable ID; a default instance with the same ID exists when none is stored. */
   kind: string
-  title: Localized
-  description: Localized
+  title: string
+  description: string
   /** Read-only status facts derived from `deployment` (undefined while waiting for setup), keyed by field key. */
-  facts?(deployment: Deployment | undefined): Record<string, Localized | string>
+  facts?(deployment: Deployment | undefined): Record<string, string>
   /** Validates stored and submitted configuration and fills defaults. */
   schema: z.ZodType<C>
   fields: FieldSpec[]

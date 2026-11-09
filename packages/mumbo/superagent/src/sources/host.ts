@@ -7,7 +7,7 @@ import type { SetupProblem } from '../setup.ts'
 import type { Family, Key } from '../kv.ts'
 import { fill } from '../infra/text.ts'
 
-/** Fixed English health templates (`{name}` placeholders); the panel localizes each `code` in the interface language. */
+/** Fixed English health templates (`{name}` placeholders); the panel words each `code` from its dictionary. */
 export const HEALTH_TEXT = {
   setupPending: 'Waiting for the deployment check',
   sourceOff: 'Off',

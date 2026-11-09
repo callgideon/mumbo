@@ -375,9 +375,9 @@ describe('github source', () => {
   it('describes CI as one fact: failed checks first, then unfinished ones, otherwise passed', () => {
     const counts = ciCounts({ head: 'abc', checks: [{ name: 'e2e', status: 'completed', conclusion: 'failure' }, { name: 'lint', status: 'in_progress', conclusion: null }, { name: 'docs', status: 'completed', conclusion: 'skipped' }], statuses: [{ context: 'deploy', state: 'error' }, { context: 'preview', state: 'pending' }] })
     expect(counts).toEqual({ failed: 2, running: 2 })
-    expect(ciFact(counts)).toEqual({ label: { zh: 'CI 失败', en: 'CI failed' }, value: '2', problem: true })
-    expect(ciFact({ failed: 0, running: 1 })).toEqual({ label: { zh: 'CI 进行中', en: 'CI running' }, value: '1' })
-    expect(ciFact({ failed: 0, running: 0 })).toEqual({ label: 'CI', value: { zh: '通过', en: 'passed' } })
+    expect(ciFact(counts)).toEqual({ label: 'CI failed', value: '2', problem: true })
+    expect(ciFact({ failed: 0, running: 1 })).toEqual({ label: 'CI running', value: '1' })
+    expect(ciFact({ failed: 0, running: 0 })).toEqual({ label: 'CI', value: 'passed' })
   })
   it('starts a review comment\'s text with its file, line and diff lines, and keeps them and the comment it answers', () => {
     const comment: GithubComment = { id: 5, body: 'Use the theme token', user: { login: 'carol', type: 'User' }, path: 'src/render.ts', line: 43,
@@ -417,7 +417,7 @@ describe('github source', () => {
   it('binds a PR to the unique live ticket on its branch and ends tickets when the PR closes', async () => {
     const h = host()
     const decisionId = 'd'
-    const request = feishuTrigger({ message_id: 'om_1', chat_id: 'oc_1', chat_type: 'group', sender_id: MEMBER, sender_type: 'user', content: '@bot 修一下标题', create_time: '1', mentions: [{ id: 'ou_bot' }] }, 'ou_bot', 'cli_bot')!
+    const request = feishuTrigger({ message_id: 'om_1', chat_id: 'oc_1', chat_type: 'group', sender_id: MEMBER, sender_type: 'user', content: '@bot fix the title', create_time: '1', mentions: [{ id: 'ou_bot' }] }, 'ou_bot', 'cli_bot')!
     h.store.triggers.save(request)
     h.store.tickets.save({ id: 't1', title: 'one', decisionId, mandate: { strength: 'explicit', policyVersion: '', basis: { via: 'listed' }, actor: { source: 'feishu', id: MEMBER }, scope: '' }, channels: [{ source: 'feishu', thread: 'feishu:oc_1', address: { chatId: 'oc_1', messageId: 'om_1' } }], assignments: [{ id: 'a', state: 'running', createdAt: '' }], inputs: [], undelivered: [], createdAt: '', updatedAt: '', execution: execution('one'), origin: { triggerId: request.id, triggerIds: [request.id] } })
     const agentsPull = (number: number): Pull => ({ ...openPull(number), user: { login: 'agent-bot' }, head: { sha: 'abc',
@@ -431,9 +431,9 @@ describe('github source', () => {
     expect(await observePull(h, endedPull(9, '2026-09-02T00:00:00Z'))).toBe(true)
     expect(h.store.tickets.get('t1')).toMatchObject({ ended: { by: 'executor', outcome: 'merged', at: '2026-09-02T00:00:00.000Z' } })
     expect(h.store.threads.get('github:9')?.subscriptions).toEqual(['t1'])
-    // The notice its end gives follows the language of the source request.
-    const notices = pullEndNotices(h.store.tickets.get('t1')!, request.text, 'acme/widgets')
-    expect(notices).toEqual([expect.objectContaining({ kind: 'notice', channel: expect.objectContaining({ source: 'feishu' }), text: expect.stringContaining('已合并') })])
+    // Its end gives a notice on the Feishu channel.
+    const notices = pullEndNotices(h.store.tickets.get('t1')!, 'acme/widgets')
+    expect(notices).toEqual([expect.objectContaining({ kind: 'notice', channel: expect.objectContaining({ source: 'feishu' }), text: '[PR #9](https://github.com/acme/widgets/pull/9) has merged.' })])
     expect(h.executor.stop).toHaveBeenCalledOnce()
     // Resumed after the merge, the ticket works on: a later look at the merged PR reports nothing again.
     h.store.tickets.save({ ...h.store.tickets.get('t1')!, ended: undefined, assignments: [...h.store.tickets.get('t1')!.assignments, { id: 'a2', state: 'pending', createdAt: '2026-09-03T00:00:00Z' }] } as never)
@@ -444,7 +444,7 @@ describe('github source', () => {
     expect(h.store.tickets.get('t1')).toMatchObject({ ended: { outcome: 'merged' } })
     expect(Date.parse(h.store.tickets.get('t1')!.ended!.at)).toBeGreaterThan(Date.parse('2026-09-03T00:00:00Z'))
     // Its notice has the id of the first one, so it goes out once.
-    expect(pullEndNotices(h.store.tickets.get('t1')!, request.text, 'acme/widgets').map(notice => notice.id)).toEqual(notices.map(notice => notice.id))
+    expect(pullEndNotices(h.store.tickets.get('t1')!, 'acme/widgets').map(notice => notice.id)).toEqual(notices.map(notice => notice.id))
     h.store.close()
   })
   it('keeps a ticket working on its other open PR when one of its PRs merges', async () => {
@@ -503,13 +503,13 @@ describe('github source', () => {
     expect([ci, branchCiTrigger('main', 'abc', 1, 'CI passed', ''), { ...ci, meta: { number: 7, isPr: true } },
       { ...ci, source: 'feishu', actor: { source: 'feishu', id: '' } }].map(trigger => policy.delivers(trigger))).toEqual([true, true, false, false])
   })
-  it('writes the terminal notice in English for a request without Han characters', async () => {
+  it('writes the closed-without-merging notice', async () => {
     const h = host()
     const request = feishuTrigger({ message_id: 'om_2', chat_id: 'oc_1', chat_type: 'group', sender_id: MEMBER, sender_type: 'user', content: '@bot fix the title', create_time: '1', mentions: [{ id: 'ou_bot' }] }, 'ou_bot', 'cli_bot')!
     h.store.triggers.save(request)
     h.store.tickets.save({ id: 't2', title: 'two', decisionId: 'd2', mandate: { strength: 'explicit', policyVersion: '', basis: { via: 'listed' }, actor: { source: 'feishu', id: MEMBER }, scope: '' }, channels: [{ source: 'feishu', thread: 'feishu:oc_1', address: { chatId: 'oc_1', messageId: 'om_2' } }], assignments: [], inputs: [], undelivered: [], createdAt: '', updatedAt: '', ...pulled(12), origin: { triggerId: request.id, triggerIds: [request.id] } })
     expect(await observePull(h, endedPull(12, '2026-09-02T00:00:00Z', false))).toBe(true)
-    expect(pullEndNotices(h.store.tickets.get('t2')!, request.text, 'acme/widgets'))
+    expect(pullEndNotices(h.store.tickets.get('t2')!, 'acme/widgets'))
       .toEqual([expect.objectContaining({ text: '[PR #12](https://github.com/acme/widgets/pull/12) was closed without merging.' })])
     h.store.close()
   })
@@ -596,7 +596,7 @@ describe('github source', () => {
     // The notification, the ticket's PR and the subscribed Thread share one read of the PR.
     expect(reads.filter(path => path === 'pulls/9')).toHaveLength(1)
     const facts = () => h.store.threads.get('github:9')!.meta.facts as Record<string, unknown>
-    expect(facts()).toMatchObject({ autoMerge: { label: { zh: '自动合并', en: 'Auto-merge' } }, ci: { value: '1' } })
+    expect(facts()).toMatchObject({ autoMerge: { label: 'Auto-merge' }, ci: { value: '1' } })
     routes['pulls/9'] = { ...pr, auto_merge: null }
     routes['commits/abc/check-runs'] = { check_runs: [{ name: 'test', status: 'completed', conclusion: 'failure' }] }
     await pollRound(h)

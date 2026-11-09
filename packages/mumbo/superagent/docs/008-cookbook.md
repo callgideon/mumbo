@@ -55,17 +55,17 @@ export type WebhookConfig = z.infer<typeof ConfigSchema>
 
 export const webhookKind: SourceKind<WebhookConfig> = {
   kind: 'webhook',
-  title: { zh: 'Webhook 队列', en: 'Webhook queue' },
-  description: { zh: '接收 webhook 队列里下列对话的消息。', en: 'Receives the messages of these conversations from the webhook queue.' },
+  title: 'Webhook queue',
+  description: 'Receives the messages of these conversations from the webhook queue.',
   schema: ConfigSchema,
   fields: [
-    { key: 'conversations', type: 'rows', label: { zh: '接收的对话', en: 'Conversations' }, columns: [
-      { key: 'id', type: 'text', label: { zh: '对话', en: 'Conversation' }, pattern: '[a-z0-9-]+' },
-      { key: 'listen', type: 'select', label: { zh: '接收', en: 'Receive' }, options: [
-        { value: 'mentions', label: { zh: '仅 @', en: '@ only' } }, { value: 'all', label: { zh: '全部消息', en: 'All' } }] },
+    { key: 'conversations', type: 'rows', label: 'Conversations', columns: [
+      { key: 'id', type: 'text', label: 'Conversation', pattern: '[a-z0-9-]+' },
+      { key: 'listen', type: 'select', label: 'Receive', options: [
+        { value: 'mentions', label: '@ only' }, { value: 'all', label: 'All' }] },
     ] },
     { key: 'pollSeconds', type: 'number', advanced: true, min: 10, max: 3600,
-      label: { zh: '轮询间隔 / 秒', en: 'Polling interval / seconds' } },
+      label: 'Polling interval / seconds' },
   ],
   health: ['webhook'],
   // find, scope, channel, threadContext, policy and environment follow in the next steps.
@@ -155,7 +155,7 @@ Revalidation calls `scope` with the Mandate's stored metadata. Make it depend on
     allowed: (address, config) => config.conversations.some(item => item.id === address.conversation),
     send: sendWebhook,
     link: address => ({ url: address.url ?? '',
-      label: { zh: `Webhook 对话 ${address.conversation}`, en: `Webhook conversation ${address.conversation}` } }),
+      label: `Webhook conversation ${address.conversation}` }),
   },
 ```
 
@@ -215,13 +215,13 @@ If messages reply to earlier messages, add `repliesTo(trigger)`. It returns the 
   policy: {
     schema: z.object({ allowed: z.array(z.object({ id: z.string().min(1), name: z.string().trim().max(100).optional() }).strict())
       .default([]) }).strict(),
-    fields: [{ key: 'allowed', type: 'rows', label: { zh: '能发起工作的发送者', en: 'Senders who may originate work' }, columns: [
-      { key: 'id', type: 'text', label: { zh: '发送者', en: 'Sender' } },
-      { key: 'name', type: 'text', label: { zh: '名字', en: 'Name' }, optional: true }] }],
-    explicit: { zh: '名单里的人在消息里 @ 智能体。', en: 'Someone on the list mentions the agent in a message.' },
+    fields: [{ key: 'allowed', type: 'rows', label: 'Senders who may originate work', columns: [
+      { key: 'id', type: 'text', label: 'Sender' },
+      { key: 'name', type: 'text', label: 'Name', optional: true }] }],
+    explicit: 'Someone on the list mentions the agent in a message.',
     rows: stored => ConfigSchema.parse(stored).conversations.map(conversation => {
       const all = conversation.listen === 'all'
-      return { id: conversation.id, label: conversation.id, note: all ? { zh: '全部消息', en: 'All' } : { zh: '仅 @', en: '@ only' },
+      return { id: conversation.id, label: conversation.id, note: all ? 'All' : '@ only',
         cells: { listedUnaddressed: all, unlistedAddressed: true, unlistedUnaddressed: all } }
     }),
   },
@@ -237,9 +237,7 @@ If messages reply to earlier messages, add `repliesTo(trigger)`. It returns the 
 
 ```ts
   environment: {
-    variables: [{ key: 'DSH_SUPERAGENT_WEBHOOK_CONVERSATION', description: {
-      zh: '接下工单的 webhook 对话；工单不是从这个来源来的时为空',
-      en: 'The webhook conversation that started the ticket; empty when the ticket did not start on this Source' } }],
+    variables: [{ key: 'DSH_SUPERAGENT_WEBHOOK_CONVERSATION', description: 'The webhook conversation that started the ticket; empty when the ticket did not start on this Source' }],
     values: ({ trigger }) => ({
       DSH_SUPERAGENT_WEBHOOK_CONVERSATION: trigger?.source === 'webhook' ? String(trigger.meta.conversation ?? '') : '' }),
   },
@@ -309,7 +307,7 @@ export async function pollQueue(ctx: SourceContext, signal: AbortSignal): Promis
     const trigger = webhookTrigger(message.data, page.me)
     if (!trigger) continue
     await ctx.receive(trigger)
-    const conversation = { label: { zh: '对话', en: 'Conversation' }, value: message.data.conversation }
+    const conversation = { label: 'Conversation', value: message.data.conversation }
     for (const ref of trigger.threads) ctx.threads.describe(threadKey(ref), { facts: { conversation } })
   }
   ctx.state.set(KV.webhook.cursor, page.next)

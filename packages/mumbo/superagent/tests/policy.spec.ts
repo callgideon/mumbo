@@ -464,9 +464,8 @@ describe('bots and events without a sender', () => {
   it('says on the GitHub bot list when a listed bot\'s comment is received: when it mentions the agent, or comments are observed', () => {
     const field = githubKind.policy!.fields.find(item => item.key === 'bots')!
     const comments = githubKind.fields.find(item => item.key === 'observeComments')!.label
-    expect(field.hint!.en).toContain('mentions the agent')
-    expect(field.hint!.en).toContain(comments.en)
-    expect(field.hint!.zh).toContain(comments.zh)
+    expect(field.hint).toContain('mentions the agent')
+    expect(field.hint).toContain(comments)
   })
   it('names a GitHub Trigger\'s receiving scope, which the Source observes where its switch is on', () => {
     const { sources } = setup(observing({ observeIssues: true }))

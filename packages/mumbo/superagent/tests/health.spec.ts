@@ -30,7 +30,7 @@ it('reports a relay in error once it failed three times, clears it once the rela
 it('keeps a failing relay\'s error while replies recover, and a failing reply\'s error while relays recover', async () => {
   const master = h.agents.get(h.runtime.masterId)!
   const lark = vi.mocked(Commands.prototype.lark)
-  const reply = (id: string) => { h.runtime.outbox.send({ id, channel: feishu('9', 'x').channel!, text: '已合并。', kind: 'notice' }) }
+  const reply = (id: string) => { h.runtime.outbox.send({ id, channel: feishu('9', 'x').channel!, text: 'merged.', kind: 'notice' }) }
   master.steer.mockImplementation(() => { throw new Error('master gone') })
   h.runtime.sessions.relay('r2', JSON.stringify({ kind: 'note' }))
   lark.mockRejectedValue(new Error('internal error (2200)'))

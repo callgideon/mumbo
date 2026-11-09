@@ -6,7 +6,7 @@ import type { DeploymentForm } from './deployment.tsx'
 import { EvalStatus } from './eval.tsx'
 import { ExecutionStatus } from './execution.tsx'
 import { ticketMark } from './marks.ts'
-import { GLOSSARY, GLOSSARY_VALUES, en, zh, type DshSuperagentKey } from './locales.ts'
+import { GLOSSARY, GLOSSARY_VALUES, en, type DshSuperagentKey } from './locales.ts'
 import { OverviewPage } from './overview.tsx'
 import { PanelProvider, usePanel, usePanelData } from './provider.tsx'
 import { HOME, TABS, initialLocation, lastSettingsGroup, remember, routeLabel, settingsRoute, type Location, type Route,
@@ -26,20 +26,17 @@ export interface AppProps {
 
 function Glossary({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { t } = usePanel()
-  const chinese = t('tab.overview') === zh['tab.overview']
-  const [own, other] = chinese ? [zh, en] : [en, zh]
   const heading = (group: keyof typeof GLOSSARY) => t(group === 'roles' ? 'glossaryGroup.roles' : `tab.${group}`)
   return <Modal className="dt-glossary-modal" open={open} onClose={onClose} title={t('glossary')} closeLabel={t('close')}
     description={t('glossaryIntro')} footer={<Button variant="primary" onClick={onClose}>{t('close')}</Button>}>
     <div className="dt-glossary-body">
       <table className="dt-glossary">
         <thead><tr>
-          <th>{t(chinese ? 'glossaryChinese' : 'glossaryEnglish')}</th><th>{t(chinese ? 'glossaryEnglish' : 'glossaryChinese')}</th>
-          <th>{t('glossaryMeaning')}</th>
+          <th>{t('glossaryTerm')}</th><th>{t('glossaryMeaning')}</th>
         </tr></thead>
         {Object.entries(GLOSSARY).map(([group, keys]) => <tbody key={group}>
-          <tr><th colSpan={3} scope="rowgroup" className="dt-glossary-group">{heading(group as keyof typeof GLOSSARY)}</th></tr>
-          {keys.map(key => <tr key={key}><td>{own[`term.${key}`]}</td><td>{other[`term.${key}`]}</td><td>{own[`meaning.${key}`]}</td></tr>)}
+          <tr><th colSpan={2} scope="rowgroup" className="dt-glossary-group">{heading(group as keyof typeof GLOSSARY)}</th></tr>
+          {keys.map(key => <tr key={key}><td>{en[`term.${key}`]}</td><td>{en[`meaning.${key}`]}</td></tr>)}
         </tbody>)}
       </table>
       <p className="dt-legend-title">{t('legendTitle')}</p>
@@ -47,8 +44,8 @@ function Glossary({ open, onClose }: { open: boolean; onClose: () => void }) {
         <Dot state={state} /><span>{t(`legend.${state}`)}</span>
       </li>)}</ul>
       <dl className="dt-values">{Object.entries(GLOSSARY_VALUES).map(([group, values]) => <div key={group} style={{ display: 'contents' }}>
-        <dt>{own[`term.${group}` as DshSuperagentKey]}</dt>
-        <dd>{values.map(key => `${own[key]} ${other[key]}`).join(' · ')}</dd>
+        <dt>{en[`term.${group}` as DshSuperagentKey]}</dt>
+        <dd>{values.map(key => en[key]).join(' · ')}</dd>
       </div>)}</dl>
     </div>
   </Modal>

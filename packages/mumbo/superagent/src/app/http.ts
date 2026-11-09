@@ -84,7 +84,7 @@ function panelAdmitted(principal: { readonly kind: string; readonly email?: unkn
   if (principal.kind === 'owner') return true
   return principal.kind === 'edge-member' && typeof principal.email === 'string' && admins.includes(principal.email)
 }
-/** Maps errors to HTTP status codes and structured payloads that the panel localizes in the interface language. */
+/** Maps errors to HTTP status codes and structured payloads that the panel words by code. */
 function failure(error: unknown): [number, Record<string, unknown>] {
   if (error instanceof z.ZodError) {
     const issues = error.issues.map(issue => ({ path: issue.path.join('.'), message: issue.message }))

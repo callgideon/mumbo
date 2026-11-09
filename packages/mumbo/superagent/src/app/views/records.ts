@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { canRetry, followupOwners, latestReport, liveTicket, settled, threadKey, ticketStage, type ActorRef, type ChannelRef, type Decision,
   type DecisionKind, type Thread, type ThreadFacts, type Ticket, type TicketStage, type Trigger } from '../../core/index.ts'
 import { allowedSender, listedBot } from '../../policy.ts'
-import type { ChannelLink, Localized } from '../../sources/kind.ts'
+import type { ChannelLink } from '../../sources/kind.ts'
 import type { SourceRegistry } from '../../sources/registry.ts'
 import { workerSessionId } from '../../executor/dsh.ts'
 import type { Store } from '../store.ts'
@@ -17,7 +17,7 @@ export const dayAgo = () => new Date(Date.now() - DAY).toISOString()
 export const newestFirst = (a: Ticket, b: Ticket) => b.updatedAt.localeCompare(a.updatedAt)
 
 /** Sender projection for the UI; automated notices have an empty `id` and no `name`. */
-export interface ActorView { source: string; id: string; name?: Localized }
+export interface ActorView { source: string; id: string; name?: string }
 /** The tickets whose worker decides a person's follow-up (see `followupOwners`). */
 export type Owners = (trigger: Trigger) => string[]
 /**
@@ -56,13 +56,12 @@ export function snapshot(host: ViewHost): Snapshot {
   }
   const settings = store.settings()
   const rules = new Map(settings.policy.rules.map(rule => [rule.id, rule.name]))
-  const named = (name: string) => ({ zh: name, en: name })
   const actor = ({ source, id }: ActorRef, human?: boolean): ActorView => {
     if (!id) return { source, id }
     const entry = allowedSender(settings, { source, id }) ?? listedBot(settings, { source, id })
-    if (entry) return { source, id, name: named(entry.name || entry.id) }
+    if (entry) return { source, id, name: entry.name || entry.id }
     const unnamed = sources.kind(source)?.policy?.unnamed
-    return { source, id, name: unnamed ? human === false ? unnamed.bot : unnamed.person : named(id) }
+    return { source, id, name: unnamed ? human === false ? unnamed.bot : unnamed.person : id }
   }
   return { ...host, threadsOf, rule: id => ({ id, name: rules.get(id) ?? id }), actor, owners: ownersOf(store) }
 }

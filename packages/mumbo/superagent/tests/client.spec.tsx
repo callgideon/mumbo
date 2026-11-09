@@ -4,14 +4,14 @@ import { createRoot } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ApiError, caller, usePoll } from '../src/client/api.ts'
 import { apply } from '../src/client/index.tsx'
-import { zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 import { SettingsSchema } from '../src/policy.ts'
 
 declare global { var IS_REACT_ACT_ENVIRONMENT: boolean }
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
 type Entry = { options: { name: string; id?: string; key?: string; order?: number; locale?: string; label?: () => string }; component: ComponentType<Record<string, unknown>> }
-const t = ((key: keyof typeof zh) => zh[key] ?? key) as never
+const t = ((key: keyof typeof en) => en[key] ?? key) as never
 function fixture(listed: string[]) {
   const entries: Entry[] = []
   const dictionaries: Record<string, unknown> = {}
@@ -36,7 +36,7 @@ async function render(entry: Entry, props: Record<string, unknown>) {
   return { container, dispose: () => { act(() => { root.unmount() }); container.remove() } }
 }
 const openMaster = async (container: HTMLElement) => {
-  const button = [...container.querySelectorAll('button')].find(item => item.textContent === zh.openMaster)!
+  const button = [...container.querySelectorAll('button')].find(item => item.textContent === en.openMaster)!
   await act(async () => { button.click() })
   for (let i = 0; i < 5; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
 }
@@ -74,7 +74,7 @@ it('reports a Session missing from the catalog in the interface language', async
   const view = await render(main, { t })
   await openMaster(view.container)
   expect(ctx.uiWorkspace.openSession).not.toHaveBeenCalled()
-  expect(document.body.textContent).toContain(zh.sessionNotListed)
+  expect(document.body.textContent).toContain(en.sessionNotListed)
   view.dispose()
 })
 

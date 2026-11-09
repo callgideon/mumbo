@@ -161,23 +161,23 @@ async function drive(host: Host) {
   const master = runtime.masterId
   // Candidates wait, which the main Session decides in one call: a request it accepts, thanks it ignores, and plain chat in the
   // channel, a proactive candidate whose card shows it touches no rule, which it ignores from its card.
-  const request = feishu('1', '@bot 修一下回归'), thanks = feishu('3', '@bot 谢谢'), chat = feishu('4', '中午吃什么', { mentions: [] })
+  const request = feishu('1', '@bot fix the regression'), thanks = feishu('3', '@bot thanks'), chat = feishu('4', 'lunch plans', { mentions: [] })
   await runtime.receive(request); await runtime.receive(thanks); await runtime.receive(chat)
   const routed = await run(master, 'orchestrator_route', { decisions: [
-    { kind: 'accept', trigger_id: request.id, title: '修复回归', worktree_name: 'fix-regression', acknowledgement: '收到，修复回归。' },
+    { kind: 'accept', trigger_id: request.id, title: 'fix regression', worktree_name: 'fix-regression', acknowledgement: 'Got it, fixing the regression.' },
     { kind: 'ignore', trigger_id: thanks.id, reason: 'Thanks only.' }, { kind: 'ignore', trigger_id: chat.id, reason: 'Lunch chat.' }] }) as
     { results: { decision?: string; reason?: string; ticket?: { ticket_id: string } }[] }
   expect(routed.results.map(result => result.decision)).toEqual(['accept', 'ignore', 'ignore'])
   expect(routed.results[2]!.reason).toMatch(/^Ignored from its card/)
   const a = routed.results[0]!.ticket!.ticket_id
-  const answer = { trigger_id: request.id, purpose: 'answer', text: '是配置。' }
+  const answer = { trigger_id: request.id, purpose: 'answer', text: 'is configuration.' }
   const refusal = await run(master, 'orchestrator_reply', answer).then(() => '', (error: Error) => error.message)
-  const proposal = feishu('5', '把副标题改成“浏览网页”', { mentions: [] })
+  const proposal = feishu('5', 'change the subtitle to“browse the web”', { mentions: [] })
   await runtime.receive(proposal)
   vi.spyOn(Commands.prototype, 'lark').mockResolvedValue({ items: [{ message_id: 'om_5', chat_id: CHAT }] })
   await run(master, 'orchestrator_eval', { trigger_id: proposal.id })
-  const proactive = (await run(master, 'orchestrator_eval_decide', { trigger_id: proposal.id, decision: 'accept', title: '文案修订', worktree_name: 'copy-fix',
-    scope: '改副标题', reason: 'explicit copy change', intent_evidence: 'quoted', acknowledgement: '收到，把副标题改成“浏览网页”。',
+  const proactive = (await run(master, 'orchestrator_eval_decide', { trigger_id: proposal.id, decision: 'accept', title: 'wording revision', worktree_name: 'copy-fix',
+    scope: 'change the subtitle', reason: 'explicit copy change', intent_evidence: 'quoted', acknowledgement: 'Got it, changing the subtitle to“browse the web”。',
     rule_assessments: [{ rule_id: 'copy', matched: true, reason: 'copy change' }, { rule_id: 'visual', matched: false, reason: 'not visual' }],
     direction: { implementation_requested: true, target_basis: 'specified', requires_design_decision: false, evidence: 'it names the text' } })).ticket as { ticket_id: string }
   const b = proactive.ticket_id
@@ -185,13 +185,13 @@ async function drive(host: Host) {
   const [workerA, workerB] = [a, b].map(workerSessionId) as [string, string]
   await run(workerA, 'orchestrator_report', { state: 'progress', summary: 'Needs a decision.', human_action: 'Desktop too?' })
   await run(workerA, 'orchestrator_report', { state: 'progress', summary: 'It reads the config.', human_action: null, reply_to_trigger_id: request.id })
-  const other = feishu('9', '@bot 顺便看看这个')
+  const other = feishu('9', '@bot take a look at this too')
   await runtime.receive(other)
   await run(master, 'orchestrator_route', { decisions: [{ kind: 'attach', ticket_id: a, trigger_id: other.id }] })
   await run(workerA, 'orchestrator_thread_unrelated', { thread: `feishu:${CHAT}:om_9`, reason: 'It asks for something else.' })
   await run(workerA, 'orchestrator_thread_follow', { thread: `feishu:${CHAT}:om_7`, reason: 'The same settings page.' })
-  await runtime.receive(feishu('7', '@bot 这个页面的按钮也改一下'))
-  const beyond = feishu('8', '另外把导出也做了', { mentions: [], root_id: 'om_1' })
+  await runtime.receive(feishu('7', '@bot change the button on this page too'))
+  const beyond = feishu('8', 'also do the export', { mentions: [], root_id: 'om_1' })
   await runtime.receive(beyond)
   await runtime.idle()
   await run(workerA, 'orchestrator_trigger_handback', { trigger_id: beyond.id, reason: 'It asks for an export feature.' })
@@ -199,7 +199,7 @@ async function drive(host: Host) {
   await runtime.pump()
   await runtime.idle()
   await run(workerA, 'orchestrator_report', { state: 'ready', summary: 'Done.' })
-  await runtime.receive(feishu('2', '再加一个按钮', { mentions: [], root_id: 'om_1' }))
+  await runtime.receive(feishu('2', 'add one more button', { mentions: [], root_id: 'om_1' }))
   await vi.waitFor(async () => {
     await runtime.pump()
     expect(runtime.store.tickets.get(a)!.inputs.some(input => input.kind === 'resumed')).toBe(true)

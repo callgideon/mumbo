@@ -1,23 +1,19 @@
 import { expect, it } from 'vitest'
 import type { EffectKind } from '../src/app/effects.ts'
-import { en, zh, type DshSuperagentKey } from '../src/client/locales.ts'
+import { en, type DshSuperagentKey } from '../src/client/locales.ts'
 import { reasonLabel, type T } from '../src/client/text.ts'
 import { REASONS, USER_ERRORS } from '../src/core/index.ts'
 
-const placeholders = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map(match => match[1]).sort()
-
-it('names the same placeholders in both languages', () => {
-  const keys = Object.keys(zh) as DshSuperagentKey[]
-  expect(keys.filter(key => placeholders(zh[key]).join() !== placeholders(en[key]).join())).toEqual([])
-  expect(keys.filter(key => !zh[key] || !en[key])).toEqual([])
+it('has text for every key', () => {
+  expect((Object.keys(en) as DshSuperagentKey[]).filter(key => !en[key])).toEqual([])
 })
 
 it('words a reason by its code with its values, each of a batch, and words a person or an assessor wrote as written', () => {
-  const t = ((key: DshSuperagentKey, values: Record<string, string> = {}) => (zh[key] ?? key).replace(/\{(\w+)\}/g, (_match, name: string) => values[name] ?? '')) as T
-  expect(reasonLabel(t, 'retried')).toBe(zh['reason.retried'])
-  expect(reasonLabel(t, [{ code: 'routed', values: { ticket: 't1' } }])).toBe('已转给工单 t1')
+  const t = ((key: DshSuperagentKey, values: Record<string, string> = {}) => (en[key] ?? key).replace(/\{(\w+)\}/g, (_match, name: string) => values[name] ?? '')) as T
+  expect(reasonLabel(t, 'retried')).toBe(en['reason.retried'])
+  expect(reasonLabel(t, [{ code: 'routed', values: { ticket: 't1' } }])).toBe('Routed to Ticket t1')
   expect(reasonLabel(t, [{ code: 'not_a_member', triggerId: '1' }, { code: 'no_mention', triggerId: '2' }]))
-    .toBe(`${zh['reason.not_a_member']}；${zh['reason.no_mention']}`)
+    .toBe(`${en['reason.not_a_member']}; ${en['reason.no_mention']}`)
   expect(reasonLabel(t, [{ code: 'said', values: { text: 'The button is already blue' } }])).toBe('The button is already blue')
   // A code the panel has no words for reads as the host words it.
   expect(reasonLabel(t, { code: 'some_new_filter' })).toBe('some_new_filter')
@@ -29,16 +25,15 @@ it('names every health entry of dsh-superagent itself, which the overview shows 
   // Executor and the unavailable Evals of the last hour.
   const entries = { runtime: 0, models: 0, reply: 0, worker: 0, assessment: 0, launch: 0, delivery: 0, relay: 0,
     notice: 0, evals: 0 } satisfies Record<EffectKind | 'runtime' | 'models' | 'reply' | 'worker' | 'evals', 0>
-  expect(Object.keys(entries).filter(name => !(`health.${name}` in zh))).toEqual([])
+  expect(Object.keys(entries).filter(name => !(`health.${name}` in en))).toEqual([])
 })
 
-it('words every refusal the host words by code, in both languages', () => {
-  expect(Object.keys(USER_ERRORS).filter(code => !zh[`userError.${code}` as DshSuperagentKey]
-    || !en[`userError.${code}` as DshSuperagentKey])).toEqual([])
+it('words every refusal the host words by code', () => {
+  expect(Object.keys(USER_ERRORS).filter(code => !en[`userError.${code}` as DshSuperagentKey])).toEqual([])
 })
 
 it('has words for every reason code the core records', () => {
-  expect(Object.keys(REASONS).filter(code => code !== 'said' && !(`reason.${code}` in zh))).toEqual([])
+  expect(Object.keys(REASONS).filter(code => code !== 'said' && !(`reason.${code}` in en))).toEqual([])
 })
 
 it('words the reasons agents read in the glossary\'s words: a sender on the list, a Thread', () => {

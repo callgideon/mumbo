@@ -71,7 +71,7 @@ it('decodes path parameters and parses each route\'s query', async () => {
   const call = serve({
     store: { settings: () => SettingsSchema.parse({}),
       read: { decisions: (filter: unknown, offset: number, limit: number) => { seen.push({ filter, offset, limit }); return { items: [], more: false } } } },
-    links: () => () => ({ url: '', label: { zh: '', en: '' } }),
+    links: () => () => ({ url: '', label: '' }),
     engine: { unsubscribe: (key: string) => { seen.push(key); return true } },
     sessions: { delivery: async () => 'injected' },
   })

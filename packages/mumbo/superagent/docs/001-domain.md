@@ -72,41 +72,41 @@ The concepts above and their rules are reusable. The Source implementations, the
 
 ## Glossary
 
-A reference list of the terms this and the later documents use, with their Chinese names; the later documents explain the terms not introduced above. The panel shows one language at a time; its (?) button opens this glossary with both languages. The messages agents send to people on GitHub and Feishu use plain language, not these terms.
+A reference list of the terms this and the later documents use; the later documents explain the terms not introduced above. The panel's (?) button opens this glossary. The messages agents send to people on GitHub and Feishu use plain language, not these terms.
 
-| Term | 中文 | Meaning |
-| --- | --- | --- |
-| Agent | 智能体 | The automated team member dsh-superagent runs, acting on Sources through identities such as a GitHub account and a Feishu bot |
-| Main Session | 主 Session | The DSH Session that evaluates Triggers, accepts and dispatches Tickets, and replies; `orchestrator` in code and prompts |
-| Executor Session | 执行器 Session | The DSH Session an Executor runs for one Ticket; `worker` in code and prompts |
-| Source | 来源 | A stream of events: a kind that a plugin provides, plus one instance configuration |
-| Trigger | 触发 | One immutable event from a Source |
-| Thread | 线程 | Triggers in time order; the unit within which Evals run one at a time |
-| Correlation | 关联 | The relation between Threads that share a Trigger; it adds context only |
-| Channel | 渠道 | The write side of a Thread |
-| Policy | 策略 | The versioned rules for accepting work, and each Source's part of it, such as who may ask for work there |
-| Policy version | 策略版本 | The identifier of one combination of rules, Source parts and accept mode; every Mandate records it |
-| Eval | 评估 | The process that turns a batch of Triggers into a Decision |
-| Gate | 准入 | The deterministic first layer of Eval: who may originate work, and with what strength |
-| Assessment | 研判 | The model's judgement during Eval |
-| Decision | 决定 | The result of Eval |
-| Mandate | 授权 | What an accept grants: strength, scope and the Policy version it relied on |
-| Ticket | 工单 | A unit of authorized work |
-| Assignment | 派工 | The binding of a Ticket to one Executor instance |
-| Subscription | 订阅 | The relation between a Ticket and a Thread |
-| Fan-out | 扇出 | Delivering Triggers of a subscribed Thread to a Ticket as context |
-| Executor | 执行器 | The port that runs Assignments: one Executor Session and one directory per Ticket |
-| Execution environment | 执行环境 | Where Executor Sessions and the prepare command run: variables that the Executor and the Sources register, each with a key, a value and a description |
-| Report | 报告 | The state an Assignment reports to its Ticket |
-| Attention | 待人工决定 | A question on a Ticket that waits for a person's answer |
-| Disposition | 去向 | The record of a Trigger being filtered, evaluated or fanned out |
-| Input | 输入 | Context delivered to a Ticket: fanned-out Triggers, Policy changes, resumes and text |
-| Scope | 范围 | The work a Mandate allows |
-| Strength | 强度 | How strong the basis of a Mandate or an Eval is |
+| Term | Meaning |
+| --- | --- |
+| Agent | The automated team member dsh-superagent runs, acting on Sources through identities such as a GitHub account and a Feishu bot |
+| Main Session | The DSH Session that evaluates Triggers, accepts and dispatches Tickets, and replies; `orchestrator` in code and prompts |
+| Executor Session | The DSH Session an Executor runs for one Ticket; `worker` in code and prompts |
+| Source | A stream of events: a kind that a plugin provides, plus one instance configuration |
+| Trigger | One immutable event from a Source |
+| Thread | Triggers in time order; the unit within which Evals run one at a time |
+| Correlation | The relation between Threads that share a Trigger; it adds context only |
+| Channel | The write side of a Thread |
+| Policy | The versioned rules for accepting work, and each Source's part of it, such as who may ask for work there |
+| Policy version | The identifier of one combination of rules, Source parts and accept mode; every Mandate records it |
+| Eval | The process that turns a batch of Triggers into a Decision |
+| Gate | The deterministic first layer of Eval: who may originate work, and with what strength |
+| Assessment | The model's judgement during Eval |
+| Decision | The result of Eval |
+| Mandate | What an accept grants: strength, scope and the Policy version it relied on |
+| Ticket | A unit of authorized work |
+| Assignment | The binding of a Ticket to one Executor instance |
+| Subscription | The relation between a Ticket and a Thread |
+| Fan-out | Delivering Triggers of a subscribed Thread to a Ticket as context |
+| Executor | The port that runs Assignments: one Executor Session and one directory per Ticket |
+| Execution environment | Where Executor Sessions and the prepare command run: variables that the Executor and the Sources register, each with a key, a value and a description |
+| Report | The state an Assignment reports to its Ticket |
+| Attention | A question on a Ticket that waits for a person's answer |
+| Disposition | The record of a Trigger being filtered, evaluated or fanned out |
+| Input | Context delivered to a Ticket: fanned-out Triggers, Policy changes, resumes and text |
+| Scope | The work a Mandate allows |
+| Strength | How strong the basis of a Mandate or an Eval is |
 
 | Group | Values |
 | --- | --- |
-| Decision | accept 接单 · stop 停止 · ignore 忽略 · unavailable 未完成 |
-| Strength | explicit 明确 · inferred 推断 |
-| Assignment | pending 待启动 · running 执行中 · ended 已结束 |
-| Report | progress 进展 · waiting 等待 · ready 就绪 · blocked 受阻 · failed 失败 · dropped 无需处理 |
+| Decision | accept · stop · ignore · unavailable |
+| Strength | explicit · inferred |
+| Assignment | pending · running · ended |
+| Report | progress · waiting · ready · blocked · failed · dropped |

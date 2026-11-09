@@ -72,9 +72,9 @@ it('names each sender as the Policy lists it, by its id where the id is readable
     id: 'bob' }),
     view.actor({ source: 'feishu', id: 'ou_bob' }), view.actor({ source: 'feishu', id: 'ou_bot' }, false), view.actor({ source: 'feishu',
       id: '' })])
-    .toEqual([{ source: 'feishu', id: 'OU_ALICE', name: { zh: 'Alice', en: 'Alice' } }, { source: 'github', id: 'alice',
-      name: { zh: 'alice', en: 'alice' } },
-      { source: 'github', id: 'bob', name: { zh: 'bob', en: 'bob' } }, { source: 'feishu', id: 'ou_bob',
+    .toEqual([{ source: 'feishu', id: 'OU_ALICE', name: 'Alice' }, { source: 'github', id: 'alice',
+      name: 'alice' },
+      { source: 'github', id: 'bob', name: 'bob' }, { source: 'feishu', id: 'ou_bob',
         name: feishuKind.policy!.unnamed!.person },
       { source: 'feishu', id: 'ou_bot', name: feishuKind.policy!.unnamed!.bot }, { source: 'feishu', id: '' }])
   expect(view.rule('copy')).toEqual({ id: 'copy', name: 'Copy fixes' })
@@ -95,7 +95,7 @@ it('classifies a Thread by what it is doing, and offers a filtered Trigger of a 
   const rows = ['e1', 'e2', 'e3'].map(id => triggerView(view, store.triggers.get(id)!))
   // A queued Trigger waits for Eval already, and an automated one is not offered.
   expect(rows.map(row => row.actions.requeue)).toEqual([true, false, false])
-  expect(rows[0]!.actor.name).toEqual({ zh: 'Alice', en: 'Alice' })
+  expect(rows[0]!.actor.name).toEqual('Alice')
 })
 
 it('states each Source by the first state that holds', () => {
@@ -221,13 +221,13 @@ it('words each settings save by what it changed from the one before, and nothing
 })
 
 it('names a listed bot as the Policy lists it, and gives a bot\'s Mandate a basis fact of its own', () => {
-  store.saveSettings(SettingsSchema.parse({ policy: { sources: { feishu: { allowed: [], bots: [{ id: 'cli_review', name: '评审机器人' }] } } } }))
+  store.saveSettings(SettingsSchema.parse({ policy: { sources: { feishu: { allowed: [], bots: [{ id: 'cli_review', name: 'review-bot' }] } } } }))
   const sources = new SourceRegistry(() => store.settings())
   sources.register(feishuKind)
   const view = snapshot({ store, sources, links })
-  expect(view.actor({ source: 'feishu', id: 'cli_review' }, false).name).toEqual({ zh: '评审机器人', en: '评审机器人' })
-  expect(basisFacts({ via: 'bot', sender: '评审机器人', addressed: 'mention', observation: { mode: 'auto' } }, view.rule).facts)
-    .toEqual([{ name: 'sender', value: '评审机器人' }, { name: 'bot' }, { name: 'addressed', value: 'mention' }, { name: 'mode', value: 'auto' }])
+  expect(view.actor({ source: 'feishu', id: 'cli_review' }, false).name).toEqual('review-bot')
+  expect(basisFacts({ via: 'bot', sender: 'review-bot', addressed: 'mention', observation: { mode: 'auto' } }, view.rule).facts)
+    .toEqual([{ name: 'sender', value: 'review-bot' }, { name: 'bot' }, { name: 'addressed', value: 'mention' }, { name: 'mode', value: 'auto' }])
 })
 
 it('shows a follow-up that reached a ticket as delivered, the tickets that handed a Trigger back with why, and the Threads a ticket follows for context', () => {

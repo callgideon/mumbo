@@ -2,7 +2,7 @@
 import { cloneElement, createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ReactElement,
   type ReactNode } from 'react'
 import type { ApiResponse } from '../app/api.ts'
-import type { FieldSpec, Localized } from '../sources/kind.ts'
+import type { FieldSpec } from '../sources/kind.ts'
 import { usePoll, type HistoryView, type Settings, type SettingsView, type SourceView } from './api.ts'
 import { Button, DisclosureRow, Icon, InfoTip, Input, SegmentedControl, Switch } from './controls.tsx'
 import { useDraft } from './draft.tsx'
@@ -238,7 +238,7 @@ function RowsField({ field, value, saved, onChange, labels, refreshLabels }: {
   </div>
 }
 export function SourceField({ field, value, saved, fact, onChange, labels, refreshLabels }: {
-  field: FieldSpec; value: unknown; saved: unknown; fact: Localized | string | undefined; onChange: (next: unknown) => void
+  field: FieldSpec; value: unknown; saved: unknown; fact: string | undefined; onChange: (next: unknown) => void
   labels: Record<string, string>
   refreshLabels?: () => Promise<string[]>
 }) {
