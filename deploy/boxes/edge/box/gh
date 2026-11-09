@@ -1,5 +1,8 @@
 #!/bin/sh
-# Placeholder until B8: the gh wrapper (/root/.mumbo/bin/gh in project boxes), which will send gh through the box-local
-# GitHub proxy. The edge reads this file at start and hands it to startScript as boxFiles.gh.
-echo 'mumbo: the gh wrapper is not installed yet' >&2
-exit 1
+# gh in a project box (/root/.mumbo/bin/gh). gh goes through the box-local GitHub proxy, which replaces the placeholder
+# token with the box token; the edge's GitHub forwarder then uses the agent account's token. gh refuses to run without
+# a token, hence the placeholder. The edge reads this file at start and hands it to startScript as boxFiles.gh.
+export GH_TOKEN=mumbo-placeholder
+export HTTPS_PROXY=http://127.0.0.1:8899
+export GH_NO_UPDATE_NOTIFIER=1
+exec /usr/bin/gh "$@"
