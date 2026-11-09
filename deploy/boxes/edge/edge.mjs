@@ -1129,12 +1129,18 @@ export const runtimeFiles = () => ({
 /**
  * `node edge.mjs --check`, run by the Dockerfile: rejects unless this directory holds everything main() loads. It imports
  * every top-level .mjs except tests and e2e scripts, then every module those name in a dynamic import (main() loads its
- * own only after start), and reads every runtimeFiles() entry.
+ * own only after start), and reads every runtimeFiles() entry. A dynamic import whose argument is not a string literal
+ * cannot be checked, so it fails the check.
  * @returns {Promise<string[]>} the modules imported.
  */
 export async function imageCheck() {
   const own = readdirSync(new URL('.', import.meta.url)).filter(f => f.endsWith('.mjs') && !/\.(test|e2e)\.mjs$/.test(f)).map(f => `./${f}`)
-  const dynamic = own.flatMap(m => [...readFileSync(new URL(m, import.meta.url), 'utf8').matchAll(/\bimport\('([^']+)'\)/g)].map(x => x[1]))
+  const dynamic = own.flatMap(m => [...readFileSync(new URL(m, import.meta.url), 'utf8').matchAll(/\bimport\(([^)]*)\)/g)].flatMap(([call, arg]) => {
+    if (m === './edge.mjs' && arg === 'm') return []  // the loop below, which imports what this scan finds
+    const literal = /^\s*(['"`])([^'"`$]+)\1\s*$/.exec(arg)
+    if (!literal) throw new Error(`edge: ${m}: ${call} has no string literal argument, so the image check cannot import it`)
+    return [literal[2]]
+  }))
   const all = [...new Set([...own, ...dynamic])]
   for (const m of all) await import(m)
   for (const u of Object.values(runtimeFiles())) readFileSync(u)

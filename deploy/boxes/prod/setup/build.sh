@@ -16,12 +16,19 @@ cp "$here/setup.sh" ./setup.sh; trap 'rm -f "$fork/packages/setup.sh"' EXIT
 # Tagged by fork commit and the setup files' hash (control.tf computes the same), so a setup change ships alone.
 stag=$sha-$(cat "$here/Dockerfile" "$here/setup.sh" | sha256sum | cut -c1-7)
 docker build -q -f "$here/Dockerfile" -t "e2b-setup:$stag" . >/dev/null && push "e2b-setup:$stag" e2b-setup
-# Node binaries, built from the same commit: orchestrator (static) and envd.
-docker run --rm -v "$fork:/src" -v e2b-gomod:/go/pkg/mod -v e2b-gocache:/root/.cache/go-build golang:1.26 bash -ec "
-  git config --global --add safe.directory /src
-  cd /src/packages/orchestrator && make fetch-busybox >/dev/null && make build-local STATIC=1 COMMIT_SHA=$sha VERSION=mumbo-$sha >/dev/null
-  cd /src/packages/envd && make build BUILD=$sha BUILD_OS=linux BUILD_ARCH=amd64 >/dev/null"
+# Node binaries, built from the same commit: orchestrator (static) and envd. Nodes download them at boot, so ones already
+# uploaded for this commit are kept: a rebuild need not be byte-identical, and a rerun (a setup-only change) must not
+# swap what the next node boots. Delete the S3 key to replace one.
 bucket=mumbo-boxes-templates-$acct
-aws s3 cp --quiet orchestrator/bin/orchestrator "s3://$bucket/artifacts/e2b/$sha/orchestrator"
-aws s3 cp --quiet envd/bin/envd "s3://$bucket/artifacts/e2b/$sha/envd"
+have() { aws s3api head-object --bucket "$bucket" --key "artifacts/e2b/$sha/$1" >/dev/null 2>&1; }
+if have orchestrator && have envd; then
+  echo "  node binaries for $sha already in s3://$bucket; kept"
+else
+  docker run --rm -v "$fork:/src" -v e2b-gomod:/go/pkg/mod -v e2b-gocache:/root/.cache/go-build golang:1.26 bash -ec "
+    git config --global --add safe.directory /src
+    cd /src/packages/orchestrator && make fetch-busybox >/dev/null && make build-local STATIC=1 COMMIT_SHA=$sha VERSION=mumbo-$sha >/dev/null
+    cd /src/packages/envd && make build BUILD=$sha BUILD_OS=linux BUILD_ARCH=amd64 >/dev/null"
+  have orchestrator || aws s3 cp --quiet orchestrator/bin/orchestrator "s3://$bucket/artifacts/e2b/$sha/orchestrator"
+  have envd || aws s3 cp --quiet envd/bin/envd "s3://$bucket/artifacts/e2b/$sha/envd"
+fi
 echo "$sha"

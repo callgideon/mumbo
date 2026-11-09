@@ -956,21 +956,24 @@ test('the image check (node edge.mjs --check) fails without a module, a dynamica
   const { join } = await import('node:path')
   const { fileURLToPath } = await import('node:url')
   const src = fileURLToPath(new URL('.', import.meta.url))
-  const check = (gone) => {
+  const check = (gone, extra) => {
     const dir = mkdtempSync(join(tmpdir(), 'edge-image-'))
     try {
       cpSync(src, dir, { recursive: true, filter: (f) => !f.includes('node_modules') })
       symlinkSync(join(src, 'node_modules'), join(dir, 'node_modules'))
       writeFileSync(join(dir, 'auth-ui/supabase.js'), '')  // the Dockerfile downloads it
       if (gone) rmSync(join(dir, gone))
+      if (extra) writeFileSync(join(dir, 'extra.mjs'), extra)
       return spawnSync(process.execPath, ['edge.mjs', '--check'], { cwd: dir, encoding: 'utf8' })
     } finally { rmSync(dir, { recursive: true, force: true }) }
   }
   assert.equal(check().status, 0)
-  // capacity.mjs: imported by edge.mjs; halt.mjs: only by main(), dynamically; box/gh: read by main().
-  for (const [gone, error] of [['capacity.mjs', /ERR_MODULE_NOT_FOUND/], ['halt.mjs', /ERR_MODULE_NOT_FOUND/], ['box/gh', /ENOENT.*box\/gh/]]) {
-    const r = check(gone)
-    assert.equal(r.status, 1, gone)
-    assert.match(r.stderr, error, gone)
+  // capacity.mjs: imported by edge.mjs; halt.mjs: only by main(), dynamically; box/gh: read by main(); extra.mjs: a
+  // double-quoted dynamic import of a missing module, and one that names no literal.
+  for (const [gone, extra, error] of [['capacity.mjs', '', /ERR_MODULE_NOT_FOUND/], ['halt.mjs', '', /ERR_MODULE_NOT_FOUND/], ['box/gh', '', /ENOENT.*box\/gh/],
+    ['', 'export const f = () => import("./gone.mjs")', /Cannot find module .*gone\.mjs/], ['', 'export const f = (m) => import(m)', /extra\.mjs: import\(m\) has no string literal/]]) {
+    const r = check(gone, extra)
+    assert.equal(r.status, 1, gone || extra)
+    assert.match(r.stderr, error, gone || extra)
   }
 })

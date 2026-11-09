@@ -2,6 +2,18 @@
 # Unencrypted on purpose: CloudWatch cannot publish to a topic under the aws/sns key, and alarm text holds no secret.
 resource "aws_sns_topic" "alarms" { name = "${local.name}-alarms" }
 
+variable "ops_alert_email" {
+  description = "Address that gets every alarm and the edge-deploy-failed notice by email; empty for none. AWS mails a confirmation link once, which must be clicked."
+  type        = string
+  default     = ""
+}
+resource "aws_sns_topic_subscription" "ops_email" {
+  count     = var.ops_alert_email == "" ? 0 : 1
+  topic_arn = aws_sns_topic.alarms.arn
+  protocol  = "email"
+  endpoint  = var.ops_alert_email
+}
+
 # Log-derived signals: the edge logs one JSON line per box event; the api logs node status changes.
 locals {
   log_metrics = {
@@ -94,6 +106,11 @@ resource "aws_cloudwatch_event_rule" "edge_deploy_failed" {
 resource "aws_cloudwatch_event_target" "edge_deploy_failed" {
   rule = aws_cloudwatch_event_rule.edge_deploy_failed.name
   arn  = aws_sns_topic.alarms.arn
+  # One plain line instead of the raw event JSON.
+  input_transformer {
+    input_paths    = { time = "$.time", deployment = "$.detail.deploymentId", reason = "$.detail.reason" }
+    input_template = "\"mumbo-boxes edge deployment <deployment> failed at <time>: <reason>. ECS rolls back to the previous task definition. Runbook: deploy/boxes/RUNBOOK.md#edge-deploy-failed\""
+  }
 }
 # The default topic policy (this account, which covers the alarms) plus EventBridge for the rule above.
 resource "aws_sns_topic_policy" "alarms" {

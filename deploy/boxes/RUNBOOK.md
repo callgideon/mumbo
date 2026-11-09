@@ -3,6 +3,11 @@
 One section per alarm in `prod/ops.tf` (alarm name `mumbo-boxes-<section>`), then routine operations. Commands run from `deploy/boxes/prod` with AWS credentials for account 641134885443. Logs: CloudWatch groups `/mumbo-boxes/{edge,api,client-proxy,setup}`, and `/mumbo-boxes/nodes` with streams `<instance>/orchestrator`, `<instance>/lifecycle` (drain) and `<instance>/boot`; node memory and disk metrics in namespace `mumbo/boxes/nodes`. A new node's orchestrator restarts 3–5 times at first boot (root cgroup race) before it serves; that is expected.
 
 ## Alarms
+Every alarm and the `edge-deploy-failed` notice go to the SNS topic `mumbo-boxes-alarms`. `ops_alert_email` in `prod/terraform.tfvars` (the founder, `hi@mumbo.si`) subscribes one address by email. After the apply that adds or changes it, AWS mails that address a confirmation link, which must be clicked once; until then nothing is delivered. Check:
+```sh
+aws sns list-subscriptions-by-topic --topic-arn "$(terraform -chdir=deploy/boxes/prod output -raw alarm_topic)" --query 'Subscriptions[].[Protocol,Endpoint,SubscriptionArn]' --output text
+```
+`PendingConfirmation` in the last column means the link has not been clicked.
 
 ### edge-backup-failed
 A box backup to S3 failed; the sweep retries in 5 minutes. Find the box with `aws logs filter-log-events --log-group-name /mumbo-boxes/edge --filter-pattern '{ $.msg = "backup failed" }'`. Repeated failures for one box usually mean a full disk in the box or a stopped box; repeated failures for every box mean the edge role lost S3 access.
@@ -14,7 +19,7 @@ An idle box could not be paused. E2B's own timeout pauses it 15 minutes later re
 Unhandled edge errors (one log line each, with path and user). Read the lines; a burst after a deploy means roll back `edge_tag` in `terraform.tfvars` and apply.
 
 ### edge-deploy-failed
-Not a CloudWatch alarm: the EventBridge rule `mumbo-boxes-edge-deploy-failed` sends ECS's `SERVICE_DEPLOYMENT_FAILED` event for the edge service to the alarm topic as raw event JSON (`detail.reason` names the cause). The deployment circuit breaker stopped the rollout and rolls the service back to the previous task definition, so the edge keeps serving the old image while `edge_tag` in `prod/terraform.tfvars` names the failed one. Handle it as in "Ship a new edge", step 6.
+Not a CloudWatch alarm: the EventBridge rule `mumbo-boxes-edge-deploy-failed` sends ECS's `SERVICE_DEPLOYMENT_FAILED` event for the edge service to the alarm topic as one line of text (`mumbo-boxes edge deployment <id> failed at <time>: <reason>`), not alarm JSON. The deployment circuit breaker stopped the rollout and rolls the service back to the previous task definition, so the edge keeps serving the old image while `edge_tag` in `prod/terraform.tfvars` names the failed one. Handle it as in "Ship a new edge", step 6.
 
 ### edge-dropped-create
 A replica died while restoring a new box; the box was killed and the next visit restores from the backup again. One is harmless. Several mean edge tasks are being killed mid-request: check `tasks-edge`.
@@ -167,21 +172,28 @@ Run from the repository root. The image is built from `git archive` of the commi
 4. Wait for the rollout. Define `edge_rollout` once per shell (bash or zsh):
    ```sh
    edge_rollout() {
-     td=$(aws ecs describe-task-definition --task-definition mumbo-boxes-edge --query taskDefinition.taskDefinitionArn --output text) || return 1
+     td=$(aws ecs describe-task-definition --task-definition mumbo-boxes-edge --query taskDefinition.taskDefinitionArn --output text) \
+       || { echo "edge_rollout: describe-task-definition failed"; return 2; }
      echo "edge_rollout: waiting for $td"
-     while sleep 15; do
+     for i in $(seq 120); do
+       sleep 15
        d=$(aws ecs describe-services --cluster mumbo-boxes-e2b --services edge \
-         --query 'services[0].deployments[].[status,taskDefinition,rolloutState,runningCount]' --output text) || return 1
+         --query 'services[0].deployments[].[status,taskDefinition,rolloutState,runningCount]' --output text) \
+         || { echo "edge_rollout: describe-services failed"; return 2; }
        echo "$d"
        echo "$d" | awk -v td="$td" '$3 == "FAILED" || ($1 == "PRIMARY" && $3 == "COMPLETED" && $2 != td) {bad = 1} END {exit !bad}' \
          && { echo "edge_rollout: ROLLED BACK, the edge is not on $td"; return 1; }
        echo "$d" | awk -v td="$td" '{n++} $1 == "PRIMARY" && $2 == td && $3 == "COMPLETED" {ok++} END {exit !(n == 1 && ok == 1)}' \
          && { echo "edge_rollout: done on $td"; return 0; }
      done
+     echo "edge_rollout: TIMED OUT after 30 minutes, the edge is not on $td"; return 2
    }
    edge_rollout
    ```
-   `td` is the newest active revision of family `mumbo-boxes-edge`, the one the apply registered. Each line printed is a deployment: status, task definition, rollout state, running tasks. It returns 0 when exactly one deployment is left, `PRIMARY` and `COMPLETED` on `td`, and 1 on a rollback: a `FAILED` deployment, or a `PRIMARY` deployment `COMPLETED` on an older revision. Stop it with Ctrl-C if it neither completes nor fails within 30 minutes, and read the events of step 6.
+   `td` is the newest active revision of family `mumbo-boxes-edge`, the one the apply registered. Each line printed is a deployment: status, task definition, rollout state, running tasks. It polls every 15 seconds, at most 120 times, and returns:
+   - 0: exactly one deployment is left, `PRIMARY` and `COMPLETED` on `td`. The rollout is done.
+   - 1: a rollback. A deployment is `FAILED`, or the `PRIMARY` deployment is `COMPLETED` on an older revision. Go to step 6.
+   - 2: no verdict. Either 30 minutes passed with the rollout still in progress, or an `aws` call failed. Read the events of step 6, then run `edge_rollout` again.
 5. Only after it returns 0, commit `terraform.tfvars` (`deploy(boxes): ship edge <C>`).
 6. Rollback (`edge_rollout` returned 1, or the `edge-deploy-failed` notification): the circuit breaker put the previous revision back. Read why; a task that crashes at start logs its error as its last lines:
    ```sh
@@ -198,19 +210,19 @@ Run from the repository root. The image is built from `git archive` of the commi
 Pending after the edge revision that reads `SUPABASE_ANON_KEY` as a plain value is steady (deployment completed, no rollback): delete the `prod/supabase-anon-key` entry from `aws_iam_role_policy.exec_edge` in `prod/edge.tf` and apply. Until then the exec role keeps that grant, so a circuit-breaker rollback to an older edge task definition, which reads the key from SSM, can still start.
 
 ### Rebuild the box template
-`node deploy/boxes/edge/template.mjs <mumbo web image>` with `E2B_API_URL`, `E2B_SANDBOX_URL`, `E2B_API_KEY` (team key from the `mumbo-boxes/e2b` secret) and `ECR_PASSWORD`. The script ends with a smoke box whose line reads `app clean 2 <MiB free on />`; it exits 1 when the free space is below `MIN_AVAIL_MB` (default 9216, 9 GiB). The new build is already the template's by then, so on a failure fix the cause (usually `box_step_disk`, "Changing E2B limits") and rebuild before boxes are created from it. From outside the VPC, tunnel through a node with SSM port forwarding to `api.boxes.internal:3000` and `sandbox.boxes.internal:3002`; the internal NLB admits :3002 only from the edge, so add a temporary rule for the node security group and remove it afterwards. A new template reaches a user when their box is next created.
+`node deploy/boxes/edge/template.mjs <mumbo web image>` with `E2B_API_URL`, `E2B_SANDBOX_URL`, `E2B_API_KEY` (team key from the `mumbo-boxes/e2b` secret) and `ECR_PASSWORD`. The script ends with a smoke box whose line reads `app clean 2 <MiB free on />`; it exits 1 when the free space is below `MIN_AVAIL_MB` (default 9216, 9 GiB). The default assumes the team's `disk_mb` from `prod/control.tf` (12288), which the setup task writes: on a team whose setup task has not run since `box_step_disk` was added (`disk_mb` 10240), a mumbo-box build leaves about 8977 MiB, below it, so run "Changing E2B limits" steps 1 to 3 first, or set `MIN_AVAIL_MB=8192` for that build. The new build is already the template's by then, so on a failure fix the cause (usually `box_step_disk`, "Changing E2B limits") and rebuild before boxes are created from it. From outside the VPC, tunnel through a node with SSM port forwarding to `api.boxes.internal:3000` and `sandbox.boxes.internal:3002`; the internal NLB admits :3002 only from the edge, so add a temporary rule for the node security group and remove it afterwards. A new template reaches a user when their box is next created.
 
 ### Changing E2B limits (box disk, RAM)
-`box_ram`, `box_free_disk` and `box_step_disk` in `prod/control.tf` reach E2B only through the setup task, which assigns them to the team limits (`setup/setup.sh`: `max_ram_mb`, `disk_mb = box_free_disk + box_step_disk`, `default_free_disk_size_mb = box_free_disk`). They reach a box only through a template built afterwards: a box keeps the disk of the build it was created from. Run from the repository root, with the tunnels and variables of "Rebuild the box template" for step 4.
+`box_ram`, `box_free_disk` and `box_step_disk` in `prod/control.tf` reach E2B only through the setup task, which writes them into the team limits (`setup/setup.sh`): it raises `max_ram_mb` to `box_ram` (never lowers it) and assigns `disk_mb = box_free_disk + box_step_disk` and `default_free_disk_size_mb = box_free_disk`. They reach a box only through a template built afterwards: a box keeps the disk of the build it was created from. Run from the repository root, with the tunnels and variables of "Rebuild the box template" for step 4.
 1. The setup image is tagged `<e2b_sha>-<hash of setup/Dockerfile and setup/setup.sh>`. Check whether that image exists:
    ```sh
    SHA=$(sed -n 's/^e2b_sha *= *"\([0-9a-f]*\)".*/\1/p' deploy/boxes/prod/terraform.tfvars)
    TAG=$SHA-$(cat deploy/boxes/prod/setup/Dockerfile deploy/boxes/prod/setup/setup.sh | sha256sum | cut -c1-7)
    aws ecr describe-images --repository-name mumbo-boxes/e2b-setup --image-ids imageTag=$TAG >/dev/null 2>&1 && echo "have $TAG" || echo "build $TAG"
    ```
-   On `build`, check out `$SHA` in the fork and run `deploy/boxes/prod/setup/build.sh <fork checkout>`; it must print `$SHA`. It also rebuilds the api, client-proxy and node binaries of the same commit: the images report `already pushed`, and the node binaries in S3 are replaced by a build of the same commit, which nodes read only at boot.
+   On `build`, check out `$SHA` in the fork and run `deploy/boxes/prod/setup/build.sh <fork checkout>`; it must print `$SHA`. It also rebuilds the api and client-proxy images, which report `already pushed` (ECR tags are immutable). It keeps the node binaries already in S3 for `$SHA` (`node binaries for $SHA already in s3://…; kept`), so the binaries the next node boots do not change.
 2. `terraform -chdir=deploy/boxes/prod apply -target=aws_ecs_task_definition.setup`. The plan must replace only that task definition (its environment, and its image when setup.sh changed).
-3. `deploy/boxes/prod/setup/run.sh`. It must exit 0; its log ends with one `setup: team|<team id>|disk_mb|…|default_free_disk_size_mb|…|max_ram_mb|…` line per team, showing the values from `control.tf`, then `setup: done`.
+3. `deploy/boxes/prod/setup/run.sh`. It must exit 0; its log ends with one `setup: team|<team id>|disk_mb|…|default_free_disk_size_mb|…|max_ram_mb|…` line per team, then `setup: done`. `disk_mb` and `default_free_disk_size_mb` must equal the values from `control.tf` (12288 and 10240 today), and `max_ram_mb` must be at least `box_ram`.
 4. Rebuild every template. List them with the size each was built with:
    ```sh
    curl -s -H "X-API-Key: $E2B_API_KEY" "$E2B_API_URL/templates" | jq -r '.[] | [.aliases[0], .memoryMB, .cpuCount, .diskSizeMB] | @tsv'
@@ -218,7 +230,7 @@ Pending after the edge revision that reads `SUPABASE_ANON_KEY` as a plain value 
    For each, `node deploy/boxes/edge/template.mjs <image> <alias> <memoryMB> <cpuCount>`, with the web image the template was last built from (HANDOFF-impl.md names it; a limits change is no occasion to ship a new web image). Each must pass its smoke check. Listed again, each template's `diskSizeMB` has grown by the `disk_mb` change.
 5. Move existing boxes to the new builds ("Moving a box to a new template build").
 
-**How `box_step_disk` was sized.** E2B gives a build `disk_mb` of free space after its own provisioning and before the template's steps (`template.mjs` `runCmd`), and the steps' installs come out of it. They were measured on 2026-11-09 by running them in `node:24-bookworm` (the web image's base, `deploy/Dockerfile`) after the web image's and E2B's provisioning packages, comparing `du -sxm /` before and after: mumbo-box (desktop packages and Chromium) 1007 MiB, mumbo-project (git, gh) 41 MiB, mumbo-child no steps. `box_step_disk = 2048` adds about 1 GiB of margin for package growth, so a mumbo-box build leaves about 11 GiB free. After any build the real figure is `disk_mb` minus the free MiB of the smoke line; raise `box_step_disk` when it nears 2048 or when `template.mjs` gains steps.
+**How `box_step_disk` was sized.** E2B gives a build `disk_mb` of free space after its own provisioning and before the template's steps (`template.mjs` `runCmd`), and the steps' installs come out of it. They were measured on 2026-11-09 by running them in `node:24-bookworm` (the web image's base, `deploy/Dockerfile`) after the web image's and E2B's provisioning packages, comparing `du -sxm /` before and after: mumbo-box (desktop packages and Chromium) 1007 MiB, mumbo-project (git, gh) 41 MiB, mumbo-child no steps. E2B sizes `disk_mb` with no root reserve and then reserves 256 MiB for root (its `build-reserved-disk-space-mb` flag default) before the steps run, and `df` does not count the reserve as available. A mumbo-box build therefore leaves 12288 − 256 − 1007 = 11025 MiB (about 10.8 GiB) free; `box_step_disk = 2048` keeps about 0.75 GiB of margin for package growth. After any build the steps' real use is `disk_mb` − 256 − the free MiB of the smoke line; raise `box_step_disk` when that plus 256 nears 2048, or when `template.mjs` gains steps.
 
 ### Moving a box to a new template build
 A box keeps its rootfs, so it keeps the disk and the software of the build it was created from. List boxes and their disk sizes (with the variables of "Rebuild the box template"; one page holds 100):
