@@ -45,6 +45,9 @@ const sent = await relay.message(user, id, 'hello coordinator').catch(e => ({ er
 check('relay: message delivered into a coordinator session', sent.delivered === true && /^session-/.test(sent.coordinatorSession ?? ''), JSON.stringify(sent))
 const again = await relay.message(user, id, 'second message').catch(e => ({ error: e.message }))
 check('relay: second message reuses the same session', again.coordinatorSession === sent.coordinatorSession, JSON.stringify(again))
+const pbox = (await store.listBoxes()).find(b => b.email === `project:${id}`)
+const role = (await (await e2b.Sandbox.connect(pbox.id)).commands.run("head -1 /root/.mumbo/agents/AGENTS.md; tr '\\0' '\\n' < /proc/$(pgrep -f 'apps/cli/src/bin.ts' | head -1)/environ | grep DSH_AGENTS_HOME")).stdout
+check('project box runs dsh with the coordinator role', role.includes('# Project coordinator') && role.includes('DSH_AGENTS_HOME=/root/.mumbo/agents'), JSON.stringify(role))
 const stranger = await fetch(`${base}/p/${id}/`, { headers: { ...H, 'x-forwarded-email': 'other@mumbo.si' }, redirect: 'manual' })
 check('non-member refused', stranger.status === 404, String(stranger.status))
 const rec = (await store.listBoxes()).find(b => b.email === `project:${id}`)

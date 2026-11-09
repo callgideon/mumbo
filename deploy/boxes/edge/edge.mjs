@@ -56,6 +56,34 @@ export function budget(store, limit) {
  * served under /p/<id>/ with its own masked host, so its dsh cookie name differs from the user's box, and no desktop:
  * it never holds anyone's signed-in browser.
  */
+/** The standing instructions for the box's agents (dsh agent-instructions, user-global chain). Edge-owned and
+ *  rewritten on every start; the user's own instructions belong in $DSH_HOME/AGENTS.md. Founder decisions: account
+ *  reads are free and writes ask; projects are shared and coordinated in their own box (ASSISTANT.md). */
+export function roleInstructions(cfg, principal) {
+  const project = principal.startsWith('project:') ? principal.slice('project:'.length) : undefined
+  if (project) return [
+    '# Project coordinator',
+    '',
+    `You coordinate the shared mumbo project ${project}. Its members reach you at https://${cfg.publicHost}/p/${project}/ and through their own assistants; a message relayed by an assistant starts with [from <email>].`,
+    '',
+    '- Keep the project in /root/projects. Run installs, builds, servers and tests in sandboxes (sandbox_* tools), not in this box.',
+    '- Plan the work, report progress to the member who asked, and ask them when a decision or an account is needed.',
+    '- You have no browser and nobody\'s accounts. When something needs an account, ask the member to have their assistant do it.',
+  ].join('\n')
+  return [
+    '# Personal assistant',
+    '',
+    `You are the personal assistant of ${principal}, working on their own computer in the cloud (this box). Their files are in /root/projects.`,
+    '',
+    '- Browser: your browser tools drive the user\'s own Chromium, where they are signed in to their accounts. Reading pages, inboxes and feeds is fine.',
+    '- Before anything that writes with one of their accounts (posting, sending, replying, buying, booking, deleting, changing settings), say exactly what you will do and wait for the user to agree, unless they have allowed that kind of action on that site; afterwards, say what you did.',
+    `- Never type passwords or one-time codes. If a site needs a sign-in, ask the user to sign in on the desktop at https://${cfg.publicHost}/desktop/.`,
+    '- Projects: software and other team work lives in shared projects, each with its own coordinator. Use project_list, project_create, project_add_member and project_message (to give a project\'s coordinator work or ask for status). Do not run project code in this box.',
+    '- Sandboxes (sandbox_* tools) are for quick isolated experiments.',
+    '- For anything recurring or later, use the schedule tools; the box runs them while the user is away.',
+  ].join('\n')
+}
+
 export function boxSite(cfg, principal) {
   const id = principal.startsWith('project:') ? principal.slice('project:'.length) : undefined
   return id === undefined
@@ -64,14 +92,18 @@ export function boxSite(cfg, principal) {
 }
 
 // ---- inside a box. It never sees a server secret: its DeepSeek key is its own box token, valid only via LLM_HOST.
-export function startScript(cfg, token, site = boxSite(cfg, '')) {
+export function startScript(cfg, token, site = boxSite(cfg, ''), role = '') {
   const llm = `https://${cfg.llmHost}`
   return `#!/bin/sh
 # Start dsh web for this box's user. Re-runnable: the router calls it again when dsh is found dead.
 set -eu
 pkill -f 'apps/cli/src/bin.ts' 2>/dev/null || true
 ip=$(hostname -I | cut -d' ' -f1)
-mkdir -p /root/projects /root/.dsh /root/.mumbo
+mkdir -p /root/projects /root/.dsh /root/.mumbo/agents
+# This box's role (edge roleInstructions), read by dsh as the shared agents root's AGENTS.md.
+cat > /root/.mumbo/agents/AGENTS.md <<'MD'
+${role}
+MD
 # Child sandboxes over MCP on the model host, authenticated by this box's token (edge sandboxes.mjs).
 cat > /root/.mumbo/sandboxes.overlay.yml <<'YML'
 - insert:
@@ -103,7 +135,7 @@ if id browser >/dev/null 2>&1; then
   pgrep -f websockify >/dev/null || nohup websockify --web /usr/share/novnc "$ip:6080" 127.0.0.1:5900 >/tmp/websockify.log 2>&1 &
 fi
 ` : ''}cd /src
-HOME=/root DSH_HOME=/root/.dsh DSH_TELEMETRY_DISABLED=1 \\
+HOME=/root DSH_HOME=/root/.dsh DSH_AGENTS_HOME=/root/.mumbo/agents DSH_TELEMETRY_DISABLED=1 \\
 DEEPSEEK_BASE_URL=${llm}/anthropic DEEPSEEK_SEARCH_BASE_URL=${llm} DEEPSEEK_API_KEY=${token} \\
 nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\
   --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml \\
@@ -171,7 +203,7 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, log = 
     // Recorded before the restore: other replicas then neither adopt nor back up a box whose data is half restored.
     await store.putBox(box.sandboxId, { email, creating: Date.now(), active: Date.now(), extended: Date.now(), backedUp: Date.now(), paused: false })
     try {
-      await box.files.write('/root/.mumbo/start.sh', startScript(cfg, signBox(edgeKey, email, box.sandboxId), boxSite(cfg, email)))
+      await box.files.write('/root/.mumbo/start.sh', startScript(cfg, signBox(edgeKey, email, box.sandboxId), boxSite(cfg, email), roleInstructions(cfg, email)))
       const restoreUrl = await presignGet(`${userPrefix(email)}/latest.tar.gz`)
       if (restoreUrl) {
         const ok = await run(box, restoreCommand(restoreUrl), 660_000).then(() => true, () => false)

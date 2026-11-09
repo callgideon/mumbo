@@ -514,3 +514,20 @@ test('project relay: signs in once, creates the coordinator session once, re-sig
   await assert.rejects(relay.message('b@x.com', id, 'hi'), (e) => e.status === 404)
   await assert.rejects(relay.message('a@x.com', id, '  '), (e) => e.status === 400)
 })
+
+test('role instructions: assistant with write consent and desktop sign-in; coordinator without accounts', async () => {
+  const { roleInstructions } = await import('./edge.mjs')
+  const c = { publicHost: 'boxes.x' }
+  const a = roleInstructions(c, 'a@x.com')
+  assert.match(a, /personal assistant of a@x\.com/)
+  assert.match(a, /wait for the user to agree/)
+  assert.match(a, /https:\/\/boxes\.x\/desktop\//)
+  assert.match(a, /project_message/)
+  const p = roleInstructions(c, 'project:0123456789abcdef')
+  assert.match(p, /coordinate the shared mumbo project 0123456789abcdef/)
+  assert.match(p, /\[from <email>\]/)
+  assert.match(p, /no browser and nobody's accounts/)
+  const script = startScript(c, 'T', undefined, a)
+  assert.match(script, /DSH_AGENTS_HOME=\/root\/\.mumbo\/agents/)
+  assert.ok(script.includes(`<<'MD'\n${a}\nMD`))
+})
