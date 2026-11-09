@@ -76,7 +76,9 @@ test('ownersOf and projectsOwnedBy follow the owner field, not membership', asyn
   const p = projects({ store, admitted: () => true, log: () => {} })
   const { id: mine } = await p.create('a@x.com', 'Mine')
   const { id: theirs } = await p.create('b@x.com', 'Theirs')
-  await p.addMember('b@x.com', theirs, 'a@x.com')
+  // Seeded directly: addMember refuses non-owners (member gate), but a stored member must still not count as owner.
+  await store.putDoc(`project:${theirs}`, { ...(await p.get(theirs)), members: ['b@x.com', 'a@x.com'] })
+  await store.addToSet('projects:a@x.com', theirs)
   assert.deepEqual(await ownersOf(store, mine), ['a@x.com'])
   assert.deepEqual(await ownersOf(store, theirs), ['b@x.com'])
   assert.deepEqual(await ownersOf(store, '0123456789abcdef'), [])

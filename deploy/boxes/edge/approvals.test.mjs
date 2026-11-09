@@ -47,7 +47,8 @@ function fakeGithub() {
   const json = (body, status = 200) => new Response(status === 204 ? null : JSON.stringify(body), { status })
   const page = (list, q) => { const p = Number(q.get('page') ?? 1), n = Number(q.get('per_page') ?? 30); return json(list.slice((p - 1) * n, p * n)) }
   gh.fetchImpl = async (url, init = {}) => {
-    const { pathname: path, searchParams: q } = new URL(url)
+    const { pathname, searchParams: q } = new URL(url)
+    const path = pathname.toLowerCase()  // GitHub compares repository names case-insensitively
     const method = init.method ?? 'GET'
     gh.calls.push({ method, path, auth: init.headers.authorization, body: init.body === undefined ? undefined : JSON.parse(init.body) })
     if (gh.down) return json({ message: 'unavailable' }, 502)
@@ -80,7 +81,9 @@ async function setup({ approvers = [FOUNDER] } = {}) {
   const store = memoryStore()
   const p = projects({ store, admitted: () => true, log: () => {} })
   const { id: project } = await p.create(FOUNDER, 'App')
-  await p.addMember(FOUNDER, project, 'member@x.com')
+  // Seeded directly: addMember refuses non-owners (member gate), but a stored member must still not count as owner.
+  await store.putDoc(`project:${project}`, { ...(await p.get(project)), members: [FOUNDER, 'member@x.com'] })
+  await store.addToSet('projects:member@x.com', project)
   await addRepo(store, project, REPO, { by: FOUNDER, approvers: [FOUNDER] })
   const notes = [], audits = [], clock = { t: NOW }
   const svc = approvalsService({
@@ -325,6 +328,24 @@ test('an item stays with the project that first listed it, even when stored data
   assert.deepEqual(await svc.grant('mallory@x.com', ID, SHA), { id: ID, merged: false, sha: SHA, reason: 'not_owner' })
   assert.equal(gh.calls.filter(c => c.method === 'PUT').length, 0)
   assert.equal(errors.mock.callCount(), 2)  // one "not rebound" line per poll
+})
+
+test('ids use the lowercased repository, and a project never takes or deletes another project\'s item', async (t) => {
+  const { store, svc, project } = await setup({ approvers: [FOUNDER, 'mallory@x.com'] })
+  const p = projects({ store, admitted: () => true, log: () => {} })
+  const { id: mallory } = await p.create('mallory@x.com', 'Same repo, other case')
+  const { id: third } = await p.create('mallory@x.com', 'Stale entry')
+  // Stored data addRepo now refuses: the same repository in another letter case, and another project's item in an open set.
+  await store.putDoc(`project:${mallory}`, { ...(await p.get(mallory)), repos: ['ACME/App'] })
+  await store.putDoc(`project:${third}`, { ...(await p.get(third)), repos: [] })
+  for (const id of [mallory, third]) await store.addToSet('projects:with-repos', id)
+  await store.addToSet(`approvals:open:${third}`, ID)
+  t.mock.method(console, 'error', () => {})
+  await svc.poll()
+  assert.deepEqual((await svc.list(FOUNDER)).map(i => [i.id, i.project]), [[ID, project]])
+  assert.deepEqual(await svc.list('mallory@x.com'), [])
+  assert.deepEqual(await store.setMembers(`approvals:open:${third}`), [])
+  assert.equal((await svc.grant('mallory@x.com', 'ACME/App#1', SHA)).reason, 'not_found')
 })
 
 test('only an approver who owns the project merges: an owner who is not an approver, and an approver who is not the owner, get not_owner', async () => {

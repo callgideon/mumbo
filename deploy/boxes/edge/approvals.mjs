@@ -16,9 +16,9 @@ const MERGE_PERMISSIONS = { contents: 'write', pull_requests: 'write' }
 /**
  * One pull request awaiting the founder.
  * @typedef {object} Approval
- * @property {string} id - `<owner>/<repo>#<n>`.
+ * @property {string} id - `<owner>/<repo>#<n>`, lowercased.
  * @property {string} project - project id.
- * @property {string} repo - `owner/name`.
+ * @property {string} repo - `owner/name`, lowercased.
  * @property {number} number
  * @property {string} title
  * @property {string} url
@@ -95,8 +95,9 @@ export function approvalsService({ store, github, notify, audit, fetchImpl, now,
     return { checks, green: requiredChecks.every(name => checks[name] === 'success') }
   }
 
+  /** Removes `id` from the project's open set, and its doc only when the doc belongs to that project. */
   async function drop(project, id) {
-    await store.deleteDoc(key(id))
+    if ((await store.getDoc(key(id)))?.project === project) await store.deleteDoc(key(id))
     await store.removeFromSet(openSet(project), id)
   }
 
@@ -186,7 +187,8 @@ export function approvalsService({ store, github, notify, audit, fetchImpl, now,
       for (const project of await projectsWithRepos(store)) {
         const keep = new Set()
         const unread = []
-        for (const repo of await getRepos(store, project)) {
+        // Ids use the lowercased name, as GitHub compares names, so one repository is one item in any letter case.
+        for (const repo of (await getRepos(store, project)).map(r => r.toLowerCase())) {
           try {
             for (const pr of (await pages(`/repos/${repo}/pulls?state=open`)).filter(isCandidate)) {
               keep.add(`${repo}#${pr.number}`)
