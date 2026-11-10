@@ -6,7 +6,10 @@
 # TMPDIR stays root-only; shell activity records go to /run/dsh-shell (root, 0711) and command spill files to a directory
 # agent can read. The MCP servers the person adds run as `mcpserver` (the server identity) in its home, with only HOME,
 # USER, PATH, and LANG besides their own entries; its groups are empty while the box's mcpServerWorkspace switch is
-# `none`, the default, and gain the workspace group the box sets up for `read` or `readwrite`.
+# `none`, the default, and for `read` or `readwrite` hold one dedicated workspace group that only the workspace's
+# directories carry, never agent's 1001, which owns every root:agent 2750 directory, or shared. The model roots give
+# other users no permission bits. All the servers share the one uid and /tmp with agent, so a server whose tools write
+# files or run commands lets the model run code as mcpserver and read every server's credentials.
 - id: subprocess
   config:
     shellActivityDirectory: /run/dsh-shell
