@@ -38,13 +38,13 @@ function scopeOf(meta: Record<string, unknown>): Scope | undefined {
 export const githubKind: SourceKind<GithubConfig> = {
   kind: SOURCE,
   title: 'GitHub',
-  description: 'The agent\'s GitHub accounts; receives notifications to it in the repository, discussion on subscribed Issues and PRs, CI changes, and PR merge or close.',
+  description: 'The agent\'s GitHub accounts; receives what addresses it in the repository, discussion on subscribed Issues and PRs, CI changes, and PR merge or close.',
   schema: GithubConfigSchema,
   fields: [
     { key: 'repository', type: 'text', pattern: '[A-Za-z0-9_.\\-]+/[A-Za-z0-9_.\\-]+', label: 'Repository',
-      hint: 'Written owner/name. This Source receives the repository\'s notifications and discussion; saving checks that the agent account can push to it, then restarts dsh-superagent.' },
+      hint: 'Written owner/name. This Source receives the repository\'s discussion; saving checks the agent account\'s access to it, then restarts dsh-superagent.' },
     { key: 'cli', type: 'text', label: 'Agent GitHub CLI',
-      hint: 'A command name or absolute path, usually a gh wrapper signed in to the agent account through GH_CONFIG_DIR. The agent acts as the account it is signed in to, and the Executor calls it as gh. Saving checks that this account can push to the repository, then restarts dsh-superagent.' },
+      hint: 'A command name or absolute path, usually a gh wrapper signed in to the agent account through GH_CONFIG_DIR, or, when the plugin configuration sets githubApp, a gh whose requests act as that App\'s bot. The agent acts as this account, and the Executor calls it as gh. Saving checks this account\'s access to the repository, then restarts dsh-superagent.' },
     { key: 'pollSeconds', type: 'number', advanced: true, min: 60, max: 3600, label: 'Polling interval / seconds', hint: 'A longer interval requested by GitHub wins.' },
     { key: 'failuresBeforeError', type: 'number', advanced: true, min: 1, max: 20, label: 'Failed polls before reporting an error', hint: 'A single network interruption is retried on the next poll and need not be reported.' },
     { key: 'observeIssues', type: 'switch', label: 'Receive new Issues in the repository',
@@ -92,7 +92,7 @@ export const githubKind: SourceKind<GithubConfig> = {
   environment: {
     variables: [
       { key: 'DSH_SUPERAGENT_GITHUB_REPOSITORY', description: 'The repository this Source watches, as owner/name. A PR the agent opens here from a branch whose last path segment is DSH_SUPERAGENT_NAME (for example agent/$DSH_SUPERAGENT_NAME) binds to the ticket' },
-      { key: 'DSH_SUPERAGENT_GITHUB_ACCOUNT', description: 'The agent\'s GitHub account. gh is signed in to it; use gh for every GitHub operation, and never another account or credential' },
+      { key: 'DSH_SUPERAGENT_GITHUB_ACCOUNT', description: 'The agent\'s GitHub account. gh acts as it; use gh for every GitHub operation, and never another account or credential' },
       { key: 'DSH_SUPERAGENT_GITHUB_COMMIT_EMAIL', description: 'Commit email of the agent\'s account. git has no identity here: commit as the author these instructions name, or as the agent\'s account with this email when they name none' },
       { key: 'DSH_SUPERAGENT_GITHUB_NUMBER', description: 'Number of the Issue or PR that started the ticket; empty when the ticket did not start on GitHub' },
       { key: 'DSH_SUPERAGENT_GITHUB_PR_HEAD', description: 'Head ref refs/pull/<number>/head of the PR that started the ticket; empty when it was not a PR' },
@@ -175,13 +175,16 @@ const STREAMS = [
   { id: 'comments', observed: (config: GithubConfig) => config.observeComments, path: 'issues/comments?' },
   { id: 'review-comments', observed: (config: GithubConfig) => config.observeComments, path: 'pulls/comments?' },
 ] as const
-/** Polls repository-wide streams (new Issues/PRs, comments, default-branch CI); each stream reads from when it was switched on, resets when switched off, and fails independently. */
+/**
+ * Polls repository-wide streams (new Issues/PRs, comments, default-branch CI); each stream reads from when it was switched on,
+ * resets when switched off, and fails independently. In App mode every stream is read, as the Source has no notifications.
+ */
 async function pollRepository(ctx: SourceContext, round: Round): Promise<void> {
   const config = ctx.config<GithubConfig>(SOURCE)
   if (!config) return
   for (const stream of STREAMS) {
     if (stopped(ctx, round)) return
-    if (!stream.observed(config)) { ctx.state.set(KV.github.stream(stream.id), undefined); continue }
+    if (!ctx.deployment.githubApp && !stream.observed(config)) { ctx.state.set(KV.github.stream(stream.id), undefined); continue }
     try { await readStream(ctx, round, stream.id, stream.path, config) }
     catch (error) { if (!stopped(ctx, round)) round.failures.push(`${stream.id}: ${String(error)}`) }
   }
@@ -199,11 +202,16 @@ async function pollRepository(ctx: SourceContext, round: Round): Promise<void> {
  * newest item (`cursorAt`), relying on Trigger ID deduplication so repeated messages are no-ops. While the cursor stays
  * unchanged (including when clamped to the hourly horizon), sending the last page's ETag makes an unchanged list return
  * HTTP 304 and cost no rate limit. Items from before their kind was switched on or beyond the horizon are ignored.
+ * In App mode an item whose kind is off is still received when it mentions the agent, or, for a comment, when its Thread
+ * has a Ticket subscription; the `app` entry of `started` is when App mode began reading the stream, and older items are ignored.
  */
 async function readStream(ctx: SourceContext, round: Round, id: string, path: string, config: GithubConfig): Promise<void> {
   const name = KV.github.stream(id)
   const stored = ctx.state.get(name)
-  const kinds = id === 'issues' ? [...config.observeIssues ? ['issues'] : [], ...config.observePulls ? ['pulls'] : []] : ['comments']
+  const app = !!ctx.deployment.githubApp
+  const observed = id === 'issues' ? [...config.observeIssues ? ['issues'] : [], ...config.observePulls ? ['pulls'] : []]
+    : config.observeComments ? ['comments'] : []
+  const kinds = [...observed, ...app ? ['app'] : []]
   const before = typeof stored?.started === 'object' ? stored.started : {}
   const started: Record<string, string> = Object.fromEntries(kinds.map(kind => [kind, before[kind] ?? round.started]))
   const horizon = Math.floor((Date.parse(round.started) - POLL_HORIZON_MS) / 3_600_000) * 3_600_000
@@ -227,18 +235,24 @@ async function readStream(ctx: SourceContext, round: Round, id: string, path: st
     if (sameName(item.user.login, login)) continue
     if (id === 'issues') {
       const issue = IssueSchema.safeParse(item)
-      const pr = issue.success && !!issue.data.pull_request
-      if (!issue.success || !fresh(issue.data.created_at, pr ? 'pulls' : 'issues')) continue
-      await ctx.receive(pr ? pullTrigger(issue.data, login) : issueTrigger(issue.data, login))
+      if (!issue.success) continue
+      const pr = !!issue.data.pull_request
+      const trigger = pr ? pullTrigger(issue.data, login) : issueTrigger(issue.data, login)
+      const at = issue.data.created_at
+      if (!fresh(at, pr ? 'pulls' : 'issues') && !(trigger.addressed && fresh(at, 'app'))) continue
+      await ctx.receive(trigger)
       nameThread(ctx, issue.data.number, issue.data.title)
       continue
     }
     const number = Number(/\/(?:issues|pulls)\/(\d+)$/.exec((id === 'comments' ? item.issue_url : item.pull_request_url) ?? '')?.[1])
-    if (!number || !fresh(item.updated_at ?? item.created_at, 'comments')) continue
+    if (!number) continue
     const isPr = id === 'review-comments' || /\/pull\//.test(item.html_url ?? '')
     const ref = { number, isPr, ...item.html_url ? { url: item.html_url } : {} }
     const trigger = commentTrigger(item, ref, id === 'comments' ? 'conversation' : 'inline', login)
-    if (trigger.text) await ctx.receive(trigger)
+    const at = item.updated_at ?? item.created_at
+    const wanted = fresh(at, 'comments')
+      || (fresh(at, 'app') && (!!trigger.addressed || !!ctx.threads.get(`github:${number}`)?.subscriptions.length))
+    if (wanted && trigger.text) await ctx.receive(trigger)
   }
   const newest = Math.max(...items.map(item => Date.parse(item.updated_at ?? '')).filter(Number.isFinite))
   const moved = Number.isFinite(newest) ? cursorAt(new Date(newest).toISOString()) : since
@@ -271,15 +285,17 @@ async function pollBranchCi(ctx: SourceContext, round: Round): Promise<void> {
   ctx.state.set(KV.github.branchCi, { branch, failures: now, revision })
 }
 /**
- * One polling round: notifications, then observed repository streams, then the PRs of open tickets with their CI, then
- * subscribed Threads. Each step and each Issue, PR, or Thread fails independently so all steps run before the round fails.
- * Other read failures (including 404) fail the round toward the error threshold, whereas deleted (410) or abandoned
- * (24h+) threads are recorded only on the thread and in health detail.
- * @returns the polling interval requested by GitHub, in seconds.
+ * One polling round: notifications (not in App mode, whose installation token cannot read them), then repository streams,
+ * then the PRs of open tickets with their CI, then subscribed Threads. Each step and each Issue, PR, or Thread fails
+ * independently so all steps run before the round fails. Other read failures (including 404) fail the round toward the
+ * error threshold, whereas deleted (410) or abandoned (24h+) threads are recorded only on the thread and in health detail.
+ * @returns the polling interval requested by GitHub, in seconds; in App mode, the configured `pollSeconds`.
  */
 export async function pollRound(ctx: SourceContext, signal?: AbortSignal): Promise<number> {
   const round = newRound(signal)
-  const notified = await pollNotifications(ctx, round).then(value => ({ value }), (error: unknown) => ({ error }))
+  const app = !!ctx.deployment.githubApp
+  const notified = app ? { value: { count: 0, interval: ctx.config<GithubConfig>(SOURCE)?.pollSeconds ?? 60 } }
+    : await pollNotifications(ctx, round).then(value => ({ value }), (error: unknown) => ({ error }))
   await pollRepository(ctx, round)
   await pollTicketPulls(ctx, signal, round)
   await pollThreads(ctx, signal, round)
@@ -291,7 +307,8 @@ export async function pollRound(ctx: SourceContext, signal?: AbortSignal): Promi
   const dropped = (round.dropped.length ? `; deleted on GitHub: ${named(round.dropped)}` : '')
     + (round.abandoned.length ? `; dropped after their reads kept failing: ${named(round.abandoned)}` : '')
     + (round.tally.skipped ? `; ${round.tally.skipped} unreadable items skipped` : '')
-  ctx.report('github', { state: 'ready', detail: `${count} notifications; next poll ≥ ${interval}s${dropped}`, at: round.started })
+  const read = app ? 'repository streams read' : `${count} notifications`
+  ctx.report('github', { state: 'ready', detail: `${read}; next poll ≥ ${interval}s${dropped}`, at: round.started })
   return interval
 }
 /** Reads notifications since the cursor and each Issue or PR they name, advancing the cursor atomically with the retry map for failed reads; deleted (410) Issues are dropped once their error is recorded. */

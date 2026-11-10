@@ -6,7 +6,8 @@ import { KV } from '../src/kv.ts'
 import { apply as applyFeishu, pollThreads as pollFeishuThreads } from '../src/sources/feishu.ts'
 import { runFeishu } from '../src/sources/feishu-loops.ts'
 import { HistoricalMessageSchema } from '../src/sources/feishu-trigger.ts'
-import { branchCiTrigger, ciTrigger, commentTrigger, githubAddress, githubChannel, issueTrigger, type GithubComment, type GithubIssue } from '../src/sources/github-trigger.ts'
+import { branchCiTrigger, ciTrigger, commentTrigger, githubAddress, githubChannel, issueTrigger, mentions, type GithubComment, type GithubIssue }
+  from '../src/sources/github-trigger.ts'
 import { claimPull, observePull, pullEndNotices, pullOf, ticketBranch, type Pull } from '../src/sources/github-pull.ts'
 import { ciCounts, ciFact, ciSummary } from '../src/sources/github-read.ts'
 import { apply as applyGithub, githubKind, pollFailure, pollRound } from '../src/sources/github.ts'
@@ -354,6 +355,17 @@ describe('github source', () => {
     expect(commentTrigger({ id: 9, body: '@Agent-Bot please fix', user: { login: 'alice', type: 'User' } }, { number: 7, isPr: true }, 'conversation', 'agent-bot')).toMatchObject({ human: true, addressed: 'mention' })
     expect(commentTrigger({ id: 10, body: 'mail@agent-bot.example', user: { login: 'alice', type: 'User' } }, { number: 7, isPr: true }, 'conversation', 'agent-bot')).not.toHaveProperty('addressed')
     expect(commentTrigger({ id: 11, body: 'pushed', user: { login: 'Agent-Bot', type: 'User' } }, { number: 7, isPr: true }, 'conversation', 'agent-bot').human).toBe(false)
+  })
+  it('takes `@<slug>` as a mention of a GitHub App\'s bot `<slug>[bot]`, and no longer handle', () => {
+    expect(mentions('@mumbo-bot please fix', 'mumbo-bot[bot]')).toBe(true)
+    expect(mentions('cc @Mumbo-Bot.', 'mumbo-bot[bot]')).toBe(true)
+    expect(mentions('@mumbo-bot[bot] please fix', 'mumbo-bot[bot]')).toBe(true)
+    for (const text of ['@mumbo-bot2 please fix', '@mumbo-bot[bot]x', '@mumbo-bot[x]', 'mail@mumbo-bot.example']) {
+      expect(mentions(text, 'mumbo-bot[bot]'), text).toBe(false)
+    }
+    // A user account's login is matched whole, as before.
+    expect(mentions('@agent-bot[bot] hi', 'agent-bot')).toBe(true)
+    expect(mentions('@agent-bot2 hi', 'agent-bot')).toBe(false)
   })
   it('reads the address of an Issue, a PR or a review comment of the repository, and nothing else', () => {
     expect(githubAddress('https://api.github.com/repos/acme/widgets/pulls/9', 'acme/widgets')).toEqual({ number: 9, pr: true })
@@ -1413,6 +1425,68 @@ describe('observing the GitHub repository', () => {
     answers.branch = { sha: 'eee5555', checks: [check('lint', 'success')] }
     await pollRound(h)
     expect(new Set(h.receive.mock.calls.map(([trigger]) => trigger.id)).size).toBe(4)
+    h.store.close()
+  })
+  const APP = { login: 'mumbo-bot[bot]', userId: 341797844 }
+  /** A Source whose agent is a GitHub App's bot, with its streams read from hour 0 when `started`. */
+  function appHost(started?: Record<string, string>) {
+    const github = { cli: '/bin/false', login: APP.login, noreply: `${APP.userId}+${APP.login}@users.noreply.github.com` }
+    const h = host({ deployment: testDeployment({ githubApp: APP, github }) })
+    if (started) for (const stream of ['issues', 'comments', 'review-comments']) h.store.set(`github-stream:${stream}`, { since: at(0), started })
+    return h
+  }
+  const listed = (calls: string[][]) => calls.map(args => args[1]!.replace(/^repos\/acme\/widgets\/?/, '').split('?')[0])
+  it('reads every repository stream and no notifications as a GitHub App, and the notifications as a user account', async () => {
+    const h = appHost()
+    observe(h, {})
+    const calls = repository(h, {})
+    expect(await pollRound(h)).toBe(60)
+    expect(listed(calls)).toEqual(['issues', 'issues/comments', 'pulls/comments'])
+    expect(h.health.github).toMatchObject({ state: 'ready', detail: 'repository streams read; next poll ≥ 60s' })
+    // The first round starts the streams: what GitHub lists from before it is not taken in.
+    expect(h.store.get<{ started: Record<string, string> }>('github-stream:issues')!.started).toEqual({ app: expect.any(String) })
+    h.store.close()
+    const user = host()
+    observe(user, {})
+    const read = repository(user, {})
+    await pollRound(user)
+    expect(listed(read)).toEqual(['notifications'])
+    user.store.close()
+  })
+  it('takes in as a GitHub App, with every switch off, only what mentions it, and comments on a Thread a Ticket subscribes to', async () => {
+    const h = appHost({ app: at(0) })
+    observe(h, {})
+    subscribed(h, { source: 'github', id: '9' }, { number: 9, isPr: false, title: 'Subscribed' })
+    const comment = (id: number, number: number, body: string, login = 'mallory', time = at(1)) => ({ id, body, user: { login, type: 'User' },
+      created_at: time, updated_at: time, issue_url: `https://api.github.com/repos/acme/widgets/issues/${number}`,
+      pull_request_url: `https://api.github.com/repos/acme/widgets/pulls/${number}`,
+      html_url: `https://github.com/acme/widgets/issues/${number}#issuecomment-${id}` })
+    repository(h, {
+      issues: [issue(3, { body: '@mumbo-bot from before', created_at: at(-24), updated_at: at(1) }),
+        issue(4, { body: '@mumbo-bot please fix', created_at: at(1), updated_at: at(1) }),
+        issue(5, { created_at: at(2), updated_at: at(2) }),
+        { ...issue(6, { body: 'cc @mumbo-bot', created_at: at(3), updated_at: at(3) }), pull_request: { url: 'x' } }],
+      comments: [comment(1, 7, '@mumbo-bot please look'), comment(2, 7, 'plain'), comment(3, 9, 'plain on a subscribed thread'),
+        comment(4, 9, 'done', APP.login), comment(5, 7, '@mumbo-bot2 not you'),
+        // Listed when the stream's cursor is older than App mode, as after a user account's polls.
+        comment(8, 7, '@mumbo-bot from before', 'mallory', at(-1))],
+      reviewComments: [comment(6, 8, 'plain nit'), comment(7, 8, '@mumbo-bot nit')] })
+    await pollRound(h)
+    expect(h.receive.mock.calls.map(([trigger]) => [trigger.meta.number, trigger.meta.kind, trigger.text]))
+      .toEqual([[4, 'issue', 'Issue 4\n\n@mumbo-bot please fix'], [6, 'pull', 'Issue 6\n\ncc @mumbo-bot'],
+        [7, 'conversation', '@mumbo-bot please look'], [9, 'conversation', 'plain on a subscribed thread'], [8, 'inline', '@mumbo-bot nit']])
+    expect(h.receive.mock.calls.map(([trigger]) => trigger.addressed)).toEqual(['mention', 'mention', 'mention', undefined, 'mention'])
+    expect(h.store.get('github-stream:comments')).toEqual({ since: cursorAt(at(1)), started: { app: at(0) } })
+    h.store.close()
+  })
+  it('takes in as a GitHub App every comment while comments are received, and every new Issue while new Issues are', async () => {
+    const h = appHost({ comments: at(0), issues: at(0), app: at(0) })
+    observe(h, { observeComments: true, observeIssues: true })
+    repository(h, { issues: [issue(5, { created_at: at(2), updated_at: at(2) })],
+      comments: [{ id: 2, body: 'plain', user: { login: 'mallory', type: 'User' }, created_at: at(1), updated_at: at(1),
+        issue_url: 'https://api.github.com/repos/acme/widgets/issues/7', html_url: 'https://github.com/acme/widgets/issues/7#issuecomment-2' }] })
+    await pollRound(h)
+    expect(h.receive.mock.calls.map(([trigger]) => [trigger.meta.number, trigger.meta.kind])).toEqual([[5, 'issue'], [7, 'conversation']])
     h.store.close()
   })
   it('tells of the default branch\'s CI when its failed checks change and once it passes again, after a first look', async () => {

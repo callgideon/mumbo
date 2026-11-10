@@ -22,6 +22,11 @@ export const Config = s.object({
     .default(15000).description('Time limit of one context read during an assessment, in milliseconds.').volatile(),
   panelAdmins: s.array(s.string().pattern(/^[^\s*,@A-Z]+@[^\s*,@A-Z]+$/)).default([])
     .description('Lowercased emails of the `edge-member` principals that may use the management panel besides the owner; exact matches only.'),
+  // The union wrapper drops the implicit `{}` default of an object schema, so an absent key stays absent.
+  githubApp: s.union([s.object({
+    login: s.string().pattern(/^[A-Za-z0-9-]+\[bot\]$/).required().description('The App\'s bot login, `<slug>[bot]`.'),
+    userId: s.number().min(1).step(1).required().description('The numeric GitHub user id of the bot.'),
+  })]).description('Act on GitHub as a GitHub App\'s bot. The agent CLI reaches GitHub with an installation token, which cannot read `/user` or notifications: setup takes the identity from here, and the GitHub Source reads the repository\'s Issues, pull requests and comments instead of notifications. Unset, the CLI is signed in to a user account.'),
 })
 export type DeploymentConfig = ReturnType<typeof Config>
 export interface Machine {
@@ -31,6 +36,8 @@ export interface Machine {
   admissionContextTimeoutMs: Volatile<number>
   /** Lowercased `edge-member` emails admitted to the management panel besides the owner. */
   panelAdmins: readonly string[]
+  /** Set when the agent acts as a GitHub App's bot (App mode); unset when its CLI is signed in to a user account. */
+  githubApp?: { login: string; userId: number } | undefined
 }
 const MOVED: Record<string, string> = {
   repository: 'on the GitHub Source', branchPrefix: 'in the prepare command of the Execution settings', github: 'on the GitHub Source',
@@ -42,8 +49,8 @@ const MOVED: Record<string, string> = {
 export function machineOf(config: DeploymentConfig): Machine {
   const unknown = Object.keys(config).filter(key => !(key in (Config.dict ?? {})))
   if (unknown.length) throw new Error(`dsh-superagent configuration has keys it does not use: ${unknown.map(key => MOVED[key] ? `${key} (now ${MOVED[key]})` : key).join(', ')}; the keys are ${Object.keys(Config.dict ?? {}).join(', ')}`)
-  const { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins } = config
-  return { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins }
+  const { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins, githubApp } = config
+  return { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins, githubApp }
 }
 
 export const GithubAccountsSchema = z.object({
@@ -87,17 +94,21 @@ function parsed<T>(schema: z.ZodType<T>, text: string): T | undefined {
   const result = schema.safeParse(value)
   return result.success ? result.data : undefined
 }
-/** Verify the agent's GitHub CLI identity and push access to the configured repository. */
+/**
+ * Verify the agent's GitHub CLI identity and push access to the configured repository.
+ * With `machine.githubApp` the identity is the App's bot and `/user` is not read; an installation token does not report
+ * `permissions`, so only a reported read-only access refuses.
+ */
 export async function resolveDeployment(machine: Machine, github: unknown, probe: Probe, path = process.env.PATH ?? ''): Promise<Deployment> {
-  const { stateDir } = machine
+  const { stateDir, githubApp } = machine
   const accounts = GithubAccountsSchema.parse(github ?? {})
   const remote = accounts.repository
   if (!remote) throw new SetupError('repositoryUnset')
   if (!accounts.cli) throw new SetupError('agentCliUnset')
   let cli: string
   try { cli = executable(accounts.cli, path, workerBin(stateDir)) } catch (error) { throw new SetupError('agentCliMissing', { output: reason(error) }) }
-  const text = await probe([cli, 'api', 'user']).catch((error: unknown) => { throw new SetupError('agentCliSignedOut', { output: reason(error) }) })
-  const agent = parsed(GithubUser, text)
+  const agent = githubApp ? { login: githubApp.login, id: githubApp.userId }
+    : parsed(GithubUser, await probe([cli, 'api', 'user']).catch((error: unknown) => { throw new SetupError('agentCliSignedOut', { output: reason(error) }) }))
   if (!agent) throw new SetupError('agentCliNoAccount')
   // Use the canonical repository name returned by GitHub so renamed repositories match incoming notifications.
   const access = parsed(RepositoryAccess, await probe([cli, 'api', `repos/${remote}`, '--jq', '{name: .full_name, push: .permissions.push}']).catch((error: unknown) => {
@@ -105,7 +116,7 @@ export async function resolveDeployment(machine: Machine, github: unknown, probe
   }))
   if (!access) throw new SetupError('repositoryUnreported', { repository: remote })
   const repository = access.name
-  if (access.push !== true) throw new SetupError('repositoryReadOnly', { account: agent.login, repository })
+  if (githubApp ? access.push === false : access.push !== true) throw new SetupError('repositoryReadOnly', { account: agent.login, repository })
   return { ...machine, repository, github: { cli, login: agent.login, noreply: `${agent.id}+${agent.login}@users.noreply.github.com` } }
 }
 
