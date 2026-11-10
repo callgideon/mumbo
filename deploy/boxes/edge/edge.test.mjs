@@ -784,33 +784,85 @@ test('model host: the edge does not filter Host, so llm.app.mumbo.si and llm.box
   } finally { s.close() }
 })
 
-test('project relay: signs in once, creates the coordinator session once, re-signs after 401, members only', async () => {
-  const { projectRelay } = await import('./projects.mjs')
-  const store = memoryStore()
-  const proj = projectStore({ store, admitted: () => true, log: () => {} })
+test('project relay: posts the member\'s message to the box\'s relay route as the member, context by default, members only', async () => {
+  const { projectRelay, RELAY_PATH } = await import('./projects.mjs')
+  const proj = projectStore({ store: memoryStore(), admitted: () => true, log: () => {} })
   const { id } = await proj.create('a@x.com', 'P')
-  const calls = []; let expire = false
+  const posts = []
+  let answer = (body) => ({ status: 200, setCookie: [], body: JSON.stringify({ result: 'stored', trigger: 't1', thread: body.id }) })
   const boxFetch = async (target, host, path, init) => {
-    calls.push(`${init.method} ${path}`)
-    if (path.startsWith('/?token=')) return { status: 303, setCookie: ['dsh-auth-abc=v1; Path=/; HttpOnly'], body: '' }
-    if (expire) { expire = false; return { status: 401, setCookie: [], body: '' } }
-    const req = JSON.parse(init.body)
-    assert.equal(init.headers.cookie, 'dsh-auth-abc=v1'); assert.equal(host, `p-${id}.boxes.example`)
-    const value = req.method === 'session/create' ? { sessionId: 'S1' } : { accepted: true }
-    if (req.method === 'session/prompt') { assert.equal(req.payload.args.request.sessionId, 'S1'); assert.match(req.payload.args.request.content[0].text, /^\[from a@x\.com\] /) }
-    return { status: 200, setCookie: [], body: JSON.stringify({ type: 'server-response', rpcId: req.rpcId, result: { ok: true, value } }) }
+    assert.equal(host, `p-${id}.boxes.example`)
+    posts.push({ path, method: init.method, member: init.member, cookie: init.headers.cookie, body: JSON.parse(init.body) })
+    return answer(posts.at(-1).body)
   }
-  const box = { ensure: async (p) => ({ id: 'pbox', token: 'TOK', principal: p }) }
-  const relay = projectRelay({ store, projects: proj, box, boxFetch, siteHostOf: () => `p-${id}.boxes.example`, log: () => {} })
-  assert.deepEqual(await relay.message('a@x.com', id, ' hi '), { delivered: true, project: id, coordinatorSession: 'S1' })
-  await relay.message('a@x.com', id, 'again')
-  assert.equal(calls.filter(c => c.startsWith('GET /?token=')).length, 1)
-  assert.equal(calls.filter(c => c === 'POST /api/session/create').length, 1)
-  expire = true
-  await relay.message('a@x.com', id, 'after expiry')
-  assert.equal(calls.filter(c => c.startsWith('GET /?token=')).length, 2)
+  const box = { ensure: async (p) => ({ id: 'pbox', token: 'TOK', principal: p, member: (e) => `hdr-for-${e}` }) }
+  const relay = projectRelay({ projects: proj, box, boxFetch, siteHostOf: () => `p-${id}.boxes.example`, edgeHost: 'app.example', log: () => {} })
+  const sent = await relay.message('a@x.com', id, ' hi ', { via: 'b1' })
+  assert.deepEqual(sent, { delivered: true, project: id, kind: 'context', messageId: posts[0].body.id, result: 'stored' })
+  assert.match(sent.messageId, /^[0-9a-f-]{36}$/, 'a made-up id when the caller gives none')
+  assert.deepEqual(posts[0], { path: RELAY_PATH, method: 'POST', member: 'hdr-for-a@x.com', cookie: undefined, body: { id: sent.messageId, kind: 'context', text: 'hi',
+    hops: [{ node: 'member', id: 'a@x.com' }, { node: 'mumbo', id: 'b1' }, { node: 'edge', id: 'app.example' }] } })
+  assert.equal(RELAY_PATH, '/orchestrator/relay')
+  // A request, with the caller's id; a retry with it is the box's duplicate.
+  assert.equal((await relay.message('a@x.com', id, 'build it', { kind: 'request', messageId: 'm-1' })).kind, 'request')
+  assert.deepEqual(posts[1].body, { id: 'm-1', kind: 'request', text: 'build it', hops: [{ node: 'member', id: 'a@x.com' }, { node: 'edge', id: 'app.example' }] })
+  answer = (body) => ({ status: 200, setCookie: [], body: JSON.stringify({ result: 'duplicate', trigger: 't1', thread: body.id, waiting: 'setup' }) })
+  assert.deepEqual(await relay.message('a@x.com', id, 'build it', { kind: 'request', messageId: 'm-1' }), { delivered: true, project: id, kind: 'request', messageId: 'm-1',
+    result: 'duplicate', waiting: 'the project\'s coordinator is not set up yet; the message waits for it' })
+  // Refused before anything is sent.
   await assert.rejects(relay.message('b@x.com', id, 'hi'), (e) => e.status === 404)
   await assert.rejects(relay.message('a@x.com', id, '  '), (e) => e.status === 400)
+  await assert.rejects(relay.message('a@x.com', id, 'hi', { kind: 'order' }), (e) => e.status === 400 && /context, request/.test(e.message))
+  await assert.rejects(relay.message('a@x.com', id, 'hi', { messageId: 'a/b' }), (e) => e.status === 400)
+  assert.equal(posts.length, 3)
+  // The box's refusals keep their status and code; anything else is a 502.
+  for (const [status, code, expected] of [[409, 'id_reused', 409], [400, 'invalid_request', 400], [409, 'relay_off', 409], [403, 'member_required', 502], [500, 'failed', 502]]) {
+    answer = () => ({ status, setCookie: [], body: JSON.stringify({ error: `no: ${code}`, code }) })
+    await assert.rejects(relay.message('a@x.com', id, 'hi'), (e) => e.status === expected && e.code === code && e.message === `the project box refused the message: no: ${code}`, code)
+  }
+  answer = () => ({ status: 200, setCookie: [], body: '<!doctype html>' })
+  await assert.rejects(relay.message('a@x.com', id, 'hi'), (e) => e.status === 502)
+})
+
+test('project relay: a box whose image has no relay route refuses with relay_unavailable and gets no message', async () => {
+  const { projectRelay } = await import('./projects.mjs')
+  const proj = projectStore({ store: memoryStore(), admitted: () => true, log: () => {} })
+  const { id } = await proj.create('a@x.com', 'P')
+  const unavailable = (e) => e.status === 409 && e.code === 'relay_unavailable' && /older build without the relay, so nothing was sent/.test(e.message)
+  // A box without member sign-in (no project overlay) is never sent the message, nor signed in to as its owner.
+  const paths = []
+  const legacy = projectRelay({ projects: proj, box: { ensure: async () => ({ id: 'old', token: 'OWNER' }) }, boxFetch: async (t, h, path) => { paths.push(path); return { status: 200, body: '{}' } },
+    siteHostOf: () => 'h', edgeHost: 'e', log: () => {} })
+  await assert.rejects(legacy.message('a@x.com', id, 'hi', { kind: 'request' }), unavailable)
+  assert.deepEqual(paths, [])
+  // A member box built before the relay: superagent's /orchestrator prefix answers 404, and a box without superagent 405.
+  for (const status of [404, 405]) {
+    const relay = projectRelay({ projects: proj, box: { ensure: async () => ({ id: 'pbox', token: 'OWNER', member: (e) => e }) }, boxFetch: async () => ({ status, setCookie: [], body: '' }),
+      siteHostOf: () => 'h', edgeHost: 'e', log: () => {} })
+    await assert.rejects(relay.message('a@x.com', id, 'hi'), unavailable, String(status))
+  }
+})
+
+test('project_message: kind defaults to context, and the caller\'s box is the mumbo hop', async () => {
+  const calls = []
+  const relay = { message: async (...args) => { calls.push(args); return { delivered: true } } }
+  const mcp = mcpServer({ ops: children({ e2b: fakeChildE2B(), cfg: childCfg, log: () => {} }), projects: projectStore({ store: memoryStore(), admitted: () => true, log: () => {} }),
+    relay, projectDomain: 'projects.example', claimOf: (info) => verifyBox('k', String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
+  const server = createServer((req, res) => mcp(req, res))
+  await new Promise(r => server.listen(0, '127.0.0.1', r))
+  const call = async (args) => {
+    const r = await fetch(`http://127.0.0.1:${server.address().port}/mcp`, { method: 'POST', headers: { authorization: `Bearer ${signBox('k', 'a@x.com', 'b1')}`, 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'project_message', arguments: args } }) })
+    const t = await r.text(); return JSON.parse(t.startsWith('{') ? t : t.split('\n').find(l => l.startsWith('data:')).slice(5)).result
+  }
+  try {
+    const pid = '0123456789abcdef'
+    await call({ id: pid, message: 'fyi' })
+    await call({ id: pid, message: 'build it', kind: 'request', messageId: 'm-1' })
+    assert.deepEqual(calls, [['a@x.com', pid, 'fyi', { kind: 'context', messageId: undefined, via: 'b1' }], ['a@x.com', pid, 'build it', { kind: 'request', messageId: 'm-1', via: 'b1' }]])
+    for (const bad of [{ kind: 'order' }, { messageId: 'a/b' }, { message: 'x'.repeat(20001) }]) assert.equal((await call({ id: pid, message: 'hi', ...bad })).isError, true, JSON.stringify(bad).slice(0, 40))
+    assert.equal(calls.length, 2)
+  } finally { server.close() }
 })
 
 test('role instructions: assistant with write consent and desktop sign-in; coordinator without accounts', async () => {
@@ -825,7 +877,7 @@ test('role instructions: assistant with write consent and desktop sign-in; coord
   assert.match(a, /project_message/)
   const p = roleInstructions(c, 'project:0123456789abcdef')
   assert.match(p, /coordinate the shared mumbo project 0123456789abcdef\. Its members reach you at https:\/\/p-0123456789abcdef\.boxes\.x\/ /)
-  assert.match(p, /\[from <email>\]/)
+  assert.match(p, /through their own assistants, whose messages reach the project's Superagent as requests or context from the member\./)
   assert.match(p, /no browser and nobody's accounts/)
   assert.doesNotMatch(p, /Downloads/)
   const script = startScript(c, 'T', undefined, a)
@@ -918,31 +970,30 @@ test('routing: browser member headers are stripped; member-capable project boxes
 })
 
 test('relay to a member-capable box sends the member header and no owner sign-in', async () => {
-  const { projectRelay } = await import('./projects.mjs')
+  const { projectRelay, RELAY_PATH } = await import('./projects.mjs')
   const { boxFetcher, boxSite } = await import('./edge.mjs')
   const seen = []
   const upstream = createServer(async (req, res) => {
     let body = ''; for await (const c of req) body += c
-    seen.push({ path: req.url, headers: req.headers })
-    const value = JSON.parse(body).method === 'session/create' ? { sessionId: 'S' } : { accepted: true }
-    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ result: { ok: true, value } }))
+    seen.push({ method: req.method, path: req.url, headers: req.headers, body: JSON.parse(body) })
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ result: 'stored', trigger: 't1', thread: 'm-1' }))
   })
   const c = { ...cfg, proxy: new URL(`http://127.0.0.1:${await listen(upstream)}`) }
-  const store = memoryStore()
-  const proj = projectStore({ store, admitted: () => true, log: () => {} })
+  const proj = projectStore({ store: memoryStore(), admitted: () => true, log: () => {} })
   const { id } = await proj.create('a@x.com', 'P')
   // Masked under the former project domain: the relay sends the Origin that box's dsh accepts.
   const box = { ensure: async () => ({ id: 'pbox', token: 'OWNER', host: `p-${id}.boxes.mumbo.si`, member: (e) => `hdr-for-${e}` }) }
-  const relay = projectRelay({ store, projects: proj, box, boxFetch: boxFetcher(c), siteHostOf: (p) => boxSite(c, p).host, log: () => {} })
+  const relay = projectRelay({ projects: proj, box, boxFetch: boxFetcher(c), siteHostOf: (p) => boxSite(c, p).host, edgeHost: c.publicHost, log: () => {} })
   try {
-    await relay.message('a@x.com', id, 'hi')
-    assert.deepEqual(seen.map(s => s.path), ['/api/session/create', '/api/session/prompt'], 'no owner sign-in')
-    for (const { headers: h } of seen) {
-      assert.equal(h['x-mumbo-member'], 'hdr-for-a@x.com')
-      assert.equal(h.cookie, undefined)
-      assert.equal(h.origin, `https://p-${id}.boxes.mumbo.si`, 'the box\'s masked host')
-      assert.equal(h['e2b-sandbox-id'], 'pbox')
-    }
+    assert.equal((await relay.message('a@x.com', id, 'hi', { messageId: 'm-1' })).result, 'stored')
+    assert.deepEqual(seen.map(s => `${s.method} ${s.path}`), [`POST ${RELAY_PATH}`], 'no owner sign-in')
+    const [{ headers: h, body }] = seen
+    assert.equal(h['x-mumbo-member'], 'hdr-for-a@x.com')
+    assert.equal(h.cookie, undefined)
+    assert.equal(h.origin, `https://p-${id}.boxes.mumbo.si`, 'the box\'s masked host')
+    assert.equal(h['e2b-sandbox-id'], 'pbox')
+    assert.equal(h['content-type'], 'application/json')
+    assert.deepEqual(body, { id: 'm-1', kind: 'context', text: 'hi', hops: [{ node: 'member', id: 'a@x.com' }, { node: 'edge', id: cfg.publicHost }] })
   } finally { upstream.close() }
 })
 
