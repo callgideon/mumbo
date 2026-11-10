@@ -49,7 +49,10 @@ import {
   streamWholeText,
   writeFileAtomic,
 } from './fsio.ts'
-import type { FsIoInternals, PathInfo } from './fsio.ts'
+import type { FsIoInternals, LocalTarget, PathInfo, ReadPin } from './fsio.ts'
+import { mutateInChild } from './child-mutations.ts'
+import type { MutationOutcomes, MutationRequest } from './child-mutations.ts'
+import type {} from '@deepseek-ai/dsh-subprocess'
 
 /** Configuration for the local filesystem backend. */
 export interface Config {
@@ -69,6 +72,11 @@ export interface Config {
   modelRoots?: string[] | undefined
 }
 
+/** A target reduced to its two fields, as the change helper receives it. */
+function plainTarget(target: FsTarget): FsTarget {
+  return { targetKey: target.targetKey, displayPath: target.displayPath }
+}
+
 /** One model root as configured (for paths written under it) and as its real path. */
 interface ModelRoot {
   configured: string
@@ -86,7 +94,9 @@ function isUnder(root: string, path: string): boolean {
  * @param roots - configured absolute directories.
  * @returns each root's configured and real form.
  */
-function modelRootsOf(roots: readonly string[]): ModelRoot[] {
+function modelRootsOf(roots: readonly string[], platform: NodeJS.Platform): ModelRoot[] {
+  // Reads confirm each opened descriptor through /proc/self/fd, which only Linux provides.
+  if (platform !== 'linux') throw new Error(`fs-local: modelRoots requires Linux; this host is ${platform}`)
   if (roots.length === 0) throw new Error('fs-local: modelRoots must list at least one directory; omit it to leave model paths unrestricted')
   return roots.map((root) => {
     if (!isAbsolute(root)) throw new Error(`fs-local: modelRoots entry ${JSON.stringify(root)} must be an absolute path`)
@@ -148,6 +158,8 @@ export class LocalFileSystem extends FileSystem {
   readonly config: ResolvedConfig
   /** The roots model paths are confined to; undefined leaves them unrestricted. */
   private readonly modelRoots: readonly ModelRoot[] | undefined
+  /** With model roots, every read and listing opens its target once and accepts only the resolved file. */
+  private readonly readPin: ReadPin | undefined
   /** Test hook forwarded to fsio for atomic-publication boundaries. */
   internals: FsIoInternals = {}
   /** Per-targetKey tail promise: serializes mutating ops so the read→guard→write
@@ -164,7 +176,32 @@ export class LocalFileSystem extends FileSystem {
       throw new Error(`fs-local: diffBasisMaxBytes must be a positive safe integer no greater than ${MAX_DIFF_BASIS_BYTES}`)
     }
     this.config = resolved
-    this.modelRoots = resolved.modelRoots === undefined ? undefined : modelRootsOf(resolved.modelRoots)
+    this.modelRoots = resolved.modelRoots === undefined ? undefined : modelRootsOf(resolved.modelRoots, process.platform)
+    const roots = this.modelRoots
+    this.readPin = roots === undefined ? undefined : (opened: string, target: LocalTarget) => {
+      if (opened === target.targetKey) return
+      // A link swapped in after resolution: the descriptor names another file than the one resolved.
+      if (!roots.some(root => isUnder(root.canonical, opened))) throw this.outsideRoots(roots, target.displayPath)
+      throw new FsError(`cannot read "${target.displayPath}": the path changed while it was being opened`, 'FS_STALE_VERSION')
+    }
+  }
+
+  /**
+   * The child that performs mutations, when the subprocess provider runs children as a separate
+   * identity: the kernel then judges every model-chosen path with that identity's permissions.
+   * With model roots and no subprocess provider mounted, mutations are refused rather than
+   * performed by this process.
+   * @param verb - the operation named in a refusal.
+   * @returns the child runner, or undefined to mutate in this process.
+   */
+  private childMutation(verb: string): (<K extends MutationRequest['op']>(request: Extract<MutationRequest, { op: K }>, signal?: AbortSignal) => Promise<MutationOutcomes[K]>) | undefined {
+    const subprocess = this.ctx.get('subprocess')
+    if (subprocess === undefined) {
+      if (this.modelRoots !== undefined) throw new FsError(`cannot ${verb}: no process provider is mounted to make the change as the run-as user`, 'FS_IO_ERROR')
+      return undefined
+    }
+    if (subprocess.childIdentity === undefined) return undefined
+    return (request, signal) => mutateInChild(subprocess, request, this.config.diffBasisMaxBytes, signal)
   }
 
   /** Run one mutation under the same lock ordering as multi-target operations. */
@@ -261,23 +298,23 @@ export class LocalFileSystem extends FileSystem {
   }
 
   override async readText(target: FsTarget, signal?: AbortSignal): Promise<string> {
-    return readWholeText({ displayPath: target.displayPath, targetKey: target.targetKey }, signal)
+    return readWholeText({ displayPath: target.displayPath, targetKey: target.targetKey }, signal, this.readPin)
   }
 
   override streamText(target: FsTarget, signal?: AbortSignal): Promise<AsyncIterable<string>> {
-    return Promise.resolve(streamWholeText({ displayPath: target.displayPath, targetKey: target.targetKey }, signal))
+    return Promise.resolve(streamWholeText({ displayPath: target.displayPath, targetKey: target.targetKey }, signal, this.readPin))
   }
 
   override async readBytes(target: FsTarget, signal: AbortSignal | undefined, maxBytes: number): Promise<Uint8Array> {
-    return readWholeBytes({ displayPath: target.displayPath, targetKey: target.targetKey }, signal, maxBytes, this.internals)
+    return readWholeBytes({ displayPath: target.displayPath, targetKey: target.targetKey }, signal, maxBytes, this.internals, this.readPin)
   }
 
   override async readByteRange(target: FsTarget, range: { offset: number; length: number }, signal?: AbortSignal): Promise<Uint8Array> {
-    return readByteWindow({ displayPath: target.displayPath, targetKey: target.targetKey }, range, signal)
+    return readByteWindow({ displayPath: target.displayPath, targetKey: target.targetKey }, range, signal, this.readPin)
   }
 
   override async listDir(target: FsTarget, signal?: AbortSignal): Promise<FsDirEntry[]> {
-    const entries = await listDirectory({ displayPath: target.displayPath, targetKey: target.targetKey }, signal)
+    const entries = await listDirectory({ displayPath: target.displayPath, targetKey: target.targetKey }, signal, this.readPin)
     return entries.map(entry => ({
       name: entry.name,
       type: entry.type,
@@ -287,7 +324,12 @@ export class LocalFileSystem extends FileSystem {
     }))
   }
 
-  override makeDirectory(target: FsTarget, signal?: AbortSignal): Promise<void> {
+  override async makeDirectory(target: FsTarget, signal?: AbortSignal): Promise<void> {
+    const child = this.childMutation(`create directory "${target.displayPath}"`)
+    if (child !== undefined) {
+      await child({ op: 'mkdir', target: { targetKey: target.targetKey, displayPath: target.displayPath } }, signal)
+      return
+    }
     return createDirectory({ displayPath: target.displayPath, targetKey: target.targetKey }, signal)
   }
 
@@ -297,6 +339,10 @@ export class LocalFileSystem extends FileSystem {
     expected?: FsWriteIntent,
     signal?: AbortSignal,
   ): Promise<FsWriteOutcome> {
+    const child = this.childMutation(`write "${target.displayPath}"`)
+    if (child !== undefined) {
+      return this.withLock(target.targetKey, () => child({ op: 'write', target: plainTarget(target), content, ...expected === undefined ? {} : { expected } }, signal))
+    }
     return this.withLock(target.targetKey, async () => {
       const existing = await this.writeTarget(target, expected)
 
@@ -331,6 +377,10 @@ export class LocalFileSystem extends FileSystem {
     expected?: { version: FsVersion },
     signal?: AbortSignal,
   ): Promise<FsEditOutcome> {
+    const child = this.childMutation(`edit "${target.displayPath}"`)
+    if (child !== undefined) {
+      return this.withLock(target.targetKey, () => child({ op: 'edit', target: plainTarget(target), edit, ...expected === undefined ? {} : { expected } }, signal))
+    }
     return this.withLock(target.targetKey, async () => {
       const existing = await probe(target.targetKey)
       // Stale guard before literal matching: an edit based on an old read reports
@@ -364,6 +414,10 @@ export class LocalFileSystem extends FileSystem {
   override async patchText(
     target: FsTarget, hunks: readonly PatchHunk[], expected?: { version: FsVersion }, signal?: AbortSignal,
   ): Promise<FsEditOutcome> {
+    const child = this.childMutation(`patch "${target.displayPath}"`)
+    if (child !== undefined) {
+      return this.withLock(target.targetKey, () => child({ op: 'patch', target: plainTarget(target), hunks, ...expected === undefined ? {} : { expected } }, signal))
+    }
     return this.withLock(target.targetKey, async () => {
       const existing = await this.requireFile(target, expected, 'patch')
       const original = await readForEdit(target.targetKey, target.displayPath, signal)
@@ -375,6 +429,10 @@ export class LocalFileSystem extends FileSystem {
   }
 
   override async deleteFile(target: FsTarget, expected?: { version: FsVersion }, signal?: AbortSignal): Promise<FsDeleteOutcome> {
+    const child = this.childMutation(`delete "${target.displayPath}"`)
+    if (child !== undefined) {
+      return this.withLock(target.targetKey, () => child({ op: 'delete', target: plainTarget(target), ...expected === undefined ? {} : { expected } }, signal))
+    }
     return this.withLock(target.targetKey, async () => {
       await this.requireFile(target, expected, 'delete')
       const before = await readTextForDiff(target.targetKey, this.config.diffBasisMaxBytes, signal)
@@ -390,6 +448,11 @@ export class LocalFileSystem extends FileSystem {
   ): Promise<FsMoveOutcome> {
     if (source.targetKey === destination.targetKey) {
       throw new FsError(`cannot move "${source.displayPath}" to itself`, 'FS_SAME_TARGET')
+    }
+    const child = this.childMutation(`move "${source.displayPath}"`)
+    if (child !== undefined) {
+      const request = { op: 'move' as const, source: plainTarget(source), destination: plainTarget(destination), options }
+      return this.withLocks([source.targetKey, destination.targetKey], () => child(request, signal))
     }
     return this.withLocks([source.targetKey, destination.targetKey], async () => {
       const sourceInfo = await this.requireFile(source, options.expectedSource, 'move')

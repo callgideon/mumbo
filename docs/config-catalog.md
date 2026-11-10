@@ -1591,7 +1591,7 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-fs-local`
 
-- `source`: [`packages/fs/fs-local/src/index.ts:55`](../packages/fs/fs-local/src/index.ts)
+- `source`: [`packages/fs/fs-local/src/index.ts:58`](../packages/fs/fs-local/src/index.ts)
 
 ```ts config-catalog
 /** Configuration for the local filesystem backend. */
@@ -2757,6 +2757,11 @@ export interface Config {
   detailFetchTimeoutMs?: number
   /** npm file CDNs that offered bundles are read from, in order; a read's `npmFileSources` moves the CDNs it names first. */
   detailNpmFileSources?: NpmFileSource[]
+  /**
+   * Offer the model the `plugin_manager` tool. Installing or enabling a plugin loads its code into this process, so a
+   * deployment that keeps the model out of it sets `false`; the person's own plugin controls are unaffected.
+   */
+  modelTools?: boolean
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-plugin-manager -->
@@ -4959,6 +4964,11 @@ export interface Config {
   maxFileBytes: number
   /** Milliseconds a line comparison may run before it degrades to whole-file replacement. */
   diffTimeoutMs: number
+  /**
+   * Record and serve change summaries. With `false` the service answers every summary and comparison with none and
+   * runs no git and reads no file; a deployment whose git cannot run as the subprocess provider's identity sets it.
+   */
+  summaries: boolean
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-workspace-changes -->

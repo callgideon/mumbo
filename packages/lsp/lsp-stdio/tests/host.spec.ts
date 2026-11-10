@@ -183,7 +183,7 @@ describe('readHostSource', () => {
   })
 })
 
-describe('readHostSource under model roots', () => {
+describe.runIf(process.platform === 'linux')('readHostSource under model roots', () => {
   it('refuses a source whose real path leaves the roots even inside the workspace', async () => {
     await ctx.fiber.dispose()
     ctx = new Context()

@@ -1,0 +1,40 @@
+# The rows the mumbo edge writes into a person box (deploy/boxes/edge/edge.mjs startScript on boxes/production):
+# sandboxes.overlay.yml, models.overlay.yml, links.overlay.yml, computer.overlay.yml, and welcome.overlay.yml.
+# The role file (DSH_AGENTS_HOME/AGENTS.md) is instructions, not a row.
+- insert:
+    - id: mcp-sandboxes
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: sandboxes
+        transport: streamable-http
+        url: https://llm.example/mcp
+    - id: browser-use
+      name: '@deepseek-ai/dsh-browser-use'
+    - id: browser-consent
+      name: '@mumbo/browser-consent'
+      config:
+        browser:
+          mode: attach
+          endpoint: http://127.0.0.1:9222
+- id: llm-pi-ai
+  config:
+    providers: {}
+- insert:
+    - id: box-links
+      name: '@mumbo/box-links'
+      config:
+        home: https://app.example/home
+        desktop: https://app.example/desktop/
+- insert:
+    - id: computer-use
+      name: '@deepseek-ai/dsh-computer-use'
+    - id: computer-use-x11
+      name: '@deepseek-ai/dsh-computer-use-x11'
+      config:
+        display: ':1'
+        xauthority: /run/x11/auth
+- insert:
+    - id: first-run-welcome
+      name: '@deepseek-ai/dsh-hooks-claude-code'
+      config:
+        configPath: /root/.mumbo/welcome-hooks.json

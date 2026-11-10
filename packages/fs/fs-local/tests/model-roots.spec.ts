@@ -4,13 +4,15 @@
  * root that leaves the roots through a symbolic link.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { execFileSync, spawn } from 'node:child_process'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
 import { FsError } from '@deepseek-ai/dsh-fs'
+import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 
 let base: string
 let workspace: string
@@ -34,6 +36,8 @@ async function rejection(promise: Promise<unknown>): Promise<FsError> {
 
 async function mount(config: Record<string, unknown>): Promise<LocalFileSystem> {
   await fiber?.dispose()
+  // With model roots, mutations need a subprocess provider; this one runs children as this process.
+  if (ctx.get('subprocess') === undefined) await ctx.plugin(LocalSubprocessRuntime)
   fiber = await ctx.plugin(LocalFileSystem, config)
   return ctx.fs as LocalFileSystem
 }
@@ -55,7 +59,7 @@ afterEach(async () => {
   await rm(base, { recursive: true, force: true })
 })
 
-describe('model roots configuration', () => {
+describe.runIf(process.platform === 'linux')('model roots configuration', () => {
   it.each([
     [[], 'fs-local: modelRoots must list at least one directory; omit it to leave model paths unrestricted'],
     [['relative/root'], 'fs-local: modelRoots entry "relative/root" must be an absolute path'],
@@ -79,7 +83,7 @@ describe('model roots configuration', () => {
   })
 })
 
-describe('model paths under roots', () => {
+describe.runIf(process.platform === 'linux')('model paths under roots', () => {
   let fs: LocalFileSystem
   beforeEach(async () => {
     fs = await mount({ cwd: workspace, modelRoots: [workspace, scratch] })
@@ -152,5 +156,96 @@ describe('model paths under roots', () => {
     await expect(linked.resolveModelPath(join(outside, 'key'))).rejects.toThrow(
       `its real path is outside the directories you can access (${join(base, 'projects-link')})`,
     )
+  })
+})
+
+/**
+ * Start a process that keeps flipping `<workspace>/swapped` between a real directory holding a
+ * harmless `key` and a symbolic link to the secret directory.
+ * @returns a stopper that ends the flipping and waits for the process to exit.
+ */
+function flipper(directory: string, secretDirectory: string): () => Promise<void> {
+  const script = [
+    "const fs = require('node:fs'); const path = require('node:path')",
+    'const [dir, secret] = process.argv.slice(1)',
+    "const target = path.join(dir, 'swapped'), real = path.join(dir, 'real'), link = path.join(dir, 'link')",
+    "fs.mkdirSync(real); fs.writeFileSync(path.join(real, 'key'), 'harmless'); fs.symlinkSync(secret, link)",
+    'for (;;) { try { fs.renameSync(real, target); fs.renameSync(target, real); fs.renameSync(link, target); fs.renameSync(target, link) } catch {} }',
+  ].join('\n')
+  const child = spawn(process.execPath, ['-e', script, directory, secretDirectory], { stdio: 'ignore' })
+  return () => new Promise((resolve) => { child.once('exit', () => { resolve() }); child.kill('SIGKILL') })
+}
+
+describe.runIf(process.platform === 'linux')('reads through an accepted descriptor', () => {
+  it('reports a target that vanished, a non-file, a FIFO, and a non-directory listing without blocking', async () => {
+    const fs = await mount({ cwd: workspace, modelRoots: [workspace, scratch] })
+    const gone = await fs.resolveModelPath('notes.txt')
+    await rm(join(workspace, 'notes.txt'))
+    await expect(fs.readText(gone)).rejects.toEqual(new FsError(`cannot read "${join(workspace, 'notes.txt')}": not found`, 'FS_NOT_FOUND'))
+    await expect(fs.readText(await fs.resolveModelPath(scratch))).rejects.toEqual(new FsError(`cannot read "${scratch}": not a regular file`, 'FS_NOT_REGULAR_FILE'))
+    execFileSync('mkfifo', [join(workspace, 'pipe')])
+    await expect(fs.readText(await fs.resolveModelPath('pipe'))).rejects.toMatchObject({ code: 'FS_NOT_REGULAR_FILE' })
+    await writeFile(join(workspace, 'plain'), 'x')
+    await expect(fs.listDir(await fs.resolveModelPath('plain'))).rejects.toEqual(new FsError(`cannot list "${join(workspace, 'plain')}": not a directory`, 'FS_NOT_DIRECTORY'))
+    await expect(fs.readByteRange(await fs.resolveModelPath('plain'), { offset: 0, length: 0 })).resolves.toEqual(new Uint8Array(0))
+    await expect(fs.readBytes(await fs.resolveModelPath('plain'), undefined, 0)).rejects.toMatchObject({ code: 'FS_TOO_LARGE' })
+    await chmod(join(workspace, 'plain'), 0o000)
+    await expect(fs.readText(await fs.resolveModelPath('plain'))).rejects.toMatchObject({ code: 'EACCES' })
+  })
+
+  it('refuses a descriptor that names a different file inside the roots', async () => {
+    const fs = await mount({ cwd: workspace, modelRoots: [workspace, scratch] })
+    await mkdir(join(workspace, 'a'))
+    await writeFile(join(workspace, 'a', 'f'), 'first')
+    await mkdir(join(scratch, 'b'))
+    await writeFile(join(scratch, 'b', 'f'), 'second')
+    const target = await fs.resolveModelPath('a/f')
+    await rm(join(workspace, 'a'), { recursive: true })
+    await symlink(join(scratch, 'b'), join(workspace, 'a'))
+    await expect(fs.readText(target)).rejects.toEqual(new FsError(`cannot read "${join(workspace, 'a/f')}": the path changed while it was being opened`, 'FS_STALE_VERSION'))
+  })
+
+  it('refuses model roots on a host without descriptor paths', async () => {
+    const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    try {
+      await expect(ctx.plugin(LocalFileSystem, { modelRoots: [workspace] })).rejects.toThrow('fs-local: modelRoots requires Linux; this host is darwin')
+    } finally {
+      platform.mockRestore()
+    }
+  })
+})
+
+describe.runIf(process.platform === 'linux')('model roots against a racing link swap', () => {
+  it('never reads or lists the secret through a link swapped in after resolution', async () => {
+    const fs = await mount({ cwd: workspace, modelRoots: [workspace, scratch] })
+    await writeFile(join(outside, 'key'), 'secret')
+    const stop = flipper(workspace, outside)
+    let reads = 0
+    try {
+      const deadline = Date.now() + 4_000
+      while (Date.now() < deadline) {
+        let target
+        try {
+          target = await fs.resolveModelPath('swapped/key')
+        } catch (_refusedOrMissing) {
+          // The link was in place or the name was absent at resolution; nothing was read.
+          continue
+        }
+        for (const read of [
+          () => fs.readText(target),
+          async () => Buffer.from(await fs.readBytes(target, undefined, 100)).toString('utf8'),
+          async () => Buffer.from(await fs.readByteRange(target, { offset: 0, length: 100 })).toString('utf8'),
+          async () => { let text = ''; for await (const chunk of await fs.streamText(target)) text += chunk; return text },
+          async () => (await fs.listDir(await fs.resolveModelPath('swapped'))).map(entry => entry.name).join(','),
+        ]) {
+          const text = await read().catch(() => '')
+          expect(text).not.toContain('secret')
+          reads += 1
+        }
+      }
+    } finally {
+      await stop()
+    }
+    expect(reads).toBeGreaterThan(50)
   })
 })

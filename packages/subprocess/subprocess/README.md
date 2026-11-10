@@ -34,6 +34,10 @@ One provider registers `ctx.subprocess` per composition; load it beside the cons
 - name: '@deepseek-ai/dsh-bash-local'
 ```
 
+### Running children as another identity
+
+A provider can start every child as a fixed identity that differs from the harness process's own; `childIdentity` reports it (`uid`, `gid`, and the supplementary `groups`), and is undefined when children run as the harness process. A Consumer that acts on model-chosen paths uses it to run that work as a child, so the kernel checks the paths with that identity; `dsh-fs-local` performs its file changes that way. `dsh-subprocess-local` sets it through its `runAs` configuration.
+
 ### Starting a managed process
 
 The request is fully explicit: the program and arguments, the working directory, one stdio disposition per stream, a termination grace, an optional abort signal, and optional environment overrides. Target and managed-range identities remain provider-private. `done` resolves with the direct command's exit facts (`exitCode` and `signal`) and rejects for spawn or provider failures; collected output stays readable after exit.

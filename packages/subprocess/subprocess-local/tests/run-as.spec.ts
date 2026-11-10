@@ -192,6 +192,12 @@ linux('run-as children through the provider', () => {
     expect(report.env).toEqual({ CALLER: 'explicit', HOME: '/home/agent', USER: 'agent' })
   })
 
+  it('reports its child identity, and none without run-as', async () => {
+    const config = runAs()
+    expect((await runtime(config)).subprocess.childIdentity).toEqual({ uid: config.uid, gid: config.gid, groups: config.groups })
+    expect((await runtime(undefined)).subprocess.childIdentity).toBeUndefined()
+  })
+
   it('looks executables up on the run-as PATH', async () => {
     const ctx = await runtime(runAs({ inherit: [], set: { PATH: '/nonexistent-run-as-path' } }))
     await expect(ctx.subprocess.resolveExecutable('sh')).rejects.toThrow('was not found on PATH')

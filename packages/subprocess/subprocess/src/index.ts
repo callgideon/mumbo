@@ -11,12 +11,13 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import { proxyEnvironmentForChild } from '@deepseek-ai/dsh-http-proxy'
 import { DSH_ENV_PREFIX } from './types.ts'
-import type { SubprocessHandle, SubprocessSpawnSpec } from './types.ts'
+import type { SubprocessChildIdentity, SubprocessHandle, SubprocessSpawnSpec } from './types.ts'
 import type { SubprocessTerminalEnvironment, SubprocessTerminalHandle, SubprocessTerminalSpawnSpec } from './types.ts'
 
 export { DSH_ENV_PREFIX } from './types.ts'
 export type {
   CollectedOutput,
+  SubprocessChildIdentity,
   DshEnvironment,
   DshEnvironmentKey,
   SubprocessCollect,
@@ -117,6 +118,17 @@ declare module '@deepseek-ai/cordis' {
 export abstract class SubprocessRuntime extends Service {
   constructor(ctx: Context) {
     super(ctx, 'subprocess')
+  }
+
+  /**
+   * The fixed identity this provider starts every child as, when it differs from the harness
+   * process's own. Consumers that act on model-chosen paths use it to run that work as a child,
+   * so the kernel checks the paths with this identity. The base provider starts children as the
+   * harness process and reports none.
+   * @returns the child identity, or undefined when children run as the harness process.
+   */
+  get childIdentity(): SubprocessChildIdentity | undefined {
+    return undefined
   }
 
   /**

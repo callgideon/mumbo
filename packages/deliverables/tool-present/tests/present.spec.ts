@@ -202,7 +202,7 @@ it('refuses a file replaced by a directory after inspecting its final component'
   expect((await execute([{ path: 'source' }])).isError).toBe(true)
 })
 
-describe('present under model roots', () => {
+describe.runIf(process.platform === 'linux')('present under model roots', () => {
   it('refuses a file outside the roots and records no delivery', async () => {
     const { owner, root, execute } = await setup(root => [join(root, 'projects')])
     await writeFile(join(root, 'secret.txt'), 'secret')

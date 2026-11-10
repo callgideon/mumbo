@@ -195,6 +195,16 @@ export interface SubprocessHandle {
   waitForExit(signal?: AbortSignal): Promise<boolean>
 }
 
+/** The fixed user identity a provider starts every child process as. */
+export interface SubprocessChildIdentity {
+  /** User id of every child. */
+  readonly uid: number
+  /** Group id of every child. */
+  readonly gid: number
+  /** The complete supplementary group list of every child. */
+  readonly groups: readonly number[]
+}
+
 /**
  * Signals supported by the terminal-process primitive. Kept member-identical
  * to `TerminalSignal` in `@deepseek-ai/dsh-terminal` without a cross-seam dependency;

@@ -57,6 +57,8 @@ describe('SubprocessRuntime seam', () => {
   it('a concrete subclass registers as ctx.subprocess and serves the abstract API', async () => {
     const ctx = new Context()
     await ctx.plugin(StubSubprocessRuntime)
+    // The base provider starts children as the harness process.
+    expect(ctx.subprocess.childIdentity).toBeUndefined()
     const handle = ctx.subprocess.spawn({
       argv: ['true'],
       cwd: '/stub',

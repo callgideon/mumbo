@@ -47,7 +47,7 @@ Set `runAs` to start every ordinary and terminal child of this provider as one n
       gid: 1001
       groups: []
       inherit: [PATH, LANG]
-      set: { HOME: /home/agent, USER: agent, LOGNAME: agent, SHELL: /bin/bash }
+      set: { HOME: /home/agent, TMPDIR: /home/agent/tmp, USER: agent, LOGNAME: agent, SHELL: /bin/bash }
       secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY]
 ```
 
@@ -59,7 +59,7 @@ Set `runAs` to start every ordinary and terminal child of this provider as one n
 | `set` | Fixed values the child always receives; they replace inherited and spawn-request entries of the same name. |
 | `secretNames` | Names that must never reach a child. A spawn whose final environment contains one, compared without case, throws `SubprocessSecretEnvironmentError` before anything starts. |
 
-The child's environment is the `inherit` names, then the spawn request's explicit entries (an `undefined` entry removes a name), then `set`. The Linux exec bootstrap takes the identity before it changes into the target's directory and enters the target, and it refuses to enter the target unless `/proc/self/status` reports exactly the configured ids and groups; a refused step rejects `done` with a `run-as:` message. Without a user-systemd scope the bootstrap runs directly as the detached process group. Executable lookup uses the run-as `PATH`, and `terminalEnvironment()` reports the run-as `SHELL`. Interactive shell activity records stay in a root-owned directory the child can only traverse; the child owns just its two record files. The provider fails at load on a non-Linux host, an unavailable exec bootstrap, a root identity, an invalid name, or a secret name in `inherit` or `set`. A process must start as root to switch to a different identity.
+The child's environment is the `inherit` names, then the spawn request's explicit entries (an `undefined` entry removes a name), then `set`. The Linux exec bootstrap takes the identity before it changes into the target's directory and enters the target, and it refuses to enter the target unless `/proc/self/status` reports exactly the configured ids and groups; a refused step rejects `done` with a `run-as:` message. Without a user-systemd scope the bootstrap runs directly as the detached process group. Executable lookup uses the run-as `PATH`, `terminalEnvironment()` reports the run-as `SHELL`, and `childIdentity` reports the identity so Consumers such as `dsh-fs-local` run model-chosen file changes as it. Interactive shell activity records stay in a root-owned directory the child can only traverse; the child owns just its two record files. The provider fails at load on a non-Linux host, an unavailable exec bootstrap, a root identity, an invalid name, or a secret name in `inherit` or `set`. A process must start as root to switch to a different identity.
 
 ### Resolving executables
 

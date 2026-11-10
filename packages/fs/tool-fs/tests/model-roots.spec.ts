@@ -15,6 +15,7 @@ import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
+import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
 
 let base: string
@@ -57,6 +58,8 @@ beforeEach(async () => {
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(NativeToolExecutor)
+  // With model roots, mutations need a subprocess provider; this one runs children as this process.
+  await ctx.plugin(LocalSubprocessRuntime)
   await ctx.plugin(LocalFileSystem, { cwd: workspace, modelRoots: [workspace] })
   // read_image resolves through the same shared read-target step as read.
   fiber = await ctx.plugin(ToolFs, { applyPatch: true })
@@ -67,7 +70,8 @@ afterEach(async () => {
   await rm(base, { recursive: true, force: true })
 })
 
-describe('model file tools under model roots', () => {
+// Model roots require Linux descriptor paths.
+describe.runIf(process.platform === 'linux')('model file tools under model roots', () => {
   it('read, write, edit, and apply_patch work inside the roots', async () => {
     expect(text(await call('read', { file_path: 'notes.txt' }))).toContain('inside')
     expect((await call('write', { file_path: 'made.txt', content: 'one\n' })).isError).toBe(false)

@@ -13,6 +13,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
 import * as FsPolicy from '@deepseek-ai/dsh-fs-observation-policy'
 import SandboxedFileSystem from '@deepseek-ai/dsh-fs-sandbox'
+import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -86,6 +87,8 @@ async function setup(
     await ctx.plugin(LocalFileSystem, { cwd: root })
   } else {
     await ctx.plugin(SandboxPolicy, { mode: options.sandboxMode, workspaceRoot: root })
+    // With model roots, mutations need a subprocess provider; this one runs children as this process.
+    if (options.modelRoots !== undefined) await ctx.plugin(LocalSubprocessRuntime)
     await ctx.plugin(SandboxedFileSystem, { cwd: root, ...options.modelRoots === undefined ? {} : { modelRoots: options.modelRoots } })
   }
   if (options.fsPolicy === true) await ctx.plugin(FsPolicy)
@@ -666,7 +669,7 @@ describe('tool-str-replace-editor', () => {
   })
 })
 
-describe('model roots', () => {
+describe.runIf(process.platform === 'linux')('model roots', () => {
   it('views and creates inside the roots and refuses every command outside them', async () => {
     const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-tool-str-replace-editor-roots-')))
     roots.push(root)

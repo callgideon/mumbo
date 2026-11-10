@@ -6,8 +6,9 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { createReadStream, realpath as realpathCallback } from 'node:fs'
-import { chmod, link, lstat, mkdir, open, readFile, readdir, rename, rm, stat } from 'node:fs/promises'
+import { constants as fsConstants, createReadStream, realpath as realpathCallback } from 'node:fs'
+import { chmod, link, lstat, mkdir, open, readFile, readdir, readlink, rename, rm, stat } from 'node:fs/promises'
+import type { FileHandle } from 'node:fs/promises'
 import type { BigIntStats, Dirent, Stats } from 'node:fs'
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { TextDecoder, promisify } from 'node:util'
@@ -62,9 +63,9 @@ function throwIfAborted(signal: AbortSignal | undefined, verb: string): void {
  * `readFile` with a bare `AbortError`, which would otherwise escape the seam's
  * error taxonomy — the streaming/write paths translate it the same way).
  */
-async function readFileAbortable(absolutePath: string, verb: 'read' | 'edit', signal?: AbortSignal): Promise<Buffer> {
+async function readFileAbortable(source: string | FileHandle, verb: 'read' | 'edit', signal?: AbortSignal): Promise<Buffer> {
   try {
-    return await readFile(absolutePath, signal ? { signal } : {})
+    return await readFile(source, signal ? { signal } : {})
   } catch (error: unknown) {
     /* v8 ignore next 2 -- a non-abort readFile rejection needs a permission/IO fault racing an open file. */
     if (!isAbortError(error)) throw error
@@ -107,6 +108,14 @@ export interface FsIoInternals {
   /** Test hook after raw-read stat preflight and before bounded content I/O. */
   inspectReadBytesAfterStat?: (target: LocalTarget) => void | Promise<void>
 }
+
+/**
+ * Accepts or refuses an opened descriptor before anything is read through it.
+ * @param opened - the descriptor's real path, as the kernel reports it under `/proc/self/fd`.
+ * @param target - the resolved target the caller asked for.
+ * @throws to refuse the descriptor; the opener closes it.
+ */
+export type ReadPin = (opened: string, target: LocalTarget) => void
 
 /** A resolved local path: the absolute path shown to callers and its realpath identity. */
 export interface LocalTarget {
@@ -301,9 +310,37 @@ function listingIoError(displayPath: string, error: unknown): FsError {
   return new FsError(`cannot list "${displayPath}": ${errorMessage(error)}`, 'FS_IO_ERROR', { cause: error })
 }
 
-async function resolveListedChildTarget(parent: LocalTarget, name: string): Promise<LocalTarget> {
-  const identity = await resolveLocalTarget(parent.targetKey, name)
+async function resolveListedChildTarget(parent: LocalTarget, name: string, base: string): Promise<LocalTarget> {
+  const identity = await resolveLocalTarget(base, name)
   return { displayPath: localDisplayPath(parent.displayPath, name), targetKey: identity.targetKey }
+}
+
+/**
+ * Open a target without following it again by name later, and let `pin` accept the opened
+ * descriptor's real path before any content is read. `O_NONBLOCK` keeps a FIFO from blocking
+ * the open; callers check the descriptor's type.
+ * @param target - the resolved target.
+ * @param verb - the operation named in a not-found error.
+ * @param pin - accepts or refuses the opened descriptor.
+ * @param directory - open a directory (`O_DIRECTORY`) instead of any file.
+ * @returns the accepted open descriptor; the caller closes it.
+ */
+async function openPinned(target: LocalTarget, verb: 'read' | 'list', pin: ReadPin, directory = false): Promise<FileHandle> {
+  let handle: FileHandle
+  try {
+    handle = await open(target.targetKey, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | (directory ? fsConstants.O_DIRECTORY : 0))
+  } catch (error: unknown) {
+    if (isENOENT(error)) throw new FsError(`cannot ${verb} "${target.displayPath}": not found`, 'FS_NOT_FOUND', { cause: error })
+    if (directory && isENOTDIR(error)) throw new FsError(`cannot ${verb} "${target.displayPath}": not a directory`, 'FS_NOT_DIRECTORY', { cause: error })
+    throw error
+  }
+  try {
+    pin(await readlink(`/proc/self/fd/${handle.fd}`), target)
+    return handle
+  } catch (error: unknown) {
+    await handle.close()
+    throw error
+  }
 }
 
 /**
@@ -312,13 +349,25 @@ async function resolveListedChildTarget(parent: LocalTarget, name: string): Prom
  * never read.
  * @param target - the resolved directory to list; a missing or non-directory target throws.
  * @param signal - aborts the listing, checked between children (`FS_ABORTED`).
+ * @param pin - accepts or refuses the opened directory before listing; omitted, the directory is listed by path.
  * @returns one entry per direct child, sorted by name.
  */
-export async function listDirectory(target: LocalTarget, signal?: AbortSignal): Promise<LocalDirEntry[]> {
+export async function listDirectory(target: LocalTarget, signal?: AbortSignal, pin?: ReadPin): Promise<LocalDirEntry[]> {
   throwIfAborted(signal, 'list')
+  if (pin === undefined) return listDirectoryAt(target, target.targetKey, signal)
+  // Names and children are read through the accepted descriptor, never by the directory's name again.
+  const handle = await openPinned(target, 'list', pin, true)
+  try {
+    return await listDirectoryAt(target, `/proc/self/fd/${handle.fd}`, signal)
+  } finally {
+    await handle.close()
+  }
+}
+
+async function listDirectoryAt(target: LocalTarget, base: string, signal?: AbortSignal): Promise<LocalDirEntry[]> {
   let info: PathInfo | null
   try {
-    info = await probe(target.targetKey)
+    info = await probe(base)
   } catch (error: unknown) {
     throw listingIoError(target.displayPath, error)
   }
@@ -327,7 +376,7 @@ export async function listDirectory(target: LocalTarget, signal?: AbortSignal): 
 
   let entries: Dirent[]
   try {
-    entries = await readdir(target.targetKey, { withFileTypes: true, encoding: 'utf8' })
+    entries = await readdir(base, { withFileTypes: true, encoding: 'utf8' })
   } catch (error: unknown) {
     /* v8 ignore next -- requires permission/kernel failure from readdir after a successful directory stat. */
     throw listingIoError(target.displayPath, error)
@@ -338,7 +387,7 @@ export async function listDirectory(target: LocalTarget, signal?: AbortSignal): 
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
     throwIfAborted(signal, 'list')
     try {
-      const childTarget = await resolveListedChildTarget(target, entry.name)
+      const childTarget = await resolveListedChildTarget(target, entry.name, base)
       const childInfo = await probe(childTarget.targetKey)
       result.push({
         name: entry.name,
@@ -405,6 +454,30 @@ function decodeUtf8Stream(
   }
 }
 
+/**
+ * Confirm a regular file, by path or, with `pin`, through an accepted descriptor.
+ * @param target - the resolved file.
+ * @param verb - the operation named in errors.
+ * @param signal - aborts before any I/O.
+ * @param pin - accepts or refuses the opened descriptor; omitted, the file is checked by path.
+ * @returns its stats, plus the open descriptor to read from when pinned; the caller closes it.
+ */
+async function regularFile(
+  target: LocalTarget, verb: 'read', signal?: AbortSignal, pin?: ReadPin,
+): Promise<{ info: Stats; handle?: FileHandle }> {
+  if (pin === undefined) return { info: await statRegularFile(target, verb, signal) }
+  throwIfAborted(signal, verb)
+  const handle = await openPinned(target, verb, pin)
+  try {
+    const info = await handle.stat()
+    if (!info.isFile()) throw new FsError(`cannot ${verb} "${target.displayPath}": not a regular file`, 'FS_NOT_REGULAR_FILE')
+    return { info, handle }
+  } catch (error: unknown) {
+    await handle.close()
+    throw error
+  }
+}
+
 async function statRegularFile(target: LocalTarget, verb: 'read', signal?: AbortSignal): Promise<Stats> {
   throwIfAborted(signal, verb)
   let info: Stats
@@ -424,11 +497,17 @@ async function statRegularFile(target: LocalTarget, verb: 'read', signal?: Abort
  * non-regular files, invalid UTF-8, and NUL-byte binary samples.
  * @param target - the resolved file to read.
  * @param signal - aborts the read (`FS_ABORTED`).
+ * @param pin - accepts or refuses the opened descriptor before reading; omitted, the file is read by path.
  * @returns the full decoded text, byte-for-byte (no normalization).
  */
-export async function readWholeText(target: LocalTarget, signal?: AbortSignal): Promise<string> {
-  await statRegularFile(target, 'read', signal)
-  const raw = await readFileAbortable(target.targetKey, 'read', signal)
+export async function readWholeText(target: LocalTarget, signal?: AbortSignal, pin?: ReadPin): Promise<string> {
+  const { handle } = await regularFile(target, 'read', signal, pin)
+  let raw: Buffer
+  try {
+    raw = await readFileAbortable(handle ?? target.targetKey, 'read', signal)
+  } finally {
+    await handle?.close()
+  }
   throwIfAborted(signal, 'read')
   if (raw.subarray(0, BINARY_SAMPLE_BYTES).includes(0)) {
     throw new FsError(`cannot read "${target.displayPath}": binary file`, 'FS_NOT_TEXT')
@@ -445,6 +524,7 @@ export async function readWholeText(target: LocalTarget, signal?: AbortSignal): 
  * @param signal - aborts the read (`FS_ABORTED`).
  * @param maxBytes - inclusive byte cap on the complete content (`FS_TOO_LARGE`).
  * @param internals - test seam for a deterministic post-stat growth race.
+ * @param pin - accepts or refuses the opened descriptor before reading; omitted, the file is read by path.
  * @returns the full raw content, at most `maxBytes` long.
  */
 export async function readWholeBytes(
@@ -452,13 +532,17 @@ export async function readWholeBytes(
   signal: AbortSignal | undefined,
   maxBytes: number,
   internals: FsIoInternals = {},
+  pin?: ReadPin,
 ): Promise<Uint8Array> {
-  const info = await statRegularFile(target, 'read', signal)
+  const { info, handle } = await regularFile(target, 'read', signal, pin)
   if (info.size > maxBytes) {
+    await handle?.close()
     throw new FsError(`cannot read "${target.displayPath}": ${info.size} bytes exceeds the ${maxBytes}-byte limit`, 'FS_TOO_LARGE')
   }
   await internals.inspectReadBytesAfterStat?.(target)
+  // A pinned stream reads the accepted descriptor and closes it when it ends.
   const stream = createReadStream(target.targetKey, {
+    ...handle === undefined ? {} : { fd: handle },
     end: maxBytes,
     ...signal ? { signal } : {},
   })
@@ -488,16 +572,22 @@ export async function readWholeBytes(
  * @param target - the resolved file to read.
  * @param range - `offset`, the 0-based first byte, and `length`, the largest byte count.
  * @param signal - aborts the read (`FS_ABORTED`).
+ * @param pin - accepts or refuses the opened descriptor before reading; omitted, the file is read by path.
  * @returns the window's bytes, at most `length` long.
  */
 export async function readByteWindow(
   target: LocalTarget,
   range: { offset: number; length: number },
   signal?: AbortSignal,
+  pin?: ReadPin,
 ): Promise<Uint8Array> {
-  await statRegularFile(target, 'read', signal)
-  if (range.length === 0) return new Uint8Array(0)
+  const { handle } = await regularFile(target, 'read', signal, pin)
+  if (range.length === 0) {
+    await handle?.close()
+    return new Uint8Array(0)
+  }
   const stream = createReadStream(target.targetKey, {
+    ...handle === undefined ? {} : { fd: handle },
     start: range.offset,
     end: range.offset + range.length - 1,
     ...signal ? { signal } : {},
@@ -524,11 +614,12 @@ export async function readByteWindow(
  * cross-chunk UTF-8 decoding), but never holds the whole file in memory.
  * @param target - the resolved file to stream.
  * @param signal - aborts the stream, including between chunks (`FS_ABORTED`).
+ * @param pin - accepts or refuses the opened descriptor before reading; omitted, the file is read by path.
  * @returns decoded text chunks in file order; chunk boundaries carry no meaning.
  */
-export async function* streamWholeText(target: LocalTarget, signal?: AbortSignal): AsyncIterable<string> {
-  await statRegularFile(target, 'read', signal)
-  const stream = createReadStream(target.targetKey, signal ? { signal } : {})
+export async function* streamWholeText(target: LocalTarget, signal?: AbortSignal, pin?: ReadPin): AsyncIterable<string> {
+  const { handle } = await regularFile(target, 'read', signal, pin)
+  const stream = createReadStream(target.targetKey, { ...handle === undefined ? {} : { fd: handle }, ...signal ? { signal } : {} })
   const decoder = new TextDecoder('utf-8', { fatal: true })
   let sampledBytes = 0
 

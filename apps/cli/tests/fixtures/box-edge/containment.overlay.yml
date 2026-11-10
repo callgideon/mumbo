@@ -1,0 +1,33 @@
+# Agent containment (B24): the rows the edge appends after every other overlay of a person or project box. The uid and
+# gid are the box's `agent` user; the rest is fixed.
+# Start every process dsh runs for the model as `agent`, with an explicit environment.
+- id: subprocess
+  config:
+    runAs:
+      uid: 1001
+      gid: 1001
+      groups: []
+      inherit: [LANG, LC_ALL, TZ]
+      set:
+        HOME: /home/agent
+        TMPDIR: /home/agent/tmp
+        USER: agent
+        LOGNAME: agent
+        SHELL: /bin/bash
+        PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY, E2B_API_KEY, GH_TOKEN, GITHUB_TOKEN]
+# Confine the model's file tools to the workspace and agent's home; reads check each opened file, changes run as agent.
+- id: fs-sandbox
+  config:
+    modelRoots: [/root/projects, /home/agent]
+# Installing or enabling a plugin loads code into root dsh: no plugin_manager tool for the model.
+- id: plugin-manager
+  config:
+    modelTools: false
+# Creator mode: runtime inspection and the plugin tools.
+- id: preset-cordis
+  disabled: true
+# Change summaries run git and read files for the model's turns; off until their scratch directory works as agent.
+- id: workspace-changes
+  config:
+    summaries: false

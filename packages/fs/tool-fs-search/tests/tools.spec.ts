@@ -1328,7 +1328,7 @@ function withPersona(...sections: string[]): string {
   return ['You are an AI agent powered by DeepSeek Harness.', ...sections].join('\n\n')
 }
 
-describe('model roots', () => {
+describe.runIf(process.platform === 'linux')('model roots', () => {
   it('refuses a search root outside the provider roots before ripgrep starts, and searches inside', async () => {
     const base = await realpath(await mkdtemp(join(tmpdir(), 'dsh-search-roots-')))
     try {

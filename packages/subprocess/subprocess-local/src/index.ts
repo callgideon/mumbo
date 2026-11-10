@@ -109,6 +109,11 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
   /** The credentials alone, as the exec bootstrap receives them. */
   private readonly identity: RunAsIdentity | undefined
 
+  /** The run-as identity every child starts with, when configured. */
+  override get childIdentity(): RunAsIdentity | undefined {
+    return this.identity
+  }
+
   static Config: z<Config> = z.object({
     runAs: z.union([RunAs, z.const(undefined)]),
   })

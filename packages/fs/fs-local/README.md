@@ -50,15 +50,17 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 <a id="confining-model-paths"></a>
 ### Confining model paths
 
-Set `modelRoots` to confine the model's file tools to an allowlist of directories, for example the workspace, `/tmp`, and the agent user's home in a contained box. The provider canonicalizes each root at load and fails loudly when a root is not absolute, missing, or not a directory, or when the list is empty.
+Set `modelRoots` to confine the model's file tools to an allowlist of directories, for example the workspace and the agent user's home in a contained box. Keep shared temporary directories such as `/tmp` out: the file tools run as this process, so every file under a root is readable to them whoever owns it. The provider requires Linux, canonicalizes each root at load, and fails loudly when a root is not absolute, missing, or not a directory, or when the list is empty.
 
 ```yaml
 - name: '@deepseek-ai/dsh-fs-local'
   config:
-    modelRoots: [/root/projects, /tmp, /home/agent]
+    modelRoots: [/root/projects, /home/agent]
 ```
 
-`resolveModelPath`, which every model-facing tool uses for a model-supplied path, realpaths the path first and refuses with `FS_OUTSIDE_ROOTS` a real path outside every root: absolute paths such as `/proc/self/environ`, `..` traversal, and symbolic links to files or directories outside. A path that does not exist yet is judged by its nearest existing ancestor, so a new file under a linked parent is refused. Every `resolve` call, including harness readers such as instruction and skill discovery and the Files panel, also refuses a path written under a root whose real path leaves the roots, because the model can plant links under its roots. Other harness paths outside the roots resolve as before. The checks run at resolution; a link swapped in between the check and the provider's open of the canonical path is not detected, as the [agent containment Agent Note](../../../.agents/notes/implemented/architecture/2026-11-10-agent-containment-run-as-and-model-roots.md) describes.
+`resolveModelPath`, which every model-facing tool uses for a model-supplied path, realpaths the path first and refuses with `FS_OUTSIDE_ROOTS` a real path outside every root: absolute paths such as `/proc/self/environ`, `..` traversal, and symbolic links to files or directories outside. A path that does not exist yet is judged by its nearest existing ancestor, so a new file under a linked parent is refused. Every `resolve` call, including harness readers such as instruction and skill discovery and the Files panel, also refuses a path written under a root whose real path leaves the roots, because the model can plant links under its roots. Other harness paths outside the roots resolve as before.
+
+With model roots, every read and listing opens its target once (`O_NONBLOCK`, so a FIFO cannot block) and accepts the descriptor only when `/proc/self/fd` reports the resolved real path; a link swapped in after resolution is refused with `FS_OUTSIDE_ROOTS` when the opened file lies outside the roots and `FS_STALE_VERSION` otherwise, and listings read names and children through the accepted descriptor. Changes are never made by this process on the model's behalf when the mounted subprocess provider reports a [child identity](../../subprocess/subprocess/README.md): each write, edit, patch, delete, move, and directory creation runs in a one-shot helper process (`mutation-helper`) the provider starts as that identity, so the kernel judges every path component with its permissions; the helper's output is decoded strictly and its failures keep their codes. With model roots and no subprocess provider mounted, every change is refused rather than made by this process. Without a child identity, changes run in this process as before. The [agent containment Agent Note](../../../.agents/notes/implemented/architecture/2026-11-10-agent-containment-run-as-and-model-roots.md) records the decision.
 
 ### What you can do
 
@@ -143,7 +145,7 @@ No direct invalidation; the named consumer owns any request-prefix changes.
 These limits define when the local backend is a poor fit or needs special operational care. They are current package constraints, not a general filesystem comparison or a task backlog.
 
 - **`config.cwd` is not a sandbox** — it is a resolution default, not containment: absolute paths and `..` escape it. Confine model paths with `modelRoots`, mutations with a stricter `ctx.fs` backend, or calls with a permission plugin on the `tools/execute` waterfall.
-- **Model roots are checked at resolution, not at open** — operations open the canonical path by name, so a process that swaps a directory under a root for a symbolic link between resolution and open redirects that operation. Pinning the opened descriptor to the resolved target is deferred.
+- **Changes without a run-as provider keep a resolution race** — with model roots but no child identity, changes open the canonical path by name in this process, so a process that swaps a directory under a root for a symbolic link between resolution and the change redirects it. Contained deployments configure a run-as subprocess provider, under which the kernel checks each change as that identity. Each helper change also costs one extra process start.
 - **Linux parent-directory recreation** — restoring observation after a parent directory is deleted and recreated is deferred; same-path file recreation while its parent remains is supported.
 - **Version tokens depend on filesystem metadata** — they combine device, inode, size, nanosecond mtime, and nanosecond ctime; a storage layer that cannot update any of those facts for a rewrite can still defeat the stale guard.
 - **`editText` holds the whole file (plus the edited copy) in memory** — streaming exists only on the read path.

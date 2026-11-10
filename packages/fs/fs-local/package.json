@@ -20,17 +20,23 @@
     },
     "./src/*": "./src/*",
     "./locale/*.json": "./locale/*.json",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./mutation-helper": {
+      "types": "./lib/types/mutation-helper.d.ts",
+      "default": "./lib/mutation-helper.js"
+    }
   },
   "files": [
     "locale/*.json",
     "lib/index.js",
+    "lib/mutation-helper.js",
     "lib/types/**/*.d.ts"
   ],
   "license": "MIT",
   "peerDependencies": {
+    "@deepseek-ai/cordis": "workspace:~",
     "@deepseek-ai/dsh-fs": "workspace:*",
-    "@deepseek-ai/cordis": "workspace:~"
+    "@deepseek-ai/dsh-subprocess": "workspace:*"
   },
   "dependencies": {
     "chokidar": "5.0.0",
@@ -39,8 +45,10 @@
     "@deepseek-ai/dsh-fs-patch": "workspace:*"
   },
   "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:~",
     "@deepseek-ai/dsh-fs": "workspace:*",
     "@deepseek-ai/dsh-llm": "workspace:*",
-    "@deepseek-ai/cordis": "workspace:~"
+    "@deepseek-ai/dsh-subprocess": "workspace:*",
+    "@deepseek-ai/dsh-subprocess-local": "workspace:*"
   }
 }
