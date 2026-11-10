@@ -410,10 +410,9 @@ test('a failed restore drops the new box, logged at error, so no backup of it re
  *  answers `presign(key, versionId)`, by default GET-URL-<version or latest>. */
 async function restoreRig({ record, presign = async (key, v) => `GET-URL-${v ?? 'latest'}`, fail = () => false } = {}) {
   const e2b = fakeE2B(); const ran = []; const killed = []; const logs = []; const presigned = []
-  e2b.Sandbox.create = async (tpl, opts) => {
-    const id = `b${e2b.made.length + 1}`; e2b.made.push({ id, opts })
-    return { sandboxId: id, files: { write: async () => {} }, kill: async () => { killed.push(id) }, commands: { run: async (c) => { ran.push(c); if (fail(c)) throw new Error('exit status 2'); return { stdout: c.includes('dsh.log') ? 'launch123' : '' } } } }
-  }
+  const box = (id) => ({ sandboxId: id, files: { write: async () => {} }, kill: async () => { killed.push(id) }, commands: { run: async (c) => { ran.push(c); if (fail(c)) throw new Error('exit status 2'); return { stdout: c.includes('dsh.log') ? 'launch123' : '' } } } })
+  e2b.Sandbox.create = async (tpl, opts) => { const id = `b${e2b.made.length + 1}`; e2b.made.push({ id, opts }); return box(id) }
+  e2b.Sandbox.connect = async (id) => box(id)
   e2b.Sandbox.list = () => ({ hasNext: true, nextItems: async function () { this.hasNext = false; return e2b.made.filter(m => !killed.includes(m.id)).map(m => ({ sandboxId: m.id, state: 'running', startedAt: '1' })) } })
   const store = memoryStore()
   if (record) await store.putDoc(restoreKey('a@x.com'), record)
@@ -422,15 +421,26 @@ async function restoreRig({ record, presign = async (key, v) => `GET-URL-${v ?? 
 }
 const KEY = `${userPrefix('a@x.com')}/latest.tar.gz`
 
-test('a restore record: the next create presigns that version, restores from its URL, logs it, then clears the record', async () => {
+test('a restore record: the next create restores that version, and the record stays until that box\'s first backup, which the next sweep takes', async () => {
   const r = await restoreRig({ record: { versionId: 'v1', at: 1 } })
   const { id } = await r.b.ensure('a@x.com')
   assert.deepEqual(r.presigned, [[KEY, 'v1']])
   assert.ok(r.ran.includes(restoreCommand('GET-URL-v1')), 'the restore command fetches the versioned URL')
   assert.deepEqual(r.logs.filter(l => l.msg === 'restore'), [{ edge: 'box', msg: 'restore', user: 'a@x.com', box: id, ok: true, versionId: 'v1' }])
-  assert.equal(await r.store.getDoc(restoreKey('a@x.com')), undefined, 'one shot')
-  // The box is lost later: its next creation restores latest.tar.gz again.
+  assert.deepEqual(await r.store.getDoc(restoreKey('a@x.com')), { versionId: 'v1', at: 1 }, 'no backup holds the restored data yet')
+  // Lost before its first backup: the next creation restores the same version, not latest.tar.gz.
   r.killed.push(id); await r.store.deleteBox(id)
+  const { id: second } = await r.b.ensure('a@x.com')
+  assert.deepEqual(r.presigned.at(-1), [KEY, 'v1'])
+  // A resume keeps the box's mark; the next sweep backs it up at once and spends the record.
+  await r.store.patchBox(second, { paused: true })
+  await r.b.ensure('a@x.com')
+  await r.b.sweep()
+  assert.ok(r.ran.includes(backupCommand('PUT')))
+  assert.equal(await r.store.getDoc(restoreKey('a@x.com')), undefined, 'one shot')
+  assert.equal((await r.store.getBox(second)).restored, undefined)
+  // Lost after that backup: the next creation restores latest.tar.gz again.
+  r.killed.push(second); await r.store.deleteBox(second)
   await r.b.ensure('a@x.com')
   assert.deepEqual(r.presigned.at(-1), [KEY, undefined])
   assert.ok(r.ran.includes(restoreCommand('GET-URL-latest')))
@@ -448,7 +458,6 @@ test('a create from a recorded version that fails in the restore or after it kee
   failing = undefined
   await r.b.ensure('a@x.com')
   assert.deepEqual(r.presigned.map(p => p[1]), ['v1', 'v1', 'v1'])
-  assert.equal(await r.store.getDoc(restoreKey('a@x.com')), undefined)
 })
 
 test('an unknown recorded version fails loud: error line, restore-failed 503, no box, no fallback to latest, record kept', async () => {
@@ -460,7 +469,7 @@ test('an unknown recorded version fails loud: error line, restore-failed 503, no
     assert.deepEqual(r.presigned, [[KEY, 'gone']], 'latest.tar.gz is never presigned')
     assert.equal(r.e2b.made.length, 0, 'no box is created')
     assert.deepEqual(await r.store.getDoc(restoreKey('a@x.com')), { versionId: 'gone', at: 1 })
-    assert.deepEqual(r.logs, [{ edge: 'box', level: 'error', msg: 'restore version unknown', user: 'a@x.com', versionId: 'gone', ...(presign === deleteMarker ? { error: 'UnknownError', status: 405 } : { error: 'NotFound' }) }])
+    assert.deepEqual(r.logs, [{ edge: 'box', level: 'error', msg: 'restore version unknown', user: 'a@x.com', versionId: 'gone', ...(presign === deleteMarker ? { error: 'UnknownError', status: 405 } : { error: 'NotFound', status: 404 }) }])
   }
   // A record without a version id would presign latest.tar.gz: refused before any presign.
   const r = await restoreRig({ record: { at: 1 } })
@@ -469,10 +478,13 @@ test('an unknown recorded version fails loud: error line, restore-failed 503, no
   assert.equal(r.logs[0].msg, 'restore version unknown')
 })
 
-test('a record the operator replaces while a create runs stays for the next creation', async () => {
+test('a record the operator replaces while a create runs stays for the next creation, past the box\'s first backup', async () => {
   const r = await restoreRig({ record: { versionId: 'v1', at: 1 }, presign: async (key, v) => { await r.store.putDoc(restoreKey('a@x.com'), { versionId: 'v2', at: 2 }); return `GET-URL-${v}` } })
-  await r.b.ensure('a@x.com')
+  const { id } = await r.b.ensure('a@x.com')
+  await r.b.sweep()
+  assert.ok(r.ran.includes(backupCommand('PUT')))
   assert.deepEqual(await r.store.getDoc(restoreKey('a@x.com')), { versionId: 'v2', at: 2 })
+  assert.equal((await r.store.getBox(id)).restored, undefined)
 })
 
 test('firstSetUp is false while a restore record exists, also without a latest backup', async () => {

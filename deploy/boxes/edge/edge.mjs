@@ -612,7 +612,8 @@ export async function inParallel(items, limit, fn) {
 }
 
 // ---- the router's view of E2B. `e2b` is the SDK module and `store` the shared state (store.mjs); both are injected.
-// A box record: { email, launch, traffic, active, extended, backedUp, paused }, plus { creating, first } until creation ends.
+// A box record: { email, launch, traffic, active, extended, backedUp, paused }, plus { creating, first } until creation ends,
+// and { restored: versionId } until the first backup of a box created from a restore record.
 export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFiles, log = console.log }) {
   const LOCK_MS = 120_000
   const CREATE_STALE_MS = 15 * 60_000  // longer than a restore (11 min cap) plus dsh start
@@ -644,9 +645,9 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
 
   // A restore record whose version S3 does not serve (gone, a delete marker, a malformed id, or any other HEAD error) fails
   // the create as a failed restore would: no fallback to latest.tar.gz, and the record stays for the operator. `status` is
-  // S3's HTTP status, which a HEAD error without a body only carries there.
+  // S3's HTTP status, which a HEAD error without a body only carries there; presignGet's NotFound is a 404.
   const unknownVersion = (email, pin, e) => {
-    say({ level: 'error', msg: 'restore version unknown', user: email, versionId: pin.versionId, ...(e ? { error: e.message, status: e.$metadata?.httpStatusCode } : { error: 'NotFound' }) })
+    say({ level: 'error', msg: 'restore version unknown', user: email, versionId: pin.versionId, ...(e ? { error: e.message, status: e.$metadata?.httpStatusCode } : { error: 'NotFound', status: 404 }) })
     throw Object.assign(new Error('restore version unknown'), { status: 503, restoreFailed: true })
   }
   async function create(email) {
@@ -679,10 +680,9 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
       }
       await run(box, 'chmod +x /root/.mumbo/start.sh && /root/.mumbo/start.sh')
       const now = Date.now()
-      await store.putBox(box.sandboxId, { email, host: boxSite(cfg, email).host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), active: now, extended: now, backedUp: now, paused: false })
-      // Only once the box is up: a create that fails after the restore keeps the record, so the retry restores the same
-      // version, not latest.tar.gz. A record the operator replaced meanwhile stays for the next creation.
-      if (pin && (await store.getDoc(restoreKey(email)))?.versionId === pin.versionId) await store.deleteDoc(restoreKey(email))
+      // A box restored from a record keeps it until its first backup has put the restored data in latest.tar.gz (backup()),
+      // so a box lost before then is recreated from the same version. backedUp 0: the next sweep takes that backup.
+      await store.putBox(box.sandboxId, { email, host: boxSite(cfg, email).host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), active: now, extended: now, backedUp: pin ? 0 : now, paused: false, ...(pin && { restored: pin.versionId }) })
       say({ msg: 'created', user: email, box: box.sandboxId })
       return box.sandboxId
     } catch (error) {
@@ -715,7 +715,7 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
             await run(box, '/root/.mumbo/start.sh')
           }
           const now = Date.now()
-          await store.putBox(id, { email, host: known?.host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), active: now, extended: now, backedUp: known?.backedUp ?? 0, paused: false })
+          await store.putBox(id, { email, host: known?.host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), active: now, extended: now, backedUp: known?.backedUp ?? 0, paused: false, ...(known?.restored && { restored: known.restored }) })
         } catch (error) {
           // A snapshot that cannot be resumed (its node died before the upload finished, or dsh never comes back)
           // must not strand the user: drop it and rebuild from the latest S3 backup.
@@ -768,6 +768,11 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
     const left = await run(box, backupCommand(url), 660_000)
     await store.patchBox(id, { backedUp: Date.now() })
     say({ msg: 'backup', user: b.email, box: id, ...(left && { left }) })
+    // The restored data is now latest.tar.gz: the one-shot record is spent, unless the operator replaced it meanwhile.
+    if (b.restored) {
+      if ((await store.getDoc(restoreKey(b.email)))?.versionId === b.restored) await store.deleteDoc(restoreKey(b.email))
+      await store.patchBox(id, { restored: undefined })
+    }
   }
   /** Take over every running box E2B reports, so backups and idle pauses cover boxes no replica has seen. */
   async function adoptRunning(now = Date.now()) {

@@ -52,8 +52,8 @@ test('dry run lists the key\'s versions newest first with the delete marker, the
     '  2026-11-02T10:00:00.000Z  delete marker  v-marker',
     '  2026-11-01T10:00:00.000Z  900 bytes  v-old',
     'pending restore: v-old, set 2026-11-04T00:00:00.000Z',
-    'box: box-a paused; a record takes effect only when the box is next created, so kill it after --set',
     'dry run: nothing changed',
+    'box: box-a paused; a record takes effect only when the box is next created, so kill it after --set',
   ].join('\n'))
   assert.deepEqual(await store.getDoc(restoreKey('a@mumbo.si')), { versionId: 'v-old', at: Date.parse('2026-11-04T00:00:00Z') })
   const checked = await run({ versionId: 'v-old' })
@@ -74,6 +74,11 @@ test('--set writes exactly the record the edge reads at the next creation, which
   const { out, store } = await run({ versionId: 'v-old', action: 'set' })
   assert.match(out, /set: the next creation of this box restores v-old/)
   assert.deepEqual(await store.getDoc(restoreKey('a@mumbo.si')), { versionId: 'v-old', at: 42 })
+  // Without E2B, or when E2B fails, the box is not checked and the record is still written; a box is listed after the write.
+  assert.match((await run({ versionId: 'v-new', action: 'set', store, e2b: undefined })).out, /set: the next creation of this box restores v-new \(replaced v-old\)\nbox: not checked \(E2B_API_KEY unset\); kill any running or paused box of a@mumbo.si after --set$/)
+  const down = { Sandbox: { list: () => ({ hasNext: true, nextItems: async () => { throw new Error('connect ECONNREFUSED') } }) } }
+  assert.match((await run({ versionId: 'v-old', action: 'set', store, e2b: down })).out, /set: the next creation of this box restores v-old \(replaced v-new\)\nbox: not checked \(connect ECONNREFUSED\); kill any running or paused box of a@mumbo.si after --set$/)
+  assert.deepEqual(await store.getDoc(restoreKey('a@mumbo.si')), { versionId: 'v-old', at: 42 })
   const presigned = []; const ran = []
   const box = (id) => ({ sandboxId: id, files: { write: async () => {} }, kill: async () => {}, commands: { run: async (c) => { ran.push(c); return { stdout: c.includes('dsh.log') ? 'launch123' : '' } } } })
   const e2b = { Sandbox: { list: () => ({ hasNext: true, nextItems: async function () { this.hasNext = false; return [] } }), create: async () => box('b1'), setTimeout: async () => {} } }
@@ -82,9 +87,7 @@ test('--set writes exactly the record the edge reads at the next creation, which
   await edge.ensure('a@mumbo.si')
   assert.deepEqual(presigned, [[KEY, 'v-old']])
   assert.ok(ran.includes(restoreCommand('GET-v-old')))
-  assert.equal(await store.getDoc(restoreKey('a@mumbo.si')), undefined)
 
-  await store.putDoc(restoreKey('a@mumbo.si'), { versionId: 'v-old', at: 1 })
   assert.match((await run({ action: 'clear', store })).out, /cleared the pending restore of v-old/)
   assert.equal(await store.getDoc(restoreKey('a@mumbo.si')), undefined)
   assert.match((await run({ action: 'clear', store })).out, /cleared: nothing was pending/)

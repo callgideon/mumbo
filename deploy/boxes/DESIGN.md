@@ -81,7 +81,7 @@ E2B's own `onTimeout: pause` (15 minutes later) is the safety net if the edge is
 - The router owns backups. It signs a 15-minute PUT URL for `users/<sha256(email)>/latest.tar.gz` and runs `tar … | curl -T -` inside the box. Excluded: `node_modules` and SQLite WAL files.
 - Session logs tolerate a torn tail, and storage-json writes atomically, so a live tar restores cleanly.
 - Bucket versioning keeps older backups for 30 days.
-- An operator's one-shot record `restore:<principal>` (`edge/restore-version.mjs`, `RUNBOOK.md` "Restore an older S3 version") makes the box's next creation restore that version, and the edge deletes the record once the box is up. A version S3 does not serve fails the create (`restore version unknown`, the restore-failed page) and never falls back to `latest.tar.gz`.
+- An operator's one-shot record `restore:<principal>` (`edge/restore-version.mjs`, `RUNBOOK.md` "Restore an older S3 version") makes the box's next creation restore that version, and the edge deletes the record after that box's first backup (the next sweep), so a box lost before then is recreated from the same version. A version S3 does not serve fails the create (`restore version unknown`, the restore-failed page) and never falls back to `latest.tar.gz`.
 - Worst case on host loss: `BACKUP_MINUTES` of files and chats (10), plus all memory state.
 
 <a id="first-run-welcome"></a>
