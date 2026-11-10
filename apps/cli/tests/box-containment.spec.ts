@@ -297,6 +297,15 @@ function namedIdentities(value: unknown): string[] {
 /** The identity every MCP stdio server that names no identity runs as in a box: a user of its own, never root or `agent`. */
 const SERVER_IDENTITY = 'mcpserver'
 
+/** The identities that run a server in each box, each in its own home: the server identity and the Playwright MCP server's. */
+const SERVER_IDENTITIES = { person: [SERVER_IDENTITY, 'browsermcp'], project: [SERVER_IDENTITY] } as const
+
+/** Root's directories, the only ones a server identity's `PATH` may name, so no model-writable directory supplies its code. */
+const SYSTEM_PATH = ['/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin']
+
+/** The box's group `shared`, which owns the Downloads: the only group the Playwright MCP server's identity holds. */
+const SHARED_GID = 1005
+
 /**
  * Ids of the enabled rows that could start an MCP stdio server as root, or as another identity than {@link SERVER_IDENTITY}.
  * mcp-client starts a stdio server that names no identity as this process unless the subprocess provider mounted at that
@@ -416,9 +425,10 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     // Each of these must exist before dsh starts, so the documented box layout names every one.
     const layout = readFileSync(join(root, '.agents/notes/implemented/architecture/2026-11-10-agent-containment-run-as-and-model-roots.md'), 'utf8')
       .split('\n').find(line => line.startsWith('- Box layout the rows depend on')) ?? ''
-    const serverHome = (subprocess as { identities?: Record<string, { set: Record<string, string> }> }).identities?.[SERVER_IDENTITY]?.set.HOME
+    const serverHomes = SERVER_IDENTITIES[box].map(name => (subprocess as { identities?: Record<string, { set: Record<string, string> }> }).identities?.[name]?.set.HOME)
+    const browserOutput = (byId('browser-consent')?.config as { browser?: { outputDir?: string } } | undefined)?.browser?.outputDir
     const required = [...modelRoots, ...(byId('fs-sandbox')?.config as { readOnlyRoots: string[] }).readOnlyRoots, subprocess.shellActivityDirectory!, subprocess.spillDirectory!,
-      serverHome!, ...box === 'project' ? [superagent!.workerDirectory!, superagent!.ghConfigDirectory!] : []]
+      ...serverHomes.map(home => home!), ...box === 'person' ? [browserOutput!] : [], ...box === 'project' ? [superagent!.workerDirectory!, superagent!.ghConfigDirectory!] : []]
     expect(required.filter(path => !layout.includes(`\`${path}\``))).toEqual([])
     expect(byId('plugin-manager')?.config).toEqual({ modelTools: false })
     expect(byId('workspace-changes')?.config).toEqual({ summaries: false })
@@ -457,6 +467,17 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     expect([server.gid, ...server.groups].filter(gid => held.has(gid))).toEqual([])
     expect(server.inherit).toEqual(['LANG'])
     expect(server.set).toEqual({ HOME: '/home/mcpserver', USER: 'mcpserver', PATH: '/usr/local/bin:/usr/bin:/bin' })
+    // Each identity that runs a server starts it in its own home, which the provider checks, with only root's directories
+    // on PATH and no NODE_PATH, so no model-writable directory supplies the code it runs.
+    for (const name of SERVER_IDENTITIES[box]) {
+      const identity = identities[name]!
+      expect(identity.set.HOME, name).toBe(`/home/${name}`)
+      expect(identity.set.PATH?.split(':').filter(directory => !SYSTEM_PATH.includes(directory)), name).toEqual([])
+      expect(identity.inherit.filter(variable => ['PATH', 'NODE_PATH'].includes(variable)), name).toEqual([])
+      expect(identity.set, name).not.toHaveProperty('NODE_PATH')
+    }
+    // The Playwright MCP server reads uploads from the shared Downloads, and holds no workspace group.
+    if (box === 'person') expect(identities.browsermcp!.groups).toEqual([SHARED_GID])
   })
 
   it('starts no MCP stdio server as root', () => {

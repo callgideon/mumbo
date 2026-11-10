@@ -90,7 +90,10 @@ export interface SessionMcpOptions {
   env?: Record<string, string>
   /** Per-call timeout override; omission retains the MCP client default. */
   toolCallTimeoutMs?: number
-  /** Subprocess identity that runs the server, with only `env` added to its own environment; omission runs it as this process. */
+  /**
+   * Subprocess identity that runs the server in its own home, with only `env` added to its own environment; omission
+   * runs it as this process in the Session's working directory.
+   */
   identity?: string
 }
 
@@ -159,7 +162,8 @@ export function mountSessionMcp(ctx: Context, options: SessionMcpOptions): void 
             command: options.command,
             args: options.args,
             ...options.env === undefined ? {} : { env: options.env },
-            cwd: await workingDirectory.ensure(agent, signal),
+            // A server that runs as an identity starts in that identity's home, never in the Session's directory.
+            ...options.identity === undefined ? { cwd: await workingDirectory.ensure(agent, signal) } : {},
             ...options.toolCallTimeoutMs === undefined ? {} : { toolCallTimeoutMs: options.toolCallTimeoutMs },
             ...options.identity === undefined ? {} : { identity: options.identity },
             failOnStartupError: true,

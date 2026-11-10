@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import type { SubprocessSpawnSpec, SubprocessTerminalHandle } from '@deepseek-ai/dsh-subprocess'
 import LocalSubprocessRuntime, { SubprocessSecretEnvironmentError } from '@deepseek-ai/dsh-subprocess-local'
 import type { RunAs } from '@deepseek-ai/dsh-subprocess-local'
@@ -821,5 +822,41 @@ linux('the server identity', () => {
     expect(readdirSync(launches).filter(name => name.startsWith('dsh-subprocess-launch-'))).toEqual([])
     const allowed = ctx.subprocess.spawn({ ...reportSpec(directory(), { NODE_PATH: '/usr/lib' }), identity: 'mcpserver' })
     await expect(allowed.done).resolves.toEqual({ exitCode: 0, signal: null })
+  })
+
+  /** A provider with further identities and no server identity, as a box's that names the Playwright server's in its row. */
+  async function identified(identities: Record<string, Partial<RunAs>>): Promise<Context> {
+    const ctx = new Context()
+    fibers.push(await ctx.plugin(LocalSubprocessRuntime, {
+      runAs: runAs({ inherit: [] }),
+      identities: Object.fromEntries(Object.entries(identities).map(([name, identity]) => [name, runAs({ inherit: [], ...identity })])),
+    }))
+    return ctx
+  }
+
+  it('gives the home of another identity a server starts as only when it passes the server identity\'s checks', async () => {
+    const home = realpathSync(directory())
+    const own = realpathSync(directory())
+    const ctx = await identified({
+      browsermcp: { set: { HOME: home, USER: 'browsermcp', PATH: '/usr/bin:/bin' } },
+      planted: { set: { HOME: home, PATH: `${own}:/usr/bin` } },
+      homeless: { set: { PATH: '/usr/bin' } },
+    })
+    expect(ctx.subprocess.serverHome('browsermcp')).toBe(home)
+    expect(() => ctx.subprocess.serverHome('nobody')).toThrow('no run-as identity named "nobody" is configured; list it under identities')
+    expect(() => ctx.subprocess.serverHome('planted')).toThrow(`identities.planted PATH entry ${JSON.stringify(own)} must be an absolute existing directory that only root can change`)
+    expect(() => ctx.subprocess.serverHome('homeless')).toThrow('identities.homeless.set.HOME must name the server identity\'s home, an absolute directory')
+    // The base provider configures no identity.
+    expect(() => SubprocessRuntime.prototype.serverHome.call(ctx.subprocess, 'browsermcp')).toThrow('this provider configures no identity "browsermcp"')
+  })
+
+  it('checks the final NODE_PATH of each spawn as an identity once a server took its home', async () => {
+    const launches = privateTmpdir()
+    const ctx = await identified({ browsermcp: { set: { HOME: realpathSync(directory()), PATH: '/usr/bin:/bin' } } })
+    ctx.subprocess.serverHome('browsermcp')
+    const own = directory()
+    expect(() => ctx.subprocess.spawn({ ...reportSpec(directory(), { NODE_PATH: own }), identity: 'browsermcp' }))
+      .toThrow(`identities.browsermcp NODE_PATH entry ${JSON.stringify(own)} must be an absolute existing directory that only root can change`)
+    expect(readdirSync(launches).filter(name => name.startsWith('dsh-subprocess-launch-'))).toEqual([])
   })
 })

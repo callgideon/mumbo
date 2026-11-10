@@ -188,7 +188,7 @@ export function assertRootOwnedPath(path: string, refusal: string, statPath: Sta
   }
 }
 
-/** The server identity of a provider: its name and its home's real path. */
+/** An identity that runs servers: its name and its home's real path. */
 export interface ServerIdentity {
   /** The `identities` entry that runs servers. */
   name: string
@@ -197,11 +197,11 @@ export interface ServerIdentity {
 }
 
 /**
- * Check the `identities` entry that runs the servers a person configures, failing loudly otherwise: its `set` names
- * `HOME` by its real path, a directory owned by the identity that no other user but root can write, directly or
- * through an ancestor, and that the identity can search, and `PATH`, which callers cannot replace; every `PATH` and
- * `NODE_PATH` entry it receives passes {@link assertRootOwnedPath}.
- * @param name - the configured `serverIdentity`.
+ * Check an `identities` entry that runs servers, such as the servers a person configures, failing loudly otherwise: its
+ * `set` names `HOME` by its real path, a directory owned by the identity that no other user but root can write,
+ * directly or through an ancestor, and that the identity can search, and `PATH`, which callers cannot replace; every
+ * `PATH` and `NODE_PATH` entry it receives passes {@link assertRootOwnedPath}.
+ * @param name - the configured `serverIdentity`, or another identity a server starts as.
  * @param identities - the provider's further identities.
  * @param statPath - reads each path's owner and mode.
  * @returns the identity's name and home.

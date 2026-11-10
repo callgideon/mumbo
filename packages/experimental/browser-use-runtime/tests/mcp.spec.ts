@@ -226,7 +226,7 @@ describe('Session MCP Loader composition', () => {
     }
   })
 
-  it.runIf(process.platform === 'linux')('starts each Session\'s server through the subprocess service as the configured identity', async () => {
+  it.runIf(process.platform === 'linux')('starts each Session\'s server through the subprocess service as the configured identity, in its home', async () => {
     // Run-as refuses a temporary directory other users can write.
     const temporary = await mkdtemp(join(tmpdir(), 'dsh-browser-mcp-tmp-'))
     roots.push(temporary)
@@ -235,13 +235,16 @@ describe('Session MCP Loader composition', () => {
     const status = await readFile('/proc/self/status', 'utf8')
     const groups = status.split('\n').find(line => line.startsWith('Groups:'))!.slice('Groups:'.length).trim().split(/\s+/u)
       .filter(id => id !== '').map(Number).sort((a, b) => a - b)
-    const own = { uid: process.getuid!(), gid: process.getgid!(), groups, inherit: [], set: { HOME: '/home/browsermcp' }, secretNames: ['DEEPSEEK_API_KEY'] }
+    const home = await realpath(await mkdtemp(join(tmpdir(), 'dsh-browser-mcp-home-')))
+    roots.push(home)
+    const own = { uid: process.getuid!(), gid: process.getgid!(), groups, inherit: [], set: { HOME: home, PATH: '/usr/bin:/bin' }, secretNames: ['DEEPSEEK_API_KEY'] }
     const { ctx, root } = await load(false, undefined, 5000, undefined, { name: 'browsermcp', subprocess: { runAs: own, identities: { browsermcp: own } } })
     const spawn = vi.spyOn(ctx.subprocess, 'spawn')
     const first = await ctx.agents.create({ sessionId: SessionId('first'), meta: { cwd: root } })
     await warm(ctx, first.agent)
     expect((await execute(ctx, first.agent)).content).toEqual([{ type: 'text', text: 'Visit 1: direct' }])
-    expect(spawn.mock.calls.map(([spec]) => [spec.argv, spec.identity])).toEqual([[[process.execPath, fixture, root], 'browsermcp']])
+    // It starts in the identity's home, never in the Session's directory, where the model could plant what it reads.
+    expect(spawn.mock.calls.map(([spec]) => [spec.argv, spec.identity, spec.cwd])).toEqual([[[process.execPath, fixture, root], 'browsermcp', home]])
     // The server probes in place: one process per Session, with no disposable sibling.
     expect((await events(root)).filter(event => event.event === 'start')).toHaveLength(1)
   })

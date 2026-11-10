@@ -78,7 +78,8 @@ export interface Config {
   /**
    * Further run-as identities by name, each with its own environment and secret names. A spawn spec that names one
    * starts its child as it; every other child starts as `runAs`, which these require. A spawn naming an identity not
-   * listed here is refused.
+   * listed here is refused. A server started as one, such as an MCP stdio server whose row names it, starts in its home,
+   * whose `set` must then meet the rules of `serverIdentity`, checked when a server first asks for that home.
    */
   identities?: Record<string, RunAs> | undefined
   /**
@@ -179,6 +180,8 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
   private readonly identities: ReadonlyMap<string, RunAs>
   /** The identity that runs the servers a person configures, with its checked home. */
   private readonly server: ServerIdentity | undefined
+  /** Checked homes of the identities servers have started as, by name; spawns as these identities check their search paths. */
+  private readonly serverHomes = new Map<string, string>()
   /** The directories this provider writes into. */
   private readonly directories: Directories
 
@@ -190,6 +193,23 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
   /** The identity that runs the servers a person configures, and its home, when configured. */
   override get serverIdentity(): ServerIdentity | undefined {
     return this.server
+  }
+
+  /**
+   * The home of a configured identity a server starts as, checked by {@link resolveServerIdentity} the first time it is
+   * asked; later spawns as that identity check their final `PATH` and `NODE_PATH` again.
+   * @param identity - an `identities` entry.
+   * @returns the identity's home, by its real path.
+   * @throws when no such identity is configured, or its home or search paths fail the checks.
+   */
+  override serverHome(identity: string): string {
+    let home = this.serverHomes.get(identity)
+    if (home === undefined) {
+      this.runAsFor(identity)
+      home = resolveServerIdentity(identity, this.identities).home
+      this.serverHomes.set(identity, home)
+    }
+    return home
   }
 
   static Config: z<Config> = z.object({
@@ -221,6 +241,7 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
     this.identity = config.runAs === undefined ? undefined : credentialsOf(config.runAs)
     this.identities = new Map(identities)
     this.server = config.serverIdentity === undefined ? undefined : resolveServerIdentity(config.serverIdentity, this.identities)
+    if (this.server !== undefined) this.serverHomes.set(this.server.name, this.server.home)
     ctx.effect(() => {
       const onHostExit = (): void => { this.terminateForHostExit() }
       process.prependListener('exit', onHostExit)
@@ -356,7 +377,7 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
     const identity = runAs === undefined ? undefined : credentialsOf(runAs)
     const env = this.targetEnvironment(request, runAs)
     // A caller's explicit NODE_PATH reaches a server too, so the final environment is checked again.
-    if (spec.identity !== undefined && spec.identity === this.server?.name) assertServerSearchPaths(env, `identities.${spec.identity}`)
+    if (spec.identity !== undefined && this.serverHomes.has(spec.identity)) assertServerSearchPaths(env, `identities.${spec.identity}`)
     const containmentMode = this.selectContainmentMode('ordinary')
     let handle: LocalSubprocessHandle
     const spillDir = this.internals.spillDir ?? this.directories.spill

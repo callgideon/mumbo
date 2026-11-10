@@ -1,9 +1,9 @@
 /**
- * A stdio server whose config names a subprocess identity starts through the subprocess service as that identity, and
- * one that names none does too, as the provider's server identity in that identity's home, when the provider runs
- * children as a run-as identity.
+ * A stdio server whose config names a subprocess identity starts through the subprocess service as that identity, in
+ * that identity's home, and one that names none does too, as the provider's server identity in that identity's home,
+ * when the provider runs children as a run-as identity.
  */
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
@@ -75,31 +75,58 @@ describe('a stdio server that names a subprocess identity', () => {
 })
 
 linux('a stdio server started through the run-as provider', () => {
-  it('runs as the named identity with only that identity\'s environment and the configured entries', async () => {
+  /** This process's own credentials, which the tests give every identity. */
+  function own() {
+    const groups = readFileSync('/proc/self/status', 'utf8').split('\n').find(line => line.startsWith('Groups:'))!
+      .slice('Groups:'.length).trim().split(/\s+/u).filter(id => id !== '').map(Number).sort((a, b) => a - b)
+    return { uid: process.getuid!(), gid: process.getgid!(), groups }
+  }
+
+  it('runs as the named identity in its home, with only that identity\'s environment and the configured entries', async () => {
     // Run-as refuses a temporary directory other users can write.
     vi.stubEnv('TMPDIR', directory())
     vi.stubEnv('DEEPSEEK_API_KEY', 'box-token')
     vi.stubEnv('AMBIENT_ONLY', 'leak')
-    const groups = readFileSync('/proc/self/status', 'utf8').split('\n').find(line => line.startsWith('Groups:'))!
-      .slice('Groups:'.length).trim().split(/\s+/u).filter(id => id !== '').map(Number).sort((a, b) => a - b)
-    const own = { uid: process.getuid!(), gid: process.getgid!(), groups }
+    const home = realpathSync(directory())
     const ctx = await mountRegistry()
     await ctx.plugin(LocalSubprocessRuntime, {
-      runAs: { ...own, inherit: [], set: { HOME: '/home/agent', USER: 'agent' }, secretNames: ['DEEPSEEK_API_KEY'] },
-      identities: { browsermcp: { ...own, inherit: [], set: { HOME: '/home/browsermcp', USER: 'browsermcp' }, secretNames: ['DEEPSEEK_API_KEY'] } },
+      runAs: { ...own(), inherit: [], set: { HOME: '/home/agent', USER: 'agent' }, secretNames: ['DEEPSEEK_API_KEY'] },
+      identities: { browsermcp: { ...own(), inherit: [], set: { HOME: home, USER: 'browsermcp', PATH: '/usr/bin:/bin' }, secretNames: ['DEEPSEEK_API_KEY'] } },
     })
     const spawn = vi.spyOn(ctx.subprocess, 'spawn')
-    const cwd = directory()
-    await ctx.plugin(McpClient, config({ env: { PLAYWRIGHT_MCP_EXTENSION: '' }, cwd }))
-    expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ argv: [process.execPath, fixture], identity: 'browsermcp' }))
+    await ctx.plugin(McpClient, config({ env: { PLAYWRIGHT_MCP_EXTENSION: '' } }))
+    expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ argv: [process.execPath, fixture], identity: 'browsermcp', cwd: home }))
     const result = await executeToolFixture(ctx, {
       signal: new AbortController().signal, callId: ToolCallId('identity-1'), name: publicToolName('ident', 'environment'), arguments: {},
     })
     const block = result.content[0] as { type: 'text'; text: string }
     const report = JSON.parse(block.text) as { uid: number; cwd: string; env: Record<string, string> }
     expect(report).toEqual({
-      uid: own.uid, cwd, env: { PLAYWRIGHT_MCP_EXTENSION: '', HOME: '/home/browsermcp', USER: 'browsermcp' },
+      uid: own().uid, cwd: home, env: { PLAYWRIGHT_MCP_EXTENSION: '', HOME: home, USER: 'browsermcp', PATH: '/usr/bin:/bin' },
     })
+  }, 30_000)
+
+  it('fails at load, before anything starts, for a named identity whose home or PATH the provider refuses, or another cwd', async () => {
+    vi.stubEnv('TMPDIR', directory())
+    const home = realpathSync(directory())
+    const planted = realpathSync(directory())
+    const ctx = await mountRegistry()
+    await ctx.plugin(LocalSubprocessRuntime, {
+      runAs: { ...own(), inherit: [], set: { HOME: '/home/agent', USER: 'agent' }, secretNames: ['DEEPSEEK_API_KEY'] },
+      identities: {
+        browsermcp: { ...own(), inherit: [], set: { HOME: home, PATH: `${planted}:/usr/bin` }, secretNames: ['DEEPSEEK_API_KEY'] },
+        homeless: { ...own(), inherit: [], set: { PATH: '/usr/bin' }, secretNames: ['DEEPSEEK_API_KEY'] },
+        desktop: { ...own(), inherit: [], set: { HOME: home, PATH: '/usr/bin' }, secretNames: ['DEEPSEEK_API_KEY'] },
+      },
+    })
+    const spawn = vi.spyOn(ctx.subprocess, 'spawn')
+    await expect(ctx.plugin(McpClient, config())).rejects.toThrow(`mcp-client(ident): subprocess-local: identities.browsermcp PATH entry ${JSON.stringify(planted)} must be an absolute existing directory that only root can change`)
+    await expect(ctx.plugin(McpClient, config({ identity: 'homeless' }))).rejects.toThrow('mcp-client(ident): subprocess-local: identities.homeless.set.HOME must name the server identity\'s home')
+    // The Session working directory a browser provider would have passed is not the identity's home.
+    await expect(ctx.plugin(McpClient, config({ identity: 'desktop', cwd: '/root/projects' }))).rejects.toMatchObject({
+      cause: { message: `mcp-client(ident): cwd "/root/projects" is not allowed: a stdio server that names identity desktop runs in its home ${JSON.stringify(home)}; remove cwd` },
+    })
+    expect(spawn).not.toHaveBeenCalled()
   }, 30_000)
 
   it('runs a server that names no identity as the provider\'s server identity in its home, never as this process or the default', async () => {
@@ -163,7 +190,9 @@ linux('a stdio server started through the run-as provider', () => {
 /** A scripted process handle behind a subprocess service that only spawns. */
 async function fakeService(options: {
   highWaterMark?: number; childIdentity?: SubprocessChildIdentity; serverIdentity?: SubprocessServerIdentity; refuse?: Error
+  homes?: Record<string, string>
 } = {}) {
+  const homes = options.homes ?? { browsermcp: '/home/browsermcp' }
   const stdin = new PassThrough({ highWaterMark: options.highWaterMark ?? 16 * 1024 })
   const stdout = new PassThrough()
   const done = Promise.withResolvers<SubprocessOutcome>()
@@ -176,6 +205,7 @@ async function fakeService(options: {
   class SpawnOnly extends SubprocessRuntime {
     override get childIdentity(): SubprocessChildIdentity | undefined { return options.childIdentity }
     override get serverIdentity(): SubprocessServerIdentity | undefined { return options.serverIdentity }
+    override serverHome(identity: string): string { return homes[identity] ?? super.serverHome(identity) }
     override spawn(spec: SubprocessSpawnSpec): SubprocessHandle {
       specs.push(spec)
       if (options.refuse !== undefined) throw options.refuse
@@ -202,12 +232,12 @@ function observe(transport: ReturnType<typeof createTransport>) {
 }
 
 describe('the subprocess stdio transport', () => {
-  it('starts the configured command once, in this process\'s directory when none is configured', async () => {
+  it('starts the configured command once, in the named identity\'s home', async () => {
     const service = await fakeService()
     const transport = createTransport(config({ cwd: '', env: { A: 'b' } }), service.ctx)
     await transport.start()
     expect(service.specs).toEqual([{
-      argv: [process.execPath, fixture], cwd: process.cwd(), env: { A: 'b' }, identity: 'browsermcp', graceMs: 2000,
+      argv: [process.execPath, fixture], cwd: '/home/browsermcp', env: { A: 'b' }, identity: 'browsermcp', graceMs: 2000,
       stdio: { stdin: 'pipe', stdout: 'pipe', stderr: { maxBytes: 0 } },
     }])
     expect(() => transport.start()).toThrow('MCP stdio transport already started')
@@ -236,6 +266,16 @@ describe('the subprocess stdio transport', () => {
     const unnamed = await fakeService({ childIdentity: { uid: 1001, gid: 1001, groups: [] } })
     expect(() => createTransport(anonymous(), unnamed.ctx)).toThrow('names no serverIdentity')
     expect([...contained.specs, ...unnamed.specs]).toEqual([])
+  })
+
+  it('refuses a named identity\'s server in any directory but that identity\'s home, or as an identity the service has no home for', async () => {
+    const service = await fakeService()
+    expect(() => createTransport(config({ cwd: '/root/projects' }), service.ctx))
+      .toThrow('mcp-client(ident): cwd "/root/projects" is not allowed: a stdio server that names identity browsermcp runs in its home "/home/browsermcp"; remove cwd')
+    expect(() => createTransport(config({ identity: 'nobody' }), service.ctx))
+      .toThrow('mcp-client(ident): subprocess: this provider configures no identity "nobody", so no server can start as it')
+    await createTransport(config({ cwd: '/home/browsermcp' }), service.ctx).start()
+    expect(service.specs).toEqual([expect.objectContaining({ cwd: '/home/browsermcp', identity: 'browsermcp' })])
   })
 
   it('fails a start the service refuses with its reason, and reports closure once so the connection can be retried', async () => {

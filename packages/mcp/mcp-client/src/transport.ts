@@ -2,9 +2,9 @@
  * Transport factory: creates the appropriate MCP transport based on the
  * plugin's resolved config. Stdio spawns a child process (with credential
  * scrubbing), through the subprocess seam when the config names an identity or
- * the mounted subprocess provider runs children as a run-as identity, in which
- * case a server that names none runs as the provider's server identity in its
- * home; Streamable HTTP connects to a URL.
+ * the mounted subprocess provider runs children as a run-as identity; such a
+ * server runs as the named identity, or else as the provider's server identity,
+ * in that identity's home. Streamable HTTP connects to a URL.
  *
  * @module
  */
@@ -135,32 +135,48 @@ class SubprocessStdioTransport implements Transport {
 }
 
 /**
+ * The home a stdio server that names an identity starts in, as the subprocess service checked it.
+ * @param config - the server's stdio config.
+ * @param identity - the identity the config names.
+ * @param subprocess - the mounted subprocess service.
+ * @returns the identity's home.
+ * @throws when the service refuses the identity or its home.
+ */
+export function identityHome(config: StdioConfig, identity: string, subprocess: SubprocessRuntime): string {
+  try {
+    return subprocess.serverHome(identity)
+  } catch (error) {
+    throw new Error(`mcp-client(${config.serverName}): ${(error as Error).message}`, { cause: error })
+  }
+}
+
+/**
  * Create an MCP transport from the resolved plugin config.
  *
  * @param config - Resolved plugin config discriminated on `transport`.
  * @param ctx - context whose subprocess service starts a stdio server that names an identity, and every stdio
  *   server when that service runs children as a run-as identity.
  * @returns an unstarted MCP transport (stdio or Streamable HTTP).
- * @throws when a stdio config names an identity and no subprocess service is mounted; or, under a provider that runs
- *   children as a run-as identity, when a stdio config names none and the provider names no server identity, or its
- *   `cwd` is not that identity's home.
+ * @throws when a stdio config names an identity and no subprocess service is mounted or it refuses that identity's
+ *   home; under a provider that runs children as a run-as identity, when a stdio config names none and the provider
+ *   names no server identity; or when the `cwd` of a server started through the subprocess service is not its
+ *   identity's home.
  */
 export function createTransport(config: Config, ctx: Context): Transport {
   switch (config.transport) {
     case 'stdio': {
       const subprocess = ctx.get('subprocess')
       const fail = (detail: string): never => { throw new Error(`mcp-client(${config.serverName}): ${detail}`) }
-      if (config.identity !== undefined) {
+      // A server started through the subprocess service runs as an identity of its own in that identity's home, never in a
+      // directory the model can write: the identity its config names or, under a run-as provider, the server identity.
+      if (config.identity !== undefined || subprocess?.childIdentity !== undefined) {
         if (subprocess === undefined) return fail(`identity ${JSON.stringify(config.identity)} requires a subprocess service`)
-        return new SubprocessStdioTransport(subprocess, config, config.identity, config.cwd === '' ? process.cwd() : config.cwd)
-      }
-      // Under a run-as provider no stdio server starts as this process, as the model's identity, or in a directory the
-      // model can write: one that names no identity runs as the provider's server identity, in that identity's home.
-      if (subprocess?.childIdentity !== undefined) {
-        const server = subprocess.serverIdentity
-        if (server === undefined) return fail('the subprocess provider runs children as a run-as identity but names no serverIdentity, which a stdio server that names no identity runs as')
+        const server = config.identity !== undefined
+          ? { name: config.identity, home: identityHome(config, config.identity, subprocess) }
+          : subprocess.serverIdentity ?? fail('the subprocess provider runs children as a run-as identity but names no serverIdentity, which a stdio server that names no identity runs as')
         if (config.cwd !== '' && config.cwd !== server.home) {
-          fail(`cwd ${JSON.stringify(config.cwd)} is not allowed: a stdio server that names no identity runs as ${server.name} in its home ${JSON.stringify(server.home)}; remove cwd`)
+          const runs = config.identity !== undefined ? `that names identity ${server.name} runs` : `that names no identity runs as ${server.name}`
+          fail(`cwd ${JSON.stringify(config.cwd)} is not allowed: a stdio server ${runs} in its home ${JSON.stringify(server.home)}; remove cwd`)
         }
         return new SubprocessStdioTransport(subprocess, config, server.name, server.home)
       }

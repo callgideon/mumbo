@@ -476,6 +476,11 @@ export function apply(ctx: Context, config: Config): void {
     if (denial(site, denied) !== undefined) throw new Error(`${name}: allowedSites entry "${site}" is also denied by deniedUrls`)
   }
   PlaywrightBrowser.validateConfig(config.browser)
+  // A server that runs as an identity starts in that identity's home, a directory that identity can change: the files a
+  // withheld result links are then deleted only from a configured output directory.
+  if (config.browser.identity !== undefined && config.browser.outputDir === undefined) {
+    throw new Error(`${name}: browser.outputDir must be set when browser.identity is, because the server then starts in that identity's home; name a directory the identity owns in a root-owned parent, such as /var/lib/mumbo/playwright-output`)
+  }
   const holder = ctx.browserUse.providerName
   if (holder !== undefined && PROVIDER_TOOL_PREFIXES[holder] === undefined) {
     throw new Error(`${name}: browser provider "${holder}" holds browserUse and its tools have no prefix this plugin can refuse; remove the row that mounts it`)
@@ -488,7 +493,7 @@ export function apply(ctx: Context, config: Config): void {
   const checkedSelects = new WeakSet<ToolExecution>()
   /** Sessions whose browser has listed or shown a denied page in some tab; their tabs' logs may keep its entries. */
   const shownDenied = new WeakSet<Session>()
-  /** The working directory each Session's Playwright server started in, the base of the links in its results. */
+  /** The working directory each Session's Playwright server without an identity started in, the base of the links in its results. */
   const serverDirectories = new WeakMap<Session, string>()
   /** What denies the page the browser's current tab showed when this plugin last read it; `undefined` when allowed. */
   let showing: string | undefined

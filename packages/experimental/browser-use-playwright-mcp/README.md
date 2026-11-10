@@ -42,8 +42,8 @@ Use `mode: attach` and set `endpoint` to an HTTP(S) debugging URL or WS(S) brows
 | `executablePath` | upstream discovery | Chromium executable for launch |
 | `endpoint` | required for attach | Existing browser debugging endpoint |
 | `toolCallTimeoutMs` | MCP client default | Per-call timeout in milliseconds |
-| `identity` | this process | Subprocess identity that runs the MCP server, with that identity's environment; see the [MCP client](../../mcp/mcp-client/README.md#environment-scrubbing-stdio) |
-| `outputDir` | `.playwright-mcp` in the Session's working directory | Absolute directory where the server writes the snapshots, screenshots, and logs its results link; passed as `--output-dir`, and a relative path fails load |
+| `identity` | this process | Subprocess identity that runs the MCP server, with that identity's environment, in that identity's home; see the [MCP client](../../mcp/mcp-client/README.md#environment-scrubbing-stdio) |
+| `outputDir` | `.playwright-mcp` in the server's working directory | Absolute directory where the server writes the snapshots, screenshots, and logs its results link; passed as `--output-dir`, and a relative path fails load |
 
 The [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-experimental-browser-use-playwright-mcp) lists accepted fields. The profile or preset selects the browser mode. The child process clears inherited `PLAYWRIGHT_MCP_*` options so they cannot replace that configuration.
 
@@ -61,7 +61,7 @@ The provider resolves its pinned npm entry and starts it under the current Node 
 
 The `playwright-core` version that the pinned server runs carries a repository [patch](../../../patches/playwright-core@1.63.0-alpha-2026-08-31.patch): an accessibility snapshot shows a fixed mask in place of the value of a password, one-time-code, payment-card, or autofilled input; [browser consent](../../mumbo/browser-consent/README.md#secret-inputs) documents the rule. pnpm applies it at install and fails the install when it does not apply or when no installed `playwright-core` has its version.
 
-Browser state survives turns while its live Session remains attached. The MCP server starts in the Session's validated current working directory and retains that launch directory after later Session directory changes. Disposal waits for server shutdown before releasing resources. Resume after reload starts fresh browser runtime state; stored conversation history does not restore cookies or pages.
+Browser state survives turns while its live Session remains attached. The MCP server starts in the Session's validated current working directory, or with an `identity` in that identity's home, and retains that launch directory after later Session directory changes. Disposal waits for server shutdown before releasing resources. Resume after reload starts fresh browser runtime state; stored conversation history does not restore cookies or pages.
 
 </details>
 

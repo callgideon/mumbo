@@ -152,6 +152,11 @@ describe('Config', () => {
     expect(Config({ browser, deniedUrls }).approvalTimeoutMs).toBe(300_000)
   })
 
+  it('requires an output directory for a server that runs as an identity, which starts in that identity\'s home', () => {
+    expect(() => { apply(new Context(), Config({ browser: { ...browser, identity: 'browsermcp' }, deniedUrls: [] })) })
+      .toThrow('browser.outputDir must be set when browser.identity is, because the server then starts in that identity\'s home')
+  })
+
   it('requires the denied URLs and rejects an entry that is neither a lowercase scheme nor a canonical origin', () => {
     expect(() => Config({ browser } as never)).toThrow('deniedUrls missing required value')
     expect(Config({ browser, deniedUrls: [] }).deniedUrls).toEqual([])

@@ -18,6 +18,7 @@
           mode: attach
           endpoint: http://127.0.0.1:9222
           identity: browsermcp
+          outputDir: /var/lib/mumbo/playwright-output
 - id: llm-pi-ai
   config:
     providers: {}

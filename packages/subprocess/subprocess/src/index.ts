@@ -142,6 +142,18 @@ export abstract class SubprocessRuntime extends Service {
   }
 
   /**
+   * The home of a named identity that runs a server, such as an MCP stdio server whose config names the identity: the
+   * directory each such server starts in. A provider checks the home, and the search paths the identity receives, by
+   * the rules of its {@link serverIdentity}. The base provider configures no identity.
+   * @param identity - the identity, as a spawn request's `identity` names it.
+   * @returns the identity's home, by its real path.
+   * @throws when the provider configures no such identity, or its home or search paths fail the provider's checks.
+   */
+  serverHome(identity: string): string {
+    throw new Error(`subprocess: this provider configures no identity ${JSON.stringify(identity)}, so no server can start as it`)
+  }
+
+  /**
    * Resolve one configured executable in this provider's execution world.
    * Absolute paths are verified; bare names use the provider's scrubbed PATH
    * plus explicit environment overrides. Relative paths containing separators

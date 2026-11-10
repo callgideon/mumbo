@@ -2444,7 +2444,7 @@ export interface LspLocalServerConfig {
 ## `@deepseek-ai/dsh-mcp-client`
 
 - `inject`: `tools`
-- `source`: [`packages/mcp/mcp-client/src/index.ts:151`](../packages/mcp/mcp-client/src/index.ts)
+- `source`: [`packages/mcp/mcp-client/src/index.ts:152`](../packages/mcp/mcp-client/src/index.ts)
 
 ```ts config-catalog
 /** Configuration for one stdio or Streamable HTTP MCP server. */
@@ -2467,14 +2467,14 @@ export interface StdioConfig {
   /** Extra env vars merged on top of scrubbed ambient env. */
   env: Record<string, string>
   /**
-   * Working directory for the child process; empty, this process's. A server that names no identity under a provider
-   * that runs children as a run-as identity always starts in the server identity's home, and any other value fails it.
+   * Working directory for the child process; empty, this process's. A server that names an identity, or names none under
+   * a provider that runs children as a run-as identity, always starts in its identity's home, and any other value fails it.
    */
   cwd: string
   /**
    * Subprocess identity, by the subprocess provider's name for it, that runs the server. Set, the
-   * server starts through the subprocess service with that identity's environment plus `env`.
-   * Omitted, it starts through the subprocess service as the provider's `serverIdentity`, in that
+   * server starts through the subprocess service with that identity's environment plus `env`, in
+   * that identity's home, which the provider checks at load (`serverHome`). Omitted, it starts through the subprocess service as the provider's `serverIdentity`, in that
    * identity's home, when that provider runs children as a run-as identity, and fails when the
    * provider names no server identity; otherwise it starts as this process with the scrubbed
    * ambient environment plus `env`.
@@ -3941,7 +3941,8 @@ export interface Config {
   /**
    * Further run-as identities by name, each with its own environment and secret names. A spawn spec that names one
    * starts its child as it; every other child starts as `runAs`, which these require. A spawn naming an identity not
-   * listed here is refused.
+   * listed here is refused. A server started as one, such as an MCP stdio server whose row names it, starts in its home,
+   * whose `set` must then meet the rules of `serverIdentity`, checked when a server first asks for that home.
    */
   identities?: Record<string, RunAs> | undefined
   /**

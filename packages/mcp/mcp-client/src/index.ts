@@ -23,6 +23,7 @@ export { resolveReconnectPolicy } from './connection.ts'
 import type { ReconnectConfig } from './connection.ts'
 import { registerServerContext } from './server-context.ts'
 import { connectionStatusIn, registerStatusCell } from './status.ts'
+import { identityHome } from './transport.ts'
 import type { McpConnectionStatusHandle } from './status.ts'
 // Side-effect type import: declaration-merges `ctx.tools` onto Context.
 import type {} from '@deepseek-ai/dsh-tools'
@@ -88,14 +89,14 @@ export interface StdioConfig {
   /** Extra env vars merged on top of scrubbed ambient env. */
   env: Record<string, string>
   /**
-   * Working directory for the child process; empty, this process's. A server that names no identity under a provider
-   * that runs children as a run-as identity always starts in the server identity's home, and any other value fails it.
+   * Working directory for the child process; empty, this process's. A server that names an identity, or names none under
+   * a provider that runs children as a run-as identity, always starts in its identity's home, and any other value fails it.
    */
   cwd: string
   /**
    * Subprocess identity, by the subprocess provider's name for it, that runs the server. Set, the
-   * server starts through the subprocess service with that identity's environment plus `env`.
-   * Omitted, it starts through the subprocess service as the provider's `serverIdentity`, in that
+   * server starts through the subprocess service with that identity's environment plus `env`, in
+   * that identity's home, which the provider checks at load (`serverHome`). Omitted, it starts through the subprocess service as the provider's `serverIdentity`, in that
    * identity's home, when that provider runs children as a run-as identity, and fails when the
    * provider names no server identity; otherwise it starts as this process with the scrubbed
    * ambient environment plus `env`.
@@ -219,8 +220,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // construction that bypassed Schemastery) rejects THIS instance before any
   // effect registers.
   const reconnect = resolveReconnectPolicy(config.reconnect, `mcp-client(${config.serverName}): reconnect`)
-  if (config.transport === 'stdio' && config.identity !== undefined && ctx.get('subprocess') === undefined) {
-    throw new Error(`mcp-client(${config.serverName}): identity ${JSON.stringify(config.identity)} requires a subprocess service`)
+  if (config.transport === 'stdio' && config.identity !== undefined) {
+    const subprocess = ctx.get('subprocess')
+    if (subprocess === undefined) throw new Error(`mcp-client(${config.serverName}): identity ${JSON.stringify(config.identity)} requires a subprocess service`)
+    identityHome(config, config.identity, subprocess)
   }
 
   // Namespace reservations are scope-local; status belongs to the actual

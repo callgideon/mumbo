@@ -31,7 +31,7 @@ kind: "package-reference"
 
 | Field | Default | Meaning |
 |---|---|---|
-| `browser` | required | Settings of the mounted [Playwright MCP provider](../../experimental/browser-use-playwright-mcp/README.md), such as `mode: attach`, `endpoint`, and the subprocess `identity` its server runs as. |
+| `browser` | required | Settings of the mounted [Playwright MCP provider](../../experimental/browser-use-playwright-mcp/README.md), such as `mode: attach`, `endpoint`, and the subprocess `identity` its server runs as. With `identity` the server starts in that identity's home, and `outputDir` is required: the plugin deletes the files of a withheld result only there, so it must be a directory the identity owns in a root-owned parent. |
 | `deniedUrls` | required | Schemes, such as `chrome:`, and origins, such as `https://accounts.google.com`, that the browser tools never open or read. `[]` denies nothing. |
 | `allowedSites` | `[]` | Origins, such as `https://mail.google.com`, where current-tab writes proceed without asking. |
 | `approvalTimeoutMs` | `300000` | How long a write waits for the person's answer before it is denied as unanswered. |
