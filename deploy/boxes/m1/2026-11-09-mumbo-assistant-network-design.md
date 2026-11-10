@@ -636,6 +636,10 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
   - on first load, if no Session is open, open `mumbo` with `ctx.uiWorkspace.openSession`;
   - never take over a Session the person chose.
   - Pinning alone puts it first in the sidebar, so it needs no new sidebar slot.
+- **Never a blank row, a small harness change.**
+  - Today the Web treats a Session with no turns as the Workspace's temporary blank row. A fresh Mumbo would be hidden from the pinned group until its first message, and "New Session" would land in it.
+  - Change: a Session that is pinned, or whose title was set explicitly (a user-sourced `session/title`), is never treated as blank.
+  - Rejected: a synthetic first turn. It would put content no one wrote into the person's record.
 - **Archive guard, a small harness addition.**
   - Archiving through the Web's "stop and archive" passes `stopActivity`, which also deletes every schedule aimed at the Session. An accidental archive would silently drop Mumbo's standing tasks.
   - Add one veto point that `workspaceRegistry.archiveSession` checks before anything else, with or without `stopActivity`. The plugin refuses `mumbo`, and the Web shows the refusal as it shows any failed archive.
@@ -726,7 +730,8 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
   - It is the same origin as the app, so `frame-ancestors 'self'` and the Origin checks hold unchanged, and no CSP change is needed.
   - It has no `sandbox` attribute, which would add nothing for a same-origin page.
 - **Browser** is the same live view with Chrome in front.
-  - Each time the tab is shown, one owner-only Host call brings Chrome's window to the front, maximized on display `:1`, and starts Chrome if it isn't running. `xdotool` is already in the image for computer use.
+  - Each time the tab is shown, one owner-only Host call brings Chrome's window to the front, maximized on display `:1` (`wmctrl`).
+  - It never starts Chrome: the restart loop (B18) keeps Chrome running, and starting it from the dsh process would run it as root.
   - So "Browser" is the desktop showing your browser.
   - Rejected: a CDP screencast of the page. It shows no tabs, address bar, sign-in pop-ups, permission prompts or file pickers, and it needs the client to reach CDP, which agent containment is taking away. It would also carry every keystroke, passwords included, as CDP input.
   - Rejected: cropping the stream to one window. No VNC server here does that.
@@ -807,7 +812,7 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
   - read `/proc/<dsh pid>/environ` and `/root/dsh.log`;
   - connect to `9222`, `envd`, the VNC port, or the X display;
   - write the Chrome policy file, or anything under `/root/.mumbo`;
-  - become root.
+  - become root, including by planting a symlink under `/home/browser` or `/root/projects` that the root setup in the start script follows. Root operations on paths a non-root user owns refuse to follow symlinks, or run as that user.
 - **Also project boxes.** This satisfies section 2's requirement for project boxes before a second member (B12).
 
 **B25, browser-level denials** (`@mumbo/browser-consent` and Chrome policy):
