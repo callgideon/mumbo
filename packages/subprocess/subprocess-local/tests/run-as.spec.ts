@@ -50,6 +50,13 @@ function runAs(overrides: Partial<RunAs> = {}): RunAs {
   }
 }
 
+/** Point the OS temporary directory at a fresh private directory for the rest of the test. */
+function privateTmpdir(): string {
+  const path = directory()
+  vi.stubEnv('TMPDIR', path)
+  return path
+}
+
 function directory(): string {
   const path = mkdtempSync(join(tmpdir(), 'dsh-run-as-'))
   scratch.push(path)
@@ -203,13 +210,14 @@ linux('run-as children through the provider', () => {
 
   it('refuses a caller-forwarded secret before anything starts', async () => {
     const ctx = await runtime(runAs())
-    const before = readdirSync(tmpdir()).filter(name => name.startsWith('dsh-subprocess-launch-')).length
+    // Launch files land in this spec's own temporary directory, so concurrent specs cannot change the count.
+    const launches = privateTmpdir()
     expect(() => ctx.subprocess.spawn(reportSpec(directory(), { DEEPSEEK_API_KEY: 'forwarded' })))
       .toThrow(SubprocessSecretEnvironmentError)
     await expect(ctx.subprocess.spawnTerminal({
       argv: ['/bin/sh'], cwd: directory(), env: { MUMBO_MEMBER_KEY: 'forwarded' }, rows: 24, cols: 80, terminalType: 'xterm', graceMs: 200,
     })).rejects.toThrow(SubprocessSecretEnvironmentError)
-    expect(readdirSync(tmpdir()).filter(name => name.startsWith('dsh-subprocess-launch-')).length).toBe(before)
+    expect(readdirSync(launches).filter(name => name.startsWith('dsh-subprocess-launch-'))).toEqual([])
   })
 
   it('refuses a terminal whose launch-specific additions name a secret', async () => {
@@ -346,11 +354,12 @@ describe('run-as launch requests', () => {
     child.emit('exit', 1, null)
     await expect(launch.direct).rejects.toThrow('subprocess bootstrap exited before it consumed the launch request; its target never ran')
 
-    const before = readdirSync(tmpdir()).filter(name => name.startsWith('dsh-subprocess-launch-')).length
+    // Launch files land in this spec's own temporary directory, so concurrent specs cannot change the count.
+    const launches = privateTmpdir()
     expect(() => launchLinuxBootstrap(ordinary, {}, identity, {
       spawn: () => { throw new Error('spawn refused') }, runnerInvocation: ['/node', '/runner.js'],
     })).toThrow('spawn refused')
-    expect(readdirSync(tmpdir()).filter(name => name.startsWith('dsh-subprocess-launch-')).length).toBe(before)
+    expect(readdirSync(launches).filter(name => name.startsWith('dsh-subprocess-launch-'))).toEqual([])
   })
 
   it('prepares a terminal bootstrap whose outcome reads the startup error and removes the files', () => {
