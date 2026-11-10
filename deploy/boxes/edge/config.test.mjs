@@ -43,8 +43,8 @@ test('production hosts: app.mumbo.si gives the project domain and the approve ho
   assert.doesNotMatch(script, /boxes\.mumbo\.si/)
 })
 
-test('prod/edge.tf former-host redirects: 302 for now, path kept (projects to /home), query marked moved=1 first so no target equals a cached plain URL', () => {
-  const tf = readFileSync(new URL('../prod/edge.tf', import.meta.url), 'utf8')
+test('prod/modules/edge/edge.tf former-host redirects: 302 for now, path kept (projects to /home), query marked moved=1 first so no target equals a cached plain URL', () => {
+  const tf = readFileSync(new URL('../prod/modules/edge/edge.tf', import.meta.url), 'utf8')
   const rule = /resource "aws_lb_listener_rule" "old_hosts" \{[\s\S]*?\n\}\n/.exec(tf)?.[0] ?? ''
   assert.match(rule, /main\s+= \[5, local\.old_hosts, local\.public_host, "\/#\{path\}"\]/)
   assert.match(rule, /approve\s+= \[6, \["approve\.\$\{local\.old_host\}"\], local\.approve_host, "\/#\{path\}"\]/)
@@ -74,16 +74,16 @@ test('rollback safety: the pre-B13 edge filter strips the default sign-in cookie
 
 test('capacity: node_count drives both the node group and the edge cap (24 units per node minus 4, max 10 nodes)', () => {
   const tf = (f) => readFileSync(new URL(`../prod/${f}`, import.meta.url), 'utf8')
-  assert.match(tf('edge.tf'), /MAX_RUNNING_UNITS\s*=\s*tostring\(2 \* \(12 \* var\.node_count - 2\)\)/)
-  assert.match(tf('nodes.tf'), /min_size\s*=\s*min\(2, var\.node_count\)/)
-  assert.match(tf('nodes.tf'), /termination_policies\s*=\s*\["OldestLaunchTemplate", "OldestInstance"\]/)
-  assert.match(tf('nodes.tf'), /enabled_metrics\s*=\s*\["GroupInServiceInstances"/)
+  assert.match(tf('modules/edge/edge.tf'), /MAX_RUNNING_UNITS\s*=\s*tostring\(2 \* \(12 \* var\.node_count - 2\)\)/)
+  assert.match(tf('modules/cell/nodes.tf'), /min_size\s*=\s*min\(2, var\.node_count\)/)
+  assert.match(tf('modules/cell/nodes.tf'), /termination_policies\s*=\s*\["OldestLaunchTemplate", "OldestInstance"\]/)
+  assert.match(tf('modules/cell/nodes.tf'), /enabled_metrics\s*=\s*\["GroupInServiceInstances"/)
   assert.match(tf('ops.tf'), /nodes-below-min = \{[^\n]*threshold = var\.node_count/)
-  assert.match(tf('edge.tf'), /MAX_RUNNING_BOXES\s*=\s*tostring\(12 \* var\.node_count - 2\)/)
-  assert.match(tf('nodes.tf'), /desired_capacity\s*=\s*var\.node_count/)
-  assert.doesNotMatch(tf('nodes.tf'), /ignore_changes\s*=\s*\[desired_capacity\]/)
-  assert.match(tf('nodes.tf'), /node_max_size = 10\b/)
-  assert.match(tf('nodes.tf'), /var\.node_count <= 10/)
+  assert.match(tf('modules/edge/edge.tf'), /MAX_RUNNING_BOXES\s*=\s*tostring\(12 \* var\.node_count - 2\)/)
+  assert.match(tf('modules/cell/nodes.tf'), /desired_capacity\s*=\s*var\.node_count/)
+  assert.doesNotMatch(tf('modules/cell/nodes.tf'), /ignore_changes\s*=\s*\[desired_capacity\]/)
+  assert.match(tf('modules/cell/nodes.tf'), /node_max_size = 10\b/)
+  assert.match(tf('main.tf'), /var\.node_count <= 10/)
   assert.equal(configWith({ MAX_RUNNING_UNITS: String(2 * (12 * 2 - 2)) }).maxRunningUnits, 44)
 })
 
@@ -105,9 +105,9 @@ test('no oauth2-proxy launch turns off its email_verified check', () => {
   // --insecure-oidc-allow-unverified-email is off and the email claim is `email`, which --oidc-email-claim and its
   // deprecated alias --user-id-claim change (providers/provider_data.go buildSessionFromClaims, providers/providers.go).
   const prod = new URL('../prod/', import.meta.url)
-  const files = [...readdirSync(prod).filter(f => f.endsWith('.tf') || f === 'terraform.tfvars').map(f => new URL(f, prod)),
+  const files = [...readdirSync(prod, { recursive: true }).filter(f => !f.startsWith('.terraform') && (f.endsWith('.tf') || f === 'terraform.tfvars')).map(f => new URL(f, prod)),
     new URL('./compose.yaml', import.meta.url), new URL('./up.sh', import.meta.url)]
-  for (const file of [new URL('edge.tf', prod), new URL('./compose.yaml', import.meta.url)]) assert.match(readFileSync(file, 'utf8'), /--provider=oidc/, file.pathname)
+  for (const file of [new URL('modules/edge/edge.tf', prod), new URL('./compose.yaml', import.meta.url)]) assert.match(readFileSync(file, 'utf8'), /--provider=oidc/, file.pathname)
   for (const file of files) assert.doesNotMatch(readFileSync(file, 'utf8'), /allow[-_]?unverified[-_]?email|email[-_]?claim|user[-_]?id[-_]?claim/i, file.pathname)
 })
 

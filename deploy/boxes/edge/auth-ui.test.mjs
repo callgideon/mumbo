@@ -100,7 +100,7 @@ test('other methods, paths and hosts fall through to the signed-in router', asyn
 
 test('oauth2-proxy skips sign-in for exactly the requests the edge serves signed out; a signed-in visitor gets the same page', async () => {
   // v7.9 matches each --skip-auth-route regex against the request URI, query included.
-  const tf = readFileSync(new URL('../prod/edge.tf', import.meta.url), 'utf8')
+  const tf = readFileSync(new URL('../prod/modules/edge/edge.tf', import.meta.url), 'utf8')
   const routes = [...tf.matchAll(/"--skip-auth-route=([^"]*)"/g)].map(m => m[1])
   assert.equal(routes.length, 2)
   assert.ok(routes.every(r => r.startsWith('GET=^') && r.endsWith('$')), 'GET only, anchored')

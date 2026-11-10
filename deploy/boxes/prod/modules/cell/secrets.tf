@@ -26,3 +26,16 @@ resource "aws_secretsmanager_secret_version" "e2b" {
   })
 }
 output "e2b_secret_arn" { value = aws_secretsmanager_secret.e2b.arn }
+
+# Each service's mTLS certificate, key and the CA (issued once for every cell, root tls.tf).
+resource "aws_secretsmanager_secret" "mtls" {
+  for_each   = var.mtls_env
+  name       = "${local.name}/mtls/${each.key}"
+  kms_key_id = aws_kms_key.data.arn
+}
+resource "aws_secretsmanager_secret_version" "mtls" {
+  for_each      = var.mtls_env
+  secret_id     = aws_secretsmanager_secret.mtls[each.key].id
+  secret_string = jsonencode({ crt = var.mtls_certs.leaves[each.key].crt, key = var.mtls_certs.leaves[each.key].key, ca = var.mtls_certs.ca_pem })
+}
+output "mtls_secret_arns" { value = { for s, v in aws_secretsmanager_secret.mtls : s => v.arn } }

@@ -434,7 +434,7 @@ test('MCP endpoint on the model host: box token required, tools act as the token
 test('desktop live view: /desktop/ goes to the box\'s noVNC port, everything else to dsh', async () => {
   const { boxRoute } = await import('./edge.mjs')
   assert.match(boxRoute('/desktop').redirect, /^\/desktop\/vnc\.html\?.*path=desktop\/websockify/)
-  // A former-host redirect adds its marker query (prod/edge.tf old_hosts).
+  // A former-host redirect adds its marker query (prod/modules/edge/edge.tf old_hosts).
   for (const url of ['/desktop/?moved=1&', '/desktop?moved=1&']) assert.equal(boxRoute(url).redirect, boxRoute('/desktop/').redirect, url)
   assert.deepEqual(boxRoute('/desktop/websockify'), { port: '6080', path: '/websockify', base: '' })
   assert.deepEqual(boxRoute('/desktop-not'), { port: '3080', path: '/desktop-not', base: '' })
@@ -605,8 +605,8 @@ test('a box\'s masked host: boxSite at creation; read once from E2B for a box th
   assert.deepEqual(infos, [made.id], 'read once, then kept in the store')
 })
 
-test('model host: the edge does not filter Host, so llm.app.mumbo.si and llm.boxes.mumbo.si both reach it; the gate is the ALB model rule (prod/edge.tf local.llm_hosts)', async () => {
-  const tf = readFileSync(new URL('../prod/edge.tf', import.meta.url), 'utf8')
+test('model host: the edge does not filter Host, so llm.app.mumbo.si and llm.boxes.mumbo.si both reach it; the gate is the ALB model rule (prod/modules/edge/edge.tf local.llm_hosts)', async () => {
+  const tf = readFileSync(new URL('../prod/modules/edge/edge.tf', import.meta.url), 'utf8')
   assert.match(tf, /llm_hosts\s*=\s*\[local\.llm_host, "llm\.\$\{local\.old_host\}"\]/)
   assert.match(tf, /model = \[20, local\.llm_hosts, "model"\]/)
   const fetchImpl = async () => new Response('{"data":[]}', { status: 200, headers: { 'content-type': 'application/json' } })
@@ -676,7 +676,7 @@ test('home page lists the assistant, desktop and the member\'s projects without 
     assert.ok(html.includes(`href="https://p-${id}.boxes.example/"`) && html.includes('&#60;b&#62;Shop&#60;/b&#62;') && !html.includes('<b>Shop'))
     assert.ok(!html.includes('Not mine'))
     assert.ok(html.includes('href="/desktop/"'))
-    // Where the ALB sends a former project host (prod/edge.tf old_hosts["projects"]): /home with the moved marker first.
+    // Where the ALB sends a former project host (prod/modules/edge/edge.tf old_hosts["projects"]): /home with the moved marker first.
     for (const path of ['/home?moved=1&', '/home?moved=1&token=x']) assert.equal((await call(port, { path, headers: { 'x-forwarded-email': 'a@x.com' } })).body, html, path)
     assert.deepEqual(ensured, [])
   } finally { server.close() }
