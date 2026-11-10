@@ -575,7 +575,7 @@ Reference mockups (sample data): `mumbo-mockups-v2.html`.
 
 **Capacity** **[my call]**:
 - A node holds 12 boxes, and boxes never pause, so each account holds a box permanently.
-- The edge sets `MAX_RUNNING_UNITS` to 2 × (12 × nodes − 2), counting a box (4 GiB) as 2 units and a child sandbox (2 GiB) as 1 unit. When it is full, newcomers see the capacity page, and the operator adds nodes (the node group allows up to 10).
+- The edge sets `MAX_RUNNING_UNITS` to 2 × (12 × nodes − 2), counting a person box (4 GiB) as 2 units, a project box (8 GiB) as 4, and a child sandbox (2 GiB) as 1. When it is full, newcomers see the capacity page, and the operator adds nodes (the node group allows up to 10).
 - Scaling automatically on box count comes later.
 
 **Leaving.** A runbook command deletes a person's box and backups. An account disabled in Google Workspace can no longer sign in.
