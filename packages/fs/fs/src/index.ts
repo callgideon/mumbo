@@ -148,6 +148,20 @@ export abstract class FileSystem extends Service {
   abstract resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget>
 
   /**
+   * Resolve a path the model supplied to a model-facing tool. A provider that confines the
+   * model to configured roots refuses, with `FS_OUTSIDE_ROOTS`, a path whose real path lies
+   * outside every root; an absent path is judged by its nearest existing ancestor. The base
+   * provider has no roots and resolves exactly like {@link resolve}. Every model-facing tool
+   * resolves model-supplied paths through this method, never through {@link resolve}.
+   * @param path - the model-supplied path; relative paths resolve against `opts.cwd`.
+   * @param opts - optional cwd override and cancellation signal.
+   * @returns the stable target, under a root when the provider confines the model.
+   */
+  resolveModelPath(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget> {
+    return this.resolve(path, opts)
+  }
+
+  /**
    * Return the canonical absolute path a subprocess in this filesystem's
    * execution world can open. The path is deliberately separate from
    * {@link FsTarget.targetKey}: consumers may pass this value to another OS

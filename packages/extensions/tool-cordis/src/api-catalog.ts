@@ -1496,6 +1496,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the stable target; the same file yields the same `targetKey`.',
       },
       {
+        signature: 'resolveModelPath(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget>',
+        description: 'Resolve a path the model supplied to a model-facing tool. A provider that confines the model to configured roots refuses, with `FS_OUTSIDE_ROOTS`, a path whose real path lies outside every root; an absent path is judged by its nearest existing ancestor. The base provider has no roots and resolves exactly like resolve. Every model-facing tool resolves model-supplied paths through this method, never through resolve.',
+        parameters: [{ name: 'path', description: 'the model-supplied path; relative paths resolve against `opts.cwd`.' }, { name: 'opts', description: 'optional cwd override and cancellation signal.' }],
+        returns: 'the stable target, under a root when the provider confines the model.',
+      },
+      {
         signature: 'abstract processPath(target: FsTarget): string',
         description: 'Return the canonical absolute path a subprocess in this filesystem\'s execution world can open. The path is deliberately separate from FsTarget.targetKey: consumers may pass this value to another OS capability, but must continue treating the target key as opaque.',
         parameters: [{ name: 'target', description: 'the resolved target whose process path is required.' }],

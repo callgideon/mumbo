@@ -7,7 +7,7 @@ kind: "package-reference"
 
 ## Summary
 
-Use `dsh-fs-local` to read, list, watch, write, edit, patch, delete, and move files on the host. Relative paths use a configurable base; absolute paths and parent traversal remain unrestricted. Aliases share one identity. Optional guards reject stale versions, and text publication preserves permissions. Moves can also apply hunks and report a published destination separately from source removal. Use `fs-sandbox` when mutations need confinement.
+Use `dsh-fs-local` to read, list, watch, write, edit, patch, delete, and move files on the host. Relative paths use a configurable base; absolute paths and parent traversal remain unrestricted unless `modelRoots` confines the model's paths. Aliases share one identity. Optional guards reject stale versions, and text publication preserves permissions. Moves can also apply hunks and report a published destination separately from source removal. Use `fs-sandbox` when mutations need confinement.
 
 ## Table of Contents
 
@@ -43,8 +43,22 @@ Load the backend with a base directory; relative paths resolve against it, and a
 |---|---|---|
 | `cwd` | `process.cwd()` | Base directory for relative paths |
 | `diffBasisMaxBytes` | `10 MiB` | UTF-8 byte limit per overwrite-diff side; larger overwrites return `before: null` |
+| `modelRoots` | unset | Existing absolute directories the model's file tools are confined to; see [Confining model paths](#confining-model-paths) |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-fs-local) is the exhaustive source for every accepted field and its JSDoc.
+
+<a id="confining-model-paths"></a>
+### Confining model paths
+
+Set `modelRoots` to confine the model's file tools to an allowlist of directories, for example the workspace, `/tmp`, and the agent user's home in a contained box. The provider canonicalizes each root at load and fails loudly when a root is not absolute, missing, or not a directory, or when the list is empty.
+
+```yaml
+- name: '@deepseek-ai/dsh-fs-local'
+  config:
+    modelRoots: [/root/projects, /tmp, /home/agent]
+```
+
+`resolveModelPath`, which every model-facing tool uses for a model-supplied path, realpaths the path first and refuses with `FS_OUTSIDE_ROOTS` a real path outside every root: absolute paths such as `/proc/self/environ`, `..` traversal, and symbolic links to files or directories outside. A path that does not exist yet is judged by its nearest existing ancestor, so a new file under a linked parent is refused. Every `resolve` call, including harness readers such as instruction and skill discovery and the Files panel, also refuses a path written under a root whose real path leaves the roots, because the model can plant links under its roots. Other harness paths outside the roots resolve as before. The checks run at resolution; a link swapped in between the check and the provider's open of the canonical path is not detected, as the [agent containment Agent Note](../../../.agents/notes/implemented/architecture/2026-11-10-agent-containment-run-as-and-model-roots.md) describes.
 
 ### What you can do
 
@@ -115,7 +129,7 @@ Read these pages when the package-level contract is not enough. They move from t
 <a id="model-experience"></a>
 ## Model Experience
 
-Indirectly, through `dsh-tool-fs`, which renders this provider's line-windowed UTF-8 content, mutation acknowledgements, and exact provider messages in capped retained results while versions, atomic-write mechanics, and directory metadata remain internal.
+Indirectly, through `dsh-tool-fs`, which renders this provider's line-windowed UTF-8 content, mutation acknowledgements, and exact provider messages in capped retained results while versions, atomic-write mechanics, and directory metadata remain internal. With `modelRoots`, a refused path reads `cannot access "<path>": its real path is outside the directories you can access (<roots>)`.
 
 #### KV Cache effect
 
@@ -128,7 +142,8 @@ No direct invalidation; the named consumer owns any request-prefix changes.
 
 These limits define when the local backend is a poor fit or needs special operational care. They are current package constraints, not a general filesystem comparison or a task backlog.
 
-- **`config.cwd` is not a sandbox** — it is a resolution default, not containment: absolute paths and `..` escape it. Enforce containment with a stricter `ctx.fs` backend or a permission plugin on the `tools/execute` waterfall.
+- **`config.cwd` is not a sandbox** — it is a resolution default, not containment: absolute paths and `..` escape it. Confine model paths with `modelRoots`, mutations with a stricter `ctx.fs` backend, or calls with a permission plugin on the `tools/execute` waterfall.
+- **Model roots are checked at resolution, not at open** — operations open the canonical path by name, so a process that swaps a directory under a root for a symbolic link between resolution and open redirects that operation. Pinning the opened descriptor to the resolved target is deferred.
 - **Linux parent-directory recreation** — restoring observation after a parent directory is deleted and recreated is deferred; same-path file recreation while its parent remains is supported.
 - **Version tokens depend on filesystem metadata** — they combine device, inode, size, nanosecond mtime, and nanosecond ctime; a storage layer that cannot update any of those facts for a rewrite can still defeat the stale guard.
 - **`editText` holds the whole file (plus the edited copy) in memory** — streaming exists only on the read path.

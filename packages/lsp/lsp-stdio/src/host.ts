@@ -79,7 +79,7 @@ export async function readHostSource(
   throwIfAborted(signal)
   let target: FsTarget
   try {
-    target = await fs.resolve(filePath, {
+    target = await fs.resolveModelPath(filePath, {
       cwd: workspace.canonicalPath,
       ...signal === undefined ? {} : { signal },
     })

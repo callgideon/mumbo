@@ -1,6 +1,8 @@
 /**
  * Host-filesystem implementation of `ctx.fs`. Realpath-derived target identity makes aliases
  * share stale guards, and writes through a symlink update its target without replacing the link.
+ * Optional model roots confine model-supplied paths and refuse any path that leaves them
+ * through a symbolic link.
  * @module @deepseek-ai/dsh-fs-local
  */
 
@@ -9,6 +11,7 @@ import type { PatchHunk } from '@deepseek-ai/dsh-fs-patch'
 import { Context } from '@deepseek-ai/cordis'
 import { constants as bufferConstants } from 'node:buffer'
 import { once } from 'node:events'
+import { realpathSync, statSync } from 'node:fs'
 import { watch } from 'chokidar'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -57,6 +60,45 @@ export interface Config {
    * runtime's safe allocation/decode maximum. Defaults to 10 MiB.
    */
   diffBasisMaxBytes?: number
+  /**
+   * Existing absolute directories the model's file tools are confined to. When set,
+   * {@link LocalFileSystem.resolveModelPath} refuses a real path outside every root, and every
+   * resolution refuses a path under a root whose real path leaves all roots, the symbolic-link
+   * escape. Omitted, model paths are unrestricted.
+   */
+  modelRoots?: string[] | undefined
+}
+
+/** One model root as configured (for paths written under it) and as its real path. */
+interface ModelRoot {
+  configured: string
+  canonical: string
+}
+
+/** Whether `path` is `root` or lies below it; both are absolute. */
+function isUnder(root: string, path: string): boolean {
+  const rel = relative(root, path)
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+}
+
+/**
+ * Canonicalize the configured model roots once, failing loudly on an unusable entry.
+ * @param roots - configured absolute directories.
+ * @returns each root's configured and real form.
+ */
+function modelRootsOf(roots: readonly string[]): ModelRoot[] {
+  if (roots.length === 0) throw new Error('fs-local: modelRoots must list at least one directory; omit it to leave model paths unrestricted')
+  return roots.map((root) => {
+    if (!isAbsolute(root)) throw new Error(`fs-local: modelRoots entry ${JSON.stringify(root)} must be an absolute path`)
+    let canonical: string
+    try {
+      canonical = realpathSync.native(root)
+    } catch (error) {
+      throw new Error(`fs-local: modelRoots entry ${JSON.stringify(root)} must be an existing directory: ${(error as Error).message}`, { cause: error })
+    }
+    if (!statSync(canonical).isDirectory()) throw new Error(`fs-local: modelRoots entry ${JSON.stringify(root)} must be an existing directory`)
+    return { configured: resolve(root), canonical }
+  })
 }
 
 type ResolvedConfig = Required<Config>
@@ -99,10 +141,13 @@ export class LocalFileSystem extends FileSystem {
   static Config: z<Config> = z.object({
     cwd: z.string().default(process.cwd()),
     diffBasisMaxBytes: z.number().default(DEFAULT_DIFF_BASIS_MAX_BYTES),
+    modelRoots: z.union([z.array(String), z.const(undefined)]),
   })
 
   /** Validated config (schemastery applied the defaults before construction). */
   readonly config: ResolvedConfig
+  /** The roots model paths are confined to; undefined leaves them unrestricted. */
+  private readonly modelRoots: readonly ModelRoot[] | undefined
   /** Test hook forwarded to fsio for atomic-publication boundaries. */
   internals: FsIoInternals = {}
   /** Per-targetKey tail promise: serializes mutating ops so the read→guard→write
@@ -119,6 +164,7 @@ export class LocalFileSystem extends FileSystem {
       throw new Error(`fs-local: diffBasisMaxBytes must be a positive safe integer no greater than ${MAX_DIFF_BASIS_BYTES}`)
     }
     this.config = resolved
+    this.modelRoots = resolved.modelRoots === undefined ? undefined : modelRootsOf(resolved.modelRoots)
   }
 
   /** Run one mutation under the same lock ordering as multi-target operations. */
@@ -149,7 +195,35 @@ export class LocalFileSystem extends FileSystem {
     if (opts?.signal?.aborted) throw new FsError('resolve aborted', 'FS_ABORTED')
     const local = await resolveLocalTarget(opts?.cwd ?? this.config.cwd, expandHomePrefix(path))
     if (opts?.signal?.aborted) throw new FsError('resolve aborted', 'FS_ABORTED')
+    const roots = this.modelRoots
+    // The model can create symbolic links under its roots, so no caller follows one out of them.
+    if (roots !== undefined && roots.some(root => isUnder(root.configured, local.displayPath) || isUnder(root.canonical, local.displayPath))
+      && !roots.some(root => isUnder(root.canonical, local.targetKey))) {
+      throw this.outsideRoots(roots, local.displayPath)
+    }
     return { targetKey: local.targetKey, displayPath: local.displayPath }
+  }
+
+  /**
+   * Resolve like {@link resolve}, then refuse a real path outside every configured model root.
+   * @param path - the model-supplied path; relative paths resolve against `opts.cwd`.
+   * @param opts - optional cwd override and cancellation signal.
+   * @returns the stable target, under a model root when roots are configured.
+   */
+  override async resolveModelPath(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget> {
+    const target = await this.resolve(path, opts)
+    const roots = this.modelRoots
+    if (roots !== undefined && !roots.some(root => isUnder(root.canonical, target.targetKey))) {
+      throw this.outsideRoots(roots, target.displayPath)
+    }
+    return target
+  }
+
+  private outsideRoots(roots: readonly ModelRoot[], displayPath: string): FsError {
+    return new FsError(
+      `cannot access "${displayPath}": its real path is outside the directories you can access (${roots.map(root => root.configured).join(', ')})`,
+      'FS_OUTSIDE_ROOTS',
+    )
   }
 
   override processPath(target: FsTarget): string {
@@ -165,8 +239,7 @@ export class LocalFileSystem extends FileSystem {
   }
 
   override contains(parent: FsTarget, child: FsTarget): boolean {
-    const path = relative(this.processPath(parent), this.processPath(child))
-    return path === '' || (path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path))
+    return isUnder(this.processPath(parent), this.processPath(child))
   }
 
   override async stat(target: FsTarget, signal?: AbortSignal): Promise<FsInfo | undefined> {

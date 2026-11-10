@@ -17,6 +17,9 @@ import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { createScope, type Scope } from '@deepseek-ai/dsh-scope'
 import { join, sep } from 'node:path'
+import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
 import { createUserMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { ContextFormed } from '@deepseek-ai/dsh-llm'
 import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
@@ -483,7 +486,7 @@ describe('workdir derivation and signal forwarding', () => {
     const controller = new AbortController()
     controller.abort()
     const exec = { signal: controller.signal, name: 'glob', callId: ToolCallId('direct-pre-abort') } as unknown as ToolExecution
-    await expect(runRipgrep(ctx, exec, 'glob', ['--files'], 1_000_000, 3_000, 64 * 1024)).rejects
+    await expect(runRipgrep(ctx, exec, 'glob', ['--files'], undefined, 1_000_000, 3_000, 64 * 1024)).rejects
       .toMatchObject({ name: 'SearchError', code: 'SEARCH_ABORTED' })
   })
 
@@ -1324,3 +1327,31 @@ describe('scope-aware search guidance', () => {
 function withPersona(...sections: string[]): string {
   return ['You are an AI agent powered by DeepSeek Harness.', ...sections].join('\n\n')
 }
+
+describe('model roots', () => {
+  it('refuses a search root outside the provider roots before ripgrep starts, and searches inside', async () => {
+    const base = await realpath(await mkdtemp(join(tmpdir(), 'dsh-search-roots-')))
+    try {
+      const workspace = join(base, 'projects')
+      await mkdir(workspace)
+      await mkdir(join(base, 'secret'))
+      await symlink(join(base, 'secret'), join(workspace, 'link'))
+      const { ctx, subprocess } = await setup()
+      await ctx.plugin(LocalFileSystem, { cwd: workspace, modelRoots: [workspace] })
+      const owner = agent(workspace)
+      const refusal = (path: string): string =>
+        `Error: cannot access "${path}": its real path is outside the directories you can access (${workspace})`
+      expect(text(await call(ctx, 'grep', { pattern: 'x', path: join(base, 'secret') }, { agent: owner }))).toBe(refusal(join(base, 'secret')))
+      expect(text(await call(ctx, 'glob', { pattern: '*', path: 'link' }, { agent: owner }))).toBe(refusal(join(workspace, 'link')))
+      expect(text(await call(ctx, 'glob', { pattern: '*', path: '/proc/1' }, { agent: owner }))).toBe(refusal('/proc/1'))
+      expect(subprocess.spawns).toHaveLength(0)
+      // A workdir moved outside the roots is refused when no path is given.
+      expect(text(await call(ctx, 'glob', { pattern: '*' }, { agent: agent(join(base, 'secret')) }))).toBe(refusal(join(base, 'secret')))
+      expect(subprocess.spawns).toHaveLength(0)
+      expect((await call(ctx, 'grep', { pattern: 'x' }, { agent: owner })).isError).toBe(false)
+      expect(subprocess.spawns).toHaveLength(1)
+    } finally {
+      await rm(base, { recursive: true, force: true })
+    }
+  })
+})

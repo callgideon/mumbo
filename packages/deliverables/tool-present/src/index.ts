@@ -87,7 +87,7 @@ export function apply(ctx: Context, config: Config): void {
         if (file.path.trim().length === 0) throw new Error('present requires a non-empty file path')
         const entry = await ctx.fs.lstat(file.path, { cwd }, exec.signal)
         if (entry !== undefined && entry.type !== 'file') throw new Error(`Cannot present ${file.path}: not a regular file`)
-        const target = await ctx.fs.resolve(file.path, options)
+        const target = await ctx.fs.resolveModelPath(file.path, options)
         const info = await ctx.fs.stat(target, exec.signal)
         if (info === undefined) throw new FsError(`Cannot present ${file.path}: file not found. Check the path, create the file if needed, and retry.`, 'FS_NOT_FOUND')
         if (info.type !== 'file') throw new Error(`Cannot present ${file.path}: not a regular file`)

@@ -1591,7 +1591,7 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-fs-local`
 
-- `source`: [`packages/fs/fs-local/src/index.ts:52`](../packages/fs/fs-local/src/index.ts)
+- `source`: [`packages/fs/fs-local/src/index.ts:55`](../packages/fs/fs-local/src/index.ts)
 
 ```ts config-catalog
 /** Configuration for the local filesystem backend. */
@@ -1603,6 +1603,13 @@ export interface Config {
    * runtime's safe allocation/decode maximum. Defaults to 10 MiB.
    */
   diffBasisMaxBytes?: number
+  /**
+   * Existing absolute directories the model's file tools are confined to. When set,
+   * {@link LocalFileSystem.resolveModelPath} refuses a real path outside every root, and every
+   * resolution refuses a path under a root whose real path leaves all roots, the symbolic-link
+   * escape. Omitted, model paths are unrestricted.
+   */
+  modelRoots?: string[] | undefined
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-fs-local -->

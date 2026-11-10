@@ -96,7 +96,7 @@ async function resolveTarget(
   if (!isAbsolute(path)) {
     throw new Error(`The path ${path} is not an absolute path, it should start with \`/\`. Maybe you meant /${path}?`)
   }
-  return ctx.fs.resolve(path, { signal })
+  return ctx.fs.resolveModelPath(path, { signal })
 }
 
 async function statExisting(

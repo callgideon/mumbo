@@ -1,6 +1,6 @@
 import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -71,7 +71,7 @@ function call(ctx: Context, owner: Agent | undefined, args: unknown) {
 
 async function setup(
   config: ToolStrReplaceEditor.Config = {},
-  options: { fsPolicy?: boolean; sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access'; root?: string } = {},
+  options: { fsPolicy?: boolean; sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access'; root?: string; modelRoots?: string[] } = {},
 ) {
   const root = options.root ?? await mkdtemp(join(tmpdir(), 'dsh-tool-str-replace-editor-'))
   if (options.root === undefined) roots.push(root)
@@ -86,7 +86,7 @@ async function setup(
     await ctx.plugin(LocalFileSystem, { cwd: root })
   } else {
     await ctx.plugin(SandboxPolicy, { mode: options.sandboxMode, workspaceRoot: root })
-    await ctx.plugin(SandboxedFileSystem, { cwd: root })
+    await ctx.plugin(SandboxedFileSystem, { cwd: root, ...options.modelRoots === undefined ? {} : { modelRoots: options.modelRoots } })
   }
   if (options.fsPolicy === true) await ctx.plugin(FsPolicy)
   const fiber = await ctx.plugin(ToolStrReplaceEditor, config)
@@ -663,5 +663,31 @@ describe('tool-str-replace-editor', () => {
     expect(() => {
       ToolStrReplaceEditor.apply(new Context(), { description: ' ' })
     }).toThrow('description must be non-empty')
+  })
+})
+
+describe('model roots', () => {
+  it('views and creates inside the roots and refuses every command outside them', async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-tool-str-replace-editor-roots-')))
+    roots.push(root)
+    const inside = join(root, 'projects')
+    const secret = join(root, 'secret')
+    await mkdir(inside)
+    await mkdir(secret)
+    await writeFile(join(secret, 'key'), 'secret')
+    await symlink(secret, join(inside, 'link'))
+    const { ctx, owner } = await setup({}, { root, sandboxMode: 'danger-full-access', modelRoots: [inside] })
+    const refusal = (path: string): string =>
+      `Error: cannot access "${path}": its real path is outside the directories you can access (${inside})`
+    expect((await call(ctx, owner, { command: 'create', path: join(inside, 'made.txt'), file_text: 'made' })).isError).toBe(false)
+    expect(text(await call(ctx, owner, { command: 'view', path: join(inside, 'made.txt') }))).toContain('made')
+    expect(text(await call(ctx, owner, { command: 'view', path: join(secret, 'key') }))).toBe(refusal(join(secret, 'key')))
+    expect(text(await call(ctx, owner, { command: 'view', path: '/proc/self/environ' }))).toBe(refusal('/proc/self/environ'))
+    expect(text(await call(ctx, owner, { command: 'view', path: join(inside, 'link') }))).toBe(refusal(join(inside, 'link')))
+    expect(text(await call(ctx, owner, { command: 'str_replace', path: join(inside, 'link', 'key'), old_str: 'secret', new_str: 'x' })))
+      .toBe(refusal(join(inside, 'link', 'key')))
+    expect(text(await call(ctx, owner, { command: 'create', path: join(inside, 'link', 'planted.txt'), file_text: 'x' })))
+      .toBe(refusal(join(inside, 'link', 'planted.txt')))
+    expect(await readFile(join(secret, 'key'), 'utf8')).toBe('secret')
   })
 })

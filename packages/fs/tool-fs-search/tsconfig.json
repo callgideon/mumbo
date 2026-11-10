@@ -21,6 +21,9 @@
       "path": "../../util/output-retention"
     },
     {
+      "path": "../fs"
+    },
+    {
       "path": "../../llm/llm"
     },
     {
