@@ -1,9 +1,9 @@
 import { Context } from '@deepseek-ai/cordis'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import { existsSync } from 'node:fs'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import sharp from 'sharp'
 import LocalAttachmentStore, {
@@ -102,6 +102,29 @@ describe('local attachment service', () => {
       const streamed: Uint8Array[] = []
       for await (const chunk of service.readFileStream(streamRef)) streamed.push(chunk)
       expect(Buffer.concat(streamed)).toEqual(Buffer.from(fileData))
+    } finally {
+      await rm(dshHome, { recursive: true, force: true })
+    }
+  })
+
+  it.skipIf(process.platform === 'win32')('lets the home group read a group-readable store but never change it', async () => {
+    const dshHome = await mkdtemp(join(tmpdir(), 'dsh-attachment-group-'))
+    try {
+      const service = new LocalAttachmentStore(new Context(), { dshHome, groupReadable: true })
+      const image = new Uint8Array(await sharp({
+        create: { width: 1, height: 1, channels: 3, background: { r: 1, g: 2, b: 3 } },
+      }).png().toBuffer())
+      const paths = [
+        service.fileHostPath(await service.saveFile({ data: Uint8Array.of(1, 2), name: 'report.xlsx' })),
+        service.fileHostPath(await service.saveFileStream({ data: (async function* () { yield Uint8Array.of(3) })(), name: 'stream.bin' })),
+        service.imageHostPath(await service.saveImage({ data: image, mediaType: 'image/png' })),
+      ]
+      for (const path of paths) {
+        expect((await stat(path)).mode & 0o7777).toBe(0o440)
+        for (let directory = dirname(path); directory !== dirname(dshHome); directory = dirname(directory)) {
+          expect((await stat(directory)).mode & 0o7777, directory).toBe(0o2750)
+        }
+      }
     } finally {
       await rm(dshHome, { recursive: true, force: true })
     }

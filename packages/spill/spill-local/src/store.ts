@@ -90,6 +90,8 @@ export interface SaveTextOptions {
   suggestedName: string
   /** Full text to persist. */
   content: string
+  /** Create the session directory `0750` and the file `0640` instead of `0700` and `0600`, for the root's group. */
+  groupReadable?: boolean
 }
 
 /** A written spill file. */
@@ -101,7 +103,8 @@ export interface SavedText {
 }
 
 /**
- * Write text to a fresh 0600 file below its private session directory.
+ * Write text to a fresh 0600 file below its private session directory, or a 0640 file below a 0750 one when
+ * `groupReadable` is set.
  * @param options The save request.
  * @returns The saved path and UTF-8 byte length.
  */
@@ -110,9 +113,9 @@ export async function saveTextFile(options: SaveTextOptions): Promise<SavedText>
   const path = join(dir, `${randomBytes(6).toString('hex')}-${encodeSegment(options.suggestedName)}`)
   let handle
   for (;;) {
-    await mkdir(dir, { recursive: true, mode: 0o700 })
+    await mkdir(dir, { recursive: true, mode: options.groupReadable === true ? 0o750 : 0o700 })
     try {
-      handle = await open(path, 'wx', 0o600)
+      handle = await open(path, 'wx', options.groupReadable === true ? 0o640 : 0o600)
       break
     } catch (error: unknown) {
       /* v8 ignore start -- requires another process to remove the directory
