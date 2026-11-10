@@ -146,7 +146,7 @@ export function keyManager({ cfg, keys, projects, csrfKey, now = () => Date.now(
   const origin = `https://${cfg.approveHost}`
   const csrf = csrfTokens(csrfKey, now)
   const when = (ms) => (ms === undefined ? 'never' : `${new Date(ms).toISOString().slice(0, 16).replace('T', ' ')} UTC`)
-  const refuse = (res, status, message) => res.writeHead(status, { ...PAGE_SECURITY, 'content-type': 'text/plain; charset=utf-8' }).end(message)
+  const refuse = (res, status, message) => res.writeHead(status, { 'content-type': 'text/plain; charset=utf-8' }).end(message)
 
   async function page(res, email, shown) {
     const mine = await projects.list(email)
@@ -155,7 +155,7 @@ export function keyManager({ cfg, keys, projects, csrfKey, now = () => Date.now(
     const rows = (await keys.list(email)).map(k => `<li><strong>${esc(k.name)}</strong> <small>${esc(k.scopes.join(', '))} · projects: ${k.projects.length ? k.projects.map(id => esc(names.get(id) ?? id)).join(', ') : 'none'} · created ${when(k.createdAt)} · expires ${when(k.expiresAt)} · last used ${when(k.lastUsedAt)}${k.revokedAt === undefined
       ? `</small><form method="post" action="/keys/revoke">${hidden({ id: k.id, csrf: token })}<button>Revoke</button></form>`
       : ` · revoked ${when(k.revokedAt)}</small>`}</li>`).join('')
-    res.writeHead(200, { ...PAGE_SECURITY, 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>mumbo door keys</title>
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>mumbo door keys</title>
 <style>${STYLE}</style>
 <main>
 <div class="row"><h1>Door keys</h1><span class="muted">${esc(email)}</span></div>
@@ -171,7 +171,9 @@ ${shown ? `<p class="notice"><strong>New key ${esc(shown.record.name)}.</strong>
   }
 
   return async (req, res, email) => {
+    // Set before anything is written, so every answer has them, userServer's 500 for a handler that throws included.
     res.setHeader('cross-origin-opener-policy', 'same-origin')
+    for (const [h, v] of Object.entries(PAGE_SECURITY)) res.setHeader(h, v)
     const path = req.url.split('?')[0]
     if (req.method === 'GET' && path === '/keys') return page(res, email)
     if (req.method !== 'POST') return refuse(res, 405, 'Method Not Allowed')
@@ -182,7 +184,7 @@ ${shown ? `<p class="notice"><strong>New key ${esc(shown.record.name)}.</strong>
     try {
       if (path === '/keys/revoke') {
         await keys.revoke(email, form.get('id'))
-        return void res.writeHead(303, { ...PAGE_SECURITY, location: '/keys' }).end()
+        return void res.writeHead(303, { location: '/keys' }).end()
       }
       const expires = form.get('expires')
       return await page(res, email, await keys.mint(email, { name: form.get('name'), scopes: form.getAll('scope'), projects: form.getAll('project'), expiresInDays: expires ? Number(expires) : undefined }))

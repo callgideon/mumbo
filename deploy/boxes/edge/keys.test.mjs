@@ -249,6 +249,7 @@ test('keys: a create that fails after the mint answers 500 without the key, and 
     // The page cannot render here, so the token is computed as csrfTokens does.
     const r = await post(t.port, '/keys', { csrf: createHmac('sha256', CSRF_KEY).update(`${A}:2026-11-10`).digest('base64url'), name: 'k', scope: 'read' })
     assert.equal(r.status, 500)
+    keyPage(r)
     assert.ok(minted && !r.body.includes(minted.key.slice(10, 42)))
     assert.deepEqual(lines.map(l => JSON.parse(l)).map(l => l.msg ?? l.error), ['minted', 'store unreachable'])
     assert.ok(!lines.join('\n').includes(minted.key.slice(10, 42)), 'the error log never has the key')
@@ -267,7 +268,14 @@ test('keys: served only on the approve host; on the public host, a box\'s origin
     assert.match(home.body, new RegExp(`<a href="https://${APPROVE}/keys">Manage door keys</a>`))
     assert.ok(!home.body.includes('<form') && !home.body.includes('csrf'), 'no form and no token on the public host')
     assert.equal((await call(t.port, { path: '/', headers: { host: APPROVE } })).body, 'the approve page', 'the approve page keeps its paths')
-    assert.deepEqual(await t.keys.list(A), [], 'nothing minted')
+    // On the approve host the key paths need a signed-in person on the allowlist.
+    for (const [email, status] of [['', 401], ['z@y.com', 403]]) {
+      for (const method of ['GET', 'POST']) {
+        const r = await call(t.port, { method, path: '/keys', headers: { ...(method === 'POST' ? NAV : {}), 'x-forwarded-email': email }, body: method === 'POST' ? 'name=x&scope=read' : undefined })
+        assert.deepEqual([r.status, r.body.includes('csrf')], [status, false], `${method} /keys as ${email || 'nobody'}`)
+      }
+    }
+    assert.deepEqual([...await t.keys.list(A), ...await t.keys.list('z@y.com')], [], 'nothing minted')
   } finally { t.close() }
 })
 
