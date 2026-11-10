@@ -1,103 +1,134 @@
-/** The commands that bring the desktop's Chrome to the front, run through a fake subprocess service. */
+/** The wmctrl commands that bring the desktop's Chrome window to the front, run against a fake desktop. */
 import { Context } from '@deepseek-ai/cordis'
 import type { SubprocessHandle, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import { expect, it } from 'vitest'
 import { frontChrome } from '../src/browser.ts'
 import { Config, type BrowserConfig } from '../src/config.ts'
 
-const FLAGS = ['--user-data-dir=/home/browser/profile', '--remote-debugging-port=9222', '--start-maximized']
 const BROWSER = Config({
-  home: 'https://boxes.example/home', desktop: 'https://boxes.example/desktop/',
-  browser: { chromeArgs: FLAGS, xauthority: '/run/x11/auth' } as BrowserConfig,
+  home: 'https://boxes.example/home', desktop: 'https://boxes.example/desktop/', browser: { xauthority: '/run/x11/auth' } as BrowserConfig,
 }).browser!
 
-/** What one fake command does: exit facts and output, or a spawn failure, or no exit until aborted. */
-type Outcome = { readonly exitCode?: number; readonly stdout?: string; readonly stderr?: string } | 'spawn-error' | 'hang'
+/** WM_CLASS values as `wmctrl -lx` prints them on the box desktop. */
+const CHROME = 'google-chrome (/home/browser/profile).Google-chrome'
+const CHROMIUM = 'chromium (/home/browser/profile).Chromium'
+const TERMINAL = 'xfce4-terminal.Xfce4-terminal'
+const FILES = 'thunar.Thunar'
 
-/** A subprocess service whose commands answer from `answer`, recording every spawn. */
-function bench(answer: (argv: readonly string[]) => Outcome, resolvable = true) {
-  const spawns: SubprocessSpawnSpec[] = []
-  const resolved: string[] = []
-  const ctx = new Context()
-  ctx.provide('subprocess', {
-    resolveExecutable: async (command: string) => {
-      resolved.push(command)
-      if (!resolvable) throw new Error(`${command}: not found`)
-      return `/usr/bin/${command}`
-    },
-    spawn: (spec: SubprocessSpawnSpec): Partial<SubprocessHandle> => {
-      spawns.push(spec)
-      const outcome = answer(spec.argv)
-      const reader = (text: string) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
-      if (outcome === 'spawn-error') return { done: Promise.reject(new Error('spawn ENOENT')), collected: {} }
-      if (outcome === 'hang') {
-        return {
-          done: new Promise((resolve) => { spec.signal!.addEventListener('abort', () => { resolve({ exitCode: null, signal: 'SIGTERM' }) }) }),
-          collected: { stdout: reader(''), stderr: reader('') },
-        }
-      }
-      return {
-        done: Promise.resolve({ exitCode: outcome.exitCode ?? 0, signal: null }),
-        collected: { stdout: reader(outcome.stdout ?? ''), stderr: reader(outcome.stderr ?? '') },
-      }
-    },
-  } as never)
-  return { ctx, spawns, resolved, argv: () => spawns.map(spec => spec.argv.join(' ')) }
+interface FakeWindow {
+  readonly wmClass: string
+  minimized: boolean
+  maximized: boolean
+  active: boolean
 }
 
-const SEARCH = 'xdotool search --onlyvisible --class google-chrome|chromium'
-const WAIT = 'xdotool search --sync --onlyvisible --class google-chrome|chromium'
-const START = `runuser -u browser -- setsid -f sh -c exec "$0" "$@" >/dev/null 2>&1 google-chrome-stable ${FLAGS.join(' ')}`
+/** A fake answer that is not a window manager's: a spawn failure, or one fixed outcome. */
+type Override = 'spawn-error' | { readonly exitCode: number; readonly stderr: string }
 
-it('activates the topmost visible Chrome window on the configured display', async () => {
-  const h = bench(argv => argv[1] === 'search' ? { stdout: '4194305\n6291457\n' } : {})
+/**
+ * A desktop whose wmctrl matches `-x` targets as the real one does: the first listed window whose WM_CLASS contains
+ * the target, ignoring case. `appearAfter` windows show only after that many `-a` attempts found nothing.
+ */
+function desktop(classes: readonly string[], options: {
+  appearAfter?: number
+  minimized?: boolean
+  override?: (argv: readonly string[]) => Override | undefined
+} = {}) {
+  const windows: FakeWindow[] = []
+  const spawns: SubprocessSpawnSpec[] = []
+  let misses = 0
+  const show = () => {
+    if (windows.length === 0 && misses >= (options.appearAfter ?? 0)) {
+      for (const wmClass of classes) windows.push({ wmClass, minimized: options.minimized ?? false, maximized: false, active: false })
+    }
+  }
+  const ctx = new Context()
+  ctx.provide('subprocess', {
+    spawn: (spec: SubprocessSpawnSpec): Partial<SubprocessHandle> => {
+      spawns.push(spec)
+      const reader = (text: string) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
+      const answer = (exitCode: number, stderr = '') => ({
+        done: Promise.resolve({ exitCode, signal: null }), collected: { stdout: reader(''), stderr: reader(stderr) },
+      })
+      const override = options.override?.(spec.argv)
+      if (override === 'spawn-error') return { done: Promise.reject(new Error('spawn wmctrl ENOENT')), collected: {} }
+      if (override !== undefined) return answer(override.exitCode, override.stderr)
+      show()
+      const [, , action, target] = spec.argv
+      const found = windows.find(window => window.wmClass.toLowerCase().includes(target!.toLowerCase()))
+      if (found === undefined) {
+        if (action === '-a') misses += 1
+        return answer(1)
+      }
+      if (action === '-a') {
+        for (const window of windows) window.active = window === found
+        found.minimized = false
+      } else {
+        found.maximized = spec.argv.at(-1) === 'add,maximized_vert,maximized_horz'
+      }
+      return answer(0)
+    },
+  } as never)
+  return { ctx, spawns, windows, argv: () => spawns.map(spec => spec.argv.join(' ')) }
+}
+
+const ACTIVATE = 'wmctrl -x -a chrom'
+const MAXIMIZE = 'wmctrl -x -r chrom -b add,maximized_vert,maximized_horz'
+
+it('activates and maximizes the Chrome window on the configured display', async () => {
+  const h = desktop([TERMINAL, CHROME])
   await frontChrome(h.ctx, BROWSER, new AbortController().signal)
-  expect(h.argv()).toEqual([SEARCH, 'xdotool windowactivate 6291457'])
+  expect(h.argv()).toEqual([ACTIVATE, MAXIMIZE])
+  expect(h.windows.map(({ wmClass, active, maximized }) => [wmClass, active, maximized]))
+    .toEqual([[TERMINAL, false, false], [CHROME, true, true]])
   for (const spec of h.spawns) {
     expect(spec.env).toEqual({ DISPLAY: ':1', XAUTHORITY: '/run/x11/auth' })
     expect(spec.cwd).toBe('/')
   }
-  expect(h.resolved).toEqual([])
 })
 
-it('starts Chrome as the desktop user with the desktop\'s flags when no Chrome window shows, then activates its window', async () => {
-  let running = false
-  const h = bench((argv) => {
-    if (argv[0] === 'runuser') { running = true; return {} }
-    if (argv[1] === 'search') return running ? { stdout: '8388609' } : { exitCode: 1 }
-    return {}
-  })
+it('restores a minimized Chrome window instead of starting another', async () => {
+  const h = desktop([CHROME], { minimized: true })
   await frontChrome(h.ctx, BROWSER, new AbortController().signal)
-  expect(h.argv()).toEqual([SEARCH, START, WAIT, 'xdotool windowactivate 8388609'])
-  expect(h.resolved).toEqual(['google-chrome-stable'])
-  // The fixed script discards Chrome's own output, so Chrome holds none of the pipes the call waits on.
-  expect(h.spawns[1]!.argv.slice(4, 10)).toEqual(['setsid', '-f', 'sh', '-c', 'exec "$0" "$@" >/dev/null 2>&1', 'google-chrome-stable'])
+  expect(h.argv()).toEqual([ACTIVATE, MAXIMIZE])
+  expect(h.windows).toEqual([{ wmClass: CHROME, minimized: false, maximized: true, active: true }])
+})
+
+it('waits while the desktop\'s restart loop brings a closed Chrome back', async () => {
+  const h = desktop([CHROME], { appearAfter: 2 })
+  await frontChrome(h.ctx, BROWSER, new AbortController().signal)
+  expect(h.argv()).toEqual([ACTIVATE, ACTIVATE, ACTIVATE, MAXIMIZE])
+  expect(h.windows[0]).toMatchObject({ active: true, maximized: true })
 })
 
 it.each([
-  ['an unreachable display', () => bench(() => ({ exitCode: 1, stderr: 'Error: Can\'t open display: :1' })),
-    /xdotool search failed \(exit 1\): Error: Can't open display: :1/, [SEARCH]],
-  ['a missing xdotool', () => bench(() => 'spawn-error'), /xdotool search could not run: spawn ENOENT/, [SEARCH]],
-  ['a missing Chrome executable', () => bench(() => ({ exitCode: 1 }), false),
-    /Chrome executable "google-chrome-stable" was not found/, [SEARCH]],
-  ['a refused start', () => bench(argv => argv[0] === 'runuser' ? { exitCode: 1, stderr: 'runuser: user browser does not exist' } : { exitCode: 1 }),
-    /starting google-chrome-stable as browser failed \(exit 1\): runuser: user browser does not exist/, [SEARCH, START]],
-  ['a refused activation', () => bench(argv => argv[1] === 'search' ? { stdout: '7' } : { exitCode: 1, stderr: 'XGetWindowProperty failed' }),
-    /xdotool windowactivate failed \(exit 1\): XGetWindowProperty failed/, [SEARCH, 'xdotool windowactivate 7']],
-])('reports %s with the failed command', async (_case, make, message, argv) => {
-  const h = make()
-  await expect(frontChrome(h.ctx, BROWSER, new AbortController().signal)).rejects.toThrow(message)
-  expect(h.argv()).toEqual(argv)
+  ['Google Chrome', [TERMINAL, CHROME], CHROME],
+  ['Debian Chromium', [FILES, CHROMIUM], CHROMIUM],
+])('matches %s with the default window class, and nothing else on the desktop', async (_case, classes, chrome) => {
+  const h = desktop(classes)
+  await frontChrome(h.ctx, BROWSER, new AbortController().signal)
+  expect(h.windows.filter(window => window.active).map(window => window.wmClass)).toEqual([chrome])
 })
 
-it('gives up on a started Chrome whose window never shows once the command deadline passes', async () => {
-  let running = false
-  const h = bench((argv) => {
-    if (argv[0] === 'runuser') { running = true; return {} }
-    if (argv.includes('--sync')) return 'hang'
-    return running ? { stdout: '1' } : { exitCode: 1 }
-  })
-  await expect(frontChrome(h.ctx, { ...BROWSER, timeoutMs: 20 }, new AbortController().signal))
-    .rejects.toThrow(/xdotool search timed out after 20 ms/)
-  expect(h.argv()).toEqual([SEARCH, START, WAIT])
+it('says that Chrome did not start when no window matches before the deadline', async () => {
+  const h = desktop([TERMINAL, FILES])
+  await expect(frontChrome(h.ctx, { ...BROWSER, timeoutMs: 600 }, new AbortController().signal))
+    .rejects.toThrow('Chrome did not start within 600 ms: no window of class "chrom" on :1')
+  expect(new Set(h.argv())).toEqual(new Set([ACTIVATE]))
+  expect(h.argv().length).toBeGreaterThan(1)
+})
+
+it.each([
+  ['an unreachable display', (argv: readonly string[]) => argv[2] === '-a' ? { exitCode: 1, stderr: 'Cannot open display.' } : undefined,
+    'wmctrl -x -a failed (exit 1): Cannot open display.', [ACTIVATE]],
+  ['a missing window manager', (argv: readonly string[]) => argv[2] === '-a'
+    ? { exitCode: 1, stderr: 'Cannot get client list properties. (_NET_CLIENT_LIST or _WIN_CLIENT_LIST)' } : undefined,
+  'wmctrl -x -a failed (exit 1): Cannot get client list properties. (_NET_CLIENT_LIST or _WIN_CLIENT_LIST)', [ACTIVATE]],
+  ['a missing wmctrl', () => 'spawn-error' as const, 'wmctrl could not run: spawn wmctrl ENOENT', [ACTIVATE]],
+  ['a refused maximize', (argv: readonly string[]) => argv[2] === '-r' ? { exitCode: 1, stderr: '' } : undefined,
+    'wmctrl -x -r failed (exit 1)', [ACTIVATE, MAXIMIZE]],
+])('reports %s at once with the failed command', async (_case, override, message, argv) => {
+  const h = desktop([CHROME], { override })
+  await expect(frontChrome(h.ctx, BROWSER, new AbortController().signal)).rejects.toThrow(message)
+  expect(h.argv()).toEqual(argv)
 })

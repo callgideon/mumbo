@@ -28,21 +28,17 @@ kind: "package-reference"
 |---|---|---|
 | `home` | required | Absolute HTTP(S) URL of the box home page. |
 | `desktop` | omitted | Absolute HTTP(S) URL of the desktop live view; omit it for a box without a desktop, such as a project box. With it, the page shows the Desktop link and the Desktop tab. |
-| `browser` | omitted | How the Browser tab brings the desktop's Chrome to the front; omit it for a box without the Browser tab. It requires `desktop`; without one the plugin fails to load. |
+| `browser` | omitted | How the Browser tab brings the desktop's Chrome window to the front; omit it, or leave the YAML key without a value, for a box without the Browser tab. `browser: {}` enables it with every default. It requires `desktop`; without one the plugin fails to load. |
 
 The `browser` object:
 
 | Field | Default | Meaning |
 |---|---|---|
-| `chromeArgs` | required | The desktop launcher's own Chrome flags, each starting with `--`, so a Chrome started here is the one the desktop would start. |
 | `display` | `:1` | X display Chrome runs on, passed as `DISPLAY` to every command. |
 | `xauthority` | omitted | Absolute X authority file passed as `XAUTHORITY`; omission removes an inherited `XAUTHORITY`. Set it when the display uses an X cookie. |
-| `user` | `browser` | Desktop user a Chrome started here runs as. |
-| `chrome` | `google-chrome-stable` | Chrome executable the desktop runs: an absolute path or a name looked up on `PATH`. |
-| `windowClass` | `google-chrome\|chromium` | Case-insensitive xdotool regular expression matching the window class of Chrome's windows. |
-| `xdotool` | `xdotool` | xdotool executable: an absolute path or a name looked up on `PATH`. |
-| `timeoutMs` | `15000` | Deadline in milliseconds for each command, including the wait for a started Chrome's first window. |
-| `graceMs` | `1000` | Milliseconds a timed-out command may take to exit after termination starts. |
+| `windowClass` | `chrom` | Text a Chrome window's WM_CLASS contains, compared without regard to case: wmctrl's own `-x` matching against `res_name.res_class` as `wmctrl -lx` prints it. Chrome started with `--user-data-dir` names its windows `google-chrome (<profile>).Google-chrome`, and Debian's Chromium `chromium (<profile>).Chromium`; the default matches both and no other window of the box desktop. |
+| `wmctrl` | `wmctrl` | wmctrl executable: an absolute path or a name looked up on `PATH`. |
+| `timeoutMs` | `15000` | Milliseconds the call waits, from its start, for a Chrome window to exist, activate, and maximize. |
 
 Each URL must have a scheme, a host, and a path; any other value, and any `browser` field outside its pattern, fails plugin load. The box edge adds the row with a Loader overlay, as in [`examples/person.overlay.yml`](examples/person.overlay.yml) and [`examples/project.overlay.yml`](examples/project.overlay.yml). The generated [configuration catalog](../../../docs/config-catalog.md#mumbobox-links) is the exhaustive source for accepted fields.
 
@@ -70,19 +66,18 @@ A desktop app's local browser takes the Browser tab over by registering kind `bo
 <a id="the-browser-tabs-host-call"></a>
 ## The Browser tab's Host call
 
-With `browser`, the Host half registers the exact Connection route `POST /api/box-links.browser-front` once the `connection` and `subprocess` services are present. The route declares no `access`, so Connection answers every non-owner Peer, such as a project member's `edge-member` Peer, 403 before the route runs; an owner request passes Connection's Host and Origin checks and browser authentication like every `/api` request. The call runs these commands through the subprocess service, with `DISPLAY` and `XAUTHORITY` from the configuration:
+With `browser`, the Host half registers the exact Connection route `POST /api/box-links.browser-front` once the `connection` and `subprocess` services are present. The route declares no `access`, so Connection answers every non-owner Peer, such as a project member's `edge-member` Peer, 403 before the route runs; an owner request passes Connection's Host and Origin checks and browser authentication like every `/api` request. The call never starts Chrome. It runs these commands through the subprocess service, with `DISPLAY` and `XAUTHORITY` from the configuration:
 
-1. `xdotool search --onlyvisible --class <windowClass>` lists the visible Chrome windows; exit 1 without a diagnostic means none.
-2. With none, the call resolves `chrome` on `PATH`, runs `runuser -u <user> -- setsid -f sh -c 'exec "$0" "$@" >/dev/null 2>&1' <chrome> <chromeArgs…>`, which returns once Chrome is forked and discards Chrome's own output, and waits with `xdotool search --sync` for its first window.
-3. `xdotool windowactivate <id>` activates the topmost window found.
+1. `wmctrl -x -a <windowClass>` activates the first window in the window manager's client list whose WM_CLASS matches. Activation goes through EWMH, so the window manager restores a minimized window and switches to its workspace. Exit 1 without a diagnostic means no window matches; the call then tries again every 250 ms, which covers the seconds in which the desktop's restart loop brings a closed Chrome back.
+2. `wmctrl -x -r <windowClass> -b add,maximized_vert,maximized_horz` maximizes that window.
 
-Calls run one at a time, so a Chrome one call started is the window the next call finds. The route answers 204 after the activation request, or 500 with the failed command's diagnostic as plain text, which is also logged as a warning. Unloading the plugin aborts the running command and waits for it.
+`timeoutMs` bounds the whole call. Calls run one at a time. The route answers 204 once both commands succeeded, or 500 with plain text that is also logged as a warning: `Chrome did not start within <timeoutMs> ms: no window of class "<windowClass>" on <display>` when no window matched in time, and otherwise the failed command with its diagnostic, such as `wmctrl -x -a failed (exit 1): Cannot open display.`. Unloading the plugin aborts the running command and waits for it.
 
 The desktop the edge starts must meet these conditions:
 
-- `chromeArgs` repeat the flags of the desktop's own Chrome launcher, including its `--user-data-dir`, debugging port, and `--start-maximized`.
-- The desktop's launcher, including any restart loop, checks for a running Chrome before starting one, as `pgrep -f 'remote-debugging-port=9222'` does today. Launching Chrome on a profile that is already open opens another window in the running Chrome and exits at once, so a loop that relaunches without checking keeps opening windows.
-- The Host runs as root, so `runuser` can switch to `user`, and can read the `xauthority` file; `xdotool`, `runuser`, and `setsid` are on its `PATH`.
+- The desktop keeps Chrome running itself, restarting it after it exits, and starts no second Chrome while one runs.
+- Its window manager supports EWMH (`_NET_CLIENT_LIST`, `_NET_ACTIVE_WINDOW`, `_NET_WM_STATE`), as xfwm4 and openbox do; without one, wmctrl reports `Cannot get client list properties` and the call fails at once.
+- `wmctrl` is on the Host's `PATH`, and the Host can read the `xauthority` file.
 
 <a id="model-experience"></a>
 ## Model Experience
@@ -98,9 +93,7 @@ No model request prefix changes.
 <a id="known-limitations-and-deferred-work"></a>
 
 - **No house or monitor glyph** — Home uses the shared layers icon and Desktop the globe icon, and the Desktop guide card draws the guide's placeholder, until designers approve dedicated glyphs.
-- **Activated, not re-maximized** — the call activates Chrome's window but does not maximize it again after the person resized it, because Debian bookworm's xdotool (3.20160805) has no `windowstate` command; Chrome's windows start maximized from `--start-maximized`. Add `windowstate --add MAXIMIZED_VERT --add MAXIMIZED_HORZ` once the image ships xdotool 3.20210804 or later.
-- **A minimized Chrome gets a new window** — xdotool does not list minimized windows as visible, so the call starts Chrome, which opens another window in the running Chrome instead of restoring the minimized one.
-- **A Chrome the call started can stop with dsh** — where the subprocess provider runs commands in a user-systemd scope, the scope keeps the detached Chrome and dsh's shutdown stops it; the desktop's own launcher then restarts it.
+- **The oldest Chrome window comes forward** — wmctrl activates the first matching window in the window manager's client list, the one mapped first, not the one the person used last.
 
 <a id="dev-note"></a>
 ### Dev Note

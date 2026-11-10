@@ -1,7 +1,7 @@
 /**
  * The plugin in real Loader compositions: the shipped example overlays put the links in the served page bootstrap,
  * and on a person box Host with Connection and the project member authenticator, the Browser tab's route brings
- * Chrome to the front for the owner and answers a member 403 before any command runs.
+ * Chrome's window to the front for the owner and answers a member 403 before any command runs.
  */
 import { randomBytes } from 'node:crypto'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -45,17 +45,21 @@ async function boot(ctx: Context, configPath: string, modules: ReadonlyMap<strin
 }
 
 it.each([
-  ['person', '{"home":"https://boxes.example/home","desktop":"https://boxes.example/desktop/","browser":true}'],
-  ['project', '{"home":"https://boxes.example/home"}'],
-])('serves the %s overlay links in the page bootstrap', { timeout: 60_000 }, async (box, links) => {
+  ['person', '{"home":"https://boxes.example/home","desktop":"https://boxes.example/desktop/","browser":true}', true],
+  ['project', '{"home":"https://boxes.example/home"}', false],
+])('serves the %s overlay links in the page bootstrap', { timeout: 60_000 }, async (box, links, stockBrowserOff) => {
   const directory = await mkdtemp(join(tmpdir(), 'mumbo-box-links-'))
   const ctx = new Context()
   onTestFinished(async () => {
     try { await ctx.fiber.dispose() } finally { await rm(directory, { recursive: true, force: true }) }
   })
   const overlay = fileURLToPath(new URL(`../examples/${box}.overlay.yml`, import.meta.url))
+  // The stock Browser row as a composition that enables it carries it.
   const rows = applyEntryPatches(
-    [{ id: 'web', name: '@deepseek-ai/dsh-host-webserver', config: { host: '127.0.0.1', port: 0 } }],
+    [
+      { id: 'web', name: '@deepseek-ai/dsh-host-webserver', config: { host: '127.0.0.1', port: 0 } },
+      { id: 'ui-sidebar-browser', name: '@deepseek-ai/dsh-client-ui-sidebar-browser', disabled: false },
+    ],
     loadOverlayPatches('box-links-test', overlay),
     (message) => { throw new Error(message) },
   )
@@ -65,15 +69,17 @@ it.each([
   await boot(ctx, configPath, new Map<string, object>([
     ['@deepseek-ai/dsh-host-webserver', WebServer],
     ['@mumbo/box-links', BoxLinks],
+    ['@deepseek-ai/dsh-client-ui-sidebar-browser', { apply() {} }],
   ]))
   const entries = new Map([...ctx.loader.entries()].map(entry => [entry.options.id, entry]))
   await entries.get('box-links')!.fiber!.await()
+  expect(entries.get('ui-sidebar-browser')!.fiber === undefined).toBe(stockBrowserOff)
   const page = entries.get('web')!.fiber!.ctx.webServer.renderIndex(PAGE, PAGE_PEER)
   expect(page).toContain(`<script>globalThis["__MUMBO_BOX_LINKS__"] = ${links}</script>`)
 })
 
-/** A person box Host whose subprocess service plays a desktop where Chrome is not running until started. */
-async function personBox(windowAppears = true) {
+/** A person box Host whose subprocess service plays a desktop's wmctrl, with or without a Chrome window. */
+async function personBox(chromeShows = true) {
   const key = randomBytes(32)
   vi.stubEnv('MUMBO_MEMBER_KEY', key.toString('base64url'))
   const ctx = new Context()
@@ -90,19 +96,15 @@ async function personBox(windowAppears = true) {
   } as never)
   ctx.provide('workspaceRegistry', { list: () => [] } as never)
   ctx.provide('sessions', { list: () => [], get: () => undefined } as never)
-  let running = false
   const commands: string[] = []
   ctx.provide('subprocess', {
-    resolveExecutable: async (command: string) => `/usr/bin/${command}`,
     spawn: (spec: SubprocessSpawnSpec): Partial<SubprocessHandle> => {
       commands.push(spec.argv.join(' '))
-      if (spec.argv[0] === 'runuser') running = windowAppears
-      const found = spec.argv[1] === 'search' && running
       const reader = (text: string) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
       return {
         // Each command takes a moment, so calls that arrive together overlap unless the route orders them.
-        done: new Promise(resolve => setTimeout(() => { resolve({ exitCode: spec.argv[1] === 'search' && !found ? 1 : 0, signal: null }) }, 25)),
-        collected: { stdout: reader(found ? '12582913\n' : ''), stderr: reader('') },
+        done: new Promise((resolve) => { setTimeout(() => { resolve({ exitCode: chromeShows ? 0 : 1, signal: null }) }, 25) }),
+        collected: { stdout: reader(''), stderr: reader('') },
       }
     },
   } as never)
@@ -132,7 +134,8 @@ async function personBox(windowAppears = true) {
   return { ctx, commands, post, owner, member }
 }
 
-const SEARCH = 'xdotool search --onlyvisible --class google-chrome|chromium'
+const ACTIVATE = 'wmctrl -x -a chrom'
+const MAXIMIZE = 'wmctrl -x -r chrom -b add,maximized_vert,maximized_horz'
 
 it('refuses a project member before any command runs, and tells only the owner\'s page about the Browser tab', { timeout: 60_000 }, async () => {
   const box = await personBox()
@@ -144,24 +147,18 @@ it('refuses a project member before any command runs, and tells only the owner\'
   expect(box.ctx.webServer.renderIndex(PAGE, PAGE_PEER)).toContain('"browser":true')
 })
 
-it('starts Chrome once for the owner when two calls arrive together, then brings its window to the front for both', { timeout: 60_000 }, async () => {
+it('brings Chrome to the front for the owner, one call after the other when two arrive together', { timeout: 60_000 }, async () => {
   const box = await personBox()
   const cookie = box.owner()
   const responses = await Promise.all([box.post(cookie), box.post(cookie)])
   expect(responses.map(response => response.status)).toEqual([204, 204])
-  expect(box.commands).toEqual([
-    SEARCH,
-    'runuser -u browser -- setsid -f sh -c exec "$0" "$@" >/dev/null 2>&1 google-chrome-stable --user-data-dir=/home/browser/profile --start-maximized',
-    'xdotool search --sync --onlyvisible --class google-chrome|chromium',
-    'xdotool windowactivate 12582913',
-    SEARCH,
-    'xdotool windowactivate 12582913',
-  ])
+  expect(box.commands).toEqual([ACTIVATE, MAXIMIZE, ACTIVATE, MAXIMIZE])
 })
 
-it('answers the owner with the failed command\'s diagnostic', { timeout: 60_000 }, async () => {
+it('answers the owner 500 when no Chrome window appears within the timeout', { timeout: 60_000 }, async () => {
   const box = await personBox(false)
   const response = await box.post(box.owner())
   expect(response.status).toBe(500)
-  expect(await response.text()).toBe('no google-chrome-stable window appeared on :1')
+  expect(await response.text()).toBe('Chrome did not start within 600 ms: no window of class "chrom" on :1')
+  expect(new Set(box.commands)).toEqual(new Set([ACTIVATE]))
 })

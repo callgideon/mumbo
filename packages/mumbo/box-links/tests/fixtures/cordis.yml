@@ -23,7 +23,6 @@
     home: https://boxes.example/home
     desktop: https://boxes.example/desktop/
     browser:
+      display: ':1'
       xauthority: /run/x11/auth
-      chromeArgs:
-        - --user-data-dir=/home/browser/profile
-        - --start-maximized
+      timeoutMs: 600

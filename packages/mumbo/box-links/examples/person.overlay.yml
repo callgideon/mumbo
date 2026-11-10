@@ -1,6 +1,6 @@
 # Loader overlay (`dsh --patch`) for a person's box: sidebar links to the box home page and the desktop live view,
-# and the Desktop and Browser tabs. The edge writes its public host here; chromeArgs repeat the desktop launcher's
-# own Chrome flags, and xauthority is written only on a display that uses the X cookie.
+# and the Desktop and Browser tabs. The edge writes its public host here, and xauthority only on a display that uses
+# the X cookie. The second row keeps the stock iframe Browser tab off.
 - insert:
     - id: box-links
       name: '@mumbo/box-links'
@@ -10,13 +10,5 @@
         browser:
           display: ':1'
           xauthority: /run/x11/auth
-          user: browser
-          chrome: google-chrome-stable
-          chromeArgs:
-            - --user-data-dir=/home/browser/profile
-            - --remote-debugging-address=127.0.0.1
-            - --remote-debugging-port=9222
-            - --no-first-run
-            - --no-default-browser-check
-            - --password-store=basic
-            - --start-maximized
+- id: ui-sidebar-browser
+  disabled: true

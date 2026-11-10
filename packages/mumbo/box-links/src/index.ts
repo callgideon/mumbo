@@ -18,7 +18,9 @@ export const name = 'mumbo-box-links'
  * @throws when `browser` is configured without `desktop`.
  */
 export function apply(ctx: Context, config: Config): void {
-  const { browser, ...links } = config
+  const { browser: configured, ...links } = config
+  // A YAML `browser:` key without a value validates to null and leaves the Browser tab off, as an omitted key does.
+  const browser = configured ?? undefined
   if (browser !== undefined && links.desktop === undefined) throw new Error('mumbo-box-links: browser requires desktop, the live view the Browser tab shows')
   ctx.on('webserver/index-inject', (table, peer) => {
     // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
@@ -30,8 +32,7 @@ export function apply(ctx: Context, config: Config): void {
 
 /**
  * Register the exact route behind Connection's authentication. It declares no `access`, so Connection answers every
- * non-owner Peer 403 before the route runs. Calls run one at a time, so a Chrome one call started is the window the
- * next call finds.
+ * non-owner Peer 403 before the route runs. Calls run one at a time, so two calls never act on the windows at once.
  * @param ctx - context carrying Connection and the subprocess service; owns the route's lifetime.
  * @param config - Chrome control.
  */

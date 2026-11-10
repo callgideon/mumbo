@@ -1,26 +1,21 @@
 /** Box page links and views shared by the Host and Client halves. */
 import z from '@deepseek-ai/schemastery'
 
-/** How the Host brings the desktop's Chrome to the front, and starts Chrome when no Chrome window shows. */
+/** How the Host brings the desktop's Chrome window to the front; the desktop itself keeps Chrome running. */
 export interface BrowserConfig {
   /** X display Chrome runs on, passed as `DISPLAY` to every command. */
   display: string
   /** Absolute X authority file passed as `XAUTHORITY`; omission removes an inherited `XAUTHORITY`. */
   xauthority?: string
-  /** Desktop user that a Chrome started here runs as. */
-  user: string
-  /** Chrome executable the desktop runs: an absolute path or a name looked up on `PATH`. */
-  chrome: string
-  /** The desktop launcher's own Chrome flags, so a Chrome started here is the one the desktop would start. */
-  chromeArgs: string[]
-  /** Case-insensitive xdotool regular expression matching the window class of Chrome's windows. */
+  /**
+   * Text that a Chrome window's WM_CLASS, `res_name.res_class` as `wmctrl -lx` prints it, contains, compared without
+   * regard to case: wmctrl's own `-x` matching.
+   */
   windowClass: string
-  /** `xdotool` executable: an absolute path or a name looked up on `PATH`. */
-  xdotool: string
-  /** Deadline in milliseconds for each command, including the wait for a started Chrome's first window. */
+  /** `wmctrl` executable: an absolute path or a name looked up on `PATH`. */
+  wmctrl: string
+  /** Milliseconds the call waits, from its start, for a Chrome window to exist, activate, and maximize. */
   timeoutMs: number
-  /** Milliseconds a timed-out command may take to exit after termination starts. */
-  graceMs: number
 }
 
 /** Absolute links from a box's Web page to the pages the box edge serves beside it, and the Browser tab's Host call. */
@@ -45,18 +40,15 @@ export interface PageLinks {
 
 const link = z.string().pattern(/^https?:\/\/[^/\s]+\/\S*$/)
 const program = z.string().pattern(/^(\/\S+|[^\s/]+)$/)
-const ms = z.number().step(1).min(1).max(2 ** 31 - 1)
 
 const Browser: z<BrowserConfig> = z.object({
   display: z.string().pattern(/^[\w.-]*:\d+(\.\d+)?$/).default(':1').description('X display Chrome runs on.'),
   xauthority: z.string().pattern(/^\//).description('Absolute X authority file for the display; omit for a display without one.'),
-  user: z.string().pattern(/^[a-z_][a-z0-9_-]*$/).default('browser').description('Desktop user a Chrome started here runs as.'),
-  chrome: program.default('google-chrome-stable').description('Chrome executable the desktop runs.'),
-  chromeArgs: z.array(z.string().pattern(/^--\S/)).required().description('The desktop launcher\'s own Chrome flags.'),
-  windowClass: z.string().min(1).default('google-chrome|chromium').description('xdotool class pattern of Chrome\'s windows.'),
-  xdotool: program.default('xdotool').description('xdotool executable.'),
-  timeoutMs: ms.default(15_000).description('Deadline of each command in milliseconds.'),
-  graceMs: ms.default(1000).description('Exit allowance after a timed-out command is terminated.'),
+  // Matches Google Chrome's `google-chrome (<profile>).Google-chrome` and Debian Chromium's `chromium (<profile>).Chromium`.
+  windowClass: z.string().min(1).default('chrom').description('Text a Chrome window\'s WM_CLASS contains, ignoring case.'),
+  wmctrl: program.default('wmctrl').description('wmctrl executable.'),
+  timeoutMs: z.number().step(1).min(1).max(2 ** 31 - 1).default(15_000)
+    .description('Milliseconds the call waits for a Chrome window to exist, activate, and maximize.'),
 })
 
 /**
@@ -66,7 +58,7 @@ const Browser: z<BrowserConfig> = z.object({
 export const Config: z<Config> = z.object({
   home: link.required().description('Absolute URL of the box home page.'),
   desktop: link.description('Absolute URL of the desktop live view; omit it for a box without a desktop.'),
-  // An omitted object must not become `{}` and fail its required flags.
+  // An omitted object stays omitted rather than becoming `{}`, which enables the Browser tab with every default.
   browser: Browser.default(undefined as never)
     .description('How the Browser tab brings the desktop\'s Chrome to the front; omit it for a box without the Browser tab.'),
 })

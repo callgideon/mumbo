@@ -1,13 +1,15 @@
-/** Bring the desktop's Chrome to the front for the Browser tab, starting Chrome when no Chrome window shows. */
+/** Bring the desktop's Chrome window to the front, maximized, for the Browser tab. */
+import { setTimeout as sleep } from 'node:timers/promises'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-subprocess'
 import type { BrowserConfig } from './config.ts'
 
-/** Bytes kept from each command's output; xdotool prints window ids and short diagnostics. */
+/** Bytes kept from each command's output; wmctrl prints at most a short diagnostic here. */
 const OUTPUT_BYTES = 64 * 1024
-
-/** Shell script that runs Chrome, given as `$0`, with its flags and its output discarded. */
-const CHROME_START = 'exec "$0" "$@" >/dev/null 2>&1'
+/** Interval between attempts while no Chrome window exists yet. */
+const POLL_MS = 250
+/** Exit allowance of a wmctrl command aborted at the deadline; each command is one short X request. */
+const GRACE_MS = 1000
 
 /** Exit facts and trimmed output of one finished command. */
 interface Ran {
@@ -22,30 +24,34 @@ function failure(label: string, { exitCode, stderr }: Ran): Error {
 }
 
 /**
- * Activate the topmost visible Chrome window on the configured display. When none shows, start Chrome as the
- * desktop user with the desktop's own flags, detached from this process, wait for its first window, and activate it.
- * xdotool runs as this process's user with `DISPLAY` and `XAUTHORITY` from the configuration.
+ * Activate the first window the window manager lists whose WM_CLASS contains `windowClass`, then maximize it. While
+ * no window matches, for example while the desktop's restart loop brings a closed Chrome back, try again every 250 ms
+ * until `timeoutMs` has passed since the call began. Activation goes through EWMH, so the window manager restores a
+ * minimized window and switches to its workspace; this never starts Chrome.
  * @param ctx - context carrying the subprocess service.
- * @param config - display, user, executables, flags, and bounds.
- * @param signal - aborts the running command.
- * @returns after the window manager was asked to activate a Chrome window.
- * @throws Error naming the failed command and its diagnostic.
+ * @param config - display, window class, wmctrl executable, and deadline.
+ * @param signal - aborts the call.
+ * @returns after the window manager was asked to activate and maximize a Chrome window.
+ * @throws Error naming the failed wmctrl command and its diagnostic, or saying that Chrome did not start in time.
  */
 export async function frontChrome(ctx: Context, config: BrowserConfig, signal: AbortSignal): Promise<void> {
   const env = { DISPLAY: config.display, XAUTHORITY: config.xauthority }
+  const deadline = AbortSignal.timeout(config.timeoutMs)
+  const bounded = AbortSignal.any([signal, deadline])
+  const timedOut = (): Error => new Error(
+    `Chrome did not start within ${String(config.timeoutMs)} ms: no window of class "${config.windowClass}" on ${config.display}`,
+  )
 
-  async function run(argv: readonly string[]): Promise<Ran> {
-    const deadline = AbortSignal.timeout(config.timeoutMs)
+  async function wmctrl(args: readonly string[]): Promise<Ran> {
     const handle = ctx.subprocess.spawn({
-      argv, cwd: '/', env, graceMs: config.graceMs, signal: AbortSignal.any([signal, deadline]),
+      argv: [config.wmctrl, ...args], cwd: '/', env, graceMs: GRACE_MS, signal: bounded,
       stdio: { stdin: 'ignore', stdout: { maxBytes: OUTPUT_BYTES }, stderr: { maxBytes: OUTPUT_BYTES } },
     })
-    const label = argv.slice(0, 2).join(' ')
     const outcome = await handle.done.catch((error: unknown) => {
-      throw new Error(`${label} could not run: ${error instanceof Error ? error.message : String(error)}`, { cause: error })
+      throw new Error(`wmctrl could not run: ${error instanceof Error ? error.message : String(error)}`, { cause: error })
     })
     signal.throwIfAborted()
-    if (deadline.aborted) throw new Error(`${label} timed out after ${String(config.timeoutMs)} ms`)
+    if (deadline.aborted) throw timedOut()
     const read = (reader: typeof handle.collected.stdout): string => reader?.readFrom(0).text.trim() ?? ''
     return {
       exitCode: outcome.signal === null ? outcome.exitCode : null,
@@ -54,30 +60,19 @@ export async function frontChrome(ctx: Context, config: BrowserConfig, signal: A
     }
   }
 
-  /** Visible Chrome windows, bottom to top; with `sync`, xdotool waits until one shows. */
-  async function windows(sync: boolean): Promise<string[]> {
-    const ran = await run([config.xdotool, 'search', ...sync ? ['--sync'] : [], '--onlyvisible', '--class', config.windowClass])
-    // xdotool search exits 1 without a diagnostic when nothing matches.
-    if (ran.exitCode === 1 && ran.stdout === '' && ran.stderr === '') return []
-    if (ran.exitCode !== 0) throw failure('xdotool search', ran)
-    return ran.stdout.split('\n').filter(line => /^\d+$/.test(line))
+  for (;;) {
+    const activated = await wmctrl(['-x', '-a', config.windowClass])
+    if (activated.exitCode === 0) break
+    // wmctrl exits 1 without a diagnostic when no window matches; every other outcome is a failure.
+    if (activated.exitCode !== 1 || activated.stdout !== '' || activated.stderr !== '') throw failure('wmctrl -x -a', activated)
+    try {
+      await sleep(POLL_MS, undefined, { signal: bounded })
+    } catch (error) {
+      // The sleep only rejects on abort: the caller's, or the deadline's.
+      signal.throwIfAborted()
+      throw deadline.aborted ? timedOut() : error
+    }
   }
-
-  let found = await windows(false)
-  if (found.length === 0) {
-    // setsid -f returns once Chrome is forked, so the call does not wait for Chrome to exit and an exec failure shows
-    // only as no window appearing; resolving the executable first names a missing program instead. Chrome's own output
-    // goes to /dev/null rather than to pipes this call would wait on; the script is fixed and takes Chrome as arguments.
-    await ctx.subprocess.resolveExecutable(config.chrome, undefined, signal).catch((error: unknown) => {
-      throw new Error(`Chrome executable "${config.chrome}" was not found`, { cause: error })
-    })
-    const start = await run(['runuser', '-u', config.user, '--', 'setsid', '-f', 'sh', '-c', CHROME_START, config.chrome, ...config.chromeArgs])
-    if (start.exitCode !== 0) throw failure(`starting ${config.chrome} as ${config.user}`, start)
-    found = await windows(true)
-  }
-  // Search lists the window tree in stacking order, so the last window is the topmost.
-  const top = found.at(-1)
-  if (top === undefined) throw new Error(`no ${config.chrome} window appeared on ${config.display}`)
-  const activated = await run([config.xdotool, 'windowactivate', top])
-  if (activated.exitCode !== 0) throw failure('xdotool windowactivate', activated)
+  const maximized = await wmctrl(['-x', '-r', config.windowClass, '-b', 'add,maximized_vert,maximized_horz'])
+  if (maximized.exitCode !== 0) throw failure('wmctrl -x -r', maximized)
 }
