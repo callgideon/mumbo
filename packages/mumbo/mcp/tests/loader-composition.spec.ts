@@ -13,7 +13,7 @@ import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as McpDoor from '../src/index.ts'
 
-const EXAMPLE = fileURLToPath(new URL('../examples/loopback/cordis.yml', import.meta.url))
+const DOOR_TOOLS = ['agent_send', 'agent_read', 'needs_you', 'task_reply', 'task_status', 'task_result']
 
 let root: string | undefined
 let context: Context | undefined
@@ -27,12 +27,16 @@ afterEach(async () => {
 })
 
 describe('real Loader composition', () => {
-  it('mounts the loopback example on its own listener and serves /mcp', { timeout: 60_000 }, async () => {
+  it.each([
+    ['loopback', [...DOOR_TOOLS, 'runs_halt', 'runs_resume']],
+    ['door', DOOR_TOOLS],
+  ])('mounts the %s example on its own listener and serves its tools on /mcp', { timeout: 60_000 }, async (example, tools) => {
     root = await mkdtemp(join(tmpdir(), 'mumbo-mcp-loader-'))
     await writeFile(join(root, 'key'), 'loader-key\n')
     vi.stubEnv('MUMBO_MCP_PORT', '0')
     vi.stubEnv('MUMBO_MCP_KEY_FILE', join(root, 'key'))
     vi.stubEnv('MUMBO_MCP_ASSISTANT_CWD', root)
+    vi.stubEnv('MUMBO_MCP_PRINCIPAL', 'ann')
 
     context = new Context()
     context.baseUrl = pathToFileURL(root).href + '/'
@@ -58,7 +62,8 @@ describe('real Loader composition', () => {
         return module
       }
     }
-    await loader.create({ name: 'cordis:include', config: { path: pathToFileURL(EXAMPLE).href } })
+    const path = fileURLToPath(new URL(`../examples/${example}/cordis.yml`, import.meta.url))
+    await loader.create({ name: 'cordis:include', config: { path: pathToFileURL(path).href } })
     await loader.await()
     const entries = [...loader.entries()]
     expect(entries.filter(entry => entry.fiber === undefined && !entry.disabled).map(entry => entry.options.id)).toEqual([])
@@ -79,6 +84,6 @@ describe('real Loader composition', () => {
     })
     expect(response.status).toBe(200)
     const body = await response.json() as { result: { tools: { name: string }[] } }
-    expect(body.result.tools.map(tool => tool.name)).toEqual(['agent_send', 'agent_read', 'needs_you', 'task_reply', 'task_status', 'task_result', 'runs_halt', 'runs_resume'])
+    expect(body.result.tools.map(tool => tool.name)).toEqual(tools)
   })
 })

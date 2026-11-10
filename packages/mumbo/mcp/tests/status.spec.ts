@@ -123,6 +123,16 @@ describe('task_result', () => {
     expect(unfence((reply.value as { diff: string }).diff)).toBe(expected)
   })
 
+  it('runs git through the subprocess service, so its provider decides how and as whom git runs', async () => {
+    const { host, repo } = await door()
+    const spawn = vi.spyOn(host.ctx.subprocess, 'spawn')
+    await call(host.url, 'task_result', { branch: 'feature' })
+    expect(spawn.mock.calls.map(([spec]) => ({ argv: spec.argv.slice(5), cwd: spec.cwd }))).toEqual([
+      { argv: ['rev-parse', '--verify', '--quiet', 'feature^{commit}'], cwd: repo },
+      { argv: ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--submodule=short', 'HEAD...feature', '--'], cwd: repo },
+    ])
+  })
+
   it('answers an unknown branch with code not_found', async () => {
     const { host } = await door()
     expect(await call(host.url, 'task_result', { branch: 'missing' })).toMatchObject({ isError: true, value: { code: 'not_found' } })

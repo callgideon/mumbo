@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { ensureAssistant } from '../src/assistant.ts'
+import * as McpDoor from '../src/index.ts'
 import { mcpDomain } from '../src/store.ts'
-import { type Host, startHost, stopHosts } from './door-fixture.ts'
+import { call, type Host, startHost, stopHosts } from './door-fixture.ts'
 
 afterEach(stopHosts)
 
@@ -58,5 +59,41 @@ describe('ensureAssistant', () => {
     host.held.add('s1')
     await expect(ensureAssistant(host.ctx, host.config, table)).rejects.toThrow('writer held')
     expect(table.get('main')).toEqual({ sessionId: 's1' })
+  })
+})
+
+describe('an existing Session', () => {
+  /** A host with the plugin loaded to drive the Session `mumbo`. */
+  async function existing(): Promise<Host> {
+    const host = await startHost()
+    await host.ctx.plugin(McpDoor, { ...host.config, session: 'mumbo' })
+    return host
+  }
+
+  it('drives the configured Session and never creates one', async () => {
+    const host = await existing()
+    const mumbo = host.addAgent('mumbo')
+    expect(await call(host.url, 'agent_send', { text: 'hello', request_id: 'r1' })).toMatchObject({ isError: false })
+    expect(mumbo.followup).toHaveBeenCalledOnce()
+    expect(host.calls).toEqual(['resolve:mumbo'])
+  })
+
+  it('answers not_ready and creates nothing until the Session exists, then drives it', async () => {
+    const host = await existing()
+    const notReady = { code: 'not_ready', message: 'the Session mumbo does not exist yet; try again once the host has started it' }
+    for (const [tool, args] of [['agent_send', { text: 'hello', request_id: 'r1' }], ['agent_read', { after_seq: 0 }], ['task_status', {}]] as const) {
+      expect(await call(host.url, tool, args)).toEqual({ isError: true, value: notReady })
+    }
+    expect(host.calls).toEqual(['resolve:mumbo', 'resolve:mumbo', 'resolve:mumbo'])
+    const mumbo = host.addAgent('mumbo')
+    expect(await call(host.url, 'agent_send', { text: 'hello', request_id: 'r1' })).toMatchObject({ isError: false })
+    expect(mumbo.followup).toHaveBeenCalledOnce()
+  })
+
+  it('reports another failure to resolve the Session as a tool error', async () => {
+    const host = await existing()
+    host.addAgent('mumbo')
+    host.held.add('mumbo')
+    expect(await call(host.url, 'agent_send', { text: 'hello', request_id: 'r1' })).toEqual({ isError: true, value: 'writer held' })
   })
 })

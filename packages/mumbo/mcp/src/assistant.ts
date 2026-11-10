@@ -1,4 +1,7 @@
-/** The assistant Session the tools talk to: found by its stored id, or created once in the configured workspace. */
+/**
+ * The assistant Session the tools talk to: a configured existing Session, or one found by its stored id or created
+ * once in the configured workspace.
+ */
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -6,8 +9,25 @@ import type {} from '@deepseek-ai/dsh-api-session-controller'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@deepseek-ai/dsh-workspace'
+import { ToolError } from './errors.ts'
 import type { Config } from './index.ts'
 import type { AssistantRecord } from './store.ts'
+
+/**
+ * Resolve an existing Session another plugin owns, such as `@mumbo/assistant`'s `mumbo`; never create one.
+ * @param ctx - context carrying `sessionController`.
+ * @param sessionId - the configured Session.
+ * @returns the Session's live Agent.
+ * @throws {ToolError} `not_ready` when the Session does not exist yet; the session controller's error otherwise.
+ */
+export async function resolveExisting(ctx: Context, sessionId: SessionId): Promise<Agent> {
+  const resolved = await ctx.sessionController.resolveAgent(sessionId)
+  if ('agent' in resolved) return resolved.agent
+  if (resolved.error.code === 'session/not-found') {
+    throw new ToolError('not_ready', `the Session ${sessionId} does not exist yet; try again once the host has started it`)
+  }
+  throw resolved.error
+}
 
 /**
  * Resolve the stored assistant Session, or create one when none is stored or the stored one is gone.

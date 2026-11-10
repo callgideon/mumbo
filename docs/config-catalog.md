@@ -5034,21 +5034,34 @@ export interface Config {
 ## `@mumbo/mcp`
 
 - `inject`: `webServer` · `storageDomain` · `sessionController` · `workspaceRegistry` · `agents` · `subagents` · `jobs` · `sessionProjections` · `subprocess`
-- `source`: [`packages/mumbo/mcp/src/index.ts:42`](../packages/mumbo/mcp/src/index.ts)
+- `source`: [`packages/mumbo/mcp/src/index.ts:43`](../packages/mumbo/mcp/src/index.ts)
 
 ```ts config-catalog
 /** MCP door configuration. */
 export interface Config {
-  /** File holding the bearer key; surrounding whitespace is ignored and an empty key fails load. */
+  /**
+   * File holding the bearer key, such as the per-box key the edge writes; surrounding whitespace is ignored. It is
+   * read at load, where a missing, unreadable or empty file fails load, and again for every request.
+   */
   readonly keyFile: string
   /** Principal handles allowed to call, each matching `^[a-z][a-z0-9-]{0,31}$`. */
   readonly allowlist: string[]
-  /** Title of the assistant Session the tools talk to. */
+  /**
+   * Id of an existing Session the tools talk to, such as `mumbo`, which another plugin creates; the tools answer
+   * `not_ready` until it exists. Absent, the plugin creates and keeps its own assistant Session.
+   */
+  readonly session?: string
+  /** Title of the assistant Session the plugin creates; unused with `session`. */
   readonly assistantTitle: string
-  /** Workspace directory of the assistant Session. */
+  /** Git checkout `task_status` and `task_result` read, and the workspace of the assistant Session the plugin creates. */
   readonly assistantCwd: string
   /** Tool names whose approval only a person in the browser may give. */
   readonly irreversibleTools: string[]
+  /**
+   * Tools served: `full` serves every tool; `door` serves `agent_send`, `agent_read`, `needs_you`, `task_reply`,
+   * `task_status` and `task_result`, and `task_reply` answers questions only.
+   */
+  readonly profile: 'full' | 'door'
 }
 ```
 <!-- END GENERATED config-catalog:@mumbo/mcp -->
