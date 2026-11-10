@@ -35,7 +35,7 @@ import type { WorkspaceBrowserProps } from '../contract/slots.ts'
 import type { ArchivedFilter, GroupNode, SessionNode, SessionOrderBy, SessionRowState } from '../tree.ts'
 import {
   blankRowList, deriveFlat, deriveGroups, deriveSearchResults, orderByRecency, owningGroupKey, owningParentFolder,
-  pinCurrentBlank, reconcileManualOrder, sessionMemberIds, UNGROUPED_KEY,
+  pinCurrentBlank, reconcileManualOrder, sessionMemberIds, UNGROUPED_KEY, withoutHidden,
 } from '../tree.ts'
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
 import { FLAT_SESSION_ORDER_KEY, type SessionGroupBy } from '../stores.ts'
@@ -925,6 +925,7 @@ export function WorkspaceBrowser({
   useHostInfo,
   useShortcuts,
   useWorkspaceShortcuts,
+  useHiddenSessions,
   requestSearch,
   requestAddWorkspace,
   closeAddWorkspace,
@@ -940,7 +941,12 @@ export function WorkspaceBrowser({
   // Ordering remains live while the rail or search replaces the list body.
   const sessionList = useSessions(state => state)
   const pinnedSessionIds = useWorkspaces(state => state.pinnedSessionIds)
-  const list = useMemo(() => blankRowList(sessionList, pinnedSessionIds), [sessionList, pinnedSessionIds])
+  // Hidden Sessions leave the grouped and flat lists; search reads the complete list.
+  const hiddenSessionIds = useHiddenSessions(ids => ids)
+  const list = useMemo(
+    () => withoutHidden(blankRowList(sessionList, pinnedSessionIds), hiddenSessionIds),
+    [sessionList, pinnedSessionIds, hiddenSessionIds],
+  )
   const storedWorkspaces = useWorkspaces(state => state.items)
   // The resolved name, not `t`, is the memo dependency: the bound seat keeps
   // its identity across a language switch.
@@ -1126,7 +1132,8 @@ export function WorkspaceBrowser({
       notifyArchivedNotOpenable()
       return
     }
-    setRevealSessionId(sessionId)
+    // A hidden Session has no row to reveal.
+    if (!hiddenSessionIds.includes(sessionId)) setRevealSessionId(sessionId)
     setQuery('')
     changeSearchExpanded(false)
     open(sessionId)

@@ -702,6 +702,23 @@ describe('UiWorkspaceService', () => {
     expect(withPlain.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('a'), sessionId: sid('plain') })
   })
 
+  it('publishes stacked hidden registrations, ends each once, and never reuses a hidden turnless Session as the blank', async () => {
+    const b = bench({
+      sessions: sessionState([summary('mumbo', { blank: true, cwd: '/w/a' }), summary('plain', { blank: true, cwd: '/w/a' })], 'pending'),
+      workspaces: workspaceState([workspace('a', [sid('mumbo'), sid('plain')])]),
+    })
+    const first = b.uiWorkspace.hideSession(sid('mumbo'))
+    const second = b.uiWorkspace.hideSession(sid('mumbo'))
+    expect(b.uiWorkspace.hiddenSessionIds.getSnapshot()).toEqual(['mumbo', 'mumbo'])
+    await expect(b.uiWorkspace.connectWorkspace(wid('a'))).resolves.toBe(sid('plain'))
+    first()
+    first()
+    expect(b.uiWorkspace.hiddenSessionIds.getSnapshot()).toEqual(['mumbo'])
+    second()
+    expect(b.uiWorkspace.hiddenSessionIds.getSnapshot()).toEqual([])
+    await expect(b.uiWorkspace.connectWorkspace(wid('a'))).resolves.toBe(sid('mumbo'))
+  })
+
   it('reopens a saved renamed turnless Session directly instead of reclaiming it as a blank', () => {
     persistSelection({ sessionId: sid('mumbo') })
     const b = bench({

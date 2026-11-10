@@ -12,7 +12,7 @@ import type { SessionProjectionSnapshot } from '@deepseek-ai/dsh-api-session-con
 import {
   type ArchivedFilter,
   blankRow, blankRowList, deriveFlat, deriveGroups, deriveSearchResults, orderByRecency, owningGroupKey, owningParentFolder,
-  pinCurrentBlank, reconcileManualOrder, sessionMemberIds, visibleSessionIds, workspaceLabel, UNGROUPED_KEY,
+  pinCurrentBlank, reconcileManualOrder, sessionMemberIds, visibleSessionIds, withoutHidden, workspaceLabel, UNGROUPED_KEY,
 } from '../src/client/tree.ts'
 import { createWorkspaceViewStore } from '../src/client/stores.ts'
 
@@ -326,6 +326,16 @@ describe('deriveGroups', () => {
       .toEqual([[plain.id, true], [pinned.id, false], [renamed.id, false]])
     const unchanged = list(plain)
     expect(blankRowList(unchanged, [])).toBe(unchanged)
+  })
+
+  it('drops hidden Sessions from the list the groups derive from, and keeps the snapshot when none is listed', () => {
+    const sessions = list(summary('mumbo', 3, '/w'), summary('side', 2, '/w'))
+    const visible = withoutHidden(sessions, [sid('mumbo'), sid('absent')])
+    expect(visible.ids).toEqual(['side'])
+    expect(Object.keys(visible.byId)).toEqual(['side'])
+    expect(deriveGroups(visible, [workspace('w', ['mumbo', 'side'])], noRows, noAttention, { expandedGroups: ['w'] })
+      .map(group => [group.sessionCount, group.sessions.map(session => session.id)])).toEqual([[1, ['side']]])
+    expect(withoutHidden(sessions, [sid('absent')])).toBe(sessions)
   })
 
   it('shows only the current blank session in its Workspace count and tree', () => {
