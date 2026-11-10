@@ -974,6 +974,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     mode: 'service',
     note: 'Publishes the owner share-management operations as one Typert Remote namespace that the owner client face calls; every method delegates to the same operations the same-origin routes used.',
   },
+  {
+    key: 'mumbo-browser-consent',
+    pkg: 'browser-consent',
+    title: 'Browser takeover',
+    mode: 'service',
+    consumers: ['box-links'],
+    note: "The person's hold on the box's browser: while taken over, browser consent refuses every browser tool and computer action and holds no CDP connection; box-links' owner-only route changes it.",
+  },
 ]
 
 function generatedHeader(title: string): string[] {

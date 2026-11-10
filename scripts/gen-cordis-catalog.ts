@@ -75,6 +75,7 @@ export const SERVICE_PAGE: Record<string, string> = {
   ptcRuntime: 'ptc-runtime.md',
   browserUse: 'browser-use.md',
   computerUse: 'computer-use.md',
+  'mumbo-browser-consent': 'browser-use.md',
   cuaAccess: 'computer-use.md',
   commands: 'commands.md',
   compaction: 'compaction.md',
