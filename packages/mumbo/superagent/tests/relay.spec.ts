@@ -1,11 +1,20 @@
 /**
- * The relay Source (UPSTREAM.md S9) on a running Runtime: messages posted to `/orchestrator/relay` as a project member
- * become Triggers that the real Engine, Policy, Settings and main Session tools act on. DSH admission is a stand-in that
- * answers the principal each case names; the real Connection's admission is covered in `http.spec.ts`.
+ * The relay Source (UPSTREAM.md S9, S10) on a running Runtime: messages posted to `/orchestrator/relay` as a project member
+ * become Triggers that the real Engine, Policy, Settings and main Session tools act on, and the Outbox reports replies on
+ * their Threads to a fake edge, an MCP server on 127.0.0.1 with one `report_to_member` tool. DSH admission is a stand-in
+ * that answers the principal each case names; the real Connection's admission is covered in `http.spec.ts`.
  */
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { toNodeHandler, type NodeIncomingMessageLike } from '@modelcontextprotocol/node'
+import { createMcpHandler, McpServer, type CallToolResult } from '@modelcontextprotocol/server'
+import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest'
+import { z } from 'zod'
 import { key } from '../src/core/index.ts'
-import { RELAY_LIMITS, RELAY_PATH, registerRelay } from '../src/sources/relay.ts'
+import { RELAY_LIMITS, RELAY_PATH, REPORT_TOOL, registerRelay } from '../src/sources/relay.ts'
 import { startRuntime, type Host } from './fixtures/host.ts'
 
 type Handler = (req: unknown, res: unknown) => Promise<void>
@@ -28,12 +37,50 @@ const register = () => registerRelay({ connection: { admit: () => admission },
     return () => { handler = undefined }
   } } } as never, host.runtime)
 
-// No relay Policy part is stored, as on a fresh box.
-beforeEach(async () => {
-  host = await startRuntime()
+const PROJECT = '0123456789abcdef', TOKEN = 'box-token'
+const ReportSchema = z.object({ member: z.string(), project: z.string(), thread: z.string(), messageId: z.string(), text: z.string() }).strict()
+type Report = z.infer<typeof ReportSchema>
+const SENT: CallToolResult = { content: [{ type: 'text', text: '{"result":"sent"}' }] }
+/** The fake edge: each `report_to_member` call it took, and its answer to the next ones. It refuses any other bearer token with 401. */
+const edge = { calls: [] as Report[], answer: (_report: Report): CallToolResult => SENT, url: '', tokenFile: '', close: () => {} }
+beforeAll(async () => {
+  const handler = toNodeHandler(createMcpHandler(() => {
+    const mcp = new McpServer({ name: 'fake-edge', version: '1.0.0' }, { capabilities: { tools: {} } })
+    mcp.registerTool(REPORT_TOOL, { description: 'Report to a member', inputSchema: ReportSchema }, async report => {
+      edge.calls.push(report)
+      return edge.answer(report)
+    })
+    return mcp
+  }))
+  const server = createServer((req, res) => {
+    // The adapter excludes explicit undefined on Node's optional HTTP fields.
+    if (req.headers.authorization === `Bearer ${TOKEN}`) void handler(req as NodeIncomingMessageLike, res)
+    else res.writeHead(401).end()
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const dir = mkdtempSync(join(tmpdir(), 'relay-edge-'))
+  Object.assign(edge, { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`, tokenFile: join(dir, 'edge.token'),
+    close: () => { server.close(); rmSync(dir, { recursive: true, force: true }) } })
+})
+afterAll(() => { edge.close() })
+
+/** Start a Runtime whose machine has `machine` and register the relay on it; no relay Policy part is stored, as on a fresh box. */
+async function start(machine: Parameters<typeof startRuntime>[1]) {
+  host = await startRuntime(undefined, machine)
   unregister = register()
+}
+beforeEach(async () => {
+  edge.calls = []
+  edge.answer = () => SENT
+  writeFileSync(edge.tokenFile, `${TOKEN}\n`)
+  await start({ edge: { url: edge.url, tokenFile: edge.tokenFile, project: PROJECT } })
 })
 afterEach(async () => { unregister(); await host.stop() })
+/** Run the effects that are due `ms` from now, replies included. */
+async function at(ms: number) {
+  vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + ms })
+  try { await host.runtime.pump(); await host.runtime.sendReplies() } finally { vi.useRealTimers() }
+}
 
 /** Post one body (a string is sent as is) to the relay route as `who`; returns its status and JSON body. */
 async function post(body: unknown, who: Admission = member(ALICE), method = 'POST') {
@@ -223,9 +270,71 @@ it('continues a conversation on its Thread, so a later message reaches the Ticke
     body: { result: 'stored', trigger: key('relay', ALICE, 'm2'), thread: 'm1' } })
   expect(host.runtime.store.triggers.get(key('relay', ALICE, 'm2'))?.threads).toEqual([{ source: 'relay', id: `${ALICE}/m1` }])
   expect(host.runtime.store.triggers.disposition(key('relay', ALICE, 'm2'))?.fanout).toEqual([ticketId])
-  // The relay Source has no Channel adapter yet, so the acknowledgement is dropped as undeliverable.
+})
+
+it('reports a reply on a relay Thread to its member through the edge once, under its Outbox message id, as the project box', async () => {
+  const sent = await post(message('m1', 'request', 'Fix the login page'))
+  await host.runtime.idle()
+  await host.route({ kind: 'accept', trigger_id: sent.body.trigger, title: 'Fix the login page', worktree_name: 'fix-login', acknowledgement: 'On it.' })
+  await host.runtime.idle()
   await host.runtime.sendReplies()
-  expect(host.runtime.store.receipts.get(key('ack', String(first.body.trigger)))).toMatchObject({ status: 'dropped' })
+  const ack = key('ack', String(sent.body.trigger))
+  expect(host.runtime.store.receipts.get(ack)).toMatchObject({ status: 'sent' })
+  expect(edge.calls).toEqual([{ member: ALICE, project: PROJECT, thread: 'm1', messageId: ack, text: 'On it.' }])
+  await at(300_000)
+  expect(edge.calls).toHaveLength(1)
+  const channel = host.runtime.store.triggers.get(String(sent.body.trigger))!.channel!
+  expect(host.runtime.sources.link(channel, {})).toEqual({ url: '', label: `Project member ${ALICE}` })
+})
+
+it('retries a failed report under the same message id, and drops a reply as gone when the edge says the address is not a member', async () => {
+  const sent = await post(message('m1', 'request'))
+  const channel = host.runtime.store.triggers.get(String(sent.body.trigger))!.channel!
+  edge.answer = () => ({ isError: true, content: [{ type: 'text', text: 'The project box is starting' }] })
+  host.runtime.outbox.send({ id: 'r1', channel, text: 'Done.', kind: 'reply' })
+  await host.runtime.sendReplies()
+  expect(host.runtime.outbox.status('r1')).toBe('pending')
+  edge.answer = () => SENT
+  await at(5000)
+  expect(host.runtime.outbox.status('r1')).toBe('sent')
+  expect(edge.calls.map(call => call.messageId)).toEqual(['r1', 'r1'])
+  edge.answer = () => ({ isError: true, content: [{ type: 'text', text: `not_a_member: ${ALICE} is not a member of the project` }] })
+  host.runtime.outbox.send({ id: 'r2', channel, text: 'Done again.', kind: 'reply' })
+  await host.runtime.sendReplies()
+  expect(host.runtime.store.receipts.get('r2')).toMatchObject({ status: 'dropped', dropped: { reason: 'channelGone' } })
+  expect(edge.calls).toHaveLength(3)
+})
+
+it('cuts a text longer than the relay limit to the limit, ending in an ellipsis and without a lone surrogate', async () => {
+  const sent = await post(message('m1', 'request'))
+  const channel = host.runtime.store.triggers.get(String(sent.body.trigger))!.channel!
+  const limit = RELAY_LIMITS.text
+  for (const [id, text] of [['exact', 'x'.repeat(limit)], ['over', 'x'.repeat(limit + 1)], ['pair', `${'x'.repeat(limit - 2)}😀y`]]) {
+    host.runtime.outbox.send({ id: id!, channel, text: text!, kind: 'reply' })
+  }
+  await host.runtime.sendReplies()
+  expect(edge.calls.map(call => call.text)).toEqual(['x'.repeat(limit), `${'x'.repeat(limit - 1)}…`, `${'x'.repeat(limit - 2)}…`])
+})
+
+it('keeps a reply waiting, and reports the reply effect failing, while the token is wrong or unreadable or no edge is set', async () => {
+  const sent = await post(message('m1', 'request'))
+  const channel = host.runtime.store.triggers.get(String(sent.body.trigger))!.channel!
+  writeFileSync(edge.tokenFile, 'another-token')
+  host.runtime.outbox.send({ id: 'r1', channel, text: 'Done.', kind: 'reply' })
+  await host.runtime.sendReplies()
+  rmSync(edge.tokenFile)
+  await at(5000)
+  writeFileSync(edge.tokenFile, ' \n')
+  await at(15_000)
+  expect([host.runtime.outbox.status('r1'), edge.calls]).toEqual(['pending', []])
+  expect(host.runtime.health.reply).toMatchObject({ state: 'error', detail: expect.stringContaining('is empty') })
+  unregister(); await host.stop()
+  await start({})
+  await post(message('m1', 'request'))
+  host.runtime.outbox.send({ id: 'r1', channel, text: 'Done.', kind: 'reply' })
+  await host.runtime.sendReplies(); await at(5000); await at(15_000)
+  expect([host.runtime.outbox.status('r1'), edge.calls]).toEqual(['pending', []])
+  expect(host.runtime.health.reply).toMatchObject({ state: 'error', detail: expect.stringContaining('dsh-superagent has no `edge`') })
 })
 
 it('refuses with 409 while the relay Source is switched off, and says when evaluation waits for setup', async () => {
