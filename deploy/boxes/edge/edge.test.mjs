@@ -575,15 +575,38 @@ test('MCP endpoint on the model host: box token required, tools act as the token
   } finally { server.close() }
 })
 
-test('desktop live view: /desktop/ goes to the box\'s noVNC port, everything else to dsh', async () => {
+test('desktop live view: /desktop/ goes to the box\'s desktop port, everything else to dsh', async () => {
   const { boxRoute } = await import('./edge.mjs')
-  assert.match(boxRoute('/desktop').redirect, /^\/desktop\/vnc\.html\?.*path=desktop\/websockify/)
+  // vnc.html is KasmVNC's web client and noVNC's (a template before KasmVNC); both read these from the query. The
+  // WebSocket path keeps the /desktop prefix, and show_control_bar keeps KasmVNC's clipboard and remote resize on in a frame.
+  assert.equal(boxRoute('/desktop').redirect, '/desktop/vnc.html?autoconnect=1&resize=remote&path=desktop/websockify&show_control_bar=1')
+  assert.deepEqual(boxRoute('/desktop/vnc.html?autoconnect=1'), { port: '6080', path: '/vnc.html?autoconnect=1', base: '' })
+  assert.deepEqual(boxRoute('/desktop/assets/ui-DKMQOe2K.js'), { port: '6080', path: '/assets/ui-DKMQOe2K.js', base: '' })
   // A former-host redirect adds its marker query (prod/modules/edge/edge.tf old_hosts).
   for (const url of ['/desktop/?moved=1&', '/desktop?moved=1&']) assert.equal(boxRoute(url).redirect, boxRoute('/desktop/').redirect, url)
   assert.deepEqual(boxRoute('/desktop/websockify'), { port: '6080', path: '/websockify', base: '' })
   assert.deepEqual(boxRoute('/desktop-not'), { port: '3080', path: '/desktop-not', base: '' })
   assert.deepEqual(boxRoute('/api/remote.mux'), { port: '3080', path: '/api/remote.mux', base: '' })
   assert.equal(boxHeaders(cfg, {}, { id: 'b1' }, '6080')['e2b-sandbox-port'], '6080')
+})
+
+test('the live view\'s pages may connect only to their own host, and a page that opened the public host keeps no handle to it', async () => {
+  const upstream = createServer((req, res) => res.writeHead(200, { 'content-type': 'text/html', ...(req.url === '/own-csp' ? { 'content-security-policy': "default-src 'self'" } : {}) }).end('page'))
+  await new Promise(r => upstream.listen(0, '127.0.0.1', r))
+  const box = { ensure: async () => ({ id: 'ubox', token: 'T' }), touch: async () => {}, forget: async () => {} }
+  const server = userServer({ cfg: { ...cfg, approveHost: 'approve.example', proxy: new URL(`http://127.0.0.1:${upstream.address().port}`) }, box, signin: () => false, log: () => {} })
+  const port = await listen(server)
+  const get = (path, host = cfg.publicHost) => call(port, { path, headers: { host, 'x-forwarded-email': 'a@x.com', cookie: 'dsh-auth-x=1' } })
+  try {
+    // KasmVNC's client connects wherever its URL points and, in Chrome, sends the local clipboard there.
+    const desktop = await get('/desktop/vnc.html?autoconnect=1&host=evil.example&port=443&encrypt=1&path=x')
+    assert.deepEqual([desktop.status, desktop.headers['content-security-policy']], [200, "frame-ancestors 'self', connect-src 'self' wss://boxes.example data:"])
+    assert.equal((await get('/desktop/own-csp')).headers['content-security-policy'], "default-src 'self'; frame-ancestors 'self', connect-src 'self' wss://boxes.example data:")
+    assert.equal((await get('/')).headers['content-security-policy'], "frame-ancestors 'self'", 'dsh\'s pages keep their policy')
+    for (const path of ['/', '/desktop/', '/desktop/vnc.html', '/home']) assert.equal((await get(path)).headers['cross-origin-opener-policy'], 'same-origin-allow-popups', path)
+    // MCP clients sign in through popups: the consent redirect, the approve host and project hosts get none.
+    for (const [path, host] of [['/oauth/consent?x=1', cfg.publicHost], ['/', 'approve.example'], ['/', `p-0123456789abcdef.${cfg.projectDomain}`]]) assert.equal((await get(path, host)).headers['cross-origin-opener-policy'], undefined, host + path)
+  } finally { server.close(); upstream.close() }
 })
 
 test('backups carry the browser user\'s home without caches or profile locks, and tolerate its absence', async () => {

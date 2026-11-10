@@ -17,8 +17,8 @@ const at = (text, needle) => { const i = text.indexOf(needle); assert.ok(i >= 0,
 
 test('a user box start script is byte-for-byte what it was before project boxes grew a proxy', () => {
   const s = startScript(c, 'T', boxSite(c, 'a@x.com'), "role's", undefined, boxFiles, ['o@x.com'])
-  // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows, the X cookie, the first-run welcome, the interim Chromium policy (B27), the B18 desktop and the B25 consent rows (same cfg, token T, role "role's").
-  assert.equal(createHash('sha256').update(s).digest('hex'), '20cc857394f816e41d00eb164f71c7c45a11f52403457eb0329575eead2cc2e8')
+  // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows, the X cookie, the first-run welcome, the interim Chromium policy (B27), the B18 desktop, the B25 consent rows and B19's KasmVNC and its own user (same cfg, token T, role "role's").
+  assert.equal(createHash('sha256').update(s).digest('hex'), '4e7231d9021e551d444c3c237be93d8db04c6897af5260160f2ac9140e87325e')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -225,8 +225,7 @@ test('computer use: person boxes load it only with the package and xdotool, and 
   const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles)
   assert.match(u, /if \[ -d \/src\/packages\/experimental\/computer-use-x11 \] && command -v xdotool/)
   assert.match(u, /\$LINKS_PATCH \$CU_PATCH/)
-  assert.match(u, /Xvfb :1 \$XVFB_AUTH /)
-  assert.ok(at(u, 'export XAUTHORITY=/run/x11/auth') < at(u, "Xvfb :1"))
+  for (const server of ['Xkasmvnc :1 $X_AUTH ', 'Xvfb :1 $X_AUTH ']) assert.ok(at(u, 'export XAUTHORITY=/run/x11/auth') < at(u, server), server)
   const p = startScript({ ...c, projectDomain: 'boxes.x' }, 'T', boxSite({ ...c, projectDomain: 'boxes.x' }, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
   assert.ok(!p.includes('CU_PATCH') && !p.includes('computer-use'))
 })
