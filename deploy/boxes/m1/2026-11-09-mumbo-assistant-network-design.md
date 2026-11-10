@@ -789,11 +789,20 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
 - **Their environment** is an explicit list. It never holds the box token (`DEEPSEEK_API_KEY`), `MUMBO_MEMBER_KEY` or a launch token.
   - **Harness addition:** a "run as" user and environment on the subprocess seam that these share. Node's `spawn` takes `uid` and `gid` natively.
   - The person's own Terminal tab runs as `agent` too, because the agent can drive terminals.
-- **The model's file tools** (read, write, edit, search, list) work only under an allowlist: the workspace (`/root/projects`), `/tmp` and `agent`'s home.
-  - They resolve real paths first, so a symlink can't lead out.
-  - **Harness addition:** a readable-roots allowlist for the model's file tools. dsh's sandbox limits writes only, never reads.
+- **The model's file tools** (read, write, edit, search, list) work only under an allowlist: the workspace (`/root/projects`) and `agent`'s home.
+  - `/tmp` is out, because root file tools would read anyone's temporary files, Chromium's logs included. `agent`'s `TMPDIR` is `/home/agent/tmp`.
+  - **Harness addition:** a readable-roots allowlist for the model's file tools (`modelRoots`). dsh's sandbox limits writes only, never reads.
   - An allowlist, not a denylist, because the tools run in the root dsh process and could otherwise read `/proc/<pid>/environ` of root processes.
+  - **No check-then-use race.** The agent's shell can swap a checked directory for a symlink, which is the route to `Login Data`.
+    - A read checks the real path of the opened file descriptor (`/proc/self/fd/<n>`) against the roots before reading.
+    - Nothing root does on a model-chosen path may change the filesystem before such a check: create, write, rename, delete or chmod. A root create through a swapped directory has its effect before any check. So mutating file operations run with `agent`'s own permissions, through a helper process started with "run as", and the kernel then checks every path component.
   - The person's Files panel is unchanged.
+- **Nothing the model reaches loads code into root dsh or starts it as root.**
+  - The box overlays disable the plugin manager's tools (`dsh-plugin-manager/tools`) in every preset boxes use; plugins come through the template or the operator.
+  - Runtime self-modification (extensions), model-added MCP servers, the experimental Python runtime and SDK-spawned subagents are not mounted in boxes, or they start their processes through "run as".
+  - `git` on a model-writable repository never runs as root. The repository's own config and hooks (`core.fsmonitor`, hooks, filter and textconv drivers) run code, so dsh's change summaries and anything else that runs `git` on the workspace use "run as". The workspace-changes scratch directory needs a harness follow-up for that.
+  - `/src` (the dsh code root runs) is read-only for `agent`.
+  - **A composition gate:** a test lists every model-visible tool in the box compositions with how it runs (root in-process, or "run as"), and fails on a tool it doesn't know. A new plugin can't quietly reopen this.
 - **Box permissions** (edge start script):
   - `/root` is `0711`. `/root/projects` belongs to `agent`, so Session working directories don't change.
   - `/root/.dsh`, `/root/.mumbo` and `/root/dsh.log` are root-only.
@@ -812,7 +821,12 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
   - read `/proc/<dsh pid>/environ` and `/root/dsh.log`;
   - connect to `9222`, `envd`, the VNC port, or the X display;
   - write the Chrome policy file, or anything under `/root/.mumbo`;
-  - become root, including by planting a symlink under `/home/browser` or `/root/projects` that the root setup in the start script follows. Root operations on paths a non-root user owns refuse to follow symlinks, or run as that user.
+  - become root, including by planting a symlink under `/home/browser` or `/root/projects` that the root setup in the start script follows. Root operations on paths a non-root user owns refuse to follow symlinks, or run as that user;
+  - win a race by swapping a directory for a symlink between a file tool's check and its use, for reads and for writes;
+  - run code as root through a workspace repository's `core.fsmonitor` or hooks when dsh summarizes changes;
+  - install a plugin, or add an MCP server, through any model tool;
+  - write under `/src`;
+  - escape through a backup restore: an archive whose entries go through a symlink it also contains.
 - **Also project boxes.** This satisfies section 2's requirement for project boxes before a second member (B12).
 
 **B25, browser-level denials** (`@mumbo/browser-consent` and Chrome policy):
@@ -833,7 +847,8 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
   - `browser_network_request` is refused outright.
   - The request list stays a read only if it shows no headers or bodies; otherwise it is refused too.
 - **Before B18 deploys** (Chrome with every sync type), the masking patch, the output directory and the network-request denial are live. That doesn't wait for B24, but nothing sends a saved password to a model provider in the meantime.
-- **Today's Chromium** may already hold passwords the founder saved. Until the masking is live, a managed policy for it (`PasswordManagerEnabled: false`, `AutofillCreditCardEnabled: false`) stops autofill from putting them into snapshots.
+- **Today's Chromium** may already hold passwords the founder saved. Until the masking is live, a managed policy for it (B27: `PasswordManagerEnabled: false`, `AutofillCreditCardEnabled: false`) stops new saves and card fills.
+  - Passwords saved before the policy still autofill (Chrome's documented behaviour), so any such passwords are deleted from that Chromium, or the masking ships first.
 - **Chrome's `URLBlocklist`** blocks the internal pages for everyone in the box's Chrome, the person included, because computer use drives Chrome without going through browser-consent:
   - `chrome://password-manager`, `chrome://settings/passwords`, `chrome://settings/payments`, `chrome://settings/autofill`, `chrome://settings/addresses`;
   - `chrome://sync-internals`, `chrome://autofill-internals`, `chrome://password-manager-internals`.
