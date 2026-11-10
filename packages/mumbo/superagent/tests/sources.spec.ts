@@ -377,6 +377,17 @@ describe('github source', () => {
     expect(mentions('see `@agent-bot`', 'agent-bot')).toBe(false)
     expect(mentions('`@agent-bot` and then @agent-bot', 'agent-bot')).toBe(true)
   })
+  it('reads code spans and fences as CommonMark does, so a mention beside a stray backtick counts and one in an HTML comment does not', () => {
+    for (const text of ['Typing ``` inline breaks the renderer. @mumbo-bot please fix it.\n\nRepro:\n```\nfoo\n```',
+      'Use ``a`b`` and @mumbo-bot fix `x`', 'This changes `foo\nbar` and @mumbo-bot should fix `baz` too', 'Press \\` then @mumbo-bot fix `x`',
+      'Use `C:\\` then @mumbo-bot fix `x`', '~~~\n```\n~~~\n@mumbo-bot go', '    ```\n@mumbo-bot fix']) {
+      expect(mentions(text, 'mumbo-bot[bot]'), text).toBe(true)
+    }
+    for (const text of ['``@mumbo-bot``', '<!-- To hand this to the agent, mention @mumbo-bot -->\nThe header is wrong', '<!-- @mumbo-bot',
+      '   ```\n@mumbo-bot\n   ```', '````\n@mumbo-bot\n```\nstill code']) {
+      expect(mentions(text, 'mumbo-bot[bot]'), text).toBe(false)
+    }
+  })
   it('reads the address of an Issue, a PR or a review comment of the repository, and nothing else', () => {
     expect(githubAddress('https://api.github.com/repos/acme/widgets/pulls/9', 'acme/widgets')).toEqual({ number: 9, pr: true })
     expect(githubAddress('https://api.github.com/repos/Acme/Widgets/issues/12', 'acme/widgets')).toEqual({ number: 12, pr: false })
@@ -1270,6 +1281,7 @@ describe('observing the GitHub repository', () => {
       if (bare === 'commits/main') return JSON.stringify({ sha: answers.branch!.sha })
       if (bare.endsWith('/check-runs')) return JSON.stringify([{ check_runs: answers.branch?.checks ?? [] }])
       const route = answers.routes?.[bare] ?? []
+      if (route instanceof Error) throw route
       return JSON.stringify(args.includes('--slurp') ? [route] : route)
     })
     return calls
@@ -1552,6 +1564,125 @@ describe('observing the GitHub repository', () => {
     await pollRound(h)
     expect(pullOf(h.store.tickets.get('t1')!)).toBe(20)
     expect(h.receive.mock.calls.map(([trigger]) => trigger.text)).toEqual(['please rename this variable'])
+    h.store.close()
+  })
+  /** GitHub as its list endpoints answer: the items updated since `since`, oldest update first, at most `per_page` of them. */
+  function paging(h: ReturnType<typeof host>, routes: Record<string, unknown>) {
+    vi.spyOn(h.commands, 'run').mockImplementation(async (_program, args) => {
+      const [path = '', query = ''] = args[1]!.replace(/^repos\/acme\/widgets\/?/, '').split('?')
+      const params = new URLSearchParams(query)
+      let value = routes[path] ?? (path.endsWith('/check-runs') ? { check_runs: [] } : [])
+      if (Array.isArray(value)) {
+        const since = params.get('since') ?? ''
+        value = (value as { updated_at: string }[]).filter(item => item.updated_at >= since)
+          .sort((a, b) => a.updated_at.localeCompare(b.updated_at)).slice(0, Number(params.get('per_page') ?? 100))
+      }
+      if (args.includes('--include')) return `HTTP/2.0 200 OK\r\n\r\n${JSON.stringify(value)}`
+      return JSON.stringify(args.includes('--slurp') ? [value] : value)
+    })
+  }
+  it('takes in as a GitHub App a new mention, and a new comment on a subscribed Thread, that GitHub lists after a full page', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const T0 = Date.parse('2026-11-08T10:00:00Z')
+      const t = (seconds: number) => new Date(T0 + seconds * 1000).toISOString()
+      const round = async (h: ReturnType<typeof host>, seconds: number) => { vi.setSystemTime(T0 + seconds * 1000); await pollRound(h) }
+      const h = appHost()
+      observe(h, {})
+      // A Thread whose Ticket ended long ago, so only a new comment there is received.
+      const month = t(-35 * 86_400)
+      subscribed(h, { source: 'github', id: '40' }, { number: 40, isPr: false, title: 'Merged long ago' })
+      h.store.threads.save({ ...h.store.threads.get('github:40')!, createdAt: month, lastAt: month })
+      const routes: Record<string, unknown> = {}
+      paging(h, routes)
+      await round(h, 0)
+      // A hundred older Issues and comments are updated before alice opens an Issue and comments on #40.
+      routes.issues = [...Array.from({ length: 100 }, (_, i) => issue(1 + i, { created_at: t(-86_400), updated_at: t(1 + i / 4) })),
+        issue(500, { user: ALICE, body: '@mumbo-bot fix the header typo', created_at: t(40), updated_at: t(40) })]
+      routes['issues/comments'] = [...Array.from({ length: 100 }, (_, i) => remark(100 + i, 7, 'unrelated', t(-86_400), t(1 + i / 4))),
+        remark(1, 40, 'the footer too', t(40))]
+      await round(h, 60)
+      expect(h.receive).not.toHaveBeenCalled()
+      await round(h, 120)
+      expect(h.receive.mock.calls.map(([trigger]) => trigger.text)).toEqual(['Issue 500\n\n@mumbo-bot fix the header typo', 'the footer too'])
+      h.store.close()
+    } finally { vi.useRealTimers() }
+  })
+  it('reads as a GitHub App, once the agent\'s own PR binds after a failed read, the reviewer comments the stream dropped', async () => {
+    const h = appHost({ app: at(0) })
+    observe(h, {})
+    h.store.tickets.save({ ...openTicket('t1'), assignments: [{ id: 'a1', state: 'running', createdAt: at(0) }], execution: execution('fix-1') })
+    const own = { ...issue(20, { user: { login: APP.login, type: 'Bot' }, created_at: at(1), updated_at: at(1) }), pull_request: { url: 'x' } }
+    const pr: Pull = { ...openPull(20), user: { login: APP.login }, head: { sha: 'abc', ref: 'agent/fix-1', repo: { full_name: 'acme/widgets' } } }
+    const review = remark(1, 20, 'please rename this variable', at(2))
+    const routes: Record<string, unknown> = { 'pulls/20': refused(502, 'Bad Gateway'), 'issues/20': own, 'issues/20/comments': [review] }
+    const answers: Answers = { issues: [own], comments: [review], routes }
+    repository(h, answers)
+    await expect(pollRound(h)).rejects.toThrow(/502/)
+    expect(h.receive).not.toHaveBeenCalled()
+    // The agent pushes to its PR, so GitHub lists it again, and the comment no more.
+    answers.issues = [{ ...own, updated_at: at(3) }]
+    answers.comments = []
+    routes['pulls/20'] = pr
+    await pollRound(h)
+    expect(pullOf(h.store.tickets.get('t1')!)).toBe(20)
+    expect(h.receive.mock.calls.map(([trigger]) => trigger.text)).toEqual(['please rename this variable'])
+    h.store.close()
+  })
+  it('reads as a GitHub App a new Ticket\'s Thread from its own mention, not from an earlier mention that started none', async () => {
+    const h = appHost({ app: at(0) })
+    observe(h, {})
+    const carol = { login: 'carol', type: 'User' }
+    const first = { ...remark(1, 40, '@mumbo-bot can you drop the users table?', at(1)), user: carol }
+    const reply = { ...remark(2, 40, 'and the sessions table too', at(2)), user: carol }
+    const mention = remark(3, 40, '@mumbo-bot please fix the header typo', at(30))
+    const answers: Answers = { comments: [first, reply], routes: { 'issues/40/comments': [first, reply, mention] } }
+    repository(h, answers)
+    // carol is not on the allowed list, so her mention starts no Eval.
+    await pollRound(h)
+    answers.comments = [mention]
+    await pollRound(h)
+    answers.comments = []
+    subscribed(h, { source: 'github', id: '40' }, { number: 40, isPr: false, title: 'Issue 40' })
+    h.receive.mockClear()
+    await pollRound(h)
+    expect(h.receive.mock.calls.map(([trigger]) => trigger.text)).toEqual(['@mumbo-bot please fix the header typo'])
+    h.store.close()
+  })
+  it('reads as a GitHub App the replies between two mentions made before the first one\'s Ticket subscribed', async () => {
+    const h = appHost({ app: at(0) })
+    observe(h, {})
+    const first = remark(1, 7, '@mumbo-bot fix the header typo', at(1))
+    const reply = remark(2, 7, 'the footer has it too', at(2))
+    const second = remark(3, 7, '@mumbo-bot and add a test', at(3))
+    const answers: Answers = { comments: [first, reply], routes: { 'issues/7/comments': [first, reply, second] } }
+    repository(h, answers)
+    await pollRound(h)
+    // The first mention's Eval is still running when the second arrives.
+    answers.comments = [second]
+    await pollRound(h)
+    answers.comments = []
+    subscribed(h, { source: 'github', id: '7' }, { number: 7, isPr: false, title: 'Issue 7' })
+    h.receive.mockClear()
+    await pollRound(h)
+    expect(h.receive.mock.calls.map(([trigger]) => trigger.text)).toEqual([first.body, reply.body, second.body])
+    h.store.close()
+  })
+  it('reads as a GitHub App the replies to a new Issue a switch received, posted before its Ticket subscribed', async () => {
+    const h = appHost({ issues: at(0), app: at(0) })
+    observe(h, { observeIssues: true })
+    const reply = remark(1, 8, 'also the footer has the same typo', at(2))
+    const answers: Answers = { issues: [issue(8, { user: ALICE, body: 'the header has a typo', created_at: at(1), updated_at: at(1) })],
+      comments: [reply], routes: { 'issues/8/comments': [reply] } }
+    repository(h, answers)
+    await pollRound(h)
+    expect(h.receive.mock.calls.map(([trigger]) => trigger.meta.kind)).toEqual(['issue'])
+    answers.issues = []
+    answers.comments = []
+    subscribed(h, { source: 'github', id: '8' }, { number: 8, isPr: false, title: 'Issue 8' })
+    h.receive.mockClear()
+    await pollRound(h)
+    expect(h.receive.mock.calls.map(([trigger]) => trigger.text)).toEqual(['also the footer has the same typo'])
     h.store.close()
   })
   it('takes in as a GitHub App an edit of an old comment on a subscribed Thread only while the Thread is polled', async () => {
