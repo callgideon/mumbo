@@ -147,7 +147,7 @@ describe.runIf(process.platform === 'linux')('model paths under roots', () => {
     for (const requested of [
       'link/directory/../../projects/notes.txt', 'link/missing/../../projects/notes.txt', 'link/key/../../projects/notes.txt',
       'link/directory/deep/../../../projects/notes.txt', 'link/directory/nodeep/../../../projects/notes.txt',
-      `${outside}/directory/../../projects/notes.txt`, `${outside}/missing/../../projects/notes.txt`,
+      `${outside}/directory/../../projects/notes.txt`, `${outside}/missing/../../projects/notes.txt`, `/..${workspace}/notes.txt`,
     ]) {
       const written = requested.startsWith('/') ? requested : `${workspace}/${requested}`
       expect(await rejection(fs.resolveModelPath(requested)), requested).toEqual(refusal(written))

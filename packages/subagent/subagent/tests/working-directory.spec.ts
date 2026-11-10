@@ -104,6 +104,9 @@ describe('subagent working directories', () => {
     expect(ctx.workingDirectory.get(derived.localAgent.session)).toBe(root)
     await derived.result
     expect(ctx.workingDirectory.get(derived.localAgent.session)).toBe(root)
+    const relative = await startTestActivation(ctx, 'spawn', { parent, cwd: '..', cwdChooser: 'host', prompt: [{ type: 'text', text: 'child' }] })
+    expect(ctx.workingDirectory.chooser(relative.localAgent.session)).toBe('host')
+    await relative.result
   })
 
   it('keeps an inherited directory the host chose for the parent outside the model roots after the child runs', async () => {
