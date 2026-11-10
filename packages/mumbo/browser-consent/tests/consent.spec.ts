@@ -1,7 +1,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it } from 'vitest'
 import * as PlaywrightBrowser from '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp'
-import { apply, classify, Config, currentTabUrl, denial, denyList, describeArguments, inject, targetUrl } from '../src/index.ts'
+import { apply, classify, Config, currentTabUrl, denial, denyList, describeArguments, inject, tabUrl, targetUrl } from '../src/index.ts'
 
 const browser = { mode: 'attach', endpoint: 'http://127.0.0.1:9222' } as const
 /** The list the box edge writes. */
@@ -40,6 +40,18 @@ describe('currentTabUrl', () => {
     expect(currentTabUrl('### Result\n- 0: [Inbox](https://mail.google.com/mail/u/0/)\n- 1: (current) [Shop](https://shop.example:8443/cart?x=1) [crashed]'))
       .toBe('https://shop.example:8443/cart?x=1')
     expect(currentTabUrl('- 0: (current) [](about:blank)')).toBe('about:blank')
+  })
+
+  it('reads only the result section, and an ambiguous line through a hint it ends with', () => {
+    const raced = '### Result\n- 0: [Mail](https://mail.google.com/)\n- 1: (current) [Chat](https://chat.example/)\n### Open tabs\n- 0: (current) [Mail](https://mail.google.com/)\n- 1: [Chat](https://chat.example/)'
+    expect(currentTabUrl(raced)).toBe('https://chat.example/')
+    expect(tabUrl(raced, 0)).toBe('https://mail.google.com/')
+    expect(tabUrl(raced, 2)).toBeUndefined()
+    const brackets = '### Result\n- 0: (current) [Fix [x](y) - GitHub](https://github.com/o/r/pull/1)'
+    expect(currentTabUrl(brackets)).toBeUndefined()
+    expect(currentTabUrl(brackets, 'https://github.com/o/r/pull/1')).toBe('https://github.com/o/r/pull/1')
+    expect(currentTabUrl(brackets, 'https://passwords.google.com/')).toBeUndefined()
+    expect(tabUrl(brackets, 0)).toBeUndefined()
   })
 
   it('yields no URL for an ambiguous listing', () => {
@@ -144,6 +156,10 @@ describe('Config', () => {
     expect(() => Config({ browser } as never)).toThrow('deniedUrls missing required value')
     expect(Config({ browser, deniedUrls: [] }).deniedUrls).toEqual([])
     expect(() => denyList(['Chrome:'])).toThrow('deniedUrls entry "Chrome:" is not lowercase; use "chrome:"')
+    expect(denial('https://h.example:8443/x', denyList(['https://h.example:8443']))).toBe('a page on https://h.example:8443')
+    expect(() => denyList(['https://h.example:8443/'])).toThrow('use "https://h.example:8443"')
+    expect(() => denyList(['about:'])).toThrow('deniedUrls entry "about:" would deny only about:blank; use "chrome:"')
+    expect(() => denyList(['https://*.google.com'])).toThrow('deniedUrls entry "https://*.google.com" names a wildcard host, which matches no page; list each origin')
     for (const [entry, use] of [
       ['https://accounts.google.com/', 'https://accounts.google.com'], ['HTTPS://accounts.google.com', 'https://accounts.google.com'],
       ['https://accounts.google.com.', 'https://accounts.google.com'], ['https://accounts.google.com:443', 'https://accounts.google.com'],

@@ -65,7 +65,7 @@ class ScriptedModel extends LlmAdapter {
  * Boot the composition in `root`: approval and the consent row, which mounts the real Playwright MCP provider.
  * @param root - scratch directory holding the config and serving as the Session's working directory.
  * @param options - consent config, approval policy, model script, the person's answers in order (`hang` never answers),
- *   rows placed before and after consent, and extra services the consent row waits for.
+ *   rows placed before and after consent, and extra services each row waits for, by row id.
  * @returns the booted context and Session, the approval reasons asked, every Session event, logged errors, and the
  *   consent Fiber.
  */
@@ -77,7 +77,7 @@ export async function bootComposition(root: string, options: {
   withoutApproval?: boolean
   before?: ReadonlyArray<readonly [string, Plugin]>
   after?: ReadonlyArray<readonly [string, Plugin]>
-  consentInject?: string[]
+  inject?: Readonly<Record<string, string[]>>
 }) {
   const asked: string[] = []
   const answers = [...options.answers ?? []]
@@ -105,7 +105,7 @@ export async function bootComposition(root: string, options: {
   }
   const configPath = join(root, 'cordis.yml')
   await writeFile(configPath, JSON.stringify([...modules.keys()].map(name => ({
-    id: name, name, config: configs[name] ?? {}, ...name === 'consent' && options.consentInject !== undefined ? { inject: options.consentInject } : {},
+    id: name, name, config: configs[name] ?? {}, ...options.inject?.[name] === undefined ? {} : { inject: options.inject[name] },
   }))))
   const ctx = new Context()
   const errors: string[] = []

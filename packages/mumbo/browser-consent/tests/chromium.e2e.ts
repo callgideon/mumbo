@@ -12,16 +12,22 @@ import type { ScriptStep } from './harness.ts'
 
 const skip = process.env.DSH_BROWSER_EXECUTABLE === undefined
 /** A home page on `127.0.0.1` linking to a saved-passwords page on `localhost`. */
+/**
+ * A home page on `127.0.0.1` linking to a saved-passwords page on `localhost`, which logs to its console and posts a
+ * password; `/redir` redirects there.
+ */
 const accountPages = (port: number, path: string) => path === '/settings'
   ? '<!doctype html><title>Saved passwords</title><h1>Saved passwords</h1><p>bank.example: correct-horse</p>'
-  : `<!doctype html><title>Home</title><a id="account" href="http://localhost:${String(port)}/settings">Account</a>`
+    + '<script>console.log("vault: correct-horse"); console.log("vault loaded"); fetch("/login", { method: "POST", body: "pw=correct-horse" })</script>'
+  : path === '/redir' ? `REDIRECT http://localhost:${String(port)}/settings`
+    : `<!doctype html><title>Home</title><a id="account" href="http://localhost:${String(port)}/settings">Account</a>`
 /** What the patched snapshot shows in place of a secret input's value. */
 const MASK = '•'.repeat(4)
 
 /**
  * Serve two loopback origins, `127.0.0.1` and `localhost`, attach the composition to a disposable headless Chromium,
  * and run one scripted turn.
- * @param page - HTML for a request path, given the server port.
+ * @param page - HTML for a request path, given the server port, or `REDIRECT <url>` for a redirect.
  * @param turn - consent's `deniedUrls`, `allowedSites`, the model's script, the person's answers, and whether the
  *   server writes to an `outputDir` outside the working directory, given the origins.
  * @returns each tool result's text, the approval reasons asked, the Session events, the hosts that received a POST,
@@ -39,8 +45,14 @@ async function runTurn(page: (port: number, path: string) => string, turn: (allo
   const sent: string[] = []
   const server = createServer((request, response) => {
     if (request.method === 'POST') sent.push(request.headers.host!)
+    const body = page(port, request.url ?? '/')
+    if (body.startsWith('REDIRECT ')) {
+      response.writeHead(302, { Location: body.slice('REDIRECT '.length) })
+      response.end()
+      return
+    }
     response.writeHead(200, { 'Content-Type': 'text/html' })
-    response.end(page(port, request.url ?? '/'))
+    response.end(body)
   })
   server.listen(0, '127.0.0.1')
   await once(server, 'listening')
@@ -300,3 +312,63 @@ it.skipIf(skip)('asks before a click or typing on an allowed page with a masked 
   ])
   expect(consentRecords(events)).toEqual([{ callId: 'call-4', tool: 'browser_click', site: `http://127.0.0.1:${String(port)}`, grant: 'site', outcome: 'succeeded' }])
 })
+
+it.skipIf(skip)('keeps a denied page out of reach after the tab leaves it: logs refused, its tab not selectable', { timeout: 120_000 }, async () => {
+  let denied = ''
+  const { results, asked } = await runTurn(accountPages, (allowed, other) => {
+    denied = other
+    return {
+      deniedUrls: [other], allowedSites: [allowed],
+      script: [
+        { name: 'browser_navigate', args: { url: `${allowed}/` } },
+        { name: 'browser_navigate', args: { url: `${allowed}/redir` } },
+        { name: 'browser_tabs', args: { action: 'new', url: `${allowed}/` } },
+        { name: 'browser_tabs', args: { action: 'select', index: 0 } },
+        { name: 'browser_navigate_back', args: {} },
+        { name: 'browser_console_messages', args: { all: true } },
+        { name: 'browser_network_requests', args: {} },
+      ],
+    }
+  })
+  expect(results[1]).toMatch(/^Error: browser_navigate ran, but its result is withheld/u)
+  expect(results[3]).toBe(`Error: browser_tabs did not run: that tab is a page on ${denied}, which the assistant may not use.`)
+  const logs = (name: string) => `Error: ${name} did not run: a tab in this browser has shown a page the assistant may not use, and console and request logs keep that page's entries.`
+  expect(results.slice(5)).toEqual([logs('browser_console_messages'), logs('browser_network_requests')])
+  expect(results.join('\n')).not.toContain('correct-horse')
+  expect(asked).toEqual([])
+})
+
+it.skipIf(skip)('reads an allowed page whose title holds brackets, and clicks there without asking', { timeout: 120_000 }, async () => {
+  const page = () => '<!doctype html><title>Fix [x](y) - Review</title><button id="go" type="button">Approve</button>'
+  const { results, asked, events } = await runTurn(page, allowed => ({
+    deniedUrls: [], allowedSites: [allowed],
+    script: [
+      { name: 'browser_navigate', args: { url: `${allowed}/` } },
+      { name: 'browser_tabs', args: { action: 'new', url: `${allowed}/two` } },
+      { name: 'browser_snapshot', args: {} },
+      { name: 'browser_click', args: { element: 'Approve', target: '#go' } },
+    ],
+  }))
+  expect(results.filter(result => result.startsWith('Error:'))).toEqual([])
+  expect(asked).toEqual([])
+  expect(consentRecords(events)).toEqual([expect.objectContaining({ tool: 'browser_click', grant: 'site', outcome: 'succeeded' })])
+})
+
+it('reports why a browser call failed when the browser is down', { timeout: 120_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-down-'))
+  const booted = await bootComposition(root, {
+    consent: { browser: { mode: 'attach', endpoint: 'http://127.0.0.1:1' }, deniedUrls: [] },
+    script: [{ name: 'browser_navigate', args: { url: 'https://example.com/' } }],
+  })
+  try {
+    booted.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Go.' }], source: { kind: 'user' } }))
+    await booted.agent.whenIdle()
+    const [result] = toolResults(booted.events).map(content => content.map(block => block.type === 'text' ? block.text : '').join('\n'))
+    expect(result).toMatch(/^Error: browser_navigate: the browser's current tab could not be checked after the call \(browser_tabs/u)
+    expect(result).toMatch(/ECONNREFUSED 127\.0\.0\.1:1.*\), so its result is withheld\.$/u)
+  } finally {
+    await booted.ctx.fiber.dispose()
+    await rm(root, { recursive: true, force: true, maxRetries: 5 })
+  }
+})
+

@@ -40,6 +40,10 @@ const MASKED_FIELD = new RegExp(`: ${String.fromCharCode(0x2022).repeat(4)}$`, '
 const VALUE_LIMIT = 300
 /** Characters of arguments listed in an approval prompt; further arguments are counted as not shown. */
 const SUMMARY_LIMIT = 1200
+/** Upstream tools whose output keeps entries from every page a tab has shown since Playwright last cleared it. */
+const TAB_LOGS: ReadonlySet<string> = new Set(['browser_console_messages', 'browser_network_requests'])
+/** Upstream tool that runs model-written code in the Playwright server process rather than the page; always refused. */
+const SERVER_CODE = 'browser_run_code_unsafe'
 /** Upstream tool that shows one request's headers and bodies, which carry cookies and submitted passwords; always refused. */
 const REQUEST_DETAILS = 'browser_network_request'
 /** Upstream tool that ends Playwright's browser connection and answers with fixed text. */
@@ -55,7 +59,7 @@ const PAGE_URL_LINE = /^- Page URL: (.*)$/gmu
  * downloads. The link title can hold model-written text, so a link is read from the line's last `](`.
  */
 const FILE_LINES = [
-  /^- \[.*\]\(([^()\n]+)\)$/gmu, /^- New console entries: (.+?)(?:#L\d+)?$/gmu, /^- Downloaded file .* to "([^"\n]+)"$/gmu,
+  /^- \[.*\]\(([^()\n]+)\)$/gmu, /^- New console entries: (.+?)(?:#L\d+(?:-L\d+)?)?$/gmu, /^- Downloaded file .* to "([^"\n]+)"$/gmu,
 ]
 /** Name of the directory where Playwright MCP writes the files it links when no `outputDir` is configured. */
 const OUTPUT_DIRECTORY = '.playwright-mcp'
@@ -127,6 +131,8 @@ export function denyList(entries: readonly string[]): DenyList {
   for (const entry of entries) {
     if (/^[a-z][a-z\d+.-]*:$/iu.test(entry)) {
       if (entry !== entry.toLowerCase()) throw new Error(`${name}: deniedUrls entry "${entry}" is not lowercase; use "${entry.toLowerCase()}"`)
+      // Every `about:` URL but `about:blank` is matched as `chrome:`, and `about:blank` is never denied.
+      if (entry === 'about:') throw new Error(`${name}: deniedUrls entry "about:" would deny only about:blank; use "chrome:"`)
       schemes.add(entry)
       continue
     }
@@ -134,6 +140,9 @@ export function denyList(entries: readonly string[]): DenyList {
     const origin = parsed === null ? undefined : canonicalOrigin(parsed)
     if (parsed === null || origin !== entry) {
       throw new Error(`${name}: deniedUrls entry "${entry}" is neither a scheme nor an origin; ${origin === undefined ? 'use one such as chrome: or https://accounts.google.com' : `use "${origin}"`}`)
+    }
+    if (parsed.hostname.includes('*')) {
+      throw new Error(`${name}: deniedUrls entry "${entry}" names a wildcard host, which matches no page; list each origin, such as https://accounts.google.com`)
     }
     origins.set(hostKey(parsed), entry)
   }
@@ -236,17 +245,63 @@ export function classify(tool: string, args: unknown): BrowserActionKind {
 }
 
 /**
- * Read the current tab's URL from a `browser_tabs` listing (`- 0: (current) [title](url)`). Page titles are not
- * escaped upstream, so a current-tab line holding `](` more than once is ambiguous and yields no URL.
+ * The tab lines (`- 0: (current) [title](url)`) of a `browser_tabs` listing's `### Result` section, or of the whole text
+ * when it has none. Upstream may repeat the tabs under `### Open tabs` after the result, rendered at a later moment.
+ */
+function tabLines(text: string): string[] {
+  const section = /(?:^|\n)### Result\n([\s\S]*?)(?:\n### |$)/u.exec(text)?.[1] ?? text
+  return section.split('\n').filter(line => /^- \d+: (\(current\) )?\[/u.test(line))
+}
+
+/**
+ * The URL of one tab line. Page titles are not escaped upstream, so a line holding `](` more than once is ambiguous;
+ * it yields `hint` only when the line ends with `](hint)`, since the URL is always the line's last part.
+ */
+function lineUrl(line: string, hint: string | undefined): string | undefined {
+  const trimmed = line.replace(/ \[crashed\]$/u, '')
+  const [, url, ...rest] = trimmed.split('](')
+  if (url === undefined || !trimmed.endsWith(')')) return undefined
+  if (rest.length === 0) return url.slice(0, -1)
+  return hint !== undefined && trimmed.endsWith(`](${hint})`) ? hint : undefined
+}
+
+/**
+ * Read the current tab's URL from a `browser_tabs` listing. A current-tab line holding `](` more than once is ambiguous
+ * and yields the URL only when the line ends with `hint`, such as the URL a call's own result reports.
  * @param text - the listing's text content.
+ * @param hint - a URL the current tab is believed to show.
  * @returns the URL, or `undefined` when none can be read without ambiguity.
  */
-export function currentTabUrl(text: string): string | undefined {
-  const [line, ...others] = text.split('\n').filter(candidate => /^- \d+: \(current\) \[/u.test(candidate))
-  if (line === undefined || others.length > 0) return undefined
-  const [, url, ...rest] = line.replace(/ \[crashed\]$/u, '').split('](')
-  if (url === undefined || rest.length > 0 || !url.endsWith(')')) return undefined
-  return url.slice(0, -1)
+export function currentTabUrl(text: string, hint?: string): string | undefined {
+  const current = [...new Set(tabLines(text).filter(line => /^- \d+: \(current\) /u.test(line)))]
+  const [line, ...others] = current
+  return line !== undefined && others.length === 0 ? lineUrl(line, hint) : undefined
+}
+
+/**
+ * Read one tab's URL from a `browser_tabs` listing.
+ * @param text - the listing's text content.
+ * @param index - the tab's index in the listing.
+ * @returns the URL, or `undefined` when the tab is not listed or its line is ambiguous.
+ */
+export function tabUrl(text: string, index: number): string | undefined {
+  const lines = [...new Set(tabLines(text).filter(line => line.startsWith(`- ${String(index)}: `)))]
+  const [line, ...others] = lines
+  return line !== undefined && others.length === 0 ? lineUrl(line, undefined) : undefined
+}
+
+/**
+ * Every URL a listing could name for any tab: each text after a `](` on a tab line, up to the line's end and up to
+ * the first `)`. A page title can add candidates, never hide the real URL, so a check over them errs toward denial.
+ */
+function listedUrls(text: string): string[] {
+  return text.split('\n').filter(line => /^- \d+: /u.test(line)).flatMap(line => line.replace(/ \[crashed\]$/u, '').split('](').slice(1)
+    .flatMap(part => [part.replace(/\)$/u, ''), part.replace(/\).*$/u, '')]))
+}
+
+/** The URL in the `- Page URL:` line that opens a result's `### Page` section, which upstream renders from the current tab. */
+function pageUrlOf(text: string): string | undefined {
+  return /(?:^|\n)### Page\n- Page URL: (.*)$/mu.exec(text)?.[1]
 }
 
 /**
@@ -309,7 +364,8 @@ function webOrigin(url: unknown): string | undefined {
  */
 async function removeLinkedFiles(ctx: Context, cwd: string, outputDir: string | undefined, result: ToolExecutionResult): Promise<void> {
   const text = result.content.map(block => block.type === 'text' ? block.text : '').join('\n')
-  const links = FILE_LINES.flatMap(pattern => Array.from(text.matchAll(pattern), match => match[1] ?? ''))
+  const links = FILE_LINES.flatMap(pattern => Array.from(text.matchAll(pattern), ([, link]) => link))
+    .filter((link): link is string => link !== undefined)
   const files = outputDir === undefined
     ? links.map(link => resolve(cwd, link)).filter(file => basename(dirname(file)) === OUTPUT_DIRECTORY)
     : links.map(link => basename(link)).filter(file => !['', '.', '..'].includes(file)).map(file => join(outputDir, file))
@@ -331,42 +387,29 @@ function fieldsOf(args: unknown): Record<string, unknown> {
 /* v8 ignore next */
 const INERT_RUN = { deferContext() {}, concludeTurn() {} }
 
+/** The text of one upstream read, or why it could not be made, as a phrase for the model. */
+type BrowserRead = { readonly text: string } | { readonly failure: string }
+
 /**
  * Run one upstream read for this plugin's own decision through the same Session's tool, outside the tool pipeline, so
  * its result never reaches the model. Native execution runs MCP tools one at a time, so no other call of this Session's
  * browser is in flight.
- * @returns the result's text, or `undefined` when the tool is absent or fails.
+ * @returns the result's text, or the first line of the tool's error, or that the tool is absent.
  */
-async function readBrowser(ctx: Context, exec: ToolExecution, tool: string, args: Record<string, unknown>): Promise<string | undefined> {
+async function readBrowser(ctx: Context, exec: ToolExecution, tool: string, args: Record<string, unknown>): Promise<BrowserRead> {
   const definition = ctx.tools.get(PREFIX + tool, exec.agent)
-  if (definition === undefined) return undefined
+  if (definition === undefined) return { failure: `the browser has no ${tool} tool` }
   try {
     const result = await definition.execute(args, { ...exec, ...INERT_RUN, name: PREFIX + tool, arguments: args }) as McpResult
-    return result.content.map(block => (block as { text?: unknown }).text).filter(text => typeof text === 'string').join('\n')
+    return { text: result.content.map(block => (block as { text?: unknown }).text).filter(text => typeof text === 'string').join('\n') }
   } catch (error: unknown) {
-    // A failed read leaves the answer unknown, which every caller treats as the stricter outcome.
-    ctx.logger.debug(`${tool} for consent failed: ${String(error)}`)
-    return undefined
+    // MCP errors arrive as `### Error` text; the first error line names the cause, such as a refused connection.
+    /* v8 ignore next -- MCP client tool bodies throw Error instances only */
+    const reason = error instanceof Error ? error.message : String(error)
+    const message = reason.replace(/^### Error\n/u, '').replace(/^Error: /u, '')
+    ctx.logger.warn(`${name}: ${tool} for consent failed: ${message}`)
+    return { failure: `${tool} failed: ${message.replace(/\n[\s\S]*$/u, '').slice(0, 300)}` }
   }
-}
-
-/**
- * Ask Playwright which tab the next action runs on, or the last one ran on, through its `browser_tabs` listing.
- * @returns the current tab's URL, or `undefined` when the listing is absent, fails, or is ambiguous.
- */
-async function currentTab(ctx: Context, exec: ToolExecution): Promise<string | undefined> {
-  const listing = await readBrowser(ctx, exec, TABS, { action: 'list' })
-  return listing === undefined ? undefined : currentTabUrl(listing)
-}
-
-/**
- * Read the current page's snapshot for a field the patched Playwright snapshot shows masked: a password,
- * one-time-code, payment-card, or autofilled input. The mask in the snapshot is the single source of that rule.
- * @returns whether a field shows the mask, or `undefined` when the snapshot cannot be read.
- */
-async function showsMaskedField(ctx: Context, exec: ToolExecution): Promise<boolean | undefined> {
-  const snapshot = await readBrowser(ctx, exec, SNAPSHOT, {})
-  return snapshot === undefined ? undefined : MASKED_FIELD.test(snapshot)
 }
 
 /**
@@ -407,6 +450,14 @@ export function apply(ctx: Context, config: Config): void {
   const allowed = new Set(config.allowedSites)
   const consents = new WeakMap<ToolExecution, Consent>()
   const computerConsents = new WeakSet<ToolExecution>()
+  /** `browser_tabs` selects whose target tab this plugin listed and found allowed. */
+  const checkedSelects = new WeakSet<ToolExecution>()
+  /** Sessions whose browser has listed or shown a denied page in some tab; their tabs' logs may keep its entries. */
+  const shownDenied = new WeakSet<Session>()
+  /** The working directory each Session's Playwright server started in, the base of the links in its results. */
+  const serverDirectories = new WeakMap<Session, string>()
+  /** What denies the page the browser's current tab showed when this plugin last read it; `undefined` when allowed. */
+  let showing: string | undefined
   let owned = false
   /** A refusal for a call to the tools of a provider that holds `browserUse` in place of this plugin's child. */
   const rivalRefusal = (exec: ToolExecution): string | undefined => {
@@ -424,6 +475,10 @@ export function apply(ctx: Context, config: Config): void {
   const callRefusal = (exec: ToolExecution): string | undefined => {
     const tool = toolOf(exec)
     if (tool === REQUEST_DETAILS) return `${tool} did not run: the assistant may not read request headers or bodies, which carry cookies and passwords.`
+    if (tool === SERVER_CODE) return `${tool} did not run: code may not run in the browser automation process; browser_evaluate runs a function in the page and asks the user first.`
+    if (tool !== undefined && TAB_LOGS.has(tool) && exec.agent !== undefined && shownDenied.has(exec.agent.session)) {
+      return `${tool} did not run: a tab in this browser has shown a page the assistant may not use, and console and request logs keep that page's entries.`
+    }
     if (tool !== undefined && fieldsOf(exec.arguments).filename !== undefined) {
       return `${tool} did not run: the assistant may not save browser output to a file; call it without filename to get the result directly.`
     }
@@ -432,6 +487,23 @@ export function apply(ctx: Context, config: Config): void {
     return blocked === undefined ? undefined : `${tool} did not run: the assistant may not open ${blocked}.`
   }
   const isScreenshot = (args: unknown): boolean => fieldsOf(args).action === 'screenshot'
+  /** Whether a URL names a denied page; a URL that does not parse is not evidence of one. */
+  const isDenied = (url: string): boolean => ![undefined, UNREADABLE].includes(denial(url, denied))
+  /** The current tab's URL, or why it could not be checked. */
+  type TabRead = { readonly url: string } | { readonly failure: string }
+  /**
+   * List the Session's tabs, record a denied page in any of them, and read the current tab's URL; an ambiguous
+   * current-tab line is resolved by the URL `hint` gives, when the line ends with it.
+   */
+  const readTabs = async (exec: ToolExecution, agent: Agent, hint: () => Promise<string | undefined>): Promise<TabRead> => {
+    const listing = await readBrowser(ctx, exec, TABS, { action: 'list' })
+    if ('failure' in listing) return listing
+    if (listedUrls(listing.text).some(isDenied)) shownDenied.add(agent.session)
+    const url = currentTabUrl(listing.text) ?? currentTabUrl(listing.text, await hint())
+    if (url === undefined) return { failure: 'its tab listing is ambiguous' }
+    showing = denial(url, denied)
+    return { url }
+  }
   /** The arguments of a call as its tool's input schema declares them, for an approval prompt. */
   const argumentsOf = (exec: ToolExecution, agent: Agent) => {
     const properties = ctx.tools.get(exec.name, agent)?.parameters.properties
@@ -473,9 +545,13 @@ export function apply(ctx: Context, config: Config): void {
     const refusal = rivalRefusal(exec) ?? callRefusal(exec)
     if (refusal !== undefined) return refusal
     if (exec.name === COMPUTER) {
-      return isScreenshot(exec.arguments) || computerConsents.has(exec) ? undefined : 'computer input needs the user\'s consent, which was not given.'
+      const free = isScreenshot(exec.arguments) && showing === undefined
+      return free || computerConsents.has(exec) ? undefined : 'computer input needs the user\'s consent, which was not given.'
     }
     const tool = toolOf(exec)
+    if (tool === TABS && fieldsOf(exec.arguments).action === 'select' && !checkedSelects.has(exec)) {
+      return `${tool} did not run: the tab it selects was not checked.`
+    }
     if (tool === undefined || consents.has(exec) || classify(tool, exec.arguments) === 'read') return undefined
     return `${tool} needs the user's consent, which was not given.`
   })
@@ -486,20 +562,48 @@ export function apply(ctx: Context, config: Config): void {
     const agent = exec.agent
     if (agent === undefined) return next()
     if (exec.name === COMPUTER) {
-      if (isScreenshot(exec.arguments)) return next()
-      const decision = await ask(exec, agent, 'computer input', `Computer input on the desktop. Arguments: ${argumentsOf(exec, agent).summary}.`)
-      if (decision !== 'allowed') return decision
-      computerConsents.add(exec)
-      return next()
+      const screenshot = isScreenshot(exec.arguments)
+      // Free browser reads can bring a denied page to the screen, so a screenshot then asks.
+      if (screenshot && showing === undefined) return next()
+      const { summary } = argumentsOf(exec, agent)
+      const decision = screenshot
+        ? await ask(exec, agent, 'the desktop screenshot', `Desktop screenshot while the browser's current tab is ${String(showing)}, which the assistant may not use. Arguments: ${summary}.`)
+        : await ask(exec, agent, 'computer input', `Computer input on the desktop. Arguments: ${summary}.`)
+      const consented = (): Promise<PreToolDecision> => {
+        computerConsents.add(exec)
+        return next()
+      }
+      return decision === 'allowed' ? consented() : decision
     }
     const tool = toolOf(exec)
     if (tool === undefined) return next()
+    const { action, index } = fieldsOf(exec.arguments)
+    if (tool === TABS && action === 'select') {
+      const listing = await readBrowser(ctx, exec, TABS, { action: 'list' })
+      if ('failure' in listing) return { kind: 'deny', reason: `${tool} did not run: the tab it selects could not be checked (${listing.failure}).` }
+      if (listedUrls(listing.text).some(isDenied)) shownDenied.add(agent.session)
+      const selected = typeof index === 'number' ? tabUrl(listing.text, index) : undefined
+      if (selected === undefined) return { kind: 'deny', reason: `${tool} did not run: the tab it selects could not be checked (the tab listing does not show it unambiguously).` }
+      const blocked = denial(selected, denied)
+      if (blocked !== undefined) return { kind: 'deny', reason: `${tool} did not run: that tab is ${blocked}, which the assistant may not use.` }
+      checkedSelects.add(exec)
+      return next()
+    }
     const kind = classify(tool, exec.arguments)
     if (kind === 'read') return next()
-    const url = await currentTab(ctx, exec)
-    const blocked = denial(url, denied)
-    if (blocked !== undefined) return { kind: 'deny', reason: `${tool} did not run: the current tab is ${blocked}, which the assistant may not use.` }
-    const site = webOrigin(url)
+    let snapshot: BrowserRead | undefined
+    const readSnapshot = async (): Promise<BrowserRead> => (snapshot ??= await readBrowser(ctx, exec, SNAPSHOT, {}))
+    const tab = await readTabs(exec, agent, async () => {
+      const read = await readSnapshot()
+      return 'text' in read ? pageUrlOf(read.text) : undefined
+    })
+    if ('failure' in tab) return { kind: 'deny', reason: `${tool} did not run: the browser's current tab could not be checked (${tab.failure}).` }
+    const blocked = denial(tab.url, denied)
+    if (blocked !== undefined) {
+      shownDenied.add(agent.session)
+      return { kind: 'deny', reason: `${tool} did not run: the current tab is ${blocked}, which the assistant may not use.` }
+    }
+    const site = webOrigin(tab.url)
     const grant = (granted: BrowserWriteGrant): Promise<PreToolDecision> => {
       consents.set(exec, { session: agent.session, tool, site, grant: granted })
       return next()
@@ -507,7 +611,9 @@ export function apply(ctx: Context, config: Config): void {
     // An allowance never covers a page that shows a password or payment field, nor one that cannot be checked.
     let uncovered = kind === 'always-ask' ? ' Site allowances do not cover this action.' : ''
     if (kind === 'site-write' && site !== undefined && allowed.has(site)) {
-      const masked = await showsMaskedField(ctx, exec)
+      // The patched snapshot's mask is the single source of the secret-input rule.
+      const read = await readSnapshot()
+      const masked = 'text' in read ? MASKED_FIELD.test(read.text) : undefined
       if (masked === false) return grant('site')
       uncovered = masked === true
         ? ' The page shows a password or payment field, so its site allowance does not cover this action.'
@@ -525,15 +631,38 @@ export function apply(ctx: Context, config: Config): void {
   ctx.on('tools/execute', async (exec, next) => {
     const tool = toolOf(exec)
     const result = await next()
-    // Listing tabs after `browser_close` would reconnect and open a tab; its result is fixed text.
-    if (tool === undefined || tool === CLOSE) return result
-    const blocked = reportedDenial(result, denied) ?? denial(await currentTab(ctx, exec), denied)
-    if (blocked === undefined) return result
-    const reason = `${tool} ran, but its result is withheld: the current tab is ${blocked}, which the assistant may not use. Open another page to continue.`
     const agent = exec.agent
-    if (agent !== undefined) await removeLinkedFiles(ctx, ctx.workingDirectory.get(agent.session), config.browser.outputDir, result)
+    // A listing after `browser_close` would reconnect and open a new tab; the close itself was refused before the call
+    // when its tab was on a denied page. An Agent-less call never reaches the browser.
+    if (tool === undefined || tool === CLOSE || agent === undefined) return result
+    const text = result.content.map(block => block.type === 'text' ? block.text : '').join('\n')
+    let reason: string | undefined
+    const reported = reportedDenial(result, denied)
+    if (reported === undefined) {
+      const tab = await readTabs(exec, agent, () => Promise.resolve(pageUrlOf(text)))
+      const blocked = 'failure' in tab ? undefined : denial(tab.url, denied)
+      if ('failure' in tab) reason = `${tool}: the browser's current tab could not be checked after the call (${tab.failure}), so its result is withheld.`
+      else if (blocked !== undefined) {
+        shownDenied.add(agent.session)
+        reason = `${tool} ran, but its result is withheld: the current tab is ${blocked}, which the assistant may not use. Open another page to continue.`
+      }
+    } else {
+      shownDenied.add(agent.session)
+      showing = reported
+      reason = `${tool} ran, but its result is withheld: the current tab is ${reported}, which the assistant may not use. Open another page to continue.`
+    }
+    if (reason === undefined) return result
+    // Every Session with a server of the provider passed the `agent/created` listener below, so its directory is known.
+    /* v8 ignore next */
+    const directory = serverDirectories.get(agent.session) ?? ctx.workingDirectory.get(agent.session)
+    await removeLinkedFiles(ctx, directory, config.browser.outputDir, result)
     return { isError: true, content: [{ type: 'text', text: `Error: ${reason}` }], error: { message: reason } }
   }, { prepend: true })
+
+  // The provider's own listener runs first and starts the Session's server in this directory.
+  ctx.on('agent/created', ({ agent }) => {
+    serverDirectories.set(agent.session, ctx.workingDirectory.get(agent.session))
+  })
 
   ctx.on('tools/result', (exec, result) => {
     const consent = consents.get(exec)
