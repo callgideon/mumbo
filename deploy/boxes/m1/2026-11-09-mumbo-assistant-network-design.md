@@ -137,7 +137,7 @@ These are collected from M1 on.
   - **Why.**
     - Today the agent is root. Anyone who can ask it to run a command (a project member, or injected content) can read those credentials.
     - All boxes share the node NAT IPs, so a stolen box token works from any mumbo box. For example, a member could act as `project:<id>` from their own box, with its budget, sandbox tools and `project_message`.
-  - **When.** Acceptable while the founder is every project's only member (M1). It must land before part C trusts account writes and before a second person joins any project (part D).
+  - **When.** Now: task B24 (section 17b). The founder's box syncs saved passwords and payment cards (2026-11-10), which root can read from disk. It is required before part C trusts account writes, and before a second person joins any project (part D).
   - **Options to evaluate.**
     - dsh's own sandbox (bubblewrap/Landlock). It was unavailable on Fargate but may work inside a Firecracker VM, and it covers file tools too.
     - A shell provider that switches user. This alone leaves the file tools, which run in the dsh process, unconfined.
@@ -648,7 +648,7 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
 - **Tells the person.**
   - Today a finished scheduled turn waits in the Session for the next visit.
   - An approval asked during a scheduled turn waits for a browser, which matters most.
-  - **Next, after B17:** the edge forwards a box's "notify" call (on the same model-host endpoint as the sandbox tools, with the box token) to that person's own ntfy topic, which the person sets up from the home page. Mumbo uses it when it needs an answer or has finished something the person asked for. **[my call; the founder confirms it is wanted]**
+  - **Next, after B17:** the edge forwards a box's "notify" call (on the same model-host endpoint as the sandbox tools, with the box token) to that person's own ntfy topic, which the person sets up from the home page. Mumbo uses it when it needs an answer or has finished something the person asked for. **[founder: yes, 2026-11-10; my call on the mechanism]**
 
 **How it relates to what exists:**
 - **Welcome:** unchanged (section 17a). The welcome attaches to the person's first prompt in any Session; since the app opens on Mumbo, it normally appears there.
@@ -740,12 +740,16 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
   - The debugging port stays on loopback with the box's own `--user-data-dir`. Chrome 136 and later honour the port only with a non-default profile directory, which this is.
   - **Updates.** Chrome updates with each template build. Rebuild the template at least every two weeks for Chrome security releases (RUNBOOK).
   - **Policies** in a root-owned `/etc/opt/chrome/policies/managed/mumbo.json`: `RestoreOnStartup: 1`, `DefaultBrowserSettingEnabled: false`, `MetricsReportingEnabled: false`, plus the password rule below.
-- **Passwords and payment cards don't sync into the box until agent containment lands** **[my call; the founder confirms]**.
-  - The agent runs as root. Chrome on Linux without a keyring (`--password-store=basic`) encrypts saved passwords with a fixed, public key. So any password in the profile is readable by the agent and by anyone who can steer it.
-  - Policy: `SyncTypesListDisabled: ["passwords", "payments"]`, `PasswordManagerEnabled: false`, `AutofillCreditCardEnabled: false`.
-  - Bookmarks, history, open tabs, settings and extensions sync. Don't unlock a password-manager extension in the box before containment.
+- **Chrome syncs everything, passwords and payment cards included** **[founder: 2026-11-10, "Everything", relayed by mumbo after the risk was explained]**.
+  - **What this exposes until containment (B24) lands:**
+    - The agent's shell runs as root, without asking (the box's Full-access mode, `deploy/mumbo.overlay.yml`).
+    - Chrome on Linux without a keyring (`--password-store=basic`) encrypts saved passwords and cards (`Login Data`, `Web Data`) with a fixed, public key.
+    - So the agent, and anyone who can steer it with injected instructions, can read every synced password and card from disk with no prompt. So can anyone with the backups.
+    - A keyring doesn't help while the agent is root, and a URL denylist doesn't protect the files.
+  - **Containment is the fix and is pulled forward (B24, below).**
+  - **Until then, the browser-level denials (B25)** stop the easy paths: the browser tools and computer use opening the password and payment pages, or reading a page while it shows them.
+  - **Recommended to the founder** **[my call]**: enable the `passwords` and `payments` sync types after B24 passes its escape tests. B24 is days, not weeks. B18 ships everything else syncing, with those two types behind one policy line.
   - Chrome Sync never carries sign-ins (cookies) in either direction. The person signs in to each site once in the box, and the profile, with its cookies, is in every backup.
-  - After containment (section 2), password sync is a policy change.
 - **Signing in.**
   - The person signs in on the desktop.
   - For WhatsApp from a phone, use "Link with phone number" (a code), because the phone showing the desktop can't scan its own screen.
@@ -758,10 +762,68 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
 **Acceptance:**
 - on a laptop and a phone, Browser opens with Chrome in front, and Desktop shows the whole desktop;
 - both work in the phone's full-screen panel;
-- the person signs in to Google in Chrome; bookmarks and history sync, saved passwords don't, and Chrome offers no password saving;
+- the person signs in to Google in Chrome, and everything syncs, passwords and cards included once the founder turns those on;
 - WhatsApp Web is linked by phone-number code and LinkedIn is signed in. Both stay signed in after a box restart and after a restore from backup;
 - a project host can't frame the desktop (the edge's existing test);
 - the stock iframe Browser is absent on person boxes on the Web.
+
+### Protecting the synced passwords **[my call]**
+
+The box's Chrome now holds the founder's saved passwords and cards. Two layers protect them.
+- **Containment (B24)** is what keeps them from the agent; it is section 2's agent containment, pulled forward.
+- **The browser-level denials (B25)** close the easy paths meanwhile, and stay afterwards as a second layer.
+
+**B24, agent containment.** The agent's processes and file tools stop being root.
+- **An `agent` user.** These run as `agent`:
+  - the shell commands, terminals and code runtimes (PTC) that dsh starts on the model's behalf;
+  - jobs and language servers;
+  - the shells of subagents.
+- **Their environment** is an explicit list. It never holds the box token (`DEEPSEEK_API_KEY`), `MUMBO_MEMBER_KEY` or a launch token.
+  - **Harness addition:** a "run as" user and environment on the subprocess seam that these share. Node's `spawn` takes `uid` and `gid` natively.
+  - The person's own Terminal tab runs as `agent` too, because the agent can drive terminals.
+- **The model's file tools** (read, write, edit, search, list) work only under an allowlist: the workspace (`/root/projects`), `/tmp` and `agent`'s home.
+  - They resolve real paths first, so a symlink can't lead out.
+  - **Harness addition:** a readable-roots allowlist for the model's file tools. dsh's sandbox limits writes only, never reads.
+  - An allowlist, not a denylist, because the tools run in the root dsh process and could otherwise read `/proc/<pid>/environ` of root processes.
+  - The person's Files panel is unchanged.
+- **Box permissions** (edge start script):
+  - `/root` is `0711`. `/root/projects` belongs to `agent`, so Session working directories don't change.
+  - `/root/.dsh`, `/root/.mumbo` and `/root/dsh.log` are root-only.
+  - `/home/browser` is `0700` for `browser`, and the Chrome policy file is root-owned.
+  - The X authority file stays `0600` for `browser`.
+  - There is no `sudo`.
+- **Network** (iptables owner match): `agent` can't connect to:
+  - the debugging port (`9222`);
+  - the VNC ports;
+  - E2B's in-box agent `envd` (`49983`), which runs commands as root;
+  - dsh's own port.
+  - In project boxes it still reaches the local GitHub proxy (`8899`).
+- **Cost to the person.** Installing system software (`apt`) needs root, so the agent and the Terminal tab can't. Project work already runs in sandboxes. Anything the person's box needs comes through the template or the operator.
+- **Escape tests**, run in a real box as `agent`, each of which must fail:
+  - read `Login Data`, or anything else under `/home/browser`, with the shell and with the file tools;
+  - read `/proc/<dsh pid>/environ` and `/root/dsh.log`;
+  - connect to `9222`, `envd`, the VNC port, or the X display;
+  - write the Chrome policy file, or anything under `/root/.mumbo`;
+  - become root.
+- **Also project boxes.** This satisfies section 2's requirement for project boxes before a second member (B12).
+
+**B25, browser-level denials** (`@mumbo/browser-consent` and Chrome policy):
+- **Hard deny, not ask.** An asked question can be approved by reflex. The denied URLs:
+  - every non-web scheme: `chrome:`, `chrome-untrusted:`, `chrome-extension:` (which also covers password-manager extensions), `devtools:`, `view-source:`, `file:`;
+  - the origins `https://passwords.google.com`, `https://pay.google.com`, `https://payments.google.com`, `https://myaccount.google.com` and `https://accounts.google.com`. Signing in is the person's job.
+  - The list is config, and the edge writes these defaults.
+- **The check runs before and after every browser tool call.** A call whose target, or whose tab after the call, is on a denied URL is refused, and its result (snapshot, screenshot, text) is replaced by the refusal. This covers a navigation, or a click that lands there, and a read while the person has that page open.
+- **Page script always asks,** as today: `browser_evaluate` and `browser_run_code_unsafe` ask even on allowed sites, with the script shown. A script can read an autofilled password or card number from a form field.
+  - Add a test that the page snapshot shows a filled password field masked.
+- **Chrome's `URLBlocklist`** blocks the internal pages for everyone in the box's Chrome, the person included, because computer use drives Chrome without going through browser-consent:
+  - `chrome://password-manager`, `chrome://settings/passwords`, `chrome://settings/payments`, `chrome://settings/autofill`, `chrome://settings/addresses`;
+  - `chrome://sync-internals`, `chrome://autofill-internals`, `chrome://password-manager-internals`.
+  - The person manages passwords and cards on their own devices; they sync.
+- **Computer use follows "reads are free, writes ask"** (ASSISTANT.md decision 3), as browser tools already do.
+  - Screenshots pass; clicks, typing and key presses ask.
+  - This also stops the agent clicking a site's "show password" button and screenshotting it.
+
+**What remains after both:** dsh itself runs as root. So a flaw in dsh, or in a plugin running in the dsh process, reaches everything. The backups hold the profile (KMS-encrypted in S3), so anyone with access to the AWS account can read the passwords.
 
 ### Tasks (B16 onward)
 
@@ -774,9 +836,11 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
 | **B20** | mumbo-impl | `box-browser` and `box-desktop` in `@mumbo/box-links`, with the owner-only Chrome-to-front call; the person overlay drops the stock Web Browser tab. Works with today's noVNC and B19's stack alike | — |
 | **B21** | mumbo-impl | Edge, by region (section 17c) | R6 |
 | **B22** | mumbo-impl | Edge, moving between regions (section 17c) | B21 |
-| **B23** (after B17; the founder confirms) | mumbo-impl | Mumbo's push: a per-person ntfy topic set up from the home page, and a box "notify" call through the edge | B17 |
+| **B23** **[founder: yes, 2026-11-10]** | mumbo-impl | Mumbo's push: a per-person ntfy topic set up from the home page, and a box "notify" call through the edge | B17 |
+| **B24** | mumbo-impl | Agent containment (above): the `agent` user and its environment through a harness "run as" on the subprocess seam; the file tools' readable-roots allowlist; box permissions and the iptables rules; the escape tests in a real box. Agent Notes, READMEs and tests per the repository rules | — (start now) |
+| **B25** | mumbo-impl | Browser-level denials (above): hard-denied URLs before and after every browser tool call in `@mumbo/browser-consent`; Chrome's `URLBlocklist`; computer use asking for writes | — (start now) |
 
-B17, B18 and B20 can run in parallel. B18 and B19 both change the template and the start script's desktop block, so they run in that order.
+B17, B18, B20, B24 and B25 can run in parallel. B18 and B19 both change the template and the start script's desktop block, so they run in that order. B18 and B24 both touch the start script's desktop block too; B24 rebases on B18. **Turn on the `passwords` and `payments` sync types after B24's escape tests pass** (recommended; the founder decides).
 
 ## 17c. Regions: the box near the person (N1) **[founder: 2026-11-10; my call on the how]**
 
@@ -916,6 +980,9 @@ The person's-computer track (N1: sections 17b and 17c, tasks B17–B23 and R1–
 - **DeepSeek sees business data** (section 16).
 - **Two designs for stage 10 can drift:** this one and ASSISTANT.md. After approval, fold this design into `deploy/boxes/ASSISTANT.md` as one document.
 - **WhatsApp Web automation can get the account banned** (part C).
+- **The box's Chrome holds the founder's saved passwords and payment cards** **[founder's choice, 2026-11-10]**.
+  - Until B24 lands, the root agent, and anyone steering it, can read them from disk, and the backups carry them.
+  - Mitigation: B24 is pulled forward, and B25's denials close the browser paths. Recommended: turn the two sync types on after B24's escape tests (section 17b).
 - **Google may refuse to sign in** a browser with remote debugging on, or one on a datacenter address.
   - Mitigation: the person signs in on the desktop and handles Google's checks.
   - If Google still refuses, Chrome is restarted once without the debugging port for the sign-in, then with it again. B18's acceptance tests this first.
