@@ -167,6 +167,8 @@ export function memberHeader(key, email, now = Date.now()) {
 export const mumboMcpKey = (edgeKey, boxId) => createHmac('sha256', edgeKey).update(`mumbo-mcp:${boxId}`).digest('base64url')
 export const MUMBO_MCP_PORT = '3092'
 export const MUMBO_MCP_OVERLAY = '/src/packages/mumbo/mcp/examples/person.overlay.yml'
+/** The overlay names `@mumbo/mcp` bare, which loads only when the root package links it into /src/node_modules. */
+export const MUMBO_MCP_PACKAGE = '/src/node_modules/@mumbo/mcp/package.json'
 /** The person's @mumbo/mcp principal handle (`^[a-z][a-z0-9-]{0,31}$`): their email's local part, lowercased, each run of
  *  other characters a `-`, without leading non-letters or trailing `-`, cut to 32 characters; `person` when none is left. */
 export const mcpPrincipal = (email) => email.toLowerCase().split('@')[0].replace(/[^a-z0-9]+/g, '-').replace(/^[^a-z]+/, '').slice(0, 32).replace(/-+$/, '') || 'person'
@@ -350,11 +352,11 @@ cat > /root/.mumbo/assistant.overlay.yml <<'YML'
 YML
 ASSISTANT_PATCH="--patch /root/.mumbo/assistant.overlay.yml"
 fi
-` : ''}${site.desktop && mumboMcp ? `# Mumbo through the MCP door (edge door.mjs), when the image ships @mumbo/mcp's person overlay, patched after the
-# assistant's: the Session mumbo on loopback :${MUMBO_MCP_PORT} for the edge alone, which calls with this box's key, read
+` : ''}${site.desktop && mumboMcp ? `# Mumbo through the MCP door (edge door.mjs), when the image ships @mumbo/mcp's person overlay and links the package, patched
+# after the assistant's: the Session mumbo on loopback :${MUMBO_MCP_PORT} for the edge alone, which calls with this box's key, read
 # from a file only root reads.
 MCP_PATCH=
-if [ -f ${MUMBO_MCP_OVERLAY} ]; then
+if [ -f ${MUMBO_MCP_OVERLAY} ] && [ -f ${MUMBO_MCP_PACKAGE} ]; then
 (umask 077 && printf '%s' ${sq(mumboMcp.key)} > /root/.mumbo/mcp.key)
 chmod 0600 /root/.mumbo/mcp.key
 export MUMBO_MCP_PORT=${MUMBO_MCP_PORT} MUMBO_MCP_KEY_FILE=/root/.mumbo/mcp.key MUMBO_MCP_PRINCIPAL=${sq(mumboMcp.principal)} MUMBO_MCP_ASSISTANT_CWD=/root/projects

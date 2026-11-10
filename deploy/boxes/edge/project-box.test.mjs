@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { startScript, boxSite, boxes, assistantInstructions, DENIED_URLS, MUMBO_MCP_OVERLAY, mumboMcpKey } from './edge.mjs'
+import { startScript, boxSite, boxes, assistantInstructions, DENIED_URLS, MUMBO_MCP_OVERLAY, MUMBO_MCP_PACKAGE, mumboMcpKey } from './edge.mjs'
 import { memoryStore } from './store.mjs'
 import { projects } from './projects.mjs'
 import { templateArgs } from './template.mjs'
@@ -17,8 +17,8 @@ const at = (text, needle) => { const i = text.indexOf(needle); assert.ok(i >= 0,
 
 test('a user box start script is byte-for-byte what it was before project boxes grew a proxy', () => {
   const s = startScript(c, 'T', boxSite(c, 'a@x.com'), "role's", undefined, boxFiles, ['o@x.com'], { key: 'KEY', principal: 'a' })
-  // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows, the X cookie, the first-run welcome, the interim Chromium policy (B27), the B18 desktop, the B25 consent rows, B19's KasmVNC and its own user, and B33's door to Mumbo (same cfg, token T, role "role's").
-  assert.equal(createHash('sha256').update(s).digest('hex'), 'edbc34d3da4ea2185207d61316224296e85d311c954cf53e2abef7aca77742c2')
+  // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows, the X cookie, the first-run welcome, the interim Chromium policy (B27), the B18 desktop, the B25 consent rows, B19's KasmVNC and its own user, B33's door to Mumbo and its gate on the linked package (same cfg, token T, role "role's").
+  assert.equal(createHash('sha256').update(s).digest('hex'), 'e3c35ed9aec7e8994118894f92656d72ad83f5f5008ae07c76ff46a8097a8116')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -323,15 +323,15 @@ test('create() starts a project box from projectTemplate with the owners as pane
   assert.ok(!written[0].includes('MUMBO_MCP') && !written[0].includes(mumboMcpKey('k', 'b1')))
 })
 
-test('door to Mumbo: a person box writes its key root-only and patches the person overlay after the assistant\'s, only when the image ships it', () => {
+test('door to Mumbo: a person box writes its key root-only and patches the person overlay after the assistant\'s, only when the image ships it and links @mumbo/mcp', () => {
   const mcp = { key: 'KEY_-1', principal: 'ann' }
   const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles, [], mcp)
   assert.ok(u.includes(' $ASSISTANT_PATCH $MCP_PATCH '), 'patched after the assistant overlay')
   assert.ok(at(u, 'ASSISTANT_PATCH="--patch') < at(u, '# Mumbo through the MCP door'))
   const from = at(u, '# Mumbo through the MCP door'), to = u.indexOf('\nfi\n', from) + 4
   const dir = mkdtempSync(join(tmpdir(), 'mumbo-mcp-'))
-  const overlay = join(dir, MUMBO_MCP_OVERLAY)
-  const run = () => execFileSync('sh', ['-c', `set -eu\nmkdir -p ${dir}/root/.mumbo\n${u.slice(from, to).replaceAll('/root/', `${dir}/root/`).replaceAll(MUMBO_MCP_OVERLAY, overlay)}echo "$MCP_PATCH|\${MUMBO_MCP_PORT-}|\${MUMBO_MCP_KEY_FILE-}|\${MUMBO_MCP_PRINCIPAL-}|\${MUMBO_MCP_ASSISTANT_CWD-}"`], { encoding: 'utf8' }).trim()
+  const overlay = join(dir, MUMBO_MCP_OVERLAY), pkg = join(dir, MUMBO_MCP_PACKAGE)
+  const run = () => execFileSync('sh', ['-c', `set -eu\nmkdir -p ${dir}/root/.mumbo\n${u.slice(from, to).replaceAll('/root/', `${dir}/root/`).replaceAll(MUMBO_MCP_OVERLAY, overlay).replaceAll(MUMBO_MCP_PACKAGE, pkg)}echo "$MCP_PATCH|\${MUMBO_MCP_PORT-}|\${MUMBO_MCP_KEY_FILE-}|\${MUMBO_MCP_PRINCIPAL-}|\${MUMBO_MCP_ASSISTANT_CWD-}"`], { encoding: 'utf8' }).trim()
   const keyFile = join(dir, 'root/.mumbo/mcp.key')
   try {
     // An image without the overlay: no key file, no variables, no patch.
@@ -339,6 +339,11 @@ test('door to Mumbo: a person box writes its key root-only and patches the perso
     assert.ok(!existsSync(keyFile))
     mkdirSync(join(overlay, '..'), { recursive: true })
     writeFileSync(overlay, '')
+    // An image with the overlay whose root package does not link @mumbo/mcp: the overlay could not load it, so nothing.
+    assert.equal(run(), '||||')
+    assert.ok(!existsSync(keyFile))
+    mkdirSync(join(pkg, '..'), { recursive: true })
+    writeFileSync(pkg, '{}')
     assert.equal(run(), `--patch ${overlay}|3092|${keyFile}|ann|${dir}/root/projects`)
     assert.equal(readFileSync(keyFile, 'utf8'), 'KEY_-1')
     assert.equal(statSync(keyFile).mode & 0o777, 0o600)
