@@ -6,15 +6,17 @@ import type { Volatile } from '@deepseek-ai/cordis'
 import s from '@deepseek-ai/schemastery'
 import { z } from 'zod'
 import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
-import { runAsWorker, sameDirectory, withoutDirectory, workerBin } from './infra/environment.ts'
+import { assertOwnedByRoot, runAsWorker, sameDirectory, withoutDirectory, workerBin } from './infra/environment.ts'
 import { SetupError } from './setup.ts'
 
 const reason = (error: unknown): string => error instanceof Error ? error.message : String(error)
 const absolute = (description: string) => s.string().pattern(/^\//).description(`${description} Absolute path.`)
 /** Plugin configuration of the dsh-superagent entry. Volatile fields apply without a restart because dsh-superagent reads them on each use; changing `stateDir` remounts the plugin. */
 export const Config = s.object({
-  stateDir: absolute('Directory for the database, locks, worker shims, and the agent\'s git configuration.').required(),
+  stateDir: absolute('Directory for the database, locks and, unless `workerDirectory` names another, the worker shims and the agent\'s git configuration.').required(),
   workDirectory: absolute('Directory that holds the ticket directories when the Execution settings name none; defaults to `<stateDir>/work`. Under a run-as subprocess provider the worker user must be able to write it.'),
+  workerDirectory: absolute('Directory for the worker shims (`worker-bin`) and the agent\'s git configuration (`worker-gitconfig`), which workers run and read and the orchestrator reads too; defaults to `stateDir`. Required under a run-as subprocess provider, where it, every ancestor and everything in it must be owned by root and writable by no other user; give the worker\'s group read and search access, such as `root:agent` mode `2750`.'),
+  ghConfigDirectory: absolute('`GH_CONFIG_DIR` of the orchestrator\'s own GitHub CLI calls; unset, the CLI uses its own default. Required under a run-as subprocess provider, where it, every ancestor and everything in it must be owned by root and writable by no other user, because a gh alias runs commands.'),
   promptMaxChars: s.number().min(LIMITS.promptMaxChars.min).max(LIMITS.promptMaxChars.max).step(1).default(100000)
     .description('Largest saved prompt configuration, in characters.').volatile(),
   admissionContextMaxPages: s.number().min(LIMITS.admissionContextMaxPages.min).max(LIMITS.admissionContextMaxPages.max).step(1).default(10)
@@ -34,6 +36,12 @@ export interface Machine {
   stateDir: string
   /** Default root of the ticket directories: `workDirectory`, else `<stateDir>/work`. */
   workDirectory: string
+  /** Directory of `worker-bin` and `worker-gitconfig`: `workerDirectory`, else `stateDir`; under run-as, its checked real path. */
+  workerDirectory: string
+  /** `GH_CONFIG_DIR` of the orchestrator's own CLI calls; under run-as, its checked real path. */
+  ghConfigDirectory?: string | undefined
+  /** Whether the subprocess provider runs workers as a run-as identity, so root must never run what they can change. */
+  runAs: boolean
   promptMaxChars: Volatile<number>
   admissionContextMaxPages: Volatile<number>
   admissionContextTimeoutMs: Volatile<number>
@@ -48,12 +56,26 @@ const MOVED: Record<string, string> = {
   worktreeRoot: 'the ticket directory of the Execution settings', blockedCommands: 'in the Execution settings',
 }
 
-/** Read machine settings and reject unknown configuration keys (naming where deprecated keys moved). */
-export function machineOf(config: DeploymentConfig): Machine {
+/**
+ * Read machine settings and reject unknown configuration keys (naming where deprecated keys moved). Under a run-as
+ * subprocess provider the orchestrator runs as root what workers run as another user, so `workerDirectory` and
+ * `ghConfigDirectory` must be set and pass {@link assertOwnedByRoot}; the machine keeps the real paths checked.
+ * @param config - the validated plugin configuration.
+ * @param runAs - whether the mounted subprocess provider runs children as a run-as identity.
+ * @returns the machine settings.
+ * @throws when a key is unknown, or under run-as when either directory is unset or another user could change it.
+ */
+export function machineOf(config: DeploymentConfig, runAs = false): Machine {
   const unknown = Object.keys(config).filter(key => !(key in (Config.dict ?? {})))
   if (unknown.length) throw new Error(`dsh-superagent configuration has keys it does not use: ${unknown.map(key => MOVED[key] ? `${key} (now ${MOVED[key]})` : key).join(', ')}; the keys are ${Object.keys(Config.dict ?? {}).join(', ')}`)
-  const { stateDir, workDirectory, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins, githubApp } = config
-  return { stateDir, workDirectory: workDirectory ?? join(stateDir, 'work'), promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins, githubApp }
+  const { stateDir, workDirectory, workerDirectory, ghConfigDirectory, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins, githubApp } = config
+  const contained = (key: 'workerDirectory' | 'ghConfigDirectory', path: string | undefined): string | undefined => {
+    if (!runAs) return path
+    if (path === undefined) throw new Error(`dsh-superagent ${key} must be set under a run-as subprocess provider: the orchestrator, as root, uses what it holds`)
+    return assertOwnedByRoot(path, key)
+  }
+  return { stateDir, workDirectory: workDirectory ?? join(stateDir, 'work'), workerDirectory: contained('workerDirectory', workerDirectory) ?? stateDir,
+    ghConfigDirectory: contained('ghConfigDirectory', ghConfigDirectory), runAs, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins, githubApp }
 }
 
 export const GithubAccountsSchema = z.object({
@@ -83,9 +105,16 @@ export function executable(name: string, path: string, exclude?: string): string
 }
 
 export type Probe = (argv: string[]) => Promise<string>
-/** Run startup checks through DSH's worker subprocess service with worker shims removed from PATH so a `gh` wrapper script reaches the real binary. */
-export function workerProbe(subprocess: SubprocessRuntime, stateDir: string, cwd: string, signal: AbortSignal): Probe {
-  const path = withoutDirectory(process.env.PATH ?? '', workerBin(stateDir))
+/**
+ * Run startup checks through DSH's worker subprocess service with worker shims removed from PATH so a `gh` wrapper script reaches the real binary.
+ * @param subprocess - the service that starts worker commands, as the run-as identity when it has one.
+ * @param workerDirectory - the directory whose `worker-bin` is removed from PATH.
+ * @param cwd - the directory the checks run in, the ticket work directory.
+ * @param signal - cancellation; each check also stops after 60 seconds.
+ * @returns the probe.
+ */
+export function workerProbe(subprocess: SubprocessRuntime, workerDirectory: string, cwd: string, signal: AbortSignal): Probe {
+  const path = withoutDirectory(process.env.PATH ?? '', workerBin(workerDirectory))
   return argv => runAsWorker(subprocess, ['env', `PATH=${path}`, ...argv], cwd, AbortSignal.any([signal, AbortSignal.timeout(60_000)]))
 }
 
@@ -103,13 +132,15 @@ function parsed<T>(schema: z.ZodType<T>, text: string): T | undefined {
  * `permissions`, so only a reported read-only access refuses.
  */
 export async function resolveDeployment(machine: Machine, github: unknown, probe: Probe, path = process.env.PATH ?? ''): Promise<Deployment> {
-  const { stateDir, githubApp } = machine
+  const { workerDirectory, githubApp } = machine
   const accounts = GithubAccountsSchema.parse(github ?? {})
   const remote = accounts.repository
   if (!remote) throw new SetupError('repositoryUnset')
   if (!accounts.cli) throw new SetupError('agentCliUnset')
   let cli: string
-  try { cli = executable(accounts.cli, path, workerBin(stateDir)) } catch (error) { throw new SetupError('agentCliMissing', { output: reason(error) }) }
+  try { cli = executable(accounts.cli, path, workerBin(workerDirectory)) } catch (error) { throw new SetupError('agentCliMissing', { output: reason(error) }) }
+  // The orchestrator runs this CLI as root; under run-as, a CLI the worker could change would run the worker's code as root.
+  if (machine.runAs) try { assertOwnedByRoot(cli, 'agent GitHub CLI') } catch (error) { throw new SetupError('agentCliUnsafe', { cli, output: reason(error) }) }
   const agent = githubApp ? { login: githubApp.login, id: githubApp.userId }
     : parsed(GithubUser, await probe([cli, 'api', 'user']).catch((error: unknown) => { throw new SetupError('agentCliSignedOut', { output: reason(error) }) }))
   if (!agent) throw new SetupError('agentCliNoAccount')
@@ -134,7 +165,7 @@ export async function resolveFeishuBot(machine: Machine, feishu: unknown, probe:
   if (!name) return undefined
   const fail = (error: unknown): never => { throw error instanceof SetupError ? error : new SetupError('feishuCliFailed', { output: reason(error) }) }
   let cli = ''
-  try { cli = executable(name, path, workerBin(machine.stateDir)) } catch (error) { fail(error) }
+  try { cli = executable(name, path, workerBin(machine.workerDirectory)) } catch (error) { fail(error) }
   const run = (...args: string[]): Promise<string> => probe(['env', 'LARKSUITE_CLI_NO_UPDATE_NOTIFIER=1', 'LARKSUITE_CLI_NO_SKILLS_NOTIFIER=1', cli, ...args]).catch(fail)
   const text = await run('auth', 'status')
   const status = parsed(AuthStatus, text.slice(text.indexOf('{')))

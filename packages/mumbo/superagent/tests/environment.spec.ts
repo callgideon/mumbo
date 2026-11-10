@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -60,6 +60,14 @@ describe('worker shims', () => {
     writeFileSync(workerGitConfig(dir), '[user]\n\tname = someone\n')
     await expect(writeEnvironment(testDeployment({ stateDir: dir }), [])).rejects.toThrow(`${workerGitConfig(dir)} was not written by dsh-superagent`)
     expect(readFileSync(workerGitConfig(dir), 'utf8')).toBe('[user]\n\tname = someone\n')
+  })
+  it('writes shims the worker\'s group may run and a git configuration it may read, neither of which it may change', async () => {
+    chmodSync(dir, 0o2750)
+    await writeEnvironment(testDeployment({ workerDirectory: dir }), ['old-cli'])
+    const mode = (path: string) => statSync(path).mode & 0o7777
+    // In a set-group-ID worker directory the shim directory keeps the bit, so its entries belong to the worker's group.
+    expect([mode(workerBin(dir)), mode(join(workerBin(dir), 'gh')), mode(join(workerBin(dir), 'old-cli')), mode(workerGitConfig(dir))])
+      .toEqual([0o2750, 0o750, 0o750, 0o640])
   })
   it('replaces the files it wrote under the project\'s earlier names', async () => {
     await writeEnvironment(testDeployment({ stateDir: dir }), ['old-cli', 'older-cli'])

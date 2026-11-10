@@ -2,13 +2,12 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { rmdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { key, latestAssignment, latestReport, liveTicket, runningAssignment, threadKey, waitsForPerson } from '../core/index.ts'
 import type { AssessmentOutcome, Assignment, EngineForExecutor, Execution, Executor, Mandate, PolicyEffect, Ticket, TicketInput, Trigger }
   from '../core/index.ts'
 import type { Machine } from '../deployment.ts'
-import { runAsWorker, verifyDirectory } from '../infra/environment.ts'
+import { makeWorkerDirectory, runAsWorker, verifyDirectory } from '../infra/environment.ts'
 import { deliverable, type Settings } from '../policy.ts'
 import type { Store } from '../app/store.ts'
 import { Later, type Effects } from '../app/effects.ts'
@@ -80,9 +79,6 @@ export interface ExecutorHost {
   /** Stored Trigger of the message `trigger` replies to, when it replies to one. */
   repliedTo(trigger: Trigger): Trigger | undefined
 }
-/** Creates a directory and its missing parents as the worker, through the subprocess service that runs worker commands. */
-const makeWorkerDirectory = (context: Context, path: string, signal: AbortSignal): Promise<string> =>
-  runAsWorker(context.subprocess, ['mkdir', '-p', '--', path], '/', signal)
 /** Looks up a ticket's origin trigger in Store. */
 export const sourceTrigger = (host: { store: Pick<Store, 'triggers'> }, ticket: Ticket): Trigger | undefined =>
   host.store.triggers.get(ticket.origin.triggerId)
@@ -243,8 +239,9 @@ export class DshExecutor implements Executor {
   }
   /**
    * Runs the configured `executor.prepare` command for a new ticket workspace in its parent directory with the ticket's
-   * execution environment variables, then verifies the directory as the worker sees it. Both directories are created as
-   * the worker, so under a run-as subprocess provider the worker owns them.
+   * execution environment variables, then verifies the directory as the worker sees it. Every command on the directories,
+   * including their creation and the removal of one a failed command left empty, runs as the worker, so under a run-as
+   * subprocess provider the worker owns them and root never acts on a path the worker can change.
    * A failed prepare command throws `PrepareFailed`, which is not retried automatically; an empty directory it left is removed, a non-empty one kept.
    * @throws PrepareFailed with the command's output when the prepare command fails.
    */
@@ -254,14 +251,16 @@ export class DshExecutor implements Executor {
     const env = Object.fromEntries(this.host.environment(ticket).map(variable => [variable.key, variable.value]))
     // Enforce a timeout so a hung prepare command (such as on a credential prompt) fails the ticket instead of holding a worker slot indefinitely.
     const signal = AbortSignal.any([this.host.lifetime, AbortSignal.timeout(PREPARE_TIMEOUT_MS)])
-    await makeWorkerDirectory(this.host.context, dirname(directory), signal)
-    if (command) await runAsWorker(this.host.context.subprocess, ['sh', '-c', command], dirname(directory), signal, env)
+    const { subprocess } = this.host.context
+    await makeWorkerDirectory(subprocess, dirname(directory), signal)
+    if (command) await runAsWorker(subprocess, ['sh', '-c', command], dirname(directory), signal, env)
       .catch(async (error: unknown) => {
         // Remove an empty directory left by a failed prepare command so a later retry does not treat it as already prepared.
-        await rmdir(directory).catch(() => { /* Absent, or holding what the command wrote, which the output explains. */ })
+        await runAsWorker(subprocess, ['rmdir', '--', directory], '/', this.host.lifetime)
+          .catch(() => { /* Absent, or holding what the command wrote, which the output explains. */ })
         throw new PrepareFailed(`The prepare command failed: ${error instanceof Error ? error.message : String(error)}`)
       })
-    await makeWorkerDirectory(this.host.context, directory, signal)
+    await makeWorkerDirectory(subprocess, directory, signal)
     await verifyDirectory(directory, this.host.context.subprocess, this.host.lifetime)
   }
   /** Enqueues a `launch` effect for an accepted or resumed assignment; launches start in queue order as worker slots free up. */
@@ -439,8 +438,9 @@ export class DshExecutor implements Executor {
     const source = sourceTrigger(this.host, ticket)
     const workspace = ticket.execution?.directory ?? ''
     if (!current()) return
-    // Prepare the workspace directory once; an existing directory counts as already prepared, including worktrees created before `prepare` commands existed.
-    if (!await stat(workspace).then(() => true, () => false)) {
+    // Prepare the workspace directory once; an existing directory counts as already prepared, including worktrees created before
+    // `prepare` commands existed. The worker looks, so root follows no link the worker planted.
+    if (!await runAsWorker(this.host.context.subprocess, ['test', '-e', workspace], '/', this.host.lifetime).then(() => true, () => false)) {
       await this.prepareDirectory(ticket)
       if (!current()) return
     }

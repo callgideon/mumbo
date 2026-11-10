@@ -46,8 +46,8 @@ describe('configuration schema', () => {
     // Limits are volatile references that the loader updates in place and callers read when used.
     expect({ ...read, promptMaxChars: read.promptMaxChars.get(), admissionContextMaxPages: read.admissionContextMaxPages.get(),
       admissionContextTimeoutMs: read.admissionContextTimeoutMs.get() })
-      .toEqual({ stateDir: join(dir, 'state'), workDirectory: join(dir, 'state', 'work'), promptMaxChars: 100000, admissionContextMaxPages: 10,
-        admissionContextTimeoutMs: 15000, panelAdmins: [] })
+      .toEqual({ stateDir: join(dir, 'state'), workDirectory: join(dir, 'state', 'work'), workerDirectory: join(dir, 'state'), runAs: false,
+        promptMaxChars: 100000, admissionContextMaxPages: 10, admissionContextTimeoutMs: 15000, panelAdmins: [] })
     // The ticket directories' root is its own row setting, as a contained box puts them inside the model's directories.
     expect(machineOf(Config({ stateDir: join(dir, 'state'), workDirectory: '/root/work' })).workDirectory).toBe('/root/work')
     expect(() => Config(minimal({ workDirectory: 'relative/work' }))).toThrow()
@@ -72,7 +72,56 @@ describe('configuration schema', () => {
   })
   it('names keys the configuration does not define, and where the values of older keys live now', () => {
     const raw = minimal({ repository: 'acme/widgets', repositoryPath: '/srv/widgets', blockedCommands: [], author: { name: 'Alice' }, extra: 1 })
-    expect(() => machineOf(Config(raw))).toThrow('keys it does not use: repository (now on the GitHub Source), repositoryPath (now in the prepare command of the Execution settings), blockedCommands (now in the Execution settings), author (now prompt text), extra; the keys are stateDir, workDirectory, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins')
+    expect(() => machineOf(Config(raw))).toThrow('keys it does not use: repository (now on the GitHub Source), repositoryPath (now in the prepare command of the Execution settings), blockedCommands (now in the Execution settings), author (now prompt text), extra; the keys are stateDir, workDirectory, workerDirectory, ghConfigDirectory, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins')
+  })
+})
+
+describe('under a run-as subprocess provider', () => {
+  const contained = (overrides: Record<string, unknown> = {}) =>
+    machineOf(Config(minimal({ workerDirectory: join(dir, 'worker'), ghConfigDirectory: join(dir, 'gh'), ...overrides })), true)
+  beforeEach(() => {
+    // Modes are set explicitly: the test process's umask may leave new entries group-writable.
+    mkdirSync(join(dir, 'worker', 'worker-bin'), { recursive: true }); chmodSync(join(dir, 'worker'), 0o750); chmodSync(join(dir, 'worker', 'worker-bin'), 0o750)
+    chmodSync(join(dir, 'bin'), 0o755)
+    writeFileSync(join(dir, 'worker', 'worker-gitconfig'), '', { mode: 0o640 })
+    mkdirSync(join(dir, 'gh'), { mode: 0o700 }); writeFileSync(join(dir, 'gh', 'config.yml'), '', { mode: 0o600 })
+    mkdirSync(join(dir, 'state'), { recursive: true })
+  })
+  it('requires the worker directory and the orchestrator\'s gh configuration, and keeps the real paths it checked', () => {
+    expect(() => machineOf(Config(minimal({ ghConfigDirectory: join(dir, 'gh') })), true)).toThrow('workerDirectory must be set under a run-as subprocess provider')
+    expect(() => machineOf(Config(minimal({ workerDirectory: join(dir, 'worker') })), true)).toThrow('ghConfigDirectory must be set under a run-as subprocess provider')
+    expect(contained()).toMatchObject({ workerDirectory: join(dir, 'worker'), ghConfigDirectory: join(dir, 'gh'), runAs: true })
+    symlinkSync(join(dir, 'gh'), join(dir, 'gh-link'))
+    expect(contained({ ghConfigDirectory: join(dir, 'gh-link') })).toMatchObject({ workerDirectory: join(dir, 'worker'), ghConfigDirectory: join(dir, 'gh'), runAs: true })
+    // Without run-as nothing is checked, and the worker files stay in the state directory.
+    expect(machineOf(Config(minimal()))).toMatchObject({ workerDirectory: join(dir, 'state'), ghConfigDirectory: undefined, runAs: false })
+  })
+  it('refuses at load a directory, an entry in it or an ancestor that another user could change, and a link inside', () => {
+    const refused = (change: () => void, restore: () => void, message: string) => {
+      change()
+      expect(() => contained()).toThrow(message)
+      restore()
+      expect(contained().runAs).toBe(true)
+    }
+    const worker = join(dir, 'worker'), config = join(worker, 'worker-gitconfig'), shim = join(worker, 'worker-bin', 'gh')
+    refused(() => { chmodSync(worker, 0o770) }, () => { chmodSync(worker, 0o750) }, `workerDirectory: ${worker} is writable by its group or other users`)
+    refused(() => { chmodSync(config, 0o660) }, () => { chmodSync(config, 0o640) }, `workerDirectory: ${config} is writable by its group or other users`)
+    refused(() => { symlinkSync('/usr/bin/gh', shim) }, () => { rmSync(shim) }, `workerDirectory: ${shim} is a symbolic link`)
+    refused(() => { chmodSync(join(dir, 'gh', 'config.yml'), 0o606) }, () => { chmodSync(join(dir, 'gh', 'config.yml'), 0o600) },
+      `ghConfigDirectory: ${join(dir, 'gh', 'config.yml')} is writable by its group or other users`)
+    refused(() => { chmodSync(dir, 0o777) }, () => { chmodSync(dir, 0o700) }, `workerDirectory: ${dir} is writable by its group or other users`)
+    expect(() => contained({ workerDirectory: join(dir, 'missing') })).toThrow(`workerDirectory: ${join(dir, 'missing')} does not resolve`)
+  })
+  it('refuses an agent GitHub CLI another user could change, because the orchestrator runs it as root', async () => {
+    const cli = gh(join(dir, 'bin', 'gh-shared'), 'Agent-Bot')
+    chmodSync(cli, 0o775)
+    const repository = 'acme/widgets'
+    await expect(resolveDeployment({ ...machine(), runAs: true }, { repository, cli }, probe, path))
+      .rejects.toEqual(setupError('github', 'agentCliUnsafe', { cli, output: expect.stringContaining(`${cli} is writable by its group or other users`) }))
+    // Without run-as the operator's own CLI is not checked.
+    await expect(resolveDeployment(machine(), { repository, cli }, probe, path)).resolves.toMatchObject({ github: { cli } })
+    chmodSync(cli, 0o755)
+    await expect(resolveDeployment({ ...machine(), runAs: true }, { repository, cli }, probe, path)).resolves.toMatchObject({ github: { cli } })
   })
 })
 

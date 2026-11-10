@@ -1,6 +1,6 @@
 import { Context } from '@deepseek-ai/cordis'
 import { bindScopeParent } from '@deepseek-ai/dsh-scope'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
@@ -90,10 +90,12 @@ const subprocess = { spawn: vi.fn((spec: { argv: readonly string[] }) => {
   const argv = [...spec.argv]
   while (argv[0] === 'env' || /^[A-Z_]+=/.test(argv[0] ?? '')) argv.shift()
   const answer = answers[argv.join(' ')] ?? ''
-  // The worker's `mkdir -p -- <path>` creates the directory, as the real command does.
+  // The worker's `mkdir -p --`, `rmdir --` and `test -e` act on the path as the real commands do.
   if (argv[0] === 'mkdir') mkdirSync(argv.at(-1)!, { recursive: true })
+  if (argv[0] === 'rmdir') rmdirSync(argv.at(-1)!)
+  const failed = answer instanceof Error || argv[0] === 'test' && !existsSync(argv.at(-1)!)
   const reader = (text: string) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
-  return { done: Promise.resolve({ exitCode: answer instanceof Error ? 1 : 0, signal: null }), collected: { stdout: reader(answer instanceof Error ? '' : answer), stderr: reader(answer instanceof Error ? answer.message : '') } }
+  return { done: Promise.resolve({ exitCode: failed ? 1 : 0, signal: null }), collected: { stdout: reader(answer instanceof Error ? '' : answer), stderr: reader(answer instanceof Error ? answer.message : '') } }
 }) }
 /** Source account overrides for test setup; `feishu: null` disables the Feishu source. */
 interface Accounts { github?: Record<string, unknown>; feishu?: Record<string, unknown> | null }
@@ -140,7 +142,6 @@ beforeEach(async () => {
   directory = mkdtempSync(join(tmpdir(), 'orchestrator-runtime-'))
   vi.spyOn(Commands.prototype, 'gh').mockImplementation(async args => args[1] === 'user' ? { login: 'agent-bot' } : args[1]?.includes('/pulls/') ? { state: 'open', user: { login: 'agent-bot' }, html_url: 'https://github.com/acme/widgets/pull/' + args[1].split('/').at(-1), head: { ref: `agent/${String(runtime.store.tickets.list()[0]?.execution?.name)}`, sha: 'head-1', repo: { full_name: 'acme/widgets' } } } : { default_branch: 'master', permissions: { push: true } })
   vi.spyOn(Commands.prototype, 'lark').mockResolvedValue({ users: [{ member_id: MEMBER, name: 'Alice' }], has_more: false })
-  vi.spyOn(Commands.prototype, 'git').mockResolvedValue('')
   vi.spyOn(Commands.prototype, 'run').mockResolvedValue('{"ok":true,"data":{}}')
   restarts = vi.fn()
   answers = {
@@ -844,6 +845,7 @@ it('waits for setup without the agent\'s GitHub CLI: the panel works, and nothin
 })
 
 it('reports each setup problem where the operator fixes it, and checks the agent CLI the way worker shells run it', async () => {
+  subprocess.spawn.mockClear()
   const needs = async (place: string, code: string, values: Record<string, string>, accounts: Accounts = {}) => {
     const next = await restart({}, accounts)
     await next.ready
@@ -857,6 +859,12 @@ it('reports each setup problem where the operator fixes it, and checks the agent
   expect(check[0]).toBe('env')
   expect(check[1]!.startsWith('PATH=')).toBe(true)
   expect(check[1]!.slice('PATH='.length).split(':')).not.toContain(join(directory, 'worker-bin'))
+  // Setup creates the ticket work directory as the worker and runs every check there, never in the root-only state directory.
+  const specs = subprocess.spawn.mock.calls.map(([spec]) => spec as { argv: string[]; cwd: string })
+  expect(specs).toContainEqual(expect.objectContaining({ argv: ['mkdir', '-p', '--', join(directory, 'work')], cwd: '/' }))
+  const checks = specs.filter(spec => spec.argv.includes(AGENT()) || spec.argv.includes('--show-origin'))
+  expect(checks.length).toBeGreaterThan(1)
+  expect(new Set(checks.map(spec => spec.cwd))).toEqual(new Set([join(directory, 'work')]))
   const valid = { ...answers }
   // git older than 2.32 ignores GIT_CONFIG_GLOBAL and reads the operator's configuration.
   answers = { ...valid, [HELPERS]: 'file:/home/me/.gitconfig\0!gh auth git-credential\0' }
@@ -1100,6 +1108,29 @@ it('runs the prepare command once for a new ticket, under the execution root wit
   await runtime.idle()
   expect(runtime.store.tickets.get(failed.ticket.id)!.assignments.at(-1)).toMatchObject({ report: expect.objectContaining({ state: 'failed', summary: expect.stringContaining('The prepare command failed: fatal: no such clone') }) })
   expect(waitsForPerson(runtime.store.tickets.get(failed.ticket.id)!)).toBe(true)
+  // The worker looks for the directory and removes the one the failed command left; root acts on neither.
+  const worker = subprocess.spawn.mock.calls.map(([spec]) => spec as { argv: string[]; cwd: string })
+  expect(worker).toContainEqual(expect.objectContaining({ argv: ['test', '-e', failed.ticket.execution!.directory], cwd: '/' }))
+  expect(worker).toContainEqual(expect.objectContaining({ argv: ['rmdir', '--', failed.ticket.execution!.directory], cwd: '/' }))
+})
+
+it('gives the orchestrator\'s own CLI calls its gh configuration directory, which workers never receive', async () => {
+  subprocess.spawn.mockClear()
+  const next = await restart({ ghConfigDirectory: '/srv/orchestrator-gh' })
+  await next.ready
+  expect(next.setup.commandEnvironment.GH_CONFIG_DIR).toBe('/srv/orchestrator-gh')
+  expect(process.env.GH_CONFIG_DIR).not.toBe('/srv/orchestrator-gh')
+  expect(subprocess.spawn.mock.calls.filter(([spec]) => JSON.stringify(spec).includes('/srv/orchestrator-gh'))).toEqual([])
+})
+
+it('starts the main Session in the work directory under run-as, where the worker can enter, and in the state directory otherwise', async () => {
+  const created = vi.spyOn(services.workspaceRegistry as { create(cwd: string): Promise<{ id: string }> }, 'create')
+  for (const runAs of [false, true]) {
+    agents.delete(runtime.masterId)
+    const next = await restart({ runAs })
+    await next.ready
+    expect(created).toHaveBeenLastCalledWith(runAs ? join(directory, 'work') : directory)
+  }
 })
 
 it('counts a ticket whose directory the host prepared before prepare commands existed as prepared', async () => {

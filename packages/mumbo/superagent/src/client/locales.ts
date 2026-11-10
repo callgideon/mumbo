@@ -728,6 +728,7 @@ const TEXT = {
   'setup.environmentFailed': SETUP_PROBLEMS.environmentFailed[1],
   'setup.agentCliUnset': SETUP_PROBLEMS.agentCliUnset[1],
   'setup.agentCliMissing': SETUP_PROBLEMS.agentCliMissing[1],
+  'setup.agentCliUnsafe': SETUP_PROBLEMS.agentCliUnsafe[1],
   'setup.agentCliSignedOut': SETUP_PROBLEMS.agentCliSignedOut[1],
   'setup.agentCliNoAccount': SETUP_PROBLEMS.agentCliNoAccount[1],
   'setup.repositoryUnreadable': SETUP_PROBLEMS.repositoryUnreadable[1],

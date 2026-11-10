@@ -1,3 +1,5 @@
+import { realpathSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { CliError, Commands, commandError } from '../src/infra/commands.ts'
@@ -28,6 +30,11 @@ describe('account-isolated operations', () => {
       expect(output).toContain('DSH_SUPERAGENT_PROBE=agent')
       expect(output).not.toContain('GH_TOKEN=')
     } finally { delete process.env.GH_TOKEN }
+  })
+  it('runs the orchestrator\'s own commands in the filesystem root unless the caller names a directory', async () => {
+    const commands = new Commands(() => deployment, { GH_CONFIG_DIR: '/srv/orchestrator-gh' }, new AbortController().signal)
+    expect(await commands.run('sh', ['-c', 'pwd; echo "$GH_CONFIG_DIR"'])).toBe('/\n/srv/orchestrator-gh\n')
+    expect(await commands.run('pwd', [], tmpdir())).toBe(`${realpathSync(tmpdir())}\n`)
   })
   it('refuses Feishu commands when the deployment has no Feishu bot', async () => {
     await expect(new Commands(() => testDeployment({ feishu: undefined }), {}, new AbortController().signal).lark(['im', '+chat-list'])).rejects.toThrow('The Feishu Source has no working bot CLI')

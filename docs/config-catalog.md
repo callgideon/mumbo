@@ -5164,7 +5164,7 @@ export interface Config {
 ## `@mumbo/superagent`
 
 - `inject`: `agents` · `sessionController` · `sessionPersistence` · `workspaceRegistry` · `permissionPresets` · `tools` · `systemPrompt` · `skills` · `webServer` · `connection` · `llm` · `subprocess`
-- `source`: [`packages/mumbo/superagent/src/deployment.ts:32`](../packages/mumbo/superagent/src/deployment.ts)
+- `source`: [`packages/mumbo/superagent/src/deployment.ts:34`](../packages/mumbo/superagent/src/deployment.ts)
 
 ```ts config-catalog
 export type DeploymentConfig = ReturnType<typeof Config>
