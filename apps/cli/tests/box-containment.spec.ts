@@ -362,23 +362,21 @@ async function superagentTools(): Promise<string[]> {
   return [...new Set([...main(anything, anything), ...executor(anything, anything)].map(tool => tool.name))].sort()
 }
 
-/** A tool module of `@mumbo/mcp`, which registers its tools on one request's MCP server. */
-type DoorModule = { register: (server: { registerTool(name: string): void }, deps: object) => void }
+/** The registration `@mumbo/mcp` performs on each request's MCP server, for one profile. */
+type RegisterTools = (server: { registerTool(name: string): void }, deps: object, profile: 'full' | 'door') => void
 
 /**
- * Tool names the door profile of `@mumbo/mcp` serves: its per-request server registers the conversation, ask and status
- * modules, and the halt module only outside the door profile (`src/index.ts`), so the names come from calling them.
+ * Tool names the door profile of `@mumbo/mcp` serves: its per-request server registers exactly what `registerTools`
+ * registers for the configured profile (`src/index.ts`), so the names come from calling it, whatever module defines them.
  */
 async function doorTools(): Promise<string[]> {
   const names: string[] = []
   const server = { registerTool: (name: string) => { names.push(name) } }
   // The door profile's dependencies: `task_reply` answers questions only.
   const deps = new Proxy({}, { get: (_target, key) => key === 'questionsOnly' ? true : anything })
-  for (const file of ['conversation.ts', 'asks.ts', 'status.ts']) {
-    // The package is private and exports no tool modules; its sources are loaded from the repository.
-    const module = await import(pathToFileURL(join(root, 'packages/mumbo/mcp/src', file)).href) as DoorModule
-    module.register(server, deps)
-  }
+  // The package is private and not a dependency of this app; its source is loaded from the repository.
+  const { registerTools } = await import(pathToFileURL(join(root, 'packages/mumbo/mcp/src/index.ts')).href) as { registerTools: RegisterTools }
+  registerTools(server, deps, 'door')
   return names.sort()
 }
 
