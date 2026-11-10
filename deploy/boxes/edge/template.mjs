@@ -25,8 +25,14 @@ const CHROME_SENSITIVE_SYNC = false
  *  assistant reads (edge roleInstructions).
  *  @param {boolean} sensitiveSync CHROME_SENSITIVE_SYNC
  *  @returns {string} the shell step */
+/** Chrome's own pages for saved passwords, payment cards, addresses and their internals, blocked for everyone in the box's
+ *  Chrome (spec section 17b, B25): computer use drives Chrome without going through browser consent. The person manages
+ *  passwords and cards on their own devices. */
+export const CHROME_URL_BLOCKLIST = ['chrome://password-manager', 'chrome://settings/passwords', 'chrome://settings/payments', 'chrome://settings/autofill',
+  'chrome://settings/addresses', 'chrome://sync-internals', 'chrome://autofill-internals', 'chrome://password-manager-internals']
 export const chromePolicyStep = (sensitiveSync) => {
   const policy = { RestoreOnStartup: 1, DefaultBrowserSettingEnabled: false, MetricsReportingEnabled: false, DownloadDirectory: '/home/shared/Downloads',
+    URLBlocklist: CHROME_URL_BLOCKLIST,
     ...(sensitiveSync ? {} : { SyncTypesListDisabled: ['passwords', 'payments'], PasswordManagerEnabled: false, AutofillCreditCardEnabled: false }) }
   return `install -d -m 0755 /etc/opt/chrome/policies/managed && printf '%s\\n' '${JSON.stringify(policy)}' > /etc/opt/chrome/policies/managed/mumbo.json && chmod 0644 /etc/opt/chrome/policies/managed/mumbo.json`
 }

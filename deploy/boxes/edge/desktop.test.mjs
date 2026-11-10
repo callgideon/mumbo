@@ -289,7 +289,7 @@ test('template: Chrome\'s managed policy file, byte for byte, read-only to the b
   const t = mkdtempSync(join(tmpdir(), 'policy-'))
   try {
     const write = (step) => { rmSync(join(t, 'etc'), { recursive: true, force: true }); execFileSync('sh', ['-c', step.replaceAll('/etc/opt/chrome/', `${t}/etc/opt/chrome/`)]); return readFileSync(join(t, 'etc/opt/chrome/policies/managed/mumbo.json'), 'utf8') }
-    const base = '"RestoreOnStartup":1,"DefaultBrowserSettingEnabled":false,"MetricsReportingEnabled":false,"DownloadDirectory":"/home/shared/Downloads"'
+    const base = '"RestoreOnStartup":1,"DefaultBrowserSettingEnabled":false,"MetricsReportingEnabled":false,"DownloadDirectory":"/home/shared/Downloads","URLBlocklist":["chrome://password-manager","chrome://settings/passwords","chrome://settings/payments","chrome://settings/autofill","chrome://settings/addresses","chrome://sync-internals","chrome://autofill-internals","chrome://password-manager-internals"]'
     assert.equal(write(chromePolicyStep(false)), `{${base},"SyncTypesListDisabled":["passwords","payments"],"PasswordManagerEnabled":false,"AutofillCreditCardEnabled":false}\n`)
     assert.equal(statSync(join(t, 'etc/opt/chrome/policies/managed/mumbo.json')).mode & 0o777, 0o644)
     assert.equal(statSync(join(t, 'etc/opt/chrome/policies/managed')).mode & 0o777, 0o755)

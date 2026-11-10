@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { startScript, boxSite, boxes, assistantInstructions } from './edge.mjs'
+import { startScript, boxSite, boxes, assistantInstructions, DENIED_URLS } from './edge.mjs'
 import { memoryStore } from './store.mjs'
 import { projects } from './projects.mjs'
 import { templateArgs } from './template.mjs'
@@ -17,8 +17,8 @@ const at = (text, needle) => { const i = text.indexOf(needle); assert.ok(i >= 0,
 
 test('a user box start script is byte-for-byte what it was before project boxes grew a proxy', () => {
   const s = startScript(c, 'T', boxSite(c, 'a@x.com'), "role's", undefined, boxFiles, ['o@x.com'])
-  // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows, the X cookie, the first-run welcome, the interim Chromium policy (B27) and the B18 desktop (same cfg, token T, role "role's").
-  assert.equal(createHash('sha256').update(s).digest('hex'), 'ea10673ce59a428521042c45a85fffa194c0add7f032bb86e037533837dffe33')
+  // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows, the X cookie, the first-run welcome, the interim Chromium policy (B27), the B18 desktop and the B25 consent rows (same cfg, token T, role "role's").
+  assert.equal(createHash('sha256').update(s).digest('hex'), '20cc857394f816e41d00eb164f71c7c45a11f52403457eb0329575eead2cc2e8')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -171,10 +171,52 @@ test('box links: the overlay loads only when the image ships @mumbo/box-links; p
   assert.ok(!p.includes('desktop: https://'))
 })
 
+test('slice 3: a consent that knows deniedUrls gets the denied pages and a root-only outputDir, and computer use waits for it', () => {
+  const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles)
+  const lines = u.split('\n')
+  const from = lines.findIndex(l => l === 'CONSENT=')
+  const cuFrom = lines.findIndex(l => l === 'CU_PATCH=')
+  const cuTo = lines.findIndex((l, i) => i > cuFrom && l === 'fi')
+  const consentTo = lines.findIndex((l, i) => i > from && l === 'fi')
+  assert.ok(from > 0 && consentTo > from && cuFrom > consentTo && cuTo > cuFrom)
+  const dir = mkdtempSync(join(tmpdir(), 'consent-row-'))
+  try {
+    const bin = join(dir, 'bin'); mkdirSync(bin)
+    for (const name of ['cat', 'grep', 'install']) symlinkSync(execFileSync('sh', ['-c', `command -v ${name}`], { encoding: 'utf8' }).trim(), join(bin, name))
+    for (const name of ['xdotool', 'xauth']) { writeFileSync(join(bin, name), '#!/bin/sh\n'); execFileSync('chmod', ['+x', join(bin, name)]) }
+    const block = [...lines.slice(from, consentTo + 1), ...lines.slice(cuFrom, cuTo + 1)].join('\n')
+      .replaceAll('/src/packages', join(dir, 'pkg')).replaceAll('/root/.mumbo', join(dir, 'mumbo'))
+    mkdirSync(join(dir, 'pkg', 'experimental', 'computer-use-x11'), { recursive: true })
+    const run = () => {
+      rmSync(join(dir, 'mumbo'), { recursive: true, force: true }); mkdirSync(join(dir, 'mumbo'))
+      execFileSync('/bin/sh', ['-c', `set -eu\n${block}\necho "$CONSENT"`], { encoding: 'utf8', env: { PATH: bin } })
+      return { sandboxes: readFileSync(join(dir, 'mumbo', 'sandboxes.overlay.yml'), 'utf8'), computer: readFileSync(join(dir, 'mumbo', 'computer.overlay.yml'), 'utf8') }
+    }
+    const cuRows = (inject) => `- insert:\n    - id: computer-use\n      name: '@deepseek-ai/dsh-computer-use'\n    - id: computer-use-x11\n      name: '@deepseek-ai/dsh-computer-use-x11'\n${inject ? '      inject: [mumbo-browser-consent]\n' : ''}      config:\n        display: ':1'\n        xauthority: /run/x11/auth\n`
+    // No consent package: the plain provider row, and computer use without inject.
+    let o = run()
+    assert.match(o.sandboxes, /id: browser-use-box-chromium/)
+    assert.equal(o.computer, cuRows(false))
+    // A consent from before B25: today's row, no deniedUrls key (it would fail that consent's load), no inject.
+    mkdirSync(join(dir, 'pkg', 'mumbo', 'browser-consent', 'src'), { recursive: true })
+    writeFileSync(join(dir, 'pkg', 'mumbo', 'browser-consent', 'src', 'index.ts'), 'export const allowedSites = 1\n')
+    o = run()
+    assert.equal(o.sandboxes, "    - id: browser-consent\n      name: '@mumbo/browser-consent'\n      config:\n        browser:\n          mode: attach\n          endpoint: http://127.0.0.1:9222\n")
+    assert.equal(o.computer, cuRows(false))
+    // B25's consent: deniedUrls and outputDir, the output directory root-only, and computer use injects consent.
+    writeFileSync(join(dir, 'pkg', 'mumbo', 'browser-consent', 'src', 'index.ts'), 'const deniedUrls = []\n')
+    o = run()
+    assert.equal(o.sandboxes, `    - id: browser-consent\n      name: '@mumbo/browser-consent'\n      config:\n        browser:\n          mode: attach\n          endpoint: http://127.0.0.1:9222\n          outputDir: ${join(dir, 'mumbo')}/playwright-output\n        deniedUrls: ${JSON.stringify(DENIED_URLS)}\n`)
+    assert.equal(statSync(join(dir, 'mumbo', 'playwright-output')).mode & 0o777, 0o700)
+    assert.equal(o.computer, cuRows(true))
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+  assert.deepEqual(DENIED_URLS, ['chrome:', 'chrome-untrusted:', 'chrome-extension:', 'devtools:', 'view-source:', 'file:', 'https://passwords.google.com', 'https://pay.google.com', 'https://payments.google.com', 'https://myaccount.google.com', 'https://accounts.google.com'])
+})
+
 test('browser consent replaces the plain Playwright provider row only when the image ships @mumbo/browser-consent', () => {
   const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles)
-  assert.ok(at(u, 'if [ -d /src/packages/mumbo/browser-consent ]; then') < at(u, "name: '@mumbo/browser-consent'"))
-  assert.ok(at(u, "name: '@mumbo/browser-consent'") < at(u, 'else') && at(u, 'else') < at(u, "dsh-experimental-browser-use-playwright-mcp"))
+  assert.ok(at(u, 'if [ -d /src/packages/mumbo/browser-consent ] && grep -q deniedUrls') < at(u, "name: '@mumbo/browser-consent'"))
+  assert.ok(at(u, 'elif [ -d /src/packages/mumbo/browser-consent ]; then') < at(u, '\nelse\n') && at(u, '\nelse\n') < at(u, "dsh-experimental-browser-use-playwright-mcp"))
   const p = startScript({ ...c, projectDomain: 'boxes.x' }, 'T', boxSite({ ...c, projectDomain: 'boxes.x' }, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
   assert.ok(!p.includes('browser-consent') && !p.includes('playwright-mcp'))
 })

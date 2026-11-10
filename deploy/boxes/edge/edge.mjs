@@ -193,6 +193,11 @@ export function assistantInstructions() {
 
 /** Exists once a person box has given its first-run welcome, or had sessions before it (DESIGN.md#first-run-welcome). Under
  *  /root/.dsh, so backups carry it with the conversation that holds the welcome. */
+/** The pages browser consent refuses outright (spec section 17b, B25): every non-web scheme, and Google's password,
+ *  payment and account pages, where signing in is the person's job. */
+export const DENIED_URLS = ['chrome:', 'chrome-untrusted:', 'chrome-extension:', 'devtools:', 'view-source:', 'file:', 'https://passwords.google.com',
+  'https://pay.google.com', 'https://payments.google.com', 'https://myaccount.google.com', 'https://accounts.google.com']
+
 export const WELCOMED = '/root/.dsh/welcomed'
 /** The first-run welcome (spec section 17a, step 5), added to the person's first prompt in a new box (startScript). */
 export function welcomeInstructions(cfg) {
@@ -257,7 +262,23 @@ cat > /root/.mumbo/models.overlay.yml <<'YML'
 YML
 ` : ''}${site.desktop ? `# The user's Chromium for dsh's browser tools. With @mumbo/browser-consent in the image, writes on a site ask the
 # person first; consent mounts the Playwright MCP provider itself, so the plain provider row is used only without it.
-if [ -d /src/packages/mumbo/browser-consent ]; then
+# A consent that knows deniedUrls (B25) refuses the denied pages and writes the server's files to a root-only directory
+# outside the backups; CONSENT=denied then gates computer use on it.
+CONSENT=
+if [ -d /src/packages/mumbo/browser-consent ] && grep -q deniedUrls /src/packages/mumbo/browser-consent/src/index.ts 2>/dev/null; then
+CONSENT=denied
+install -d -m 0700 /root/.mumbo/playwright-output
+cat >> /root/.mumbo/sandboxes.overlay.yml <<'YML'
+    - id: browser-consent
+      name: '@mumbo/browser-consent'
+      config:
+        browser:
+          mode: attach
+          endpoint: http://127.0.0.1:9222
+          outputDir: /root/.mumbo/playwright-output
+        deniedUrls: ${JSON.stringify(DENIED_URLS)}
+YML
+elif [ -d /src/packages/mumbo/browser-consent ]; then
 cat >> /root/.mumbo/sandboxes.overlay.yml <<'YML'
     - id: browser-consent
       name: '@mumbo/browser-consent'
@@ -319,9 +340,10 @@ cat > /root/.mumbo/computer.overlay.yml <<'YML'
       name: '@deepseek-ai/dsh-computer-use'
     - id: computer-use-x11
       name: '@deepseek-ai/dsh-computer-use-x11'
-      config:
-        display: ':1'
 YML
+# With a deniedUrls consent, the desktop tool waits for its service, so a consent row that fails leaves no ungated input.
+if [ "$CONSENT" = denied ]; then echo '      inject: [mumbo-browser-consent]' >> /root/.mumbo/computer.overlay.yml; fi
+printf '%s\\n' '      config:' "        display: ':1'" >> /root/.mumbo/computer.overlay.yml
 command -v xauth >/dev/null 2>&1 && echo "        xauthority: /run/x11/auth" >> /root/.mumbo/computer.overlay.yml
 CU_PATCH="--patch /root/.mumbo/computer.overlay.yml"
 fi
