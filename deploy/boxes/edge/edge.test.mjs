@@ -390,7 +390,7 @@ test('a failed restore drops the new box, logged at error, so no backup of it re
   e2b.Sandbox.list = () => ({ hasNext: true, nextItems: async function () { this.hasNext = false; return e2b.made.filter(m => !killed.includes(m.id)).map(m => ({ sandboxId: m.id, state: 'running', startedAt: '1' })) } })
   const store = memoryStore()
   const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => 'GET-URL', presignPut: async () => 'PUT', log: (l) => logs.push(JSON.parse(l)) })
-  await assert.rejects(b.ensure('a@x.com'), (e) => e.status === 503)
+  await assert.rejects(b.ensure('a@x.com'), (e) => e.status === 503 && e.restoreFailed === true)
   assert.deepEqual(killed, ['b1'])
   assert.equal(await store.getBox('b1'), undefined)
   assert.deepEqual(logs.filter(l => l.msg === 'restore'), [{ edge: 'box', level: 'error', msg: 'restore', user: 'a@x.com', box: 'b1', ok: false }])
@@ -1015,6 +1015,36 @@ test('a fast non-capacity failure uses the same first-set-up choice as a slow on
     assert.match(r.body, text)
   }
   assert.equal(logs.length, 2, 'one log per failed ensure')
+})
+test('a failed restore shows its own page, keeps it while the next attempt runs, and a success clears it', async () => {
+  let mode = 'restore'
+  const ensure = async () => {
+    if (mode === 'restore') throw Object.assign(new Error('restore failed'), { status: 503, restoreFailed: true })
+    if (mode === 'slow') return new Promise(() => {})
+    if (mode === 'other') throw new Error('box is being created')
+    return { id: 'b1', token: 'T' }
+  }
+  const servers = []
+  const open = async () => { const s = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure, firstSetUp: async () => false, touch() {}, forget() {} }, log: () => {} }); servers.push(s); return listen(s) }
+  const failed = /Your computer could not be restored from its backup\. The operator has been alerted\./
+  try {
+    const port = await open()
+    const first = await call(port, { headers: nav })
+    assert.equal(first.status, 503)
+    assert.match(first.body, failed)
+    assert.match(first.body, /http-equiv="refresh"/, 'the page still reloads, so the restore is tried again')
+    mode = 'slow'
+    const retrying = await call(port, { headers: nav })
+    assert.match(retrying.body, failed)
+    assert.doesNotMatch(retrying.body, /Starting your computer/)
+    const port2 = await open()
+    mode = 'restore'; await call(port2, { headers: nav })
+    mode = 'ok'; await call(port2, { headers: nav })
+    mode = 'slow'
+    assert.match((await call(port2, { headers: nav })).body, /Starting your computer/)
+    mode = 'other'
+    assert.doesNotMatch((await call(await open(), { headers: nav })).body, /could not be restored/)
+  } finally { for (const s of servers) { s.closeAllConnections?.(); s.close() } }
 })
 test('create looks up the backup before it creates the sandbox', async () => {
   const e2b = fakeE2B(); let seen

@@ -191,13 +191,13 @@ export function assistantInstructions() {
   ].join('\n')
 }
 
-/** Exists once a person box has given its first-run welcome, or had sessions before it (DESIGN.md#first-run-welcome). Under
- *  /root/.dsh, so backups carry it with the conversation that holds the welcome. */
 /** The pages browser consent refuses outright (spec section 17b, B25): every non-web scheme, and Google's password,
  *  payment and account pages, where signing in is the person's job. */
 export const DENIED_URLS = ['chrome:', 'chrome-untrusted:', 'chrome-extension:', 'devtools:', 'view-source:', 'file:', 'https://passwords.google.com',
   'https://pay.google.com', 'https://payments.google.com', 'https://myaccount.google.com', 'https://accounts.google.com']
 
+/** Exists once a person box has given its first-run welcome, or had sessions before it (DESIGN.md#first-run-welcome). Under
+ *  /root/.dsh, so backups carry it with the conversation that holds the welcome. */
 export const WELCOMED = '/root/.dsh/welcomed'
 /** The first-run welcome (spec section 17a, step 5), added to the person's first prompt in a new box (startScript). */
 export function welcomeInstructions(cfg) {
@@ -660,7 +660,7 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
         say({ ...(ok ? {} : { level: 'error' }), msg: 'restore', user: email, box: box.sandboxId, ok })
         // A partly restored box must never be backed up over the archive: the catch below drops it, and the next visit
         // restores again.
-        if (!ok) throw Object.assign(new Error('restore failed'), { status: 503 })
+        if (!ok) throw Object.assign(new Error('restore failed'), { status: 503, restoreFailed: true })
       }
       await run(box, 'chmod +x /root/.mumbo/start.sh && /root/.mumbo/start.sh')
       const now = Date.now()
@@ -999,6 +999,9 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log
     ? (await verifyAlb(req.headers['x-amzn-oidc-data']).catch(() => undefined)) ?? ''
     : String(req.headers['x-forwarded-email'] ?? '').toLowerCase()
   const pending = new Map()  // box key -> the in-flight ensure of this replica
+  // Box keys whose last ensure here failed its restore: their pages say so, also while the next attempt runs, until one
+  // succeeds. ponytail: per replica; another replica shows the starting page until its own attempt fails.
+  const restoreFailed = new Set()
   const SLOW = Symbol('slow')
   const quiet = (p) => { Promise.resolve(p).catch(() => {}) }
   // A project box is the root of its own origin (boxSite): every path on that host, /home included, goes to its dsh.
@@ -1051,14 +1054,19 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log
     if (to.project && !(await projects?.isMember(email, to.project))) return page(res, 403, 'No such project, or you are not one of its members.', false)
     let target
     const key = to.project ? `project:${to.project}` : email
-    // The starting page for a person or project box that is not ready; a first set-up (no backup yet) says so.
-    const starting = async () => page(res, 503, to.project ? "Starting this project's computer. This page reloads by itself."
+    // The starting page for a person or project box that is not ready; a first set-up (no backup yet) says so. After a failed
+    // restore it says that instead, and still reloads: each reload after the failure tries the restore again.
+    const starting = async () => page(res, 503, restoreFailed.has(key) ? `${to.project ? "This project's computer" : 'Your computer'} could not be restored from its backup. The operator has been alerted.`
+      : to.project ? "Starting this project's computer. This page reloads by itself."
       : await box.firstSetUp(email).catch(() => false) ? 'Setting up your computer, about a minute. This page reloads by itself.' : 'Starting your computer. This page reloads by itself.')
     try {
       let p = pending.get(key)
       if (!p) {
         p = box.ensure(key); pending.set(key, p)
-        p.then(() => pending.delete(key), (e) => { pending.delete(key); log(JSON.stringify({ edge: 'error', user: email, project: to.project, error: e.message })) })
+        p.then(() => { pending.delete(key); restoreFailed.delete(key) }, (e) => {
+          pending.delete(key); if (e.restoreFailed) restoreFailed.add(key)
+          log(JSON.stringify({ edge: 'error', user: email, project: to.project, error: e.message }))
+        })
       }
       // A page load that waits on a box shows the starting page after cfg.pageAfterMs; reloads join the same ensure.
       target = isNavigation(req) ? await Promise.race([p, new Promise(r => setTimeout(r, cfg.pageAfterMs, SLOW).unref())]) : await p

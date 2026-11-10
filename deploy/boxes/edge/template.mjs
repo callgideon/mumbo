@@ -21,15 +21,25 @@ export function templateArgs(argv, env = process.env) {
 /** true: the founder's full sync (decision 2026-11-10), passwords and payment cards included, since browser snapshots
  *  mask password and card fields (B25). false keeps Chrome from saving or syncing them. */
 const CHROME_SENSITIVE_SYNC = true
-/** The template step that writes Google Chrome's managed policy, root-owned. Downloads land in the shared folder the
- *  assistant reads (edge roleInstructions).
- *  @param {boolean} sensitiveSync CHROME_SENSITIVE_SYNC
- *  @returns {string} the shell step */
 /** Chrome's own pages for saved passwords, payment cards, addresses and their internals, blocked for everyone in the box's
  *  Chrome (spec section 17b, B25): computer use drives Chrome without going through browser consent. The person manages
  *  passwords and cards on their own devices. */
 export const CHROME_URL_BLOCKLIST = ['chrome://password-manager', 'chrome://settings/passwords', 'chrome://settings/payments', 'chrome://settings/autofill',
   'chrome://settings/addresses', 'chrome://sync-internals', 'chrome://autofill-internals', 'chrome://password-manager-internals']
+/** The template step that fails the build unless the image's browser consent knows `deniedUrls` and the image installs
+ *  playwright-core with the masking patch (B25), so full sync never ships on an image whose snapshots show passwords:
+ *  the patch file must be listed in pnpm-workspace.yaml, and the installed bundle must carry it.
+ *  @param {string} src the image's source checkout, /src
+ *  @returns {string} the shell step */
+export const maskingGuardStep = (src = '/src') => [
+  `grep -q deniedUrls ${src}/packages/mumbo/browser-consent/src/index.ts || { echo 'mumbo-box: this image has no B25 browser consent (deniedUrls)' >&2; exit 1; }`,
+  `p=$(sed -n 's/^ *playwright-core@[^:]*: *\\(patches\\/playwright-core@[^ ]*\\.patch\\) *$/\\1/p' ${src}/pnpm-workspace.yaml) && [ -n "$p" ] && [ -f "${src}/$p" ] || { echo 'mumbo-box: pnpm-workspace.yaml lists no playwright-core patch under patches/' >&2; exit 1; }`,
+  `grep -qs maskedInjectedScriptSource ${src}/node_modules/.pnpm/playwright-core@*/node_modules/playwright-core/lib/coreBundle.js || { echo 'mumbo-box: the installed playwright-core lacks the masking patch' >&2; exit 1; }`,
+].join('; ')
+/** The template step that writes Google Chrome's managed policy, root-owned. Downloads land in the shared folder the
+ *  assistant reads (edge roleInstructions).
+ *  @param {boolean} sensitiveSync CHROME_SENSITIVE_SYNC
+ *  @returns {string} the shell step */
 export const chromePolicyStep = (sensitiveSync) => {
   const policy = { RestoreOnStartup: 1, DefaultBrowserSettingEnabled: false, MetricsReportingEnabled: false, DownloadDirectory: '/home/shared/Downloads',
     URLBlocklist: CHROME_URL_BLOCKLIST,
@@ -41,6 +51,7 @@ export const chromePolicyStep = (sensitiveSync) => {
  *  the user `browser`, and writes /usr/local/bin/google-chrome, the one way to start Chrome; the menu entry and XFCE's
  *  web browser are aimed at it here. */
 export const BOX_STEPS = [
+  ...(CHROME_SENSITIVE_SYNC ? [maskingGuardStep()] : []),
   'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google-chrome.asc && chmod go+r /etc/apt/keyrings/google-chrome.asc && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xvfb x11vnc novnc websockify xfce4-session xfwm4 xfce4-panel xfdesktop4 thunar xfce4-terminal tango-icon-theme librsvg2-common google-chrome-stable dbus-x11 xdotool wmctrl imagemagick xsel xauth fonts-noto-core fonts-noto-color-emoji fonts-noto-cjk procps && rm -rf /var/lib/apt/lists/*',
   'id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser',
   // Downloads are shared through the group shared (B24 adds the agent's users): /home/shared is root's, so no member can

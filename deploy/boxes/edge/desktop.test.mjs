@@ -9,7 +9,7 @@ import { tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { startScript, boxSite } from './edge.mjs'
-import { BOX_STEPS, chromePolicyStep } from './template.mjs'
+import { BOX_STEPS, chromePolicyStep, maskingGuardStep } from './template.mjs'
 
 const c = { llmHost: 'l', publicHost: 'boxes.x' }
 const person = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, {})
@@ -275,7 +275,7 @@ test('with Google Chrome the old Chromium profile is moved once, as browser, to 
 })
 
 test('template: Google Chrome stable from Google\'s signed amd64 repository and the XFCE desktop, in place of Chromium and openbox', () => {
-  const [install] = BOX_STEPS
+  const install = BOX_STEPS.find(s => s.startsWith('apt-get update'))
   const repo = 'echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list'
   assert.ok(at(install, 'curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google-chrome.asc') < at(install, repo))
   const packages = install.slice(at(install, repo)).match(/apt-get install -y --no-install-recommends ([^&]+) &&/)[1].trim().split(' ')
@@ -296,6 +296,32 @@ test('template: Chrome\'s managed policy file, byte for byte, read-only to the b
     assert.equal(write(chromePolicyStep(true)), `{${base}}\n`)
     // Slice 3: full sync, passwords and cards included, now that browser snapshots mask them (B25).
     assert.ok(BOX_STEPS.includes(chromePolicyStep(true)) && !BOX_STEPS.includes(chromePolicyStep(false)))
+  } finally { rmSync(t, { recursive: true, force: true }) }
+})
+
+test('template: full sync fails the build on an image without B25 consent or the installed playwright-core masking patch', () => {
+  const t = mkdtempSync(join(tmpdir(), 'guard-'))
+  const PATCH = 'patches/playwright-core@1.63.0-alpha-2026-08-31.patch'
+  const BUNDLE = 'node_modules/.pnpm/playwright-core@1.63.0-alpha-2026-08-31_patch_hash=abc/node_modules/playwright-core/lib/coreBundle.js'
+  const image = ({ consent = 'readonly deniedUrls: string[]', listed = true, patchFile = true, bundle = 'function maskedInjectedScriptSource() {}' } = {}) => {
+    rmSync(t, { recursive: true, force: true })
+    for (const [f, text] of [
+      ['packages/mumbo/browser-consent/src/index.ts', consent],
+      ['pnpm-workspace.yaml', `patchedDependencies:\n  'lexical@0.49.0': patches/lexical@0.49.0.patch\n${listed ? `  playwright-core@1.63.0-alpha-2026-08-31: ${PATCH}\n` : ''}`],
+      ...(patchFile ? [[PATCH, 'diff']] : []),
+      [BUNDLE, bundle],
+    ]) { mkdirSync(join(t, f, '..'), { recursive: true }); writeFileSync(join(t, f), text) }
+    const r = spawnSync('sh', ['-c', maskingGuardStep(t)], { encoding: 'utf8' })
+    return { code: r.status, err: r.stderr }
+  }
+  try {
+    assert.deepEqual(image(), { code: 0, err: '' })
+    assert.deepEqual([image({ consent: 'export const x = 1' }).code, image({ consent: 'export const x = 1' }).err], [1, 'mumbo-box: this image has no B25 browser consent (deniedUrls)\n'])
+    assert.match(image({ listed: false }).err, /lists no playwright-core patch/)
+    assert.match(image({ patchFile: false }).err, /lists no playwright-core patch/)
+    assert.deepEqual([image({ bundle: 'unpatched' }).code, image({ bundle: 'unpatched' }).err], [1, 'mumbo-box: the installed playwright-core lacks the masking patch\n'])
+    // Full sync is on, so the guard is the first step, before anything is installed.
+    assert.equal(BOX_STEPS[0], maskingGuardStep())
   } finally { rmSync(t, { recursive: true, force: true }) }
 })
 
