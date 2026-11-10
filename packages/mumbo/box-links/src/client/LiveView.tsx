@@ -13,9 +13,10 @@ export interface LiveViewInjected {
   readonly url: string
   /**
    * Bring Chrome to the front through the owner-only Host call; present only on the Browser tab.
+   * @param signal - aborts the call, and with it the Host's command, when the tab hides.
    * @returns the failure detail, or undefined when the Host brought Chrome to the front.
    */
-  readonly front?: () => Promise<string | undefined>
+  readonly front?: (signal: AbortSignal) => Promise<string | undefined>
 }
 
 /** Props assembled by the right Sidebar's tab seat. */
@@ -23,7 +24,8 @@ export type LiveViewProps = PropsRuntime<'sidebar.right.pane.tab'> & PropsLocale
 
 /**
  * Render the live view while the tab shows; each time a Browser tab shows, call the Host once to bring Chrome to
- * the front. A failed call shows its detail and a retry above the live view, which stays usable.
+ * the front, and abort that call when the tab hides. A failed call shows its detail and a retry above the live view,
+ * which stays usable.
  * @param props - tab information, the live view URL, the optional Host call, and copy.
  * @returns the tab body.
  */
@@ -33,10 +35,11 @@ export function LiveView({ useTabInfo, url, front, t }: LiveViewProps): ReactNod
   const [failure, setFailure] = useState<string>()
   useEffect(() => {
     if (!visible || front === undefined) return
-    let current = true
+    // Hiding the tab aborts its call, so a call nobody waits for neither raises Chrome later nor holds the Host's queue.
+    const call = new AbortController()
     setFailure(undefined)
-    void front().then((detail) => { if (current) setFailure(detail) })
-    return () => { current = false }
+    void front(call.signal).then((detail) => { if (!call.signal.aborted) setFailure(detail) })
+    return () => { call.abort() }
   }, [visible, front, attempt])
   return (
     <section className={css.root}>

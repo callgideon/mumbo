@@ -32,17 +32,20 @@ function failure(label: string, { exitCode, stderr }: Ran): Error {
  * @param config - display, window class, wmctrl executable, and deadline.
  * @param signal - aborts the call.
  * @returns after the window manager was asked to activate and maximize a Chrome window.
- * @throws Error naming the failed wmctrl command and its diagnostic, or saying that Chrome did not start in time.
+ * @throws Error naming the failed or unfinished wmctrl command, or saying that no Chrome window appeared in time.
  */
 export async function frontChrome(ctx: Context, config: BrowserConfig, signal: AbortSignal): Promise<void> {
   const env = { DISPLAY: config.display, XAUTHORITY: config.xauthority }
   const deadline = AbortSignal.timeout(config.timeoutMs)
+  // A function, so the check reads the signal again after each await rather than a narrowed earlier value.
+  const expired = (): boolean => deadline.aborted
   const bounded = AbortSignal.any([signal, deadline])
-  const timedOut = (): Error => new Error(
-    `Chrome did not start within ${String(config.timeoutMs)} ms: no window of class "${config.windowClass}" on ${config.display}`,
-  )
+  const unfinished = (args: readonly string[]): Error =>
+    new Error(`wmctrl ${args.join(' ')} did not finish within ${String(config.timeoutMs)} ms on ${config.display}`)
 
   async function wmctrl(args: readonly string[]): Promise<Ran> {
+    signal.throwIfAborted()
+    if (expired()) throw unfinished(args)
     const handle = ctx.subprocess.spawn({
       argv: [config.wmctrl, ...args], cwd: '/', env, graceMs: GRACE_MS, signal: bounded,
       stdio: { stdin: 'ignore', stdout: { maxBytes: OUTPUT_BYTES }, stderr: { maxBytes: OUTPUT_BYTES } },
@@ -51,7 +54,8 @@ export async function frontChrome(ctx: Context, config: BrowserConfig, signal: A
       throw new Error(`wmctrl could not run: ${error instanceof Error ? error.message : String(error)}`, { cause: error })
     })
     signal.throwIfAborted()
-    if (deadline.aborted) throw timedOut()
+    // A command the deadline killed names itself: a hung X server or window manager, not a missing Chrome.
+    if (outcome.signal !== null && expired()) throw unfinished(args)
     const read = (reader: typeof handle.collected.stdout): string => reader?.readFrom(0).text.trim() ?? ''
     return {
       exitCode: outcome.signal === null ? outcome.exitCode : null,
@@ -70,7 +74,8 @@ export async function frontChrome(ctx: Context, config: BrowserConfig, signal: A
     } catch (error) {
       // The sleep only rejects on abort: the caller's, or the deadline's.
       signal.throwIfAborted()
-      throw deadline.aborted ? timedOut() : error
+      if (!expired()) throw error
+      throw new Error(`Chrome did not start within ${String(config.timeoutMs)} ms: no window of class "${config.windowClass}" on ${config.display}`)
     }
   }
   const maximized = await wmctrl(['-x', '-r', config.windowClass, '-b', 'add,maximized_vert,maximized_horz'])

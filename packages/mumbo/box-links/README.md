@@ -71,7 +71,13 @@ With `browser`, the Host half registers the exact Connection route `POST /api/bo
 1. `wmctrl -x -a <windowClass>` activates the first window in the window manager's client list whose WM_CLASS matches. Activation goes through EWMH, so the window manager restores a minimized window and switches to its workspace. Exit 1 without a diagnostic means no window matches; the call then tries again every 250 ms, which covers the seconds in which the desktop's restart loop brings a closed Chrome back.
 2. `wmctrl -x -r <windowClass> -b add,maximized_vert,maximized_horz` maximizes that window.
 
-`timeoutMs` bounds the whole call. Calls run one at a time. The route answers 204 once both commands succeeded, or 500 with plain text that is also logged as a warning: `Chrome did not start within <timeoutMs> ms: no window of class "<windowClass>" on <display>` when no window matched in time, and otherwise the failed command with its diagnostic, such as `wmctrl -x -a failed (exit 1): Cannot open display.`. Unloading the plugin aborts the running command and waits for it.
+`timeoutMs` bounds the whole call. Calls run one at a time. The route answers 204 once both commands succeeded, or 500 with plain text that is also logged as a warning:
+
+- `Chrome did not start within <timeoutMs> ms: no window of class "<windowClass>" on <display>` when every attempt found no matching window until the deadline;
+- `wmctrl <arguments> did not finish within <timeoutMs> ms on <display>` when the deadline stopped a command that was still running, or came before the next one, such as with a hung X server or window manager;
+- the failed command with its diagnostic otherwise, such as `wmctrl -x -a failed (exit 1): Cannot open display.`.
+
+The Browser tab aborts its request when it hides, and the Host then aborts the call, so a hidden tab's call neither brings Chrome forward later nor holds the queue. Unloading the plugin removes the route, aborts the running command, and waits for it.
 
 The desktop the edge starts must meet these conditions:
 

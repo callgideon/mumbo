@@ -1,6 +1,6 @@
 /** The wmctrl commands that bring the desktop's Chrome window to the front, run against a fake desktop. */
 import { Context } from '@deepseek-ai/cordis'
-import type { SubprocessHandle, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
+import type { SubprocessHandle, SubprocessOutcome, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import { expect, it } from 'vitest'
 import { frontChrome } from '../src/browser.ts'
 import { Config, type BrowserConfig } from '../src/config.ts'
@@ -22,8 +22,8 @@ interface FakeWindow {
   active: boolean
 }
 
-/** A fake answer that is not a window manager's: a spawn failure, or one fixed outcome. */
-type Override = 'spawn-error' | { readonly exitCode: number; readonly stderr: string }
+/** A fake answer that is not a window manager's: a spawn failure, a command that runs until killed, or one fixed outcome. */
+type Override = 'spawn-error' | 'hang' | { readonly exitCode: number; readonly stderr: string; readonly afterMs?: number }
 
 /**
  * A desktop whose wmctrl matches `-x` targets as the real one does: the first listed window whose WM_CLASS contains
@@ -52,6 +52,20 @@ function desktop(classes: readonly string[], options: {
       })
       const override = options.override?.(spec.argv)
       if (override === 'spawn-error') return { done: Promise.reject(new Error('spawn wmctrl ENOENT')), collected: {} }
+      if (override === 'hang') {
+        // A wmctrl blocked on a stopped X server exits only when its signal kills it.
+        const done = new Promise<SubprocessOutcome>((resolve) => {
+          spec.signal!.addEventListener('abort', () => { resolve({ exitCode: null, signal: 'SIGTERM' }) })
+        })
+        return { done, collected: { stdout: reader(''), stderr: reader('') } }
+      }
+      if (override?.afterMs !== undefined) {
+        // A command that ignores its signal and exits normally once `afterMs` has passed.
+        const done = new Promise<SubprocessOutcome>((resolve) => {
+          setTimeout(() => { resolve({ exitCode: override.exitCode, signal: null }) }, override.afterMs)
+        })
+        return { done, collected: { stdout: reader(''), stderr: reader(override.stderr) } }
+      }
       if (override !== undefined) return answer(override.exitCode, override.stderr)
       show()
       const [, , action, target] = spec.argv
@@ -131,4 +145,38 @@ it.each([
   const h = desktop([CHROME], { override })
   await expect(frontChrome(h.ctx, BROWSER, new AbortController().signal)).rejects.toThrow(message)
   expect(h.argv()).toEqual(argv)
+})
+
+it.each([
+  ['an activation', (argv: readonly string[]) => argv[2] === '-a' ? 'hang' as const : undefined,
+    `${ACTIVATE} did not finish within 300 ms on :1`, [ACTIVATE]],
+  ['a maximize after the window was activated', (argv: readonly string[]) => argv[2] === '-r' ? 'hang' as const : undefined,
+    `${MAXIMIZE} did not finish within 300 ms on :1`, [ACTIVATE, MAXIMIZE]],
+])('names %s that the deadline stopped, rather than a missing Chrome', async (_case, override, message, argv) => {
+  const h = desktop([CHROME], { override })
+  await expect(frontChrome(h.ctx, { ...BROWSER, timeoutMs: 300 }, new AbortController().signal)).rejects.toThrow(message)
+  expect(h.argv()).toEqual(argv)
+  expect(h.spawns.at(-1)!.signal!.aborted).toBe(true)
+})
+
+it('names the maximize when the deadline passed before it could start', async () => {
+  const h = desktop([CHROME], { override: argv => argv[2] === '-a' ? { exitCode: 0, stderr: '', afterMs: 400 } : undefined })
+  await expect(frontChrome(h.ctx, { ...BROWSER, timeoutMs: 300 }, new AbortController().signal))
+    .rejects.toThrow(`${MAXIMIZE} did not finish within 300 ms on :1`)
+  expect(h.argv()).toEqual([ACTIVATE])
+})
+
+it.each([
+  ['a running command', (argv: readonly string[]) => argv[2] === '-a' ? 'hang' as const : undefined],
+  ['the wait between attempts', undefined],
+])('stops at %s once the caller aborts, and runs nothing more', async (_case, override) => {
+  const h = desktop([TERMINAL], override === undefined ? {} : { override })
+  const caller = new AbortController()
+  const call = frontChrome(h.ctx, BROWSER, caller.signal)
+  await expect.poll(() => h.spawns.length).toBe(1)
+  await new Promise((resolve) => { setTimeout(resolve, 20) })
+  caller.abort()
+  await expect(call).rejects.toThrow('This operation was aborted')
+  expect(h.spawns[0]!.signal!.aborted).toBe(true)
+  expect(h.argv()).toEqual([ACTIVATE])
 })

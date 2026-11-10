@@ -4,7 +4,7 @@
  * Chrome's window to the front for the owner and answers a member 403 before any command runs.
  */
 import { randomBytes } from 'node:crypto'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -17,7 +17,7 @@ import RemoteAccessService from '@deepseek-ai/dsh-api-remote-access'
 import { loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
 import * as Connection from '@deepseek-ai/dsh-client-connection'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
-import type { SubprocessHandle, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
+import type { SubprocessHandle, SubprocessOutcome, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
 import * as EdgeMember from '@mumbo/edge-member'
 import { expect, it, onTestFinished, vi } from 'vitest'
@@ -78,13 +78,23 @@ it.each([
   expect(page).toContain(`<script>globalThis["__MUMBO_BOX_LINKS__"] = ${links}</script>`)
 })
 
-/** A person box Host whose subprocess service plays a desktop's wmctrl, with or without a Chrome window. */
-async function personBox(chromeShows = true) {
+/**
+ * A person box Host whose subprocess service plays a desktop's wmctrl: with a Chrome window, without one, or with a
+ * hung X server whose wmctrl exits 50 ms after its signal aborts it.
+ */
+async function personBox(desktop: 'chrome' | 'empty' | 'hung' = 'chrome') {
   const key = randomBytes(32)
   vi.stubEnv('MUMBO_MEMBER_KEY', key.toString('base64url'))
+  // The Loader writes entry state back to its file, such as `disabled` after an unload, so it reads a copy.
+  const directory = await mkdtemp(join(tmpdir(), 'mumbo-box-links-'))
+  const configPath = join(directory, 'cordis.yml')
+  await copyFile(fileURLToPath(new URL('./fixtures/cordis.yml', import.meta.url)), configPath)
   const ctx = new Context()
   onTestFinished(async () => {
-    try { await ctx.fiber.dispose() } finally { vi.unstubAllEnvs() }
+    try { await ctx.fiber.dispose() } finally {
+      vi.unstubAllEnvs()
+      await rm(directory, { recursive: true, force: true })
+    }
   })
   const records = new Map<unknown, unknown>()
   ctx.provide('credentials', {
@@ -97,18 +107,25 @@ async function personBox(chromeShows = true) {
   ctx.provide('workspaceRegistry', { list: () => [] } as never)
   ctx.provide('sessions', { list: () => [], get: () => undefined } as never)
   const commands: string[] = []
+  const signals: AbortSignal[] = []
+  let exited = 0
   ctx.provide('subprocess', {
     spawn: (spec: SubprocessSpawnSpec): Partial<SubprocessHandle> => {
       commands.push(spec.argv.join(' '))
+      signals.push(spec.signal!)
       const reader = (text: string) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
-      return {
+      const done = desktop === 'hung'
+        ? new Promise<SubprocessOutcome>((resolve) => {
+          spec.signal!.addEventListener('abort', () => {
+            setTimeout(() => { exited += 1; resolve({ exitCode: null, signal: 'SIGTERM' }) }, 50)
+          })
+        })
         // Each command takes a moment, so calls that arrive together overlap unless the route orders them.
-        done: new Promise((resolve) => { setTimeout(() => { resolve({ exitCode: chromeShows ? 0 : 1, signal: null }) }, 25) }),
-        collected: { stdout: reader(''), stderr: reader('') },
-      }
+        : new Promise<SubprocessOutcome>((resolve) => { setTimeout(() => { resolve({ exitCode: desktop === 'chrome' ? 0 : 1, signal: null }) }, 25) })
+      return { done, collected: { stdout: reader(''), stderr: reader('') } }
     },
   } as never)
-  await boot(ctx, fileURLToPath(new URL('./fixtures/cordis.yml', import.meta.url)), new Map<string, object>([
+  await boot(ctx, configPath, new Map<string, object>([
     ['@deepseek-ai/dsh-typert-registry', TypertRegistry],
     ['@deepseek-ai/dsh-api-remote-access', RemoteAccessService],
     ['@deepseek-ai/dsh-api-gateway', TypertGatewayService],
@@ -131,7 +148,7 @@ async function personBox(chromeShows = true) {
     return { cookie: setCookie!.split(';', 1)[0]! }
   }
   const member = (): Record<string, string> => ({ 'x-mumbo-member': EdgeMember.signMemberHeader(key, 'ann@example.com', Math.floor(Date.now() / 1000) + 300) })
-  return { ctx, commands, post, owner, member }
+  return { ctx, commands, signals, exited: () => exited, post, owner, member }
 }
 
 const ACTIVATE = 'wmctrl -x -a chrom'
@@ -156,9 +173,27 @@ it('brings Chrome to the front for the owner, one call after the other when two 
 })
 
 it('answers the owner 500 when no Chrome window appears within the timeout', { timeout: 60_000 }, async () => {
-  const box = await personBox(false)
+  const box = await personBox('empty')
   const response = await box.post(box.owner())
   expect(response.status).toBe(500)
   expect(await response.text()).toBe('Chrome did not start within 600 ms: no window of class "chrom" on :1')
   expect(new Set(box.commands)).toEqual(new Set([ACTIVATE]))
+})
+
+it('removes the route on unload, after aborting the running command and waiting for it to exit', { timeout: 60_000 }, async () => {
+  const box = await personBox('hung')
+  const cookie = box.owner()
+  const pending = box.post(cookie)
+  await expect.poll(() => box.commands).toEqual([ACTIVATE])
+  const entry = [...box.ctx.loader.entries()].find(row => row.options.id === 'box-links')!
+  await entry.fiber!.dispose()
+  // The command exits 50 ms after its abort; unload returns only after it did.
+  expect(box.signals[0]!.aborted).toBe(true)
+  expect(box.exited()).toBe(1)
+  const response = await pending
+  expect(response.status).toBe(500)
+  expect(await response.text()).toBe('This operation was aborted')
+  const after = await box.post(cookie)
+  expect(after.status).toBe(404)
+  expect(box.commands).toEqual([ACTIVATE])
 })

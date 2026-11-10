@@ -136,7 +136,7 @@ it('calls the Host once each time the Browser tab shows, beside the same live vi
 
 it('reports a failed call above the live view and calls again on retry', async () => {
   const answers = [
-    async () => new Response('xdotool search failed (exit 1): Error: Can\'t open display: :1', { status: 500 }),
+    async () => new Response('wmctrl -x -a failed (exit 1): Cannot open display.', { status: 500 }),
     async () => { throw new TypeError('Failed to fetch') },
     async () => new Response(null, { status: 403 }),
     async () => new Response(null, { status: 204 }),
@@ -144,7 +144,7 @@ it('reports a failed call above the live view and calls again on retry', async (
   const h = await mount({ home: HOME, desktop: DESKTOP, browser: true }, () => answers.shift()!())
   h.open(BROWSER_KIND)
   const alert = await h.view.findByRole('alert')
-  expect(alert.textContent).toContain('Chrome could not be brought to the front: xdotool search failed (exit 1): Error: Can\'t open display: :1')
+  expect(alert.textContent).toContain('Chrome could not be brought to the front: wmctrl -x -a failed (exit 1): Cannot open display.')
   expect(h.frames()).toHaveLength(1)
   fireEvent.click(h.view.getByRole('button', { name: 'Try again' }))
   await waitFor(() => { expect(h.view.getByRole('alert').textContent).toContain('front: Failed to fetch') })
@@ -154,6 +154,25 @@ it('reports a failed call above the live view and calls again on retry', async (
   await waitFor(() => { expect(h.view.queryByRole('alert')).toBeNull() })
   expect(h.fetch).toHaveBeenCalledTimes(4)
   expect(h.frames()).toHaveLength(1)
+})
+
+it('aborts the Host call when the tab hides, and ignores the answer that arrives later', async () => {
+  const late = Promise.withResolvers<Response>()
+  const answers = [() => late.promise, async () => new Response(null, { status: 204 })]
+  const h = await mount({ home: HOME, desktop: DESKTOP, browser: true }, () => answers.shift()!())
+  h.open(BROWSER_KIND)
+  await waitFor(() => { expect(h.fetch).toHaveBeenCalledTimes(1) })
+  const signal = h.fetch.mock.calls[0]![1]!.signal!
+  expect(signal.aborted).toBe(false)
+  // A collapsed panel keeps the body mounted but hidden, so a late answer could still reach its state.
+  act(() => { h.controller.toggleExpanded() })
+  expect(signal.aborted).toBe(true)
+  await act(async () => { late.resolve(new Response('wmctrl -x -a failed (exit 1): Cannot open display.', { status: 500 })) })
+  expect(h.container.querySelector('[role="alert"]')).toBeNull()
+  act(() => { h.controller.toggleExpanded() })
+  await waitFor(() => { expect(h.fetch).toHaveBeenCalledTimes(2) })
+  expect(h.fetch.mock.calls[1]![1]!.signal!.aborted).toBe(false)
+  expect(h.container.querySelector('[role="alert"]')).toBeNull()
 })
 
 it('yields the Browser kind to an extension-band registration and falls back to the live view when it leaves', async () => {

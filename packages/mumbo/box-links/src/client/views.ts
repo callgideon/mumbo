@@ -37,17 +37,18 @@ export function viewDefinitions(t: TranslateNS<'boxLinks'>): { desktop: SidebarR
 
 /**
  * POST the owner-only Host call that brings Chrome to the front.
+ * @param signal - aborts the request; the Host then aborts its command.
  * @returns the failure detail, or undefined on success.
  */
-async function frontChrome(): Promise<string | undefined> {
+async function frontChrome(signal: AbortSignal): Promise<string | undefined> {
   try {
     // Document-relative, so a page served under a path prefix reaches its own Host.
-    const response = await fetch(BROWSER_FRONT_PATH.slice(1), { method: 'POST' })
+    const response = await fetch(BROWSER_FRONT_PATH.slice(1), { method: 'POST', signal })
     if (response.ok) return undefined
     const text = (await response.text()).trim()
     return text === '' ? `HTTP ${String(response.status)}` : text
   } catch (error) {
-    // The request never reached the Host: offline, or the page is unloading.
+    // The request did not complete: offline, the page is unloading, or the tab hid and aborted it.
     return error instanceof Error ? error.message : String(error)
   }
 }
