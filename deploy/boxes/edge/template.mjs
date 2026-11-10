@@ -46,13 +46,29 @@ export const chromePolicyStep = (sensitiveSync) => {
     ...(sensitiveSync ? {} : { SyncTypesListDisabled: ['passwords', 'payments'], PasswordManagerEnabled: false, AutofillCreditCardEnabled: false }) }
   return `install -d -m 0755 /etc/opt/chrome/policies/managed && printf '%s\\n' '${JSON.stringify(policy)}' > /etc/opt/chrome/policies/managed/mumbo.json && chmod 0644 /etc/opt/chrome/policies/managed/mumbo.json`
 }
-/** The user's box is their computer: a virtual display, the XFCE desktop, Google Chrome stable from Google's apt
- *  repository (each build installs the current release) and the noVNC live view. The edge's start script runs them as
- *  the user `browser`, and writes /usr/local/bin/google-chrome, the one way to start Chrome; the menu entry and XFCE's
- *  web browser are aimed at it here. */
+/** KasmVNC, the desktop's display and live view: its Debian bookworm amd64 release package (the web image is
+ *  node:24-bookworm), pinned by version and sha256. Update both together (RUNBOOK "Person box desktop and Google Chrome"). */
+export const KASMVNC = { version: '1.5.2', sha256: '5f4bfda43e89178782eac37ae463b1d95d16ac5e45da8b7989ec75404e764993' }
+/** The template step that installs KasmVNC from its GitHub release, failing the build unless the download has the
+ *  pinned sha256. It also caps the screen size the web client asks for at 1600x900: KasmVNC has no server-side limit,
+ *  and the client sizes the screen to the element the added style limits (`#noVNC_container>div`). The step fails when
+ *  the style is not in both entry pages.
+ *  @param {{ version: string, sha256: string }} pin KASMVNC
+ *  @returns {string} the shell step */
+export const kasmvncStep = ({ version, sha256 } = KASMVNC) => {
+  const name = `kasmvncserver_debian_bookworm_${version}_amd64.deb`, deb = `/tmp/${name}`
+  const style = '<style>#noVNC_container>div{max-width:1600px;max-height:900px}</style>'
+  const pages = '/usr/share/kasmvnc/www/index.html /usr/share/kasmvnc/www/vnc.html'
+  return `curl -fsSL -o ${deb} https://github.com/kasmtech/KasmVNC/releases/download/v${version}/${name} && echo "${sha256}  ${deb}" | sha256sum -c - && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${deb} && rm -rf ${deb} /var/lib/apt/lists/* && sed -i 's|</head>|${style}</head>|' ${pages} && for f in ${pages}; do grep -qF '${style}' "$f" || { echo "mumbo-box: no screen cap in $f" >&2; exit 1; }; done`
+}
+/** The user's box is their computer: KasmVNC's display and live view, the XFCE desktop and Google Chrome stable from
+ *  Google's apt repository (each build installs the current release). The edge's start script runs them as the user
+ *  `browser`, and writes /usr/local/bin/google-chrome, the one way to start Chrome; the menu entry and XFCE's web browser
+ *  are aimed at it here. */
 export const BOX_STEPS = [
   ...(CHROME_SENSITIVE_SYNC ? [maskingGuardStep()] : []),
-  'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google-chrome.asc && chmod go+r /etc/apt/keyrings/google-chrome.asc && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xvfb x11vnc novnc websockify xfce4-session xfwm4 xfce4-panel xfdesktop4 thunar xfce4-terminal tango-icon-theme librsvg2-common google-chrome-stable dbus-x11 xdotool wmctrl imagemagick xsel xauth fonts-noto-core fonts-noto-color-emoji fonts-noto-cjk procps && rm -rf /var/lib/apt/lists/*',
+  'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google-chrome.asc && chmod go+r /etc/apt/keyrings/google-chrome.asc && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xfce4-session xfwm4 xfce4-panel xfdesktop4 thunar xfce4-terminal tango-icon-theme librsvg2-common google-chrome-stable dbus-x11 xdotool wmctrl imagemagick xsel xauth fonts-noto-core fonts-noto-color-emoji fonts-noto-cjk procps && rm -rf /var/lib/apt/lists/*',
+  kasmvncStep(),
   'id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser',
   // Downloads are shared through the group shared (B24 adds the agent's users): /home/shared is root's, so no member can
   // replace the folder itself. The browser's home stays its own.

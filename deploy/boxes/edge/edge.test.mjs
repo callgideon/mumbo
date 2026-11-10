@@ -467,9 +467,13 @@ test('MCP endpoint on the model host: box token required, tools act as the token
   } finally { server.close() }
 })
 
-test('desktop live view: /desktop/ goes to the box\'s noVNC port, everything else to dsh', async () => {
+test('desktop live view: /desktop/ goes to the box\'s desktop port, everything else to dsh', async () => {
   const { boxRoute } = await import('./edge.mjs')
-  assert.match(boxRoute('/desktop').redirect, /^\/desktop\/vnc\.html\?.*path=desktop\/websockify/)
+  // vnc.html is KasmVNC's web client and noVNC's (a template before KasmVNC); both read these from the query. The
+  // WebSocket path keeps the /desktop prefix, and show_control_bar keeps KasmVNC's clipboard and remote resize on in a frame.
+  assert.equal(boxRoute('/desktop').redirect, '/desktop/vnc.html?autoconnect=1&resize=remote&path=desktop/websockify&show_control_bar=1')
+  assert.deepEqual(boxRoute('/desktop/vnc.html?autoconnect=1'), { port: '6080', path: '/vnc.html?autoconnect=1', base: '' })
+  assert.deepEqual(boxRoute('/desktop/assets/ui-DKMQOe2K.js'), { port: '6080', path: '/assets/ui-DKMQOe2K.js', base: '' })
   // A former-host redirect adds its marker query (prod/modules/edge/edge.tf old_hosts).
   for (const url of ['/desktop/?moved=1&', '/desktop?moved=1&']) assert.equal(boxRoute(url).redirect, boxRoute('/desktop/').redirect, url)
   assert.deepEqual(boxRoute('/desktop/websockify'), { port: '6080', path: '/websockify', base: '' })

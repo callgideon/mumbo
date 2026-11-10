@@ -3,13 +3,14 @@
 // through sh in a temporary root with fake XFCE, D-Bus and Chrome programs, and only those on PATH.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { createHash } from 'node:crypto'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { startScript, boxSite } from './edge.mjs'
-import { BOX_STEPS, chromePolicyStep, maskingGuardStep } from './template.mjs'
+import { BOX_STEPS, KASMVNC, chromePolicyStep, kasmvncStep, maskingGuardStep } from './template.mjs'
 
 const c = { llmHost: 'l', publicHost: 'boxes.x' }
 const person = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, {})
@@ -17,7 +18,7 @@ const at = (text, needle) => { const i = text.indexOf(needle); assert.ok(i >= 0,
 /** The body the start script writes to `path` with a quoted heredoc. */
 const heredoc = (path) => { const head = `cat > ${path} <<'SH'\n`; const i = at(person, head) + head.length; return person.slice(i, person.indexOf('\nSH\n', i) + 1) }
 /** The whole desktop block, run as start.sh runs it (`set -eu`, `$ip` set); it appends `reached` to log/dsh when dsh's start would run. */
-const block = () => `set -eu\nip=127.0.0.1\n${person.slice(at(person, 'if id browser >/dev/null 2>&1; then'), person.indexOf('\nfi\n', at(person, 'websockify --web')) + 4)}echo reached >> /tmp/dsh\n`
+const block = () => `set -eu\nip=127.0.0.1\n${person.slice(at(person, 'if id browser >/dev/null 2>&1; then'), person.indexOf('\nfi\n', at(person, '/usr/local/bin/mumbo-browser >/tmp/chrome.log')) + 4)}echo reached >> /tmp/dsh\n`
 /** The test's own user stands in for browser, and one of its supplementary groups, if any, for shared. */
 const USER = userInfo().username
 const GROUP = execFileSync('id', ['-Gn'], { encoding: 'utf8' }).trim().split(' ')[1]
@@ -25,18 +26,19 @@ const GROUP = execFileSync('id', ['-Gn'], { encoding: 'utf8' }).trim().split(' '
 const VERSION = '[ "$1" = --version ] && { echo "Google Chrome 142.0.7444.59 "; exit; }\n'
 const REAL = ['sleep', 'pgrep', 'rm', 'grep', 'head', 'sort', 'tail', 'date', 'mv', 'cat', 'chmod', 'mkdir', 'touch', 'wc', 'nohup', 'install', 'rmdir', 'chgrp', 'find']
 
-/** A temporary root: box paths moved under it, a private debugging port, and PATH holding only fakes and REAL tools. */
+/** A temporary root: box paths moved under it, a private debugging port, process checks that see only its own fakes,
+ *  and PATH holding only fakes and REAL tools. */
 function box() {
   const t = mkdtempSync(join(tmpdir(), 'desktop-'))
   const port = String(20000 + Math.floor(Math.random() * 40000))
-  for (const d of ['bin', 'fake', 'home', 'log', 'root', 'outside', 'shared']) mkdirSync(join(t, d))
+  for (const d of ['bin', 'fake', 'home', 'log', 'root', 'outside', 'shared', 'run']) mkdirSync(join(t, d))
   for (const tool of REAL) symlinkSync(execFileSync('sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).trim(), join(t, 'fake', tool))
   const groups = []
   const b = {
     t, port,
     /** Box paths moved under t; `as` is the user that stands in for browser. */
-    local: (text, as = USER) => text.replaceAll('/tmp/', `${t}/log/`).replaceAll('/etc/', `${t}/etc/`).replaceAll('/root/', `${t}/root/`).replaceAll('/usr/local/bin/', `${t}/bin/`).replaceAll('/home/browser/', `${t}/home/`).replaceAll('/home/shared', `${t}/shared`)
-      .replaceAll('remote-debugging-port=9222', `remote-debugging-port=${port}`).replaceAll('pgrep -f websockify', `pgrep -f ${t}/fake/websockify`).replaceAll('-u browser', `-u ${as}`).replaceAll('"$(id -un)" = browser', `"$(id -un)" = ${as}`).replaceAll('chgrp -hR shared', `chgrp -hR ${GROUP ?? USER}`),
+    local: (text, as = USER) => text.replaceAll('/tmp/', `${t}/log/`).replaceAll('/etc/', `${t}/etc/`).replaceAll('/root/', `${t}/root/`).replaceAll('/usr/local/bin/', `${t}/bin/`).replaceAll('/home/browser/', `${t}/home/`).replaceAll('/home/shared', `${t}/shared`).replaceAll('/run/x11', `${t}/run/x11`)
+      .replaceAll('remote-debugging-port=9222', `remote-debugging-port=${port}`).replaceAll('pgrep -f websockify', `pgrep -f ${t}/fake/websockify`).replace(/pgrep -x (Xkasmvnc|Xvfb|x11vnc)/g, `pgrep -f ${t}/fake/$1`).replaceAll('-u browser', `-u ${as}`).replaceAll('"$(id -un)" = browser', `"$(id -un)" = ${as}`).replaceAll('chgrp -hR shared', `chgrp -hR ${GROUP ?? USER}`),
     fake: (name, body) => { rmSync(join(t, 'fake', name), { force: true }); writeFileSync(join(t, 'fake', name), `#!/bin/sh\n${body}\n`); chmodSync(join(t, 'fake', name), 0o755) },
     /** Runs sh text from a file, as the box runs start.sh, in its own process group, which done() kills with everything it
      *  started. */
@@ -60,7 +62,9 @@ function box() {
   b.fake('id', `[ "$*" = browser ] && exit 0; exec ${execFileSync('sh', ['-c', 'command -v id'], { encoding: 'utf8' }).trim()} "$@"`)
   b.fake('su', 'export SHELL="$3"; exec /bin/sh -c "$5"')
   b.fake('iptables', 'exit 0')
-  for (const name of ['Xvfb', 'x11vnc', 'websockify']) b.fake(name, 'sleep 30')
+  // KasmVNC's server logs its arguments; the stack of a template before it logs its name.
+  b.fake('Xkasmvnc', `echo "$*" >> ${t}/log/xvnc; sleep 30`)
+  for (const name of ['Xvfb', 'x11vnc', 'websockify']) b.fake(name, `echo "${name} $*" >> ${t}/log/old; sleep 30`)
   return b
 }
 
@@ -72,9 +76,64 @@ test('person start script: XFCE as browser on :1 with bash as its shell, Chrome 
   assert.ok(heredoc('/usr/local/bin/mumbo-browser').startsWith('#!/bin/sh\nchmod 0700 /home/browser/\nif [ -d /home/browser/Downloads ] && [ ! -L /home/browser/Downloads ] && [ -d /home/shared/Downloads ]; then\n'))
   assert.equal(heredoc('/usr/local/bin/google-chrome'), '#!/bin/sh\nb=$(command -v google-chrome-stable) && p=/home/browser/chrome-profile || { b=chromium; p=/home/browser/profile; }\n[ "$(id -un)" = browser ] || exec "$b" "$@"\nexec "$b" --user-data-dir=$p --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --no-first-run --no-default-browser-check --password-store=basic --start-maximized "$@"\n')
   assert.ok(at(person, 'export XAUTHORITY=/run/x11/auth') < at(person, 'su browser -s /bin/sh -c \'SHELL=/bin/bash DISPLAY=:1 /usr/local/bin/mumbo-desktop'))
-  assert.ok(at(person, 'Xvfb :1') < at(person, 'DISPLAY=:1 /usr/local/bin/mumbo-desktop') && at(person, 'DISPLAY=:1 /usr/local/bin/mumbo-browser') < at(person, 'x11vnc -display :1'))
+  // The display server, KasmVNC's or the older template's, starts before the desktop session and the browser.
+  for (const server of ['Xkasmvnc :1', 'Xvfb :1', 'x11vnc -display :1']) assert.ok(at(person, server) < at(person, 'DISPLAY=:1 /usr/local/bin/mumbo-desktop'), server)
   assert.ok(person.includes('127.0.0.1:5900 >/root/websockify.log 2>&1 &\n'), 'root logs to its own directory, not to a /tmp name browser can plant')
   assert.ok(!person.includes('DISPLAY=:1 chromium') && !person.includes('DISPLAY=:1 openbox'), 'the browser and window manager start only through their loops')
+  // No WebGL fallback (spec "No WebGL fallback"): Chrome never gets SwiftShader.
+  assert.ok(!/swiftshader/i.test(person))
+})
+
+/** The arguments the start script gives KasmVNC on a box with the X cookie at `auth` and address 127.0.0.1, flag by flag. */
+const xvncArgs = (auth) => [
+  [':1'],
+  ['-auth', auth],  // only cookie holders (browser, root) reach :1, as with Xvfb
+  ['-geometry', '1600x900'], ['-depth', '24'],  // the cap is also the size before a viewer resizes; Chrome needs 24 bits
+  ['-nolisten', 'tcp'],  // X itself on its local socket only
+  ['-interface', '127.0.0.1'], ['-websocketPort', '6080'],  // the box address and port websockify used, which the edge reaches
+  ['-httpd', '/usr/share/kasmvnc/www'],  // its web client at /
+  ['-DisableBasicAuth'], ['-sslOnly=0'], ['-SecurityTypes', 'None'],  // its own login, TLS and VNC password off: the edge is the gate
+  ['-PublicIP', '127.0.0.1'],  // no STUN query at start
+  ['-FrameRate', '30'], ['-RectThreads', '2'], ['-IgnoreClientSettingsKasm'],  // a viewer cannot raise the frame rate
+  ['-DLP_ClipTypes', 'text/plain'], ['-DLP_ClipSendMax', '262144'], ['-DLP_ClipAcceptMax', '262144'], ['-DLP_ClipDelay', '500'],  // text only, limited
+].flat().join(' ')
+
+test('KasmVNC runs as browser on :1 with the X cookie and each flag, once per re-run, and no part of the older stack starts', async () => {
+  const b = box()
+  try {
+    b.fake('xauth', 'printf cookie > "$3"'); b.fake('mcookie', 'echo 0123'); b.fake('chown', 'exit 0')
+    b.fake('Xkasmvnc', `echo "$* [$XAUTHORITY]" >> ${b.t}/log/xvnc; sleep 30`)
+    b.fake('startxfce4', 'sleep 30'); b.fake('google-chrome-stable', `${VERSION}sleep 30`)
+    b.run(b.local(block()))
+    await sleep(1500)
+    b.run(b.local(block()))
+    await sleep(1500)
+    assert.deepEqual(b.lines('xvnc'), [`${xvncArgs(`${b.t}/run/x11/auth`)} [${b.t}/run/x11/auth]`])
+    assert.equal(readFileSync(join(b.t, 'run/x11/auth'), 'utf8'), 'cookie')
+    assert.deepEqual([b.lines('old'), b.lines('dsh')], [[], ['reached', 'reached']])
+  } finally { b.done() }
+})
+
+test('the RUNBOOK\'s desktop section names the pinned KasmVNC, every flag the start script gives it with its value, and the measurements', () => {
+  const runbook = readFileSync(new URL('../RUNBOOK.md', import.meta.url), 'utf8')
+  const section = runbook.slice(at(runbook, '### Person box desktop and Google Chrome\n'), runbook.indexOf('\n### ', at(runbook, '### Person box desktop and Google Chrome\n')))
+  const line = person.slice(at(person, 'Xkasmvnc :1 '), person.indexOf(' >/tmp/xvnc.log', at(person, 'Xkasmvnc :1 ')))
+  // Each flag with its value, if it takes one: `-FrameRate 30`, `-DisableBasicAuth`.
+  const flags = line.match(/-\S+(?: [^-\s]\S*)?/g)
+  assert.equal(flags.length, 17)
+  for (const needle of [KASMVNC.version, KASMVNC.sha256, '-auth /run/x11/auth', ...flags, 'Selkies 2.x', 'Keypress to glyph', 'Idle CPU', 'Frame rate', 'Updating KasmVNC']) assert.ok(section.includes(needle), needle)
+})
+
+test('a template before KasmVNC runs Xvfb, x11vnc and websockify with noVNC, as before', async () => {
+  const b = box()
+  try {
+    rmSync(join(b.t, 'fake/Xkasmvnc'))
+    b.fake('startxfce4', 'sleep 30'); b.fake('google-chrome-stable', `${VERSION}sleep 30`)
+    b.run(b.local(block()))
+    await sleep(1500)
+    assert.deepEqual(b.lines('old').sort(), ['Xvfb :1 -screen 0 1440x900x24 -nolisten tcp', 'websockify --web /usr/share/novnc 127.0.0.1:6080 127.0.0.1:5900', 'x11vnc -display :1 -localhost -forever -shared -nopw -rfbport 5900 -quiet'])
+    assert.deepEqual([b.lines('xvnc'), b.lines('dsh')], [[], ['reached']])
+  } finally { b.done() }
 })
 
 test('the desktop session runs XFCE with xfwm4 compositing off, on its own D-Bus (none left from an earlier start), and starts again after it ends', async () => {
@@ -153,11 +212,12 @@ test('a re-run starts no second desktop session, browser loop or Chrome, and rea
     b.fake('startxfce4', `echo "start $SHELL" >> ${b.t}/log/xfce; sleep 30`)
     b.fake('google-chrome-stable', `${VERSION}echo start >> ${b.t}/log/chrome; sleep 30`)
     b.run(b.local(block()))
-    await sleep(1000)
+    await sleep(2000)
     b.run(b.local(block()))
-    await sleep(1000)
+    await sleep(1500)
     assert.equal(b.count(`${b.t}/bin/mumbo-desktop`), 1)
     assert.equal(b.count(`${b.t}/bin/mumbo-browser`), 1)
+    assert.equal(b.count(`${b.t}/fake/Xkasmvnc`), 1)
     assert.deepEqual([b.lines('xfce'), b.lines('chrome'), b.lines('dsh')], [['start /bin/bash'], ['start'], ['reached', 'reached']])
   } finally { b.done() }
 })
@@ -173,7 +233,7 @@ test('root\'s part of the desktop block writes nothing under /home/browser, and 
       plant(b)
       const before = readdirSync(join(b.t, 'home')).sort()
       b.run(b.local(block()))
-      await sleep(1000)
+      await sleep(1500)
       assert.deepEqual([readdirSync(join(b.t, 'outside')), readFileSync(join(b.t, 'outside/keep'), 'utf8'), statSync(join(b.t, 'outside')).mode & 0o777], [['keep'], 'keep', 0o700], 'outside unchanged')
       assert.deepEqual(b.lines('dsh'), ['reached'])
       return { before, after: readdirSync(join(b.t, 'home')).sort() }
@@ -197,7 +257,7 @@ test('root repairs /home/shared/Downloads as browser:shared 2770, never through 
       b.fake('install', `echo "$*" >> ${b.t}/log/install`)
       plant(b)
       b.run(b.local(block()))
-      await sleep(700)
+      await sleep(1500)
       assert.deepEqual(b.lines('dsh'), ['reached'])
       return b.lines('install').map(l => l.replaceAll(b.t, 'T'))
     } finally { b.done() }
@@ -279,10 +339,48 @@ test('template: Google Chrome stable from Google\'s signed amd64 repository and 
   const repo = 'echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list'
   assert.ok(at(install, 'curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google-chrome.asc') < at(install, repo))
   const packages = install.slice(at(install, repo)).match(/apt-get install -y --no-install-recommends ([^&]+) &&/)[1].trim().split(' ')
-  for (const p of ['google-chrome-stable', 'xfce4-session', 'xfwm4', 'xfce4-panel', 'xfdesktop4', 'thunar', 'xfce4-terminal', 'tango-icon-theme', 'librsvg2-common', 'dbus-x11', 'xdotool', 'wmctrl', 'xauth', 'xvfb', 'x11vnc', 'novnc', 'websockify']) assert.ok(packages.includes(p), p)
-  for (const p of ['chromium', 'openbox', 'xfce4']) assert.ok(!packages.includes(p), p)
+  for (const p of ['google-chrome-stable', 'xfce4-session', 'xfwm4', 'xfce4-panel', 'xfdesktop4', 'thunar', 'xfce4-terminal', 'tango-icon-theme', 'librsvg2-common', 'dbus-x11', 'xdotool', 'wmctrl', 'xauth']) assert.ok(packages.includes(p), p)
+  // KasmVNC (its own step) replaces the virtual display, the VNC server, the WebSocket proxy and the web client.
+  for (const p of ['chromium', 'openbox', 'xfce4', 'xvfb', 'x11vnc', 'novnc', 'websockify']) assert.ok(!packages.includes(p), p)
+  assert.equal(BOX_STEPS[BOX_STEPS.indexOf(install) + 1], kasmvncStep(), 'KasmVNC is installed once curl is')
   assert.ok(BOX_STEPS.includes('id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser'))
   assert.ok(BOX_STEPS.indexOf('id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser') < BOX_STEPS.indexOf('groupadd -f shared && usermod -aG shared browser && chmod 0700 /home/browser && install -d -m 0755 /home/shared && install -d -o browser -g shared -m 2770 /home/shared/Downloads'))
+})
+
+test('template: KasmVNC 1.5.2 or later from its release, installed only when the download has the pinned sha256, with the screen cap in both entry pages', () => {
+  assert.deepEqual(KASMVNC, { version: '1.5.2', sha256: '5f4bfda43e89178782eac37ae463b1d95d16ac5e45da8b7989ec75404e764993' })
+  // 1.5.1 and 1.5.2 fixed a web-server path traversal (CVE-2024-38449) and a WebSocket handshake overflow.
+  const [major, minor, patch] = KASMVNC.version.split('.').map(Number)
+  assert.ok(major > 1 || (major === 1 && (minor > 5 || (minor === 5 && patch >= 2))), KASMVNC.version)
+  assert.ok(kasmvncStep().startsWith('curl -fsSL -o /tmp/kasmvncserver_debian_bookworm_1.5.2_amd64.deb https://github.com/kasmtech/KasmVNC/releases/download/v1.5.2/kasmvncserver_debian_bookworm_1.5.2_amd64.deb && echo "5f4bfda43e89178782eac37ae463b1d95d16ac5e45da8b7989ec75404e764993  /tmp/kasmvncserver_debian_bookworm_1.5.2_amd64.deb" | sha256sum -c - && apt-get update && '))
+  const t = mkdtempSync(join(tmpdir(), 'kasmvnc-'))
+  const STYLE = '<style>#noVNC_container>div{max-width:1600px;max-height:900px}</style>'
+  const PAGE = '<!DOCTYPE html><html><head><title>KasmVNC</title></head><body></body></html>'
+  /** Runs the step with curl downloading `download` and apt-get logging its arguments; box paths moved under t. */
+  const run = (download, step = kasmvncStep({ version: '1.5.2', sha256: createHash('sha256').update('the release').digest('hex') }), pages = [PAGE, PAGE]) => {
+    rmSync(t, { recursive: true, force: true })
+    for (const d of ['fake', 'tmp', 'www', 'lists']) mkdirSync(join(t, d), { recursive: true })
+    writeFileSync(join(t, 'download'), download)
+    for (const [i, name] of ['index.html', 'vnc.html'].entries()) writeFileSync(join(t, 'www', name), pages[i])
+    for (const [name, body] of [['curl', `echo "$4" >> ${t}/curl; cp ${t}/download "$3"`], ['apt-get', `echo "$*" >> ${t}/apt`]]) { writeFileSync(join(t, 'fake', name), `#!/bin/sh\n${body}\n`); chmodSync(join(t, 'fake', name), 0o755) }
+    const local = step.replaceAll('/tmp/', `${t}/tmp/`).replaceAll('/usr/share/kasmvnc/www/', `${t}/www/`).replaceAll('/var/lib/apt/lists/', `${t}/lists/`)
+    const r = spawnSync('sh', ['-c', local], { encoding: 'utf8', env: { PATH: `${join(t, 'fake')}:${process.env.PATH}` } })
+    const read = (f) => existsSync(join(t, f)) ? readFileSync(join(t, f), 'utf8').replaceAll(t, 'T') : ''
+    return { code: r.status, err: r.stderr.replaceAll(t, 'T'), curl: read('curl'), apt: read('apt'), pages: ['www/index.html', 'www/vnc.html'].map(read), deb: readdirSync(join(t, 'tmp')) }
+  }
+  try {
+    const DEB = 'T/tmp/kasmvncserver_debian_bookworm_1.5.2_amd64.deb'
+    const capped = PAGE.replace('</head>', `${STYLE}</head>`)
+    assert.deepEqual(run('the release'), { code: 0, err: '', curl: 'https://github.com/kasmtech/KasmVNC/releases/download/v1.5.2/kasmvncserver_debian_bookworm_1.5.2_amd64.deb\n', apt: `update\ninstall -y --no-install-recommends ${DEB}\n`, pages: [capped, capped], deb: [] })
+    // Fail-closed: a download that is not the pinned file installs nothing and fails the build.
+    const bad = run('a tampered release')
+    assert.deepEqual([bad.code, bad.apt, bad.pages], [1, '', [PAGE, PAGE]])
+    assert.match(bad.err, /WARNING: 1 computed checksum did NOT match/)
+    assert.equal(run('the release', kasmvncStep()).apt, '', 'the real pin does not match a fake file')
+    // A web client whose page the cap cannot enter fails the build.
+    const uncapped = run('the release', undefined, [PAGE, '<html><body></body></html>'])
+    assert.deepEqual([uncapped.code, uncapped.err], [1, 'mumbo-box: no screen cap in T/www/vnc.html\n'])
+  } finally { rmSync(t, { recursive: true, force: true }) }
 })
 
 test('template: Chrome\'s managed policy file, byte for byte, read-only to the browser user, without and with sensitive sync', () => {

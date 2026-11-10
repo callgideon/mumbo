@@ -369,25 +369,27 @@ cat > /root/.mumbo/welcome.overlay.yml <<'YML'
 YML
 WELCOME_PATCH="--patch /root/.mumbo/welcome.overlay.yml"
 fi
-` : ''}${site.desktop ? `# Desktop: XFCE and the user's own Google Chrome (signed-in accounts live in its profile) on a virtual display, as the
+` : ''}${site.desktop ? `# Desktop: XFCE and the user's own Google Chrome (signed-in accounts live in its profile) on display :1, as the
 # unprivileged user browser; templates before XFCE run openbox and Chromium on the same profile. The browser's debugging
-# port stays on loopback for dsh's browser tools; noVNC on :6080 is the live view, which only the edge reaches (E2B
-# traffic token). Re-runnable: each part starts only if it is not running. This script never writes as root under
-# /home/browser, which the user browser controls (a symlink there could aim a root write anywhere): the loops below do
-# that as browser.
+# port stays on loopback for dsh's browser tools; the live view on :6080 (KasmVNC's web client, noVNC on a template
+# before it) is reached only by the edge (E2B traffic token). Re-runnable: each part starts only if it is not running.
+# This script never writes as root under /home/browser, which the user browser controls (a symlink there could aim a
+# root write anywhere): the loops below do that as browser.
 if id browser >/dev/null 2>&1; then
-  # E2B forwards every loopback port to the box address; the browser's debugging port and raw VNC stay box-local.
+  # E2B forwards every loopback port to the box address; the browser's debugging port and raw VNC stay box-local, and
+  # so does KasmVNC's WebRTC port (UDP, the WebSocket's number, bound on every address), which the ALB cannot carry.
   for port in 9222 5900; do iptables -C INPUT -p tcp --dport $port ! -i lo -j DROP 2>/dev/null || iptables -I INPUT -p tcp --dport $port ! -i lo -j DROP || true; done
+  iptables -C INPUT -p udp --dport 6080 ! -i lo -j DROP 2>/dev/null || iptables -I INPUT -p udp --dport 6080 ! -i lo -j DROP || true
   # X access cookie, so only holders of /run/x11/auth (the browser user and root) can read or drive :1. su keeps the
   # environment, so every X client below inherits XAUTHORITY. Images without xauth run :1 without one, as before.
-  XVFB_AUTH=
+  X_AUTH=
   if command -v xauth >/dev/null 2>&1; then
     mkdir -p /run/x11
     [ -s /run/x11/auth ] || { xauth -q -f /run/x11/auth add :1 . "$(mcookie)" 2>/dev/null; chown browser /run/x11/auth; chmod 600 /run/x11/auth; }
     export XAUTHORITY=/run/x11/auth
-    XVFB_AUTH="-auth /run/x11/auth"
+    X_AUTH="-auth /run/x11/auth"
   fi
-  export XVFB_AUTH
+  export X_AUTH
   # Until browser snapshots mask password and card fields (B25), Chromium saves and fills no passwords or cards. Root writes
   # the managed policy to a temporary file in the same directory and renames it into place, refusing a symlinked directory
   # or target; Chromium reads the directory at start and when it changes. A template with Google Chrome carries Chrome's
@@ -457,11 +459,20 @@ while :; do
 done
 SH
   chmod 0755 /usr/local/bin/google-chrome /usr/local/bin/mumbo-desktop /usr/local/bin/mumbo-browser
-  pgrep -x Xvfb >/dev/null || { su browser -s /bin/sh -c 'Xvfb :1 $XVFB_AUTH -screen 0 1440x900x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &'; sleep 1; }
+  # KasmVNC (template.mjs, RUNBOOK "Person box desktop and Google Chrome"): one X server that encodes only what changed
+  # and serves its web client and WebSocket on $ip:6080, with no raw VNC port. Its own login and TLS are off: the edge
+  # terminates TLS and is the only gate. -PublicIP keeps it from asking public STUN servers at start (it exits when none
+  # answers); -IgnoreClientSettingsKasm keeps a viewer from raising the frame rate. KasmVNC 1.5.2 accepts -RectThreads but
+  # does not apply it (RUNBOOK). A template before KasmVNC runs Xvfb, x11vnc and websockify with noVNC.
+  if command -v Xkasmvnc >/dev/null 2>&1; then
+    pgrep -x Xkasmvnc >/dev/null || { su browser -s /bin/sh -c "Xkasmvnc :1 $X_AUTH -geometry 1600x900 -depth 24 -nolisten tcp -interface $ip -websocketPort 6080 -httpd /usr/share/kasmvnc/www -DisableBasicAuth -sslOnly=0 -SecurityTypes None -PublicIP 127.0.0.1 -FrameRate 30 -RectThreads 2 -IgnoreClientSettingsKasm -DLP_ClipTypes text/plain -DLP_ClipSendMax 262144 -DLP_ClipAcceptMax 262144 -DLP_ClipDelay 500 >/tmp/xvnc.log 2>&1 &"; sleep 1; }
+  else
+    pgrep -x Xvfb >/dev/null || { su browser -s /bin/sh -c 'Xvfb :1 $X_AUTH -screen 0 1440x900x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &'; sleep 1; }
+    pgrep -x x11vnc >/dev/null || su browser -s /bin/sh -c 'x11vnc -display :1 -localhost -forever -shared -nopw -rfbport 5900 -quiet >/tmp/x11vnc.log 2>&1 &'
+    pgrep -f websockify >/dev/null || nohup websockify --web /usr/share/novnc "$ip:6080" 127.0.0.1:5900 >/root/websockify.log 2>&1 &
+  fi
   pgrep -f /usr/local/bin/mumbo-desktop >/dev/null || su browser -s /bin/sh -c 'SHELL=/bin/bash DISPLAY=:1 /usr/local/bin/mumbo-desktop >/tmp/desktop.log 2>&1 &'
   pgrep -f /usr/local/bin/mumbo-browser >/dev/null || su browser -s /bin/sh -c 'DISPLAY=:1 /usr/local/bin/mumbo-browser >/tmp/chrome.log 2>&1 &'
-  pgrep -x x11vnc >/dev/null || su browser -s /bin/sh -c 'x11vnc -display :1 -localhost -forever -shared -nopw -rfbport 5900 -quiet >/tmp/x11vnc.log 2>&1 &'
-  pgrep -f websockify >/dev/null || nohup websockify --web /usr/share/novnc "$ip:6080" 127.0.0.1:5900 >/root/websockify.log 2>&1 &
 fi
 ` : ''}${site.desktop ? '' : `# Project box: a TLS-terminating GitHub proxy on loopback (its own CA, trusted system-wide) aims git and gh at the edge's
 # forwarder with this box's token (edge/box/github-local-proxy.mjs); dsh and its children reach GitHub only through it.
@@ -855,15 +866,18 @@ const page = (res, status, text, refresh = true) => res.writeHead(status, { 'con
   .end(`<!doctype html><meta charset="utf-8">${refresh ? '<meta http-equiv="refresh" content="5">' : ''}<title>mumbo</title><body style="font-family:system-ui;display:grid;place-items:center;min-height:90vh;margin:0"><p>${text}</p>`)
 const DROP = new Set(['connection', 'keep-alive', 'proxy-connection', 'transfer-encoding', 'upgrade', 'te', 'trailer', 'host', 'authorization', 'x-mumbo-member'])
 
-/** Which box port a main-host request goes to: the desktop live view (noVNC, :6080) under /desktop/, otherwise dsh
- *  (:3080). The old project path /p/<id>/… redirects to the project's own origin (boxSite). */
+/** Which box port a main-host request goes to: the desktop live view (:6080, KasmVNC's web client, or noVNC on a
+ *  template before it) under /desktop/, otherwise dsh (:3080). The old project path /p/<id>/… redirects to the
+ *  project's own origin (boxSite). */
 export function boxRoute(url, projectDomain) {
   // Matched on the path: former-host redirects add a query (moved=1) even to links that had none.
   const q = url.indexOf('?')
   const path = q < 0 ? url : url.slice(0, q), query = q < 0 ? '' : url.slice(q)
   const p = /^\/p\/([0-9a-f]{16})(\/.*)?$/.exec(path)
   if (p) return { redirect: `https://p-${p[1]}.${projectDomain}${p[2] ?? '/'}${query}` }
-  if (path === '/desktop' || path === '/desktop/') return { redirect: '/desktop/vnc.html?autoconnect=1&resize=remote&path=desktop/websockify' }
+  // Both clients serve vnc.html and read these from the query. The WebSocket path keeps the prefix the edge strips;
+  // show_control_bar keeps KasmVNC's own controls, clipboard and remote resize on inside the Desktop tab's frame.
+  if (path === '/desktop' || path === '/desktop/') return { redirect: '/desktop/vnc.html?autoconnect=1&resize=remote&path=desktop/websockify&show_control_bar=1' }
   if (url.startsWith('/desktop/')) return { port: '6080', path: url.slice('/desktop'.length), base: '' }
   return { port: '3080', path: url, base: '' }
 }
@@ -1048,8 +1062,8 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log
     if (!to) return page(res, 404, 'Not found.', false)
     if (!to.project && /^\/home\/?(?:\?|$)/.test(req.url)) return homePage(cfg, res, email, await projects?.list(email) ?? [])
     if (to.redirect) return res.writeHead(302, { location: to.redirect, 'cache-control': 'no-store' }).end()
-    // dsh refuses a cross-origin /api request itself; the desktop (websockify) checks no Origin, so anything but a read
-    // must come from its own page.
+    // dsh refuses a cross-origin /api request itself; the desktop's server (KasmVNC, or websockify) checks no Origin, so
+    // anything but a read must come from its own page.
     if (to.port === '6080' && req.method !== 'GET' && req.method !== 'HEAD' && req.headers.origin !== `https://${host}`) return page(res, 403, 'Forbidden.', false)
     if (to.project && !(await projects?.isMember(email, to.project))) return page(res, 403, 'No such project, or you are not one of its members.', false)
     let target
@@ -1093,7 +1107,7 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log
     if (skippedSignin(req)) return socket.end('HTTP/1.1 400 Bad Request\r\n\r\n')
     // As for HTTP, only the public host's and project hosts' WebSockets reach a box; the approve host and unknown hosts
     // are refused. So is an upgrade whose Origin is not this host (browsers always send one): the sign-in cookie covers
-    // every subdomain, so a project page could otherwise open the visitor's desktop, whose noVNC checks no Origin.
+    // every subdomain, so a project page could otherwise open the visitor's desktop, whose server checks no Origin.
     const host = hostOf(req)
     const to = routeOf(host, req.url)
     if (!to || req.headers.origin !== `https://${host}`) return socket.destroy()
