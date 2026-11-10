@@ -18,7 +18,7 @@ const at = (text, needle) => { const i = text.indexOf(needle); assert.ok(i >= 0,
 test('a user box start script is byte-for-byte what it was before project boxes grew a proxy', () => {
   const s = startScript(c, 'T', boxSite(c, 'a@x.com'), "role's", undefined, boxFiles, ['o@x.com'])
   // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows, the X cookie, the first-run welcome, the interim Chromium policy (B27) and the B18 desktop (same cfg, token T, role "role's").
-  assert.equal(createHash('sha256').update(s).digest('hex'), '6e63fd97df2cf9746d0bba07d3ffd68f17df3f10d857baece729d0ccb226bff2')
+  assert.equal(createHash('sha256').update(s).digest('hex'), '82f03ad430ae7cd67d8c5a354e4e0306a324f0991947471f5ee28d87e593a323')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {

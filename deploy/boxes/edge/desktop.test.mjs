@@ -9,7 +9,7 @@ import { tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { startScript, boxSite } from './edge.mjs'
-import { BOX_STEPS } from './template.mjs'
+import { BOX_STEPS, chromePolicyStep } from './template.mjs'
 
 const c = { llmHost: 'l', publicHost: 'boxes.x' }
 const person = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, {})
@@ -18,11 +18,12 @@ const at = (text, needle) => { const i = text.indexOf(needle); assert.ok(i >= 0,
 const heredoc = (path) => { const head = `cat > ${path} <<'SH'\n`; const i = at(person, head) + head.length; return person.slice(i, person.indexOf('\nSH\n', i) + 1) }
 /** The whole desktop block, run as start.sh runs it (`set -eu`, `$ip` set); it appends `reached` to log/dsh when dsh's start would run. */
 const block = () => `set -eu\nip=127.0.0.1\n${person.slice(at(person, 'if id browser >/dev/null 2>&1; then'), person.indexOf('\nfi\n', at(person, 'websockify --web')) + 4)}echo reached >> /tmp/dsh\n`
-/** The test's own user stands in for browser. */
+/** The test's own user stands in for browser, and one of its supplementary groups, if any, for shared. */
 const USER = userInfo().username
+const GROUP = execFileSync('id', ['-Gn'], { encoding: 'utf8' }).trim().split(' ')[1]
 /** How the fake Chrome answers the version check that runs before the browser loop. */
 const VERSION = '[ "$1" = --version ] && { echo "Google Chrome 142.0.7444.59 "; exit; }\n'
-const REAL = ['sleep', 'pgrep', 'rm', 'grep', 'head', 'sort', 'tail', 'date', 'mv', 'cat', 'chmod', 'mkdir', 'touch', 'wc', 'nohup', 'install', 'rmdir']
+const REAL = ['sleep', 'pgrep', 'rm', 'grep', 'head', 'sort', 'tail', 'date', 'mv', 'cat', 'chmod', 'mkdir', 'touch', 'wc', 'nohup', 'install', 'rmdir', 'chgrp', 'find']
 
 /** A temporary root: box paths moved under it, a private debugging port, and PATH holding only fakes and REAL tools. */
 function box() {
@@ -35,7 +36,7 @@ function box() {
     t, port,
     /** Box paths moved under t; `as` is the user that stands in for browser. */
     local: (text, as = USER) => text.replaceAll('/tmp/', `${t}/log/`).replaceAll('/etc/', `${t}/etc/`).replaceAll('/root/', `${t}/root/`).replaceAll('/usr/local/bin/', `${t}/bin/`).replaceAll('/home/browser/', `${t}/home/`).replaceAll('/home/shared', `${t}/shared`)
-      .replaceAll('remote-debugging-port=9222', `remote-debugging-port=${port}`).replaceAll('pgrep -f websockify', `pgrep -f ${t}/fake/websockify`).replaceAll('-u browser', `-u ${as}`).replaceAll('"$(id -un)" = browser', `"$(id -un)" = ${as}`),
+      .replaceAll('remote-debugging-port=9222', `remote-debugging-port=${port}`).replaceAll('pgrep -f websockify', `pgrep -f ${t}/fake/websockify`).replaceAll('-u browser', `-u ${as}`).replaceAll('"$(id -un)" = browser', `"$(id -un)" = ${as}`).replaceAll('chgrp -hR shared', `chgrp -hR ${GROUP ?? USER}`),
     fake: (name, body) => { rmSync(join(t, 'fake', name), { force: true }); writeFileSync(join(t, 'fake', name), `#!/bin/sh\n${body}\n`); chmodSync(join(t, 'fake', name), 0o755) },
     /** Runs sh text from a file, as the box runs start.sh, in its own process group, which done() kills with everything it
      *  started. */
@@ -68,7 +69,7 @@ test('person start script: XFCE as browser on :1 with bash as its shell, Chrome 
   assert.ok(person.includes(`pgrep -f /usr/local/bin/mumbo-browser >/dev/null || su browser -s /bin/sh -c 'DISPLAY=:1 /usr/local/bin/mumbo-browser >/tmp/chrome.log 2>&1 &'\n`))
   assert.ok(person.includes(`\n  if getent group shared >/dev/null 2>&1 && [ ! -L /home/shared ] && [ ! -L /home/shared/Downloads ]; then install -d -o browser -g shared -m 2770 /home/shared/Downloads 2>/dev/null || echo 'shared downloads folder not repaired' >&2; fi\n`))
   assert.ok(at(person, 'install -d -o browser -g shared') < at(person, "DISPLAY=:1 /usr/local/bin/mumbo-browser"))
-  assert.ok(heredoc('/usr/local/bin/mumbo-browser').startsWith('#!/bin/sh\nif [ -d /home/browser/Downloads ] && [ ! -L /home/browser/Downloads ] && [ -d /home/shared/Downloads ]; then\n'))
+  assert.ok(heredoc('/usr/local/bin/mumbo-browser').startsWith('#!/bin/sh\nchmod 0700 /home/browser/\nif [ -d /home/browser/Downloads ] && [ ! -L /home/browser/Downloads ] && [ -d /home/shared/Downloads ]; then\n'))
   assert.equal(heredoc('/usr/local/bin/google-chrome'), '#!/bin/sh\n[ "$(id -un)" = browser ] || exec "$(command -v google-chrome-stable || echo chromium)" "$@"\nexec "$(command -v google-chrome-stable || echo chromium)" --user-data-dir=/home/browser/profile --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --no-first-run --no-default-browser-check --password-store=basic --start-maximized "$@"\n')
   assert.ok(at(person, 'export XAUTHORITY=/run/x11/auth') < at(person, 'su browser -s /bin/sh -c \'SHELL=/bin/bash DISPLAY=:1 /usr/local/bin/mumbo-desktop'))
   assert.ok(at(person, 'Xvfb :1') < at(person, 'DISPLAY=:1 /usr/local/bin/mumbo-desktop') && at(person, 'DISPLAY=:1 /usr/local/bin/mumbo-browser') < at(person, 'x11vnc -display :1'))
@@ -207,7 +208,7 @@ test('root repairs /home/shared/Downloads as browser:shared 2770, never through 
   assert.deepEqual(await repairs(() => {}, false), [])
 })
 
-test('the browser loop moves ~/Downloads into the shared folder as browser, keeping both sides of a name clash and never following a link', () => {
+test('the browser loop keeps its home 0700 and moves ~/Downloads into the shared folder as browser, with group shared and setgid folders, keeping both sides of a name clash and never following a link', () => {
   const pre = heredoc('/usr/local/bin/mumbo-browser').split('while :; do')[0]
   const b = box()
   try {
@@ -215,12 +216,20 @@ test('the browser loop moves ~/Downloads into the shared folder as browser, keep
     writeFileSync(join(b.t, 'outside/keep'), 'keep')
     const run = () => { writeFileSync(join(b.t, 'pre.sh'), b.local(pre)); execFileSync('/bin/sh', [join(b.t, 'pre.sh')], { env: { PATH: join(b.t, 'fake') } }) }
     const old = join(b.t, 'home/Downloads'), shared = join(b.t, 'shared/Downloads')
-    mkdirSync(old); mkdirSync(shared)
-    for (const [n, v] of [['a.pdf', 'a'], ['.hidden', 'h'], ['-dash', 'd'], ['clash', 'old']]) writeFileSync(join(old, n), v)
+    mkdirSync(old); mkdirSync(shared); mkdirSync(join(old, 'unz')); chmodSync(join(b.t, 'home'), 0o755)
+    for (const [n, v] of [['a.pdf', 'a'], ['.hidden', 'h'], ['-dash', 'd'], ['clash', 'old'], ['unz/in.txt', 'i']]) writeFileSync(join(old, n), v)
     writeFileSync(join(shared, 'clash'), 'new')
     symlinkSync(join(b.t, 'outside/keep'), join(old, 'link'))
     run()
-    assert.deepEqual(readdirSync(shared).sort(), ['-dash', '.hidden', 'a.pdf', 'clash', 'link'])
+    assert.equal(statSync(join(b.t, 'home')).mode & 0o777, 0o700)
+    assert.deepEqual(readdirSync(shared).sort(), ['-dash', '.hidden', 'a.pdf', 'clash', 'link', 'unz'])
+    assert.ok(statSync(join(shared, 'unz')).mode & 0o2000, 'a moved folder is setgid')
+    if (GROUP) {
+      const gid = Number(execFileSync('getent', ['group', GROUP], { encoding: 'utf8' }).split(':')[2])
+      for (const n of ['a.pdf', '-dash', 'unz', 'unz/in.txt']) assert.equal(statSync(join(shared, n)).gid, gid, n)
+      assert.equal(lstatSync(join(shared, 'link')).gid, gid)
+      assert.notEqual(statSync(join(shared, 'clash')).gid, gid, 'the shared side of a clash is untouched')
+    }
     assert.deepEqual([readFileSync(join(shared, 'clash'), 'utf8'), readFileSync(join(old, 'clash'), 'utf8'), readdirSync(old)], ['new', 'old', ['clash']])
     assert.ok(lstatSync(join(shared, 'link')).isSymbolicLink())
     assert.deepEqual([readdirSync(join(b.t, 'outside')), readFileSync(join(b.t, 'outside/keep'), 'utf8')], [['keep'], 'keep'])
@@ -273,15 +282,17 @@ test('template: Google Chrome stable from Google\'s signed amd64 repository and 
   assert.ok(BOX_STEPS.indexOf('id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser') < BOX_STEPS.indexOf('groupadd -f shared && usermod -aG shared browser && chmod 0700 /home/browser && install -d -m 0755 /home/shared && install -d -o browser -g shared -m 2770 /home/shared/Downloads'))
 })
 
-test('template: Chrome\'s managed policy file, byte for byte, read-only to the browser user', () => {
+test('template: Chrome\'s managed policy file, byte for byte, read-only to the browser user, without and with sensitive sync', () => {
   const t = mkdtempSync(join(tmpdir(), 'policy-'))
   try {
-    const step = BOX_STEPS.find(s => s.includes('/etc/opt/chrome/policies/managed/mumbo.json'))
-    execFileSync('sh', ['-c', step.replaceAll('/etc/opt/chrome/', `${t}/etc/opt/chrome/`)])
-    const file = join(t, 'etc/opt/chrome/policies/managed/mumbo.json')
-    assert.equal(readFileSync(file, 'utf8'), '{"RestoreOnStartup":1,"DefaultBrowserSettingEnabled":false,"MetricsReportingEnabled":false,"DownloadDirectory":"/home/shared/Downloads"}\n')
-    assert.equal(statSync(file).mode & 0o777, 0o644)
+    const write = (step) => { rmSync(join(t, 'etc'), { recursive: true, force: true }); execFileSync('sh', ['-c', step.replaceAll('/etc/opt/chrome/', `${t}/etc/opt/chrome/`)]); return readFileSync(join(t, 'etc/opt/chrome/policies/managed/mumbo.json'), 'utf8') }
+    const base = '"RestoreOnStartup":1,"DefaultBrowserSettingEnabled":false,"MetricsReportingEnabled":false,"DownloadDirectory":"/home/shared/Downloads"'
+    assert.equal(write(chromePolicyStep(false)), `{${base},"SyncTypesListDisabled":["passwords","payments"],"PasswordManagerEnabled":false,"AutofillCreditCardEnabled":false}\n`)
+    assert.equal(statSync(join(t, 'etc/opt/chrome/policies/managed/mumbo.json')).mode & 0o777, 0o644)
     assert.equal(statSync(join(t, 'etc/opt/chrome/policies/managed')).mode & 0o777, 0o755)
+    assert.equal(write(chromePolicyStep(true)), `{${base}}\n`)
+    // Slice 2: passwords and cards stay out of the box until browser snapshots mask them (B25).
+    assert.ok(BOX_STEPS.includes(chromePolicyStep(false)) && !BOX_STEPS.includes(chromePolicyStep(true)))
   } finally { rmSync(t, { recursive: true, force: true }) }
 })
 

@@ -185,6 +185,81 @@ test('restore writes nothing outside /home/browser through a symlink planted in 
   } finally { rmSync(work, { recursive: true, force: true }) }
 })
 
+test('a ~/Downloads swapped for a symlink after the listing is archived as the symlink, never read through', () => {
+  const { root, db, target } = fixture()
+  db.close()
+  const home = join(root, 'home/browser'), outside = mkdtempSync(join(tmpdir(), 'outside-'))
+  try {
+    mkdirSync(join(home, 'Downloads/item'), { recursive: true }); writeFileSync(join(home, 'Downloads/item/f'), 'mine')
+    mkdirSync(join(outside, 'item')); writeFileSync(join(outside, 'item/secret'), 'ROOT ONLY')
+    mkdirSync(join(root, 'home/shared/Downloads'), { recursive: true })
+    // The swap lands between the listing and tar.
+    const cmd = backupCommand(target, root).replace('rc=0; tar -C ', `rc=0; mv '${home}/Downloads' '${home}/D'; ln -s '${outside}' '${home}/Downloads'; tar -C `)
+    const b = sh(cmd)
+    assert.equal(b.status, 0, b.stderr)
+    const listing = execFileSync('tar', ['-tvzf', `${root}.tgz`], { encoding: 'utf8' })
+    assert.match(listing, /^l.* home\/browser\/Downloads -> /m)
+    assert.doesNotMatch(listing, /home\/browser\/Downloads\/|secret/)
+  } finally { rmSync(outside, { recursive: true, force: true }) }
+})
+
+test('a restore whose tar fails part way still moves the SQLite snapshots back, then reports the failure', () => {
+  const { root, file, db, target } = fixture()
+  assert.equal(sh(backupCommand(target, root)).status, 0)
+  db.close()
+  // Append members that fail extraction: a symlink out of the tree, then a file through it.
+  const work = mkdtempSync(join(tmpdir(), 'fail-'))
+  try {
+    execFileSync('sh', ['-c', `gunzip -c '${root}.tgz' > '${work}/a.tar'`])
+    mkdirSync(join(work, 'src/home/browser'), { recursive: true }); symlinkSync(work, join(work, 'src/home/browser/esc'))
+    execFileSync('tar', ['-C', join(work, 'src'), '-rf', join(work, 'a.tar'), 'home/browser/esc'])
+    rmSync(join(work, 'src/home/browser/esc')); mkdirSync(join(work, 'src/home/browser/esc')); writeFileSync(join(work, 'src/home/browser/esc/y'), 'y')
+    execFileSync('tar', ['-C', join(work, 'src'), '-rf', join(work, 'a.tar'), 'home/browser/esc/y'])
+    execFileSync('sh', ['-c', `gzip -c '${work}/a.tar' > '${root}.tgz'`])
+  } finally { rmSync(work, { recursive: true, force: true }) }
+  rmSync(join(root, 'root'), { recursive: true })
+  const r = sh(restoreCommand(target, root))
+  assert.equal(r.status, 2, r.stderr)
+  assert.ok(!existsSync(join(root, 'root/.mumbo-sqlite')))
+  const back = new DatabaseSync(file)
+  assert.deepEqual(back.prepare('SELECT v FROM t').all().map((x) => x.v), [42])
+  back.close()
+})
+
+test('a Downloads folder nested past PATH_MAX is left out and counted, and the rest is backed up', () => {
+  const { root, db, target } = fixture()
+  db.close()
+  const dl = join(root, 'home/shared/Downloads')
+  mkdirSync(join(dl, 'deep'), { recursive: true }); writeFileSync(join(dl, 'ok.txt'), 'ok')
+  // Relative mkdir and chdir, which a shell's cd refuses past PATH_MAX.
+  execFileSync(process.execPath, ['-e', 'const fs = require("fs"), n = "d".repeat(200); for (let i = 0; i < 22; i++) { fs.mkdirSync(n); process.chdir(n) } fs.writeFileSync("f", "x")'], { cwd: join(dl, 'deep') })
+  try {
+    const b = sh(backupCommand(target, root))
+    assert.equal(b.status, 0, b.stderr)
+    assert.equal(b.stdout, 'downloads left out of the backup: 1 items, 0 MiB\n')
+    const names = execFileSync('tar', ['-tzf', `${root}.tgz`], { encoding: 'utf8' }).split('\n')
+    assert.ok(names.includes('home/shared/Downloads/ok.txt') && names.includes('root/.mumbo-sqlite/.dsh/superagent/orchestrator.sqlite.snap'))
+    assert.ok(!names.some(n => n.startsWith('home/shared/Downloads/deep')))
+  } finally { execFileSync('rm', ['-rf', root]) }
+})
+
+test('a tar failure of status 2 lists and archives once more before the backup fails', () => {
+  const { root, db, target } = fixture()
+  db.close()
+  const dl = join(root, 'home/shared/Downloads')
+  mkdirSync(dl, { recursive: true }); writeFileSync(join(dl, 'big'), ''); truncateSync(join(dl, 'big'), 1100 * 1024 * 1024)
+  const dir = mkdtempSync(join(tmpdir(), 'tar-'))
+  try {
+    writeFileSync(join(dir, 'tar'), `#!/bin/sh\nn=$(cat '${dir}/n' 2>/dev/null || echo 0); echo $((n + 1)) > '${dir}/n'\n[ "$n" = 0 ] && exit 2\nexec ${execFileSync('sh', ['-c', 'command -v tar'], { encoding: 'utf8' }).trim()} "$@"\n`)
+    chmodSync(join(dir, 'tar'), 0o755)
+    const b = sh(backupCommand(target, root), { ...process.env, PATH: `${dir}:${process.env.PATH}` })
+    assert.equal(b.status, 0, b.stderr)
+    assert.equal(readFileSync(join(dir, 'n'), 'utf8').trim(), '2')
+    assert.equal(b.stdout, 'downloads left out of the backup: 1 items, 1100 MiB\n', 'the line is printed once')
+    assert.match(execFileSync('tar', ['-tzf', `${root}.tgz`], { encoding: 'utf8' }), /orchestrator\.sqlite\.snap/)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
 test('a corrupt database fails the backup and leaves the previous archive alone', () => {
   const { root, db, target } = fixture()
   db.close()

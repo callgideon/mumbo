@@ -18,9 +18,18 @@ export function templateArgs(argv, env = process.env) {
   }
 }
 
-/** Google Chrome's managed policy in person boxes. Chrome Sync, passwords and payment cards stay at Chrome's defaults
- *  (founder decision 2026-11-10); downloads land in the shared folder the assistant reads (edge roleInstructions). */
-const CHROME_POLICY = { RestoreOnStartup: 1, DefaultBrowserSettingEnabled: false, MetricsReportingEnabled: false, DownloadDirectory: '/home/shared/Downloads' }
+/** false until browser snapshots mask password and card fields (B25): Chrome then neither saves nor syncs passwords and
+ *  payment cards. true gives the founder's full sync (decision 2026-11-10). */
+const CHROME_SENSITIVE_SYNC = false
+/** The template step that writes Google Chrome's managed policy, root-owned. Downloads land in the shared folder the
+ *  assistant reads (edge roleInstructions).
+ *  @param {boolean} sensitiveSync CHROME_SENSITIVE_SYNC
+ *  @returns {string} the shell step */
+export const chromePolicyStep = (sensitiveSync) => {
+  const policy = { RestoreOnStartup: 1, DefaultBrowserSettingEnabled: false, MetricsReportingEnabled: false, DownloadDirectory: '/home/shared/Downloads',
+    ...(sensitiveSync ? {} : { SyncTypesListDisabled: ['passwords', 'payments'], PasswordManagerEnabled: false, AutofillCreditCardEnabled: false }) }
+  return `install -d -m 0755 /etc/opt/chrome/policies/managed && printf '%s\\n' '${JSON.stringify(policy)}' > /etc/opt/chrome/policies/managed/mumbo.json && chmod 0644 /etc/opt/chrome/policies/managed/mumbo.json`
+}
 /** The user's box is their computer: a virtual display, the XFCE desktop, Google Chrome stable from Google's apt
  *  repository (each build installs the current release) and the noVNC live view. The edge's start script runs them as
  *  the user `browser`, and writes /usr/local/bin/google-chrome, the one way to start Chrome; the menu entry and XFCE's
@@ -31,7 +40,7 @@ export const BOX_STEPS = [
   // Downloads are shared through the group shared (B24 adds the agent's users): /home/shared is root's, so no member can
   // replace the folder itself. The browser's home stays its own.
   'groupadd -f shared && usermod -aG shared browser && chmod 0700 /home/browser && install -d -m 0755 /home/shared && install -d -o browser -g shared -m 2770 /home/shared/Downloads',
-  `install -d -m 0755 /etc/opt/chrome/policies/managed && printf '%s\\n' '${JSON.stringify(CHROME_POLICY)}' > /etc/opt/chrome/policies/managed/mumbo.json && chmod 0644 /etc/opt/chrome/policies/managed/mumbo.json`,
+  chromePolicyStep(CHROME_SENSITIVE_SYNC),
   // The stock panels, without the panel's first-start dialog; XFCE's web browser and Chrome's menu entry start the box's Chrome.
   'cp /etc/xdg/xfce4/panel/default.xml /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml && sed -i "s/^WebBrowser=.*/WebBrowser=google-chrome/" /etc/xdg/xfce4/helpers.rc && install -d /usr/local/share/applications && sed "s#/usr/bin/google-chrome-stable#/usr/local/bin/google-chrome#" /usr/share/applications/google-chrome.desktop > /usr/local/share/applications/google-chrome.desktop',
 ]

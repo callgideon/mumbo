@@ -374,13 +374,19 @@ while :; do
 done
 SH
   # The browser, started again within 5 s of exiting, since the assistant's browser tools need it. While any Chrome runs
-  # on the profile it waits. First it moves ~/Downloads (a template before the shared folder, or its backup) into
-  # /home/shared/Downloads, keeping either side's file on a name clash, and moves a profile last used by a newer browser
-  # aside, so that Chrome makes a new one; mv -T will not move it into a directory a symlink names.
+  # on the profile it waits. First it keeps /home/browser at 0700 (a restored archive can carry 0755), moves ~/Downloads (a
+  # template before the shared folder, or its backup) into /home/shared/Downloads with group shared, keeping either side's
+  # file on a name clash, and moves a profile last used by a newer browser aside, so that Chrome makes a new one; mv -T
+  # will not move it into a directory a symlink names.
   cat > /usr/local/bin/mumbo-browser <<'SH'
 #!/bin/sh
+chmod 0700 /home/browser/
 if [ -d /home/browser/Downloads ] && [ ! -L /home/browser/Downloads ] && [ -d /home/shared/Downloads ]; then
-  for f in /home/browser/Downloads/* /home/browser/Downloads/.[!.]* /home/browser/Downloads/..?*; do { [ -e "$f" ] || [ -L "$f" ]; } && mv -n -- "$f" /home/shared/Downloads/; done
+  for f in /home/browser/Downloads/* /home/browser/Downloads/.[!.]* /home/browser/Downloads/..?*; do
+    { [ -e "$f" ] || [ -L "$f" ]; } || continue
+    mv -n -- "$f" /home/shared/Downloads/
+    [ -e "$f" ] || [ -L "$f" ] || { g="/home/shared/Downloads/\${f##*/}"; chgrp -hR shared -- "$g"; find "$g" -type d -exec chmod g+s {} +; }
+  done
   rmdir /home/browser/Downloads 2>/dev/null
 fi
 have=$(google-chrome-stable --version 2>/dev/null | grep -oE '[0-9]+(\\.[0-9]+)+' | head -n 1)
@@ -471,30 +477,33 @@ const BROWSER_EXCLUDES = ['.cache', ...['Singleton*', '*/Cache', '*/Code Cache',
  *  kept newest first up to the total: the archive is staged on the box's own disk. */
 const DOWNLOADS_ITEM_MAX = 1024 ** 3, DOWNLOADS_TOTAL_MAX = 2 * 1024 ** 3
 /** Lists, NUL-terminated and as exact bytes, what a backup takes from /home/browser and /home/shared: argv[3] gets the two
- *  homes and their Downloads folders (archived without recursion), argv[4] every other top-level entry and the Downloads
- *  items kept (archived with recursion). Downloads is never named by a pattern, so no file name can exclude anything else.
- *  It reads with lstat and never follows a symlink; an item still being downloaded (*.crdownload) is skipped. Prints one
- *  line when Downloads items are left out. */
+ *  homes and /home/shared/Downloads (archived without recursion), argv[4] every other top-level entry of the homes and the
+ *  shared Downloads items kept (archived with recursion, by tar's own traversal, which follows no symlink). Only names
+ *  whose parent is root's (/home, /home/shared, /home/shared/Downloads) are listed, so browser cannot swap a directory
+ *  above a listed name for a symlink; an old ~/Downloads is one entry of /home/browser. Downloads is never named by a
+ *  pattern, so no file name can exclude anything else. It reads with lstat; an item still being downloaded
+ *  (*.crdownload) is skipped, and one it cannot read is left out. Prints one line when Downloads items are left out. */
 const SELECT_JS = `const fs = require("fs"), path = require("path"), NUL = Buffer.from([0])
 const [root, dirsOut, unitsOut, itemMax, totalMax] = process.argv.slice(1)
-const st = (r) => fs.lstatSync(Buffer.concat([Buffer.from(root + "/"), r]), { throwIfNoEntry: false })
-const names = (r) => { try { return fs.readdirSync(Buffer.concat([Buffer.from(root + "/"), r]), { encoding: "buffer" }) } catch { return [] } }
+const abs = (r) => Buffer.concat([Buffer.from(root + "/"), r])
+const st = (r) => { try { return fs.lstatSync(abs(r)) } catch { return undefined } }
+const names = (r) => { try { return fs.readdirSync(abs(r), { encoding: "buffer" }) } catch { return undefined } }
 const join = (r, n) => Buffer.concat([r, Buffer.from("/"), n])
-const bytes = (r) => { const s = st(r); return !s ? 0 : s.isFile() ? s.size : s.isDirectory() ? names(r).reduce((n, c) => n + bytes(join(r, c)), 0) : 0 }
+const bytes = (r) => { const s = st(r); if (!s) return Infinity; if (s.isFile()) return s.size; if (!s.isDirectory()) return 0; const c = names(r); return c ? c.reduce((n, x) => n + bytes(join(r, x)), 0) : Infinity }
 const dirs = [], units = [], items = []
 for (const home of ["home/browser", "home/shared"].map((h) => Buffer.from(h))) {
   if (!st(home)?.isDirectory()) continue
   dirs.push(home)
-  for (const n of names(home)) {
+  for (const n of names(home) ?? []) {
     const r = join(home, n)
-    if (n.toString() !== "Downloads" || !st(r).isDirectory()) { units.push(r); continue }
+    if (home.toString() !== "home/shared" || n.toString() !== "Downloads" || !st(r)?.isDirectory()) { units.push(r); continue }
     dirs.push(r)
-    for (const c of names(r)) if (!c.toString("latin1").endsWith(".crdownload")) { const i = join(r, c); items.push({ i, size: bytes(i), mtime: st(i)?.mtimeMs ?? 0 }) }
+    for (const c of names(r) ?? []) if (!c.toString("latin1").endsWith(".crdownload")) { const i = join(r, c); items.push({ i, size: bytes(i), mtime: st(i)?.mtimeMs ?? 0 }) }
   }
 }
 let total = 0, left = 0, leftBytes = 0
 for (const { i, size } of items.sort((a, b) => b.mtime - a.mtime)) {
-  if (size <= Number(itemMax) && total + size <= Number(totalMax)) { units.push(i); total += size } else { left++; leftBytes += size }
+  if (size <= Number(itemMax) && total + size <= Number(totalMax)) { units.push(i); total += size } else { left++; leftBytes += Number.isFinite(size) ? size : 0 }
 }
 const out = (f, list) => fs.writeFileSync(f, Buffer.concat(list.flatMap((r) => [r, NUL])))
 out(dirsOut, dirs); out(unitsOut, units)
@@ -502,13 +511,14 @@ if (left) console.log("downloads left out of the backup: " + left + " items, " +
 /** Upload chats, projects and the browser and shared homes (signed-in accounts, desktop settings, Downloads by SELECT_JS; BROWSER_EXCLUDES left out) to a presigned S3 PUT. Runs inside the box; S3 refuses a streamed (chunked) body,
  *  so the archive goes to a temporary file first. SQLite databases under /root travel as consistent `.snap` copies under root/.mumbo-sqlite. Extraction on restore also stays inside the box.
  *  The homes are only read, and tar archives a symlink there as a symlink. Chrome's SQLite and LevelDB stores travel as copies of the live files: Chrome holds most of its SQLite databases (History, Web Data) under an exclusive lock while it runs, so no other process can snapshot them.
- *  tar's status 1 (a file changed while it was read, as a running Chrome's do) still uploads the archive; any other failure stops the backup. Prints SELECT_JS's line, if any.
+ *  tar's status 1 (a file changed while it was read, as a running Chrome's do) still uploads the archive. Status 2 (a listed name vanished before tar read it) lists and archives once more; a second failure stops the backup. Prints SELECT_JS's line, if any.
  *  `root` (default `/`) is the filesystem root, for tests. */
 export const backupCommand = (url, root = '/') => {
   const r = root.replace(/\/+$/, ''), snap = `${r}/root/.mumbo-sqlite`
-  return `set -e; f=$(mktemp /tmp/mumbo-backup.XXXXXX); dirs=$(mktemp /tmp/mumbo-backup.XXXXXX); units=$(mktemp /tmp/mumbo-backup.XXXXXX); trap 'rm -f "$f" "$dirs" "$units"; rm -rf '${snap}'' EXIT; rm -rf '${snap}'; node -e '${SNAPSHOT_JS}' '${r}/root' '${snap}'; node -e '${SELECT_JS}' '${r}' "$dirs" "$units" ${DOWNLOADS_ITEM_MAX} ${DOWNLOADS_TOTAL_MAX}; tar -C '${root}' --exclude=node_modules --exclude='*.sqlite-wal' --exclude='*.sqlite-shm' ${['root/.dsh', 'root/projects'].flatMap((d) => ['*.sqlite', '*.db', '*-wal', '*-shm', '*-journal'].map((p) => `--exclude='${d}/${p}'`)).join(' ')} ${BROWSER_EXCLUDES.map((p) => `--exclude='home/browser/${p}'`).join(' ')} -czf "$f" $(cd '${root}' && ls -d root/.dsh root/projects root/.mumbo-sqlite 2>/dev/null) --null --verbatim-files-from --no-recursion -T "$dirs" --recursion -T "$units" || [ $? -eq 1 ]; curl -fsS -m 600 -X PUT -H 'content-type: application/gzip' --upload-file "$f" '${url}'; rm -rf '${snap}'`
+  return `set -e; f=$(mktemp /tmp/mumbo-backup.XXXXXX); dirs=$(mktemp /tmp/mumbo-backup.XXXXXX); units=$(mktemp /tmp/mumbo-backup.XXXXXX); trap 'rm -f "$f" "$dirs" "$units"; rm -rf '${snap}'' EXIT; rm -rf '${snap}'; node -e '${SNAPSHOT_JS}' '${r}/root' '${snap}'; for try in 1 2; do msg=$(node -e '${SELECT_JS}' '${r}' "$dirs" "$units" ${DOWNLOADS_ITEM_MAX} ${DOWNLOADS_TOTAL_MAX}); rc=0; tar -C '${root}' --exclude=node_modules --exclude='*.sqlite-wal' --exclude='*.sqlite-shm' ${['root/.dsh', 'root/projects'].flatMap((d) => ['*.sqlite', '*.db', '*-wal', '*-shm', '*-journal'].map((p) => `--exclude='${d}/${p}'`)).join(' ')} ${BROWSER_EXCLUDES.map((p) => `--exclude='home/browser/${p}'`).join(' ')} -czf "$f" $(cd '${root}' && ls -d root/.dsh root/projects root/.mumbo-sqlite 2>/dev/null) --null --verbatim-files-from --no-recursion -T "$dirs" --recursion -T "$units" || rc=$?; [ $rc -le 1 ] && break; [ $try = 2 ] && exit $rc; done; [ -z "$msg" ] || echo "$msg"; curl -fsS -m 600 -X PUT -H 'content-type: application/gzip' --upload-file "$f" '${url}'; rm -rf '${snap}'`
 }
-/** Download and unpack a backup, then move each `.snap` back over its database path. Runs before dsh starts, in a box
+/** Download and unpack a backup, then move each `.snap` back over its database path, also when tar fails part way, and
+ *  exit with tar's status. Runs before dsh starts, in a box
  *  just created from the template. A backup taken before it covered all of /home/browser holds only home/browser/profile
  *  there; one with home/browser/Downloads has it moved into /home/shared/Downloads by the browser loop (startScript). Root writes /home/browser here, and GNU tar's defaults keep a symlink, in the
  *  box or in the archive, from aiming a write outside it: an archive symlink to an absolute or `..` target is made only
@@ -516,7 +526,7 @@ export const backupCommand = (url, root = '/') => {
  *  --keep-directory-symlink or -P (backup.test.mjs). */
 export const restoreCommand = (url, root = '/') => {
   const r = root.replace(/\/+$/, ''), snap = `${r}/root/.mumbo-sqlite`
-  return `set -e; curl -fsS -m 600 '${url}' | tar -C '${root}' -xzf -; if [ -d '${snap}' ]; then (cd '${snap}' && find . -name '*.snap' -type f) | while IFS= read -r p; do d='${r}/root/'"\${p#./}"; d="\${d%.snap}"; rm -f "$d-wal" "$d-shm" "$d-journal"; mv '${snap}'/"$p" "$d"; done; rm -rf '${snap}'; fi`
+  return `set -e; rc=0; curl -fsS -m 600 '${url}' | tar -C '${root}' -xzf - || rc=$?; if [ -d '${snap}' ]; then (cd '${snap}' && find . -name '*.snap' -type f) | while IFS= read -r p; do d='${r}/root/'"\${p#./}"; d="\${d%.snap}"; rm -f "$d-wal" "$d-shm" "$d-journal"; mv '${snap}'/"$p" "$d"; done; rm -rf '${snap}'; fi; exit $rc`
 }
 
 /** Prints the earliest next run (epoch ms) of the box's active dsh scheduled tasks, or nothing. Reads both storage
