@@ -787,7 +787,7 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
     - So the `passwords` and `payments` sync types are on now, not gated on B24.
     - The designer's recommendation was to wait for B24's escape tests.
     - The 2026-11-10 research recommends going further and keeping `passwords`, `autofill` (which covers `payments`) and the password manager off the box by policy for good. With no saved secret on the box, it is the only layer that holds even if CDP filtering leaks. Google's own agentic Chrome and Edge's Copilot Actions keep their models away from saved passwords.
-    - The founder is asked again before slice 3 turns full sync on. Their answer is recorded here.
+    - **The founder was asked again** with that recommendation stated plainly, and three options: wait for B24, now, or never. **Their answer was "Turn it on now"** **[founder: 2026-11-10]**. Full sync turns on with slice 3.
   - Chrome Sync never carries sign-ins (cookies) in either direction. The person signs in to each site once in the box, and the profile, with its cookies, is in every backup.
 - **Signing in, in this order** **[my call, from the research]**:
   1. **The site's own link-a-device flow,** which makes the box a legitimate device of the account:
