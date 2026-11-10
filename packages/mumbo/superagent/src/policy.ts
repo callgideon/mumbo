@@ -135,9 +135,10 @@ export function listedBot(settings: Settings, actor: ActorRef): z.infer<typeof A
   const bots = z.array(AllowedSchema).catch([]).parse(settings.policy.sources[actor.source]?.bots ?? [])
   return bots.find(entry => sameName(entry.id, actor.id))
 }
-/** Whether anyone may originate work: an allowed list names someone, or an installed Source counts every actor as allowed. */
-export const anyoneAllowed = (settings: Settings, sources: Pick<PolicySources, 'allMembers'> & { instances(): { id: string }[] }): boolean =>
-  Object.values(settings.policy.sources).some(part => part.allowed.length > 0) || sources.instances().some(({ id }) => sources.allMembers(id))
+/** Whether anyone may originate work: an allowed list names someone, or an enabled Source counts every actor as allowed. */
+export const anyoneAllowed = (settings: Settings, sources: Pick<PolicySources, 'allMembers'> & { instances(): { id: string; enabled: boolean }[] }):
+  boolean => Object.values(settings.policy.sources).some(part => part.allowed.length > 0)
+  || sources.instances().some(({ id, enabled }) => enabled && sources.allMembers(id))
 const senderName = (entry: z.infer<typeof AllowedSchema>): string => entry.name || entry.id
 
 /** Check whether a thread has tickets of its own (excluding context-only subscriptions). */

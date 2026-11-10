@@ -128,12 +128,31 @@ it('shows the switch on the panel, on while no relay part is stored, and only th
     .toEqual([true, false, false])
   // A stored relay part its kind refuses counts no member.
   expect(sources.allMembers('relay', stored({ relay: { allowed: [{ id: 'Not a member' }] } }))).toBe(false)
-  // With every allowed list empty, the members are who may originate work, until the switch is off.
+  // With every allowed list empty, the members are who may originate work, until the switch or the Source is off.
   const noAllowed = async () => ((await host.api('GET', 'overview')).body.problems as { kind: string }[]).some(problem => problem.kind === 'no-allowed')
   await savePolicy({ feishu: { allowed: [], syncChat: '' }, github: { allowed: [] } })
   expect(await noAllowed()).toBe(false)
+  const on = store.settings()
+  store.saveSettings({ ...on, sources: { ...on.sources, relay: { enabled: false, config: {} } } })
+  expect(await noAllowed()).toBe(true)
+  store.saveSettings(on)
   await savePolicy({ relay: { allMembers: false } })
   expect(await noAllowed()).toBe(true)
+})
+
+it('shows the main Session the relay part over its defaults while none is stored, and which Sources count every member', async () => {
+  const read = (resource: string) => host.runTool(host.runtime.masterId, 'orchestrator_read', { resource })
+  const policy = async () => (JSON.parse((await read('settings/policy') as { text: string }).text) as
+    { value: { sources: Record<string, unknown> } }).value
+  expect(await read('settings')).toMatchObject({ policy: { allowed: { relay: 0 }, all_members: ['relay'] } })
+  const value = await policy()
+  expect(value.sources.relay).toEqual({ allowed: [], allMembers: true, admission: {} })
+  // Saved back as read, the block stores the part it showed.
+  await host.runtime.settings.save('policy', value, host.runtime.store.blockRevision('policy'), 'panel')
+  expect(host.runtime.store.settings().policy.sources.relay).toEqual(value.sources.relay)
+  await savePolicy({ relay: { allowed: [{ id: ALICE }], allMembers: false } })
+  expect(await read('settings')).toMatchObject({ policy: { allowed: { relay: 1 }, all_members: [] } })
+  expect((await policy()).sources.relay).toEqual({ allowed: [{ id: ALICE }], allMembers: false, admission: {} })
 })
 
 it('receives nothing from a request DSH does not admit as a live project member', async () => {
