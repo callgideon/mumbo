@@ -108,7 +108,15 @@ export const config = () => ({
   // The most input tokens one image is charged when a box drops a response before its usage (openrouterBody
   // inputEstimate), and the charge for an image whose size cannot be read. Qwen-VL's own per-image maximum.
   openrouterImageTokens: atLeast('OPENROUTER_IMAGE_TOKENS', 0, 16384),
+  // B24: whether the MCP servers people add (the box user mcpserver) reach the workspace; see startScript.
+  mcpServerWorkspace: oneOf('MCP_SERVER_WORKSPACE', MCP_SERVER_WORKSPACE, 'none'),
 })
+/** A setting that must be one of `values`; anything else fails at start. */
+function oneOf(name, values, fallback) {
+  const value = env(name, fallback)
+  if (!values.includes(value)) throw new Error(`edge: ${name} must be one of ${values.join(', ')}, not ${JSON.stringify(value)}`)
+  return value
+}
 
 /** Address or @domain allowlist, lowercased (config()); an empty list admits nobody. The email compares lowercased. An
  *  @domain entry matches that exact domain only: @mumbo.si admits neither x@sub.mumbo.si nor x@evil-mumbo.si. An entry
@@ -212,6 +220,22 @@ export function welcomeInstructions(cfg) {
     'Then answer their message.',
   ].join('\n')
 }
+
+/** The box ports of dsh and of the desktop's live view (KasmVNC) on a template that ships PORTS_MARKER (template.mjs
+ *  PORTS_STEP): below 1024, where only root and Xkasmvnc (given cap_net_bind_service) may bind, so no other user can take
+ *  either port over and serve pages on the box's origin while dsh or KasmVNC is down (B24). The edge's routes, its health
+ *  check and the start script all take the numbers from here or from OLD_PORTS. */
+export const PORTS = { dsh: '880', live: '881' }
+/** The ports of a template without PORTS_MARKER, and of a box record without `ports` (a box created before the edge
+ *  recorded them). Drop this fallback once no such box remains (RUNBOOK "Agent containment (B24)"). */
+export const OLD_PORTS = { dsh: '3080', live: '6080' }
+/** The template's marker: one line, `<PORTS.dsh> <PORTS.live>`. The start script and portsOf read it. */
+export const PORTS_MARKER = '/usr/local/share/mumbo/ports'
+/** The image ships the B24 harness (the run-as subprocess provider with a server identity) when this file names
+ *  serverIdentity: the start script then writes the containment rows (containmentRows) and lays the box out for them. */
+const B24_SOURCE = '/src/packages/subprocess/subprocess-local/src/index.ts'
+/** What the MCP servers a person adds may do in the workspace (edge MCP_SERVER_WORKSPACE): `none`, `read` or `readwrite`. */
+export const MCP_SERVER_WORKSPACE = ['none', 'read', 'readwrite']
 
 export function boxSite(cfg, principal) {
   const id = principal.startsWith('project:') ? principal.slice('project:'.length) : undefined

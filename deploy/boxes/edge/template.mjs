@@ -2,8 +2,10 @@
 // starts it per user with that user's box token (edge/edge.mjs startScript).
 // Usage (needs the edge/node_modules e2b SDK and E2B_API_URL / E2B_SANDBOX_URL / E2B_API_KEY):
 //   ECR_PASSWORD=$(aws ecr get-login-password --region us-east-1) node template.mjs (inside the edge image, or from deploy/boxes/edge) <ecr image uri>
+import { dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Sandbox, Template } from 'e2b'
+import { PORTS, PORTS_MARKER } from './edge.mjs'
 // Usage: template.mjs <ecr image> [name=mumbo-box] [memoryMB=4096] [cpuCount=2]; children use: mumbo-child 2048.
 // MIN_AVAIL_MB (default 9216, 9 GiB): the least free space on / a box from the new build may have, or the script fails.
 export function templateArgs(argv, env = process.env) {
@@ -65,14 +67,44 @@ export const kasmvncStep = ({ version, sha256 } = KASMVNC) => {
   const pages = '/usr/share/kasmvnc/www/index.html /usr/share/kasmvnc/www/vnc.html'
   return `curl -fsSL -o ${deb} https://github.com/kasmtech/KasmVNC/releases/download/v${version}/${name} && echo "${sha256}  ${deb}" | sha256sum -c - && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${deb} && rm -rf ${deb} /var/lib/apt/lists/* && sed -i 's|</head>|${style}</head>|' ${pages} && for f in ${pages}; do grep -qF '${style}' "$f" || { echo "mumbo-box: no screen cap in $f" >&2; exit 1; }; done`
 }
+/** The template step that lets KasmVNC's server, which runs as the user xvnc, bind the live view's port below 1024 (edge
+ *  PORTS): file capability cap_net_bind_service on Xkasmvnc's real path, checked. */
+export const KASMVNC_BIND_STEP = 'x=$(readlink -f "$(command -v Xkasmvnc)") && setcap cap_net_bind_service=+ep "$x" && getcap "$x" | grep -q cap_net_bind_service'
+/** The template step that writes edge PORTS_MARKER: boxes from this template run dsh and the live view on edge PORTS, and
+ *  their start script treats a failed iptables rule as fatal. */
+export const PORTS_STEP = `install -d -m 0755 ${dirname(PORTS_MARKER)} && printf '%s\\n' '${PORTS.dsh} ${PORTS.live}' > ${PORTS_MARKER} && chmod 0644 ${PORTS_MARKER}`
+/** Agent containment's users and groups (B24, edge startScript), which the start script looks up by name at each start:
+ *  `agent` runs the model's commands and owns the workspace; `mcpserver` runs the MCP servers the person adds. A person
+ *  box adds `browsermcp` (the Playwright MCP server), `desktop` (the X clients of computer use and the Browser tab) and
+ *  `xsession` (the XFCE session). Group `shared` holds the Downloads (agent, browsermcp, xsession, beside browser);
+ *  `workspace` reads the workspace (xsession, and mcpserver when the edge's MCP_SERVER_WORKSPACE allows it); `desktop`,
+ *  desktop's own group, reads the X cookie (browser, xvnc, xsession). Homes are their users' alone, and the run-as
+ *  TMPDIRs exist. An ACL check fails the build on a filesystem the start script's setfacl would fail on. No account keeps
+ *  an empty password, so no user becomes another with su (E2B's own account `user` has sudo).
+ *  @param {boolean} person a person box (mumbo-box), not a project box
+ *  @returns {string[]} the steps */
+export const usersSteps = (person) => {
+  const users = ['agent', 'mcpserver', ...(person ? ['browsermcp', 'desktop', 'xsession'] : [])]
+  const shell = (u) => ['agent', 'xsession'].includes(u) ? '/bin/bash' : '/usr/sbin/nologin'
+  return [
+    ...users.map(u => `id ${u} >/dev/null 2>&1 || useradd -m -s ${shell(u)} ${u}`),
+    `groupadd -f workspace${person ? ' && for u in agent browsermcp xsession; do usermod -aG shared $u; done && usermod -aG workspace xsession && for u in browser xvnc xsession; do usermod -aG desktop $u; done' : ''}`,
+    `for u in ${users.join(' ')}; do chmod 0700 /home/$u; done && for u in ${['agent', ...(person ? ['browsermcp', 'desktop'] : [])].join(' ')}; do install -d -o $u -g $u -m 0700 /home/$u/tmp; done`,
+    'd=$(mktemp -d /var/tmp/acl.XXXXXX) && setfacl -m u:agent:x "$d" && setfacl -d -m g::rwx "$d" && rm -rf "$d"',
+    'awk -F: \'$2 == "" { print $1 }\' /etc/shadow | xargs -r -n1 passwd -l',
+    PORTS_STEP,
+  ]
+}
 /** The user's box is their computer: KasmVNC's display and live view, the XFCE desktop and Google Chrome stable from
  *  Google's apt repository (each build installs the current release). The edge's start script runs KasmVNC as the user
- *  `xvnc` and the rest as the user `browser`, and writes /usr/local/bin/google-chrome, the one way to start Chrome; the
- *  menu entry and XFCE's web browser are aimed at it here. */
+ *  `xvnc`, Chrome as the user `browser` and, on an image with the B24 harness, the XFCE session as `xsession` (before it,
+ *  as `browser`), and writes /usr/local/bin/google-chrome, the one way to start Chrome; the menu entry and XFCE's web
+ *  browser are aimed at it here. */
 export const BOX_STEPS = [
   ...(CHROME_SENSITIVE_SYNC ? [maskingGuardStep()] : []),
-  'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google-chrome.asc && chmod go+r /etc/apt/keyrings/google-chrome.asc && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xfce4-session xfwm4 xfce4-panel xfdesktop4 thunar xfce4-terminal tango-icon-theme librsvg2-common google-chrome-stable dbus-x11 xdotool wmctrl imagemagick xsel xauth fonts-noto-core fonts-noto-color-emoji fonts-noto-cjk procps && rm -rf /var/lib/apt/lists/*',
+  'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google-chrome.asc && chmod go+r /etc/apt/keyrings/google-chrome.asc && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xfce4-session xfwm4 xfce4-panel xfdesktop4 thunar xfce4-terminal tango-icon-theme librsvg2-common google-chrome-stable dbus-x11 xdotool wmctrl imagemagick xsel xauth fonts-noto-core fonts-noto-color-emoji fonts-noto-cjk procps iptables libcap2-bin acl && rm -rf /var/lib/apt/lists/*',
   kasmvncStep(),
+  KASMVNC_BIND_STEP,
   'id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser',
   // KasmVNC's server runs as its own system user, with no home or login, so browser cannot signal it or take its place.
   'id xvnc >/dev/null 2>&1 || useradd -r -U -M -d /nonexistent -s /usr/sbin/nologin xvnc',
@@ -82,6 +114,13 @@ export const BOX_STEPS = [
   chromePolicyStep(CHROME_SENSITIVE_SYNC),
   // The stock panels, without the panel's first-start dialog; XFCE's web browser and Chrome's menu entry start the box's Chrome.
   'cp /etc/xdg/xfce4/panel/default.xml /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml && sed -i "s/^WebBrowser=.*/WebBrowser=google-chrome/" /etc/xdg/xfce4/helpers.rc && install -d /usr/local/share/applications && sed "s#/usr/bin/google-chrome-stable#/usr/local/bin/google-chrome#" /usr/share/applications/google-chrome.desktop > /usr/local/share/applications/google-chrome.desktop',
+  ...usersSteps(true),
+]
+/** A project box is headless: git, gh (GitHub's apt repository) and openssl for the box-local GitHub proxy's CA, iptables
+ *  and acl for the start script, and agent containment's users. */
+export const PROJECT_STEPS = [
+  'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl gpg git openssl procps iptables acl && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*',
+  ...usersSteps(false),
 ]
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) await build(templateArgs(process.argv))
@@ -90,12 +129,7 @@ async function build({ image, name, memoryMB, cpuCount, minAvailMB }) {
 let tpl = Template().fromImage(image, { username: 'AWS', password: process.env.ECR_PASSWORD }).setUser('root')
 // Children (mumbo-child) stay headless.
 if (name.startsWith('mumbo-box')) tpl = tpl.runCmd(BOX_STEPS)
-// A project box is headless: git, gh (GitHub's apt repository) and openssl for the box-local GitHub proxy's CA.
-if (name.startsWith('mumbo-project')) {
-  tpl = tpl.runCmd([
-    'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl gpg git openssl procps && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*',
-  ])
-}
+if (name.startsWith('mumbo-project')) tpl = tpl.runCmd(PROJECT_STEPS)
 const info = await Template.build(tpl, name, { cpuCount, memoryMB })
 console.log('built', info.templateId, info.buildId)
 // Smoke: a box from the template has the app, no prior user data, curl for backups, and at least minAvailMB free on /.
