@@ -25,7 +25,7 @@ import {
   IconPanelLeftOutlineRegular, IconPinFillRegular, focusWithoutRing, isBehindModal, isDarwinDesktop, Menu, ShortcutKeys, Toast,
   Tooltip, useModalLayer, writeClipboard,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { InjectFace, PropsRenderFactories, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { InjectFace, PropsRenderFactories, PropsRenderSlots, PropsRuntime, SessionIdOf } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
   SidebarPanelActionsOwnerProps, SidebarPanelMetadata, SidebarRootComponentProps, SidebarRootInjected, SidebarSectionHookContext,
   SidebarSectionOwnerProps,
@@ -55,11 +55,10 @@ function localBuildVersion(): string | undefined {
     + (process.env.DSH_CLIENT_GIT_DIRTY === 'true' ? '-dirty' : '')
 }
 
-type PanelRowProps =
+type PanelRowViewProps =
   Pick<SidebarPanelMetadata, 'id' | 'label'>
   & Pick<SidebarSectionOwnerProps, 'wide'>
-  & Pick<PropsRuntime<'sidebar'>, 'usePanelInfo'>
-  & Pick<InjectFace<SidebarRootInjected>, 'selectPanel' | 'trackEntryClick' | 'setPinned'>
+  & Pick<InjectFace<SidebarRootInjected>, 'trackEntryClick' | 'setPinned'>
   & { readonly unpinLabel: string; readonly unpinTooltip: string; readonly canUnpin: boolean }
   & PropsRenderFactories
 
@@ -69,11 +68,15 @@ function officialEntry(id: string): 'plugin' | 'cron' | undefined {
   return id === 'schedules' ? 'cron' : undefined
 }
 
-/** Each panel row subscribes only to its own selection state. */
-function PanelRow({
-  id, label, wide, unpinLabel, unpinTooltip, canUnpin, usePanelInfo, selectPanel, setPinned, trackEntryClick, renderFactorySlot,
-}: PanelRowProps) {
-  const active = usePanelInfo(info => info.activePanelId === id)
+/** Whether a row always shows: Plugins and every Session row are never unpinned or listed in More. */
+function fixedPanel({ id, session }: Pick<SidebarPanelMetadata, 'id' | 'session'>): boolean {
+  return id === FIXED_PANEL_ID || session !== undefined
+}
+
+/** One navigation row; {@link PanelRow} and {@link SessionRow} supply its selected state and its action. */
+function PanelRowView({
+  id, label, wide, unpinLabel, unpinTooltip, canUnpin, active, onSelect, setPinned, trackEntryClick, renderFactorySlot,
+}: PanelRowViewProps & { readonly active: boolean; readonly onSelect: () => void }) {
   return (
     <div className={clsx(css.panelEntry, wide && css.panelEntryWide, active && css.panelEntryActive)}>
       <Tooltip label={label} delayMs={500} disabled={wide}>
@@ -85,7 +88,7 @@ function PanelRow({
           onClick={() => {
             const entry = officialEntry(id)
             if (entry !== undefined) trackEntryClick({ menu_name: entry, position: 'sidebar' })
-            selectPanel(id)
+            onSelect()
           }}
         >
           <span className={css.panelGlyph} aria-hidden="true">
@@ -111,6 +114,24 @@ function PanelRow({
       </Tooltip>}
     </div>
   )
+}
+
+/** Each panel row subscribes only to its own selection state. */
+function PanelRow({
+  usePanelInfo, selectPanel, ...view
+}: PanelRowViewProps & Pick<PropsRuntime<'sidebar'>, 'usePanelInfo'> & Pick<InjectFace<SidebarRootInjected>, 'selectPanel'>) {
+  const active = usePanelInfo(info => info.activePanelId === view.id)
+  return <PanelRowView {...view} active={active} onSelect={() => { selectPanel(view.id) }} />
+}
+
+/** A Session row is selected while its Session is the main view and no panel is selected. */
+function SessionRow({
+  session, usePanelInfo, useSessions, openSession, ...view
+}: PanelRowViewProps & Pick<PropsRuntime<'sidebar'>, 'usePanelInfo' | 'useSessions'>
+  & Pick<InjectFace<SidebarRootInjected>, 'openSession'> & { readonly session: SessionIdOf }) {
+  const conversation = usePanelInfo(info => info.activePanelId === null)
+  const shown = useSessions(list => (list.byId[session]?.retainedBy.mainView ?? 0) > 0)
+  return <PanelRowView {...view} active={conversation && shown} onSelect={() => { openSession(session) }} />
 }
 
 type PanelMoreMenuProps =
@@ -155,9 +176,11 @@ export function SidebarRoot({
   startSession,
   toggleSidebar,
   selectPanel,
+  openSession,
   setPinned,
   trackEntryClick,
   useRemoteAccess,
+  useSessions,
   usePanels,
   useEntryPins,
   useEntryActions,
@@ -409,33 +432,35 @@ export function SidebarRoot({
         >
           {panels.length > 0 && (
             <nav className={css.panelList} aria-label={t('panels.label')}>
-              {panels.filter(({ id }) => id === FIXED_PANEL_ID || !hasEntryActions || !unpinned.includes(id)).map(({ id, label }) => (
-                <PanelRow
-                  key={id}
-                  id={id}
-                  label={label}
-                  wide={wide}
-                  unpinLabel={t('panels.unpin', { name: label })}
-                  unpinTooltip={t('panels.unpinTooltip')}
-                  canUnpin={hasEntryActions && id !== FIXED_PANEL_ID}
-                  setPinned={setPinned}
-                  usePanelInfo={usePanelInfo}
-                  selectPanel={selectPanel}
-                  trackEntryClick={trackEntryClick}
-                  renderFactorySlot={renderFactorySlot}
-                />
-              ))}
+              {panels.filter(panel => fixedPanel(panel) || !hasEntryActions || !unpinned.includes(panel.id)).map((panel) => {
+                const view: PanelRowViewProps = {
+                  id: panel.id,
+                  label: panel.label,
+                  wide,
+                  unpinLabel: t('panels.unpin', { name: panel.label }),
+                  unpinTooltip: t('panels.unpinTooltip'),
+                  canUnpin: hasEntryActions && !fixedPanel(panel),
+                  setPinned,
+                  trackEntryClick,
+                  renderFactorySlot,
+                }
+                return panel.session === undefined
+                  ? <PanelRow key={panel.id} {...view} usePanelInfo={usePanelInfo} selectPanel={selectPanel} />
+                  : <SessionRow key={panel.id} {...view} session={panel.session} usePanelInfo={usePanelInfo} useSessions={useSessions}
+                    openSession={openSession} />
+              })}
               {hasEntryActions && (
                 <PanelMoreMenu
                   wide={wide}
                   label={t('panels.more')}
-                  entries={panels.filter(({ id }) => id !== FIXED_PANEL_ID)
+                  entries={panels.filter(panel => !fixedPanel(panel))
                     .map(({ id, label }) => ({ id, label, pinned: !unpinned.includes(id), active: id === activePanelId }))}
                   onOpen={(id) => {
                     const entry = officialEntry(id)
                     if (entry !== undefined) trackEntryClick({ menu_name: entry, position: 'sidebar_more' })
                     const panel = panels.find(candidate => candidate.id === id)
-                    if (panel !== undefined) selectPanel(panel.id)
+                    if (panel?.session !== undefined) openSession(panel.session)
+                    else if (panel !== undefined) selectPanel(panel.id)
                   }}
                   onPinnedChange={setPinned}
                   trackEntryClick={trackEntryClick}

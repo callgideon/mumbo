@@ -2,7 +2,7 @@
 import type {} from '@deepseek-ai/dsh-client-product-analytics/client'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
-import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
+import { resolveSlotLabel, type SessionIdOf } from '@deepseek-ai/dsh-client-ui-slots'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
@@ -42,6 +42,7 @@ const NS = 'sidebar'
 
 interface WorkspaceNavigation {
   startSession(workspaceId?: Parameters<SidebarRootInjected['startSession']>[0]): void
+  openSession(sessionId: SessionIdOf): void
 }
 
 /** Services required by the sidebar plugin. */
@@ -55,15 +56,17 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { en, ja, es, fr, de, ru, pt }), 'ui-sidebar: dictionaries')
   const panels = createSnapshotStore<readonly SidebarPanelMetadata[]>([])
   const syncPanels = (): void => {
-    const next = ctx.slots.entriesOfSlot('sidebar.panellist').map(({ options }) => {
-      // The list registration requires an id; StoredEntry erases the slot kind.
+    const next = ctx.slots.entriesOfSlot('sidebar.panellist').map(({ options, fields }): SidebarPanelMetadata => {
+      // The list registration requires an id, and its typed fields declare `session`; StoredEntry erases both.
       const id = options.id as MainPanelId
-      return { id, order: options.order ?? 0, label: resolveSlotLabel(options.label) ?? id }
+      const session = fields?.session as SessionIdOf | undefined
+      return { id, order: options.order ?? 0, label: resolveSlotLabel(options.label) ?? id, ...(session === undefined ? {} : { session }) }
     }).sort((a, b) => a.order - b.order)
     const previous = panels.getSnapshot()
     if (previous.length === next.length && previous.every((panel, index) => {
       const candidate = next[index] as SidebarPanelMetadata
       return panel.id === candidate.id && panel.order === candidate.order && panel.label === candidate.label
+        && panel.session === candidate.session
     })) return
     panels.set(next)
   }
@@ -81,6 +84,7 @@ export function apply(ctx: ClientContext): void {
     startSession: (workspaceId) => { workspaceNavigation.startSession(workspaceId) },
     toggleSidebar: () => { ctx.layout.toggleSidebar() },
     selectPanel: (id) => { ctx.layout.selectPanel(id) },
+    openSession: (sessionId) => { workspaceNavigation.openSession(sessionId) },
     setPinned: panelPins.setPinned,
     trackEntryClick: (attributes) => { ctx.get('productAnalytics')?.track('sidebar_menu_click', attributes) },
     hooks: { panels, shortcuts: ctx.shortcuts.catalog, entryPins: panelPins.unpinned, entryActions },
