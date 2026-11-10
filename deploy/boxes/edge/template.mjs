@@ -73,14 +73,15 @@ export const KASMVNC_BIND_STEP = 'x=$(readlink -f "$(command -v Xkasmvnc)") && s
 /** The template step that writes edge PORTS_MARKER: boxes from this template run dsh and the live view on edge PORTS, and
  *  their start script treats a failed iptables rule as fatal. */
 export const PORTS_STEP = `install -d -m 0755 ${dirname(PORTS_MARKER)} && printf '%s\\n' '${PORTS.dsh} ${PORTS.live}' > ${PORTS_MARKER} && chmod 0644 ${PORTS_MARKER}`
-/** Agent containment's users and groups (B24, edge startScript), which the start script looks up by name at each start:
- *  `agent` runs the model's commands and owns the workspace; `mcpserver` runs the MCP servers the person adds. A person
- *  box adds `browsermcp` (the Playwright MCP server), `desktop` (the X clients of computer use and the Browser tab) and
- *  `xsession` (the XFCE session). Group `shared` holds the Downloads (agent, browsermcp, xsession, beside browser);
- *  `workspace` reads the workspace (xsession, and mcpserver when the edge's MCP_SERVER_WORKSPACE allows it); `desktop`,
- *  desktop's own group, reads the X cookie (browser, xvnc, xsession). Homes are their users' alone, and the run-as
- *  TMPDIRs exist. An ACL check fails the build on a filesystem the start script's setfacl would fail on. No account keeps
- *  an empty password, so no user becomes another with su (E2B's own account `user` has sudo).
+/** Agent containment's users and groups (B24, edge startScript), which the start script looks up by name at each start
+ *  and writes into the containment rows by id, since E2B's own account `user` can take any id: `agent` runs the model's
+ *  commands and owns the workspace; `mcpserver` runs the MCP servers the person adds. A person box adds `browsermcp` (the
+ *  Playwright MCP server), `desktop` (the X clients of computer use and the Browser tab) and `xsession` (the XFCE
+ *  session). Group `shared` holds the Downloads (agent, browsermcp, xsession, beside browser); `workspace` the workspace
+ *  (agent and xsession; mcpserver joins at start with the edge's MCP_SERVER_WORKSPACE `readwrite`, and `workspace-read`
+ *  with `read`); `desktop`, desktop's own group, reads the X cookie (browser, xvnc, xsession). Homes are their users'
+ *  alone, and the run-as TMPDIRs exist. An ACL check fails the build on a filesystem the start script's setfacl would
+ *  fail on. No account keeps an empty password; the start script also takes the set-user-ID bit off su and sudo.
  *  @param {boolean} person a person box (mumbo-box), not a project box
  *  @returns {string[]} the steps */
 export const usersSteps = (person) => {
@@ -88,9 +89,9 @@ export const usersSteps = (person) => {
   const shell = (u) => ['agent', 'xsession'].includes(u) ? '/bin/bash' : '/usr/sbin/nologin'
   return [
     ...users.map(u => `id ${u} >/dev/null 2>&1 || useradd -m -s ${shell(u)} ${u}`),
-    `groupadd -f workspace${person ? ' && for u in agent browsermcp xsession; do usermod -aG shared $u; done && usermod -aG workspace xsession && for u in browser xvnc xsession; do usermod -aG desktop $u; done' : ''}`,
+    `groupadd -f workspace && groupadd -f workspace-read && usermod -aG workspace agent${person ? ' && for u in agent browsermcp xsession; do usermod -aG shared $u; done && usermod -aG workspace xsession && for u in browser xvnc xsession; do usermod -aG desktop $u; done' : ''}`,
     `for u in ${users.join(' ')}; do chmod 0700 /home/$u; done && for u in ${['agent', ...(person ? ['browsermcp', 'desktop'] : [])].join(' ')}; do install -d -o $u -g $u -m 0700 /home/$u/tmp; done`,
-    'd=$(mktemp -d /var/tmp/acl.XXXXXX) && setfacl -m u:agent:x "$d" && setfacl -d -m g::rwx "$d" && rm -rf "$d"',
+    'd=$(mktemp -d /var/tmp/acl.XXXXXX) && setfacl --set u::rwx,g::rwx,g:workspace-read:r-x,m::rwx,o::--- "$d" && getfacl -p "$d" | grep -qx group:workspace-read:r-x && rm -rf "$d"',
     'awk -F: \'$2 == "" { print $1 }\' /etc/shadow | xargs -r -n1 passwd -l',
     PORTS_STEP,
   ]

@@ -17,8 +17,12 @@ const person = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, {})
 const at = (text, needle) => { const i = text.indexOf(needle); assert.ok(i >= 0, `missing: ${needle}`); return i }
 /** The body the start script writes to `path` with a quoted heredoc. */
 const heredoc = (path) => { const head = `cat > ${path} <<'SH'\n`; const i = at(person, head) + head.length; return person.slice(i, person.indexOf('\nSH\n', i) + 1) }
-/** The whole desktop block, run as start.sh runs it (`set -eu`, `$ip` set); it appends `reached` to log/dsh when dsh's start would run. */
-const block = () => `set -eu\nip=127.0.0.1\n${person.slice(at(person, 'if id browser >/dev/null 2>&1; then'), person.indexOf('\nfi\n', at(person, '/usr/local/bin/mumbo-browser >/tmp/chrome.log')) + 4)}echo reached >> /tmp/dsh\n`
+/** What start.sh sets before the desktop block: the template gate, the live view's port (the marker's on a B24 template,
+ *  edge PORTS) and the firewall helper. */
+const prelude = (b24 = '') => `B24_TEMPLATE=${b24} IP6= LIVE_PORT=${b24 ? '881' : '6080'}\n${person.split('\n').find(l => l.startsWith('rule() { '))}\n`
+/** The whole desktop block, run as start.sh runs it (`set -eu`, `$ip` set); it appends `reached` to log/dsh when dsh's
+ *  start would run. `b24`: on a template with the B24 marker. */
+const block = (b24) => `set -eu\nip=127.0.0.1\n${prelude(b24)}${person.slice(at(person, 'if id browser >/dev/null 2>&1; then'), person.indexOf('\nfi\n', at(person, '/usr/local/bin/mumbo-browser >/tmp/chrome.log')) + 4)}echo reached >> /tmp/dsh\n`
 /** The test's own user stands in for browser, and one of its supplementary groups, if any, for shared. */
 const USER = userInfo().username
 const GROUP = execFileSync('id', ['-Gn'], { encoding: 'utf8' }).trim().split(' ')[1]
@@ -68,14 +72,15 @@ function box() {
   return b
 }
 
-test('person start script: XFCE as browser on :1 with bash as its shell, Chrome on its own new profile with CDP on loopback, the shared Downloads repaired', () => {
-  assert.ok(person.includes(`pgrep -f /usr/local/bin/mumbo-desktop >/dev/null || su browser -s /bin/sh -c 'SHELL=/bin/bash DISPLAY=:1 /usr/local/bin/mumbo-desktop >/tmp/desktop.log 2>&1 &'\n`))
+test('person start script: XFCE on :1 with bash as its shell (as xsession on the B24 template, browser before it), Chrome on its own new profile with CDP on loopback, the shared Downloads repaired', () => {
+  assert.ok(person.includes(`pgrep -f /usr/local/bin/mumbo-desktop >/dev/null || su "$SESSION_USER" -s /bin/sh -c 'SHELL=/bin/bash DISPLAY=:1 /usr/local/bin/mumbo-desktop >/tmp/desktop.log 2>&1 &'\n`))
+  assert.ok(person.includes('\n  SESSION_USER=browser X_OWNER=browser:xvnc\n  if [ -n "$B24_TEMPLATE" ]; then SESSION_USER=xsession X_OWNER=root:desktop; fi\n'))
   assert.ok(person.includes(`pgrep -f /usr/local/bin/mumbo-browser >/dev/null || su browser -s /bin/sh -c 'DISPLAY=:1 /usr/local/bin/mumbo-browser >/tmp/chrome.log 2>&1 &'\n`))
   assert.ok(person.includes(`\n  if getent group shared >/dev/null 2>&1 && [ ! -L /home/shared ] && [ ! -L /home/shared/Downloads ]; then install -d -o browser -g shared -m 2770 /home/shared/Downloads 2>/dev/null || echo 'shared downloads folder not repaired' >&2; fi\n`))
   assert.ok(at(person, 'install -d -o browser -g shared') < at(person, "DISPLAY=:1 /usr/local/bin/mumbo-browser"))
   assert.ok(heredoc('/usr/local/bin/mumbo-browser').startsWith('#!/bin/sh\nchmod 0700 /home/browser/\nif [ -d /home/browser/Downloads ] && [ ! -L /home/browser/Downloads ] && [ -d /home/shared/Downloads ]; then\n'))
-  assert.equal(heredoc('/usr/local/bin/google-chrome'), '#!/bin/sh\nb=$(command -v google-chrome-stable) && p=/home/browser/chrome-profile || { b=chromium; p=/home/browser/profile; }\n[ "$(id -un)" = browser ] || exec "$b" "$@"\nexec "$b" --user-data-dir=$p --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --no-first-run --no-default-browser-check --password-store=basic --start-maximized "$@"\n')
-  assert.ok(at(person, 'export XAUTHORITY=/run/x11/auth') < at(person, 'su browser -s /bin/sh -c \'SHELL=/bin/bash DISPLAY=:1 /usr/local/bin/mumbo-desktop'))
+  assert.equal(heredoc('/usr/local/bin/google-chrome'), '#!/bin/sh\nb=$(command -v google-chrome-stable) && p=/home/browser/chrome-profile || { b=chromium; p=/home/browser/profile; }\n[ "$(id -un)" != xsession ] || exec wmctrl -x -a google-chrome\n[ "$(id -un)" = browser ] || exec "$b" "$@"\nexec "$b" --user-data-dir=$p --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --no-first-run --no-default-browser-check --password-store=basic --start-maximized "$@"\n')
+  assert.ok(at(person, 'export XAUTHORITY=/run/x11/auth') < at(person, 'su "$SESSION_USER" -s /bin/sh -c \'SHELL=/bin/bash DISPLAY=:1 /usr/local/bin/mumbo-desktop'))
   // The display server, KasmVNC's or the older template's, starts before the desktop session and the browser.
   for (const server of ['Xkasmvnc :1', 'Xvfb :1', 'x11vnc -display :1']) assert.ok(at(person, server) < at(person, 'DISPLAY=:1 /usr/local/bin/mumbo-desktop'), server)
   assert.ok(person.includes('127.0.0.1:5900 >/root/websockify.log 2>&1 &\n'), 'root logs to its own directory, not to a /tmp name browser can plant')
@@ -85,12 +90,12 @@ test('person start script: XFCE as browser on :1 with bash as its shell, Chrome 
 })
 
 /** The arguments the start script gives KasmVNC on a box with the X cookie at `auth` and address 127.0.0.1, flag by flag. */
-const xvncArgs = (auth) => [
+const xvncArgs = (auth, port = '6080') => [
   [':1'],
   ['-auth', auth],  // only cookie holders (browser, root) reach :1, as with Xvfb
   ['-geometry', '1600x900'], ['-depth', '24'],  // the cap is also the size before a viewer resizes; Chrome needs 24 bits
   ['-nolisten', 'tcp'],  // X itself on its local socket only
-  ['-interface', '127.0.0.1'], ['-websocketPort', '6080'],  // the box address and port websockify used, which the edge reaches
+  ['-interface', '127.0.0.1'], ['-websocketPort', port],  // the box address and the live view's port, which the edge reaches
   ['-httpd', '/usr/share/kasmvnc/www'],  // its web client at /
   ['-DisableBasicAuth'], ['-sslOnly=0'], ['-SecurityTypes', 'None'],  // its own login, TLS and VNC password off: the edge is the gate
   ['-PublicIP', '127.0.0.1'],  // no STUN query at start
@@ -116,6 +121,36 @@ test('KasmVNC runs as xvnc on :1 with the X cookie and each flag, once per re-ru
     assert.deepEqual([b.lines('chown').map(l => l.replaceAll(b.t, 'T')), statSync(join(b.t, 'run/x11/auth')).mode & 0o777], [['browser T/run/x11/auth', 'browser:xvnc T/run/x11/auth', 'browser:xvnc T/run/x11/auth'], 0o640])
     assert.deepEqual([b.lines('old'), b.lines('dsh')], [[], ['reached', 'reached']])
   } finally { b.done() }
+})
+
+test('B24 template: the live view on the marker\'s port, the X cookie root:desktop 0640, XFCE as xsession and Chrome as browser, and every INPUT rule fatal', async () => {
+  /** The desktop block on a B24 template (or before it) with `iptables` the fake's body; what it started, as T paths. */
+  const run = async (iptables, b24 = '1') => {
+    const b = box()
+    try {
+      b.fake('xauth', 'printf cookie > "$3"'); b.fake('mcookie', 'echo 0123'); b.fake('chown', `echo "$*" >> ${b.t}/log/chown`)
+      b.fake('su', `echo "$1" >> ${b.t}/log/su; export SHELL="$3"; exec /bin/sh -c "$5"`)
+      b.fake('iptables', iptables(b.t))
+      b.fake('startxfce4', 'sleep 30'); b.fake('google-chrome-stable', `${VERSION}sleep 30`)
+      b.run(b.local(block(b24)))
+      await sleep(1500)
+      const auth = join(b.t, 'run/x11/auth')
+      return { xvnc: b.lines('xvnc').map(l => l.replaceAll(b.t, 'T')), chown: b.lines('chown').map(l => l.replaceAll(b.t, 'T')), su: b.lines('su').sort(), iptables: b.lines('iptables'), dsh: b.lines('dsh'), mode: existsSync(auth) ? statSync(auth).mode & 0o777 : undefined }
+    } finally { b.done() }
+  }
+  // Each rule is checked (-C) and, when absent, inserted (-I).
+  const r = await run((t) => `echo "$*" >> ${t}/log/iptables; [ "$1" != -C ]`)
+  assert.deepEqual(r.xvnc, [xvncArgs('T/run/x11/auth', '881')])
+  assert.deepEqual([r.chown, r.mode], [['browser T/run/x11/auth', 'root:desktop T/run/x11/auth'], 0o640])
+  assert.deepEqual(r.su, ['browser', 'xsession', 'xvnc'])
+  assert.deepEqual(r.iptables.filter(l => l.startsWith('-I')), ['-I INPUT -p tcp --dport 9222 ! -i lo -j DROP', '-I INPUT -p tcp --dport 5900:5999 ! -i lo -j DROP', '-I INPUT -p udp --dport 881 ! -i lo -j DROP'])
+  assert.deepEqual(r.dsh, ['reached'])
+  // A rule that cannot be inserted stops the script before any of the desktop starts.
+  const failed = await run(() => 'exit 1')
+  assert.deepEqual([failed.xvnc, failed.su, failed.dsh], [[], [], []])
+  // Before the marker a failed rule is passed over, as before, and the session and cookie stay browser's.
+  const before = await run(() => 'exit 1', '')
+  assert.deepEqual([before.su, before.chown, before.dsh], [['browser', 'browser', 'xvnc'], ['browser T/run/x11/auth', 'browser:xvnc T/run/x11/auth'], ['reached']])
 })
 
 test('the RUNBOOK\'s desktop section names the pinned KasmVNC, every flag the start script gives it with its value, and the measurements', () => {
@@ -305,7 +340,7 @@ test('the browser loop keeps its home 0700 and moves ~/Downloads into the shared
   } finally { b.done() }
 })
 
-test('with Google Chrome the old Chromium profile is moved once, as browser, to ~/.chromium-profile-old with mode 0700, never through a symlink', () => {
+test('with Google Chrome the old Chromium profile and the copy B18 moved aside are deleted, as browser, at every start, never through a symlink (B24)', () => {
   const pre = heredoc('/usr/local/bin/mumbo-browser').split('while :; do')[0]
   const b = box()
   try {
@@ -315,26 +350,24 @@ test('with Google Chrome the old Chromium profile is moved once, as browser, to 
       writeFileSync(join(b.t, 'pre.sh'), b.local(pre)); execFileSync('/bin/sh', [join(b.t, 'pre.sh')], { env: { PATH: join(b.t, 'fake') } })
       return readdirSync(home).sort()
     }
-    const profile = () => { mkdirSync(join(home, 'profile/Default'), { recursive: true }); writeFileSync(join(home, 'profile/Default/Login Data'), 'old passwords'); chmodSync(join(home, 'profile'), 0o755) }
+    const profile = (dir) => { mkdirSync(join(dir, 'Default'), { recursive: true }); writeFileSync(join(dir, 'Default/Login Data'), 'old passwords'); chmodSync(dir, 0o755) }
+    mkdirSync(join(home, 'chrome-profile'))
     // The Chromium fallback keeps its profile in place.
-    profile()
-    assert.deepEqual(run(false), ['profile'])
-    // Google Chrome: moved once, readable by browser only.
-    assert.deepEqual(run(), ['.chromium-profile-old'])
-    assert.equal(readFileSync(join(old, 'Default/Login Data'), 'utf8'), 'old passwords')
-    assert.equal(statSync(old).mode & 0o777, 0o700)
-    // Once: a later profile is not moved over it.
-    profile()
-    assert.deepEqual(run(), ['.chromium-profile-old', 'profile'])
-    assert.equal(readFileSync(join(old, 'Default/Login Data'), 'utf8'), 'old passwords')
-    // A symlink planted at the target, or a symlinked profile, is never moved through or moved.
-    rmSync(old, { recursive: true }); symlinkSync(join(b.t, 'outside'), old)
-    const mode = statSync(join(b.t, 'outside')).mode
-    assert.deepEqual(run(), ['.chromium-profile-old', 'profile'])
-    assert.deepEqual([readdirSync(join(b.t, 'outside')), statSync(join(b.t, 'outside')).mode], [[], mode])
-    rmSync(old); rmSync(join(home, 'profile'), { recursive: true }); symlinkSync(join(b.t, 'outside'), join(home, 'profile'))
-    assert.deepEqual(run(), ['profile'])
-    assert.ok(lstatSync(join(home, 'profile')).isSymbolicLink())
+    profile(join(home, 'profile'))
+    assert.deepEqual(run(false), ['chrome-profile', 'profile'])
+    // Google Chrome: both go, Chrome's own profile stays; a repeat, and a restored backup's ~/profile, are deleted again.
+    profile(old)
+    assert.deepEqual(run(), ['chrome-profile'])
+    assert.deepEqual(run(), ['chrome-profile'])
+    profile(join(home, 'profile'))
+    assert.deepEqual(run(), ['chrome-profile'])
+    // A symlink planted at either name is removed, never what it points at.
+    writeFileSync(join(b.t, 'outside/keep'), 'keep')
+    symlinkSync(join(b.t, 'outside'), old); symlinkSync(join(b.t, 'outside'), join(home, 'profile'))
+    assert.deepEqual(run(), ['chrome-profile'])
+    assert.deepEqual([readdirSync(join(b.t, 'outside')), readFileSync(join(b.t, 'outside/keep'), 'utf8')], [['keep'], 'keep'])
+    // It runs as browser: the start script starts the loop through su browser.
+    assert.ok(person.includes("su browser -s /bin/sh -c 'DISPLAY=:1 /usr/local/bin/mumbo-browser"))
   } finally { b.done() }
 })
 

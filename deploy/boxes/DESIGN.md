@@ -23,7 +23,7 @@ flowchart LR
   O -->|X-Forwarded-Email| R[edge router :8080]
   R -->|SDK: list / create / connect / pause| API[E2B API :3000]
   R -->|HTTP + WS, E2b-Sandbox-Id, traffic token| CP[E2B client-proxy :3002]
-  CP -->|Host masked to boxes.mumbo.si| BOX[box VM: dsh web :3080]
+  CP -->|Host masked to boxes.mumbo.si| BOX[box VM: dsh web :880]
   BOX -->|https llm.boxes.mumbo.si, x-api-key = box token| C
   C --> M[edge model host :8081]
   M -->|server key| DS[(api.deepseek.com)]
@@ -44,7 +44,7 @@ Code: `edge/edge.mjs` (router and model host in one Node process), `edge/compose
 
    Then restore the user's backup inside the box, write `start.sh` and start `dsh web`. Measured: 8.3 s.
 4. A paused box, or one unknown to this edge process, is connected (resumed, 0.5–2.3 s). If `dsh` does not answer, `start.sh` is re-run in place.
-5. The router reads the launch token from `/root/dsh.log`. It proxies with `E2b-Sandbox-Id`, `E2b-Sandbox-Port: 3080` and the box's `e2b-traffic-access-token`, and drops the client's identity, auth and `e2b-*` headers.
+5. The router reads the launch token from `/root/dsh.log`. It proxies with `E2b-Sandbox-Id`, `E2b-Sandbox-Port` (the box's dsh port from its record: 880, or 3080 for a box from a template before B24, RUNBOOK "Agent containment (B24)") and the box's `e2b-traffic-access-token`, and drops the client's identity, auth and `e2b-*` headers.
    - A request with no `dsh-auth-*` cookie and no token gets a 302 to `/?token=…`.
    - A navigation answered 401 (a stale cookie from another account or an older box) gets the same 302.
    - `Secure` is added to every Set-Cookie.
@@ -88,6 +88,7 @@ E2B's own `onTimeout: pause` (15 minutes later) is the safety net if the edge is
 **First-run welcome** (spec section 17a, step 5).
 - While `/root/.dsh/welcomed` is absent, a person box's `start.sh` mounts `@deepseek-ai/dsh-hooks-claude-code` with one `UserPromptSubmit` hook. The hook creates the marker with noclobber. Only the prompt whose hook created it gets the welcome (`welcomeInstructions` in `edge.mjs`) as added context. Project boxes have no welcome. The role `AGENTS.md` cannot carry it, because dsh reads that file into every new session.
 - The marker means the box has been welcomed, or had sessions before it could be. `start.sh` also creates it, with no welcome, when dsh's sessions root `/root/.dsh/sessions` holds any file: a restart, or a restore from a backup taken before the welcome existed. A chat opened but never sent to may count as a session. The marker is under `/root/.dsh`, so backups carry it.
+- Under agent containment (B24) the hook runs as `agent`, so the marker is `/home/agent/.mumbo-welcome/welcomed` and the message `/home/agent/.mumbo-welcome/message.json`, both written as `agent`. Backups leave them out; a restored box has sessions, so `start.sh` marks it. The operator commands below then name that marker and run as `agent` (`su -s /bin/sh agent -c '…'`).
 - The bridge is mounted only on starts where the marker is absent: from a new box's first start until its first start after the welcome. Until then each prompt runs a no-op hook (about 8 ms) and logs `hook/invoked` and `hook/result`.
 - Delivery is at most once. The marker exists before the model sees the welcome, so a failed first turn (model error, abort) loses it. This is accepted.
 - dsh runs hooks through its shell service under the box's `sandbox-policy`, without approval. They run because `mumbo.overlay.yml` sets `danger-full-access`. Under `workspace-write` on a host without bubblewrap or Landlock, dsh refuses the hook and nobody is welcomed.

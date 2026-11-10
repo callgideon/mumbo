@@ -2,30 +2,38 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { registerHooks } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { WELCOMED, welcomeInstructions, startScript, boxSite, backupCommand, restoreCommand } from './edge.mjs'
+import { WELCOMED, AGENT_WELCOME, welcomeInstructions, startScript, boxSite, backupCommand, restoreCommand } from './edge.mjs'
 
 const c = { llmHost: 'l', publicHost: 'boxes.x', projectDomain: 'boxes.x' }
-const sh = (script) => execFileSync('sh', ['-c', script], { encoding: 'utf8' })
+const sh = (script, env = process.env) => execFileSync('sh', ['-c', script], { encoding: 'utf8', env })
 const bridge = new URL('../../../packages/experimental/hooks-claude-code/', import.meta.url)
 
-/** A temp filesystem root with the person start script's welcome block, run as start.sh would; `start()` returns $WELCOME_PATCH. */
-function box() {
+/** A temp filesystem root with the person start script's welcome block, run as start.sh would; `start()` returns
+ *  $WELCOME_PATCH. `b24`: an image with agent containment, where su (a fake that logs the user to `su` and runs the
+ *  command as the test's user) stands in for agent, whose home is home/agent. */
+function box(b24 = '') {
   const script = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role')
   const from = script.indexOf('# First-run welcome')
+  const end = 'WELCOME_PATCH="--patch /root/.mumbo/welcome.overlay.yml"\nfi\n'
   assert.ok(from > 0)
   const root = mkdtempSync(join(tmpdir(), 'welcome-'))
   mkdirSync(join(root, 'root/.dsh'), { recursive: true })
   mkdirSync(join(root, 'root/.mumbo'))
-  const block = script.slice(from, script.indexOf('\nfi\n', script.indexOf('WELCOME_PATCH=', from)) + 4).replaceAll('/root/', `${root}/root/`)
+  mkdirSync(join(root, 'home/agent'), { recursive: true })
+  mkdirSync(join(root, 'bin'))
+  writeFileSync(join(root, 'bin/su'), `#!/bin/sh\necho "$1" >> ${root}/su\nexec /bin/sh -c "$5"\n`); chmodSync(join(root, 'bin/su'), 0o755)
+  const env = { ...process.env, PATH: `${root}/bin:${process.env.PATH}` }
+  const block = script.slice(from, script.indexOf(end, from) + end.length).replaceAll('/root/', `${root}/root/`).replaceAll('/home/agent/', `${root}/home/agent/`)
   const at = (path) => join(root, path)
   return {
     root, at,
-    start: () => sh(`set -eu\n${block}echo "$WELCOME_PATCH"`).trim(),
+    start: () => sh(`set -eu\nB24_IMAGE=${b24}\n${block}echo "$WELCOME_PATCH"`, env).trim(),
     prompt: () => sh(JSON.parse(readFileSync(at('root/.mumbo/welcome-hooks.json'), 'utf8')).UserPromptSubmit[0].hooks[0].command),
+    su: () => existsSync(at('su')) ? readFileSync(at('su'), 'utf8') : '',
     done: () => rmSync(root, { recursive: true, force: true }),
   }
 }
@@ -86,7 +94,32 @@ test('project boxes get no welcome', () => {
   assert.ok(!p.includes('WELCOME') && !p.includes('welcome'))
 })
 
-test('the welcome marker lives in the backed-up tree, so a restored box is not welcomed again', () => {
+test('under agent containment (B24) the hook runs as agent: its marker and message are agent\'s, written as agent, and a restored box is marked, not welcomed', () => {
+  const marker = join(AGENT_WELCOME, 'welcomed').slice(1)
+  const b = box('1')
+  try {
+    assert.equal(b.start(), `--patch ${b.root}/root/.mumbo/welcome.overlay.yml`)
+    assert.equal(b.su(), 'agent\n', 'root writes nothing in agent\'s home')
+    assert.ok(!existsSync(b.at('root/.mumbo/welcome.json')) && !existsSync(b.at(WELCOMED.slice(1))))
+    // The hook, as agent: one welcome, which creates agent's own marker.
+    assert.deepEqual(JSON.parse(b.prompt()), { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: welcomeInstructions(c) } })
+    assert.ok(existsSync(b.at(marker)))
+    assert.equal(b.prompt(), '')
+    assert.equal(b.start(), '', 'a restart of a welcomed box mounts no hook')
+    assert.equal(b.su(), 'agent\n')
+  } finally { b.done() }
+  // Backups leave agent's home out; a box restored with sessions is marked, as agent, instead.
+  const r = box('1')
+  try {
+    mkdirSync(r.at('root/.dsh/sessions/s'), { recursive: true }); writeFileSync(r.at('root/.dsh/sessions/s/log'), 'x')
+    assert.equal(r.start(), '')
+    assert.ok(existsSync(r.at(marker)))
+    assert.equal(r.su(), 'agent\n')
+    assert.ok(!existsSync(r.at('root/.mumbo/welcome-hooks.json')))
+  } finally { r.done() }
+})
+
+test('the welcome marker lives in the backed-up tree, so a restored box is not welcomed again (before containment)', () => {
   assert.ok(WELCOMED.startsWith('/root/.dsh/'))
   const root = mkdtempSync(join(tmpdir(), 'welcome-bk-'))
   const target = `file://${root}.tgz`

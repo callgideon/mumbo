@@ -1,5 +1,6 @@
 #!/bin/sh
-# gh in a project box (/root/.mumbo/bin/gh). gh goes through the box-local GitHub proxy, which replaces the placeholder
+# gh in a project box (/usr/local/lib/mumbo/bin/gh, root's and readable by every user, so the agent's commands run it too;
+# /root/.mumbo/bin/gh links to it). gh goes through the box-local GitHub proxy, which replaces the placeholder
 # token with the box token; the edge's GitHub forwarder then swaps in the project's mumbo-bot App installation token.
 # gh refuses to run without a token, hence the placeholder. The edge reads this file at start and hands it to
 # startScript as boxFiles.gh.
