@@ -7,11 +7,12 @@
  * caller's config (the bash executor's, the LSP host's, …). The provider
  * config `runAs` starts every child on Linux as a fixed non-root identity with
  * an explicit environment; `identities` adds further such identities that a
- * spawn spec selects by name.
+ * spawn spec selects by name. A run-as child never receives this process's
+ * standard output or error: output a spec asks to inherit is read and discarded.
  * @module @deepseek-ai/dsh-subprocess-local
  */
 
-import { constants } from 'node:fs'
+import { constants, statSync } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
 import { tmpdir, userInfo } from 'node:os'
 import { delimiter, extname, isAbsolute, resolve } from 'node:path'
@@ -51,7 +52,10 @@ import {
   systemdRunIdentity,
 } from './linux-scope.ts'
 import type { LinuxTerminalBootstrapLaunch, LinuxTerminalScopeLaunch } from './linux-scope.ts'
-import { assertNoSecretNames, assertRunAsHost, credentialsOf, IDENTITY_NAME, RunAs, runAsEnvironment, validateRunAs } from './run-as.ts'
+import {
+  assertNoSecretNames, assertPrivateDirectory, assertRunAsHost, assertSearchable, credentialsOf, IDENTITY_NAME, RunAs,
+  runAsEnvironment, validateRunAs,
+} from './run-as.ts'
 import type { RunAsIdentity } from './run-as.ts'
 import { LinuxScopeSelector } from './linux-scope-selector.ts'
 import type { LinuxScopeDecision } from './linux-scope-selector.ts'
@@ -77,6 +81,53 @@ export interface Config {
    * listed here is refused.
    */
   identities?: Record<string, RunAs> | undefined
+  /**
+   * Absolute existing directory that receives each interactive shell's private activity records; omitted, the OS
+   * temporary directory. Under `runAs` it must be writable by no other user, directly or through an ancestor, and
+   * searchable by the run-as user through every ancestor, so a root-only temporary directory needs this set.
+   */
+  shellActivityDirectory?: string | undefined
+  /**
+   * Absolute existing directory that receives spill files, created mode `0640`; omitted, a private per-process
+   * directory under the OS temporary directory. Under `runAs` it must be writable by no other user, directly or
+   * through an ancestor.
+   */
+  spillDirectory?: string | undefined
+}
+
+/** The directories a provider writes into, resolved from its config. */
+interface Directories {
+  /** Parent of each interactive shell's activity record directory. */
+  shellActivity: string
+  /** Spill file directory; undefined selects the private per-process directory. */
+  spill: string | undefined
+}
+
+/**
+ * Resolve and check the directories of a provider config, failing at load on any unusable entry.
+ * @param config - the provider config.
+ * @returns the resolved directories.
+ * @throws when an entry is not an absolute existing directory, or under `runAs` fails its ownership or search check.
+ */
+function resolveDirectories(config: Config): Directories {
+  for (const [field, path] of [['shellActivityDirectory', config.shellActivityDirectory], ['spillDirectory', config.spillDirectory]] as const) {
+    if (path === undefined) continue
+    let directory = false
+    try {
+      directory = isAbsolute(path) && statSync(path).isDirectory()
+    } catch (_missing) {
+      // Reported below as not an existing directory.
+    }
+    if (!directory) throw new Error(`subprocess-local: ${field} ${JSON.stringify(path)} must be an absolute existing directory`)
+  }
+  const directories = { shellActivity: config.shellActivityDirectory ?? tmpdir(), spill: config.spillDirectory }
+  const runAs = config.runAs
+  if (runAs === undefined) return directories
+  const unshared = (field: string, path: string): string => `subprocess-local: ${field} ${JSON.stringify(path)} must be owned by this process and writable by no other user, directly or through an ancestor`
+  const shellActivity = assertPrivateDirectory(directories.shellActivity, unshared(config.shellActivityDirectory === undefined ? 'shellActivityDirectory (the temporary directory)' : 'shellActivityDirectory', directories.shellActivity))
+  assertSearchable(shellActivity, credentialsOf(runAs), path => `subprocess-local: the run-as user (uid ${runAs.uid}) cannot search ${JSON.stringify(path)}, so its shells cannot reach their activity records under ${JSON.stringify(shellActivity)}; set shellActivityDirectory to a directory it can search, such as /run/dsh-shell (root, 0711)`)
+  if (directories.spill !== undefined) assertPrivateDirectory(directories.spill, unshared('spillDirectory', directories.spill))
+  return directories
 }
 
 /**
@@ -117,6 +168,8 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
   private readonly identity: RunAsIdentity | undefined
   /** Further identities a spawn spec selects by name. */
   private readonly identities: ReadonlyMap<string, RunAs>
+  /** The directories this provider writes into. */
+  private readonly directories: Directories
 
   /** The run-as identity every child starts with, when configured. */
   override get childIdentity(): RunAsIdentity | undefined {
@@ -126,6 +179,8 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
   static Config: z<Config> = z.object({
     runAs: z.union([RunAs, z.const(undefined)]),
     identities: z.union([z.dict(RunAs), z.const(undefined)]),
+    shellActivityDirectory: z.union([String, z.const(undefined)]),
+    spillDirectory: z.union([String, z.const(undefined)]),
   })
 
   constructor(ctx: Context, config: Config = {}) {
@@ -144,6 +199,7 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
       // Only the exec bootstrap can take the identity before the target runs, with or without a systemd scope.
       if (!probeLinuxBootstrap()) throw new Error('subprocess-local: runAs requires the Linux exec bootstrap (the koffi execve binding and the runner entry), which is unavailable')
     }
+    this.directories = resolveDirectories(config)
     this.runAs = config.runAs
     this.identity = config.runAs === undefined ? undefined : credentialsOf(config.runAs)
     this.identities = new Map(identities)
@@ -278,22 +334,26 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
   spawn(spec: SubprocessSpawnSpec): SubprocessHandle {
     validateSubprocessSpec(spec)
     const runAs = this.runAsFor(spec.identity)
+    const request = runAs === undefined ? spec : withoutInheritedOutput(spec)
     const identity = runAs === undefined ? undefined : credentialsOf(runAs)
-    const env = this.targetEnvironment(spec, runAs)
+    const env = this.targetEnvironment(request, runAs)
     const containmentMode = this.selectContainmentMode('ordinary')
     let handle: LocalSubprocessHandle
-    const internals: SpawnInternals = { ...this.internals, onSpillFailure: this.reportSpillFailure }
+    const spillDir = this.internals.spillDir ?? this.directories.spill
+    const internals: SpawnInternals = {
+      ...this.internals, ...spillDir === undefined ? {} : { spillDir }, onSpillFailure: this.reportSpillFailure,
+    }
     const linuxScope = containmentMode === 'linux-scope' ? this.linuxScopeDecision : undefined
     if (containmentMode === 'fallback' && identity === undefined) {
-      handle = spawnSubprocess(spec, internals)
+      handle = spawnSubprocess(request, internals)
     } else {
       const binding = prepareManagedProcessBinding(internals)
       const launch = linuxScope !== undefined
-        ? launchLinuxScope(spec, env, linuxScope.literalArgv, {}, identity)
+        ? launchLinuxScope(request, env, linuxScope.literalArgv, {}, identity)
         : identity !== undefined
-          ? launchLinuxBootstrap(spec, env, identity)
-          : launchWindowsJob(spec, env)
-      handle = bindManagedProcess(spec, launch, binding)
+          ? launchLinuxBootstrap(request, env, identity)
+          : launchWindowsJob(request, env)
+      handle = bindManagedProcess(request, launch, binding)
       if (linuxScope !== undefined) this.watchLinuxScopeStart(handle.done, linuxScope.generation)
     }
     this.live.add(handle)
@@ -384,7 +444,7 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
     const containmentMode = this.selectContainmentMode('terminal')
     const env = this.targetEnvironment(spec, this.runAs)
     const platform = this.internals.platform ?? process.platform
-    const activity = prepareShellActivity(spec, env, platform, this.identity)
+    const activity = prepareShellActivity(spec, env, platform, this.directories.shellActivity, this.identity)
     const launch = activity === undefined ? spec : { ...spec, argv: activity.argv, env: activity.env }
     const options: IPtyForkOptions | IWindowsPtyForkOptions = {
       name: spec.terminalType,
@@ -454,6 +514,24 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
     }
     void handle.done.then(release, release).catch(() => {})
     return handle
+  }
+}
+
+/** Collection that keeps no byte: the provider reads the stream and discards it. */
+const DISCARD = { maxBytes: 0 } as const
+
+/**
+ * A run-as request with each output stream it asks to inherit read and discarded instead, so a contained child never
+ * holds this process's standard output or error, such as a root-only log another program parses.
+ * @param spec - the validated request.
+ * @returns the request with `'inherit'` output replaced by a collection that keeps nothing.
+ */
+function withoutInheritedOutput(spec: SubprocessSpawnSpec): SubprocessSpawnSpec {
+  const { stdout, stderr } = spec.stdio
+  if (stdout !== 'inherit' && stderr !== 'inherit') return spec
+  return {
+    ...spec,
+    stdio: { ...spec.stdio, stdout: stdout === 'inherit' ? DISCARD : stdout, stderr: stderr === 'inherit' ? DISCARD : stderr },
   }
 }
 

@@ -35,7 +35,7 @@ function buildChildEnv(extra: Record<string, string>): Record<string, string> {
 /**
  * Newline-delimited JSON-RPC over the stdio of a server started through the subprocess seam as a
  * named identity. The child receives that identity's environment plus the configured `env`, never
- * this process's environment.
+ * this process's environment, and none of this process's descriptors: its standard error is discarded.
  */
 class SubprocessStdioTransport implements Transport {
   onclose?: () => void
@@ -60,7 +60,8 @@ class SubprocessStdioTransport implements Transport {
       env: this.config.env,
       identity: this.identity,
       graceMs: CLOSE_GRACE_MS,
-      stdio: { stdin: 'pipe', stdout: 'pipe', stderr: 'inherit' },
+      // A contained server never writes to this process's standard error; its diagnostics are read and dropped.
+      stdio: { stdin: 'pipe', stdout: 'pipe', stderr: { maxBytes: 0 } },
     })
     // Piped stdin and stdout are present by the spawn contract.
     const stdin = handle.stdin as NonNullable<SubprocessHandle['stdin']>

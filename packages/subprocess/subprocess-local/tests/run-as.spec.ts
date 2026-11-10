@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -89,11 +89,16 @@ function reportSpec(cwd: string, env?: NodeJS.ProcessEnv): SubprocessSpawnSpec {
   }
 }
 
-async function runtime(config: RunAs | undefined, identities?: Record<string, RunAs>): Promise<Context> {
+async function runtime(
+  config: RunAs | undefined,
+  identities?: Record<string, RunAs>,
+  directories: { shellActivityDirectory?: string; spillDirectory?: string } = {},
+): Promise<Context> {
   const ctx = new Context()
   fibers.push(await ctx.plugin(LocalSubprocessRuntime, {
     ...config === undefined ? {} : { runAs: config },
     ...identities === undefined ? {} : { identities },
+    ...directories,
   }))
   return ctx
 }
@@ -183,6 +188,16 @@ describe('run-as host facts', () => {
     chmodSync(open, 0o700)
   })
 
+  it('refuses a temporary directory inside a directory another user owns, which it could rename', () => {
+    const inner = join(realpathSync(directory()), 'inner')
+    mkdirSync(inner, { mode: 0o700 })
+    const parent = dirname(inner)
+    const otherOwner = (path: string) => path === parent ? { uid: process.getuid!() + 1, gid: 1, mode: 0o40755 } : statSync(path)
+    expect(() => { assertRunAsHost(inner, () => '1', otherOwner) })
+      .toThrow(`subprocess-local: runAs requires a temporary directory no other user can write, but ${JSON.stringify(inner)} is not`)
+    expect(() => { assertRunAsHost(inner, () => '1', path => path === parent ? { uid: 0, gid: 0, mode: 0o40755 } : statSync(path)) }).not.toThrow()
+  })
+
   it('refuses unprotected hard links', () => {
     expect(() => { assertRunAsHost(directory(), () => '0\n') })
       .toThrow('subprocess-local: runAs requires fs.protected_hardlinks=1, so the run-as user cannot hard-link files it may not read; set it with sysctl before starting dsh')
@@ -191,6 +206,28 @@ describe('run-as host facts', () => {
   onLinux('fails the plugin at load in a shared temporary directory', async () => {
     vi.stubEnv('TMPDIR', '/tmp')
     await expect(new Context().plugin(LocalSubprocessRuntime, { runAs: runAs() })).rejects.toThrow('runAs requires a temporary directory no other user can write')
+  })
+
+  onLinux('fails the plugin at load when a configured directory is missing, relative, or writable by others', async () => {
+    const shared = directory()
+    chmodSync(shared, 0o770)
+    for (const [config, message] of [
+      [{ shellActivityDirectory: 'relative' }, 'subprocess-local: shellActivityDirectory "relative" must be an absolute existing directory'],
+      [{ spillDirectory: join(shared, 'missing') }, `subprocess-local: spillDirectory ${JSON.stringify(join(shared, 'missing'))} must be an absolute existing directory`],
+      [{ runAs: runAs(), spillDirectory: shared }, `subprocess-local: spillDirectory ${JSON.stringify(shared)} must be owned by this process and writable by no other user, directly or through an ancestor`],
+      [{ runAs: runAs(), shellActivityDirectory: shared }, `subprocess-local: shellActivityDirectory ${JSON.stringify(shared)} must be owned by this process and writable by no other user, directly or through an ancestor`],
+    ] as const) {
+      const ctx = new Context()
+      await expect(ctx.plugin(LocalSubprocessRuntime, config)).rejects.toThrow(message)
+      expect(ctx.get('subprocess')).toBeUndefined()
+    }
+  })
+
+  onLinux('fails the plugin at load when the run-as user cannot search the directory that holds shell records', async () => {
+    const own = ownIdentity()
+    const records = realpathSync(tmpdir())
+    await expect(new Context().plugin(LocalSubprocessRuntime, { runAs: runAs({ uid: own.uid + 1, gid: own.gid + 1, groups: [] }) }))
+      .rejects.toThrow(`subprocess-local: the run-as user (uid ${own.uid + 1}) cannot search ${JSON.stringify(records)}, so its shells cannot reach their activity records under ${JSON.stringify(records)}; set shellActivityDirectory to a directory it can search, such as /run/dsh-shell (root, 0711)`)
   })
 })
 
@@ -337,10 +374,52 @@ linux('run-as children through the provider', () => {
     await expect(groupHandle.done).rejects.toThrow(/^run-as: could not take uid \d+, gid \d+, groups \[[\d, ]+\]: /u)
     expect(groupHandle.collected.stdout!.readFrom(0).text).toBe('')
 
-    const otherUser = await runtime(runAs({ uid: own.uid + 1 }))
+    // The other user searches its shell record directory through the group bit.
+    chmodSync(tmpdir(), 0o711)
+    const records = directory()
+    chmodSync(records, 0o711)
+    const otherUser = await runtime(runAs({ uid: own.uid + 1 }), undefined, { shellActivityDirectory: records })
     const userHandle = otherUser.subprocess.spawn(reportSpec(directory()))
     await expect(userHandle.done).rejects.toThrow(`run-as: could not take uid ${own.uid + 1}`)
     expect(userHandle.collected.stdout!.readFrom(0).text).toBe('')
+  })
+
+  it('never hands a run-as child this process\'s standard output or error', async () => {
+    const ctx = await runtime(runAs())
+    const handle = ctx.subprocess.spawn({
+      argv: [process.execPath, '-e', "process.stdout.write('discarded'); process.stderr.write(require('fs').readlinkSync('/proc/self/fd/1'))"],
+      cwd: directory(),
+      stdio: { stdin: 'ignore', stdout: 'inherit', stderr: { maxBytes: 1024 } },
+      graceMs: 200,
+    })
+    await expect(handle.done).resolves.toEqual({ exitCode: 0, signal: null })
+    expect(handle.stdout).toBeUndefined()
+    expect(handle.collected.stderr!.readFrom(0).text).not.toBe(readlinkSync('/proc/self/fd/1'))
+    const reporter = ctx.subprocess.spawn({
+      argv: [process.execPath, '-e', "process.stdout.write(require('fs').readlinkSync('/proc/self/fd/2'))"],
+      cwd: directory(),
+      stdio: { stdin: 'ignore', stdout: { maxBytes: 1024 }, stderr: 'inherit' },
+      graceMs: 200,
+    })
+    await expect(reporter.done).resolves.toEqual({ exitCode: 0, signal: null })
+    const childStderr = reporter.collected.stdout!.readFrom(0).text
+    expect(childStderr).not.toBe(readlinkSync('/proc/self/fd/2'))
+  })
+
+  it('writes spill files readable by the spill directory\'s group into the configured directory', async () => {
+    const spill = realpathSync(directory())
+    const ctx = await runtime(runAs(), undefined, { spillDirectory: spill })
+    const handle = ctx.subprocess.spawn({
+      argv: [process.execPath, '-e', "process.stdout.write('y'.repeat(4096))"],
+      cwd: directory(),
+      stdio: { stdin: 'ignore', stdout: { maxBytes: 16, spill: { maxBytes: 1 << 20 } }, stderr: { maxBytes: 16 } },
+      graceMs: 200,
+    })
+    await handle.done
+    const path = handle.collected.stdout!.readFrom(0).spillPath!
+    expect(dirname(path)).toBe(spill)
+    expect(statSync(path).mode & 0o777).toBe(0o640)
+    expect(readFileSync(path, 'utf8')).toBe('y'.repeat(4096))
   })
 
   it('reports a directory the identity cannot enter as a spawn failure', async () => {
@@ -369,11 +448,14 @@ linux('run-as children through the provider', () => {
   })
 
   it('observes an interactive run-as bash through activity records it can write but not replace', async () => {
-    const ctx = await runtime(runAs({ inherit: ['PATH'], set: { HOME: directory() } }))
+    const records = directory()
+    chmodSync(records, 0o711)
+    const ctx = await runtime(runAs({ inherit: ['PATH'], set: { HOME: directory() } }), undefined, { shellActivityDirectory: records })
     const terminal = await ctx.subprocess.spawnTerminal({
       argv: ['/bin/bash', '-i'], cwd: directory(), rows: 24, cols: 80, terminalType: 'xterm', graceMs: 500, shellActivity: true,
     })
     try {
+      expect(readdirSync(records)).toEqual([expect.stringMatching(/^dsh-shell-/u)])
       const deadline = Date.now() + 10_000
       let state = (await terminal.inspectActivity()).state
       while (state !== 'idle' && Date.now() < deadline) {
@@ -498,7 +580,7 @@ linux('run-as shell activity records', () => {
     const identity = ownIdentity()
     const activity = prepareShellActivity({
       argv: [`/bin/${shell}`, '-i'], cwd: '/', rows: 1, cols: 1, terminalType: 'xterm', graceMs: 1, shellActivity: true,
-    }, {}, 'linux', identity)!
+    }, {}, 'linux', tmpdir(), identity)!
     const startup = shell === 'bash' ? activity.argv[2] as string : join(activity.env.ZDOTDIR as string, '.zshenv')
     const records = join(startup, '..')
     try {

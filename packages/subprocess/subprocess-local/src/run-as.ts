@@ -126,38 +126,80 @@ export function assertNoSecretNames(runAs: RunAs, env: Readonly<Record<string, s
   if (found.length > 0) throw new SubprocessSecretEnvironmentError(found)
 }
 
+/** Reads one path's owner and mode; `statSync` outside tests. */
+export type StatPath = (path: string) => { uid: number; gid: number; mode: number }
+
+/** The real path of `directory` and each of its ancestors, the filesystem root first. */
+function ancestry(directory: string): string[] {
+  const chain: string[] = []
+  for (let path = realpathSync.native(directory); ; path = dirname(path)) {
+    chain.unshift(path)
+    if (dirname(path) === path) return chain
+  }
+}
+
+/**
+ * Require a directory that no user other than this process and root can write, directly or by replacing it through
+ * an ancestor: the directory is owned by this process and not writable by group or others, and every ancestor is
+ * owned by root or this process and not writable by group or others, except a sticky ancestor whose next entry this
+ * process owns.
+ * @param directory - the directory to check.
+ * @param refusal - the error message when the check fails.
+ * @param statPath - reads each path's owner and mode.
+ * @returns the directory's real path.
+ * @throws when the directory or an ancestor fails the check.
+ */
+export function assertPrivateDirectory(directory: string, refusal: string, statPath: StatPath = statSync): string {
+  const uid = process.getuid?.()
+  const chain = ancestry(directory)
+  chain.forEach((path, index) => {
+    const info = statPath(path)
+    const shared = (info.mode & 0o022) !== 0
+    const next = chain[index + 1]
+    const safe = next === undefined
+      ? info.uid === uid && !shared
+      : (info.uid === 0 || info.uid === uid) && (!shared || ((info.mode & 0o1000) !== 0 && statPath(next).uid === uid))
+    if (!safe) throw new Error(refusal)
+  })
+  return chain[chain.length - 1] as string
+}
+
+/**
+ * Require that an identity can search a directory and every ancestor, by the owner, group, or other search bit that
+ * applies to it.
+ * @param directory - the directory to check.
+ * @param identity - the identity that must enter the directory.
+ * @param refusal - builds the error message from the first path it cannot search.
+ * @param statPath - reads each path's owner and mode.
+ * @throws when the identity cannot search the directory or an ancestor.
+ */
+export function assertSearchable(
+  directory: string, identity: RunAsIdentity, refusal: (path: string) => string, statPath: StatPath = statSync,
+): void {
+  for (const path of ancestry(directory)) {
+    const info = statPath(path)
+    const bit = info.uid === identity.uid ? 0o100 : info.gid === identity.gid || identity.groups.includes(info.gid) ? 0o010 : 0o001
+    if ((info.mode & bit) === 0) throw new Error(refusal(path))
+  }
+}
+
 /**
  * Require host facts run-as depends on, failing loudly otherwise:
- * - this process's temporary directory, where the root bootstrap's launch requests and its
- *   module cache live, is writable by no other user: it and each ancestor are owned by this
- *   process or not writable by group or others, a sticky ancestor counting only when this process
- *   owns the entry below it;
+ * - this process's temporary directory, where the root bootstrap's launch requests and its module cache live, is
+ *   writable by no other user, directly or through an ancestor (see {@link assertPrivateDirectory});
  * - `fs.protected_hardlinks` is 1, so the run-as user cannot hard-link files it may not access
  *   into a directory the model may read.
  * @param temporaryDirectory - this process's `os.tmpdir()`.
  * @param readSysctl - reads a `/proc/sys` file.
+ * @param statPath - reads each path's owner and mode.
  * @throws when either fact does not hold; the message names the fix.
  */
 export function assertRunAsHost(
   temporaryDirectory: string,
   readSysctl: (path: string) => string = path => readFileSync(path, 'utf8'),
+  statPath: StatPath = statSync,
 ): void {
-  const uid = process.getuid?.()
-  const real = realpathSync.native(temporaryDirectory)
-  const chain: string[] = []
-  for (let path = real; ; path = dirname(path)) {
-    chain.unshift(path)
-    if (dirname(path) === path) break
-  }
-  chain.forEach((path, index) => {
-    const info = statSync(path)
-    const shared = (info.mode & 0o022) !== 0
-    const next = chain[index + 1]
-    const own = next === undefined ? info.uid === uid : (info.mode & 0o1000) !== 0 && statSync(next).uid === uid
-    if (next === undefined ? !own || shared : shared && !own) {
-      throw new Error(`subprocess-local: runAs requires a temporary directory no other user can write, but ${JSON.stringify(real)} is not; start dsh with TMPDIR set to a root-only directory such as /root/.dsh/tmp`)
-    }
-  })
+  assertPrivateDirectory(temporaryDirectory, `subprocess-local: runAs requires a temporary directory no other user can write, but ${JSON.stringify(realpathSync.native(temporaryDirectory))} is not; start dsh with TMPDIR set to a root-only directory such as /root/.dsh/tmp`, statPath)
   if (readSysctl(join('/proc/sys/fs', 'protected_hardlinks')).trim() !== '1') {
     throw new Error('subprocess-local: runAs requires fs.protected_hardlinks=1, so the run-as user cannot hard-link files it may not read; set it with sysctl before starting dsh')
   }

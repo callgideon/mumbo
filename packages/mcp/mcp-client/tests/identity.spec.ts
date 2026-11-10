@@ -128,7 +128,7 @@ describe('the subprocess stdio transport', () => {
     await transport.start()
     expect(service.specs).toEqual([{
       argv: [process.execPath, fixture], cwd: process.cwd(), env: { A: 'b' }, identity: 'browsermcp', graceMs: 2000,
-      stdio: { stdin: 'pipe', stdout: 'pipe', stderr: 'inherit' },
+      stdio: { stdin: 'pipe', stdout: 'pipe', stderr: { maxBytes: 0 } },
     }])
     expect(() => transport.start()).toThrow('MCP stdio transport already started')
     await transport.send({ jsonrpc: '2.0', method: 'ping' })

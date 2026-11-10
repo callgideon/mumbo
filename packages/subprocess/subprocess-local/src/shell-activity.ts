@@ -1,6 +1,5 @@
 /** Private shell lifecycle files; ordinary output never authorizes terminal reclamation. */
 import { chmodSync, chownSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import type { SubprocessTerminalActivity, SubprocessTerminalSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import type { RunAsIdentity } from './run-as.ts'
@@ -56,17 +55,18 @@ export class ShellActivity {
  * @param spec - terminal request; custom arguments and wrapped executables remain unmodified.
  * @param env - scrubbed target environment.
  * @param platform - execution platform.
+ * @param parent - directory that receives the record directory; the provider's `shellActivityDirectory`.
  * @param runAs - the identity the shell runs as; it may then traverse the directory, read the
  *   startup file, and write only the two record files.
  * @returns private integration, or undefined for unsupported launches.
  */
 export function prepareShellActivity(
-  spec: SubprocessTerminalSpawnSpec, env: Record<string, string>, platform: NodeJS.Platform, runAs?: RunAsIdentity,
+  spec: SubprocessTerminalSpawnSpec, env: Record<string, string>, platform: NodeJS.Platform, parent: string, runAs?: RunAsIdentity,
 ): ShellActivity | undefined {
   if (spec.shellActivity !== true || platform === 'win32' || spec.argv.length !== 2 || spec.argv[1] !== '-i') return undefined
   const shell = basename(spec.argv[0] as string)
   if (shell !== 'bash' && shell !== 'zsh') return undefined
-  const directory = mkdtempSync(join(tmpdir(), 'dsh-shell-'))
+  const directory = mkdtempSync(join(parent, 'dsh-shell-'))
   const state = quote(join(directory, 'state'))
   const guards = quote(join(directory, 'guards'))
   // The directory stays owned by this process, so a run-as shell can neither add nor replace entries in it.
