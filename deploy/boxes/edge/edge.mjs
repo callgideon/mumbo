@@ -171,9 +171,10 @@ export function roleInstructions(cfg, principal) {
     '',
     `You are the personal assistant of ${principal}, working on their own computer in the cloud (this box). Their files are in /root/projects.`,
     '',
-    '- Browser: your browser tools drive the user\'s own Chromium, where they are signed in to their accounts. Reading pages, inboxes and feeds is fine.',
+    '- Browser: your browser tools drive the user\'s own Google Chrome, where they are signed in to their accounts. Reading pages, inboxes and feeds is fine.',
     '- Before anything that writes with one of their accounts (posting, sending, replying, buying, booking, deleting, changing settings), say exactly what you will do and wait for the user to agree, unless they have allowed that kind of action on that site; afterwards, say what you did.',
     `- Never type passwords or one-time codes. If a site needs a sign-in, ask the user to sign in on the desktop at https://${cfg.publicHost}/desktop/.`,
+    '- Files: downloads land in /home/browser/Downloads, and files the user wants to upload go in the same folder.',
     '- Projects: software and other team work lives in shared projects, each with its own coordinator. Use project_list, project_create, project_add_member and project_message (to give a project\'s coordinator work or ask for status). Do not run project code in this box.',
     '- Sandboxes (sandbox_* tools) are for quick isolated experiments.',
     '- For anything recurring or later, use the schedule tools; the box runs them while the user is away.',
@@ -314,9 +315,10 @@ cat > /root/.mumbo/welcome.overlay.yml <<'YML'
 YML
 WELCOME_PATCH="--patch /root/.mumbo/welcome.overlay.yml"
 fi
-` : ''}${site.desktop ? `# Desktop: the user's own Chromium (signed-in accounts live in its profile) on a virtual display, as the unprivileged
-# user browser; its debugging port stays on loopback for dsh's browser tools; noVNC on :6080 is the live view, which
-# only the edge reaches (E2B traffic token). Re-runnable: each part starts only if it is not running.
+` : ''}${site.desktop ? `# Desktop: XFCE and the user's own Google Chrome (signed-in accounts live in its profile) on a virtual display, as the
+# unprivileged user browser; templates before XFCE run openbox and Chromium on the same profile. The browser's debugging
+# port stays on loopback for dsh's browser tools; noVNC on :6080 is the live view, which only the edge reaches (E2B
+# traffic token). Re-runnable: each part starts only if it is not running.
 if id browser >/dev/null 2>&1; then
   # E2B forwards every loopback port to the box address; the browser's debugging port and raw VNC stay box-local.
   for port in 9222 5900; do iptables -C INPUT -p tcp --dport $port ! -i lo -j DROP 2>/dev/null || iptables -I INPUT -p tcp --dport $port ! -i lo -j DROP || true; done
@@ -330,8 +332,47 @@ if id browser >/dev/null 2>&1; then
     XVFB_AUTH="-auth /run/x11/auth"
   fi
   export XVFB_AUTH
-  pgrep -x Xvfb >/dev/null || { su browser -s /bin/sh -c 'Xvfb :1 $XVFB_AUTH -screen 0 1440x900x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &'; sleep 1; su browser -s /bin/sh -c 'DISPLAY=:1 openbox >/tmp/openbox.log 2>&1 &'; }
-  pgrep -f 'remote-debugging-port=9222' >/dev/null || { rm -f /home/browser/profile/Singleton*; su browser -s /bin/sh -c 'DISPLAY=:1 chromium --user-data-dir=/home/browser/profile --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --no-first-run --no-default-browser-check --password-store=basic --start-maximized >/tmp/chromium.log 2>&1 &'; }
+  install -d -o browser -g browser /home/browser/Downloads
+  # The one way to start the browser: the loop below and the desktop's launchers (the template aims them here). A start
+  # while it runs opens a window in it.
+  cat > /usr/local/bin/google-chrome <<'SH'
+#!/bin/sh
+exec "$(command -v google-chrome-stable || echo chromium)" --user-data-dir=/home/browser/profile --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --no-first-run --no-default-browser-check --password-store=basic --start-maximized "$@"
+SH
+  # The desktop session, started again 2 s after it ends. Compositing makes the VNC server send more, so xfwm4's is set
+  # off before each start.
+  cat > /usr/local/bin/mumbo-desktop <<'SH'
+#!/bin/sh
+while :; do
+  if command -v startxfce4 >/dev/null 2>&1; then
+    eval "$(dbus-launch --sh-syntax)"
+    xfconf-query -c xfwm4 -p /general/use_compositing -n -t bool -s false
+    startxfce4
+    kill "$DBUS_SESSION_BUS_PID"
+  else
+    openbox
+  fi
+  sleep 2
+done
+SH
+  # The browser, started again within 5 s of exiting, since the assistant's browser tools need it. While a Chrome that a
+  # launcher started runs, it waits. A profile last used by a newer browser is moved aside first, and Chrome makes a new one.
+  cat > /usr/local/bin/mumbo-browser <<'SH'
+#!/bin/sh
+have=$(google-chrome-stable --version 2>/dev/null | grep -oE '[0-9]+(\\.[0-9]+)+' | head -n 1)
+last=$(grep -oE '^[0-9]+(\\.[0-9]+)+$' '/home/browser/profile/Last Version' 2>/dev/null)
+if [ -n "$have" ] && [ -n "$last" ] && [ "$(printf '%s\\n%s\\n' "$have" "$last" | sort -V | tail -n 1)" != "$have" ] && ! pgrep -f remote-debugging-port=9222 >/dev/null; then
+  mv /home/browser/profile "/home/browser/profile.$last.$(date +%s)"
+fi
+while :; do
+  pgrep -f remote-debugging-port=9222 >/dev/null || { rm -f /home/browser/profile/Singleton*; /usr/local/bin/google-chrome; }
+  sleep 2
+done
+SH
+  chmod 0755 /usr/local/bin/google-chrome /usr/local/bin/mumbo-desktop /usr/local/bin/mumbo-browser
+  pgrep -x Xvfb >/dev/null || { su browser -s /bin/sh -c 'Xvfb :1 $XVFB_AUTH -screen 0 1440x900x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &'; sleep 1; }
+  pgrep -f /usr/local/bin/mumbo-desktop >/dev/null || su browser -s /bin/sh -c 'DISPLAY=:1 /usr/local/bin/mumbo-desktop >/tmp/desktop.log 2>&1 &'
+  pgrep -f /usr/local/bin/mumbo-browser >/dev/null || su browser -s /bin/sh -c 'DISPLAY=:1 /usr/local/bin/mumbo-browser >/tmp/chrome.log 2>&1 &'
   pgrep -x x11vnc >/dev/null || su browser -s /bin/sh -c 'x11vnc -display :1 -localhost -forever -shared -nopw -rfbport 5900 -quiet >/tmp/x11vnc.log 2>&1 &'
   pgrep -f websockify >/dev/null || nohup websockify --web /usr/share/novnc "$ip:6080" 127.0.0.1:5900 >/tmp/websockify.log 2>&1 &
 fi
@@ -397,14 +438,19 @@ for (const d of [".dsh", "projects"]) {
     db.close()
   }
 }`
-/** Upload chats, projects and the browser profile (signed-in accounts; caches and locks excluded) to a presigned S3 PUT. Runs inside the box; S3 refuses a streamed (chunked) body,
+/** What a backup leaves out of /home/browser: caches, re-downloaded browser components and models, and profile locks.
+ *  `profile*` covers a profile kept aside (startScript) too; tar's exclude patterns let `*` match `/`. */
+const BROWSER_EXCLUDES = ['.cache', ...['Singleton*', '*/Cache', '*/Code Cache', '*/GPUCache', '*/Service Worker/CacheStorage', 'ShaderCache', 'GrShaderCache',
+  'GraphiteDawnCache', 'component_crx_cache', 'extensions_crx_cache', 'OptGuideOnDeviceModel'].map((p) => `profile*/${p}`)]
+/** Upload chats, projects and the browser user's home (signed-in accounts, downloads, desktop settings; BROWSER_EXCLUDES left out) to a presigned S3 PUT. Runs inside the box; S3 refuses a streamed (chunked) body,
  *  so the archive goes to a temporary file first. SQLite databases travel as consistent `.snap` copies under root/.mumbo-sqlite. Extraction on restore also stays inside the box.
  *  `root` (default `/`) is the filesystem root, for tests. */
 export const backupCommand = (url, root = '/') => {
   const r = root.replace(/\/+$/, ''), snap = `${r}/root/.mumbo-sqlite`
-  return `set -e; f=$(mktemp /tmp/mumbo-backup.XXXXXX); trap 'rm -f "$f"; rm -rf '${snap}'' EXIT; rm -rf '${snap}'; node -e '${SNAPSHOT_JS}' '${r}/root' '${snap}'; tar -C '${root}' --exclude=node_modules --exclude='*.sqlite-wal' --exclude='*.sqlite-shm' ${['root/.dsh', 'root/projects'].flatMap((d) => ['*.sqlite', '*.db', '*-wal', '*-shm', '*-journal'].map((p) => `--exclude='${d}/${p}'`)).join(' ')} --exclude='home/browser/profile/Singleton*' --exclude='home/browser/profile/*/Cache' --exclude='home/browser/profile/*/Code Cache' --exclude='home/browser/profile/*/GPUCache' --exclude='home/browser/profile/*/Service Worker/CacheStorage' -czf "$f" $(cd '${root}' && ls -d root/.dsh root/projects root/.mumbo-sqlite home/browser/profile 2>/dev/null); curl -fsS -m 600 -X PUT -H 'content-type: application/gzip' --upload-file "$f" '${url}'; rm -rf '${snap}'`
+  return `set -e; f=$(mktemp /tmp/mumbo-backup.XXXXXX); trap 'rm -f "$f"; rm -rf '${snap}'' EXIT; rm -rf '${snap}'; node -e '${SNAPSHOT_JS}' '${r}/root' '${snap}'; tar -C '${root}' --exclude=node_modules --exclude='*.sqlite-wal' --exclude='*.sqlite-shm' ${['root/.dsh', 'root/projects'].flatMap((d) => ['*.sqlite', '*.db', '*-wal', '*-shm', '*-journal'].map((p) => `--exclude='${d}/${p}'`)).join(' ')} ${BROWSER_EXCLUDES.map((p) => `--exclude='home/browser/${p}'`).join(' ')} -czf "$f" $(cd '${root}' && ls -d root/.dsh root/projects root/.mumbo-sqlite home/browser 2>/dev/null); curl -fsS -m 600 -X PUT -H 'content-type: application/gzip' --upload-file "$f" '${url}'; rm -rf '${snap}'`
 }
-/** Download and unpack a backup, then move each `.snap` back over its database path. Runs before dsh starts. */
+/** Download and unpack a backup, then move each `.snap` back over its database path. Runs before dsh starts. A backup
+ *  taken before it covered all of /home/browser holds only home/browser/profile there; the start script makes Downloads. */
 export const restoreCommand = (url, root = '/') => {
   const r = root.replace(/\/+$/, ''), snap = `${r}/root/.mumbo-sqlite`
   return `set -e; curl -fsS -m 600 '${url}' | tar -C '${root}' -xzf -; if [ -d '${snap}' ]; then (cd '${snap}' && find . -name '*.snap' -type f) | while IFS= read -r p; do d='${r}/root/'"\${p#./}"; d="\${d%.snap}"; rm -f "$d-wal" "$d-shm" "$d-journal"; mv '${snap}'/"$p" "$d"; done; rm -rf '${snap}'; fi`

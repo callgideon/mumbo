@@ -17,8 +17,14 @@ const at = (text, needle) => { const i = text.indexOf(needle); assert.ok(i >= 0,
 
 test('a user box start script is byte-for-byte what it was before project boxes grew a proxy', () => {
   const s = startScript(c, 'T', boxSite(c, 'a@x.com'), "role's", undefined, boxFiles, ['o@x.com'])
-  // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows, the X cookie and the first-run welcome (same cfg, token T, role "role's").
-  assert.equal(createHash('sha256').update(s).digest('hex'), '307068336f6f6c73a112ce4e3930485ccf012edf58082ffd8053de98765d58c1')
+  // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows, the X cookie, the first-run welcome and the B18 desktop (same cfg, token T, role "role's").
+  assert.equal(createHash('sha256').update(s).digest('hex'), 'f8e23e51b48f5730da33397564e45d2bd9016c17f3a4ebaf6792a306f7cc11a1')
+})
+
+test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
+  const p = { ...c, projectDomain: 'boxes.x', agentLogin: 'mumbo-bot[bot]', agentId: 341797844 }
+  const s = startScript(p, 'TOK', boxSite(p, 'project:0123456789abcdef'), "role's", 'KEYTEXT', boxFiles, ['O@x.com'])
+  assert.equal(createHash('sha256').update(s).digest('hex'), '99e092312b355463622742923a17b6b5ba6c7a96a15836fd27b19f36913f6981')
 })
 
 test('box links: the overlay loads only when the image ships @mumbo/box-links; project boxes get no desktop link', () => {

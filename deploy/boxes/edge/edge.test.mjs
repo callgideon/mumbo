@@ -442,11 +442,11 @@ test('desktop live view: /desktop/ goes to the box\'s noVNC port, everything els
   assert.equal(boxHeaders(cfg, {}, { id: 'b1' }, '6080')['e2b-sandbox-port'], '6080')
 })
 
-test('backups carry the browser profile without caches or profile locks, and tolerate its absence', async () => {
+test('backups carry the browser user\'s home without caches or profile locks, and tolerate its absence', async () => {
   const { backupCommand } = await import('./edge.mjs')
   const c = backupCommand('URL')
-  assert.match(c, /ls -d root\/\.dsh root\/projects root\/\.mumbo-sqlite home\/browser\/profile 2>\/dev\/null/)
-  for (const x of ['Singleton*', '*/Cache', '*/Code Cache', '*/GPUCache']) assert.ok(c.includes(`--exclude='home/browser/profile/${x}'`), x)
+  assert.match(c, /ls -d root\/\.dsh root\/projects root\/\.mumbo-sqlite home\/browser 2>\/dev\/null/)
+  for (const x of ['.cache', 'profile*/Singleton*', 'profile*/*/Cache', 'profile*/*/Code Cache', 'profile*/*/GPUCache']) assert.ok(c.includes(`--exclude='home/browser/${x}'`), x)
 })
 
 test('an idle box is paused with its next scheduled run and woken for it, restarting dsh', async () => {
@@ -653,11 +653,14 @@ test('role instructions: assistant with write consent and desktop sign-in; coord
   assert.match(a, /personal assistant of a@x\.com/)
   assert.match(a, /wait for the user to agree/)
   assert.match(a, /https:\/\/boxes\.x\/desktop\//)
+  assert.match(a, /\n- Never type passwords or one-time codes\./)
+  assert.match(a, /\n- Files: downloads land in \/home\/browser\/Downloads, and files the user wants to upload go in the same folder\.\n/)
   assert.match(a, /project_message/)
   const p = roleInstructions(c, 'project:0123456789abcdef')
   assert.match(p, /coordinate the shared mumbo project 0123456789abcdef\. Its members reach you at https:\/\/p-0123456789abcdef\.boxes\.x\/ /)
   assert.match(p, /\[from <email>\]/)
   assert.match(p, /no browser and nobody's accounts/)
+  assert.doesNotMatch(p, /Downloads/)
   const script = startScript(c, 'T', undefined, a)
   assert.match(script, /DSH_AGENTS_HOME=\/root\/\.mumbo\/agents/)
   assert.ok(script.includes(`<<'MD'\n${a}\nMD`))

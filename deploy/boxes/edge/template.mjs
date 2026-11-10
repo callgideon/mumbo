@@ -17,18 +17,28 @@ export function templateArgs(argv, env = process.env) {
     minAvailMB: Number(minAvail),
   }
 }
+
+/** Google Chrome's managed policy in person boxes. Chrome Sync, passwords and payment cards stay at Chrome's defaults
+ *  (founder decision 2026-11-10); downloads land where the assistant reads them (edge roleInstructions). */
+const CHROME_POLICY = { RestoreOnStartup: 1, DefaultBrowserSettingEnabled: false, MetricsReportingEnabled: false, DownloadDirectory: '/home/browser/Downloads' }
+/** The user's box is their computer: a virtual display, the XFCE desktop, Google Chrome stable from Google's apt
+ *  repository (each build installs the current release) and the noVNC live view. The edge's start script runs them as
+ *  the user `browser`, and writes /usr/local/bin/google-chrome, the one way to start Chrome; the menu entry and XFCE's
+ *  web browser are aimed at it here. */
+export const BOX_STEPS = [
+  'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google-chrome.asc && chmod go+r /etc/apt/keyrings/google-chrome.asc && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xvfb x11vnc novnc websockify xfce4-session xfwm4 xfce4-panel xfdesktop4 thunar xfce4-terminal tango-icon-theme librsvg2-common google-chrome-stable dbus-x11 xdotool imagemagick xsel xauth fonts-noto-core fonts-noto-color-emoji fonts-noto-cjk procps && rm -rf /var/lib/apt/lists/*',
+  'id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser',
+  `install -d -m 0755 /etc/opt/chrome/policies/managed && printf '%s\\n' '${JSON.stringify(CHROME_POLICY)}' > /etc/opt/chrome/policies/managed/mumbo.json && chmod 0644 /etc/opt/chrome/policies/managed/mumbo.json`,
+  // The stock panels, without the panel's first-start dialog; XFCE's web browser and Chrome's menu entry start the box's Chrome.
+  'cp /etc/xdg/xfce4/panel/default.xml /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml && sed -i "s/^WebBrowser=.*/WebBrowser=google-chrome/" /etc/xdg/xfce4/helpers.rc && install -d /usr/local/share/applications && sed "s#/usr/bin/google-chrome-stable#/usr/local/bin/google-chrome#" /usr/share/applications/google-chrome.desktop > /usr/local/share/applications/google-chrome.desktop',
+]
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) await build(templateArgs(process.argv))
 
 async function build({ image, name, memoryMB, cpuCount, minAvailMB }) {
 let tpl = Template().fromImage(image, { username: 'AWS', password: process.env.ECR_PASSWORD }).setUser('root')
-// The user's box is their computer: a virtual display, a window manager, Chromium and the noVNC live view
-// (PRODUCTION.md stage 9). The edge's start script runs them; children (mumbo-child) stay headless.
-if (name.startsWith('mumbo-box')) {
-  tpl = tpl.runCmd([
-    'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xvfb openbox x11vnc novnc websockify chromium dbus-x11 xdotool imagemagick xsel xauth fonts-noto-core fonts-noto-color-emoji fonts-noto-cjk procps && rm -rf /var/lib/apt/lists/*',
-    'id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser',
-  ])
-}
+// Children (mumbo-child) stay headless.
+if (name.startsWith('mumbo-box')) tpl = tpl.runCmd(BOX_STEPS)
 // A project box is headless: git, gh (GitHub's apt repository) and openssl for the box-local GitHub proxy's CA.
 if (name.startsWith('mumbo-project')) {
   tpl = tpl.runCmd([
