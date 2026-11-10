@@ -822,7 +822,18 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
   - The list is config, and the edge writes these defaults.
 - **The check runs before and after every browser tool call.** A call whose target, or whose tab after the call, is on a denied URL is refused, and its result (snapshot, screenshot, text) is replaced by the refusal. This covers a navigation, or a click that lands there, and a read while the person has that page open.
 - **Page script always asks,** as today: `browser_evaluate` and `browser_run_code_unsafe` ask even on allowed sites, with the script shown. A script can read an autofilled password or card number from a form field.
-  - Add a test that the page snapshot shows a filled password field masked.
+- **Snapshots never carry secrets.** Playwright's page snapshot (`toAriaNode` in `playwright-core`) writes every field's value, passwords included. Once Chrome fills a login form, the next snapshot (a read, so no ask) would send the password to the model provider and into the Session log.
+  - A `pnpm` patch to `playwright-core` (`patchedDependencies`, as the repository already does for other packages) writes a fixed `••••` instead of the value for any field that is:
+    - `type=password`;
+    - in Chrome's autofilled state (`:autofill`);
+    - or one whose `autocomplete` names a password, a one-time code or a card (`current-password`, `new-password`, `one-time-code`, `cc-*`).
+  - The patch must apply, or install fails. An end-to-end test asserts the masking. Offer it upstream to Playwright, which is the way off the patch.
+  - Playwright MCP's output directory moves out of the workspace into a root-only directory (B24's file allowlist excludes it), and out of backups.
+- **Network request details are denied.** A request's details carry its `Cookie` header and form body, so a login's password or a session cookie would reach the model.
+  - `browser_network_request` is refused outright.
+  - The request list stays a read only if it shows no headers or bodies; otherwise it is refused too.
+- **Before B18 deploys** (Chrome with every sync type), the masking patch, the output directory and the network-request denial are live. That doesn't wait for B24, but nothing sends a saved password to a model provider in the meantime.
+- **Today's Chromium** may already hold passwords the founder saved. Until the masking is live, a managed policy for it (`PasswordManagerEnabled: false`, `AutofillCreditCardEnabled: false`) stops autofill from putting them into snapshots.
 - **Chrome's `URLBlocklist`** blocks the internal pages for everyone in the box's Chrome, the person included, because computer use drives Chrome without going through browser-consent:
   - `chrome://password-manager`, `chrome://settings/passwords`, `chrome://settings/payments`, `chrome://settings/autofill`, `chrome://settings/addresses`;
   - `chrome://sync-internals`, `chrome://autofill-internals`, `chrome://password-manager-internals`.
