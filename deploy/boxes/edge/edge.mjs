@@ -330,6 +330,15 @@ if id browser >/dev/null 2>&1; then
     XVFB_AUTH="-auth /run/x11/auth"
   fi
   export XVFB_AUTH
+  # Until browser snapshots mask password and card fields (B25), Chromium saves and fills no passwords or cards. Root writes
+  # the managed policy to a temporary file in the same directory and renames it into place, refusing a symlinked directory
+  # or target; Chromium reads the directory at start and when it changes. B18 replaces it with Google Chrome's policy.
+  pol=/etc/chromium/policies/managed
+  if [ ! -L /etc/chromium ] && [ ! -L /etc/chromium/policies ] && [ ! -L $pol ] && mkdir -p $pol && [ ! -L $pol/mumbo.json ]; then
+    tmp=$(mktemp $pol/.mumbo.json.XXXXXX) && printf '%s\\n' '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}' > "$tmp" && chmod 0644 "$tmp" && mv -fT "$tmp" $pol/mumbo.json || { rm -f "$tmp"; echo 'chromium policy not written' >&2; }
+  else
+    echo 'chromium policy path is a symlink; not written' >&2
+  fi
   pgrep -x Xvfb >/dev/null || { su browser -s /bin/sh -c 'Xvfb :1 $XVFB_AUTH -screen 0 1440x900x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &'; sleep 1; su browser -s /bin/sh -c 'DISPLAY=:1 openbox >/tmp/openbox.log 2>&1 &'; }
   pgrep -f 'remote-debugging-port=9222' >/dev/null || { rm -f /home/browser/profile/Singleton*; su browser -s /bin/sh -c 'DISPLAY=:1 chromium --user-data-dir=/home/browser/profile --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --no-first-run --no-default-browser-check --password-store=basic --start-maximized >/tmp/chromium.log 2>&1 &'; }
   pgrep -x x11vnc >/dev/null || su browser -s /bin/sh -c 'x11vnc -display :1 -localhost -forever -shared -nopw -rfbport 5900 -quiet >/tmp/x11vnc.log 2>&1 &'
