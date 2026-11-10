@@ -1,6 +1,6 @@
 # State for the platform. E2B treats Redis as the source of truth for running sandboxes (losing keys kills VMs,
 # review B1), so E2B gets MemoryDB (durable multi-AZ log). The edge gets its own ElastiCache: a failover there
-# only resets activity timers and budgets.
+# only resets activity timers and budgets (modules/edge).
 
 resource "aws_kms_key" "data" {
   description         = "${local.name} data at rest"
@@ -93,29 +93,6 @@ resource "aws_memorydb_cluster" "e2b" {
   auto_minor_version_upgrade = true
 }
 
-# ---- ElastiCache for the edge (box records, locks, budgets, sweep lease). TLS, one replica.
-resource "aws_elasticache_subnet_group" "edge" {
-  name       = "${local.name}-edge"
-  subnet_ids = module.vpc.private_subnets
-}
-resource "aws_elasticache_replication_group" "edge" {
-  replication_group_id       = "${local.name}-edge"
-  description                = "mumbo edge shared state"
-  engine                     = "valkey"
-  engine_version             = "7.2"
-  node_type                  = "cache.t4g.small"
-  num_cache_clusters         = 2
-  automatic_failover_enabled = true
-  multi_az_enabled           = true
-  subnet_group_name          = aws_elasticache_subnet_group.edge.name
-  security_group_ids         = [aws_security_group.data.id]
-  transit_encryption_enabled = true
-  at_rest_encryption_enabled = true
-  kms_key_id                 = aws_kms_key.data.arn
-  parameter_group_name       = "default.valkey7"
-  snapshot_retention_limit   = 3
-}
-
 # ---- S3: templates and pause snapshots (same bucket layout as E2B). Versioned so an RDS point-in-time restore
 # can still find the objects its rows point at (review M4); Bucket Keys avoid one KMS call per ranged GET.
 resource "aws_s3_bucket" "templates" { bucket = "${local.name}-templates-${data.aws_caller_identity.this.account_id}" }
@@ -153,5 +130,4 @@ resource "aws_s3_bucket_lifecycle_configuration" "templates" {
 
 output "postgres_endpoint" { value = aws_db_instance.e2b.address }
 output "memorydb_endpoint" { value = "${aws_memorydb_cluster.e2b.cluster_endpoint[0].address}:${aws_memorydb_cluster.e2b.cluster_endpoint[0].port}" }
-output "edge_redis_endpoint" { value = aws_elasticache_replication_group.edge.primary_endpoint_address }
 output "templates_bucket" { value = aws_s3_bucket.templates.bucket }

@@ -8,7 +8,7 @@ locals {
     client_proxy = aws_security_group.client_proxy.id
     edge         = aws_security_group.edge.id
   }
-  ecr     = "${data.aws_caller_identity.this.account_id}.dkr.ecr.us-east-1.amazonaws.com/${local.name}"
+  ecr     = var.ecr
   e2b_arn = aws_secretsmanager_secret.e2b.arn
   box_ram = 8192
   # Box disk, written to the E2B team limits by setup/setup.sh. A box gets it only from a template built afterwards
@@ -144,7 +144,7 @@ locals {
   secret = { for k in ["POSTGRES_CONNECTION_STRING", "REDIS_CLUSTER_URL", "ADMIN_TOKEN", "SANDBOX_ACCESS_TOKEN_HASH_SEED", "TEAM_API_KEY"] : k => "${local.e2b_arn}:${k}::" }
   # The mTLS files: an entrypoint writes the secret's PEMs to the default paths E2B reads.
   tls_wrap   = "mkdir -p /var/run/e2b/tls /var/run/e2b/trust && printf %s \"$MTLS_CRT\" > /var/run/e2b/tls/tls.crt && printf %s \"$MTLS_KEY\" > /var/run/e2b/tls/tls.key && printf %s \"$MTLS_CA\" > /var/run/e2b/trust/ca.crt && unset MTLS_CRT MTLS_KEY MTLS_CA && exec \"$@\""
-  common_env = { ENVIRONMENT = "prod", AWS_REGION = "us-east-1", E2B_TLS_CERT_FILE = "/var/run/e2b/tls/tls.crt", E2B_TLS_KEY_FILE = "/var/run/e2b/tls/tls.key", E2B_TLS_CA_FILE = "/var/run/e2b/trust/ca.crt" }
+  common_env = { ENVIRONMENT = "prod", AWS_REGION = local.region, E2B_TLS_CERT_FILE = "/var/run/e2b/tls/tls.crt", E2B_TLS_KEY_FILE = "/var/run/e2b/tls/tls.key", E2B_TLS_CA_FILE = "/var/run/e2b/trust/ca.crt" }
   services = {
     api = {
       image   = "${local.ecr}/e2b-api:${var.e2b_sha}"
@@ -215,7 +215,7 @@ resource "aws_ecs_task_definition" "e2b" {
       for f in ["crt", "key", "ca"] : { name = "MTLS_${upper(f)}", valueFrom = "${aws_secretsmanager_secret.mtls[each.value.mtls].arn}:${f}::" }
     ])
     stopTimeout      = 90
-    logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.e2b[each.key].name, awslogs-region = "us-east-1", awslogs-stream-prefix = each.key } }
+    logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.e2b[each.key].name, awslogs-region = local.region, awslogs-stream-prefix = each.key } }
   }])
 }
 
@@ -260,11 +260,11 @@ resource "aws_ecs_task_definition" "setup" {
   execution_role_arn       = aws_iam_role.exec.arn
   container_definitions = jsonencode([{
     name             = "setup"
-    image            = "${local.ecr}/e2b-setup:${var.e2b_sha}-${substr(sha256("${file("${path.module}/setup/Dockerfile")}${file("${path.module}/setup/setup.sh")}"), 0, 7)}"
+    image            = "${local.ecr}/e2b-setup:${var.e2b_sha}-${substr(sha256("${file("${path.root}/setup/Dockerfile")}${file("${path.root}/setup/setup.sh")}"), 0, 7)}"
     essential        = true
     environment      = [{ name = "BOX_RAM_MB", value = tostring(local.box_ram) }, { name = "BOX_FREE_DISK_MB", value = tostring(local.box_free_disk) }, { name = "BOX_DISK_MB", value = tostring(local.box_free_disk + local.box_step_disk) }]
     secrets          = [for k in ["POSTGRES_CONNECTION_STRING", "TEAM_API_KEY"] : { name = k, valueFrom = local.secret[k] }]
-    logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.e2b["setup"].name, awslogs-region = "us-east-1", awslogs-stream-prefix = "setup" } }
+    logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.e2b["setup"].name, awslogs-region = local.region, awslogs-stream-prefix = "setup" } }
   }])
 }
 

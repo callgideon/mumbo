@@ -3,7 +3,8 @@
 #   *.app.mumbo.si      -> the same; the edge serves approve.app.mumbo.si and project boxes p-<16 hex>.app.mumbo.si, 404 otherwise
 #   llm.app.mumbo.si    -> edge model host :8081 (box token + source address = one of our NAT EIPs); llm.boxes.mumbo.si too
 #   boxes.mumbo.si (the former public host), api.mumbo.si and *.boxes.mumbo.si -> redirect (old_hosts rules)
-# The edge reaches E2B by private names on the internal NLB; client-proxy header routing needs sandbox.<domain>.
+# The edge itself is modules/edge; here are its settings and what every region's edge shares: the public records and
+# the SSM parameters.
 variable "edge_tag" {
   description = "Edge image tag in ECR (mumbo repo commit)."
   type        = string
@@ -60,52 +61,42 @@ variable "signin_cookie_name" {
   }
 }
 
-locals {
-  public_host  = "app.mumbo.si"
-  approve_host = "approve.${local.public_host}"
-  supabase_url = "https://qkvcouccrhyjiarkauyo.supabase.co"
-  # The project's publishable key (SUPABASE_ANON_KEY): public, the sign-in page serves it to every visitor in config.js.
-  supabase_publishable_key = "sb_publishable_hrzV3iBFsW4OOQydX9nmhA_goP8Birh"
-  # oauth2-proxy's callback: Mumbo's OAuth client's redirect URI, the only one the sign-in page sends a code to.
-  oauth_redirect_url = "https://${local.public_host}/oauth2/callback"
-  # The former public host. Its names redirect (old_hosts rules), except its model host, which boxes created
-  # under it have in their start script.
-  old_host     = "boxes.mumbo.si"
-  llm_host     = "llm.${local.public_host}" # LLM_HOST: new boxes' model host
-  llm_hosts    = [local.llm_host, "llm.${local.old_host}"]
-  backup_store = "mumbo-boxes-backup-${data.aws_caller_identity.this.account_id}" # created by the trial (../edge.tf); users' backups carry over
-  # api.mumbo.si was the retired shared server's (2026-11-09).
-  old_hosts = [local.old_host, "api.mumbo.si"]
-  # PROJECT_DOMAIN: project boxes are p-<16 hex>.<this>. It must stay in the mumbo.si zone.
-  project_domain = local.public_host
-  # Wildcard names: the approve page (approve.<public host>) and project boxes.
-  wildcards    = distinct(["*.${local.public_host}", "*.${local.project_domain}"])
-  audit_prefix = "audit/approvals/"
+module "edge_us_east_1" {
+  source = "./modules/edge"
+
+  name                  = local.name
+  edge_tag              = var.edge_tag
+  approver_emails       = var.approver_emails
+  ntfy_enabled          = var.ntfy_enabled
+  github_agent_login    = var.github_agent_login
+  github_agent_id       = var.github_agent_id
+  openrouter_models     = var.openrouter_models
+  openrouter_zdr        = var.openrouter_zdr
+  signin_cookie_name    = var.signin_cookie_name
+  node_count            = var.node_count
+  ecr                   = local.ecr
+  cert_validation_fqdns = [for r in aws_route53_record.cert : r.fqdn]
+
+  vpc_id                 = module.cell_us_east_1.vpc_id
+  public_subnets         = module.cell_us_east_1.public_subnets
+  private_subnets        = module.cell_us_east_1.private_subnets
+  box_egress_ips         = module.cell_us_east_1.nat_egress_ips
+  ecs_cluster_id         = module.cell_us_east_1.ecs_cluster.id
+  exec_role              = module.cell_us_east_1.exec_role
+  edge_security_group_id = module.cell_us_east_1.edge_security_group_id
+  data_security_group_id = module.cell_us_east_1.data_security_group_id
+  data_kms_key_arn       = module.cell_us_east_1.data_kms_key_arn
+  backup_bucket          = module.cell_us_east_1.backup_bucket
+  backups_kms_key_arn    = module.cell_us_east_1.backups_kms_key_arn
+  e2b_secret_arn         = module.cell_us_east_1.e2b_secret_arn
+  e2b_api_url            = module.cell_us_east_1.e2b_api_url
+  e2b_sandbox_url        = module.cell_us_east_1.e2b_sandbox_url
 }
 
-resource "aws_route53_record" "internal" {
-  for_each = toset(["api", "sandbox"])
-  zone_id  = aws_route53_zone.internal.zone_id
-  name     = "${each.key}.boxes.internal"
-  type     = "A"
-  alias {
-    name                   = aws_lb.internal.dns_name
-    zone_id                = aws_lb.internal.zone_id
-    evaluate_target_health = false
-  }
-}
-
-# ---- certificate and public ALB
 data "aws_route53_zone" "public" { name = "mumbo.si" }
-resource "aws_acm_certificate" "edge" {
-  domain_name               = local.public_host
-  subject_alternative_names = concat(local.llm_hosts, local.old_hosts, local.wildcards, ["*.${local.old_host}"])
-  validation_method         = "DNS"
-  lifecycle { create_before_destroy = true }
-}
 resource "aws_route53_record" "cert" {
   # *.X validates with X's record. Keyed by the domain without "*.": record names are unknown until a new certificate exists.
-  for_each = { for o in aws_acm_certificate.edge.domain_validation_options : trimprefix(o.domain_name, "*.") => o... }
+  for_each = { for o in module.edge_us_east_1.domain_validation_options : trimprefix(o.domain_name, "*.") => o... }
   zone_id  = data.aws_route53_zone.public.zone_id
   name     = each.value[0].resource_record_name
   type     = each.value[0].resource_record_type
@@ -114,343 +105,32 @@ resource "aws_route53_record" "cert" {
   # app/api validation records already exist from the old CDK certificate; ACM reuses one record per name.
   allow_overwrite = true
 }
-resource "aws_acm_certificate_validation" "edge" {
-  certificate_arn         = aws_acm_certificate.edge.arn
-  validation_record_fqdns = [for r in aws_route53_record.cert : r.fqdn]
-}
-
-resource "aws_security_group" "alb" {
-  name        = "${local.name}-alb"
-  description = "Public ALB for the edge"
-  vpc_id      = module.vpc.vpc_id
-}
-resource "aws_vpc_security_group_ingress_rule" "alb" {
-  for_each          = toset(["80", "443"])
-  security_group_id = aws_security_group.alb.id
-  cidr_ipv4         = "0.0.0.0/0"
-  ip_protocol       = "tcp"
-  from_port         = each.key
-  to_port           = each.key
-}
-resource "aws_vpc_security_group_egress_rule" "alb" {
-  security_group_id = aws_security_group.alb.id
-  ip_protocol       = "-1"
-  cidr_ipv4         = "0.0.0.0/0"
-}
-resource "aws_vpc_security_group_ingress_rule" "edge" {
-  for_each                     = toset(["4180", "8081"])
-  security_group_id            = aws_security_group.edge.id
-  referenced_security_group_id = aws_security_group.alb.id
-  ip_protocol                  = "tcp"
-  from_port                    = each.key
-  to_port                      = each.key
-}
-
-resource "aws_lb" "edge" {
-  name                       = "${local.name}-edge"
-  load_balancer_type         = "application"
-  subnets                    = module.vpc.public_subnets
-  security_groups            = [aws_security_group.alb.id]
-  idle_timeout               = 3600 # dsh's stream WebSocket stays open while a tab is
-  drop_invalid_header_fields = true
-  # Append: the edge model host trusts only the last X-Forwarded-For entry, which is the one this ALB adds.
-  xff_header_processing_mode = "append"
-}
-resource "aws_lb_target_group" "edge" {
-  for_each             = { user = { port = 4180, path = "/ping" }, model = { port = 8081, path = "/edge/healthz" } }
-  name                 = "${local.name}-edge-${each.key}"
-  port                 = each.value.port
-  protocol             = "HTTP"
-  target_type          = "ip"
-  vpc_id               = module.vpc.vpc_id
-  deregistration_delay = 30
-  health_check {
-    path                = each.value.path
-    interval            = 10
-    healthy_threshold   = 2
-    unhealthy_threshold = 3
-  }
-}
-resource "aws_lb_listener" "https" {
-  load_balancer_arn = aws_lb.edge.arn
-  port              = 443
-  protocol          = "HTTPS"
-  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn   = aws_acm_certificate_validation.edge.certificate_arn
-  default_action {
-    type = "fixed-response"
-    fixed_response {
-      content_type = "text/plain"
-      message_body = "not found"
-      status_code  = "404"
-    }
-  }
-}
-resource "aws_lb_listener_rule" "edge" {
-  # [priority, host names, target group]; the llm. rule outranks the wildcards.
-  for_each     = { user = [10, [local.public_host], "user"], model = [20, local.llm_hosts, "model"], subdomains = [30, local.wildcards, "user"] }
-  listener_arn = aws_lb_listener.https.arn
-  priority     = each.value[0]
-  condition {
-    host_header { values = each.value[1] }
-  }
-  action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.edge[each.value[2]].arn
-  }
-}
-# Former names redirect to the new ones with the same path and query. A project box moved from p-<id>.boxes.mumbo.si
-# to p-<id>.app.mumbo.si, which a redirect cannot derive (it keeps or replaces the whole host), so those land on the
-# home page, which links every project of the signed-in person.
-# The query starts with moved=1 (moved=1& when the request had none): browsers hold the app.mumbo.si -> boxes.mumbo.si
-# 301 from before as a cache entry for the plain URL, which would loop; the marked URL is never that entry.
-# HTTP_302 until the move is final (PRODUCTION.md, "Public host app.mumbo.si"), then HTTP_301.
-resource "aws_lb_listener_rule" "old_hosts" {
-  # [priority, host names, redirect host, path]; the wildcard ranks below llm.boxes.mumbo.si (model, 20).
-  for_each = {
-    main     = [5, local.old_hosts, local.public_host, "/#{path}"]
-    approve  = [6, ["approve.${local.old_host}"], local.approve_host, "/#{path}"]
-    projects = [40, ["*.${local.old_host}"], local.public_host, "/home"]
-  }
-  listener_arn = aws_lb_listener.https.arn
-  priority     = each.value[0]
-  condition {
-    host_header { values = each.value[1] }
-  }
-  action {
-    type = "redirect"
-    redirect {
-      host        = each.value[2]
-      port        = "443"
-      protocol    = "HTTPS"
-      path        = each.value[3]
-      query       = "moved=1&#{query}"
-      status_code = "HTTP_302"
-    }
-  }
-}
-moved {
-  from = aws_lb_listener_rule.old_hosts
-  to   = aws_lb_listener_rule.old_hosts["main"]
-}
-# oauth2-proxy skips sign-in for any GET whose client-sent X-Forwarded-Uri matches a skip-auth route (task below), and
-# neither this ALB nor oauth2-proxy sets that header: every request carrying it is refused, before any other rule.
-resource "aws_lb_listener_rule" "x_forwarded_uri" {
-  listener_arn = aws_lb_listener.https.arn
-  priority     = 1
-  condition {
-    http_header {
-      http_header_name = "X-Forwarded-Uri"
-      values           = ["*"]
-    }
-  }
-  action {
-    type = "fixed-response"
-    fixed_response {
-      content_type = "text/plain"
-      message_body = "bad request"
-      status_code  = "400"
-    }
-  }
-}
-
-resource "aws_lb_listener" "http" {
-  load_balancer_arn = aws_lb.edge.arn
-  port              = 80
-  protocol          = "HTTP"
-  default_action {
-    type = "redirect"
-    redirect {
-      port        = "443"
-      protocol    = "HTTPS"
-      status_code = "HTTP_301"
-    }
-  }
-}
-
-# ---- task
-resource "aws_cloudwatch_log_group" "edge" {
-  name              = "/${local.name}/edge"
-  retention_in_days = 30
-}
-resource "aws_iam_role" "edge" {
-  name               = "${local.name}-edge"
-  assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "sts:AssumeRole", Principal = { Service = "ecs-tasks.amazonaws.com" } }] })
-}
-resource "aws_iam_role_policy" "edge" {
-  role = aws_iam_role.edge.id
-  policy = jsonencode({ Version = "2012-10-17", Statement = [
-    { Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject"], Resource = "arn:aws:s3:::${local.backup_store}/users/*" },
-    { Effect = "Allow", Action = "s3:PutObject", Resource = "arn:aws:s3:::${local.backup_store}/${local.audit_prefix}*" },
-    { Effect = "Allow", Action = "s3:ListBucket", Resource = "arn:aws:s3:::${local.backup_store}" },
-    { Effect = "Allow", Action = ["kms:Decrypt", "kms:GenerateDataKey"], Resource = aws_kms_key.backups.arn },
-    { Effect = "Allow", Action = "ssm:GetParameter", Resource = "arn:aws:ssm:us-east-1:${data.aws_caller_identity.this.account_id}:parameter/mumbo/boxes/edge-secret" },
-    { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = "arn:aws:secretsmanager:us-east-1:${data.aws_caller_identity.this.account_id}:secret:mumbo/prod/deepseek-api-key-*" },
-  ] })
-}
-resource "aws_iam_role_policy" "exec_edge" {
-  role = aws_iam_role.exec.id
-  policy = jsonencode({ Version = "2012-10-17", Statement = [
-    { Effect = "Allow", Action = "ssm:GetParameters", Resource = distinct(concat(
-      [for p in values(merge(local.proxy_ssm, local.edge_ssm)) : "${local.ssm}/${p}"],
-      # Remove after the plain-env revision is steady (RUNBOOK.md): edge task definitions before it read SUPABASE_ANON_KEY
-      # from this parameter, and a circuit-breaker rollback to one must still start.
-      ["${local.ssm}/prod/supabase-anon-key"],
-    )) },
-    { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = concat([data.aws_secretsmanager_secret.github_app.arn], values(local.edge_secrets)) },
-  ] })
-}
-# The mumbo-bot GitHub App (app_id, slug, private_key), created outside Terraform under the data key (kms:Decrypt in control.tf).
-data "aws_secretsmanager_secret" "github_app" { name = "${local.name}/github-app" }
-# The OpenRouter API key (a plain string), created outside Terraform under the data key; read only while the route is on.
-data "aws_secretsmanager_secret" "openrouter" {
-  count = var.openrouter_models == "" ? 0 : 1
-  name  = "${local.name}/openrouter"
-}
-
-locals {
-  ssm = "arn:aws:ssm:us-east-1:${data.aws_caller_identity.this.account_id}:parameter/mumbo"
-  # Container env name -> SSM parameter under /mumbo; these are all the exec role may read.
-  proxy_ssm = { OAUTH2_PROXY_CLIENT_ID = "boxes/oauth-client-id", OAUTH2_PROXY_CLIENT_SECRET = "boxes/oauth-client-secret", OAUTH2_PROXY_COOKIE_SECRET = "boxes/cookie-secret" }
-  edge_ssm = merge(
-    { ALLOWED_EMAILS = "boxes/allowed-emails", MUMBO_OAUTH_CLIENT_IDS = "boxes/oauth-client-id" },
-    var.ntfy_enabled ? { NTFY_TOPIC = "boxes/ntfy-topic" } : {},
-  )
-  # Container env name -> plain-string Secrets Manager secret; with github_app, all the secrets the exec role may read.
-  edge_secrets = { for s in data.aws_secretsmanager_secret.openrouter : "OPENROUTER_API_KEY" => s.arn }
-}
-resource "aws_ecs_task_definition" "edge" {
-  family                   = "${local.name}-edge"
-  requires_compatibilities = ["FARGATE"]
-  network_mode             = "awsvpc"
-  cpu                      = 1024
-  memory                   = 2048
-  execution_role_arn       = aws_iam_role.exec.arn
-  task_role_arn            = aws_iam_role.edge.arn
-  runtime_platform {
-    operating_system_family = "LINUX"
-    cpu_architecture        = "X86_64"
-  }
-  container_definitions = jsonencode([
-    {
-      name         = "oauth2-proxy"
-      image        = "quay.io/oauth2-proxy/oauth2-proxy:v7.9.0"
-      essential    = true
-      portMappings = [{ containerPort = 4180, protocol = "tcp" }]
-      command = [
-        "--provider=oidc", "--oidc-issuer-url=${local.supabase_url}/auth/v1",
-        "--redirect-url=${local.oauth_redirect_url}", "--scope=openid email", "--code-challenge-method=S256",
-        "--cookie-secure=true", "--cookie-samesite=lax", "--cookie-csrf-per-request=true", "--cookie-csrf-expire=10m",
-        # One sign-in for the approve page and project boxes; the edge never forwards these cookies to a box.
-        "--cookie-name=${var.signin_cookie_name}", "--cookie-domain=.${local.public_host}", "--whitelist-domain=.${local.public_host}",
-        "--reverse-proxy=true", "--pass-user-headers=true", "--skip-provider-button=true", "--email-domain=*",
-        "--upstream=http://127.0.0.1:8080", "--http-address=0.0.0.0:4180",
-        "--upstream-timeout=120s", # a first visit creates the box and restores its backup before answering
-        # The Supabase sign-in page and its scripts (edge authUi), for visitors not signed in yet. v7.9 matches the
-        # request URI with its query; the edge serves exactly these GETs on the approve host and redirects the page there.
-        # oauth2-proxy also skips sign-in for any GET whose client-sent X-Forwarded-Uri matches a route, in later versions
-        # too: the ALB rule x_forwarded_uri refuses that header and the edge does as well. On every route oauth2-proxy
-        # strips client identity headers (set explicitly here) and sets X-Forwarded-Email only from a session; the edge
-        # treats a request without it as signed out. Who may enter is decided in the edge (admitted()), never by these flags.
-        "--skip-auth-route=GET=^/oauth/consent([?].*)?$", "--skip-auth-route=GET=^/auth-ui/(supabase|config|consent)[.]js$",
-        "--skip-auth-strip-headers=true",
-      ]
-      secrets          = [for k, p in local.proxy_ssm : { name = k, valueFrom = "${local.ssm}/${p}" }]
-      logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.edge.name, awslogs-region = "us-east-1", awslogs-stream-prefix = "oauth2-proxy" } }
-    },
-    {
-      name         = "edge"
-      image        = "${local.ecr}/edge:${var.edge_tag}"
-      essential    = true
-      portMappings = [{ containerPort = 8081, protocol = "tcp" }]
-      environment = [for k, v in {
-        PUBLIC_HOST       = local.public_host
-        LLM_HOST          = local.llm_host
-        BACKUP_BUCKET     = local.backup_store
-        BOX_EGRESS_IPS    = join(",", module.vpc.nat_public_ips)
-        E2B_API_URL       = "http://api.boxes.internal:3000"
-        E2B_SANDBOX_URL   = "http://sandbox.boxes.internal:3002"
-        REDIS_URL         = "rediss://${aws_elasticache_replication_group.edge.primary_endpoint_address}:6379"
-        LISTEN_HOST       = "127.0.0.1"
-        MODEL_LISTEN_HOST = "0.0.0.0"
-        AWS_REGION        = "us-east-1"
-        PAUSE_IDLE        = "false" # boxes stay running (founder, 2026-11-09); cost work later
-        PROJECT_DOMAIN    = local.project_domain
-        SUPABASE_URL      = local.supabase_url
-        SUPABASE_ANON_KEY = local.supabase_publishable_key
-        # The sign-in page consents only for this client (MUMBO_OAUTH_CLIENT_IDS, below) and redirect URI.
-        MUMBO_OAUTH_REDIRECT_URIS = local.oauth_redirect_url
-        SIGNIN_COOKIE             = var.signin_cookie_name
-        # Capacity units, not boxes: a person or project box (4096 MB, edge/template.mjs) is 2, a child sandbox (2048 MB, the
-        # mumbo-child build argument) is 1. 12 boxes per node (nodes.tf hugepages) minus 2 of headroom. An edge image from before
-        # the units change reads MAX_RUNNING_BOXES (running boxes of all kinds, children too, counted as one each) instead; both stay until no such image can be rolled back to.
-        MAX_RUNNING_UNITS = tostring(2 * (12 * var.node_count - 2))
-        MAX_RUNNING_BOXES = tostring(12 * var.node_count - 2)
-        # Approvals. PROJECT_TEMPLATE stays unset (it defaults to BOX_TEMPLATE) until the mumbo-project template is built.
-        APPROVE_HOST         = local.approve_host
-        APPROVER_EMAILS      = var.approver_emails
-        GITHUB_AGENT_LOGIN   = var.github_agent_login
-        GITHUB_AGENT_ID      = var.github_agent_id
-        REQUIRED_CHECKS      = "static,unit"
-        DAILY_TOKENS_USER    = "20000000"
-        DAILY_TOKENS_PROJECT = "50000000"
-        AUDIT_PREFIX         = local.audit_prefix
-        OPENROUTER_MODELS    = var.openrouter_models
-        OPENROUTER_ZDR       = tostring(var.openrouter_zdr)
-      } : { name = k, value = v }]
-      secrets = concat([for k, p in local.edge_ssm : { name = k, valueFrom = "${local.ssm}/${p}" }], [for k, arn in local.edge_secrets : { name = k, valueFrom = arn }], [
-        { name = "E2B_API_KEY", valueFrom = local.secret.TEAM_API_KEY },
-        { name = "GITHUB_APP_ID", valueFrom = "${data.aws_secretsmanager_secret.github_app.arn}:app_id::" },
-        { name = "GITHUB_APP_KEY", valueFrom = "${data.aws_secretsmanager_secret.github_app.arn}:private_key::" },
-      ])
-      stopTimeout      = 60
-      logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.edge.name, awslogs-region = "us-east-1", awslogs-stream-prefix = "edge" } }
-    },
-  ])
-}
-resource "aws_ecs_service" "edge" {
-  name                               = "edge"
-  cluster                            = aws_ecs_cluster.e2b.id
-  task_definition                    = aws_ecs_task_definition.edge.arn
-  desired_count                      = 2
-  launch_type                        = "FARGATE"
-  deployment_minimum_healthy_percent = 100
-  deployment_maximum_percent         = 200
-  health_check_grace_period_seconds  = 60
-  deployment_circuit_breaker {
-    enable   = true
-    rollback = true
-  }
-  network_configuration {
-    subnets         = module.vpc.private_subnets
-    security_groups = [aws_security_group.edge.id]
-  }
-  load_balancer {
-    target_group_arn = aws_lb_target_group.edge["user"].arn
-    container_name   = "oauth2-proxy"
-    container_port   = 4180
-  }
-  load_balancer {
-    target_group_arn = aws_lb_target_group.edge["model"].arn
-    container_name   = "edge"
-    container_port   = 8081
-  }
-  # The exec role's grant first: a task whose secrets it may not read does not start.
-  depends_on = [aws_lb_listener_rule.edge, aws_iam_role_policy.exec_edge]
-}
-
-output "edge_alb" { value = aws_lb.edge.dns_name }
 
 # Public names on the ALB. They replace the trial's A records (allow_overwrite); the trial no longer manages them.
 resource "aws_route53_record" "public" {
-  for_each        = toset(concat([local.public_host], local.llm_hosts, local.old_hosts, local.wildcards, ["*.${local.old_host}"]))
+  for_each        = toset(module.edge_us_east_1.public_names)
   zone_id         = data.aws_route53_zone.public.zone_id
   name            = each.key
   type            = "A"
   allow_overwrite = true
   alias {
-    name                   = aws_lb.edge.dns_name
-    zone_id                = aws_lb.edge.zone_id
+    name                   = module.edge_us_east_1.edge_alb.dns_name
+    zone_id                = module.edge_us_east_1.edge_alb.zone_id
     evaluate_target_health = false
   }
 }
+
+# The edge's settings in SSM; values are managed outside Terraform (edit the allowlist in SSM, then restart the edge
+# tasks). The secrets were generated by the trial and are kept as they are (box tokens and
+# oauth2-proxy cookies are signed with them); a fresh install sets them by hand, like the OAuth client
+# (/mumbo/boxes/oauth-client-{id,secret}, created in Supabase with redirect https://app.mumbo.si/oauth2/callback).
+resource "aws_ssm_parameter" "edge" {
+  for_each = { "allowed-emails" = "String", "edge-secret" = "SecureString", "cookie-secret" = "SecureString" }
+  name     = "/mumbo/boxes/${each.key}"
+  type     = each.value
+  value    = each.key == "allowed-emails" ? "@mumbo.si,@cambrialabs.ai" : "set outside Terraform"
+  lifecycle { ignore_changes = [value] }
+}
+
+output "edge_alb" { value = module.edge_us_east_1.edge_alb.dns_name }
+output "edge_redis_endpoint" { value = module.edge_us_east_1.edge_redis_endpoint }
