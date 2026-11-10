@@ -4,12 +4,12 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
-import type { Config } from '../config.ts'
+import type { PageLinks } from '../config.ts'
 import type {} from './locales.ts'
 import css from './BoxLinks.module.css'
 
 /** Props composed by the sidebar footer-action slot. */
-export type BoxLinksProps = PropsRuntime<'sidebar.footer.action'> & InjectFace<Config> & PropsLocale<'boxLinks'>
+export type BoxLinksProps = PropsRuntime<'sidebar.footer.action'> & InjectFace<PageLinks> & PropsLocale<'boxLinks'>
 
 /**
  * Render one row per configured link: icon and label in the wide sidebar, icon with a tooltip in the rail.

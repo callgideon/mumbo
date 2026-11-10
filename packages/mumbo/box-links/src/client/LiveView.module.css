@@ -1,0 +1,33 @@
+/* The Desktop and Browser tab body: a failure strip, as the terminal tab draws its status, above a live view that fills the pane. */
+
+.root {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 0;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+}
+
+.failure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  background: var(--dsw-alias-bg-l2);
+}
+
+.message {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.frame {
+  display: block;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+}
