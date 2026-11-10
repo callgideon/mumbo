@@ -58,7 +58,7 @@ export function snapshot(host: ViewHost): Snapshot {
   const rules = new Map(settings.policy.rules.map(rule => [rule.id, rule.name]))
   const actor = ({ source, id }: ActorRef, human?: boolean): ActorView => {
     if (!id) return { source, id }
-    const entry = allowedSender(settings, { source, id }) ?? listedBot(settings, { source, id })
+    const entry = allowedSender(settings, sources, { source, id }) ?? listedBot(settings, { source, id })
     if (entry) return { source, id, name: entry.name || entry.id }
     const unnamed = sources.kind(source)?.policy?.unnamed
     return { source, id, name: unnamed ? human === false ? unnamed.bot : unnamed.person : id }

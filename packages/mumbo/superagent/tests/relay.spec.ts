@@ -1,7 +1,7 @@
 /**
  * The relay Source (UPSTREAM.md S9) on a running Runtime: messages posted to `/orchestrator/relay` as a project member
- * become Triggers that the real Engine, Policy and main Session tools act on. DSH admission is a stand-in that answers
- * the principal each case names; the real Connection's admission is covered in `http.spec.ts`.
+ * become Triggers that the real Engine, Policy, Settings and main Session tools act on. DSH admission is a stand-in that
+ * answers the principal each case names; the real Connection's admission is covered in `http.spec.ts`.
  */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { key } from '../src/core/index.ts'
@@ -28,11 +28,9 @@ const register = () => registerRelay({ connection: { admit: () => admission },
     return () => { handler = undefined }
   } } } as never, host.runtime)
 
+// No relay Policy part is stored, as on a fresh box.
 beforeEach(async () => {
   host = await startRuntime()
-  const settings = host.runtime.store.settings()
-  host.runtime.store.saveSettings({ ...settings, policy: { ...settings.policy,
-    sources: { ...settings.policy.sources, relay: { allowed: [{ id: ALICE }], admission: {} } } } })
   unregister = register()
 })
 afterEach(async () => { unregister(); await host.stop() })
@@ -50,8 +48,22 @@ const message = (id: string, kind: 'request' | 'context', text = `${kind} ${id}`
   ({ id, kind, text, hops: HOPS, ...extra })
 const stored = () => host.runtime.store.read.recentTriggers(0, 50).filter(trigger => trigger.source === 'relay')
 const candidate = (triggerId: string) => host.relays(host.runtime.masterId).find(item => item.kind === 'candidate' && item.trigger_id === triggerId)
+/** Save these Policy parts over the stored ones through Settings, as the panel does. */
+async function savePolicy(parts: Record<string, Record<string, unknown>>) {
+  const policy = host.runtime.store.settings().policy
+  await host.runtime.settings.save('policy', { ...policy, sources: { ...policy.sources, ...parts } }, host.runtime.store.blockRevision('policy'), 'panel')
+}
+/** Accept the request `id` that `email` relayed as a Ticket; returns the Ticket's id. */
+async function accepted(email: string, id: string) {
+  const sent = await post(message(id, 'request', `Fix ${id}`, { hops: hopsOf(email) }), member(email))
+  await host.runtime.idle()
+  const result = await host.route({ kind: 'accept', trigger_id: sent.body.trigger, title: `Fix ${id}`, worktree_name: `fix-${id}`,
+    acknowledgement: 'On it.' })
+  await host.runtime.idle()
+  return (result.ticket as { ticket_id: string }).ticket_id
+}
 
-it('turns a request into an explicit Trigger from the member with its hop chain, which reaches the main Session as an explicit candidate', async () => {
+it('turns a request into an explicit Trigger from the member with its hop chain, which reaches the main Session as an explicit candidate from any member', async () => {
   const sent = await post(message('m1', 'request', 'Fix the login page'))
   expect(sent).toEqual({ status: 200, body: { result: 'stored', trigger: key('relay', ALICE, 'm1'), thread: 'm1' } })
   expect(host.runtime.store.triggers.get(key('relay', ALICE, 'm1'))).toMatchObject({ source: 'relay', human: true, addressed: 'direct',
@@ -64,7 +76,7 @@ it('turns a request into an explicit Trigger from the member with its hop chain,
   expect(candidate(key('relay', ALICE, 'm1'))).toMatchObject({ from: ALICE, thread: `relay:${ALICE}/m1`, strength: 'explicit' })
 })
 
-it('turns context into an implicit Trigger, an inferred candidate at most', async () => {
+it('turns context into an implicit Trigger, an inferred candidate at most from any member', async () => {
   expect(await post(message('m2', 'context', 'The login page uses OAuth now'))).toMatchObject({ status: 200, body: { result: 'stored' } })
   const trigger = host.runtime.store.triggers.get(key('relay', ALICE, 'm2'))!
   expect(trigger).toMatchObject({ human: true, meta: { kind: 'context' } })
@@ -73,7 +85,9 @@ it('turns context into an implicit Trigger, an inferred candidate at most', asyn
   expect(candidate(trigger.id)).toMatchObject({ from: ALICE, strength: 'inferred' })
 })
 
-it('leaves a sender off the Policy\'s allowed list to the Policy, which admits neither their request nor their context', async () => {
+it('with every member switched off, admits only the members on the allowed list, refusing another\'s request and context', async () => {
+  await savePolicy({ relay: { allowed: [{ id: ALICE }], allMembers: false } })
+  await post(message('m1', 'request'))
   for (const kind of ['request', 'context'] as const) {
     expect(await post(message(`bob-${kind}`, kind, undefined, { hops: hopsOf(BOB) }), member(BOB))).toMatchObject({ status: 200, body: { result: 'stored' } })
   }
@@ -82,6 +96,63 @@ it('leaves a sender off the Policy\'s allowed list to the Policy, which admits n
     expect(candidate(key('relay', BOB, `bob-${kind}`))).toBeUndefined()
     expect(host.runtime.store.decisions.byThread(`relay:${BOB}/bob-${kind}`)).toMatchObject([{ kind: 'ignore', reason: [{ code: 'not_a_member' }] }])
   }
+  expect(candidate(key('relay', ALICE, 'm1'))).toMatchObject({ from: ALICE, strength: 'explicit' })
+})
+
+it('takes the authority of switched-off members\' Mandates, as removing them from the list would', async () => {
+  const alice = await accepted(ALICE, 'm1'), bob = await accepted(BOB, 'm2')
+  await savePolicy({ relay: { allowed: [{ id: BOB }], allMembers: false } })
+  const policyInputs = (id: string) => host.runtime.store.tickets.get(id)!.inputs.filter(input => input.kind === 'policy-changed')
+  expect(policyInputs(alice)).toMatchObject([{ effect: { requesterAllowed: false, requester: { source: 'relay', id: ALICE } } }])
+  expect(policyInputs(bob)).toEqual([])
+  expect(host.runtime.store.settingsHistory(1)[0]).toMatchObject({ policyChanged: true, notified: [alice] })
+  // Alice's later message on her Thread no longer reaches her Ticket.
+  await post(message('m3', 'context', 'It is the second button', { thread: 'm1' }))
+  expect(host.runtime.store.triggers.disposition(key('relay', ALICE, 'm3'))?.fanout).toEqual([])
+})
+
+it('shows the switch on the panel, on while no relay part is stored, and only the relay kind accepts it', async () => {
+  const view = (await host.api('GET', 'settings')).body as { blocks: { policy: { value: { sources: Record<string, unknown> } } },
+    sources: { id: string; policy?: { fields: { key: string; type: string }[]; defaults: unknown } }[] }
+  const relay = view.sources.find(source => source.id === 'relay')!.policy!
+  expect(relay.fields.map(field => [field.key, field.type])).toEqual([['allowed', 'rows'], ['allMembers', 'switch']])
+  expect(relay.defaults).toEqual({ allowed: [], allMembers: true })
+  expect(view.blocks.policy.value.sources.relay).toBeUndefined()
+  // The kinds whose senders name themselves refuse the field, so a stored one is never read.
+  await expect(savePolicy({ github: { allowed: [], allMembers: true } })).rejects.toThrow('allMembers')
+  await expect(savePolicy({ feishu: { allowed: [], allMembers: true } })).rejects.toThrow('allMembers')
+  const { sources, store } = host.runtime
+  const settings = store.settings()
+  const stored = (parts: Record<string, Record<string, unknown>>) => ({ ...settings, policy: { ...settings.policy, sources: parts as never } })
+  expect(['relay', 'github', 'unknown'].map(id => sources.allMembers(id, stored({ github: { allowed: [], allMembers: true } }))))
+    .toEqual([true, false, false])
+  // A stored relay part its kind refuses counts no member.
+  expect(sources.allMembers('relay', stored({ relay: { allowed: [{ id: 'Not a member' }] } }))).toBe(false)
+  // With every allowed list empty, the members are who may originate work, until the switch or the Source is off.
+  const noAllowed = async () => ((await host.api('GET', 'overview')).body.problems as { kind: string }[]).some(problem => problem.kind === 'no-allowed')
+  await savePolicy({ feishu: { allowed: [], syncChat: '' }, github: { allowed: [] } })
+  expect(await noAllowed()).toBe(false)
+  const on = store.settings()
+  store.saveSettings({ ...on, sources: { ...on.sources, relay: { enabled: false, config: {} } } })
+  expect(await noAllowed()).toBe(true)
+  store.saveSettings(on)
+  await savePolicy({ relay: { allMembers: false } })
+  expect(await noAllowed()).toBe(true)
+})
+
+it('shows the main Session the relay part over its defaults while none is stored, and which Sources count every member', async () => {
+  const read = (resource: string) => host.runTool(host.runtime.masterId, 'orchestrator_read', { resource })
+  const policy = async () => (JSON.parse((await read('settings/policy') as { text: string }).text) as
+    { value: { sources: Record<string, unknown> } }).value
+  expect(await read('settings')).toMatchObject({ policy: { allowed: { relay: 0 }, all_members: ['relay'] } })
+  const value = await policy()
+  expect(value.sources.relay).toEqual({ allowed: [], allMembers: true, admission: {} })
+  // Saved back as read, the block stores the part it showed.
+  await host.runtime.settings.save('policy', value, host.runtime.store.blockRevision('policy'), 'panel')
+  expect(host.runtime.store.settings().policy.sources.relay).toEqual(value.sources.relay)
+  await savePolicy({ relay: { allowed: [{ id: ALICE }], allMembers: false } })
+  expect(await read('settings')).toMatchObject({ policy: { allowed: { relay: 1 }, all_members: [] } })
+  expect((await policy()).sources.relay).toEqual({ allowed: [{ id: ALICE }], allMembers: false, admission: {} })
 })
 
 it('receives nothing from a request DSH does not admit as a live project member', async () => {

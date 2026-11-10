@@ -116,21 +116,29 @@ export const POLICY_REVISION = 'mandate-v3'
 export function policyVersion(settings: Settings): string {
   return key(POLICY_REVISION, JSON.stringify({ rules: settings.policy.rules, mode: settings.eval.mode, sources: settings.policy.sources }))
 }
-export function allowedSender(settings: Settings, actor: ActorRef): z.infer<typeof AllowedSchema> | undefined {
+/** The Sources as the Policy reads them: listening scope, and which Sources count every actor they authenticate as allowed. */
+export interface PolicySources extends SourceScope {
+  /**
+   * Whether every actor of `source` is an allowed sender: its policy part's `allMembers`, which only a kind whose actor ids
+   * are authenticated declares.
+   */
+  allMembers(source: string): boolean
+}
+/** The allowed-list entry naming `actor` on its Source, or a bare `{ id }` when that Source counts every actor as allowed. */
+export function allowedSender(settings: Settings, sources: Pick<PolicySources, 'allMembers'>, actor: ActorRef):
+  z.infer<typeof AllowedSchema> | undefined {
   return settings.policy.sources[actor.source]?.allowed.find(entry => sameName(entry.id, actor.id))
+    ?? (sources.allMembers(actor.source) ? { id: actor.id } : undefined)
 }
 /** Look up `actor` in the Source's `bots` policy list (validated by the Source's kind), whose messages are admitted as inferred candidates at most. */
 export function listedBot(settings: Settings, actor: ActorRef): z.infer<typeof AllowedSchema> | undefined {
   const bots = z.array(AllowedSchema).catch([]).parse(settings.policy.sources[actor.source]?.bots ?? [])
   return bots.find(entry => sameName(entry.id, actor.id))
 }
-/**
- * Whether a Trigger may reach a ticket as an Input: a person on the Source's allowed list, a bot on its bot list, or GitHub CI,
- * which has no sender and which GitHub's CI Triggers label with `meta.ci`. Any other senderless Trigger is withheld.
- */
-export const deliverable = (settings: Settings, trigger: Trigger): boolean => trigger.human ? !!allowedSender(settings, trigger.actor)
-  : (trigger.source === 'github' && trigger.actor.id === '' && trigger.meta.ci === true) || !!listedBot(settings, trigger.actor)
-export const anyoneAllowed = (settings: Settings): boolean => Object.values(settings.policy.sources).some(part => part.allowed.length > 0)
+/** Whether anyone may originate work: an allowed list names someone, or an enabled Source counts every actor as allowed. */
+export const anyoneAllowed = (settings: Settings, sources: Pick<PolicySources, 'allMembers'> & { instances(): { id: string; enabled: boolean }[] }):
+  boolean => Object.values(settings.policy.sources).some(part => part.allowed.length > 0)
+  || sources.instances().some(({ id, enabled }) => enabled && sources.allMembers(id))
 const senderName = (entry: z.infer<typeof AllowedSchema>): string => entry.name || entry.id
 
 /** Check whether a thread has tickets of its own (excluding context-only subscriptions). */
@@ -147,7 +155,7 @@ function admissionOf(settings: Settings, source: string, row: string | undefined
 const STRENGTH: Readonly<Record<Admission, number>> = { ignore: 0, inferred: 1, explicit: 2 }
 
 /** Compute how a settings change from `old` to `now` affects the authorization or matched rules of each open ticket. */
-export function policyEffects(tickets: readonly Ticket[], old: Settings, now: Settings, scope: (settings: Settings) => SourceScope):
+export function policyEffects(tickets: readonly Ticket[], old: Settings, now: Settings, scope: (settings: Settings) => PolicySources):
   Map<string, PolicyEffect> {
   const before = settingsPolicy(old, scope(old)), after = settingsPolicy(now, scope(now))
   const effects = new Map<string, PolicyEffect>()
@@ -170,7 +178,7 @@ export function policyEffects(tickets: readonly Ticket[], old: Settings, now: Se
   return effects
 }
 /** Build the active Policy for gating incoming Triggers and revalidating existing Ticket Mandates. */
-export function settingsPolicy(settings: Settings, sources: SourceScope): Policy {
+export function settingsPolicy(settings: Settings, sources: PolicySources): Policy {
   const version = policyVersion(settings)
   const mode = settings.eval.mode
   /** Gate non-human triggers: only listed bots (as inferred candidates) and senderless system/CI events may pass; other bots are rejected. */
@@ -196,7 +204,7 @@ export function settingsPolicy(settings: Settings, sources: SourceScope): Policy
     version, paused: settings.paused, evalTimeoutMs: settings.eval.timeoutSeconds * 1000,
     gate(trigger: Trigger, thread, tickets) {
       if (!trigger.human) return machineGate(trigger)
-      const allowed = allowedSender(settings, trigger.actor)
+      const allowed = allowedSender(settings, sources, trigger.actor)
       const scope = listened(sources, trigger.source, trigger.meta)
       const row = scope.listened ? scope.row : undefined
       const recorded = { source: trigger.source, scope: trigger.meta, ...row === undefined ? {} : { row }, ...allowed ? { sender: senderName(allowed) } : {} }
@@ -216,7 +224,10 @@ export function settingsPolicy(settings: Settings, sources: SourceScope): Policy
       return { admissible: false, reason: !allowed ? 'not_a_member' : receivable && admission === 'ignore' ? 'admission_ignored' : 'no_mention' }
     },
     admitsInferred: rules => mode === 'auto' && rules.length > 0 && rules.every(id => settings.policy.rules.some(rule => rule.enabled && rule.id === id)),
-    delivers: trigger => deliverable(settings, trigger),
+    // A person on the Source's allowed list, a bot on its bot list, or GitHub CI, which has no sender and which GitHub's CI
+    // Triggers label with `meta.ci`; any other senderless Trigger is withheld.
+    delivers: trigger => trigger.human ? !!allowedSender(settings, sources, trigger.actor)
+      : (trigger.source === 'github' && trigger.actor.id === '' && trigger.meta.ci === true) || !!listedBot(settings, trigger.actor),
     revalidate(mandate: Mandate) {
       // Revalidation rules follow docs/002 (Eval path; Resume revalidates).
       const { basis } = mandate
@@ -231,7 +242,7 @@ export function settingsPolicy(settings: Settings, sources: SourceScope): Policy
       // An admission-table Mandate holds while the sender's current cell still grants at least the original strength.
       if (basis.via === 'admission') {
         const { cell } = basis
-        const listed = !!allowedSender(settings, mandate.actor)
+        const listed = !!allowedSender(settings, sources, mandate.actor)
         // A listed sender who addresses the agent is always explicit and uses no table cell.
         if (cell === 'unlistedAddressed' && listed) return true
         // A sender added to the allowed list since acceptance moves to the listed cell, and still undergoes observation checks below.
@@ -240,7 +251,7 @@ export function settingsPolicy(settings: Settings, sources: SourceScope): Policy
         const admission = admissionOf(settings, source ?? '', current?.listened ? current.row : undefined, now)
         if (STRENGTH[admission] < STRENGTH[mandate.strength]) return false
         if (mandate.strength === 'explicit') return true
-      } else if (basis.via !== 'bot' && !allowedSender(settings, mandate.actor)) return false
+      } else if (basis.via !== 'bot' && !allowedSender(settings, sources, mandate.actor)) return false
       // Observed/inferred Mandates hold only while auto mode is active and all matched rules remain enabled.
       if ((basis.via === 'admission' || basis.via === 'listed' || basis.via === 'bot') && basis.observation) return mode === 'auto' && rulesOn(basis.rules)
       return true
