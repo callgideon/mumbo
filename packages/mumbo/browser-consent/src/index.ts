@@ -6,7 +6,7 @@
  * @module @mumbo/browser-consent
  */
 
-import { realpathSync, statSync } from 'node:fs'
+import { lstatSync, realpathSync, statSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
@@ -165,8 +165,10 @@ function below(directory: string, path: string): boolean {
 }
 
 /**
- * Say why a call may not send the files its `paths` argument names. Each must be an absolute path below the upload
- * directory, as written and as resolved, so neither `..` nor a link leads out of it, and must name an existing file.
+ * Say why a call may not send the files its `paths` argument names. Each must be an absolute path without `.` or `..`
+ * names that leads below the upload directory through directories to a regular file, none of them a symbolic link, so
+ * nothing leads out of the directory. Names below it are read without following links, so no refusal tells whether a
+ * path outside the directory exists.
  * @param paths - the call's `paths` argument.
  * @param upload - the validated upload directory.
  * @returns why the first refused path is refused, or `undefined` when every path may be sent.
@@ -177,19 +179,21 @@ export function uploadRefusal(paths: unknown, upload: UploadDirectory): string |
   for (const path of paths as unknown[]) {
     const shown = JSON.stringify(path)
     if (typeof path !== 'string' || !isAbsolute(path)) return `${shown} is not an absolute path`
-    if (!below(upload.configured, resolve(path)) && !below(upload.real, resolve(path))) return `${shown} is not in ${upload.configured}`
-    let real: string
-    try {
-      real = realpathSync.native(path)
-    } catch (error: unknown) {
-      const code = error instanceof Error && 'code' in error ? String(error.code) : String(error)
-      return code === 'ENOENT' ? `${shown} does not exist` : `${shown} cannot be resolved (${code})`
-    }
-    if (!below(upload.real, real)) return `${shown} leads out of ${upload.configured} through a symbolic link`
-    // A directory would send every file below it, links included.
-    if (!statSync(real).isFile()) return `${shown} is not a file`
+    const base = resolve(path) === path ? [upload.configured, upload.real].find(directory => below(directory, path)) : undefined
+    if (base === undefined || !fileBelow(upload.real, relative(base, path).split(sep))) return `${shown} is not a file in ${upload.configured}`
   }
   return undefined
+}
+
+/** Whether `names`, joined below `directory`, are directories and then a regular file, with no symbolic link among them. */
+function fileBelow(directory: string, names: readonly string[]): boolean {
+  let entry = directory
+  for (const [index, name] of names.entries()) {
+    entry = join(entry, name)
+    const stats = lstatSync(entry, { throwIfNoEntry: false })
+    if (!(index === names.length - 1 ? stats?.isFile() : stats?.isDirectory())) return false
+  }
+  return true
 }
 
 /** A validated `deniedUrls` list. */
@@ -635,9 +639,7 @@ export function apply(ctx: Context, config: Config): void {
     }
     // The browser reads an uploaded file as its own user, which can read its saved passwords: only the upload directory's files go.
     const unsent = tool !== undefined && FILE_SENDERS.has(tool) ? uploadRefusal(fieldsOf(exec.arguments).paths, upload) : undefined
-    if (unsent !== undefined) {
-      return `${tool} did not run: ${unsent}. The browser uploads files only from ${upload.configured}; copy the file into ${upload.configured} first and pass the copy's path.`
-    }
+    if (unsent !== undefined) return `${tool} did not run: ${unsent}.`
     const target = tool === undefined ? undefined : targetUrl(exec.arguments)
     const blocked = target === undefined ? undefined : denial(target, denied)
     return blocked === undefined ? undefined : `${tool} did not run: the assistant may not open ${blocked}.`

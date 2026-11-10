@@ -326,21 +326,20 @@ describe('browser write consent in the person-box composition', () => {
     expect((await loaded.calls()).map(call => call.name)).toEqual(['browser_navigate', 'browser_navigate', 'browser_navigate', 'browser_tabs', 'browser_network_requests'])
   })
 
-  it('sends files only from the upload directory, and tells the model to copy one there first, before asking anyone', { timeout: 60_000 }, async () => {
+  it('sends files only from the upload directory, refusing every other path the same way before asking anyone', { timeout: 60_000 }, async () => {
     const downloads = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-downloads-'))
     roots.push(downloads)
     const loaded = await load({ consent: { uploadDirectory: downloads } })
     const secret = join(loaded.root, 'Login Data')
     await writeFile(secret, 'passwords')
     await symlink(secret, join(downloads, 'tax.pdf'))
-    const copy = `copy the file into ${downloads} first and pass the copy's path.`
-    for (const [name, args, reason] of [
-      ['browser_file_upload', { paths: [secret] }, `${JSON.stringify(secret)} is not in ${downloads}`],
-      ['browser_drop', { target: 'e1', paths: [`${downloads}/../${relative(dirname(downloads), secret)}`] }, `"${downloads}/../${relative(dirname(downloads), secret)}" is not in ${downloads}`],
-      ['browser_file_upload', { paths: [join(downloads, 'tax.pdf')] }, `"${join(downloads, 'tax.pdf')}" leads out of ${downloads} through a symbolic link`],
-      ['browser_file_upload', { paths: [join(downloads, 'missing.pdf')] }, `"${join(downloads, 'missing.pdf')}" does not exist`],
+    for (const [name, args, path] of [
+      ['browser_file_upload', { paths: [secret] }, secret],
+      ['browser_drop', { target: 'e1', paths: [`${downloads}/../${relative(dirname(downloads), secret)}`] }, `${downloads}/../${relative(dirname(downloads), secret)}`],
+      ['browser_file_upload', { paths: [join(downloads, 'tax.pdf')] }, join(downloads, 'tax.pdf')],
+      ['browser_file_upload', { paths: [join(downloads, 'missing.pdf')] }, join(downloads, 'missing.pdf')],
     ] as const) {
-      const refusal = `Error: ${name} did not run: ${reason}. The browser uploads files only from ${downloads}; ${copy}`
+      const refusal = `Error: ${name} did not run: ${JSON.stringify(path)} is not a file in ${downloads}.`
       expect(textOf(await direct(loaded, tool(name), args))).toBe(refusal)
       // The guard refuses it too when a listener ahead of consent would allow it.
       const allow = loaded.ctx.on('tools/pre-execute', (): Promise<PreToolDecision> => Promise.resolve({ kind: 'allow' }), { prepend: true })

@@ -210,26 +210,33 @@ describe('upload paths', () => {
     symlinkSync(secret, join(downloads, 'tax-link.pdf'))
     symlinkSync(join(root, 'browser'), join(downloads, 'profile'))
     symlinkSync(join(downloads, 'tax.pdf'), join(downloads, 'inside-link.pdf'))
+    // Links whose targets pass through a directory outside and come back: one that exists, one that does not.
+    symlinkSync(`${root}/browser/../Downloads/tax.pdf`, join(downloads, 'through-private.pdf'))
+    symlinkSync(`${root}/nowhere/../Downloads/tax.pdf`, join(downloads, 'through-missing.pdf'))
+    symlinkSync(join(downloads, 'loop'), join(downloads, 'loop'))
     return { root, downloads, secret, upload: uploadDirectory(downloads) }
   }
 
-  it('sends files below the upload directory, through links that stay inside it', () => {
-    const { downloads, upload } = layout()
-    expect(uploadRefusal([join(downloads, 'tax.pdf'), join(downloads, 'folder', 'scan.pdf'), join(downloads, 'inside-link.pdf')], upload)).toBeUndefined()
+  it('sends regular files below the upload directory, named below it as configured or as resolved', () => {
+    const { root, downloads, upload } = layout()
+    expect(uploadRefusal([join(downloads, 'tax.pdf'), join(downloads, 'folder', 'scan.pdf')], upload)).toBeUndefined()
     // No paths cancels the file chooser, which sends nothing.
     expect(uploadRefusal(undefined, upload)).toBeUndefined()
+    symlinkSync(downloads, join(root, 'configured'))
+    const linked = uploadDirectory(join(root, 'configured'))
+    expect(uploadRefusal([join(root, 'configured', 'tax.pdf'), join(downloads, 'folder', 'scan.pdf')], linked)).toBeUndefined()
+    expect(uploadRefusal([join(root, 'configured', 'profile', 'Login Data')], linked)).toBe(`"${join(root, 'configured', 'profile', 'Login Data')}" is not a file in ${join(root, 'configured')}`)
   })
 
-  it('refuses a path outside it, one whose .. leaves it, a link out of it, a missing file, a folder, and a relative path', () => {
-    const { downloads, secret, upload } = layout()
+  it('refuses with one answer every path that is not a regular file reached below it through no link, whatever lies outside', () => {
+    const { root, downloads, secret, upload } = layout()
     const refusal = (path: unknown) => uploadRefusal([join(downloads, 'tax.pdf'), path], upload)
-    expect(refusal(secret)).toBe(`${JSON.stringify(secret)} is not in ${downloads}`)
-    expect(refusal(`${downloads}/../browser/Login Data`)).toBe(`"${downloads}/../browser/Login Data" is not in ${downloads}`)
-    expect(refusal(join(downloads, 'tax-link.pdf'))).toBe(`"${join(downloads, 'tax-link.pdf')}" leads out of ${downloads} through a symbolic link`)
-    expect(refusal(join(downloads, 'profile', 'Login Data'))).toBe(`"${join(downloads, 'profile', 'Login Data')}" leads out of ${downloads} through a symbolic link`)
-    expect(refusal(join(downloads, 'missing.pdf'))).toBe(`"${join(downloads, 'missing.pdf')}" does not exist`)
-    expect(refusal(join(downloads, 'folder'))).toBe(`"${join(downloads, 'folder')}" is not a file`)
-    expect(refusal(downloads)).toBe(`"${downloads}" is not in ${downloads}`)
+    for (const path of [
+      secret, `${downloads}/../browser/Login Data`, `${downloads}/./tax.pdf`, `${downloads}/folder/`, join(downloads, 'tax-link.pdf'),
+      join(downloads, 'profile', 'Login Data'), join(downloads, 'inside-link.pdf'), join(downloads, 'through-private.pdf'),
+      join(downloads, 'through-missing.pdf'), join(downloads, 'loop'), join(downloads, 'missing.pdf'), join(downloads, 'nowhere', 'scan.pdf'),
+      join(downloads, 'tax.pdf', 'scan.pdf'), join(downloads, 'folder'), downloads, join(root, 'Downloads-other', 'tax.pdf'),
+    ]) expect(refusal(path), path).toBe(`${JSON.stringify(path)} is not a file in ${downloads}`)
     expect(refusal('tax.pdf')).toBe('"tax.pdf" is not an absolute path')
     expect(refusal(7)).toBe('7 is not an absolute path')
     expect(uploadRefusal(join(downloads, 'tax.pdf'), upload)).toBe('paths is not a list of file paths')
