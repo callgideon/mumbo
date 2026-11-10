@@ -94,6 +94,7 @@ Copy [examples/profile.cordis.patch.yml](../examples/profile.cordis.patch.yml) t
 | --- | --- | --- |
 | `stateDir` | yes | Absolute path: the database, the lock, the command shims in `worker-bin`, the agent's git configuration and, by default, the Ticket directories in `work`. Back it up before upgrades |
 | `promptMaxChars`, `admissionContextMaxPages`, `admissionContextTimeoutMs` | no | The largest saved prompt configuration, and how many Thread pages one assessment reads within what time |
+| `panelAdmins` | no | In Mumbo: the lowercased `edge-member` emails that may use the panel and the Management API besides the owner, default none; see [UPSTREAM.md S2](../UPSTREAM.md#s2-management-api-admission) |
 
 After the first start, edit machine limits in **Settings → Deployment** or the DeepSeek Harness Plugin Manager. Changes apply without restart. `stateDir` cannot be changed there. Invalid values or unknown configuration keys prevent startup; the log identifies the key.
 
@@ -158,6 +159,8 @@ Setup must succeed before polling or work starts. Overview lists missing require
 
 ### Management API
 
+In Mumbo, the Management API admits only DSH-authenticated requests from the owner or a member `panelAdmins` lists, on any bind address; the loopback rule below is upstream's, see [UPSTREAM.md S2](../UPSTREAM.md#s2-management-api-admission).
+
 The panel uses a local HTTP API that agents can also call. `SETUP.md` uses it to save settings, and the service script reads `GET state`.
 
 Send requests to `http://127.0.0.1:<port>/orchestrator/api/` with `x-orchestrator-request: 1`. The host must be `127.0.0.1:<port>` or `localhost:<port>`. Missing headers or an `Origin` from another site receive 403.
@@ -205,6 +208,8 @@ The blocks:
 - `executor`: `model`, `maxWorkers`, `directory`, `prepare` and `blockedCommands`. The processing pause is a setting of its own, `paused`, which `POST executor/pause` sets.
 
 Changing a repository or CLI runs the corresponding setup check first. A failed check returns 400 with details in `setup`. A successful account change, or any save while setup is pending, returns `restarting: true`. The API is temporarily unavailable while the application restarts.
+
+In Mumbo, this `curl` gets 401: it carries no DSH browser cookie ([UPSTREAM.md S2](../UPSTREAM.md#s2-management-api-admission)).
 
 ```sh
 api=http://127.0.0.1:3082/orchestrator/api

@@ -66,12 +66,12 @@ Upstream serves `/orchestrator/api/` only from a loopback Web server, to any req
 - `src/deployment.ts`: the `panelAdmins` key, lowercased emails, default `[]`, which admits no `edge-member`; `Machine.panelAdmins` carries it. An entry that is not one lowercased address (uppercase, whitespace, `*`, `,`, or not exactly one `@`) fails at load. An unknown key's error names the valid keys instead of pointing at `docs/006-deployment.md`.
 - `src/index.ts`: injects `connection`.
 - Tests: `tests/http.spec.ts` replaces the loopback test with the admission cases over a faked `admit`, and adds one through the real Connection plugin: its Host and Origin checks, the owner's browser cookie, a stand-in member authenticator, and a disposed member Peer. `tests/deployment.spec.ts` covers the `panelAdmins` default and validation, and `tests/fixtures/deployment.ts` sets `panelAdmins: []`. The `connection` fakes in `tests/fixtures/host.ts`, `tests/runtime.spec.ts` and `tests/model-surface.spec.ts` are services of their own, where `ctx.connection` reads them, and their owner Peer carries a `signal`.
-- Not updated: `docs/006-deployment.md` (the Management API section, its `curl` example and the configuration key table), `docs/007-architecture.md` (the `http.ts` and `http.spec.ts` rows) and `SETUP.md` step 3 still describe upstream's unauthenticated loopback access. A `curl` without a DSH browser cookie now gets 401.
+- Upstream docs keep their loopback text, with a one-line Mumbo note pointing here: `docs/006-deployment.md` (the Management API section, its `curl` example, and a `panelAdmins` row in the configuration key table), `docs/007-architecture.md` (the `http.ts` and `http.spec.ts` rows) and `SETUP.md` (Execute step 3). A `curl` without a DSH browser cookie gets 401.
 
 Files outside the copy changed for S2, because they said non-owner Peers reach no route outside the Gateway except exact routes that declare `access`:
 
-- `packages/client/connection/src/rpc.ts` (`ConnectionAuthenticator`) and `packages/client/connection/README.md` with its `README.zh.md` pair: that holds for Connection's own routes, and a route that calls `admit` itself decides which principals it serves and must refuse a Peer whose `signal` has aborted.
-- `packages/mumbo/edge-member/README.md` with its `README.zh.md` pair (Member access) and the `src/index.ts` module comment: `@mumbo/superagent` serves `/orchestrator/api/`, settings and prompt saves included, to the members `panelAdmins` lists.
+- `packages/client/connection/src/rpc.ts` (`ConnectionAuthenticator`) and `packages/client/connection/README.md`: that holds for Connection's own routes, and a route that calls `admit` itself decides which principals it serves and must refuse a Peer whose `signal` has aborted.
+- `packages/mumbo/edge-member/README.md` (Member access) and the `src/index.ts` module comment: `@mumbo/superagent` serves `/orchestrator/api/`, settings and prompt saves included, to the members `panelAdmins` lists.
 
 ## S3: delivery policy
 
