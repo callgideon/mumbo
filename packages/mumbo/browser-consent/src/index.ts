@@ -6,9 +6,9 @@
  * @module @mumbo/browser-consent
  */
 
-import { statSync } from 'node:fs'
+import { realpathSync, statSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
@@ -52,6 +52,8 @@ const TAB_LOGS: ReadonlySet<string> = new Set(['browser_console_messages', 'brow
 const SERVER_CODE = 'browser_run_code_unsafe'
 /** Upstream tool that shows one request's headers and bodies, which carry cookies and submitted passwords; always refused. */
 const REQUEST_DETAILS = 'browser_network_request'
+/** Upstream tools that send the local files their `paths` argument names to the page. */
+const FILE_SENDERS: ReadonlySet<string> = new Set(['browser_file_upload', 'browser_drop'])
 /** Upstream tool that ends Playwright's browser connection and answers with fixed text. */
 const CLOSE = 'browser_close'
 /** Desktop tool of the `computer-use-x11` provider, whose `screenshot` action is its only read. */
@@ -112,10 +114,15 @@ export interface Config {
   readonly allowedSites: string[]
   /** Milliseconds a write waits for the person's answer before it is denied as unanswered. */
   readonly approvalTimeoutMs: number
+  /**
+   * Absolute existing directory, such as the shared Downloads, that holds every file `browser_file_upload` and
+   * `browser_drop` may send; the browser reads those files as its own user. Required, so each deployment states it.
+   */
+  readonly uploadDirectory: string
 }
 
 /** Consent configuration as written: provider settings in their input form, the denied URLs, the other fields defaulted. */
-export type ConfigInput = Partial<Omit<Config, 'browser' | 'deniedUrls'>> & Pick<Config, 'deniedUrls'>
+export type ConfigInput = Partial<Omit<Config, 'browser' | 'deniedUrls' | 'uploadDirectory'>> & Pick<Config, 'deniedUrls' | 'uploadDirectory'>
   & { readonly browser: NonNullable<Parameters<typeof PlaywrightBrowser.Config>[0]> }
 
 export const Config: z<ConfigInput, Config> = z.object({
@@ -123,7 +130,67 @@ export const Config: z<ConfigInput, Config> = z.object({
   deniedUrls: z.array(z.string()).required(),
   allowedSites: z.array(z.string()).default([]),
   approvalTimeoutMs: z.natural().min(1).default(300_000),
+  uploadDirectory: z.string().required(),
 })
+
+/** The upload directory as configured, and its real path. */
+export interface UploadDirectory {
+  /** The configured directory, normalized. */
+  readonly configured: string
+  /** Its real path. */
+  readonly real: string
+}
+
+/**
+ * Validate `uploadDirectory`.
+ * @param path - the configured directory.
+ * @returns the directory as configured and its real path.
+ * @throws when it is not an absolute path to an existing directory.
+ */
+export function uploadDirectory(path: string): UploadDirectory {
+  let real: string | undefined
+  try {
+    real = isAbsolute(path) ? realpathSync.native(path) : undefined
+  } catch (_missing) {
+    // Reported below as not an existing directory.
+  }
+  if (real === undefined || !statSync(real).isDirectory()) throw new Error(`${name}: uploadDirectory "${path}" must be an absolute path to an existing directory, such as /home/shared/Downloads`)
+  return { configured: resolve(path), real }
+}
+
+/** Whether `path` names an entry below `directory`, not the directory itself. */
+function below(directory: string, path: string): boolean {
+  const rest = relative(directory, path)
+  return rest !== '' && rest !== '..' && !rest.startsWith(`..${sep}`) && !isAbsolute(rest)
+}
+
+/**
+ * Say why a call may not send the files its `paths` argument names. Each must be an absolute path below the upload
+ * directory, as written and as resolved, so neither `..` nor a link leads out of it, and must name an existing file.
+ * @param paths - the call's `paths` argument.
+ * @param upload - the validated upload directory.
+ * @returns why the first refused path is refused, or `undefined` when every path may be sent.
+ */
+export function uploadRefusal(paths: unknown, upload: UploadDirectory): string | undefined {
+  if (paths === undefined) return undefined
+  if (!Array.isArray(paths)) return 'paths is not a list of file paths'
+  for (const path of paths as unknown[]) {
+    const shown = JSON.stringify(path)
+    if (typeof path !== 'string' || !isAbsolute(path)) return `${shown} is not an absolute path`
+    if (!below(upload.configured, resolve(path)) && !below(upload.real, resolve(path))) return `${shown} is not in ${upload.configured}`
+    let real: string
+    try {
+      real = realpathSync.native(path)
+    } catch (error: unknown) {
+      const code = error instanceof Error && 'code' in error ? String(error.code) : String(error)
+      return code === 'ENOENT' ? `${shown} does not exist` : `${shown} cannot be resolved (${code})`
+    }
+    if (!below(upload.real, real)) return `${shown} leads out of ${upload.configured} through a symbolic link`
+    // A directory would send every file below it, links included.
+    if (!statSync(real).isFile()) return `${shown} is not a file`
+  }
+  return undefined
+}
 
 /** A validated `deniedUrls` list. */
 export interface DenyList {
@@ -476,6 +543,7 @@ export function apply(ctx: Context, config: Config): void {
     if (denial(site, denied) !== undefined) throw new Error(`${name}: allowedSites entry "${site}" is also denied by deniedUrls`)
   }
   PlaywrightBrowser.validateConfig(config.browser)
+  const upload = uploadDirectory(config.uploadDirectory)
   // A server that runs as an identity starts in that identity's home, a directory that identity can change: the files a
   // withheld result links are then deleted only from a configured output directory.
   if (config.browser.identity !== undefined && config.browser.outputDir === undefined) {
@@ -564,6 +632,11 @@ export function apply(ctx: Context, config: Config): void {
     }
     if (tool !== undefined && fieldsOf(exec.arguments).filename !== undefined) {
       return `${tool} did not run: the assistant may not save browser output to a file; call it without filename to get the result directly.`
+    }
+    // The browser reads an uploaded file as its own user, which can read its saved passwords: only the upload directory's files go.
+    const unsent = tool !== undefined && FILE_SENDERS.has(tool) ? uploadRefusal(fieldsOf(exec.arguments).paths, upload) : undefined
+    if (unsent !== undefined) {
+      return `${tool} did not run: ${unsent}. The browser uploads files only from ${upload.configured}; copy the file into ${upload.configured} first and pass the copy's path.`
     }
     const target = tool === undefined ? undefined : targetUrl(exec.arguments)
     const blocked = target === undefined ? undefined : denial(target, denied)

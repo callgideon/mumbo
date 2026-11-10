@@ -1,6 +1,6 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, relative } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import { BrowserUseProviderName } from '@deepseek-ai/dsh-browser-use/brand'
@@ -57,7 +57,7 @@ async function load(options: LoadOptions = {}) {
   vi.stubEnv('CONSENT_FIXTURE_ROOT', root)
   vi.stubEnv('CONSENT_FIXTURE_MODE', options.withoutTabs === true ? 'no-tabs' : '')
   vi.stubEnv('CONSENT_FIXTURE_START', options.start ?? '')
-  const consent = { browser: { mode: 'attach', endpoint: 'http://127.0.0.1:9' }, deniedUrls: DENIED_URLS, allowedSites: ['http://allowed.test'], ...options.consent }
+  const consent = { browser: { mode: 'attach', endpoint: 'http://127.0.0.1:9' }, deniedUrls: DENIED_URLS, allowedSites: ['http://allowed.test'], uploadDirectory: root, ...options.consent }
   const booted = await bootComposition(root, { ...options, consent })
   contexts.push(booted.ctx)
   // Every call the browser received, in order, with the current tab's URL before the call.
@@ -89,7 +89,12 @@ const browserTools = (loaded: Awaited<ReturnType<typeof load>>) => loaded.ctx.to
 
 describe('browser write consent in the person-box composition', () => {
   it('decides each write on the tab it runs on, asks for the rest with its arguments, and logs every allowed write', { timeout: 60_000 }, async () => {
+    const downloads = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-downloads-'))
+    roots.push(downloads)
+    const upload = join(downloads, 'tax.pdf')
+    await writeFile(upload, 'pdf')
     const { asked, events, calls, root } = await turn({
+      consent: { uploadDirectory: downloads },
       script: [
         { name: 'browser_navigate', args: { url: 'http://allowed.test/inbox' } },
         { name: 'browser_click', args: { element: 'Archive', target: 'e1' } },
@@ -102,7 +107,7 @@ describe('browser write consent in the person-box composition', () => {
         { name: 'browser_navigate', args: { url: 'http://allowed.test/?redirect=http%3A%2F%2Fevil.test%2F' } },
         { name: 'browser_click', args: { target: 'e5' } },
         { name: 'browser_tabs', args: { action: 'select', index: 1 } },
-        { name: 'browser_file_upload', args: { paths: ['/root/tax.pdf'] } },
+        { name: 'browser_file_upload', args: { paths: [upload] } },
         { name: 'browser_evaluate', args: { function: '() => document.forms[0].submit()' } },
       ],
       answers: ['rejected', 'allowed-once', 'rejected', 'rejected', 'cancelled'],
@@ -128,7 +133,7 @@ describe('browser write consent in the person-box composition', () => {
       'Browser write: browser_type on http://other.test. Arguments: "target": "e2", "text": "hi\\nthere". Model-written target description: "Message".',
       'Browser write: browser_click on http://other.test. Arguments: "target": "e3". Model-written target description: "Send".',
       'Browser write: browser_click on http://evil.test. Arguments: "target": "e5".',
-      'Browser write: browser_file_upload on http://allowed.test. Arguments: "paths": ["/root/tax.pdf"]. Site allowances do not cover this action.',
+      `Browser write: browser_file_upload on http://allowed.test. Arguments: "paths": [${JSON.stringify(upload)}]. Site allowances do not cover this action.`,
       'Browser write: browser_evaluate on http://allowed.test. Arguments: "function": "() => document.forms[0].submit()". Site allowances do not cover this action.',
     ])
     const results = toolResults(events)
@@ -319,6 +324,31 @@ describe('browser write consent in the person-box composition', () => {
     expect((await direct(loaded, tool('browser_network_requests'), {})).isError).toBe(false)
     expect(loaded.asked).toEqual([])
     expect((await loaded.calls()).map(call => call.name)).toEqual(['browser_navigate', 'browser_navigate', 'browser_navigate', 'browser_tabs', 'browser_network_requests'])
+  })
+
+  it('sends files only from the upload directory, and tells the model to copy one there first, before asking anyone', { timeout: 60_000 }, async () => {
+    const downloads = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-downloads-'))
+    roots.push(downloads)
+    const loaded = await load({ consent: { uploadDirectory: downloads } })
+    const secret = join(loaded.root, 'Login Data')
+    await writeFile(secret, 'passwords')
+    await symlink(secret, join(downloads, 'tax.pdf'))
+    const copy = `copy the file into ${downloads} first and pass the copy's path.`
+    for (const [name, args, reason] of [
+      ['browser_file_upload', { paths: [secret] }, `${JSON.stringify(secret)} is not in ${downloads}`],
+      ['browser_drop', { target: 'e1', paths: [`${downloads}/../${relative(dirname(downloads), secret)}`] }, `"${downloads}/../${relative(dirname(downloads), secret)}" is not in ${downloads}`],
+      ['browser_file_upload', { paths: [join(downloads, 'tax.pdf')] }, `"${join(downloads, 'tax.pdf')}" leads out of ${downloads} through a symbolic link`],
+      ['browser_file_upload', { paths: [join(downloads, 'missing.pdf')] }, `"${join(downloads, 'missing.pdf')}" does not exist`],
+    ] as const) {
+      const refusal = `Error: ${name} did not run: ${reason}. The browser uploads files only from ${downloads}; ${copy}`
+      expect(textOf(await direct(loaded, tool(name), args))).toBe(refusal)
+      // The guard refuses it too when a listener ahead of consent would allow it.
+      const allow = loaded.ctx.on('tools/pre-execute', (): Promise<PreToolDecision> => Promise.resolve({ kind: 'allow' }), { prepend: true })
+      expect(textOf(await direct(loaded, tool(name), args))).toBe(refusal)
+      allow()
+    }
+    expect(loaded.asked).toEqual([])
+    expect(await loaded.calls()).toEqual([])
   })
 
   it('withholds the result of every call that leaves or finds the tab on a denied page, and refuses writes there', { timeout: 60_000 }, async () => {

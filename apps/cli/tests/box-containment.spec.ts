@@ -219,7 +219,7 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
     ...NONE, identity: 'desktop', startsProcesses: config => config?.browser != null, note: 'the person\'s Browser tab runs wmctrl',
   },
   '@mumbo/browser-consent': {
-    runs: 'run-as', tools: ['mcp__playwright-mcp__*'], identity: 'browsermcp', note: 'the Playwright MCP stdio server',
+    runs: 'run-as', tools: ['mcp__playwright-mcp__*'], identity: 'browsermcp', note: 'the Playwright MCP stdio server; uploads only from the shared Downloads',
   },
   '@mumbo/edge-member': NONE,
   '@mumbo/superagent': {
@@ -430,6 +430,11 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     const required = [...modelRoots, ...(byId('fs-sandbox')?.config as { readOnlyRoots: string[] }).readOnlyRoots, subprocess.shellActivityDirectory!, subprocess.spillDirectory!,
       ...serverHomes.map(home => home!), ...box === 'person' ? [browserOutput!] : [], ...box === 'project' ? [superagent!.workerDirectory!, superagent!.ghConfigDirectory!] : []]
     expect(required.filter(path => !layout.includes(`\`${path}\``))).toEqual([])
+    // The browser sends files only from the shared Downloads, which the model's tools reach as a model root.
+    if (box === 'person') {
+      expect((byId('browser-consent')?.config as { uploadDirectory?: string }).uploadDirectory).toBe('/home/shared/Downloads')
+      expect(modelRoots).toContain('/home/shared/Downloads')
+    }
     expect(byId('plugin-manager')?.config).toEqual({ modelTools: false })
     expect(byId('workspace-changes')?.config).toEqual({ summaries: false })
     expect(isDisabled(byId('preset-cordis')?.disabled)).toBe(true)

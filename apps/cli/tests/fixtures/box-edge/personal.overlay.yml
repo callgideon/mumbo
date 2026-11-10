@@ -19,6 +19,7 @@
           endpoint: http://127.0.0.1:9222
           identity: browsermcp
           outputDir: /var/lib/mumbo/playwright-output
+        uploadDirectory: /home/shared/Downloads
 - id: llm-pi-ai
   config:
     providers: {}

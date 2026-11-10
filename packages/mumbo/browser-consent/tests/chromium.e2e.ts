@@ -92,7 +92,7 @@ async function runTurn(page: (port: number, path: string) => string, turn: (allo
     const output = outputDir === true ? join(tmpdir(), `${basename(root)}-output`) : join(root, '.playwright-mcp')
     cleanup.push(output)
     const browser = { mode: 'attach', endpoint: `http://127.0.0.1:${debugPort}`, ...outputDir === true ? { outputDir: output } : {} }
-    booted = await bootComposition(root, { consent: { browser, deniedUrls, allowedSites }, script, answers: answers ?? [] })
+    booted = await bootComposition(root, { consent: { browser, deniedUrls, allowedSites, uploadDirectory: root }, script, answers: answers ?? [] })
     booted.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Go.' }], source: { kind: 'user' } }))
     await booted.agent.whenIdle()
     const names = await readdir(output).catch(() => [])
@@ -382,7 +382,7 @@ it('reports why a browser call failed when the browser is down', { timeout: 120_
   const root = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-down-'))
   vi.stubEnv('DSH_HOME', root)
   const booted = await bootComposition(root, {
-    consent: { browser: { mode: 'attach', endpoint: 'http://127.0.0.1:1' }, deniedUrls: [] },
+    consent: { browser: { mode: 'attach', endpoint: 'http://127.0.0.1:1' }, deniedUrls: [], uploadDirectory: root },
     script: [{ name: 'browser_navigate', args: { url: 'https://example.com/' } }],
   })
   try {
@@ -422,7 +422,7 @@ it.skipIf(skip)('holds no connection to the browser while the person has it, and
     proxy.listen(0, '127.0.0.1')
     await once(proxy, 'listening')
     const endpoint = `http://127.0.0.1:${String((proxy.address() as AddressInfo).port)}`
-    booted = await bootComposition(root, { consent: { browser: { mode: 'attach', endpoint }, deniedUrls: ['chrome:'] } })
+    booted = await bootComposition(root, { consent: { browser: { mode: 'attach', endpoint }, deniedUrls: ['chrome:'], uploadDirectory: root } })
     const { ctx, agent } = booted
     const snapshot = async () => (await executeModelToolFixture(ctx, {
       agent, name: tool('browser_snapshot'), arguments: {}, callId: ToolCallId('snapshot'), signal: new AbortController().signal,

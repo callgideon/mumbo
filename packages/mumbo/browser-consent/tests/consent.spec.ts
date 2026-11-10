@@ -1,9 +1,16 @@
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, onTestFinished } from 'vitest'
 import * as PlaywrightBrowser from '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp'
-import { apply, classify, Config, currentTabUrl, denial, denyList, describeArguments, inject, tabUrl, targetUrl } from '../src/index.ts'
+import {
+  apply, classify, Config, currentTabUrl, denial, denyList, describeArguments, inject, tabUrl, targetUrl, uploadDirectory, uploadRefusal,
+} from '../src/index.ts'
 
 const browser = { mode: 'attach', endpoint: 'http://127.0.0.1:9222' } as const
+/** An existing directory for the configs that do not reach an upload. */
+const uploads = tmpdir()
 /** The list the box edge writes. */
 const DENIED = denyList([
   'chrome:', 'chrome-untrusted:', 'chrome-extension:', 'devtools:', 'view-source:', 'file:', 'https://passwords.google.com',
@@ -142,24 +149,31 @@ describe('describeArguments', () => {
 describe('Config', () => {
   it('rejects an allowed site that is not an exact web origin and names the origin to use', () => {
     const deniedUrls: string[] = []
-    expect(() => { apply(new Context(), Config({ browser, deniedUrls, allowedSites: ['https://mail.google.com/'] })) })
+    expect(() => { apply(new Context(), Config({ browser, deniedUrls, allowedSites: ['https://mail.google.com/'], uploadDirectory: uploads })) })
       .toThrow('allowedSites entry "https://mail.google.com/" is not an origin; use "https://mail.google.com"')
     for (const site of ['mail.google.com', 'ftp://files.example']) {
-      expect(() => { apply(new Context(), Config({ browser, deniedUrls, allowedSites: [site] })) }).toThrow(`allowedSites entry "${site}" is not an origin; use one such as`)
+      expect(() => { apply(new Context(), Config({ browser, deniedUrls, allowedSites: [site], uploadDirectory: uploads })) }).toThrow(`allowedSites entry "${site}" is not an origin; use one such as`)
     }
-    expect(() => { apply(new Context(), Config({ browser, deniedUrls: ['https://mail.google.com'], allowedSites: ['http://mail.google.com'] })) })
+    expect(() => { apply(new Context(), Config({ browser, deniedUrls: ['https://mail.google.com'], allowedSites: ['http://mail.google.com'], uploadDirectory: uploads })) })
       .toThrow('allowedSites entry "http://mail.google.com" is also denied by deniedUrls')
-    expect(Config({ browser, deniedUrls }).approvalTimeoutMs).toBe(300_000)
+    expect(Config({ browser, deniedUrls, uploadDirectory: uploads }).approvalTimeoutMs).toBe(300_000)
+  })
+
+  it('requires an existing absolute upload directory', () => {
+    expect(() => Config({ browser, deniedUrls: [] } as never)).toThrow('uploadDirectory missing required value')
+    for (const path of ['Downloads', join(uploads, 'no-such-downloads-directory'), join(import.meta.dirname, 'consent.spec.ts')]) {
+      expect(() => uploadDirectory(path), path).toThrow(`uploadDirectory "${path}" must be an absolute path to an existing directory, such as /home/shared/Downloads`)
+    }
   })
 
   it('requires an output directory for a server that runs as an identity, which starts in that identity\'s home', () => {
-    expect(() => { apply(new Context(), Config({ browser: { ...browser, identity: 'browsermcp' }, deniedUrls: [] })) })
+    expect(() => { apply(new Context(), Config({ browser: { ...browser, identity: 'browsermcp' }, deniedUrls: [], uploadDirectory: uploads })) })
       .toThrow('browser.outputDir must be set when browser.identity is, because the server then starts in that identity\'s home')
   })
 
   it('requires the denied URLs and rejects an entry that is neither a lowercase scheme nor a canonical origin', () => {
-    expect(() => Config({ browser } as never)).toThrow('deniedUrls missing required value')
-    expect(Config({ browser, deniedUrls: [] }).deniedUrls).toEqual([])
+    expect(() => Config({ browser, uploadDirectory: uploads } as never)).toThrow('deniedUrls missing required value')
+    expect(Config({ browser, deniedUrls: [], uploadDirectory: uploads }).deniedUrls).toEqual([])
     expect(() => denyList(['Chrome:'])).toThrow('deniedUrls entry "Chrome:" is not lowercase; use "chrome:"')
     expect(denial('https://h.example:8443/x', denyList(['https://h.example:8443']))).toBe('a page on https://h.example:8443')
     expect(() => denyList(['https://h.example:8443/'])).toThrow('use "https://h.example:8443"')
@@ -177,5 +191,47 @@ describe('Config', () => {
 
   it('waits for the same services as the provider it mounts', () => {
     expect(inject).toEqual(PlaywrightBrowser.inject)
+  })
+})
+
+describe('upload paths', () => {
+  /** A Downloads directory beside a private one, with a file in each and the links a model could plant. */
+  function layout() {
+    const root = mkdtempSync(join(tmpdir(), 'mumbo-consent-uploads-'))
+    onTestFinished(() => { rmSync(root, { recursive: true, force: true }) })
+    const downloads = join(root, 'Downloads')
+    const secret = join(root, 'browser', 'Login Data')
+    mkdirSync(downloads)
+    mkdirSync(join(root, 'browser'))
+    mkdirSync(join(downloads, 'folder'))
+    writeFileSync(join(downloads, 'tax.pdf'), 'pdf')
+    writeFileSync(join(downloads, 'folder', 'scan.pdf'), 'pdf')
+    writeFileSync(secret, 'passwords')
+    symlinkSync(secret, join(downloads, 'tax-link.pdf'))
+    symlinkSync(join(root, 'browser'), join(downloads, 'profile'))
+    symlinkSync(join(downloads, 'tax.pdf'), join(downloads, 'inside-link.pdf'))
+    return { root, downloads, secret, upload: uploadDirectory(downloads) }
+  }
+
+  it('sends files below the upload directory, through links that stay inside it', () => {
+    const { downloads, upload } = layout()
+    expect(uploadRefusal([join(downloads, 'tax.pdf'), join(downloads, 'folder', 'scan.pdf'), join(downloads, 'inside-link.pdf')], upload)).toBeUndefined()
+    // No paths cancels the file chooser, which sends nothing.
+    expect(uploadRefusal(undefined, upload)).toBeUndefined()
+  })
+
+  it('refuses a path outside it, one whose .. leaves it, a link out of it, a missing file, a folder, and a relative path', () => {
+    const { downloads, secret, upload } = layout()
+    const refusal = (path: unknown) => uploadRefusal([join(downloads, 'tax.pdf'), path], upload)
+    expect(refusal(secret)).toBe(`${JSON.stringify(secret)} is not in ${downloads}`)
+    expect(refusal(`${downloads}/../browser/Login Data`)).toBe(`"${downloads}/../browser/Login Data" is not in ${downloads}`)
+    expect(refusal(join(downloads, 'tax-link.pdf'))).toBe(`"${join(downloads, 'tax-link.pdf')}" leads out of ${downloads} through a symbolic link`)
+    expect(refusal(join(downloads, 'profile', 'Login Data'))).toBe(`"${join(downloads, 'profile', 'Login Data')}" leads out of ${downloads} through a symbolic link`)
+    expect(refusal(join(downloads, 'missing.pdf'))).toBe(`"${join(downloads, 'missing.pdf')}" does not exist`)
+    expect(refusal(join(downloads, 'folder'))).toBe(`"${join(downloads, 'folder')}" is not a file`)
+    expect(refusal(downloads)).toBe(`"${downloads}" is not in ${downloads}`)
+    expect(refusal('tax.pdf')).toBe('"tax.pdf" is not an absolute path')
+    expect(refusal(7)).toBe('7 is not an absolute path')
+    expect(uploadRefusal(join(downloads, 'tax.pdf'), upload)).toBe('paths is not a list of file paths')
   })
 })

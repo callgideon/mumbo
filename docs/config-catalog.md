@@ -5109,7 +5109,7 @@ export interface BrowserConfig {
 
 - `inject`: `browserUse` · `agents` · `tools` · `systemPrompt` · `workingDirectory`
 - `refs`: [`PlaywrightBrowser`](../packages/experimental/browser-use-playwright-mcp/src/index.ts)
-- `source`: [`packages/mumbo/browser-consent/src/index.ts:103`](../packages/mumbo/browser-consent/src/index.ts)
+- `source`: [`packages/mumbo/browser-consent/src/index.ts:105`](../packages/mumbo/browser-consent/src/index.ts)
 
 ```ts config-catalog
 /** Consent configuration. */
@@ -5125,6 +5125,11 @@ export interface Config {
   readonly allowedSites: string[]
   /** Milliseconds a write waits for the person's answer before it is denied as unanswered. */
   readonly approvalTimeoutMs: number
+  /**
+   * Absolute existing directory, such as the shared Downloads, that holds every file `browser_file_upload` and
+   * `browser_drop` may send; the browser reads those files as its own user. Required, so each deployment states it.
+   */
+  readonly uploadDirectory: string
 }
 ```
 <!-- END GENERATED config-catalog:@mumbo/browser-consent -->
