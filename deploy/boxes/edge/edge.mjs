@@ -86,7 +86,7 @@ export const config = () => ({
   approveHost: env('APPROVE_HOST', `approve.${env('PUBLIC_HOST')}`),
   approverEmails: list(env('APPROVER_EMAILS', '')),  // who may merge and bind repositories; empty: nobody
   agentLogin: optional('GITHUB_AGENT_LOGIN'),  // the App's bot user, mumbo-bot[bot]
-  agentId: agentId(),  // its numeric user id, which approvals match; unset: the approvals poller is off
+  agentId: agentId(),  // its numeric user id, which approvals and the GitHub forwarder's edit check match; unset: the approvals poller is off and the agent edits nothing
   requiredChecks: checkNames('REQUIRED_CHECKS', 'static,unit'),
   dailyTokensUser: Number(env('DAILY_TOKENS_USER', '20000000')),
   dailyTokensProject: Number(env('DAILY_TOKENS_PROJECT', '50000000')),
@@ -1225,7 +1225,7 @@ async function main() {
   const { installationOf } = await import('./github-app.mjs')
   const approve = approvePage({ approvals, halt, store, csrfKey, host: cfg.approveHost, approvers: cfg.approverEmails, installationOf: installationOf({ ...app, fetchImpl: fetch, now }) })
   const tokens = tokenBudget({ store, limits: { user: cfg.dailyTokensUser, project: cfg.dailyTokensProject }, now })
-  const github = githubForwarder({ store, halt, app, fetchImpl: fetch, now })
+  const github = githubForwarder({ store, halt, app, agentId: cfg.agentId, fetchImpl: fetch, now })
   // One replica polls GitHub each minute: the 55 s lease lapses before the next tick. Off without GITHUB_AGENT_ID.
   if (cfg.agentId) {
     setInterval(() => store.lease('approvals:poll', 55_000).then(won => won && approvals.poll()).catch(e => console.error('edge: approvals poll', e.message)), 60_000).unref()

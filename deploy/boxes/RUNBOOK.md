@@ -305,6 +305,7 @@ Check what the installation holds, read-only, with an App JWT: `GET /orgs/callgi
 - `the project's repositories changed; retry` (409): a repository was bound or removed while the request fetched its token; the next request uses the new list.
 - `no_repos` (403): the project has no repository; bind one on the approve page. Binding refuses a repository the App is not installed for, or one in another installation than the project's repositories.
 - `mumbo-bot App refused the token (HTTP <status>): …` or `mumbo-bot token mint failed: …` (502): read GitHub's message; a rate limit says so and clears by itself.
+- `only the agent's own comments and pull requests may be edited` (403): the box edited, or closed, a comment or pull request whose author is not `GITHUB_AGENT_ID`. This is expected when a prompt-injected agent tries it; an edit with `the author lookup failed` or `GITHUB_AGENT_ID is not set` also refuses, because the edge could not confirm the author.
 
 ### Restore Postgres to a point in time
 `aws rds restore-db-instance-to-point-in-time --source-db-instance-identifier mumbo-boxes-e2b --target-db-instance-identifier mumbo-boxes-e2b-restore --restore-time <UTC>` into the same subnet group and security group, then point `POSTGRES_CONNECTION_STRING` in the `mumbo-boxes/e2b` secret at the new instance and force a new deployment of api. Snapshots that newer rows point at stay in the versioned templates bucket for 14 days (review M4).

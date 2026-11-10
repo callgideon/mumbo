@@ -2,7 +2,8 @@
 // codeload.github.com or objects.githubusercontent.com). The box authenticates with its box token, already verified
 // by modelServer; the edge mints the project's mumbo-bot App token, limited by GitHub to the project's repositories,
 // and forwards only what its rules allow (design section 9): reads on the project's repositories, comments and pull
-// requests short of merging or retargeting, and pushes to agent/* only.
+// requests short of merging or retargeting, edits only to the agent's own comments and pull requests, and pushes to
+// agent/* only.
 import { Readable, finished, pipeline } from 'node:stream'
 import { Kind, parse, print, valueFromASTUntyped, visit } from 'graphql'
 import { tokenCache } from './github-app.mjs'
@@ -38,6 +39,12 @@ const WRITES = [
   /^POST \/issues\/comments\/\d+\/reactions$/,
 ]
 const PULL_EDIT = /^PATCH \/pulls\/\d+$/
+// Superagent reads an edited comment as a new message from its author, so editing someone else's words would carry
+// their authority. These writes pass only when a GET of the same path, with the agent token, names the agent as
+// `user.id`; the GraphQL mutations only when the node they name, of this type, has the agent as `author.databaseId`.
+const OWN_EDITS = [/^PATCH \/issues\/comments\/\d+$/, PULL_EDIT]
+const OWN_EDIT_MUTATIONS = new Map([['updateIssueComment', { key: 'id', type: 'IssueComment' }], ['updatePullRequest', { key: 'pullRequestId', type: 'PullRequest' }]])
+const NOT_OWN = 'only the agent\'s own comments and pull requests may be edited'
 const MUTATIONS = new Set(['createPullRequest', 'updatePullRequest', 'markPullRequestReadyForReview', 'convertPullRequestToDraft', 'addComment', 'updateIssueComment', 'addReaction', 'requestReviews'])
 // A mutation's input keys, classified by name: these scalars, or node ids (`id`, `ids`, `*Id`, `*Ids`, as GitHub's
 // schema names every ID input). Any other key is refused, so an id under a key this list does not know is never
@@ -47,8 +54,10 @@ const ID_KEY = /^(id|ids)$|Ids?$/
 // requestReviews only: these name people, teams and bots, not repository objects, so they are not resolved; the
 // mutation is scoped by its pullRequestId alone. Everywhere else such ids resolve and are refused.
 const REVIEWER_IDS = new Set(['userIds', 'teamIds', 'botIds'])
-// The node types a mutation may touch, each with its repository; any other type resolves to no repository.
-const NODE_REPOS = `query($ids: [ID!]!) { nodes(ids: $ids) { __typename ... on Repository { nameWithOwner } ${['PullRequest', 'Issue', 'IssueComment', 'PullRequestReviewComment'].map(t => `... on ${t} { repository { nameWithOwner } }`).join(' ')} } }`
+// The node types a mutation may touch, each with its repository; any other type resolves to no repository. The types an
+// edit names also bring their author's numeric id.
+const AUTHOR = 'author { __typename ... on Bot { databaseId } ... on User { databaseId } }'
+const NODE_REPOS = `query($ids: [ID!]!) { nodes(ids: $ids) { __typename ... on Repository { nameWithOwner } ${['PullRequest', 'Issue', 'IssueComment', 'PullRequestReviewComment'].map(t => `... on ${t} { repository { nameWithOwner }${t === 'PullRequest' || t === 'IssueComment' ? ` ${AUTHOR}` : ''} }`).join(' ')} } }`
 const STOPPED = 'stopped by the founder'
 // The agent's token: never workflows (so .github/workflows stays unwritable), actions or administration.
 const AGENT_PERMISSIONS = { contents: 'write', pull_requests: 'write', issues: 'write', checks: 'read', statuses: 'read' }
@@ -59,8 +68,10 @@ const AGENT_PERMISSIONS = { contents: 'write', pull_requests: 'write', issues: '
  * 504 for a push GitHub has not answered within `pushTimeoutMs`) and log one line
  * `{ edge: 'github', refused, principal, method, host, path }`. While `halt.isHalted(principal)`, only GET and HEAD,
  * git-upload-pack and GraphQL documents without a mutation pass. Every node id a GraphQL mutation names must resolve,
- * through one `nodes(ids:)` lookup with the project's token, to an object in one of the project's repositories. A
- * request whose client has left is not forwarded, and one in flight is aborted.
+ * through one `nodes(ids:)` lookup with the project's token, to an object in one of the project's repositories. An edit
+ * (OWN_EDITS, OWN_EDIT_MUTATIONS) passes only when that object's author is the user `agentId`, by numeric id; without
+ * `agentId`, or when the author cannot be read, it answers 403 and nothing is forwarded. A request whose client has
+ * left is not forwarded, and one in flight is aborted.
  * Credentials: requests to api.github.com and github.com carry the project's App installation token, for the project's
  * bound repositories and AGENT_PERMISSIONS (github-app.mjs tokenCache: one mint at a time per project, reused until 5
  * minutes before expiry, minted anew when the bound repositories change, dropped when GitHub answers 401, a failure
@@ -69,29 +80,45 @@ const AGENT_PERMISSIONS = { contents: 'write', pull_requests: 'write', issues: '
  * message>`; any other mint failure answers 502 with its cause (`repo_not_installed: …`, a rate limit, `mumbo-bot App
  * refused the token (HTTP <status>): …`, or `mumbo-bot token mint failed: …`). No request goes out with another token.
  * A project whose repositories change while its token is fetched answers 409.
- * @param {{ store: object, halt: { isHalted(principal: string): Promise<boolean> }, app: { appId: string | undefined, privateKey: string | undefined } | undefined, fetchImpl: typeof fetch, now?: () => number, log?: (line: string) => void, pushTimeoutMs?: number }} deps
- *   `app` without both fields answers 503 to every request; `now` is epoch ms; `pushTimeoutMs` defaults to
- *   PUSH_TIMEOUT_MS.
+ * @param {{ store: object, halt: { isHalted(principal: string): Promise<boolean> }, app: { appId: string | undefined, privateKey: string | undefined } | undefined, agentId: number | undefined, fetchImpl: typeof fetch, now?: () => number, log?: (line: string) => void, pushTimeoutMs?: number }} deps
+ *   `app` without both fields answers 503 to every request; `agentId` is the agent's numeric GitHub user id
+ *   (GITHUB_AGENT_ID); `now` is epoch ms; `pushTimeoutMs` defaults to PUSH_TIMEOUT_MS.
  * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, claim: { u: string, b: string }) => Promise<void>}
  *   handles one request; `claim` is the verified box token (`u` the principal, `b` the box id).
  */
-export function githubForwarder({ store, halt, app, fetchImpl, now = Date.now, log = console.log, pushTimeoutMs = PUSH_TIMEOUT_MS }) {
+export function githubForwarder({ store, halt, app, agentId, fetchImpl, now = Date.now, log = console.log, pushTimeoutMs = PUSH_TIMEOUT_MS }) {
   // Principals with a receive-pack in flight on this replica: one buffered push each.
   const pushing = new Set()
   const tokens = app?.appId && app?.privateKey ? tokenCache({ app, permissions: AGENT_PERMISSIONS, fetchImpl, now }) : undefined
 
   /** Resolves `ids` with the `project`'s `token`; returns a refusal `{ reason, status? }` unless each is an object in
-   *  one of `repos`. */
-  async function outsideRepos(ids, repos, project, token) {
+   *  one of `repos` and each of `edits` (`{ id, type }`, ids among `ids`) is of its type and written by the agent. A
+   *  failed lookup answers 502, or 403 when the document edits. */
+  async function outsideRepos(ids, repos, project, token, edits) {
     const r = await fetchImpl('https://api.github.com/graphql', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `token ${token}` }, body: JSON.stringify({ query: NODE_REPOS, variables: { ids } }) })
     if (r.status === 401) tokens.forget(project)
-    if (!r.ok) return { reason: `the node id lookup failed (HTTP ${r.status})`, status: 502 }
+    if (!r.ok) return { reason: `the node id lookup failed (HTTP ${r.status})`, status: edits.length ? 403 : 502 }
     const nodes = (await r.json())?.data?.nodes
     for (const [i, id] of ids.entries()) {
       const n = nodes?.[i]
       const repo = n?.__typename === 'Repository' ? n.nameWithOwner : n?.repository?.nameWithOwner
       if (typeof repo !== 'string' || !repos.includes(repo.toLowerCase())) return { reason: `node ${id} (${n?.__typename ?? 'not found'}) is not in this project's repositories` }
     }
+    for (const { id, type } of edits) {
+      const n = nodes[ids.indexOf(id)]
+      if (n.__typename !== type || n.author?.databaseId !== agentId) return { reason: `${NOT_OWN}; ${type} ${id} is not` }
+    }
+  }
+
+  /** Reads the REST object at `path` with the `project`'s `token`; returns a refusal reason unless its `user.id` is the
+   *  agent. Any failure to read it is a refusal. */
+  async function notOwn(path, project, token) {
+    try {
+      const r = await fetchImpl(`https://api.github.com${path}`, { method: 'GET', headers: { accept: 'application/vnd.github+json', authorization: `token ${token}` }, redirect: 'manual' })
+      if (r.status === 401) tokens.forget(project)
+      if (!r.ok) return `the author lookup failed (HTTP ${r.status})`
+      return (await r.json())?.user?.id === agentId ? undefined : NOT_OWN
+    } catch (e) { return `the author lookup failed (${e.message})` }
   }
 
   return async (req, res, claim) => {
@@ -144,9 +171,10 @@ export function githubForwarder({ store, halt, app, fetchImpl, now = Date.now, l
       // Only mutations name node ids (each must name one), so a document with none is reads only.
       if (checked.ids.length) {
         if (await halt.isHalted(claim.u)) return refuse(STOPPED)
+        if (checked.edits.length && agentId === undefined) return refuse(`${NOT_OWN}, and GITHUB_AGENT_ID is not set`)
         const t = await token()
         if (!t) return
-        const outside = await outsideRepos(checked.ids, repos, id, t)
+        const outside = await outsideRepos(checked.ids, repos, id, t, checked.edits)
         if (outside) return refuse(outside.reason, outside.status)
       }
       body = checked.body
@@ -158,6 +186,13 @@ export function githubForwarder({ store, halt, app, fetchImpl, now = Date.now, l
       body = await readBody(req, JSON_MAX)
       if (!body) return refuse('body over 1 MiB', 413)
       if (PULL_EDIT.test(rule) && !(body = pullEdit(body))) return refuse('a pull request edit may change only title, body and state "closed"')
+      if (OWN_EDITS.some(w => w.test(rule))) {
+        if (agentId === undefined) return refuse(`${NOT_OWN}, and GITHUB_AGENT_ID is not set`)
+        const t = await token()
+        if (!t) return
+        const why = await notOwn(path, id, t)
+        if (why) return refuse(why)
+      }
     } else if (gitService === 'git-upload-pack') {
       // Streamed unread; git gzips fetch requests over 1 KB.
       body = Readable.toWeb(req)
@@ -245,8 +280,9 @@ function pullEdit(buf) {
  * operation repeats a variable name (400 otherwise). A mutation may hold only allowed top-level
  * fields, by field name (never alias), and no fragments. Each field's `input`, with variables and their defaults
  * resolved, holds only known keys and names at least one node id; updatePullRequest may not set baseRefName or reopen.
- * Returns `{ refused, status? }` or `{ ids, body }`: the node ids to resolve, and the printed document with variables
- * and operationName, so GitHub runs exactly what was checked.
+ * Returns `{ refused, status? }` or `{ ids, edits, body }`: the node ids to resolve, the `{ id, type }` each edit
+ * (OWN_EDIT_MUTATIONS) names, and the printed document with variables and operationName, so GitHub runs exactly what
+ * was checked.
  */
 function checkGraphql(text) {
   let req, doc
@@ -265,7 +301,7 @@ function checkGraphql(text) {
     OperationDefinition: (n) => once(n.variableDefinitions.map(v => v.variable.name.value), 'an operation repeats a variable name'),
   })
   if (repeated) return { refused: repeated, status: 400 }
-  const ids = new Set()
+  const ids = new Set(), edits = []
   for (const def of doc.definitions) {
     if (def.kind !== Kind.OPERATION_DEFINITION || def.operation === 'query') continue
     if (def.operation !== 'mutation') return { refused: `a ${def.operation} is not allowed` }
@@ -290,12 +326,15 @@ function checkGraphql(text) {
       }
       if (name === 'requestReviews' && typeof input.pullRequestId !== 'string') return { refused: 'requestReviews needs a pullRequestId' }
       if (!named) return { refused: `${name} names no node id` }
+      const edit = OWN_EDIT_MUTATIONS.get(name)
+      if (edit && typeof input[edit.key] !== 'string') return { refused: `${name} needs ${edit.key}` }
+      if (edit) edits.push({ id: input[edit.key], type: edit.type })
       if (name === 'updatePullRequest' && (req.query.includes('baseRefName') || JSON.stringify(req.variables ?? null).includes('baseRefName'))) return { refused: 'updatePullRequest may not change baseRefName' }
       if (name === 'updatePullRequest' && input.state != null && input.state !== 'CLOSED') return { refused: 'updatePullRequest may set state only to CLOSED' }
     }
   }
   if (ids.size > MAX_NODE_IDS) return { refused: `mutations may name at most ${MAX_NODE_IDS} node ids` }
-  return { ids: [...ids], body: JSON.stringify({ query: print(doc), variables: req.variables, operationName: req.operationName }) }
+  return { ids: [...ids], edits, body: JSON.stringify({ query: print(doc), variables: req.variables, operationName: req.operationName }) }
 }
 
 /**

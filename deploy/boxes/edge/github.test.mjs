@@ -19,13 +19,21 @@ const AGENT_PERMISSIONS = { contents: 'write', pull_requests: 'write', issues: '
 /** GitHub's answer to an installation token request: what was asked, plus metadata: read, valid for an hour from `t`. */
 const granted = (asked, token, t) => Response.json({ token, expires_at: new Date(t + HOUR).toISOString(), repositories: asked.repositories.map(n => ({ full_name: `callgideon/${n}` })), permissions: { ...asked.permissions, metadata: 'read' } }, { status: 201 })
 const ok = () => new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
+// The agent's bot user (GITHUB_AGENT_ID) and the founder, a person.
+const AGENT_ID = 341797844, FOUNDER_ID = 1001
+const agent = { __typename: 'Bot', databaseId: AGENT_ID }, founder = { __typename: 'User', databaseId: FOUNDER_ID }
 // GitHub's answer to the forwarder's nodes(ids:) lookup: a type outside its fragments comes back with __typename only.
 const mumbo = { nameWithOwner: 'callgideon/mumbo' }
 const NODES = {
   R_1: { __typename: 'Repository', nameWithOwner: 'CallGideon/Mumbo' },
-  PR_1: { __typename: 'PullRequest', repository: mumbo },
+  PR_1: { __typename: 'PullRequest', repository: mumbo, author: agent },
+  PR_HUMAN: { __typename: 'PullRequest', repository: mumbo, author: founder },
   I_1: { __typename: 'Issue', repository: mumbo },
-  IC_1: { __typename: 'IssueComment', repository: mumbo },
+  IC_1: { __typename: 'IssueComment', repository: mumbo, author: agent },
+  IC_FOUNDER: { __typename: 'IssueComment', repository: mumbo, author: founder },
+  // A person whose login reads like the agent's: only the numeric id counts.
+  IC_LOOKALIKE: { __typename: 'IssueComment', repository: mumbo, author: { __typename: 'User', databaseId: 42, login: 'mumbo-bot[bot]' } },
+  IC_GHOST: { __typename: 'IssueComment', repository: mumbo, author: null },
   RC_1: { __typename: 'PullRequestReviewComment', repository: mumbo },
   R_OTHER: { __typename: 'Repository', nameWithOwner: 'callgideon/other' },
   I_OTHER: { __typename: 'Issue', repository: { nameWithOwner: 'callgideon/other' } },
@@ -56,17 +64,19 @@ const sendThenReset = (port, path, afterMs) => {
 
 /**
  * A forwarder behind a local server; project P1 has callgideon/mumbo and the claim's principal is `state.principal`.
- * Node id lookups are answered by `lookup(ids)` and recorded in `lookups`, apart from the forwarded `calls`.
+ * Node id lookups are answered by `lookup(ids)` and recorded in `lookups`, apart from the forwarded `calls`. The
+ * forwarder's own REST reads of an edit's author (the only fetch without `duplex`) are answered by `author(url)`, by
+ * default an object the agent wrote, and recorded in `authors`.
  * The App's own calls (installation, token mint, revoke: Bearer authorization) are recorded in `mints`; a mint is
  * answered by `mint(asked body, nth mint, state.t)`, by default a token AGENT, and the installation lookup by
  * `installation()`. `state.t` is the clock (epoch ms).
  * `isHalted` takes `haltMs` and records each principal it is asked about in `haltChecks`; `state.settled` counts
  * handlers that have returned.
  */
-async function forwarder({ reply = ok, lookup = lookupOk, app = APP, mint = (asked, n, t) => granted(asked, 'AGENT', t), installation = () => Response.json({ id: 77 }), haltMs = 0, pushTimeoutMs } = {}) {
+async function forwarder({ reply = ok, lookup = lookupOk, author = () => Response.json({ user: { login: 'mumbo-bot[bot]', id: AGENT_ID } }), app = APP, noAgentId = false, mint = (asked, n, t) => granted(asked, 'AGENT', t), installation = () => Response.json({ id: 77 }), haltMs = 0, pushTimeoutMs } = {}) {
   const store = memoryStore()
   await store.putDoc(`project:${P1}`, { id: P1, name: 'P1', owner: 'a@x.com', members: ['a@x.com'], createdAt: '2026-11-09T00:00:00Z', repos: ['callgideon/mumbo'] })
-  const calls = [], lookups = [], mints = [], logs = [], haltChecks = [], halted = new Set(), state = { principal: ME, settled: 0, t: NOW }
+  const calls = [], lookups = [], authors = [], mints = [], logs = [], haltChecks = [], halted = new Set(), state = { principal: ME, settled: 0, t: NOW }
   const isHalted = async (u) => { haltChecks.push(u); if (haltMs) await new Promise(r => setTimeout(r, haltMs)); return halted.has(u) }
   // Records each call with its body read into a Buffer; `streamed` says the forwarder sent a stream, not a buffer.
   const fetchImpl = async (url, init) => {
@@ -78,6 +88,10 @@ async function forwarder({ reply = ok, lookup = lookupOk, app = APP, mint = (ask
       if (init.method === 'DELETE') return new Response(null, { status: 204 })
       return mint(asked, mints.filter(m => m.method === 'POST').length, state.t)
     }
+    if (init.duplex === undefined && init.method === 'GET') {
+      authors.push({ url, authorization: init.headers.authorization, redirect: init.redirect })
+      return author(url)
+    }
     const body = init.body == null ? undefined : Buffer.from(await new Response(init.body).arrayBuffer())
     const gql = url === 'https://api.github.com/graphql' ? JSON.parse(body) : undefined
     if (gql?.query.startsWith('query($ids: [ID!]!) { nodes(ids: $ids)')) {
@@ -87,7 +101,7 @@ async function forwarder({ reply = ok, lookup = lookupOk, app = APP, mint = (ask
     calls.push({ url, init: { ...init, body }, streamed: init.body instanceof ReadableStream })
     return reply(url, init)
   }
-  const forward = githubForwarder({ store, halt: { isHalted }, app, fetchImpl, now: () => state.t, log: (line) => logs.push(JSON.parse(line)), pushTimeoutMs })
+  const forward = githubForwarder({ store, halt: { isHalted }, app, agentId: noAgentId ? undefined : AGENT_ID, fetchImpl, now: () => state.t, log: (line) => logs.push(JSON.parse(line)), pushTimeoutMs })
   const server = createServer((req, res) => forward(req, res, { u: state.principal, b: 'b1' }).finally(() => { state.settled++ }))
   await new Promise(r => server.listen(0, '127.0.0.1', r))
   const port = server.address().port
@@ -99,7 +113,7 @@ async function forwarder({ reply = ok, lookup = lookupOk, app = APP, mint = (ask
     })
     req.on('error', reject); req.end(body)
   })
-  return { call, calls, lookups, mints, logs, haltChecks, halted, state, store, port, close: () => { server.closeAllConnections(); server.close() } }
+  return { call, calls, lookups, authors, mints, logs, haltChecks, halted, state, store, port, close: () => { server.closeAllConnections(); server.close() } }
 }
 
 test('reads: a project repository is read with the project\'s App token; the box token and x-api-key stay behind', async (t) => {
@@ -314,6 +328,111 @@ test('GraphQL mutations stay in the project repositories: every node id, inline 
   const down = await forwarder({ lookup: () => new Response('busy', { status: 502 }) }); t.after(down.close)
   assert.equal((await down.call('api.github.com/graphql', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: comment('I_1') }) })).status, 502)
   assert.equal(down.calls.length, 0, 'a failed lookup forwards nothing')
+})
+
+// Superagent re-reads an edited comment as a new message from its author, so an edit to the founder's comment would
+// forge the founder's request. The REST path reads the object's author; the GraphQL path reads it in the node lookup.
+const NOT_OWN = /only the agent's own comments and pull requests may be edited/
+const REST_AUTHORS = {
+  '/issues/comments/9': { login: 'mumbo-bot[bot]', id: AGENT_ID },
+  '/issues/comments/10': { login: 'founder', id: FOUNDER_ID },
+  '/issues/comments/11': { login: 'mumbo-bot[bot]', id: 42 },  // a lookalike login: only the numeric id counts
+  '/pulls/5': { login: 'mumbo-bot[bot]', id: AGENT_ID },
+  '/pulls/6': { login: 'founder', id: FOUNDER_ID },
+}
+const restAuthor = (url) => Response.json({ user: REST_AUTHORS[url.replace('https://api.github.com/repos/callgideon/mumbo', '')] ?? null })
+const editComment = (id) => `mutation { updateIssueComment(input: {id: "${id}", body: "x"}) { clientMutationId } }`
+const editPull = (id) => `mutation { updatePullRequest(input: {pullRequestId: "${id}", body: "x"}) { clientMutationId } }`
+const writers = (f) => ({
+  patch: (p, body) => f.call(`api.github.com/repos/callgideon/mumbo${p}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+  gql: (query, variables) => f.call('api.github.com/graphql', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query, variables }) }),
+})
+const refusal = (r) => (r.headers['content-type'] === 'application/json' && r.body.startsWith('{"errors"') ? r.json().errors[0].message : r.json().message)
+
+test('edits: the agent edits only its own comments and pull requests, matched by numeric id, on REST and GraphQL', async (t) => {
+  const f = await forwarder({ author: restAuthor }); t.after(f.close)
+  const { patch, gql } = writers(f)
+  for (const [why, send] of [
+    ['REST: the founder\'s comment', () => patch('/issues/comments/10', { body: 'forged' })],
+    ['REST: a person\'s pull request body', () => patch('/pulls/6', { body: 'forged' })],
+    ['REST: closing a person\'s pull request', () => patch('/pulls/6', { state: 'closed' })],
+    ['REST: a lookalike login with another id', () => patch('/issues/comments/11', { body: 'x' })],
+    ['REST: an object with no author', () => patch('/issues/comments/12', { body: 'x' })],
+    ['GraphQL: the founder\'s comment', () => gql(editComment('IC_FOUNDER'))],
+    ['GraphQL: a person\'s pull request body', () => gql(editPull('PR_HUMAN'))],
+    ['GraphQL: closing a person\'s pull request', () => gql('mutation { updatePullRequest(input: {pullRequestId: "PR_HUMAN", state: CLOSED}) { clientMutationId } }')],
+    ['GraphQL: the founder\'s comment through variables', () => gql('mutation($i: UpdateIssueCommentInput!) { updateIssueComment(input: $i) { clientMutationId } }', { i: { id: 'IC_FOUNDER', body: 'x' } })],
+    ['GraphQL: an own edit beside the founder\'s', () => gql(`mutation { a: updateIssueComment(input: {id: "IC_1", body: "x"}) { clientMutationId } b: updateIssueComment(input: {id: "IC_FOUNDER", body: "x"}) { clientMutationId } }`)],
+    ['GraphQL: a lookalike login with another id', () => gql(editComment('IC_LOOKALIKE'))],
+    ['GraphQL: a deleted author', () => gql(editComment('IC_GHOST'))],
+    ['GraphQL: an id of another type', () => gql(editComment('PR_1'))],
+  ]) {
+    const r = await send()
+    assert.equal(r.status, 403, why)
+    assert.match(refusal(r), NOT_OWN, why)
+  }
+  assert.equal(f.calls.length, 0, 'nothing refused is forwarded')
+  // The REST reads go to the edited object itself, with the agent token, and follow no redirect.
+  assert.deepEqual(f.authors.slice(0, 2), [
+    { url: 'https://api.github.com/repos/callgideon/mumbo/issues/comments/10', authorization: 'token AGENT', redirect: 'manual' },
+    { url: 'https://api.github.com/repos/callgideon/mumbo/pulls/6', authorization: 'token AGENT', redirect: 'manual' },
+  ])
+
+  for (const [why, send] of [
+    ['REST: the agent\'s comment', () => patch('/issues/comments/9', { body: 'edited' })],
+    ['REST: the agent\'s pull request, closed', () => patch('/pulls/5', { title: 't', state: 'closed' })],
+    ['GraphQL: the agent\'s comment', () => gql(editComment('IC_1'))],
+    ['GraphQL: the agent\'s pull request', () => gql(editPull('PR_1'))],
+  ]) assert.equal((await send()).status, 200, why)
+  assert.equal(f.calls.length, 4)
+  assert.deepEqual(f.calls.map(c => c.url).slice(0, 2), ['https://api.github.com/repos/callgideon/mumbo/issues/comments/9', 'https://api.github.com/repos/callgideon/mumbo/pulls/5'])
+  // New comments and reactions on anyone's thread need no author check.
+  const before = f.authors.length
+  assert.equal((await gql('mutation { addComment(input: {subjectId: "PR_HUMAN", body: "x"}) { clientMutationId } }')).status, 200)
+  assert.equal((await f.call('api.github.com/repos/callgideon/mumbo/issues/comments/10/reactions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"content":"eyes"}' })).status, 200)
+  assert.equal(f.authors.length, before)
+})
+
+test('edits fail closed: an author that cannot be read, or no GITHUB_AGENT_ID, answers 403 and forwards nothing', async (t) => {
+  for (const [why, author] of [
+    ['HTTP 500', () => new Response('oops', { status: 500 })],
+    ['HTTP 404', () => Response.json({ message: 'Not Found' }, { status: 404 })],
+    ['a redirect', () => new Response(null, { status: 301, headers: { location: 'https://api.github.com/repositories/1/issues/comments/9' } })],
+    ['a body that is not JSON', () => new Response('<html>', { status: 200 })],
+    ['a network failure', () => { throw new TypeError('fetch failed') }],
+  ]) {
+    const f = await forwarder({ author }); t.after(f.close)
+    const r = await writers(f).patch('/issues/comments/9', { body: 'x' })
+    assert.equal(r.status, 403, why)
+    assert.match(refusal(r), /the author lookup failed/, why)
+    assert.equal(f.calls.length, 0, why)
+  }
+
+  // A 401 on the author read drops the cached token, so the next request mints again.
+  const expired = await forwarder({ author: () => new Response('{}', { status: 401 }) }); t.after(expired.close)
+  assert.equal((await writers(expired).patch('/pulls/5', { title: 't' })).status, 403)
+  assert.equal((await writers(expired).patch('/pulls/5', { title: 't' })).status, 403)
+  assert.equal(expired.mints.filter(m => m.method === 'POST').length, 2)
+
+  // The GraphQL lookup failing answers 403 for an edit; a document without one keeps 502.
+  const down = await forwarder({ lookup: () => new Response('busy', { status: 502 }) }); t.after(down.close)
+  const r = await writers(down).gql(editComment('IC_1'))
+  assert.equal(r.status, 403)
+  assert.match(refusal(r), /the node id lookup failed \(HTTP 502\)/)
+  assert.equal((await writers(down).gql('mutation { addComment(input: {subjectId: "I_1", body: "x"}) { clientMutationId } }')).status, 502)
+  assert.equal(down.calls.length, 0)
+
+  // Without the agent's id nothing can be matched: edits are refused before any token or lookup; other writes pass.
+  const unset = await forwarder({ noAgentId: true }); t.after(unset.close)
+  const { patch, gql } = writers(unset)
+  for (const send of [() => patch('/issues/comments/9', { body: 'x' }), () => patch('/pulls/5', { title: 't' }), () => gql(editComment('IC_1')), () => gql(editPull('PR_1'))]) {
+    const refused = await send()
+    assert.equal(refused.status, 403)
+    assert.match(refusal(refused), /GITHUB_AGENT_ID is not set/)
+  }
+  assert.equal(unset.authors.length + unset.lookups.length + unset.mints.length + unset.calls.length, 0)
+  assert.equal((await unset.call('api.github.com/repos/callgideon/mumbo/issues/5/comments', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"body":"hi"}' })).status, 200)
+  assert.equal((await gql('mutation { addComment(input: {subjectId: "I_1", body: "x"}) { clientMutationId } }')).status, 200)
 })
 
 test('requestReviews is scoped by its pull request; reviewer user, team and bot ids are not resolved', async (t) => {
