@@ -12,7 +12,7 @@ import type { GithubComment, PullRef } from './github-trigger.ts'
 import { observePull, pullsOf, readPull, type Pull } from './github-pull.ts'
 import { health, sourceContext, type Health, type SourceContext } from './host.ts'
 import { KV } from '../kv.ts'
-import { cursorAt, pause, POLL_HORIZON_MS, pollThreads as pollEach } from './poll.ts'
+import { cursorAt, pause, polled, POLL_HORIZON_MS, pollThreads as pollEach } from './poll.ts'
 import type { SourceKind } from './kind.ts'
 import { z } from 'zod'
 
@@ -38,7 +38,7 @@ function scopeOf(meta: Record<string, unknown>): Scope | undefined {
 export const githubKind: SourceKind<GithubConfig> = {
   kind: SOURCE,
   title: 'GitHub',
-  description: 'The agent\'s GitHub accounts; receives what addresses it in the repository, discussion on subscribed Issues and PRs, CI changes, and PR merge or close.',
+  description: 'The agent\'s GitHub accounts; receives notifications to it in the repository (for a GitHub App, what mentions it), discussion on subscribed Issues and PRs, CI changes, and PR merge or close.',
   schema: GithubConfigSchema,
   fields: [
     { key: 'repository', type: 'text', pattern: '[A-Za-z0-9_.\\-]+/[A-Za-z0-9_.\\-]+', label: 'Repository',
@@ -202,8 +202,12 @@ async function pollRepository(ctx: SourceContext, round: Round): Promise<void> {
  * newest item (`cursorAt`), relying on Trigger ID deduplication so repeated messages are no-ops. While the cursor stays
  * unchanged (including when clamped to the hourly horizon), sending the last page's ETag makes an unchanged list return
  * HTTP 304 and cost no rate limit. Items from before their kind was switched on or beyond the horizon are ignored.
- * In App mode an item whose kind is off is still received when it mentions the agent, or, for a comment, when its Thread
- * has a Ticket subscription; the `app` entry of `started` is when App mode began reading the stream, and older items are ignored.
+ * In App mode an item whose kind is off is still received when it mentions the agent (an Issue or PR only when created
+ * since the stream's last read, `read`, so a mention added by editing its body is not read), or, for a comment, when a
+ * Ticket subscribes to its Thread and the Thread is polled or the comment is new since the last read. The `app` entry of
+ * `started` is when App mode began reading the stream, and older items are ignored. A received mention starts its
+ * Thread's read position when it has none, so the Thread's poll reads the replies posted before its Ticket subscribed.
+ * The agent's own open PR is read so it binds to the Ticket on its branch, as its notification does for a user account.
  */
 async function readStream(ctx: SourceContext, round: Round, id: string, path: string, config: GithubConfig): Promise<void> {
   const name = KV.github.stream(id)
@@ -229,18 +233,29 @@ async function readStream(ctx: SourceContext, round: Round, id: string, path: st
   const { login } = ctx.deployment.github
   const fresh = (at: string | null | undefined, kind: string) =>
     kind in started && Date.parse(at ?? '') >= Math.max(Date.parse(started[kind]!), horizon)
+  // The cursor stays five seconds before the newest item, so in a quiet repository an edited item stays after it; only the
+  // last read's start tells a new item from one listed again.
+  const created = (at: string | null | undefined) => Date.parse(at ?? '') >= Date.parse(cursorAt(stored?.read ?? round.started))
   for (const item of items) {
     // Stopping mid-stream aborts before advancing the cursor so unread items are retried.
     if (stopped(ctx, round)) throw new Error('The GitHub Source stopped during the poll')
-    if (sameName(item.user.login, login)) continue
+    if (sameName(item.user.login, login)) {
+      const own = app && id === 'issues' ? IssueSchema.safeParse(item) : undefined
+      if (own?.success && own.data.pull_request && own.data.state === 'open') {
+        try { await pull(ctx, round, own.data.number) } catch (error) { if (!stopped(ctx, round)) failed(ctx, round, own.data.number, error) }
+      }
+      continue
+    }
     if (id === 'issues') {
       const issue = IssueSchema.safeParse(item)
       if (!issue.success) continue
       const pr = !!issue.data.pull_request
       const trigger = pr ? pullTrigger(issue.data, login) : issueTrigger(issue.data, login)
       const at = issue.data.created_at
-      if (!fresh(at, pr ? 'pulls' : 'issues') && !(trigger.addressed && fresh(at, 'app'))) continue
+      const mentioned = !!trigger.addressed && fresh(at, 'app') && created(at)
+      if (!fresh(at, pr ? 'pulls' : 'issues') && !mentioned) continue
       await ctx.receive(trigger)
+      if (mentioned) startThread(ctx, issue.data.number, at)
       nameThread(ctx, issue.data.number, issue.data.title)
       continue
     }
@@ -250,16 +265,23 @@ async function readStream(ctx: SourceContext, round: Round, id: string, path: st
     const ref = { number, isPr, ...item.html_url ? { url: item.html_url } : {} }
     const trigger = commentTrigger(item, ref, id === 'comments' ? 'conversation' : 'inline', login)
     const at = item.updated_at ?? item.created_at
-    const wanted = fresh(at, 'comments')
-      || (fresh(at, 'app') && (!!trigger.addressed || !!ctx.threads.get(`github:${number}`)?.subscriptions.length))
-    if (wanted && trigger.text) await ctx.receive(trigger)
+    const thread = ctx.threads.get(`github:${number}`)
+    const subscribed = !!thread?.subscriptions.length && (polled(ctx, thread) || created(item.created_at))
+    const appRule = fresh(at, 'app') && (!!trigger.addressed || subscribed)
+    if (!(fresh(at, 'comments') || appRule) || !trigger.text) continue
+    await ctx.receive(trigger)
+    if (appRule && trigger.addressed) startThread(ctx, number, item.created_at ?? at!)
   }
   const newest = Math.max(...items.map(item => Date.parse(item.updated_at ?? '')).filter(Number.isFinite))
   const moved = Number.isFinite(newest) ? cursorAt(new Date(newest).toISOString()) : since
   const next = Date.parse(moved) > Date.parse(since) ? moved : since
   const etag = /^etag:\s*(.+)$/im.exec(headers)?.[1]?.trim()
   // The ETag belongs to this request, which the next round repeats only while the cursor stays unchanged.
-  ctx.state.set(name, { since: next, started, ...etag && next === since ? { etag } : {} })
+  ctx.state.set(name, { since: next, started, ...app ? { read: round.started } : {}, ...etag && next === since ? { etag } : {} })
+}
+/** Starts Thread `number`'s read position at `at` when it has none, so a later subscribed-Thread poll reads from there. */
+function startThread(ctx: SourceContext, number: number, at: string): void {
+  if (ctx.state.get(KV.github.cursor(number)) === undefined) ctx.state.set(KV.github.cursor(number), at)
 }
 /** Polls default-branch CI checks, emitting a trigger only when the set of failing checks changes after the initial baseline. */
 async function pollBranchCi(ctx: SourceContext, round: Round): Promise<void> {

@@ -57,11 +57,15 @@ function commentText(comment: GithubComment, kind: 'conversation' | 'inline' | '
   const place = kind === 'inline' && comment.path ? reviewPlace(comment) : ''
   return [decision, place, comment.body ?? ''].filter(Boolean).join('\n\n')
 }
-/** True when `text` mentions `login`. People mention a GitHub App's bot `<slug>[bot]` as `@<slug>`; `@<slug>[bot]` counts too. */
+/**
+ * True when `text` mentions `login` outside code blocks and inline code spans, which GitHub does not treat as mentions.
+ * People mention a GitHub App's bot `<slug>[bot]` as `@<slug>`; `@<slug>[bot]` counts too.
+ */
 export function mentions(text: string, login: string): boolean {
   const slug = login.replace(/\[bot\]$/, '')
   const handle = slug === login ? escapeRegExp(login) : `${escapeRegExp(slug)}(?:\\[bot\\])?(?!\\[)`
-  return new RegExp(`(?:^|[^a-zA-Z0-9_@])@${handle}(?![a-zA-Z0-9_-])`, 'i').test(text)
+  const prose = text.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`/g, ' ')
+  return new RegExp(`(?:^|[^a-zA-Z0-9_@])@${handle}(?![a-zA-Z0-9_-])`, 'i').test(prose)
 }
 const author = (user: { login: string; type?: string }, agent: string) =>
   ({ actor: { source: SOURCE, id: user.login }, human: isHumanLogin(user) && !sameName(user.login, agent) })
