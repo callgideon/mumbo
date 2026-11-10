@@ -13,6 +13,7 @@ import { constants as bufferConstants } from 'node:buffer'
 import { once } from 'node:events'
 import { realpathSync, statSync } from 'node:fs'
 import type { Stats } from 'node:fs'
+import { realpath } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { watch } from 'chokidar'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -338,9 +339,11 @@ export class LocalFileSystem extends FileSystem {
     try {
       target = await this.resolve(path, opts)
     } catch (error: unknown) {
-      // A failure for a path outside the roots would tell the model whether that path exists and what it is.
+      // A failure for a path that leaves the roots, as written or through a link under a root, would tell the model
+      // whether that path exists and what it is.
       const displayPath = localDisplayPath(opts?.cwd ?? this.config.cwd, expandHomePrefix(path))
-      if (roots !== undefined && !(error instanceof FsError && error.code === 'FS_ABORTED') && !this.underRoots(roots, displayPath)) {
+      if (roots !== undefined && !(error instanceof FsError && error.code === 'FS_ABORTED')
+        && (!this.underRoots(roots, displayPath) || await this.ancestorLeavesRoots(roots, displayPath))) {
         throw this.outsideRoots(roots, displayPath)
       }
       throw error
@@ -349,6 +352,22 @@ export class LocalFileSystem extends FileSystem {
       throw this.outsideRoots(roots, target.displayPath)
     }
     return target
+  }
+
+  /** Whether the deepest existing ancestor of a path that failed to resolve has a real path outside every root. */
+  private async ancestorLeavesRoots(roots: readonly ModelRoot[], displayPath: string): Promise<boolean> {
+    for (let path = dirname(displayPath); ; path = dirname(path)) {
+      let real: string | undefined
+      try {
+        real = await realpath(path)
+      } catch (_absentOrNotDirectory) {
+        // This prefix does not resolve either; its parent decides.
+        /* v8 ignore next -- the filesystem root always realpaths, so the walk returns before it passes the root. */
+        if (dirname(path) === path) return false
+        continue
+      }
+      return !roots.some(root => isUnder(root.canonical, real))
+    }
   }
 
   private outsideRoots(roots: readonly ModelRoot[], displayPath: string): FsError {

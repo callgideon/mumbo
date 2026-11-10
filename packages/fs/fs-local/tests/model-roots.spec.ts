@@ -129,6 +129,18 @@ describe.runIf(process.platform === 'linux')('model paths under roots', () => {
     }
   })
 
+  it('gives one refusal for names behind a link out of the roots, whether they exist, are missing, or are files', async () => {
+    await mkdir(join(outside, 'directory'))
+    await symlink(outside, join(workspace, 'link'))
+    for (const requested of ['link/key/x', 'link/missing/x', 'link/directory/x', 'link/key/..', 'link/directory/..', 'link/missing/..']) {
+      expect(await rejection(fs.resolveModelPath(requested))).toEqual(refusal(`${workspace}/${requested}`))
+    }
+    // Inside the roots the real failure stays.
+    await mkdir(join(workspace, 'real'))
+    expect((await rejection(fs.resolveModelPath('notes.txt/x'))).code).toBe('FS_NOT_FOUND')
+    expect((await rejection(fs.resolveModelPath('real/missing/..'))).code).toBe('FS_NOT_FOUND')
+  })
+
   it('refuses a write target that does not exist yet under a symbolically linked parent', async () => {
     await symlink(outside, join(scratch, 'parent'))
     const requested = join(scratch, 'parent', 'missing', 'new.txt')
