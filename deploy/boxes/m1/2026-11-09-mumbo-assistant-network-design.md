@@ -849,7 +849,10 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
 - **Take over (B28).** The Browser tab has "Take over" and "Hand back".
   - While the person has taken over, `@mumbo/browser-consent` holds no CDP connection to Chrome, and refuses every browser tool and computer-use action with "the person has taken over the browser".
   - Hand back reconnects.
-  - It is for sign-ins and anything else the person wants the agent kept out of, as Operator's takeover was. Nothing the person types then reaches the agent, or a screenshot.
+  - It is for sign-ins and anything else the person wants the agent kept out of, as Operator's takeover was.
+    - While taken over, nothing the person types reaches the agent or a screenshot. The bar saying "you have the browser" shows only after every browser connection of the agent has closed.
+    - A takeover survives a dsh restart; a record that can't be read counts as taken over.
+    - **After Hand back, tabs the person used are readable to the agent again,** like any open tab. So the bar tells them to close tabs with anything they want kept from it before handing back.
 - **Hidden tabs disconnect** (no `keepMounted`). Two hidden live views would each keep an encoder busy. Showing a tab reconnects in about a second.
 - **Ready for the local browser (N2).**
   - `box-browser` registers in the `builtin` band. When the desktop app registers its own local-browser body for the same kind in the `extension` band, the right panel uses that one and falls back to the live view when it unregisters.
