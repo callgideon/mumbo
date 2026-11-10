@@ -36,6 +36,8 @@ export interface SlotDeclaration {
   hookContext?: string
   /** Type name of the slot-level inject face, absent when the slot declares none. */
   injectType?: string
+  /** Type name of the extra `list` registration fields, absent when the slot declares none. */
+  fieldsType?: string
   /** The member's JSDoc with container indentation removed, '' when undocumented. */
   jsDoc: string
   /** Workspace package that declares the contract. */
@@ -169,6 +171,7 @@ export function slotDeclarations(file: ScannedFile): SlotDeclaration[] {
         const keyProps = memberTypeText(entry, 'keyProps', file.sf)
         const hookContext = memberTypeText(entry, 'hookContext', file.sf)
         const injectType = memberTypeText(entry, 'inject', file.sf)
+        const fieldsType = memberTypeText(entry, 'fields', file.sf)
         out.push({
           key,
           kind: literalMember(entry, 'kind'),
@@ -177,6 +180,7 @@ export function slotDeclarations(file: ScannedFile): SlotDeclaration[] {
           ...keyProps === undefined ? {} : { keyProps },
           ...hookContext === undefined ? {} : { hookContext },
           ...injectType === undefined ? {} : { injectType },
+          ...fieldsType === undefined ? {} : { fieldsType },
           jsDoc: jsDocOf(member, file.sf),
           package: file.package,
           source: `${file.rel}:${String(lineOf(file.sf, member))}`,
@@ -348,8 +352,13 @@ function declarationText(statement: ts.Node, sf: ts.SourceFile): string {
   return dedent(sf.text.slice(statement.getStart(sf, true), statement.getEnd()))
 }
 
-/** One member's JSDoc comment text, '' when the member has none. */
-function jsDocOf(member: ts.Node, sf: ts.SourceFile): string {
+/**
+ * One member's JSDoc comment text, '' when the member has none.
+ * @param member - a declaration or member node.
+ * @param sf - the source file that contains it.
+ * @returns the comment with container indentation removed.
+ */
+export function jsDocOf(member: ts.Node, sf: ts.SourceFile): string {
   // getStart(includeJsDoc) brackets exactly the doc comment: with it the range
   // opens at `/**`, without it at the member itself.
   const withDoc = member.getStart(sf, true)

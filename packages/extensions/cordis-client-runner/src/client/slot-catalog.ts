@@ -4233,6 +4233,12 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
         type: 'string | (() => string)',
         doc: 'Display text where the owner projects one (nav rows, tabs). A thunk is re-read on every projection, so localized text follows the active locale without re-registering.',
       },
+      {
+        name: 'session',
+        requirement: 'optional',
+        type: 'SessionIdOf',
+        doc: 'Session the row opens through Workspace navigation instead of selecting a main panel. The row is active while that Session is the main view and no panel is selected, and it is fixed: it cannot be unpinned and More never lists it.',
+      },
     ],
     ownerProps: [
       '/** Icon presentation supplied by the global panel row. */\nexport interface SidebarPanelIconOwnerProps {\n  /** Requested square edge in pixels. */\n  size: number\n  /** Whether this panel is selected in the main column, or a Session row\'s Session is the main view with no panel selected. */\n  active: boolean\n}',

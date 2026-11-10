@@ -18,6 +18,7 @@ import ts from 'typescript'
 import {
   declaredTypes,
   indexExportedTypes,
+  jsDocOf,
   referencedTypeNames,
   scanSlotFiles,
   slotDeclarations,
@@ -67,7 +68,8 @@ interface OptionDoc {
  * conditional type keyed on the slot's kind: it has no per-kind declaration a
  * lexical scan could read, and its own JSDoc addresses the compiler, not a
  * registrant. `verify-client-catalog` pins the authority's text so a change
- * there forces this table to be revisited.
+ * there forces this table to be revisited. A `list` slot's declared `fields`
+ * are appended per slot by {@link fieldOptions}.
  */
 const REGISTER_OPTIONS: Readonly<Record<(typeof KINDS)[number], readonly OptionDoc[]>> = {
   single: [],
@@ -214,6 +216,9 @@ export function validateSlotContracts(
       && !types.has(declaration.ownerType)) {
       problems.push(`${where} names owner props '${declaration.ownerType}' that no exported declaration provides; export the interface so the catalog can show what the component receives.`)
     }
+    if (declaration.fieldsType !== undefined && fieldOptions(declaration.fieldsType, types) === undefined) {
+      problems.push(`${where} names list fields '${declaration.fieldsType}' that no exported interface provides; export the interface so the catalog can teach each field as a register option.`)
+    }
   }
   for (const registration of registrations) {
     if (registration.factory !== true && !byKey.has(registration.key)) {
@@ -288,7 +293,11 @@ function entryOf(
     scope: declaration.scope,
     summary: firstSentence(doc),
     doc,
-    registerOptions: REGISTER_OPTIONS[declaration.kind as (typeof KINDS)[number]],
+    registerOptions: [
+      ...REGISTER_OPTIONS[declaration.kind as (typeof KINDS)[number]],
+      // validateSlotContracts rejected an unresolvable fields type before projection.
+      ...declaration.fieldsType === undefined ? [] : fieldOptions(declaration.fieldsType, types) as OptionDoc[],
+    ],
     ownerProps: owner.declarations.map(type => truncate(type.text)),
     ownerPropsReferences: owner.references,
     standardProps: kits.get(declaration.scope) ?? [],
@@ -314,6 +323,20 @@ function entryOf(
     example: exampleOf(declaration),
     source: declaration.source,
   }
+}
+
+/** A `list` slot's declared registration fields as register options; undefined when no exported interface declares them. */
+function fieldOptions(fieldsType: string, types: ReadonlyMap<string, TypeDeclaration>): OptionDoc[] | undefined {
+  const declaration = types.get(fieldsType)
+  if (declaration === undefined) return undefined
+  const source = ts.createSourceFile(declaration.source, declaration.text, ts.ScriptTarget.Latest, true)
+  const fields = source.statements.find(ts.isInterfaceDeclaration)
+  return fields?.members.filter(ts.isPropertySignature).map((member): OptionDoc => ({
+    name: member.name.getText(source),
+    requirement: member.questionToken === undefined ? 'required' : 'optional',
+    type: member.type?.getText(source).replace(/\s+/g, ' ') ?? 'any',
+    doc: docProse(jsDocOf(member, source)).replace(/\s+/g, ' '),
+  }))
 }
 
 /**
