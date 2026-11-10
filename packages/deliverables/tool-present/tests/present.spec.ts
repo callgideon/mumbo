@@ -213,4 +213,14 @@ describe.runIf(process.platform === 'linux')('present under model roots', () => 
     )
     expect(owner.session.snapshotEvents().filter(event => event.type === 'deliverables/presented')).toEqual([])
   })
+
+  it('refuses an existing outside directory with the same refusal as a missing path', async () => {
+    const { root, execute } = await setup(root => [join(root, 'projects')])
+    await mkdir(join(root, 'dir'))
+    for (const path of [join(root, 'dir'), join(root, 'missing')]) {
+      const result = await execute([{ path, description: 'Probe' }])
+      expect(result.content.map(block => block.type === 'text' ? block.text : '').join(''))
+        .toContain(`cannot access "${path}": its real path is outside the directories you can access (${join(root, 'projects')})`)
+    }
+  })
 })

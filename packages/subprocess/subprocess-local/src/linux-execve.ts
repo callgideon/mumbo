@@ -77,3 +77,19 @@ export function loadLinuxExecve(): LinuxExecve {
   }
   return cachedExecve
 }
+
+const PR_SET_NO_NEW_PRIVS = 38
+
+/* v8 ignore start -- only the run-as bootstrap child calls this; the provider tests read its effect in that child's status. */
+/**
+ * Set `no_new_privs` on the calling process through libc `prctl`, so neither it nor anything it
+ * executes can gain privileges through setuid, setgid, or file capabilities.
+ * @throws a Node-style error when the kernel refuses.
+ */
+export function setNoNewPrivileges(): void {
+  const koffi = requireKoffi()
+  const prctl = koffi.load(null).func('int prctl(int option, unsigned long arg2, unsigned long arg3, unsigned long arg4, unsigned long arg5)') as
+    (option: number, arg2: number, arg3: number, arg4: number, arg5: number) => number
+  if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) !== 0) throw systemError(koffi.errno(), 'prctl')
+}
+/* v8 ignore stop */

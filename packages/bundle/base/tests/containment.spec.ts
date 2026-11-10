@@ -5,7 +5,7 @@
  * this process's own; the provider's own suite proves a different identity is refused.
  */
 import { spawn as spawnProcess } from 'node:child_process'
-import { readdirSync, readFileSync } from 'node:fs'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -85,6 +85,9 @@ async function boot(): Promise<Box> {
   const home = join(root, 'agent-home')
   const secret = join(root, 'secret')
   for (const directory of [projects, home, join(home, 'tmp'), secret]) await mkdir(directory)
+  // dsh's own temporary directory: private and outside the model roots, as run-as requires.
+  await mkdir(join(root, 'harness-tmp'), { mode: 0o700 })
+  vi.stubEnv('TMPDIR', join(root, 'harness-tmp'))
   await writeFile(join(secret, 'key'), 'box-secret')
   await writeFile(join(projects, 'notes.txt'), 'project notes')
   vi.stubEnv('DEEPSEEK_API_KEY', 'box-token')
@@ -198,6 +201,13 @@ suite('agent containment through a real cordis.yml composition', () => {
     expect(text(await execute('read', { file_path: 'escape/key' }))).toBe(refusal(join(projects, 'escape/key')))
     expect(text(await execute('write', { file_path: 'escape/key', content: 'overwritten' }))).toBe(refusal(join(projects, 'escape/key')))
     expect(await readFile(join(secret, 'key'), 'utf8')).toBe('box-secret')
+
+    // A file the model writes belongs to the run-as user, which can go on working with it.
+    expect((await execute('write', { file_path: 'made/new.txt', content: 'first\n' })).isError).toBe(false)
+    const made = statSync(join(projects, 'made', 'new.txt'))
+    expect([made.uid, statSync(join(projects, 'made')).uid]).toEqual([process.getuid!(), process.getuid!()])
+    expect(text(await execute('bash', { command: 'echo second >> made/new.txt && cat made/new.txt', description: 'Append as agent' })))
+      .toContain('first\nsecond')
   })
 
   it('never reads or writes outside the roots while a link is swapped in during the tool calls', async () => {

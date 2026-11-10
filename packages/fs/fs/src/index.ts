@@ -141,11 +141,15 @@ export abstract class FileSystem extends Service {
    * remote/sandboxed backend may need a round-trip to map a path to a stable identity), hence
    * async even though the local backend only normalizes + realpaths.
    *
+   * A provider that confines the model to roots refuses, for every caller, a path written under a
+   * root whose real path leaves the roots, because the model can plant such links; a reader the
+   * person drives directly, such as the Files panel, passes `unconfined` to resolve as before.
+   *
    * @param path - the path to resolve; relative paths resolve against `opts.cwd`.
-   * @param opts - optional cwd override and cancellation signal.
+   * @param opts - optional cwd override, cancellation signal, and the person-facing `unconfined` resolution.
    * @returns the stable target; the same file yields the same `targetKey`.
    */
-  abstract resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget>
+  abstract resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal; unconfined?: boolean }): Promise<FsTarget>
 
   /**
    * Resolve a path the model supplied to a model-facing tool. A provider that confines the

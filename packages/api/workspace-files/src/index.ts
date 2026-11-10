@@ -390,7 +390,8 @@ export class WorkspaceFiles extends TypertRemoteService {
   ): Promise<{ root: FsTarget; workspaceRoot: string; entry: FsPathInfo }> {
     if (path.length === 0) throw new RemoteError('gateway/bad-request', 'path is required', {})
     const { workspaceRoot } = workspaceFileScope
-    const root = await this.ctx.fs.resolve(workspaceRoot, { signal })
+    // The person's own browsing keeps resolving through links that leave the model's directories.
+    const root = await this.ctx.fs.resolve(workspaceRoot, { signal, unconfined: true })
     // Gate on the path itself before anything follows it.
     const entry = await this.ctx.fs.lstat(path, { cwd: workspaceRoot }, signal)
     if (entry === undefined) {
@@ -401,7 +402,7 @@ export class WorkspaceFiles extends TypertRemoteService {
 
   /** Resolve an inspected path and refuse it unless the workspace contains it. */
   private async confine(root: FsTarget, workspaceRoot: string, path: string, signal: AbortSignal): Promise<FsTarget> {
-    const target = await this.ctx.fs.resolve(path, { cwd: workspaceRoot, signal })
+    const target = await this.ctx.fs.resolve(path, { cwd: workspaceRoot, signal, unconfined: true })
     if (!this.ctx.fs.contains(root, target)) {
       throw new RemoteError('workspace-file/outside-workspace', `"${path}" is outside the workspace`, { path })
     }
@@ -422,7 +423,7 @@ export class WorkspaceFiles extends TypertRemoteService {
     if (entry.type !== 'file') {
       throw new RemoteError('workspace-file/not-regular-file', `"${path}" is a ${entry.type}`, { path, kind: entry.type })
     }
-    const target = await this.ctx.fs.resolve(path, { cwd: workspaceRoot, signal })
+    const target = await this.ctx.fs.resolve(path, { cwd: workspaceRoot, signal, unconfined: true })
     const info = await this.ctx.fs.stat(target, signal)
     if (info === undefined) {
       throw new RemoteError('workspace-file/not-found', `no entry at "${path}"`, { path })

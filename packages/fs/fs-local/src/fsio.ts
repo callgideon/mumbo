@@ -113,9 +113,10 @@ export interface FsIoInternals {
  * Accepts or refuses an opened descriptor before anything is read through it.
  * @param opened - the descriptor's real path, as the kernel reports it under `/proc/self/fd`.
  * @param target - the resolved target the caller asked for.
+ * @param info - the descriptor's own metadata.
  * @throws to refuse the descriptor; the opener closes it.
  */
-export type ReadPin = (opened: string, target: LocalTarget) => void
+export type ReadPin = (opened: string, target: LocalTarget, info: Stats) => void
 
 /** A resolved local path: the absolute path shown to callers and its realpath identity. */
 export interface LocalTarget {
@@ -335,7 +336,7 @@ async function openPinned(target: LocalTarget, verb: 'read' | 'list', pin: ReadP
     throw error
   }
   try {
-    pin(await readlink(`/proc/self/fd/${handle.fd}`), target)
+    pin(await readlink(`/proc/self/fd/${handle.fd}`), target, await handle.stat())
     return handle
   } catch (error: unknown) {
     await handle.close()

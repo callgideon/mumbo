@@ -8,7 +8,7 @@
  * text. A fake provider would let a string-prefix containment check pass this
  * file, which is exactly the defect the gate exists to prevent.
  */
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -42,16 +42,18 @@ export interface Harness {
  * Create the workspace, its outside sibling, and a context with the local
  * backend rooted at the workspace.
  * @param prefix - temp directory prefix naming the suite.
+ * @param modelRoots - optional model roots of the local backend, given the workspace.
  * @returns the harness; dispose it in `afterEach`.
  */
-export async function openWorkspace(prefix: string): Promise<Harness> {
-  const root = await mkdtemp(join(tmpdir(), prefix))
+export async function openWorkspace(prefix: string, modelRoots?: (workspace: string) => string[]): Promise<Harness> {
+  const root = await realpath(await mkdtemp(join(tmpdir(), prefix)))
   const workspace = join(root, 'workspace')
   const outside = join(root, 'outside')
   await mkdir(workspace, { recursive: true })
   await mkdir(outside, { recursive: true })
   const ctx = new Context()
-  const fiber = await ctx.plugin(LocalFileSystem, { cwd: workspace })
+  const roots = modelRoots === undefined ? {} : { modelRoots: modelRoots(workspace) }
+  const fiber = await ctx.plugin(LocalFileSystem, { cwd: workspace, ...roots })
   ctx.provide('sandboxPolicy', {
     workspaceRoot: workspace,
     resolve: () => ({ mode: 'workspace-write', workspaceRoot: workspace }),

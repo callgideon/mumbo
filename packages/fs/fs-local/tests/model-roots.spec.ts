@@ -6,7 +6,7 @@
 
 import { execFileSync, spawn } from 'node:child_process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, link, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -203,6 +203,71 @@ describe.runIf(process.platform === 'linux')('reads through an accepted descript
     await rm(join(workspace, 'a'), { recursive: true })
     await symlink(join(scratch, 'b'), join(workspace, 'a'))
     await expect(fs.readText(target)).rejects.toEqual(new FsError(`cannot read "${join(workspace, 'a/f')}": the path changed while it was being opened`, 'FS_STALE_VERSION'))
+  })
+
+  it('refuses a root that contains this process\'s temporary directory', async () => {
+    const previous = process.env.TMPDIR
+    process.env.TMPDIR = join(workspace, 'tmp')
+    await mkdir(join(workspace, 'tmp'))
+    try {
+      await expect(ctx.plugin(LocalFileSystem, { modelRoots: [workspace] })).rejects.toThrow(
+        `fs-local: modelRoots must not contain this process's temporary directory ${JSON.stringify(join(workspace, 'tmp'))}; start dsh with TMPDIR set to a root-only directory such as /root/.dsh/tmp`,
+      )
+    } finally {
+      if (previous === undefined) delete process.env.TMPDIR
+      else process.env.TMPDIR = previous
+    }
+  })
+
+  it('lists a link out of the roots as an opaque entry that no read accepts', async () => {
+    const fs = await mount({ cwd: workspace, modelRoots: [workspace, scratch] })
+    await mkdir(join(workspace, 'v'))
+    await symlink(outside, join(workspace, 'v', 'out'))
+    await symlink(join(scratch), join(workspace, 'v', 'in'))
+    const entries = await fs.listDir(await fs.resolveModelPath('v'))
+    expect(entries.map(({ name, type, size, version }) => ({ name, type, size, version }))).toEqual([
+      { name: 'in', type: 'directory', size: undefined, version: expect.any(String) as string },
+      { name: 'out', type: 'other', size: undefined, version: undefined },
+    ])
+    const out = entries.find(entry => entry.name === 'out')!
+    expect(out.target.targetKey).toBe(join(workspace, 'v', 'out'))
+    await expect(fs.listDir(out.target)).rejects.toMatchObject({ code: 'FS_OUTSIDE_ROOTS' })
+    await expect(fs.readText(await fs.resolve(join(outside, 'key')))).resolves.toBe('secret')
+  })
+
+  it('refuses a hard-linked file the run-as user does not own', async () => {
+    const fs = await mount({ cwd: workspace, modelRoots: [workspace, scratch] })
+    await writeFile(join(scratch, 'original'), 'linked')
+    await link(join(scratch, 'original'), join(workspace, 'hard'))
+    const subprocess = ctx.subprocess
+    const identity = vi.spyOn(subprocess, 'childIdentity', 'get').mockReturnValue({ uid: process.getuid!() + 1, gid: 1, groups: [] })
+    try {
+      await expect(fs.readText(await fs.resolveModelPath('hard'))).rejects.toMatchObject({ code: 'FS_OUTSIDE_ROOTS' })
+      await expect(fs.readText(await fs.resolveModelPath('notes.txt'))).resolves.toBe('inside')
+      identity.mockReturnValue({ uid: process.getuid!(), gid: 1, groups: [] })
+      await expect(fs.readText(await fs.resolveModelPath('hard'))).resolves.toBe('linked')
+    } finally {
+      identity.mockRestore()
+    }
+  })
+
+  it('refuses any path outside the roots with one fixed refusal, whether or not it exists', async () => {
+    const fs = await mount({ cwd: workspace, modelRoots: [workspace, scratch] })
+    for (const requested of [join(outside, 'key', 'below'), join(outside, 'missing', 'below'), join(outside, 'key')]) {
+      expect(await rejection(fs.resolveModelPath(requested))).toEqual(refusal(requested))
+    }
+    await writeFile(join(workspace, 'file'), 'x')
+    await expect(fs.resolveModelPath('file/below')).rejects.toMatchObject({ code: 'FS_NOT_FOUND' })
+    const aborted = new AbortController()
+    aborted.abort()
+    await expect(fs.resolveModelPath(join(outside, 'key'), { signal: aborted.signal })).rejects.toMatchObject({ code: 'FS_ABORTED' })
+  })
+
+  it('resolves through an outward link for a person-facing reader', async () => {
+    const fs = await mount({ cwd: workspace, modelRoots: [workspace, scratch] })
+    await symlink(outside, join(workspace, 'escape'))
+    expect(await fs.readText(await fs.resolve('escape/key', { unconfined: true }))).toBe('secret')
+    await expect(fs.resolve('escape/key')).rejects.toMatchObject({ code: 'FS_OUTSIDE_ROOTS' })
   })
 
   it('refuses model roots on a host without descriptor paths', async () => {

@@ -272,3 +272,17 @@ describe('workspaceFiles.read — the file changing under its gate', () => {
     await expect(endpoint().read(harness.scope, 'notes.txt', {}, signal())).rejects.toMatchObject({ code: 'FS_IO_ERROR' })
   })
 })
+
+describe.runIf(process.platform === 'linux')('read under model roots', () => {
+  it('opens a file through a link that leaves the model roots, as before', async () => {
+    const harness = await openWorkspace('dsh-workspace-files-roots-', workspace => [workspace])
+    try {
+      await writeFile(join(harness.outside, 'shared.txt'), 'shared\n')
+      await symlink(harness.outside, join(harness.workspace, 'linked'))
+      const result = await harness.endpoint().read(harness.scope, 'linked/shared.txt', {}, signal())
+      expect(JSON.stringify(result)).toContain('shared')
+    } finally {
+      await harness.dispose()
+    }
+  })
+})

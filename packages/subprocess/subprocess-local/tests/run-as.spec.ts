@@ -1,14 +1,14 @@
 import { EventEmitter } from 'node:events'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { SubprocessSpawnSpec, SubprocessTerminalHandle } from '@deepseek-ai/dsh-subprocess'
 import LocalSubprocessRuntime, { SubprocessSecretEnvironmentError } from '@deepseek-ai/dsh-subprocess-local'
 import type { RunAs } from '@deepseek-ai/dsh-subprocess-local'
-import { assertNoSecretNames, runAsEnvironment, validateRunAs } from '../src/run-as.ts'
+import { assertNoSecretNames, assertRunAsHost, runAsEnvironment, validateRunAs } from '../src/run-as.ts'
 import { launchLinuxBootstrap, launchLinuxScope, prepareLinuxTerminalBootstrap, prepareLinuxTerminalScope } from '../src/linux-scope.ts'
 import { consumeLinuxLaunchRequest, linuxLaunchFilesFromLocator, openLinuxStartupError, readLinuxStartupError, createLinuxLaunchFiles } from '../src/runner-protocol.ts'
 import { SUBPROCESS_RUNNER_ENV } from '../src/runner-launch.ts'
@@ -20,6 +20,11 @@ const linux = process.platform === 'linux' ? describe : describe.skip
 const onLinux = process.platform === 'linux' ? it : it.skip
 const scratch: string[] = []
 const fibers: { dispose(): Promise<unknown> }[] = []
+
+beforeEach(() => {
+  // Run-as refuses a temporary directory other users can write; every test gets a private one.
+  vi.stubEnv('TMPDIR', directory())
+})
 
 afterEach(async () => {
   for (const fiber of fibers.splice(0)) await fiber.dispose()
@@ -58,19 +63,20 @@ function privateTmpdir(): string {
 }
 
 function directory(): string {
-  const path = mkdtempSync(join(tmpdir(), 'dsh-run-as-'))
+  const path = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), 'dsh-run-as-'))
   scratch.push(path)
   return path
 }
 
 /** What {@link REPORT} prints: the child's kernel credentials and its exact environment. */
-interface Report { uid: number[]; gid: number[]; groups: number[]; env: Record<string, string> }
+interface Report { uid: number[]; gid: number[]; groups: number[]; env: Record<string, string>; noNewPrivs: string; capEff: string }
 
 /** A Node child that reports its kernel credentials and its exact environment as JSON. */
 const REPORT = [
   "const status = require('fs').readFileSync('/proc/self/status', 'utf8')",
   "const ids = f => status.split('\\n').find(l => l.startsWith(f + ':')).slice(f.length + 1).trim().split(/\\s+/).filter(Boolean).map(Number)",
-  "process.stdout.write(JSON.stringify({ uid: ids('Uid'), gid: ids('Gid'), groups: ids('Groups').sort((a, b) => a - b), env: process.env }))",
+  "const field = f => status.split('\\n').find(l => l.startsWith(f + ':')).slice(f.length + 1).trim()",
+  "process.stdout.write(JSON.stringify({ uid: ids('Uid'), gid: ids('Gid'), groups: ids('Groups').sort((a, b) => a - b), env: process.env, noNewPrivs: field('NoNewPrivs'), capEff: field('CapEff') }))",
 ].join(';')
 
 function reportSpec(cwd: string, env?: NodeJS.ProcessEnv): SubprocessSpawnSpec {
@@ -139,6 +145,36 @@ describe('run-as configuration', () => {
   })
 })
 
+describe('run-as host facts', () => {
+  it('accepts a private temporary directory below a sticky shared one, with protected hard links', () => {
+    expect(() => { assertRunAsHost(directory(), () => '1\n') }).not.toThrow()
+  })
+
+  it('refuses a shared or group-writable temporary directory, or a writable non-sticky ancestor', () => {
+    const message = (path: string) => `subprocess-local: runAs requires a temporary directory no other user can write, but ${JSON.stringify(path)} is not; start dsh with TMPDIR set to a root-only directory such as /root/.dsh/tmp`
+    expect(() => { assertRunAsHost('/tmp', () => '1') }).toThrow(message('/tmp'))
+    const grouped = directory()
+    chmodSync(grouped, 0o770)
+    expect(() => { assertRunAsHost(grouped, () => '1') }).toThrow(message(grouped))
+    const open = directory()
+    chmodSync(open, 0o777)
+    const inner = join(open, 'inner')
+    mkdirSync(inner, { mode: 0o700 })
+    expect(() => { assertRunAsHost(inner, () => '1') }).toThrow(message(inner))
+    chmodSync(open, 0o700)
+  })
+
+  it('refuses unprotected hard links', () => {
+    expect(() => { assertRunAsHost(directory(), () => '0\n') })
+      .toThrow('subprocess-local: runAs requires fs.protected_hardlinks=1, so the run-as user cannot hard-link files it may not read; set it with sysctl before starting dsh')
+  })
+
+  onLinux('fails the plugin at load in a shared temporary directory', async () => {
+    vi.stubEnv('TMPDIR', '/tmp')
+    await expect(new Context().plugin(LocalSubprocessRuntime, { runAs: runAs() })).rejects.toThrow('runAs requires a temporary directory no other user can write')
+  })
+})
+
 describe('run-as environment', () => {
   it('inherits only allowlisted ambient names, then explicit entries, then fixed values', () => {
     vi.stubEnv('KEPT', 'ambient')
@@ -189,6 +225,7 @@ linux('run-as children through the provider', () => {
     expect(report.uid).toEqual(Array(4).fill(config.uid))
     expect(report.gid).toEqual(Array(4).fill(config.gid))
     expect(report.groups).toEqual(config.groups)
+    expect([report.noNewPrivs, report.capEff]).toEqual(['1', '0000000000000000'])
     expect(report.env).toEqual({ CALLER: 'explicit', HOME: '/home/agent', USER: 'agent' })
   })
 
@@ -420,8 +457,9 @@ linux('run-as shell activity records', () => {
 
 describe('run-as exec bootstrap', () => {
   const identity = { uid: 2000, gid: 3000, groups: [3002, 3001, 3001] }
-  const status = (uid: number, gid: number, groups: string): string =>
-    `Name:\tnode\nUid:\t${uid}\t${uid}\t${uid}\t${uid}\nGid:\t${gid}\t${gid}\t${gid}\t${gid}\nGroups:\t${groups}\n`
+  const contained = 'CapPrm:\t0000000000000000\nCapEff:\t0000000000000000\nCapAmb:\t0000000000000000\nNoNewPrivs:\t1\n'
+  const status = (uid: number, gid: number, groups: string, rest = contained): string =>
+    `Name:\tnode\nUid:\t${uid}\t${uid}\t${uid}\t${uid}\nGid:\t${gid}\t${gid}\t${gid}\t${gid}\nGroups:\t${groups}\n${rest}`
 
   function host(steps: string[], overrides: Record<string, unknown> = {}) {
     return {
@@ -447,6 +485,7 @@ describe('run-as exec bootstrap', () => {
     const internals: SpawnRunnerInternals = {
       execve,
       readProcessStatus: vi.fn(() => statuses.shift() ?? ''),
+      setNoNewPrivileges: vi.fn(() => { steps.push('no_new_privs') }),
       loadWin32ProcessBindings: vi.fn(),
       spawnCurrentTokenJobProcess: vi.fn(),
       closeFileDescriptor: vi.fn(),
@@ -463,7 +502,7 @@ describe('run-as exec bootstrap', () => {
     const steps: string[] = []
     const { files, run, runner } = bootstrap([status(0, 0, '0'), status(2000, 3000, '3001 3002')], steps)
     await run()
-    expect(steps).toEqual(['setgroups 3001,3002', 'setgid 3000', 'setuid 2000', 'chdir /target', 'execve /bin/tool'])
+    expect(steps).toEqual(['setgroups 3001,3002', 'setgid 3000', 'setuid 2000', 'no_new_privs', 'chdir /target', 'execve /bin/tool'])
     expect(runner.exitCode).toBe(127)
     expect(readLinuxStartupError(files.startupErrorPath)?.error.message).toBe('spawn /bin/tool ENOEXEC_TEST')
   })
@@ -472,7 +511,7 @@ describe('run-as exec bootstrap', () => {
     const steps: string[] = []
     const { run } = bootstrap([status(0, 0, '3002 3001'), status(2000, 3000, '3001 3002')], steps)
     await run()
-    expect(steps.slice(0, 2)).toEqual(['setgid 3000', 'setuid 2000'])
+    expect(steps.slice(0, 3)).toEqual(['setgid 3000', 'setuid 2000', 'no_new_privs'])
   })
 
   it.each([
@@ -499,6 +538,18 @@ describe('run-as exec bootstrap', () => {
     await run()
     expect(execve).not.toHaveBeenCalled()
     expect(readLinuxStartupError(files.startupErrorPath)?.error.message).toBe(message)
+  })
+
+  it.each([
+    ['kept capabilities', 'CapPrm:\t0000000000000000\nCapEff:\t0000000000000400\nCapAmb:\t0000000000000000\nNoNewPrivs:\t1\n'],
+    ['no no_new_privs', 'CapPrm:\t0000000000000000\nCapEff:\t0000000000000000\nCapAmb:\t0000000000000000\nNoNewPrivs:\t0\n'],
+  ])('refuses %s and never enters the target', async (_case, rest) => {
+    const steps: string[] = []
+    const { files, run, execve } = bootstrap([status(0, 0, ''), status(2000, 3000, '3001 3002', rest)], steps)
+    await run()
+    expect(execve).not.toHaveBeenCalled()
+    expect(readLinuxStartupError(files.startupErrorPath)?.error.message)
+      .toBe('run-as: the process kept capabilities or lacks no_new_privs after the change')
   })
 
   it('fails closed when the kernel reports no credentials', async () => {

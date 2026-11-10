@@ -4,6 +4,8 @@
  * @module dsh-subprocess-local/run-as
  */
 
+import { readFileSync, realpathSync, statSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import { scrubbedParentEnv, SENSITIVE_ENV_PATTERN } from '@deepseek-ai/dsh-subprocess'
 
@@ -109,4 +111,41 @@ export function assertNoSecretNames(runAs: RunAs, env: Readonly<Record<string, s
   const secrets = new Set(runAs.secretNames.map(name => name.toUpperCase()))
   const found = Object.keys(env).filter(name => secrets.has(name.toUpperCase()))
   if (found.length > 0) throw new SubprocessSecretEnvironmentError(found)
+}
+
+/**
+ * Require host facts run-as depends on, failing loudly otherwise:
+ * - this process's temporary directory, where the root bootstrap's launch requests and its
+ *   module cache live, is writable by no other user: it and each ancestor are owned by this
+ *   process or not writable by group or others, a sticky ancestor counting only when this process
+ *   owns the entry below it;
+ * - `fs.protected_hardlinks` is 1, so the run-as user cannot hard-link files it may not access
+ *   into a directory the model may read.
+ * @param temporaryDirectory - this process's `os.tmpdir()`.
+ * @param readSysctl - reads a `/proc/sys` file.
+ * @throws when either fact does not hold; the message names the fix.
+ */
+export function assertRunAsHost(
+  temporaryDirectory: string,
+  readSysctl: (path: string) => string = path => readFileSync(path, 'utf8'),
+): void {
+  const uid = process.getuid?.()
+  const real = realpathSync.native(temporaryDirectory)
+  const chain: string[] = []
+  for (let path = real; ; path = dirname(path)) {
+    chain.unshift(path)
+    if (dirname(path) === path) break
+  }
+  chain.forEach((path, index) => {
+    const info = statSync(path)
+    const shared = (info.mode & 0o022) !== 0
+    const next = chain[index + 1]
+    const own = next === undefined ? info.uid === uid : (info.mode & 0o1000) !== 0 && statSync(next).uid === uid
+    if (next === undefined ? !own || shared : shared && !own) {
+      throw new Error(`subprocess-local: runAs requires a temporary directory no other user can write, but ${JSON.stringify(real)} is not; start dsh with TMPDIR set to a root-only directory such as /root/.dsh/tmp`)
+    }
+  })
+  if (readSysctl(join('/proc/sys/fs', 'protected_hardlinks')).trim() !== '1') {
+    throw new Error('subprocess-local: runAs requires fs.protected_hardlinks=1, so the run-as user cannot hard-link files it may not read; set it with sysctl before starting dsh')
+  }
 }

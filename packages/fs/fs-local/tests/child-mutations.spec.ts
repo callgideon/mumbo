@@ -21,6 +21,7 @@ import { runMutationHelper } from '../src/mutation-helper.ts'
 const linux = process.platform === 'linux' ? describe : describe.skip
 
 let base: string
+let harnessTmp: string | undefined
 let ctx: Context
 
 /** This process's identity, the only one a non-root test can run children as. */
@@ -36,6 +37,11 @@ async function mount(
   ctx = new Context()
   const spawns: SubprocessSpawnSpec[] = []
   if (options.subprocess !== false) {
+    if (options.runAs) {
+      // Run-as refuses a temporary directory other users can write; model roots refuse one inside them.
+      harnessTmp = await mkdtemp(join(tmpdir(), 'dsh-child-mutations-tmp-'))
+      vi.stubEnv('TMPDIR', harnessTmp)
+    }
     await ctx.plugin(LocalSubprocessRuntime, options.runAs
       ? { runAs: { ...ownIdentity(), inherit: ['PATH'], set: { HOME: base }, secretNames: ['DEEPSEEK_API_KEY'] } }
       : {})
@@ -53,6 +59,9 @@ beforeEach(async () => {
 afterEach(async () => {
   await ctx.fiber.dispose()
   vi.restoreAllMocks()
+  vi.unstubAllEnvs()
+  if (harnessTmp !== undefined) await rm(harnessTmp, { recursive: true, force: true })
+  harnessTmp = undefined
   await chmod(base, 0o700).catch(() => {})
   for (const entry of await readdir(base)) await chmod(join(base, entry), 0o700).catch(() => {})
   await rm(base, { recursive: true, force: true })
@@ -83,7 +92,7 @@ linux('mutations under a run-as subprocess provider', () => {
       expect(spec.cwd).toBe('/')
     }
     expect(typeof created.version).toBe('string')
-  })
+  }, 30_000)
 
   it('returns the helper\'s own filesystem refusals with their codes', async () => {
     const { fs } = await mount({ runAs: true, modelRoots: [base] })

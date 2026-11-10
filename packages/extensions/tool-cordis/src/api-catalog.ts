@@ -1490,9 +1490,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         throws: ['when the provider does not support watching or cannot initialize the watcher.'],
       },
       {
-        signature: 'abstract resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget>',
-        description: 'Resolve a model/plugin-supplied path into a stable FsTarget. May perform I/O (a remote/sandboxed backend may need a round-trip to map a path to a stable identity), hence async even though the local backend only normalizes + realpaths.',
-        parameters: [{ name: 'path', description: 'the path to resolve; relative paths resolve against `opts.cwd`.' }, { name: 'opts', description: 'optional cwd override and cancellation signal.' }],
+        signature: 'abstract resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal; unconfined?: boolean }): Promise<FsTarget>',
+        description: 'Resolve a model/plugin-supplied path into a stable FsTarget. May perform I/O (a remote/sandboxed backend may need a round-trip to map a path to a stable identity), hence async even though the local backend only normalizes + realpaths.\n\nA provider that confines the model to roots refuses, for every caller, a path written under a root whose real path leaves the roots, because the model can plant such links; a reader the person drives directly, such as the Files panel, passes `unconfined` to resolve as before.',
+        parameters: [{ name: 'path', description: 'the path to resolve; relative paths resolve against `opts.cwd`.' }, { name: 'opts', description: 'optional cwd override, cancellation signal, and the person-facing `unconfined` resolution.' }],
         returns: 'the stable target; the same file yields the same `targetKey`.',
       },
       {

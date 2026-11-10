@@ -12,11 +12,13 @@ import { Context } from '@deepseek-ai/cordis'
 import { constants as bufferConstants } from 'node:buffer'
 import { once } from 'node:events'
 import { realpathSync, statSync } from 'node:fs'
+import type { Stats } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { watch } from 'chokidar'
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import z from '@deepseek-ai/schemastery'
-import { FileSystem, FsError, FsVersion } from '@deepseek-ai/dsh-fs'
+import { FileSystem, FsError, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
 import type {
   FsDeleteOutcome,
   FsMoveOutcome,
@@ -178,11 +180,22 @@ export class LocalFileSystem extends FileSystem {
     this.config = resolved
     this.modelRoots = resolved.modelRoots === undefined ? undefined : modelRootsOf(resolved.modelRoots, process.platform)
     const roots = this.modelRoots
-    this.readPin = roots === undefined ? undefined : (opened: string, target: LocalTarget) => {
-      if (opened === target.targetKey) return
-      // A link swapped in after resolution: the descriptor names another file than the one resolved.
-      if (!roots.some(root => isUnder(root.canonical, opened))) throw this.outsideRoots(roots, target.displayPath)
-      throw new FsError(`cannot read "${target.displayPath}": the path changed while it was being opened`, 'FS_STALE_VERSION')
+    // This process keeps its own temporary files there, among them the module cache of the run-as bootstrap.
+    const temporary = realpathSync.native(tmpdir())
+    if (roots?.some(root => isUnder(root.canonical, temporary)) === true) {
+      throw new Error(`fs-local: modelRoots must not contain this process's temporary directory ${JSON.stringify(temporary)}; start dsh with TMPDIR set to a root-only directory such as /root/.dsh/tmp`)
+    }
+    this.readPin = roots === undefined ? undefined : (opened: string, target: LocalTarget, info: Stats) => {
+      if (opened !== target.targetKey) {
+        // A link swapped in after resolution: the descriptor names another file than the one resolved.
+        if (!roots.some(root => isUnder(root.canonical, opened))) throw this.outsideRoots(roots, target.displayPath)
+        throw new FsError(`cannot read "${target.displayPath}": the path changed while it was being opened`, 'FS_STALE_VERSION')
+      }
+      // A hard link has no path of its own to check; one the run-as user does not own may lead to a file it could not read.
+      const identity = this.ctx.get('subprocess')?.childIdentity
+      if (identity !== undefined && info.isFile() && info.nlink > 1 && info.uid !== identity.uid) {
+        throw this.outsideRoots(roots, target.displayPath)
+      }
     }
   }
 
@@ -228,17 +241,22 @@ export class LocalFileSystem extends FileSystem {
     return acquire(0)
   }
 
-  override async resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget> {
+  override async resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal; unconfined?: boolean }): Promise<FsTarget> {
     if (opts?.signal?.aborted) throw new FsError('resolve aborted', 'FS_ABORTED')
     const local = await resolveLocalTarget(opts?.cwd ?? this.config.cwd, expandHomePrefix(path))
     if (opts?.signal?.aborted) throw new FsError('resolve aborted', 'FS_ABORTED')
     const roots = this.modelRoots
-    // The model can create symbolic links under its roots, so no caller follows one out of them.
-    if (roots !== undefined && roots.some(root => isUnder(root.configured, local.displayPath) || isUnder(root.canonical, local.displayPath))
+    // The model can create symbolic links under its roots, so no harness reader follows one out of them.
+    if (roots !== undefined && opts?.unconfined !== true && this.underRoots(roots, local.displayPath)
       && !roots.some(root => isUnder(root.canonical, local.targetKey))) {
       throw this.outsideRoots(roots, local.displayPath)
     }
     return { targetKey: local.targetKey, displayPath: local.displayPath }
+  }
+
+  /** Whether a path as written lies under a root, by its configured or real spelling. */
+  private underRoots(roots: readonly ModelRoot[], displayPath: string): boolean {
+    return roots.some(root => isUnder(root.configured, displayPath) || isUnder(root.canonical, displayPath))
   }
 
   /**
@@ -248,8 +266,18 @@ export class LocalFileSystem extends FileSystem {
    * @returns the stable target, under a model root when roots are configured.
    */
   override async resolveModelPath(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget> {
-    const target = await this.resolve(path, opts)
     const roots = this.modelRoots
+    let target: FsTarget
+    try {
+      target = await this.resolve(path, opts)
+    } catch (error: unknown) {
+      // A failure for a path outside the roots would tell the model whether that path exists and what it is.
+      const displayPath = localDisplayPath(opts?.cwd ?? this.config.cwd, expandHomePrefix(path))
+      if (roots !== undefined && !(error instanceof FsError && error.code === 'FS_ABORTED') && !this.underRoots(roots, displayPath)) {
+        throw this.outsideRoots(roots, displayPath)
+      }
+      throw error
+    }
     if (roots !== undefined && !roots.some(root => isUnder(root.canonical, target.targetKey))) {
       throw this.outsideRoots(roots, target.displayPath)
     }
@@ -315,7 +343,17 @@ export class LocalFileSystem extends FileSystem {
 
   override async listDir(target: FsTarget, signal?: AbortSignal): Promise<FsDirEntry[]> {
     const entries = await listDirectory({ displayPath: target.displayPath, targetKey: target.targetKey }, signal, this.readPin)
-    return entries.map(entry => ({
+    const roots = this.modelRoots
+    // A child under a root whose real path leaves every root is reported as an opaque entry: no type,
+    // size, or version, and a target that is its own in-root path, which no read accepts.
+    const escapes = (entry: (typeof entries)[number]): boolean => roots !== undefined
+      && roots.some(root => isUnder(root.canonical, target.targetKey))
+      && !roots.some(root => isUnder(root.canonical, entry.target.targetKey))
+    return entries.map(entry => escapes(entry) ? {
+      name: entry.name,
+      type: 'other' as const,
+      target: { targetKey: FsTargetKey(join(target.targetKey, entry.name)), displayPath: entry.target.displayPath },
+    } : ({
       name: entry.name,
       type: entry.type,
       target: { targetKey: entry.target.targetKey, displayPath: entry.target.displayPath },

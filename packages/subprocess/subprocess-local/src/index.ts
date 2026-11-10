@@ -12,7 +12,7 @@
 
 import { constants } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
-import { userInfo } from 'node:os'
+import { tmpdir, userInfo } from 'node:os'
 import { delimiter, extname, isAbsolute, resolve } from 'node:path'
 import type { Duplex } from 'node:stream'
 import { Context } from '@deepseek-ai/cordis'
@@ -50,7 +50,7 @@ import {
   systemdRunIdentity,
 } from './linux-scope.ts'
 import type { LinuxTerminalBootstrapLaunch, LinuxTerminalScopeLaunch } from './linux-scope.ts'
-import { assertNoSecretNames, RunAs, runAsEnvironment, validateRunAs } from './run-as.ts'
+import { assertNoSecretNames, assertRunAsHost, RunAs, runAsEnvironment, validateRunAs } from './run-as.ts'
 import type { RunAsIdentity } from './run-as.ts'
 import { LinuxScopeSelector } from './linux-scope-selector.ts'
 import type { LinuxScopeDecision } from './linux-scope-selector.ts'
@@ -122,6 +122,7 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
     super(ctx)
     if (config.runAs !== undefined) {
       validateRunAs(config.runAs, process.platform)
+      assertRunAsHost(tmpdir())
       // Only the exec bootstrap can take the identity before the target runs, with or without a systemd scope.
       if (!probeLinuxBootstrap()) throw new Error('subprocess-local: runAs requires the Linux exec bootstrap (the koffi execve binding and the runner entry), which is unavailable')
     }
