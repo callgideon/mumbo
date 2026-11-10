@@ -538,7 +538,7 @@ describe('github source', () => {
   })
   it('delivers to tickets the comments of allowed senders and listed bots, and senderless CI, but no stranger\'s', () => {
     const settings = SettingsSchema.parse({ policy: { sources: { github: { allowed: [{ id: 'alice' }], bots: [{ id: 'dependabot[bot]' }] } } } })
-    const policy = settingsPolicy(settings, { scope: () => ({ listened: true, observed: false }) })
+    const policy = settingsPolicy(settings, { scope: () => ({ listened: true, observed: false }), allMembers: () => false })
     const from = (login: string, type = 'User') =>
       policy.delivers(commentTrigger({ id: 1, body: 'x', user: { login, type } }, { number: 7, isPr: true }, 'conversation', 'agent-bot'))
     // The agent's own comment and the merge bot's are not delivered either.

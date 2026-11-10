@@ -137,6 +137,12 @@ export interface SlotEntryDef {
    * face; child registrants do not own or replace this common capability.
    */
   inject?: object
+  /**
+   * Optional extra fields of a `list` registration. Each registration may
+   * carry them beside `id`, `order`, and `label`; the core stores them
+   * uninterpreted as the entry's `fields`, and the slot's owner reads them.
+   */
+  fields?: object
 }
 
 /** One caller-selected Component position inside a reusable Factory. */
@@ -787,6 +793,10 @@ export interface StoredFactory {
  */
 export type SlotLabel = string | (() => string)
 
+/** Extra fields a list slot declares for its registrations ({@link SlotEntryDef.fields}); none adds nothing. */
+export type ListFieldsOf<K extends keyof SlotMap & string> =
+  SlotMap[K] extends { fields: infer F extends object } ? F : unknown
+
 /**
  * Kind shape fields carried in register options (keyed dispatch key; list
  * id/order/label; hoc id/order; chain select/priority; for every other kind
@@ -808,7 +818,7 @@ export type KindOptions<
       label?: SlotLabel
       /** Cell shadowing rank (ascending, default 0, lowest renders; same id + same priority throws — see {@link SlotCore.register}). */
       priority?: number
-    }
+    } & ListFieldsOf<K>
       : SlotMap[K]['kind'] extends 'chain' ? {
         /** Routing selector, mandatory on chain entries; `M` (the component's `matched` prop) infers from its return. */
         select: ChainSelect<SlotMap[K] extends { owner: infer O extends object } ? O : object, M>
@@ -879,6 +889,8 @@ type BaseOptions<
 export interface StoredEntry {
   component: unknown
   options: { key?: string; id?: string; order?: number; label?: SlotLabel; priority?: number }
+  /** Slot-declared fields a list registration carried ({@link SlotEntryDef.fields}); absent when it carried none. */
+  fields?: Readonly<Record<string, unknown>> | undefined
   /** Chain routing selector (type-erased like `inject`; present exactly on chain-slot entries). */
   select?: ((owner: never) => unknown) | undefined
   /** Registrant business face; positional params derive from the declaration (sessionId?, actions?). */
@@ -928,6 +940,11 @@ interface ErasedOptions {
   inject?: ((...args: any) => Record<string, unknown>) | undefined
   registrant?: string | undefined
 }
+
+/** Register options the core interprets; every other field of a list registration is one of its slot-declared fields. */
+const CORE_OPTIONS: ReadonlySet<string> = new Set<keyof ErasedOptions>([
+  'name', 'key', 'id', 'order', 'label', 'select', 'priority', 'children', 'store', 'locale', 'inject', 'registrant',
+])
 
 /**
  * Per-key registry record. Created on first touch; never removed (version
@@ -1183,7 +1200,8 @@ export class SlotCore {
    *
    * @param options - registration options: target `name`, `children`
    * declaration table, `store` seat, `inject` business-face factory, kind
-   * shape fields (keyed `key`; list `id`/`order`/`label`).
+   * shape fields (keyed `key`; list `id`/`order`/`label` plus the slot's
+   * declared `fields`).
    * @param component - component honoring the five-share composed props
    * contract ({@link ComposedProps}); checked at this call site.
    * @returns disposer removing the registration and its declarations
@@ -1297,6 +1315,9 @@ export class SlotCore {
       else this.handleScopes.set(options.store, { scope: spec.scope, count: 1 })
     }
 
+    const fields = spec.kind === 'list'
+      ? Object.entries(options).filter(([field]) => !CORE_OPTIONS.has(field))
+      : []
     const entry: StoredEntry = {
       component,
       options: {
@@ -1306,6 +1327,7 @@ export class SlotCore {
         ...(options.label !== undefined ? { label: options.label } : {}),
         ...(options.priority !== undefined ? { priority: options.priority } : {}),
       },
+      ...(fields.length > 0 ? { fields: Object.fromEntries(fields) } : {}),
       ...(options.select !== undefined ? { select: options.select } : {}),
       ...(options.inject !== undefined ? { inject: options.inject } : {}),
       ...(options.children !== undefined ? { children: options.children } : {}),

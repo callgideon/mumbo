@@ -1,17 +1,19 @@
+import { rm, writeFile } from 'node:fs/promises'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { afterEach, describe, expect, it } from 'vitest'
 import * as McpDoor from '../src/index.ts'
-import { KEY, startHost, stopHosts } from './door-fixture.ts'
+import { call, KEY, startHost, stopHosts } from './door-fixture.ts'
 
 const TOOLS_LIST = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} })
-const TOOL_NAMES = ['agent_send', 'agent_read', 'needs_you', 'task_reply', 'task_status', 'task_result', 'runs_halt', 'runs_resume']
+const DOOR_TOOL_NAMES = ['agent_send', 'agent_read', 'needs_you', 'task_reply', 'task_status', 'task_result']
+const TOOL_NAMES = [...DOOR_TOOL_NAMES, 'runs_halt', 'runs_resume']
 
 afterEach(stopHosts)
 
 /** Start the plugin and return the route URL. */
-async function serve(): Promise<string> {
+async function serve(profile: McpDoor.Config['profile'] = 'full'): Promise<string> {
   const host = await startHost()
-  await host.ctx.plugin(McpDoor, host.config)
+  await host.ctx.plugin(McpDoor, { ...host.config, profile })
   return host.url
 }
 
@@ -21,10 +23,12 @@ async function post(url: string, options: {
   principal?: string | null
   body?: string
   method?: string
+  headers?: Record<string, string>
 } = {}): Promise<Response> {
   const headers: Record<string, string> = {
     'content-type': 'application/json',
     accept: 'application/json, text/event-stream',
+    ...options.headers,
   }
   const authorization = options.authorization === undefined ? `Bearer ${KEY}` : options.authorization
   const principal = options.principal === undefined ? 'ann' : options.principal
@@ -113,6 +117,76 @@ describe('authenticated /mcp route', () => {
   })
 })
 
+describe('door profile', () => {
+  it('lists exactly the door tools, without runs_halt and runs_resume', async () => {
+    const response = await post(await serve('door'))
+    const body = await response.json() as { result: { tools: { name: string }[] } }
+    expect(body.result.tools.map(tool => tool.name)).toEqual(DOOR_TOOL_NAMES)
+  })
+
+  it('answers a call to runs_halt as an unknown tool', async () => {
+    await expect(call(await serve('door'), 'runs_halt', { request_id: 'r1' })).rejects.toThrow('Tool runs_halt not found')
+  })
+})
+
+describe('key name header', () => {
+  it.each([
+    ['repeated', ['laptop', 'phone']],
+    ['not percent-encoded', ['laptop Claude Code']],
+    ['not valid percent-encoding', ['laptop%E0%A4%A']],
+  ])('refuses a key name that is %s with 400', async (_label, values) => {
+    const headers = new Headers({
+      authorization: `Bearer ${KEY}`,
+      'x-mcp-principal': 'ann',
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+    })
+    // fetch sends a repeated header as one line joined by `, `, as Node joins repeated lines.
+    for (const value of values) headers.append('x-mumbo-key-name', value)
+    const response = await fetch(await serve(), { method: 'POST', headers, body: TOOLS_LIST })
+    expect(response.status).toBe(400)
+    expect(await response.text()).toBe('malformed x-mumbo-key-name')
+  })
+
+  it('counts only after the key authenticated the request', async () => {
+    const response = await post(await serve(), { authorization: 'Bearer wrong', headers: { 'x-mumbo-key-name': '%' } })
+    expect(response.status).toBe(401)
+  })
+})
+
+describe('key file', () => {
+  it('fails load naming the key file when it is missing, and registers no route', async () => {
+    const { ctx, config, url } = await startHost()
+    await rm(config.keyFile)
+    await expect(ctx.plugin(McpDoor, config)).rejects.toThrow(`mumbo-mcp: cannot read keyFile ${config.keyFile}: Error: ENOENT`)
+    expect((await post(url)).status).toBe(404)
+  })
+
+  it('accepts a rotated key from the next request on and refuses the old one', async () => {
+    const { ctx, config, url } = await startHost()
+    await ctx.plugin(McpDoor, config)
+    await writeFile(config.keyFile, ' rotated-key\n')
+    expect((await post(url)).status).toBe(401)
+    expect((await post(url, { authorization: 'Bearer rotated-key' })).status).toBe(200)
+  })
+
+  it.each([
+    ['emptied', async (file: string) => { await writeFile(file, '\n') }],
+    ['deleted', async (file: string) => { await rm(file) }],
+  ])('refuses every request with 503 while the key file is %s, an empty key included, until it holds a key again', async (_label, change) => {
+    const { ctx, config, url } = await startHost()
+    await ctx.plugin(McpDoor, config)
+    await change(config.keyFile)
+    for (const authorization of [`Bearer ${KEY}`, 'Bearer ', 'Bearer']) {
+      const response = await post(url, { authorization })
+      expect(response.status).toBe(503)
+      expect(await response.text()).toBe('key unavailable')
+    }
+    await writeFile(config.keyFile, KEY)
+    expect((await post(url)).status).toBe(200)
+  })
+})
+
 describe('plugin lifecycle', () => {
   it('fails load on an empty key file and registers no route', async () => {
     const { ctx, config, url } = await startHost({ keyText: ' \n' })
@@ -120,9 +194,15 @@ describe('plugin lifecycle', () => {
     expect((await post(url)).status).toBe(404)
   })
 
-  it('fails load on a malformed allowlist entry', async () => {
-    const { ctx, config, url } = await startHost({ allowlist: ['Bad Name'] })
-    await expect(ctx.plugin(McpDoor, config)).rejects.toThrow(/allowlist\[0\]/)
+  it.each([
+    ['a malformed allowlist entry', { allowlist: ['Bad Name'] }, /allowlist\[0\]/],
+    ['an allowlist entry an unset variable left absent', { allowlist: [undefined] }, /allowlist\[0\] missing required value/],
+    ['an empty allowlist', { allowlist: [] }, /allowlist expected array length >= 1/],
+    ['an empty session', { session: '' }, /session expect string to match/],
+    ['a session holding whitespace', { session: ' ' }, /session expect string to match/],
+  ])('fails load on %s and registers no route', async (_label, change, error) => {
+    const { ctx, config, url } = await startHost()
+    await expect(ctx.plugin(McpDoor, { ...config, ...change } as McpDoor.Config)).rejects.toThrow(error)
     expect((await post(url)).status).toBe(404)
   })
 

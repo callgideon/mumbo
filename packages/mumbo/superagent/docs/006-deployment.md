@@ -94,7 +94,7 @@ Copy [examples/profile.cordis.patch.yml](../examples/profile.cordis.patch.yml) t
 | --- | --- | --- |
 | `stateDir` | yes | Absolute path: the database, the lock, the command shims in `worker-bin`, and the agent's git configuration. Back it up before upgrades |
 | `workDirectory` | no | Absolute path that holds the Ticket directories when the Execution settings name no directory; defaults to `<stateDir>/work`. Ticket directories are created as the worker, so under a run-as subprocess provider the worker user must be able to write it |
-| `workerDirectory`, `ghConfigDirectory` | no; both required under a run-as subprocess provider | In Mumbo: where the command shims and the agent's git configuration live, and the orchestrator's own `GH_CONFIG_DIR`; see `UPSTREAM.md` S9 |
+| `workerDirectory`, `ghConfigDirectory` | no; both required under a run-as subprocess provider | In Mumbo: where the command shims and the agent's git configuration live, and the orchestrator's own `GH_CONFIG_DIR`; see `UPSTREAM.md` S10 |
 | `promptMaxChars`, `admissionContextMaxPages`, `admissionContextTimeoutMs` | no | The largest saved prompt configuration, and how many Thread pages one assessment reads within what time |
 | `panelAdmins` | no | In Mumbo: the lowercased `edge-member` emails that may use the panel and the Management API besides the owner, default none; see `UPSTREAM.md` S2 |
 

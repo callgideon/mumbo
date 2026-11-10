@@ -67,3 +67,10 @@ it('refuses keys of the previous configuration before registering anything', asy
   expect(ctx.on).not.toHaveBeenCalled()
   expect(ctx.inject).not.toHaveBeenCalled()
 })
+
+it('registers the relay Source as an effect of the entry, after the Runtime\'s stop', async () => {
+  const { ctx } = context()
+  await apply(ctx as never, Config({ stateDir: '/srv/state' }))
+  expect(ctx.effect).toHaveBeenCalledTimes(2)
+  expect(ctx.effect).toHaveBeenLastCalledWith(expect.any(Function), 'dsh-superagent: relay Source')
+})

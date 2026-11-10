@@ -155,6 +155,7 @@ export async function startHost(options: { keyText?: string; allowlist?: string[
     assistantTitle: 'assistant',
     assistantCwd: root,
     irreversibleTools: ['deploy'],
+    profile: 'full',
   } satisfies McpDoor.Config
   return { ctx, root, config, url: `${ctx.webServer.getOrigin()}/mcp`, calls, agents, held, hold, children, jobs, kill, projections, addAgent }
 }
@@ -208,17 +209,35 @@ export interface ToolReply {
 }
 
 /**
+ * List the tools through the SDK client over HTTP, as principal `ann`.
+ * @param url - the `/mcp` URL.
+ * @returns each tool's name and input schema, in listing order.
+ */
+export async function listTools(url: string): Promise<Awaited<ReturnType<Client['listTools']>>['tools']> {
+  const client = new Client({ name: 'fixture', version: '0.0.0' })
+  await client.connect(new StreamableHTTPClientTransport(new URL(url), {
+    requestInit: { headers: { authorization: `Bearer ${KEY}`, 'x-mcp-principal': 'ann' } },
+  }))
+  try {
+    return (await client.listTools()).tools
+  } finally {
+    await client.close()
+  }
+}
+
+/**
  * Call one tool through the SDK client over HTTP.
  * @param url - the `/mcp` URL.
  * @param name - tool name.
  * @param args - tool arguments.
  * @param principal - the calling handle.
+ * @param headers - further request headers, such as `x-mumbo-key-name`.
  * @returns the error flag and the first content block's text, parsed when it is a JSON object.
  */
-export async function call(url: string, name: string, args: Record<string, unknown>, principal = 'ann'): Promise<ToolReply> {
+export async function call(url: string, name: string, args: Record<string, unknown>, principal = 'ann', headers: Record<string, string> = {}): Promise<ToolReply> {
   const client = new Client({ name: 'fixture', version: '0.0.0' })
   await client.connect(new StreamableHTTPClientTransport(new URL(url), {
-    requestInit: { headers: { authorization: `Bearer ${KEY}`, 'x-mcp-principal': principal } },
+    requestInit: { headers: { authorization: `Bearer ${KEY}`, 'x-mcp-principal': principal, ...headers } },
   }))
   try {
     const result = await client.callTool({ name, arguments: args })

@@ -5046,8 +5046,8 @@ export interface Config {
 
 ## `@mumbo/assistant`
 
-- `inject`: `sessionController` · `workspaceRegistry` · `agents`
-- `source`: [`packages/mumbo/assistant/src/index.ts:28`](../packages/mumbo/assistant/src/index.ts)
+- `inject`: `sessionController` · `workspaceRegistry` · `agents` · `storageDomain`
+- `source`: [`packages/mumbo/assistant/src/index.ts:50`](../packages/mumbo/assistant/src/index.ts)
 
 ```ts config-catalog
 /** Mumbo's instructions, the Workspace its Session is created in, and how a failed ensure is retried. */
@@ -5108,7 +5108,7 @@ export interface BrowserConfig {
 
 - `inject`: `browserUse` · `agents` · `tools` · `systemPrompt` · `workingDirectory`
 - `refs`: [`PlaywrightBrowser`](../packages/experimental/browser-use-playwright-mcp/src/index.ts)
-- `source`: [`packages/mumbo/browser-consent/src/index.ts:88`](../packages/mumbo/browser-consent/src/index.ts)
+- `source`: [`packages/mumbo/browser-consent/src/index.ts:103`](../packages/mumbo/browser-consent/src/index.ts)
 
 ```ts config-catalog
 /** Consent configuration. */
@@ -5151,21 +5151,38 @@ export interface Config {
 ## `@mumbo/mcp`
 
 - `inject`: `webServer` · `storageDomain` · `sessionController` · `workspaceRegistry` · `agents` · `subagents` · `jobs` · `sessionProjections` · `subprocess`
-- `source`: [`packages/mumbo/mcp/src/index.ts:42`](../packages/mumbo/mcp/src/index.ts)
+- `source`: [`packages/mumbo/mcp/src/index.ts:43`](../packages/mumbo/mcp/src/index.ts)
 
 ```ts config-catalog
 /** MCP door configuration. */
 export interface Config {
-  /** File holding the bearer key; surrounding whitespace is ignored and an empty key fails load. */
+  /**
+   * File holding the bearer key, such as the per-box key the edge writes; surrounding whitespace is ignored. It is
+   * read at load, where a missing, unreadable or empty file fails load, and again for every request.
+   */
   readonly keyFile: string
-  /** Principal handles allowed to call, each matching `^[a-z][a-z0-9-]{0,31}$`. */
+  /** Principal handles allowed to call, at least one, each matching `^[a-z][a-z0-9-]{0,31}$`. */
   readonly allowlist: string[]
-  /** Title of the assistant Session the tools talk to. */
+  /**
+   * Id of an existing Session the tools talk to, such as `mumbo`, which another plugin creates; the tools answer
+   * `not_ready` until it exists. Absent, the plugin creates and keeps its own assistant Session.
+   */
+  readonly session?: string
+  /** Title of the assistant Session the plugin creates; unused with `session`. */
   readonly assistantTitle: string
-  /** Workspace directory of the assistant Session. */
+  /**
+   * Directory whose git checkout `task_status` and `task_result` read, and the workspace of the assistant Session the
+   * plugin creates. When it is not a git checkout, `task_status` reports `worktrees` as `null` and `task_result` answers
+   * `not_found`.
+   */
   readonly assistantCwd: string
   /** Tool names whose approval only a person in the browser may give. */
   readonly irreversibleTools: string[]
+  /**
+   * Tools served: `full` serves every tool; `door` serves `agent_send`, `agent_read`, `needs_you`, `task_reply`,
+   * `task_status` and `task_result`, and `task_reply` answers questions only.
+   */
+  readonly profile: 'full' | 'door'
 }
 ```
 <!-- END GENERATED config-catalog:@mumbo/mcp -->

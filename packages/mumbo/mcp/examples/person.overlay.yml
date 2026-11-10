@@ -1,0 +1,25 @@
+# Loader overlay (`dsh --patch`) for a person's box: the MCP door to Mumbo on its own loopback listener, after
+# @mumbo/assistant's overlay. The edge writes the per-box key to MUMBO_MCP_KEY_FILE, names the person's handle in
+# MUMBO_MCP_PRINCIPAL, and is the only caller. MUMBO_MCP_ASSISTANT_CWD is /root/projects, Mumbo's Workspace, which
+# is not a git checkout. The tools drive the Session `mumbo` that @mumbo/assistant creates, and serve the door profile.
+- insert:
+    - id: mumbo-mcp-ingress
+      name: cordis:group
+      group: true
+      isolate:
+        webServer: true
+      config:
+        - id: mumbo-mcp-listener
+          name: '@deepseek-ai/dsh-host-webserver'
+          config:
+            host: '127.0.0.1'
+            port: !!js Number(process.env.MUMBO_MCP_PORT ?? 3092)
+
+        - id: mumbo-mcp
+          name: '@mumbo/mcp'
+          config:
+            keyFile: !!js process.env.MUMBO_MCP_KEY_FILE
+            allowlist: !!js '[process.env.MUMBO_MCP_PRINCIPAL]'
+            session: mumbo
+            profile: door
+            assistantCwd: !!js process.env.MUMBO_MCP_ASSISTANT_CWD

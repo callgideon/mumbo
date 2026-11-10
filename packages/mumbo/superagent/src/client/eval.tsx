@@ -151,7 +151,8 @@ function PolicyBlock() {
   // Expand all rules when native form validation fails inside a collapsed rule.
   const reveal = (target: EventTarget) => { if (target instanceof Element
     && target.closest('.dt-rules')) setExpanded(new Set(policy.rules.map(rule => rule.id))) }
-  const part = (id: string) => (policy.sources[id] ?? { allowed: [] }) as Part
+  // A part shows its kind's defaults for the fields it does not store, such as a fresh box's.
+  const part = (source: SourceView, parts: typeof policy.sources) => ({ ...source.policy!.defaults, ...parts[source.id] }) as Part
   const add = () => insert({ id: crypto.randomUUID(), name: '', enabled: true, instruction: '' }, policy.rules.length)
   return <form className="dt-form dt-block" onSubmit={event => { void draft.submit(event) }}
     onInvalidCapture={event => reveal(event.target)}>
@@ -179,8 +180,8 @@ function PolicyBlock() {
             {localized(t, source.title)}
           </button>)}
         </div>}
-        <SourcePart key={current.id} source={current} part={part(current.id)}
-          saved={(blocks.policy.value.sources[current.id] ?? {}) as Part} dirty={draft.dirty}
+        <SourcePart key={current.id} source={current} part={part(current, policy.sources)}
+          saved={part(current, blocks.policy.value.sources)} dirty={draft.dirty}
           reload={reload} onChange={next => edit({ sources: { ...policy.sources,
             [current.id]: next as typeof policy.sources[string] } })} />
       </Section>}

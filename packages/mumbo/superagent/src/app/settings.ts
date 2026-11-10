@@ -107,31 +107,35 @@ export class Settings {
   current(): SettingsValue { return this.host.store.settings() }
   /**
    * Returns an overview of all settings blocks with their current block revisions: full values for `pause`, `eval`, and
-   * `executor`; rule summaries and allowed-sender counts for `policy`; and instance status switches for `sources` (with `read: 'settings/<block>'` paths for full block reads).
+   * `executor`; rule summaries, allowed-sender counts and the Sources that count every member as allowed (`all_members`) for
+   * `policy`; and instance status switches for `sources` (with `read: 'settings/<block>'` paths for full block reads).
    */
   view() {
     const { store, sources } = this.host
     const settings = store.settings(), revision = (block: SettingsSave) => store.blockRevision(block)
-    const { rules, sources: parts } = settings.policy
+    const { rules } = settings.policy, parts = sources.policyParts(settings)
     return { revision: store.get(KV.settings.revision) ?? 0,
       pause: { revision: revision('pause'), value: { paused: settings.paused } },
       eval: { revision: revision('eval'), value: settings.eval },
       executor: { revision: revision('executor'), value: settings.executor },
       policy: { revision: revision('policy'), rules: rules.map(rule => ({ id: rule.id, name: rule.name, enabled: rule.enabled })),
-        allowed: Object.fromEntries(Object.entries(parts).map(([id, part]) => [id, part.allowed.length])), read: 'settings/policy' },
+        allowed: Object.fromEntries(Object.entries(parts).map(([id, part]) => [id, part.allowed.length])),
+        all_members: Object.keys(parts).filter(id => sources.allMembers(id, settings)), read: 'settings/policy' },
       sources: sources.instances(settings).map(({ id, kind, enabled, installed }) =>
         ({ id, kind, enabled, installed, revision: revision(`source:${id}`), read: `settings/source:${id}` })) }
   }
   /**
    * Returns one settings block as accepted by `save` (`policy`, `eval`, `executor`, `pause` holding `{ paused }`, or
-   * `source:<id>` holding `{ enabled, config }`) along with its current block revision.
+   * `source:<id>` holding `{ enabled, config }`) along with its current block revision. The `policy` block holds each
+   * installed Source kind's part as the Policy reads it, stored or not, with its kind's defaults applied.
    * @throws UserError (`unknownBlock`) when no such settings block exists.
    */
   block(block: string): { block: string; revision: number; value: unknown } {
     const { store, sources } = this.host
     const settings = store.settings(), id = block.startsWith('source:') ? block.slice('source:'.length) : undefined
     const instance = id === undefined ? undefined : sources.instances(settings).find(item => item.id === id)
-    const value = block === 'pause' ? { paused: settings.paused } : block === 'policy' || block === 'eval' || block === 'executor' ? settings[block]
+    const value = block === 'pause' ? { paused: settings.paused } : block === 'policy' ? { ...settings.policy, sources: sources.policyParts(settings) }
+      : block === 'eval' || block === 'executor' ? settings[block]
       : instance ? { enabled: instance.enabled, config: instance.config } : undefined
     if (value === undefined) throw new UserError('unknownBlock', { block })
     return { block, revision: store.blockRevision(block as SettingsSave), value }
@@ -176,7 +180,8 @@ export class Settings {
     const restarting = setupChanged(old, settings) || !this.host.setup.configured()
     const before = policyVersion(old), after = policyVersion(settings)
     const scope = (version: SettingsValue) => ({
-      scope: (input: { source: string; meta: Record<string, unknown> }) => this.host.sources.scope(input, version) })
+      scope: (input: { source: string; meta: Record<string, unknown> }) => this.host.sources.scope(input, version),
+      allMembers: (source: string) => this.host.sources.allMembers(source, version) })
     const effects = before === after ? new Map() : policyEffects(store.tickets.open(), old, SettingsSchema.parse(settings), scope)
     const notified = [...effects.keys()]
     store.atomic(() => {

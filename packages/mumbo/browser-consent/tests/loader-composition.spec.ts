@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -47,11 +47,13 @@ const DENIED_URLS = [
   'https://pay.google.com', 'https://payments.google.com', 'https://myaccount.google.com', 'https://accounts.google.com',
 ]
 
-type LoadOptions = Omit<Parameters<typeof bootComposition>[1], 'consent'> & { consent?: Record<string, unknown>; withoutTabs?: boolean; start?: string }
+type LoadOptions = Omit<Parameters<typeof bootComposition>[1], 'consent'> & { consent?: Record<string, unknown>; withoutTabs?: boolean; start?: string; root?: string }
 
 async function load(options: LoadOptions = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-'))
-  roots.push(root)
+  const root = options.root ?? await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-'))
+  if (options.root === undefined) roots.push(root)
+  // The takeover record lives under the DSH home.
+  vi.stubEnv('DSH_HOME', root)
   vi.stubEnv('CONSENT_FIXTURE_ROOT', root)
   vi.stubEnv('CONSENT_FIXTURE_MODE', options.withoutTabs === true ? 'no-tabs' : '')
   vi.stubEnv('CONSENT_FIXTURE_START', options.start ?? '')
@@ -599,5 +601,236 @@ describe('browser write consent in the person-box composition', () => {
     expect(textOf(await direct(loaded, 'computer', { action: 'screenshot' }))).toBe('screenshot done')
     expect(inputs).toEqual(['screenshot', 'click', 'screenshot'])
     expect(loaded.asked).toHaveLength(2)
+  })
+})
+
+describe('take over', () => {
+  const TAKEN_OVER = 'Browser and desktop tools stay unavailable until they hand it back.'
+  const refused = (name: string) => `Error: ${name} did not run: the person has taken over the browser. ${TAKEN_OVER}`
+  const stopped = (name: string) => `Error: ${name} was stopped because the person took over the browser, so it may or may not have taken effect. ${TAKEN_OVER}`
+  const takeoverOf = (loaded: Awaited<ReturnType<typeof load>>) => loaded.ctx.get('mumbo-browser-consent')!
+  const record = (root: string) => join(root, 'mumbo', 'browser-takeover')
+  /** Each call the browser received, by name and action. */
+  const received = async (loaded: Awaited<ReturnType<typeof load>>) => (await loaded.allCalls()).map(call => `${call.name}${call.args.action === undefined ? '' : ` ${call.args.action}`}`)
+  /**
+   * A `computer` tool that records each action, finishes each only once `gate` settles, whether or not its call was
+   * stopped, and, with `stall`, runs until its call is stopped.
+   */
+  const desktop = (inputs: string[] = [], gate?: Promise<void>) => ({ inject: ['tools'], apply(ctx: Context) {
+    ctx.tools.register(defineContentToolFixture({
+      name: 'computer', description: 'Desktop.', parameters: { action: { type: 'string', required: true }, stall: { type: 'boolean' } },
+      execute: async (args, exec) => {
+        inputs.push(args.action)
+        if (gate !== undefined) await gate
+        if (args.stall !== true) return [{ type: 'text', text: `${args.action} done` }]
+        return new Promise((_resolve, reject) => { exec.signal.addEventListener('abort', () => { reject(new Error('stopped')) }) })
+      },
+    }))
+  } })
+  /** Run one call through the executor as the booted Session's Agent under its own call id. */
+  type Loaded = Awaited<ReturnType<typeof load>>
+  const run = (loaded: Loaded, name: string, args: Record<string, unknown>, id: string) => executeModelToolFixture(loaded.ctx, {
+    agent: loaded.agent, name, arguments: args, callId: ToolCallId(id), signal: new AbortController().signal,
+  })
+
+  it('refuses every browser tool and computer action, closes the browser connection, and reconnects on hand back', { timeout: 60_000 }, async () => {
+    const inputs: string[] = []
+    const loaded = await load({
+      before: [['desktop', desktop(inputs)]], start: 'http://allowed.test/',
+      script: [{ name: 'browser_navigate', args: { url: 'http://allowed.test/next' } }, { name: 'computer', args: { action: 'screenshot' } }],
+    })
+    const takeover = takeoverOf(loaded)
+    expect(takeover.hold).toEqual({ kind: 'free' })
+    // An Agent-less read reaches no browser whether or not the person has it.
+    expect(textOf(await direct(loaded, tool('browser_snapshot'), {}, false))).toMatch(/browser tool belongs to another Session/u)
+    // Handing back a browser the person does not have changes nothing, and a Session that never called the browser has
+    // no connection to close.
+    await takeover.handBack()
+    await takeover.takeOver()
+    expect(takeover.hold).toEqual({ kind: 'held' })
+    expect(await received(loaded)).toEqual([])
+
+    for (const schema of browserTools(loaded)) {
+      expect(textOf(await direct(loaded, schema.name, { url: 'http://allowed.test/', filename: 'x' }))).toBe(refused(schema.name.slice(tool('').length)))
+    }
+    for (const action of ['screenshot', 'click', 'move', 'drag', 'scroll', 'type', 'key', 'other']) {
+      expect(textOf(await direct(loaded, 'computer', { action }))).toBe(refused('computer'))
+    }
+    // The model sees the refusals as its tool results; nothing is asked, and neither the browser nor the desktop gets a call.
+    loaded.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Go.' }], source: { kind: 'user' } }))
+    await loaded.agent.whenIdle()
+    expect(toolResults(loaded.events)).toEqual([refused('browser_navigate'), refused('computer')].map(text => [{ type: 'text', text }]))
+    expect(loaded.asked).toEqual([])
+    expect(inputs).toEqual([])
+    expect(await received(loaded)).toEqual([])
+
+    // Handing back reconnects by reading the tabs; the next take over closes that connection.
+    await takeover.handBack()
+    expect(takeover.hold).toEqual({ kind: 'free' })
+    expect(await received(loaded)).toEqual(['browser_tabs list'])
+    expect(textOf(await direct(loaded, tool('browser_snapshot'), {}))).toContain('- Page URL: http://allowed.test/')
+    expect(textOf(await direct(loaded, 'computer', { action: 'screenshot' }))).toBe('screenshot done')
+    await takeover.takeOver()
+    await takeover.takeOver()
+    expect(await received(loaded)).toEqual(['browser_tabs list', 'browser_snapshot', 'browser_tabs list', 'browser_close'])
+  })
+
+  it('stops the calls in flight when the person takes over and returns none of their results', { timeout: 60_000 }, async () => {
+    const inputs: string[] = []
+    const loaded = await load({
+      before: [['desktop', desktop(inputs)]], start: 'http://allowed.test/stall', answers: ['hang'], script: [{ name: 'computer', args: { action: 'click' } }],
+    })
+    // A read waiting in the browser, a write whose tab consent is reading, a screenshot running on the desktop, and the
+    // model's input waiting for the person's answer.
+    const snapshot = run(loaded, tool('browser_snapshot'), {}, 'snapshot')
+    await expect.poll(() => received(loaded)).toEqual(['browser_snapshot'])
+    const click = run(loaded, tool('browser_click'), { target: 'e1' }, 'click')
+    await expect.poll(() => received(loaded)).toEqual(['browser_snapshot', 'browser_tabs list'])
+    const screenshot = run(loaded, 'computer', { action: 'screenshot', stall: true }, 'screenshot')
+    loaded.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Go.' }], source: { kind: 'user' } }))
+    await expect.poll(() => [inputs, loaded.asked.length]).toEqual([['screenshot'], 1])
+
+    await takeoverOf(loaded).takeOver()
+    expect((await Promise.all([snapshot, click, screenshot])).map(textOf)).toEqual([stopped('browser_snapshot'), refused('browser_click'), stopped('computer')])
+    await loaded.agent.whenIdle()
+    expect(toolResults(loaded.events)).toEqual([[{ type: 'text', text: refused('computer') }]])
+    // No listing follows the stopped calls; the close comes after they settled.
+    expect(await received(loaded)).toEqual(['browser_snapshot', 'browser_tabs list', 'browser_close'])
+    expect(inputs).toEqual(['screenshot'])
+    expect(loaded.events.flatMap(event => event.type === 'approval/decided' ? [event.data.outcome] : [])).toEqual(['cancelled'])
+
+    // A call that finished in the browser while consent was still reading the tab after it.
+    const checking = await load({ start: 'http://allowed.test/stalltabs' })
+    const read = run(checking, tool('browser_snapshot'), {}, 'read')
+    await expect.poll(() => received(checking)).toEqual(['browser_snapshot', 'browser_tabs list'])
+    await takeoverOf(checking).takeOver()
+    expect(textOf(await read)).toBe(stopped('browser_snapshot'))
+    expect(await received(checking)).toEqual(['browser_snapshot', 'browser_tabs list', 'browser_close'])
+  })
+
+  it('refuses a call that reached dispatch after the person took over, and one that a listener ahead of consent allowed', { timeout: 60_000 }, async () => {
+    const inputs: string[] = []
+    const loaded = await load({ before: [['desktop', desktop(inputs)]] })
+    const takeover = takeoverOf(loaded)
+    // Outside consent's wrapper, so the person takes over after the guard let each call through.
+    const late = loaded.ctx.on('tools/execute', async (_exec, next) => {
+      await takeover.takeOver()
+      return next()
+    }, { prepend: true })
+    expect(textOf(await direct(loaded, tool('browser_snapshot'), {}))).toBe(refused('browser_snapshot'))
+    expect(textOf(await direct(loaded, 'computer', { action: 'screenshot' }))).toBe(refused('computer'))
+    late()
+    loaded.ctx.on('tools/pre-execute', (): Promise<PreToolDecision> => Promise.resolve({ kind: 'allow' }), { prepend: true })
+    expect(textOf(await direct(loaded, tool('browser_snapshot'), {}))).toBe(refused('browser_snapshot'))
+    expect(textOf(await direct(loaded, 'computer', { action: 'screenshot' }))).toBe(refused('computer'))
+    expect(await received(loaded)).toEqual([])
+    expect(inputs).toEqual([])
+  })
+
+  it('reports the takeover as taking until the calls in flight settle and the browser connection closes', { timeout: 60_000 }, async () => {
+    const inputs: string[] = []
+    const gate = Promise.withResolvers<undefined>()
+    const loaded = await load({ before: [['desktop', desktop(inputs, gate.promise)]], start: 'http://allowed.test/' })
+    const takeover = takeoverOf(loaded)
+    await direct(loaded, tool('browser_snapshot'), {})
+    // A desktop call that keeps running past its stop until the test lets it finish.
+    const screenshot = run(loaded, 'computer', { action: 'screenshot' }, 'screenshot')
+    await expect.poll(() => inputs).toEqual(['screenshot'])
+    const taken = takeover.takeOver()
+    expect(takeover.hold).toEqual({ kind: 'taking' })
+    // The take over waits for that call before it closes the browser connection.
+    expect(await received(loaded)).toEqual(['browser_snapshot', 'browser_tabs list'])
+    expect(takeover.hold).toEqual({ kind: 'taking' })
+    gate.resolve(undefined)
+    await taken
+    expect(takeover.hold).toEqual({ kind: 'held' })
+    expect(await received(loaded)).toEqual(['browser_snapshot', 'browser_tabs list', 'browser_close'])
+    expect(textOf(await screenshot)).toBe(stopped('computer'))
+  })
+
+  it('keeps the browser taken over across a restart until the person hands it back', { timeout: 60_000 }, async () => {
+    const first = await load({ start: 'http://allowed.test/' })
+    await takeoverOf(first).takeOver()
+    expect((await stat(record(first.root))).mode & 0o777).toBe(0o600)
+    contexts.splice(contexts.indexOf(first.ctx), 1)
+    await first.ctx.fiber.dispose()
+
+    const second = await load({ root: first.root, start: 'http://allowed.test/' })
+    expect(takeoverOf(second).hold).toEqual({ kind: 'held' })
+    expect(textOf(await direct(second, tool('browser_snapshot'), {}))).toBe(refused('browser_snapshot'))
+    expect(await received(second)).toEqual([])
+    await takeoverOf(second).handBack()
+    await expect(stat(record(first.root))).rejects.toThrow(/ENOENT/u)
+    expect(await received(second)).toEqual(['browser_tabs list'])
+  })
+
+  it('lets the latest request win when a take over arrives during a hand back', { timeout: 60_000 }, async () => {
+    const loaded = await load()
+    const takeover = takeoverOf(loaded)
+    await takeover.takeOver()
+    await Promise.all([takeover.handBack(), takeover.takeOver()])
+    expect(takeover.hold).toEqual({ kind: 'held' })
+    expect((await stat(record(loaded.root))).isFile()).toBe(true)
+    await Promise.all([takeover.takeOver(), takeover.handBack()])
+    expect(takeover.hold).toEqual({ kind: 'free' })
+    await expect(stat(record(loaded.root))).rejects.toThrow(/ENOENT/u)
+  })
+
+  it('reports a takeover it could not save or whose connection stayed open, and a record it cannot check or remove', { timeout: 60_000 }, async () => {
+    // A record that cannot be checked counts as a takeover, and one that cannot be written is reported.
+    const unchecked = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-'))
+    roots.push(unchecked)
+    await writeFile(join(unchecked, 'mumbo'), '')
+    const blocked = await load({ root: unchecked })
+    expect(takeoverOf(blocked).hold).toEqual({ kind: 'held' })
+    const unreadable = `could not check ${record(unchecked)}, so the browser stays taken over until the person hands it back`
+    expect(blocked.errors).toContainEqual(expect.stringContaining(unreadable))
+    const unsaved = /^the takeover could not be saved, so a restart would hand the browser back: Error: /u
+    await expect(takeoverOf(blocked).takeOver()).rejects.toThrow(unsaved)
+    const notSaved = { kind: 'unfinished', failure: expect.stringMatching(unsaved) as string }
+    expect(takeoverOf(blocked).hold).toEqual(notSaved)
+    // A hand back that fails leaves the take over reported unfinished.
+    await expect(takeoverOf(blocked).handBack()).rejects.toThrow(/ENOTDIR/u)
+    expect(takeoverOf(blocked).hold).toEqual(notSaved)
+
+    // A record that cannot be removed keeps the browser taken over.
+    const stuck = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-'))
+    roots.push(stuck)
+    await mkdir(join(record(stuck), 'entry'), { recursive: true })
+    const kept = await load({ root: stuck })
+    await expect(takeoverOf(kept).handBack()).rejects.toThrow()
+    expect(takeoverOf(kept).hold).toEqual({ kind: 'held' })
+
+    // A connection that does not close is reported on each attempt, and the browser stays taken over.
+    const open = await load({ start: 'http://allowed.test/noclose' })
+    await direct(open, tool('browser_snapshot'), {})
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await expect(takeoverOf(open).takeOver()).rejects.toThrow('a browser connection did not close: browser_close failed: fixture failure')
+    }
+    expect(takeoverOf(open).hold).toEqual({ kind: 'unfinished', failure: 'a browser connection did not close: browser_close failed: fixture failure' })
+    expect(await received(open)).toEqual(['browser_snapshot', 'browser_tabs list', 'browser_close', 'browser_close'])
+  })
+
+  it('reads the tab the person left when they hand back, so a screenshot of a denied or unread page asks', { timeout: 60_000 }, async () => {
+    const screenshot = 'Error: The user declined the desktop screenshot.'
+    const question = (what: string) => `Desktop screenshot while the browser's current tab is ${what}, which the assistant may not use. Arguments: "action": "screenshot".`
+    const unread = 'a page whose address cannot be read'
+    // A listing that fails, or whose current-tab line a page title makes ambiguous, leaves the tab unread.
+    for (const [start, what] of [
+      ['https://accounts.google.com/', 'a page on https://accounts.google.com'], ['http://allowed.test/broken', unread], ['http://allowed.test/brackets', unread],
+    ] as const) {
+      const loaded = await load({ before: [['desktop', desktop()]], start, script: [{ name: 'computer', args: { action: 'screenshot' } }] })
+      await takeoverOf(loaded).takeOver()
+      await takeoverOf(loaded).handBack()
+      loaded.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Go.' }], source: { kind: 'user' } }))
+      await loaded.agent.whenIdle()
+      expect(toolResults(loaded.events)).toEqual([[{ type: 'text', text: screenshot }]])
+      expect(loaded.asked).toEqual([question(what)])
+    }
+    // The listing showed a denied page, so console and request logs stay refused.
+    const denied = await load({ start: 'https://accounts.google.com/' })
+    await takeoverOf(denied).takeOver()
+    await takeoverOf(denied).handBack()
+    expect(textOf(await direct(denied, tool('browser_console_messages'), {}))).toMatch(/console and request logs keep that page's entries\.$/u)
   })
 })

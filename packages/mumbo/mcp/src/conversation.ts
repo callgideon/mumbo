@@ -126,6 +126,14 @@ async function messagesAfter(
 }
 
 /**
+ * The text `agent_send` logs: the caller's text, after `[from <principal> via <key name>] ` when the edge named the
+ * key, so the Session log and the model both record who sent it through which key.
+ */
+function attributed(deps: ToolDeps, text: string): string {
+  return deps.via === undefined ? text : `[from ${deps.principal} via ${deps.via}] ${text}`
+}
+
+/**
  * Register `agent_send` and `agent_read` for one principal.
  * @param server - the request's MCP server.
  * @param deps - plugin state and the principal.
@@ -140,10 +148,10 @@ export function register(server: McpServer, deps: ToolDeps): void {
     async (args) => {
       let deliver: (() => void) | undefined
       const result = await once(deps.idem, 'agent_send', deps.principal, args.request_id, args, async () => {
-        if (isHalted(deps.halt)) throw new ToolError('halted', 'runs are halted; runs_resume ends the halt')
+        if (isHalted(deps.halt)) throw new ToolError('halted', 'runs are halted until they are resumed')
         const agent = await deps.assistant()
         const afterSeq = agent.session.seq - 1
-        const sent = createUserMessage({ content: [{ type: 'text', text: args.text }], source: { kind: 'mcp', principal: deps.principal } })
+        const sent = createUserMessage({ content: [{ type: 'text', text: attributed(deps, args.text) }], source: { kind: 'mcp', principal: deps.principal } })
         deliver = () => { agent.followup(sent) }
         return JSON.stringify({ message_id: sent.id, after_seq: afterSeq })
       })

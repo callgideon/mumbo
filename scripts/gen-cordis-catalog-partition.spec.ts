@@ -196,6 +196,7 @@ describe('cordis-walk scan reach', () => {
       '  }',
       '  interface Context {',
       '    thing: ThingService',
+      "    'quoted-thing': QuotedService",
       '  }',
       '}',
       '',
@@ -206,6 +207,6 @@ describe('cordis-walk scan reach', () => {
       : null
     if (!body) throw new Error('fixture did not parse to a module block')
     expect(eventNameList(body, sf)).toEqual(['scope/list', 'plain'])
-    expect([...contextKeyMap(body, sf)]).toEqual([['thing', 'ThingService']])
+    expect([...contextKeyMap(body, sf)]).toEqual([['thing', 'ThingService'], ['quoted-thing', 'QuotedService']])
   })
 })

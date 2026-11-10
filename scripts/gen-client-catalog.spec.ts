@@ -76,6 +76,12 @@ describe('client slot contract validation', () => {
     expect(problems[0]).toContain('MissingProps')
   })
 
+  it('rejects list fields no exported interface provides', () => {
+    const problems = validateSlotContracts([declaration({ kind: 'list', fieldsType: 'MissingFields' })], [], new Map())
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toContain('MissingFields')
+  })
+
   it('rejects the same key declared twice, because a merge would hide one contract', () => {
     const problems = validateSlotContracts(
       [declaration(), declaration({ source: 'packages/client/other/src/client/slots.ts:3' })],
@@ -264,5 +270,10 @@ describe('the real workspace surface', () => {
     expect(owner).not.toContain('truncated')
     expect(tool.ownerPropsReferences).not.toContain('ToolCallCommonProps')
     expect(tool.ownerPropsReferences).not.toContain('ToolCallPhaseProps')
+    // A list slot's declared fields are register options beside the kind's own.
+    const panels = entries.find(entry => entry.key === 'sidebar.panellist')!
+    expect(panels.registerOptions.map(option => option.name)).toEqual(['id', 'order', 'label', 'session'])
+    expect(panels.registerOptions[3]).toMatchObject({ requirement: 'optional', type: 'SessionIdOf' })
+    expect(panels.registerOptions[3]?.doc).toContain('Session the row opens')
   })
 })

@@ -72,6 +72,29 @@ export class SourceRegistry implements SourceScope {
     const parsed = policy.schema.safeParse(rest)
     return { ...parsed.success ? parsed.data : policy.schema.parse({}), admission: AdmissionTableSchema.safeParse(admission ?? {}).data ?? {} }
   }
+  /**
+   * Whether `source`'s policy part sets `allMembers`, with its kind's default when the part does not; false when the kind is
+   * not installed or the stored part fails its kind's validation, so neither widens who may originate work.
+   */
+  allMembers(source: string, settings = this.settings()): boolean { return this.parsedPart(source, settings)?.allMembers === true }
+  /**
+   * The Policy's Source parts as the Policy reads them: each installed kind's part, stored or not, with its kind's defaults
+   * applied; a part whose kind is not installed or refuses it stays as stored.
+   */
+  policyParts(settings = this.settings()): Settings['policy']['sources'] {
+    const stored = settings.policy.sources
+    return Object.fromEntries([...new Set([...this.kinds.keys(), ...Object.keys(stored)])].flatMap(id => {
+      const parsed = this.parsedPart(id, settings)
+      return parsed ? [[id, { ...parsed, admission: stored[id]?.admission ?? {} } as Settings['policy']['sources'][string]]]
+        : stored[id] ? [[id, stored[id]]] : []
+    }))
+  }
+  /** `source`'s stored part without `admission`, parsed by its kind; undefined when the kind is not installed or refuses the part. */
+  private parsedPart(source: string, settings: Settings): Record<string, unknown> | undefined {
+    const { admission: _admission, ...rest } = settings.policy.sources[source] ?? {}
+    const parsed = this.kinds.get(source)?.policy?.schema.safeParse(rest)
+    return parsed?.success ? parsed.data : undefined
+  }
   channelAllowed(channel: { source: string; address: Record<string, string> }, settings = this.settings()): boolean {
     const kind = this.kinds.get(channel.source)
     if (!kind) return false

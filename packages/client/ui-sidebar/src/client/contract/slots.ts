@@ -9,7 +9,7 @@
  */
 import type { RefCallback } from 'react'
 import type {
-  InjectFace, PropsLocale, PropsRenderFactories, PropsRenderSlots, PropsRuntime, SlotHookFactory,
+  InjectFace, PropsLocale, PropsRenderFactories, PropsRenderSlots, PropsRuntime, SessionIdOf, SlotHookFactory,
 } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
@@ -43,8 +43,10 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     /**
      * Global panel icons. Each list id addresses the matching main panel;
      * the sidebar owns the button and resolves its label from list metadata.
+     * A registration carrying `session: SessionId` opens that Session
+     * instead and needs no main panel; its row is fixed like Plugins.
      */
-    'sidebar.panellist': { kind: 'list'; scope: 'root'; owner: SidebarPanelIconOwnerProps }
+    'sidebar.panellist': { kind: 'list'; scope: 'root'; owner: SidebarPanelIconOwnerProps; fields: SidebarPanelFields }
     /** Rows of the panel list's More menu; the sidebar shows More only while this list has registrations. */
     'sidebar.panellist.actions': { kind: 'list'; scope: 'root'; owner: SidebarPanelActionsOwnerProps }
     /**
@@ -92,18 +94,30 @@ export interface SidebarBrandNameOwnerProps {
 export interface SidebarPanelIconOwnerProps {
   /** Requested square edge in pixels. */
   size: number
-  /** Whether this panel is selected in the main column. */
+  /** Whether this panel is selected in the main column, or a Session row's Session is the main view with no panel selected. */
   active: boolean
+}
+
+/** Extra fields of a `sidebar.panellist` registration. */
+export interface SidebarPanelFields {
+  /**
+   * Session the row opens through Workspace navigation instead of selecting a main panel. The row is active while that
+   * Session is the main view and no panel is selected, and it is fixed: it cannot be unpinned and More never lists it.
+   * It shows that Session's status dot, and it is absent once the Session list has arrived without that Session.
+   */
+  session?: SessionIdOf
 }
 
 /** Serializable metadata for one active global panel list registration. */
 export interface SidebarPanelMetadata {
-  /** List id and matching main panel key. */
+  /** List id; the matching main panel key unless `session` is set. */
   id: MainPanelId
   /** Ascending row order; ties retain registration order. */
   order: number
   /** Row title and accessible name: resolved label, or the id when omitted. */
   label: string
+  /** Session the row opens, from the registration's `session` field. */
+  session?: SessionIdOf
 }
 
 /** One customizable panel launcher listed in the More menu. */
@@ -120,11 +134,11 @@ export interface SidebarPanelActionEntry {
 
 /** Owner share of the panel list's More menu rows. */
 export interface SidebarPanelActionsOwnerProps {
-  /** Customizable panels in registration order; Plugins is never listed. */
+  /** Customizable panels in registration order; Plugins and Session rows are never listed. */
   readonly entries: readonly SidebarPanelActionEntry[]
   /**
-   * Open a panel without changing its pin state.
-   * @param id - Listed panel id.
+   * Open a panel, or the Session a Session row names, without changing its pin state.
+   * @param id - Registered panel id.
    */
   readonly onOpen: (id: string) => void
   /**
@@ -204,6 +218,11 @@ export type SidebarRootInjected = {
   toggleSidebar: () => void
   /** Select the global panel addressed by a sidebar row. */
   selectPanel: (id: MainPanelId) => void
+  /**
+   * Open the Session a Session row names through Workspace navigation.
+   * @param sessionId - The row's `session` field.
+   */
+  openSession: (sessionId: SessionIdOf) => void
   /**
    * Show or unpin one panel launcher; Plugins is ignored.
    * @param id - Panel id.

@@ -10,7 +10,9 @@
  * listing repeats the tabs under `### Open tabs` with an earlier current tab, as upstream does when a header changes
  * between its two reads. A page whose URL holds `brackets` has a title holding `](`. A snapshot of a page whose URL
  * holds `login` shows a masked password field; a snapshot fails on a page whose URL holds `nosnap`, and a tab listing
- * on one whose URL holds `broken`. `browser_close` answers with upstream's fixed result followed by the page section.
+ * on one whose URL holds `broken`. `browser_close` answers with upstream's fixed result followed by the page section,
+ * and fails on a page whose URL holds `noclose`. Every other call on a page whose URL holds `stall` never answers, and
+ * only `browser_tabs` on one whose URL holds `stalltabs`.
  */
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
@@ -59,7 +61,9 @@ createInterface({ input: process.stdin }).on('line', line => {
     case 'tools/call': {
       const { name, arguments: args } = request.params
       appendFileSync(join(root, 'calls.ndjson'), JSON.stringify({ name, args, url: tabs[current].url }) + '\n')
-      const failing = name === 'browser_tabs' ? 'broken' : name === 'browser_snapshot' ? 'nosnap' : undefined
+      const url = tabs[current].url
+      if (url.includes('stalltabs') ? name === 'browser_tabs' : url.includes('stall') && name !== 'browser_close') break
+      const failing = name === 'browser_tabs' ? 'broken' : name === 'browser_snapshot' ? 'nosnap' : name === 'browser_close' ? 'noclose' : undefined
       if ((failing !== undefined && tabs[current].url.includes(failing)) || args.target === 'gone') {
         reply(request.id, { ...text('### Error\nError: fixture failure'), isError: true })
         break

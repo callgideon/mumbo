@@ -2146,6 +2146,32 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'mumbo-browser-consent',
+    summary: 'The person\'s hold on the browser, provided as the `mumbo-browser-consent` service.',
+    description: 'The person\'s hold on the browser, provided as the `mumbo-browser-consent` service. While the person has taken over, every Playwright MCP browser tool and every `computer` action is refused before dispatch, and once the take over finishes no Session\'s Playwright MCP server holds a connection to the browser. No model tool changes it; the box\'s owner-only Host call does.',
+    methods: [
+      {
+        signature: 'readonly hold: BrowserHold',
+        description: 'Who has the browser now; every kind but `free` refuses the browser and desktop calls, and a takeover stays across a Host restart until the person hands it back.',
+        parameters: [],
+      },
+      {
+        signature: 'takeOver(): Promise<void>',
+        description: 'Take the browser over. Refusal starts before this returns; the promise settles once the takeover is recorded for a restart, the browser and desktop calls in flight are stopped, and every Session\'s browser connection is closed.',
+        parameters: [],
+        returns: 'after the browser connections are closed.',
+        throws: ['Error naming each step that failed; the browser stays taken over, {@link hold} reports it `unfinished` until a later call or a hand back succeeds, and a later call retries the steps.'],
+      },
+      {
+        signature: 'handBack(): Promise<void>',
+        description: 'Hand the browser back and reconnect each live Session\'s browser by reading its tabs. A take over requested while this runs wins, and the browser stays taken over.',
+        parameters: [],
+        returns: 'after the reconnecting reads settle; a failed read leaves the next desktop screenshot asking.',
+        throws: ['Error when the takeover record could not be removed; the browser stays taken over, and {@link hold} keeps its kind.'],
+      },
+    ],
+  },
+  {
     key: 'officeToPdf',
     summary: 'A provider lifetime owns all converters, queued calls, and temporary files.',
     description: 'A provider lifetime owns all converters, queued calls, and temporary files.',
@@ -5839,6 +5865,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'BrandedNumber',
     declaration: 'export type BrandedNumber<B extends string> = number & {\n    readonly [BRAND]: B;\n};',
+  },
+  {
+    name: 'BrowserHold',
+    declaration: 'export type BrowserHold = {\n    readonly kind: \'free\';\n} | {\n    readonly kind: \'taking\';\n} | {\n    readonly kind: \'held\';\n} | {\n    readonly kind: \'unfinished\';\n    readonly failure: string;\n};',
   },
   {
     name: 'BrowserUseProviderName',

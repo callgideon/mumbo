@@ -25,5 +25,5 @@ export function apply(ctx: Context): void {
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action', id: 'box-links', locale: NS, inject: () => links,
   }, BoxLinks))
-  if (links.desktop !== undefined) registerViews(ctx, links.desktop, links.browser === true)
+  if (links.desktop !== undefined) registerViews(ctx, links.desktop, links.browser === true, links.takeover === true)
 }

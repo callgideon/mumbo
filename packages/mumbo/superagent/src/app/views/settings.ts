@@ -13,8 +13,8 @@ function policyOf(sources: SourceRegistry, id: string, health: HealthMap) {
   const part = sources.policyPart(id)!
   const config = sources.instance(id)?.config ?? {}
   const sync = policy.sync && { label: policy.sync.label, ready: policy.sync.ready(part), health: health[`sync:${id}`] }
-  return { policy: { fields: policy.fields, explicit: policy.explicit, ...policy.rows ? { rows: policy.rows(config) } : {}, ...sync
-    ? { sync } : {} } }
+  return { policy: { fields: policy.fields, defaults: policy.schema.parse({}), explicit: policy.explicit,
+    ...policy.rows ? { rows: policy.rows(config) } : {}, ...sync ? { sync } : {} } }
 }
 /**
  * Builds the settings view by block (`{ value, revision }`), per-Source configuration and restart-sensitive fields,

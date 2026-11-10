@@ -10,7 +10,7 @@ import { apply as applySidebar, inject as injectSidebar } from '@deepseek-ai/dsh
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { apply, inject } from '../src/client/index.ts'
 import { BROWSER_ID, BROWSER_KIND, DESKTOP_ID, DESKTOP_KIND } from '../src/client/views.ts'
-import { BOX_LINKS_GLOBAL } from '../src/config.ts'
+import { BOX_LINKS_GLOBAL, type TakeoverState } from '../src/config.ts'
 
 const SESSION = 's-box' as SessionId
 const HOME = 'https://boxes.example/home'
@@ -36,10 +36,13 @@ afterEach(async () => {
   }
 })
 
-/** Mount the right Sidebar and this plugin for one on-screen Session, with `fetch` answering the Host call. */
-async function mount(links: unknown, host: () => Promise<Response> = async () => new Response(null, { status: 204 })) {
+/** The Host's answer to one request. */
+type Host = (url: string, init?: RequestInit) => Promise<Response>
+
+/** Mount the right Sidebar and this plugin for one on-screen Session, with `fetch` answering the Host calls. */
+async function mount(links: unknown, host: Host = async () => new Response(null, { status: 204 })) {
   vi.stubGlobal(BOX_LINKS_GLOBAL, links)
-  const fetch = vi.fn((_url: string, _init?: RequestInit) => host())
+  const fetch = vi.fn((url: string, init?: RequestInit) => host(url, init))
   vi.stubGlobal('fetch', fetch)
   const runtime = await SlotTestRuntime.create()
   runtimes.push(runtime)
@@ -193,4 +196,133 @@ it('yields the Browser kind to an extension-band registration and falls back to 
   expect(h.container.querySelector('[data-local-browser]')).toBeNull()
   expect(h.frames()).toHaveLength(1)
   await waitFor(() => { expect(h.fetch).toHaveBeenCalledTimes(2) })
+})
+
+const TAKEOVER_ROUTE = 'api/box-links.browser-takeover'
+const OWNER = { home: HOME, desktop: DESKTOP, browser: true, takeover: true }
+
+const FREE = { hold: { kind: 'free' } } as const
+const HELD = { hold: { kind: 'held' } } as const
+
+/**
+ * A Host whose Chrome call succeeds and whose take-over route gives the queued answers in order: a JSON state, sent
+ * with status 500 when it carries a change's `failure`, a Response, a promise of one, or a function that makes the
+ * answer when the request arrives.
+ */
+function takeoverHost(answers: Array<TakeoverState | Response | Promise<Response> | (() => Promise<Response>)>) {
+  const requests: string[] = []
+  const host: Host = async (url, init) => {
+    if (url !== TAKEOVER_ROUTE) return new Response(null, { status: 204 })
+    requests.push(typeof init?.body === 'string' ? init.body : 'GET')
+    const next = answers.shift()!
+    if (typeof next === 'function') return next()
+    if (next instanceof Response || next instanceof Promise) return next
+    return Response.json(next, { status: 'failure' in next ? 500 : 200 })
+  }
+  return { host, requests }
+}
+
+it('says who has the browser each time the Browser tab shows, and takes it over and hands it back', async () => {
+  const taking = Promise.withResolvers<Response>()
+  const { host, requests } = takeoverHost([FREE, taking.promise, FREE, FREE, HELD])
+  const h = await mount(OWNER, host)
+  const browser = h.open(BROWSER_KIND)
+  const status = await h.view.findByRole('status')
+  expect(status.textContent).toContain('Mumbo can use this browser. Take over to sign in or type something private.')
+  fireEvent.click(h.view.getByRole('button', { name: 'Take over' }))
+  expect(h.view.getByRole('button', { name: 'Taking over…' })).toHaveProperty('disabled', true)
+  await act(async () => { taking.resolve(Response.json(HELD)) })
+  expect(h.view.getByRole('status').textContent).toContain('You have the browser. Mumbo can\'t see or use it until you hand it back.')
+  expect(h.frames()).toHaveLength(1)
+  fireEvent.click(h.view.getByRole('button', { name: 'Hand back' }))
+  expect(h.view.getByRole('button', { name: 'Handing back…' })).toHaveProperty('disabled', true)
+  await waitFor(() => { expect(h.view.getByRole('button', { name: 'Take over' })).toHaveProperty('disabled', false) })
+  // Showing the tab again reads the state again, here changed from another device.
+  h.open('guide')
+  act(() => { h.controller.focus(browser.id) })
+  await waitFor(() => { expect(requests).toHaveLength(4) })
+  h.open(DESKTOP_KIND)
+  act(() => { h.controller.focus(browser.id) })
+  await waitFor(() => { expect(h.view.getByRole('status').textContent).toContain('You have the browser.') })
+  expect(requests).toEqual(['GET', '{"takenOver":true}', '{"takenOver":false}', 'GET', 'GET'])
+  expect(h.fetch.mock.calls.filter(([url]) => url === TAKEOVER_ROUTE).map(([, init]) => init?.method)).toEqual([undefined, 'POST', 'POST', undefined, undefined])
+})
+
+it('warns while a take over did not finish, and reports a failed hand back and a route it cannot reach', async () => {
+  const unfinished = { hold: { kind: 'unfinished', failure: 'a browser connection did not close: browser_close failed: timed out' } } as const
+  const { host, requests } = takeoverHost([
+    unfinished, { ...unfinished, failure: 'EISDIR' }, HELD, { ...HELD, failure: 'EISDIR' },
+    () => Promise.reject(new TypeError('Failed to fetch')),
+    // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- a rejection that is not an Error still reaches the person.
+    () => Promise.reject('offline'),
+    new Response('Forbidden', { status: 403 }), new Response(null, { status: 404 }), FREE,
+  ])
+  const warning = `Mumbo can't use the browser, but taking over didn't finish: ${unfinished.hold.failure}. Don't type anything private yet.`
+  const h = await mount(OWNER, host)
+  const browser = h.open(BROWSER_KIND)
+  expect((await h.view.findByRole('alert')).textContent).toContain(warning)
+  // A hand back that fails after an unfinished take over keeps the warning, below the hand-back failure.
+  fireEvent.click(h.view.getByRole('button', { name: 'Hand back' }))
+  await waitFor(() => { expect(h.view.getAllByRole('alert').map(alert => alert.textContent)).toEqual(['Couldn\'t hand the browser back: EISDIR', expect.stringContaining(warning)]) })
+  expect(h.view.queryByRole('status')).toBeNull()
+  fireEvent.click(h.view.getByRole('button', { name: 'Try again' }))
+  await waitFor(() => { expect(h.view.getByRole('status').textContent).toContain('You have the browser.') })
+  expect(h.view.queryByRole('alert')).toBeNull()
+  fireEvent.click(h.view.getByRole('button', { name: 'Hand back' }))
+  await waitFor(() => { expect(h.view.getByRole('alert').textContent).toBe('Couldn\'t hand the browser back: EISDIR') })
+  expect(h.view.getByRole('status').textContent).toContain('You have the browser.')
+
+  // Each time the tab shows it reads again; a read that gets no state says why and offers a retry.
+  h.open('guide')
+  act(() => { h.controller.focus(browser.id) })
+  await waitFor(() => { expect(h.view.getByRole('alert').textContent).toContain('Couldn\'t check who has the browser: Failed to fetch') })
+  fireEvent.click(h.view.getByRole('button', { name: 'Try again' }))
+  await waitFor(() => { expect(h.view.getByRole('alert').textContent).toContain('Couldn\'t check who has the browser: offline') })
+  fireEvent.click(h.view.getByRole('button', { name: 'Try again' }))
+  await waitFor(() => { expect(h.view.getByRole('alert').textContent).toContain('Couldn\'t check who has the browser: Forbidden') })
+  fireEvent.click(h.view.getByRole('button', { name: 'Try again' }))
+  await waitFor(() => { expect(h.view.getByRole('alert').textContent).toContain('Couldn\'t check who has the browser: HTTP 404') })
+  fireEvent.click(h.view.getByRole('button', { name: 'Try again' }))
+  await waitFor(() => { expect(h.view.getByRole('button', { name: 'Take over' })).toBeTruthy() })
+  expect(requests).toEqual(['GET', '{"takenOver":false}', '{"takenOver":true}', '{"takenOver":false}', 'GET', 'GET', 'GET', 'GET', 'GET'])
+})
+
+it('warns while a take over is still closing the assistant\'s connections, and says the person has the browser only once it finished', async () => {
+  const retried = Promise.withResolvers<Response>()
+  const { host, requests } = takeoverHost([{ hold: { kind: 'taking' } }, retried.promise])
+  const h = await mount(OWNER, host)
+  h.open(BROWSER_KIND)
+  expect((await h.view.findByRole('alert')).textContent).toContain('Mumbo can\'t use the browser, but taking over hasn\'t finished yet. Don\'t type anything private yet.')
+  expect(h.view.queryByRole('status')).toBeNull()
+  expect(h.view.getByRole('button', { name: 'Hand back' })).toBeTruthy()
+  // Trying again takes over again, which the Host answers once the earlier take over finished.
+  fireEvent.click(h.view.getByRole('button', { name: 'Try again' }))
+  expect(h.view.getByRole('button', { name: 'Taking over…' })).toHaveProperty('disabled', true)
+  expect(h.view.queryByRole('status')).toBeNull()
+  await act(async () => { retried.resolve(Response.json(HELD)) })
+  expect(h.view.getByRole('status').textContent).toContain('You have the browser. Mumbo can\'t see or use it until you hand it back. Before you do, close any tab you typed something private in.')
+  expect(h.view.queryByRole('alert')).toBeNull()
+  expect(requests).toEqual(['GET', '{"takenOver":true}'])
+})
+
+it('aborts the read when the tab hides, ignores its late answer, and shows no take-over bar without the route', async () => {
+  const late = Promise.withResolvers<Response>()
+  const { host } = takeoverHost([late.promise, FREE])
+  const h = await mount(OWNER, host)
+  h.open(BROWSER_KIND)
+  await waitFor(() => { expect(h.fetch.mock.calls.filter(([url]) => url === TAKEOVER_ROUTE)).toHaveLength(1) })
+  const signal = h.fetch.mock.calls.find(([url]) => url === TAKEOVER_ROUTE)![1]!.signal!
+  act(() => { h.controller.toggleExpanded() })
+  expect(signal.aborted).toBe(true)
+  await act(async () => { late.resolve(Response.json(HELD)) })
+  expect(h.container.querySelector('[role="status"]')).toBeNull()
+  act(() => { h.controller.toggleExpanded() })
+  await waitFor(() => { expect(h.view.getByRole('status').textContent).toContain('Mumbo can use this browser.') })
+  // The Desktop tab, and a Browser tab whose Host serves no take-over route, draw no bar.
+  h.open(DESKTOP_KIND)
+  expect(h.container.querySelector('[role="status"]')).toBeNull()
+  const plain = await mount({ home: HOME, desktop: DESKTOP, browser: true })
+  plain.open(BROWSER_KIND)
+  await waitFor(() => { expect(plain.calls()).toEqual([[ROUTE, 'POST']]) })
+  expect(plain.container.querySelector('[role="status"]')).toBeNull()
 })

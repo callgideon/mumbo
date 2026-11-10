@@ -4206,14 +4206,14 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'sidebar.footer.action\', () => ctx.slots.register(\n      { name: \'sidebar.footer.action\', id: \'my-entry\', order: 100, label: \'My entry\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-sidebar/src/client/contract/slots.ts:75',
+    source: 'packages/client/ui-sidebar/src/client/contract/slots.ts:77',
   },
   {
     key: 'sidebar.panellist',
     kind: 'list',
     scope: 'root',
     summary: 'Global panel icons.',
-    doc: 'Global panel icons. Each list id addresses the matching main panel;\nthe sidebar owns the button and resolves its label from list metadata.',
+    doc: 'Global panel icons. Each list id addresses the matching main panel;\nthe sidebar owns the button and resolves its label from list metadata.\nA registration carrying `session: SessionId` opens that Session\ninstead and needs no main panel; its row is fixed like Plugins.',
     registerOptions: [
       {
         name: 'id',
@@ -4233,9 +4233,15 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
         type: 'string | (() => string)',
         doc: 'Display text where the owner projects one (nav rows, tabs). A thunk is re-read on every projection, so localized text follows the active locale without re-registering.',
       },
+      {
+        name: 'session',
+        requirement: 'optional',
+        type: 'SessionIdOf',
+        doc: 'Session the row opens through Workspace navigation instead of selecting a main panel. The row is active while that Session is the main view and no panel is selected, and it is fixed: it cannot be unpinned and More never lists it. It shows that Session\'s status dot, and it is absent once the Session list has arrived without that Session.',
+      },
     ],
     ownerProps: [
-      '/** Icon presentation supplied by the global panel row. */\nexport interface SidebarPanelIconOwnerProps {\n  /** Requested square edge in pixels. */\n  size: number\n  /** Whether this panel is selected in the main column. */\n  active: boolean\n}',
+      '/** Icon presentation supplied by the global panel row. */\nexport interface SidebarPanelIconOwnerProps {\n  /** Requested square edge in pixels. */\n  size: number\n  /** Whether this panel is selected in the main column, or a Session row\'s Session is the main view with no panel selected. */\n  active: boolean\n}',
     ],
     ownerPropsReferences: [],
     standardProps: [
@@ -4257,11 +4263,12 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     occupants: [
       'client-ui-plugin-manager PluginsPanelIcon',
       'client-ui-schedule TaskManagerIcon',
+      '@mumbo/assistant MumboIcon id \'mumbo\'',
       '@mumbo/superagent HammerIcon',
     ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'sidebar.panellist\', () => ctx.slots.register(\n      { name: \'sidebar.panellist\', id: \'my-entry\', order: 100, label: \'My entry\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-sidebar/src/client/contract/slots.ts:47',
+    source: 'packages/client/ui-sidebar/src/client/contract/slots.ts:49',
   },
   {
     key: 'sidebar.panellist.actions',
@@ -4290,7 +4297,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       },
     ],
     ownerProps: [
-      '/** Owner share of the panel list\'s More menu rows. */\nexport interface SidebarPanelActionsOwnerProps {\n  /** Customizable panels in registration order; Plugins is never listed. */\n  readonly entries: readonly SidebarPanelActionEntry[]\n  /**\n   * Open a panel without changing its pin state.\n   * @param id - Listed panel id.\n   */\n  readonly onOpen: (id: string) => void\n  /**\n   * Show (true) or unpin (false) a panel launcher.\n   * @param id - Listed panel id.\n   * @param pinned - Whether the launcher shows in the sidebar.\n   */\n  readonly onPinnedChange: (id: string, pinned: boolean) => void\n  /** Close the More menu. */\n  readonly onDismiss: () => void\n}',
+      '/** Owner share of the panel list\'s More menu rows. */\nexport interface SidebarPanelActionsOwnerProps {\n  /** Customizable panels in registration order; Plugins and Session rows are never listed. */\n  readonly entries: readonly SidebarPanelActionEntry[]\n  /**\n   * Open a panel, or the Session a Session row names, without changing its pin state.\n   * @param id - Registered panel id.\n   */\n  readonly onOpen: (id: string) => void\n  /**\n   * Show (true) or unpin (false) a panel launcher.\n   * @param id - Listed panel id.\n   * @param pinned - Whether the launcher shows in the sidebar.\n   */\n  readonly onPinnedChange: (id: string, pinned: boolean) => void\n  /** Close the More menu. */\n  readonly onDismiss: () => void\n}',
     ],
     ownerPropsReferences: [
       'SidebarPanelActionEntry',
@@ -4316,7 +4323,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'sidebar.panellist.actions\', () => ctx.slots.register(\n      { name: \'sidebar.panellist.actions\', id: \'my-entry\', order: 100, label: \'My entry\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-sidebar/src/client/contract/slots.ts:49',
+    source: 'packages/client/ui-sidebar/src/client/contract/slots.ts:51',
   },
   {
     key: 'sidebar.right.pane.tab',
@@ -5190,7 +5197,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'shadows-shipped-ui',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'sidebar.settings\', () => ctx.slots.register(\n      { name: \'sidebar.settings\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-sidebar/src/client/contract/slots.ts:70',
+    source: 'packages/client/ui-sidebar/src/client/contract/slots.ts:72',
   },
   {
     key: 'sidebar.toggle.badge',
@@ -5256,7 +5263,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'shadows-shipped-ui',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'sidebar.workspaces\', () => ctx.slots.register(\n      { name: \'sidebar.workspaces\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-sidebar/src/client/contract/slots.ts:58',
+    source: 'packages/client/ui-sidebar/src/client/contract/slots.ts:60',
   },
   {
     key: 'sidebar.workspaces.directoryFlow',
