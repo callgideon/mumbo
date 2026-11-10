@@ -309,8 +309,9 @@ Not built now. The platform comes first. When this comes back, start from these 
   - URLs stay `github.com`, so `gh`, git and superagent work unchanged. Superagent does not support GitHub Enterprise hosts (its `docs/006-deployment.md`).
   - **Allowed operations:**
     - reads on the project's repositories;
-    - comments;
-    - opening, updating and marking pull requests ready;
+    - new comments and reactions;
+    - opening pull requests, and marking them ready;
+    - edits only to what the agent wrote: a comment (REST `PATCH …/comments/{id}`, GraphQL `updateIssueComment`) or a pull request (REST `PATCH /pulls/{n}`, GraphQL `updatePullRequest`) whose author is the agent's own App identity, matched by numeric id. The edge reads the author with the agent token before forwarding, and anything else gets 403. Superagent re-reads an edited comment as a new message from its original author, so an edit to someone else's comment would forge that person's authority, such as the founder's;
     - pushes only to `agent/*` branches.
   - **Refused:** every merge endpoint, including the GraphQL `mergePullRequest` and auto-merge; approvals; ref deletion outside `agent/*`; repository settings; and the contents API.
   - **Workflow files.** Changes under `.github/workflows` are refused by GitHub itself, because the agent token has no `workflow` scope. Other `.github/` files are flagged as protected at approval time.
@@ -481,6 +482,8 @@ Reference mockups (sample data): `mumbo-mockups-v2.html`.
 - **Superagent's panel** stays available in each project box for detailed supervision.
   - Only the project's owners can open it. They arrive as edge members, and the box lists them in `panelAdmins` from the project's owner list; the list is empty, and so closed, by default.
   - The panel can change settings and Policy, but never merge or approve.
+  - Panel access equals shell access in the box: the Execution settings hold the prepare command the box runs, and the GitHub Source holds the CLI path the workers call. So `panelAdmins` only ever lists people already trusted with the box, which are the project's owners.
+  - The Execution prepare command checks out the ticket branch as `agent/<ticket>`, because the edge accepts pushes only to `agent/*` and lists only `agent/*` heads for approval. The GitHub Source CLI is `/root/.mumbo/bin/gh`.
 - **Phone** uses the same Web client below 768px, with the sidebar as a drawer.
 
 ## 16. Data and privacy **[my call; flagged]**
