@@ -5,7 +5,8 @@
  * root dsh or start a root process for the model must be switched off or absent, every subprocess identity a row
  * names must be the one its classification expects and a configured non-root identity of its own, every MCP stdio
  * server that names no identity must start as the dedicated `mcpserver` identity, never as root or `agent`, and the
- * project box's `dsh-superagent` row may differ from the founder's overlay only by the keys containment adds.
+ * project box's `dsh-superagent` row may differ from the founder's overlay only by the keys containment adds. The person
+ * box includes the door to Mumbo (`@mumbo/mcp`), whose tools the edge calls for the person.
  */
 
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
@@ -19,6 +20,8 @@ const root = resolve(import.meta.dirname, '../../..')
 const installAnchor = fileURLToPath(new URL('../package.json', import.meta.url))
 const deployed = (name: string) => loadOverlayPatches('dsh', join(root, 'deploy', name))
 const edge = (name: string) => loadOverlayPatches('dsh', join(import.meta.dirname, 'fixtures/box-edge', name))
+/** The overlay the edge patches into person boxes for the door to Mumbo. */
+const door = () => loadOverlayPatches('dsh', join(root, 'packages/mumbo/mcp/examples/person.overlay.yml'))
 
 /** How a package's model-visible tools run in a contained box. */
 type Runs =
@@ -39,6 +42,8 @@ interface Classification {
   runs: Runs
   /** Model-visible tool names; a `*` suffix names a dynamic family. */
   tools: readonly string[]
+  /** Tools of the same package that start processes through the run-as provider as `agent`, although its others run as `runs`. */
+  runAsTools?: readonly string[]
   /** The docs/tool-catalog.md package whose tool names must equal `tools`, when it is catalogued. */
   catalog?: string
   /** The subprocess identity, other than the default `agent`, that the package's row names for its processes. */
@@ -222,6 +227,11 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
     runs: 'run-as', tools: ['mcp__playwright-mcp__*'], identity: 'browsermcp', note: 'the Playwright MCP stdio server; uploads only from the shared Downloads',
   },
   '@mumbo/edge-member': NONE,
+  '@mumbo/mcp': {
+    runs: 'in-process', tools: ['agent_read', 'agent_send', 'needs_you', 'task_reply'], runAsTools: ['task_result', 'task_status'],
+    note: 'the door to Mumbo, served to the edge on its own loopback listener for the person\'s Mumbo, not to the box\'s model: '
+      + 'data only, except git in assistantCwd, which task_status and task_result run through the run-as provider as agent',
+  },
   '@mumbo/superagent': {
     runs: 'in-process',
     tools: [
@@ -278,7 +288,7 @@ function compose(box: 'person' | 'project'): Row[] {
       profile.patches,
       deployed('mumbo.overlay.yml'),
       deployed('mumbo-personal.overlay.yml'),
-      ...box === 'person' ? [edge('personal.overlay.yml')] : [edge('project.overlay.yml'), deployed('mumbo-project.overlay.yml')],
+      ...box === 'person' ? [edge('personal.overlay.yml'), door()] : [edge('project.overlay.yml'), deployed('mumbo-project.overlay.yml')],
       edge(`containment-${box}.overlay.yml`),
     ], message => warnings.push(message))
     expect(warnings).toEqual([])
@@ -350,6 +360,26 @@ async function superagentTools(): Promise<string[]> {
     ((await import(pathToFileURL(join(root, 'packages/mumbo/superagent/src/app/tools', file)).href)) as Record<string, SuperagentTools>)[name]!
   const [main, executor] = await Promise.all([load('main.ts', 'mainTools'), load('executor.ts', 'executorTools')])
   return [...new Set([...main(anything, anything), ...executor(anything, anything)].map(tool => tool.name))].sort()
+}
+
+/** A tool module of `@mumbo/mcp`, which registers its tools on one request's MCP server. */
+type DoorModule = { register: (server: { registerTool(name: string): void }, deps: object) => void }
+
+/**
+ * Tool names the door profile of `@mumbo/mcp` serves: its per-request server registers the conversation, ask and status
+ * modules, and the halt module only outside the door profile (`src/index.ts`), so the names come from calling them.
+ */
+async function doorTools(): Promise<string[]> {
+  const names: string[] = []
+  const server = { registerTool: (name: string) => { names.push(name) } }
+  // The door profile's dependencies: `task_reply` answers questions only.
+  const deps = new Proxy({}, { get: (_target, key) => key === 'questionsOnly' ? true : anything })
+  for (const file of ['conversation.ts', 'asks.ts', 'status.ts']) {
+    // The package is private and exports no tool modules; its sources are loaded from the repository.
+    const module = await import(pathToFileURL(join(root, 'packages/mumbo/mcp/src', file)).href) as DoorModule
+    module.register(server, deps)
+  }
+  return names.sort()
 }
 
 /** Keys the containment rows add to the founder's `dsh-superagent` row; any other difference fails. */
@@ -523,13 +553,26 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     expect(rows.find(row => row.id === 'dsh-superagent')?.config).toEqual(contained)
   })
 
+  it.runIf(box === 'person')('lists every tool the door to Mumbo serves, with the ones that run git as agent', async () => {
+    const mcp = enabled.filter(row => row.name === '@mumbo/mcp')
+    expect(mcp.map(row => (row.config as { profile?: string }).profile)).toEqual(['door'])
+    const { tools, runAsTools } = CLASSIFICATION['@mumbo/mcp']!
+    expect([...tools, ...runAsTools ?? []].sort()).toEqual(await doorTools())
+    // The door serves no halt or resume of the person's runs.
+    expect(await doorTools()).not.toContain('runs_halt')
+  })
+
   it('lists every mounted model tool with how it runs', () => {
-    const table = names.flatMap(name => (CLASSIFICATION[name]?.tools ?? []).map((tool) => {
-      const { runs, identity } = CLASSIFICATION[name]!
-      return `${tool} — ${runs}${identity === undefined ? '' : ` as ${identity}`} (${name})`
-    }))
+    const table = names.flatMap((name) => {
+      const { runs, identity, tools = [], runAsTools = [] } = CLASSIFICATION[name] ?? {}
+      return [
+        ...tools.map(tool => `${tool} — ${String(runs)}${identity === undefined ? '' : ` as ${identity}`} (${name})`),
+        ...runAsTools.map(tool => `${tool} — run-as (${name})`),
+      ]
+    })
     expect(table).toEqual(expect.arrayContaining(box === 'person'
-      ? ['computer — run-as as desktop (@deepseek-ai/dsh-computer-use-x11)', 'mcp__playwright-mcp__* — run-as as browsermcp (@mumbo/browser-consent)']
+      ? ['computer — run-as as desktop (@deepseek-ai/dsh-computer-use-x11)', 'mcp__playwright-mcp__* — run-as as browsermcp (@mumbo/browser-consent)',
+          'agent_send — in-process (@mumbo/mcp)', 'task_result — run-as (@mumbo/mcp)', 'task_status — run-as (@mumbo/mcp)']
       : ['bash — run-as (@deepseek-ai/dsh-tool-bash)']))
     if (box === 'project') expect(table).toEqual(expect.arrayContaining(['orchestrator_read — in-process (@mumbo/superagent)']))
   })
