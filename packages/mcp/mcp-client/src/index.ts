@@ -91,8 +91,10 @@ export interface StdioConfig {
   cwd: string
   /**
    * Subprocess identity, by the subprocess provider's name for it, that runs the server. Set, the
-   * server starts through the subprocess service with that identity's environment plus `env`;
-   * omitted, it starts as this process with the scrubbed ambient environment plus `env`.
+   * server starts through the subprocess service with that identity's environment plus `env`.
+   * Omitted, it starts through the subprocess service as the provider's default identity when that
+   * provider runs children as a run-as identity, and otherwise as this process with the scrubbed
+   * ambient environment plus `env`.
    */
   identity?: string
   /** Timeout per tool call or resource request in milliseconds. */

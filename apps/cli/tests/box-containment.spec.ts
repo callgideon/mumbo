@@ -3,8 +3,8 @@
  * and the edge's containment rows (fixtures/box-edge). Every mounted package is classified by how its model-visible
  * tools run; an unclassified package fails, catalogued tool names must match, the packages that would load code into
  * root dsh or start a root process for the model must be switched off or absent, every subprocess identity a row
- * names must be the one its classification expects and a configured non-root identity of its own, and no MCP row may
- * start a stdio server without naming one.
+ * names must be the one its classification expects and a configured non-root identity of its own, and no MCP stdio
+ * server may start as root.
  */
 
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
@@ -110,9 +110,11 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
   '@deepseek-ai/dsh-llm-retry': NONE,
   '@deepseek-ai/dsh-mcp-client': {
     runs: 'remote', tools: ['mcp__sandboxes__*'], identityFromRow: true, startsProcesses: config => config?.transport !== 'streamable-http',
-    note: 'the edge\'s sandboxes server over HTTP; a stdio row must name the identity its server runs as',
+    note: 'the edge\'s sandboxes server over HTTP; a stdio server runs as the identity its row names, or as agent',
   },
-  '@deepseek-ai/dsh-mcp-manager': { ...NONE, note: 'servers are added by the person, never by a model tool' },
+  '@deepseek-ai/dsh-mcp-manager': {
+    runs: 'run-as', tools: ['mcp__*'], note: 'servers the person adds; mcp-client starts each stdio server through the run-as provider as agent',
+  },
   '@deepseek-ai/dsh-mcp-resources': {
     runs: 'remote', tools: ['list_mcp_resource_templates', 'list_mcp_resources', 'read_mcp_resource'], catalog: '@deepseek-ai/dsh-mcp-resources',
   },
@@ -286,13 +288,18 @@ function namedIdentities(value: unknown): string[] {
 }
 
 /**
- * Ids of the enabled MCP client rows that start a stdio server without naming a run-as identity, so the server would run
- * as root with what root dsh can reach. Every transport but Streamable HTTP starts a process.
+ * Ids of the enabled rows that would start an MCP stdio server as root with what root dsh can reach. mcp-client starts a
+ * stdio server that names no identity as this process unless the subprocess provider runs children as a run-as identity,
+ * and every server the manager starts names none; every transport but Streamable HTTP starts a process.
  */
 function rootStdioServers(rows: readonly Row[]): string[] {
-  return enabledRows(rows).flatMap((row) => {
+  const enabled = enabledRows(rows)
+  const providers = enabled.filter(row => row.name === '@deepseek-ai/dsh-subprocess-local')
+  if (providers.length > 0 && providers.every(row => (row.config as { runAs?: unknown } | undefined)?.runAs !== undefined)) return []
+  return enabled.flatMap((row) => {
     const config = row.config as { transport?: unknown; identity?: unknown } | undefined
-    const root = row.name === '@deepseek-ai/dsh-mcp-client' && config?.transport !== 'streamable-http' && typeof config?.identity !== 'string'
+    const root = row.name === '@deepseek-ai/dsh-mcp-manager'
+      || (row.name === '@deepseek-ai/dsh-mcp-client' && config?.transport !== 'streamable-http' && typeof config?.identity !== 'string')
     return root ? [row.id ?? '(no id)'] : []
   })
 }
@@ -394,17 +401,19 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     }
   })
 
-  it('starts no MCP stdio server without a run-as identity', () => {
-    expect(rootStdioServers(rows)).toEqual([])
-    // The check itself: a stdio row without an identity fails; a remote row and an identity-run stdio row pass.
+  it('starts no MCP stdio server as root', () => {
     const mcp = '@deepseek-ai/dsh-mcp-client'
-    expect(rootStdioServers([
-      ...rows,
-      { id: 'root-files', name: mcp, config: { serverName: 'files', transport: 'stdio', command: 'npx', args: [] } },
+    const added: Row[] = [
+      { id: 'files', name: mcp, config: { serverName: 'files', transport: 'stdio', command: 'npx', args: [] } },
       { id: 'remote', name: mcp, config: { serverName: 'remote', transport: 'streamable-http', url: 'https://mcp.example/mcp' } },
-      { id: 'contained', name: mcp, config: { serverName: 'contained', transport: 'stdio', command: 'npx', identity: 'browsermcp' } },
       { id: 'off', name: mcp, disabled: true, config: { serverName: 'off', transport: 'stdio', command: 'npx' } },
-    ])).toEqual(['root-files'])
+    ]
+    // The person's servers come through the manager, which this box mounts.
+    expect(enabled.some(row => row.name === '@deepseek-ai/dsh-mcp-manager')).toBe(true)
+    expect(rootStdioServers([...rows, ...added])).toEqual([])
+    // The check itself: without run-as on the provider, the manager and a stdio row naming no identity start servers as root.
+    const unconfined = rows.map(row => row.id === 'subprocess' ? { ...row, config: { ...row.config as object, runAs: undefined } } : row)
+    expect(rootStdioServers([...unconfined, ...added])).toEqual(['mcp-manager', 'files'])
   })
 
   it('lists every mounted model tool with how it runs', () => {

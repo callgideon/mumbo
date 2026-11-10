@@ -55,7 +55,7 @@ Add one entry per server; nothing else is required. After the harness starts, th
 | `transport` | required | `stdio` or `streamable-http` |
 | `serverName` | required | Namespace for the server's tool names; `[A-Za-z0-9_-]{1,32}`, unique inside one registration scope |
 | `command` / `args` / `env` / `cwd` | — | stdio: executable, arguments, extra env merged over scrubbed ambient env, working directory |
-| `identity` | unset | stdio: subprocess identity that runs the server; see [Environment scrubbing (stdio)](#environment-scrubbing-stdio) |
+| `identity` | unset | stdio: subprocess identity that runs the server; unset under a run-as subprocess provider, its default identity; see [Environment scrubbing (stdio)](#environment-scrubbing-stdio) |
 | `url` / `headers` | — | streamable-http: endpoint URL and extra request headers |
 | `toolCallTimeoutMs` | `60,000` | Timeout per `tools/call` or resource request |
 | `startupTimeoutMs` | unset | Optional budget for template resolution, negotiation, connection, and the initial tool sync |
@@ -132,7 +132,7 @@ This section explains the design decisions behind the bridge and points at the c
 | [`src/templates.ts`](src/templates.ts) | Credential template syntax, substitution, and reference discovery |
 | [`src/server-context.ts`](src/server-context.ts) | Resource-provider registration and literal server instructions |
 | [`src/tools.ts`](src/tools.ts) | Tool bridge: discovery, naming, registration swap, execution, image projection |
-| [`src/transport.ts`](src/transport.ts) | Transport factory: stdio spawn with scrubbed env or through the subprocess service as a named identity, Streamable HTTP |
+| [`src/transport.ts`](src/transport.ts) | Transport factory: stdio spawn with scrubbed env or through the subprocess service as a named or run-as identity, Streamable HTTP |
 | [`src/status.ts`](src/status.ts) | Status cell keyed by Fiber, retaining its final cleanup result |
 | [`src/probe.ts`](src/probe.ts) | One-shot probe: connect, identify, list tools, close — nothing registers |
 | [`src/deadline.ts`](src/deadline.ts) | Shared settlement deadline behind the startup and probe budgets |
@@ -160,6 +160,8 @@ A tool call uses the SDK with the raw name, complete tool definition, JSON argum
 The child environment starts from the subprocess seam's `scrubbedParentEnv()` — ambient names matching `/KEY|PASSWORD|SECRET|TOKEN/i` and ambient `DSH_*` names are dropped — and the configured `env` merges on top, so explicit overrides survive. The MCP SDK owns the actual spawn; this package shares the scrub definition, not the spawn path.
 
 With `identity`, the server starts through `ctx.subprocess` instead, as the subprocess provider's identity of that name, for example a dedicated non-root user for a browser server in a contained box. Its environment is that identity's own plus the configured `env`, never this process's; the provider refuses an identity it does not list. Its standard error is read and discarded, so it never receives this process's standard error, which may be a root-only log. That identity must be able to search `cwd` (this process's working directory when `cwd` is empty; browser providers pass the Session working directory), because the server changes into it after it takes the identity; otherwise the server fails to start. This transport probes the protocol version in place, so a server that closes during the probe fails to connect rather than starting a second process. The plugin fails at load when `identity` is set and no subprocess service is mounted.
+
+When the mounted subprocess provider runs children as a run-as identity (its `childIdentity` is set, as with `dsh-subprocess-local` `runAs`), a stdio server that names no identity starts through `ctx.subprocess` the same way, as that provider's default identity, never as this process. No configuration starts a stdio server as this process under such a provider, so servers a person adds through `dsh-mcp-manager` run as the run-as user too. The choice is made at each connection from the subprocess service mounted then; a contained composition mounts the provider before any MCP server starts.
 
 </details>
 

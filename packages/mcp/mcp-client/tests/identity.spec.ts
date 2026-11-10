@@ -1,4 +1,7 @@
-/** A stdio server whose config names a subprocess identity starts through the subprocess service as that identity. */
+/**
+ * A stdio server whose config names a subprocess identity starts through the subprocess service as that identity, and
+ * one that names none does too, as the provider's default identity, when the provider runs children as a run-as identity.
+ */
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,8 +10,11 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { JSONRPCMessage } from '@modelcontextprotocol/client'
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio'
 import { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
-import type { SubprocessHandle, SubprocessOutcome, SubprocessSpawnSpec, SubprocessTerminalEnvironment, SubprocessTerminalHandle } from '@deepseek-ai/dsh-subprocess'
+import type {
+  SubprocessChildIdentity, SubprocessHandle, SubprocessOutcome, SubprocessSpawnSpec, SubprocessTerminalEnvironment, SubprocessTerminalHandle,
+} from '@deepseek-ai/dsh-subprocess'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
@@ -50,6 +56,12 @@ function config(overrides: Partial<McpClient.StdioConfig> = {}): McpClient.Stdio
   }) as McpClient.StdioConfig
 }
 
+/** The same server config naming no identity. */
+function anonymous(overrides: Partial<McpClient.StdioConfig> = {}): McpClient.StdioConfig {
+  const { identity: _named, ...rest } = config(overrides)
+  return rest
+}
+
 describe('a stdio server that names a subprocess identity', () => {
   it('fails at load when no subprocess service is mounted, before any tool registers', async () => {
     const ctx = await mountRegistry()
@@ -86,10 +98,31 @@ linux('a stdio server started through the run-as provider', () => {
       uid: own.uid, cwd, env: { PLAYWRIGHT_MCP_EXTENSION: '', HOME: '/home/browsermcp', USER: 'browsermcp' },
     })
   }, 30_000)
+
+  it('runs a server that names no identity as the provider\'s default identity, never as this process', async () => {
+    vi.stubEnv('TMPDIR', directory())
+    vi.stubEnv('AMBIENT_ONLY', 'leak')
+    const groups = readFileSync('/proc/self/status', 'utf8').split('\n').find(line => line.startsWith('Groups:'))!
+      .slice('Groups:'.length).trim().split(/\s+/u).filter(id => id !== '').map(Number).sort((a, b) => a - b)
+    const own = { uid: process.getuid!(), gid: process.getgid!(), groups }
+    const ctx = await mountRegistry()
+    await ctx.plugin(LocalSubprocessRuntime, {
+      runAs: { ...own, inherit: [], set: { HOME: '/home/agent', USER: 'agent' }, secretNames: ['DEEPSEEK_API_KEY'] },
+    })
+    const spawn = vi.spyOn(ctx.subprocess, 'spawn')
+    const cwd = directory()
+    await ctx.plugin(McpClient, anonymous({ env: { ENTRY: 'set' }, cwd }))
+    expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ argv: [process.execPath, fixture], identity: undefined }))
+    const result = await executeToolFixture(ctx, {
+      signal: new AbortController().signal, callId: ToolCallId('identity-2'), name: publicToolName('ident', 'environment'), arguments: {},
+    })
+    const report = JSON.parse((result.content[0] as { type: 'text'; text: string }).text) as { uid: number; cwd: string; env: Record<string, string> }
+    expect(report).toEqual({ uid: own.uid, cwd, env: { ENTRY: 'set', HOME: '/home/agent', USER: 'agent' } })
+  }, 30_000)
 })
 
 /** A scripted process handle behind a subprocess service that only spawns. */
-async function fakeService(options: { highWaterMark?: number } = {}) {
+async function fakeService(options: { highWaterMark?: number; childIdentity?: SubprocessChildIdentity } = {}) {
   const stdin = new PassThrough({ highWaterMark: options.highWaterMark ?? 16 * 1024 })
   const stdout = new PassThrough()
   const done = Promise.withResolvers<SubprocessOutcome>()
@@ -100,6 +133,7 @@ async function fakeService(options: { highWaterMark?: number } = {}) {
     waitForExit: () => done.promise.then(() => true, () => true),
   }
   class SpawnOnly extends SubprocessRuntime {
+    override get childIdentity(): SubprocessChildIdentity | undefined { return options.childIdentity }
     override spawn(spec: SubprocessSpawnSpec): SubprocessHandle { specs.push(spec); return handle }
     override resolveExecutable(): Promise<string> { throw new Error('unused') }
     override terminalEnvironment(): Promise<SubprocessTerminalEnvironment> { throw new Error('unused') }
@@ -133,6 +167,15 @@ describe('the subprocess stdio transport', () => {
     expect(() => transport.start()).toThrow('MCP stdio transport already started')
     await transport.send({ jsonrpc: '2.0', method: 'ping' })
     expect(String(service.stdin.read())).toBe('{"jsonrpc":"2.0","method":"ping"}\n')
+  })
+
+  it('starts a server that names no identity through the service only when the service runs children as a run-as identity', async () => {
+    const contained = await fakeService({ childIdentity: { uid: 1001, gid: 1001, groups: [] } })
+    await createTransport(anonymous({ cwd: '/srv' }), contained.ctx).start()
+    expect(contained.specs).toEqual([expect.objectContaining({ argv: [process.execPath, fixture], cwd: '/srv', identity: undefined })])
+    const plain = await fakeService()
+    expect(createTransport(anonymous(), plain.ctx)).toBeInstanceOf(StdioClientTransport)
+    expect(plain.specs).toEqual([])
   })
 
   it('delivers newline-delimited messages across chunks and reports a line that is not a message', async () => {

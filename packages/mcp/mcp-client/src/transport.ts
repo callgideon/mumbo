@@ -1,7 +1,8 @@
 /**
  * Transport factory: creates the appropriate MCP transport based on the
  * plugin's resolved config. Stdio spawns a child process (with credential
- * scrubbing), through the subprocess seam when the config names an identity;
+ * scrubbing), through the subprocess seam when the config names an identity or
+ * the mounted subprocess provider runs children as a run-as identity;
  * Streamable HTTP connects to a URL.
  *
  * @module
@@ -34,8 +35,9 @@ function buildChildEnv(extra: Record<string, string>): Record<string, string> {
 
 /**
  * Newline-delimited JSON-RPC over the stdio of a server started through the subprocess seam as a
- * named identity. The child receives that identity's environment plus the configured `env`, never
- * this process's environment, and none of this process's descriptors: its standard error is discarded.
+ * named identity, or as the provider's default when none is named. The child receives that identity's
+ * environment plus the configured `env`, never this process's environment, and none of this process's
+ * descriptors: its standard error is discarded.
  */
 class SubprocessStdioTransport implements Transport {
   onclose?: () => void
@@ -48,7 +50,7 @@ class SubprocessStdioTransport implements Transport {
   constructor(
     private readonly subprocess: SubprocessRuntime,
     private readonly config: StdioConfig,
-    private readonly identity: string,
+    private readonly identity: string | undefined,
   ) {}
 
   start(): Promise<void> {
@@ -125,16 +127,20 @@ class SubprocessStdioTransport implements Transport {
  * Create an MCP transport from the resolved plugin config.
  *
  * @param config - Resolved plugin config discriminated on `transport`.
- * @param ctx - context whose subprocess service starts a stdio server that names an identity.
+ * @param ctx - context whose subprocess service starts a stdio server that names an identity, and every stdio
+ *   server when that service runs children as a run-as identity.
  * @returns an unstarted MCP transport (stdio or Streamable HTTP).
  * @throws when a stdio config names an identity and no subprocess service is mounted.
  */
 export function createTransport(config: Config, ctx: Context): Transport {
   switch (config.transport) {
     case 'stdio': {
-      if (config.identity !== undefined) {
-        const subprocess = ctx.get('subprocess')
-        if (subprocess === undefined) throw new Error(`mcp-client(${config.serverName}): identity ${JSON.stringify(config.identity)} requires a subprocess service`)
+      const subprocess = ctx.get('subprocess')
+      if (config.identity !== undefined && subprocess === undefined) {
+        throw new Error(`mcp-client(${config.serverName}): identity ${JSON.stringify(config.identity)} requires a subprocess service`)
+      }
+      // Under a run-as provider no stdio server starts as this process: one that names no identity runs as the default.
+      if (subprocess !== undefined && (config.identity !== undefined || subprocess.childIdentity !== undefined)) {
         return new SubprocessStdioTransport(subprocess, config, config.identity)
       }
       return new StdioClientTransport({

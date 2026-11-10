@@ -79,6 +79,8 @@ Settings writes persist through ConfigEditor with revision checks; Loader update
 
 `env` values, `headers` values, `command`, `args`, `cwd`, and `url` accept `${credential:REF}` templates. The manager passes raw strings to mcp-client with template expansion enabled; configuration remains readable to management surfaces, so keep secret values in the credentials provider. Missing values put that instance in `waiting-credentials`; referenced credential updates retry resolution or replace its connection when the resolved values change. Diagnostics and tool failures replace every resolved value with `[redacted]`. See [runtime templates and credentials](../mcp-client/README.md#runtime-templates-and-credentials) for provider requirements and replacement ordering.
 
+A stdio server starts as this process with a scrubbed environment, unless the mounted subprocess provider runs children as a run-as identity, such as `dsh-subprocess-local` with `runAs` in a contained box. Then every stdio server the manager starts runs through that provider as its default identity, with that identity's environment plus `env` ([mcp-client](../mcp-client/README.md#environment-scrubbing-stdio)); no entry can choose another identity or this process. That identity must be able to search the entry's `cwd`, or this process's working directory when `cwd` is empty, or the server fails to start.
+
 ### Registering a server from a plugin
 
 A plugin that integrates an MCP service registers its server instead of writing configuration:
