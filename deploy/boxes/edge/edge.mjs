@@ -180,8 +180,6 @@ export function roleInstructions(cfg, principal) {
   ].join('\n')
 }
 
-/** Exists once a person box has given its first-run welcome, or had sessions before it (DESIGN.md#first-run-welcome). Under
- *  /root/.dsh, so backups carry it with the conversation that holds the welcome. */
 /** Mumbo's own instructions (spec section 17b): the system prompt section @mumbo/assistant gives the Session `mumbo` only. */
 export function assistantInstructions() {
   return [
@@ -192,6 +190,8 @@ export function assistantInstructions() {
   ].join('\n')
 }
 
+/** Exists once a person box has given its first-run welcome, or had sessions before it (DESIGN.md#first-run-welcome). Under
+ *  /root/.dsh, so backups carry it with the conversation that holds the welcome. */
 export const WELCOMED = '/root/.dsh/welcomed'
 /** The first-run welcome (spec section 17a, step 5), added to the person's first prompt in a new box (startScript). */
 export function welcomeInstructions(cfg) {
