@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { chmodSync, mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync, readdirSync, symlinkSync, truncateSync, readlinkSync, lstatSync } from 'node:fs'
+import { chmodSync, mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync, readdirSync, symlinkSync, truncateSync, readlinkSync, lstatSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -108,16 +108,37 @@ test('a backup whose files changed while tar read them is still uploaded; any ot
   assert.match(execFileSync('tar', ['-tzf', `${root}.tgz`], { encoding: 'utf8' }), /root\/\.mumbo-sqlite\/\.dsh\/superagent\/orchestrator\.sqlite\.snap/)
 })
 
-test('Downloads files over 1 GiB stay out of the backup, matched by their literal names', () => {
+test('Downloads: items over 1 GiB stay out, the rest is kept newest first up to 2 GiB, and no file name excludes anything else', () => {
   const { root, db, target } = fixture()
   db.close()
-  const dl = join(root, 'home/browser/Downloads')
-  mkdirSync(dl, { recursive: true })
-  for (const [name, size] of [['disk *.iso', 1025 * 1024 * 1024], ['disk a.iso', 1024 * 1024 * 1024], ['notes.txt', 5]]) { writeFileSync(join(dl, name), ''); truncateSync(join(dl, name), size) }
+  const MiB = 1024 * 1024, now = Date.now() / 1000
+  mkdirSync(join(root, 'root/projects/app'), { recursive: true }); writeFileSync(join(root, 'root/projects/app/main.c'), 'int main;')
+  const dl = join(root, 'home/shared/Downloads'), legacy = join(root, 'home/browser/Downloads')
+  mkdirSync(join(dl, 'root/.dsh'), { recursive: true }); mkdirSync(legacy, { recursive: true })
+  const put = (dir, name, size, ageHours) => { writeFileSync(join(dir, name), ''); truncateSync(join(dir, name), size); utimesSync(join(dir, name), now - ageHours * 3600, now - ageHours * 3600) }
+  // Names that, as exclude patterns, would drop root/ or match other files: a newline, a glob, trailing space, a root-like path.
+  put(dl, 'x\nroot', 1100 * MiB, 0)
+  put(dl, 'y\n.dsh', 5, 0.5)
+  put(dl, 'g*', 1100 * MiB, 0.5)
+  put(dl, 'gz', 5, 0.5)
+  put(dl, 'name ', 5, 0.5)
+  put(dl, 'name', 5, 0.5)
+  put(join(dl, 'root/.dsh'), 's', 5, 0.5)
+  put(dl, 'part.crdownload', 5, 0)
+  put(dl, 'new', 700 * MiB, 1)
+  put(dl, 'mid', 700 * MiB, 2)
+  put(dl, 'old', 700 * MiB, 3)
+  put(legacy, 'legacy.txt', 5, 0.5)
   const b = sh(backupCommand(target, root))
   assert.equal(b.status, 0, b.stderr)
-  const names = execFileSync('tar', ['-tzf', `${root}.tgz`], { encoding: 'utf8' }).split('\n')
-  assert.deepEqual(['disk *.iso', 'disk a.iso', 'notes.txt'].map(n => names.includes(`home/browser/Downloads/${n}`)), [false, true, true])
+  assert.equal(b.stdout, 'downloads left out of the backup: 3 items, 2900 MiB\n')
+  // tar -t prints a newline in a name as a backslash and an n.
+  const names = execFileSync('tar', ['-tzf', `${root}.tgz`], { encoding: 'utf8' }).split('\n').map(n => n.replaceAll('\\n', '\n'))
+  for (const n of ['root/.dsh/superagent/', 'root/projects/app/main.c', 'root/.mumbo-sqlite/.dsh/superagent/orchestrator.sqlite.snap', 'home/shared/', 'home/shared/Downloads/']) assert.ok(names.includes(n), n)
+  const kept = ['y\n.dsh', 'gz', 'name ', 'name', 'root/.dsh/s', 'new', 'mid'].map(n => `home/shared/Downloads/${n}`)
+  const left = ['x\nroot', 'g*', 'old', 'part.crdownload'].map(n => `home/shared/Downloads/${n}`)
+  for (const n of [...kept, 'home/browser/Downloads/legacy.txt']) assert.ok(names.includes(n), JSON.stringify(n))
+  for (const n of left) assert.ok(!names.includes(n), JSON.stringify(n))
 })
 
 test('a backup reads /home/browser without following a planted symlink out of it', () => {

@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -22,19 +22,19 @@ const block = () => `set -eu\nip=127.0.0.1\n${person.slice(at(person, 'if id bro
 const USER = userInfo().username
 /** How the fake Chrome answers the version check that runs before the browser loop. */
 const VERSION = '[ "$1" = --version ] && { echo "Google Chrome 142.0.7444.59 "; exit; }\n'
-const REAL = ['sleep', 'pgrep', 'rm', 'grep', 'head', 'sort', 'tail', 'date', 'mv', 'cat', 'chmod', 'mkdir', 'touch', 'wc', 'nohup', 'install']
+const REAL = ['sleep', 'pgrep', 'rm', 'grep', 'head', 'sort', 'tail', 'date', 'mv', 'cat', 'chmod', 'mkdir', 'touch', 'wc', 'nohup', 'install', 'rmdir']
 
 /** A temporary root: box paths moved under it, a private debugging port, and PATH holding only fakes and REAL tools. */
 function box() {
   const t = mkdtempSync(join(tmpdir(), 'desktop-'))
   const port = String(20000 + Math.floor(Math.random() * 40000))
-  for (const d of ['bin', 'fake', 'home', 'log', 'root', 'outside']) mkdirSync(join(t, d))
+  for (const d of ['bin', 'fake', 'home', 'log', 'root', 'outside', 'shared']) mkdirSync(join(t, d))
   for (const tool of REAL) symlinkSync(execFileSync('sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).trim(), join(t, 'fake', tool))
   const groups = []
   const b = {
     t, port,
     /** Box paths moved under t; `as` is the user that stands in for browser. */
-    local: (text, as = USER) => text.replaceAll('/tmp/', `${t}/log/`).replaceAll('/etc/', `${t}/etc/`).replaceAll('/root/', `${t}/root/`).replaceAll('/usr/local/bin/', `${t}/bin/`).replaceAll('/home/browser/', `${t}/home/`)
+    local: (text, as = USER) => text.replaceAll('/tmp/', `${t}/log/`).replaceAll('/etc/', `${t}/etc/`).replaceAll('/root/', `${t}/root/`).replaceAll('/usr/local/bin/', `${t}/bin/`).replaceAll('/home/browser/', `${t}/home/`).replaceAll('/home/shared', `${t}/shared`)
       .replaceAll('remote-debugging-port=9222', `remote-debugging-port=${port}`).replaceAll('pgrep -f websockify', `pgrep -f ${t}/fake/websockify`).replaceAll('-u browser', `-u ${as}`).replaceAll('"$(id -un)" = browser', `"$(id -un)" = ${as}`),
     fake: (name, body) => { rmSync(join(t, 'fake', name), { force: true }); writeFileSync(join(t, 'fake', name), `#!/bin/sh\n${body}\n`); chmodSync(join(t, 'fake', name), 0o755) },
     /** Runs sh text from a file, as the box runs start.sh, in its own process group, which done() kills with everything it
@@ -63,10 +63,12 @@ function box() {
   return b
 }
 
-test('person start script: XFCE as browser on :1 with bash as its shell, Chrome on the kept profile with CDP on loopback, Downloads made by browser', () => {
+test('person start script: XFCE as browser on :1 with bash as its shell, Chrome on the kept profile with CDP on loopback, the shared Downloads repaired', () => {
   assert.ok(person.includes(`pgrep -f /usr/local/bin/mumbo-desktop >/dev/null || su browser -s /bin/sh -c 'SHELL=/bin/bash DISPLAY=:1 /usr/local/bin/mumbo-desktop >/tmp/desktop.log 2>&1 &'\n`))
   assert.ok(person.includes(`pgrep -f /usr/local/bin/mumbo-browser >/dev/null || su browser -s /bin/sh -c 'DISPLAY=:1 /usr/local/bin/mumbo-browser >/tmp/chrome.log 2>&1 &'\n`))
-  assert.ok(heredoc('/usr/local/bin/mumbo-browser').startsWith('#!/bin/sh\nmkdir -p /home/browser/Downloads 2>/dev/null\n'))
+  assert.ok(person.includes(`\n  if getent group shared >/dev/null 2>&1 && [ ! -L /home/shared ] && [ ! -L /home/shared/Downloads ]; then install -d -o browser -g shared -m 2770 /home/shared/Downloads 2>/dev/null || echo 'shared downloads folder not repaired' >&2; fi\n`))
+  assert.ok(at(person, 'install -d -o browser -g shared') < at(person, "DISPLAY=:1 /usr/local/bin/mumbo-browser"))
+  assert.ok(heredoc('/usr/local/bin/mumbo-browser').startsWith('#!/bin/sh\nif [ -d /home/browser/Downloads ] && [ ! -L /home/browser/Downloads ] && [ -d /home/shared/Downloads ]; then\n'))
   assert.equal(heredoc('/usr/local/bin/google-chrome'), '#!/bin/sh\n[ "$(id -un)" = browser ] || exec "$(command -v google-chrome-stable || echo chromium)" "$@"\nexec "$(command -v google-chrome-stable || echo chromium)" --user-data-dir=/home/browser/profile --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --no-first-run --no-default-browser-check --password-store=basic --start-maximized "$@"\n')
   assert.ok(at(person, 'export XAUTHORITY=/run/x11/auth') < at(person, 'su browser -s /bin/sh -c \'SHELL=/bin/bash DISPLAY=:1 /usr/local/bin/mumbo-desktop'))
   assert.ok(at(person, 'Xvfb :1') < at(person, 'DISPLAY=:1 /usr/local/bin/mumbo-desktop') && at(person, 'DISPLAY=:1 /usr/local/bin/mumbo-browser') < at(person, 'x11vnc -display :1'))
@@ -144,7 +146,7 @@ test('the google-chrome wrapper pins the profile only for browser; for any other
   } finally { b.done() }
 })
 
-test('a re-run starts no second desktop session, browser loop or Chrome, reaches dsh both times, and browser makes Downloads', async () => {
+test('a re-run starts no second desktop session, browser loop or Chrome, and reaches dsh both times', async () => {
   const b = box()
   try {
     b.fake('startxfce4', `echo "start $SHELL" >> ${b.t}/log/xfce; sleep 30`)
@@ -156,7 +158,6 @@ test('a re-run starts no second desktop session, browser loop or Chrome, reaches
     assert.equal(b.count(`${b.t}/bin/mumbo-desktop`), 1)
     assert.equal(b.count(`${b.t}/bin/mumbo-browser`), 1)
     assert.deepEqual([b.lines('xfce'), b.lines('chrome'), b.lines('dsh')], [['start /bin/bash'], ['start'], ['reached', 'reached']])
-    assert.ok(statSync(join(b.t, 'home/Downloads')).isDirectory())
   } finally { b.done() }
 })
 
@@ -183,6 +184,52 @@ test('root\'s part of the desktop block writes nothing under /home/browser, and 
   await run((b) => { symlinkSync(join(b.t, 'outside'), join(b.t, 'home/Downloads')); symlinkSync(join(b.t, 'outside/keep'), join(b.t, 'log/websockify.log')) })
   const file = await run((b) => writeFileSync(join(b.t, 'home/Downloads'), 'a file'))
   assert.deepEqual(file.after, ['Downloads'])
+})
+
+test('root repairs /home/shared/Downloads as browser:shared 2770, never through a symlink, and only where the group exists', async () => {
+  const repairs = async (plant, group = true) => {
+    const b = box()
+    try {
+      for (const name of ['startxfce4', 'google-chrome-stable']) b.fake(name, `${VERSION}sleep 30`)
+      b.fake('su', 'exit 0')
+      b.fake('getent', group ? '[ "$*" = "group shared" ]' : 'exit 2')
+      b.fake('install', `echo "$*" >> ${b.t}/log/install`)
+      plant(b)
+      b.run(b.local(block()))
+      await sleep(700)
+      assert.deepEqual(b.lines('dsh'), ['reached'])
+      return b.lines('install').map(l => l.replaceAll(b.t, 'T'))
+    } finally { b.done() }
+  }
+  assert.deepEqual(await repairs(() => {}), ['-d -o browser -g shared -m 2770 T/shared/Downloads'])
+  assert.deepEqual(await repairs((b) => symlinkSync(join(b.t, 'outside'), join(b.t, 'shared/Downloads'))), [])
+  assert.deepEqual(await repairs((b) => { rmSync(join(b.t, 'shared'), { recursive: true }); symlinkSync(join(b.t, 'outside'), join(b.t, 'shared')) }), [])
+  assert.deepEqual(await repairs(() => {}, false), [])
+})
+
+test('the browser loop moves ~/Downloads into the shared folder as browser, keeping both sides of a name clash and never following a link', () => {
+  const pre = heredoc('/usr/local/bin/mumbo-browser').split('while :; do')[0]
+  const b = box()
+  try {
+    b.fake('google-chrome-stable', 'exit 1')
+    writeFileSync(join(b.t, 'outside/keep'), 'keep')
+    const run = () => { writeFileSync(join(b.t, 'pre.sh'), b.local(pre)); execFileSync('/bin/sh', [join(b.t, 'pre.sh')], { env: { PATH: join(b.t, 'fake') } }) }
+    const old = join(b.t, 'home/Downloads'), shared = join(b.t, 'shared/Downloads')
+    mkdirSync(old); mkdirSync(shared)
+    for (const [n, v] of [['a.pdf', 'a'], ['.hidden', 'h'], ['-dash', 'd'], ['clash', 'old']]) writeFileSync(join(old, n), v)
+    writeFileSync(join(shared, 'clash'), 'new')
+    symlinkSync(join(b.t, 'outside/keep'), join(old, 'link'))
+    run()
+    assert.deepEqual(readdirSync(shared).sort(), ['-dash', '.hidden', 'a.pdf', 'clash', 'link'])
+    assert.deepEqual([readFileSync(join(shared, 'clash'), 'utf8'), readFileSync(join(old, 'clash'), 'utf8'), readdirSync(old)], ['new', 'old', ['clash']])
+    assert.ok(lstatSync(join(shared, 'link')).isSymbolicLink())
+    assert.deepEqual([readdirSync(join(b.t, 'outside')), readFileSync(join(b.t, 'outside/keep'), 'utf8')], [['keep'], 'keep'])
+    rmSync(join(old, 'clash')); run()
+    assert.equal(existsSync(old), false, 'the emptied folder is removed')
+    // A ~/Downloads that is a symlink is left alone.
+    symlinkSync(join(b.t, 'outside'), old); run()
+    assert.deepEqual([readdirSync(join(b.t, 'outside')), lstatSync(old).isSymbolicLink()], [['keep'], true])
+  } finally { b.done() }
 })
 
 test('a profile last used by a newer browser is moved aside before Chrome starts; an older, equal or unreadable one is kept', () => {
@@ -223,6 +270,7 @@ test('template: Google Chrome stable from Google\'s signed amd64 repository and 
   for (const p of ['google-chrome-stable', 'xfce4-session', 'xfwm4', 'xfce4-panel', 'xfdesktop4', 'thunar', 'xfce4-terminal', 'tango-icon-theme', 'librsvg2-common', 'dbus-x11', 'xdotool', 'wmctrl', 'xauth', 'xvfb', 'x11vnc', 'novnc', 'websockify']) assert.ok(packages.includes(p), p)
   for (const p of ['chromium', 'openbox', 'xfce4']) assert.ok(!packages.includes(p), p)
   assert.ok(BOX_STEPS.includes('id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser'))
+  assert.ok(BOX_STEPS.indexOf('id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser') < BOX_STEPS.indexOf('groupadd -f shared && usermod -aG shared browser && chmod 0700 /home/browser && install -d -m 0755 /home/shared && install -d -o browser -g shared -m 2770 /home/shared/Downloads'))
 })
 
 test('template: Chrome\'s managed policy file, byte for byte, read-only to the browser user', () => {
@@ -231,7 +279,7 @@ test('template: Chrome\'s managed policy file, byte for byte, read-only to the b
     const step = BOX_STEPS.find(s => s.includes('/etc/opt/chrome/policies/managed/mumbo.json'))
     execFileSync('sh', ['-c', step.replaceAll('/etc/opt/chrome/', `${t}/etc/opt/chrome/`)])
     const file = join(t, 'etc/opt/chrome/policies/managed/mumbo.json')
-    assert.equal(readFileSync(file, 'utf8'), '{"RestoreOnStartup":1,"DefaultBrowserSettingEnabled":false,"MetricsReportingEnabled":false,"DownloadDirectory":"/home/browser/Downloads"}\n')
+    assert.equal(readFileSync(file, 'utf8'), '{"RestoreOnStartup":1,"DefaultBrowserSettingEnabled":false,"MetricsReportingEnabled":false,"DownloadDirectory":"/home/shared/Downloads"}\n')
     assert.equal(statSync(file).mode & 0o777, 0o644)
     assert.equal(statSync(join(t, 'etc/opt/chrome/policies/managed')).mode & 0o777, 0o755)
   } finally { rmSync(t, { recursive: true, force: true }) }
