@@ -212,10 +212,11 @@ async function pollRepository(ctx: SourceContext, round: Round): Promise<void> {
  * only after a page that was not full, because a later round lists the items beyond a full page. The `app` entry of
  * `started` is when App mode began reading the stream, and older items are ignored. Each Issue or PR received, and each
  * mention in a comment, starts its Thread's read position (`startThread`), so the Thread's poll reads the replies posted
- * before its Ticket subscribed; a mention in a comment starts it when the mention arrived, so an edit of an old comment
- * reads none of the replies before the edit. The agent's own open PR is read so it binds to the Ticket on its branch, as
- * its notification does for a user account, and starts its Thread's read position at its creation until a Ticket
- * subscribes to it.
+ * before its Ticket subscribed. A mention in a comment that is new since the last read starts it at the comment's
+ * creation; an older comment edited to add a mention starts it at the edit, so it reads none of the replies before it.
+ * The agent's own open PR is read so it binds to the Ticket on its branch, as its notification does for a user account,
+ * and starts its Thread's read position at its creation until a Ticket subscribes to it. The ETag is sent only once
+ * every kind has a start, so a 304 never keeps a kind from recording one.
  */
 async function readStream(ctx: SourceContext, round: Round, id: string, path: string, config: GithubConfig): Promise<void> {
   const name = KV.github.stream(id)
@@ -228,7 +229,8 @@ async function readStream(ctx: SourceContext, round: Round, id: string, path: st
   const started: Record<string, string> = Object.fromEntries(kinds.map(kind => [kind, before[kind] ?? round.started]))
   const horizon = Math.floor((Date.parse(round.started) - POLL_HORIZON_MS) / 3_600_000) * 3_600_000
   const since = new Date(Math.max(Date.parse(stored?.since ?? round.started), horizon)).toISOString()
-  const conditional = stored?.etag && stored.since === since ? ['-H', `If-None-Match: ${stored.etag}`] : []
+  // A kind without a start yet needs this round's list to record one, so no 304 may skip it.
+  const conditional = stored?.etag && stored.since === since && kinds.every(kind => kind in before) ? ['-H', `If-None-Match: ${stored.etag}`] : []
   let raw: string
   const listed = `${path}&sort=updated&direction=asc&per_page=${PAGE}&since=${encodeURIComponent(since)}`
   try { raw = await ctx.commands.withSignal(round.signal).api(listed, '--include', ...conditional) }
@@ -286,7 +288,7 @@ async function readStream(ctx: SourceContext, round: Round, id: string, path: st
     const appRule = fresh(at, 'app') && (!!trigger.addressed || subscribed)
     if (!(fresh(at, 'comments') || appRule) || !trigger.text) continue
     const unread = idle(ctx, number)
-    if (await ctx.receive(trigger) === 'stored' && appRule && trigger.addressed) startThread(ctx, number, at!, unread)
+    if (await ctx.receive(trigger) === 'stored' && appRule && trigger.addressed) startThread(ctx, number, created(item.created_at) ? item.created_at! : at!, unread)
   }
   const newest = Math.max(...items.map(item => Date.parse(item.updated_at ?? '')).filter(Number.isFinite))
   const moved = Number.isFinite(newest) ? cursorAt(new Date(newest).toISOString()) : since

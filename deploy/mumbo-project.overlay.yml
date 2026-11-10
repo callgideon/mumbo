@@ -221,8 +221,9 @@
 # Superagent state is backed up with the rest of DSH home. The GitHub Source repository, CLI, Policy allowlist and worker
 # directory are set once in the panel, not here. panelAdmins lists the project owners (lowercased, comma-separated in
 # MUMBO_PANEL_ADMINS); an empty list admits nobody but the box owner. githubApp is the GitHub App bot the agent acts as,
-# from MUMBO_GITHUB_APP_LOGIN (`<slug>[bot]`) and MUMBO_GITHUB_APP_USER_ID; with only one of them set, the plugin fails at
-# load. With neither, the agent CLI must be signed in to a user account.
+# from MUMBO_GITHUB_APP_LOGIN (`<slug>[bot]`) and MUMBO_GITHUB_APP_USER_ID, the bot user's numeric id from
+# `gh api 'users/<slug>[bot]' --jq .id`, not the App ID; with only one of them set, the plugin fails at load. With
+# neither, the agent CLI must be signed in to a user account.
 - id: dsh-superagent
   config:
     stateDir: !!js dshHomePath('superagent')

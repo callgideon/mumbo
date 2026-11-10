@@ -25,7 +25,7 @@ export const Config = s.object({
   // The union wrapper drops the implicit `{}` default of an object schema, so an absent key stays absent.
   githubApp: s.union([s.object({
     login: s.string().pattern(/^[A-Za-z0-9-]+\[bot\]$/).required().description('The App\'s bot login, `<slug>[bot]`.'),
-    userId: s.number().min(1).step(1).required().description('The numeric GitHub user id of the bot.'),
+    userId: s.number().min(1).step(1).required().description('The bot user\'s numeric id, from `gh api \'users/<slug>[bot]\' --jq .id`; not the App ID.'),
   })]).description('Act on GitHub as a GitHub App\'s bot. The agent CLI reaches GitHub with an installation token, which cannot read `/user` or notifications: setup takes the identity from here, and the GitHub Source reads the repository\'s Issues, pull requests and comments instead of notifications. Unset, the CLI is signed in to a user account.'),
 })
 export type DeploymentConfig = ReturnType<typeof Config>

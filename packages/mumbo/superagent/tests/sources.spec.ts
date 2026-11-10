@@ -1277,6 +1277,8 @@ describe('observing the GitHub repository', () => {
     h.store.saveSettings({ ...h.store.settings(), sources: { ...h.store.settings().sources, github: { enabled: true, config } } })
   /** GitHub as the repository's lists and its default branch answer; a request with the ETag of an unchanged list answers 304. */
   interface Answers { issues?: unknown[]; comments?: unknown[]; reviewComments?: unknown[]; branch?: { sha: string; checks: unknown[] };
+    /** The ETag of the current lists; a request that sends it gets 304. */
+    etag?: string
     /** Answers to other paths, such as an Issue, a PR or a Thread's comments. */
     routes?: Record<string, unknown> }
   function repository(h: ReturnType<typeof host>, answers: Answers) {
@@ -1284,9 +1286,10 @@ describe('observing the GitHub repository', () => {
     vi.spyOn(h.commands, 'run').mockImplementation(async (_program, args) => {
       calls.push(args)
       const bare = args[1]!.replace(/^repos\/acme\/widgets\/?/, '').split('?')[0]!
-      const listed = (list: unknown[] | undefined) => `HTTP/2.0 200 OK\r\nETag: "same"\r\n\r\n${JSON.stringify(list ?? [])}`
+      const etag = answers.etag ?? '"same"'
+      const listed = (list: unknown[] | undefined) => `HTTP/2.0 200 OK\r\nETag: ${etag}\r\n\r\n${JSON.stringify(list ?? [])}`
       if (bare === 'notifications') return 'HTTP/2.0 200 OK\r\n\r\n[]'
-      if (args.includes('If-None-Match: "same"')) throw commandError({ stderr: 'gh: HTTP 304', code: 1 })
+      if (args.includes(`If-None-Match: ${etag}`)) throw commandError({ stderr: 'gh: HTTP 304', code: 1 })
       if (bare === 'issues') return listed(answers.issues)
       if (bare === 'issues/comments') return listed(answers.comments)
       if (bare === 'pulls/comments') return listed(answers.reviewComments)
@@ -1668,6 +1671,8 @@ describe('observing the GitHub repository', () => {
   it('reads as a GitHub App a Thread whose old comment was edited to mention the agent from the edit, not from the comment\'s creation', async () => {
     const h = appHost({ app: at(0) })
     observe(h, {})
+    // An earlier read listed the comment, before the edit added the mention.
+    h.store.set('github-stream:comments', { since: at(0), started: { app: at(0) }, read: at(3) })
     const edited = remark(1, 40, '@mumbo-bot please fix the header typo', at(1), at(5))
     const reply = { ...remark(2, 40, 'agreed, and the footer', at(2)), user: { login: 'dave', type: 'User' } }
     const answers: Answers = { comments: [edited], routes: { 'issues/40/comments': [edited, reply] } }
@@ -1679,6 +1684,43 @@ describe('observing the GitHub repository', () => {
     await pollRound(h)
     expect(h.receive.mock.calls.map(([trigger]) => trigger.text)).toEqual([edited.body])
     h.store.close()
+  })
+  it('reads as a GitHub App the reply posted between a new mention and its quick edit, once the Ticket subscribes', async () => {
+    const h = appHost({ app: at(0) })
+    observe(h, {})
+    const ask = remark(1, 7, '@mumbo-bot please fix the header typo', at(1), at(3))
+    const reply = { ...remark(2, 7, 'and the footer has the same typo', at(2)), user: { login: 'bob', type: 'User' } }
+    const answers: Answers = { comments: [reply, ask], routes: { 'issues/7/comments': [ask, reply] } }
+    repository(h, answers)
+    await pollRound(h)
+    answers.comments = []
+    subscribed(h, { source: 'github', id: '7' }, { number: 7, isPr: false, title: 'Issue 7' })
+    h.receive.mockClear()
+    await pollRound(h)
+    expect(h.receive.mock.calls.map(([trigger]) => trigger.text)).toEqual([ask.body, reply.body])
+    h.store.close()
+  })
+  it('takes in as a GitHub App, after a user account\'s stream kept an ETag, a mention of a kind whose switch is off', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const T0 = Date.parse('2026-11-08T10:00:00Z')
+      const t = (seconds: number) => new Date(T0 + seconds * 1000).toISOString()
+      const h = appHost()
+      observe(h, { observeIssues: true })
+      // A user account's quiet issues stream, receiving new Issues and not new PRs, kept the ETag of its last list.
+      h.store.set('github-stream:issues', { since: t(-60), started: { issues: t(-3600) }, etag: '"same"' })
+      const answers: Answers = {}
+      repository(h, answers)
+      vi.setSystemTime(T0)
+      await pollRound(h)
+      // alice opens a PR that mentions the agent, which changes the list.
+      answers.etag = '"changed"'
+      answers.issues = [{ ...issue(9, { user: ALICE, body: '@mumbo-bot please review', created_at: t(30), updated_at: t(30) }), pull_request: { url: 'x' } }]
+      vi.setSystemTime(T0 + 60_000)
+      await pollRound(h)
+      expect(h.receive.mock.calls.map(([trigger]) => [trigger.meta.number, trigger.meta.kind])).toEqual([[9, 'pull']])
+      h.store.close()
+    } finally { vi.useRealTimers() }
   })
   it('steps as a GitHub App past a full page that falls within the cursor\'s five-second overlap', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
