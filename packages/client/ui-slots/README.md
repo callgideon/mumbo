@@ -25,6 +25,8 @@ kind: "package-library"
 
 Compose UI through this package whenever you write a client plugin: register a component into a slot your parent declared, or declare child slots your component renders. The five kinds cover the composition shapes — `single` (one occupant), `list` (ordered entries), `keyed` (dispatch by a key), `chain` (entries elect themselves), and `hoc` (entries nest around the owner's `children`).
 
+A `list` slot may declare `fields` in its `SlotMap` entry: each registration then carries those fields beside `id`, `order`, and `label`, typed by the declaration, and the core stores them uninterpreted as the stored entry's `fields` for the slot's owner to read. Other kinds accept no extra fields.
+
 ### Reusable Component Factories
 
 A designer may choose a Component Factory for a component or assembly they consider reusable, even with one current caller; unrelated parents, separate packages, and additional injection or local slots are not prerequisites. A one-off component need not use a Factory. Declare its complete type in `SlotFactoryMap`, install the definition with `ctx.slots.registerFactory()`, render occurrences through the injected `renderFactorySlot()`, and select each declared local Component through the call's `slots` option. The definition reads that choice through `useFactorySlot(name, fallback)`.
