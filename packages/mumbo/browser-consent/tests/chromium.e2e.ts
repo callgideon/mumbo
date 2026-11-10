@@ -11,6 +11,8 @@ import { bootComposition, consentRecords, toolResults } from './harness.ts'
 import type { ScriptStep } from './harness.ts'
 
 const skip = process.env.DSH_BROWSER_EXECUTABLE === undefined
+/** What the patched snapshot shows in place of a secret input's value. */
+const MASK = '•'.repeat(4)
 
 /**
  * Serve two loopback origins, `127.0.0.1` and `localhost`, attach the composition to a disposable headless Chromium,
@@ -18,7 +20,7 @@ const skip = process.env.DSH_BROWSER_EXECUTABLE === undefined
  * @param page - HTML for a request path, given the server port.
  * @param turn - consent's `deniedUrls`, `allowedSites`, the model's script, and the person's answers, given the origins.
  * @returns each tool result's text, the approval reasons asked, the Session events, the hosts that received a POST,
- *   and the names of the files Playwright MCP left in its output directory with their contents.
+ *   and the files Playwright MCP left in its output directory, by name.
  */
 async function runTurn(page: (port: number, path: string) => string, turn: (allowed: string, other: string) => {
   deniedUrls: string[]
@@ -50,7 +52,8 @@ async function runTurn(page: (port: number, path: string) => string, turn: (allo
     booted.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Go.' }], source: { kind: 'user' } }))
     await booted.agent.whenIdle()
     const output = join(root, '.playwright-mcp')
-    const files = await Promise.all((await readdir(output).catch(() => [])).map(async name => [name, await readFile(join(output, name), 'utf8')] as const))
+    const names = await readdir(output).catch(() => [])
+    const files = new Map(await Promise.all(names.map(async name => [name, await readFile(join(output, name))] as const)))
     const results = toolResults(booted.events).map(content => content.map(block => block.type === 'text' ? block.text : `[${block.type}]`).join('\n'))
     return { results, asked: booted.asked, events: booted.events, sent, files, port }
   } finally {
@@ -120,17 +123,88 @@ it.skipIf(skip)('withholds what a denied page shows, in the result and in the fi
   expect(asked).toEqual([])
   expect(consentRecords(events)).toEqual([{ callId: 'call-3', tool: 'browser_click', site: `http://127.0.0.1:${String(port)}`, grant: 'site', outcome: 'failed' }])
   // Playwright wrote the allowed pages' snapshots; the denied page's snapshot is deleted.
-  expect(files.length).toBeGreaterThan(0)
-  expect(files.filter(([, content]) => content.includes('correct-horse') || content.includes('Saved passwords'))).toEqual([])
+  expect(files.size).toBeGreaterThan(0)
+  expect([...files].filter(([, content]) => content.includes('correct-horse') || content.includes('Saved passwords'))).toEqual([])
 })
 
-it.skipIf(skip)('shows a filled password field\'s value in a snapshot, because the pinned Playwright MCP does not mask it', { timeout: 120_000 }, async () => {
-  // Chromium's password manager fills the field the same way once a click or key press on the page commits the fill.
-  const page = () => '<!doctype html><title>Sign in</title><form><label>Password <input id="pw" type="password"></label></form>'
-    + '<script>document.getElementById("pw").value = "hunter2-autofilled"</script>'
-  const { results } = await runTurn(page, allowed => ({
-    deniedUrls: [], allowedSites: [allowed],
-    script: [{ name: 'browser_navigate', args: { url: `${allowed}/` } }, { name: 'browser_snapshot', args: {} }],
+it.skipIf(skip)('masks password, one-time-code, and payment-card inputs in snapshots and their files; the :autofill check is best-effort', { timeout: 120_000 }, async () => {
+  // Each secret field gets a distinct value; none may appear in a result or a file Playwright wrote.
+  const secrets: Record<string, string> = {
+    pw: 'pw-secret-1', cur: 'cur-secret-2', fresh: 'new-secret-3', otp: 'otp-secret-4', ccn: '4111111111111111', csc: '737', exp: '11/29', holder: 'Card Holder Name', code: 'otp-secret-5',
+  }
+  const page = () => '<!doctype html><title>Checkout</title><form>'
+    + '<label>Password <input id="pw" type="password"></label><label>Empty password <input id="blank" type="password"></label>'
+    + '<label>Current <input id="cur" autocomplete="current-password"></label><label>New <input id="fresh" autocomplete="new-password"></label>'
+    + '<label>Code <input id="otp" autocomplete="one-time-code"></label><label>Card <input id="ccn" autocomplete="cc-number"></label>'
+    + '<label>CVC <input id="csc" autocomplete="cc-csc"></label><label>Expiry <input id="exp" autocomplete="section-pay billing cc-exp"></label>'
+    + '<label>Holder <input id="holder" autocomplete="CC-NAME"></label><label>Note <textarea id="code" autocomplete="one-time-code"></textarea></label>'
+    + '<label>Email <input id="email" autocomplete="email"></label><label>Lookalike <input id="near" autocomplete="x-cc-number"></label></form>'
+    + `<script>Object.entries(${JSON.stringify({ ...secrets, email: 'person@example.com', near: 'near-visible-6' })}).forEach(([id, value]) => { document.getElementById(id).value = value })</script>`
+  const { results, files } = await runTurn(page, allowed => ({
+    deniedUrls: [], allowedSites: [allowed], answers: ['allowed-once'],
+    script: [
+      { name: 'browser_navigate', args: { url: `${allowed}/` } },
+      { name: 'browser_snapshot', args: {} },
+      // :autofill is best-effort: a test cannot make Chromium autofill, so it only shows both pseudo-classes parse here.
+      { name: 'browser_evaluate', args: { function: '() => [":autofill", ":-webkit-autofill"].map(pseudo => { try { document.body.matches(pseudo); return "parses" } catch { return "throws" } })' } },
+    ],
   }))
-  expect(results[1]).toMatch(/^ *- textbox "Password" \[ref=e\d+\]: hunter2-autofilled$/mu)
+  const masked = ['Password', 'Empty password', 'Current', 'New', 'Code', 'Card', 'CVC', 'Expiry', 'Holder', 'Note']
+  for (const name of masked) expect(results[1]).toMatch(new RegExp(`^ *- textbox "${name}" \\[ref=e\\d+\\]: ${MASK}$`, 'mu'))
+  expect(results[1]).toMatch(/^ *- textbox "Email" \[ref=e\d+\]: person@example\.com$/mu)
+  expect(results[1]).toMatch(/^ *- textbox "Lookalike" \[ref=e\d+\]: near-visible-6$/mu)
+  expect(results[2]).toMatch(/\[\s*"parses",\s*"parses"\s*\]/u)
+  const snapshotFiles = [...files].filter(([name]) => name.endsWith('.yml')).map(([, content]) => content.toString('utf8'))
+  expect(snapshotFiles.length).toBeGreaterThan(0)
+  expect(snapshotFiles.join('\n')).toMatch(new RegExp(`^ *- textbox "Card" \\[ref=e\\d+\\]: ${MASK}$`, 'mu'))
+  for (const secret of Object.values(secrets)) {
+    expect(results.join('\n')).not.toContain(secret)
+    expect(snapshotFiles.join('\n')).not.toContain(secret)
+  }
+})
+
+it.skipIf(skip)('shows a password field as dots in screenshots; revealing it takes a click or hover, which asks unless the site is allowed', { timeout: 120_000 }, async () => {
+  // Identical element screenshots of two equal-length passwords mean the glyphs are not drawn; text fields are the control.
+  const page = () => '<!doctype html><title>Sign in</title><style>input { caret-color: transparent; outline: none; font: 16px monospace; width: 220px }</style>'
+    + '<input id="pa" type="password" autocomplete="current-password"><input id="pb" type="password"><input id="pc" type="password">'
+    + '<input id="ta"><input id="tb"><button id="show" onclick="pa.type = \'text\'" onmouseover="pa.type = \'text\'">Show password</button>'
+    + '<script>pa.value = ta.value = "AAAAAAAA"; pb.value = tb.value = "WWWWWWWW"</script>'
+  const shot = (id: string, filename: string): ScriptStep => ({ name: 'browser_take_screenshot', args: { element: id, target: `#${id}`, filename: `.playwright-mcp/${filename}` } })
+  const { results, asked, files } = await runTurn(page, (allowed, other) => ({
+    deniedUrls: [], allowedSites: [allowed], answers: ['allowed-once', 'rejected', 'rejected'],
+    script: [
+      { name: 'browser_navigate', args: { url: `${other}/` } },
+      shot('pa', 'pa.png'), shot('pb', 'pb.png'), shot('ta', 'ta.png'), shot('tb', 'tb.png'),
+      { name: 'browser_type', args: { element: 'third password', target: '#pc', text: 'WWWWWWWW' } },
+      shot('pc', 'pc.png'),
+      { name: 'browser_snapshot', args: {} },
+      { name: 'browser_hover', args: { element: 'Show password', target: '#show' } },
+      { name: 'browser_click', args: { element: 'Show password', target: '#show' } },
+      shot('pa', 'pa-after-reads.png'),
+      // On an allowed site the same click runs without asking.
+      { name: 'browser_navigate', args: { url: `${allowed}/` } },
+      { name: 'browser_click', args: { element: 'Show password', target: '#show' } },
+      shot('pa', 'pa-revealed.png'),
+      { name: 'browser_snapshot', args: {} },
+    ],
+  }))
+  const png = (name: string) => files.get(name)!
+  expect(png('pa.png').equals(png('pb.png'))).toBe(true)
+  expect(png('pa.png').equals(png('pc.png'))).toBe(true)
+  expect(png('ta.png').equals(png('tb.png'))).toBe(false)
+  expect(png('pa-after-reads.png').equals(png('pa.png'))).toBe(true)
+  expect(png('pa-revealed.png').equals(png('pa.png'))).toBe(false)
+  expect(png('pa-revealed.png').equals(png('ta.png'))).toBe(true)
+  expect(asked.map(reason => reason.split('. Arguments')[0])).toEqual([
+    expect.stringMatching(/^Browser write: browser_type on http:\/\/localhost:\d+$/u),
+    expect.stringMatching(/^Browser write: browser_hover on http:\/\/localhost:\d+$/u),
+    expect.stringMatching(/^Browser write: browser_click on http:\/\/localhost:\d+$/u),
+  ])
+  // The snapshot is a read and masks all three password fields; the declined hover and click leave the field a password field.
+  const maskedFields = (text: string | undefined) => text?.match(new RegExp(`^ *- textbox (\\[active\\] )?\\[ref=(f\\d+)?e\\d+\\]: ${MASK}$`, 'gmu'))
+  expect(maskedFields(results[7])).toHaveLength(3)
+  // Revealed by an allowed click, the field is text: the screenshot shows the password, and the snapshot still masks it
+  // by its autocomplete token.
+  expect(maskedFields(results[14])).toHaveLength(3)
+  expect(results[14]).toMatch(/^ *- textbox \[ref=(f\d+)?e\d+\]: AAAAAAAA$/mu)
 })

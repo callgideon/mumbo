@@ -13,6 +13,7 @@ kind: "package-reference"
 
 - [Configuration](#configuration)
 - [Denied pages](#denied-pages)
+- [Secret inputs](#secret-inputs)
 - [Decisions](#decisions)
 - [Computer use](#computer-use)
 - [Provider ownership](#provider-ownership)
@@ -53,6 +54,13 @@ A denied page is refused, never asked about, because a question can be approved 
 A URL is matched after WHATWG URL parsing, which lowercases the scheme and host, converts an IDN host to punycode, decodes percent-encoded host characters, drops userinfo and the default port, strips surrounding spaces, tabs, and newlines, and reads backslashes as slashes; trailing dots of the host are then ignored. So `HTTPS://Accounts.Google.com.`, `https://accounts.google.com:443/`, and `https://x@accounts.google.com/` all match `https://accounts.google.com`. A scheme entry matches every URL with that scheme. An origin entry matches its exact host and port under both `http:` and `https:`, because Chromium upgrades HSTS hosts such as Google's to `https:` before any request; it does not match subdomains. `view-source:`, `blob:`, and `filesystem:` URLs are denied by their own scheme or by the URL they wrap, so `view-source:https://accounts.google.com/` is denied even without `view-source:` in the list. `about:blank` is never denied: a new tab starts there, and calls on it are decided as on any page. Every other `about:` URL counts as a `chrome:` URL, because Chromium serves `about:<page>` as `chrome://<page>`. A URL that does not parse counts as denied. `data:` and `javascript:` URLs are not in the box list; navigation to them still asks.
 
 The refusal names the tool and what denied it, `a <scheme> page` or `a page on <origin>`, never the full URL. A write whose result is withheld after the call still ran; its audit record has outcome `failed`.
+
+<a id="secret-inputs"></a>
+## Secret inputs
+
+The repository [patches](../../../patches/playwright-core@1.63.0-alpha-2026-08-31.patch) the `playwright-core` that the pinned Playwright MCP server runs, so a page snapshot, inline or in a `.playwright-mcp` file, shows `••••` in place of an input's or text area's value when any of these holds: the input is `type="password"`; it matches `:autofill` or `:-webkit-autofill`; or its `autocomplete` attribute has a `current-password`, `new-password`, `one-time-code`, or `cc-` token, matched by token and case-insensitively. The mask is fixed, so it reveals neither the value's length nor whether the field is empty. The `:autofill` check is best effort: an unsupported pseudo-class is skipped, and the tests cannot make Chromium autofill. pnpm applies the patch at install, and the install fails when the patch does not apply or when no installed `playwright-core` has its version, so updating `@playwright/mcp` requires re-creating the patch and rerunning the Chromium tests; upstreaming the change to Playwright retires the patch.
+
+Screenshots show a password field as dots, because Chromium draws it so. Revealing it takes the page's own show-password control, a click or hover that asks on a site the person has not allowed; reads do not dispatch input to the page. On an `allowedSites` origin that click runs without asking, and a later screenshot shows the password, although the snapshot still masks a field whose `autocomplete` names a password.
 
 <a id="decisions"></a>
 ## Decisions
@@ -150,7 +158,7 @@ Append-only. The result follows the Session's existing history like any tool res
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **A snapshot shows a filled password field's value** — the pinned Playwright MCP renders every text input's value in a snapshot, password inputs included, and writes action snapshots to `.playwright-mcp/` in the Session's working directory. Once a click or key press on a page commits Chromium's autofill, a snapshot of an allowed or unlisted page shows the saved password in clear text, without asking. Masking needs a change in Playwright's snapshot code (`toAriaNode` in `playwright-core`); the Chromium end-to-end test pins the current behavior.
+- **Masking covers input values only** — a revealed password, as a screenshot shows it after a show-password click on an allowed site; a select's options, such as a card's expiry month; an accessible name that a page builds from an embedded input's value; and text the page itself renders all pass unmasked, as does a text input that carries no secret type, token, or autofill state. Masking depends on a dependency patch keyed to one `playwright-core` version.
 - **Not a security boundary in a box** — the plugin gates the model's browser and desktop tools only. In a box the model also has a root shell in Full access with no per-command ask, so it can reach Chromium's debugging port at `127.0.0.1:9222` directly, for example with `curl` or `playwright-core`, and read the browser profile directory. Consent becomes a boundary only once the browser runs outside the reach of the dsh user, which is a platform decision.
 - **The tab is read around the call, not during it** — a page that navigates itself between the before-listing and a write runs the write on its new origin, and a result whose page the person leaves between the call and the after-listing passes unless the result's own `- Page URL:` line names the denied page. A click inside a cross-origin frame counts as the top-level page's site, and a denied page in a frame of an allowed page is not detected.
 - **Other tabs' titles and URLs are visible** — `browser_tabs` lists every tab's title and URL, including a denied page open in a tab that is not current.

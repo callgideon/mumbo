@@ -57,6 +57,8 @@ When configuring the system prompt's `toolOrder` for the whole process, leave br
 
 The provider resolves its pinned npm entry and starts it under the current Node executable. A temporary protocol probe may precede the serving process. The [shared runtime](../browser-use-runtime/README.md) owns awaited Agent initialization, per-Session serialization, and cleanup; the [MCP client](../../mcp/mcp-client/README.md) owns transport, discovery, and result projection.
 
+The `playwright-core` version that the pinned server runs carries a repository [patch](../../../patches/playwright-core@1.63.0-alpha-2026-08-31.patch): an accessibility snapshot shows a fixed mask in place of the value of a password, one-time-code, payment-card, or autofilled input; [browser consent](../../mumbo/browser-consent/README.md#secret-inputs) documents the rule. pnpm applies it at install and fails the install when it does not apply or when no installed `playwright-core` has its version.
+
 Browser state survives turns while its live Session remains attached. The MCP server starts in the Session's validated current working directory and retains that launch directory after later Session directory changes. Disposal waits for server shutdown before releasing resources. Resume after reload starts fresh browser runtime state; stored conversation history does not restore cookies or pages.
 
 </details>
@@ -101,6 +103,7 @@ The integration retains the pinned server's browser and tool restrictions.
 - The shared resource-server inventory can show inherited server names; it does not grant access to another Session's browser.
 - Cancellation does not undo navigation, clicks, or other actions already delivered to the browser.
 - Tool schemas follow the pinned experimental dependency and carry no DSH stability promise.
+- Updating `@playwright/mcp` changes the `playwright-core` it runs, so the masking patch must be re-created for the new version and re-checked with the browser-consent Chromium tests, or retired once Playwright masks these values itself.
 
 <a id="dev-note"></a>
 ### Dev Note
