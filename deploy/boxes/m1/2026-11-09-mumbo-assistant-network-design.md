@@ -613,8 +613,10 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
 
 ### Mumbo, the always-present assistant
 
-**What the person sees.**
-- One Session called **Mumbo**, pinned at the top of the sidebar, in every person's box.
+**What the person sees** **[founder, 2026-11-10, after B17 went live: "a personal assistant dedicated chat above 'Plugins'", not a chat within projects]**.
+- **Mumbo is its own entry in the sidebar's navigation band, above Plugins** (B29): its icon and "Mumbo", in every person's box.
+  - It opens the Mumbo Session directly, and is highlighted while that Session is on screen.
+  - Mumbo does not appear in the Workspace and Session lists. It is not a project chat, and it is not pinned there.
 - Opening the app with no Session selected opens Mumbo, on the phone too.
 - It is the place to dump things, ask for status and come back to.
 - Other chats remain for side work.
@@ -637,7 +639,7 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
 - **Host, at start:**
   - resolve the Session `mumbo`, a fixed id the edge and other plugins can name;
   - if it is not found, create it in the Workspace of the person's files (`/root/projects`) with the deployment's default preset, and title it `Mumbo`;
-  - unarchive it if it is archived, and pin it if it isn't pinned;
+  - unarchive it if it is archived. From B29 it isn't pinned: the navigation entry replaces the pin;
   - one ensure runs at a time.
   - The person may rename it; the plugin titles it only when it creates it.
 - **Its own instructions** come from a system prompt section added on `agent/created` for this Session only. The text is the plugin's `instructions` config, which the edge writes as it writes `roleInstructions` today. In summary:
@@ -650,7 +652,25 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
 - **Client:**
   - on first load, if no Session is open, open `mumbo` with `ctx.uiWorkspace.openSession`;
   - never take over a Session the person chose.
-  - Pinning alone puts it first in the sidebar, so it needs no new sidebar slot.
+- **B29, Mumbo in the navigation band. Two small harness additions, because no slot does this today:**
+  - **(a) `ui-sidebar`: a panel-list entry may name a Session.**
+    - Today every `sidebar.panellist` row calls `selectPanel(id)` and needs a main panel.
+    - An entry registered with `session: <SessionId>` instead opens that Session (`uiWorkspace.openSession`) from its row and from the More menu. It is highlighted while that Session is the main view and no panel is selected.
+    - Like Plugins, it is fixed: it can't be unpinned into More.
+    - `@mumbo/assistant`'s client registers the entry `mumbo` with order −10, below Plugins' 0, so it sits first in the band, with label "Mumbo" from its own locale namespace.
+    - Its icon is an existing shared icon until designers approve a Mumbo glyph (repository rule on official artwork).
+  - **(b) `ui-workspace`: a plugin may hide a Session from the Workspace browser's grouped and flat lists.** It registers through a registration that returns its disposer.
+    - Search still finds it, so something said in Mumbo can be found.
+    - `@mumbo/assistant` hides `mumbo`.
+  - **The B17 Host part stays:** the fixed id, ensure, title, unarchive, the archive veto and the prompt section. It no longer pins Mumbo, and unpins it once if a B17 box pinned it.
+  - The first-load opening of Mumbo stays.
+  - Each addition comes with its README contract line and tests, and the client UI snapshot or GIF the repository requires for a user-visible change.
+  - **Acceptance:**
+    - the band shows Mumbo above Plugins in the wide sidebar and the rail;
+    - a click opens the Mumbo chat, and the row is highlighted;
+    - Mumbo is absent from every Workspace group and the flat list;
+    - on a phone, the drawer shows the same row;
+    - a project box shows no Mumbo row.
 - **Never a blank row, a small harness change.**
   - Today the Web treats a Session with no turns as the Workspace's temporary blank row. A fresh Mumbo would be hidden from the pinned group until its first message, and "New Session" would land in it.
   - Change: a Session that is pinned, or whose title was set explicitly (a user-sourced `session/title`), is never treated as blank.
@@ -935,6 +955,7 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
 | **B17** | mumbo-impl | `@mumbo/assistant`: the Mumbo Session (ensure, title, pin, unarchive, its prompt section, opening it on first load), the harness archive guard, and the person-box overlay row with `instructions` in the edge start script. Tests: the acceptance above, a real-composition test, snapshots | — |
 | **B18** | mumbo-impl | Desktop and Chrome, edge and template: XFCE; Google Chrome with the policy file and profile kept; the restart loop; Downloads; backups of `/home/browser` without caches; the `roleInstructions` line. Measure before and after on the founder's box. Rollback is the previous template | — |
 | **B19** | mumbo-impl | The streaming stack: KasmVNC 1.5.2 or later, version and checksum pinned, in place of Xvfb, x11vnc, websockify and noVNC at the same `/desktop/` path. 30 fps, 2 encoder threads, a text-only clipboard with limits, screen size capped at 1600×900, its own login and TLS off behind the edge. Then measure keypress-to-glyph (camera), scroll fps and idle CPU, run the Selkies 2.x bake-off, and make the vCPU decision | B18 (after slice 2) |
+| **B29** (urgent: the founder's first impression) | mumbo-impl | Mumbo as its own navigation entry above Plugins: the `ui-sidebar` Session-entry option, the `ui-workspace` hide-a-Session registration, and `@mumbo/assistant`'s client registering both. It stops pinning. Tests, README lines and the UI snapshot or GIF | B17 |
 | **B28** | mumbo-impl | Take over and Hand back in the Browser tab: browser-consent drops its CDP connection and refuses browser and computer-use tools while the person has taken over. The first Google sign-in uses it | B20, B25 |
 | **B20** | mumbo-impl | `box-browser` and `box-desktop` in `@mumbo/box-links`, with the owner-only Chrome-to-front call; the person overlay drops the stock Web Browser tab. Works with today's noVNC and B19's stack alike | — |
 | **B21** | mumbo-impl | Edge, by region (section 17c) | R6 |
