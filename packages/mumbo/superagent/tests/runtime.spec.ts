@@ -143,7 +143,7 @@ beforeEach(async () => {
   directory = mkdtempSync(join(tmpdir(), 'orchestrator-runtime-'))
   vi.spyOn(Commands.prototype, 'gh').mockImplementation(async args => args[1] === 'user' ? { login: 'agent-bot' } : args[1]?.includes('/pulls/') ? { state: 'open', user: { login: 'agent-bot' }, html_url: 'https://github.com/acme/widgets/pull/' + args[1].split('/').at(-1), head: { ref: `agent/${String(runtime.store.tickets.list()[0]?.execution?.name)}`, sha: 'head-1', repo: { full_name: 'acme/widgets' } } } : { default_branch: 'master', permissions: { push: true } })
   vi.spyOn(Commands.prototype, 'lark').mockResolvedValue({ users: [{ member_id: MEMBER, name: 'Alice' }], has_more: false })
-  vi.spyOn(Commands.prototype, 'run').mockResolvedValue('{"ok":true,"data":{}}')
+  vi.spyOn(Commands.prototype, 'run').mockImplementation(async (_program, args) => args.join(' ') === 'api user' ? '{"login":"agent-bot","id":7}' : '{"ok":true,"data":{}}')
   restarts = vi.fn()
   answers = {
     [`git -C ${directory} rev-parse --show-toplevel`]: `${directory}\n`,
@@ -1219,6 +1219,20 @@ it('gives the orchestrator\'s own CLI calls its gh configuration directory, whic
   expect(next.setup.commandEnvironment.GH_CONFIG_DIR).toBe('/srv/orchestrator-gh')
   expect(process.env.GH_CONFIG_DIR).not.toBe('/srv/orchestrator-gh')
   expect(subprocess.spawn.mock.calls.filter(([spec]) => JSON.stringify(spec).includes('/srv/orchestrator-gh'))).toEqual([])
+})
+
+it('under run-as reads the agent\'s login with the orchestrator\'s own gh, its configuration directory, in /, whatever the worker answers', async () => {
+  answers[`${AGENT()} api user`] = '{"login":"maintainer","id":42}'
+  // The orchestrator's gh: signed in to the agent's account only with its own configuration directory, in /.
+  writeFileSync(AGENT(), '#!/bin/sh\n[ "$*" = "api user" ] && [ "$GH_CONFIG_DIR" = /srv/orchestrator-gh ] && [ "$(pwd -P)" = / ] && echo \'{"login":"agent-bot","id":7}\'\n')
+  vi.spyOn(Commands.prototype, 'run').mockRestore()
+  const workerDirectory = join(directory, 'worker')
+  mkdirSync(workerDirectory)
+  answers[HELPERS] = `file:${workerGitConfig(workerDirectory)}\0${credentialHelper(AGENT())}\0`
+  const next = await restart({ runAs: true, workerDirectory, ghConfigDirectory: '/srv/orchestrator-gh' })
+  await next.ready
+  expect(next.setupProblem).toBeUndefined()
+  expect(next.deployment.github).toMatchObject({ login: 'agent-bot', noreply: '7+agent-bot@users.noreply.github.com' })
 })
 
 it('starts the main Session under run-as in the worker directory, where a worker can enter but plants no instructions, and in the state directory otherwise', async () => {

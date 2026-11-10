@@ -75,8 +75,9 @@
     groupReadable: true
 # Ticket directories go in the ticket work directory above, created as agent. The worker shims and git configuration live in
 # /var/lib/mumbo/superagent (root:agent 2750, worker-bin 2750, shims 0750, worker-gitconfig 0640), which agent reads and
-# runs but cannot change, and the orchestrator's own gh reads its configuration from root's /root/.config/gh (0700); the
-# plugin refuses both at load unless they are root's. The rest restates mumbo-project.overlay.yml, which the gate checks.
+# runs but cannot change, and the orchestrator's own gh reads its configuration from root's /root/.config/gh (0700),
+# signed in to the agent's account, where setup reads the agent's login; the plugin refuses both at load unless they are
+# root's. The rest restates mumbo-project.overlay.yml, which the gate checks.
 - id: dsh-superagent
   config:
     stateDir: !!js dshHomePath('superagent')

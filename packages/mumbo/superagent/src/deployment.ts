@@ -16,7 +16,7 @@ export const Config = s.object({
   stateDir: absolute('Directory for the database, locks and, unless `workerDirectory` names another, the worker shims and the agent\'s git configuration.').required(),
   workDirectory: absolute('Directory that holds the ticket directories when the Execution settings name none; defaults to `<stateDir>/work`. Under a run-as subprocess provider the worker user must be able to write it.'),
   workerDirectory: absolute('Directory for the worker shims (`worker-bin`) and the agent\'s git configuration (`worker-gitconfig`), which workers run and read and the orchestrator reads too; defaults to `stateDir`. Required under a run-as subprocess provider, where it, every ancestor and everything in it must be owned by root and writable by no other user; give the worker\'s group read and search access, such as `root:agent` mode `2750`.'),
-  ghConfigDirectory: absolute('`GH_CONFIG_DIR` of the orchestrator\'s own GitHub CLI calls; unset, the CLI uses its own default. Required under a run-as subprocess provider, where it, every ancestor and everything in it must be owned by root and writable by no other user, because a gh alias runs commands.'),
+  ghConfigDirectory: absolute('`GH_CONFIG_DIR` of the orchestrator\'s own GitHub CLI calls; unset, the CLI uses its own default. Required under a run-as subprocess provider, where setup reads the agent\'s GitHub login through it, so it must be signed in to the agent\'s account, and where it, every ancestor and everything in it must be owned by root and writable by no other user, because a gh alias runs commands.'),
   promptMaxChars: s.number().min(LIMITS.promptMaxChars.min).max(LIMITS.promptMaxChars.max).step(1).default(100000)
     .description('Largest saved prompt configuration, in characters.').volatile(),
   admissionContextMaxPages: s.number().min(LIMITS.admissionContextMaxPages.min).max(LIMITS.admissionContextMaxPages.max).step(1).default(10)
@@ -131,10 +131,19 @@ function parsed<T>(schema: z.ZodType<T>, text: string): T | undefined {
 /**
  * Verify the agent's GitHub CLI identity and push access to the configured repository.
  * With `machine.githubApp` the identity is the App's bot and `/user` is not read; an installation token does not report
- * `permissions`, so only a reported read-only access refuses. Under run-as the CLI is kept by the real path checked, and
- * GitHub's name for the repository, which the worker reports, must equal the configured one but for case.
+ * `permissions`, so only a reported read-only access refuses. Under run-as the CLI is kept by the real path checked,
+ * GitHub's name for the repository, which the worker reports, must equal the configured one but for case, and `/user` is
+ * read through `orchestrator`, because the worker answers `probe` through a gh configuration it can write.
+ * @param machine - the machine settings.
+ * @param github - the GitHub Source's configuration.
+ * @param probe - runs a command as worker shells do.
+ * @param orchestrator - runs a command as the orchestrator's own CLI calls do: as this process's user, in `/`, with its
+ *   `GH_CONFIG_DIR`.
+ * @param path - the `PATH` the agent CLI is looked up on.
+ * @returns the deployment.
+ * @throws SetupError naming what setup needs.
  */
-export async function resolveDeployment(machine: Machine, github: unknown, probe: Probe, path = process.env.PATH ?? ''): Promise<Deployment> {
+export async function resolveDeployment(machine: Machine, github: unknown, probe: Probe, orchestrator: Probe, path = process.env.PATH ?? ''): Promise<Deployment> {
   const { workerDirectory, githubApp } = machine
   const accounts = GithubAccountsSchema.parse(github ?? {})
   const remote = accounts.repository
@@ -145,8 +154,11 @@ export async function resolveDeployment(machine: Machine, github: unknown, probe
   // The orchestrator runs this CLI as root; under run-as, a CLI the worker could change would run the worker's code as root.
   // Every caller then runs the real path checked here, so a link on the way that the worker repoints later changes nothing.
   if (machine.runAs) try { cli = assertOwnedByRoot(cli, 'agent GitHub CLI') } catch (error) { throw new SetupError('agentCliUnsafe', { cli, output: reason(error) }) }
+  // The login decides which GitHub activity root takes for the agent's own: what intake skips and which pull requests a
+  // worker may claim. Under run-as no answer the worker can forge may name it.
+  const user = machine.runAs ? orchestrator : probe
   const agent = githubApp ? { login: githubApp.login, id: githubApp.userId }
-    : parsed(GithubUser, await probe([cli, 'api', 'user']).catch((error: unknown) => { throw new SetupError('agentCliSignedOut', { output: reason(error) }) }))
+    : parsed(GithubUser, await user([cli, 'api', 'user']).catch((error: unknown) => { throw new SetupError('agentCliSignedOut', { output: reason(error) }) }))
   if (!agent) throw new SetupError('agentCliNoAccount')
   // Use the canonical repository name returned by GitHub so renamed repositories match incoming notifications.
   const access = parsed(RepositoryAccess, await probe([cli, 'api', `repos/${remote}`, '--jq', '{name: .full_name, push: .permissions.push}']).catch((error: unknown) => {

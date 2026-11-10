@@ -117,12 +117,12 @@ describe('under a run-as subprocess provider', () => {
     const cli = gh(join(dir, 'bin', 'gh-shared'), 'Agent-Bot')
     chmodSync(cli, 0o775)
     const repository = 'acme/widgets'
-    await expect(resolveDeployment({ ...machine(), runAs: true }, { repository, cli }, probe, path))
+    await expect(resolveDeployment({ ...machine(), runAs: true }, { repository, cli }, probe, probe, path))
       .rejects.toEqual(setupError('github', 'agentCliUnsafe', { cli, output: expect.stringContaining(`${cli} is writable by its group or other users`) }))
     // Without run-as the operator's own CLI is not checked.
-    await expect(resolveDeployment(machine(), { repository, cli }, probe, path)).resolves.toMatchObject({ github: { cli } })
+    await expect(resolveDeployment(machine(), { repository, cli }, probe, probe, path)).resolves.toMatchObject({ github: { cli } })
     chmodSync(cli, 0o755)
-    await expect(resolveDeployment({ ...machine(), runAs: true }, { repository, cli }, probe, path)).resolves.toMatchObject({ github: { cli } })
+    await expect(resolveDeployment({ ...machine(), runAs: true }, { repository, cli }, probe, probe, path)).resolves.toMatchObject({ github: { cli } })
   })
   it('runs the real path of the agent GitHub CLI it checked, so a link the worker repoints after setup runs nothing else as root', async () => {
     const real = gh(join(dir, 'bin', 'gh-real'), 'Agent-Bot')
@@ -131,7 +131,7 @@ describe('under a run-as subprocess provider', () => {
     chmodSync(shared, 0o777)
     const link = join(shared, 'gh')
     symlinkSync(real, link)
-    const deployment = await resolveDeployment({ ...machine(), runAs: true }, { repository: 'acme/widgets', cli: link }, probe, path)
+    const deployment = await resolveDeployment({ ...machine(), runAs: true }, { repository: 'acme/widgets', cli: link }, probe, probe, path)
     expect(deployment.github.cli).toBe(real)
     rmSync(link)
     symlinkSync(program(join(shared, 'worker-gh'), 'echo \'{"login":"worker"}\''), link)
@@ -140,11 +140,24 @@ describe('under a run-as subprocess provider', () => {
   })
   it('under run-as takes GitHub\'s name for the repository, which the worker reports, only when it differs from the configured one in case alone', async () => {
     const cli = program(join(dir, 'bin', 'gh-any'), `case "$*" in\n  "api user") echo '{"login":"Agent-Bot","id":7}' ;;\n  "api repos/"*) echo '{"name":"acme/widgets","push":true}' ;;\nesac`)
-    await expect(resolveDeployment({ ...machine(), runAs: true }, { repository: 'victim/private', cli }, probe, path))
+    await expect(resolveDeployment({ ...machine(), runAs: true }, { repository: 'victim/private', cli }, probe, probe, path))
       .rejects.toEqual(setupError('github', 'repositoryRenamed', { repository: 'victim/private', name: 'acme/widgets' }))
-    expect((await resolveDeployment({ ...machine(), runAs: true }, { repository: 'ACME/Widgets', cli }, probe, path)).repository).toBe('acme/widgets')
+    expect((await resolveDeployment({ ...machine(), runAs: true }, { repository: 'ACME/Widgets', cli }, probe, probe, path)).repository).toBe('acme/widgets')
     // Without run-as the operator's own CLI may resolve a renamed repository.
-    expect((await resolveDeployment(machine(), { repository: 'victim/private', cli }, probe, path)).repository).toBe('acme/widgets')
+    expect((await resolveDeployment(machine(), { repository: 'victim/private', cli }, probe, probe, path)).repository).toBe('acme/widgets')
+  })
+  it('under run-as takes the agent\'s login from the orchestrator\'s own CLI calls, not from what the worker answers', async () => {
+    const cli = gh(join(dir, 'bin', 'gh-agent'), 'Agent-Bot')
+    // The worker answers `/user` through a gh configuration it can write.
+    const worker: Probe = argv => argv.join(' ') === `${cli} api user` ? Promise.resolve('{"login":"maintainer","id":42}') : probe(argv)
+    const contained = { ...machine(), runAs: true }
+    expect((await resolveDeployment(contained, { repository: 'acme/widgets', cli }, worker, probe, path)).github)
+      .toEqual({ cli, login: 'Agent-Bot', noreply: '7+Agent-Bot@users.noreply.github.com' })
+    const signedOut: Probe = argv => argv.includes('user') ? Promise.reject(new Error('gh auth login')) : probe(argv)
+    await expect(resolveDeployment(contained, { repository: 'acme/widgets', cli }, worker, signedOut, path))
+      .rejects.toEqual(setupError('github', 'agentCliSignedOut', { output: 'gh auth login' }))
+    // Without run-as the CLI as worker shells run it names the account, as upstream.
+    expect((await resolveDeployment(machine(), { repository: 'acme/widgets', cli }, worker, signedOut, path)).github.login).toBe('maintainer')
   })
   it('refuses a repository whose owner or name is . or .., which would leave repos/ in an API path', () => {
     for (const repository of ['../..', './x', 'acme/..', 'acme/.']) expect(() => GithubAccountsSchema.parse({ repository }), repository).toThrow('owner/name')
@@ -154,16 +167,16 @@ describe('under a run-as subprocess provider', () => {
 
 describe('setup', () => {
   it('reads the repository from the GitHub Source and the accounts from their CLIs, skipping the worker shims', async () => {
-    const deployment = await resolveDeployment(machine(), { repository: 'acme/widgets', cli: 'gh' }, probe, path)
+    const deployment = await resolveDeployment(machine(), { repository: 'acme/widgets', cli: 'gh' }, probe, probe, path)
     expect(deployment).toMatchObject({ repository: 'acme/widgets', github: { cli: join(dir, 'bin', 'gh'), login: 'Agent-Bot', noreply: '7+Agent-Bot@users.noreply.github.com' } })
     expect(deployment.github).toEqual({ cli: join(dir, 'bin', 'gh'), login: 'Agent-Bot', noreply: '7+Agent-Bot@users.noreply.github.com' })
     expect(deployment).not.toHaveProperty('feishu')
     // A renamed repository is still resolved by its old name; notifications carry GitHub's current full_name.
-    expect((await resolveDeployment(machine(), { repository: 'acme/gadgets', cli: 'gh' }, probe, path)).repository).toBe('acme/widgets')
+    expect((await resolveDeployment(machine(), { repository: 'acme/gadgets', cli: 'gh' }, probe, probe, path)).repository).toBe('acme/widgets')
   })
   it('names what setup needs and where it is set', async () => {
     const needs = (place: string, code: string, values: Record<string, unknown>, github: unknown) =>
-      expect(resolveDeployment(machine(), github, probe, path)).rejects.toEqual(setupError(place, code, values))
+      expect(resolveDeployment(machine(), github, probe, probe, path)).rejects.toEqual(setupError(place, code, values))
     const repository = 'acme/widgets'
     await needs('github', 'repositoryUnset', {}, { cli: 'gh' })
     await needs('github', 'agentCliUnset', {}, { repository })
@@ -187,7 +200,7 @@ describe('setup', () => {
     const appGh = (file: string, push: string): string => program(file, `case "$*" in\n  "api user") echo 'HTTP 403' >&2; exit 1 ;;\n  "api repos/acme/"*" --jq {name: .full_name, push: .permissions.push}") echo '{"name":"acme/widgets","push":${push}}' ;;\n  *) exit 1 ;;\nesac`)
     const calls: string[][] = []
     const recording: Probe = argv => { calls.push(argv); return probe(argv) }
-    const resolve = (cli: string) => resolveDeployment(machine({ githubApp }), { repository: 'acme/widgets', cli }, recording, path)
+    const resolve = (cli: string) => resolveDeployment(machine({ githubApp }), { repository: 'acme/widgets', cli }, recording, probe, path)
     const cli = appGh(join(dir, 'bin', 'gh-app'), 'null')
     const deployment = await resolve(cli)
     expect(deployment.github).toEqual({ cli, login: 'mumbo-bot[bot]', noreply: '341797844+mumbo-bot[bot]@users.noreply.github.com' })
