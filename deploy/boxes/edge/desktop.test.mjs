@@ -64,13 +64,13 @@ function box() {
   return b
 }
 
-test('person start script: XFCE as browser on :1 with bash as its shell, Chrome on the kept profile with CDP on loopback, the shared Downloads repaired', () => {
+test('person start script: XFCE as browser on :1 with bash as its shell, Chrome on its own new profile with CDP on loopback, the shared Downloads repaired', () => {
   assert.ok(person.includes(`pgrep -f /usr/local/bin/mumbo-desktop >/dev/null || su browser -s /bin/sh -c 'SHELL=/bin/bash DISPLAY=:1 /usr/local/bin/mumbo-desktop >/tmp/desktop.log 2>&1 &'\n`))
   assert.ok(person.includes(`pgrep -f /usr/local/bin/mumbo-browser >/dev/null || su browser -s /bin/sh -c 'DISPLAY=:1 /usr/local/bin/mumbo-browser >/tmp/chrome.log 2>&1 &'\n`))
   assert.ok(person.includes(`\n  if getent group shared >/dev/null 2>&1 && [ ! -L /home/shared ] && [ ! -L /home/shared/Downloads ]; then install -d -o browser -g shared -m 2770 /home/shared/Downloads 2>/dev/null || echo 'shared downloads folder not repaired' >&2; fi\n`))
   assert.ok(at(person, 'install -d -o browser -g shared') < at(person, "DISPLAY=:1 /usr/local/bin/mumbo-browser"))
   assert.ok(heredoc('/usr/local/bin/mumbo-browser').startsWith('#!/bin/sh\nchmod 0700 /home/browser/\nif [ -d /home/browser/Downloads ] && [ ! -L /home/browser/Downloads ] && [ -d /home/shared/Downloads ]; then\n'))
-  assert.equal(heredoc('/usr/local/bin/google-chrome'), '#!/bin/sh\n[ "$(id -un)" = browser ] || exec "$(command -v google-chrome-stable || echo chromium)" "$@"\nexec "$(command -v google-chrome-stable || echo chromium)" --user-data-dir=/home/browser/profile --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --no-first-run --no-default-browser-check --password-store=basic --start-maximized "$@"\n')
+  assert.equal(heredoc('/usr/local/bin/google-chrome'), '#!/bin/sh\nb=$(command -v google-chrome-stable) && p=/home/browser/chrome-profile || { b=chromium; p=/home/browser/profile; }\n[ "$(id -un)" = browser ] || exec "$b" "$@"\nexec "$b" --user-data-dir=$p --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --no-first-run --no-default-browser-check --password-store=basic --start-maximized "$@"\n')
   assert.ok(at(person, 'export XAUTHORITY=/run/x11/auth') < at(person, 'su browser -s /bin/sh -c \'SHELL=/bin/bash DISPLAY=:1 /usr/local/bin/mumbo-desktop'))
   assert.ok(at(person, 'Xvfb :1') < at(person, 'DISPLAY=:1 /usr/local/bin/mumbo-desktop') && at(person, 'DISPLAY=:1 /usr/local/bin/mumbo-browser') < at(person, 'x11vnc -display :1'))
   assert.ok(person.includes('127.0.0.1:5900 >/root/websockify.log 2>&1 &\n'), 'root logs to its own directory, not to a /tmp name browser can plant')
@@ -117,7 +117,7 @@ test('Chrome is started again within 5 s of exiting; one a launcher started is w
     const starts = b.lines('chrome').slice(1).map(l => Number(l.split(' ')[0]))
     assert.ok(starts.length >= 2, `restarted: ${starts.length}`)
     for (const [i, s] of starts.entries()) assert.ok(s - (i ? starts[i - 1] : closed) < 5000, `start ${i} within 5 s`)
-    assert.ok(b.lines('chrome').every(l => l.endsWith(` --user-data-dir=${b.t}/home/profile --remote-debugging-address=127.0.0.1 --remote-debugging-port=${b.port} --no-first-run --no-default-browser-check --password-store=basic --start-maximized`)))
+    assert.ok(b.lines('chrome').every(l => l.endsWith(` --user-data-dir=${b.t}/home/chrome-profile --remote-debugging-address=127.0.0.1 --remote-debugging-port=${b.port} --no-first-run --no-default-browser-check --password-store=basic --start-maximized`)))
   } finally { b.done() }
 })
 
@@ -125,14 +125,14 @@ test('a Chrome on the profile without the debugging port is waited for: its Sing
   const b = box()
   try {
     b.fake('google-chrome-stable', `${VERSION}echo start >> ${b.t}/log/chrome`)
-    mkdirSync(join(b.t, 'home/profile'))
+    mkdirSync(join(b.t, 'home/chrome-profile'))
     writeFileSync(join(b.t, 'outside/keep'), 'keep')
-    symlinkSync(join(b.t, 'outside/keep'), join(b.t, 'home/profile/SingletonLock'))
-    b.run(`exec /bin/sh -c 'sleep 30; true' 'chrome --user-data-dir=${b.t}/home/profile'`)
+    symlinkSync(join(b.t, 'outside/keep'), join(b.t, 'home/chrome-profile/SingletonLock'))
+    b.run(`exec /bin/sh -c 'sleep 30; true' 'chrome --user-data-dir=${b.t}/home/chrome-profile'`)
     await sleep(300)
     b.run(`${b.t}/bin/mumbo-browser`)
     await sleep(2500)
-    assert.deepEqual([b.lines('chrome'), readdirSync(join(b.t, 'home/profile')), readFileSync(join(b.t, 'outside/keep'), 'utf8')], [[], ['SingletonLock'], 'keep'])
+    assert.deepEqual([b.lines('chrome'), readdirSync(join(b.t, 'home/chrome-profile')), readFileSync(join(b.t, 'outside/keep'), 'utf8')], [[], ['SingletonLock'], 'keep'])
   } finally { b.done() }
 })
 
@@ -143,7 +143,7 @@ test('the google-chrome wrapper pins the profile only for browser; for any other
     writeFileSync(join(b.t, 'bin/plain'), b.local(heredoc('/usr/local/bin/google-chrome'), 'browser')); chmodSync(join(b.t, 'bin/plain'), 0o755)
     execFileSync(join(b.t, 'bin/plain'), ['--headless', '--screenshot'], { env: { PATH: join(b.t, 'fake') } })
     execFileSync(join(b.t, 'bin/google-chrome'), ['https://x'], { env: { PATH: join(b.t, 'fake') } })
-    assert.deepEqual(b.lines('chrome'), ['--headless --screenshot', `--user-data-dir=${b.t}/home/profile --remote-debugging-address=127.0.0.1 --remote-debugging-port=${b.port} --no-first-run --no-default-browser-check --password-store=basic --start-maximized https://x`])
+    assert.deepEqual(b.lines('chrome'), ['--headless --screenshot', `--user-data-dir=${b.t}/home/chrome-profile --remote-debugging-address=127.0.0.1 --remote-debugging-port=${b.port} --no-first-run --no-default-browser-check --password-store=basic --start-maximized https://x`])
   } finally { b.done() }
 })
 
@@ -241,33 +241,36 @@ test('the browser loop keeps its home 0700 and moves ~/Downloads into the shared
   } finally { b.done() }
 })
 
-test('a profile last used by a newer browser is moved aside before Chrome starts; an older, equal or unreadable one is kept', () => {
+test('with Google Chrome the old Chromium profile is moved once, as browser, to ~/.chromium-profile-old with mode 0700, never through a symlink', () => {
   const pre = heredoc('/usr/local/bin/mumbo-browser').split('while :; do')[0]
   const b = box()
   try {
-    const check = (last, version = 'Google Chrome 142.0.7444.59 ') => {
-      rmSync(join(b.t, 'home'), { recursive: true }); mkdirSync(join(b.t, 'home/profile'), { recursive: true })
-      if (last !== undefined) writeFileSync(join(b.t, 'home/profile/Last Version'), last)
-      if (version) b.fake('google-chrome-stable', `echo '${version}'`); else rmSync(join(b.t, 'fake/google-chrome-stable'), { force: true })
-      // From a file, as the box runs it: an sh -c command line would match the check's own pgrep.
-      writeFileSync(join(b.t, 'pre.sh'), b.local(pre))
-      execFileSync('/bin/sh', [join(b.t, 'pre.sh')], { env: { PATH: join(b.t, 'fake') } })
-      return readdirSync(join(b.t, 'home')).filter(n => n !== 'Downloads').sort()
+    const home = join(b.t, 'home'), old = join(home, '.chromium-profile-old')
+    const run = (chrome = true) => {
+      if (chrome) b.fake('google-chrome-stable', 'exit 0'); else rmSync(join(b.t, 'fake/google-chrome-stable'), { force: true })
+      writeFileSync(join(b.t, 'pre.sh'), b.local(pre)); execFileSync('/bin/sh', [join(b.t, 'pre.sh')], { env: { PATH: join(b.t, 'fake') } })
+      return readdirSync(home).sort()
     }
-    assert.match(check('142.0.7444.60').join(), /^profile\.142\.0\.7444\.60\.\d+$/)
-    assert.match(check('143.0.1.2').join(), /^profile\.143\.0\.1\.2\.\d+$/)
-    for (const kept of ['142.0.7444.59', '142.0.7444.9', '141.0.7390.122', '', '../../x', '143.0.0.1; touch x', undefined]) assert.deepEqual(check(kept), ['profile'], String(kept))
-    assert.deepEqual(check('143.0.1.2', ''), ['profile'], 'a template without Chrome keeps the profile')
-    const running = spawn('/bin/sh', ['-c', 'sleep 5; true', `chrome --user-data-dir=${b.t}/home/profile`], { stdio: 'ignore' })
-    try { assert.deepEqual(check('143.0.1.2'), ['profile'], 'a running Chrome, even without the debugging port, keeps its profile') } finally { running.kill('SIGKILL') }
-    // A symlink planted at the move-aside name does not take the profile out of /home/browser.
-    b.fake('date', 'echo 1700000000')
-    rmSync(join(b.t, 'home'), { recursive: true }); mkdirSync(join(b.t, 'home/profile'), { recursive: true }); writeFileSync(join(b.t, 'home/profile/Last Version'), '143.0.1.2')
-    symlinkSync(join(b.t, 'outside'), join(b.t, 'home/profile.143.0.1.2.1700000000'))
-    b.fake('google-chrome-stable', "echo 'Google Chrome 142.0.7444.59'")
-    writeFileSync(join(b.t, 'pre.sh'), b.local(pre))
-    spawnSync('/bin/sh', [join(b.t, 'pre.sh')], { env: { PATH: join(b.t, 'fake') } })
-    assert.deepEqual([readdirSync(join(b.t, 'outside')), existsSync(join(b.t, 'home/profile/Last Version'))], [[], true])
+    const profile = () => { mkdirSync(join(home, 'profile/Default'), { recursive: true }); writeFileSync(join(home, 'profile/Default/Login Data'), 'old passwords'); chmodSync(join(home, 'profile'), 0o755) }
+    // The Chromium fallback keeps its profile in place.
+    profile()
+    assert.deepEqual(run(false), ['profile'])
+    // Google Chrome: moved once, readable by browser only.
+    assert.deepEqual(run(), ['.chromium-profile-old'])
+    assert.equal(readFileSync(join(old, 'Default/Login Data'), 'utf8'), 'old passwords')
+    assert.equal(statSync(old).mode & 0o777, 0o700)
+    // Once: a later profile is not moved over it.
+    profile()
+    assert.deepEqual(run(), ['.chromium-profile-old', 'profile'])
+    assert.equal(readFileSync(join(old, 'Default/Login Data'), 'utf8'), 'old passwords')
+    // A symlink planted at the target, or a symlinked profile, is never moved through or moved.
+    rmSync(old, { recursive: true }); symlinkSync(join(b.t, 'outside'), old)
+    const mode = statSync(join(b.t, 'outside')).mode
+    assert.deepEqual(run(), ['.chromium-profile-old', 'profile'])
+    assert.deepEqual([readdirSync(join(b.t, 'outside')), statSync(join(b.t, 'outside')).mode], [[], mode])
+    rmSync(old); rmSync(join(home, 'profile'), { recursive: true }); symlinkSync(join(b.t, 'outside'), join(home, 'profile'))
+    assert.deepEqual(run(), ['profile'])
+    assert.ok(lstatSync(join(home, 'profile')).isSymbolicLink())
   } finally { b.done() }
 })
 

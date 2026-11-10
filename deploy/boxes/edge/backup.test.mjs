@@ -59,10 +59,11 @@ test('backups carry the browser user\'s home, downloads and desktop settings inc
   const put = (path) => { mkdirSync(join(home, path, '..'), { recursive: true }); writeFileSync(join(home, path), path) }
   const kept = ['Downloads/report.pdf', '.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml', 'profile/Last Version', 'profile/Default/Cookies',
     'profile/Default/Service Worker/Database/x', 'profile/Default/Service Worker/ScriptCache/x', 'profile/Default/IndexedDB/https_web.whatsapp.com_0.indexeddb.leveldb/x',
-    'profile.143.0.1.2.1700000000/Default/Cookies']
+    'chrome-profile/Default/Cookies', 'chrome-profile/Default/Service Worker/ScriptCache/x', 'chrome-profile/Local State']
   const dropped = ['.cache/sessions/xfce4-session-box:1', 'profile/SingletonLock', 'profile/Default/Cache/Cache_Data/x', 'profile/Default/Code Cache/js/x',
     'profile/Default/GPUCache/x', 'profile/Default/Service Worker/CacheStorage/x', 'profile/ShaderCache/x', 'profile/GrShaderCache/x', 'profile/GraphiteDawnCache/x',
-    'profile/component_crx_cache/x', 'profile/extensions_crx_cache/x', 'profile/OptGuideOnDeviceModel/x', 'profile.143.0.1.2.1700000000/Default/Cache/x',
+    'profile/component_crx_cache/x', 'profile/extensions_crx_cache/x', 'profile/OptGuideOnDeviceModel/x', '.chromium-profile-old/Default/Login Data',
+    'chrome-profile/SingletonLock', 'chrome-profile/Default/Cache/x', 'chrome-profile/Default/Code Cache/js/x', 'chrome-profile/GrShaderCache/x', 'chrome-profile/Default/DawnWebGPUCache/x',
     'profile/Default/DawnGraphiteCache/x', 'profile/Default/DawnWebGPUCache/x', 'profile/Crashpad/x', 'profile/Default/blob_storage/x', 'profile/Default/Shared Dictionary/cache/x']
   for (const p of [...kept, ...dropped]) put(p)
   const b = sh(backupCommand(target, root))

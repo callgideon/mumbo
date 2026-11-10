@@ -350,11 +350,13 @@ if id browser >/dev/null 2>&1; then
     fi
   fi
   # The one way to start the browser: the loop below and the desktop's launchers (the template aims them here). A start
-  # while it runs opens a window in it. For any other user, such as the agent's root shell, it is plain Chrome.
+  # while it runs opens a window in it. For any other user, such as the agent's root shell, it is plain Chrome. Google
+  # Chrome has its own new profile (founder decision); Chromium, on a template before Chrome, keeps the old one.
   cat > /usr/local/bin/google-chrome <<'SH'
 #!/bin/sh
-[ "$(id -un)" = browser ] || exec "$(command -v google-chrome-stable || echo chromium)" "$@"
-exec "$(command -v google-chrome-stable || echo chromium)" --user-data-dir=/home/browser/profile --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --no-first-run --no-default-browser-check --password-store=basic --start-maximized "$@"
+b=$(command -v google-chrome-stable) && p=/home/browser/chrome-profile || { b=chromium; p=/home/browser/profile; }
+[ "$(id -un)" = browser ] || exec "$b" "$@"
+exec "$b" --user-data-dir=$p --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --no-first-run --no-default-browser-check --password-store=basic --start-maximized "$@"
 SH
   # The desktop session, started again 2 s after it ends. Compositing makes the VNC server send more, so xfwm4's is set
   # off before each start.
@@ -376,8 +378,8 @@ SH
   # The browser, started again within 5 s of exiting, since the assistant's browser tools need it. While any Chrome runs
   # on the profile it waits. First it keeps /home/browser at 0700 (a restored archive can carry 0755), moves ~/Downloads (a
   # template before the shared folder, or its backup) into /home/shared/Downloads with group shared, keeping either side's
-  # file on a name clash, and moves a profile last used by a newer browser aside, so that Chrome makes a new one; mv -T
-  # will not move it into a directory a symlink names.
+  # file on a name clash, and, with Google Chrome, moves the old Chromium profile once to ~/.chromium-profile-old, mode
+  # 0700: no browser opens it, backups leave it out, and B24 deletes it. Neither move follows a symlink.
   cat > /usr/local/bin/mumbo-browser <<'SH'
 #!/bin/sh
 chmod 0700 /home/browser/
@@ -389,13 +391,14 @@ if [ -d /home/browser/Downloads ] && [ ! -L /home/browser/Downloads ] && [ -d /h
   done
   rmdir /home/browser/Downloads 2>/dev/null
 fi
-have=$(google-chrome-stable --version 2>/dev/null | grep -oE '[0-9]+(\\.[0-9]+)+' | head -n 1)
-last=$(grep -oE '^[0-9]+(\\.[0-9]+)+$' '/home/browser/profile/Last Version' 2>/dev/null)
-if [ -n "$have" ] && [ -n "$last" ] && [ "$(printf '%s\\n%s\\n' "$have" "$last" | sort -V | tail -n 1)" != "$have" ] && ! pgrep -u browser -f 'user-data-dir=/home/browser/profile' >/dev/null; then
-  mv -T /home/browser/profile "/home/browser/profile.$last.$(date +%s)"
+p=/home/browser/profile
+if command -v google-chrome-stable >/dev/null 2>&1; then
+  if [ -d /home/browser/profile ] && [ ! -L /home/browser/profile ] && [ ! -e /home/browser/.chromium-profile-old ] && [ ! -L /home/browser/.chromium-profile-old ]; then mv -T /home/browser/profile /home/browser/.chromium-profile-old; fi
+  [ ! -d /home/browser/.chromium-profile-old ] || [ -L /home/browser/.chromium-profile-old ] || chmod 0700 /home/browser/.chromium-profile-old
+  p=/home/browser/chrome-profile
 fi
 while :; do
-  pgrep -u browser -f 'user-data-dir=/home/browser/profile' >/dev/null || { rm -f /home/browser/profile/Singleton*; /usr/local/bin/google-chrome; }
+  pgrep -u browser -f "user-data-dir=$p" >/dev/null || { rm -f "$p"/Singleton*; /usr/local/bin/google-chrome; }
   sleep 2
 done
 SH
@@ -468,11 +471,12 @@ for (const d of [".dsh", "projects"]) {
     db.close()
   }
 }`
-/** What a backup leaves out of /home/browser: caches, re-downloaded browser components and models, and profile locks.
- *  `profile*` covers a profile kept aside (startScript) too; tar's exclude patterns let `*` match `/`. */
-const BROWSER_EXCLUDES = ['.cache', ...['Singleton*', '*/Cache', '*/Code Cache', '*/GPUCache', '*/Service Worker/CacheStorage', 'ShaderCache', 'GrShaderCache',
-  'GraphiteDawnCache', 'DawnGraphiteCache', 'DawnWebGPUCache', 'Crashpad', 'blob_storage', 'Shared Dictionary/cache', 'component_crx_cache', 'extensions_crx_cache',
-  'OptGuideOnDeviceModel'].map((p) => `profile*/${p}`)]
+/** What a backup leaves out of /home/browser: the old Chromium profile Google Chrome replaced (startScript), caches,
+ *  re-downloaded browser components and models, and profile locks, in Chrome's and Chromium's profiles; tar's exclude
+ *  patterns let `*` match `/`. */
+const BROWSER_EXCLUDES = ['.cache', '.chromium-profile-old', ...['Singleton*', '*/Cache', '*/Code Cache', '*/GPUCache', '*/Service Worker/CacheStorage', 'ShaderCache', 'GrShaderCache',
+  'GraphiteDawnCache', '*/DawnGraphiteCache', '*/DawnWebGPUCache', 'Crashpad', '*/blob_storage', '*/Shared Dictionary/cache', 'component_crx_cache', 'extensions_crx_cache',
+  'OptGuideOnDeviceModel'].flatMap((p) => [`chrome-profile/${p}`, `profile/${p}`])]
 /** Downloads items (a file, or a folder with everything in it) over this many bytes stay out of backups, and the rest is
  *  kept newest first up to the total: the archive is staged on the box's own disk. */
 const DOWNLOADS_ITEM_MAX = 1024 ** 3, DOWNLOADS_TOTAL_MAX = 2 * 1024 ** 3
