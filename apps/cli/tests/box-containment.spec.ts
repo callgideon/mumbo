@@ -360,6 +360,11 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
       expect((byId('dsh-superagent')?.config as { workDirectory?: string }).workDirectory).toBe('/root/work')
       expect(modelRoots).toContain('/root/work')
     }
+    // Each of these must exist before dsh starts, so the documented box layout names every one.
+    const layout = readFileSync(join(root, '.agents/notes/implemented/architecture/2026-11-10-agent-containment-run-as-and-model-roots.md'), 'utf8')
+      .split('\n').find(line => line.startsWith('- Box layout the rows depend on')) ?? ''
+    const required = [...modelRoots, ...(byId('fs-sandbox')?.config as { readOnlyRoots: string[] }).readOnlyRoots, subprocess.shellActivityDirectory!, subprocess.spillDirectory!]
+    expect(required.filter(path => !layout.includes(`\`${path}\``))).toEqual([])
     expect(byId('plugin-manager')?.config).toEqual({ modelTools: false })
     expect(byId('workspace-changes')?.config).toEqual({ summaries: false })
     expect(isDisabled(byId('preset-cordis')?.disabled)).toBe(true)

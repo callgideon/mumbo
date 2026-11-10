@@ -30,6 +30,7 @@
 # file, changes run as agent. The attachment, skill, and spill directories the harness names to the model are read-only;
 # the ones outside /root are root-owned with group agent and set-group-ID (2750), so the agent shell can read but not
 # change them.
+# Every root below must exist when dsh starts, /root/.dsh/skills and /usr/local/share/mumbo/agents/skills included.
 - id: fs-sandbox
   config:
     modelRoots: [/root/projects, /home/agent, /root/work]
@@ -39,7 +40,9 @@
       - /usr/local/share/mumbo/agents/skills
       - /var/lib/mumbo/spill
       - /var/lib/mumbo/subprocess-spill
-# Uploads live outside the root-only harness home, readable by agent's group and writable only by root.
+# Uploads live outside the root-only harness home, readable by agent's group and writable only by root. The box creates
+# /var/lib/mumbo/attachments, its attachments, and attachments/v1 (each root:agent 2750): the store makes v1 only on its
+# first upload, and fs-sandbox needs every read-only root to exist at load.
 - id: attachment-local
   config:
     dshHome: /var/lib/mumbo/attachments

@@ -84,12 +84,12 @@ These roots open the files to the model's `read` only, which runs as this proces
 
 | Directory | Configured by | Layout for the run-as user `agent` |
 |---|---|---|
-| Attachments | `dsh-attachment-local` `dshHome: /var/lib/mumbo/attachments` with `groupReadable: true` | the home `root:agent`, mode `2750`; the store then creates directories `2750` and files `0440` |
+| Attachments | `dsh-attachment-local` `dshHome: /var/lib/mumbo/attachments` with `groupReadable: true` | the home, `attachments`, and `attachments/v1` each `root:agent`, mode `2750`, created by the box because the store creates `attachments/v1` only on its first upload; the store then creates directories `2750` and files `0440` |
 | Session spill files | `dsh-spill-local` `root: /var/lib/mumbo/spill` with `groupReadable: true` | `root:agent`, mode `2750`; session directories `2750`, files `0640` |
 | Command spill files | `dsh-subprocess-local` `spillDirectory: /var/lib/mumbo/subprocess-spill` | `root:agent`, mode `2750`; files `0640` |
 | Skills | `$DSH_AGENTS_HOME/skills` with `DSH_AGENTS_HOME=/usr/local/share/mumbo/agents` | `root:root`, directories `0755`, files `0644` |
 
-The harness home (`$DSH_HOME`) itself stays root-only, so skills under `$DSH_HOME/skills` stay readable through `read` but their scripts cannot run from the model's shell.
+Every model and read-only root must exist when the provider loads, or it fails at load, so the box creates each directory in the table, and `$DSH_HOME/skills`, before dsh starts. The harness home (`$DSH_HOME`) itself stays root-only, so skills under `$DSH_HOME/skills` stay readable through `read` but their scripts cannot run from the model's shell.
 
 ### What you can do
 
