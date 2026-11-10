@@ -1088,6 +1088,11 @@ The person's-computer track (N1: sections 17b and 17c, tasks B17–B23 and R1–
 - **Move the agent onto the `mumbo-bot` App**, so no machine accounts remain. This needs superagent's GitHub Source to work without `/user` and notifications.
 - **Limit the superagent panel's hover styles to devices that hover.** Wrap every `:hover` rule in the copy's `src/client/client.css` in `@media (hover: hover)`, so a tap on a phone does not leave a row highlighted. Log it in UPSTREAM.md, and let the repository's hover spec scan the copy. The copy's other theme differences stay excluded: corner shape, hairline borders and elevated scroll rebinding. The panel already uses dsh's color tokens, and it is an owners-only supervision page.
 
+- **Restoring an older backup without deleting anything** (B30, approved 2026-11-10).
+  - An operator command (`restore-version.mjs`) writes a one-shot "restore version `<versionId>` for `<principal>`" record in the edge store. The edge presigns that version for the principal's next restore.
+  - The record clears after the restored box's first successful backup, so a box lost before then comes back from the same version.
+  - No new principal gets the backup key's Decrypt. The backups hold the founder's synced passwords, and agents run operations. If an operator role is ever needed, it must be human-only with MFA, and conditioned on S3 and the backup bucket.
+  - The RUNBOOK's delete-newer-versions path is now only a last resort.
 - **The browser after N1** (from the 2026-11-10 research):
   - **A CDP broker.** Chrome takes `--remote-debugging-pipe` or a port only the broker can reach. Playwright MCP connects through the broker (`--cdp-endpoint`), which:
     - refuses cookie-reading methods (`Storage.getCookies`, `Network.getCookies`, `Network.getAllCookies`);
