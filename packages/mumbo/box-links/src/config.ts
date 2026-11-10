@@ -40,14 +40,22 @@ export interface PageLinks {
   takeover?: boolean
 }
 
-/** The Host's answer about the person's hold on the browser: whether they have taken it over, and why a change failed. */
+/**
+ * Who has the browser, as browser consent's service reports it: `free` for the assistant, `taking` while a take over
+ * still closes the assistant's browser connections, `held` once none is open, and `unfinished` with the failure of a
+ * take over that did not finish.
+ */
+export type TakeoverHold =
+  | { kind: 'free' }
+  | { kind: 'taking' }
+  | { kind: 'held' }
+  | { kind: 'unfinished'; failure: string }
+
+/** The take-over route's answer: who has the browser, and why a requested change failed. */
 export interface TakeoverState {
-  /** Whether the person has taken over the browser. */
-  takenOver: boolean
-  /**
-   * Why the requested change failed; on a read, why the last take over did not finish while the browser stays taken
-   * over.
-   */
+  /** Who has the browser after the request. */
+  hold: TakeoverHold
+  /** On a POST answer with status 500, why the requested change failed. */
   failure?: string
 }
 
@@ -86,7 +94,12 @@ export const PageLinks: z<PageLinks> = z.object({
 
 /** Validate a take-over route answer in the browser. */
 export const TakeoverState: z<TakeoverState> = z.object({
-  takenOver: z.boolean().required(),
+  hold: z.union([
+    z.object({ kind: z.const('free').required() }),
+    z.object({ kind: z.const('taking').required() }),
+    z.object({ kind: z.const('held').required() }),
+    z.object({ kind: z.const('unfinished').required(), failure: z.string().required() }),
+  ]).required(),
   failure: z.string(),
 })
 

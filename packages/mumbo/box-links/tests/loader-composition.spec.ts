@@ -19,6 +19,7 @@ import * as Connection from '@deepseek-ai/dsh-client-connection'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
 import type { SubprocessHandle, SubprocessOutcome, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
+import type { BrowserHold } from '@mumbo/browser-consent'
 import * as EdgeMember from '@mumbo/edge-member'
 import { expect, it, onTestFinished, vi } from 'vitest'
 import * as BoxLinks from '../src/index.ts'
@@ -108,7 +109,7 @@ async function personBox(desktop: 'chrome' | 'empty' | 'hung' = 'chrome', consen
   ctx.provide('workspaceRegistry', { list: () => [] } as never)
   ctx.provide('sessions', { list: () => [], get: () => undefined } as never)
   // Browser consent's take-over service, which the person box's consent row provides.
-  if (consent !== undefined) ctx.provide('mumbo-browser-consent', consent as never)
+  const withdrawConsent = consent === undefined ? undefined : ctx.provide('mumbo-browser-consent', consent as never)
   const commands: string[] = []
   const signals: AbortSignal[] = []
   let exited = 0
@@ -154,7 +155,7 @@ async function personBox(desktop: 'chrome' | 'empty' | 'hung' = 'chrome', consen
     return { cookie: setCookie!.split(';', 1)[0]! }
   }
   const member = (): Record<string, string> => ({ 'x-mumbo-member': EdgeMember.signMemberHeader(key, 'ann@example.com', Math.floor(Date.now() / 1000) + 300) })
-  return { ctx, commands, signals, exited: () => exited, post, takeoverRoute, owner, member }
+  return { ctx, commands, signals, exited: () => exited, post, takeoverRoute, owner, member, withdrawConsent }
 }
 
 const ACTIVATE = 'wmctrl -x -a chrom'
@@ -204,21 +205,27 @@ it('removes the route on unload, after aborting the running command and waiting 
   expect(box.commands).toEqual([ACTIVATE])
 })
 
-/** Browser consent's take-over service: records each change, and fails the next take over or hand back when told. */
+/**
+ * Browser consent's take-over service: records each change, reports a take over as taking until it finishes, holds a
+ * take over while `pause` is pending, and fails the next take over or hand back when told.
+ */
 function consentService() {
   const changes: string[] = []
   // A failure that is not an Error stands for a rejection value the route did not expect.
   const failing: { takeOver?: string | undefined; handBack?: string | { reason: string } | undefined } = {}
   const service = {
-    takenOver: false,
+    hold: { kind: 'free' } as BrowserHold,
     changes,
     failing,
-    takeOver() {
+    pause: undefined as Promise<void> | undefined,
+    async takeOver() {
       changes.push('take over')
-      service.takenOver = true
+      service.hold = { kind: 'taking' }
+      if (service.pause !== undefined) await service.pause
       const failure = failing.takeOver
       failing.takeOver = undefined
-      return failure === undefined ? Promise.resolve() : Promise.reject(new Error(failure))
+      service.hold = failure === undefined ? { kind: 'held' } : { kind: 'unfinished', failure }
+      if (failure !== undefined) throw new Error(failure)
     },
     handBack() {
       changes.push('hand back')
@@ -226,12 +233,15 @@ function consentService() {
       failing.handBack = undefined
       // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- the route reports a rejection that is not an Error too.
       if (failure !== undefined) return Promise.reject(typeof failure === 'string' ? new Error(failure) : failure)
-      service.takenOver = false
+      service.hold = { kind: 'free' }
       return Promise.resolve()
     },
   }
   return service
 }
+
+const FREE = { hold: { kind: 'free' } }
+const HELD = { hold: { kind: 'held' } }
 
 it('tells only the owner\'s page about the take-over route, which exists while browser consent is loaded', { timeout: 60_000 }, async () => {
   const without = await personBox()
@@ -257,21 +267,32 @@ it('takes the browser over and hands it back for the owner, and reports a change
     const state: unknown = await response.json()
     return [response.status, state]
   }
-  expect(await answer()).toEqual([200, { takenOver: false }])
-  expect(await answer('{"takenOver":true}')).toEqual([200, { takenOver: true }])
-  expect(await answer()).toEqual([200, { takenOver: true }])
-  expect(await answer('{"takenOver":false}')).toEqual([200, { takenOver: false }])
+  expect(await answer()).toEqual([200, FREE])
+  expect(await answer('{"takenOver":true}')).toEqual([200, HELD])
+  expect(await answer()).toEqual([200, HELD])
+  expect(await answer('{"takenOver":false}')).toEqual([200, FREE])
 
-  // A take over that did not finish leaves the browser taken over, and each read reports why until a change succeeds.
-  consent.failing.takeOver = 'a browser connection did not close: browser_close failed: timed out'
-  expect(await answer('{"takenOver":true}')).toEqual([500, { takenOver: true, failure: 'a browser connection did not close: browser_close failed: timed out' }])
-  expect(await answer()).toEqual([200, { takenOver: true, failure: 'a browser connection did not close: browser_close failed: timed out' }])
+  // While a take over still runs, a read reports it taking rather than held.
+  const pause = Promise.withResolvers<undefined>()
+  consent.pause = pause.promise
+  const taking = answer('{"takenOver":true}')
+  await expect.poll(() => consent.changes).toHaveLength(3)
+  expect(await answer()).toEqual([200, { hold: { kind: 'taking' } }])
+  // A take over that did not finish is reported on each read, and after a hand back that failed, until a change succeeds.
+  const failure = 'a browser connection did not close: browser_close failed: timed out'
+  const unfinished = { hold: { kind: 'unfinished', failure } }
+  consent.failing.takeOver = failure
+  consent.pause = undefined
+  pause.resolve(undefined)
+  expect(await taking).toEqual([500, { ...unfinished, failure }])
+  expect(await answer()).toEqual([200, unfinished])
   consent.failing.handBack = 'EISDIR: illegal operation on a directory'
-  expect(await answer('{"takenOver":false}')).toEqual([500, { takenOver: true, failure: 'EISDIR: illegal operation on a directory' }])
-  expect(await answer('{"takenOver":true}')).toEqual([200, { takenOver: true }])
-  expect(await answer()).toEqual([200, { takenOver: true }])
+  expect(await answer('{"takenOver":false}')).toEqual([500, { ...unfinished, failure: 'EISDIR: illegal operation on a directory' }])
+  expect(await answer()).toEqual([200, unfinished])
+  expect(await answer('{"takenOver":true}')).toEqual([200, HELD])
+  expect(await answer()).toEqual([200, HELD])
   consent.failing.handBack = { reason: 'busy' }
-  expect(await answer('{"takenOver":false}')).toEqual([500, { takenOver: true, failure: '[object Object]' }])
+  expect(await answer('{"takenOver":false}')).toEqual([500, { ...HELD, failure: '[object Object]' }])
   expect(consent.changes).toEqual(['take over', 'hand back', 'take over', 'hand back', 'take over', 'hand back'])
 
   for (const body of ['nope', '{"takenOver":"yes"}', '{}']) {
@@ -280,4 +301,17 @@ it('takes the browser over and hands it back for the owner, and reports a change
     expect(await response.text()).toMatch(/^Expected a JSON body \{"takenOver": true \| false\}: /u)
   }
   expect(consent.changes).toHaveLength(6)
+})
+
+it('removes the take-over route when browser consent leaves and when the plugin unloads', { timeout: 60_000 }, async () => {
+  for (const leave of ['consent', 'plugin'] as const) {
+    const box = await personBox('chrome', consentService())
+    const cookie = box.owner()
+    expect((await box.takeoverRoute(cookie)).status).toBe(200)
+    expect(box.ctx.webServer.renderIndex(PAGE, PAGE_PEER)).toContain('"takeover":true')
+    if (leave === 'consent') box.withdrawConsent!()
+    else await [...box.ctx.loader.entries()].find(row => row.options.id === 'box-links')!.fiber!.dispose()
+    await expect.poll(async () => (await box.takeoverRoute(cookie)).status).toBe(404)
+    expect(box.ctx.webServer.renderIndex(PAGE, PAGE_PEER)).not.toContain('"takeover":true')
+  }
 })

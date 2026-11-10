@@ -23,7 +23,7 @@ import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import type {} from '@deepseek-ai/dsh-working-directory'
 import z from '@deepseek-ai/schemastery'
-import type { BrowserTakeover, BrowserWriteGrant } from './types.ts'
+import type { BrowserHold, BrowserTakeover, BrowserWriteGrant } from './types.ts'
 
 export type * from './types.ts'
 
@@ -513,6 +513,10 @@ export function apply(ctx: Context, config: Config): void {
   const connected = new WeakSet<Agent>()
   /** Take-over and hand-back requests so far; a hand back yields to any request made after it. */
   let requests = 0
+  /** Take-over steps queued or running. */
+  let taking = 0
+  /** Why the last take-over step failed; a later step that succeeds, or a hand back, clears it. */
+  let unfinished: string | undefined
   /** The take-over and hand-back steps, which run one at a time. */
   let changes = Promise.resolve()
   /** The name a takeover refusal gives a browser or desktop call; `undefined` for every other tool. */
@@ -807,10 +811,15 @@ export function apply(ctx: Context, config: Config): void {
     return closed.flatMap(result => 'failure' in result ? [`a browser connection did not close: ${result.failure}`] : [])
   }
   const takeover: BrowserTakeover = {
-    get takenOver() { return release.signal.aborted },
+    get hold(): BrowserHold {
+      if (!release.signal.aborted) return { kind: 'free' }
+      if (taking > 0) return { kind: 'taking' }
+      return unfinished === undefined ? { kind: 'held' } : { kind: 'unfinished', failure: unfinished }
+    },
     takeOver() {
       requests += 1
       release.abort()
+      taking += 1
       return serialize(async () => {
         const failures: string[] = []
         try {
@@ -819,7 +828,9 @@ export function apply(ctx: Context, config: Config): void {
           failures.push(`the takeover could not be saved, so a restart would hand the browser back: ${String(error)}`)
         }
         failures.push(...await disconnect())
-        if (failures.length > 0) throw new Error(failures.join('; '))
+        taking -= 1
+        unfinished = failures.length === 0 ? undefined : failures.join('; ')
+        if (unfinished !== undefined) throw new Error(unfinished)
       })
     },
     handBack() {
@@ -829,6 +840,7 @@ export function apply(ctx: Context, config: Config): void {
         // A take over requested after this hand back writes the record again in its own step and keeps the browser.
         if (request !== requests || !release.signal.aborted) return
         release = new AbortController()
+        unfinished = undefined
         // The person may have left a denied page on screen; until a read shows the tab, a desktop screenshot asks.
         showing = UNREADABLE
         await Promise.all(ctx.agents.list().filter(agent => ctx.tools.get(PREFIX + TABS, agent) !== undefined)

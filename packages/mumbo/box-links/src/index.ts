@@ -72,21 +72,18 @@ const TakeoverRequest: z<{ takenOver: boolean }> = z.object({ takenOver: z.boole
 
 /**
  * Register the exact take-over route behind Connection's authentication. Like the Chrome route it declares no
- * `access`, so Connection answers every non-owner Peer 403 before the route runs. GET answers the current
- * {@link TakeoverState}; POST with `{ takenOver: true }` takes the browser over and with `false` hands it back, then
- * answers the state with status 200, or 500 with the failure. A read reports why the last take over did not finish
- * while the browser stays taken over.
+ * `access`, so Connection answers every non-owner Peer 403 before the route runs. GET answers the
+ * {@link TakeoverState} that browser consent reports; POST with `{ takenOver: true }` takes the browser over and with
+ * `false` hands it back, then answers the state with status 200, or 500 with the failure.
  * @param ctx - context carrying Connection and browser consent; owns the route's lifetime.
  */
 function serveTakeover(ctx: Context): void {
   const takeover = ctx['mumbo-browser-consent']
-  /** Why the last take over did not finish; cleared by a change that succeeds. */
-  let unfinished: string | undefined
-  const state = (failure?: string): TakeoverState => ({ takenOver: takeover.takenOver, ...failure === undefined ? {} : { failure } })
+  const state = (failure?: string): TakeoverState => ({ hold: takeover.hold, ...failure === undefined ? {} : { failure } })
   ctx.connection.fetch.register({
     path: BROWSER_TAKEOVER_PATH, methods: ['GET', 'POST'], requestBody: 'buffered',
     fetch: async (request) => {
-      if (request.method === 'GET') return Response.json(state(takeover.takenOver ? unfinished : undefined))
+      if (request.method === 'GET') return Response.json(state())
       let takenOver: boolean
       try {
         // The schema checks the body the type names.
@@ -96,12 +93,10 @@ function serveTakeover(ctx: Context): void {
       }
       try {
         await (takenOver ? takeover.takeOver() : takeover.handBack())
-        unfinished = undefined
         return Response.json(state())
       } catch (error: unknown) {
         const failure = error instanceof Error ? error.message : String(error)
         ctx.logger.warn(`mumbo-box-links: ${takenOver ? 'taking over' : 'handing back'} the browser failed: ${failure}`)
-        if (takenOver) unfinished = failure
         return Response.json(state(failure), { status: 500 })
       }
     },

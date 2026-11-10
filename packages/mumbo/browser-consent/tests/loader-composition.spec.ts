@@ -612,13 +612,17 @@ describe('take over', () => {
   const record = (root: string) => join(root, 'mumbo', 'browser-takeover')
   /** Each call the browser received, by name and action. */
   const received = async (loaded: Awaited<ReturnType<typeof load>>) => (await loaded.allCalls()).map(call => `${call.name}${call.args.action === undefined ? '' : ` ${call.args.action}`}`)
-  /** A `computer` tool that records each action and, with `stall`, runs until its call is stopped. */
-  const desktop = (inputs: string[] = []) => ({ inject: ['tools'], apply(ctx: Context) {
+  /**
+   * A `computer` tool that records each action, finishes each only once `gate` settles, whether or not its call was
+   * stopped, and, with `stall`, runs until its call is stopped.
+   */
+  const desktop = (inputs: string[] = [], gate?: Promise<void>) => ({ inject: ['tools'], apply(ctx: Context) {
     ctx.tools.register(defineContentToolFixture({
       name: 'computer', description: 'Desktop.', parameters: { action: { type: 'string', required: true }, stall: { type: 'boolean' } },
-      execute: (args, exec) => {
+      execute: async (args, exec) => {
         inputs.push(args.action)
-        if (args.stall !== true) return Promise.resolve([{ type: 'text', text: `${args.action} done` }])
+        if (gate !== undefined) await gate
+        if (args.stall !== true) return [{ type: 'text', text: `${args.action} done` }]
         return new Promise((_resolve, reject) => { exec.signal.addEventListener('abort', () => { reject(new Error('stopped')) }) })
       },
     }))
@@ -636,14 +640,14 @@ describe('take over', () => {
       script: [{ name: 'browser_navigate', args: { url: 'http://allowed.test/next' } }, { name: 'computer', args: { action: 'screenshot' } }],
     })
     const takeover = takeoverOf(loaded)
-    expect(takeover.takenOver).toBe(false)
+    expect(takeover.hold).toEqual({ kind: 'free' })
     // An Agent-less read reaches no browser whether or not the person has it.
     expect(textOf(await direct(loaded, tool('browser_snapshot'), {}, false))).toMatch(/browser tool belongs to another Session/u)
     // Handing back a browser the person does not have changes nothing, and a Session that never called the browser has
     // no connection to close.
     await takeover.handBack()
     await takeover.takeOver()
-    expect(takeover.takenOver).toBe(true)
+    expect(takeover.hold).toEqual({ kind: 'held' })
     expect(await received(loaded)).toEqual([])
 
     for (const schema of browserTools(loaded)) {
@@ -662,7 +666,7 @@ describe('take over', () => {
 
     // Handing back reconnects by reading the tabs; the next take over closes that connection.
     await takeover.handBack()
-    expect(takeover.takenOver).toBe(false)
+    expect(takeover.hold).toEqual({ kind: 'free' })
     expect(await received(loaded)).toEqual(['browser_tabs list'])
     expect(textOf(await direct(loaded, tool('browser_snapshot'), {}))).toContain('- Page URL: http://allowed.test/')
     expect(textOf(await direct(loaded, 'computer', { action: 'screenshot' }))).toBe('screenshot done')
@@ -723,6 +727,27 @@ describe('take over', () => {
     expect(inputs).toEqual([])
   })
 
+  it('reports the takeover as taking until the calls in flight settle and the browser connection closes', { timeout: 60_000 }, async () => {
+    const inputs: string[] = []
+    const gate = Promise.withResolvers<undefined>()
+    const loaded = await load({ before: [['desktop', desktop(inputs, gate.promise)]], start: 'http://allowed.test/' })
+    const takeover = takeoverOf(loaded)
+    await direct(loaded, tool('browser_snapshot'), {})
+    // A desktop call that keeps running past its stop until the test lets it finish.
+    const screenshot = run(loaded, 'computer', { action: 'screenshot' }, 'screenshot')
+    await expect.poll(() => inputs).toEqual(['screenshot'])
+    const taken = takeover.takeOver()
+    expect(takeover.hold).toEqual({ kind: 'taking' })
+    // The take over waits for that call before it closes the browser connection.
+    expect(await received(loaded)).toEqual(['browser_snapshot', 'browser_tabs list'])
+    expect(takeover.hold).toEqual({ kind: 'taking' })
+    gate.resolve(undefined)
+    await taken
+    expect(takeover.hold).toEqual({ kind: 'held' })
+    expect(await received(loaded)).toEqual(['browser_snapshot', 'browser_tabs list', 'browser_close'])
+    expect(textOf(await screenshot)).toBe(stopped('computer'))
+  })
+
   it('keeps the browser taken over across a restart until the person hands it back', { timeout: 60_000 }, async () => {
     const first = await load({ start: 'http://allowed.test/' })
     await takeoverOf(first).takeOver()
@@ -731,7 +756,7 @@ describe('take over', () => {
     await first.ctx.fiber.dispose()
 
     const second = await load({ root: first.root, start: 'http://allowed.test/' })
-    expect(takeoverOf(second).takenOver).toBe(true)
+    expect(takeoverOf(second).hold).toEqual({ kind: 'held' })
     expect(textOf(await direct(second, tool('browser_snapshot'), {}))).toBe(refused('browser_snapshot'))
     expect(await received(second)).toEqual([])
     await takeoverOf(second).handBack()
@@ -744,10 +769,10 @@ describe('take over', () => {
     const takeover = takeoverOf(loaded)
     await takeover.takeOver()
     await Promise.all([takeover.handBack(), takeover.takeOver()])
-    expect(takeover.takenOver).toBe(true)
+    expect(takeover.hold).toEqual({ kind: 'held' })
     expect((await stat(record(loaded.root))).isFile()).toBe(true)
     await Promise.all([takeover.takeOver(), takeover.handBack()])
-    expect(takeover.takenOver).toBe(false)
+    expect(takeover.hold).toEqual({ kind: 'free' })
     await expect(stat(record(loaded.root))).rejects.toThrow(/ENOENT/u)
   })
 
@@ -757,12 +782,16 @@ describe('take over', () => {
     roots.push(unchecked)
     await writeFile(join(unchecked, 'mumbo'), '')
     const blocked = await load({ root: unchecked })
-    expect(takeoverOf(blocked).takenOver).toBe(true)
+    expect(takeoverOf(blocked).hold).toEqual({ kind: 'held' })
     const unreadable = `could not check ${record(unchecked)}, so the browser stays taken over until the person hands it back`
     expect(blocked.errors).toContainEqual(expect.stringContaining(unreadable))
     const unsaved = /^the takeover could not be saved, so a restart would hand the browser back: Error: /u
     await expect(takeoverOf(blocked).takeOver()).rejects.toThrow(unsaved)
-    expect(takeoverOf(blocked).takenOver).toBe(true)
+    const notSaved = { kind: 'unfinished', failure: expect.stringMatching(unsaved) as string }
+    expect(takeoverOf(blocked).hold).toEqual(notSaved)
+    // A hand back that fails leaves the take over reported unfinished.
+    await expect(takeoverOf(blocked).handBack()).rejects.toThrow(/ENOTDIR/u)
+    expect(takeoverOf(blocked).hold).toEqual(notSaved)
 
     // A record that cannot be removed keeps the browser taken over.
     const stuck = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-'))
@@ -770,7 +799,7 @@ describe('take over', () => {
     await mkdir(join(record(stuck), 'entry'), { recursive: true })
     const kept = await load({ root: stuck })
     await expect(takeoverOf(kept).handBack()).rejects.toThrow()
-    expect(takeoverOf(kept).takenOver).toBe(true)
+    expect(takeoverOf(kept).hold).toEqual({ kind: 'held' })
 
     // A connection that does not close is reported on each attempt, and the browser stays taken over.
     const open = await load({ start: 'http://allowed.test/noclose' })
@@ -778,7 +807,7 @@ describe('take over', () => {
     for (let attempt = 0; attempt < 2; attempt++) {
       await expect(takeoverOf(open).takeOver()).rejects.toThrow('a browser connection did not close: browser_close failed: fixture failure')
     }
-    expect(takeoverOf(open).takenOver).toBe(true)
+    expect(takeoverOf(open).hold).toEqual({ kind: 'unfinished', failure: 'a browser connection did not close: browser_close failed: fixture failure' })
     expect(await received(open)).toEqual(['browser_snapshot', 'browser_tabs list', 'browser_close', 'browser_close'])
   })
 

@@ -67,10 +67,11 @@ When the bootstrap also carries `takeover: true`, which the Host puts only in th
 | State | Bar | Action |
 |---|---|---|
 | The assistant has the browser | `Mumbo can use this browser. Take over to sign in or type something private.` | Take over |
-| The person has it | `You have the browser. Mumbo can't see or use it until you hand it back.` | Hand back |
+| A take over is still closing the assistant's browser connections | A warning that taking over has not finished, saying not to type anything private yet | Try again, which takes over again and answers once the earlier take over finished, and Hand back |
+| The person has it, with no assistant connection open | `You have the browser. Mumbo can't see or use it until you hand it back. Before you do, close any tab you typed something private in.` | Hand back |
 | A take over did not finish | A warning naming the failure and saying not to type anything private yet | Try again, which takes over again, and Hand back |
 
-While a change runs, the bar's buttons are disabled and the pressed one reads `Taking over…` or `Handing back…`. A failed hand back shows its failure above the bar, which stays on the person's state; a read that gets no state shows why with a Try again button. The Desktop tab shows the same live view without the bar: Take over belongs to the Browser tab, and the takeover holds whichever tab the person types in.
+The state comes from browser consent's [hold](../browser-consent/README.md#take-over), so a reload, a second device, or a reloaded plugin reads the same state. While a change runs, the bar's buttons are disabled and the pressed one reads `Taking over…` or `Handing back…`. A failed hand back shows its failure above the bar, which stays on the person's state, including the warning of a take over that did not finish; a read that gets no state shows why with a Try again button. The Desktop tab shows the same live view without the bar: Take over belongs to the Browser tab, and the takeover holds whichever tab the person types in.
 
 A desktop app's local browser takes the Browser tab over by registering kind `box-browser` in the `extension` band with its own id and body: the right panel then renders that body for every `box-browser` tab and falls back to the live view when the registration leaves. Using the guide entry id `open` keeps the person's guide pin choice across the takeover. Nothing else in the product names the live view.
 
@@ -101,8 +102,8 @@ The desktop the edge starts must meet these conditions:
 
 With `browser`, while the `connection` service and browser consent's `mumbo-browser-consent` service are present, the Host half registers the exact Connection route `/api/box-links.browser-takeover`. Like the Chrome call it declares no `access`, so Connection answers every non-owner Peer 403 before the route runs.
 
-- `GET` answers 200 with JSON `{ "takenOver": boolean }`, adding `failure` while the browser stays taken over after a take over that did not finish.
-- `POST` with the JSON body `{ "takenOver": true }` takes the browser over and with `false` hands it back, through the [consent service](../browser-consent/README.md#take-over). It answers once the change finished: 200 with the state, or 500 with the state and the `failure` text, which is also logged as a warning. A take over answers only after the assistant's browser connections are closed, so the bar says the person has the browser only once that holds.
+- `GET` answers 200 with JSON `{ "hold": { "kind": "free" | "taking" | "held" | "unfinished" } }`, the consent service's [hold](../browser-consent/README.md#take-over); `unfinished` adds the take over's `failure` inside `hold`.
+- `POST` with the JSON body `{ "takenOver": true }` takes the browser over and with `false` hands it back, through the consent service. It answers once the change finished: 200 with the state, or 500 with the state and the change's `failure` text beside `hold`, which is also logged as a warning. The hold is `held` only after the assistant's browser connections are closed, so the bar says the person has the browser only once that holds.
 - Any other body answers 400 with plain text.
 
 The Browser tab does not abort a change when it hides, and the Host finishes it either way. Unloading the plugin or browser consent removes the route.

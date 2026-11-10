@@ -4,12 +4,13 @@ import type { ReactNode } from 'react'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
+import { assertNever } from '@deepseek-ai/dsh-util-values'
 import type { TakeoverState } from '../config.ts'
 import type {} from './locales.ts'
 import css from './LiveView.module.css'
 
 /** The Host's take-over state, or why it did not arrive. */
-export type TakeoverAnswer = TakeoverState | { readonly takenOver?: undefined; readonly failure: string }
+export type TakeoverAnswer = TakeoverState | { readonly hold?: undefined; readonly failure: string }
 
 /** The Browser tab's calls to the owner-only take-over route. */
 export interface TakeoverCalls {
@@ -89,8 +90,9 @@ interface TakeoverProps {
 
 /**
  * Read who has the browser each time the tab shows, and offer Take over or Hand back. While a change runs, both
- * buttons are disabled and the pressed one says what is happening. A take over that did not finish says so, and that
- * the person should not type anything private yet, with a retry and Hand back.
+ * buttons are disabled and the pressed one says what is happening. A take over that is still closing the assistant's
+ * browser connections, or that did not finish, warns the person not to type anything private yet, with a retry and
+ * Hand back; only a finished take over says the person has the browser.
  */
 function Takeover({ visible, calls, t }: TakeoverProps): ReactNode {
   /** The Host's last answer and the request that produced it. */
@@ -112,7 +114,7 @@ function Takeover({ visible, calls, t }: TakeoverProps): ReactNode {
     })
   }
   const { answer, request } = shown
-  if (answer.takenOver === undefined) {
+  if (answer.hold === undefined) {
     return (
       <div className={css.failure} role="alert">
         <span className={css.message}>{t('takeover.unknown', { detail: answer.failure })}</span>
@@ -120,42 +122,50 @@ function Takeover({ visible, calls, t }: TakeoverProps): ReactNode {
       </div>
     )
   }
-  const { takenOver, failure } = answer
-  // A failed take over leaves the browser refused to Mumbo but maybe still connected; a failed hand back leaves it taken over.
-  const unfinished = takenOver && request !== 'hand' ? failure : undefined
-  const notHandedBack = request === 'hand' ? failure : undefined
+  const { hold, failure } = answer
   const button = (action: 'take' | 'hand', label: string): ReactNode => (
     <Button variant="outline" size="sm" disabled={pending !== undefined} onClick={() => { change(action) }}>{label}</Button>
   )
-  if (!takenOver) {
-    return (
-      <div className={css.bar} role="status">
-        <span className={css.message}>{t('takeover.free')}</span>
-        {button('take', pending === 'take' ? t('takeover.taking') : t('takeover.take'))}
-      </div>
-    )
-  }
   const handBack = button('hand', pending === 'hand' ? t('takeover.handing') : t('takeover.handBack'))
-  if (unfinished !== undefined) {
-    return (
-      <div className={css.unfinished} role="alert">
-        <span className={css.message}>{t('takeover.unfinished', { detail: unfinished })}</span>
-        {button('take', pending === 'take' ? t('takeover.taking') : t('browser.retry'))}
-        {handBack}
-      </div>
-    )
-  }
-  return (
-    <>
-      {notHandedBack !== undefined && (
-        <div className={css.failure} role="alert">
-          <span className={css.message}>{t('takeover.notHandedBack', { detail: notHandedBack })}</span>
-        </div>
-      )}
-      <div className={css.held} role="status">
-        <span className={css.message}>{t('takeover.held')}</span>
-        {handBack}
-      </div>
-    </>
+  // A failed hand back leaves the browser as it was, so its failure shows above the bar of the person's hold.
+  const notHandedBack = request === 'hand' && failure !== undefined && (
+    <div className={css.failure} role="alert">
+      <span className={css.message}>{t('takeover.notHandedBack', { detail: failure })}</span>
+    </div>
   )
+  switch (hold.kind) {
+    case 'free':
+      return (
+        <div className={css.bar} role="status">
+          <span className={css.message}>{t('takeover.free')}</span>
+          {button('take', pending === 'take' ? t('takeover.taking') : t('takeover.take'))}
+        </div>
+      )
+    case 'taking':
+    case 'unfinished':
+      // The assistant is refused, but one of its browser connections may still be open.
+      return (
+        <>
+          {notHandedBack}
+          <div className={css.unfinished} role="alert">
+            <span className={css.message}>{hold.kind === 'taking' ? t('takeover.pending') : t('takeover.unfinished', { detail: hold.failure })}</span>
+            {button('take', pending === 'take' ? t('takeover.taking') : t('browser.retry'))}
+            {handBack}
+          </div>
+        </>
+      )
+    case 'held':
+      return (
+        <>
+          {notHandedBack}
+          <div className={css.held} role="status">
+            <span className={css.message}>{t('takeover.held')}</span>
+            {handBack}
+          </div>
+        </>
+      )
+    /* v8 ignore next -- closed-union exhaustiveness guard */
+    default:
+      return assertNever(hold, 'TakeoverHold')
+  }
 }
