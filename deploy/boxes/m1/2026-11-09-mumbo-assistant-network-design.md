@@ -718,7 +718,10 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
   - Replace Xvfb + x11vnc + websockify + noVNC with one X server that has the VNC server built in, so nothing polls.
   - **KasmVNC 1.5.2 or later** (decided after the 2026-11-10 research). It is a single Xvnc server that replaces Xvfb and x11vnc, with its own web client. It encodes changed rectangles as JPEG or WebP across threads, lowers quality during fast motion with a periodic lossless refresh, and has an H.264 video mode.
     - It drops into the X11 and XFCE setup, and its per-direction clipboard limits (size, type, rate) fit the consent model.
-    - Stay current on its releases: 1.5.1 and 1.5.2 fixed a web-server path traversal (CVE-2024-38449) and a WebSocket handshake overflow. The template pins the version and its checksum.
+    - Stay current on its releases: 1.3.2 fixed a web-server path traversal (CVE-2024-38449), and 1.5.2 a WebSocket handshake overflow. The template pins the version and its checksum.
+    - It runs as its own system user, `xvnc`.
+    - The live view's pages may connect only to their own host (`connect-src 'self' wss://<host>`). KasmVNC's client otherwise connects wherever its URL says, and would send the clipboard there.
+    - The public host sends `Cross-Origin-Opener-Policy: same-origin-allow-popups`, so no other origin keeps a handle to post messages into the live view.
   - **Starting settings:** 30 frames a second at most; 2 encoder threads, where KasmVNC defaults to every core and would starve Chrome; text-only clipboard with size and rate limits.
   - It is served on the same port and the same `/desktop/` path. KasmVNC's own login and TLS are off: the edge terminates TLS and stays the only gate, raw ports stay loopback-only, and the edge's Origin checks apply unchanged.
     - No stream URL ever works without the person's edge sign-in. Bearer stream links (Steel's are unauthenticated) are not used.
@@ -878,10 +881,19 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
     - The panel's Chrome launcher brings the loop's Chrome to the front and never starts a second Chrome as `xsession`.
     - The person keeps the desktop terminal, as `xsession`.
     - **What remains:** a process on the display can still drive Chrome's window without consent, because X11 has no isolation between clients. Getting one needs a consented computer-use action. The X SECURITY extension's untrusted clients are a later option.
+  - **No other user can take over dsh's or the live view's port.**
+    - Whatever answers on `$ip:3080` or `$ip:6080` serves pages on the app's own origin. If dsh or KasmVNC died, a process that bound the port first could serve script there, or register a service worker that outlives the box in the person's browser.
+    - So `net.ipv4.ip_unprivileged_port_start=6081`: only root, or a binary given `cap_net_bind_service` (`Xkasmvnc`), may bind below it. Chrome's `9222` stays above it.
+    - Escape test: `agent` binding either port fails.
   - **`/proc` is mounted with `hidepid=2`** (or `hidepid=invisible`), so one user can't see another's processes or their command lines, such as the text `xdotool type` was given.
   - **The first-run welcome's marker and message** move to an `agent`-readable place, such as `/home/agent/.mumbo-welcome`, because hooks run as `agent`. A root hook would be a model-reachable root path.
   - **Playwright MCP's output directory** is `browsermcp`-owned, `0700`, and outside backups.
-  - **An MCP server the person adds from the panel** runs as `agent` in boxes, never as root. The composition gate rejects a stdio server without an identity in box compositions.
+  - **An MCP server the person adds from the panel** runs as its own user, `mcpserver`, never as root or as `agent`. Its credentials (`${credential:…}` in its environment) must not be readable by the model's shell.
+    - `mcpserver` has no `shared` group and no CDP, and its egress is limited like `agent`'s.
+    - Its working directory is its own home, and no model-writable directory is on its `PATH` or `NODE_PATH`.
+    - It has no workspace access unless a box switch grants it (`mcpServerWorkspace: none | read | readwrite`, default none). A server running in a model-writable directory could be fed planted code or configuration, with the person's credentials in its environment.
+    - All panel servers share the one user, so they can read each other's environment. That is accepted for now; they are all the person's own choices.
+    - The composition gate rejects a stdio server without an identity in box compositions. The MCP client never falls back to starting servers as root in boxes.
   - **Downloads** are `/home/shared/Downloads`, owned by `browser:shared` with mode `2770`; `agent` and `browser` are both in `shared`. Chrome's `DownloadDirectory` policy points there, and it is a model root. `/home/browser` stays `0700`, and backups include `/home/shared`.
   - **A composition gate:** a test lists every model-visible tool in the box compositions with how it runs (root in-process, or "run as"), and fails on a tool it doesn't know. A new plugin can't quietly reopen this.
   - **A working directory never extends the model roots.**
