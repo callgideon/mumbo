@@ -938,9 +938,9 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
   - `git` on a model-writable repository never runs as root. The repository's own config and hooks (`core.fsmonitor`, hooks, filter and textconv drivers) run code, so dsh's change summaries and anything else that runs `git` on the workspace use "run as". The workspace-changes scratch directory needs a harness follow-up for that.
   - `/src` (the dsh code root runs) is read-only for `agent`.
   - **Every helper process that acts on the model's behalf runs under a non-root identity of its own** through the same "run as" seam, never as root:
-    - **Playwright MCP** runs as `browsermcp`. That user alone, beside root, may reach the debugging port. It reads only the model roots and the shared Downloads, so the kernel enforces the upload limit.
+    - **Playwright MCP** runs as `browsermcp`. That user alone, beside root, may reach the debugging port. It reads only the shared Downloads, so the kernel enforces the upload limit.
       - `browser_run_code_unsafe`, which runs model code inside that server, is hard-denied. In-page `browser_evaluate` keeps asking.
-      - `browser_file_upload` paths are limited to the model roots and the shared Downloads.
+      - `browser_file_upload` paths are limited to the shared Downloads. The agent copies a file there first, so `browsermcp` needs no workspace access.
       - The edge never mounts a browser provider without consent: the plain fallback row is gone.
     - **Computer use** runs `xdotool` as `desktop`, the one user beside `browser` that may read the X authority file.
       - Every model-derived argument passes a strict check: numbers for coordinates; key names from a fixed pattern; typed text only as the final argument after `type --`. So no argument can chain another `xdotool` command, such as `exec`.
@@ -952,7 +952,8 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
     - The gh wrapper the agent calls lives in `/usr/local/lib/mumbo/bin`, root-owned and readable by all. The box CA certificate is the copy in `/usr/local/share/ca-certificates/mumbo-box.crt`.
   - **The XFCE session runs as its own user, `xsession`. Only Chrome runs as `browser`,** through its restart loop.
     - Any X client can inject input. So a terminal or run dialog that computer use opens on the desktop must not land a shell that can read Chrome's `Login Data` and `Cookies`.
-    - `xsession` is in `shared` (Downloads) and has the workspace through its group, nothing else.
+    - `xsession` is in `shared` (Downloads) and the dedicated workspace group, nothing else.
+  - **The workspace's group is a dedicated one** (not `agent`'s primary group, which opens every `root:agent 2750` directory). Its members are `agent`, `xsession` and, when `mcpServerWorkspace` allows, `mcpserver`. The model roots give `other` no permissions.
     - The panel's Chrome launcher brings the loop's Chrome to the front and never starts a second Chrome as `xsession`.
     - The person keeps the desktop terminal, as `xsession`.
     - **What remains:** a process on the display can still drive Chrome's window without consent, because X11 has no isolation between clients. Getting one needs a consented computer-use action. The X SECURITY extension's untrusted clients are a later option.
