@@ -76,18 +76,21 @@ const PINNED_COPY = join(PACKAGES_DIR, 'mumbo', 'superagent')
 
 /**
  * Every file shipped as package source whose name the predicate accepts,
- * excluding build output, installed dependencies and PINNED_COPY.
+ * excluding build output, installed dependencies and, unless asked for,
+ * PINNED_COPY.
  * @param accepts - filename predicate.
+ * @param options - `pinnedCopy: true` also walks PINNED_COPY, for the rules
+ *   its stylesheet follows.
  * @returns absolute paths under packages/, `/`-separated on every platform so
  *   specs can match repo-relative suffixes verbatim.
  */
-export function packageFiles(accepts: (name: string) => boolean): string[] {
+export function packageFiles(accepts: (name: string) => boolean, { pinnedCopy = false }: { pinnedCopy?: boolean } = {}): string[] {
   const found: string[] = []
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name)
       if (entry.isDirectory()) {
-        if (entry.name !== 'node_modules' && entry.name !== 'lib' && entry.name !== 'dist' && path !== PINNED_COPY) walk(path)
+        if (entry.name !== 'node_modules' && entry.name !== 'lib' && entry.name !== 'dist' && (pinnedCopy || path !== PINNED_COPY)) walk(path)
       } else if (accepts(entry.name)) found.push(path.replaceAll('\\', '/'))
     }
   }
@@ -97,8 +100,9 @@ export function packageFiles(accepts: (name: string) => boolean): string[] {
 
 /**
  * Every CSS file shipped as package source.
+ * @param options - as for {@link packageFiles}.
  * @returns absolute stylesheet paths, `/`-separated on every platform.
  */
-export function packageStylesheets(): string[] {
-  return packageFiles(name => name.endsWith('.css'))
+export function packageStylesheets(options?: { pinnedCopy?: boolean }): string[] {
+  return packageFiles(name => name.endsWith('.css'), options)
 }
