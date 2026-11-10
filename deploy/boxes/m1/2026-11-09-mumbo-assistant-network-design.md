@@ -741,7 +741,7 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
   - Nothing else in the product names the live view, so N2 needs no change here.
 - **Google Chrome replaces Debian's Chromium** **[my call; follows the founder's ask]**.
   - Google turned Sync off for Chromium builds, so a profile that syncs with the person's Google account needs Google Chrome stable, from Google's apt repository (amd64; nodes are x86_64).
-  - **The existing profile directory is kept.** Chrome opens a Chromium profile last used by a version no newer than itself. Otherwise the box starts a fresh profile and keeps the old directory aside.
+  - **Chrome starts on a fresh, empty profile** **[founder: 2026-11-10]**. The old Chromium profile may hold saved passwords that still autofill. It is moved aside, excluded from backups and unused, and deleted as a step of B24's rollout. The person signs in to sites again; their Google sync brings the rest back.
   - The debugging port stays on loopback with the box's own `--user-data-dir`. Chrome 136 and later honour the port only with a non-default profile directory, which this is.
   - **Updates.** Chrome updates with each template build. Rebuild the template at least every two weeks for Chrome security releases (RUNBOOK).
   - **Policies** in a root-owned `/etc/opt/chrome/policies/managed/mumbo.json`: `RestoreOnStartup: 1`, `DefaultBrowserSettingEnabled: false`, `MetricsReportingEnabled: false`, plus the password rule below.
@@ -810,6 +810,7 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
     - **Computer use** runs `xdotool` as `desktop`, the one user beside `browser` that may read the X authority file.
       - Every model-derived argument passes a strict check: numbers for coordinates; key names from a fixed pattern; typed text only as the final argument after `type --`. So no argument can chain another `xdotool` command, such as `exec`.
       - The composition gate lists it.
+    - **The Browser tab's `wmctrl`** (B20) runs as `desktop` too. It isn't model-reachable, but root must never be a client of an X server that a less-privileged user (`browser`) runs.
   - **Read-only roots.** The attachment and skill directories the model needs are listed exactly, never `/root/.dsh` itself and never a credentials store. They are checked the same way as the model roots, and changes there are refused.
   - **Project boxes** add `/root/work`, owned by `agent`, to the model roots. `/root/.mumbo` is `0711`, with `bin/` and `ca/ca.crt` readable, and `ca/ca.key` and the rest root-only.
   - **Downloads** are `/home/shared/Downloads`, owned by `browser:shared` with mode `2770`; `agent` and `browser` are both in `shared`. Chrome's `DownloadDirectory` policy points there, and it is a model root. `/home/browser` stays `0700`, and backups include `/home/shared`.
@@ -862,6 +863,9 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
   - `browser_network_request` is refused outright.
   - The request list stays a read only if it shows no headers or bodies; otherwise it is refused too.
 - **Before B18 deploys** (Chrome with every sync type), the masking patch, the output directory and the network-request denial are live. That doesn't wait for B24, but nothing sends a saved password to a model provider in the meantime.
+- **Until B25 is live**, request details carry session cookies whatever is synced.
+  - The designer's condition was no agent browser rows (consent or fallback) and no computer-use row in person boxes until B25.
+  - **Informed founder decision** **[founder: 2026-11-10]**: agent browsing stays on for the few hours until B25 deploys, with that risk stated plainly. The hotfix that removes the rows was built and held.
 - **Today's Chromium** may already hold passwords the founder saved. Until the masking is live, a managed policy for it (B27: `PasswordManagerEnabled: false`, `AutofillCreditCardEnabled: false`) stops new saves and card fills.
   - Passwords saved before the policy still autofill (Chrome's documented behaviour), so any such passwords are deleted from that Chromium, or the masking ships first.
 - **Chrome's `URLBlocklist`** blocks the internal pages for everyone in the box's Chrome, the person included, because computer use drives Chrome without going through browser-consent:
