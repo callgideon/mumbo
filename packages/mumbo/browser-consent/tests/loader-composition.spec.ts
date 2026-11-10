@@ -217,6 +217,24 @@ describe('browser write consent in the person-box composition', () => {
     }
   })
 
+  it('mounts no browser when the subprocess service refuses the server\'s identity, and Sessions still start', { timeout: 60_000 }, async () => {
+    const checked: string[] = []
+    const subprocess = { apply(ctx: Context) {
+      ctx.provide('subprocess', { serverHome(identity: string): never {
+        checked.push(identity)
+        throw new Error(`subprocess-local: identities.${identity} set.HOME "/home/${identity}" must be writable by no other user`)
+      } })
+    } }
+    const browser = { mode: 'attach', endpoint: 'http://127.0.0.1:9', identity: 'browsermcp', outputDir: '/var/lib/mumbo/playwright-output' }
+    // The composition creates its Session after load, which rejects when a Session's creation fails.
+    const refused = await load({ before: [['subprocess', subprocess]], consent: { browser } })
+    expect(checked).toEqual(['browsermcp'])
+    expect(refused.consentFiber?.state).toBe(ACTIVE)
+    expect(refused.errors).toContainEqual(expect.stringContaining('subprocess-local: identities.browsermcp set.HOME "/home/browsermcp" must be writable by no other user'))
+    expect(refused.ctx.browserUse.providerName).toBeUndefined()
+    expect(browserTools(refused)).toEqual([])
+  })
+
   it('refuses every tool of a provider row that loaded ahead of consent', { timeout: 60_000 }, async () => {
     const rival = { inject: PlaywrightBrowser.inject, async apply(ctx: Context) {
       await ctx.plugin(PlaywrightBrowser, { mode: 'attach', endpoint: 'http://127.0.0.1:9' })

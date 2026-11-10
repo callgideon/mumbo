@@ -51,6 +51,9 @@
       "path": "../../util/values"
     },
     {
+      "path": "../../subprocess/subprocess"
+    },
+    {
       "path": "../../session/working-directory"
     }
   ]

@@ -18,6 +18,7 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { McpResult } from '@deepseek-ai/dsh-mcp-client'
 import type { Session } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-subprocess'
 import type { ToolExecution, ToolExecutionResult, ToolExecutionToken, PreToolDecision } from '@deepseek-ai/dsh-tools'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
@@ -941,11 +942,14 @@ export function apply(ctx: Context, config: Config): void {
       reportRival(ctx, current)
       throw new Error(`${name}: browser provider "${current}" took browserUse before this plugin's browser started`)
     }
+    // Checked here, where a refused identity fails only the browser; each Session's server start would fail the Session.
+    if (browser.identity !== undefined) child.subprocess.serverHome(browser.identity)
     applyProvider(child, browser)
     child.effect(() => {
       owned = true
       return () => { owned = false }
     })
   }
-  ctx.plugin({ name: providerName, inject: [...inject, GATE], Config: ProviderConfig, apply: applyOwned }, config.browser)
+  const identityServices = config.browser.identity === undefined ? [] : ['subprocess']
+  ctx.plugin({ name: providerName, inject: [...inject, GATE, ...identityServices], Config: ProviderConfig, apply: applyOwned }, config.browser)
 }
