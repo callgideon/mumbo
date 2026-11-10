@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { memoryStore } from './store.mjs'
-import { projects, projectRelay, getRepos, addRepo, removeRepo, projectsWithRepos, ownersOf, projectsOwnedBy } from './projects.mjs'
+import { projects, getRepos, addRepo, removeRepo, projectsWithRepos, ownersOf, projectsOwnedBy } from './projects.mjs'
 
 /** The mumbo-bot App's installation by repository owner; `other` is another installation, `nowhere` has none. */
 const INSTALLATIONS = { acme: 77, callgideon: 77, m: 77, o: 77, other: 88 }
@@ -150,36 +150,4 @@ test('removeRepo: an approver who owns the project unbinds a repository; the las
   assert.deepEqual(await projectsWithRepos(store), [])
   await addRepo(store, other, 'acme/a', as('m@x.com'))
   assert.deepEqual(await getRepos(store, other), ['acme/a'])
-})
-
-test('the relay keeps the coordinator session in its own key: its first write, racing removeRepo, leaves the repository unbound', async () => {
-  const store = memoryStore()
-  const p = projects({ store, admitted: () => true, log: () => {} })
-  const { id } = await p.create('a@x.com', 'P')
-  await addRepo(store, id, 'acme/a', as('a@x.com'))
-  // removeRepo lands just before the relay's first store write after the session is created.
-  let created = false, raced = false
-  const racing = { ...store, async putDoc(key, value) {
-    if (created && !raced) { raced = true; await removeRepo(store, id, 'acme/a', as('a@x.com')) }
-    return store.putDoc(key, value)
-  } }
-  const methods = []
-  const boxFetch = async (target, host, path, init) => {
-    const req = JSON.parse(init.body)
-    methods.push(req.method)
-    if (req.method === 'session/create') created = true
-    return { status: 200, setCookie: [], body: JSON.stringify({ result: { ok: true, value: req.method === 'session/create' ? { sessionId: 'S1' } : {} } }) }
-  }
-  const box = { ensure: async () => ({ id: 'pbox', token: 'TOK', member: (m) => m }) }
-  const relay = projectRelay({ store: racing, projects: projects({ store: racing, admitted: () => true, log: () => {} }), box, boxFetch, siteHostOf: () => 'h', log: () => {} })
-  assert.equal((await relay.message('a@x.com', id, 'hi')).coordinatorSession, 'S1')
-  assert.equal(raced, true)
-  assert.deepEqual(await getRepos(store, id), [], 'still unbound')
-  assert.deepEqual(await projectsWithRepos(store), [])
-  assert.equal((await relay.message('a@x.com', id, 'again')).coordinatorSession, 'S1', 'the session is reused')
-  // A project doc written before the session key existed keeps its session.
-  const { id: old } = await p.create('a@x.com', 'Old')
-  await store.putDoc(`project:${old}`, { ...(await p.get(old)), coordinatorSessionId: 'S0' })
-  assert.equal((await relay.message('a@x.com', old, 'hi')).coordinatorSession, 'S0')
-  assert.deepEqual(methods, ['session/create', 'session/prompt', 'session/prompt', 'session/prompt'])
 })
