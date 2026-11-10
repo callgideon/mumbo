@@ -1,23 +1,29 @@
 /**
  * Reads free, writes ask, denied pages never: consent for the assistant's actions in a person's own signed-in Chromium
  * and on their desktop. The plugin mounts the Playwright MCP browser provider itself, so the browser tools exist only
- * while consent is loaded and valid.
+ * while consent is loaded and valid. While the person has taken the browser over, it refuses every browser and desktop
+ * call and keeps no browser connection open.
  * @module @mumbo/browser-consent
  */
 
+import { statSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-agent'
+import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import type {} from '@deepseek-ai/dsh-browser-use'
 import * as PlaywrightBrowser from '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp'
+import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { McpResult } from '@deepseek-ai/dsh-mcp-client'
 import type { Session } from '@deepseek-ai/dsh-session'
-import type { ToolExecution, ToolExecutionResult, PreToolDecision } from '@deepseek-ai/dsh-tools'
+import type { ToolExecution, ToolExecutionResult, ToolExecutionToken, PreToolDecision } from '@deepseek-ai/dsh-tools'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import type {} from '@deepseek-ai/dsh-working-directory'
 import z from '@deepseek-ai/schemastery'
-import type { BrowserWriteGrant } from './types.ts'
+import type { BrowserHold, BrowserTakeover, BrowserWriteGrant } from './types.ts'
 
 export type * from './types.ts'
 
@@ -65,6 +71,15 @@ const FILE_LINES = [
 const OUTPUT_DIRECTORY = '.playwright-mcp'
 /** {@link denial} phrase for a URL that does not parse or a tab whose URL cannot be read. */
 const UNREADABLE = 'a page whose address cannot be read'
+/** Why a browser or desktop call does not run, and the failure of a consent read that a takeover stopped. */
+const TAKEN_OVER = 'the person has taken over the browser'
+/** How long a takeover lasts, as the model is told with each refusal. */
+const UNTIL_HANDED_BACK = 'Browser and desktop tools stay unavailable until they hand it back.'
+
+/** The refusal of a browser or desktop call, named `tool`, that the person's takeover kept from running. */
+function takenOverRefusal(tool: string): string {
+  return `${tool} did not run: ${TAKEN_OVER}. ${UNTIL_HANDED_BACK}`
+}
 
 /** Upstream tools that only read the page or browser state, plus history navigation. */
 const READS: ReadonlySet<string> = new Set([
@@ -400,6 +415,8 @@ async function readBrowser(ctx: Context, exec: ToolExecution, tool: string, args
   const definition = ctx.tools.get(PREFIX + tool, exec.agent)
   if (definition === undefined) return { failure: `the browser has no ${tool} tool` }
   try {
+    // A read whose call was stopped before it began, such as by a takeover, never reaches the browser.
+    exec.signal.throwIfAborted()
     const result = await definition.execute(args, { ...exec, ...INERT_RUN, name: PREFIX + tool, arguments: args }) as McpResult
     return { text: result.content.map(block => (block as { text?: unknown }).text).filter(text => typeof text === 'string').join('\n') }
   } catch (error: unknown) {
@@ -430,6 +447,23 @@ const PROVIDER_TOOL_PREFIXES: Readonly<Record<string, string>> = {
 function reportRival(ctx: Context, holder: string): void {
   const prefix = PROVIDER_TOOL_PREFIXES[holder]
   ctx.logger.error(`browser provider "${holder}" holds browserUse without ${name}, so ${prefix === undefined ? 'its tools are not under consent' : `its tools (${prefix}*) are refused`}; remove the row that mounts it and mount the browser only through ${name}`)
+}
+
+/**
+ * Whether a takeover record exists. A record that cannot be checked counts as present, so the browser stays taken over
+ * until the person hands it back.
+ * @param ctx - plugin context carrying the logger.
+ * @param file - the takeover record.
+ */
+function recordedTakeover(ctx: Context, file: string): boolean {
+  try {
+    statSync(file)
+    return true
+  } catch (error: unknown) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return false
+    ctx.logger.error(`${name}: could not check ${file}, so the browser stays taken over until the person hands it back: ${String(error)}`)
+    return true
+  }
 }
 
 export function apply(ctx: Context, config: Config): void {
@@ -468,6 +502,50 @@ export function apply(ctx: Context, config: Config): void {
       : undefined
   }
   const toolOf = (exec: ToolExecution): string | undefined => exec.name.startsWith(PREFIX) ? exec.name.slice(PREFIX.length) : undefined
+  /** Present while the person has taken over the browser, so a Host restart keeps the takeover. */
+  const takeoverFile = join(resolveDshHome(), 'mumbo', 'browser-takeover')
+  /** Aborted while the person has the browser, which stops every browser and desktop call and consent read started before. */
+  let release = new AbortController()
+  if (recordedTakeover(ctx, takeoverFile)) release.abort()
+  /** Browser and desktop calls and consent reads that may still be running; a takeover waits for them to settle. */
+  const running = new Set<Promise<void>>()
+  /** Agents whose Playwright server received a call since this plugin last closed its browser connection. */
+  const connected = new WeakSet<Agent>()
+  /** Take-over and hand-back requests so far; a hand back yields to any request made after it. */
+  let requests = 0
+  /** Take-over steps queued or running. */
+  let taking = 0
+  /** Why the last take-over step failed; a later step that succeeds, or a hand back, clears it. */
+  let unfinished: string | undefined
+  /** The take-over and hand-back steps, which run one at a time. */
+  let changes = Promise.resolve()
+  /** The name a takeover refusal gives a browser or desktop call; `undefined` for every other tool. */
+  const takeoverTool = (exec: ToolExecution): string | undefined => toolOf(exec) ?? (exec.name === COMPUTER ? COMPUTER : undefined)
+  /** The refusal of a browser or desktop call while the person has the browser. */
+  const takeoverRefusal = (exec: ToolExecution): string | undefined => {
+    const tool = takeoverTool(exec)
+    return tool === undefined || !release.signal.aborted ? undefined : takenOverRefusal(tool)
+  }
+  /** Keep an operation among the running ones until it settles. */
+  const track = <T>(operation: Promise<T>): Promise<T> => {
+    const settled = operation.then(() => {}, () => {})
+    running.add(settled)
+    void settled.then(() => running.delete(settled))
+    return operation
+  }
+  /** One upstream read for a consent decision: refused while the person has the browser, and stopped when they take it. */
+  const readForConsent = async (exec: ToolExecution, agent: Agent, tool: string, args: Record<string, unknown>): Promise<BrowserRead> => {
+    const stop = release.signal
+    connected.add(agent)
+    const result = await track(readBrowser(ctx, { ...exec, signal: AbortSignal.any([exec.signal, stop]) }, tool, args))
+    return stop.aborted ? { failure: TAKEN_OVER } : result
+  }
+  /** A run context for one of this plugin's own browser calls for `agent`, outside any model call. */
+  const ownCall = (agent: Agent): ToolExecution => {
+    const callId = ToolCallId(name)
+    const token = Symbol(name) as ToolExecutionToken
+    return { callId, rootCallId: callId, token, name, arguments: {}, agent, signal: new AbortController().signal }
+  }
   /**
    * A refusal for a browser call that reads request details, saves its output to a file the call names, which would
    * outlive a withheld result and could overwrite workspace files, or whose `url` argument names a denied page.
@@ -496,7 +574,7 @@ export function apply(ctx: Context, config: Config): void {
    * current-tab line is resolved by the URL `hint` gives, when the line ends with it.
    */
   const readTabs = async (exec: ToolExecution, agent: Agent, hint: () => Promise<string | undefined>): Promise<TabRead> => {
-    const listing = await readBrowser(ctx, exec, TABS, { action: 'list' })
+    const listing = await readForConsent(exec, agent, TABS, { action: 'list' })
     if ('failure' in listing) return listing
     if (listedUrls(listing.text).some(isDenied)) shownDenied.add(agent.session)
     const url = currentTabUrl(listing.text) ?? currentTabUrl(listing.text, await hint())
@@ -518,9 +596,10 @@ export function apply(ctx: Context, config: Config): void {
     const approval = ctx.get('approval')
     if (approval === undefined) return unavailable
     const timeout = AbortSignal.timeout(config.approvalTimeoutMs)
+    // A takeover withdraws the question; the call is then refused like any call made while the person has the browser.
     const outcome: ApprovalOutcome = await approval.request({
       agent, toolName: exec.name, callId: exec.callId, reason, displayReason: { en: reason },
-      signal: AbortSignal.any([exec.signal, timeout]),
+      signal: AbortSignal.any([exec.signal, timeout, release.signal]),
     })
     switch (outcome) {
       case 'allowed-once':
@@ -542,7 +621,7 @@ export function apply(ctx: Context, config: Config): void {
   }
 
   ctx.tools.guard((exec) => {
-    const refusal = rivalRefusal(exec) ?? callRefusal(exec)
+    const refusal = takeoverRefusal(exec) ?? rivalRefusal(exec) ?? callRefusal(exec)
     if (refusal !== undefined) return refusal
     if (exec.name === COMPUTER) {
       const free = isScreenshot(exec.arguments) && showing === undefined
@@ -556,8 +635,9 @@ export function apply(ctx: Context, config: Config): void {
     return `${tool} needs the user's consent, which was not given.`
   })
 
-  ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
-    const refusal = rivalRefusal(exec) ?? callRefusal(exec)
+  /** Refuse a call, ask the person about it, or pass it to the listeners after this one. */
+  const decide = async (exec: ToolExecution, next: () => Promise<PreToolDecision>): Promise<PreToolDecision> => {
+    const refusal = takeoverRefusal(exec) ?? rivalRefusal(exec) ?? callRefusal(exec)
     if (refusal !== undefined) return { kind: 'deny', reason: refusal }
     const agent = exec.agent
     if (agent === undefined) return next()
@@ -579,7 +659,7 @@ export function apply(ctx: Context, config: Config): void {
     if (tool === undefined) return next()
     const { action, index } = fieldsOf(exec.arguments)
     if (tool === TABS && action === 'select') {
-      const listing = await readBrowser(ctx, exec, TABS, { action: 'list' })
+      const listing = await readForConsent(exec, agent, TABS, { action: 'list' })
       if ('failure' in listing) return { kind: 'deny', reason: `${tool} did not run: the tab it selects could not be checked (${listing.failure}).` }
       if (listedUrls(listing.text).some(isDenied)) shownDenied.add(agent.session)
       const selected = typeof index === 'number' ? tabUrl(listing.text, index) : undefined
@@ -592,7 +672,7 @@ export function apply(ctx: Context, config: Config): void {
     const kind = classify(tool, exec.arguments)
     if (kind === 'read') return next()
     let snapshot: BrowserRead | undefined
-    const readSnapshot = async (): Promise<BrowserRead> => (snapshot ??= await readBrowser(ctx, exec, SNAPSHOT, {}))
+    const readSnapshot = async (): Promise<BrowserRead> => (snapshot ??= await readForConsent(exec, agent, SNAPSHOT, {}))
     const tab = await readTabs(exec, agent, async () => {
       const read = await readSnapshot()
       return 'text' in read ? pageUrlOf(read.text) : undefined
@@ -625,13 +705,52 @@ export function apply(ctx: Context, config: Config): void {
       + (element === undefined ? '' : ` Model-written target description: ${element}.`) + uncovered
     const decision = await ask(exec, agent, `${tool} on ${where}`, reason)
     return decision === 'allowed' ? grant('approval') : decision
+  }
+  ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
+    const decision = await decide(exec, next)
+    // A takeover during the decision stops its reads and withdraws its question; the call is refused like a later one.
+    const refusal = takeoverRefusal(exec)
+    return refusal === undefined ? decision : { kind: 'deny', reason: refusal }
   }, { prepend: true })
+
+  /** The error that replaces a result, after deleting the files Playwright linked from a browser result. */
+  const withhold = async (exec: ToolExecution, result: ToolExecutionResult | undefined, reason: string): Promise<ToolExecutionResult> => {
+    const agent = exec.agent
+    if (result !== undefined && toolOf(exec) !== undefined && agent !== undefined) {
+      // Every Session with a server of the provider passed the `agent/created` listener below, so its directory is known.
+      /* v8 ignore next */
+      const directory = serverDirectories.get(agent.session) ?? ctx.workingDirectory.get(agent.session)
+      await removeLinkedFiles(ctx, directory, config.browser.outputDir, result)
+    }
+    return { isError: true, content: [{ type: 'text', text: `Error: ${reason}` }], error: { message: reason } }
+  }
 
   // Around dispatch, so wrappers outside it, post-execute policy, and result observers see only the replacement.
   ctx.on('tools/execute', async (exec, next) => {
+    const called = takeoverTool(exec)
+    if (called === undefined) return next()
+    const stop = release.signal
+    // The guard let it through before the person took over; neither the browser nor the desktop receives it.
+    if (stop.aborted) return withhold(exec, undefined, takenOverRefusal(called))
+    // A function, so each check reads the signal again after an await rather than a narrowed earlier value.
+    const interrupted = (): boolean => stop.aborted
+    const stopped = `${called} was stopped because the person took over the browser, so it may or may not have taken effect. ${UNTIL_HANDED_BACK}`
     const tool = toolOf(exec)
-    const result = await next()
     const agent = exec.agent
+    if (tool !== undefined && agent !== undefined) connected.add(agent)
+    const original = exec.signal
+    exec.signal = AbortSignal.any([original, stop])
+    let result: ToolExecutionResult
+    try {
+      result = await track(next())
+    } catch (error: unknown) {
+      // The browser runtime rejects a call that a takeover stopped while it waited for or ran in the browser.
+      if (interrupted()) return await withhold(exec, undefined, stopped)
+      throw error
+    } finally {
+      exec.signal = original
+    }
+    if (interrupted()) return withhold(exec, result, stopped)
     // A listing after `browser_close` would reconnect and open a new tab; the close itself was refused before the call
     // when its tab was on a denied page. An Agent-less call never reaches the browser.
     if (tool === undefined || tool === CLOSE || agent === undefined) return result
@@ -651,12 +770,9 @@ export function apply(ctx: Context, config: Config): void {
       showing = reported
       reason = `${tool} ran, but its result is withheld: the current tab is ${reported}, which the assistant may not use. Open another page to continue.`
     }
-    if (reason === undefined) return result
-    // Every Session with a server of the provider passed the `agent/created` listener below, so its directory is known.
-    /* v8 ignore next */
-    const directory = serverDirectories.get(agent.session) ?? ctx.workingDirectory.get(agent.session)
-    await removeLinkedFiles(ctx, directory, config.browser.outputDir, result)
-    return { isError: true, content: [{ type: 'text', text: `Error: ${reason}` }], error: { message: reason } }
+    // A takeover during the check stops its read; the result is withheld like that of any call it stopped.
+    if (interrupted()) reason = stopped
+    return reason === undefined ? result : withhold(exec, result, reason)
   }, { prepend: true })
 
   // The provider's own listener runs first and starts the Session's server in this directory.
@@ -676,9 +792,67 @@ export function apply(ctx: Context, config: Config): void {
     })
   })
 
+  /** Run one take-over or hand-back step after those requested before it. */
+  const serialize = (step: () => Promise<void>): Promise<void> => {
+    const result = changes.then(step)
+    changes = result.then(() => {}, () => {})
+    return result
+  }
+  /** Close the browser connection of each live Session whose Playwright server may hold one, once its calls settle. */
+  const disconnect = async (): Promise<string[]> => {
+    await Promise.all(running)
+    const agents = ctx.agents.list().filter(agent => connected.has(agent) && ctx.tools.get(PREFIX + CLOSE, agent) !== undefined)
+    // In attach mode upstream's `browser_close` closes the CDP connection and leaves the browser and its tabs open.
+    const closed = await Promise.all(agents.map(async (agent) => {
+      const result = await readBrowser(ctx, ownCall(agent), CLOSE, {})
+      if ('text' in result) connected.delete(agent)
+      return result
+    }))
+    return closed.flatMap(result => 'failure' in result ? [`a browser connection did not close: ${result.failure}`] : [])
+  }
+  const takeover: BrowserTakeover = {
+    get hold(): BrowserHold {
+      if (!release.signal.aborted) return { kind: 'free' }
+      if (taking > 0) return { kind: 'taking' }
+      return unfinished === undefined ? { kind: 'held' } : { kind: 'unfinished', failure: unfinished }
+    },
+    takeOver() {
+      requests += 1
+      release.abort()
+      taking += 1
+      return serialize(async () => {
+        const failures: string[] = []
+        try {
+          await writeFileAtomic(takeoverFile, `${new Date().toISOString()}\n`, { mode: 0o600 })
+        } catch (error: unknown) {
+          failures.push(`the takeover could not be saved, so a restart would hand the browser back: ${String(error)}`)
+        }
+        failures.push(...await disconnect())
+        taking -= 1
+        unfinished = failures.length === 0 ? undefined : failures.join('; ')
+        if (unfinished !== undefined) throw new Error(unfinished)
+      })
+    },
+    handBack() {
+      const request = ++requests
+      return serialize(async () => {
+        await rm(takeoverFile, { force: true })
+        // A take over requested after this hand back writes the record again in its own step and keeps the browser.
+        if (request !== requests || !release.signal.aborted) return
+        release = new AbortController()
+        unfinished = undefined
+        // The person may have left a denied page on screen; until a read shows the tab, a desktop screenshot asks.
+        showing = UNREADABLE
+        await Promise.all(ctx.agents.list().filter(agent => ctx.tools.get(PREFIX + TABS, agent) !== undefined)
+          .map(agent => readTabs(ownCall(agent), agent, () => Promise.resolve(undefined))))
+      })
+    },
+  }
+  ctx.effect(() => () => changes, `${name}: takeover`)
+
   if (holder !== undefined) return
   // The provider depends on this plugin's service, so it unloads before the guard and listeners go.
-  ctx.provide(GATE, {})
+  ctx.provide(GATE, takeover)
   const { name: providerName, Config: ProviderConfig, apply: applyProvider } = PlaywrightBrowser
   const applyOwned = (child: Context, browser: PlaywrightBrowser.Config): void => {
     // Another provider may take browserUse between this plugin's load and its child's start.

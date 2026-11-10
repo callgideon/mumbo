@@ -36,6 +36,27 @@ export interface PageLinks {
   desktop?: string
   /** True on the owner's page when the Host serves the Browser tab's call. */
   browser?: boolean
+  /** True on the owner's page when the Host also serves the Browser tab's take-over route, with browser consent loaded. */
+  takeover?: boolean
+}
+
+/**
+ * Who has the browser, as browser consent's service reports it: `free` for the assistant, `taking` while a take over
+ * still closes the assistant's browser connections, `held` once none is open, and `unfinished` with the failure of a
+ * take over that did not finish.
+ */
+export type TakeoverHold =
+  | { kind: 'free' }
+  | { kind: 'taking' }
+  | { kind: 'held' }
+  | { kind: 'unfinished'; failure: string }
+
+/** The take-over route's answer: who has the browser, and why a requested change failed. */
+export interface TakeoverState {
+  /** Who has the browser after the request. */
+  hold: TakeoverHold
+  /** On a POST answer with status 500, why the requested change failed. */
+  failure?: string
 }
 
 const link = z.string().pattern(/^https?:\/\/[^/\s]+\/\S*$/)
@@ -68,6 +89,18 @@ export const PageLinks: z<PageLinks> = z.object({
   home: link.required(),
   desktop: link,
   browser: z.boolean(),
+  takeover: z.boolean(),
+})
+
+/** Validate a take-over route answer in the browser. */
+export const TakeoverState: z<TakeoverState> = z.object({
+  hold: z.union([
+    z.object({ kind: z.const('free').required() }),
+    z.object({ kind: z.const('taking').required() }),
+    z.object({ kind: z.const('held').required() }),
+    z.object({ kind: z.const('unfinished').required(), failure: z.string().required() }),
+  ]).required(),
+  failure: z.string(),
 })
 
 /** Page bootstrap global that carries the validated {@link PageLinks} to the Client half. */
@@ -75,3 +108,9 @@ export const BOX_LINKS_GLOBAL = '__MUMBO_BOX_LINKS__'
 
 /** Owner-only exact route that brings Chrome to the front; the Client posts to its document-relative form. */
 export const BROWSER_FRONT_PATH = '/api/box-links.browser-front'
+
+/**
+ * Owner-only exact route through which the Browser tab reads, takes over, and hands back the browser: GET answers a
+ * {@link TakeoverState}, and POST with `{ takenOver }` changes it and answers the same.
+ */
+export const BROWSER_TAKEOVER_PATH = '/api/box-links.browser-takeover'

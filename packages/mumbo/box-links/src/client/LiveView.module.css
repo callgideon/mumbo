@@ -1,4 +1,4 @@
-/* The Desktop and Browser tab body: a failure strip, as the terminal tab draws its status, above a live view that fills the pane. */
+/* The Desktop and Browser tab body: a failure strip, as the terminal tab draws its status, and the take-over bar above a live view that fills the pane. */
 
 .root {
   display: flex;
@@ -10,18 +10,51 @@
   font-size: 13px;
 }
 
-.failure {
+.failure,
+.bar,
+.held,
+.unfinished {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   padding: 5px 12px;
+}
+
+.failure {
   background: var(--dsw-alias-bg-l2);
+}
+
+/* The take-over bar: who has the browser, and the action that changes it at the bar's end. */
+.bar,
+.held,
+.unfinished {
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+.bar {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.held {
+  background: var(--dsw-alias-state-business-tertiary);
+}
+
+/* The notice treatment of the approval panel: a take over that did not finish. */
+.unfinished {
+  background: var(--dsw-alias-state-warn-tertiary);
+  color: var(--dsw-alias-state-warn-primary);
 }
 
 .message {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.bar .message,
+.held .message,
+.unfinished .message {
+  flex: 1 1 12em;
 }
 
 .frame {
