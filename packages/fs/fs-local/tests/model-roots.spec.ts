@@ -141,6 +141,25 @@ describe.runIf(process.platform === 'linux')('model paths under roots', () => {
     expect((await rejection(fs.resolveModelPath('real/missing/..'))).code).toBe('FS_NOT_FOUND')
   })
 
+  it('gives the same refusal to a path that leaves the roots and returns with "..", whether the outside name exists or not', async () => {
+    await mkdir(join(outside, 'directory', 'deep'), { recursive: true })
+    await symlink(outside, join(workspace, 'link'))
+    for (const requested of [
+      'link/directory/../../projects/notes.txt', 'link/missing/../../projects/notes.txt', 'link/key/../../projects/notes.txt',
+      'link/directory/deep/../../../projects/notes.txt', 'link/directory/nodeep/../../../projects/notes.txt',
+      `${outside}/directory/../../projects/notes.txt`, `${outside}/missing/../../projects/notes.txt`,
+    ]) {
+      const written = requested.startsWith('/') ? requested : `${workspace}/${requested}`
+      expect(await rejection(fs.resolveModelPath(requested)), requested).toEqual(refusal(written))
+    }
+    // ".." inside the roots keeps its physical meaning, through a link that stays inside too.
+    await mkdir(join(workspace, 'real', 'inner'), { recursive: true })
+    await writeFile(join(workspace, 'real', 'beside.txt'), 'beside')
+    await symlink(join(workspace, 'real', 'inner'), join(workspace, 'inner-link'))
+    expect(await fs.readText(await fs.resolveModelPath('real/inner/../../notes.txt'))).toBe('inside')
+    expect(await fs.readText(await fs.resolveModelPath('inner-link/../beside.txt'))).toBe('beside')
+  })
+
   it('refuses a write target that does not exist yet under a symbolically linked parent', async () => {
     await symlink(outside, join(scratch, 'parent'))
     const requested = join(scratch, 'parent', 'missing', 'new.txt')

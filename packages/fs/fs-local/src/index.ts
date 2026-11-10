@@ -335,15 +335,18 @@ export class LocalFileSystem extends FileSystem {
    */
   override async resolveModelPath(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget> {
     const roots = this.modelRoots
+    const displayPath = localDisplayPath(opts?.cwd ?? this.config.cwd, expandHomePrefix(path))
+    // `..` steps back from where the path before it really is, so a walk that leaves the roots and comes back would
+    // resolve only when the directory it passed outside exists.
+    if (roots !== undefined && await this.parentStepLeavesRoots(roots, displayPath)) throw this.outsideRoots(roots, displayPath)
     let target: FsTarget
     try {
       target = await this.resolve(path, opts)
     } catch (error: unknown) {
       // A failure for a path that leaves the roots, as written or through a link under a root, would tell the model
       // whether that path exists and what it is.
-      const displayPath = localDisplayPath(opts?.cwd ?? this.config.cwd, expandHomePrefix(path))
       if (roots !== undefined && !(error instanceof FsError && error.code === 'FS_ABORTED')
-        && (!this.underRoots(roots, displayPath) || await this.ancestorLeavesRoots(roots, displayPath))) {
+        && (!this.underRoots(roots, displayPath) || await this.realLeavesRoots(roots, dirname(displayPath)))) {
         throw this.outsideRoots(roots, displayPath)
       }
       throw error
@@ -354,9 +357,18 @@ export class LocalFileSystem extends FileSystem {
     return target
   }
 
-  /** Whether the deepest existing ancestor of a path that failed to resolve has a real path outside every root. */
-  private async ancestorLeavesRoots(roots: readonly ModelRoot[], displayPath: string): Promise<boolean> {
-    for (let path = dirname(displayPath); ; path = dirname(path)) {
+  /** Whether some `..` segment of a path steps back from a prefix that {@link realLeavesRoots} places outside every root. */
+  private async parentStepLeavesRoots(roots: readonly ModelRoot[], displayPath: string): Promise<boolean> {
+    const segments = displayPath.split(sep)
+    for (let index = 1; index < segments.length; index++) {
+      if (segments[index] === '..' && await this.realLeavesRoots(roots, segments.slice(0, index).join(sep) || sep)) return true
+    }
+    return false
+  }
+
+  /** Whether the real path of `start`, or of its deepest existing ancestor when it does not resolve, is outside every root. */
+  private async realLeavesRoots(roots: readonly ModelRoot[], start: string): Promise<boolean> {
+    for (let path = start; ; path = dirname(path)) {
       let real: string | undefined
       try {
         real = await realpath(path)
