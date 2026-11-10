@@ -22,6 +22,8 @@ const TOOLS = [
   tool('browser_file_upload', { paths: { type: 'array', items: { type: 'string' } } }),
   tool('browser_evaluate', { function: { type: 'string' } }),
   tool('browser_close'),
+  tool('browser_network_requests'),
+  tool('browser_network_request', { index: { type: 'number' } }),
 ]
 const tabs = [{ url: start || 'about:blank' }]
 let current = 0

@@ -285,6 +285,8 @@ describe('browser write consent in the person-box composition', () => {
     expect(textOf(await direct(loaded, tool('browser_navigate'), { url: 'https://accounts.google.com/' })))
       .toBe('Error: browser_navigate did not run: the assistant may not open a page on https://accounts.google.com.')
     expect(textOf(await direct(loaded, tool('browser_navigate'), { url: 'about:settings' }))).toBe('Error: browser_navigate did not run: the assistant may not open a chrome: page.')
+    const details = 'Error: browser_network_request did not run: the assistant may not read request headers or bodies, which carry cookies and passwords.'
+    expect(textOf(await direct(loaded, tool('browser_network_request'), { index: 1 }))).toBe(details)
     expect(await loaded.calls()).toEqual([])
     // Other origins open, and so does a blank new tab.
     for (const url of ['http://allowed.test/', 'https://mail.google.com/', 'https://accounts.google.com.evil.test/']) {
@@ -298,8 +300,10 @@ describe('browser write consent in the person-box composition', () => {
     loaded.ctx.on('tools/pre-execute', (): Promise<PreToolDecision> => Promise.resolve({ kind: 'allow' }), { prepend: true })
     expect(textOf(await direct(loaded, tool('browser_navigate'), { url: 'chrome://settings/passwords' }))).toBe('Error: browser_navigate did not run: the assistant may not open a chrome: page.')
     expect(textOf(await direct(loaded, tool('browser_navigate'), { url: 'chrome://settings/passwords' }, false))).toBe('Error: browser_navigate did not run: the assistant may not open a chrome: page.')
+    expect(textOf(await direct(loaded, tool('browser_network_request'), { index: 1 }))).toBe(details)
+    expect((await direct(loaded, tool('browser_network_requests'), {})).isError).toBe(false)
     expect(loaded.asked).toEqual([])
-    expect(await loaded.calls()).toHaveLength(4)
+    expect((await loaded.calls()).map(call => call.name)).toEqual(['browser_navigate', 'browser_navigate', 'browser_navigate', 'browser_tabs', 'browser_network_requests'])
   })
 
   it('withholds the result of every call that leaves or finds the tab on a denied page, and refuses writes there', { timeout: 60_000 }, async () => {

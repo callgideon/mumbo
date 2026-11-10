@@ -208,3 +208,24 @@ it.skipIf(skip)('shows a password field as dots in screenshots; revealing it tak
   expect(maskedFields(results[14])).toHaveLength(3)
   expect(results[14]).toMatch(/^ *- textbox \[ref=(f\d+)?e\d+\]: AAAAAAAA$/mu)
 })
+
+it.skipIf(skip)('lists requests without their headers or bodies, and refuses the request details that carry them', { timeout: 120_000 }, async () => {
+  const page = (_port: number, path: string) => path === '/login' ? 'ok'
+    : '<!doctype html><title>Sign in</title><script>document.cookie = "session=cookie-secret-6"; fetch("/login", { method: "POST", '
+      + 'headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Auth": "header-secret-8" }, body: "password=body-secret-7" })'
+      + '.then(() => document.body.append("sent"))</script>'
+  const { results, asked, sent } = await runTurn(page, allowed => ({
+    deniedUrls: [], allowedSites: [allowed],
+    script: [
+      { name: 'browser_navigate', args: { url: `${allowed}/` } },
+      { name: 'browser_wait_for', args: { text: 'sent' } },
+      { name: 'browser_network_requests', args: {} },
+      { name: 'browser_network_request', args: { index: 2 } },
+    ],
+  }))
+  expect(sent).toHaveLength(1)
+  expect(results[2]).toMatch(/^\d+\. \[POST\] http:\/\/127\.0\.0\.1:\d+\/login => \[200\] OK$/mu)
+  for (const secret of ['cookie-secret-6', 'body-secret-7', 'header-secret-8']) expect(results.join('\n')).not.toContain(secret)
+  expect(results[3]).toBe('Error: browser_network_request did not run: the assistant may not read request headers or bodies, which carry cookies and passwords.')
+  expect(asked).toEqual([])
+})

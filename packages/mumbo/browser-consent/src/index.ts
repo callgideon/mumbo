@@ -37,6 +37,8 @@ const TABS = 'browser_tabs'
 const VALUE_LIMIT = 300
 /** Characters of arguments listed in an approval prompt; further arguments are counted as not shown. */
 const SUMMARY_LIMIT = 1200
+/** Upstream tool that shows one request's headers and bodies, which carry cookies and submitted passwords; always refused. */
+const REQUEST_DETAILS = 'browser_network_request'
 /** Upstream tool that ends Playwright's browser connection and answers with fixed text. */
 const CLOSE = 'browser_close'
 /** Desktop tool of the `computer-use-x11` provider, whose `screenshot` action is its only read. */
@@ -57,7 +59,7 @@ const UNREADABLE = 'a page whose address cannot be read'
 /** Upstream tools that only read the page or browser state, plus history navigation. */
 const READS: ReadonlySet<string> = new Set([
   'browser_snapshot', 'browser_take_screenshot', 'browser_find', 'browser_console_messages', 'browser_network_requests',
-  'browser_network_request', 'browser_wait_for', 'browser_navigate_back', 'browser_navigate_forward',
+  'browser_wait_for', 'browser_navigate_back', 'browser_navigate_forward',
 ])
 /** Upstream tools that act only on Playwright's current tab, so a site allowance can cover them. */
 const SITE_WRITES: ReadonlySet<string> = new Set([
@@ -384,9 +386,10 @@ export function apply(ctx: Context, config: Config): void {
       : undefined
   }
   const toolOf = (exec: ToolExecution): string | undefined => exec.name.startsWith(PREFIX) ? exec.name.slice(PREFIX.length) : undefined
-  /** A refusal for a browser call whose `url` argument names a denied page. */
-  const targetRefusal = (exec: ToolExecution): string | undefined => {
+  /** A refusal for a browser call that reads request details or whose `url` argument names a denied page. */
+  const callRefusal = (exec: ToolExecution): string | undefined => {
     const tool = toolOf(exec)
+    if (tool === REQUEST_DETAILS) return `${tool} did not run: the assistant may not read request headers or bodies, which carry cookies and passwords.`
     const target = tool === undefined ? undefined : targetUrl(exec.arguments)
     const blocked = target === undefined ? undefined : denial(target, denied)
     return blocked === undefined ? undefined : `${tool} did not run: the assistant may not open ${blocked}.`
@@ -430,7 +433,7 @@ export function apply(ctx: Context, config: Config): void {
   }
 
   ctx.tools.guard((exec) => {
-    const refusal = rivalRefusal(exec) ?? targetRefusal(exec)
+    const refusal = rivalRefusal(exec) ?? callRefusal(exec)
     if (refusal !== undefined) return refusal
     if (exec.name === COMPUTER) {
       return isScreenshot(exec.arguments) || computerConsents.has(exec) ? undefined : 'computer input needs the user\'s consent, which was not given.'
@@ -441,7 +444,7 @@ export function apply(ctx: Context, config: Config): void {
   })
 
   ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
-    const refusal = rivalRefusal(exec) ?? targetRefusal(exec)
+    const refusal = rivalRefusal(exec) ?? callRefusal(exec)
     if (refusal !== undefined) return { kind: 'deny', reason: refusal }
     const agent = exec.agent
     if (agent === undefined) return next()
