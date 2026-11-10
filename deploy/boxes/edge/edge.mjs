@@ -380,8 +380,9 @@ if id browser >/dev/null 2>&1; then
   # so does KasmVNC's WebRTC port (UDP, the WebSocket's number, bound on every address), which the ALB cannot carry.
   for port in 9222 5900; do iptables -C INPUT -p tcp --dport $port ! -i lo -j DROP 2>/dev/null || iptables -I INPUT -p tcp --dport $port ! -i lo -j DROP || true; done
   iptables -C INPUT -p udp --dport 6080 ! -i lo -j DROP 2>/dev/null || iptables -I INPUT -p udp --dport 6080 ! -i lo -j DROP || true
-  # X access cookie, so only holders of /run/x11/auth (the browser user and root) can read or drive :1. su keeps the
-  # environment, so every X client below inherits XAUTHORITY. Images without xauth run :1 without one, as before.
+  # X access cookie, so only holders of /run/x11/auth (the browser user, root, and KasmVNC's server through its group) can
+  # read or drive :1. su keeps the environment, so every X client below inherits XAUTHORITY. Images without xauth run :1
+  # without one, as before.
   X_AUTH=
   if command -v xauth >/dev/null 2>&1; then
     mkdir -p /run/x11
@@ -463,9 +464,12 @@ SH
   # and serves its web client and WebSocket on $ip:6080, with no raw VNC port. Its own login and TLS are off: the edge
   # terminates TLS and is the only gate. -PublicIP keeps it from asking public STUN servers at start (it exits when none
   # answers); -IgnoreClientSettingsKasm keeps a viewer from raising the frame rate. KasmVNC 1.5.2 accepts -RectThreads but
-  # does not apply it (RUNBOOK). A template before KasmVNC runs Xvfb, x11vnc and websockify with noVNC.
+  # does not apply it (RUNBOOK). It runs as the system user xvnc (template.mjs), which browser can neither signal nor
+  # impersonate: whatever answers on :6080 serves pages on dsh's origin, and browser runs Chrome. A template before
+  # KasmVNC runs Xvfb, x11vnc and websockify with noVNC.
   if command -v Xkasmvnc >/dev/null 2>&1; then
-    pgrep -x Xkasmvnc >/dev/null || { su browser -s /bin/sh -c "Xkasmvnc :1 $X_AUTH -geometry 1600x900 -depth 24 -nolisten tcp -interface $ip -websocketPort 6080 -httpd /usr/share/kasmvnc/www -DisableBasicAuth -sslOnly=0 -SecurityTypes None -PublicIP 127.0.0.1 -FrameRate 30 -RectThreads 2 -IgnoreClientSettingsKasm -DLP_ClipTypes text/plain -DLP_ClipSendMax 262144 -DLP_ClipAcceptMax 262144 -DLP_ClipDelay 500 >/tmp/xvnc.log 2>&1 &"; sleep 1; }
+    [ -z "$X_AUTH" ] || { chown browser:xvnc /run/x11/auth; chmod 0640 /run/x11/auth; }
+    pgrep -u xvnc -x Xkasmvnc >/dev/null || { su xvnc -s /bin/sh -c "Xkasmvnc :1 $X_AUTH -geometry 1600x900 -depth 24 -nolisten tcp -interface $ip -websocketPort 6080 -httpd /usr/share/kasmvnc/www -DisableBasicAuth -sslOnly=0 -SecurityTypes None -PublicIP 127.0.0.1 -FrameRate 30 -RectThreads 2 -IgnoreClientSettingsKasm -DLP_ClipTypes text/plain -DLP_ClipSendMax 262144 -DLP_ClipAcceptMax 262144 -DLP_ClipDelay 500 >/tmp/xvnc.log 2>&1 &"; sleep 1; }
   else
     pgrep -x Xvfb >/dev/null || { su browser -s /bin/sh -c 'Xvfb :1 $X_AUTH -screen 0 1440x900x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &'; sleep 1; }
     pgrep -x x11vnc >/dev/null || su browser -s /bin/sh -c 'x11vnc -display :1 -localhost -forever -shared -nopw -rfbport 5900 -quiet >/tmp/x11vnc.log 2>&1 &'
@@ -1060,6 +1064,9 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log
     })
     const to = routeOf(host, req.url)
     if (!to) return page(res, 404, 'Not found.', false)
+    // A page that opened the public host keeps no handle to it or its frames: KasmVNC's client in the Desktop tab's frame
+    // takes clipboard, resize and disconnect messages from any origin. dsh keeps handles to the popups it opens itself.
+    if (host === cfg.publicHost) res.setHeader('cross-origin-opener-policy', 'same-origin-allow-popups')
     if (!to.project && /^\/home\/?(?:\?|$)/.test(req.url)) return homePage(cfg, res, email, await projects?.list(email) ?? [])
     if (to.redirect) return res.writeHead(302, { location: to.redirect, 'cache-control': 'no-store' }).end()
     // dsh refuses a cross-origin /api request itself; the desktop's server (KasmVNC, or websockify) checks no Origin, so
@@ -1097,7 +1104,11 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log
     const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: to.path, headers: { ...boxHeaders(cfg, req.headers, target, to.port), ...(member ? { 'x-mumbo-member': member } : {}) } }, (r) => {
       // A stale cookie (another account on this browser, or a recreated box) gets a fresh exchange instead of a dead end.
       if (dsh && !member && r.statusCode === 401 && isNavigation(req)) { r.resume(); return res.writeHead(302, { location: launch, 'cache-control': 'no-store' }).end() }
-      res.writeHead(r.statusCode ?? 502, noFraming(secureCookies(cfg, { ...r.headers })))
+      const headers = noFraming(secureCookies(cfg, { ...r.headers }))
+      // KasmVNC's client connects to the host, port and path its URL names and, in Chrome, sends the local clipboard
+      // there: a second policy lets the live view's pages connect to this host only. data: is its video decoder probe.
+      if (to.port === '6080') headers['content-security-policy'] += `, connect-src 'self' wss://${host} data:`
+      res.writeHead(r.statusCode ?? 502, headers)
       r.pipe(res)
     })
     up.on('error', (e) => { quiet(box.forget(target.id)); if (!res.headersSent) page(res, 502, 'Could not reach your box. Retrying…'); else res.destroy(); log(JSON.stringify({ edge: 'error', user: email, error: e.message })) })

@@ -248,7 +248,8 @@ test('no other origin may frame our pages: box responses on the main and project
   const framing = (r) => [r.headers['content-security-policy'], r.headers['x-frame-options']]
   const ours = ["frame-ancestors 'self'", 'SAMEORIGIN']
   try {
-    assert.deepEqual(framing(await call(t.port, { path: '/desktop/vnc.html?autoconnect=1', headers: { host: main } })), ours, 'the main-host desktop')
+    // The live view's pages also get a second policy that keeps their connections on this host (edge.test.mjs).
+    assert.deepEqual(framing(await call(t.port, { path: '/desktop/vnc.html?autoconnect=1', headers: { host: main } })), [`${ours[0]}, connect-src 'self' wss://${main} data:`, ours[1]], 'the main-host desktop')
     assert.deepEqual(framing(await call(t.port, { headers: { host: main, cookie: 'dsh-auth-x=1' } })), ours, 'the main-host dsh')
     assert.deepEqual(framing(await call(t.port, { headers: { host: t.host } })), ours, 'a project host')
     assert.deepEqual(framing(await call(t.port, { path: '/own-policy', headers: { host: t.host } })), ["default-src 'self'; frame-ancestors 'none'", 'DENY'], 'a box\'s own policy is kept')

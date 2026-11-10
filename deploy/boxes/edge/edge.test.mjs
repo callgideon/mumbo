@@ -482,6 +482,25 @@ test('desktop live view: /desktop/ goes to the box\'s desktop port, everything e
   assert.equal(boxHeaders(cfg, {}, { id: 'b1' }, '6080')['e2b-sandbox-port'], '6080')
 })
 
+test('the live view\'s pages may connect only to their own host, and a page that opened the public host keeps no handle to it', async () => {
+  const upstream = createServer((req, res) => res.writeHead(200, { 'content-type': 'text/html', ...(req.url === '/own-csp' ? { 'content-security-policy': "default-src 'self'" } : {}) }).end('page'))
+  await new Promise(r => upstream.listen(0, '127.0.0.1', r))
+  const box = { ensure: async () => ({ id: 'ubox', token: 'T' }), touch: async () => {}, forget: async () => {} }
+  const server = userServer({ cfg: { ...cfg, approveHost: 'approve.example', proxy: new URL(`http://127.0.0.1:${upstream.address().port}`) }, box, signin: () => false, log: () => {} })
+  const port = await listen(server)
+  const get = (path, host = cfg.publicHost) => call(port, { path, headers: { host, 'x-forwarded-email': 'a@x.com', cookie: 'dsh-auth-x=1' } })
+  try {
+    // KasmVNC's client connects wherever its URL points and, in Chrome, sends the local clipboard there.
+    const desktop = await get('/desktop/vnc.html?autoconnect=1&host=evil.example&port=443&encrypt=1&path=x')
+    assert.deepEqual([desktop.status, desktop.headers['content-security-policy']], [200, "frame-ancestors 'self', connect-src 'self' wss://boxes.example data:"])
+    assert.equal((await get('/desktop/own-csp')).headers['content-security-policy'], "default-src 'self'; frame-ancestors 'self', connect-src 'self' wss://boxes.example data:")
+    assert.equal((await get('/')).headers['content-security-policy'], "frame-ancestors 'self'", 'dsh\'s pages keep their policy')
+    for (const path of ['/', '/desktop/', '/desktop/vnc.html', '/home']) assert.equal((await get(path)).headers['cross-origin-opener-policy'], 'same-origin-allow-popups', path)
+    // MCP clients sign in through popups: the consent redirect, the approve host and project hosts get none.
+    for (const [path, host] of [['/oauth/consent?x=1', cfg.publicHost], ['/', 'approve.example'], ['/', `p-0123456789abcdef.${cfg.projectDomain}`]]) assert.equal((await get(path, host)).headers['cross-origin-opener-policy'], undefined, host + path)
+  } finally { server.close(); upstream.close() }
+})
+
 test('backups carry the browser user\'s home without caches or profile locks, and tolerate its absence', async () => {
   const { backupCommand } = await import('./edge.mjs')
   const c = backupCommand('URL')

@@ -38,7 +38,7 @@ function box() {
     t, port,
     /** Box paths moved under t; `as` is the user that stands in for browser. */
     local: (text, as = USER) => text.replaceAll('/tmp/', `${t}/log/`).replaceAll('/etc/', `${t}/etc/`).replaceAll('/root/', `${t}/root/`).replaceAll('/usr/local/bin/', `${t}/bin/`).replaceAll('/home/browser/', `${t}/home/`).replaceAll('/home/shared', `${t}/shared`).replaceAll('/run/x11', `${t}/run/x11`)
-      .replaceAll('remote-debugging-port=9222', `remote-debugging-port=${port}`).replaceAll('pgrep -f websockify', `pgrep -f ${t}/fake/websockify`).replace(/pgrep -x (Xkasmvnc|Xvfb|x11vnc)/g, `pgrep -f ${t}/fake/$1`).replaceAll('-u browser', `-u ${as}`).replaceAll('"$(id -un)" = browser', `"$(id -un)" = ${as}`).replaceAll('chgrp -hR shared', `chgrp -hR ${GROUP ?? USER}`),
+      .replaceAll('remote-debugging-port=9222', `remote-debugging-port=${port}`).replaceAll('pgrep -f websockify', `pgrep -f ${t}/fake/websockify`).replace(/pgrep (?:-u xvnc )?-x (Xkasmvnc|Xvfb|x11vnc)/g, `pgrep -f ${t}/fake/$1`).replaceAll('-u browser', `-u ${as}`).replaceAll('"$(id -un)" = browser', `"$(id -un)" = ${as}`).replaceAll('chgrp -hR shared', `chgrp -hR ${GROUP ?? USER}`),
     fake: (name, body) => { rmSync(join(t, 'fake', name), { force: true }); writeFileSync(join(t, 'fake', name), `#!/bin/sh\n${body}\n`); chmodSync(join(t, 'fake', name), 0o755) },
     /** Runs sh text from a file, as the box runs start.sh, in its own process group, which done() kills with everything it
      *  started. */
@@ -98,10 +98,12 @@ const xvncArgs = (auth) => [
   ['-DLP_ClipTypes', 'text/plain'], ['-DLP_ClipSendMax', '262144'], ['-DLP_ClipAcceptMax', '262144'], ['-DLP_ClipDelay', '500'],  // text only, limited
 ].flat().join(' ')
 
-test('KasmVNC runs as browser on :1 with the X cookie and each flag, once per re-run, and no part of the older stack starts', async () => {
+test('KasmVNC runs as xvnc on :1 with the X cookie and each flag, once per re-run, and no part of the older stack starts', async () => {
+  // xvnc, not browser: browser runs Chrome, and whatever answers on :6080 serves pages on dsh's origin.
+  assert.ok(person.includes('pgrep -u xvnc -x Xkasmvnc >/dev/null || { su xvnc -s /bin/sh -c "Xkasmvnc :1 '))
   const b = box()
   try {
-    b.fake('xauth', 'printf cookie > "$3"'); b.fake('mcookie', 'echo 0123'); b.fake('chown', 'exit 0')
+    b.fake('xauth', 'printf cookie > "$3"'); b.fake('mcookie', 'echo 0123'); b.fake('chown', `echo "$*" >> ${b.t}/log/chown`)
     b.fake('Xkasmvnc', `echo "$* [$XAUTHORITY]" >> ${b.t}/log/xvnc; sleep 30`)
     b.fake('startxfce4', 'sleep 30'); b.fake('google-chrome-stable', `${VERSION}sleep 30`)
     b.run(b.local(block()))
@@ -110,6 +112,8 @@ test('KasmVNC runs as browser on :1 with the X cookie and each flag, once per re
     await sleep(1500)
     assert.deepEqual(b.lines('xvnc'), [`${xvncArgs(`${b.t}/run/x11/auth`)} [${b.t}/run/x11/auth]`])
     assert.equal(readFileSync(join(b.t, 'run/x11/auth'), 'utf8'), 'cookie')
+    // The cookie stays browser's; the server reads it through its group.
+    assert.deepEqual([b.lines('chown').map(l => l.replaceAll(b.t, 'T')), statSync(join(b.t, 'run/x11/auth')).mode & 0o777], [['browser T/run/x11/auth', 'browser:xvnc T/run/x11/auth', 'browser:xvnc T/run/x11/auth'], 0o640])
     assert.deepEqual([b.lines('old'), b.lines('dsh')], [[], ['reached', 'reached']])
   } finally { b.done() }
 })
@@ -344,17 +348,19 @@ test('template: Google Chrome stable from Google\'s signed amd64 repository and 
   for (const p of ['chromium', 'openbox', 'xfce4', 'xvfb', 'x11vnc', 'novnc', 'websockify']) assert.ok(!packages.includes(p), p)
   assert.equal(BOX_STEPS[BOX_STEPS.indexOf(install) + 1], kasmvncStep(), 'KasmVNC is installed once curl is')
   assert.ok(BOX_STEPS.includes('id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser'))
+  assert.ok(BOX_STEPS.includes('id xvnc >/dev/null 2>&1 || useradd -r -U -M -d /nonexistent -s /usr/sbin/nologin xvnc'), 'KasmVNC\'s own system user')
   assert.ok(BOX_STEPS.indexOf('id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser') < BOX_STEPS.indexOf('groupadd -f shared && usermod -aG shared browser && chmod 0700 /home/browser && install -d -m 0755 /home/shared && install -d -o browser -g shared -m 2770 /home/shared/Downloads'))
 })
 
 test('template: KasmVNC 1.5.2 or later from its release, installed only when the download has the pinned sha256, with the screen cap in both entry pages', () => {
   assert.deepEqual(KASMVNC, { version: '1.5.2', sha256: '5f4bfda43e89178782eac37ae463b1d95d16ac5e45da8b7989ec75404e764993' })
-  // 1.5.1 and 1.5.2 fixed a web-server path traversal (CVE-2024-38449) and a WebSocket handshake overflow.
+  // 1.3.2 fixed a web-server path traversal (CVE-2024-38449) and 1.5.2 a WebSocket handshake buffer overflow.
   const [major, minor, patch] = KASMVNC.version.split('.').map(Number)
   assert.ok(major > 1 || (major === 1 && (minor > 5 || (minor === 5 && patch >= 2))), KASMVNC.version)
   assert.ok(kasmvncStep().startsWith('curl -fsSL -o /tmp/kasmvncserver_debian_bookworm_1.5.2_amd64.deb https://github.com/kasmtech/KasmVNC/releases/download/v1.5.2/kasmvncserver_debian_bookworm_1.5.2_amd64.deb && echo "5f4bfda43e89178782eac37ae463b1d95d16ac5e45da8b7989ec75404e764993  /tmp/kasmvncserver_debian_bookworm_1.5.2_amd64.deb" | sha256sum -c - && apt-get update && '))
   const t = mkdtempSync(join(tmpdir(), 'kasmvnc-'))
-  const STYLE = '<style>#noVNC_container>div{max-width:1600px;max-height:900px}</style>'
+  // The cap, and no Displays button: its additional displays size the screen to their own windows.
+  const STYLE = '<style>#noVNC_container>div{max-width:1600px;max-height:900px}#noVNC_displays_button{display:none!important}</style>'
   const PAGE = '<!DOCTYPE html><html><head><title>KasmVNC</title></head><body></body></html>'
   /** Runs the step with curl downloading `download` and apt-get logging its arguments; box paths moved under t. */
   const run = (download, step = kasmvncStep({ version: '1.5.2', sha256: createHash('sha256').update('the release').digest('hex') }), pages = [PAGE, PAGE]) => {
