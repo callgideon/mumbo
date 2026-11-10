@@ -160,6 +160,17 @@ export function memberHeader(key, email, now = Date.now()) {
   return `${body}.${createHmac('sha256', key).update(body).digest('base64url')}`
 }
 
+// ---- Mumbo through the door (spec section 10, B33). A person box serves @mumbo/mcp's person overlay on loopback
+// MUMBO_MCP_PORT, which E2B's client proxy reaches, to the edge alone: it accepts only the box's own key,
+// HMAC(edge key, "mumbo-mcp:" + box id) as unpadded base64url, which the start script writes to a root-only file. The door
+// (door.mjs mumboForwarder) derives it again for every call, so nothing stores it.
+export const mumboMcpKey = (edgeKey, boxId) => createHmac('sha256', edgeKey).update(`mumbo-mcp:${boxId}`).digest('base64url')
+export const MUMBO_MCP_PORT = '3092'
+export const MUMBO_MCP_OVERLAY = '/src/packages/mumbo/mcp/examples/person.overlay.yml'
+/** The person's @mumbo/mcp principal handle (`^[a-z][a-z0-9-]{0,31}$`): their email's local part, lowercased, each run of
+ *  other characters a `-`, without leading non-letters or trailing `-`, cut to 32 characters; `person` when none is left. */
+export const mcpPrincipal = (email) => email.toLowerCase().split('@')[0].replace(/[^a-z0-9]+/g, '-').replace(/^[^a-z]+/, '').slice(0, 32).replace(/-+$/, '') || 'person'
+
 /** The standing instructions for the box's agents (dsh agent-instructions, user-global chain). Edge-owned and
  *  rewritten on every start; the user's own instructions belong in $DSH_HOME/AGENTS.md. Founder decisions: account
  *  reads are free and writes ask; projects are shared and coordinated in their own box (ASSISTANT.md). */
@@ -229,8 +240,8 @@ export function boxSite(cfg, principal) {
 // memberKeyText: a project box's member key (base64url). boxFiles: { proxy, gh }, the texts of box/github-local-proxy.mjs
 // and box/gh as read by main() at start, written into project boxes. panelAdmins: the project owners' emails, for MUMBO_PANEL_ADMINS.
 // cfg.agentLogin and cfg.agentId (GITHUB_AGENT_LOGIN, GITHUB_AGENT_ID) become a project box's MUMBO_GITHUB_APP_LOGIN and
-// MUMBO_GITHUB_APP_USER_ID.
-export function startScript(cfg, token, site = boxSite(cfg, ''), role = '', memberKeyText, boxFiles, panelAdmins = []) {
+// MUMBO_GITHUB_APP_USER_ID. mumboMcp: a person box's { key: mumboMcpKey, principal: mcpPrincipal } for the door to Mumbo.
+export function startScript(cfg, token, site = boxSite(cfg, ''), role = '', memberKeyText, boxFiles, panelAdmins = [], mumboMcp) {
   const llm = `https://${cfg.llmHost}`
   // dsh's OpenRouter route (@deepseek-ai/dsh-llm-pi-ai, the base composition's row llm-pi-ai) through the model host,
   // keyed by the box token. Images leave 8 MiB of OPENROUTER_MAX_BODY for the text.
@@ -338,6 +349,16 @@ cat > /root/.mumbo/assistant.overlay.yml <<'YML'
         instructions: ${JSON.stringify(assistantInstructions())}
 YML
 ASSISTANT_PATCH="--patch /root/.mumbo/assistant.overlay.yml"
+fi
+` : ''}${site.desktop && mumboMcp ? `# Mumbo through the MCP door (edge door.mjs), when the image ships @mumbo/mcp's person overlay, patched after the
+# assistant's: the Session mumbo on loopback :${MUMBO_MCP_PORT} for the edge alone, which calls with this box's key, read
+# from a file only root reads.
+MCP_PATCH=
+if [ -f ${MUMBO_MCP_OVERLAY} ]; then
+(umask 077 && printf '%s' ${sq(mumboMcp.key)} > /root/.mumbo/mcp.key)
+chmod 0600 /root/.mumbo/mcp.key
+export MUMBO_MCP_PORT=${MUMBO_MCP_PORT} MUMBO_MCP_KEY_FILE=/root/.mumbo/mcp.key MUMBO_MCP_PRINCIPAL=${sq(mumboMcp.principal)} MUMBO_MCP_ASSISTANT_CWD=/root/projects
+MCP_PATCH="--patch ${MUMBO_MCP_OVERLAY}"
 fi
 ` : ''}${site.desktop ? `# Desktop control on :1 (@deepseek-ai/dsh-computer-use-x11), when the image ships the package and xdotool.
 CU_PATCH=
@@ -525,7 +546,7 @@ ${site.desktop ? '' : `PATH=/root/.mumbo/bin:$PATH NODE_USE_ENV_PROXY=1 NODE_EXT
 `}HOME=/root DSH_HOME=/root/.dsh DSH_AGENTS_HOME=/root/.mumbo/agents DSH_TELEMETRY_DISABLED=1 \\
 DEEPSEEK_BASE_URL=${llm}/anthropic DEEPSEEK_SEARCH_BASE_URL=${llm} DEEPSEEK_API_KEY=${token} \\
 nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\
-  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml${openrouter ? ' --patch /root/.mumbo/models.overlay.yml' : ''} $LINKS_PATCH${site.desktop ? ' $CU_PATCH $WELCOME_PATCH $ASSISTANT_PATCH' : ''}${memberKeyText ? ' $PROJECT_PATCH' : ''} \\
+  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml${openrouter ? ' --patch /root/.mumbo/models.overlay.yml' : ''} $LINKS_PATCH${site.desktop ? ' $CU_PATCH $WELCOME_PATCH $ASSISTANT_PATCH' : ''}${site.desktop && mumboMcp ? ' $MCP_PATCH' : ''}${memberKeyText ? ' $PROJECT_PATCH' : ''} \\
   --no-open --host "$ip" --port 3080 --public-url ${site.publicUrl} --trusted-host ${cfg.publicHost}${site.host === cfg.publicHost ? '' : ` --trusted-host ${site.host}`} > /root/dsh.log 2>&1 &
 `
 }
@@ -690,7 +711,8 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
     try {
       await box.files.write('/root/.mumbo/start.sh', startScript(cfg, signBox(edgeKey, email, box.sandboxId), boxSite(cfg, email), roleInstructions(cfg, email),
         email.startsWith('project:') ? memberKey(edgeKey, box.sandboxId).toString('base64url') : undefined, boxFiles,
-        email.startsWith('project:') ? await ownersOf(store, email.slice('project:'.length)) : undefined))
+        email.startsWith('project:') ? await ownersOf(store, email.slice('project:'.length)) : undefined,
+        email.startsWith('project:') ? undefined : { key: mumboMcpKey(edgeKey, box.sandboxId), principal: mcpPrincipal(email) }))
       if (restoreUrl) {
         const ok = await run(box, restoreCommand(restoreUrl), 660_000).then(() => true, () => false)
         say({ ...(ok ? {} : { level: 'error' }), msg: 'restore', user: email, box: box.sandboxId, ok, ...(pin && { versionId: pin.versionId }) })
@@ -967,15 +989,16 @@ export function homePage(cfg, res, email, projects) {
 <ul><li><a href="/">Your assistant</a></li><li><a href="/desktop/">Your desktop</a> <small>sign in to your accounts here</small></li><li><a href="https://${esc(cfg.approveHost)}/keys">Manage door keys</a> <small>for your own AI tools, such as Claude Code, to reach mumbo over MCP</small></li></ul>
 <h2>Projects</h2><ul>${rows}</ul>`)
 }
-/** One request from the edge itself to a box's dsh through the client-proxy, as a browser on the box's own origin
- *  (`siteHost`, boxSite) would send it. */
-export const boxFetcher = (cfg) => (target, siteHost, path, { method = 'GET', headers = {}, body, member } = {}) => new Promise((resolve, reject) => {
+/** One request from the edge itself to a box's dsh (`port` 3080, or another box port) through the client-proxy, as a
+ *  browser on the box's own origin (`siteHost`, boxSite) would send it. `edgeHeaders` are set after boxHeaders, which drops
+ *  identity headers such as authorization from `headers`; the request fails once the box sends nothing for `timeoutMs`. */
+export const boxFetcher = (cfg) => (target, siteHost, path, { method = 'GET', headers = {}, body, member, port = '3080', edgeHeaders = {}, timeoutMs = 60_000 } = {}) => new Promise((resolve, reject) => {
   const req = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method, path,
-    headers: { ...boxHeaders(cfg, { ...headers, host: siteHost, origin: `https://${siteHost}`, ...(body ? { 'content-length': Buffer.byteLength(body) } : {}) }, target, '3080'), ...(member ? { 'x-mumbo-member': member } : {}) } }, (r) => {
+    headers: { ...boxHeaders(cfg, { ...headers, host: siteHost, origin: `https://${siteHost}`, ...(body ? { 'content-length': Buffer.byteLength(body) } : {}) }, target, port), ...(member ? { 'x-mumbo-member': member } : {}), ...edgeHeaders } }, (r) => {
     const chunks = []
     r.on('data', c => chunks.push(c)).on('end', () => resolve({ status: r.statusCode, setCookie: r.headers['set-cookie'] ?? [], body: Buffer.concat(chunks).toString() }))
   })
-  req.setTimeout(60_000, () => req.destroy(new Error('box request timed out')))
+  req.setTimeout(timeoutMs, () => req.destroy(new Error('box request timed out')))
   req.on('error', reject)
   req.end(body)
 })
@@ -1533,8 +1556,9 @@ async function main() {
   const { children, mcpServer } = await import('./sandboxes.mjs')
   const mcp = mcpServer({ ops: children({ e2b, cfg }), projects: proj, relay, projectDomain: cfg.projectDomain, claimOf: (info) => verifyBox(edgeKey, String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
   const allow = budget(store, cfg.dailyRequests)
-  const { door, doorTools } = await import('./door.mjs')
-  const doorHandler = door({ keys: doorKeyService, tools: doorTools({ projects: proj }), allow, tokens, rate: { perMinute: cfg.doorRatePerMinute, burst: cfg.doorBurst } })
+  const { door, doorTools, mumboForwarder } = await import('./door.mjs')
+  const mumbo = mumboForwarder({ box, boxFetch: boxFetcher(cfg), edgeKey, siteHostOf: (p) => boxSite(cfg, p).host })
+  const doorHandler = door({ keys: doorKeyService, tools: doorTools({ projects: proj, mumbo }), allow, tokens, rate: { perMinute: cfg.doorRatePerMinute, burst: cfg.doorBurst } })
   modelServer({ cfg, edgeKey, modelKey, allow, owns: box.owns, touch: box.touch, mcp, door: doorHandler, github, halt, tokens })
     .listen(8081, modelHost, () => console.log(`edge: model host on ${modelHost}:8081`))
 }

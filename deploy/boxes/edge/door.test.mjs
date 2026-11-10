@@ -1,13 +1,14 @@
 // node --test: the MCP door (B32) over the wire, through modelServer as main() wires it: bearer door keys only, jumbo's
 // refusal codes as HTTP statuses with JSON-RPC errors, the per-key rate limit, one log line per call without secrets,
 // the dispatcher's scope, project, budget and declaration checks, whoami and project_list, and the box-token endpoint
-// beside it unchanged.
+// beside it unchanged. Then the Mumbo tools (B33), forwarded through a fake client proxy to the owner's box.
 import assert from 'node:assert/strict'
-import { request } from 'node:http'
+import { createHmac } from 'node:crypto'
+import { createServer, request } from 'node:http'
 import { test } from 'node:test'
 import { z } from 'zod'
-import { door, doorTools } from './door.mjs'
-import { modelServer, signBox, verifyBox } from './edge.mjs'
+import { door, doorTools, mumboForwarder } from './door.mjs'
+import { boxFetcher, mcpPrincipal, memberKey, modelServer, mumboMcpKey, signBox, verifyBox } from './edge.mjs'
 import { doorKeys, keyHash } from './keys.mjs'
 import { projects } from './projects.mjs'
 import { children, mcpServer } from './sandboxes.mjs'
@@ -39,14 +40,14 @@ const send = (port, { host = PUBLIC, path = '/mcp', method = 'POST', headers = {
  * The edge's model listener with a door over a memory store: A owns projects P and Q, B owns R. `tools` are added to the
  * door's own; `rate` and the budgets can be set. `at(ms)` moves the clock.
  */
-async function setup({ tools = [], rate = { perMinute: 60, burst: 100 }, budgetOpen = true, tokensOpen = true } = {}) {
+async function setup({ tools = [], rate = { perMinute: 60, burst: 100 }, budgetOpen = true, tokensOpen = true, mumbo = async () => { throw new Error('no box here') } } = {}) {
   const store = memoryStore(), lines = [], charged = []
   let now = NOW
   const proj = projects({ store, admitted: () => true, log: () => {} })
   const P = (await proj.create(A, 'Mine')).id, Q = (await proj.create(A, 'Other')).id, R = (await proj.create(B, 'Theirs')).id
   const allowed = new Set([A, B])
   const keys = doorKeys({ store, projects: proj, admitted: (e) => allowed.has(e), now: () => now, log: () => {} })
-  const front = door({ keys, tools: [...doorTools({ projects: proj }), ...tools], rate, now: () => now, log: (l) => lines.push(l),
+  const front = door({ keys, tools: [...doorTools({ projects: proj, mumbo }), ...tools], rate, now: () => now, log: (l) => lines.push(l),
     allow: async (u) => { charged.push(`requests ${u}`); return budgetOpen }, tokens: { allow: async (u) => { charged.push(`tokens ${u}`); return tokensOpen } } })
   const ops = children({ e2b: { Sandbox: { list: () => ({ hasNext: false }) } }, cfg: { childTemplates: ['c'], maxChildren: 1 }, log: () => {} })
   const mcp = mcpServer({ ops, claimOf: (info) => verifyBox('k', String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
@@ -255,7 +256,7 @@ test('whoami and project_list: the key itself, and the projects it names whose o
     refused(await t.tool(key, 'in_project', { project: t.Q }), 403, 'project_not_allowed')
     assert.equal(result(await t.tool(key, 'in_project', { project: t.P })), 'ran')
     const listed = (await t.rpc(key, 'tools/list')).json.result.tools.map(x => x.name).sort()
-    assert.deepEqual(listed, ['in_project', 'project_list', 'whoami'])
+    assert.deepEqual(listed, ['agent_read', 'agent_send', 'in_project', 'needs_you', 'project_list', 'task_reply', 'task_result', 'task_status', 'whoami'])
   } finally { t.close() }
 })
 
@@ -276,4 +277,130 @@ test('the box-token endpoint beside the door: unchanged on the model host, close
     refused(await send(t.port, { path: '/anthropic/v1/messages', headers: { 'x-api-key': box, ...from }, body: '{}' }), 404, 'not_found')
     refused(await send(t.port, { headers: { authorization: `Bearer ${box}`, ...from }, body: '{}' }), 403, 'user_key_required')
   } finally { t.close() }
+})
+
+// ---- Mumbo through the door (B33): the six @mumbo/mcp tools forwarded to the owner's person box.
+
+const BOX = { id: 'sbx1', token: 'launch', traffic: 'TT', host: PUBLIC }
+const boxOf = (ensured, touched, ensure = async () => BOX) => ({ ensure: async (p) => { ensured.push(p); return ensure(p) }, touch: async (id) => { touched.push(id) } })
+/** A fake E2B client proxy: records each request and answers `answer(seen)`, a { status?, body } (body JSON unless a string). */
+async function fakeProxy(answer) {
+  const seen = []
+  const server = createServer((req, res) => {
+    const chunks = []
+    req.on('data', c => chunks.push(c)).on('end', () => {
+      seen.push({ method: req.method, url: req.url, headers: req.headersDistinct, body: JSON.parse(Buffer.concat(chunks)) })
+      const { status = 200, body } = answer(seen.at(-1))
+      res.writeHead(status, { 'content-type': 'application/json' }).end(typeof body === 'string' ? body : JSON.stringify(body))
+    })
+  })
+  await new Promise(r => server.listen(0, '127.0.0.1', r))
+  return { seen, url: new URL(`http://127.0.0.1:${server.address().port}`), close: () => server.close() }
+}
+
+test('the per-box key is HMAC(edge key, mumbo-mcp:<box id>): stable per box, different across boxes and from the member key; the handle fits @mumbo/mcp', () => {
+  const k = mumboMcpKey('edge', 'box1')
+  assert.equal(k, mumboMcpKey('edge', 'box1'))
+  assert.equal(k, createHmac('sha256', 'edge').update('mumbo-mcp:box1').digest('base64url'))
+  assert.match(k, /^[A-Za-z0-9_-]{43}$/)
+  for (const other of [mumboMcpKey('edge', 'box2'), mumboMcpKey('other', 'box1'), memberKey('edge', 'box1').toString('base64url')]) assert.notEqual(k, other)
+  for (const [email, handle] of [['a@x.com', 'a'], ['Rishabh.17IITkgp@gmail.com', 'rishabh-17iitkgp'], ['9lives+tag@x.com', 'lives-tag'], ['__@x.com', 'person'], [`${'b'.repeat(31)}.c@x.com`, 'b'.repeat(31)]]) {
+    assert.equal(mcpPrincipal(email), handle, email)
+    assert.match(handle, /^[a-z][a-z0-9-]{0,31}$/)
+  }
+})
+
+test('Mumbo tools reach the owner\'s box: ensured, then one tools/call to its @mumbo/mcp route with the box key, the owner\'s handle and the key\'s name; the box\'s result comes back unchanged', async () => {
+  const replies = {
+    agent_send: { content: [{ type: 'text', text: '{"message_id":"m1","after_seq":3}' }] },
+    task_reply: { content: [{ type: 'text', text: '{"code":"needs_person","message":"this tool approval can only be answered by a person in the browser"}' }], isError: true },
+  }
+  const proxy = await fakeProxy(({ body }) => ({ body: { jsonrpc: '2.0', id: body.id, result: replies[body.params.name] } }))
+  const ensured = [], touched = []
+  const mumbo = mumboForwarder({ box: boxOf(ensured, touched), boxFetch: boxFetcher({ publicHost: PUBLIC, proxy: proxy.url }), edgeKey: 'edge-secret', siteHostOf: () => PUBLIC, log: () => {} })
+  const t = await setup({ mumbo })
+  try {
+    const key = await t.mint({ name: 'laptop Claude Code [ü]', scopes: ['prompt'] })
+    const sent = await t.tool(key, 'agent_send', { text: 'hello', request_id: 'r1', extra: 'dropped' })
+    assert.equal(sent.status, 200)
+    assert.deepEqual(sent.json.result, replies.agent_send)
+    const [call] = proxy.seen
+    assert.deepEqual([call.method, call.url], ['POST', '/mcp'])
+    assert.deepEqual(call.body, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'agent_send', arguments: { text: 'hello', request_id: 'r1' } } })
+    const h = call.headers
+    assert.deepEqual(h.authorization, [`Bearer ${mumboMcpKey('edge-secret', 'sbx1')}`], 'the box key, never the door key')
+    assert.deepEqual(h['x-mcp-principal'], ['a'])
+    assert.deepEqual(h['x-mumbo-key-name'], [encodeURIComponent('laptop Claude Code [ü]')])
+    assert.deepEqual([h['e2b-sandbox-id'], h['e2b-sandbox-port'], h['e2b-traffic-access-token']], [['sbx1'], ['3092'], ['TT']])
+    assert.deepEqual(h['content-type'], ['application/json'])
+    assert.equal(h.accept[0], 'application/json, text/event-stream')
+    assert.deepEqual(ensured, [A]); assert.deepEqual(touched, ['sbx1'])
+    // The box refuses an approval itself; its refusal passes through unchanged.
+    assert.deepEqual((await t.tool(key, 'task_reply', { ask_id: 'x', request_id: 'r2', answers: [] })).json.result, replies.task_reply)
+    await settle()
+    assert.deepEqual(t.logs().map(l => [l.tool, l.outcome]), [['agent_send', 'ok'], ['task_reply', 'box_error']])
+  } finally { t.close(); proxy.close() }
+})
+
+test('Mumbo tools: read scope for needs_you, task_status and task_result, prompt for agent_send, agent_read and task_reply; only agent_send is charged; runs_halt and runs_resume are not on the door', async () => {
+  const forwarded = []
+  const t = await setup({ mumbo: async (key, name) => { forwarded.push(name); return { content: [{ type: 'text', text: name }] } } })
+  try {
+    const reader = await t.mint({ name: 'reader' }), prompter = await t.mint({ name: 'prompter', scopes: ['prompt'] })
+    const args = { agent_send: { text: 'hi', request_id: 'r' }, agent_read: { after_seq: 0 }, task_reply: { ask_id: 'a', request_id: 'r' }, needs_you: {}, task_status: {}, task_result: { branch: 'b' } }
+    for (const [name, a] of Object.entries(args)) {
+      const read = ['needs_you', 'task_status', 'task_result'].includes(name)
+      assert.equal((await t.tool(read ? reader : prompter, name, a)).json.result.content[0].text, name)
+      refused(await t.tool(read ? prompter : reader, name, a), 403, 'insufficient_scope')
+    }
+    assert.deepEqual(forwarded, Object.keys(args))
+    assert.deepEqual(t.charged, [`requests ${A}`, `tokens ${A}`], 'agent_send alone causes model turns')
+    const listed = (await t.rpc(reader, 'tools/list')).json.result.tools.map(x => x.name)
+    for (const name of ['runs_halt', 'runs_resume']) {
+      assert.ok(!listed.includes(name), name)
+      const r = await t.tool(prompter, name, { request_id: 'r' })
+      assert.ok(r.json.error ?? r.json.result.isError, name)
+    }
+    assert.equal(forwarded.length, 6, 'nothing is forwarded for runs_*')
+  } finally { t.close() }
+})
+
+test('box unavailable: an image without the door route, a box that cannot start or is still starting, and an answer without a tool result', async () => {
+  let answer = () => ({ status: 502, body: 'The sandbox is running but port is not open' })
+  const proxy = await fakeProxy((seen) => answer(seen))
+  const forward = (ensure, readyMs) => mumboForwarder({ box: boxOf([], [], ensure), boxFetch: boxFetcher({ publicHost: PUBLIC, proxy: proxy.url }), edgeKey: 'k', siteHostOf: () => PUBLIC, readyMs, log: () => {} })
+  const t = await setup({ mumbo: forward() })
+  try {
+    const r = await t.tool(await t.mint(), 'task_status')
+    assert.equal(r.status, 200); assert.equal(r.json.result.isError, true)
+    assert.match(r.json.result.content[0].text, /^box_unavailable: .*\(HTTP 502\): its image may not have the door yet/)
+    await settle()
+    assert.equal(t.logs().at(-1).outcome, 'box_unavailable')
+    const key = { owner: A, name: 'k' }
+    answer = ({ body }) => ({ body: { jsonrpc: '2.0', id: body.id, error: { code: -32602, message: 'Tool task_status not found' } } })
+    await assert.rejects(forward()(key, 'task_status', {}), { code: 'box_unavailable', message: /answered no tool result/ })
+    await assert.rejects(forward(async () => { throw Object.assign(new Error('capacity'), { capacity: true, status: 503 }) })(key, 'task_status', {}), { code: 'box_unavailable', message: /at capacity/ })
+    await assert.rejects(forward(async () => { throw new Error('restore failed') })(key, 'task_status', {}), { code: 'box_unavailable', message: /not ready: it is starting, or it could not start/ })
+    await assert.rejects(forward(() => new Promise(() => {}), 10)(key, 'task_status', {}), { code: 'box_unavailable', message: /is starting/ })
+    assert.equal(proxy.seen.length, 2, 'a box that is not ready gets no call')
+  } finally { t.close(); proxy.close() }
+})
+
+test('agent_read waits at most 40 s, less after a slow start, so a call ends within 50 s, inside the ALB and CloudFront 60 s', async () => {
+  let clock = NOW, start = 0
+  const sent = []
+  const boxFetch = async (target, host, path, opts) => { sent.push({ args: JSON.parse(opts.body).params.arguments, timeoutMs: opts.timeoutMs }); return { status: 200, body: JSON.stringify({ result: { content: [] } }) } }
+  const forward = mumboForwarder({ box: { ensure: async () => { clock += start; return BOX }, touch: async () => {} }, boxFetch, edgeKey: 'k', siteHostOf: () => PUBLIC, now: () => clock, log: () => {} })
+  const key = { owner: A, name: 'k' }
+  await forward(key, 'agent_read', { after_seq: 4, wait_s: 40 })
+  await forward(key, 'agent_read', { after_seq: 4 })
+  start = 15_000
+  await forward(key, 'agent_read', { after_seq: 4, wait_s: 40 })
+  start = 48_000
+  await forward(key, 'agent_read', { after_seq: 4, wait_s: 40 })
+  assert.deepEqual(sent.map(s => s.args.wait_s), [40, 0, 30, 0])
+  assert.deepEqual(sent.map(s => s.timeoutMs), [50_000, 50_000, 35_000, 2_000])
+  assert.deepEqual(sent[0].args, { after_seq: 4, wait_s: 40 })
+  const failing = mumboForwarder({ box: { ensure: async () => BOX, touch: async () => {} }, boxFetch: async () => { throw new Error('box request timed out') }, edgeKey: 'k', siteHostOf: () => PUBLIC, log: () => {} })
+  await assert.rejects(failing(key, 'agent_read', { after_seq: 0 }), { code: 'box_unavailable', message: /did not answer in time/ })
 })
