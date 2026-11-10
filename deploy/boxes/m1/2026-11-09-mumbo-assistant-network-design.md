@@ -1,6 +1,6 @@
 # Mumbo personal assistant: node network and assistant brain (design v2)
 
-Date: 2026-11-09, revision 2.1 (revision 2 plus the founder's answers to its open decisions). Covers parts **A** (the network of nodes) and **B** (the assistant's brain). Part **C** (the founder's accounts in the box: WhatsApp, email, browser, consent) and part **D** (teammates' assistants, phone number, the assistant's own WhatsApp number) get their own designs later.
+Date: 2026-11-09, revision 2.1 (revision 2 plus the founder's answers to its open decisions). Updated 2026-11-10 with the north star (section 1), the person's computer (section 17b) and regions (section 17c). Covers parts **A** (the network of nodes) and **B** (the assistant's brain). Part **C** (the founder's accounts in the box: WhatsApp, email, browser, consent) and part **D** (teammates' assistants, phone number, the assistant's own WhatsApp number) get their own designs later.
 
 Marks: **[founder]** = decided by the founder. **[my call]** = decided by the designer; the founder may overturn it. Unmarked = context or a requirement that follows from the above.
 
@@ -42,6 +42,29 @@ The founder is the first and design-target user. Their current projects **[found
 - **openinfrx:** the open kernel challenge. It competes with bitlane for compute.
 - **admin:** incorporation, invoices and compliance work, buried in email.
 
+### North star: one OS **[founder: 2026-11-10]**
+
+> "mumbo would replace comet / local browser / local ai tools and coding agents / everything - it would be one OS - with local native performance - always on / running on cloud"
+
+What this means for the design **[my call on the wording; founder on the direction]**:
+- **Mumbo is the person's one OS.** Their browser, their AI assistant and their coding agents live in one place.
+- **The cloud box is the always-on source of truth.** It keeps working while the person's laptop sleeps: Mumbo, schedules, the box's browser and project work all run there.
+- **The desktop app is the native-performance front end.**
+  - It uses local compute wherever that improves the feel, with state kept in step with the box: a local browser engine, and local rendering of the client.
+  - The box's own Chrome stays the browser the assistant automates.
+- **The browser must feel native.** A streamed remote desktop can be made smooth (section 17b) but never native, so native feel comes from the desktop app's local browser.
+
+Milestones toward it. These run alongside M1–M6 and don't widen M1:
+
+| Step | Contents | Done when |
+|---|---|---|
+| **N1** the person's computer (sections 17b, 17c) | Mumbo, the always-present assistant session; a smooth, complete desktop with Google Chrome; Browser and Desktop tabs in the app; the box in the person's region | The founder works from India in Mumbo and their box's Chrome and calls it smooth |
+| **N2** desktop app as the client | `apps/desktop` connects to the person's box as its host (signed in through the edge) instead of running dsh locally. Its Browser tab is a local browser engine (the app's own Chromium, which its stock Browser tab already uses on the desktop), kept in step with the box's Chrome | Everyday browsing in the desktop app is as fast as a local browser, and the assistant still works in the box's Chrome while the laptop sleeps |
+| **N3** coding agents in one place | Local Claude Code and Codex sessions attach to mumbo through the MCP door (M3); agents that run in the box follow section 8.1 | A local Claude Code session takes a Mumbo Ticket and reports back into Mumbo |
+| **N4** handoff | Open work moves between the laptop and the box: when the laptop sleeps, Mumbo and the box's Chrome carry on; when it wakes, the app shows what happened (the digest, M4) | The founder closes the laptop mid-task and finds the task done on reopening |
+
+What can be kept in step between the local browser and the box's Chrome is being researched (2026-11-10): Chrome Sync, cookies, Device Bound Session Credentials, and WhatsApp linked devices. So is the fastest VM instance type and guest OS. N2's design waits for that research; N1 does not.
+
 ### Success **[founder]**
 
 1. The founder rarely has to look into any project.
@@ -70,6 +93,7 @@ These are collected from M1 on.
 - Spend runs away overnight, or the assistant has no budget left in the morning. **[my call]**
 - Anything is sent as the founder without approval. **[founder]**
 - A new visual language that differs from the existing dsh Web client. **[founder]**
+- Everyday browsing in mumbo feels slower than in the person's own local browser. **[founder: "local native performance"]**
 
 ## 2. Principles and constraints
 
@@ -332,9 +356,9 @@ Not built now. The platform comes first. When this comes back, start from these 
     - It doesn't poll notifications (App tokens can't). It polls the repository streams it already has (new issues, new PRs, comments, reviews) plus check runs.
     - To keep strangers on a public repo from costing an Eval each, a comment becomes a Trigger only when at least one holds:
       - it is on a Thread a Ticket subscribes to;
-      - it mentions `@mumbo-bot`;
-      - it comes from an allowlisted sender.
-      - Everything else is filtered at the Source scope, before Eval.
+      - it mentions `@mumbo-bot` (or `@mumbo-bot[bot]`) outside code and HTML comments, where GitHub renders it.
+      - Everything else is filtered at the Source scope, before Eval. An allowlisted sender's unaddressed comment needs no third rule: Policy refuses it anyway while comments are not observed (`receivable = addressed || observed`), as it does for a user account.
+    - **Known gap until webhooks:** a review body that mentions the bot on a pull request no Ticket follows is not received, because GitHub has no repository-wide list of reviews. Webhooks (below) close it with `pull_request_review` events.
   - **Identity checks.** The approval poller's author filter and the review-marker author are `mumbo-bot[bot]`, matched by numeric id.
   - **Merges** still use a separate single-repo token minted per merge. The author and the merger are now the same App, so the founder's tap stays the only merge gate.
 - **Merge bot.** The existing `mumbo-bot` GitHub App (id 5295930, installed on the `callgideon` organization) **[founder]**.
@@ -563,6 +587,279 @@ Reference mockups (sample data): `mumbo-mockups-v2.html`.
 - a `gmail.com` account gets the invite-only page;
 - with the cap reached, the next newcomer gets the capacity page.
 
+## 17b. The person's computer (N1) **[founder: 2026-11-10; my call on the how]**
+
+The founder asked for three things on 2026-11-10:
+- a dedicated assistant called Mumbo;
+- a desktop that is smooth and complete;
+- Browser and Desktop tabs in the app.
+
+The region is section 17c. All of these build on stage 9 (the box as the person's computer) and on ASSISTANT.md's home session and home view. They apply to person boxes only; project boxes are unchanged.
+
+### Mumbo, the always-present assistant
+
+**What the person sees.**
+- One Session called **Mumbo**, pinned at the top of the sidebar, in every person's box.
+- Opening the app with no Session selected opens Mumbo, on the phone too.
+- It is the place to dump things, ask for status and come back to.
+- Other chats remain for side work.
+
+**What exists in dsh** (origin/main, 2026-11-10):
+- `ctx.sessionController.create({ sessionId, workspaceId, agentPreset })` creates a root Session. It takes a stable id the caller picks.
+- `resolveAgent(id)` finds one. Create only on `session/not-found`, because `create` with the id of a Session that has started makes a new random one instead.
+- `rename` sets a title that automatic titling never overwrites.
+- `workspaceRegistry.pinSession` / `unarchiveSession` pin and unarchive a Session.
+- `agent/created` with `agent.ctx.systemPrompt.section(...)` gives one Session its own instructions on every create and resume.
+- Superagent's main Session (`src/app/sessions.ts`) and `@mumbo/mcp`'s assistant Session (`src/assistant.ts`) already follow this pattern.
+- What doesn't exist:
+  - per-Session metadata;
+  - a client route that opens a Session from the URL;
+  - a fixed entry above the Session list;
+  - any way to stop a Session being archived.
+
+**Design** **[my call]**:
+- **A plugin, `@mumbo/assistant`** (`packages/mumbo/assistant`, Host and Client halves), loaded by a person-box overlay row that the edge's start script writes, as for `@mumbo/box-links`. No other part of dsh changes, except the archive guard below.
+- **Host, at start:**
+  - resolve the Session `mumbo`, a fixed id the edge and other plugins can name;
+  - if it is not found, create it in the Workspace of the person's files (`/root/projects`) with the deployment's default preset, and title it `Mumbo`;
+  - unarchive it if it is archived, and pin it if it isn't pinned;
+  - one ensure runs at a time.
+  - The person may rename it; the plugin titles it only when it creates it.
+- **Its own instructions** come from a system prompt section added on `agent/created` for this Session only. The text is the plugin's `instructions` config, which the edge writes as it writes `roleInstructions` today. In summary:
+  - you are Mumbo, this person's assistant, and the Session they come back to;
+  - keep track of what they asked and what is pending;
+  - use schedules for later and recurring work;
+  - when they return, start with what happened while they were away.
+  - The box-wide rules in the shared `AGENTS.md` still apply, because every Session reads them.
+  - Because the preset is locked after a Session's first turn, Mumbo stays on the default preset. What makes it Mumbo is this section, so later changes reach the existing Session without recreating it.
+- **Client:**
+  - on first load, if no Session is open, open `mumbo` with `ctx.uiWorkspace.openSession`;
+  - never take over a Session the person chose.
+  - Pinning alone puts it first in the sidebar, so it needs no new sidebar slot.
+- **Archive guard, a small harness addition.**
+  - Archiving through the Web's "stop and archive" passes `stopActivity`, which also deletes every schedule aimed at the Session. An accidental archive would silently drop Mumbo's standing tasks.
+  - Add one veto point that `workspaceRegistry.archiveSession` checks before anything else, with or without `stopActivity`. The plugin refuses `mumbo`, and the Web shows the refusal as it shows any failed archive.
+  - Its Agent Note, README and tests come with it (repository rules).
+  - Until it lands, the start-time unarchive repairs an archive at the next restart, but the deleted schedules stay deleted.
+
+**"Always running"** means three things:
+- **Always reachable.** The Session lives in the box's dsh process, not in a browser, and boxes never pause (ASSISTANT.md decision 4).
+- **Acts on its own.** It runs schedules the person or Mumbo created (`schedule_create` with this Session as the target), and these run with no browser open. From M2, project reports relayed up from coordinators are delivered into `mumbo`. From M3, the MCP door's "assistant" means `mumbo`, so `@mumbo/mcp`'s `assistantTitle` Session is replaced by it when both are composed.
+- **Tells the person.**
+  - Today a finished scheduled turn waits in the Session for the next visit.
+  - An approval asked during a scheduled turn waits for a browser, which matters most.
+  - **Next, after B17:** the edge forwards a box's "notify" call (on the same model-host endpoint as the sandbox tools, with the box token) to that person's own ntfy topic, which the person sets up from the home page. Mumbo uses it when it needs an answer or has finished something the person asked for. **[my call; the founder confirms it is wanted]**
+
+**How it relates to what exists:**
+- **Welcome:** unchanged (section 17a). The welcome attaches to the person's first prompt in any Session; since the app opens on Mumbo, it normally appears there.
+- **Superagent:** not loaded in person boxes today. In M4 the assistant's superagent instance works behind Mumbo: its router Session is not the chat, and Mumbo's log stays the person's record. How Mumbo hands dumps to it is M4's design.
+- **Per-person preset (ASSISTANT.md):** Mumbo's section plus the box overlay's rows (browser, computer use, sandboxes, schedules) are the assistant preset. No separate preset is built.
+- **Other chats:** side conversations with the same tools and box rules. Project reports, relayed messages and standing schedules go to Mumbo only.
+
+**Acceptance:**
+- a new box has Mumbo pinned first, and the app opens on it;
+- a restart neither duplicates it nor changes its title;
+- an unpinned Mumbo is pinned again at the next start;
+- archiving it is refused, and its schedules survive the attempt;
+- a schedule Mumbo created runs with no browser open, and its result is in Mumbo on the next visit;
+- recorded-session snapshots cover Mumbo's system prompt section (repository rule).
+
+### A smooth, complete desktop
+
+**Today** (`edge.mjs` start script, desktop block; `template.mjs`):
+- **Rendering and streaming.** Xvfb draws a 1440×900×24 screen in memory, and x11vnc finds changes by comparing it repeatedly. noVNC shows it through websockify, the edge and the ALB. Chromium renders in software on 2 vCPU. The founder reports heavy lag.
+- **No desktop.** Only openbox runs: there is no taskbar, file manager or desktop. A minimized window can't be brought back, so the screen goes blank.
+
+**Wanted:**
+- **Smooth.** Typing echoes and scrolling follows within the network round trip plus a frame or two.
+- **Complete.** A taskbar with the open windows and a launcher, a file manager, a terminal and the browser. Minimizing or closing anything never leaves the person stranded.
+
+**Design** **[my call; the research ranks the streaming stack]**:
+- **A display server that streams only what was drawn.**
+  - Replace Xvfb + x11vnc + websockify + noVNC with one X server that has the VNC server built in, so nothing polls.
+  - **Provisional choice: KasmVNC**, a TigerVNC fork with its own web client and WebP/JPEG encoding that lowers quality during fast motion. It also encodes across threads and copies text both ways.
+  - It is served on the same port and the same `/desktop/` path. KasmVNC's own login is off: the edge stays the only gate, raw ports stay loopback-only, and the edge's Origin checks apply unchanged.
+  - Depth stays 24 bits, which Chrome needs. The screen follows the viewer's size, so a phone gets a phone-sized desktop.
+  - WebRTC stacks (Selkies) are in only if the research shows VNC can't meet the acceptance below. They need a UDP or TURN path that the ALB doesn't carry, plus video encoding on the box's CPU.
+- **XFCE** as the desktop, run as the `browser` user as openbox is today:
+  - the xfwm4 window manager with compositing off, since compositing makes the VNC server send more;
+  - the panel with a window list and launcher;
+  - the Thunar file manager and the XFCE terminal.
+  - Lighter alternatives save about 100 MB but don't look like a normal desktop.
+- **The browser is always there.**
+  - Chrome runs under a loop that restarts it within 5 seconds if it exits. The assistant's browser tools depend on it, and on a real desktop the person can now close it.
+  - It reopens the previous tabs (`RestoreOnStartup`).
+- **Files.**
+  - Chrome downloads to `/home/browser/Downloads`. The assistant reads downloads there and puts files the person wants to upload in the same folder; one line in `roleInstructions` says so.
+  - Backups cover all of `/home/browser` except caches, not only the profile. So a restore or a move (section 17c) keeps downloads and desktop settings.
+- **Size.**
+  - Measure on the founder's box before and after: frame rate, box CPU and node CPU.
+  - If Chrome or the encoder is CPU-bound at 2 vCPU, person boxes get 4 vCPU.
+  - A node (r8i.2xlarge, 8 vCPU) already holds up to 12 boxes, so vCPUs are shared. More vCPUs raise a box's burst, not the node's total, and node CPU is the real limit (section 20).
+  - Chrome flags for software rendering follow the research and the measurement.
+
+**Acceptance**, from the founder's location after the move to India (section 17c), on a laptop and on a phone:
+- scrolling a LinkedIn feed in the desktop shows at least 20 frames a second in the viewer's statistics, and the box's CPU stays below 80%;
+- typing in WhatsApp Web echoes without a visible delay;
+- minimizing every window leaves the taskbar, and each window comes back from it;
+- closing Chrome brings it back within 5 seconds with its tabs, and the assistant's browser tools work again;
+- text copies both ways between the person's device and the desktop;
+- the founder calls it smooth.
+
+### Browser and Desktop tabs
+
+**What exists in dsh:**
+- The right panel holds tab kinds. A plugin registers one with `ctx.sidebarRightTabs.register` and puts its body in the `sidebar.right.pane.tab` slot. Its guide card has an order: Files 10, Terminal 20, the stock Browser 30.
+- Below 768px the panel goes full-screen.
+- The stock Browser tab (`ui-sidebar-browser`) works differently by platform:
+  - on the Web, it is an iframe that refuses the app's own origin, and most sites refuse to be framed;
+  - in the desktop app, it uses the app's own Chromium (a webview).
+- dsh sets no CSP on the app page.
+- The desktop live view is served at `/desktop/` on the app's own origin, behind the edge's `frame-ancestors 'self'` and Origin checks.
+
+**Design** **[my call]**:
+- **Two tab kinds, `box-browser` (title "Browser") and `box-desktop` (title "Desktop"),** added to `@mumbo/box-links`.
+  - That package already carries the box's desktop URL into the page, and its README becomes "box links and views".
+  - Their guide cards follow Terminal: Browser 30, Desktop 35.
+  - On person boxes on the Web, the person overlay drops the stock iframe Browser, which can't open most sites. The desktop app keeps it.
+- **Desktop** is an iframe of the configured `desktop` URL.
+  - It is the same origin as the app, so `frame-ancestors 'self'` and the Origin checks hold unchanged, and no CSP change is needed.
+  - It has no `sandbox` attribute, which would add nothing for a same-origin page.
+- **Browser** is the same live view with Chrome in front.
+  - Each time the tab is shown, one owner-only Host call brings Chrome's window to the front, maximized on display `:1`, and starts Chrome if it isn't running. `xdotool` is already in the image for computer use.
+  - So "Browser" is the desktop showing your browser.
+  - Rejected: a CDP screencast of the page. It shows no tabs, address bar, sign-in pop-ups, permission prompts or file pickers, and it needs the client to reach CDP, which agent containment is taking away. It would also carry every keystroke, passwords included, as CDP input.
+  - Rejected: cropping the stream to one window. No VNC server here does that.
+- **Hidden tabs disconnect** (no `keepMounted`). Two hidden live views would each keep an encoder busy. Showing a tab reconnects in about a second.
+- **Ready for the local browser (N2).**
+  - `box-browser` registers in the `builtin` band. When the desktop app registers its own local-browser body for the same kind in the `extension` band, the right panel uses that one and falls back to the live view when it unregisters.
+  - Nothing else in the product names the live view, so N2 needs no change here.
+- **Google Chrome replaces Debian's Chromium** **[my call; follows the founder's ask]**.
+  - Google turned Sync off for Chromium builds, so a profile that syncs with the person's Google account needs Google Chrome stable, from Google's apt repository (amd64; nodes are x86_64).
+  - **The existing profile directory is kept.** Chrome opens a Chromium profile last used by a version no newer than itself. Otherwise the box starts a fresh profile and keeps the old directory aside.
+  - The debugging port stays on loopback with the box's own `--user-data-dir`. Chrome 136 and later honour the port only with a non-default profile directory, which this is.
+  - **Updates.** Chrome updates with each template build. Rebuild the template at least every two weeks for Chrome security releases (RUNBOOK).
+  - **Policies** in a root-owned `/etc/opt/chrome/policies/managed/mumbo.json`: `RestoreOnStartup: 1`, `DefaultBrowserSettingEnabled: false`, `MetricsReportingEnabled: false`, plus the password rule below.
+- **Passwords and payment cards don't sync into the box until agent containment lands** **[my call; the founder confirms]**.
+  - The agent runs as root. Chrome on Linux without a keyring (`--password-store=basic`) encrypts saved passwords with a fixed, public key. So any password in the profile is readable by the agent and by anyone who can steer it.
+  - Policy: `SyncTypesListDisabled: ["passwords", "payments"]`, `PasswordManagerEnabled: false`, `AutofillCreditCardEnabled: false`.
+  - Bookmarks, history, open tabs, settings and extensions sync. Don't unlock a password-manager extension in the box before containment.
+  - Chrome Sync never carries sign-ins (cookies) in either direction. The person signs in to each site once in the box, and the profile, with its cookies, is in every backup.
+  - After containment (section 2), password sync is a policy change.
+- **Signing in.**
+  - The person signs in on the desktop.
+  - For WhatsApp from a phone, use "Link with phone number" (a code), because the phone showing the desktop can't scan its own screen.
+- **Rules unchanged:**
+  - the assistant never types passwords or one-time codes;
+  - `@mumbo/browser-consent` asks before writes;
+  - the profile is backed up;
+  - the edge's framing and Origin checks hold.
+
+**Acceptance:**
+- on a laptop and a phone, Browser opens with Chrome in front, and Desktop shows the whole desktop;
+- both work in the phone's full-screen panel;
+- the person signs in to Google in Chrome; bookmarks and history sync, saved passwords don't, and Chrome offers no password saving;
+- WhatsApp Web is linked by phone-number code and LinkedIn is signed in. Both stay signed in after a box restart and after a restore from backup;
+- a project host can't frame the desktop (the edge's existing test);
+- the stock iframe Browser is absent on person boxes on the Web.
+
+### Tasks (B16 onward)
+
+| Task | Owner | Contents | Depends on |
+|---|---|---|---|
+| **B16** | mumbo-impl (done, approved) | Project boxes get `MUMBO_GITHUB_APP_LOGIN` and `MUMBO_GITHUB_APP_USER_ID` (superagent App mode, UPSTREAM S7) | #27 |
+| **B17** | mumbo-impl | `@mumbo/assistant`: the Mumbo Session (ensure, title, pin, unarchive, its prompt section, opening it on first load), the harness archive guard, and the person-box overlay row with `instructions` in the edge start script. Tests: the acceptance above, a real-composition test, snapshots | — |
+| **B18** | mumbo-impl | Desktop and Chrome, edge and template: XFCE; Google Chrome with the policy file and profile kept; the restart loop; Downloads; backups of `/home/browser` without caches; the `roleInstructions` line. Measure before and after on the founder's box. Rollback is the previous template | — |
+| **B19** | mumbo-impl | The streaming stack: KasmVNC, or the research's pick, in place of Xvfb, x11vnc, websockify and noVNC at the same `/desktop/` path. Then the vCPU decision from the measurement | B18, research |
+| **B20** | mumbo-impl | `box-browser` and `box-desktop` in `@mumbo/box-links`, with the owner-only Chrome-to-front call; the person overlay drops the stock Web Browser tab. Works with today's noVNC and B19's stack alike | — |
+| **B21** | mumbo-impl | Edge, by region (section 17c) | R6 |
+| **B22** | mumbo-impl | Edge, moving between regions (section 17c) | B21 |
+| **B23** (after B17; the founder confirms) | mumbo-impl | Mumbo's push: a per-person ntfy topic set up from the home page, and a box "notify" call through the edge | B17 |
+
+B17, B18 and B20 can run in parallel. B18 and B19 both change the template and the start script's desktop block, so they run in that order.
+
+## 17c. Regions: the box near the person (N1) **[founder: 2026-11-10; my call on the how]**
+
+The founder is in India, and their box must run in `ap-south-1` (Mumbai). The region is a setting per person, and a person can move between regions. Today everything is one stack in `us-east-1`: the edge and ALB, E2B control (API and client proxy on ECS, Postgres, MemoryDB), the edge's Valkey store, the nodes and the backup bucket. r8i nodes offer nested virtualization in all three `ap-south-1` zones (checked 2026-11-10).
+
+**What has to be near the person:** the desktop stream and the app's WebSocket, both of which cross the edge. Model calls (seconds each), GitHub and approvals are not latency-sensitive.
+
+**Design** **[my call]**:
+- **Cells.** A cell is one region's VPC, E2B control, nodes, templates bucket, backup bucket and NAT addresses. There is one cell per region, and the first new one is `ap-south-1`.
+- **An edge in every cell region, one shared state.**
+  - The same edge image runs as an ECS service behind its own ALB in each region.
+  - Every edge can serve every person: it routes each request to the cell of that person's (or project's) box, across regions if needed (inter-region VPC peering).
+  - **Rejected: one global edge.** An Indian person's desktop stream would cross the ocean twice for a box in Mumbai.
+  - **Rejected: separate stacks per region with their own host names.** They break the single sign-in host and the same-origin Desktop tab.
+- **DNS.** Route 53 latency-based records point `app.mumbo.si`, `*.app.mumbo.si` and `llm.app.mumbo.si` at every regional ALB, with health checks, so each person reaches the nearest edge. `llm.boxes.mumbo.si` stays in `us-east-1` only. Global Accelerator isn't needed while latency records do the job.
+- **State.**
+  - The edge's Valkey store stays single, in `us-east-1`. The Mumbai edge reaches it over peering, so a store round trip costs about 190 ms from there.
+  - The desktop stream and the app's WebSocket pay that only when connecting. Measure a page load from India; if store round trips add more than 300 ms, add a 30-second per-replica cache of box placement. If the cache isn't enough, the next step is a Valkey Global Datastore with reads in each region.
+  - The edge's sweeps (backups, idle, wake) stay one lease holder for all regions. It drives each cell's E2B API.
+- **Where the region lives: the edge store,** on the person's record and on each box and project record. Not Supabase:
+  - user metadata is writable by the person through Supabase's API;
+  - the region must change atomically with the box record during a move;
+  - the edge already keeps all placement in its store.
+  - Records without a region are in `us-east-1`.
+- **A newcomer's region** is the region of the edge that served their first sign-in, which is the nearest region with a cell, through latency DNS.
+- **Backups.** Each cell has its own bucket and KMS key, and a box backs up into its own region's bucket, keeping the 10-minute uploads in-region.
+  - No cross-region replication: disaster recovery across regions isn't a goal yet.
+  - A move copies the latest backup once.
+  - Offboarding deletes a person's backups in every region.
+- **Model host and egress.** Each edge's model host calls DeepSeek and OpenRouter itself, under the same budget ledger (shared store).
+  - `BOX_EGRESS_IPS` becomes the union of every cell's NAT addresses.
+  - The rules don't change: only `api.deepseek.com` among DeepSeek's hosts, and OpenRouter's `data_collection: deny`.
+- **Child sandboxes** run in their owner's cell. A move kills the person's children, which are short-lived.
+- **Project boxes** have a region too. It defaults to the creator's region at creation, and existing projects stay in `us-east-1`. They aren't latency-sensitive (chat, no desktop) and sit near GitHub. Only the operator moves them, with the same flow, since members may live in different regions.
+- **Capacity** is per cell: `MAX_RUNNING_UNITS` follows that cell's node count. A full cell shows the capacity page; it doesn't spill a person into a distant region.
+- **Sign-in.** Each edge's oauth2-proxy uses the same client and cookie secret, so a sign-in on one edge is valid on every edge. Supabase is global.
+
+**Moving between regions** reuses the RUNBOOK's "move a box" (back up, then restore elsewhere), automated with a rollback:
+1. **Start.** The person starts the move on the home page ("Your computer is in US East (Virginia). Move to India (Mumbai)"). They confirm after reading what a move loses: running terminals and servers, an agent turn in progress, and software installed outside the saved folders. The operator can start one with a RUNBOOK command, including for a project box. One move per principal runs at a time.
+2. **Mark.** The edge marks the principal as moving. Pages say "Moving your computer to India (Mumbai). This page reloads by itself", and WebSocket upgrades are refused.
+3. **Stop and back up.** Stop dsh and Chrome in the source box so nothing writes, then take a final backup into the source bucket.
+4. **Copy.** Copy that backup to the target bucket server-side, re-encrypted with the target key.
+5. **Restore.** Create the box in the target cell from the copied backup (the existing `ensure` restore path), and check that dsh answers.
+6. **Switch.** Write the new region and box record, then kill the source box and the person's children. Sessions, schedules, files and Chrome sign-ins come along, because they are what the backup holds.
+7. **Failure** at any step before the switch puts the person back on the source box: dsh and Chrome are started again, the target box is killed, and the person is told. The source bucket keeps its backups until they expire.
+
+**Terraform, one module per region** (mumbo builds these):
+
+| Task | Contents | Done when |
+|---|---|---|
+| **R1** | Split `deploy/boxes/prod` into a `modules/cell` and a `modules/edge`, and instantiate both for `us-east-1` with `moved` blocks. Parameterize every hard-coded region: the provider, the S3 endpoint service name and the node launch template. Per-cell private names, such as `api.<region>.boxes.internal` and `orchestrators.<region>.boxes.internal`; `us-east-1` keeps today's names | `terraform plan` for `us-east-1` shows no changes |
+| **R2** | Shared resources at the root: the public zone's records, the edge's Valkey store (still `us-east-1`), and the edge secrets every region reads (oauth2-proxy client and cookie secret, GitHub App, OpenRouter, each cell's E2B key) through replicas or full-ARN cross-region reads | No changes in plan; the secrets are readable from `ap-south-1` |
+| **R3** | The `ap-south-1` cell: VPC `10.21.0.0/16`, clear of 10.11/16, 10.12/16 and 10.20/16; E2B control; nodes with `node_count = 1` (12 boxes); templates and backup buckets with KMS; NAT. Its fixed monthly cost goes to the founder before apply | Its API answers on its private name |
+| **R4** | Peering between `us-east-1` and `ap-south-1`, with routes, security groups and the private zone associated with both VPCs. Both edges reach both cells' API and client proxy, and the store. mTLS certificates for the new cell from the same CA | An edge task in each region reaches both cells |
+| **R5** | E2B on the new cell: `setup/build.sh` into its templates bucket; the `mumbo-box`, `mumbo-child` and `mumbo-project` templates built on its API; the stage 4 move check on its nodes | `check/move.mjs` passes in `ap-south-1` |
+| **R6** | The `ap-south-1` edge: an ECS service, an ALB and an ACM certificate for every edge name, and both edges' cell configuration (B21). Not yet in DNS: tested with `curl --resolve` | The founder signs in through the Mumbai ALB with `--resolve` |
+| **R7** | Latency records and health checks for the edge names, pointing at both ALBs. **The switch is the founder's go**, because DNS changes are theirs. Rollback is removing the Mumbai records | From India, `app.mumbo.si` resolves to the Mumbai ALB |
+| **R8** | Move the founder's box (B22) and run the acceptance | Below |
+
+**Edge tasks:**
+- **B21, the edge by region:**
+  - a cell configuration per region: API and client-proxy URLs, the E2B key, backup bucket and key, `MAX_RUNNING_UNITS`, NAT addresses; plus `EDGE_REGION`;
+  - a region on person, box and project records;
+  - every E2B and S3 call uses the record's cell, and capacity is per cell;
+  - the model host accepts every cell's addresses;
+  - newcomers get `EDGE_REGION`, and children follow their owner;
+  - tests for each. Measure store latency from Mumbai, and add the placement cache only if it is needed.
+- **B22, moving between regions:**
+  - the flow above, with its pages and the home-page control;
+  - the RUNBOOK command, which also works for project boxes;
+  - offboarding across every region.
+  - Tests: a move, a target-restore failure that leaves the person on the source box, a visit and a WebSocket during a move, and a second move refused while one runs.
+
+**Acceptance (first milestone: the founder's box in Mumbai):**
+- **The move.** The founder's box runs in the `ap-south-1` cell, moved from `us-east-1` with Sessions, schedules, files and Chrome sign-ins intact.
+- **Routing.**
+  - From India, `app.mumbo.si` is served by the Mumbai edge, and the TCP round trip to its ALB is under 60 ms.
+  - A person in the US still reaches a `us-east-1` box through the `us-east-1` edge.
+  - The founder reaches the mumbo project box (`us-east-1`) through the Mumbai edge.
+- **Services from the Mumbai box.** Model calls, budgets, approvals, the GitHub forwarder and child sandboxes (created in Mumbai) all work.
+- **Moves.** A move back to `us-east-1` and again to Mumbai works. A forced failure leaves the founder on their source box.
+- **Backups.** The Mumbai box's backups land in the Mumbai bucket.
+
 ## 18. Milestones **[founder: A, then B, then C; my call on the cut]**
 
 | Milestone | Contents | Done when |
@@ -576,9 +873,11 @@ Reference mockups (sample data): `mumbo-mockups-v2.html`.
 
 Then the part C design (accounts in the box), then D.
 
+The person's-computer track (N1: sections 17b and 17c, tasks B17–B23 and R1–R8) runs alongside these milestones. It doesn't change their contents or their order. **[founder: 2026-11-10, "don't widen M1"]**
+
 ## 19. Non-goals of this design
 
-- **Part C:** WhatsApp and email Sources, the box browser and computer use, consent for account actions (ASSISTANT.md decision 3), and sending as the founder, including superagent's Outbox approval gate.
+- **Part C:** WhatsApp and email Sources (the assistant reading them), consent for account actions beyond `@mumbo/browser-consent` (ASSISTANT.md decision 3), and sending as the founder, including superagent's Outbox approval gate. The box's desktop and browser themselves, and the person signing in there, are N1 (section 17b).
 - **Part D:** teammates' assistants, phone calls, and the assistant's own number.
 - Deploy approvals before M5, and task coordinators.
 - Productizing for users other than the founder. Nothing should assume a single user per deployment beyond one assistant per box.
@@ -595,6 +894,7 @@ Then the part C design (accounts in the box), then D.
 
 - **Move Mumbo-authored security code in the superagent copy under the coverage gate.** Today the whole copy is excluded. Move the panel admission rule (S2) and `Policy.delivers` (S3) into `src/mumbo/*.ts`, and narrow the exclusion to leave `src/mumbo/**` covered.
 - **Match GitHub identities by numeric user id, not login,** in superagent's Policy allowlist and in the edge's agent-author and review-marker checks. A renamed or recycled login could otherwise match.
+- **Don't credit an edit to the comment's author.** Superagent reads an edited comment, including an old one edited to add `@mumbo-bot`, as a message from its author. Anyone with write access to a repository can edit anyone's comment there, so a write collaborator could forge the founder's authority. Today the only write holders are the founder and the agent, and the edge (B15) stops the agent editing others' comments. **Before anyone else gets write access to a project's repository,** superagent ignores a comment whose GraphQL `editor` is not its author, or credits it to the editor.
 - **Bind the approval item's file list to the head SHA** through `compare/{base}...{sha}` (B2's noted race).
 - **Trim the `mumbo-bot` App's permissions:** remove actions and workflows write. The edge already mints narrower tokens.
 - **Move the agent onto the `mumbo-bot` App**, so no machine accounts remain. This needs superagent's GitHub Source to work without `/user` and notifications.
@@ -616,6 +916,12 @@ Then the part C design (accounts in the box), then D.
 - **DeepSeek sees business data** (section 16).
 - **Two designs for stage 10 can drift:** this one and ASSISTANT.md. After approval, fold this design into `deploy/boxes/ASSISTANT.md` as one document.
 - **WhatsApp Web automation can get the account banned** (part C).
+- **Google may refuse to sign in** a browser with remote debugging on, or one on a datacenter address.
+  - Mitigation: the person signs in on the desktop and handles Google's checks.
+  - If Google still refuses, Chrome is restarted once without the debugging port for the sign-in, then with it again. B18's acceptance tests this first.
+- **Google Chrome's terms.** Installing Chrome in boxes for the company's own people is ordinary use. Offering it to customers needs a review before productizing.
+- **A region costs a fixed amount each month** (E2B control, NAT, the ALB, a minimum of one node) whether or not anyone uses it. R3 states the amount before apply.
+- **One edge store for all regions** adds a cross-region round trip to the Mumbai edge's store reads (section 17c). Measured in B21; the cache and the Global Datastore are the next steps.
 
 **Before public launch** (checklist) **[founder]**
 - Branch rules on `main`, `dev` and `master` (section 9).
