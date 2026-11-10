@@ -683,6 +683,7 @@
 /* Panel entries use a 3px paint inset, the New Session bar's 12px radius,
    the session rows' hover/selected fill, and the primary ink. */
 .panelRow {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--dsh-sidebar-label-gap);
@@ -740,6 +741,26 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A Session row's status dot takes the place other rows give their unpin action. */
+.panelStatus {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 100%;
+}
+
+/* In the rail, the dot marks the glyph's top-right corner. */
+.collapsed .panelStatus {
+  top: 4px;
+  right: 4px;
+  width: auto;
+  height: auto;
 }
 
 .collapsed .panelList {

@@ -15,6 +15,9 @@ export const en = {
   'navigation.label': 'Navigation',
   'panels.more': 'More',
   'version.copied': 'Version copied',
+  'session.status.waiting': 'Waiting for your response',
+  'session.status.running': 'Running',
+  'session.status.completed': 'Completed',
 } satisfies Record<string, string>
 
 /** Japanese copy, checked against the English keys. */
@@ -29,6 +32,9 @@ export const ja = {
   'navigation.label': 'ナビゲーション',
   'panels.more': 'その他',
   'version.copied': 'バージョンをコピーしました',
+  'session.status.waiting': '応答待ち',
+  'session.status.running': '実行中',
+  'session.status.completed': '完了',
 } satisfies Record<keyof typeof en, string>
 
 /** Spanish dictionary, checked against the English keys. */
@@ -43,6 +49,9 @@ export const es = {
   'navigation.label': 'Navegación',
   'panels.more': 'Más',
   'version.copied': 'Versión copiada',
+  'session.status.waiting': 'Esperando tu respuesta',
+  'session.status.running': 'En ejecución',
+  'session.status.completed': 'Completado',
 } satisfies Record<keyof typeof en, string>
 
 /** French dictionary, checked against the English keys. */
@@ -57,6 +66,9 @@ export const fr = {
   'navigation.label': 'Navigation',
   'panels.more': 'Plus',
   'version.copied': 'Version copiée',
+  'session.status.waiting': 'En attente de votre réponse',
+  'session.status.running': 'En cours',
+  'session.status.completed': 'Terminé',
 } satisfies Record<keyof typeof en, string>
 
 /** German dictionary, checked against the English keys. */
@@ -71,6 +83,9 @@ export const de = {
   'navigation.label': 'Navigation',
   'panels.more': 'Mehr',
   'version.copied': 'Version kopiert',
+  'session.status.waiting': 'Wartet auf Ihre Antwort',
+  'session.status.running': 'Läuft',
+  'session.status.completed': 'Abgeschlossen',
 } satisfies Record<keyof typeof en, string>
 
 /** Russian dictionary, checked against the English keys. */
@@ -85,6 +100,9 @@ export const ru = {
   'navigation.label': 'Навигация',
   'panels.more': 'Ещё',
   'version.copied': 'Версия скопирована',
+  'session.status.waiting': 'Ожидает вашего ответа',
+  'session.status.running': 'Выполняется',
+  'session.status.completed': 'Завершено',
 } satisfies Record<keyof typeof en, string>
 
 /** Portuguese dictionary, checked against the English keys. */
@@ -99,4 +117,7 @@ export const pt = {
   'navigation.label': 'Navegação',
   'panels.more': 'Mais',
   'version.copied': 'Versão copiada',
+  'session.status.waiting': 'Aguardando sua resposta',
+  'session.status.running': 'Em execução',
+  'session.status.completed': 'Concluído',
 } satisfies Record<keyof typeof en, string>

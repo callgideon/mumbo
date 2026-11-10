@@ -4237,7 +4237,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
         name: 'session',
         requirement: 'optional',
         type: 'SessionIdOf',
-        doc: 'Session the row opens through Workspace navigation instead of selecting a main panel. The row is active while that Session is the main view and no panel is selected, and it is fixed: it cannot be unpinned and More never lists it.',
+        doc: 'Session the row opens through Workspace navigation instead of selecting a main panel. The row is active while that Session is the main view and no panel is selected, and it is fixed: it cannot be unpinned and More never lists it. It shows that Session\'s status dot, and it is absent once the Session list has arrived without that Session.',
       },
     ],
     ownerProps: [

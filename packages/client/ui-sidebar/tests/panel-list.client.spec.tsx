@@ -12,6 +12,7 @@ import { IconGlobeOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ILayout, MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { PropsRenderSlots, PropsRuntime, SessionIdOf, SlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import type { TrackProductEvent } from '@deepseek-ai/dsh-client-product-analytics/client'
+import type { SessionPendingInteractionBase } from '@deepseek-ai/dsh-client-ui-session/client'
 import { apply, inject } from '../src/client/index.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -539,16 +540,23 @@ describe('sidebar Session rows', () => {
     })
   }
 
-  async function sessionBench(collapsed = false) {
+  async function sessionBench(collapsed = false, listed = true) {
     const b = await bench(collapsed)
-    await b.runtime.sessions.add({ id: MUMBO })
+    if (listed) await b.runtime.sessions.add({ id: MUMBO })
     await b.runtime.sessions.add({ id: SIDE })
     await mountPanels(b.runtime, b.locale)
     await mountPanel(b.runtime, { id: PLUGINS, heading: 'Plugins content', label: 'Plugins', order: 0 })
     const row = await mountSessionRow(b.runtime)
     const navigation = await b.view.findByRole('navigation', { name: 'Global panels' })
-    const mumbo = await within(navigation).findByRole('button', { name: 'Mumbo' })
-    return { ...b, row, navigation, mumbo }
+    const mumbo = () => within(navigation).queryByRole('button', { name: 'Mumbo' })
+    if (listed) await waitFor(() => { expect(mumbo()).not.toBeNull() })
+    return { ...b, row, navigation, mumbo: mumbo() as HTMLElement, findMumbo: mumbo }
+  }
+
+  /** The row's status description, or null while it shows no status. */
+  function statusOf(button: HTMLElement): string | null {
+    const id = button.getAttribute('aria-describedby')
+    return id === null ? null : document.getElementById(id)?.textContent ?? null
   }
 
   it.each([false, true])('leads Plugins by order and opens its Session, active only while that Session is the main view, with collapsed=%s', async (collapsed) => {
@@ -612,5 +620,45 @@ describe('sidebar Session rows', () => {
     expect(openSession).toHaveBeenCalledExactlyOnceWith(MUMBO)
     expect(layout.selectPanel.mock.calls).toEqual([[null]])
     await waitFor(() => { expect(mumbo.getAttribute('aria-current')).toBe('page') })
+  })
+
+  it.each([false, true])('shows its Session\'s pending answer, then activity, then an unseen completion as a status dot, with collapsed=%s', async (collapsed) => {
+    const { runtime, mumbo, openSession } = await sessionBench(collapsed)
+    expect(statusOf(mumbo)).toBeNull()
+    expect(mumbo.querySelector('[data-state]')).toBeNull()
+
+    await runtime.sessions.updateSummary(MUMBO, { running: true })
+    await waitFor(() => { expect(statusOf(mumbo)).toBe('Running') })
+    expect(mumbo.querySelector('[data-state]')?.getAttribute('data-state')).toBe('ongoing')
+
+    // An approval asked while the Session runs outranks the activity.
+    const publish = runtime.ctx.uiSession.registerPendingInteraction<SessionPendingInteractionBase>(() => 0)
+    let answered = (): void => {}
+    act(() => { answered = publish({ kind: 'approval', key: 'request', sessionId: MUMBO }, async () => {}) })
+    await waitFor(() => { expect(statusOf(mumbo)).toBe('Waiting for your response') })
+    expect(mumbo.querySelector('[data-state]')?.getAttribute('data-state')).toBe('warning')
+    act(() => { answered() })
+    await waitFor(() => { expect(statusOf(mumbo)).toBe('Running') })
+
+    // A turn that ends while another Session is open stays marked until Mumbo is opened.
+    act(() => { openSession(SIDE) })
+    await runtime.sessions.updateSummary(MUMBO, { running: false })
+    await waitFor(() => { expect(statusOf(mumbo)).toBe('Completed') })
+    expect(mumbo.querySelector('[data-state]')?.getAttribute('data-state')).toBe('done')
+    fireEvent.click(mumbo)
+    await waitFor(() => { expect(statusOf(mumbo)).toBeNull() })
+  })
+
+  it('is absent while the arrived Session list lacks its Session, and shown while the list is still arriving', async () => {
+    const { runtime, navigation, findMumbo, openSession } = await sessionBench(false, false)
+    expect(within(navigation).getAllByRole('button').map(button => button.getAttribute('aria-label')))
+      .toEqual(['Plugins', 'Beta panel', 'Alpha panel'])
+    act(() => { runtime.sessions.list.update((draft) => { draft.phase = 'pending' }) })
+    await waitFor(() => { expect(findMumbo()).not.toBeNull() })
+    act(() => { runtime.sessions.list.update((draft) => { draft.phase = 'ready' }) })
+    await waitFor(() => { expect(findMumbo()).toBeNull() })
+    await runtime.sessions.add({ id: MUMBO })
+    fireEvent.click(await within(navigation).findByRole('button', { name: 'Mumbo' }))
+    expect(openSession).toHaveBeenCalledExactlyOnceWith(MUMBO)
   })
 })

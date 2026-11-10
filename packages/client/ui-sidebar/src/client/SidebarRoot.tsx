@@ -18,18 +18,19 @@
  * scrollbar indirection away while it is elsewhere, so a list the user is not
  * pointing at carries no bar.
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
   FishLogo, IconAppsAddOutlineRegular, IconNewChatOutlineMedium, IconNewChatOutlineRegular,
-  IconPanelLeftOutlineRegular, IconPinFillRegular, focusWithoutRing, isBehindModal, isDarwinDesktop, Menu, ShortcutKeys, Toast,
-  Tooltip, useModalLayer, writeClipboard,
+  IconPanelLeftOutlineRegular, IconPinFillRegular, focusWithoutRing, isBehindModal, isDarwinDesktop, Menu, ShortcutKeys, StateDot, Toast,
+  Tooltip, useModalLayer, writeClipboard, type StateDotState,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { InjectFace, PropsRenderFactories, PropsRenderSlots, PropsRuntime, SessionIdOf } from '@deepseek-ai/dsh-client-ui-slots'
+import type { InjectFace, PropsLocale, PropsRenderFactories, PropsRenderSlots, PropsRuntime, SessionIdOf } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
   SidebarPanelActionsOwnerProps, SidebarPanelMetadata, SidebarRootComponentProps, SidebarRootInjected, SidebarSectionHookContext,
   SidebarSectionOwnerProps,
 } from './contract/slots.ts'
+import type { SidebarKey } from './locales.ts'
 import { FIXED_PANEL_ID } from './panel-pins.ts'
 import { createScrollHandoff } from './scroll-handoff.ts'
 import css from './SidebarRoot.module.css'
@@ -73,10 +74,17 @@ function fixedPanel({ id, session }: Pick<SidebarPanelMetadata, 'id' | 'session'
   return id === FIXED_PANEL_ID || session !== undefined
 }
 
-/** One navigation row; {@link PanelRow} and {@link SessionRow} supply its selected state and its action. */
+/** Status a row shows beside its label: a dot, described to assistive technology by `label`. */
+interface RowStatus {
+  readonly state: StateDotState
+  readonly label: string
+}
+
+/** One navigation row; {@link PanelRow} and {@link SessionRow} supply its selected state, its action and any status. */
 function PanelRowView({
-  id, label, wide, unpinLabel, unpinTooltip, canUnpin, active, onSelect, setPinned, trackEntryClick, renderFactorySlot,
-}: PanelRowViewProps & { readonly active: boolean; readonly onSelect: () => void }) {
+  id, label, wide, unpinLabel, unpinTooltip, canUnpin, active, status, onSelect, setPinned, trackEntryClick, renderFactorySlot,
+}: PanelRowViewProps & { readonly active: boolean; readonly status?: RowStatus | undefined; readonly onSelect: () => void }) {
+  const statusId = useId()
   return (
     <div className={clsx(css.panelEntry, wide && css.panelEntryWide, active && css.panelEntryActive)}>
       <Tooltip label={label} delayMs={500} disabled={wide}>
@@ -85,6 +93,7 @@ function PanelRowView({
           className={css.panelRow}
           aria-label={label}
           aria-current={active ? 'page' : undefined}
+          aria-describedby={status === undefined ? undefined : statusId}
           onClick={() => {
             const entry = officialEntry(id)
             if (entry !== undefined) trackEntryClick({ menu_name: entry, position: 'sidebar' })
@@ -99,6 +108,10 @@ function PanelRowView({
               {label}
             </span>
           )}
+          {status !== undefined && <span className={css.panelStatus}>
+            <StateDot state={status.state} size={wide ? undefined : 8} />
+            <span id={statusId} hidden>{status.label}</span>
+          </span>}
         </button>
       </Tooltip>
       {wide && canUnpin && <Tooltip label={unpinTooltip} side="bottom" align="end" delayMs={500} portal>
@@ -124,14 +137,34 @@ function PanelRow({
   return <PanelRowView {...view} active={active} onSelect={() => { selectPanel(view.id) }} />
 }
 
-/** A Session row is selected while its Session is the main view and no panel is selected. */
+/** Each Session row state's shared status dot, as Workspace Session rows draw it, and its description. */
+const SESSION_STATUS = {
+  waiting: { state: 'warning', label: 'session.status.waiting' },
+  running: { state: 'ongoing', label: 'session.status.running' },
+  completed: { state: 'done', label: 'session.status.completed' },
+} as const satisfies Record<string, { state: StateDotState; label: SidebarKey }>
+
+/**
+ * A Session row is selected while its Session is the main view and no panel is selected. Its dot shows a pending
+ * answer, then activity, then a completion not yet seen. Once the Host list has arrived without its Session, the row
+ * is absent, because opening an unlisted Session fails.
+ */
 function SessionRow({
-  session, usePanelInfo, useSessions, openSession, ...view
-}: PanelRowViewProps & Pick<PropsRuntime<'sidebar'>, 'usePanelInfo' | 'useSessions'>
-  & Pick<InjectFace<SidebarRootInjected>, 'openSession'> & { readonly session: SessionIdOf }) {
+  session, usePanelInfo, useSessions, useSessionStatus, openSession, t, ...view
+}: PanelRowViewProps & Pick<PropsRuntime<'sidebar'>, 'usePanelInfo' | 'useSessions' | 'useSessionStatus'>
+  & Pick<InjectFace<SidebarRootInjected>, 'openSession'> & Pick<PropsLocale<'sidebar'>, 't'> & { readonly session: SessionIdOf }) {
   const conversation = usePanelInfo(info => info.activePanelId === null)
   const shown = useSessions(list => (list.byId[session]?.retainedBy.mainView ?? 0) > 0)
-  return <PanelRowView {...view} active={conversation && shown} onSelect={() => { openSession(session) }} />
+  const listed = useSessions(list => list.phase !== 'ready' || list.ids.includes(session))
+  const state = useSessionStatus((statuses): keyof typeof SESSION_STATUS | undefined => {
+    const status = statuses.get(session)
+    if (status?.pendingInteraction !== undefined) return 'waiting'
+    if (status?.running === true) return 'running'
+    return status?.completionUnread === true ? 'completed' : undefined
+  })
+  if (!listed) return null
+  const status = state === undefined ? undefined : { state: SESSION_STATUS[state].state, label: t(SESSION_STATUS[state].label) }
+  return <PanelRowView {...view} active={conversation && shown} status={status} onSelect={() => { openSession(session) }} />
 }
 
 type PanelMoreMenuProps =
@@ -181,6 +214,7 @@ export function SidebarRoot({
   trackEntryClick,
   useRemoteAccess,
   useSessions,
+  useSessionStatus,
   usePanels,
   useEntryPins,
   useEntryActions,
@@ -447,7 +481,7 @@ export function SidebarRoot({
                 return panel.session === undefined
                   ? <PanelRow key={panel.id} {...view} usePanelInfo={usePanelInfo} selectPanel={selectPanel} />
                   : <SessionRow key={panel.id} {...view} session={panel.session} usePanelInfo={usePanelInfo} useSessions={useSessions}
-                    openSession={openSession} />
+                    useSessionStatus={useSessionStatus} openSession={openSession} t={t} />
               })}
               {hasEntryActions && (
                 <PanelMoreMenu
