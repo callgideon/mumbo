@@ -16,7 +16,7 @@ The root-scoped lists `sidebar.panellist.actions`, `conversation.session.header.
 
 ## Declaration and lifecycle
 
-`SlotMap` is the compile-time registry. A package declaration-merges the key, cardinality, scope, owner props, keyed props, and optional slot-level inject face. The runtime declaration is the matching `children` entry on the component that owns the render location.
+`SlotMap` is the compile-time registry. A package declaration-merges the key, cardinality, scope, owner props, keyed props, optional slot-level inject face, and, for a `list` slot, optional registration [`fields`](../../packages/client/ui-slots/README.md#use-this-package). The runtime declaration is the matching `children` entry on the component that owns the render location.
 
 Declaring a child has three effects: it makes the child key live, authorizes that parent entry's `renderSlot` or `renderSlotChain` call, and records the runtime dispatch specification. One live entry owns each declaration. Registering into an undeclared slot or declaring a child already owned elsewhere fails during plugin activation.
 
@@ -56,7 +56,7 @@ The slot declaration fixes two independent axes.
 | Axis | Value | Meaning |
 |---|---|---|
 | cardinality | `single` | One cell. The active priority winner renders. Use a child slot instead of treating this as an additive list. |
-| cardinality | `list` | Cells are addressed by required `id` and ordered by `order`, then registration order. |
+| cardinality | `list` | Cells are addressed by required `id` and ordered by `order`, then registration order. A registration may also carry the slot's declared `fields`, which the owner reads. |
 | cardinality | `keyed` | The owner dispatches an `entryKey`; the matching cell renders with any key-specific props. |
 | cardinality | `chain` | Each entry supplies a pure `select(owner)` function. The first non-null result in priority order renders and receives that result as `matched`; otherwise the owner fallback renders. |
 | cardinality | `hoc` | Entries nest around the owner's `renderSlot(key, owner, { children })` content, lowest outermost; see [Hoc layers](#hoc-layers). |

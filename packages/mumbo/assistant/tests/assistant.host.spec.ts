@@ -93,7 +93,7 @@ async function host() {
     ctx.plugin(Assistant, { instructions, workspace, retryDelaysMs }).await()
   const prompt = async (id: SessionId = MUMBO) => renderPrompt(await ctx.systemPrompt.assemble({ scope: ctx.agents.get(id)! }))
   return {
-    ctx, workspace, calls, titles, start, prompt, resume, remove,
+    ctx, facility, workspace, calls, titles, start, prompt, resume, remove,
     failResolve: (code: string) => { resolveError = Object.assign(new Error(code), { code }) },
     clearFailure: () => { resolveError = undefined },
     /** Hold every later resolve until `held` settles, as a slow resume would. */
@@ -103,14 +103,26 @@ async function host() {
 
 const MUMBO = Assistant.MUMBO_SESSION_ID
 
+/** A box an earlier version of the plugin started: Mumbo exists and is pinned, beside a pin of the person's own. */
+async function pinnedEarlier(ctx: Context): Promise<void> {
+  const workspace = await mkdtemp(join(tmpdir(), 'mumbo-assistant-earlier-'))
+  dirs.push(workspace)
+  const target = await ctx.workspaceRegistry.create(workspace)
+  ctx.sessions.create(MUMBO, { meta: { cwd: workspace } })
+  await target.attachSession(MUMBO)
+  ctx.sessions.create(SessionId('side'), {})
+  await ctx.workspaceRegistry.pinSession(SessionId('side'))
+  await ctx.workspaceRegistry.pinSession(MUMBO)
+}
+
 describe('ensuring Mumbo at start', () => {
-  it('creates, titles, and pins Mumbo in the configured Workspace on a fresh store', async () => {
+  it('creates and titles Mumbo in the configured Workspace on a fresh store, and leaves it unpinned', async () => {
     const { ctx, workspace, calls, titles, start } = await host()
     await start()
     expect(calls).toEqual(['resolve:mumbo', 'create:mumbo:undefined', 'rename:mumbo:Mumbo'])
     expect(titles.get(MUMBO)).toBe('Mumbo')
     expect(ctx.workspaceRegistry.list().map(item => [item.path, item.sessionIds])).toEqual([[workspace, [MUMBO]]])
-    expect(ctx.workspaceRegistry.pinnedSessionIds).toEqual([MUMBO])
+    expect(ctx.workspaceRegistry.pinnedSessionIds).toEqual([])
   })
 
   it('neither duplicates nor retitles Mumbo on a restart, so the person\'s title stays', async () => {
@@ -125,26 +137,50 @@ describe('ensuring Mumbo at start', () => {
     expect(ctx.sessions.list().map(session => session.id)).toEqual([MUMBO])
   })
 
-  it('pins an unpinned Mumbo again at the next start, ahead of other pins', async () => {
+  it('unpins a Mumbo an earlier version pinned once, and keeps a pin the person sets afterwards', async () => {
     const { ctx, start } = await host()
+    await pinnedEarlier(ctx)
     const first = await start()
-    ctx.sessions.create(SessionId('side'), {})
-    await ctx.workspaceRegistry.unpinSession(MUMBO)
-    await ctx.workspaceRegistry.pinSession(SessionId('side'))
+    expect(ctx.workspaceRegistry.pinnedSessionIds).toEqual(['side'])
+    await ctx.workspaceRegistry.pinSession(MUMBO)
     await first.dispose()
     await start()
-    expect(ctx.workspaceRegistry.pinnedSessionIds).toEqual([MUMBO, 'side'])
+    expect([...ctx.workspaceRegistry.pinnedSessionIds].sort()).toEqual([MUMBO, 'side'])
   })
 
-  it('unarchives and pins an archived Mumbo at the next start', async () => {
+  it('retries a failed unpin without unpinning twice, and records it only once it held', async () => {
+    const { ctx, start } = await host()
+    await pinnedEarlier(ctx)
+    const error = vi.spyOn(ctx.logger, 'error').mockImplementation(() => {})
+    const registry = ctx.workspaceRegistry
+    const unpin = vi.spyOn(registry, 'unpinSession').mockRejectedValueOnce(new Error('disk full'))
+    const first = await start(INSTRUCTIONS, [5])
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(/retrying in 5 ms: .*disk full/))
+    await vi.waitFor(() => { expect(registry.pinnedSessionIds).toEqual(['side']) })
+    expect(unpin).toHaveBeenCalledTimes(2)
+    await first.dispose()
+    await registry.pinSession(MUMBO)
+    await start()
+    expect(unpin).toHaveBeenCalledTimes(2)
+  })
+
+  it('fails the start when its domain does not open, and leaves no veto behind', async () => {
+    const { ctx, facility, start } = await host()
+    vi.spyOn(facility, 'open').mockRejectedValueOnce(new Error('backend gone'))
+    await expect(start()).rejects.toThrow('backend gone')
+    ctx.sessions.create(MUMBO, {})
+    await ctx.workspaceRegistry.archiveSession(MUMBO)
+    expect(ctx.workspaceRegistry.archivedSessionIds).toEqual([MUMBO])
+  })
+
+  it('unarchives an archived Mumbo at the next start', async () => {
     const { ctx, start } = await host()
     const first = await start()
     await first.dispose()
     await ctx.workspaceRegistry.archiveSession(MUMBO)
-    expect(ctx.workspaceRegistry.pinnedSessionIds).toEqual([])
     await start()
     expect(ctx.workspaceRegistry.archivedSessionIds).toEqual([])
-    expect(ctx.workspaceRegistry.pinnedSessionIds).toEqual([MUMBO])
+    expect(ctx.workspaceRegistry.pinnedSessionIds).toEqual([])
   })
 
   it('keeps the veto and the section through a failed ensure, reports it, and succeeds on a later retry', async () => {
@@ -164,10 +200,8 @@ describe('ensuring Mumbo at start', () => {
     await expect(ctx.workspaceRegistry.archiveSession(MUMBO, { stopActivity: true })).rejects.toThrow(Assistant.ARCHIVE_REFUSAL)
     expect(stopped).toEqual([])
     // The lease is released before the retry, which then ensures as usual.
-    await ctx.workspaceRegistry.unpinSession(MUMBO)
     clearFailure()
-    await vi.waitFor(() => { expect(ctx.workspaceRegistry.pinnedSessionIds).toEqual([MUMBO]) })
-    expect(calls).toEqual(['resolve:mumbo', 'resolve:mumbo'])
+    await vi.waitFor(() => { expect(calls).toEqual(['resolve:mumbo', 'resolve:mumbo']) })
   })
 
   it('keeps the veto while a restart drains a running retry, and starts the next ensure after it', async () => {
@@ -200,11 +234,12 @@ describe('ensuring Mumbo at start', () => {
     const { ctx, workspace, calls } = await host()
     const error = vi.spyOn(ctx.logger, 'error').mockImplementation(() => {})
     // A missing Workspace directory fails creation on every attempt.
-    await ctx.plugin(Assistant, { instructions: INSTRUCTIONS, workspace: join(workspace, 'missing'), retryDelaysMs: [5] }).await()
+    const exhausted = await ctx.plugin(Assistant, { instructions: INSTRUCTIONS, workspace: join(workspace, 'missing'), retryDelaysMs: [5] }).await()
     await vi.waitFor(() => { expect(error).toHaveBeenCalledTimes(2) })
     expect(error).toHaveBeenLastCalledWith(expect.stringMatching(/no retry is left until the next start: .*missing/))
     expect(ctx.sessions.list()).toEqual([])
     expect(calls).toEqual(['resolve:mumbo', 'resolve:mumbo'])
+    await exhausted.dispose()
 
     const pending = await ctx.plugin(Assistant, { instructions: INSTRUCTIONS, workspace: join(workspace, 'missing'), retryDelaysMs: [30] }).await()
     await pending.dispose()
@@ -279,7 +314,6 @@ describe('the archive veto', () => {
       .rejects.toThrow(`cannot archive session 'mumbo': ${Assistant.ARCHIVE_REFUSAL}`)
     expect(stopped).toEqual([])
     expect(ctx.workspaceRegistry.archivedSessionIds).toEqual([])
-    expect(ctx.workspaceRegistry.pinnedSessionIds).toEqual([MUMBO])
 
     // Other Sessions archive as before, and the veto goes with the plugin.
     ctx.sessions.create(SessionId('side'), {})

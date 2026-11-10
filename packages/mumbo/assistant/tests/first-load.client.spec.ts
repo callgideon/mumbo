@@ -5,6 +5,7 @@ import type { WorkspaceSnapshot, WorkspaceView } from '@deepseek-ai/dsh-api-work
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { LayoutController } from '@deepseek-ai/dsh-client-ui-layout/client'
+import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { en } from '@deepseek-ai/dsh-client-ui-workspace/src/client/locales.ts'
 import { UiWorkspaceService } from '@deepseek-ai/dsh-client-ui-workspace/src/client/navigation.ts'
 import { createWorkspaceViewStore } from '@deepseek-ai/dsh-client-ui-workspace/src/client/stores.ts'
@@ -59,6 +60,8 @@ async function page(options: PageOptions) {
   locale.setLocale('en')
   ctx.effect(() => locale.register('workspace', { en }))
   ctx.provide('locale', locale)
+  // The sidebar never declares its panel list here, so the entry stays pending.
+  await ctx.plugin(SlotRegistry)
   const layout = new LayoutController({ selectPanel: vi.fn() } as never, () => true, createSnapshotStore({ activePanelId: null }))
   ctx.provide('layout', layout)
   const list = createSnapshotStore<SessionListState>({ ids: [], byId: {}, phase: 'pending', projectionsBySession: {} }, { flush: 'sync' })
@@ -109,7 +112,7 @@ async function page(options: PageOptions) {
     }
   }
   /** Start the plugin again on the same page, as an HMR rebuild of its bundle does. */
-  const reapply = async () => { await ctx.plugin({ inject, apply }) }
+  const reapply = async () => ctx.plugin({ inject, apply }).await()
   return { ready, settled, plugin, service, reapply, create: sessions.create }
 }
 
@@ -168,10 +171,11 @@ it('keeps a Session the person opened when the plugin starts again on the same p
   // Mumbo itself open: a restart does not open it again.
   await plugin!.dispose()
   const opens = vi.spyOn(service, 'openSession')
-  await reapply()
+  const again = await reapply()
   await settled()
   expect(opens).not.toHaveBeenCalled()
   service.openSession(sid('side'))
+  await again.dispose()
   await reapply()
   expect(await settled()).toEqual({ open: ['side'], saved: 'side' })
   expect(opens).toHaveBeenCalledExactlyOnceWith('side')
@@ -191,4 +195,11 @@ it('leaves navigation alone after unload, and leaves restoration alone in a page
   const without = await page({ rows: [MUMBO], workspaces: [HOME, ELSEWHERE], plugin: false })
   without.ready()
   expect(await without.settled()).toEqual({ open: ['created-a'], saved: 'created-a' })
+})
+
+it('hides Mumbo from the Workspace browser through Workspace navigation until the plugin unloads', async () => {
+  const { plugin, service } = await page({ rows: [MUMBO], workspaces: [HOME] })
+  expect(service.hiddenSessionIds.getSnapshot()).toEqual([MUMBO_SESSION_ID])
+  await plugin!.dispose()
+  expect(service.hiddenSessionIds.getSnapshot()).toEqual([])
 })

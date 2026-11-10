@@ -4931,8 +4931,8 @@ export interface Config {
 
 ## `@mumbo/assistant`
 
-- `inject`: `sessionController` · `workspaceRegistry` · `agents`
-- `source`: [`packages/mumbo/assistant/src/index.ts:28`](../packages/mumbo/assistant/src/index.ts)
+- `inject`: `sessionController` · `workspaceRegistry` · `agents` · `storageDomain`
+- `source`: [`packages/mumbo/assistant/src/index.ts:50`](../packages/mumbo/assistant/src/index.ts)
 
 ```ts config-catalog
 /** Mumbo's instructions, the Workspace its Session is created in, and how a failed ensure is retried. */

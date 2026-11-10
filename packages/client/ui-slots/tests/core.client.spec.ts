@@ -8,7 +8,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
     'test.single': { kind: 'single'; scope: 'root' }
     'test.session': { kind: 'single'; scope: 'session' }
-    'test.list': { kind: 'list'; scope: 'root' }
+    'test.list': { kind: 'list'; scope: 'root'; fields: { tone?: string } }
     'test.keyed': { kind: 'keyed'; scope: 'session' }
     'test.chain': { kind: 'chain'; scope: 'session'; owner: { tags: string[] } }
     'test.hoc': { kind: 'hoc'; scope: 'root' }
@@ -168,6 +168,22 @@ describe('kind semantics', () => {
     // @ts-expect-error list registration requires options.id
     expect(() => core.register({ name: 'test.list' }, Comp)).toThrow('requires options.id')
     expect(core.entries('test.list').map(e => e.options.id)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('list: declared fields land on the stored entry uninterpreted; other kinds and bare entries store none', () => {
+    const core = new SlotCore()
+    mountFrame(core)
+    core.register({ name: 'test.list', id: 'warm', order: 1, tone: 'warm', registrant: 'tester' }, Comp)
+    core.register({ name: 'test.list', id: 'bare' }, Comp)
+    // @ts-expect-error a declared field keeps its declared type
+    core.register({ name: 'test.list', id: 'typed', tone: 1 }, Comp)
+    // @ts-expect-error a slot that declares no fields accepts none
+    core.register({ name: 'test.keyed', key: 'a', tone: 'warm' }, Comp)
+    const entry = (id: string) => core.entries('test.list').find(candidate => candidate.options.id === id)
+    const [warm, bare] = [entry('warm'), entry('bare')]
+    expect(warm).toMatchObject({ options: { id: 'warm', order: 1 }, fields: { tone: 'warm' }, registrant: 'tester' })
+    expect(bare?.fields).toBeUndefined()
+    expect(core.entries('test.keyed')[0]?.fields).toBeUndefined()
   })
 
   it('hoc: missing or duplicate id throws, layers sort by priority then order, one winner per id', () => {

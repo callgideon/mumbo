@@ -15,6 +15,8 @@ import { SlotTestRuntime, usePinnedBrowserLanguages } from '@deepseek-ai/dsh-cli
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
 import { apply, inject } from '@deepseek-ai/dsh-client-ui-sidebar/client'
+import { IconPluginPinwheelOutlineRegular, IconSparkleRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { de } from '../src/client/locales.ts'
 
 // The service reads its initial locale from the browser; these specs assert
@@ -40,7 +42,7 @@ async function bench() {
   const runtime = await SlotTestRuntime.create()
   runtime.ctx.provide('shortcuts', { catalog: createSnapshotStore([]) } as never)
   runtime.ctx.provide('layout', { toggleSidebar: vi.fn() })
-  runtime.ctx.provide('uiWorkspace', { startSession: vi.fn() } as never)
+  runtime.ctx.provide('uiWorkspace', { startSession: vi.fn(), openSession: vi.fn() } as never)
   const locale = new LocaleRuntime(runtime.ctx)
   locale.register('common', { en: commonEn })
   runtime.ctx.provide('locale', locale)
@@ -102,5 +104,32 @@ describe('sidebar shell snapshots', () => {
       await runtime.dispose()
       document.documentElement.removeAttribute('data-windows-titlebar')
     }
+  })
+
+  it('renders a Session row above Plugins, selected while its Session is open, in the column, the rail, and the drawer', async () => {
+    const { runtime } = await bench()
+    const mumbo = await runtime.sessions.add({ id: 'mumbo' })
+    runtime.sessions.retain(mumbo, { source: 'mainView' })
+    await runtime.mount({
+      inject: ['slots'],
+      apply(ctx) {
+        ctx.slots.inject('sidebar.panellist', function* () {
+          yield ctx.slots.register({ name: 'sidebar.panellist', id: 'plugins', order: 0, label: 'Plugins' },
+            ({ size }: PropsRuntime<'sidebar.panellist'>) => <IconPluginPinwheelOutlineRegular size={size} />)
+          yield ctx.slots.register({ name: 'sidebar.panellist', id: 'mumbo', order: -10, label: 'Mumbo', session: mumbo },
+            ({ size }: PropsRuntime<'sidebar.panellist'>) => <IconSparkleRegular size={size} />)
+        })
+      },
+    })
+    const slot = runtime.renderSlot('sidebar', { collapsed: false, width: 300, drawer: false })
+    expect(slot.view.getByRole('button', { name: 'Mumbo' }).getAttribute('aria-current')).toBe('page')
+    expect(slot.view.getByRole('navigation')).toMatchSnapshot('session row expanded')
+    slot.update({ collapsed: true, width: 56, drawer: false })
+    await waitFor(() => { expect(slot.view.getByRole('button', { name: 'Mumbo' }).textContent).toBe('') })
+    expect(slot.view.getByRole('navigation')).toMatchSnapshot('session row rail')
+    slot.update({ collapsed: false, width: 300, drawer: true })
+    expect(slot.view.getByRole('button', { name: 'Mumbo' }).textContent).toBe('Mumbo')
+    expect(slot.view.getByRole('navigation')).toMatchSnapshot('session row drawer')
+    await runtime.dispose()
   })
 })
