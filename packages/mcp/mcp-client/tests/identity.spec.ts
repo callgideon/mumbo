@@ -123,7 +123,7 @@ linux('a stdio server started through the run-as provider', () => {
 })
 
 /** A scripted process handle behind a subprocess service that only spawns. */
-async function fakeService(options: { highWaterMark?: number; childIdentity?: SubprocessChildIdentity } = {}) {
+async function fakeService(options: { highWaterMark?: number; childIdentity?: SubprocessChildIdentity; refuse?: Error } = {}) {
   const stdin = new PassThrough({ highWaterMark: options.highWaterMark ?? 16 * 1024 })
   const stdout = new PassThrough()
   const done = Promise.withResolvers<SubprocessOutcome>()
@@ -135,7 +135,11 @@ async function fakeService(options: { highWaterMark?: number; childIdentity?: Su
   }
   class SpawnOnly extends SubprocessRuntime {
     override get childIdentity(): SubprocessChildIdentity | undefined { return options.childIdentity }
-    override spawn(spec: SubprocessSpawnSpec): SubprocessHandle { specs.push(spec); return handle }
+    override spawn(spec: SubprocessSpawnSpec): SubprocessHandle {
+      specs.push(spec)
+      if (options.refuse !== undefined) throw options.refuse
+      return handle
+    }
     override resolveExecutable(): Promise<string> { throw new Error('unused') }
     override terminalEnvironment(): Promise<SubprocessTerminalEnvironment> { throw new Error('unused') }
     override spawnTerminal(): Promise<SubprocessTerminalHandle> { throw new Error('unused') }
@@ -177,6 +181,17 @@ describe('the subprocess stdio transport', () => {
     const plain = await fakeService()
     expect(createTransport(anonymous(), plain.ctx)).toBeInstanceOf(StdioClientTransport)
     expect(plain.specs).toEqual([])
+  })
+
+  it('fails a start the service refuses with its reason, and reports closure once so the connection can be retried', async () => {
+    const service = await fakeService({ refuse: new Error('refusing to start a process whose environment contains GITHUB_TOKEN') })
+    const transport = createTransport(config({ env: { GITHUB_TOKEN: 'person-token' } }), service.ctx)
+    const seen = observe(transport)
+    await expect(transport.start()).rejects.toThrow('environment contains GITHUB_TOKEN')
+    await vi.waitFor(() => { expect(seen.closed()).toBe(1) })
+    await transport.close()
+    expect(seen.closed()).toBe(1)
+    await expect(transport.send({ jsonrpc: '2.0', method: 'late' })).rejects.toThrow('Not connected')
   })
 
   it('delivers newline-delimited messages across chunks and reports a line that is not a message', async () => {

@@ -56,15 +56,24 @@ class SubprocessStdioTransport implements Transport {
   start(): Promise<void> {
     if (this.started) throw new Error('MCP stdio transport already started')
     this.started = true
-    const handle = this.handle = this.subprocess.spawn({
-      argv: [this.config.command, ...this.config.args],
-      cwd: this.config.cwd === '' ? process.cwd() : this.config.cwd,
-      env: this.config.env,
-      identity: this.identity,
-      graceMs: CLOSE_GRACE_MS,
-      // A contained server never writes to this process's standard error; its diagnostics are read and dropped.
-      stdio: { stdin: 'pipe', stdout: 'pipe', stderr: { maxBytes: 0 } },
-    })
+    let handle: SubprocessHandle
+    try {
+      handle = this.handle = this.subprocess.spawn({
+        argv: [this.config.command, ...this.config.args],
+        cwd: this.config.cwd === '' ? process.cwd() : this.config.cwd,
+        env: this.config.env,
+        identity: this.identity,
+        graceMs: CLOSE_GRACE_MS,
+        // A contained server never writes to this process's standard error; its diagnostics are read and dropped.
+        stdio: { stdin: 'pipe', stdout: 'pipe', stderr: { maxBytes: 0 } },
+      })
+    } catch (error) {
+      // Nothing started, such as when the provider refuses a secret name in `env`: report the closure once, so the
+      // connection confirms it and can be retried, and fail the start with the provider's reason.
+      queueMicrotask(() => { this.onclose?.() })
+      // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- spawn throws an Error by its contract.
+      return Promise.reject(error)
+    }
     // Piped stdin and stdout are present by the spawn contract.
     const stdin = handle.stdin as NonNullable<SubprocessHandle['stdin']>
     const stdout = handle.stdout as NonNullable<SubprocessHandle['stdout']>
