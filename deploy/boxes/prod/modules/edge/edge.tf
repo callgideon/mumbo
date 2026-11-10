@@ -177,6 +177,23 @@ resource "aws_lb_listener_rule" "edge" {
     target_group_arn = aws_lb_target_group.edge[each.value[2]].arn
   }
 }
+# The MCP door (design §10, R-door): https://<public host>/mcp goes to the model listener, past oauth2-proxy. The door
+# takes bearer keys only and ignores cookies, so skipping the sign-in proxy opens no cookie-authenticated path. Ranks
+# above the user rule (10), below the X-Forwarded-Uri refusal (1) and the former-name redirects (5, 6). The ALB idle timeout (3600 s) covers long calls.
+resource "aws_lb_listener_rule" "door" {
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 7
+  condition {
+    host_header { values = [local.public_host] }
+  }
+  condition {
+    path_pattern { values = ["/mcp", "/mcp/*"] }
+  }
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.edge["model"].arn
+  }
+}
 # Former names redirect to the new ones with the same path and query. A project box moved from p-<id>.boxes.mumbo.si
 # to p-<id>.app.mumbo.si, which a redirect cannot derive (it keeps or replaces the whole host), so those land on the
 # home page, which links every project of the signed-in person.
