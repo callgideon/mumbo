@@ -92,6 +92,43 @@ test('interim Chromium policy: a template with Google Chrome and its own policy 
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
 
+test('slice 2: a person box adds the Browser and Desktop tabs and drops the stock Web Browser only when the image\'s box-links has them and wmctrl exists', () => {
+  const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles)
+  const lines = u.split('\n')
+  const from = lines.findIndex(l => l === 'LINKS_PATCH=')
+  const to = lines.findIndex((l, i) => i > from && l === 'fi' && lines[i - 1].startsWith('LINKS_PATCH="--patch'))
+  assert.ok(from >= 0 && to > from, 'links block present')
+  const dir = mkdtempSync(join(tmpdir(), 'links-row-'))
+  try {
+    const bin = join(dir, 'bin'); mkdirSync(bin)
+    const block = lines.slice(from, to + 1).join('\n').replaceAll('/src/packages/mumbo/box-links', join(dir, 'pkg')).replaceAll('/root/.mumbo', dir)
+    const run = (path) => { execFileSync('/bin/sh', ['-c', `set -eu\n${block}`], { encoding: 'utf8', env: { PATH: path } }); return readFileSync(join(dir, 'links.overlay.yml'), 'utf8') }
+    const tool = (name) => { writeFileSync(join(bin, name), '#!/bin/sh\n'); execFileSync('chmod', ['+x', join(bin, name)]) }
+    // Only the fake tools and cat are on PATH, so the host's own xauth or wmctrl never leaks in.
+    symlinkSync('/bin/cat', join(bin, 'cat'))
+    const base = bin
+    // An image whose box-links predates the tabs: links only, the stock Browser stays.
+    mkdirSync(join(dir, 'pkg', 'src'), { recursive: true })
+    tool('wmctrl')
+    let y = run(base)
+    assert.ok(!y.includes('browser:') && !y.includes('ui-sidebar-browser'))
+    // The tabs and wmctrl, no xauth: browser without xauthority.
+    writeFileSync(join(dir, 'pkg', 'src', 'browser.ts'), '')
+    y = run(base)
+    assert.ok(y.includes("        browser:\n          display: ':1'\n- id: ui-sidebar-browser\n  disabled: true\n"), y)
+    // With xauth: the cookie path the desktop block creates.
+    tool('xauth')
+    y = run(base)
+    assert.equal(y, "- insert:\n    - id: box-links\n      name: '@mumbo/box-links'\n      config:\n        home: https://boxes.x/home\n        desktop: https://boxes.x/desktop/\n        browser:\n          display: ':1'\n          xauthority: /run/x11/auth\n- id: ui-sidebar-browser\n  disabled: true\n")
+    // No wmctrl: no tabs.
+    execFileSync('rm', [join(bin, 'wmctrl')])
+    y = run(bin)
+    assert.ok(!y.includes('browser:') && !y.includes('ui-sidebar-browser'))
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+  const p = startScript({ ...c, projectDomain: 'boxes.x' }, 'T', boxSite({ ...c, projectDomain: 'boxes.x' }, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
+  assert.ok(!p.includes('ui-sidebar-browser') && !p.includes('box-links/src/browser.ts'))
+})
+
 test('box links: the overlay loads only when the image ships @mumbo/box-links; project boxes get no desktop link', () => {
   const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles)
   assert.match(u, /if \[ -d \/src\/packages\/mumbo\/box-links \]; then/)

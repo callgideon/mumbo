@@ -276,7 +276,16 @@ cat > /root/.mumbo/links.overlay.yml <<'YML'
         home: https://${cfg.publicHost}/home
 ${site.desktop ? `        desktop: https://${cfg.publicHost}/desktop/
 ` : ''}YML
-LINKS_PATCH="--patch /root/.mumbo/links.overlay.yml"
+${site.desktop ? `# The right panel's Browser and Desktop tabs (box-links' browser key), when the image's box-links has them and wmctrl
+# is installed; they replace the stock Web Browser tab, which most sites refuse to be framed in. The tabs raise the box's
+# Chrome with wmctrl and never start it: the desktop's restart loop keeps it running.
+if [ -f /src/packages/mumbo/box-links/src/browser.ts ] && command -v wmctrl >/dev/null 2>&1; then
+  printf '%s\\n' '        browser:' "          display: ':1'" >> /root/.mumbo/links.overlay.yml
+  # The X cookie is made below with xauth, as for computer use.
+  if command -v xauth >/dev/null 2>&1; then echo '          xauthority: /run/x11/auth' >> /root/.mumbo/links.overlay.yml; fi
+  printf '%s\\n' '- id: ui-sidebar-browser' '  disabled: true' >> /root/.mumbo/links.overlay.yml
+fi
+` : ''}LINKS_PATCH="--patch /root/.mumbo/links.overlay.yml"
 fi
 ${site.desktop ? `# Desktop control on :1 (@deepseek-ai/dsh-computer-use-x11), when the image ships the package and xdotool.
 CU_PATCH=
