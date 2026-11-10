@@ -138,6 +138,24 @@ test('create() starts a project box from projectTemplate with the owners as pane
   assert.ok(!written[1].includes('MUMBO_PANEL_ADMINS'))
 })
 
+test('create() charges a project box 4 capacity units and a person box 2', async () => {
+  const made = []
+  const e2b = {
+    Sandbox: {
+      list: () => ({ hasNext: true, nextItems: async function () { this.hasNext = false; return [] } }),
+      create: async (tpl) => { made.push(tpl); return { sandboxId: `b${made.length}`, files: { write: async () => {} }, commands: { run: async (cmd) => ({ stdout: cmd.includes('dsh.log') ? 'launch' : '' }) }, kill: async () => {} } },
+    },
+  }
+  const store = memoryStore()
+  // Nothing runs; 3 units are left: a person box (2) fits, a project box (4) does not.
+  const cfg = { ...c, template: 'T-user', projectTemplate: 'T-project', idleMs: 1000, maxRunningUnits: 3 }
+  const { id } = await projects({ store, admitted: () => true, log: () => {} }).create('Owner@x.com', 'P')
+  const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'P', boxFiles, log: () => {} })
+  await assert.rejects(b.ensure(`project:${id}`), (e) => e.status === 503 && e.capacity === true)
+  await b.ensure('a@x.com')
+  assert.deepEqual(made, ['T-user'])
+})
+
 test('templateArgs defaults', () => {
   assert.deepEqual(templateArgs(['n', 's', 'img'], {}), { image: 'img', name: 'mumbo-box', memoryMB: 4096, cpuCount: 2, minAvailMB: 9216 })
   assert.deepEqual(templateArgs(['n', 's', 'img', 'mumbo-project', '2048', '4'], { MIN_AVAIL_MB: '10240' }), { image: 'img', name: 'mumbo-project', memoryMB: 2048, cpuCount: 4, minAvailMB: 10240 })

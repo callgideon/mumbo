@@ -816,13 +816,17 @@ test('model host: a client that drops mid-stream cancels the upstream and the me
   } finally { s.close() }
 })
 
-test('capacity counts a box at 2 units and a running child at 1, and refuses past the limit', async () => {
-  const { runningUnits, atCapacity, UNITS } = await import('./capacity.mjs')
+test('capacity counts a person box at 2 units, a project box at 4 and a running child at 1, and refuses past the limit', async () => {
+  const { runningUnits, atCapacity, UNITS, unitsFor } = await import('./capacity.mjs')
   const list = (items) => ({ Sandbox: { list: () => { let more = true; return { get hasNext() { return more }, nextItems: async () => { more = false; return items } } } } })
   const e2b = list([{ metadata: { user: 'a@x.com' } }, { metadata: { user: 'project:p' } }, { metadata: { owner: 'a@x.com' } }, { metadata: { owner: 'a@x.com' } }])
-  assert.equal(await runningUnits(e2b), 6)
-  assert.equal(await atCapacity(e2b, { maxRunningUnits: 7 }, UNITS.child), false)
-  assert.equal(await atCapacity(e2b, { maxRunningUnits: 7 }, UNITS.box), true)
+  assert.equal(await runningUnits(e2b), 2 + 4 + 1 + 1)
+  assert.deepEqual([unitsFor({ user: 'a@x.com' }), unitsFor({ user: 'project:0123456789abcdef' }), unitsFor({ owner: 'project:p', user: 'project:p' }), unitsFor(undefined)], [2, 4, 1, 2])
+  assert.equal(await atCapacity(e2b, { maxRunningUnits: 9 }, UNITS.child), false)
+  assert.equal(await atCapacity(e2b, { maxRunningUnits: 9 }, UNITS.box), true)
+  // 8 in use: a person box (2) fits under 11, a project box (4) does not.
+  assert.equal(await atCapacity(e2b, { maxRunningUnits: 11 }, UNITS.box), false)
+  assert.equal(await atCapacity(e2b, { maxRunningUnits: 11 }, UNITS.project), true)
   assert.equal(await atCapacity(e2b, { maxRunningUnits: 0 }, UNITS.box), false, '0 is no cap')
 })
 

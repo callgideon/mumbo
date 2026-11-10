@@ -381,8 +381,9 @@ resource "aws_ecs_task_definition" "edge" {
         # The sign-in page consents only for this client (MUMBO_OAUTH_CLIENT_IDS, below) and redirect URI.
         MUMBO_OAUTH_REDIRECT_URIS = local.oauth_redirect_url
         SIGNIN_COOKIE             = var.signin_cookie_name
-        # Capacity units, not boxes: a person or project box (4096 MB, edge/template.mjs) is 2, a child sandbox (2048 MB, the
-        # mumbo-child build argument) is 1. 12 boxes per node (nodes.tf hugepages) minus 2 of headroom. An edge image from before
+        # Capacity units, not boxes (edge/capacity.mjs): a person box (4096 MB, edge/template.mjs) is 2, a project box (8192 MB, the
+        # mumbo-project build) is 4, a child sandbox (2048 MB, the mumbo-child build argument) is 1. 24 units per node (nodes.tf
+        # hugepages) minus 4 of headroom. An edge image from before
         # the units change reads MAX_RUNNING_BOXES (running boxes of all kinds, children too, counted as one each) instead; both stay until no such image can be rolled back to.
         MAX_RUNNING_UNITS = tostring(2 * (12 * var.node_count - 2))
         MAX_RUNNING_BOXES = tostring(12 * var.node_count - 2)

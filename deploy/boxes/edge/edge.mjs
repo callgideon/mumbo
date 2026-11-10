@@ -7,7 +7,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { createServer, request as httpRequest } from 'node:http'
 import { Readable, pipeline } from 'node:stream'
 import { ownersOf } from './projects.mjs'
-import { UNITS, atCapacity } from './capacity.mjs'
+import { atCapacity, unitsFor } from './capacity.mjs'
 
 const env = (name, fallback) => process.env[name] ?? fallback ?? (() => { throw new Error(`edge: set ${name}`) })()
 /** A number setting that must be finite and at least `min`; a bad value stops the edge at start. */
@@ -458,7 +458,7 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
   const dshUp = async (box) => (await run(box, "curl -s -o /dev/null -m 5 -w '%{http_code}' http://$(hostname -I | cut -d' ' -f1):3080/ || true")) !== '000'
 
   async function create(email) {
-    if (await atCapacity(e2b, cfg, UNITS.box)) throw Object.assign(new Error('capacity'), { status: 503, capacity: true })
+    if (await atCapacity(e2b, cfg, unitsFor({ user: email }))) throw Object.assign(new Error('capacity'), { status: 503, capacity: true })
     // Before the sandbox exists, so its `creating` record follows the create at once (adopt/backup race).
     const restoreUrl = await presignGet(`${userPrefix(email)}/latest.tar.gz`)
     const box = await e2b.Sandbox.create(email.startsWith('project:') ? cfg.projectTemplate : cfg.template, {
