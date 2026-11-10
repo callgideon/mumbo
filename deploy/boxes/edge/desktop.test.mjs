@@ -35,7 +35,7 @@ function box() {
     t, port,
     /** Box paths moved under t; `as` is the user that stands in for browser. */
     local: (text, as = USER) => text.replaceAll('/tmp/', `${t}/log/`).replaceAll('/etc/', `${t}/etc/`).replaceAll('/root/', `${t}/root/`).replaceAll('/usr/local/bin/', `${t}/bin/`).replaceAll('/home/browser/', `${t}/home/`)
-      .replaceAll('remote-debugging-port=9222', `remote-debugging-port=${port}`).replaceAll('-u browser', `-u ${as}`).replaceAll('"$(id -un)" = browser', `"$(id -un)" = ${as}`),
+      .replaceAll('remote-debugging-port=9222', `remote-debugging-port=${port}`).replaceAll('pgrep -f websockify', `pgrep -f ${t}/fake/websockify`).replaceAll('-u browser', `-u ${as}`).replaceAll('"$(id -un)" = browser', `"$(id -un)" = ${as}`),
     fake: (name, body) => { rmSync(join(t, 'fake', name), { force: true }); writeFileSync(join(t, 'fake', name), `#!/bin/sh\n${body}\n`); chmodSync(join(t, 'fake', name), 0o755) },
     /** Runs sh text from a file, as the box runs start.sh, in its own process group, which done() kills with everything it
      *  started. */

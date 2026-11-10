@@ -474,7 +474,7 @@ export const backupCommand = (url, root = '/') => {
  *  just created from the template. A backup taken before it covered all of /home/browser holds only home/browser/profile
  *  there; the start script makes Downloads. Root writes /home/browser here, and GNU tar's defaults keep a symlink, in the
  *  box or in the archive, from aiming a write outside it: an archive symlink to an absolute or `..` target is made only
- *  after every other member, and an existing symlink is replaced, not written through. Never add --overwrite,
+ *  after every other member, and an existing symlink is replaced, not written through. Never add -h (--dereference),
  *  --keep-directory-symlink or -P (backup.test.mjs). */
 export const restoreCommand = (url, root = '/') => {
   const r = root.replace(/\/+$/, ''), snap = `${r}/root/.mumbo-sqlite`
