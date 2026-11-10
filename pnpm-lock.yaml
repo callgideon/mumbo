@@ -22,6 +22,7 @@ patchedDependencies:
   mdast-util-gfm-autolink-literal@2.0.1: 7fa6fc7927128a45c3f148d31faf388806895e2de39c14a144200edbc1e7aaa0
   micromark-extension-gfm-autolink-literal@2.1.0: 906ae7c0cd1f69e7ee308a41bc0542e0085276ac7517e56e96f0ccaf5a89327d
   node-pty@1.2.0-beta.15: 9d30053266d0f39d3debe894c675867f6782da6bcadbc94a693b3cfb9eff8ed0
+  playwright-core@1.63.0-alpha-2026-08-31: 4b4bfd20ba57d579aff98f5a7099734dac1983503f274c73d97f23ae037f1b42
 
 importers:
 
@@ -8634,6 +8635,9 @@ importers:
       '@deepseek-ai/dsh-experimental-browser-use-runtime':
         specifier: workspace:*
         version: link:../browser-use-runtime
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
       '@playwright/mcp':
         specifier: 0.0.80
         version: 0.0.80
@@ -29175,7 +29179,7 @@ snapshots:
   '@playwright/mcp@0.0.80':
     dependencies:
       playwright: 1.63.0-alpha-2026-08-31
-      playwright-core: 1.63.0-alpha-2026-08-31
+      playwright-core: 1.63.0-alpha-2026-08-31(patch_hash=4b4bfd20ba57d579aff98f5a7099734dac1983503f274c73d97f23ae037f1b42)
 
   '@preact/signals-core@1.14.4': {}
 
@@ -33577,7 +33581,7 @@ snapshots:
 
   playwright-core@1.61.1: {}
 
-  playwright-core@1.63.0-alpha-2026-08-31: {}
+  playwright-core@1.63.0-alpha-2026-08-31(patch_hash=4b4bfd20ba57d579aff98f5a7099734dac1983503f274c73d97f23ae037f1b42): {}
 
   playwright@1.61.1:
     dependencies:
@@ -33587,7 +33591,7 @@ snapshots:
 
   playwright@1.63.0-alpha-2026-08-31:
     dependencies:
-      playwright-core: 1.63.0-alpha-2026-08-31
+      playwright-core: 1.63.0-alpha-2026-08-31(patch_hash=4b4bfd20ba57d579aff98f5a7099734dac1983503f274c73d97f23ae037f1b42)
 
   plist@3.1.0:
     dependencies:

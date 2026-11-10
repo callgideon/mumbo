@@ -1,6 +1,6 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import { BrowserUseProviderName } from '@deepseek-ai/dsh-browser-use/brand'
@@ -8,7 +8,7 @@ import * as PlaywrightBrowser from '@deepseek-ai/dsh-experimental-browser-use-pl
 import { mountSessionMcp } from '@deepseek-ai/dsh-experimental-browser-use-runtime/mcp'
 import { ToolCallId, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { defineContentToolFixture, executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
-import type { PreToolDecision, ToolExecution, ToolExecutionToken } from '@deepseek-ai/dsh-tools'
+import type { PreToolDecision, ToolExecution, ToolExecutionResult, ToolExecutionToken } from '@deepseek-ai/dsh-tools'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { bootComposition, consentRecords, tool, toolResults } from './harness.ts'
 import type { ScriptStep } from './harness.ts'
@@ -25,7 +25,9 @@ vi.mock('@deepseek-ai/dsh-experimental-browser-use-runtime/mcp', async (importOr
   return {
     ...actual,
     mountSessionMcp: (ctx: Context, options: Parameters<typeof actual.mountSessionMcp>[1]) => {
-      actual.mountSessionMcp(ctx, { ...options, args: [FIXTURE, process.env.CONSENT_FIXTURE_ROOT!, process.env.CONSENT_FIXTURE_MODE ?? ''] })
+      // The fixture writes its files where the real server's `--output-dir` points.
+      const outputDir = options.args.includes('--output-dir') ? options.args[options.args.indexOf('--output-dir') + 1]! : ''
+      actual.mountSessionMcp(ctx, { ...options, args: [FIXTURE, process.env.CONSENT_FIXTURE_ROOT!, process.env.CONSENT_FIXTURE_MODE ?? '', process.env.CONSENT_FIXTURE_START ?? '', outputDir] })
     },
   }
 })
@@ -39,22 +41,39 @@ afterEach(async () => {
   vi.unstubAllEnvs()
 })
 
-type LoadOptions = Omit<Parameters<typeof bootComposition>[1], 'consent'> & { consent?: Record<string, unknown>; withoutTabs?: boolean }
+/** The list the box edge writes: every non-web scheme and the Google pages that hold passwords, payments, and sign-in. */
+const DENIED_URLS = [
+  'chrome:', 'chrome-untrusted:', 'chrome-extension:', 'devtools:', 'view-source:', 'file:', 'https://passwords.google.com',
+  'https://pay.google.com', 'https://payments.google.com', 'https://myaccount.google.com', 'https://accounts.google.com',
+]
+
+type LoadOptions = Omit<Parameters<typeof bootComposition>[1], 'consent'> & { consent?: Record<string, unknown>; withoutTabs?: boolean; start?: string }
 
 async function load(options: LoadOptions = {}) {
   const root = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-'))
   roots.push(root)
   vi.stubEnv('CONSENT_FIXTURE_ROOT', root)
   vi.stubEnv('CONSENT_FIXTURE_MODE', options.withoutTabs === true ? 'no-tabs' : '')
-  const consent = { browser: { mode: 'attach', endpoint: 'http://127.0.0.1:9' }, allowedSites: ['http://allowed.test'], ...options.consent }
+  vi.stubEnv('CONSENT_FIXTURE_START', options.start ?? '')
+  const consent = { browser: { mode: 'attach', endpoint: 'http://127.0.0.1:9' }, deniedUrls: DENIED_URLS, allowedSites: ['http://allowed.test'], ...options.consent }
   const booted = await bootComposition(root, { ...options, consent })
   contexts.push(booted.ctx)
-  // Every call the browser received except consent's own current-tab listings.
-  const calls = async () => (await readFile(join(root, 'calls.ndjson'), 'utf8').catch(() => '')).trim().split('\n').filter(Boolean)
+  // Every call the browser received, in order, with the current tab's URL before the call.
+  const allCalls = async () => (await readFile(join(root, 'calls.ndjson'), 'utf8').catch(() => '')).trim().split('\n').filter(Boolean)
     .map(line => JSON.parse(line) as { name: string; args: { action?: string }; url: string })
-    .filter(call => !(call.name === 'browser_tabs' && call.args.action === 'list'))
-  return { ...booted, calls }
+  // Every call except consent's own current-tab listings.
+  const calls = async () => (await allCalls()).filter(call => !(call.name === 'browser_tabs' && call.args.action === 'list'))
+  return { ...booted, calls, allCalls, root }
 }
+
+/** Run one call through the executor as the booted Session's Agent, or without an Agent. */
+const direct = (loaded: Awaited<ReturnType<typeof load>>, name: string, args: Record<string, unknown>, agent: boolean = true) =>
+  executeModelToolFixture(loaded.ctx, {
+    ...agent ? { agent: loaded.agent } : {}, name, arguments: args, callId: ToolCallId(`direct-${name}`), signal: new AbortController().signal,
+  })
+
+/** Model-visible text of one result. */
+const textOf = (result: { content: ReadonlyArray<{ type: string; text?: string }> }) => result.content.map(block => block.text ?? `[${block.type}]`).join('\n')
 
 /** Run one scripted turn and return what it produced. */
 async function turn(options: LoadOptions & { script: readonly ScriptStep[] }) {
@@ -68,7 +87,7 @@ const browserTools = (loaded: Awaited<ReturnType<typeof load>>) => loaded.ctx.to
 
 describe('browser write consent in the person-box composition', () => {
   it('decides each write on the tab it runs on, asks for the rest with its arguments, and logs every allowed write', { timeout: 60_000 }, async () => {
-    const { asked, events, calls } = await turn({
+    const { asked, events, calls, root } = await turn({
       script: [
         { name: 'browser_navigate', args: { url: 'http://allowed.test/inbox' } },
         { name: 'browser_click', args: { element: 'Archive', target: 'e1' } },
@@ -83,25 +102,25 @@ describe('browser write consent in the person-box composition', () => {
         { name: 'browser_tabs', args: { action: 'select', index: 1 } },
         { name: 'browser_file_upload', args: { paths: ['/root/tax.pdf'] } },
         { name: 'browser_evaluate', args: { function: '() => document.forms[0].submit()' } },
-        { name: 'browser_navigate', args: { url: 'http://broken.test/' } },
-        { name: 'browser_click', args: { element: 'Continue', target: 'e4' } },
       ],
-      answers: ['rejected', 'allowed-once', 'rejected', 'rejected', 'cancelled', 'allowed-once'],
+      answers: ['rejected', 'allowed-once', 'rejected', 'rejected', 'cancelled'],
     })
 
-    // Each call is listed with the URL of the tab it ran on; the denied writes never reached the browser.
+    // Each call is listed with the URL of the tab it ran on; the denied writes never reached the browser. Each write on
+    // the allowed site first reads the page's snapshot for a masked field.
     expect((await calls()).map(call => `${call.name} ${call.url}`)).toEqual([
       'browser_navigate about:blank',
+      'browser_snapshot http://allowed.test/inbox',
       'browser_click http://allowed.test/inbox',
+      'browser_snapshot http://allowed.test/inbox',
       'browser_click http://allowed.test/inbox',
+      'browser_snapshot http://allowed.test/inbox',
       'browser_click http://allowed.test/inbox',
       'browser_tabs http://other.test/next',
       'browser_tabs http://allowed.test/compose',
       'browser_click http://other.test/next',
       'browser_navigate http://other.test/next',
       'browser_tabs http://evil.test/',
-      'browser_navigate http://allowed.test/compose',
-      'browser_click http://broken.test/',
     ])
     expect(asked).toEqual([
       'Browser write: browser_type on http://other.test. Arguments: "target": "e2", "text": "hi\\nthere". Model-written target description: "Message".',
@@ -109,7 +128,6 @@ describe('browser write consent in the person-box composition', () => {
       'Browser write: browser_click on http://evil.test. Arguments: "target": "e5".',
       'Browser write: browser_file_upload on http://allowed.test. Arguments: "paths": ["/root/tax.pdf"]. Site allowances do not cover this action.',
       'Browser write: browser_evaluate on http://allowed.test. Arguments: "function": "() => document.forms[0].submit()". Site allowances do not cover this action.',
-      'Browser write: browser_click on an unidentified page. Arguments: "target": "e4". Model-written target description: "Continue".',
     ])
     const results = toolResults(events)
     expect(results[4]).toEqual([{ type: 'text', text: 'Error: The user declined browser_type on http://other.test.' }])
@@ -119,8 +137,8 @@ describe('browser write consent in the person-box composition', () => {
       { callId: 'call-2', tool: 'browser_click', site: 'http://allowed.test', grant: 'site', outcome: 'failed' },
       { callId: 'call-3', tool: 'browser_click', site: 'http://allowed.test', grant: 'site', outcome: 'succeeded' },
       { callId: 'call-7', tool: 'browser_click', site: 'http://other.test', grant: 'approval', outcome: 'succeeded' },
-      { callId: 'call-14', tool: 'browser_click', grant: 'approval', outcome: 'succeeded' },
     ])
+    expect((await readdir(join(root, '.playwright-mcp'))).sort()).toEqual(['console-2.log', 'page-1.yml', 'page-2.yml', 'page-3.yml'])
   })
 
   it('denies a write that a listener ahead of consent allowed, and loses its browser when consent unloads', { timeout: 60_000 }, async () => {
@@ -167,7 +185,7 @@ describe('browser write consent in the person-box composition', () => {
   })
 
   it('denies writes when no one can be asked, and Agent-less writes outright', { timeout: 60_000 }, async () => {
-    const { ctx, agent, calls } = await load({ withoutTabs: true, withoutApproval: true })
+    const { ctx, agent, calls } = await load({ withoutApproval: true })
     const run = (name: string, owner?: typeof agent) => executeModelToolFixture(ctx, {
       ...owner === undefined ? {} : { agent: owner }, name, arguments: { target: 'e1' }, callId: ToolCallId('direct'), signal: new AbortController().signal,
     })
@@ -180,7 +198,11 @@ describe('browser write consent in the person-box composition', () => {
   })
 
   it('mounts no browser when its config is invalid', { timeout: 60_000 }, async () => {
-    for (const consent of [{ allowedSites: ['https://mail.google.com/'] }, { browser: { mode: 'attach', endpoint: 'http://localhost:bad/path' } }]) {
+    for (const consent of [
+      { allowedSites: ['https://mail.google.com/'] }, { browser: { mode: 'attach', endpoint: 'http://localhost:bad/path' } },
+      { deniedUrls: undefined }, { deniedUrls: ['https://accounts.google.com/'] }, { allowedSites: ['https://accounts.google.com'] },
+      { browser: { mode: 'attach', endpoint: 'http://127.0.0.1:9', outputDir: 'playwright-output' } },
+    ]) {
       const invalid = await load({ consent })
       expect(invalid.consentFiber?.state).toBe(FAILED)
       expect(invalid.ctx.browserUse.providerName).toBeUndefined()
@@ -194,7 +216,7 @@ describe('browser write consent in the person-box composition', () => {
       ctx.provide('rivalReady', {})
     } }
     const { consentFiber, ctx, agent, events, calls, asked } = await turn({
-      before: [['rival', rival]], consentInject: ['rivalReady'],
+      before: [['rival', rival]], inject: { consent: ['rivalReady'] },
       script: [{ name: 'browser_snapshot', args: {} }, { name: 'browser_click', args: { target: 'e1' } }], answers: ['allowed-once'],
     })
     expect(consentFiber?.state).toBe(ACTIVE)
@@ -233,14 +255,14 @@ describe('browser write consent in the person-box composition', () => {
       } }))
       ctx.provide('rivalReady', {})
     } })
-    const stagehand = await load({ before: [['stagehand', holder('stagehand-native')]], consentInject: ['rivalReady'] })
+    const stagehand = await load({ before: [['stagehand', holder('stagehand-native')]], inject: { consent: ['rivalReady'] } })
     expect(stagehand.consentFiber?.state).toBe(ACTIVE)
     expect(stagehand.errors).toContainEqual(expect.stringContaining('"stagehand-native" holds browserUse without mumbo-browser-consent, so its tools (stagehand_*) are refused'))
     const act = await executeModelToolFixture(stagehand.ctx, { agent: stagehand.agent, name: 'stagehand_act', arguments: {}, callId: ToolCallId('act'), signal: new AbortController().signal })
     expect(act.content).toEqual([{ type: 'text', text: 'Error: stagehand_act did not run: browser tools are disabled because this browser was set up without consent checks.' }])
     expect(acted).toBe(false)
 
-    const unknownFirst = await load({ before: [['mystery', holder('mystery')]], consentInject: ['rivalReady'] })
+    const unknownFirst = await load({ before: [['mystery', holder('mystery')]], inject: { consent: ['rivalReady'] } })
     expect(unknownFirst.consentFiber?.state).toBe(FAILED)
     expect(unknownFirst.errors).toContainEqual(expect.stringContaining('browser provider "mystery" holds browserUse and its tools have no prefix this plugin can refuse'))
 
@@ -251,5 +273,331 @@ describe('browser write consent in the person-box composition', () => {
     const report = unknownLate.errors.find(error => error.includes('"mystery" holds browserUse'))
     expect(report).toContain('its tools are not under consent')
     expect(report).not.toContain('refused')
+  })
+  it('refuses a call that names a denied page before the browser sees it, without asking', { timeout: 60_000 }, async () => {
+    const loaded = await load({ answers: [] })
+    const bypasses = [
+      'chrome://password-manager/passwords', 'CHROME://settings/passwords', 'about:settings', 'chrome-untrusted://print/',
+      'chrome-extension://abcdefghijklmnop/popup.html', 'devtools://devtools/bundled/inspector.html', 'view-source:http://allowed.test/',
+      'file:///home/browser/.config/google-chrome/Default/Login%20Data', 'https://passwords.google.com/', 'https://pay.google.com/',
+      'https://payments.google.com/', 'https://myaccount.google.com/security', 'HTTPS://Accounts.Google.com./', 'https://accounts.google.com:443/',
+      'https://x@accounts.google.com/', 'http://accounts.google.com/Logout', 'accounts.google.com', 'https://accounts%2Egoogle.com/',
+      'https://ａｃｃｏｕｎｔｓ.google.com/', 'blob:https://accounts.google.com/0f8c',
+    ]
+    for (const url of bypasses) {
+      for (const [name, args] of [['browser_navigate', { url }], ['browser_tabs', { action: 'new', url }]] as const) {
+        expect(textOf(await direct(loaded, tool(name), args))).toMatch(new RegExp(`^Error: ${name} did not run: the assistant may not open (a [a-z-]+: page|a page on https://[a-z.]+\\.google\\.com|a page whose address cannot be read)\\.$`, 'u'))
+      }
+    }
+    expect(textOf(await direct(loaded, tool('browser_navigate'), { url: 'https://accounts.google.com/' })))
+      .toBe('Error: browser_navigate did not run: the assistant may not open a page on https://accounts.google.com.')
+    expect(textOf(await direct(loaded, tool('browser_navigate'), { url: 'about:settings' }))).toBe('Error: browser_navigate did not run: the assistant may not open a chrome: page.')
+    const details = 'Error: browser_network_request did not run: the assistant may not read request headers or bodies, which carry cookies and passwords.'
+    expect(textOf(await direct(loaded, tool('browser_network_request'), { index: 1 }))).toBe(details)
+    const saved = 'Error: browser_snapshot did not run: the assistant may not save browser output to a file; call it without filename to get the result directly.'
+    expect(textOf(await direct(loaded, tool('browser_snapshot'), { filename: 'notes/page.yml' }))).toBe(saved)
+    const serverCode = 'Error: browser_run_code_unsafe did not run: code may not run in the browser automation process; browser_evaluate runs a function in the page and asks the user first.'
+    expect(textOf(await direct(loaded, tool('browser_run_code_unsafe'), { code: 'async (page) => page.title()' }))).toBe(serverCode)
+    expect(await loaded.calls()).toEqual([])
+    // Other origins open, and so does a blank new tab.
+    for (const url of ['http://allowed.test/', 'https://mail.google.com/', 'https://accounts.google.com.evil.test/']) {
+      expect(textOf(await direct(loaded, tool('browser_navigate'), { url }))).toBe(`### Page\n- Page URL: ${url}\n- Page Title: Fixture page`)
+    }
+    expect((await direct(loaded, tool('browser_tabs'), { action: 'new' })).isError).toBe(false)
+    expect((await loaded.calls()).map(call => call.args)).toEqual([
+      ...['http://allowed.test/', 'https://mail.google.com/', 'https://accounts.google.com.evil.test/'].map(url => ({ url })), { action: 'new' },
+    ])
+    // The guard refuses the same call when a listener ahead of consent allows it, and when no Agent makes it.
+    loaded.ctx.on('tools/pre-execute', (): Promise<PreToolDecision> => Promise.resolve({ kind: 'allow' }), { prepend: true })
+    expect(textOf(await direct(loaded, tool('browser_navigate'), { url: 'chrome://settings/passwords' }))).toBe('Error: browser_navigate did not run: the assistant may not open a chrome: page.')
+    expect(textOf(await direct(loaded, tool('browser_navigate'), { url: 'chrome://settings/passwords' }, false))).toBe('Error: browser_navigate did not run: the assistant may not open a chrome: page.')
+    expect(textOf(await direct(loaded, tool('browser_network_request'), { index: 1 }))).toBe(details)
+    expect(textOf(await direct(loaded, tool('browser_snapshot'), { filename: 'notes/page.yml' }))).toBe(saved)
+    expect(textOf(await direct(loaded, tool('browser_run_code_unsafe'), { code: 'async (page) => page.title()' }))).toBe(serverCode)
+    expect((await direct(loaded, tool('browser_network_requests'), {})).isError).toBe(false)
+    expect(loaded.asked).toEqual([])
+    expect((await loaded.calls()).map(call => call.name)).toEqual(['browser_navigate', 'browser_navigate', 'browser_navigate', 'browser_tabs', 'browser_network_requests'])
+  })
+
+  it('withholds the result of every call that leaves or finds the tab on a denied page, and refuses writes there', { timeout: 60_000 }, async () => {
+    const { asked, events, calls, root } = await turn({
+      start: 'https://passwords.google.com/',
+      script: [
+        { name: 'browser_snapshot', args: {} },
+        { name: 'browser_tabs', args: { action: 'select', index: 0 } },
+        { name: 'browser_click', args: { element: 'Show password', target: 'e1' } },
+        { name: 'browser_evaluate', args: { function: '() => document.querySelector("input").value' } },
+        { name: 'browser_navigate', args: { url: 'http://allowed.test/' } },
+        { name: 'browser_click', args: { element: 'Sign in](elsewhere.yml)', target: 'link:https://accounts.google.com/signin' } },
+        { name: 'browser_navigate', args: { url: 'http://allowed.test/' } },
+        { name: 'browser_click', args: { element: 'Settings', target: 'report:chrome://settings/passwords' } },
+      ],
+    })
+    const withheld = (name: string, page: string) => [{ type: 'text', text: `Error: ${name} ran, but its result is withheld: the current tab is ${page}, which the assistant may not use. Open another page to continue.` }]
+    expect(toolResults(events)).toEqual([
+      withheld('browser_snapshot', 'a page on https://passwords.google.com'),
+      [{ type: 'text', text: 'Error: browser_tabs did not run: that tab is a page on https://passwords.google.com, which the assistant may not use.' }],
+      [{ type: 'text', text: 'Error: browser_click did not run: the current tab is a page on https://passwords.google.com, which the assistant may not use.' }],
+      [{ type: 'text', text: 'Error: browser_evaluate did not run: the current tab is a page on https://passwords.google.com, which the assistant may not use.' }],
+      [{ type: 'text', text: '### Page\n- Page URL: http://allowed.test/\n- Page Title: Fixture page' }],
+      withheld('browser_click', 'a page on https://accounts.google.com'),
+      [{ type: 'text', text: '### Page\n- Page URL: http://allowed.test/\n- Page Title: Fixture page' }],
+      withheld('browser_click', 'a chrome: page'),
+    ])
+    expect(asked).toEqual([])
+    expect((await calls()).map(call => `${call.name} ${call.url}`)).toEqual([
+      'browser_snapshot https://passwords.google.com/',
+      'browser_navigate https://passwords.google.com/',
+      'browser_snapshot http://allowed.test/',
+      'browser_click http://allowed.test/',
+      'browser_navigate https://accounts.google.com/signin',
+      'browser_snapshot http://allowed.test/',
+      'browser_click http://allowed.test/',
+    ])
+    expect(consentRecords(events)).toEqual([
+      { callId: 'call-5', tool: 'browser_click', site: 'http://allowed.test', grant: 'site', outcome: 'failed' },
+      { callId: 'call-7', tool: 'browser_click', site: 'http://allowed.test', grant: 'site', outcome: 'failed' },
+    ])
+    // The snapshot files Playwright wrote for the withheld clicks are gone, so no other tool can read them.
+    expect(await readdir(join(root, '.playwright-mcp'))).toEqual([])
+  })
+
+  it('withholds a result and refuses writes when the current tab cannot be read', { timeout: 60_000 }, async () => {
+    const unchecked = (name: string, why: string) => [{ type: 'text', text: `Error: ${name}: the browser's current tab could not be checked after the call (${why}), so its result is withheld.` }]
+    const withoutTabs = await turn({ withoutTabs: true, script: [{ name: 'browser_navigate', args: { url: 'http://allowed.test/' } }, { name: 'browser_click', args: { target: 'e1' } }] })
+    expect(toolResults(withoutTabs.events)).toEqual([
+      unchecked('browser_navigate', 'the browser has no browser_tabs tool'),
+      [{ type: 'text', text: 'Error: browser_click did not run: the browser\'s current tab could not be checked (the browser has no browser_tabs tool).' }],
+    ])
+    expect(withoutTabs.asked).toEqual([])
+    expect((await withoutTabs.calls()).map(call => call.name)).toEqual(['browser_navigate'])
+    // A listing that fails, here on the fixture's broken page, withholds the result too.
+    const broken = await turn({ script: [{ name: 'browser_navigate', args: { url: 'http://broken.test/' } }] })
+    expect(toolResults(broken.events)).toEqual([unchecked('browser_navigate', 'browser_tabs failed: fixture failure')])
+  })
+
+  it('asks before a write on an allowed site whose page shows a masked field or cannot be checked', { timeout: 60_000 }, async () => {
+    const { asked, events, calls } = await turn({
+      script: [
+        { name: 'browser_navigate', args: { url: 'http://allowed.test/login' } },
+        { name: 'browser_click', args: { element: 'Sign in', target: 'e1' } },
+        { name: 'browser_type', args: { element: 'Password', target: 'e2', text: 'x' } },
+        { name: 'browser_navigate', args: { url: 'http://allowed.test/nosnap' } },
+        { name: 'browser_click', args: { element: 'Next', target: 'e3' } },
+        { name: 'browser_navigate', args: { url: 'http://allowed.test/inbox' } },
+        { name: 'browser_click', args: { element: 'Archive', target: 'e4' } },
+      ],
+      answers: ['allowed-once', 'rejected', 'rejected'],
+    })
+    const masked = ' The page shows a password or payment field, so its site allowance does not cover this action.'
+    expect(asked).toEqual([
+      `Browser write: browser_click on http://allowed.test. Arguments: "target": "e1". Model-written target description: "Sign in".${masked}`,
+      `Browser write: browser_type on http://allowed.test. Arguments: "target": "e2", "text": "x". Model-written target description: "Password".${masked}`,
+      'Browser write: browser_click on http://allowed.test. Arguments: "target": "e3". Model-written target description: "Next".'
+        + ' The page could not be checked for password or payment fields, so its site allowance does not cover this action.',
+    ])
+    expect(toolResults(events)[2]).toEqual([{ type: 'text', text: 'Error: The user declined browser_type on http://allowed.test.' }])
+    expect((await calls()).filter(call => call.name !== 'browser_snapshot' && call.name !== 'browser_navigate').map(call => `${call.name} ${call.url}`))
+      .toEqual(['browser_click http://allowed.test/login', 'browser_click http://allowed.test/inbox'])
+    expect(consentRecords(events)).toEqual([
+      { callId: 'call-1', tool: 'browser_click', site: 'http://allowed.test', grant: 'approval', outcome: 'succeeded' },
+      { callId: 'call-6', tool: 'browser_click', site: 'http://allowed.test', grant: 'site', outcome: 'succeeded' },
+    ])
+  })
+
+  it('refuses console and request logs once any tab has shown a denied page', { timeout: 60_000 }, async () => {
+    const logs = (name: string) => [{ type: 'text', text: `Error: ${name} did not run: a tab in this browser has shown a page the assistant may not use, and console and request logs keep that page's entries.` }]
+    // A click lands on a denied page; after the tab moves on, its logs may still hold that page's entries.
+    const landed = await turn({
+      script: [
+        { name: 'browser_navigate', args: { url: 'http://allowed.test/' } },
+        { name: 'browser_network_requests', args: {} },
+        { name: 'browser_click', args: { element: 'Sign in', target: 'link:https://accounts.google.com/' } },
+        { name: 'browser_navigate', args: { url: 'http://allowed.test/' } },
+        { name: 'browser_console_messages', args: { all: true } },
+        { name: 'browser_network_requests', args: {} },
+      ],
+    })
+    const results = toolResults(landed.events)
+    expect(results[1]).toEqual([{ type: 'text', text: '### Page\n- Page URL: http://allowed.test/\n- Page Title: Fixture page' }])
+    expect(results.slice(4)).toEqual([logs('browser_console_messages'), logs('browser_network_requests')])
+    // The person's own tab on a denied page, seen only in a listing, does the same.
+    const listed = await turn({
+      start: 'https://passwords.google.com/',
+      script: [{ name: 'browser_tabs', args: { action: 'new', url: 'http://allowed.test/' } }, { name: 'browser_network_requests', args: {} }],
+    })
+    expect(toolResults(listed.events)[1]).toEqual(logs('browser_network_requests'))
+    expect((await listed.calls()).map(call => call.name)).toEqual(['browser_tabs'])
+  })
+
+  it('asks before a desktop screenshot while the browser shows a denied page, and refuses selecting a tab it cannot check', { timeout: 60_000 }, async () => {
+    const desktop = { inject: ['tools'], apply(ctx: Context) {
+      ctx.tools.register(defineContentToolFixture({
+        name: 'computer', description: 'Desktop.', parameters: { action: { type: 'string', required: true } },
+        execute: args => Promise.resolve([{ type: 'text', text: `${args.action} done` }]),
+      }))
+    } }
+    const loaded = await turn({
+      before: [['desktop', desktop]], start: 'https://passwords.google.com/', answers: ['rejected', 'allowed-once'],
+      script: [
+        { name: 'browser_snapshot', args: {} },
+        { name: 'computer', args: { action: 'screenshot' } },
+        { name: 'computer', args: { action: 'screenshot' } },
+        { name: 'browser_tabs', args: { action: 'select', index: 7 } },
+        { name: 'browser_navigate', args: { url: 'http://allowed.test/' } },
+        { name: 'computer', args: { action: 'screenshot' } },
+      ],
+    })
+    expect(loaded.asked).toEqual(Array.from({ length: 2 }, () => 'Desktop screenshot while the browser\'s current tab is a page on https://passwords.google.com, which the assistant may not use. Arguments: "action": "screenshot".'))
+    const results = toolResults(loaded.events)
+    expect(results.slice(1, 3)).toEqual([[{ type: 'text', text: 'Error: The user declined the desktop screenshot.' }], [{ type: 'text', text: 'screenshot done' }]])
+    expect(results[3]).toEqual([{ type: 'text', text: 'Error: browser_tabs did not run: the tab it selects could not be checked (the tab listing does not show it unambiguously).' }])
+    expect(results[5]).toEqual([{ type: 'text', text: 'screenshot done' }])
+    // A click on the allowed page lands on a denied one. The guard then denies a screenshot that a listener ahead of
+    // consent allowed, and a select that skipped the check.
+    expect(textOf(await direct(loaded, tool('browser_click'), { target: 'link:https://pay.google.com/' }))).toMatch(/^Error: browser_click ran, but its result is withheld/u)
+    loaded.ctx.on('tools/pre-execute', (): Promise<PreToolDecision> => Promise.resolve({ kind: 'allow' }), { prepend: true })
+    expect(textOf(await direct(loaded, 'computer', { action: 'screenshot' }))).toBe('Error: computer input needs the user\'s consent, which was not given.')
+    expect(textOf(await direct(loaded, tool('browser_tabs'), { action: 'select', index: 0 }))).toBe('Error: browser_tabs did not run: the tab it selects was not checked.')
+  })
+
+  it('refuses a select or write it cannot check, and withholds a listing of a denied tab', { timeout: 60_000 }, async () => {
+    const broken = await turn({ start: 'http://allowed.test/broken', script: [{ name: 'browser_tabs', args: { action: 'select', index: 0 } }] })
+    expect(toolResults(broken.events)[0]).toEqual([{ type: 'text', text: 'Error: browser_tabs did not run: the tab it selects could not be checked (browser_tabs failed: fixture failure).' }])
+    const unchecked = await turn({
+      start: 'http://allowed.test/brackets-nosnap',
+      script: [{ name: 'browser_tabs', args: { action: 'select' } }, { name: 'browser_click', args: { target: 'e1' } }],
+    })
+    expect(toolResults(unchecked.events)).toEqual([
+      [{ type: 'text', text: 'Error: browser_tabs did not run: the tab it selects could not be checked (the tab listing does not show it unambiguously).' }],
+      [{ type: 'text', text: 'Error: browser_click did not run: the browser\'s current tab could not be checked (its tab listing is ambiguous).' }],
+    ])
+    const listed = await turn({ start: 'https://myaccount.google.com/', script: [{ name: 'browser_tabs', args: { action: 'list' } }] })
+    expect(JSON.stringify(toolResults(listed.events)[0])).toContain('ran, but its result is withheld: the current tab is a page on https://myaccount.google.com')
+  })
+
+  it('withholds a result holding other blocks, and logs a linked file it cannot delete', { timeout: 60_000 }, async () => {
+    const loaded = await load({ start: 'https://pay.google.com/', script: [{ name: 'browser_snapshot', args: {} }] })
+    await mkdir(join(loaded.root, '.playwright-mcp', 'folder'), { recursive: true })
+    // Registered after consent, so it wraps the browser inside consent's wrapper and adds an image and a link.
+    loaded.ctx.on('tools/execute', async (_exec, next) => {
+      const result = await next()
+      return { ...result, content: [{ type: 'image', attachment: { attachmentId: 'a', mediaType: 'image/png', bytes: 1, width: 1, height: 1 } }, ...result.content, { type: 'text', text: '- [Snapshot](.playwright-mcp/folder)' }] } as ToolExecutionResult
+    })
+    loaded.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Go.' }], source: { kind: 'user' } }))
+    await loaded.agent.whenIdle()
+    expect(JSON.stringify(toolResults(loaded.events)[0])).toContain('ran, but its result is withheld: the current tab is a page on https://pay.google.com')
+    expect(loaded.errors).toContainEqual(expect.stringContaining(`could not delete ${join(loaded.root, '.playwright-mcp', 'folder')}, which Playwright wrote for a withheld result`))
+  })
+
+  it('reads an ambiguous tab line through the page URL a result or snapshot reports', { timeout: 60_000 }, async () => {
+    const { asked, events, calls } = await turn({
+      script: [
+        { name: 'browser_navigate', args: { url: 'http://allowed.test/brackets' } },
+        { name: 'browser_click', args: { element: 'Merge', target: 'e1' } },
+      ],
+    })
+    expect(toolResults(events)[0]).toEqual([{ type: 'text', text: '### Page\n- Page URL: http://allowed.test/brackets\n- Page Title: Fix [x](y)' }])
+    expect(asked).toEqual([])
+    expect((await calls()).map(call => call.name)).toEqual(['browser_navigate', 'browser_snapshot', 'browser_click'])
+    expect(consentRecords(events)).toEqual([{ callId: 'call-1', tool: 'browser_click', site: 'http://allowed.test', grant: 'site', outcome: 'succeeded' }])
+  })
+
+  it('deletes a withheld result\'s files from the directory the server started in after the Session moves', { timeout: 60_000 }, async () => {
+    const loaded = await load({
+      script: [{ name: 'browser_navigate', args: { url: 'http://allowed.test/' } }, { name: 'browser_click', args: { element: 'Sign in', target: 'link:https://accounts.google.com/' } }],
+    })
+    await mkdir(join(loaded.root, 'elsewhere'))
+    await loaded.ctx.workingDirectory.set(loaded.agent, join(loaded.root, 'elsewhere'))
+    loaded.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Go.' }], source: { kind: 'user' } }))
+    await loaded.agent.whenIdle()
+    expect(JSON.stringify(toolResults(loaded.events)[1])).toContain('ran, but its result is withheld')
+    expect(await readdir(join(loaded.root, '.playwright-mcp'))).toEqual([])
+  })
+
+  it('starts a desktop row that injects consent\'s service only when consent loads', { timeout: 60_000 }, async () => {
+    const desktop = { inject: ['tools'], apply(ctx: Context) {
+      ctx.tools.register(defineContentToolFixture({ name: 'computer', description: 'Desktop.', parameters: {}, execute: () => Promise.resolve([]) }))
+    } }
+    const hasComputer = (loaded: Awaited<ReturnType<typeof load>>) => loaded.ctx.tools.schemas(loaded.agent).some(schema => schema.name === 'computer')
+    expect(hasComputer(await load({ after: [['desktop', desktop]], inject: { desktop: ['mumbo-browser-consent'] } }))).toBe(true)
+    const invalid = await load({ consent: { deniedUrls: undefined }, after: [['desktop', desktop]], inject: { desktop: ['mumbo-browser-consent'] } })
+    expect(invalid.consentFiber?.state).toBe(FAILED)
+    expect(hasComputer(invalid)).toBe(false)
+  })
+
+  it('passes outputDir to the server and deletes a withheld result\'s files there', { timeout: 60_000 }, async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-output-'))
+    roots.push(outputDir)
+    const { events, root } = await turn({
+      consent: { browser: { mode: 'attach', endpoint: 'http://127.0.0.1:9', outputDir } },
+      script: [
+        { name: 'browser_navigate', args: { url: 'http://allowed.test/' } },
+        { name: 'browser_click', args: { element: 'Next', target: 'e1' } },
+        { name: 'browser_click', args: { element: 'Sign in', target: 'link:https://accounts.google.com/' } },
+      ],
+    })
+    expect(toolResults(events)[1]).toEqual([{ type: 'text', text: `### Page\n- Page URL: http://allowed.test/\n- Page Title: Fixture page\n### Snapshot\n- [Snapshot of Next](${relative(root, join(outputDir, 'page-1.yml'))})` }])
+    expect(JSON.stringify(toolResults(events)[2])).toContain('Error: browser_click ran, but its result is withheld')
+    expect(await readdir(outputDir)).toEqual(['page-1.yml'])
+    expect(await readdir(root)).not.toContain('.playwright-mcp')
+  })
+
+  it('replaces the result before later wrappers and post-execute policy see it', { timeout: 60_000 }, async () => {
+    const loaded = await load({ start: 'https://accounts.google.com/' })
+    const seen: string[] = []
+    loaded.ctx.on('tools/execute', async (_exec, next) => {
+      const result = await next()
+      seen.push(textOf(result))
+      return result
+    }, { prepend: true })
+    loaded.ctx.on('tools/post-execute', (_exec, result) => {
+      seen.push(textOf(result))
+      return Promise.resolve({ kind: 'accept' })
+    }, { prepend: true })
+    const result = await direct(loaded, tool('browser_snapshot'), {})
+    const text = 'Error: browser_snapshot ran, but its result is withheld: the current tab is a page on https://accounts.google.com, which the assistant may not use. Open another page to continue.'
+    expect(textOf(result)).toBe(text)
+    expect(seen).toEqual([text, text])
+  })
+
+  it('does not list tabs after closing the browser, which would open a new tab', { timeout: 60_000 }, async () => {
+    const loaded = await turn({ script: [{ name: 'browser_close', args: {} }], answers: ['allowed-once'] })
+    expect(toolResults(loaded.events)).toEqual([[{ type: 'text', text: '### Result\nNo open tabs. Navigate to a URL to create one.\n### Page\n- Page URL: about:blank\n- Page Title: Fixture page' }]])
+    expect((await loaded.allCalls()).map(call => `${call.name}${call.args.action === undefined ? '' : ` ${call.args.action}`}`)).toEqual(['browser_tabs list', 'browser_close'])
+  })
+
+  it('lets desktop screenshots pass and asks before every other computer input, which the guard enforces', { timeout: 60_000 }, async () => {
+    const inputs: string[] = []
+    const desktop = { inject: ['tools'], apply(ctx: Context) {
+      ctx.tools.register(defineContentToolFixture({
+        name: 'computer', description: 'Desktop.',
+        parameters: { action: { type: 'string', required: true }, x: { type: 'integer' }, y: { type: 'integer' }, text: { type: 'string' } },
+        execute: (args) => {
+          inputs.push(args.action)
+          return Promise.resolve([{ type: 'text', text: `${args.action} done` }])
+        },
+      }))
+    } }
+    const loaded = await turn({
+      before: [['desktop', desktop]], answers: ['allowed-once', 'rejected'],
+      script: [{ name: 'computer', args: { action: 'screenshot' } }, { name: 'computer', args: { action: 'click', x: 1, y: 2 } }, { name: 'computer', args: { action: 'type', text: 'hunter2' } }],
+    })
+    expect(toolResults(loaded.events)).toEqual(['screenshot done', 'click done', 'Error: The user declined computer input.'].map(text => [{ type: 'text', text }]))
+    expect(loaded.asked).toEqual([
+      'Computer input on the desktop. Arguments: "action": "click", "x": 1, "y": 2.',
+      'Computer input on the desktop. Arguments: "action": "type", "text": "hunter2".',
+    ])
+    expect(loaded.events.flatMap(event => event.type === 'approval/asked' ? [event.data.toolName] : event.type === 'approval/decided' ? [event.data.outcome] : []))
+      .toEqual(['computer', 'allowed-once', 'computer', 'rejected'])
+    // Without this plugin's recorded consent, the guard denies input that a listener ahead of consent allowed.
+    loaded.ctx.on('tools/pre-execute', (): Promise<PreToolDecision> => Promise.resolve({ kind: 'allow' }), { prepend: true })
+    for (const action of ['key', 'scroll', 'drag', 'move']) {
+      expect(textOf(await direct(loaded, 'computer', { action }))).toBe('Error: computer input needs the user\'s consent, which was not given.')
+    }
+    expect(textOf(await direct(loaded, 'computer', { action: 'click' }, false))).toBe('Error: computer input needs the user\'s consent, which was not given.')
+    expect(textOf(await direct(loaded, 'computer', { action: 'screenshot' }))).toBe('screenshot done')
+    expect(inputs).toEqual(['screenshot', 'click', 'screenshot'])
+    expect(loaded.asked).toHaveLength(2)
   })
 })

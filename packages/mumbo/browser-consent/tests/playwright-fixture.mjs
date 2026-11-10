@@ -1,12 +1,23 @@
 /**
  * Stdio stand-in for the Playwright MCP server: tabs whose URLs follow navigation, a `?redirect=` query, and clicks on a
- * `link:<url>` target, plus a call log. Each call is logged with the current tab's URL before the call.
+ * `link:<url>` target, plus a call log. Each call is logged with the current tab's URL before the call. The first tab
+ * starts on the URL in the third argument, or `about:blank`; a click on a `report:<url>` target reports that page URL
+ * without moving the tab, as when the person leaves the page between the call and the next listing.
+ *
+ * Output follows the pinned server. Each click writes the page it ends on to `page-<n>.yml` in the output directory,
+ * the fourth argument or `.playwright-mcp` in the working directory, and links it relative to the working directory
+ * under a title naming the clicked element; a `link:` click also writes a console log linked with a line range. A tab
+ * listing repeats the tabs under `### Open tabs` with an earlier current tab, as upstream does when a header changes
+ * between its two reads. A page whose URL holds `brackets` has a title holding `](`. A snapshot of a page whose URL
+ * holds `login` shows a masked password field; a snapshot fails on a page whose URL holds `nosnap`, and a tab listing
+ * on one whose URL holds `broken`. `browser_close` answers with upstream's fixed result followed by the page section.
  */
-import { appendFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { join, relative } from 'node:path'
 import { createInterface } from 'node:readline'
 
-const [root, mode] = process.argv.slice(2)
+const [root, mode, start, outputDir] = process.argv.slice(2)
+const output = outputDir || '.playwright-mcp'
 const reply = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\n')
 const text = value => ({ content: [{ type: 'text', text: value }] })
 const tool = (name, properties = {}) => ({ name, description: `Fixture ${name}.`, inputSchema: { type: 'object', properties } })
@@ -18,11 +29,19 @@ const TOOLS = [
   tool('browser_type', { element: { type: 'string' }, target: { type: 'string' }, text: { type: 'string' } }),
   tool('browser_file_upload', { paths: { type: 'array', items: { type: 'string' } } }),
   tool('browser_evaluate', { function: { type: 'string' } }),
+  tool('browser_run_code_unsafe', { code: { type: 'string' } }),
+  tool('browser_close'),
+  tool('browser_console_messages', { all: { type: 'boolean' } }),
+  tool('browser_network_requests'),
+  tool('browser_network_request', { index: { type: 'number' } }),
 ]
-const tabs = [{ url: 'about:blank' }]
+const tabs = [{ url: start || 'about:blank' }]
 let current = 0
+let written = 0
 /** Follow a `?redirect=` query to its target, as a server redirect would. */
 const land = url => new URL(url).searchParams.get('redirect') ?? url
+const title = url => url.includes('brackets') ? 'Fix [x](y)' : 'Fixture page'
+const listing = currentIndex => tabs.map((tab, index) => `- ${index}:${index === currentIndex ? ' (current)' : ''} [${title(tab.url)}](${tab.url})`).join('\n')
 
 createInterface({ input: process.stdin }).on('line', line => {
   const request = JSON.parse(line)
@@ -40,17 +59,42 @@ createInterface({ input: process.stdin }).on('line', line => {
     case 'tools/call': {
       const { name, arguments: args } = request.params
       appendFileSync(join(root, 'calls.ndjson'), JSON.stringify({ name, args, url: tabs[current].url }) + '\n')
-      if ((name === 'browser_tabs' && tabs[current].url.includes('broken')) || args.target === 'gone') {
+      const failing = name === 'browser_tabs' ? 'broken' : name === 'browser_snapshot' ? 'nosnap' : undefined
+      if ((failing !== undefined && tabs[current].url.includes(failing)) || args.target === 'gone') {
         reply(request.id, { ...text('### Error\nError: fixture failure'), isError: true })
         break
       }
+      const before = current
       if (name === 'browser_navigate') tabs[current].url = land(args.url)
       if (name === 'browser_click' && args.target?.startsWith('link:')) tabs[current].url = args.target.slice('link:'.length)
       if (name === 'browser_tabs' && args.action === 'new') current = tabs.push({ url: args.url ?? 'about:blank' }) - 1
       if (name === 'browser_tabs' && args.action === 'select') current = args.index
-      reply(request.id, name === 'browser_tabs'
-        ? text(`### Result\n${tabs.map((tab, index) => `- ${index}:${index === current ? ' (current)' : ''} [Fixture page](${tab.url})`).join('\n')}`)
-        : text(`### Page\n- Page URL: ${tabs[current].url}`))
+      const reported = name === 'browser_click' && args.target?.startsWith('report:') ? args.target.slice('report:'.length) : tabs[current].url
+      const page = `### Page\n- Page URL: ${reported}\n- Page Title: ${title(reported)}`
+      if (name === 'browser_tabs') {
+        reply(request.id, text(`### Result\n${listing(current)}\n### Open tabs\n${listing(before === current ? 0 : before)}`))
+        break
+      }
+      if (name === 'browser_close') {
+        reply(request.id, text(`### Result\nNo open tabs. Navigate to a URL to create one.\n${page}`))
+        break
+      }
+      // A page whose URL holds `login` shows a password field, which the patched snapshot masks.
+      let sections = name === 'browser_snapshot' && tabs[current].url.includes('login')
+        ? `\n### Snapshot\n\`\`\`yaml\n- textbox "Password" [ref=e1]: ${String.fromCharCode(0x2022).repeat(4)}\n\`\`\``
+        : ''
+      if (name === 'browser_click') {
+        mkdirSync(output, { recursive: true })
+        const file = join(output, `page-${++written}.yml`)
+        writeFileSync(file, `- text: ${reported}\n`)
+        sections = `\n### Snapshot\n- [Snapshot of ${args.element ?? 'the page'}](${relative(process.cwd(), file)})`
+        if (args.target?.startsWith('link:')) {
+          const log = join(output, `console-${written}.log`)
+          writeFileSync(log, `[LOG] one @ ${reported}\n[LOG] two @ ${reported}\n[LOG] three @ ${reported}\n`)
+          sections += `\n### Events\n- New console entries: ${relative(process.cwd(), log)}#L1-L3`
+        }
+      }
+      reply(request.id, text(`${page}${sections}`))
       break
     }
     default:
