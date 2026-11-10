@@ -1,12 +1,15 @@
-# Agent containment (B24): the rows the edge appends after every other overlay of a project box. The uid and gid are
-# the box's `agent` user; NO_PROXY ends with the edge's LLM host; the rest is fixed. A project box has no desktop or
-# browser, so no further identity.
+# Agent containment (B24): the rows the edge appends after every other overlay of a project box. The ids are the box's
+# users `agent` (1001) and `mcpserver` (1006); NO_PROXY ends with the edge's LLM host; the rest is fixed. A project box
+# has no desktop or browser, so no identity for them.
 # Start every process dsh runs for the model as `agent`, with an explicit environment that reaches GitHub through the
 # box-local proxy, as dsh itself does. The gh wrapper and the proxy CA are root-owned, world-readable copies outside
 # /root/.mumbo, which stays 0700. dsh's own TMPDIR stays root-only; shell activity records go to /run/dsh-shell (root,
 # 0711) and command spill files to a directory agent can read. The superagent's worker shims come first on PATH and its
 # git configuration is the global one, as dsh-superagent sets them in its own environment, which run-as children do not
-# receive; both live in its root-owned worker directory.
+# receive; both live in its root-owned worker directory. The MCP servers the person adds run as `mcpserver` (the server
+# identity) in its home, with only HOME, USER, PATH, and LANG besides their own entries; its groups are empty while the
+# box's mcpServerWorkspace switch is `none`, the default, and gain the workspace group the box sets up for `read` or
+# `readwrite`.
 - id: subprocess
   config:
     shellActivityDirectory: /run/dsh-shell
@@ -32,6 +35,18 @@
         HTTPS_PROXY: http://127.0.0.1:8899
         NO_PROXY: 127.0.0.1,localhost,llm.example
       secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY, E2B_API_KEY, GH_TOKEN, GITHUB_TOKEN]
+    identities:
+      mcpserver:
+        uid: 1006
+        gid: 1006
+        groups: []
+        inherit: [LANG]
+        set:
+          HOME: /home/mcpserver
+          USER: mcpserver
+          PATH: /usr/local/bin:/usr/bin:/bin
+        secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY, E2B_API_KEY, GH_TOKEN, GITHUB_TOKEN]
+    serverIdentity: mcpserver
 # Confine the model's file tools to the workspace, agent's home, and the ticket work directory; reads check each opened
 # file, changes run as agent. The attachment, skill, and spill directories the harness names to the model are read-only;
 # the ones outside /root are root-owned with group agent and set-group-ID (2750), so the agent shell can read but not
@@ -70,8 +85,8 @@
     ghConfigDirectory: /root/.config/gh
     panelAdmins: !!js (process.env.MUMBO_PANEL_ADMINS ?? '').split(',').filter(Boolean)
     githubApp: !!js "process.env.MUMBO_GITHUB_APP_LOGIN || process.env.MUMBO_GITHUB_APP_USER_ID ? { login: process.env.MUMBO_GITHUB_APP_LOGIN, userId: Number(process.env.MUMBO_GITHUB_APP_USER_ID) } : undefined"
-# The manager starts the person's MCP stdio servers through the run-as provider as agent, and runs only while a subprocess
-# service is mounted, so no server starts as root after a provider remount or when the provider failed at load. Only
+# The manager starts the person's MCP stdio servers through the run-as provider as mcpserver, and runs only while a
+# subprocess service is mounted, so no server starts as root after a provider remount or when the provider failed at load. Only
 # `inject` is patched: a `config` patch would replace the servers the person added in Settings.
 - id: mcp-manager
   inject: [credentials, subprocess]

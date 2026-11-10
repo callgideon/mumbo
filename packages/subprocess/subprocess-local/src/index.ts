@@ -53,10 +53,10 @@ import {
 } from './linux-scope.ts'
 import type { LinuxTerminalBootstrapLaunch, LinuxTerminalScopeLaunch } from './linux-scope.ts'
 import {
-  assertNoSecretNames, assertPrivateDirectory, assertRunAsHost, assertSearchable, credentialsOf, IDENTITY_NAME, RunAs,
-  runAsEnvironment, validateRunAs,
+  assertNoSecretNames, assertPrivateDirectory, assertRunAsHost, assertSearchable, assertServerSearchPaths, credentialsOf, IDENTITY_NAME,
+  resolveServerIdentity, RunAs, runAsEnvironment, validateRunAs,
 } from './run-as.ts'
-import type { RunAsIdentity } from './run-as.ts'
+import type { RunAsIdentity, ServerIdentity } from './run-as.ts'
 import { LinuxScopeSelector } from './linux-scope-selector.ts'
 import type { LinuxScopeDecision } from './linux-scope-selector.ts'
 import { launchWindowsJob, probeWindowsJob } from './windows-job.ts'
@@ -81,6 +81,14 @@ export interface Config {
    * listed here is refused.
    */
   identities?: Record<string, RunAs> | undefined
+  /**
+   * Name of the `identities` entry that runs the servers a person configures rather than the model, such as MCP stdio
+   * servers that name no identity; each starts in that identity's home. Its `set` must name `HOME` by its real path, an
+   * existing directory owned by that identity, writable by no other user but root, directly or through an ancestor, and
+   * searchable by it, and `PATH`; every `PATH` and `NODE_PATH` entry that identity receives, at load and at each spawn,
+   * must be a directory only root can change.
+   */
+  serverIdentity?: string | undefined
   /**
    * Absolute existing directory that receives each interactive shell's private activity records; omitted, the OS
    * temporary directory. Under `runAs` it must be writable by no other user, directly or through an ancestor, and
@@ -169,6 +177,8 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
   private readonly identity: RunAsIdentity | undefined
   /** Further identities a spawn spec selects by name. */
   private readonly identities: ReadonlyMap<string, RunAs>
+  /** The identity that runs the servers a person configures, with its checked home. */
+  private readonly server: ServerIdentity | undefined
   /** The directories this provider writes into. */
   private readonly directories: Directories
 
@@ -177,9 +187,15 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
     return this.identity
   }
 
+  /** The identity that runs the servers a person configures, and its home, when configured. */
+  override get serverIdentity(): ServerIdentity | undefined {
+    return this.server
+  }
+
   static Config: z<Config> = z.object({
     runAs: z.union([RunAs, z.const(undefined)]),
     identities: z.union([z.dict(RunAs), z.const(undefined)]),
+    serverIdentity: z.union([String, z.const(undefined)]),
     shellActivityDirectory: z.union([String, z.const(undefined)]),
     spillDirectory: z.union([String, z.const(undefined)]),
   })
@@ -204,6 +220,7 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
     this.runAs = config.runAs
     this.identity = config.runAs === undefined ? undefined : credentialsOf(config.runAs)
     this.identities = new Map(identities)
+    this.server = config.serverIdentity === undefined ? undefined : resolveServerIdentity(config.serverIdentity, this.identities)
     ctx.effect(() => {
       const onHostExit = (): void => { this.terminateForHostExit() }
       process.prependListener('exit', onHostExit)
@@ -338,6 +355,8 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
     const request = runAs === undefined ? spec : withoutInheritedOutput(spec)
     const identity = runAs === undefined ? undefined : credentialsOf(runAs)
     const env = this.targetEnvironment(request, runAs)
+    // A caller's explicit NODE_PATH reaches a server too, so the final environment is checked again.
+    if (spec.identity !== undefined && spec.identity === this.server?.name) assertServerSearchPaths(env, `identities.${spec.identity}`)
     const containmentMode = this.selectContainmentMode('ordinary')
     let handle: LocalSubprocessHandle
     const spillDir = this.internals.spillDir ?? this.directories.spill

@@ -8,7 +8,7 @@ import { Context } from '@deepseek-ai/cordis'
 import type { SubprocessSpawnSpec, SubprocessTerminalHandle } from '@deepseek-ai/dsh-subprocess'
 import LocalSubprocessRuntime, { SubprocessSecretEnvironmentError } from '@deepseek-ai/dsh-subprocess-local'
 import type { RunAs } from '@deepseek-ai/dsh-subprocess-local'
-import { assertNoSecretNames, assertRunAsHost, runAsEnvironment, validateRunAs } from '../src/run-as.ts'
+import { assertNoSecretNames, assertRootOwnedPath, assertRunAsHost, resolveServerIdentity, runAsEnvironment, validateRunAs } from '../src/run-as.ts'
 import { launchLinuxBootstrap, launchLinuxScope, prepareLinuxTerminalBootstrap, prepareLinuxTerminalScope } from '../src/linux-scope.ts'
 import { consumeLinuxLaunchRequest, linuxLaunchFilesFromLocator, openLinuxStartupError, readLinuxStartupError, createLinuxLaunchFiles } from '../src/runner-protocol.ts'
 import { SUBPROCESS_RUNNER_ENV } from '../src/runner-launch.ts'
@@ -743,5 +743,83 @@ describe('run-as exec bootstrap', () => {
     expect(execve).not.toHaveBeenCalled()
     expect(readLinuxStartupError(files.startupErrorPath)?.error.message)
       .toBe('run-as: could not take uid 2000, gid 3000, groups [3001, 3002]: run-as: /proc/self/status has no Groups line')
+  })
+})
+
+linux('the server identity', () => {
+  /** A provider whose `serverIdentity` names `mcpserver`, this process's own identity with `server` as its own config. */
+  async function serving(server: Partial<RunAs> = {}): Promise<Context> {
+    const ctx = new Context()
+    fibers.push(await ctx.plugin(LocalSubprocessRuntime, {
+      runAs: runAs({ inherit: [] }),
+      identities: { mcpserver: runAs({ inherit: [], set: { HOME: realpathSync(directory()), USER: 'mcpserver', PATH: '/usr/bin:/bin' }, ...server }) },
+      serverIdentity: 'mcpserver',
+    }))
+    return ctx
+  }
+
+  it('reports its name and its home, where servers start, and none without serverIdentity', async () => {
+    const home = realpathSync(directory())
+    const ctx = await serving({ set: { HOME: home, USER: 'mcpserver', PATH: '/usr/bin:/bin' } })
+    expect(ctx.subprocess.serverIdentity).toEqual({ name: 'mcpserver', home })
+    expect((await runtime(runAs())).subprocess.serverIdentity).toBeUndefined()
+  })
+
+  it('accepts only directories root alone can change on a server\'s PATH, by their spelling and their real path', () => {
+    expect(() => { assertRootOwnedPath('/usr/bin', 'refused') }).not.toThrow()
+    expect(() => { assertRootOwnedPath('/bin', 'refused') }).not.toThrow()
+    const own = directory()
+    const linked = join(directory(), 'bin')
+    symlinkSync('/usr/bin', linked)
+    // Owned by this user, not root; a link in a directory this user can change; relative; missing.
+    for (const path of [own, linked, 'usr/bin', join(own, 'missing')]) expect(() => { assertRootOwnedPath(path, 'refused') }, path).toThrow('refused')
+    const groupWritable = (path: string) => ({ ...statSync(path), uid: 0, mode: path === '/usr' ? 0o40775 : statSync(path).mode })
+    expect(() => { assertRootOwnedPath('/usr/bin', 'refused', groupWritable) }).toThrow('refused')
+  })
+
+  it.each([
+    ['an identity it does not list', { serverIdentity: 'nobody' }, 'serverIdentity "nobody" must name an entry of identities'],
+    ['no HOME', { set: { USER: 'mcpserver', PATH: '/usr/bin' } }, 'identities.mcpserver.set.HOME must name the server identity\'s home, an absolute directory'],
+    ['a missing HOME', { set: { HOME: '/nonexistent-mcpserver', PATH: '/usr/bin' } }, 'set.HOME "/nonexistent-mcpserver" must be an existing directory named by its real path'],
+    ['no PATH of its own', { set: { HOME: 'HOME' } }, 'identities.mcpserver.set.PATH must be set, so no caller replaces the server identity\'s PATH'],
+    ['a PATH entry a user other than root owns', { set: { HOME: 'HOME', PATH: 'OWN:/usr/bin' } }, 'identities.mcpserver PATH entry "OWN" must be an absolute existing directory that only root can change'],
+    ['an inherited NODE_PATH entry a user other than root owns', { inherit: ['NODE_PATH'], set: { HOME: 'HOME', PATH: '/usr/bin' } }, 'identities.mcpserver NODE_PATH entry "OWN"'],
+  ])('fails at load for %s', async (_case, change, message) => {
+    const home = realpathSync(directory())
+    const own = realpathSync(directory())
+    vi.stubEnv('NODE_PATH', own)
+    const set = Object.fromEntries(Object.entries((change as { set?: Record<string, string> }).set ?? { HOME: home, PATH: '/usr/bin' })
+      .map(([name, value]) => [name, value.replace('HOME', home).replace('OWN', own)]))
+    const ctx = new Context()
+    await expect(ctx.plugin(LocalSubprocessRuntime, {
+      runAs: runAs({ inherit: [] }),
+      identities: { mcpserver: runAs({ inherit: (change as { inherit?: string[] }).inherit ?? [], set }) },
+      serverIdentity: (change as { serverIdentity?: string }).serverIdentity ?? 'mcpserver',
+    })).rejects.toThrow(message.replace('OWN', own))
+    expect(ctx.get('subprocess')).toBeUndefined()
+  })
+
+  it('refuses a home spelled through a link, owned by another user, or the identity cannot search', () => {
+    const home = realpathSync(directory())
+    const link = join(directory(), 'home')
+    symlinkSync(home, link)
+    const identity = (set: Record<string, string>) => new Map([['mcpserver', runAs({ inherit: [], set: { PATH: '/usr/bin', ...set } })]])
+    expect(() => resolveServerIdentity('mcpserver', identity({ HOME: link }))).toThrow('must be an existing directory named by its real path')
+    const foreign = (path: string) => ({ ...statSync(path), uid: path === home ? 4242 : statSync(path).uid })
+    expect(() => resolveServerIdentity('mcpserver', identity({ HOME: home }), foreign)).toThrow(`must be owned by uid ${String(process.getuid!())} and writable by no other user but root`)
+    const unsearchable = (path: string) => ({ ...statSync(path), mode: path === home ? 0o40600 : statSync(path).mode })
+    expect(() => resolveServerIdentity('mcpserver', identity({ HOME: home }), unsearchable)).toThrow('cannot search')
+    expect(resolveServerIdentity('mcpserver', identity({ HOME: home }))).toEqual({ name: 'mcpserver', home })
+  })
+
+  it('refuses a server spawn whose final NODE_PATH names a directory another user could change, before anything starts', async () => {
+    const launches = privateTmpdir()
+    const ctx = await serving()
+    const own = directory()
+    expect(() => ctx.subprocess.spawn({ ...reportSpec(directory(), { NODE_PATH: own }), identity: 'mcpserver' }))
+      .toThrow(`identities.mcpserver NODE_PATH entry ${JSON.stringify(own)} must be an absolute existing directory that only root can change`)
+    expect(readdirSync(launches).filter(name => name.startsWith('dsh-subprocess-launch-'))).toEqual([])
+    const allowed = ctx.subprocess.spawn({ ...reportSpec(directory(), { NODE_PATH: '/usr/lib' }), identity: 'mcpserver' })
+    await expect(allowed.done).resolves.toEqual({ exitCode: 0, signal: null })
   })
 })

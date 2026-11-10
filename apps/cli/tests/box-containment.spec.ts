@@ -3,9 +3,9 @@
  * and the edge's containment rows (fixtures/box-edge). Every mounted package is classified by how its model-visible
  * tools run; an unclassified package fails, catalogued tool names must match, the packages that would load code into
  * root dsh or start a root process for the model must be switched off or absent, every subprocess identity a row
- * names must be the one its classification expects and a configured non-root identity of its own, no MCP stdio
- * server may start as root, and the project box's `dsh-superagent` row may differ from the founder's overlay only by the
- * keys containment adds.
+ * names must be the one its classification expects and a configured non-root identity of its own, every MCP stdio
+ * server that names no identity must start as the dedicated `mcpserver` identity, never as root or `agent`, and the
+ * project box's `dsh-superagent` row may differ from the founder's overlay only by the keys containment adds.
  */
 
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
@@ -109,10 +109,11 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
   '@deepseek-ai/dsh-llm-retry': NONE,
   '@deepseek-ai/dsh-mcp-client': {
     runs: 'remote', tools: ['mcp__sandboxes__*'], identityFromRow: true, startsProcesses: config => config?.transport !== 'streamable-http',
-    note: 'the edge\'s sandboxes server over HTTP; a stdio server runs as the identity its row names, or as agent',
+    note: 'the edge\'s sandboxes server over HTTP; a stdio server runs as the identity its row names, or as mcpserver',
   },
   '@deepseek-ai/dsh-mcp-manager': {
-    runs: 'run-as', tools: ['mcp__*'], note: 'servers the person adds; mcp-client starts each stdio server through the run-as provider as agent',
+    runs: 'run-as', tools: ['mcp__*'],
+    note: 'servers the person adds; mcp-client starts each stdio server through the run-as provider as the server identity, mcpserver, in its home',
   },
   '@deepseek-ai/dsh-mcp-resources': {
     runs: 'remote', tools: ['list_mcp_resource_templates', 'list_mcp_resources', 'read_mcp_resource'], catalog: '@deepseek-ai/dsh-mcp-resources',
@@ -293,17 +294,24 @@ function namedIdentities(value: unknown): string[] {
   return Object.entries(value).flatMap(([key, entry]) => key === 'identity' && typeof entry === 'string' ? [entry] : namedIdentities(entry))
 }
 
+/** The identity every MCP stdio server that names no identity runs as in a box: a user of its own, never root or `agent`. */
+const SERVER_IDENTITY = 'mcpserver'
+
 /**
- * Ids of the enabled rows that could start an MCP stdio server as root with what root dsh can reach. mcp-client starts a
- * stdio server that names no identity as this process unless the subprocess provider mounted at that connection runs
- * children as a run-as identity, and every server the manager starts names none; every transport but Streamable HTTP
- * starts a process. Such a row is contained only when every subprocess provider row sets `runAs` and the row injects
- * `subprocess`, so it runs only while a provider is mounted: none after a provider remount or a provider failed at load.
+ * Ids of the enabled rows that could start an MCP stdio server as root, or as another identity than {@link SERVER_IDENTITY}.
+ * mcp-client starts a stdio server that names no identity as this process unless the subprocess provider mounted at that
+ * connection runs children as a run-as identity, and then as that provider's `serverIdentity`; every server the manager
+ * starts names none; every transport but Streamable HTTP starts a process. Such a row is contained only when every
+ * subprocess provider row sets `runAs` and names `mcpserver` as its `serverIdentity`, and the row injects `subprocess`, so
+ * it runs only while a provider is mounted: none after a provider remount or a provider failed at load.
  */
 function rootStdioServers(rows: readonly Row[]): string[] {
   const enabled = enabledRows(rows)
   const providers = enabled.filter(row => row.name === '@deepseek-ai/dsh-subprocess-local')
-  const runAs = providers.length > 0 && providers.every(row => (row.config as { runAs?: unknown } | undefined)?.runAs !== undefined)
+  const runAs = providers.length > 0 && providers.every((row) => {
+    const config = row.config as { runAs?: unknown; serverIdentity?: unknown } | undefined
+    return config?.runAs !== undefined && config.serverIdentity === SERVER_IDENTITY
+  })
   return enabled.flatMap((row) => {
     const config = row.config as { transport?: unknown; identity?: unknown } | undefined
     const starts = row.name === '@deepseek-ai/dsh-mcp-manager'
@@ -394,7 +402,7 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     const layout = readFileSync(join(root, '.agents/notes/implemented/architecture/2026-11-10-agent-containment-run-as-and-model-roots.md'), 'utf8')
       .split('\n').find(line => line.startsWith('- Box layout the rows depend on')) ?? ''
     const required = [...modelRoots, ...(byId('fs-sandbox')?.config as { readOnlyRoots: string[] }).readOnlyRoots, subprocess.shellActivityDirectory!, subprocess.spillDirectory!,
-      ...box === 'project' ? [superagent!.workerDirectory!, superagent!.ghConfigDirectory!] : []]
+      serverHome!, ...box === 'project' ? [superagent!.workerDirectory!, superagent!.ghConfigDirectory!] : []]
     expect(required.filter(path => !layout.includes(`\`${path}\``))).toEqual([])
     expect(byId('plugin-manager')?.config).toEqual({ modelTools: false })
     expect(byId('workspace-changes')?.config).toEqual({ summaries: false })
@@ -408,15 +416,18 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
       const identity = entry?.identityFromRow === true ? (row.config as { identity?: string } | undefined)?.identity : entry?.identity
       if (identity === undefined || entry?.startsProcesses?.(row.config as Record<string, unknown> | undefined) === false) return []
       return [`${row.name} as ${identity}`]
+    const serverHome = (subprocess as { identities?: Record<string, { set: Record<string, string> }> }).identities?.[SERVER_IDENTITY]?.set.HOME
     }).sort()
     expect(named).toEqual(expected)
     expect(named).toEqual(box === 'person'
       ? ['@deepseek-ai/dsh-computer-use-x11 as desktop', '@mumbo/box-links as desktop', '@mumbo/browser-consent as browsermcp']
       : [])
-    type Identity = { uid: number; gid: number; secretNames: string[] }
-    const subprocess = rows.find(row => row.id === 'subprocess')?.config as { runAs: Identity; identities?: Record<string, Identity> }
+    type Identity = { uid: number; gid: number; groups: number[]; inherit: string[]; set: Record<string, string>; secretNames: string[] }
+    const subprocess = rows.find(row => row.id === 'subprocess')?.config as { runAs: Identity; identities?: Record<string, Identity>; serverIdentity?: string }
     const identities = subprocess.identities ?? {}
-    expect(Object.keys(identities).sort()).toEqual([...new Set(expected.map(entry => entry.split(' as ')[1]))].sort())
+    // The server identity is the provider's, not a row's: the MCP stdio servers that name none run as it.
+    expect(subprocess.serverIdentity).toBe(SERVER_IDENTITY)
+    expect(Object.keys(identities).sort()).toEqual([...new Set([...expected.map(entry => entry.split(' as ')[1]), SERVER_IDENTITY])].sort())
     const uids = [subprocess.runAs.uid, ...Object.values(identities).map(identity => identity.uid)]
     expect(uids.every(uid => uid > 0)).toBe(true)
     expect(new Set(uids).size).toBe(uids.length)
@@ -438,6 +449,14 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     // The check itself: without run-as on the provider, the manager and a stdio row naming no identity start servers as root,
     // and so do they without the injection, once the provider is gone.
     const unconfined = rows.map(row => row.id === 'subprocess' ? { ...row, config: { ...row.config as object, runAs: undefined } } : row)
+    // The person's server credentials reach no group another identity holds (`shared`, the workspace through agent's
+    // group) while the box's mcpServerWorkspace switch is `none`, and its environment is the minimal base.
+    const server = identities[SERVER_IDENTITY]!
+    const others = [subprocess.runAs, ...Object.entries(identities).filter(([name]) => name !== SERVER_IDENTITY).map(([, identity]) => identity)]
+    const held = new Set(others.flatMap(identity => [identity.gid, ...identity.groups]))
+    expect([server.gid, ...server.groups].filter(gid => held.has(gid))).toEqual([])
+    expect(server.inherit).toEqual(['LANG'])
+    expect(server.set).toEqual({ HOME: '/home/mcpserver', USER: 'mcpserver', PATH: '/usr/local/bin:/usr/bin:/bin' })
     expect(rootStdioServers([...unconfined, ...added])).toEqual(['mcp-manager', 'files'])
     const unbound = rows.map(row => row.id === 'mcp-manager' ? { ...row, inject: ['credentials'] } : row)
     expect(rootStdioServers([...unbound, ...added, { ...added[0]!, id: 'loose', inject: undefined }])).toEqual(['mcp-manager', 'loose'])
@@ -456,6 +475,11 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     // The composed row is the containment row, whole.
     expect(rows.find(row => row.id === 'dsh-superagent')?.config).toEqual(contained)
   })
+    // Without the server identity they would run as another one, such as agent, whose shell the model drives.
+    for (const serverIdentity of [undefined, 'agent']) {
+      const shared = rows.map(row => row.id === 'subprocess' ? { ...row, config: { ...row.config as object, serverIdentity } } : row)
+      expect(rootStdioServers([...shared, ...added])).toEqual(['mcp-manager', 'files'])
+    }
 
   it('lists every mounted model tool with how it runs', () => {
     const table = names.flatMap(name => (CLASSIFICATION[name]?.tools ?? []).map((tool) => {

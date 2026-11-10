@@ -212,6 +212,14 @@ export interface SubprocessChildIdentity {
   readonly groups: readonly number[]
 }
 
+/** The provider-configured identity that runs the servers a person configures, and the directory each starts in. */
+export interface SubprocessServerIdentity {
+  /** The identity's name, as a spawn request's `identity` names it. */
+  readonly name: string
+  /** The identity's own home, by its real path: the working directory of every server started as it. */
+  readonly home: string
+}
+
 /**
  * Signals supported by the terminal-process primitive. Kept member-identical
  * to `TerminalSignal` in `@deepseek-ai/dsh-terminal` without a cross-seam dependency;

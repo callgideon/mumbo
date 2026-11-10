@@ -1,6 +1,7 @@
 /**
  * A stdio server whose config names a subprocess identity starts through the subprocess service as that identity, and
- * one that names none does too, as the provider's default identity, when the provider runs children as a run-as identity.
+ * one that names none does too, as the provider's server identity in that identity's home, when the provider runs
+ * children as a run-as identity.
  */
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -13,7 +14,7 @@ import type { JSONRPCMessage } from '@modelcontextprotocol/client'
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio'
 import { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import type {
-  SubprocessChildIdentity, SubprocessHandle, SubprocessOutcome, SubprocessSpawnSpec,
+  SubprocessChildIdentity, SubprocessHandle, SubprocessOutcome, SubprocessServerIdentity, SubprocessSpawnSpec,
   SubprocessTerminalEnvironment, SubprocessTerminalHandle,
 } from '@deepseek-ai/dsh-subprocess'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
@@ -100,30 +101,35 @@ linux('a stdio server started through the run-as provider', () => {
     })
   }, 30_000)
 
-  it('runs a server that names no identity as the provider\'s default identity, never as this process', async () => {
+  it('runs a server that names no identity as the provider\'s server identity in its home, never as this process or the default', async () => {
     vi.stubEnv('TMPDIR', directory())
     vi.stubEnv('AMBIENT_ONLY', 'leak')
+    vi.stubEnv('LANG', 'C.UTF-8')
     const groups = readFileSync('/proc/self/status', 'utf8').split('\n').find(line => line.startsWith('Groups:'))!
       .slice('Groups:'.length).trim().split(/\s+/u).filter(id => id !== '').map(Number).sort((a, b) => a - b)
     const own = { uid: process.getuid!(), gid: process.getgid!(), groups }
+    const home = directory()
     const ctx = await mountRegistry()
     await ctx.plugin(LocalSubprocessRuntime, {
       runAs: { ...own, inherit: [], set: { HOME: '/home/agent', USER: 'agent' }, secretNames: ['DEEPSEEK_API_KEY'] },
+      identities: { mcpserver: { ...own, inherit: ['LANG'], set: { HOME: home, USER: 'mcpserver', PATH: '/usr/bin:/bin' }, secretNames: ['DEEPSEEK_API_KEY'] } },
+      serverIdentity: 'mcpserver',
     })
     const spawn = vi.spyOn(ctx.subprocess, 'spawn')
-    const cwd = directory()
-    await ctx.plugin(McpClient, anonymous({ env: { ENTRY: 'set' }, cwd }))
-    expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ argv: [process.execPath, fixture], identity: undefined }))
+    await ctx.plugin(McpClient, anonymous({ env: { ENTRY: 'set' } }))
+    expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ argv: [process.execPath, fixture], identity: 'mcpserver', cwd: home, env: { ENTRY: 'set' } }))
     const result = await executeToolFixture(ctx, {
       signal: new AbortController().signal, callId: ToolCallId('identity-2'), name: publicToolName('ident', 'environment'), arguments: {},
     })
     const report = JSON.parse((result.content[0] as { type: 'text'; text: string }).text) as { uid: number; cwd: string; env: Record<string, string> }
-    expect(report).toEqual({ uid: own.uid, cwd, env: { ENTRY: 'set', HOME: '/home/agent', USER: 'agent' } })
+    expect(report).toEqual({ uid: own.uid, cwd: home, env: { ENTRY: 'set', HOME: home, USER: 'mcpserver', PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' } })
   }, 30_000)
 })
 
 /** A scripted process handle behind a subprocess service that only spawns. */
-async function fakeService(options: { highWaterMark?: number; childIdentity?: SubprocessChildIdentity; refuse?: Error } = {}) {
+async function fakeService(options: {
+  highWaterMark?: number; childIdentity?: SubprocessChildIdentity; serverIdentity?: SubprocessServerIdentity; refuse?: Error
+} = {}) {
   const stdin = new PassThrough({ highWaterMark: options.highWaterMark ?? 16 * 1024 })
   const stdout = new PassThrough()
   const done = Promise.withResolvers<SubprocessOutcome>()
@@ -135,6 +141,7 @@ async function fakeService(options: { highWaterMark?: number; childIdentity?: Su
   }
   class SpawnOnly extends SubprocessRuntime {
     override get childIdentity(): SubprocessChildIdentity | undefined { return options.childIdentity }
+    override get serverIdentity(): SubprocessServerIdentity | undefined { return options.serverIdentity }
     override spawn(spec: SubprocessSpawnSpec): SubprocessHandle {
       specs.push(spec)
       if (options.refuse !== undefined) throw options.refuse
@@ -175,12 +182,26 @@ describe('the subprocess stdio transport', () => {
   })
 
   it('starts a server that names no identity through the service only when the service runs children as a run-as identity', async () => {
-    const contained = await fakeService({ childIdentity: { uid: 1001, gid: 1001, groups: [] } })
-    await createTransport(anonymous({ cwd: '/srv' }), contained.ctx).start()
-    expect(contained.specs).toEqual([expect.objectContaining({ argv: [process.execPath, fixture], cwd: '/srv', identity: undefined })])
+    const server = { name: 'mcpserver', home: '/home/mcpserver' }
+    const contained = await fakeService({ childIdentity: { uid: 1001, gid: 1001, groups: [] }, serverIdentity: server })
+    await createTransport(anonymous({ env: { ENTRY: 'set' } }), contained.ctx).start()
+    await createTransport(anonymous({ cwd: '/home/mcpserver' }), contained.ctx).start()
+    expect(contained.specs).toEqual([
+      expect.objectContaining({ argv: [process.execPath, fixture], cwd: '/home/mcpserver', env: { ENTRY: 'set' }, identity: 'mcpserver' }),
+      expect.objectContaining({ cwd: '/home/mcpserver', identity: 'mcpserver' }),
+    ])
     const plain = await fakeService()
     expect(createTransport(anonymous(), plain.ctx)).toBeInstanceOf(StdioClientTransport)
     expect(plain.specs).toEqual([])
+  })
+
+  it('refuses, under a run-as provider, a server that names no identity in another directory, or with no server identity to run as', async () => {
+    const contained = await fakeService({ childIdentity: { uid: 1001, gid: 1001, groups: [] }, serverIdentity: { name: 'mcpserver', home: '/home/mcpserver' } })
+    expect(() => createTransport(anonymous({ cwd: '/root/projects' }), contained.ctx))
+      .toThrow('mcp-client(ident): cwd "/root/projects" is not allowed: a stdio server that names no identity runs as mcpserver in its home "/home/mcpserver"; remove cwd')
+    const unnamed = await fakeService({ childIdentity: { uid: 1001, gid: 1001, groups: [] } })
+    expect(() => createTransport(anonymous(), unnamed.ctx)).toThrow('names no serverIdentity')
+    expect([...contained.specs, ...unnamed.specs]).toEqual([])
   })
 
   it('fails a start the service refuses with its reason, and reports closure once so the connection can be retried', async () => {

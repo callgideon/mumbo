@@ -11,7 +11,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import { proxyEnvironmentForChild } from '@deepseek-ai/dsh-http-proxy'
 import { DSH_ENV_PREFIX } from './types.ts'
-import type { SubprocessChildIdentity, SubprocessHandle, SubprocessSpawnSpec } from './types.ts'
+import type { SubprocessChildIdentity, SubprocessHandle, SubprocessServerIdentity, SubprocessSpawnSpec } from './types.ts'
 import type { SubprocessTerminalEnvironment, SubprocessTerminalHandle, SubprocessTerminalSpawnSpec } from './types.ts'
 
 export { DSH_ENV_PREFIX } from './types.ts'
@@ -27,6 +27,7 @@ export type {
   SubprocessOutputMode,
   SubprocessOutputRead,
   SubprocessOutputReader,
+  SubprocessServerIdentity,
   SubprocessSpawnSpec,
   SubprocessStdinMode,
   SubprocessStdio,
@@ -128,6 +129,15 @@ export abstract class SubprocessRuntime extends Service {
    * @returns the child identity, or undefined when children run as the harness process.
    */
   get childIdentity(): SubprocessChildIdentity | undefined {
+    return undefined
+  }
+
+  /**
+   * The identity that runs servers a person configures rather than the model, such as MCP stdio servers that name no
+   * identity, and its home, where each of them starts. The base provider names none.
+   * @returns the identity's name and home, or undefined when the provider names none.
+   */
+  get serverIdentity(): SubprocessServerIdentity | undefined {
     return undefined
   }
 

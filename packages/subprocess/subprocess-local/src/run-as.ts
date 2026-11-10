@@ -5,7 +5,7 @@
  */
 
 import { readFileSync, realpathSync, statSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import { scrubbedParentEnv, SENSITIVE_ENV_PATTERN } from '@deepseek-ai/dsh-subprocess'
 
@@ -139,18 +139,17 @@ function ancestry(directory: string): string[] {
 }
 
 /**
- * Require a directory that no user other than this process and root can write, directly or by replacing it through
- * an ancestor: the directory is owned by this process and not writable by group or others, and every ancestor is
- * owned by root or this process and not writable by group or others, except a sticky ancestor whose next entry this
- * process owns.
+ * Require a directory that no user other than its owner and root can write, directly or by replacing it through an
+ * ancestor: the directory is owned by `uid` and not writable by group or others, and every ancestor is owned by root
+ * or `uid` and not writable by group or others, except a sticky ancestor whose next entry `uid` owns.
  * @param directory - the directory to check.
  * @param refusal - the error message when the check fails.
  * @param statPath - reads each path's owner and mode.
+ * @param uid - the required owner; this process's user by default.
  * @returns the directory's real path.
  * @throws when the directory or an ancestor fails the check.
  */
-export function assertPrivateDirectory(directory: string, refusal: string, statPath: StatPath = statSync): string {
-  const uid = process.getuid?.()
+export function assertPrivateDirectory(directory: string, refusal: string, statPath: StatPath = statSync, uid = process.getuid?.()): string {
   const chain = ancestry(directory)
   chain.forEach((path, index) => {
     const info = statPath(path)
@@ -162,6 +161,87 @@ export function assertPrivateDirectory(directory: string, refusal: string, statP
     if (!safe) throw new Error(refusal)
   })
   return chain[chain.length - 1] as string
+}
+
+/**
+ * Require that only root can change what an absolute path names: every directory on its spelling, which holds a name
+ * the lookup passes, and every directory on its real path is owned by root and writable by no group or other user, so
+ * no other user can add an entry, replace one, or repoint a link on the way.
+ * @param path - the path to check.
+ * @param refusal - the error message when the check fails.
+ * @param statPath - reads each path's owner and mode, following links.
+ * @throws when the path is relative or missing, or any of those directories fails the check.
+ */
+export function assertRootOwnedPath(path: string, refusal: string, statPath: StatPath = statSync): void {
+  if (!isAbsolute(path)) throw new Error(refusal)
+  let real: string
+  try {
+    real = realpathSync.native(path)
+  } catch (_missing) {
+    // A path that does not resolve names nothing root controls.
+    throw new Error(refusal)
+  }
+  const prefixes = (spelling: string): string[] => spelling === dirname(spelling) ? [spelling] : [...prefixes(dirname(spelling)), spelling]
+  for (const directory of new Set([...prefixes(resolve(path)), ...prefixes(real)])) {
+    const info = statPath(directory)
+    if (info.uid !== 0 || (info.mode & 0o022) !== 0) throw new Error(refusal)
+  }
+}
+
+/** The server identity of a provider: its name and its home's real path. */
+export interface ServerIdentity {
+  /** The `identities` entry that runs servers. */
+  name: string
+  /** The real path of the identity's `set.HOME`. */
+  home: string
+}
+
+/**
+ * Check the `identities` entry that runs the servers a person configures, failing loudly otherwise: its `set` names
+ * `HOME` by its real path, a directory owned by the identity that no other user but root can write, directly or
+ * through an ancestor, and that the identity can search, and `PATH`, which callers cannot replace; every `PATH` and
+ * `NODE_PATH` entry it receives passes {@link assertRootOwnedPath}.
+ * @param name - the configured `serverIdentity`.
+ * @param identities - the provider's further identities.
+ * @param statPath - reads each path's owner and mode.
+ * @returns the identity's name and home.
+ * @throws when the name is not listed or any of these conditions fails; the message names the field.
+ */
+export function resolveServerIdentity(name: string, identities: ReadonlyMap<string, RunAs>, statPath: StatPath = statSync): ServerIdentity {
+  const runAs = identities.get(name)
+  if (runAs === undefined) throw new Error(`subprocess-local: serverIdentity ${JSON.stringify(name)} must name an entry of identities`)
+  const field = `identities.${name}`
+  const home = runAs.set.HOME
+  if (home === undefined || !isAbsolute(home)) throw new Error(`subprocess-local: ${field}.set.HOME must name the server identity's home, an absolute directory`)
+  let real: string
+  try {
+    real = realpathSync.native(home)
+  } catch (_missing) {
+    // Reported below with the rule the home must meet.
+    real = ''
+  }
+  if (real !== home) throw new Error(`subprocess-local: ${field}.set.HOME ${JSON.stringify(home)} must be an existing directory named by its real path`)
+  assertPrivateDirectory(home, `subprocess-local: ${field}.set.HOME ${JSON.stringify(home)} must be owned by uid ${String(runAs.uid)} and writable by no other user but root, directly or through an ancestor`, statPath, runAs.uid)
+  assertSearchable(home, credentialsOf(runAs), path => `subprocess-local: ${field} (uid ${String(runAs.uid)}) cannot search ${JSON.stringify(path)}, so its servers cannot start in its home`, statPath)
+  if (runAs.set.PATH === undefined) throw new Error(`subprocess-local: ${field}.set.PATH must be set, so no caller replaces the server identity's PATH`)
+  assertServerSearchPaths(runAsEnvironment(runAs), field)
+  return { name, home }
+}
+
+/**
+ * Refuse a server identity's environment whose `PATH` or `NODE_PATH` names a directory a user other than root could
+ * change, where planted code would run with the person's server credentials.
+ * @param env - the environment the server receives.
+ * @param field - the config field named in a refusal.
+ * @param statPath - reads each path's owner and mode.
+ * @throws when an entry fails {@link assertRootOwnedPath}.
+ */
+export function assertServerSearchPaths(env: Readonly<NodeJS.ProcessEnv>, field: string, statPath: StatPath = statSync): void {
+  for (const variable of ['PATH', 'NODE_PATH']) {
+    for (const entry of env[variable]?.split(delimiter) ?? []) {
+      assertRootOwnedPath(entry, `subprocess-local: ${field} ${variable} entry ${JSON.stringify(entry)} must be an absolute existing directory that only root can change: every directory on its path owned by root and writable by no group or other user`, statPath)
+    }
+  }
 }
 
 /**

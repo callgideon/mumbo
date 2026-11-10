@@ -27,7 +27,7 @@ Mount the provider beside its consumers and start processes exactly as the subpr
 
 ### Mounting the provider
 
-Load the provider in the same composition as its consumers. Every per-process choice arrives on the spawn request, so deployment-varying decisions stay with the caller's configuration; only the [run-as identities](#running-children-as-another-user) and the two directories the provider writes into are provider configuration. `shellActivityDirectory` receives each interactive shell's private activity records and defaults to the OS temporary directory. `spillDirectory` receives spill files and defaults to a private per-process directory under the OS temporary directory. Each must be an absolute existing directory, or the provider fails at load. `terminalEnvironment()` reads a nonempty `SHELL` on POSIX, falling back to the account login shell, or a nonempty `ComSpec` on Windows. Empty values are omitted so the consumer can choose its platform fallback.
+Load the provider in the same composition as its consumers. Every per-process choice arrives on the spawn request, so deployment-varying decisions stay with the caller's configuration; only the [run-as identities](#running-children-as-another-user), the server identity, and the two directories the provider writes into are provider configuration. `shellActivityDirectory` receives each interactive shell's private activity records and defaults to the OS temporary directory. `spillDirectory` receives spill files and defaults to a private per-process directory under the OS temporary directory. Each must be an absolute existing directory, or the provider fails at load. `terminalEnvironment()` reads a nonempty `SHELL` on POSIX, falling back to the account login shell, or a nonempty `ComSpec` on Windows. Empty values are omitted so the consumer can choose its platform fallback.
 
 ```yaml
 - name: '@deepseek-ai/dsh-subprocess-local'
@@ -78,6 +78,20 @@ Spill files are created with mode `0640`. Under `runAs`, `spillDirectory` must b
         inherit: [LANG]
         set: { HOME: /home/desktop, TMPDIR: /home/desktop/tmp, PATH: /usr/bin:/bin }
         secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY]
+```
+
+`serverIdentity` names the `identities` entry that runs the servers a person configures rather than the model; `dsh-mcp-client` starts every stdio server that names no identity as it, in its home, so the person's server credentials never sit in the run-as user's processes. `serverIdentity` reports that name and the home's real path. The provider fails at load unless that entry's `set.HOME` is spelled as its real path, owned by that identity, writable by no other user but root, directly or through an ancestor, and searchable by it, and its `set.PATH` is present, so no caller replaces it. Every `PATH` and `NODE_PATH` entry that identity receives must be an absolute existing directory that only root can change: each directory along its spelling and along its real path is owned by root and writable by no group or other user. The provider checks the configured values at load and the final environment of every spawn as that identity, which a caller's `NODE_PATH` cannot then evade.
+
+```yaml
+    identities:
+      mcpserver:
+        uid: 1006
+        gid: 1006
+        groups: []
+        inherit: [LANG]
+        set: { HOME: /home/mcpserver, USER: mcpserver, PATH: /usr/local/bin:/usr/bin:/bin }
+        secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY]
+    serverIdentity: mcpserver
 ```
 
 ### Resolving executables
@@ -198,7 +212,7 @@ These limits define when the provider is a poor fit or needs special operational
 - **Windows terminal allocation requires node-pty's bundled console host assets** — every Windows terminal is spawned with `useConptyDll: true`, so allocation resolves `conpty/conpty.dll` and `OpenConsole.exe` relative to node-pty's own addon; an asset that is missing or unpacked wrong makes `spawnTerminal` throw instead of falling back to the operating system console host. node-pty marks the option experimental, so a node-pty upgrade can change this behaviour. See the [bundled console host note](../../../.agents/notes/implemented/bug-fix/2026-09-28-pty-bundled-console-host.md).
 - **Fallback terminal ownership remains observational** — on macOS or Linux without usable user-systemd, a child that reparents before any foreground-inspection snapshot or leaves the owned terminal session can escape the process-table scan. The local provider does not add a continuous process-table monitor; supported Linux native mode instead retains these descendants through scope membership.
 - **In-process cleanup requires a JavaScript-observable exit** — direct `process.exit()`, default uncaught exceptions, and default unhandled rejections emit Node's synchronous `exit` event. The default OS disposition for an unhandled `SIGTERM`, `SIGINT`, or `SIGHUP` bypasses that event; an application covers those signals only by installing a handler that performs normal disposal or calls `process.exit()`. `SIGKILL`, fatal OOM, `process.abort()`, native crashes, power loss, and any failure that cannot run JavaScript require an external supervisor, container init, or equivalent OS owner.
-- **Run-as covers this provider only** — processes started outside `ctx.subprocess` (MCP stdio servers whose row names no `identity`, plugin installation, the experimental Python PTC runtime, the SDK subagent's child `dsh`) keep this process's identity, and a credential a Consumer forwards under a name absent from `secretNames` reaches the child. Workspace change capture and superagent worker checks run as the run-as user too and need scratch and configuration paths that user can read and write.
+- **Run-as covers this provider only** — processes started outside `ctx.subprocess` (MCP stdio servers while no run-as provider is mounted, plugin installation, the experimental Python PTC runtime, the SDK subagent's child `dsh`) keep this process's identity, and a credential a Consumer forwards under a name absent from `secretNames` reaches the child. Workspace change capture and superagent worker checks run as the run-as user too and need scratch and configuration paths that user can read and write.
 - **The credential scrub is a name heuristic** — `*KEY*`/`*PASSWORD*`/`*SECRET*`/`*TOKEN*` only; differently named secrets (for example `*PASSPHRASE*`) pass through, and a whitelist for over-scrubbed variables is noted future work.
 - **Completed spill files are not deleted** — bounded full-output recovery files accumulate in `spillDirectory` or under the OS tmpdir until something external cleans them; the private per-process spill directory is removed at a JavaScript-observable exit only when it holds no completed spill file.
 - **A removed spill directory is not recreated** — the private per-process directory is created once; after an external cleaner removes it, every later spill in that process degrades to the in-memory tail with an `error` log until the host restarts. Recreating a fresh random directory on `ENOENT` is deferred work.

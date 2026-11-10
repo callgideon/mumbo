@@ -2444,7 +2444,7 @@ export interface LspLocalServerConfig {
 ## `@deepseek-ai/dsh-mcp-client`
 
 - `inject`: `tools`
-- `source`: [`packages/mcp/mcp-client/src/index.ts:147`](../packages/mcp/mcp-client/src/index.ts)
+- `source`: [`packages/mcp/mcp-client/src/index.ts:151`](../packages/mcp/mcp-client/src/index.ts)
 
 ```ts config-catalog
 /** Configuration for one stdio or Streamable HTTP MCP server. */
@@ -2466,13 +2466,17 @@ export interface StdioConfig {
   args: string[]
   /** Extra env vars merged on top of scrubbed ambient env. */
   env: Record<string, string>
-  /** Working directory for the child process. */
+  /**
+   * Working directory for the child process; empty, this process's. A server that names no identity under a provider
+   * that runs children as a run-as identity always starts in the server identity's home, and any other value fails it.
+   */
   cwd: string
   /**
    * Subprocess identity, by the subprocess provider's name for it, that runs the server. Set, the
    * server starts through the subprocess service with that identity's environment plus `env`.
-   * Omitted, it starts through the subprocess service as the provider's default identity when that
-   * provider runs children as a run-as identity, and otherwise as this process with the scrubbed
+   * Omitted, it starts through the subprocess service as the provider's `serverIdentity`, in that
+   * identity's home, when that provider runs children as a run-as identity, and fails when the
+   * provider names no server identity; otherwise it starts as this process with the scrubbed
    * ambient environment plus `env`.
    */
   identity?: string
@@ -3940,6 +3944,14 @@ export interface Config {
    * listed here is refused.
    */
   identities?: Record<string, RunAs> | undefined
+  /**
+   * Name of the `identities` entry that runs the servers a person configures rather than the model, such as MCP stdio
+   * servers that name no identity; each starts in that identity's home. Its `set` must name `HOME` by its real path, an
+   * existing directory owned by that identity, writable by no other user but root, directly or through an ancestor, and
+   * searchable by it, and `PATH`; every `PATH` and `NODE_PATH` entry that identity receives, at load and at each spawn,
+   * must be a directory only root can change.
+   */
+  serverIdentity?: string | undefined
   /**
    * Absolute existing directory that receives each interactive shell's private activity records; omitted, the OS
    * temporary directory. Under `runAs` it must be writable by no other user, directly or through an ancestor, and
