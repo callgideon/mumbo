@@ -4925,15 +4925,39 @@ export interface Config {
 
 ## `@mumbo/box-links`
 
-- `source`: [`packages/mumbo/box-links/src/config.ts:5`](../packages/mumbo/box-links/src/config.ts)
+- `source`: [`packages/mumbo/box-links/src/config.ts:27`](../packages/mumbo/box-links/src/config.ts)
 
 ```ts config-catalog
-/** Absolute links from a box's Web page to the pages the box edge serves beside it. */
+/** Absolute links from a box's Web page to the pages the box edge serves beside it, and the Browser tab's Host call. */
 export interface Config {
   /** Box home page: the person's assistant, desktop, and shared projects. */
   home: string
   /** Desktop live view; omitted for a box without a desktop, such as a project box. */
   desktop?: string
+  /** The Browser tab's Chrome control; omitted for a box without the Browser tab. Requires `desktop`. */
+  browser?: BrowserConfig
+}
+
+/** How the Host brings the desktop's Chrome to the front, and starts Chrome when no Chrome window shows. */
+export interface BrowserConfig {
+  /** X display Chrome runs on, passed as `DISPLAY` to every command. */
+  display: string
+  /** Absolute X authority file passed as `XAUTHORITY`; omission removes an inherited `XAUTHORITY`. */
+  xauthority?: string
+  /** Desktop user that a Chrome started here runs as. */
+  user: string
+  /** Chrome executable the desktop runs: an absolute path or a name looked up on `PATH`. */
+  chrome: string
+  /** The desktop launcher's own Chrome flags, so a Chrome started here is the one the desktop would start. */
+  chromeArgs: string[]
+  /** Case-insensitive xdotool regular expression matching the window class of Chrome's windows. */
+  windowClass: string
+  /** `xdotool` executable: an absolute path or a name looked up on `PATH`. */
+  xdotool: string
+  /** Deadline in milliseconds for each command, including the wait for a started Chrome's first window. */
+  timeoutMs: number
+  /** Milliseconds a timed-out command may take to exit after termination starts. */
+  graceMs: number
 }
 ```
 <!-- END GENERATED config-catalog:@mumbo/box-links -->

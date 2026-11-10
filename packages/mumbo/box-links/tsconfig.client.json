@@ -30,6 +30,9 @@
       "path": "../../client/ui-sidebar"
     },
     {
+      "path": "../../client/ui-sidebar-right"
+    },
+    {
       "path": "../../client/ui-slots"
     }
   ]

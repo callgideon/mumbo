@@ -1,0 +1,29 @@
+# Test-only person box Host: the Web carrier, Connection, the Gateway with remote access, the project member
+# authenticator, and the box links with the Browser tab's Chrome control.
+- id: typert-registry
+  name: '@deepseek-ai/dsh-typert-registry'
+- id: remote-access
+  name: '@deepseek-ai/dsh-api-remote-access'
+- id: typert-gateway
+  name: '@deepseek-ai/dsh-api-gateway'
+- id: webserver
+  name: '@deepseek-ai/dsh-host-webserver'
+  config:
+    host: '127.0.0.1'
+    port: 0
+- id: client-connection
+  name: '@deepseek-ai/dsh-client-connection'
+- id: mumbo-edge-member
+  name: '@mumbo/edge-member'
+  config:
+    key: !!js process.env.MUMBO_MEMBER_KEY
+- id: box-links
+  name: '@mumbo/box-links'
+  config:
+    home: https://boxes.example/home
+    desktop: https://boxes.example/desktop/
+    browser:
+      xauthority: /run/x11/auth
+      chromeArgs:
+        - --user-data-dir=/home/browser/profile
+        - --start-maximized

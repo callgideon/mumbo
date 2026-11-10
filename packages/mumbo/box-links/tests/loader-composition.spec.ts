@@ -1,22 +1,51 @@
-/** The shipped example overlays load through the real Loader and put the links in the served page bootstrap. */
+/**
+ * The plugin in real Loader compositions: the shipped example overlays put the links in the served page bootstrap,
+ * and on a person box Host with Connection and the project member authenticator, the Browser tab's route brings
+ * Chrome to the front for the owner and answers a member 403 before any command runs.
+ */
+import { randomBytes } from 'node:crypto'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
+import Group from '@deepseek-ai/cordis-plugin-group'
 import Include, { applyEntryPatches } from '@deepseek-ai/cordis-plugin-include'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
+import TypertGatewayService from '@deepseek-ai/dsh-api-gateway'
+import RemoteAccessService from '@deepseek-ai/dsh-api-remote-access'
 import { loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
+import * as Connection from '@deepseek-ai/dsh-client-connection'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
-import { expect, it, onTestFinished } from 'vitest'
+import type { SubprocessHandle, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
+import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
+import * as EdgeMember from '@mumbo/edge-member'
+import { expect, it, onTestFinished, vi } from 'vitest'
 import * as BoxLinks from '../src/index.ts'
 
-/** The Peer an index render speaks for; the links do not depend on it. */
+/** The Peer an index render speaks for. */
 const PAGE_PEER = { principal: { kind: 'owner' } } as Parameters<WebServer['renderIndex']>[1]
 const PAGE = '<!doctype html><html><head></head><body></body></html>'
+const ROUTE = '/api/box-links.browser-front'
+
+/** Boot `cordis.yml` rows through the Loader, resolving each package to the test's source-plane module. */
+async function boot(ctx: Context, configPath: string, modules: ReadonlyMap<string, object>): Promise<void> {
+  await ctx.plugin(Loader)
+  ctx.loader.builtins.group = Group
+  ctx.loader.builtins.include = class FixtureInclude extends Include {
+    override import(specifier: string, getOuterStack?: () => string[]): unknown {
+      if (specifier.startsWith('cordis:')) return super.import(specifier, getOuterStack)
+      const module = modules.get(specifier)
+      if (module === undefined) throw new Error(`Unexpected Loader import: ${specifier}`)
+      return module
+    }
+  }
+  await ctx.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(configPath).href } })
+  await ctx.loader.await()
+}
 
 it.each([
-  ['person', '{"home":"https://boxes.example/home","desktop":"https://boxes.example/desktop/"}'],
+  ['person', '{"home":"https://boxes.example/home","desktop":"https://boxes.example/desktop/","browser":true}'],
   ['project', '{"home":"https://boxes.example/home"}'],
 ])('serves the %s overlay links in the page bootstrap', { timeout: 60_000 }, async (box, links) => {
   const directory = await mkdtemp(join(tmpdir(), 'mumbo-box-links-'))
@@ -33,24 +62,106 @@ it.each([
   const configPath = join(directory, 'cordis.yml')
   await writeFile(configPath, JSON.stringify(rows))
   ctx.baseUrl = pathToFileURL(directory).href + '/'
-  await ctx.plugin(Loader)
-  // Loader imports resolve to the test's source-plane modules.
-  const modules = new Map<string, object>([
+  await boot(ctx, configPath, new Map<string, object>([
     ['@deepseek-ai/dsh-host-webserver', WebServer],
     ['@mumbo/box-links', BoxLinks],
-  ])
-  ctx.loader.builtins.include = class FixtureInclude extends Include {
-    override import(specifier: string, getOuterStack?: () => string[]): unknown {
-      if (specifier.startsWith('cordis:')) return super.import(specifier, getOuterStack)
-      const module = modules.get(specifier)
-      if (module === undefined) throw new Error(`Unexpected Loader import: ${specifier}`)
-      return module
-    }
-  }
-  await ctx.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(configPath).href } })
-  await ctx.loader.await()
+  ]))
   const entries = new Map([...ctx.loader.entries()].map(entry => [entry.options.id, entry]))
   await entries.get('box-links')!.fiber!.await()
   const page = entries.get('web')!.fiber!.ctx.webServer.renderIndex(PAGE, PAGE_PEER)
   expect(page).toContain(`<script>globalThis["__MUMBO_BOX_LINKS__"] = ${links}</script>`)
+})
+
+/** A person box Host whose subprocess service plays a desktop where Chrome is not running until started. */
+async function personBox(windowAppears = true) {
+  const key = randomBytes(32)
+  vi.stubEnv('MUMBO_MEMBER_KEY', key.toString('base64url'))
+  const ctx = new Context()
+  onTestFinished(async () => {
+    try { await ctx.fiber.dispose() } finally { vi.unstubAllEnvs() }
+  })
+  const records = new Map<unknown, unknown>()
+  ctx.provide('credentials', {
+    async modifyRecord(record: unknown, mutate: (current: unknown) => Promise<unknown>): Promise<unknown> {
+      const next = await mutate(records.get(record))
+      if (next !== undefined) records.set(record, next)
+      return next ?? records.get(record)
+    },
+  } as never)
+  ctx.provide('workspaceRegistry', { list: () => [] } as never)
+  ctx.provide('sessions', { list: () => [], get: () => undefined } as never)
+  let running = false
+  const commands: string[] = []
+  ctx.provide('subprocess', {
+    resolveExecutable: async (command: string) => `/usr/bin/${command}`,
+    spawn: (spec: SubprocessSpawnSpec): Partial<SubprocessHandle> => {
+      commands.push(spec.argv.join(' '))
+      if (spec.argv[0] === 'runuser') running = windowAppears
+      const found = spec.argv[1] === 'search' && running
+      const reader = (text: string) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
+      return {
+        // Each command takes a moment, so calls that arrive together overlap unless the route orders them.
+        done: new Promise(resolve => setTimeout(() => { resolve({ exitCode: spec.argv[1] === 'search' && !found ? 1 : 0, signal: null }) }, 25)),
+        collected: { stdout: reader(found ? '12582913\n' : ''), stderr: reader('') },
+      }
+    },
+  } as never)
+  await boot(ctx, fileURLToPath(new URL('./fixtures/cordis.yml', import.meta.url)), new Map<string, object>([
+    ['@deepseek-ai/dsh-typert-registry', TypertRegistry],
+    ['@deepseek-ai/dsh-api-remote-access', RemoteAccessService],
+    ['@deepseek-ai/dsh-api-gateway', TypertGatewayService],
+    ['@deepseek-ai/dsh-host-webserver', WebServer],
+    ['@deepseek-ai/dsh-client-connection', Connection],
+    ['@mumbo/edge-member', EdgeMember],
+    ['@mumbo/box-links', BoxLinks],
+  ]))
+  expect([...ctx.loader.entries()].filter(entry => entry.fiber === undefined).map(entry => entry.options.id)).toEqual([])
+  const origin = `http://127.0.0.1:${String(ctx.webServer.port)}`
+  const post = (headers: Record<string, string>) => fetch(`${origin}${ROUTE}`, { method: 'POST', headers: { origin, ...headers } })
+  /** Exchange the Host's launch token for the owner's browser cookie. */
+  const owner = (): Record<string, string> => {
+    const target = new URL(ctx.connection.authenticatedUrl(origin))
+    let setCookie: string | undefined
+    ctx.connection.authorizeIndex({ method: 'GET', url: `${target.pathname}${target.search}`, headers: { host: target.host } }, {
+      writeHead(_status, headers) { setCookie = headers?.['set-cookie'] },
+      end() {},
+    })
+    return { cookie: setCookie!.split(';', 1)[0]! }
+  }
+  const member = (): Record<string, string> => ({ 'x-mumbo-member': EdgeMember.signMemberHeader(key, 'ann@example.com', Math.floor(Date.now() / 1000) + 300) })
+  return { ctx, commands, post, owner, member }
+}
+
+const SEARCH = 'xdotool search --onlyvisible --class google-chrome|chromium'
+
+it('refuses a project member before any command runs, and tells only the owner\'s page about the Browser tab', { timeout: 60_000 }, async () => {
+  const box = await personBox()
+  const response = await box.post(box.member())
+  expect(response.status).toBe(403)
+  expect(box.commands).toEqual([])
+  const peer = box.ctx.connection.createPeer({ principal: { kind: 'edge-member', email: 'ann@example.com' } })
+  expect(box.ctx.webServer.renderIndex(PAGE, peer)).not.toContain('"browser":true')
+  expect(box.ctx.webServer.renderIndex(PAGE, PAGE_PEER)).toContain('"browser":true')
+})
+
+it('starts Chrome once for the owner when two calls arrive together, then brings its window to the front for both', { timeout: 60_000 }, async () => {
+  const box = await personBox()
+  const cookie = box.owner()
+  const responses = await Promise.all([box.post(cookie), box.post(cookie)])
+  expect(responses.map(response => response.status)).toEqual([204, 204])
+  expect(box.commands).toEqual([
+    SEARCH,
+    'runuser -u browser -- setsid -f sh -c exec "$0" "$@" >/dev/null 2>&1 google-chrome-stable --user-data-dir=/home/browser/profile --start-maximized',
+    'xdotool search --sync --onlyvisible --class google-chrome|chromium',
+    'xdotool windowactivate 12582913',
+    SEARCH,
+    'xdotool windowactivate 12582913',
+  ])
+})
+
+it('answers the owner with the failed command\'s diagnostic', { timeout: 60_000 }, async () => {
+  const box = await personBox(false)
+  const response = await box.post(box.owner())
+  expect(response.status).toBe(500)
+  expect(await response.text()).toBe('no google-chrome-stable window appeared on :1')
 })
