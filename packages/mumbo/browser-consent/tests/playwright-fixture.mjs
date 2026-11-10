@@ -5,7 +5,8 @@
  * without moving the tab, as when the person leaves the page between the call and the next listing. Each click writes
  * the page it ends on to `page-<n>.yml` in the output directory, the fourth argument or `.playwright-mcp` in the working
  * directory, and links it relative to the working directory under a title naming the clicked element, as Playwright
- * MCP links an element screenshot.
+ * MCP links an element screenshot. A snapshot of a page whose URL holds `login` shows a masked password field; a
+ * snapshot fails on a page whose URL holds `nosnap`, and a tab listing on one whose URL holds `broken`.
  */
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
@@ -50,7 +51,8 @@ createInterface({ input: process.stdin }).on('line', line => {
     case 'tools/call': {
       const { name, arguments: args } = request.params
       appendFileSync(join(root, 'calls.ndjson'), JSON.stringify({ name, args, url: tabs[current].url }) + '\n')
-      if ((name === 'browser_tabs' && tabs[current].url.includes('broken')) || args.target === 'gone') {
+      const failing = name === 'browser_tabs' ? 'broken' : name === 'browser_snapshot' ? 'nosnap' : undefined
+      if ((failing !== undefined && tabs[current].url.includes(failing)) || args.target === 'gone') {
         reply(request.id, { ...text('### Error\nError: fixture failure'), isError: true })
         break
       }
@@ -59,7 +61,10 @@ createInterface({ input: process.stdin }).on('line', line => {
       if (name === 'browser_tabs' && args.action === 'new') current = tabs.push({ url: args.url ?? 'about:blank' }) - 1
       if (name === 'browser_tabs' && args.action === 'select') current = args.index
       const reported = name === 'browser_click' && args.target?.startsWith('report:') ? args.target.slice('report:'.length) : tabs[current].url
-      let snapshot = ''
+      // A page whose URL holds `login` shows a password field, which the patched snapshot masks.
+      let snapshot = name === 'browser_snapshot' && tabs[current].url.includes('login')
+        ? `\n### Snapshot\n\`\`\`yaml\n- textbox "Password" [ref=e1]: ${String.fromCharCode(0x2022).repeat(4)}\n\`\`\``
+        : ''
       if (name === 'browser_click') {
         const file = join(output, `page-${++written}.yml`)
         mkdirSync(output, { recursive: true })

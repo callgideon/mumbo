@@ -106,11 +106,15 @@ describe('browser write consent in the person-box composition', () => {
       answers: ['rejected', 'allowed-once', 'rejected', 'rejected', 'cancelled'],
     })
 
-    // Each call is listed with the URL of the tab it ran on; the denied writes never reached the browser.
+    // Each call is listed with the URL of the tab it ran on; the denied writes never reached the browser. Each write on
+    // the allowed site first reads the page's snapshot for a masked field.
     expect((await calls()).map(call => `${call.name} ${call.url}`)).toEqual([
       'browser_navigate about:blank',
+      'browser_snapshot http://allowed.test/inbox',
       'browser_click http://allowed.test/inbox',
+      'browser_snapshot http://allowed.test/inbox',
       'browser_click http://allowed.test/inbox',
+      'browser_snapshot http://allowed.test/inbox',
       'browser_click http://allowed.test/inbox',
       'browser_tabs http://other.test/next',
       'browser_tabs http://allowed.test/compose',
@@ -342,8 +346,10 @@ describe('browser write consent in the person-box composition', () => {
       'browser_snapshot https://passwords.google.com/',
       'browser_tabs https://passwords.google.com/',
       'browser_navigate https://passwords.google.com/',
+      'browser_snapshot http://allowed.test/',
       'browser_click http://allowed.test/',
       'browser_navigate https://accounts.google.com/signin',
+      'browser_snapshot http://allowed.test/',
       'browser_click http://allowed.test/',
     ])
     expect(consentRecords(events)).toEqual([
@@ -366,6 +372,35 @@ describe('browser write consent in the person-box composition', () => {
     // A listing that fails, here on the fixture's broken page, withholds the result too.
     const broken = await turn({ script: [{ name: 'browser_navigate', args: { url: 'http://broken.test/' } }] })
     expect(toolResults(broken.events)).toEqual([unreadable('browser_navigate')])
+  })
+
+  it('asks before a write on an allowed site whose page shows a masked field or cannot be checked', { timeout: 60_000 }, async () => {
+    const { asked, events, calls } = await turn({
+      script: [
+        { name: 'browser_navigate', args: { url: 'http://allowed.test/login' } },
+        { name: 'browser_click', args: { element: 'Sign in', target: 'e1' } },
+        { name: 'browser_type', args: { element: 'Password', target: 'e2', text: 'x' } },
+        { name: 'browser_navigate', args: { url: 'http://allowed.test/nosnap' } },
+        { name: 'browser_click', args: { element: 'Next', target: 'e3' } },
+        { name: 'browser_navigate', args: { url: 'http://allowed.test/inbox' } },
+        { name: 'browser_click', args: { element: 'Archive', target: 'e4' } },
+      ],
+      answers: ['allowed-once', 'rejected', 'rejected'],
+    })
+    const masked = ' The page shows a password or payment field, so its site allowance does not cover this action.'
+    expect(asked).toEqual([
+      `Browser write: browser_click on http://allowed.test. Arguments: "target": "e1". Model-written target description: "Sign in".${masked}`,
+      `Browser write: browser_type on http://allowed.test. Arguments: "target": "e2", "text": "x". Model-written target description: "Password".${masked}`,
+      'Browser write: browser_click on http://allowed.test. Arguments: "target": "e3". Model-written target description: "Next".'
+        + ' The page could not be checked for password or payment fields, so its site allowance does not cover this action.',
+    ])
+    expect(toolResults(events)[2]).toEqual([{ type: 'text', text: 'Error: The user declined browser_type on http://allowed.test.' }])
+    expect((await calls()).filter(call => call.name !== 'browser_snapshot' && call.name !== 'browser_navigate').map(call => `${call.name} ${call.url}`))
+      .toEqual(['browser_click http://allowed.test/login', 'browser_click http://allowed.test/inbox'])
+    expect(consentRecords(events)).toEqual([
+      { callId: 'call-1', tool: 'browser_click', site: 'http://allowed.test', grant: 'approval', outcome: 'succeeded' },
+      { callId: 'call-6', tool: 'browser_click', site: 'http://allowed.test', grant: 'site', outcome: 'succeeded' },
+    ])
   })
 
   it('passes outputDir to the server and deletes a withheld result\'s files there', { timeout: 60_000 }, async () => {

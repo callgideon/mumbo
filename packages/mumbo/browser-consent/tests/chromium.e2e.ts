@@ -167,7 +167,7 @@ it.skipIf(skip)('masks password, one-time-code, and payment-card inputs in snaps
   }
 })
 
-it.skipIf(skip)('shows a password field as dots in screenshots; revealing it takes a click or hover, which asks unless the site is allowed', { timeout: 120_000 }, async () => {
+it.skipIf(skip)('shows a password field as dots in screenshots; revealing it takes a click or hover, which asks even on an allowed site', { timeout: 120_000 }, async () => {
   // Identical element screenshots of two equal-length passwords mean the glyphs are not drawn; text fields are the control.
   const page = () => '<!doctype html><title>Sign in</title><style>input { caret-color: transparent; outline: none; font: 16px monospace; width: 220px }</style>'
     + '<input id="pa" type="password" autocomplete="current-password"><input id="pb" type="password"><input id="pc" type="password">'
@@ -175,7 +175,7 @@ it.skipIf(skip)('shows a password field as dots in screenshots; revealing it tak
     + '<script>pa.value = ta.value = "AAAAAAAA"; pb.value = tb.value = "WWWWWWWW"</script>'
   const shot = (id: string): ScriptStep => ({ name: 'browser_take_screenshot', args: { element: id, target: `#${id}` } })
   const { results, asked, files } = await runTurn(page, (allowed, other) => ({
-    deniedUrls: [], allowedSites: [allowed], answers: ['allowed-once', 'rejected', 'rejected'],
+    deniedUrls: [], allowedSites: [allowed], answers: ['allowed-once', 'rejected', 'rejected', 'allowed-once'],
     script: [
       { name: 'browser_navigate', args: { url: `${other}/` } },
       shot('pa'), shot('pb'), shot('ta'), shot('tb'),
@@ -185,7 +185,7 @@ it.skipIf(skip)('shows a password field as dots in screenshots; revealing it tak
       { name: 'browser_hover', args: { element: 'Show password', target: '#show' } },
       { name: 'browser_click', args: { element: 'Show password', target: '#show' } },
       shot('pa'),
-      // On an allowed site the same click runs without asking.
+      // On an allowed site the same click asks too, because the page shows a masked field; the person approves it.
       { name: 'browser_navigate', args: { url: `${allowed}/` } },
       { name: 'browser_click', args: { element: 'Show password', target: '#show' } },
       shot('pa'),
@@ -205,11 +205,13 @@ it.skipIf(skip)('shows a password field as dots in screenshots; revealing it tak
     expect.stringMatching(/^Browser write: browser_type on http:\/\/localhost:\d+$/u),
     expect.stringMatching(/^Browser write: browser_hover on http:\/\/localhost:\d+$/u),
     expect.stringMatching(/^Browser write: browser_click on http:\/\/localhost:\d+$/u),
+    expect.stringMatching(/^Browser write: browser_click on http:\/\/127\.0\.0\.1:\d+$/u),
   ])
+  expect(asked[3]).toContain('The page shows a password or payment field, so its site allowance does not cover this action.')
   // The snapshot is a read and masks all three password fields; the declined hover and click leave the field a password field.
   const maskedFields = (text: string | undefined) => text?.match(new RegExp(`^ *- textbox (\\[active\\] )?\\[ref=(f\\d+)?e\\d+\\]: ${MASK}$`, 'gmu'))
   expect(maskedFields(results[7])).toHaveLength(3)
-  // Revealed by an allowed click, the field is text: the screenshot shows the password, and the snapshot still masks it
+  // Revealed by an approved click, the field is text: the screenshot shows the password, and the snapshot still masks it
   // by its autocomplete token.
   expect(maskedFields(results[14])).toHaveLength(3)
   expect(results[14]).toMatch(/^ *- textbox \[ref=(f\d+)?e\d+\]: AAAAAAAA$/mu)
@@ -271,4 +273,30 @@ it.skipIf(skip)('writes to a configured outputDir outside the working directory,
   expect([...files.keys()].filter(name => name.endsWith('.yml'))).toHaveLength(2)
   expect([...files.values()].filter(content => content.includes('correct-horse'))).toEqual([])
   expect(workspace).not.toContain('.playwright-mcp')
+})
+
+it.skipIf(skip)('asks before a click or typing on an allowed page with a masked field, or one whose snapshot fails, and not on a plain page', { timeout: 120_000 }, async () => {
+  const page = (_port: number, path: string) => path === '/login'
+    ? '<!doctype html><title>Sign in</title><input id="pw" type="password"><button id="go" type="button">Sign in</button>'
+    : path === '/modal'
+      ? '<!doctype html><title>Notice</title><script>setTimeout(() => alert("Notice"), 0)</script>'
+      : '<!doctype html><title>Inbox</title><button id="go" type="button">Next</button>'
+  const { asked, events, port } = await runTurn(page, allowed => ({
+    deniedUrls: [], allowedSites: [allowed], answers: ['rejected', 'rejected', 'rejected'],
+    script: [
+      { name: 'browser_navigate', args: { url: `${allowed}/login` } },
+      { name: 'browser_click', args: { element: 'Sign in', target: '#go' } },
+      { name: 'browser_type', args: { element: 'Password', target: '#pw', text: 'x' } },
+      { name: 'browser_navigate', args: { url: `${allowed}/inbox` } },
+      { name: 'browser_click', args: { element: 'Next', target: '#go' } },
+      { name: 'browser_navigate', args: { url: `${allowed}/modal` } },
+      { name: 'browser_handle_dialog', args: { accept: true } },
+    ],
+  }))
+  expect(asked.map(reason => reason.replace(/^Browser write: (\w+) on .*?\.( The page.*)$/u, '$1$2'))).toEqual([
+    'browser_click The page shows a password or payment field, so its site allowance does not cover this action.',
+    'browser_type The page shows a password or payment field, so its site allowance does not cover this action.',
+    'browser_handle_dialog The page could not be checked for password or payment fields, so its site allowance does not cover this action.',
+  ])
+  expect(consentRecords(events)).toEqual([{ callId: 'call-4', tool: 'browser_click', site: `http://127.0.0.1:${String(port)}`, grant: 'site', outcome: 'succeeded' }])
 })

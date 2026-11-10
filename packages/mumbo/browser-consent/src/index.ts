@@ -32,6 +32,10 @@ const PREFIX = 'mcp__playwright-mcp__'
 const GATE = 'mumbo-browser-consent'
 /** Upstream tool whose `list` action reports Playwright's current tab. */
 const TABS = 'browser_tabs'
+/** Upstream tool that returns the current page's accessibility snapshot. */
+const SNAPSHOT = 'browser_snapshot'
+/** A snapshot line whose field shows the patched snapshot's fixed mask in place of its value. */
+const MASKED_FIELD = new RegExp(`: ${String.fromCharCode(0x2022).repeat(4)}$`, 'mu')
 /** Characters shown of one argument key or value in an approval prompt; the rest is counted as not shown. */
 const VALUE_LIMIT = 300
 /** Characters of arguments listed in an approval prompt; further arguments are counted as not shown. */
@@ -328,22 +332,41 @@ function fieldsOf(args: unknown): Record<string, unknown> {
 const INERT_RUN = { deferContext() {}, concludeTurn() {} }
 
 /**
- * Ask Playwright which tab the next action runs on, or the last one ran on, through the same Session's `browser_tabs`
- * tool. Native execution runs MCP tools one at a time, so no other call of this Session's browser is in flight.
- * @returns the current tab's URL, or `undefined` when the tool is absent, fails, or lists ambiguously.
+ * Run one upstream read for this plugin's own decision through the same Session's tool, outside the tool pipeline, so
+ * its result never reaches the model. Native execution runs MCP tools one at a time, so no other call of this Session's
+ * browser is in flight.
+ * @returns the result's text, or `undefined` when the tool is absent or fails.
  */
-async function currentTab(ctx: Context, exec: ToolExecution): Promise<string | undefined> {
-  const tabs = ctx.tools.get(PREFIX + TABS, exec.agent)
-  if (tabs === undefined) return undefined
-  const args = { action: 'list' }
+async function readBrowser(ctx: Context, exec: ToolExecution, tool: string, args: Record<string, unknown>): Promise<string | undefined> {
+  const definition = ctx.tools.get(PREFIX + tool, exec.agent)
+  if (definition === undefined) return undefined
   try {
-    const listing = await tabs.execute(args, { ...exec, ...INERT_RUN, name: PREFIX + TABS, arguments: args }) as McpResult
-    return currentTabUrl(listing.content.map(block => (block as { text?: unknown }).text).filter(text => typeof text === 'string').join('\n'))
+    const result = await definition.execute(args, { ...exec, ...INERT_RUN, name: PREFIX + tool, arguments: args }) as McpResult
+    return result.content.map(block => (block as { text?: unknown }).text).filter(text => typeof text === 'string').join('\n')
   } catch (error: unknown) {
-    // A failed listing leaves the tab unknown, which every caller treats as denied.
-    ctx.logger.debug(`current tab listing failed: ${String(error)}`)
+    // A failed read leaves the answer unknown, which every caller treats as the stricter outcome.
+    ctx.logger.debug(`${tool} for consent failed: ${String(error)}`)
     return undefined
   }
+}
+
+/**
+ * Ask Playwright which tab the next action runs on, or the last one ran on, through its `browser_tabs` listing.
+ * @returns the current tab's URL, or `undefined` when the listing is absent, fails, or is ambiguous.
+ */
+async function currentTab(ctx: Context, exec: ToolExecution): Promise<string | undefined> {
+  const listing = await readBrowser(ctx, exec, TABS, { action: 'list' })
+  return listing === undefined ? undefined : currentTabUrl(listing)
+}
+
+/**
+ * Read the current page's snapshot for a field the patched Playwright snapshot shows masked: a password,
+ * one-time-code, payment-card, or autofilled input. The mask in the snapshot is the single source of that rule.
+ * @returns whether a field shows the mask, or `undefined` when the snapshot cannot be read.
+ */
+async function showsMaskedField(ctx: Context, exec: ToolExecution): Promise<boolean | undefined> {
+  const snapshot = await readBrowser(ctx, exec, SNAPSHOT, {})
+  return snapshot === undefined ? undefined : MASKED_FIELD.test(snapshot)
 }
 
 /**
@@ -481,12 +504,19 @@ export function apply(ctx: Context, config: Config): void {
       consents.set(exec, { session: agent.session, tool, site, grant: granted })
       return next()
     }
-    if (kind === 'site-write' && site !== undefined && allowed.has(site)) return grant('site')
+    // An allowance never covers a page that shows a password or payment field, nor one that cannot be checked.
+    let uncovered = kind === 'always-ask' ? ' Site allowances do not cover this action.' : ''
+    if (kind === 'site-write' && site !== undefined && allowed.has(site)) {
+      const masked = await showsMaskedField(ctx, exec)
+      if (masked === false) return grant('site')
+      uncovered = masked === true
+        ? ' The page shows a password or payment field, so its site allowance does not cover this action.'
+        : ' The page could not be checked for password or payment fields, so its site allowance does not cover this action.'
+    }
     const where = site ?? 'an unidentified page'
     const { summary, element } = argumentsOf(exec, agent)
     const reason = `Browser write: ${tool} on ${where}. Arguments: ${summary}.`
-      + (element === undefined ? '' : ` Model-written target description: ${element}.`)
-      + (kind === 'always-ask' ? ' Site allowances do not cover this action.' : '')
+      + (element === undefined ? '' : ` Model-written target description: ${element}.`) + uncovered
     const decision = await ask(exec, agent, `${tool} on ${where}`, reason)
     return decision === 'allowed' ? grant('approval') : decision
   }, { prepend: true })
