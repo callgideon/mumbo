@@ -32,6 +32,8 @@ interface PageOptions {
   readonly saved?: string
   readonly rows: SessionSummary[]
   readonly workspaces: WorkspaceView[]
+  /** Sessions archived on the Host. */
+  readonly archived?: string[]
   /** Load the plugin, or leave it out as a control. */
   readonly plugin?: boolean
   /** Hold the Host's Session creation until released. */
@@ -94,7 +96,8 @@ async function page(options: PageOptions) {
   const plugin = options.plugin === false ? undefined : await ctx.plugin({ inject, apply })
   const ready = () => {
     workspaces.set({
-      items: options.workspaces, archivedSessionIds: [], pinnedSessionIds: [MUMBO_SESSION_ID], phase: 'ready', state: 'idle', error: null,
+      items: options.workspaces, archivedSessionIds: (options.archived ?? []).map(sid), pinnedSessionIds: [MUMBO_SESSION_ID],
+      phase: 'ready', state: 'idle', error: null,
     })
     list.set({ ids: options.rows.map(row => row.id), byId: Object.fromEntries(options.rows.map(row => [row.id, row])), phase: 'ready', projectionsBySession: {} })
   }
@@ -105,7 +108,9 @@ async function page(options: PageOptions) {
       saved: (JSON.parse(storage.get('dsh.sessions.current') ?? '{}') as { sessionId?: string }).sessionId,
     }
   }
-  return { ready, settled, plugin, service, create: sessions.create }
+  /** Start the plugin again on the same page, as an HMR rebuild of its bundle does. */
+  const reapply = async () => { await ctx.plugin({ inject, apply }) }
+  return { ready, settled, plugin, service, reapply, create: sessions.create }
 }
 
 const MUMBO = summary('mumbo', '/w/home', true)
@@ -142,6 +147,34 @@ it('leaves a saved blank Session open, which navigation restores asynchronously'
   await new Promise(resolve => setTimeout(resolve, 10))
   creation.resolve(undefined)
   expect(await settled()).toEqual({ open: ['draft'], saved: 'draft' })
+})
+
+it('opens Mumbo when the saved blank was archived, since navigation would open a new blank instead', async () => {
+  const { ready, settled, service } = await page({
+    saved: 'draft', rows: [MUMBO, summary('draft', '/w/a', true)], workspaces: [HOME, { ...ELSEWHERE, sessionIds: [sid('draft')] }],
+    archived: ['draft'],
+  })
+  ready()
+  expect(service.restoration.getSnapshot()).toBe('fresh')
+  expect(await settled()).toEqual({ open: [MUMBO_SESSION_ID], saved: MUMBO_SESSION_ID })
+})
+
+it('keeps a Session the person opened when the plugin starts again on the same page', async () => {
+  const { ready, settled, plugin, service, reapply } = await page({
+    rows: [MUMBO, summary('side', '/w/a', false)], workspaces: [HOME, { ...ELSEWHERE, sessionIds: [sid('side')] }],
+  })
+  ready()
+  expect((await settled()).open).toEqual([MUMBO_SESSION_ID])
+  // Mumbo itself open: a restart does not open it again.
+  await plugin!.dispose()
+  const opens = vi.spyOn(service, 'openSession')
+  await reapply()
+  await settled()
+  expect(opens).not.toHaveBeenCalled()
+  service.openSession(sid('side'))
+  await reapply()
+  expect(await settled()).toEqual({ open: ['side'], saved: 'side' })
+  expect(opens).toHaveBeenCalledExactlyOnceWith('side')
 })
 
 it('opens nothing of its own when the Host did not list Mumbo', async () => {

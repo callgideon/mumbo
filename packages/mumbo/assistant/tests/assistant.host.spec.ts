@@ -64,9 +64,11 @@ async function host() {
   }
   const remove = async (id: SessionId): Promise<void> => { await unregister.get(id)?.() }
   let resolveError: Error | undefined
+  let gate: Promise<unknown> | undefined
   ctx.provide('sessionController', {
     resolveAgent: async (id: SessionId) => {
       calls.push(`resolve:${id}`)
+      await gate
       if (resolveError !== undefined) return { error: resolveError }
       const live = ctx.agents.get(id)
       if (live !== undefined) return { agent: live }
@@ -94,6 +96,8 @@ async function host() {
     ctx, workspace, calls, titles, start, prompt, resume, remove,
     failResolve: (code: string) => { resolveError = Object.assign(new Error(code), { code }) },
     clearFailure: () => { resolveError = undefined },
+    /** Hold every later resolve until `held` settles, as a slow resume would. */
+    hold: (held: Promise<unknown> | undefined) => { gate = held },
   }
 }
 
@@ -164,6 +168,32 @@ describe('ensuring Mumbo at start', () => {
     clearFailure()
     await vi.waitFor(() => { expect(ctx.workspaceRegistry.pinnedSessionIds).toEqual([MUMBO]) })
     expect(calls).toEqual(['resolve:mumbo', 'resolve:mumbo'])
+  })
+
+  it('keeps the veto while a restart drains a running retry, and starts the next ensure after it', async () => {
+    const { ctx, calls, start, failResolve, clearFailure, hold } = await host()
+    vi.spyOn(ctx.logger, 'error').mockImplementation(() => {})
+    const first = await start()
+    await first.dispose()
+    failResolve('session/writer-held')
+    calls.length = 0
+    const fiber = await start(INSTRUCTIONS, [5])
+    // The retry's resolve hangs, as a slow resume would, while the plugin restarts.
+    const slow = Promise.withResolvers<undefined>()
+    hold(slow.promise)
+    clearFailure()
+    await vi.waitFor(() => { expect(calls).toEqual(['resolve:mumbo', 'resolve:mumbo']) })
+    const restarting = fiber.restart()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(calls).toEqual(['resolve:mumbo', 'resolve:mumbo'])
+    const stopped: SessionId[] = []
+    ctx.on('workspace/session-stop', ({ sessionId }) => { stopped.push(sessionId) })
+    await expect(ctx.workspaceRegistry.archiveSession(MUMBO, { stopActivity: true })).rejects.toThrow(Assistant.ARCHIVE_REFUSAL)
+    expect(stopped).toEqual([])
+    hold(undefined)
+    slow.resolve(undefined)
+    await restarting
+    expect(calls).toEqual(['resolve:mumbo', 'resolve:mumbo', 'resolve:mumbo'])
   })
 
   it('stops after the configured retries and cancels a pending retry on unload', async () => {

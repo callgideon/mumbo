@@ -8,10 +8,10 @@ import { MUMBO_SESSION_ID } from '../session.ts'
 export const inject = ['sessions', 'uiWorkspace']
 
 /**
- * Decide once, when Workspace navigation's startup restoration starts: a `saved` restoration reopens the Session the
- * person chose, blank or not, and is left alone; a `fresh` one would open a Workspace blank, and opening Mumbo
- * supersedes it. Nothing happens when the Host did not list Mumbo, or when restoration never runs because a Session was
- * opened first.
+ * Decide once per start of this plugin, when Workspace navigation's startup restoration starts: a `saved` restoration
+ * reopens the Session the person chose, blank or not, and is left alone; a `fresh` one would open a Workspace blank, and
+ * opening Mumbo supersedes it. Nothing happens when the Host did not list Mumbo, when Mumbo or a Session with a turn is
+ * already open, or when restoration never runs because a Session was opened first.
  * @param ctx - Client plugin context.
  */
 export function apply(ctx: Context): void {
@@ -23,7 +23,10 @@ export function apply(ctx: Context): void {
     if (restoration === 'fresh') {
       // After restoration's synchronous part, so this navigation is the later one.
       queueMicrotask(() => {
-        if (sessions.list.getSnapshot().ids.includes(MUMBO_SESSION_ID)) uiWorkspace.openSession(MUMBO_SESSION_ID)
+        const { ids, byId } = sessions.list.getSnapshot()
+        // A re-applied plugin (an HMR rebuild) reads the page's earlier `fresh`: keep a Session the person opened since.
+        const chosen = Object.values(byId).some(row => (row.retainedBy.mainView ?? 0) > 0 && (!row.blank || row.id === MUMBO_SESSION_ID))
+        if (ids.includes(MUMBO_SESSION_ID) && !chosen) uiWorkspace.openSession(MUMBO_SESSION_ID)
       })
     }
   }

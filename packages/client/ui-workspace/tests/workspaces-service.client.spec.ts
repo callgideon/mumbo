@@ -1477,6 +1477,18 @@ describe('UiWorkspaceService', () => {
     expect(b.uiWorkspace.restoration.getSnapshot()).toBe(expected)
   })
 
+  it.each([
+    { name: 'archived', cwd: '/w/a', archived: true },
+    { name: 'outside its Workspace directory', cwd: '/elsewhere', archived: false },
+  ])('reports fresh restoration for a saved blank that is $name, since navigation opens a new blank', ({ cwd, archived }) => {
+    persistSelection({ sessionId: sid('draft') })
+    const b = bench({
+      sessions: sessionState([summary('draft', { blank: true, cwd })]),
+      workspaces: workspaceState([workspace('a', [sid('draft')])], archived ? [sid('draft')] : []),
+    })
+    expect(b.uiWorkspace.restoration.getSnapshot()).toBe('fresh')
+  })
+
   it('reports saved restoration for a persisted subagent address, and stays pending when a Session opened first', () => {
     const address: SubagentAddress = { parentSessionId: sid('parent'), childSessionId: sid('child'), mode: 'continuable' }
     persistSelection({ sessionId: address.childSessionId, subagentAddress: address })

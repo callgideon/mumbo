@@ -75,8 +75,6 @@ async function ensure(ctx: Context, config: Config): Promise<void> {
  * @param config - validated configuration.
  */
 export async function apply(ctx: Context, config: Config): Promise<void> {
-  ctx.on('workspace/archive-veto', ({ sessionId }) => sessionId === MUMBO_SESSION_ID ? ARCHIVE_REFUSAL : undefined)
-
   // Only one Agent per Session id is live; a new one replaces the released section of its predecessor.
   let release: (() => void) | undefined
   const instruct = (agent: Agent): void => {
@@ -89,19 +87,24 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       interpolate: false,
     })
   }
-  ctx.on('agent/created', ({ agent }) => { instruct(agent); return undefined })
-  ctx.effect(() => () => release?.(), 'mumbo-assistant: prompt section')
+  // A failed ensure must not take the veto and the section down with the plugin, so it is reported and retried.
+  const lifetime = new AbortController()
+  let ensuring = Promise.resolve()
+  // One composite effect tears down in reverse order: a running ensure drains before the section and the veto go, so a
+  // restart never leaves Mumbo archivable while an old attempt finishes.
+  ctx.effect(function* () {
+    yield ctx.on('workspace/archive-veto', ({ sessionId }) => sessionId === MUMBO_SESSION_ID ? ARCHIVE_REFUSAL : undefined)
+    yield ctx.on('agent/created', ({ agent }) => { instruct(agent); return undefined })
+    yield () => release?.()
+    yield async () => {
+      lifetime.abort()
+      await ensuring
+    }
+  }, 'mumbo-assistant')
   // A schedule may resume Mumbo before this plugin starts.
   const live = ctx.agents.get(MUMBO_SESSION_ID)
   if (live !== undefined) instruct(live)
 
-  // A failed ensure must not take the veto and the section down with the plugin, so it is reported and retried.
-  const lifetime = new AbortController()
-  let ensuring = Promise.resolve()
-  ctx.effect(() => async () => {
-    lifetime.abort()
-    await ensuring
-  }, 'mumbo-assistant: ensure')
   const attempt = async (retry: number): Promise<void> => {
     try {
       await ensure(ctx, config)

@@ -39,8 +39,8 @@ export interface StartSessionOptions extends DraftInitializationOptions {
 
 /**
  * What startup restoration opens: `pending` until it starts; `saved` when it reopens the saved
- * selection, a listed Session (blank ones included) or a subagent address; `fresh` when no saved
- * selection is listed and it opens a Workspace blank, or nothing.
+ * selection, a listed Session (a blank one only while it is unarchived in its Workspace) or a
+ * subagent address; `fresh` when it reopens nothing saved and opens a Workspace blank, or nothing.
  */
 export type UiWorkspaceRestoration = 'pending' | 'saved' | 'fresh'
 
@@ -487,20 +487,21 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       return
     }
     const summary = saved.sessionId === undefined ? undefined : sessions.byId[saved.sessionId]
-    this.restorationSource.set(summary === undefined ? 'fresh' : 'saved')
     const workspace = summary === undefined ? undefined
       : workspaces.items.find(item => item.sessionIds.includes(summary.id))
-    if (summary !== undefined && (!blankRow(summary, workspaces.pinnedSessionIds) || workspace === undefined)) {
-      this.replaceMain(summary.id, this.lifetime.signal, 'preserve')
+    const direct = summary !== undefined && (!blankRow(summary, workspaces.pinnedSessionIds) || workspace === undefined)
+      ? summary.id : undefined
+    const reclaim = summary !== undefined && workspace !== undefined && summary.cwd === workspace.path
+      && !workspaces.archivedSessionIds.includes(summary.id) ? { workspaceId: workspace.workspaceId, sessionId: summary.id } : undefined
+    this.restorationSource.set(direct !== undefined || reclaim !== undefined ? 'saved' : 'fresh')
+    if (direct !== undefined) {
+      this.replaceMain(direct, this.lifetime.signal, 'preserve')
       return
     }
     const navigation = AbortSignal.any([this.ctx.layout.beginNavigation(), this.lifetime.signal])
     this.restorationNavigation = navigation
     let sessionId: SessionId | undefined
-    if (summary !== undefined && workspace !== undefined && summary.cwd === workspace.path
-      && !workspaces.archivedSessionIds.includes(summary.id)) {
-      sessionId = await this.restoreBlank(workspace.workspaceId, summary.id)
-    }
+    if (reclaim !== undefined) sessionId = await this.restoreBlank(reclaim.workspaceId, reclaim.sessionId)
     let target = workspace?.workspaceId ?? recentWorkspace(workspaces.items, sessions.byId)
     if (target === undefined && workspaces.items.length === 0 && sessions.ids.length === 0) {
       const prepared = await this.initializeDefaultWorkspace(navigation)
