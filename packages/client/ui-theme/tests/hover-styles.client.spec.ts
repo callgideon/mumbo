@@ -35,13 +35,15 @@ it('rejects unguarded hover and queries that also match devices without hover', 
   `)).toEqual([])
 })
 
+// The pinned superagent copy's panel follows this rule too (UPSTREAM.md S8).
 it('limits every client hover selector to hover-capable primary input', () => {
-  const clientRoots = packageFiles(name => name === 'package.json').flatMap((file) => {
+  const clientRoots = packageFiles(name => name === 'package.json', { pinnedCopy: true }).flatMap((file) => {
     const manifest = JSON.parse(readFileSync(file, 'utf8')) as { dsh?: { client?: object } }
     return manifest.dsh?.client === undefined ? [] : [file.slice(0, -'package.json'.length)]
   })
-  const files = packageStylesheets().filter(file => file.includes('/packages/client/') || clientRoots.some(root => file.startsWith(root)))
+  const files = packageStylesheets({ pinnedCopy: true }).filter(file => file.includes('/packages/client/') || clientRoots.some(root => file.startsWith(root)))
   expect(files.length).toBeGreaterThan(0)
+  expect(files.some(file => file.endsWith('/packages/mumbo/superagent/src/client/client.css'))).toBe(true)
   const failures = files.flatMap(file => unguardedHover(readFileSync(file, 'utf8')).map(selector => `${file}: ${selector}`))
   expect(failures).toEqual([])
 })
