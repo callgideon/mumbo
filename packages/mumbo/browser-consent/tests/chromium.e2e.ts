@@ -3,11 +3,14 @@ import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
+import { connect, createServer as createTcpServer } from 'node:net'
+import type { AddressInfo, Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { ToolCallId, createUserMessage } from '@deepseek-ai/dsh-llm'
+import { executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import { expect, it, vi } from 'vitest'
-import { bootComposition, consentRecords, toolResults } from './harness.ts'
+import { bootComposition, consentRecords, tool, toolResults } from './harness.ts'
 import type { ScriptStep } from './harness.ts'
 
 const skip = process.env.DSH_BROWSER_EXECUTABLE === undefined
@@ -23,6 +26,28 @@ const accountPages = (port: number, path: string) => path === '/settings'
     : `<!doctype html><title>Home</title><a id="account" href="http://localhost:${String(port)}/settings">Account</a>`
 /** What the patched snapshot shows in place of a secret input's value. */
 const MASK = '•'.repeat(4)
+
+/**
+ * Start a disposable headless Chromium with its profile in `root`.
+ * @param root - scratch directory for the profile.
+ * @returns the debugging port once Chromium reports it, and a stop that waits for Chromium to exit.
+ */
+function launchChromium(root: string) {
+  const profile = join(root, 'profile')
+  const chromium = spawn(process.env.DSH_BROWSER_EXECUTABLE!, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', 'about:blank'], { stdio: 'ignore' })
+  const exited = once(chromium, 'exit')
+  return {
+    async debugPort(): Promise<string> {
+      let port = ''
+      await vi.waitFor(async () => { port = (await readFile(join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0]!; expect(Number(port)).toBeGreaterThan(0) }, { timeout: 20_000 })
+      return port
+    },
+    async stop(): Promise<void> {
+      if (chromium.exitCode === null) chromium.kill('SIGTERM')
+      await exited
+    },
+  }
+}
 
 /**
  * Serve two loopback origins, `127.0.0.1` and `localhost`, attach the composition to a disposable headless Chromium,
@@ -57,13 +82,12 @@ async function runTurn(page: (port: number, path: string) => string, turn: (allo
   server.listen(0, '127.0.0.1')
   await once(server, 'listening')
   const { port } = server.address() as { port: number }
-  const profile = join(root, 'profile')
-  const chromium = spawn(process.env.DSH_BROWSER_EXECUTABLE!, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', 'about:blank'], { stdio: 'ignore' })
-  const exited = once(chromium, 'exit')
+  // The takeover record lives under the DSH home.
+  vi.stubEnv('DSH_HOME', root)
+  const chromium = launchChromium(root)
   let booted: Awaited<ReturnType<typeof bootComposition>> | undefined
   try {
-    let debugPort = ''
-    await vi.waitFor(async () => { debugPort = (await readFile(join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0]!; expect(Number(debugPort)).toBeGreaterThan(0) }, { timeout: 20_000 })
+    const debugPort = await chromium.debugPort()
     const { deniedUrls, allowedSites, script, answers, outputDir } = turn(`http://127.0.0.1:${String(port)}`, `http://localhost:${String(port)}`)
     const output = outputDir === true ? join(tmpdir(), `${basename(root)}-output`) : join(root, '.playwright-mcp')
     cleanup.push(output)
@@ -77,8 +101,8 @@ async function runTurn(page: (port: number, path: string) => string, turn: (allo
     return { results, asked: booted.asked, events: booted.events, sent, files, port, workspace: await readdir(root) }
   } finally {
     await booted?.ctx.fiber.dispose()
-    if (chromium.exitCode === null) chromium.kill('SIGTERM')
-    await exited
+    await chromium.stop()
+    vi.unstubAllEnvs()
     server.closeAllConnections()
     server.close()
     await Promise.all([root, ...cleanup].map(path => rm(path, { recursive: true, force: true, maxRetries: 5 })))
@@ -356,6 +380,7 @@ it.skipIf(skip)('reads an allowed page whose title holds brackets, and clicks th
 
 it('reports why a browser call failed when the browser is down', { timeout: 120_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-down-'))
+  vi.stubEnv('DSH_HOME', root)
   const booted = await bootComposition(root, {
     consent: { browser: { mode: 'attach', endpoint: 'http://127.0.0.1:1' }, deniedUrls: [] },
     script: [{ name: 'browser_navigate', args: { url: 'https://example.com/' } }],
@@ -368,7 +393,58 @@ it('reports why a browser call failed when the browser is down', { timeout: 120_
     expect(result).toMatch(/ECONNREFUSED 127\.0\.0\.1:1.*\), so its result is withheld\.$/u)
   } finally {
     await booted.ctx.fiber.dispose()
+    vi.unstubAllEnvs()
     await rm(root, { recursive: true, force: true, maxRetries: 5 })
   }
 })
 
+it.skipIf(skip)('holds no connection to the browser while the person has it, and reconnects when they hand it back', { timeout: 120_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-takeover-'))
+  vi.stubEnv('DSH_HOME', root)
+  const chromium = launchChromium(root)
+  // Every connection to the debugging port, the HTTP version request and the CDP WebSocket alike, passes through here.
+  const open = new Set<Socket>()
+  const proxy = createTcpServer((client) => {
+    open.add(client)
+    const upstream = connect(Number(debugPort), '127.0.0.1')
+    const close = () => {
+      open.delete(client)
+      client.destroy()
+      upstream.destroy()
+    }
+    for (const socket of [client, upstream]) socket.on('close', close).on('error', close)
+    client.pipe(upstream).pipe(client)
+  })
+  let debugPort = ''
+  let booted: Awaited<ReturnType<typeof bootComposition>> | undefined
+  try {
+    debugPort = await chromium.debugPort()
+    proxy.listen(0, '127.0.0.1')
+    await once(proxy, 'listening')
+    const endpoint = `http://127.0.0.1:${String((proxy.address() as AddressInfo).port)}`
+    booted = await bootComposition(root, { consent: { browser: { mode: 'attach', endpoint }, deniedUrls: ['chrome:'] } })
+    const { ctx, agent } = booted
+    const snapshot = async () => (await executeModelToolFixture(ctx, {
+      agent, name: tool('browser_snapshot'), arguments: {}, callId: ToolCallId('snapshot'), signal: new AbortController().signal,
+    })).content.map(block => block.type === 'text' ? block.text : '').join('\n')
+    expect(await snapshot()).toContain('- Page URL: about:blank')
+    expect(open.size).toBeGreaterThan(0)
+
+    const takeover = ctx.get('mumbo-browser-consent')!
+    await takeover.takeOver()
+    await expect.poll(() => open.size, { timeout: 15_000 }).toBe(0)
+    expect(await snapshot()).toBe('Error: browser_snapshot did not run: the person has taken over the browser. Browser and desktop tools stay unavailable until they hand it back.')
+    expect(open.size).toBe(0)
+
+    await takeover.handBack()
+    expect(open.size).toBeGreaterThan(0)
+    expect(await snapshot()).toContain('- Page URL: about:blank')
+  } finally {
+    await booted?.ctx.fiber.dispose()
+    for (const socket of open) socket.destroy()
+    proxy.close()
+    await chromium.stop()
+    vi.unstubAllEnvs()
+    await rm(root, { recursive: true, force: true, maxRetries: 5 })
+  }
+})

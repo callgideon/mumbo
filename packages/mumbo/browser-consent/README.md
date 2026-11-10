@@ -7,7 +7,7 @@ kind: "package-reference"
 
 ## Summary
 
-`@mumbo/browser-consent` enforces "reads are free, writes ask, denied pages never" for the model's browser tools in the person's own signed-in Chromium, and "reads are free, writes ask" for computer use on their desktop. It mounts the Playwright MCP provider itself. A call that names a page in `deniedUrls`, or leaves or finds the tab on one, is refused without asking, and its result is replaced. Current-tab writes on an `allowedSites` origin proceed unless the page shows a password or payment field; other writes and desktop input ask. The Session log records allowed browser writes.
+`@mumbo/browser-consent` enforces "reads are free, writes ask, denied pages never" for the model's browser tools in the person's own signed-in Chromium, and "reads are free, writes ask" for computer use on their desktop. It mounts the Playwright MCP provider itself. A call that names, opens, or finds a page in `deniedUrls` is refused without asking. Current-tab writes on an `allowedSites` origin proceed unless the page shows a password or payment field; other writes and desktop input ask. The Session log records allowed browser writes. While the person has taken over, browser and desktop calls are refused and the connection closed.
 
 ## Table of Contents
 
@@ -16,6 +16,7 @@ kind: "package-reference"
 - [Secret inputs](#secret-inputs)
 - [Decisions](#decisions)
 - [Computer use](#computer-use)
+- [Take over](#take-over)
 - [Provider ownership](#provider-ownership)
 - [Audit record](#audit-record)
 - [Composition](#composition)
@@ -91,12 +92,23 @@ The `tools/pre-execute` listener registers with `prepend`. A guard registered wi
 
 The plugin also gates the `computer` tool of [`@deepseek-ai/dsh-computer-use-x11`](../../experimental/computer-use-x11/README.md), which drives the same desktop and Chromium without going through the browser tools. A `screenshot` passes, except while the browser's current tab, as this plugin last read it, is on a denied page: free browser reads can bring such a page to the screen, so the screenshot then asks with the question `Desktop screenshot while the browser's current tab is <what>, which the assistant may not use. Arguments: <arguments>.` Every other action (`click`, `move`, `drag`, `scroll`, `type`, `key`, or an action the plugin does not know) asks the person through the approval service with the question `Computer input on the desktop. Arguments: <arguments>.`, listing the arguments the tool declares as for browser writes. No allowance covers desktop input, so the approval service's `approval/asked` and `approval/decided` records in the Session log are the record of every allowed input. The guard denies input that reaches dispatch without this plugin's recorded consent, and input without an Agent.
 
+While the person has taken the browser over, every action is refused, as [Take over](#take-over) describes.
+
 Computer use lives in this package rather than in a package of its own because it applies the same consent rule to the same signed-in desktop with the same approval flow and guard; a separate package would duplicate that flow and need its own row. The desktop has no URL to check: Chromium's `URLBlocklist` policy keeps the password and payment settings pages closed to computer use.
+
+<a id="take-over"></a>
+## Take over
+
+The plugin provides the takeover as the value of its `mumbo-browser-consent` service, typed `BrowserTakeover` in [`src/types.ts`](src/types.ts). The box's owner-only [take-over route](../box-links/README.md) changes it; no model tool does.
+
+- **Taking over.** `takeOver()` starts refusing before it returns: the guard and the `tools/pre-execute` listener refuse every `mcp__playwright-mcp__<tool>` call and every `computer` action, `screenshot` included, before the browser or the desktop receives it, and withdraw an approval question pending for one. Calls already running are stopped: their signal aborts, and each result, finished or failed, is replaced by the stopped-call error, after the files Playwright linked from it are deleted. Once they settle, the plugin calls `browser_close` through each live Session's Playwright MCP server that received a call since its connection last closed. In attach mode upstream then closes its CDP connection and leaves Chromium and its tabs open; the server keeps running without a connection, and its tools stay listed. The promise settles after that. It rejects, naming each failed step, when the record could not be written or a connection did not close; the browser stays taken over, and calling it again retries both steps.
+- **The record.** The file `mumbo/browser-takeover` under the DSH home, written atomically with mode `0600`, records the takeover until hand back removes it. At load, a present file, or one that cannot be checked, starts the plugin taken over, so a Host restart never reconnects while the person may be typing; a server starts without a connection, because upstream connects on its first call.
+- **Handing back.** `handBack()` removes the record, stops refusing, and lists each live Session's tabs through `browser_tabs`, which reconnects. The person may have left a denied page, such as Google's sign-in, on screen, so the listing updates what the [screenshot check](#computer-use) and the [log refusal](#denied-pages) know; until a listing shows the current tab, a desktop screenshot asks. A take over requested during a hand back wins. A record that cannot be removed rejects the hand back and keeps the browser taken over.
 
 <a id="provider-ownership"></a>
 ## Provider ownership
 
-The plugin registers its guard and listeners, provides a service, and mounts `@deepseek-ai/dsh-experimental-browser-use-playwright-mcp` as its child with the `browser` settings and that service added to the child's requirements. The provider therefore starts only once the gate is active, and invalid configuration mounts no browser at all; unloading the plugin unloads the provider and removes its browser tools before the guard goes. Whenever another provider holds `browserUse` in place of the child, whether its row loaded before this plugin or took the registration before the child started, the plugin refuses every call to that provider's tools, reads included, decides this on each call, and logs an error naming the provider. It knows the tool prefixes of the Playwright MCP (`mcp__playwright-mcp__`), Chrome DevTools MCP (`mcp__chrome-devtools-mcp__`), and Stagehand (`stagehand_`) providers. A provider with another name already holding `browserUse` at load fails this plugin's load; one that takes it after load is reported as not under consent, because its tools cannot be told apart. While the child holds `browserUse`, no other browser-use provider can register, but a browser reached through a plain MCP server row is outside this plugin. Mount the provider only through this plugin.
+The plugin registers its guard and listeners, provides its takeover service, and mounts `@deepseek-ai/dsh-experimental-browser-use-playwright-mcp` as its child with the `browser` settings and that service added to the child's requirements. The provider therefore starts only once the gate is active, and invalid configuration mounts no browser at all; unloading the plugin unloads the provider and removes its browser tools before the guard goes. Whenever another provider holds `browserUse` in place of the child, whether its row loaded before this plugin or took the registration before the child started, the plugin refuses every call to that provider's tools, reads included, decides this on each call, and logs an error naming the provider. It knows the tool prefixes of the Playwright MCP (`mcp__playwright-mcp__`), Chrome DevTools MCP (`mcp__chrome-devtools-mcp__`), and Stagehand (`stagehand_`) providers. A provider with another name already holding `browserUse` at load fails this plugin's load; one that takes it after load is reported as not under consent, because its tools cannot be told apart. While the child holds `browserUse`, no other browser-use provider can register, but a browser reached through a plain MCP server row is outside this plugin. Mount the provider only through this plugin.
 
 <a id="audit-record"></a>
 ## Audit record
@@ -129,7 +141,7 @@ Mount it beside the `browserUse` registry, with `dsh-user-approval`, which the s
         display: ':1'
 ```
 
-The plugin requires the provider's services; it reads the approval service on each write. `browser.outputDir` moves the files the Playwright MCP server writes out of the Session's working directory, here to a root-only directory that backups skip. The server runs as a child of the dsh process, started by the MCP client's stdio transport rather than the subprocess service, so it keeps the dsh process's user and can write there. The `inject` line makes the desktop tool wait for this plugin's service, so a consent row that fails to load, or that refuses another browser provider, leaves no ungated desktop tool.
+The plugin requires the provider's services; it reads the approval service on each write. `browser.outputDir` moves the files the Playwright MCP server writes out of the Session's working directory, here to a root-only directory that backups skip. The server runs as a child of the dsh process, started by the MCP client's stdio transport rather than the subprocess service, so it keeps the dsh process's user and can write there. The `inject` line makes the desktop tool wait for this plugin's service, so a consent row that fails to load, or that refuses another browser provider, leaves no ungated desktop tool. [`@mumbo/box-links`](../box-links/README.md) finds the same service and shows Take over and Hand back in the owner's Browser tab.
 
 <a id="model-experience"></a>
 ## Model Experience
@@ -162,15 +174,31 @@ A denial replaces the browser's result with one short line; allowed calls add no
 
 Append-only. The result follows the Session's existing history like any tool result.
 
+### Taken over browser
+
+#### What the model sees
+
+While the person has the browser, a browser tool call or a `computer` action returns `Error: <tool> did not run: the person has taken over the browser. Browser and desktop tools stay unavailable until they hand it back.`, where `<tool>` is the upstream tool name or `computer`. A call that was running when the person took over returns `Error: <tool> was stopped because the person took over the browser, so it may or may not have taken effect. Browser and desktop tools stay unavailable until they hand it back.` in place of its result. The tool list and the system prompt stay the same, and taking over or handing back adds no Session event.
+
+#### Token effect
+
+A refusal replaces the call's result with one short line.
+
+#### KV Cache effect
+
+Append-only. The result follows the Session's existing history like any tool result.
+
 ## Known Limitations and Deferred Work
 
 <a id="known-limitations-and-deferred-work"></a>
 
 - **Masking covers input values only** — a revealed password, as a screenshot shows it after a show-password click on an allowed site; a select's options, such as a card's expiry month; an accessible name that a page builds from an embedded input's value; and text the page itself renders all pass unmasked, as does a text input that carries no secret type, token, or autofill state. Masking depends on a dependency patch keyed to one `playwright-core` version.
-- **Not a security boundary in a box** — the plugin gates the model's browser and desktop tools only. In a box the model also has a root shell in Full access with no per-command ask, so it can reach Chromium's debugging port at `127.0.0.1:9222` directly, for example with `curl` or `playwright-core`, and read the browser profile directory. Consent becomes a boundary only once the browser runs outside the reach of the dsh user, which is a platform decision.
+- **Not a security boundary in a box** — the plugin gates the model's browser and desktop tools only. In a box the model also has a root shell in Full access with no per-command ask, so it can reach Chromium's debugging port at `127.0.0.1:9222` directly, for example with `curl` or `playwright-core`, and read the browser profile directory. A takeover does not stop that shell either: it can read the screen through X, open its own debugging connection, or delete the takeover record and restart the Host. Consent becomes a boundary only once the browser runs outside the reach of the dsh user, which is a platform decision.
 - **The tab is read around the call, not during it** — a page that navigates itself between the before-listing and a write runs the write on its new origin, and a result whose page the person leaves between the call and the after-listing passes unless the result's own `- Page URL:` line names the denied page. A click inside a cross-origin frame counts as the top-level page's site, and a denied page in a frame of an allowed page is not detected.
 - **Request URLs are visible** — `browser_network_requests` lists each request's full URL, so a token in a query string, such as an OAuth code, reaches the model.
 - **Console and request logs stay refused for the Session** — the refusal after a denied page is not lifted when that tab closes or the browser clears its logs; a new Session starts without it.
+- **Console messages can outlive a takeover** — the connection that hand back opens can receive the console messages a page stored while the person had the browser, because Chromium replays them to a new debugging client, so `browser_console_messages` can show them unless a listing showed a denied page.
+- **A connection that did not close stays open until a retry** — when `browser_close` fails or times out, the server can keep its idle connection, which receives page events while every call is refused; the take-over route reports the failure, and the Browser tab tells the person not to type anything private until a retry succeeds.
 - **The desktop screenshot check uses the last tab read** — a page the person opens in the browser themselves, after the plugin's last read, does not make a screenshot ask.
 - **Other tabs' titles and URLs are visible** — `browser_tabs` lists every tab's title and URL, including a denied page open in a tab that is not current.
 - **Withholding reaches only the result and its linked files** — a screenshot taken on a denied page stays in the attachment store under DSH home, and deleting the console log file that a withheld result links also drops the entries it held from earlier pages.
