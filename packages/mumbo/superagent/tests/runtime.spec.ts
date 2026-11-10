@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmdirSync, rmSync, sy
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, onTestFinished, vi } from 'vitest'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import { discoverBaselineInstructionFiles } from '@deepseek-ai/dsh-agent-instructions'
@@ -1115,13 +1115,19 @@ it('runs the prepare command once for a new ticket, under the execution root wit
   expect(worker).toContainEqual(expect.objectContaining({ argv: ['rmdir', '--', failed.ticket.execution!.directory], cwd: '/' }))
 })
 
+/** A ticket work directory outside the state directory, as a contained box's `workDirectory` is. */
+function workOutsideState(): string {
+  const work = mkdtempSync(join(tmpdir(), 'orchestrator-work-'))
+  onTestFinished(() => { rmSync(work, { recursive: true, force: true }) })
+  return work
+}
+
 it('under run-as refuses to start a worker whose ticket directory a planted link moves outside, before root reads anything there', async () => {
   // The workspace registry records a Session's directory by its real path, as DSH's does.
   vi.spyOn(services.workspaceRegistry as { create(cwd: string): Promise<{ id: string }> }, 'create').mockImplementation(async cwd => ({ id: realpathSync(cwd) }))
   const outside = join(directory, 'outside')
   mkdirSync(outside)
-  mkdirSync(join(directory, 'work'))
-  const next = await restart({ runAs: true })
+  const next = await restart({ runAs: true, workDirectory: workOutsideState() })
   await next.ready
   next.sources.register(feishuKind); next.sources.register(githubKind)
   // A worker plants the ticket directory as a link to a directory outside the work directory before the launch looks.
@@ -1141,6 +1147,69 @@ it('under run-as refuses to start a worker whose ticket directory a planted link
   } finally {
     subprocess.spawn.mockImplementation(commands)
   }
+})
+
+it('under run-as refuses to recreate a deleted worker Session whose ticket directory a planted link now moves outside, and steers nothing into it', async () => {
+  vi.spyOn(services.workspaceRegistry as { create(cwd: string): Promise<{ id: string }> }, 'create').mockImplementation(async cwd => ({ id: realpathSync(cwd) }))
+  const outside = join(directory, 'outside')
+  mkdirSync(outside)
+  const next = await restart({ runAs: true, workDirectory: workOutsideState() })
+  await next.ready
+  next.sources.register(feishuKind); next.sources.register(githubKind)
+  const { ticket, sessionId } = await acceptedTicket()
+  expect(runningAssignment(runtime.store.tickets.get(ticket.id)!)).toBeDefined()
+  // A person deletes the worker Session, and a worker replaces the ticket directory with a link out of the work directory.
+  agents.delete(sessionId)
+  sections.delete(sessionId)
+  rmSync(ticket.execution!.directory, { recursive: true })
+  symlinkSync(outside, ticket.execution!.directory)
+  deliveries.mockClear()
+  await receive(feishu('2', 'check the log too', { mentions: [], root_id: 'om_1' }))
+  await runtime.idle()
+  expect(runtime.store.tickets.get(ticket.id)!.delivery).toMatchObject({ error: expect.stringContaining(`leads to ${outside} through a symbolic link`) })
+  expect(sections.has(sessionId)).toBe(false)
+  expect(relays(sessionId)).toEqual([])
+})
+
+it('under run-as starts a new main Session in the worker directory when the earlier one is in the state directory, which it keeps', async () => {
+  const created = vi.spyOn(services.workspaceRegistry as { create(cwd: string): Promise<{ id: string }> }, 'create')
+  const earlier = runtime.masterId
+  const workerDirectory = join(directory, 'worker')
+  mkdirSync(workerDirectory)
+  answers[HELPERS] = `file:${workerGitConfig(workerDirectory)}\0${credentialHelper(AGENT())}\0`
+  const next = await restart({ runAs: true, workerDirectory })
+  await next.ready
+  expect(next.masterId).not.toBe(earlier)
+  expect(created).toHaveBeenLastCalledWith(workerDirectory)
+  expect(next.store.get(KV.runtime.masterId)).toBe(next.masterId)
+  expect(agents.has(earlier)).toBe(true)
+  // What the orchestrator is told reaches the new main Session; the next start keeps it.
+  next.sources.register(feishuKind); next.sources.register(githubKind)
+  const trigger = feishu('1', '@bot fix the regression')
+  await receive(trigger)
+  expect(relays(next.masterId).some(item => item.trigger_id === trigger.id)).toBe(true)
+  expect(relays(earlier)).toEqual([])
+  const again = await restart({ runAs: true, workerDirectory })
+  await again.ready
+  expect(again.masterId).toBe(next.masterId)
+})
+
+it('under run-as fails a ticket accepted before it, whose directory is in the state directory, saying what to do, and runs nothing there', async () => {
+  const { ticket, sessionId } = await acceptedTicket()
+  expect(ticket.execution!.directory.startsWith(`${directory}/`)).toBe(true)
+  const workerDirectory = join(directory, 'worker')
+  mkdirSync(workerDirectory)
+  answers[HELPERS] = `file:${workerGitConfig(workerDirectory)}\0${credentialHelper(AGENT())}\0`
+  subprocess.spawn.mockClear()
+  const next = await restart({ runAs: true, workerDirectory, workDirectory: workOutsideState() })
+  await next.ready
+  deliveries.mockClear()
+  await next.pump()
+  await next.idle()
+  expect(next.store.tickets.get(ticket.id)!.assignments.at(-1)).toMatchObject({ report: expect.objectContaining({ state: 'failed',
+    summary: expect.stringContaining(`The ticket directory ${ticket.execution!.directory} is in the state directory ${directory}, which the worker cannot enter under a run-as subprocess provider: the ticket was accepted before it. Its files stay there; open a new ticket for this work`) }) })
+  expect(subprocess.spawn.mock.calls.filter(([spec]) => spec.argv.includes(ticket.execution!.directory))).toEqual([])
+  expect(relays(sessionId)).toEqual([])
 })
 
 it('gives the orchestrator\'s own CLI calls its gh configuration directory, which workers never receive', async () => {

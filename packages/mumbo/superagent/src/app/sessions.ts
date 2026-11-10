@@ -30,6 +30,8 @@ export interface SessionsHost {
   /** The `models` health entry, which reports managed sessions waiting on a model-budget retry. */
   readonly health: HealthEntry
   readonly masterId: string
+  /** Whether the subprocess provider runs workers as a run-as identity, so root reads no Session directory a link moved. */
+  readonly runAs: boolean
   readonly lifetime: AbortSignal
   closing(): boolean
   /** Execution environment variables for `ticket`, rendered into its worker's system prompt. */
@@ -136,11 +138,12 @@ export class Sessions {
   }
   /**
    * Resolves or creates session `id` in workspace `cwd`, initializes its role model, decorates it with prompts/skills/tools, sets `danger-full-access` permissions, and renames it to `title`.
-   * With `exact`, the Session's recorded directory must be `cwd` as written: the workspace registry follows links, so a
-   * link on the way would move the Session, whose instructions and skills root reads, to wherever it leads.
-   * @throws when `exact` is set and the Session's directory is not `cwd`, before anything reads from it.
+   * Under run-as the Session's recorded directory must be `cwd` as written, for every Session it resolves or creates: the
+   * workspace registry follows links, so a link a worker planted on the way would move the Session, whose instructions and
+   * skills root reads, to wherever it leads.
+   * @throws under run-as when the Session's directory is not `cwd`, before it is decorated or prompted.
    */
-  async ensure(id: string, cwd: string, title: string, role: 'orchestrator' | 'worker', exact = false): Promise<Agent> {
+  async ensure(id: string, cwd: string, title: string, role: 'orchestrator' | 'worker'): Promise<Agent> {
     const ctx = this.ctx
     let result = await ctx.sessionController.resolveAgent(id as SessionId)
     if ('error' in result && result.error.code === 'session/not-found') {
@@ -151,7 +154,7 @@ export class Sessions {
       result = await ctx.sessionController.resolveAgent(id as SessionId)
     }
     if ('error' in result) throw result.error
-    if (exact && result.agent.session.header.cwd !== cwd) {
+    if (this.host.runAs && result.agent.session.header.cwd !== cwd) {
       throw new Error(`The Session directory ${cwd} leads to ${String(result.agent.session.header.cwd)} through a symbolic link, which dsh-superagent does not follow under a run-as subprocess provider; remove the link, and name the ticket directory root by its real path`)
     }
     const settings = this.host.store.settings()

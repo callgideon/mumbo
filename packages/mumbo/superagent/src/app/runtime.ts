@@ -101,7 +101,13 @@ export class Runtime extends Service implements SourceHost {
         ? environmentOf({ deployment: setup.deployment, sources: this.sources, settings: store.settings() }) : undefined
       const feishu = () => setup.configured() && !!setup.deployment.feishu
       const prompts = this.prompts = new Prompts(store, () => machine.promptMaxChars.get(), deployed, feishu)
-      const masterId = this.masterId = store.get(KV.runtime.masterId) ?? `orchestrator-${key(machine.stateDir)}`
+      // Under run-as the main Session lives in the worker directory, so its id names that directory: a main Session created
+      // elsewhere earlier, such as in the state directory before run-as, which the run-as user cannot enter, keeps its
+      // history, and a new one starts in the worker directory.
+      const earlier = store.get(KV.runtime.masterId)
+      const masterId = this.masterId = machine.runAs ? `orchestrator-${key(machine.stateDir, machine.workerDirectory)}`
+        : earlier ?? `orchestrator-${key(machine.stateDir)}`
+      if (earlier !== undefined && earlier !== masterId) ctx.logger.info('dsh-superagent starts the main Session %s in %s; the earlier main Session %s stays as it was', masterId, machine.workerDirectory, earlier)
       store.set(KV.runtime.masterId, masterId)
       const commands = this.commands = new Commands(() => setup.deployment, setup.commandEnvironment, this.lifetime)
       const board = this.board
@@ -119,7 +125,7 @@ export class Runtime extends Service implements SourceHost {
         promptVersion: id => this.sessions.promptVersion(id), mayRead: (id, revision) => this.sessions.mayRead(id, revision),
         feishuPageSize: () => feishuSettings(sources).readPageSize, sourceLink: link }
       const sessions = this.sessions = new Sessions({ context: ctx, store, prompts, effects, health: board.claim('models'), masterId,
-        lifetime: this.lifetime,
+        runAs: machine.runAs, lifetime: this.lifetime,
         closing: () => this.closing(), environment,
         tools: (agent, ticket) => ticket ? executorTools(this.toolHost, ticket) : mainTools(this.toolHost, agent) })
       const policyChanged: EngineForSettings['policyChanged'] = (from, to, effects) => { this.engine.policyChanged(from, to, effects) }

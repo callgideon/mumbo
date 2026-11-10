@@ -2,7 +2,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { key, latestAssignment, latestReport, liveTicket, runningAssignment, threadKey, waitsForPerson } from '../core/index.ts'
 import type { AssessmentOutcome, Assignment, EngineForExecutor, Execution, Executor, Mandate, PolicyEffect, Ticket, TicketInput, Trigger }
   from '../core/index.ts'
@@ -438,6 +438,13 @@ export class DshExecutor implements Executor {
     const source = sourceTrigger(this.host, ticket)
     const workspace = ticket.execution?.directory ?? ''
     if (!current()) return
+    // Tickets accepted before run-as have their directories under the state directory's default work directory, where root
+    // ran their workers and the run-as user cannot enter.
+    const { runAs, stateDir } = this.host.machine
+    const fromState = relative(stateDir, workspace)
+    if (runAs && fromState !== '..' && !fromState.startsWith('../')) {
+      throw new Error(`The ticket directory ${workspace} is in the state directory ${stateDir}, which the worker cannot enter under a run-as subprocess provider: the ticket was accepted before it. Its files stay there; open a new ticket for this work`)
+    }
     // Prepare the workspace directory once; an existing directory counts as already prepared, including worktrees created before
     // `prepare` commands existed. The worker looks, so root follows no link the worker planted here.
     if (!await runAsWorker(this.host.context.subprocess, ['test', '-e', workspace], '/', this.host.lifetime).then(() => true, () => false)) {
@@ -446,8 +453,7 @@ export class DshExecutor implements Executor {
     }
     if (!current()) return
     const sessionId = workerSessionId(ticket.id)
-    // Root records the Session directory through a real path; under run-as a link the worker planted must not move it.
-    const agent = await this.host.sessions.ensure(sessionId, workspace, ticket.title, 'worker', this.host.machine.runAs)
+    const agent = await this.host.sessions.ensure(sessionId, workspace, ticket.title, 'worker')
     if (!current()) return
     // The background work of the Assignment this one replaces stops first, so its end does not clear this one's message.
     await this.stopped(ticket.id)
