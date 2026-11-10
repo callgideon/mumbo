@@ -694,7 +694,7 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
   - Chrome runs under a loop that restarts it within 5 seconds if it exits. The assistant's browser tools depend on it, and on a real desktop the person can now close it.
   - It reopens the previous tabs (`RestoreOnStartup`).
 - **Files.**
-  - Chrome downloads to `/home/browser/Downloads`. The assistant reads downloads there and puts files the person wants to upload in the same folder; one line in `roleInstructions` says so.
+  - Chrome downloads to `/home/shared/Downloads` (B24). The assistant reads downloads there and puts files the person wants to upload in the same folder; one line in `roleInstructions` says so.
   - Backups cover all of `/home/browser` except caches, not only the profile. So a restore or a move (section 17c) keeps downloads and desktop settings.
 - **Size.**
   - Measure on the founder's box before and after: frame rate, box CPU and node CPU.
@@ -741,7 +741,7 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
   - Nothing else in the product names the live view, so N2 needs no change here.
 - **Google Chrome replaces Debian's Chromium** **[my call; follows the founder's ask]**.
   - Google turned Sync off for Chromium builds, so a profile that syncs with the person's Google account needs Google Chrome stable, from Google's apt repository (amd64; nodes are x86_64).
-  - **The existing profile directory is kept.** Chrome opens a Chromium profile last used by a version no newer than itself. Otherwise the box starts a fresh profile and keeps the old directory aside.
+  - **Chrome starts on a fresh, empty profile** **[founder: 2026-11-10]**. The old Chromium profile may hold saved passwords that still autofill. It is moved aside, excluded from backups and unused, and deleted as a step of B24's rollout. The person signs in to sites again; their Google sync brings the rest back.
   - The debugging port stays on loopback with the box's own `--user-data-dir`. Chrome 136 and later honour the port only with a non-default profile directory, which this is.
   - **Updates.** Chrome updates with each template build. Rebuild the template at least every two weeks for Chrome security releases (RUNBOOK).
   - **Policies** in a root-owned `/etc/opt/chrome/policies/managed/mumbo.json`: `RestoreOnStartup: 1`, `DefaultBrowserSettingEnabled: false`, `MetricsReportingEnabled: false`, plus the password rule below.
@@ -789,11 +789,32 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
 - **Their environment** is an explicit list. It never holds the box token (`DEEPSEEK_API_KEY`), `MUMBO_MEMBER_KEY` or a launch token.
   - **Harness addition:** a "run as" user and environment on the subprocess seam that these share. Node's `spawn` takes `uid` and `gid` natively.
   - The person's own Terminal tab runs as `agent` too, because the agent can drive terminals.
-- **The model's file tools** (read, write, edit, search, list) work only under an allowlist: the workspace (`/root/projects`), `/tmp` and `agent`'s home.
-  - They resolve real paths first, so a symlink can't lead out.
-  - **Harness addition:** a readable-roots allowlist for the model's file tools. dsh's sandbox limits writes only, never reads.
+- **The model's file tools** (read, write, edit, search, list) work only under an allowlist: the workspace (`/root/projects`) and `agent`'s home.
+  - `/tmp` is out, because root file tools would read anyone's temporary files, Chromium's logs included. `agent`'s `TMPDIR` is `/home/agent/tmp`.
+  - **Harness addition:** a readable-roots allowlist for the model's file tools (`modelRoots`). dsh's sandbox limits writes only, never reads.
   - An allowlist, not a denylist, because the tools run in the root dsh process and could otherwise read `/proc/<pid>/environ` of root processes.
+  - **No check-then-use race.** The agent's shell can swap a checked directory for a symlink, which is the route to `Login Data`.
+    - A read checks the real path of the opened file descriptor (`/proc/self/fd/<n>`) against the roots before reading.
+    - Nothing root does on a model-chosen path may change the filesystem before such a check: create, write, rename, delete or chmod. A root create through a swapped directory has its effect before any check. So mutating file operations run with `agent`'s own permissions, through a helper process started with "run as", and the kernel then checks every path component.
   - The person's Files panel is unchanged.
+- **Nothing the model reaches loads code into root dsh or starts it as root.**
+  - The box overlays disable the plugin manager's tools (`dsh-plugin-manager/tools`) in every preset boxes use; plugins come through the template or the operator.
+  - Runtime self-modification (extensions), model-added MCP servers, the experimental Python runtime and SDK-spawned subagents are not mounted in boxes, or they start their processes through "run as".
+  - `git` on a model-writable repository never runs as root. The repository's own config and hooks (`core.fsmonitor`, hooks, filter and textconv drivers) run code, so dsh's change summaries and anything else that runs `git` on the workspace use "run as". The workspace-changes scratch directory needs a harness follow-up for that.
+  - `/src` (the dsh code root runs) is read-only for `agent`.
+  - **Every helper process that acts on the model's behalf runs under a non-root identity of its own** through the same "run as" seam, never as root:
+    - **Playwright MCP** runs as `browsermcp`. That user alone, beside root, may reach the debugging port. It reads only the model roots and the shared Downloads, so the kernel enforces the upload limit.
+      - `browser_run_code_unsafe`, which runs model code inside that server, is hard-denied. In-page `browser_evaluate` keeps asking.
+      - `browser_file_upload` paths are limited to the model roots and the shared Downloads.
+      - The edge never mounts a browser provider without consent: the plain fallback row is gone.
+    - **Computer use** runs `xdotool` as `desktop`, the one user beside `browser` that may read the X authority file.
+      - Every model-derived argument passes a strict check: numbers for coordinates; key names from a fixed pattern; typed text only as the final argument after `type --`. So no argument can chain another `xdotool` command, such as `exec`.
+      - The composition gate lists it.
+    - **The Browser tab's `wmctrl`** (B20) runs as `desktop` too. It isn't model-reachable, but root must never be a client of an X server that a less-privileged user (`browser`) runs.
+  - **Read-only roots.** The attachment and skill directories the model needs are listed exactly, never `/root/.dsh` itself and never a credentials store. They are checked the same way as the model roots, and changes there are refused.
+  - **Project boxes** add `/root/work`, owned by `agent`, to the model roots. `/root/.mumbo` is `0711`, with `bin/` and `ca/ca.crt` readable, and `ca/ca.key` and the rest root-only.
+  - **Downloads** are `/home/shared/Downloads`, owned by `browser:shared` with mode `2770`; `agent` and `browser` are both in `shared`. Chrome's `DownloadDirectory` policy points there, and it is a model root. `/home/browser` stays `0700`, and backups include `/home/shared`.
+  - **A composition gate:** a test lists every model-visible tool in the box compositions with how it runs (root in-process, or "run as"), and fails on a tool it doesn't know. A new plugin can't quietly reopen this.
 - **Box permissions** (edge start script):
   - `/root` is `0711`. `/root/projects` belongs to `agent`, so Session working directories don't change.
   - `/root/.dsh`, `/root/.mumbo` and `/root/dsh.log` are root-only.
@@ -812,7 +833,12 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
   - read `/proc/<dsh pid>/environ` and `/root/dsh.log`;
   - connect to `9222`, `envd`, the VNC port, or the X display;
   - write the Chrome policy file, or anything under `/root/.mumbo`;
-  - become root, including by planting a symlink under `/home/browser` or `/root/projects` that the root setup in the start script follows. Root operations on paths a non-root user owns refuse to follow symlinks, or run as that user.
+  - become root, including by planting a symlink under `/home/browser` or `/root/projects` that the root setup in the start script follows. Root operations on paths a non-root user owns refuse to follow symlinks, or run as that user;
+  - win a race by swapping a directory for a symlink between a file tool's check and its use, for reads and for writes;
+  - run code as root through a workspace repository's `core.fsmonitor` or hooks when dsh summarizes changes;
+  - install a plugin, or add an MCP server, through any model tool;
+  - write under `/src`;
+  - escape through a backup restore: an archive whose entries go through a symlink it also contains.
 - **Also project boxes.** This satisfies section 2's requirement for project boxes before a second member (B12).
 
 **B25, browser-level denials** (`@mumbo/browser-consent` and Chrome policy):
@@ -829,11 +855,19 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
     - or one whose `autocomplete` names a password, a one-time code or a card (`current-password`, `new-password`, `one-time-code`, `cc-*`).
   - The patch must apply, or install fails. An end-to-end test asserts the masking. Offer it upstream to Playwright, which is the way off the patch.
   - Playwright MCP's output directory moves out of the workspace into a root-only directory (B24's file allowlist excludes it), and out of backups.
+- **On a page with a secret field, every write asks,** even on an allowed site: a page whose snapshot has a field the masking hides.
+  - Otherwise a click on "show password" on an allowed site would run unasked, and the next screenshot would show the password.
+  - Allowing a site never depends on the operator leaving sign-in origins out.
+- **No browser call writes files where the model chose.** A call with a `filename` argument is refused, because page content could otherwise overwrite project files.
 - **Network request details are denied.** A request's details carry its `Cookie` header and form body, so a login's password or a session cookie would reach the model.
   - `browser_network_request` is refused outright.
   - The request list stays a read only if it shows no headers or bodies; otherwise it is refused too.
 - **Before B18 deploys** (Chrome with every sync type), the masking patch, the output directory and the network-request denial are live. That doesn't wait for B24, but nothing sends a saved password to a model provider in the meantime.
-- **Today's Chromium** may already hold passwords the founder saved. Until the masking is live, a managed policy for it (`PasswordManagerEnabled: false`, `AutofillCreditCardEnabled: false`) stops autofill from putting them into snapshots.
+- **Until B25 is live**, request details carry session cookies whatever is synced.
+  - The designer's condition was no agent browser rows (consent or fallback) and no computer-use row in person boxes until B25.
+  - **Informed founder decision** **[founder: 2026-11-10]**: agent browsing stays on for the few hours until B25 deploys, with that risk stated plainly. The hotfix that removes the rows was built and held.
+- **Today's Chromium** may already hold passwords the founder saved. Until the masking is live, a managed policy for it (B27: `PasswordManagerEnabled: false`, `AutofillCreditCardEnabled: false`) stops new saves and card fills.
+  - Passwords saved before the policy still autofill (Chrome's documented behaviour), so any such passwords are deleted from that Chromium, or the masking ships first.
 - **Chrome's `URLBlocklist`** blocks the internal pages for everyone in the box's Chrome, the person included, because computer use drives Chrome without going through browser-consent:
   - `chrome://password-manager`, `chrome://settings/passwords`, `chrome://settings/payments`, `chrome://settings/autofill`, `chrome://settings/addresses`;
   - `chrome://sync-internals`, `chrome://autofill-internals`, `chrome://password-manager-internals`.

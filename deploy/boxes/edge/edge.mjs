@@ -181,6 +181,16 @@ export function roleInstructions(cfg, principal) {
   ].join('\n')
 }
 
+/** Mumbo's own instructions (spec section 17b): the system prompt section @mumbo/assistant gives the Session `mumbo` only. */
+export function assistantInstructions() {
+  return [
+    'You are Mumbo, this person\'s assistant, and the Session they come back to.',
+    'Keep track of what they asked and what is still pending.',
+    'Use schedules for later and recurring work, with this Session as their target.',
+    'When they return, start with what happened while they were away.',
+  ].join('\n')
+}
+
 /** Exists once a person box has given its first-run welcome, or had sessions before it (DESIGN.md#first-run-welcome). Under
  *  /root/.dsh, so backups carry it with the conversation that holds the welcome. */
 export const WELCOMED = '/root/.dsh/welcomed'
@@ -287,7 +297,20 @@ if [ -f /src/packages/mumbo/box-links/src/browser.ts ] && command -v wmctrl >/de
 fi
 ` : ''}LINKS_PATCH="--patch /root/.mumbo/links.overlay.yml"
 fi
-${site.desktop ? `# Desktop control on :1 (@deepseek-ai/dsh-computer-use-x11), when the image ships the package and xdotool.
+${site.desktop ? `# Mumbo, the person's always-present assistant Session (@mumbo/assistant), when the image ships that package.
+ASSISTANT_PATCH=
+if [ -d /src/packages/mumbo/assistant ]; then
+cat > /root/.mumbo/assistant.overlay.yml <<'YML'
+- insert:
+    - id: assistant
+      name: '@mumbo/assistant'
+      config:
+        workspace: /root/projects
+        instructions: ${JSON.stringify(assistantInstructions())}
+YML
+ASSISTANT_PATCH="--patch /root/.mumbo/assistant.overlay.yml"
+fi
+` : ''}${site.desktop ? `# Desktop control on :1 (@deepseek-ai/dsh-computer-use-x11), when the image ships the package and xdotool.
 CU_PATCH=
 if [ -d /src/packages/experimental/computer-use-x11 ] && command -v xdotool >/dev/null 2>&1; then
 cat > /root/.mumbo/computer.overlay.yml <<'YML'
@@ -457,7 +480,7 @@ ${site.desktop ? '' : `PATH=/root/.mumbo/bin:$PATH NODE_USE_ENV_PROXY=1 NODE_EXT
 `}HOME=/root DSH_HOME=/root/.dsh DSH_AGENTS_HOME=/root/.mumbo/agents DSH_TELEMETRY_DISABLED=1 \\
 DEEPSEEK_BASE_URL=${llm}/anthropic DEEPSEEK_SEARCH_BASE_URL=${llm} DEEPSEEK_API_KEY=${token} \\
 nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\
-  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml${openrouter ? ' --patch /root/.mumbo/models.overlay.yml' : ''} $LINKS_PATCH${site.desktop ? ' $CU_PATCH $WELCOME_PATCH' : ''}${memberKeyText ? ' $PROJECT_PATCH' : ''} \\
+  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml${openrouter ? ' --patch /root/.mumbo/models.overlay.yml' : ''} $LINKS_PATCH${site.desktop ? ' $CU_PATCH $WELCOME_PATCH $ASSISTANT_PATCH' : ''}${memberKeyText ? ' $PROJECT_PATCH' : ''} \\
   --no-open --host "$ip" --port 3080 --public-url ${site.publicUrl} --trusted-host ${cfg.publicHost}${site.host === cfg.publicHost ? '' : ` --trusted-host ${site.host}`} > /root/dsh.log 2>&1 &
 `
 }

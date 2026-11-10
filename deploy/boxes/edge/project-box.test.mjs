@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { startScript, boxSite, boxes } from './edge.mjs'
+import { startScript, boxSite, boxes, assistantInstructions } from './edge.mjs'
 import { memoryStore } from './store.mjs'
 import { projects } from './projects.mjs'
 import { templateArgs } from './template.mjs'
@@ -18,7 +18,7 @@ const at = (text, needle) => { const i = text.indexOf(needle); assert.ok(i >= 0,
 test('a user box start script is byte-for-byte what it was before project boxes grew a proxy', () => {
   const s = startScript(c, 'T', boxSite(c, 'a@x.com'), "role's", undefined, boxFiles, ['o@x.com'])
   // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows, the X cookie, the first-run welcome, the interim Chromium policy (B27) and the B18 desktop (same cfg, token T, role "role's").
-  assert.equal(createHash('sha256').update(s).digest('hex'), '0f66991d968b65f3d4d54d9b4fd97bd36e5322cbfd85b12bc358c2c047d79656')
+  assert.equal(createHash('sha256').update(s).digest('hex'), 'ea10673ce59a428521042c45a85fffa194c0add7f032bb86e037533837dffe33')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -127,6 +127,38 @@ test('slice 2: a person box adds the Browser and Desktop tabs and drops the stoc
   } finally { rmSync(dir, { recursive: true, force: true }) }
   const p = startScript({ ...c, projectDomain: 'boxes.x' }, 'T', boxSite({ ...c, projectDomain: 'boxes.x' }, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
   assert.ok(!p.includes('ui-sidebar-browser') && !p.includes('box-links/src/browser.ts'))
+})
+
+test('Mumbo: a person box loads @mumbo/assistant with its instructions only when the image ships the package; a project box never', () => {
+  const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles)
+  assert.match(u, /^ASSISTANT_PATCH=$/m)
+  assert.ok(at(u, 'ASSISTANT_PATCH=\n') < at(u, 'if [ -d /src/packages/mumbo/assistant ]; then'))
+  assert.match(u, / \$WELCOME_PATCH \$ASSISTANT_PATCH/)
+  assert.match(u, /    - id: assistant\n      name: '@mumbo\/assistant'\n      config:\n        workspace: \/root\/projects\n        instructions: /)
+  // The value is a JSON string on one line, which YAML reads as a double-quoted scalar with the same escapes.
+  const line = u.split('\n').find(l => l.startsWith('        instructions: '))
+  assert.equal(JSON.parse(line.slice('        instructions: '.length)), assistantInstructions())
+  assert.match(assistantInstructions(), /^You are Mumbo, this person's assistant/)
+  const p = startScript({ ...c, projectDomain: 'boxes.x' }, 'T', boxSite({ ...c, projectDomain: 'boxes.x' }, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
+  assert.ok(!p.includes('@mumbo/assistant') && !p.includes('ASSISTANT_PATCH'))
+})
+
+test('Mumbo: the assistant block runs under sh -eu, with and without the package', () => {
+  const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles)
+  const lines = u.split('\n')
+  const from = lines.findIndex(l => l === 'ASSISTANT_PATCH=')
+  const to = lines.findIndex((l, i) => i > from && l === 'fi')
+  const dir = mkdtempSync(join(tmpdir(), 'assistant-row-'))
+  try {
+    const block = lines.slice(from, to + 1).join('\n').replaceAll('/src/packages/mumbo/assistant', join(dir, 'pkg')).replaceAll('/root/.mumbo', dir)
+    const run = () => execFileSync('sh', ['-c', `set -eu\n${block}\nprintf '[%s]' "$ASSISTANT_PATCH"`], { encoding: 'utf8' })
+    assert.equal(run(), '[]')
+    assert.equal(existsSync(join(dir, 'assistant.overlay.yml')), false)
+    mkdirSync(join(dir, 'pkg'))
+    assert.equal(run(), `[--patch ${dir}/assistant.overlay.yml]`)
+    const overlay = readFileSync(join(dir, 'assistant.overlay.yml'), 'utf8')
+    assert.equal(JSON.parse(overlay.split('\n').find(l => l.startsWith('        instructions: ')).slice('        instructions: '.length)), assistantInstructions())
+  } finally { rmSync(dir, { recursive: true, force: true }) }
 })
 
 test('box links: the overlay loads only when the image ships @mumbo/box-links; project boxes get no desktop link', () => {
