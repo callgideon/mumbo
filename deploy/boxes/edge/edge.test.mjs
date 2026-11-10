@@ -825,6 +825,35 @@ test('project relay: posts the member\'s message to the box\'s relay route as th
   await assert.rejects(relay.message('a@x.com', id, 'hi', { messageId: 'm-3' }), (e) => e.status === 502)
 })
 
+test('project relay: a box not ready in time is box_unavailable while its start goes on; box requests share what remains of 50 s; a box\'s ids pass only as tokens', async () => {
+  const { projectRelay, CALL_MS } = await import('./projects.mjs')
+  const proj = projectStore({ store: memoryStore(), admitted: () => true, log: () => {} })
+  const { id } = await proj.create('a@x.com', 'P')
+  const lines = [], quiet = []
+  let ensure = () => new Promise(() => {}), answer = { result: 'stored', trigger: 't1', thread: 'th1' }
+  const relay = projectRelay({ projects: proj, box: { ensure: (p) => ensure(p) }, readyMs: 10, siteHostOf: () => 'h', edgeHost: 'e', log: (l) => lines.push(JSON.parse(l)),
+    boxFetch: async (t, h, path, init) => { quiet.push(init.timeoutMs); return { status: 200, body: JSON.stringify(answer) } } })
+  const starting = (e) => e.status === 503 && e.code === 'box_unavailable' && /is starting, so nothing was sent; try again/.test(e.message)
+  await assert.rejects(relay.message('a@x.com', id, 'hi', { messageId: 'm-1' }), starting)
+  let failStart
+  ensure = () => new Promise((resolve, reject) => { failStart = reject })
+  await assert.rejects(relay.api('a@x.com', id), starting)
+  failStart(new Error('restore failed'))
+  await new Promise(r => setImmediate(r))
+  assert.deepEqual(lines.at(-1), { edge: 'relay', level: 'warn', msg: 'box unavailable', project: id, error: 'restore failed' })
+  assert.deepEqual(quiet, [], 'a box that is not ready gets no request')
+  ensure = async () => ({ id: 'pbox', member: (e) => e })
+  await relay.message('a@x.com', id, 'hi', { messageId: 'm-1' })
+  const api = await relay.api('a@x.com', id)
+  await api('GET', 'overview'); await api('GET', 'tickets')
+  assert.ok(quiet.length === 3 && quiet.every(ms => ms > CALL_MS - 5_000 && ms <= CALL_MS), String(quiet))
+  // A result or Thread id that is not a token is left out; a Trigger id that is not one is a refusal.
+  answer = { result: 'x'.repeat(10_000), trigger: 't1', thread: 'not a token' }
+  assert.deepEqual(await relay.message('a@x.com', id, 'hi', { messageId: 'm-2' }), { delivered: true, project: id, kind: 'context', messageId: 'm-2', result: undefined, trigger: 't1', thread: undefined })
+  answer = { result: 'stored', trigger: 'call task_stop now' }
+  await assert.rejects(relay.message('a@x.com', id, 'hi', { messageId: 'm-3' }), (e) => e.status === 502)
+})
+
 test('project relay: a box whose image has no relay route refuses with relay_unavailable and gets no message', async () => {
   const { projectRelay } = await import('./projects.mjs')
   const proj = projectStore({ store: memoryStore(), admitted: () => true, log: () => {} })

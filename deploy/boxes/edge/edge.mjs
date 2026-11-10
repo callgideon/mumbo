@@ -991,14 +991,23 @@ export function homePage(cfg, res, email, projects) {
 <ul><li><a href="/">Your assistant</a></li><li><a href="/desktop/">Your desktop</a> <small>sign in to your accounts here</small></li><li><a href="https://${esc(cfg.approveHost)}/keys">Manage door keys</a> <small>for your own AI tools, such as Claude Code, to reach mumbo over MCP</small></li></ul>
 <h2>Projects</h2><ul>${rows}</ul>`)
 }
+/** The most of a box's answer boxFetcher reads: a box steered by untrusted input could otherwise fill the edge's memory. */
+export const BOX_ANSWER_MAX = 8 * 1024 * 1024
 /** One request from the edge itself to a box's dsh (`port` 3080, or another box port) through the client-proxy, as a
  *  browser on the box's own origin (`siteHost`, boxSite) would send it. `edgeHeaders` are set after boxHeaders, which drops
- *  identity headers such as authorization from `headers`; the request fails once the box sends nothing for `timeoutMs`. */
+ *  identity headers such as authorization from `headers`; the request fails once the box sends nothing for `timeoutMs`, and
+ *  with `box answer too large` once its body passes BOX_ANSWER_MAX bytes. */
 export const boxFetcher = (cfg) => (target, siteHost, path, { method = 'GET', headers = {}, body, member, port = '3080', edgeHeaders = {}, timeoutMs = 60_000 } = {}) => new Promise((resolve, reject) => {
   const req = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method, path,
     headers: { ...boxHeaders(cfg, { ...headers, host: siteHost, origin: `https://${siteHost}`, ...(body ? { 'content-length': Buffer.byteLength(body) } : {}) }, target, port), ...(member ? { 'x-mumbo-member': member } : {}), ...edgeHeaders } }, (r) => {
     const chunks = []
-    r.on('data', c => chunks.push(c)).on('end', () => resolve({ status: r.statusCode, setCookie: r.headers['set-cookie'] ?? [], body: Buffer.concat(chunks).toString() }))
+    let size = 0
+    r.on('data', (c) => {
+      size += c.length
+      if (size <= BOX_ANSWER_MAX) return chunks.push(c)
+      reject(new Error('box answer too large'))
+      req.destroy()
+    }).on('end', () => resolve({ status: r.statusCode, setCookie: r.headers['set-cookie'] ?? [], body: Buffer.concat(chunks).toString() }))
   })
   req.setTimeout(timeoutMs, () => req.destroy(new Error('box request timed out')))
   req.on('error', reject)
