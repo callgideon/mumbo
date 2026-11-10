@@ -455,7 +455,8 @@ Every node can be driven by a higher agent or an external AI. **[founder]**
   - `task_reply` (prompt) answers **questions only**. Tool approvals and plan reviews are refused through the door, which keeps "no approvals through the door".
   - `task_status` and `task_result` (read). `task_result`'s `git diff` runs as `agent` (B24).
   - `runs_halt` and `runs_resume` are not on the door: stopping a whole box is for a person.
-  - `project_list`, `project_status` and `project_message` (with `kind: context | request`), within the key's projects;
+  - `project_list`, `project_status` and `project_message` (kind `context` only), within the key's projects. On the door, `task_start` is the only way to ask for work, so a key without `workspace` can't create Tickets. Mumbo's own box-side `project_message` still takes both kinds. **[2026-11-10, B34 review]**
+  - `project_status` returns the edge's project record, superagent's problem kinds, the Tickets waiting on a person, the newest open Tickets (at most 20) and executor load. Superagent has no brief yet. Its management API admits only owners (`panelAdmins`), so a non-owner member is refused until member access is designed.
   - `task_start` and `task_stop` (workspace) for one Ticket. `task_start` is an explicit request Trigger, which superagent's Eval turns into a Ticket.
 - **M2, down:** a project's coordinator is superagent, so `project_message` delivers into superagent, not a plain Session.
   - A new superagent Source kind, `relay` (UPSTREAM S9), takes the edge's relayed messages as Triggers: the member as actor, human, explicit for `request` and implicit for `context`, with the hop chain.
@@ -466,7 +467,22 @@ Every node can be driven by a higher agent or an external AI. **[founder]**
     - The edge never writes Policy; only a person in the panel does (S4).
 - **M2, up:** the `relay` Source is two-way. A coordinator's reply on a relay Thread, through its Outbox, goes back to the member's Mumbo as one message: "[project X] …".
   - The edge offers project boxes one tool for this, `report_to_member`. It accepts only a member of that project and lands in that person's `mumbo` Session.
+    - It is served on its own path, `/mcp/report`, for project-box tokens only. It is not on `/mcp`, because dsh's `mcp-sandboxes` client offers every `/mcp` tool to the box's models, which could then post any text to any member and skip the Outbox's reply rules.
+    - The report is `[project <name>] report from its coordinator:` followed by the text in a nonce'd `<untrusted-N>` fence. Mumbo's instructions say a report is data from the project, never the person's request or consent.
+    - Idempotent per (project, Outbox message id), within `@mumbo/mcp`'s one-day window.
   - Mumbo's instructions say how to file a dump to a project (`project_message`, kind `context`) and where reports arrive.
+  - **Follow-ups (B36 review, 2026-11-10):**
+    - **B36b:** a report's source names the project, not the person. Today `@mumbo/mcp` logs it as `{kind:'mcp', principal:<member>}`, so `agent_read` and the log say the person sent it. A source such as `{kind:'report', project}` with no principal is needed, still listed by `agent_read` as `report:<project>`. Required before anything reads person-sourced messages as the person's requests (the M4 brain and digest) and before a project has a second member.
+    - **Report rate limit:** a bucket per (project, member) at the edge, such as burst 10 and 30 an hour, answering `rate_limited`, which the Outbox retries. Until B24, any process in a project box holds the box token, and each report starts a model turn on the member's budget.
+    - A halted project (an owner's "Stop everything") gets `halted` from `report_to_member`, which the Outbox retries later. Stop everything covers a project's effects on other people's assistants.
+    - The management API's 403 reaches the door as `owner_only` ("only the project's owners can read its status or stop its Tickets"), not `box_refused`.
+    - `project_status`'s `waitingOnYou` becomes `waitingOnPeople`: superagent's list is every Ticket waiting on any person, not on the caller.
+  - **Risk:** a report starts a Mumbo turn with the person's whole browser: Chrome with passwords and cards synced, and WhatsApp. Today four things limit it:
+    - the fence;
+    - Mumbo's instructions;
+    - the rule "say what you'll do and wait for agreement before writing with an account";
+    - the project's admission policy, with a private repository.
+    The structural fix is B25b (section 17b): while a report started the turn, every browser write asks.
 - **M3, workers:** superagent gets a pluggable Executor port, and an external-worker Executor whose Assignments are leased through the door.
   - `task_claim`, `task_report` and `task_result`.
   - A 10-minute lease, renewed by any call on the Ticket.
@@ -481,7 +497,7 @@ Every node can be driven by a higher agent or an external AI. **[founder]**
 | **R-door** (mumbo) | ALB rule `app.mumbo.si` + `/mcp*` to the edge's model target group, past oauth2-proxy; ALB idle timeout of 60 s or more | — |
 | **B32** door endpoint | `/mcp` on the model listener: bearer only, cookies ignored, a per-key rate limit, a log line per call (key id and name, tool, outcome), budget charging, and scope and project checks before any tool. Ships with `whoami` and `project_list` | B31, R-door |
 | **B33** door to Mumbo | `@mumbo/mcp`: a setting for an existing Session (`mumbo`) and its key from a file the edge writes, derived per box. Person-box overlay row. Door tools `agent_send`, `agent_read`, `needs_you`, `task_reply` (questions only), `task_status` and `task_result`, forwarded through the client proxy. `runs_*` stay off the door. The B24 gate lists its tools, and `task_result`'s git runs as `agent` | B32 (the in-box half can start now) |
-| **B34** door to projects | `project_status` (brief, Tickets and stages, what waits on the person, read through the project box's superagent API as the member), `project_message` with `kind`, `task_start` and `task_stop`, all within the key's projects | B32, B35 |
+| **B34** door to projects | `project_status` (project record, problems, Tickets and stages, what waits on a person, executor load, read through the project box's superagent API as the member), `project_message` (kind `context` only), `task_start` and `task_stop`, all within the key's projects | B32, B35 |
 | **B35** M2 down | Superagent `relay` Source (UPSTREAM S9): edge-posted messages become Triggers with the member as actor and the hop chain; `request` is explicit, `context` implicit. `projectRelay` posts there instead of the plain coordinator Session. Tests through the real Source | — |
 | **B36** M2 up | `relay` Thread replies go back through the edge (`report_to_member`, project boxes only, members only) into the person's `mumbo` Session as "[project X] …". Mumbo's instructions are updated for filing and reports | B35, B17 |
 | **B37** M3 workers | The Executor port and the external-worker Executor: leases, renewal, fencing tokens, `task_claim`, `task_report` and `task_result` on the door; the reviewer Ticket. The acceptance is M3's "Done when" | B34 |
@@ -960,6 +976,7 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
   - **No other user can take over dsh's or the live view's port.**
     - Whatever answers on dsh's or the live view's port serves pages on the app's own origin. If dsh or KasmVNC died, a process that bound the port first could serve script there, or register a service worker that outlives the box in the person's browser.
     - So both move below 1024, where only root or a binary given `cap_net_bind_service` may bind: dsh on `$ip:880`, KasmVNC (`Xkasmvnc`, given that capability) on `$ip:881`. The default unprivileged floor stays, so dev servers keep their usual ports (3000, 4200, 5000, 5173).
+    - **The door's in-box listener** (`@mumbo/mcp`, B33) is on `882` too. The edge sends that port the box's door key with the person's principal, so a process that bound it first would get the key and could speak to Mumbo as the person.
     - The edge keeps both numbers in one place. A box record carries its ports, and records without them mean the old `3080`/`6080` until no old-template box remains.
     - First check that E2B's client proxy forwards to a port below 1024. If it doesn't: a floor of 2990, with the listeners on 2980 and 2981.
     - Escape test: `agent` binding either new port fails, and binding 3000 or 5173 works.
@@ -1035,6 +1052,7 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
   - Otherwise a click on "show password" on an allowed site would run unasked, and the next screenshot would show the password.
   - Allowing a site never depends on the operator leaving sign-in origins out.
 - **No browser call writes files where the model chose.** A call with a `filename` argument is refused, because page content could otherwise overwrite project files.
+- **A turn started by a project's report asks before every browser write** (B25b, after B36b; **[2026-11-10, B36 review]**): while the Session's newest user message has the `report` source, writes on every site ask, as on a page with a secret field. A report's text is steered by workers and outside issues, and it reaches the Mumbo that holds the person's accounts.
 - **Network request details are denied.** A request's details carry its `Cookie` header and form body, so a login's password or a session cookie would reach the model.
   - `browser_network_request` is refused outright.
   - The request list stays a read only if it shows no headers or bodies; otherwise it is refused too.
