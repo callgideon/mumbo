@@ -26,6 +26,7 @@ import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import * as McpClient from '../src/index.ts'
 import { publicToolName } from '../src/tools.ts'
 import { createTransport } from '../src/transport.ts'
+import { TestCredentials } from './credential-fixture.ts'
 
 const linux = process.platform === 'linux' ? describe : describe.skip
 const fixture = fileURLToPath(new URL('./fixtures/environment-server.mjs', import.meta.url))
@@ -123,6 +124,39 @@ linux('a stdio server started through the run-as provider', () => {
     })
     const report = JSON.parse((result.content[0] as { type: 'text'; text: string }).text) as { uid: number; cwd: string; env: Record<string, string> }
     expect(report).toEqual({ uid: own.uid, cwd: home, env: { ENTRY: 'set', HOME: home, USER: 'mcpserver', PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' } })
+  }, 30_000)
+
+  it('refuses a credential in the command line, which the model\'s identity can read, before resolving it, and passes one in env', async () => {
+    vi.stubEnv('TMPDIR', directory())
+    const groups = readFileSync('/proc/self/status', 'utf8').split('\n').find(line => line.startsWith('Groups:'))!
+      .slice('Groups:'.length).trim().split(/\s+/u).filter(id => id !== '').map(Number).sort((a, b) => a - b)
+    const own = { uid: process.getuid!(), gid: process.getgid!(), groups }
+    const home = directory()
+    const ctx = await mountRegistry()
+    await ctx.plugin(TestCredentials)
+    const credentials = ctx.get('credentials') as TestCredentials
+    credentials.values.set('MCP_TOKEN', 'person-token')
+    const resolve = vi.spyOn(credentials, 'resolve')
+    await ctx.plugin(LocalSubprocessRuntime, {
+      runAs: { ...own, inherit: [], set: { HOME: '/home/agent', USER: 'agent' }, secretNames: ['DEEPSEEK_API_KEY'] },
+      identities: { mcpserver: { ...own, inherit: [], set: { HOME: home, USER: 'mcpserver', PATH: '/usr/bin:/bin' }, secretNames: ['DEEPSEEK_API_KEY'] } },
+      serverIdentity: 'mcpserver',
+    })
+    const spawn = vi.spyOn(ctx.subprocess, 'spawn')
+    const refusal = 'command or args reference ${credential:MCP_TOKEN}, which would put the credential in the server\'s command line'
+    for (const exposed of [{ args: [fixture, '--token=${credential:MCP_TOKEN}'] }, { command: '${credential:MCP_TOKEN}' }]) {
+      const config = anonymous({ ...exposed, expandTemplates: true })
+      expect(await McpClient.probeServer(ctx, config)).toMatchObject({ ok: false, message: expect.stringContaining(refusal) as string })
+      await expect(ctx.plugin(McpClient, config)).rejects.toMatchObject({ cause: { message: expect.stringContaining(refusal) as string } })
+    }
+    expect(spawn).not.toHaveBeenCalled()
+    expect(resolve).not.toHaveBeenCalled()
+    await ctx.plugin(McpClient, anonymous({ env: { TOKEN: '${credential:MCP_TOKEN}' }, expandTemplates: true }))
+    const result = await executeToolFixture(ctx, {
+      signal: new AbortController().signal, callId: ToolCallId('identity-3'), name: publicToolName('ident', 'environment'), arguments: {},
+    })
+    const report = JSON.parse((result.content[0] as { type: 'text'; text: string }).text) as { env: Record<string, string> }
+    expect(report.env.TOKEN).toBe('person-token')
   }, 30_000)
 })
 
