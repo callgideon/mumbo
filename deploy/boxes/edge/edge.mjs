@@ -33,7 +33,7 @@ const checkNames = (name, fallback) => {
 /** A bare lowercase hostname with at least one dot: no scheme, port, path or trailing dot. Anything else fails at start. */
 const hostname = (name, fallback) => {
   const value = env(name, fallback)
-  if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(value)) throw new Error(`edge: ${name} must be a bare lowercase hostname such as boxes.mumbo.si, not ${JSON.stringify(value)}`)
+  if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(value)) throw new Error(`edge: ${name} must be a bare lowercase hostname such as app.mumbo.si, not ${JSON.stringify(value)}`)
   return value
 }
 /** GITHUB_AGENT_ID, the agent's numeric GitHub user id, or undefined; set together with GITHUB_AGENT_LOGIN or fails. */
@@ -57,12 +57,12 @@ const cookieName = (name, fallback) => {
 const redirectUris = (name) => {
   const uris = env(name).split(',').map(s => s.trim()).filter(Boolean)
   const exact = (v) => { try { const u = new URL(v); return `${u.origin}${u.pathname}` === v } catch { return false } }
-  if (uris.length === 0 || !uris.every(exact)) throw new Error(`edge: ${name} must list origin-and-path URIs such as https://boxes.mumbo.si/oauth2/callback, not ${JSON.stringify(env(name))}`)
+  if (uris.length === 0 || !uris.every(exact)) throw new Error(`edge: ${name} must list origin-and-path URIs such as https://app.mumbo.si/oauth2/callback, not ${JSON.stringify(env(name))}`)
   return uris
 }
 export const config = () => ({
   publicHost: env('PUBLIC_HOST'),
-  projectDomain: hostname('PROJECT_DOMAIN', 'boxes.mumbo.si'),  // project boxes are served at p-<16 hex>.<this>
+  projectDomain: hostname('PROJECT_DOMAIN', env('PUBLIC_HOST')),  // project boxes are served at p-<16 hex>.<this>
   llmHost: env('LLM_HOST'),
   signinCookie: cookieName('SIGNIN_COOKIE', SIGNIN_COOKIE),  // oauth2-proxy's --cookie-name; see isSignin
   template: env('BOX_TEMPLATE', 'mumbo-box'),
@@ -474,7 +474,7 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
       }
       await run(box, 'chmod +x /root/.mumbo/start.sh && /root/.mumbo/start.sh')
       const now = Date.now()
-      await store.putBox(box.sandboxId, { email, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), active: now, extended: now, backedUp: now, paused: false })
+      await store.putBox(box.sandboxId, { email, host: boxSite(cfg, email).host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), active: now, extended: now, backedUp: now, paused: false })
       say({ msg: 'created', user: email, box: box.sandboxId })
       return box.sandboxId
     } catch (error) {
@@ -506,7 +506,7 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
             await run(box, '/root/.mumbo/start.sh')
           }
           const now = Date.now()
-          await store.putBox(id, { email, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), active: now, extended: now, backedUp: known?.backedUp ?? 0, paused: false })
+          await store.putBox(id, { email, host: known?.host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), active: now, extended: now, backedUp: known?.backedUp ?? 0, paused: false })
         } catch (error) {
           // A snapshot that cannot be resumed (its node died before the upload finished, or dsh never comes back)
           // must not strand the user: drop it and rebuild from the latest S3 backup.
@@ -522,9 +522,16 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
   }
   const pick = async (id) => {
     const b = await store.getBox(id)
+    // The masked host (E2B maskRequestHost) is recorded at creation; for a box recorded without it (adopted, or created
+    // before the record held it) E2B is asked once.
+    let host = b.host
+    if (!host) {
+      host = (await e2b.Sandbox.getInfo(id)).network?.maskRequestHost
+      if (host) await store.patchBox(id, { host }); else say({ level: 'warn', msg: 'no masked host; Origin passes unchanged', user: b.email, box: id })
+    }
     // A project box whose image runs @mumbo/edge-member: members get a signed header, never the owner launch token.
     const member = b.memberAuth ? (email) => memberHeader(memberKey(edgeKey, id), email) : undefined
-    return { id, token: b.launch, traffic: b.traffic, ...(member ? { member } : {}) }
+    return { id, token: b.launch, traffic: b.traffic, host, ...(member ? { member } : {}) }
   }
 
   /** Record activity (a browser request, a WebSocket frame or a model call) and push E2B's own pause timer out. */
@@ -661,9 +668,12 @@ const DROP = new Set(['connection', 'keep-alive', 'proxy-connection', 'transfer-
 /** Which box port a main-host request goes to: the desktop live view (noVNC, :6080) under /desktop/, otherwise dsh
  *  (:3080). The old project path /p/<id>/… redirects to the project's own origin (boxSite). */
 export function boxRoute(url, projectDomain) {
-  const p = /^\/p\/([0-9a-f]{16})(\/.*)?$/.exec(url)
-  if (p) return { redirect: `https://p-${p[1]}.${projectDomain}${p[2] ?? '/'}` }
-  if (url === '/desktop' || url === '/desktop/') return { redirect: '/desktop/vnc.html?autoconnect=1&resize=remote&path=desktop/websockify' }
+  // Matched on the path: former-host redirects add a query (moved=1) even to links that had none.
+  const q = url.indexOf('?')
+  const path = q < 0 ? url : url.slice(0, q), query = q < 0 ? '' : url.slice(q)
+  const p = /^\/p\/([0-9a-f]{16})(\/.*)?$/.exec(path)
+  if (p) return { redirect: `https://p-${p[1]}.${projectDomain}${p[2] ?? '/'}${query}` }
+  if (path === '/desktop' || path === '/desktop/') return { redirect: '/desktop/vnc.html?autoconnect=1&resize=remote&path=desktop/websockify' }
   if (url.startsWith('/desktop/')) return { port: '6080', path: url.slice('/desktop'.length), base: '' }
   return { port: '3080', path: url, base: '' }
 }
@@ -673,10 +683,13 @@ export function boxRoute(url, projectDomain) {
  *  SIGNIN_COOKIE still hold. */
 const isSignin = (cfg, cookie) => [cfg.signinCookie ?? SIGNIN_COOKIE, '_oauth2_proxy'].some(p => cookie.split('=')[0].trim().startsWith(p))
 /** Headers for the box: client headers minus hop-by-hop, identity and E2B headers, plus E2B routing for this box only.
- *  The browser's Origin passes unchanged; dsh accepts it only when it equals the box's masked host (boxSite). */
+ *  dsh accepts an Origin only when it equals the box's masked host (target.host). A same-origin Origin
+ *  (https://<the request's Host>) becomes https://<target.host>, because a box created before PUBLIC_HOST or
+ *  PROJECT_DOMAIN changed keeps the former name as its masked host. Any other Origin, and Sec-Fetch-Site, pass unchanged. */
 export function boxHeaders(cfg, incoming, target, port = '3080') {
   const out = {}
   for (const [k, v] of Object.entries(incoming)) if (!DROP.has(k) && !k.startsWith('x-forwarded-') && !k.startsWith('e2b-')) out[k] = v
+  if (target.host && out.origin === `https://${hostOf({ headers: incoming })}`) out.origin = `https://${target.host}`
   // The sign-in cookie (oauth2-proxy) never reaches a box: a box that saw it could replay it as the signed-in person.
   // Every box request goes through here: HTTP, WebSocket upgrades and the relay (boxFetcher).
   if (out.cookie !== undefined) {
@@ -711,7 +724,7 @@ export function homePage(cfg, res, email, projects) {
  *  (`siteHost`, boxSite) would send it. */
 export const boxFetcher = (cfg) => (target, siteHost, path, { method = 'GET', headers = {}, body, member } = {}) => new Promise((resolve, reject) => {
   const req = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method, path,
-    headers: { ...boxHeaders(cfg, { ...headers, origin: `https://${siteHost}`, ...(body ? { 'content-length': Buffer.byteLength(body) } : {}) }, target, '3080'), ...(member ? { 'x-mumbo-member': member } : {}) } }, (r) => {
+    headers: { ...boxHeaders(cfg, { ...headers, host: siteHost, origin: `https://${siteHost}`, ...(body ? { 'content-length': Buffer.byteLength(body) } : {}) }, target, '3080'), ...(member ? { 'x-mumbo-member': member } : {}) } }, (r) => {
     const chunks = []
     r.on('data', c => chunks.push(c)).on('end', () => resolve({ status: r.statusCode, setCookie: r.headers['set-cookie'] ?? [], body: Buffer.concat(chunks).toString() }))
   })
@@ -840,7 +853,7 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log
     })
     const to = routeOf(host, req.url)
     if (!to) return page(res, 404, 'Not found.', false)
-    if (!to.project && (req.url === '/home' || req.url === '/home/')) return homePage(cfg, res, email, await projects?.list(email) ?? [])
+    if (!to.project && /^\/home\/?(?:\?|$)/.test(req.url)) return homePage(cfg, res, email, await projects?.list(email) ?? [])
     if (to.redirect) return res.writeHead(302, { location: to.redirect, 'cache-control': 'no-store' }).end()
     // dsh refuses a cross-origin /api request itself; the desktop (websockify) checks no Origin, so anything but a read
     // must come from its own page.

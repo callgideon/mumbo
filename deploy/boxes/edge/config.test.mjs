@@ -2,10 +2,10 @@
 import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { admitted, config } from './edge.mjs'
+import { admitted, config, startScript } from './edge.mjs'
 
 const base = { PUBLIC_HOST: 'boxes.mumbo.si', LLM_HOST: 'llm.boxes.mumbo.si', BACKUP_BUCKET: 'backups' }
-const M1 = ['APPROVE_HOST', 'GITHUB_AGENT_LOGIN', 'GITHUB_AGENT_ID', 'REQUIRED_CHECKS', 'DAILY_TOKENS_USER', 'DAILY_TOKENS_PROJECT', 'BOX_TEMPLATE', 'PROJECT_TEMPLATE',
+const M1 = ['PROJECT_DOMAIN', 'APPROVE_HOST', 'GITHUB_AGENT_LOGIN', 'GITHUB_AGENT_ID', 'REQUIRED_CHECKS', 'DAILY_TOKENS_USER', 'DAILY_TOKENS_PROJECT', 'BOX_TEMPLATE', 'PROJECT_TEMPLATE',
   'AUDIT_PREFIX', 'GITHUB_AGENT_TOKEN', 'GITHUB_APP_ID', 'GITHUB_APP_KEY', 'GITHUB_MERGE_TOKEN', 'NTFY_TOPIC', 'SIGNIN_COOKIE', 'SUPABASE_URL', 'MUMBO_OAUTH_REDIRECT_URIS',
   'OPENROUTER_MODELS', 'OPENROUTER_API_KEY', 'OPENROUTER_ZDR', 'OPENROUTER_IMAGE_TOKENS']
 /** config() with exactly `base` plus `vars` set among the variables it reads here. */
@@ -30,6 +30,28 @@ test('M1 settings: defaults, and secrets optional so the edge starts before they
   const set = configWith({ GITHUB_APP_ID: '5295930', GITHUB_APP_KEY: 'PEM', REQUIRED_CHECKS: ' Static , unit,' })
   assert.equal(set.appId, '5295930'); assert.equal(set.appKey, 'PEM')
   assert.deepEqual(set.requiredChecks, ['Static', 'unit'], 'trimmed, case kept')
+})
+
+test('production hosts: app.mumbo.si gives the project domain and the approve host; a new box\'s start script names only app.mumbo.si hosts', () => {
+  const c = configWith({ PUBLIC_HOST: 'app.mumbo.si', LLM_HOST: 'llm.app.mumbo.si' })
+  assert.equal(c.projectDomain, 'app.mumbo.si')
+  assert.equal(c.approveHost, 'approve.app.mumbo.si')
+  const script = startScript(c, 'mbx.t')
+  assert.match(script, /DEEPSEEK_BASE_URL=https:\/\/llm\.app\.mumbo\.si\/anthropic DEEPSEEK_SEARCH_BASE_URL=https:\/\/llm\.app\.mumbo\.si /)
+  assert.match(script, /url: https:\/\/llm\.app\.mumbo\.si\/mcp\n/)
+  assert.match(script, / --public-url https:\/\/app\.mumbo\.si\/ --trusted-host app\.mumbo\.si /)
+  assert.doesNotMatch(script, /boxes\.mumbo\.si/)
+})
+
+test('prod/edge.tf former-host redirects: 302 for now, path kept (projects to /home), query marked moved=1 first so no target equals a cached plain URL', () => {
+  const tf = readFileSync(new URL('../prod/edge.tf', import.meta.url), 'utf8')
+  const rule = /resource "aws_lb_listener_rule" "old_hosts" \{[\s\S]*?\n\}\n/.exec(tf)?.[0] ?? ''
+  assert.match(rule, /main\s+= \[5, local\.old_hosts, local\.public_host, "\/#\{path\}"\]/)
+  assert.match(rule, /approve\s+= \[6, \["approve\.\$\{local\.old_host\}"\], local\.approve_host, "\/#\{path\}"\]/)
+  assert.match(rule, /projects = \[40, \["\*\.\$\{local\.old_host\}"\], local\.public_host, "\/home"\]/, 'the wildcard ranks below llm.boxes (model, 20)')
+  assert.match(rule, /host\s+= each\.value\[2\]\n.*\n.*\n\s+path\s+= each\.value\[3\]\n\s+query\s+= "moved=1&#\{query\}"\n\s+status_code = "HTTP_302"\n/)
+  assert.match(tf, /old_hosts\s+= \[local\.old_host, "api\.mumbo\.si"\]/)
+  assert.match(tf, /old_host\s+= "boxes\.mumbo\.si"/)
 })
 
 test('an empty REQUIRED_CHECKS fails at start instead of dropping the merge gate\'s CI requirement', () => {

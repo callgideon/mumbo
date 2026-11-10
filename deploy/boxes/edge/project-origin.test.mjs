@@ -45,7 +45,8 @@ async function setup(extra = {}) {
   const key = memberKey('k', 'pbox')
   const ensured = []; const approved = []
   const box = {
-    ensure: async (p) => { ensured.push(p); return p === `project:${id}` ? { id: 'pbox', token: 'OWNER', member: (e) => memberHeader(key, e) } : { id: 'ubox', token: 'T' } },
+    // Both boxes were created under boxes.mumbo.si, so that is their masked host (boxSite at creation).
+    ensure: async (p) => { ensured.push(p); return p === `project:${id}` ? { id: 'pbox', token: 'OWNER', host: `p-${id}.boxes.mumbo.si`, member: (e) => memberHeader(key, e) } : { id: 'ubox', token: 'T', host: 'boxes.mumbo.si' } },
     touch: async () => {}, forget: async () => {},
   }
   const approve = async (req, res) => { approved.push(req.url); res.writeHead(200).end('approve page') }
@@ -126,6 +127,40 @@ test('an HTTP request from Origin: https://boxes.mumbo.si reaches the project bo
   } finally { t.close() }
 })
 
+test('on app.mumbo.si, boxes masked as boxes.mumbo.si get a same-origin Origin as their own; foreign Origins, no Origin and Sec-Fetch-Site pass unchanged', async () => {
+  const t = await setup({ publicHost: 'app.mumbo.si', projectDomain: 'app.mumbo.si', approveHost: 'approve.app.mumbo.si' })
+  const main = 'app.mumbo.si', oldUser = 'https://boxes.mumbo.si', oldProject = `https://p-${t.id}.boxes.mumbo.si`
+  const post = (host, headers) => call(t.port, { method: 'POST', path: '/api/x', headers: { host, cookie: 'dsh-auth-x=1', ...headers } })
+  try {
+    assert.equal((await post(main, { origin: `https://${main}`, 'sec-fetch-site': 'same-origin' })).body, 'from box', 'a same-origin POST reaches dsh')
+    await post(t.host, { origin: `https://${t.host}`, 'sec-fetch-site': 'same-origin' })
+    assert.ok((await call(t.port, { path: '/api/remote.mux', headers: { host: main, origin: `https://${main}`, ...upgrade } })).upgraded)
+    assert.ok((await call(t.port, { path: '/api/remote.mux', headers: { host: t.host, origin: `https://${t.host}`, ...upgrade } })).upgraded)
+    // A project page posting to the founder's box keeps its own Origin, which that box's dsh refuses (not its masked host).
+    await post(main, { origin: `https://${t.host}`, 'sec-fetch-site': 'same-site' })
+    await post(main, {})
+    await post(main, { origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' })
+    assert.deepEqual(t.seen.map(s => [s.headers['e2b-sandbox-id'], s.headers.origin, s.headers['sec-fetch-site']]), [
+      ['ubox', oldUser, 'same-origin'], ['pbox', oldProject, 'same-origin'], ['ubox', oldUser, undefined], ['pbox', oldProject, undefined],
+      ['ubox', `https://${t.host}`, 'same-site'], ['ubox', undefined, undefined], ['ubox', 'https://evil.example', 'cross-site'],
+    ])
+  } finally { t.close() }
+})
+
+test('on app.mumbo.si, the URLs the former-host redirects send to (marker query first) reach the same pages', async () => {
+  const t = await setup({ publicHost: 'app.mumbo.si', projectDomain: 'app.mumbo.si', approveHost: 'approve.app.mumbo.si' })
+  const main = 'app.mumbo.si'
+  try {
+    assert.equal((await call(t.port, { path: '/?moved=1&', headers: { host: main } })).headers.location, '/?token=T', 'the launch exchange')
+    assert.match((await call(t.port, { path: '/desktop/?moved=1&', headers: { host: main } })).headers.location, /^\/desktop\/vnc\.html\?/)
+    assert.match((await call(t.port, { path: '/home?moved=1&', headers: { host: main } })).body, /<h1>mumbo<\/h1>/)
+    for (const [path, to] of [[`/p/${t.id}/x?moved=1&`, '/x?moved=1&'], [`/p/${t.id}?moved=1&`, '/?moved=1&'], [`/p/${t.id}?moved=1&a=b`, '/?moved=1&a=b'], [`/p/${t.id}/?moved=1&a=b`, '/?moved=1&a=b']]) {
+      assert.equal((await call(t.port, { path, headers: { host: main } })).headers.location, `https://${t.host}${to}`, path)
+    }
+    assert.deepEqual(t.ensured, ['a@x.com'], 'only the launch exchange started a box; the redirects started none')
+  } finally { t.close() }
+})
+
 test('an upgrade from another origin, or with none, is refused, so a project page cannot open the visitor\'s desktop; same-origin upgrades work', async () => {
   const t = await setup()
   const main = 'boxes.mumbo.si'
@@ -181,7 +216,7 @@ function configFrom(vars) {
 const env = { PUBLIC_HOST: 'boxes.mumbo.si', LLM_HOST: 'llm.boxes.mumbo.si', BACKUP_BUCKET: 'b', ALLOWED_EMAILS: '@x.com' }
 
 test('with PROJECT_DOMAIN=projects.example, p-<id>.projects.example is the project origin, p-<id>.boxes.mumbo.si answers 404, and links use the new domain', async () => {
-  assert.equal(configFrom(env).projectDomain, 'boxes.mumbo.si', 'the default changes nothing')
+  assert.equal(configFrom(env).projectDomain, env.PUBLIC_HOST, 'unset: the public host')
   const c = configFrom({ ...env, PROJECT_DOMAIN: 'projects.example' })
   const t = await setup(c)
   const host = `p-${t.id}.projects.example`, old = `p-${t.id}.boxes.mumbo.si`
