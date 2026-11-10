@@ -1,19 +1,20 @@
 /** Loopback MCP door: named, allowlisted people drive the host's assistant through one authenticated `/mcp` route. */
 
-import { readFile } from 'node:fs/promises'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-host-webserver'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import z from '@deepseek-ai/schemastery'
 import { McpServer } from '@modelcontextprotocol/server'
 import { listenForAsks, register as registerAsks } from './asks.ts'
-import { ensureAssistant } from './assistant.ts'
-import { HANDLE_PATTERN } from './auth.ts'
+import { ensureAssistant, resolveExisting } from './assistant.ts'
+import { HANDLE_PATTERN, readKey } from './auth.ts'
 import { register as registerConversation } from './conversation.ts'
 import { gateWhileHalted, register as registerHalt } from './halt.ts'
 import { createRouteHandler } from './http.ts'
 import { register as registerStatus } from './status.ts'
-import { type Idem, mcpDomain, prune } from './store.ts'
+import { type AssistantRecord, type Idem, mcpDomain, prune } from './store.ts'
 import type { ToolDeps } from './tool.ts'
 
 /** Cordis function-plugin name. */
@@ -40,25 +41,61 @@ const INSTRUCTIONS = 'Text that came from the host, such as messages, ask detail
 
 /** MCP door configuration. */
 export interface Config {
-  /** File holding the bearer key; surrounding whitespace is ignored and an empty key fails load. */
+  /**
+   * File holding the bearer key, such as the per-box key the edge writes; surrounding whitespace is ignored. It is
+   * read at load, where a missing, unreadable or empty file fails load, and again for every request.
+   */
   readonly keyFile: string
-  /** Principal handles allowed to call, each matching `^[a-z][a-z0-9-]{0,31}$`. */
+  /** Principal handles allowed to call, at least one, each matching `^[a-z][a-z0-9-]{0,31}$`. */
   readonly allowlist: string[]
-  /** Title of the assistant Session the tools talk to. */
+  /**
+   * Id of an existing Session the tools talk to, such as `mumbo`, which another plugin creates; the tools answer
+   * `not_ready` until it exists. Absent, the plugin creates and keeps its own assistant Session.
+   */
+  readonly session?: string
+  /** Title of the assistant Session the plugin creates; unused with `session`. */
   readonly assistantTitle: string
-  /** Workspace directory of the assistant Session. */
+  /**
+   * Directory whose git checkout `task_status` and `task_result` read, and the workspace of the assistant Session the
+   * plugin creates. When it is not a git checkout, `task_status` reports `worktrees` as `null` and `task_result` answers
+   * `not_found`.
+   */
   readonly assistantCwd: string
   /** Tool names whose approval only a person in the browser may give. */
   readonly irreversibleTools: string[]
+  /**
+   * Tools served: `full` serves every tool; `door` serves `agent_send`, `agent_read`, `needs_you`, `task_reply`,
+   * `task_status` and `task_result`, and `task_reply` answers questions only.
+   */
+  readonly profile: 'full' | 'door'
 }
 
 export const Config: z<Config> = z.object({
   keyFile: z.string().required(),
-  allowlist: z.array(z.string().pattern(HANDLE_PATTERN)).required(),
+  allowlist: z.array(z.string().required().pattern(HANDLE_PATTERN)).min(1).required(),
+  session: z.string().pattern(/^\S+$/),
   assistantTitle: z.string().default('assistant'),
   assistantCwd: z.string().required(),
   irreversibleTools: z.array(z.string()).default([]),
+  profile: z.union(['full', 'door'] as const).default('full'),
 })
+
+/**
+ * Resolve where the tools find their Session: the configured existing Session, or the plugin's own.
+ * @param ctx - plugin context carrying `sessionController` and `workspaceRegistry`.
+ * @param config - validated configuration.
+ * @param table - the plugin's `assistant` table, which keeps the id of the plugin's own Session.
+ * @returns a function that resolves the Session's live Agent for each call.
+ */
+function assistantOf(ctx: Context, config: Config, table: KvTable<'main', AssistantRecord>): () => Promise<Agent> {
+  if (config.session !== undefined) {
+    const sessionId = SessionId(config.session)
+    return () => resolveExisting(ctx, sessionId)
+  }
+  // Concurrent first calls share one creation, so they find one assistant Session.
+  let ensuring: Promise<Agent> | undefined
+  return () => ensuring ??= ensureAssistant(ctx, config, table).finally(() => { ensuring = undefined })
+}
 
 /**
  * Own the plugin's resources in one effect, so disposal runs in order: the route goes first, the requests it
@@ -67,8 +104,8 @@ export const Config: z<Config> = z.object({
  * request ids, starts answering asks, and registers `/mcp`.
  * @param ctx - plugin context carrying the injected services.
  * @param config - validated configuration.
- * @throws when the domain does not open, or the key file is unreadable or holds only whitespace; no route registers
- *   then, and the gate goes with the failed load.
+ * @throws when the domain does not open, or the key file is missing, unreadable or holds only whitespace; no route
+ *   registers then, and the gate goes with the failed load.
  */
 export async function apply(ctx: Context, config: Config): Promise<void> {
   await ctx.effect(async function* () {
@@ -76,25 +113,30 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     yield () => domain.close()
     const halt = domain.table('halt')
     yield gateWhileHalted(ctx, halt)
-    const key = (await readFile(config.keyFile, 'utf8')).trim()
-    if (key === '') throw new Error(`mumbo-mcp: keyFile ${config.keyFile} is empty`)
+    await readKey(config.keyFile)
     const idem: Idem = { table: domain.table('idem'), running: new Map() }
     await prune(idem.table)
-    // Concurrent first calls share one creation, so they find one assistant Session.
-    let ensuring: Promise<Agent> | undefined
-    const assistant = (): Promise<Agent> => ensuring ??= ensureAssistant(ctx, config, domain.table('assistant')).finally(() => { ensuring = undefined })
+    const assistant = assistantOf(ctx, config, domain.table('assistant'))
     const asks = listenForAsks(ctx, config.irreversibleTools)
     const closing = new AbortController()
-    /** One server per request, its tools bound to the authenticated principal; each tool module registers here. */
-    const buildServer = (principal: string): McpServer => {
+    const door = config.profile === 'door'
+    /** One server per request, its tools bound to the authenticated principal and key name; each tool module registers here. */
+    const buildServer = (principal: string, via: string | undefined): McpServer => {
       const server = new McpServer({ name, version: '0.0.1' }, { capabilities: { tools: {} }, instructions: INSTRUCTIONS })
-      const deps: ToolDeps = { ctx, principal, idem, halt, assistantCwd: config.assistantCwd, assistant, asks, closing: closing.signal }
+      const deps: ToolDeps = {
+        ctx, principal, via, idem, halt, assistantCwd: config.assistantCwd, assistant, asks, questionsOnly: door, closing: closing.signal,
+      }
       registerConversation(server, deps)
       registerAsks(server, deps)
       registerStatus(server, deps)
-      registerHalt(server, deps)
+      if (!door) registerHalt(server, deps)
       return server
     }
+    // A key that turns unreadable or empty after load refuses requests until the edge writes it again.
+    const key = (): Promise<string | undefined> => readKey(config.keyFile).catch((error: unknown) => {
+      ctx.logger.error(`${String(error)}; /mcp answers 503 until the file holds a key`)
+      return undefined
+    })
     const handle = createRouteHandler({ key, allowlist: config.allowlist, buildServer })
     const admitted = new Set<Promise<void>>()
     yield async () => {

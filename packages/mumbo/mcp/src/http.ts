@@ -3,7 +3,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Readable } from 'node:stream'
 import { type McpServer, WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/server'
-import { checkKey, checkPrincipal } from './auth.ts'
+import { checkKey, checkPrincipal, readKeyName } from './auth.ts'
 
 /** Largest accepted request body: room for the largest valid tool call after JSON escaping. */
 const MAX_BODY_BYTES = 1024 * 1024
@@ -11,29 +11,34 @@ const MAX_BODY_BYTES = 1024 * 1024
 /** Request headers the stateless JSON exchange reads; `authorization` stays out of the MCP server. */
 const FORWARDED_HEADERS = ['accept', 'content-type', 'content-length', 'mcp-protocol-version'] as const
 
+/** Header naming the caller's key, read only once the key authenticated the request. */
+const KEY_NAME_HEADER = 'x-mumbo-key-name'
+
 /** Values the route handler needs, fixed at plugin load. */
 export interface RouteOptions {
-  /** Trimmed bearer key. */
-  readonly key: string
+  /** The current trimmed bearer key, read per request; `undefined` when it cannot be read or is empty. */
+  readonly key: () => Promise<string | undefined>
   /** Principal handles allowed to call. */
   readonly allowlist: readonly string[]
-  /** Build a fresh MCP server whose tools act for one principal. */
-  readonly buildServer: (principal: string) => McpServer
+  /** Build a fresh MCP server whose tools act for one principal, through the key named `via` when the edge named it. */
+  readonly buildServer: (principal: string, via: string | undefined) => McpServer
 }
 
 /** Answer a refused request with a plain-text reason that carries no request data. */
-function refuse(response: ServerResponse, status: 401 | 403 | 405, message: string): void {
+function refuse(response: ServerResponse, status: 400 | 401 | 403 | 405 | 503, message: string): void {
   response.writeHead(status, { 'content-type': 'text/plain; charset=utf-8' })
   response.end(message)
 }
 
 /**
- * Create the `/mcp` handler. Only `POST` is served (`405` otherwise); a wrong
- * or missing key answers `401` and a malformed or unlisted principal `403`,
- * before any body is read. Each accepted request gets its own server and
- * transport, closed once the JSON response is written; the transport answers
- * `413` for a body over 1 MiB and its JSON-RPC errors for protocol failures.
- * @param options - key, allowlist, and the per-request server factory.
+ * Create the `/mcp` handler. Only `POST` is served (`405` otherwise); an
+ * unreadable or empty key file answers `503`, a wrong or missing key `401`,
+ * a malformed or unlisted principal `403`, and a repeated or malformed key
+ * name `400`, before any body is read. Each accepted request gets its own
+ * server and transport, closed once the JSON response is written; the
+ * transport answers `413` for a body over 1 MiB and its JSON-RPC errors for
+ * protocol failures.
+ * @param options - key source, allowlist, and the per-request server factory.
  * @returns the route handler.
  */
 export function createRouteHandler(options: RouteOptions): (request: IncomingMessage, response: ServerResponse) => Promise<void> {
@@ -43,7 +48,12 @@ export function createRouteHandler(options: RouteOptions): (request: IncomingMes
       refuse(response, 405, 'method not allowed')
       return
     }
-    if (!checkKey(request.headers.authorization, options.key)) {
+    const key = await options.key()
+    if (key === undefined) {
+      refuse(response, 503, 'key unavailable')
+      return
+    }
+    if (!checkKey(request.headers.authorization, key)) {
       refuse(response, 401, 'invalid key')
       return
     }
@@ -53,11 +63,17 @@ export function createRouteHandler(options: RouteOptions): (request: IncomingMes
       refuse(response, 403, 'principal not allowed')
       return
     }
+    // Node joins a repeated header with `, `, which readKeyName refuses.
+    const via = readKeyName(request.headersDistinct[KEY_NAME_HEADER]?.join(', '))
+    if (via === false) {
+      refuse(response, 400, `malformed ${KEY_NAME_HEADER}`)
+      return
+    }
     const headers = new Headers()
     for (const name of FORWARDED_HEADERS) {
       for (const value of request.headersDistinct[name] ?? []) headers.append(name, value)
     }
-    const server = options.buildServer(principal)
+    const server = options.buildServer(principal, via)
     try {
       const transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: undefined,

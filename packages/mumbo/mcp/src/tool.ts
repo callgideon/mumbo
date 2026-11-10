@@ -15,16 +15,20 @@ export interface ToolDeps {
   readonly ctx: Context
   /** The authenticated handle the tools act for. */
   readonly principal: string
+  /** The sanitised name of the key the caller used, when the edge named it, such as `laptop Claude Code`. */
+  readonly via: string | undefined
   /** Remembered results by request id. */
   readonly idem: Idem
   /** The halt flag. */
   readonly halt: KvTable<'main', HaltRecord>
-  /** The assistant Session's workspace directory, a git checkout. */
+  /** The directory whose git checkout `task_status` and `task_result` read. */
   readonly assistantCwd: string
-  /** Resolve, or create once, the assistant Session's live Agent. */
+  /** Resolve the assistant Session's live Agent: the configured existing Session, or the plugin's own, created once. */
   readonly assistant: () => Promise<Agent>
   /** Open asks by `ask_id`, shared by every request. */
   readonly asks: ReadonlyMap<AskId, PendingAsk>
+  /** Whether `task_reply` answers questions only, leaving tool approvals and plan reviews to a person in the browser. */
+  readonly questionsOnly: boolean
   /** Aborted once the plugin starts unloading; a waiting tool returns early. */
   readonly closing: AbortSignal
 }

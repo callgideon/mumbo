@@ -28,6 +28,9 @@ const replyArgs = z.object({
   feedback: z.string().exactOptional().describe('For a rejected plan: what to change.'),
 })
 
+/** The `task_reply` arguments when it answers questions only. */
+const answerArgs = replyArgs.omit({ decision: true, feedback: true })
+
 /** One `task_reply`. */
 type Reply = z.output<typeof replyArgs>
 
@@ -177,22 +180,39 @@ async function callArguments(deps: ToolDeps, ask: PendingAsk, signal: AbortSigna
   return {}
 }
 
+/** Tool descriptions by whether `task_reply` answers questions only. */
+const DESCRIPTIONS = {
+  all: {
+    needsYou: 'List what waits for a person: tool approvals with the call\'s arguments, plan reviews and questions from any Session. '
+      + 'Answer one whose answerable is true with task_reply; the others can only be answered in the browser.',
+    reply: 'Answer one ask from needs_you. A tool or plan ask takes decision approve or reject; a rejected plan may carry feedback. '
+      + 'A question ask takes answers. An ask answered in the browser first gives not_found.',
+  },
+  questionsOnly: {
+    needsYou: 'List what waits for a person: questions from any Session, and tool approvals with the call\'s arguments and plan reviews '
+      + 'for information. Answer a question with task_reply; approvals and plan reviews (answerable false) can only be answered in the browser.',
+    reply: 'Answer one question from needs_you with answers. Tool approvals and plan reviews cannot be answered here. '
+      + 'A question answered in the browser first gives not_found.',
+  },
+} as const
+
 /**
  * Register `needs_you` and `task_reply` for one principal.
  * @param server - the request's MCP server.
  * @param deps - plugin state, the open asks, and the principal.
  */
 export function register(server: McpServer, deps: ToolDeps): void {
+  const descriptions = deps.questionsOnly ? DESCRIPTIONS.questionsOnly : DESCRIPTIONS.all
   defineTool(
     server,
     'needs_you',
-    'List what waits for a person: tool approvals with the call\'s arguments, plan reviews and questions from any Session. '
-    + 'Answer one with task_reply; an irreversible ask can only be answered in the browser.',
+    descriptions.needsYou,
     z.object({}),
     async (_args, signal) => JSON.stringify({
       asks: await Promise.all([...deps.asks.values()].map(async ask => ({
         ...ask.view,
         detail: fence(ask.view.detail),
+        answerable: !ask.view.irreversible && (!deps.questionsOnly || ask.view.kind === 'question'),
         ...await callArguments(deps, ask, signal),
       }))),
     }),
@@ -200,12 +220,15 @@ export function register(server: McpServer, deps: ToolDeps): void {
   defineTool(
     server,
     'task_reply',
-    'Answer one ask from needs_you. A tool or plan ask takes decision approve or reject; a rejected plan may carry feedback. '
-    + 'A question ask takes answers. An ask answered in the browser first gives not_found.',
-    replyArgs,
+    descriptions.reply,
+    deps.questionsOnly ? answerArgs : replyArgs,
     async args => await once(deps.idem, 'task_reply', deps.principal, args.request_id, args, () => {
       const ask = deps.asks.get(brandString<AskId>(args.ask_id))
       if (ask === undefined) throw new ToolError('not_found', `no open ask ${args.ask_id}: it was answered elsewhere or withdrawn`)
+      if (deps.questionsOnly && ask.view.kind !== 'question') {
+        const what = ask.view.kind === 'tool' ? 'tool approval' : 'plan review'
+        throw new ToolError('needs_person', `this ${what} can only be answered by a person in the browser; task_reply answers questions only`)
+      }
       ask.answer(args)
       return Promise.resolve(JSON.stringify({ ok: true }))
     }),

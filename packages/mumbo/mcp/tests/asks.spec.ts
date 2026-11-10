@@ -2,7 +2,7 @@ import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions'
 import { afterEach, describe, expect, it } from 'vitest'
 import * as McpDoor from '../src/index.ts'
-import { call, type FakeAgent, type Host, message, startHost, stopHosts } from './door-fixture.ts'
+import { call, type FakeAgent, type Host, listTools, message, startHost, stopHosts } from './door-fixture.ts'
 
 afterEach(stopHosts)
 
@@ -10,6 +10,7 @@ interface Listed {
   readonly ask_id: string
   readonly kind: string
   readonly detail: string
+  readonly answerable: boolean
 }
 
 const PLAN: AskUserQuestionItem = {
@@ -21,10 +22,10 @@ const PLAN: AskUserQuestionItem = {
   intent: { kind: 'plan-review', approve: 'Approve' },
 }
 
-/** A host with the plugin loaded. */
-async function door(): Promise<Host> {
+/** A host with the plugin loaded with `profile`. */
+async function door(profile: McpDoor.Config['profile'] = 'full'): Promise<Host> {
   const host = await startHost()
-  await host.ctx.plugin(McpDoor, host.config)
+  await host.ctx.plugin(McpDoor, { ...host.config, profile })
   return host
 }
 
@@ -76,8 +77,8 @@ describe('tool approvals', () => {
     void askTool(host, 'edit')
     const asks = await needsYou(host)
     expect(asks).toEqual([
-      { ask_id: expect.any(String) as string, kind: 'tool', session_id: 's1', tool: 'shell', detail: fenced('run shell'), irreversible: false },
-      { ask_id: expect.any(String) as string, kind: 'tool', session_id: 's1', tool: 'edit', detail: fenced(''), irreversible: false },
+      { ask_id: expect.any(String) as string, kind: 'tool', session_id: 's1', tool: 'shell', detail: fenced('run shell'), irreversible: false, answerable: true },
+      { ask_id: expect.any(String) as string, kind: 'tool', session_id: 's1', tool: 'edit', detail: fenced(''), irreversible: false, answerable: true },
     ])
     expect(asks[0]?.ask_id).not.toBe(asks[1]?.ask_id)
     const reply = await call(host.url, 'task_reply', { ask_id: asks[0]?.ask_id, request_id: 'r1', decision: 'approve' })
@@ -97,7 +98,7 @@ describe('tool approvals', () => {
     ])
     void askTool(host, 'shell', { agent, callId: 'c1', reason: 'run shell' })
     void askTool(host, 'shell', { agent, callId: 'c9' })
-    const tool = { ask_id: expect.any(String) as string, kind: 'tool', session_id: 's1', tool: 'shell', irreversible: false }
+    const tool = { ask_id: expect.any(String) as string, kind: 'tool', session_id: 's1', tool: 'shell', irreversible: false, answerable: true }
     expect(await needsYou(host)).toEqual([
       { ...tool, call_id: 'c1', detail: fenced('run shell'), arguments: fenced('\\{"command":"rm -r /srv/example"\\}') },
       { ...tool, call_id: 'c9', detail: fenced('') },
@@ -127,7 +128,7 @@ describe('tool approvals', () => {
     let answer: (outcome: ApprovalOutcome) => void = () => {}
     const outcome = askTool(host, 'deploy', { browser: new Promise((resolve) => { answer = resolve }) })
     const ask = await only(host)
-    expect(ask).toMatchObject({ kind: 'tool', tool: 'deploy', irreversible: true })
+    expect(ask).toMatchObject({ kind: 'tool', tool: 'deploy', irreversible: true, answerable: false })
     const reply = await call(host.url, 'task_reply', { ask_id: ask.ask_id, request_id: 'r1', decision: 'approve' })
     expect(reply).toMatchObject({ isError: true, value: { code: 'needs_person' } })
     expect(await needsYou(host)).toHaveLength(1)
@@ -170,7 +171,7 @@ describe('plan reviews', () => {
     const host = await door()
     const answer = askQuestions(host, [PLAN], { id: 's1' })
     const ask = await only(host)
-    expect(ask).toEqual({ ask_id: expect.any(String) as string, kind: 'plan', session_id: 's1', detail: fenced('# Plan\\n\\nShip it\\.'), irreversible: false })
+    expect(ask).toEqual({ ask_id: expect.any(String) as string, kind: 'plan', session_id: 's1', detail: fenced('# Plan\\n\\nShip it\\.'), irreversible: false, answerable: true })
     await call(host.url, 'task_reply', { ask_id: ask.ask_id, request_id: 'r1', decision: 'approve' })
     expect(await answer).toEqual({ answers: [{ id: 'plan-review', selected: ['Approve'] }] })
   })
@@ -200,7 +201,7 @@ describe('questions', () => {
     const questions: AskUserQuestionItem[] = [{ id: 'q1', question: 'Which store?', options: [{ label: 'json' }, { label: 'sqlite' }] }]
     const answer = askQuestions(host, questions)
     const ask = await only(host)
-    expect(ask).toEqual({ ask_id: expect.any(String) as string, kind: 'question', detail: expect.any(String) as string, irreversible: false })
+    expect(ask).toEqual({ ask_id: expect.any(String) as string, kind: 'question', detail: expect.any(String) as string, irreversible: false, answerable: true })
     expect(JSON.parse(ask.detail.split('\n')[1] ?? '')).toEqual(questions)
     const answers = [{ id: 'q1', selected: ['json'], custom: 'for now' }]
     await call(host.url, 'task_reply', { ask_id: ask.ask_id, request_id: 'r1', answers })
@@ -213,5 +214,35 @@ describe('questions', () => {
     const { ask_id } = await only(host)
     const reply = await call(host.url, 'task_reply', { ask_id, request_id: 'r1', decision: 'approve' })
     expect(reply).toMatchObject({ isError: true, value: { code: 'invalid' } })
+  })
+})
+
+describe('door profile', () => {
+  it('lists tool approvals and plan reviews as not answerable, refuses them with needs_person, and keeps them open', async () => {
+    const host = await door('door')
+    void askTool(host, 'shell')
+    void askQuestions(host, [PLAN], { id: 's1' })
+    const asks = await needsYou(host)
+    expect(asks.map(({ kind, answerable }) => ({ kind, answerable }))).toEqual([{ kind: 'tool', answerable: false }, { kind: 'plan', answerable: false }])
+    for (const [ask, what] of [[asks[0], 'tool approval'], [asks[1], 'plan review']] as const) {
+      const reply = await call(host.url, 'task_reply', { ask_id: ask?.ask_id, request_id: what.replace(' ', '-'), decision: 'approve' })
+      expect(reply).toEqual({
+        isError: true,
+        value: { code: 'needs_person', message: `this ${what} can only be answered by a person in the browser; task_reply answers questions only` },
+      })
+    }
+    expect((await needsYou(host)).map(({ ask_id }) => ask_id)).toEqual(asks.map(({ ask_id }) => ask_id))
+  })
+
+  it('answers a question and offers task_reply without decision or feedback', async () => {
+    const host = await door('door')
+    const answer = askQuestions(host, [{ id: 'q1', question: 'Which store?' }])
+    const ask = await only(host)
+    expect(ask).toMatchObject({ kind: 'question', answerable: true })
+    const answers = [{ id: 'q1', selected: ['json'] }]
+    expect(await call(host.url, 'task_reply', { ask_id: ask.ask_id, request_id: 'r1', answers })).toEqual({ isError: false, value: { ok: true } })
+    expect(await answer).toEqual({ answers })
+    const tools = await listTools(host.url)
+    expect(Object.keys(tools.find(tool => tool.name === 'task_reply')?.inputSchema.properties ?? {})).toEqual(['ask_id', 'request_id', 'answers'])
   })
 })
