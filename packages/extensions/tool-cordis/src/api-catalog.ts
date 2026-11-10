@@ -4497,8 +4497,14 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'its effective absolute directory.',
       },
       {
+        signature: 'chooser(session: Session): \'model\' | \'host\'',
+        description: 'Read who chose the committed directory, without filesystem I/O.',
+        parameters: [{ name: 'session', description: 'Session whose directory is requested.' }],
+        returns: '`\'host\'` for the original project and directories the person or the harness set; `\'model\'` otherwise, including directories recorded before the log named a chooser.',
+      },
+      {
         signature: 'ensure(agent: Agent, signal?: AbortSignal): Promise<string>',
-        description: 'Validate the current directory and restore the original project when it disappeared or, unless it is the original project, lies outside the model roots, so no directory reader follows a directory the model may not access. A missing original project is recreated empty through the filesystem provider and logged; files it held are not restored. Every Session in this process that was created before the recreation and works in, or falls back to, that project is told once.',
+        description: 'Validate the current directory and restore the original project when it disappeared or, when the model chose it, lies outside the model roots, so no directory reader follows a directory the model may not access. A directory the person or the harness chose is kept wherever it is, except that one under a model root whose real path now leaves the roots is not followed either. A missing original project is recreated empty through the filesystem provider and logged; files it held are not restored. Every Session in this process that was created before the recreation and works in, or falls back to, that project is told once.',
         parameters: [{ name: 'agent', description: 'live or unpublished Agent owning the Session.' }, { name: 'signal', description: 'cancellation for filesystem inspection and creation.' }],
         returns: 'the existing directory; recovery is committed before fulfillment. A notice failure is warned without reverting the committed state.',
         throws: ['when the original project cannot be recreated; the failure is logged.'],
@@ -4506,7 +4512,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       {
         signature: 'set(agent: Agent, path: string, signal?: AbortSignal, chooser: \'model\' | \'host\' = \'host\'): Promise<string>',
         description: 'Change one Session\'s directory without changing existing processes or permissions.',
-        parameters: [{ name: 'agent', description: 'live or unpublished Agent owning the Session.' }, { name: 'path', description: 'absolute path or a path relative to its current directory.' }, { name: 'signal', description: 'cancellation before the durable change.' }, { name: 'chooser', description: 'who chose `path`: `\'model\'` resolves it through `fs.resolveModelPath`, so a directory outside the model roots is refused; `\'host\'`, the person or the harness, resolves it unconfined.' }],
+        parameters: [{ name: 'agent', description: 'live or unpublished Agent owning the Session.' }, { name: 'path', description: 'absolute path or a path relative to its current directory.' }, { name: 'signal', description: 'cancellation before the durable change.' }, { name: 'chooser', description: 'who chose `path`: `\'model\'` resolves it through `fs.resolveModelPath`, so a directory outside the model roots is refused; `\'host\'`, the person or the harness, resolves it unconfined and records it as theirs, so {@link ensure} keeps it.' }],
         returns: 'the canonical absolute directory, committed before fulfillment. A notice failure is warned; the next request still receives the committed directory.',
         throws: ['when the requested path is not an existing directory, or a model-chosen one lies outside the model roots.'],
       },

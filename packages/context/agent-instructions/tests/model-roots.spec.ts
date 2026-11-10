@@ -70,8 +70,8 @@ describe.runIf(process.platform === 'linux')('project root discovery under model
       await ctx.plugin(AgentLoop, { agents: [] })
       ctx.llm.registerAdapter(['mock'], adapter)
       const agent = await ctx.agentLoop.create(SessionId('planted-instructions'), { provider: 'mock', model: 'mock' }, { cwd: projects })
-      // A directory recorded before the roots applied, or chosen by the person, lies outside them.
-      await ctx.workingDirectory.set(agent, outside)
+      // A directory the model chose before the roots applied lies outside them; like every older log, it names no chooser.
+      agent.session.append('working-directory/change', { cwd: outside })
       agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
       await agent.whenIdle()
       const request = JSON.stringify(adapter.requests.at(-1))

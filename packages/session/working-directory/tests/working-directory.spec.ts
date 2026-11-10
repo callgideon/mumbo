@@ -1,5 +1,5 @@
 import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
-import { mkdtemp, mkdir, readdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
@@ -49,7 +49,7 @@ describe('Session working directories', () => {
     expect(f.ctx.workingDirectory.get(sibling.session)).toBe(f.root)
     expect(f.agent.session.header.cwd).toBe(f.root)
     expect(f.agent.session.snapshotEvents()).toContainEqual(expect.objectContaining({
-      type: 'working-directory/change', data: { cwd: child },
+      type: 'working-directory/change', data: { cwd: child, chooser: 'host' },
     }))
     const messages = f.harness.claim(f.agent, 'next-step', 1)
     expect(messages).toEqual([expect.objectContaining({
@@ -392,7 +392,7 @@ describe('Session working directories', () => {
       await rejection
       await expect(queued).resolves.toBe(join(f.root, 'second'))
       expect(f.agent.session.snapshotEvents().filter(event => event.type === 'working-directory/change'))
-        .toEqual([expect.objectContaining({ data: { cwd: join(f.root, 'second') } })])
+        .toEqual([expect.objectContaining({ data: { cwd: join(f.root, 'second'), chooser: 'host' } })])
       expect(f.harness.claim(f.agent, 'next-step', 1)).toHaveLength(1)
     } finally {
       release.resolve(undefined)
@@ -555,11 +555,12 @@ describe.runIf(process.platform === 'linux')('working directories under model ro
     await expect(f.ctx.workingDirectory.resolveModelDirectory(agent, '..')).resolves.toBe(f.projects)
   })
 
-  it('returns to the original project from a recorded directory outside the roots, through a logged change', async () => {
+  it('returns to the original project from a recorded directory outside the roots that names no chooser, through a logged change', async () => {
     await using f = await confined()
     const agent = await f.harness.create(SessionId('confined-recorded'), {}, { cwd: f.projects })
-    await f.ctx.workingDirectory.set(agent, f.outside)
-    f.harness.claim(agent, 'next-step', 1)
+    // As the model recorded it before the roots applied, or as any log written before choosers were recorded.
+    agent.session.append('working-directory/change', { cwd: f.outside })
+    expect(f.ctx.workingDirectory.chooser(agent.session)).toBe('model')
     await expect(f.ctx.workingDirectory.ensure(agent)).resolves.toBe(f.projects)
     expect(agent.session.snapshotEvents().filter(event => event.type === 'working-directory/change').map(event => event.data))
       .toEqual([{ cwd: f.outside }, { cwd: f.projects }])
@@ -571,7 +572,7 @@ describe.runIf(process.platform === 'linux')('working directories under model ro
   it('reports a failure other than the roots refusal while checking a recorded directory', async () => {
     await using f = await confined()
     const agent = await f.harness.create(SessionId('confined-failure'), {}, { cwd: f.projects })
-    await f.ctx.workingDirectory.set(agent, join(f.projects, 'app'))
+    await f.ctx.workingDirectory.set(agent, join(f.projects, 'app'), undefined, 'model')
     vi.spyOn(f.ctx.fs, 'resolveModelPath').mockRejectedValueOnce(new FsError('disk unavailable', 'FS_IO_ERROR'))
     await expect(f.ctx.workingDirectory.ensure(agent)).rejects.toMatchObject({ code: 'FS_IO_ERROR' })
     expect(f.ctx.workingDirectory.get(agent.session)).toBe(join(f.projects, 'app'))
@@ -582,5 +583,37 @@ describe.runIf(process.platform === 'linux')('working directories under model ro
     const agent = await f.harness.create(SessionId('confined-origin'), {}, { cwd: f.outside })
     await expect(f.ctx.workingDirectory.ensure(agent)).resolves.toBe(f.outside)
     expect(f.harness.claim(agent, 'next-step', 1)).toEqual([])
+  })
+
+  it('keeps a directory the person or the harness set outside the roots, also in a Session restored from its log', async () => {
+    await using f = await confined()
+    const agent = await f.harness.create(SessionId('confined-host'), {}, { cwd: f.projects })
+    expect(f.ctx.workingDirectory.chooser(agent.session)).toBe('host')
+    await f.ctx.workingDirectory.set(agent, f.outside)
+    expect(f.ctx.workingDirectory.chooser(agent.session)).toBe('host')
+    f.harness.claim(agent, 'next-step', 1)
+    await expect(f.ctx.workingDirectory.ensure(agent)).resolves.toBe(f.outside)
+    expect(f.harness.claim(agent, 'next-step', 1)).toEqual([])
+    const restored = await f.ctx.agents.create({
+      sessionId: SessionId('confined-host-restored'), seed: agent.session.snapshotEvents(), meta: { cwd: f.projects },
+    })
+    try {
+      await expect(f.ctx.workingDirectory.ensure(restored.agent)).resolves.toBe(f.outside)
+    } finally {
+      await restored.dispose()
+    }
+    // The model's next choice is its own again.
+    await f.ctx.workingDirectory.set(agent, join(f.projects, 'app'), undefined, 'model')
+    expect(f.ctx.workingDirectory.chooser(agent.session)).toBe('model')
+  })
+
+  it('does not follow a directory the harness set under a root once a link there leads outside the roots', async () => {
+    await using f = await confined()
+    const agent = await f.harness.create(SessionId('confined-host-link'), {}, { cwd: f.projects })
+    const app = join(f.projects, 'app')
+    await f.ctx.workingDirectory.set(agent, app)
+    await rm(app, { recursive: true })
+    await symlink(f.outside, app)
+    await expect(f.ctx.workingDirectory.ensure(agent)).resolves.toBe(f.projects)
   })
 })

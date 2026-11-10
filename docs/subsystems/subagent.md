@@ -78,7 +78,8 @@ interface SubagentStartRequest {
   readonly cwd?: string
   /**
    * Who chose `cwd`. The default `'model'` resolves it through `fs.resolveModelPath`, so a directory outside the model
-   * roots is refused before the child starts; a caller that derives `cwd` itself passes `'host'`.
+   * roots is refused before the child starts; a caller that derives `cwd` itself passes `'host'`, and the child's
+   * working directory records that choice, so model roots leave it as chosen. An omitted `cwd` keeps the parent's chooser.
    */
   readonly cwdChooser?: 'model' | 'host'
   /**

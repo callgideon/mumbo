@@ -37,6 +37,11 @@ declare module '@deepseek-ai/dsh-session/types' {
     'working-directory/change': {
       /** Absolute directory used by subsequent directory-based operations. */
       cwd: string
+      /**
+       * `'host'` when the person or the harness chose `cwd`, which model roots then leave as chosen. Absent when the
+       * model chose it and in logs written before this field existed, so model roots confine such a directory.
+       */
+      chooser?: 'host'
     }
   }
 }
@@ -53,6 +58,9 @@ export interface Config {
   /** Absolute execution-world fallback directory; omitted values use the launch directory. */
   defaultDirectory?: string
 }
+
+/** The recorded directory and whether the person or the harness chose it. */
+type Recorded = { cwd: string; host: boolean } | null
 
 /** One owner for each Session's effective directory and its model-visible changes. */
 export class WorkingDirectoryService extends Service {
@@ -71,7 +79,7 @@ export class WorkingDirectoryService extends Service {
   /** Original projects this process recreated, and the Sessions created before then that were told. */
   private readonly recreations = new Map<string, { at: number; told: Set<SessionId> }>()
 
-  private workingDirectoryProjectionHandle!: ProjectionHandle<string | null>
+  private workingDirectoryProjectionHandle!: ProjectionHandle<Recorded>
 
   constructor(ctx: Context, config: Config) {
     super(ctx, 'workingDirectory')
@@ -82,14 +90,15 @@ export class WorkingDirectoryService extends Service {
 
   protected async [Service.init](): Promise<void> {
     const ctx = this.ctx
-    const directorySchema = zod.string().min(1).refine(isAbsolute).nullable()
+    const directory = zod.string().min(1).refine(isAbsolute)
     this.workingDirectoryProjectionHandle = await ctx.sessionProjections.register({
       key: 'workingDirectory',
-      stateVersion: 1,
-      stateSchema: directorySchema,
-      init: header => header.cwd ?? null,
-      apply: (state, event) => event.type === 'working-directory/change' ? event.data.cwd : state,
-      wire: { viewSchema: directorySchema, view: state => state },
+      stateVersion: 2,
+      stateSchema: zod.object({ cwd: directory, host: zod.boolean() }).nullable(),
+      // The original project is the person's choice.
+      init: header => header.cwd === undefined ? null : { cwd: header.cwd, host: true },
+      apply: (state, event) => event.type === 'working-directory/change' ? { cwd: event.data.cwd, host: event.data.chooser === 'host' } : state,
+      wire: { viewSchema: directory.nullable(), view: state => state?.cwd ?? null },
     })
     ctx.systemPrompt.context({
       name: 'working-directory:current',
@@ -124,12 +133,25 @@ export class WorkingDirectoryService extends Service {
    * @returns its effective absolute directory.
    */
   get(session: Session): string {
-    return this.workingDirectoryProjectionHandle.stateOf(session) ?? this.defaultDirectory
+    return this.workingDirectoryProjectionHandle.stateOf(session)?.cwd ?? this.defaultDirectory
   }
 
   /**
-   * Validate the current directory and restore the original project when it disappeared or, unless it is the original
-   * project, lies outside the model roots, so no directory reader follows a directory the model may not access.
+   * Read who chose the committed directory, without filesystem I/O.
+   * @param session - Session whose directory is requested.
+   * @returns `'host'` for the original project and directories the person or the harness set; `'model'` otherwise,
+   * including directories recorded before the log named a chooser.
+   */
+  chooser(session: Session): 'model' | 'host' {
+    const original = session.header.cwd ?? this.defaultDirectory
+    return this.get(session) === original || this.workingDirectoryProjectionHandle.stateOf(session)?.host === true ? 'host' : 'model'
+  }
+
+  /**
+   * Validate the current directory and restore the original project when it disappeared or, when the model chose it,
+   * lies outside the model roots, so no directory reader follows a directory the model may not access. A directory the
+   * person or the harness chose is kept wherever it is, except that one under a model root whose real path now leaves
+   * the roots is not followed either.
    * A missing original project is recreated empty through the filesystem provider and logged;
    * files it held are not restored. Every Session in this process that was created before the
    * recreation and works in, or falls back to, that project is told once.
@@ -143,10 +165,7 @@ export class WorkingDirectoryService extends Service {
     return this.serialize(agent, signal, async (control) => {
       const current = this.get(agent.session)
       const original = agent.session.header.cwd ?? this.defaultDirectory
-      // The original project is the person's choice; any other directory must stay inside the model roots.
-      const target = current === original
-        ? await this.ctx.fs.resolve(current, { signal: control })
-        : await this.withinModelRoots(current, control)
+      const target = await this.available(current, this.chooser(agent.session), control)
       const info = target === undefined ? undefined : await this.ctx.fs.stat(target, control)
       control.throwIfAborted()
       agent.ctx.fiber.assertActive()
@@ -179,7 +198,8 @@ export class WorkingDirectoryService extends Service {
    * @param path - absolute path or a path relative to its current directory.
    * @param signal - cancellation before the durable change.
    * @param chooser - who chose `path`: `'model'` resolves it through `fs.resolveModelPath`, so a directory outside the
-   * model roots is refused; `'host'`, the person or the harness, resolves it unconfined.
+   * model roots is refused; `'host'`, the person or the harness, resolves it unconfined and records it as theirs, so
+   * {@link ensure} keeps it.
    * @returns the canonical absolute directory, committed before fulfillment.
    * A notice failure is warned; the next request still receives the committed directory.
    * @throws when the requested path is not an existing directory, or a model-chosen one lies outside the model roots.
@@ -188,7 +208,7 @@ export class WorkingDirectoryService extends Service {
     return this.serialize(agent, signal, async (control) => {
       if (path.length === 0) throw new Error('working-directory: cd must not be empty')
       const directory = await this.directory(path, this.get(agent.session), control, chooser)
-      this.commit(agent, directory, 'changed', control)
+      this.commit(agent, directory, 'changed', control, chooser === 'host' ? 'host' : undefined)
       return directory
     })
   }
@@ -237,10 +257,15 @@ export class WorkingDirectoryService extends Service {
     return recreation
   }
 
-  /** The target of a recorded directory, or undefined when it lies outside the model roots. */
-  private async withinModelRoots(directory: string, signal: AbortSignal): Promise<FsTarget | undefined> {
+  /**
+   * The target of a recorded directory, or undefined when the model roots refuse it: one the model chose when it lies
+   * outside them, any other when its path under a root leads outside them.
+   */
+  private async available(directory: string, chooser: 'model' | 'host', signal: AbortSignal): Promise<FsTarget | undefined> {
     try {
-      return await this.ctx.fs.resolveModelPath(directory, { signal })
+      return chooser === 'model'
+        ? await this.ctx.fs.resolveModelPath(directory, { signal })
+        : await this.ctx.fs.resolve(directory, { signal })
     } catch (error) {
       if (error instanceof FsError && error.code === 'FS_OUTSIDE_ROOTS') return undefined
       throw error
@@ -259,11 +284,15 @@ export class WorkingDirectoryService extends Service {
     return this.ctx.fs.processPath(target)
   }
 
-  private commit(agent: Agent, directory: string, transition: 'changed' | 'recovered' | 'recreated', signal: AbortSignal): void {
+  /**
+   * Commit a directory and queue its notice. `chooser` is the event's field: a set by the person or the harness passes
+   * `'host'`; recovery returns to the original project, which {@link chooser} treats as the person's without it.
+   */
+  private commit(agent: Agent, directory: string, transition: 'changed' | 'recovered' | 'recreated', signal: AbortSignal, chooser?: 'host'): void {
     signal.throwIfAborted()
     agent.ctx.fiber.assertActive()
     const previous = this.get(agent.session)
-    if (previous !== directory) agent.session.append('working-directory/change', { cwd: directory })
+    if (previous !== directory) agent.session.append('working-directory/change', { cwd: directory, ...chooser === undefined ? {} : { chooser } })
     else if (transition !== 'recreated') return
     const from = JSON.stringify(previous)
     const to = JSON.stringify(directory)

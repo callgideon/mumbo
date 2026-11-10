@@ -97,11 +97,22 @@ describe('subagent working directories', () => {
     expect(ctx.agents.list().map(agent => agent.id)).toEqual([parent.id])
     const inside = await startTestActivation(ctx, 'spawn', { parent, cwd: 'first', prompt: [{ type: 'text', text: 'child' }] })
     expect(ctx.workingDirectory.get(inside.localAgent.session)).toBe(first)
+    expect(ctx.workingDirectory.chooser(inside.localAgent.session)).toBe('model')
     await inside.result
-    // A caller that derives the directory itself, such as a workflow, is not confined.
+    // A caller that derives the directory itself, such as a workflow, is not confined, before or after the child runs.
     const derived = await startTestActivation(ctx, 'spawn', { parent, cwd: root, cwdChooser: 'host', prompt: [{ type: 'text', text: 'child' }] })
     expect(ctx.workingDirectory.get(derived.localAgent.session)).toBe(root)
     await derived.result
+    expect(ctx.workingDirectory.get(derived.localAgent.session)).toBe(root)
+  })
+
+  it('keeps an inherited directory the host chose for the parent outside the model roots after the child runs', async () => {
+    const { ctx, parent, root } = await fixture({ confineTo: 'origin' })
+    await ctx.workingDirectory.set(parent, root)
+    const inherited = await startTestActivation(ctx, 'spawn', { parent, prompt: [{ type: 'text', text: 'child' }] })
+    await inherited.result
+    expect(ctx.workingDirectory.get(inherited.localAgent.session)).toBe(root)
+    expect(ctx.workingDirectory.chooser(inherited.localAgent.session)).toBe('host')
   })
 
   it('rolls back a local child whose setup realm has no directory service', async () => {
