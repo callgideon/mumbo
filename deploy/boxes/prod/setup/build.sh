@@ -13,7 +13,7 @@ push() { local t=${1##*:}; docker tag "$1" "$reg/mumbo-boxes/$2:$t"; docker push
 docker build -q -f api/Dockerfile --build-arg COMMIT_SHA="$sha" --build-arg VERSION="mumbo-$sha" --build-arg EXPECTED_MIGRATION_TIMESTAMP="$mig" -t "e2b-api:$sha" . >/dev/null && push "e2b-api:$sha" e2b-api
 docker build -q -f client-proxy/Dockerfile --build-arg COMMIT_SHA="$sha" -t "e2b-client-proxy:$sha" . >/dev/null && push "e2b-client-proxy:$sha" e2b-client-proxy
 cp "$here/setup.sh" ./setup.sh; trap 'rm -f "$fork/packages/setup.sh"' EXIT
-# Tagged by fork commit and the setup files' hash (control.tf computes the same), so a setup change ships alone.
+# Tagged by fork commit and the setup files' hash (modules/cell/control.tf computes the same), so a setup change ships alone.
 stag=$sha-$(cat "$here/Dockerfile" "$here/setup.sh" | sha256sum | cut -c1-7)
 docker build -q -f "$here/Dockerfile" -t "e2b-setup:$stag" . >/dev/null && push "e2b-setup:$stag" e2b-setup
 # Node binaries, built from the same commit: orchestrator (static) and envd. Nodes download them at boot, so ones already

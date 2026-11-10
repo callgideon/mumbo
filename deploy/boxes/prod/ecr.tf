@@ -7,7 +7,7 @@ resource "aws_ecr_repository" "images" {
   image_scanning_configuration { scan_on_push = true }
   encryption_configuration {
     encryption_type = "KMS"
-    kms_key         = aws_kms_key.data.arn
+    kms_key         = module.cell_us_east_1.data_kms_key_arn
   }
 }
 resource "aws_ecr_lifecycle_policy" "images" {

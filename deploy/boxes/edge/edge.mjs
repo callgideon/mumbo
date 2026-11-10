@@ -816,7 +816,7 @@ const hostOf = (req) => String(req.headers.host ?? '').toLowerCase().replace(/:\
 
 /**
  * The Supabase sign-in and consent page (Supabase's OAuth authorization path /oauth/consent) and its scripts, for
- * visitors who are not signed in yet: oauth2-proxy skips sign-in for these GETs (prod/edge.tf; skippedSignin). `html` is
+ * visitors who are not signed in yet: oauth2-proxy skips sign-in for these GETs (prod/modules/edge/edge.tf; skippedSignin). `html` is
  * auth-ui/index.html; its inline script, style and event handler are allowed by hash. config.js carries the Supabase
  * URL and publishable key, and Mumbo's own OAuth client ids and redirect URIs, the only ones the page consents for
  * (consent.js). Returns a handler that answers and returns true for the page and its scripts, false for anything else.
@@ -845,7 +845,7 @@ export function authUi({ html, supabaseJs, consentJs, supabaseUrl, anonKey, clie
 }
 
 /** True for a request carrying X-Forwarded-Uri, which neither the ALB nor oauth2-proxy sets. oauth2-proxy skips sign-in
- *  for its skip-auth GETs (prod/edge.tf) and, with --reverse-proxy, for any GET whose client-sent X-Forwarded-Uri matches
+ *  for its skip-auth GETs (prod/modules/edge/edge.tf) and, with --reverse-proxy, for any GET whose client-sent X-Forwarded-Uri matches
  *  one of them, in later versions too. The ALB rule x_forwarded_uri refuses that header and is the hard stop; this check
  *  is defence in depth. oauth2-proxy strips client identity headers on every route and sets X-Forwarded-Email only from a
  *  session, so a request without it is signed out. Who may enter is decided here (admitted()), never by oauth2-proxy flags. */

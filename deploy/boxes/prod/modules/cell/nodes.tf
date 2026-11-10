@@ -1,33 +1,18 @@
 # Stage 4: sandbox nodes. Plain EC2 with nested virtualization in an Auto Scaling group across three AZs.
 # A node boots from stock Ubuntu 24.04 with nodes/node.sh.tftpl; a termination is held by the lifecycle hook
 # while the node pauses its boxes (memory kept) and leaves DNS. Upgrades are blue/green through node_count (review B2):
-# change e2b_sha and set node_count to 2N, apply, wait until the new nodes are in orchestrators.boxes.internal, then set
+# change e2b_sha and set node_count to 2N, apply, wait until the new nodes are in orchestrators.<private_domain>, then set
 # N and apply; scale-in prefers the oldest launch template but rebalances Availability Zones first, so protect the new nodes and
 # check every node's launch template version (RUNBOOK "Adding nodes", step 5); each terminated node drains through the hook. Never restart
 # orchestrators in place, and never apply while the desired capacity differs from node_count.
-variable "e2b_sha" {
-  description = "Fork commit whose orchestrator and envd the nodes run (setup/build.sh uploads them)."
-  type        = string
-}
-
-variable "node_count" {
-  description = "Sandbox nodes: the ASG desired capacity and the nodes-below-min alarm threshold. The edge cap is MAX_RUNNING_UNITS = 2 * (12 * node_count - 2) capacity units: a 4096 MB person or project box is 2 units (edge/template.mjs memoryMB) and a 2048 MB child sandbox is 1 (the mumbo-child build argument), 12 boxes per node on 48 GiB of guest hugepages, minus 2 boxes of headroom."
-  type        = number
-  default     = 2
-  validation {
-    condition     = floor(var.node_count) == var.node_count && var.node_count >= 1 && var.node_count <= 10
-    error_message = "node_count must be a whole number from 1 to 10 (the node group's max_size)."
-  }
-}
-
 locals {
-  node_max_size = 10            # the node group max_size; node_count validates against it
+  node_max_size = 10            # the node group max_size; the root's node_count validates against it
   node_type     = "r8i.2xlarge" # 8 vCPU, 64 GiB
   hugepages     = 24576         # 48 GiB of 2 MiB pages for guests: 12 running 4 GiB boxes (review M5)
   firecracker   = "v1.14-0.2.0"
   kernel        = "vmlinux-6.1.177_5008931"
   busybox       = "1.36.1"
-  orch_dns      = "orchestrators.boxes.internal"
+  orch_dns      = "orchestrators.${var.private_domain}"
   hook          = "drain"
 }
 
@@ -75,7 +60,7 @@ resource "aws_iam_role_policy" "nodes" {
     { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = [aws_secretsmanager_secret.mtls["orchestrator"].arn, aws_secretsmanager_secret.e2b.arn] },
     { Effect = "Allow", Action = ["route53:ChangeResourceRecordSets", "route53:ListResourceRecordSets"], Resource = aws_route53_zone.internal.arn },
     { Effect = "Allow", Action = "ec2:DescribeInstances", Resource = "*" },
-    { Effect = "Allow", Action = "autoscaling:CompleteLifecycleAction", Resource = "arn:aws:autoscaling:us-east-1:${data.aws_caller_identity.this.account_id}:autoScalingGroup:*:autoScalingGroupName/${local.name}-nodes" },
+    { Effect = "Allow", Action = "autoscaling:CompleteLifecycleAction", Resource = "arn:aws:autoscaling:${local.region}:${data.aws_caller_identity.this.account_id}:autoScalingGroup:*:autoScalingGroupName/${local.name}-nodes" },
   ] })
 }
 resource "aws_iam_role_policy_attachment" "nodes_cloudwatch" {
@@ -97,8 +82,8 @@ resource "aws_launch_template" "nodes" {
   instance_type          = local.node_type
   update_default_version = true
   vpc_security_group_ids = [aws_security_group.nodes.id]
-  user_data = base64gzip(templatefile("${path.module}/nodes/node.sh.tftpl", {
-    region      = "us-east-1", bucket = aws_s3_bucket.templates.bucket, e2b_sha = var.e2b_sha,
+  user_data = base64gzip(templatefile("${path.root}/nodes/node.sh.tftpl", {
+    region      = local.region, bucket = aws_s3_bucket.templates.bucket, e2b_sha = var.e2b_sha,
     firecracker = local.firecracker, kernel = local.kernel, busybox = local.busybox,
     hugepages   = local.hugepages, nbds = 256,
     mtls_secret = aws_secretsmanager_secret.mtls["orchestrator"].arn, e2b_secret = aws_secretsmanager_secret.e2b.arn,
