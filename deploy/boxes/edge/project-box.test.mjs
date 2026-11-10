@@ -1,6 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { startScript, boxSite, boxes } from './edge.mjs'
 import { memoryStore } from './store.mjs'
 import { projects } from './projects.mjs'
@@ -71,6 +75,48 @@ test('a project box start script has the proxy setup in order, before the member
   assert.match(s, /MUMBO_PANEL_ADMINS='o@x\.com,p@x\.com' /)
   assert.ok(!/HTTP_PROXY/.test(s.replace('HTTPS_PROXY', '')), 'no plain HTTP_PROXY')
   assert.match(s, /touch \/root\/\.mumbo\/member-auth/)
+})
+
+const APP_GATE = 'if grep -qs MUMBO_GITHUB_APP_LOGIN /src/deploy/mumbo-project.overlay.yml; then export '
+/** The App env line of a start script, run by sh with its overlay path pointed at `overlay`; prints both variables. */
+function runAppEnv(script, overlay, cwd) {
+  const line = script.split('\n').find(l => l.startsWith(APP_GATE))
+  assert.ok(line, 'App env line present')
+  const sh = `${line.replace('/src/deploy/mumbo-project.overlay.yml', overlay)}\nprintf '[%s][%s]' "\${MUMBO_GITHUB_APP_LOGIN-unset}" "\${MUMBO_GITHUB_APP_USER_ID-unset}"`
+  return execFileSync('sh', ['-c', sh], { cwd, encoding: 'utf8', env: { PATH: process.env.PATH } })
+}
+
+test('GitHub App env: a project box exports the agent login and id after the proxy, before dsh; a person box gets neither', () => {
+  const app = { ...c, agentLogin: 'mumbo-bot[bot]', agentId: 341797844 }
+  const p = startScript(app, 'TOK', boxSite(app, 'project:0123456789abcdef'), 'role', 'K', boxFiles, ['o@x.com'])
+  assert.ok(p.includes(`${APP_GATE}MUMBO_GITHUB_APP_LOGIN='mumbo-bot[bot]' MUMBO_GITHUB_APP_USER_ID=341797844; fi\n`))
+  // Outside the proxy's subshell, so the export reaches the dsh process.
+  assert.ok(at(p, ') 9>/root/.mumbo/ca.lock') < at(p, APP_GATE) && at(p, APP_GATE) < at(p, 'nohup node --import tsx/esm apps/cli/src/bin.ts'))
+  const u = startScript(app, 'T', boxSite(app, 'a@x.com'), 'role', undefined, boxFiles)
+  assert.ok(!u.includes('MUMBO_GITHUB_APP'))
+  // Without GITHUB_AGENT_LOGIN and GITHUB_AGENT_ID (edge config sets both or neither) a project box gets neither.
+  const none = startScript(c, 'TOK', boxSite(c, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
+  assert.ok(!none.includes('MUMBO_GITHUB_APP'))
+})
+
+test('GitHub App env: sh exports both only when the overlay reads them, with the [bot] login quoted literally', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'app-env-'))
+  try {
+    // Files an unquoted export argument MUMBO_GITHUB_APP_LOGIN=mumbo-bot[bot] would glob to.
+    for (const name of ['mumbo-botb', 'mumbo-boto']) writeFileSync(join(dir, `MUMBO_GITHUB_APP_LOGIN=${name}`), '')
+    const reads = join(dir, 'reads.yml'), older = join(dir, 'older.yml')
+    writeFileSync(reads, "githubApp: !!js \"process.env.MUMBO_GITHUB_APP_LOGIN || ...\"\n")
+    writeFileSync(older, 'stateDir: x\n')
+    const app = { ...c, agentLogin: 'mumbo-bot[bot]', agentId: 341797844 }
+    const p = startScript(app, 'TOK', boxSite(app, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
+    assert.equal(runAppEnv(p, reads, dir), '[mumbo-bot[bot]][341797844]')
+    assert.equal(runAppEnv(p, older, dir), '[unset][unset]')
+    assert.equal(runAppEnv(p, join(dir, 'missing.yml'), dir), '[unset][unset]')
+    // A login with a quote stays one literal word, not shell syntax.
+    const odd = { ...app, agentLogin: "it's[bot]; touch pwned" }
+    assert.equal(runAppEnv(startScript(odd, 'TOK', boxSite(odd, 'project:0123456789abcdef'), 'role', 'K', boxFiles), reads, dir), "[it's[bot]; touch pwned][341797844]")
+    assert.ok(!existsSync(join(dir, 'pwned')))
+  } finally { rmSync(dir, { recursive: true, force: true }) }
 })
 
 test('create() starts a project box from projectTemplate with the owners as panel admins; a user box from template', async () => {

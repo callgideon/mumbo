@@ -204,6 +204,8 @@ export function boxSite(cfg, principal) {
 // ---- inside a box. It never sees a server secret: its DeepSeek key is its own box token, valid only via LLM_HOST.
 // memberKeyText: a project box's member key (base64url). boxFiles: { proxy, gh }, the texts of box/github-local-proxy.mjs
 // and box/gh as read by main() at start, written into project boxes. panelAdmins: the project owners' emails, for MUMBO_PANEL_ADMINS.
+// cfg.agentLogin and cfg.agentId (GITHUB_AGENT_LOGIN, GITHUB_AGENT_ID) become a project box's MUMBO_GITHUB_APP_LOGIN and
+// MUMBO_GITHUB_APP_USER_ID.
 export function startScript(cfg, token, site = boxSite(cfg, ''), role = '', memberKeyText, boxFiles, panelAdmins = []) {
   const llm = `https://${cfg.llmHost}`
   // dsh's OpenRouter route (@deepseek-ai/dsh-llm-pi-ai, the base composition's row llm-pi-ai) through the model host,
@@ -364,6 +366,9 @@ for i in $(seq 20); do curl -s -o /dev/null -m 1 http://127.0.0.1:8899/ && up=1 
 PROJECT_PATCH=
 if [ -f /src/deploy/mumbo-project.overlay.yml ]; then PROJECT_PATCH="--patch /src/deploy/mumbo-project.overlay.yml"; touch /root/.mumbo/member-auth; else rm -f /root/.mumbo/member-auth; fi
 export MUMBO_MEMBER_KEY=${memberKeyText}
+` : ''}${!site.desktop && cfg.agentLogin && cfg.agentId !== undefined ? `# Project box: superagent's GitHub Source acts as the agent's App bot user (@mumbo/superagent UPSTREAM.md S7) when the
+# image's project overlay reads these; an older overlay that does not gets neither.
+if grep -qs MUMBO_GITHUB_APP_LOGIN /src/deploy/mumbo-project.overlay.yml; then export MUMBO_GITHUB_APP_LOGIN=${sq(cfg.agentLogin)} MUMBO_GITHUB_APP_USER_ID=${cfg.agentId}; fi
 ` : ''}cd /src
 ${site.desktop ? '' : `PATH=/root/.mumbo/bin:$PATH NODE_USE_ENV_PROXY=1 NODE_EXTRA_CA_CERTS=/root/.mumbo/ca/ca.crt HTTPS_PROXY=http://127.0.0.1:8899 NO_PROXY=127.0.0.1,localhost,${cfg.llmHost} MUMBO_PANEL_ADMINS=${sq(panelAdmins.map(e => e.toLowerCase()).join(','))} \\
 `}HOME=/root DSH_HOME=/root/.dsh DSH_AGENTS_HOME=/root/.mumbo/agents DSH_TELEMETRY_DISABLED=1 \\
