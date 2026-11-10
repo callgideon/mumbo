@@ -435,7 +435,12 @@ Every node can be driven by a higher agent or an external AI. **[founder]**
   - The door authenticates only by `Authorization: Bearer mumbo_pat_…` and ignores cookies, so a browser carrying the sign-in cookie can't use it. A cross-site request has no key.
   - The ALB idle timeout is at least 60 s, for the 40 s long-poll.
 - **Keys:**
-  - minted by the person on the edge's home page, which shows the key once and lists and revokes keys;
+  - minted, listed and revoked by the person on the **approve host** (`approve.app.mumbo.si`), which no box ever serves. The home page only links there ("Manage door keys").
+    - The person's box serves the public host's origin, so script it serves could otherwise open a key page, mint a key and read it.
+    - The approve host already has the edge's identity check, a CSRF token with an Origin check, `frame-ancestors 'none'` and COOP same-origin.
+    - A new key is shown once there, `no-store`, and never logged;
+  - refusal codes are jumbo's plus `project_not_allowed`. `user_disabled` applies when the person leaves the allowed emails, and a box token gets `user_key_required`;
+  - expiry is 7, 30, 90 (the default) or 365 days, or none. Last use is recorded at most once a minute. Revoked keys stay on record;
   - each key has a name (such as "laptop Claude Code"), scopes, optional expiry and the projects it may reach;
   - stored as a SHA-256 hash in the edge store;
   - every call is logged with the key's id and name, rate-limited per key, and charged to the person's daily budget when it causes model turns.
@@ -455,6 +460,10 @@ Every node can be driven by a higher agent or an external AI. **[founder]**
 - **M2, down:** a project's coordinator is superagent, so `project_message` delivers into superagent, not a plain Session.
   - A new superagent Source kind, `relay` (UPSTREAM S9), takes the edge's relayed messages as Triggers: the member as actor, human, explicit for `request` and implicit for `context`, with the hop chain.
   - Policy's allowlist decides as for any sender (S3). The edge posts to the box as the member (`x-mumbo-member`).
+  - **Who may originate work.** The relay Source's policy has `allMembers`, default on: every member the edge admits may originate work.
+    - The edge already enforces membership on every relay, and removing a member there takes effect on the next message.
+    - The panel can switch it off and list specific members instead.
+    - The edge never writes Policy; only a person in the panel does (S4).
 - **M2, up:** the `relay` Source is two-way. A coordinator's reply on a relay Thread, through its Outbox, goes back to the member's Mumbo as one message: "[project X] …".
   - The edge offers project boxes one tool for this, `report_to_member`. It accepts only a member of that project and lands in that person's `mumbo` Session.
   - Mumbo's instructions say how to file a dump to a project (`project_message`, kind `context`) and where reports arrive.
@@ -468,7 +477,7 @@ Every node can be driven by a higher agent or an external AI. **[founder]**
 
 | Task | Contents | Depends on |
 |---|---|---|
-| **B31** door keys | `mumbo_pat_` minting and verification, ported from jumbo's `key_format.py`: 32 base62 characters plus a 6-character base62 CRC32, SHA-256 at rest. Scopes, expiry, a project list per key, revocation, jumbo's error codes, and the home-page key manager (create shown once, list, revoke). Tests | — |
+| **B31** door keys | `mumbo_pat_` minting and verification, ported from jumbo's `key_format.py`: 32 base62 characters plus a 6-character base62 CRC32, SHA-256 at rest. Scopes, expiry, a project list per key, revocation, jumbo's error codes plus `project_not_allowed`, and the key manager on the approve host (create shown once, list, revoke), linked from the home page. Tests | — |
 | **R-door** (mumbo) | ALB rule `app.mumbo.si` + `/mcp*` to the edge's model target group, past oauth2-proxy; ALB idle timeout of 60 s or more | — |
 | **B32** door endpoint | `/mcp` on the model listener: bearer only, cookies ignored, a per-key rate limit, a log line per call (key id and name, tool, outcome), budget charging, and scope and project checks before any tool. Ships with `whoami` and `project_list` | B31, R-door |
 | **B33** door to Mumbo | `@mumbo/mcp`: a setting for an existing Session (`mumbo`) and its key from a file the edge writes, derived per box. Person-box overlay row. Door tools `agent_send`, `agent_read`, `needs_you`, `task_reply` (questions only), `task_status` and `task_result`, forwarded through the client proxy. `runs_*` stay off the door. The B24 gate lists its tools, and `task_result`'s git runs as `agent` | B32 (the in-box half can start now) |
@@ -477,7 +486,7 @@ Every node can be driven by a higher agent or an external AI. **[founder]**
 | **B36** M2 up | `relay` Thread replies go back through the edge (`report_to_member`, project boxes only, members only) into the person's `mumbo` Session as "[project X] …". Mumbo's instructions are updated for filing and reports | B35, B17 |
 | **B37** M3 workers | The Executor port and the external-worker Executor: leases, renewal, fencing tokens, `task_claim`, `task_report` and `task_result` on the door; the reviewer Ticket. The acceptance is M3's "Done when" | B34 |
 
-**Acceptance for the door** (B31–B34): the founder mints a key on the home page and points Claude Code's `mumbo` entry at `https://app.mumbo.si/mcp`. From Claude Code:
+**Acceptance for the door** (B31–B34): the founder mints a key on the approve host (linked from the home page) and points Claude Code's `mumbo` entry at `https://app.mumbo.si/mcp`. From Claude Code:
 - they send Mumbo a message and read its reply;
 - they answer a question Mumbo asked, and an approval is refused;
 - they read a project's status and file context to the mumbo project, which arrives as a superagent Trigger;
@@ -849,7 +858,10 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
 - **Take over (B28).** The Browser tab has "Take over" and "Hand back".
   - While the person has taken over, `@mumbo/browser-consent` holds no CDP connection to Chrome, and refuses every browser tool and computer-use action with "the person has taken over the browser".
   - Hand back reconnects.
-  - It is for sign-ins and anything else the person wants the agent kept out of, as Operator's takeover was. Nothing the person types then reaches the agent, or a screenshot.
+  - It is for sign-ins and anything else the person wants the agent kept out of, as Operator's takeover was.
+    - While taken over, nothing the person types reaches the agent or a screenshot. The bar saying "you have the browser" shows only after every browser connection of the agent has closed.
+    - A takeover survives a dsh restart; a record that can't be read counts as taken over.
+    - **After Hand back, tabs the person used are readable to the agent again,** like any open tab. So the bar tells them to close tabs with anything they want kept from it before handing back.
 - **Hidden tabs disconnect** (no `keepMounted`). Two hidden live views would each keep an encoder busy. Showing a tab reconnects in about a second.
 - **Ready for the local browser (N2).**
   - `box-browser` registers in the `builtin` band. When the desktop app registers its own local-browser body for the same kind in the `extension` band, the right panel uses that one and falls back to the live view when it unregisters.
@@ -968,7 +980,8 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
     - Ticket directories live in `/root/work`, created as `agent`.
     - The worker shims and gitconfig live in `/var/lib/mumbo/superagent`, `root:agent 2750` (shims `0750`, gitconfig `0640`), readable by `agent` and never writable by it.
     - Everything that touches a ticket directory runs as `agent`: the Execution prepare command, the worker probe, environment checks and any `git`.
-    - The root orchestrator's own GitHub CLI uses a root-owned `gh` and config directory, because `gh` aliases can run shell commands.
+    - The root orchestrator's own GitHub CLI uses a root-owned `gh` and config directory (`/root/.config/gh`, `0700`, its ownership checked at load), because `gh` aliases can run shell commands. Root runs exactly the path it checked, never a link the agent could repoint.
+    - The orchestrator's main Session works in a root-owned directory, not the agent-writable `/root/work`, so no worker can plant `AGENTS.md` or skills that root reads into its prompt.
     - The orchestrator's model tools are listed in the gate as root in-process, data only.
   - **Other box paths:**
     - `/run/dsh-shell` `0711` root;
