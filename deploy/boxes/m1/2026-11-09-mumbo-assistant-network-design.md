@@ -843,6 +843,10 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
     - or one whose `autocomplete` names a password, a one-time code or a card (`current-password`, `new-password`, `one-time-code`, `cc-*`).
   - The patch must apply, or install fails. An end-to-end test asserts the masking. Offer it upstream to Playwright, which is the way off the patch.
   - Playwright MCP's output directory moves out of the workspace into a root-only directory (B24's file allowlist excludes it), and out of backups.
+- **On a page with a secret field, every write asks,** even on an allowed site: a page whose snapshot has a field the masking hides.
+  - Otherwise a click on "show password" on an allowed site would run unasked, and the next screenshot would show the password.
+  - Allowing a site never depends on the operator leaving sign-in origins out.
+- **No browser call writes files where the model chose.** A call with a `filename` argument is refused, because page content could otherwise overwrite project files.
 - **Network request details are denied.** A request's details carry its `Cookie` header and form body, so a login's password or a session cookie would reach the model.
   - `browser_network_request` is refused outright.
   - The request list stays a read only if it shows no headers or bodies; otherwise it is refused too.
