@@ -4945,13 +4945,18 @@ export interface Config {
 
 - `inject`: `browserUse` · `agents` · `tools` · `systemPrompt` · `workingDirectory`
 - `refs`: [`PlaywrightBrowser`](../packages/experimental/browser-use-playwright-mcp/src/index.ts)
-- `source`: [`packages/mumbo/browser-consent/src/index.ts:56`](../packages/mumbo/browser-consent/src/index.ts)
+- `source`: [`packages/mumbo/browser-consent/src/index.ts:76`](../packages/mumbo/browser-consent/src/index.ts)
 
 ```ts config-catalog
 /** Consent configuration. */
 export interface Config {
   /** Playwright MCP provider settings; the plugin mounts the provider with them. */
   readonly browser: PlaywrightBrowser.Config
+  /**
+   * Pages the browser tools never open or read: lowercase schemes with their colon (`chrome:`) and `http:` or `https:`
+   * origins (`https://accounts.google.com`). Required, so each deployment states its list; `[]` denies nothing.
+   */
+  readonly deniedUrls: string[]
   /** Origins (`https://host[:port]`) where site writes proceed without asking. */
   readonly allowedSites: string[]
   /** Milliseconds a write waits for the person's answer before it is denied as unanswered. */

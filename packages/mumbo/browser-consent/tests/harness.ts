@@ -23,7 +23,7 @@ import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import WorkingDirectory from '@deepseek-ai/dsh-working-directory'
 import * as Consent from '../src/index.ts'
 
-/** One scripted model step: a browser tool call by its upstream name. */
+/** One scripted model step: a browser tool call by its upstream name, or a call of another tool by its full name. */
 export interface ScriptStep {
   readonly name: string
   readonly args: Record<string, unknown>
@@ -52,7 +52,8 @@ class ScriptedModel extends LlmAdapter {
       yield { type: 'finish', reason: { kind: 'stop' } }
       return
     }
-    const call = { type: 'tool-call' as const, id: ToolCallId(`call-${String(step)}`), name: tool(next.name), arguments: JSON.stringify(next.args) }
+    const name = next.name.startsWith('browser_') ? tool(next.name) : next.name
+    const call = { type: 'tool-call' as const, id: ToolCallId(`call-${String(step)}`), name, arguments: JSON.stringify(next.args) }
     yield { type: 'block-start', index: 0, blockType: 'tool-call' }
     yield { type: 'tool-call-delta', index: 0, id: call.id, name: call.name, argumentsDelta: call.arguments }
     yield { type: 'block-end', index: 0, block: call }

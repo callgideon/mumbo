@@ -1,5 +1,5 @@
 ---
-description: "Consent for browser writes in a person's own signed-in Chromium, for deployments that compose the Playwright MCP browser provider with the approval service."
+description: "Consent for the assistant's actions in a person's own signed-in Chromium and on their desktop, with hard-denied pages, for deployments that compose the Playwright MCP browser provider with the approval service."
 kind: "package-reference"
 ---
 
@@ -7,12 +7,14 @@ kind: "package-reference"
 
 ## Summary
 
-`@mumbo/browser-consent` enforces "reads are free, writes ask" for the model's browser tools in the person's own signed-in Chromium. It mounts the Playwright MCP browser provider itself, so those tools exist only while consent is loaded with a valid configuration. Navigation and page reads pass. A click, typing, form fill, or similar action on the current tab proceeds without asking only when that tab's origin is in `allowedSites`; every other write asks the person once through the approval service, showing its arguments. Each allowed write is recorded in the Session log with its site, tool, and outcome.
+`@mumbo/browser-consent` enforces "reads are free, writes ask, denied pages never" for the model's browser tools in the person's own signed-in Chromium, and "reads are free, writes ask" for computer use on their desktop. It mounts the Playwright MCP browser provider itself, so those tools exist only while consent is valid. A call that names a page in `deniedUrls`, or leaves or finds the tab on one, is refused without asking, and its result is replaced. Current-tab writes on an `allowedSites` origin proceed; other writes and desktop input ask once. The Session log records allowed browser writes.
 
 ## Table of Contents
 
 - [Configuration](#configuration)
+- [Denied pages](#denied-pages)
 - [Decisions](#decisions)
+- [Computer use](#computer-use)
 - [Provider ownership](#provider-ownership)
 - [Audit record](#audit-record)
 - [Composition](#composition)
@@ -28,15 +30,34 @@ kind: "package-reference"
 | Field | Default | Meaning |
 |---|---|---|
 | `browser` | required | Settings of the mounted [Playwright MCP provider](../../experimental/browser-use-playwright-mcp/README.md), such as `mode: attach` and `endpoint`. |
+| `deniedUrls` | required | Schemes, such as `chrome:`, and origins, such as `https://accounts.google.com`, that the browser tools never open or read. `[]` denies nothing. |
 | `allowedSites` | `[]` | Origins, such as `https://mail.google.com`, where current-tab writes proceed without asking. |
 | `approvalTimeoutMs` | `300000` | How long a write waits for the person's answer before it is denied as unanswered. |
 
-An `allowedSites` entry that is not an exact `http:` or `https:` origin, or a `browser.endpoint` that is not a valid URL, fails plugin load; for an allowed site the error names the origin to use when the entry has one, such as `https://mail.google.com` for `https://mail.google.com/`. Matching is exact: `https://mail.google.com` does not cover `https://docs.google.com` or `http://mail.google.com`. The generated [configuration catalog](../../../docs/config-catalog.md#mumbobrowser-consent) is the exhaustive source for accepted fields.
+`deniedUrls` has no default, so a deployment that omits it fails to load and mounts no browser. A scheme entry is lowercase and ends with its colon; an origin entry is an exact `http:` or `https:` origin without a path, userinfo, default port, or trailing dot. Any other entry fails plugin load, and the error names the form to use when the entry has one, such as `chrome:` for `Chrome:` or `https://accounts.google.com` for `https://accounts.google.com/`. A person box denies every non-web scheme and the Google pages that hold passwords, payments, and sign-in:
+
+```yaml
+deniedUrls: [chrome:, chrome-untrusted:, chrome-extension:, devtools:, view-source:, file:, https://passwords.google.com, https://pay.google.com, https://payments.google.com, https://myaccount.google.com, https://accounts.google.com]
+```
+
+An `allowedSites` entry that is not an exact `http:` or `https:` origin, an `allowedSites` entry that `deniedUrls` also denies, or a `browser.endpoint` that is not a valid URL fails plugin load; for an allowed site the error names the origin to use when the entry has one, such as `https://mail.google.com` for `https://mail.google.com/`. Allowance matching is exact: `https://mail.google.com` does not cover `https://docs.google.com` or `http://mail.google.com`. The generated [configuration catalog](../../../docs/config-catalog.md#mumbobrowser-consent) is the exhaustive source for accepted fields.
+
+<a id="denied-pages"></a>
+## Denied pages
+
+A denied page is refused, never asked about, because a question can be approved by reflex. The check runs before and after every call of a tool named `mcp__playwright-mcp__<tool>`, reads included:
+
+- **Before the call**, a `url` argument that names a denied page refuses the call; the browser never receives it. A string that is not a URL is read as Playwright MCP reads it, with `http://` in front when it starts with `localhost` and `https://` otherwise. A write also lists the current tab first, and is refused when that tab is on a denied page or cannot be read.
+- **After the call**, the plugin lists the current tab through the same Session's `browser_tabs` tool and also reads every `- Page URL:` line in the result. When either names a denied page, or the listing fails, is missing, or is ambiguous, the result (snapshot, screenshot, text, console, network, or error) is replaced by a refusal, and the files Playwright MCP linked from it in its `.playwright-mcp` output directory are deleted, so no other tool can read them. This covers a navigation or a click that lands on a denied page and a read while the person has one open. `browser_close` is the one call not checked after: its answer is fixed text, and a listing would reconnect and open a new tab.
+
+A URL is matched after WHATWG URL parsing, which lowercases the scheme and host, converts an IDN host to punycode, decodes percent-encoded host characters, drops userinfo and the default port, strips surrounding spaces, tabs, and newlines, and reads backslashes as slashes; trailing dots of the host are then ignored. So `HTTPS://Accounts.Google.com.`, `https://accounts.google.com:443/`, and `https://x@accounts.google.com/` all match `https://accounts.google.com`. A scheme entry matches every URL with that scheme. An origin entry matches its exact host and port under both `http:` and `https:`, because Chromium upgrades HSTS hosts such as Google's to `https:` before any request; it does not match subdomains. `view-source:`, `blob:`, and `filesystem:` URLs are denied by their own scheme or by the URL they wrap, so `view-source:https://accounts.google.com/` is denied even without `view-source:` in the list. `about:blank` is never denied: a new tab starts there, and calls on it are decided as on any page. Every other `about:` URL counts as a `chrome:` URL, because Chromium serves `about:<page>` as `chrome://<page>`. A URL that does not parse counts as denied. `data:` and `javascript:` URLs are not in the box list; navigation to them still asks.
+
+The refusal names the tool and what denied it, `a <scheme> page` or `a page on <origin>`, never the full URL. A write whose result is withheld after the call still ran; its audit record has outcome `failed`.
 
 <a id="decisions"></a>
 ## Decisions
 
-The plugin gates every tool named `mcp__playwright-mcp__<tool>` and leaves other tools alone. Each call falls into one of three kinds:
+Each browser call that no denial refuses falls into one of three kinds:
 
 | Kind | Upstream tools | Decision |
 |---|---|---|
@@ -44,11 +65,18 @@ The plugin gates every tool named `mcp__playwright-mcp__<tool>` and leaves other
 | Site write | `browser_click`, `browser_type`, `browser_fill_form`, `browser_press_key`, `browser_press_sequentially`, `browser_keydown`, `browser_keyup`, `browser_select_option`, `browser_check`, `browser_uncheck`, `browser_hover`, `browser_drag`, `browser_handle_dialog`, `browser_resize`, `browser_reload`, `browser_close`; `browser_drop` without `paths` | Proceeds when the current tab's origin is allowed; otherwise asks. |
 | Always ask | `browser_evaluate`, `browser_run_code_unsafe`, `browser_file_upload`, `browser_drop` with `paths`, navigation to any other scheme or a scheme-less URL, `browser_tabs` `close`, and every tool not listed here | Asks even on an allowed site. |
 
-Before deciding a write, the plugin reads the current tab from Playwright itself by calling the same Session's `browser_tabs` tool with `list`, so the site is the tab the action runs on after redirects, link clicks, and tab switches, not the page the model names. Upstream does not escape page titles in that listing; a listing that cannot be read without ambiguity, a failed listing, or a non-web page leaves the site unknown, and the write asks.
+Page script always asks, with the script shown, because a script can read an autofilled password or card number from a form field. Before deciding a write, the plugin reads the current tab from Playwright itself by calling the same Session's `browser_tabs` tool with `list`, so the site is the tab the action runs on after redirects, link clicks, and tab switches, not the page the model names. Upstream does not escape page titles in that listing, so a listing that cannot be read without ambiguity counts as unreadable. A write on a page that is not a website, such as `about:blank`, asks on `an unidentified page`.
 
 The approval request names the tool and the site, lists the arguments the tool's input schema declares as JSON (typed text, form values, keys, uploaded paths, code to run, URLs, dialog answers), and gives the model's `element` description apart as model-written. Keys the schema does not declare are counted but not shown, because the tool ignores them and the model could otherwise write into the prompt through them; arguments that are not a JSON object are not shown at all. Keys and values are cut at 300 characters with a count of what was cut, arguments past 1,200 characters are counted as not shown, and invisible format characters are percent-encoded, because the Web approval card shows this text as its title. Approving a write approves the whole call, including any argument the prompt cuts or leaves out. A write is denied when the person declines, when no answer arrives within `approvalTimeoutMs`, when no answerer is available, or when the Session's approval policy is `never`; a cancelled request, such as an interrupted turn, cancels the call.
 
-The `tools/pre-execute` listener registers with `prepend`. A guard registered with `ctx.tools.guard()` denies any write that reaches dispatch without a consent this plugin recorded, so another listener that allows a write or asks its own question cannot let it through, and a call without an Agent cannot run a write.
+The `tools/pre-execute` listener registers with `prepend`. A guard registered with `ctx.tools.guard()` denies any call that names a denied page and any write that reaches dispatch without a consent this plugin recorded, so another listener that allows a call or asks its own question cannot let it through, and a call without an Agent cannot run a write. The after-call check is the outermost `tools/execute` wrapper when the plugin loads, so wrappers registered after it, `tools/post-execute` policy, and result observers see only the refusal.
+
+<a id="computer-use"></a>
+## Computer use
+
+The plugin also gates the `computer` tool of [`@deepseek-ai/dsh-computer-use-x11`](../../experimental/computer-use-x11/README.md), which drives the same desktop and Chromium without going through the browser tools. A `screenshot` passes. Every other action (`click`, `move`, `drag`, `scroll`, `type`, `key`, or an action the plugin does not know) asks the person through the approval service with the question `Computer input on the desktop. Arguments: <arguments>.`, listing the arguments the tool declares as for browser writes. No allowance covers desktop input, so the approval service's `approval/asked` and `approval/decided` records in the Session log are the record of every allowed input. The guard denies input that reaches dispatch without this plugin's recorded consent, and input without an Agent.
+
+Computer use lives in this package rather than in a package of its own because it applies the same consent rule to the same signed-in desktop with the same approval flow and guard; a separate package would duplicate that flow and need its own row. The desktop has no URL to check: Chromium's `URLBlocklist` policy keeps the password and payment settings pages closed to computer use.
 
 <a id="provider-ownership"></a>
 ## Provider ownership
@@ -58,12 +86,12 @@ The plugin registers its guard and listeners, provides a service, and mounts `@d
 <a id="audit-record"></a>
 ## Audit record
 
-When an allowed write's result is final, the plugin appends `browser-consent/write` to the Session: `callId`, the upstream `tool`, `site` when the current tab's origin was read, `grant` (`site` for an allowance, `approval` for a one-shot approval), and `outcome` (`succeeded` or `failed`; `failed` includes a refusal by a later policy). Denied writes leave no record of their own; the approval service's `approval/asked` and `approval/decided` record every question, including its argument summary, and its answer. The [persistence catalog](../../../docs/persistence-catalog.md) owns the exact payload.
+When an allowed browser write's result is final, the plugin appends `browser-consent/write` to the Session: `callId`, the upstream `tool`, `site` when the current tab's origin was read, `grant` (`site` for an allowance, `approval` for a one-shot approval), and `outcome` (`succeeded` or `failed`; `failed` includes a refusal by a later policy and a result withheld after the call). Denied writes leave no record of their own; the approval service's `approval/asked` and `approval/decided` record every question, including its argument summary, and its answer. The [persistence catalog](../../../docs/persistence-catalog.md) owns the exact payload.
 
 <a id="composition"></a>
 ## Composition
 
-Mount it beside the `browserUse` registry, with `dsh-user-approval`, which the shipped profiles already include:
+Mount it beside the `browserUse` registry, with `dsh-user-approval`, which the shipped profiles already include. The person box's rows:
 
 ```yaml
 - insert:
@@ -75,18 +103,40 @@ Mount it beside the `browserUse` registry, with `dsh-user-approval`, which the s
         browser:
           mode: attach
           endpoint: http://127.0.0.1:9222
+        deniedUrls: [chrome:, chrome-untrusted:, chrome-extension:, devtools:, view-source:, file:, https://passwords.google.com, https://pay.google.com, https://payments.google.com, https://myaccount.google.com, https://accounts.google.com]
+    - id: computer-use
+      name: '@deepseek-ai/dsh-computer-use'
+    - id: computer-use-x11
+      name: '@deepseek-ai/dsh-computer-use-x11'
+      inject: [mumbo-browser-consent]
+      config:
+        display: ':1'
 ```
 
-The plugin requires the provider's services; it reads the approval service on each write.
+The plugin requires the provider's services; it reads the approval service on each write. The `inject` line makes the desktop tool wait for this plugin's service, so a consent row that fails to load, or that refuses another browser provider, leaves no ungated desktop tool.
 
 <a id="model-experience"></a>
 ## Model Experience
 
-### Denied browser write
+### Denied page
 
 #### What the model sees
 
-A denied write's tool result replaces the browser's answer with one error line naming the upstream tool and the site, or `an unidentified page`: `Error: The user declined <tool> on <site>.`, `Error: <tool> on <site> got no answer from the user within <seconds> seconds.`, `Error: Approval prompts are disabled in this session, so <tool> on <site> did not run.`, or `Error: <tool> on <site> needs the user's approval, and no approval channel is available.` A write that reached dispatch without consent returns `Error: <tool> needs the user's consent, which was not given.`, and a cancelled approval returns the tool runtime's `Error: tool call aborted before dispatch`. While another provider holds the browser, every browser call returns `Error: <tool> did not run: browser tools are disabled because this browser was set up without consent checks.` Allowed writes and reads return the browser's ordinary result; the approval question and the audit record are not model context.
+A call that names a denied page returns `Error: <tool> did not run: the assistant may not open <what>.`, where `<what>` is `a <scheme> page`, `a page on <origin>`, or `a page whose address cannot be read`. A write while the current tab is on one returns `Error: <tool> did not run: the current tab is <what>, which the assistant may not use.`. A call after which the tab is on one returns `Error: <tool> ran, but its result is withheld: the current tab is <what>, which the assistant may not use. Open another page to continue.` in place of the browser's answer.
+
+#### Token effect
+
+A refusal replaces the browser's result with one short line.
+
+#### KV Cache effect
+
+Append-only. The result follows the Session's existing history like any tool result.
+
+### Denied browser write or desktop input
+
+#### What the model sees
+
+A denied write's tool result replaces the browser's answer with one error line naming the upstream tool and the site, or `an unidentified page`: `Error: The user declined <tool> on <site>.`, `Error: <tool> on <site> got no answer from the user within <seconds> seconds.`, `Error: Approval prompts are disabled in this session, so <tool> on <site> did not run.`, or `Error: <tool> on <site> needs the user's approval, and no approval channel is available.` Denied desktop input uses the same lines with `computer input` in place of `<tool> on <site>`. A write that reached dispatch without consent returns `Error: <tool> needs the user's consent, which was not given.` (`computer input needs ...` for the desktop), and a cancelled approval returns the tool runtime's `Error: tool call aborted before dispatch`. While another provider holds the browser, every browser call returns `Error: <tool> did not run: browser tools are disabled because this browser was set up without consent checks.` Allowed writes and reads return the browser's ordinary result; the approval question and the audit record are not model context.
 
 #### Token effect
 
@@ -100,12 +150,16 @@ Append-only. The result follows the Session's existing history like any tool res
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **Not a security boundary in a box** — the plugin gates the model's browser tools only. In a box the model also has a root shell in Full access with no per-command ask, so it can reach Chromium's debugging port at `127.0.0.1:9222` directly, for example with `curl` or `playwright-core`, and read the browser profile directory. Consent becomes a boundary only once the browser runs outside the reach of the dsh user, which is a platform decision.
-- **Allowances live in files the model can edit** — `allowedSites` and the rest of the deployment's configuration, including its MCP server rows, are files the same shell can change, and changing `allowedSites` reloads the plugin; no Client page manages allowances.
-- **Only the mounted Playwright MCP provider is consented** — the classification follows the pinned `@playwright/mcp` server, and an upstream tool added later asks until it is classified. Another browser-use provider's tools are refused outright or, for an unknown provider that takes `browserUse` after load, left ungated with an error; a browser reached through a plain MCP server row passes ungated.
-- **The site is read before the action, not during it** — a page that navigates itself between the listing and the action runs the action on its new origin; a click inside a cross-origin frame counts as the top-level page's site.
+- **A snapshot shows a filled password field's value** — the pinned Playwright MCP renders every text input's value in a snapshot, password inputs included, and writes action snapshots to `.playwright-mcp/` in the Session's working directory. Once a click or key press on a page commits Chromium's autofill, a snapshot of an allowed or unlisted page shows the saved password in clear text, without asking. Masking needs a change in Playwright's snapshot code (`toAriaNode` in `playwright-core`); the Chromium end-to-end test pins the current behavior.
+- **Not a security boundary in a box** — the plugin gates the model's browser and desktop tools only. In a box the model also has a root shell in Full access with no per-command ask, so it can reach Chromium's debugging port at `127.0.0.1:9222` directly, for example with `curl` or `playwright-core`, and read the browser profile directory. Consent becomes a boundary only once the browser runs outside the reach of the dsh user, which is a platform decision.
+- **The tab is read around the call, not during it** — a page that navigates itself between the before-listing and a write runs the write on its new origin, and a result whose page the person leaves between the call and the after-listing passes unless the result's own `- Page URL:` line names the denied page. A click inside a cross-origin frame counts as the top-level page's site, and a denied page in a frame of an allowed page is not detected.
+- **Other tabs' titles and URLs are visible** — `browser_tabs` lists every tab's title and URL, including a denied page open in a tab that is not current.
+- **Withholding reaches only the result and its linked files** — a screenshot taken on a denied page stays in the attachment store under DSH home, and deleting the console log file that a withheld result links also drops the entries it held from earlier pages.
+- **Allowances live in files the model can edit** — `allowedSites`, `deniedUrls`, and the rest of the deployment's configuration, including its MCP server rows, are files the same shell can change, and changing them reloads the plugin; no Client page manages allowances.
+- **Only the mounted Playwright MCP provider and the X11 `computer` tool are consented** — the classification follows the pinned `@playwright/mcp` server, and an upstream tool added later asks until it is classified. Another browser-use provider's tools are refused outright or, for an unknown provider that takes `browserUse` after load, left ungated with an error; a browser reached through a plain MCP server row passes ungated. Other computer-use providers' tools are not gated.
 - **Navigation is a read** — a `GET` that changes state, such as a one-click unsubscribe link, runs without asking, and a navigation can carry page data to any URL.
 - **Allowances are per site, not per kind of action** — an allowed origin permits every site write there, posting and buying included.
+- **Every desktop input asks** — scrolling and pointer moves ask like clicks, because wheel and hover input reach the page under the pointer.
 - **The audit record has no Client renderer** — it is in the Session log and its exports, not in the Chat.
 
 <a id="dev-note"></a>

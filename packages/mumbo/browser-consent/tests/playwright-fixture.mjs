@@ -1,12 +1,15 @@
 /**
  * Stdio stand-in for the Playwright MCP server: tabs whose URLs follow navigation, a `?redirect=` query, and clicks on a
- * `link:<url>` target, plus a call log. Each call is logged with the current tab's URL before the call.
+ * `link:<url>` target, plus a call log. Each call is logged with the current tab's URL before the call. The first tab
+ * starts on the URL in the third argument, or `about:blank`; a click on a `report:<url>` target reports that page URL
+ * without moving the tab, as when the person leaves the page between the call and the next listing. Each click writes
+ * the page it ends on to `.playwright-mcp/page-<n>.yml` in the working directory and links it, as Playwright MCP does.
  */
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 
-const [root, mode] = process.argv.slice(2)
+const [root, mode, start] = process.argv.slice(2)
 const reply = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\n')
 const text = value => ({ content: [{ type: 'text', text: value }] })
 const tool = (name, properties = {}) => ({ name, description: `Fixture ${name}.`, inputSchema: { type: 'object', properties } })
@@ -18,9 +21,11 @@ const TOOLS = [
   tool('browser_type', { element: { type: 'string' }, target: { type: 'string' }, text: { type: 'string' } }),
   tool('browser_file_upload', { paths: { type: 'array', items: { type: 'string' } } }),
   tool('browser_evaluate', { function: { type: 'string' } }),
+  tool('browser_close'),
 ]
-const tabs = [{ url: 'about:blank' }]
+const tabs = [{ url: start || 'about:blank' }]
 let current = 0
+let written = 0
 /** Follow a `?redirect=` query to its target, as a server redirect would. */
 const land = url => new URL(url).searchParams.get('redirect') ?? url
 
@@ -48,9 +53,17 @@ createInterface({ input: process.stdin }).on('line', line => {
       if (name === 'browser_click' && args.target?.startsWith('link:')) tabs[current].url = args.target.slice('link:'.length)
       if (name === 'browser_tabs' && args.action === 'new') current = tabs.push({ url: args.url ?? 'about:blank' }) - 1
       if (name === 'browser_tabs' && args.action === 'select') current = args.index
+      const reported = name === 'browser_click' && args.target?.startsWith('report:') ? args.target.slice('report:'.length) : tabs[current].url
+      let snapshot = ''
+      if (name === 'browser_click') {
+        const file = `.playwright-mcp/page-${++written}.yml`
+        mkdirSync('.playwright-mcp', { recursive: true })
+        writeFileSync(file, `- text: ${reported}\n`)
+        snapshot = `\n### Snapshot\n- [Snapshot](${file})`
+      }
       reply(request.id, name === 'browser_tabs'
         ? text(`### Result\n${tabs.map((tab, index) => `- ${index}:${index === current ? ' (current)' : ''} [Fixture page](${tab.url})`).join('\n')}`)
-        : text(`### Page\n- Page URL: ${tabs[current].url}`))
+        : text(`### Page\n- Page URL: ${reported}${snapshot}`))
       break
     }
     default:

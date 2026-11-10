@@ -40,6 +40,9 @@
     },
     {
       "path": "../../util/values"
+    },
+    {
+      "path": "../../session/working-directory"
     }
   ]
 }

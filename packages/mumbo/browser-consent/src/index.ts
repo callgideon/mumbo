@@ -1,18 +1,22 @@
 /**
- * Reads free, writes ask: consent for the assistant's actions in a person's own signed-in Chromium. The plugin mounts
- * the Playwright MCP browser provider itself, so the browser tools exist only while consent is loaded and valid.
+ * Reads free, writes ask, denied pages never: consent for the assistant's actions in a person's own signed-in Chromium
+ * and on their desktop. The plugin mounts the Playwright MCP browser provider itself, so the browser tools exist only
+ * while consent is loaded and valid.
  * @module @mumbo/browser-consent
  */
 
+import { rm } from 'node:fs/promises'
+import { basename, dirname, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-browser-use'
 import * as PlaywrightBrowser from '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp'
 import { validateBrowserMcpConfig } from '@deepseek-ai/dsh-experimental-browser-use-runtime/mcp'
 import type { McpResult } from '@deepseek-ai/dsh-mcp-client'
 import type { Session } from '@deepseek-ai/dsh-session'
-import type { ToolExecution, PreToolDecision } from '@deepseek-ai/dsh-tools'
+import type { ToolExecution, ToolExecutionResult, PreToolDecision } from '@deepseek-ai/dsh-tools'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
+import type {} from '@deepseek-ai/dsh-working-directory'
 import z from '@deepseek-ai/schemastery'
 import type { BrowserWriteGrant } from './types.ts'
 
@@ -33,6 +37,22 @@ const TABS = 'browser_tabs'
 const VALUE_LIMIT = 300
 /** Characters of arguments listed in an approval prompt; further arguments are counted as not shown. */
 const SUMMARY_LIMIT = 1200
+/** Upstream tool that ends Playwright's browser connection and answers with fixed text. */
+const CLOSE = 'browser_close'
+/** Desktop tool of the `computer-use-x11` provider, whose `screenshot` action is its only read. */
+const COMPUTER = 'computer'
+/** Schemes whose URL wraps another URL that Chromium loads or shows. */
+const WRAPPER_SCHEMES: ReadonlySet<string> = new Set(['view-source:', 'blob:', 'filesystem:'])
+/** Line Playwright MCP writes into a result for the page the result describes. */
+const PAGE_URL_LINE = /^- Page URL: (.*)$/gmu
+/** Lines through which Playwright MCP links a file it wrote for a result: snapshots, screenshots, console entries, downloads. */
+const FILE_LINES = [
+  /^- \[[^\]\n]*\]\(([^)\n]+)\)$/gmu, /^- New console entries: (.+?)(?:#L\d+)?$/gmu, /^- Downloaded file .* to "([^"\n]+)"$/gmu,
+]
+/** Directory, inside the server's working directory, where Playwright MCP writes the files it links. */
+const OUTPUT_DIRECTORY = '.playwright-mcp'
+/** {@link denial} phrase for a URL that does not parse or a tab whose URL cannot be read. */
+const UNREADABLE = 'a page whose address cannot be read'
 
 /** Upstream tools that only read the page or browser state, plus history navigation. */
 const READS: ReadonlySet<string> = new Set([
@@ -56,20 +76,131 @@ export type BrowserActionKind = 'read' | 'site-write' | 'always-ask'
 export interface Config {
   /** Playwright MCP provider settings; the plugin mounts the provider with them. */
   readonly browser: PlaywrightBrowser.Config
+  /**
+   * Pages the browser tools never open or read: lowercase schemes with their colon (`chrome:`) and `http:` or `https:`
+   * origins (`https://accounts.google.com`). Required, so each deployment states its list; `[]` denies nothing.
+   */
+  readonly deniedUrls: string[]
   /** Origins (`https://host[:port]`) where site writes proceed without asking. */
   readonly allowedSites: string[]
   /** Milliseconds a write waits for the person's answer before it is denied as unanswered. */
   readonly approvalTimeoutMs: number
 }
 
-/** Consent configuration as written: provider settings in their input form, the other fields defaulted. */
-export type ConfigInput = Partial<Omit<Config, 'browser'>> & { readonly browser: NonNullable<Parameters<typeof PlaywrightBrowser.Config>[0]> }
+/** Consent configuration as written: provider settings in their input form, the denied URLs, the other fields defaulted. */
+export type ConfigInput = Partial<Omit<Config, 'browser' | 'deniedUrls'>> & Pick<Config, 'deniedUrls'>
+  & { readonly browser: NonNullable<Parameters<typeof PlaywrightBrowser.Config>[0]> }
 
 export const Config: z<ConfigInput, Config> = z.object({
   browser: PlaywrightBrowser.Config.required(),
+  deniedUrls: z.array(z.string()).required(),
   allowedSites: z.array(z.string()).default([]),
   approvalTimeoutMs: z.natural().min(1).default(300_000),
 })
+
+/** A validated `deniedUrls` list. */
+export interface DenyList {
+  /** Denied schemes, lowercase with their colon. */
+  readonly schemes: ReadonlySet<string>
+  /** Denied origins as written, keyed by {@link hostKey}. */
+  readonly origins: ReadonlyMap<string, string>
+}
+
+/**
+ * Validate `deniedUrls` entries. A scheme entry is lowercase with its colon; an origin entry is an `http:` or `https:`
+ * origin as {@link canonicalOrigin} writes it.
+ * @param entries - the configured entries.
+ * @returns the deny list.
+ * @throws naming the first entry that is neither, and the form to use when the entry has one.
+ */
+export function denyList(entries: readonly string[]): DenyList {
+  const schemes = new Set<string>()
+  const origins = new Map<string, string>()
+  for (const entry of entries) {
+    if (/^[a-z][a-z\d+.-]*:$/iu.test(entry)) {
+      if (entry !== entry.toLowerCase()) throw new Error(`${name}: deniedUrls entry "${entry}" is not lowercase; use "${entry.toLowerCase()}"`)
+      schemes.add(entry)
+      continue
+    }
+    const parsed = URL.parse(entry)
+    const origin = parsed === null ? undefined : canonicalOrigin(parsed)
+    if (parsed === null || origin !== entry) {
+      throw new Error(`${name}: deniedUrls entry "${entry}" is neither a scheme nor an origin; ${origin === undefined ? 'use one such as chrome: or https://accounts.google.com' : `use "${origin}"`}`)
+    }
+    origins.set(hostKey(parsed), entry)
+  }
+  return { schemes, origins }
+}
+
+/**
+ * Say what denies a URL. The URL is parsed as WHATWG URLs are, which lowercases the scheme and host, converts an IDN
+ * host to punycode, decodes percent-encoded host characters, drops userinfo and the default port, and strips
+ * surrounding spaces, tabs, and newlines; trailing dots of the host are then ignored. An `about:` URL other than
+ * `about:blank` counts as a `chrome:` URL, because Chromium serves `about:<page>` as `chrome://<page>`. A
+ * `view-source:`, `blob:`, or `filesystem:` URL is denied by its own scheme or by the URL it wraps. An origin entry
+ * covers its host and port under both `http:` and `https:`.
+ * @param url - the URL as Chromium reports it or a call names it, or `undefined` when it could not be read.
+ * @param denied - the validated deny list.
+ * @returns `a <scheme> page`, `a page on <origin>`, or {@link UNREADABLE} for a URL that is absent or does not parse;
+ *   `undefined` when nothing denies the URL.
+ */
+export function denial(url: string | undefined, denied: DenyList): string | undefined {
+  const parsed = url === undefined ? null : URL.parse(url)
+  if (parsed === null) return UNREADABLE
+  const scheme = parsed.protocol === 'about:' && parsed.pathname.toLowerCase() !== 'blank' ? 'chrome:' : parsed.protocol
+  if (denied.schemes.has(scheme)) return `a ${scheme} page`
+  if (WRAPPER_SCHEMES.has(scheme)) return denial(parsed.href.slice(scheme.length), denied)
+  const origin = scheme === 'http:' || scheme === 'https:' ? denied.origins.get(hostKey(parsed)) : undefined
+  return origin === undefined ? undefined : `a page on ${origin}`
+}
+
+/** The host of a parsed URL without trailing dots. */
+function bareHost(url: URL): string {
+  return url.hostname.replace(/\.+$/u, '')
+}
+
+/** Host and port of a parsed URL with trailing host dots removed; the port is empty when it is the scheme's default. */
+function hostKey(url: URL): string {
+  return `${bareHost(url)}:${url.port}`
+}
+
+/** The origin of an `http:` or `https:` URL with trailing host dots removed. */
+function canonicalOrigin(url: URL): string | undefined {
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined
+  return `${url.protocol}//${bareHost(url)}${url.port === '' ? '' : `:${url.port}`}`
+}
+
+/**
+ * The URL a call's `url` argument opens, read as Playwright MCP reads it: a string that does not parse as a URL gets
+ * `http://` in front when it starts with `localhost` and `https://` otherwise.
+ * @param args - the call's parsed arguments.
+ * @returns the URL, or `undefined` when the call has no string `url` argument.
+ */
+export function targetUrl(args: unknown): string | undefined {
+  const { url } = fieldsOf(args)
+  if (typeof url !== 'string') return undefined
+  return URL.canParse(url) ? url : `${url.startsWith('localhost') ? 'http' : 'https'}://${url}`
+}
+
+/**
+ * Say what denies a page that a result reports through Playwright MCP's `- Page URL:` lines.
+ * @param result - the call's result.
+ * @param denied - the validated deny list.
+ * @returns the {@link denial} of the first denied reported URL, or `undefined` when none is denied.
+ */
+function reportedDenial(result: ToolExecutionResult, denied: DenyList): string | undefined {
+  for (const block of result.content) {
+    if (block.type !== 'text') continue
+    for (const [, url] of block.text.matchAll(PAGE_URL_LINE)) {
+      const blocked = denial(url, denied)
+      if (blocked !== undefined) return blocked
+    }
+  }
+  return undefined
+}
+
+/** The Agent that makes a tool call. */
+type Agent = NonNullable<ToolExecution['agent']>
 
 /** One write's consent, kept from its decision to its final result. */
 interface Consent {
@@ -97,17 +228,17 @@ export function classify(tool: string, args: unknown): BrowserActionKind {
 }
 
 /**
- * Read the current tab's origin from a `browser_tabs` listing (`- 0: (current) [title](url)`). Page titles are not
- * escaped upstream, so a current-tab line holding `](` more than once is ambiguous and yields no origin.
+ * Read the current tab's URL from a `browser_tabs` listing (`- 0: (current) [title](url)`). Page titles are not
+ * escaped upstream, so a current-tab line holding `](` more than once is ambiguous and yields no URL.
  * @param text - the listing's text content.
- * @returns the `http:` or `https:` origin, or `undefined` when none can be read without ambiguity.
+ * @returns the URL, or `undefined` when none can be read without ambiguity.
  */
-export function currentTabOrigin(text: string): string | undefined {
+export function currentTabUrl(text: string): string | undefined {
   const [line, ...others] = text.split('\n').filter(candidate => /^- \d+: \(current\) \[/u.test(candidate))
   if (line === undefined || others.length > 0) return undefined
   const [, url, ...rest] = line.replace(/ \[crashed\]$/u, '').split('](')
   if (url === undefined || rest.length > 0 || !url.endsWith(')')) return undefined
-  return webOrigin(url.slice(0, -1))
+  return url.slice(0, -1)
 }
 
 /**
@@ -157,6 +288,26 @@ function webOrigin(url: unknown): string | undefined {
   return parsed !== null && (parsed.protocol === 'http:' || parsed.protocol === 'https:') ? parsed.origin : undefined
 }
 
+/**
+ * Delete the files Playwright MCP wrote for a withheld result, so the model cannot read them with other tools. Only
+ * links that resolve to a file directly inside a `.playwright-mcp` directory are followed, because page titles in the
+ * same text are not escaped. A failed deletion is logged; the result stays withheld.
+ * @param ctx - plugin context carrying the logger.
+ * @param cwd - the Session's working directory, which is the server's and the base of its relative links.
+ * @param result - the withheld result.
+ */
+async function removeLinkedFiles(ctx: Context, cwd: string, result: ToolExecutionResult): Promise<void> {
+  const text = result.content.map(block => block.type === 'text' ? block.text : '').join('\n')
+  const files = FILE_LINES.flatMap(pattern => Array.from(text.matchAll(pattern), match => resolve(cwd, match[1] ?? '')))
+  await Promise.all(files.filter(file => basename(dirname(file)) === OUTPUT_DIRECTORY).map(async (file) => {
+    try {
+      await rm(file, { force: true })
+    } catch (error: unknown) {
+      ctx.logger.error(`${name}: could not delete ${file}, which Playwright wrote for a withheld result: ${String(error)}`)
+    }
+  }))
+}
+
 /** The fields of a call's parsed arguments, which a malformed call may give as a non-object. */
 function fieldsOf(args: unknown): Record<string, unknown> {
   return typeof args === 'object' && args !== null ? args as Record<string, unknown> : {}
@@ -167,19 +318,19 @@ function fieldsOf(args: unknown): Record<string, unknown> {
 const INERT_RUN = { deferContext() {}, concludeTurn() {} }
 
 /**
- * Ask Playwright which tab the next action runs on, through the same Session's `browser_tabs` tool.
- * Native execution runs MCP tools one at a time, so no other call of this Session's browser is in flight.
- * @returns the current tab's origin, or `undefined` when the tool is absent, fails, or lists ambiguously.
+ * Ask Playwright which tab the next action runs on, or the last one ran on, through the same Session's `browser_tabs`
+ * tool. Native execution runs MCP tools one at a time, so no other call of this Session's browser is in flight.
+ * @returns the current tab's URL, or `undefined` when the tool is absent, fails, or lists ambiguously.
  */
-async function currentSite(ctx: Context, exec: ToolExecution): Promise<string | undefined> {
+async function currentTab(ctx: Context, exec: ToolExecution): Promise<string | undefined> {
   const tabs = ctx.tools.get(PREFIX + TABS, exec.agent)
   if (tabs === undefined) return undefined
   const args = { action: 'list' }
   try {
     const listing = await tabs.execute(args, { ...exec, ...INERT_RUN, name: PREFIX + TABS, arguments: args }) as McpResult
-    return currentTabOrigin(listing.content.map(block => (block as { text?: unknown }).text).filter(text => typeof text === 'string').join('\n'))
+    return currentTabUrl(listing.content.map(block => (block as { text?: unknown }).text).filter(text => typeof text === 'string').join('\n'))
   } catch (error: unknown) {
-    // A failed listing leaves the site unknown, so the caller asks the user instead.
+    // A failed listing leaves the tab unknown, which every caller treats as denied.
     ctx.logger.debug(`current tab listing failed: ${String(error)}`)
     return undefined
   }
@@ -206,11 +357,13 @@ function reportRival(ctx: Context, holder: string): void {
 }
 
 export function apply(ctx: Context, config: Config): void {
+  const denied = denyList(config.deniedUrls)
   for (const site of config.allowedSites) {
     const origin = webOrigin(site)
     if (origin !== site) {
       throw new Error(`${name}: allowedSites entry "${site}" is not an origin${origin === undefined ? '; use one such as https://mail.google.com' : `; use "${origin}"`}`)
     }
+    if (denial(site, denied) !== undefined) throw new Error(`${name}: allowedSites entry "${site}" is also denied by deniedUrls`)
   }
   validateBrowserMcpConfig(config.browser)
   const holder = ctx.browserUse.providerName
@@ -220,6 +373,7 @@ export function apply(ctx: Context, config: Config): void {
   if (holder !== undefined) reportRival(ctx, holder)
   const allowed = new Set(config.allowedSites)
   const consents = new WeakMap<ToolExecution, Consent>()
+  const computerConsents = new WeakSet<ToolExecution>()
   let owned = false
   /** A refusal for a call to the tools of a provider that holds `browserUse` in place of this plugin's child. */
   const rivalRefusal = (exec: ToolExecution): string | undefined => {
@@ -230,37 +384,25 @@ export function apply(ctx: Context, config: Config): void {
       : undefined
   }
   const toolOf = (exec: ToolExecution): string | undefined => exec.name.startsWith(PREFIX) ? exec.name.slice(PREFIX.length) : undefined
-
-  ctx.tools.guard((exec) => {
-    const refusal = rivalRefusal(exec)
-    if (refusal !== undefined) return refusal
+  /** A refusal for a browser call whose `url` argument names a denied page. */
+  const targetRefusal = (exec: ToolExecution): string | undefined => {
     const tool = toolOf(exec)
-    if (tool === undefined || consents.has(exec) || classify(tool, exec.arguments) === 'read') return undefined
-    return `${tool} needs the user's consent, which was not given.`
-  })
-
-  ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
-    const refusal = rivalRefusal(exec)
-    if (refusal !== undefined) return { kind: 'deny', reason: refusal }
-    const tool = toolOf(exec)
-    const agent = exec.agent
-    if (tool === undefined || agent === undefined) return next()
-    const kind = classify(tool, exec.arguments)
-    if (kind === 'read') return next()
-    const site = await currentSite(ctx, exec)
-    const grant = (granted: BrowserWriteGrant): Promise<PreToolDecision> => {
-      consents.set(exec, { session: agent.session, tool, site, grant: granted })
-      return next()
-    }
-    if (kind === 'site-write' && site !== undefined && allowed.has(site)) return grant('site')
-    const where = site ?? 'an unidentified page'
+    const target = tool === undefined ? undefined : targetUrl(exec.arguments)
+    const blocked = target === undefined ? undefined : denial(target, denied)
+    return blocked === undefined ? undefined : `${tool} did not run: the assistant may not open ${blocked}.`
+  }
+  const isScreenshot = (args: unknown): boolean => fieldsOf(args).action === 'screenshot'
+  /** The arguments of a call as its tool's input schema declares them, for an approval prompt. */
+  const argumentsOf = (exec: ToolExecution, agent: Agent) => {
     const properties = ctx.tools.get(exec.name, agent)?.parameters.properties
-    const { summary, element } = describeArguments(exec.arguments, new Set(typeof properties === 'object' && properties !== null ? Object.keys(properties) : []))
-    const always = kind === 'always-ask'
-    const reason = `Browser write: ${tool} on ${where}. Arguments: ${summary}.`
-      + (element === undefined ? '' : ` Model-written target description: ${element}.`)
-      + (always ? ' Site allowances do not cover this action.' : '')
-    const unavailable: PreToolDecision = { kind: 'deny', reason: `${tool} on ${where} needs the user's approval, and no approval channel is available.` }
+    return describeArguments(exec.arguments, new Set(typeof properties === 'object' && properties !== null ? Object.keys(properties) : []))
+  }
+  /**
+   * Ask the person to approve one call. `subject` names the call in each denial reason, such as
+   * `browser_click on https://example.com` or `computer input`.
+   */
+  const ask = async (exec: ToolExecution, agent: Agent, subject: string, reason: string): Promise<PreToolDecision | 'allowed'> => {
+    const unavailable: PreToolDecision = { kind: 'deny', reason: `${subject} needs the user's approval, and no approval channel is available.` }
     const approval = ctx.get('approval')
     if (approval === undefined) return unavailable
     const timeout = AbortSignal.timeout(config.approvalTimeoutMs)
@@ -270,14 +412,14 @@ export function apply(ctx: Context, config: Config): void {
     })
     switch (outcome) {
       case 'allowed-once':
-        return grant('approval')
+        return 'allowed'
       case 'rejected':
         return (approval.overrideOf(agent.session) ?? approval.config.policy) === 'never'
-          ? { kind: 'deny', reason: `Approval prompts are disabled in this session, so ${tool} on ${where} did not run.` }
-          : { kind: 'deny', reason: `The user declined ${tool} on ${where}.` }
+          ? { kind: 'deny', reason: `Approval prompts are disabled in this session, so ${subject} did not run.` }
+          : { kind: 'deny', reason: `The user declined ${subject}.` }
       case 'cancelled':
         return timeout.aborted && !exec.signal.aborted
-          ? { kind: 'deny', reason: `${tool} on ${where} got no answer from the user within ${String(config.approvalTimeoutMs / 1000)} seconds.` }
+          ? { kind: 'deny', reason: `${subject} got no answer from the user within ${String(config.approvalTimeoutMs / 1000)} seconds.` }
           : { kind: 'cancel' }
       case 'unavailable':
         return unavailable
@@ -285,6 +427,64 @@ export function apply(ctx: Context, config: Config): void {
       default:
         return assertNever(outcome, 'ApprovalOutcome')
     }
+  }
+
+  ctx.tools.guard((exec) => {
+    const refusal = rivalRefusal(exec) ?? targetRefusal(exec)
+    if (refusal !== undefined) return refusal
+    if (exec.name === COMPUTER) {
+      return isScreenshot(exec.arguments) || computerConsents.has(exec) ? undefined : 'computer input needs the user\'s consent, which was not given.'
+    }
+    const tool = toolOf(exec)
+    if (tool === undefined || consents.has(exec) || classify(tool, exec.arguments) === 'read') return undefined
+    return `${tool} needs the user's consent, which was not given.`
+  })
+
+  ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
+    const refusal = rivalRefusal(exec) ?? targetRefusal(exec)
+    if (refusal !== undefined) return { kind: 'deny', reason: refusal }
+    const agent = exec.agent
+    if (agent === undefined) return next()
+    if (exec.name === COMPUTER) {
+      if (isScreenshot(exec.arguments)) return next()
+      const decision = await ask(exec, agent, 'computer input', `Computer input on the desktop. Arguments: ${argumentsOf(exec, agent).summary}.`)
+      if (decision !== 'allowed') return decision
+      computerConsents.add(exec)
+      return next()
+    }
+    const tool = toolOf(exec)
+    if (tool === undefined) return next()
+    const kind = classify(tool, exec.arguments)
+    if (kind === 'read') return next()
+    const url = await currentTab(ctx, exec)
+    const blocked = denial(url, denied)
+    if (blocked !== undefined) return { kind: 'deny', reason: `${tool} did not run: the current tab is ${blocked}, which the assistant may not use.` }
+    const site = webOrigin(url)
+    const grant = (granted: BrowserWriteGrant): Promise<PreToolDecision> => {
+      consents.set(exec, { session: agent.session, tool, site, grant: granted })
+      return next()
+    }
+    if (kind === 'site-write' && site !== undefined && allowed.has(site)) return grant('site')
+    const where = site ?? 'an unidentified page'
+    const { summary, element } = argumentsOf(exec, agent)
+    const reason = `Browser write: ${tool} on ${where}. Arguments: ${summary}.`
+      + (element === undefined ? '' : ` Model-written target description: ${element}.`)
+      + (kind === 'always-ask' ? ' Site allowances do not cover this action.' : '')
+    const decision = await ask(exec, agent, `${tool} on ${where}`, reason)
+    return decision === 'allowed' ? grant('approval') : decision
+  }, { prepend: true })
+
+  // Around dispatch, so wrappers outside it, post-execute policy, and result observers see only the replacement.
+  ctx.on('tools/execute', async (exec, next) => {
+    const tool = toolOf(exec)
+    const result = await next()
+    // Listing tabs after `browser_close` would reconnect and open a tab; its result is fixed text.
+    if (tool === undefined || tool === CLOSE) return result
+    const blocked = reportedDenial(result, denied) ?? denial(await currentTab(ctx, exec), denied)
+    if (blocked === undefined) return result
+    const reason = `${tool} ran, but its result is withheld: the current tab is ${blocked}, which the assistant may not use. Open another page to continue.`
+    if (exec.agent !== undefined) await removeLinkedFiles(ctx, ctx.workingDirectory.get(exec.agent.session), result)
+    return { isError: true, content: [{ type: 'text', text: `Error: ${reason}` }], error: { message: reason } }
   }, { prepend: true })
 
   ctx.on('tools/result', (exec, result) => {
