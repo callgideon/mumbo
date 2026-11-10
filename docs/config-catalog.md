@@ -4920,6 +4920,25 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-workspace-changes -->
 
+<!-- BEGIN GENERATED config-catalog:@mumbo/assistant -->
+<a id="mumboassistant"></a>
+
+## `@mumbo/assistant`
+
+- `inject`: `sessionController` · `workspaceRegistry` · `agents`
+- `source`: [`packages/mumbo/assistant/src/index.ts:28`](../packages/mumbo/assistant/src/index.ts)
+
+```ts config-catalog
+/** Mumbo's instructions and the Workspace its Session is created in. */
+export interface Config {
+  /** Text of the system prompt section every Mumbo Agent receives; the box edge writes it. */
+  readonly instructions: string
+  /** Absolute directory of the Workspace a newly created Mumbo Session joins; it must exist. */
+  readonly workspace: string
+}
+```
+<!-- END GENERATED config-catalog:@mumbo/assistant -->
+
 <!-- BEGIN GENERATED config-catalog:@mumbo/box-links -->
 <a id="mumbobox-links"></a>
 
