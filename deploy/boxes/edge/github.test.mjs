@@ -64,7 +64,7 @@ const sendThenReset = (port, path, afterMs) => {
 
 /**
  * A forwarder behind a local server; project P1 has callgideon/mumbo and the claim's principal is `state.principal`.
- * Node id lookups are answered by `lookup(ids)` and recorded in `lookups`, apart from the forwarded `calls`. The
+ * Node id lookups are answered by `lookup(ids, query)` and recorded in `lookups`, apart from the forwarded `calls`. The
  * forwarder's own REST reads of an edit's author (the only fetch without `duplex`) are answered by `author(url)`, by
  * default an object the agent wrote, and recorded in `authors`.
  * The App's own calls (installation, token mint, revoke: Bearer authorization) are recorded in `mints`; a mint is
@@ -96,7 +96,7 @@ async function forwarder({ reply = ok, lookup = lookupOk, author = () => Respons
     const gql = url === 'https://api.github.com/graphql' ? JSON.parse(body) : undefined
     if (gql?.query.startsWith('query($ids: [ID!]!) { nodes(ids: $ids)')) {
       lookups.push({ ids: gql.variables.ids, authorization: init.headers.authorization })
-      return lookup(gql.variables.ids)
+      return lookup(gql.variables.ids, gql.query)
     }
     calls.push({ url, init: { ...init, body }, streamed: init.body instanceof ReadableStream })
     return reply(url, init)
@@ -386,11 +386,47 @@ test('edits: the agent edits only its own comments and pull requests, matched by
   ]) assert.equal((await send()).status, 200, why)
   assert.equal(f.calls.length, 4)
   assert.deepEqual(f.calls.map(c => c.url).slice(0, 2), ['https://api.github.com/repos/callgideon/mumbo/issues/comments/9', 'https://api.github.com/repos/callgideon/mumbo/pulls/5'])
+  // A pull request's state and reviewers are the agent's own to change too; its own pass.
+  for (const m of ['markPullRequestReadyForReview', 'convertPullRequestToDraft']) {
+    const r = await gql(`mutation { ${m}(input: {pullRequestId: "PR_HUMAN"}) { clientMutationId } }`)
+    assert.equal(r.status, 403, m)
+    assert.match(refusal(r), NOT_OWN, m)
+    assert.equal((await gql(`mutation { ${m}(input: {pullRequestId: "PR_1"}) { clientMutationId } }`)).status, 200, m)
+  }
+  assert.equal((await gql('mutation { requestReviews(input: {pullRequestId: "PR_HUMAN", userIds: ["U_1"], union: false}) { clientMutationId } }')).status, 403)
+  const reviewers = (n) => f.call(`api.github.com/repos/callgideon/mumbo/pulls/${n}/requested_reviewers`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"reviewers":["someone"]}' })
+  assert.equal((await reviewers(6)).status, 403)
+  assert.equal(f.authors.at(-1).url, 'https://api.github.com/repos/callgideon/mumbo/pulls/6', 'reviewers are checked against the pull request')
+  assert.equal((await reviewers(5)).status, 200)
   // New comments and reactions on anyone's thread need no author check.
   const before = f.authors.length
   assert.equal((await gql('mutation { addComment(input: {subjectId: "PR_HUMAN", body: "x"}) { clientMutationId } }')).status, 200)
   assert.equal((await f.call('api.github.com/repos/callgideon/mumbo/issues/comments/10/reactions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"content":"eyes"}' })).status, 200)
   assert.equal(f.authors.length, before)
+})
+
+test('the node lookup asks GitHub for the author of each pull request and issue comment by numeric id', async (t) => {
+  let query
+  const f = await forwarder({ lookup: (ids, q) => { query = q; return lookupOk(ids) } }); t.after(f.close)
+  assert.equal((await writers(f).gql(editComment('IC_1'))).status, 200)
+  const author = 'author { __typename ... on Bot { databaseId } ... on User { databaseId } }'
+  for (const type of ['PullRequest', 'IssueComment']) assert.ok(query.includes(`... on ${type} { repository { nameWithOwner } ${author} }`), type)
+  // The query GitHub runs must parse; an author selection outside the Actor fragments would be refused by GitHub.
+  assert.doesNotThrow(() => parse(query))
+})
+
+test('POST /pulls opens a pull request from a branch only: converting an issue or any other key is refused', async (t) => {
+  const f = await forwarder(); t.after(f.close)
+  const open = (body) => f.call('api.github.com/repos/callgideon/mumbo/pulls', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  for (const body of [{ issue: 5, head: 'agent/x', base: 'main' }, { title: 't', head: 'agent/x', base: 'main', issue: 5 }, { title: 't', head: 'agent/x', head_repo: 'someone/fork', base: 'main' }]) {
+    const r = await open(body)
+    assert.equal(r.status, 403, JSON.stringify(body))
+    assert.match(r.json().message, /a new pull request may set only title, body, head, base, draft, maintainer_can_modify/)
+  }
+  assert.equal(f.calls.length, 0)
+  const body = { title: 't', body: 'b', head: 'agent/x', base: 'main', draft: true, maintainer_can_modify: false }
+  assert.equal((await open(body)).status, 200)
+  assert.deepEqual(JSON.parse(f.calls[0].init.body), body)
 })
 
 test('edits fail closed: an author that cannot be read, or no GITHUB_AGENT_ID, answers 403 and forwards nothing', async (t) => {
@@ -414,13 +450,21 @@ test('edits fail closed: an author that cannot be read, or no GITHUB_AGENT_ID, a
   assert.equal((await writers(expired).patch('/pulls/5', { title: 't' })).status, 403)
   assert.equal(expired.mints.filter(m => m.method === 'POST').length, 2)
 
-  // The GraphQL lookup failing answers 403 for an edit; a document without one keeps 502.
-  const down = await forwarder({ lookup: () => new Response('busy', { status: 502 }) }); t.after(down.close)
-  const r = await writers(down).gql(editComment('IC_1'))
-  assert.equal(r.status, 403)
-  assert.match(refusal(r), /the node id lookup failed \(HTTP 502\)/)
-  assert.equal((await writers(down).gql('mutation { addComment(input: {subjectId: "I_1", body: "x"}) { clientMutationId } }')).status, 502)
-  assert.equal(down.calls.length, 0)
+  // The GraphQL lookup failing, answered or thrown, answers 403 for an edit; a document without one keeps 502.
+  for (const [why, lookup, message] of [
+    ['HTTP 502', () => new Response('busy', { status: 502 }), /the node id lookup failed \(HTTP 502\)/],
+    ['a network failure', () => { throw new TypeError('fetch failed') }, /the node id lookup failed \(fetch failed\)/],
+    ['a body that is not JSON', () => new Response('<html>', { status: 200 }), /the node id lookup failed \(/],
+  ]) {
+    const down = await forwarder({ lookup }); t.after(down.close)
+    const r = await writers(down).gql(editComment('IC_1'))
+    assert.equal(r.status, 403, why)
+    assert.match(refusal(r), message, why)
+    const plain = await writers(down).gql('mutation { addComment(input: {subjectId: "I_1", body: "x"}) { clientMutationId } }')
+    assert.equal(plain.status, 502, why)
+    assert.match(refusal(plain), message, why)
+    assert.equal(down.calls.length, 0, why)
+  }
 
   // Without the agent's id nothing can be matched: edits are refused before any token or lookup; other writes pass.
   const unset = await forwarder({ noAgentId: true }); t.after(unset.close)

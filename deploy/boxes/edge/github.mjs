@@ -39,11 +39,18 @@ const WRITES = [
   /^POST \/issues\/comments\/\d+\/reactions$/,
 ]
 const PULL_EDIT = /^PATCH \/pulls\/\d+$/
+// Opening a pull request takes these keys only: GitHub's `issue` would turn a person's issue, with its title, body and
+// comments, into a pull request carrying the agent's commits.
+const PULL_CREATE = /^POST \/pulls$/
+const PULL_CREATE_KEYS = new Set(['title', 'body', 'head', 'base', 'draft', 'maintainer_can_modify'])
 // Superagent reads an edited comment as a new message from its author, so editing someone else's words would carry
-// their authority. These writes pass only when a GET of the same path, with the agent token, names the agent as
-// `user.id`; the GraphQL mutations only when the node they name, of this type, has the agent as `author.databaseId`.
-const OWN_EDITS = [/^PATCH \/issues\/comments\/\d+$/, PULL_EDIT]
-const OWN_EDIT_MUTATIONS = new Map([['updateIssueComment', { key: 'id', type: 'IssueComment' }], ['updatePullRequest', { key: 'pullRequestId', type: 'PullRequest' }]])
+// their authority; changing the state or reviewers of someone else's pull request is refused with them. These writes
+// pass only when a GET of the object they change (the path without `/requested_reviewers`), with the agent token,
+// names the agent as `user.id`; the GraphQL mutations only when the node they name, of this type, has the agent as
+// `author.databaseId`.
+const OWN_EDITS = [/^PATCH \/issues\/comments\/\d+$/, PULL_EDIT, /^POST \/pulls\/\d+\/requested_reviewers$/]
+const OWN_EDIT_MUTATIONS = new Map([['updateIssueComment', { key: 'id', type: 'IssueComment' }],
+  ...['updatePullRequest', 'markPullRequestReadyForReview', 'convertPullRequestToDraft', 'requestReviews'].map(m => [m, { key: 'pullRequestId', type: 'PullRequest' }])])
 const NOT_OWN = 'only the agent\'s own comments and pull requests may be edited'
 const MUTATIONS = new Set(['createPullRequest', 'updatePullRequest', 'markPullRequestReadyForReview', 'convertPullRequestToDraft', 'addComment', 'updateIssueComment', 'addReaction', 'requestReviews'])
 // A mutation's input keys, classified by name: these scalars, or node ids (`id`, `ids`, `*Id`, `*Ids`, as GitHub's
@@ -69,8 +76,9 @@ const AGENT_PERMISSIONS = { contents: 'write', pull_requests: 'write', issues: '
  * `{ edge: 'github', refused, principal, method, host, path }`. While `halt.isHalted(principal)`, only GET and HEAD,
  * git-upload-pack and GraphQL documents without a mutation pass. Every node id a GraphQL mutation names must resolve,
  * through one `nodes(ids:)` lookup with the project's token, to an object in one of the project's repositories. An edit
- * (OWN_EDITS, OWN_EDIT_MUTATIONS) passes only when that object's author is the user `agentId`, by numeric id; without
- * `agentId`, or when the author cannot be read, it answers 403 and nothing is forwarded. A request whose client has
+ * or pull request state change (OWN_EDITS, OWN_EDIT_MUTATIONS) passes only when that object's author is the user
+ * `agentId`, by numeric id; without `agentId`, or when the author cannot be read, it answers 403 and nothing is
+ * forwarded. `POST /pulls` takes only PULL_CREATE_KEYS. A request whose client has
  * left is not forwarded, and one in flight is aborted.
  * Credentials: requests to api.github.com and github.com carry the project's App installation token, for the project's
  * bound repositories and AGENT_PERMISSIONS (github-app.mjs tokenCache: one mint at a time per project, reused until 5
@@ -95,10 +103,14 @@ export function githubForwarder({ store, halt, app, agentId, fetchImpl, now = Da
    *  one of `repos` and each of `edits` (`{ id, type }`, ids among `ids`) is of its type and written by the agent. A
    *  failed lookup answers 502, or 403 when the document edits. */
   async function outsideRepos(ids, repos, project, token, edits) {
-    const r = await fetchImpl('https://api.github.com/graphql', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `token ${token}` }, body: JSON.stringify({ query: NODE_REPOS, variables: { ids } }) })
-    if (r.status === 401) tokens.forget(project)
-    if (!r.ok) return { reason: `the node id lookup failed (HTTP ${r.status})`, status: edits.length ? 403 : 502 }
-    const nodes = (await r.json())?.data?.nodes
+    const failed = edits.length ? 403 : 502
+    let nodes
+    try {
+      const r = await fetchImpl('https://api.github.com/graphql', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `token ${token}` }, body: JSON.stringify({ query: NODE_REPOS, variables: { ids } }) })
+      if (r.status === 401) tokens.forget(project)
+      if (!r.ok) return { reason: `the node id lookup failed (HTTP ${r.status})`, status: failed }
+      nodes = (await r.json())?.data?.nodes
+    } catch (e) { return { reason: `the node id lookup failed (${e.message})`, status: failed } }
     for (const [i, id] of ids.entries()) {
       const n = nodes?.[i]
       const repo = n?.__typename === 'Repository' ? n.nameWithOwner : n?.repository?.nameWithOwner
@@ -186,11 +198,12 @@ export function githubForwarder({ store, halt, app, agentId, fetchImpl, now = Da
       body = await readBody(req, JSON_MAX)
       if (!body) return refuse('body over 1 MiB', 413)
       if (PULL_EDIT.test(rule) && !(body = pullEdit(body))) return refuse('a pull request edit may change only title, body and state "closed"')
+      if (PULL_CREATE.test(rule) && !(body = jsonOnly(body, k => PULL_CREATE_KEYS.has(k)))) return refuse(`a new pull request may set only ${[...PULL_CREATE_KEYS].join(', ')}`)
       if (OWN_EDITS.some(w => w.test(rule))) {
         if (agentId === undefined) return refuse(`${NOT_OWN}, and GITHUB_AGENT_ID is not set`)
         const t = await token()
         if (!t) return
-        const why = await notOwn(path, id, t)
+        const why = await notOwn(path.replace(/\/requested_reviewers$/, ''), id, t)
         if (why) return refuse(why)
       }
     } else if (gitService === 'git-upload-pack') {
@@ -267,13 +280,15 @@ function readBody(req, max) {
 
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
 
-/** A `PATCH /pulls/{n}` body re-serialized when it changes only title, body and state "closed"; otherwise undefined. */
-function pullEdit(buf) {
+/** `buf` re-serialized when it is a JSON object whose every key and value `ok` accepts; otherwise undefined. */
+function jsonOnly(buf, ok) {
   let v
   try { v = JSON.parse(buf.toString('utf8')) } catch { return undefined }  // not JSON: refused like any other body
-  const ok = isObject(v) && Object.keys(v).every(k => k === 'title' || k === 'body' || (k === 'state' && v.state === 'closed'))
-  return ok ? JSON.stringify(v) : undefined
+  return isObject(v) && Object.entries(v).every(([k, x]) => ok(k, x)) ? JSON.stringify(v) : undefined
 }
+
+/** A `PATCH /pulls/{n}` body re-serialized when it changes only title, body and state "closed"; otherwise undefined. */
+const pullEdit = (buf) => jsonOnly(buf, (k, v) => k === 'title' || k === 'body' || (k === 'state' && v === 'closed'))
 
 /**
  * Checks a GraphQL request: every operation, whatever operationName picks. No input object repeats a field name and no
