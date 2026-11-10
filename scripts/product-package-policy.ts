@@ -39,6 +39,8 @@ export const PRODUCT_PACKAGE_POLICY: Readonly<Record<string, ProductPackagePolic
   'packages/mumbo/browser-consent': { category: 'optional', reason: 'Browser write consent that a per-user box overlay mounts; it mounts the signed-in browser provider itself.' },
   'packages/mumbo/edge-member': { category: 'optional', reason: 'Project-member admission mounted only in mumbo project boxes, with the edge-derived member key.' },
   'packages/mumbo/mcp': { category: 'optional', reason: 'Loopback MCP server mounted only with an explicit key file, allowlist, and listener.' },
+  // pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md
+  'packages/mumbo/superagent': { category: 'optional', reason: 'Profile layer added only by an explicit profile patch or overlay, which supplies its state directory.' },
   'packages/sdk/client': { category: 'sdk', reason: 'Published TypeScript embedding client runs in the consumer process.' },
   'packages/typert/generator': { category: 'build', reason: 'Build-time generation of type metadata.' },
   'packages/test-support/agent-loop-testkit': { category: 'test', reason: 'Published agent-loop test harness.' },

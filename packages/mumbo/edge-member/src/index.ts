@@ -1,7 +1,8 @@
 /**
  * Project members as Host principals: requests the mumbo edge signs for a project member are admitted as an
- * `edge-member` Peer that may read, follow, prompt, and create Sessions in this Host, and nothing else, and each
- * member message reaches the model after a notice naming its sender.
+ * `edge-member` Peer that may read, follow, prompt, and create Sessions in this Host, and nothing else except on a
+ * route that admits Peers itself (see the README's Member access), and each member message reaches the model after a
+ * notice naming its sender.
  *
  * @module @mumbo/edge-member
  */

@@ -4966,7 +4966,7 @@ export interface Config {
 ## `@mumbo/edge-member`
 
 - `inject`: `connection` · `remoteAccess` · `workspaceRegistry` · `sessions`
-- `source`: [`packages/mumbo/edge-member/src/index.ts:49`](../packages/mumbo/edge-member/src/index.ts)
+- `source`: [`packages/mumbo/edge-member/src/index.ts:50`](../packages/mumbo/edge-member/src/index.ts)
 
 ```ts config-catalog
 /** Edge member configuration. */
@@ -5001,6 +5001,19 @@ export interface Config {
 }
 ```
 <!-- END GENERATED config-catalog:@mumbo/mcp -->
+
+<!-- BEGIN GENERATED config-catalog:@mumbo/superagent -->
+<a id="mumbosuperagent"></a>
+
+## `@mumbo/superagent`
+
+- `inject`: `agents` · `sessionController` · `sessionPersistence` · `workspaceRegistry` · `permissionPresets` · `tools` · `systemPrompt` · `skills` · `webServer` · `connection` · `llm` · `subprocess`
+- `source`: [`packages/mumbo/superagent/src/deployment.ts:26`](../packages/mumbo/superagent/src/deployment.ts)
+
+```ts config-catalog
+export type DeploymentConfig = ReturnType<typeof Config>
+```
+<!-- END GENERATED config-catalog:@mumbo/superagent -->
 
 ## Loadable plugins with no config
 

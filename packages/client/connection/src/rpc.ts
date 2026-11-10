@@ -239,10 +239,12 @@ export interface HostConnectionFetch {
  * the next authenticator and then to owner authentication; an authenticator
  * never refuses a request, and one that throws is logged and passed over. The
  * returned Peer must carry a non-owner principal; its creator owns its
- * disposal, and a disposed Peer is refused at dispatch. Only the Gateway and
- * exact Fetch routes that declare `access` serve non-owner Peers; other exact
- * routes, dedicated RPC channels, and routes guarded by `requestRejection`
- * answer them 403.
+ * disposal, and a disposed Peer is refused at dispatch. Of Connection's own
+ * routes, only the Gateway and exact Fetch routes that declare `access` serve
+ * non-owner Peers; other exact routes, dedicated RPC channels, and routes
+ * guarded by `requestRejection` answer them 403. A route that calls
+ * {@link HostConnectionHandle.admit} itself decides which principals it serves
+ * and must refuse a Peer whose `signal` has aborted.
  * @param request - request headers from the HTTP or upgrade request.
  * @returns the Peer this credential speaks for, or undefined when the request carries none.
  */

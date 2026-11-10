@@ -97,6 +97,7 @@
     { "path": "./packages/mumbo/edge-member/tsconfig.client.json" },
     { "path": "./packages/experimental/session-inspector" },
     { "path": "./packages/experimental/client-ui-forge/tsconfig.client.json" },
+    { "path": "./packages/mumbo/superagent/tsconfig.client.json" },
     { "path": "./packages/client/hmr" },
     { "path": "./packages/client/connection/tsconfig.client.json" },
     { "path": "./packages/client/file-upload/tsconfig.client.json" },

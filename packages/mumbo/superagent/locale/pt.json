@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Superagent",
+    "description": "Monitora um repositório do GitHub, transforma solicitações autorizadas em Tickets e executa cada um em sua própria sessão do DSH."
+  }
+}

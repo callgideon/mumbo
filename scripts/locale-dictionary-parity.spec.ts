@@ -35,12 +35,14 @@ function relative(file: string): string {
   return file.slice(root.length).replaceAll('\\', '/')
 }
 
-/** Every TypeScript source file under each workspace package's `src`, excluding declarations. */
+/** Every TypeScript source file under each workspace package's `src`, excluding declarations and the pinned superagent copy. */
 function sourceFiles(): string[] {
   const files: string[] = []
   const packagesRoot = resolve(root, 'packages')
   for (const group of directories(packagesRoot)) {
     for (const pkg of directories(resolve(packagesRoot, group))) {
+      // pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md
+      if (group === 'mumbo' && pkg === 'superagent') continue
       walk(resolve(packagesRoot, group, pkg, 'src'), files)
     }
   }

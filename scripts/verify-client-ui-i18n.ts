@@ -333,6 +333,8 @@ function sourceFiles(): string[] {
   ])]
     .map(file => file.replaceAll('\\', '/'))
     .filter(file => !file.endsWith('.d.ts'))
+    // pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md
+    .filter(file => !file.startsWith('packages/mumbo/superagent/'))
     .sort()
 }
 

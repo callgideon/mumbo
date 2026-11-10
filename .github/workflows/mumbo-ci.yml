@@ -51,6 +51,10 @@ jobs:
           DSH_ARCHIVE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: pnpm run check:ci:static
 
+      # Same command as deploy/Dockerfile. Runs last: the rebrand rewrites the runner's tree.
+      - name: Egress check (unreviewed DeepSeek hosts)
+        run: pnpm exec tsx scripts/mumbo-rebrand.ts && pnpm exec tsx scripts/mumbo-egress-check.ts
+
   unit:
     runs-on: ubuntu-24.04
     timeout-minutes: 60

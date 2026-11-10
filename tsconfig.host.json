@@ -566,6 +566,7 @@
     { "path": "./packages/mumbo/browser-consent" },
     { "path": "./packages/mumbo/mcp" },
     { "path": "./packages/mumbo/edge-member/tsconfig.host.json" },
+    { "path": "./packages/mumbo/superagent/tsconfig.host.json" },
     { "path": "./packages/todo/tool-todo" },
     { "path": "./packages/plan/plan-mode" },
     { "path": "./packages/preset/agent-preset-registry" },
