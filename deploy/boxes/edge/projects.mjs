@@ -2,9 +2,10 @@
 // `project:<id>` and running dsh as the coordinator; its members are signed-in users. Membership lives in the edge
 // store: doc `project:<id>` = { id, name, owner, members, createdAt, repos? } and set `projects:<email>` = ids.
 // `repos` (`owner/name`) are the GitHub repositories the project may use through the edge; set `projects:with-repos`
-// lists every project that has one, for the approvals poller. Doc `project-session:<id>` = { sessionId } is the
-// coordinator session (projects created before it keep `coordinatorSessionId` on the project doc).
-import { randomBytes, randomUUID } from 'node:crypto'
+// lists every project that has one, for the approvals poller. Docs `project-session:<id>` and the project doc's
+// `coordinatorSessionId` name the plain coordinator Session that relayed messages went to before the relay route; nothing
+// reads them now.
+import { randomBytes } from 'node:crypto'
 
 const fail = (status, message) => Object.assign(new Error(message), { status })
 /** Project ids are lowercase letters and digits, so they fit a hostname label (`p-<id>.<public host>`). */
@@ -122,61 +123,52 @@ export function projects({ store, admitted, log = console.log }) {
   }
 }
 
+/** The relay route of @mumbo/superagent on a project box (packages/mumbo/superagent UPSTREAM.md S9). */
+export const RELAY_PATH = '/orchestrator/relay'
+/** What a member sends: `context`, never a work request on its own, or a `request` for work. */
+export const MESSAGE_KINDS = ['context', 'request']
+/** A message id as the relay route accepts it; a UUID is one. */
+export const MESSAGE_ID = /^[A-Za-z0-9._:-]{1,128}$/
+
 /**
- * Delivers a member's message into the project's coordinator session. The project box is ensured (created or
- * resumed); the edge signs in to its dsh with the box's launch token like a browser, keeps the cookie, creates the
- * coordinator session once (its id lives at `project-session:<id>`) and prompts it over dsh's unary RPC
- * (`POST api/session/prompt`). The member is named in the message text; per-member dsh principals come later.
- * `boxFetch(target, siteHost, path, init)` sends one request to the box through the client-proxy and resolves
- * { status, setCookie, body }.
+ * Delivers a member's message to the project's Superagent, which receives it as a Trigger from the member: the project box
+ * is ensured (created or resumed) and the edge posts to its relay route as the member (x-mumbo-member) through the
+ * client-proxy. `kind` is 'context' (the default) or 'request'. `messageId`, required, is the caller's idempotency key: a retry with the
+ * same id and content is answered `duplicate` and creates nothing, so a caller that timed out retries with the id it chose. `via` is the box id of the member's
+ * assistant, a hop of the relay path. Fails with 400 for an empty message, an unknown kind or a missing or malformed id, 404 for a
+ * project the member is not in, 409 (`code: 'relay_unavailable'`) when the box's image has no relay route (no member
+ * sign-in, or the route answers 404 or 405), and otherwise with the box's 400 or 409 and its code (`invalid_request`,
+ * `id_reused`, `relay_off`), or 502. `boxFetch(target, siteHost, path, init)` sends one request to the box through the
+ * client-proxy and resolves { status, setCookie, body }; `edgeHost` names this edge in the relay path.
  */
-export function projectRelay({ store, projects, box, boxFetch, siteHostOf, log = console.log }) {
-  const cookies = new Map()  // box id -> dsh cookie
+export function projectRelay({ projects, box, boxFetch, siteHostOf, edgeHost, log = console.log }) {
   const say = (fields) => log(JSON.stringify({ edge: 'relay', ...fields }))
-  async function signIn(target, host) {
-    const r = await boxFetch(target, host, `/?token=${target.token}`, { method: 'GET' })
-    const cookie = (r.setCookie ?? []).map(c => c.split(';')[0]).find(c => c.startsWith('dsh-auth-'))
-    if (!cookie) throw fail(502, `project box sign-in failed (${r.status})`)
-    cookies.set(target.id, cookie)
-    return cookie
-  }
-  async function rpc(target, host, method, request, member) {
-    const call = async (cookie) => boxFetch(target, host, `/api/${method}`, {
-      method: 'POST',
-      headers: { ...(cookie ? { cookie } : {}), 'content-type': 'application/json' },
-      body: JSON.stringify({ type: 'client-request', rpcId: randomUUID(), method, payload: { args: { request } } }),
-      // A member-capable box gets the member themselves (dsh records them as the principal), not the owner.
-      ...(target.member ? { member: target.member(member) } : {}),
-    })
-    if (target.member) {
-      const r = await call()
-      const out = r.status === 200 ? JSON.parse(r.body).result : undefined
-      if (!out?.ok) throw fail(502, `${method} failed: ${out?.error?.message ?? `HTTP ${r.status}`}`)
-      return out.value
-    }
-    let r = await call(cookies.get(target.id) ?? await signIn(target, host))
-    if (r.status === 401) r = await call(await signIn(target, host))
-    const out = r.status === 200 ? JSON.parse(r.body).result : undefined
-    if (!out?.ok) throw fail(502, `${method} failed: ${out?.error?.message ?? `HTTP ${r.status}`}`)
-    return out.value
-  }
+  // No fallback to the plain coordinator Session: it would take context as a work request and a retry as a second message.
+  const unavailable = (id) => Object.assign(fail(409, `project ${id} runs an older build without the relay, so nothing was sent; its owner moves the box to the current build (RUNBOOK "Moving a box to a new template build")`), { code: 'relay_unavailable' })
   return {
-    async message(member, id, text) {
+    async message(member, id, text, { kind = 'context', messageId, via } = {}) {
       if (typeof text !== 'string' || !text.trim()) throw fail(400, 'the message is empty')
+      if (!MESSAGE_KINDS.includes(kind)) throw fail(400, `kind is one of ${MESSAGE_KINDS.join(', ')}`)
+      if (typeof messageId !== 'string' || !MESSAGE_ID.test(messageId)) throw fail(400, 'messageId is 1 to 128 letters, digits and . _ : -')
       const p = await projects.get(id)
       if (!p?.members.includes(member)) throw fail(404, `no project ${id} of yours`)
       const principal = projectPrincipal(id)
       const target = await box.ensure(principal)
-      const host = siteHostOf(principal)
-      // Its own key, so this write never replaces the project doc (and its repos) outside the bindings lock.
-      let sessionId = (await store.getDoc(`project-session:${id}`))?.sessionId ?? p.coordinatorSessionId
-      if (!sessionId) {
-        sessionId = (await rpc(target, host, 'session/create', { cwd: '/root/projects' }, member)).sessionId
-        await store.putDoc(`project-session:${id}`, { sessionId })
+      if (!target.member) throw unavailable(id)
+      const hops = [{ node: 'member', id: member }, ...(via ? [{ node: 'mumbo', id: via }] : []), { node: 'edge', id: edgeHost }]
+      const r = await boxFetch(target, siteHostOf(principal), RELAY_PATH, { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: messageId, kind, text: text.trim(), hops }), member: target.member(member) })
+      if (r.status === 404 || r.status === 405) throw unavailable(id)
+      let out
+      try { out = JSON.parse(r.body) } catch { out = undefined }  // a body that is not JSON is a refusal like any other
+      if (r.status !== 200 || typeof out?.trigger !== 'string') {
+        say({ level: 'warn', msg: 'refused', project: id, member, status: r.status, code: out?.code })
+        const status = r.status === 400 || r.status === 409 ? r.status : 502
+        throw Object.assign(fail(status, `the project box refused the message: ${out?.error ?? `HTTP ${r.status}`}`), out?.code ? { code: out.code } : {})
       }
-      await rpc(target, host, 'session/prompt', { requestId: randomUUID(), sessionId, mode: 'queue', content: [{ type: 'text', text: `[from ${member}] ${text.trim()}` }] }, member)
-      say({ msg: 'delivered', project: id, member, session: sessionId })
-      return { delivered: true, project: id, coordinatorSession: sessionId }
+      say({ msg: 'delivered', project: id, member, kind, messageId, result: out.result })
+      return { delivered: true, project: id, kind, messageId, result: out.result,
+        ...(out.waiting ? { waiting: 'the project\'s coordinator is not set up yet; the message waits for it' } : {}) }
     },
   }
 }
