@@ -8,10 +8,10 @@
  * project box's `dsh-superagent` row may differ from the founder's overlay only by the keys containment adds.
  */
 
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { composeEntries, loadOverlayPatches, loadProfile } from '@deepseek-ai/dsh-app-boot'
 
@@ -321,11 +321,26 @@ function rootStdioServers(rows: readonly Row[]): string[] {
   })
 }
 
-/** Tool names the superagent copy registers, read from its tool modules. */
-function superagentTools(): string[] {
-  const directory = join(root, 'packages/mumbo/superagent/src/app/tools')
-  return readdirSync(directory).flatMap(file => [...readFileSync(join(directory, file), 'utf8').matchAll(/name: '(orchestrator_[a-z_]+)'/gu)].map(match => match[1]!))
-    .sort()
+/** A builder of the superagent copy's model tools for one Session. */
+type SuperagentTools = (host: object, owner: object) => readonly { name: string }[]
+
+/** A stand-in for every value a tool builder reads from its host while it builds descriptions: any property, call, or text. */
+const anything: object = new Proxy(() => undefined, {
+  get: (_target, key) => key === Symbol.toPrimitive ? () => 'stand-in' : anything,
+  apply: () => anything,
+})
+
+/**
+ * Tool names the superagent copy registers: it registers exactly what `mainTools` builds for its main Session and
+ * `executorTools` for an Executor Session (`src/app/runtime.ts`), so the names come from calling them, whatever a name
+ * is or wherever a tool is defined.
+ */
+async function superagentTools(): Promise<string[]> {
+  // The copy is private and exports no tool builders; its sources are loaded from the repository.
+  const load = async (file: string, name: string): Promise<SuperagentTools> =>
+    ((await import(pathToFileURL(join(root, 'packages/mumbo/superagent/src/app/tools', file)).href)) as Record<string, SuperagentTools>)[name]!
+  const [main, executor] = await Promise.all([load('main.ts', 'mainTools'), load('executor.ts', 'executorTools')])
+  return [...new Set([...main(anything, anything), ...executor(anything, anything)].map(tool => tool.name))].sort()
 }
 
 /** Keys the containment rows add to the founder's `dsh-superagent` row; any other difference fails. */
@@ -401,6 +416,7 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     // Each of these must exist before dsh starts, so the documented box layout names every one.
     const layout = readFileSync(join(root, '.agents/notes/implemented/architecture/2026-11-10-agent-containment-run-as-and-model-roots.md'), 'utf8')
       .split('\n').find(line => line.startsWith('- Box layout the rows depend on')) ?? ''
+    const serverHome = (subprocess as { identities?: Record<string, { set: Record<string, string> }> }).identities?.[SERVER_IDENTITY]?.set.HOME
     const required = [...modelRoots, ...(byId('fs-sandbox')?.config as { readOnlyRoots: string[] }).readOnlyRoots, subprocess.shellActivityDirectory!, subprocess.spillDirectory!,
       serverHome!, ...box === 'project' ? [superagent!.workerDirectory!, superagent!.ghConfigDirectory!] : []]
     expect(required.filter(path => !layout.includes(`\`${path}\``))).toEqual([])
@@ -416,7 +432,6 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
       const identity = entry?.identityFromRow === true ? (row.config as { identity?: string } | undefined)?.identity : entry?.identity
       if (identity === undefined || entry?.startsProcesses?.(row.config as Record<string, unknown> | undefined) === false) return []
       return [`${row.name} as ${identity}`]
-    const serverHome = (subprocess as { identities?: Record<string, { set: Record<string, string> }> }).identities?.[SERVER_IDENTITY]?.set.HOME
     }).sort()
     expect(named).toEqual(expected)
     expect(named).toEqual(box === 'person'
@@ -434,6 +449,14 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     for (const identity of Object.values(identities)) {
       expect(identity.secretNames).toEqual(expect.arrayContaining(['DEEPSEEK_API_KEY', 'MUMBO_MEMBER_KEY']))
     }
+    // The person's server credentials reach no group another identity holds (`shared`, the workspace through agent's
+    // group) while the box's mcpServerWorkspace switch is `none`, and its environment is the minimal base.
+    const server = identities[SERVER_IDENTITY]!
+    const others = [subprocess.runAs, ...Object.entries(identities).filter(([name]) => name !== SERVER_IDENTITY).map(([, identity]) => identity)]
+    const held = new Set(others.flatMap(identity => [identity.gid, ...identity.groups]))
+    expect([server.gid, ...server.groups].filter(gid => held.has(gid))).toEqual([])
+    expect(server.inherit).toEqual(['LANG'])
+    expect(server.set).toEqual({ HOME: '/home/mcpserver', USER: 'mcpserver', PATH: '/usr/local/bin:/usr/bin:/bin' })
   })
 
   it('starts no MCP stdio server as root', () => {
@@ -449,22 +472,20 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     // The check itself: without run-as on the provider, the manager and a stdio row naming no identity start servers as root,
     // and so do they without the injection, once the provider is gone.
     const unconfined = rows.map(row => row.id === 'subprocess' ? { ...row, config: { ...row.config as object, runAs: undefined } } : row)
-    // The person's server credentials reach no group another identity holds (`shared`, the workspace through agent's
-    // group) while the box's mcpServerWorkspace switch is `none`, and its environment is the minimal base.
-    const server = identities[SERVER_IDENTITY]!
-    const others = [subprocess.runAs, ...Object.entries(identities).filter(([name]) => name !== SERVER_IDENTITY).map(([, identity]) => identity)]
-    const held = new Set(others.flatMap(identity => [identity.gid, ...identity.groups]))
-    expect([server.gid, ...server.groups].filter(gid => held.has(gid))).toEqual([])
-    expect(server.inherit).toEqual(['LANG'])
-    expect(server.set).toEqual({ HOME: '/home/mcpserver', USER: 'mcpserver', PATH: '/usr/local/bin:/usr/bin:/bin' })
     expect(rootStdioServers([...unconfined, ...added])).toEqual(['mcp-manager', 'files'])
     const unbound = rows.map(row => row.id === 'mcp-manager' ? { ...row, inject: ['credentials'] } : row)
     expect(rootStdioServers([...unbound, ...added, { ...added[0]!, id: 'loose', inject: undefined }])).toEqual(['mcp-manager', 'loose'])
+    // Without the server identity they would run as another one, such as agent, whose shell the model drives.
+    for (const serverIdentity of [undefined, 'agent']) {
+      const shared = rows.map(row => row.id === 'subprocess' ? { ...row, config: { ...row.config as object, serverIdentity } } : row)
+      expect(rootStdioServers([...shared, ...added])).toEqual(['mcp-manager', 'files'])
+    }
   })
 
-  it.runIf(box === 'project')('lists every orchestrator tool the superagent registers, and keeps the founder\'s superagent row apart from the containment keys', () => {
-    expect(CLASSIFICATION['@mumbo/superagent']!.tools).toEqual(superagentTools())
-    expect(superagentTools()).toContain('orchestrator_read')
+  it.runIf(box === 'project')('lists every orchestrator tool the superagent registers, and keeps the founder\'s superagent row apart from the containment keys', async () => {
+    const registered = await superagentTools()
+    expect(CLASSIFICATION['@mumbo/superagent']!.tools).toEqual(registered)
+    expect(registered).toContain('orchestrator_read')
     const founder = deployed('mumbo-project.overlay.yml').filter(row => row.id === 'dsh-superagent' && row.config !== undefined).at(-1)?.config as Record<string, unknown>
     const contained = edge('containment-project.overlay.yml').find(row => row.id === 'dsh-superagent')?.config as Record<string, unknown>
     const without = (config: Record<string, unknown>) =>
@@ -475,11 +496,6 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     // The composed row is the containment row, whole.
     expect(rows.find(row => row.id === 'dsh-superagent')?.config).toEqual(contained)
   })
-    // Without the server identity they would run as another one, such as agent, whose shell the model drives.
-    for (const serverIdentity of [undefined, 'agent']) {
-      const shared = rows.map(row => row.id === 'subprocess' ? { ...row, config: { ...row.config as object, serverIdentity } } : row)
-      expect(rootStdioServers([...shared, ...added])).toEqual(['mcp-manager', 'files'])
-    }
 
   it('lists every mounted model tool with how it runs', () => {
     const table = names.flatMap(name => (CLASSIFICATION[name]?.tools ?? []).map((tool) => {
