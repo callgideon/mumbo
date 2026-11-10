@@ -42,6 +42,7 @@ Edits to the copy:
   - Docs: the glossary of `docs/001-domain.md` has no Chinese column; `docs/002-authorization.md`, `docs/005-panel.md` and the `docs/008-cookbook.md` examples use the English labels; `docs/006-deployment.md` (setup problems) and `docs/007-architecture.md` (the `locales.ts` and `locales.client.spec.ts` rows, fixed refusals) no longer describe two languages.
   - Tests use English data and assert the English copy; the tests that compared the two languages assert the English text once.
   - `locale/ja.json` stays; it is the only file in the copy with CJK ideographs.
+- `src/app/views/text.ts`: `withoutHtml` strips HTML tags and comments until none remain, so the pieces around a removed tag cannot form another; upstream's single pass fails this repository's CodeQL check `js/incomplete-multi-character-sanitization`. The panel renders this text as React text nodes. `tests/views.spec.ts` covers nested fragments.
 - Panel specs: `tests/fixtures/panel.tsx` and the nine `tests/panel-*.spec.tsx` import `./fixtures/panel-server.tsx` (renamed from `.ts`). `tests/panel-deployment.spec.tsx` no longer publishes `mode: 'memory'` in the read-only scenario (line 108); the snapshot has no `mode`, and `writable: false` selects the read-only hint.
 
 Files outside the copy changed for S1:
@@ -54,7 +55,7 @@ Files outside the copy changed for S1:
 - `scripts/package-dependency-policy.ts`: `scopeParentOf` is classified peer-required for `@deepseek-ai/dsh-scope`; `src/app/sessions.ts` reads the scope chain, which is module state of the shared instance. `MessageId`, `ReasoningEffortId` and `freezeMessage` are peer-required for `@deepseek-ai/dsh-llm`, because `src/app/delivery.ts` and `src/app/role-models.ts` build messages with the shared instance's ids and freeze; that row also holds `@mumbo/edge-member`'s `createUserMessage`.
 - Repository gate exclusions, each commented `pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md`: the coverage `exclude` in `vitest.config.ts`; the scans of `scripts/verify-export-jsdoc.ts`, `scripts/verify-client-ui-i18n.ts`, `scripts/verify-no-unknown-casts.ts`, `scripts/verify-doc-refs.ts` and `scripts/locale-dictionary-parity.spec.ts`; `docs/**` and `SETUP.md` as link sources in `scripts/verify-md-links.ts`; the exported-type index of `scripts/gen-client-catalog.ts`; and, in `scripts/gen-cordis-catalog.ts`, `excludedPackages` (a field of `CordisCatalogPolicy` in `packages/typert/generator/src/cordis-catalog.ts`) and the `orchestrator` entry of `SERVICE_WALK_EXEMPTIONS`.
 - `scripts/product-package-policy.ts`: `optional` classification.
-- `packages/mumbo/README.md`: the package row, and the Summary names `superagent/` as the package that registers model tools. Its `README.zh.md` pair and record stay as on main; this package ships no Chinese.
+- `packages/mumbo/README.md`: the package row, and the Summary names `superagent/` as the package that registers model tools. The repository is English only, so it has no Chinese pair.
 - `docs/persistence-changes/2026-11-09-superagent-message-source.md` and `.schema.json`: the `dsh-superagent` message source, with no Chinese pair.
 
 ## S2: management API admission

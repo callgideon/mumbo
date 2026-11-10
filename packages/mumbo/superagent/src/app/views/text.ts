@@ -1,9 +1,16 @@
 /** Text sanitization and formatting helpers for plain-text previews and HTML-free Markdown in views. */
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'", nbsp: ' ' }
+/** Strips HTML comments and tags until none remain, so the pieces left around a removed tag cannot form another. */
+function stripTags(text: string): string {
+  let previous: string
+  do {
+    previous = text
+    text = text.replace(/<!--[\s\S]*?-->/g, '').replace(/<\/?[a-zA-Z][^>]*>/g, '')
+  } while (text !== previous)
+  return text
+}
 /** Strips HTML comments and tags, decodes basic entities, and strips again to catch entity-encoded tags. */
-const withoutHtml = (text: string) => text.replace(/<!--[\s\S]*?-->/g, '').replace(/<\/?[a-zA-Z][^>]*>/g, '')
-  .replace(/&(amp|lt|gt|quot|#39|nbsp);/g, (_match, name: string) => ENTITIES[name]!)
-  .replace(/<!--[\s\S]*?-->/g, '').replace(/<\/?[a-zA-Z][^>]*>/g, '')
+const withoutHtml = (text: string) => stripTags(stripTags(text).replace(/&(amp|lt|gt|quot|#39|nbsp);/g, (_match, name: string) => ENTITIES[name]!))
 export function plain(text: string, lines = false): string {
   const result = withoutHtml(text)
     .replace(/!\[[^\]]*\]\([^)]*\)|\[Image: [^\]]*\]/g, '[image]')

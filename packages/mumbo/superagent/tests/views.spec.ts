@@ -191,6 +191,9 @@ it('sends text without HTML, entity-encoded tags included, and with images named
   expect(plain(text)).toBe('Hello there alert(1) [image] [image]')
   expect(markdown(`**Fix** ${text}\n\n- one`)).toBe('**Fix** Hello there alert(1)  [image] [image]\n\n- one')
   expect(plain('[the docs](https://example.com) and `code` &amp; more')).toBe('the docs and code & more')
+  // Each removal leaves pieces that would form a new tag or comment; stripping repeats until none remains.
+  expect(plain('<<<script>script>script>x <!<!---->-- y --> z')).toBe('x z')
+  expect(markdown('&lt;&lt;script&gt;script&gt;alert(1)')).toBe('alert(1)')
 })
 
 it('words each settings save by what it changed from the one before, and nothing after a gap in the history', () => {
