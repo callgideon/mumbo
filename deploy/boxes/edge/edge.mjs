@@ -134,6 +134,9 @@ export function verifyBox(key, token) {
   try { return JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) } catch { return undefined }
 }
 export const userPrefix = (email) => `users/${createHash('sha256').update(email.toLowerCase()).digest('hex')}`
+/** Store doc of an operator's one-shot versioned restore, `{ versionId, at }`, written by restore-version.mjs. `principal` is
+ *  the box key: a lowercased email or `project:<id>`. The box's next creation restores that version of latest.tar.gz. */
+export const restoreKey = (principal) => `restore:${principal}`
 
 // ---- per-user daily request budget (budget.mjs, with the token budget).
 export { budget } from './budget.mjs'
@@ -639,10 +642,22 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
   const memberAuth = async (box) => (await run(box, 'test -f /root/.mumbo/member-auth && echo yes || true')) === 'yes'
   const dshUp = async (box) => (await run(box, "curl -s -o /dev/null -m 5 -w '%{http_code}' http://$(hostname -I | cut -d' ' -f1):3080/ || true")) !== '000'
 
+  // A restore record whose version S3 does not serve (gone, a delete marker, a malformed id, or any other HEAD error) fails
+  // the create as a failed restore would: no fallback to latest.tar.gz, and the record stays for the operator. `status` is
+  // S3's HTTP status, which a HEAD error without a body only carries there.
+  const unknownVersion = (email, pin, e) => {
+    say({ level: 'error', msg: 'restore version unknown', user: email, versionId: pin.versionId, ...(e ? { error: e.message, status: e.$metadata?.httpStatusCode } : { error: 'NotFound' }) })
+    throw Object.assign(new Error('restore version unknown'), { status: 503, restoreFailed: true })
+  }
   async function create(email) {
     if (await atCapacity(e2b, cfg, unitsFor({ user: email }))) throw Object.assign(new Error('capacity'), { status: 503, capacity: true })
     // Before the sandbox exists, so its `creating` record follows the create at once (adopt/backup race).
-    const restoreUrl = await presignGet(`${userPrefix(email)}/latest.tar.gz`)
+    const backupKey = `${userPrefix(email)}/latest.tar.gz`
+    const pin = await store.getDoc(restoreKey(email))
+    const restoreUrl = !pin ? await presignGet(backupKey)
+      // Without a version id the presign would be of latest.tar.gz.
+      : typeof pin.versionId !== 'string' || !pin.versionId ? unknownVersion(email, pin, new Error('the record has no versionId'))
+      : await presignGet(backupKey, pin.versionId).then((url) => url ?? unknownVersion(email, pin), (e) => unknownVersion(email, pin, e))
     const box = await e2b.Sandbox.create(email.startsWith('project:') ? cfg.projectTemplate : cfg.template, {
       timeoutMs: timeout(), metadata: { user: email },
       lifecycle: { onTimeout: 'pause', autoResume: true },
@@ -657,7 +672,7 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
         email.startsWith('project:') ? await ownersOf(store, email.slice('project:'.length)) : undefined))
       if (restoreUrl) {
         const ok = await run(box, restoreCommand(restoreUrl), 660_000).then(() => true, () => false)
-        say({ ...(ok ? {} : { level: 'error' }), msg: 'restore', user: email, box: box.sandboxId, ok })
+        say({ ...(ok ? {} : { level: 'error' }), msg: 'restore', user: email, box: box.sandboxId, ok, ...(pin && { versionId: pin.versionId }) })
         // A partly restored box must never be backed up over the archive: the catch below drops it, and the next visit
         // restores again.
         if (!ok) throw Object.assign(new Error('restore failed'), { status: 503, restoreFailed: true })
@@ -665,6 +680,9 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
       await run(box, 'chmod +x /root/.mumbo/start.sh && /root/.mumbo/start.sh')
       const now = Date.now()
       await store.putBox(box.sandboxId, { email, host: boxSite(cfg, email).host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), active: now, extended: now, backedUp: now, paused: false })
+      // Only once the box is up: a create that fails after the restore keeps the record, so the retry restores the same
+      // version, not latest.tar.gz. A record the operator replaced meanwhile stays for the next creation.
+      if (pin && (await store.getDoc(restoreKey(email)))?.versionId === pin.versionId) await store.deleteDoc(restoreKey(email))
       say({ msg: 'created', user: email, box: box.sandboxId })
       return box.sandboxId
     } catch (error) {
@@ -675,10 +693,11 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
   }
 
   /** The user's running box: id, dsh launch token and E2B traffic token. Creates, resumes or repairs as needed. */
-  /** True while the person has no box and no backup, or their box is still its first creation (edge pages). */
+  /** True while the person has no box, no restore record and no backup, or their box is still its first creation (edge pages). */
   async function firstSetUp(email) {
     const found = await find(email)
-    return found ? (await store.getBox(found.sandboxId))?.first === true : !(await presignGet(`${userPrefix(email)}/latest.tar.gz`))
+    if (found) return (await store.getBox(found.sandboxId))?.first === true
+    return !(await store.getDoc(restoreKey(email))) && !(await presignGet(`${userPrefix(email)}/latest.tar.gz`))
   }
   async function ensure(email) {
     return store.withLock(`user:${email}`, LOCK_MS, async () => {
@@ -1358,6 +1377,16 @@ export async function imageCheck() {
   return all
 }
 
+/**
+ * boxes()'s presignGet over an S3 client, its command classes and the presigner.
+ * @returns {(key: string, versionId?: string) => Promise<string | undefined>} HEADs the object, at `versionId` when given
+ *   (s3:GetObjectVersion), and presigns a 15-minute GET of the same; undefined on NotFound, and any other error throws.
+ */
+export const presignGetter = ({ s3, bucket, HeadObjectCommand, GetObjectCommand, getSignedUrl }) => async (key, versionId) => {
+  try { await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key, VersionId: versionId })) } catch (e) { if (e.name === 'NotFound') return undefined; throw e }
+  return getSignedUrl(s3, new GetObjectCommand({ Bucket: bucket, Key: key, VersionId: versionId }), { expiresIn: 900 })
+}
+
 // ---- process wiring: secrets come from SSM / Secrets Manager through the host's instance role.
 async function main() {
   const cfg = config()
@@ -1381,10 +1410,7 @@ async function main() {
   const modelKey = (await new SecretsManagerClient({ region }).send(new GetSecretValueCommand({ SecretId: env('MODEL_KEY_SECRET', 'mumbo/prod/deepseek-api-key') }))).SecretString
   const s3 = new S3Client({ region, requestChecksumCalculation: 'WHEN_REQUIRED' })  // presigned for curl, which sends no checksum
   const presignPut = (key) => getSignedUrl(s3, new PutObjectCommand({ Bucket: cfg.bucket, Key: key, ContentType: 'application/gzip' }), { expiresIn: 900 })
-  const presignGet = async (key) => {
-    try { await s3.send(new HeadObjectCommand({ Bucket: cfg.bucket, Key: key })) } catch (e) { if (e.name === 'NotFound') return undefined; throw e }
-    return getSignedUrl(s3, new GetObjectCommand({ Bucket: cfg.bucket, Key: key }), { expiresIn: 900 })
-  }
+  const presignGet = presignGetter({ s3, bucket: cfg.bucket, HeadObjectCommand, GetObjectCommand, getSignedUrl })
   const files = runtimeFiles()
   const read = (name) => readFileSync(files[name], 'utf8')
   // For project boxes' start script; read here so a missing file stops the edge at start.

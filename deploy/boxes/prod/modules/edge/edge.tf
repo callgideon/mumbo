@@ -254,7 +254,7 @@ resource "aws_iam_role" "edge" {
 resource "aws_iam_role_policy" "edge" {
   role = aws_iam_role.edge.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [
-    { Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject"], Resource = "arn:aws:s3:::${local.backup_store}/users/*" },
+    { Effect = "Allow", Action = ["s3:GetObject", "s3:GetObjectVersion", "s3:PutObject"], Resource = "arn:aws:s3:::${local.backup_store}/users/*" }, # GetObjectVersion: versioned restores (RUNBOOK "Restore an older S3 version")
     { Effect = "Allow", Action = "s3:PutObject", Resource = "arn:aws:s3:::${local.backup_store}/${local.audit_prefix}*" },
     { Effect = "Allow", Action = "s3:ListBucket", Resource = "arn:aws:s3:::${local.backup_store}" },
     { Effect = "Allow", Action = ["kms:Decrypt", "kms:GenerateDataKey"], Resource = var.backups_kms_key_arn },

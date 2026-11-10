@@ -1,7 +1,8 @@
-# Not in the image: tests, e2e scripts, the operator-run offboarding script, dependencies and secrets.
+# Not in the image: tests, e2e scripts, the operator-run offboarding and restore scripts, dependencies and secrets.
 *.test.mjs
 *.e2e.mjs
 box/*.test.mjs
 offboard.mjs
+restore-version.mjs
 node_modules
 .env

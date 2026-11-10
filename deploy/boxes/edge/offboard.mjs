@@ -24,20 +24,22 @@ export function offboardArgs(args) {
 /** The S3 operations the script needs, over an AWS SDK client and its command classes. */
 export function s3Adapter(client, { ListObjectVersionsCommand, DeleteObjectsCommand }) {
   return {
-    /** Every object version and delete marker under the prefix, across pages. */
+    /** Every object version and delete marker under the prefix, across pages: { Key, VersionId, LastModified, Size, IsLatest },
+     *  and DeleteMarker: true on a delete marker. */
     async listObjectVersions(Bucket, Prefix) {
       const out = []
+      const pick = (v, DeleteMarker) => ({ Key: v.Key, VersionId: v.VersionId, LastModified: v.LastModified, Size: v.Size, IsLatest: v.IsLatest, ...(DeleteMarker && { DeleteMarker }) })
       for (let KeyMarker, VersionIdMarker; ;) {
         const r = await client.send(new ListObjectVersionsCommand({ Bucket, Prefix, KeyMarker, VersionIdMarker }))
-        out.push(...[...r.Versions ?? [], ...r.DeleteMarkers ?? []].map(v => ({ Key: v.Key, VersionId: v.VersionId })))
+        out.push(...(r.Versions ?? []).map(v => pick(v)), ...(r.DeleteMarkers ?? []).map(v => pick(v, true)))
         if (!r.IsTruncated) return out
         KeyMarker = r.NextKeyMarker; VersionIdMarker = r.NextVersionIdMarker
       }
     },
-    /** Deletes the versions 1000 at a time; throws if S3 reports any per-object error. */
+    /** Deletes the versions 1000 at a time, by Key and VersionId only (an ObjectIdentifier's Size is a delete condition that only directory buckets support); throws if S3 reports any per-object error. */
     async deleteVersions(Bucket, objects) {
       for (let i = 0; i < objects.length; i += 1000) {
-        const r = await client.send(new DeleteObjectsCommand({ Bucket, Delete: { Objects: objects.slice(i, i + 1000), Quiet: true } }))
+        const r = await client.send(new DeleteObjectsCommand({ Bucket, Delete: { Objects: objects.slice(i, i + 1000).map(({ Key, VersionId }) => ({ Key, VersionId })), Quiet: true } }))
         if (r.Errors?.length) throw new Error(`S3 refused ${r.Errors.length} deletion(s): ${r.Errors[0].Message}`)
       }
     },
@@ -50,7 +52,8 @@ export async function assertEdgeStore(client, allowEmpty = false) {
   throw new Error('the Redis at REDIS_URL holds no `boxes` set (the edge index of every box). Either it is not the ElastiCache mumbo-boxes-edge endpoint (MemoryDB, wrong port), or the edge has never created a box; in the second case rerun with --allow-empty-store')
 }
 
-async function listSandboxes(e2b, query) {
+/** Every sandbox E2B lists for the query, across pages; callers filter the metadata themselves. */
+export async function listSandboxes(e2b, query) {
   const pager = e2b.Sandbox.list({ query })
   const found = []
   while (pager.hasNext) found.push(...await pager.nextItems())

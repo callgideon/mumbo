@@ -70,16 +70,23 @@ test('S3 adapter: pages, delete markers, batches of 1000, and per-object errors'
   const client = { send: async (c) => {
     sent.push(c)
     if (c.name === 'delete') return { Errors: errors }
+    const t = new Date('2026-11-01T00:00:00Z')
     return c.input.KeyMarker === undefined
-      ? { Versions: [{ Key: 'k1', VersionId: 'a' }], IsTruncated: true, NextKeyMarker: 'k1', NextVersionIdMarker: 'a' }
-      : { DeleteMarkers: [{ Key: 'k1', VersionId: 'm' }], IsTruncated: false }
+      ? { Versions: [{ Key: 'k1', VersionId: 'a', LastModified: t, Size: 10, IsLatest: false, ETag: 'e', StorageClass: 'STANDARD' }], IsTruncated: true, NextKeyMarker: 'k1', NextVersionIdMarker: 'a' }
+      : { DeleteMarkers: [{ Key: 'k1', VersionId: 'm', LastModified: t, IsLatest: true }], IsTruncated: false }
   } }
   const s3 = s3Adapter(client, cmds)
-  assert.deepEqual(await s3.listObjectVersions('b', 'p/'), [{ Key: 'k1', VersionId: 'a' }, { Key: 'k1', VersionId: 'm' }])
+  const t = new Date('2026-11-01T00:00:00Z')
+  const listed = await s3.listObjectVersions('b', 'p/')
+  assert.deepEqual(listed, [{ Key: 'k1', VersionId: 'a', LastModified: t, Size: 10, IsLatest: false }, { Key: 'k1', VersionId: 'm', LastModified: t, Size: undefined, IsLatest: true, DeleteMarker: true }])
   assert.equal(sent[1].input.KeyMarker, 'k1'); assert.equal(sent[1].input.VersionIdMarker, 'a')
   sent.length = 0
   await s3.deleteVersions('b', Array.from({ length: 2500 }, (_, i) => ({ Key: 'k', VersionId: String(i) })))
   assert.deepEqual(sent.map(c => c.input.Delete.Objects.length), [1000, 1000, 500])
+  // A listing passed straight back deletes by Key and VersionId only: no Size condition reaches S3.
+  sent.length = 0
+  await s3.deleteVersions('b', listed)
+  assert.deepEqual(sent[0].input.Delete.Objects, [{ Key: 'k1', VersionId: 'a' }, { Key: 'k1', VersionId: 'm' }])
   errors = [{ Message: 'AccessDenied' }]
   await assert.rejects(s3.deleteVersions('b', [{ Key: 'k', VersionId: '1' }]), /refused 1.*AccessDenied/)
 })
