@@ -733,6 +733,7 @@ const TEXT = {
   'setup.agentCliNoAccount': SETUP_PROBLEMS.agentCliNoAccount[1],
   'setup.repositoryUnreadable': SETUP_PROBLEMS.repositoryUnreadable[1],
   'setup.repositoryUnreported': SETUP_PROBLEMS.repositoryUnreported[1],
+  'setup.repositoryRenamed': SETUP_PROBLEMS.repositoryRenamed[1],
   'setup.repositoryReadOnly': SETUP_PROBLEMS.repositoryReadOnly[1],
   'setup.feishuCliFailed': SETUP_PROBLEMS.feishuCliFailed[1],
   'setup.feishuNoApp': SETUP_PROBLEMS.feishuNoApp[1],

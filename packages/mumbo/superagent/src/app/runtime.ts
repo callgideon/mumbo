@@ -204,8 +204,9 @@ export class Runtime extends Service implements SourceHost {
     }
     this.sessions.install()
     this.executor.install()
-    // A run-as worker cannot enter the root-only state directory, so under run-as the main Session's commands run in the work directory.
-    await this.sessions.ensure(this.masterId, this.machine.runAs ? this.machine.workDirectory : this.machine.stateDir, 'dsh-superagent orchestrator', 'orchestrator')
+    // Under run-as the main Session starts in the worker directory, which the run-as user can enter but not write: root reads
+    // instructions and skills from a Session's directory, so never one a worker could plant them in, such as the work directory.
+    await this.sessions.ensure(this.masterId, this.machine.runAs ? this.machine.workerDirectory : this.machine.stateDir, 'dsh-superagent orchestrator', 'orchestrator')
     for (const id of this.settings.syncable()) await this.settings.sync(id).catch(() => { /* sync() records its failure in health. */ })
     // If stop() was called while awaiting setup, session creation, or policy sync, do not start background loops.
     if (this.closing()) return

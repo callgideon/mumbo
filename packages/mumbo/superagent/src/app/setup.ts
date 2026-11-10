@@ -2,7 +2,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { UserError } from '../core/index.ts'
 import { SETUP_FIELDS, resolveDeployment, resolveFeishuBot, workerProbe, type Deployment, type Machine } from '../deployment.ts'
-import { agentVariables, applyEnvironment, makeWorkerDirectory, verifyEnvironment, withoutDirectory, workerBin, writeEnvironment } from '../infra/environment.ts'
+import { agentVariables, applyEnvironment, verifyEnvironment, withoutDirectory, workerBin, writeEnvironment } from '../infra/environment.ts'
 import type { Settings, SettingsBlock } from '../policy.ts'
 import { SetupError, type SetupProblem } from '../setup.ts'
 
@@ -74,16 +74,13 @@ export class Setup {
     if (this.resolved) await writeEnvironment(this.resolved, blocked)
   }
   restore(): void { this.restoreEnvironment?.(); this.restoreEnvironment = undefined }
-  /** Probes CLIs the way worker shells run them, in the ticket work directory, which setup creates as the worker before it probes. */
+  /** Probes CLIs the way worker shells run them, in `/`. */
   private probe() {
     const { context, machine, lifetime } = this.host
-    return workerProbe(context.subprocess, machine.workerDirectory, machine.workDirectory, lifetime)
+    return workerProbe(context.subprocess, machine.workerDirectory, lifetime)
   }
   private async resolve(settings: Settings): Promise<Deployment> {
     const { context, machine, lifetime } = this.host
-    await makeWorkerDirectory(context.subprocess, machine.workDirectory, lifetime).catch((error: unknown) => {
-      throw new SetupError('environmentFailed', { output: error instanceof Error ? error.message : String(error) })
-    })
     const probe = this.probe()
     const deployment = await resolveDeployment(machine, settings.sources.github?.config, probe)
     const feishu = await resolveFeishuBot(machine, settings.sources.feishu?.config, probe).catch((error: unknown) => {

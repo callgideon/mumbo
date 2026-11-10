@@ -134,8 +134,13 @@ export class Sessions {
       if (status === 'idle' && !this.host.closing()) { this.retryHealth.clear(agent.id); this.updateModelHealth() }
     })
   }
-  /** Resolves or creates session `id` in workspace `cwd`, initializes its role model, decorates it with prompts/skills/tools, sets `danger-full-access` permissions, and renames it to `title`. */
-  async ensure(id: string, cwd: string, title: string, role: 'orchestrator' | 'worker'): Promise<Agent> {
+  /**
+   * Resolves or creates session `id` in workspace `cwd`, initializes its role model, decorates it with prompts/skills/tools, sets `danger-full-access` permissions, and renames it to `title`.
+   * With `exact`, the Session's recorded directory must be `cwd` as written: the workspace registry follows links, so a
+   * link on the way would move the Session, whose instructions and skills root reads, to wherever it leads.
+   * @throws when `exact` is set and the Session's directory is not `cwd`, before anything reads from it.
+   */
+  async ensure(id: string, cwd: string, title: string, role: 'orchestrator' | 'worker', exact = false): Promise<Agent> {
     const ctx = this.ctx
     let result = await ctx.sessionController.resolveAgent(id as SessionId)
     if ('error' in result && result.error.code === 'session/not-found') {
@@ -146,6 +151,9 @@ export class Sessions {
       result = await ctx.sessionController.resolveAgent(id as SessionId)
     }
     if ('error' in result) throw result.error
+    if (exact && result.agent.session.header.cwd !== cwd) {
+      throw new Error(`The Session directory ${cwd} leads to ${String(result.agent.session.header.cwd)} through a symbolic link, which dsh-superagent does not follow under a run-as subprocess provider; remove the link, and name the ticket directory root by its real path`)
+    }
     const settings = this.host.store.settings()
     await initializeRoleModel(ctx, result.agent, role === 'orchestrator' ? settings.eval.model : settings.executor.model)
     await this.decorate(result.agent)

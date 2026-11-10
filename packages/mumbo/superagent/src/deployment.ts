@@ -78,8 +78,10 @@ export function machineOf(config: DeploymentConfig, runAs = false): Machine {
     ghConfigDirectory: contained('ghConfigDirectory', ghConfigDirectory), runAs, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins, githubApp }
 }
 
+/** `owner/name`, where neither part is `.` or `..`, which would leave `repos/` in an API path. */
+const REPOSITORY = /^(?!\.\.?\/)[A-Za-z0-9_.-]+\/(?!\.\.?$)[A-Za-z0-9_.-]+$/
 export const GithubAccountsSchema = z.object({
-  repository: z.string().trim().regex(/^([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?$/, 'owner/name').default(''),
+  repository: z.string().trim().regex(new RegExp(`^$|${REPOSITORY.source}`), 'owner/name').default(''),
   cli: z.string().trim().default(''),
 })
 export const FeishuBotSchema = z.object({ cli: z.string().trim().default('') })
@@ -107,19 +109,19 @@ export function executable(name: string, path: string, exclude?: string): string
 export type Probe = (argv: string[]) => Promise<string>
 /**
  * Run startup checks through DSH's worker subprocess service with worker shims removed from PATH so a `gh` wrapper script reaches the real binary.
+ * The checks run in `/`, where no repository a worker made can change what the CLIs read.
  * @param subprocess - the service that starts worker commands, as the run-as identity when it has one.
  * @param workerDirectory - the directory whose `worker-bin` is removed from PATH.
- * @param cwd - the directory the checks run in, the ticket work directory.
  * @param signal - cancellation; each check also stops after 60 seconds.
  * @returns the probe.
  */
-export function workerProbe(subprocess: SubprocessRuntime, workerDirectory: string, cwd: string, signal: AbortSignal): Probe {
+export function workerProbe(subprocess: SubprocessRuntime, workerDirectory: string, signal: AbortSignal): Probe {
   const path = withoutDirectory(process.env.PATH ?? '', workerBin(workerDirectory))
-  return argv => runAsWorker(subprocess, ['env', `PATH=${path}`, ...argv], cwd, AbortSignal.any([signal, AbortSignal.timeout(60_000)]))
+  return argv => runAsWorker(subprocess, ['env', `PATH=${path}`, ...argv], '/', AbortSignal.any([signal, AbortSignal.timeout(60_000)]))
 }
 
 const GithubUser = z.object({ login: z.string().regex(/^[A-Za-z0-9-]+$/), id: z.number().int().positive() })
-const RepositoryAccess = z.object({ name: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/), push: z.boolean().nullable() })
+const RepositoryAccess = z.object({ name: z.string().regex(REPOSITORY), push: z.boolean().nullable() })
 function parsed<T>(schema: z.ZodType<T>, text: string): T | undefined {
   let value: unknown
   try { value = JSON.parse(text) } catch { return undefined /* Non-JSON output; the caller surfaces the setup failure. */ }
@@ -129,7 +131,8 @@ function parsed<T>(schema: z.ZodType<T>, text: string): T | undefined {
 /**
  * Verify the agent's GitHub CLI identity and push access to the configured repository.
  * With `machine.githubApp` the identity is the App's bot and `/user` is not read; an installation token does not report
- * `permissions`, so only a reported read-only access refuses.
+ * `permissions`, so only a reported read-only access refuses. Under run-as the CLI is kept by the real path checked, and
+ * GitHub's name for the repository, which the worker reports, must equal the configured one but for case.
  */
 export async function resolveDeployment(machine: Machine, github: unknown, probe: Probe, path = process.env.PATH ?? ''): Promise<Deployment> {
   const { workerDirectory, githubApp } = machine
@@ -140,7 +143,8 @@ export async function resolveDeployment(machine: Machine, github: unknown, probe
   let cli: string
   try { cli = executable(accounts.cli, path, workerBin(workerDirectory)) } catch (error) { throw new SetupError('agentCliMissing', { output: reason(error) }) }
   // The orchestrator runs this CLI as root; under run-as, a CLI the worker could change would run the worker's code as root.
-  if (machine.runAs) try { assertOwnedByRoot(cli, 'agent GitHub CLI') } catch (error) { throw new SetupError('agentCliUnsafe', { cli, output: reason(error) }) }
+  // Every caller then runs the real path checked here, so a link on the way that the worker repoints later changes nothing.
+  if (machine.runAs) try { cli = assertOwnedByRoot(cli, 'agent GitHub CLI') } catch (error) { throw new SetupError('agentCliUnsafe', { cli, output: reason(error) }) }
   const agent = githubApp ? { login: githubApp.login, id: githubApp.userId }
     : parsed(GithubUser, await probe([cli, 'api', 'user']).catch((error: unknown) => { throw new SetupError('agentCliSignedOut', { output: reason(error) }) }))
   if (!agent) throw new SetupError('agentCliNoAccount')
@@ -149,6 +153,8 @@ export async function resolveDeployment(machine: Machine, github: unknown, probe
     throw new SetupError('repositoryUnreadable', { account: agent.login, repository: remote, output: reason(error) })
   }))
   if (!access) throw new SetupError('repositoryUnreported', { repository: remote })
+  // Under run-as the worker answers this probe, so its answer may only correct the name's case, never pick another repository.
+  if (machine.runAs && access.name.toLowerCase() !== remote.toLowerCase()) throw new SetupError('repositoryRenamed', { repository: remote, name: access.name })
   const repository = access.name
   if (githubApp ? access.push === false : access.push !== true) throw new SetupError('repositoryReadOnly', { account: agent.login, repository })
   return { ...machine, repository, github: { cli, login: agent.login, noreply: `${agent.id}+${agent.login}@users.noreply.github.com` } }

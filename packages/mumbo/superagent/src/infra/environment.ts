@@ -181,12 +181,18 @@ export async function runAsWorker(subprocess: SubprocessRuntime, argv: string[],
 export const makeWorkerDirectory = (subprocess: SubprocessRuntime, path: string, signal: AbortSignal): Promise<string> =>
   runAsWorker(subprocess, ['mkdir', '-p', '--', path], '/', signal)
 
-/** Verifies, in the ticket work directory, that worker git invocations resolve the deployment's GitHub credential helper. */
-export async function verifyEnvironment(deployment: Pick<Deployment, 'github' | 'workerDirectory' | 'workDirectory'>, subprocess: SubprocessRuntime, signal: AbortSignal): Promise<void> {
-  const { github, workerDirectory, workDirectory } = deployment
-  // `-z` separates fields with NUL and never quotes paths.
-  const helpers = (await runAsWorker(subprocess, ['git', 'config', '-z', '--show-origin', '--get-all', 'credential.https://github.com.helper'], workDirectory, AbortSignal.any([signal, AbortSignal.timeout(60_000)])).catch(() => '')).split('\0')
-  if (helpers.join('\0') !== [`file:${workerGitConfig(workerDirectory)}`, credentialHelper(github.cli), ''].join('\0')) throw new SetupError('gitTooOld')
+/**
+ * Verifies that worker git invocations resolve the deployment's GitHub credential helper. The check runs in `/`, where no
+ * repository a worker made can add its own configuration; a git failure other than finding no helper is reported as it is.
+ */
+export async function verifyEnvironment(deployment: Pick<Deployment, 'github' | 'workerDirectory'>, subprocess: SubprocessRuntime, signal: AbortSignal): Promise<void> {
+  const { github, workerDirectory } = deployment
+  // `-z` separates fields with NUL and never quotes paths; `--get-all` exits with code 1 when no helper is set.
+  const output = await runAsWorker(subprocess, ['git', 'config', '-z', '--show-origin', '--get-all', 'credential.https://github.com.helper'], '/', AbortSignal.any([signal, AbortSignal.timeout(60_000)]))
+    .catch((error: unknown) => { if (error instanceof CliError && error.exitCode === 1) return ''; throw error })
+  if (output !== [`file:${workerGitConfig(workerDirectory)}`, credentialHelper(github.cli), ''].join('\0')) {
+    throw new SetupError('gitTooOld', { output: output === '' ? 'git reports no github.com credential helper' : `git reports ${output.split('\0').filter(Boolean).join(' ')}` })
+  }
 }
 
 /**

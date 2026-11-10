@@ -66,7 +66,7 @@ export interface ExecutorHost {
   readonly effects: Pick<Effects, 'enqueue' | 'handle'>
   /** The `worker` health entry, which reports whether background worker event handling failed. */
   readonly health: HealthEntry
-  readonly machine: Pick<Machine, 'stateDir' | 'workDirectory'>
+  readonly machine: Pick<Machine, 'stateDir' | 'workDirectory' | 'runAs'>
   readonly lifetime: AbortSignal
   /** Session manager for worker sessions and for relaying worker reports to the main Session. */
   readonly sessions: Pick<Sessions, 'ensure' | 'prompt' | 'promptedId' | 'relay' | 'holds'>
@@ -439,14 +439,15 @@ export class DshExecutor implements Executor {
     const workspace = ticket.execution?.directory ?? ''
     if (!current()) return
     // Prepare the workspace directory once; an existing directory counts as already prepared, including worktrees created before
-    // `prepare` commands existed. The worker looks, so root follows no link the worker planted.
+    // `prepare` commands existed. The worker looks, so root follows no link the worker planted here.
     if (!await runAsWorker(this.host.context.subprocess, ['test', '-e', workspace], '/', this.host.lifetime).then(() => true, () => false)) {
       await this.prepareDirectory(ticket)
       if (!current()) return
     }
     if (!current()) return
     const sessionId = workerSessionId(ticket.id)
-    const agent = await this.host.sessions.ensure(sessionId, workspace, ticket.title, 'worker')
+    // Root records the Session directory through a real path; under run-as a link the worker planted must not move it.
+    const agent = await this.host.sessions.ensure(sessionId, workspace, ticket.title, 'worker', this.host.machine.runAs)
     if (!current()) return
     // The background work of the Assignment this one replaces stops first, so its end does not clear this one's message.
     await this.stopped(ticket.id)

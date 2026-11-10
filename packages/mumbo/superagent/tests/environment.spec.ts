@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SENSITIVE_ENV_PATTERN, type SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
-import { GIT_LOCATION, agentVariables, credentialHelper, runAsWorker, verifyDirectory, withoutDirectory, workerBin, workerGitConfig, writeEnvironment }
+import { GIT_LOCATION, agentVariables, credentialHelper, runAsWorker, verifyDirectory, verifyEnvironment, withoutDirectory, workerBin, workerGitConfig, writeEnvironment }
   from '../src/infra/environment.ts'
 import { CliError } from '../src/infra/commands.ts'
 import { testDeployment } from './fixtures/deployment.ts'
@@ -166,6 +166,27 @@ describe('ticket directory check', () => {
     const error = await runAsWorker(subprocess(join(dir, 'global')), failing, dir, signal).catch((e: unknown) => e)
     expect(error).toBeInstanceOf(CliError)
     expect(error).toMatchObject({ message: 'nope', exitCode: 3 })
+  })
+})
+
+describe('the worker git check of setup', () => {
+  const signal = new AbortController().signal
+  it('runs where no repository a worker made adds configuration, such as one in the work directory', async () => {
+    const deployment = testDeployment({ stateDir: dir })
+    await writeEnvironment(deployment, [])
+    mkdirSync(deployment.workDirectory)
+    const git = (...args: string[]) => exec('git', args, { cwd: deployment.workDirectory, env: gitEnv({ GIT_CONFIG_GLOBAL: join(dir, 'unused'), GIT_CONFIG_NOSYSTEM: '1' }) })
+    await git('init', '-q')
+    await git('config', 'credential.https://github.com.helper', 'planted')
+    await expect(verifyEnvironment(deployment, subprocess(workerGitConfig(dir)), signal)).resolves.toBeUndefined()
+  })
+  it('reports a git failure as git reports it, and a missing helper with what git found', async () => {
+    const deployment = testDeployment({ stateDir: dir })
+    writeFileSync(workerGitConfig(dir), '[core\n')
+    await expect(verifyEnvironment(deployment, subprocess(workerGitConfig(dir)), signal)).rejects.toThrow(/bad config/)
+    writeFileSync(workerGitConfig(dir), '')
+    await expect(verifyEnvironment(deployment, subprocess(workerGitConfig(dir)), signal))
+      .rejects.toThrow('needs git 2.32 or later')
   })
 })
 

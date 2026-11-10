@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Config, executable, machineOf, resolveDeployment, resolveFeishuBot, type Machine, type Probe } from '../src/deployment.ts'
+import { Config, GithubAccountsSchema, executable, machineOf, resolveDeployment, resolveFeishuBot, type Machine, type Probe } from '../src/deployment.ts'
+import { Commands } from '../src/infra/commands.ts'
 import { gitEnv } from './fixtures/git.ts'
 
 const exec = promisify(execFile)
@@ -122,6 +123,32 @@ describe('under a run-as subprocess provider', () => {
     await expect(resolveDeployment(machine(), { repository, cli }, probe, path)).resolves.toMatchObject({ github: { cli } })
     chmodSync(cli, 0o755)
     await expect(resolveDeployment({ ...machine(), runAs: true }, { repository, cli }, probe, path)).resolves.toMatchObject({ github: { cli } })
+  })
+  it('runs the real path of the agent GitHub CLI it checked, so a link the worker repoints after setup runs nothing else as root', async () => {
+    const real = gh(join(dir, 'bin', 'gh-real'), 'Agent-Bot')
+    const shared = join(dir, 'shared')
+    mkdirSync(shared)
+    chmodSync(shared, 0o777)
+    const link = join(shared, 'gh')
+    symlinkSync(real, link)
+    const deployment = await resolveDeployment({ ...machine(), runAs: true }, { repository: 'acme/widgets', cli: link }, probe, path)
+    expect(deployment.github.cli).toBe(real)
+    rmSync(link)
+    symlinkSync(program(join(shared, 'worker-gh'), 'echo \'{"login":"worker"}\''), link)
+    const commands = new Commands(() => deployment, {}, new AbortController().signal)
+    expect(await commands.gh(['api', 'user'])).toEqual({ login: 'Agent-Bot', id: 7 })
+  })
+  it('under run-as takes GitHub\'s name for the repository, which the worker reports, only when it differs from the configured one in case alone', async () => {
+    const cli = program(join(dir, 'bin', 'gh-any'), `case "$*" in\n  "api user") echo '{"login":"Agent-Bot","id":7}' ;;\n  "api repos/"*) echo '{"name":"acme/widgets","push":true}' ;;\nesac`)
+    await expect(resolveDeployment({ ...machine(), runAs: true }, { repository: 'victim/private', cli }, probe, path))
+      .rejects.toEqual(setupError('github', 'repositoryRenamed', { repository: 'victim/private', name: 'acme/widgets' }))
+    expect((await resolveDeployment({ ...machine(), runAs: true }, { repository: 'ACME/Widgets', cli }, probe, path)).repository).toBe('acme/widgets')
+    // Without run-as the operator's own CLI may resolve a renamed repository.
+    expect((await resolveDeployment(machine(), { repository: 'victim/private', cli }, probe, path)).repository).toBe('acme/widgets')
+  })
+  it('refuses a repository whose owner or name is . or .., which would leave repos/ in an API path', () => {
+    for (const repository of ['../..', './x', 'acme/..', 'acme/.']) expect(() => GithubAccountsSchema.parse({ repository }), repository).toThrow('owner/name')
+    expect(GithubAccountsSchema.parse({ repository: 'acme/.github' }).repository).toBe('acme/.github')
   })
 })
 
