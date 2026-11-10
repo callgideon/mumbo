@@ -1,22 +1,22 @@
-- dialog "设置":
-  - text: 设置
+- dialog "Settings":
+  - text: Settings
   - navigation:
-    - button "通用设置"
-    - button "模型"
-    - button "内置插件"
-    - button "Agent 预设"
-  - button "打开配置文件"
-  - button "关闭"
-  - heading "模型" [level=2]
-  - paragraph: 填入各提供商的 API 密钥即可使用其模型。
+    - button "General"
+    - button "Models"
+    - button "Built-in plugins"
+    - button "Agent presets"
+  - button "Open configuration file"
+  - button "Close"
+  - heading "Models" [level=2]
+  - paragraph: Enter your API keys to use models from the following providers.
   - list
-  - tablist "添加方式":
-    - tab "第三方模型提供商" [selected]
-    - tab "自定义模型 API"
-  - paragraph: 从内置目录中选择 OpenAI、Anthropic、Kimi 等提供商，填入其 API 密钥即可使用。
-  - tabpanel "第三方模型提供商":
-    - text: 提供商
-    - combobox "提供商":
+  - tablist "How to add":
+    - tab "Third-party model provider" [selected]
+    - tab "Custom model API"
+  - paragraph: Pick OpenAI, Anthropic, Kimi, or another provider from the built-in catalog and enter its API key.
+  - tabpanel "Third-party model provider":
+    - text: Provider
+    - combobox "Provider":
       - option "amazon-bedrock"
       - option "ant-ling"
       - option "anthropic"
@@ -58,6 +58,6 @@
       - option "xiaomi-token-plan-sgp"
       - option "zai"
       - option "zai-coding-cn"
-    - group: 自定义设置
-    - button "取消"
-    - button "保存"
+    - group: Customized settings
+    - button "Cancel"
+    - button "Apply"

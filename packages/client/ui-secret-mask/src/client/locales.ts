@@ -5,14 +5,8 @@ import type {} from '@deepseek-ai/dsh-client-ui-slots'
 /** Dictionary namespace owned by this plugin. */
 export const NS = 'secretMask'
 
-/** Simplified Chinese dictionary (the key-set source of truth). */
-export const zh = {
-  'secret.reveal': '显示密钥',
-  'secret.hide': '隐藏密钥',
-} satisfies Record<string, string>
-
 /** The secretMask namespace key union. */
-export type SecretMaskKey = keyof typeof zh
+export type SecretMaskKey = keyof typeof en
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -21,11 +15,11 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
-/** English dictionary, checked complete against the zh key set. */
+/** English dictionary (the key-set source of truth). */
 export const en = {
   'secret.reveal': 'Show secret',
   'secret.hide': 'Hide secret',
-} satisfies Record<SecretMaskKey, string>
+} satisfies Record<string, string>
 
 /** Japanese copy, checked against the English keys. */
 export const ja = {

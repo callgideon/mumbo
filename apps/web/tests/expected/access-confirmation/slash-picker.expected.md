@@ -1,10 +1,10 @@
-- textbox "筛选选项":
-  - /placeholder: 搜索…
-- listbox "/permission 匹配项":
-  - option "仅可查看"
-  - option "工作区内修改" [selected]
-  - option "完全权限"
-  - option "自动审查 EXP":
-    - text: 自动审查
+- textbox "Filter options":
+  - /placeholder: Search…
+- listbox "/permission matches":
+  - option "Read Only"
+  - option "Workspace Write" [selected]
+  - option "Full access"
+  - option "Auto review EXP":
+    - text: Auto review
     - superscript: EXP
-    - text: 无沙箱运行；每次原生工具调用和 PTC 内层调用前由同一模型进行实验性审查。
+    - text: Run without a sandbox after an experimental same-model review of every native tool call and PTC inner call.

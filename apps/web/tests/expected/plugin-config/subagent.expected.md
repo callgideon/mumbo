@@ -1,25 +1,25 @@
-- button "返回插件": 插件
-- heading "子智能体" [level=3]
-- paragraph: 设置子智能体的递归层级、数量和模型。
-- region "运行限制":
-  - heading "运行限制" [level=3]
-  - text: 最大递归深度
-  - button "最大递归深度说明"
-  - text: 已覆盖
-  - button "恢复默认"
-  - textbox "最大递归深度":
+- button "Back to plugins": Plugins
+- heading "Subagent" [level=3]
+- paragraph: Set Subagent recursion depth, count, and models.
+- region "Limits":
+  - heading "Limits" [level=3]
+  - text: Maximum recursion depth
+  - button "About maximum recursion depth"
+  - text: Overridden
+  - button "Reset to default"
+  - textbox "Maximum recursion depth":
     - /placeholder: ""
     - text: "2"
-  - text: 子智能体并行数量上限
-  - button "子智能体并行数量上限说明"
-  - text: 已覆盖
-  - button "恢复默认"
-  - textbox "子智能体并行数量上限":
+  - text: Subagent parallelism limit
+  - button "About the Subagent parallelism limit"
+  - text: Overridden
+  - button "Reset to default"
+  - textbox "Subagent parallelism limit":
     - /placeholder: ""
     - text: "12"
-- region "模型选择":
-  - heading "模型选择" [level=3]
-  - text: 允许 Agent 为子智能体选择模型
-  - switch "允许 Agent 为子智能体选择模型"
-  - paragraph: 关闭后，子智能体使用配置的默认模型或继承父 Agent 的模型；已选模型会保留。
-- button "保存" [disabled]
+- region "Model selection":
+  - heading "Model selection" [level=3]
+  - text: Allow agents to choose models for Subagents
+  - switch "Allow agents to choose models for Subagents"
+  - paragraph: Subagents use configured defaults or inherit the parent agent's model. Saved model choices are retained.
+- button "Save" [disabled]

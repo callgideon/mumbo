@@ -15,12 +15,11 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
-import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import { EMPTY_CONVERSATION_SNAPSHOT } from '../src/client/contract/snapshot.ts'
 import type { ConversationSnapshot } from '../src/client/contract/snapshot.ts'
 import { createConversationStore } from '../src/client/stores.ts'
 import { SessionInputShell } from '../src/client/input/facade.ts'
-import { en, zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 import { ConversationContent } from '../src/client/skeleton/ConversationContent.tsx'
 import { ConversationHeader } from '../src/client/skeleton/ConversationHeader.tsx'
 import { ConversationMainPanel } from '../src/client/skeleton/ConversationMainPanel.tsx'
@@ -94,7 +93,7 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', ResizeObserverStub)
 })
 
-const t: ConversationContentProps['t'] = makeTranslate(zh, commonZh)
+const t: ConversationContentProps['t'] = makeTranslate(en, commonEn)
 
 const sid = (id: string) => id as SessionId
 const wid = (id: string) => id as WorkspaceId
@@ -562,7 +561,7 @@ describe('ConversationRoot resident composer', () => {
     expect(b.slotCalls).toContain('conversation.session.header.utilities')
     expect(b.slotCalls).toContain('conversation.session.header.corner')
     expect(b.headerFactory).toHaveBeenCalledWith('contextMenu.button', expect.objectContaining({
-      target: { kind: 'sessionHeader', value: { sessionId: SID } }, label: zh['header.more'], size: 'sm',
+      target: { kind: 'sessionHeader', value: { sessionId: SID } }, label: en['header.more'], size: 'sm',
     }))
   })
 
@@ -593,8 +592,8 @@ describe('ConversationRoot resident composer', () => {
     expect(b.slotCalls).not.toContain('conversation.session.header.utilities')
     expect(b.headerFactory).not.toHaveBeenCalled()
     expect(b.slotCalls).not.toContain('conversation.session.header.actions')
-    expect(b.view.getByText('探索未至之境')).toBeTruthy()
-    expect(b.view.getByText('预览版')).toBeTruthy()
+    expect(b.view.getByText('Into the Unknown')).toBeTruthy()
+    expect(b.view.getByText('Preview')).toBeTruthy()
     expect(b.view.queryByTestId('view-chat')).toBeNull()
     // The same machine-backed textarea is live in the hero, and the
     // persistence mirror stays bound (ConversationSession mounts chrome-hidden
@@ -605,7 +604,7 @@ describe('ConversationRoot resident composer', () => {
     expect(b.store.store.getSnapshot().draft).toEqual({ text: 'draft in hero', references: [] })
     // Picker: open through the chip; a pick switches to the other
     // workspace's blank session (draft carry is apply-layer wiring).
-    fireEvent.click(b.view.getByRole('button', { name: '选择工作区' }))
+    fireEvent.click(b.view.getByRole('button', { name: 'Choose workspace' }))
     const owner = b.pickerOwner() as { open: boolean; onPick(id: WorkspaceId): void }
     expect(owner.open).toBe(true)
     act(() => { owner.onPick(wid('second')) })
@@ -627,7 +626,7 @@ describe('ConversationRoot resident composer', () => {
     expect(conversationPhase(failed, EMPTY_CONVERSATION_SNAPSHOT)).toBe('engaging')
     const b = mount(failed, undefined, undefined, { summaryBlank: true })
     expect(b.view.container.querySelector('[data-phase]')?.getAttribute('data-phase')).toBe('active')
-    expect(b.view.queryByText('探索未至之境')).toBeNull()
+    expect(b.view.queryByText('Into the Unknown')).toBeNull()
   })
 
   it('settling phase: a summary that does not prove the session blank hides the composer while it opens', () => {
@@ -659,7 +658,7 @@ describe('ConversationRoot resident composer', () => {
     // blank the column for the history round-trip.
     const root = b.view.container.querySelector('[data-phase]')
     expect(root?.getAttribute('data-phase')).toBe('hero')
-    expect(b.view.getByText('探索未至之境')).toBeTruthy()
+    expect(b.view.getByText('Into the Unknown')).toBeTruthy()
     expect(b.view.getByRole('textbox')).toBeTruthy()
   })
 
@@ -720,7 +719,7 @@ describe('ConversationRoot resident composer', () => {
     const viewTabs = ['trajectory', 'timeline', 'chat', 'notes'].map(id => ({ id, label: id }))
     const b = mount(sessionSnapshotOf(), undefined, undefined, { viewTabs, entryActions: true })
     expect(within(b.view.getByRole('tablist')).getAllByRole('tab').map(tab => tab.textContent)).toEqual(['chat'])
-    fireEvent.click(b.view.getByRole('button', { name: zh['session.moreViews'] }))
+    fireEvent.click(b.view.getByRole('button', { name: en['session.moreViews'] }))
     expect(b.actionsOwner().entries.map(entry => entry.id)).toEqual(['trajectory', 'timeline', 'notes'])
     act(() => { b.actionsOwner().onOpen('trajectory') })
     expect(b.view.getByRole('tab', { name: 'chat' })).toBeTruthy()
@@ -734,7 +733,7 @@ describe('ConversationRoot resident composer', () => {
     const viewTabs = ['chat', 'trajectory', 'timeline'].map(id => ({ id, label: id }))
     const b = mount(sessionSnapshotOf(), undefined, undefined, { viewTabs, entryActions: true, headerOnly: true })
     expect(within(b.view.getByRole('tablist')).getAllByRole('tab').map(tab => tab.textContent)).toEqual(['chat', 'trajectory'])
-    fireEvent.click(b.view.getByRole('button', { name: zh['session.moreViews'] }))
+    fireEvent.click(b.view.getByRole('button', { name: en['session.moreViews'] }))
     expect(b.actionsOwner().entries.map(entry => entry.id)).toEqual(['timeline'])
   })
 
@@ -759,7 +758,7 @@ describe('ConversationRoot resident composer', () => {
     const b = mount(sessionSnapshotOf(), undefined, undefined, { unpinnedViews: ['trajectory'], entryActions: true })
     const tablist = b.view.getByRole('tablist')
     expect(within(tablist).getAllByRole('tab').map(tab => tab.textContent)).toEqual(['Chat'])
-    const more = b.view.getByRole('button', { name: zh['session.moreViews'] })
+    const more = b.view.getByRole('button', { name: en['session.moreViews'] })
     expect(tablist.nextElementSibling?.contains(more)).toBe(true)
     expect(more.getAttribute('aria-haspopup')).toBe('menu')
     expect(b.view.queryByRole('menu')).toBeNull()
@@ -769,8 +768,8 @@ describe('ConversationRoot resident composer', () => {
     const b = mount(sessionSnapshotOf(), undefined, undefined, {
       viewTabs: [
         { id: 'chat', label: 'Chat' },
-        { id: 'short', label: '轨迹' },
-        { id: 'long-cjk', label: '很长的视图名称' },
+        { id: 'short', label: 'Trajectory' },
+        { id: 'long-cjk', label: 'very long view name' },
         { id: 'long-latin', label: 'A very long view name' },
       ],
       headerOnly: true,
@@ -783,8 +782,8 @@ describe('ConversationRoot resident composer', () => {
       return tooltip
     }
     expect(tooltipFor('Chat')).toBeNull()
-    expect(tooltipFor('轨迹')).toBeNull()
-    expect(tooltipFor('很长的视图名称')).toBe('很长的视图名称')
+    expect(tooltipFor('Trajectory')).toBeNull()
+    expect(tooltipFor('very long view name')).toBe('very long view name')
     expect(tooltipFor('A very long view name')).toBe('A very long view name')
   })
 
@@ -800,12 +799,12 @@ describe('ConversationRoot resident composer', () => {
     const b = mount(sessionSnapshotOf(), undefined, undefined, { viewTabs, entryActions: true })
     const external = () => within(b.view.getByRole('tablist')).getAllByRole('tab').map(tab => tab.textContent)
     expect(external()).toEqual(['Chat', 'Trajectory', 'Timeline'])
-    fireEvent.click(b.view.getByRole('button', { name: zh['session.moreViews'] }))
+    fireEvent.click(b.view.getByRole('button', { name: en['session.moreViews'] }))
     expect(b.actionsOwner().entries.map(entry => entry.id)).toEqual(['inspector'])
     act(() => { b.actionsOwner().onOpen('inspector') })
     expect(external()).toEqual(['Chat', 'Trajectory', 'Timeline'])
     expect(b.actionsOwner().entries.find(entry => entry.id === 'inspector')?.active).toBe(true)
-    expect(b.view.getByRole('button', { name: zh['session.moreViews'] })).toBeTruthy()
+    expect(b.view.getByRole('button', { name: en['session.moreViews'] })).toBeTruthy()
     const row = b.view.getByRole('tablist').parentElement!
     const rowReads = () => readWidth.mock.contexts.filter(element => element === row).length
     const reads = rowReads()
@@ -834,7 +833,7 @@ describe('ConversationRoot resident composer', () => {
     width = 300
     act(() => { fireResize(row) })
     expect(external()).toEqual(['chat', 'trajectory'])
-    fireEvent.click(b.view.getByRole('button', { name: zh['session.moreViews'] }))
+    fireEvent.click(b.view.getByRole('button', { name: en['session.moreViews'] }))
     expect(b.actionsOwner().entries.map(entry => entry.id)).toEqual(['timeline', 'inspector', 'notes'])
     expect(b.actionsOwner().entries.find(entry => entry.id === 'notes')?.active).toBe(true)
     width = 1000
@@ -855,25 +854,25 @@ describe('ConversationRoot resident composer', () => {
     const b = mount(sessionSnapshotOf(), undefined, undefined, { viewTabs, entryActions: true })
     expect(within(b.view.getByRole('tablist')).getAllByRole('tab').map(tab => tab.textContent))
       .toEqual(viewTabs.map(tab => tab.label))
-    fireEvent.click(b.view.getByRole('button', { name: zh['session.moreViews'] }))
+    fireEvent.click(b.view.getByRole('button', { name: en['session.moreViews'] }))
     expect(b.actionsOwner().entries).toEqual([])
   })
 
   it('omits More while the View actions list has no registrations', () => {
     const b = mount(sessionSnapshotOf())
     expect(b.view.getByRole('tablist')).toBeTruthy()
-    expect(b.view.queryByRole('button', { name: zh['session.moreViews'] })).toBeNull()
+    expect(b.view.queryByRole('button', { name: en['session.moreViews'] })).toBeNull()
   })
 
   it('omits the tab row and More while Chat is the only registered View', () => {
     const b = mount(sessionSnapshotOf(), undefined, undefined, { viewTabs: [{ id: 'chat', label: 'Chat' }], entryActions: true })
     expect(b.view.queryByRole('tablist')).toBeNull()
-    expect(b.view.queryByRole('button', { name: zh['session.moreViews'] })).toBeNull()
+    expect(b.view.queryByRole('button', { name: en['session.moreViews'] })).toBeNull()
   })
 
   it('hands the More menu the non-Chat Views with their pin state and this Session\'s selection', () => {
     const b = mount(sessionSnapshotOf(), undefined, undefined, { unpinnedViews: ['trajectory'], entryActions: true })
-    const more = b.view.getByRole('button', { name: zh['session.moreViews'] })
+    const more = b.view.getByRole('button', { name: en['session.moreViews'] })
     fireEvent.click(more)
     expect(more.getAttribute('aria-expanded')).toBe('true')
     expect(within(b.view.getByRole('menu')).getByRole('menuitem', { name: 'Header view action' })).toBeTruthy()
@@ -899,7 +898,7 @@ describe('ConversationRoot resident composer', () => {
       ],
       selectWorkspace,
     )
-    fireEvent.click(b.view.getByRole('button', { name: '选择工作区' }))
+    fireEvent.click(b.view.getByRole('button', { name: 'Choose workspace' }))
     const owner = b.pickerOwner() as { onPick(id: WorkspaceId): void }
     await act(async () => { owner.onPick(wid('second')); await Promise.resolve() })
     expect(selectWorkspace).toHaveBeenCalledWith(wid('second'))
@@ -909,7 +908,7 @@ describe('ConversationRoot resident composer', () => {
 
   it('blank session keeps the interactive picker chip (workspace switchable until the first message)', () => {
     const b = mount(sessionSnapshotOf({ blank: true }))
-    const chip = b.view.getByRole('button', { name: '选择工作区' })
+    const chip = b.view.getByRole('button', { name: 'Choose workspace' })
     expect((chip as HTMLButtonElement).disabled).toBe(false)
     expect(b.slotCalls).toContain('conversation.hero.workspace')
     // The agent-preset chip sits in the same row, for the same reason: both

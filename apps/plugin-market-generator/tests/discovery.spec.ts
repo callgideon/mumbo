@@ -157,7 +157,7 @@ describe('PackageFiles', () => {
 
 describe('readDisplayMetadata', () => {
   it.each([
-    { keywords: ['search', '', ' search ', 'search', '搜索'] },
+    { keywords: ['search', '', ' search ', 'search', 'Search'] },
     { keywords: [] },
   ])('preserves manifest keywords $keywords', async ({ keywords }) => {
     const result = await readDisplay(tree({}), { name: 'dsh-a', keywords })
@@ -222,7 +222,7 @@ describe('readDisplayMetadata', () => {
     const files = tree({
       'locale/en.json': JSON.stringify({ meta: { title: 'Alpha' } }),
       'locale/fr.json': JSON.stringify({ meta: {} }),
-      'locale/zh.json': JSON.stringify({ meta: { title: '甲', description: '做甲' } }),
+      'locale/zh.json': JSON.stringify({ meta: { title: 'A', description: 'do A' } }),
       'locale/FR.json': JSON.stringify({ meta: { title: 'Alpha (fr)' } }),
       'locale/Bad_Name.json': '{}',
       'locale/de.json': '{',
@@ -233,7 +233,7 @@ describe('readDisplayMetadata', () => {
       'locale/readme.md': 'not a locale',
     })
     const { display, warnings } = await readDisplay(files, { name: 'dsh-a', description: 'Does A', author: { name: 'Jane', email: 'j@example.com' } })
-    expect(display).toEqual({ title: { en: 'Alpha', fr: 'Alpha (fr)', zh: '甲' }, description: { en: 'Does A', zh: '做甲' }, author: 'Jane' })
+    expect(display).toEqual({ title: { en: 'Alpha', fr: 'Alpha (fr)', zh: 'A' }, description: { en: 'Does A', zh: 'do A' }, author: 'Jane' })
     expect(warnings).toEqual([
       'locale file locale/Bad_Name.json ignored: its name is not a language id',
       expect.stringMatching(/^locale file locale\/de\.json ignored: SyntaxError/u) as string,
@@ -245,18 +245,18 @@ describe('readDisplayMetadata', () => {
   })
 
   it('reads no locale directory without locale/en.json and returns plain strings without translations', async () => {
-    expect((await readDisplay(tree({ 'locale/zh.json': JSON.stringify({ meta: { title: '甲' } }) }), { name: 'dsh-a', author: 'Jane <j@example.com>' })).display)
+    expect((await readDisplay(tree({ 'locale/zh.json': JSON.stringify({ meta: { title: 'A' } }) }), { name: 'dsh-a', author: 'Jane <j@example.com>' })).display)
       .toEqual({ title: 'dsh-a', author: 'Jane' })
     expect((await readDisplay(tree({ 'locale/en.json': JSON.stringify({ meta: { description: 'English only' } }) }), { name: 'dsh-a', author: { url: 'x' } })).display)
       .toEqual({ title: 'dsh-a', description: 'English only' })
-    expect((await readDisplay(tree({ 'locale/en.json': '{}', 'locale/zh.json': JSON.stringify({ meta: { description: '只有中文' } }) }), { name: 'dsh-a' })).display)
+    expect((await readDisplay(tree({ 'locale/en.json': '{}', 'locale/zh.json': JSON.stringify({ meta: { description: 'only has Chinese' } }) }), { name: 'dsh-a' })).display)
       .toEqual({ title: 'dsh-a' })
   })
 
   it('resolves locale files and the icon through the exports map', async () => {
     const files = tree({
       'dist/locale/en.json': JSON.stringify({ meta: { title: 'Alpha' } }),
-      'dist/locale/zh.json': JSON.stringify({ meta: { title: '甲' } }),
+      'dist/locale/zh.json': JSON.stringify({ meta: { title: 'A' } }),
       'dist/locale/fr.json': JSON.stringify({ meta: { title: 'Alpha (fr)' } }),
       'other/fr.json': JSON.stringify({ meta: { title: 'elsewhere' } }),
       'locale/en.json': JSON.stringify({ meta: { title: 'not exported' } }),
@@ -267,11 +267,11 @@ describe('readDisplayMetadata', () => {
       name: 'dsh-a',
       exports: { './locale/fr.json': './other/fr.json', './locale/*': './dist/locale/*', './icon': { types: './icon.d.ts', default: './art/icon.svg' } },
     })
-    expect(display).toEqual({ title: { en: 'Alpha', zh: '甲' }, icon: 'data:image/svg+xml;base64,PHN2Zy8+' })
+    expect(display).toEqual({ title: { en: 'Alpha', zh: 'A' }, icon: 'data:image/svg+xml;base64,PHN2Zy8+' })
     expect(warnings).toEqual(['locale file dist/locale/fr.json ignored: ./locale/fr.json does not resolve into dist/locale'])
     expect((await readDisplay(files, { name: 'dsh-a', exports: { '.': './index.js' } })).display).toEqual({ title: 'dsh-a' })
-    const flat = tree({ 'en.json': JSON.stringify({ meta: { title: 'Alpha' } }), 'zh.json': JSON.stringify({ meta: { title: '甲' } }), 'package.json': '{}' })
-    expect((await readDisplay(flat, { exports: { './locale/*': './*' } })).display).toEqual({ title: { en: 'Alpha', zh: '甲' } })
+    const flat = tree({ 'en.json': JSON.stringify({ meta: { title: 'Alpha' } }), 'zh.json': JSON.stringify({ meta: { title: 'A' } }), 'package.json': '{}' })
+    expect((await readDisplay(flat, { exports: { './locale/*': './*' } })).display).toEqual({ title: { en: 'Alpha', zh: 'A' } })
     expect((await readDisplay(flat, {})).display).toEqual({})
     expect((await readDisplay(files, { name: 'dsh-a', exports: { './locale/en.json': './../outside.json' } })).display).toEqual({ title: 'dsh-a' })
   })

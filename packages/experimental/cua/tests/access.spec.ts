@@ -464,7 +464,7 @@ it('does not reactivate old handles when stored permission was revoked and later
   expect(f.answer).toHaveBeenCalledOnce()
 })
 
-it.each([new NativeError('SETTINGS_UNAVAILABLE', '请手动打开系统设置'), new Error('transport ended'), new NativeError('NATIVE_EXIT', 'helper exited')])(
+it.each([new NativeError('SETTINGS_UNAVAILABLE', 'please manually Open System Settings'), new Error('transport ended'), new NativeError('NATIVE_EXIT', 'helper exited')])(
   'preserves provider and transport settings failures: %s', async (failure) => {
     const f = await setup()
     await f.ctx.cuaAccess.systemStatus()

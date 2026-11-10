@@ -114,11 +114,11 @@ function markdownImageFixture(remoteUrl: string, outsidePath: string): string {
           '',
           '[View comparison](./valid.png)',
           '',
-          '![Space path]({{cwd}}/test workspace/测试图.png)',
+          '![Space path]({{cwd}}/test workspace/test image.png)',
           '',
-          '![Encoded path]({{cwd}}/test%20workspace/测试图.png)',
+          '![Encoded path]({{cwd}}/test%20workspace/test image.png)',
           '',
-          '![Encoded filename]({{cwd}}/test%20workspace/测试%23100%25.png)',
+          '![Encoded filename]({{cwd}}/test%20workspace/test%23100%25.png)',
           '',
           '![Oversized image]({{cwd}}/oversized.png)',
           '',
@@ -174,8 +174,8 @@ describe('web e2e: Markdown image rendering', () => {
     await writeFile(join(scaffold.workspaceCwd, 'valid.png'), PNG)
     await writeFile(join(scaffold.workspaceCwd, 'local-image.png'), PNG)
     await mkdir(join(scaffold.workspaceCwd, 'test workspace'))
-    await writeFile(join(scaffold.workspaceCwd, 'test workspace/测试图.png'), PNG)
-    await writeFile(join(scaffold.workspaceCwd, 'test workspace/测试#100%.png'), PNG)
+    await writeFile(join(scaffold.workspaceCwd, 'test workspace/test image.png'), PNG)
+    await writeFile(join(scaffold.workspaceCwd, 'test workspace/test#100%.png'), PNG)
     await writeFile(join(scaffold.workspaceCwd, 'corrupt.png'), 'invalid image')
     const oversized = await open(join(scaffold.workspaceCwd, 'oversized.png'), 'w')
     try {
@@ -277,8 +277,8 @@ describe('web e2e: Markdown image rendering', () => {
     expect(mediaResponses).toEqual(new Map([
       [join(scaffold.workspaceCwd, 'valid.png'), 200],
       [join(scaffold.workspaceCwd, 'local-image.png'), 200],
-      [join(scaffold.workspaceCwd, 'test workspace/测试图.png'), 200],
-      [join(scaffold.workspaceCwd, 'test workspace/测试#100%.png'), 200],
+      [join(scaffold.workspaceCwd, 'test workspace/test image.png'), 200],
+      [join(scaffold.workspaceCwd, 'test workspace/test#100%.png'), 200],
       [join(scaffold.workspaceCwd, 'oversized.png'), 413],
       [join(scaffold.persistenceRoot, 'outside.png'), 200],
       [join(scaffold.workspaceCwd, 'missing.png'), 404],

@@ -11,7 +11,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { LiveshareShareAction } from '../src/client/ShareAction.tsx'
-import { en, NS, zh } from '../src/client/locales.ts'
+import { en, NS, fr } from '../src/client/locales.ts'
 import type { OwnerShares } from '../src/client/owner-shares.ts'
 import { accepted, ownerSharesDouble, refused } from './owner-shares-double.client.ts'
 import { rememberManagedShare, setManagedShareOpener } from '../src/client/share-navigation.ts'
@@ -20,8 +20,9 @@ const SESSION = 'owner-session' as SessionId
 
 // The action reads its copy through the locale seat the browser composition provides.
 const locale = new LocaleRuntime(new Context())
-locale.register(NS, { zh, en })
-locale.setLocale('zh')
+locale.addLanguage({ id: 'fr', label: 'Français', fallback: 'en' })
+locale.register(NS, { fr, en })
+locale.setLocale('fr')
 const t = locale.bind(NS)
 
 afterEach(cleanup)
@@ -50,9 +51,9 @@ describe('Session header Share action', () => {
     const { shares, calls } = ownerSharesDouble()
     renderAction(shares)
 
-    fireEvent.click(screen.getByRole('button', { name: zh['header.action'] }))
+    fireEvent.click(screen.getByRole('button', { name: fr['header.action'] }))
 
-    await waitFor(() => { expect(screen.getByText(zh['dialog.title'])).toBeTruthy() })
+    await waitFor(() => { expect(screen.getByText(fr['dialog.title'])).toBeTruthy() })
     // The dialog is told which Session it publishes, including a Session the list does not name.
     expect(calls.map(call => call.method)).toContain('relay')
   })
@@ -65,13 +66,13 @@ describe('Session header Share action', () => {
       }] as never }),
     })
     renderAction(shares)
-    fireEvent.click(screen.getByRole('button', { name: zh['header.action'] }))
-    await waitFor(() => { expect(screen.getByText(zh['dialog.title'])).toBeTruthy() })
-    fireEvent.click(screen.getByText(zh['dialog.manage']))
-    const manage = await screen.findByRole('button', { name: zh['manage.open'] })
+    fireEvent.click(screen.getByRole('button', { name: fr['header.action'] }))
+    await waitFor(() => { expect(screen.getByText(fr['dialog.title'])).toBeTruthy() })
+    fireEvent.click(screen.getByText(fr['dialog.manage']))
+    const manage = await screen.findByRole('button', { name: fr['manage.open'] })
     fireEvent.click(manage)
-    await waitFor(() => { expect(screen.getByText(zh['dialog.title'])).toBeTruthy() })
-    expect(screen.queryByText(zh['manage.title'])).toBeNull()
+    await waitFor(() => { expect(screen.getByText(fr['dialog.title'])).toBeTruthy() })
+    expect(screen.queryByText(fr['manage.title'])).toBeNull()
   })
 
   it('asks workspace navigation to open another Session selected in the manager', async () => {
@@ -84,10 +85,10 @@ describe('Session header Share action', () => {
       }] as never }),
     })
     renderAction(shares)
-    fireEvent.click(screen.getByRole('button', { name: zh['header.action'] }))
-    await waitFor(() => { expect(screen.getByText(zh['dialog.title'])).toBeTruthy() })
-    fireEvent.click(screen.getByText(zh['dialog.manage']))
-    const manage = await screen.findByRole('button', { name: zh['manage.open'] })
+    fireEvent.click(screen.getByRole('button', { name: fr['header.action'] }))
+    await waitFor(() => { expect(screen.getByText(fr['dialog.title'])).toBeTruthy() })
+    fireEvent.click(screen.getByText(fr['dialog.manage']))
+    const manage = await screen.findByRole('button', { name: fr['manage.open'] })
     fireEvent.click(manage)
     expect(open).toHaveBeenCalledWith('other-session')
     await waitFor(() => { expect(screen.getByText('Other session')).toBeTruthy() })
@@ -97,47 +98,47 @@ describe('Session header Share action', () => {
     rememberManagedShare(SESSION)
     const { shares } = ownerSharesDouble()
     renderAction(shares)
-    await waitFor(() => { expect(screen.getByText(zh['dialog.title'])).toBeTruthy() })
+    await waitFor(() => { expect(screen.getByText(fr['dialog.title'])).toBeTruthy() })
   })
 
   it('opens the dialog for a Session the list has not published, titled by its id', async () => {
     const { shares } = ownerSharesDouble()
     renderAction(shares, list())
 
-    fireEvent.click(screen.getByRole('button', { name: zh['header.action'] }))
+    fireEvent.click(screen.getByRole('button', { name: fr['header.action'] }))
 
-    await waitFor(() => { expect(screen.getByText(zh['dialog.title'])).toBeTruthy() })
+    await waitFor(() => { expect(screen.getByText(fr['dialog.title'])).toBeTruthy() })
   })
 
   it('starts from an empty address when the Host has none saved', async () => {
     const { shares } = ownerSharesDouble({ relay: async () => accepted({}) })
     renderAction(shares)
 
-    fireEvent.click(screen.getByRole('button', { name: zh['header.action'] }))
+    fireEvent.click(screen.getByRole('button', { name: fr['header.action'] }))
 
-    await waitFor(() => { expect(screen.getByText(zh['dialog.title'])).toBeTruthy() })
-    expect(screen.getByLabelText(zh['dialog.relay'])).toHaveProperty('value', '')
-    expect(screen.getByText(zh['dialog.addressHint'])).toBeTruthy()
+    await waitFor(() => { expect(screen.getByText(fr['dialog.title'])).toBeTruthy() })
+    expect(screen.getByLabelText(fr['dialog.relay'])).toHaveProperty('value', '')
+    expect(screen.getByText(fr['dialog.addressHint'])).toBeTruthy()
   })
 
   it('titles the dialog by the Session id when its listed row has no display title', async () => {
     const { shares } = ownerSharesDouble()
     renderAction(shares, { byId: { [SESSION]: {} } })
 
-    fireEvent.click(screen.getByRole('button', { name: zh['header.action'] }))
+    fireEvent.click(screen.getByRole('button', { name: fr['header.action'] }))
 
-    await waitFor(() => { expect(screen.getByText(zh['dialog.title'])).toBeTruthy() })
+    await waitFor(() => { expect(screen.getByText(fr['dialog.title'])).toBeTruthy() })
   })
 
   it('opens the dialog when the Host fails to report its relay address', async () => {
     const { shares } = ownerSharesDouble({ relay: async () => { throw new Error('relay unavailable') } })
     renderAction(shares)
 
-    fireEvent.click(screen.getByRole('button', { name: zh['header.action'] }))
+    fireEvent.click(screen.getByRole('button', { name: fr['header.action'] }))
 
     // Typing the address is still possible: a failed read is not a reason to keep the dialog closed.
-    await waitFor(() => { expect(screen.getByText(zh['dialog.title'])).toBeTruthy() })
-    expect(screen.getByText(zh['dialog.create'])).toBeTruthy()
+    await waitFor(() => { expect(screen.getByText(fr['dialog.title'])).toBeTruthy() })
+    expect(screen.getByText(fr['dialog.create'])).toBeTruthy()
   })
 
   it('opens the dialog when the Host answers that it could not read the relay address', async () => {
@@ -146,38 +147,38 @@ describe('Session header Share action', () => {
     })
     renderAction(shares)
 
-    fireEvent.click(screen.getByRole('button', { name: zh['header.action'] }))
+    fireEvent.click(screen.getByRole('button', { name: fr['header.action'] }))
 
-    await waitFor(() => { expect(screen.getByText(zh['dialog.title'])).toBeTruthy() })
-    expect(screen.getByText(zh['dialog.create'])).toBeTruthy()
+    await waitFor(() => { expect(screen.getByText(fr['dialog.title'])).toBeTruthy() })
+    expect(screen.getByText(fr['dialog.create'])).toBeTruthy()
   })
 
   it('moves from the share dialog to share management, which closes back to the header', async () => {
     const { shares } = ownerSharesDouble()
     renderAction(shares)
 
-    fireEvent.click(screen.getByRole('button', { name: zh['header.action'] }))
-    await waitFor(() => { expect(screen.getByText(zh['dialog.title'])).toBeTruthy() })
-    fireEvent.click(screen.getByText(zh['dialog.manage']))
+    fireEvent.click(screen.getByRole('button', { name: fr['header.action'] }))
+    await waitFor(() => { expect(screen.getByText(fr['dialog.title'])).toBeTruthy() })
+    fireEvent.click(screen.getByText(fr['dialog.manage']))
 
     // The management surface lists this host's shares; the dialog it replaced is gone.
-    await waitFor(() => { expect(screen.getByText(zh['manage.title'])).toBeTruthy() })
-    expect(screen.queryByText(zh['dialog.title'])).toBeNull()
+    await waitFor(() => { expect(screen.getByText(fr['manage.title'])).toBeTruthy() })
+    expect(screen.queryByText(fr['dialog.title'])).toBeNull()
 
-    fireEvent.click(screen.getAllByRole('button', { name: zh['manage.done'] })[0] as HTMLElement)
-    await waitFor(() => { expect(screen.queryByText(zh['manage.title'])).toBeNull() })
+    fireEvent.click(screen.getAllByRole('button', { name: fr['manage.done'] })[0] as HTMLElement)
+    await waitFor(() => { expect(screen.queryByText(fr['manage.title'])).toBeNull() })
   })
 
   it('closes the share dialog without publishing anything', async () => {
     const { shares, calls } = ownerSharesDouble()
     renderAction(shares)
 
-    fireEvent.click(screen.getByRole('button', { name: zh['header.action'] }))
-    await waitFor(() => { expect(screen.getByText(zh['dialog.title'])).toBeTruthy() })
+    fireEvent.click(screen.getByRole('button', { name: fr['header.action'] }))
+    await waitFor(() => { expect(screen.getByText(fr['dialog.title'])).toBeTruthy() })
     // A fresh dialog states no link yet, so its close control is the cancel affordance.
-    fireEvent.click(screen.getAllByRole('button', { name: zh['dialog.cancel'] })[0] as HTMLElement)
+    fireEvent.click(screen.getAllByRole('button', { name: fr['dialog.cancel'] })[0] as HTMLElement)
 
-    await waitFor(() => { expect(screen.queryByText(zh['dialog.title'])).toBeNull() })
+    await waitFor(() => { expect(screen.queryByText(fr['dialog.title'])).toBeNull() })
     expect(calls.map(call => call.method)).not.toContain('create')
   })
 })

@@ -828,11 +828,11 @@ describe('Typert Remote streams', () => {
     const socket = new WebSocket(`ws://127.0.0.1:${String(ctx.webServer.port)}/api/remote.mux`, { headers: { cookie: browserCookie(ctx) } })
     await once(socket, 'open')
     try {
-      const streamId = '界"window'
+      const streamId = '계"window'
       sendOpen(socket, streamId, 'feed/echo', { prefix: '' })
       socket.send(JSON.stringify({ type: 'end', streamId }))
       await vi.waitFor(() => { expect(service.windows).toHaveLength(1) })
-      const value = 'line\n界'
+      const value = 'line\n계'
       const complete = JSON.stringify({ type: 'item', streamId, value })
       expect(service.windows[0]).toEqual({
         maxBytes: 512, frameOverheadBytes: Buffer.byteLength(complete, 'utf8') - Buffer.byteLength(JSON.stringify(value), 'utf8'),

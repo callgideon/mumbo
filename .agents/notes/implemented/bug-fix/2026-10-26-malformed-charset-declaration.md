@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-10-26-malformed-charset-declaration.zh.md)
-
 ## Problem
 
 A response can declare `charset=utf-8,gbk` over readable UTF-8 HTML. Passing that entire parameter to `TextDecoder` rejects the page before reading it. Compatibility needs an explicit encoding preference because successful decoding alone cannot identify the server's intended encoding.
@@ -14,7 +12,7 @@ A response can declare `charset=utf-8,gbk` over readable UTF-8 HTML. Passing tha
 
 The provider decodes once. Recovery rejects invalid UTF-8 with `WEB_UNSUPPORTED_CONTENT_TYPE` and preserves the decoding error as its cause. Only an actual byte-cap truncation enables streaming decode, which omits an incomplete suffix and keeps `truncated: true`. Complete responses, including those exactly at the cap, validate the final sequence at EOF.
 
-UTF-8 recovery is an explicit heuristic, not proof of the original encoding. The bytes `C2 A9` represent `©` in UTF-8 and `漏` in GBK; repeating them preserves that ambiguity at any length. The provider accepts that ambiguity for UTF-8 recovery but does not extend it to arbitrary legacy-encoding guesses.
+UTF-8 recovery is an explicit heuristic, not proof of the original encoding. The bytes `C2 A9` represent `©` in UTF-8 and a different CJK ideograph in GBK; repeating them preserves that ambiguity at any length. The provider accepts that ambiguity for UTF-8 recovery but does not extend it to arbitrary legacy-encoding guesses.
 
 ## Alternatives considered
 

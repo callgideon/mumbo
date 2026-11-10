@@ -943,7 +943,7 @@ describe('searchSummaryMaxChars is plugin config', () => {
 
   it('does not split a surrogate pair at the cut', async () => {
     expect(await boundedValue('ab😀cd', { searchSummaryMaxChars: 4 })).toEqual(withSummary('ab…'))
-    expect(await boundedValue('一二三四五六', { searchSummaryMaxChars: 4 })).toEqual(withSummary('一二三…'))
+    expect(await boundedValue('가나다라마바', { searchSummaryMaxChars: 4 })).toEqual(withSummary('가나다…'))
   })
 
   it.each([['zero', 0], ['fractional', 2.5]])('rejects a %s searchSummaryMaxChars at load', async (_label, value) => {

@@ -5,7 +5,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { BOX_LINKS_GLOBAL, Config } from '../config.ts'
 import { BoxLinks } from './BoxLinks.tsx'
-import { de, en, es, fr, ja, NS, pt, ru, zh } from './locales.ts'
+import { de, en, es, fr, ja, NS, pt, ru } from './locales.ts'
 
 /** Services the registration needs. */
 export const inject = ['slots', 'locale']
@@ -20,7 +20,7 @@ export function apply(ctx: Context): void {
   // A page rendered before the Host row started carries no links; the next page load does.
   if (embedded === undefined) return
   const links = Config(embedded)
-  ctx.effect(() => ctx.locale.register(NS, { en, zh, ja, es, fr, de, ru, pt }), 'box-links: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { en, ja, es, fr, de, ru, pt }), 'box-links: dictionaries')
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action', id: 'box-links', locale: NS, inject: () => links,
   }, BoxLinks))

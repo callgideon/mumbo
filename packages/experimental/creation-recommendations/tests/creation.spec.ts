@@ -22,7 +22,7 @@ describe('interface creation', () => {
       { ...installedBundle('enabled'), official: true, meta: { title: 'Existing view', description: 'Inspect current work' } },
       { ...installedBundle('disabled'), official: true, enabled: false, description: 'Optional view' },
       { ...installedBundle('empty'), official: true },
-      { ...installedBundle('localized'), official: true, meta: { title: { en: 'Counter', zh: '计数器' }, description: { en: 'Count tasks', zh: '统计任务' } } },
+      { ...installedBundle('localized'), official: true, meta: { title: { en: 'Counter', ja: 'カウンター' }, description: { en: 'Count tasks', ja: 'タスクをかぞえる' } } },
       installedBundle('third-party'),
     )
     expect(f.ctx.tools.get('plugin_manager')).toBeUndefined()
@@ -115,7 +115,7 @@ describe('interface creation', () => {
 
   it('retains actual task content separately from the short plan and hands it to Creator after reload', async () => {
     const f = await fixture()
-    const initialContent = '| 项目 | 负责人 | 状态 |\n| A | 小李 | 未开始 |\n| B | 小王 | 进行中 |\n| C | 小陈 | 已完成 |'
+    const initialContent = '| other item | Owner | Status |\n| A | Lee | Not started |\n| B | Wong | in progress |\n| C | Chen | completed |'
     await f.propose('call-creation-1', { ...proposal, details: { ...proposal.details, initialContent } })
     expect(f.startActivation).not.toHaveBeenCalled()
     await f.fiber.dispose()
@@ -152,25 +152,25 @@ describe('interface creation', () => {
     }
     expect(await f.ctx.actionCards.act(f.agent, callId, 'create')).toEqual({ status: 'refused', reason: 'invalid-location' })
     expect(f.startActivation).not.toHaveBeenCalled()
-    await f.act('create', 'page', '  左侧入口打开全屏日历  ')
+    await f.act('create', 'page', '  left entry OpenFullscreen calendar  ')
     const spec = await f.complete()
     const instructions: unknown = JSON.parse(spec.prompt.find(block => block.type === 'text')!.text)
     const references = ['sidebar-right.md', 'session-tab.md', 'sidebar-entry.md'].map(file =>
       fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-creation-recommendations/references/' + file)))
-    expect(instructions).toMatchObject({ location: { request: '左侧入口打开全屏日历' }, uiReferences: references })
+    expect(instructions).toMatchObject({ location: { request: 'left entry OpenFullscreen calendar' }, uiReferences: references })
     expect(instructions).toHaveProperty('locationPolicy', expect.stringContaining('instead of silently substituting another location'))
     expect(instructions).not.toHaveProperty('uiReference')
     for (const reference of references) expect(await readFile(reference, 'utf8')).toMatch(/^# /)
-    expect(f.current()).toMatchObject({ phase: 'installed', customLocation: '左侧入口打开全屏日历' })
+    expect(f.current()).toMatchObject({ phase: 'installed', customLocation: 'left entry OpenFullscreen calendar' })
     recordCard(f.agent.session, { ...f.current()!, phase: 'interrupted' })
     await f.fiber.dispose()
     await f.ctx.plugin(CreationRecommendations)
-    expect(f.current()?.customLocation).toBe('左侧入口打开全屏日历')
+    expect(f.current()?.customLocation).toBe('left entry OpenFullscreen calendar')
     await f.act('undo')
-    expect(f.current()).toMatchObject({ phase: 'removed', customLocation: '左侧入口打开全屏日历' })
+    expect(f.current()).toMatchObject({ phase: 'removed', customLocation: 'left entry OpenFullscreen calendar' })
   })
 
-  it.each(['', '右侧查看当前会话'])('allows dismissing a custom location without creation: %s', async (customLocation) => {
+  it.each(['', 'right InspectThis session'])('allows dismissing a custom location without creation: %s', async (customLocation) => {
     const f = await fixture()
     await f.propose()
     expect((await f.act('dismiss', 'page', customLocation)).status).toBe('settled')

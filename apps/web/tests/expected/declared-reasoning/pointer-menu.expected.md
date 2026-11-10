@@ -1,6 +1,6 @@
-- group "模型与推理等级":
-  - searchbox "搜索模型…"
-  - menu "模型":
+- group "Model and reasoning effort":
+  - searchbox "Search models…"
+  - menu "Model":
     - group "DeepSeek":
       - text: DeepSeek
       - menuitemradio "DeepSeek-V4-Flash"

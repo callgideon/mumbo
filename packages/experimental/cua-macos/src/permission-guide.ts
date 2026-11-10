@@ -20,16 +20,6 @@ const en = {
   screenRecording: 'Screen Recording',
 }
 
-const zh = {
-  instruction: '将 {application} 拖入上方列表以允许{permission}',
-  backLabel: '返回',
-  finderLabel: '在 Finder 中显示',
-  unavailableMessage: '找不到此应用。请重新启用 Computer Use 后重试',
-  settingsMessage: '请手动打开系统设置 > 隐私与安全性 > {permission}',
-  accessibility: '辅助功能',
-  screenRecording: '屏幕录制',
-} satisfies typeof en
-
 const ja = {
   instruction: '{permission}を許可するには、{application}を上の一覧にドラッグしてください',
   backLabel: '戻る',
@@ -90,7 +80,7 @@ const pt = {
   screenRecording: 'Gravação de tela',
 } satisfies typeof en
 
-const dictionaries = new Map<string, typeof en>(Object.entries({ en, zh, ja, es, fr, de, ru, pt }))
+const dictionaries = new Map<string, typeof en>(Object.entries({ en, ja, es, fr, de, ru, pt }))
 
 /**
  * Resolve native permission copy from the Client language; unsupported languages use English.

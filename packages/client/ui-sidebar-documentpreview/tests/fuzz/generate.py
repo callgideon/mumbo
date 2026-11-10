@@ -93,14 +93,14 @@ def workbook_bytes(writer, features, values, case_seed):
         if 'epoch1904' in active:
             book.epoch = CALENDAR_MAC_1904
         sheet = book.active
-        sheet.title = '数据'
+        sheet.title = '뇌꿊'
     else:
         book = xlsxwriter.Workbook(output, {'in_memory': True, 'date_1904': 'epoch1904' in active})
         book.set_properties({'created': datetime(2020, 1, 1)})
-        sheet = book.add_worksheet('数据')
+        sheet = book.add_worksheet('뇌꿊')
 
     for r, c, value, kind in values:
-        oracle = {'sheet': '数据', 'r': r, 'c': c}
+        oracle = {'sheet': '뇌꿊', 'r': r, 'c': c}
         if kind == 'formula':
             formula, cached = value
             oracle['formula'] = formula
@@ -150,7 +150,7 @@ def workbook_bytes(writer, features, values, case_seed):
         if 'image' in active:
             sheet.add_image(Image(io.BytesIO(PNG)), 'H18')
         if 'comment' in active:
-            sheet['B2'].comment = Comment('生成的批注', 'fuzz')
+            sheet['B2'].comment = Comment('셻깬신껕륄', 'fuzz')
         if 'conditional' in active:
             sheet.conditional_formatting.add('B2:B3', ColorScaleRule(start_type='min', start_color='FF0000', end_type='max', end_color='00FF00'))
         if 'conditional-databar' in active:
@@ -176,7 +176,7 @@ def workbook_bytes(writer, features, values, case_seed):
         if 'hidden' in active:
             sheet.row_dimensions[3].hidden = True
             sheet.column_dimensions['B'].hidden = True
-            book.create_sheet('隐藏页').sheet_state = 'hidden'
+            book.create_sheet('띈툫뤭').sheet_state = 'hidden'
         if 'header' in active:
             sheet.oddHeader.center.text = 'Fuzz &P'
         if 'styled' in active:
@@ -186,12 +186,12 @@ def workbook_bytes(writer, features, values, case_seed):
     else:
         if 'chart' in active:
             chart = book.add_chart({'type': 'column'})
-            chart.add_series({'values': ['数据', 1, 1, 2, 1]})
+            chart.add_series({'values': ['뇌꿊', 1, 1, 2, 1]})
             sheet.insert_chart('H2', chart)
         if 'image' in active:
             sheet.insert_image('H18', 'pixel.png', {'image_data': io.BytesIO(PNG)})
         if 'comment' in active:
-            sheet.write_comment('B2', '生成的批注')
+            sheet.write_comment('B2', '셻깬신껕륄')
         if 'conditional' in active:
             sheet.conditional_format('B2:B3', {'type': '2_color_scale'})
         if 'conditional-databar' in active:
@@ -215,7 +215,7 @@ def workbook_bytes(writer, features, values, case_seed):
         if 'hidden' in active:
             sheet.set_row(2, None, None, {'hidden': True})
             sheet.set_column('B:B', None, None, {'hidden': True})
-            book.add_worksheet('隐藏页').hide()
+            book.add_worksheet('띈툫뤭').hide()
         if 'header' in active:
             sheet.set_header('&CFuzz &P')
         if 'styled' in active:
@@ -285,10 +285,10 @@ def main():
     directed += [([feature], base_values, feature) for feature in FEATURES]
     directed += [(['chart', feature], base_values, 'chart-' + feature) for feature in ['comment', 'image', 'conditional']]
     directed += [([], base_values + [(4, 0, error, 'error')], 'error-' + str(index)) for index, error in enumerate(ERRORS)]
-    directed += [([], base_values + [(4, 0, ('=1+2', value), 'formula')], 'cache-' + str(index)) for index, value in enumerate([3, 0, False, True, '', '文本', '#DIV/0!'])]
+    directed += [([], base_values + [(4, 0, ('=1+2', value), 'formula')], 'cache-' + str(index)) for index, value in enumerate([3, 0, False, True, '', '뇣뎈', '#DIV/0!'])]
     directed += [([epoch] if epoch else [], base_values + [(4, 0, value, kind)], f'temporal-{epoch}-{index}') for epoch in ['', 'epoch1904'] for index, (value, kind) in enumerate([
         (datetime(2024, 2, 29, 12, 34, 56), 'date'), (time(12, 34, 56), 'time'), (timedelta(days=2, hours=3), 'time')])]
-    directed += [([], base_values + [(4, 0, value, 'value')], 'text-' + str(index)) for index, value in enumerate(['<pic/><chart/> & 字符', '😀\n多行\t数据', '_x0041_', '_x000D_', '00123'])]
+    directed += [([], base_values + [(4, 0, value, 'value')], 'text-' + str(index)) for index, value in enumerate(['<pic/><chart/> & 퍗잂', '😀\n턚풨\t뇌꿊', '_x0041_', '_x000D_', '00123'])]
 
     def emit(data, cells, expected_features, writer, features, variant, valid=True):
         index = len(manifest['cases'])
@@ -317,7 +317,7 @@ def main():
             features = [feature for feature in FEATURES + (['textbox'] if writer == 'xlsxwriter' else []) if rng.random() < 0.3]
             values = copy.deepcopy(base_values)
             for row in range(5, rng.randint(6, 14)):
-                value = rng.choice([rng.randint(-100000, 100000), rng.random() * 100, True, False, '中文😀', '<chart>literal</chart>', '00123'])
+                value = rng.choice([rng.randint(-100000, 100000), rng.random() * 100, True, False, '옭뇣😀', '<chart>literal</chart>', '00123'])
                 values.append((row, rng.randrange(4), value, 'value'))
             values += [(3, 3, rng.choice(ERRORS), 'error')]
             try:

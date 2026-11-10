@@ -215,8 +215,8 @@ def exercise(args, artifacts, transcript, summary):
                     assert any(event["shift"] and not event["oskey"] and not event["ctrl"] and not event["alt"]
                                for event in events_after(shifted, before_shift, "LEFT_ARROW")), shifted
 
-                    call("typeText", {**owner, "text": "好"})
-                    expected = REPLACEMENT[:-1] + "好"
+                    call("typeText", {**owner, "text": "텽"})
+                    expected = REPLACEMENT[:-1] + "텽"
                     after_selection = checkpoint("05-unicode-replacement", wait(lambda state: state["text"] == expected and
                         state["selection"]["collapsed"], "Unicode replacement of the shifted selection"))
                     before_plain = after_selection["event_sequence"]
@@ -226,8 +226,8 @@ def exercise(args, artifacts, transcript, summary):
                     assert any(not event["oskey"] and not event["shift"] and not event["ctrl"] and not event["alt"]
                                for event in events_after(plain, before_plain, "B")), plain
                     before_unicode = plain["event_sequence"]
-                    call("typeText", {**owner, "text": "中文"})
-                    final = checkpoint("07-unicode-after-chords", wait(lambda state: state["text"] == expected + "b中文" and
+                    call("typeText", {**owner, "text": "옭뇣"})
+                    final = checkpoint("07-unicode-after-chords", wait(lambda state: state["text"] == expected + "b옭뇣" and
                         state["selection"]["collapsed"], "Plain Unicode input after Command and Shift release"))
                     assert any(event["unicode"] and not event["oskey"] and not event["shift"] and
                                not event["ctrl"] and not event["alt"] for event in events_after(final, before_unicode)), final

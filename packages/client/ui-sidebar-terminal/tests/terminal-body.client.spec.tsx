@@ -10,7 +10,7 @@ import type { TerminalViewState } from '@deepseek-ai/dsh-api-terminal-controller
 import type { WebTerminalId } from '@deepseek-ai/dsh-api-terminal-controller/types'
 import { TerminalBody, type TerminalBodyProps } from '../src/client/terminal.tsx'
 import { TerminalTitle } from '../src/client/TerminalTitle.tsx'
-import { en, zh } from '../src/client/locales.ts'
+import { en, fr } from '../src/client/locales.ts'
 
 const fake = vi.hoisted(() => ({
   terminals: [] as FakeTerminal[],
@@ -154,9 +154,9 @@ it('keeps one emulator across rename and locale updates, applies snapshots and o
   h.update({ ...snapshot, render: { revision: 2, frame: { type: 'output', sequence: 1, data: 'duplicate' } } })
   expect(terminal.write).toHaveBeenCalledTimes(2)
   h.update({ ...snapshot, info: { ...info, title: 'Development' } })
-  h.view.rerender(<TerminalBody {...h.props} t={makeTranslate(zh)} />)
+  h.view.rerender(<TerminalBody {...h.props} t={makeTranslate(fr)} />)
   expect(fake.terminals).toHaveLength(1)
-  expect(terminal.textarea?.getAttribute('aria-label')).toBe(zh.title)
+  expect(terminal.textarea?.getAttribute('aria-label')).toBe(fr.title)
   h.view.unmount()
   expect(terminal.dispose).toHaveBeenCalledOnce()
   expect(terminal.disposeInput).toHaveBeenCalledOnce()
@@ -365,13 +365,13 @@ it.each(titleSurfaces)('handles Escape, unchanged names and IME composition whil
   fireEvent.blur(input)
   expect(h.model.rename).not.toHaveBeenCalled()
   input = edit()
-  fireEvent.change(input, { target: { value: '开发' } })
+  fireEvent.change(input, { target: { value: 'develop' } })
   fireEvent.keyDown(input, { key: 'Enter', isComposing: true })
   fireEvent.keyDown(input, { key: 'Enter', keyCode: 229 })
   expect(title.getByRole('textbox', { name: en.rename })).toBe(input)
   expect(h.model.rename).not.toHaveBeenCalled()
   fireEvent.blur(input)
-  expect(h.model.rename).toHaveBeenCalledWith('开发')
+  expect(h.model.rename).toHaveBeenCalledWith('develop')
 })
 
 it.each(titleSurfaces)('removes the native $name listener when its title unmounts', (surface) => {
@@ -400,7 +400,7 @@ it('starts a recovered screen with no local history when environment discovery i
 })
 
 
-it.each([en, zh])('translates known terminal failures while retaining unknown Host diagnostics', (dictionary) => {
+it.each([en, fr])('translates known terminal failures while retaining unknown Host diagnostics', (dictionary) => {
   const h = mount(idle, dictionary)
   for (const issue of ['missingTerminal', 'inputFull', 'attachmentEnded', 'invalidOutput', 'terminalLimit'] as const) {
     h.update({ ...idle, phase: 'failed', issue, error: 'raw diagnostic' })
@@ -411,7 +411,7 @@ it.each([en, zh])('translates known terminal failures while retaining unknown Ho
   expect(h.view.getByRole('alert').textContent).toContain('Host permission denied')
 })
 
-it.each([en, zh])('offers an explicit new terminal for missing instances without retrying the lost process', (dictionary) => {
+it.each([en, fr])('offers an explicit new terminal for missing instances without retrying the lost process', (dictionary) => {
   const h = mount({ ...idle, phase: 'failed', issue: 'missingTerminal', error: 'raw Host diagnostic' }, dictionary)
   expect(h.view.getByRole('alert').textContent).toBe(dictionary.missingTerminal)
   expect(h.view.queryByRole('button', { name: dictionary.reconnect })).toBeNull()

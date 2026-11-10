@@ -12,13 +12,13 @@ function fixture() {
   return directory
 }
 
-it('uses the confirmed Chinese language for recovery before Host settings are available', () => {
+it('uses the confirmed German language for recovery before Host settings are available', () => {
   const directory = fixture()
   expect(readDesktopLocaleCache(directory)).toBeUndefined()
-  writeDesktopLocaleCache(directory, 'zh-CN')
+  writeDesktopLocaleCache(directory, 'de')
   const cached = readDesktopLocaleCache(directory)
   const locale = cached === undefined ? resolveDesktopStartupLocale(null, ['en-US']) : resolveDesktopLocale(cached)
-  expect(locale.messages.fatalSummary).toBe('应用无法启动或已意外停止。')
+  expect(locale.messages.fatalSummary).toBe('Die Anwendung konnte nicht gestartet werden oder wurde unerwartet gestoppt.')
   writeDesktopLocaleCache(directory, 'en')
   expect(readDesktopLocaleCache(directory)).toBe('en')
 })
@@ -56,7 +56,7 @@ it('keeps read and write failures from blocking recovery', () => {
   writeFileSync(join(directory, 'desktop'), 'not a directory')
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
   onTestFinished(() => { warn.mockRestore() })
-  expect(() => { writeDesktopLocaleCache(directory, 'zh-CN') }).not.toThrow()
+  expect(() => { writeDesktopLocaleCache(directory, 'de') }).not.toThrow()
   expect(readDesktopLocaleCache(directory)).toBeUndefined()
   expect(warn).toHaveBeenCalled()
 })

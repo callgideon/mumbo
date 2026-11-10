@@ -1,0 +1,54 @@
+[
+  {
+    "path": "**/locale/**/ja.json",
+    "reason": "Japanese locale (kanji are Japanese script, not Chinese)"
+  },
+  {
+    "path": "apps/desktop/installer/locales/ja_JP.json",
+    "reason": "Japanese desktop installer strings"
+  },
+  {
+    "path": "{apps,packages}/**/src/**/{*locales,locale,locales/*}.ts",
+    "block": "^export const (?:ja|[a-z]\\w*Ja)\\b",
+    "reason": "Japanese (ja) dictionaries of per-language dictionary modules; the block pattern keeps CJK in any other dictionary, such as a zh dictionary from an upstream sync, failing"
+  },
+  {
+    "path": "packages/client/ui-context-menu/src/client/locales.ts",
+    "line": "^\\s*ja: \\{",
+    "reason": "Inline Japanese (ja) context-menu feedback"
+  },
+  {
+    "path": "packages/client/locale/src/client/index.ts",
+    "line": "\\['ja', '\\u65e5\\u672c\\u8a9e'\\]",
+    "reason": "Japanese language-picker label, written as its endonym (nihongo)"
+  },
+  {
+    "path": "packages/client/ui-directory-picker-browse/src/client/index.ts",
+    "line": "^\\s*'browser\\.\\w+': '",
+    "reason": "Inline Japanese dictionary entries of the directory picker"
+  },
+  {
+    "path": "packages/experimental/cua-macos/src/permission-guide.ts",
+    "line": "^\\s+\\w+: '",
+    "reason": "Inline Japanese dictionary entries of the macOS permission guide"
+  },
+  {
+    "path": "packages/web/*/src/*.ts",
+    "line": "^\\s*ja: '",
+    "reason": "Japanese (ja) web provider descriptions"
+  },
+  {
+    "path": "{apps,packages}/**/tests/**",
+    "line": "[\\p{Script=Hiragana}\\p{Script=Katakana}]|'(\\u65e5\\u672c\\u8a9e|\\u8a2d\\u5b9a|\\u624b\\u9806)'",
+    "reason": "Japanese-locale test assertions and expected output: lines with kana are Japanese, and the kana-free labels are nihongo (language), settei (Settings), and tejun (Instructions)"
+  },
+  {
+    "path": "snapshots/web/ptc-round/ui-ja.expected.md",
+    "reason": "Expected Web UI rendered in the Japanese locale"
+  },
+  {
+    "path": "snapshots/web/{creation,plugin}-recommendations/session.v4.jsonl",
+    "line": "\\\\\"ja\\\\\":\\\\\"",
+    "reason": "Recorded tool result carrying each plugin title and description in every shipped locale, including Japanese (ja)"
+  }
+]

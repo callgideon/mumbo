@@ -69,7 +69,7 @@ describe('Session open', () => {
 
   it('installs the tail page: cold → loading → open with window and nodes in place', async ({ mock, start }) => {
     const session = await sessionBench(mock, start, SID)
-    const page = plainTurn(SessionSeq(10), 3, '问', '答')
+    const page = plainTurn(SessionSeq(10), 3, 'ask', 'reply')
     mock.stream(FOLLOW, followScript(history(page, true)))
     expect(session.getSnapshot().openState).toBe('cold')
     const opening = session.open()
@@ -123,12 +123,12 @@ describe('Session open', () => {
   it('stitches live frames landing right behind the opening snapshot, dropping the page overlap', async ({ mock, start }) => {
     const session = await sessionBench(mock, start, SID)
     const gate = Promise.withResolvers<SessionEventsPage>()
-    const page = plainTurn(SessionSeq(10), 0, '早', '安')
+    const page = plainTurn(SessionSeq(10), 0, 'early', 'morning')
     mock.stream(FOLLOW, async ([request], stream) => {
       stream.push(followSnapshot(await gate.promise, request as SessionFollowRequest))
       // Two live frames follow the snapshot before the opening settles; seq 15 overlaps its tail.
       stream.push(frame(ev.turnStart(SessionSeq(15), 1)))
-      stream.push(frame(ev.user(SessionSeq(16), '插进来的')))
+      stream.push(frame(ev.user(SessionSeq(16), 'inserted')))
     })
     const opening = session.open()
     gate.resolve(historyValue(page))
@@ -150,7 +150,7 @@ describe('live event path', () => {
   it('drops replayed frames at or below the window tail', async ({ mock, start }) => {
     const session = await opened(mock, start)
     const before = session.eventSource.getSnapshot()
-    await pushEvent(mock, ev.user(SessionSeq(3), '重放'))
+    await pushEvent(mock, ev.user(SessionSeq(3), 'replay'))
     expect(session.eventSource.getSnapshot()).toBe(before)
   })
 
@@ -183,8 +183,8 @@ describe('live event path', () => {
 
 describe('paging', () => {
   it('prepends an older page and keeps seq continuity', async ({ mock, start }) => {
-    const older = plainTurn(SessionSeq(0), 0, '旧问', '旧答')
-    const newer = plainTurn(SessionSeq(6), 1, '新问', '新答')
+    const older = plainTurn(SessionSeq(0), 0, 'old q', 'old a')
+    const newer = plainTurn(SessionSeq(6), 1, 'new q', 'new a')
     const session = await sessionBench(mock, start, SID)
     mock.stream(FOLLOW, followScript(history(newer, true)))
     mock.remote.session.page.mockImplementation(pageRule(history(older)))
@@ -202,9 +202,9 @@ describe('paging', () => {
   it('installs a page without interpreting business replacement metadata', async ({ mock, start }) => {
     const session = await sessionBench(mock, start, SID)
     mock.stream(FOLLOW, followScript(history([
-      ev.compactSummary(SessionSeq(80), '窗外范围的摘要', SessionSeq(3), SessionSeq(40)),
+      ev.compactSummary(SessionSeq(80), 'out-of-window summary', SessionSeq(3), SessionSeq(40)),
       ev.compactCheckpoint(SessionSeq(81), SessionSeq(80), SessionSeq(3), SessionSeq(40)),
-      ev.user(SessionSeq(82), '压缩后的新问题'),
+      ev.user(SessionSeq(82), 'new question after compaction'),
     ], true)))
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     try {
@@ -220,8 +220,8 @@ describe('paging', () => {
 
   it('drops a discontinuous older page fail-soft (window unchanged, hasMore cleared)', async ({ mock, start }) => {
     const session = await sessionBench(mock, start, SID)
-    mock.stream(FOLLOW, followScript(history(plainTurn(SessionSeq(10), 1, '新', '页'), true)))
-    mock.remote.session.page.mockImplementation(pageRule(history(plainTurn(SessionSeq(0), 0, '断', '层'), true))) // tail seq 5, but baseSeq is 10 → hole
+    mock.stream(FOLLOW, followScript(history(plainTurn(SessionSeq(10), 1, 'new', 'page'), true)))
+    mock.remote.session.page.mockImplementation(pageRule(history(plainTurn(SessionSeq(0), 0, 'gap', 'layer'), true))) // tail seq 5, but baseSeq is 10 → hole
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     try {
       await session.open()
@@ -236,9 +236,9 @@ describe('paging', () => {
   })
 
   it('loadThrough pages repeatedly until the window covers the target seq', async ({ mock, start }) => {
-    const oldest = plainTurn(SessionSeq(0), 0, '最旧问', '最旧答')
-    const middle = plainTurn(SessionSeq(6), 1, '中问', '中答')
-    const newest = plainTurn(SessionSeq(12), 2, '新问', '新答')
+    const oldest = plainTurn(SessionSeq(0), 0, 'oldest q', 'oldest a')
+    const middle = plainTurn(SessionSeq(6), 1, 'mid q', 'mid a')
+    const newest = plainTurn(SessionSeq(12), 2, 'new q', 'new a')
     const session = await sessionBench(mock, start, SID)
     mock.stream(FOLLOW, followScript(history(newest, true)))
     await session.open()
@@ -476,8 +476,8 @@ describe('prompt and cancel errors', () => {
   it('routes an addressed child through non-activating history, continuation prompt, and interrupt only', async ({ mock, start }) => {
     const session = await sessionBench(mock, start, SID, { address: CHILD })
     await session.open()
-    const prompted = await session.prompt([{ type: 'text', text: '继续' }], 'queue')
-    const steered = await session.prompt([{ type: 'text', text: '现在处理' }], 'steer')
+    const prompted = await session.prompt([{ type: 'text', text: 'continue' }], 'queue')
+    const steered = await session.prompt([{ type: 'text', text: 'handle now' }], 'steer')
     const cancelled = await session.cancel()
 
     expect(prompted).toEqual({ ok: true, value: { accepted: true } })
@@ -493,14 +493,14 @@ describe('prompt and cancel errors', () => {
         requestId: expect.any(String) as unknown as string,
         childSessionId: SID,
         delivery: 'queue',
-        content: [{ type: 'text', text: '继续' }],
+        content: [{ type: 'text', text: 'continue' }],
         clientTimeZone: TIME_ZONE,
       },
       {
         requestId: expect.any(String) as unknown as string,
         childSessionId: SID,
         delivery: 'steer',
-        content: [{ type: 'text', text: '现在处理' }],
+        content: [{ type: 'text', text: 'handle now' }],
         clientTimeZone: TIME_ZONE,
       },
     ])
@@ -516,12 +516,12 @@ describe('prompt and cancel errors', () => {
   it('sends an addressed child continuation under its echo request id and retires a refused echo', async ({ mock, start }) => {
     const session = await sessionBench(mock, start, SID, { address: CHILD })
     await session.open()
-    const accepted = session.beginSubmission({ mode: 'queue', text: '继续', attachments: [] })
-    await session.prompt([{ type: 'text', text: '继续' }], 'queue', undefined, accepted.requestId)
+    const accepted = session.beginSubmission({ mode: 'queue', text: 'continue', attachments: [] })
+    await session.prompt([{ type: 'text', text: 'continue' }], 'queue', undefined, accepted.requestId)
     expect(mock.log.requests('subagents/prompt')).toMatchObject([{ requestId: accepted.requestId, childSessionId: SID }])
     expect(session.getSnapshot().pendingSubmissions.map(echo => echo.requestId)).toEqual([accepted.requestId])
 
-    const refused = session.beginSubmission({ mode: 'queue', text: '附件', attachments: [] })
+    const refused = session.beginSubmission({ mode: 'queue', text: 'attachment', attachments: [] })
     await session.prompt([{ type: 'file', receiptId: 'receipt' as never }], 'queue', undefined, refused.requestId)
     expect(session.getSnapshot().pendingSubmissions.map(echo => echo.requestId)).toEqual([accepted.requestId])
   })
@@ -530,7 +530,7 @@ describe('prompt and cancel errors', () => {
     const session = await sessionBench(mock, start, SID, { address: CHILD })
     await session.open()
     const content = [
-      { type: 'text' as const, text: '看这张图' },
+      { type: 'text' as const, text: 'look at this image' },
       { type: 'image' as const, mediaType: 'image/png' as const, data: 'aGk=', name: 'shot.png' },
     ]
     const prompted = await session.prompt(content, 'queue')
@@ -565,7 +565,7 @@ describe('prompt and cancel errors', () => {
 
     const prompted = await session.prompt([
       { type: 'file', receiptId: 'receipt' as never },
-      { type: 'text', text: '继续' },
+      { type: 'text', text: 'continue' },
     ], 'queue')
 
     expect(prompted).toMatchObject({
@@ -584,7 +584,7 @@ describe('prompt and cancel errors', () => {
       'subagent/not-resumable', 'subagent cannot be resumed', { childSessionId: SID },
     )))
     await session.open()
-    const prompted = await session.prompt([{ type: 'text', text: '继续' }], 'queue')
+    const prompted = await session.prompt([{ type: 'text', text: 'continue' }], 'queue')
     const cancelled = await session.cancel()
 
     expect(prompted).toMatchObject({ ok: false, error: { code: 'subagent/not-resumable' } })
@@ -602,7 +602,7 @@ describe('prompt and cancel errors', () => {
     const session = await sessionBench(mock, start, SID, { address: CHILD })
     await session.open()
     const prompted = await session.prompt(
-      [{ type: 'text', text: '看图' }, { type: 'image', mediaType: 'image/png', data: 'AA==' }],
+      [{ type: 'text', text: 'look at image' }, { type: 'image', mediaType: 'image/png', data: 'AA==' }],
       'queue',
     )
 
@@ -618,7 +618,7 @@ describe('prompt and cancel errors', () => {
     expect(session.getSnapshot()).toMatchObject({
       blank: true, promptAttempted: false, awaitingFirstTurn: false,
     })
-    const inFlight = session.prompt([{ type: 'text', text: '要发的' }], 'queue')
+    const inFlight = session.prompt([{ type: 'text', text: 'to send' }], 'queue')
     // An unrelated update rebuilds the snapshot while the Host has not answered yet.
     session.handleAgentError('unrelated live failure')
     expect(session.getSnapshot()).toMatchObject({
@@ -632,7 +632,7 @@ describe('prompt and cancel errors', () => {
     expect(mock.log.requests('session/prompt')).toMatchObject([{
       sessionId: SID,
       mode: 'queue',
-      content: [{ type: 'text', text: '要发的' }],
+      content: [{ type: 'text', text: 'to send' }],
       clientTimeZone: TIME_ZONE,
     }])
     session.handleRunning(true)
@@ -642,7 +642,7 @@ describe('prompt and cancel errors', () => {
   it('does not await a first turn when the history already contains one', async ({ mock, start }) => {
     const session = await sessionBench(mock, start, SID)
     session.handleBlank(false)
-    const inFlight = session.prompt([{ type: 'text', text: '继续' }], 'queue')
+    const inFlight = session.prompt([{ type: 'text', text: 'continue' }], 'queue')
     expect(session.getSnapshot()).toMatchObject({ blank: false, promptAttempted: false, awaitingFirstTurn: false })
     expect((await inFlight).ok).toBe(true)
     expect(session.getSnapshot()).toMatchObject({ blank: false, promptAttempted: true, awaitingFirstTurn: false })
@@ -653,7 +653,7 @@ describe('prompt and cancel errors', () => {
     session.handleBlank(true)
     const receipt = Promise.withResolvers<{ ok: true; value: { accepted: true } }>()
     mock.remote.session.prompt.mockImplementationOnce(() => receipt.promise)
-    const inFlight = session.prompt([{ type: 'text', text: '很快' }], 'queue')
+    const inFlight = session.prompt([{ type: 'text', text: 'quick' }], 'queue')
     session.handleRunning(true)
     session.handleRunning(false)
     receipt.resolve({ ok: true, value: { accepted: true } })
@@ -664,12 +664,12 @@ describe('prompt and cancel errors', () => {
   it('keeps an accepted first prompt converted when a later prompt is rejected', async ({ mock, start }) => {
     const session = await sessionBench(mock, start, SID)
     session.handleBlank(true)
-    expect((await session.prompt([{ type: 'text', text: '第一次' }], 'queue')).ok).toBe(true)
+    expect((await session.prompt([{ type: 'text', text: 'first try' }], 'queue')).ok).toBe(true)
     session.handleRunning(true)
     session.handleRunning(false)
     mock.remote.session.prompt.mockResolvedValue(err(new RemoteError('session/agent-busy', 'busy', { reason: 'x' })))
 
-    expect((await session.prompt([{ type: 'text', text: '第二次' }], 'queue')).ok).toBe(false)
+    expect((await session.prompt([{ type: 'text', text: 'second try' }], 'queue')).ok).toBe(false)
     expect(session.getSnapshot()).toMatchObject({
       blank: false, running: false, awaitingFirstTurn: false,
       promptError: { op: 'send', error: { code: 'session/agent-busy' } },
@@ -680,7 +680,7 @@ describe('prompt and cancel errors', () => {
     const session = await sessionBench(mock, start, SID)
     session.handleBlank(true)
     mock.remote.session.prompt.mockResolvedValue(err(new RemoteError('session/agent-busy', 'busy', { reason: 'x' })))
-    const result = await session.prompt([{ type: 'text', text: '失败的' }], 'queue')
+    const result = await session.prompt([{ type: 'text', text: 'failing' }], 'queue')
     expect(result.ok).toBe(false)
     expect(session.getSnapshot().promptError).toMatchObject({ op: 'send', error: { code: 'session/agent-busy' } })
     expect(session.getSnapshot()).toMatchObject({
@@ -746,15 +746,15 @@ describe('prompt and cancel errors', () => {
 describe('rename', () => {
   it('settles the title projection cell from the unary response (higher-seq-wins vs the push frame)', async ({ mock, start }) => {
     const session = await sessionBench(mock, start, SID)
-    mock.remote.session.rename.mockResolvedValue(ok({ title: '正名', seq: 7 }))
-    const result = await session.rename('  正名  ')
-    expect(result).toMatchObject({ ok: true, value: { title: '正名', seq: 7 } })
-    expect(mock.log.requests('session/rename')).toMatchObject([{ sessionId: SID, title: '  正名  ' }])
-    expect(session.projections.faceOf('title').getSnapshot()).toBe('正名')
+    mock.remote.session.rename.mockResolvedValue(ok({ title: 'renamed', seq: 7 }))
+    const result = await session.rename('  renamed  ')
+    expect(result).toMatchObject({ ok: true, value: { title: 'renamed', seq: 7 } })
+    expect(mock.log.requests('session/rename')).toMatchObject([{ sessionId: SID, title: '  renamed  ' }])
+    expect(session.projections.faceOf('title').getSnapshot()).toBe('renamed')
     // A stale lower-seq apply (the push-frame path routes into this same
     // store) must not roll the settled value back.
-    session.projections.apply('title', '旧名', SessionSeq(3))
-    expect(session.projections.faceOf('title').getSnapshot()).toBe('正名')
+    session.projections.apply('title', 'old name', SessionSeq(3))
+    expect(session.projections.faceOf('title').getSnapshot()).toBe('renamed')
   })
 
   it('returns the business error untouched and a carrier throw as the client\'s gateway/internal fold', async ({ mock, start }) => {
@@ -866,11 +866,11 @@ describe('remaining branches', () => {
 
   it('drops live events while cold/error (no window upkeep)', async ({ mock, start }) => {
     const session = await sessionBench(mock, start, SID)
-    await pushEvent(mock, ev.user(SessionSeq(0), '冷态帧')) // no follow is open: nothing receives it
+    await pushEvent(mock, ev.user(SessionSeq(0), 'cold frame')) // no follow is open: nothing receives it
     expect(eventSeqs(session)).toEqual([])
     mock.stream(FOLLOW, followScript(err(new RemoteError('gateway/internal', 'x', {}))))
     await session.open()
-    await pushEvent(mock, ev.user(SessionSeq(0), '错态帧'))
+    await pushEvent(mock, ev.user(SessionSeq(0), 'wrong-state frame'))
     expect(eventSeqs(session)).toEqual([])
   })
 
@@ -894,8 +894,8 @@ describe('remaining branches', () => {
     await session.open()
     const gate = Promise.withResolvers<RemoteResult<SessionEventsPage>>()
     mock.remote.session.page.mockImplementation(pageRule(gate.promise))
-    await pushEvent(mock, ev.user(SessionSeq(9), '洞一'))
-    await pushEvent(mock, ev.user(SessionSeq(10), '洞二'))
+    await pushEvent(mock, ev.user(SessionSeq(9), 'hole one'))
+    await pushEvent(mock, ev.user(SessionSeq(10), 'hole two'))
     await vi.waitFor(() => { expect(mock.log.requests(PAGE)).toHaveLength(1) })
     gate.resolve(err(new RemoteError('gateway/internal', 'repair wire down', {})))
     await vi.waitFor(() => { expect(session.getSnapshot().openState).toBe('error') })
@@ -920,11 +920,11 @@ describe('remaining branches', () => {
     const stale = Promise.withResolvers<RemoteResult<SessionEventsPage>>()
     mock.stream(FOLLOW, followScript(() => stale.promise))
     const opening = session.open()
-    mock.stream(FOLLOW, followScript(history(plainTurn(SessionSeq(6), 1, '新', '代'))))
+    mock.stream(FOLLOW, followScript(history(plainTurn(SessionSeq(6), 1, 'new', 'gen'))))
     const resynced = session.resync()
-    stale.resolve(history(plainTurn(SessionSeq(0), 0, '旧', '代'))) // success, but its generation is gone
+    stale.resolve(history(plainTurn(SessionSeq(0), 0, 'old', 'gen'))) // success, but its generation is gone
     await Promise.all([opening, resynced])
-    expect(eventSeqs(session)).toEqual(plainTurn(SessionSeq(6), 1, '新', '代').map(event => event.seq))
+    expect(eventSeqs(session)).toEqual(plainTurn(SessionSeq(6), 1, 'new', 'gen').map(event => event.seq))
   })
 
   it('drops a gap repair superseded by a full resync while its pull was in flight', async ({ mock, start }) => {
@@ -933,11 +933,11 @@ describe('remaining branches', () => {
     await session.open()
     const repairPull = Promise.withResolvers<RemoteResult<SessionEventsPage>>()
     mock.remote.session.page.mockImplementation(pageRule(repairPull.promise))
-    await pushEvent(mock, ev.user(SessionSeq(9), '洞'))
+    await pushEvent(mock, ev.user(SessionSeq(9), 'hole'))
     await vi.waitFor(() => { expect(mock.log.requests(PAGE)).toHaveLength(1) })
     mock.stream(FOLLOW, followScript(history(plainTurn(SessionSeq(6), 1, 'c', 'd'))))
     const resynced = session.resync() // bumps the generation
-    repairPull.resolve(history(plainTurn(SessionSeq(0), 0, '旧', '页'))) // repair result: stale, dropped
+    repairPull.resolve(history(plainTurn(SessionSeq(0), 0, 'old', 'page'))) // repair result: stale, dropped
     await resynced
     expect(eventSeqs(session)).toEqual(plainTurn(SessionSeq(6), 1, 'c', 'd').map(event => event.seq))
   })
@@ -970,20 +970,20 @@ describe('remaining branches', () => {
 describe('resync', () => {
   it('keeps the old feed until the reconnect snapshot, then repairs queued live gaps', async ({ mock, start }) => {
     const session = await sessionBench(mock, start, SID)
-    mock.stream(FOLLOW, followScript(history(plainTurn(SessionSeq(0), 0, '旧', '窗'))))
+    mock.stream(FOLLOW, followScript(history(plainTurn(SessionSeq(0), 0, 'old', 'window'))))
     await session.open()
     const oldWindow = session.eventSource.getSnapshot()
     const replacement = Promise.withResolvers<SessionEventsPage>()
     // The reconnect generation: its snapshot is gated, then two live frames land out of order right behind it.
     mock.stream(FOLLOW, async ([request], stream) => {
       stream.push(followSnapshot(await replacement.promise, request as SessionFollowRequest))
-      stream.push(frame(ev.user(SessionSeq(17), '后到高位')))
-      stream.push(frame(ev.user(SessionSeq(16), '后到低位')))
+      stream.push(frame(ev.user(SessionSeq(17), 'late high')))
+      stream.push(frame(ev.user(SessionSeq(16), 'late low')))
     })
     mock.remote.session.page.mockImplementation(pageRule(history([
-      ...plainTurn(SessionSeq(10), 2, '终', '页'),
-      ev.user(SessionSeq(16), '后到低位'),
-      ev.user(SessionSeq(17), '后到高位'),
+      ...plainTurn(SessionSeq(10), 2, 'last', 'page'),
+      ev.user(SessionSeq(16), 'late low'),
+      ev.user(SessionSeq(17), 'late high'),
     ])))
     const publications: ReturnType<Session['eventSource']['getSnapshot']>[] = []
     const off = session.eventSource.subscribe(() => {
@@ -995,7 +995,7 @@ describe('resync', () => {
     expect(session.eventSource.getSnapshot()).toBe(oldWindow)
     expect(publications).toEqual([])
 
-    replacement.resolve(historyValue(plainTurn(SessionSeq(10), 2, '终', '页')))
+    replacement.resolve(historyValue(plainTurn(SessionSeq(10), 2, 'last', 'page')))
     await syncing
     await vi.waitFor(() => {
       expect(eventSeqs(session)).toEqual([10, 11, 12, 13, 14, 15, 16, 17])
@@ -1035,26 +1035,26 @@ describe('resync', () => {
     const stale = Promise.withResolvers<RemoteResult<SessionEventsPage>>()
     mock.stream(FOLLOW, followScript(() => stale.promise))
     const firstOpen = session.open()
-    mock.stream(FOLLOW, followScript(history(plainTurn(SessionSeq(6), 1, '新', '代'))))
+    mock.stream(FOLLOW, followScript(history(plainTurn(SessionSeq(6), 1, 'new', 'gen'))))
     const resynced = session.resync()
     stale.reject(new Error('dead connection')) // the doomed pre-disconnect request fails late
     await firstOpen
     await resynced
     const snapshot = session.getSnapshot()
     expect(snapshot.openState).toBe('open') // stale failure did not settle the fresh generation into error
-    expect(eventSeqs(session)).toEqual(plainTurn(SessionSeq(6), 1, '新', '代').map(event => event.seq))
+    expect(eventSeqs(session)).toEqual(plainTurn(SessionSeq(6), 1, 'new', 'gen').map(event => event.seq))
   })
 })
 
 describe('snapshot ownership', () => {
   it('publishes event-window appends without changing an unrelated Session snapshot', async ({ mock, start }) => {
     const session = await sessionBench(mock, start, SID)
-    mock.stream(FOLLOW, followScript(history(plainTurn(SessionSeq(0), 0, '稳', '定'))))
+    mock.stream(FOLLOW, followScript(history(plainTurn(SessionSeq(0), 0, 'stable', 'fixed'))))
     await session.open()
     const sessionBefore = session.getSnapshot()
     const windowBefore = session.eventSource.getSnapshot()
     const firstEntry = windowBefore.entries[0]
-    await pushEvent(mock, ev.user(SessionSeq(6), '追加'))
+    await pushEvent(mock, ev.user(SessionSeq(6), 'append'))
     const windowAfter = session.eventSource.getSnapshot()
     expect(session.getSnapshot()).toBe(sessionBefore)
     expect(windowAfter).not.toBe(windowBefore)

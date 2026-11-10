@@ -32,7 +32,6 @@ export class DeepSeekFetchApiProvider implements WebFetchProvider {
   /** Picker description: what this provider suits and what it costs or cannot do. */
   readonly description: NonNullable<WebFetchProvider['description']> = {
     en: 'Fetches public URLs on DeepSeek servers and returns Markdown. Uses the DeepSeek account of the current conversation, or a DeepSeek API key, may incur API charges, and cannot reach intranet or loopback addresses.',
-    zh: '由 DeepSeek 服务端抓取公网页面并返回 Markdown。使用当前会话的 DeepSeek 账号或 DeepSeek API Key，可能产生计费，且无法访问内网和本机',
     ja: 'DeepSeek のサーバーで公開 URL を取得し、Markdown を返します。現在の会話の DeepSeek アカウント、または DeepSeek API キーを使用し、API 料金が発生する場合があり、イントラネットやループバックのアドレスにはアクセスできません。',
     es: 'Obtiene URL públicas en los servidores de DeepSeek y devuelve Markdown. Usa la cuenta de DeepSeek de la conversación actual o una clave de API de DeepSeek, puede generar cargos de API y no puede acceder a direcciones de la intranet ni de bucle invertido.',
     fr: "Récupère les URL publiques sur les serveurs DeepSeek et renvoie du Markdown. Utilise le compte DeepSeek de la conversation en cours ou une clé API DeepSeek, peut entraîner des frais d'API et ne peut pas atteindre les adresses intranet ou de bouclage.",

@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-08-23-client-derived-tool-presentation.zh.md)
-
 ## Problem
 
 Session history is a durable journal interface, while tool cards are Client presentation. Computing card views during `page` or `follow` would couple history reads to the Tools registry, Agent presets, restored scopes, presenter execution, and transient UI types.
@@ -494,7 +492,7 @@ This change does not promise to preserve differences expressed only through a Ho
 - Session Controller and Client README/JSDoc contracts describe the raw journal and Client presentation owner.
 - The tool cookbook documents the Web Client integration path.
 - This Agent Note is the decision owner; retained Host presenter notes keep their independent decisions.
-- Authored Remote types, dependencies, READMEs, pairing records, and generated references remain synchronized.
+- Authored Remote types, dependencies, READMEs, and generated references remain synchronized.
 
 ## Verification Matrix
 

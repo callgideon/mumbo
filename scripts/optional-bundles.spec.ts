@@ -275,12 +275,12 @@ describe('optional bundles', () => {
       || row.name === '@deepseek-ai/dsh-tool-schedule')).toBe(false)
   })
 
-  it.each(OPTIONAL_BUNDLES)('%s resolves a title, description, and icon in both shipped languages', (name) => {
+  it.each(OPTIONAL_BUNDLES)('%s resolves a title, description, and icon in English and Japanese', (name) => {
     const meta = readPluginMeta(name, pathToFileURL(`${bundle(name).dir}/package.json`).href)
     expect(meta?.error).toBeUndefined()
     for (const field of [meta?.title, meta?.description]) {
       expect(typeof field).toBe('object')
-      for (const language of ['en', 'zh']) expect((field as Record<string, string>)[language]).toMatch(/\S/)
+      for (const language of ['en', 'ja']) expect((field as Record<string, string>)[language]).toMatch(/\S/)
     }
     expect(meta?.icon).toMatch(/^data:image\//)
   })

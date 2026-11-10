@@ -326,10 +326,10 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
     const toolbar = page.getByRole('toolbar')
     const search = toolbar.getByRole('searchbox')
     try {
-      for (const locale of ['en', 'zh', 'ja', 'es', 'fr', 'de', 'ru', 'pt']) {
+      for (const locale of ['en', 'ja', 'es', 'fr', 'de', 'ru', 'pt']) {
         await scaffold.ctx.settings.update('locale', { preference: locale })
         await expect.poll(() => page.evaluate(() => document.documentElement.lang))
-          .toBe(locale === 'zh' ? 'zh-CN' : locale)
+          .toBe(locale)
         await search.fill('NAVIGATION_OK')
         await page.setViewportSize({ width: 390, height: 844 })
         await expect.poll(() => toolbar.evaluate((element) => {

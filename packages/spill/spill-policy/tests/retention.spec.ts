@@ -43,7 +43,7 @@ describe('ordered mixed-content retention', () => {
   })
 
   it('omits everything when the notices consume the budget', () => {
-    expect(retainContent([text('雪'), image('a')], 0, price)).toEqual({
+    expect(retainContent([text('눈'), image('a')], 0, price)).toEqual({
       head: [], tail: [], omittedBytes: 3, omittedImages: 1,
     })
   })

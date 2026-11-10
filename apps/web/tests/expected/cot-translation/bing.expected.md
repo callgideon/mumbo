@@ -1,3 +1,3 @@
-- button "思考" [expanded]
-- button "查看原文"
-- paragraph: 用户要求我回复一个单词。
+- button "Think" [expanded]
+- button "View original"
+- paragraph: The user asks me to reply with a single word.

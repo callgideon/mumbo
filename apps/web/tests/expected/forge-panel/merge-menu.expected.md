@@ -1,7 +1,7 @@
 - menu:
-  - text: "将 #9 合并到 main"
-  - menuitem "压缩合并 把全部提交压缩成一个提交"
-  - menuitem "创建合并提交 保留全部提交，并新增一个合并提交"
-  - menuitem "变基合并 把提交逐个变基到 main"
+  - text: "Merge #9 into main"
+  - menuitem "Squash and merge Combine every commit into one"
+  - menuitem "Create a merge commit Keep every commit and add a merge commit"
+  - menuitem "Rebase and merge Replay each commit onto main"
   - separator
-  - menuitem "确认合并"
+  - menuitem "Confirm merge"

@@ -1,7 +1,5 @@
 # Plugin indexes
 
-English | [中文](plugin-market.zh.md)
-
 ## Summary
 
 A plugin index is one JSON file that lists installable DSH bundles with their titles, icons, authors, and versions. Turn on the experimental **Custom plugin indexes** bundle to browse indexes in a **Discover** tab on the Plugins page and install a listed version after a confirmation. To publish an index, write or generate an index file and serve it, together with its icon files, from any static host.
@@ -45,7 +43,7 @@ This is a minimal index with one npm plugin and one plugin from a Git monorepo:
 ```json
 {
   "format": 1,
-  "title": { "en": "Team plugins", "zh": "团队插件" },
+  "title": { "en": "Team plugins", "es": "Complementos del equipo" },
   "plugins": [
     {
       "name": "dsh-plugin-foo",
@@ -104,7 +102,7 @@ The generator only downloads and reads files; it never installs packages or runs
 <a id="index-format"></a>
 ## Index format reference
 
-Text fields marked `LocalizedText` are a string or an object of strings keyed by lowercase language ids, such as `{ "en": "Foo", "zh": "甲" }`; an object must contain `en`. Members DSH does not know are ignored.
+Text fields marked `LocalizedText` are a string or an object of strings keyed by lowercase language ids, such as `{ "en": "Foo", "es": "Foo" }`; an object must contain `en`. Members DSH does not know are ignored.
 
 | Index field | Required | Meaning |
 |---|---|---|

@@ -1,45 +1,45 @@
-- text: 简单画一个 SVG 表示冯诺依曼架构, 保存为 von-neumann.svg {{clock}}
-- button "复制"
-- status: 已完成
-- button "已完成，用时 {{duration}}" [expanded]
-- button "已完成分析" [expanded]
-- button "上下文注入 runtime-context"
-- button "上下文注入 time-context"
-- button "思考 The user wants a simple SVG diagram of the von Neumann architecture, saved as von-neumann.svg. Let me create a clean SVG showing CPU (control unit, ALU), memory, input, and output with bidirectional data/control buses."
-- paragraph: 我来创建一个冯诺依曼架构的 SVG 示意图。
-- button "已写入文件并调用工具" [expanded]
-- button "写入 von-neumann.svg 6KB +83 -0":
-  - text: 写入
+- text: Draw a simple SVG of the von Neumann architecture, save it as von-neumann.svg, and provide a standalone file card so it is easy to open. {{clock}}
+- button "Copy"
+- status: Completed
+- button "Completed in {{duration}}" [expanded]
+- button "Analysis completed" [expanded]
+- button "Context injection runtime-context"
+- button "Context injection time-context"
+- button "Think The user wants a simple SVG diagram of the von Neumann architecture, saved as von-neumann.svg. Let me create a clean SVG showing CPU (control unit, ALU), memory, input, and output with bidirectional data/control buses."
+- paragraph: I'll create a von Neumann architecture SVG diagram.
+- button "Wrote files and called tools" [expanded]
+- button "Write von-neumann.svg 6KB +83 -0":
+  - text: Write
   - button "von-neumann.svg"
   - text: 6KB +83 -0
-- button "思考 The file is created. Let me present it as a deliverable."
-- button "交付文件 已交付 von-neumann.svg"
+- button "Think The file is created. Let me present it as a deliverable."
+- button "Present files Delivered von-neumann.svg"
 - paragraph:
-  - text: 已创建
+  - text: Created
   - code:
-    - button "在侧边栏打开 {{cwd}}/workspace/von-neumann.svg": von-neumann.svg
-  - text: ，一个简洁的冯诺依曼架构示意图，包含：
+    - button "Open {{cwd}}/workspace/von-neumann.svg in sidebar": von-neumann.svg
+  - text: ", a clean von Neumann architecture diagram that includes:"
 - list:
   - listitem:
-    - strong: CPU（中央处理器）
-    - text: ：内含控制单元 CU、算术逻辑单元 ALU 和寄存器组
+    - strong: CPU (Central Processing Unit)
+    - text: ": contains the control unit CU, the arithmetic logic unit ALU and the register file"
   - listitem:
-    - strong: 内存储器 Memory
-    - text: ：标注"指令和数据统一存放"（存储程序思想）
+    - strong: Main Memory
+    - text: ": labeled \"instructions and data stored together\" (the stored-program concept)"
   - listitem:
-    - strong: 输入设备 / 输出设备
-    - text: ：分别用绿色和粉色表示数据流向
+    - strong: Input devices / output devices
+    - text: ": drawn in green and pink respectively, showing the direction of data flow"
   - listitem:
-    - strong: 总线连接
-    - text: ：CPU 与内存间的地址总线，以及 CPU 与 I/O 设备间的数据/控制线，箭头标明数据流向
-- paragraph: 下方附一行核心思想说明：指令与数据以二进制统一存储在存储器中。用浏览器打开该 SVG 文件即可查看。
-- button "查看 von-neumann.svg 的改动": 已编辑 von-neumann.svg +83 -0
-- text: 此主机没有可用的桌面，无法使用外部程序打开文件或文件夹；文件仍可在侧边栏预览
-- button "在侧边栏预览 {{cwd}}/workspace/von-neumann.svg"
-- text: von-neumann.svg 冯诺依曼架构示意图 SVG
-- button "复制"
-- button "好的回答"
-- button "有问题的回答"
-- button "在新对话中分支"
-- button "用量 32K tok"
+    - strong: Bus connections
+    - text: ": CPU and memory linked by the address bus, and CPU and I/O devices linked by data/control lines; arrows mark the direction of data flow"
+- paragraph: "A line at the bottom states the core idea: instructions and data are stored together in memory in binary. Open the SVG file in a browser to view it."
+- button "View changes to von-neumann.svg": Edited von-neumann.svg +83 -0
+- text: This Host has no desktop available to open files or folders in external apps. Files can still be previewed in the sidebar.
+- button "Preview {{cwd}}/workspace/von-neumann.svg in sidebar"
+- text: von-neumann.svg Von Neumann architecture diagram in SVG
+- button "Copy"
+- button "Good response"
+- button "Bad response"
+- button "Branch into a new conversation"
+- button "Usage 32K tok"
 - text: {{clock}}

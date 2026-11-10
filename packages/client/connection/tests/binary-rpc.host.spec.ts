@@ -58,7 +58,9 @@ describe('Connection binary RPC', () => {
         req.once('error', reject)
         req.end(init.body as string)
       }))
-      expect(await rpc.call('/api', 'fixture/read', {})).toEqual({ ok: true, value: { data, bytes: data.length } })
+      // Element-wise `toEqual` over these 1 MiB takes seconds; `Buffer.compare` checks the same bytes natively.
+      const sameBytes = (bytes: unknown) => bytes instanceof Uint8Array && Buffer.compare(bytes, data) === 0
+      expect(await rpc.call('/api', 'fixture/read', {})).toEqual({ ok: true, value: { data: expect.toSatisfy(sameBytes) as Uint8Array, bytes: data.length } })
       if (compression === 'gzip') {
         expect(encoding).toBe('gzip')
         expect(transferred).toBeLessThan(data.length / 10)

@@ -150,7 +150,7 @@ function Frame({ renderSlot }: PropsRenderSlots<Seats>) {
 }
 
 async function bench(
-  language: 'en' | 'zh' = 'en',
+  language: 'en' | 'de' = 'en',
   { analytics = true, navigation = true }: { analytics?: boolean; navigation?: boolean } = {},
 ) {
   const runtime = await SlotTestRuntime.create()
@@ -160,6 +160,7 @@ async function bench(
     inject: ['slots'],
     apply(ctx: Context) {
       const locale = new LocaleRuntime(ctx)
+      locale.addLanguage({ id: 'de', label: 'Deutsch', fallback: 'en' })
       locale.setLocale(language)
       ctx.provide('locale', locale)
       ctx.slots.installLocale(locale)
@@ -222,13 +223,13 @@ describe('More menu registrations', () => {
     ['en', 'sidebar.panellist.actions', 'Create a DSH plugin with a left sidebar entry.'],
     ['en', 'conversation.session.header.views.actions', 'Create a DSH conversation view plugin.'],
     ['en', 'sidebar.right.tab.guide.actions', 'Create a DSH plugin with a right sidebar entry.'],
-    ['zh', 'sidebar.panellist.actions', '创建一个带左侧栏入口的 DSH 插件。'],
-    ['zh', 'conversation.session.header.views.actions', '创建一个 DSH 会话视图插件。'],
-    ['zh', 'sidebar.right.tab.guide.actions', '创建一个带右侧栏入口的 DSH 插件。'],
+    ['de', 'sidebar.panellist.actions', 'Erstellen Sie ein DSH-Plugin mit einem Eintrag in der linken Seitenleiste.'],
+    ['de', 'conversation.session.header.views.actions', 'Erstellen Sie ein DSH-Plugin für die Konversationsansicht.'],
+    ['de', 'sidebar.right.tab.guide.actions', 'Erstellen Sie ein DSH-Plugin mit einem Eintrag in der rechten Seitenleiste.'],
   ] as const)('starts an unsent %s Creator draft from %s', async (language, seat, prompt) => {
     const b = await bench(language)
     fireEvent.click(within(b.view.getByRole('menu', { name: seat }))
-      .getByRole('menuitem', { name: language === 'zh' ? '创建你的插件' : 'Create your plugin' }))
+      .getByRole('menuitem', { name: language === 'de' ? 'Erstellen Sie Ihr Plugin' : 'Create your plugin' }))
     expect(b.startSession).toHaveBeenCalledExactlyOnceWith(undefined, {
       agentPreset: 'cordis', prompt, whenDraftExists: 'append',
     })

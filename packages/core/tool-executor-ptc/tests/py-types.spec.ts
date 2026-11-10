@@ -423,7 +423,7 @@ describe('renderToolsSdkPy', () => {
   })
 
   it('keeps a non-ASCII field name as a TypedDict field and derives its class name from it', () => {
-    // `路径` satisfies `xid_start xid_continue*`, so CPython accepts it as an
+    // `경로` satisfies `xid_start xid_continue*`, so CPython accepts it as an
     // attribute and as the `TypedDict` key. Rejecting it would degrade the
     // whole object, dropping every SIBLING field's name, requiredness and type
     // too — and under `mode: 'ptc'` the native schemas are omitted, so
@@ -431,25 +431,25 @@ describe('renderToolsSdkPy', () => {
     // `camelCase` has to pass the same characters through instead of splitting
     // on them.
     const tool: ToolSdkSchema = {
-      name: '搜索',
+      name: '검색',
       description: 'Unicode identifiers.',
       parameters: {
         type: 'object',
         additionalProperties: false,
         properties: {
-          路径: { type: 'string' },
-          opts: { type: 'object', additionalProperties: false, properties: { 深度: { type: 'number' } } },
+          경로: { type: 'string' },
+          opts: { type: 'object', additionalProperties: false, properties: { 깊이: { type: 'number' } } },
         },
-        required: ['路径'],
+        required: ['경로'],
       },
       output: { type: 'string' },
     }
     const text = renderToolsSdkPy([tool])
-    expect(text).toContain('async def 搜索(self, args: 搜索Args) -> str:')
-    expect(text).toContain('class 搜索Args(TypedDict):')
-    expect(text).toContain('    路径: str')
-    expect(text).toContain('class 搜索ArgsOpts(TypedDict):')
-    expect(text).toContain('    深度: NotRequired[float]')
+    expect(text).toContain('async def 검색(self, args: 검색Args) -> str:')
+    expect(text).toContain('class 검색Args(TypedDict):')
+    expect(text).toContain('    경로: str')
+    expect(text).toContain('class 검색ArgsOpts(TypedDict):')
+    expect(text).toContain('    깊이: NotRequired[float]')
     expect(text).not.toContain('dict[str, Any]')
   })
 
@@ -505,7 +505,7 @@ describe('renderToolsSdkPy', () => {
   })
 
   it('subscripts a tool name that NFKC-normalizes to something else, while declaring a plain Unicode one', () => {
-    // Same split at the tool-name site: `路径` becomes an `async def`, the
+    // Same split at the tool-name site: `경로` becomes an `async def`, the
     // ligature name cannot, because `async def ﬁnd` would define `find`. The
     // subscript comment quotes the name, so its exact bytes survive, and its
     // TypedDict is still named and referenced — the name is only unusable as a
@@ -520,8 +520,8 @@ describe('renderToolsSdkPy', () => {
       parameters: { type: 'object', additionalProperties: false, properties: { q: { type: 'string' } }, required: ['q'] },
       output: { type: 'string' },
     })
-    const text = renderToolsSdkPy([of('路径'), of('ﬁnd')])
-    expect(text).toContain('async def 路径(self, args: 路径Args) -> str:')
+    const text = renderToolsSdkPy([of('경로'), of('ﬁnd')])
+    expect(text).toContain('async def 경로(self, args: 경로Args) -> str:')
     expect(text).toContain('# tools["ﬁnd"](args: FIndArgs) -> str')
     expect(text).toContain('class FIndArgs(TypedDict):')
     expect(text).not.toContain('async def ﬁnd')

@@ -77,20 +77,20 @@ const BASE_RULES: readonly UserTextRule[] = [
   goalCommandReferenceRule, collapseWhitespaceRule, trimWhitespaceRule,
 ]
 /** Facts a sent message bubble supplies. */
-const FACTS: Readonly<Partial<UserTextFacts>> = { sessionLabels: ['会话一'], skillNames: ['plan', 'review'] }
+const FACTS: Readonly<Partial<UserTextFacts>> = { sessionLabels: ['세션 하나'], skillNames: ['plan', 'review'] }
 
 const KIB = 1024
 /** Exercise each workload's code paths before measuring sub-millisecond baseline evaluations. */
 const WARMUP_PAIRS = 10
 /** Base batch size; half-sized scaling inputs use twice as many evaluations. */
 const SINGLE_DOCUMENT_EVALUATIONS = 20
-const PROSE = '帮我看看这个函数为什么慢，顺便把 README 也更新一下。The quick brown fox jumps over the lazy dog, 1234 times. '
+const PROSE = '이 함수가 왜 느린지 봐 주시고 README도 업데이트해 주세요. The quick brown fox jumps over the lazy dog, 1234 times. '
 const CODE = 'const value = await fetch(`https://api.example.com/v1/items?id=${id}`); if (!value.ok) throw new Error("bad: " + value.status);\n'
 const BASE64 = 'QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5ejAxMjM0NTY3ODkrLw'
 const MARKDOWN = [
-  '## 安装与配置', '', '- 运行 `pnpm install`，然后执行 `pnpm run build`。',
-  '- 详见 [文档](https://example.com/docs/setup?ref=readme#install)。', '',
-  '| 选项 | 默认值 | 说明 |', '|---|---|---|', '| `timeout` | 30s | 请求超时 |', '| `retries` | 3 | 失败重试次数 |', '',
+  '## 설치 및 구성', '', '- `pnpm install`을 실행한 다음 `pnpm run build`를 실행합니다.',
+  '- 자세한 내용은 [문서](https://example.com/docs/setup?ref=readme#install)를 참조하세요.', '',
+  '| 옵션 | 기본값 | 설명 |', '|---|---|---|', '| `timeout` | 30s | 요청 제한 시간 |', '| `retries` | 3 | 실패 재시도 횟수 |', '',
   '```ts', "const client = createClient({ baseUrl: 'https://api.example.com/v1', timeout: 30_000 })", '```', '', '',
 ].join('\n')
 const LOG = '2026-10-11T12:00:00.123Z INFO  [worker-3] GET https://api.example.com/v1/items?id=1234&page=2 200 12ms '
@@ -101,8 +101,8 @@ const SHELL = 'pnpm --filter @deepseek-ai/dsh-client-ui-secret-mask run test -- 
   + ' && git push origin feat/user-text-secret-mask\n'
 /** Ordinary message fragments: prose, references, a slash skill, a URL without credentials, and code. */
 const MESSAGE_PARTS = [
-  PROSE, '参照 @src/app/main.ts 修复一下', ' /plan 先列计划', ' 见 https://example.com/docs/a?b=c#d ',
-  '`const total = items.reduce((a, b) => a + b, 0)`', ' 然后跑 pnpm run test -- --watch=false。',
+  PROSE, '@src/app/main.ts 를 참고해 수정해 주세요', ' /plan 먼저 계획을 나열', ' 참조 https://example.com/docs/a?b=c#d ',
+  '`const total = items.reduce((a, b) => a + b, 0)`', ' 그런 다음 pnpm run test -- --watch=false 를 실행하세요.',
 ] as const
 
 const fill = (unit: string, characters: number): string => unit.repeat(Math.ceil(characters / unit.length)).slice(0, characters)
@@ -131,7 +131,7 @@ function messages(count: number): string[] {
 /** Ordinary 200-character messages, each carrying one credential whole. */
 function credentialMessages(count: number, credential: string): string[] {
   return Array.from({ length: count }, (_, index) => {
-    const head = `${String(index)} 帮我看看这个配置能不能用：`
+    const head = `${String(index)} 이 설정이 작동하는지 봐 주세요: `
     const tail = `，${MESSAGE_PARTS[index % MESSAGE_PARTS.length]!}${PROSE}`
     return head + credential + tail.slice(0, Math.max(0, 200 - head.length - credential.length))
   })

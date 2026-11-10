@@ -7,13 +7,6 @@ export const en = {
   approve: 'Allow for this session',
 }
 
-/** Chinese application-access messages. */
-export const zh = {
-  question: '允许智能体通过 Computer Use 控制此应用吗？',
-  detail: '在插件页面管理所有会话的应用权限。',
-  approve: '本会话允许',
-} satisfies Record<keyof typeof en, string>
-
 /** Japanese application-access messages. */
 export const ja = {
   question: 'エージェントが Computer Use でこのアプリを操作することを許可しますか？',
@@ -60,7 +53,6 @@ export const pt = {
 export const applicationAccessDisplay = {
   question: {
     en: en.question,
-    zh: zh.question,
     ja: ja.question,
     es: es.question,
     fr: fr.question,
@@ -68,10 +60,9 @@ export const applicationAccessDisplay = {
     ru: ru.question,
     pt: pt.question,
   },
-  detail: { en: en.detail, zh: zh.detail, ja: ja.detail, es: es.detail, fr: fr.detail, de: de.detail, ru: ru.detail, pt: pt.detail },
+  detail: { en: en.detail, ja: ja.detail, es: es.detail, fr: fr.detail, de: de.detail, ru: ru.detail, pt: pt.detail },
   approve: {
     en: en.approve,
-    zh: zh.approve,
     ja: ja.approve,
     es: es.approve,
     fr: fr.approve,

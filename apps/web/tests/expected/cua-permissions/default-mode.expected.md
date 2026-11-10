@@ -1,4 +1,4 @@
-- group "新会话默认模式":
-  - strong: 新会话默认模式
-  - paragraph: Computer Use 仅在 PTC 模式中可用。
-  - button "设为 PTC"
+- group "Default mode for new sessions":
+  - strong: Default mode for new sessions
+  - paragraph: Computer use is available only in PTC mode.
+  - button "Set to PTC"

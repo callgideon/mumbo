@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest'
 import { Config } from '../src/config.ts'
 import { createTranscriber } from '../src/inference.ts'
 
-const native = vi.hoisted(() => ({ speech: true, texts: ['第一句。', '第二句。'], configs: [] as object[],
+const native = vi.hoisted(() => ({ speech: true, texts: ['First sentence.', 'Second sentence.'], configs: [] as object[],
   front: vi.fn(), resets: vi.fn(), accepted: [] as number[], windows: [] as number[],
   starts: [] as number[], heads: [] as number[] }))
 vi.mock('node:module', () => {
@@ -45,7 +45,7 @@ function wave(samples = 1024, first = 0): Uint8Array {
 it('loads one model pair, carries language changes, and copies VAD buffers for Electron', () => {
   const transcribe = createTranscriber(Object.assign(Config({ dataRoot: '/cache' }), { model: '/model', tokens: '/tokens', vad: '/vad' }))
   const result = transcribe(wave(), 'zh')
-  expect(result).toMatchObject({ text: '第一句。 第二句。', audioSeconds: 1024 / 16000 })
+  expect(result).toMatchObject({ text: 'First sentence. Second sentence.', audioSeconds: 1024 / 16000 })
   expect(result.inferenceSeconds).toBeGreaterThanOrEqual(0)
   expect(native.accepted).toEqual([512, 512])
   expect(native.front).toHaveBeenCalledWith(false)
@@ -66,7 +66,7 @@ it('restores the onset a cold VAD reports late, for the first segment only and w
   const transcribe = createTranscriber(Object.assign(Config({ dataRoot: '/cache' }), { model: '/model', tokens: '/tokens', vad: '/vad' }))
   const run = (start: number, samples: number, first = 0): void => {
     native.speech = true; native.accepted.length = 0; native.heads.length = 0
-    native.starts = [start]; native.texts = ['第一句。', '第二句。']
+    native.starts = [start]; native.texts = ['First sentence.', 'Second sentence.']
     transcribe(wave(samples, first), 'zh')
   }
   run(900, 1024, 1000)
@@ -79,7 +79,7 @@ it('restores the onset a cold VAD reports late, for the first segment only and w
   expect(native.accepted).toEqual([512, 512])
   const off = createTranscriber(Object.assign(Config({ dataRoot: '/cache', vadOnsetPaddingSeconds: 0 }), { model: '/model', tokens: '/tokens', vad: '/vad' }))
   native.speech = true; native.accepted.length = 0
-  native.starts = [900]; native.texts = ['第一句。', '第二句。']
+  native.starts = [900]; native.texts = ['First sentence.', 'Second sentence.']
   off(wave(1024, 1000), 'zh')
   expect(native.accepted).toEqual([512, 512])
 })

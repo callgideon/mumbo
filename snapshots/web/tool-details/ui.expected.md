@@ -282,7 +282,7 @@
 - text: Recorded result
 - list:
   - listitem:
-    - text: 工具卡片示例
+    - text: Tool card example
     - term: pluginId
     - definition: demo-tool-card
     - term: Current package
@@ -322,27 +322,27 @@
         - listitem:
           - paragraph: terminal_list
 - button "Inspect"
-- button "Run ralph loop 已检查详情区域的换行和工具名称显示。" [expanded]
+- button "Run ralph loop Checked wrapping and tool names in the details area." [expanded]
 - text: Recorded result
 - list:
   - listitem:
-    - text: 已检查详情区域的换行和工具名称显示。 Worker reported completion
+    - text: Checked wrapping and tool names in the details area. Worker reported completion
     - term: Rounds
     - definition: "2"
     - list:
-      - listitem: 目标、任务清单和定时任务已逐项检查。
-      - listitem: 列表类工具仍显示原始输出。
+      - listitem: The goal, to-do list, and reminders were checked one by one.
+      - listitem: List tools still show raw output.
     - group:
       - text: Task
       - list:
         - listitem:
-          - paragraph: 检查并整理工具卡片的布局问题
+          - paragraph: Review and sort out tool card layout issues
 - button "Inspect"
 - 'button "Read event tool/call · #5" [expanded]'
 - text: Recorded result
 - list:
   - listitem:
-    - text: tool/call 任务清单变化示例 · todo-diff-demo
+    - text: tool/call To-do list change example · todo-diff-demo
     - term: Event sequence
     - definition: "5"
     - term: Time
@@ -365,35 +365,35 @@
               - listitem:
                 - text: Result In progress
                 - term: Content
-                - definition: 实现紧凑详情
+                - definition: Implement compact details
   - listitem:
     - group:
       - text: Surrounding events
       - list:
         - listitem:
-          - paragraph: "Before: - seq 4 | assistant/message | {{timestamp}} 更新任务清单。 After: - seq 6 | tool/result | {{timestamp}} Updated todo list: 0 completed, 1 in progress, 0 pending."
+          - paragraph: "Before: - seq 4 | assistant/message | {{timestamp}} Update the to-do list. After: - seq 6 | tool/result | {{timestamp}} Updated todo list: 0 completed, 1 in progress, 0 pending."
 - button "Inspect"
 - button "Search events 2 matches" [expanded]
 - text: Recorded result
 - list:
   - listitem:
-    - text: "重新设计任务清单工具卡片。 user/message · #1"
+    - text: "Redesign the to-do list tool card. user/message · #1"
     - term: Time
     - definition: Sep 10, 2026, 4:00 PM
     - term: Record status
     - definition: current
   - listitem:
-    - text: "工具卡片现在按新增、修改和删除显示。 assistant/message · #12"
+    - text: "Tool cards now show additions, modifications, and deletions. assistant/message · #12"
     - term: Time
     - definition: Sep 10, 2026, 4:01 PM
     - term: Record status
     - definition: current
 - button "Inspect"
-- button "Trace event 任务清单变化示例" [expanded]
+- button "Trace event To-do list change example" [expanded]
 - text: Recorded result
 - list:
   - listitem:
-    - text: 任务清单变化示例 todo-diff-demo
+    - text: To-do list change example todo-diff-demo
     - term: Target event
     - definition: seq 12 | assistant/message | current | {{timestamp}}
     - term: Replaced by
@@ -411,8 +411,8 @@
 - text: Recorded result
 - list:
   - listitem:
-    - text: 任务清单变化示例 todo-diff-demo
-    - paragraph: 重新设计任务清单工具卡片。
+    - text: To-do list change example todo-diff-demo
+    - paragraph: Redesign the to-do list tool card.
     - term: Time
     - definition: Sep 10, 2026, 4:00 PM
     - term: Parent
@@ -433,11 +433,11 @@
     - term: Best match
     - definition: seq 1 | user/message | current | {{timestamp}}
 - button "Inspect"
-- button "Trace session 任务清单变化示例" [expanded]
+- button "Trace session To-do list change example" [expanded]
 - text: Recorded result
 - list:
   - listitem:
-    - text: 任务清单变化示例 todo-diff-demo
+    - text: To-do list change example todo-diff-demo
     - term: Time
     - definition: Sep 10, 2026, 4:00 PM
     - term: Availability
@@ -461,7 +461,7 @@
     - text: deepseek/deepseek-reasoner
     - paragraph: DeepSeek Reasoner
 - button "Inspect"
-- button "Create subagent 检查工具卡片布局，并列出三个最值得改进的地方。" [expanded]
+- button "Create subagent Check the tool card layout and list the three most valuable improvements." [expanded]
 - text: Recorded result
 - list:
   - listitem:
@@ -472,27 +472,27 @@
       - text: Task
       - list:
         - listitem:
-          - paragraph: 检查工具卡片布局，并列出三个最值得改进的地方。
+          - paragraph: Check the tool card layout and list the three most valuable improvements.
 - button "Inspect"
 - button "List subagents 3 agents" [expanded]
 - text: Recorded result
 - list:
   - listitem:
     - text: agent-demo-review Running
-    - button "Expand description for agent-demo-review": 检查工具卡片布局
+    - button "Expand description for agent-demo-review": Check tool card layout
   - listitem:
     - text: agent-demo-docs Idle
-    - button "Expand description for agent-demo-docs": 整理工具展示清单
+    - button "Expand description for agent-demo-docs": Organize the tool display list
   - listitem:
     - text: agent-demo-icons Ready
-    - button "Expand description for agent-demo-icons": 检查状态图标
+    - button "Expand description for agent-demo-icons": Check status icons
 - button "Inspect"
 - button "Send message agent-demo-review" [expanded]
 - text: Recorded result
 - list:
   - listitem:
     - text: agent-demo-review Message delivered
-    - paragraph: 请优先检查窄屏下的任务差异列表。
+    - paragraph: Check the to-do diff list on narrow screens first.
 - button "Inspect"
 - button "Interrupt agent agent-demo-review" [expanded]
 - text: Recorded result
@@ -529,7 +529,7 @@
 - list:
   - listitem:
     - text: job-demo-preview Cancellation requested
-    - paragraph: 演示检查已经结束
+    - paragraph: The demo check has finished
 - button "Inspect"
 - button "Open terminal preview" [expanded]
 - text: Recorded result
@@ -638,7 +638,7 @@
 - list:
   - listitem:
     - text: ui-review Running
-    - paragraph: 检查工具卡片的可读性
+    - paragraph: Check tool card readability
     - term: ID
     - definition: agent-demo-review
     - term: Role
@@ -659,7 +659,7 @@
     - definition: lead
   - listitem:
     - text: ui-review Running
-    - paragraph: 检查工具卡片的可读性
+    - paragraph: Check tool card readability
     - term: ID
     - definition: agent-demo-review
     - term: Role
@@ -670,7 +670,7 @@
     - definition: fresh
   - listitem:
     - text: docs Inactive
-    - paragraph: 整理工具清单
+    - paragraph: Organize the tool list
     - term: ID
     - definition: agent-demo-docs
     - term: Role
@@ -685,14 +685,14 @@
 - list:
   - listitem:
     - text: ui-review Message delivered
-    - paragraph: 请先检查新增、删除和状态变化的区分是否清楚。
+    - paragraph: First check that additions, deletions, and status changes are clearly distinct.
 - button "Inspect"
-- button "Create team task 检查工具卡片的窄屏布局" [expanded]
+- button "Create team task Check the narrow-screen tool card layout" [expanded]
 - text: Recorded result
 - list:
   - listitem:
-    - text: 检查工具卡片的窄屏布局 Pending
-    - paragraph: 检查 360px 宽度下的换行、详情按钮和状态图标。
+    - text: Check the narrow-screen tool card layout Pending
+    - paragraph: Check wrapping, detail buttons, and status icons at 360px width.
     - term: ID
     - definition: task-demo-1
     - term: Revision
@@ -705,12 +705,12 @@
         - listitem:
           - paragraph: packages/client/ui-tool/src/client/tool/
 - button "Inspect"
-- button "Read team task 检查工具卡片的窄屏布局" [expanded]
+- button "Read team task Check the narrow-screen tool card layout" [expanded]
 - text: Recorded result
 - list:
   - listitem:
-    - text: 检查工具卡片的窄屏布局 Pending
-    - paragraph: 检查 360px 宽度下的换行、详情按钮和状态图标。
+    - text: Check the narrow-screen tool card layout Pending
+    - paragraph: Check wrapping, detail buttons, and status icons at 360px width.
     - term: ID
     - definition: task-demo-1
     - term: Revision
@@ -723,12 +723,12 @@
         - listitem:
           - paragraph: packages/client/ui-tool/src/client/tool/
 - button "Inspect"
-- button "Update team task 检查工具卡片的窄屏布局" [expanded]
+- button "Update team task Check the narrow-screen tool card layout" [expanded]
 - text: Recorded result
 - list:
   - listitem:
-    - text: 检查工具卡片的窄屏布局 In progress
-    - paragraph: 检查 360px 宽度下的换行、详情按钮和状态图标。
+    - text: Check the narrow-screen tool card layout In progress
+    - paragraph: Check wrapping, detail buttons, and status icons at 360px width.
     - term: ID
     - definition: task-demo-1
     - term: Revision
@@ -747,8 +747,8 @@
 - text: Recorded result
 - list:
   - listitem:
-    - text: 检查工具卡片的窄屏布局 In progress
-    - paragraph: 检查 360px 宽度下的换行、详情按钮和状态图标。
+    - text: Check the narrow-screen tool card layout In progress
+    - paragraph: Check wrapping, detail buttons, and status icons at 360px width.
     - term: ID
     - definition: task-demo-1
     - term: Revision
@@ -763,8 +763,8 @@
         - listitem:
           - paragraph: packages/client/ui-tool/src/client/tool/
   - listitem:
-    - text: 整理检查结论 Pending
-    - paragraph: 检查 360px 宽度下的换行、详情按钮和状态图标。
+    - text: Summarize the review findings Pending
+    - paragraph: Check wrapping, detail buttons, and status icons at 360px width.
     - term: ID
     - definition: task-demo-2
     - term: Revision

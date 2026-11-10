@@ -38,7 +38,7 @@ const PYTHON_RUNTIME_DIR = 'python/sdk-runtime/src/deepseek_harness_runtime/runt
 /** The deployed closure doubles as the node-mode carrier. */
 const PYTHON_NODE_SUBDIR = 'node'
 /** Documentation excluded from the generated runtime directory. */
-const DEPLOY_ONLY_DOCS = ['README.md', 'README.zh.md', 'README.i18n.yaml']
+const DEPLOY_ONLY_DOCS = ['README.md']
 
 /**
  * Whole-tree assets cover Cordis's runtime bare-package imports, which pkg's

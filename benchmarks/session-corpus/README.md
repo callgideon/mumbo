@@ -1,7 +1,5 @@
 # Session corpus benchmarks
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 Measure the Web Host's Session list, content search, and fork over synthetic corpora in which every Session is at least as long as the same quantile of a measured local DSH corpus. Search and fork run over separate 1,000-Session corpora; the list runs over 3,000, the largest count that keeps this file within five minutes on standard hosted CI. Content search models a deployment that opts in with `openAt: first-search`; shipped profiles disable it. No case uses network services, recorded Sessions, or a browser.

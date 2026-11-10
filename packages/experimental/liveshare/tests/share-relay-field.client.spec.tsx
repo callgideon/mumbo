@@ -207,10 +207,10 @@ describe('Liveshare relay URL field', () => {
 
   it('warns that a changed address has to be verified again before creating', async () => {
     await showDialog({
-      identity: relay => ({ state: 'verified', relay, displayName: '许翰翔' }),
+      identity: relay => ({ state: 'verified', relay, displayName: 'Alice' }),
       postBody: { effective: 'https://new.example.test' },
     })
-    expect(await screen.findByText('许翰翔')).toBeDefined()
+    expect(await screen.findByText('Alice')).toBeDefined()
     fireEvent.change(screen.getByLabelText('Share service address'), { target: { value: 'https://new.example.test' } })
     await saveAddress()
 
@@ -235,9 +235,9 @@ describe('Liveshare relay URL field', () => {
 
   it('offers to verify again on the address in force for a verified owner', async () => {
     await showDialog({
-      identity: relay => ({ state: 'verified', relay, displayName: '许翰翔' }),
+      identity: relay => ({ state: 'verified', relay, displayName: 'Alice' }),
     })
-    expect(await screen.findByText('许翰翔')).toBeDefined()
+    expect(await screen.findByText('Alice')).toBeDefined()
     expect(screen.getByRole('button', { name: 'Sign in again' })).toHaveProperty('disabled', false)
     expect(screen.getByRole('tab', { name: 'Read only' })).toHaveProperty('disabled', false)
     expect(screen.getByRole('switch', { name: en['dialog.allowsFork'] })).toHaveProperty('disabled', false)

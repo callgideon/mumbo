@@ -366,6 +366,13 @@ describe('gate graph validation', () => {
     expect(quick).toEqual(full.filter(gate => gate.quick === true))
   })
 
+  it('rejects CJK text in the static CI and documentation aggregates', () => {
+    for (const mode of ['ci-static', 'ci-primary', 'doc-sync', 'doc-quick'] as const) {
+      expect(withPnpmEntrypoint(() => gatesForMode(mode).find(gate => gate.id === 'no-cjk')), mode)
+        .toMatchObject({ args: ['/private/pnpm.cjs', 'run', 'verify-no-cjk'] })
+    }
+  })
+
   it('checks the recorded npm dependency catalog in both documentation aggregates', () => {
     for (const mode of ['doc-sync', 'doc-quick'] as const) {
       expect(withPnpmEntrypoint(() => gatesForMode(mode).find(gate => gate.id === 'dependency-catalog')))
@@ -413,7 +420,7 @@ describe('gate graph validation', () => {
 
     expect(ids.slice(0, 11)).toEqual([
       'doc-typecheck', 'docs-site-build', 'doc-graphs', 'cli-help', 'markdown-links', 'type-equivalence',
-      'cordis-catalog', 'cordis-inspect-catalog', 'workflow-guest', 'mermaid', 'translation-pairing',
+      'cordis-catalog', 'cordis-inspect-catalog', 'workflow-guest', 'mermaid', 'markdown-wrap',
     ])
   })
 

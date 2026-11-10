@@ -87,7 +87,7 @@ export async function lifecyclePullRequestSnapshot(number) {
 }
 
 const EXEMPT_MESSAGE =
-  'Issue policy exempt：当前 PR 不在强制范围（Draft、Bot/App 或尚无 review request/review）。\n'
+  'Issue policy exempt: this PR is outside the enforced scope (draft, Bot/App, or no review request or review yet).\n'
 
 /**
  * Determine current policy eligibility and Project access needs without Project credentials.
@@ -104,7 +104,7 @@ export async function runPullRequestPreflight(event) {
       `eligible=${eligible}\nexempt=${!eligible}\nneeds-project=${needsProject}\n`,
     )
   }
-  process.stdout.write(eligible ? 'Issue policy applicable；执行完整校验。\n' : EXEMPT_MESSAGE)
+  process.stdout.write(eligible ? 'Issue policy applicable; running full validation.\n' : EXEMPT_MESSAGE)
   return { eligible, needsProject }
 }
 
@@ -118,9 +118,9 @@ export async function runPullRequestCheck(event) {
   const errors = validatePullRequest(pull)
   if (errors.length > 0) {
     for (const error of errors) process.stdout.write(`::error::${error}\n`)
-    throw new Error(`Issue policy 未通过，共 ${errors.length} 项`)
+    throw new Error(`Issue policy failed with ${errors.length} error(s)`)
   }
   process.stdout.write(
-    requiresPullRequestPolicy(pull) ? 'Issue policy 通过。\n' : EXEMPT_MESSAGE,
+    requiresPullRequestPolicy(pull) ? 'Issue policy passed.\n' : EXEMPT_MESSAGE,
   )
 }

@@ -7,7 +7,6 @@ import {
   launchWebScaffold, watchConsole, webSnapshotMode, WELCOME_NOTICE_COPY,
   type WebConsoleTripwire, type WebScaffold,
 } from './scaffold.ts'
-import { ZH_BROWSER_LOCALE } from './support.ts'
 
 const MODE = webSnapshotMode()
 const MOUNT = '/tools/dsh/'
@@ -28,7 +27,7 @@ describe.skipIf(MODE === 'record')('web e2e: public mount through a prefix-strip
     browser = await chromium.launch()
     page = await browser.newPage({
       viewport: { width: 1440, height: 960 },
-      locale: ZH_BROWSER_LOCALE,
+      locale: 'en-US',
     })
     tripwire = watchConsole(page)
     page.on('request', (request) => { requestUrls.push(request.url()) })
@@ -50,7 +49,7 @@ describe.skipIf(MODE === 'record')('web e2e: public mount through a prefix-strip
   const offMountRequests = (): string[] => requestUrls.filter(url => !url.startsWith(scaffold.baseUrl))
 
   it('loads the shell, its plugin bundles, and the Gateway WebSocket under the mount', async () => {
-    const welcome = page.getByRole('dialog', { name: WELCOME_NOTICE_COPY.zh.title })
+    const welcome = page.getByRole('dialog', { name: WELCOME_NOTICE_COPY.en.title })
     await welcome.waitFor({ timeout: 15_000 })
     expect(new URL(page.url()).pathname).toBe(MOUNT)
 
@@ -68,7 +67,7 @@ describe.skipIf(MODE === 'record')('web e2e: public mount through a prefix-strip
     }
     expect([manifest?.id, manifest?.scope, manifest?.startUrl]).toEqual([scaffold.baseUrl, scaffold.baseUrl, scaffold.baseUrl])
 
-    await welcome.getByRole('button', { name: WELCOME_NOTICE_COPY.zh.continueLabel }).click()
+    await welcome.getByRole('button', { name: WELCOME_NOTICE_COPY.en.continueLabel }).click()
     await welcome.waitFor({ state: 'detached', timeout: 15_000 })
 
     // The forward must be a live two-way pipe, not just a handshake: the page's

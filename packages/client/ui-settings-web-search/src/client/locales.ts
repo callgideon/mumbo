@@ -54,45 +54,6 @@ export const en: Record<WebSearchSettingsLocaleKey, string> = {
   invalidCount: 'Enter an integer from 1 to 50, or leave blank to use the default.',
 }
 
-/** Simplified Chinese copy. */
-export const zh: Record<WebSearchSettingsLocaleKey, string> = {
-  title: '网页搜索与获取',
-  description: '选择网页搜索与网页获取使用的提供方。',
-  searchSection: '网页搜索提供方',
-  fetchSection: '网页获取提供方',
-  providerDeepSeek: 'DeepSeek Search API',
-  providerLegacy: 'DeepSeek（旧版）',
-  legacyKeyHint: '账号模型发起的请求使用已登录账号；其他请求使用此 API Key（{ref}），默认与「模型」页共用',
-  maxUses: '单次请求最多搜索次数',
-  maxUsesHint: '每次 Messages 请求允许的服务端搜索次数上限，须为正整数，默认 5',
-  invalidMaxUses: '请填正整数；留空表示使用默认值',
-  providerLocal: '本机直接获取',
-  providerDeepSeekFetch: 'DeepSeek Fetch API',
-  providerMissing: '{id}（未加载）',
-  providerAuto: '自动选择',
-  providersFailed: '无法读取提供方列表，此菜单可能不完整',
-  retry: '重试',
-  pluginProviderHint: '请在该插件自己的设置中配置',
-  credential: 'API Key',
-  baseUrl: 'Base URL',
-  baseUrlHint: '填写含 API 前缀的地址；留空时使用官方地址；程序追加 {path}',
-  apiKeyUnsetApi: '未配置密钥。',
-  searchGuide: '网页搜索与获取指南',
-  searchGuideUrl: 'https://api-docs.deepseek.com/zh-cn/guides/search',
-  apiKeySet: '已配置密钥。',
-  count: '每次搜索结果数',
-  countHint: '每个查询返回的结果条数，须为 1–50 的整数，默认 10；不控制搜索调用次数。web_search 保留的来源数不超过其自身的结果上限。',
-  overridden: '已覆盖',
-  reset: '恢复默认',
-  readOnly: '本部署的设置为只读。',
-  unavailable: '该插件当前未加载，暂时无法配置。',
-  save: '保存',
-  saving: '保存中…',
-  saveFailed: '本部署没有接受这些值，已保留供你修改。',
-  invalidNumber: '请填数字；留空表示使用默认值。',
-  invalidCount: '请填 1–50 的整数；留空表示使用默认值。',
-}
-
 /**
  * The form frame's copy, read from this page's dictionary.
  * @param t - the page's locale reader.

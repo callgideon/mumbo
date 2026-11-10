@@ -6,7 +6,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import type { ApprovalCardInput } from '@deepseek-ai/dsh-client-ui-approval/client'
 import { PendingQuestion, createWaterfallRequest } from '@deepseek-ai/dsh-client-ui-user-questions/src/client/contract/slots.ts'
 import { ApplicationApproval, selectApplicationApproval, type ApplicationApprovalProps } from '../src/client/ApplicationApproval.tsx'
-import { en, zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 
 type AskUserQuestionItem = PendingQuestion['questions'][number]
 type ApprovalIntent = Extract<NonNullable<AskUserQuestionItem['intent']>, { kind: 'approval' }>
@@ -29,8 +29,8 @@ it('leaves ordinary questions, plan reviews and other approval intents to their 
 it.each(['allow', 'reject', 'always'] as const)('returns the exact %s option from the shared card', async (choice) => {
   const intent: ApprovalIntent = {
     kind: 'approval', approve: 'task-value', reject: 'deny-value', always: 'saved-value',
-    subject: { name: 'Calculator' }, display: { question: { en: 'Allow?', zh: '允许吗？' },
-      detail: { en: 'Scope', zh: '本次任务' }, approve: { en: 'Task', zh: '本次任务允许' } },
+    subject: { name: 'Calculator' }, display: { question: { en: 'Allow?', fr: 'Autoriser ?' },
+      detail: { en: 'Scope', fr: 'Cette tâche' }, approve: { en: 'Task', fr: 'Autoriser pour cette tâche' } },
   }
   const item: AskUserQuestionItem = { id: 'cua-app-access', question: 'English question', detail: 'English detail', intent }
   const pending = new PendingQuestion('s1' as SessionId, [item])
@@ -38,12 +38,12 @@ it.each(['allow', 'reject', 'always'] as const)('returns the exact %s option fro
   pending.attachWaterfall(request.channel)
   const factory = vi.fn((_name: string, _input: ApprovalCardInput) => null)
   render(<ApplicationApproval {...{ matched: selectApplicationApproval(pending)!, renderFactorySlot: factory,
-    t: makeTranslate(zh), resolveText: text => text.zh ?? text.en } as ApplicationApprovalProps} />)
+    t: makeTranslate(en), resolveText: text => text.fr ?? text.en } as ApplicationApprovalProps} />)
   const [name, card] = factory.mock.calls[0]!
   expect(name).toBe('conversation.approval.card')
-  expect(card).toMatchObject({ title: '允许吗？', description: '本次任务', allowLabel: '本次任务允许', subject: { name: 'Calculator' } })
+  expect(card).toMatchObject({ title: 'Autoriser ?', description: 'Cette tâche', allowLabel: 'Autoriser pour cette tâche', subject: { name: 'Calculator' } })
   expect(card.canAnswer()).toBe(true)
-  expect(card.warning).toEqual({ label: zh.approvalRisks, title: zh.approvalRiskTitle, detail: zh.approvalRiskNotice })
+  expect(card.warning).toEqual({ label: en.approvalRisks, title: en.approvalRiskTitle, detail: en.approvalRiskNotice })
   await ({ allow: card.onAllow, reject: card.onReject, always: card.onAlways! })[choice]()
   expect(await request.result).toEqual({ answers: [{ id: 'cua-app-access', selected: [{ allow: 'task-value', reject: 'deny-value', always: 'saved-value' }[choice]] }] })
   pending.close()

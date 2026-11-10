@@ -1,6 +1,6 @@
-# ⚠ 官网资源已上传，缓存刷新结果未确认
+# ⚠ Website assets uploaded; cache refresh result not confirmed
 
-刷新提交未确认，可能尚未提交
+Refresh submission not confirmed; it may not have been submitted
 
 https://download.deepseek.com/desktop/dsh-latest-macos-arm64.dmg
 Task: unknown

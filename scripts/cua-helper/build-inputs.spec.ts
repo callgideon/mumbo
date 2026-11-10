@@ -277,7 +277,7 @@ globalThis.fetch = async (input, options) => {
     } else {
       expect(result.status, result.stderr).toBe(0)
       expect(readFileSync(output, 'utf8')).toBe(scenario === 'match' ? 'artifact-id=456\nrun-id=123\n' : 'artifact-id=\nrun-id=\n')
-      expect(readFileSync(summary, 'utf8')).toContain(scenario === 'match' ? '跳过依赖安装' : '未找到')
+      expect(readFileSync(summary, 'utf8')).toContain(scenario === 'match' ? 'Skipping dependency installation' : 'No usable CUA helper artifact')
     }
   },
 )

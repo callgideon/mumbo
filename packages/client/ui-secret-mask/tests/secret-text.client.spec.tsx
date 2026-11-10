@@ -5,7 +5,7 @@ import type { ComponentProps } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { SecretText } from '../src/client/SecretText.tsx'
-import { en, zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 
 afterEach(cleanup)
 
@@ -16,7 +16,7 @@ const KEY = ['sk', '-', '0123456789abcdef0123456789abcdef'].join('')
 const OTHER = ['sk', '-', 'fedcba9876543210fedcba9876543210'].join('')
 const masked = (value: string): string => value.slice(0, 8) + '*'.repeat(value.length - 8)
 
-function props(raw: string, interactive: boolean, dictionary: Record<string, string> = zh): Props {
+function props(raw: string, interactive: boolean, dictionary: Record<string, string> = en): Props {
   // The component reads only these owner and locale seats.
   return {
     node: { id: 'secret', start: 0, end: raw.length, data: { masked: masked(raw) } },
@@ -35,14 +35,14 @@ describe('SecretText', () => {
   it('reveals and hides the value from its own control', () => {
     const view = render(<SecretText {...props(KEY, true)} />)
     const run = view.container.querySelector('[data-secret]')!
-    const reveal = view.getByRole('button', { name: '显示密钥' })
+    const reveal = view.getByRole('button', { name: 'Show secret' })
     expect(run.textContent).toBe(masked(KEY))
     expect(reveal.getAttribute('aria-pressed')).toBe('false')
     expect(reveal.querySelector('svg')).not.toBeNull()
 
     fireEvent.click(reveal)
     expect(run.textContent).toBe(KEY)
-    const hide = view.getByRole('button', { name: '隐藏密钥' })
+    const hide = view.getByRole('button', { name: 'Hide secret' })
     expect(hide.getAttribute('aria-pressed')).toBe('true')
 
     fireEvent.click(hide)

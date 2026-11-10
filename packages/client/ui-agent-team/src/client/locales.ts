@@ -3,44 +3,10 @@
 /** Locale namespace owned by the Agent teamwork Web UI. */
 export const NS = 'agent-team'
 
-/** Simplified Chinese dictionary and key source. */
-export const zh = {
-  'progress.completed': '{count} 已完成',
-  'progress.active': '{count} 进行中',
-  'progress.pending': '{count} 待处理',
-  'command.title': '智能体团队协作',
-  'command.running': '执行中',
-  'command.done': '已完成',
-  'command.failed': '执行失败',
-  'command.failedReason': '执行失败：{reason}',
-  trigger: '任务板',
-  'mode.label': '启用智能体团队协作',
-  'mode.infoLabel': '关于智能体团队协作',
-  'mode.description': '通过共享任务板协调多个智能体的分工与进度，复杂任务表现更佳，token 开销也相应更高。',
-  'mode.failed': '无法确认智能体团队协作设置已保存，请重试：{message}',
-  'disable.title': '确认停用智能体团队协作？',
-  'disable.description': '对话过程中停用智能体团队协作，将停止共享任务工具和团队协调指令。',
-  'disable.warning': '停用后可能影响缓存复用、增加后续 token 用量与开销，并影响当前任务的协作效果。',
-  'disable.cancel': '取消',
-  'disable.confirm': '确认停用',
-  'disable.close': '关闭',
-  loading: '正在加载任务板…',
-  unavailable: '任务板暂不可用',
-  failure: '任务记录无效：{message}',
-  empty: '暂无共享任务，可以通过对话创建',
-  tasks: '共享任务',
-  owner: '负责人',
-  unowned: '未分配',
-  blocked: '被依赖阻塞',
-  'status.pending': '待处理',
-  'status.in_progress': '进行中',
-  'status.completed': '已完成',
-} satisfies Record<string, string>
-
 /** Agent teamwork locale key union. */
-export type TeamKey = keyof typeof zh
+export type TeamKey = keyof typeof en
 
-/** English dictionary checked against the Chinese key set. */
+/** English dictionary (the key-set source of truth). */
 export const en = {
   'progress.completed': '{count} completed',
   'progress.active': '{count} in progress',
@@ -72,7 +38,7 @@ export const en = {
   'status.pending': 'Pending',
   'status.in_progress': 'In progress',
   'status.completed': 'Completed',
-} satisfies Record<TeamKey, string>
+} satisfies Record<string, string>
 
 /** Japanese copy, checked against the English keys. */
 export const ja = {

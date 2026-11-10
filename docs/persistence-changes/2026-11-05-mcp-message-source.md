@@ -5,8 +5,6 @@ kind: persistence-change
 
 # 2026-11-05-mcp-message-source
 
-English | [中文](2026-11-05-mcp-message-source.zh.md)
-
 ## Summary
 
 Adds the mcp message source: a user message an allowlisted person sent through the @mumbo/mcp door, carrying the person's handle as principal.

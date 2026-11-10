@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { bindSnapshotSelector, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import menuCss from '@deepseek-ai/dsh-client-ui-primitives/src/Menu.module.css'
-import { en, zh } from '../src/client/locales.ts'
+import { en, fr } from '../src/client/locales.ts'
 import type { PanelSnapshot } from '../src/client/source.ts'
 import { WorktreeToggle } from '../src/client/WorktreeToggle.tsx'
 import type { ForgeBranches, ForgeCheckoutState, ForgePanelState, ForgePanelWorktree, ForgeWorktreeBlocker } from '../src/types.ts'
@@ -140,7 +140,7 @@ describe('WorktreeToggle checkbox', () => {
 
   it.each([
     ['en', en, 'Current branch: main', 'Not on a branch · 0a1b2c3'],
-    ['zh', zh, '当前分支：main', '未在分支上 · 0a1b2c3'],
+    ['fr', fr, 'Branche actuelle : main', 'Aucune branche active · 0a1b2c3'],
   ] as const)('names the branch and detached checkout in an informational tooltip (%s)', (_locale, copy, branchLabel, detachedLabel) => {
     const b = option(editable(), makeTranslate(copy))
     const chip = b.view.getByRole('button', { name: branchLabel })

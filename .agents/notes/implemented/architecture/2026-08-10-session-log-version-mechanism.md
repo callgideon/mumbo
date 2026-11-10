@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-08-10-session-log-version-mechanism.zh.md)
-
 ## Problem
 
 Session logs must be upgradable after release, and the runtime that ships first is the floor for every later decision: whatever refusal and degradation behavior is missing from the first released reader can never be added to the copies users already run. Release issue #1901 required at minimum that an old runtime reading a newer session format reports "unsupported" instead of misreading it. The pre-change reader did the opposite on both axes: `assertVersion` rejected any version mismatch with one direction-blind message, and the JSONL decoder passed unknown event types through untouched, so reconstruction silently skipped them — resuming a gutted session with no diagnostic at all.
@@ -24,9 +22,9 @@ The [reader-compatibility review decision](../process/2026-10-08-session-reader-
 
 ### Writer and publication authority
 
-`SESSION_FORMAT_VERSION` owns the checkout writer number; the [release-status reference](../../../../docs/session-format-status.md) owns one bilingual `latestReleasedVersion` and `evidenceTag` record. Publication changes independently of source development, so status is derived by comparing those facts rather than maintaining a second `released` boolean. General documentation links to these authorities; fixed-version contracts and historical evidence keep their explicit numbers.
+`SESSION_FORMAT_VERSION` owns the checkout writer number; the [release-status reference](../../../../docs/session-format-status.md) owns one `latestReleasedVersion` and `evidenceTag` record. Publication changes independently of source development, so status is derived by comparing those facts rather than maintaining a second `released` boolean. General documentation links to these authorities; fixed-version contracts and historical evidence keep their explicit numbers.
 
-The [documentation-standard check](../../../../scripts/doc-standard.spec.ts) validates record structure, bilingual equality, evidence-link consistency, and the local release/writer ordering without network access. It proves internal consistency, not publication or freshness. The release operator verifies publication and updates the record after a higher format ships, as required by the [release process](../process/2026-08-10-npm-release-sequences.md). This keeps compatibility review independent of credentials and GitHub availability while making the manual freshness obligation explicit.
+The [documentation-standard check](../../../../scripts/doc-standard.spec.ts) validates record structure, evidence-link consistency, and the local release/writer ordering without network access. It proves internal consistency, not publication or freshness. The release operator verifies publication and updates the record after a higher format ships, as required by the [release process](../process/2026-08-10-npm-release-sequences.md). This keeps compatibility review independent of credentials and GitHub availability while making the manual freshness obligation explicit.
 
 ## Consequences
 

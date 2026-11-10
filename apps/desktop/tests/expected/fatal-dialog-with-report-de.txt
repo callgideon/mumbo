@@ -1,0 +1,11 @@
+DeepSeek Harness ist nicht verfügbar
+Die Anwendung konnte nicht gestartet werden oder wurde unerwartet gestoppt.
+Desktop Host failed
+Plugin initialization failed
+Diagnosebericht: C:\Users\someone\AppData\Roaming\DeepSeek Harness\logs\crash-2026-09-22T10-30-00-000Z-host.log
+
+Wenn Anwendungsdateien fehlen oder beschädigt sind, schließen Sie die Anwendung und installieren Sie sie erneut. Ihre Aufgaben werden separat gespeichert.
+Beenden
+Neustart
+Deaktivieren Sie Plugins von Drittanbietern, sichern Sie den Profil-Patch und starten Sie neu
+Diagnosebericht abrufen

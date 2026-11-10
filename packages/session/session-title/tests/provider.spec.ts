@@ -220,7 +220,7 @@ describe('SessionTitleService Provider lifecycle', () => {
     })
     const session = ctx.sessions.create(SessionId('underivable-fallback'))
     session.append('turn/start', { turn: 1 })
-    appendHumanPrompt(session, '番')
+    appendHumanPrompt(session, '토')
     await settle()
     appendRoute(session)
     await settle()

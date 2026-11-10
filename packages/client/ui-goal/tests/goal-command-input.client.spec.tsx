@@ -12,7 +12,7 @@ import type {
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import type { PropsRenderFactories } from '@deepseek-ai/dsh-client-ui-slots'
 import { createUserTextFixture } from '../../ui-conversation/tests/user-text-component-fixture.client.tsx'
-import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
+import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
 import type { SessionEvent } from '@deepseek-ai/dsh-session/types'
 import { commandDefinition } from '@deepseek-ai/dsh-client-ui-chat/src/client/conversation-nodes/command.ts'
 import { chatViewDefinition } from '@deepseek-ai/dsh-client-ui-chat/src/client/conversation-nodes/chat-snapshot-builder.ts'
@@ -20,7 +20,7 @@ import { GoalCommandInputView } from '../src/client/GoalCommandInputView.tsx'
 import {
   goalCommandInputDefinition, goalCommandText,
 } from '../src/client/goal-command-input.ts'
-import { zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 
 afterEach(cleanup)
 
@@ -131,7 +131,7 @@ describe('goal command input projection', () => {
   })
 
   it('renders the user-style command bubble without ordinary message actions', () => {
-    const t = makeTranslate(zh, commonZh)
+    const t = makeTranslate(en, commonEn)
     const props = {
       node: {
         key: 'goal-command-input:one',
@@ -141,7 +141,7 @@ describe('goal command input projection', () => {
       renderFactorySlot: textFactories(),
     } as Parameters<typeof GoalCommandInputView>[0]
     const view = render(<GoalCommandInputView {...props} />)
-    const bubble = view.getByRole('group', { name: '指令输入' })
+    const bubble = view.getByRole('group', { name: 'Command input' })
 
     expect(bubble.textContent).toBe('/goal ship it')
     expect(within(bubble).queryByRole('button')).toBeNull()
@@ -154,7 +154,7 @@ describe('goal command input projection', () => {
     const commands: UserTextInput['facts']['commands'][] = []
     const props = {
       node: { key: 'goal-command-input:stable', data: { commandId: 'command-goal', text: '/goal ship it', time: 1 } },
-      t: makeTranslate(zh, commonZh),
+      t: makeTranslate(en, commonEn),
       renderFactorySlot: textFactories((input) => { commands.push(input.facts.commands) }),
     } as Parameters<typeof GoalCommandInputView>[0]
     const view = render(<GoalCommandInputView {...props} />)
@@ -162,11 +162,11 @@ describe('goal command input projection', () => {
     expect(commands).toHaveLength(2)
     expect(commands[0]).toEqual([{ start: 0, end: 5, name: 'goal' }])
     expect(commands[1]).toBe(commands[0])
-    expect(view.getByRole('group', { name: '指令输入' }).textContent).toBe('/goal ship it')
+    expect(view.getByRole('group', { name: 'Command input' }).textContent).toBe('/goal ship it')
   })
 
   it('renders a bare /goal as one command chip and nothing else', () => {
-    const t = makeTranslate(zh, commonZh)
+    const t = makeTranslate(en, commonEn)
     const props = {
       node: {
         key: 'goal-command-input:bare',
@@ -176,24 +176,24 @@ describe('goal command input projection', () => {
       renderFactorySlot: textFactories(),
     } as Parameters<typeof GoalCommandInputView>[0]
     const view = render(<GoalCommandInputView {...props} />)
-    const bubble = view.getByRole('group', { name: '指令输入' })
+    const bubble = view.getByRole('group', { name: 'Command input' })
     expect(bubble.textContent).toBe('/goal')
     expect([...bubble.querySelectorAll('[data-ref-chip]')].map(chip => chip.textContent)).toEqual(['/goal'])
   })
 
   it('decorates only the leading command token: a /goal inside the objective stays plain', () => {
-    const t = makeTranslate(zh, commonZh)
+    const t = makeTranslate(en, commonEn)
     const props = {
       node: {
         key: 'goal-command-input:two',
-        data: { commandId: 'command-goal', text: '/goal 检查 /goal 的语法', time: 1_700_000_000_000 },
+        data: { commandId: 'command-goal', text: '/goal Check /goal \'s syntax', time: 1_700_000_000_000 },
       },
       t,
       renderFactorySlot: textFactories(),
     } as Parameters<typeof GoalCommandInputView>[0]
     const view = render(<GoalCommandInputView {...props} />)
-    const bubble = view.getByRole('group', { name: '指令输入' })
-    expect(bubble.textContent).toBe('/goal 检查 /goal 的语法')
+    const bubble = view.getByRole('group', { name: 'Command input' })
+    expect(bubble.textContent).toBe('/goal Check /goal \'s syntax')
     const chips = [...bubble.querySelectorAll('[data-ref-chip]')]
     expect(chips.map(chip => chip.textContent)).toEqual(['/goal'])
   })

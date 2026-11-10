@@ -1,11 +1,11 @@
 /** The workspace navigator's listed levels as the file tree's entries and directory states. */
 import { describe, expect, it } from 'vitest'
 import { makeTranslate, RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
-import { zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 import type { FilesTreeState } from '../src/client/store.ts'
 import { parentOf, treeRootOf, workspaceDirectories, workspaceEntries } from '../src/client/workspace-tree.ts'
 
-const t = makeTranslate(zh)
+const t = makeTranslate(en)
 
 /** A tree at `root` with `src` listed below it. */
 function listed(root: string): FilesTreeState {
@@ -54,10 +54,10 @@ describe('workspaceDirectories', () => {
       },
     }, t)
     expect(states).toEqual({
-      '/r': { failure: zh['error.notFound'], truncated: true },
+      '/r': { failure: en['error.notFound'], truncated: true },
       '/r/a': { loading: true },
       '/r/b': { loading: true },
-      '/r/c': { failure: zh['error.notFound'] },
+      '/r/c': { failure: en['error.notFound'] },
       '/r/d': {},
     })
   })

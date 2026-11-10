@@ -7,7 +7,7 @@
  * @returns the zero-based, end-exclusive content line range, or undefined for other paths or malformed markers.
  */
 export function historicalSchemaRegion(file: string, source: string): readonly [number, number] | undefined {
-  if (!/^docs\/persistence-changes\/historical-formats\/v(?:0|[1-9]\d*)(?:\.zh)?\.md$/u.test(file)) return undefined
+  if (!/^docs\/persistence-changes\/historical-formats\/v(?:0|[1-9]\d*)\.md$/u.test(file)) return undefined
   if (source.match(/<!--\s*persistence-format-schema\b/giu)?.length !== 2) return undefined
   const lines = source.split(/\r?\n/u)
   const start = lines.indexOf('<!-- persistence-format-schema:start -->')

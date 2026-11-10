@@ -5,8 +5,6 @@ kind: persistence-release
 
 # Persistence release: dsh-v0.0.1-rc.3
 
-English | [中文](dsh-v0.0.1-rc.3.zh.md)
-
 ## Summary
 
 The four compact/* event keys become compaction/*; user-message source kind workspace-instructions becomes agent-instructions, and hook dialect claude becomes claude-code. These literal and event-key changes occur while the writer format remains 0.
@@ -114,7 +112,7 @@ Detected 12 changed roots and 12 structural differences. The review requirement 
 <a id="verification"></a>
 ## Verification
 
-Extraction passed canonical-graph, root-digest, and reachable-type-digest validation, permitting the original optional `surfaceOp` only for historical surface events. The in-tree check reconstructs each tag from its predecessor and verifies before/after values, snapshot coverage, and bilingual machine declarations.
+Extraction passed canonical-graph, root-digest, and reachable-type-digest validation, permitting the original optional `surfaceOp` only for historical surface events. The in-tree check reconstructs each tag from its predecessor and verifies before/after values, snapshot coverage, and machine declarations.
 
 ```sh
 pnpm run verify-persistence-releases

@@ -5,8 +5,6 @@ kind: persistence-release
 
 # Persistence release: dsh-v0.1.2-alpha.1
 
-English | [中文](dsh-v0.1.2-alpha.1.zh.md)
-
 ## Summary
 
 The envelope removes ignorable, request/header gains optional startsSeries and the series reason, and model-selection, subagent model-policy, and delivery-acceptance events are added. The writer format remains 0 despite these structural changes.
@@ -283,7 +281,7 @@ Detected 52 changed roots and 61 structural differences. The review requirement 
 <a id="verification"></a>
 ## Verification
 
-Extraction passed canonical-graph, root-digest, and reachable-type-digest validation, permitting the original optional `surfaceOp` only for historical surface events. The in-tree check reconstructs each tag from its predecessor and verifies before/after values, snapshot coverage, and bilingual machine declarations.
+Extraction passed canonical-graph, root-digest, and reachable-type-digest validation, permitting the original optional `surfaceOp` only for historical surface events. The in-tree check reconstructs each tag from its predecessor and verifies before/after values, snapshot coverage, and machine declarations.
 
 ```sh
 pnpm run verify-persistence-releases

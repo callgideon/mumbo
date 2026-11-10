@@ -95,7 +95,7 @@ function installPrivacyRelay(owner: FixtureWorld, reader: PrivacyOwnerReader) {
 describe('Assembled viewer page global configuration privacy', () => {
   it.each([
     { authority: 'loopback', origin: 'http://localhost:3000', language: 'en-US', locale: 'en', send: 'Send message', earlier: 'Load earlier' },
-    { authority: 'public', origin: 'https://viewer.example.test', language: 'zh-CN', locale: 'zh', send: '发送消息', earlier: '加载更早' },
+    { authority: 'public', origin: 'https://viewer.example.test', language: 'fr-FR', locale: 'fr', send: 'Envoyer le message', earlier: 'Charger plus tôt' },
   ])('keeps $authority settings private without losing Session grants or presentation', async ({ authority, origin, language, locale, send, earlier }) => {
     // Vitest's jsdom environment exposes its JSDOM instance; reconfigure changes the actual page authority.
     const jsdom = Reflect.get(globalThis, 'jsdom') as { reconfigure(options: { url: string }): void }
@@ -188,13 +188,13 @@ describe('Assembled viewer page global configuration privacy', () => {
       expect(JSON.stringify(forms.describe().getSnapshot())).not.toContain(sentinel)
       expect(document.body.textContent).not.toContain(sentinel)
     }
-    expect(screen.queryByRole('button', { name: /^(设置|Settings)$/u })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^(Paramètres|Settings)$/u })).toBeNull()
     expect(context.get('theme')?.getTheme().preference).toBe('system')
     expect(context.get('locale')?.getLocale().active).toBe(locale)
-    expect(document.documentElement.lang).toBe(locale === 'zh' ? 'zh-CN' : 'en')
+    expect(document.documentElement.lang).toBe(locale)
     expect(document.documentElement.style.colorScheme).toMatch(/^(light|dark)$/u)
     expect(document.body.style.getPropertyValue('--dsh-content-font-size')).toBe('14px')
-    expect(document.body.textContent).toContain('问题 51：fixture 历史消息')
+    expect(document.body.textContent).toContain('question 51: fixture history message')
     expect(document.querySelector('pre.shiki code')).not.toBeNull()
     const delivered = document.querySelector<HTMLElement>('[data-presented-files-row]')
     if (delivered === null) throw new Error('assembled viewer page delivered-file card is missing')
@@ -205,11 +205,11 @@ describe('Assembled viewer page global configuration privacy', () => {
     }, { timeout: 15_000 })
     await waitFor(() => { expect(document.querySelector('[data-liveshare-viewer-seat="model"]')?.textContent).toMatch(/deepseek/iu) })
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: earlier })) })
-    await waitFor(() => { expect(document.body.textContent).toContain('问题 50') }, { timeout: 15_000 })
+    await waitFor(() => { expect(document.body.textContent).toContain('question 50') }, { timeout: 15_000 })
     expect(relay.ordinaryCalls).toEqual(expect.arrayContaining(['session/page', 'session/attachment', 'session/modelCatalog']))
 
     expect(context.get('remoteAccess')?.source('session', 'fx-alpha', 'session/prompt').getSnapshot()).toBe(true)
-    const stopLabel = locale === 'zh' ? '停止生成' : 'Stop generating'
+    const stopLabel = locale === 'fr' ? 'Arrêter la génération' : 'Stop generating'
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: stopLabel })) })
     await waitFor(() => { expect(owner?.cancellations).toEqual(['fx-alpha']) })
     const text = `privacy ${authority}: real input sender remains granted`
@@ -220,7 +220,7 @@ describe('Assembled viewer page global configuration privacy', () => {
     expect(request).toMatchObject({ sessionId: 'fx-alpha', content: [{ type: 'text', text }] })
     promptEcho(owner.history('fx-alpha'), request)
     await act(async () => { owner?.completeReply('fx-alpha') })
-    await waitFor(() => { expect(document.body.textContent).toContain(`回声：${text}`) }, { timeout: 15_000 })
+    await waitFor(() => { expect(document.body.textContent).toContain(`Echo:${text}`) }, { timeout: 15_000 })
     expect(dispatch).not.toHaveBeenCalled()
   }, 180_000)
 })

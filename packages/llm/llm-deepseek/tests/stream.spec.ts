@@ -107,7 +107,7 @@ describe('SSE framing and provider failures', () => {
   }
   it('frames UTF-8 split at every byte and counts comments and ping as transport activity', async () => {
     const result = await read(`\uFEFF: heartbeat\r\n\r\n${sse([{ type: 'ping' }, ...textEvents]).replaceAll('\n', '\r\n')}`, true)
-    expect(result.result).toContainEqual({ type: 'text-delta', index: 0, text: 'Hello 世界' })
+    expect(result.result).toContainEqual({ type: 'text-delta', index: 0, text: 'Hello 세계' })
     expect(result.activity).toBe(textEvents.length + 2)
   })
   it.each(['data: not-json\n\n', 'data: []\n\n', 'event: ping\ndata: {"type":"other"}\n\n', 'data: {}\n\n'])('rejects malformed SSE %#', async (text) => {

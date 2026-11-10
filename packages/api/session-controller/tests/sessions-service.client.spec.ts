@@ -887,12 +887,12 @@ describe('create', () => {
     b.mock.remote.session.create.mockResolvedValue(ok({ sessionId: sid('fresh') }))
     await expect(b.svc.create({ cwd: '/w', sessionId: sid('fresh') })).resolves.toBe('fresh')
     expect(b.mock.remote.session.create).toHaveBeenCalledExactlyOnceWith({ cwd: '/w', sessionId: 'fresh' })
-    b.mock.remote.session.create.mockResolvedValue(err(new RemoteError('gateway/internal', '爆了', {})))
+    b.mock.remote.session.create.mockResolvedValue(err(new RemoteError('gateway/internal', 'blew up', {})))
     const failure = await b.svc.create({ sessionId: sid('candidate') }).catch((error: unknown) => error)
     expect(failure).toBeInstanceOf(SessionCreateError)
     expect(failure).toMatchObject({
       requestedSessionId: 'candidate',
-      rpcError: { code: 'gateway/internal', message: '爆了' },
+      rpcError: { code: 'gateway/internal', message: 'blew up' },
     })
   })
 
@@ -979,8 +979,8 @@ describe('fork', () => {
   it.for([
     ['Roadmap', 'Roadmap (1)'],
     ['Roadmap (1)', 'Roadmap (2)'],
-    ['计划（1）', '计划（2）'],
-    ['计划 （9）', '计划 （10）'],
+    ['Plan（1）', 'Plan（2）'],
+    ['Plan （9）', 'Plan （10）'],
   ] as const)('increments the durable title %j after the child is published', async ([sourceTitle, childTitle], { bench }) => {
     const b = bench()
     b.svc.handleControlFrame({

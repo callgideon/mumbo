@@ -34,7 +34,7 @@ it('bounds the queue and encoded record bytes including multibyte characters and
   const directory = await fixture()
   const journal = new OperationJournal(directory, { recordBytes: 8, segmentBytes: 32, queuedBytes: 16 })
   onTestFinished(async () => { await journal.close() })
-  expect(journal.enqueue('{"中":1}')).toBe(false)
+  expect(journal.enqueue('{"é":1}')).toBe(false)
   expect(journal.enqueue('{"a":1}')).toBe(true)
   expect(journal.enqueue('{"a":2}')).toBe(true)
   expect(journal.enqueue('{"a":3}')).toBe(false)

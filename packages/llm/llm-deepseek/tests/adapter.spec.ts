@@ -90,7 +90,7 @@ describe('direct Messages HTTP', () => {
     expect(http.requests[0]?.body.messages).toEqual([wireNotice])
     expect(http.requests[1]?.body.messages).toEqual([
       wireNotice,
-      { role: 'assistant', content: [{ type: 'text', text: 'Hello 世界' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Hello 세계' }] },
       { role: 'user', content: [{ type: 'text', text: 'continue' }] },
     ])
     expect(JSON.stringify(history)).toBe(saved)
@@ -145,7 +145,7 @@ describe('direct Messages HTTP', () => {
     const http = await endpoint()
     const llm = adapter({ baseURL: http.url })
     const response = await assemble(llm.stream(options({ model: 'deepseek-flash', sessionId: SessionId('session-test'), purpose: 'compaction' })), 'deepseek-flash')
-    expect(response.message.content).toEqual([{ type: 'text', text: 'Hello 世界' }])
+    expect(response.message.content).toEqual([{ type: 'text', text: 'Hello 세계' }])
     expect(response.message.source).toMatchObject({
       model: 'deepseek-flash', replayState: { response: { model: 'deepseek-flash' } },
     })

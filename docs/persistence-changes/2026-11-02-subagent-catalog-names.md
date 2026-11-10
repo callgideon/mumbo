@@ -5,8 +5,6 @@ kind: persistence-change
 
 # 2026-11-02-subagent-catalog-names
 
-English | [中文](2026-11-02-subagent-catalog-names.zh.md)
-
 ## Summary
 
 Adds version 3 of the parent-owned subagent/catalog payload, which records each continuable or parent-delivered external child's name, unique among its creator's children.

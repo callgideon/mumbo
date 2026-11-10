@@ -19,8 +19,6 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
-/** Simplified Chinese labels. */
-export const zh = { home: '主页', desktop: '桌面' } satisfies Record<BoxLinksKey, string>
 /** Japanese labels. */
 export const ja = { home: 'ホーム', desktop: 'デスクトップ' } satisfies Record<BoxLinksKey, string>
 /** Spanish labels. */

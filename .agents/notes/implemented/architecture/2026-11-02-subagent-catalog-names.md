@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-11-02-subagent-catalog-names.zh.md)
-
 ## Problem
 
 Models coordinate subagents through `send_message`, `interrupt_agent`, `list_agents`, and Team task owners. Those tools addressed every member by a 36-character Session id. Models copy such ids poorly: they cannot recall which id belongs to which task, they mistype ids, and every listing, receipt, notice, and identity statement spends tokens on them. Descriptions explain responsibilities but repeat and cannot address a member. Models need short, readable references that survive restarts and resolve to exactly one member, without a second execution identity.

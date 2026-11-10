@@ -15,10 +15,10 @@ function entry(overrides: Record<string, unknown> = {}): Record<string, unknown>
 function document(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     format: 1,
-    title: { en: 'Example Market', zh: '示例市场' },
+    title: { en: 'Example Market', ja: 'サンプルマーケット' },
     metadata: {
       categories: { productivity: { title: 'Productivity' } },
-      labels: { official: { title: { en: 'Official', zh: '官方' } }, ui: { title: 'UI' } },
+      labels: { official: { title: { en: 'Official', ja: 'こうしき' } }, ui: { title: 'UI' } },
       sortKeys: { downloads: { title: 'Downloads', order: 'desc' } },
     },
     plugins: [entry()],
@@ -51,7 +51,7 @@ describe('parseMarketIndex', () => {
       extra: true,
       plugins: [
         entry({
-          title: { en: 'Foo', 'zh-cn': '甲' },
+          title: { en: 'Foo', 'ja-jp': 'こう' },
           description: 'Does foo',
           icon: 'icons/foo.svg',
           author: 'Jane Doe',
@@ -77,17 +77,17 @@ describe('parseMarketIndex', () => {
     }), INDEX_URL)
     expect(index).toEqual({
       format: 1,
-      title: { en: 'Example Market', zh: '示例市场' },
+      title: { en: 'Example Market', ja: 'サンプルマーケット' },
       description: 'Community bundles',
       metadata: {
         categories: { productivity: { title: 'Productivity' } },
-        labels: { official: { title: { en: 'Official', zh: '官方' } }, ui: { title: 'UI' } },
+        labels: { official: { title: { en: 'Official', ja: 'こうしき' } }, ui: { title: 'UI' } },
         sortKeys: { downloads: { title: 'Downloads', order: 'desc' } },
       },
       plugins: [
         {
           name: '@scope/dsh-foo',
-          title: { en: 'Foo', 'zh-cn': '甲' },
+          title: { en: 'Foo', 'ja-jp': 'こう' },
           description: 'Does foo',
           icon: 'https://market.example/dsh/icons/foo.svg',
           author: 'Jane Doe',
@@ -115,7 +115,7 @@ describe('parseMarketIndex', () => {
   })
 
   it('preserves free-form keywords without declarations, including order, duplicates, and empty strings', () => {
-    for (const keywords of [[], ['market-specific', ' npm ', '中文', '', 'market-specific']]) {
+    for (const keywords of [[], ['market-specific', ' npm ', 'にほんご', '', 'market-specific']]) {
       const index = parseMarketIndex({ format: 1, title: 'Keywords', plugins: [entry({ metadata: { keywords } })] }, INDEX_URL)
       expect(index.plugins[0]?.metadata.keywords).toEqual(keywords)
     }
@@ -157,7 +157,7 @@ describe('parseMarketIndex', () => {
     expect(rejection([]).message).toBe('$ must be an object')
     expect(rejection(document({ format: 2 })).path).toBe('$.format')
     expect(rejection(document({ title: '  ' })).message).toBe('$.title must be a string with a non-whitespace character')
-    expect(rejection(document({ title: { zh: '市场' } })).message).toBe('$.title must contain en')
+    expect(rejection(document({ title: { ja: 'マーケット' } })).message).toBe('$.title must contain en')
     expect(rejection(document({ title: { EN: 'Market' } })).message).toBe('$.title.EN must be keyed by a lowercase language id')
     expect(rejection(document({ plugins: {} })).message).toBe('$.plugins must be an array')
     expect(rejection(document({ metadata: [] })).message).toBe('$.metadata must be an object')

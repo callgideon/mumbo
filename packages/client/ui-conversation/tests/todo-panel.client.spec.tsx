@@ -9,28 +9,28 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { bindSnapshotSelector, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { TodoItem } from '@deepseek-ai/dsh-tool-todo/client'
-import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
+import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
 import type { TodoDockProps } from '../src/client/skeleton/TodoPanel.tsx'
 import { TodoDock, TodoPanel, todoDockEntry } from '../src/client/skeleton/TodoPanel.tsx'
-import { NS, zh } from '../src/client/locales.ts'
+import { NS, en } from '../src/client/locales.ts'
 
-const t: TodoDockProps['t'] = makeTranslate(zh, commonZh)
+const t: TodoDockProps['t'] = makeTranslate(en, commonEn)
 
 afterEach(cleanup)
 
 const LIST: TodoItem[] = [
-  { content: '搭骨架', status: 'completed' },
-  { content: '写组件', status: 'in_progress' },
-  { content: '补测试', status: 'pending' },
+  { content: 'scaffold', status: 'completed' },
+  { content: 'write component', status: 'in_progress' },
+  { content: 'add tests', status: 'pending' },
 ]
 
 /** A parallel plan: three tasks running at once (concurrent subagents). */
 const PARALLEL: TodoItem[] = [
-  { content: '搭骨架', status: 'completed' },
-  { content: '写组件', status: 'in_progress' },
-  { content: '跑后台构建', status: 'in_progress' },
-  { content: '读源码', status: 'in_progress' },
-  { content: '补测试', status: 'pending' },
+  { content: 'scaffold', status: 'completed' },
+  { content: 'write component', status: 'in_progress' },
+  { content: 'run background build', status: 'in_progress' },
+  { content: 'read source', status: 'in_progress' },
+  { content: 'add tests', status: 'pending' },
 ]
 
 describe('TodoPanel', () => {
@@ -42,19 +42,19 @@ describe('TodoPanel', () => {
   it('starts collapsed with the per-status count summary visible', () => {
     render(<TodoPanel todos={LIST} t={t} />)
     expect(screen.getByTestId('todo-panel')).toBeTruthy()
-    expect(screen.getByText('任务')).toBeTruthy()
-    expect(screen.getByText('1 已完成 · 1 进行中 · 1 待处理')).toBeTruthy()
+    expect(screen.getByText('To-dos')).toBeTruthy()
+    expect(screen.getByText('1 completed · 1 in progress · 1 pending')).toBeTruthy()
     expect(screen.getByRole('button', { expanded: false })).toBeTruthy()
     expect(screen.queryByRole('list')).toBeNull()
   })
 
   it('omits the completed segment while nothing is done yet', () => {
     render(<TodoPanel todos={[
-      { content: '写组件', status: 'in_progress' },
-      { content: '补测试', status: 'pending' },
+      { content: 'write component', status: 'in_progress' },
+      { content: 'add tests', status: 'pending' },
     ]} t={t} />)
-    expect(screen.getByText('1 进行中 · 1 待处理')).toBeTruthy()
-    expect(screen.queryByText(/已完成/)).toBeNull()
+    expect(screen.getByText('1 in progress · 1 pending')).toBeTruthy()
+    expect(screen.queryByText(/completed/)).toBeNull()
   })
 
   it('expands to show one row per item with its status glyph', () => {
@@ -62,12 +62,12 @@ describe('TodoPanel', () => {
     fireEvent.click(screen.getByRole('button', { expanded: false }))
     const items = screen.getAllByRole('listitem')
     expect(items.map(li => li.getAttribute('data-status'))).toEqual(['completed', 'in_progress', 'pending'])
-    expect(screen.getByText('搭骨架')).toBeTruthy()
-    expect(screen.getByText('写组件')).toBeTruthy()
+    expect(screen.getByText('scaffold')).toBeTruthy()
+    expect(screen.getByText('write component')).toBeTruthy()
     expect(items.map(li => li.querySelector('[data-state]')?.getAttribute('data-state')))
       .toEqual(['done', 'ongoing', 'idle'])
     expect(screen.getAllByRole('img').map(node => node.getAttribute('aria-label')))
-      .toEqual(['已完成', '进行中', '待处理'])
+      .toEqual(['Completed', 'In progress', 'Pending'])
   })
 
   it('collapse hides an expanded list; expand restores; header keeps the count summary', () => {
@@ -77,8 +77,8 @@ describe('TodoPanel', () => {
     fireEvent.click(header)
     expect(screen.queryByRole('list')).toBeNull()
     // Collapsed header is title + progress only (no in-progress content hint).
-    expect(screen.getByText('1 已完成 · 1 进行中 · 1 待处理')).toBeTruthy()
-    expect(screen.queryByText('写组件')).toBeNull()
+    expect(screen.getByText('1 completed · 1 in progress · 1 pending')).toBeTruthy()
+    expect(screen.queryByText('write component')).toBeNull()
     fireEvent.click(screen.getByRole('button', { expanded: false }))
     expect(screen.getAllByRole('listitem')).toHaveLength(3)
   })
@@ -90,17 +90,17 @@ describe('TodoPanel', () => {
     // items carry the in-progress glyph at once, and the header counts all three.
     const statuses = screen.getAllByRole('listitem').map(li => li.getAttribute('data-status'))
     expect(statuses.filter(s => s === 'in_progress')).toHaveLength(3)
-    expect(screen.getByText('跑后台构建')).toBeTruthy()
-    expect(screen.getByText('读源码')).toBeTruthy()
-    expect(screen.getByText('1 已完成 · 3 进行中 · 1 待处理')).toBeTruthy()
+    expect(screen.getByText('run background build')).toBeTruthy()
+    expect(screen.getByText('read source')).toBeTruthy()
+    expect(screen.getByText('1 completed · 3 in progress · 1 pending')).toBeTruthy()
   })
 
   it('an all-completed list collapses the summary to the done count alone', () => {
-    render(<TodoPanel todos={[{ content: '都完了', status: 'completed' }]} t={t} />)
+    render(<TodoPanel todos={[{ content: 'all done', status: 'completed' }]} t={t} />)
     expect(screen.getByRole('button', { expanded: false })).toBeTruthy()
-    expect(screen.queryByText('都完了')).toBeNull()
-    expect(screen.getByText('1 已完成')).toBeTruthy()
-    expect(screen.queryByText(/进行中|待处理/)).toBeNull()
+    expect(screen.queryByText('all done')).toBeNull()
+    expect(screen.getByText('1 completed')).toBeTruthy()
+    expect(screen.queryByText(/in progress|pending/)).toBeNull()
   })
 })
 
@@ -118,7 +118,7 @@ describe('TodoDock', () => {
     // Capability absent (no baseline/frame yet) renders nothing.
     expect(screen.queryByTestId('todo-panel')).toBeNull()
     act(() => { store.set({ value: LIST }) })
-    expect(screen.getByText('1 已完成 · 1 进行中 · 1 待处理')).toBeTruthy()
+    expect(screen.getByText('1 completed · 1 in progress · 1 pending')).toBeTruthy()
     // The pre-first-write whole value (null) retires the strip (the panel owns no data).
     act(() => { store.set({ value: null }) })
     expect(screen.queryByTestId('todo-panel')).toBeNull()

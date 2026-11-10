@@ -6,10 +6,20 @@ import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type { SubprocessTerminalActivity } from '@deepseek-ai/dsh-subprocess'
 import { afterEach, describe, expect, it } from 'vitest'
+import { COVERAGE_TEST_TIMEOUT_ENV, coverageTestTimeoutOptions } from '../../../../scripts/coverage-partitions.ts'
 import LocalSubprocessRuntime from '../src/index.ts'
 
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
+
+const laneBudgetMs = coverageTestTimeoutOptions(process.env[COVERAGE_TEST_TIMEOUT_ENV]).testTimeout ?? 0
+/**
+ * Linux activity stays unknown until a /proc scan completes without any host process exiting
+ * mid-scan; under aggregate test load that can take seconds, so each activity wait keeps this floor.
+ */
+const ACTIVITY_WAIT_MS = Math.max(15_000, laneBudgetMs)
+/** A case runs several activity waits and must outlast one so a stalled wait reports its samples. */
+const CASE_TIMEOUT_MS = Math.max(60_000, laneBudgetMs)
 
 /** Prompt every startup file in this spec prints; its repeats count the prompts a shell reached. */
 const PROMPT_MARKER = 'READY>'
@@ -61,7 +71,7 @@ async function expectActivity(h: Shell, expected: SubprocessTerminalActivity['st
       const activity = await h.handle.inspectActivity()
       observed.push(`${activity.state}:${activity.revision}`)
       return activity.state
-    }).toBe(expected)
+    }, { timeout: ACTIVITY_WAIT_MS }).toBe(expected)
   } catch (cause) {
     const prompts = h.prompts() - promptsBefore
     const samples = observed.length === 0 ? 'no sample' : summarizeSamples(observed)
@@ -69,7 +79,7 @@ async function expectActivity(h: Shell, expected: SubprocessTerminalActivity['st
   }
 }
 
-describe.skipIf(process.platform === 'win32' || !existsSync('/bin/zsh'))('Zsh terminal activity', () => {
+describe.skipIf(process.platform === 'win32' || !existsSync('/bin/zsh'))('Zsh terminal activity', { timeout: CASE_TIMEOUT_MS }, () => {
   it('keeps silent foreground work, builtin loops, read, and background jobs busy until a new prompt is idle', async () => {
     const h = await shell('/bin/zsh')
     await expectActivity(h, 'idle')
@@ -134,7 +144,7 @@ describe.skipIf(process.platform === 'win32' || !existsSync('/bin/zsh'))('Zsh te
   })
 })
 
-describe.skipIf(process.platform === 'win32' || !existsSync('/bin/bash'))('Bash terminal activity', () => {
+describe.skipIf(process.platform === 'win32' || !existsSync('/bin/bash'))('Bash terminal activity', { timeout: CASE_TIMEOUT_MS }, () => {
   it('preserves scalar prompt hooks and uses unknown on shells without PS0', async () => {
     const h = await shell('bash', "PROMPT_COMMAND='printf HOOK; # user comment'\nset -C")
     expect(h.output()).toContain('HOOK')

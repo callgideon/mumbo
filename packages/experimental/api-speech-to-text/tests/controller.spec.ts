@@ -11,7 +11,7 @@ const id = 'sensevoice-local' as SpeechProviderId
 function fixture(maxAudioBytes = 32044, maxDurationSeconds = 1) {
   const ctx = new Context(); roots.push(ctx)
   const speech = new SpeechToText(ctx, SpeechToText.Config({ defaultProvider: id, language: 'auto' }))
-  const recognize = vi.fn(async () => ({ text: '你好', audioSeconds: 1, inferenceSeconds: 0.1 }))
+  const recognize = vi.fn(async () => ({ text: 'hello', audioSeconds: 1, inferenceSeconds: 0.1 }))
   speech.register({ info: { id, name: 'test', location: 'host-local', languages: ['auto', 'zh', 'en', 'ja'] }, transcribe: recognize })
   return { api: new SpeechController(ctx, { maxAudioBytes, maxDurationSeconds }), recognize }
 }
@@ -33,7 +33,7 @@ it('lists limits without inference and forwards explicit provider and language',
   const lifetime = new AbortController(), observation = api.follow(lifetime.signal)[Symbol.asyncIterator]()
   expect((await observation.next()).value).toMatchObject({ providers: [{ id, preparation: { phase: 'ready' } }] })
   lifetime.abort(); await observation.next()
-  expect(await api.transcribe({ audioBase64: recording(), providerId: id, language: 'zh' }, new AbortController().signal)).toMatchObject({ text: '你好' })
+  expect(await api.transcribe({ audioBase64: recording(), providerId: id, language: 'zh' }, new AbortController().signal)).toMatchObject({ text: 'hello' })
   expect(recognize).toHaveBeenCalledWith(expect.objectContaining({ language: 'zh' }), expect.any(AbortSignal))
   await api.transcribe({ audioBase64: recording() }, new AbortController().signal)
   expect(recognize).toHaveBeenLastCalledWith(expect.objectContaining({ language: 'auto' }), expect.any(AbortSignal))

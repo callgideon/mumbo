@@ -1,44 +1,44 @@
-- button "返回 实验性插件": 实验性插件
-- button "卸载 思考过程机器翻译" [disabled]: 卸载
+- button "Back to Experimental plugins": Experimental plugins
+- button "Uninstall Machine translation of reasoning" [disabled]: Uninstall
 - status
-- switch "启用 思考过程机器翻译" [checked]
-- heading "思考过程机器翻译" [level=3]
-- text: v{{version}} 实验性
+- switch "Enable Machine translation of reasoning" [checked]
+- heading "Machine translation of reasoning" [level=3]
+- text: v{{version}} Experimental
 - paragraph:
   - code: "@deepseek-ai/dsh-experimental-cot-translation-bundle"
-- paragraph: 智能体输出时，把展开的“思考”行翻译成你选择的语言，点击“查看原文”可切换回原文。
-- region "详细介绍":
+- paragraph: Translates expanded Think rows into your chosen language as the agent writes them, and View original switches back.
+- region "Details":
   - paragraph:
-    - img "展开的思考行从英文翻译成中文，并显示“查看原文”按钮"
-- paragraph: 展开的思考内容会发送给所选翻译服务，可能包含私有代码或对话细节。
-- paragraph: Bing 和 Google 翻译无需额外登录或 API key，但匿名接口可能拒绝或限制请求
-- text: 翻译服务
-- combobox "翻译服务":
+    - img "An expanded Think row translated from Chinese into English, with a View original button"
+- paragraph: Expanded reasoning is sent to the selected service. It may contain private code or conversation details.
+- paragraph: Bing and Google need no translation login or API key. Their anonymous endpoints may reject or limit requests.
+- text: Translation service
+- combobox "Translation service":
   - option "Bing" [selected]
   - option "Google"
-- text: 目标语言
-- textbox "目标语言":
+- text: Target language
+- textbox "Target language":
   - /placeholder: ""
   - text: auto
-- paragraph: auto 使用界面语言；也可填写语言代码，例如 zh、en、ja
-- button "保存" [disabled]
-- heading "包含的组件" [level=4]
-- text: 共 2 个 · 2 运行中
+- paragraph: auto follows the UI language; language codes such as zh, en, and ja also work.
+- button "Save" [disabled]
+- heading "Components" [level=4]
+- text: 2 total · 2 running
 - list:
   - listitem:
-    - text: 翻译服务 提供机器翻译，并复用会话中已保存的翻译结果。
+    - text: Translation service Translate text and reuse translations saved in the session.
     - code: translator
     - code: "@deepseek-ai/dsh-experimental-translator"
-    - text: 运行中
-    - switch "启用组件 翻译服务" [checked]
+    - text: Running
+    - switch "Enable component Translation service" [checked]
   - listitem:
-    - text: 思考过程机器翻译 将展开的思考内容机器翻译为其他语言。
+    - text: Machine translation of reasoning Display expanded reasoning in another language using machine translation.
     - code: cot-translation
     - code: "@deepseek-ai/dsh-experimental-client-ui-cot-translation"
-    - text: 运行中
-    - switch "启用组件 思考过程机器翻译" [checked]
-- heading "来源信息" [level=4]
-- term: 代码来源
-- definition: 内置
-- term: 当前版本
+    - text: Running
+    - switch "Enable component Machine translation of reasoning" [checked]
+- heading "Source" [level=4]
+- term: Code source
+- definition: Built in
+- term: Current version
 - definition: {{version}}

@@ -69,7 +69,7 @@ describe('official recommendations', () => {
     expect(await f.ctx.pluginRecommendations.describe(f.agent, callId)).toEqual({ status: 'refused', reason: 'unknown' })
     f.propose()
     expect(await f.ctx.pluginRecommendations.describe(f.agent, callId)).toEqual({
-      status: 'available', title: { en: 'Search', zh: '搜索' }, description: 'Search past conversations.', enabled: false,
+      status: 'available', title: { en: 'Search', zh: 'Search' }, description: 'Search past conversations.', enabled: false,
     })
     const noMeta = { ...bundle }
     delete noMeta.meta

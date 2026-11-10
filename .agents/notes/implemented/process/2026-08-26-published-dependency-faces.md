@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-08-26-published-dependency-faces.zh.md)
-
 ## Problem
 
 A package may contain a browser bundle, a Host entry, shared TypeScript declarations, and Cordis injection metadata. Encoding all of those relationships as required npm peers made the published CLI expensive to install: npm installs peers automatically and repeatedly evaluates placement through deep, converging peer paths. Changing ranges or making the peers optional did not remove that traversal.
@@ -44,11 +42,11 @@ pnpm run verify-package-dependencies
 
 Classify each new Host runtime export in [`package-dependency-policy.ts`](../../../../scripts/package-dependency-policy.ts) before generating manifests. `duplicateSafePackages` permits every runtime export from one exact root entry as an ordinary dependency; `safeHostDependencyExports` permits only listed exports; `peerRequiredHostExports` keeps the whole provider package edge in matching peer and development sections. An export may receive only one classification. After removing a package-wide identity or state requirement, classify its root entry at package level; after changing one export in a mixed package, update the exact export table. An edge becomes an ordinary dependency only after none of its imported exports remain peer-required.
 
-Generate the managed manifests and every directly derived artifact with one command. `--fix` writes nothing while a policy violation exists; after success it refreshes `pnpm-lock.yaml`, regenerates both module-graph languages and their pairing record, and prints the ordinary-dependency and peer-required edge lists.
+Generate the managed manifests and every directly derived artifact with one command. `--fix` writes nothing while a policy violation exists; after success it refreshes `pnpm-lock.yaml`, regenerates `docs/module-graph.md`, and prints the ordinary-dependency and peer-required edge lists.
 
 ```sh
 pnpm run verify-package-dependencies -- --fix
-git diff -- packages pnpm-lock.yaml docs/module-graph.md docs/module-graph.zh.md docs/module-graph.i18n.yaml
+git diff -- packages pnpm-lock.yaml docs/module-graph.md
 ```
 
 Measure the working-tree graph and a Git ref through the local metadata-only registry. Each run creates a fresh consumer and npm cache, replaces inherited npm configuration with explicit peer, hoisting, and registry settings, executes `npm install --package-lock-only`, rejects archive downloads, and leaves the repository unchanged. `--runs` controls repetitions, `--timeout-ms` terminates the npm process tree after its deadline, and optional `--max-ms` makes the command fail when the slowest run exceeds a threshold.

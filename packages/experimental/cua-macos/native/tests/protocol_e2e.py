@@ -51,7 +51,7 @@ def cases():
         (request("capture-debug", "screenshot", {"unexpected": "private capture content"}),
          "capture-debug", "INVALID_ARGUMENT", "Unknown operation parameter"),
         (request("", "protocol-absent", {}), "", "UNSUPPORTED", "Unsupported native operation: protocol-absent"),
-        (request("call-中文-🧪", "protocol-absent\noperation", {}), "call-中文-🧪", "UNSUPPORTED",
+        (request("call-옭뇣-🧪", "protocol-absent\noperation", {}), "call-옭뇣-🧪", "UNSUPPORTED",
          "Unsupported native operation: protocol-absent\noperation"),
     ]
     result.append((request("hover-button", "hover", {"mouseButton": "left"}), "hover-button", "INVALID_ARGUMENT",

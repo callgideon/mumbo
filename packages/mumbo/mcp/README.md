@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @mumbo/mcp
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 `@mumbo/mcp` serves the Model Context Protocol on one exact `/mcp` route of the injected `ctx.webServer`. A caller presents a shared bearer key and names an allowlisted principal; every request gets a fresh stateless MCP server that answers in JSON, never in a stream. Use it when a person's MCP client on another machine reaches the host through a local relay. The key authenticates the relay, not the person.

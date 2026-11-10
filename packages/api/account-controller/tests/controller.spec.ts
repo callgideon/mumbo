@@ -51,7 +51,7 @@ it('delegates bonus reads and acknowledgements without altering their values', a
   const { provider, controller } = fixture()
   const accountId = 'account' as AccountUserId
   const orderId = 'order' as AccountBonusOrderId
-  const batch: AccountBonusBatch = { accountId, bonuses: [{ orderId, expiresAt: '2026-10-21T12:00:00Z', message: '已赠送您 5.00 元 DSH 体验赠金。' }] }
+  const batch: AccountBonusBatch = { accountId, bonuses: [{ orderId, expiresAt: '2026-10-21T12:00:00Z', message: 'You have been granted a 5.00 CNY DSH trial bonus.' }] }
   provider.getUnnotifiedBonuses.mockResolvedValueOnce(batch)
   expect(await controller.getUnnotifiedBonuses(client)).toBe(batch)
   expect(provider.getUnnotifiedBonuses).toHaveBeenCalledExactlyOnceWith(client)

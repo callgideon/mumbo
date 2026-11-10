@@ -704,7 +704,7 @@ describe('LlmRuntime', () => {
   it('detaches advertised model badges, including their translations', async () => {
     const ctx = new Context()
     await ctx.plugin(LlmRuntime)
-    const translated = { text: { en: 'New', zh: '新' }, tone: 'info' as const }
+    const translated = { text: { en: 'New', ja: 'ニュー' }, tone: 'info' as const }
     const literal = { text: '1017', tone: 'neutral' as const }
     ctx.llm.registerAdapter(['catalog'], new CatalogAdapter({ id: 'catalog', name: 'Catalog' }, [
       { provider: 'catalog', id: 'new', name: 'New', badge: translated },

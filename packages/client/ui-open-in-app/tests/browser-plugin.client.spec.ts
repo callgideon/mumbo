@@ -31,7 +31,7 @@ import { FileRouteAction } from '../src/client/FileRouteAction.tsx'
 import { ContextMenuApplicationIcon } from '../src/client/context-menus.tsx'
 import type { OpenInAppOutcome } from '../src/client/outcome.ts'
 import { OpenInAppToast, type OpenInAppToastProps, type OpenInAppToastSource } from '../src/client/open-toast.tsx'
-import { en, NS, zh } from '../src/client/locales.ts'
+import { en, NS, fr } from '../src/client/locales.ts'
 
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', async original => ({
   ...await original<typeof import('@deepseek-ai/dsh-client-ui-primitives')>(),
@@ -441,17 +441,18 @@ describe('open-in-app browser half', () => {
   it('registers both dictionaries under its own namespace and releases them with the fiber', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ apps: [] }), { status: 200 })))
     const { ctx, fiber } = await bench()
-    ctx.locale.setLocale('zh')
+    ctx.locale.addLanguage({ id: 'fr', label: 'Français', fallback: 'en' })
+    ctx.locale.setLocale('fr')
     const translate = ctx.locale.bind(NS)
-    expect(translate('path.more')).toBe(zh['path.more'])
+    expect(translate('path.more')).toBe(fr['path.more'])
     ctx.locale.setLocale('en')
     expect(translate('path.more')).toBe(en['path.more'])
     await fiber.dispose()
     expect(translate('path.more')).not.toBe(en['path.more'])
   })
 
-  it('keeps the English dictionary key-identical to the Chinese source of truth', () => {
-    expect(Object.keys(en).sort()).toEqual(Object.keys(zh).sort())
+  it('keeps the French dictionary key-identical to the English source of truth', () => {
+    expect(Object.keys(en).sort()).toEqual(Object.keys(fr).sort())
   })
 })
 

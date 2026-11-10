@@ -27,7 +27,7 @@ import {
 import { PermissionSelect } from '../src/client/PermissionSelect.tsx'
 import type { PermissionSelectInjected } from '../src/client/PermissionSelect.tsx'
 import { apply, inject } from '../src/client/index.ts'
-import { accessEn, accessZh } from '../src/client/locales.ts'
+import { accessEn, accessFr } from '../src/client/locales.ts'
 
 const sid = (k: string): SessionId => k as SessionId
 
@@ -49,6 +49,7 @@ async function bench(allows: (action: string) => boolean = () => true) {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry)
   const locale = new LocaleRuntime(ctx)
+  locale.addLanguage({ id: 'fr', label: 'Français', fallback: 'en' })
   locale.setLocale('en')
   ctx.provide('locale', locale)
   const mock = RemoteMock.create().load(remoteDefaultResponses)
@@ -234,15 +235,15 @@ describe('ui-permission browser plugin', () => {
         confirmLabel: 'Enable Auto review',
       },
     })
-    b.locale.setLocale('zh')
+    b.locale.setLocale('fr')
     const localized = await b.popup().options(proj, new AbortController().signal)
-    expect(localized.map(option => option.label)).toEqual(['仅可查看', '工作区内修改', '完全权限', '自动审查'])
+    expect(localized.map(option => option.label)).toEqual(['Lecture seule', 'Écriture dans l\'espace de travail', 'Accès complet', 'Auto review'])
     expect(localized.find(option => option.id === 'danger-full-access')?.confirmation).toEqual({
-      title: '确认启用完全权限？',
-      description: accessZh['confirm.description'],
-      acknowledgeLabel: '我已了解风险，并愿意继续',
-      cancelLabel: '取消',
-      confirmLabel: '启用完全权限',
+      title: 'Activer l\'accès complet ?',
+      description: accessFr['confirm.description'],
+      acknowledgeLabel: 'Je comprends les risques et je veux continuer',
+      cancelLabel: 'Annuler',
+      confirmLabel: 'Activer l\'accès complet',
     })
     b.setCatalog({ ...CATALOG, options: [
       { value: 'workspace-write', name: 'Project Files' },
@@ -315,12 +316,12 @@ describe('ui-permission browser plugin', () => {
 
   it('localizes the Auto description instead of displaying host English copy', async () => {
     const b = await bench()
-    b.ctx.locale.setLocale('zh')
+    b.ctx.locale.setLocale('fr')
     const proj = { sessionId: sid('s1') }
     b.values.set(sid('s1'), { currentValue: 'workspace-write' })
     const options = await b.popup().options(proj, new AbortController().signal)
     expect(options.find(option => option.id === 'auto')?.detail)
-      .toBe('无沙箱运行；每次原生工具调用和 PTC 内层调用前由同一模型进行实验性审查。')
+      .toBe('Exécutez sans bac à sable après un examen expérimental sur le même modèle de chaque appel d\'outil natif et appel interne PTC.')
   })
 
   it('a pick submits the /permission line; rejection and unmatched throw', async () => {

@@ -5,7 +5,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { DesktopFileActions, FileActions } from '../types.ts'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import { registerFileMenus } from './context-menus.tsx'
-import { zh, en, ja, es, fr, de, ru, pt, type FileActionKey } from './locales.ts'
+import { en, ja, es, fr, de, ru, pt, type FileActionKey } from './locales.ts'
 import { BrowserFileActions } from './files.ts'
 
 export type { FileActions, FileActionSource, FileSaveResult } from '../types.ts'
@@ -27,7 +27,7 @@ export function apply(ctx: Context): void {
   ctx.provide('fileActions', actions)
   ctx.effect(() => () => { actions.dispose() }, 'file actions: lifetime')
   ctx.inject(['contextMenus', 'slots', 'locale', 'remote', 'remote.workspaceFiles', 'remote.session'], (child) => {
-    child.effect(() => child.locale.register('fileActions', { zh, en, ja, es, fr, de, ru, pt }), 'file actions: locale')
+    child.effect(() => child.locale.register('fileActions', { en, ja, es, fr, de, ru, pt }), 'file actions: locale')
     child.slots.inject('contextMenu.icon', function* () {
       for (const [key, Icon] of Object.entries({
         'file-actions.copy': IconCopyOutlineRegular, 'file-actions.download': IconDownloadOutlineRegular,

@@ -130,40 +130,40 @@ describe('all-messages LLM title provider', () => {
     const { ctx, adapter } = await harness()
 
     const fallbackSession = ctx.sessions.create(SessionId('all-source-fallback'))
-    const fallbackMessage = appendHumanPrompt(fallbackSession, '阳台种番茄和罗勒')
+    const fallbackMessage = appendHumanPrompt(fallbackSession, 'growing tomatoes and basil on the balcony')
     await ctx.sessionTitle.refresh(fallbackSession)
     const fallbackOptions = adapter.requests.at(-1)!
     expect(textOf(fallbackOptions)).toBe(initialInput([
-      { seq: fallbackMessage.seq, text: '阳台种番茄和罗勒' },
+      { seq: fallbackMessage.seq, text: 'growing tomatoes and basil on the balcony' },
     ]))
     expect(fallbackOptions.system).toBe(SYSTEM_BASE)
 
     const userSession = ctx.sessions.create(SessionId('all-source-user'))
-    const userMessage = appendHumanPrompt(userSession, '阳台种番茄和罗勒')
-    ctx.sessionTitle.rename(userSession, '用户标题')
+    const userMessage = appendHumanPrompt(userSession, 'growing tomatoes and basil on the balcony')
+    ctx.sessionTitle.rename(userSession, 'User title')
     await ctx.sessionTitle.refresh(userSession)
     const userOptions = adapter.requests.at(-1)!
-    expect(textOf(userOptions)).toBe(initialInput([{ seq: userMessage.seq, text: '阳台种番茄和罗勒' }]))
+    expect(textOf(userOptions)).toBe(initialInput([{ seq: userMessage.seq, text: 'growing tomatoes and basil on the balcony' }]))
     expect(userOptions.system).toBe(SYSTEM_BASE)
 
     await ctx.sessionTitle.refresh(fallbackSession)
     const revisionOptions = adapter.requests.at(-1)!
     expect(textOf(revisionOptions)).toBe(revisionInput('All messages model title', [
-      { seq: fallbackMessage.seq, text: '阳台种番茄和罗勒' },
+      { seq: fallbackMessage.seq, text: 'growing tomatoes and basil on the balcony' },
     ]))
     expect(revisionOptions.system).toBe(SYSTEM_WITH_TITLE)
 
     const foreignSession = ctx.sessions.create(SessionId('all-source-foreign'))
-    const foreignMessage = appendHumanPrompt(foreignSession, '阳台种番茄和罗勒')
+    const foreignMessage = appendHumanPrompt(foreignSession, 'growing tomatoes and basil on the balcony')
     foreignSession.append('session/title', {
-      title: '前一个提供方标题',
+      title: 'previous Provider title',
       messageSeqs: [foreignMessage.seq],
       source: { kind: 'provider', provider: SessionTitleProviderId('previous-provider') },
     })
     await ctx.sessionTitle.refresh(foreignSession)
     const foreignOptions = adapter.requests.at(-1)!
-    expect(textOf(foreignOptions)).toBe(revisionInput('前一个提供方标题', [
-      { seq: foreignMessage.seq, text: '阳台种番茄和罗勒' },
+    expect(textOf(foreignOptions)).toBe(revisionInput('previous Provider title', [
+      { seq: foreignMessage.seq, text: 'growing tomatoes and basil on the balcony' },
     ]))
     expect(foreignOptions.system).toBe(SYSTEM_WITH_TITLE)
   })
@@ -223,11 +223,11 @@ describe('all-messages LLM title provider', () => {
     ctx.llm.registerAdapter(['title-route'], adapter)
     await ctx.plugin(providerPlugin, LLM_CONFIG)
     const session = ctx.sessions.create(SessionId('absent-current-title'))
-    const message = appendHumanPrompt(session, '番')
+    const message = appendHumanPrompt(session, '토')
 
     await ctx.sessionTitle.refresh(session)
 
-    expect(textOf(adapter.requests[0])).toBe(initialInput([{ seq: message.seq, text: '番' }]))
+    expect(textOf(adapter.requests[0])).toBe(initialInput([{ seq: message.seq, text: '토' }]))
     expect(adapter.requests[0]?.system).toBe(SYSTEM_BASE)
   })
 
@@ -314,23 +314,23 @@ describe('all-messages LLM title provider', () => {
 
   it('preserves an accepted title unchanged when the model returns it verbatim', async () => {
     const { ctx, adapter } = await harness(LLM_CONFIG, [
-      { type: 'text-delta', index: 0, text: '阳台种番茄与罗勒' },
+      { type: 'text-delta', index: 0, text: 'growing tomatoes and basil on the balcony' },
       { type: 'finish', reason: { kind: 'stop' } },
     ])
     const session = ctx.sessions.create(SessionId('all-stability'))
-    const first = appendHumanPrompt(session, '我想在阳台种番茄和罗勒，请给入门建议。')
+    const first = appendHumanPrompt(session, 'I want to grow tomatoes and basil on my balcony; please give beginner advice.')
     await ctx.sessionTitle.refresh(session)
-    expect(ctx.sessionTitle.get(session)?.title).toBe('阳台种番茄与罗勒')
+    expect(ctx.sessionTitle.get(session)?.title).toBe('growing tomatoes and basil on the balcony')
 
-    const second = appendHumanPrompt(session, '花盆要多大？')
+    const second = appendHumanPrompt(session, 'How big should the pots be?')
     const accepted = await ctx.sessionTitle.refresh(session)
 
     expect(accepted).toMatchObject({
-      title: '阳台种番茄与罗勒',
+      title: 'growing tomatoes and basil on the balcony',
       messageSeqs: [first.seq, second.seq],
       source: { kind: 'provider', provider: providerPlugin.name },
     })
     expect(adapter.requests.at(-1)?.system).toBe(SYSTEM_WITH_TITLE)
-    expect(textOf(adapter.requests.at(-1))).toContain('"currentTitle":"阳台种番茄与罗勒"')
+    expect(textOf(adapter.requests.at(-1))).toContain('"currentTitle":"growing tomatoes and basil on the balcony"')
   })
 })

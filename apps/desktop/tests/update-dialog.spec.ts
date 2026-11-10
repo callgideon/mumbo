@@ -51,13 +51,13 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function setup(locale: DesktopLocale | (() => DesktopLocale) = resolveDesktopLocale('zh-CN')) {
+function setup(locale: DesktopLocale | (() => DesktopLocale) = resolveDesktopLocale('de')) {
   const parent = new fixture.FakeParent()
   const owner = parent as unknown as BrowserWindow
   const overlays = new DesktopUpdateOverlays()
   dialogs = new DesktopUpdateDialog('preload-update-dialog.cjs', locale, overlays)
   const show = (signal?: AbortSignal, options: Partial<UpdateDialogOptions> = {}) => dialogs!.show(owner, {
-    message: '下载完成', buttons: ['安装并重启'], cancelId: 1, ...options, ...(signal === undefined ? {} : { signal }),
+    message: 'Download abgeschlossen', buttons: ['Installieren und neu starten'], cancelId: 1, ...options, ...(signal === undefined ? {} : { signal }),
   })
   const invoke = (channel: string, ...args: unknown[]) => {
     const view = fixture.views.at(-1)!
@@ -73,7 +73,7 @@ it('accepts only a displayed choice from its isolated shell frame', async () => 
   const pending = f.show()
   const view = fixture.views[0]!
   expect(dialogs!.isOpen).toBe(true)
-  expect(f.invoke(UPDATE_DIALOG_IPC.status)).toMatchObject({ closeLabel: '关闭', buttons: ['安装并重启'], cancelId: 1 })
+  expect(f.invoke(UPDATE_DIALOG_IPC.status)).toMatchObject({ closeLabel: 'Schließen', buttons: ['Installieren und neu starten'], cancelId: 1 })
   const respond = fixture.handlers.get(UPDATE_DIALOG_IPC.respond)!
   expect(() => respond({ sender: f.parent.webContents, senderFrame: view.webContents.mainFrame }, 0)).toThrow(/unowned/)
   expect(() => respond({ sender: view.webContents, senderFrame: { ...view.webContents.mainFrame } }, 0)).toThrow(/unowned/)
@@ -108,14 +108,14 @@ it('updates a background result in the same view without activating its owner', 
   await Promise.resolve()
   const view = fixture.views[0]!
   const old = f.invoke(UPDATE_DIALOG_IPC.status) as { revision: number }
-  const next = f.show(undefined, { message: '已是最新版本' })
+  const next = f.show(undefined, { message: 'Sie verwenden die neueste Version.' })
   expect((await first).response).toBe(1)
   expect(fixture.views).toHaveLength(1)
   expect(f.parent.contentView.addChildView).toHaveBeenCalledOnce()
   expect(view.webContents.loadURL).toHaveBeenCalledOnce()
   expect(f.parent.focus).not.toHaveBeenCalled()
   expect(view.webContents.focus).not.toHaveBeenCalled()
-  expect(view.webContents.send).toHaveBeenLastCalledWith(UPDATE_DIALOG_IPC.changed, expect.objectContaining({ message: '已是最新版本' }))
+  expect(view.webContents.send).toHaveBeenLastCalledWith(UPDATE_DIALOG_IPC.changed, expect.objectContaining({ message: 'Sie verwenden die neueste Version.' }))
   expect(() => fixture.handlers.get(UPDATE_DIALOG_IPC.respond)!({
     sender: view.webContents, senderFrame: view.webContents.mainFrame,
   }, old.revision, 0)).toThrow(/stale/)
@@ -205,7 +205,7 @@ it('denies foreign navigation, redirects, and new windows', async () => {
 it('reads the current locale and keeps technical diagnostics separate from ordinary detail', async () => {
   let locale = resolveDesktopLocale('en')
   const f = setup(() => locale)
-  for (const language of ['zh-CN', 'en']) {
+  for (const language of ['de', 'en']) {
     locale = resolveDesktopLocale(language)
     const pending = f.show(undefined, { technicalDetails: 'exit 0; shutdown acknowledged false' })
     expect(f.invoke(UPDATE_DIALOG_IPC.status)).toMatchObject({ locale: locale.id, closeLabel: locale.messages.updateClose,

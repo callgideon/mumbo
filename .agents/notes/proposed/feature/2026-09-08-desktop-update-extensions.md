@@ -2,8 +2,6 @@
 
 Status: proposed
 
-English | [中文](2026-09-08-desktop-update-extensions.zh.md)
-
 ## Problem
 
 Frequent releases may eventually benefit from independently revised Desktop packages, a stable subscription, next-launch installation, or replacing an older pending update. These choices introduce additional release and installer states that are not needed to ship the initial fixed-Nightly, explicitly approved installation flow.
@@ -33,7 +31,7 @@ This part of the proposal is superseded by [Desktop channel settings](../../../.
 
 ### Automatic-installation setting
 
-The candidate setting is automatic installation, potentially enabled by default only after product approval and measured platform behavior. Candidate Chinese helper text is “关闭后仍会提示更新，需手动升级。” If next-launch installation is not acceptable, evaluate a download-only setting and retain explicit installation confirmation.
+The candidate setting is automatic installation, potentially enabled by default only after product approval and measured platform behavior. Candidate helper text is “Updates will still be prompted after closing; upgrade manually.” If next-launch installation is not acceptable, evaluate a download-only setting and retain explicit installation confirmation.
 
 | Setting | Newer version discovered | Later complete app launch |
 |---|---|---|

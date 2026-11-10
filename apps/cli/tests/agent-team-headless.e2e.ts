@@ -51,7 +51,7 @@ describe('dsh run with Agent Teams enabled', () => {
       ].join('\n'))
       const launch = resolveExampleLaunch({
         srcBin: dshBinScript,
-        configArgs: ['--profile', 'headless', '请先运行 workflow 检查，再使用 Agent Teams 把调研和实现拆给两个 teammate，等待完成后汇总。'],
+        configArgs: ['--profile', 'headless', 'please first Run workflow Checks, then use Open in Agent Teams split research and implementation between two teammate, wait Done then summarize.'],
         tsconfigPath,
         env: {
           DSH_HOME: home,

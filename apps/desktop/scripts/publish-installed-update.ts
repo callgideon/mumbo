@@ -23,12 +23,12 @@ async function main(): Promise<void> {
   let confirmed = false
   try {
     console.log(action === 'upload-binaries'
-      ? '仅授权此批次 test 二进制上传。确认没有其他发布者；会完整回读安装包，可能产生较大下载流量。'
-      : '仅授权此批次 test 清单发布。确认没有其他发布者；复用成功上传回执，仅回读清单，不重复下载安装包。')
+      ? 'Authorizes only this batch of test binary uploads. Confirm there is no other publisher; the installer will be read back in full, which may cause heavy download traffic.'
+      : 'Authorizes only this batch of test manifest publishing. Confirm there is no other publisher; successful upload receipts are reused and only the manifest is read back, without downloading the installer again.')
     if (action === 'publish-feed' && version === prepared.run.versions[1]) {
-      console.log('确认版本 1 已通过安装后的入口启动并仍在运行；必须提供该批次 journals 目录。')
+      console.log('Confirm version 1 was launched through the installed entry point and is still running; the journals directory of this batch is required.')
     }
-    confirmed = (await terminal.question(`请输入 ${expected}：`)) === expected
+    confirmed = (await terminal.question(`Type ${expected}: `)) === expected
   } finally { terminal.close() }
   if (!confirmed) throw new Error('operator declined')
   console.log(await executeInstalledUpdatePublication(manifest, version, receipt, action, createInstalledUpdateCos(), values.journals))

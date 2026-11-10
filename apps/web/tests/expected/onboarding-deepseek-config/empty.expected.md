@@ -1,2 +1,2 @@
-- group "模型与推理等级":
-  - status: 暂无可用模型
+- group "Model and reasoning effort":
+  - status: No models available.

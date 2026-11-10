@@ -8,59 +8,59 @@ import { FoldedText } from '@deepseek-ai/dsh-client-ui-action-cards/src/client/C
 import type { ActionCardFields, ActionCardResult } from '@deepseek-ai/dsh-action-cards/types'
 import { PageCardBody, type PageCardProps } from '../src/client/Card.tsx'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
-import { en, zh } from '../src/client/locales.ts'
+import { en, fr } from '../src/client/locales.ts'
 
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 const callId = ToolCallId('creation-1')
 const ACTION = 'create_personalized_page'
 type Act = (verb: string, payload?: ActionCardFields) => Promise<ActionCardResult | undefined>
 
-function props(decision?: { phase: string; data?: ActionCardFields }, chinese = true, details: ActionCardFields = { slot: 'sidebar-right' }): PageCardProps & { act: ReturnType<typeof vi.fn<Act>> } {
+function props(decision?: { phase: string; data?: ActionCardFields }, french = false, details: ActionCardFields = { slot: 'sidebar-right' }): PageCardProps & { act: ReturnType<typeof vi.fn<Act>> } {
   const proposal = { callId, turn: 1, action: ACTION, title: 'Counter', brief: 'Keep my task count visible.', details }
   return { proposal, decision: decision === undefined ? undefined : { callId, action: ACTION, ...decision },
     sessionId: SessionId('session-1'), summary: <><strong>{proposal.title}</strong><p>{proposal.brief}</p></>, Folded: FoldedText,
     act: vi.fn<Act>(async () => ({ status: 'accepted' })), infoDismissed: createSnapshotStore(true),
-    t: makeTranslate(chinese ? zh : en) }
+    t: makeTranslate(french ? fr : en) }
 }
 
 it('starts with the recommended location, lets the user change it, and starts only on Create', async () => {
   const value = props()
   render(<PageCardBody {...value} />)
   expect(screen.getByText('Counter')).toBeTruthy()
-  const location = screen.getByRole('button', { name: '添加到: 右侧栏' })
+  const location = screen.getByRole('button', { name: 'Add to: Right sidebar' })
   expect(screen.queryByRole('menu')).toBeNull()
   fireEvent.click(location)
   expect(screen.getAllByRole('menuitem')).toHaveLength(4)
   fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
   expect(screen.queryByRole('menu')).toBeNull()
   fireEvent.click(location)
-  fireEvent.click(screen.getByRole('menuitem', { name: /会话 Tab/ }))
+  fireEvent.click(screen.getByRole('menuitem', { name: /Session tab/ }))
   expect(screen.queryByRole('menu')).toBeNull()
   expect(value.act).not.toHaveBeenCalled()
-  fireEvent.click(screen.getByRole('button', { name: '创建' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Create' }))
   await waitFor(() => { expect(value.act).toHaveBeenCalledExactlyOnceWith('create', { slot: 'page' }) })
 })
 
 it('requires a written location, preserves its draft, and passes only the chosen location on Create', async () => {
   const value = props()
   const { rerender } = render(<PageCardBody {...value} />)
-  fireEvent.click(screen.getByRole('button', { name: '添加到: 右侧栏' }))
-  fireEvent.click(screen.getByRole('menuitem', { name: /自行撰写/ }))
-  const input = screen.getByRole('textbox', { name: zh.customLabel })
-  expect(screen.getByRole('button', { name: '创建' }).hasAttribute('disabled')).toBe(true)
-  fireEvent.change(input, { target: { value: '  左侧入口打开全屏日历  ' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Add to: Right sidebar' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: /Write your own/ }))
+  const input = screen.getByRole('textbox', { name: en.customLabel })
+  expect(screen.getByRole('button', { name: 'Create' }).hasAttribute('disabled')).toBe(true)
+  fireEvent.change(input, { target: { value: '  Left entry opens a full-screen calendar  ' } })
   expect(value.act).not.toHaveBeenCalled()
-  fireEvent.click(screen.getByRole('button', { name: '创建' }))
-  await waitFor(() => { expect(value.act).toHaveBeenCalledWith('create', { slot: 'sidebar-right', customLocation: '左侧入口打开全屏日历' }) })
+  fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+  await waitFor(() => { expect(value.act).toHaveBeenCalledWith('create', { slot: 'sidebar-right', customLocation: 'Left entry opens a full-screen calendar' }) })
   rerender(<PageCardBody {...value} />)
-  fireEvent.click(screen.getByRole('button', { name: '添加到: 自行撰写' }))
-  fireEvent.click(screen.getByRole('menuitem', { name: /全局页面/ }))
+  fireEvent.click(screen.getByRole('button', { name: 'Add to: Write your own' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: /Global page/ }))
   expect(screen.queryByRole('textbox')).toBeNull()
-  fireEvent.click(screen.getByRole('button', { name: '创建' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Create' }))
   await waitFor(() => { expect(value.act).toHaveBeenLastCalledWith('create', { slot: 'sidebar-left' }) })
-  fireEvent.click(screen.getByRole('button', { name: '添加到: 全局页面' }))
-  fireEvent.click(screen.getByRole('menuitem', { name: /自行撰写/ }))
-  expect(screen.getByRole<HTMLTextAreaElement>('textbox').value).toBe('  左侧入口打开全屏日历  ')
+  fireEvent.click(screen.getByRole('button', { name: 'Add to: Global page' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: /Write your own/ }))
+  expect(screen.getByRole<HTMLTextAreaElement>('textbox').value).toBe('  Left entry opens a full-screen calendar  ')
 })
 
 it('shows the recorded placement once settled, not the location picked before the decision', () => {
@@ -75,28 +75,28 @@ it('shows the recorded placement once settled, not the location picked before th
 })
 
 it('restores a written location after cancellation and preserves it on retry', async () => {
-  const value = props({ phase: 'cancelled', data: { slot: 'page', customLocation: '右侧查看当前会话的 Context' } })
+  const value = props({ phase: 'cancelled', data: { slot: 'page', customLocation: "View this session's Context on the right" } })
   const { rerender } = render(<PageCardBody {...value} />)
-  expect(screen.getByRole<HTMLTextAreaElement>('textbox').value).toBe('右侧查看当前会话的 Context')
-  fireEvent.click(screen.getByRole('button', { name: '重新创建' }))
-  await waitFor(() => { expect(value.act).toHaveBeenCalledWith('create', { slot: 'page', customLocation: '右侧查看当前会话的 Context' }) })
-  rerender(<PageCardBody {...props({ phase: 'installed', data: { slot: 'page', customLocation: '右侧查看当前会话的 Context' } })} />)
-  expect(screen.getByText('添加到 · 右侧查看当前会话的 Context')).toBeTruthy()
+  expect(screen.getByRole<HTMLTextAreaElement>('textbox').value).toBe("View this session's Context on the right")
+  fireEvent.click(screen.getByRole('button', { name: 'Create again' }))
+  await waitFor(() => { expect(value.act).toHaveBeenCalledWith('create', { slot: 'page', customLocation: "View this session's Context on the right" }) })
+  rerender(<PageCardBody {...props({ phase: 'installed', data: { slot: 'page', customLocation: "View this session's Context on the right" } })} />)
+  expect(screen.getByText("Add to · View this session's Context on the right")).toBeTruthy()
 })
 
 it('opens the cost notice until dismissed, remembers dismissal, and allows reopening', () => {
   const value = props()
   value.infoDismissed.set(false)
   const first = render(<PageCardBody {...value} />)
-  expect(screen.getByRole('note').textContent).toContain(zh.creationCost)
-  fireEvent.click(screen.getByRole('button', { name: zh.creationInfo }))
+  expect(screen.getByRole('note').textContent).toContain(en.creationCost)
+  fireEvent.click(screen.getByRole('button', { name: en.creationInfo }))
   expect(value.infoDismissed.getSnapshot()).toBe(true)
   expect(screen.queryByRole('note')).toBeNull()
   first.unmount()
   render(<PageCardBody {...value} />)
   expect(screen.queryByRole('note')).toBeNull()
-  fireEvent.click(screen.getByRole('button', { name: zh.creationInfo }))
-  expect(screen.getByRole('note').textContent).toContain(zh.creationBackground)
+  fireEvent.click(screen.getByRole('button', { name: en.creationInfo }))
+  expect(screen.getByRole('note').textContent).toContain(en.creationBackground)
   expect(value.act).not.toHaveBeenCalled()
 })
 
@@ -107,21 +107,21 @@ it('disables pending decisions, labels only a pending Create as starting, and su
   const creation = Promise.withResolvers<ActionCardResult | undefined>()
   value.act.mockReturnValueOnce(dismissal.promise).mockReturnValueOnce(creation.promise)
   render(<PageCardBody {...value} />)
-  fireEvent.click(screen.getByRole('button', { name: '暂不需要' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Not now' }))
   expect(value.infoDismissed.getSnapshot()).toBe(true)
-  expect(screen.getByRole('button', { name: '添加到: 右侧栏' }).hasAttribute('disabled')).toBe(true)
-  expect(screen.getByRole('button', { name: '暂不需要' }).hasAttribute('disabled')).toBe(true)
-  expect(screen.getByRole('button', { name: '创建' }).hasAttribute('disabled')).toBe(true)
-  expect(screen.queryByRole('button', { name: '开始创建…' })).toBeNull()
-  fireEvent.click(screen.getByRole('button', { name: zh.creationInfo }))
-  expect(screen.getByRole('note').textContent).toContain(zh.creationCost)
+  expect(screen.getByRole('button', { name: 'Add to: Right sidebar' }).hasAttribute('disabled')).toBe(true)
+  expect(screen.getByRole('button', { name: 'Not now' }).hasAttribute('disabled')).toBe(true)
+  expect(screen.getByRole('button', { name: 'Create' }).hasAttribute('disabled')).toBe(true)
+  expect(screen.queryByRole('button', { name: 'Starting…' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: en.creationInfo }))
+  expect(screen.getByRole('note').textContent).toContain(en.creationCost)
   expect(value.act).toHaveBeenCalledWith('dismiss', { slot: 'sidebar-right' })
   await act(async () => { dismissal.resolve({ status: 'settled', decision: { callId, action: ACTION, phase: 'dismissed' } }) })
-  fireEvent.click(screen.getByRole('button', { name: '创建' }))
-  expect(screen.getByRole('button', { name: '开始创建…' }).hasAttribute('disabled')).toBe(true)
-  expect(screen.getByRole('button', { name: '暂不需要' }).hasAttribute('disabled')).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+  expect(screen.getByRole('button', { name: 'Starting…' }).hasAttribute('disabled')).toBe(true)
+  expect(screen.getByRole('button', { name: 'Not now' }).hasAttribute('disabled')).toBe(true)
   await act(async () => { creation.resolve({ status: 'accepted' }) })
-  expect(screen.getByRole('button', { name: '创建' }).hasAttribute('disabled')).toBe(false)
+  expect(screen.getByRole('button', { name: 'Create' }).hasAttribute('disabled')).toBe(false)
 })
 
 it.each(['installing', 'dismissed', 'replaced'] as const)('restores %s without repeat actions', (phase) => {
@@ -131,9 +131,9 @@ it.each(['installing', 'dismissed', 'replaced'] as const)('restores %s without r
   expect(screen.getByText('Add to · Global page')).toBeTruthy()
 })
 
-it.each([true, false])('explains cost and background creation without starting work (Chinese: %s)', (chinese) => {
-  const value = props(undefined, chinese)
-  const copy = chinese ? zh : en
+it.each([true, false])('explains cost and background creation without starting work (French: %s)', (french) => {
+  const value = props(undefined, french)
+  const copy = french ? fr : en
   render(<PageCardBody {...value} />)
   const button = screen.getByRole('button', { name: copy.creationInfo })
   expect(screen.queryByRole('note')).toBeNull()
@@ -156,27 +156,27 @@ it('offers cancellation beside the location during generation, then waits for cl
   const pending = Promise.withResolvers<ActionCardResult | undefined>()
   value.act.mockImplementation(() => pending.promise)
   const { rerender } = render(<PageCardBody {...value} />)
-  expect(screen.queryByText(zh.sourceRetained)).toBeNull()
-  fireEvent.click(screen.getByRole('button', { name: zh.creationInfo }))
-  expect(screen.getByText(zh.sourceRetained)).toBeTruthy()
-  const cancel = screen.getByRole('button', { name: '取消创建' })
-  expect(cancel.parentElement).toBe(screen.getByText(`${zh.location} · ${zh.page}`).parentElement)
+  expect(screen.queryByText(en.sourceRetained)).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: en.creationInfo }))
+  expect(screen.getByText(en.sourceRetained)).toBeTruthy()
+  const cancel = screen.getByRole('button', { name: 'Cancel creation' })
+  expect(cancel.parentElement).toBe(screen.getByText(`${en.location} · ${en.page}`).parentElement)
   fireEvent.click(cancel)
   expect(value.act).toHaveBeenCalledWith('cancel', undefined)
-  expect(screen.getByRole('button', { name: '正在取消…' }).hasAttribute('disabled')).toBe(true)
-  expect(screen.queryByRole('button', { name: '重新创建' })).toBeNull()
+  expect(screen.getByRole('button', { name: 'Cancelling…' }).hasAttribute('disabled')).toBe(true)
+  expect(screen.queryByRole('button', { name: 'Create again' })).toBeNull()
   await act(async () => { pending.resolve({ status: 'accepted' }) })
   rerender(<PageCardBody {...props({ phase: 'cancelled', data: { slot: 'page' } })} />)
-  expect(screen.getByRole('button', { name: '重新创建' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Create again' })).toBeTruthy()
   rerender(<PageCardBody {...props({ phase: 'installing', data: { slot: 'page' } })} />)
-  expect(screen.getByRole('status').textContent).toBe(zh.installing)
-  expect(screen.queryByRole('button', { name: '取消创建' })).toBeNull()
+  expect(screen.getByRole('status').textContent).toBe(en.installing)
+  expect(screen.queryByRole('button', { name: 'Cancel creation' })).toBeNull()
 })
 
 it.each(['failed', 'interrupted', 'cancelled', 'unconfirmed'] as const)('offers an explicit retry after %s', async (phase) => {
   const value = props({ phase, data: { slot: 'page' } })
   render(<PageCardBody {...value} />)
-  fireEvent.click(screen.getByRole('button', { name: '重新创建' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Create again' }))
   await waitFor(() => { expect(value.act).toHaveBeenCalledWith('create', { slot: 'page' }) })
 })
 
@@ -184,16 +184,16 @@ it('offers only Undo, beside the location, on installed and earlier kept plugins
   const value = props({ phase: 'installed', data: { slot: 'page', application: 'applied' } })
   const { rerender } = render(<PageCardBody {...value} />)
   expect(screen.getAllByRole('status')).toHaveLength(1)
-  const undo = screen.getByRole('button', { name: zh.undo })
-  expect(screen.getAllByRole('button')).toEqual([screen.getByRole('button', { name: zh.creationInfo }), undo])
-  expect(undo.parentElement).toBe(screen.getByText(`${zh.location} · ${zh.page}`).parentElement)
+  const undo = screen.getByRole('button', { name: en.undo })
+  expect(screen.getAllByRole('button')).toEqual([screen.getByRole('button', { name: en.creationInfo }), undo])
+  expect(undo.parentElement).toBe(screen.getByText(`${en.location} · ${en.page}`).parentElement)
   fireEvent.click(undo)
   await waitFor(() => { expect(value.act).toHaveBeenCalledWith('undo', undefined) })
   const kept = props({ phase: 'kept', data: { slot: 'page', application: 'restart-required' } })
   rerender(<PageCardBody {...kept} />)
-  expect(screen.getByText(zh['restart-required'])).toBeTruthy()
-  expect(screen.getAllByRole('button')).toEqual([screen.getByRole('button', { name: zh.creationInfo }), screen.getByRole('button', { name: zh.undo })])
-  fireEvent.click(screen.getByRole('button', { name: zh.undo }))
+  expect(screen.getByText(en['restart-required'])).toBeTruthy()
+  expect(screen.getAllByRole('button')).toEqual([screen.getByRole('button', { name: en.creationInfo }), screen.getByRole('button', { name: en.undo })])
+  fireEvent.click(screen.getByRole('button', { name: en.undo }))
   await waitFor(() => { expect(kept.act).toHaveBeenCalledWith('undo', undefined) })
 })
 
@@ -202,30 +202,30 @@ it('offers only Restore on a removed card, labels it while pending and explains 
   const pending = Promise.withResolvers<ActionCardResult | undefined>()
   value.act.mockImplementation(() => pending.promise)
   render(<PageCardBody {...value} />)
-  expect(screen.getByRole('status').textContent).toBe(zh.removed)
-  const restore = screen.getByRole('button', { name: zh.restore })
-  expect(screen.getAllByRole('button')).toEqual([screen.getByRole('button', { name: zh.creationInfo }), restore])
-  expect(restore.parentElement).toBe(screen.getByText(`${zh.location} · ${zh.page}`).parentElement)
+  expect(screen.getByRole('status').textContent).toBe(en.removed)
+  const restore = screen.getByRole('button', { name: en.restore })
+  expect(screen.getAllByRole('button')).toEqual([screen.getByRole('button', { name: en.creationInfo }), restore])
+  expect(restore.parentElement).toBe(screen.getByText(`${en.location} · ${en.page}`).parentElement)
   fireEvent.click(restore)
   expect(value.act).toHaveBeenCalledExactlyOnceWith('restore', undefined)
-  expect(screen.getByRole('button', { name: zh.restoring }).hasAttribute('disabled')).toBe(true)
+  expect(screen.getByRole('button', { name: en.restoring }).hasAttribute('disabled')).toBe(true)
   await act(async () => { pending.resolve({ status: 'refused', reason: 'source-missing' }) })
-  expect(screen.getByRole('alert').textContent).toBe(zh['source-missing'])
-  expect(screen.getByRole('button', { name: zh.restore }).hasAttribute('disabled')).toBe(false)
+  expect(screen.getByRole('alert').textContent).toBe(en['source-missing'])
+  expect(screen.getByRole('button', { name: en.restore }).hasAttribute('disabled')).toBe(false)
 })
 
 it.each([
-  ['installed', 'failed', zh.applicationFailed],
-  ['kept', 'cancelled', zh.applicationCancelled],
-  ['removed', 'overridden', zh.overridden],
+  ['installed', 'failed', en.applicationFailed],
+  ['kept', 'cancelled', en.applicationCancelled],
+  ['removed', 'overridden', en.overridden],
 ] as const)('describes a %s receipt whose change ended %s with application copy, not phase copy', (phase, application, text) => {
   render(<PageCardBody {...props({ phase, data: { slot: 'page', application } })} />)
-  expect(screen.getAllByRole('status').map(status => status.textContent)).toEqual([zh[phase], text])
+  expect(screen.getAllByRole('status').map(status => status.textContent)).toEqual([en[phase], text])
 })
 
 it('leaves a failed creation to its phase line when the change also failed to apply', () => {
   render(<PageCardBody {...props({ phase: 'failed', data: { slot: 'page', application: 'failed' } })} />)
-  expect(screen.getAllByRole('status').map(status => status.textContent)).toEqual([zh.failed])
+  expect(screen.getAllByRole('status').map(status => status.textContent)).toEqual([en.failed])
 })
 
 it('keeps uncertain actions recoverable on refusal and connection loss', async () => {
@@ -235,27 +235,27 @@ it('keeps uncertain actions recoverable on refusal and connection loss', async (
     .mockResolvedValueOnce({ status: 'unconfirmed', reason: 'later-reason' })
     .mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('disconnected'))
   render(<PageCardBody {...value} />)
-  for (const text of [zh.unavailable, zh['read-only'], zh.unavailable, zh.transport, zh.transport]) {
-    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+  for (const text of [en.unavailable, en['read-only'], en.unavailable, en.transport, en.transport]) {
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
     await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(text) })
   }
 })
 
 it('shows supplied initial content as folded data below the plan and omits it otherwise', () => {
   const view = render(<PageCardBody {...props()} />)
-  expect(screen.queryByText('预填内容')).toBeNull()
-  const items = '1. 导出成功\n2. 断网提示清楚'
-  view.rerender(<PageCardBody {...props(undefined, true, { slot: 'sidebar-right', initialContent: items })} />)
-  expect(screen.getByText('预填内容')).toBeTruthy()
-  expect(screen.getByText(/导出成功/).textContent).toBe(items)
-  expect(screen.queryByRole('button', { name: '展开内容' })).toBeNull()
-  view.rerender(<PageCardBody {...props(undefined, true, { slot: 'sidebar-right', initialContent: '条'.repeat(131) })} />)
-  fireEvent.click(screen.getByRole('button', { name: '展开内容' }))
-  expect(screen.getByRole('button', { name: '收起内容' }).getAttribute('aria-expanded')).toBe('true')
+  expect(screen.queryByText('Starts with')).toBeNull()
+  const items = '1. Export succeeds\n2. The offline notice is clear'
+  view.rerender(<PageCardBody {...props(undefined, false, { slot: 'sidebar-right', initialContent: items })} />)
+  expect(screen.getByText('Starts with')).toBeTruthy()
+  expect(screen.getByText(/Export succeeds/).textContent).toBe(items)
+  expect(screen.queryByRole('button', { name: 'View all content' })).toBeNull()
+  view.rerender(<PageCardBody {...props(undefined, false, { slot: 'sidebar-right', initialContent: '뎽'.repeat(131) })} />)
+  fireEvent.click(screen.getByRole('button', { name: 'View all content' }))
+  expect(screen.getByRole('button', { name: 'Collapse content' }).getAttribute('aria-expanded')).toBe('true')
 })
 
 it('falls back to the summary for invalid fields and ignores unknown phases and invalid data', () => {
-  const invalid = render(<PageCardBody {...props(undefined, true, { slot: 'elsewhere' })} />)
+  const invalid = render(<PageCardBody {...props(undefined, false, { slot: 'elsewhere' })} />)
   expect(screen.getByText('Counter')).toBeTruthy()
   expect(screen.queryByRole('button')).toBeNull()
   invalid.unmount()

@@ -1,4 +1,4 @@
 - menu:
-  - menuitem "设置"
-  - menuitem "意见反馈"
-  - menuitem "登录"
+  - menuitem "Settings"
+  - menuitem "Feedback"
+  - menuitem "Sign in"

@@ -8,11 +8,11 @@ import { PartialArguments } from '@deepseek-ai/dsh-util-values'
 import { CordisActionRow } from '../src/client/CordisActionRow.tsx'
 import { CordisDefineRow } from '../src/client/CordisDefineRow.tsx'
 import { CordisRunRow } from '../src/client/CordisRunRow.tsx'
-import { zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 
 afterEach(cleanup)
 
-const t = ((key: keyof typeof zh) => zh[key]) as Parameters<typeof CordisActionRow>[0]['t']
+const t = ((key: keyof typeof en) => en[key]) as Parameters<typeof CordisActionRow>[0]['t']
 
 function failed(name: string): ToolResultNode {
   return {

@@ -6,12 +6,6 @@ export const en = {
   deniedWithReason: (reason: string): string => `Auto review denied this call: ${reason}`,
 }
 
-/** Chinese approval messages. */
-export const zh = {
-  denied: 'Auto review 拒绝了此调用。',
-  deniedWithReason: (reason: string): string => `Auto review 拒绝了此调用：${reason}`,
-} satisfies typeof en
-
 /** Japanese approval messages. */
 export const ja = {
   denied: '自動認可レビューがこの呼び出しを拒否しました。',
@@ -53,12 +47,11 @@ export const pt = {
  * @param reason - optional reviewer explanation.
  * @returns text for the Client's localized-text resolver.
  */
-export function deniedDisplayReason(reason?: string): Record<'en' | 'zh' | 'ja' | 'es' | 'fr' | 'de' | 'ru' | 'pt', string> {
+export function deniedDisplayReason(reason?: string): Record<'en' | 'ja' | 'es' | 'fr' | 'de' | 'ru' | 'pt', string> {
   return reason === undefined
-    ? { en: en.denied, zh: zh.denied, ja: ja.denied, es: es.denied, fr: fr.denied, de: de.denied, ru: ru.denied, pt: pt.denied }
+    ? { en: en.denied, ja: ja.denied, es: es.denied, fr: fr.denied, de: de.denied, ru: ru.denied, pt: pt.denied }
     : {
       en: en.deniedWithReason(reason),
-      zh: zh.deniedWithReason(reason),
       ja: ja.deniedWithReason(reason),
       es: es.deniedWithReason(reason),
       fr: fr.deniedWithReason(reason),

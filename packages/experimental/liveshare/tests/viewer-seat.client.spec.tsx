@@ -16,12 +16,13 @@ import { ViewerModelSeat } from '../src/client/viewer-model.tsx'
 import { ViewerPermissionSeat } from '../src/client/viewer-permission.tsx'
 import { ViewerSeat } from '../src/client/viewer-seat.tsx'
 import { viewerCapabilities } from '../src/client/viewer-capabilities.ts'
-import { en, NS, zh } from '../src/client/locales.ts'
+import { en, NS, fr } from '../src/client/locales.ts'
 
 // The seats read their copy through the locale seat the served page's client tree provides.
 const locale = new LocaleRuntime(new Context())
-locale.register(NS, { zh, en })
-locale.setLocale('zh')
+locale.addLanguage({ id: 'fr', label: 'Français', fallback: 'en' })
+locale.register(NS, { fr, en })
+locale.setLocale('fr')
 const t = locale.bind(NS)
 
 afterEach(() => {
@@ -48,9 +49,9 @@ const catalog = {
     id: 'internal',
     models: [{
       id: 'dsv41f',
-      name: '内网 DSV41F',
+      name: 'intranet DSV41F',
       reasoning: {
-        efforts: [{ id: 'low', name: '低强度' }, { id: 'high', name: '高强度' }],
+        efforts: [{ id: 'low', name: 'low effort' }, { id: 'high', name: 'high effort' }],
         defaultEffort: 'low',
       },
     }],
@@ -69,10 +70,10 @@ describe('viewer model seat', () => {
       />,
     )
 
-    const seat = await screen.findByText(/内网 DSV41F/)
-    expect(seat.textContent).toBe('内网 DSV41F · 高强度')
+    const seat = await screen.findByText(/intranet DSV41F/)
+    expect(seat.textContent).toBe('intranet DSV41F · high effort')
     // The restriction is visible copy, not only the tooltip.
-    expect(document.body.textContent).toContain(zh['viewer.model.locked'])
+    expect(document.body.textContent).toContain(fr['viewer.model.locked'])
     const element = document.querySelector('[data-liveshare-viewer-seat="model"]')
     expect(element?.tagName).toBe('SPAN')
     expect(element?.getAttribute('aria-disabled')).toBe('true')
@@ -91,7 +92,7 @@ describe('viewer model seat', () => {
       />,
     )
 
-    expect((await screen.findByText(/内网 DSV41F/)).textContent).toBe('内网 DSV41F · 低强度')
+    expect((await screen.findByText(/intranet DSV41F/)).textContent).toBe('intranet DSV41F · low effort')
   })
 
   it('states the raw effort id when the catalog names no level, and no effort when nothing states one', async () => {
@@ -102,7 +103,7 @@ describe('viewer model seat', () => {
         catalog={() => Promise.resolve(catalog)}
       />,
     )
-    expect((await screen.findByText(/内网 DSV41F/)).textContent).toBe('内网 DSV41F · future')
+    expect((await screen.findByText(/intranet DSV41F/)).textContent).toBe('intranet DSV41F · future')
     unmount()
 
     render(
@@ -163,8 +164,8 @@ describe('viewer permission seat', () => {
     render(<ViewerPermissionSeat t={t} locked capabilities={viewerCapabilities} />)
 
     const element = document.querySelector('[data-liveshare-viewer-seat="permission"]')
-    expect(element?.textContent).toContain(zh['dialog.sessionMode.write'])
-    expect(element?.textContent).toContain(zh['viewer.permission.locked'])
+    expect(element?.textContent).toContain(fr['dialog.sessionMode.write'])
+    expect(element?.textContent).toContain(fr['viewer.permission.locked'])
     expect(element?.tagName).toBe('SPAN')
     expect(element?.getAttribute('aria-disabled')).toBe('true')
     expect(element?.querySelector('button, select, input, [role="button"], [role="combobox"], [tabindex]')).toBeNull()
@@ -177,8 +178,8 @@ describe('viewer permission seat', () => {
     render(<ViewerPermissionSeat t={t} locked capabilities={viewerCapabilities} />)
 
     const element = document.querySelector('[data-liveshare-viewer-seat="permission"]')
-    expect(element?.textContent).toContain(zh['viewer.permission.unconfirmed'])
-    expect(element?.textContent).not.toContain(zh['dialog.sessionMode.view'])
+    expect(element?.textContent).toContain(fr['viewer.permission.unconfirmed'])
+    expect(element?.textContent).not.toContain(fr['dialog.sessionMode.view'])
   })
 })
 

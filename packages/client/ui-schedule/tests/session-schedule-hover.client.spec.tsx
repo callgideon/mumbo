@@ -12,7 +12,7 @@ import {
   formatScheduleAbsolute, formatScheduleFrequency, formatScheduleRelative,
 } from '../src/client/schedule-format.ts'
 import { SessionScheduleHover, type SessionScheduleHoverProps } from '../src/client/SessionScheduleHover.tsx'
-import { en, zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 import css from '../src/client/SessionScheduleMark.module.css'
 import { pinSystemZone } from './zone-fixture.ts'
 
@@ -72,7 +72,7 @@ function sourceFor(
 function renderHover(
   source: CatalogInjected<ScheduleCatalogEntry>,
   sessionId: SessionId = SESSION,
-  dictionary: typeof en | typeof zh = en,
+  dictionary: typeof en = en,
 ) {
   const props = {
     sessionId,
@@ -145,7 +145,7 @@ describe('Session hover-card task section', () => {
     expect(view.container.textContent).not.toContain('{count}')
   })
 
-  it.each([['English', en], ['Chinese', zh]] as const)(
+  it.each([['English', en]] as const)(
     'states the next run in the same shape as the other three surfaces in %s',
     async (_name, dictionary) => {
       const only = record('only', 'Check metrics', START + 300_000)

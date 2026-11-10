@@ -56,9 +56,9 @@ async function fixture() {
   let bonusStatus = 200
   let bonuses: unknown = [
     { order_id: ORDER, campaign: 'dsh_login_bonus', amount: '5.00', currency: 'CNY',
-      granted_at: '2026-09-21T12:00:00Z', expires_at: '2026-10-21T12:00:00Z', msg: '已赠送您 5.00 元 DSH 体验赠金。' },
+      granted_at: '2026-09-21T12:00:00Z', expires_at: '2026-10-21T12:00:00Z', msg: 'You have been granted a 5.00 CNY DSH trial bonus.' },
     { order_id: SECOND_ORDER, campaign: 'dsh_login_bonus', amount: '1.50', currency: 'CNY',
-      granted_at: '2026-09-20T12:00:00Z', expires_at: '2026-10-20T12:00:00Z', msg: '已赠送您 1.50 元 DSH 体验赠金。' },
+      granted_at: '2026-09-20T12:00:00Z', expires_at: '2026-10-20T12:00:00Z', msg: 'You have been granted a 1.50 CNY DSH trial bonus.' },
   ]
   let ackBizCode = 0
   let ackStatus = 200
@@ -193,9 +193,9 @@ it('reads unnotified bonuses with the platform origin, grant header, and locale 
     accountId: USER as AccountUserId,
     bonuses: [
       { orderId: ORDER as AccountBonusOrderId, campaign: 'dsh_login_bonus', amount: '5.00', currency: 'CNY',
-        grantedAt: '2026-09-21T12:00:00Z', expiresAt: '2026-10-21T12:00:00Z', message: '已赠送您 5.00 元 DSH 体验赠金。' },
+        grantedAt: '2026-09-21T12:00:00Z', expiresAt: '2026-10-21T12:00:00Z', message: 'You have been granted a 5.00 CNY DSH trial bonus.' },
       { orderId: SECOND_ORDER as AccountBonusOrderId, campaign: 'dsh_login_bonus', amount: '1.50', currency: 'CNY',
-        grantedAt: '2026-09-20T12:00:00Z', expiresAt: '2026-10-20T12:00:00Z', message: '已赠送您 1.50 元 DSH 体验赠金。' },
+        grantedAt: '2026-09-20T12:00:00Z', expiresAt: '2026-10-20T12:00:00Z', message: 'You have been granted a 1.50 CNY DSH trial bonus.' },
     ],
   })
   expect(f.requests).toEqual([

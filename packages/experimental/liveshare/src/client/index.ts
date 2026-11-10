@@ -23,7 +23,7 @@ import { LiveshareShareAction } from './ShareAction.tsx'
 import type { OwnerShares } from './owner-shares.ts'
 import { forgetOwnerDisplay, rememberOwnerIdentity } from './owner-display.ts'
 import { setManagedShareOpener } from './share-navigation.ts'
-import { de, en, es, fr, ja, NS, pt, ru, zh, type LiveshareKey } from './locales.ts'
+import { de, en, es, fr, ja, NS, pt, ru, type LiveshareKey } from './locales.ts'
 import { SharedSessionOrigin, shareViewerAuthor } from './user-origin.tsx'
 import * as viewerBrand from './viewer-brand.tsx'
 import * as viewerModel from './viewer-model.tsx'
@@ -65,7 +65,7 @@ function isViewerPage(): boolean {
  */
 export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
   // The viewer plugins are children of this face, so this one registration outlives every one of them.
-  ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }), 'liveshare: browser dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { en, ja, es, fr, de, ru, pt }), 'liveshare: browser dictionaries')
   // The shared Session's attributed messages reach both pages through the same durable source, so
   // one registration supplies Chat's origin seat on either face. Declaration-aware injection makes
   // this independent of whether Chat's user renderer is already registered.

@@ -3,18 +3,13 @@
 /** Quote plugin dictionary namespace. */
 export const NS = 'messageQuotes'
 
-/** Simplified Chinese dictionary and key source. */
-export const zh = {
-  'quote.add': '引用文本',
-}
-
 /** Supported Quote interaction copy keys. */
-export type MessageQuotesKey = keyof typeof zh
+export type MessageQuotesKey = keyof typeof en
 
 /** English dictionary. */
-export const en: Record<MessageQuotesKey, string> = {
+export const en = {
   'quote.add': 'Quote text',
-}
+} satisfies Record<string, string>
 
 /** Japanese dictionary. */
 export const ja = {

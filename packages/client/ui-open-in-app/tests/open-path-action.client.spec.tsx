@@ -13,7 +13,7 @@ import { OpenPathEmptyAction, type OpenPathEmptyActionProps } from '../src/clien
 import type { OpenInAppPathAction } from '../src/client/open-path.ts'
 import type { OpenInAppOutcome } from '../src/client/outcome.ts'
 import { useOpenTargetGesture } from '../src/client/OpenTargetButton.tsx'
-import { zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 
 afterEach(() => {
   cleanup()
@@ -21,7 +21,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-const t = makeTranslate(zh)
+const t = makeTranslate(en)
 const ABSOLUTE_PATH = '/host/project/work/clip.mp4'
 
 interface Bench {
@@ -72,8 +72,8 @@ describe('OpenPathAction gestures', () => {
     const main = await screen.findByRole('button', { name: t('open.title', { app: 'Music' }) })
     await act(async () => { fireEvent.click(main) })
     expect(b.openPath).toHaveBeenLastCalledWith(ABSOLUTE_PATH, 'open', undefined)
-    fireEvent.click(screen.getByRole('button', { name: zh['path.more'] }))
-    await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: zh['path.reveal'] })) })
+    fireEvent.click(screen.getByRole('button', { name: en['path.more'] }))
+    await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: en['path.reveal'] })) })
     expect(b.openPath).toHaveBeenLastCalledWith(ABSOLUTE_PATH, 'reveal', undefined)
     expect(screen.queryByRole('menu')).toBeNull()
   })
@@ -82,14 +82,14 @@ describe('OpenPathAction gestures', () => {
     const b = bench()
     render(<OpenPathAction {...b.props} />)
     await act(async () => {})
-    const more = screen.getByRole('button', { name: zh['path.more'] })
+    const more = screen.getByRole('button', { name: en['path.more'] })
     fireEvent.click(more)
     expect(more.getAttribute('aria-expanded')).toBe('true')
     fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
     expect(screen.queryByRole('menu')).toBeNull()
     expect(b.openPath).not.toHaveBeenCalled()
     fireEvent.click(more)
-    await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: 'Music（默认）' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: 'Music (default)' })) })
     expect(b.openPath).toHaveBeenLastCalledWith(ABSOLUTE_PATH, 'open', '/Music.app')
   })
 
@@ -100,7 +100,7 @@ describe('OpenPathAction gestures', () => {
     const main = await screen.findByRole('button', { name: t('open.title', { app: 'Music' }) })
     fireEvent.click(main)
     expect(main).toHaveProperty('disabled', true)
-    expect(screen.getByRole('button', { name: zh['path.more'] })).toHaveProperty('disabled', true)
+    expect(screen.getByRole('button', { name: en['path.more'] })).toHaveProperty('disabled', true)
     expect(container.querySelector('[data-open-path]')?.getAttribute('data-state')).toBe('busy')
     fireEvent.click(main)
     expect(b.openPath).toHaveBeenCalledOnce()
@@ -121,7 +121,7 @@ describe('OpenPathEmptyAction', () => {
     const b = bench()
     render(<OpenPathEmptyAction {...b.props} />)
     await act(async () => {})
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['path.open'] })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: en['path.open'] })) })
     expect(b.openPath).toHaveBeenCalledWith(ABSOLUTE_PATH, 'open', undefined)
     expect(b.report).toHaveBeenCalledWith({ kind: 'opened' })
     expect(screen.queryByRole('alert')).toBeNull()
@@ -131,14 +131,14 @@ describe('OpenPathEmptyAction', () => {
     const revealed = bench({ openPath: vi.fn(async (): Promise<OpenInAppOutcome> => ({ kind: 'revealed' })) })
     render(<OpenPathEmptyAction {...revealed.props} applications={async () => []} />)
     await act(async () => {})
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['path.reveal'] })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: en['path.reveal'] })) })
     expect(revealed.report).toHaveBeenCalledWith({ kind: 'revealed' })
     cleanup()
 
     const b = bench({ openPath: vi.fn(async (): Promise<OpenInAppOutcome> => ({ kind: 'failed', failure: 'openError' })) })
     render(<OpenPathEmptyAction {...b.props} />)
     await act(async () => {})
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['path.open'] })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: en['path.open'] })) })
     expect(b.report).toHaveBeenCalledTimes(1)
     expect(b.report).toHaveBeenCalledWith({ kind: 'failed', failure: 'openError' })
     // The banner belongs to this plugin's overlay entry, which outlives the control.
@@ -157,8 +157,8 @@ it('shows the default icon and current application list, and selects an applicat
   const view = render(<OpenPathAction {...b.props} applications={applications} />)
   await act(async () => {})
   expect(view.container.querySelector('[data-open-path-open] img')?.getAttribute('src')).toBe(icon)
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['path.more'] })) })
-  expect(screen.getByRole('menuitem', { name: 'Music（默认）' })).toBeTruthy()
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: en['path.more'] })) })
+  expect(screen.getByRole('menuitem', { name: 'Music (default)' })).toBeTruthy()
   await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: 'Player' })) })
   expect(b.openPath).toHaveBeenLastCalledWith(ABSOLUTE_PATH, 'open', '/Player.app')
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: t('open.title', { app: 'Music' }) })) })
@@ -175,9 +175,9 @@ it('ignores an obsolete file query and refreshes the default application when th
   const view = render(<OpenPathAction {...b.props} applications={applications} />)
   view.rerender(<OpenPathAction {...b.props} absolutePath="/other.mp3" applications={applications} />)
   await act(async () => { old.resolve([{ id: '/Old.app', name: 'Old', default: true, icon: null }]) })
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['path.more'] })) })
-  expect(screen.queryByRole('menuitem', { name: 'Old（默认）' })).toBeNull()
-  expect(screen.getByRole('menuitem', { name: 'Player（默认）' })).toBeTruthy()
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: en['path.more'] })) })
+  expect(screen.queryByRole('menuitem', { name: 'Old (default)' })).toBeNull()
+  expect(screen.getByRole('menuitem', { name: 'Player (default)' })).toBeTruthy()
   expect(applications.mock.calls[0]![1].aborted).toBe(true)
   expect(applications).toHaveBeenLastCalledWith('/other.mp3', expect.any(AbortSignal))
 })
@@ -186,9 +186,9 @@ it('keeps reveal last and makes it the default when the file query fails', async
   const b = bench()
   render(<OpenPathAction {...b.props} applications={async () => null} />)
   await act(async () => {})
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['path.more'] })) })
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: en['path.more'] })) })
   const items = screen.getAllByRole('menuitem')
-  expect(items.map(item => item.textContent)).toEqual([zh['path.appsError'], '显示文件位置（默认）'])
+  expect(items.map(item => item.textContent)).toEqual([en['path.appsError'], 'Show file location (default)'])
   expect(items[0]).toHaveProperty('disabled', true)
   await act(async () => { fireEvent.click(items[1]!) })
   expect(b.openPath).toHaveBeenLastCalledWith(ABSOLUTE_PATH, 'reveal', undefined)
@@ -201,16 +201,16 @@ it('opens with the first registered application when none is marked default', as
   const main = screen.getByRole('button', { name: t('open.title', { app: 'Player' }) })
   await act(async () => { fireEvent.click(main) })
   expect(b.openPath).toHaveBeenLastCalledWith(ABSOLUTE_PATH, 'open', '/Player.app')
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['path.more'] })) })
-  expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Player（默认）', zh['path.reveal']])
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: en['path.more'] })) })
+  expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Player (default)', en['path.reveal']])
 })
 
 it('uses reveal as the default only when no application is registered', async () => {
   const b = bench()
   render(<OpenPathAction {...b.props} applications={async () => []} />)
   await act(async () => {})
-  expect(screen.queryByRole('button', { name: zh['path.more'] })).toBeNull()
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['path.reveal'] })) })
+  expect(screen.queryByRole('button', { name: en['path.more'] })).toBeNull()
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: en['path.reveal'] })) })
   expect(b.openPath).toHaveBeenLastCalledWith(ABSOLUTE_PATH, 'reveal', undefined)
 })
 
@@ -233,7 +233,7 @@ it('closes the application menu from its chevron without querying again', async 
   const b = bench()
   render(<OpenPathAction {...b.props} />)
   await act(async () => {})
-  const more = screen.getByRole('button', { name: zh['path.more'] })
+  const more = screen.getByRole('button', { name: en['path.more'] })
   await act(async () => { fireEvent.click(more) })
   expect(screen.getByRole('menu')).toBeTruthy()
   const calls = vi.mocked(b.props.applications).mock.calls.length
@@ -264,10 +264,10 @@ it('uses the same application menu in the prominent empty-state control', async 
   await act(async () => {})
   expect(view.container.querySelector('[data-open-target]')?.getAttribute('data-size')).toBe('large')
   // The large control scales the menu chevron up from the compact 10px glyph.
-  expect(screen.getByRole('button', { name: zh['path.more'] }).querySelector('svg')?.getAttribute('width')).toBe('14')
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['path.more'] })) })
-  expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Music（默认）', zh['path.reveal']])
-  await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: 'Music（默认）' })) })
+  expect(screen.getByRole('button', { name: en['path.more'] }).querySelector('svg')?.getAttribute('width')).toBe('14')
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: en['path.more'] })) })
+  expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Music (default)', en['path.reveal']])
+  await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: 'Music (default)' })) })
   expect(b.openPath).toHaveBeenLastCalledWith(ABSOLUTE_PATH, 'open', '/Music.app')
 })
 
@@ -275,7 +275,7 @@ it('labels the prominent default action as reveal when no application is registe
   const b = bench()
   render(<OpenPathEmptyAction {...b.props} applications={async () => []} />)
   await act(async () => {})
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['path.reveal'] })) })
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: en['path.reveal'] })) })
   expect(b.openPath).toHaveBeenLastCalledWith(ABSOLUTE_PATH, 'reveal', undefined)
 })
 
@@ -288,9 +288,9 @@ it('uses a skeleton while associations load and pins reveal outside the applicat
   expect(view.container.querySelector('[data-open-path-open] svg')).toBeNull()
   await act(async () => { pending.resolve([{ id: 'music', name: 'Music', default: true, icon: null }]) })
   expect(view.container.querySelector('[data-open-target-skeleton]')).toBeNull()
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['path.more'] })) })
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: en['path.more'] })) })
   const menu = screen.getByRole('menu')
-  const reveal = screen.getByRole('menuitem', { name: zh['path.reveal'] })
+  const reveal = screen.getByRole('menuitem', { name: en['path.reveal'] })
   expect(menu.firstElementChild?.contains(reveal)).toBe(false)
   expect(menu.lastElementChild?.contains(reveal)).toBe(true)
 })

@@ -107,7 +107,7 @@ describe('three-mode acceptance: real-profile base', () => {
         '',
       ].join('\n'))
 
-      const first = await run(cwd, home, ['写一个 note.txt'])
+      const first = await run(cwd, home, ['write a note.txt'])
       const after = await observe(sessions, cwd)
       const seen = `timedOut=${String(first.timedOut)} signal=${String(first.signal)} exit=${String(first.exitCode)}`
         + `\nstdout:\n${first.stdout}\nstderr:\n${first.stderr}`

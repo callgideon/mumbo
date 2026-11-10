@@ -1,9 +1,9 @@
-- textbox "搜索分支"
-- group "默认":
-  - menuitem "origin/main 默认"
-- group "本地分支":
-  - text: 本地分支
+- textbox "Search branches"
+- group "Default":
+  - menuitem "origin/main Default"
+- group "Local branches":
+  - text: Local branches
   - menuitem "topic"
   - menuitem "main"
   - menuitem "release"
-- text: 与 HEAD 和所选分支的合并基准比较，包含未提交的修改
+- text: Compared with the merge base of HEAD and the selected branch, including uncommitted changes

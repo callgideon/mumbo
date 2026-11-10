@@ -37,15 +37,15 @@ try {
   checks.push('executable-handshake')
 
   const target = await ctx.fs.resolve(`${root}/sample.txt`)
-  await ctx.fs.writeText(target, 'first\n你好\n')
-  assert.equal(await ctx.fs.readText(target), 'first\n你好\n')
+  await ctx.fs.writeText(target, 'first\n안녕\n')
+  assert.equal(await ctx.fs.readText(target), 'first\n안녕\n')
   assert.equal(Buffer.from(await ctx.fs.readByteRange(target, { offset: 0, length: 5 })).toString(), 'first')
-  assert.equal(Buffer.from(await ctx.fs.readBytes(target, undefined, 1024)).toString(), 'first\n你好\n')
+  assert.equal(Buffer.from(await ctx.fs.readBytes(target, undefined, 1024)).toString(), 'first\n안녕\n')
   await ctx.fs.editText(target, { oldString: 'first', newString: 'second', replaceAll: false })
-  assert.equal(await ctx.fs.readText(target), 'second\n你好\n')
+  assert.equal(await ctx.fs.readText(target), 'second\n안녕\n')
   let streamed = ''
   for await (const part of await ctx.fs.streamText(target)) streamed += part
-  assert.equal(streamed, 'second\n你好\n')
+  assert.equal(streamed, 'second\n안녕\n')
   assert((await ctx.fs.listDir(await ctx.fs.resolve(root))).some(entry => entry.name === 'sample.txt'))
   await assert.rejects(ctx.fs.writeText(target, 'denied', undefined, undefined, { mode: 'read-only', workspaceRoot: root }))
   checks.push('guarded-files-and-streams')

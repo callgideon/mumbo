@@ -36,19 +36,19 @@ const IMPLEMENTATION_PULL_REQUEST_ACTIONS = new Set([
 ])
 
 for (const status of ['In progress', 'In review']) {
-  if (!ACTIVE_STATUS_ORDER.includes(status)) throw new Error(`config.statuses 缺少 ${status}`)
+  if (!ACTIVE_STATUS_ORDER.includes(status)) throw new Error(`config.statuses is missing ${status}`)
 }
 if (typeof config.lifecycleActor !== 'string' || !config.lifecycleActor) {
-  throw new Error('config.lifecycleActor 未设置')
+  throw new Error('config.lifecycleActor is not set')
 }
 if (typeof config.priorityField !== 'string' || !config.priorityField) {
-  throw new Error('config.priorityField 未设置')
+  throw new Error('config.priorityField is not set')
 }
 if (typeof config.startDateField !== 'string' || !config.startDateField) {
-  throw new Error('config.startDateField 未设置')
+  throw new Error('config.startDateField is not set')
 }
 if (typeof config.projectTimeZone !== 'string' || !config.projectTimeZone) {
-  throw new Error('config.projectTimeZone 未设置')
+  throw new Error('config.projectTimeZone is not set')
 }
 Intl.DateTimeFormat('en-US', { timeZone: config.projectTimeZone })
 
@@ -100,7 +100,7 @@ export function nextResolvingIssueStatus(currentStatus, command, currentStatusAc
   let target
   if (command === 'review-requested') target = 'In review'
   else if (command === 'implementation' || command === 'changes-requested') target = 'In progress'
-  else throw new Error(`未知 lifecycle command：${command}`)
+  else throw new Error(`Unknown lifecycle command: ${command}`)
 
   const currentIndex = ACTIVE_STATUS_ORDER.indexOf(currentStatus)
   const targetIndex = ACTIVE_STATUS_ORDER.indexOf(target)
@@ -122,7 +122,7 @@ export function nextResolvingIssueStatus(currentStatus, command, currentStatusAc
  */
 export function projectDate(timestamp, timeZone = config.projectTimeZone) {
   const instant = new Date(timestamp)
-  if (Number.isNaN(instant.getTime())) throw new Error(`无效的 PR 创建时间：${timestamp}`)
+  if (Number.isNaN(instant.getTime())) throw new Error(`Invalid PR creation time: ${timestamp}`)
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat('en-US', {
       timeZone,
@@ -213,24 +213,24 @@ export function validateIssue(issue) {
   const invalidLabels = issue.labels.filter(isInvalidIssueLabel)
 
   if (invalidLabels.length > 0) {
-    errors.push(`Issue 不得使用 PR kind 或旧版标签：${invalidLabels.join(', ')}`)
+    errors.push(`Issue must not use a PR kind or legacy label: ${invalidLabels.join(', ')}`)
   }
-  if (!TYPES.has(issue.type ?? '')) errors.push('Type 必须是五种原生英文 Type 之一')
-  if (!status || !config.statuses.includes(status)) errors.push('Issue 必须在 Project 中且具有合法 Status')
+  if (!TYPES.has(issue.type ?? '')) errors.push('Type must be one of the five native Issue Types')
+  if (!status || !config.statuses.includes(status)) errors.push('Issue must be in the Project with a valid Status')
   if (issue.priority !== null && !PRIORITIES.includes(issue.priority.toLowerCase())) {
-    errors.push('Priority 必须为空或为 P0–P3')
+    errors.push('Priority must be empty or P0–P3')
   }
   if (status === 'Done' && (issue.state !== 'closed' || issue.stateReason !== 'completed')) {
-    errors.push('Done 必须对应 Completed 关闭原因')
+    errors.push('Done requires the Completed close reason')
   }
   if (
     status === 'No action' &&
     (issue.state !== 'closed' || issue.stateReason !== 'not_planned')
   ) {
-    errors.push('No action 必须对应 Not planned 关闭原因')
+    errors.push('No action requires the Not planned close reason')
   }
   if (!['Done', 'No action'].includes(status ?? '') && issue.state !== 'open') {
-    errors.push(`${status} 必须对应开放 Issue`)
+    errors.push(`${status} requires an open Issue`)
   }
   return errors
 }
@@ -262,20 +262,20 @@ export function validatePullRequest(input) {
   const areas = input.labels.filter((label) => label.startsWith('area/'))
 
   if (input.references.all.length === 0) {
-    errors.push('PR 正文必须引用至少一个同仓库 Issue；PR 编号（包括堆叠依赖 PR）不算 Issue 引用')
+    errors.push('PR body must reference at least one same-repository Issue; PR numbers, including stacked dependency PRs, are not Issue references')
   }
   if (kinds.length !== 1) {
-    errors.push(`PR 必须恰好有一个允许的 kind/*，当前为 ${kinds.length}`)
+    errors.push(`PR must have exactly one allowed kind/*; found ${kinds.length}`)
   }
   if (unknownKinds.length > 0) {
-    errors.push(`PR 含不支持的 kind/*：${unknownKinds.join(', ')}`)
+    errors.push(`PR has unsupported kind/*: ${unknownKinds.join(', ')}`)
   }
-  if (legacyLabels.length > 0) errors.push(`PR 含旧版标签：${legacyLabels.join(', ')}`)
-  if (sourceLabels.length > 0) errors.push(`source/* 仅用于 Issue：${sourceLabels.join(', ')}`)
-  if (priorities.length > 1) errors.push(`PR 最多有一个 p0–p3，当前为 ${priorities.length}`)
-  if (areas.length === 0) errors.push('PR 必须至少有一个 area/*')
+  if (legacyLabels.length > 0) errors.push(`PR has legacy labels: ${legacyLabels.join(', ')}`)
+  if (sourceLabels.length > 0) errors.push(`source/* is for Issues only: ${sourceLabels.join(', ')}`)
+  if (priorities.length > 1) errors.push(`PR may have at most one p0–p3; found ${priorities.length}`)
+  if (areas.length === 0) errors.push('PR must have at least one area/*')
   for (const number of input.references.all) {
-    if (!input.issues.has(number)) errors.push(`#${number} 不是同仓库 Issue`)
+    if (!input.issues.has(number)) errors.push(`#${number} is not a same-repository Issue`)
   }
 
   const resolving = input.references.resolving
@@ -290,14 +290,14 @@ export function validatePullRequest(input) {
     const highest = issuePriorities.sort(
       (left, right) => PRIORITIES.indexOf(left) - PRIORITIES.indexOf(right),
     )[0]
-    errors.push(`PR Priority 应为 ${highest}`)
+    errors.push(`PR Priority must be ${highest}`)
   } else if (priorities.length === 1 && issuePriorities.length !== resolving.length) {
-    errors.push('有 Priority 的解决型 PR 要求每个被解决 Issue 都设置 Priority')
+    errors.push('A resolving PR with Priority requires every resolved Issue to set Priority')
   } else if (priorities.length === 1) {
     const highest = issuePriorities.sort(
       (left, right) => PRIORITIES.indexOf(left) - PRIORITIES.indexOf(right),
     )[0]
-    if (priorities[0] !== highest) errors.push(`PR Priority 应为 ${highest}`)
+    if (priorities[0] !== highest) errors.push(`PR Priority must be ${highest}`)
   }
   return errors
 }

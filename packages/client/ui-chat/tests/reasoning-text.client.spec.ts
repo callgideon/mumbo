@@ -5,7 +5,7 @@ describe('reasoning display text', () => {
   it.each([
     '',
     'Ordinary reasoning',
-    '普通思考正文',
+    'plain Think body',
     '\n  Original text  \n',
     '<note>Original text</note>',
   ])('preserves ordinary reasoning %j', (text) => {

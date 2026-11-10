@@ -1,9 +1,9 @@
-- dialog "添加一个 API Key 开始使用":
-  - heading "添加一个 API Key 开始使用" [level=2]
-  - paragraph: 配置 DeepSeek 官方模型，即可开始使用。
-  - text: API 密钥
-  - button "认证说明": "?"
-  - textbox "API 密钥":
-    - /placeholder: 输入 API 密钥
-  - button "稍后配置"
-  - button "保存并继续" [disabled]
+- dialog "Add an API key to get started":
+  - heading "Add an API key to get started" [level=2]
+  - paragraph: Configure the official DeepSeek provider to start building.
+  - text: API key
+  - button "Authentication details": "?"
+  - textbox "API key":
+    - /placeholder: Enter your API key
+  - button "Configure later"
+  - button "Save and continue" [disabled]

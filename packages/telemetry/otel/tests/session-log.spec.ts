@@ -112,7 +112,7 @@ it('preserves full nested events without truncation or ambient headers and retai
   vi.stubEnv('OTEL_EXPORTER_OTLP_HEADERS', 'Authorization=Bearer%20unrelated')
   const target = await collector()
   const { sender } = reporter(target.endpoint)
-  const record = sessionRecord('中文\n"quote"\\path 😀')
+  const record = sessionRecord('한글\n"quote"\\path 😀')
   sender.reportSessionLog(record)
   await sender.shutdown()
   expect(contents(target.captures).map(parseContent)).toEqual([record.event])
@@ -127,7 +127,7 @@ it('preserves full nested events without truncation or ambient headers and retai
 it.each([CompressionAlgorithm.GZIP, CompressionAlgorithm.NONE])('bounds %s requests and preserves nested content', async (compression) => {
   const target = await collector()
   const { sender, onFailure } = reporter(target.endpoint, { exporter: { url: target.endpoint, compression, concurrencyLimit: 1 } })
-  const records = [0,1,2].map(seq => sessionRecord('中"\\'.repeat(100000), seq))
+  const records = [0,1,2].map(seq => sessionRecord('한"\\'.repeat(100000), seq))
   for (const record of records) sender.reportSessionLog(record)
   await sender.shutdown()
   expect(target.captures.length).toBeGreaterThan(1)
@@ -138,7 +138,7 @@ it.each([CompressionAlgorithm.GZIP, CompressionAlgorithm.NONE])('bounds %s reque
 
 it('admits an exact request and diagnoses an oversized record only once', async () => {
   const target = await collector()
-  const record = sessionRecord('边界"\\')
+  const record = sessionRecord('경계"\\')
   const baseline = reporter(target.endpoint).sender
   baseline.reportSessionLog(record)
   await baseline.shutdown()

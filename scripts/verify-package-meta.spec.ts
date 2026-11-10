@@ -290,7 +290,7 @@ it.each([
 
 it('ignores unrelated locale content without requiring metadata exports', () => {
   manifest({ exports: { '.': './lib/index.js' }, files: ['lib'] })
-  json('locale/zh.json', { buttons: { save: '保存' }, enabled: true, other: null })
+  json('locale/es.json', { buttons: { save: 'Guardar' }, enabled: true, other: null })
   expect(packageMetaProblems(root)).toEqual([])
 })
 
@@ -304,14 +304,14 @@ it('ignores ordinary JSON metadata outside locale directories and resource expor
 it('accepts direct root metadata and per-field English fallback without built entries', () => {
   manifest()
   json('locale/en.json', { meta: { title: 'Plugin', description: '%literal%' }, buttons: { save: 'Save' } })
-  json('locale/zh.json', { meta: { title: '插件' }, nested: [1, null] })
+  json('locale/es.json', { meta: { title: 'Complemento' }, nested: [1, null] })
   json('locale/pt-BR.json', { meta: { description: 'Descrição' } })
   file('locale/README.txt', 'Not a JSON resource.')
   expect(packageMetaProblems(root)).toEqual([])
   expect(existsSync(join(dir, 'lib'))).toBe(false)
 })
 
-it.each(['en', 'zh'])('rejects %s metadata resolved into build output without reading that JSON', (language) => {
+it.each(['en', 'es'])('rejects %s metadata resolved into build output without reading that JSON', (language) => {
   manifest({
     exports: {
       './locale/*.json': './locale/*.json',
@@ -319,7 +319,7 @@ it.each(['en', 'zh'])('rejects %s metadata resolved into build output without re
     },
   })
   json('locale/en.json', { meta: { title: 'Plugin' } })
-  json('locale/zh.json', { meta: { title: '插件' } })
+  json('locale/es.json', { meta: { title: 'Complemento' } })
   file(`lib/locale/${language}.json`, '{')
   const problems = packageMetaProblems(root).join('\n')
   expect(problems).toContain(`${language}.json`)
@@ -378,9 +378,9 @@ it('validates root and multiple exported plugins independently', () => {
   })
   json('locale/root/en.json', { meta: { title: 'Bundle' } })
   json('locale/search/en.json', { meta: { title: 'Search' } })
-  json('locale/search/zh.json', { meta: { title: '搜索' } })
+  json('locale/search/es.json', { meta: { title: 'Buscar' } })
   json('locale/write/en.json', { meta: { description: 'Write files' } })
-  json('locale/write/zh.json', { meta: { description: '写入文件' } })
+  json('locale/write/es.json', { meta: { description: 'Escribir archivo' } })
   expect(packageMetaProblems(root)).toEqual([])
 })
 
@@ -395,7 +395,7 @@ it('accepts missing English fields in independently exported plugin metadata', (
   })
   json('locale/root/en.json', { meta: { description: 'Bundle description' } })
   json('locale/search/en.json', { meta: { title: 'Search' } })
-  json('locale/search/zh.json', { meta: { description: '搜索文件' } })
+  json('locale/search/es.json', { meta: { description: 'Buscar archivos' } })
   expect(packageMetaProblems(root)).toEqual([])
 })
 
@@ -415,9 +415,9 @@ it.each([
 it('requires exports for every translated resource', () => {
   manifest({ exports: { '.': './lib/index.js', './locale/en.json': './locale/en.json' } })
   json('locale/en.json', { meta: { title: 'Plugin' } })
-  json('locale/zh.json', { meta: { title: '插件' } })
+  json('locale/es.json', { meta: { title: 'Complemento' } })
   const problems = packageMetaProblems(root).join('\n')
-  expect(problems).toContain('locale/zh.json')
+  expect(problems).toContain('locale/es.json')
   expect(problems).toContain('exports')
 })
 
@@ -451,7 +451,7 @@ it.each([
     files: ['resources/search'],
   })
   json('resources/search/en.json', { meta: { title: 'Search' } })
-  json('resources/search/zh.json', { meta: { title: '搜索' } })
+  json('resources/search/es.json', { meta: { title: 'Buscar' } })
   expect(packageMetaProblems(root)).toEqual([])
 })
 
@@ -460,12 +460,12 @@ it('accepts individually exported resources in an independent physical directory
     exports: {
       './search': './lib/search.js',
       './search/locale/en.json': './resources/search/en.json',
-      './search/locale/zh.json': './resources/search/zh.json',
+      './search/locale/es.json': './resources/search/es.json',
     },
     files: ['resources'],
   })
   json('resources/search/en.json', { meta: { title: 'Search' } })
-  json('resources/search/zh.json', { meta: { title: '搜索' } })
+  json('resources/search/es.json', { meta: { title: 'Buscar' } })
   expect(packageMetaProblems(root)).toEqual([])
 })
 
@@ -536,23 +536,23 @@ it('rejects language resources mapped outside the English resource directory', (
     exports: {
       '.': './lib/index.js',
       './locale/en.json': './locale/en.json',
-      './locale/zh.json': './elsewhere/zh.json',
+      './locale/es.json': './elsewhere/es.json',
     },
     files: ['locale', 'elsewhere'],
   })
   json('locale/en.json', { meta: { title: 'Plugin' } })
-  json('locale/zh.json', { meta: { title: '插件' } })
-  json('elsewhere/zh.json', { meta: { title: '其他' } })
-  expect(packageMetaProblems(root).join('\n')).toContain('zh.json')
+  json('locale/es.json', { meta: { title: 'Complemento' } })
+  json('elsewhere/es.json', { meta: { title: 'Otro' } })
+  expect(packageMetaProblems(root).join('\n')).toContain('es.json')
 })
 
 it.each([undefined, ['.'], ['./'], ['locale'], ['locale/'], ['./locale'], ['locale/*.json'], ['locale/**'],
-  ['locale/en.json', 'locale/zh.json']])(
+  ['locale/en.json', 'locale/es.json']])(
   'accepts published locale resources: %j',
   (files) => {
     manifest({ files })
     json('locale/en.json', { meta: { title: 'Plugin' } })
-    json('locale/zh.json', { meta: { title: '插件' } })
+    json('locale/es.json', { meta: { title: 'Complemento' } })
     expect(packageMetaProblems(root)).toEqual([])
   },
 )
@@ -560,18 +560,18 @@ it.each([undefined, ['.'], ['./'], ['locale'], ['locale/'], ['./locale'], ['loca
 it.each([
   [[], 'en'],
   [['lib'], 'en'],
-  [['locale/en.json'], 'zh'],
+  [['locale/en.json'], 'es'],
   [['locale', '!locale/en.json'], 'en'],
   [['locale', '!locale/*.json'], 'en'],
   [['locale', '!locale'], 'en'],
 ] as const)('rejects omitted or excluded publication files: %j', (files, language) => {
   manifest({ files })
   json('locale/en.json', { meta: { title: 'Plugin' } })
-  json('locale/zh.json', { meta: { title: '插件' } })
+  json('locale/es.json', { meta: { title: 'Complemento' } })
   expect(packageMetaProblems(root).join('\n')).toContain(`files must include locale/${language}.json`)
 })
 
-it.each([{ files: ['locale'] }, { files: ['resources', '!resources/search/zh.json'] }])(
+it.each([{ files: ['locale'] }, { files: ['resources', '!resources/search/es.json'] }])(
   'checks publication paths after resolving resource exports: %j',
   ({ files }) => {
     manifest({
@@ -579,7 +579,7 @@ it.each([{ files: ['locale'] }, { files: ['resources', '!resources/search/zh.jso
       files,
     })
     json('resources/search/en.json', { meta: { title: 'Search' } })
-    json('resources/search/zh.json', { meta: { title: '搜索' } })
+    json('resources/search/es.json', { meta: { title: 'Buscar' } })
     expect(packageMetaProblems(root).join('\n')).toContain('files must include resources/search/')
   },
 )
@@ -589,7 +589,7 @@ it.each(['locale', 'resources/search'])('rejects translated metadata without an 
     exports: { '.': './lib/index.js', './package.json': './package.json', './locale/*.json': `./${directory}/*.json` },
     files: [directory],
   })
-  json(`${directory}/zh.json`, { meta: { title: '插件' } })
+  json(`${directory}/es.json`, { meta: { title: 'Complemento' } })
   expect(packageMetaProblems(root).join('\n')).toContain('en.json')
 })
 
@@ -607,7 +607,7 @@ it.each([
     },
   })
   json('locale/en.json', { meta: {} })
-  json('locale/zh.json', { meta: { [field]: '译文' } })
+  json('locale/es.json', { meta: { [field]: 'Traducción' } })
   expect(packageMetaProblems(root)).toEqual([])
 })
 
@@ -628,13 +628,13 @@ it.each([null, [], false, 1, 'text'])('rejects a non-object English locale docum
 it.each([null, false, 1, {}, [], '', '  '])('rejects a malformed display field: %j', (value) => {
   manifest()
   json('locale/en.json', { meta: { title: 'Plugin', description: 'About it' } })
-  json('locale/zh.json', { meta: { title: value } })
+  json('locale/es.json', { meta: { title: value } })
   const problems = packageMetaProblems(root).join('\n')
-  expect(problems).toContain('zh.json')
+  expect(problems).toContain('es.json')
   expect(problems).toContain('title')
 })
 
-it.each(['en', 'zh'])('rejects malformed JSON in %s.json', (language) => {
+it.each(['en', 'es'])('rejects malformed JSON in %s.json', (language) => {
   manifest()
   json('locale/en.json', { meta: { title: 'Plugin' } })
   file(`locale/${language}.json`, '{')
@@ -659,7 +659,7 @@ it('rejects case-equivalent language files when the filesystem can hold both', (
 it('accepts locale files without metadata alongside an English introduction', () => {
   manifest()
   json('locale/en.json', { meta: { title: 'Plugin' } })
-  json('locale/zh.json', { buttons: { save: '保存' }, other: null })
+  json('locale/es.json', { buttons: { save: 'Guardar' }, other: null })
   expect(packageMetaProblems(root)).toEqual([])
 })
 
@@ -669,7 +669,7 @@ it('reports metadata failures from more than one workspace package', () => {
   dir = join(root, 'packages', 'another', 'second')
   manifest({ name: '@test/second' })
   json('locale/en.json', { meta: { title: 'Second' } })
-  json('locale/zh.json', { meta: { description: '' } })
+  json('locale/es.json', { meta: { description: '' } })
   const problems = packageMetaProblems(root).join('\n')
   expect(problems).toContain('@deepseek-ai/dsh-test-plugin')
   expect(problems).toContain('@test/second')
