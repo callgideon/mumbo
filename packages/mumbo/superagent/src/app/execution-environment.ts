@@ -1,5 +1,4 @@
 /** Execution environment variables exposed to prepare commands and documented in worker Session instructions; never contains credentials. */
-import { join } from 'node:path'
 import type { Ticket, Trigger } from '../core/index.ts'
 import type { Deployment } from '../deployment.ts'
 import type { Settings } from '../policy.ts'
@@ -15,7 +14,8 @@ export const EXECUTOR_VARIABLES: readonly (VariableSpec & { ticket?: true })[] =
 ]
 export interface Variable { key: string; value: string; description: string; owner: string }
 
-export const executionRoot = (settings: Settings, stateDir: string): string => settings.executor.directory || join(stateDir, 'work')
+/** The root of the ticket directories: the Execution settings' directory, else the deployment's `workDirectory`. */
+export const executionRoot = (settings: Settings, workDirectory: string): string => settings.executor.directory || workDirectory
 
 /** Lists all declared variables grouped by owner; `enabled` is false for Sources that are currently switched off. */
 export function declaredVariables(sources: SourceRegistry, settings?: Settings): { owner: string; enabled: boolean; variables: readonly VariableSpec[] }[] {

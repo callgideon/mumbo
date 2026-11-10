@@ -49,7 +49,8 @@ The `dsh-superagent` row accepts these fields:
 
 | Field | Default | Meaning |
 |---|---|---|
-| `stateDir` | required | Absolute directory for the database, the lock, the worker command shims, the agent's git configuration and, by default, the Ticket directories |
+| `stateDir` | required | Absolute directory for the database, the lock, the worker command shims, and the agent's git configuration |
+| `workDirectory` | `<stateDir>/work` | Absolute directory that holds the Ticket directories when the Execution settings name none; the worker creates them, so it must be able to write here |
 | `promptMaxChars` | `100000` | Largest saved prompt configuration, in characters, from 1,000 to 1,000,000 |
 | `admissionContextMaxPages` | `10` | Pages of Thread context one assessment may read, from 1 to 100 |
 | `admissionContextTimeoutMs` | `15000` | Time limit of one context read during an assessment, from 1 to 90,000 milliseconds |

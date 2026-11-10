@@ -3,7 +3,7 @@
  * allowed member Alice (`ou_alice`), listened chat `oc_team`, and `auto` eval mode. Stop it with `stop()`.
  */
 import { Context } from '@deepseek-ai/cordis'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { vi, type Mock } from 'vitest'
@@ -157,6 +157,8 @@ export async function startRuntime(seed?: (store: Store) => void) {
     while (argv[0] === 'env' || /^[A-Z_]+=/.test(argv[0] ?? '')) argv.shift()
     const reader = (text: string) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
     const exited = { exitCode: 0, signal: null }
+    // The worker's `mkdir -p -- <path>` creates the directory, as the real command does.
+    if (argv[0] === 'mkdir') mkdirSync(argv.at(-1)!, { recursive: true })
     const done = argv[0] === 'sh' && hooks.prepare ? hooks.prepare.then(() => exited) : Promise.resolve(exited)
     return { done, collected: { stdout: reader(answers[argv.join(' ')] ?? ''), stderr: reader('') } }
   }) }

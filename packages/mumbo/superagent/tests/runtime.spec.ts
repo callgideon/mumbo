@@ -1,6 +1,6 @@
 import { Context } from '@deepseek-ai/cordis'
 import { bindScopeParent } from '@deepseek-ai/dsh-scope'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
@@ -90,6 +90,8 @@ const subprocess = { spawn: vi.fn((spec: { argv: readonly string[] }) => {
   const argv = [...spec.argv]
   while (argv[0] === 'env' || /^[A-Z_]+=/.test(argv[0] ?? '')) argv.shift()
   const answer = answers[argv.join(' ')] ?? ''
+  // The worker's `mkdir -p -- <path>` creates the directory, as the real command does.
+  if (argv[0] === 'mkdir') mkdirSync(argv.at(-1)!, { recursive: true })
   const reader = (text: string) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
   return { done: Promise.resolve({ exitCode: answer instanceof Error ? 1 : 0, signal: null }), collected: { stdout: reader(answer instanceof Error ? '' : answer), stderr: reader(answer instanceof Error ? answer.message : '') } }
 }) }
@@ -1079,7 +1081,12 @@ it('runs the prepare command once for a new ticket, under the execution root wit
   const prepare = (command: string) => runtime.store.saveSettings({ ...runtime.store.settings(), executor: { ...runtime.store.settings().executor, prepare: command } })
   const runs = () => subprocess.spawn.mock.calls.map(([spec]) => spec as { argv: string[]; cwd: string; env?: Record<string, string> }).filter(spec => spec.argv[0] === 'sh')
   prepare('git -C /srv/widgets worktree add "$DSH_SUPERAGENT_DIR" -b "agent/$DSH_SUPERAGENT_NAME"')
+  subprocess.spawn.mockClear()
   const { ticket } = await acceptedTicket()
+  // The worker creates the execution root and the ticket directory, so under a run-as provider it owns both.
+  expect(subprocess.spawn.mock.calls.map(([spec]) => spec as { argv: string[]; cwd: string }).filter(spec => spec.argv[0] === 'mkdir'))
+    .toEqual([expect.objectContaining({ argv: ['mkdir', '-p', '--', join(directory, 'work')], cwd: '/' }),
+      expect.objectContaining({ argv: ['mkdir', '-p', '--', ticket.execution!.directory], cwd: '/' })])
   expect(runs()).toEqual([expect.objectContaining({ argv: ['sh', '-c', 'git -C /srv/widgets worktree add "$DSH_SUPERAGENT_DIR" -b "agent/$DSH_SUPERAGENT_NAME"'], cwd: join(directory, 'work'),
     env: expect.objectContaining({ DSH_SUPERAGENT_DIR: ticket.execution!.directory, DSH_SUPERAGENT_NAME: ticket.execution!.name, DSH_SUPERAGENT_GITHUB_REPOSITORY: 'acme/widgets', DSH_SUPERAGENT_FEISHU_CHAT: CHAT }) })])
   // A retry reuses the prepared directory.
