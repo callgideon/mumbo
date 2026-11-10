@@ -355,18 +355,19 @@ describe.runIf(process.platform === 'linux')('read-only roots', () => {
     const linked = await fs.resolveModelPath('uploads/files/upload.csv')
     const created = await fs.resolveModelPath(join(skills, 'new.md'))
     const notes = await fs.resolveModelPath('notes.txt')
-    const attempts: [Promise<unknown>, string][] = [
-      [fs.writeText(upload, 'changed'), `write "${upload.displayPath}"`],
-      [fs.writeText(linked, 'changed'), `write "${linked.displayPath}"`],
-      [fs.writeText(created, 'new'), `write "${created.displayPath}"`],
-      [fs.editText(upload, { oldString: 'a', newString: 'b', replaceAll: false }), `edit "${upload.displayPath}"`],
-      [fs.patchText(upload, []), `patch "${upload.displayPath}"`],
-      [fs.deleteFile(upload), `delete "${upload.displayPath}"`],
-      [fs.moveFile(upload, notes, {}), `move "${upload.displayPath}"`],
-      [fs.moveFile(notes, created, {}), `move "${notes.displayPath}"`],
-      [fs.makeDirectory(await fs.resolveModelPath(join(skills, 'dir'))), `create directory "${join(skills, 'dir')}"`],
+    const directory = await fs.resolveModelPath(join(skills, 'dir'))
+    const attempts: [() => Promise<unknown>, string][] = [
+      [() => fs.writeText(upload, 'changed'), `write "${upload.displayPath}"`],
+      [() => fs.writeText(linked, 'changed'), `write "${linked.displayPath}"`],
+      [() => fs.writeText(created, 'new'), `write "${created.displayPath}"`],
+      [() => fs.editText(upload, { oldString: 'a', newString: 'b', replaceAll: false }), `edit "${upload.displayPath}"`],
+      [() => fs.patchText(upload, []), `patch "${upload.displayPath}"`],
+      [() => fs.deleteFile(upload), `delete "${upload.displayPath}"`],
+      [() => fs.moveFile(upload, notes, {}), `move "${upload.displayPath}"`],
+      [() => fs.moveFile(notes, created, {}), `move "${notes.displayPath}"`],
+      [() => fs.makeDirectory(directory), `create directory "${join(skills, 'dir')}"`],
     ]
-    for (const [attempt, verb] of attempts) expect(await rejection(attempt)).toEqual(readOnlyRefusal(verb))
+    for (const [attempt, verb] of attempts) expect(await rejection(attempt())).toEqual(readOnlyRefusal(verb))
     expect(await fs.readText(upload)).toBe('a,b')
     expect(await fs.readText(notes)).toBe('inside')
     expect(await fs.stat(created)).toBeUndefined()
