@@ -5,20 +5,24 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { startScript, boxSite, boxes } from './edge.mjs'
+import { startScript, boxSite, boxes, AGENT_BROWSER } from './edge.mjs'
 import { memoryStore } from './store.mjs'
 import { projects } from './projects.mjs'
 import { templateArgs } from './template.mjs'
 
 const c = { llmHost: 'l', publicHost: 'boxes.x' }
+const on = { ...c, agentBrowser: true }
 const boxFiles = { proxy: 'PROXY-JS\n', gh: '#!/bin/sh\nGH\n' }
 const b64 = (s) => Buffer.from(s).toString('base64')
 const at = (text, needle) => { const i = text.indexOf(needle); assert.ok(i >= 0, `missing: ${needle}`); return i }
 
 test('a user box start script is byte-for-byte what it was before project boxes grew a proxy', () => {
-  const s = startScript(c, 'T', boxSite(c, 'a@x.com'), "role's", undefined, boxFiles, ['o@x.com'])
+  const s = startScript(on, 'T', boxSite(on, 'a@x.com'), "role's", undefined, boxFiles, ['o@x.com'])
   // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows, the X cookie, the first-run welcome and the interim Chromium policy (B27) (same cfg, token T, role "role's").
   assert.equal(createHash('sha256').update(s).digest('hex'), '05cbf60bf17ca3acbe4ce74b5095bb8e14a8e7d1d4d11b8def78c38c9ccde639')
+  // With AGENT_BROWSER off (the hotfix) the only change is that the agent's browser and computer-use rows are gone.
+  const off = startScript(c, 'T', boxSite(c, 'a@x.com'), "role's", undefined, boxFiles, ['o@x.com'])
+  assert.equal(createHash('sha256').update(off).digest('hex'), '2871d32ac72804e4988abb09ca11b7ed6a9e6b9fc98e0464aa794f74c2ae4e27')
 })
 
 const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'
@@ -75,6 +79,17 @@ test('interim Chromium policy: written whole with mode 0644, and never through a
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
 
+test('agent browser off (AGENT_BROWSER): a person box mounts no browser-use, browser-consent, Playwright MCP or computer-use row, and CU_PATCH stays defined', () => {
+  assert.equal(AGENT_BROWSER, false)
+  const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles)
+  for (const gone of ['dsh-browser-use', '@mumbo/browser-consent', 'dsh-experimental-browser-use-playwright-mcp', 'computer-use-x11', 'computer.overlay.yml']) assert.ok(!u.includes(gone), gone)
+  assert.match(u, /^CU_PATCH=$/m)
+  assert.match(u, / \$CU_PATCH \$WELCOME_PATCH/)
+  // The script still runs to the dsh launch under set -u with the rows gone.
+  const p = startScript({ ...c, projectDomain: 'boxes.x' }, 'T', boxSite({ ...c, projectDomain: 'boxes.x' }, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
+  assert.ok(!p.includes('computer-use'))
+})
+
 test('box links: the overlay loads only when the image ships @mumbo/box-links; project boxes get no desktop link', () => {
   const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles)
   assert.match(u, /if \[ -d \/src\/packages\/mumbo\/box-links \]; then/)
@@ -85,21 +100,21 @@ test('box links: the overlay loads only when the image ships @mumbo/box-links; p
   assert.ok(!p.includes('desktop: https://'))
 })
 
-test('browser consent replaces the plain Playwright provider row only when the image ships @mumbo/browser-consent', () => {
-  const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles)
+test('browser consent replaces the plain Playwright provider row only when the image ships @mumbo/browser-consent (with AGENT_BROWSER on)', () => {
+  const u = startScript(on, 'T', boxSite(on, 'a@x.com'), 'role', undefined, boxFiles)
   assert.ok(at(u, 'if [ -d /src/packages/mumbo/browser-consent ]; then') < at(u, "name: '@mumbo/browser-consent'"))
   assert.ok(at(u, "name: '@mumbo/browser-consent'") < at(u, 'else') && at(u, 'else') < at(u, "dsh-experimental-browser-use-playwright-mcp"))
-  const p = startScript({ ...c, projectDomain: 'boxes.x' }, 'T', boxSite({ ...c, projectDomain: 'boxes.x' }, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
+  const p = startScript({ ...on, projectDomain: 'boxes.x' }, 'T', boxSite({ ...c, projectDomain: 'boxes.x' }, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
   assert.ok(!p.includes('browser-consent') && !p.includes('playwright-mcp'))
 })
 
-test('computer use: person boxes load it only with the package and xdotool, and :1 needs the X cookie; project boxes never', () => {
-  const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles)
+test('computer use: person boxes load it only with the package and xdotool, and :1 needs the X cookie; project boxes never (with AGENT_BROWSER on)', () => {
+  const u = startScript(on, 'T', boxSite(on, 'a@x.com'), 'role', undefined, boxFiles)
   assert.match(u, /if \[ -d \/src\/packages\/experimental\/computer-use-x11 \] && command -v xdotool/)
   assert.match(u, /\$LINKS_PATCH \$CU_PATCH/)
   assert.match(u, /Xvfb :1 \$XVFB_AUTH /)
   assert.ok(at(u, 'export XAUTHORITY=/run/x11/auth') < at(u, "Xvfb :1"))
-  const p = startScript({ ...c, projectDomain: 'boxes.x' }, 'T', boxSite({ ...c, projectDomain: 'boxes.x' }, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
+  const p = startScript({ ...on, projectDomain: 'boxes.x' }, 'T', boxSite({ ...c, projectDomain: 'boxes.x' }, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
   assert.ok(!p.includes('CU_PATCH') && !p.includes('computer-use'))
 })
 

@@ -182,6 +182,13 @@ export function roleInstructions(cfg, principal) {
 
 /** Exists once a person box has given its first-run welcome, or had sessions before it (DESIGN.md#first-run-welcome). Under
  *  /root/.dsh, so backups carry it with the conversation that holds the welcome. */
+/**
+ * Whether person boxes mount the agent's browser and desktop tools: the browser-use service, @mumbo/browser-consent (or
+ * the plain Playwright MCP provider without it) and computer use. Off until browser snapshots mask password and card
+ * fields and the network request details are denied (B25): today those details carry the Cookie header as a read.
+ */
+export const AGENT_BROWSER = false
+
 export const WELCOMED = '/root/.dsh/welcomed'
 /** The first-run welcome (spec section 17a, step 5), added to the person's first prompt in a new box (startScript). */
 export function welcomeInstructions(cfg) {
@@ -214,6 +221,8 @@ export function startScript(cfg, token, site = boxSite(cfg, ''), role = '', memb
     models: cfg.openrouterModels.map(id => ({ id, ...OPENROUTER_BOX_MODELS[id] })) } : undefined
   const b64 = (text) => Buffer.from(text).toString('base64')
   const sq = (text) => `'${text.replaceAll("'", `'\\''`)}'`
+  // AGENT_BROWSER, unless the caller (tests) says otherwise.
+  const agentBrowser = cfg.agentBrowser ?? AGENT_BROWSER
   return `#!/bin/sh
 # Start dsh web for this box's user. Re-runnable: the router calls it again when dsh is found dead.
 set -eu
@@ -235,7 +244,7 @@ cat > /root/.mumbo/sandboxes.overlay.yml <<'YML'
         url: ${llm}/mcp
         headers:
           Authorization: !!js '\`Bearer \${process.env.DEEPSEEK_API_KEY}\`'
-${site.desktop ? `    - id: browser-use
+${site.desktop && agentBrowser ? `    - id: browser-use
       name: '@deepseek-ai/dsh-browser-use'
 ` : ''}YML
 ${openrouter ? `# Image-capable models on OpenRouter (edge OPENROUTER_MODELS). A Session keeps the model it starts with.
@@ -244,7 +253,7 @@ cat > /root/.mumbo/models.overlay.yml <<'YML'
   config:
     providers: ${JSON.stringify({ openrouter })}
 YML
-` : ''}${site.desktop ? `# The user's Chromium for dsh's browser tools. With @mumbo/browser-consent in the image, writes on a site ask the
+` : ''}${site.desktop && agentBrowser ? `# The user's Chromium for dsh's browser tools. With @mumbo/browser-consent in the image, writes on a site ask the
 # person first; consent mounts the Playwright MCP provider itself, so the plain provider row is used only without it.
 if [ -d /src/packages/mumbo/browser-consent ]; then
 cat >> /root/.mumbo/sandboxes.overlay.yml <<'YML'
@@ -277,7 +286,7 @@ ${site.desktop ? `        desktop: https://${cfg.publicHost}/desktop/
 ` : ''}YML
 LINKS_PATCH="--patch /root/.mumbo/links.overlay.yml"
 fi
-${site.desktop ? `# Desktop control on :1 (@deepseek-ai/dsh-computer-use-x11), when the image ships the package and xdotool.
+${site.desktop && agentBrowser ? `# Desktop control on :1 (@deepseek-ai/dsh-computer-use-x11), when the image ships the package and xdotool.
 CU_PATCH=
 if [ -d /src/packages/experimental/computer-use-x11 ] && command -v xdotool >/dev/null 2>&1; then
 cat > /root/.mumbo/computer.overlay.yml <<'YML'
@@ -292,6 +301,7 @@ YML
 command -v xauth >/dev/null 2>&1 && echo "        xauthority: /run/x11/auth" >> /root/.mumbo/computer.overlay.yml
 CU_PATCH="--patch /root/.mumbo/computer.overlay.yml"
 fi
+` : site.desktop ? `CU_PATCH=
 ` : ''}${site.desktop ? `# First-run welcome (edge welcomeInstructions): until ${WELCOMED} exists, a UserPromptSubmit hook creates it (noclobber,
 # so exactly one prompt wins) and adds the welcome to that prompt. dsh reads AGENTS.md into every new session, so the
 # role file cannot carry a once-only greeting. A box with any session log under dsh's sessions root has been used (a
