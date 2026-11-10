@@ -361,7 +361,10 @@ resource "aws_ecs_task_definition" "edge" {
         # the units change reads MAX_RUNNING_BOXES (running boxes of all kinds, children too, counted as one each) instead; both stay until no such image can be rolled back to.
         MAX_RUNNING_UNITS = tostring(2 * (12 * var.node_count - 2))
         MAX_RUNNING_BOXES = tostring(12 * var.node_count - 2)
-        # Approvals. PROJECT_TEMPLATE stays unset (it defaults to BOX_TEMPLATE) until the mumbo-project template is built.
+        # Project boxes: the mumbo-project template (8192 MB, 4 vCPU; superagent, gh, no desktop), built 2026-11-10 from
+        # mumbo-web-prod:prod-546f42d7fb (RUNBOOK "Rebuild the box template").
+        PROJECT_TEMPLATE = "mumbo-project"
+        # Approvals.
         APPROVE_HOST         = local.approve_host
         APPROVER_EMAILS      = var.approver_emails
         GITHUB_AGENT_LOGIN   = var.github_agent_login
