@@ -1048,7 +1048,8 @@ export const KEY_PATHS = ['/home/keys', '/home/keys/revoke']
  *  box, for its members only; `approve` (approve-page.mjs) serves cfg.approveHost, an origin no box serves; any other host
  *  answers 404. `signin` (authUi) answers its GETs on the approve host before any identity check; GET /oauth/consent on
  *  the public host, which a box serves, redirects there. A request or upgrade skippedSignin flags gets 400 before all that.
- *  `keys` (keys.mjs keyManager) adds the door key manager to /home on the public host and answers its KEY_PATHS there. */
+ *  `keys` (keys.mjs keyManager) adds the door key manager to /home on the public host and answers its KEY_PATHS there.
+ *  The public host answers 403 to any service-worker script fetch. */
 export function userServer({ cfg, box, verifyAlb, projects, approve, signin, keys, log = console.log }) {
   const identify = async (req) => verifyAlb
     ? (await verifyAlb(req.headers['x-amzn-oidc-data']).catch(() => undefined)) ?? ''
@@ -1095,6 +1096,9 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, key
     if (!email.includes('@')) return json(res, 401, { error: 'not signed in' })
     if (!admitted(cfg.allowed, email)) return page(res, 403, inviteText(cfg.allowed), false)
     const host = hostOf(req)
+    // No service worker registers on the public host: one a box served would sit in front of /home and read the door key
+    // a create shows. Browsers send `Service-Worker: script` on every worker script fetch, and a page cannot set it.
+    if (host === cfg.publicHost && req.headers['service-worker'] !== undefined) return page(res, 403, 'Forbidden.', false)
     if (host === cfg.approveHost && approve) return approve(req, res, email).catch((e) => {
       log(JSON.stringify({ edge: 'error', user: email, host, error: e.message }))
       if (!res.headersSent) page(res, 500, 'The approve page failed. Reload to try again.', false); else res.destroy()

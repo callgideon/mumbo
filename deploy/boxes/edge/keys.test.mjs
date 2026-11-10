@@ -26,12 +26,12 @@ function recording() {
     addToSet: (k, m) => { written.push(k, m); return store.addToSet(k, m) } } }
 }
 /** The key service over a project store where A owns P and B owns Q; `at` moves the clock, `allowed` is the allowlist. */
-async function setup(store = memoryStore()) {
+async function setup(store = memoryStore(), log = () => {}) {
   const proj = projects({ store, admitted: () => true, log: () => {} })
   const P = (await proj.create(A, 'Mine')).id, Q = (await proj.create(B, 'Theirs')).id
   let now = NOW
   const allowed = new Set([A, B])
-  const keys = doorKeys({ store, projects: proj, admitted: (e) => allowed.has(e), now: () => now, log: () => {} })
+  const keys = doorKeys({ store, projects: proj, admitted: (e) => allowed.has(e), now: () => now, log })
   return { store, proj, keys, P, Q, allowed, at: (ms) => { now = ms } }
 }
 
@@ -57,19 +57,24 @@ test('isKey refuses a flipped character, a wrong length, a wrong prefix and anyt
   for (const v of [undefined, null, 42, {}, '']) assert.equal(isKey(v), false)
 })
 
-test('the store holds only the SHA-256 of a key; list shows neither the key nor its hash', async () => {
-  const { store, written } = recording()
-  const t = await setup(store)
+test('the store holds only the SHA-256 of a key; list and the log show neither the key nor its hash', async () => {
+  const { store, written } = recording(), lines = []
+  const t = await setup(store, (line) => lines.push(line))
   const { key, record } = await t.keys.mint(A, { name: 'laptop', scopes: ['read'] })
   const hash = createHash('sha256').update(key).digest('hex')
   assert.equal(keyHash(key), hash)
   assert.deepEqual(await store.getDoc(`key:${hash}`), record)
   assert.deepEqual(await store.setMembers(`keys:${A}`), [hash])
   await t.keys.verify(key)
+  await assert.rejects(t.keys.verify(`${key.slice(0, 42)}${key[42] === 'A' ? 'B' : 'A'}${key.slice(43)}`), { code: 'invalid_api_key' })
+  await t.keys.revoke(A, record.id)
+  await assert.rejects(t.keys.verify(key), { code: 'key_revoked' })
   const all = JSON.stringify(written)
   assert.ok(!all.includes(key.slice(10, 42)), 'neither the key nor its random part is ever written')
   const listed = JSON.stringify(await t.keys.list(A))
   assert.ok(!listed.includes(key.slice(10, 42)) && !listed.includes(hash))
+  assert.deepEqual(lines.map(l => JSON.parse(l).msg), ['minted', 'revoked'])
+  assert.ok(!lines.join('\n').includes(key.slice(10, 42)) && !lines.join('\n').includes(hash), 'the log has neither the key nor its hash')
 })
 
 test('verify refuses with jumbo\'s codes, and checks the format before any store read', async () => {
@@ -166,17 +171,19 @@ const post = (port, path, fields, headers = {}) => call(port, { method: 'POST', 
 const csrfOf = (html) => /name="csrf" value="([^"]+)"/.exec(html)[1]
 const keyIn = (html) => /<code>(mumbo_pat_[0-9A-Za-z]{38})<\/code>/.exec(html)?.[1]
 
-async function site(projectName) {
-  const t = await setup()
+/** The key manager in userServer; `log` gets both the key service's and userServer's lines. */
+async function site(projectName, log = () => {}) {
+  const t = await setup(undefined, log)
   if (projectName) t.H = (await t.proj.create(A, projectName)).id
   const cfg = { publicHost: HOST, projectDomain: HOST, approveHost: `approve.${HOST}`, allowed: ['@x.com'], signinCookie: '_oauth2_proxy_mumbo', proxy: new URL('http://127.0.0.1:1') }
   const box = { ensure: async () => assert.fail('the key manager starts no box'), touch: async () => {}, forget: async () => {}, firstSetUp: async () => false }
-  const server = userServer({ cfg, box, projects: t.proj, keys: keyManager({ cfg, keys: t.keys, csrfKey: CSRF_KEY, now: () => NOW }), log: () => {} })
+  const server = userServer({ cfg, box, projects: t.proj, keys: keyManager({ cfg, keys: t.keys, csrfKey: CSRF_KEY, now: () => NOW }), log })
   return { ...t, port: await listen(server), close: () => server.close() }
 }
 
-test('home: a person creates a key, sees it once, finds it listed and revokes it', async () => {
-  const t = await site()
+test('home: a person creates a key, sees it once, finds it listed and revokes it; the log never has the key', async () => {
+  const lines = []
+  const t = await site(undefined, (line) => lines.push(line))
   try {
     const home = await call(t.port)
     assert.equal(home.status, 200)
@@ -202,6 +209,20 @@ test('home: a person creates a key, sees it once, finds it listed and revokes it
     const after = (await call(t.port)).body
     assert.match(after, /· revoked 2026-11-10 12:00 UTC<\/small><\/li>/)
     assert.ok(!after.includes('action="/home/keys/revoke"'), 'a revoked key has no Revoke button')
+    assert.deepEqual(lines.map(l => JSON.parse(l).msg), ['minted', 'revoked'])
+    assert.ok(!lines.join('\n').includes(key.slice(10, 42)), 'the log never has the key')
+  } finally { t.close() }
+})
+
+test('home: the public host registers no service worker, so none can sit in front of a key\'s create', async () => {
+  const t = await site()
+  try {
+    // A box serving /sw.js would otherwise reach a box (and here fail with 500, since this site starts none).
+    for (const path of ['/sw.js', '/home', '/home/keys']) {
+      const r = await call(t.port, { path, headers: { 'service-worker': 'script' } })
+      assert.equal(r.status, 403, path)
+    }
+    assert.equal((await call(t.port)).status, 200, 'the page itself still loads')
   } finally { t.close() }
 })
 

@@ -157,7 +157,8 @@ ${shown ? `<p><strong>New key ${esc(shown.record.name)}.</strong> Copy it now: i
 
   async function post(req, res, email, mine) {
     if (req.method !== 'POST') return refuse(res, 405, 'Method Not Allowed')
-    // A script on this origin, which the person's own box also serves, cannot fetch these and read the answer.
+    // A script on this origin, which the person's own box also serves, cannot read the answer through a fetch, refused
+    // here, or a service worker, which userServer never lets register on the public host.
     // ponytail: it could still drive a popup it opened; serving keys from an origin no box serves (the approve host) closes that.
     if (req.headers['sec-fetch-mode'] !== 'navigate' || req.headers['sec-fetch-dest'] !== 'document') return refuse(res, 403, 'Forbidden')
     const form = await checkedForm(req, res, email, origin, csrf)
