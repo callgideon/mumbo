@@ -6,11 +6,10 @@
  */
 
 import { rm } from 'node:fs/promises'
-import { basename, dirname, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-browser-use'
 import * as PlaywrightBrowser from '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp'
-import { validateBrowserMcpConfig } from '@deepseek-ai/dsh-experimental-browser-use-runtime/mcp'
 import type { McpResult } from '@deepseek-ai/dsh-mcp-client'
 import type { Session } from '@deepseek-ai/dsh-session'
 import type { ToolExecution, ToolExecutionResult, PreToolDecision } from '@deepseek-ai/dsh-tools'
@@ -54,7 +53,7 @@ const PAGE_URL_LINE = /^- Page URL: (.*)$/gmu
 const FILE_LINES = [
   /^- \[.*\]\(([^()\n]+)\)$/gmu, /^- New console entries: (.+?)(?:#L\d+)?$/gmu, /^- Downloaded file .* to "([^"\n]+)"$/gmu,
 ]
-/** Directory, inside the server's working directory, where Playwright MCP writes the files it links. */
+/** Name of the directory where Playwright MCP writes the files it links when no `outputDir` is configured. */
 const OUTPUT_DIRECTORY = '.playwright-mcp'
 /** {@link denial} phrase for a URL that does not parse or a tab whose URL cannot be read. */
 const UNREADABLE = 'a page whose address cannot be read'
@@ -294,17 +293,23 @@ function webOrigin(url: unknown): string | undefined {
 }
 
 /**
- * Delete the files Playwright MCP wrote for a withheld result, so the model cannot read them with other tools. Only
- * links that resolve to a file directly inside a `.playwright-mcp` directory are followed, because page titles in the
- * same text are not escaped. A failed deletion is logged; the result stays withheld.
+ * Delete the files Playwright MCP wrote for a withheld result, so the model cannot read them with other tools. With an
+ * `outputDir`, each link's file name is deleted from that directory, where the server writes every linked file, so a
+ * Session directory change after the server started does not matter. Otherwise only links that resolve to a file
+ * directly inside a directory named `.playwright-mcp` are followed. A failed deletion is logged; the result stays
+ * withheld.
  * @param ctx - plugin context carrying the logger.
  * @param cwd - the Session's working directory, which is the server's and the base of its relative links.
+ * @param outputDir - the configured absolute output directory, if any.
  * @param result - the withheld result.
  */
-async function removeLinkedFiles(ctx: Context, cwd: string, result: ToolExecutionResult): Promise<void> {
+async function removeLinkedFiles(ctx: Context, cwd: string, outputDir: string | undefined, result: ToolExecutionResult): Promise<void> {
   const text = result.content.map(block => block.type === 'text' ? block.text : '').join('\n')
-  const files = FILE_LINES.flatMap(pattern => Array.from(text.matchAll(pattern), match => resolve(cwd, match[1] ?? '')))
-  await Promise.all(files.filter(file => basename(dirname(file)) === OUTPUT_DIRECTORY).map(async (file) => {
+  const links = FILE_LINES.flatMap(pattern => Array.from(text.matchAll(pattern), match => match[1] ?? ''))
+  const files = outputDir === undefined
+    ? links.map(link => resolve(cwd, link)).filter(file => basename(dirname(file)) === OUTPUT_DIRECTORY)
+    : links.map(link => basename(link)).filter(file => !['', '.', '..'].includes(file)).map(file => join(outputDir, file))
+  await Promise.all(files.map(async (file) => {
     try {
       await rm(file, { force: true })
     } catch (error: unknown) {
@@ -370,7 +375,7 @@ export function apply(ctx: Context, config: Config): void {
     }
     if (denial(site, denied) !== undefined) throw new Error(`${name}: allowedSites entry "${site}" is also denied by deniedUrls`)
   }
-  validateBrowserMcpConfig(config.browser)
+  PlaywrightBrowser.validateConfig(config.browser)
   const holder = ctx.browserUse.providerName
   if (holder !== undefined && PROVIDER_TOOL_PREFIXES[holder] === undefined) {
     throw new Error(`${name}: browser provider "${holder}" holds browserUse and its tools have no prefix this plugin can refuse; remove the row that mounts it`)
@@ -495,7 +500,8 @@ export function apply(ctx: Context, config: Config): void {
     const blocked = reportedDenial(result, denied) ?? denial(await currentTab(ctx, exec), denied)
     if (blocked === undefined) return result
     const reason = `${tool} ran, but its result is withheld: the current tab is ${blocked}, which the assistant may not use. Open another page to continue.`
-    if (exec.agent !== undefined) await removeLinkedFiles(ctx, ctx.workingDirectory.get(exec.agent.session), result)
+    const agent = exec.agent
+    if (agent !== undefined) await removeLinkedFiles(ctx, ctx.workingDirectory.get(agent.session), config.browser.outputDir, result)
     return { isError: true, content: [{ type: 'text', text: `Error: ${reason}` }], error: { message: reason } }
   }, { prepend: true })
 

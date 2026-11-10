@@ -37,3 +37,15 @@ it('rejects malformed endpoints before mounting any browser resources', () => {
   expect(() => { Provider.apply(new Context(), Provider.Config({ mode: 'attach', endpoint: 'http://localhost:bad/path' })) }).toThrow('browser endpoint')
   expect(mountSessionMcp).not.toHaveBeenCalled()
 })
+
+it('passes an absolute output directory to the server and rejects a relative one before mounting', () => {
+  Provider.apply(new Context(), Provider.Config({ mode: 'attach', endpoint: 'http://127.0.0.1:9222', outputDir: '/root/.mumbo/playwright-output' }))
+  expect(vi.mocked(mountSessionMcp).mock.calls[0]![1].args.slice(1))
+    .toEqual(['--browser', 'chromium', '--cdp-endpoint', 'http://127.0.0.1:9222', '--output-dir', '/root/.mumbo/playwright-output'])
+  Provider.apply(new Context(), Provider.Config({ mode: 'launch', outputDir: '/tmp/out' }))
+  expect(vi.mocked(mountSessionMcp).mock.calls[1]![1].args.slice(1)).toEqual(['--browser', 'chromium', '--isolated', '--headless', '--output-dir', '/tmp/out'])
+  expect(() => { Provider.apply(new Context(), Provider.Config({ mode: 'launch', outputDir: 'playwright-output' })) })
+    .toThrow('browser outputDir must be an absolute path, got "playwright-output"')
+  expect(mountSessionMcp).toHaveBeenCalledTimes(2)
+  expect(() => Provider.Config({ mode: 'launch', outputDir: 7 } as never)).toThrow()
+})

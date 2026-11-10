@@ -970,11 +970,17 @@ export type Config = BrowserMcpConfig
 
 - `inject`: `browserUse` · `agents` · `tools` · `systemPrompt` · `workingDirectory`
 - `refs`: `BrowserMcpConfig` (`@deepseek-ai/dsh-experimental-browser-use-runtime/mcp`)
-- `source`: [`packages/experimental/browser-use-playwright-mcp/src/index.ts:16`](../packages/experimental/browser-use-playwright-mcp/src/index.ts)
+- `source`: [`packages/experimental/browser-use-playwright-mcp/src/index.ts:17`](../packages/experimental/browser-use-playwright-mcp/src/index.ts)
 
 ```ts config-catalog
-/** Fixed Chromium launch or existing-browser attachment settings. */
-export type Config = BrowserMcpConfig
+/** Fixed Chromium launch or existing-browser attachment settings, and where the server writes its files. */
+export type Config = BrowserMcpConfig & {
+  /**
+   * Absolute directory for the snapshots, screenshots, and logs the server writes; omitted, the server writes them to
+   * `.playwright-mcp` in the Session's working directory.
+   */
+  outputDir?: string
+}
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-experimental-browser-use-playwright-mcp -->
 
@@ -4945,7 +4951,7 @@ export interface Config {
 
 - `inject`: `browserUse` · `agents` · `tools` · `systemPrompt` · `workingDirectory`
 - `refs`: [`PlaywrightBrowser`](../packages/experimental/browser-use-playwright-mcp/src/index.ts)
-- `source`: [`packages/mumbo/browser-consent/src/index.ts:81`](../packages/mumbo/browser-consent/src/index.ts)
+- `source`: [`packages/mumbo/browser-consent/src/index.ts:80`](../packages/mumbo/browser-consent/src/index.ts)
 
 ```ts config-catalog
 /** Consent configuration. */

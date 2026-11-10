@@ -8632,6 +8632,9 @@ importers:
       '@deepseek-ai/dsh-experimental-browser-use-runtime':
         specifier: workspace:*
         version: link:../browser-use-runtime
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
       '@playwright/mcp':
         specifier: 0.0.80
         version: 0.0.80

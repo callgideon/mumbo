@@ -4,7 +4,7 @@ import { once } from 'node:events'
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { expect, it, vi } from 'vitest'
 import { bootComposition, consentRecords, toolResults } from './harness.ts'
@@ -22,7 +22,8 @@ const MASK = '•'.repeat(4)
  * Serve two loopback origins, `127.0.0.1` and `localhost`, attach the composition to a disposable headless Chromium,
  * and run one scripted turn.
  * @param page - HTML for a request path, given the server port.
- * @param turn - consent's `deniedUrls`, `allowedSites`, the model's script, and the person's answers, given the origins.
+ * @param turn - consent's `deniedUrls`, `allowedSites`, the model's script, the person's answers, and whether the
+ *   server writes to an `outputDir` outside the working directory, given the origins.
  * @returns each tool result's text, the approval reasons asked, the Session events, the hosts that received a POST,
  *   the files Playwright MCP left in its output directory, by name, and the names in the working directory.
  */
@@ -31,8 +32,10 @@ async function runTurn(page: (port: number, path: string) => string, turn: (allo
   allowedSites: string[]
   script: ScriptStep[]
   answers?: Array<'rejected' | 'allowed-once'>
+  outputDir?: boolean
 }) {
   const root = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-e2e-'))
+  const cleanup: string[] = []
   const sent: string[] = []
   const server = createServer((request, response) => {
     if (request.method === 'POST') sent.push(request.headers.host!)
@@ -49,13 +52,13 @@ async function runTurn(page: (port: number, path: string) => string, turn: (allo
   try {
     let debugPort = ''
     await vi.waitFor(async () => { debugPort = (await readFile(join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0]!; expect(Number(debugPort)).toBeGreaterThan(0) }, { timeout: 20_000 })
-    const { deniedUrls, allowedSites, script, answers } = turn(`http://127.0.0.1:${String(port)}`, `http://localhost:${String(port)}`)
-    booted = await bootComposition(root, {
-      consent: { browser: { mode: 'attach', endpoint: `http://127.0.0.1:${debugPort}` }, deniedUrls, allowedSites }, script, answers: answers ?? [],
-    })
+    const { deniedUrls, allowedSites, script, answers, outputDir } = turn(`http://127.0.0.1:${String(port)}`, `http://localhost:${String(port)}`)
+    const output = outputDir === true ? join(tmpdir(), `${basename(root)}-output`) : join(root, '.playwright-mcp')
+    cleanup.push(output)
+    const browser = { mode: 'attach', endpoint: `http://127.0.0.1:${debugPort}`, ...outputDir === true ? { outputDir: output } : {} }
+    booted = await bootComposition(root, { consent: { browser, deniedUrls, allowedSites }, script, answers: answers ?? [] })
     booted.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Go.' }], source: { kind: 'user' } }))
     await booted.agent.whenIdle()
-    const output = join(root, '.playwright-mcp')
     const names = await readdir(output).catch(() => [])
     const files = new Map(await Promise.all(names.map(async name => [name, await readFile(join(output, name))] as const)))
     const results = toolResults(booted.events).map(content => content.map(block => block.type === 'text' ? block.text : `[${block.type}]`).join('\n'))
@@ -66,7 +69,7 @@ async function runTurn(page: (port: number, path: string) => string, turn: (allo
     await exited
     server.closeAllConnections()
     server.close()
-    await rm(root, { recursive: true, force: true, maxRetries: 5 })
+    await Promise.all([root, ...cleanup].map(path => rm(path, { recursive: true, force: true, maxRetries: 5 })))
   }
 }
 
@@ -252,4 +255,20 @@ it.skipIf(skip)('refuses saving browser output to a chosen file, and deletes a w
   expect(workspace).not.toContain('snap.yml')
   expect([...files.keys()].filter(name => name.endsWith('.png'))).toEqual([])
   expect([...files.values()].filter(content => content.includes('correct-horse'))).toEqual([])
+})
+
+it.skipIf(skip)('writes to a configured outputDir outside the working directory, and deletes a withheld result\'s files there', { timeout: 120_000 }, async () => {
+  const { results, files, workspace } = await runTurn(accountPages, (allowed, other) => ({
+    deniedUrls: [other], allowedSites: [allowed], outputDir: true,
+    script: [
+      { name: 'browser_navigate', args: { url: `${allowed}/` } },
+      { name: 'browser_click', args: { element: 'Account', target: '#account' } },
+      { name: 'browser_navigate', args: { url: `${allowed}/` } },
+    ],
+  }))
+  expect(results[0]).toMatch(/^- \[Snapshot\]\(\.\.\/[^)]+-output\/page-[^)]+\.yml\)$/mu)
+  expect(results[1]).toMatch(/^Error: browser_click ran, but its result is withheld/u)
+  expect([...files.keys()].filter(name => name.endsWith('.yml'))).toHaveLength(2)
+  expect([...files.values()].filter(content => content.includes('correct-horse'))).toEqual([])
+  expect(workspace).not.toContain('.playwright-mcp')
 })

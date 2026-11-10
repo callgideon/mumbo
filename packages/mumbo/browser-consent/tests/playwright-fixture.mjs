@@ -3,14 +3,16 @@
  * `link:<url>` target, plus a call log. Each call is logged with the current tab's URL before the call. The first tab
  * starts on the URL in the third argument, or `about:blank`; a click on a `report:<url>` target reports that page URL
  * without moving the tab, as when the person leaves the page between the call and the next listing. Each click writes
- * the page it ends on to `.playwright-mcp/page-<n>.yml` in the working directory and links it under a title naming the
- * clicked element, as Playwright MCP links an element screenshot.
+ * the page it ends on to `page-<n>.yml` in the output directory, the fourth argument or `.playwright-mcp` in the working
+ * directory, and links it relative to the working directory under a title naming the clicked element, as Playwright
+ * MCP links an element screenshot.
  */
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { createInterface } from 'node:readline'
 
-const [root, mode, start] = process.argv.slice(2)
+const [root, mode, start, outputDir] = process.argv.slice(2)
+const output = outputDir || '.playwright-mcp'
 const reply = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\n')
 const text = value => ({ content: [{ type: 'text', text: value }] })
 const tool = (name, properties = {}) => ({ name, description: `Fixture ${name}.`, inputSchema: { type: 'object', properties } })
@@ -59,10 +61,10 @@ createInterface({ input: process.stdin }).on('line', line => {
       const reported = name === 'browser_click' && args.target?.startsWith('report:') ? args.target.slice('report:'.length) : tabs[current].url
       let snapshot = ''
       if (name === 'browser_click') {
-        const file = `.playwright-mcp/page-${++written}.yml`
-        mkdirSync('.playwright-mcp', { recursive: true })
+        const file = join(output, `page-${++written}.yml`)
+        mkdirSync(output, { recursive: true })
         writeFileSync(file, `- text: ${reported}\n`)
-        snapshot = `\n### Snapshot\n- [Snapshot of ${args.element ?? 'the page'}](${file})`
+        snapshot = `\n### Snapshot\n- [Snapshot of ${args.element ?? 'the page'}](${relative(process.cwd(), file)})`
       }
       reply(request.id, name === 'browser_tabs'
         ? text(`### Result\n${tabs.map((tab, index) => `- ${index}:${index === current ? ' (current)' : ''} [Fixture page](${tab.url})`).join('\n')}`)

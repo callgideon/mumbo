@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import { BrowserUseProviderName } from '@deepseek-ai/dsh-browser-use/brand'
@@ -25,7 +25,9 @@ vi.mock('@deepseek-ai/dsh-experimental-browser-use-runtime/mcp', async (importOr
   return {
     ...actual,
     mountSessionMcp: (ctx: Context, options: Parameters<typeof actual.mountSessionMcp>[1]) => {
-      actual.mountSessionMcp(ctx, { ...options, args: [FIXTURE, process.env.CONSENT_FIXTURE_ROOT!, process.env.CONSENT_FIXTURE_MODE ?? '', process.env.CONSENT_FIXTURE_START ?? ''] })
+      // The fixture writes its files where the real server's `--output-dir` points.
+      const outputDir = options.args.includes('--output-dir') ? options.args[options.args.indexOf('--output-dir') + 1]! : ''
+      actual.mountSessionMcp(ctx, { ...options, args: [FIXTURE, process.env.CONSENT_FIXTURE_ROOT!, process.env.CONSENT_FIXTURE_MODE ?? '', process.env.CONSENT_FIXTURE_START ?? '', outputDir] })
     },
   }
 })
@@ -195,6 +197,7 @@ describe('browser write consent in the person-box composition', () => {
     for (const consent of [
       { allowedSites: ['https://mail.google.com/'] }, { browser: { mode: 'attach', endpoint: 'http://localhost:bad/path' } },
       { deniedUrls: undefined }, { deniedUrls: ['https://accounts.google.com/'] }, { allowedSites: ['https://accounts.google.com'] },
+      { browser: { mode: 'attach', endpoint: 'http://127.0.0.1:9', outputDir: 'playwright-output' } },
     ]) {
       const invalid = await load({ consent })
       expect(invalid.consentFiber?.state).toBe(FAILED)
@@ -363,6 +366,23 @@ describe('browser write consent in the person-box composition', () => {
     // A listing that fails, here on the fixture's broken page, withholds the result too.
     const broken = await turn({ script: [{ name: 'browser_navigate', args: { url: 'http://broken.test/' } }] })
     expect(toolResults(broken.events)).toEqual([unreadable('browser_navigate')])
+  })
+
+  it('passes outputDir to the server and deletes a withheld result\'s files there', { timeout: 60_000 }, async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-output-'))
+    roots.push(outputDir)
+    const { events, root } = await turn({
+      consent: { browser: { mode: 'attach', endpoint: 'http://127.0.0.1:9', outputDir } },
+      script: [
+        { name: 'browser_navigate', args: { url: 'http://allowed.test/' } },
+        { name: 'browser_click', args: { element: 'Next', target: 'e1' } },
+        { name: 'browser_click', args: { element: 'Sign in', target: 'link:https://accounts.google.com/' } },
+      ],
+    })
+    expect(toolResults(events)[1]).toEqual([{ type: 'text', text: `### Page\n- Page URL: http://allowed.test/\n### Snapshot\n- [Snapshot of Next](${relative(root, join(outputDir, 'page-1.yml'))})` }])
+    expect(JSON.stringify(toolResults(events)[2])).toContain('Error: browser_click ran, but its result is withheld')
+    expect(await readdir(outputDir)).toEqual(['page-1.yml'])
+    expect(await readdir(root)).not.toContain('.playwright-mcp')
   })
 
   it('replaces the result before later wrappers and post-execute policy see it', { timeout: 60_000 }, async () => {
