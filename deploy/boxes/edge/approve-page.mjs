@@ -30,7 +30,8 @@ const NOTICES = new Map([
   ['repo_removed', 'Repository access removed.'],
   ['repo_changed', 'The project\'s repositories changed meanwhile. Try again.'],
 ])
-const STYLE = `body{margin:0;background:#fff;color:rgb(15,17,21);font:14px/24px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+/** The edge form pages' stylesheet (this page and the key manager, keys.mjs). */
+export const STYLE = `body{margin:0;background:#fff;color:rgb(15,17,21);font:14px/24px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 main{max-width:40rem;margin:0 auto;padding:24px 16px}h1{font-size:20px;line-height:28px;margin:0}h2{font-size:14px;margin:32px 0 0}
 a{color:rgb(65,118,230);text-decoration:none}.muted{color:rgb(97,102,107)}p{margin:0}form{margin:0}
 .card{border:0.5px solid rgba(0,0,0,.12);border-radius:12px;padding:16px;margin:12px 0}

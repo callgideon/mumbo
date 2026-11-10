@@ -1,6 +1,7 @@
 // node --test: door keys (B31). The format and checksum are jumbo's (vectors from its key_format.checksum with the mumbo
-// prefix); the store holds only hashes; verify refuses with jumbo's codes; the home page's key manager mints, lists and
-// revokes only the signed-in person's own keys, behind Origin, navigation and CSRF checks, and shows a new key once.
+// prefix); the store holds only hashes; verify refuses with jumbo's codes and writes the last use at most once a minute;
+// the key manager, served on the approve host only, mints, lists and revokes only the signed-in person's own keys, behind
+// Origin, navigation and CSRF checks, and shows a new key once.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { createHash, createHmac } from 'node:crypto'
@@ -13,7 +14,7 @@ import { projects } from './projects.mjs'
 const A = 'a@x.com', B = 'b@x.com'
 const NOW = Date.parse('2026-11-10T12:00:00Z')
 const DAY = 86_400_000
-const HOST = 'boxes.mumbo.si'
+const HOST = 'boxes.mumbo.si', APPROVE = `approve.${HOST}`
 const CSRF_KEY = Buffer.from('h'.repeat(32))
 const VECTOR = `${PREFIX}0123456789ABCDEFGHIJKLMNOPQRSTUV3nCqy1`
 const HOSTILE = '"><script>alert(1)</script><b x=\''
@@ -127,6 +128,20 @@ test('a revoked key fails on the very next call; list keeps it with its last use
   assert.deepEqual([listed.lastUsedAt, listed.revokedAt], [NOW + 1000, NOW + 2000])
 })
 
+test('the last use is written at most once a minute per key, as jumbo does', async () => {
+  const { store, written } = recording()
+  const t = await setup(store)
+  const one = await t.keys.mint(A, { name: 'one', scopes: ['read'] }), two = await t.keys.mint(A, { name: 'two', scopes: ['read'] })
+  const uses = () => written.filter(v => typeof v === 'string' && v.startsWith('key-used:'))
+  for (const ms of [0, 1000, 59_999]) { t.at(NOW + ms); await t.keys.verify(one.key) }
+  await t.keys.verify(two.key)
+  assert.deepEqual(uses(), [`key-used:${one.record.id}`, `key-used:${two.record.id}`], 'one write per key within the minute')
+  t.at(NOW + 60_000)
+  await t.keys.verify(one.key)
+  assert.equal(uses().length, 3)
+  assert.equal((await t.keys.list(A)).find(k => k.name === 'one').lastUsedAt, NOW + 60_000)
+})
+
 test('mint takes a name, known scopes, an offered lifetime and only projects the owner is a member of', async () => {
   const t = await setup()
   for (const [what, input] of [['no name', { name: ' ', scopes: ['read'] }], ['a long name', { name: 'n'.repeat(81), scopes: ['read'] }],
@@ -155,45 +170,54 @@ test('nobody lists or revokes another person\'s key', async () => {
   await t.keys.verify(key)
 })
 
-// ---- the key manager on /home, through userServer
+// ---- the key manager on the approve host, through userServer
 const listen = (server) => new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port)))
-const call = (port, { method = 'GET', path = '/home', headers = {}, body } = {}) => new Promise((resolve, reject) => {
-  const all = Object.fromEntries(Object.entries({ host: HOST, 'x-forwarded-email': A, ...headers, ...(body === undefined ? {} : { 'content-length': Buffer.byteLength(body) }) }).filter(([, v]) => v !== undefined))
+const call = (port, { method = 'GET', path = '/keys', headers = {}, body } = {}) => new Promise((resolve, reject) => {
+  const all = Object.fromEntries(Object.entries({ host: APPROVE, 'x-forwarded-email': A, ...headers, ...(body === undefined ? {} : { 'content-length': Buffer.byteLength(body) }) }).filter(([, v]) => v !== undefined))
   const req = request({ host: '127.0.0.1', port, method, path, headers: all }, (res) => {
     let text = ''; res.setEncoding('utf8'); res.on('data', c => { text += c }); res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: text }))
   })
   req.on('error', reject)
   req.end(body)
 })
-/** A form POST as the browser sends it from the home page. */
-const NAV = { origin: `https://${HOST}`, 'content-type': 'application/x-www-form-urlencoded', 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' }
+/** A form POST as the browser sends it from the key manager. */
+const NAV = { origin: `https://${APPROVE}`, 'content-type': 'application/x-www-form-urlencoded', 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' }
 const post = (port, path, fields, headers = {}) => call(port, { method: 'POST', path, headers: { ...NAV, ...headers }, body: new URLSearchParams(fields).toString() })
 const csrfOf = (html) => /name="csrf" value="([^"]+)"/.exec(html)[1]
 const keyIn = (html) => /<code>(mumbo_pat_[0-9A-Za-z]{38})<\/code>/.exec(html)?.[1]
+/** Every key page: no framing, no opener handle, no caching. */
+const KEY_PAGE = { 'x-frame-options': 'DENY', 'cross-origin-opener-policy': 'same-origin', 'cache-control': 'no-store' }
+const keyPage = (r) => {
+  assert.deepEqual(Object.fromEntries(Object.keys(KEY_PAGE).map(h => [h, r.headers[h]])), KEY_PAGE)
+  assert.match(r.headers['content-security-policy'], /^default-src 'none';.*frame-ancestors 'none'/)
+}
 
-/** The key manager in userServer; `log` gets both the key service's and userServer's lines. */
-async function site(projectName, log = () => {}) {
+/** The key manager in userServer, beside a stand-in approve page; `log` gets both the key service's and userServer's
+ *  lines; `wrap` may replace the key service's methods. */
+async function site(projectName, log = () => {}, wrap = (keys) => keys) {
   const t = await setup(undefined, log)
   if (projectName) t.H = (await t.proj.create(A, projectName)).id
-  const cfg = { publicHost: HOST, projectDomain: HOST, approveHost: `approve.${HOST}`, allowed: ['@x.com'], signinCookie: '_oauth2_proxy_mumbo', proxy: new URL('http://127.0.0.1:1') }
+  const cfg = { publicHost: HOST, projectDomain: HOST, approveHost: APPROVE, allowed: ['@x.com'], signinCookie: '_oauth2_proxy_mumbo', proxy: new URL('http://127.0.0.1:1') }
   const box = { ensure: async () => assert.fail('the key manager starts no box'), touch: async () => {}, forget: async () => {}, firstSetUp: async () => false }
-  const server = userServer({ cfg, box, projects: t.proj, keys: keyManager({ cfg, keys: t.keys, csrfKey: CSRF_KEY, now: () => NOW }), log })
+  const approve = async (req, res) => { res.writeHead(200).end('the approve page') }
+  const server = userServer({ cfg, box, projects: t.proj, approve, keys: keyManager({ cfg, keys: wrap(t.keys), projects: t.proj, csrfKey: CSRF_KEY, now: () => NOW }), log })
   return { ...t, port: await listen(server), close: () => server.close() }
 }
 
-test('home: a person creates a key, sees it once, finds it listed and revokes it; the log never has the key', async () => {
+test('keys: a person creates a key, sees it once, finds it listed and revokes it; the log never has the key', async () => {
   const lines = []
   const t = await site(undefined, (line) => lines.push(line))
   try {
-    const home = await call(t.port)
-    assert.equal(home.status, 200)
-    assert.deepEqual([home.headers['x-frame-options'], home.headers['cross-origin-opener-policy'], home.headers['cache-control']], ['DENY', 'same-origin', 'no-store'])
-    assert.match(home.headers['content-security-policy'], /^default-src 'none';.*frame-ancestors 'none'/)
-    assert.match(home.body, new RegExp(`<input type="checkbox" name="project" value="${t.P}"> Mine</label>`))
-    assert.ok(!home.body.includes(t.Q), 'another person\'s project is not offered')
-    const csrf = csrfOf(home.body)
-    const made = await post(t.port, '/home/keys', [['csrf', csrf], ['name', 'laptop Claude Code'], ['scope', 'read'], ['scope', 'prompt'], ['project', t.P], ['expires', '30']])
-    assert.deepEqual([made.status, made.headers['cache-control'], made.headers['x-frame-options']], [200, 'no-store', 'DENY'])
+    const page = await call(t.port)
+    assert.equal(page.status, 200)
+    keyPage(page)
+    assert.match(page.body, new RegExp(`<input type="checkbox" name="project" value="${t.P}"> Mine</label>`))
+    assert.ok(!page.body.includes(t.Q), 'another person\'s project is not offered')
+    assert.match(page.body, /<select name="expires"><option value="">never<\/option><option value="7">in 7 days<\/option><option value="30">in 30 days<\/option><option value="90" selected>in 90 days<\/option><option value="365">in 365 days<\/option><\/select>/)
+    const csrf = csrfOf(page.body)
+    const made = await post(t.port, '/keys', [['csrf', csrf], ['name', 'laptop Claude Code'], ['scope', 'read'], ['scope', 'prompt'], ['project', t.P], ['expires', '30']])
+    assert.equal(made.status, 200)
+    keyPage(made)
     const key = keyIn(made.body)
     assert.ok(isKey(key))
     assert.equal(made.body.split(key.slice(10)).length, 2, 'the key appears once')
@@ -202,31 +226,64 @@ test('home: a person creates a key, sees it once, finds it listed and revokes it
     assert.deepEqual([k.owner, k.name, k.scopes, k.projects, k.expiresAt], [A, 'laptop Claude Code', ['read', 'prompt'], [t.P], NOW + 30 * DAY])
     const again = await call(t.port)
     assert.ok(!again.body.includes(key.slice(10)) && keyIn(again.body) === undefined, 'never shown again')
-    assert.match(again.body, /<strong>laptop Claude Code<\/strong> <small>read, prompt · projects: Mine · created 2026-11-10 12:00 UTC · expires 2026-12-10 12:00 UTC · last used 2026-11-10 12:00 UTC<\/small><form method="post" action="\/home\/keys\/revoke">/)
-    const revoked = await post(t.port, '/home/keys/revoke', { id: k.id, csrf })
-    assert.deepEqual([revoked.status, revoked.headers.location], [303, '/home'])
+    assert.match(again.body, /<strong>laptop Claude Code<\/strong> <small>read, prompt · projects: Mine · created 2026-11-10 12:00 UTC · expires 2026-12-10 12:00 UTC · last used 2026-11-10 12:00 UTC<\/small><form method="post" action="\/keys\/revoke">/)
+    const revoked = await post(t.port, '/keys/revoke', { id: k.id, csrf })
+    assert.deepEqual([revoked.status, revoked.headers.location], [303, '/keys'])
+    keyPage(revoked)
     await assert.rejects(t.keys.verify(key), { code: 'key_revoked' })
     const after = (await call(t.port)).body
     assert.match(after, /· revoked 2026-11-10 12:00 UTC<\/small><\/li>/)
-    assert.ok(!after.includes('action="/home/keys/revoke"'), 'a revoked key has no Revoke button')
+    assert.ok(!after.includes('action="/keys/revoke"'), 'a revoked key has no Revoke button')
     assert.deepEqual(lines.map(l => JSON.parse(l).msg), ['minted', 'revoked'])
     assert.ok(!lines.join('\n').includes(key.slice(10, 42)), 'the log never has the key')
   } finally { t.close() }
 })
 
-test('home: the public host registers no service worker, so none can sit in front of a key\'s create', async () => {
-  const t = await site()
+test('keys: a create that fails after the mint answers 500 without the key, and the error log has no key', async () => {
+  const lines = []
+  let minted
+  const t = await site(undefined, (line) => lines.push(line), (keys) => ({ ...keys,
+    mint: async (...a) => (minted = await keys.mint(...a)),
+    list: async () => { throw new Error('store unreachable') } }))
   try {
-    // A box serving /sw.js would otherwise reach a box (and here fail with 500, since this site starts none).
-    for (const path of ['/sw.js', '/home', '/home/keys']) {
-      const r = await call(t.port, { path, headers: { 'service-worker': 'script' } })
-      assert.equal(r.status, 403, path)
-    }
-    assert.equal((await call(t.port)).status, 200, 'the page itself still loads')
+    // The page cannot render here, so the token is computed as csrfTokens does.
+    const r = await post(t.port, '/keys', { csrf: createHmac('sha256', CSRF_KEY).update(`${A}:2026-11-10`).digest('base64url'), name: 'k', scope: 'read' })
+    assert.equal(r.status, 500)
+    assert.ok(minted && !r.body.includes(minted.key.slice(10, 42)))
+    assert.deepEqual(lines.map(l => JSON.parse(l)).map(l => l.msg ?? l.error), ['minted', 'store unreachable'])
+    assert.ok(!lines.join('\n').includes(minted.key.slice(10, 42)), 'the error log never has the key')
   } finally { t.close() }
 })
 
-test('home: a create or revoke without the exact origin, a form navigation, a form body or the person\'s own CSRF token changes nothing', async () => {
+test('keys: served only on the approve host; on the public host, a box\'s origin, the key paths redirect there and /home only links', async () => {
+  const t = await site()
+  try {
+    for (const [method, path] of [['GET', '/keys'], ['GET', '/keys?x=1'], ['GET', '/keys/revoke'], ['POST', '/keys'], ['POST', '/keys/revoke']]) {
+      const r = await call(t.port, { method, path, headers: { ...(method === 'POST' ? NAV : {}), host: HOST, origin: `https://${HOST}` }, body: method === 'POST' ? 'name=x&scope=read' : undefined })
+      assert.deepEqual([r.status, r.headers.location, keyIn(r.body), r.body.includes('csrf')], [302, `https://${APPROVE}/keys`, undefined, false], `${method} ${path}`)
+    }
+    const home = await call(t.port, { path: '/home', headers: { host: HOST } })
+    assert.equal(home.status, 200)
+    assert.match(home.body, new RegExp(`<a href="https://${APPROVE}/keys">Manage door keys</a>`))
+    assert.ok(!home.body.includes('<form') && !home.body.includes('csrf'), 'no form and no token on the public host')
+    assert.equal((await call(t.port, { path: '/', headers: { host: APPROVE } })).body, 'the approve page', 'the approve page keeps its paths')
+    assert.deepEqual(await t.keys.list(A), [], 'nothing minted')
+  } finally { t.close() }
+})
+
+test('keys: the public host registers no service worker, so none can sit in front of /home', async () => {
+  const t = await site()
+  try {
+    // A box serving /sw.js would otherwise reach a box (and here fail with 500, since this site starts none).
+    for (const path of ['/sw.js', '/home', '/keys']) {
+      const r = await call(t.port, { path, headers: { host: HOST, 'service-worker': 'script' } })
+      assert.equal(r.status, 403, path)
+    }
+    assert.equal((await call(t.port, { path: '/home', headers: { host: HOST } })).status, 200, 'the page itself still loads')
+  } finally { t.close() }
+})
+
+test('keys: a create or revoke without the exact origin, a form navigation, a form body or the person\'s own CSRF token changes nothing', async () => {
   const t = await site()
   try {
     const csrf = csrfOf((await call(t.port)).body)
@@ -235,7 +292,8 @@ test('home: a create or revoke without the exact origin, a form navigation, a fo
     const fields = { csrf, name: 'x', scope: 'read' }
     const cases = [
       ['no Origin', fields, { origin: undefined }, 403], ['another site', fields, { origin: 'https://evil.example' }, 403],
-      ['plain http', fields, { origin: `http://${HOST}` }, 403], ['a project host', fields, { origin: `https://p-${t.P}.${HOST}` }, 403],
+      ['the public host, which a box serves', fields, { origin: `https://${HOST}` }, 403],
+      ['plain http', fields, { origin: `http://${APPROVE}` }, 403], ['a project host', fields, { origin: `https://p-${t.P}.${HOST}` }, 403],
       ['a fetch', fields, { 'sec-fetch-mode': 'cors', 'sec-fetch-dest': 'empty' }, 403], ['a frame', fields, { 'sec-fetch-dest': 'iframe' }, 403],
       ['no Sec-Fetch headers', fields, { 'sec-fetch-mode': undefined, 'sec-fetch-dest': undefined }, 403],
       ['no token', { name: 'x', scope: 'read' }, {}, 403], ['B\'s token', { ...fields, csrf: other(CSRF_KEY, B) }, {}, 403],
@@ -243,40 +301,42 @@ test('home: a create or revoke without the exact origin, a form navigation, a fo
       ['JSON', fields, { 'content-type': 'application/json' }, 415],
     ]
     for (const [what, body, headers, status] of cases) {
-      assert.equal((await post(t.port, '/home/keys', body, headers)).status, status, `create: ${what}`)
-      assert.equal((await post(t.port, '/home/keys/revoke', { ...body, id: record.id }, headers)).status, status, `revoke: ${what}`)
+      const made = await post(t.port, '/keys', body, headers)
+      assert.equal(made.status, status, `create: ${what}`)
+      keyPage(made)
+      assert.equal((await post(t.port, '/keys/revoke', { ...body, id: record.id }, headers)).status, status, `revoke: ${what}`)
     }
-    assert.equal((await call(t.port, { path: '/home/keys' })).status, 405)
+    assert.equal((await call(t.port, { path: '/keys/revoke' })).status, 405)
     const listed = await t.keys.list(A)
     assert.deepEqual(listed.map(k => [k.name, k.revokedAt]), [['kept', undefined]])
   } finally { t.close() }
 })
 
-test('home: another person sees none of a person\'s keys and cannot revoke one', async () => {
+test('keys: another person sees none of a person\'s keys and cannot revoke one', async () => {
   const t = await site()
   try {
     const { key, record } = await t.keys.mint(A, { name: 'a-only', scopes: ['read'] })
     const page = await call(t.port, { headers: { 'x-forwarded-email': B } })
     assert.ok(!page.body.includes('a-only') && !page.body.includes(record.id))
-    const r = await post(t.port, '/home/keys/revoke', { id: record.id, csrf: csrfOf(page.body) }, { 'x-forwarded-email': B })
+    const r = await post(t.port, '/keys/revoke', { id: record.id, csrf: csrfOf(page.body) }, { 'x-forwarded-email': B })
     assert.equal(r.status, 404)
     await t.keys.verify(key)
   } finally { t.close() }
 })
 
-test('home: a hostile key or project name is escaped; bad input is refused with its reason', async () => {
+test('keys: a hostile key or project name is escaped; bad input is refused with its reason', async () => {
   const t = await site(HOSTILE)
   try {
     const csrf = csrfOf((await call(t.port)).body)
-    const made = await post(t.port, '/home/keys', [['csrf', csrf], ['name', HOSTILE], ['scope', 'read'], ['project', t.H]])
+    const made = await post(t.port, '/keys', [['csrf', csrf], ['name', HOSTILE], ['scope', 'read'], ['project', t.H]])
     assert.equal(made.status, 200)
     for (const html of [made.body, (await call(t.port)).body]) {
       assert.ok(!html.includes('<script>') && !html.includes(HOSTILE), 'no raw hostile text')
       assert.ok(html.includes('&#34;&#62;&#60;script&#62;alert(1)&#60;/script&#62;&#60;b x=&#39;'))
     }
-    const none = await post(t.port, '/home/keys', { csrf, name: 'x' })
+    const none = await post(t.port, '/keys', { csrf, name: 'x' })
     assert.deepEqual([none.status, none.body], [400, 'A key needs one or more of the scopes read, prompt, workspace.'])
-    assert.equal((await post(t.port, '/home/keys', [['csrf', csrf], ['name', 'x'], ['scope', 'read'], ['project', t.Q]])).status, 403)
-    assert.equal((await post(t.port, '/home/keys', [['csrf', csrf], ['name', 'x'], ['scope', 'read'], ['expires', '2']])).status, 400)
+    assert.equal((await post(t.port, '/keys', [['csrf', csrf], ['name', 'x'], ['scope', 'read'], ['project', t.Q]])).status, 403)
+    assert.equal((await post(t.port, '/keys', [['csrf', csrf], ['name', 'x'], ['scope', 'read'], ['expires', '2']])).status, 400)
   } finally { t.close() }
 })

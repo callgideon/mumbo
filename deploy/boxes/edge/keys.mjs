@@ -1,14 +1,15 @@
-// Door keys (spec section 10, B31): `mumbo_pat_` keys a person mints, lists and revokes on the edge's home page, for the
-// MCP door (B32), which calls verify, requireScope and requireProject before any tool.
+// Door keys (spec section 10, B31): `mumbo_pat_` keys a person mints, lists and revokes on the approve host's key
+// manager, for the MCP door (B32), which calls verify, requireScope and requireProject before any tool.
 // The format is jumbo's (platform-api core/db/key_format.py) with this prefix: PREFIX, 32 base62 characters, then the
 // CRC32 of PREFIX and those 32 as 6 base62 digits, most significant first, padded with '0'; 48 characters in all.
 // The edge store holds only each key's SHA-256: doc `key:<sha256 hex>` = { id, owner, name, scopes, projects, createdAt,
 // expiresAt?, revokedAt? } (times in epoch ms), set `keys:<email>` = the hashes of that person's keys, and doc
-// `key-used:<id>` = { at }, the last verified use. Nothing caches a key, so a revocation holds from the next call.
+// `key-used:<id>` = { at }, the last verified use, written at most once a minute per key and edge process (as jumbo
+// does). Nothing caches a key, so a revocation holds from the next call.
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto'
 import { crc32 } from 'node:zlib'
-import { checkedForm, csrfTokens, hidden } from './approve-page.mjs'
-import { esc, homePage, PAGE_SECURITY } from './edge.mjs'
+import { checkedForm, csrfTokens, hidden, STYLE } from './approve-page.mjs'
+import { esc, PAGE_SECURITY } from './edge.mjs'
 
 export const PREFIX = 'mumbo_pat_'
 const ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
@@ -17,6 +18,7 @@ export const SCOPES = ['read', 'prompt', 'workspace']
 /** The lifetimes a key may be given, in days; a key without one never expires. */
 export const EXPIRY_DAYS = [7, 30, 90, 365]
 const DAY_MS = 86_400_000
+const LAST_USE_MS = 60_000
 
 /** The 6-character base62 CRC32 of PREFIX + body. */
 export function checksum(body) {
@@ -48,6 +50,7 @@ const refusal = (status, code, message) => Object.assign(new Error(message), { s
 export function doorKeys({ store, projects, admitted, now = () => Date.now(), log = console.log }) {
   const say = (fields) => log(JSON.stringify({ edge: 'key', ...fields }))
   const bad = (message) => refusal(400, 'invalid_request', message)
+  const lastWrite = new Map()  // key id -> when this process last wrote its key-used doc
   /** [hash, record] of each of the owner's keys; a hash whose record is gone is skipped. */
   async function own(owner) {
     const out = []
@@ -93,7 +96,8 @@ export function doorKeys({ store, projects, admitted, now = () => Date.now(), lo
     },
     /**
      * The record of a bearer `token`, checked as jumbo's MCP server does. Format and checksum are checked before any store
-     * read; the record is read on every call. Records the use in `key-used:<id>` (a failed write is logged, never fatal).
+     * read; the record is read on every call. Records the use in `key-used:<id>` at most once a minute per key and
+     * process (a failed write is logged, never fatal, and not retried within that minute).
      * @throws 403 user_key_required for a box token (a person's assistant or a project's coordinator); 401
      *   invalid_api_key for anything else that is not a stored key; 401 key_revoked; 401 key_expired from expiresAt on;
      *   403 user_disabled once the owner is off the allowlist.
@@ -107,7 +111,11 @@ export function doorKeys({ store, projects, admitted, now = () => Date.now(), lo
       if (k.revokedAt !== undefined) throw refusal(401, 'key_revoked', 'mumbo key revoked')
       if (k.expiresAt !== undefined && k.expiresAt <= now()) throw refusal(401, 'key_expired', 'mumbo key expired')
       if (!admitted(k.owner)) throw refusal(403, 'user_disabled', 'mumbo user disabled')
-      await store.putDoc(`key-used:${k.id}`, { at: now() }).catch((e) => say({ level: 'warn', msg: 'last use not written', key: k.id, error: e.message }))
+      const at = now(), last = lastWrite.get(k.id)
+      if (last === undefined || at - last >= LAST_USE_MS) {
+        lastWrite.set(k.id, at)
+        await store.putDoc(`key-used:${k.id}`, { at }).catch((e) => say({ level: 'warn', msg: 'last use not written', key: k.id, error: e.message }))
+      }
       return k
     },
     /** @throws 403 insufficient_scope unless the verified `key` has `scope`. */
@@ -122,60 +130,65 @@ export function doorKeys({ store, projects, admitted, now = () => Date.now(), lo
 }
 
 /**
- * The key manager on the person's home page (https://<public host>/home). Only the signed-in person, userServer's
- * identity and never a header a box sets, mints, lists and revokes, and only their own keys. A POST must be a top-level
- * form navigation with `Origin: https://<public host>` and the person's CSRF token for the day (approve-page.mjs
- * csrfTokens). A new key is shown once, in the answer to its create.
- * @param {{ cfg: { publicHost: string }, keys: ReturnType<typeof doorKeys>, csrfKey: Buffer, now?: () => number }} deps
- *   `csrfKey` is HMAC-SHA256(edge key, 'home-csrf').
- * @returns {{ section: (email: string, mine: object[], shown?: { key: string, record: object }) => Promise<string>, post: (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, email: string, mine: object[]) => Promise<void> }}
- *   `section` is the HTML homePage adds; `post` answers POST /home/keys with the home page showing the new key, and
- *   POST /home/keys/revoke with 303 to /home. `mine` is the person's projects (projects.mjs list).
+ * The key manager on the approve host (https://<approve host>/keys), an origin no box serves: a page on the public host,
+ * which the person's own box serves, could otherwise open the manager in a popup, mint a key and read it. Only the
+ * signed-in person, userServer's identity and never a header a box sets, mints, lists and revokes, and only their own
+ * keys. Every answer has COOP same-origin and PAGE_SECURITY (frame-ancestors 'none', cache-control no-store).
+ * @param {{ cfg: { approveHost: string }, keys: ReturnType<typeof doorKeys>, projects: ReturnType<typeof import('./projects.mjs').projects>, csrfKey: Buffer, now?: () => number }} deps
+ *   `csrfKey` is HMAC-SHA256(edge key, 'keys-csrf'); `projects` lists the person's projects for the form.
+ * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, email: string) => Promise<void>}
+ *   handles one request on the approve host (userServer sends it KEY_PATHS there): `GET /keys` shows the keys and the
+ *   create form; `POST /keys` mints and answers 200 with the page showing the new key, the only place it ever appears
+ *   (nothing logs it); `POST /keys/revoke` answers 303 to /keys. A POST must be a top-level form navigation with
+ *   `Origin: https://<approve host>` and the person's CSRF token for the day (approve-page.mjs checkedForm).
  */
-export function keyManager({ cfg, keys, csrfKey, now = () => Date.now() }) {
-  const origin = `https://${cfg.publicHost}`
+export function keyManager({ cfg, keys, projects, csrfKey, now = () => Date.now() }) {
+  const origin = `https://${cfg.approveHost}`
   const csrf = csrfTokens(csrfKey, now)
   const when = (ms) => (ms === undefined ? 'never' : `${new Date(ms).toISOString().slice(0, 16).replace('T', ' ')} UTC`)
   const refuse = (res, status, message) => res.writeHead(status, { ...PAGE_SECURITY, 'content-type': 'text/plain; charset=utf-8' }).end(message)
 
-  async function section(email, mine, shown) {
+  async function page(res, email, shown) {
+    const mine = await projects.list(email)
     const names = new Map(mine.map(p => [p.id, p.name]))
     const token = csrf.token(email)
     const rows = (await keys.list(email)).map(k => `<li><strong>${esc(k.name)}</strong> <small>${esc(k.scopes.join(', '))} · projects: ${k.projects.length ? k.projects.map(id => esc(names.get(id) ?? id)).join(', ') : 'none'} · created ${when(k.createdAt)} · expires ${when(k.expiresAt)} · last used ${when(k.lastUsedAt)}${k.revokedAt === undefined
-      ? `</small><form method="post" action="/home/keys/revoke">${hidden({ id: k.id, csrf: token })}<button>Revoke</button></form>`
+      ? `</small><form method="post" action="/keys/revoke">${hidden({ id: k.id, csrf: token })}<button>Revoke</button></form>`
       : ` · revoked ${when(k.revokedAt)}</small>`}</li>`).join('')
-    return `
-<h2>Keys</h2><p><small>For your own AI tools, such as Claude Code, to reach mumbo over MCP. A key acts as you, with the scopes and projects you pick.</small></p>
-${shown ? `<p><strong>New key ${esc(shown.record.name)}.</strong> Copy it now: it is not shown again.<br><code>${esc(shown.key)}</code></p>\n` : ''}<ul>${rows || '<li><small>None yet.</small></li>'}</ul>
-<form method="post" action="/home/keys">${hidden({ csrf: token })}
+    res.writeHead(200, { ...PAGE_SECURITY, 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>mumbo door keys</title>
+<style>${STYLE}</style>
+<main>
+<div class="row"><h1>Door keys</h1><span class="muted">${esc(email)}</span></div>
+<p class="muted">For your own AI tools, such as Claude Code, to reach mumbo over MCP. A key acts as you, with the scopes and projects you pick.</p>
+${shown ? `<p class="notice"><strong>New key ${esc(shown.record.name)}.</strong> Copy it now: it is not shown again.<br><code>${esc(shown.key)}</code></p>\n` : ''}<ul>${rows || '<li><small>None yet.</small></li>'}</ul>
+<form method="post" action="/keys" class="card">${hidden({ csrf: token })}
 <p><label>Name <input name="name" required maxlength="80" placeholder="laptop Claude Code"></label></p>
 <p>Scopes: ${SCOPES.map(s => `<label><input type="checkbox" name="scope" value="${s}"${s === 'read' ? ' checked' : ''}> ${s}</label>`).join(' ')}<br><small>read: status; prompt: talk to Mumbo and answer its questions; workspace: start and stop tasks</small></p>
 <p>Projects: ${mine.length ? mine.map(p => `<label><input type="checkbox" name="project" value="${esc(p.id)}"> ${esc(p.name)}</label>`).join(' ') : '<small>none yet</small>'}</p>
-<p><label>Expires <select name="expires"><option value="">never</option>${EXPIRY_DAYS.map(d => `<option value="${d}">in ${d} days</option>`).join('')}</select></label></p>
-<p><button>Create key</button></p></form>`
+<p><label>Expires <select name="expires"><option value="">never</option>${EXPIRY_DAYS.map(d => `<option value="${d}"${d === 90 ? ' selected' : ''}>in ${d} days</option>`).join('')}</select></label></p>
+<p><button class="primary">Create key</button></p></form>
+</main>`)
   }
 
-  async function post(req, res, email, mine) {
+  return async (req, res, email) => {
+    res.setHeader('cross-origin-opener-policy', 'same-origin')
+    const path = req.url.split('?')[0]
+    if (req.method === 'GET' && path === '/keys') return page(res, email)
     if (req.method !== 'POST') return refuse(res, 405, 'Method Not Allowed')
-    // A script on this origin, which the person's own box also serves, cannot read the answer through a fetch, refused
-    // here, or a service worker, which userServer never lets register on the public host.
-    // ponytail: it could still drive a popup it opened; serving keys from an origin no box serves (the approve host) closes that.
+    // Only a top-level form navigation, so no script, not even the approve host's own sign-in scripts, reads the answer.
     if (req.headers['sec-fetch-mode'] !== 'navigate' || req.headers['sec-fetch-dest'] !== 'document') return refuse(res, 403, 'Forbidden')
     const form = await checkedForm(req, res, email, origin, csrf)
     if (!form) return
     try {
-      if (req.url === '/home/keys/revoke') {
+      if (path === '/keys/revoke') {
         await keys.revoke(email, form.get('id'))
-        return void res.writeHead(303, { ...PAGE_SECURITY, location: '/home' }).end()
+        return void res.writeHead(303, { ...PAGE_SECURITY, location: '/keys' }).end()
       }
       const expires = form.get('expires')
-      const shown = await keys.mint(email, { name: form.get('name'), scopes: form.getAll('scope'), projects: form.getAll('project'), expiresInDays: expires ? Number(expires) : undefined })
-      return homePage(cfg, res, email, mine, await section(email, mine, shown))
+      return await page(res, email, await keys.mint(email, { name: form.get('name'), scopes: form.getAll('scope'), projects: form.getAll('project'), expiresInDays: expires ? Number(expires) : undefined }))
     } catch (e) {
       if ([400, 403, 404].includes(e.status)) return refuse(res, e.status, e.message)
       throw e
     }
   }
-
-  return { section, post }
 }
