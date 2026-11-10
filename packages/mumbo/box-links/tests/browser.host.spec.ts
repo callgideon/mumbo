@@ -101,6 +101,18 @@ it('activates and maximizes the Chrome window on the configured display', async 
   }
 })
 
+it('runs wmctrl as the configured subprocess identity, and as the provider default without one', async () => {
+  const named = desktop([CHROME])
+  const desktopBrowser = Config({
+    home: 'https://boxes.example/home', desktop: 'https://boxes.example/desktop/', browser: { identity: 'desktop' } as BrowserConfig,
+  }).browser!
+  await frontChrome(named.ctx, desktopBrowser, new AbortController().signal)
+  expect(named.spawns.map(spec => spec.identity)).toEqual(['desktop', 'desktop'])
+  const unnamed = desktop([CHROME])
+  await frontChrome(unnamed.ctx, BROWSER, new AbortController().signal)
+  expect(unnamed.spawns.map(spec => spec.identity)).toEqual([undefined, undefined])
+})
+
 it('restores a minimized Chrome window instead of starting another', async () => {
   const h = desktop([CHROME], { minimized: true })
   await frontChrome(h.ctx, BROWSER, new AbortController().signal)

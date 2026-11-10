@@ -1,6 +1,7 @@
 # The rows the mumbo edge writes into a person box (deploy/boxes/edge/edge.mjs startScript on boxes/production):
-# sandboxes.overlay.yml, models.overlay.yml, links.overlay.yml, computer.overlay.yml, and welcome.overlay.yml.
-# The role file (DSH_AGENTS_HOME/AGENTS.md) is instructions, not a row.
+# sandboxes.overlay.yml, models.overlay.yml, links.overlay.yml, computer.overlay.yml, and welcome.overlay.yml, with the
+# subprocess identities B24 adds: `browsermcp` for the Playwright MCP server, `desktop` for the X clients of computer
+# use and the Browser tab. The role file (DSH_AGENTS_HOME/AGENTS.md) is instructions, not a row.
 - insert:
     - id: mcp-sandboxes
       name: '@deepseek-ai/dsh-mcp-client'
@@ -16,6 +17,7 @@
         browser:
           mode: attach
           endpoint: http://127.0.0.1:9222
+          identity: browsermcp
 - id: llm-pi-ai
   config:
     providers: {}
@@ -25,6 +27,9 @@
       config:
         home: https://app.example/home
         desktop: https://app.example/desktop/
+        browser:
+          xauthority: /run/x11/auth
+          identity: desktop
 - insert:
     - id: computer-use
       name: '@deepseek-ai/dsh-computer-use'
@@ -33,6 +38,7 @@
       config:
         display: ':1'
         xauthority: /run/x11/auth
+        identity: desktop
 - insert:
     - id: first-run-welcome
       name: '@deepseek-ai/dsh-hooks-claude-code'

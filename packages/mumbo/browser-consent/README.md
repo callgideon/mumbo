@@ -27,7 +27,7 @@ kind: "package-reference"
 
 | Field | Default | Meaning |
 |---|---|---|
-| `browser` | required | Settings of the mounted [Playwright MCP provider](../../experimental/browser-use-playwright-mcp/README.md), such as `mode: attach` and `endpoint`. |
+| `browser` | required | Settings of the mounted [Playwright MCP provider](../../experimental/browser-use-playwright-mcp/README.md), such as `mode: attach`, `endpoint`, and the subprocess `identity` its server runs as. |
 | `allowedSites` | `[]` | Origins, such as `https://mail.google.com`, where current-tab writes proceed without asking. |
 | `approvalTimeoutMs` | `300000` | How long a write waits for the person's answer before it is denied as unanswered. |
 

@@ -6,7 +6,7 @@
 import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -116,5 +116,35 @@ describe.runIf(process.platform === 'linux')('model file tools under model roots
     expect(patched).toContain(refusal(key).replace(/^Error: /u, ''))
     expect(await readFile(key, 'utf8')).toBe('secret')
     await expect(readFile(join(outside, 'planted.txt'))).rejects.toThrow()
+  })
+})
+
+describe.runIf(process.platform === 'linux')('model file tools under read-only roots', () => {
+  it('reads an uploaded file and refuses to change it, leaving it untouched', async () => {
+    const attachments = join(base, 'dsh', 'attachments', 'v1')
+    await mkdir(join(attachments, 'files'), { recursive: true })
+    await writeFile(join(attachments, 'files', 'upload.csv'), 'a,b\n')
+    vi.stubEnv('DSH_HOME', join(base, 'dsh'))
+    onTestFinished(() => { vi.unstubAllEnvs() })
+    ctx = new Context()
+    onTestFinished(() => ctx.fiber.dispose())
+    provideWorkingDirectoryFixture(ctx)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
+    await ctx.plugin(LocalSubprocessRuntime)
+    await ctx.plugin(LocalFileSystem, { cwd: workspace, modelRoots: [workspace], readOnlyRoots: [attachments] })
+    await ctx.plugin(ToolFs, { applyPatch: true })
+    const upload = join(attachments, 'files', 'upload.csv')
+    expect(text(await call('read', { file_path: upload }))).toContain('a,b')
+    for (const [name, args, verb] of [
+      ['write', { file_path: upload, content: 'changed' }, 'write'],
+      ['edit', { file_path: upload, old_string: 'a', new_string: 'b' }, 'edit'],
+    ] as const) {
+      const result = await call(name, args)
+      expect(result.isError).toBe(true)
+      expect(text(result)).toBe(`Error: cannot ${verb} "${upload}": it is in a directory you can only read (${attachments})`)
+    }
+    expect(await readFile(upload, 'utf8')).toBe('a,b\n')
   })
 })

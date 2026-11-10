@@ -191,6 +191,14 @@ describe('SSH ordinary process behavior', () => {
     expect(test.calls.filter(call => call.method === 'process.terminate')).toHaveLength(0)
   })
 
+  it('refuses a named child identity before contacting the remote host', async () => {
+    const test = await setup()
+    const message = 'subprocess-ssh: cannot start a process as identity "desktop"; remote processes run as the SSH account'
+    expect(() => test.runtime.spawn({ ...spec, identity: 'desktop' })).toThrow(message)
+    await expect(test.runtime.resolveExecutable('node', undefined, undefined, 'desktop')).rejects.toThrow(message)
+    expect(test.calls).toEqual([])
+  })
+
   it('retains authoritative collected byte offsets when older stream snapshots arrive after completion', async () => {
     const test = await setup()
     const handle = test.runtime.spawn({ ...spec, stdio: { stdin: 'ignore', stdout: { maxBytes: 4 }, stderr: { maxBytes: 4 } } })

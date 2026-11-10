@@ -4,9 +4,10 @@
  * Normal disposal terminates and joins live ranges; Node's synchronous exit
  * phase force-stops any ranges the service still owns. Every disposition and
  * limit arrives on the spec, so deployment-varying choices stay with the
- * caller's config (the bash executor's, the LSP host's, …). The one provider
- * config, `runAs`, starts every child on Linux as a fixed non-root identity
- * with an explicit environment.
+ * caller's config (the bash executor's, the LSP host's, …). The provider
+ * config `runAs` starts every child on Linux as a fixed non-root identity with
+ * an explicit environment; `identities` adds further such identities that a
+ * spawn spec selects by name.
  * @module @deepseek-ai/dsh-subprocess-local
  */
 
@@ -50,7 +51,7 @@ import {
   systemdRunIdentity,
 } from './linux-scope.ts'
 import type { LinuxTerminalBootstrapLaunch, LinuxTerminalScopeLaunch } from './linux-scope.ts'
-import { assertNoSecretNames, assertRunAsHost, RunAs, runAsEnvironment, validateRunAs } from './run-as.ts'
+import { assertNoSecretNames, assertRunAsHost, credentialsOf, IDENTITY_NAME, RunAs, runAsEnvironment, validateRunAs } from './run-as.ts'
 import type { RunAsIdentity } from './run-as.ts'
 import { LinuxScopeSelector } from './linux-scope-selector.ts'
 import type { LinuxScopeDecision } from './linux-scope-selector.ts'
@@ -70,6 +71,12 @@ export type { RunAs, RunAsIdentity } from './run-as.ts'
 export interface Config {
   /** Start every child as this identity with this environment; omitted, children run as this process with its scrubbed environment. */
   runAs?: RunAs | undefined
+  /**
+   * Further run-as identities by name, each with its own environment and secret names. A spawn spec that names one
+   * starts its child as it; every other child starts as `runAs`, which these require. A spawn naming an identity not
+   * listed here is refused.
+   */
+  identities?: Record<string, RunAs> | undefined
 }
 
 /**
@@ -108,6 +115,8 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
   private readonly runAs: RunAs | undefined
   /** The credentials alone, as the exec bootstrap receives them. */
   private readonly identity: RunAsIdentity | undefined
+  /** Further identities a spawn spec selects by name. */
+  private readonly identities: ReadonlyMap<string, RunAs>
 
   /** The run-as identity every child starts with, when configured. */
   override get childIdentity(): RunAsIdentity | undefined {
@@ -116,10 +125,19 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
 
   static Config: z<Config> = z.object({
     runAs: z.union([RunAs, z.const(undefined)]),
+    identities: z.union([z.dict(RunAs), z.const(undefined)]),
   })
 
   constructor(ctx: Context, config: Config = {}) {
     super(ctx)
+    const identities = Object.entries(config.identities ?? {})
+    if (identities.length > 0 && config.runAs === undefined) {
+      throw new Error('subprocess-local: identities requires runAs, the identity of every child whose spawn names none')
+    }
+    for (const [name, runAs] of identities) {
+      if (!IDENTITY_NAME.test(name)) throw new Error(`subprocess-local: identities name ${JSON.stringify(name)} must match ${String(IDENTITY_NAME)}`)
+      validateRunAs(runAs, process.platform, `identities.${name}`)
+    }
     if (config.runAs !== undefined) {
       validateRunAs(config.runAs, process.platform)
       assertRunAsHost(tmpdir())
@@ -127,7 +145,8 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
       if (!probeLinuxBootstrap()) throw new Error('subprocess-local: runAs requires the Linux exec bootstrap (the koffi execve binding and the runner entry), which is unavailable')
     }
     this.runAs = config.runAs
-    this.identity = config.runAs === undefined ? undefined : { uid: config.runAs.uid, gid: config.runAs.gid, groups: config.runAs.groups }
+    this.identity = config.runAs === undefined ? undefined : credentialsOf(config.runAs)
+    this.identities = new Map(identities)
     ctx.effect(() => {
       const onHostExit = (): void => { this.terminateForHostExit() }
       process.prependListener('exit', onHostExit)
@@ -195,10 +214,12 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
     command: string,
     env?: Readonly<Record<string, string>>,
     signal?: AbortSignal,
+    identity?: string,
   ): Promise<string> {
     if (command.length === 0) throw new Error('subprocess-local: executable must be non-empty')
     signal?.throwIfAborted()
-    const environment = this.runAs === undefined ? childEnv(env) : runAsEnvironment(this.runAs, env)
+    const runAs = this.runAsFor(identity)
+    const environment = runAs === undefined ? childEnv(env) : runAsEnvironment(runAs, env)
     const absolute = isAbsolute(command)
     if (!absolute && (command.includes('/') || (process.platform === 'win32' && command.includes('\\')))) {
       throw new Error(
@@ -233,9 +254,21 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
       extensions.map(extension => resolve(process.cwd(), directory, command + extension)))
   }
 
+  /**
+   * The run-as configuration of one launch.
+   * @param name - the identity a spawn spec names; undefined selects `runAs`.
+   * @returns the configuration, or undefined when children run as this process.
+   * @throws when no identity of that name is configured.
+   */
+  private runAsFor(name: string | undefined): RunAs | undefined {
+    if (name === undefined) return this.runAs
+    const runAs = this.identities.get(name)
+    if (runAs === undefined) throw new Error(`subprocess-local: no run-as identity named ${JSON.stringify(name)} is configured; list it under identities`)
+    return runAs
+  }
+
   /** The complete target environment: run-as composition plus the secret guard, or the scrubbed parent base. */
-  private targetEnvironment(spec: Parameters<typeof targetEnvironment>[0]): Record<string, string> {
-    const runAs = this.runAs
+  private targetEnvironment(spec: Parameters<typeof targetEnvironment>[0], runAs: RunAs | undefined): Record<string, string> {
     if (runAs === undefined) return targetEnvironment(spec)
     const env = targetEnvironment(spec, explicit => runAsEnvironment(runAs, explicit))
     assertNoSecretNames(runAs, env)
@@ -244,19 +277,21 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
 
   spawn(spec: SubprocessSpawnSpec): SubprocessHandle {
     validateSubprocessSpec(spec)
-    const env = this.targetEnvironment(spec)
+    const runAs = this.runAsFor(spec.identity)
+    const identity = runAs === undefined ? undefined : credentialsOf(runAs)
+    const env = this.targetEnvironment(spec, runAs)
     const containmentMode = this.selectContainmentMode('ordinary')
     let handle: LocalSubprocessHandle
     const internals: SpawnInternals = { ...this.internals, onSpillFailure: this.reportSpillFailure }
     const linuxScope = containmentMode === 'linux-scope' ? this.linuxScopeDecision : undefined
-    if (containmentMode === 'fallback' && this.identity === undefined) {
+    if (containmentMode === 'fallback' && identity === undefined) {
       handle = spawnSubprocess(spec, internals)
     } else {
       const binding = prepareManagedProcessBinding(internals)
       const launch = linuxScope !== undefined
-        ? launchLinuxScope(spec, env, linuxScope.literalArgv, {}, this.identity)
-        : this.identity !== undefined
-          ? launchLinuxBootstrap(spec, env, this.identity)
+        ? launchLinuxScope(spec, env, linuxScope.literalArgv, {}, identity)
+        : identity !== undefined
+          ? launchLinuxBootstrap(spec, env, identity)
           : launchWindowsJob(spec, env)
       handle = bindManagedProcess(spec, launch, binding)
       if (linuxScope !== undefined) this.watchLinuxScopeStart(handle.done, linuxScope.generation)
@@ -347,7 +382,7 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
     spec.signal?.throwIfAborted()
     const inspector = this.terminalInspector ?? createProcessInspector()
     const containmentMode = this.selectContainmentMode('terminal')
-    const env = this.targetEnvironment(spec)
+    const env = this.targetEnvironment(spec, this.runAs)
     const platform = this.internals.platform ?? process.platform
     const activity = prepareShellActivity(spec, env, platform, this.identity)
     const launch = activity === undefined ? spec : { ...spec, argv: activity.argv, env: activity.env }

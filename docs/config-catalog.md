@@ -843,6 +843,8 @@ export interface Config {
   typeDelayMs: number
   /** Pointer movements dispatched between the start and end of a drag. */
   dragSteps: number
+  /** Subprocess identity, by the provider's name for it, that runs every command and finds its executable; omitted, the default. */
+  identity?: string
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-computer-use-x11 -->
@@ -1591,7 +1593,7 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-fs-local`
 
-- `source`: [`packages/fs/fs-local/src/index.ts:60`](../packages/fs/fs-local/src/index.ts)
+- `source`: [`packages/fs/fs-local/src/index.ts:61`](../packages/fs/fs-local/src/index.ts)
 
 ```ts config-catalog
 /** Configuration for the local filesystem backend. */
@@ -1610,6 +1612,16 @@ export interface Config {
    * escape. Omitted, model paths are unrestricted.
    */
   modelRoots?: string[] | undefined
+  /**
+   * Existing absolute directories the model's file tools may read but never change, such as the
+   * attachment and skill directories the harness names to the model. Requires `modelRoots`, which
+   * they may not overlap. Reads and listings under them are confined exactly as under a model root,
+   * except that a file's link count is not checked, so the run-as user must not be able to write
+   * there; every change whose path lies under one is refused. An entry may not be or contain the
+   * harness home (`DSH_HOME`), nor be, contain, or lie inside a conventional credential store under
+   * the user's home directory.
+   */
+  readOnlyRoots?: string[] | undefined
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-fs-local -->
@@ -2420,7 +2432,7 @@ export interface LspLocalServerConfig {
 ## `@deepseek-ai/dsh-mcp-client`
 
 - `inject`: `tools`
-- `source`: [`packages/mcp/mcp-client/src/index.ts:138`](../packages/mcp/mcp-client/src/index.ts)
+- `source`: [`packages/mcp/mcp-client/src/index.ts:145`](../packages/mcp/mcp-client/src/index.ts)
 
 ```ts config-catalog
 /** Configuration for one stdio or Streamable HTTP MCP server. */
@@ -2444,6 +2456,12 @@ export interface StdioConfig {
   env: Record<string, string>
   /** Working directory for the child process. */
   cwd: string
+  /**
+   * Subprocess identity, by the subprocess provider's name for it, that runs the server. Set, the
+   * server starts through the subprocess service with that identity's environment plus `env`;
+   * omitted, it starts as this process with the scrubbed ambient environment plus `env`.
+   */
+  identity?: string
   /** Timeout per tool call or resource request in milliseconds. */
   toolCallTimeoutMs: number
   /** Optional budget for one connection attempt plus its initial tool sync, in milliseconds. */
@@ -3889,13 +3907,19 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-subprocess-local`
 
-- `source`: [`packages/subprocess/subprocess-local/src/index.ts:70`](../packages/subprocess/subprocess-local/src/index.ts)
+- `source`: [`packages/subprocess/subprocess-local/src/index.ts:71`](../packages/subprocess/subprocess-local/src/index.ts)
 
 ```ts config-catalog
 /** Provider configuration. */
 export interface Config {
   /** Start every child as this identity with this environment; omitted, children run as this process with its scrubbed environment. */
   runAs?: RunAs | undefined
+  /**
+   * Further run-as identities by name, each with its own environment and secret names. A spawn spec that names one
+   * starts its child as it; every other child starts as `runAs`, which these require. A spawn naming an identity not
+   * listed here is refused.
+   */
+  identities?: Record<string, RunAs> | undefined
 }
 
 /** Run every child of this provider as one fixed non-root identity with an explicit environment. */
@@ -4978,7 +5002,7 @@ export interface Config {
 
 ## `@mumbo/box-links`
 
-- `source`: [`packages/mumbo/box-links/src/config.ts:22`](../packages/mumbo/box-links/src/config.ts)
+- `source`: [`packages/mumbo/box-links/src/config.ts:24`](../packages/mumbo/box-links/src/config.ts)
 
 ```ts config-catalog
 /** Absolute links from a box's Web page to the pages the box edge serves beside it, and the Browser tab's Host call. */
@@ -5006,6 +5030,8 @@ export interface BrowserConfig {
   wmctrl: string
   /** Milliseconds the call waits, from its start, for a Chrome window to exist, activate, and maximize. */
   timeoutMs: number
+  /** Subprocess identity, by the subprocess provider's name for it, that runs and finds `wmctrl`; omitted, the provider's default. */
+  identity?: string
 }
 ```
 <!-- END GENERATED config-catalog:@mumbo/box-links -->

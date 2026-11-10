@@ -39,7 +39,7 @@ Load the shared policy service, then this backend, then the tools; the read-befo
 - name: '@deepseek-ai/dsh-tool-fs'
 ```
 
-The backend's config is unchanged from the local backend's (`cwd` resolution default, `diffBasisMaxBytes` overwrite bound, and the [`modelRoots`](../fs-local/README.md#confining-model-paths) allowlist that confines model paths independently of the mode fence and its escalation); the [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-fs-sandbox) is the exhaustive source.
+The backend's config is unchanged from the local backend's (`cwd` resolution default, `diffBasisMaxBytes` overwrite bound, and the [`modelRoots`](../fs-local/README.md#confining-model-paths) and [`readOnlyRoots`](../fs-local/README.md#read-only-roots) allowlists that confine model paths independently of the mode fence and its escalation); the [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-fs-sandbox) is the exhaustive source.
 
 ### How the fence behaves
 

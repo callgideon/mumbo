@@ -7,7 +7,7 @@ kind: "package-reference"
 
 ## Summary
 
-Use `dsh-fs-local` to read, list, watch, write, edit, patch, delete, and move files on the host. Relative paths use a configurable base; absolute paths and parent traversal remain unrestricted unless `modelRoots` confines the model's paths. Aliases share one identity. Optional guards reject stale versions, and text publication preserves permissions. Moves can also apply hunks and report a published destination separately from source removal. Use `fs-sandbox` when mutations need confinement.
+Use `dsh-fs-local` to read, list, watch, write, edit, patch, delete, and move files on the host. Relative paths use a configurable base; absolute paths and parent traversal remain unrestricted unless `modelRoots` and `readOnlyRoots` confine the model's paths. Aliases share one identity. Optional guards reject stale versions, and text publication preserves permissions. Moves can also apply hunks and report a published destination separately from source removal. Use `fs-sandbox` when mutations need confinement.
 
 ## Table of Contents
 
@@ -44,6 +44,7 @@ Load the backend with a base directory; relative paths resolve against it, and a
 | `cwd` | `process.cwd()` | Base directory for relative paths |
 | `diffBasisMaxBytes` | `10 MiB` | UTF-8 byte limit per overwrite-diff side; larger overwrites return `before: null` |
 | `modelRoots` | unset | Existing absolute directories the model's file tools are confined to; see [Confining model paths](#confining-model-paths) |
+| `readOnlyRoots` | unset | Existing absolute directories the model's file tools may also read but never change; requires `modelRoots`; see [Read-only roots](#read-only-roots) |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-fs-local) is the exhaustive source for every accepted field and its JSDoc.
 
@@ -61,6 +62,18 @@ Set `modelRoots` to confine the model's file tools to an allowlist of directorie
 `resolveModelPath`, which every model-facing tool uses for a model-supplied path, realpaths the path first and refuses with `FS_OUTSIDE_ROOTS` a real path outside every root: absolute paths such as `/proc/self/environ`, `..` traversal, and symbolic links to files or directories outside. A path that does not exist yet is judged by its nearest existing ancestor, so a new file under a linked parent is refused. Every `resolve` call, including harness readers such as instruction and skill discovery and the Files panel, also refuses a path written under a root whose real path leaves the roots, because the model can plant links under its roots. Other harness paths outside the roots resolve as before. A reader the person drives directly, such as the Files panel, passes `unconfined: true` to `resolve` and keeps following such links. For a path outside every root, `resolveModelPath` turns any resolution failure into the same refusal, so the model cannot learn whether such a path exists or what it is. A listing of a directory under a root reports a child whose real path leaves every root as an opaque `other` entry, with no size or version and a target that is its in-root path, which no read accepts.
 
 With model roots, every read and listing opens its target once (`O_NONBLOCK`, so a FIFO cannot block) and accepts the descriptor only when `/proc/self/fd` reports the resolved real path; a link swapped in after resolution is refused with `FS_OUTSIDE_ROOTS` when the opened file lies outside the roots and `FS_STALE_VERSION` otherwise, and listings read names and children through the accepted descriptor. Under a run-as provider, a regular file with more than one hard link that the run-as user does not own is refused too: a hard link has no path of its own for the roots check. Changes are never made by this process on the model's behalf when the mounted subprocess provider reports a [child identity](../../subprocess/subprocess/README.md): each write, edit, patch, delete, move, and directory creation runs in a one-shot helper process (`mutation-helper`) the provider starts as that identity, so the kernel judges every path component with its permissions; the helper's output is decoded strictly and its failures keep their codes. With model roots and no subprocess provider mounted, every change is refused rather than made by this process. Without a child identity, changes run in this process as before. The [agent containment Agent Note](../../../.agents/notes/implemented/architecture/2026-11-10-agent-containment-run-as-and-model-roots.md) records the decision.
+
+<a id="read-only-roots"></a>
+#### Read-only roots
+
+Set `readOnlyRoots` beside `modelRoots` to the harness directories the model is told to read, such as the attachment store (`$DSH_HOME/attachments/v1`) and the skill directories (`$DSH_HOME/skills`, `$DSH_AGENTS_HOME/skills`). Paths under them resolve, read, and list exactly as under a model root, through the same descriptor check and opaque listing entries. Every change whose path lies under one, by its real or its written path, is refused with `FS_OUTSIDE_ROOTS` before anything runs: `cannot <verb>: it is in a directory you can only read (<read-only roots>)`. The link-count rule does not apply there, because the store keeps hard-linked names and the run-as user cannot add a link where it cannot write, so the box must keep these directories unwritable by that user. The provider fails at load when the list is empty or `modelRoots` is unset, when an entry overlaps a model root, when an entry is or contains the harness home (`$DSH_HOME`), and when an entry is, contains, or lies inside a conventional credential store under the user's home directory (`.ssh`, `.gnupg`, `.aws`, `.azure`, `.config/gcloud`, `.config/gh`, `.docker`, `.kube`, `.netrc`, `.git-credentials`, `.npmrc`, `.pypirc`). The harness keeps its own credential file directly in `$DSH_HOME`, so no entry inside the home holds it.
+
+```yaml
+- name: '@deepseek-ai/dsh-fs-local'
+  config:
+    modelRoots: [/root/projects, /home/agent]
+    readOnlyRoots: [/root/.dsh/attachments/v1, /root/.dsh/skills, /root/.mumbo/agents/skills]
+```
 
 ### What you can do
 
@@ -131,7 +144,7 @@ Read these pages when the package-level contract is not enough. They move from t
 <a id="model-experience"></a>
 ## Model Experience
 
-Indirectly, through `dsh-tool-fs`, which renders this provider's line-windowed UTF-8 content, mutation acknowledgements, and exact provider messages in capped retained results while versions, atomic-write mechanics, and directory metadata remain internal. With `modelRoots`, a refused path reads `cannot access "<path>": its real path is outside the directories you can access (<roots>)`.
+Indirectly, through `dsh-tool-fs`, which renders this provider's line-windowed UTF-8 content, mutation acknowledgements, and exact provider messages in capped retained results while versions, atomic-write mechanics, and directory metadata remain internal. With `modelRoots`, a refused path reads `cannot access "<path>": its real path is outside the directories you can access (<roots>)`, listing the read-only roots too; a change under a read-only root reads `cannot <verb>: it is in a directory you can only read (<read-only roots>)`.
 
 #### KV Cache effect
 

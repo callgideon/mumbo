@@ -121,8 +121,8 @@ export abstract class SubprocessRuntime extends Service {
   }
 
   /**
-   * The fixed identity this provider starts every child as, when it differs from the harness
-   * process's own. Consumers that act on model-chosen paths use it to run that work as a child,
+   * The identity this provider starts every child as whose spawn names no identity, when it differs
+   * from the harness process's own. Consumers that act on model-chosen paths use it to run that work as a child,
    * so the kernel checks the paths with this identity. The base provider starts children as the
    * harness process and reports none.
    * @returns the child identity, or undefined when children run as the harness process.
@@ -140,12 +140,15 @@ export abstract class SubprocessRuntime extends Service {
    * @param command - absolute executable path or bare PATH name.
    * @param env - explicit environment entries used for lookup.
    * @param signal - aborts remote or local lookup.
+   * @param identity - the provider-configured identity whose environment supplies PATH, as on
+   *   {@link SubprocessSpawnSpec.identity}; omitted, the default. An unknown name is refused.
    * @returns a canonical executable path.
    */
   abstract resolveExecutable(
     command: string,
     env?: Readonly<Record<string, string>>,
     signal?: AbortSignal,
+    identity?: string,
   ): Promise<string>
 
   /**

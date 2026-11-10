@@ -1,0 +1,41 @@
+# Agent containment (B24): the rows the edge appends after every other overlay of a project box. The uid and gid are
+# the box's `agent` user; NO_PROXY ends with the edge's LLM host; the rest is fixed. A project box has no desktop or
+# browser, so no further identity.
+# Start every process dsh runs for the model as `agent`, with an explicit environment that reaches GitHub through the
+# box-local proxy, as dsh itself does.
+- id: subprocess
+  config:
+    runAs:
+      uid: 1001
+      gid: 1001
+      groups: []
+      inherit: [LANG, LC_ALL, TZ]
+      set:
+        HOME: /home/agent
+        TMPDIR: /home/agent/tmp
+        USER: agent
+        LOGNAME: agent
+        SHELL: /bin/bash
+        PATH: /root/.mumbo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        NODE_EXTRA_CA_CERTS: /root/.mumbo/ca/ca.crt
+        NODE_USE_ENV_PROXY: '1'
+        HTTPS_PROXY: http://127.0.0.1:8899
+        NO_PROXY: 127.0.0.1,localhost,llm.example
+      secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY, E2B_API_KEY, GH_TOKEN, GITHUB_TOKEN]
+# Confine the model's file tools to the workspace, agent's home, and the ticket work directory; reads check each opened
+# file, changes run as agent. The attachment and skill directories the harness names to the model are read-only.
+- id: fs-sandbox
+  config:
+    modelRoots: [/root/projects, /home/agent, /root/work]
+    readOnlyRoots: [/root/.dsh/attachments/v1, /root/.dsh/skills, /root/.mumbo/agents/skills]
+# Installing or enabling a plugin loads code into root dsh: no plugin_manager tool for the model.
+- id: plugin-manager
+  config:
+    modelTools: false
+# Creator mode: runtime inspection and the plugin tools.
+- id: preset-cordis
+  disabled: true
+# Change summaries run git and read files for the model's turns; off until their scratch directory works as agent.
+- id: workspace-changes
+  config:
+    summaries: false

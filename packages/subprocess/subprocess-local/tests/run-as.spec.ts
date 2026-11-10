@@ -89,9 +89,12 @@ function reportSpec(cwd: string, env?: NodeJS.ProcessEnv): SubprocessSpawnSpec {
   }
 }
 
-async function runtime(config: RunAs | undefined): Promise<Context> {
+async function runtime(config: RunAs | undefined, identities?: Record<string, RunAs>): Promise<Context> {
   const ctx = new Context()
-  fibers.push(await ctx.plugin(LocalSubprocessRuntime, config === undefined ? {} : { runAs: config }))
+  fibers.push(await ctx.plugin(LocalSubprocessRuntime, {
+    ...config === undefined ? {} : { runAs: config },
+    ...identities === undefined ? {} : { identities },
+  }))
   return ctx
 }
 
@@ -119,6 +122,22 @@ describe('run-as configuration', () => {
 
   it('accepts an identity with no supplementary groups', () => {
     expect(() => { validateRunAs(runAs({ groups: [] }), 'linux') }).not.toThrow()
+  })
+
+  it('names the identity whose field is unusable', () => {
+    expect(() => { validateRunAs(runAs({ uid: 0 }), 'linux', 'identities.desktop') })
+      .toThrow('subprocess-local: identities.desktop .uid must be a positive integer, not 0; 0 is root')
+  })
+
+  onLinux.each([
+    [{ identities: { desktop: runAs() } }, 'subprocess-local: identities requires runAs, the identity of every child whose spawn names none'],
+    [{ runAs: runAs(), identities: { 'Desk top': runAs() } }, 'subprocess-local: identities name "Desk top" must match /^[a-z][a-z0-9-]{0,31}$/u'],
+    [{ runAs: runAs(), identities: { desktop: runAs({ uid: 0 }) } }, 'subprocess-local: identities.desktop .uid must be a positive integer, not 0; 0 is root'],
+    [{ runAs: runAs(), identities: { desktop: runAs({ set: { MUMBO_MEMBER_KEY: 'x' } }) } }, 'subprocess-local: identities.desktop passes MUMBO_MEMBER_KEY, which .secretNames lists'],
+  ])('fails the plugin at load for unusable identities %#', async (config, message) => {
+    const ctx = new Context()
+    await expect(ctx.plugin(LocalSubprocessRuntime, config)).rejects.toThrow(message)
+    expect(ctx.get('subprocess')).toBeUndefined()
   })
 
   onLinux('fails the plugin at load for a root identity and leaves no service', async () => {
@@ -227,6 +246,46 @@ linux('run-as children through the provider', () => {
     expect(report.groups).toEqual(config.groups)
     expect([report.noNewPrivs, report.capEff]).toEqual(['1', '0000000000000000'])
     expect(report.env).toEqual({ CALLER: 'explicit', HOME: '/home/agent', USER: 'agent' })
+  })
+
+  it('runs a child as the identity its spawn names, with that identity\'s environment and secret names', async () => {
+    vi.stubEnv('PATH', process.env.PATH)
+    const desktop = runAs({ inherit: [], set: { HOME: '/home/desktop', USER: 'desktop' }, secretNames: ['XAUTH_COOKIE'] })
+    const ctx = await runtime(runAs({ inherit: [], set: { HOME: '/home/agent', USER: 'agent' } }), { desktop })
+    const named = ctx.subprocess.spawn({ ...reportSpec(directory(), { DISPLAY: ':1' }), identity: 'desktop' })
+    await expect(named.done).resolves.toEqual({ exitCode: 0, signal: null })
+    const report = JSON.parse(named.collected.stdout!.readFrom(0).text) as Report
+    expect(report.uid).toEqual(Array(4).fill(desktop.uid))
+    expect([report.noNewPrivs, report.capEff]).toEqual(['1', '0000000000000000'])
+    expect(report.env).toEqual({ DISPLAY: ':1', HOME: '/home/desktop', USER: 'desktop' })
+    const unnamed = ctx.subprocess.spawn(reportSpec(directory(), { XAUTH_COOKIE: 'agent may' }))
+    await expect(unnamed.done).resolves.toEqual({ exitCode: 0, signal: null })
+    expect((JSON.parse(unnamed.collected.stdout!.readFrom(0).text) as Report).env)
+      .toEqual({ XAUTH_COOKIE: 'agent may', HOME: '/home/agent', USER: 'agent' })
+    expect(() => ctx.subprocess.spawn({ ...reportSpec(directory(), { XAUTH_COOKIE: 'x' }), identity: 'desktop' }))
+      .toThrow(new SubprocessSecretEnvironmentError(['XAUTH_COOKIE']))
+    expect(ctx.subprocess.childIdentity).toEqual({ uid: desktop.uid, gid: desktop.gid, groups: desktop.groups })
+  })
+
+  it('refuses a spawn naming an identity that is not configured, before anything starts', async () => {
+    const launches = privateTmpdir()
+    const contained = await runtime(runAs(), { desktop: runAs() })
+    expect(() => contained.subprocess.spawn({ ...reportSpec(directory()), identity: 'browsermcp' }))
+      .toThrow('subprocess-local: no run-as identity named "browsermcp" is configured; list it under identities')
+    const plain = await runtime(undefined)
+    expect(() => plain.subprocess.spawn({ ...reportSpec(directory()), identity: 'desktop' }))
+      .toThrow('subprocess-local: no run-as identity named "desktop" is configured; list it under identities')
+    await expect(plain.subprocess.resolveExecutable('sh', undefined, undefined, 'desktop'))
+      .rejects.toThrow('subprocess-local: no run-as identity named "desktop" is configured; list it under identities')
+    expect(readdirSync(launches).filter(name => name.startsWith('dsh-subprocess-launch-'))).toEqual([])
+  })
+
+  it('looks executables up on the PATH of the identity named for the lookup', async () => {
+    const ctx = await runtime(runAs({ inherit: [], set: { PATH: '/usr/bin:/bin' } }), {
+      desktop: runAs({ inherit: [], set: { PATH: '/nonexistent-desktop-path' } }),
+    })
+    await expect(ctx.subprocess.resolveExecutable('sh')).resolves.toMatch(/\/sh$/u)
+    await expect(ctx.subprocess.resolveExecutable('sh', undefined, undefined, 'desktop')).rejects.toThrow('was not found on PATH')
   })
 
   it('reports its child identity, and none without run-as', async () => {

@@ -127,6 +127,13 @@ interface SubprocessSpawnSpec {
    * tombstone that removes an ordinary ambient entry from the child.
    */
   env?: NodeJS.ProcessEnv | undefined
+  /**
+   * Name of a provider-configured identity to start the child as, chosen by the
+   * caller's own config, never by model input. Omitted, the child starts as the
+   * provider's default: its `childIdentity`, or the harness process's own. A
+   * provider without an identity of that name refuses the spawn.
+   */
+  identity?: string | undefined
 }
 ```
 
@@ -250,7 +257,7 @@ The terminal spec fully specifies argv, cwd, environment overrides, terminal typ
 
 ## Service behavior
 
-The abstract [`SubprocessRuntime`](../../packages/subprocess/subprocess/src/index.ts) Service Definition specifies execution-world coordinates, executable lookup, ordinary `spawn`, and `spawnTerminal`. [`LocalSubprocessRuntime`](../../packages/subprocess/subprocess-local/src/index.ts) provides them with platform-selected managed ranges, per-disposition wiring, credential scrubbing, `node-pty`, platform process inspection, and terminate-and-join disposal. Its optional `runAs` configuration starts every child on Linux as one non-root identity with an explicit environment and refuses a launch whose environment names a configured secret; it is provider configuration, so no spawn request opts in or out. See [`dsh-subprocess`](../../packages/subprocess/subprocess/README.md) for the Service Definition contract and [`dsh-subprocess-local`](../../packages/subprocess/subprocess-local/README.md) for local mechanics.
+The abstract [`SubprocessRuntime`](../../packages/subprocess/subprocess/src/index.ts) Service Definition specifies execution-world coordinates, executable lookup, ordinary `spawn`, and `spawnTerminal`. [`LocalSubprocessRuntime`](../../packages/subprocess/subprocess-local/src/index.ts) provides them with platform-selected managed ranges, per-disposition wiring, credential scrubbing, `node-pty`, platform process inspection, and terminate-and-join disposal. Its optional `runAs` configuration starts every child on Linux as one non-root identity with an explicit environment and refuses a launch whose environment names a configured secret; it is provider configuration, so no spawn request opts out. Its optional `identities` add further named identities, which a spawn request selects with `identity` from its caller's own configuration; an unknown name is refused. See [`dsh-subprocess`](../../packages/subprocess/subprocess/README.md) for the Service Definition contract and [`dsh-subprocess-local`](../../packages/subprocess/subprocess-local/README.md) for local mechanics.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -285,9 +292,11 @@ Implementations must honor these semantics:
  * @param command - absolute executable path or bare PATH name.
  * @param env - explicit environment entries used for lookup.
  * @param signal - aborts remote or local lookup.
+ * @param identity - the provider-configured identity whose environment supplies PATH, as on
+ *   {@link SubprocessSpawnSpec.identity}; omitted, the default. An unknown name is refused.
  * @returns a canonical executable path.
  */
-abstract resolveExecutable( command: string, env?: Readonly<Record<string, string>>, signal?: AbortSignal, ): Promise<string>
+abstract resolveExecutable( command: string, env?: Readonly<Record<string, string>>, signal?: AbortSignal, identity?: string, ): Promise<string>
 
 /**
  * Inspect shell-selection facts in the provider's execution environment.

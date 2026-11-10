@@ -41,6 +41,18 @@ export const RunAs: z<RunAs> = z.object({
 
 const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u
 
+/** Name of one further run-as identity that a caller's config selects for a spawn. */
+export const IDENTITY_NAME = /^[a-z][a-z0-9-]{0,31}$/u
+
+/**
+ * The credentials of one configured identity alone, as the exec bootstrap receives them.
+ * @param runAs - the configured identity and environment.
+ * @returns its user id, group id, and supplementary groups.
+ */
+export function credentialsOf(runAs: RunAs): RunAsIdentity {
+  return { uid: runAs.uid, gid: runAs.gid, groups: runAs.groups }
+}
+
 /** A launch refused because its final environment names a configured secret. */
 export class SubprocessSecretEnvironmentError extends Error {
   override readonly name = 'SubprocessSecretEnvironmentError'
@@ -56,10 +68,11 @@ export class SubprocessSecretEnvironmentError extends Error {
  * an invalid or credential-shaped name, or an inherited or fixed name listed as a secret.
  * @param runAs - the configured identity and environment.
  * @param platform - the host platform.
+ * @param field - the config field named in a refusal, such as `runAs` or `identities.desktop`.
  * @throws when any field is unusable; the message names the field.
  */
-export function validateRunAs(runAs: RunAs, platform: NodeJS.Platform): void {
-  const fail = (detail: string): never => { throw new Error(`subprocess-local: runAs ${detail}`) }
+export function validateRunAs(runAs: RunAs, platform: NodeJS.Platform, field = 'runAs'): void {
+  const fail = (detail: string): never => { throw new Error(`subprocess-local: ${field} ${detail}`) }
   if (platform !== 'linux') fail(`requires Linux; this host is ${platform}`)
   for (const [field, id] of [['uid', runAs.uid], ['gid', runAs.gid], ...runAs.groups.map(id => ['groups', id] as const)] as const) {
     if (!Number.isSafeInteger(id) || id <= 0) fail(`.${field} must be a positive integer, not ${String(id)}; 0 is root`)

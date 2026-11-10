@@ -104,6 +104,13 @@ export interface SubprocessSpawnSpec {
    * tombstone that removes an ordinary ambient entry from the child.
    */
   env?: NodeJS.ProcessEnv | undefined
+  /**
+   * Name of a provider-configured identity to start the child as, chosen by the
+   * caller's own config, never by model input. Omitted, the child starts as the
+   * provider's default: its `childIdentity`, or the harness process's own. A
+   * provider without an identity of that name refuses the spawn.
+   */
+  identity?: string | undefined
 }
 
 /**
@@ -195,13 +202,13 @@ export interface SubprocessHandle {
   waitForExit(signal?: AbortSignal): Promise<boolean>
 }
 
-/** The fixed user identity a provider starts every child process as. */
+/** The user identity a provider starts child processes as. */
 export interface SubprocessChildIdentity {
-  /** User id of every child. */
+  /** User id of the children. */
   readonly uid: number
-  /** Group id of every child. */
+  /** Group id of the children. */
   readonly gid: number
-  /** The complete supplementary group list of every child. */
+  /** The complete supplementary group list of the children. */
   readonly groups: readonly number[]
 }
 

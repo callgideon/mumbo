@@ -1,0 +1,61 @@
+# Agent containment (B24): the rows the edge appends after every other overlay of a person box. The ids are the box's
+# users `agent` (1001), `browsermcp` (1002), and `desktop` (1003) and group `shared` (1005); the rest is fixed.
+# Start every process dsh runs for the model as `agent`, with an explicit environment; the Playwright MCP server runs as
+# `browsermcp` and the X clients of computer use and the Browser tab run as `desktop`, each named by its own row.
+- id: subprocess
+  config:
+    runAs:
+      uid: 1001
+      gid: 1001
+      groups: [1005]
+      inherit: [LANG, LC_ALL, TZ]
+      set:
+        HOME: /home/agent
+        TMPDIR: /home/agent/tmp
+        USER: agent
+        LOGNAME: agent
+        SHELL: /bin/bash
+        PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY, E2B_API_KEY, GH_TOKEN, GITHUB_TOKEN]
+    identities:
+      browsermcp:
+        uid: 1002
+        gid: 1002
+        groups: [1005]
+        inherit: [LANG, LC_ALL, TZ]
+        set:
+          HOME: /home/browsermcp
+          TMPDIR: /home/browsermcp/tmp
+          USER: browsermcp
+          LOGNAME: browsermcp
+          PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY, E2B_API_KEY, GH_TOKEN, GITHUB_TOKEN]
+      desktop:
+        uid: 1003
+        gid: 1003
+        groups: []
+        inherit: [LANG, LC_ALL, TZ]
+        set:
+          HOME: /home/desktop
+          TMPDIR: /home/desktop/tmp
+          USER: desktop
+          LOGNAME: desktop
+          PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY, E2B_API_KEY, GH_TOKEN, GITHUB_TOKEN]
+# Confine the model's file tools to the workspace, agent's home, and the shared Downloads; reads check each opened file,
+# changes run as agent. The attachment and skill directories the harness names to the model are read-only.
+- id: fs-sandbox
+  config:
+    modelRoots: [/root/projects, /home/agent, /home/shared/Downloads]
+    readOnlyRoots: [/root/.dsh/attachments/v1, /root/.dsh/skills, /root/.mumbo/agents/skills]
+# Installing or enabling a plugin loads code into root dsh: no plugin_manager tool for the model.
+- id: plugin-manager
+  config:
+    modelTools: false
+# Creator mode: runtime inspection and the plugin tools.
+- id: preset-cordis
+  disabled: true
+# Change summaries run git and read files for the model's turns; off until their scratch directory works as agent.
+- id: workspace-changes
+  config:
+    summaries: false

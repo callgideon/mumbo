@@ -39,6 +39,7 @@ The `browser` object:
 | `windowClass` | `chrom` | Text a Chrome window's WM_CLASS contains, compared without regard to case: wmctrl's own `-x` matching against `res_name.res_class` as `wmctrl -lx` prints it. Chrome started with `--user-data-dir` names its windows `google-chrome (<profile>).Google-chrome`, and Debian's Chromium `chromium (<profile>).Chromium`; the default matches both and no other window of the box desktop. |
 | `wmctrl` | `wmctrl` | wmctrl executable: an absolute path or a name looked up on `PATH`. |
 | `timeoutMs` | `15000` | Milliseconds the call waits, from its start, for a Chrome window to exist, activate, and maximize. |
+| `identity` | omitted | Subprocess identity that runs `wmctrl` and whose `PATH` finds it, such as the box's `desktop` user, the one that may read the X authority file; omitted, the subprocess provider's default identity. |
 
 Each URL must have a scheme, a host, and a path; any other value, and any `browser` field outside its pattern, fails plugin load. The box edge adds the row with a Loader overlay, as in [`examples/person.overlay.yml`](examples/person.overlay.yml) and [`examples/project.overlay.yml`](examples/project.overlay.yml). The generated [configuration catalog](../../../docs/config-catalog.md#mumbobox-links) is the exhaustive source for accepted fields.
 

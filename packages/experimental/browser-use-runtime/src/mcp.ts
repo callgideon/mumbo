@@ -23,6 +23,8 @@ export interface BrowserMcpLaunchConfig {
   executablePath?: string
   /** Per-call timeout override in milliseconds; omission uses the MCP client default. */
   toolCallTimeoutMs?: number
+  /** Subprocess identity, by the subprocess provider's name for it, that runs the MCP server; omission runs it as this process. */
+  identity?: string
 }
 
 /** Attachment to an externally owned Chromium browser. */
@@ -33,6 +35,8 @@ export interface BrowserMcpAttachConfig {
   endpoint: string
   /** Per-call timeout override in milliseconds; omission uses the MCP client default. */
   toolCallTimeoutMs?: number
+  /** Subprocess identity, by the subprocess provider's name for it, that runs the MCP server; omission runs it as this process. */
+  identity?: string
 }
 
 /** Fixed launch or attachment choice for one MCP browser provider. */
@@ -45,11 +49,13 @@ export const BrowserMcpConfig: Schema<BrowserMcpAttachConfig | (Omit<BrowserMcpL
     headless: Schema.boolean().default(true),
     executablePath: Schema.string().pattern(/\S/u),
     toolCallTimeoutMs: Schema.number().min(1),
+    identity: Schema.string().min(1),
   }),
   Schema.object({
     mode: Schema.const('attach').required(),
     endpoint: Schema.string().pattern(/^https?:\/\/[^\s/]+|^wss?:\/\/[^\s/]+/u).required(),
     toolCallTimeoutMs: Schema.number().min(1),
+    identity: Schema.string().min(1),
   }),
 ])
 
@@ -84,6 +90,8 @@ export interface SessionMcpOptions {
   env?: Record<string, string>
   /** Per-call timeout override; omission retains the MCP client default. */
   toolCallTimeoutMs?: number
+  /** Subprocess identity that runs the server, with only `env` added to its own environment; omission runs it as this process. */
+  identity?: string
 }
 
 interface ClientState {
@@ -153,6 +161,7 @@ export function mountSessionMcp(ctx: Context, options: SessionMcpOptions): void 
             ...options.env === undefined ? {} : { env: options.env },
             cwd: await workingDirectory.ensure(agent, signal),
             ...options.toolCallTimeoutMs === undefined ? {} : { toolCallTimeoutMs: options.toolCallTimeoutMs },
+            ...options.identity === undefined ? {} : { identity: options.identity },
             failOnStartupError: true,
             reconnect: { enabled: false },
           }))

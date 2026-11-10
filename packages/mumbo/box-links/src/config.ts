@@ -16,6 +16,8 @@ export interface BrowserConfig {
   wmctrl: string
   /** Milliseconds the call waits, from its start, for a Chrome window to exist, activate, and maximize. */
   timeoutMs: number
+  /** Subprocess identity, by the subprocess provider's name for it, that runs and finds `wmctrl`; omitted, the provider's default. */
+  identity?: string
 }
 
 /** Absolute links from a box's Web page to the pages the box edge serves beside it, and the Browser tab's Host call. */
@@ -49,6 +51,7 @@ const Browser: z<BrowserConfig> = z.object({
   wmctrl: program.default('wmctrl').description('wmctrl executable.'),
   timeoutMs: z.number().step(1).min(1).max(2 ** 31 - 1).default(15_000)
     .description('Milliseconds the call waits for a Chrome window to exist, activate, and maximize.'),
+  identity: z.string().min(1).description('Subprocess identity that runs wmctrl; omit it for the subprocess provider\'s default.'),
 })
 
 /**

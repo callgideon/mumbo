@@ -1,8 +1,9 @@
 /**
  * Containment gate over the mumbo box compositions: the web profile, the founder's overlays, the rows the edge writes,
  * and the edge's containment rows (fixtures/box-edge). Every mounted package is classified by how its model-visible
- * tools run; an unclassified package fails, catalogued tool names must match, and the packages that would load code
- * into root dsh or start a root process for the model must be switched off or absent.
+ * tools run; an unclassified package fails, catalogued tool names must match, the packages that would load code into
+ * root dsh or start a root process for the model must be switched off or absent, and every subprocess identity a row
+ * names must be the one its classification expects and a configured non-root identity of its own.
  */
 
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
@@ -25,7 +26,7 @@ type Runs =
   | 'in-process'
   /** Reads files in root dsh through `resolveModelPath` and descriptor-checked opens; changes files as the run-as user. */
   | 'model-roots'
-  /** Starts its processes through the run-as subprocess provider. */
+  /** Starts its processes through the run-as subprocess provider, as `agent` or as the identity its row names. */
   | 'run-as'
   /** Runs on another host; root dsh relays requests over the network. */
   | 'remote'
@@ -40,6 +41,10 @@ interface Classification {
   tools: readonly string[]
   /** The docs/tool-catalog.md package whose tool names must equal `tools`, when it is catalogued. */
   catalog?: string
+  /** The subprocess identity, other than the default `agent`, that the package's row names for its processes. */
+  identity?: string
+  /** Whether a row with this config starts processes and so must name `identity`; omitted, every row does. */
+  startsProcesses?: (config: Record<string, unknown> | undefined) => boolean
   note?: string
 }
 
@@ -77,8 +82,7 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
   '@deepseek-ai/dsh-compaction-tool-result-pruner': NONE,
   '@deepseek-ai/dsh-computer-use': NONE,
   '@deepseek-ai/dsh-computer-use-x11': {
-    runs: 'pending-ruling', tools: ['computer'],
-    note: 'ruling #2/#3: its X clients start through the run-as provider, but `agent` may not reach the X display',
+    runs: 'run-as', tools: ['computer'], identity: 'desktop', note: 'xdotool, xsel, and import, with every xdotool argument checked',
   },
   '@deepseek-ai/dsh-config-editor': NONE,
   '@deepseek-ai/dsh-cordis-client-runner': { ...NONE, note: 'the browser half of the Cordis runner' },
@@ -203,10 +207,11 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
   '@deepseek-ai/dsh-working-directory': NONE,
   '@deepseek-ai/dsh-workspace': NONE,
   '@deepseek-ai/dsh-workspace-changes': { ...NONE, note: 'summaries must be off; checked below' },
-  '@mumbo/box-links': NONE,
+  '@mumbo/box-links': {
+    ...NONE, identity: 'desktop', startsProcesses: config => config?.browser != null, note: 'the person\'s Browser tab runs wmctrl',
+  },
   '@mumbo/browser-consent': {
-    runs: 'pending-ruling', tools: ['mcp__playwright-mcp__*'],
-    note: 'ruling #1: the Playwright MCP stdio server starts as root to reach the browser\'s debugging port',
+    runs: 'run-as', tools: ['mcp__playwright-mcp__*'], identity: 'browsermcp', note: 'the Playwright MCP stdio server',
   },
   '@mumbo/edge-member': NONE,
   '@mumbo/superagent': {
@@ -259,13 +264,19 @@ function compose(box: 'person' | 'project'): Row[] {
       deployed('mumbo.overlay.yml'),
       deployed('mumbo-personal.overlay.yml'),
       ...box === 'person' ? [edge('personal.overlay.yml')] : [edge('project.overlay.yml'), deployed('mumbo-project.overlay.yml')],
-      edge('containment.overlay.yml'),
+      edge(`containment-${box}.overlay.yml`),
     ], message => warnings.push(message))
     expect(warnings).toEqual([])
     return rows
   } finally {
     rmSync(home, { recursive: true, force: true })
   }
+}
+
+/** Every `identity` value in a row's config, at any depth: the subprocess identities the row's processes run as. */
+function namedIdentities(value: unknown): string[] {
+  if (typeof value !== 'object' || value === null) return []
+  return Object.entries(value).flatMap(([key, entry]) => key === 'identity' && typeof entry === 'string' ? [entry] : namedIdentities(entry))
 }
 
 /** Tool names per package from the generated tool catalog's package map. */
@@ -303,17 +314,48 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     const runAs = (byId('subprocess')?.config as { runAs?: { set: Record<string, string>; secretNames: string[] } }).runAs
     expect(runAs?.set).toMatchObject({ HOME: '/home/agent', TMPDIR: '/home/agent/tmp' })
     expect(runAs?.secretNames).toEqual(expect.arrayContaining(['DEEPSEEK_API_KEY', 'MUMBO_MEMBER_KEY']))
-    expect(byId('fs-sandbox')?.config).toEqual({ modelRoots: ['/root/projects', '/home/agent'] })
+    expect(byId('fs-sandbox')?.config).toEqual({
+      modelRoots: ['/root/projects', '/home/agent', box === 'person' ? '/home/shared/Downloads' : '/root/work'],
+      readOnlyRoots: ['/root/.dsh/attachments/v1', '/root/.dsh/skills', '/root/.mumbo/agents/skills'],
+    })
     expect(byId('plugin-manager')?.config).toEqual({ modelTools: false })
     expect(byId('workspace-changes')?.config).toEqual({ summaries: false })
     expect(isDisabled(byId('preset-cordis')?.disabled)).toBe(true)
   })
 
+  it('runs each named subprocess identity for exactly the packages classified with it, as a non-root user of its own', () => {
+    const named = enabled.flatMap(row => namedIdentities(row.config).map(identity => `${row.name} as ${identity}`)).sort()
+    const expected = enabled.flatMap((row) => {
+      const entry = row.name === undefined ? undefined : CLASSIFICATION[row.name]
+      if (entry?.identity === undefined || entry.startsProcesses?.(row.config as Record<string, unknown> | undefined) === false) return []
+      return [`${row.name} as ${entry.identity}`]
+    }).sort()
+    expect(named).toEqual(expected)
+    expect(named).toEqual(box === 'person'
+      ? ['@deepseek-ai/dsh-computer-use-x11 as desktop', '@mumbo/box-links as desktop', '@mumbo/browser-consent as browsermcp']
+      : [])
+    type Identity = { uid: number; gid: number; secretNames: string[] }
+    const subprocess = rows.find(row => row.id === 'subprocess')?.config as { runAs: Identity; identities?: Record<string, Identity> }
+    const identities = subprocess.identities ?? {}
+    expect(Object.keys(identities).sort()).toEqual([...new Set(expected.map(entry => entry.split(' as ')[1]))].sort())
+    const uids = [subprocess.runAs.uid, ...Object.values(identities).map(identity => identity.uid)]
+    expect(uids.every(uid => uid > 0)).toBe(true)
+    expect(new Set(uids).size).toBe(uids.length)
+    for (const identity of Object.values(identities)) {
+      expect(identity.secretNames).toEqual(expect.arrayContaining(['DEEPSEEK_API_KEY', 'MUMBO_MEMBER_KEY']))
+    }
+  })
+
   it('lists every mounted model tool with how it runs', () => {
-    const table = names.flatMap(name => (CLASSIFICATION[name]?.tools ?? []).map(tool => `${tool} — ${CLASSIFICATION[name]!.runs} (${name})`))
-    expect(table.length).toBeGreaterThan(0)
+    const table = names.flatMap(name => (CLASSIFICATION[name]?.tools ?? []).map((tool) => {
+      const { runs, identity } = CLASSIFICATION[name]!
+      return `${tool} — ${runs}${identity === undefined ? '' : ` as ${identity}`} (${name})`
+    }))
+    expect(table).toEqual(expect.arrayContaining(box === 'person'
+      ? ['computer — run-as as desktop (@deepseek-ai/dsh-computer-use-x11)', 'mcp__playwright-mcp__* — run-as as browsermcp (@mumbo/browser-consent)']
+      : ['bash — run-as (@deepseek-ai/dsh-tool-bash)']))
     // Only these may run outside the run-as provider and the model roots; each awaits a named ruling.
     expect(names.filter(name => CLASSIFICATION[name]?.runs === 'pending-ruling').sort())
-      .toEqual(box === 'person' ? ['@deepseek-ai/dsh-computer-use-x11', '@mumbo/browser-consent'] : ['@mumbo/superagent'])
+      .toEqual(box === 'person' ? [] : ['@mumbo/superagent'])
   })
 })

@@ -39,5 +39,6 @@ export function apply(ctx: Context, config: Config): void {
     command: process.execPath,
     args,
     ...config.toolCallTimeoutMs === undefined ? {} : { toolCallTimeoutMs: config.toolCallTimeoutMs },
+    ...config.identity === undefined ? {} : { identity: config.identity },
   })
 }
