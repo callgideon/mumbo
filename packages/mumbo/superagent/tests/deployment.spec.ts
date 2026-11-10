@@ -12,7 +12,7 @@ let dir: string
 let path: string
 const program = (file: string, body = ''): string => { writeFileSync(file, `#!/bin/sh\n${body}\n`); chmodSync(file, 0o755); return file }
 /** Fake gh CLI signed in as `login` with configurable push access to acme/widgets (including its former name acme/gadgets). */
-const gh = (file: string, login: string, push = true): string => program(file, `case "$*" in\n  "api user") echo '{"login":"${login}","id":7}' ;;\n  "api repos/acme/"*" --jq {name: .full_name, push: .permissions.push}") echo '{"name":"acme/widgets","push":${push}}' ;;\n  *) exit 1 ;;\nesac`)
+const gh = (file: string, login: string, push: boolean | null = true): string => program(file, `case "$*" in\n  "api user") echo '{"login":"${login}","id":7}' ;;\n  "api repos/acme/"*" --jq {name: .full_name, push: .permissions.push}") echo '{"name":"acme/widgets","push":${push}}' ;;\n  *) exit 1 ;;\nesac`)
 /** Fake lark-cli script body returning canned auth, strict-mode, and bot info responses. */
 const lark = (status: object, mode = 'bot', bot: object = { bot: { open_id: 'ou_bot', app_name: 'Widgets Bot' }, code: 0 }): string =>
   `case "$*" in\n  "auth status") echo '${JSON.stringify(status)}' ;;\n  "config strict-mode") echo 'strict-mode: ${mode} (source: profile)' ;;\n  "api GET /open-apis/bot/v3/info --as bot --format ndjson") echo '${JSON.stringify(bot)}' ;;\nesac`
@@ -58,6 +58,15 @@ describe('configuration schema', () => {
       expect(() => Config(minimal({ panelAdmins: [entry] })), entry).toThrow()
     }
   })
+  it('reads a GitHub App bot only as a `<slug>[bot]` login with a positive integer user id', () => {
+    const app = { login: 'mumbo-bot[bot]', userId: 341797844 }
+    expect(machineOf(Config(minimal({ githubApp: app }))).githubApp).toEqual(app)
+    expect(machineOf(Config(minimal())).githubApp).toBeUndefined()
+    for (const githubApp of [{ ...app, login: 'mumbo-bot' }, { ...app, login: 'mumbo bot[bot]' }, { ...app, userId: 0 }, { ...app, userId: 1.5 },
+      { login: app.login }, { userId: app.userId }]) {
+      expect(() => machineOf(Config(minimal({ githubApp }))), JSON.stringify(githubApp)).toThrow()
+    }
+  })
   it('names keys the configuration does not define, and where the values of older keys live now', () => {
     const raw = minimal({ repository: 'acme/widgets', repositoryPath: '/srv/widgets', blockedCommands: [], author: { name: 'Alice' }, extra: 1 })
     expect(() => machineOf(Config(raw))).toThrow('keys it does not use: repository (now on the GitHub Source), repositoryPath (now in the prepare command of the Execution settings), blockedCommands (now in the Execution settings), author (now prompt text), extra; the keys are stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins')
@@ -83,6 +92,8 @@ describe('setup', () => {
     await needs('github', 'agentCliMissing', { output: 'bin/gh must be a command name or an absolute path' }, { repository, cli: 'bin/gh' })
     await needs('github', 'agentCliSignedOut', {}, { repository, cli: program(join(dir, 'bin', 'gh-broken'), 'exit 1') })
     await needs('github', 'repositoryReadOnly', { account: 'Agent-Bot', repository: 'acme/widgets' }, { repository, cli: gh(join(dir, 'bin', 'gh-reader'), 'Agent-Bot', false) })
+    // A user account must be reported able to push; only a GitHub App's installation token reports no permissions.
+    await needs('github', 'repositoryReadOnly', { account: 'Agent-Bot', repository: 'acme/widgets' }, { repository, cli: gh(join(dir, 'bin', 'gh-unreported'), 'Agent-Bot', null) })
     // Signed in, but the account cannot read the repository, or the CLI names no account.
     const unreadable = program(join(dir, 'bin', 'gh-outsider'),
       `case "$*" in\n  "api user") echo '{"login":"Agent-Bot","id":7}' ;;\n  *) echo 'HTTP 404' >&2; exit 1 ;;\nesac`)
@@ -90,6 +101,26 @@ describe('setup', () => {
     await needs('github', 'repositoryUnreadable', { account: 'Agent-Bot', repository: 'acme/widgets', output }, { repository, cli: unreadable })
     await needs('github', 'agentCliNoAccount', {}, { repository, cli: program(join(dir, 'bin', 'gh-anonymous'), `echo '{}'`) })
     expect(() => executable('nothing-here', join(dir, 'bin'))).toThrow('nothing-here is not an executable file on PATH')
+  })
+  it('takes a GitHub App\'s identity from the configuration, reads only the repository, and refuses only reported read-only access', async () => {
+    const githubApp = { login: 'mumbo-bot[bot]', userId: 341797844 }
+    // An installation token: `/user` answers 403, and the repository reports no `permissions` unless `push` is given.
+    const appGh = (file: string, push: string): string => program(file, `case "$*" in\n  "api user") echo 'HTTP 403' >&2; exit 1 ;;\n  "api repos/acme/"*" --jq {name: .full_name, push: .permissions.push}") echo '{"name":"acme/widgets","push":${push}}' ;;\n  *) exit 1 ;;\nesac`)
+    const calls: string[][] = []
+    const recording: Probe = argv => { calls.push(argv); return probe(argv) }
+    const resolve = (cli: string) => resolveDeployment(machine({ githubApp }), { repository: 'acme/widgets', cli }, recording, path)
+    const cli = appGh(join(dir, 'bin', 'gh-app'), 'null')
+    const deployment = await resolve(cli)
+    expect(deployment.github).toEqual({ cli, login: 'mumbo-bot[bot]', noreply: '341797844+mumbo-bot[bot]@users.noreply.github.com' })
+    expect(deployment.githubApp).toEqual(githubApp)
+    expect(calls.map(argv => argv.slice(1, 3).join(' '))).toEqual(['api repos/acme/widgets'])
+    expect((await resolve(appGh(join(dir, 'bin', 'gh-app-push'), 'true'))).repository).toBe('acme/widgets')
+    await expect(resolve(appGh(join(dir, 'bin', 'gh-app-reader'), 'false')))
+      .rejects.toEqual(setupError('github', 'repositoryReadOnly', { account: 'mumbo-bot[bot]', repository: 'acme/widgets' }))
+    // The edge serves only the project's repositories; another one answers 404.
+    const outside = program(join(dir, 'bin', 'gh-app-outside'), `echo 'HTTP 404' >&2; exit 1`)
+    await expect(resolve(outside)).rejects.toEqual(setupError('github', 'repositoryUnreadable',
+      { account: 'mumbo-bot[bot]', repository: 'acme/widgets', output: expect.stringContaining('HTTP 404') }))
   })
   it('reads the Feishu bot from a bot-only lark-cli, or finds none when the Feishu Source names no CLI', async () => {
     expect(await resolveFeishuBot(machine(), {}, probe, path)).toBeUndefined()

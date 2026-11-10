@@ -29,13 +29,14 @@ afterEach(async () => {
   vi.unstubAllEnvs()
 })
 
-/** Boot the project overlay's rows; returns the machine settings `dsh-superagent` resolved, or the failure that stopped it. */
-async function boot(panelAdmins: string | undefined): Promise<{ home: string; stateDir?: string; panelAdmins?: unknown; rejection?: string }> {
+const ENV = ['MUMBO_PANEL_ADMINS', 'MUMBO_GITHUB_APP_LOGIN', 'MUMBO_GITHUB_APP_USER_ID'] as const
+interface Booted { home: string; stateDir?: string; panelAdmins?: unknown; githubApp?: unknown; rejection?: string; failure?: string }
+/** Boot the project overlay's rows with `env` (unset variables are empty); returns the machine settings `dsh-superagent` resolved, the rejection of `machineOf`, or the load failure of its configuration. */
+async function boot(env: Partial<Record<(typeof ENV)[number], string | undefined>> = {}): Promise<Booted> {
   dir = mkdtempSync(join(tmpdir(), 'dsh-project-loader-'))
   const home = join(dir, 'home')
   vi.stubEnv('DSH_HOME', home)
-  if (panelAdmins === undefined) vi.stubEnv('MUMBO_PANEL_ADMINS', '')
-  else vi.stubEnv('MUMBO_PANEL_ADMINS', panelAdmins)
+  for (const name of ENV) vi.stubEnv(name, env[name] ?? '')
   vi.stubEnv('MUMBO_MEMBER_KEY', 'unused')
   const base = join(dir, 'base.yml')
   writeFileSync(base, '[]\n')
@@ -45,7 +46,7 @@ async function boot(panelAdmins: string | undefined): Promise<{ home: string; st
   const config = join(dir, 'cordis.yml')
   writeFileSync(config, dump)
 
-  const seen: { stateDir?: string; panelAdmins?: unknown; rejection?: string } = {}
+  const seen: Omit<Booted, 'home'> = {}
   const superagent = {
     name: 'dsh-superagent',
     Config,
@@ -53,7 +54,7 @@ async function boot(panelAdmins: string | undefined): Promise<{ home: string; st
       seen.stateDir = resolved.stateDir
       seen.panelAdmins = (resolved as { panelAdmins?: unknown }).panelAdmins
       try {
-        machineOf(resolved)
+        seen.githubApp = machineOf(resolved).githubApp
       } catch (error) {
         // The plugin refuses keys its Config does not list; kept so the test reports it after the other assertions.
         seen.rejection = String(error)
@@ -76,7 +77,8 @@ async function boot(panelAdmins: string | undefined): Promise<{ home: string; st
   const entry = [...loader.entries()].find(candidate => candidate.options.id === 'dsh-superagent')
   expect(entry, 'dsh-superagent row').toBeDefined()
   expect(entry!.fiber, 'dsh-superagent started').toBeDefined()
-  return { home, ...seen }
+  const failure = await entry!.fiber!.await().then(() => undefined, (error: unknown) => String(error))
+  return { home, ...seen, ...failure === undefined ? {} : { failure } }
 }
 
 describe('project-box overlay in the real Loader', () => {
@@ -84,10 +86,28 @@ describe('project-box overlay in the real Loader', () => {
     ['unset', undefined, []],
     ['a comma list', 'a@x.io,b@x.io', ['a@x.io', 'b@x.io']],
   ])('loads dsh-superagent under DSH_HOME with panelAdmins from %s', { timeout: 60_000 }, async (_name, env, expected) => {
-    const result = await boot(env)
+    const result = await boot({ MUMBO_PANEL_ADMINS: env })
     expect(result.stateDir).toBe(join(result.home, 'superagent'))
     expect(result.panelAdmins).toEqual(expected)
     // Passes once A3 adds `panelAdmins` to the plugin Config; until then `machineOf` rejects the key.
     expect(result.rejection).toBeUndefined()
+  })
+  it.each([
+    ['both variables', { MUMBO_GITHUB_APP_LOGIN: 'mumbo-bot[bot]', MUMBO_GITHUB_APP_USER_ID: '341797844' }, { login: 'mumbo-bot[bot]', userId: 341797844 }],
+    ['neither variable', {}, undefined],
+  ])('resolves githubApp from %s', { timeout: 60_000 }, async (_name, env, expected) => {
+    const result = await boot(env)
+    expect(result.githubApp).toEqual(expected)
+    expect(result.rejection).toBeUndefined()
+    expect(result.failure).toBeUndefined()
+  })
+  it.each([
+    ['the login alone', { MUMBO_GITHUB_APP_LOGIN: 'mumbo-bot[bot]' }],
+    ['the user id alone', { MUMBO_GITHUB_APP_USER_ID: '341797844' }],
+  ])('fails to load dsh-superagent with %s of the GitHub App', { timeout: 60_000 }, async (_name, env) => {
+    const result = await boot(env)
+    expect(result.failure).toMatch(/githubApp/)
+    // Validation stops the plugin before it applies, so it never runs in user mode.
+    expect(result.stateDir).toBeUndefined()
   })
 })

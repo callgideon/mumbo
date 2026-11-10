@@ -57,8 +57,29 @@ function commentText(comment: GithubComment, kind: 'conversation' | 'inline' | '
   const place = kind === 'inline' && comment.path ? reviewPlace(comment) : ''
   return [decision, place, comment.body ?? ''].filter(Boolean).join('\n\n')
 }
-export const mentions = (text: string, login: string): boolean =>
-  new RegExp(`(?:^|[^a-zA-Z0-9_@])@${escapeRegExp(login)}(?![a-zA-Z0-9_-])`, 'i').test(text)
+/**
+ * The blocks that hide a mention, as CommonMark reads them, whichever starts first: a fenced code block (a line of three or
+ * more backticks, with no backtick after them, or tildes, indented up to three spaces, through a line of at least as many
+ * of the same character or to the end of the text), or an HTML comment that starts a line (through `-->` or to the end).
+ */
+const BLOCK = /^ {0,3}(`{3,}|~{3,})(?:(?<=`)[^`\n]*|(?<=~).*)$[\s\S]*?(?:^ {0,3}\1(?:(?<=`)`*|(?<=~)~*)[ \t]*$|(?![\s\S]))|^ {0,3}<!--[\s\S]*?(?:-->|(?![\s\S]))/gm
+/**
+ * Inline text that hides a mention, read left to right so whichever starts first wins: an escaped backslash or backtick,
+ * a closed HTML comment, or a code span, a backtick run closed by the next run of the same length within its paragraph
+ * (not across a blank line or a line that starts a heading, quote or list item). A backslash inside a span is part of it.
+ */
+const INLINE = /\\[\\`]|<!--[\s\S]*?-->|(?<!`)(`+)(?!`)(?:(?!\n(?:[ \t]*\n| {0,3}(?:#{1,6}[ \t]|>|[-*+][ \t]|\d{1,9}[.)][ \t])))[\s\S])*?(?<!`)\1(?!`)/g
+/**
+ * True when `text` mentions `login` where GitHub renders it: outside fenced code blocks, inline code spans and HTML
+ * comments, found close to how CommonMark reads them. People mention a GitHub App's bot `<slug>[bot]` as `@<slug>`;
+ * `@<slug>[bot]` counts too.
+ */
+export function mentions(text: string, login: string): boolean {
+  const slug = login.replace(/\[bot\]$/, '')
+  const handle = slug === login ? escapeRegExp(login) : `${escapeRegExp(slug)}(?:\\[bot\\])?(?!\\[)`
+  const prose = text.replace(/\r\n?/g, '\n').replace(BLOCK, ' ').replace(INLINE, ' ')
+  return new RegExp(`(?:^|[^a-zA-Z0-9_@])@${handle}(?![a-zA-Z0-9_-])`, 'i').test(prose)
+}
 const author = (user: { login: string; type?: string }, agent: string) =>
   ({ actor: { source: SOURCE, id: user.login }, human: isHumanLogin(user) && !sameName(user.login, agent) })
 /** Builds a trigger for a comment or review; text is empty for a bodyless comment or a `COMMENTED` review without a body. */

@@ -12,7 +12,7 @@ import type { GithubComment, PullRef } from './github-trigger.ts'
 import { observePull, pullsOf, readPull, type Pull } from './github-pull.ts'
 import { health, sourceContext, type Health, type SourceContext } from './host.ts'
 import { KV } from '../kv.ts'
-import { cursorAt, pause, POLL_HORIZON_MS, pollThreads as pollEach } from './poll.ts'
+import { cursorAt, pause, polled, POLL_HORIZON_MS, pollThreads as pollEach } from './poll.ts'
 import type { SourceKind } from './kind.ts'
 import { z } from 'zod'
 
@@ -38,13 +38,13 @@ function scopeOf(meta: Record<string, unknown>): Scope | undefined {
 export const githubKind: SourceKind<GithubConfig> = {
   kind: SOURCE,
   title: 'GitHub',
-  description: 'The agent\'s GitHub accounts; receives notifications to it in the repository, discussion on subscribed Issues and PRs, CI changes, and PR merge or close.',
+  description: 'The agent\'s GitHub accounts; receives notifications to it in the repository (for a GitHub App, what mentions it), discussion on subscribed Issues and PRs, CI changes, and PR merge or close.',
   schema: GithubConfigSchema,
   fields: [
     { key: 'repository', type: 'text', pattern: '[A-Za-z0-9_.\\-]+/[A-Za-z0-9_.\\-]+', label: 'Repository',
-      hint: 'Written owner/name. This Source receives the repository\'s notifications and discussion; saving checks that the agent account can push to it, then restarts dsh-superagent.' },
+      hint: 'Written owner/name. This Source receives the repository\'s discussion; saving checks the agent account\'s access to it, then restarts dsh-superagent.' },
     { key: 'cli', type: 'text', label: 'Agent GitHub CLI',
-      hint: 'A command name or absolute path, usually a gh wrapper signed in to the agent account through GH_CONFIG_DIR. The agent acts as the account it is signed in to, and the Executor calls it as gh. Saving checks that this account can push to the repository, then restarts dsh-superagent.' },
+      hint: 'A command name or absolute path, usually a gh wrapper signed in to the agent account through GH_CONFIG_DIR, or, when the plugin configuration sets githubApp, a gh whose requests act as that App\'s bot. The agent acts as this account, and the Executor calls it as gh. Saving checks this account\'s access to the repository, then restarts dsh-superagent.' },
     { key: 'pollSeconds', type: 'number', advanced: true, min: 60, max: 3600, label: 'Polling interval / seconds', hint: 'A longer interval requested by GitHub wins.' },
     { key: 'failuresBeforeError', type: 'number', advanced: true, min: 1, max: 20, label: 'Failed polls before reporting an error', hint: 'A single network interruption is retried on the next poll and need not be reported.' },
     { key: 'observeIssues', type: 'switch', label: 'Receive new Issues in the repository',
@@ -92,7 +92,7 @@ export const githubKind: SourceKind<GithubConfig> = {
   environment: {
     variables: [
       { key: 'DSH_SUPERAGENT_GITHUB_REPOSITORY', description: 'The repository this Source watches, as owner/name. A PR the agent opens here from a branch whose last path segment is DSH_SUPERAGENT_NAME (for example agent/$DSH_SUPERAGENT_NAME) binds to the ticket' },
-      { key: 'DSH_SUPERAGENT_GITHUB_ACCOUNT', description: 'The agent\'s GitHub account. gh is signed in to it; use gh for every GitHub operation, and never another account or credential' },
+      { key: 'DSH_SUPERAGENT_GITHUB_ACCOUNT', description: 'The agent\'s GitHub account. gh acts as it; use gh for every GitHub operation, and never another account or credential' },
       { key: 'DSH_SUPERAGENT_GITHUB_COMMIT_EMAIL', description: 'Commit email of the agent\'s account. git has no identity here: commit as the author these instructions name, or as the agent\'s account with this email when they name none' },
       { key: 'DSH_SUPERAGENT_GITHUB_NUMBER', description: 'Number of the Issue or PR that started the ticket; empty when the ticket did not start on GitHub' },
       { key: 'DSH_SUPERAGENT_GITHUB_PR_HEAD', description: 'Head ref refs/pull/<number>/head of the PR that started the ticket; empty when it was not a PR' },
@@ -168,6 +168,8 @@ function included(raw: string): { headers: string; body: string } {
   if (split < 0) throw new Error('GitHub returned no HTTP headers')
   return { headers: raw.slice(0, split), body: raw.slice(split).trim() }
 }
+/** Items per page of a repository-wide stream; a round reads one page. */
+const PAGE = 100
 const ListedSchema = CommentSchema.extend({ issue_url: z.string().nullish(), pull_request_url: z.string().nullish() })
 /** Repository-wide event streams; GitHub's `/issues` endpoint includes PRs, and `/issues/comments` covers issue and PR conversation comments (excluding inline review comments). */
 const STREAMS = [
@@ -175,13 +177,16 @@ const STREAMS = [
   { id: 'comments', observed: (config: GithubConfig) => config.observeComments, path: 'issues/comments?' },
   { id: 'review-comments', observed: (config: GithubConfig) => config.observeComments, path: 'pulls/comments?' },
 ] as const
-/** Polls repository-wide streams (new Issues/PRs, comments, default-branch CI); each stream reads from when it was switched on, resets when switched off, and fails independently. */
+/**
+ * Polls repository-wide streams (new Issues/PRs, comments, default-branch CI); each stream reads from when it was switched on,
+ * resets when switched off, and fails independently. In App mode every stream is read, as the Source has no notifications.
+ */
 async function pollRepository(ctx: SourceContext, round: Round): Promise<void> {
   const config = ctx.config<GithubConfig>(SOURCE)
   if (!config) return
   for (const stream of STREAMS) {
     if (stopped(ctx, round)) return
-    if (!stream.observed(config)) { ctx.state.set(KV.github.stream(stream.id), undefined); continue }
+    if (!ctx.deployment.githubApp && !stream.observed(config)) { ctx.state.set(KV.github.stream(stream.id), undefined); continue }
     try { await readStream(ctx, round, stream.id, stream.path, config) }
     catch (error) { if (!stopped(ctx, round)) round.failures.push(`${stream.id}: ${String(error)}`) }
   }
@@ -196,56 +201,119 @@ async function pollRepository(ctx: SourceContext, round: Round): Promise<void> {
 }
 /**
  * Polls one repository-wide event stream (oldest first) since its cursor and steps the cursor to five seconds before the
- * newest item (`cursorAt`), relying on Trigger ID deduplication so repeated messages are no-ops. While the cursor stays
+ * newest item (`cursorAt`), relying on Trigger ID deduplication so repeated messages are no-ops. A full page whose items
+ * all fall within those five seconds would leave the cursor in place and list the same page again, so the cursor then
+ * steps to the newest item itself, which GitHub's inclusive `since` lists again. While the cursor stays
  * unchanged (including when clamped to the hourly horizon), sending the last page's ETag makes an unchanged list return
  * HTTP 304 and cost no rate limit. Items from before their kind was switched on or beyond the horizon are ignored.
+ * In App mode an item whose kind is off is still received when it mentions the agent (an Issue or PR only when created
+ * since the stream's last read, `read`, so a mention added by editing its body is not read), or, for a comment, when a
+ * Ticket subscribes to its Thread and the Thread is polled or the comment is new since the last read. `read` advances
+ * only after a page that was not full, because a later round lists the items beyond a full page. The `app` entry of
+ * `started` is when App mode began reading the stream, and older items are ignored. Each Issue or PR received, and each
+ * mention in a comment, starts its Thread's read position (`startThread`), so the Thread's poll reads the replies posted
+ * before its Ticket subscribed. A mention in a comment that is new since the last read starts it at the comment's
+ * creation; an older comment edited to add a mention starts it at the edit, so it reads none of the replies before it.
+ * The agent's own open PR is read so it binds to the Ticket on its branch, as its notification does for a user account,
+ * and starts its Thread's read position at its creation until a Ticket subscribes to it. The ETag is sent only once
+ * every kind has a start, so a 304 never keeps a kind from recording one.
  */
 async function readStream(ctx: SourceContext, round: Round, id: string, path: string, config: GithubConfig): Promise<void> {
   const name = KV.github.stream(id)
   const stored = ctx.state.get(name)
-  const kinds = id === 'issues' ? [...config.observeIssues ? ['issues'] : [], ...config.observePulls ? ['pulls'] : []] : ['comments']
+  const app = !!ctx.deployment.githubApp
+  const observed = id === 'issues' ? [...config.observeIssues ? ['issues'] : [], ...config.observePulls ? ['pulls'] : []]
+    : config.observeComments ? ['comments'] : []
+  const kinds = [...observed, ...app ? ['app'] : []]
   const before = typeof stored?.started === 'object' ? stored.started : {}
   const started: Record<string, string> = Object.fromEntries(kinds.map(kind => [kind, before[kind] ?? round.started]))
   const horizon = Math.floor((Date.parse(round.started) - POLL_HORIZON_MS) / 3_600_000) * 3_600_000
   const since = new Date(Math.max(Date.parse(stored?.since ?? round.started), horizon)).toISOString()
-  const conditional = stored?.etag && stored.since === since ? ['-H', `If-None-Match: ${stored.etag}`] : []
+  // A kind without a start yet needs this round's list to record one, so no 304 may skip it.
+  const conditional = stored?.etag && stored.since === since && kinds.every(kind => kind in before) ? ['-H', `If-None-Match: ${stored.etag}`] : []
   let raw: string
-  const listed = `${path}&sort=updated&direction=asc&per_page=100&since=${encodeURIComponent(since)}`
+  const listed = `${path}&sort=updated&direction=asc&per_page=${PAGE}&since=${encodeURIComponent(since)}`
   try { raw = await ctx.commands.withSignal(round.signal).api(listed, '--include', ...conditional) }
   catch (error) {
     if (error instanceof CliError && error.code === 304) return
     throw error
   }
   const { headers, body } = included(raw)
-  const items = validItems(ListedSchema, z.array(z.unknown()).parse(JSON.parse(body)), round.tally)
+  const page = z.array(z.unknown()).parse(JSON.parse(body))
+  const items = validItems(ListedSchema, page, round.tally)
   const { login } = ctx.deployment.github
   const fresh = (at: string | null | undefined, kind: string) =>
     kind in started && Date.parse(at ?? '') >= Math.max(Date.parse(started[kind]!), horizon)
+  // The cursor stays five seconds before the newest item, so in a quiet repository an edited item stays after it; only the
+  // last read's start tells a new item from one listed again.
+  const read = stored?.read ?? started.app ?? round.started
+  const created = (at: string | null | undefined) => Date.parse(at ?? '') >= Date.parse(cursorAt(read))
   for (const item of items) {
     // Stopping mid-stream aborts before advancing the cursor so unread items are retried.
     if (stopped(ctx, round)) throw new Error('The GitHub Source stopped during the poll')
-    if (sameName(item.user.login, login)) continue
+    if (sameName(item.user.login, login)) {
+      const own = app && id === 'issues' ? IssueSchema.safeParse(item) : undefined
+      if (own?.success && own.data.pull_request && own.data.state === 'open') {
+        // Before a Ticket subscribes, the PR's creation replaces a later position a mention set; a position from a Ticket that
+        // followed this PR before stays.
+        const unsubscribed = !ctx.threads.get(`github:${own.data.number}`)?.subscriptions.length
+        try {
+          await pull(ctx, round, own.data.number)
+          startThread(ctx, own.data.number, own.data.created_at, unsubscribed)
+        } catch (error) { if (!stopped(ctx, round)) failed(ctx, round, own.data.number, error) }
+      }
+      continue
+    }
     if (id === 'issues') {
       const issue = IssueSchema.safeParse(item)
-      const pr = issue.success && !!issue.data.pull_request
-      if (!issue.success || !fresh(issue.data.created_at, pr ? 'pulls' : 'issues')) continue
-      await ctx.receive(pr ? pullTrigger(issue.data, login) : issueTrigger(issue.data, login))
+      if (!issue.success) continue
+      const pr = !!issue.data.pull_request
+      const trigger = pr ? pullTrigger(issue.data, login) : issueTrigger(issue.data, login)
+      const at = issue.data.created_at
+      const mentioned = !!trigger.addressed && fresh(at, 'app') && created(at)
+      if (!fresh(at, pr ? 'pulls' : 'issues') && !mentioned) continue
+      const unread = idle(ctx, issue.data.number)
+      if (await ctx.receive(trigger) === 'stored' && app) startThread(ctx, issue.data.number, at, unread)
       nameThread(ctx, issue.data.number, issue.data.title)
       continue
     }
     const number = Number(/\/(?:issues|pulls)\/(\d+)$/.exec((id === 'comments' ? item.issue_url : item.pull_request_url) ?? '')?.[1])
-    if (!number || !fresh(item.updated_at ?? item.created_at, 'comments')) continue
+    if (!number) continue
     const isPr = id === 'review-comments' || /\/pull\//.test(item.html_url ?? '')
     const ref = { number, isPr, ...item.html_url ? { url: item.html_url } : {} }
     const trigger = commentTrigger(item, ref, id === 'comments' ? 'conversation' : 'inline', login)
-    if (trigger.text) await ctx.receive(trigger)
+    const at = item.updated_at ?? item.created_at
+    const thread = ctx.threads.get(`github:${number}`)
+    const subscribed = !!thread?.subscriptions.length && (polled(ctx, thread) || created(item.created_at))
+    const appRule = fresh(at, 'app') && (!!trigger.addressed || subscribed)
+    if (!(fresh(at, 'comments') || appRule) || !trigger.text) continue
+    const unread = idle(ctx, number)
+    if (await ctx.receive(trigger) === 'stored' && appRule && trigger.addressed) startThread(ctx, number, created(item.created_at) ? item.created_at! : at!, unread)
   }
   const newest = Math.max(...items.map(item => Date.parse(item.updated_at ?? '')).filter(Number.isFinite))
   const moved = Number.isFinite(newest) ? cursorAt(new Date(newest).toISOString()) : since
-  const next = Date.parse(moved) > Date.parse(since) ? moved : since
+  const stepped = page.length >= PAGE && newest > Date.parse(since) ? new Date(newest).toISOString() : since
+  const next = Date.parse(moved) > Date.parse(since) ? moved : stepped
   const etag = /^etag:\s*(.+)$/im.exec(headers)?.[1]?.trim()
   // The ETag belongs to this request, which the next round repeats only while the cursor stays unchanged.
-  ctx.state.set(name, { since: next, started, ...etag && next === since ? { etag } : {} })
+  const advanced = page.length < PAGE ? round.started : read
+  ctx.state.set(name, { since: next, started, ...app ? { read: advanced } : {}, ...etag && next === since ? { etag } : {} })
+}
+/**
+ * Starts Thread `number`'s read position at `at`, so a later subscribed-Thread poll reads from there. It replaces an
+ * existing position only when the Thread was `idle` before the item arrived, so a new Ticket on an old Thread does not
+ * read the replies of an earlier, finished request.
+ */
+function startThread(ctx: SourceContext, number: number, at: string, idle: boolean): void {
+  if (idle || ctx.state.get(KV.github.cursor(number)) === undefined) ctx.state.set(KV.github.cursor(number), at)
+}
+/**
+ * True when nothing will read Thread `number` from its read position: no Trigger of it waits for or is in an Eval, whose
+ * Ticket would read it, and no Ticket subscription of it is polled.
+ */
+function idle(ctx: SourceContext, number: number): boolean {
+  const thread = ctx.threads.get(`github:${number}`)
+  return !thread || (!thread.pending.length && !thread.evaluating && !(thread.subscriptions.length && polled(ctx, thread)))
 }
 /** Polls default-branch CI checks, emitting a trigger only when the set of failing checks changes after the initial baseline. */
 async function pollBranchCi(ctx: SourceContext, round: Round): Promise<void> {
@@ -271,15 +339,17 @@ async function pollBranchCi(ctx: SourceContext, round: Round): Promise<void> {
   ctx.state.set(KV.github.branchCi, { branch, failures: now, revision })
 }
 /**
- * One polling round: notifications, then observed repository streams, then the PRs of open tickets with their CI, then
- * subscribed Threads. Each step and each Issue, PR, or Thread fails independently so all steps run before the round fails.
- * Other read failures (including 404) fail the round toward the error threshold, whereas deleted (410) or abandoned
- * (24h+) threads are recorded only on the thread and in health detail.
- * @returns the polling interval requested by GitHub, in seconds.
+ * One polling round: notifications (not in App mode, whose installation token cannot read them), then repository streams,
+ * then the PRs of open tickets with their CI, then subscribed Threads. Each step and each Issue, PR, or Thread fails
+ * independently so all steps run before the round fails. Other read failures (including 404) fail the round toward the
+ * error threshold, whereas deleted (410) or abandoned (24h+) threads are recorded only on the thread and in health detail.
+ * @returns the polling interval requested by GitHub, in seconds; in App mode, the configured `pollSeconds`.
  */
 export async function pollRound(ctx: SourceContext, signal?: AbortSignal): Promise<number> {
   const round = newRound(signal)
-  const notified = await pollNotifications(ctx, round).then(value => ({ value }), (error: unknown) => ({ error }))
+  const app = !!ctx.deployment.githubApp
+  const notified = app ? { value: { count: 0, interval: ctx.config<GithubConfig>(SOURCE)?.pollSeconds ?? 60 } }
+    : await pollNotifications(ctx, round).then(value => ({ value }), (error: unknown) => ({ error }))
   await pollRepository(ctx, round)
   await pollTicketPulls(ctx, signal, round)
   await pollThreads(ctx, signal, round)
@@ -291,7 +361,8 @@ export async function pollRound(ctx: SourceContext, signal?: AbortSignal): Promi
   const dropped = (round.dropped.length ? `; deleted on GitHub: ${named(round.dropped)}` : '')
     + (round.abandoned.length ? `; dropped after their reads kept failing: ${named(round.abandoned)}` : '')
     + (round.tally.skipped ? `; ${round.tally.skipped} unreadable items skipped` : '')
-  ctx.report('github', { state: 'ready', detail: `${count} notifications; next poll ≥ ${interval}s${dropped}`, at: round.started })
+  const read = app ? 'repository streams read' : `${count} notifications`
+  ctx.report('github', { state: 'ready', detail: `${read}; next poll ≥ ${interval}s${dropped}`, at: round.started })
   return interval
 }
 /** Reads notifications since the cursor and each Issue or PR they name, advancing the cursor atomically with the retry map for failed reads; deleted (410) Issues are dropped once their error is recorded. */
