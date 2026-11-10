@@ -694,7 +694,7 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
   - Chrome runs under a loop that restarts it within 5 seconds if it exits. The assistant's browser tools depend on it, and on a real desktop the person can now close it.
   - It reopens the previous tabs (`RestoreOnStartup`).
 - **Files.**
-  - Chrome downloads to `/home/browser/Downloads`. The assistant reads downloads there and puts files the person wants to upload in the same folder; one line in `roleInstructions` says so.
+  - Chrome downloads to `/home/shared/Downloads` (B24). The assistant reads downloads there and puts files the person wants to upload in the same folder; one line in `roleInstructions` says so.
   - Backups cover all of `/home/browser` except caches, not only the profile. So a restore or a move (section 17c) keeps downloads and desktop settings.
 - **Size.**
   - Measure on the founder's box before and after: frame rate, box CPU and node CPU.
@@ -802,6 +802,17 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
   - Runtime self-modification (extensions), model-added MCP servers, the experimental Python runtime and SDK-spawned subagents are not mounted in boxes, or they start their processes through "run as".
   - `git` on a model-writable repository never runs as root. The repository's own config and hooks (`core.fsmonitor`, hooks, filter and textconv drivers) run code, so dsh's change summaries and anything else that runs `git` on the workspace use "run as". The workspace-changes scratch directory needs a harness follow-up for that.
   - `/src` (the dsh code root runs) is read-only for `agent`.
+  - **Every helper process that acts on the model's behalf runs under a non-root identity of its own** through the same "run as" seam, never as root:
+    - **Playwright MCP** runs as `browsermcp`. That user alone, beside root, may reach the debugging port. It reads only the model roots and the shared Downloads, so the kernel enforces the upload limit.
+      - `browser_run_code_unsafe`, which runs model code inside that server, is hard-denied. In-page `browser_evaluate` keeps asking.
+      - `browser_file_upload` paths are limited to the model roots and the shared Downloads.
+      - The edge never mounts a browser provider without consent: the plain fallback row is gone.
+    - **Computer use** runs `xdotool` as `desktop`, the one user beside `browser` that may read the X authority file.
+      - Every model-derived argument passes a strict check: numbers for coordinates; key names from a fixed pattern; typed text only as the final argument after `type --`. So no argument can chain another `xdotool` command, such as `exec`.
+      - The composition gate lists it.
+  - **Read-only roots.** The attachment and skill directories the model needs are listed exactly, never `/root/.dsh` itself and never a credentials store. They are checked the same way as the model roots, and changes there are refused.
+  - **Project boxes** add `/root/work`, owned by `agent`, to the model roots. `/root/.mumbo` is `0711`, with `bin/` and `ca/ca.crt` readable, and `ca/ca.key` and the rest root-only.
+  - **Downloads** are `/home/shared/Downloads`, owned by `browser:shared` with mode `2770`; `agent` and `browser` are both in `shared`. Chrome's `DownloadDirectory` policy points there, and it is a model root. `/home/browser` stays `0700`, and backups include `/home/shared`.
   - **A composition gate:** a test lists every model-visible tool in the box compositions with how it runs (root in-process, or "run as"), and fails on a tool it doesn't know. A new plugin can't quietly reopen this.
 - **Box permissions** (edge start script):
   - `/root` is `0711`. `/root/projects` belongs to `agent`, so Session working directories don't change.
