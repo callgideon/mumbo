@@ -112,6 +112,7 @@ test('every refusal over the wire: its status, JSON-RPC error and code, WWW-Auth
       [await send(t.port, { headers: { authorization: `Bearer ${plain}` }, body: '{' }), 400, 'parse_error'],
       [await send(t.port, { headers: { authorization: `Bearer ${plain}` }, body: '[]' }), 400, 'invalid_request'],
       [await send(t.port, { headers: { authorization: `Bearer ${plain}` }, body: 'x'.repeat(1024 * 1024 + 1) }), 413, 'body_too_large'],
+      [await send(t.port, { method: 'GET', headers: { authorization: `Bearer ${plain}` } }), 405, 'method_not_allowed'],
     ]
     t.at(NOW + 7 * 86_400_000)
     cases.push([await t.tool(expiring, 'whoami'), 401, 'key_expired'])
@@ -123,6 +124,28 @@ test('every refusal over the wire: its status, JSON-RPC error and code, WWW-Auth
     }
     // The JSON-RPC id is echoed once the body was read.
     assert.equal(cases[4][0].json.id, 7)
+    assert.equal(cases.find(([, , code]) => code === 'method_not_allowed')[0].headers.allow, 'POST')
+  } finally { t.close() }
+})
+
+test('a method other than POST is answered 405 before its body is read: a 64 MiB PUT or DELETE gets its answer after 1 MiB', async () => {
+  const t = await setup()
+  try {
+    const key = await t.mint()
+    for (const method of ['PUT', 'DELETE']) {
+      // The client declares 64 MiB but sends only 1 MiB and never ends, so a door that read the body would never answer.
+      const r = await new Promise((resolve, reject) => {
+        const req = request({ host: '127.0.0.1', port: t.port, method, path: '/mcp', headers: { host: PUBLIC, authorization: `Bearer ${key}`, 'content-type': 'application/json', 'content-length': 64 * 1024 * 1024 } }, (res) => {
+          const chunks = []
+          res.on('data', c => chunks.push(c)).on('end', () => { req.destroy(); resolve({ status: res.statusCode, headers: res.headers, json: JSON.parse(Buffer.concat(chunks)) }) })
+        })
+        req.on('error', (e) => { if (!req.destroyed) reject(e) })
+        req.write('x'.repeat(1024 * 1024))
+      })
+      refused(r, 405, 'method_not_allowed')
+      assert.equal(r.headers.allow, 'POST', method)
+      assert.equal(r.headers.connection, 'close', method)
+    }
   } finally { t.close() }
 })
 
@@ -156,6 +179,9 @@ test('one log line per call: key id and name, owner, method, tool, outcome, stat
     await t.tool(reader, 'echo', { wrong: 1 })
     await t.tool(key, 'whoami')
     await send(t.port, { headers: { authorization: `Bearer ${key.slice(0, -1)}x` }, body: '{}' })
+    await send(t.port, { method: 'DELETE', headers: { authorization: `Bearer ${reader}` } })
+    // The SDK's own refusal of a body that is not JSON.
+    await t.rpc(reader, 'tools/list', {}, { headers: { 'content-type': 'text/plain' } })
     await settle()
     const logs = t.logs()
     for (const l of logs) assert.equal(typeof l.ms, 'number')
@@ -166,6 +192,8 @@ test('one log line per call: key id and name, owner, method, tool, outcome, stat
       { edge: 'door', key: readerId, name: 'reader', owner: A, method: 'tools/call', tool: 'echo', outcome: 'not_run', status: 200 },
       { edge: 'door', key: id, name: 'laptop', owner: A, method: 'tools/call', tool: 'whoami', outcome: 'insufficient_scope', status: 403 },
       { edge: 'door', outcome: 'invalid_api_key', status: 401 },
+      { edge: 'door', key: readerId, name: 'reader', owner: A, outcome: 'method_not_allowed', status: 405 },
+      { edge: 'door', key: readerId, name: 'reader', owner: A, method: 'tools/list', outcome: 'http_415', status: 415 },
     ])
     const all = t.lines.join('\n')
     for (const k of [key, reader]) { assert.ok(!all.includes(k.slice(10, 42))); assert.ok(!all.includes(keyHash(k))) }

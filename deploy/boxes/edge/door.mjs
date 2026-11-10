@@ -3,9 +3,10 @@
 // Streamable HTTP through the same SDK plumbing as the boxes' endpoint (sandboxes.mjs).
 // The gate, in order: the path is /mcp; no Origin header (browsers send one on every POST and cross-origin request; MCP
 // clients such as Claude Code send none), and no CORS header is ever sent; exactly one `Authorization: Bearer <key>`
-// (cookies are never read), checked by doorKeys.verify; the key's rate limit; one JSON-RPC message per POST. Then the
-// dispatcher: a tools/call names a declared tool, the key has its scope and, for a tool that takes a project, reaches
-// that project, and a tool that causes model turns finds the owner's daily budgets open. Only then does the tool run.
+// (cookies are never read), checked by doorKeys.verify; the key's rate limit; POST only, one JSON-RPC message each.
+// Then the dispatcher: a tools/call names a declared tool, the key has its scope and, for a tool that takes a project,
+// reaches that project, and a tool that causes model turns finds the owner's daily budgets open. Only then does the tool
+// run.
 // Every request logs one line {"edge":"door"} with the key id and name, owner, method, tool, outcome, status and ms;
 // never the key, its hash or any argument.
 import { z } from 'zod'
@@ -50,7 +51,9 @@ export const doorTools = ({ projects }) => [
  *   Refusals answer a JSON-RPC error `{ code: -32001, message: '<code>: <text>', data: { code } }` with the HTTP status:
  *   401 invalid_api_key, key_revoked, key_expired (with `WWW-Authenticate: Bearer realm="mumbo"`); 403 origin_refused,
  *   user_key_required, user_disabled, insufficient_scope, project_not_allowed, tool_undeclared; 429 rate_limited (with
- *   Retry-After in seconds) and budget_exhausted; 400 parse_error and invalid_request; 413 body_too_large; 404 not_found.
+ *   Retry-After in seconds) and budget_exhausted; 400 parse_error and invalid_request; 405 method_not_allowed (with
+ *   `Allow: POST`); 413 body_too_large; 404 not_found.
+ *   A request the SDK refuses itself (such as 406 or 415) logs the outcome `http_<status>`.
  */
 export function door({ keys, tools, allow, tokens, rate, now = () => Date.now(), log = console.log }) {
   // ponytail: per edge process, so with N replicas a key gets up to N times the rate; move the bucket into the store if
@@ -103,6 +106,8 @@ export function door({ keys, tools, allow, tokens, rate, now = () => Date.now(),
     const call = { outcome: 'error' }  // what the log line says; refusals and the tool wrapper set outcome
     res.on('close', () => {
       const { admitted, project, ...fields } = call
+      // The SDK's own refusals (such as 406 or 415) set no outcome; they log their status.
+      if (res.statusCode >= 400 && ['ok', 'not_run'].includes(fields.outcome)) fields.outcome = `http_${res.statusCode}`
       log(JSON.stringify({ edge: 'door', ...fields, status: res.statusCode, ms: now() - started }))
     })
     const refuse = (status, code, message, { id = null, rpc = -32001, headers = {} } = {}) => {
@@ -125,24 +130,24 @@ export function door({ keys, tools, allow, tokens, rate, now = () => Date.now(),
     Object.assign(call, { key: key.id, name: key.name, owner: key.owner })
     const wait = take(key.id)
     if (wait) return refuse(429, 'rate_limited', `This key may make ${rate.perMinute} calls a minute.`, { headers: { 'retry-after': String(wait) } })
+    // Only a POST's body is read, under the cap; the SDK would read any other method's whole body before its own 405.
+    if (req.method !== 'POST') return refuse(405, 'method_not_allowed', 'The door takes POST only.', { headers: { allow: 'POST', connection: 'close' } })
+    const raw = await readBody(req, MAX_BODY)
+    if (raw === null) return refuse(413, 'body_too_large', `Request bodies are limited to ${MAX_BODY} bytes here.`, { headers: { connection: 'close' } })
     let msg
-    if (req.method === 'POST') {
-      const raw = await readBody(req, MAX_BODY)
-      if (raw === null) return refuse(413, 'body_too_large', `Request bodies are limited to ${MAX_BODY} bytes here.`, { headers: { connection: 'close' } })
-      try { msg = JSON.parse(raw) } catch { return refuse(400, 'parse_error', 'The body is not JSON.', { rpc: -32700 }) }
-      if (msg === null || typeof msg !== 'object' || Array.isArray(msg)) return refuse(400, 'invalid_request', 'The door takes one JSON-RPC message per request.', { rpc: -32600 })
-      if (typeof msg.method === 'string') call.method = msg.method.slice(0, 64)
-      const tool = msg.method === 'tools/call' ? tools.find(t => t.name === msg.params?.name) : undefined
-      if (tool) {
-        call.tool = tool.name
-        const args = msg.params.arguments
-        try { await admit(key, tool, args) } catch (e) {
-          if (!e.code) throw e
-          return refuse(e.status, e.code, e.message, { id: msg.id ?? null })
-        }
-        if (tool.turns && !((await allow(key.owner)) && (!tokens || await tokens.allow(key.owner)))) return refuse(429, 'budget_exhausted', `The daily model budget of ${key.owner} is spent.`, { id: msg.id ?? null })
-        Object.assign(call, { admitted: tool.name, project: args?.project })
+    try { msg = JSON.parse(raw) } catch { return refuse(400, 'parse_error', 'The body is not JSON.', { rpc: -32700 }) }
+    if (msg === null || typeof msg !== 'object' || Array.isArray(msg)) return refuse(400, 'invalid_request', 'The door takes one JSON-RPC message per request.', { rpc: -32600 })
+    if (typeof msg.method === 'string') call.method = msg.method.slice(0, 64)
+    const tool = msg.method === 'tools/call' ? tools.find(t => t.name === msg.params?.name) : undefined
+    if (tool) {
+      call.tool = tool.name
+      const args = msg.params.arguments
+      try { await admit(key, tool, args) } catch (e) {
+        if (!e.code) throw e
+        return refuse(e.status, e.code, e.message, { id: msg.id ?? null })
       }
+      if (tool.turns && !((await allow(key.owner)) && (!tokens || await tokens.allow(key.owner)))) return refuse(429, 'budget_exhausted', `The daily model budget of ${key.owner} is spent.`, { id: msg.id ?? null })
+      Object.assign(call, { admitted: tool.name, project: args?.project })
     }
     // A tools/call that reaches the SDK but runs no tool (unknown name, invalid arguments) logs not_run.
     call.outcome = call.method === 'tools/call' ? 'not_run' : 'ok'
