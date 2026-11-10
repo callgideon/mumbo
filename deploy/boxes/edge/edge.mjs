@@ -514,25 +514,30 @@ const BROWSER_EXCLUDES = ['.cache', '.chromium-profile-old', ...['Singleton*', '
 const DOWNLOADS_ITEM_MAX = 1024 ** 3, DOWNLOADS_TOTAL_MAX = 2 * 1024 ** 3
 /** Lists, NUL-terminated and as exact bytes, what a backup takes from /home/browser and /home/shared: argv[3] gets the two
  *  homes and /home/shared/Downloads (archived without recursion), argv[4] every other top-level entry of the homes and the
- *  shared Downloads items kept (archived with recursion, by tar's own traversal, which follows no symlink). Only names
- *  whose parent is root's (/home, /home/shared, /home/shared/Downloads) are listed, so browser cannot swap a directory
- *  above a listed name for a symlink; an old ~/Downloads is one entry of /home/browser. Downloads is never named by a
- *  pattern, so no file name can exclude anything else. It reads with lstat; an item still being downloaded
- *  (*.crdownload) is skipped, and one it cannot read is left out. Prints one line when Downloads items are left out. */
+ *  Downloads items kept (archived with recursion, by tar's own traversal, which follows no symlink). Only names whose
+ *  enclosing directories are each an entry of a root-owned directory (/home, /home/shared) are listed: the homes'
+ *  top-level entries and the shared Downloads items. Never list a name below one of these: browser could swap a
+ *  directory above it for a symlink. An old ~/Downloads is one item, under the same limits. Downloads is never named by
+ *  a pattern, so no file name can exclude anything else. It reads with lstat; an item still being downloaded
+ *  (*.crdownload) is skipped, an entry that vanishes while it is sized counts as empty, and an item it cannot read is
+ *  left out. Prints one line when Downloads items are left out. */
 const SELECT_JS = `const fs = require("fs"), path = require("path"), NUL = Buffer.from([0])
 const [root, dirsOut, unitsOut, itemMax, totalMax] = process.argv.slice(1)
 const abs = (r) => Buffer.concat([Buffer.from(root + "/"), r])
 const st = (r) => { try { return fs.lstatSync(abs(r)) } catch { return undefined } }
 const names = (r) => { try { return fs.readdirSync(abs(r), { encoding: "buffer" }) } catch { return undefined } }
 const join = (r, n) => Buffer.concat([r, Buffer.from("/"), n])
-const bytes = (r) => { const s = st(r); if (!s) return Infinity; if (s.isFile()) return s.size; if (!s.isDirectory()) return 0; const c = names(r); return c ? c.reduce((n, x) => n + bytes(join(r, x)), 0) : Infinity }
+const gone = (e) => e.code === "ENOENT" || e.code === "ENOTDIR"
+const bytes = (r) => { let s, c; try { s = fs.lstatSync(abs(r)) } catch (e) { return gone(e) ? 0 : Infinity } if (s.isFile()) return s.size; if (!s.isDirectory()) return 0; try { c = fs.readdirSync(abs(r), { encoding: "buffer" }) } catch (e) { return gone(e) ? 0 : Infinity } return c.reduce((n, x) => n + bytes(join(r, x)), 0) }
 const dirs = [], units = [], items = []
 for (const home of ["home/browser", "home/shared"].map((h) => Buffer.from(h))) {
   if (!st(home)?.isDirectory()) continue
   dirs.push(home)
   for (const n of names(home) ?? []) {
     const r = join(home, n)
-    if (home.toString() !== "home/shared" || n.toString() !== "Downloads" || !st(r)?.isDirectory()) { units.push(r); continue }
+    const downloads = n.toString() === "Downloads" && st(r)?.isDirectory()
+    if (downloads && home.toString() === "home/browser") { items.push({ i: r, size: bytes(r), mtime: st(r)?.mtimeMs ?? 0 }); continue }
+    if (!downloads) { units.push(r); continue }
     dirs.push(r)
     for (const c of names(r) ?? []) if (!c.toString("latin1").endsWith(".crdownload")) { const i = join(r, c); items.push({ i, size: bytes(i), mtime: st(i)?.mtimeMs ?? 0 }) }
   }
@@ -630,7 +635,10 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
         email.startsWith('project:') ? await ownersOf(store, email.slice('project:'.length)) : undefined))
       if (restoreUrl) {
         const ok = await run(box, restoreCommand(restoreUrl), 660_000).then(() => true, () => false)
-        say({ msg: 'restore', user: email, box: box.sandboxId, ok })
+        say({ ...(ok ? {} : { level: 'error' }), msg: 'restore', user: email, box: box.sandboxId, ok })
+        // A partly restored box must never be backed up over the archive: the catch below drops it, and the next visit
+        // restores again.
+        if (!ok) throw Object.assign(new Error('restore failed'), { status: 503 })
       }
       await run(box, 'chmod +x /root/.mumbo/start.sh && /root/.mumbo/start.sh')
       const now = Date.now()

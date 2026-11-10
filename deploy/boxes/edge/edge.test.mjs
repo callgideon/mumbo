@@ -380,6 +380,31 @@ test('a box being restored is neither backed up nor started by another replica, 
   assert.equal(await store.getBox('dead'), undefined)
 })
 
+test('a failed restore drops the new box, logged at error, so no backup of it replaces the archive; the next visit restores again', async () => {
+  const e2b = fakeE2B(); const killed = []; const logs = []; const ran = []
+  let fail = true
+  e2b.Sandbox.create = async (tpl, opts) => {
+    const id = `b${e2b.made.length + 1}`; e2b.made.push({ id, opts })
+    return { sandboxId: id, files: { write: async () => {} }, kill: async () => { killed.push(id) }, commands: { run: async (c) => { ran.push(c); if (c.includes('GET-URL') && fail) throw new Error('exit status 2'); return { stdout: c.includes('dsh.log') ? 'launch123' : '' } } } }
+  }
+  e2b.Sandbox.list = () => ({ hasNext: true, nextItems: async function () { this.hasNext = false; return e2b.made.filter(m => !killed.includes(m.id)).map(m => ({ sandboxId: m.id, state: 'running', startedAt: '1' })) } })
+  const store = memoryStore()
+  const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => 'GET-URL', presignPut: async () => 'PUT', log: (l) => logs.push(JSON.parse(l)) })
+  await assert.rejects(b.ensure('a@x.com'), (e) => e.status === 503)
+  assert.deepEqual(killed, ['b1'])
+  assert.equal(await store.getBox('b1'), undefined)
+  assert.deepEqual(logs.filter(l => l.msg === 'restore'), [{ edge: 'box', level: 'error', msg: 'restore', user: 'a@x.com', box: 'b1', ok: false }])
+  assert.ok(!ran.some(c => c.includes('/root/.mumbo/start.sh') || c.includes('--upload-file')), 'neither started nor backed up')
+  fail = false
+  const { id } = await b.ensure('a@x.com')
+  assert.equal(id, 'b2')
+  assert.deepEqual(logs.filter(l => l.msg === 'restore').at(-1), { edge: 'box', msg: 'restore', user: 'a@x.com', box: 'b2', ok: true })
+  // The alarm on that line, and the RUNBOOK entry its description links to.
+  const { readFileSync } = await import('node:fs')
+  assert.ok(readFileSync(new URL('../prod/ops.tf', import.meta.url), 'utf8').includes('edge-restore-failed = { group = module.edge_us_east_1.log_group, pattern = "{ $.msg = \\"restore\\" && $.ok IS FALSE }" }'))
+  assert.match(readFileSync(new URL('../RUNBOOK.md', import.meta.url), 'utf8'), /^### edge-restore-failed$/m)
+})
+
 // ---- child sandboxes (sandboxes.mjs)
 import { children, mcpServer } from './sandboxes.mjs'
 function fakeChildE2B() {

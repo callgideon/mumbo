@@ -18,6 +18,7 @@ resource "aws_sns_topic_subscription" "ops_email" {
 locals {
   log_metrics = {
     edge-backup-failed  = { group = module.edge_us_east_1.log_group, pattern = "{ $.msg = \"backup failed\" }" }
+    edge-restore-failed = { group = module.edge_us_east_1.log_group, pattern = "{ $.msg = \"restore\" && $.ok IS FALSE }" }
     edge-pause-failed   = { group = module.edge_us_east_1.log_group, pattern = "{ $.msg = \"pause failed\" }" }
     edge-errors         = { group = module.edge_us_east_1.log_group, pattern = "{ $.edge = \"error\" }" }
     edge-dropped-create = { group = module.edge_us_east_1.log_group, pattern = "{ $.msg = \"dropped unfinished create\" }" }

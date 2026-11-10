@@ -261,6 +261,50 @@ test('a tar failure of status 2 lists and archives once more before the backup f
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
 
+test('a truncated archive fails the restore, after the SQLite snapshots before the cut are moved back', () => {
+  const { root, file, db, target } = fixture()
+  db.close()
+  mkdirSync(join(root, 'home/browser'), { recursive: true })
+  writeFileSync(join(root, 'home/browser/f'), Buffer.alloc(1000000, 7).map((_, i) => (i * 2654435761) % 251))
+  assert.equal(sh(backupCommand(target, root)).status, 0)
+  const tar = execFileSync('gunzip', ['-c', `${root}.tgz`])
+  writeFileSync(`${root}.tgz`, execFileSync('gzip', ['-c'], { input: tar.subarray(0, tar.length - 400000) }))
+  rmSync(join(root, 'root'), { recursive: true }); rmSync(join(root, 'home'), { recursive: true })
+  const r = sh(restoreCommand(target, root))
+  assert.notEqual(r.status, 0)
+  const back = new DatabaseSync(file)
+  assert.deepEqual(back.prepare('SELECT v FROM t').all().map((x) => x.v), [42])
+  back.close()
+})
+
+test('an old ~/Downloads is one item under the Downloads limits', () => {
+  const { root, db, target } = fixture()
+  db.close()
+  const old = join(root, 'home/browser/Downloads')
+  mkdirSync(old, { recursive: true }); mkdirSync(join(root, 'home/browser/.config'))
+  writeFileSync(join(root, 'home/browser/.config/x'), 'x')
+  for (const n of ['a.iso', 'b.zip']) { writeFileSync(join(old, n), ''); truncateSync(join(old, n), 600 * 1024 * 1024) }
+  const b = sh(backupCommand(target, root))
+  assert.equal(b.status, 0, b.stderr)
+  assert.equal(b.stdout, 'downloads left out of the backup: 1 items, 1200 MiB\n')
+  const names = execFileSync('tar', ['-tzf', `${root}.tgz`], { encoding: 'utf8' }).split('\n')
+  assert.ok(names.includes('home/browser/.config/x') && !names.some(n => n.startsWith('home/browser/Downloads')))
+})
+
+test('a file that vanishes while a Downloads item is sized counts as empty, so the item is kept', () => {
+  const root = mkdtempSync(join(tmpdir(), 'sel-'))
+  try {
+    mkdirSync(join(root, 'home/shared/Downloads/proj'), { recursive: true })
+    for (const n of ['keep', 'vanish']) writeFileSync(join(root, 'home/shared/Downloads/proj', n), n)
+    const cmd = backupCommand('U', root), from = cmd.indexOf("msg=$(node -e '") + "msg=$(node -e '".length
+    // lstat of the file named vanish fails with ENOENT, as when it is deleted between readdir and lstat.
+    writeFileSync(join(root, 'vanish.cjs'), 'const fs = require("fs"), real = fs.lstatSync; fs.lstatSync = function (p, ...a) { if (String(p).endsWith("/vanish")) throw Object.assign(new Error("gone"), { code: "ENOENT" }); return real.call(this, p, ...a) }')
+    const out = execFileSync(process.execPath, ['-r', join(root, 'vanish.cjs'), '-e', cmd.slice(from, cmd.indexOf("'", from)), root, join(root, 'dirs'), join(root, 'units'), String(1024 ** 3), String(2 * 1024 ** 3)], { encoding: 'utf8' })
+    assert.equal(out, '')
+    assert.ok(readFileSync(join(root, 'units'), 'latin1').split('\0').includes('home/shared/Downloads/proj'))
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
 test('a corrupt database fails the backup and leaves the previous archive alone', () => {
   const { root, db, target } = fixture()
   db.close()
