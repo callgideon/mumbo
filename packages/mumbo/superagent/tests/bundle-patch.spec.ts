@@ -3,19 +3,20 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
+import { applyEntryPatches, entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 import { ROUTER_PRESET, WORKER_PRESET } from '../src/app/sessions.ts'
 
 interface Row { id?: string; name: string; disabled?: unknown; config?: Record<string, unknown> & { plugins?: Row[] } | Row[] }
-/** The patch as DSH reads it: Cordis's include plugin parses `!!js` scalars, and applies the inserts to an entry list. */
+/**
+ * The patch as DSH reads it: Cordis's include plugin, from source, parses `!!js` scalars with its own js-yaml and applies
+ * the inserts to an entry list.
+ */
 async function patched(): Promise<Row[]> {
-  const cordis = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/cordis/package.json'))
-  const include = cordis.resolve('@deepseek-ai/cordis-plugin-include')
-  const { entryListSchema, applyEntryPatches } = await import(include) as {
-    entryListSchema: unknown; applyEntryPatches(data: Row[], patches: unknown[], warn: (message: string) => void): Row[] }
-  const yaml = await import(createRequire(include).resolve('js-yaml')) as { load(text: string, options: { schema: unknown }): unknown }
+  const includeRoot = join(import.meta.dirname, '..', '..', '..', '..', 'vendor', 'include', 'package.json')
+  const yaml = await import(createRequire(includeRoot).resolve('js-yaml')) as { load(text: string, options: { schema: unknown }): unknown }
   const patches = yaml.load(readFileSync(join(import.meta.dirname, '..', 'cordis.patch.yml'), 'utf8'), { schema: entryListSchema }) as unknown[]
   const warnings: string[] = []
-  const rows = applyEntryPatches([], patches, message => { warnings.push(message) })
+  const rows = applyEntryPatches([], patches as never, message => { warnings.push(message) }) as Row[]
   expect(warnings).toEqual([])
   return rows
 }
