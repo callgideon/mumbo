@@ -13,7 +13,8 @@ import type { JSONRPCMessage } from '@modelcontextprotocol/client'
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio'
 import { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import type {
-  SubprocessChildIdentity, SubprocessHandle, SubprocessOutcome, SubprocessSpawnSpec, SubprocessTerminalEnvironment, SubprocessTerminalHandle,
+  SubprocessChildIdentity, SubprocessHandle, SubprocessOutcome, SubprocessSpawnSpec,
+  SubprocessTerminalEnvironment, SubprocessTerminalHandle,
 } from '@deepseek-ai/dsh-subprocess'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
