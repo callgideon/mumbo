@@ -390,13 +390,19 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-attachment-local`
 
-- `source`: [`packages/attachment/attachment-local/src/index.ts:65`](../packages/attachment/attachment-local/src/index.ts)
+- `source`: [`packages/attachment/attachment-local/src/index.ts:68`](../packages/attachment/attachment-local/src/index.ts)
 
 ```ts config-catalog
 /** Local attachment backend configuration. */
 export interface Config {
   /** Explicit harness home; omitted follows `DSH_HOME`, then `~/.dsh`. */
   dshHome?: string
+  /**
+   * Let the home's group read the store but not change it: directories are created `2750` and objects `0440`, so a
+   * home owned by this process with another user's group and the set-group-ID bit passes that group to everything
+   * below it. Default `false`: directories `0700`, objects `0400`. The home itself takes the directory mode.
+   */
+  groupReadable?: boolean
   /** Maximum encoded bytes accepted for one submitted image. Default: 50 MiB. */
   maxImageBytes?: number
   /** Maximum image count accepted in one submitted message. Default: 20. */
@@ -1599,7 +1605,7 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-fs-local`
 
-- `source`: [`packages/fs/fs-local/src/index.ts:61`](../packages/fs/fs-local/src/index.ts)
+- `source`: [`packages/fs/fs-local/src/index.ts:62`](../packages/fs/fs-local/src/index.ts)
 
 ```ts config-catalog
 /** Configuration for the local filesystem backend. */
@@ -3535,6 +3541,12 @@ export interface Config {
    * ages out.
    */
   cleanupPeriodDays?: number
+  /**
+   * Let the root's group read spill files but not change them: session directories are created `0750` and files
+   * `0640`, so a configured root owned by this process with another user's group and the set-group-ID bit passes that
+   * group to every session directory and file. Defaults to `false` (`0700` and `0600`).
+   */
+  groupReadable?: boolean
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-spill-local -->
@@ -3913,7 +3925,7 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-subprocess-local`
 
-- `source`: [`packages/subprocess/subprocess-local/src/index.ts:71`](../packages/subprocess/subprocess-local/src/index.ts)
+- `source`: [`packages/subprocess/subprocess-local/src/index.ts:74`](../packages/subprocess/subprocess-local/src/index.ts)
 
 ```ts config-catalog
 /** Provider configuration. */
@@ -3926,6 +3938,18 @@ export interface Config {
    * listed here is refused.
    */
   identities?: Record<string, RunAs> | undefined
+  /**
+   * Absolute existing directory that receives each interactive shell's private activity records; omitted, the OS
+   * temporary directory. Under `runAs` it must be writable by no other user, directly or through an ancestor, and
+   * searchable by the run-as user through every ancestor, so a root-only temporary directory needs this set.
+   */
+  shellActivityDirectory?: string | undefined
+  /**
+   * Absolute existing directory that receives spill files, created mode `0640`; omitted, a private per-process
+   * directory under the OS temporary directory. Under `runAs` it must be writable by no other user, directly or
+   * through an ancestor.
+   */
+  spillDirectory?: string | undefined
 }
 
 /** Run every child of this provider as one fixed non-root identity with an explicit environment. */
@@ -4959,7 +4983,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-working-directory`
 
 - `inject`: `fs` · `sessionProjections` · `systemPrompt`
-- `source`: [`packages/session/working-directory/src/index.ts:51`](../packages/session/working-directory/src/index.ts)
+- `source`: [`packages/session/working-directory/src/index.ts:52`](../packages/session/working-directory/src/index.ts)
 
 ```ts config-catalog
 /** Deployment default for Sessions without an original project directory. */
@@ -5138,7 +5162,7 @@ export interface Config {
 ## `@mumbo/superagent`
 
 - `inject`: `agents` · `sessionController` · `sessionPersistence` · `workspaceRegistry` · `permissionPresets` · `tools` · `systemPrompt` · `skills` · `webServer` · `connection` · `llm` · `subprocess`
-- `source`: [`packages/mumbo/superagent/src/deployment.ts:31`](../packages/mumbo/superagent/src/deployment.ts)
+- `source`: [`packages/mumbo/superagent/src/deployment.ts:32`](../packages/mumbo/superagent/src/deployment.ts)
 
 ```ts config-catalog
 export type DeploymentConfig = ReturnType<typeof Config>

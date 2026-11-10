@@ -2,8 +2,9 @@
  * Containment gate over the mumbo box compositions: the web profile, the founder's overlays, the rows the edge writes,
  * and the edge's containment rows (fixtures/box-edge). Every mounted package is classified by how its model-visible
  * tools run; an unclassified package fails, catalogued tool names must match, the packages that would load code into
- * root dsh or start a root process for the model must be switched off or absent, and every subprocess identity a row
- * names must be the one its classification expects and a configured non-root identity of its own.
+ * root dsh or start a root process for the model must be switched off or absent, every subprocess identity a row
+ * names must be the one its classification expects and a configured non-root identity of its own, and no MCP row may
+ * start a stdio server without naming one.
  */
 
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
@@ -45,6 +46,8 @@ interface Classification {
   identity?: string
   /** Whether a row with this config starts processes and so must name `identity`; omitted, every row does. */
   startsProcesses?: (config: Record<string, unknown> | undefined) => boolean
+  /** The identity is the one each row names for itself, such as an MCP stdio server row's, instead of `identity`. */
+  identityFromRow?: true
   note?: string
 }
 
@@ -105,7 +108,10 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
   '@deepseek-ai/dsh-llm-deepseek-api-key': NONE,
   '@deepseek-ai/dsh-llm-pi-ai': NONE,
   '@deepseek-ai/dsh-llm-retry': NONE,
-  '@deepseek-ai/dsh-mcp-client': { runs: 'remote', tools: ['mcp__sandboxes__*'], note: 'the edge\'s sandboxes server over HTTP' },
+  '@deepseek-ai/dsh-mcp-client': {
+    runs: 'remote', tools: ['mcp__sandboxes__*'], identityFromRow: true, startsProcesses: config => config?.transport !== 'streamable-http',
+    note: 'the edge\'s sandboxes server over HTTP; a stdio row must name the identity its server runs as',
+  },
   '@deepseek-ai/dsh-mcp-manager': { ...NONE, note: 'servers are added by the person, never by a model tool' },
   '@deepseek-ai/dsh-mcp-resources': {
     runs: 'remote', tools: ['list_mcp_resource_templates', 'list_mcp_resources', 'read_mcp_resource'], catalog: '@deepseek-ai/dsh-mcp-resources',
@@ -279,6 +285,25 @@ function namedIdentities(value: unknown): string[] {
   return Object.entries(value).flatMap(([key, entry]) => key === 'identity' && typeof entry === 'string' ? [entry] : namedIdentities(entry))
 }
 
+/**
+ * Ids of the enabled MCP client rows that start a stdio server without naming a run-as identity, so the server would run
+ * as root with what root dsh can reach. Every transport but Streamable HTTP starts a process.
+ */
+function rootStdioServers(rows: readonly Row[]): string[] {
+  return enabledRows(rows).flatMap((row) => {
+    const config = row.config as { transport?: unknown; identity?: unknown } | undefined
+    const root = row.name === '@deepseek-ai/dsh-mcp-client' && config?.transport !== 'streamable-http' && typeof config?.identity !== 'string'
+    return root ? [row.id ?? '(no id)'] : []
+  })
+}
+
+/** Every string value in a config, at any depth. */
+function configStrings(value: unknown): string[] {
+  if (typeof value === 'string') return [value]
+  if (typeof value !== 'object' || value === null) return []
+  return Object.values(value).flatMap(configStrings)
+}
+
 /** Tool names per package from the generated tool catalog's package map. */
 function catalogTools(): Map<string, string[]> {
   const text = readFileSync(join(root, 'docs/tool-catalog.md'), 'utf8')
@@ -311,13 +336,30 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
 
   it('applies the containment rows', () => {
     const byId = (id: string) => rows.find(row => row.id === id)
-    const runAs = (byId('subprocess')?.config as { runAs?: { set: Record<string, string>; secretNames: string[] } }).runAs
+    const subprocess = byId('subprocess')?.config as { runAs?: { set: Record<string, string>; secretNames: string[] }; shellActivityDirectory?: string; spillDirectory?: string }
+    const runAs = subprocess.runAs
     expect(runAs?.set).toMatchObject({ HOME: '/home/agent', TMPDIR: '/home/agent/tmp' })
     expect(runAs?.secretNames).toEqual(expect.arrayContaining(['DEEPSEEK_API_KEY', 'MUMBO_MEMBER_KEY']))
+    // Shell activity records and command spill files leave dsh's root-only temporary directory for ones agent can reach.
+    expect([subprocess.shellActivityDirectory, subprocess.spillDirectory]).toEqual(['/run/dsh-shell', '/var/lib/mumbo/subprocess-spill'])
+    // /root/.mumbo stays 0700: no value a run-as child receives names a path inside it.
+    expect(configStrings(subprocess).filter(value => value.includes('/root/.mumbo'))).toEqual([])
+    const modelRoots = ['/root/projects', '/home/agent', box === 'person' ? '/home/shared/Downloads' : '/root/work']
     expect(byId('fs-sandbox')?.config).toEqual({
-      modelRoots: ['/root/projects', '/home/agent', box === 'person' ? '/home/shared/Downloads' : '/root/work'],
-      readOnlyRoots: ['/root/.dsh/attachments/v1', '/root/.dsh/skills', '/root/.mumbo/agents/skills'],
+      modelRoots,
+      readOnlyRoots: [
+        '/var/lib/mumbo/attachments/attachments/v1', '/root/.dsh/skills', '/usr/local/share/mumbo/agents/skills', '/var/lib/mumbo/spill',
+        '/var/lib/mumbo/subprocess-spill',
+      ],
     })
+    // The stores whose paths the model is told to read write where the read-only roots name, readable by agent's group.
+    expect(byId('attachment-local')?.config).toEqual({ dshHome: '/var/lib/mumbo/attachments', groupReadable: true })
+    expect(byId('spill-local')?.config).toEqual({ root: '/var/lib/mumbo/spill', groupReadable: true })
+    if (box === 'project') {
+      // Ticket directories sit in a model root, created as agent.
+      expect((byId('dsh-superagent')?.config as { workDirectory?: string }).workDirectory).toBe('/root/work')
+      expect(modelRoots).toContain('/root/work')
+    }
     expect(byId('plugin-manager')?.config).toEqual({ modelTools: false })
     expect(byId('workspace-changes')?.config).toEqual({ summaries: false })
     expect(isDisabled(byId('preset-cordis')?.disabled)).toBe(true)
@@ -327,8 +369,9 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     const named = enabled.flatMap(row => namedIdentities(row.config).map(identity => `${row.name} as ${identity}`)).sort()
     const expected = enabled.flatMap((row) => {
       const entry = row.name === undefined ? undefined : CLASSIFICATION[row.name]
-      if (entry?.identity === undefined || entry.startsProcesses?.(row.config as Record<string, unknown> | undefined) === false) return []
-      return [`${row.name} as ${entry.identity}`]
+      const identity = entry?.identityFromRow === true ? (row.config as { identity?: string } | undefined)?.identity : entry?.identity
+      if (identity === undefined || entry?.startsProcesses?.(row.config as Record<string, unknown> | undefined) === false) return []
+      return [`${row.name} as ${identity}`]
     }).sort()
     expect(named).toEqual(expected)
     expect(named).toEqual(box === 'person'
@@ -344,6 +387,19 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     for (const identity of Object.values(identities)) {
       expect(identity.secretNames).toEqual(expect.arrayContaining(['DEEPSEEK_API_KEY', 'MUMBO_MEMBER_KEY']))
     }
+  })
+
+  it('starts no MCP stdio server without a run-as identity', () => {
+    expect(rootStdioServers(rows)).toEqual([])
+    // The check itself: a stdio row without an identity fails; a remote row and an identity-run stdio row pass.
+    const mcp = '@deepseek-ai/dsh-mcp-client'
+    expect(rootStdioServers([
+      ...rows,
+      { id: 'root-files', name: mcp, config: { serverName: 'files', transport: 'stdio', command: 'npx', args: [] } },
+      { id: 'remote', name: mcp, config: { serverName: 'remote', transport: 'streamable-http', url: 'https://mcp.example/mcp' } },
+      { id: 'contained', name: mcp, config: { serverName: 'contained', transport: 'stdio', command: 'npx', identity: 'browsermcp' } },
+      { id: 'off', name: mcp, disabled: true, config: { serverName: 'off', transport: 'stdio', command: 'npx' } },
+    ])).toEqual(['root-files'])
   })
 
   it('lists every mounted model tool with how it runs', () => {

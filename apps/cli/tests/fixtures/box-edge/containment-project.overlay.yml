@@ -2,9 +2,13 @@
 # the box's `agent` user; NO_PROXY ends with the edge's LLM host; the rest is fixed. A project box has no desktop or
 # browser, so no further identity.
 # Start every process dsh runs for the model as `agent`, with an explicit environment that reaches GitHub through the
-# box-local proxy, as dsh itself does.
+# box-local proxy, as dsh itself does. The gh wrapper and the proxy CA are root-owned, world-readable copies outside
+# /root/.mumbo, which stays 0700. dsh's own TMPDIR stays root-only; shell activity records go to /run/dsh-shell (root,
+# 0711) and command spill files to a directory agent can read.
 - id: subprocess
   config:
+    shellActivityDirectory: /run/dsh-shell
+    spillDirectory: /var/lib/mumbo/subprocess-spill
     runAs:
       uid: 1001
       gid: 1001
@@ -16,18 +20,42 @@
         USER: agent
         LOGNAME: agent
         SHELL: /bin/bash
-        PATH: /root/.mumbo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-        NODE_EXTRA_CA_CERTS: /root/.mumbo/ca/ca.crt
+        PATH: /usr/local/lib/mumbo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        NODE_EXTRA_CA_CERTS: /usr/local/share/ca-certificates/mumbo-box.crt
         NODE_USE_ENV_PROXY: '1'
         HTTPS_PROXY: http://127.0.0.1:8899
         NO_PROXY: 127.0.0.1,localhost,llm.example
       secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY, E2B_API_KEY, GH_TOKEN, GITHUB_TOKEN]
 # Confine the model's file tools to the workspace, agent's home, and the ticket work directory; reads check each opened
-# file, changes run as agent. The attachment and skill directories the harness names to the model are read-only.
+# file, changes run as agent. The attachment, skill, and spill directories the harness names to the model are read-only;
+# the ones outside /root are root-owned with group agent and set-group-ID (2750), so the agent shell can read but not
+# change them.
 - id: fs-sandbox
   config:
     modelRoots: [/root/projects, /home/agent, /root/work]
-    readOnlyRoots: [/root/.dsh/attachments/v1, /root/.dsh/skills, /root/.mumbo/agents/skills]
+    readOnlyRoots:
+      - /var/lib/mumbo/attachments/attachments/v1
+      - /root/.dsh/skills
+      - /usr/local/share/mumbo/agents/skills
+      - /var/lib/mumbo/spill
+      - /var/lib/mumbo/subprocess-spill
+# Uploads live outside the root-only harness home, readable by agent's group and writable only by root.
+- id: attachment-local
+  config:
+    dshHome: /var/lib/mumbo/attachments
+    groupReadable: true
+# Spilled tool results the model is told to read, likewise.
+- id: spill-local
+  config:
+    root: /var/lib/mumbo/spill
+    groupReadable: true
+# Ticket directories go in the ticket work directory above, created as agent; the rest restates mumbo-project.overlay.yml.
+- id: dsh-superagent
+  config:
+    stateDir: !!js dshHomePath('superagent')
+    workDirectory: /root/work
+    panelAdmins: !!js (process.env.MUMBO_PANEL_ADMINS ?? '').split(',').filter(Boolean)
+    githubApp: !!js "process.env.MUMBO_GITHUB_APP_LOGIN || process.env.MUMBO_GITHUB_APP_USER_ID ? { login: process.env.MUMBO_GITHUB_APP_LOGIN, userId: Number(process.env.MUMBO_GITHUB_APP_USER_ID) } : undefined"
 # Installing or enabling a plugin loads code into root dsh: no plugin_manager tool for the model.
 - id: plugin-manager
   config:
