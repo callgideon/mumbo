@@ -145,7 +145,7 @@ function root({ users = true } = {}) {
     /** Runs `text` with box paths moved under t; returns status, stderr and the variables named. */
     run: (text, show = []) => {
       const local = text.replaceAll('/root', `${t}/root`).replaceAll('/var/lib/mumbo', `${t}/var/lib/mumbo`).replaceAll('/usr/local/share/mumbo', `${t}/usr/local/share/mumbo`)
-        .replaceAll('/run/dsh-shell', `${t}/run/dsh-shell`).replaceAll('/proc/', `${t}/proc/`)
+        .replaceAll('/run/dsh-shell', `${t}/run/dsh-shell`).replaceAll('/proc/', `${t}/proc/`).replaceAll('/src/deploy', `${t}/src/deploy`)
       const r = spawnSync('/bin/sh', ['-c', `set -eu\n${local}\n${show.map(v => `printf '%s=%s\\n' ${v} "$${v}"`).join('\n')}`], { encoding: 'utf8', env: { PATH: join(t, 'bin') } })
       return { code: r.status, err: r.stderr.replaceAll(t, 'T'), out: r.stdout.replaceAll(t, 'T') }
     },
@@ -175,12 +175,22 @@ test('containment rows: the harness fixtures with the box\'s ids and agent in th
   // An unquoted heredoc carries the rows: no $ but the id variables, no backquote, no backslash.
   for (const person of [true, false]) {
     const rows = containmentRows(c, person)
-    assert.deepEqual([...new Set(rows.match(/\$\w*/g))].sort(), ['$AGENT_GID', '$AGENT_UID', '$MCP_GID', '$MCP_GROUPS', '$MCP_UID', '$WS_GID', ...(person ? ['$BMCP_GID', '$BMCP_UID', '$DESKTOP_GID', '$DESKTOP_UID', '$SHARED_GID'] : [])].sort())
+    assert.deepEqual([...new Set(rows.match(/\$\w*/g))].sort(), ['$AGENT_GID', '$AGENT_UID', '$MCP_GID', '$MCP_GROUPS', '$MCP_UID', '$WS_GID', ...(person ? ['$BMCP_GID', '$BMCP_UID', '$DESKTOP_GID', '$DESKTOP_UID', '$SHARED_GID'] : ['$SUPERAGENT_EDGE'])].sort())
     assert.ok(!/[`\\]/.test(rows))
     // No value of the subprocess row names a path in /root/.mumbo, which stays 0700.
     assert.ok(!rows.slice(0, rows.indexOf('- id: fs-sandbox')).includes('/root/.mumbo'))
   }
   assert.throws(() => containmentLayout({ ...c, mcpServerWorkspace: 'all' }, true), /mcpServerWorkspace "all"/)
+  // An image whose project overlay gives superagent the edge's report endpoint (B36) keeps it: this row replaces that config.
+  const r = root()
+  try {
+    mkdirSync(r.at('src/deploy'), { recursive: true })
+    writeFileSync(r.at('src/deploy/mumbo-project.overlay.yml'), '    edge: !!js "process.env.MUMBO_EDGE_MCP_URL"\n')
+    const out = r.run(`B24_IMAGE=1 B24_TEMPLATE=1\n${layoutOf(script(c, false))}`)
+    assert.equal(out.code, 0, out.err)
+    const githubApp = FIXTURE(false).split('\n').find(l => l.startsWith('    githubApp: '))
+    assert.equal(readFileSync(r.at('root/.mumbo/containment.overlay.yml'), 'utf8').replaceAll(r.t, ''), FIXTURE(false).replace(githubApp, `${githubApp}\n    edge: !!js "process.env.MUMBO_EDGE_MCP_URL || process.env.MUMBO_EDGE_TOKEN_FILE || process.env.MUMBO_PROJECT_ID ? { url: process.env.MUMBO_EDGE_MCP_URL, tokenFile: process.env.MUMBO_EDGE_TOKEN_FILE, project: process.env.MUMBO_PROJECT_ID } : undefined"`))
+  } finally { r.done() }
 })
 
 test('containment rows are patched last, only on an image with the harness, and dsh starts with its own TMPDIR and agents root', () => {

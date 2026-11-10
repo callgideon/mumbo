@@ -229,7 +229,7 @@ test('with PROJECT_DOMAIN=projects.example, p-<id>.projects.example is the proje
     assert.deepEqual(t.seen.map(s => s.headers['e2b-sandbox-id']), ['pbox', 'pbox'])
     assert.equal((await call(t.port, { path: `/p/${t.id}/x`, headers: { host: 'boxes.mumbo.si' } })).headers.location, `https://${host}/x`)
     assert.ok((await call(t.port, { path: '/home', headers: { host: 'boxes.mumbo.si' } })).body.includes(`href="https://${host}/"`))
-    assert.deepEqual(boxSite(c, `project:${t.id}`), { host, publicUrl: `https://${host}/`, desktop: false })
+    assert.deepEqual(boxSite(c, `project:${t.id}`), { host, publicUrl: `https://${host}/`, desktop: false, project: t.id })
     assert.ok(roleInstructions(c, `project:${t.id}`).includes(`Its members reach you at https://${host}/ `))
     assert.deepEqual(t.ensured, [`project:${t.id}`, `project:${t.id}`])
   } finally { t.close() }
