@@ -40,14 +40,14 @@ const ws = await new Promise((resolve) => {
   req.on('response', (r) => resolve(`http ${r.statusCode}`)); req.on('error', (e) => resolve(e.message)); setTimeout(() => resolve('timeout'), 15000); req.end()
 })
 check('dsh WebSocket opens on the project host', ws === 'open', ws)
-// Relay: the edge's own path (projectRelay over boxFetcher) creates the coordinator session and prompts it.
+// Relay: the edge's own path (projectRelay over boxFetcher) posts to the project box's Superagent relay route as the member.
 const { projectRelay } = await import('./projects.mjs')
 const { boxFetcher, boxSite } = await import('./edge.mjs')
-const relay = projectRelay({ store, projects: proj, box, boxFetch: boxFetcher(cfg), siteHostOf: (p) => boxSite(cfg, p).host, log: () => {} })
-const sent = await relay.message(user, id, 'hello coordinator').catch(e => ({ error: e.message }))
-check('relay: message delivered into a coordinator session', sent.delivered === true && /^session-/.test(sent.coordinatorSession ?? ''), JSON.stringify(sent))
-const again = await relay.message(user, id, 'second message').catch(e => ({ error: e.message }))
-check('relay: second message reuses the same session', again.coordinatorSession === sent.coordinatorSession, JSON.stringify(again))
+const relay = projectRelay({ projects: proj, box, boxFetch: boxFetcher(cfg), siteHostOf: (p) => boxSite(cfg, p).host, edgeHost: cfg.publicHost, log: () => {} })
+const sent = await relay.message(user, id, 'hello coordinator', { messageId: 'e2e-1' }).catch(e => ({ error: e.message }))
+check('relay: the project box stores the message as a Superagent Trigger', sent.delivered === true && sent.result === 'stored', JSON.stringify(sent))
+const again = await relay.message(user, id, 'hello coordinator', { messageId: 'e2e-1' }).catch(e => ({ error: e.message }))
+check('relay: a retry with the same message id is a duplicate', again.result === 'duplicate', JSON.stringify(again))
 const pbox = (await store.listBoxes()).find(b => b.email === `project:${id}`)
 const role = (await (await e2b.Sandbox.connect(pbox.id)).commands.run("head -1 /root/.mumbo/agents/AGENTS.md; tr '\\0' '\\n' < /proc/$(pgrep -f 'apps/cli/src/bin.ts' | head -1)/environ | grep DSH_AGENTS_HOME")).stdout
 check('project box runs dsh with the coordinator role', role.includes('# Project coordinator') && role.includes('DSH_AGENTS_HOME=/root/.mumbo/agents'), JSON.stringify(role))
