@@ -636,6 +636,10 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
   - on first load, if no Session is open, open `mumbo` with `ctx.uiWorkspace.openSession`;
   - never take over a Session the person chose.
   - Pinning alone puts it first in the sidebar, so it needs no new sidebar slot.
+- **Never a blank row, a small harness change.**
+  - Today the Web treats a Session with no turns as the Workspace's temporary blank row. A fresh Mumbo would be hidden from the pinned group until its first message, and "New Session" would land in it.
+  - Change: a Session that is pinned, or whose title was set explicitly (a user-sourced `session/title`), is never treated as blank.
+  - Rejected: a synthetic first turn. It would put content no one wrote into the person's record.
 - **Archive guard, a small harness addition.**
   - Archiving through the Web's "stop and archive" passes `stopActivity`, which also deletes every schedule aimed at the Session. An accidental archive would silently drop Mumbo's standing tasks.
   - Add one veto point that `workspaceRegistry.archiveSession` checks before anything else, with or without `stopActivity`. The plugin refuses `mumbo`, and the Web shows the refusal as it shows any failed archive.
@@ -726,7 +730,8 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
   - It is the same origin as the app, so `frame-ancestors 'self'` and the Origin checks hold unchanged, and no CSP change is needed.
   - It has no `sandbox` attribute, which would add nothing for a same-origin page.
 - **Browser** is the same live view with Chrome in front.
-  - Each time the tab is shown, one owner-only Host call brings Chrome's window to the front, maximized on display `:1`, and starts Chrome if it isn't running. `xdotool` is already in the image for computer use.
+  - Each time the tab is shown, one owner-only Host call brings Chrome's window to the front, maximized on display `:1` (`wmctrl`).
+  - It never starts Chrome: the restart loop (B18) keeps Chrome running, and starting it from the dsh process would run it as root.
   - So "Browser" is the desktop showing your browser.
   - Rejected: a CDP screencast of the page. It shows no tabs, address bar, sign-in pop-ups, permission prompts or file pickers, and it needs the client to reach CDP, which agent containment is taking away. It would also carry every keystroke, passwords included, as CDP input.
   - Rejected: cropping the stream to one window. No VNC server here does that.
@@ -807,7 +812,7 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
   - read `/proc/<dsh pid>/environ` and `/root/dsh.log`;
   - connect to `9222`, `envd`, the VNC port, or the X display;
   - write the Chrome policy file, or anything under `/root/.mumbo`;
-  - become root.
+  - become root, including by planting a symlink under `/home/browser` or `/root/projects` that the root setup in the start script follows. Root operations on paths a non-root user owns refuse to follow symlinks, or run as that user.
 - **Also project boxes.** This satisfies section 2's requirement for project boxes before a second member (B12).
 
 **B25, browser-level denials** (`@mumbo/browser-consent` and Chrome policy):
@@ -817,7 +822,18 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
   - The list is config, and the edge writes these defaults.
 - **The check runs before and after every browser tool call.** A call whose target, or whose tab after the call, is on a denied URL is refused, and its result (snapshot, screenshot, text) is replaced by the refusal. This covers a navigation, or a click that lands there, and a read while the person has that page open.
 - **Page script always asks,** as today: `browser_evaluate` and `browser_run_code_unsafe` ask even on allowed sites, with the script shown. A script can read an autofilled password or card number from a form field.
-  - Add a test that the page snapshot shows a filled password field masked.
+- **Snapshots never carry secrets.** Playwright's page snapshot (`toAriaNode` in `playwright-core`) writes every field's value, passwords included. Once Chrome fills a login form, the next snapshot (a read, so no ask) would send the password to the model provider and into the Session log.
+  - A `pnpm` patch to `playwright-core` (`patchedDependencies`, as the repository already does for other packages) writes a fixed `••••` instead of the value for any field that is:
+    - `type=password`;
+    - in Chrome's autofilled state (`:autofill`);
+    - or one whose `autocomplete` names a password, a one-time code or a card (`current-password`, `new-password`, `one-time-code`, `cc-*`).
+  - The patch must apply, or install fails. An end-to-end test asserts the masking. Offer it upstream to Playwright, which is the way off the patch.
+  - Playwright MCP's output directory moves out of the workspace into a root-only directory (B24's file allowlist excludes it), and out of backups.
+- **Network request details are denied.** A request's details carry its `Cookie` header and form body, so a login's password or a session cookie would reach the model.
+  - `browser_network_request` is refused outright.
+  - The request list stays a read only if it shows no headers or bodies; otherwise it is refused too.
+- **Before B18 deploys** (Chrome with every sync type), the masking patch, the output directory and the network-request denial are live. That doesn't wait for B24, but nothing sends a saved password to a model provider in the meantime.
+- **Today's Chromium** may already hold passwords the founder saved. Until the masking is live, a managed policy for it (`PasswordManagerEnabled: false`, `AutofillCreditCardEnabled: false`) stops autofill from putting them into snapshots.
 - **Chrome's `URLBlocklist`** blocks the internal pages for everyone in the box's Chrome, the person included, because computer use drives Chrome without going through browser-consent:
   - `chrome://password-manager`, `chrome://settings/passwords`, `chrome://settings/payments`, `chrome://settings/autofill`, `chrome://settings/addresses`;
   - `chrome://sync-internals`, `chrome://autofill-internals`, `chrome://password-manager-internals`.
