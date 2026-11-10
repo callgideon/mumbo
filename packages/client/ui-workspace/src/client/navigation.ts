@@ -129,6 +129,13 @@ export interface UiWorkspace {
    */
   unpinSession(sessionId: SessionId): Promise<void>
   /**
+   * Hide a Session from the Workspace browser's grouped and flat lists while the registration lasts; search still finds
+   * it, and New Session never reuses it as a Workspace blank. Registrations of the same id stack.
+   * @param sessionId - Session to hide.
+   * @returns idempotent disposer that ends this registration.
+   */
+  hideSession(sessionId: SessionId): () => void
+  /**
    * Open the Host-native directory picker.
    * @returns the selected directory, or null when cancelled.
    */
@@ -192,6 +199,9 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   private restorationNavigation: AbortSignal | undefined
   private readonly restorationSource = createSnapshotStore<UiWorkspaceRestoration>('pending', { flush: 'sync' })
   readonly restoration: ObservableSnapshot<UiWorkspaceRestoration> = this.restorationSource
+  private readonly hiddenSource = createSnapshotStore<readonly SessionId[]>([])
+  /** Hidden Session ids, one per live {@link UiWorkspace.hideSession} registration; the browser lists none of them. */
+  readonly hiddenSessionIds: ObservableSnapshot<readonly SessionId[]> = this.hiddenSource
 
   /**
    * @param ctx - Client root Context.
@@ -256,7 +266,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       const summary = sessions.byId[id]
       const listed = summary?.projectionValues?.agentPreset
       return summary !== undefined && blankRow(summary, pinned) && summary.cwd === workspace.path
-        && workspace.sessionIds.includes(id) && !archived.includes(id)
+        && workspace.sessionIds.includes(id) && !archived.includes(id) && !this.hiddenSource.getSnapshot().includes(id)
         && (options.agentPreset === undefined || typeof listed !== 'string' || listed === options.agentPreset)
     })
     return this.createNamed({
@@ -435,6 +445,18 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     const result = await this.directoryPicker.createDirectory(path, name)
     if (!result.ok) throw new DirectoryBrowseError(result.error)
     return result.value
+  }
+
+  hideSession(sessionId: SessionId): () => void {
+    this.hiddenSource.set([...this.hiddenSource.getSnapshot(), sessionId])
+    let hidden = true
+    return () => {
+      if (!hidden) return
+      hidden = false
+      const ids = this.hiddenSource.getSnapshot()
+      const index = ids.indexOf(sessionId)
+      this.hiddenSource.set(ids.filter((_, position) => position !== index))
+    }
   }
 
   whenAccess(workspaceId: WorkspaceId, action: RemoteEndpoint, callback: () => AccessEffect): () => void {

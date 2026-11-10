@@ -255,6 +255,215 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
 </div>
 `;
 
+exports[`sidebar shell snapshots > renders a Session row above Plugins, selected while its Session is open, in the column, the rail, and the drawer > session row drawer 1`] = `
+<nav
+  aria-label="Global panels"
+  class="panelList"
+>
+  <div
+    class="panelEntry panelEntryWide panelEntryActive"
+  >
+    <button
+      aria-current="page"
+      aria-label="Mumbo"
+      class="panelRow"
+      type="button"
+    >
+      <span
+        aria-hidden="true"
+        class="panelGlyph"
+      >
+        <div
+          data-slot="sidebar.panellist"
+          style="display: contents;"
+        >
+          <svg
+            aria-hidden="true"
+            data-content="b22c03dd"
+            data-icon="dsw-icon-sparkle-regular"
+            height="16"
+            width="16"
+          />
+        </div>
+      </span>
+      <span
+        class="panelTitle wide"
+      >
+        Mumbo
+      </span>
+    </button>
+  </div>
+  <div
+    class="panelEntry panelEntryWide"
+  >
+    <button
+      aria-label="Plugins"
+      class="panelRow"
+      type="button"
+    >
+      <span
+        aria-hidden="true"
+        class="panelGlyph"
+      >
+        <div
+          data-slot="sidebar.panellist"
+          style="display: contents;"
+        >
+          <svg
+            aria-hidden="true"
+            data-content="d251ef04"
+            data-icon="dsw-icon-plugin-pinwheel-outline-regular"
+            height="16"
+            width="16"
+          />
+        </div>
+      </span>
+      <span
+        class="panelTitle wide"
+      >
+        Plugins
+      </span>
+    </button>
+  </div>
+</nav>
+`;
+
+exports[`sidebar shell snapshots > renders a Session row above Plugins, selected while its Session is open, in the column, the rail, and the drawer > session row expanded 1`] = `
+<nav
+  aria-label="Global panels"
+  class="panelList"
+>
+  <div
+    class="panelEntry panelEntryWide panelEntryActive"
+  >
+    <button
+      aria-current="page"
+      aria-label="Mumbo"
+      class="panelRow"
+      type="button"
+    >
+      <span
+        aria-hidden="true"
+        class="panelGlyph"
+      >
+        <div
+          data-slot="sidebar.panellist"
+          style="display: contents;"
+        >
+          <svg
+            aria-hidden="true"
+            data-content="b22c03dd"
+            data-icon="dsw-icon-sparkle-regular"
+            height="16"
+            width="16"
+          />
+        </div>
+      </span>
+      <span
+        class="panelTitle wide"
+      >
+        Mumbo
+      </span>
+    </button>
+  </div>
+  <div
+    class="panelEntry panelEntryWide"
+  >
+    <button
+      aria-label="Plugins"
+      class="panelRow"
+      type="button"
+    >
+      <span
+        aria-hidden="true"
+        class="panelGlyph"
+      >
+        <div
+          data-slot="sidebar.panellist"
+          style="display: contents;"
+        >
+          <svg
+            aria-hidden="true"
+            data-content="d251ef04"
+            data-icon="dsw-icon-plugin-pinwheel-outline-regular"
+            height="16"
+            width="16"
+          />
+        </div>
+      </span>
+      <span
+        class="panelTitle wide"
+      >
+        Plugins
+      </span>
+    </button>
+  </div>
+</nav>
+`;
+
+exports[`sidebar shell snapshots > renders a Session row above Plugins, selected while its Session is open, in the column, the rail, and the drawer > session row rail 1`] = `
+<nav
+  aria-label="Global panels"
+  class="panelList"
+>
+  <div
+    class="panelEntry panelEntryActive"
+  >
+    <button
+      aria-current="page"
+      aria-label="Mumbo"
+      class="panelRow"
+      type="button"
+    >
+      <span
+        aria-hidden="true"
+        class="panelGlyph"
+      >
+        <div
+          data-slot="sidebar.panellist"
+          style="display: contents;"
+        >
+          <svg
+            aria-hidden="true"
+            data-content="b22c03dd"
+            data-icon="dsw-icon-sparkle-regular"
+            height="18"
+            width="18"
+          />
+        </div>
+      </span>
+    </button>
+  </div>
+  <div
+    class="panelEntry"
+  >
+    <button
+      aria-label="Plugins"
+      class="panelRow"
+      type="button"
+    >
+      <span
+        aria-hidden="true"
+        class="panelGlyph"
+      >
+        <div
+          data-slot="sidebar.panellist"
+          style="display: contents;"
+        >
+          <svg
+            aria-hidden="true"
+            data-content="d251ef04"
+            data-icon="dsw-icon-plugin-pinwheel-outline-regular"
+            height="18"
+            width="18"
+          />
+        </div>
+      </span>
+    </button>
+  </div>
+</nav>
+`;
+
 exports[`sidebar shell snapshots > renders the collapsed rail after the crossfade settles, in place 1`] = `
 <div
   data-slot="sidebar"

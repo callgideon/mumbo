@@ -63,6 +63,22 @@ export function blankRowList(list: SessionListState, pinnedSessionIds: readonly 
   return { ...list, byId }
 }
 
+/**
+ * Drop hidden Sessions from the list the grouped and flat views derive from.
+ * @param list - Host Session list snapshot.
+ * @param hiddenSessionIds - Sessions `uiWorkspace.hideSession` hides.
+ * @returns the same snapshot when it lists none of them, otherwise a copy without them.
+ */
+export function withoutHidden(list: SessionListState, hiddenSessionIds: readonly SessionId[]): SessionListState {
+  const hidden = new Set(hiddenSessionIds.filter(id => list.byId[id] !== undefined))
+  if (hidden.size === 0) return list
+  return {
+    ...list,
+    ids: list.ids.filter(id => !hidden.has(id)),
+    byId: Object.fromEntries(Object.entries(list.byId).filter(([id]) => !hidden.has(id as SessionId))),
+  }
+}
+
 function mainSessionId(list: SessionListState): SessionId | undefined {
   return Object.values(list.byId)
     .find(session => (session.retainedBy.mainView ?? 0) > 0)?.id

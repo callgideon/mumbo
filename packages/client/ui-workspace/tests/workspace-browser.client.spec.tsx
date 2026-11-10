@@ -154,6 +154,7 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
     createWorkspace: vi.fn(async () => workspace('created', [])),
     useDirectoryFlow: bindSnapshotSelector({ getSnapshot: () => true, subscribe: () => () => {} }),
     useHostInfo: selector => selector({ home: undefined, isLoopback: true }),
+    useHiddenSessions: select => select([]),
     renderSlot: renderDirectoryFlowOnly,
     renderFactorySlot: renderMenuButton,
     t,
@@ -2857,5 +2858,47 @@ describe('Workspace tree grouping', () => {
     fireEvent.dragEnd(alpha)
     expect(b.props.insertWorkspaceBefore).toHaveBeenCalledOnce()
     expect(b.props.insertWorkspaceBefore).toHaveBeenCalledWith(wid('alpha'), wid('gamma'))
+  })
+})
+
+describe('hidden Sessions', () => {
+  const rowKeys = () => screen.getAllByRole('treeitem').map(row => row.getAttribute('data-row-key'))
+
+  it.each(['workspace', 'flat'] as const)('leaves a hidden Session out of the %s list, including while it is open, and lists it again once unhidden', (mode) => {
+    const preferences = createWorkspaceViewStore().create()
+    preferences.actions.setGroupBy(mode)
+    preferences.actions.setGroupExpanded('home', true)
+    const hidden = createSnapshotStore<readonly SessionId[]>([sid('mumbo')])
+    mount({
+      useSessions: hook(sessionState([summary('mumbo', 3), summary('side', 2), summary('loose', 1)], { main: sid('mumbo') })),
+      useWorkspaces: hook(workspaceState([workspace('home', ['mumbo', 'side'])])),
+      useHiddenSessions: bindSnapshotSelector(hidden),
+    })
+    // An accounted hidden member does not fall into Ungrouped either.
+    expect(rowKeys()).toEqual(mode === 'flat'
+      ? ['session:side', 'session:loose']
+      : ['workspace:home', 'session:side', `workspace:${UNGROUPED_KEY}`])
+    act(() => { hidden.set([]) })
+    expect(rowKeys()).toEqual(mode === 'flat'
+      ? ['session:mumbo', 'session:side', 'session:loose']
+      : ['workspace:home', 'session:mumbo', 'session:side', `workspace:${UNGROUPED_KEY}`])
+  })
+
+  it('still finds a hidden Session through search and opens it without revealing a row', async () => {
+    const open = vi.fn()
+    const b = mount({
+      useSessions: hook(sessionState([summary('mumbo', 2, { displayTitle: 'Mumbo' }), summary('side', 1)])),
+      useWorkspaces: hook(workspaceState([workspace('home', ['mumbo', 'side'])])),
+      useHiddenSessions: select => select([sid('mumbo')]),
+      open,
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Search sessions' }))
+    fireEvent.change(screen.getByPlaceholderText('Search session names'), { target: { value: 'mumbo' } })
+    await act(async () => { await Promise.resolve() })
+    const result = within(screen.getByRole('tree', { name: 'Search results' })).getByRole('treeitem')
+    expect(result.textContent).toContain('Mumbo')
+    fireEvent.click(result)
+    expect(open).toHaveBeenCalledExactlyOnceWith(sid('mumbo'))
+    expect(b.store.getSnapshot().groupExpansion).toEqual({})
   })
 })

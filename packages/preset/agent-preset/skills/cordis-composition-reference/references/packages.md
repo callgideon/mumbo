@@ -342,7 +342,7 @@ Every package below exports a Cordis plugin that a bundle patch can name in a Lo
 
 | Package | Config | Description |
 |---|---|---|
-| `@mumbo/assistant` | yes | Mumbo, the person's always-present assistant Session: pinned, unarchivable, instructed, and opened first |
+| `@mumbo/assistant` | yes | Mumbo, the person's always-present assistant Session: its own sidebar entry, unarchivable, instructed, and opened first |
 | `@mumbo/box-links` | yes | Box links, and the Desktop and Browser tabs that show the box desktop live view |
 | `@mumbo/browser-consent` | yes | Reads free, writes ask, denied pages never: consent for browser and desktop actions in a person's own signed-in Chromium |
 | `@mumbo/edge-member` | yes | Project members admitted from an edge-signed header as non-owner DeepSeek Harness principals |
