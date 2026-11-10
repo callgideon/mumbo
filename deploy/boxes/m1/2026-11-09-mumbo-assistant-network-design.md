@@ -398,7 +398,7 @@ Every node can be driven by a higher agent or an external AI. **[founder]**
 - **Where.** On the edge's MCP endpoint, which stage 8 already uses to serve sandbox tools with the box token.
   - External callers cannot reach a box today: oauth2-proxy has no bearer pass-through, and the router strips `Authorization`.
   - The door adds routes on the edge that accept bearer keys and resume the target box when needed. **[my call]**
-- **Keys** **[founder: jumbo is dead; mumbo takes over]**. The edge mints and verifies its own keys in its Postgres database, with no runtime dependency on jumbo. jumbo's key model is copied from its code (`core/db/key_format.py`, `core/db/common.py`, `modules/mcp/server.py`):
+- **Keys** **[founder: jumbo is dead; mumbo takes over]**. The edge mints and verifies its own keys in its store (the Valkey that already holds boxes and projects), with no runtime dependency on jumbo. jumbo's key model is copied from its code (`core/db/key_format.py`, `core/db/common.py`, `modules/mcp/server.py`):
   - format: `mumbo_pat_` + 32 base62 characters + a 6-character CRC32 checksum; stored as a SHA-256 hash;
   - scopes `read`, `prompt` and `workspace`; optional expiry; revocation;
   - only a person's own keys work; assistant and session keys are refused; only a person, signed in at the edge, can mint keys;
@@ -420,6 +420,69 @@ Every node can be driven by a higher agent or an external AI. **[founder]**
 - **No approvals through the door.** **[my call]**
 - Every call is logged with its key id and is visible to the node above.
 - Context sent by the founder's own Claude agents to a project is a primary use, not an edge case. **[founder]**
+
+### Building the door, M2 and M3 **[founder, 2026-11-10: "can you connect to the MCP of my personal assistant mumbo ... have 2-way discussion ... assign it work ... guide it to build itself and review work"; my call on the how]**
+
+**What exists** (`boxes/production`, 2026-11-10):
+- The edge's model host serves an MCP endpoint for boxes, authenticated by box token and source address: `sandbox_*`, `project_create`, `project_list`, `project_add_member` and `project_message`.
+- `project_message` (`projects.mjs` `projectRelay`) signs in to the project box's dsh and queues `[from <member>] <text>` into a plain dsh coordinator Session. It doesn't reach superagent.
+- `@mumbo/mcp` is an in-box MCP route on dsh's web server, driving one assistant Session for allowlisted principals behind a shared key: `agent_send`, `agent_read` with a 40 s long-poll, `needs_you`, `task_reply`, `task_status`, `task_result`, `runs_halt` and `runs_resume`. Boxes don't compose it.
+- Nothing lets a caller outside reach any of this: the public host goes through the sign-in proxy, and the model host only admits boxes.
+
+**Design:**
+- **Where the door is: `https://app.mumbo.si/mcp`.**
+  - An ALB rule sends that path on the public host straight to the edge's model listener, past the sign-in proxy, so no new host name and no DNS change is needed.
+  - The door authenticates only by `Authorization: Bearer mumbo_pat_…` and ignores cookies, so a browser carrying the sign-in cookie can't use it. A cross-site request has no key.
+  - The ALB idle timeout is at least 60 s, for the 40 s long-poll.
+- **Keys:**
+  - minted by the person on the edge's home page, which shows the key once and lists and revokes keys;
+  - each key has a name (such as "laptop Claude Code"), scopes, optional expiry and the projects it may reach;
+  - stored as a SHA-256 hash in the edge store;
+  - every call is logged with the key's id and name, rate-limited per key, and charged to the person's daily budget when it causes model turns.
+- **Talking to Mumbo** goes through `@mumbo/mcp`, composed in person boxes and pointed at the Session `mumbo`.
+  - It gets a setting that names an existing Session instead of creating its own.
+  - Its key is derived per box from the edge key, so nothing new is stored.
+  - The door calls its tools through the client proxy, as `projectRelay` reaches a box.
+  - A message from the door shows in Mumbo as from the person, with the key's name ("via laptop Claude Code").
+- **What the door exposes** (the table above, narrowed):
+  - `agent_send` and `agent_read` (prompt);
+  - `needs_you` (read). It lists tool approvals and plan reviews only as information.
+  - `task_reply` (prompt) answers **questions only**. Tool approvals and plan reviews are refused through the door, which keeps "no approvals through the door".
+  - `task_status` and `task_result` (read). `task_result`'s `git diff` runs as `agent` (B24).
+  - `runs_halt` and `runs_resume` are not on the door: stopping a whole box is for a person.
+  - `project_list`, `project_status` and `project_message` (with `kind: context | request`), within the key's projects;
+  - `task_start` and `task_stop` (workspace) for one Ticket. `task_start` is an explicit request Trigger, which superagent's Eval turns into a Ticket.
+- **M2, down:** a project's coordinator is superagent, so `project_message` delivers into superagent, not a plain Session.
+  - A new superagent Source kind, `relay` (UPSTREAM S9), takes the edge's relayed messages as Triggers: the member as actor, human, explicit for `request` and implicit for `context`, with the hop chain.
+  - Policy's allowlist decides as for any sender (S3). The edge posts to the box as the member (`x-mumbo-member`).
+- **M2, up:** the `relay` Source is two-way. A coordinator's reply on a relay Thread, through its Outbox, goes back to the member's Mumbo as one message: "[project X] …".
+  - The edge offers project boxes one tool for this, `report_to_member`. It accepts only a member of that project and lands in that person's `mumbo` Session.
+  - Mumbo's instructions say how to file a dump to a project (`project_message`, kind `context`) and where reports arrive.
+- **M3, workers:** superagent gets a pluggable Executor port, and an external-worker Executor whose Assignments are leased through the door.
+  - `task_claim`, `task_report` and `task_result`.
+  - A 10-minute lease, renewed by any call on the Ticket.
+  - Fencing: a per-Assignment edge token for GitHub and model calls, revoked when the Assignment is replaced (section 8).
+  - Done means a reviewer's verdict on the exact head SHA plus CI.
+
+**Tasks** (mumbo-impl unless marked; B31, B33, B35 and R-door start in parallel):
+
+| Task | Contents | Depends on |
+|---|---|---|
+| **B31** door keys | `mumbo_pat_` minting and verification, ported from jumbo's `key_format.py`: 32 base62 characters plus a 6-character base62 CRC32, SHA-256 at rest. Scopes, expiry, a project list per key, revocation, jumbo's error codes, and the home-page key manager (create shown once, list, revoke). Tests | — |
+| **R-door** (mumbo) | ALB rule `app.mumbo.si` + `/mcp*` to the edge's model target group, past oauth2-proxy; ALB idle timeout of 60 s or more | — |
+| **B32** door endpoint | `/mcp` on the model listener: bearer only, cookies ignored, a per-key rate limit, a log line per call (key id and name, tool, outcome), budget charging, and scope and project checks before any tool. Ships with `whoami` and `project_list` | B31, R-door |
+| **B33** door to Mumbo | `@mumbo/mcp`: a setting for an existing Session (`mumbo`) and its key from a file the edge writes, derived per box. Person-box overlay row. Door tools `agent_send`, `agent_read`, `needs_you`, `task_reply` (questions only), `task_status` and `task_result`, forwarded through the client proxy. `runs_*` stay off the door. The B24 gate lists its tools, and `task_result`'s git runs as `agent` | B32 (the in-box half can start now) |
+| **B34** door to projects | `project_status` (brief, Tickets and stages, what waits on the person, read through the project box's superagent API as the member), `project_message` with `kind`, `task_start` and `task_stop`, all within the key's projects | B32, B35 |
+| **B35** M2 down | Superagent `relay` Source (UPSTREAM S9): edge-posted messages become Triggers with the member as actor and the hop chain; `request` is explicit, `context` implicit. `projectRelay` posts there instead of the plain coordinator Session. Tests through the real Source | — |
+| **B36** M2 up | `relay` Thread replies go back through the edge (`report_to_member`, project boxes only, members only) into the person's `mumbo` Session as "[project X] …". Mumbo's instructions are updated for filing and reports | B35, B17 |
+| **B37** M3 workers | The Executor port and the external-worker Executor: leases, renewal, fencing tokens, `task_claim`, `task_report` and `task_result` on the door; the reviewer Ticket. The acceptance is M3's "Done when" | B34 |
+
+**Acceptance for the door** (B31–B34): the founder mints a key on the home page and points Claude Code's `mumbo` entry at `https://app.mumbo.si/mcp`. From Claude Code:
+- they send Mumbo a message and read its reply;
+- they answer a question Mumbo asked, and an approval is refused;
+- they read a project's status and file context to the mumbo project, which arrives as a superagent Trigger;
+- a revoked key stops working at once;
+- a key without `prompt` can read but not send.
 
 ## 11. Liveness, recovery and backups **[my call]**
 
@@ -882,9 +945,11 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
     - The person keeps the desktop terminal, as `xsession`.
     - **What remains:** a process on the display can still drive Chrome's window without consent, because X11 has no isolation between clients. Getting one needs a consented computer-use action. The X SECURITY extension's untrusted clients are a later option.
   - **No other user can take over dsh's or the live view's port.**
-    - Whatever answers on `$ip:3080` or `$ip:6080` serves pages on the app's own origin. If dsh or KasmVNC died, a process that bound the port first could serve script there, or register a service worker that outlives the box in the person's browser.
-    - So `net.ipv4.ip_unprivileged_port_start=6081`: only root, or a binary given `cap_net_bind_service` (`Xkasmvnc`), may bind below it. Chrome's `9222` stays above it.
-    - Escape test: `agent` binding either port fails.
+    - Whatever answers on dsh's or the live view's port serves pages on the app's own origin. If dsh or KasmVNC died, a process that bound the port first could serve script there, or register a service worker that outlives the box in the person's browser.
+    - So both move below 1024, where only root or a binary given `cap_net_bind_service` may bind: dsh on `$ip:880`, KasmVNC (`Xkasmvnc`, given that capability) on `$ip:881`. The default unprivileged floor stays, so dev servers keep their usual ports (3000, 4200, 5000, 5173).
+    - The edge keeps both numbers in one place. A box record carries its ports, and records without them mean the old `3080`/`6080` until no old-template box remains.
+    - First check that E2B's client proxy forwards to a port below 1024. If it doesn't: a floor of 2990, with the listeners on 2980 and 2981.
+    - Escape test: `agent` binding either new port fails, and binding 3000 or 5173 works.
   - **`/proc` is mounted with `hidepid=2`** (or `hidepid=invisible`), so one user can't see another's processes or their command lines, such as the text `xdotool type` was given.
   - **The first-run welcome's marker and message** move to an `agent`-readable place, such as `/home/agent/.mumbo-welcome`, because hooks run as `agent`. A root hook would be a model-reachable root path.
   - **Playwright MCP's output directory** is `browsermcp`-owned, `0700`, and outside backups.
