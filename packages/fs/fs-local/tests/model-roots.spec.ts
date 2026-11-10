@@ -147,7 +147,7 @@ describe.runIf(process.platform === 'linux')('model paths under roots', () => {
     for (const requested of [
       'link/directory/../../projects/notes.txt', 'link/missing/../../projects/notes.txt', 'link/key/../../projects/notes.txt',
       'link/directory/deep/../../../projects/notes.txt', 'link/directory/nodeep/../../../projects/notes.txt',
-      `${outside}/directory/../../projects/notes.txt`, `${outside}/missing/../../projects/notes.txt`, `/..${workspace}/notes.txt`,
+      `${outside}/directory/../../projects/notes.txt`, `${outside}/missing/../../projects/notes.txt`,
     ]) {
       const written = requested.startsWith('/') ? requested : `${workspace}/${requested}`
       expect(await rejection(fs.resolveModelPath(requested)), requested).toEqual(refusal(written))
@@ -158,6 +158,30 @@ describe.runIf(process.platform === 'linux')('model paths under roots', () => {
     await symlink(join(workspace, 'real', 'inner'), join(workspace, 'inner-link'))
     expect(await fs.readText(await fs.resolveModelPath('real/inner/../../notes.txt'))).toBe('inside')
     expect(await fs.readText(await fs.resolveModelPath('inner-link/../beside.txt'))).toBe('beside')
+    // So does ".." from a directory on the way to a root, which tells nothing about what lies outside.
+    expect(await fs.readText(await fs.resolveModelPath(`/..${workspace}/notes.txt`))).toBe('inside')
+  })
+
+  it('gives a final link out of the roots the same refusal whether its target exists or not, and follows one inside', async () => {
+    await symlink(join(outside, 'key'), join(workspace, 'present'))
+    await symlink(join(outside, 'nokey'), join(workspace, 'dangling'))
+    for (const name of ['present', 'dangling']) expect(await rejection(fs.resolveModelPath(name)), name).toEqual(refusal(join(workspace, name)))
+    // A dangling link inside the roots leads to the file a write through it creates.
+    await symlink(join(workspace, 'later.txt'), join(workspace, 'pending'))
+    expect(await fs.resolveModelPath('pending')).toEqual({ targetKey: join(workspace, 'later.txt'), displayPath: join(workspace, 'pending') })
+    // A relative link resolves from its own directory; a loop and a directory the process cannot search fail as the kernel's lookup would.
+    await mkdir(join(workspace, 'sub'))
+    await symlink('../notes.txt', join(workspace, 'sub', 'relative'))
+    expect(await fs.readText(await fs.resolveModelPath('sub/relative'))).toBe('inside')
+    expect(await rejection(fs.resolveModelPath(' '))).toEqual(new FsError('file_path must be a non-empty string', 'FS_NOT_FOUND'))
+    await symlink('loop', join(workspace, 'loop'))
+    expect(await rejection(fs.resolveModelPath('loop'))).toEqual(new FsError(`cannot resolve "${join(workspace, 'loop')}": too many levels of symbolic links`, 'FS_NOT_FOUND'))
+    await chmod(join(workspace, 'sub'), 0o000)
+    try {
+      await expect(fs.resolveModelPath('sub/relative')).rejects.toMatchObject({ code: 'EACCES' })
+    } finally {
+      await chmod(join(workspace, 'sub'), 0o755)
+    }
   })
 
   it('refuses a write target that does not exist yet under a symbolically linked parent', async () => {
@@ -420,7 +444,46 @@ describe.runIf(process.platform === 'linux')('read-only roots', () => {
   })
 })
 
+/**
+ * Start a process that keeps repointing the link `<workspace>/l` between an empty directory inside the roots and the
+ * secret directory, each time by renaming a new link over it.
+ * @returns a stopper that ends the repointing and waits for the process to exit.
+ */
+function repointer(directory: string, secretDirectory: string): () => Promise<void> {
+  const script = [
+    "const fs = require('node:fs'); const path = require('node:path')",
+    'const [dir, secret] = process.argv.slice(1)',
+    "const decoy = path.join(dir, 'decoy'), link = path.join(dir, 'l'), next = path.join(dir, 'l.next')",
+    'fs.mkdirSync(decoy)',
+    'for (;;) { for (const target of [secret, decoy]) { try { fs.symlinkSync(target, next); fs.renameSync(next, link) } catch {} } }',
+  ].join('\n')
+  const child = spawn(process.execPath, ['-e', script, directory, secretDirectory], { stdio: 'ignore' })
+  return () => new Promise((resolve) => { child.once('exit', () => { resolve() }); child.kill('SIGKILL') })
+}
+
 describe.runIf(process.platform === 'linux')('model roots against a racing link swap', () => {
+  it('tells nothing about names outside the roots through a link repointed while a path resolves', async () => {
+    const fs = await mount({ cwd: workspace, modelRoots: [workspace, scratch] })
+    await mkdir(join(outside, 'directory'))
+    const stop = repointer(workspace, outside)
+    const outcomes = { back: new Set<string>(), file: new Set<string>() }
+    const outcome = (promise: Promise<unknown>) => promise.then(() => 'resolved', (error: unknown) => error instanceof FsError ? `${error.code} ${error.message}` : String(error))
+    try {
+      const deadline = Date.now() + 4_000
+      while (Date.now() < deadline) {
+        // Through the secret directory the walk would come back into the roots only because `directory` exists there.
+        outcomes.back.add(await outcome(fs.resolveModelPath('l/directory/../../projects/notes.txt')))
+        // Through the secret directory `key` is a file, which a missing name is not.
+        outcomes.file.add(await outcome(fs.resolveModelPath('l/key/x')))
+      }
+    } finally {
+      await stop()
+    }
+    expect([...outcomes.back].filter(text => text === 'resolved')).toEqual([])
+    expect([...outcomes.file].filter(text => text.includes('not a directory'))).toEqual([])
+    expect(outcomes.back.size + outcomes.file.size).toBeGreaterThan(2)
+  })
+
   it('never reads or lists the secret through a link swapped in after resolution', async () => {
     const fs = await mount({ cwd: workspace, modelRoots: [workspace, scratch] })
     await writeFile(join(outside, 'key'), 'secret')

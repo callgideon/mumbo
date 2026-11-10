@@ -13,7 +13,7 @@ import { constants as bufferConstants } from 'node:buffer'
 import { once } from 'node:events'
 import { realpathSync, statSync } from 'node:fs'
 import type { Stats } from 'node:fs'
-import { realpath } from 'node:fs/promises'
+import { lstat, readlink } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { watch } from 'chokidar'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -328,58 +328,72 @@ export class LocalFileSystem extends FileSystem {
   }
 
   /**
-   * Resolve like {@link resolve}, then refuse a real path outside every configured model root.
+   * Resolve like {@link resolve}, then refuse a real path outside every configured model root. With roots, the path is
+   * resolved by {@link walkModelPath}, so whether it leads outside, and whether it fails, comes from one walk that never
+   * examines a name outside the roots.
    * @param path - the model-supplied path; relative paths resolve against `opts.cwd`.
    * @param opts - optional cwd override and cancellation signal.
    * @returns the stable target, under a model root when roots are configured.
    */
   override async resolveModelPath(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget> {
     const roots = this.modelRoots
+    if (roots === undefined) return this.resolve(path, opts)
+    if (opts?.signal?.aborted) throw new FsError('resolve aborted', 'FS_ABORTED')
+    if (path.trim().length === 0) throw new FsError('file_path must be a non-empty string', 'FS_NOT_FOUND')
     const displayPath = localDisplayPath(opts?.cwd ?? this.config.cwd, expandHomePrefix(path))
-    // `..` steps back from where the path before it really is, so a walk that leaves the roots and comes back would
-    // resolve only when the directory it passed outside exists.
-    if (roots !== undefined && await this.parentStepLeavesRoots(roots, displayPath)) throw this.outsideRoots(roots, displayPath)
-    let target: FsTarget
-    try {
-      target = await this.resolve(path, opts)
-    } catch (error: unknown) {
-      // A failure for a path that leaves the roots, as written or through a link under a root, would tell the model
-      // whether that path exists and what it is.
-      if (roots !== undefined && !(error instanceof FsError && error.code === 'FS_ABORTED')
-        && (!this.underRoots(roots, displayPath) || await this.realLeavesRoots(roots, dirname(displayPath)))) {
-        throw this.outsideRoots(roots, displayPath)
-      }
-      throw error
-    }
-    if (roots !== undefined && !roots.some(root => isUnder(root.canonical, target.targetKey))) {
-      throw this.outsideRoots(roots, target.displayPath)
-    }
-    return target
+    const targetKey = await this.walkModelPath(roots, displayPath)
+    if (!roots.some(root => isUnder(root.canonical, targetKey))) throw this.outsideRoots(roots, displayPath)
+    return { targetKey: FsTargetKey(targetKey), displayPath }
   }
 
-  /** Whether some `..` segment of a path steps back from a prefix that {@link realLeavesRoots} places outside every root. */
-  private async parentStepLeavesRoots(roots: readonly ModelRoot[], displayPath: string): Promise<boolean> {
-    const segments = displayPath.split(sep)
-    for (let index = 1; index < segments.length; index++) {
-      if (segments[index] === '..' && await this.realLeavesRoots(roots, segments.slice(0, index).join(sep) || sep)) return true
-    }
-    return false
-  }
-
-  /** Whether the real path of `start`, or of its deepest existing ancestor when it does not resolve, is outside every root. */
-  private async realLeavesRoots(roots: readonly ModelRoot[], start: string): Promise<boolean> {
-    for (let path = start; ; path = dirname(path)) {
-      let real: string | undefined
-      try {
-        real = await realpath(path)
-      } catch (_absentOrNotDirectory) {
-        // This prefix does not resolve either; its parent decides.
-        /* v8 ignore next -- the filesystem root always realpaths, so the walk returns before it passes the root. */
-        if (dirname(path) === path) return false
+  /**
+   * Resolve an absolute path one name at a time from the filesystem root, following links and `..` as the kernel does,
+   * and refuse before examining any name that is neither under a root nor on the way to one. The same walk decides where
+   * the path leads and how it fails, so a link the model's shell swaps meanwhile changes only which way the walk goes:
+   * no outcome depends on what exists outside the roots. A missing name ends the walk with the rest appended, as a target
+   * to create; a final link is followed, dangling or not.
+   * @returns the real path the walk reached.
+   */
+  private async walkModelPath(roots: readonly ModelRoot[], displayPath: string): Promise<string> {
+    const notFound = (why: string) => new FsError(`cannot resolve "${displayPath}": ${why}`, 'FS_NOT_FOUND')
+    // Under a root by its real path, or a directory a root's configured or real spelling passes through.
+    const reachable = (path: string) =>
+      roots.some(root => isUnder(root.canonical, path) || isUnder(path, root.canonical) || isUnder(path, root.configured))
+    const names = (path: string) => path.split(sep).filter(name => name !== '' && name !== '.')
+    const pending = names(displayPath)
+    let real: string = sep
+    for (let links = 0, name = pending.shift(); name !== undefined; name = pending.shift()) {
+      if (name === '..') {
+        real = dirname(real)
         continue
       }
-      return !roots.some(root => isUnder(root.canonical, real))
+      const next = join(real, name)
+      if (!reachable(next)) throw this.outsideRoots(roots, displayPath)
+      let info: Stats
+      try {
+        info = await lstat(next)
+      } catch (error: unknown) {
+        const { code } = error as NodeJS.ErrnoException
+        if (code === 'ENOENT') {
+          if (pending.includes('..')) throw notFound('parent traversal crosses a missing directory')
+          return join(next, ...pending)
+        }
+        /* v8 ignore next -- a directory the walk entered became a file between two steps; the race has no deterministic test. */
+        if (code === 'ENOTDIR') throw notFound('a parent path segment is not a directory')
+        throw error
+      }
+      if (info.isSymbolicLink()) {
+        // The kernel's own limit on links followed in one lookup.
+        if (++links > 40) throw notFound('too many levels of symbolic links')
+        const target = await readlink(next)
+        pending.unshift(...names(target))
+        if (isAbsolute(target)) real = sep
+        continue
+      }
+      if (pending.length > 0 && !info.isDirectory()) throw notFound('a parent path segment is not a directory')
+      real = next
     }
+    return real
   }
 
   private outsideRoots(roots: readonly ModelRoot[], displayPath: string): FsError {
