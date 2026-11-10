@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-28-session-corpus-performance.zh.md)
-
 ## Problem
 
 Existing gates measure one long Session: [opening it](2026-09-04-session-open-performance-gate.md) or [continuing it](2026-09-06-backend-continuation-performance.md). Listing, content search, and fork scale with the whole corpus or with the source Session's length, and no gate covered a user with many long Sessions. A corpus of uniform small Sessions would understate the work, because real corpora are heavy-tailed.

@@ -751,7 +751,7 @@ describe('byte-bounded DeepSeek session-log upload', () => {
   })
 
   it('measures maxBytes in UTF-8 bytes', async () => {
-    const { ctx, session, full } = await unbounded('bounded-utf8', ['界'.repeat(100), '界'.repeat(100)])
+    const { ctx, session, full } = await unbounded('bounded-utf8', ['계'.repeat(100), '계'.repeat(100)])
     const limit = bytes(prefix(full, 2)) - 1
     // UTF-16 code units undercount this field, so a code-unit budget would still admit both messages.
     expect(JSON.stringify(prefix(full, 2)).length).toBeLessThan(limit)

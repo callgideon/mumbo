@@ -1418,7 +1418,7 @@ describe('installLlmReplay (through the real LlmRuntime)', () => {
               systemPromptUpdate: 'in-history',
               toolUpdate: 'addition-only',
             },
-            { id: 'pro', name: 'Pro', description: 'Larger model', reasoningEfforts: ['high'], badge: { text: { en: 'New', zh: '新' }, tone: 'info' } },
+            { id: 'pro', name: 'Pro', description: 'Larger model', reasoningEfforts: ['high'], badge: { text: { en: 'New', ja: 'ニュー' }, tone: 'info' } },
           ],
         },
         { id: 'empty' },
@@ -1431,7 +1431,7 @@ describe('installLlmReplay (through the real LlmRuntime)', () => {
     ])
     await expect(ctx.llm.listModels('deepseek')).resolves.toEqual([
       { provider: 'deepseek', id: 'flash', name: 'flash', inputModalities: ['text', 'image'] },
-      { provider: 'deepseek', id: 'pro', name: 'Pro', description: 'Larger model', badge: { text: { en: 'New', zh: '新' }, tone: 'info' } },
+      { provider: 'deepseek', id: 'pro', name: 'Pro', description: 'Larger model', badge: { text: { en: 'New', ja: 'ニュー' }, tone: 'info' } },
     ])
     await expect(ctx.llm.listModels('empty')).resolves.toEqual([])
     await expect(ctx.llm.resolveModelInfo('deepseek', 'flash')).resolves.toMatchObject({
@@ -2201,7 +2201,7 @@ describe('apply (the plugin entry)', () => {
   it.each([
     ['a non-object', '1017'],
     ['blank text', { text: ' ', tone: 'info' }],
-    ['translations without English', { text: { zh: '新' }, tone: 'info' }],
+    ['translations without English', { text: { ja: 'ニュー' }, tone: 'info' }],
     ['a blank translation', { text: { en: 'New', zh: '' }, tone: 'info' }],
     ['an unknown tone', { text: '1017', tone: 'accent' }],
   ])('rejects a badge with %s during load', (_case, badge) => {

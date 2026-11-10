@@ -29,12 +29,12 @@ describe('dsh-skill-badge', () => {
     expect(await ctx.skills.list()).toEqual([])
   })
 
-  it('presents the component as DSH with the bundle tag artwork in both locales', async () => {
+  it('presents the component as DSH with the bundle tag artwork', async () => {
     expect(JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))).toMatchObject({
       icon: './icon.svg',
       exports: { './locale/*.json': './locale/*.json' },
     })
-    for (const language of ['en', 'zh']) {
+    for (const language of ['en']) {
       expect(JSON.parse(await readFile(new URL(`../locale/${language}.json`, import.meta.url), 'utf8')))
         .toMatchObject({ meta: { title: 'DSH' } })
     }

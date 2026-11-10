@@ -29,9 +29,9 @@ it('reads each bundle version once per language and publishes the result', async
   controller.load('a', '1.0.0', 'en', false)
   expect(state('a', '1.0.0', 'en')).toEqual({ status: 'loading' })
   await vi.waitFor(() => { expect(state('a', '1.0.0', 'en')).toEqual({ status: 'ready', detail: FOUND }) })
-  controller.load('a', undefined, 'zh', false)
-  await vi.waitFor(() => { expect(state('a', undefined, 'zh')?.status).toBe('ready') })
-  expect(manager.readBundleDetail.mock.calls).toEqual([['a', 'en', { npmFileSources: [] }], ['a', 'zh', { npmFileSources: [] }]])
+  controller.load('a', undefined, 'fr', false)
+  await vi.waitFor(() => { expect(state('a', undefined, 'fr')?.status).toBe('ready') })
+  expect(manager.readBundleDetail.mock.calls).toEqual([['a', 'en', { npmFileSources: [] }], ['a', 'fr', { npmFileSources: [] }]])
 })
 
 it('reports failures by reason, reads again on retry, and settles a retried key with the latest answer', async () => {

@@ -10,72 +10,8 @@
  * @module
  */
 
-/** Simplified Chinese rule and duration copy, key-set source of truth. */
-export const frequencyZh = {
-  'frequency.hostMonthly': '每月 {days} 日 {time}，不足该日则月末',
-  'frequency.hostDailyInterval': '每 {interval} 天 {time}',
-  'frequency.hostWeeklyInterval': '每 {interval} 周的周{weekdays} {time}',
-  'frequency.hostMonthlyInterval': '每 {interval} 个月的 {days} 日 {time}，不足该日则月末',
-  'frequency.hostZone': '{rule}（{timeZone}）',
-  'frequency.hostCustom': '自定义',
-  'time.locale': 'zh-CN',
-  'time.utcPrefix': 'UTC',
-  'frequency.daily': '每天 {time}（{timeZone}）',
-  'frequency.dailyLocal': '每天 {time}',
-  'frequency.weekly': '每周{weekdays} {time}（{timeZone}）',
-  'frequency.weeklyLocal': '每周{weekdays} {time}',
-  'frequency.cron': '自定义（{timeZone}）',
-  'frequency.cronLocal': '自定义',
-  'frequency.cronRule': '{rule}（{timeZone}）',
-  'cron.list.join': '、',
-  'cron.part.join': ' ',
-  'cron.weekday.name': '周{weekday}',
-  'cron.weekday.range': '{from}至{to}',
-  'cron.months': '（{months}）',
-  'cron.day.every': '每天{months}',
-  'cron.day.weekdays': '{weekdays}{months}',
-  'cron.day.monthDays': '每月 {days} 日{months}',
-  'cron.day.both': '每月 {days} 日或{weekdays}{months}',
-  'cron.day.bothStarred': '每月 {days} 日且{weekdays}{months}',
-  'cron.hours.range': '{from} 至 {to}',
-  'cron.hours.list': '{hours}',
-  'cron.time.everyMinute': '每分钟',
-  'cron.time.everyMinutes': '每 {step} 分钟',
-  'cron.time.joinedEveryMinute': '每分钟',
-  'cron.time.joinedEveryMinutes': '每 {step} 分钟',
-  'cron.time.everyHour': '每小时',
-  'cron.time.joinedEveryHour': '每小时',
-  'cron.time.everyNHours': '每 {count} 小时',
-  'cron.time.joinedEveryNHours': '每 {count} 小时',
-  'cron.time.hourlyAt': '每小时的第 {minutes} 分钟',
-  'cron.time.joinedHourlyAt': '每小时的第 {minutes} 分钟',
-  'cron.time.hoursEveryMinute': '{hours} 点的每分钟',
-  'cron.time.hoursEveryMinutes': '{hours} 点内每 {step} 分钟',
-  'cron.time.at': '{times}',
-  'cron.time.hoursAt': '{hours} 点的第 {minutes} 分钟',
-  'frequency.weekday.join': '、',
-  'frequency.weekday.1': '一',
-  'frequency.weekday.2': '二',
-  'frequency.weekday.3': '三',
-  'frequency.weekday.4': '四',
-  'frequency.weekday.5': '五',
-  'frequency.weekday.6': '六',
-  'frequency.weekday.7': '日',
-  'unit.day.one': '天',
-  'unit.day.other': '天',
-  'unit.hour.one': '小时',
-  'unit.hour.other': '小时',
-  'unit.minute.one': '分钟',
-  'unit.minute.other': '分钟',
-  'unit.second.one': '秒',
-  'unit.second.other': '秒',
-  'relative.now': '现在到期',
-  'relative.future': '{value}{unit}后',
-  'relative.overdue': '已逾期 {value}{unit}',
-} as const
-
-/** English rule and duration copy, key-identical to the Chinese source. */
-export const frequencyEn: Record<keyof typeof frequencyZh, string> = {
+/** English rule and duration copy (the key-set source of truth). */
+export const frequencyEn = {
   'frequency.hostMonthly': 'Monthly on day {days} at {time}, or month end',
   'frequency.hostDailyInterval': 'Every {interval} days at {time}',
   'frequency.hostWeeklyInterval': 'Every {interval} weeks on {weekdays} at {time}',
@@ -136,7 +72,7 @@ export const frequencyEn: Record<keyof typeof frequencyZh, string> = {
   'relative.now': 'Due now',
   'relative.future': 'in {value} {unit}',
   'relative.overdue': '{value} {unit} overdue',
-}
+} satisfies Record<string, string>
 
 /** Japanese copy, checked against the English keys. */
 export const frequencyJa = {

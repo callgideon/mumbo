@@ -44,8 +44,8 @@ describe('Assembled liveshare viewer page stopping its own branch', () => {
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) =>
       window.setTimeout(() => { callback(0) }, 0))
     vi.stubGlobal('cancelAnimationFrame', (id: number) => { clearTimeout(id) })
-    Object.defineProperty(navigator, 'languages', { value: ['zh-CN'], configurable: true })
-    Object.defineProperty(navigator, 'language', { value: 'zh-CN', configurable: true })
+    Object.defineProperty(navigator, 'languages', { value: ['en-US'], configurable: true })
+    Object.defineProperty(navigator, 'language', { value: 'en-US', configurable: true })
     const owner = createFixtureFaces({ viewerSourceGrant: () => ({ sessionMode: 'fork-readonly' }),
       viewerFork: true, forkRunning: true })
     owned.disposeOwner = () => { owner.dispose() }
@@ -73,24 +73,24 @@ describe('Assembled liveshare viewer page stopping its own branch', () => {
     await waitFor(() => {
       expect(document.querySelector('[data-sample="bash"]')).not.toBeNull()
     }, { timeout: 30_000 })
-    expect(screen.queryByRole('button', { name: '停止生成' })).toBeNull()
-    expect(screen.queryByRole('button', { name: '发送消息' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Stop generating' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Send message' })).toBeNull()
 
     // Branching gives this page a Session of its own, and that child carries the reader's run.
     const branches = await screen.findAllByRole(
-      'button', { name: '在新对话中分支' }, { timeout: 15_000 },
+      'button', { name: 'Branch into a new conversation' }, { timeout: 15_000 },
     )
     const branch = branches.at(-1)
     if (branch === undefined) throw new Error('no branch action on the shared Session')
     await act(async () => { fireEvent.click(branch) })
-    const stop = await screen.findByRole('button', { name: '停止生成' }, { timeout: 15_000 })
+    const stop = await screen.findByRole('button', { name: 'Stop generating' }, { timeout: 15_000 })
 
     // Cancelling it ends that run — the Host's own answer to `cancel` — and hands the composer back
     // for the next prompt, while the run in the shared Session is still the owner's to end.
     await act(async () => { fireEvent.click(stop) })
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: '停止生成' })).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Stop generating' })).toBeNull()
     }, { timeout: 15_000 })
-    expect(screen.getAllByRole('button', { name: '发送消息' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('button', { name: 'Send message' }).length).toBeGreaterThan(0)
   }, 180_000)
 })

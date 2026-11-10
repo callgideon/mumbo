@@ -6,7 +6,7 @@ import {
   CHANGES_ID, CHANGES_KIND, changesAddress, changesDefinition, changesTitle, parseChangesAddress,
 } from '../src/client/changes-address.ts'
 import { createChangesStore } from '../src/client/changes-store.ts'
-import { en, zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 
 const SESSION = SessionId('s/1')
 const URL = 'https://github.com/octo/demo/pull/7'
@@ -36,10 +36,10 @@ describe('changes addresses', () => {
   })
 
   it('name the local view and a change request view by its number when the URL ends in one', () => {
-    const t = makeTranslate(zh)
-    expect(changesTitle({ kind: 'local' }, t)).toBe('本地变更')
-    expect(changesTitle({ kind: 'change', url: URL }, t)).toBe('#7 的变更')
-    expect(changesTitle({ kind: 'change', url: 'https://example.com/review' }, t)).toBe('变更')
+    const t = makeTranslate(en)
+    expect(changesTitle({ kind: 'local' }, t)).toBe('Local changes')
+    expect(changesTitle({ kind: 'change', url: URL }, t)).toBe('Changes in #7')
+    expect(changesTitle({ kind: 'change', url: 'https://example.com/review' }, t)).toBe('Changes')
   })
 })
 

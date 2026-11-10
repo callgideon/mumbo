@@ -1,5 +1,5 @@
-Open: button: 选择模型，当前 Origin Large
+Open: button: Select model, current Origin Large
 Enter model pane: menuitemradio: Origin Large
-Navigate models: searchbox: 搜索模型…
-Return to root: menuitem: 模型Origin Large
-Close: button: 选择模型，当前 Origin Large
+Navigate models: searchbox: Search models…
+Return to root: menuitem: ModelOrigin Large
+Close: button: Select model, current Origin Large

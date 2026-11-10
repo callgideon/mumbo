@@ -41,7 +41,7 @@ async function identityOf(host: Context, relay: string): Promise<WireOwnerIdenti
 /** Credential payload fields the host decodes for display, in the Relay's own signed-payload shape. */
 function credentialPayload(overrides: Record<string, unknown> = {}): string {
   const payload = {
-    displayName: '许翰翔',
+    displayName: 'Alice',
     subjectId: 'ou_owner',
     avatarUrl: 'https://cdn.example/owner.png',
     expiresAt: Date.now() + 7 * 24 * 60 * 60_000,

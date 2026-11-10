@@ -649,13 +649,13 @@ describe('web e2e: resident question composer round trip', () => {
       signal: controller.signal,
       questions: [{
         id: 'reasoning',
-        header: '确认思考等级',
-        question: '选择 HF provider 的思考等级？',
+        header: 'Thinking level',
+        question: 'Which thinking level for HF provider?',
         options: [
-          { label: '高（high）', description: '倾向更充分的推理，通常更慢、消耗更多 token，需模型支持。' },
-          { label: '中（medium）', description: '平衡推理深度与速度；需模型支持。' },
-          { label: '低（low）', description: '优先速度与较低 token 消耗；需模型支持。' },
-          { label: '先查看当前配置', description: '先确认 HF provider 的模型及其支持的思考参数，再决定。' },
+          { label: 'High (high)', description: 'Deeper reasoning, slower.' },
+          { label: 'Medium (medium)', description: 'Balanced depth and speed.' },
+          { label: 'Low (low)', description: 'Faster, fewer tokens.' },
+          { label: 'Check config first', description: 'Confirm model support.' },
         ],
       }],
     })
@@ -665,7 +665,7 @@ describe('web e2e: resident question composer round trip', () => {
     let completed = false
     try {
       await page.setViewportSize({ width: 1328, height: 720 })
-      await composer.getByRole('heading', { name: '选择 HF provider 的思考等级？' }).waitFor()
+      await composer.getByRole('heading', { name: 'Which thinking level for HF provider?' }).waitFor()
       expect(await composer.getByRole('heading').evaluate(readCopy))
         .toEqual({ lines: 1, clipped: false, overflows: false, toggle: undefined })
       expect(await composer.getByRole('button', { name: 'Expand', exact: true }).count()).toBe(0)
@@ -685,9 +685,9 @@ describe('web e2e: resident question composer round trip', () => {
       expect(rows).toEqual(Array.from({ length: 4 }, () => ({
         sameLine: true, fontSize: '13px', lineHeight: '20px', maskImage: 'none',
       })))
-      await composer.getByRole('radio', { name: '中（medium）' }).click()
+      await composer.getByRole('radio', { name: 'Medium (medium)' }).click()
       await composer.getByRole('button', { name: 'Submit', exact: true }).click()
-      expect(await outcome).toEqual({ value: { answers: [{ id: 'reasoning', selected: ['中（medium）'] }] } })
+      expect(await outcome).toEqual({ value: { answers: [{ id: 'reasoning', selected: ['Medium (medium)'] }] } })
       completed = true
     } finally {
       controller.abort()

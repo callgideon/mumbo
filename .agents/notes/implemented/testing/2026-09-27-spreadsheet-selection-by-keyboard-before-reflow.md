@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-27-spreadsheet-selection-by-keyboard-before-reflow.zh.md)
-
 ## Problem
 
 [document-preview.e2e.ts](../../../../apps/web/tests/document-preview.e2e.ts) opens `meeting.xlsx`, clicks the sheet overlay at `{ x: 60, y: 40 }` to select `A1`, then widens and narrows the sidebar four times and asserts after each reflow that the name box still reads `A1`. Ten of the eleven `CI master` runs of the serial self-hosted Linux lane between 2026-09-24 and 2026-09-27 failed one or both locale cases of that scenario with `expected 'B1' to be 'A1'` at the first reflow, and hosted `node 24 / snapshots and artifacts` runs failed the same way (runs 36110572677 and 36213089675). The failure is not locale-bound: en-US failed alone in four master runs, both locales in three, zh-CN alone in three. Polling the read (#5243) changed nothing because `B1` is the committed selection, not a stale sample.
@@ -12,7 +10,7 @@ English | [中文](2026-09-27-spreadsheet-selection-by-keyboard-before-reflow.zh
 
 ## Decision
 
-The meeting-sheet step selects by keyboard. The scenario focuses the sheet overlay (`tabindex="-1"`), asserts the focus landed, presses `ArrowRight` and asserts `B1` with an empty formula bar, then presses `ArrowLeft` and asserts `A1` with `会议纪要`, and only then starts the reflow loop. `handleArrowKey` → `moveHighlightCell` computes the target from committed state — the current selection and `visibledatacolumn` — so a re-executed updater yields the same cell whatever the grid's geometry is by then, and the two moves make the interaction observable because `B1` differs from the initial selection. The reflow loop, its `A1` assertion, the sheet-tab scroll-control counts, and the canvas identity check are unchanged.
+The meeting-sheet step selects by keyboard. The scenario focuses the sheet overlay (`tabindex="-1"`), asserts the focus landed, presses `ArrowRight` and asserts `B1` with an empty formula bar, then presses `ArrowLeft` and asserts `A1` with `Meeting minutes`, and only then starts the reflow loop. `handleArrowKey` → `moveHighlightCell` computes the target from committed state — the current selection and `visibledatacolumn` — so a re-executed updater yields the same cell whatever the grid's geometry is by then, and the two moves make the interaction observable because `B1` differs from the initial selection. The reflow loop, its `A1` assertion, the sheet-tab scroll-control counts, and the canvas identity check are unchanged.
 
 The budget-sheet click at the start of the scenario stays a pointer click: it targets a cell other than the initial selection, its result is verified by the `46281` formula read, and keyboard, clipboard, and layout reads separate it from the first reflow by far more than one deferred render. The `values.csv` click followed by a narrowing stays too: a re-execution against the narrowed grid resolves a negative x, which `colLocation` clamps to column A, the same cell.
 

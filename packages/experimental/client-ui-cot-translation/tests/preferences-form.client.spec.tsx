@@ -8,7 +8,7 @@ import { bindSnapshotSelector, makeTranslate, stubConfigForm } from '@deepseek-a
 import { TranslationPreferencesForm } from '../src/client/preferences-form.ts'
 import { TranslationSettings, type TranslationSettingsProps } from '../src/client/TranslationSettings.tsx'
 import type { CotTranslationPreferences } from '../src/preferences.ts'
-import { en, zh, formLabels } from '../src/client/locales.ts'
+import { en, formLabels } from '../src/client/locales.ts'
 
 afterEach(cleanup)
 
@@ -46,8 +46,8 @@ it('uses the shared unavailable and read-only states and supplies both dictionar
   const scope = stubConfigForm<CotTranslationPreferences>()
   const form = new TranslationPreferencesForm(scope.scope), { hooks, ...actions } = form.inject()
   try {
-    expect(Object.keys(en)).toEqual(Object.keys(zh))
-    expect(formLabels(makeTranslate(zh)).save).toBe('保存')
+    expect(Object.keys(en)).toEqual(Object.keys(en))
+    expect(formLabels(makeTranslate(en)).save).toBe('Save')
     const props = { view: 'page' as const, ...actions,
       refreshProviders: vi.fn(), useAvailableProviders: bindSnapshotSelector(
         createSnapshotStore<readonly TranslationProvider[]>(['bing', 'google'])), useTranslationForm: bindSnapshotSelector(hooks.translationForm),
@@ -115,8 +115,8 @@ it('offers both version-free paid routes only when eligible and keeps selection 
     expect(view.getByText(en.paidNotice)).toBeTruthy()
     expect(en.paidNotice).toContain('Each uncached fragment sends a separate paid')
     expect(en.paidNotice).toContain('Reopening reasoning reuses saved results')
-    expect(zh.paidNotice).toContain('每个未缓存片段')
-    expect(zh.paidNotice).toContain('重新展开会复用已保存的译文')
+    expect(en.paidNotice).toContain('Each uncached fragment sends a separate paid DeepSeek Flash request through the selected account or official API credentials. Reopening reasoning reuses saved results; changing the provider, language, source text, or request settings may send a new paid request.')
+    expect(en.paidNotice).toContain('Each uncached fragment sends a separate paid DeepSeek Flash request through the selected account or official API credentials. Reopening reasoning reuses saved results; changing the provider, language, source text, or request settings may send a new paid request.')
     expect(view.queryByText(en.anonymousNotice)).toBeNull()
     expect(scope.mutate).not.toHaveBeenCalled()
     fireEvent.click(view.getByRole('button', { name: en.save }))

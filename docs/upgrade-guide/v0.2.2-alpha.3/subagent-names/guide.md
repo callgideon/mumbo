@@ -5,8 +5,6 @@ description: "Subagent control and Team task tools address agents by name, list_
 
 # Subagent tools address agents by name
 
-English | [中文](guide.zh.md)
-
 ## Change
 
 New subagents have sibling-unique names in their creator's `subagent/catalog`. The root is `lead`; descendant names are paths such as `reviewer/checker`. The [subagent runtime](../../../../packages/subagent/subagent/README.md#agent-names) defines naming rules. Historical children keep their Session ids. Scripts, PTC, SDK callers, and transcripts must adopt these changes:

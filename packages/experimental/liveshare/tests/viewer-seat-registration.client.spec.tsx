@@ -18,7 +18,7 @@ import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { SlotTestRuntime } from '@deepseek-ai/dsh-client-test-runtime'
 import { afterEach, describe, expect, it, onTestFinished } from 'vitest'
 import { act, cleanup, waitFor } from '@testing-library/react'
-import { en, NS, zh } from '../src/client/locales.ts'
+import { en, NS, fr } from '../src/client/locales.ts'
 import * as viewerModel from '../src/client/viewer-model.tsx'
 import * as viewerPermission from '../src/client/viewer-permission.tsx'
 import { VIEWER_SEAT_PRIORITY } from '../src/client/viewer-seat.tsx'
@@ -32,9 +32,9 @@ const CATALOG = {
     id: 'internal',
     models: [{
       id: 'dsv41f',
-      name: '内网 DSV41F',
+      name: 'intranet DSV41F',
       reasoning: {
-        efforts: [{ id: 'low', name: '低强度' }, { id: 'high', name: '高强度' }],
+        efforts: [{ id: 'low', name: 'low effort' }, { id: 'high', name: 'high effort' }],
         defaultEffort: 'low',
       },
     }],
@@ -58,8 +58,9 @@ async function bench(options: { readonly catalogReadable?: boolean } = {}) {
   onTestFinished(() => runtime.dispose())
   let catalogReads = 0
   const locale = new LocaleRuntime(runtime.ctx)
-  locale.register(NS, { en, zh })
-  locale.setLocale('zh')
+  locale.addLanguage({ id: 'fr', label: 'Français', fallback: 'en' })
+  locale.register(NS, { en, fr })
+  locale.setLocale('fr')
   runtime.ctx.provide('locale', locale)
   runtime.slots.installLocale(locale)
   runtime.remote.provideNamespaces({
@@ -135,11 +136,11 @@ describe('viewer seat registration', () => {
     const { permission, model } = renderSeats(runtime, session)
     expect(permission.container.querySelector('[data-liveshare-viewer-seat="permission"]')).not.toBeNull()
     expect(permission.container.querySelector('[data-shipped="permission"]')).toBeNull()
-    expect(permission.container.textContent).toContain(zh['viewer.permission.locked'])
+    expect(permission.container.textContent).toContain(fr['viewer.permission.locked'])
     expect(model.container.querySelector('[data-liveshare-viewer-seat="model"]')).not.toBeNull()
     expect(model.container.querySelector('[data-shipped="model"]')).toBeNull()
     // The viewer's own copy states the restriction; the shipped control has none.
-    expect(model.container.textContent).toContain(zh['viewer.model.locked'])
+    expect(model.container.textContent).toContain(fr['viewer.model.locked'])
 
     // Both entries stay on the ledger: the viewer entry is the lower one, the shipped entry is shadowed.
     expect(seatRanks(runtime, 'conversation.input.permission')).toEqual([VIEWER_SEAT_PRIORITY, 0])

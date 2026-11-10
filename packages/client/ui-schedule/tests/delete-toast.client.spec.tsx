@@ -7,11 +7,11 @@ import {
   createDeleteToastSource, ScheduleDeleteToast,
   type DeleteToastState, type ScheduleDeleteToastProps,
 } from '../src/client/DeleteToast.tsx'
-import { en, zh } from '../src/client/task-manager-locales.ts'
+import { en } from '../src/client/task-manager-locales.ts'
 
 afterEach(() => { cleanup(); vi.useRealTimers() })
 
-function mount(state: DeleteToastState | null, dictionary: typeof en | typeof zh = en) {
+function mount(state: DeleteToastState | null, dictionary: typeof en = en) {
   const dismiss = vi.fn()
   const props = {
     useToast: <T,>(select: (value: DeleteToastState | null) => T): T => select(state),
@@ -76,8 +76,8 @@ describe('ScheduleDeleteToast', () => {
   })
 
   it('shows the warning banner for a deletion that could not be confirmed', () => {
-    mount({ kind: 'deleteFailed', seq: 2 }, zh)
-    expect(screen.getByRole('alert').textContent).toBe(zh['toast.deleteFailed'])
+    mount({ kind: 'deleteFailed', seq: 2 }, en)
+    expect(screen.getByRole('alert').textContent).toBe(en['toast.deleteFailed'])
   })
 
   it('states how many inactive tasks a bulk removal cleared, singular for one', () => {
@@ -92,12 +92,12 @@ describe('ScheduleDeleteToast', () => {
   })
 
   it('states that a bulk removal found nothing instead of a zero count', () => {
-    mount({ kind: 'cleared', count: 0, seq: 4 }, zh)
-    expect(screen.getByRole('alert').textContent).toBe(zh['toast.clearedNone'])
+    mount({ kind: 'cleared', count: 0, seq: 4 }, en)
+    expect(screen.getByRole('alert').textContent).toBe(en['toast.clearedNone'])
   })
 
   it('shows the warning banner for a bulk removal that failed', () => {
-    mount({ kind: 'clearFailed', seq: 5 }, zh)
-    expect(screen.getByRole('alert').textContent).toBe(zh['toast.clearFailed'])
+    mount({ kind: 'clearFailed', seq: 5 }, en)
+    expect(screen.getByRole('alert').textContent).toBe(en['toast.clearFailed'])
   })
 })

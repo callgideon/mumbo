@@ -27,7 +27,7 @@ def office_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_saved_output_and_literal_path_arguments(
     operation: Callable[..., ConversionResult], office_cli: Path, tmp_path: Path,
 ) -> None:
-    source = tmp_path / "工作簿 $name with spaces.xlsx"
+    source = tmp_path / "통합문서 $name with spaces.xlsx"
     output = tmp_path / "saved workbook.xlsx"
     result = operation(source, output)
     assert result.output_path == output
@@ -53,7 +53,7 @@ def test_render_images_reads_the_saved_manifest(office_cli: Path, tmp_path: Path
 
 
 def test_worksheet_selection_and_csv_sheet_keep_exact_names(office_cli: Path, tmp_path: Path) -> None:
-    sheet = "收入 $Values"
+    sheet = "수입 $Values"
     render_images("workbook.xlsx", tmp_path / "preview", sheet=sheet, range="A1:E9")
     assert json.loads(office_cli.read_text())[5:] == ["--sheet", sheet, "--range", "A1:E9"]
     convert("workbook.xlsx", tmp_path / "data.csv", sheet=sheet)
@@ -66,14 +66,14 @@ def test_limits_and_fonts_reach_the_cli(office_cli: Path, tmp_path: Path) -> Non
         max_archive_entries=10, max_uncompressed_bytes=4096, max_font_files=20,
         max_font_file_bytes=8192, max_loaded_font_bytes=16384,
         font_directories=[tmp_path / "Fonts One", tmp_path / "Fonts Two"],
-        initial_font_families=["Fixture Sans", "中文字体"], font_fallbacks=[["Preferred", "Fallback"]],
+        initial_font_families=["Fixture Sans", "한글폰트"], font_fallbacks=[["Preferred", "Fallback"]],
     ))
     assert json.loads(office_cli.read_text())[5:] == [
         "--timeout-ms", "4567", "--max-input-bytes", "1024", "--max-output-bytes", "2048",
         "--max-image-resolution", "72", "--max-archive-entries", "10", "--max-uncompressed-bytes", "4096",
         "--max-font-files", "20", "--max-font-file-bytes", "8192", "--max-loaded-font-bytes", "16384",
         "--font-directory", str(tmp_path / "Fonts One"), "--font-directory", str(tmp_path / "Fonts Two"),
-        "--initial-font-family", "Fixture Sans", "--initial-font-family", "中文字体",
+        "--initial-font-family", "Fixture Sans", "--initial-font-family", "한글폰트",
         "--font-fallbacks", '[["Preferred", "Fallback"]]',
     ]
 

@@ -1,3 +1,3 @@
-# 项目说明
+# Project notes
 
-一个用于演示的仓库。
+A repository used for demos.

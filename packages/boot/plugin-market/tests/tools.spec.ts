@@ -45,12 +45,12 @@ async function fixture() {
 
 const document = {
   format: 1,
-  title: { en: 'Market', zh: '市场' },
+  title: { en: 'Market', ja: 'マーケット' },
   metadata: { categories: { tools: { title: 'Tools' } }, labels: { official: { title: 'Official' } }, sortKeys: { downloads: { title: 'Downloads', order: 'desc' } } },
   plugins: [
     {
       name: 'dsh-a', author: 'Jane', homepage: 'https://example.com/a', repository: { url: 'https://github.com/o/a' },
-      title: { en: 'A', zh: '甲' }, description: { en: 'Does A', zh: '做甲' },
+      title: { en: 'A', ja: 'こう' }, description: { en: 'Does A', ja: 'こうをする' },
       metadata: { category: 'tools', labels: ['official'], sortKeys: { downloads: 5 } },
       versions: [
         { version: '1.0.0', publishTimestamp: 1790476800, source: { type: 'npm', registry: 'https://r.example/' } },
@@ -68,7 +68,7 @@ it('lists configured indexes with English titles', async () => {
   expect((await call({ action: 'list_indexes' })).json).toEqual({ indexes: [{ url: URL_A, title: null }] })
   await ctx.pluginMarket.search(URL_A, { sort: { kind: 'index' }, offset: 0, limit: 1 })
   expect((await call({ action: 'list_indexes' })).json).toEqual({ indexes: [{ url: URL_A, title: 'Plain' }] })
-  serve({ format: 1, title: { en: 'Localized', zh: '本地化' }, plugins: [] })
+  serve({ format: 1, title: { en: 'Localized', ja: 'ローカライズ' }, plugins: [] })
   await ctx.pluginMarket.search(URL_A, { sort: { kind: 'index' }, offset: 0, limit: 1, refresh: true })
   expect((await call({ action: 'list_indexes' })).json).toEqual({ indexes: [{ url: URL_A, title: 'Localized' }] })
   vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('offline'))))
@@ -105,7 +105,7 @@ it('pages plugins with the default version\'s install target and registry plugin
 it('lists plugins matching a query by relevance', async () => {
   serve(document)
   const { call } = await fixture()
-  expect((await call({ action: 'list_plugins', target: URL_A, query: '做甲' })).json).toMatchObject({ entries: [{ name: 'dsh-a' }], total: 1, nextOffset: null })
+  expect((await call({ action: 'list_plugins', target: URL_A, query: 'こうをする' })).json).toMatchObject({ entries: [{ name: 'dsh-a' }], total: 1, nextOffset: null })
   expect((await call({ action: 'list_plugins', target: URL_A, query: '  ' })).json).toMatchObject({ total: 3 })
 })
 

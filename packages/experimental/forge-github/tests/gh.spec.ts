@@ -24,7 +24,8 @@ async function fakeGh(): Promise<string> {
     '  echo) printf "%s|" "$@"; printf "\\nprompt=%s token=%s pager=[%s]\\n" "$GH_PROMPT_DISABLED" "${GH_TOKEN:-unset}" "$GH_PAGER" ;;',
     '  input) cat ;;',
     '  fail) echo oops >&2; exit 3 ;;',
-    '  sleep) sleep 5 ;;',
+    // exec keeps one process: a forked sleep would hold stdout open after the timeout kills the shell.
+    '  sleep) exec sleep 5 ;;',
     '  big) head -c 5000 /dev/zero | tr "\\0" x ;;',
     'esac',
     '',
@@ -36,7 +37,7 @@ async function fakeGh(): Promise<string> {
 describe.skipIf(process.platform === 'win32')('gh runner', () => {
   it('delivers review JSON through stdin without interpreting shell syntax', async () => {
     const run = ghRunner({ ghCommand: await fakeGh(), timeoutMs: 5_000, maxOutputBytes: 10_000 })
-    const body = JSON.stringify({ body: 'Check `$(secret)`\n检查边界' })
+    const body = JSON.stringify({ body: 'Check `$(secret)`\nChecks boundary' })
     await expect(run(['input'], new AbortController().signal, body)).resolves.toEqual({ exitCode: 0, stdout: body, stderr: '' })
   })
 

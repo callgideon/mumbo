@@ -76,7 +76,6 @@ export class DeepSeekSearchApiProvider implements WebSearchProvider {
   /** Picker description: what this provider suits and what it costs or cannot do. */
   readonly description: NonNullable<WebSearchProvider['description']> = {
     en: 'Queries the search endpoint directly for titles, URLs, and snippets without an extra model call. Uses the DeepSeek account of the current conversation, or a DeepSeek API key, and may incur API charges.',
-    zh: '直接请求搜索接口返回标题、URL 与摘要，无需额外调用模型。使用当前会话的 DeepSeek 账号或 DeepSeek API Key，可能产生计费',
     ja: '追加のモデル呼び出しなしで検索エンドポイントに直接問い合わせ、タイトル、URL、スニペットを返します。現在の会話の DeepSeek アカウント、または DeepSeek API キーを使用し、API 料金が発生する場合があります。',
     es: 'Consulta directamente el punto de conexión de búsqueda y devuelve títulos, URL y fragmentos sin una llamada adicional al modelo. Usa la cuenta de DeepSeek de la conversación actual o una clave de API de DeepSeek, y puede generar cargos de API.',
     fr: "Interroge directement le point de terminaison de recherche pour obtenir titres, URL et extraits, sans appel de modèle supplémentaire. Utilise le compte DeepSeek de la conversation en cours ou une clé API DeepSeek, et peut entraîner des frais d'API.",

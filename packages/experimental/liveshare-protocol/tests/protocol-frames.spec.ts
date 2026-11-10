@@ -191,7 +191,7 @@ describe('additive wire fields reject invalid values', () => {
   })
 
   it('accepts an actor display name and refuses blank or non-string ones', () => {
-    expect(request({ displayName: '许翰翔' })).toMatchObject({ actor: { displayName: '许翰翔' } })
+    expect(request({ displayName: 'Alice' })).toMatchObject({ actor: { displayName: 'Alice' } })
     expect(request({ displayName: '' })).toBeUndefined()
     expect(request({ displayName: 7 })).toBeUndefined()
   })

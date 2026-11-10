@@ -28,7 +28,7 @@ function bundle(name: string, fields: Partial<BundleInfo>): BundleInfo {
 }
 
 function index(plugins: unknown[] = []): unknown {
-  return { format: 1, title: { en: 'Market', zh: '市场' }, description: 'Bundles', plugins }
+  return { format: 1, title: { en: 'Market', ja: 'マーケット' }, description: 'Bundles', plugins }
 }
 
 function release(version: string, fields: Record<string, unknown> = {}): Record<string, unknown> {
@@ -124,7 +124,7 @@ it('reads an index with installation status, compatibility, and install argument
   })
   const listing = await read(market, URL_A)
   expect(fetch).toHaveBeenCalledWith(URL_A, expect.objectContaining({ redirect: 'error' }))
-  expect(listing).toMatchObject({ url: URL_A, title: { en: 'Market', zh: '市场' }, description: 'Bundles', metadata: { categories: {}, labels: {}, sortKeys: {} } })
+  expect(listing).toMatchObject({ url: URL_A, title: { en: 'Market', ja: 'マーケット' }, description: 'Bundles', metadata: { categories: {}, labels: {}, sortKeys: {} } })
   const by = Object.fromEntries(listing.entries.map(item => [item.name, item]))
   expect(by.absent).toMatchObject({
     icon: 'https://market.example/a.svg', author: 'Jane', defaultVersion: '1.0.0', installation: { status: 'not-installed' },
@@ -141,7 +141,7 @@ it('reads an index with installation status, compatibility, and install argument
   expect(by.incompatible?.installation).toEqual({ status: 'update-available', installedVersion: '0.9.0' })
   expect(by.incompatible?.versions[0]?.compatibility).toEqual({ compatible: false, runtimeVersion: runtime, requirements: { 'engines.dsh': '0.0.1' }, exempted: false })
   expect(by.exempted?.versions[0]).toMatchObject({ install: { spec: 'exempted@1.0.0', registry: 'https://r.example/' }, compatibility: { compatible: false, exempted: true } })
-  expect(market.listIndexes()).toEqual([{ url: URL_A, title: { en: 'Market', zh: '市场' }, description: 'Bundles' }])
+  expect(market.listIndexes()).toEqual([{ url: URL_A, title: { en: 'Market', ja: 'マーケット' }, description: 'Bundles' }])
 })
 
 it('defaults to the highest compatible stable version, or the highest compatible prerelease without a stable one', async () => {
@@ -354,17 +354,17 @@ const SEARCHABLE = {
   format: 1,
   title: 'Market',
   metadata: {
-    categories: { work: { title: { en: 'Productivity', zh: '效率' } }, fun: { title: 'Games' } },
-    labels: { official: { title: { en: 'Official', zh: '官方' } }, ui: { title: 'UI' } },
+    categories: { work: { title: { en: 'Productivity', ja: 'こうりつ' } }, fun: { title: 'Games' } },
+    labels: { official: { title: { en: 'Official', ja: 'こうしき' } }, ui: { title: 'UI' } },
     sortKeys: { downloads: { title: 'Downloads', order: 'desc' } },
   },
   plugins: [
     entry('dsh-weather', {
-      description: { en: 'Shows the forecast without review', ja: '天気予報を表示' }, author: 'Kim',
+      description: { en: 'Shows the forecast without review', ja: 'てんきよほう' }, author: 'Kim',
       metadata: { category: 'fun', labels: ['ui'], sortKeys: { downloads: 10 } },
     }, [release('1.0.0', { publishTimestamp: 30 })]),
     entry('dsh-auto-review', {
-      title: { en: 'Automatic review', zh: '自动代码审查' },
+      title: { en: 'Automatic review', ja: 'じどうかんさ' },
       metadata: { category: 'work', labels: ['official', 'ui'], keywords: ['lint'], sortKeys: { downloads: 50 } },
     }, [release('2.0.0', { publishTimestamp: 10 }), release('1.0.0', { publishTimestamp: 40 })]),
     entry('dsh-notes', { description: 'Keep a review checklist', metadata: { category: 'work', labels: ['official'] } }, [release('1.0.0', { publishTimestamp: 20 })]),
@@ -394,11 +394,11 @@ it.each([
   ['a word prefix', 'auto', ['dsh-auto-review']],
   ['words that must all match, across fields', 'forecast kim', ['dsh-weather']],
   ['a keyword', 'lint', ['dsh-auto-review']],
-  ['Chinese title text', '代码审查', ['dsh-auto-review']],
-  ['one CJK character', '审', ['dsh-auto-review']],
-  ['the last CJK character of a run', '查', ['dsh-auto-review']],
-  ['Japanese description text', '天気', ['dsh-weather']],
-  ['a localized category title', '效率', ['dsh-auto-review', 'dsh-notes']],
+  ['Japanese title text', 'かんさ', ['dsh-auto-review']],
+  ['one kana character', 'か', ['dsh-auto-review']],
+  ['the last kana character of a run', 'さ', ['dsh-auto-review']],
+  ['Japanese description text', 'てんき', ['dsh-weather']],
+  ['a localized category title', 'こうりつ', ['dsh-auto-review', 'dsh-notes']],
   ['a label title', 'official', ['dsh-auto-review', 'dsh-notes']],
   ['upper case', 'KIM', ['dsh-weather']],
   ['words from different plugins', 'forecast lint', []],
@@ -484,17 +484,17 @@ it('keeps index order among equal sort-key values and among plugins without one'
 })
 
 it.each([
-  ['CJK text after Latin text', '预览', ['p-md']],
+  ['CJK text after Latin text', 'プレビュー', ['p-md']],
   ['Latin text between CJK text', 'markdown', ['p-md']],
-  ['CJK text after a Latin word', '插件', ['p-vue']],
+  ['CJK text after a Latin word', 'プラグイン', ['p-vue']],
   ['katakana with the prolonged sound mark', 'ヒー', ['p-coffee']],
   ['a later katakana word', 'サーバー', ['p-coffee']],
-  ['the iteration mark', '々木', ['p-sasaki']],
+  ['the iteration mark', 'ヽキ', ['p-sasaki']],
   ['full-width letters as ASCII', 'abc', ['p-full']],
   ['a decomposed accent as its composed form', 'café', ['p-cafe']],
   ['decomposed Hangul as composed syllables', '국어', ['p-hangul']],
   ['half-width katakana as full-width', 'パソコン', ['p-kana']],
-  ['a compatibility character as its decomposition', '㈱', ['p-kabu']],
+  ['a compatibility character as its decomposition', '㌀', ['p-kabu']],
   ['a long word two edits away', 'internaxionalizatiox', ['p-full']],
   ['a long word three edits away', 'internaxionalixatiox', []],
 ])('splits and normalizes text: %s', async (_label, text, expected) => {
@@ -502,15 +502,15 @@ it.each([
     format: 1,
     title: 'Scripts',
     plugins: [
-      entry('p-md', { description: '支持Markdown预览' }),
-      entry('p-vue', { title: 'Vue插件' }),
+      entry('p-md', { description: 'サポートMarkdownプレビュー' }),
+      entry('p-vue', { title: 'Vueプラグイン' }),
       entry('p-coffee', { title: 'コーヒーサーバー' }),
-      entry('p-sasaki', { author: '佐々木' }),
+      entry('p-sasaki', { author: 'サヽキ' }),
       entry('p-full', { title: 'ＡＢＣ Tools', metadata: { keywords: ['internationalization'] } }),
       entry('p-cafe', { description: 'cafe\u0301 menu' }),
       entry('p-hangul', { title: '한국어'.normalize('NFD') }),
       entry('p-kana', { title: 'ﾊﾟｿｺﾝ' }),
-      entry('p-kabu', { author: '株' }),
+      entry('p-kabu', { author: 'アパート' }),
     ],
   }))
   const { market } = await mount()

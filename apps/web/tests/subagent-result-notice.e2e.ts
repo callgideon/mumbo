@@ -12,35 +12,35 @@ import {
   acknowledgeReloadConnectionLoss, assertFixtureInventory, captureStableAria, compareOrRefreshGolden,
   launchWebScaffold, watchConsole, webSnapshotMode,
 } from './scaffold.ts'
-import { connectFreshWorkspace, connectFreshWorkspaceZh } from './support.ts'
+import { connectFreshWorkspace } from './support.ts'
 
 const DIR = fileURLToPath(new URL('./expected/subagent-result-notice/', import.meta.url))
 const MODE = webSnapshotMode()
 const OUTPUT = '## Research result\nThe original child reply stays available.'
 const OUTCOMES = [
-  { reason: 'completed', en: 'Subagent run completed', zh: '子智能体已完成任务' },
-  { reason: 'aborted', en: 'Subagent run stopped', zh: '子智能体任务已停止' },
-  { reason: 'error', en: 'Subagent run failed', zh: '子智能体执行失败' },
-  { reason: 'max-tokens', en: 'Subagent reached the token limit', zh: '子智能体已达 token 上限' },
-  { reason: 'refusal', en: 'Subagent declined the task', zh: '子智能体拒绝执行' },
-] as const satisfies readonly { reason: SubagentStopReason; en: string; zh: string }[]
+  { reason: 'completed', en: 'Subagent run completed' },
+  { reason: 'aborted', en: 'Subagent run stopped' },
+  { reason: 'error', en: 'Subagent run failed' },
+  { reason: 'max-tokens', en: 'Subagent reached the token limit' },
+  { reason: 'refusal', en: 'Subagent declined the task' },
+] as const satisfies readonly { reason: SubagentStopReason; en: string }[]
 
 describe.skipIf(MODE === 'record')('web e2e: subagent result notices', () => {
   let browser: Browser
   beforeAll(async () => { browser = await chromium.launch() })
   afterAll(async () => { await browser?.close() })
 
-  it.each(['en', 'zh'] as const)('shows recorded outcomes and preserves notice bodies in %s', async (locale) => {
+  it.each(['en'] as const)('shows recorded outcomes and preserves notice bodies in %s', async (locale) => {
     const scaffold = await launchWebScaffold()
     let context: BrowserContext | undefined
     try {
       context = await browser.newContext({
-        locale: locale === 'en' ? 'en-US' : 'zh-CN', timezoneId: 'Asia/Shanghai', viewport: { width: 1280, height: 900 },
+        locale: 'en-US', timezoneId: 'Asia/Shanghai', viewport: { width: 1280, height: 900 },
       })
       const page = await context.newPage()
       const tripwire = watchConsole(page)
       await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-      await (locale === 'en' ? connectFreshWorkspace : connectFreshWorkspaceZh)(page, scaffold.workspaceCwd)
+      await connectFreshWorkspace(page, scaffold.workspaceCwd)
       const agent = scaffold.ctx.agents.list()[0]
       if (agent === undefined) throw new Error('Notice fixture has no connected Agent')
       const session = agent.session
@@ -72,7 +72,7 @@ describe.skipIf(MODE === 'record')('web e2e: subagent result notices', () => {
         message: createSettlementMessage(childId, 'agent-1', { stopReason: 'completed', output: [] }),
       })
       notices.push({
-        title: locale === 'en' ? 'Subtask status updated' : '子任务状态更新',
+        title: 'Subtask status updated',
         message: createUserMessage({
           source: { kind: 'subagent-settled', form: 'notice', senderSessionId: childId, summary: 'Background subagent finished.' },
           content: [{ type: 'text', text: 'Background subagent finished.' }],
@@ -124,6 +124,6 @@ describe.skipIf(MODE === 'record')('web e2e: subagent result notices', () => {
   })
 
   it('keeps the fixture inventory closed', async () => {
-    await assertFixtureInventory(DIR, ['en.expected.md', 'zh.expected.md'])
+    await assertFixtureInventory(DIR, ['en.expected.md'])
   })
 })

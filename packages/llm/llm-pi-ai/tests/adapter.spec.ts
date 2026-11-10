@@ -994,7 +994,7 @@ describe('provider profile lifecycle', () => {
   it.each([
     ['bad header name', 'value'],
     ['x-company', 'line\nbreak'],
-    ['x-company', '部署'],
+    ['x-company', '배포'],
   ])('rejects provider header %j when Fetch cannot represent the entry', (name, value) => {
     expect(() => resolveProfiles({ openai: { headers: { [name]: value } } }))
       .toThrow(`provider "openai" header "${name}" is not valid for Fetch`)

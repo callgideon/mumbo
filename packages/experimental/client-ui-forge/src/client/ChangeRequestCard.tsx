@@ -148,7 +148,7 @@ function ChangesRow({ entry, snapshot, name, actions, locale, t }: {
   )
 }
 
-/** The merged or closed fact with its time, such as 已合并到 main · 2 小时前. */
+/** The merged or closed fact with its time, such as Merged into main · 2 h ago. */
 function finished(snapshot: ChangeRequestSnapshot, now: number, t: Translate): string {
   const state = snapshot.state === 'merged' ? t('change.mergedTo', { base: snapshot.baseBranch }) : t('change.state.closed')
   const ago = snapshot.closedAt === null ? undefined : formatAgo(snapshot.closedAt, now, t)

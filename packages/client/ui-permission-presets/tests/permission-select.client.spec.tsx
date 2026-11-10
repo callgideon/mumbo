@@ -10,7 +10,7 @@ import {
   PermissionSelect, type PermissionSelectProps,
 } from '../src/client/PermissionSelect.tsx'
 import type { PermissionCatalogState } from '../src/client/catalog.ts'
-import { accessZh } from '../src/client/locales.ts'
+import { accessEn } from '../src/client/locales.ts'
 
 afterEach(cleanup)
 
@@ -28,7 +28,7 @@ const CATALOG: PermissionCatalog = {
   ],
 }
 
-const t: PermissionSelectProps['t'] = makeTranslate(accessZh)
+const t: PermissionSelectProps['t'] = makeTranslate(accessEn)
 
 function setup(options: {
   selection?: PermissionSelection | undefined
@@ -57,7 +57,7 @@ function setup(options: {
 }
 
 function trigger(): HTMLButtonElement {
-  return screen.getByRole('button', { name: /^访问模式/ }) as HTMLButtonElement
+  return screen.getByRole('button', { name: /^Access mode/ }) as HTMLButtonElement
 }
 
 describe('PermissionSelect', () => {
@@ -75,17 +75,17 @@ describe('PermissionSelect', () => {
       selection: { currentValue: 'read-only' },
       select: () => submitted.promise,
     })
-    expect(trigger().textContent).toBe('仅可查看')
+    expect(trigger().textContent).toBe('Read Only')
     expect([...trigger().querySelectorAll('svg')]
       .every(icon => icon.closest('[aria-hidden="true"]') !== null)).toBe(true)
 
     fireEvent.click(trigger())
     expect(screen.getAllByRole('menuitem').map(item => item.textContent))
-      .toEqual(['仅可查看', '工作区内修改', '完全权限', '自动审查EXP'])
-    fireEvent.click(screen.getByRole('menuitem', { name: '工作区内修改' }))
+      .toEqual(['Read Only', 'Workspace Write', 'Full access', 'Auto reviewEXP'])
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Workspace Write' }))
 
     expect(select).toHaveBeenCalledExactlyOnceWith('workspace-write')
-    expect(trigger().textContent).toBe('工作区内修改')
+    expect(trigger().textContent).toBe('Workspace Write')
     expect(trigger().disabled).toBe(true)
     submitted.resolve(true)
     await act(async () => { await submitted.promise })
@@ -123,19 +123,19 @@ describe('PermissionSelect', () => {
     const { select } = setup()
     const open = () => {
       fireEvent.click(trigger())
-      fireEvent.click(screen.getByRole('menuitem', { name: '完全权限' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Full access' }))
     }
     open()
-    const enable = screen.getByRole<HTMLButtonElement>('button', { name: '启用完全权限' })
+    const enable = screen.getByRole<HTMLButtonElement>('button', { name: 'Enable Full access' })
     expect(enable.disabled).toBe(true)
-    fireEvent.click(screen.getByRole('checkbox', { name: '我已了解风险，并愿意继续' }))
-    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'I understand the risks and want to continue' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(select).not.toHaveBeenCalled()
 
     open()
     expect(screen.getByRole<HTMLInputElement>('checkbox').checked).toBe(false)
     fireEvent.click(screen.getByRole('checkbox'))
-    fireEvent.click(screen.getByRole('button', { name: '启用完全权限' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Enable Full access' }))
     expect(select).toHaveBeenCalledExactlyOnceWith('danger-full-access')
     await act(async () => {})
   })
@@ -143,32 +143,32 @@ describe('PermissionSelect', () => {
   it('marks Auto experimental and uses the current-session risk copy', async () => {
     const { select, selection } = setup()
     fireEvent.click(trigger())
-    const autoOption = screen.getByRole('menuitem', { name: '自动审查 EXP' })
+    const autoOption = screen.getByRole('menuitem', { name: 'Auto review EXP' })
     const autoGlyph = autoOption.querySelector('svg[aria-hidden="true"]')
     expect(autoGlyph).not.toBeNull()
     expect(autoGlyph!.innerHTML)
-      .not.toBe(screen.getByRole('menuitem', { name: '完全权限' }).querySelector('svg')!.innerHTML)
+      .not.toBe(screen.getByRole('menuitem', { name: 'Full access' }).querySelector('svg')!.innerHTML)
     fireEvent.click(autoOption)
 
-    const dialog = screen.getByRole('dialog', { name: '确认启用自动审查（实验）？' })
-    expect(dialog.textContent).toContain('不使用沙箱')
-    expect(dialog.textContent).toContain('误放行或误拒绝')
-    fireEvent.click(screen.getByRole('checkbox', { name: '我已了解这些风险，并愿意继续' }))
-    fireEvent.click(screen.getByRole('button', { name: '启用自动审查' }))
+    const dialog = screen.getByRole('dialog', { name: 'Enable Auto review (experimental)?' })
+    expect(dialog.textContent).toContain('runs without a sandbox')
+    expect(dialog.textContent).toContain('can falsely allow or deny actions')
+    fireEvent.click(screen.getByRole('checkbox', { name: 'I understand these risks and want to continue' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Enable Auto review' }))
     expect(select).toHaveBeenCalledExactlyOnceWith('auto')
     act(() => { selection.set({ value: { currentValue: 'auto' } }) })
     await act(async () => {})
 
-    expect(trigger().getAttribute('aria-label')).toBe('访问模式，当前：自动审查')
-    expect(trigger().textContent).toBe('自动审查')
+    expect(trigger().getAttribute('aria-label')).toBe('Access mode, current: Auto review')
+    expect(trigger().textContent).toBe('Auto review')
     expect(trigger().querySelectorAll('svg[aria-hidden="true"]')).toHaveLength(2)
-    expect(trigger().getAttribute('title')).toBe('无沙箱运行；每次原生工具调用和 PTC 内层调用前由同一模型进行实验性审查。')
+    expect(trigger().getAttribute('title')).toBe('Run without a sandbox after an experimental same-model review of every native tool call and PTC inner call.')
   })
 
   it('revokes open UI when locked or either source disappears', () => {
     const locked = setup()
     fireEvent.click(trigger())
-    fireEvent.click(screen.getByRole('menuitem', { name: '完全权限' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Full access' }))
     locked.view.rerender(<PermissionSelect {...locked.props} locked />)
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(trigger().disabled).toBe(true)
@@ -192,7 +192,7 @@ describe('PermissionSelect', () => {
     const withoutAuto = { ...CATALOG, options: CATALOG.options.filter(option => option.value !== 'auto') }
     const chooseAuto = () => {
       fireEvent.click(trigger())
-      fireEvent.click(screen.getByRole('menuitem', { name: '自动审查 EXP' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Auto review EXP' }))
     }
     try {
       chooseAuto()
@@ -207,15 +207,15 @@ describe('PermissionSelect', () => {
       chooseAuto()
       expect(screen.getByRole<HTMLInputElement>('checkbox').checked).toBe(false)
       fireEvent.click(screen.getByRole('checkbox'))
-      fireEvent.click(screen.getByRole('button', { name: '启用自动审查' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Enable Auto review' }))
       expect(select).toHaveBeenCalledExactlyOnceWith('auto')
-      expect(trigger().textContent).toBe('自动审查')
+      expect(trigger().textContent).toBe('Auto review')
 
       act(() => {
         selection.set({ value: { currentValue: 'danger-full-access' } })
         catalog.set({ value: withoutAuto })
       })
-      expect(trigger().textContent).toBe('完全权限')
+      expect(trigger().textContent).toBe('Full access')
       expect(trigger().disabled).toBe(true)
     } finally {
       submitted.resolve(false)
@@ -231,11 +231,11 @@ describe('PermissionSelect', () => {
     expect(trigger().querySelectorAll('svg')).toHaveLength(1)
 
     fireEvent.click(trigger())
-    fireEvent.click(screen.getByRole('menuitem', { name: '工作区内修改' }))
-    expect(trigger().textContent).toBe('工作区内修改')
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Workspace Write' }))
+    expect(trigger().textContent).toBe('Workspace Write')
     await act(async () => {})
     expect(trigger().textContent).toBe('Custom')
     act(() => { selection.set({ value: { currentValue: 'workspace-write' } }) })
-    expect(trigger().textContent).toBe('工作区内修改')
+    expect(trigger().textContent).toBe('Workspace Write')
   })
 })

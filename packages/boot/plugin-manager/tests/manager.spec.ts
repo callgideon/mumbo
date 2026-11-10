@@ -519,7 +519,7 @@ it.each(['native', 'runtime'] as const)('reads a disabled bundle and its indepen
       bundle: { patch: './cordis.patch.yml' },
     } }))
   writeFileSync(join(root, 'locale', 'en.json'), '{"meta":{"title":"Local bundle"}}')
-  writeFileSync(join(root, 'locale', 'zh.json'), '{"meta":{"title":"本地组合包"}}')
+  writeFileSync(join(root, 'locale', 'ja.json'), '{"meta":{"title":"ローカルバンドル"}}')
   writeFileSync(join(child, 'package.json'), JSON.stringify({ name: 'local-child', exports: {
     './first': './index.js', './second': './index.js',
     './first/locale/*.json': './first-locale/*.json', './second/locale/*.json': './second-locale/*.json',
@@ -553,7 +553,7 @@ it.each(['native', 'runtime'] as const)('reads a disabled bundle and its indepen
   }
   await ctx.plugin(PluginPackages, mode === 'runtime' ? { resolution } : {})
   const result = (await manager.listBundles()).find(row => row.name === 'localized')
-  expect(result).toMatchObject({ enabled: false, meta: { title: { en: 'Local bundle', zh: '本地组合包' } }, rows: [
+  expect(result).toMatchObject({ enabled: false, meta: { title: { en: 'Local bundle', ja: 'ローカルバンドル' } }, rows: [
     { rowId: 'first', moduleName: 'local-child/first', meta: { title: { en: 'First plugin' } } },
     { rowId: 'second', moduleName: 'local-child/second', meta: { title: { en: 'Second plugin' } } },
   ] })

@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-client-ui-workspace
 
-English | [中文](README.zh.md)
-
 Desktop product events use the optional [product analytics service](../product-analytics/README.md); ordinary Web interactions are excluded.
 
 ## Summary
@@ -29,7 +27,7 @@ This package lets users browse grouped or flat Session lists, choose a Workspace
 
 Use the sidebar to browse Workspaces and their Sessions, reorder them, and start new ones; use the picker in the Session Intent hero to choose a Workspace for a new session. Picker entries that share a name also show the shortest trailing path that tells each apart, and hovering one shows its full path. An open Workspace shows its first non-blank Sessions in list order up to a per-Workspace watermark, initially five. The watermark rises to cover the last Session within the first 50 that is running, has a running child, awaits the user, has an unread completion, or is open in the main view; a Session opened from search raises it to that Session at any position. The watermark is a row count that never falls on its own, so the rows stay visible after a run or notification ends; a reorder that moves a Session past the watermark hides it. Each **Show more** click raises it by five, without the 50-row limit, and reveals the rest when five or fewer remain; after the final batch, **Show less** resets it. Folding a Workspace resets its watermark and those of its nested Workspaces; a reset watermark still covers the qualifying Sessions. The selected blank **New Session** is an extra row outside the watermark until its first prompt. Watermarks are not persisted; any unmount of the grouped tree resets them.
 
-History rows without a stored title use the localized unnamed label (未命名 / Untitled), rather than a directory name. The current blank row remains New Session; other blank rows remain hidden. Rename drafts use the stored title, or start empty when unnamed; unnamed rows do not offer title copying.
+History rows without a stored title use the localized unnamed label (Untitled), rather than a directory name. The current blank row remains New Session; other blank rows remain hidden. Rename drafts use the stored title, or start empty when unnamed; unnamed rows do not offer title copying.
 
 Without hover, Workspace actions appear only while expanded, Session More buttons stay visible, and search-result actions remain visible. Toolbar tooltips render outside the sidebar so its drawer animation does not crop them. Search and rename inputs use 16px text with a coarse pointer; a fine pointer keeps their compact sizes.
 
@@ -152,7 +150,6 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 const en: LocaleDictOf<typeof NS> = { export: 'Export {title}' }
-const zh: LocaleDictOf<typeof NS> = { export: '导出 {title}' }
 
 interface ExportRowInjected {
   exportSession: (sessionId: SessionId) => void
@@ -175,7 +172,7 @@ function ExportRow({ sessionId, displayTitle, useMenuOpenState, exportSession, t
 export const inject = ['slots', 'locale']
 
 export function apply(ctx: Context): void {
-  ctx.effect(() => ctx.locale.register(NS, { en, zh }), 'acme-session-actions: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { en }), 'acme-session-actions: dictionaries')
 
   // Order 500 places the row after the shipped Archive (400); `separatorBefore` opens the plugin group.
   ctx.slots.inject('sidebar.workspaces.session.menu.item', () => ctx.slots.register({

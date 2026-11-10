@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # dsh-cua native helper
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 This macOS 14+ JSON-lines helper uses Swift 6, AppKit, Accessibility, CoreGraphics and ScreenCaptureKit. Windows support is in development. It adapts selected MIT-licensed Cua Driver behavior without loading an external driver. `upstream.json` records the fixed upstream version, adapted Swift files and local modules; `LICENSE.cua-driver` preserves the MIT notice.

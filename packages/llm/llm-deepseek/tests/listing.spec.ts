@@ -112,7 +112,7 @@ describe('parseModelListing', () => {
 
   const OWN = `client_metadata["${APP_IDENTITY.product}"]`
   const showing = (badge: unknown) => ({ ...MESSAGES, client_metadata: { [APP_IDENTITY.product]: { badge } } })
-  const longest = '十'.repeat(MAX_BADGE_TEXT_LENGTH)
+  const longest = 'じ'.repeat(MAX_BADGE_TEXT_LENGTH)
   it.each([
     [{ text: '1017', tone: 'info' }, { text: '1017', tone: 'info' }],
     [{ text: '  1017 ', tone: 'success' }, { text: '1017', tone: 'success' }],
@@ -123,7 +123,7 @@ describe('parseModelListing', () => {
     [{ text: 'Beta', tone: null }, { text: 'Beta', tone: 'neutral' }],
     [{ text: 'Beta', tone: 'accent' }, { text: 'Beta', tone: 'neutral' }],
     [{ text: 'Beta', tone: 1 }, { text: 'Beta', tone: 'neutral' }],
-    [{ text: { en: 'New', zh: '新', 'zh-hant': ' 新 ' }, tone: 'info' }, { text: { en: 'New', zh: '新', 'zh-hant': '新' }, tone: 'info' }],
+    [{ text: { en: 'New', ja: 'ニュー', 'ja-jp': ' ニュー ' }, tone: 'info' }, { text: { en: 'New', ja: 'ニュー', 'ja-jp': 'ニュー' }, tone: 'info' }],
   ])('decodes badge %j', (badge, expected) => {
     expect(only(showing(badge))?.badge).toEqual({ kind: 'badge', badge: expected })
   })
@@ -163,7 +163,7 @@ describe('parseModelListing', () => {
     { tone: 'info' },
     { text: null },
     { text: '   ' },
-    { text: `${longest}十` },
+    { text: `${longest}じ` },
     { text: 'line\nbreak' },
     { text: '\nNew' },
     { text: 'New\u2028Model' },
@@ -175,10 +175,10 @@ describe('parseModelListing', () => {
     { text: '\ufe0f' },
     { text: ' \u00ad\u200b ' },
     { text: 7 },
-    { text: { zh: '新' } },
-    { text: { en: 'New', ZH: '新' } },
-    { text: { en: 'New', zh: '' } },
-    { text: { en: 'New', zh: '\u200b' } },
+    { text: { ja: 'ニュー' } },
+    { text: { en: 'New', JA: 'ニュー' } },
+    { text: { en: 'New', ja: '' } },
+    { text: { en: 'New', ja: '\u200b' } },
     { text: { en: 1 } },
   ])('rejects badge %j without hiding the entry', (badge) => {
     const entry = only(showing(badge))

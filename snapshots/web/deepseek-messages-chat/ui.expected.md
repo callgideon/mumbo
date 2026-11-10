@@ -1,28 +1,28 @@
 - banner:
-  - navigation "会话层级": 只回复 MESSAGES_WEB_READY，不调用
-  - text: 标准模式
-  - button "更多操作"
-  - button "打开右侧边栏"
+  - navigation "Session hierarchy": Reply only with MESSAGES_WEB_READY and
+  - text: Standard mode
+  - button "More actions"
+  - button "Open right sidebar"
   - tablist:
-    - tab "对话" [selected]
-    - tab "轨迹"
-  - button "更多会话视图"
-- text: 只回复 MESSAGES_WEB_READY，不调用工具。 {{clock}}
-- button "复制"
-- status: 已完成
-- button "已完成，用时 {{duration}}"
+    - tab "Chat" [selected]
+    - tab "Trajectory"
+  - button "More conversation views"
+- text: Reply only with MESSAGES_WEB_READY and do not call tools. {{clock}}
+- button "Copy"
+- status: Completed
+- button "Completed in {{duration}}"
 - paragraph: MESSAGES_WEB_READY
-- button "复制"
-- button "好的回答"
-- button "有问题的回答"
-- button "在新对话中分支"
-- button "用量 8.2K tok"
+- button "Copy"
+- button "Good response"
+- button "Bad response"
+- button "Branch into a new conversation"
+- button "Usage 8.2K tok"
 - text: {{clock}}
-- textbox "发消息或创建任务, / 调用指令, @ 文件或对话"
-- button "添加文件或调用指令"
-- button "访问模式，当前：工作区内修改": 工作区内修改
-- button "选择模型，当前 DeepSeek-V4-Flash，推理等级 high": DeepSeek-V4-Flash high
-- button "发送消息" [disabled]
-- button "1 轮 1 步 · {{throughput}} tok/s": 1 轮 1 步{{throughput}} tok/s
-- button "8.2K tok · 缓存命中 16%": 8.2K tok缓存命中 16%
-- button "上下文已用 1%": 1%
+- textbox "Message or run a task, / commands, @ files or sessions"
+- button "Add files or run commands"
+- 'button "Access mode, current: Workspace Write"': Workspace Write
+- button "Select model, current DeepSeek-V4-Flash, reasoning effort high": DeepSeek-V4-Flash high
+- button "Send message" [disabled]
+- button "1 turns 1 steps · {{throughput}} tok/s": 1 turns 1 steps{{throughput}} tok/s
+- button "8.2K tok · Cache hit 16%": 8.2K tokCache hit 16%
+- button "1% of context used": 1%

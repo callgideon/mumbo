@@ -4,8 +4,6 @@ description: "Review a DSH page or modal as a whole, explain findings through de
 
 # Cookbook: review a UI design
 
-English | [中文](reviewing-ui-design.zh.md)
-
 ## Summary
 
 Use this cookbook for explicitly requested comprehensive reviews and for evidence steps justified by a change's impact or regression risk. Ordinary development follows the lightweight path in the [UI change workflow](../../.agents/skills/dsh-client-ui-ux/SKILL.md#required-review-loop); it does not execute every section below. The [principles and case reference](../ui-design-review-cases.md) supplies judgment criteria, not a mandatory checklist. Existing tests, GUI PR GIFs and designer/product approval remain governed by their original owners.

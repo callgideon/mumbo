@@ -1,1 +1,1 @@
-- button "代码审查和变更 查看代码变更与本会话的变更请求"
+- button "Code review and changes Review code changes and this session’s change requests"

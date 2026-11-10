@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-sandbox
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 Use `dsh-sandbox` to run a subprocess and everything it spawns under a per-call file-access policy. A command can run without writes (`read-only`), write only inside its workspace (`workspace-write`), or run unrestricted (`danger-full-access`). If the requested mode cannot be enforced, the call fails with `SANDBOX_UNAVAILABLE` instead of running unconfined. After a denied call, the model can request one strictly wider mode for human approval. This is same-world confinement: the process still shares the host kernel and filesystem; use a container, microVM, or remote executor when the whole environment must be isolated.
@@ -63,7 +61,7 @@ Enforcement is reported per call: `full` means the backend governs every promise
 
 ### Denied calls and escalation
 
-When a confined call is denied, the operation reports a denial marker naming the mode — `[sandbox: file access denied under <mode> mode]` — and, when the composition advertises escalation, an escalation hint. The model may retry the exact call once with `sandbox_permissions` (the narrowest wider mode that suffices) plus a `justification`; the approval service obtains consent for the operation. The request retains its audit reason and supplies English, Chinese, and Japanese presentation copy from `src/locales.ts`, with the model's justification unchanged. Missing translations follow the locale service's fallback chain, ultimately English; requesters own their translated presentation text. A wider mode requires approval and applies to that one call only. Repeating the call's effective mode succeeds without approval; narrower targets remain invalid.
+When a confined call is denied, the operation reports a denial marker naming the mode — `[sandbox: file access denied under <mode> mode]` — and, when the composition advertises escalation, an escalation hint. The model may retry the exact call once with `sandbox_permissions` (the narrowest wider mode that suffices) plus a `justification`; the approval service obtains consent for the operation. The request retains its audit reason and supplies presentation copy in every shipped language from `src/locales.ts`, with the model's justification unchanged. Missing translations follow the locale service's fallback chain, ultimately English; requesters own their translated presentation text. A wider mode requires approval and applies to that one call only. Repeating the call's effective mode succeeds without approval; narrower targets remain invalid.
 
 ### Fail-closed behavior
 

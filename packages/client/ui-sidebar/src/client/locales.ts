@@ -1,23 +1,9 @@
 /** `sidebar` namespace dictionaries for shell controls and global panels. */
 
-/** Simplified Chinese dictionary (the key-set source of truth). */
-export const zh = {
-  'panels.unpinTooltip': '从左侧栏取消固定',
-  'panels.unpin': '从侧边栏取消固定{name}',
-  'session.new': '新会话',
-  'session.new.label': '新建会话',
-  'toggle.open': '打开侧边栏',
-  'toggle.collapse': '收起侧边栏',
-  'panels.label': '全局面板',
-  'navigation.label': '导航',
-  'panels.more': '更多',
-  'version.copied': '版本号复制成功',
-} satisfies Record<string, string>
-
 /** The sidebar namespace key union. */
-export type SidebarKey = keyof typeof zh
+export type SidebarKey = keyof typeof en
 
-/** English dictionary, checked complete against the zh key set. */
+/** English dictionary (the key-set source of truth). */
 export const en = {
   'panels.unpinTooltip': 'Unpin from left sidebar',
   'panels.unpin': 'Unpin {name} from sidebar',
@@ -29,7 +15,7 @@ export const en = {
   'navigation.label': 'Navigation',
   'panels.more': 'More',
   'version.copied': 'Version copied',
-} satisfies Record<SidebarKey, string>
+} satisfies Record<string, string>
 
 /** Japanese copy, checked against the English keys. */
 export const ja = {

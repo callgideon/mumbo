@@ -130,7 +130,7 @@ describe('session-reference real Loader composition', () => {
       .map(body => body.split('\n').filter(line => line.startsWith('"'))
         .map(line => JSON.parse(line) as string).join(''))
     expect(messages).toEqual([
-      'EARLY_SOURCE_FACT\n' + 'Historical detail 界.\n'.repeat(30)
+      'EARLY_SOURCE_FACT\n' + 'Historical detail 계.\n'.repeat(30)
         + 'x'.repeat(4096) + 'GIANT_LINE_MIDDLE_FACT' + 'y'.repeat(4096),
       'LATEST_SOURCE_FACT\nThe captured answer is forty-two.',
     ])

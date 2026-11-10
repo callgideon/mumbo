@@ -43,7 +43,7 @@ To offer, call \`propose_action\` once, in the same turn as loading this skill, 
 
 ## Official plugins
 
-[{"name":"official-search","title":{"en":"Search","zh":"搜索"},"description":"Search past conversations.","enabled":false},{"name":"enabled","title":{"en":"Search","zh":"搜索"},"description":"Search past conversations.","enabled":true},{"name":"described","title":"described","description":"History search","enabled":false},{"name":"bare","title":"bare","description":"","enabled":false}]",
+[{"name":"official-search","title":{"en":"Search","zh":"Search"},"description":"Search past conversations.","enabled":false},{"name":"enabled","title":{"en":"Search","zh":"Search"},"description":"Search past conversations.","enabled":true},{"name":"described","title":"described","description":"History search","enabled":false},{"name":"bare","title":"bare","description":"","enabled":false}]",
   "name": "official-plugins",
   "provider": "dsh-official-plugins",
 }

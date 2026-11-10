@@ -1236,7 +1236,7 @@ describe('workspace context rendering', () => {
 
   it('keeps compact truncation notices within budget when a multibyte display path is cut', () => {
     const rendered = renderAgentInstructions([
-      { absolutePath: '/repo/路径/AGENTS.md', displayPath: '路径/AGENTS.md', content: 'x'.repeat(1000) },
+      { absolutePath: '/repo/경로/AGENTS.md', displayPath: '경로/AGENTS.md', content: 'x'.repeat(1000) },
     ], { maxBytes: 51 })
 
     expect(Buffer.byteLength(rendered.text, 'utf8')).toBeLessThanOrEqual(51)
@@ -1596,7 +1596,7 @@ describe('workspace context rendering', () => {
 
   it('truncates multibyte content in both chains on code point boundaries near the limit', () => {
     const files = [
-      { absolutePath: '/home/user/.dsh/AGENTS.md', displayPath: '~/.dsh/AGENTS.md', content: '规'.repeat(400) },
+      { absolutePath: '/home/user/.dsh/AGENTS.md', displayPath: '~/.dsh/AGENTS.md', content: '규'.repeat(400) },
       { absolutePath: '/repo/AGENTS.md', displayPath: 'AGENTS.md', content: '😀'.repeat(300) },
     ]
 
@@ -1609,7 +1609,7 @@ describe('workspace context rendering', () => {
     expect(rendered.text).toContain([
       'Instructions from: ~/.dsh/AGENTS.md',
       '',
-      '规'.repeat(99),
+      '규'.repeat(99),
       '',
       'Instructions from: AGENTS.md',
       '',

@@ -10,8 +10,8 @@
 - navigation "Turn navigation":
   - button "Jump to turn 1"
   - button "Jump to turn 2"
-- group "Command input": /goal 做两个turn，每个turn输出随机一个包的文件结构。注意你做完一个turn之后，直接输出内容，停止，我们的系统会帮你再开一个turn，你看着做一个类似的
-- 'button "goal Goal created Status: active Objective: 做两个turn，每个turn输出随机一个包的文件结构。注意你做完一个turn之后，直接输出内容，停止，我们的系统会帮你再开一个turn，你看着做一个类似的 Rounds: 0/256 Activation: armed Commands: /goal edit <objective>, /goal pause, /goal clear"'
+- group "Command input": /goal Do two turns. In each turn, output the file structure of one random package. Note that after you finish one turn, output the content directly and stop; our system will open another turn for you, and you do a similar one.
+- 'button "goal Goal created Status: active Objective: Do two turns. In each turn, output the file structure of one random package. Note that after you finish one turn, output the content directly and stop; our system will open another turn for you, and you do a similar one. Rounds: 0/256 Activation: armed Commands: /goal edit <objective>, /goal pause, /goal clear"'
 - button "Continuing goal {{clock}}":
   - text: Continuing goal
   - time: {{clock}}
@@ -20,9 +20,9 @@
 - button "Ran commands and updated the plan" [expanded]
 - button "Context injection runtime-context"
 - button "Context injection time-context"
-- 'button "Think The user''s goal is: \"做两个turn，每个turn输出随机一个包的文件结构。注意你做完一个turn之后，直接输出内容，停止，我们的系统会帮你再开一个turn，你看着做一个类似的\" — which translates to: \"Do two turns, each turn output the file structure of a random package. Note that after you finish one turn, directly output the content and stop; our system will help you open another turn, and you just do something similar.\""'
+- 'button "Think The user''s goal is: \"Do two turns. In each turn, output the file structure of one random package. Note that after you finish one turn, output the content directly and stop; our system will open another turn for you, and you do a similar one.\" — in short: two turns, each outputting the file structure of a random package; after finishing one turn I output the content directly and stop, and the system opens another turn where I do something similar."'
 - button "Bash List package directories deterministically"
-- button "View goal 做两个turn，每个turn输出随机一个包的文件结构。注意你做完一个turn之后，直接输出内容，停止，我们的系统会帮你再开一个turn，你看着做一个类似的"
+- button "View goal Do two turns. In each turn, output the file structure of one random package. Note that after you finish one turn, output the content directly and stop; our system will open another turn for you, and you do a similar one."
 - 'button "Think There''s a `packages` directory. Let me look inside to see what packages are available."'
 - button "Bash List packages directory contents"
 - button "Think There are 4 packages:"
@@ -31,10 +31,10 @@
 - button "Bash Randomly select one package with Python"
 - 'button "Think The random pick for turn 1 is `packages/context/session-reference`. Now I''ll output its file structure. Let me get the file tree."'
 - button "Bash List all files in session-reference package"
-- 'button "Think Turn 1 is done. Per the objective: \"你做完一个turn之后，直接输出内容，停止\" — after finishing a turn, directly output the content and stop. The system will open another turn."'
+- 'button "Think Turn 1 is done. Per the objective: \"after you finish one turn, output the content directly and stop\" — after finishing a turn, directly output the content and stop. The system will open another turn."'
 - paragraph:
   - strong: Turn 1 / 2
-  - text: — 随机选中的包：
+  - text: "— Randomly picked package:"
   - code: packages/context/session-reference
   - text: 📦
 - text: Code block
@@ -44,8 +44,8 @@
 - text: Code block
 - button "Wrap lines" [pressed]
 - button "Copy"
-- code: "session-reference/ ├── README.md # 包说明文档 ├── package.json # 包元数据与依赖声明 ├── src/ │ ├── index.ts # 入口，导出公共 API │ └── uri.ts # 会话引用 URI 相关实现 └── tests/ └── session-reference.spec.ts # 单元测试"
-- paragraph: 这是一个很典型的轻量 TypeScript 包结构：入口 + 实现 + 测试。这一轮到此结束，等系统开启下一个 turn。
+- code: "session-reference/ ├── README.md # Package documentation ├── package.json # Package metadata and dependency declarations ├── src/ │ ├── index.ts # Entry point, exports the public API │ └── uri.ts # Session reference URI handling └── tests/ └── session-reference.spec.ts # Unit tests"
+- paragraph: "This is a very typical lightweight TypeScript package layout: entry point + implementation + tests. This round ends here; waiting for the system to start the next turn."
 - button "Copy"
 - button "Good response"
 - button "Bad response"
@@ -65,7 +65,7 @@
 - 'button "Think This is turn 2 of 2. I''ve output the file structure for `packages/llm/token-meter`. Both turns are done. I should output the content, stop, and then mark the goal as complete since both turns are finished."'
 - paragraph:
   - strong: Turn 2 / 2
-  - text: — 随机选中的包：
+  - text: "— Randomly picked package:"
   - code: packages/llm/token-meter
   - text: 📦
 - text: Code block
@@ -75,69 +75,69 @@
 - text: Code block
 - button "Wrap lines" [pressed]
 - button "Copy"
-- code: "token-meter/ ├── README.md # 包说明文档 ├── package.json # 包元数据与依赖声明 ├── src/ │ └── index.ts # 入口，导出公共 API（token 计量逻辑） └── tests/ └── token-meter.spec.ts # 单元测试"
+- code: "token-meter/ ├── README.md # Package documentation ├── package.json # Package metadata and dependency declarations ├── src/ │ └── index.ts # Entry point, exports the public API (token metering logic) └── tests/ └── token-meter.spec.ts # Unit tests"
 - paragraph:
-  - text: 两个 turn 都完成了（turn 1：
+  - text: "Each turn is complete (turn 1:"
   - code: session-reference
-  - text: ，turn 2：
+  - text: ", turn 2:"
   - code: token-meter
-  - text: ）。这一轮到此结束。
+  - text: ). This round ends here.
 - button "Updated the plan" [expanded]
-- button "View goal 做两个turn，每个turn输出随机一个包的文件结构。注意你做完一个turn之后，直接输出内容，停止，我们的系统会帮你再开一个turn，你看着做一个类似的"
-- paragraph: 两个 turn 均已完成，目标达成，标记 goal 为完成。
+- button "View goal Do two turns. In each turn, output the file structure of one random package. Note that after you finish one turn, output the content directly and stop; our system will open another turn for you, and you do a similar one."
+- paragraph: Both turns are complete and the objective is met; marking the goal as complete.
 - button "Updated the plan" [expanded]
-- button "Update goal 做两个turn，每个turn输出随机一个包的文件结构。注意你做完一个turn之后，直接输出内容，停止，我们的系统会帮你再开一个turn，你看着做一个类似的"
-- 'button "Context injection tool-goal complete: 做两个turn，每个turn输出随机一个包的文件结构。注意你做完一个turn之后，直接输出内容，停止，我们的系统会帮你再开一个turn，你看着做一个类似的"'
-- paragraph: 两个 turn 都完成了 ✅
+- button "Update goal Do two turns. In each turn, output the file structure of one random package. Note that after you finish one turn, output the content directly and stop; our system will open another turn for you, and you do a similar one."
+- 'button "Context injection tool-goal complete: Do two turns. In each turn, output the file structure of one random package. Note that after you finish one t…"'
+- paragraph: Each turn is complete ✅
 - paragraph:
-  - strong: 总结：
+  - strong: "Summary:"
 - list:
   - listitem:
     - strong: Turn 1
-    - text: — 随机选中
+    - text: — Randomly picked
     - code: packages/context/session-reference
-    - text: ，输出了文件结构： Code block
+    - text: "and output its file structure: Code block"
     - button "Wrap lines" [pressed]
     - button "Copy"
     - code: session-reference/ ├── README.md ├── package.json ├── src/ │ ├── index.ts │ └── uri.ts └── tests/ └── session-reference.spec.ts
   - listitem:
     - strong: Turn 2
-    - text: — 随机选中
+    - text: — Randomly picked
     - code: packages/llm/token-meter
-    - text: ，输出了文件结构： Code block
+    - text: "and output its file structure: Code block"
     - button "Wrap lines" [pressed]
     - button "Copy"
     - code: token-meter/ ├── README.md ├── package.json ├── src/ │ └── index.ts └── tests/ └── token-meter.spec.ts
 - paragraph:
-  - strong: 验证方式：
-  - text: 两个包的随机选择都通过
+  - strong: "Verification:"
+  - text: Both package picks were made at random with
   - code: python3 random.choice
-  - text: 从工作区的
+  - text: from the workspace's
   - code: packages/
-  - text: 目录下实际枚举的 4 个候选包中抽取（
+  - text: directory, drawing from the 4 candidate packages actually enumerated there (
   - code: ui-conversation
-  - text: 、
+  - text: ","
   - code: session-reference
-  - text: 、
+  - text: ","
   - code: token-meter
-  - text: 、
+  - text: ","
   - code: skill-filesystem
-  - text: ），文件结构则用
+  - text: ); the file structures were listed with
   - code: find
-  - text: 实际列出文件后整理输出，均已排除
+  - text: and then formatted for output, in both cases excluding
   - code: node_modules
-  - text: 和
+  - text: and
   - code: .git
-  - text: 。第二次随机抽到了与 turn 1 相同的包，为避免重复换抽了另一个。
+  - text: . The second random draw landed on the same package as turn 1 did, so I re-drew a different one to avoid repetition.
 - paragraph:
-  - strong: 说明：
-  - text: 本轮没有产生任何文件修改或提交——任务本身就是"输出文件结构"，所有产物都在上面的消息文本里。
+  - strong: "Note:"
+  - text: This round made no file changes or commits——the task itself was simply "output the file structure", so everything it produced is in the message text above.
 - paragraph:
-  - text: 如果你还想看剩下两个包（
+  - text: If you would also like to see the structure of the remaining two packages (
   - code: ui-conversation
-  - text: 、
+  - text: ","
   - code: skill-filesystem
-  - text: ）的结构，或者其他格式的输出（比如带文件大小的树形图），随时告诉我。
+  - text: ), or output in another format (for example, a tree with file sizes), just let me know.
 - button "Copy"
 - button "Good response"
 - button "Bad response"

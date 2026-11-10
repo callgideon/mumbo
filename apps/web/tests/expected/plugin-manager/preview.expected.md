@@ -1,24 +1,24 @@
-- button "返回 实验性插件": 实验性插件
+- button "Back to Experimental plugins": Experimental plugins
 - status
-- switch "启用 DSH 徽章技能"
-- heading "DSH 徽章技能" [level=3]
-- text: v{{version}} 实验性
+- switch "Enable DSH badge skill"
+- heading "DSH badge skill" [level=3]
+- text: v{{version}} Experimental
 - paragraph:
   - code: "@deepseek-ai/dsh-experimental-badge-skill-bundle"
-- paragraph: 让 Agent 为文档、PR 等产出添加「powered by dsh」徽章。
-- region "详细介绍":
+- paragraph: Let agents add a “powered by dsh” badge to documents, pull requests, and other outputs.
+- region "Details":
   - paragraph:
-    - img "DSH 徽章技能功能预览"
-- heading "包含的组件" [level=4]
-- text: 共 1 个 · 1 已停用
+    - img "DSH badge skill feature preview"
+- heading "Components" [level=4]
+- text: 1 total · 1 off
 - list:
   - listitem:
-    - text: DSH 提供官方 powered-by-DSH 徽章技能。
+    - text: DSH Provide the official powered-by-DSH badge skill.
     - code: skill-badge
     - code: "@deepseek-ai/dsh-skill-badge"
-    - text: 已关闭
-- heading "来源信息" [level=4]
-- term: 代码来源
-- definition: 内置
-- term: 当前版本
+    - text: "Off"
+- heading "Source" [level=4]
+- term: Code source
+- definition: Built in
+- term: Current version
 - definition: {{version}}

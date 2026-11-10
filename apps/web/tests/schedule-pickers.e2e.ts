@@ -71,7 +71,6 @@ async function expectEllipsisStyle(labels: Locator): Promise<void> {
 
 describe.each([
   { locale: 'en-US', tasks: 'Automation tasks', time: 'Time', second: 'Second', zone: 'Time zone', repeat: 'Repeat' },
-  { locale: 'zh-CN', tasks: '自动化任务', time: '时间', second: '秒', zone: '时区', repeat: '重复' },
 ])('automation pickers ($locale)', (copy) => {
   it('keeps the repeat menu inside the short layout viewport before and after zoom', async () => {
     const context = await browser.newContext({
@@ -81,7 +80,7 @@ describe.each([
     const page = await context.newPage()
     try {
       await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-      await revealNavigationDrawer(page, copy.locale === 'zh-CN' ? 'zh' : 'en')
+      await revealNavigationDrawer(page, 'en')
       await page.getByRole('button', { name: copy.tasks, exact: true }).click()
       const detail = page.getByTestId('task-manager-page')
       await detail.getByRole('button', { name: TITLE, exact: true }).click()
@@ -119,7 +118,7 @@ describe.each([
     try {
       const consoleWatch = watchConsole(page)
       await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-      await revealNavigationDrawer(page, copy.locale === 'zh-CN' ? 'zh' : 'en')
+      await revealNavigationDrawer(page, 'en')
       await page.getByRole('button', { name: copy.tasks, exact: true }).click()
       const detail = page.getByTestId('task-manager-page')
       await detail.getByRole('button', { name: TITLE, exact: true }).click()

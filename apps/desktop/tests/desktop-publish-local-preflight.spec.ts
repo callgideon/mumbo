@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -35,8 +36,11 @@ it('checks the retained preset before approval and the approved preset before up
   }
 })
 
-it('runs the local preflight before dependency installation in both self-hosted jobs', async () => {
-  const workflow = await readFile('.github/workflows/desktop-publish.yml', 'utf8')
+const publishWorkflow = '.github/workflows/desktop-publish.yml'
+
+// The Mumbo fork ships only mumbo-* workflows, so the upstream publish workflow is absent there.
+it.skipIf(!existsSync(publishWorkflow))('runs the local preflight before dependency installation in both self-hosted jobs', async () => {
+  const workflow = await readFile(publishWorkflow, 'utf8')
   for (const job of ['prepare', 'publish']) {
     const section = workflow.split(`\n  ${job}:`)[1]!.split(/\n  \w+:/u)[0]!
     expect(section.indexOf('node apps/desktop/scripts/preflight-desktop-publish-local.mjs')).toBeGreaterThan(0)

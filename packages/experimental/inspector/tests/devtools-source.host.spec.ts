@@ -122,7 +122,7 @@ describe('generated CSS text modules', () => {
     ['empty', ''],
     ['quotes and slashes', '.title::after { content: "double"; other: \'single\'; path: "C:\\icons\\file"; }'],
     ['backticks and interpolation', '/* `template` ${mustNotRun()} */\n.title { content: "${value}"; }'],
-    ['line endings', '\uFEFF:root {\r\n  --label: "中文 🚀";\r\n}\n'],
+    ['line endings', '\uFEFF:root {\r\n  --label: "옭뇣 🚀";\r\n}\n'],
     ['control characters', '/* \u0000\t\u2028\u2029 */'],
     ['script-like text', '\"; throw new Error("must stay text"); /* </script> */'],
   ])('preserves CSS text through module evaluation: %s', (_label, source) => {

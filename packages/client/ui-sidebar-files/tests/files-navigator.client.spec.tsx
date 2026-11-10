@@ -19,7 +19,7 @@ import { RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
 import { DEFAULT_NAVIGATOR_WIDTH } from '../src/client/store.ts'
 import type { DirLevel, FilesTreeState } from '../src/client/store.ts'
 import { locateFile, navigatorGeometry, relativeFileOf } from '../src/client/store.ts'
-import { zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 import { mountNavigator, PANE, ROOT, SESSION, TAB } from './mount.client.tsx'
 import type { Mounted } from './mount.client.tsx'
 
@@ -40,7 +40,7 @@ afterEach(() => {
 
 /** Show the navigator and answer the root and `src` listings, as revealing `src/…` asks for them. */
 async function revealSrc(h: Mounted): Promise<void> {
-  act(() => { fireEvent.click(h.view.getByRole('button', { name: zh['navigator.show'] })) })
+  act(() => { fireEvent.click(h.view.getByRole('button', { name: en['navigator.show'] })) })
   await act(() => h.script.watches.ready(ROOT))
   await act(() => h.script.settle({ ok: true, value: ROOT_LEVEL }))
   await act(() => h.script.watches.ready(`${ROOT}/src`))
@@ -61,12 +61,12 @@ describe('FileNavigator beside a preview', () => {
   it('stays hidden and lists nothing until the toggle shows it', async () => {
     const h = mountNavigator(A)
     expect(h.view.container.querySelector('[data-files-navigator]')).toBeNull()
-    const toggle = h.view.getByRole('button', { name: zh['navigator.show'] })
+    const toggle = h.view.getByRole('button', { name: en['navigator.show'] })
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
     expect(h.script.watches.opened).toEqual([])
     act(() => { fireEvent.click(toggle) })
     expect(h.instance.getSnapshot().byPane[PANE]?.open).toBe(true)
-    expect(h.view.getByRole('button', { name: zh['navigator.hide'] }).getAttribute('aria-expanded')).toBe('true')
+    expect(h.view.getByRole('button', { name: en['navigator.hide'] }).getAttribute('aria-expanded')).toBe('true')
     await act(() => h.script.watches.ready(ROOT))
     expect(h.view.container.querySelector('[data-files-navigator]')).not.toBeNull()
   })
@@ -131,8 +131,8 @@ describe('FileNavigator beside a preview', () => {
     const h = mountNavigator(A)
     await revealSrc(h)
     fireEvent.scroll(h.view.container.querySelector('[data-files-body]')!, { target: { scrollTop: 64 } })
-    act(() => { fireEvent.click(h.view.getByRole('button', { name: zh['navigator.hide'] })) })
-    act(() => { fireEvent.click(h.view.getByRole('button', { name: zh['navigator.show'] })) })
+    act(() => { fireEvent.click(h.view.getByRole('button', { name: en['navigator.hide'] })) })
+    act(() => { fireEvent.click(h.view.getByRole('button', { name: en['navigator.show'] })) })
     expect(h.view.container.querySelector('[data-files-body]')?.scrollTop).toBe(64)
   })
 
@@ -140,10 +140,10 @@ describe('FileNavigator beside a preview', () => {
     const h = mountNavigator(A)
     await revealSrc(h)
     const streams = [...h.script.watches.opened]
-    act(() => { fireEvent.click(h.view.getByRole('button', { name: zh['navigator.hide'] })) })
+    act(() => { fireEvent.click(h.view.getByRole('button', { name: en['navigator.hide'] })) })
     await endTask()
     expect(streams.every(stream => stream.signal.aborted)).toBe(true)
-    act(() => { fireEvent.click(h.view.getByRole('button', { name: zh['navigator.show'] })) })
+    act(() => { fireEvent.click(h.view.getByRole('button', { name: en['navigator.show'] })) })
     // The kept rows draw at once while the listing reopens.
     expect(h.view.container.querySelector(`[data-files-path="${ROOT}/src/b.ts"]`)).not.toBeNull()
     await act(() => h.script.watches.ready(ROOT, 1))
@@ -222,7 +222,7 @@ describe('FileNavigator beside a preview', () => {
     Element.prototype.scrollIntoView = scrolled
     const outside = sessionFileAddress(SESSION, '/elsewhere/a.ts')
     const h = mountNavigator(outside)
-    act(() => { fireEvent.click(h.view.getByRole('button', { name: zh['navigator.show'] })) })
+    act(() => { fireEvent.click(h.view.getByRole('button', { name: en['navigator.show'] })) })
     await act(() => h.script.watches.ready(ROOT))
     await act(() => h.script.settle({ ok: true, value: ROOT_LEVEL }))
     expect(h.view.container.querySelector('[aria-current]')).toBeNull()
@@ -240,7 +240,7 @@ describe('FileNavigator beside a preview', () => {
       await act(() => h.script.watches.ready(ROOT))
       expect(aside()?.getAttribute('data-files-navigator-mode')).toBe(mode)
       expect(aside()?.className).toMatch(mode)
-      expect(h.view.getByRole('separator', { name: zh['navigator.resize'] })).not.toBeNull()
+      expect(h.view.getByRole('separator', { name: en['navigator.resize'] })).not.toBeNull()
       expect(aside()?.style.getPropertyValue('--files-navigator-width')).toBe(`${drawn}px`)
       // A modified Escape belongs to someone else.
       fireEvent.keyDown(aside()!, { key: 'Escape', shiftKey: true })
@@ -271,11 +271,11 @@ describe('FileNavigator beside a preview', () => {
     const aside = (): HTMLElement | null => h.view.container.querySelector<HTMLElement>('[data-files-navigator]')
     expect(aside()?.getAttribute('data-files-navigator-mode')).toBe('fill')
     expect(h.view.queryByRole('separator')).toBeNull()
-    act(() => { fireEvent.click(h.view.getByRole('button', { name: zh['navigator.hide'] })) })
+    act(() => { fireEvent.click(h.view.getByRole('button', { name: en['navigator.hide'] })) })
     h.row.width = 400
-    act(() => { fireEvent.click(h.view.getByRole('button', { name: zh['navigator.show'] })) })
+    act(() => { fireEvent.click(h.view.getByRole('button', { name: en['navigator.show'] })) })
     expect(aside()?.getAttribute('data-files-navigator-mode')).toBe('overlay')
-    expect(h.view.getByRole('separator', { name: zh['navigator.resize'] })).not.toBeNull()
+    expect(h.view.getByRole('separator', { name: en['navigator.resize'] })).not.toBeNull()
   })
 
   it.each(['row', 'viewport'] as const)('hands covered content focus to the open tree only when the %s starts filling', async (source) => {
@@ -529,7 +529,7 @@ describe('FileNavigator beside a preview', () => {
     edge().style.display = ''
     act(() => { edge().focus() })
     act(() => { h.row.report(399) })
-    act(() => { h.view.getByRole('button', { name: zh['navigator.hide'] }).focus() })
+    act(() => { h.view.getByRole('button', { name: en['navigator.hide'] }).focus() })
     await endTask()
     expect(document.activeElement?.hasAttribute('data-files-navigator-toggle')).toBe(true)
   })
@@ -554,7 +554,7 @@ describe('FileNavigator beside a preview', () => {
     const h = mountNavigator(A)
     act(() => { h.instance.actions.shown(PANE, true) })
     await act(() => h.script.watches.ready(ROOT))
-    const edge = h.view.getByRole('separator', { name: zh['navigator.resize'] })
+    const edge = h.view.getByRole('separator', { name: en['navigator.resize'] })
     const width = (): number | undefined => h.instance.getSnapshot().byPane[PANE]?.width
     expect(edge.getAttribute('aria-valuenow')).toBe(String(DEFAULT_NAVIGATOR_WIDTH))
     expect(edge.getAttribute('aria-valuemin')).toBe('180')
@@ -684,7 +684,7 @@ describe('FileNavigator beside a preview', () => {
     act(() => { h.viewers.set(false) })
     const row = (): HTMLElement => h.view.container.querySelector<HTMLElement>(`[data-files-path="${ROOT}/src/b.ts"]`)!
     expect(row().querySelector('button')).toBeNull()
-    expect(row().querySelector('[aria-disabled="true"]')?.getAttribute('title')).toBe(zh['entry.noViewer'])
+    expect(row().querySelector('[aria-disabled="true"]')?.getAttribute('title')).toBe(en['entry.noViewer'])
     // Directories still open.
     expect(within(h.view.container.querySelector<HTMLElement>(`[data-files-path="${ROOT}/src"]`)!).getByRole('button', { name: 'src' })).not.toBeNull()
     act(() => { h.viewers.set(true) })
@@ -697,12 +697,12 @@ describe('FileNavigator beside a preview', () => {
     Element.prototype.scrollIntoView = scrolled
     const h = mountNavigator(A)
     await revealSrc(h)
-    act(() => { fireEvent.click(h.view.getByRole('button', { name: zh['navigator.hide'] })) })
+    act(() => { fireEvent.click(h.view.getByRole('button', { name: en['navigator.hide'] })) })
     await endTask()
     h.view.unmount()
     h.placement.contentId = sessionFileAddress(SESSION, 'lib/c.ts')
     const back = h.remount()
-    act(() => { fireEvent.click(back.getByRole('button', { name: zh['navigator.show'] })) })
+    act(() => { fireEvent.click(back.getByRole('button', { name: en['navigator.show'] })) })
     // The kept root level lacks `lib` until it is listed again.
     expect(h.instance.getSnapshot().byPane[PANE]?.tree?.levels[ROOT]).toMatchObject({ kind: 'ready', refreshing: true })
     expect(back.container.querySelector(`[data-files-path="${ROOT}/lib"]`)).toBeNull()
@@ -722,12 +722,12 @@ describe('FileNavigator beside a preview', () => {
   it('finishes a reveal on the kept listings below a directory that fails to list again, so its ancestors stay collapsible', async () => {
     const h = mountNavigator(A)
     await revealSrc(h)
-    act(() => { fireEvent.click(h.view.getByRole('button', { name: zh['navigator.hide'] })) })
+    act(() => { fireEvent.click(h.view.getByRole('button', { name: en['navigator.hide'] })) })
     await endTask()
     h.view.unmount()
     h.placement.contentId = sessionFileAddress(SESSION, 'src/new.ts')
     const back = h.remount()
-    act(() => { fireEvent.click(back.getByRole('button', { name: zh['navigator.show'] })) })
+    act(() => { fireEvent.click(back.getByRole('button', { name: en['navigator.show'] })) })
     expect(h.instance.getSnapshot().byPane[PANE]?.tree?.levels[`${ROOT}/src`]).toMatchObject({ refreshing: true })
     await act(() => h.script.watches.ready(ROOT, 1))
     await act(() => h.script.settle({ ok: false, error: new RemoteError('workspace-file/not-found', 'gone', { path: ROOT }) }))

@@ -96,11 +96,11 @@ describe('FontFamilyRow', () => {
 
   it('ignores Enter while an input method is composing', () => {
     const b = mount()
-    fireEvent.change(b.field, { target: { value: '思源' } })
+    fireEvent.change(b.field, { target: { value: 'Source Han' } })
     fireEvent.keyDown(b.field, { key: 'Enter', isComposing: true })
     fireEvent.keyDown(b.field, { key: 'Enter', keyCode: 229 })
     expect(b.setFontFamily).not.toHaveBeenCalled()
-    expect(b.field.value).toBe('思源')
+    expect(b.field.value).toBe('Source Han')
   })
 
   it('commits on Enter and follows later store changes', () => {

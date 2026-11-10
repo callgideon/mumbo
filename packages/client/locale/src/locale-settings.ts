@@ -12,7 +12,7 @@ export const LOCALE_PREFERENCE_FIELD = 'preference'
 export const LOCALE_ID_PATTERN = /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/u
 
 /** Baseline locales required by typed namespace dictionary registration. */
-export const LOCALE_IDS = ['zh', 'en'] as const
+export const LOCALE_IDS = ['en'] as const
 
 /** Baseline locale required by typed namespace dictionary registration. */
 export type BuiltInLocaleId = typeof LOCALE_IDS[number]

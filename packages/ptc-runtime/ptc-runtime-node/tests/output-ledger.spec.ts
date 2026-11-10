@@ -15,7 +15,7 @@ it('accounts for exact JSON escaping, separators and optional completion values'
 it('retains a bounded prefix when logs or a failure diagnostic exceed the limit', () => {
   for (const maxBytes of [4, 8, 40, 80]) {
     const ledger = new OutputLedger(maxBytes)
-    const result = ledger.limit(['a', 'b', '你好🙂'.repeat(50)])
+    const result = ledger.limit(['a', 'b', '안녕🙂'.repeat(50)])
     expect(result.error?.kind).toBe('output-limit')
     const bytes = Buffer.byteLength(JSON.stringify(result.logs)) + Buffer.byteLength(JSON.stringify(result.error?.message))
     expect(bytes).toBeLessThanOrEqual(maxBytes)

@@ -1,47 +1,47 @@
-- dialog "设置":
-  - text: 设置
+- dialog "Settings":
+  - text: Settings
   - navigation:
-    - button "通用设置"
-    - button "模型"
-    - button "内置插件"
-    - button "Agent 预设"
-  - button "打开配置文件"
-  - button "关闭"
-  - heading "Agent 预设" [level=2]
-  - paragraph: 选择 Agent 的工具和工作方式。日常任务用「标准模式」，扩展 DSH 的能力用「创造模式」。
-  - heading "内置" [level=3]
+    - button "General"
+    - button "Models"
+    - button "Built-in plugins"
+    - button "Agent presets"
+  - button "Open configuration file"
+  - button "Close"
+  - heading "Agent presets" [level=2]
+  - paragraph: Choose the agent’s tools and how it works. Use Standard mode for everyday tasks, or Creator mode to add capabilities to DSH.
+  - heading "Built-in" [level=3]
   - list:
     - listitem:
-      - 'button "新任务默认: 标准模式" [disabled] [pressed]':
-        - text: 标准模式 新任务默认
+      - 'button "New task default: Standard mode" [disabled] [pressed]':
+        - text: Standard mode New task default
         - code: standard
-        - text: 处理代码、文件和资料，适合大多数任务。Agent 会按需使用检索、编辑和终端等工具。
-      - 'button "模式说明: 标准模式"': 模式说明
-      - 'button "如何使用: 标准模式"': 如何使用
-      - 'button "查看配置: 标准模式"': 查看配置
+        - text: Work with code, files, and information. Suitable for most tasks, with search, editing, terminal commands, and other tools available as needed.
+      - 'button "Mode details: Standard mode"': Mode details
+      - 'button "How to use: Standard mode"': How to use
+      - 'button "View configuration: Standard mode"': View configuration
     - listitem:
-      - 'button "设为新任务默认: PTC 模式"':
-        - text: PTC 模式 内置
+      - 'button "Set as new task default: PTC mode"':
+        - text: PTC mode Built-in
         - code: ptc
-        - text: 包含标准模式的所有能力，更适合批量调用工具，并对结果进行筛选、整理、去重、统计或汇总的任务。
-      - 'button "模式说明: PTC 模式"': 模式说明
-      - 'button "如何使用: PTC 模式"': 如何使用
-      - 'button "查看配置: PTC 模式"': 查看配置
+        - text: Includes all Standard mode capabilities. Better suited to tasks that call tools in batches and then filter, organize, deduplicate, count, or summarize the results.
+      - 'button "Mode details: PTC mode"': Mode details
+      - 'button "How to use: PTC mode"': How to use
+      - 'button "View configuration: PTC mode"': View configuration
     - listitem:
-      - 'button "设为新任务默认: 极简模式"':
-        - text: 极简模式 内置
+      - 'button "Set as new task default: Minimal mode"':
+        - text: Minimal mode Built-in
         - code: minimal
-        - text: Agent 使用终端和图片读取工具，并支持上下文压缩，适合测试和对比其基础表现。
-      - 'button "模式说明: 极简模式"': 模式说明
-      - 'button "如何使用: 极简模式"': 如何使用
-      - 'button "查看配置: 极简模式"': 查看配置
+        - text: The agent uses a terminal and image reading, with context compaction. Useful for testing and comparing its basic performance.
+      - 'button "Mode details: Minimal mode"': Mode details
+      - 'button "How to use: Minimal mode"': How to use
+      - 'button "View configuration: Minimal mode"': View configuration
     - listitem:
-      - 'button "设为新任务默认: 创造模式"':
-        - text: 创造模式 内置
+      - 'button "Set as new task default: Creator mode"':
+        - text: Creator mode Built-in
         - code: cordis
-        - text: 用对话定制 DSH：让 Agent 编写插件，添加新功能或界面；也能组合工具和提示词，创建自己的模式。
-      - 'button "模式说明: 创造模式"': 模式说明
-      - 'button "如何使用: 创造模式"': 如何使用
-      - 'button "查看配置: 创造模式"': 查看配置
-  - heading "自定义" [level=3]
-  - button "让 Agent 帮我创建预设模式"
+        - text: Customize DSH through conversation. Let the agent write plugins that add features or UI, or combine tools and prompts to create your own mode.
+      - 'button "Mode details: Creator mode"': Mode details
+      - 'button "How to use: Creator mode"': How to use
+      - 'button "View configuration: Creator mode"': View configuration
+  - heading "Custom" [level=3]
+  - button "Let the agent help me create a preset"

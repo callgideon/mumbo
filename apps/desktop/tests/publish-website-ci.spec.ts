@@ -114,7 +114,7 @@ it.each(['accepted', 'unconfirmed', 'incomplete', 'wrong-journal', 'upload', 'pu
       DESKTOP_WEBSITE_APPROVAL: approval, DOWNLOAD_PROD_EO_ZONE_ID: 'zone-fixture', GITHUB_STEP_SUMMARY: summary })
     expect(submit).toHaveBeenCalledOnce()
     expect(query).toHaveBeenCalledTimes(2)
-    expect(output.mock.calls.map(call => String(call[0])).join('')).toContain('::warning title=官网缓存刷新结果未确认::')
+    expect(output.mock.calls.map(call => String(call[0])).join('')).toContain('::warning title=Website cache refresh result not confirmed::')
     expect(JSON.parse(await readFile(join(records, 'state.json'), 'utf8'))).toMatchObject({ upload: 'uploaded', purge: { status: 'unknown' } })
     await expect(await readFile(summary, 'utf8')).toMatchFileSnapshot(`./expected/website-purge-${scenario}.md`)
     expect(await readFile(summary, 'utf8')).not.toContain('fixture-key')

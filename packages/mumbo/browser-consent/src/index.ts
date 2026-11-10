@@ -260,15 +260,12 @@ export function apply(ctx: Context, config: Config): void {
     const reason = `Browser write: ${tool} on ${where}. Arguments: ${summary}.`
       + (element === undefined ? '' : ` Model-written target description: ${element}.`)
       + (always ? ' Site allowances do not cover this action.' : '')
-    const zh = `浏览器写操作：${tool}，页面 ${where}。参数：${summary}。`
-      + (element === undefined ? '' : `模型撰写的目标描述：${element}。`)
-      + (always ? '站点许可不适用于此操作。' : '')
     const unavailable: PreToolDecision = { kind: 'deny', reason: `${tool} on ${where} needs the user's approval, and no approval channel is available.` }
     const approval = ctx.get('approval')
     if (approval === undefined) return unavailable
     const timeout = AbortSignal.timeout(config.approvalTimeoutMs)
     const outcome: ApprovalOutcome = await approval.request({
-      agent, toolName: exec.name, callId: exec.callId, reason, displayReason: { en: reason, zh },
+      agent, toolName: exec.name, callId: exec.callId, reason, displayReason: { en: reason },
       signal: AbortSignal.any([exec.signal, timeout]),
     })
     switch (outcome) {

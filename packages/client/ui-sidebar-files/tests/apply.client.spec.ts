@@ -24,7 +24,7 @@ import { FileNavigator } from '../src/client/FileNavigator.tsx'
 import { FilesBody } from '../src/client/FilesBody.tsx'
 import { FilesTitle } from '../src/client/FilesTitle.tsx'
 import { NavigatorToggle } from '../src/client/NavigatorToggle.tsx'
-import { en, ja, zh, es, fr, de, ru, pt } from '../src/client/locales.ts'
+import { en, ja, es, fr, de, ru, pt } from '../src/client/locales.ts'
 import type { createFilesStore } from '../src/client/store.ts'
 
 interface Recorded {
@@ -247,7 +247,7 @@ describe('ui-sidebar-files apply', () => {
     expect(definition?.title('sidebar://files')).toBe('type.label')
     expect(definition?.guide?.map(entry => [entry.order, entry.title(), entry.description?.()]))
       .toEqual([[10, 'guide.title', 'guide.description']])
-    expect(dictionaries.get('sidebarFiles')).toEqual({ zh, en, ja, es, fr, de, ru, pt })
+    expect(dictionaries.get('sidebarFiles')).toEqual({ en, ja, es, fr, de, ru, pt })
     // The seat key is the implementation's id, not the kind: an extension may
     // take the kind over, and the seat must still find this body.
     expect(registered.map(entry => [entry.name, entry.key, entry.locale])).toEqual([

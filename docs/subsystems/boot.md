@@ -1,7 +1,5 @@
 # Profile management
 
-English | [中文](boot.zh.md)
-
 The [boot package group](../../packages/boot/README.md) owns launcher-provided profile access and the plugin manager. [Plugin Manager](../../packages/boot/plugin-manager/README.md) documents persistence, reload and package-operation behavior.
 
 ## Management records
@@ -390,7 +388,7 @@ async entry(url: string, name: string): Promise<MarketListingEntry | undefined>
  * @param url - a configured index URL.
  * @param name - the plugin's package name.
  * @param version - one listed version.
- * @param language - the display language, such as `zh-CN`; documents fall back through its prefixes to English.
+ * @param language - the display language, such as `pt-BR`; documents fall back through its prefixes to English.
  * @param options - `refresh` reads again instead of reusing a result cached for `cacheTtlMs`; `npmFileSources` names
  *   npm file CDNs to ask first for an npm version, in order; configured CDNs it omits follow, and CDNs that are not
  *   configured are not asked.

@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-client-ui-user-questions
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 The Web client shows an agent's question beside the chat input. Users choose options, enter text, skip questions, and submit one answer batch. A timed card counts down; focus pauses it, editing or `Take time` holds it, and expiry lets the agent continue while the question stays answerable. Closing a card linked to a tool call hides it; its tool row reopens it and later shows recorded answers. The Host preserves the question across restart, while this browser preserves unfinished input across reload.
@@ -81,7 +79,7 @@ The card accepts one question declaring the intent, carrying the plan as `detail
 
 ### Copy and locale
 
-Composer chrome copy (pager, buttons, placeholders, validation feedback) is bilingual: the plugin registers zh/en dictionaries under the `question` namespace of `dsh-client-locale` and hands the entry its bound translator plus the locale snapshot source through the inject face, so a locale switch re-renders a mounted composer. Question and option text arrives from the model and renders verbatim; carrier failure messages also display untranslated.
+Composer chrome copy (pager, buttons, placeholders, validation feedback) is localized: the plugin registers its dictionaries under the `question` namespace of `dsh-client-locale` and hands the entry its bound translator plus the locale snapshot source through the inject face, so a locale switch re-renders a mounted composer. Question and option text arrives from the model and renders verbatim; carrier failure messages also display untranslated.
 
 </details>
 

@@ -170,19 +170,11 @@ Replace the hedge with the actual bound and the failure behavior when it is exce
 
 ## Authoring-language slips
 
-**Leaked:** "The renderer runs on the client 端; see the 设计稿 for spacing. ---- 私有 ----"
+**Leaked:** "The renderer runs on the client end; see the mockup draft for spacing. ---- private ----"
 
 **Fixed:** "The renderer runs on the client side; spacing follows the Figma frame `widget-badges`."
 
-Working-language fragments and session separators are transcription residue. The Figma frame name stays: an external source that resolves outside the repo by design.
-
-### Authoring-language slip inside a paired fence
-
-**Leaked in both files:** `// 更新这里 before returning` inside a verbatim code block.
-
-**Fixed in both files:** `// Update this before returning.`
-
-Correct the block once and copy that byte-exact fence into both language files. Translating the code comment differently in the Chinese counterpart breaks the pairing contract even when both comments are individually fluent.
+Working-language fragments, literal renderings of them, and session separators are transcription residue. The Figma frame name stays: an external source that resolves outside the repo by design.
 
 ## Behavior-visible candidates
 

@@ -21,7 +21,7 @@ async function bench(served?: string[]) {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
   const locale = new LocaleRuntime(ctx)
-  locale.setLocale('zh')
+  locale.setLocale('en')
   ctx.provide('locale', locale)
   const describeSettings = vi.fn(() => Promise.resolve(served === undefined
     ? { ok: false, error: new RemoteError('gateway/internal', 'no provider', {}) }
@@ -58,7 +58,7 @@ describe('ui-settings-agent-loop apply', () => {
     await vi.waitFor(() => { expect(slots.entries('plugins.item')).toHaveLength(1) })
     const entry = slots.entries('plugins.item')[0]!
     expect(entry.options).toMatchObject({ id: 'agent-loop', order: 30 })
-    expect(resolveSlotLabel(entry.options.label)).toBe('Agent 循环')
+    expect(resolveSlotLabel(entry.options.label)).toBe('Agent loop')
     expect(entry.locale).toBe(NS)
     const face = (entry.inject as () => Pick<AgentLoopCardFace, 'hooks'>)()
     expect(Object.keys(face.hooks)).toEqual(['agentLoopCard'])

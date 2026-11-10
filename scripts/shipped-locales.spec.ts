@@ -33,8 +33,8 @@ it('matches Desktop dictionaries, resolution and installer resources to the ship
   const dictionaries = Object.keys(desktop).filter(name => /^[a-z]{2}$/u.test(name)).sort()
   expect(dictionaries).toEqual([...SHIPPED_LOCALE_IDS].sort())
   for (const id of SHIPPED_LOCALE_IDS) {
-    expect(desktop.resolveDesktopLocale(id).id).toBe(id === 'zh' ? 'zh-CN' : id)
-    expect(desktop.resolveDesktopStartupLocale(null, [id]).id).toBe(id === 'zh' ? 'zh-CN' : id)
+    expect(desktop.resolveDesktopLocale(id).id).toBe(id)
+    expect(desktop.resolveDesktopStartupLocale(null, [id]).id).toBe(id)
   }
   expect(readInstallerLocales().map(locale => locale.id.split('_')[0]).sort()).toEqual(dictionaries)
 })

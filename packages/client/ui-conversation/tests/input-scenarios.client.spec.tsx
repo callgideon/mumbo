@@ -31,13 +31,13 @@ import {
 } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
+import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
 import type { DraftAttachmentId } from '../src/client/contract/input.ts'
 import { SessionInputShell } from '../src/client/input/facade.ts'
 import { $replaceDetectSpanWithText } from '../src/client/input/editor/span-map.ts'
 import { InputBar } from '../src/client/skeleton/InputBar.tsx'
 import type { InputBarProps } from '../src/client/skeleton/InputBar.tsx'
-import { zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 
 // Every fixture carries the resource hook the resources plugin merges into GlobalStandardProps.
 const useResource = (() => ({ status: 'none' as const, value: undefined, failure: undefined })) as GlobalStandardProps['useResource']
@@ -115,9 +115,9 @@ function commandSource(
 }
 
 const COMMANDS: FakeCommand[] = [
-  { name: 'goal', description: '设定目标', input: { hint: '目标内容' } },
-  { name: 'compact', description: '压缩上下文' },
-  { name: 'vision', description: '识别图片', input: { hint: '想问什么', attachments: true } },
+  { name: 'goal', description: 'Set a goal', input: { hint: 'Goal objective' } },
+  { name: 'compact', description: 'Compact context' },
+  { name: 'vision', description: 'Ask about an image', input: { hint: 'What to ask', attachments: true } },
 ]
 
 const PNG: SubmitAttachment = { type: 'image', mediaType: 'image/png', data: 'AA==' }
@@ -204,7 +204,7 @@ async function scopedBench(register?: (inputTriggers: InputTriggerService) => vo
     stop: vi.fn(),
     retry: undefined,
     useStopShortcut: bindSnapshotSelector(createSnapshotStore<readonly string[]>([])),
-    t: makeTranslate(zh, commonZh),
+    t: makeTranslate(en, commonEn),
     variant: 'composer',
   }
   const view = render(<InputBar {...barProps} />)
@@ -242,7 +242,7 @@ async function scopedBench(register?: (inputTriggers: InputTriggerService) => vo
 
 async function bench(executeImpl?: (line: string) => Promise<SubmitOutcome>) {
   const execute = vi.fn(executeImpl ?? ((line: string) =>
-    Promise.resolve({ kind: 'success' as const, text: `已执行 ${line}` })))
+    Promise.resolve({ kind: 'success' as const, text: `executed ${line}` })))
   const { source, executed, envelopes } = commandSource(COMMANDS, execute)
   const base = await scopedBench((inputTriggers) => { inputTriggers.registerSource(source) })
   return { ...base, execute, executed, envelopes }
@@ -263,17 +263,17 @@ describe('scenario A: menu-pick /goal, type args, enter submits', () => {
     expect(b.shell.snapshot.phase).toBe('claimed')
     expect(b.shell.snapshot.draft).toBe('/goal ')
     expect(b.view.container.querySelector('[data-composer-command]')?.textContent).toBe('/goal')
-    // The zh dictionary owns a hint.goal entry, which overrides the machine's raw hint (production behavior).
-    expect(b.textarea.style.getPropertyValue('--dsh-composer-hint')).toBe(JSON.stringify('输入目标，智能体将持续执行'))
+    // The en dictionary owns a hint.goal entry, which overrides the machine's raw hint (production behavior).
+    expect(b.textarea.style.getPropertyValue('--dsh-composer-hint')).toBe(JSON.stringify('describe the objective for a long-running task'))
     // Continue typing args; hint drops; claim holds.
-    b.append('发布 v1')
+    b.append('배포 v1')
     expect(b.shell.snapshot.phase).toBe('claimed')
     // Enter: submitting → command execute → commit clears.
     fireEvent.keyDown(b.textarea, { key: 'Enter' })
-    await vi.waitFor(() => { expect(b.execute).toHaveBeenCalledWith('/goal 发布 v1', []) })
+    await vi.waitFor(() => { expect(b.execute).toHaveBeenCalledWith('/goal 배포 v1', []) })
     await vi.waitFor(() => { expect(b.shell.snapshot.draft).toBe('') })
     expect(b.shell.snapshot.phase).toBe('plain')
-    expect(b.view.getByText('已执行 /goal 发布 v1')).toBeTruthy()
+    expect(b.view.getByText('executed /goal 배포 v1')).toBeTruthy()
     expect(b.sink).not.toHaveBeenCalled()
   })
 })
@@ -283,9 +283,9 @@ describe('scenario C: pasted /goal xxx + enter (menu never opened)', () => {
     const b = await bench()
     // Paste lands whole; caret at end means detectTrigger sees no token under
     // the caret mid-whitespace — menu stays closed; enter runs adjudication.
-    act(() => { b.shell.setDraft('/goal 尽快发布') })
+    act(() => { b.shell.setDraft('/goal 빨리배포') })
     fireEvent.keyDown(b.textarea, { key: 'Enter' })
-    await vi.waitFor(() => { expect(b.execute).toHaveBeenCalledWith('/goal 尽快发布', []) })
+    await vi.waitFor(() => { expect(b.execute).toHaveBeenCalledWith('/goal 빨리배포', []) })
     await vi.waitFor(() => { expect(b.shell.snapshot.phase).toBe('plain') })
     expect(b.shell.snapshot.draft).toBe('')
     expect(b.sink).not.toHaveBeenCalled()
@@ -312,10 +312,10 @@ describe('scenario D: execute-kind /compact', () => {
     await vi.waitFor(() => { expect(b.shell.snapshot.phase).toBe('plain') })
     cleanup()
     const b2 = await bench()
-    act(() => { b2.shell.setDraft('/compact 现在') })
+    act(() => { b2.shell.setDraft('/compact 지금') })
     fireEvent.keyDown(b2.textarea, { key: 'Enter' })
     // execute with trailing → matchEnter answers undefined → default sink.
-    await vi.waitFor(() => { expect(b2.sink).toHaveBeenCalledWith('/compact 现在', [], 'queue', expect.any(AbortSignal), expect.any(Function)) })
+    await vi.waitFor(() => { expect(b2.sink).toHaveBeenCalledWith('/compact 지금', [], 'queue', expect.any(AbortSignal), expect.any(Function)) })
     expect(b2.executed).toHaveLength(0)
   })
 })
@@ -324,9 +324,9 @@ describe('scenario: images ride an accepting command through the real pipeline',
   it('adjudication reports the image count; the claim chain serializes, submits, and consumes', async () => {
     const b = await bench()
     act(() => { b.shell.addAttachments(['img-1' as DraftAttachmentId]) })
-    act(() => { b.shell.setDraft('/vision 这张图是什么') })
+    act(() => { b.shell.setDraft('/vision 이그림은뭐야') })
     fireEvent.keyDown(b.textarea, { key: 'Enter' })
-    await vi.waitFor(() => { expect(b.execute).toHaveBeenCalledWith('/vision 这张图是什么', [PNG]) })
+    await vi.waitFor(() => { expect(b.execute).toHaveBeenCalledWith('/vision 이그림은뭐야', [PNG]) })
     // The envelope the controller forwarded to matchEnter carried the count.
     expect(b.envelopes).toEqual([{ attachments: 1 }])
     expect(b.serialize).toHaveBeenCalledWith(['img-1'])
@@ -338,9 +338,9 @@ describe('scenario: images ride an accepting command through the real pipeline',
 
   it('an imageless enter adjudicates with a zero-image envelope', async () => {
     const b = await bench()
-    act(() => { b.shell.setDraft('/goal 发布') })
+    act(() => { b.shell.setDraft('/goal 배포') })
     fireEvent.keyDown(b.textarea, { key: 'Enter' })
-    await vi.waitFor(() => { expect(b.execute).toHaveBeenCalledWith('/goal 发布', []) })
+    await vi.waitFor(() => { expect(b.execute).toHaveBeenCalledWith('/goal 배포', []) })
     expect(b.envelopes).toEqual([{ attachments: 0 }])
     expect(b.serialize).not.toHaveBeenCalled()
     expect(b.release).not.toHaveBeenCalled()
@@ -348,14 +348,14 @@ describe('scenario: images ride an accepting command through the real pipeline',
 })
 
 describe('scenario H: the command chip deletes whole', () => {
-  it.each(['goal', '目标', 'plan', '计划', 'feedback', '反馈'])('keeps /%s claimed until the chip itself is deleted', async (name) => {
-    const { source } = commandSource([{ name, description: name, input: { hint: '目标内容' } }],
+  it.each(['goal', '목표', 'plan', '계획', 'feedback', '의견'])('keeps /%s claimed until the chip itself is deleted', async (name) => {
+    const { source } = commandSource([{ name, description: name, input: { hint: 'Goal objective' } }],
       () => Promise.resolve({ kind: 'success' }))
     const b = await scopedBench((triggers) => { triggers.registerSource(source) })
     b.type(`/${name}`)
     await b.space()
     expect(b.shell.snapshot.phase).toBe('claimed')
-    b.append('这是目标')
+    b.append('이건목표')
     for (let i = 0; i < 5; i++) {
       const { end } = b.shell.caretSpan()
       b.erase(end - 1, end)
@@ -378,7 +378,7 @@ describe('scenario H: the command chip deletes whole', () => {
     b.type('/goal')
     await vi.waitFor(() => { expect(b.controller.menu.getSnapshot().open).toBe(true) })
     await b.space()
-    b.append('发布')
+    b.append('배포')
     for (let i = 0; i < 3; i++) {
       const { end } = b.shell.caretSpan()
       b.erase(end - 1, end)
@@ -413,9 +413,9 @@ describe('scenario H: the command chip deletes whole', () => {
     expect(b.textarea.hasAttribute('data-composer-chip-selected')).toBe(false)
     b.deleteCharacter(true)
     expect(chip()?.hasAttribute('data-selected')).toBe(true)
-    b.append('发布')
+    b.append('배포')
     expect(chip()?.hasAttribute('data-selected')).toBe(false)
-    expect(b.shell.snapshot.draft).toBe('/goal发布')
+    expect(b.shell.snapshot.draft).toBe('/goal배포')
     expect(b.shell.snapshot.phase).toBe('claimed')
   })
 
@@ -476,7 +476,7 @@ describe('scenario H: the command chip deletes whole', () => {
     b.type('/goal')
     await vi.waitFor(() => { expect(b.controller.menu.getSnapshot().open).toBe(true) })
     await b.space()
-    b.append('发布')
+    b.append('배포')
     act(() => {
       b.shell.editor.update(() => {
         const paragraph = $getRoot().getFirstChild()
@@ -489,7 +489,7 @@ describe('scenario H: the command chip deletes whole', () => {
     expect(chip()?.hasAttribute('data-selected')).toBe(true)
     b.deleteCharacter(false)
     expect(chip()).toBeNull()
-    expect(b.shell.snapshot.draft).toBe(' 发布')
+    expect(b.shell.snapshot.draft).toBe(' 배포')
     expect(b.shell.snapshot.phase).toBe('plain')
   })
 
@@ -498,16 +498,16 @@ describe('scenario H: the command chip deletes whole', () => {
     b.type('/goal')
     await vi.waitFor(() => { expect(b.controller.menu.getSnapshot().open).toBe(true) })
     await b.space()
-    b.append('发布')
+    b.append('배포')
     // The caret right after the chip: Lexical writes into the argument text.
     act(() => {
       b.shell.editor.update(() => {
         const paragraph = $getRoot().getFirstChild()
         if (!$isElementNode(paragraph)) throw new Error('missing paragraph')
-        paragraph.select(1, 1).insertText('立即')
+        paragraph.select(1, 1).insertText('즉시')
       }, { discrete: true })
     })
-    expect(b.shell.snapshot.draft).toBe('/goal立即 发布')
+    expect(b.shell.snapshot.draft).toBe('/goal즉시 배포')
     expect(b.shell.snapshot.phase).toBe('claimed')
     expect(b.view.container.querySelector('[data-composer-command]')?.textContent).toBe('/goal')
   })
@@ -519,13 +519,13 @@ describe('scenario H: the command chip deletes whole', () => {
     // Space adjudication claims (space column, leadingInput).
     await b.space()
     expect(b.shell.snapshot.phase).toBe('claimed')
-    b.append('发布')
+    b.append('배포')
     b.erase(0, 1)
     expect(b.shell.snapshot.phase).toBe('plain')
-    expect(b.shell.snapshot.draft).toBe(' 发布')
+    expect(b.shell.snapshot.draft).toBe(' 배포')
     expect(b.view.container.querySelector('[data-composer-command]')).toBeNull()
     fireEvent.keyDown(b.textarea, { key: 'Enter' })
-    expect(b.sink).toHaveBeenCalledWith('发布', [], 'queue', expect.any(AbortSignal), expect.any(Function))
+    expect(b.sink).toHaveBeenCalledWith('배포', [], 'queue', expect.any(AbortSignal), expect.any(Function))
     expect(b.execute).not.toHaveBeenCalled()
   })
 
@@ -534,16 +534,16 @@ describe('scenario H: the command chip deletes whole', () => {
     b.type('/goal')
     await vi.waitFor(() => { expect(b.controller.menu.getSnapshot().open).toBe(true) })
     await b.space()
-    b.append('发布')
+    b.append('배포')
     act(() => {
       b.shell.editor.update(() => {
         const paragraph = $getRoot().getFirstChild()
         if (!$isElementNode(paragraph)) throw new Error('missing paragraph')
-        paragraph.getFirstChild()?.insertBefore($createTextNode('看看 '))
+        paragraph.getFirstChild()?.insertBefore($createTextNode('봐봐 '))
       }, { discrete: true })
     })
     expect(b.shell.snapshot.phase).toBe('plain')
-    expect(b.shell.snapshot.draft).toBe('看看 /goal 发布')
+    expect(b.shell.snapshot.draft).toBe('봐봐 /goal 배포')
     expect(b.view.container.querySelector('[data-composer-command]')).toBeNull()
   })
 
@@ -552,7 +552,7 @@ describe('scenario H: the command chip deletes whole', () => {
     b.type('/goal')
     await vi.waitFor(() => { expect(b.controller.menu.getSnapshot().open).toBe(true) })
     await b.space()
-    b.append('发布')
+    b.append('배포')
     b.erase(0, 1)
     expect(b.shell.snapshot.phase).toBe('plain')
     act(() => {
@@ -561,10 +561,10 @@ describe('scenario H: the command chip deletes whole', () => {
     })
     expect(b.shell.snapshot.phase).toBe('claimed')
     expect(b.shell.snapshot.claim?.name).toBe('goal')
-    expect(b.shell.snapshot.draft).toBe('/goal 发布')
+    expect(b.shell.snapshot.draft).toBe('/goal 배포')
     expect(b.view.container.querySelector('[data-composer-command]')?.textContent).toBe('/goal')
     fireEvent.keyDown(b.textarea, { key: 'Enter' })
-    await vi.waitFor(() => { expect(b.execute).toHaveBeenCalledWith('/goal 发布', []) })
+    await vi.waitFor(() => { expect(b.execute).toHaveBeenCalledWith('/goal 배포', []) })
   })
 })
 
@@ -616,9 +616,9 @@ describe('scenario: reference decoration follows the current lexicon', () => {
 describe('scenario I: unknown /xyz + enter', () => {
   it('adjudication misses in one hop and the whole line rides the default sink', async () => {
     const b = await bench()
-    act(() => { b.shell.setDraft('/xyz 干点啥') })
+    act(() => { b.shell.setDraft('/xyz 뭐하지') })
     fireEvent.keyDown(b.textarea, { key: 'Enter' })
-    await vi.waitFor(() => { expect(b.sink).toHaveBeenCalledWith('/xyz 干点啥', [], 'queue', expect.any(AbortSignal), expect.any(Function)) })
+    await vi.waitFor(() => { expect(b.sink).toHaveBeenCalledWith('/xyz 뭐하지', [], 'queue', expect.any(AbortSignal), expect.any(Function)) })
     await vi.waitFor(() => { expect(b.shell.snapshot.phase).toBe('plain') })
     expect(b.execute).not.toHaveBeenCalled()
   })
@@ -629,14 +629,14 @@ describe('scenario I: unknown /xyz + enter', () => {
         trigger: '/', name: 'command',
         candidates: () => Promise.resolve([]),
         onPick: () => undefined,
-        matchEnter: () => Promise.reject(new Error('目录预热失败')),
+        matchEnter: () => Promise.reject(new Error('Directory warm-up Failed')),
       } as never)
     })
-    act(() => { b.shell.setDraft('/plan 上线') })
+    act(() => { b.shell.setDraft('/plan 출시') })
     fireEvent.keyDown(b.textarea, { key: 'Enter' })
-    await vi.waitFor(() => { expect(b.view.getByText('目录预热失败')).toBeTruthy() })
+    await vi.waitFor(() => { expect(b.view.getByText('Directory warm-up Failed')).toBeTruthy() })
     // Never a silent downgrade: draft retained, sink untouched.
-    expect(b.shell.snapshot.draft).toBe('/plan 上线')
+    expect(b.shell.snapshot.draft).toBe('/plan 출시')
     expect(b.sink).not.toHaveBeenCalled()
   })
 })

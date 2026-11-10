@@ -23,7 +23,7 @@ async function rendered(window) {
 export async function qualifyUpdateDialogs(root, fixture) {
   const theme = nativeTheme.themeSource
   nativeTheme.themeSource = 'light'
-  const locale = resolveDesktopLocale('zh-CN')
+  const locale = resolveDesktopLocale('en')
   const messages = locale.messages
   const screenshots = []
   protocol.handle('dsh-app', async request => {

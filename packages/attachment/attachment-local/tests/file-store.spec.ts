@@ -46,7 +46,7 @@ describe('fileLeafName', () => {
     expect(fileLeafName('a\u0000b\u001f.txt')).toBe('ab.txt')
     expect(fileLeafName('a<b>c:d"e|f?g*h.txt')).toBe('a_b_c_d_e_f_g_h.txt')
     expect(fileLeafName(`${'x'.repeat(300)}.bin`).length).toBe(255)
-    const multibyte = fileLeafName(`${'文'.repeat(100)}.txt`)
+    const multibyte = fileLeafName(`${'한'.repeat(100)}.txt`)
     expect(Buffer.byteLength(multibyte)).toBeLessThanOrEqual(255)
     expect(multibyte.endsWith('\ufffd')).toBe(false)
     expect(fileLeafName(`safe-${'x'.repeat(248)}\ud83d\ude00`)).not.toMatch(/\ud83d$/u)
@@ -97,7 +97,7 @@ describe('saveFileVerbatim', () => {
   it('stores sanitized Windows-reserved and multibyte names', async () => {
     const root = await makeRoot()
     const reserved = await saveFileVerbatim(root, { data: new Uint8Array(0), name: 'NUL.txt' })
-    const multibyte = await saveFileVerbatim(root, { data: Uint8Array.of(1), name: '文'.repeat(100) })
+    const multibyte = await saveFileVerbatim(root, { data: Uint8Array.of(1), name: '한'.repeat(100) })
     expect(reserved.name).toBe('_NUL.txt')
     expect(Buffer.byteLength(multibyte.name)).toBeLessThanOrEqual(255)
     await expect(readFile(storedFilePath(root, reserved))).resolves.toHaveLength(0)

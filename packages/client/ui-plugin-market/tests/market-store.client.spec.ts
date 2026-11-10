@@ -363,11 +363,11 @@ describe('detail reads', () => {
     face.loadDetail(BUNDLE, 'en')
     expect(controller.details.getSnapshot()[detailKey(BUNDLE, 'en')]).toEqual({ status: 'loading' })
     await vi.waitFor(() => { expect(controller.details.getSnapshot()[detailKey(BUNDLE, 'en')]).toEqual({ status: 'ready', detail: FOUND }) })
-    face.loadDetail(ENTRY, 'zh')
-    await vi.waitFor(() => { expect(controller.details.getSnapshot()[detailKey(ENTRY, 'zh')]).toEqual({ status: 'ready', detail: { status: 'none' } }) })
+    face.loadDetail(ENTRY, 'fr')
+    await vi.waitFor(() => { expect(controller.details.getSnapshot()[detailKey(ENTRY, 'fr')]).toEqual({ status: 'ready', detail: { status: 'none' } }) })
     // An npm version asks the registry comparison and reads npmmirror first where it won; a Git version does not ask.
     expect(market.readEntryDetail.mock.calls).toEqual([
-      [A, 'b', '1.0.0', 'en', { refresh: false, npmFileSources: ['npmmirror'] }], [B, 'e', '2.0.0', 'zh', { refresh: false, npmFileSources: [] }],
+      [A, 'b', '1.0.0', 'en', { refresh: false, npmFileSources: ['npmmirror'] }], [B, 'e', '2.0.0', 'fr', { refresh: false, npmFileSources: [] }],
     ])
   })
 
@@ -405,8 +405,8 @@ describe('detail reads', () => {
   it('forgets every read after the connection reset and drops the answers of forgotten reads', async () => {
     const { controller, face, market } = setup()
     let answer: (value: Answer<PluginDetail>) => void = () => {}
-    face.loadDetail(ENTRY, 'zh')
-    await vi.waitFor(() => { expect(controller.details.getSnapshot()[detailKey(ENTRY, 'zh')]?.status).toBe('ready') })
+    face.loadDetail(ENTRY, 'fr')
+    await vi.waitFor(() => { expect(controller.details.getSnapshot()[detailKey(ENTRY, 'fr')]?.status).toBe('ready') })
     market.readEntryDetail.mockImplementationOnce(() => new Promise((resolve) => { answer = resolve }))
     face.loadDetail(BUNDLE, 'en')
     await vi.waitFor(() => { expect(market.readEntryDetail).toHaveBeenCalledTimes(2) })

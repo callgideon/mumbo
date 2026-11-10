@@ -3,15 +3,13 @@
 Status: implemented
 Archived: 2026-09-04
 
-English | [中文](2026-08-26-web-trigger-menu-presentation-polish.zh.md)
-
 ## Problem
 
 The Web composer's `/` and `@` trigger menu carried several presentation defects that made the reference flow harder to read and operate. Candidate rows spelled their kind as a localized text prefix (`Folder · name/`, `Session · label`) that duplicated the section title and pushed the name right. Pointer hover used a CSS `:hover` tint while keyboard navigation drove the reducer-owned highlight, so two rows could look focused at once. The drillable-folder affordance was a raw `›` text glyph, unlike every other chevron in the composer, and nothing told the user that Tab drills into the highlighted folder. The pending-source state was a bare "Loading…" text row. The editable `@dir/` text a drill leaves behind rendered a folder icon before the `@`, visually double-marking a token that is not a settled chip. The composer placeholders never mentioned that `/` and `@` exist ([#3080](https://github.com/deepseek-harness/deepseek-harness/issues/3080)).
 
 ## Decision
 
-Candidate rows lead with a domain icon instead of a text prefix: `InputTriggerCandidate.icon` narrows from `string` to the closed union `InputTriggerCandidateIcon` (`file | folder | session`), the menu view maps it to `ReferenceIcon`, and `ui-reference` emits bare names (`folderx/`, session label). The `candidate.file`/`candidate.folder`/`candidate.session` locale keys are deleted; the session section title is `对话`/`Sessions`. The menu spans the composer card edge to edge (`left: 0; right: 0`), and a pending source renders two breathing skeleton bars in item cell metrics instead of the loading text row.
+Candidate rows lead with a domain icon instead of a text prefix: `InputTriggerCandidate.icon` narrows from `string` to the closed union `InputTriggerCandidateIcon` (`file | folder | session`), the menu view maps it to `ReferenceIcon`, and `ui-reference` emits bare names (`folderx/`, session label). The `candidate.file`/`candidate.folder`/`candidate.session` locale keys are deleted; the session section title is `Sessions`. The menu spans the composer card edge to edge (`left: 0; right: 0`), and a pending source renders two breathing skeleton bars in item cell metrics instead of the loading text row.
 
 Pointer and keyboard share one highlight, last input wins: a `hover` MenuEvent parks the reducer-owned highlight on a ready row, `MenuView` routes it from `onMouseMove` (not `mouseenter`, so keyboard-scrolling rows under a resting pointer cannot steal the highlight back), and the CSS `:hover` tint is gone.
 
@@ -19,7 +17,7 @@ The drill affordance on the highlighted folder row is the library `IconChevronRi
 
 A token still carrying its trigger character is editable text, not a settled chip: the text-ref decoration colors it and nothing more, and the domain icon belongs exclusively to the settled `ReferenceChipNode`. The former appearance channel (scan `appearance` field, `TextRefNode.__appearance`, `data-ref-appearance` DOM attribute, CSS `::before` icon) is deleted end to end.
 
-Composer placeholders advertise both triggers (`描述你想要构建的内容… / 调用指令 @ 文件或对话` / `Describe what you want to build... / commands, @ files or sessions`), and the zh copy for commands is unified from 命令 to 指令 across `ui-chat`, `ui-conversation`, `ui-goal`, and `ui-input-trigger`.
+Composer placeholders advertise both triggers (`Describe what you want to build... / commands, @ files or sessions`), and the Chinese copy for commands was unified across `ui-chat`, `ui-conversation`, `ui-goal`, and `ui-input-trigger`.
 
 ## Alternatives considered
 

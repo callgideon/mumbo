@@ -5,8 +5,6 @@ kind: "package-group"
 
 # mumbo/ — packages for the per-user box platform
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 The mumbo family holds what a per-user box deployment adds to a running Web host: authenticated access for people's own tools, the pages the box edge serves beside the host, project members, and consent for the assistant's actions with a person's signed-in accounts. Each package attaches to existing services and registers no model tools; `superagent/` is the exception, a pinned copy of an agent that works one GitHub repository in its own Sessions. Each package README owns its contract.

@@ -1,19 +1,23 @@
 body {
   --dsw-linear-gradient-think: linear-gradient(180deg, #fff 20.19%, rgba(255, 255, 255, 0) 100%);
   --dsw-linear-think-select: linear-gradient(180deg, #f5f6f7 20.19%, rgba(245, 246, 247, 0) 100%);
-  /* 阴影 */
+  /* Shadows */
   --dsw-shadow-lv1: 0 2px 4px 0 rgba(0, 0, 0, 0.05);
   --dsw-shadow-lv1-blur: 0 4px 12px 0 rgba(0, 0, 0, 0.02);
   --dsw-shadow-lv2: 0 4px 12px 0 rgba(0, 0, 0, 0.02), 0 2px 8px 0 rgba(0, 0, 0, 0.04);
   --dsw-shadow-lv3:
     0 0 1px 0 rgba(0, 0, 0, 0.2), 0 0 4px 0 rgba(0, 0, 0, 0.02), 0 12px 32px 0 rgba(0, 0, 0, 0.08);
-  /* Elevation：浮层/面板/面型按钮的描边+投影三件套。0.5px 发丝描边画在
-     box-shadow 里（组件配 border: 0，不占布局），叠两层极淡柔光；深色主题下
-     柔光几乎不可见，由描边承担分离。描边颜色经 --dsw-elevation-stroke-color
-     间接，组件可重绑（菜单面重绑最浅的 l1、输入框重绑 l2，输入框的
-     workspace-trigger 态置 transparent 只保留柔光）。soft 供输入框：更大
-     模糊、更低透明度的柔光。默认色只声明在 body 上，让表面的重绑沿继承
-     传给真正消费投影的后代。 */
+  /* Elevation: the stroke-plus-shadow triple for overlays, panels, and
+     surface-style buttons. A 0.5px hairline stroke is drawn inside
+     box-shadow (components set border: 0, so it takes no layout space) and
+     two very faint soft glows are layered on top; in dark themes the glow is
+     nearly invisible and the stroke provides the separation. The stroke color
+     goes through --dsw-elevation-stroke-color, so components can rebind it
+     (menu surfaces rebind to the lightest l1, inputs rebind to l2, and the
+     input's workspace-trigger state sets transparent to keep only the glow).
+     soft is for inputs: a larger, blurrier, lower-opacity glow. The default
+     color is declared only on body so surface rebinds propagate by inheritance
+     to the descendants that actually consume the shadow. */
   --dsw-elevation-stroke-color: var(--dsw-alias-border-l4);
   /* Blocking masks dim the page; menu backgrounds retain their blur. */
   --dsw-mask-blur: none;
@@ -24,10 +28,12 @@ body[data-ds-dark-theme] [data-menu-material] {
   --dsw-elevation-stroke-color: var(--dsw-alias-border-l3);
 }
 
-/* 派生 elevation 值逐元素声明而非从 body 继承：继承传下来的是在 body 上就
-   已替换完 var() 的值，组件重绑 --dsw-elevation-stroke-color 将无法进入
-   var(--dsw-elevation-*)；逐元素声明让每个元素按自己看到的描边色重新替换
-   （同 scrollbar.css 对 --dsh-scrollbar-thumb 的处理）。 */
+/* Derived elevation values are declared per element instead of inherited from
+   body: an inherited value has already had var() substituted on body, so a
+   component rebinding --dsw-elevation-stroke-color could not reach
+   var(--dsw-elevation-*). Per-element declaration lets every element
+   re-substitute with the stroke color it sees (same treatment as
+   scrollbar.css for --dsh-scrollbar-thumb). */
 body,
 body * {
   --dsw-elevation-stroke: 0 0 0 0.5px var(--dsw-elevation-stroke-color);
@@ -44,10 +50,10 @@ body[data-ds-dark-theme] {
   --dsw-linear-think-select: linear-gradient(180deg, #232325 20.19%, rgba(35, 35, 37, 0) 100%);
 }
 
-/* ---------- 字体 ---------- */
-/* 由 @deepseek-figma-plugin/custom-variable-name 插件导出 */
-/* Markdown 阶梯整体按 0.875（正文 16 → 14）等比缩放，四舍五入到整数像素；
-   重新从 Figma 导出时需要保留这一缩放。 */
+/* ---------- Fonts ---------- */
+/* Exported by the @deepseek-figma-plugin/custom-variable-name plugin */
+/* The Markdown scale is multiplied by 0.875 as a whole (body 16 -> 14) and
+   rounded to whole pixels; keep this scaling when re-exporting from Figma. */
 /* Bootstrap and ThemePresenter set the integer content size on body (10–22px,
    default 14px). Headings and body variants share its pixel delta. Secondary
    text uses size − 1 through 14px, then size − 2: 10→9, 14→13, 15→13, 22→20.
@@ -174,7 +180,7 @@ body {
   --dsw-font-markdown-code-block-font-size: var(--dsh-code-font-size, 11px);
   --dsw-font-markdown-code-block-font-style: normal;
 
-  /* 手工补充（非插件导出）：tool row 展开卡片内的小号 code 字体。 */
+  /* Manual addition (not plugin-exported): small code font inside expanded tool row cards. */
   --dsw-font-markdown-code-block-small: var(--dsh-code-font-size, 11px) / calc(16px + var(--dsh-code-font-delta)) var(--ds-font-family-code);
   --dsw-font-markdown-code-block-small-font-family: var(--ds-font-family-code);
   --dsw-font-markdown-code-block-small-font-weight: 400;

@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-commands
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 `dsh-commands` lets users run `/command [input]` actions in interactive Harness UIs without turning the command or its result into a model message. Commands can advertise input hints, accept attachments, and target one agent while preserving a global command with the same name for other agents. Every admitted run is recorded in the receiving agent's session log, while the UI renders the settled result outside model history. Use it for direct human controls in the `dsh` CLI or Web client; UI-less demos and ACP automation do not provide this command surface.
@@ -61,7 +59,7 @@ A command may declare `input.attachments` to accept composer images and generic 
 
 An interactive adapter calls `execute(agent, line, attachments, signal)` with the exact receiving agent, the full command line, and the submission's ordered attachments. It returns the settled `CommandExecution` — the normalized result plus its lifecycle `commandId` — or `undefined` for invalid syntax or an unknown name. `list(agent)` and `find(agent, name)` serve discovery after agent-scoped shadowing.
 
-The stateless `@deepseek-ai/dsh-commands/builtin` entry shares first-party identity, English/Chinese input tokens, and descriptor resolution across Host and Client adapters. `builtinCommandName()` identifies the definition independently of its registered name; `resolveCommand()` preserves exact-name priority and follows aliases by definition ID. Adapters choose their supported subset; the registry itself continues to accept arbitrary definitions.
+The stateless `@deepseek-ai/dsh-commands/builtin` entry shares first-party identity, English input tokens, and descriptor resolution across Host and Client adapters. `builtinCommandName()` identifies the definition independently of its registered name; `resolveCommand()` preserves exact-name priority and follows aliases by definition ID. Adapters choose their supported subset; the registry itself continues to accept arbitrary definitions.
 
 ### Cancellation
 

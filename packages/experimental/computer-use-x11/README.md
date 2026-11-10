@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-computer-use-x11
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 Operate desktop applications on a Linux X11 display, such as an Xvfb virtual screen, with screenshots, pointer input and keyboard input. One `computer` tool captures the whole display with ImageMagick `import`, sends input with `xdotool`, and pastes non-ASCII text through `xsel`. Screenshots reach image-capable models through durable attachments, and coordinates map from the delivered image back to screen pixels. This experimental package is an explicit composition choice; the host installs the three programs.

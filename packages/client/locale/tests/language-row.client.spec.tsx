@@ -17,7 +17,7 @@ const usePanelInfo: GlobalStandardProps['usePanelInfo'] = selector => selector({
 
 afterEach(cleanup)
 
-const OPTIONS = [{ id: 'zh', label: '中文' }, { id: 'en', label: 'English' }]
+const OPTIONS = [{ id: 'de', label: 'Deutsch' }, { id: 'en', label: 'English' }]
 
 function emptySessions() {
   const store = createSnapshotStore<SessionListState>(
@@ -69,25 +69,25 @@ describe('LanguageRow', () => {
     const trigger = screen.getByRole('button', { name: /English/ })
     fireEvent.click(trigger)
     expect(trigger.getAttribute('aria-expanded')).toBe('true')
-    fireEvent.click(screen.getByRole('menuitem', { name: '中文' }))
-    expect(b.setLocale).toHaveBeenCalledWith('zh')
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Deutsch' }))
+    expect(b.setLocale).toHaveBeenCalledWith('de')
     expect(trigger.getAttribute('aria-expanded')).toBe('false')
-    expect(screen.queryByRole('menuitem', { name: '中文' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Deutsch' })).toBeNull()
   })
 
   it('closes on outside pointerdown without selecting', () => {
     const b = mount('en')
     fireEvent.click(screen.getByRole('button', { name: /English/ }))
-    expect(screen.getByRole('menuitem', { name: '中文' })).toBeDefined()
+    expect(screen.getByRole('menuitem', { name: 'Deutsch' })).toBeDefined()
     fireEvent.pointerDown(document.body)
-    expect(screen.queryByRole('menuitem', { name: '中文' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Deutsch' })).toBeNull()
     expect(b.setLocale).not.toHaveBeenCalled()
   })
 
   it('follows store changes; an unknown active id falls back to the id itself', () => {
     const b = mount('en')
-    act(() => { b.store.actions.sync('zh', OPTIONS, 1) })
-    expect(screen.getByRole('button', { name: /中文/ })).toBeDefined()
+    act(() => { b.store.actions.sync('de', OPTIONS, 1) })
+    expect(screen.getByRole('button', { name: /Deutsch/ })).toBeDefined()
     act(() => { b.store.actions.sync('fr', OPTIONS, 2) })
     expect(screen.getByRole('button', { name: /fr/ })).toBeDefined()
   })

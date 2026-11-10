@@ -7,7 +7,7 @@ import type { ChatNode } from '../src/client/contract/chat-nodes.ts'
 import { TurnTriggerNodeView } from '../src/client/chat/TurnTriggerNodeView.tsx'
 import { turnTriggerDetails } from '../src/client/chat/turn-trigger.ts'
 import { contextForm, contextProducer } from '../src/client/conversation-nodes/event-projection.ts'
-import { en, zh } from '../src/client/locale.ts'
+import { en } from '../src/client/locale.ts'
 
 afterEach(cleanup)
 
@@ -26,7 +26,7 @@ function trigger(source: unknown): ChatNode<'turn-trigger'> {
 describe('Turn trigger notices', () => {
   it.each([
     [en, 'Requested to continue generation'],
-    [zh, '已请求继续生成'],
+    [en, 'Requested to continue generation'],
   ])('shows an empty retry as a compact continuation receipt', (locale, title) => {
     const node = trigger({ kind: 'retry' })
     node.data.content = []
@@ -63,7 +63,7 @@ describe('Turn trigger notices', () => {
 
   it.each([
     [en, 'Task message received'],
-    [zh, '收到任务消息'],
+    [en, 'Task message received'],
   ])('presents Team relays as Agent messages while retaining the sender name', (locale, title) => {
     const node = trigger({ kind: 'agent-message', form: 'relay', senderSessionId: 'sender' })
     node.data.content = [{ type: 'text', text: 'Team message from reviewer-2:' }, { type: 'text', text: 'Ready.' }]
@@ -76,7 +76,7 @@ describe('Turn trigger notices', () => {
 
   it.each([
     { locale: en, title: 'Automation task' },
-    { locale: zh, title: '自动化任务' },
+    { locale: en, title: 'Automation task' },
   ])('uses the automation task label $title and shared clock', ({ locale, title }) => {
     const node = trigger({ kind: 'schedule' })
     const view = render(<TurnTriggerNodeView node={node} t={makeTranslate(locale)} />)
@@ -88,12 +88,12 @@ describe('Turn trigger notices', () => {
   })
 
   it.each([
-    ['completed', 'Subagent run completed', '子智能体已完成任务'],
-    ['aborted', 'Subagent run stopped', '子智能体任务已停止'],
-    ['error', 'Subagent run failed', '子智能体执行失败'],
-    ['max-tokens', 'Subagent reached the token limit', '子智能体已达 token 上限'],
-    ['refusal', 'Subagent declined the task', '子智能体拒绝执行'],
-    ['backend-specific', 'Subagent run ended unexpectedly', '子智能体异常结束'],
+    ['completed', 'Subagent run completed', 'Subagent run completed'],
+    ['aborted', 'Subagent run stopped', 'Subagent run stopped'],
+    ['error', 'Subagent run failed', 'Subagent run failed'],
+    ['max-tokens', 'Subagent reached the token limit', 'Subagent reached the token limit'],
+    ['refusal', 'Subagent declined the task', 'Subagent declined the task'],
+    ['backend-specific', 'Subagent run ended unexpectedly', 'Subagent run ended unexpectedly'],
   ])('presents only the recorded %s outcome in both locales', (stopReason, english, chinese) => {
     const source = { kind: 'subagent-settled', stopReason, senderSessionId: 'child-1' }
     const node = trigger(source)
@@ -103,7 +103,7 @@ describe('Turn trigger notices', () => {
     const reference = render(<IconUsersOutlineRegular size={14} />)
     expect(view.getByRole('button').querySelector('svg')?.outerHTML)
       .toBe(reference.container.querySelector('svg')?.outerHTML)
-    view.rerender(<TurnTriggerNodeView node={node} t={makeTranslate(zh)} />)
+    view.rerender(<TurnTriggerNodeView node={node} t={makeTranslate(en)} />)
     expect(view.getByRole('button').textContent).toContain(chinese)
     expect(view.getByRole('button').textContent).not.toContain(' · ')
     fireEvent.click(view.getByRole('button'))

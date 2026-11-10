@@ -255,12 +255,12 @@ def main():
             call("click", {**owner, "snapshotId": first["snapshotId"], "windowId": primary["windowId"],
                            "x": field[0] + field[2] / 2 - primary["bounds"]["x"],
                            "y": field[1] + field[3] / 2 - primary["bounds"]["y"]})
-            call("typeText", {**owner, "text": "中文 CUA 🧪"})
-            wait_state(lambda state: state["text"] == "中文 CUA 🧪", "Unicode input was not received completely")
+            call("typeText", {**owner, "text": "옭뇣 CUA 🧪"})
+            wait_state(lambda state: state["text"] == "옭뇣 CUA 🧪", "Unicode input was not received completely")
             call("pressKey", {**owner, "key": "a", "modifiers": ["command"]})
-            call("typeText", {**owner, "text": "第二次 CUA"})
+            call("typeText", {**owner, "text": "있욌락 CUA"})
             call("pressKey", {**owner, "key": "tab"})
-            state = wait_state(lambda state: state["text"] == "第二次 CUA", "Command+A replacement or key dispatch was not received")
+            state = wait_state(lambda state: state["text"] == "있욌락 CUA", "Command+A replacement or key dispatch was not received")
             check_hover()
             state = json.loads(state_path.read_text())
             expected_pointer_counts = {key: state[key] + 1 for key in

@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-08-26-ban-ambiguous-origin-label.zh.md)
-
 ## Problem
 
 The case-insensitive ten-letter ASCII token formed by `prove` followed by `nance` had accumulated unrelated meanings across the repository. It named source-event references, provider and model metadata, context producers, installed artifact identity, configuration origins, browser-recording evidence, and release attestations. A reader could not determine the recorded fact from the label alone.
@@ -18,7 +16,7 @@ The rule applies to source, tests, documentation, active Agent Notes, prompts, s
 
 `verify-concrete-terms` scans tracked filenames, symlink targets, and text case-insensitively after NFKC normalization. It runs as a quick leaf of `doc-sync`, and its tests prove rejection in prose, identifiers, and paths. Vendored sources and frozen archived Agent Notes remain excluded because their repository policies prohibit direct edits.
 
-Historical persistence evidence retains identifiers from its selected source tree. The check excludes release schema JSON under `docs/persistence-changes/releases/` and `docs/persistence-changes/historical-formats/vN.schema.json`. In `vN.md` and `vN.zh.md`, only the schema content inside one valid pair of `persistence-format-schema` markers is exempt; `verify-persistence-formats` requires that content to match the generated historical schema. Authored prose, current catalogs, and current schemas remain checked. Renaming a captured identifier would misrepresent the historical declarations; the [persistence history decision](2026-09-11-persistence-type-history.md) owns that evidence.
+Historical persistence evidence retains identifiers from its selected source tree. The check excludes release schema JSON under `docs/persistence-changes/releases/` and `docs/persistence-changes/historical-formats/vN.schema.json`. In `vN.md`, only the schema content inside one valid pair of `persistence-format-schema` markers is exempt; `verify-persistence-formats` requires that content to match the generated historical schema. Authored prose, current catalogs, and current schemas remain checked. Renaming a captured identifier would misrepresent the historical declarations; the [persistence history decision](2026-09-11-persistence-type-history.md) owns that evidence.
 
 This decision partially supersedes the earlier decision's rejection of fixed word bans and identifier renames for this one token. The earlier decision remains active for all other abstract language and for choosing each replacement according to its local meaning.
 

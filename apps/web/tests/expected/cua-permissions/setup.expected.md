@@ -1,6 +1,6 @@
-- dialog "使用 Computer Use 前需要设置":
-  - heading "使用 Computer Use 前需要设置" [level=2]
-  - button "关闭"
-  - paragraph: Computer Use 插件已开启，但暂时无法检测系统权限。请前往插件详情页查看原因并重试。
-  - button "稍后"
-  - button "前往设置"
+- dialog "Set up computer use before use":
+  - heading "Set up computer use before use" [level=2]
+  - button "Close"
+  - paragraph: Computer use is enabled, but system permissions could not be checked. Open the plugin details to see the error and retry.
+  - button "Later"
+  - button "Open settings"

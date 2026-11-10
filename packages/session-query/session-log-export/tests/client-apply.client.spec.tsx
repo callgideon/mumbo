@@ -138,7 +138,8 @@ describe('session-log-download browser plugin', () => {
     const face = injectedOf(b.slots.entries('shell.overlay')[0]) as SessionMarkdownCopyToastInjected
     expect(face.hooks.sessionMarkdownCopy.getSnapshot().notice?.kind).toBe('preparationFailed')
     expect(b.failed).not.toHaveBeenCalled()
-    b.ctx.locale.setLocale('zh')
+    b.ctx.locale.addLanguage({ id: 'de', label: 'Deutsch', fallback: 'en' })
+    b.ctx.locale.setLocale('de')
     expect(menu.source.getSnapshot()[0]?.label).not.toBe('Copy Session as Markdown')
   })
 

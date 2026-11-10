@@ -27,9 +27,9 @@ it('keeps a send in the composer until the Host accepts it and then shows the me
     }
   }, { timeout: 5_000 })
   fireEvent.paste(composer, {
-    clipboardData: { items: [], getData: () => '回显这条消息' },
+    clipboardData: { items: [], getData: () => 'echo this Message' },
   })
-  await waitFor(() => { expect(composer.textContent).toBe('回显这条消息') })
+  await waitFor(() => { expect(composer.textContent).toBe('echo this Message') })
   fireEvent.keyDown(composer, { key: 'Enter' })
 
   // Synchronously after the keystroke, before the prompt is even serialized
@@ -37,7 +37,7 @@ it('keeps a send in the composer until the Host accepts it and then shows the me
   // read-only composer behind a busy send control, and the conversation shows
   // nothing yet.
   expect(document.querySelector('[data-submission-echo]')).toBeNull()
-  expect(composer.textContent).toBe('回显这条消息')
+  expect(composer.textContent).toBe('echo this Message')
   expect(composer.getAttribute('contenteditable')).toBe('false')
   expect(document.querySelector('[role="group"][aria-label="Pending attachments"] img')).not.toBeNull()
   expect(screen.getByRole('button', { name: 'Sending message' }).getAttribute('aria-busy')).toBe('true')
@@ -59,5 +59,5 @@ it('keeps a send in the composer until the Host accepts it and then shows the me
       throw new Error('durable user gallery missing')
     }
   }, { timeout: 10_000 })
-  expect(screen.getAllByText('回显这条消息')).toHaveLength(1)
+  expect(screen.getAllByText('echo this Message')).toHaveLength(1)
 })

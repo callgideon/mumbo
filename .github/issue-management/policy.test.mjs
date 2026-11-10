@@ -210,7 +210,7 @@ test('keeps the pull request template aligned with the dsh-pr-description skill'
   const source = readFileSync(new URL('../pull_request_template.md', import.meta.url), 'utf8')
   const skillPath = '.agents/skills/dsh-pr-description/SKILL.md'
   const skill = readFileSync(new URL(`../../${skillPath}`, import.meta.url), 'utf8')
-  assert.ok(source.startsWith(`<!-- 本 PR 正文按 ${skillPath} 填写。 -->\n`), 'the template points to the skill')
+  assert.ok(source.startsWith(`<!-- Fill in this PR description by following ${skillPath}. -->\n`), 'the template points to the skill')
   assert.deepEqual(source.match(/^## .+$/gm), [
     '## Motivation',
     '## Changes',
@@ -228,9 +228,9 @@ test('keeps the pull request template aligned with the dsh-pr-description skill'
   const skillStages = [...stagesSection.matchAll(/^\*\*(.+?)\*\*:/gm)].map(([, stage]) => stage)
   assert.ok(skillStages.length > 0, 'the skill lists stages')
   for (const stage of skillStages) {
-    assert.match(stage, /^[a-z]+ [\u4e00-\u9fff]+$/, `stage name pairs one English word with a Chinese name: ${stage}`)
+    assert.match(stage, /^[a-z]+$/, `stage name is one lowercase English word: ${stage}`)
   }
-  const reviewStage = 'review 评审处理'
+  const reviewStage = 'review'
   assert.equal(skillStages.at(-1), reviewStage, 'review is the last stage')
 
   const skillProse = skill.replace(/```[\s\S]*?```/g, '')
@@ -247,7 +247,7 @@ test('keeps the pull request template aligned with the dsh-pr-description skill'
     ['auto', 'ede9fe'],
   ]) {
     assert.ok(
-      badgeSection.includes(`https://img.shields.io/badge/䷼%20AI--DECLARATION-${level}-${color}?labelColor=${color}`),
+      badgeSection.includes(`https://img.shields.io/badge/%E4%B7%BC%20AI--DECLARATION-${level}-${color}?labelColor=${color}`),
       `the skill has the ${level} badge URL`,
     )
   }
@@ -268,10 +268,10 @@ test('keeps the pull request template aligned with the dsh-pr-description skill'
     assert.match(markdown, /^## AI Usage$/m, `the ${label} uses the AI Usage heading`)
     assert.match(markdown, /^<!-- ai-declaration:start -->$/m, `the ${label} starts the declaration block`)
     assert.match(markdown, /^<!-- ai-declaration:end -->$/m, `the ${label} ends the declaration block`)
-    assert.ok(markdown.includes('| 阶段 | 级别 | AI 参与度 | 决策记录 |'), `the ${label} shows the stage table header`)
+    assert.ok(markdown.includes('| Stage | Level | AI involvement | Decision record |'), `the ${label} shows the stage table header`)
     assert.ok(markdown.includes(versionLink), `the ${label} uses the pinned specification version`)
   }
-  const exampleRows = [...example.matchAll(/^\| .+? \| ([a-z]+) [^|]+ \| (\d+)% \| .+$/gm)]
+  const exampleRows = [...example.matchAll(/^\| .+? \| ([a-z]+) \| (\d+)% \| .+$/gm)]
   assert.ok(exampleRows.length > 0, 'the example has stage rows')
   const levelOrder = ['hint', 'assist', 'pair', 'copilot', 'auto']
   const highestExampleLevel = exampleRows
@@ -285,29 +285,29 @@ test('keeps the pull request template aligned with the dsh-pr-description skill'
   assert.equal(source.match(/<!-- ai-declaration:end -->/g)?.length, 1)
   assert.ok(
     declarationBlock.includes(
-      '[![AI-DECLARATION: 待填级别](https://img.shields.io/badge/䷼%20AI--DECLARATION-待填级别-e5e7eb?labelColor=e5e7eb)](https://ai-declaration.md)',
+      '[![AI-DECLARATION: TBD](https://img.shields.io/badge/%E4%B7%BC%20AI--DECLARATION-TBD-e5e7eb?labelColor=e5e7eb)](https://ai-declaration.md)',
     ),
     'the block has the placeholder badge link',
   )
   assert.ok(
-    declarationBlock.includes(`**AI declaration** (${versionLink}): \`待填级别\``),
+    declarationBlock.includes(`**AI declaration** (${versionLink}): \`TBD\``),
     'the block pins the declaration',
   )
 
   const usageSection = source.slice(source.indexOf('## AI Usage'))
   assert.ok(usageSection.includes('<!-- ai-declaration:start -->'), 'the AI declaration block is in AI Usage')
-  assert.ok(usageSection.includes('| 阶段 | 级别 | AI 参与度 | 决策记录 |'), 'the stage table is in AI Usage')
+  assert.ok(usageSection.includes('| Stage | Level | AI involvement | Decision record |'), 'the stage table is in AI Usage')
   assert.ok(source.includes('|:--|:--|--:|:--|'), 'the template right-aligns AI involvement')
   assert.deepEqual(
-    [...source.matchAll(/^\| (.+?) \| (?:待填级别|n\/a 暂不适用) \| (?:\?%|—) \| .+$/gm)].map(([, stage]) => stage),
+    [...source.matchAll(/^\| (.+?) \| (?:TBD|n\/a) \| (?:\?%|—) \| .+$/gm)].map(([, stage]) => stage),
     skillStages,
     'the template has one row per skill stage, in skill order',
   )
   for (const stage of skillStages.slice(0, -1)) {
-    assert.ok(source.includes(`| ${stage} | 待填级别 | ?% | 待填说明 |`), `${stage} has a placeholder row`)
+    assert.ok(source.includes(`| ${stage} | TBD | ?% | TBD |`), `${stage} has a placeholder row`)
   }
   assert.ok(
-    source.includes(`| ${reviewStage} | n/a 暂不适用 | — | 尚无已处理的评审意见。 |`),
+    source.includes(`| ${reviewStage} | n/a | — | No review comments handled yet. |`),
     'the review row starts as n/a, as the skill requires at PR creation',
   )
   for (const [label, text] of [
@@ -347,7 +347,7 @@ test('reserves PR kind and legacy labels for pull requests', () => {
   ]) {
     assert.ok(
       validateIssue({ ...legalIssue, labels: [label] }).some((error) =>
-        error.startsWith('Issue 不得使用 PR kind 或旧版标签：'),
+        error.startsWith('Issue must not use a PR kind or legacy label: '),
       ),
       label,
     )
@@ -464,7 +464,7 @@ test('keeps terminal Status aligned with the native close reason', () => {
     }),
     [],
   )
-  assert.ok(validateIssue({ ...legalIssue, status: 'Done' }).includes('Done 必须对应 Completed 关闭原因'))
+  assert.ok(validateIssue({ ...legalIssue, status: 'Done' }).includes('Done requires the Completed close reason'))
 })
 
 test('separates resolving and informational references', () => {
@@ -480,7 +480,7 @@ test('separates resolving and informational references', () => {
 test('converts PR creation timestamps to Shanghai Project dates', () => {
   assert.equal(projectDate('2026-08-27T15:59:59Z', 'Asia/Shanghai'), '2026-08-27')
   assert.equal(projectDate('2026-08-27T16:00:00Z', 'Asia/Shanghai'), '2026-08-28')
-  assert.throws(() => projectDate('invalid', 'Asia/Shanghai'), /无效的 PR 创建时间/)
+  assert.throws(() => projectDate('invalid', 'Asia/Shanghai'), /Invalid PR creation time/)
 })
 
 test('initializes every referenced Issue only for a PR opened event', async () => {
@@ -607,13 +607,13 @@ test('rejects a missing, non-Date, or Issue-level Start Date field', async (t) =
   let response = projectGraphqlData({ startDateField: false })
   const requests = mockGraphql(t, () => response)
 
-  await assert.rejects(initializeIssueStartDate(42, '2026-08-28'), /Project 缺少 Start Date 字段/)
+  await assert.rejects(initializeIssueStartDate(42, '2026-08-28'), /Project is missing the Start Date field/)
   response = projectGraphqlData({ startDateType: 'TEXT' })
-  await assert.rejects(initializeIssueStartDate(42, '2026-08-28'), /Start Date 字段必须为 Date/)
+  await assert.rejects(initializeIssueStartDate(42, '2026-08-28'), /Start Date field must be Date/)
   response = projectGraphqlData({ startDateIsIssueField: true })
   await assert.rejects(
     initializeIssueStartDate(42, '2026-08-28'),
-    /Start Date 字段必须为 Project Date 字段/,
+    /Start Date field must be a Project Date field/,
   )
   assert.equal(requests.length, 3)
 })
@@ -622,16 +622,16 @@ test('rejects a missing, non-select, or Issue-level Priority field', async (t) =
   let response = projectGraphqlData({ priorityField: false })
   const requests = mockGraphql(t, () => response)
 
-  await assert.rejects(initializeIssueStartDate(42, '2026-08-28'), /Project 缺少 Priority 字段/)
+  await assert.rejects(initializeIssueStartDate(42, '2026-08-28'), /Project is missing the Priority field/)
   response = projectGraphqlData({ priorityType: 'TEXT' })
   await assert.rejects(
     initializeIssueStartDate(42, '2026-08-28'),
-    /Priority 字段必须为 Single Select/,
+    /Priority field must be Single Select/,
   )
   response = projectGraphqlData({ priorityIsIssueField: true })
   await assert.rejects(
     initializeIssueStartDate(42, '2026-08-28'),
-    /Priority 字段必须为 Project custom field/,
+    /Priority field must be a Project custom field/,
   )
   assert.equal(requests.length, 3)
 })
@@ -683,7 +683,7 @@ test('enforces highest resolving Priority without Type or area synchronization',
   assert.deepEqual(validatePullRequest(pull), [])
   assert.ok(
     validatePullRequest({ ...pull, labels: ['kind/cleanup', 'p2', 'area/web'] }).includes(
-      'PR Priority 应为 p0',
+      'PR Priority must be p0',
     ),
   )
 })
@@ -829,8 +829,8 @@ test('requires repository PR labels in the enforcement scope', () => {
     references: { all: [2], resolving: [], related: [2] },
     issues: new Map([[2, { priority: null }]]),
   })
-  assert.ok(errors.includes('PR 必须恰好有一个允许的 kind/*，当前为 0'))
-  assert.ok(errors.includes('PR 必须至少有一个 area/*'))
+  assert.ok(errors.includes('PR must have exactly one allowed kind/*; found 0'))
+  assert.ok(errors.includes('PR must have at least one area/*'))
 })
 
 test('accepts exactly the canonical kinds with extensible areas', () => {
@@ -843,17 +843,17 @@ test('rejects multiple, unknown, legacy, and Issue-source PR labels', () => {
   assert.ok(
     validatePullRequest(
       reviewedPull(['kind/feature', 'kind/doc', 'area/web']),
-    ).includes('PR 必须恰好有一个允许的 kind/*，当前为 2'),
+    ).includes('PR must have exactly one allowed kind/*; found 2'),
   )
   assert.ok(
     validatePullRequest(reviewedPull(['kind/experimental', 'area/web'])).includes(
-      'PR 含不支持的 kind/*：kind/experimental',
+      'PR has unsupported kind/*: kind/experimental',
     ),
   )
   for (const label of legacyLabels) {
     assert.ok(
       validatePullRequest(reviewedPull(['kind/feature', 'area/web', label])).some((error) =>
-        error.startsWith('PR 含旧版标签：'),
+        error.startsWith('PR has legacy labels: '),
       ),
       label,
     )
@@ -861,7 +861,7 @@ test('rejects multiple, unknown, legacy, and Issue-source PR labels', () => {
   assert.ok(
     validatePullRequest(
       reviewedPull(['kind/feature', 'area/web', 'source/internal-pr']),
-    ).includes('source/* 仅用于 Issue：source/internal-pr'),
+    ).includes('source/* is for Issues only: source/internal-pr'),
   )
 })
 
@@ -937,9 +937,9 @@ test('validates informational Issues and ignores PR numbers without Project read
 
 test('requires a real Issue and explains why stacked PR references do not qualify', async (t) => {
   const fixture = mockPolicyApi(t, { pull: { body: 'Fixes #3' }, issues: { 3: { pull_request: {} } } })
-  await assert.rejects(runPullRequestCheck({ pull_request: { number: 10 } }), /Issue policy 未通过/)
+  await assert.rejects(runPullRequestCheck({ pull_request: { number: 10 } }), /Issue policy failed/)
   assert.equal(fixture.requests.length, 4)
-  assert.match(fixture.output.join(''), /PR 编号（包括堆叠依赖 PR）不算 Issue 引用/)
+  assert.match(fixture.output.join(''), /PR numbers, including stacked dependency PRs, are not Issue references/)
 })
 
 test('fetches Project Priority only for resolving Issues and enforces mismatch', async (t) => {
@@ -949,17 +949,17 @@ test('fetches Project Priority only for resolving Issues and enforces mismatch',
   assert.equal(fixture.requests.length, 6)
   assert.equal(fixture.workflowOutput(), 'eligible=true\nexempt=false\nneeds-project=true\n')
   assert.ok(!fixture.requests.includes('/graphql'))
-  await assert.rejects(runPullRequestCheck(event), /Issue policy 未通过/)
+  await assert.rejects(runPullRequestCheck(event), /Issue policy failed/)
   assert.equal(fixture.requests.length, 13)
   assert.equal(fixture.requests.filter((path) => path === '/graphql').length, 1)
-  assert.match(fixture.output.join(''), /PR Priority 应为 p1/)
+  assert.match(fixture.output.join(''), /PR Priority must be p1/)
 })
 
 test('enforces current metadata on title edits and prior reviews without requested reviewers', async (t) => {
   const fixture = mockPolicyApi(t, { requested: false, reviews: [{}], pull: { labels: [] }, issues: { 2: {} } })
-  await assert.rejects(runPullRequestCheck({ action: 'edited', changes: { title: { from: 'old' } }, pull_request: { number: 10 } }), /Issue policy 未通过/)
+  await assert.rejects(runPullRequestCheck({ action: 'edited', changes: { title: { from: 'old' } }, pull_request: { number: 10 } }), /Issue policy failed/)
   assert.equal(fixture.requests.length, 4)
-  assert.match(fixture.output.join(''), /PR 必须至少有一个 area/)
+  assert.match(fixture.output.join(''), /PR must have at least one area/)
 })
 
 test('fails closed on missing referenced numbers and unavailable Project access', async (t) => {
@@ -1165,12 +1165,12 @@ test('allows missing Priority only when resolving Issues are also unprioritized'
   assert.deepEqual(validatePullRequest(pull), [])
   assert.ok(
     validatePullRequest({ ...pull, issues: new Map([[2, { priority: 'P2' }]]) }).includes(
-      'PR Priority 应为 p2',
+      'PR Priority must be p2',
     ),
   )
   assert.ok(
     validatePullRequest({ ...pull, labels: [...pull.labels, 'p2'] }).includes(
-      '有 Priority 的解决型 PR 要求每个被解决 Issue 都设置 Priority',
+      'A resolving PR with Priority requires every resolved Issue to set Priority',
     ),
   )
 })

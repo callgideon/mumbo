@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-11-09-connection-authenticators-and-edge-members.zh.md)
-
 ## Problem
 
 A mumbo shared project is its own Host behind the mumbo edge, and several people work in it. Connection admission was closed: `admit()` returned the owner's `browserPeer` for a valid browser cookie or an owner API Peer for an API cookie, and nothing else. The edge therefore signed every member in with the box's owner launch token, so the Host recorded every member's message as the owner's, the coordinator learned the author only from a `[from <email>]` prefix the edge wrote into relayed text, and every member held owner power over settings, credentials, and plugins. The [peer principal decision](2026-10-12-peer-principal-and-remote-access.md) already records non-owner callers on prompts and gates their calls through remote access, but its only non-owner kind, the liveshare `share-viewer`, enters through an in-process relay channel, not HTTP admission.

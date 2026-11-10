@@ -20,8 +20,8 @@ import { PartialArguments } from '@deepseek-ai/dsh-util-values'
 import { apply as applyTool, inject as injectTool } from '../src/client/apply.ts'
 
 // The service reads its initial locale from the browser; these specs assert
-// the shipped Chinese copy, so they state the browser they assume.
-usePinnedBrowserLanguages('zh-CN')
+// the shipped English copy, so they state the browser they assume.
+usePinnedBrowserLanguages('en-US')
 
 const SID = 's1' as SessionId
 // jsdom omits font loading events used by the resident composer.
@@ -46,9 +46,9 @@ beforeEach(() => {
   Object.defineProperty(document, 'fonts', { configurable: true, value: new EventTarget() })
 })
 const TODOS: TodoItem[] = [
-  { content: '梳理需求', status: 'completed' },
-  { content: '实现 fixture 样本', status: 'in_progress' },
-  { content: '浏览器验收', status: 'pending' },
+  { content: 'sort out requirements', status: 'completed' },
+  { content: 'implement fixture sample', status: 'in_progress' },
+  { content: 'Browser acceptance', status: 'pending' },
 ]
 
 const todoResult = (seq: number): ToolResultNode => ({
@@ -132,13 +132,13 @@ describe('todo_write assembly (product registrations, no outlet twins)', () => {
     // Keyed toolview registration took the row (summary derived from args).
     const row = view.container.querySelector('[data-tool="todo_write"]')
     expect(row).not.toBeNull()
-    expect(row!.textContent).toContain('新增 3')
+    expect(row!.textContent).toContain('3 added')
 
     // The plan strip sits in the input dock, fed by the projection
     // (default-collapsed: the header summary shows; rows appear on expand).
     const panel = view.container.querySelector('[data-testid="todo-panel"]')
     expect(panel).not.toBeNull()
-    expect(panel!.textContent).toContain('1 已完成\u2002·\u20021 进行中\u2002·\u20021 待处理')
+    expect(panel!.textContent).toContain('1 completed\u2002·\u20021 in progress\u2002·\u20021 pending')
     fireEvent.click(panel!.querySelector('button')!)
     expect([...panel!.querySelectorAll('li')].map(li => li.getAttribute('data-status')))
       .toEqual(['completed', 'in_progress', 'pending'])

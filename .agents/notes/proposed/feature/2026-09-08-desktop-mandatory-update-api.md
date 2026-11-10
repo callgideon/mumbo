@@ -2,8 +2,6 @@
 
 Status: proposed
 
-English | [中文](2026-09-08-desktop-mandatory-update-api.zh.md)
-
 ## Problem
 
 Desktop requires mandatory-update decisions when its business server is local and when the user is not signed in. Mobile ordinary-update responses do not define Desktop artifact installation. Backend and Desktop owners need a self-contained protocol with explicit success, blocking, and error semantics, separate from updater artifact selection.
@@ -80,8 +78,8 @@ This means the current client does not require a mandatory update, not that its 
   "msg": "Client version too low",
   "data": {
     "show_content": {
-      "title": "请更新 DeepSeek Harness",
-      "detail": "当前版本已停止支持，请下载并安装新版本。"
+      "title": "Please update DeepSeek Harness",
+      "detail": "This version is no longer supported. Download and install the new version."
     },
     "desktop_app_link": "https://example.com/harness/download"
   }

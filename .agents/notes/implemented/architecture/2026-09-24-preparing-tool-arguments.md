@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-09-24-preparing-tool-arguments.zh.md)
-
 ## Problem
 
 [Three-stage tool calls](2026-09-22-tool-call-three-phases.md) make tool identity visible before `tool/call`. A raw argument prefix alone cannot supply field-aware presentation: write/edit need a complete path and decoded content length, while bash/run_code need the description before the command or program finishes streaming.

@@ -8,7 +8,7 @@ const API_VERSION = '2026-03-10'
 
 function token() {
   const value = process.env.GH_TOKEN || process.env.GITHUB_TOKEN
-  if (!value) throw new Error('GH_TOKEN 或 GITHUB_TOKEN 未设置')
+  if (!value) throw new Error('GH_TOKEN or GITHUB_TOKEN is not set')
   return value
 }
 
@@ -171,29 +171,29 @@ export async function projectContext(number, includeStatusActor = false, include
   )
   const project = data.organization?.projectV2
   const issue = data.repository?.issue
-  if (!project || project.title !== config.projectTitle) throw new Error('目标 Project 不存在或标题不匹配')
-  if (!issue) throw new Error(`#${number} 不存在`)
+  if (!project || project.title !== config.projectTitle) throw new Error('the target Project does not exist or its title does not match')
+  if (!issue) throw new Error(`#${number} does not exist`)
   const statusField = project.fields.nodes.find((field) => field?.name === 'Status')
-  if (!statusField) throw new Error('Project 缺少 Status 字段')
+  if (!statusField) throw new Error('Project is missing the Status field')
   const priorityField = project.fields.nodes.find((field) => field?.name === config.priorityField)
-  if (!priorityField) throw new Error(`Project 缺少 ${config.priorityField} 字段`)
+  if (!priorityField) throw new Error(`Project is missing the ${config.priorityField} field`)
   if (priorityField.dataType !== 'SINGLE_SELECT') {
-    throw new Error(`Project ${config.priorityField} 字段必须为 Single Select`)
+    throw new Error(`Project ${config.priorityField} field must be Single Select`)
   }
   if (priorityField.isIssueField) {
-    throw new Error(`Project ${config.priorityField} 字段必须为 Project custom field`)
+    throw new Error(`Project ${config.priorityField} field must be a Project custom field`)
   }
   const startDateField = includeStartDate
     ? project.fields.nodes.find((field) => field?.name === config.startDateField)
     : null
   if (includeStartDate && !startDateField) {
-    throw new Error(`Project 缺少 ${config.startDateField} 字段`)
+    throw new Error(`Project is missing the ${config.startDateField} field`)
   }
   if (startDateField && startDateField.dataType !== 'DATE') {
-    throw new Error(`Project ${config.startDateField} 字段必须为 Date`)
+    throw new Error(`Project ${config.startDateField} field must be Date`)
   }
   if (startDateField?.isIssueField) {
-    throw new Error(`Project ${config.startDateField} 字段必须为 Project Date 字段`)
+    throw new Error(`Project ${config.startDateField} field must be a Project Date field`)
   }
   const item = issue.projectItems.nodes.find((candidate) => candidate.project.id === project.id)
   const latestStatusEvent = issue.timelineItems?.nodes
@@ -269,7 +269,7 @@ export async function initializeIssueStartDate(number, date) {
  */
 export async function updateStatus(context, status) {
   const option = context.statusField.options.find((candidate) => candidate.name === status)
-  if (!option) throw new Error(`Status 不存在：${status}`)
+  if (!option) throw new Error(`Status does not exist: ${status}`)
   if (context.item.fieldValueByName?.name === status) return
   await graphql(
     `mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {

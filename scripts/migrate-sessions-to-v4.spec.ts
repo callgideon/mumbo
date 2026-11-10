@@ -161,8 +161,8 @@ describe('one-time V4 migration command', () => {
   it.each(['none', 'zstd'] as const)('publishes %s successors, preserves sources and current bytes on rerun', async (compression) => {
     const root = temporaryRoot()
     const old = await fixture(root, 'old', 0, compression)
-    const older = await fixture(root, 'tool/session~名', 0, compression)
-    const source = await fixture(root, 'tool/session~名', 3, compression, toolTurn)
+    const older = await fixture(root, 'tool/session~이름', 0, compression)
+    const source = await fixture(root, 'tool/session~이름', 3, compression, toolTurn)
     const current = await fixture(root, 'current', 4, compression)
     await mkdir(join(root, '_no-cwd', 'empty'))
     const first = await run('--sessions-dir', root)

@@ -1,6 +1,6 @@
-- dialog "连接 GitHub 超时":
-  - heading "连接 GitHub 超时" [level=2]
-  - button "关闭"
-  - paragraph: 请尝试其他安装来源。
-  - button "取消"
-  - button "改用国内镜像"
+- dialog "GitHub connection timed out":
+  - heading "GitHub connection timed out" [level=2]
+  - button "Close"
+  - paragraph: Try another installation source.
+  - button "Cancel"
+  - button "Use mainland China mirror"

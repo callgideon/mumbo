@@ -164,6 +164,6 @@ if (isEntry(import.meta.url)) {
   const sourceDigest = cuaHelperSourceDigest(root)
   const buildKey = cuaHelperBuildKey(sourceDigest, readCuaSigningSettings(env))
   appendFileSync(env.GITHUB_OUTPUT, `build-key=${buildKey}\n`)
-  appendFileSync(env.GITHUB_STEP_SUMMARY, `CUA helper 源码摘要：\`${sourceDigest}\`。\n\n`)
+  appendFileSync(env.GITHUB_STEP_SUMMARY, `CUA helper source digest: \`${sourceDigest}\`.\n\n`)
   console.log(`CUA helper source digest: ${sourceDigest}`)
 }

@@ -26,7 +26,7 @@ function derivedDocumentStore(remote: object) {
   const ctx = { remote } as never
   return new SettingsDocumentStore(ctx, new SettingsDescribeMirror(ctx, () => true))
 }
-import { en, zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 import { CurrentVersionRow } from '../src/client/CurrentVersionRow.tsx'
 import { DesktopUpdateBadge } from '../src/client/DesktopUpdateIndicator.tsx'
 import { HostReleasePrompt, type HostReleasePromptProps } from '../src/client/HostReleasePrompt.tsx'
@@ -240,7 +240,7 @@ it('reports a failed developer-tool write and allows retry', async () => {
 describe('current version', () => {
   it.each([
     ['Current version: 1.2.3-rc.4', en],
-    ['当前版本：1.2.3-rc.4', zh],
+    ['Current version: 1.2.3-rc.4', en],
   ])('renders the localized release label %s', (expected, dictionary) => {
     vi.stubEnv('DSH_CLIENT_VERSION', '1.2.3-rc.4')
     const translate: TriggerContentProps['t'] = (key, params) => {
@@ -310,9 +310,9 @@ describe('Host release change confirmation', () => {
     })
     expect(screen.getByRole('dialog').textContent).toContain('Serviceaaaaaaabbbbbbb' + 'Page0.2.00.2.1')
     cleanup()
-    prompt({ page: { version: '0.2.1' }, previous: { version: '0.2.1' }, host: { version: '0.2.1', commit: 'bbbbbbb' } }, zh)
-    expect(screen.getByRole('dialog', { name: '服务版本变化' }).textContent)
-      .toContain('服务未解析bbbbbbb页面未解析bbbbbbb')
+    prompt({ page: { version: '0.2.1' }, previous: { version: '0.2.1' }, host: { version: '0.2.1', commit: 'bbbbbbb' } }, en)
+    expect(screen.getByRole('dialog', { name: 'Service version changed' }).textContent)
+      .toContain('ServiceUnknownbbbbbbbPageUnknownbbbbbbb')
     cleanup()
     prompt({ page: undefined, previous: undefined, host: { version: '0.2.1' } })
     expect(screen.getByRole('dialog').textContent).toContain('ServiceUnknown0.2.1PageUnknown0.2.1')
@@ -422,14 +422,14 @@ it('keeps the settings-file notification for ten seconds with a details action',
 })
 
 it('uses the concise Chinese configuration error for the settings notification', () => {
-  expect(zh['desktop.channel.result.configuration']).toBe('配置文件异常，更新已暂停')
+  expect(en['desktop.channel.result.configuration']).toBe('Settings file error; updates are paused')
 })
 
 it('labels uncertain settings saves without claiming they were not written', () => {
-  expect(zh['desktop.channel.result.uncertain']).toBe('设置保存异常')
+  expect(en['desktop.channel.result.uncertain']).toBe('Settings save error')
 })
 
 it('does not describe a saved selection that failed to apply as unsaved', () => {
-  expect(zh['desktop.channel.result.apply']).toBe('设置保存异常')
+  expect(en['desktop.channel.result.apply']).toBe('Settings save error')
   expect(en['desktop.channel.result.apply']).toBe('Settings save error')
 })

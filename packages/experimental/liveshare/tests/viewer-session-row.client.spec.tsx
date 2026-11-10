@@ -8,7 +8,7 @@ import { cleanup, fireEvent, render } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { apply, inject } from '../src/client/viewer-session-row.tsx'
-import { en, NS, zh } from '../src/client/locales.ts'
+import { en, NS, fr } from '../src/client/locales.ts'
 
 const SHARED = 'shared' as SessionId
 const contexts: Context[] = []
@@ -29,9 +29,10 @@ async function bench() {
     'sidebar.session.row.leading': { kind: 'list', scope: 'root' },
   } } as never, () => null)
   const locale = new LocaleRuntime(ctx)
-  locale.setLocale('zh')
+  locale.addLanguage({ id: 'fr', label: 'Français', fallback: 'en' })
+  locale.setLocale('fr')
   ctx.provide('locale', locale)
-  locale.register(NS, { zh, en })
+  locale.register(NS, { fr, en })
   await ctx.plugin({ inject: [...inject], apply }).await()
   const entry = slots.entriesOfSlot('sidebar.session.row.leading')[0]!
   const View = entry.component as (props: Record<string, unknown>) => ReactNode
@@ -62,15 +63,15 @@ describe('viewer Session lineage', () => {
     const page = await bench()
     const view = page.marker({ forkLineage: { origin: 'fork', workspaceReadOnly: true, sourceSessionId } })
     fireEvent.pointerEnter(view.container.querySelector('span') as HTMLElement)
-    expect(view.container.textContent).toContain('分叉会话')
+    expect(view.container.textContent).toContain('Dériver la session')
   })
 
   it('marks a branch with the title its source Session carries', async () => {
     const page = await bench()
     const view = page.marker({ forkLineage: {
       origin: 'fork', workspaceReadOnly: true, sourceSessionId: 'fx-source',
-    } }, '上游会话')
+    } }, 'Upstream session')
     fireEvent.pointerEnter(view.container.querySelector('span') as HTMLElement)
-    expect(view.container.textContent).toContain('来自「上游会话」的分支')
+    expect(view.container.textContent).toContain('Dérivée de « Upstream session »')
   })
 })

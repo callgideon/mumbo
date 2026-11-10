@@ -108,11 +108,11 @@ it.each([
   expect(manifest.source.publishRequested).toBeUndefined()
   const summary = await readFile(env.GITHUB_STEP_SUMMARY, 'utf8')
   if (debug) {
-    expect(summary).toContain('不能发布到 test 或 production')
+    expect(summary).toContain('cannot be published to test or production')
     expect(summary).not.toContain('Publish separately')
     await expect(prepareDesktopPublication({ ...env, DESKTOP_PUBLISH_ROUTE: JSON.stringify({
       runId: '123', attempt: '2', commit: env.GITHUB_SHA, runnerName: env.RUNNER_NAME, target, preset: 'test', sourceRef: 'master', channel: 'nightly',
-    }) })).rejects.toThrow('重跑当前发布任务无效')
+    }) })).rejects.toThrow('re-running the current publish job has no effect')
     await expect(summary).toMatchFileSnapshot(`./expected/retained-${qualification}.md`)
   } else expect(summary).toContain('Publish separately with package_run_id=123 and package_run_attempt=2')
 })

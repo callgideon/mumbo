@@ -33,7 +33,7 @@ function memory(contents: Record<string, string>): DetailFiles & { reads: string
 }
 
 it('derives language chains from a language id', () => {
-  expect(languageChain('zh-Hans-CN')).toEqual(['zh-hans-cn', 'zh-hans', 'zh', 'en'])
+  expect(languageChain('ja-Hans-CN')).toEqual(['ja-hans-cn', 'ja-hans', 'ja', 'en'])
   expect(languageChain('en-US')).toEqual(['en-us', 'en'])
   expect(languageChain('en')).toEqual(['en'])
   expect(() => languageChain('../x')).toThrow('Not a language id')
@@ -47,18 +47,18 @@ it('decodes Markdown without a byte order mark or a leading front matter block',
 
 it('reads the locale document first, falling back through languages and failing on a missing named file', async () => {
   const files = memory({
-    'locale/zh.json': JSON.stringify({ meta: { title: '无详情' } }),
+    'locale/ja.json': JSON.stringify({ meta: { title: 'しょうさいなし' } }),
     'locale/en.json': JSON.stringify({ meta: { detail: 'guide/DETAIL.md' } }),
-    'locale/zh-CN.json': JSON.stringify({ meta: { detail: 'guide/详情.md' } }),
+    'locale/ja-JP.json': JSON.stringify({ meta: { detail: 'guide/しょうさい.md' } }),
     'guide/DETAIL.md': '# Detail',
-    'guide/详情.md': '# 详情',
+    'guide/しょうさい.md': '# しょうさい',
     'README.md': '# Readme',
   })
-  expect(await readPackageDocument(files, '', ['zh', 'en'], 100, signal)).toEqual({ origin: 'locale', path: 'guide/DETAIL.md', markdown: '# Detail' })
-  expect(await readPackageDocument(files, '', languageChain('zh-CN'), 100, signal)).toMatchObject({ origin: 'locale', markdown: '# 详情' })
-  expect(files.reads).toContain('locale/zh-cn.json')
-  await readPackageDocument(files, '', languageChain('zh-Hant'), 100, signal)
-  expect(files.reads).not.toContain('locale/zh-HANT.json')
+  expect(await readPackageDocument(files, '', ['ja', 'en'], 100, signal)).toEqual({ origin: 'locale', path: 'guide/DETAIL.md', markdown: '# Detail' })
+  expect(await readPackageDocument(files, '', languageChain('ja-JP'), 100, signal)).toMatchObject({ origin: 'locale', markdown: '# しょうさい' })
+  expect(files.reads).toContain('locale/ja-jp.json')
+  await readPackageDocument(files, '', languageChain('ja-Hant'), 100, signal)
+  expect(files.reads).not.toContain('locale/ja-HANT.json')
   const missing = memory({ 'locale/en.json': JSON.stringify({ meta: { detail: 'GONE.md' } }) })
   await expectRejection(readPackageDocument(missing, '', ['en'], 100, signal), { reason: 'invalid' }, 'GONE.md')
 })

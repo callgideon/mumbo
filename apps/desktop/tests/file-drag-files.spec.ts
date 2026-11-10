@@ -27,7 +27,7 @@ it('exports original bytes and keeps a used file readable until disposal', async
 
 it('accepts non-image and unknown types while rejecting writes after disposal', async () => {
   const { store } = await files()
-  for (const [name, mediaType] of [['报告.pdf', 'application/pdf'], ['custom.asset', 'application/x-unknown']]) {
+  for (const [name, mediaType] of [['report.pdf', 'application/pdf'], ['custom.asset', 'application/x-unknown']]) {
     const bytes = new Uint8Array([37, 80, 68, 70])
     const handle = await store.prepare(bytes, { name, mediaType: mediaType! })
     const path = store.take(handle, false)!

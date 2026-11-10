@@ -7,15 +7,15 @@ import { bindDisclosure, useDisclosure } from '@deepseek-ai/dsh-client-ui-chat/s
 import type { SessionSnapshot } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { ToolCallBlock, ToolResultNode } from '@deepseek-ai/dsh-client-ui-chat/client'
 import { contextMenuHook, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
-import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
+import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
 import type { ToolCallOwnerProps, ToolTreeProps } from '../src/client/contract/slots.ts'
 import { ToolCallTree } from '../src/client/tool/ToolCallTree.tsx'
-import { zh } from '@deepseek-ai/dsh-client-ui-conversation/src/client/locales.ts'
+import { en } from '@deepseek-ai/dsh-client-ui-conversation/src/client/locales.ts'
 import { PartialArguments } from '@deepseek-ai/dsh-util-values'
 
 afterEach(cleanup)
 
-const t: ToolTreeProps['t'] = makeTranslate(zh, commonZh)
+const t: ToolTreeProps['t'] = makeTranslate(en, commonEn)
 
 const root = (callId: string, call: ToolResultNode['call']): ToolResultNode => ({
   kind: 'tool-result', seq: 3, time: 3_000, callId, call, callTime: 2_000,
@@ -220,6 +220,6 @@ describe('ToolCallTree', () => {
 
     expect(renderSlot).not.toHaveBeenCalled()
     expect(view.queryByTestId('keyed-skill')).toBeNull()
-    expect(view.getByText('Auto review 已拒绝')).toBeTruthy()
+    expect(view.getByText('Rejected by Auto review')).toBeTruthy()
   })
 })

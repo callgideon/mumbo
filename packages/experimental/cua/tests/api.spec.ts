@@ -526,14 +526,14 @@ describe('input actions', () => {
   it('passes literal text and keys to the selected app identity', async () => {
     const f = fixture()
     const app = await f.api.getApp('Editor')
-    await app.typeText('中文\nline two')
-    await app.paste('粘贴\nplain text')
+    await app.typeText('Chinese\nline two')
+    await app.paste('Paste\nplain text')
     await app.paste('<b>bold</b>', { format: 'html' })
     await app.pressKey('Control_L+shift+a')
     await app.pressKey('Return')
     expect(f.dispatch.mock.calls.slice(-5).map(([operation]) => operation)).toEqual([
-      { method: 'typeText', params: { appHandle: 'app-17', text: '中文\nline two' } },
-      { method: 'paste', params: { appHandle: 'app-17', text: '粘贴\nplain text' } },
+      { method: 'typeText', params: { appHandle: 'app-17', text: 'Chinese\nline two' } },
+      { method: 'paste', params: { appHandle: 'app-17', text: 'Paste\nplain text' } },
       { method: 'paste', params: { appHandle: 'app-17', text: '<b>bold</b>', format: 'html' } },
       { method: 'pressKey', params: { appHandle: 'app-17', key: 'a', modifiers: ['control', 'shift'] } },
       { method: 'pressKey', params: { appHandle: 'app-17', key: 'Return', modifiers: [] } },

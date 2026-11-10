@@ -6,44 +6,44 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { TodoItem } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { ToolResultNode } from '@deepseek-ai/dsh-client-ui-chat/client'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
-import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
+import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
 import { TodoRow, todoToolview } from '../src/client/tool/toolviews/todo-row.tsx'
 import { planSummary } from '../src/client/tool/toolviews/plan-summary.ts'
 import { CONVERSATION_NS as NS } from '../src/client/locale.ts'
-import { zh } from '@deepseek-ai/dsh-client-ui-conversation/src/client/locales.ts'
+import { en } from '@deepseek-ai/dsh-client-ui-conversation/src/client/locales.ts'
 import { PartialArguments } from '@deepseek-ai/dsh-util-values'
 
 type TodoRowProps = Parameters<typeof TodoRow>[0]
 
-const t: TodoRowProps['t'] = makeTranslate(zh, commonZh)
+const t: TodoRowProps['t'] = makeTranslate(en, commonEn)
 
 afterEach(cleanup)
 
 const LIST: TodoItem[] = [
-  { content: '搭骨架', status: 'completed' },
-  { content: '写组件', status: 'in_progress' },
-  { content: '补测试', status: 'pending' },
+  { content: 'scaffold', status: 'completed' },
+  { content: 'write component', status: 'in_progress' },
+  { content: 'add tests', status: 'pending' },
 ]
 
 const PARALLEL: TodoItem[] = [
-  { content: '搭骨架', status: 'completed' },
-  { content: '写组件', status: 'in_progress' },
-  { content: '跑后台构建', status: 'in_progress' },
-  { content: '读源码', status: 'in_progress' },
-  { content: '补测试', status: 'pending' },
+  { content: 'scaffold', status: 'completed' },
+  { content: 'write component', status: 'in_progress' },
+  { content: 'run background build', status: 'in_progress' },
+  { content: 'read source', status: 'in_progress' },
+  { content: 'add tests', status: 'pending' },
 ]
 
 describe('planSummary', () => {
   it('counts done/total and names the single active item with no extra count', () => {
-    expect(planSummary(LIST)).toEqual({ done: 1, total: 3, activeContent: '写组件', activeExtra: 0 })
+    expect(planSummary(LIST)).toEqual({ done: 1, total: 3, activeContent: 'write component', activeExtra: 0 })
   })
 
   it('reports the extra active count separately when several items are in progress', () => {
-    expect(planSummary(PARALLEL)).toEqual({ done: 1, total: 5, activeContent: '写组件', activeExtra: 2 })
+    expect(planSummary(PARALLEL)).toEqual({ done: 1, total: 5, activeContent: 'write component', activeExtra: 2 })
   })
 
   it('has no hint when nothing is in progress', () => {
-    expect(planSummary([{ content: '都完了', status: 'completed' }]))
+    expect(planSummary([{ content: 'all done', status: 'completed' }]))
       .toEqual({ done: 1, total: 1, activeContent: null, activeExtra: 0 })
   })
 
@@ -88,28 +88,28 @@ describe('TodoRow', () => {
 
   it('summarizes counts and the active item from the call args', () => {
     render(<TodoRow {...rowProps(resultNode(ARGS))} />)
-    expect(screen.getByText('更新任务清单')).toBeTruthy()
-    expect(screen.getByText('1/3 已完成 · 写组件')).toBeTruthy()
+    expect(screen.getByText('Update to-do list')).toBeTruthy()
+    expect(screen.getByText('1/3 completed · write component')).toBeTruthy()
   })
 
   it('reports the extra active count outside the ellipsized summary text', () => {
     const { container } = render(<TodoRow {...rowProps(resultNode(JSON.stringify({ todos: PARALLEL })))} />)
-    const text = screen.getByText('1/5 已完成 · 写组件')
+    const text = screen.getByText('1/5 completed · write component')
     const extra = screen.getByText('+2')
     expect(text.contains(extra)).toBe(false)
-    expect(container.textContent).toContain('1/5 已完成 · 写组件+2')
+    expect(container.textContent).toContain('1/5 completed · write component+2')
   })
 
   it('omits the active clause when no item is in progress and reads running-call args', () => {
     const args = JSON.stringify({ todos: [{ content: 'x', status: 'completed' }] })
     render(<TodoRow {...rowProps({ phase: 'start' as const, args: PartialArguments.fromText(args), callId: 'c1', name: 'todo_write', argsRaw: args, turn: 1, step: 1, time: 1_000, subCalls: [] })} />)
-    expect(screen.getByText('1/1 已完成')).toBeTruthy()
+    expect(screen.getByText('1/1 completed')).toBeTruthy()
   })
 
   it('keeps the counts when an active item has unusable content', () => {
     const args = JSON.stringify({ todos: [{ content: 'done', status: 'completed' }, { content: 42, status: 'in_progress' }] })
     const { container } = render(<TodoRow {...rowProps(resultNode(args))} />)
-    expect(screen.getByText('1/2 已完成')).toBeTruthy()
+    expect(screen.getByText('1/2 completed')).toBeTruthy()
     expect(container.textContent).not.toContain('+')
   })
 
@@ -139,10 +139,10 @@ describe('TodoRow', () => {
     render(<TodoRow {...rowProps(resultNode(ARGS))} />)
     fireEvent.click(screen.getByRole('button', { expanded: false }))
     expect(screen.getByRole('button', { expanded: true })).toBeTruthy()
-    expect(screen.getByText('搭骨架')).toBeTruthy()
+    expect(screen.getByText('scaffold')).toBeTruthy()
     expect(screen.getAllByRole('listitem')).toHaveLength(3)
-    expect(screen.getByLabelText('进行中')).toBeTruthy()
-    expect(screen.queryByText('输入')).toBeNull()
+    expect(screen.getByLabelText('In progress')).toBeTruthy()
+    expect(screen.queryByText('IN')).toBeNull()
   })
 
   it.each([

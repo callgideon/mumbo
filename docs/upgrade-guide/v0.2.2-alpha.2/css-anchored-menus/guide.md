@@ -5,8 +5,6 @@ description: "Client UI consumers must replace JavaScript panel positioning and 
 
 # CSS-anchored menus
 
-English | [中文](guide.zh.md)
-
 ## Change
 
 `@deepseek-ai/dsh-client-ui-primitives` removes the `useAnchoredPosition` value export and `AnchoredPositionOptions` type export. `Menu` replaces `getAnchorRect` with `anchorRef` for an external trigger element or `anchorPoint` for a point-triggered menu. Custom Client UI that imports the removed exports or passes the removed prop must migrate.

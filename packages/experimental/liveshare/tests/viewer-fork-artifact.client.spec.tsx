@@ -136,7 +136,7 @@ describe('Assembled liveshare viewer page branching a share', () => {
     // The shipped Tooltip listens for pointer events; a hover dispatched as a mouse event never raises
     // its bubble, so the ceiling statement would stay unread.
     await act(async () => { fireEvent.pointerEnter(mark) })
-    expect(await screen.findByText('Forked from “Fixture 历史会话”')).toBeDefined()
+    expect(await screen.findByText('Forked from “Fixture past session”')).toBeDefined()
     await act(async () => { fireEvent.pointerLeave(mark) })
     expect(screen.getAllByRole('button', { name: 'Send message' }).length).toBeGreaterThan(0)
     // Prompting the branch is not reconfiguring it: the child gets no preset seat and no session
@@ -178,7 +178,7 @@ describe('Assembled liveshare viewer page branching a share', () => {
     expect(owner.history('fx-alpha').some(event => event.type === 'user/message'
       && Reflect.get(event.data.source, 'rpcId') === request.requestId)).toBe(false)
     await act(async () => { owner?.completeReply(childId) })
-    const replyText = `回声：${userText}。这是 fixture 的流式回复，用于验证打字机增长与定稿切换。`
+    const replyText = `Echo:${userText}. This is fixture 's streamed reply, used to verify typewriter growth and the final-draft switch.`
     await waitFor(() => { expect(document.body.textContent).toContain(replyText) }, { timeout: 15_000 })
 
     await act(async () => { fireEvent.click(sourceRow) })

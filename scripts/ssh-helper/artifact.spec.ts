@@ -13,8 +13,9 @@ async function fixture() {
   onTestFinished(() => rm(root, { recursive: true, force: true }))
   const payload = join(root, 'dsh-ssh-helper')
   await mkdir(join(payload, 'native/system'), { recursive: true })
-  await writeFile(join(payload, 'dsh-ssh-helper'), 'fixture executable')
-  await writeFile(join(payload, 'native/system/package.json'), '{}')
+  // Portable archives store group/other-unwritable modes, so fixture modes must not depend on the host umask.
+  await writeFile(join(payload, 'dsh-ssh-helper'), 'fixture executable', { mode: 0o644 })
+  await writeFile(join(payload, 'native/system/package.json'), '{}', { mode: 0o644 })
   const metadata = {
     format: 1, version: '1.0.0', commit: 'a'.repeat(40), dirty: false,
     target: 'node24-linux-x64', protocol: 2, nodeVersion: 'v24.1.0',

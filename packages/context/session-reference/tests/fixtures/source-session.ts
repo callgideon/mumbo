@@ -14,7 +14,7 @@ export const inject = ['sessions']
 export function apply(ctx: Context): void {
   const source = Session.create(SessionId('reference-source'))
   source.append('user/message', createUserMessage({
-    content: [{ type: 'text', text: 'EARLY_SOURCE_FACT\n' + 'Historical detail 界.\n'.repeat(30)
+    content: [{ type: 'text', text: 'EARLY_SOURCE_FACT\n' + 'Historical detail 계.\n'.repeat(30)
       + 'x'.repeat(4096) + 'GIANT_LINE_MIDDLE_FACT' + 'y'.repeat(4096) }],
     source: { kind: 'user' },
   }), { surfaceOp: 'append' })

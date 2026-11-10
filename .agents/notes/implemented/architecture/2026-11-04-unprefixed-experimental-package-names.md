@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-11-04-unprefixed-experimental-package-names.zh.md)
-
 ## Problem
 
 An experimental package named `@deepseek-ai/dsh-experimental-<name>` must be renamed when it moves to a product group. The rename changes every import, dependency entry, module declaration, and profile file that names the package, so promotion carries a migration that is unrelated to the capability's behavior.

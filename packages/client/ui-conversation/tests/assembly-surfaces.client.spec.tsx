@@ -24,7 +24,7 @@ Range.prototype.getBoundingClientRect = () => ({
 })
 
 
-usePinnedBrowserLanguages('zh-CN')
+usePinnedBrowserLanguages('en-US')
 
 
 const SID = 's1' as SessionId
@@ -127,10 +127,10 @@ describe('resident composer', () => {
     fireEvent.click(textarea!)
     expect(view.getByTestId('workspace-probe').textContent).toBe('true:0')
     expect(textarea!.getAttribute('aria-expanded')).toBe('true')
-    fireEvent.click(view.getByRole('button', { name: '选择工作区' }))
+    fireEvent.click(view.getByRole('button', { name: 'Choose workspace' }))
     fireEvent.keyDown(textarea!, { key: 'Enter' })
     expect(view.getByTestId('workspace-probe').textContent).toBe('true:0')
-    expect(view.getByRole('button', { name: '选择工作区' })).toBeTruthy()
+    expect(view.getByRole('button', { name: 'Choose workspace' })).toBeTruthy()
     await runtime.dispose()
   })
 
@@ -155,7 +155,7 @@ describe('resident composer', () => {
     const scrollBody = view.container.querySelector('[data-conversation-scroll]')!
     const composerSeat = view.container.querySelector('[data-composer-seat]')!
     const textarea = view.container.querySelector<HTMLDivElement>('[data-composer-input]')!
-    const workspaceChip = view.getByRole('button', { name: '选择工作区' })
+    const workspaceChip = view.getByRole('button', { name: 'Choose workspace' })
     const workspaceProbe = view.getByTestId('workspace-probe')
     expect(textarea.getAttribute('aria-disabled')).not.toBe('true')
     expect(textarea.getAttribute('contenteditable')).not.toBe('true')
@@ -176,7 +176,7 @@ describe('resident composer', () => {
     expect(view.container.querySelector('[data-conversation-scroll]')).toBe(scrollBody)
     expect(view.container.querySelector('[data-composer-seat]')).toBe(composerSeat)
     expect(view.container.querySelector<HTMLDivElement>('[data-composer-input]')).toBe(textarea)
-    expect(view.getByRole('button', { name: '选择工作区' })).toBe(workspaceChip)
+    expect(view.getByRole('button', { name: 'Choose workspace' })).toBe(workspaceChip)
     expect(view.getByTestId('workspace-probe')).toBe(workspaceProbe)
     expect(workspaceProbe.textContent).toBe('true:1')
     expect(textarea.getAttribute('aria-disabled')).not.toBe('true')
@@ -254,12 +254,12 @@ describe('title projection across assembled surfaces', () => {
   it('one summary update re-labels the current-session crumb', async () => {
     const runtime = await bench()
     const view = runtime.renderRoot()
-    const hierarchy = view.getByRole('navigation', { name: '会话层级' })
+    const hierarchy = view.getByRole('navigation', { name: 'Session hierarchy' })
     expect(within(hierarchy).getByText('S').tagName).toBe('SPAN')
 
-    await runtime.sessions.updateSummary(SID, { displayTitle: '修订标题', title: '修订标题' })
+    await runtime.sessions.updateSummary(SID, { displayTitle: 'revised title', title: 'revised title' })
     await waitFor(() => {
-      expect(within(hierarchy).getByText('修订标题').tagName).toBe('SPAN')
+      expect(within(hierarchy).getByText('revised title').tagName).toBe('SPAN')
     })
     expect(within(hierarchy).queryByText('S')).toBeNull()
     await runtime.dispose()

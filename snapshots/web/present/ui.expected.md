@@ -7,7 +7,7 @@
     - tab "Chat" [selected]
     - tab "Trajectory"
   - button "More conversation views"
-- text: "Use one run_code program to do the following in order. Call present for missing.txt and catch its error without creating that file. Use bash to run exactly `printf \"DELIVERED_REPORT\\n\" > report.txt; printf \"DELIVERED_NOTE\\n\" > 说明.txt`. Call present for report.txt and 说明.txt. After present succeeds, deliberately throw the string \"AFTER_PRESENT\" (not an Error object) from that same run_code program. Do not retry the program or create any other files. Finish by mentioning `report.txt` and `说明.txt` in inline code, and put PRESENT_DONE in a separate paragraph. {{clock}}"
+- text: "Use one run_code program to do the following in order. Call present for missing.txt and catch its error without creating that file. Use bash to run exactly `printf \"DELIVERED_REPORT\\n\" > report.txt; printf \"DELIVERED_NOTE\\n\" > notes.txt`. Call present for report.txt and notes.txt. After present succeeds, deliberately throw the string \"AFTER_PRESENT\" (not an Error object) from that same run_code program. Do not retry the program or create any other files. Finish by mentioning `report.txt` and `notes.txt` in inline code, and put PRESENT_DONE in a separate paragraph. {{clock}}"
 - button "Copy"
 - status: Completed
 - button "Completed in {{duration}}" [expanded]
@@ -19,7 +19,7 @@
 - 'button "Code Error: code run failed (exception): AFTER_PRESENT"'
 - button "Present files Delivery failed missing.txt"
 - button "Bash Write DELIVERED_REPORT and DELIVERED_NOTE to files"
-- button "Present files Delivered report.txt, 说明.txt"
+- button "Present files Delivered report.txt, notes.txt"
 - button "Think The program ran as intended:"
 - paragraph:
   - text: "The single program ran exactly as ordered:"
@@ -33,7 +33,7 @@
     - button "Open {{cwd}}/workspace/report.txt in sidebar": report.txt
   - text: and
   - code:
-    - button "Open {{cwd}}/workspace/说明.txt in sidebar": 说明.txt
+    - button "Open {{cwd}}/workspace/notes.txt in sidebar": notes.txt
   - text: ", after which the program deliberately threw the string"
   - code: AFTER_PRESENT
   - text: — no retries, no extra files.
@@ -42,8 +42,8 @@
 - text: report.txt delivered report
 - button "Open in Test Editor"
 - button "More ways to open"
-- button "Preview {{cwd}}/workspace/说明.txt in sidebar"
-- text: 说明.txt delivered note
+- button "Preview {{cwd}}/workspace/notes.txt in sidebar"
+- text: notes.txt delivered note
 - button "Open in Test Editor"
 - button "More ways to open"
 - button "Copy"

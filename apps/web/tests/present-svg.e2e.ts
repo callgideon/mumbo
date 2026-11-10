@@ -14,12 +14,12 @@ import {
   fixtureUserPrompts, launchWebScaffold, recordFixture, watchConsole,
   webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { connectFreshWorkspaceZh, ZH_BROWSER_LOCALE } from './support.ts'
+import { connectFreshWorkspace } from './support.ts'
 
 const DIR = fileURLToPath(new URL('../../../snapshots/web/present-svg', import.meta.url))
-const FIXTURE = join(DIR, 'session.v3.jsonl')
+const FIXTURE = join(DIR, 'session.v4.jsonl')
 const MODE = webSnapshotMode()
-const RECORD_PROMPT = '简单画一个 SVG 表示冯诺依曼架构，保存为 von-neumann.svg，并提供独立文件卡片，方便打开。'
+const RECORD_PROMPT = 'Draw a simple SVG of the von Neumann architecture, save it as von-neumann.svg, and provide a standalone file card so it is easy to open.'
 const FILE = 'von-neumann.svg'
 
 /** Queue counters from the installed ws implementation; payload contents are never recorded. */
@@ -92,7 +92,7 @@ describe('web e2e: requested SVG is explicitly delivered', () => {
     })
     browser = await chromium.launch()
     page = await browser.newPage({
-      viewport: { width: 1680, height: 1000 }, locale: ZH_BROWSER_LOCALE, timezoneId: 'Asia/Shanghai',
+      viewport: { width: 1680, height: 1000 }, locale: 'en-US', timezoneId: 'Asia/Shanghai',
     })
     tripwire = watchConsole(page)
     page.on('console', (message) => {
@@ -110,7 +110,7 @@ describe('web e2e: requested SVG is explicitly delivered', () => {
     })
     await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
     await page.waitForSelector('[class*="frame"]')
-    await connectFreshWorkspaceZh(page, scaffold.workspaceCwd)
+    await connectFreshWorkspace(page, scaffold.workspaceCwd)
   })
 
   afterAll(async () => {
@@ -167,13 +167,13 @@ describe('web e2e: requested SVG is explicitly delivered', () => {
     const card = page.locator('[data-presented-file]').filter({ hasText: FILE })
     await card.waitFor({ state: 'visible' })
     expect(await card.count()).toBe(1)
-    expect(await page.getByText('产物', { exact: true }).count()).toBe(0)
+    expect(await page.getByText('artifact', { exact: true }).count()).toBe(0)
     // The scaffold workspace is not a git repository; the write call supplies its single changed file.
     const changes = page.locator('[data-changed-files]')
     // Changed-file cards wait for a separate summary request after the presentation events arrive.
     await changes.waitFor({ state: 'visible' })
     expect(await changes.count()).toBe(1)
-    expect(await changes.getByText(`已编辑 ${FILE}`, { exact: true }).count()).toBe(1)
+    expect(await changes.getByText(`Edited ${FILE}`, { exact: true }).count()).toBe(1)
     expect(await changes.getByRole('list').count()).toBe(0)
     expect(await changes.locator('svg').evaluate(icon => icon.innerHTML))
       .toBe(await card.locator('svg').evaluate(icon => icon.innerHTML))
@@ -209,7 +209,7 @@ describe('web e2e: requested SVG is explicitly delivered', () => {
     expect(tripwire.warnings, connectionDiagnostics.join('\n')).toEqual([])
   })
 
-  it.skipIf(MODE === 'record')('replays the delivered file and Chinese conversation', async () => {
+  it.skipIf(MODE === 'record')('replays the delivered file and the conversation', async () => {
     await assertFinalWorkspaceSnapshot(DIR, cwd)
     expect(await page.locator('[data-presented-file] [data-open-target]').count()).toBe(0)
     // Delivery owns the transcript; navigation and composer chrome have separate scenarios.
@@ -218,10 +218,10 @@ describe('web e2e: requested SVG is explicitly delivered', () => {
   })
 
   it('opens the single edited file from its compact card', async () => {
-    await page.locator('[data-changed-files]').getByRole('button', { name: `查看 ${FILE} 的改动` }).click()
+    await page.locator('[data-changed-files]').getByRole('button', { name: `View changes to ${FILE}` }).click()
     const review = page.locator('[data-changes-review]')
     await review.waitFor({ state: 'visible' })
-    expect(await review.getByRole('button', { name: '选择要查看的文件' }).innerText()).toContain(FILE)
+    expect(await review.getByRole('button', { name: 'Choose the file to review' }).innerText()).toContain(FILE)
     expect(tripwire.pageErrors).toEqual([])
   })
 })

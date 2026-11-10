@@ -12,7 +12,7 @@ window.__ModuleLoader__.load({
           start: 'Input activity', cancel: 'Cancel activity', insert: 'Insert result', stale: 'Draft changed',
           setup: 'Input plugin setup', details: 'Open setup', later: 'Later', config: 'Input plugin configuration',
         }
-        ctx.effect(() => ctx.locale.register('fixtureInput', { en: labels, zh: labels }))
+        ctx.effect(() => ctx.locale.register('fixtureInput', { en: labels }))
         ctx.slots.inject('conversation.input.activity', () => ctx.slots.register({
           name: 'conversation.input.activity', locale: 'fixtureInput',
         }, ({ inputActions, onActiveChange, locked, t }) => {

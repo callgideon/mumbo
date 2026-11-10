@@ -20,7 +20,7 @@ import { ChangesTabTitle } from '../src/client/ChangesTabTitle.tsx'
 import { ForgeTab, type ForgeTabInjected } from '../src/client/ForgeTab.tsx'
 import { ForgeTabTitle } from '../src/client/ForgeTabTitle.tsx'
 import { HeaderButton, type HeaderButtonInjected } from '../src/client/HeaderButton.tsx'
-import { en, NS, zh } from '../src/client/locales.ts'
+import { en, NS } from '../src/client/locales.ts'
 import { inject, mountForgePanel, TAB_ID, TAB_KIND } from '../src/client/mount.ts'
 import type { SessionListInjected } from '../src/client/session-list.ts'
 import { SessionHoverForge } from '../src/client/SessionHoverForge.tsx'
@@ -279,10 +279,10 @@ describe('mountForgePanel registration', () => {
     expect(f.sidebarRightTabs.register).toHaveBeenCalledTimes(2)
     const type = f.sidebarRightTabs.register.mock.calls[0]?.[0]
     expect(type).toMatchObject({ id: TAB_ID, kind: TAB_KIND })
-    expect([en['tab.title'], zh['tab.title']]).toContain(type?.title('sidebar://forge-panel'))
+    expect([en['tab.title'], en['tab.title']]).toContain(type?.title('sidebar://forge-panel'))
     expect(type?.guide).toHaveLength(1)
-    expect([en['guide.title'], zh['guide.title']]).toContain(type?.guide?.[0]?.title())
-    expect([en['guide.description'], zh['guide.description']]).toContain(type?.guide?.[0]?.description?.())
+    expect([en['guide.title'], en['guide.title']]).toContain(type?.guide?.[0]?.title())
+    expect([en['guide.description'], en['guide.description']]).toContain(type?.guide?.[0]?.description?.())
     expect(f.sidebarRightTabs.register.mock.calls[1]?.[0]).toMatchObject({ id: CHANGES_ID, kind: CHANGES_KIND })
     expect(f.entry('sidebar.right.pane.tab', ForgeTab)).toMatchObject({ options: { key: TAB_ID }, locale: NS })
     expect(f.entry('sidebar.right.pane.tab.title', ForgeTabTitle)).toMatchObject({ options: { key: TAB_ID }, locale: NS })
@@ -834,7 +834,7 @@ describe('mountForgePanel changes view', () => {
     f.changes(S1).createChangeRequest()
     await settle()
     const text = send.mock.calls[0]?.[0]
-    expect([en['changes.local.prompt'], zh['changes.local.prompt']]).toContain(text)
+    expect([en['changes.local.prompt'], en['changes.local.prompt']]).toContain(text)
     expect(f.notice()).toMatchObject({ key: 'toast.prompted', tone: 'success', params: { text } })
 
     send.mockRejectedValueOnce(new Error('rejected'))

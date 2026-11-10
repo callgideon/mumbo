@@ -1,47 +1,47 @@
 
-## 发布前确认
+## Confirm before publishing
 
-核对以下信息后，点击 **Review deployments**，选择 <code>desktop-test</code> 并点击 **Approve and deploy**；信息有误请点击 **Reject**。
+After checking the information below, click **Review deployments**, select <code>desktop-test</code>, and click **Approve and deploy**; if anything is wrong, click **Reject**.
 
-| 项目 | 发布信息 |
+| Item | Release information |
 | --- | --- |
-| 发布环境 | <code>test</code> |
-| 版本号 | <code>1.0.0</code> |
-| 升级通道 | <code>nightly</code> |
-| 更新灰度比例 | 全量（未设置） |
-| 平台 | <code>win-x64</code> |
-| 测试 release ID | <code>aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</code><br>测试下载路径的随机前缀，用于降低地址被猜到的可能性；连续升级测试需使用相同值。 |
-| 下载地址预览 | <a href="https&#58;//example.com/dsh-desk/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bin/win-x64/deepseek-harness-1.0.0-win-x64.exe">https&#58;//example.com/dsh-desk/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bin/win-x64/deepseek-harness-1.0.0-win-x64.exe</a><br>发布后的目标地址，审批前不保证可下载。 |
-| 升级 YAML | <a href="https&#58;//example.com/dsh-desk/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/feeds/win-x64/nightly.yml">https&#58;//example.com/dsh-desk/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/feeds/win-x64/nightly.yml</a><br>本次发布将更新此文件；审批前可能不存在或仍指向旧版本。 |
-| 打包来源 | <a href="https&#58;//github.com/owner/repo/actions/runs/10/attempts/2">查看打包运行 #10 · 第 2 次尝试</a><br>源码：<code>master @ bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb</code><br>打包机器：<code>fixture-runner</code> |
-| 签名与公证 | EXE 签名校验通过 |
-| Git tag | 不创建（test 环境） |
+| Environment | <code>test</code> |
+| Version | <code>1.0.0</code> |
+| Update channel | <code>nightly</code> |
+| Staged rollout percentage | Full (not set) |
+| Platform | <code>win-x64</code> |
+| Test release ID | <code>aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</code><br>Random prefix of the test download path, used to make the address harder to guess; consecutive upgrade tests must use the same value. |
+| Download URL preview | <a href="https&#58;//example.com/dsh-desk/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bin/win-x64/deepseek-harness-1.0.0-win-x64.exe">https&#58;//example.com/dsh-desk/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bin/win-x64/deepseek-harness-1.0.0-win-x64.exe</a><br>Target addresses after publishing; downloads are not guaranteed before approval. |
+| Update YAML | <a href="https&#58;//example.com/dsh-desk/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/feeds/win-x64/nightly.yml">https&#58;//example.com/dsh-desk/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/feeds/win-x64/nightly.yml</a><br>This release will update this file; before approval it may not exist or may still point to the old version. |
+| Package source | <a href="https&#58;//github.com/owner/repo/actions/runs/10/attempts/2">View packaging run #10 · attempt 2</a><br>Source: <code>master @ bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb</code><br>Packaging machine: <code>fixture-runner</code> |
+| Signing and notarization | EXE signature verified |
+| Git tag | Not created (test environment) |
 
-### 批准后将执行
+### Runs after approval
 
-1. 重新校验产物与发布目标；若与审批摘要不一致则停止。
-2. 上传缺少的文件，跳过内容一致的已有文件；发现内容冲突则停止。
-3. 更新上述升级 YAML，并保存发布记录。
+1. Re-verify the artifacts and release target; stop if they differ from the approval digest.
+2. Upload missing files and skip existing files with identical content; stop on a content conflict.
+3. Update the update YAML above and save the release record.
 
-**本次只发布 test，不修改 production。**
+**This release publishes to test only and does not modify production.**
 
 <details>
-<summary>技术详情与文件清单</summary>
+<summary>Technical details and file list</summary>
 
-COS 存储桶：<code>fixture-1250000000</code>
+COS bucket: <code>fixture-1250000000</code>
 
-release ID 取自原打包产物清单。打包时优先使用表单 `test_release_id`；留空则使用机器 `presets/test.env` 中的 `DOWNLOAD_TEST_RELEASE_ID`。发布时不重新选择。
+The release ID comes from the original package manifest. When packaging, the form field `test_release_id` takes precedence; if left empty, `DOWNLOAD_TEST_RELEASE_ID` from the machine `presets/test.env` is used. It is not re-selected at publish time.
 
-审批摘要 SHA-256：<code>cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc</code>
+Approval digest SHA-256: <code>cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc</code>
 
-共 3 个文件；大小及 SHA-256 对应实际上传字节，包括更新后的 YAML 内容。
+3 files in total; sizes and SHA-256 correspond to the bytes actually uploaded, including the updated YAML content.
 
-| 文件 | 大小 | SHA-256 |
+| File | Size | SHA-256 |
 | --- | --- | --- |
-| <a href="https&#58;//example.com/dsh-desk/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bin/win-x64/deepseek-harness-1.0.0-win-x64.exe">deepseek-harness-1.0.0-win-x64.exe</a> | 23 字节 | <code>7039e7b3e00d39fbfb2948ba31b6216ac9ffff01b4117a1cec08025255d9ad10</code> |
-| <a href="https&#58;//example.com/dsh-desk/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bin/win-x64/deepseek-harness-1.0.0-win-x64.exe.blockmap">deepseek-harness-1.0.0-win-x64.exe.blockmap</a> | 16 字节 | <code>4fd6c7d73e713d7f54f173dfc845d046d267f9e62c80a92670b0696131bfb74a</code> |
-| <a href="https&#58;//example.com/dsh-desk/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/feeds/win-x64/nightly.yml">nightly.yml</a> | 272 字节 | <code>faccf50f8398d6781568114dda9a678751e4c01044dd9424d00237c69e58cb59</code> |
+| <a href="https&#58;//example.com/dsh-desk/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bin/win-x64/deepseek-harness-1.0.0-win-x64.exe">deepseek-harness-1.0.0-win-x64.exe</a> | 23 bytes | <code>7039e7b3e00d39fbfb2948ba31b6216ac9ffff01b4117a1cec08025255d9ad10</code> |
+| <a href="https&#58;//example.com/dsh-desk/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bin/win-x64/deepseek-harness-1.0.0-win-x64.exe.blockmap">deepseek-harness-1.0.0-win-x64.exe.blockmap</a> | 16 bytes | <code>4fd6c7d73e713d7f54f173dfc845d046d267f9e62c80a92670b0696131bfb74a</code> |
+| <a href="https&#58;//example.com/dsh-desk/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/feeds/win-x64/nightly.yml">nightly.yml</a> | 272 bytes | <code>faccf50f8398d6781568114dda9a678751e4c01044dd9424d00237c69e58cb59</code> |
 
 </details>
 
-若仓库为公开仓库，此摘要中的下载路径及 test 发布的 release ID 也会公开。随机前缀不能替代访问鉴权。
+If the repository is public, the download paths in this summary and the release ID of a test release are also public. A random prefix is not a substitute for access authentication.

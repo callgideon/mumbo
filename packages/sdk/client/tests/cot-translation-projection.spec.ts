@@ -41,7 +41,7 @@ it('preserves common translation requests and results in SDK events without repl
           messages: [{ role: 'user', content: [{ type: 'text', text: 'Original paragraph' }] }],
         } },
       })
-      appendPluginRecord(session, 'plugin:translator/result', { requestSeq, text: '翻译结果' })
+      appendPluginRecord(session, 'plugin:translator/result', { requestSeq, text: 'translated result' })
     } finally {
       clock.mockRestore()
     }

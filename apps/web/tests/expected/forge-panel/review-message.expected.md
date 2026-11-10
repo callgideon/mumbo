@@ -10,7 +10,7 @@
 > +export const extra = 1
 > ```
 > Comment:
-> 请检查这项修改
+> Please check this change
 
 > ## User Comment 1
 > File: src/app.ts
@@ -24,4 +24,4 @@
 > +export const app = 1
 > ```
 > Comment:
-> 请解释这行代码
+> Please explain this line

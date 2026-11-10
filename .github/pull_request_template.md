@@ -1,16 +1,16 @@
-<!-- 本 PR 正文按 .agents/skills/dsh-pr-description/SKILL.md 填写。 -->
+<!-- Fill in this PR description by following .agents/skills/dsh-pr-description/SKILL.md. -->
 
 ## Motivation
 
-<!-- 引用同仓库 Issue：Fixes #N 或 Refs #N。 -->
+<!-- Reference a same-repository Issue: Fixes #N or Refs #N. -->
 
 ## Changes
 
 ## Testing
 
-<!-- 测试设计 -->
+<!-- Test design -->
 
-- <!-- 测试条目 -->
+- <!-- Test entry -->
 
   <details>
   <summary>Proof</summary>
@@ -20,15 +20,15 @@
 ## AI Usage
 
 <!-- ai-declaration:start -->
-[![AI-DECLARATION: 待填级别](https://img.shields.io/badge/䷼%20AI--DECLARATION-待填级别-e5e7eb?labelColor=e5e7eb)](https://ai-declaration.md)
+[![AI-DECLARATION: TBD](https://img.shields.io/badge/%E4%B7%BC%20AI--DECLARATION-TBD-e5e7eb?labelColor=e5e7eb)](https://ai-declaration.md)
 
-**AI declaration** ([v0.1.2](https://ai-declaration.md/en/0.1.2)): `待填级别`
+**AI declaration** ([v0.1.2](https://ai-declaration.md/en/0.1.2)): `TBD`
 <!-- ai-declaration:end -->
 
-| 阶段 | 级别 | AI 参与度 | 决策记录 |
+| Stage | Level | AI involvement | Decision record |
 |:--|:--|--:|:--|
-| breakdown 问题拆解 | 待填级别 | ?% | 待填说明 |
-| design 方案设计 | 待填级别 | ?% | 待填说明 |
-| testing 验收测试 | 待填级别 | ?% | 待填说明 |
-| implementation 技术实现 | 待填级别 | ?% | 待填说明 |
-| review 评审处理 | n/a 暂不适用 | — | 尚无已处理的评审意见。 |
+| breakdown | TBD | ?% | TBD |
+| design | TBD | ?% | TBD |
+| testing | TBD | ?% | TBD |
+| implementation | TBD | ?% | TBD |
+| review | n/a | — | No review comments handled yet. |

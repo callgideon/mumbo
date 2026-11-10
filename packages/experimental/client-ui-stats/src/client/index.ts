@@ -16,7 +16,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 // Type-only: the standard Session props the slot component receives.
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
-import { de, en, es, fr, ja, NS, pt, ru, zh } from './locales.ts'
+import { de, en, es, fr, ja, NS, pt, ru } from './locales.ts'
 import type { LoadOlderResult, StatsSnapshot } from './stats-contract.ts'
 import { registerStatsDefinitions } from './stats-definition.ts'
 import { EMPTY_STATS_SNAPSHOT, registerStatsConversationView } from './stats-snapshot-builder.ts'
@@ -66,7 +66,7 @@ export function apply(ctx: Context): void {
   // One page request per Session binding; Chat/Trajectory may still own the
   // Session's in-flight page, which loadOlder observes through loadingOlder.
   const pages = new WeakMap<SessionBinding, Promise<LoadOlderResult>>()
-  ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, de, es, fr, pt, ru }), 'client-ui-stats: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { en, ja, de, es, fr, pt, ru }), 'client-ui-stats: dictionaries')
   // Registration-time text (the tab label) reads through the bound translate as
   // a thunk, so it follows the active locale without re-registration.
   const t = ctx.locale.bind(NS)

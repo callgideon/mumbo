@@ -12,29 +12,29 @@
 - button "Completed in {{duration}}" [disabled]
 - heading "CJK strong emphasis" [level=2]
 - paragraph:
-  - strong: 注意：
-  - text: 内容
+  - strong: 륄굫：
+  - text: 즅펹
 - paragraph:
   - strong: "Notice:"
-  - text: 内容
+  - text: 즅펹
 - paragraph:
-  - strong: 事件中间件（waterfall）
-  - text: 实现
+  - strong: 욋웶옭뚬웶（waterfall）
+  - text: 펞쀌
 - paragraph:
-  - strong: 事件中间件(waterfall)
-  - text: 实现
+  - strong: 욋웶옭뚬웶(waterfall)
+  - text: 펞쀌
 - paragraph:
-  - strong: 句号。
-  - text: 后续
+  - strong: 쯥쯷。
+  - text: 찎쭉
 - paragraph:
   - strong: Period.
-  - text: 后续
+  - text: 찎쭉
 - paragraph:
-  - strong: 提醒！
-  - text: 继续
+  - strong: 뀬뉊！
+  - text: 쭃쭉
 - paragraph:
   - strong: Warning!
-  - text: 继续
+  - text: 쭃쭉
 - paragraph: CJK_STRONG_DONE
 - button "Copy"
 - button "Good response"

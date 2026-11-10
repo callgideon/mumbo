@@ -1,10 +1,7 @@
 /** Full-viewport viewing of loaded, standalone content images in documentation pages. */
 import { labelButton, type MediaViewer, viewerButton } from './media-viewer.ts'
 
-const messages = {
-  en: 'View image fullscreen: {alt}',
-  zh: '全屏查看图片：{alt}',
-}
+const OPEN_LABEL = 'View image fullscreen: {alt}'
 
 interface ImageEntry {
   container: HTMLElement
@@ -23,12 +20,10 @@ export class ImageViewer {
 
   /**
    * @param doc Browser document containing VitePress content.
-   * @param language Current VitePress language, read again when entries refresh.
    * @param viewer Shared modal owner for images and diagrams.
    */
   constructor(
     private readonly doc: Document,
-    private readonly language: () => string,
     private readonly viewer: Pick<MediaViewer, 'open'>,
   ) {
     const root = doc.querySelector('#VPContent') ?? doc.body
@@ -44,7 +39,7 @@ export class ImageViewer {
     this.#scan()
   }
 
-  /** Close the image view and refresh controls after route, language, or theme changes. */
+  /** Close the image view and refresh controls after route or theme changes. */
   refresh(): void {
     this.#closeActive()
     this.#scan()
@@ -87,9 +82,8 @@ export class ImageViewer {
         this.#remove(image, entry)
       }
     }
-    const copy = this.language().startsWith('zh') ? messages.zh : messages.en
     for (const image of images) {
-      const label = copy.replace('{alt}', () => image.alt)
+      const label = OPEN_LABEL.replace('{alt}', () => image.alt)
       const existing = this.#entries.get(image)
       if (existing) {
         if (existing.button.getAttribute('aria-label') !== label) labelButton(existing.button, label)

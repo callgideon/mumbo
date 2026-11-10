@@ -54,7 +54,7 @@ def _completion_steps(final: _Completion | None = None) -> list[_Completion]:
 def test_goal_reads_and_invalid_controls_do_not_start_model_work(tmp_path: Path) -> None:
     with _runtime(tmp_path, []) as runtime:
         session = runtime.harness.start_session(_SESSION_ID)
-        executions = [_command(runtime, session, "/目标")]
+        executions = [_command(runtime, session, "/goal")]
         for line in ["/goal edit", "/goal edit Missing goal", "/goal pause", "/goal resume"]:
             executions.append(_command(runtime, session, line, kind="error"))
         executions.append(_command(runtime, session, "/goal clear"))
@@ -74,7 +74,7 @@ def test_goal_continues_rounds_and_finishes_wrapup_after_completion_event(
                   initial_permission="workspace-write", max_goal_rounds=3) as runtime:
         session = runtime.harness.start_session(_SESSION_ID)
         with runtime.harness.client.subscribe_session_notifications(session.id) as events:
-            running = runtime.workers.submit(session.run, "/目标 Verify the small change.")
+            running = runtime.workers.submit(session.run, "/goal Verify the small change.")
             completed = _until(events, "goal/change", "complete")
             assert completed["goal"]["phase"] == "complete" and completed["roundsStarted"] == 2
             assert final.entered.wait(_WAIT_SECONDS)

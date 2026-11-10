@@ -67,7 +67,7 @@ describe.skipIf(mode === 'record')('web e2e: independent-writer Excel previews',
       if (await toggle.count() > 0 && await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click()
       await column.locator('[data-files-navigator]:visible [data-files-entry="file"]').getByRole('button', { name: `${name}.xlsx`, exact: true }).click()
       await expect.poll(async () => (await preview.getAttribute('data-textpreview-url'))?.endsWith(`/${name}.xlsx`)).toBe(true)
-      await sheets.getByText('数据', { exact: true }).waitFor()
+      await sheets.getByText('뇌꿊', { exact: true }).waitFor()
       await excel.locator('.fortune-sheet-overlay').click({ position: { x: 70, y: 30 } })
       await expect.poll(() => excel.locator('.fortune-fx-input').innerText()).toBe('Item')
       await page.keyboard.press('ControlOrMeta+C')
@@ -80,9 +80,9 @@ describe.skipIf(mode === 'record')('web e2e: independent-writer Excel previews',
           : name === 'orphan-drawing' ? 'conditional formatting' : 'charts, conditional formatting'
         expect(await notice.innerText()).toBe(`This preview does not support ${features} in this workbook. Open it in a system application for the full experience.`)
       }
-      rows.push(`- ${name}.xlsx: 数据 opened; Item copied`)
+      rows.push(`- ${name}.xlsx: 뇌꿊 opened; Item copied`)
     }
-    expect(await sheets.getByText('隐藏页', { exact: true }).isVisible()).toBe(false)
+    expect(await sheets.getByText('띈툫뤭', { exact: true }).isVisible()).toBe(false)
     const warning = await notice.innerText()
     expect(warning).toBe('This preview does not support charts, images, shapes, conditional formatting in this workbook. Open it in a system application for the full experience.')
     rows.push('- Relocated workbook: hidden sheet omitted', `- Relocated workbook notice: ${warning}`)

@@ -1,11 +1,11 @@
-- heading "插件" [level=1]
-- text: 安装、启用和配置插件
-- button "插件说明"
-- button "刷新" [disabled]
-- group "添加插件":
-  - button "添加插件" [disabled]
-  - button "选择添加插件方式" [disabled]
-- status "正在读取插件…"
+- heading "Plugins" [level=1]
+- text: Install, enable, and configure plugins
+- button "About plugins"
+- button "Refresh" [disabled]
+- group "Add plugin":
+  - button "Add plugin" [disabled]
+  - button "Choose how to add a plugin" [disabled]
+- status "Reading plugins…"
 
 1680px: 4 rows; page/group headers, rows, icons and text line origins align within 0.1px
 1000px: 4 rows; page/group headers, rows, icons and text line origins align within 0.1px

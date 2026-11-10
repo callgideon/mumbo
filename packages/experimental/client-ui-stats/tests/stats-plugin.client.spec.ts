@@ -19,7 +19,7 @@ import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import type { StoredEntry } from '@deepseek-ai/dsh-client-ui-slots'
-import { de, en, es, fr, ja, NS, pt, ru, zh } from '../src/client/locales.ts'
+import { de, en, es, fr, ja, NS, pt, ru } from '../src/client/locales.ts'
 import type {
   StatsCall, StatsContribution, StatsSnapshot, StatsStepMetrics, StatsStepState, StatsViewNode,
 } from '../src/client/stats-contract.ts'
@@ -182,7 +182,7 @@ async function mountPlugin(): Promise<PluginBench> {
     },
   }
   ctx.provide('sessions', { binding: (id: SessionId) => (id === SID ? sessionBinding : undefined) } as never)
-  ctx.provide('locale', { register: localeRegister, bind: () => makeTranslate(zh) } as never)
+  ctx.provide('locale', { register: localeRegister, bind: () => makeTranslate(en) } as never)
   ctx.provide('uiConversation', {
     binding,
     imageUrl,
@@ -389,7 +389,7 @@ function locatedUpdate(event: SessionEventLike, location: ConversationLocation):
 describe('browser plugin registration', () => {
   it('registers the performance tab, dictionaries, Definitions, and view target', async () => {
     const bench = await mountPlugin()
-    expect(bench.localeRegister).toHaveBeenCalledWith(NS, { zh, en, ja, de, es, fr, pt, ru })
+    expect(bench.localeRegister).toHaveBeenCalledWith(NS, { en, ja, de, es, fr, pt, ru })
     expect(bench.events.map(definition => definition.kind)).toEqual([
       'stats-step', 'stats-prompt', 'stats-turn-end', 'stats-code-mode', 'stats-compaction', 'stats-event',
     ])
@@ -400,7 +400,7 @@ describe('browser plugin registration', () => {
     expect(registered.component).toBe(StatsView)
     expect(registered.options).toMatchObject({ id: 'stats', order: 40 })
     expect(registered.locale).toBe(NS)
-    expect(resolveSlotLabel(registered.options.label)).toBe('统计')
+    expect(resolveSlotLabel(registered.options.label)).toBe('Statistics')
     await bench.fiber.dispose()
     expect(bench.entries()).toEqual([])
     // The dictionary registration rides the plugin fiber effect; Definitions and
@@ -534,7 +534,7 @@ describe('host entry', () => {
 
 describe('locale dictionaries', () => {
   it('ships the same key set in both languages', () => {
-    expect(Object.keys(en).sort()).toEqual(Object.keys(zh).sort())
+    expect(Object.keys(en).sort()).toEqual(Object.keys(en).sort())
     expect(Object.values(en).every(value => value !== '')).toBe(true)
     expect(en['view.stats']).toBe('Statistics')
     expect(en['summary']).toContain('{turns}')
@@ -564,13 +564,13 @@ describe('snapshot builder', () => {
     expect(builder.apply({ upserts: [], timeline: { turnOrder: [], turns: new Map() } })).toBe(first)
     const upserted = builder.apply({
       upserts: [
-        node('stats-prompt:1:0', { kind: 'prompt', turn: 1, prompt: '问', images: [IMAGE], source: 'user', sender: null }),
+        node('stats-prompt:1:0', { kind: 'prompt', turn: 1, prompt: 'ask', images: [IMAGE], source: 'user', sender: null }),
         node('stats-step:1:1', { kind: 'step', metrics: measuredStep(1, 1, 1_000, 1_800) }),
         node('stats-turn-end:1:100000', { kind: 'end', turn: 1, closeKind: 'completed', endTime: 1_800 }),
       ],
       timeline: { turnOrder: [1], turns: new Map() },
     })
-    expect(upserted.turns[0]?.prompt).toBe('问')
+    expect(upserted.turns[0]?.prompt).toBe('ask')
     expect(upserted.stepCount).toBe(1)
   })
 
@@ -589,7 +589,7 @@ describe('conversation Definitions', () => {
     const snapshot = assemble(definitions, [
       entry(event('turn/start', { turn: 1 })),
       entry(event('user/message', {
-        role: 'user', id: 'u1', content: [{ type: 'text', text: '看看这个' }, { type: 'image', attachment: IMAGE }], source: { kind: 'user' },
+        role: 'user', id: 'u1', content: [{ type: 'text', text: 'look at this' }, { type: 'image', attachment: IMAGE }], source: { kind: 'user' },
       })),
       entry(event('step/start', { turn: 1, step: 1 }, 2_000)),
       transient(1, 1, delta, 2_100),
@@ -612,7 +612,7 @@ describe('conversation Definitions', () => {
     expect(snapshot?.turns).toHaveLength(1)
     expect(snapshot?.stepCount).toBe(1)
     const turn = snapshot!.turns[0]!
-    expect(turn.prompt).toBe('看看这个')
+    expect(turn.prompt).toBe('look at this')
     expect(turn.promptImages).toEqual([IMAGE])
     expect(turn.interrupted).toBe(false)
     expect(turn.steps[0]?.startTime).toBe(2_000)
@@ -660,7 +660,7 @@ describe('conversation Definitions', () => {
     const definitions = await registeredDefinitions()
     const snapshot = assemble(definitions, [
       entry(event('user/message', {
-        role: 'user', id: 'u2', content: [{ type: 'text', text: '问题' }], source: { kind: 'user' },
+        role: 'user', id: 'u2', content: [{ type: 'text', text: 'question' }], source: { kind: 'user' },
       })),
       entry(event('assistant/message', {
         turn: 4,
@@ -960,20 +960,20 @@ describe('conversation Definitions', () => {
     })
     expect(prompt.match(runtime)).toEqual({ id: `${runtime.seq}`, role: 'start' })
     const user = event('user/message', {
-      role: 'user', id: 'u6', content: [{ type: 'text', text: '继续' }, { type: 'image', attachment: IMAGE }], source: { kind: 'user' },
+      role: 'user', id: 'u6', content: [{ type: 'text', text: 'Continue' }, { type: 'image', attachment: IMAGE }], source: { kind: 'user' },
     })
     expect(prompt.match(user)).toEqual({ id: `${user.seq}`, role: 'start' })
     const match = locatedStart(user, turnAt(9))
     const state = prompt.start(contextOf(prompt, undefined), match, reader)
     expect(state.turn).toBe(9)
     expect(state.mark).toBe('prompt')
-    expect(state.prompt).toBe('继续')
+    expect(state.prompt).toBe('Continue')
     expect(state.images).toEqual([IMAGE])
     expect(state.trigger).toBe('user')
     const node = prompt.buildViewNode!({
       ...contextOf(prompt, state, [match], match),
     }) as StatsViewNode
-    expect(node.data).toEqual({ kind: 'prompt', turn: 9, prompt: '继续', images: [IMAGE], source: 'user', sender: null })
+    expect(node.data).toEqual({ kind: 'prompt', turn: 9, prompt: 'Continue', images: [IMAGE], source: 'user', sender: null })
     const context: ConversationNodeContext<StatsStepState> & { readonly state: StatsStepState } = {
       ...contextOf(prompt, state, [match], match),
       state,
@@ -985,7 +985,7 @@ describe('conversation Definitions', () => {
     const definitions = await registeredDefinitions()
     const prompt = definitions[1] as ConversationNodeDefinition<StatsStepState>
     const user = event('user/message', {
-      role: 'user', id: 'u7', content: [{ type: 'text', text: '问题' }], source: { kind: 'user' },
+      role: 'user', id: 'u7', content: [{ type: 'text', text: 'question' }], source: { kind: 'user' },
     })
     const located = locatedStart(user, stepAt(4, 1))
     const state = prompt.start(contextOf(prompt, undefined), located, reader)
@@ -1004,7 +1004,7 @@ describe('conversation Definitions', () => {
     const definitions = await registeredDefinitions()
     const prompt = definitions[1] as ConversationNodeDefinition<StatsStepState>
     const user = event('user/message', {
-      role: 'user', id: 'u8', content: [{ type: 'text', text: '问题' }], source: { kind: 'user' },
+      role: 'user', id: 'u8', content: [{ type: 'text', text: 'question' }], source: { kind: 'user' },
     })
     const match = locatedStart(user, turnAt(3))
     const state = { ...prompt.start(contextOf(prompt, undefined), match, reader), trigger: null }

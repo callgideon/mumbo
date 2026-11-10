@@ -14,7 +14,7 @@ import { cleanup, render } from '@testing-library/react'
 import { createElement } from 'react'
 import { afterEach, describe, expect, it, onTestFinished } from 'vitest'
 import { apply } from '../src/client/index.ts'
-import { de, en, es, fr, ja, NS, pt, ru, zh } from '../src/client/locales.ts'
+import { de, en, es, fr, ja, NS, pt, ru } from '../src/client/locales.ts'
 import { shareViewerAuthor, shareViewerSubject, SharedSessionOrigin } from '../src/client/user-origin.tsx'
 import { forgetOwnerDisplay } from '../src/client/owner-display.ts'
 
@@ -34,7 +34,7 @@ const SHARED = {
 /** A source that recorded the Relay display name beside the subject. */
 const SHARED_NAMED = {
   ...SHARED,
-  principal: { ...SHARED.principal, actor: { ...SHARED.principal.actor, displayName: '许翰翔' } },
+  principal: { ...SHARED.principal, actor: { ...SHARED.principal.actor, displayName: 'Alice' } },
 }
 
 /** The same source by the owner, and a source with no principal at all. */
@@ -69,7 +69,7 @@ describe('shareViewerSubject', () => {
   })
 
   it('states the recorded display name and ignores a malformed one', () => {
-    expect(shareViewerAuthor(SHARED_NAMED)).toEqual({ subjectId: 'subject-42', displayName: '许翰翔' })
+    expect(shareViewerAuthor(SHARED_NAMED)).toEqual({ subjectId: 'subject-42', displayName: 'Alice' })
     expect(shareViewerAuthor({
       ...SHARED,
       principal: { ...SHARED.principal, actor: { ...SHARED.principal.actor, displayName: '  ' } },
@@ -91,7 +91,7 @@ describe('shared-session origin chain', () => {
     expect(entries[0]?.locale).toBe(NS)
     const select = entries[0]?.select as (owner: { source: unknown; kind: 'user' | 'steering' }) => unknown
     expect(select({ source: SHARED, kind: 'user' })).toEqual({ subjectId: 'subject-42' })
-    expect(select({ source: SHARED_NAMED, kind: 'user' })).toEqual({ subjectId: 'subject-42', displayName: '许翰翔' })
+    expect(select({ source: SHARED_NAMED, kind: 'user' })).toEqual({ subjectId: 'subject-42', displayName: 'Alice' })
     expect(select({ source: OWNER, kind: 'user' })).toBeNull()
     expect(select({ source: SHARED, kind: 'steering' })).toBeNull()
     expect(select({ source: { kind: 'user', principal: { kind: 'owner' } }, kind: 'user' })).toBeNull()
@@ -99,21 +99,21 @@ describe('shared-session origin chain', () => {
 
   it('renders the elected author in the active locale', () => {
     const view = render(createElement(SharedSessionOrigin, {
-      matched: { subjectId: 'subject-42' }, t: translate('zh'),
+      matched: { subjectId: 'subject-42' }, t: translate('fr'),
     } as never))
     expect(view.container.querySelector('[data-liveshare-origin="subject-42"]')?.textContent)
-      .toBe('来自会话分享【subject-42】')
+      .toBe('D’une session partagée [subject-42]')
     view.unmount()
     const named = render(createElement(SharedSessionOrigin, {
-      matched: { subjectId: 'subject-42', displayName: '许翰翔' }, t: translate('en'),
+      matched: { subjectId: 'subject-42', displayName: 'Alice' }, t: translate('en'),
     } as never))
     expect(named.container.querySelector('[data-liveshare-origin="subject-42"]')?.textContent)
-      .toBe('From a shared session [许翰翔]')
+      .toBe('From a shared session [Alice]')
   })
 
   it('defines the shared-session line in every dictionary', () => {
-    const dictionaries = { zh, en, ja, es, fr, de, ru, pt }
-    const keys = Object.keys(zh).sort()
+    const dictionaries = { en, ja, es, fr, de, ru, pt }
+    const keys = Object.keys(fr).sort()
     for (const dictionary of Object.values(dictionaries)) {
       expect(Object.keys(dictionary).sort()).toEqual(keys)
       expect(dictionary['inputOrigin.sharedSession']).toContain('{subjectId}')
@@ -122,9 +122,9 @@ describe('shared-session origin chain', () => {
 })
 
 /** One package dictionary as the component's translator. */
-function translate(locale: 'zh' | 'en') {
-  const dictionary = locale === 'zh' ? zh : en
-  return (key: keyof typeof zh, params?: Record<string, string | number>): string => {
+function translate(locale: 'fr' | 'en') {
+  const dictionary = locale === 'fr' ? fr : en
+  return (key: keyof typeof fr, params?: Record<string, string | number>): string => {
     let result = dictionary[key] ?? key
     for (const [name, value] of Object.entries(params ?? {})) result = result.replace(`{${name}}`, String(value))
     return result
@@ -140,7 +140,8 @@ async function renderBench() {
   const runtime = await SlotTestRuntime.create()
   onTestFinished(() => runtime.dispose())
   const locale = new LocaleRuntime(runtime.ctx)
-  locale.setLocale('zh')
+  locale.addLanguage({ id: 'fr', label: 'Français', fallback: 'en' })
+  locale.setLocale('fr')
   runtime.ctx.provide('locale', locale)
   runtime.slots.installLocale(locale)
   // The test runtime owns the Remote double; the face only needs its mount and

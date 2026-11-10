@@ -157,11 +157,11 @@ describe('owner login host face', () => {
   })
 
   it('submits the code with its state, and reads the identity the host answers with', async () => {
-    const request = answering(200, { state: 'verified', relay: ORIGIN, displayName: '许翰翔' })
+    const request = answering(200, { state: 'verified', relay: ORIGIN, displayName: 'Alice' })
     const redeemed = await hostOwnerLogin(ORIGIN, request).redeem('one-time-code', 's1')
     expect(redeemed).toEqual({
       ok: true,
-      value: { state: 'verified', relay: ORIGIN, displayName: '许翰翔' },
+      value: { state: 'verified', relay: ORIGIN, displayName: 'Alice' },
     })
     const [path, init] = request.mock.calls[0] ?? []
     expect(path).toBe('api/liveshare.ownerLoginRedeem')

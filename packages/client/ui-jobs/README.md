@@ -5,8 +5,6 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-client-ui-jobs
 
-English | [中文](README.zh.md)
-
 ## Summary
 
 `dsh-client-ui-jobs` shows the session's background jobs in one header control, with lifecycle, elapsed time, progress, and terminal detail. Live jobs and settled jobs with retained output offer expandable output panels; collapsing stops the stream. Live rows lead with a ticking duration, followed by kind and status. Settled rows fold under a section heading; those without retained output, including subagents whose answers went to the model, stay static.
@@ -55,7 +53,7 @@ One slot entry in the header actions band (after the preset label) renders the t
 |---|---|
 | [`src/client/JobListAction.tsx`](src/client/JobListAction.tsx) | The job list: sections, durations, panels |
 | [`src/client/index.ts`](src/client/index.ts) | Slot registration and the dictionaries |
-| [`src/client/locales.ts`](src/client/locales.ts) | The `job` namespace copy (zh source of truth) |
+| [`src/client/locales.ts`](src/client/locales.ts) | The `job` namespace copy (English source of truth) |
 
 Background-job rows follow the [standard menu edge geometry](../../../docs/ui-radius.md#nested-hover); controls inside a filled running row retain compact corners.
 

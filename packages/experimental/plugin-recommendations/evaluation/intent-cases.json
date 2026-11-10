@@ -1,126 +1,126 @@
 [
   {
     "id": "cot_original",
-    "prompt": "我希望模型思考过程能是中文的 目前有时候是英文的",
+    "prompt": "I want the model's thinking to be in Chinese It is sometimes English right now",
     "expected": "Look up the catalog, offer exactly one matching cot-translation-bundle card, explain its actual scope, and do not enable or edit files before the user acts."
   },
   {
     "id": "cot_paraphrase",
-    "prompt": "展开的英文推理看着有点费劲，能让我直接读中文吗？",
+    "prompt": "Reading the expanded English reasoning is a bit of a strain; can I read it in Chinese directly?",
     "expected": "Look up the catalog, offer exactly one matching cot-translation-bundle card, explain its actual scope, and do not enable or edit files before the user acts."
   },
   {
     "id": "badge",
-    "prompt": "希望我以后让你创建 PR 时都能带上 powered by dsh 的标识。",
+    "prompt": "I hope that whenever I ask you to create PR you always include powered by dsh the badge.",
     "expected": "Look up the catalog, offer exactly one matching badge-skill-bundle card, explain its actual scope, and do not enable or edit files before the user acts."
   },
   {
     "id": "voice",
-    "prompt": "我想在 DSH 里直接说话输入长需求，不想全靠打字。",
+    "prompt": "I want to in DSH by speaking directly, to enter long requirements without typing everything.",
     "expected": "Look up the catalog, offer exactly one matching voice-input-bundle card, explain its actual scope, and do not enable or edit files before the user acts."
   },
   {
     "id": "titles",
-    "prompt": "会话聊着聊着主题就变了，标题却还是第一句话，我希望它能跟着对话内容更新。",
+    "prompt": "A session's topic drifts as we chat, but the title stays the first sentence; I want it to follow the conversation content.",
     "expected": "Look up the catalog, offer exactly one matching session-titles-bundle card, explain its actual scope, and do not enable or edit files before the user acts."
   },
   {
     "id": "search",
-    "prompt": "我想让你帮我找回这个工作区以前会话里讨论过的方案，有什么现成功能？",
+    "prompt": "I want you to help me recover a plan discussed in earlier sessions of this workspace; is there a ready-made feature?",
     "expected": "Look up the catalog, offer exactly one matching session-search card, explain its actual scope, and do not enable or edit files before the user acts."
   },
   {
     "id": "terminal",
-    "prompt": "我希望你开的终端可以在多次工具调用间一直复用，保留 shell 状态，还能继续向同一个交互程序输入。",
+    "prompt": "I want the terminal you open to be reused across tool calls, keeping its shell state, and still be able to type into the same interactive program.",
     "expected": "Look up the catalog, offer exactly one matching terminal-bundle card, explain its actual scope, and do not enable or edit files before the user acts."
   },
   {
     "id": "worktree",
-    "prompt": "我希望在 DSH 里让你另开一个独立分支和工作目录继续做新改动，当前改动还留在原处。",
+    "prompt": "I want, in DSH , for you to open a separate branch and working directory to continue with new changes while the current changes stay in place.",
     "expected": "Look up the catalog, offer exactly one matching tool-worktree card, explain its actual scope, and do not enable or edit files before the user acts."
   },
   {
     "id": "team",
-    "prompt": "我希望多个智能体能分工、互相沟通，还能在一个共享任务看板上协调进度。",
+    "prompt": "I want multiple agents to divide work, communicate, and coordinate progress on a shared task board.",
     "expected": "Look up the catalog, offer exactly one matching agent-team-profile card, explain its actual scope, and do not enable or edit files before the user acts."
   },
   {
     "id": "auto_review",
-    "prompt": "DSH 每次工具调用都让我确认很打断思路，能让模型先根据我的授权判断是否放行吗？",
+    "prompt": "DSH Confirming every tool call interrupts my train of thought; can the model first decide whether to allow it based on my authorization?",
     "expected": "Look up the catalog, offer exactly one matching auto-review card, explain its actual scope, and do not enable or edit files before the user acts."
   },
   {
     "id": "ralph",
-    "prompt": "我希望围绕同一个目标循环迭代，每轮都换一个上下文干净的新智能体继续做。",
+    "prompt": "I want to iterate in a loop around one goal, with each round handed to a fresh agent with a clean context.",
     "expected": "Look up the catalog, offer exactly one matching ralph-bundle card, explain its actual scope, and do not enable or edit files before the user acts."
   },
   {
     "id": "inspector",
-    "prompt": "我想在 DSH 界面里查看会话原始事件和消息分组，排查消息显示异常。",
+    "prompt": "I want to in DSH to inspect raw session events and message groups in the UI and troubleshoot message display problems.",
     "expected": "Look up the catalog, offer exactly one matching inspector-profile card, explain its actual scope, and do not enable or edit files before the user acts."
   },
   {
     "id": "market",
-    "prompt": "我有一份第三方插件市场的索引，想加到 DSH 里直接浏览和安装里面的插件。",
+    "prompt": "I have an index of a third-party plugin market and want to add it to DSH to browse and install its plugins directly.",
     "expected": "Look up the catalog, offer exactly one matching plugin-market-bundle card, explain its actual scope, and do not enable or edit files before the user acts."
   },
   {
     "id": "cua",
-    "prompt": "我希望你能在我的 Mac 上查看并点击桌面应用的界面、填写表单，DSH 有什么现成功能？",
+    "prompt": "I want you to be able, on my Mac , to view and click the desktop app's UI and fill in forms, DSH is there a ready-made feature?",
     "expected": "Look up the catalog, offer exactly one matching cua-bundle card, explain its actual scope, and do not enable or edit files before the user acts."
   },
   {
     "id": "translation_once",
-    "prompt": "把这句话翻译成中文：Let me check the failing test first.",
+    "prompt": "Translate this sentence into Chinese: Let me check the failing test first.",
     "expected": "No recommendation card or file edits; clarify if the request is vague, otherwise answer the request."
   },
   {
     "id": "ordinary_question",
-    "prompt": "用两句话解释 Git merge 和 rebase 的区别。",
+    "prompt": "Explain in two sentences the difference between Git merge and rebase .",
     "expected": "No recommendation card or file edits; clarify if the request is vague, otherwise answer the request."
   },
   {
     "id": "one_off",
-    "prompt": "帮我写一句庆祝今天完成工作的短句。",
+    "prompt": "Write me a short sentence celebrating finishing work today.",
     "expected": "No recommendation card or file edits; clarify if the request is vague, otherwise answer the request."
   },
   {
     "id": "vague",
-    "prompt": "我希望这个界面用起来更顺手。",
+    "prompt": "I want this interface to be easier to use.",
     "expected": "No recommendation card or file edits; clarify if the request is vague, otherwise answer the request."
   },
   {
     "id": "decline",
-    "prompt": "我想让思考内容显示中文，但先只讨论，不要推荐插件或修改配置。",
+    "prompt": "I want thinking content shown in Chinese, but only discuss it for now; do not recommend plugins or change configuration.",
     "expected": "No recommendation card or file edits; clarify if the request is vague, otherwise answer the request."
   },
   {
     "id": "two_cards_ambiguous_counter",
     "setup": "Both experiments enabled; badge disabled.",
-    "prompt": "我需要每个 PR 的 DSH 标识，以及一个右侧栏计数器。请给两个入口：已有插件一张卡，创造一张卡，但先别执行。",
+    "prompt": "I need every PR 's DSH badge, plus a right-sidebar counter. Please give two entry points: one card for an existing plugin, one card to create one, but do not execute yet.",
     "expected": "Exactly one badge proposal, no rejected extra call. Explain the remaining need and clarify what to count; do not invent PR aggregation or promise an automatic later card."
   },
   {
     "id": "creation_first_without_priority",
     "setup": "Both experiments enabled; badge disabled.",
-    "prompt": "我想在当前会话右侧放一个手动小成就计数器，能加一、归零并按会话保存。另外我希望每个 PR 都有 DSH 标识。这两个都给我入口，先不要执行。",
+    "prompt": "I want a manual mini achievement counter on the right of the current session that can add one, reset to zero, and save per session. I also want every PR all have DSH badge. Give me entry points for both, and do not execute yet.",
     "expected": "Choose the existing badge plugin despite mention order; discuss the independent counter without proposing a second card or claiming it exists."
   },
   {
     "id": "explicit_creation_priority",
     "setup": "Both experiments enabled; badge disabled.",
-    "prompt": "我希望每个 PR 都有 DSH 标识，也想在当前会话右侧放一个手动小成就计数器，能加一、归零并按会话保存。这轮优先给计数器的创建方案入口，徽章暂时只说明，不要执行。",
+    "prompt": "I want every PR all have DSH badge, and also a manual mini achievement counter on the right of the current session that can add one, reset to zero, and save per session. This round, give the counter's creation entry point first and only explain the badge for now; do not execute.",
     "expected": "Exactly one create_personalized_page card with slot sidebar-right for the manual counter; no badge proposal and no generation before clicking Create."
   },
   {
     "id": "later_independent_need",
     "setup": "Same conversation after a badge-only recommendation; both experiments enabled.",
-    "prompt": "现在给计数器方案：当前会话右侧的手动小成就计数器，可以加一、归零并按会话保存，先不要创建。",
+    "prompt": "Now give the counter plan: a manual mini achievement counter on the right of the current session that can add one, reset to zero, and save per session; do not create it yet.",
     "expected": "One creation card in the new turn, without a turn-limit rejection or requiring badge activation; preserve manual counting and per-Session data."
   },
   {
     "id": "two_existing_plugins",
-    "prompt": "我看展开的英文思考很费劲，也希望每个 PR 都有 DSH 标识。两个现成插件都给推荐入口，先不要启用。",
+    "prompt": "I find the expanded English thinking a strain to read, and I also want every PR all have DSH badge. Give recommendation entry points for both ready-made plugins, and do not enable yet.",
     "expected": "Select one eligible plugin before calling propose_action, explain the other need, no rejected second call or claim that both cards exist."
   }
 ]

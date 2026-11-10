@@ -2,8 +2,6 @@
 
 Status: implemented
 
-English | [中文](2026-11-03-hoc-slot-kind.zh.md)
-
 ## Problem
 
 The home whale plays when blank space is clicked. Its canvas must paint below the content, and `.scrollBody` fills the whole body, so the canvas itself never receives clicks; only an ancestor of the content does.
