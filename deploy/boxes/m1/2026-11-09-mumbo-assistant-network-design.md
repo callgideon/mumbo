@@ -310,8 +310,8 @@ Not built now. The platform comes first. When this comes back, start from these 
   - **Allowed operations:**
     - reads on the project's repositories;
     - new comments and reactions;
-    - opening pull requests, and marking them ready;
-    - edits only to what the agent wrote: a comment (REST `PATCH …/comments/{id}`, GraphQL `updateIssueComment`) or a pull request (REST `PATCH /pulls/{n}`, GraphQL `updatePullRequest`) whose author is the agent's own App identity, matched by numeric id. The edge reads the author with the agent token before forwarding, and anything else gets 403. Superagent re-reads an edited comment as a new message from its original author, so an edit to someone else's comment would forge that person's authority, such as the founder's;
+    - opening pull requests from a branch: `POST /pulls` takes only `title`, `body`, `head`, `base`, `draft` and `maintainer_can_modify`, so the agent cannot turn a person's issue into its own pull request (`issue`);
+    - edits and state changes only to what the agent wrote: a comment (REST `PATCH …/comments/{id}`, GraphQL `updateIssueComment`), or a pull request's edit, close, ready, draft or reviewer request (REST `PATCH /pulls/{n}` and `POST /pulls/{n}/requested_reviewers`; GraphQL `updatePullRequest`, `markPullRequestReadyForReview`, `convertPullRequestToDraft` and `requestReviews`), when its author is the agent's own App identity, matched by numeric id. The edge reads the author with the agent token before forwarding, and anything else gets 403. Superagent re-reads an edited comment as a new message from its original author, so an edit to someone else's comment would forge that person's authority, such as the founder's;
     - pushes only to `agent/*` branches.
   - **Refused:** every merge endpoint, including the GraphQL `mergePullRequest` and auto-merge; approvals; ref deletion outside `agent/*`; repository settings; and the contents API.
   - **Workflow files.** Changes under `.github/workflows` are refused by GitHub itself, because the agent token has no `workflow` scope. Other `.github/` files are flagged as protected at approval time.
