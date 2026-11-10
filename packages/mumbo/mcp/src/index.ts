@@ -46,7 +46,7 @@ export interface Config {
    * read at load, where a missing, unreadable or empty file fails load, and again for every request.
    */
   readonly keyFile: string
-  /** Principal handles allowed to call, each matching `^[a-z][a-z0-9-]{0,31}$`. */
+  /** Principal handles allowed to call, at least one, each matching `^[a-z][a-z0-9-]{0,31}$`. */
   readonly allowlist: string[]
   /**
    * Id of an existing Session the tools talk to, such as `mumbo`, which another plugin creates; the tools answer
@@ -55,7 +55,11 @@ export interface Config {
   readonly session?: string
   /** Title of the assistant Session the plugin creates; unused with `session`. */
   readonly assistantTitle: string
-  /** Git checkout `task_status` and `task_result` read, and the workspace of the assistant Session the plugin creates. */
+  /**
+   * Directory whose git checkout `task_status` and `task_result` read, and the workspace of the assistant Session the
+   * plugin creates. When it is not a git checkout, `task_status` reports `worktrees` as `null` and `task_result` answers
+   * `not_found`.
+   */
   readonly assistantCwd: string
   /** Tool names whose approval only a person in the browser may give. */
   readonly irreversibleTools: string[]
@@ -68,7 +72,7 @@ export interface Config {
 
 export const Config: z<Config> = z.object({
   keyFile: z.string().required(),
-  allowlist: z.array(z.string().pattern(HANDLE_PATTERN)).required(),
+  allowlist: z.array(z.string().required().pattern(HANDLE_PATTERN)).min(1).required(),
   session: z.string().pattern(/^\S+$/),
   assistantTitle: z.string().default('assistant'),
   assistantCwd: z.string().required(),

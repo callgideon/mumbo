@@ -21,7 +21,7 @@ export interface ToolDeps {
   readonly idem: Idem
   /** The halt flag. */
   readonly halt: KvTable<'main', HaltRecord>
-  /** The assistant Session's workspace directory, a git checkout. */
+  /** The directory whose git checkout `task_status` and `task_result` read. */
   readonly assistantCwd: string
   /** Resolve the assistant Session's live Agent: the configured existing Session, or the plugin's own, created once. */
   readonly assistant: () => Promise<Agent>

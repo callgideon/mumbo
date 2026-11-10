@@ -194,9 +194,15 @@ describe('plugin lifecycle', () => {
     expect((await post(url)).status).toBe(404)
   })
 
-  it('fails load on a malformed allowlist entry', async () => {
-    const { ctx, config, url } = await startHost({ allowlist: ['Bad Name'] })
-    await expect(ctx.plugin(McpDoor, config)).rejects.toThrow(/allowlist\[0\]/)
+  it.each([
+    ['a malformed allowlist entry', { allowlist: ['Bad Name'] }, /allowlist\[0\]/],
+    ['an allowlist entry an unset variable left absent', { allowlist: [undefined] }, /allowlist\[0\] missing required value/],
+    ['an empty allowlist', { allowlist: [] }, /allowlist expected array length >= 1/],
+    ['an empty session', { session: '' }, /session expect string to match/],
+    ['a session holding whitespace', { session: ' ' }, /session expect string to match/],
+  ])('fails load on %s and registers no route', async (_label, change, error) => {
+    const { ctx, config, url } = await startHost()
+    await expect(ctx.plugin(McpDoor, { ...config, ...change } as McpDoor.Config)).rejects.toThrow(error)
     expect((await post(url)).status).toBe(404)
   })
 

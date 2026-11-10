@@ -73,13 +73,21 @@ describe('task_status', () => {
     expect(unfence(value.worktrees)).toBe(git(repo, 'worktree', 'list', '--porcelain'))
   })
 
-  it('reports a git failure as a tool error', async () => {
+  it('reports worktrees as null when assistantCwd is not a git checkout', async () => {
     const host = await startHost()
-    // The temp root is no git checkout.
+    // The temp root is not a git checkout, like the Workspace of a person's files.
     await host.ctx.plugin(McpDoor, host.config)
     const reply = await call(host.url, 'task_status', {})
+    expect(reply).toMatchObject({ isError: false, value: { assistant_session: 's1', worktrees: null } })
+  })
+
+  it('reports any other git failure as a tool error', async () => {
+    const { host, repo } = await door()
+    git(repo, 'config', 'core.repositoryformatversion', '1')
+    git(repo, 'config', 'extensions.bogus', 'true')
+    const reply = await call(host.url, 'task_status', {})
     expect(reply.isError).toBe(true)
-    expect(reply.value).toEqual(expect.stringMatching(/^git worktree failed \(128\): fatal: not a git repository/))
+    expect(reply.value).toEqual(expect.stringMatching(/^git worktree failed \(128\): fatal: unknown repository extension/))
   })
 })
 
@@ -136,6 +144,15 @@ describe('task_result', () => {
   it('answers an unknown branch with code not_found', async () => {
     const { host } = await door()
     expect(await call(host.url, 'task_result', { branch: 'missing' })).toMatchObject({ isError: true, value: { code: 'not_found' } })
+  })
+
+  it('answers code not_found when assistantCwd is not a git checkout', async () => {
+    const host = await startHost()
+    await host.ctx.plugin(McpDoor, host.config)
+    expect(await call(host.url, 'task_result', { branch: 'main' })).toEqual({
+      isError: true,
+      value: { code: 'not_found', message: 'the assistant workspace is not a git checkout' },
+    })
   })
 
   it.each([

@@ -34,7 +34,7 @@ const GIT_OPTIONS = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/nu
 
 /**
  * Clear inherited repository, attribute-tree, command-line configuration and replacement-ref selectors, as the
- * worktree service does, and turn off prompts and lazy fetches from a promisor remote.
+ * worktree service does, turn off prompts and lazy fetches from a promisor remote, and keep git's messages in English.
  */
 const GIT_ENV: NodeJS.ProcessEnv = {
   ...Object.fromEntries([
@@ -45,7 +45,11 @@ const GIT_ENV: NodeJS.ProcessEnv = {
   ].map(key => [key, undefined])),
   GIT_TERMINAL_PROMPT: '0',
   GIT_NO_LAZY_FETCH: '1',
+  LC_ALL: 'C',
 }
+
+/** Git's message, under `LC_ALL=C`, when neither the directory nor a parent is a git checkout. */
+const NOT_A_CHECKOUT = /not a git repository/
 
 const resultArgs = z.object({
   branch: z.string().regex(/^[A-Za-z0-9._/-]{1,100}$/)
@@ -95,6 +99,7 @@ interface GitRun {
  * @param signal - ends the command.
  * @param options - exit codes that count as success (`[0]` by default) and the kept range (all by default).
  * @returns the exit code, the kept text, and the length of the whole output.
+ * @throws {ToolError} `not_found` when `cwd` is not a git checkout.
  * @throws when git is missing, or exits by a signal or with another code; the message carries git's stderr.
  */
 async function git(
@@ -127,6 +132,7 @@ async function git(
     const outcome = await child.done
     if (outcome.exitCode === null || !ok.includes(outcome.exitCode)) {
       const stderr = (child.collected as Required<SubprocessCollectedOutputs>).stderr.readFrom(0).text.trim()
+      if (outcome.exitCode === 128 && NOT_A_CHECKOUT.test(stderr)) throw new ToolError('not_found', 'the assistant workspace is not a git checkout')
       throw new Error(`git ${String(args[0])} failed (${outcome.signal ?? outcome.exitCode}): ${stderr}`)
     }
     return { exitCode: outcome.exitCode, text, length }
@@ -146,18 +152,24 @@ export function register(server: McpServer, deps: ToolDeps): void {
     server,
     'task_status',
     'What the assistant is doing: its Session id, whether runs are halted, its todos, goal, plan and subagent catalog, '
-    + 'its direct children with live status, and the git worktrees of its checkout.',
+    + 'its direct children with live status, and the git worktrees of its checkout, null when its workspace is not a git checkout.',
     z.object({}),
     async (_args, signal) => {
       const agent = await deps.assistant()
       const { values } = deps.ctx.sessionProjections.snapshot(agent.session)
-      const worktrees = await git(deps.ctx, deps.assistantCwd, ['worktree', 'list', '--porcelain'], signal)
+      const worktrees = await git(deps.ctx, deps.assistantCwd, ['worktree', 'list', '--porcelain'], signal).then(
+        run => fence(run.text),
+        (error: unknown) => {
+          if (error instanceof ToolError && error.code === 'not_found') return null
+          throw error
+        },
+      )
       return JSON.stringify({
         assistant_session: agent.id,
         halted: isHalted(deps.halt),
         projections: fence(JSON.stringify(Object.fromEntries(Object.entries(values).filter(([key]) => PROJECTIONS.has(key))))),
         children: listChildren(deps.ctx, values.subagentCatalog),
-        worktrees: fence(worktrees.text),
+        worktrees,
       })
     },
   )
