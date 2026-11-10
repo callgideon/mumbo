@@ -797,10 +797,9 @@ test('project relay: posts the member\'s message to the box\'s relay route as th
   }
   const box = { ensure: async (p) => ({ id: 'pbox', token: 'TOK', principal: p, member: (e) => `hdr-for-${e}` }) }
   const relay = projectRelay({ projects: proj, box, boxFetch, siteHostOf: () => `p-${id}.boxes.example`, edgeHost: 'app.example', log: () => {} })
-  const sent = await relay.message('a@x.com', id, ' hi ', { via: 'b1' })
-  assert.deepEqual(sent, { delivered: true, project: id, kind: 'context', messageId: posts[0].body.id, result: 'stored' })
-  assert.match(sent.messageId, /^[0-9a-f-]{36}$/, 'a made-up id when the caller gives none')
-  assert.deepEqual(posts[0], { path: RELAY_PATH, method: 'POST', member: 'hdr-for-a@x.com', cookie: undefined, body: { id: sent.messageId, kind: 'context', text: 'hi',
+  const sent = await relay.message('a@x.com', id, ' hi ', { messageId: 'm-0', via: 'b1' })
+  assert.deepEqual(sent, { delivered: true, project: id, kind: 'context', messageId: 'm-0', result: 'stored' })
+  assert.deepEqual(posts[0], { path: RELAY_PATH, method: 'POST', member: 'hdr-for-a@x.com', cookie: undefined, body: { id: 'm-0', kind: 'context', text: 'hi',
     hops: [{ node: 'member', id: 'a@x.com' }, { node: 'mumbo', id: 'b1' }, { node: 'edge', id: 'app.example' }] } })
   assert.equal(RELAY_PATH, '/orchestrator/relay')
   // A request, with the caller's id; a retry with it is the box's duplicate.
@@ -809,19 +808,19 @@ test('project relay: posts the member\'s message to the box\'s relay route as th
   answer = (body) => ({ status: 200, setCookie: [], body: JSON.stringify({ result: 'duplicate', trigger: 't1', thread: body.id, waiting: 'setup' }) })
   assert.deepEqual(await relay.message('a@x.com', id, 'build it', { kind: 'request', messageId: 'm-1' }), { delivered: true, project: id, kind: 'request', messageId: 'm-1',
     result: 'duplicate', waiting: 'the project\'s coordinator is not set up yet; the message waits for it' })
-  // Refused before anything is sent.
-  await assert.rejects(relay.message('b@x.com', id, 'hi'), (e) => e.status === 404)
-  await assert.rejects(relay.message('a@x.com', id, '  '), (e) => e.status === 400)
-  await assert.rejects(relay.message('a@x.com', id, 'hi', { kind: 'order' }), (e) => e.status === 400 && /context, request/.test(e.message))
-  await assert.rejects(relay.message('a@x.com', id, 'hi', { messageId: 'a/b' }), (e) => e.status === 400)
+  // Refused before anything is sent; the caller chooses the id, so a send that timed out is retried with it.
+  await assert.rejects(relay.message('b@x.com', id, 'hi', { messageId: 'm-2' }), (e) => e.status === 404)
+  await assert.rejects(relay.message('a@x.com', id, '  ', { messageId: 'm-2' }), (e) => e.status === 400)
+  await assert.rejects(relay.message('a@x.com', id, 'hi', { kind: 'order', messageId: 'm-2' }), (e) => e.status === 400 && /context, request/.test(e.message))
+  for (const messageId of ['a/b', undefined]) await assert.rejects(relay.message('a@x.com', id, 'hi', { messageId }), (e) => e.status === 400, String(messageId))
   assert.equal(posts.length, 3)
   // The box's refusals keep their status and code; anything else is a 502.
   for (const [status, code, expected] of [[409, 'id_reused', 409], [400, 'invalid_request', 400], [409, 'relay_off', 409], [403, 'member_required', 502], [500, 'failed', 502]]) {
     answer = () => ({ status, setCookie: [], body: JSON.stringify({ error: `no: ${code}`, code }) })
-    await assert.rejects(relay.message('a@x.com', id, 'hi'), (e) => e.status === expected && e.code === code && e.message === `the project box refused the message: no: ${code}`, code)
+    await assert.rejects(relay.message('a@x.com', id, 'hi', { messageId: 'm-3' }), (e) => e.status === expected && e.code === code && e.message === `the project box refused the message: no: ${code}`, code)
   }
   answer = () => ({ status: 200, setCookie: [], body: '<!doctype html>' })
-  await assert.rejects(relay.message('a@x.com', id, 'hi'), (e) => e.status === 502)
+  await assert.rejects(relay.message('a@x.com', id, 'hi', { messageId: 'm-3' }), (e) => e.status === 502)
 })
 
 test('project relay: a box whose image has no relay route refuses with relay_unavailable and gets no message', async () => {
@@ -833,17 +832,17 @@ test('project relay: a box whose image has no relay route refuses with relay_una
   const paths = []
   const legacy = projectRelay({ projects: proj, box: { ensure: async () => ({ id: 'old', token: 'OWNER' }) }, boxFetch: async (t, h, path) => { paths.push(path); return { status: 200, body: '{}' } },
     siteHostOf: () => 'h', edgeHost: 'e', log: () => {} })
-  await assert.rejects(legacy.message('a@x.com', id, 'hi', { kind: 'request' }), unavailable)
+  await assert.rejects(legacy.message('a@x.com', id, 'hi', { kind: 'request', messageId: 'm-1' }), unavailable)
   assert.deepEqual(paths, [])
   // A member box built before the relay: superagent's /orchestrator prefix answers 404, and a box without superagent 405.
   for (const status of [404, 405]) {
     const relay = projectRelay({ projects: proj, box: { ensure: async () => ({ id: 'pbox', token: 'OWNER', member: (e) => e }) }, boxFetch: async () => ({ status, setCookie: [], body: '' }),
       siteHostOf: () => 'h', edgeHost: 'e', log: () => {} })
-    await assert.rejects(relay.message('a@x.com', id, 'hi'), unavailable, String(status))
+    await assert.rejects(relay.message('a@x.com', id, 'hi', { messageId: 'm-1' }), unavailable, String(status))
   }
 })
 
-test('project_message: kind defaults to context, and the caller\'s box is the mumbo hop', async () => {
+test('project_message: kind defaults to context, a messageId is required, and the caller\'s box is the mumbo hop', async () => {
   const calls = []
   const relay = { message: async (...args) => { calls.push(args); return { delivered: true } } }
   const mcp = mcpServer({ ops: children({ e2b: fakeChildE2B(), cfg: childCfg, log: () => {} }), projects: projectStore({ store: memoryStore(), admitted: () => true, log: () => {} }),
@@ -857,10 +856,12 @@ test('project_message: kind defaults to context, and the caller\'s box is the mu
   }
   try {
     const pid = '0123456789abcdef'
-    await call({ id: pid, message: 'fyi' })
+    await call({ id: pid, message: 'fyi', messageId: 'm-0' })
     await call({ id: pid, message: 'build it', kind: 'request', messageId: 'm-1' })
-    assert.deepEqual(calls, [['a@x.com', pid, 'fyi', { kind: 'context', messageId: undefined, via: 'b1' }], ['a@x.com', pid, 'build it', { kind: 'request', messageId: 'm-1', via: 'b1' }]])
-    for (const bad of [{ kind: 'order' }, { messageId: 'a/b' }, { message: 'x'.repeat(20001) }]) assert.equal((await call({ id: pid, message: 'hi', ...bad })).isError, true, JSON.stringify(bad).slice(0, 40))
+    assert.deepEqual(calls, [['a@x.com', pid, 'fyi', { kind: 'context', messageId: 'm-0', via: 'b1' }], ['a@x.com', pid, 'build it', { kind: 'request', messageId: 'm-1', via: 'b1' }]])
+    for (const bad of [{ kind: 'order' }, { messageId: 'a/b' }, { messageId: undefined }, { message: 'x'.repeat(20001) }]) {
+      assert.equal((await call({ id: pid, message: 'hi', messageId: 'm-2', ...bad })).isError, true, JSON.stringify(bad).slice(0, 40))
+    }
     assert.equal(calls.length, 2)
   } finally { server.close() }
 })

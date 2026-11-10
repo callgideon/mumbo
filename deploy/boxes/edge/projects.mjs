@@ -5,7 +5,7 @@
 // lists every project that has one, for the approvals poller. Docs `project-session:<id>` and the project doc's
 // `coordinatorSessionId` name the plain coordinator Session that relayed messages went to before the relay route; nothing
 // reads them now.
-import { randomBytes, randomUUID } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 
 const fail = (status, message) => Object.assign(new Error(message), { status })
 /** Project ids are lowercase letters and digits, so they fit a hostname label (`p-<id>.<public host>`). */
@@ -128,14 +128,14 @@ export const RELAY_PATH = '/orchestrator/relay'
 /** What a member sends: `context`, never a work request on its own, or a `request` for work. */
 export const MESSAGE_KINDS = ['context', 'request']
 /** A message id as the relay route accepts it; a UUID is one. */
-const MESSAGE_ID = /^[A-Za-z0-9._:-]{1,128}$/
+export const MESSAGE_ID = /^[A-Za-z0-9._:-]{1,128}$/
 
 /**
  * Delivers a member's message to the project's Superagent, which receives it as a Trigger from the member: the project box
  * is ensured (created or resumed) and the edge posts to its relay route as the member (x-mumbo-member) through the
- * client-proxy. `kind` is 'context' (the default) or 'request'. `messageId` is the idempotency key: a retry with the same id
- * and content is answered `duplicate` and creates nothing; one is made up when absent. `via` is the box id of the member's
- * assistant, a hop of the relay path. Fails with 400 for an empty message, an unknown kind or a malformed id, 404 for a
+ * client-proxy. `kind` is 'context' (the default) or 'request'. `messageId`, required, is the caller's idempotency key: a retry with the
+ * same id and content is answered `duplicate` and creates nothing, so a caller that timed out retries with the id it chose. `via` is the box id of the member's
+ * assistant, a hop of the relay path. Fails with 400 for an empty message, an unknown kind or a missing or malformed id, 404 for a
  * project the member is not in, 409 (`code: 'relay_unavailable'`) when the box's image has no relay route (no member
  * sign-in, or the route answers 404 or 405), and otherwise with the box's 400 or 409 and its code (`invalid_request`,
  * `id_reused`, `relay_off`), or 502. `boxFetch(target, siteHost, path, init)` sends one request to the box through the
@@ -146,7 +146,7 @@ export function projectRelay({ projects, box, boxFetch, siteHostOf, edgeHost, lo
   // No fallback to the plain coordinator Session: it would take context as a work request and a retry as a second message.
   const unavailable = (id) => Object.assign(fail(409, `project ${id} runs an older build without the relay, so nothing was sent; its owner moves the box to the current build (RUNBOOK "Moving a box to a new template build")`), { code: 'relay_unavailable' })
   return {
-    async message(member, id, text, { kind = 'context', messageId = randomUUID(), via } = {}) {
+    async message(member, id, text, { kind = 'context', messageId, via } = {}) {
       if (typeof text !== 'string' || !text.trim()) throw fail(400, 'the message is empty')
       if (!MESSAGE_KINDS.includes(kind)) throw fail(400, `kind is one of ${MESSAGE_KINDS.join(', ')}`)
       if (typeof messageId !== 'string' || !MESSAGE_ID.test(messageId)) throw fail(400, 'messageId is 1 to 128 letters, digits and . _ : -')

@@ -6,7 +6,7 @@ import { z } from 'zod'
 import { createMcpHandler, McpServer } from '@modelcontextprotocol/server'
 import { toNodeHandler } from '@modelcontextprotocol/node'
 import { UNITS, atCapacity } from './capacity.mjs'
-import { MESSAGE_KINDS } from './projects.mjs'
+import { MESSAGE_ID, MESSAGE_KINDS } from './projects.mjs'
 
 const MAX_OUTPUT = 64 * 1024
 const clip = (s) => (s.length > MAX_OUTPUT ? `${s.slice(0, MAX_OUTPUT)}\n[… ${s.length - MAX_OUTPUT} more characters cut]` : s)
@@ -117,10 +117,10 @@ export function mcpServer({ ops, projects, relay, projectDomain, claimOf }) {
       }, tool(claim, (c, a) => projects.addMember(c.u, a.id, a.email)))
       if (relay) {
         mcp.registerTool('project_message', {
-          description: "Send a message to a project's coordinator, as you. kind 'context' (the default) tells it something to keep in mind and never asks for work; kind 'request' asks it for work. The project's policy decides whether it acts. It starts the project's box if needed. To make a send safe to retry, give it a messageId and retry with the same one: the coordinator receives the message once. Replies do not come back here yet; the project's page shows its work.",
+          description: "Send a message to a project's coordinator, as you. kind 'context' (the default) tells it something to keep in mind and never asks for work; kind 'request' asks it for work. The project's policy decides whether it acts. It starts the project's box if needed. Give each new message a new messageId, such as a fresh UUID; if a send fails or times out, retry it with the same messageId, so the coordinator receives it once. Replies do not come back here yet; the project's page shows its work.",
           inputSchema: z.object({ id: pid, message: z.string().min(1).max(20000),
             kind: z.enum(MESSAGE_KINDS).default('context').describe("'context': information, never a work request; 'request': asks for work"),
-            messageId: z.string().regex(/^[A-Za-z0-9._:-]{1,128}$/).optional().describe('Id of this message; reuse it only to retry the same message') }),
+            messageId: z.string().regex(MESSAGE_ID).describe('A new id for each message (letters, digits and . _ : -, up to 128); reuse it only to retry the same message') }),
         }, tool(claim, (c, a) => relay.message(c.u, a.id, a.message, { kind: a.kind, messageId: a.messageId, via: c.b })))
       }
     }
