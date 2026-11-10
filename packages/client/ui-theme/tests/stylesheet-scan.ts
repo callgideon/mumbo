@@ -71,9 +71,12 @@ export function varReferences(value: string): string[] {
   return [...value.matchAll(/var\(\s*(--[\w-]+)/g)].map(([, name = '']) => name)
 }
 
+// pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md
+const PINNED_COPY = join(PACKAGES_DIR, 'mumbo', 'superagent')
+
 /**
  * Every file shipped as package source whose name the predicate accepts,
- * excluding build output and installed dependencies.
+ * excluding build output, installed dependencies and PINNED_COPY.
  * @param accepts - filename predicate.
  * @returns absolute paths under packages/, `/`-separated on every platform so
  *   specs can match repo-relative suffixes verbatim.
@@ -84,7 +87,7 @@ export function packageFiles(accepts: (name: string) => boolean): string[] {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name)
       if (entry.isDirectory()) {
-        if (entry.name !== 'node_modules' && entry.name !== 'lib' && entry.name !== 'dist') walk(path)
+        if (entry.name !== 'node_modules' && entry.name !== 'lib' && entry.name !== 'dist' && path !== PINNED_COPY) walk(path)
       } else if (accepts(entry.name)) found.push(path.replaceAll('\\', '/'))
     }
   }
