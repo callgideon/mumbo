@@ -186,7 +186,8 @@ export function assertSearchable(
 /**
  * Require host facts run-as depends on, failing loudly otherwise:
  * - this process's temporary directory, where the root bootstrap's launch requests and its module cache live, is
- *   writable by no other user, directly or through an ancestor (see {@link assertPrivateDirectory});
+ *   named by its real path, since every later use joins onto that spelling, and is writable by no other user,
+ *   directly or through an ancestor (see {@link assertPrivateDirectory});
  * - `fs.protected_hardlinks` is 1, so the run-as user cannot hard-link files it may not access
  *   into a directory the model may read.
  * @param temporaryDirectory - this process's `os.tmpdir()`.
@@ -199,7 +200,11 @@ export function assertRunAsHost(
   readSysctl: (path: string) => string = path => readFileSync(path, 'utf8'),
   statPath: StatPath = statSync,
 ): void {
-  assertPrivateDirectory(temporaryDirectory, `subprocess-local: runAs requires a temporary directory no other user can write, but ${JSON.stringify(realpathSync.native(temporaryDirectory))} is not; start dsh with TMPDIR set to a root-only directory such as /root/.dsh/tmp`, statPath)
+  const real = realpathSync.native(temporaryDirectory)
+  if (real !== temporaryDirectory) {
+    throw new Error(`subprocess-local: runAs requires TMPDIR to name its real path, but ${JSON.stringify(temporaryDirectory)} resolves to ${JSON.stringify(real)}; start dsh with TMPDIR=${real}`)
+  }
+  assertPrivateDirectory(temporaryDirectory, `subprocess-local: runAs requires a temporary directory no other user can write, but ${JSON.stringify(real)} is not; start dsh with TMPDIR set to a root-only directory such as /root/.dsh/tmp`, statPath)
   if (readSysctl(join('/proc/sys/fs', 'protected_hardlinks')).trim() !== '1') {
     throw new Error('subprocess-local: runAs requires fs.protected_hardlinks=1, so the run-as user cannot hard-link files it may not read; set it with sysctl before starting dsh')
   }

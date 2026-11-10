@@ -104,7 +104,8 @@ interface Directories {
 }
 
 /**
- * Resolve and check the directories of a provider config, failing at load on any unusable entry.
+ * Resolve and check the directories of a provider config, failing at load on any unusable entry. Under `runAs` each
+ * directory is replaced by the real path the checks examined, so no later write goes through a link in its spelling.
  * @param config - the provider config.
  * @returns the resolved directories.
  * @throws when an entry is not an absolute existing directory, or under `runAs` fails its ownership or search check.
@@ -126,8 +127,8 @@ function resolveDirectories(config: Config): Directories {
   const unshared = (field: string, path: string): string => `subprocess-local: ${field} ${JSON.stringify(path)} must be owned by this process and writable by no other user, directly or through an ancestor`
   const shellActivity = assertPrivateDirectory(directories.shellActivity, unshared(config.shellActivityDirectory === undefined ? 'shellActivityDirectory (the temporary directory)' : 'shellActivityDirectory', directories.shellActivity))
   assertSearchable(shellActivity, credentialsOf(runAs), path => `subprocess-local: the run-as user (uid ${runAs.uid}) cannot search ${JSON.stringify(path)}, so its shells cannot reach their activity records under ${JSON.stringify(shellActivity)}; set shellActivityDirectory to a directory it can search, such as /run/dsh-shell (root, 0711)`)
-  if (directories.spill !== undefined) assertPrivateDirectory(directories.spill, unshared('spillDirectory', directories.spill))
-  return directories
+  const spill = directories.spill === undefined ? undefined : assertPrivateDirectory(directories.spill, unshared('spillDirectory', directories.spill))
+  return { shellActivity, spill }
 }
 
 /**

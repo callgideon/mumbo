@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { PassThrough } from 'node:stream'
@@ -196,6 +196,14 @@ describe('run-as host facts', () => {
     expect(() => { assertRunAsHost(inner, () => '1', otherOwner) })
       .toThrow(`subprocess-local: runAs requires a temporary directory no other user can write, but ${JSON.stringify(inner)} is not`)
     expect(() => { assertRunAsHost(inner, () => '1', path => path === parent ? { uid: 0, gid: 0, mode: 0o40755 } : statSync(path)) }).not.toThrow()
+  })
+
+  it('refuses a temporary directory named through a link, since later writes would follow the link', () => {
+    const real = realpathSync(directory())
+    const link = join(directory(), 'link')
+    symlinkSync(real, link)
+    expect(() => { assertRunAsHost(link, () => '1') })
+      .toThrow(`subprocess-local: runAs requires TMPDIR to name its real path, but ${JSON.stringify(link)} resolves to ${JSON.stringify(real)}; start dsh with TMPDIR=${real}`)
   })
 
   it('refuses unprotected hard links', () => {
@@ -420,6 +428,41 @@ linux('run-as children through the provider', () => {
     expect(dirname(path)).toBe(spill)
     expect(statSync(path).mode & 0o777).toBe(0o640)
     expect(readFileSync(path, 'utf8')).toBe('y'.repeat(4096))
+  })
+
+  it('keeps writing spill files and shell records where it checked at load after a link in the configured spelling is repointed', async () => {
+    const spill = realpathSync(directory())
+    const records = realpathSync(directory())
+    chmodSync(records, 0o711)
+    const elsewhere = realpathSync(directory())
+    const links = directory()
+    symlinkSync(spill, join(links, 'spill'))
+    symlinkSync(records, join(links, 'records'))
+    const ctx = await runtime(runAs({ inherit: ['PATH'], set: { HOME: directory() } }), undefined, {
+      spillDirectory: join(links, 'spill'), shellActivityDirectory: join(links, 'records'),
+    })
+    for (const name of ['spill', 'records']) {
+      rmSync(join(links, name))
+      symlinkSync(elsewhere, join(links, name))
+    }
+    const handle = ctx.subprocess.spawn({
+      argv: [process.execPath, '-e', "process.stdout.write('y'.repeat(4096))"],
+      cwd: directory(),
+      stdio: { stdin: 'ignore', stdout: { maxBytes: 16, spill: { maxBytes: 1 << 20 } }, stderr: { maxBytes: 16 } },
+      graceMs: 200,
+    })
+    await handle.done
+    expect(dirname(handle.collected.stdout!.readFrom(0).spillPath!)).toBe(spill)
+    const terminal = await ctx.subprocess.spawnTerminal({
+      argv: ['/bin/bash', '-i'], cwd: directory(), rows: 24, cols: 80, terminalType: 'xterm', graceMs: 500, shellActivity: true,
+    })
+    try {
+      expect(readdirSync(records)).toEqual([expect.stringMatching(/^dsh-shell-/u)])
+      expect(readdirSync(elsewhere)).toEqual([])
+      await vi.waitFor(async () => { expect((await terminal.inspectActivity()).state).toBe('idle') }, { timeout: 10_000, interval: 50 })
+    } finally {
+      await terminal.terminate()
+    }
   })
 
   it('reports a directory the identity cannot enter as a spawn failure', async () => {
