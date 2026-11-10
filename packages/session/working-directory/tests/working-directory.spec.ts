@@ -569,6 +569,22 @@ describe.runIf(process.platform === 'linux')('working directories under model ro
     })])
   })
 
+  it('records the host as the chooser of a recorded directory it sets again, so the directory stays, without a notice', async () => {
+    await using f = await confined()
+    const agent = await f.harness.create(SessionId('confined-reclaimed'), {}, { cwd: f.projects })
+    // A directory the person set before the log named choosers reads as the model's.
+    agent.session.append('working-directory/change', { cwd: f.outside })
+    await expect(f.ctx.workingDirectory.set(agent, f.outside)).resolves.toBe(f.outside)
+    expect(f.ctx.workingDirectory.chooser(agent.session)).toBe('host')
+    expect(agent.session.snapshotEvents().filter(event => event.type === 'working-directory/change').map(event => event.data))
+      .toEqual([{ cwd: f.outside }, { cwd: f.outside, chooser: 'host' }])
+    expect(f.harness.claim(agent, 'next-step', 1)).toEqual([])
+    await expect(f.ctx.workingDirectory.ensure(agent)).resolves.toBe(f.outside)
+    // Setting it again appends nothing more.
+    await f.ctx.workingDirectory.set(agent, f.outside)
+    expect(agent.session.snapshotEvents().filter(event => event.type === 'working-directory/change')).toHaveLength(2)
+  })
+
   it('reports a failure other than the roots refusal while checking a recorded directory', async () => {
     await using f = await confined()
     const agent = await f.harness.create(SessionId('confined-failure'), {}, { cwd: f.projects })

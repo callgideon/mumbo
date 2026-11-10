@@ -287,13 +287,15 @@ export class WorkingDirectoryService extends Service {
   /**
    * Commit a directory and queue its notice. `chooser` is the event's field: a set by the person or the harness passes
    * `'host'`; recovery returns to the original project, which {@link chooser} treats as the person's without it.
+   * A host set of the directory already recorded as the model's records the host as its chooser, without a notice.
    */
   private commit(agent: Agent, directory: string, transition: 'changed' | 'recovered' | 'recreated', signal: AbortSignal, chooser?: 'host'): void {
     signal.throwIfAborted()
     agent.ctx.fiber.assertActive()
     const previous = this.get(agent.session)
-    if (previous !== directory) agent.session.append('working-directory/change', { cwd: directory, ...chooser === undefined ? {} : { chooser } })
-    else if (transition !== 'recreated') return
+    const claimed = previous === directory && chooser === 'host' && this.chooser(agent.session) === 'model'
+    if (previous !== directory || claimed) agent.session.append('working-directory/change', { cwd: directory, ...chooser === undefined ? {} : { chooser } })
+    if (previous === directory && transition !== 'recreated') return
     const from = JSON.stringify(previous)
     const to = JSON.stringify(directory)
     const recreation = 'was missing and has been recreated empty; files that were in it before are gone.'
