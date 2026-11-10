@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { startScript, boxSite, boxes, AGENT_BROWSER } from './edge.mjs'
+import { startScript, boxSite, boxes, AGENT_BROWSER, assistantInstructions } from './edge.mjs'
 import { memoryStore } from './store.mjs'
 import { projects } from './projects.mjs'
 import { templateArgs } from './template.mjs'
@@ -18,11 +18,11 @@ const at = (text, needle) => { const i = text.indexOf(needle); assert.ok(i >= 0,
 
 test('a user box start script is byte-for-byte what it was before project boxes grew a proxy', () => {
   const s = startScript(on, 'T', boxSite(on, 'a@x.com'), "role's", undefined, boxFiles, ['o@x.com'])
-  // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows, the X cookie, the first-run welcome and the interim Chromium policy (B27) (same cfg, token T, role "role's").
-  assert.equal(createHash('sha256').update(s).digest('hex'), '05cbf60bf17ca3acbe4ce74b5095bb8e14a8e7d1d4d11b8def78c38c9ccde639')
+  // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows, the X cookie, the first-run welcome, the interim Chromium policy (B27) and the @mumbo/assistant row (same cfg, token T, role "role's").
+  assert.equal(createHash('sha256').update(s).digest('hex'), '633f3da1a9be08de91cf252a72dc3be9b1c80a9e33e86a39c0a54b70e51ae17b')
   // With AGENT_BROWSER off (the hotfix) the only change is that the agent's browser and computer-use rows are gone.
   const off = startScript(c, 'T', boxSite(c, 'a@x.com'), "role's", undefined, boxFiles, ['o@x.com'])
-  assert.equal(createHash('sha256').update(off).digest('hex'), '2871d32ac72804e4988abb09ca11b7ed6a9e6b9fc98e0464aa794f74c2ae4e27')
+  assert.equal(createHash('sha256').update(off).digest('hex'), '484d48f9a1c2dca0db91ac35a3dfcad183a1df8c2659e271f65d7c190e0a062c')
 })
 
 const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'
@@ -88,6 +88,38 @@ test('agent browser off (AGENT_BROWSER): a person box mounts no browser-use, bro
   // The script still runs to the dsh launch under set -u with the rows gone.
   const p = startScript({ ...c, projectDomain: 'boxes.x' }, 'T', boxSite({ ...c, projectDomain: 'boxes.x' }, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
   assert.ok(!p.includes('computer-use'))
+})
+
+test('Mumbo: a person box loads @mumbo/assistant with its instructions only when the image ships the package; a project box never', () => {
+  const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles)
+  assert.match(u, /^ASSISTANT_PATCH=$/m)
+  assert.ok(at(u, 'ASSISTANT_PATCH=\n') < at(u, 'if [ -d /src/packages/mumbo/assistant ]; then'))
+  assert.match(u, / \$WELCOME_PATCH \$ASSISTANT_PATCH/)
+  assert.match(u, /    - id: assistant\n      name: '@mumbo\/assistant'\n      config:\n        workspace: \/root\/projects\n        instructions: /)
+  // The value is a JSON string on one line, which YAML reads as a double-quoted scalar with the same escapes.
+  const line = u.split('\n').find(l => l.startsWith('        instructions: '))
+  assert.equal(JSON.parse(line.slice('        instructions: '.length)), assistantInstructions())
+  assert.match(assistantInstructions(), /^You are Mumbo, this person's assistant/)
+  const p = startScript({ ...c, projectDomain: 'boxes.x' }, 'T', boxSite({ ...c, projectDomain: 'boxes.x' }, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
+  assert.ok(!p.includes('@mumbo/assistant') && !p.includes('ASSISTANT_PATCH'))
+})
+
+test('Mumbo: the assistant block runs under sh -eu, with and without the package', () => {
+  const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles)
+  const lines = u.split('\n')
+  const from = lines.findIndex(l => l === 'ASSISTANT_PATCH=')
+  const to = lines.findIndex((l, i) => i > from && l === 'fi')
+  const dir = mkdtempSync(join(tmpdir(), 'assistant-row-'))
+  try {
+    const block = lines.slice(from, to + 1).join('\n').replaceAll('/src/packages/mumbo/assistant', join(dir, 'pkg')).replaceAll('/root/.mumbo', dir)
+    const run = () => execFileSync('sh', ['-c', `set -eu\n${block}\nprintf '[%s]' "$ASSISTANT_PATCH"`], { encoding: 'utf8' })
+    assert.equal(run(), '[]')
+    assert.equal(existsSync(join(dir, 'assistant.overlay.yml')), false)
+    mkdirSync(join(dir, 'pkg'))
+    assert.equal(run(), `[--patch ${dir}/assistant.overlay.yml]`)
+    const overlay = readFileSync(join(dir, 'assistant.overlay.yml'), 'utf8')
+    assert.equal(JSON.parse(overlay.split('\n').find(l => l.startsWith('        instructions: ')).slice('        instructions: '.length)), assistantInstructions())
+  } finally { rmSync(dir, { recursive: true, force: true }) }
 })
 
 test('box links: the overlay loads only when the image ships @mumbo/box-links; project boxes get no desktop link', () => {
