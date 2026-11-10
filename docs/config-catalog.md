@@ -2444,7 +2444,7 @@ export interface LspLocalServerConfig {
 ## `@deepseek-ai/dsh-mcp-client`
 
 - `inject`: `tools`
-- `source`: [`packages/mcp/mcp-client/src/index.ts:145`](../packages/mcp/mcp-client/src/index.ts)
+- `source`: [`packages/mcp/mcp-client/src/index.ts:147`](../packages/mcp/mcp-client/src/index.ts)
 
 ```ts config-catalog
 /** Configuration for one stdio or Streamable HTTP MCP server. */
@@ -2470,8 +2470,10 @@ export interface StdioConfig {
   cwd: string
   /**
    * Subprocess identity, by the subprocess provider's name for it, that runs the server. Set, the
-   * server starts through the subprocess service with that identity's environment plus `env`;
-   * omitted, it starts as this process with the scrubbed ambient environment plus `env`.
+   * server starts through the subprocess service with that identity's environment plus `env`.
+   * Omitted, it starts through the subprocess service as the provider's default identity when that
+   * provider runs children as a run-as identity, and otherwise as this process with the scrubbed
+   * ambient environment plus `env`.
    */
   identity?: string
   /** Timeout per tool call or resource request in milliseconds. */
@@ -3925,7 +3927,7 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-subprocess-local`
 
-- `source`: [`packages/subprocess/subprocess-local/src/index.ts:74`](../packages/subprocess/subprocess-local/src/index.ts)
+- `source`: [`packages/subprocess/subprocess-local/src/index.ts:75`](../packages/subprocess/subprocess-local/src/index.ts)
 
 ```ts config-catalog
 /** Provider configuration. */
@@ -4983,7 +4985,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-working-directory`
 
 - `inject`: `fs` · `sessionProjections` · `systemPrompt`
-- `source`: [`packages/session/working-directory/src/index.ts:52`](../packages/session/working-directory/src/index.ts)
+- `source`: [`packages/session/working-directory/src/index.ts:57`](../packages/session/working-directory/src/index.ts)
 
 ```ts config-catalog
 /** Deployment default for Sessions without an original project directory. */
