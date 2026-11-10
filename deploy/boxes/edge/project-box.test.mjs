@@ -18,7 +18,7 @@ const at = (text, needle) => { const i = text.indexOf(needle); assert.ok(i >= 0,
 test('a user box start script is byte-for-byte what it was before project boxes grew a proxy', () => {
   const s = startScript(c, 'T', boxSite(c, 'a@x.com'), "role's", undefined, boxFiles, ['o@x.com'], { key: 'KEY', principal: 'a' })
   // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows, the X cookie, the first-run welcome, the interim Chromium policy (B27), the B18 desktop, the B25 consent rows, B19's KasmVNC and its own user, B33's door to Mumbo and its gate on the linked package (same cfg, token T, role "role's").
-  assert.equal(createHash('sha256').update(s).digest('hex'), 'e3c35ed9aec7e8994118894f92656d72ad83f5f5008ae07c76ff46a8097a8116')
+  assert.equal(createHash('sha256').update(s).digest('hex'), 'e9c5e12896c68f9deebcab600a47fe56409647d0cfecd8417b5e25f0565ce1f1')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -344,7 +344,7 @@ test('door to Mumbo: a person box writes its key root-only and patches the perso
     assert.ok(!existsSync(keyFile))
     mkdirSync(join(pkg, '..'), { recursive: true })
     writeFileSync(pkg, '{}')
-    assert.equal(run(), `--patch ${overlay}|3092|${keyFile}|ann|${dir}/root/projects`)
+    assert.equal(run(), `--patch ${overlay}|882|${keyFile}|ann|${dir}/root/projects`)
     assert.equal(readFileSync(keyFile, 'utf8'), 'KEY_-1')
     assert.equal(statSync(keyFile).mode & 0o777, 0o600)
     // A re-run over a file another mode left keeps it root's alone.

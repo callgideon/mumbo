@@ -165,7 +165,7 @@ export function memberHeader(key, email, now = Date.now()) {
 // HMAC(edge key, "mumbo-mcp:" + box id) as unpadded base64url, which the start script writes to a root-only file. The door
 // (door.mjs mumboForwarder) derives it again for every call, so nothing stores it.
 export const mumboMcpKey = (edgeKey, boxId) => createHmac('sha256', edgeKey).update(`mumbo-mcp:${boxId}`).digest('base64url')
-export const MUMBO_MCP_PORT = '3092'
+export const MUMBO_MCP_PORT = '882'
 export const MUMBO_MCP_OVERLAY = '/src/packages/mumbo/mcp/examples/person.overlay.yml'
 /** The overlay names `@mumbo/mcp` bare, which loads only when the root package links it into /src/node_modules. */
 export const MUMBO_MCP_PACKAGE = '/src/node_modules/@mumbo/mcp/package.json'

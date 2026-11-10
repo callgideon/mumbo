@@ -331,7 +331,7 @@ test('Mumbo tools reach the owner\'s box: ensured, then one tools/call to its @m
     assert.deepEqual(h.authorization, [`Bearer ${mumboMcpKey('edge-secret', 'sbx1')}`], 'the box key, never the door key')
     assert.deepEqual(h['x-mcp-principal'], ['a'])
     assert.deepEqual(h['x-mumbo-key-name'], [encodeURIComponent('laptop Claude Code [ü]')])
-    assert.deepEqual([h['e2b-sandbox-id'], h['e2b-sandbox-port'], h['e2b-traffic-access-token']], [['sbx1'], ['3092'], ['TT']])
+    assert.deepEqual([h['e2b-sandbox-id'], h['e2b-sandbox-port'], h['e2b-traffic-access-token']], [['sbx1'], ['882'], ['TT']])
     assert.deepEqual(h['content-type'], ['application/json'])
     assert.equal(h.accept[0], 'application/json, text/event-stream')
     assert.deepEqual(ensured, [A]); assert.deepEqual(touched, ['sbx1'])
