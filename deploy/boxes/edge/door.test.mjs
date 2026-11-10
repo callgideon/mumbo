@@ -1,7 +1,8 @@
 // node --test: the MCP door (B32) over the wire, through modelServer as main() wires it: bearer door keys only, jumbo's
 // refusal codes as HTTP statuses with JSON-RPC errors, the per-key rate limit, one log line per call without secrets,
 // the dispatcher's scope, project, budget and declaration checks, whoami and project_list, and the box-token endpoint
-// beside it unchanged. Then the Mumbo tools (B33), forwarded through a fake client proxy to the owner's box.
+// beside it unchanged. Then the Mumbo tools (B33), forwarded through a fake client proxy to the owner's box, and the project
+// tools (B34), which reach a project's box as its member through projectRelay and a fake client proxy.
 import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
 import { createServer, request } from 'node:http'
@@ -10,7 +11,7 @@ import { z } from 'zod'
 import { door, doorTools, mumboForwarder } from './door.mjs'
 import { boxFetcher, mcpPrincipal, memberKey, modelServer, mumboMcpKey, signBox, verifyBox } from './edge.mjs'
 import { doorKeys, keyHash } from './keys.mjs'
-import { projects } from './projects.mjs'
+import { projectRelay, projects } from './projects.mjs'
 import { children, mcpServer } from './sandboxes.mjs'
 import { memoryStore } from './store.mjs'
 
@@ -40,14 +41,14 @@ const send = (port, { host = PUBLIC, path = '/mcp', method = 'POST', headers = {
  * The edge's model listener with a door over a memory store: A owns projects P and Q, B owns R. `tools` are added to the
  * door's own; `rate` and the budgets can be set. `at(ms)` moves the clock.
  */
-async function setup({ tools = [], rate = { perMinute: 60, burst: 100 }, budgetOpen = true, tokensOpen = true, mumbo = async () => { throw new Error('no box here') } } = {}) {
+async function setup({ tools = [], rate = { perMinute: 60, burst: 100 }, budgetOpen = true, tokensOpen = true, mumbo = async () => { throw new Error('no box here') }, relayOf = () => undefined } = {}) {
   const store = memoryStore(), lines = [], charged = []
   let now = NOW
   const proj = projects({ store, admitted: () => true, log: () => {} })
   const P = (await proj.create(A, 'Mine')).id, Q = (await proj.create(A, 'Other')).id, R = (await proj.create(B, 'Theirs')).id
   const allowed = new Set([A, B])
   const keys = doorKeys({ store, projects: proj, admitted: (e) => allowed.has(e), now: () => now, log: () => {} })
-  const front = door({ keys, tools: [...doorTools({ projects: proj, mumbo }), ...tools], rate, now: () => now, log: (l) => lines.push(l),
+  const front = door({ keys, tools: [...doorTools({ projects: proj, mumbo, relay: relayOf(proj) }), ...tools], rate, now: () => now, log: (l) => lines.push(l),
     allow: async (u) => { charged.push(`requests ${u}`); return budgetOpen }, tokens: { allow: async (u) => { charged.push(`tokens ${u}`); return tokensOpen } } })
   const ops = children({ e2b: { Sandbox: { list: () => ({ hasNext: false }) } }, cfg: { childTemplates: ['c'], maxChildren: 1 }, log: () => {} })
   const mcp = mcpServer({ ops, claimOf: (info) => verifyBox('k', String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
@@ -95,7 +96,7 @@ test('bearer only: no key, a cookie alone, a box token, a malformed or repeated 
 })
 
 test('every refusal over the wire: its status, JSON-RPC error and code, WWW-Authenticate on 401s, and never the key', async () => {
-  const t = await setup({ tools: [{ name: 'project_status', scope: 'read', project: true, turns: false, input: z.object({ project: z.string() }), description: 'd', run: async (k, a) => a.project }] })
+  const t = await setup()
   try {
     const expiring = await t.mint({ expiresInDays: 7 }), plain = await t.mint(), prompt = await t.mint({ scopes: ['prompt'] }), revoked = await t.mint({ name: 'old' })
     await t.keys.revoke(A, (await t.keys.list(A)).find(k => k.name === 'old').id)
@@ -256,7 +257,7 @@ test('whoami and project_list: the key itself, and the projects it names whose o
     refused(await t.tool(key, 'in_project', { project: t.Q }), 403, 'project_not_allowed')
     assert.equal(result(await t.tool(key, 'in_project', { project: t.P })), 'ran')
     const listed = (await t.rpc(key, 'tools/list')).json.result.tools.map(x => x.name).sort()
-    assert.deepEqual(listed, ['agent_read', 'agent_send', 'in_project', 'needs_you', 'project_list', 'task_reply', 'task_result', 'task_status', 'whoami'])
+    assert.deepEqual(listed, ['agent_read', 'agent_send', 'in_project', 'needs_you', 'project_list', 'project_message', 'project_status', 'task_reply', 'task_result', 'task_start', 'task_status', 'task_stop', 'whoami'])
   } finally { t.close() }
 })
 
@@ -289,7 +290,7 @@ async function fakeProxy(answer) {
   const server = createServer((req, res) => {
     const chunks = []
     req.on('data', c => chunks.push(c)).on('end', () => {
-      seen.push({ method: req.method, url: req.url, headers: req.headersDistinct, body: JSON.parse(Buffer.concat(chunks)) })
+      seen.push({ method: req.method, url: req.url, headers: req.headersDistinct, body: chunks.length ? JSON.parse(Buffer.concat(chunks)) : undefined })
       const { status = 200, body } = answer(seen.at(-1))
       res.writeHead(status, { 'content-type': 'application/json' }).end(typeof body === 'string' ? body : JSON.stringify(body))
     })
@@ -403,4 +404,147 @@ test('agent_read waits at most 40 s, less after a slow start, so a call ends wit
   assert.deepEqual(sent[0].args, { after_seq: 4, wait_s: 40 })
   const failing = mumboForwarder({ box: { ensure: async () => BOX, touch: async () => {} }, boxFetch: async () => { throw new Error('box request timed out') }, edgeKey: 'k', siteHostOf: () => PUBLIC, log: () => {} })
   await assert.rejects(failing(key, 'agent_read', { after_seq: 0 }), { code: 'box_unavailable', message: /did not answer in time/ })
+})
+
+// ---- Projects through the door (B34): a project's box, as the key's owner, through projectRelay and a fake client proxy.
+
+const ticket = (id, fill = 0) => ({ id, title: `T ${id}${'t'.repeat(fill)}`, state: 'open', stage: 'working', summary: 's'.repeat(fill), updatedAt: '2026-11-10T11:00:00Z', assignments: 1, threads: [] })
+/**
+ * A door whose project tools reach a fake client proxy. Each project's box is `box-project:<id>`; its Superagent knows the
+ * Tickets `tickets[<project id>]`, answers the relay with a stored Trigger, and `answer(seen)`, when it returns one, first.
+ */
+async function projectDoor({ tickets = () => ({}), answer = () => undefined, ...opts } = {}) {
+  const ensured = [], projectOf = (seen) => seen.headers['e2b-sandbox-id'][0].slice('box-project:'.length)
+  let known = {}
+  const proxy = await fakeProxy((seen) => {
+    const own = answer(seen)
+    if (own) return own
+    if (seen.url === '/orchestrator/relay') return { body: { result: 'stored', trigger: `trig-${seen.body.id}`, thread: seen.body.id } }
+    if (seen.url === '/orchestrator/api/overview') return { body: { problems: [{ kind: 'executor-paused' }], person: [], executor: { running: 1, queued: 0, idle: 0, maxWorkers: 2 }, flow: {} } }
+    const items = known[projectOf(seen)] ?? []
+    if (seen.url === '/orchestrator/api/tickets?state=open&limit=20') return { body: { items, total: items.length, next_offset: null } }
+    const stop = /^\/orchestrator\/api\/tickets\/([^/]+)\/stop$/.exec(seen.url)
+    if (seen.method === 'POST' && stop && items.some(x => x.id === stop[1])) return { body: { stopped: true } }
+    return { status: 404, body: { error: 'Ticket not found' } }
+  })
+  const relayOf = (proj) => projectRelay({ projects: proj, log: () => {}, boxFetch: boxFetcher({ publicHost: PUBLIC, proxy: proxy.url }), siteHostOf: (p) => `site-${p}`, edgeHost: PUBLIC,
+    box: { ensure: async (p) => { ensured.push(p); return { id: `box-${p}`, token: 'OWNER', traffic: 'TT', host: `site-${p}`, member: (e) => `signed:${e}` } } } })
+  const t = await setup({ relayOf, ...opts })
+  known = tickets(t)
+  return { ...t, proxy, ensured, close: () => { t.close(); proxy.close() } }
+}
+
+test('project tools: read scope for project_status, prompt for project_message, workspace for task_start and task_stop; only messages and task_start are charged', async () => {
+  const t = await projectDoor({ tickets: (t) => ({ [t.P]: [ticket('tp1')] }) })
+  try {
+    const keys = Object.fromEntries(await Promise.all(['read', 'prompt', 'workspace'].map(async (s) => [s, await t.mint({ name: s, scopes: [s], projects: [t.P] })])))
+    const calls = [['project_status', 'read', {}], ['project_message', 'prompt', { message: 'fyi', messageId: 'm1' }], ['task_start', 'workspace', { message: 'build it', messageId: 'm2' }], ['task_stop', 'workspace', { ticket: 'tp1' }]]
+    for (const [name, scope, args] of calls) {
+      for (const other of ['read', 'prompt', 'workspace'].filter(s => s !== scope)) refused(await t.tool(keys[other], name, { project: t.P, ...args }), 403, 'insufficient_scope')
+      assert.equal(t.ensured.length, 0, `${name}: a refused call never reaches the box`)
+      result(await t.tool(keys[scope], name, { project: t.P, ...args }))
+      t.ensured.length = 0
+    }
+    assert.deepEqual(t.charged, [`requests ${A}`, `tokens ${A}`, `requests ${A}`, `tokens ${A}`], 'project_message and task_start cause model turns')
+  } finally { t.close() }
+})
+
+test('project tools refuse a project the key does not name, another person\'s, and one its owner left, before any box call', async () => {
+  const t = await projectDoor()
+  try {
+    const key = await t.mint({ scopes: ['read', 'prompt', 'workspace'], projects: [t.P] })
+    const args = { project_status: {}, project_message: { message: 'hi', messageId: 'm1' }, task_start: { message: 'do', messageId: 'm2' }, task_stop: { ticket: 'tq1' } }
+    const all = async (project) => { for (const [name, a] of Object.entries(args)) refused(await t.tool(key, name, { project, ...a }), 403, 'project_not_allowed') }
+    await all(t.Q)
+    await all(t.R)
+    await all(undefined)
+    // A leaves P after the key was minted.
+    await t.store.putDoc(`project:${t.P}`, { ...(await t.store.getDoc(`project:${t.P}`)), members: [] })
+    await all(t.P)
+    assert.deepEqual(t.ensured, []); assert.deepEqual(t.proxy.seen, [])
+    assert.deepEqual(t.charged, [])
+  } finally { t.close() }
+})
+
+test('project_message and task_start: posted to the relay as the member, the key\'s name in the hop chain after the member; task_start returns the trigger and thread', async () => {
+  const t = await projectDoor()
+  try {
+    const key = await t.mint({ name: 'laptop Claude Code', scopes: ['prompt', 'workspace'], projects: [t.P] })
+    assert.deepEqual(result(await t.tool(key, 'project_message', { project: t.P, message: ' a note ', messageId: 'm1' })),
+      { delivered: true, project: t.P, kind: 'context', messageId: 'm1', result: 'stored', trigger: 'trig-m1', thread: 'm1' })
+    assert.equal(result(await t.tool(key, 'project_message', { project: t.P, message: 'please', kind: 'request', messageId: 'm2' })).kind, 'request')
+    assert.deepEqual(result(await t.tool(key, 'task_start', { project: t.P, message: 'build the thing', messageId: 'm3' })),
+      { delivered: true, project: t.P, kind: 'request', messageId: 'm3', result: 'stored', trigger: 'trig-m3', thread: 'm3' })
+    const hops = [{ node: 'member', id: A }, { node: 'door', id: 'laptop Claude Code' }, { node: 'edge', id: PUBLIC }]
+    assert.deepEqual(t.proxy.seen.map(x => x.body), [{ id: 'm1', kind: 'context', text: 'a note', hops }, { id: 'm2', kind: 'request', text: 'please', hops }, { id: 'm3', kind: 'request', text: 'build the thing', hops }])
+    for (const x of t.proxy.seen) {
+      assert.deepEqual([x.method, x.url, x.headers['x-mumbo-member'], x.headers['e2b-sandbox-id'], x.headers.authorization], ['POST', '/orchestrator/relay', [`signed:${A}`], [`box-project:${t.P}`], undefined])
+    }
+    assert.deepEqual(t.ensured, [`project:${t.P}`, `project:${t.P}`, `project:${t.P}`], 'the project box is ensured on each call')
+    // Without a messageId nothing is sent; the box's own refusal comes back with its code.
+    const bare = await t.tool(key, 'task_start', { project: t.P, message: 'x' })
+    assert.equal(bare.json.result.isError, true)
+    assert.equal(t.proxy.seen.length, 3)
+  } finally { t.close() }
+  const s = await projectDoor({ answer: (x) => x.url === '/orchestrator/relay' && { status: 409, body: { error: 'The project\'s relay Source is switched off', code: 'relay_off' } } })
+  try {
+    const r = await s.tool(await s.mint({ scopes: ['prompt'], projects: [s.P] }), 'project_message', { project: s.P, message: 'hi', messageId: 'm1' })
+    assert.equal(r.json.result.isError, true); assert.match(r.json.result.content[0].text, /^relay_off: /)
+    await settle()
+    assert.equal(s.logs().at(-1).outcome, 'relay_off')
+  } finally { s.close() }
+})
+
+test('project_status: the project, problems, what waits on you and open Tickets, read through the management API as the member, bounded', async () => {
+  const many = Array.from({ length: 50 }, (_, i) => ticket(`t${i}`, 10_000))
+  const t = await projectDoor({ answer: (x) => x.url === '/orchestrator/api/overview' && { body: {
+    problems: Array.from({ length: 30 }, (_, i) => ({ kind: i ? 'outgoing' : 'setup', detail: 'x'.repeat(10_000) })),
+    person: Array.from({ length: 25 }, (_, i) => ({ ...ticket(`p${i}`, 10_000), stage: 'person', action: 'answer', note: { text: 'q'.repeat(10_000), error: false } })),
+    executor: { running: 1, queued: 2, idle: 3, maxWorkers: 4, extra: 'x'.repeat(10_000) }, flow: { received: 1 } } },
+  tickets: (t) => ({ [t.P]: many }) })
+  try {
+    const key = await t.mint({ projects: [t.P] })
+    const r = await t.tool(key, 'project_status', { project: t.P })
+    const out = result(r)
+    assert.deepEqual(out.project, { id: t.P, name: 'Mine', owner: A, members: [A] })
+    assert.deepEqual([out.problems.length, out.problems[0], out.moreProblems], [10, 'setup', 20])
+    assert.deepEqual([out.waitingOnYou.length, out.moreWaiting, out.tickets.length, out.openTickets], [20, 5, 20, 50])
+    assert.deepEqual(out.executor, { running: 1, queued: 2, idle: 3, maxWorkers: 4 })
+    const [w] = out.waitingOnYou
+    assert.deepEqual([w.id, w.stage, w.action, w.title.length, w.note.length, w.summary.length], ['p0', 'person', 'answer', 200, 300, 500])
+    assert.deepEqual(Object.keys(out.tickets[0]).sort(), ['id', 'stage', 'summary', 'title', 'updatedAt'])
+    assert.ok(r.text.length < 64 * 1024, `${r.text.length} characters`)
+    // One box, ensured once, read as the member with the management API's same-origin header.
+    assert.deepEqual(t.ensured, [`project:${t.P}`])
+    assert.deepEqual(t.proxy.seen.map(x => `${x.method} ${x.url}`), ['GET /orchestrator/api/overview', 'GET /orchestrator/api/tickets?state=open&limit=20'])
+    for (const x of t.proxy.seen) {
+      assert.deepEqual([x.headers['x-mumbo-member'], x.headers['x-orchestrator-request'], x.headers['e2b-sandbox-id'], x.headers.origin], [[`signed:${A}`], ['1'], [`box-project:${t.P}`], [`https://site-project:${t.P}`]])
+      assert.equal(x.headers.authorization, undefined)
+    }
+    assert.deepEqual(t.charged, [], 'a read causes no model turns')
+  } finally { t.close() }
+  // A box that refuses the member, or answers no JSON, is box_refused.
+  const s = await projectDoor({ answer: () => ({ status: 403, body: { error: 'Management requires the owner or a panel admin' } }) })
+  try {
+    const r = await s.tool(await s.mint({ projects: [s.P] }), 'project_status', { project: s.P })
+    assert.equal(r.json.result.isError, true); assert.match(r.json.result.content[0].text, /^box_refused: .*panel admin/)
+  } finally { s.close() }
+})
+
+test('task_stop stops one Ticket of the named project, as the member; another project\'s Ticket is not found there, and its project is refused', async () => {
+  const t = await projectDoor({ tickets: (t) => ({ [t.P]: [ticket('tp1')], [t.Q]: [ticket('tq1')] }) })
+  try {
+    const key = await t.mint({ scopes: ['workspace'], projects: [t.P] })
+    assert.deepEqual(result(await t.tool(key, 'task_stop', { project: t.P, ticket: 'tp1' })), { stopped: true })
+    const other = await t.tool(key, 'task_stop', { project: t.P, ticket: 'tq1' })
+    assert.equal(other.json.result.isError, true); assert.equal(other.json.result.content[0].text, 'not_found: the project box refused: Ticket not found')
+    refused(await t.tool(key, 'task_stop', { project: t.Q, ticket: 'tq1' }), 403, 'project_not_allowed')
+    const bad = await t.tool(key, 'task_stop', { project: t.P, ticket: '../executor/pause' })
+    assert.equal(bad.json.result.isError, true)
+    assert.deepEqual(t.proxy.seen.map(x => `${x.method} ${x.url} ${x.headers['e2b-sandbox-id']} ${x.headers['x-mumbo-member']} ${x.headers['x-orchestrator-request']}`), [
+      `POST /orchestrator/api/tickets/tp1/stop box-project:${t.P} signed:${A} 1`, `POST /orchestrator/api/tickets/tq1/stop box-project:${t.P} signed:${A} 1`])
+    await settle()
+    assert.deepEqual(t.logs().filter(l => l.tool === 'task_stop').map(l => l.outcome), ['ok', 'not_found', 'project_not_allowed', 'not_run'])
+    assert.deepEqual(t.charged, [])
+  } finally { t.close() }
 })

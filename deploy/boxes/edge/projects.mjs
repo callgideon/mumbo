@@ -131,33 +131,48 @@ export const MESSAGE_KINDS = ['context', 'request']
 export const MESSAGE_ID = /^[A-Za-z0-9._:-]{1,128}$/
 
 /**
- * Delivers a member's message to the project's Superagent, which receives it as a Trigger from the member: the project box
- * is ensured (created or resumed) and the edge posts to its relay route as the member (x-mumbo-member) through the
- * client-proxy. `kind` is 'context' (the default) or 'request'. `messageId`, required, is the caller's idempotency key: a retry with the
- * same id and content is answered `duplicate` and creates nothing, so a caller that timed out retries with the id it chose. `via` is the box id of the member's
- * assistant, a hop of the relay path. Fails with 400 for an empty message, an unknown kind or a missing or malformed id, 404 for a
- * project the member is not in, 409 (`code: 'relay_unavailable'`) when the box's image has no relay route (no member
- * sign-in, or the route answers 404 or 405), and otherwise with the box's 400 or 409 and its code (`invalid_request`,
- * `id_reused`, `relay_off`), or 502. `boxFetch(target, siteHost, path, init)` sends one request to the box through the
- * client-proxy and resolves { status, setCookie, body }; `edgeHost` names this edge in the relay path.
+ * The edge's way into a project box as a member, through the client-proxy: the project box is ensured (created or resumed)
+ * and every request carries the member's signed x-mumbo-member header. `boxFetch(target, siteHost, path, init)` sends one
+ * request to the box through the client-proxy and resolves { status, setCookie, body }; `edgeHost` names this edge in the
+ * relay path. A project the member is not in fails with 404 before the box is ensured; a box whose image has no member
+ * sign-in, or no relay route for message(), with 409 (`code: 'relay_unavailable'`).
+ *
+ * message(member, id, text, { kind, messageId, via, door }) delivers a message to the project's Superagent relay route, which
+ * receives it as a Trigger from the member. `kind` is 'context' (the default) or 'request'. `messageId`, required, is the
+ * caller's idempotency key: a retry with the same id and content is answered `duplicate` and creates nothing, so a caller that
+ * timed out retries with the id it chose. The relay path is the member, then `via`, the box id of the member's assistant
+ * (hop `mumbo`), or `door`, the name of the door key that sent it (hop `door`), then this edge. Resolves { delivered, project,
+ * kind, messageId, result, trigger, thread, waiting? } with the relay's Trigger and Thread ids. Fails with 400 for an empty
+ * message, an unknown kind or a missing or malformed id, and otherwise with the box's 400 or 409 and its code
+ * (`invalid_request`, `id_reused`, `relay_off`), or 502.
+ *
+ * api(member, id) ensures the box once and resolves `(method, path) => Promise<object>`, which calls Superagent's management
+ * API (`/orchestrator/api/<path>`) as the member, who must be one of the box's panel admins, and resolves its JSON answer.
+ * It fails with the box's 400, 404 or 409 and its message (`code` the box's, else `not_found` for 404 and `invalid_request`
+ * for 400 and 409), and 502 (`code: 'box_refused'`) for any other answer.
  */
 export function projectRelay({ projects, box, boxFetch, siteHostOf, edgeHost, log = console.log }) {
   const say = (fields) => log(JSON.stringify({ edge: 'relay', ...fields }))
   // No fallback to the plain coordinator Session: it would take context as a work request and a retry as a second message.
   const unavailable = (id) => Object.assign(fail(409, `project ${id} runs an older build without the relay, so nothing was sent; its owner moves the box to the current build (RUNBOOK "Moving a box to a new template build")`), { code: 'relay_unavailable' })
+  /** The project's box, ensured, for a member of the project. */
+  async function reach(member, id) {
+    const p = await projects.get(id)
+    if (!p?.members.includes(member)) throw fail(404, `no project ${id} of yours`)
+    const principal = projectPrincipal(id)
+    const target = await box.ensure(principal)
+    if (!target.member) throw unavailable(id)
+    return { target, host: siteHostOf(principal), member: target.member(member) }
+  }
   return {
-    async message(member, id, text, { kind = 'context', messageId, via } = {}) {
+    async message(member, id, text, { kind = 'context', messageId, via, door } = {}) {
       if (typeof text !== 'string' || !text.trim()) throw fail(400, 'the message is empty')
       if (!MESSAGE_KINDS.includes(kind)) throw fail(400, `kind is one of ${MESSAGE_KINDS.join(', ')}`)
       if (typeof messageId !== 'string' || !MESSAGE_ID.test(messageId)) throw fail(400, 'messageId is 1 to 128 letters, digits and . _ : -')
-      const p = await projects.get(id)
-      if (!p?.members.includes(member)) throw fail(404, `no project ${id} of yours`)
-      const principal = projectPrincipal(id)
-      const target = await box.ensure(principal)
-      if (!target.member) throw unavailable(id)
-      const hops = [{ node: 'member', id: member }, ...(via ? [{ node: 'mumbo', id: via }] : []), { node: 'edge', id: edgeHost }]
-      const r = await boxFetch(target, siteHostOf(principal), RELAY_PATH, { method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ id: messageId, kind, text: text.trim(), hops }), member: target.member(member) })
+      const { target, host, member: signed } = await reach(member, id)
+      const hops = [{ node: 'member', id: member }, ...(via ? [{ node: 'mumbo', id: via }] : []), ...(door ? [{ node: 'door', id: door }] : []), { node: 'edge', id: edgeHost }]
+      const r = await boxFetch(target, host, RELAY_PATH, { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: messageId, kind, text: text.trim(), hops }), member: signed })
       if (r.status === 404 || r.status === 405) throw unavailable(id)
       let out
       try { out = JSON.parse(r.body) } catch { out = undefined }  // a body that is not JSON is a refusal like any other
@@ -167,8 +182,22 @@ export function projectRelay({ projects, box, boxFetch, siteHostOf, edgeHost, lo
         throw Object.assign(fail(status, `the project box refused the message: ${out?.error ?? `HTTP ${r.status}`}`), out?.code ? { code: out.code } : {})
       }
       say({ msg: 'delivered', project: id, member, kind, messageId, result: out.result })
-      return { delivered: true, project: id, kind, messageId, result: out.result,
+      return { delivered: true, project: id, kind, messageId, result: out.result, trigger: out.trigger, thread: out.thread,
         ...(out.waiting ? { waiting: 'the project\'s coordinator is not set up yet; the message waits for it' } : {}) }
+    },
+    async api(member, id) {
+      const { target, host, member: signed } = await reach(member, id)
+      return async (method, path) => {
+        const r = await boxFetch(target, host, `/orchestrator/api/${path}`, { method, headers: { 'x-orchestrator-request': '1' }, member: signed })
+        let out
+        try { out = JSON.parse(r.body) } catch { out = undefined }
+        if (r.status === 200 && out && typeof out === 'object') return out
+        say({ level: 'warn', msg: 'api refused', project: id, member, path: path.split('?')[0], status: r.status })
+        if ([400, 404, 409].includes(r.status) && typeof out?.error === 'string') {
+          throw Object.assign(fail(r.status, `the project box refused: ${out.error}`), { code: out.code ?? (r.status === 404 ? 'not_found' : 'invalid_request') })
+        }
+        throw Object.assign(fail(502, `the project box did not answer its management API: ${out?.error ?? `HTTP ${r.status}`}`), { code: 'box_refused' })
+      }
     },
   }
 }

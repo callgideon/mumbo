@@ -800,7 +800,7 @@ test('project relay: posts the member\'s message to the box\'s relay route as th
   const box = { ensure: async (p) => ({ id: 'pbox', token: 'TOK', principal: p, member: (e) => `hdr-for-${e}` }) }
   const relay = projectRelay({ projects: proj, box, boxFetch, siteHostOf: () => `p-${id}.boxes.example`, edgeHost: 'app.example', log: () => {} })
   const sent = await relay.message('a@x.com', id, ' hi ', { messageId: 'm-0', via: 'b1' })
-  assert.deepEqual(sent, { delivered: true, project: id, kind: 'context', messageId: 'm-0', result: 'stored' })
+  assert.deepEqual(sent, { delivered: true, project: id, kind: 'context', messageId: 'm-0', result: 'stored', trigger: 't1', thread: 'm-0' })
   assert.deepEqual(posts[0], { path: RELAY_PATH, method: 'POST', member: 'hdr-for-a@x.com', cookie: undefined, body: { id: 'm-0', kind: 'context', text: 'hi',
     hops: [{ node: 'member', id: 'a@x.com' }, { node: 'mumbo', id: 'b1' }, { node: 'edge', id: 'app.example' }] } })
   assert.equal(RELAY_PATH, '/orchestrator/relay')
@@ -809,7 +809,7 @@ test('project relay: posts the member\'s message to the box\'s relay route as th
   assert.deepEqual(posts[1].body, { id: 'm-1', kind: 'request', text: 'build it', hops: [{ node: 'member', id: 'a@x.com' }, { node: 'edge', id: 'app.example' }] })
   answer = (body) => ({ status: 200, setCookie: [], body: JSON.stringify({ result: 'duplicate', trigger: 't1', thread: body.id, waiting: 'setup' }) })
   assert.deepEqual(await relay.message('a@x.com', id, 'build it', { kind: 'request', messageId: 'm-1' }), { delivered: true, project: id, kind: 'request', messageId: 'm-1',
-    result: 'duplicate', waiting: 'the project\'s coordinator is not set up yet; the message waits for it' })
+    result: 'duplicate', trigger: 't1', thread: 'm-1', waiting: 'the project\'s coordinator is not set up yet; the message waits for it' })
   // Refused before anything is sent; the caller chooses the id, so a send that timed out is retried with it.
   await assert.rejects(relay.message('b@x.com', id, 'hi', { messageId: 'm-2' }), (e) => e.status === 404)
   await assert.rejects(relay.message('a@x.com', id, '  ', { messageId: 'm-2' }), (e) => e.status === 400)

@@ -1560,7 +1560,7 @@ async function main() {
   const allow = budget(store, cfg.dailyRequests)
   const { door, doorTools, mumboForwarder } = await import('./door.mjs')
   const mumbo = mumboForwarder({ box, boxFetch: boxFetcher(cfg), edgeKey, siteHostOf: (p) => boxSite(cfg, p).host })
-  const doorHandler = door({ keys: doorKeyService, tools: doorTools({ projects: proj, mumbo }), allow, tokens, rate: { perMinute: cfg.doorRatePerMinute, burst: cfg.doorBurst } })
+  const doorHandler = door({ keys: doorKeyService, tools: doorTools({ projects: proj, mumbo, relay }), allow, tokens, rate: { perMinute: cfg.doorRatePerMinute, burst: cfg.doorBurst } })
   modelServer({ cfg, edgeKey, modelKey, allow, owns: box.owns, touch: box.touch, mcp, door: doorHandler, github, halt, tokens })
     .listen(8081, modelHost, () => console.log(`edge: model host on ${modelHost}:8081`))
 }
