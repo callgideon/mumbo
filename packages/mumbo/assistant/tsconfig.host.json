@@ -29,6 +29,9 @@
       "path": "../../core/system-prompt"
     },
     {
+      "path": "../../storage/storage-domain"
+    },
+    {
       "path": "../../workspace/workspace"
     }
   ]

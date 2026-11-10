@@ -4257,6 +4257,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     occupants: [
       'client-ui-plugin-manager PluginsPanelIcon',
       'client-ui-schedule TaskManagerIcon',
+      '@mumbo/assistant MumboIcon id \'mumbo\'',
       '@mumbo/superagent HammerIcon',
     ],
     replaceRisk: 'none',
