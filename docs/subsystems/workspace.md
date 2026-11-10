@@ -162,7 +162,7 @@ interface SessionActivity {
 }
 ```
 
-`SessionActivityItem` carries the family-specific `id` (a session, job, or schedule id) and an optional display `label`. `archiveSession(sessionId)` asks the waterfall once, after the existence check, and rejects a non-empty answer with `WorkspaceActiveSessionError` (`sessionId`, `activity`) without writing; the controller maps it to the `workspace/session-active` error, whose details carry the same two fields. `archiveSession(sessionId, { stopActivity: true })` — the `ArchiveSessionOptions` field the transport request exposes as `stopActivity` — skips the check, writes the archive, then dispatches `workspace/session-stop`; a rejecting provider is logged and the archive stays, and the stopped work is never awaited to settlement. An already archived id neither asks nor stops.
+`SessionActivityItem` carries the family-specific `id` (a session, job, or schedule id) and an optional display `label`. `archiveSession(sessionId)` asks the waterfall once, after the existence check, and rejects a non-empty answer with `WorkspaceActiveSessionError` (`sessionId`, `activity`) without writing; the controller maps it to the `workspace/session-active` error, whose details carry the same two fields. `archiveSession(sessionId, { stopActivity: true })` — the `ArchiveSessionOptions` field the transport request exposes as `stopActivity` — skips the check, writes the archive, then dispatches `workspace/session-stop`; a rejecting provider is logged and the archive stays, and the stopped work is never awaited to settlement. An already archived id that no listener vetoes neither asks the activity waterfall nor stops.
 
 A third Host event, `workspace/archive-veto` (bail), refuses an archive outright. It is dispatched first on every request, with or without `stopActivity` and also for an already archived id; the first listener that returns a reason rejects the request with `WorkspaceArchiveVetoedError` (`sessionId`, `reason`) before the existence check, any write, or any stop, and the controller maps it to `gateway/bad-request` with that reason in its message, so the Web shows it as any failed archive. The [archive veto Agent Note](../../.agents/notes/implemented/architecture/2026-11-10-archive-veto.md) records why it is a separate event. The shipped providers, what they stop, and the `agent/pre-step` gate that keeps an archived Session from running a model step are documented with the [registry package](../../packages/workspace/workspace/README.md#api-behavior); the decision record is the [archive-stops-running-work Agent Note](../../.agents/notes/implemented/feature/2026-09-21-archive-stops-running-session-work.md).
 
@@ -544,7 +544,8 @@ insertBefore(id: WorkspaceId, beforeId?: WorkspaceId): Promise<readonly Workspac
  * `agent/pre-step` gate reads, so every wake the stops induce is already
  * blocked. Archiving drops the session's pin in the same durable write
  * (pinning and archival are mutually exclusive). An already archived id
- * resolves without writing, asking, or stopping.
+ * that no listener vetoes resolves without writing, asking the activity
+ * waterfall, or stopping.
  * @param sessionId - The session to archive.
  * @param options - Whether running work is stopped instead of refusing.
  * @returns resolution after durability and, with `stopActivity`, after every stop request was issued.

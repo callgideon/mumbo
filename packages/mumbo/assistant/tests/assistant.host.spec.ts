@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context, type Fiber } from '@deepseek-ai/cordis'
+import { createScope } from '@deepseek-ai/dsh-scope'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import { loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
@@ -14,7 +15,7 @@ import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import ToolRegistry from '@deepseek-ai/dsh-tools'
 import WorkspaceRegistry, { type WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MemoryStorageBackend } from '../../../storage/storage-domain/tests/helpers/memory-backend.ts'
 import * as Assistant from '../src/index.ts'
 
@@ -49,11 +50,15 @@ async function host() {
 
   const calls: string[] = []
   const titles = new Map<SessionId, string>()
-  const unregister = new Map<SessionId, () => unknown>()
+  const unregister = new Map<SessionId, () => Promise<void>>()
+  // Like a production Agent, each one owns a prompt layer scoped to it, disposed with it.
+  const owner = (await ctx.plugin({ inject: ['systemPrompt'], apply: () => {} })).ctx
   const resume = async (id: SessionId): Promise<Agent> => {
-    const agent = { id, session: ctx.sessions.get(id)!, status: 'idle', ctx } as Agent
+    const agent = { id, session: ctx.sessions.get(id)!, status: 'idle' } as Agent
+    const scope = createScope(owner, agent)
+    Object.assign(agent, { ctx: scope.ctx })
     const dispose = ctx.agents.register(agent)
-    unregister.set(id, dispose)
+    unregister.set(id, async () => { await dispose(); await scope.dispose() })
     await dispose
     return agent
   }
@@ -82,12 +87,13 @@ async function host() {
       return { title: request.title, seq: 0 }
     },
   } as never)
-  const start = (instructions = INSTRUCTIONS): Promise<Fiber> =>
-    ctx.plugin(Assistant, { instructions, workspace }).await()
-  const prompt = async () => renderPrompt(await ctx.systemPrompt.assemble())
+  const start = (instructions = INSTRUCTIONS, retryDelaysMs: number[] = []): Promise<Fiber> =>
+    ctx.plugin(Assistant, { instructions, workspace, retryDelaysMs }).await()
+  const prompt = async (id: SessionId = MUMBO) => renderPrompt(await ctx.systemPrompt.assemble({ scope: ctx.agents.get(id)! }))
   return {
     ctx, workspace, calls, titles, start, prompt, resume, remove,
     failResolve: (code: string) => { resolveError = Object.assign(new Error(code), { code }) },
+    clearFailure: () => { resolveError = undefined },
   }
 }
 
@@ -137,27 +143,55 @@ describe('ensuring Mumbo at start', () => {
     expect(ctx.workspaceRegistry.pinnedSessionIds).toEqual([MUMBO])
   })
 
-  it('fails the start without creating anything when Mumbo cannot be resolved for another reason', async () => {
-    const { ctx, calls, start, failResolve } = await host()
+  it('keeps the veto and the section through a failed ensure, reports it, and succeeds on a later retry', async () => {
+    const { ctx, calls, start, prompt, failResolve, clearFailure } = await host()
+    // A held writer lease: the previous process still owns Mumbo's log.
+    const first = await start()
+    await first.dispose()
     failResolve('session/writer-held')
-    await expect(start()).rejects.toMatchObject({ code: 'session/writer-held' })
+    const error = vi.spyOn(ctx.logger, 'error').mockImplementation(() => {})
+    calls.length = 0
+    await start(INSTRUCTIONS, [20])
     expect(calls).toEqual(['resolve:mumbo'])
-    expect(ctx.sessions.list()).toEqual([])
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(/could not ensure Session 'mumbo'; retrying in 20 ms: .*session\/writer-held/))
+    expect(await prompt()).toContain(INSTRUCTIONS)
+    const stopped: SessionId[] = []
+    ctx.on('workspace/session-stop', ({ sessionId }) => { stopped.push(sessionId) })
+    await expect(ctx.workspaceRegistry.archiveSession(MUMBO, { stopActivity: true })).rejects.toThrow(Assistant.ARCHIVE_REFUSAL)
+    expect(stopped).toEqual([])
+    // The lease is released before the retry, which then ensures as usual.
+    await ctx.workspaceRegistry.unpinSession(MUMBO)
+    clearFailure()
+    await vi.waitFor(() => { expect(ctx.workspaceRegistry.pinnedSessionIds).toEqual([MUMBO]) })
+    expect(calls).toEqual(['resolve:mumbo', 'resolve:mumbo'])
   })
 
-  it('fails the start when the configured Workspace directory does not exist', async () => {
-    const { ctx, workspace } = await host()
-    await expect(ctx.plugin(Assistant, { instructions: INSTRUCTIONS, workspace: join(workspace, 'missing') }).await())
-      .rejects.toThrow(/missing/)
+  it('stops after the configured retries and cancels a pending retry on unload', async () => {
+    const { ctx, workspace, calls } = await host()
+    const error = vi.spyOn(ctx.logger, 'error').mockImplementation(() => {})
+    // A missing Workspace directory fails creation on every attempt.
+    await ctx.plugin(Assistant, { instructions: INSTRUCTIONS, workspace: join(workspace, 'missing'), retryDelaysMs: [5] }).await()
+    await vi.waitFor(() => { expect(error).toHaveBeenCalledTimes(2) })
+    expect(error).toHaveBeenLastCalledWith(expect.stringMatching(/no retry is left until the next start: .*missing/))
     expect(ctx.sessions.list()).toEqual([])
+    expect(calls).toEqual(['resolve:mumbo', 'resolve:mumbo'])
+
+    const pending = await ctx.plugin(Assistant, { instructions: INSTRUCTIONS, workspace: join(workspace, 'missing'), retryDelaysMs: [30] }).await()
+    await pending.dispose()
+    calls.length = 0
+    await new Promise(resolve => setTimeout(resolve, 60))
+    expect(calls).toEqual([])
   })
 
-  it('rejects blank instructions and a relative Workspace at load', () => {
-    expect(() => Assistant.Config({ instructions: ' \n', workspace: '/root/projects' })).toThrow()
-    expect(() => Assistant.Config({ instructions: INSTRUCTIONS, workspace: 'projects' })).toThrow()
+  it('rejects blank instructions, a relative Workspace, and a zero retry delay at load', () => {
+    expect(() => Assistant.Config({ instructions: ' \n', workspace: '/root/projects' } as Assistant.Config)).toThrow()
+    expect(() => Assistant.Config({ instructions: INSTRUCTIONS, workspace: 'projects' } as Assistant.Config)).toThrow()
     expect(() => Assistant.Config({} as Assistant.Config)).toThrow()
-    // The edge may omit the Workspace.
-    expect(Assistant.Config({ instructions: INSTRUCTIONS } as Assistant.Config)).toEqual({ instructions: INSTRUCTIONS, workspace: '/root/projects' })
+    expect(() => Assistant.Config({ instructions: INSTRUCTIONS, retryDelaysMs: [0] } as Assistant.Config)).toThrow()
+    // The edge may omit the Workspace and the retry delays.
+    expect(Assistant.Config({ instructions: INSTRUCTIONS } as Assistant.Config)).toEqual({
+      instructions: INSTRUCTIONS, workspace: '/root/projects', retryDelaysMs: [1000, 2000, 5000, 10000, 30000],
+    })
   })
 
   it('accepts the example person-box row the edge copies', () => {
@@ -175,10 +209,11 @@ describe('Mumbo\'s prompt section', () => {
     const { ctx, start, prompt, resume, remove } = await host()
     const fiber = await start()
     expect(await prompt()).toContain(INSTRUCTIONS)
-    // Every Agent here shares the root prompt layer: instructing another Agent would register the section twice and fail.
     ctx.sessions.create(SessionId('side'), {})
     await resume(SessionId('side'))
-    // A resumed Agent replaces its predecessor's section instead of duplicating it.
+    expect(await prompt(SessionId('side'))).not.toContain('You are Mumbo')
+    expect(await prompt()).toContain(INSTRUCTIONS)
+    // The section goes with its Agent, and a resumed Agent gets it again.
     await remove(MUMBO)
     await resume(MUMBO)
     expect((await prompt()).split(INSTRUCTIONS)).toHaveLength(2)

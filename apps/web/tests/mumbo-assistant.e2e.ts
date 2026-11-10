@@ -12,6 +12,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium, type Page } from 'playwright'
 import { expect, it } from 'vitest'
+import { LlmAdapter, type GenerateOptions, type LlmModelInfo, type LlmProviderInfo, type LlmResolvedModelInfo, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId, type Session } from '@deepseek-ai/dsh-session'
 import {
   fixtureUserPrompts, launchWebScaffold, recordFixture, seedSession, selectedSessionFixture, watchConsole, webSnapshotMode,
@@ -45,6 +46,30 @@ async function remote(scaffold: WebScaffold, endpoint: string, args: Readonly<Re
   })
   if (!response.ok) throw new Error(`${endpoint} failed over HTTP ${response.status}: ${await response.text()}`)
   return (await response.json() as { result: unknown }).result
+}
+
+/** A local model that answers every request with one line and keeps the requests it saw. */
+class StubModel extends LlmAdapter {
+  readonly requests: GenerateOptions[] = []
+
+  override providerInfo(provider: string): LlmProviderInfo {
+    return { id: provider, name: provider }
+  }
+
+  override listModels(provider: string): Promise<readonly LlmModelInfo[]> {
+    return Promise.resolve([{ provider, id: 'stub', name: 'stub' }])
+  }
+
+  override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
+    return Promise.resolve({ provider, id: model, name: model, context: { contextWindow: 100_000 } })
+  }
+
+  override async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    this.requests.push(options)
+    yield { type: 'block-start', index: 0, blockType: 'text' }
+    yield { type: 'block-end', index: 0, block: { type: 'text', text: 'Checked in.' } }
+    yield { type: 'finish', reason: { kind: 'stop' } }
+  }
 }
 
 /** Rendered text of the system prompt surface node, or undefined when the surface carries none. */
@@ -141,6 +166,37 @@ it('opens a new box on Mumbo pinned first, starts real blanks beside it, and ref
   } finally {
     await scaffold.close()
     await rm(elsewhere, { recursive: true, force: true })
+  }
+})
+
+it('runs a schedule aimed at Mumbo with no browser open, and logs its turn in Mumbo under Mumbo\'s instructions', async () => {
+  const scaffold = await launchWebScaffold({ extraOverlayPath: OVERLAY, profile: { hmr: false, packages: [{ dir: PACKAGE }] } })
+  try {
+    const { ctx } = scaffold
+    const model = new StubModel()
+    const unregister = ctx.llm.registerAdapter(['mumbo-stub'], model)
+    try {
+      expect(await remote(scaffold, 'session/selectModel', { request: { sessionId: MUMBO, provider: 'mumbo-stub', model: 'stub' } }))
+        .toMatchObject({ ok: true })
+      const settled = scaffold.whenTurnSettled()
+      await ctx.schedule.create({
+        title: 'Check in', prompt: 'Check in on the pending work.', timing: { kind: 'after', after_seconds: 1 },
+        target: { kind: 'session', sessionId: MUMBO },
+      })
+      expect(await settled).toBe(MUMBO)
+      const session = ctx.agents.get(MUMBO)!.session
+      expect(systemPromptText(session)).toContain(INSTRUCTIONS)
+      const messages = session.deriveMessages().flatMap(message => message.role === 'system' ? [] : [
+        `${message.role}: ${message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('')}`,
+      ])
+      expect(messages).toContainEqual(expect.stringMatching(/^user: \[SCHEDULE REMINDER\][\s\S]*Check in on the pending work\./))
+      expect(messages.at(-1)).toBe('assistant: Checked in.')
+      expect(model.requests.filter(request => request.purpose === undefined)).toHaveLength(1)
+    } finally {
+      unregister()
+    }
+  } finally {
+    await scaffold.close()
   }
 })
 

@@ -388,7 +388,8 @@ export class WorkspaceRegistry extends Service {
    * `agent/pre-step` gate reads, so every wake the stops induce is already
    * blocked. Archiving drops the session's pin in the same durable write
    * (pinning and archival are mutually exclusive). An already archived id
-   * resolves without writing, asking, or stopping.
+   * that no listener vetoes resolves without writing, asking the activity
+   * waterfall, or stopping.
    * @param sessionId - The session to archive.
    * @param options - Whether running work is stopped instead of refusing.
    * @returns resolution after durability and, with `stopActivity`, after every stop request was issued.

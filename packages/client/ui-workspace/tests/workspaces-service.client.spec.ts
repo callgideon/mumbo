@@ -1463,6 +1463,32 @@ describe('UiWorkspaceService', () => {
     expect(b.selectPanel.mock.calls).toEqual([[panel]])
   })
 
+  it.each([
+    { name: 'a saved Session with a turn', saved: 'side', rows: [summary('side', { cwd: '/w/a' })], expected: 'saved' },
+    { name: 'a saved blank', saved: 'draft', rows: [summary('draft', { blank: true, cwd: '/w/a' })], expected: 'saved' },
+    { name: 'a saved Session no longer listed', saved: 'gone', rows: [], expected: 'fresh' },
+    { name: 'no saved selection', saved: undefined, rows: [], expected: 'fresh' },
+  ] as const)('reports $expected restoration for $name, synchronously as the lists settle', ({ saved, rows, expected }) => {
+    persistSelection(saved === undefined ? {} : { sessionId: sid(saved) })
+    const b = bench({ workspaces: workspaceState([], [], 'pending'), sessions: sessionState([...rows], 'pending') })
+    expect(b.uiWorkspace.restoration.getSnapshot()).toBe('pending')
+    b.workspaces.list.set(workspaceState([workspace('a', rows.map(row => row.id))]))
+    b.sessions.list.set(sessionState([...rows]))
+    expect(b.uiWorkspace.restoration.getSnapshot()).toBe(expected)
+  })
+
+  it('reports saved restoration for a persisted subagent address, and stays pending when a Session opened first', () => {
+    const address: SubagentAddress = { parentSessionId: sid('parent'), childSessionId: sid('child'), mode: 'continuable' }
+    persistSelection({ sessionId: address.childSessionId, subagentAddress: address })
+    expect(bench({ workspaces: workspaceState(), sessions: sessionState() }).uiWorkspace.restoration.getSnapshot()).toBe('saved')
+    persistSelection({})
+    const b = bench({ workspaces: workspaceState([], [], 'pending'), sessions: sessionState([], 'pending') })
+    b.uiWorkspace.openSession(sid('chosen'))
+    b.workspaces.list.set(workspaceState())
+    b.sessions.list.set(sessionState())
+    expect(b.uiWorkspace.restoration.getSnapshot()).toBe('pending')
+  })
+
   it('restores a persisted subagent address without a parent catalog', () => {
     const address: SubagentAddress = {
       parentSessionId: sid('parent'),

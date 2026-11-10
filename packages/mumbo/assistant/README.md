@@ -26,6 +26,7 @@ kind: "package-reference"
 |---|---|---|
 | `instructions` | required | Text of Mumbo's system prompt section, used verbatim; it must contain a non-whitespace character. |
 | `workspace` | `/root/projects` | Absolute path of the existing directory whose Workspace a newly created Mumbo joins. |
+| `retryDelaysMs` | `[1000, 2000, 5000, 10000, 30000]` | Delays in milliseconds before each retry of a failed ensure; their count bounds the retries, and each must be positive. |
 
 The box edge adds the row with a Loader overlay, as in [`examples/person.overlay.yml`](examples/person.overlay.yml), and writes the instructions there. The generated [configuration catalog](../../../docs/config-catalog.md#mumboassistant) is the exhaustive source for accepted fields.
 
@@ -36,12 +37,12 @@ The Host half needs the Web profile's `sessionController`, `workspaceRegistry`, 
 
 1. registers a `workspace/archive-veto` listener that refuses `mumbo` with `Mumbo is your always-present assistant and cannot be archived.`, with or without `stopActivity`, so archiving fails before anything is written or stopped and the schedules aimed at Mumbo survive; the Web shows the message as it shows any failed archive;
 2. adds Mumbo's prompt section to every Agent of `mumbo` on `agent/created`, and to one already resumed before the plugin started;
-3. resolves `mumbo` through the session controller. Only on `session/not-found` does it create it in the Workspace of `workspace` with the deployment's default preset and title it `Mumbo`; any other resolve error fails the plugin start;
-4. unarchives Mumbo when it is archived, and pins it when it is not pinned.
+3. ensures Mumbo: it resolves `mumbo` through the session controller, and only on `session/not-found` creates it in the Workspace of `workspace` with the deployment's default preset and titles it `Mumbo`;
+4. then unarchives Mumbo when it is archived, and pins it when it is not pinned.
 
-The plugin start awaits these steps, and Cordis never overlaps two starts of one plugin instance, so one ensure runs at a time. A restart resolves the existing Session, so it neither duplicates nor retitles it: a title the person gave Mumbo stays. A failure in any step fails the plugin start loudly, and the veto and prompt section are removed with it. `MUMBO_SESSION_ID` is exported for other plugins that name the Session.
+The plugin start awaits the first ensure. A restart resolves the existing Session, so it neither duplicates nor retitles it: a title the person gave Mumbo stays. A failed ensure, such as `session/writer-held` while the previous process still holds Mumbo's log after a restart, is logged as an error and retried after each delay in `retryDelaysMs`; the veto and the prompt section stay registered throughout, so Mumbo cannot be archived while its ensure is failing. Attempts never overlap, and unloading the plugin cancels a pending retry and waits for a running one. `MUMBO_SESSION_ID` is exported for other plugins that name the Session.
 
-The Client half waits until the Session and Workspace lists first settle. Workspace navigation restores the saved selection in that same notification, so a Session the person chose is already open by the next microtask, and the plugin leaves it. When no Session is open, navigation is still preparing a blank Session in the most recent Workspace, and `ctx.uiWorkspace.openSession(mumbo)` supersedes it. The decision is made once per page load and only when the Host listed `mumbo`; later navigation is the person's. Because Mumbo is pinned and titled from creation, the Workspace browser lists it as an ordinary pinned row before its first turn, and New Session beside it opens a separate blank Session ([blank-row rule](../../client/ui-workspace/README.md#use-this-package)).
+The Client half waits for Workspace navigation's startup restoration (`ctx.uiWorkspace.restoration`). A `saved` restoration reopens the Session the person chose, including a saved New Session, and the plugin leaves it. A `fresh` one, with no saved selection listed, would open a blank Session in the most recent Workspace, and `ctx.uiWorkspace.openSession(mumbo)` supersedes it. The decision is made once per page load and only when the Host listed `mumbo`; later navigation is the person's. Because Mumbo is pinned and titled from creation, the Workspace browser lists it as an ordinary pinned row before its first turn, and New Session beside it opens a separate blank Session ([blank-row rule](../../client/ui-workspace/README.md#use-this-package)).
 
 <a id="model-experience"></a>
 ## Model Experience
@@ -74,7 +75,8 @@ Prefix-stable while the instructions stay the same. Changing `instructions` repl
 <a id="known-limitations-and-deferred-work"></a>
 
 - **Pre-veto archives keep their losses** — an archive with `stopActivity` made while the plugin was not loaded deleted Mumbo's schedules; the next start unarchives Mumbo but cannot restore them.
-- **Delayed title on a failed rename** — when titling fails after creation, the plugin start fails and the next start finds the Session and leaves its title to automatic titling.
+- **Delayed title on a failed rename** — when titling fails after creation, the retry finds the Session and leaves its title to automatic titling.
+- **Retries end** — after the last of `retryDelaysMs` the plugin stops ensuring until the next start; the veto and the prompt section remain.
 - **No notification** — a finished scheduled turn or an approval asked during one waits in Mumbo for the person's next visit.
 - **A blank Session may remain** — when Mumbo supersedes first-load navigation, the blank Session that navigation prepared in the recent Workspace is kept for later reuse.
 

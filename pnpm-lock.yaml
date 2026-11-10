@@ -13811,15 +13811,21 @@ importers:
       '@deepseek-ai/dsh-app-boot':
         specifier: workspace:*
         version: link:../../boot/app-boot
+      '@deepseek-ai/dsh-client-locale':
+        specifier: workspace:*
+        version: link:../../client/locale
       '@deepseek-ai/dsh-client-store':
         specifier: workspace:*
         version: link:../../client/store
-      '@deepseek-ai/dsh-client-ui-session':
+      '@deepseek-ai/dsh-client-ui-layout':
         specifier: workspace:*
-        version: link:../../client/ui-session
+        version: link:../../client/ui-layout
       '@deepseek-ai/dsh-client-ui-workspace':
         specifier: workspace:*
         version: link:../../client/ui-workspace
+      '@deepseek-ai/dsh-scope':
+        specifier: workspace:*
+        version: link:../../core/scope
       '@deepseek-ai/dsh-session':
         specifier: workspace:*
         version: link:../../core/session
