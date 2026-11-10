@@ -1,5 +1,6 @@
-# Stage 3: mutual TLS between E2B's parts. Each service's certificate, key and the CA go to one Secrets Manager
-# secret; its host or task writes them to E2B_TLS_{CERT,KEY,CA}_FILE. `mtls_env` is each service's E2B_TLS_* env.
+# Stage 3: mutual TLS between E2B's parts, one CA for every cell. Each service's certificate, key and the CA go to one
+# Secrets Manager secret per cell (modules/cell/secrets.tf); its host or task writes them to E2B_TLS_{CERT,KEY,CA}_FILE.
+# `mtls_env` is each service's E2B_TLS_* env.
 module "mtls" {
   source       = "./mtls"
   trust_domain = "boxes.internal"
@@ -31,16 +32,5 @@ locals {
   }
 }
 
-resource "aws_secretsmanager_secret" "mtls" {
-  for_each   = local.spiffe
-  name       = "${local.name}/mtls/${each.key}"
-  kms_key_id = aws_kms_key.data.arn
-}
-resource "aws_secretsmanager_secret_version" "mtls" {
-  for_each      = local.spiffe
-  secret_id     = aws_secretsmanager_secret.mtls[each.key].id
-  secret_string = jsonencode({ crt = module.mtls.leaves[each.key].crt, key = module.mtls.leaves[each.key].key, ca = module.mtls.ca_pem })
-}
-
-output "mtls_secret_arns" { value = { for s, v in aws_secretsmanager_secret.mtls : s => v.arn } }
+output "mtls_secret_arns" { value = module.cell_us_east_1.mtls_secret_arns }
 output "mtls_env" { value = local.mtls_env }

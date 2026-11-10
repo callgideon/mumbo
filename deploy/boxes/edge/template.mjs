@@ -46,5 +46,5 @@ console.log(line)
 const avail = /^app clean 2 (\d+)$/.exec(line)?.[1]
 if (avail === undefined) process.exit(1)
 // The template is already built and named by now: a failure means rebuild before boxes are created from it.
-if (Number(avail) < minAvailMB) { console.error(`template: ${avail} MiB free on /, below MIN_AVAIL_MB ${minAvailMB}; raise box_step_disk in prod/control.tf (RUNBOOK "Changing E2B limits")`); process.exit(1) }
+if (Number(avail) < minAvailMB) { console.error(`template: ${avail} MiB free on /, below MIN_AVAIL_MB ${minAvailMB}; raise box_step_disk in prod/modules/cell/control.tf (RUNBOOK "Changing E2B limits")`); process.exit(1) }
 }
