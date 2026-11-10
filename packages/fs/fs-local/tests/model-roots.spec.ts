@@ -461,7 +461,49 @@ function repointer(directory: string, secretDirectory: string): () => Promise<vo
   return () => new Promise((resolve) => { child.once('exit', () => { resolve() }); child.kill('SIGKILL') })
 }
 
+/**
+ * Start a process that keeps swapping the empty directory `<workspace>/d` for a link to the secret directory and back.
+ * @returns a stopper that ends the swapping and waits for the process to exit.
+ */
+function swapper(directory: string, secretDirectory: string): () => Promise<void> {
+  const script = [
+    "const fs = require('node:fs'); const path = require('node:path')",
+    'const [dir, secret] = process.argv.slice(1)',
+    "const d = path.join(dir, 'd'), aside = path.join(dir, 'd.aside')",
+    'fs.mkdirSync(d)',
+    'for (;;) { try { fs.renameSync(d, aside); fs.symlinkSync(secret, d); fs.unlinkSync(d); fs.renameSync(aside, d) } catch {} }',
+  ].join('\n')
+  const child = spawn(process.execPath, ['-e', script, directory, secretDirectory], { stdio: 'ignore' })
+  return () => new Promise((resolve) => { child.once('exit', () => { resolve() }); child.kill('SIGKILL') })
+}
+
 describe.runIf(process.platform === 'linux')('model roots against a racing link swap', () => {
+  it('tells nothing about names outside the roots through a directory swapped for a link between two steps of a resolution', async () => {
+    const fs = await mount({ cwd: workspace, modelRoots: [workspace, scratch] })
+    await mkdir(join(outside, 'directory'))
+    const stop = swapper(workspace, outside)
+    const outcomes = { file: new Map<string, number>(), back: new Map<string, number>() }
+    const outcome = (promise: Promise<unknown>) => promise.then(() => 'resolved', (error: unknown) => error instanceof FsError ? `${error.code} ${error.message}` : `raw ${String(error)}`)
+    const count = (seen: Map<string, number>, text: string) => { seen.set(text, (seen.get(text) ?? 0) + 1) }
+    try {
+      for (let index = 0; index < 3000; index++) {
+        // In the secret directory `key` is a file, which a missing name is not.
+        count(outcomes.file, await outcome(fs.resolveModelPath('d/key/x')))
+        // The walk would come back from `directory` only because it exists there.
+        count(outcomes.back, await outcome(fs.resolveModelPath('d/directory/../x')))
+      }
+    } finally {
+      await stop()
+    }
+    const all = [...outcomes.file.keys(), ...outcomes.back.keys()]
+    expect(all.filter(text => text.includes('not a directory') || text.startsWith('raw '))).toEqual([])
+    expect(outcomes.back.has('resolved')).toBe(false)
+    // Both sides of the swap were seen: the refusal through the link and the walk in the empty directory.
+    expect(all.filter(text => text.startsWith('FS_OUTSIDE_ROOTS')).length).toBeGreaterThan(0)
+    expect(outcomes.file.get('resolved') ?? 0).toBeGreaterThan(0)
+  }, 60_000)
+
+
   it('tells nothing about names outside the roots through a link repointed while a path resolves', async () => {
     const fs = await mount({ cwd: workspace, modelRoots: [workspace, scratch] })
     await mkdir(join(outside, 'directory'))

@@ -11,9 +11,10 @@ import type { PatchHunk } from '@deepseek-ai/dsh-fs-patch'
 import { Context } from '@deepseek-ai/cordis'
 import { constants as bufferConstants } from 'node:buffer'
 import { once } from 'node:events'
-import { realpathSync, statSync } from 'node:fs'
+import { constants, realpathSync, statSync } from 'node:fs'
 import type { Stats } from 'node:fs'
-import { lstat, readlink } from 'node:fs/promises'
+import { lstat, open, readlink } from 'node:fs/promises'
+import type { FileHandle } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { watch } from 'chokidar'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -128,6 +129,12 @@ function rootsOf(roots: readonly string[], platform: NodeJS.Platform, field: 'mo
     return { configured: resolve(root), canonical }
   })
 }
+
+/**
+ * Open flags of a directory descriptor the model path walk holds: `O_PATH` (Linux, where model roots run), which
+ * needs no read permission and reads nothing, and `O_DIRECTORY`.
+ */
+const DIRECTORY_PATH = 0o10000000 | constants.O_DIRECTORY
 
 /** Conventional credential stores under the user's home directory that no read-only root may be, contain, or lie inside. */
 const CREDENTIAL_STORES = ['.ssh', '.gnupg', '.aws', '.azure', '.config/gcloud', '.config/gh', '.docker', '.kube', '.netrc', '.git-credentials', '.npmrc', '.pypirc']
@@ -349,9 +356,11 @@ export class LocalFileSystem extends FileSystem {
   /**
    * Resolve an absolute path one name at a time from the filesystem root, following links and `..` as the kernel does,
    * and refuse before examining any name that is neither under a root nor on the way to one. The same walk decides where
-   * the path leads and how it fails, so a link the model's shell swaps meanwhile changes only which way the walk goes:
-   * no outcome depends on what exists outside the roots. A missing name ends the walk with the rest appended, as a target
-   * to create; a final link is followed, dangling or not.
+   * the path leads and how it fails, and it holds a descriptor of each directory it enters and examines the next name
+   * only within that directory, never following a link it has not read: a directory the model's shell swaps for a link,
+   * or a link it repoints, between two steps changes only which way the walk goes, so no outcome depends on what exists
+   * outside the roots. A name that changes between being examined and entered is examined again. A missing name ends the
+   * walk with the rest appended, as a target to create; a final link is followed, dangling or not.
    * @returns the real path the walk reached.
    */
   private async walkModelPath(roots: readonly ModelRoot[], displayPath: string): Promise<string> {
@@ -361,39 +370,62 @@ export class LocalFileSystem extends FileSystem {
       roots.some(root => isUnder(root.canonical, path) || isUnder(path, root.canonical) || isUnder(path, root.configured))
     const names = (path: string) => path.split(sep).filter(name => name !== '' && name !== '.')
     const pending = names(displayPath)
-    let real: string = sep
-    for (let links = 0, name = pending.shift(); name !== undefined; name = pending.shift()) {
-      if (name === '..') {
-        real = dirname(real)
-        continue
-      }
-      const next = join(real, name)
-      if (!reachable(next)) throw this.outsideRoots(roots, displayPath)
-      let info: Stats
-      try {
-        info = await lstat(next)
-      } catch (error: unknown) {
-        const { code } = error as NodeJS.ErrnoException
-        if (code === 'ENOENT') {
+    // The directories entered, the filesystem root first; `..` returns to the one entered before.
+    const held: { path: string; handle: FileHandle }[] = [{ path: sep, handle: await open(sep, DIRECTORY_PATH) }]
+    const current = () => held[held.length - 1]!
+    // A name within the held directory, never a path the kernel would walk again from the root.
+    const within = (name: string) => `/proc/self/fd/${String(current().handle.fd)}/${name}`
+    const leave = async (keep: number) => { for (const { handle } of held.splice(keep)) await handle.close() }
+    try {
+      // `links` counts links followed, the kernel's own limit for one lookup; `changes` counts names examined again.
+      for (let links = 0, changes = 0, name = pending.shift(); name !== undefined; name = pending.shift()) {
+        if (name === '..') {
+          await leave(Math.max(1, held.length - 1))
+          continue
+        }
+        const next = join(current().path, name)
+        if (!reachable(next)) throw this.outsideRoots(roots, displayPath)
+        const again = () => {
+          if (++changes > 40) throw notFound('it kept changing while it was resolved')
+          pending.unshift(name)
+        }
+        let info: Stats
+        try {
+          info = await lstat(within(name))
+        } catch (error: unknown) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
           if (pending.includes('..')) throw notFound('parent traversal crosses a missing directory')
           return join(next, ...pending)
         }
-        /* v8 ignore next -- a directory the walk entered became a file between two steps; the race has no deterministic test. */
-        if (code === 'ENOTDIR') throw notFound('a parent path segment is not a directory')
-        throw error
+        if (info.isSymbolicLink()) {
+          let target: string
+          try {
+            target = await readlink(within(name))
+          } catch (error: unknown) {
+            // The link was replaced or removed after it was examined.
+            if (!['EINVAL', 'ENOENT'].includes(String((error as NodeJS.ErrnoException).code))) throw error
+            again()
+            continue
+          }
+          if (++links > 40) throw notFound('too many levels of symbolic links')
+          pending.unshift(...names(target))
+          if (isAbsolute(target)) await leave(1)
+          continue
+        }
+        if (pending.length === 0) return next
+        if (!info.isDirectory()) throw notFound('a parent path segment is not a directory')
+        try {
+          held.push({ path: next, handle: await open(within(name), DIRECTORY_PATH | constants.O_NOFOLLOW) })
+        } catch (error: unknown) {
+          // The directory was replaced, by a link or a file, or removed after it was examined.
+          if (!['ENOTDIR', 'ELOOP', 'ENOENT'].includes(String((error as NodeJS.ErrnoException).code))) throw error
+          again()
+        }
       }
-      if (info.isSymbolicLink()) {
-        // The kernel's own limit on links followed in one lookup.
-        if (++links > 40) throw notFound('too many levels of symbolic links')
-        const target = await readlink(next)
-        pending.unshift(...names(target))
-        if (isAbsolute(target)) real = sep
-        continue
-      }
-      if (pending.length > 0 && !info.isDirectory()) throw notFound('a parent path segment is not a directory')
-      real = next
+      return current().path
+    } finally {
+      await leave(0)
     }
-    return real
   }
 
   private outsideRoots(roots: readonly ModelRoot[], displayPath: string): FsError {
