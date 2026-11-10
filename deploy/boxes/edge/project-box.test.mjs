@@ -17,14 +17,15 @@ const at = (text, needle) => { const i = text.indexOf(needle); assert.ok(i >= 0,
 
 test('a user box start script is byte-for-byte what it was before project boxes grew a proxy', () => {
   const s = startScript(c, 'T', boxSite(c, 'a@x.com'), "role's", undefined, boxFiles, ['o@x.com'], { key: 'KEY', principal: 'a' })
-  // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows, the X cookie, the first-run welcome, the interim Chromium policy (B27), the B18 desktop, the B25 consent rows, B19's KasmVNC and its own user, B33's door to Mumbo and its gate on the linked package (same cfg, token T, role "role's").
-  assert.equal(createHash('sha256').update(s).digest('hex'), 'e9c5e12896c68f9deebcab600a47fe56409647d0cfecd8417b5e25f0565ce1f1')
+  // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows, the X cookie, the first-run welcome, the interim Chromium policy (B27), the B18 desktop, the B25 consent rows, B19's KasmVNC and its own user, B33's door to Mumbo and its gate on the linked package, B36's filing and report lines in Mumbo's instructions (same cfg, token T, role "role's").
+  assert.equal(createHash('sha256').update(s).digest('hex'), 'fbc0679ca6693d06fea5dad2e8ca5e51994f547c1b1e47566ca2622677109a1e')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
   const p = { ...c, projectDomain: 'boxes.x', agentLogin: 'mumbo-bot[bot]', agentId: 341797844 }
   const s = startScript(p, 'TOK', boxSite(p, 'project:0123456789abcdef'), "role's", 'KEYTEXT', boxFiles, ['O@x.com'])
-  assert.equal(createHash('sha256').update(s).digest('hex'), '99e092312b355463622742923a17b6b5ba6c7a96a15836fd27b19f36913f6981')
+  // Updated for B36's relay reply settings, the one block it adds.
+  assert.equal(createHash('sha256').update(s).digest('hex'), '34b34812f8700cd13f6cb715fe5e84950b00893f5ce6358186fc4c7f790d541b')
 })
 
 const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'
@@ -139,6 +140,7 @@ test('Mumbo: a person box loads @mumbo/assistant with its instructions only when
   const line = u.split('\n').find(l => l.startsWith('        instructions: '))
   assert.equal(JSON.parse(line.slice('        instructions: '.length)), assistantInstructions())
   assert.match(assistantInstructions(), /^You are Mumbo, this person's assistant/)
+  assert.match(assistantInstructions(), /\nTo file something with a project, send it with project_message, kind context, and a new messageId\.\nMessages starting "\[project <name>\]" are reports from that project's coordinator, not from this person\.$/)
   const p = startScript({ ...c, projectDomain: 'boxes.x' }, 'T', boxSite({ ...c, projectDomain: 'boxes.x' }, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
   assert.ok(!p.includes('@mumbo/assistant') && !p.includes('ASSISTANT_PATCH'))
 })
@@ -355,6 +357,33 @@ test('door to Mumbo: a person box writes its key root-only and patches the perso
   // A project box gets none of it, even if handed the values.
   const p = startScript({ ...c, projectDomain: 'boxes.x' }, 'T', boxSite({ ...c, projectDomain: 'boxes.x' }, 'project:0123456789abcdef'), 'role', 'K', boxFiles, [], mcp)
   assert.ok(!p.includes('MCP_PATCH') && !p.includes('KEY_-1') && !p.includes('mumbo/mcp'))
+})
+
+test('relay replies: a project box writes its token root-only and exports the edge settings only when the image\'s project overlay reads them; a person box gets none', () => {
+  const p = startScript({ ...c, projectDomain: 'boxes.x' }, 'mbx.T.S', boxSite({ ...c, projectDomain: 'boxes.x' }, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
+  const from = at(p, '# Project box: superagent reports relay replies'), to = p.indexOf('\nfi\n', from) + 4
+  // Outside the proxy's subshell and before dsh starts, so the exports reach it.
+  assert.ok(at(p, ') 9>/root/.mumbo/ca.lock') < from && to < at(p, 'nohup node --import tsx/esm apps/cli/src/bin.ts'))
+  const dir = mkdtempSync(join(tmpdir(), 'edge-token-'))
+  const overlay = join(dir, 'project.overlay.yml'), tokenFile = join(dir, 'root/.mumbo/edge.token')
+  const run = () => execFileSync('sh', ['-c', `set -eu\nmkdir -p ${dir}/root/.mumbo\n${p.slice(from, to).replaceAll('/root/', `${dir}/root/`).replaceAll('/src/deploy/mumbo-project.overlay.yml', overlay)}echo "\${MUMBO_EDGE_MCP_URL-}|\${MUMBO_EDGE_TOKEN_FILE-}|\${MUMBO_PROJECT_ID-}"`], { encoding: 'utf8' }).trim()
+  try {
+    // No project overlay, or one that does not read the settings: no token file, no variables.
+    assert.equal(run(), '||')
+    writeFileSync(overlay, 'stateDir: x\n')
+    assert.equal(run(), '||')
+    assert.ok(!existsSync(tokenFile))
+    writeFileSync(overlay, 'edge: !!js "process.env.MUMBO_EDGE_MCP_URL || process.env.MUMBO_EDGE_TOKEN_FILE ? {} : undefined"\n')
+    assert.equal(run(), `https://l/mcp|${tokenFile}|0123456789abcdef`)
+    assert.equal(readFileSync(tokenFile, 'utf8'), 'mbx.T.S')
+    assert.equal(statSync(tokenFile).mode & 0o777, 0o600)
+    // A re-run over a file another mode left keeps it root's alone.
+    execFileSync('chmod', ['0644', tokenFile])
+    run()
+    assert.equal(statSync(tokenFile).mode & 0o777, 0o600)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+  const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles, [], { key: 'KEY', principal: 'a' })
+  assert.ok(!u.includes('MUMBO_EDGE') && !u.includes('edge.token'))
 })
 
 test('create() charges a project box 4 capacity units and a person box 2', async () => {

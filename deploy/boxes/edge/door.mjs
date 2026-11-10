@@ -12,7 +12,8 @@
 // The Mumbo tools (B33) are forwarded to @mumbo/mcp in the owner's person box (mumboForwarder), which answers them.
 // The project tools (B34) reach a project's box as the key's owner, a member, through projectRelay: messages to its
 // Superagent relay Source, reads and Ticket stops through Superagent's management API.
-import { randomBytes } from 'node:crypto'
+// memberReporter (B36) takes a project box's replies back the other way, into a member's Session mumbo.
+import { createHash, randomBytes } from 'node:crypto'
 import { z } from 'zod'
 import { createMcpHandler, McpServer } from '@modelcontextprotocol/server'
 import { toNodeHandler } from '@modelcontextprotocol/node'
@@ -71,6 +72,36 @@ export function mumboForwarder({ box, boxFetch, edgeKey, siteHostOf, readyMs = B
     throw unavailable(r.status === 200
       ? 'Mumbo\'s door in your computer answered no tool result; its image may be older than the edge.'
       : `Mumbo's door in your computer did not answer (HTTP ${r.status}): its image may not have the door yet, or Mumbo is still starting; try again in a minute.`)
+  }
+}
+
+/**
+ * report_to_member (spec section 10, M2 up), for sandboxes.mjs mcpServer: a project box's Superagent reports one reply on a
+ * relay Thread to a member of its project. It lands in the member's Session mumbo as one agent_send through `mumbo`
+ * (mumboForwarder), which ensures the member's box: the text `[project <name>] <text>`, as the member, with `project <name>`
+ * as the attribution in `x-mumbo-key-name`. The request_id is derived from (project, messageId), so @mumbo/mcp runs a repeat
+ * once and answers it with the first result.
+ * @param {{ projects: ReturnType<typeof import('./projects.mjs').projects>, admitted: (email: string) => boolean,
+ *   mumbo: ReturnType<typeof mumboForwarder>, log?: (line: string) => void }} deps - `admitted` is the edge allowlist.
+ * @returns {(box: string, args: { member: string, project: string, thread: string, messageId: string, text: string }) =>
+ *   Promise<object>} called with the calling box's project id; resolves { delivered: true, project, member, messageId }.
+ *   Throws `not_a_member` when `member` is not a member of the project or not on the allowlist (Superagent settles the reply
+ *   as gone), `wrong_project` when `project` is not the calling box's, `box_error` with @mumbo/mcp's refusal (such as
+ *   `halted`), and mumboForwarder's `box_unavailable`; Superagent retries these.
+ */
+export function memberReporter({ projects, admitted, mumbo, log = console.log }) {
+  const refuse = (code, message) => Object.assign(new Error(message), { code })
+  return async (box, { member, project, thread, messageId, text }) => {
+    if (project !== box) throw refuse('wrong_project', `this box serves project ${box}, not ${project}`)
+    const p = await projects.get(project)
+    if (!p?.members.includes(member) || !admitted(member)) throw refuse('not_a_member', `${member} is not a member of project ${project}`)
+    // ponytail: @mumbo/mcp remembers a request_id for a day (IDEMPOTENCY_WINDOW_MS), so a report retried later than that
+    // arrives twice; keep a (project, messageId) record in the store if Superagent's retries ever outlast it.
+    const request_id = createHash('sha256').update(`report:${project}/${messageId}`).digest('base64url')
+    const out = await mumbo({ owner: member, name: `project ${p.name}` }, 'agent_send', { text: `[project ${p.name}] ${text}`, request_id })
+    if (out.isError) throw refuse('box_error', `Mumbo refused the report: ${String(out.content[0]?.text).slice(0, 500)}`)
+    log(JSON.stringify({ edge: 'report', msg: 'delivered', project, member, thread, messageId }))
+    return { delivered: true, project, member, messageId }
   }
 }
 

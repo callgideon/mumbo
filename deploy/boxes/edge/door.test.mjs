@@ -2,13 +2,14 @@
 // refusal codes as HTTP statuses with JSON-RPC errors, the per-key rate limit, one log line per call without secrets,
 // the dispatcher's scope, project, budget and declaration checks, whoami and project_list, and the box-token endpoint
 // beside it unchanged. Then the Mumbo tools (B33), forwarded through a fake client proxy to the owner's box, and the project
-// tools (B34), which reach a project's box as its member through projectRelay and a fake client proxy.
+// tools (B34), which reach a project's box as its member through projectRelay and a fake client proxy. Last, report_to_member
+// (B36) on the box-token endpoint, which takes a project box's replies into a member's Session mumbo.
 import assert from 'node:assert/strict'
-import { createHmac } from 'node:crypto'
+import { createHash, createHmac } from 'node:crypto'
 import { createServer, request } from 'node:http'
 import { test } from 'node:test'
 import { z } from 'zod'
-import { door, doorTools, mumboForwarder } from './door.mjs'
+import { door, doorTools, memberReporter, mumboForwarder } from './door.mjs'
 import { BOX_ANSWER_MAX, boxFetcher, mcpPrincipal, memberKey, modelServer, mumboMcpKey, signBox, verifyBox } from './edge.mjs'
 import { doorKeys, keyHash } from './keys.mjs'
 import { projectRelay, projects } from './projects.mjs'
@@ -588,5 +589,111 @@ test('task_stop stops one Ticket of the named project, as the member; another pr
     await settle()
     assert.deepEqual(t.logs().filter(l => l.tool === 'task_stop').map(l => l.outcome), ['ok', 'not_found', 'project_not_allowed', 'not_run'])
     assert.deepEqual(t.charged, [])
+  } finally { t.close() }
+})
+
+// ---- Reports to members (B36): a project box's Superagent reports a relay reply into a member's Session mumbo.
+
+/**
+ * The model listener's box endpoint with report_to_member, over a memory store: A owns P ('Mine') and Q, B owns R. Reports go
+ * through mumboForwarder to a fake client proxy that answers agent_send as @mumbo/mcp does, with the first result per
+ * request_id, or `answer(seen)` when it returns one. `report(project, args)` calls the tool with that project box's token.
+ */
+async function reportSetup() {
+  const store = memoryStore(), lines = []
+  const proj = projects({ store, admitted: () => true, log: () => {} })
+  const P = (await proj.create(A, 'Mine')).id, Q = (await proj.create(A, 'Other')).id, R = (await proj.create(B, 'Theirs')).id
+  const allowed = new Set([A, B]), first = new Map(), ensured = []
+  const t = { answer: () => undefined }
+  const proxy = await fakeProxy((seen) => {
+    const { request_id } = seen.body.params.arguments
+    if (!first.has(request_id)) first.set(request_id, { content: [{ type: 'text', text: JSON.stringify({ message_id: `m${first.size}`, after_seq: 0 }) }] })
+    return t.answer(seen) ?? { body: { jsonrpc: '2.0', id: seen.body.id, result: first.get(request_id) } }
+  })
+  const mumbo = mumboForwarder({ box: boxOf(ensured, []), boxFetch: boxFetcher({ publicHost: PUBLIC, proxy: proxy.url }), edgeKey: 'edge-secret', siteHostOf: () => PUBLIC, log: () => {} })
+  const report = memberReporter({ projects: proj, admitted: (e) => allowed.has(e), mumbo, log: (l) => lines.push(JSON.parse(l)) })
+  const ops = children({ e2b: { Sandbox: { list: () => ({ hasNext: false }) } }, cfg: { childTemplates: ['c'], maxChildren: 1 }, log: () => {} })
+  const mcp = mcpServer({ ops, projects: proj, relay: { message: async () => ({}) }, report, claimOf: (info) => verifyBox('k', String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
+  const server = modelServer({ cfg, edgeKey: 'k', modelKey: 'SERVER', allow: async () => true, owns: async () => true, touch: () => {}, mcp, log: () => {} })
+  await new Promise(r => server.listen(0, '127.0.0.1', r))
+  const rpc = (principal, method, params) => send(server.address().port, { host: LLM, headers: { authorization: `Bearer ${signBox('k', principal, 'pbox')}`, 'x-forwarded-for': '1.2.3.4' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) })
+  const reportAs = async (project, args = {}) => (await rpc(`project:${project}`, 'tools/call', { name: 'report_to_member',
+    arguments: { member: A, project, thread: 'th1', messageId: 'r1', text: 'Built it.', ...args } })).json.result
+  return Object.assign(t, { P, Q, R, allowed, first, ensured, proxy, lines, rpc, report: reportAs, close: () => { server.close(); proxy.close() } })
+}
+const requestIdOf = (project, messageId) => createHash('sha256').update(`report:${project}/${messageId}`).digest('base64url')
+
+test('report_to_member is offered to project boxes only; a person\'s box neither lists nor runs it', async () => {
+  const t = await reportSetup()
+  try {
+    const names = async (principal) => (await t.rpc(principal, 'tools/list', {})).json.result.tools.map(x => x.name)
+    assert.ok((await names(`project:${t.P}`)).includes('report_to_member'))
+    const person = await names(A)
+    assert.ok(!person.includes('report_to_member') && person.includes('project_message'))
+    const r = await t.rpc(A, 'tools/call', { name: 'report_to_member', arguments: { member: A, project: t.P, thread: 'th1', messageId: 'r1', text: 'hi' } })
+    assert.ok(r.json.error ?? r.json.result.isError)
+    assert.equal(t.proxy.seen.length, 0)
+  } finally { t.close() }
+})
+
+test('report_to_member lands in the member\'s Session mumbo as one agent_send "[project <name>] <text>" through their box\'s @mumbo/mcp, attributed to the project', async () => {
+  const t = await reportSetup()
+  try {
+    const r = await t.report(t.P, { text: 'Built it.\nPR #4 is open.' })
+    assert.equal(r.isError, undefined, JSON.stringify(r))
+    assert.deepEqual(JSON.parse(r.content[0].text), { delivered: true, project: t.P, member: A, messageId: 'r1' })
+    const [call] = t.proxy.seen
+    assert.deepEqual([call.method, call.url], ['POST', '/mcp'])
+    assert.deepEqual(call.body.params, { name: 'agent_send', arguments: { text: '[project Mine] Built it.\nPR #4 is open.', request_id: requestIdOf(t.P, 'r1') } })
+    assert.match(call.body.params.arguments.request_id, /^[A-Za-z0-9_-]{1,64}$/, '@mumbo/mcp\'s request_id form')
+    const h = call.headers
+    assert.deepEqual(h.authorization, [`Bearer ${mumboMcpKey('edge-secret', 'sbx1')}`])
+    assert.deepEqual(h['x-mcp-principal'], ['a'])
+    assert.deepEqual(h['x-mumbo-key-name'], [encodeURIComponent('project Mine')])
+    assert.deepEqual([h['e2b-sandbox-id'], h['e2b-sandbox-port']], [['sbx1'], ['882']])
+    assert.deepEqual(t.ensured, [A], 'the member\'s own box is ensured, not the project\'s')
+    assert.deepEqual(t.lines, [{ edge: 'report', msg: 'delivered', project: t.P, member: A, thread: 'th1', messageId: 'r1' }])
+    // The text is bounded at Superagent's relay limit.
+    assert.equal((await t.report(t.P, { messageId: 'r2', text: 'x'.repeat(20_000) })).isError, undefined)
+    assert.equal(t.proxy.seen.at(-1).body.params.arguments.text, `[project Mine] ${'x'.repeat(20_000)}`)
+    for (const bad of [{ text: 'x'.repeat(20_001) }, { text: '' }, { messageId: 'a/b' }, { thread: undefined }, { project: 'P' }]) {
+      assert.equal((await t.report(t.P, { messageId: 'r3', ...bad })).isError, true, JSON.stringify(bad).slice(0, 40))
+    }
+    assert.equal(t.proxy.seen.length, 2, 'a call outside the schema is not forwarded')
+  } finally { t.close() }
+})
+
+test('report_to_member is idempotent on (project, messageId): a retry arrives once and answers as the first call; the same id in another project is another report', async () => {
+  const t = await reportSetup()
+  try {
+    const once = await t.report(t.P)
+    assert.deepEqual(await t.report(t.P), once)
+    assert.deepEqual(t.proxy.seen.map(x => x.body.params.arguments.request_id), [requestIdOf(t.P, 'r1'), requestIdOf(t.P, 'r1')], 'both calls carry one request_id')
+    assert.equal(t.first.size, 1, 'one message reaches the Session')
+    await t.report(t.Q)
+    await t.report(t.P, { messageId: 'r2' })
+    assert.equal(t.first.size, 3)
+    assert.notEqual(requestIdOf(t.P, 'r1'), requestIdOf(t.Q, 'r1'))
+  } finally { t.close() }
+})
+
+test('report_to_member refuses a non-member with not_a_member: (Superagent settles it as gone), and another project or Mumbo\'s refusal with other codes (retried)', async () => {
+  const t = await reportSetup()
+  try {
+    const refusal = (r) => { assert.equal(r.isError, true, JSON.stringify(r)); return r.content[0].text }
+    assert.equal(refusal(await t.report(t.P, { member: B })), `not_a_member: ${B} is not a member of project ${t.P}`)
+    assert.match(refusal(await t.report(t.P, { member: 'nobody@x.com' })), /^not_a_member: /)
+    t.allowed.delete(A)
+    assert.match(refusal(await t.report(t.P)), /^not_a_member: /, 'a member off the allowlist')
+    t.allowed.add(A)
+    // A box reports for its own project only; a mistaken project id is not a gone member.
+    assert.equal(refusal(await t.report(t.P, { project: t.R, member: B })), `wrong_project: this box serves project ${t.P}, not ${t.R}`)
+    assert.equal(t.proxy.seen.length, 0, 'nothing is forwarded for a refusal')
+    t.answer = ({ body }) => ({ body: { jsonrpc: '2.0', id: body.id, result: { isError: true, content: [{ type: 'text', text: '{"code":"halted","message":"runs are halted"}' }] } } })
+    assert.equal(refusal(await t.report(t.P)), 'box_error: Mumbo refused the report: {"code":"halted","message":"runs are halted"}')
+    t.answer = () => ({ status: 502, body: 'The sandbox is running but port is not open' })
+    assert.match(refusal(await t.report(t.P)), /^box_unavailable: /)
+    assert.deepEqual(t.lines, [], 'only a delivery is logged as delivered')
   } finally { t.close() }
 })
