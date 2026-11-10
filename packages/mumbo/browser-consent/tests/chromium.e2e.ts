@@ -429,10 +429,16 @@ it.skipIf(skip)('holds no connection to the browser while the person has it, and
     })).content.map(block => block.type === 'text' ? block.text : '').join('\n')
     expect(await snapshot()).toContain('- Page URL: about:blank')
     expect(open.size).toBeGreaterThan(0)
+    // Chromium's own list of its tabs, read past the proxy.
+    const tabs = async () => (await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json() as Array<{ id: string; type: string }>)
+      .filter(target => target.type === 'page').map(target => target.id)
+    const before = await tabs()
 
     const takeover = ctx.get('mumbo-browser-consent')!
     await takeover.takeOver()
     await expect.poll(() => open.size, { timeout: 15_000 }).toBe(0)
+    // Closing the connection leaves the person's tabs open.
+    expect(await tabs()).toEqual(before)
     expect(await snapshot()).toBe('Error: browser_snapshot did not run: the person has taken over the browser. Browser and desktop tools stay unavailable until they hand it back.')
     expect(open.size).toBe(0)
 
