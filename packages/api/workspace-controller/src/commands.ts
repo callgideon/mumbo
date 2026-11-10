@@ -5,6 +5,7 @@ import type { Workspace } from '@deepseek-ai/dsh-workspace'
 import {
   WorkspaceActiveSessionError,
   WorkspaceArchivedSessionPinError,
+  WorkspaceArchiveVetoedError,
   WorkspaceId,
   WorkspaceMoveInvalidError,
   WorkspaceOrderInvalidError,
@@ -152,7 +153,9 @@ export class WorkspaceCommands {
   }
 
   /**
-   * Add one known Session to the registry-global archive set. Without
+   * Add one known Session to the registry-global archive set. A Session a
+   * `workspace/archive-veto` listener refuses is a `gateway/bad-request`
+   * carrying the listener's reason, with or without `stopActivity`. Without
    * `stopActivity` a Session with running work is refused as
    * `workspace/session-active` with the activity the registry's providers
    * reported; with it, the providers stop that work first.
@@ -166,6 +169,9 @@ export class WorkspaceCommands {
         request.stopActivity === true ? { stopActivity: true } : {},
       )
     } catch (error) {
+      if (error instanceof WorkspaceArchiveVetoedError) {
+        throw new RemoteError('gateway/bad-request', error.message, {}, { cause: error })
+      }
       if (error instanceof WorkspaceUnknownSessionError) {
         throw new RemoteError('session/not-found', error.message, { sessionId: request.sessionId }, { cause: error })
       }

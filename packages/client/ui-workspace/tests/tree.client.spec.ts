@@ -11,7 +11,7 @@ import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { SessionProjectionSnapshot } from '@deepseek-ai/dsh-api-session-controller/client'
 import {
   type ArchivedFilter,
-  deriveFlat, deriveGroups, deriveSearchResults, orderByRecency, owningGroupKey, owningParentFolder,
+  blankRow, blankRowList, deriveFlat, deriveGroups, deriveSearchResults, orderByRecency, owningGroupKey, owningParentFolder,
   pinCurrentBlank, reconcileManualOrder, sessionMemberIds, visibleSessionIds, workspaceLabel, UNGROUPED_KEY,
 } from '../src/client/tree.ts'
 import { createWorkspaceViewStore } from '../src/client/stores.ts'
@@ -309,6 +309,23 @@ describe('deriveGroups', () => {
     expect(groups[0]!.sessions.map(session => session.id)).toEqual([
       sid('two'), sid('new'), sid('one'),
     ])
+  })
+
+  it('treats only an unpinned untitled turnless Session as the blank row', () => {
+    const { title: _title, ...untitled } = summary('plain', 1)
+    const plain = { ...untitled, blank: true }
+    const pinned = { ...plain, id: sid('pinned') }
+    const renamed = { ...plain, id: sid('renamed'), title: 'Mumbo' }
+    expect(blankRow(plain, [])).toBe(true)
+    expect(blankRow(pinned, [pinned.id])).toBe(false)
+    expect(blankRow(renamed, [])).toBe(false)
+    expect(blankRow({ ...plain, blank: false }, [])).toBe(false)
+    const sessions = list(plain, pinned, renamed)
+    const narrowed = blankRowList(sessions, [pinned.id])
+    expect(Object.values(narrowed.byId).map(session => [session.id, session.blank]))
+      .toEqual([[plain.id, true], [pinned.id, false], [renamed.id, false]])
+    const unchanged = list(plain)
+    expect(blankRowList(unchanged, [])).toBe(unchanged)
   })
 
   it('shows only the current blank session in its Workspace count and tree', () => {

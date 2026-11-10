@@ -69,6 +69,7 @@
     { "path": "./packages/util/atomic-write" },
     { "path": "./packages/experimental/client-ui-voice-input" },
     { "path": "./packages/experimental/client-ui-claude-code-mods" },
+    { "path": "./packages/mumbo/assistant/tsconfig.client.json" },
     { "path": "./packages/mumbo/box-links/tsconfig.client.json" },
 
     { "path": "./packages/client/ui-sidebar-terminal" },

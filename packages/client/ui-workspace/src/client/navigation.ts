@@ -13,7 +13,7 @@ import type {
 } from '@deepseek-ai/dsh-api-session-controller/client'
 // Type-only: pulls the `agentPreset` Session projection value into this program.
 import type {} from '@deepseek-ai/dsh-agent-preset-registry/types'
-import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
+import { createSnapshotStore, type ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
 import type {
   IWorkspaces, WorkspaceId, WorkspaceSnapshot, WorkspaceView,
@@ -23,6 +23,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { DraftInitializationOptions } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { RowToast } from './contract/slots.ts'
 import { pinOrderAccounts, pinOrderSource } from './pin-order.ts'
+import { blankRow } from './tree.ts'
 import type { WorkspaceViewStoreActions } from './stores.ts'
 
 interface MainSelection {
@@ -36,8 +37,22 @@ export interface StartSessionOptions extends DraftInitializationOptions {
   readonly agentPreset?: string
 }
 
+/**
+ * What startup restoration opens: `pending` until it starts; `saved` when it reopens the saved
+ * selection, a listed Session (a blank one only while it is unarchived in its Workspace) or a
+ * subagent address; `fresh` when it reopens nothing saved and opens a Workspace blank, or nothing.
+ */
+export type UiWorkspaceRestoration = 'pending' | 'saved' | 'fresh'
+
 /** Workspace archive and directory operations consumed by Client UI domains. */
 export interface UiWorkspace {
+  /**
+   * Startup restoration's source. It leaves `pending` synchronously when restoration starts,
+   * before anything opens, and stays `pending` when a Session was opened before restoration ran.
+   * A `fresh` restoration's blank opens asynchronously, so an {@link UiWorkspace.openSession}
+   * made after `fresh` is published supersedes it.
+   */
+  readonly restoration: ObservableSnapshot<UiWorkspaceRestoration>
   /**
    * Select a Session and show its Conversation as one UI navigation action.
    * @param target - known Session identity or durable direct-parent subagent address to display.
@@ -175,6 +190,8 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   )
   private mainReference: SessionReference | undefined
   private restorationNavigation: AbortSignal | undefined
+  private readonly restorationSource = createSnapshotStore<UiWorkspaceRestoration>('pending', { flush: 'sync' })
+  readonly restoration: ObservableSnapshot<UiWorkspaceRestoration> = this.restorationSource
 
   /**
    * @param ctx - Client root Context.
@@ -233,12 +250,12 @@ class UiWorkspaceService extends Service implements UiWorkspace {
 
   /** Name the first reusable member blank; a requested preset also skips blanks listing another preset. */
   private createInWorkspace(workspace: WorkspaceView, options: Pick<StartSessionOptions, 'agentPreset'>): Promise<SessionId> {
-    const archived = this.workspaces.list.getSnapshot().archivedSessionIds
+    const { archivedSessionIds: archived, pinnedSessionIds: pinned } = this.workspaces.list.getSnapshot()
     const sessions = this.sessions.list.getSnapshot()
     const blank = sessions.ids.find((id) => {
       const summary = sessions.byId[id]
       const listed = summary?.projectionValues?.agentPreset
-      return summary !== undefined && summary.blank && summary.cwd === workspace.path
+      return summary !== undefined && blankRow(summary, pinned) && summary.cwd === workspace.path
         && workspace.sessionIds.includes(id) && !archived.includes(id)
         && (options.agentPreset === undefined || typeof listed !== 'string' || listed === options.agentPreset)
     })
@@ -465,23 +482,26 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   private async restoreSelection(workspaces: WorkspaceSnapshot, sessions: SessionListState): Promise<void> {
     const saved = this.selection.getSnapshot()
     if (saved.subagentAddress !== undefined) {
+      this.restorationSource.set('saved')
       this.replaceMain(saved.subagentAddress, this.lifetime.signal, 'preserve')
       return
     }
     const summary = saved.sessionId === undefined ? undefined : sessions.byId[saved.sessionId]
     const workspace = summary === undefined ? undefined
       : workspaces.items.find(item => item.sessionIds.includes(summary.id))
-    if (summary !== undefined && (!summary.blank || workspace === undefined)) {
-      this.replaceMain(summary.id, this.lifetime.signal, 'preserve')
+    const direct = summary !== undefined && (!blankRow(summary, workspaces.pinnedSessionIds) || workspace === undefined)
+      ? summary.id : undefined
+    const reclaim = summary !== undefined && workspace !== undefined && summary.cwd === workspace.path
+      && !workspaces.archivedSessionIds.includes(summary.id) ? { workspaceId: workspace.workspaceId, sessionId: summary.id } : undefined
+    this.restorationSource.set(direct !== undefined || reclaim !== undefined ? 'saved' : 'fresh')
+    if (direct !== undefined) {
+      this.replaceMain(direct, this.lifetime.signal, 'preserve')
       return
     }
     const navigation = AbortSignal.any([this.ctx.layout.beginNavigation(), this.lifetime.signal])
     this.restorationNavigation = navigation
     let sessionId: SessionId | undefined
-    if (summary !== undefined && workspace !== undefined && summary.cwd === workspace.path
-      && !workspaces.archivedSessionIds.includes(summary.id)) {
-      sessionId = await this.restoreBlank(workspace.workspaceId, summary.id)
-    }
+    if (reclaim !== undefined) sessionId = await this.restoreBlank(reclaim.workspaceId, reclaim.sessionId)
     let target = workspace?.workspaceId ?? recentWorkspace(workspaces.items, sessions.byId)
     if (target === undefined && workspaces.items.length === 0 && sessions.ids.length === 0) {
       const prepared = await this.initializeDefaultWorkspace(navigation)

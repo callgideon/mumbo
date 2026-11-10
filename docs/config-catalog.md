@@ -4920,6 +4920,27 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-workspace-changes -->
 
+<!-- BEGIN GENERATED config-catalog:@mumbo/assistant -->
+<a id="mumboassistant"></a>
+
+## `@mumbo/assistant`
+
+- `inject`: `sessionController` · `workspaceRegistry` · `agents`
+- `source`: [`packages/mumbo/assistant/src/index.ts:28`](../packages/mumbo/assistant/src/index.ts)
+
+```ts config-catalog
+/** Mumbo's instructions, the Workspace its Session is created in, and how a failed ensure is retried. */
+export interface Config {
+  /** Text of the system prompt section every Mumbo Agent receives; the box edge writes it. */
+  readonly instructions: string
+  /** Absolute directory of the Workspace a newly created Mumbo Session joins; it must exist. */
+  readonly workspace: string
+  /** Delays before each retry of a failed ensure, in milliseconds; their count bounds the retries. */
+  readonly retryDelaysMs: number[]
+}
+```
+<!-- END GENERATED config-catalog:@mumbo/assistant -->
+
 <!-- BEGIN GENERATED config-catalog:@mumbo/box-links -->
 <a id="mumbobox-links"></a>
 

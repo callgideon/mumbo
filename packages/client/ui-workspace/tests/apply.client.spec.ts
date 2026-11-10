@@ -719,6 +719,22 @@ describe('ui-workspace apply', () => {
     },
   )
 
+  it('reports the Host refusing to fork a turnless row, as the fork shortcut does', async () => {
+    const b = await bench()
+    onTestFinished(() => b.ctx.fiber.dispose())
+    declare(b.slots, 'sidebar.workspaces', 'shell.overlay')
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+    b.fork.mockRejectedValueOnce(new SessionForkError(
+      new RemoteError('session/fork-unavailable', 'no completed turn', { sessionId: sid('mumbo') }),
+      sid('mumbo'),
+    ))
+    const toast = faceOf(entry(b.slots, 'shell.overlay', 'workspace.row-toast')) as RowToastInjected
+    sessionMenuActions(b.ctx).forkSession(sid('mumbo'))
+    await vi.waitFor(() => {
+      expect(toast.hooks.toast.getSnapshot()).toEqual({ kind: 'shortcutForkFailed', reason: 'unavailable', seq: 1 })
+    })
+  })
+
   it('offers to open a source only after the Host refuses migration and never retries the fork', async () => {
     const b = await bench()
     onTestFinished(() => b.ctx.fiber.dispose())
@@ -816,7 +832,7 @@ describe('ui-workspace apply', () => {
       ? new Error('fork failed')
       : kind === 'other-remote'
         ? new SessionForkError(
-          new RemoteError('session/fork-unavailable', 'no completed turn', { sessionId: sid('source') }),
+          new RemoteError('session/not-found', 'no such Session', { sessionId: sid('source') }),
           sid('source'),
         )
         : new RemoteError('session/migration-required', 'migration required', { sessionId: sid('source') })

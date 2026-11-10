@@ -414,6 +414,8 @@
       "@deepseek-ai/dsh-native-command/types": ["./packages/util/native-command/src/types.ts"],
       "@deepseek-ai/dsh-message-quotes/client": ["./packages/session/message-quotes/src/client/index.ts"],
       "@deepseek-ai/dsh-ptc-runtime-node/configuration": ["./packages/ptc-runtime/ptc-runtime-node/src/configuration.ts"],
+      "@mumbo/assistant": ["./packages/mumbo/assistant/src/index.ts"],
+      "@mumbo/assistant/client": ["./packages/mumbo/assistant/src/client/index.ts"],
       "@mumbo/box-links": ["./packages/mumbo/box-links/src/index.ts"],
       "@mumbo/box-links/client": ["./packages/mumbo/box-links/src/client/index.ts"],
       "@mumbo/browser-consent": ["./packages/mumbo/browser-consent/src/index.ts"],

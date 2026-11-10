@@ -1182,6 +1182,61 @@ describe('registry-global session archive', () => {
     expect(result.registry.archivedSessionIds).toEqual(['known'])
   })
 
+  it.each([
+    ['without stopActivity', {}],
+    ['with stopActivity', { stopActivity: true }],
+  ])('refuses a vetoed session %s before anything is asked, written, or stopped', async (_label, options) => {
+    const dir = await makeDir('archive-veto')
+    const result = await harness({ sessions: [header('kept', dir, 100), header('other', dir, 200)] })
+    const order: string[] = []
+    result.ctx.on('workspace/archive-veto', ({ sessionId }) => {
+      order.push(`veto:${sessionId}`)
+      return sessionId === 'kept' ? 'it is the assistant' : undefined
+    })
+    result.ctx.on('workspace/session-activity', ({ sessionId }, next) => {
+      order.push(`activity:${sessionId}`)
+      return next()
+    })
+    result.ctx.on('workspace/session-stop', ({ sessionId }) => { order.push(`stop:${sessionId}`) })
+
+    await expect(result.registry.archiveSession(SessionId('kept'), options)).rejects.toMatchObject({
+      name: 'WorkspaceArchiveVetoedError',
+      sessionId: 'kept',
+      reason: 'it is the assistant',
+      message: "cannot archive session 'kept': it is the assistant",
+    })
+    expect(order).toEqual(['veto:kept'])
+    expect(result.registry.archivedSessionIds).toEqual([])
+    expect(storedState(result.pool).archivedSessionIds).toEqual([])
+    expect(result.changes.filter(change => change.table === '')).toEqual([])
+
+    // A listener returning undefined leaves the archive to the other checks.
+    await result.registry.archiveSession(SessionId('other'), options)
+    expect(result.registry.archivedSessionIds).toEqual(['other'])
+    // The veto is asked before the unknown-session check, too.
+    order.length = 0
+    await expect(result.registry.archiveSession(SessionId('ghost'), options))
+      .rejects.toThrow(/cannot archive session 'ghost'/)
+    expect(order).toEqual(['veto:ghost'])
+  })
+
+  it('refuses an already archived vetoed session and archives once the veto is disposed', async () => {
+    const dir = await makeDir('archive-veto-dispose')
+    const result = await harness({ sessions: [header('kept', dir, 100)] })
+    await result.registry.archiveSession(SessionId('kept'))
+    const dispose = result.ctx.on('workspace/archive-veto', () => 'kept')
+    await expect(result.registry.archiveSession(SessionId('kept')))
+      .rejects.toThrow("cannot archive session 'kept': kept")
+    await result.registry.unarchiveSession(SessionId('kept'))
+    await expect(result.registry.archiveSession(SessionId('kept'), { stopActivity: true }))
+      .rejects.toThrow("cannot archive session 'kept': kept")
+    expect(result.registry.archivedSessionIds).toEqual([])
+
+    dispose()
+    await result.registry.archiveSession(SessionId('kept'), { stopActivity: true })
+    expect(result.registry.archivedSessionIds).toEqual(['kept'])
+  })
+
   it('restores the archive set across restarts and defaults it for pre-field media', async () => {
     const dir = await makeDir('archive-restart')
     const pool = new MemoryMediaPool()

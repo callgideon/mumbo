@@ -71,6 +71,22 @@ export class WorkspaceActiveSessionError extends Error {
   }
 }
 
+/**
+ * A `workspace/archive-veto` listener refused an archiveSession request.
+ * Nothing was written, asked, or stopped; `reason` is the listener's
+ * explanation for the person who asked.
+ */
+export class WorkspaceArchiveVetoedError extends Error {
+  /**
+   * @param sessionId - The session the request named.
+   * @param reason - The vetoing listener's explanation.
+   */
+  constructor(readonly sessionId: SessionId, readonly reason: string) {
+    super(`cannot archive session '${sessionId}': ${reason}`)
+    this.name = 'WorkspaceArchiveVetoedError'
+  }
+}
+
 /** A pinSession request named a session currently in the archive set; pinning and archival are mutually exclusive. */
 export class WorkspaceArchivedSessionPinError extends Error {
   /**
@@ -116,6 +132,18 @@ declare module '@deepseek-ai/cordis' {
   }
 
   interface Events {
+    /**
+     * Ask whether a session may be archived at all. It is dispatched first on
+     * every archive request, with or without `stopActivity` and also for an
+     * id already archived; the first listener that returns a reason refuses
+     * the request with {@link WorkspaceArchiveVetoedError} before anything is
+     * written, asked, or stopped. Listeners decide synchronously from state
+     * they own; returning `undefined` leaves the decision to the others.
+     * @param request - the session the archive request names.
+     * @returns the refusal reason shown to the person, or `undefined` to allow.
+     * @mode bail
+     */
+    'workspace/archive-veto'(request: SessionActivityRequest): string | undefined
     /**
      * Ask the composed providers what still runs for a session before it is
      * archived. A listener prepends its own {@link SessionActivity} entries to
@@ -346,7 +374,10 @@ export class WorkspaceRegistry extends Service {
   }
 
   /**
-   * Archive one session durably. The session must exist (live or in session
+   * Archive one session durably. The `workspace/archive-veto` listeners are
+   * asked first, with or without `stopActivity`; a refusal rejects with
+   * {@link WorkspaceArchiveVetoedError} before any other check, write, or
+   * stop. The session must exist (live or in session
    * persistence); its workspace accounting — or lack of one — is irrelevant.
    * Without `stopActivity` the session must also be inactive: the
    * `workspace/session-activity` waterfall is asked once, and any reported
@@ -357,13 +388,16 @@ export class WorkspaceRegistry extends Service {
    * `agent/pre-step` gate reads, so every wake the stops induce is already
    * blocked. Archiving drops the session's pin in the same durable write
    * (pinning and archival are mutually exclusive). An already archived id
-   * resolves without writing, asking, or stopping.
+   * that no listener vetoes resolves without writing, asking the activity
+   * waterfall, or stopping.
    * @param sessionId - The session to archive.
    * @param options - Whether running work is stopped instead of refusing.
    * @returns resolution after durability and, with `stopActivity`, after every stop request was issued.
    */
   archiveSession(sessionId: SessionId, options: ArchiveSessionOptions = {}): Promise<void> {
     return this.enqueueOperation(async () => {
+      const veto = this.ctx.bail('workspace/archive-veto', { sessionId })
+      if (veto !== undefined) throw new WorkspaceArchiveVetoedError(sessionId, veto)
       // The chain slot serializes against every other registry write, so this
       // check-then-write pair cannot interleave with another archive.
       if (this.requireState().archivedSessionIds.includes(sessionId)) return
