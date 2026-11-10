@@ -66,20 +66,22 @@ export function children({ e2b, cfg, log = console.log }) {
   }
 }
 
-/**
- * Node request handler for the MCP endpoint. `claimOf(req)` returns the caller's verified {u, b}; the model host
- * checks the token, ownership and source address before calling this. `projectDomain` (config PROJECT_DOMAIN) names
- * where project boxes are served, p-<id>.<projectDomain>. `report` (door.mjs memberReporter) serves report_to_member to
- * project boxes. A failure with a code answers an error result `<code>: <message>`, as the door does.
- */
-export function mcpServer({ ops, projects, relay, report, projectDomain, claimOf }) {
-  const tool = (claim, fn) => async (args) => {
-    try {
-      return { content: [{ type: 'text', text: JSON.stringify(await fn(claim, args), null, 2) }] }
-    } catch (e) {
-      return { isError: true, content: [{ type: 'text', text: e.code ? `${e.code}: ${e.message}` : e.message }] }
-    }
+/** A tool handler running `fn(claim, args)`: its result as JSON text, or a failure with a code as `<code>: <message>`, as the door does. */
+const tool = (claim, fn) => async (args) => {
+  try {
+    return { content: [{ type: 'text', text: JSON.stringify(await fn(claim, args), null, 2) }] }
+  } catch (e) {
+    return { isError: true, content: [{ type: 'text', text: e.code ? `${e.code}: ${e.message}` : e.message }] }
   }
+}
+
+/**
+ * Node request handler for the MCP endpoint /mcp, which dsh's mcp-sandboxes client (edge.mjs startScript) hands to every
+ * box's models. `claimOf(req)` returns the caller's verified {u, b}; the model host checks the token, ownership and source
+ * address before calling this. `projectDomain` (config PROJECT_DOMAIN) names where project boxes are served,
+ * p-<id>.<projectDomain>.
+ */
+export function mcpServer({ ops, projects, relay, projectDomain, claimOf }) {
   const id = z.string().describe('Sandbox id from sandbox_create or sandbox_list')
   const handler = createMcpHandler(({ requestInfo }) => {
     const claim = claimOf(requestInfo)
@@ -120,17 +122,31 @@ export function mcpServer({ ops, projects, relay, report, projectDomain, claimOf
       }, tool(claim, (c, a) => projects.addMember(c.u, a.id, a.email)))
       if (relay) {
         mcp.registerTool('project_message', {
-          description: "Send a message to a project's coordinator, as you. kind 'context' (the default) tells it something to keep in mind and never asks for work; kind 'request' asks it for work. The project's policy decides whether it acts. It starts the project's box if needed. Give each new message a new messageId, such as a fresh UUID; if a send fails or times out, retry it with the same messageId, so the coordinator receives it once. Its replies arrive in Mumbo's Session as messages starting \"[project <name>]\"; the project's page shows its work.",
+          description: "Send a message to a project's coordinator, as you. kind 'context' (the default) tells it something to keep in mind and never asks for work; kind 'request' asks it for work. The project's policy decides whether it acts. It starts the project's box if needed. Give each new message a new messageId, such as a fresh UUID; if a send fails or times out, retry it with the same messageId, so the coordinator receives it once. Its replies arrive in Mumbo's Session as messages starting \"[project <name>] report from its coordinator:\", the report fenced as untrusted data; the project's page shows its work.",
           inputSchema: z.object({ id: pid, message: z.string().min(1).max(20000),
             kind: z.enum(MESSAGE_KINDS).default('context').describe("'context': information, never a work request; 'request': asks for work"),
             messageId: z.string().regex(MESSAGE_ID).describe('A new id for each message (letters, digits and . _ : -, up to 128); reuse it only to retry the same message') }),
         }, tool(claim, (c, a) => relay.message(c.u, a.id, a.message, { kind: a.kind, messageId: a.messageId, via: c.b })))
       }
     }
-    // A project's box reports its coordinator's replies to the project's members (M2 up); a person's box does not get it.
-    if (report && claim?.u.startsWith('project:')) {
+    return mcp
+  })
+  return toNodeHandler(handler)
+}
+
+/**
+ * Node request handler for /mcp/report, where a project box's Superagent reports its coordinator's replies to the project's
+ * members (spec section 10, M2 up) with `report` (door.mjs memberReporter). It lists report_to_member to project boxes
+ * only, and nothing to a person's box. It is not on /mcp, so dsh's mcp-sandboxes client never hands it to a box's models.
+ * `claimOf` and the model host's checks are as for mcpServer.
+ */
+export function reportServer({ report, claimOf }) {
+  return toNodeHandler(createMcpHandler(({ requestInfo }) => {
+    const claim = claimOf(requestInfo)
+    const mcp = new McpServer({ name: 'mumbo-reports', version: '1.0.0' }, { capabilities: { tools: {} } })
+    if (claim?.u.startsWith('project:')) {
       mcp.registerTool('report_to_member', {
-        description: "For this project's Superagent: deliver one reply on a relay Thread to a member of this project. It arrives in the member's Mumbo as \"[project <name>] <text>\", once per messageId. A member who is not one of this project's is refused with not_a_member.",
+        description: "For this project's Superagent: deliver one reply on a relay Thread to a member of this project. It arrives in the member's Mumbo, fenced as untrusted data after \"[project <name>] report from its coordinator:\", once per messageId. A member who is not one of this project's is refused with not_a_member.",
         inputSchema: z.object({
           member: z.string().max(320).describe("The member's email, lowercased"),
           project: z.string().regex(/^[a-z0-9]{16}$/).describe("This box's project id"),
@@ -141,6 +157,5 @@ export function mcpServer({ ops, projects, relay, report, projectDomain, claimOf
       }, tool(claim, (c, a) => report(c.u.slice('project:'.length), a)))
     }
     return mcp
-  })
-  return toNodeHandler(handler)
+  }))
 }

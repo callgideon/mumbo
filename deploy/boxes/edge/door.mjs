@@ -32,11 +32,13 @@ const READ_MARGIN_S = 5
  * Forwards a door call to Mumbo, @mumbo/mcp in the key owner's person box (its person overlay, startScript): ensures the
  * box as projectRelay does, then POSTs one `tools/call` to /mcp on MUMBO_MCP_PORT through the client proxy, with the
  * box's mumboMcpKey as the bearer, the owner's mcpPrincipal in `x-mcp-principal` and the key's name, percent-encoded, in
- * `x-mumbo-key-name`. agent_read's `wait_s` is cut so the call ends within CALL_MS.
+ * `x-mumbo-key-name`, which @mumbo/mcp's agent_send puts before the text as `[from <handle> via <key name>] `. A call
+ * without a key name sends no `x-mumbo-key-name`, so agent_send logs the text alone. agent_read's `wait_s` is cut so the
+ * call ends within CALL_MS.
  * @param {{ box: { ensure(principal: string): Promise<{ id: string }>, touch(id: string): Promise<void> },
  *   boxFetch: ReturnType<typeof import('./edge.mjs').boxFetcher>, edgeKey: string, siteHostOf: (principal: string) => string,
  *   readyMs?: number, now?: () => number, log?: (line: string) => void }} deps - `readyMs` defaults to BOX_READY_MS.
- * @returns {(key: { owner: string, name: string }, name: string, args: object) => Promise<object>} the box tool's
+ * @returns {(key: { owner: string, name?: string }, name: string, args: object) => Promise<object>} the box tool's
  *   CallToolResult, unchanged. Throws `box_unavailable` when the box is not ready within `readyMs` (its start goes on),
  *   cannot start, or its route answers no tool result (an image without the overlay answers the client proxy's 502).
  */
@@ -58,7 +60,7 @@ export function mumboForwarder({ box, boxFetch, edgeKey, siteHostOf, readyMs = B
       r = await boxFetch(target, siteHostOf(key.owner), '/mcp', {
         method: 'POST', port: MUMBO_MCP_PORT, timeoutMs: Math.max(1000, deadline - now()),
         headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
-        edgeHeaders: { authorization: `Bearer ${mumboMcpKey(edgeKey, target.id)}`, 'x-mcp-principal': mcpPrincipal(key.owner), 'x-mumbo-key-name': encodeURIComponent(key.name) },
+        edgeHeaders: { authorization: `Bearer ${mumboMcpKey(edgeKey, target.id)}`, 'x-mcp-principal': mcpPrincipal(key.owner), ...(key.name === undefined ? {} : { 'x-mumbo-key-name': encodeURIComponent(key.name) }) },
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
       })
     } catch (e) {
@@ -76,11 +78,14 @@ export function mumboForwarder({ box, boxFetch, edgeKey, siteHostOf, readyMs = B
 }
 
 /**
- * report_to_member (spec section 10, M2 up), for sandboxes.mjs mcpServer: a project box's Superagent reports one reply on a
- * relay Thread to a member of its project. It lands in the member's Session mumbo as one agent_send through `mumbo`
- * (mumboForwarder), which ensures the member's box: the text `[project <name>] <text>`, as the member, with `project <name>`
- * as the attribution in `x-mumbo-key-name`. The request_id is derived from (project, messageId), so @mumbo/mcp runs a repeat
- * once and answers it with the first result.
+ * report_to_member (spec section 10, M2 up), for sandboxes.mjs reportServer: a project box's Superagent reports one reply on
+ * a relay Thread to a member of its project. It lands in the member's Session mumbo as one agent_send through `mumbo`
+ * (mumboForwarder), which ensures the member's box, without a key name, so the logged message starts with the prefix:
+ * `[project <name>] report from its coordinator:`, a newline, and the text in a nonce'd `<untrusted-…>` tag (`fence`).
+ * Workers and strangers' issues can steer that text, so Mumbo's instructions (edge.mjs assistantInstructions) treat it as
+ * data, never as the person's words. In the prefix, brackets, line breaks and other control or separator characters of the
+ * project's name are spaces. The request_id is derived from (project, messageId), so @mumbo/mcp runs a repeat once and
+ * answers it with the first result.
  * @param {{ projects: ReturnType<typeof import('./projects.mjs').projects>, admitted: (email: string) => boolean,
  *   mumbo: ReturnType<typeof mumboForwarder>, log?: (line: string) => void }} deps - `admitted` is the edge allowlist.
  * @returns {(box: string, args: { member: string, project: string, thread: string, messageId: string, text: string }) =>
@@ -98,7 +103,8 @@ export function memberReporter({ projects, admitted, mumbo, log = console.log })
     // ponytail: @mumbo/mcp remembers a request_id for a day (IDEMPOTENCY_WINDOW_MS), so a report retried later than that
     // arrives twice; keep a (project, messageId) record in the store if Superagent's retries ever outlast it.
     const request_id = createHash('sha256').update(`report:${project}/${messageId}`).digest('base64url')
-    const out = await mumbo({ owner: member, name: `project ${p.name}` }, 'agent_send', { text: `[project ${p.name}] ${text}`, request_id })
+    const name = p.name.replace(/[\p{C}\p{Z}[\]]+/gu, ' ').trim() || project
+    const out = await mumbo({ owner: member }, 'agent_send', { text: `[project ${name}] report from its coordinator:\n${fence(text)}`, request_id })
     if (out.isError) throw refuse('box_error', `Mumbo refused the report: ${String(out.content[0]?.text).slice(0, 500)}`)
     log(JSON.stringify({ edge: 'report', msg: 'delivered', project, member, thread, messageId }))
     return { delivered: true, project, member, messageId }
