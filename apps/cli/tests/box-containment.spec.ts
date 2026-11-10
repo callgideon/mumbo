@@ -3,11 +3,12 @@
  * and the edge's containment rows (fixtures/box-edge). Every mounted package is classified by how its model-visible
  * tools run; an unclassified package fails, catalogued tool names must match, the packages that would load code into
  * root dsh or start a root process for the model must be switched off or absent, every subprocess identity a row
- * names must be the one its classification expects and a configured non-root identity of its own, and no MCP stdio
- * server may start as root.
+ * names must be the one its classification expects and a configured non-root identity of its own, no MCP stdio
+ * server may start as root, and the project box's `dsh-superagent` row may differ from the founder's overlay only by the
+ * keys containment adds.
  */
 
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -33,8 +34,6 @@ type Runs =
   | 'remote'
   /** Mounted, but the containment rows withhold its tool from the model. */
   | 'withheld'
-  /** Starts a root process or a process that must reach what `agent` may not; awaiting a ruling (named in `note`). */
-  | 'pending-ruling'
 
 interface Classification {
   runs: Runs
@@ -223,8 +222,15 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
   },
   '@mumbo/edge-member': NONE,
   '@mumbo/superagent': {
-    runs: 'pending-ruling', tools: ['orchestrator_*'],
-    note: 'project boxes: its tools run gh and git for the deployment\'s accounts from root dsh',
+    runs: 'in-process',
+    tools: [
+      'orchestrator_ack', 'orchestrator_eval', 'orchestrator_eval_decide', 'orchestrator_eval_read', 'orchestrator_read', 'orchestrator_reply',
+      'orchestrator_report', 'orchestrator_route', 'orchestrator_thread_follow', 'orchestrator_thread_unrelated', 'orchestrator_thread_unsubscribe',
+      'orchestrator_ticket_note', 'orchestrator_ticket_request_status', 'orchestrator_ticket_retry', 'orchestrator_trigger_handback',
+      'orchestrator_trigger_requeue',
+    ],
+    note: 'project boxes, root in-process and data only: the Store, and `gh api` on the configured repository through a root-owned CLI '
+      + 'and GH_CONFIG_DIR; no tool runs a command or a path the model names; ticket directories are made and checked as agent',
   },
   '@mumbo/superagent/github-watch': NONE,
 }
@@ -237,7 +243,7 @@ const FORBIDDEN = [
   '@deepseek-ai/dsh-subagent-dsh-sdk',
 ]
 
-interface Row { id?: string; name?: string; disabled?: unknown; config?: unknown }
+interface Row { id?: string; name?: string; disabled?: unknown; inject?: unknown; config?: unknown }
 
 /** Evaluate a row's `disabled` value the way a contained Linux box boots it: the launcher supplies a profile context. */
 function isDisabled(value: unknown): boolean {
@@ -288,21 +294,34 @@ function namedIdentities(value: unknown): string[] {
 }
 
 /**
- * Ids of the enabled rows that would start an MCP stdio server as root with what root dsh can reach. mcp-client starts a
- * stdio server that names no identity as this process unless the subprocess provider runs children as a run-as identity,
- * and every server the manager starts names none; every transport but Streamable HTTP starts a process.
+ * Ids of the enabled rows that could start an MCP stdio server as root with what root dsh can reach. mcp-client starts a
+ * stdio server that names no identity as this process unless the subprocess provider mounted at that connection runs
+ * children as a run-as identity, and every server the manager starts names none; every transport but Streamable HTTP
+ * starts a process. Such a row is contained only when every subprocess provider row sets `runAs` and the row injects
+ * `subprocess`, so it runs only while a provider is mounted: none after a provider remount or a provider failed at load.
  */
 function rootStdioServers(rows: readonly Row[]): string[] {
   const enabled = enabledRows(rows)
   const providers = enabled.filter(row => row.name === '@deepseek-ai/dsh-subprocess-local')
-  if (providers.length > 0 && providers.every(row => (row.config as { runAs?: unknown } | undefined)?.runAs !== undefined)) return []
+  const runAs = providers.length > 0 && providers.every(row => (row.config as { runAs?: unknown } | undefined)?.runAs !== undefined)
   return enabled.flatMap((row) => {
     const config = row.config as { transport?: unknown; identity?: unknown } | undefined
-    const root = row.name === '@deepseek-ai/dsh-mcp-manager'
+    const starts = row.name === '@deepseek-ai/dsh-mcp-manager'
       || (row.name === '@deepseek-ai/dsh-mcp-client' && config?.transport !== 'streamable-http' && typeof config?.identity !== 'string')
-    return root ? [row.id ?? '(no id)'] : []
+    const contained = runAs && Array.isArray(row.inject) && row.inject.includes('subprocess')
+    return starts && !contained ? [row.id ?? '(no id)'] : []
   })
 }
+
+/** Tool names the superagent copy registers, read from its tool modules. */
+function superagentTools(): string[] {
+  const directory = join(root, 'packages/mumbo/superagent/src/app/tools')
+  return readdirSync(directory).flatMap(file => [...readFileSync(join(directory, file), 'utf8').matchAll(/name: '(orchestrator_[a-z_]+)'/gu)].map(match => match[1]!))
+    .sort()
+}
+
+/** Keys the containment rows add to the founder's `dsh-superagent` row; any other difference fails. */
+const SUPERAGENT_CONTAINMENT_KEYS = ['workDirectory', 'workerDirectory', 'ghConfigDirectory']
 
 /** Every string value in a config, at any depth. */
 function configStrings(value: unknown): string[] {
@@ -362,15 +381,20 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     // The stores whose paths the model is told to read write where the read-only roots name, readable by agent's group.
     expect(byId('attachment-local')?.config).toEqual({ dshHome: '/var/lib/mumbo/attachments', groupReadable: true })
     expect(byId('spill-local')?.config).toEqual({ root: '/var/lib/mumbo/spill', groupReadable: true })
+    const superagent = byId('dsh-superagent')?.config as { workDirectory?: string; workerDirectory?: string; ghConfigDirectory?: string } | undefined
     if (box === 'project') {
-      // Ticket directories sit in a model root, created as agent.
-      expect((byId('dsh-superagent')?.config as { workDirectory?: string }).workDirectory).toBe('/root/work')
+      // Ticket directories sit in a model root, created as agent; the worker files and the orchestrator's gh configuration are root's.
+      expect(superagent).toMatchObject({ workDirectory: '/root/work', workerDirectory: '/var/lib/mumbo/superagent', ghConfigDirectory: '/root/.config/gh' })
       expect(modelRoots).toContain('/root/work')
+      // Workers receive the run-as environment, not dsh's, so it carries what dsh-superagent sets in its own.
+      expect(runAs?.set.PATH?.split(':')[0]).toBe('/var/lib/mumbo/superagent/worker-bin')
+      expect(runAs?.set).toMatchObject({ GIT_CONFIG_GLOBAL: '/var/lib/mumbo/superagent/worker-gitconfig', GIT_CONFIG_NOSYSTEM: '1', GIT_ASKPASS: '', GIT_TERMINAL_PROMPT: '0' })
     }
     // Each of these must exist before dsh starts, so the documented box layout names every one.
     const layout = readFileSync(join(root, '.agents/notes/implemented/architecture/2026-11-10-agent-containment-run-as-and-model-roots.md'), 'utf8')
       .split('\n').find(line => line.startsWith('- Box layout the rows depend on')) ?? ''
-    const required = [...modelRoots, ...(byId('fs-sandbox')?.config as { readOnlyRoots: string[] }).readOnlyRoots, subprocess.shellActivityDirectory!, subprocess.spillDirectory!]
+    const required = [...modelRoots, ...(byId('fs-sandbox')?.config as { readOnlyRoots: string[] }).readOnlyRoots, subprocess.shellActivityDirectory!, subprocess.spillDirectory!,
+      ...box === 'project' ? [superagent!.workerDirectory!, superagent!.ghConfigDirectory!] : []]
     expect(required.filter(path => !layout.includes(`\`${path}\``))).toEqual([])
     expect(byId('plugin-manager')?.config).toEqual({ modelTools: false })
     expect(byId('workspace-changes')?.config).toEqual({ summaries: false })
@@ -404,16 +428,33 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
   it('starts no MCP stdio server as root', () => {
     const mcp = '@deepseek-ai/dsh-mcp-client'
     const added: Row[] = [
-      { id: 'files', name: mcp, config: { serverName: 'files', transport: 'stdio', command: 'npx', args: [] } },
+      { id: 'files', name: mcp, inject: ['subprocess'], config: { serverName: 'files', transport: 'stdio', command: 'npx', args: [] } },
       { id: 'remote', name: mcp, config: { serverName: 'remote', transport: 'streamable-http', url: 'https://mcp.example/mcp' } },
       { id: 'off', name: mcp, disabled: true, config: { serverName: 'off', transport: 'stdio', command: 'npx' } },
     ]
     // The person's servers come through the manager, which this box mounts.
-    expect(enabled.some(row => row.name === '@deepseek-ai/dsh-mcp-manager')).toBe(true)
+    expect(enabled.find(row => row.name === '@deepseek-ai/dsh-mcp-manager')?.inject).toEqual(['credentials', 'subprocess'])
     expect(rootStdioServers([...rows, ...added])).toEqual([])
-    // The check itself: without run-as on the provider, the manager and a stdio row naming no identity start servers as root.
+    // The check itself: without run-as on the provider, the manager and a stdio row naming no identity start servers as root,
+    // and so do they without the injection, once the provider is gone.
     const unconfined = rows.map(row => row.id === 'subprocess' ? { ...row, config: { ...row.config as object, runAs: undefined } } : row)
     expect(rootStdioServers([...unconfined, ...added])).toEqual(['mcp-manager', 'files'])
+    const unbound = rows.map(row => row.id === 'mcp-manager' ? { ...row, inject: ['credentials'] } : row)
+    expect(rootStdioServers([...unbound, ...added, { ...added[0]!, id: 'loose', inject: undefined }])).toEqual(['mcp-manager', 'loose'])
+  })
+
+  it.runIf(box === 'project')('lists every orchestrator tool the superagent registers, and keeps the founder\'s superagent row apart from the containment keys', () => {
+    expect(CLASSIFICATION['@mumbo/superagent']!.tools).toEqual(superagentTools())
+    expect(superagentTools()).toContain('orchestrator_read')
+    const founder = deployed('mumbo-project.overlay.yml').filter(row => row.id === 'dsh-superagent' && row.config !== undefined).at(-1)?.config as Record<string, unknown>
+    const contained = edge('containment-project.overlay.yml').find(row => row.id === 'dsh-superagent')?.config as Record<string, unknown>
+    const without = (config: Record<string, unknown>) =>
+      Object.fromEntries(Object.entries(config).filter(([key]) => !SUPERAGENT_CONTAINMENT_KEYS.includes(key)))
+    expect(Object.keys(founder).length).toBeGreaterThan(1)
+    expect(without(contained)).toEqual(without(founder))
+    expect(SUPERAGENT_CONTAINMENT_KEYS.filter(key => key in contained)).toEqual(SUPERAGENT_CONTAINMENT_KEYS)
+    // The composed row is the containment row, whole.
+    expect(rows.find(row => row.id === 'dsh-superagent')?.config).toEqual(contained)
   })
 
   it('lists every mounted model tool with how it runs', () => {
@@ -424,8 +465,6 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     expect(table).toEqual(expect.arrayContaining(box === 'person'
       ? ['computer — run-as as desktop (@deepseek-ai/dsh-computer-use-x11)', 'mcp__playwright-mcp__* — run-as as browsermcp (@mumbo/browser-consent)']
       : ['bash — run-as (@deepseek-ai/dsh-tool-bash)']))
-    // Only these may run outside the run-as provider and the model roots; each awaits a named ruling.
-    expect(names.filter(name => CLASSIFICATION[name]?.runs === 'pending-ruling').sort())
-      .toEqual(box === 'person' ? [] : ['@mumbo/superagent'])
+    if (box === 'project') expect(table).toEqual(expect.arrayContaining(['orchestrator_read — in-process (@mumbo/superagent)']))
   })
 })

@@ -4,7 +4,9 @@
 # Start every process dsh runs for the model as `agent`, with an explicit environment that reaches GitHub through the
 # box-local proxy, as dsh itself does. The gh wrapper and the proxy CA are root-owned, world-readable copies outside
 # /root/.mumbo, which stays 0700. dsh's own TMPDIR stays root-only; shell activity records go to /run/dsh-shell (root,
-# 0711) and command spill files to a directory agent can read.
+# 0711) and command spill files to a directory agent can read. The superagent's worker shims come first on PATH and its
+# git configuration is the global one, as dsh-superagent sets them in its own environment, which run-as children do not
+# receive; both live in its root-owned worker directory.
 - id: subprocess
   config:
     shellActivityDirectory: /run/dsh-shell
@@ -20,7 +22,11 @@
         USER: agent
         LOGNAME: agent
         SHELL: /bin/bash
-        PATH: /usr/local/lib/mumbo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        PATH: /var/lib/mumbo/superagent/worker-bin:/usr/local/lib/mumbo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        GIT_CONFIG_GLOBAL: /var/lib/mumbo/superagent/worker-gitconfig
+        GIT_CONFIG_NOSYSTEM: '1'
+        GIT_ASKPASS: ''
+        GIT_TERMINAL_PROMPT: '0'
         NODE_EXTRA_CA_CERTS: /usr/local/share/ca-certificates/mumbo-box.crt
         NODE_USE_ENV_PROXY: '1'
         HTTPS_PROXY: http://127.0.0.1:8899
@@ -52,13 +58,23 @@
   config:
     root: /var/lib/mumbo/spill
     groupReadable: true
-# Ticket directories go in the ticket work directory above, created as agent; the rest restates mumbo-project.overlay.yml.
+# Ticket directories go in the ticket work directory above, created as agent. The worker shims and git configuration live in
+# /var/lib/mumbo/superagent (root:agent 2750, worker-bin 2750, shims 0750, worker-gitconfig 0640), which agent reads and
+# runs but cannot change, and the orchestrator's own gh reads its configuration from root's /root/.config/gh (0700); the
+# plugin refuses both at load unless they are root's. The rest restates mumbo-project.overlay.yml, which the gate checks.
 - id: dsh-superagent
   config:
     stateDir: !!js dshHomePath('superagent')
     workDirectory: /root/work
+    workerDirectory: /var/lib/mumbo/superagent
+    ghConfigDirectory: /root/.config/gh
     panelAdmins: !!js (process.env.MUMBO_PANEL_ADMINS ?? '').split(',').filter(Boolean)
     githubApp: !!js "process.env.MUMBO_GITHUB_APP_LOGIN || process.env.MUMBO_GITHUB_APP_USER_ID ? { login: process.env.MUMBO_GITHUB_APP_LOGIN, userId: Number(process.env.MUMBO_GITHUB_APP_USER_ID) } : undefined"
+# The manager starts the person's MCP stdio servers through the run-as provider as agent, and runs only while a subprocess
+# service is mounted, so no server starts as root after a provider remount or when the provider failed at load. Only
+# `inject` is patched: a `config` patch would replace the servers the person added in Settings.
+- id: mcp-manager
+  inject: [credentials, subprocess]
 # Installing or enabling a plugin loads code into root dsh: no plugin_manager tool for the model.
 - id: plugin-manager
   config:

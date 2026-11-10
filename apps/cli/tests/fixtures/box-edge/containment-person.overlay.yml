@@ -71,6 +71,11 @@
   config:
     root: /var/lib/mumbo/spill
     groupReadable: true
+# The manager starts the person's MCP stdio servers through the run-as provider as agent, and runs only while a subprocess
+# service is mounted, so no server starts as root after a provider remount or when the provider failed at load. Only
+# `inject` is patched: a `config` patch would replace the servers the person added in Settings.
+- id: mcp-manager
+  inject: [credentials, subprocess]
 # Installing or enabling a plugin loads code into root dsh: no plugin_manager tool for the model.
 - id: plugin-manager
   config:
