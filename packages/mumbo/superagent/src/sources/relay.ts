@@ -10,6 +10,7 @@ import { readFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { z } from 'zod'
 import { key, threadKey, type OutboundMessage, type Trigger } from '../core/index.ts'
+import { COMMAND_TIMEOUT_MS } from '../infra/commands.ts'
 import { sourceContext, type SourceContext, type SourceHost } from './host.ts'
 import type { SourceKind } from './kind.ts'
 
@@ -50,13 +51,15 @@ export const NOT_A_MEMBER = 'not_a_member'
  * `{ member, project, thread, messageId, text }`: the Channel's member and conversation (the `thread` the relay route
  * answered), the project id from `deployment.edge`, the Outbox message id, and the text cut to {@link RELAY_LIMITS}`.text`
  * characters, ending in `…` when cut. The call goes over MCP streamable HTTP to `edge.url` with `Authorization: Bearer <the
- * trimmed content of edge.tokenFile>`, read on each call. The edge reports each message id at most once.
- * @param host - carries the resolved deployment.
- * @param message - the Outbox message; its id is the idempotency key.
+ * trimmed content of edge.tokenFile>`, read on each call. The edge reports each `(project, messageId)` pair at most once:
+ * Outbox message ids are unique only within one project's box. The whole exchange is aborted when `commands.signal` aborts,
+ * as on `Runtime.stop`, and after {@link COMMAND_TIMEOUT_MS}, the time limit of one command.
+ * @param host - carries the resolved deployment and the Runtime's lifetime signal.
+ * @param message - the Outbox message; with the project, its id is the idempotency key.
  * @returns `'sent'` for any result that is not an error, `'gone'` for an error result whose text starts with
  * `not_a_member:`.
- * @throws when `edge` is unset, the token file is unreadable or empty, the call fails, or the edge answers another error,
- * so the Outbox retries.
+ * @throws when `edge` is unset, the token file is unreadable or empty, the call fails or is aborted, or the edge answers
+ * another error, so the Outbox retries.
  */
 export async function sendRelay(host: Pick<SourceContext, 'commands'>, message: OutboundMessage): Promise<'sent' | 'gone'> {
   const { edge } = host.commands.deployment
@@ -68,10 +71,12 @@ export async function sendRelay(host: Pick<SourceContext, 'commands'>, message: 
   const limit = RELAY_LIMITS.text
   // Drop a high surrogate left alone by the cut, so the text stays well-formed.
   const text = message.text.length <= limit ? message.text : `${message.text.slice(0, limit - 1).replace(/[\uD800-\uDBFF]$/, '')}…`
+  // Each request's `signal` aborts its fetch; the transport overrides `requestInit.signal` with its own.
+  const options = { signal: AbortSignal.any([host.commands.signal, AbortSignal.timeout(COMMAND_TIMEOUT_MS)]), timeout: COMMAND_TIMEOUT_MS }
   const client = new Client({ name: 'dsh-superagent', version: '1.0.0' })
   try {
-    await client.connect(new StreamableHTTPClientTransport(new URL(edge.url), { requestInit: { headers: { authorization: `Bearer ${token}` } } }))
-    const result = await client.callTool({ name: REPORT_TOOL, arguments: { member, project: edge.project, thread, messageId: message.id, text } })
+    await client.connect(new StreamableHTTPClientTransport(new URL(edge.url), { requestInit: { headers: { authorization: `Bearer ${token}` } } }), options)
+    const result = await client.callTool({ name: REPORT_TOOL, arguments: { member, project: edge.project, thread, messageId: message.id, text } }, options)
     if (!result.isError) return 'sent'
     const answer = result.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n')
     if (answer.startsWith(`${NOT_A_MEMBER}:`)) return 'gone'

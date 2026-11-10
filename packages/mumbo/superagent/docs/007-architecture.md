@@ -408,7 +408,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/stage.spec.ts` | The Ticket stages, row by row |
 | `tests/policy.spec.ts` | Source scope, the gate, the admission table, Mandate revalidation, the Policy version, settings migrations and assessment outcomes |
 | `tests/registry.spec.ts` | `SourceRegistry`: instances, validation, Policy parts, Channels and Thread context |
-| `tests/relay.spec.ts` | In Mumbo, the relay Source on a running Runtime: requests and context as Triggers and candidates, the Policy's allowed list and its every-member switch, admission, idempotent message ids, malformed bodies and continued conversations (`UPSTREAM.md` S9); replies reported to a fake edge, retried, dropped as gone, cut to the limit, and waiting without a token or an edge (`UPSTREAM.md` S10) |
+| `tests/relay.spec.ts` | In Mumbo, the relay Source on a running Runtime: requests and context as Triggers and candidates, the Policy's allowed list and its every-member switch, admission, idempotent message ids, malformed bodies and continued conversations (`UPSTREAM.md` S9); replies reported to a fake edge, retried, dropped as gone, cut to the limit, waiting without a token or an edge, and aborted when the Runtime stops (`UPSTREAM.md` S10) |
 | `tests/sources.spec.ts` | The Feishu and GitHub Sources on a `SourceContext`: translation, polls and read positions, the pull request rules, health |
 | `tests/commands.spec.ts` | CLI calls as the deployment's accounts, the Channels' answers, and repository-scoped GitHub calls |
 | `tests/feishu-read.spec.ts`, `tests/github-read.spec.ts` | Feishu and GitHub reads |

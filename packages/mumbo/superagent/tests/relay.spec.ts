@@ -42,7 +42,7 @@ const ReportSchema = z.object({ member: z.string(), project: z.string(), thread:
 type Report = z.infer<typeof ReportSchema>
 const SENT: CallToolResult = { content: [{ type: 'text', text: '{"result":"sent"}' }] }
 /** The fake edge: each `report_to_member` call it took, and its answer to the next ones. It refuses any other bearer token with 401. */
-const edge = { calls: [] as Report[], answer: (_report: Report): CallToolResult => SENT, url: '', tokenFile: '', close: () => {} }
+const edge = { calls: [] as Report[], answer: (_report: Report): CallToolResult | Promise<CallToolResult> => SENT, url: '', tokenFile: '', close: () => {} }
 beforeAll(async () => {
   const handler = toNodeHandler(createMcpHandler(() => {
     const mcp = new McpServer({ name: 'fake-edge', version: '1.0.0' }, { capabilities: { tools: {} } })
@@ -303,6 +303,20 @@ it('retries a failed report under the same message id, and drops a reply as gone
   await host.runtime.sendReplies()
   expect(host.runtime.store.receipts.get('r2')).toMatchObject({ status: 'dropped', dropped: { reason: 'channelGone' } })
   expect(edge.calls).toHaveLength(3)
+})
+
+it('stops the Runtime without waiting for an edge that does not answer a report', async () => {
+  const sent = await post(message('m1', 'request'))
+  const channel = host.runtime.store.triggers.get(String(sent.body.trigger))!.channel!
+  let answer = () => {}
+  edge.answer = () => new Promise(resolve => { answer = () => resolve(SENT) })
+  host.runtime.outbox.send({ id: 'r1', channel, text: 'Done.', kind: 'reply' })
+  const sending = host.runtime.sendReplies()
+  await vi.waitFor(() => expect(edge.calls).toHaveLength(1))
+  // Without the lifetime signal, stopping waits for the SDK's 60 s request timeout, past this test's time limit.
+  await host.runtime.stop()
+  await sending
+  answer()
 })
 
 it('cuts a text longer than the relay limit to the limit, ending in an ellipsis and without a lone surrogate', async () => {
