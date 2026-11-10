@@ -50,20 +50,35 @@ What this means for the design **[my call on the wording; founder on the directi
 - **Mumbo is the person's one OS.** Their browser, their AI assistant and their coding agents live in one place.
 - **The cloud box is the always-on source of truth.** It keeps working while the person's laptop sleeps: Mumbo, schedules, the box's browser and project work all run there.
 - **The desktop app is the native-performance front end.**
-  - It uses local compute wherever that improves the feel, with state kept in step with the box: a local browser engine, and local rendering of the client.
+  - Its own controls are local: tabs, address bar, the agent panel and consent prompts.
+  - It uses local compute where a GPU-less box is weak: WebGL, webcam, and sites signed in with the laptop's own identity.
   - The box's own Chrome stays the browser the assistant automates.
-- **The browser must feel native.** A streamed remote desktop can be made smooth (section 17b) but never native, so native feel comes from the desktop app's local browser.
+- **The browser must feel native.**
+  - Native feel comes from local controls plus a stream that adds no more than about two frames beyond the network round trip.
+  - Browsing is not claimed to be faster: page speed is bound by single-core JavaScript, and Mighty shut down in 2022 selling speed.
+  - The claim is that the browser and the assistant are always on and continuous across devices.
+- **Each identity lives on one device; sessions never move.** **[my call, from the 2026-11-10 research]**
+  - The box owns every sign-in an agent needs while the laptop sleeps. The laptop owns what is bound to its hardware or GPU.
+  - Chrome Sync carries the account (bookmarks, settings, extensions, history, open tabs) but never cookies; it syncs cookies only between managed ChromeOS devices.
+  - Copied Google cookies die under Device Bound Session Credentials, which are on by default for Google accounts on Windows from May 2026 and absent on Linux.
+  - So the box signs in itself, and no feature copies cookies or profiles between devices. Any per-site cookie import would need counsel first.
 
 Milestones toward it. These run alongside M1–M6 and don't widen M1:
 
 | Step | Contents | Done when |
 |---|---|---|
 | **N1** the person's computer (sections 17b, 17c) | Mumbo, the always-present assistant session; a smooth, complete desktop with Google Chrome; Browser and Desktop tabs in the app; the box in the person's region | The founder works from India in Mumbo and their box's Chrome and calls it smooth |
-| **N2** desktop app as the client | `apps/desktop` connects to the person's box as its host (signed in through the edge) instead of running dsh locally. Its Browser tab is a local browser engine (the app's own Chromium, which its stock Browser tab already uses on the desktop), kept in step with the box's Chrome | Everyday browsing in the desktop app is as fast as a local browser, and the assistant still works in the box's Chrome while the laptop sleeps |
+| **N2** desktop app as the client | `apps/desktop` connects to the person's box as its host, signed in through the edge, instead of running dsh locally. It is a native shell, with the Chromium host in a separate process and agent input injected below the UI (the split ChatGPT Atlas uses). It draws local tabs, address bar, agent panel and consent prompts, and decodes the box's stream with WebCodecs. Agent-driven and box-signed-in tabs show as the box's stream. A local engine (`WebContentsView`) handles the person's local-identity browsing, WebGL and webcam. Google sign-in in the app goes through the system browser. Later, an Electron transport over QUIC or WebTransport through an NLB, once E2B nodes can take UDP | Browsing in the app feels native: local controls, and a stream within two frames of the round trip. The assistant still works in the box's Chrome while the laptop sleeps |
 | **N3** coding agents in one place | Local Claude Code and Codex sessions attach to mumbo through the MCP door (M3); agents that run in the box follow section 8.1 | A local Claude Code session takes a Mumbo Ticket and reports back into Mumbo |
-| **N4** handoff | Open work moves between the laptop and the box: when the laptop sleeps, Mumbo and the box's Chrome carry on; when it wakes, the app shows what happened (the digest, M4) | The founder closes the laptop mid-task and finds the task done on reopening |
+| **N4** handoff | Open work moves between the laptop and the box as navigation, never identity: URL, tab group, scroll position, non-secret form drafts and a task digest, over Mumbo's own channel in under a second (CDP on the box, a protocol to the app). Chrome Sync is not the channel, because it gives no latency guarantee. A per-tab driver lease means one engine drives a tab at a time. A task that needs a session bound to the laptop goes to that session, in a consented local tab, instead of moving it. When the laptop sleeps, Mumbo and the box's Chrome carry on; when it wakes, the app shows what happened (the digest, M4) | The founder closes the laptop mid-task and finds the task done on reopening |
 
-What can be kept in step between the local browser and the box's Chrome is being researched (2026-11-10): Chrome Sync, cookies, Device Bound Session Credentials, and WhatsApp linked devices. So is the fastest VM instance type and guest OS. N2's design waits for that research; N1 does not.
+Research, 2026-11-10 (`.claude/research/reports/Cloud Chrome sync and native desktop.md`), still to be measured:
+- how often Google challenges sign-ins from the nodes' addresses;
+- keypress-to-glyph latency and CPU per stream on real nodes;
+- whether E2B nodes can take UDP;
+- counsel's view on any cookie import.
+
+The research on instance type, guest OS and regions is still pending.
 
 ### Success **[founder]**
 
@@ -598,8 +613,10 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
 
 ### Mumbo, the always-present assistant
 
-**What the person sees.**
-- One Session called **Mumbo**, pinned at the top of the sidebar, in every person's box.
+**What the person sees** **[founder, 2026-11-10, after B17 went live: "a personal assistant dedicated chat above 'Plugins'", not a chat within projects]**.
+- **Mumbo is its own entry in the sidebar's navigation band, above Plugins** (B29): its icon and "Mumbo", in every person's box.
+  - It opens the Mumbo Session directly, and is highlighted while that Session is on screen.
+  - Mumbo does not appear in the Workspace and Session lists. It is not a project chat, and it is not pinned there.
 - Opening the app with no Session selected opens Mumbo, on the phone too.
 - It is the place to dump things, ask for status and come back to.
 - Other chats remain for side work.
@@ -622,7 +639,7 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
 - **Host, at start:**
   - resolve the Session `mumbo`, a fixed id the edge and other plugins can name;
   - if it is not found, create it in the Workspace of the person's files (`/root/projects`) with the deployment's default preset, and title it `Mumbo`;
-  - unarchive it if it is archived, and pin it if it isn't pinned;
+  - unarchive it if it is archived. From B29 it isn't pinned: the navigation entry replaces the pin;
   - one ensure runs at a time.
   - The person may rename it; the plugin titles it only when it creates it.
 - **Its own instructions** come from a system prompt section added on `agent/created` for this Session only. The text is the plugin's `instructions` config, which the edge writes as it writes `roleInstructions` today. In summary:
@@ -635,7 +652,25 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
 - **Client:**
   - on first load, if no Session is open, open `mumbo` with `ctx.uiWorkspace.openSession`;
   - never take over a Session the person chose.
-  - Pinning alone puts it first in the sidebar, so it needs no new sidebar slot.
+- **B29, Mumbo in the navigation band. Two small harness additions, because no slot does this today:**
+  - **(a) `ui-sidebar`: a panel-list entry may name a Session.**
+    - Today every `sidebar.panellist` row calls `selectPanel(id)` and needs a main panel.
+    - An entry registered with `session: <SessionId>` instead opens that Session (`uiWorkspace.openSession`) from its row and from the More menu. It is highlighted while that Session is the main view and no panel is selected.
+    - Like Plugins, it is fixed: it can't be unpinned into More.
+    - `@mumbo/assistant`'s client registers the entry `mumbo` with order −10, below Plugins' 0, so it sits first in the band, with label "Mumbo" from its own locale namespace.
+    - Its icon is an existing shared icon until designers approve a Mumbo glyph (repository rule on official artwork).
+  - **(b) `ui-workspace`: a plugin may hide a Session from the Workspace browser's grouped and flat lists.** It registers through a registration that returns its disposer.
+    - Search still finds it, so something said in Mumbo can be found.
+    - `@mumbo/assistant` hides `mumbo`.
+  - **The B17 Host part stays:** the fixed id, ensure, title, unarchive, the archive veto and the prompt section. It no longer pins Mumbo, and unpins it once if a B17 box pinned it.
+  - The first-load opening of Mumbo stays.
+  - Each addition comes with its README contract line and tests, and the client UI snapshot or GIF the repository requires for a user-visible change.
+  - **Acceptance:**
+    - the band shows Mumbo above Plugins in the wide sidebar and the rail;
+    - a click opens the Mumbo chat, and the row is highlighted;
+    - Mumbo is absent from every Workspace group and the flat list;
+    - on a phone, the drawer shows the same row;
+    - a project box shows no Mumbo row.
 - **Never a blank row, a small harness change.**
   - Today the Web treats a Session with no turns as the Workspace's temporary blank row. A fresh Mumbo would be hidden from the pinned group until its first message, and "New Session" would land in it.
   - Change: a Session that is pinned, or whose title was set explicitly (a user-sourced `session/title`), is never treated as blank.
@@ -681,10 +716,19 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
 **Design** **[my call; the research ranks the streaming stack]**:
 - **A display server that streams only what was drawn.**
   - Replace Xvfb + x11vnc + websockify + noVNC with one X server that has the VNC server built in, so nothing polls.
-  - **Provisional choice: KasmVNC**, a TigerVNC fork with its own web client and WebP/JPEG encoding that lowers quality during fast motion. It also encodes across threads and copies text both ways.
-  - It is served on the same port and the same `/desktop/` path. KasmVNC's own login is off: the edge stays the only gate, raw ports stay loopback-only, and the edge's Origin checks apply unchanged.
-  - Depth stays 24 bits, which Chrome needs. The screen follows the viewer's size, so a phone gets a phone-sized desktop.
-  - WebRTC stacks (Selkies) are in only if the research shows VNC can't meet the acceptance below. They need a UDP or TURN path that the ALB doesn't carry, plus video encoding on the box's CPU.
+  - **KasmVNC 1.5.2 or later** (decided after the 2026-11-10 research). It is a single Xvnc server that replaces Xvfb and x11vnc, with its own web client. It encodes changed rectangles as JPEG or WebP across threads, lowers quality during fast motion with a periodic lossless refresh, and has an H.264 video mode.
+    - It drops into the X11 and XFCE setup, and its per-direction clipboard limits (size, type, rate) fit the consent model.
+    - Stay current on its releases: 1.5.1 and 1.5.2 fixed a web-server path traversal (CVE-2024-38449) and a WebSocket handshake overflow. The template pins the version and its checksum.
+  - **Starting settings:** 30 frames a second at most; 2 encoder threads, where KasmVNC defaults to every core and would starve Chrome; text-only clipboard with size and rate limits.
+  - It is served on the same port and the same `/desktop/` path. KasmVNC's own login and TLS are off: the edge terminates TLS and stays the only gate, raw ports stay loopback-only, and the edge's Origin checks apply unchanged.
+    - No stream URL ever works without the person's edge sign-in. Bearer stream links (Steel's are unauthenticated) are not used.
+  - Depth stays 24 bits, which Chrome needs. The screen follows the viewer's size, capped at 1600×900, so a phone gets a phone-sized desktop.
+  - **A Selkies 2.x bake-off** on our own nodes. It is WebSocket by default (H.264 in stripes, near-zero idle CPU), but has a thin maintainer base. It replaces KasmVNC only if it wins on three measured numbers:
+    - keypress-to-glyph latency, filmed with a camera;
+    - scroll frame rate at the box's vCPU count;
+    - idle CPU.
+  - Not used for the main view: Chrome's CDP screencast, which runs at about 4–12 fps, shows only the page and misses dialogs and pickers. Also not used: WebRTC-only stacks, which the ALB can't carry.
+  - **No WebGL fallback.** Chrome made SwiftShader opt-in (`--enable-unsafe-swiftshader`), a flag that lowers security for a browser the agent drives, so it stays off. WebGL-heavy sites and the webcam belong to the desktop app's local engine (N2).
 - **XFCE** as the desktop, run as the `browser` user as openbox is today:
   - the xfwm4 window manager with compositing off, since compositing makes the VNC server send more;
   - the panel with a window list and launcher;
@@ -703,8 +747,9 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
   - Chrome flags for software rendering follow the research and the measurement.
 
 **Acceptance**, from the founder's location after the move to India (section 17c), on a laptop and on a phone:
-- scrolling a LinkedIn feed in the desktop shows at least 20 frames a second in the viewer's statistics, and the box's CPU stays below 80%;
-- typing in WhatsApp Web echoes without a visible delay;
+- keypress to glyph, filmed with a camera, is within two frames (about 35 ms) of the network round trip. That is about 40–75 ms from Bangalore to Mumbai, against the roughly 70 ms at which people start to notice;
+- scrolling a LinkedIn feed shows at least 25 frames a second in the viewer's statistics, and the box's CPU stays below 80%;
+- with nobody watching, the stream uses almost no CPU;
 - minimizing every window leaves the taskbar, and each window comes back from it;
 - closing Chrome brings it back within 5 seconds with its tabs, and the assistant's browser tools work again;
 - text copies both ways between the person's device and the desktop;
@@ -735,6 +780,10 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
   - So "Browser" is the desktop showing your browser.
   - Rejected: a CDP screencast of the page. It shows no tabs, address bar, sign-in pop-ups, permission prompts or file pickers, and it needs the client to reach CDP, which agent containment is taking away. It would also carry every keystroke, passwords included, as CDP input.
   - Rejected: cropping the stream to one window. No VNC server here does that.
+- **Take over (B28).** The Browser tab has "Take over" and "Hand back".
+  - While the person has taken over, `@mumbo/browser-consent` holds no CDP connection to Chrome, and refuses every browser tool and computer-use action with "the person has taken over the browser".
+  - Hand back reconnects.
+  - It is for sign-ins and anything else the person wants the agent kept out of, as Operator's takeover was. Nothing the person types then reaches the agent, or a screenshot.
 - **Hidden tabs disconnect** (no `keepMounted`). Two hidden live views would each keep an encoder busy. Showing a tab reconnects in about a second.
 - **Ready for the local browser (N2).**
   - `box-browser` registers in the `builtin` band. When the desktop app registers its own local-browser body for the same kind in the `extension` band, the right panel uses that one and falls back to the live view when it unregisters.
@@ -757,10 +806,18 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
     - The founder was told plainly that the agent, or anyone steering it, and the backups could read every password and card, and that blocking Chrome's pages doesn't stop it.
     - So the `passwords` and `payments` sync types are on now, not gated on B24.
     - The designer's recommendation was to wait for B24's escape tests.
+    - The 2026-11-10 research recommends going further and keeping `passwords`, `autofill` (which covers `payments`) and the password manager off the box by policy for good. With no saved secret on the box, it is the only layer that holds even if CDP filtering leaks. Google's own agentic Chrome and Edge's Copilot Actions keep their models away from saved passwords.
+    - **The founder was asked again** with that recommendation stated plainly, and three options: wait for B24, now, or never. **Their answer was "Turn it on now"** **[founder: 2026-11-10]**. Full sync turns on with slice 3.
   - Chrome Sync never carries sign-ins (cookies) in either direction. The person signs in to each site once in the box, and the profile, with its cookies, is in every backup.
-- **Signing in.**
-  - The person signs in on the desktop.
-  - For WhatsApp from a phone, use "Link with phone number" (a code), because the phone showing the desktop can't scan its own screen.
+- **Signing in, in this order** **[my call, from the research]**:
+  1. **The site's own link-a-device flow,** which makes the box a legitimate device of the account:
+     - WhatsApp's 8-character "Link with phone number" code, since a phone showing the desktop can't scan its own screen;
+     - Telegram's or Discord's QR approved from an existing session.
+     - WhatsApp logs out linked devices when the phone stays offline for about 14 days.
+  2. **The person signs in by hand through the stream while the agent is detached** ("Take over", B28). Google may refuse a browser under automation, so the first Google sign-in always goes this way.
+     - Passkeys from a phone (hybrid) don't work through a stream, because they need Bluetooth near the client. Use TOTP, SMS or a password.
+  3. **Never:** copying cookies or a profile from the laptop. Google's are bound by Device Bound Session Credentials, others may be bound by rotation, and the legal position needs counsel first.
+- **Google Workspace session binding.** A Workspace tenant that enforces Device Bound Session Credentials blocks unsupported platforms, Linux Chrome among them, from its enforced apps. For `mumbo.si` and `cambrialabs.ai` (the founder's tenants), leave that enforcement off if Google apps are to work in the box.
 - **Rules unchanged:**
   - the assistant never types passwords or one-time codes;
   - `@mumbo/browser-consent` asks before writes;
@@ -812,9 +869,37 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
       - The composition gate lists it.
     - **The Browser tab's `wmctrl`** (B20) runs as `desktop` too. It isn't model-reachable, but root must never be a client of an X server that a less-privileged user (`browser`) runs.
   - **Read-only roots.** The attachment and skill directories the model needs are listed exactly, never `/root/.dsh` itself and never a credentials store. They are checked the same way as the model roots, and changes there are refused.
-  - **Project boxes** add `/root/work`, owned by `agent`, to the model roots. `/root/.mumbo` is `0711`, with `bin/` and `ca/ca.crt` readable, and `ca/ca.key` and the rest root-only.
+  - **Project boxes** add `/root/work`, owned by `agent`, to the model roots.
+    - `/root/.mumbo` stays `0700`, because `start.sh` holds the box token. `start.sh` is `0700` everywhere.
+    - The gh wrapper the agent calls lives in `/usr/local/lib/mumbo/bin`, root-owned and readable by all. The box CA certificate is the copy in `/usr/local/share/ca-certificates/mumbo-box.crt`.
+  - **The XFCE session runs as its own user, `xsession`. Only Chrome runs as `browser`,** through its restart loop.
+    - Any X client can inject input. So a terminal or run dialog that computer use opens on the desktop must not land a shell that can read Chrome's `Login Data` and `Cookies`.
+    - `xsession` is in `shared` (Downloads) and has the workspace through its group, nothing else.
+    - The panel's Chrome launcher brings the loop's Chrome to the front and never starts a second Chrome as `xsession`.
+    - The person keeps the desktop terminal, as `xsession`.
+    - **What remains:** a process on the display can still drive Chrome's window without consent, because X11 has no isolation between clients. Getting one needs a consented computer-use action. The X SECURITY extension's untrusted clients are a later option.
+  - **`/proc` is mounted with `hidepid=2`** (or `hidepid=invisible`), so one user can't see another's processes or their command lines, such as the text `xdotool type` was given.
+  - **The first-run welcome's marker and message** move to an `agent`-readable place, such as `/home/agent/.mumbo-welcome`, because hooks run as `agent`. A root hook would be a model-reachable root path.
+  - **Playwright MCP's output directory** is `browsermcp`-owned, `0700`, and outside backups.
+  - **An MCP server the person adds from the panel** runs as `agent` in boxes, never as root. The composition gate rejects a stdio server without an identity in box compositions.
   - **Downloads** are `/home/shared/Downloads`, owned by `browser:shared` with mode `2770`; `agent` and `browser` are both in `shared`. Chrome's `DownloadDirectory` policy points there, and it is a model root. `/home/browser` stays `0700`, and backups include `/home/shared`.
   - **A composition gate:** a test lists every model-visible tool in the box compositions with how it runs (root in-process, or "run as"), and fails on a tool it doesn't know. A new plugin can't quietly reopen this.
+  - **A working directory never extends the model roots.**
+    - A Session's origin may sit outside them as its working directory, because the person chose it, but the model's file tools still reach only the model and read-only roots.
+    - A working directory the model chooses outside the roots reverts to the origin, with a logged event.
+  - **Superagent's ticket workers (project boxes) are contained.**
+    - Ticket directories live in `/root/work`, created as `agent`.
+    - The worker shims and gitconfig live in `/var/lib/mumbo/superagent`, `root:agent 2750` (shims `0750`, gitconfig `0640`), readable by `agent` and never writable by it.
+    - Everything that touches a ticket directory runs as `agent`: the Execution prepare command, the worker probe, environment checks and any `git`.
+    - The root orchestrator's own GitHub CLI uses a root-owned `gh` and config directory, because `gh` aliases can run shell commands.
+    - The orchestrator's model tools are listed in the gate as root in-process, data only.
+  - **Other box paths:**
+    - `/run/dsh-shell` `0711` root;
+    - `/var/lib/mumbo/{attachments,spill,subprocess-spill}` `root:agent 2750`, the read-only roots. **Backups include the attachments** (and the spill, if Sessions read it after a restart). Existing uploads move there once.
+    - `DSH_AGENTS_HOME=/usr/local/share/mumbo/agents`, root-owned;
+    - root dsh's `TMPDIR=/root/.dsh/tmp`;
+    - `protected_hardlinks=1`, asserted at load.
+  - **The project box's `dsh-superagent` config has one source:** the containment overlay, or a gate that compares the whole object with the founder overlay's. Spot checks would miss drift.
 - **Box permissions** (edge start script):
   - `/root` is `0711`. `/root/projects` belongs to `agent`, so Session working directories don't change.
   - `/root/.dsh`, `/root/.mumbo` and `/root/dsh.log` are root-only.
@@ -885,7 +970,9 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
 | **B16** | mumbo-impl (done, approved) | Project boxes get `MUMBO_GITHUB_APP_LOGIN` and `MUMBO_GITHUB_APP_USER_ID` (superagent App mode, UPSTREAM S7) | #27 |
 | **B17** | mumbo-impl | `@mumbo/assistant`: the Mumbo Session (ensure, title, pin, unarchive, its prompt section, opening it on first load), the harness archive guard, and the person-box overlay row with `instructions` in the edge start script. Tests: the acceptance above, a real-composition test, snapshots | — |
 | **B18** | mumbo-impl | Desktop and Chrome, edge and template: XFCE; Google Chrome with the policy file and profile kept; the restart loop; Downloads; backups of `/home/browser` without caches; the `roleInstructions` line. Measure before and after on the founder's box. Rollback is the previous template | — |
-| **B19** | mumbo-impl | The streaming stack: KasmVNC, or the research's pick, in place of Xvfb, x11vnc, websockify and noVNC at the same `/desktop/` path. Then the vCPU decision from the measurement | B18, research |
+| **B19** | mumbo-impl | The streaming stack: KasmVNC 1.5.2 or later, version and checksum pinned, in place of Xvfb, x11vnc, websockify and noVNC at the same `/desktop/` path. 30 fps, 2 encoder threads, a text-only clipboard with limits, screen size capped at 1600×900, its own login and TLS off behind the edge. Then measure keypress-to-glyph (camera), scroll fps and idle CPU, run the Selkies 2.x bake-off, and make the vCPU decision | B18 (after slice 2) |
+| **B29** (urgent: the founder's first impression) | mumbo-impl | Mumbo as its own navigation entry above Plugins: the `ui-sidebar` Session-entry option, the `ui-workspace` hide-a-Session registration, and `@mumbo/assistant`'s client registering both. It stops pinning. Tests, README lines and the UI snapshot or GIF | B17 |
+| **B28** | mumbo-impl | Take over and Hand back in the Browser tab: browser-consent drops its CDP connection and refuses browser and computer-use tools while the person has taken over. The first Google sign-in uses it | B20, B25 |
 | **B20** | mumbo-impl | `box-browser` and `box-desktop` in `@mumbo/box-links`, with the owner-only Chrome-to-front call; the person overlay drops the stock Web Browser tab. Works with today's noVNC and B19's stack alike | — |
 | **B21** | mumbo-impl | Edge, by region (section 17c) | R6 |
 | **B22** | mumbo-impl | Edge, moving between regions (section 17c) | B21 |
@@ -1017,6 +1104,20 @@ The person's-computer track (N1: sections 17b and 17c, tasks B17–B23 and R1–
 - **Move the agent onto the `mumbo-bot` App**, so no machine accounts remain. This needs superagent's GitHub Source to work without `/user` and notifications.
 - **Limit the superagent panel's hover styles to devices that hover.** Wrap every `:hover` rule in the copy's `src/client/client.css` in `@media (hover: hover)`, so a tap on a phone does not leave a row highlighted. Log it in UPSTREAM.md, and let the repository's hover spec scan the copy. The copy's other theme differences stay excluded: corner shape, hairline borders and elevated scroll rebinding. The panel already uses dsh's color tokens, and it is an owners-only supervision page.
 
+- **Restoring an older backup without deleting anything** (B30, approved 2026-11-10).
+  - An operator command (`restore-version.mjs`) writes a one-shot "restore version `<versionId>` for `<principal>`" record in the edge store. The edge presigns that version for the principal's next restore.
+  - The record clears after the restored box's first successful backup, so a box lost before then comes back from the same version.
+  - No new principal gets the backup key's Decrypt. The backups hold the founder's synced passwords, and agents run operations. If an operator role is ever needed, it must be human-only with MFA, and conditioned on S3 and the backup bucket.
+  - The RUNBOOK's delete-newer-versions path is now only a last resort.
+- **The browser after N1** (from the 2026-11-10 research):
+  - **A CDP broker.** Chrome takes `--remote-debugging-pipe` or a port only the broker can reach. Playwright MCP connects through the broker (`--cdp-endpoint`), which:
+    - refuses cookie-reading methods (`Storage.getCookies`, `Network.getCookies`, `Network.getAllCookies`);
+    - refuses agent commands on password and payment origins;
+    - stops forwarding during Take over.
+    - Playwright MCP states it is "not a security boundary", so the CDP socket is what holds the person's web identity.
+  - **A logged-out browser for research tasks,** a throwaway context with no sign-ins, as Atlas does. The signed-in Chrome is kept for account tasks, which shrinks what injected instructions on an arbitrary page can reach.
+  - **Per-site approval tiers, and a phishing check before any sign-in form.**
+
 ### Deferred to their own research or design
 
 - Claude workers in sandboxes and the account-manager plugin: subscription logins, usage and rotation, with `cux` as the reference (section 8.1).
@@ -1037,8 +1138,10 @@ The person's-computer track (N1: sections 17b and 17c, tasks B17–B23 and R1–
   - Until B24 lands, the root agent, and anyone steering it, can read them from disk, and the backups carry them.
   - The founder accepted this, informed (section 17b). Mitigation: B24 is pulled forward and runs first, and B25's denials close the browser paths.
 - **Google may refuse to sign in** a browser with remote debugging on, or one on a datacenter address.
-  - Mitigation: the person signs in on the desktop and handles Google's checks.
-  - If Google still refuses, Chrome is restarted once without the debugging port for the sign-in, then with it again. B18's acceptance tests this first.
+  - Mitigation: the person signs in by hand through the stream with the agent detached (Take over, B28), and handles Google's checks.
+  - If Google still refuses, Chrome is restarted once without the debugging port for the sign-in, then with it again.
+  - How often Google challenges our nodes' addresses is still to be measured.
+- **A Workspace tenant that enforces Device Bound Session Credentials** blocks the box's Linux Chrome from its enforced apps. Mitigation: leave that enforcement off for the founder's tenants, or use those apps in the desktop app's local engine (N2).
 - **Google Chrome's terms.** Installing Chrome in boxes for the company's own people is ordinary use. Offering it to customers needs a review before productizing.
 - **A region costs a fixed amount each month** (E2B control, NAT, the ALB, a minimum of one node) whether or not anyone uses it. R3 states the amount before apply.
 - **One edge store for all regions** adds a cross-region round trip to the Mumbai edge's store reads (section 17c). Measured in B21; the cache and the Global Datastore are the next steps.

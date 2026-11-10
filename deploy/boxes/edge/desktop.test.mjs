@@ -403,27 +403,34 @@ test('template: Chrome\'s managed policy file, byte for byte, read-only to the b
   } finally { rmSync(t, { recursive: true, force: true }) }
 })
 
-test('template: full sync fails the build on an image without B25 consent or the installed playwright-core masking patch', () => {
+test('template: full sync fails the build unless every installed copy of the patched playwright-core version carries the masking patch', () => {
   const t = mkdtempSync(join(tmpdir(), 'guard-'))
-  const PATCH = 'patches/playwright-core@1.63.0-alpha-2026-08-31.patch'
-  const BUNDLE = 'node_modules/.pnpm/playwright-core@1.63.0-alpha-2026-08-31_patch_hash=abc/node_modules/playwright-core/lib/coreBundle.js'
-  const image = ({ consent = 'readonly deniedUrls: string[]', listed = true, patchFile = true, bundle = 'function maskedInjectedScriptSource() {}' } = {}) => {
+  const V = '1.63.0-alpha-2026-08-31'
+  const PATCH = `patches/playwright-core@${V}.patch`
+  const bundle = (dir) => `node_modules/.pnpm/${dir}/node_modules/playwright-core/lib/coreBundle.js`
+  const MASKED = 'function maskedInjectedScriptSource() {}'
+  const image = ({ consent = 'readonly deniedUrls: string[]', key = `playwright-core@${V}`, patchFile = true, copies = { [`playwright-core@${V}_patch_hash=abc`]: MASKED, 'playwright-core@1.61.1': 'unpatched' } } = {}) => {
     rmSync(t, { recursive: true, force: true })
     for (const [f, text] of [
       ['packages/mumbo/browser-consent/src/index.ts', consent],
-      ['pnpm-workspace.yaml', `patchedDependencies:\n  'lexical@0.49.0': patches/lexical@0.49.0.patch\n${listed ? `  playwright-core@1.63.0-alpha-2026-08-31: ${PATCH}\n` : ''}`],
+      ['pnpm-workspace.yaml', `patchedDependencies:\n  'lexical@0.49.0': patches/lexical@0.49.0.patch\n${key ? `  ${key}: ${PATCH}\n` : ''}`],
       ...(patchFile ? [[PATCH, 'diff']] : []),
-      [BUNDLE, bundle],
+      ...Object.entries(copies).map(([dir, text]) => [bundle(dir), text]),
     ]) { mkdirSync(join(t, f, '..'), { recursive: true }); writeFileSync(join(t, f), text) }
     const r = spawnSync('sh', ['-c', maskingGuardStep(t)], { encoding: 'utf8' })
-    return { code: r.status, err: r.stderr }
+    return [r.status, r.stderr]
   }
   try {
-    assert.deepEqual(image(), { code: 0, err: '' })
-    assert.deepEqual([image({ consent: 'export const x = 1' }).code, image({ consent: 'export const x = 1' }).err], [1, 'mumbo-box: this image has no B25 browser consent (deniedUrls)\n'])
-    assert.match(image({ listed: false }).err, /lists no playwright-core patch/)
-    assert.match(image({ patchFile: false }).err, /lists no playwright-core patch/)
-    assert.deepEqual([image({ bundle: 'unpatched' }).code, image({ bundle: 'unpatched' }).err], [1, 'mumbo-box: the installed playwright-core lacks the masking patch\n'])
+    // Today's image: the patched version plus the test runner's unpatched 1.61.1, which is not checked.
+    assert.deepEqual(image(), [0, ''])
+    assert.deepEqual(image({ key: `'playwright-core@${V}'` }), [0, ''], 'a quoted key')
+    assert.deepEqual(image({ consent: 'export const x = 1' }), [1, 'mumbo-box: this image has no B25 browser consent (deniedUrls)\n'])
+    assert.deepEqual(image({ key: '' }), [1, 'mumbo-box: pnpm-workspace.yaml lists no playwright-core patch under patches/\n'])
+    assert.deepEqual(image({ patchFile: false }), [1, 'mumbo-box: pnpm-workspace.yaml lists no playwright-core patch under patches/\n'])
+    assert.deepEqual(image({ copies: { [`playwright-core@${V}_patch_hash=abc`]: 'unpatched' } }), [1, `mumbo-box: playwright-core@${V}_patch_hash=abc lacks the masking patch\n`])
+    // A second, unpatched copy of the named version fails even beside a patched one; a patched other version satisfies nothing.
+    assert.deepEqual(image({ copies: { [`playwright-core@${V}_patch_hash=abc`]: MASKED, [`playwright-core@${V}`]: 'unpatched' } }), [1, `mumbo-box: playwright-core@${V} lacks the masking patch\n`])
+    assert.deepEqual(image({ copies: { 'playwright-core@1.61.1': MASKED } }), [1, `mumbo-box: playwright-core ${V} is not installed\n`])
     // Full sync is on, so the guard is the first step, before anything is installed.
     assert.equal(BOX_STEPS[0], maskingGuardStep())
   } finally { rmSync(t, { recursive: true, force: true }) }

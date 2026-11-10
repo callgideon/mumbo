@@ -28,13 +28,16 @@ export const CHROME_URL_BLOCKLIST = ['chrome://password-manager', 'chrome://sett
   'chrome://settings/addresses', 'chrome://sync-internals', 'chrome://autofill-internals', 'chrome://password-manager-internals']
 /** The template step that fails the build unless the image's browser consent knows `deniedUrls` and the image installs
  *  playwright-core with the masking patch (B25), so full sync never ships on an image whose snapshots show passwords:
- *  the patch file must be listed in pnpm-workspace.yaml, and the installed bundle must carry it.
+ *  pnpm-workspace.yaml must list the patch file under patches/ for one playwright-core version, and every installed copy
+ *  of that version must carry it. Other playwright-core versions (the test runner's) are not checked.
  *  @param {string} src the image's source checkout, /src
  *  @returns {string} the shell step */
 export const maskingGuardStep = (src = '/src') => [
   `grep -q deniedUrls ${src}/packages/mumbo/browser-consent/src/index.ts || { echo 'mumbo-box: this image has no B25 browser consent (deniedUrls)' >&2; exit 1; }`,
-  `p=$(sed -n 's/^ *playwright-core@[^:]*: *\\(patches\\/playwright-core@[^ ]*\\.patch\\) *$/\\1/p' ${src}/pnpm-workspace.yaml) && [ -n "$p" ] && [ -f "${src}/$p" ] || { echo 'mumbo-box: pnpm-workspace.yaml lists no playwright-core patch under patches/' >&2; exit 1; }`,
-  `grep -qs maskedInjectedScriptSource ${src}/node_modules/.pnpm/playwright-core@*/node_modules/playwright-core/lib/coreBundle.js || { echo 'mumbo-box: the installed playwright-core lacks the masking patch' >&2; exit 1; }`,
+  `l=$(sed -n "s/^ *'\\{0,1\\}playwright-core@\\([^:' ]*\\)'\\{0,1\\}: *\\(patches\\/playwright-core@[^ ]*\\.patch\\) *$/\\1 \\2/p" ${src}/pnpm-workspace.yaml); v=\${l% *}; p=\${l#* }`,
+  `[ -n "$l" ] && [ -f "${src}/$p" ] || { echo 'mumbo-box: pnpm-workspace.yaml lists no playwright-core patch under patches/' >&2; exit 1; }`,
+  `n=0; for d in ${src}/node_modules/.pnpm/playwright-core@*; do case "\${d##*/}" in "playwright-core@$v"|"playwright-core@\${v}_"*|"playwright-core@\${v}("*) grep -q maskedInjectedScriptSource "$d/node_modules/playwright-core/lib/coreBundle.js" 2>/dev/null || { echo "mumbo-box: \${d##*/} lacks the masking patch" >&2; exit 1; }; n=$((n + 1));; esac; done`,
+  `[ "$n" -gt 0 ] || { echo "mumbo-box: playwright-core $v is not installed" >&2; exit 1; }`,
 ].join('; ')
 /** The template step that writes Google Chrome's managed policy, root-owned. Downloads land in the shared folder the
  *  assistant reads (edge roleInstructions).

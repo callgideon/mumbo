@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { request, createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
-import { inParallel, signBox, verifyBox, userPrefix, budget, needsLaunch, boxHeaders, boxes, modelServer, userServer, startScript, backupCommand, admitted, secureCookies, albIdentity } from './edge.mjs'
+import { inParallel, signBox, verifyBox, userPrefix, budget, needsLaunch, boxHeaders, boxes, modelServer, userServer, startScript, backupCommand, restoreCommand, restoreKey, presignGetter, admitted, secureCookies, albIdentity } from './edge.mjs'
 import { memoryStore, redisStore } from './store.mjs'
 import { generateKeyPairSync, createSign } from 'node:crypto'
 
@@ -401,8 +401,116 @@ test('a failed restore drops the new box, logged at error, so no backup of it re
   assert.deepEqual(logs.filter(l => l.msg === 'restore').at(-1), { edge: 'box', msg: 'restore', user: 'a@x.com', box: 'b2', ok: true })
   // The alarm on that line, and the RUNBOOK entry its description links to.
   const { readFileSync } = await import('node:fs')
-  assert.ok(readFileSync(new URL('../prod/ops.tf', import.meta.url), 'utf8').includes('edge-restore-failed = { group = module.edge_us_east_1.log_group, pattern = "{ $.msg = \\"restore\\" && $.ok IS FALSE }" }'))
+  assert.ok(readFileSync(new URL('../prod/ops.tf', import.meta.url), 'utf8').includes('edge-restore-failed = { group = module.edge_us_east_1.log_group, pattern = "{ ($.msg = \\"restore\\" && $.ok IS FALSE) || $.msg = \\"restore version unknown\\" }" }'))
   assert.match(readFileSync(new URL('../RUNBOOK.md', import.meta.url), 'utf8'), /^### edge-restore-failed$/m)
+})
+
+// ---- versioned restores (restore-version.mjs writes the record)
+/** Boxes over a fake E2B whose box commands are recorded and fail when `fail(command)` says so; presignGet is recorded and
+ *  answers `presign(key, versionId)`, by default GET-URL-<version or latest>. */
+async function restoreRig({ record, presign = async (key, v) => `GET-URL-${v ?? 'latest'}`, fail = () => false } = {}) {
+  const e2b = fakeE2B(); const ran = []; const killed = []; const logs = []; const presigned = []
+  const box = (id) => ({ sandboxId: id, files: { write: async () => {} }, kill: async () => { killed.push(id) }, commands: { run: async (c) => { ran.push(c); if (fail(c)) throw new Error('exit status 2'); return { stdout: c.includes('dsh.log') ? 'launch123' : '' } } } })
+  e2b.Sandbox.create = async (tpl, opts) => { const id = `b${e2b.made.length + 1}`; e2b.made.push({ id, opts }); return box(id) }
+  e2b.Sandbox.connect = async (id) => box(id)
+  e2b.Sandbox.list = () => ({ hasNext: true, nextItems: async function () { this.hasNext = false; return e2b.made.filter(m => !killed.includes(m.id)).map(m => ({ sandboxId: m.id, state: 'running', startedAt: '1' })) } })
+  const store = memoryStore()
+  if (record) await store.putDoc(restoreKey('a@x.com'), record)
+  const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async (key, versionId) => { presigned.push([key, versionId]); return presign(key, versionId) }, presignPut: async () => 'PUT', log: (l) => logs.push(JSON.parse(l)) })
+  return { e2b, b, store, ran, killed, logs, presigned }
+}
+const KEY = `${userPrefix('a@x.com')}/latest.tar.gz`
+
+test('a restore record: the next create restores that version, and the record stays until that box\'s first backup, which the next sweep takes', async () => {
+  const r = await restoreRig({ record: { versionId: 'v1', at: 1 } })
+  const { id } = await r.b.ensure('a@x.com')
+  assert.deepEqual(r.presigned, [[KEY, 'v1']])
+  assert.ok(r.ran.includes(restoreCommand('GET-URL-v1')), 'the restore command fetches the versioned URL')
+  assert.deepEqual(r.logs.filter(l => l.msg === 'restore'), [{ edge: 'box', msg: 'restore', user: 'a@x.com', box: id, ok: true, versionId: 'v1' }])
+  assert.deepEqual(await r.store.getDoc(restoreKey('a@x.com')), { versionId: 'v1', at: 1 }, 'no backup holds the restored data yet')
+  // Lost before its first backup: the next creation restores the same version, not latest.tar.gz.
+  r.killed.push(id); await r.store.deleteBox(id)
+  const { id: second } = await r.b.ensure('a@x.com')
+  assert.deepEqual(r.presigned.at(-1), [KEY, 'v1'])
+  // A resume keeps the box's mark; the next sweep backs it up at once and spends the record.
+  await r.store.patchBox(second, { paused: true })
+  await r.b.ensure('a@x.com')
+  await r.b.sweep()
+  assert.ok(r.ran.includes(backupCommand('PUT')))
+  assert.equal(await r.store.getDoc(restoreKey('a@x.com')), undefined, 'one shot')
+  assert.equal((await r.store.getBox(second)).restored, undefined)
+  // Lost after that backup: the next creation restores latest.tar.gz again.
+  r.killed.push(second); await r.store.deleteBox(second)
+  await r.b.ensure('a@x.com')
+  assert.deepEqual(r.presigned.at(-1), [KEY, undefined])
+  assert.ok(r.ran.includes(restoreCommand('GET-URL-latest')))
+})
+
+test('a create from a recorded version that fails in the restore or after it keeps the record, and the retry uses the same version', async () => {
+  let failing = 'GET-URL'
+  const r = await restoreRig({ record: { versionId: 'v1', at: 1 }, fail: (c) => failing !== undefined && c.includes(failing) })
+  await assert.rejects(r.b.ensure('a@x.com'), (e) => e.status === 503 && e.restoreFailed === true)
+  assert.deepEqual(r.logs.find(l => l.msg === 'restore'), { edge: 'box', level: 'error', msg: 'restore', user: 'a@x.com', box: 'b1', ok: false, versionId: 'v1' })
+  assert.deepEqual(await r.store.getDoc(restoreKey('a@x.com')), { versionId: 'v1', at: 1 })
+  failing = 'chmod +x'  // restored, then start.sh fails: the box is dropped
+  await assert.rejects(r.b.ensure('a@x.com'))
+  assert.deepEqual(await r.store.getDoc(restoreKey('a@x.com')), { versionId: 'v1', at: 1 })
+  failing = undefined
+  await r.b.ensure('a@x.com')
+  assert.deepEqual(r.presigned.map(p => p[1]), ['v1', 'v1', 'v1'])
+})
+
+test('an unknown recorded version fails loud: error line, restore-failed 503, no box, no fallback to latest, record kept', async () => {
+  const notFound = async () => undefined
+  const deleteMarker = async () => { throw Object.assign(new Error('UnknownError'), { name: '405', $metadata: { httpStatusCode: 405 } }) }
+  for (const presign of [notFound, deleteMarker]) {
+    const r = await restoreRig({ record: { versionId: 'gone', at: 1 }, presign })
+    await assert.rejects(r.b.ensure('a@x.com'), (e) => e.status === 503 && e.restoreFailed === true && e.message === 'restore version unknown')
+    assert.deepEqual(r.presigned, [[KEY, 'gone']], 'latest.tar.gz is never presigned')
+    assert.equal(r.e2b.made.length, 0, 'no box is created')
+    assert.deepEqual(await r.store.getDoc(restoreKey('a@x.com')), { versionId: 'gone', at: 1 })
+    assert.deepEqual(r.logs, [{ edge: 'box', level: 'error', msg: 'restore version unknown', user: 'a@x.com', versionId: 'gone', ...(presign === deleteMarker ? { error: 'UnknownError', status: 405 } : { error: 'NotFound', status: 404 }) }])
+  }
+  // A record without a version id would presign latest.tar.gz: refused before any presign.
+  const r = await restoreRig({ record: { at: 1 } })
+  await assert.rejects(r.b.ensure('a@x.com'), (e) => e.restoreFailed === true)
+  assert.deepEqual(r.presigned, [])
+  assert.equal(r.logs[0].msg, 'restore version unknown')
+})
+
+test('a record the operator replaces while a create runs stays for the next creation, past the box\'s first backup', async () => {
+  const r = await restoreRig({ record: { versionId: 'v1', at: 1 }, presign: async (key, v) => { await r.store.putDoc(restoreKey('a@x.com'), { versionId: 'v2', at: 2 }); return `GET-URL-${v}` } })
+  const { id } = await r.b.ensure('a@x.com')
+  await r.b.sweep()
+  assert.ok(r.ran.includes(backupCommand('PUT')))
+  assert.deepEqual(await r.store.getDoc(restoreKey('a@x.com')), { versionId: 'v2', at: 2 })
+  assert.equal((await r.store.getBox(id)).restored, undefined)
+})
+
+test('firstSetUp is false while a restore record exists, also without a latest backup', async () => {
+  const r = await restoreRig({ presign: async () => undefined })
+  assert.equal(await r.b.firstSetUp('a@x.com'), true)
+  await r.store.putDoc(restoreKey('a@x.com'), { versionId: 'v1', at: 1 })
+  assert.equal(await r.b.firstSetUp('a@x.com'), false)
+})
+
+test('presignGetter HEADs and presigns the given version, and no version without one', async () => {
+  const { S3Client, HeadObjectCommand, GetObjectCommand } = await import('@aws-sdk/client-s3')
+  const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner')
+  const s3 = new S3Client({ region: 'us-east-1', credentials: { accessKeyId: 'a', secretAccessKey: 'b' } })
+  const heads = []; let fail
+  s3.send = async (c) => { heads.push(c.input); if (fail) throw fail }
+  const get = presignGetter({ s3, bucket: 'bk', HeadObjectCommand, GetObjectCommand, getSignedUrl })
+  const url = new URL(await get(KEY, 'v1'))
+  assert.deepEqual(heads, [{ Bucket: 'bk', Key: KEY, VersionId: 'v1' }])
+  assert.equal(url.pathname, `/bk/${KEY}`)
+  assert.equal(url.searchParams.get('versionId'), 'v1')
+  assert.equal(new URL(await get(KEY)).searchParams.has('versionId'), false)
+  assert.equal(heads[1].VersionId, undefined)
+  fail = Object.assign(new Error('NotFound'), { name: 'NotFound' })
+  assert.equal(await get(KEY, 'v1'), undefined)
+  fail = Object.assign(new Error('Method Not Allowed'), { name: '405' })
+  await assert.rejects(get(KEY, 'v1'), /Method Not Allowed/)
 })
 
 // ---- child sandboxes (sandboxes.mjs)
