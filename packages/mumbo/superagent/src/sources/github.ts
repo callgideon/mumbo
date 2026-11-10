@@ -201,17 +201,21 @@ async function pollRepository(ctx: SourceContext, round: Round): Promise<void> {
 }
 /**
  * Polls one repository-wide event stream (oldest first) since its cursor and steps the cursor to five seconds before the
- * newest item (`cursorAt`), relying on Trigger ID deduplication so repeated messages are no-ops. While the cursor stays
+ * newest item (`cursorAt`), relying on Trigger ID deduplication so repeated messages are no-ops. A full page whose items
+ * all fall within those five seconds would leave the cursor in place and list the same page again, so the cursor then
+ * steps to the newest item itself, which GitHub's inclusive `since` lists again. While the cursor stays
  * unchanged (including when clamped to the hourly horizon), sending the last page's ETag makes an unchanged list return
  * HTTP 304 and cost no rate limit. Items from before their kind was switched on or beyond the horizon are ignored.
  * In App mode an item whose kind is off is still received when it mentions the agent (an Issue or PR only when created
  * since the stream's last read, `read`, so a mention added by editing its body is not read), or, for a comment, when a
  * Ticket subscribes to its Thread and the Thread is polled or the comment is new since the last read. `read` advances
- * only after a page that was not full, because an item beyond a full page is listed by a later round. The `app` entry of
+ * only after a page that was not full, because a later round lists the items beyond a full page. The `app` entry of
  * `started` is when App mode began reading the stream, and older items are ignored. Each Issue or PR received, and each
  * mention in a comment, starts its Thread's read position (`startThread`), so the Thread's poll reads the replies posted
- * before its Ticket subscribed. The agent's own open PR is read so it binds to the Ticket on its branch, as its
- * notification does for a user account, and starts its Thread's read position at its creation when it has none.
+ * before its Ticket subscribed; a mention in a comment starts it when the mention arrived, so an edit of an old comment
+ * reads none of the replies before the edit. The agent's own open PR is read so it binds to the Ticket on its branch, as
+ * its notification does for a user account, and starts its Thread's read position at its creation until a Ticket
+ * subscribes to it.
  */
 async function readStream(ctx: SourceContext, round: Round, id: string, path: string, config: GithubConfig): Promise<void> {
   const name = KV.github.stream(id)
@@ -248,10 +252,12 @@ async function readStream(ctx: SourceContext, round: Round, id: string, path: st
     if (sameName(item.user.login, login)) {
       const own = app && id === 'issues' ? IssueSchema.safeParse(item) : undefined
       if (own?.success && own.data.pull_request && own.data.state === 'open') {
+        // Before a Ticket subscribes, the PR's creation replaces a later position a mention set; a position from a Ticket that
+        // followed this PR before stays.
+        const unsubscribed = !ctx.threads.get(`github:${own.data.number}`)?.subscriptions.length
         try {
           await pull(ctx, round, own.data.number)
-          // Only an unset position: an existing one, from a Ticket that followed this PR before, is later than its creation.
-          startThread(ctx, own.data.number, own.data.created_at, false)
+          startThread(ctx, own.data.number, own.data.created_at, unsubscribed)
         } catch (error) { if (!stopped(ctx, round)) failed(ctx, round, own.data.number, error) }
       }
       continue
@@ -280,11 +286,12 @@ async function readStream(ctx: SourceContext, round: Round, id: string, path: st
     const appRule = fresh(at, 'app') && (!!trigger.addressed || subscribed)
     if (!(fresh(at, 'comments') || appRule) || !trigger.text) continue
     const unread = idle(ctx, number)
-    if (await ctx.receive(trigger) === 'stored' && appRule && trigger.addressed) startThread(ctx, number, item.created_at ?? at!, unread)
+    if (await ctx.receive(trigger) === 'stored' && appRule && trigger.addressed) startThread(ctx, number, at!, unread)
   }
   const newest = Math.max(...items.map(item => Date.parse(item.updated_at ?? '')).filter(Number.isFinite))
   const moved = Number.isFinite(newest) ? cursorAt(new Date(newest).toISOString()) : since
-  const next = Date.parse(moved) > Date.parse(since) ? moved : since
+  const stepped = page.length >= PAGE && newest > Date.parse(since) ? new Date(newest).toISOString() : since
+  const next = Date.parse(moved) > Date.parse(since) ? moved : stepped
   const etag = /^etag:\s*(.+)$/im.exec(headers)?.[1]?.trim()
   // The ETag belongs to this request, which the next round repeats only while the cursor stays unchanged.
   const advanced = page.length < PAGE ? round.started : read

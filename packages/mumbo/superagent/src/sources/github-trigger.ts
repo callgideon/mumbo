@@ -58,25 +58,26 @@ function commentText(comment: GithubComment, kind: 'conversation' | 'inline' | '
   return [decision, place, comment.body ?? ''].filter(Boolean).join('\n\n')
 }
 /**
- * A fenced code block as CommonMark reads it: a line of three or more backticks (with no backtick after them) or tildes,
- * indented up to three spaces, through a line of at least as many of the same character, or to the end of the text.
+ * The blocks that hide a mention, as CommonMark reads them, whichever starts first: a fenced code block (a line of three or
+ * more backticks, with no backtick after them, or tildes, indented up to three spaces, through a line of at least as many
+ * of the same character or to the end of the text), or an HTML comment that starts a line (through `-->` or to the end).
  */
-const FENCE = /^ {0,3}(`{3,}|~{3,})(?:(?<=`)[^`\n]*|(?<=~).*)$[\s\S]*?(?:^ {0,3}\1(?:(?<=`)`*|(?<=~)~*)[ \t]*$|(?![\s\S]))/gm
+const BLOCK = /^ {0,3}(`{3,}|~{3,})(?:(?<=`)[^`\n]*|(?<=~).*)$[\s\S]*?(?:^ {0,3}\1(?:(?<=`)`*|(?<=~)~*)[ \t]*$|(?![\s\S]))|^ {0,3}<!--[\s\S]*?(?:-->|(?![\s\S]))/gm
 /**
- * An escaped backtick, or an inline code span: a backtick run closed by the next run of the same length, not across a
- * blank line. Read left to right, so a backslash inside a span stays part of it.
+ * Inline text that hides a mention, read left to right so whichever starts first wins: an escaped backslash or backtick,
+ * a closed HTML comment, or a code span, a backtick run closed by the next run of the same length within its paragraph
+ * (not across a blank line or a line that starts a heading, quote or list item). A backslash inside a span is part of it.
  */
-const SPAN = /\\`|(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)/g
-/** An HTML comment, which GitHub does not render; an unclosed one runs to the end of the text. */
-const COMMENT = /<!--[\s\S]*?(?:-->|(?![\s\S]))/g
+const INLINE = /\\[\\`]|<!--[\s\S]*?-->|(?<!`)(`+)(?!`)(?:(?!\n(?:[ \t]*\n| {0,3}(?:#{1,6}[ \t]|>|[-*+][ \t]|\d{1,9}[.)][ \t])))[\s\S])*?(?<!`)\1(?!`)/g
 /**
  * True when `text` mentions `login` where GitHub renders it: outside fenced code blocks, inline code spans and HTML
- * comments. People mention a GitHub App's bot `<slug>[bot]` as `@<slug>`; `@<slug>[bot]` counts too.
+ * comments, found close to how CommonMark reads them. People mention a GitHub App's bot `<slug>[bot]` as `@<slug>`;
+ * `@<slug>[bot]` counts too.
  */
 export function mentions(text: string, login: string): boolean {
   const slug = login.replace(/\[bot\]$/, '')
   const handle = slug === login ? escapeRegExp(login) : `${escapeRegExp(slug)}(?:\\[bot\\])?(?!\\[)`
-  const prose = text.replace(FENCE, ' ').replace(SPAN, ' ').replace(COMMENT, ' ')
+  const prose = text.replace(/\r\n?/g, '\n').replace(BLOCK, ' ').replace(INLINE, ' ')
   return new RegExp(`(?:^|[^a-zA-Z0-9_@])@${handle}(?![a-zA-Z0-9_-])`, 'i').test(prose)
 }
 const author = (user: { login: string; type?: string }, agent: string) =>
