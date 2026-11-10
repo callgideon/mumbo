@@ -884,6 +884,22 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
   - **An MCP server the person adds from the panel** runs as `agent` in boxes, never as root. The composition gate rejects a stdio server without an identity in box compositions.
   - **Downloads** are `/home/shared/Downloads`, owned by `browser:shared` with mode `2770`; `agent` and `browser` are both in `shared`. Chrome's `DownloadDirectory` policy points there, and it is a model root. `/home/browser` stays `0700`, and backups include `/home/shared`.
   - **A composition gate:** a test lists every model-visible tool in the box compositions with how it runs (root in-process, or "run as"), and fails on a tool it doesn't know. A new plugin can't quietly reopen this.
+  - **A working directory never extends the model roots.**
+    - A Session's origin may sit outside them as its working directory, because the person chose it, but the model's file tools still reach only the model and read-only roots.
+    - A working directory the model chooses outside the roots reverts to the origin, with a logged event.
+  - **Superagent's ticket workers (project boxes) are contained.**
+    - Ticket directories live in `/root/work`, created as `agent`.
+    - The worker shims and gitconfig live in `/var/lib/mumbo/superagent`, `root:agent 2750` (shims `0750`, gitconfig `0640`), readable by `agent` and never writable by it.
+    - Everything that touches a ticket directory runs as `agent`: the Execution prepare command, the worker probe, environment checks and any `git`.
+    - The root orchestrator's own GitHub CLI uses a root-owned `gh` and config directory, because `gh` aliases can run shell commands.
+    - The orchestrator's model tools are listed in the gate as root in-process, data only.
+  - **Other box paths:**
+    - `/run/dsh-shell` `0711` root;
+    - `/var/lib/mumbo/{attachments,spill,subprocess-spill}` `root:agent 2750`, the read-only roots. **Backups include the attachments** (and the spill, if Sessions read it after a restart). Existing uploads move there once.
+    - `DSH_AGENTS_HOME=/usr/local/share/mumbo/agents`, root-owned;
+    - root dsh's `TMPDIR=/root/.dsh/tmp`;
+    - `protected_hardlinks=1`, asserted at load.
+  - **The project box's `dsh-superagent` config has one source:** the containment overlay, or a gate that compares the whole object with the founder overlay's. Spot checks would miss drift.
 - **Box permissions** (edge start script):
   - `/root` is `0711`. `/root/projects` belongs to `agent`, so Session working directories don't change.
   - `/root/.dsh`, `/root/.mumbo` and `/root/dsh.log` are root-only.
