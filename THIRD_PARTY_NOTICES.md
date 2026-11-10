@@ -172,6 +172,7 @@ pnpm applies local patches to the following packages at install time, so shipped
 - `mdast-util-gfm-autolink-literal@2.0.1` — [`patches/mdast-util-gfm-autolink-literal@2.0.1.patch`](patches/mdast-util-gfm-autolink-literal@2.0.1.patch)
 - `micromark-extension-gfm-autolink-literal@2.1.0` — [`patches/micromark-extension-gfm-autolink-literal@2.1.0.patch`](patches/micromark-extension-gfm-autolink-literal@2.1.0.patch)
 - `node-pty@1.2.0-beta.15` — [`patches/node-pty@1.2.0-beta.15.patch`](patches/node-pty@1.2.0-beta.15.patch)
+- `playwright-core@1.63.0-alpha-2026-08-31` — [`patches/playwright-core@1.63.0-alpha-2026-08-31.patch`](patches/playwright-core@1.63.0-alpha-2026-08-31.patch)
 
 ## Chrome DevTools frontend
 

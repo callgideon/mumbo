@@ -342,8 +342,9 @@ Every package below exports a Cordis plugin that a bundle patch can name in a Lo
 
 | Package | Config | Description |
 |---|---|---|
+| `@mumbo/assistant` | yes | Mumbo, the person's always-present assistant Session: pinned, unarchivable, instructed, and opened first |
 | `@mumbo/box-links` | yes | Box links, and the Desktop and Browser tabs that show the box desktop live view |
-| `@mumbo/browser-consent` | yes | Reads free, writes ask: consent for browser writes in a person's own signed-in Chromium |
+| `@mumbo/browser-consent` | yes | Reads free, writes ask, denied pages never: consent for browser and desktop actions in a person's own signed-in Chromium |
 | `@mumbo/edge-member` | yes | Project members admitted from an edge-signed header as non-owner DeepSeek Harness principals |
 | `@mumbo/mcp` | yes | Authenticated loopback MCP server for a running DeepSeek Harness web host |
 | `@mumbo/superagent` | yes | A proactive agent for one GitHub repository, as a DSH (DeepSeek Harness) bundle: it listens to GitHub and optionally Feishu, evaluates requests under a Policy, turns authorized ones into Tickets, and executes each in its own DSH Session. |

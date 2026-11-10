@@ -298,6 +298,17 @@ describe('WorkspaceController commands', () => {
       .rejects.toMatchObject({ code: 'session/not-found' })
     await expect(controller.unarchiveSession({ sessionId: session.id }))
       .resolves.toEqual({ archivedSessionIds: [] })
+    // A vetoed Session is a business refusal whose message carries the reason.
+    const stopVetoing = ctx.on('workspace/archive-veto', ({ sessionId }) =>
+      sessionId === session.id ? 'it is the assistant' : undefined)
+    for (const stopActivity of [false, true]) {
+      await expect(controller.archiveSession({ sessionId: session.id, stopActivity })).rejects.toMatchObject({
+        code: 'gateway/bad-request',
+        message: `cannot archive session '${session.id}': it is the assistant`,
+      })
+    }
+    expect([...ctx.workspaceRegistry.archivedSessionIds]).toEqual([])
+    stopVetoing()
     // Unarchive is idempotent: an id that is not archived is not an error.
     await expect(controller.unarchiveSession({ sessionId: session.id }))
       .resolves.toEqual({ archivedSessionIds: [] })

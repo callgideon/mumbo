@@ -682,6 +682,36 @@ describe('UiWorkspaceService', () => {
     expect(b.sessions.retain).not.toHaveBeenCalled()
   })
 
+  it('never reuses a pinned or renamed turnless Session as the Workspace blank', async () => {
+    const assistant = summary('mumbo', { blank: true, cwd: '/w/a', title: 'Mumbo' })
+    const pinned = summary('pinned', { blank: true, cwd: '/w/a' })
+    const b = bench({
+      sessions: sessionState([assistant, pinned], 'pending'),
+      workspaces: { ...workspaceState([workspace('a', [sid('mumbo'), sid('pinned')])]), pinnedSessionIds: [sid('pinned')] },
+    })
+    b.uiWorkspace.startSession(wid('a'))
+    await vi.waitFor(() => { expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('a') }) })
+    // An ordinary turnless member is still the blank New Session returns to.
+    const withPlain = bench({
+      sessions: sessionState([assistant, pinned, summary('plain', { blank: true, cwd: '/w/a' })], 'pending'),
+      workspaces: {
+        ...workspaceState([workspace('a', [sid('mumbo'), sid('pinned'), sid('plain')])]), pinnedSessionIds: [sid('pinned')],
+      },
+    })
+    await expect(withPlain.uiWorkspace.connectWorkspace(wid('a'))).resolves.toBe(sid('plain'))
+    expect(withPlain.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('a'), sessionId: sid('plain') })
+  })
+
+  it('reopens a saved renamed turnless Session directly instead of reclaiming it as a blank', () => {
+    persistSelection({ sessionId: sid('mumbo') })
+    const b = bench({
+      sessions: sessionState([summary('mumbo', { blank: true, cwd: '/w/a', title: 'Mumbo' })]),
+      workspaces: workspaceState([workspace('a', [sid('mumbo')])]),
+    })
+    expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('mumbo'), { source: 'mainView' })
+    expect(b.sessions.create).not.toHaveBeenCalled()
+  })
+
   it('returns New Session to the Workspace blank that holds its unsent draft', async () => {
     const b = bench({
       sessions: sessionState([summary('blank', { blank: true, cwd: '/w/a' })], 'pending'),
@@ -1431,6 +1461,44 @@ describe('UiWorkspaceService', () => {
     b.sessions.list.set(sessionState([summary('saved')]))
     expect(b.sessions.retained[0]!.reference.sessionId).toBe(saved)
     expect(b.selectPanel.mock.calls).toEqual([[panel]])
+  })
+
+  it.each([
+    { name: 'a saved Session with a turn', saved: 'side', rows: [summary('side', { cwd: '/w/a' })], expected: 'saved' },
+    { name: 'a saved blank', saved: 'draft', rows: [summary('draft', { blank: true, cwd: '/w/a' })], expected: 'saved' },
+    { name: 'a saved Session no longer listed', saved: 'gone', rows: [], expected: 'fresh' },
+    { name: 'no saved selection', saved: undefined, rows: [], expected: 'fresh' },
+  ] as const)('reports $expected restoration for $name, synchronously as the lists settle', ({ saved, rows, expected }) => {
+    persistSelection(saved === undefined ? {} : { sessionId: sid(saved) })
+    const b = bench({ workspaces: workspaceState([], [], 'pending'), sessions: sessionState([...rows], 'pending') })
+    expect(b.uiWorkspace.restoration.getSnapshot()).toBe('pending')
+    b.workspaces.list.set(workspaceState([workspace('a', rows.map(row => row.id))]))
+    b.sessions.list.set(sessionState([...rows]))
+    expect(b.uiWorkspace.restoration.getSnapshot()).toBe(expected)
+  })
+
+  it.each([
+    { name: 'archived', cwd: '/w/a', archived: true },
+    { name: 'outside its Workspace directory', cwd: '/elsewhere', archived: false },
+  ])('reports fresh restoration for a saved blank that is $name, since navigation opens a new blank', ({ cwd, archived }) => {
+    persistSelection({ sessionId: sid('draft') })
+    const b = bench({
+      sessions: sessionState([summary('draft', { blank: true, cwd })]),
+      workspaces: workspaceState([workspace('a', [sid('draft')])], archived ? [sid('draft')] : []),
+    })
+    expect(b.uiWorkspace.restoration.getSnapshot()).toBe('fresh')
+  })
+
+  it('reports saved restoration for a persisted subagent address, and stays pending when a Session opened first', () => {
+    const address: SubagentAddress = { parentSessionId: sid('parent'), childSessionId: sid('child'), mode: 'continuable' }
+    persistSelection({ sessionId: address.childSessionId, subagentAddress: address })
+    expect(bench({ workspaces: workspaceState(), sessions: sessionState() }).uiWorkspace.restoration.getSnapshot()).toBe('saved')
+    persistSelection({})
+    const b = bench({ workspaces: workspaceState([], [], 'pending'), sessions: sessionState([], 'pending') })
+    b.uiWorkspace.openSession(sid('chosen'))
+    b.workspaces.list.set(workspaceState())
+    b.sessions.list.set(sessionState())
+    expect(b.uiWorkspace.restoration.getSnapshot()).toBe('pending')
   })
 
   it('restores a persisted subagent address without a parent catalog', () => {

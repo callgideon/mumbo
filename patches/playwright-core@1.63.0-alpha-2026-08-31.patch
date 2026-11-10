@@ -1,0 +1,45 @@
+diff --git a/lib/coreBundle.js b/lib/coreBundle.js
+index a1f4354..f109451 100644
+--- a/lib/coreBundle.js
++++ b/lib/coreBundle.js
+@@ -19797,6 +19797,31 @@ var init_fileUploadUtils = __esm({
+ 
+ // packages/playwright-core/src/generated/injectedScriptSource.ts
+ var source4;
++// Mumbo patch (patches/playwright-core@1.63.0-alpha-2026-08-31.patch): an aria snapshot shows a fixed mask instead of the
++// value of a password, one-time-code, payment-card, or autofilled input. Upstreaming the change to Playwright retires it.
++var maskedSource4;
++function maskedInjectedScriptSource() {
++  if (maskedSource4 === void 0) {
++    const unmasked = "result.children = [element.value];";
++    if (source4.split(unmasked).length !== 2)
++      throw new Error("playwright-core patch: the aria snapshot input value line changed; re-check patches/playwright-core@1.63.0-alpha-2026-08-31.patch");
++    maskedSource4 = source4.replace(unmasked, () => String.raw`result.children = [((input) => {
++      if (input.type === "password")
++        return true;
++      for (const pseudo of [":autofill", ":-webkit-autofill"]) {
++        try {
++          if (input.matches(pseudo))
++            return true;
++        } catch {
++          // The browser does not support this pseudo-class.
++        }
++      }
++      const tokens = (input.getAttribute("autocomplete") || "").toLowerCase().split(/\s+/);
++      return tokens.some((token) => token === "current-password" || token === "new-password" || token === "one-time-code" || token.startsWith("cc-"));
++    })(element) ? "\u2022\u2022\u2022\u2022" : element.value];`);
++  }
++  return maskedSource4;
++}
+ var init_injectedScriptSource = __esm({
+   "packages/playwright-core/src/generated/injectedScriptSource.ts"() {
+     "use strict";
+@@ -19930,7 +19955,7 @@ var init_dom = __esm({
+         (() => {
+         ${globalsSnapshot}
+         const module = {};
+-        ${source4}
++        ${maskedInjectedScriptSource()}
+         return new (module.exports.InjectedScript())(globalThis, ${JSON.stringify(options)});
+         })();
+       `;

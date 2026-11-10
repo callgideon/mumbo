@@ -6,6 +6,7 @@ import type { ShortcutCommand, ShortcutCommandId } from '@deepseek-ai/dsh-client
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { UiWorkspace } from './navigation.ts'
+import { blankRow } from './tree.ts'
 
 /** Transient requests consumed by the existing workspace browser. */
 export interface WorkspaceShortcutState {
@@ -89,7 +90,9 @@ export function installWorkspaceShortcuts(
     })
   register('session.rename', () => t('rename.session.title'), ['rename session'], 'KeyG', ['primary', 'alt'], ['primary', 'alt'], (context) => {
     const target = current()
-    return target === undefined || target.blank || (context.modal !== null && context.modal !== 'sidebar') || ctx.layout.panelInfo.getSnapshot().activePanelId !== null
+    // A pinned or titled turnless Session is an ordinary row, which its row menu renames too.
+    return target === undefined || blankRow(target, ctx.workspaces.list.getSnapshot().pinnedSessionIds)
+      || (context.modal !== null && context.modal !== 'sidebar') || ctx.layout.panelInfo.getSnapshot().activePanelId !== null
       ? { status: 'blocked', reason: t('shortcut.noSession') }
       : { status: 'handled', run: () => { controls.rename(target.id, target.title?.trim() ?? '') } }
   })

@@ -1,0 +1,9 @@
+# Loader overlay for the Mumbo scenario: the person-box row the box edge
+# writes, with Mumbo's Workspace at the scaffold's own temporary workspace
+# (the scaffold changes into it before boot) instead of /root/projects.
+- insert:
+    - id: assistant
+      name: '@mumbo/assistant'
+      config:
+        workspace: !!js process.cwd()
+        instructions: You are Mumbo, this person's assistant.
