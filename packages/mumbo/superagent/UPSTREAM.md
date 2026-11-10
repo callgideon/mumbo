@@ -42,7 +42,7 @@ Edits to the copy:
   - Docs: the glossary of `docs/001-domain.md` has no Chinese column; `docs/002-authorization.md`, `docs/005-panel.md` and the `docs/008-cookbook.md` examples use the English labels; `docs/006-deployment.md` (setup problems) and `docs/007-architecture.md` (the `locales.ts` and `locales.client.spec.ts` rows, fixed refusals) no longer describe two languages.
   - Tests use English data and assert the English copy; the tests that compared the two languages assert the English text once.
   - `locale/ja.json` stays; it is the only file in the copy with CJK ideographs.
-- `src/app/views/text.ts`: `withoutHtml` strips HTML tags and comments until none remain, so the pieces around a removed tag cannot form another; upstream's single pass fails this repository's CodeQL check `js/incomplete-multi-character-sanitization`. The panel renders this text as React text nodes. `tests/views.spec.ts` covers nested fragments.
+- `src/app/views/text.ts`: `withoutHtml` strips HTML tags and comments until none remain, so the pieces around a removed tag cannot form another, and an unclosed comment runs to the end of the text, as GitHub renders it; upstream's single pass fails this repository's CodeQL check `js/incomplete-multi-character-sanitization`. The panel renders this text as React text nodes. `tests/views.spec.ts` covers nested fragments.
 - Panel specs: `tests/fixtures/panel.tsx` and the nine `tests/panel-*.spec.tsx` import `./fixtures/panel-server.tsx` (renamed from `.ts`). `tests/panel-deployment.spec.tsx` no longer publishes `mode: 'memory'` in the read-only scenario (line 108); the snapshot has no `mode`, and `writable: false` selects the read-only hint.
 
 Files outside the copy changed for S1:

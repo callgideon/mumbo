@@ -194,6 +194,9 @@ it('sends text without HTML, entity-encoded tags included, and with images named
   // Each removal leaves pieces that would form a new tag or comment; stripping repeats until none remains.
   expect(plain('<<<script>script>script>x <!<!---->-- y --> z')).toBe('x z')
   expect(markdown('&lt;&lt;script&gt;script&gt;alert(1)')).toBe('alert(1)')
+  // A comment that is never closed hides the rest, as GitHub renders it.
+  expect(plain('shown <!<!-- -->-- hidden')).toBe('shown')
+  expect(plain('shown &lt;!-- hidden')).toBe('shown')
 })
 
 it('words each settings save by what it changed from the one before, and nothing after a gap in the history', () => {
