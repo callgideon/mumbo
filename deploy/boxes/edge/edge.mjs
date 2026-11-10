@@ -1,7 +1,8 @@
 // mumbo edge: routes each signed-in user to their own box (an E2B Firecracker VM running `dsh web`),
 // proxies the box's model and search calls with the server key, pauses idle boxes and backs them up to S3.
-// :8080 is reached only through oauth2-proxy (X-Forwarded-Email is trusted); :8081 serves the model host and
-// accepts only box tokens. Design, review fixes and failure handling: deploy/boxes/DESIGN.md.
+// :8080 is reached only through oauth2-proxy (X-Forwarded-Email is trusted); :8081 serves the model host, which
+// accepts only box tokens, and the MCP door on the public host (door.mjs), which accepts only door keys. Design, review
+// fixes and failure handling: deploy/boxes/DESIGN.md.
 import { createHash, createHmac, createVerify, timingSafeEqual } from 'node:crypto'
 import { readFileSync, readdirSync } from 'node:fs'
 import { createServer, request as httpRequest } from 'node:http'
@@ -108,6 +109,10 @@ export const config = () => ({
   // The most input tokens one image is charged when a box drops a response before its usage (openrouterBody
   // inputEstimate), and the charge for an image whose size cannot be read. Qwen-VL's own per-image maximum.
   openrouterImageTokens: atLeast('OPENROUTER_IMAGE_TOKENS', 0, 16384),
+  // The MCP door's rate limit (door.mjs): each key's bucket holds DOOR_BURST calls and refills DOOR_RATE_PER_MINUTE a
+  // minute, per edge replica.
+  doorRatePerMinute: atLeast('DOOR_RATE_PER_MINUTE', 1, 60),
+  doorBurst: atLeast('DOOR_BURST', 1, 20),
 })
 
 /** Address or @domain allowlist, lowercased (config()); an empty list admits nobody. The email compares lowercased. An
@@ -1312,7 +1317,7 @@ export function openrouterBody(cfg, raw) {
 }
 
 /** A request's body, or null once it passes `cap` bytes (the rest is left unread). Rejects when the client goes away first. */
-const readBody = (req, cap) => new Promise((resolve, reject) => {
+export const readBody = (req, cap) => new Promise((resolve, reject) => {
   if (req.destroyed) return reject(new Error('request aborted'))
   const chunks = []
   let size = 0
@@ -1327,8 +1332,10 @@ const readBody = (req, cap) => new Promise((resolve, reject) => {
 })
 
 // github (github.mjs), halt (halt.mjs) and tokens (budget.mjs tokenBudget) are optional like mcp: absent, /github/
-// answers 404, nothing is halted and tokens are not counted. main() passes all of them.
-export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, mcp, github, halt, tokens, fetchImpl = fetch, log = console.log }) {
+// answers 404, nothing is halted and tokens are not counted. main() passes all of them. `door` (door.mjs) gets every
+// request whose Host is the public host (the ALB rule R-door sends https://<public host>/mcp* here), before the source
+// and box token checks, and no such request reaches a box route; without `door` those requests are treated as any other.
+export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, mcp, door, github, halt, tokens, fetchImpl = fetch, log = console.log }) {
   if (cfg.openrouterModels?.length && !cfg.openrouterKey) throw new Error('edge: OPENROUTER_MODELS needs OPENROUTER_API_KEY')
   return createServer((req, res) => route(req, res).catch((e) => {
     log(JSON.stringify({ edge: 'error', path: req.url?.split('?')[0], error: e.message }))
@@ -1336,6 +1343,7 @@ export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, mcp, g
   }))
   async function route(req, res) {
     if (req.url === '/edge/healthz') return json(res, 200, { ok: true })
+    if (door && hostOf(req) === cfg.publicHost) return door(req, res)
     // The last X-Forwarded-For entry is the one our load balancer appended; earlier entries come from the client.
     const source = String(req.headers['x-forwarded-for'] ?? '').split(',').at(-1).trim()
     if (cfg.egressIps.length > 0 && !cfg.egressIps.includes(source)) return json(res, 403, { error: 'box tokens work only from mumbo boxes' })
@@ -1517,13 +1525,17 @@ async function main() {
   }
   const signin = cfg.supabaseUrl ? authUi({ html: read('html'), supabaseJs: read('supabaseJs'), consentJs: read('consentJs'), supabaseUrl: cfg.supabaseUrl,
     anonKey: env('SUPABASE_ANON_KEY'), clientIds: values('MUMBO_OAUTH_CLIENT_IDS'), redirectUris: cfg.oauthRedirectUris }) : undefined
-  // Door keys (keys.mjs): minted, listed and revoked on the approve host; the door that accepts them is B32.
+  // Door keys (keys.mjs): minted, listed and revoked on the approve host; the door (door.mjs) accepts them on the model listener.
   const { doorKeys, keyManager } = await import('./keys.mjs')
-  const keys = keyManager({ cfg, keys: doorKeys({ store, projects: proj, admitted: (e) => admitted(cfg.allowed, e) }), projects: proj, csrfKey: createHmac('sha256', edgeKey).update('keys-csrf').digest() })
+  const doorKeyService = doorKeys({ store, projects: proj, admitted: (e) => admitted(cfg.allowed, e) })
+  const keys = keyManager({ cfg, keys: doorKeyService, projects: proj, csrfKey: createHmac('sha256', edgeKey).update('keys-csrf').digest() })
   userServer({ cfg, box, verifyAlb, projects: proj, approve, signin, keys }).listen(8080, listenHost, () => console.log(`edge: users on ${listenHost}:8080`))
   const { children, mcpServer } = await import('./sandboxes.mjs')
   const mcp = mcpServer({ ops: children({ e2b, cfg }), projects: proj, relay, projectDomain: cfg.projectDomain, claimOf: (info) => verifyBox(edgeKey, String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
-  modelServer({ cfg, edgeKey, modelKey, allow: budget(store, cfg.dailyRequests), owns: box.owns, touch: box.touch, mcp, github, halt, tokens })
+  const allow = budget(store, cfg.dailyRequests)
+  const { door, doorTools } = await import('./door.mjs')
+  const doorHandler = door({ keys: doorKeyService, tools: doorTools({ projects: proj }), allow, tokens, rate: { perMinute: cfg.doorRatePerMinute, burst: cfg.doorBurst } })
+  modelServer({ cfg, edgeKey, modelKey, allow, owns: box.owns, touch: box.touch, mcp, door: doorHandler, github, halt, tokens })
     .listen(8081, modelHost, () => console.log(`edge: model host on ${modelHost}:8081`))
 }
 

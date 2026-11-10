@@ -7,7 +7,7 @@ import { admitted, config, startScript } from './edge.mjs'
 const base = { PUBLIC_HOST: 'boxes.mumbo.si', LLM_HOST: 'llm.boxes.mumbo.si', BACKUP_BUCKET: 'backups' }
 const M1 = ['PROJECT_DOMAIN', 'APPROVE_HOST', 'GITHUB_AGENT_LOGIN', 'GITHUB_AGENT_ID', 'REQUIRED_CHECKS', 'DAILY_TOKENS_USER', 'DAILY_TOKENS_PROJECT', 'BOX_TEMPLATE', 'PROJECT_TEMPLATE',
   'AUDIT_PREFIX', 'GITHUB_AGENT_TOKEN', 'GITHUB_APP_ID', 'GITHUB_APP_KEY', 'GITHUB_MERGE_TOKEN', 'NTFY_TOPIC', 'SIGNIN_COOKIE', 'SUPABASE_URL', 'MUMBO_OAUTH_REDIRECT_URIS',
-  'OPENROUTER_MODELS', 'OPENROUTER_API_KEY', 'OPENROUTER_ZDR', 'OPENROUTER_IMAGE_TOKENS']
+  'OPENROUTER_MODELS', 'OPENROUTER_API_KEY', 'OPENROUTER_ZDR', 'OPENROUTER_IMAGE_TOKENS', 'DOOR_RATE_PER_MINUTE', 'DOOR_BURST']
 /** config() with exactly `base` plus `vars` set among the variables it reads here. */
 function configWith(vars = {}) {
   const all = { ...Object.fromEntries(M1.map(k => [k, undefined])), ...base, ...vars }
@@ -146,4 +146,12 @@ test('OpenRouter route: off unless OPENROUTER_MODELS names models (exact ids, tr
   assert.equal(off.openrouterImageTokens, 16384)
   assert.equal(configWith({ OPENROUTER_IMAGE_TOKENS: '0' }).openrouterImageTokens, 0)
   for (const bad of ['-1', 'many']) assert.throws(() => configWith({ OPENROUTER_IMAGE_TOKENS: bad }), /OPENROUTER_IMAGE_TOKENS/, bad)
+})
+
+test('the door\'s rate limit: 60 calls a minute and a burst of 20 by default; a value below 1 or not a number stops the edge', () => {
+  const c = configWith()
+  assert.equal(c.doorRatePerMinute, 60); assert.equal(c.doorBurst, 20)
+  const set = configWith({ DOOR_RATE_PER_MINUTE: '120', DOOR_BURST: '5' })
+  assert.equal(set.doorRatePerMinute, 120); assert.equal(set.doorBurst, 5)
+  for (const name of ['DOOR_RATE_PER_MINUTE', 'DOOR_BURST']) for (const bad of ['0', '-1', 'fast', 'Infinity', '']) assert.throws(() => configWith({ [name]: bad }), new RegExp(name), `${name}=${bad}`)
 })
