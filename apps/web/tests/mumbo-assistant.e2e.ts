@@ -1,7 +1,8 @@
 /**
  * Mumbo in the shipped Web composition with the person-box row: the Host creates, titles, and pins the Session at
- * start; a first page load opens it, and a Session the person chose stays open across a reload; archiving Mumbo is
- * refused through the Workspace Remote with and without stopActivity, and its schedules stay. Zero model calls.
+ * start; a first page load opens it as a pinned row before its first turn, New Session beside it opens a real blank,
+ * and a Session the person chose stays open across a reload; archiving Mumbo is refused through the row button and the
+ * Workspace Remote with and without stopActivity, and its schedules stay. Zero model calls.
  */
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
@@ -60,7 +61,7 @@ async function opened(page: Page): Promise<string | undefined> {
   })
 }
 
-it('opens a new box on Mumbo, keeps a chosen Session, and refuses to archive Mumbo or drop its schedules', async () => {
+it('opens a new box on Mumbo pinned first, starts real blanks beside it, and refuses to archive Mumbo or drop its schedules', async () => {
   const scaffold = await launchWebScaffold({ extraOverlayPath: OVERLAY, profile: { hmr: false, packages: [{ dir: PACKAGE }] } })
   const elsewhere = await mkdtemp(join(tmpdir(), 'mumbo-e2e-elsewhere-'))
   try {
@@ -79,20 +80,43 @@ it('opens a new box on Mumbo, keeps a chosen Session, and refuses to archive Mum
     try {
       const page = await newEnglishPage(browser)
       const tripwire = watchConsole(page)
+      const rejected: string[] = []
+      page.on('console', (message) => { if (message.text().startsWith('session archive rejected:')) rejected.push(message.text()) })
       await page.goto(scaffold.authenticatedUrl)
-      // Until its first turn Mumbo is its Workspace's provisional New Session row.
+      // Before its first turn Mumbo is already an ordinary row under its title, pinned first and selected.
       await expect.poll(() => opened(page), { timeout: 20_000 }).toBe(MUMBO)
+      const actions = page.locator('button[aria-label^="Session actions for "]')
+      const mumbo = page.getByRole('treeitem').filter({ has: page.locator('button[aria-label="Session actions for Mumbo"]') })
+      await expect.poll(() => mumbo.getAttribute('aria-selected')).toBe('true')
+      expect(await actions.first().getAttribute('aria-label')).toBe('Session actions for Mumbo')
+      expect(await page.getByRole('treeitem', { name: 'New Session' }).count()).toBe(0)
+
+      // New Session from Mumbo inherits Mumbo's Workspace and opens a real blank Session there, not Mumbo.
+      await page.getByRole('button', { name: 'New session', exact: true }).filter({ hasText: 'New Session' }).click()
+      await expect.poll(() => opened(page)).not.toBe(MUMBO)
+      const blank = await opened(page) as SessionId
+      expect(home!.sessionIds).toContain(blank)
       await page.getByRole('treeitem', { name: 'New Session', selected: true }).waitFor()
+      expect(await mumbo.count()).toBe(1)
 
       // A Session the person opens stays open across a reload.
       const side = await seedSession(scaffold, await readFile(SEED, 'utf8'), 'mumbo-e2e-side')
       await page.reload()
       await page.getByText('Ungrouped', { exact: true }).click()
-      await page.getByRole('treeitem').filter({ has: page.locator('button[aria-label^="Session actions for "]') }).first().click()
+      const sideRow = page.getByRole('treeitem').filter({ has: actions })
+        .filter({ hasNot: page.locator('button[aria-label="Session actions for Mumbo"]') })
+      await sideRow.first().click()
       await expect.poll(() => opened(page)).toBe(side)
       await page.reload()
-      await page.getByRole('treeitem', { selected: true }).filter({ has: page.locator('button[aria-label^="Session actions for "]') }).waitFor()
+      await page.getByRole('treeitem', { selected: true }).filter({ has: actions }).waitFor()
       expect(await opened(page)).toBe(side)
+
+      // The row button's archive is refused like any failed archive; Mumbo stays listed.
+      await mumbo.hover()
+      await mumbo.getByRole('button', { name: 'Archive session', exact: true }).click()
+      await expect.poll(() => rejected.length).toBe(1)
+      expect(rejected[0]).toContain(REFUSAL)
+      expect(await mumbo.count()).toBe(1)
 
       // Archiving Mumbo is refused with and without stopActivity, which would delete the schedules aimed at it.
       const schedule = await ctx.schedule.create({

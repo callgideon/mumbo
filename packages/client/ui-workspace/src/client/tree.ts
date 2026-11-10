@@ -1,7 +1,7 @@
 /**
  * Derives the workspace browser tree from caller-projected Workspace and
  * Session order. Unassigned Sessions trail under Ungrouped; only the selected
- * blank Session remains visible.
+ * blank row remains visible.
  */
 import {
   type SessionListState, type SessionSearchResultItem, type SessionSummary,
@@ -35,6 +35,34 @@ export function owningGroupKey(
 export type SessionPendingInteractionStatus = 'approval' | 'plan-review' | 'question'
 type SessionStatuses = SessionStatusSnapshot
 
+/**
+ * Whether a Session is its Workspace's provisional New Session row: turnless,
+ * unpinned, and untitled. A turnless Session can carry a title only from an
+ * explicit rename, because automatic titles derive from a user message that
+ * only a turn logs; so a pinned or renamed turnless Session is an ordinary row.
+ * @param session - Host summary; its `blank` means only that no turn started.
+ * @param pinnedSessionIds - registry-global pin set.
+ * @returns whether the Workspace browser and New Session treat it as the blank row.
+ */
+export function blankRow(session: SessionSummary, pinnedSessionIds: readonly SessionId[]): boolean {
+  return session.blank && session.title === undefined && !pinnedSessionIds.includes(session.id)
+}
+
+/**
+ * Narrow every summary's `blank` to {@link blankRow}, so the browser's
+ * derivations see a pinned or renamed turnless Session as an ordinary row.
+ * @param list - Host Session list snapshot.
+ * @param pinnedSessionIds - registry-global pin set.
+ * @returns the same snapshot when nothing narrows, otherwise a copy.
+ */
+export function blankRowList(list: SessionListState, pinnedSessionIds: readonly SessionId[]): SessionListState {
+  const narrowed = Object.values(list.byId).filter(session => session.blank && !blankRow(session, pinnedSessionIds))
+  if (narrowed.length === 0) return list
+  const byId = { ...list.byId }
+  for (const session of narrowed) byId[session.id] = { ...session, blank: false }
+  return { ...list, byId }
+}
+
 function mainSessionId(list: SessionListState): SessionId | undefined {
   return Object.values(list.byId)
     .find(session => (session.retainedBy.mainView ?? 0) > 0)?.id
@@ -45,7 +73,7 @@ export interface SessionNode {
   id: SessionId
   /** Stored title, or empty; the renderer localizes blank and unnamed row labels. */
   title: string
-  /** The provisional blank session (renderer shows the localized New Session title). */
+  /** The provisional blank row, see {@link blankRow} (renderer shows the localized New Session title). */
   blank: boolean
   /** A Session-scoped UI consumer is awaiting this user. */
   pendingInteraction?: SessionPendingInteractionStatus

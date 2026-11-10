@@ -23,6 +23,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { DraftInitializationOptions } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { RowToast } from './contract/slots.ts'
 import { pinOrderAccounts, pinOrderSource } from './pin-order.ts'
+import { blankRow } from './tree.ts'
 import type { WorkspaceViewStoreActions } from './stores.ts'
 
 interface MainSelection {
@@ -233,12 +234,12 @@ class UiWorkspaceService extends Service implements UiWorkspace {
 
   /** Name the first reusable member blank; a requested preset also skips blanks listing another preset. */
   private createInWorkspace(workspace: WorkspaceView, options: Pick<StartSessionOptions, 'agentPreset'>): Promise<SessionId> {
-    const archived = this.workspaces.list.getSnapshot().archivedSessionIds
+    const { archivedSessionIds: archived, pinnedSessionIds: pinned } = this.workspaces.list.getSnapshot()
     const sessions = this.sessions.list.getSnapshot()
     const blank = sessions.ids.find((id) => {
       const summary = sessions.byId[id]
       const listed = summary?.projectionValues?.agentPreset
-      return summary !== undefined && summary.blank && summary.cwd === workspace.path
+      return summary !== undefined && blankRow(summary, pinned) && summary.cwd === workspace.path
         && workspace.sessionIds.includes(id) && !archived.includes(id)
         && (options.agentPreset === undefined || typeof listed !== 'string' || listed === options.agentPreset)
     })
@@ -471,7 +472,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     const summary = saved.sessionId === undefined ? undefined : sessions.byId[saved.sessionId]
     const workspace = summary === undefined ? undefined
       : workspaces.items.find(item => item.sessionIds.includes(summary.id))
-    if (summary !== undefined && (!summary.blank || workspace === undefined)) {
+    if (summary !== undefined && (!blankRow(summary, workspaces.pinnedSessionIds) || workspace === undefined)) {
       this.replaceMain(summary.id, this.lifetime.signal, 'preserve')
       return
     }

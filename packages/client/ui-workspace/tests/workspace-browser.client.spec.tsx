@@ -44,8 +44,10 @@ const t: WorkspaceBrowserProps['t'] = makeTranslate(en, commonEn)
 
 const sid = (id: string) => id as SessionId
 const wid = (id: string) => id as WorkspaceId
+// Like the Host's, a turnless (blank) summary carries no durable title: only a rename could give it one.
 const summary = (id: string, updatedAt: number, overrides: Partial<SessionSummary> = {}): SessionSummary => ({
-  id: sid(id), title: overrides.displayTitle ?? id, displayTitle: id, running: false, blank: false, updatedAt, ...overrides,
+  id: sid(id), ...overrides.blank === true ? {} : { title: overrides.displayTitle ?? id },
+  displayTitle: id, running: false, blank: false, updatedAt, ...overrides,
   retainedBy: overrides.retainedBy ?? {},
 })
 const sessionState = (
@@ -418,13 +420,13 @@ describe('WorkspaceBrowser', () => {
     expect(b.store.getSnapshot().sessionOrderByAccount[account]).toEqual(['blank', 'old', 'absent'])
 
     rerender(b, {
-      useSessions: hook(sessionState([old, { ...blank, blank: false, updatedAt: 20 }], { main: blank.id })),
+      useSessions: hook(sessionState([old, { ...blank, blank: false, title: 'blank', updatedAt: 20 }], { main: blank.id })),
     })
     expect(names()).toEqual([expect.stringContaining('blank'), expect.stringContaining('old')])
     expect(b.store.getSnapshot().sessionOrderByAccount[account]).toEqual(['blank', 'old', 'absent'])
 
     rerender(b, {
-      useSessions: hook(sessionState([old, absent, { ...blank, blank: false, updatedAt: 20 }], { main: blank.id })),
+      useSessions: hook(sessionState([old, absent, { ...blank, blank: false, title: 'blank', updatedAt: 20 }], { main: blank.id })),
       useWorkspaces: hook(groups(['old', 'absent', 'blank'])),
     })
     expect(names()).toEqual([
@@ -432,7 +434,7 @@ describe('WorkspaceBrowser', () => {
     ])
     expect(b.store.getSnapshot().sessionOrderByAccount[account]).toEqual(['blank', 'old', 'absent'])
     rerender(b, {
-      useSessions: hook(sessionState([old, { ...blank, blank: false, updatedAt: 20 }], { main: blank.id })),
+      useSessions: hook(sessionState([old, { ...blank, blank: false, title: 'blank', updatedAt: 20 }], { main: blank.id })),
       useWorkspaces: hook(groups(['old', 'blank'])),
     })
     expect(b.store.getSnapshot().sessionOrderByAccount[account]).toEqual(['blank', 'old', 'absent'])
@@ -456,7 +458,7 @@ describe('WorkspaceBrowser', () => {
     })
 
     rerender(b, {
-      useSessions: hook(sessionState([old, { ...blank, blank: false, updatedAt: 20 }], { main: blank.id })),
+      useSessions: hook(sessionState([old, { ...blank, blank: false, title: 'blank', updatedAt: 20 }], { main: blank.id })),
     })
     await waitFor(() => {
       expect(b.store.getSnapshot().sessionOrderByAccount.alpha).toEqual(['blank', 'old'])
@@ -1063,7 +1065,7 @@ describe('WorkspaceBrowser', () => {
     expect(screen.queryByText('session-6')).toBeNull()
 
     rerender(b, {
-      useSessions: hook(sessionState([{ ...blank, blank: false }, ...ordinary], { main: blank.id })),
+      useSessions: hook(sessionState([{ ...blank, blank: false, title: 'blank' }, ...ordinary], { main: blank.id })),
     })
     expect(screen.getByText('blank')).toBeTruthy()
     expect(screen.queryByText('session-5')).toBeNull()
@@ -1398,6 +1400,24 @@ describe('WorkspaceBrowser', () => {
     expect(screen.getByText('b')).toBeTruthy()
     fireEvent.click(screen.getByText('alpha'))
     expect(screen.queryByText('b')).toBeNull()
+  })
+
+  it('shows a pinned or renamed turnless Session as an ordinary row, while another turnless Session stays hidden', () => {
+    const pinned = summary('pinned', 3, { blank: true })
+    const renamed = { ...summary('renamed', 2, { blank: true }), title: 'Mumbo' }
+    const plain = summary('plain', 1, { blank: true })
+    mount({
+      useSessions: hook(sessionState([pinned, renamed, plain])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['pinned', 'renamed', 'plain'])], [], [pinned.id])),
+    })
+    fireEvent.click(screen.getByText('alpha'))
+    expect(screen.getByText('Untitled')).toBeTruthy()
+    expect(screen.getByText('Mumbo')).toBeTruthy()
+    expect(screen.queryByText('New Session')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Session actions for Mumbo' })).toBeTruthy()
+    // A renamed turnless Session is searchable by its title, as any ordinary row.
+    fireEvent.change(screen.getByPlaceholderText('Search session names'), { target: { value: 'mumbo' } })
+    expect(screen.getByText('Mumbo')).toBeTruthy()
   })
 
   it('shows only the current blank session as the localized New Session, excluded from search', () => {

@@ -682,6 +682,36 @@ describe('UiWorkspaceService', () => {
     expect(b.sessions.retain).not.toHaveBeenCalled()
   })
 
+  it('never reuses a pinned or renamed turnless Session as the Workspace blank', async () => {
+    const assistant = summary('mumbo', { blank: true, cwd: '/w/a', title: 'Mumbo' })
+    const pinned = summary('pinned', { blank: true, cwd: '/w/a' })
+    const b = bench({
+      sessions: sessionState([assistant, pinned], 'pending'),
+      workspaces: { ...workspaceState([workspace('a', [sid('mumbo'), sid('pinned')])]), pinnedSessionIds: [sid('pinned')] },
+    })
+    b.uiWorkspace.startSession(wid('a'))
+    await vi.waitFor(() => { expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('a') }) })
+    // An ordinary turnless member is still the blank New Session returns to.
+    const withPlain = bench({
+      sessions: sessionState([assistant, pinned, summary('plain', { blank: true, cwd: '/w/a' })], 'pending'),
+      workspaces: {
+        ...workspaceState([workspace('a', [sid('mumbo'), sid('pinned'), sid('plain')])]), pinnedSessionIds: [sid('pinned')],
+      },
+    })
+    await expect(withPlain.uiWorkspace.connectWorkspace(wid('a'))).resolves.toBe(sid('plain'))
+    expect(withPlain.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('a'), sessionId: sid('plain') })
+  })
+
+  it('reopens a saved renamed turnless Session directly instead of reclaiming it as a blank', () => {
+    persistSelection({ sessionId: sid('mumbo') })
+    const b = bench({
+      sessions: sessionState([summary('mumbo', { blank: true, cwd: '/w/a', title: 'Mumbo' })]),
+      workspaces: workspaceState([workspace('a', [sid('mumbo')])]),
+    })
+    expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('mumbo'), { source: 'mainView' })
+    expect(b.sessions.create).not.toHaveBeenCalled()
+  })
+
   it('returns New Session to the Workspace blank that holds its unsent draft', async () => {
     const b = bench({
       sessions: sessionState([summary('blank', { blank: true, cwd: '/w/a' })], 'pending'),
