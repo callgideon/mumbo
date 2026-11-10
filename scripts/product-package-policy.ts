@@ -35,6 +35,7 @@ export const PRODUCT_PACKAGE_POLICY: Readonly<Record<string, ProductPackagePolic
   'packages/context/tmux-context': { category: 'optional', reason: 'Context contribution requiring a tmux pane.' },
   'packages/fs/tool-str-replace-editor': { category: 'optional', reason: 'Explicit alternative to the default filesystem editing tools.' },
   'packages/fs/fs-observation-policy': { category: 'optional', reason: 'Read-before-mutation guard that a deployment enables on the disabled dsh-base row.' },
+  'packages/mumbo/assistant': { category: 'optional', reason: 'Per-person assistant Session mounted only by the box edge overlay, which supplies its instructions.' },
   'packages/mumbo/box-links': { category: 'optional', reason: 'Box page links mounted only by the box edge overlay, which supplies the links.' },
   'packages/mumbo/browser-consent': { category: 'optional', reason: 'Browser write consent that a per-user box overlay mounts; it mounts the signed-in browser provider itself.' },
   'packages/mumbo/edge-member': { category: 'optional', reason: 'Project-member admission mounted only in mumbo project boxes, with the edge-derived member key.' },

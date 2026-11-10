@@ -7,6 +7,7 @@ import { RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionListState, SessionSummary, SessionSnapshot } from '@deepseek-ai/dsh-api-session-controller/client'
 import { SessionForkError } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { WorkspaceSnapshot } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { ShortcutCommand, ShortcutGesture, ShortcutPlatform } from '@deepseek-ai/dsh-client-shortcuts/client'
 import type { PanelInfo, MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { ShortcutRegistry } from '../../shortcuts/src/client/registry.ts'
@@ -42,6 +43,8 @@ async function bench(runtime: 'web' | 'desktop' = 'desktop', platform: ShortcutP
     sessionId: sid(id), session: { ...history, loadOlder },
   }]))
   ctx.provide('sessions', { list, binding: (id: SessionId) => bindings.get(id) })
+  const workspaces = createSnapshotStore<Pick<WorkspaceSnapshot, 'pinnedSessionIds'>>({ pinnedSessionIds: [] })
+  ctx.provide('workspaces', { list: workspaces })
   const panelInfo = createSnapshotStore<PanelInfo>({ activePanelId: null })
   ctx.provide('layout', { panelInfo })
   const directory = createSnapshotStore(true)
@@ -63,7 +66,10 @@ async function bench(runtime: 'web' | 'desktop' = 'desktop', platform: ShortcutP
   const select = (id: string) => { list.set({ ...list.getSnapshot(), byId: {
     [sid('a')]: row('a', id === 'a'), [sid('b')]: row('b', id === 'b'),
   } }) }
-  return { ctx, fiber, registry, commands, navigation, controls, reportForkFailure, list, directory, select, history, loadOlder, panelInfo }
+  return {
+    ctx, fiber, registry, commands, navigation, controls, reportForkFailure, list, directory, select, history, loadOlder, panelInfo,
+    workspaces,
+  }
 }
 
 afterEach(() => { vi.restoreAllMocks() })
@@ -124,7 +130,9 @@ describe('workspace shortcut ownership', () => {
     const b = await bench(runtime)
     const gesture = key('KeyG', { alt: true })
     const invoke = (modal: string | null = null) => b.registry.dispatch(gesture, { ...context, modal }, vi.fn())
-    b.list.set({ ...b.list.getSnapshot(), byId: { [sid('a')]: { ...row('a', true), blank: true } } })
+    // Like the Host's, a turnless summary carries no title unless the Session was renamed.
+    const { title: _title, ...turnless } = row('a', true)
+    b.list.set({ ...b.list.getSnapshot(), byId: { [sid('a')]: { ...turnless, blank: true } } })
     expect(invoke().status).toBe('blocked')
     expect(b.controls.state.getSnapshot().renameTarget).toBeNull()
     b.select('a')
@@ -216,6 +224,21 @@ describe('workspace shortcut ownership', () => {
     expect(invoke()).toMatchObject({ status: 'blocked', reason: en['shortcut.noSession'] })
     expect(b.loadOlder).not.toHaveBeenCalled()
   })
+})
+
+it('renames a pinned or titled turnless main Session, which is an ordinary row, and refuses the blank row', async () => {
+  const b = await bench()
+  const turnless = (id: string, title?: string): SessionSummary => {
+    const { title: _title, ...untitled } = row(id, true)
+    return { ...untitled, blank: true, ...title === undefined ? {} : { title } }
+  }
+  const rename = () => b.commands.get('session.rename')!.resolve(context)
+  b.list.set({ ...b.list.getSnapshot(), byId: { [sid('a')]: turnless('a', 'Mumbo') } })
+  expect(rename().status).toBe('handled')
+  b.list.set({ ...b.list.getSnapshot(), byId: { [sid('a')]: turnless('a') } })
+  expect(rename()).toMatchObject({ status: 'blocked', reason: en['shortcut.noSession'] })
+  b.workspaces.set({ pinnedSessionIds: [sid('a')] })
+  expect(rename().status).toBe('handled')
 })
 
 it('opens an empty rename draft for unnamed history instead of its directory label', async () => {

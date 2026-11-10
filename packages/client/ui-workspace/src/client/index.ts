@@ -59,7 +59,7 @@ import { registerToasts } from './toast/register.ts'
 import { WorkspacePicker } from './WorkspacePicker.tsx'
 import { en, ja, es, fr, de, ru, pt, type WorkspaceKey } from './locales.ts'
 
-export type { StartSessionOptions, UiWorkspace } from './navigation.ts'
+export type { StartSessionOptions, UiWorkspace, UiWorkspaceRestoration } from './navigation.ts'
 export type {
   DirectoryFlowOwnerProps, DirectoryFlowSlotName, DirectoryPickingHooks, DirectoryPickingInjected,
   MenuOpenState, RowToast, SessionRenameTarget, SessionRowOwnerProps, UseMenuOpenState, WorkspaceBrowserInjected,
@@ -227,10 +227,11 @@ export function apply(ctx: Context): void {
       uiWorkspace.forkSession(sessionId, (childId) => {
         ctx.get('productAnalytics')?.track('branch_session_click', { session_id: childId, parent_session_id: sessionId, click_position: 'sidebar' })
       }, { allowMigration: false }).catch((error: unknown) => {
-        if (error instanceof Error && error.name === 'SessionForkError'
-          && (error as SessionForkError).rpcError.code === 'session/migration-required') {
-          notify({ kind: 'forkRequiresOpen', sessionId })
-        }
+        if (!(error instanceof Error) || error.name !== 'SessionForkError') return
+        const { code } = (error as SessionForkError).rpcError
+        if (code === 'session/migration-required') notify({ kind: 'forkRequiresOpen', sessionId })
+        // A pinned or titled turnless row offers Fork; the Host refuses it, as the fork shortcut reports.
+        else if (code === 'session/fork-unavailable') notify({ kind: 'shortcutForkFailed', reason: 'unavailable' })
       })
     },
   })

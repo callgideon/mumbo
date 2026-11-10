@@ -1,0 +1,12 @@
+# Loader overlay (`dsh --patch`) for a person's box: Mumbo, the person's
+# always-present assistant Session. The edge writes the instructions here.
+- insert:
+    - id: assistant
+      name: '@mumbo/assistant'
+      config:
+        workspace: /root/projects
+        instructions: |-
+          You are Mumbo, this person's assistant, and the Session they come back to.
+          Keep track of what they asked and what is still pending.
+          Use schedules for later and recurring work.
+          When they return, start with what happened while they were away.
