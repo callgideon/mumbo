@@ -614,7 +614,7 @@ test('the live view\'s pages may connect only to their own host, and a page that
 test('backups carry the browser user\'s home without caches or profile locks, and tolerate its absence', async () => {
   const { backupCommand } = await import('./edge.mjs')
   const c = backupCommand('URL')
-  assert.match(c, /ls -d root\/\.dsh root\/projects root\/\.mumbo-sqlite 2>\/dev\/null\) --null --verbatim-files-from --no-recursion -T "\$dirs" --recursion -T "\$units" /)
+  assert.match(c, /ls -d root\/\.dsh root\/projects root\/\.mumbo-sqlite var\/lib\/mumbo\/attachments 2>\/dev\/null\) --null --verbatim-files-from --no-recursion -T "\$dirs" --recursion -T "\$units" /)
   for (const x of ['.cache', '.chromium-profile-old', 'chrome-profile/Singleton*', 'chrome-profile/*/Cache', 'chrome-profile/*/Code Cache', 'chrome-profile/*/GPUCache', 'profile/Singleton*', 'profile/*/Cache']) assert.ok(c.includes(`--exclude='home/browser/${x}'`), x)
 })
 

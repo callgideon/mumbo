@@ -315,3 +315,35 @@ test('a corrupt database fails the backup and leaves the previous archive alone'
   assert.equal(execFileSync('cat', [`${root}.tgz`], { encoding: 'utf8' }), 'previous')
   assert.ok(!existsSync(join(root, 'root/.mumbo-sqlite')))
 })
+
+test('backups carry the uploads of agent containment (B24) without their cache, and a restore puts an upload back; dsh\'s temporary directory stays out', () => {
+  const { root, db, target } = fixture()
+  db.close()
+  const store = join(root, 'var/lib/mumbo/attachments')
+  for (const [p, v] of [['attachments/v1/ab/cdef', 'uploaded bytes'], ['cache/attachments/x', 'cache']]) { mkdirSync(join(store, p, '..'), { recursive: true }); writeFileSync(join(store, p), v) }
+  chmodSync(join(store, 'attachments/v1/ab/cdef'), 0o440)
+  mkdirSync(join(root, 'root/.dsh/tmp/tsx'), { recursive: true }); writeFileSync(join(root, 'root/.dsh/tmp/tsx/x'), 'module cache')
+  const b = sh(backupCommand(target, root))
+  assert.equal(b.status, 0, b.stderr)
+  const names = execFileSync('tar', ['-tzf', `${root}.tgz`], { encoding: 'utf8' }).split('\n')
+  assert.ok(names.includes('var/lib/mumbo/attachments/attachments/v1/ab/cdef'))
+  assert.ok(!names.some(n => n.startsWith('var/lib/mumbo/attachments/cache') || n.startsWith('root/.dsh/tmp')))
+  rmSync(join(root, 'var'), { recursive: true })
+  assert.equal(sh(restoreCommand(target, root)).status, 0)
+  assert.equal(readFileSync(join(store, 'attachments/v1/ab/cdef'), 'utf8'), 'uploaded bytes')
+  assert.equal(lstatSync(join(store, 'attachments/v1/ab/cdef')).mode & 0o777, 0o440)
+})
+
+test('a backup stages its SQLite snapshots root-only (umask 077): under containment other users pass through /root', () => {
+  const { root, db, target } = fixture()
+  db.close()
+  // curl, which uploads while the snapshots are staged, reports their directory's mode first.
+  const dir = mkdtempSync(join(tmpdir(), 'curl-'))
+  try {
+    writeFileSync(join(dir, 'curl'), `#!/bin/sh\nstat -c %a '${root}/root/.mumbo-sqlite' '${root}/root/.mumbo-sqlite/.dsh/superagent/orchestrator.sqlite.snap' > '${dir}/modes'\nexec ${execFileSync('sh', ['-c', 'command -v curl'], { encoding: 'utf8' }).trim()} "$@"\n`)
+    chmodSync(join(dir, 'curl'), 0o755)
+    const b = sh(backupCommand(target, root), { ...process.env, PATH: `${dir}:${process.env.PATH}` })
+    assert.equal(b.status, 0, b.stderr)
+    assert.deepEqual(readFileSync(join(dir, 'modes'), 'utf8').trim().split('\n').map(m => Number.parseInt(m, 8) & 0o077), [0, 0])
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
