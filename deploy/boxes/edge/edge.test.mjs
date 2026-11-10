@@ -654,7 +654,7 @@ test('role instructions: assistant with write consent and desktop sign-in; coord
   assert.match(a, /wait for the user to agree/)
   assert.match(a, /https:\/\/boxes\.x\/desktop\//)
   assert.match(a, /\n- Never type passwords or one-time codes\./)
-  assert.match(a, /\n- Files: downloads land in \/home\/browser\/Downloads, and files the user wants to upload go in the same folder\.\n/)
+  assert.match(a, /\n- Files: downloads land in \/home\/browser\/Downloads, and files the user wants to upload go in the same folder\. Backups leave out files over 1 GiB there\.\n/)
   assert.match(a, /project_message/)
   const p = roleInstructions(c, 'project:0123456789abcdef')
   assert.match(p, /coordinate the shared mumbo project 0123456789abcdef\. Its members reach you at https:\/\/p-0123456789abcdef\.boxes\.x\/ /)

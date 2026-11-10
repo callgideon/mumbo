@@ -174,7 +174,7 @@ export function roleInstructions(cfg, principal) {
     '- Browser: your browser tools drive the user\'s own Google Chrome, where they are signed in to their accounts. Reading pages, inboxes and feeds is fine.',
     '- Before anything that writes with one of their accounts (posting, sending, replying, buying, booking, deleting, changing settings), say exactly what you will do and wait for the user to agree, unless they have allowed that kind of action on that site; afterwards, say what you did.',
     `- Never type passwords or one-time codes. If a site needs a sign-in, ask the user to sign in on the desktop at https://${cfg.publicHost}/desktop/.`,
-    '- Files: downloads land in /home/browser/Downloads, and files the user wants to upload go in the same folder.',
+    '- Files: downloads land in /home/browser/Downloads, and files the user wants to upload go in the same folder. Backups leave out files over 1 GiB there.',
     '- Projects: software and other team work lives in shared projects, each with its own coordinator. Use project_list, project_create, project_add_member and project_message (to give a project\'s coordinator work or ask for status). Do not run project code in this box.',
     '- Sandboxes (sandbox_* tools) are for quick isolated experiments.',
     '- For anything recurring or later, use the schedule tools; the box runs them while the user is away.',
@@ -318,7 +318,8 @@ fi
 ` : ''}${site.desktop ? `# Desktop: XFCE and the user's own Google Chrome (signed-in accounts live in its profile) on a virtual display, as the
 # unprivileged user browser; templates before XFCE run openbox and Chromium on the same profile. The browser's debugging
 # port stays on loopback for dsh's browser tools; noVNC on :6080 is the live view, which only the edge reaches (E2B
-# traffic token). Re-runnable: each part starts only if it is not running.
+# traffic token). Re-runnable: each part starts only if it is not running. Root never writes under /home/browser, which
+# the user browser controls (a symlink there could aim a root write anywhere): the loops below do that as browser.
 if id browser >/dev/null 2>&1; then
   # E2B forwards every loopback port to the box address; the browser's debugging port and raw VNC stay box-local.
   for port in 9222 5900; do iptables -C INPUT -p tcp --dport $port ! -i lo -j DROP 2>/dev/null || iptables -I INPUT -p tcp --dport $port ! -i lo -j DROP || true; done
@@ -332,11 +333,23 @@ if id browser >/dev/null 2>&1; then
     XVFB_AUTH="-auth /run/x11/auth"
   fi
   export XVFB_AUTH
-  install -d -o browser -g browser /home/browser/Downloads
+  # Until browser snapshots mask password and card fields (B25), Chromium saves and fills no passwords or cards. Root writes
+  # the managed policy to a temporary file in the same directory and renames it into place, refusing a symlinked directory
+  # or target; Chromium reads the directory at start and when it changes. A template with Google Chrome carries Chrome's
+  # own policy file instead (template.mjs).
+  pol=/etc/chromium/policies/managed
+  if [ ! -e /etc/opt/chrome/policies/managed/mumbo.json ]; then
+    if [ ! -L /etc/chromium ] && [ ! -L /etc/chromium/policies ] && [ ! -L $pol ] && mkdir -p $pol && [ ! -L $pol/mumbo.json ]; then
+      tmp=$(mktemp $pol/.mumbo.json.XXXXXX) && printf '%s\\n' '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}' > "$tmp" && chmod 0644 "$tmp" && mv -fT "$tmp" $pol/mumbo.json || { rm -f "$tmp"; echo 'chromium policy not written' >&2; }
+    else
+      echo 'chromium policy path is a symlink; not written' >&2
+    fi
+  fi
   # The one way to start the browser: the loop below and the desktop's launchers (the template aims them here). A start
-  # while it runs opens a window in it.
+  # while it runs opens a window in it. For any other user, such as the agent's root shell, it is plain Chrome.
   cat > /usr/local/bin/google-chrome <<'SH'
 #!/bin/sh
+[ "$(id -un)" = browser ] || exec "$(command -v google-chrome-stable || echo chromium)" "$@"
 exec "$(command -v google-chrome-stable || echo chromium)" --user-data-dir=/home/browser/profile --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --no-first-run --no-default-browser-check --password-store=basic --start-maximized "$@"
 SH
   # The desktop session, started again 2 s after it ends. Compositing makes the VNC server send more, so xfwm4's is set
@@ -345,6 +358,7 @@ SH
 #!/bin/sh
 while :; do
   if command -v startxfce4 >/dev/null 2>&1; then
+    unset DBUS_SESSION_BUS_PID DBUS_SESSION_BUS_ADDRESS
     eval "$(dbus-launch --sh-syntax)"
     xfconf-query -c xfwm4 -p /general/use_compositing -n -t bool -s false
     startxfce4
@@ -355,26 +369,28 @@ while :; do
   sleep 2
 done
 SH
-  # The browser, started again within 5 s of exiting, since the assistant's browser tools need it. While a Chrome that a
-  # launcher started runs, it waits. A profile last used by a newer browser is moved aside first, and Chrome makes a new one.
+  # The browser, started again within 5 s of exiting, since the assistant's browser tools need it. While any Chrome runs
+  # on the profile it waits. First it makes Downloads (the policy's download directory), and moves a profile last used by
+  # a newer browser aside, so that Chrome makes a new one; mv -T will not move it into a directory a symlink names.
   cat > /usr/local/bin/mumbo-browser <<'SH'
 #!/bin/sh
+mkdir -p /home/browser/Downloads 2>/dev/null
 have=$(google-chrome-stable --version 2>/dev/null | grep -oE '[0-9]+(\\.[0-9]+)+' | head -n 1)
 last=$(grep -oE '^[0-9]+(\\.[0-9]+)+$' '/home/browser/profile/Last Version' 2>/dev/null)
-if [ -n "$have" ] && [ -n "$last" ] && [ "$(printf '%s\\n%s\\n' "$have" "$last" | sort -V | tail -n 1)" != "$have" ] && ! pgrep -f remote-debugging-port=9222 >/dev/null; then
-  mv /home/browser/profile "/home/browser/profile.$last.$(date +%s)"
+if [ -n "$have" ] && [ -n "$last" ] && [ "$(printf '%s\\n%s\\n' "$have" "$last" | sort -V | tail -n 1)" != "$have" ] && ! pgrep -u browser -f 'user-data-dir=/home/browser/profile' >/dev/null; then
+  mv -T /home/browser/profile "/home/browser/profile.$last.$(date +%s)"
 fi
 while :; do
-  pgrep -f remote-debugging-port=9222 >/dev/null || { rm -f /home/browser/profile/Singleton*; /usr/local/bin/google-chrome; }
+  pgrep -u browser -f 'user-data-dir=/home/browser/profile' >/dev/null || { rm -f /home/browser/profile/Singleton*; /usr/local/bin/google-chrome; }
   sleep 2
 done
 SH
   chmod 0755 /usr/local/bin/google-chrome /usr/local/bin/mumbo-desktop /usr/local/bin/mumbo-browser
   pgrep -x Xvfb >/dev/null || { su browser -s /bin/sh -c 'Xvfb :1 $XVFB_AUTH -screen 0 1440x900x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &'; sleep 1; }
-  pgrep -f /usr/local/bin/mumbo-desktop >/dev/null || su browser -s /bin/sh -c 'DISPLAY=:1 /usr/local/bin/mumbo-desktop >/tmp/desktop.log 2>&1 &'
+  pgrep -f /usr/local/bin/mumbo-desktop >/dev/null || su browser -s /bin/sh -c 'SHELL=/bin/bash DISPLAY=:1 /usr/local/bin/mumbo-desktop >/tmp/desktop.log 2>&1 &'
   pgrep -f /usr/local/bin/mumbo-browser >/dev/null || su browser -s /bin/sh -c 'DISPLAY=:1 /usr/local/bin/mumbo-browser >/tmp/chrome.log 2>&1 &'
   pgrep -x x11vnc >/dev/null || su browser -s /bin/sh -c 'x11vnc -display :1 -localhost -forever -shared -nopw -rfbport 5900 -quiet >/tmp/x11vnc.log 2>&1 &'
-  pgrep -f websockify >/dev/null || nohup websockify --web /usr/share/novnc "$ip:6080" 127.0.0.1:5900 >/tmp/websockify.log 2>&1 &
+  pgrep -f websockify >/dev/null || nohup websockify --web /usr/share/novnc "$ip:6080" 127.0.0.1:5900 >/root/websockify.log 2>&1 &
 fi
 ` : ''}${site.desktop ? '' : `# Project box: a TLS-terminating GitHub proxy on loopback (its own CA, trusted system-wide) aims git and gh at the edge's
 # forwarder with this box's token (edge/box/github-local-proxy.mjs); dsh and its children reach GitHub only through it.
@@ -441,16 +457,25 @@ for (const d of [".dsh", "projects"]) {
 /** What a backup leaves out of /home/browser: caches, re-downloaded browser components and models, and profile locks.
  *  `profile*` covers a profile kept aside (startScript) too; tar's exclude patterns let `*` match `/`. */
 const BROWSER_EXCLUDES = ['.cache', ...['Singleton*', '*/Cache', '*/Code Cache', '*/GPUCache', '*/Service Worker/CacheStorage', 'ShaderCache', 'GrShaderCache',
-  'GraphiteDawnCache', 'component_crx_cache', 'extensions_crx_cache', 'OptGuideOnDeviceModel'].map((p) => `profile*/${p}`)]
-/** Upload chats, projects and the browser user's home (signed-in accounts, downloads, desktop settings; BROWSER_EXCLUDES left out) to a presigned S3 PUT. Runs inside the box; S3 refuses a streamed (chunked) body,
- *  so the archive goes to a temporary file first. SQLite databases travel as consistent `.snap` copies under root/.mumbo-sqlite. Extraction on restore also stays inside the box.
+  'GraphiteDawnCache', 'DawnGraphiteCache', 'DawnWebGPUCache', 'Crashpad', 'blob_storage', 'Shared Dictionary/cache', 'component_crx_cache', 'extensions_crx_cache',
+  'OptGuideOnDeviceModel'].map((p) => `profile*/${p}`)]
+/** Downloads files larger than this (MiB) stay out of backups: the archive is staged on the box's own disk. */
+const DOWNLOAD_BACKUP_MAX_MIB = 1024
+/** Upload chats, projects and the browser user's home (signed-in accounts, downloads, desktop settings; BROWSER_EXCLUDES and Downloads files over DOWNLOAD_BACKUP_MAX_MIB left out) to a presigned S3 PUT. Runs inside the box; S3 refuses a streamed (chunked) body,
+ *  so the archive goes to a temporary file first. SQLite databases under /root travel as consistent `.snap` copies under root/.mumbo-sqlite. Extraction on restore also stays inside the box.
+ *  /home/browser is only read, and tar archives a symlink there as a symlink. Chrome's SQLite and LevelDB stores travel as copies of the live files: Chrome holds most of its SQLite databases (History, Web Data) under an exclusive lock while it runs, so no other process can snapshot them.
+ *  tar's status 1 (a file changed while it was read, as a running Chrome's do) still uploads the archive; any other failure stops the backup.
  *  `root` (default `/`) is the filesystem root, for tests. */
 export const backupCommand = (url, root = '/') => {
   const r = root.replace(/\/+$/, ''), snap = `${r}/root/.mumbo-sqlite`
-  return `set -e; f=$(mktemp /tmp/mumbo-backup.XXXXXX); trap 'rm -f "$f"; rm -rf '${snap}'' EXIT; rm -rf '${snap}'; node -e '${SNAPSHOT_JS}' '${r}/root' '${snap}'; tar -C '${root}' --exclude=node_modules --exclude='*.sqlite-wal' --exclude='*.sqlite-shm' ${['root/.dsh', 'root/projects'].flatMap((d) => ['*.sqlite', '*.db', '*-wal', '*-shm', '*-journal'].map((p) => `--exclude='${d}/${p}'`)).join(' ')} ${BROWSER_EXCLUDES.map((p) => `--exclude='home/browser/${p}'`).join(' ')} -czf "$f" $(cd '${root}' && ls -d root/.dsh root/projects root/.mumbo-sqlite home/browser 2>/dev/null); curl -fsS -m 600 -X PUT -H 'content-type: application/gzip' --upload-file "$f" '${url}'; rm -rf '${snap}'`
+  return `set -e; f=$(mktemp /tmp/mumbo-backup.XXXXXX); big=$(mktemp /tmp/mumbo-backup.XXXXXX); trap 'rm -f "$f" "$big"; rm -rf '${snap}'' EXIT; rm -rf '${snap}'; node -e '${SNAPSHOT_JS}' '${r}/root' '${snap}'; (cd '${root}' && find home/browser/Downloads -type f -size +${DOWNLOAD_BACKUP_MAX_MIB}M 2>/dev/null || true) > "$big"; tar -C '${root}' --exclude=node_modules --exclude='*.sqlite-wal' --exclude='*.sqlite-shm' ${['root/.dsh', 'root/projects'].flatMap((d) => ['*.sqlite', '*.db', '*-wal', '*-shm', '*-journal'].map((p) => `--exclude='${d}/${p}'`)).join(' ')} ${BROWSER_EXCLUDES.map((p) => `--exclude='home/browser/${p}'`).join(' ')} --no-wildcards -X "$big" --wildcards -czf "$f" $(cd '${root}' && ls -d root/.dsh root/projects root/.mumbo-sqlite home/browser 2>/dev/null) || [ $? -eq 1 ]; curl -fsS -m 600 -X PUT -H 'content-type: application/gzip' --upload-file "$f" '${url}'; rm -rf '${snap}'`
 }
-/** Download and unpack a backup, then move each `.snap` back over its database path. Runs before dsh starts. A backup
- *  taken before it covered all of /home/browser holds only home/browser/profile there; the start script makes Downloads. */
+/** Download and unpack a backup, then move each `.snap` back over its database path. Runs before dsh starts, in a box
+ *  just created from the template. A backup taken before it covered all of /home/browser holds only home/browser/profile
+ *  there; the start script makes Downloads. Root writes /home/browser here, and GNU tar's defaults keep a symlink, in the
+ *  box or in the archive, from aiming a write outside it: an archive symlink to an absolute or `..` target is made only
+ *  after every other member, and an existing symlink is replaced, not written through. Never add --overwrite,
+ *  --keep-directory-symlink or -P (backup.test.mjs). */
 export const restoreCommand = (url, root = '/') => {
   const r = root.replace(/\/+$/, ''), snap = `${r}/root/.mumbo-sqlite`
   return `set -e; curl -fsS -m 600 '${url}' | tar -C '${root}' -xzf -; if [ -d '${snap}' ]; then (cd '${snap}' && find . -name '*.snap' -type f) | while IFS= read -r p; do d='${r}/root/'"\${p#./}"; d="\${d%.snap}"; rm -f "$d-wal" "$d-shm" "$d-journal"; mv '${snap}'/"$p" "$d"; done; rm -rf '${snap}'; fi`

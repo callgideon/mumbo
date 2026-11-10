@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { startScript, boxSite, boxes } from './edge.mjs'
@@ -17,14 +17,79 @@ const at = (text, needle) => { const i = text.indexOf(needle); assert.ok(i >= 0,
 
 test('a user box start script is byte-for-byte what it was before project boxes grew a proxy', () => {
   const s = startScript(c, 'T', boxSite(c, 'a@x.com'), "role's", undefined, boxFiles, ['o@x.com'])
-  // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows, the X cookie, the first-run welcome and the B18 desktop (same cfg, token T, role "role's").
-  assert.equal(createHash('sha256').update(s).digest('hex'), 'f8e23e51b48f5730da33397564e45d2bd9016c17f3a4ebaf6792a306f7cc11a1')
+  // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows, the X cookie, the first-run welcome, the interim Chromium policy (B27) and the B18 desktop (same cfg, token T, role "role's").
+  assert.equal(createHash('sha256').update(s).digest('hex'), '4e299b1e78b70e7977a10d3455302ec2b27789458a2049ddb91cabe5670590ac')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
   const p = { ...c, projectDomain: 'boxes.x', agentLogin: 'mumbo-bot[bot]', agentId: 341797844 }
   const s = startScript(p, 'TOK', boxSite(p, 'project:0123456789abcdef'), "role's", 'KEYTEXT', boxFiles, ['O@x.com'])
   assert.equal(createHash('sha256').update(s).digest('hex'), '99e092312b355463622742923a17b6b5ba6c7a96a15836fd27b19f36913f6981')
+})
+
+const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'
+/** The start script's Chromium policy block, run by sh with /etc/chromium pointed at `etc`. */
+function runPolicy(script, etc) {
+  const lines = script.split('\n')
+  const from = lines.findIndex(l => l.startsWith('  pol=/etc/chromium/policies/managed'))
+  const to = lines.findIndex((l, i) => i > from && l === '  fi')
+  assert.ok(from >= 0 && to > from, 'policy block present')
+  const block = lines.slice(from, to + 1).join('\n').replaceAll('/etc/chromium', etc)
+  return execFileSync('sh', ['-c', `set -eu\n${block}\necho REACHED`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+}
+
+test('interim Chromium policy: a person box turns off saved passwords and cards before Chromium starts; a project box gets none', () => {
+  const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles)
+  assert.ok(u.includes(POLICY))
+  assert.ok(at(u, '  pol=/etc/chromium/policies/managed') < at(u, "su browser -s /bin/sh -c 'DISPLAY=:1 /usr/local/bin/mumbo-browser"))
+  const p = startScript({ ...c, projectDomain: 'boxes.x' }, 'T', boxSite({ ...c, projectDomain: 'boxes.x' }, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
+  assert.ok(!p.includes('/etc/chromium'))
+})
+
+test('interim Chromium policy: written whole with mode 0644, and never through a symlink', () => {
+  const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles)
+  const dir = mkdtempSync(join(tmpdir(), 'chromium-pol-'))
+  try {
+    // Fresh: the file is created with exactly the policy, mode 0644, and no temporary file is left.
+    const etc = join(dir, 'fresh')
+    assert.match(runPolicy(u, etc), /REACHED/)
+    const file = join(etc, 'policies/managed/mumbo.json')
+    assert.equal(readFileSync(file, 'utf8'), `${POLICY}\n`)
+    assert.equal(statSync(file).mode & 0o777, 0o644)
+    assert.deepEqual(execFileSync('ls', ['-A', join(etc, 'policies/managed')], { encoding: 'utf8' }).trim().split('\n'), ['mumbo.json'])
+    // A re-run replaces it in place.
+    writeFileSync(file, 'old')
+    runPolicy(u, etc)
+    assert.equal(readFileSync(file, 'utf8'), `${POLICY}\n`)
+    // A symlinked managed directory: nothing is written through it, and the script goes on.
+    const outside = join(dir, 'outside'); mkdirSync(outside)
+    const linkedDir = join(dir, 'linked-dir'); mkdirSync(join(linkedDir, 'policies'), { recursive: true })
+    symlinkSync(outside, join(linkedDir, 'policies/managed'))
+    assert.match(runPolicy(u, linkedDir), /REACHED/)
+    assert.deepEqual(execFileSync('ls', ['-A', outside], { encoding: 'utf8' }).trim(), '')
+    // A symlinked target file: the file it points at is left alone, and the link stays a link.
+    const linkedFile = join(dir, 'linked-file'); mkdirSync(join(linkedFile, 'policies/managed'), { recursive: true })
+    const victim = join(dir, 'victim'); writeFileSync(victim, 'keep')
+    symlinkSync(victim, join(linkedFile, 'policies/managed/mumbo.json'))
+    assert.match(runPolicy(u, linkedFile), /REACHED/)
+    assert.equal(readFileSync(victim, 'utf8'), 'keep')
+    assert.ok(lstatSync(join(linkedFile, 'policies/managed/mumbo.json')).isSymbolicLink())
+    // A symlinked /etc/chromium itself.
+    const linkedRoot = join(dir, 'linked-root'); symlinkSync(outside, linkedRoot)
+    assert.match(runPolicy(u, linkedRoot), /REACHED/)
+    assert.equal(existsSync(join(outside, 'policies')), false)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('interim Chromium policy: a template with Google Chrome and its own policy file gets no Chromium policy', () => {
+  const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles)
+  const dir = mkdtempSync(join(tmpdir(), 'chrome-pol-'))
+  try {
+    mkdirSync(join(dir, 'opt/chrome/policies/managed'), { recursive: true })
+    writeFileSync(join(dir, 'opt/chrome/policies/managed/mumbo.json'), '{}\n')
+    assert.match(runPolicy(u.replaceAll('/etc/opt/chrome', join(dir, 'opt/chrome')), join(dir, 'chromium')), /REACHED/)
+    assert.equal(existsSync(join(dir, 'chromium')), false)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
 })
 
 test('box links: the overlay loads only when the image ships @mumbo/box-links; project boxes get no desktop link', () => {

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { startScript, boxSite } from './edge.mjs'
@@ -16,23 +16,27 @@ const person = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, {})
 const at = (text, needle) => { const i = text.indexOf(needle); assert.ok(i >= 0, `missing: ${needle}`); return i }
 /** The body the start script writes to `path` with a quoted heredoc. */
 const heredoc = (path) => { const head = `cat > ${path} <<'SH'\n`; const i = at(person, head) + head.length; return person.slice(i, person.indexOf('\nSH\n', i) + 1) }
-/** The desktop block from Downloads to the browser loop's start, without the X server. */
-const block = () => person.slice(at(person, 'install -d -o browser'), person.indexOf('\n', at(person, 'mumbo-browser >/tmp/chrome.log')) + 1).split('\n').filter(l => !l.includes('Xvfb')).join('\n')
+/** The whole desktop block, run as start.sh runs it (`set -eu`, `$ip` set); it appends `reached` to log/dsh when dsh's start would run. */
+const block = () => `set -eu\nip=127.0.0.1\n${person.slice(at(person, 'if id browser >/dev/null 2>&1; then'), person.indexOf('\nfi\n', at(person, 'websockify --web')) + 4)}echo reached >> /tmp/dsh\n`
+/** The test's own user stands in for browser. */
+const USER = userInfo().username
 /** How the fake Chrome answers the version check that runs before the browser loop. */
 const VERSION = '[ "$1" = --version ] && { echo "Google Chrome 142.0.7444.59 "; exit; }\n'
-const REAL = ['sleep', 'pgrep', 'rm', 'grep', 'head', 'sort', 'tail', 'date', 'mv', 'cat', 'chmod', 'mkdir', 'touch', 'wc']
+const REAL = ['sleep', 'pgrep', 'rm', 'grep', 'head', 'sort', 'tail', 'date', 'mv', 'cat', 'chmod', 'mkdir', 'touch', 'wc', 'nohup', 'install']
 
 /** A temporary root: box paths moved under it, a private debugging port, and PATH holding only fakes and REAL tools. */
 function box() {
   const t = mkdtempSync(join(tmpdir(), 'desktop-'))
   const port = String(20000 + Math.floor(Math.random() * 40000))
-  for (const d of ['bin', 'fake', 'home', 'log']) mkdirSync(join(t, d))
+  for (const d of ['bin', 'fake', 'home', 'log', 'root', 'outside']) mkdirSync(join(t, d))
   for (const tool of REAL) symlinkSync(execFileSync('sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).trim(), join(t, 'fake', tool))
   const groups = []
   const b = {
     t, port,
-    local: (text) => text.replaceAll('/tmp/', `${t}/log/`).replaceAll('/usr/local/bin/', `${t}/bin/`).replaceAll('/home/browser/', `${t}/home/`).replaceAll('remote-debugging-port=9222', `remote-debugging-port=${port}`),
-    fake: (name, body) => { writeFileSync(join(t, 'fake', name), `#!/bin/sh\n${body}\n`); chmodSync(join(t, 'fake', name), 0o755) },
+    /** Box paths moved under t; `as` is the user that stands in for browser. */
+    local: (text, as = USER) => text.replaceAll('/tmp/', `${t}/log/`).replaceAll('/etc/', `${t}/etc/`).replaceAll('/root/', `${t}/root/`).replaceAll('/usr/local/bin/', `${t}/bin/`).replaceAll('/home/browser/', `${t}/home/`)
+      .replaceAll('remote-debugging-port=9222', `remote-debugging-port=${port}`).replaceAll('-u browser', `-u ${as}`).replaceAll('"$(id -un)" = browser', `"$(id -un)" = ${as}`),
+    fake: (name, body) => { rmSync(join(t, 'fake', name), { force: true }); writeFileSync(join(t, 'fake', name), `#!/bin/sh\n${body}\n`); chmodSync(join(t, 'fake', name), 0o755) },
     /** Runs sh text from a file, as the box runs start.sh, in its own process group, which done() kills with everything it
      *  started. */
     run: (text) => {
@@ -51,27 +55,35 @@ function box() {
   for (const f of ['google-chrome', 'mumbo-desktop', 'mumbo-browser']) { writeFileSync(join(t, 'bin', f), b.local(heredoc(`/usr/local/bin/${f}`))); chmodSync(join(t, 'bin', f), 0o755) }
   b.fake('dbus-launch', 'sleep 30 >/dev/null 2>&1 &\necho "DBUS_SESSION_BUS_ADDRESS=unix:fake; export DBUS_SESSION_BUS_ADDRESS; DBUS_SESSION_BUS_PID=$!;"')
   b.fake('xfconf-query', `echo "xfconf-query $*" >> ${t}/log/session`)
+  // `id browser` succeeds; anything else is the real id. su runs the command as the test user, setting SHELL as util-linux su -s does.
+  b.fake('id', `[ "$*" = browser ] && exit 0; exec ${execFileSync('sh', ['-c', 'command -v id'], { encoding: 'utf8' }).trim()} "$@"`)
+  b.fake('su', 'export SHELL="$3"; exec /bin/sh -c "$5"')
+  b.fake('iptables', 'exit 0')
+  for (const name of ['Xvfb', 'x11vnc', 'websockify']) b.fake(name, 'sleep 30')
   return b
 }
 
-test('person start script: XFCE as browser on :1, Chrome on the kept profile with CDP on loopback, Downloads owned by browser', () => {
-  assert.match(person, /\n {2}install -d -o browser -g browser \/home\/browser\/Downloads\n/)
-  assert.ok(person.includes(`pgrep -f /usr/local/bin/mumbo-desktop >/dev/null || su browser -s /bin/sh -c 'DISPLAY=:1 /usr/local/bin/mumbo-desktop >/tmp/desktop.log 2>&1 &'\n`))
+test('person start script: XFCE as browser on :1 with bash as its shell, Chrome on the kept profile with CDP on loopback, Downloads made by browser', () => {
+  assert.ok(person.includes(`pgrep -f /usr/local/bin/mumbo-desktop >/dev/null || su browser -s /bin/sh -c 'SHELL=/bin/bash DISPLAY=:1 /usr/local/bin/mumbo-desktop >/tmp/desktop.log 2>&1 &'\n`))
   assert.ok(person.includes(`pgrep -f /usr/local/bin/mumbo-browser >/dev/null || su browser -s /bin/sh -c 'DISPLAY=:1 /usr/local/bin/mumbo-browser >/tmp/chrome.log 2>&1 &'\n`))
-  assert.equal(heredoc('/usr/local/bin/google-chrome'), '#!/bin/sh\nexec "$(command -v google-chrome-stable || echo chromium)" --user-data-dir=/home/browser/profile --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --no-first-run --no-default-browser-check --password-store=basic --start-maximized "$@"\n')
-  assert.ok(at(person, 'export XAUTHORITY=/run/x11/auth') < at(person, 'su browser -s /bin/sh -c \'DISPLAY=:1 /usr/local/bin/mumbo-desktop'))
+  assert.ok(heredoc('/usr/local/bin/mumbo-browser').startsWith('#!/bin/sh\nmkdir -p /home/browser/Downloads 2>/dev/null\n'))
+  assert.equal(heredoc('/usr/local/bin/google-chrome'), '#!/bin/sh\n[ "$(id -un)" = browser ] || exec "$(command -v google-chrome-stable || echo chromium)" "$@"\nexec "$(command -v google-chrome-stable || echo chromium)" --user-data-dir=/home/browser/profile --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --no-first-run --no-default-browser-check --password-store=basic --start-maximized "$@"\n')
+  assert.ok(at(person, 'export XAUTHORITY=/run/x11/auth') < at(person, 'su browser -s /bin/sh -c \'SHELL=/bin/bash DISPLAY=:1 /usr/local/bin/mumbo-desktop'))
   assert.ok(at(person, 'Xvfb :1') < at(person, 'DISPLAY=:1 /usr/local/bin/mumbo-desktop') && at(person, 'DISPLAY=:1 /usr/local/bin/mumbo-browser') < at(person, 'x11vnc -display :1'))
+  assert.ok(person.includes('127.0.0.1:5900 >/root/websockify.log 2>&1 &\n'), 'root logs to its own directory, not to a /tmp name browser can plant')
   assert.ok(!person.includes('DISPLAY=:1 chromium') && !person.includes('DISPLAY=:1 openbox'), 'the browser and window manager start only through their loops')
 })
 
-test('the desktop session runs XFCE with xfwm4 compositing off, on its own D-Bus, and starts again after it ends', async () => {
+test('the desktop session runs XFCE with xfwm4 compositing off, on its own D-Bus (none left from an earlier start), and starts again after it ends', async () => {
   const b = box()
   try {
-    b.fake('startxfce4', `echo "startxfce4 $DBUS_SESSION_BUS_ADDRESS" >> ${b.t}/log/session`)
+    b.fake('startxfce4', `echo "startxfce4 [$DBUS_SESSION_BUS_ADDRESS]" >> ${b.t}/log/session`)
+    // The second dbus-launch fails, printing nothing.
+    b.fake('dbus-launch', `[ -e ${b.t}/bus ] && exit 1; touch ${b.t}/bus\nsleep 30 >/dev/null 2>&1 &\necho "DBUS_SESSION_BUS_ADDRESS=unix:fake; export DBUS_SESSION_BUS_ADDRESS; DBUS_SESSION_BUS_PID=$!;"`)
     b.run(`${b.t}/bin/mumbo-desktop`)
     await sleep(3000)
     const lines = b.lines('session')
-    assert.deepEqual(lines.slice(0, 4), ['xfconf-query -c xfwm4 -p /general/use_compositing -n -t bool -s false', 'startxfce4 unix:fake', 'xfconf-query -c xfwm4 -p /general/use_compositing -n -t bool -s false', 'startxfce4 unix:fake'])
+    assert.deepEqual(lines.slice(0, 4), ['xfconf-query -c xfwm4 -p /general/use_compositing -n -t bool -s false', 'startxfce4 [unix:fake]', 'xfconf-query -c xfwm4 -p /general/use_compositing -n -t bool -s false', 'startxfce4 []'])
   } finally { b.done() }
 })
 
@@ -106,12 +118,36 @@ test('Chrome is started again within 5 s of exiting; one a launcher started is w
   } finally { b.done() }
 })
 
-test('a re-run starts no second desktop session, browser loop or Chrome, and makes Downloads', async () => {
+test('a Chrome on the profile without the debugging port is waited for: its Singleton lock stays and no second Chrome starts', async () => {
   const b = box()
   try {
-    b.fake('su', 'exec /bin/sh -c "$5"')
-    b.fake('install', 'for a; do d=$a; done; mkdir -p "$d"')
-    b.fake('startxfce4', `echo start >> ${b.t}/log/xfce; sleep 30`)
+    b.fake('google-chrome-stable', `${VERSION}echo start >> ${b.t}/log/chrome`)
+    mkdirSync(join(b.t, 'home/profile'))
+    writeFileSync(join(b.t, 'outside/keep'), 'keep')
+    symlinkSync(join(b.t, 'outside/keep'), join(b.t, 'home/profile/SingletonLock'))
+    b.run(`exec /bin/sh -c 'sleep 30; true' 'chrome --user-data-dir=${b.t}/home/profile'`)
+    await sleep(300)
+    b.run(`${b.t}/bin/mumbo-browser`)
+    await sleep(2500)
+    assert.deepEqual([b.lines('chrome'), readdirSync(join(b.t, 'home/profile')), readFileSync(join(b.t, 'outside/keep'), 'utf8')], [[], ['SingletonLock'], 'keep'])
+  } finally { b.done() }
+})
+
+test('the google-chrome wrapper pins the profile only for browser; for any other user it is plain Chrome', () => {
+  const b = box()
+  try {
+    b.fake('google-chrome-stable', `echo "$*" >> ${b.t}/log/chrome`)
+    writeFileSync(join(b.t, 'bin/plain'), b.local(heredoc('/usr/local/bin/google-chrome'), 'browser')); chmodSync(join(b.t, 'bin/plain'), 0o755)
+    execFileSync(join(b.t, 'bin/plain'), ['--headless', '--screenshot'], { env: { PATH: join(b.t, 'fake') } })
+    execFileSync(join(b.t, 'bin/google-chrome'), ['https://x'], { env: { PATH: join(b.t, 'fake') } })
+    assert.deepEqual(b.lines('chrome'), ['--headless --screenshot', `--user-data-dir=${b.t}/home/profile --remote-debugging-address=127.0.0.1 --remote-debugging-port=${b.port} --no-first-run --no-default-browser-check --password-store=basic --start-maximized https://x`])
+  } finally { b.done() }
+})
+
+test('a re-run starts no second desktop session, browser loop or Chrome, reaches dsh both times, and browser makes Downloads', async () => {
+  const b = box()
+  try {
+    b.fake('startxfce4', `echo "start $SHELL" >> ${b.t}/log/xfce; sleep 30`)
     b.fake('google-chrome-stable', `${VERSION}echo start >> ${b.t}/log/chrome; sleep 30`)
     b.run(b.local(block()))
     await sleep(1000)
@@ -119,9 +155,34 @@ test('a re-run starts no second desktop session, browser loop or Chrome, and mak
     await sleep(1000)
     assert.equal(b.count(`${b.t}/bin/mumbo-desktop`), 1)
     assert.equal(b.count(`${b.t}/bin/mumbo-browser`), 1)
-    assert.deepEqual([b.lines('xfce'), b.lines('chrome')], [['start'], ['start']])
+    assert.deepEqual([b.lines('xfce'), b.lines('chrome'), b.lines('dsh')], [['start /bin/bash'], ['start'], ['reached', 'reached']])
     assert.ok(statSync(join(b.t, 'home/Downloads')).isDirectory())
   } finally { b.done() }
+})
+
+test('root\'s part of the desktop block writes nothing under /home/browser, and a planted Downloads or log symlink moves no write outside it', async () => {
+  const run = async (plant, su) => {
+    const b = box()
+    try {
+      b.fake('startxfce4', 'sleep 30')
+      b.fake('google-chrome-stable', `${VERSION}sleep 30`)
+      if (su) b.fake('su', su)
+      writeFileSync(join(b.t, 'outside/keep'), 'keep'); chmodSync(join(b.t, 'outside'), 0o700)
+      plant(b)
+      const before = readdirSync(join(b.t, 'home')).sort()
+      b.run(b.local(block()))
+      await sleep(1000)
+      assert.deepEqual([readdirSync(join(b.t, 'outside')), readFileSync(join(b.t, 'outside/keep'), 'utf8'), statSync(join(b.t, 'outside')).mode & 0o777], [['keep'], 'keep', 0o700], 'outside unchanged')
+      assert.deepEqual(b.lines('dsh'), ['reached'])
+      return { before, after: readdirSync(join(b.t, 'home')).sort() }
+    } finally { b.done() }
+  }
+  // su that runs nothing: what remains is root's own part.
+  const rootOnly = await run(() => {}, 'exit 0')
+  assert.deepEqual(rootOnly.after, rootOnly.before)
+  await run((b) => { symlinkSync(join(b.t, 'outside'), join(b.t, 'home/Downloads')); symlinkSync(join(b.t, 'outside/keep'), join(b.t, 'log/websockify.log')) })
+  const file = await run((b) => writeFileSync(join(b.t, 'home/Downloads'), 'a file'))
+  assert.deepEqual(file.after, ['Downloads'])
 })
 
 test('a profile last used by a newer browser is moved aside before Chrome starts; an older, equal or unreadable one is kept', () => {
@@ -135,14 +196,22 @@ test('a profile last used by a newer browser is moved aside before Chrome starts
       // From a file, as the box runs it: an sh -c command line would match the check's own pgrep.
       writeFileSync(join(b.t, 'pre.sh'), b.local(pre))
       execFileSync('/bin/sh', [join(b.t, 'pre.sh')], { env: { PATH: join(b.t, 'fake') } })
-      return readdirSync(join(b.t, 'home')).sort()
+      return readdirSync(join(b.t, 'home')).filter(n => n !== 'Downloads').sort()
     }
     assert.match(check('142.0.7444.60').join(), /^profile\.142\.0\.7444\.60\.\d+$/)
     assert.match(check('143.0.1.2').join(), /^profile\.143\.0\.1\.2\.\d+$/)
     for (const kept of ['142.0.7444.59', '142.0.7444.9', '141.0.7390.122', '', '../../x', '143.0.0.1; touch x', undefined]) assert.deepEqual(check(kept), ['profile'], String(kept))
     assert.deepEqual(check('143.0.1.2', ''), ['profile'], 'a template without Chrome keeps the profile')
-    const running = spawn('/bin/sh', ['-c', 'sleep 5; true', `chrome --remote-debugging-port=${b.port}`], { stdio: 'ignore' })
-    try { assert.deepEqual(check('143.0.1.2'), ['profile'], 'a running Chrome keeps its profile') } finally { running.kill('SIGKILL') }
+    const running = spawn('/bin/sh', ['-c', 'sleep 5; true', `chrome --user-data-dir=${b.t}/home/profile`], { stdio: 'ignore' })
+    try { assert.deepEqual(check('143.0.1.2'), ['profile'], 'a running Chrome, even without the debugging port, keeps its profile') } finally { running.kill('SIGKILL') }
+    // A symlink planted at the move-aside name does not take the profile out of /home/browser.
+    b.fake('date', 'echo 1700000000')
+    rmSync(join(b.t, 'home'), { recursive: true }); mkdirSync(join(b.t, 'home/profile'), { recursive: true }); writeFileSync(join(b.t, 'home/profile/Last Version'), '143.0.1.2')
+    symlinkSync(join(b.t, 'outside'), join(b.t, 'home/profile.143.0.1.2.1700000000'))
+    b.fake('google-chrome-stable', "echo 'Google Chrome 142.0.7444.59'")
+    writeFileSync(join(b.t, 'pre.sh'), b.local(pre))
+    spawnSync('/bin/sh', [join(b.t, 'pre.sh')], { env: { PATH: join(b.t, 'fake') } })
+    assert.deepEqual([readdirSync(join(b.t, 'outside')), existsSync(join(b.t, 'home/profile/Last Version'))], [[], true])
   } finally { b.done() }
 })
 
@@ -151,7 +220,7 @@ test('template: Google Chrome stable from Google\'s signed amd64 repository and 
   const repo = 'echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list'
   assert.ok(at(install, 'curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google-chrome.asc') < at(install, repo))
   const packages = install.slice(at(install, repo)).match(/apt-get install -y --no-install-recommends ([^&]+) &&/)[1].trim().split(' ')
-  for (const p of ['google-chrome-stable', 'xfce4-session', 'xfwm4', 'xfce4-panel', 'xfdesktop4', 'thunar', 'xfce4-terminal', 'tango-icon-theme', 'librsvg2-common', 'dbus-x11', 'xdotool', 'xauth', 'xvfb', 'x11vnc', 'novnc', 'websockify']) assert.ok(packages.includes(p), p)
+  for (const p of ['google-chrome-stable', 'xfce4-session', 'xfwm4', 'xfce4-panel', 'xfdesktop4', 'thunar', 'xfce4-terminal', 'tango-icon-theme', 'librsvg2-common', 'dbus-x11', 'xdotool', 'wmctrl', 'xauth', 'xvfb', 'x11vnc', 'novnc', 'websockify']) assert.ok(packages.includes(p), p)
   for (const p of ['chromium', 'openbox', 'xfce4']) assert.ok(!packages.includes(p), p)
   assert.ok(BOX_STEPS.includes('id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser'))
 })
