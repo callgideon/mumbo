@@ -11,7 +11,9 @@ import { startRuntime, type Host } from './fixtures/host.ts'
 type Handler = (req: unknown, res: unknown) => Promise<void>
 type Admission = { peer: { principal: { kind: string; email?: string }; signal: AbortSignal } } | { rejection: 401 | 403 }
 const ALICE = 'alice@example.com', BOB = 'bob@example.com'
-const HOPS = [{ node: 'member', id: ALICE }, { node: 'mumbo', id: 'box-1' }, { node: 'edge', id: 'app.mumbo.si' }]
+/** The relay path of a message from `email`, which starts at that member. */
+const hopsOf = (email: string) => [{ node: 'member', id: email }, { node: 'mumbo', id: 'box-1' }, { node: 'edge', id: 'app.mumbo.si' }]
+const HOPS = hopsOf(ALICE)
 const peer = (principal: { kind: string; email?: string }, signal = new AbortController().signal): Admission => ({ peer: { principal, signal } })
 const member = (email: string) => peer({ kind: 'edge-member', email })
 
@@ -73,7 +75,7 @@ it('turns context into an implicit Trigger, an inferred candidate at most', asyn
 
 it('leaves a sender off the Policy\'s allowed list to the Policy, which admits neither their request nor their context', async () => {
   for (const kind of ['request', 'context'] as const) {
-    expect(await post(message(`bob-${kind}`, kind), member(BOB))).toMatchObject({ status: 200, body: { result: 'stored' } })
+    expect(await post(message(`bob-${kind}`, kind, undefined, { hops: hopsOf(BOB) }), member(BOB))).toMatchObject({ status: 200, body: { result: 'stored' } })
   }
   await host.runtime.idle()
   for (const kind of ['request', 'context']) {
@@ -102,13 +104,13 @@ it('stores a message id once per member: a retry answers duplicate, and other co
     expect(await post(changed)).toEqual({ status: 409, body: { error: 'Message m1 was relayed before with other content', code: 'id_reused' } })
   }
   // Message ids are the member's own: another member's m1 is another message.
-  expect(await post(message('m1', 'request', 'Fix the login page'), member(BOB))).toMatchObject({ status: 200, body: { result: 'stored' } })
+  expect(await post(message('m1', 'request', 'Fix the login page', { hops: hopsOf(BOB) }), member(BOB))).toMatchObject({ status: 200, body: { result: 'stored' } })
   expect(stored()).toHaveLength(2)
   await host.runtime.idle()
   expect(host.candidates().filter(id => id === first.body.trigger)).toHaveLength(1)
 })
 
-it('refuses a malformed body with 400 and the fields, an oversized one with 413 and another method with 405, storing nothing', async () => {
+it('refuses a malformed body or one whose first hop is not the admitted member with 400 and the fields, an oversized one with 413 and another method with 405, storing nothing', async () => {
   const invalid = async (body: unknown) => {
     const answer = await post(body)
     expect(answer, JSON.stringify(body).slice(0, 80)).toMatchObject({ status: 400, body: { code: 'invalid_request' } })
@@ -127,8 +129,10 @@ it('refuses a malformed body with 400 and the fields, an oversized one with 413 
   expect(await invalid(message('m1', 'request', 'hi', { hops: [{ node: 'Edge!', id: 'x' }] }))).toEqual(['hops.0.node'])
   expect(await invalid(message('m1', 'request', 'hi', { hops: [{ node: 'edge', id: 'a\u0007b' }] }))).toEqual(['hops.0.id'])
   expect(await invalid(message('m1', 'request', 'hi', { hops: [{ node: 'edge', id: 'x'.repeat(RELAY_LIMITS.hop + 1) }] }))).toEqual(['hops.0.id'])
-  // The actor is the admitted member; a body cannot name another.
+  // The actor is the admitted member; a body cannot name another, nor start its relay path at another node.
   expect(await invalid(message('m1', 'request', 'hi', { actor: BOB }))).toEqual([''])
+  expect(await invalid(message('m1', 'request', 'hi', { hops: hopsOf(BOB) }))).toEqual(['hops.0'])
+  expect(await invalid(message('m1', 'request', 'hi', { hops: HOPS.slice(1) }))).toEqual(['hops.0'])
   expect(await post({ ...message('m1', 'request'), text: 'x'.repeat(RELAY_LIMITS.bodyBytes) })).toEqual({ status: 413,
     body: { error: `The request exceeds ${RELAY_LIMITS.bodyBytes} bytes`, code: 'too_large' } })
   expect(await post(undefined, member(ALICE), 'GET')).toEqual({ status: 405, body: { error: 'Relay a message with POST', code: 'method' } })

@@ -115,10 +115,11 @@ async function relay(source: SourceContext, member: string, request: RelayReques
 
 /**
  * Register the relay Source kind and mount `POST /orchestrator/relay`. A request is received only when `ctx.connection.admit`
- * admits it (with DSH's Host and Origin checks) as a live `edge-member` Peer; its body is a {@link RelayRequest}. Responses:
+ * admits it (with DSH's Host and Origin checks) as a live `edge-member` Peer; its body is a {@link RelayRequest} whose first
+ * hop is `{ node: 'member', id: <that member> }`. Responses:
  * 200 `{ result: 'stored' | 'duplicate', trigger, thread, waiting? }`, where a repeated message id with the same text, kind and
  * conversation is `duplicate` and `waiting: 'setup'` means evaluation waits for the Superagent setup; and `{ error, code }`
- * with 400 `invalid_request` (`issues` lists the fields), 401 or 403 `unauthenticated` (DSH admission), 403
+ * with 400 `invalid_request` (`issues` lists the fields, `hops.0` for another first hop), 401 or 403 `unauthenticated` (DSH admission), 403
  * `member_required`, 405 `method`, 409 `id_reused` or `relay_off`, 413 `too_large`, or 500 `failed`.
  * @param ctx - plugin context carrying the web server and Connection.
  * @param host - the runtime the Source receives into.
@@ -137,8 +138,10 @@ export function registerRelay(ctx: Pick<Context, 'connection' | 'webServer'>, ho
       const member = principal.kind === 'edge-member' ? principal.email : undefined
       if (admission.peer.signal.aborted || typeof member !== 'string') throw new Refusal(403, 'member_required', 'Only a project member relays messages')
       const parsed = RelayRequestSchema.safeParse(await body(req))
-      if (!parsed.success) {
-        const issues = parsed.error.issues.map(issue => ({ path: issue.path.join('.'), message: issue.message }))
+      const issues = !parsed.success ? parsed.error.issues.map(issue => ({ path: issue.path.join('.'), message: issue.message }))
+        : parsed.data.hops[0]!.node === 'member' && parsed.data.hops[0]!.id === member ? []
+          : [{ path: 'hops.0', message: 'The first hop is not the admitted member' }]
+      if (!parsed.success || issues.length) {
         answer(res, 400, { error: `Invalid relay request: ${issues.map(issue => issue.path || '(body)').join(', ')}`, code: 'invalid_request', issues })
         return
       }
