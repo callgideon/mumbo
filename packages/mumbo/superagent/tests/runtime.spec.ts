@@ -1206,6 +1206,28 @@ it('under run-as starts a new main Session in the worker directory when the earl
   expect(again.masterId).toBe(next.masterId)
 })
 
+it('under run-as delivers no relay or notice to a main Session whose recorded directory is not the worker directory, and records why', async () => {
+  const workerDirectory = join(directory, 'worker')
+  mkdirSync(workerDirectory)
+  answers[HELPERS] = `file:${workerGitConfig(workerDirectory)}\0${credentialHelper(AGENT())}\0`
+  const next = await restart({ runAs: true, workerDirectory })
+  await next.ready
+  // The main Session now records another directory, as one recreated through a planted link would.
+  const outside = join(directory, 'outside')
+  const main = agents.get(next.masterId) as NonNullable<ReturnType<typeof agents.get>> & { session: { header: { cwd: string } } }
+  main.session.header.cwd = outside
+  deliveries.mockClear(); main.inject.mockClear()
+  next.sessions.relay('moved', JSON.stringify({ kind: 'note' }))
+  next.sessions.notify('moved', { kind: 'note' }, 'note')
+  await next.idle()
+  expect(relays(next.masterId)).toEqual([])
+  expect(main.inject).not.toHaveBeenCalled()
+  const refusal = `The Session directory ${workerDirectory} leads to ${outside} through a symbolic link`
+  expect(next.store.db.prepare("SELECT kind, key, error FROM effect WHERE kind IN ('relay', 'notice') ORDER BY kind").all()).toEqual([
+    { kind: 'notice', key: 'moved', error: expect.stringContaining(refusal) }, { kind: 'relay', key: 'moved', error: expect.stringContaining(refusal) },
+  ])
+})
+
 it('under run-as fails a ticket accepted before it, whose directory is in the state directory, saying what to do, and runs nothing there', async () => {
   const { ticket, sessionId } = await acceptedTicket()
   expect(ticket.execution!.directory.startsWith(`${directory}/`)).toBe(true)
