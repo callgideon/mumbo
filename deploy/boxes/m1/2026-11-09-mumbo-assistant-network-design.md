@@ -598,6 +598,7 @@ Then the part C design (accounts in the box), then D.
 - **Bind the approval item's file list to the head SHA** through `compare/{base}...{sha}` (B2's noted race).
 - **Trim the `mumbo-bot` App's permissions:** remove actions and workflows write. The edge already mints narrower tokens.
 - **Move the agent onto the `mumbo-bot` App**, so no machine accounts remain. This needs superagent's GitHub Source to work without `/user` and notifications.
+- **Limit the superagent panel's hover styles to devices that hover.** Wrap every `:hover` rule in the copy's `src/client/client.css` in `@media (hover: hover)`, so a tap on a phone does not leave a row highlighted. Log it in UPSTREAM.md, and let the repository's hover spec scan the copy. The copy's other theme differences stay excluded: corner shape, hairline borders and elevated scroll rebinding. The panel already uses dsh's color tokens, and it is an owners-only supervision page.
 
 ### Deferred to their own research or design
 
