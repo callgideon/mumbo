@@ -11,6 +11,10 @@ import { bootComposition, consentRecords, toolResults } from './harness.ts'
 import type { ScriptStep } from './harness.ts'
 
 const skip = process.env.DSH_BROWSER_EXECUTABLE === undefined
+/** A home page on `127.0.0.1` linking to a saved-passwords page on `localhost`. */
+const accountPages = (port: number, path: string) => path === '/settings'
+  ? '<!doctype html><title>Saved passwords</title><h1>Saved passwords</h1><p>bank.example: correct-horse</p>'
+  : `<!doctype html><title>Home</title><a id="account" href="http://localhost:${String(port)}/settings">Account</a>`
 /** What the patched snapshot shows in place of a secret input's value. */
 const MASK = '•'.repeat(4)
 
@@ -20,7 +24,7 @@ const MASK = '•'.repeat(4)
  * @param page - HTML for a request path, given the server port.
  * @param turn - consent's `deniedUrls`, `allowedSites`, the model's script, and the person's answers, given the origins.
  * @returns each tool result's text, the approval reasons asked, the Session events, the hosts that received a POST,
- *   and the files Playwright MCP left in its output directory, by name.
+ *   the files Playwright MCP left in its output directory, by name, and the names in the working directory.
  */
 async function runTurn(page: (port: number, path: string) => string, turn: (allowed: string, other: string) => {
   deniedUrls: string[]
@@ -55,7 +59,7 @@ async function runTurn(page: (port: number, path: string) => string, turn: (allo
     const names = await readdir(output).catch(() => [])
     const files = new Map(await Promise.all(names.map(async name => [name, await readFile(join(output, name))] as const)))
     const results = toolResults(booted.events).map(content => content.map(block => block.type === 'text' ? block.text : `[${block.type}]`).join('\n'))
-    return { results, asked: booted.asked, events: booted.events, sent, files, port }
+    return { results, asked: booted.asked, events: booted.events, sent, files, port, workspace: await readdir(root) }
   } finally {
     await booted?.ctx.fiber.dispose()
     if (chromium.exitCode === null) chromium.kill('SIGTERM')
@@ -92,11 +96,8 @@ it.skipIf(skip)('asks before a click or code run on a site the person has not al
 })
 
 it.skipIf(skip)('withholds what a denied page shows, in the result and in the files Playwright wrote for it', { timeout: 120_000 }, async () => {
-  const page = (port: number, path: string) => path === '/settings'
-    ? '<!doctype html><title>Saved passwords</title><h1>Saved passwords</h1><p>bank.example: correct-horse</p>'
-    : `<!doctype html><title>Home</title><a id="account" href="http://localhost:${String(port)}/settings">Account</a>`
   let denied = ''
-  const { results, asked, events, files, port } = await runTurn(page, (allowed, other) => {
+  const { results, asked, events, files, port } = await runTurn(accountPages, (allowed, other) => {
     denied = other
     return {
       deniedUrls: ['chrome:', other], allowedSites: [allowed],
@@ -169,32 +170,34 @@ it.skipIf(skip)('shows a password field as dots in screenshots; revealing it tak
     + '<input id="pa" type="password" autocomplete="current-password"><input id="pb" type="password"><input id="pc" type="password">'
     + '<input id="ta"><input id="tb"><button id="show" onclick="pa.type = \'text\'" onmouseover="pa.type = \'text\'">Show password</button>'
     + '<script>pa.value = ta.value = "AAAAAAAA"; pb.value = tb.value = "WWWWWWWW"</script>'
-  const shot = (id: string, filename: string): ScriptStep => ({ name: 'browser_take_screenshot', args: { element: id, target: `#${id}`, filename: `.playwright-mcp/${filename}` } })
+  const shot = (id: string): ScriptStep => ({ name: 'browser_take_screenshot', args: { element: id, target: `#${id}` } })
   const { results, asked, files } = await runTurn(page, (allowed, other) => ({
     deniedUrls: [], allowedSites: [allowed], answers: ['allowed-once', 'rejected', 'rejected'],
     script: [
       { name: 'browser_navigate', args: { url: `${other}/` } },
-      shot('pa', 'pa.png'), shot('pb', 'pb.png'), shot('ta', 'ta.png'), shot('tb', 'tb.png'),
+      shot('pa'), shot('pb'), shot('ta'), shot('tb'),
       { name: 'browser_type', args: { element: 'third password', target: '#pc', text: 'WWWWWWWW' } },
-      shot('pc', 'pc.png'),
+      shot('pc'),
       { name: 'browser_snapshot', args: {} },
       { name: 'browser_hover', args: { element: 'Show password', target: '#show' } },
       { name: 'browser_click', args: { element: 'Show password', target: '#show' } },
-      shot('pa', 'pa-after-reads.png'),
+      shot('pa'),
       // On an allowed site the same click runs without asking.
       { name: 'browser_navigate', args: { url: `${allowed}/` } },
       { name: 'browser_click', args: { element: 'Show password', target: '#show' } },
-      shot('pa', 'pa-revealed.png'),
+      shot('pa'),
       { name: 'browser_snapshot', args: {} },
     ],
   }))
-  const png = (name: string) => files.get(name)!
-  expect(png('pa.png').equals(png('pb.png'))).toBe(true)
-  expect(png('pa.png').equals(png('pc.png'))).toBe(true)
-  expect(png('ta.png').equals(png('tb.png'))).toBe(false)
-  expect(png('pa-after-reads.png').equals(png('pa.png'))).toBe(true)
-  expect(png('pa-revealed.png').equals(png('pa.png'))).toBe(false)
-  expect(png('pa-revealed.png').equals(png('ta.png'))).toBe(true)
+  // Each screenshot is the file its result links.
+  const png = (step: number) => files.get(/\]\(\.playwright-mcp\/([^)]+\.png)\)$/mu.exec(results[step] ?? '')?.[1] ?? '')!
+  const [pa, pb, ta, tb, pc, afterReads, revealed] = [1, 2, 3, 4, 6, 10, 13].map(png)
+  expect(pa!.equals(pb!)).toBe(true)
+  expect(pa!.equals(pc!)).toBe(true)
+  expect(ta!.equals(tb!)).toBe(false)
+  expect(afterReads!.equals(pa!)).toBe(true)
+  expect(revealed!.equals(pa!)).toBe(false)
+  expect(revealed!.equals(ta!)).toBe(true)
   expect(asked.map(reason => reason.split('. Arguments')[0])).toEqual([
     expect.stringMatching(/^Browser write: browser_type on http:\/\/localhost:\d+$/u),
     expect.stringMatching(/^Browser write: browser_hover on http:\/\/localhost:\d+$/u),
@@ -228,4 +231,25 @@ it.skipIf(skip)('lists requests without their headers or bodies, and refuses the
   for (const secret of ['cookie-secret-6', 'body-secret-7', 'header-secret-8']) expect(results.join('\n')).not.toContain(secret)
   expect(results[3]).toBe('Error: browser_network_request did not run: the assistant may not read request headers or bodies, which carry cookies and passwords.')
   expect(asked).toEqual([])
+})
+
+it.skipIf(skip)('refuses saving browser output to a chosen file, and deletes a withheld screenshot whatever its element is called', { timeout: 120_000 }, async () => {
+  let denied = ''
+  const { results, files, workspace } = await runTurn(accountPages, (allowed, other) => {
+    denied = other
+    return {
+      deniedUrls: [other], allowedSites: [allowed],
+      script: [
+        { name: 'browser_navigate', args: { url: `${allowed}/` } },
+        { name: 'browser_click', args: { element: 'Account', target: '#account' } },
+        { name: 'browser_snapshot', args: { filename: 'snap.yml' } },
+        { name: 'browser_take_screenshot', args: { element: 'heading](elsewhere.png)', target: 'h1' } },
+      ],
+    }
+  })
+  expect(results[2]).toBe('Error: browser_snapshot did not run: the assistant may not save browser output to a file; call it without filename to get the result directly.')
+  expect(results[3]).toBe(`Error: browser_take_screenshot ran, but its result is withheld: the current tab is a page on ${denied}, which the assistant may not use. Open another page to continue.`)
+  expect(workspace).not.toContain('snap.yml')
+  expect([...files.keys()].filter(name => name.endsWith('.png'))).toEqual([])
+  expect([...files.values()].filter(content => content.includes('correct-horse'))).toEqual([])
 })

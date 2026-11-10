@@ -3,7 +3,8 @@
  * `link:<url>` target, plus a call log. Each call is logged with the current tab's URL before the call. The first tab
  * starts on the URL in the third argument, or `about:blank`; a click on a `report:<url>` target reports that page URL
  * without moving the tab, as when the person leaves the page between the call and the next listing. Each click writes
- * the page it ends on to `.playwright-mcp/page-<n>.yml` in the working directory and links it, as Playwright MCP does.
+ * the page it ends on to `.playwright-mcp/page-<n>.yml` in the working directory and links it under a title naming the
+ * clicked element, as Playwright MCP links an element screenshot.
  */
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -61,7 +62,7 @@ createInterface({ input: process.stdin }).on('line', line => {
         const file = `.playwright-mcp/page-${++written}.yml`
         mkdirSync('.playwright-mcp', { recursive: true })
         writeFileSync(file, `- text: ${reported}\n`)
-        snapshot = `\n### Snapshot\n- [Snapshot](${file})`
+        snapshot = `\n### Snapshot\n- [Snapshot of ${args.element ?? 'the page'}](${file})`
       }
       reply(request.id, name === 'browser_tabs'
         ? text(`### Result\n${tabs.map((tab, index) => `- ${index}:${index === current ? ' (current)' : ''} [Fixture page](${tab.url})`).join('\n')}`)

@@ -287,6 +287,8 @@ describe('browser write consent in the person-box composition', () => {
     expect(textOf(await direct(loaded, tool('browser_navigate'), { url: 'about:settings' }))).toBe('Error: browser_navigate did not run: the assistant may not open a chrome: page.')
     const details = 'Error: browser_network_request did not run: the assistant may not read request headers or bodies, which carry cookies and passwords.'
     expect(textOf(await direct(loaded, tool('browser_network_request'), { index: 1 }))).toBe(details)
+    const saved = 'Error: browser_snapshot did not run: the assistant may not save browser output to a file; call it without filename to get the result directly.'
+    expect(textOf(await direct(loaded, tool('browser_snapshot'), { filename: 'notes/page.yml' }))).toBe(saved)
     expect(await loaded.calls()).toEqual([])
     // Other origins open, and so does a blank new tab.
     for (const url of ['http://allowed.test/', 'https://mail.google.com/', 'https://accounts.google.com.evil.test/']) {
@@ -301,6 +303,7 @@ describe('browser write consent in the person-box composition', () => {
     expect(textOf(await direct(loaded, tool('browser_navigate'), { url: 'chrome://settings/passwords' }))).toBe('Error: browser_navigate did not run: the assistant may not open a chrome: page.')
     expect(textOf(await direct(loaded, tool('browser_navigate'), { url: 'chrome://settings/passwords' }, false))).toBe('Error: browser_navigate did not run: the assistant may not open a chrome: page.')
     expect(textOf(await direct(loaded, tool('browser_network_request'), { index: 1 }))).toBe(details)
+    expect(textOf(await direct(loaded, tool('browser_snapshot'), { filename: 'notes/page.yml' }))).toBe(saved)
     expect((await direct(loaded, tool('browser_network_requests'), {})).isError).toBe(false)
     expect(loaded.asked).toEqual([])
     expect((await loaded.calls()).map(call => call.name)).toEqual(['browser_navigate', 'browser_navigate', 'browser_navigate', 'browser_tabs', 'browser_network_requests'])
@@ -315,7 +318,7 @@ describe('browser write consent in the person-box composition', () => {
         { name: 'browser_click', args: { element: 'Show password', target: 'e1' } },
         { name: 'browser_evaluate', args: { function: '() => document.querySelector("input").value' } },
         { name: 'browser_navigate', args: { url: 'http://allowed.test/' } },
-        { name: 'browser_click', args: { element: 'Sign in', target: 'link:https://accounts.google.com/signin' } },
+        { name: 'browser_click', args: { element: 'Sign in](elsewhere.yml)', target: 'link:https://accounts.google.com/signin' } },
         { name: 'browser_navigate', args: { url: 'http://allowed.test/' } },
         { name: 'browser_click', args: { element: 'Settings', target: 'report:chrome://settings/passwords' } },
       ],

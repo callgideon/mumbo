@@ -47,9 +47,12 @@ const COMPUTER = 'computer'
 const WRAPPER_SCHEMES: ReadonlySet<string> = new Set(['view-source:', 'blob:', 'filesystem:'])
 /** Line Playwright MCP writes into a result for the page the result describes. */
 const PAGE_URL_LINE = /^- Page URL: (.*)$/gmu
-/** Lines through which Playwright MCP links a file it wrote for a result: snapshots, screenshots, console entries, downloads. */
+/**
+ * Lines through which Playwright MCP links a file it wrote for a result: snapshots, screenshots, console entries,
+ * downloads. The link title can hold model-written text, so a link is read from the line's last `](`.
+ */
 const FILE_LINES = [
-  /^- \[[^\]\n]*\]\(([^)\n]+)\)$/gmu, /^- New console entries: (.+?)(?:#L\d+)?$/gmu, /^- Downloaded file .* to "([^"\n]+)"$/gmu,
+  /^- \[.*\]\(([^()\n]+)\)$/gmu, /^- New console entries: (.+?)(?:#L\d+)?$/gmu, /^- Downloaded file .* to "([^"\n]+)"$/gmu,
 ]
 /** Directory, inside the server's working directory, where Playwright MCP writes the files it links. */
 const OUTPUT_DIRECTORY = '.playwright-mcp'
@@ -386,10 +389,16 @@ export function apply(ctx: Context, config: Config): void {
       : undefined
   }
   const toolOf = (exec: ToolExecution): string | undefined => exec.name.startsWith(PREFIX) ? exec.name.slice(PREFIX.length) : undefined
-  /** A refusal for a browser call that reads request details or whose `url` argument names a denied page. */
+  /**
+   * A refusal for a browser call that reads request details, saves its output to a file the call names, which would
+   * outlive a withheld result and could overwrite workspace files, or whose `url` argument names a denied page.
+   */
   const callRefusal = (exec: ToolExecution): string | undefined => {
     const tool = toolOf(exec)
     if (tool === REQUEST_DETAILS) return `${tool} did not run: the assistant may not read request headers or bodies, which carry cookies and passwords.`
+    if (tool !== undefined && fieldsOf(exec.arguments).filename !== undefined) {
+      return `${tool} did not run: the assistant may not save browser output to a file; call it without filename to get the result directly.`
+    }
     const target = tool === undefined ? undefined : targetUrl(exec.arguments)
     const blocked = target === undefined ? undefined : denial(target, denied)
     return blocked === undefined ? undefined : `${tool} did not run: the assistant may not open ${blocked}.`
