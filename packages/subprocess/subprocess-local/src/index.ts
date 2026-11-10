@@ -2,9 +2,11 @@
  * Local Service Provider for the subprocess capability seam. Each spawn owns a
  * platform-selected managed range with the spec's per-stream stdio dispositions.
  * Normal disposal terminates and joins live ranges; Node's synchronous exit
- * phase force-stops any ranges the service still owns. It has no config: every
- * disposition and limit arrives on the spec, so deployment-varying choices
- * stay with the caller's config (the bash executor's, the LSP host's, …).
+ * phase force-stops any ranges the service still owns. Every disposition and
+ * limit arrives on the spec, so deployment-varying choices stay with the
+ * caller's config (the bash executor's, the LSP host's, …). The one provider
+ * config, `runAs`, starts every child on Linux as a fixed non-root identity
+ * with an explicit environment.
  * @module @deepseek-ai/dsh-subprocess-local
  */
 
@@ -14,6 +16,7 @@ import { userInfo } from 'node:os'
 import { delimiter, extname, isAbsolute, resolve } from 'node:path'
 import type { Duplex } from 'node:stream'
 import { Context } from '@deepseek-ai/cordis'
+import z from '@deepseek-ai/schemastery'
 import type * as NodePty from 'node-pty'
 import type { IPtyForkOptions, IWindowsPtyForkOptions } from 'node-pty'
 import { createLazyRequire } from '@deepseek-ai/dsh-lazy-require'
@@ -36,13 +39,19 @@ import type { LocalSubprocessHandle, SpawnInternals } from './spawn.ts'
 import {
   confirmLinuxManager,
   LinuxScopeNotStartedError,
+  launchLinuxBootstrap,
   launchLinuxScope,
   linuxManagerListener,
+  prepareLinuxTerminalBootstrap,
   prepareLinuxTerminalScope,
+  probeLinuxBootstrap,
   probeLinuxNative,
   signalLinuxDirectProcess,
   systemdRunIdentity,
 } from './linux-scope.ts'
+import type { LinuxTerminalBootstrapLaunch, LinuxTerminalScopeLaunch } from './linux-scope.ts'
+import { assertNoSecretNames, RunAs, runAsEnvironment, validateRunAs } from './run-as.ts'
+import type { RunAsIdentity } from './run-as.ts'
 import { LinuxScopeSelector } from './linux-scope-selector.ts'
 import type { LinuxScopeDecision } from './linux-scope-selector.ts'
 import { launchWindowsJob, probeWindowsJob } from './windows-job.ts'
@@ -53,6 +62,15 @@ import { LocalTerminalHandle } from './terminal.ts'
 import { prepareShellActivity } from './shell-activity.ts'
 
 const requireNodePty = createLazyRequire<typeof NodePty>('node-pty', import.meta.url)
+
+export { SubprocessSecretEnvironmentError } from './run-as.ts'
+export type { RunAs, RunAsIdentity } from './run-as.ts'
+
+/** Provider configuration. */
+export interface Config {
+  /** Start every child as this identity with this environment; omitted, children run as this process with its scrubbed environment. */
+  runAs?: RunAs | undefined
+}
 
 /**
  * Local subprocess service: platform-selected managed ranges, Node-shaped stdio
@@ -86,9 +104,24 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
   private linuxScopeDecision: Extract<LinuxScopeDecision, { kind: 'scope' }> | undefined
   /** Test hook for platform process inspection; production resolves lazily on terminal spawn. */
   terminalInspector: ProcessInspector | undefined
+  /** The identity and environment every child starts with, when configured. */
+  private readonly runAs: RunAs | undefined
+  /** The credentials alone, as the exec bootstrap receives them. */
+  private readonly identity: RunAsIdentity | undefined
 
-  constructor(ctx: Context) {
+  static Config: z<Config> = z.object({
+    runAs: z.union([RunAs, z.const(undefined)]),
+  })
+
+  constructor(ctx: Context, config: Config = {}) {
     super(ctx)
+    if (config.runAs !== undefined) {
+      validateRunAs(config.runAs, process.platform)
+      // Only the exec bootstrap can take the identity before the target runs, with or without a systemd scope.
+      if (!probeLinuxBootstrap()) throw new Error('subprocess-local: runAs requires the Linux exec bootstrap (the koffi execve binding and the runner entry), which is unavailable')
+    }
+    this.runAs = config.runAs
+    this.identity = config.runAs === undefined ? undefined : { uid: config.runAs.uid, gid: config.runAs.gid, groups: config.runAs.groups }
     ctx.effect(() => {
       const onHostExit = (): void => { this.terminateForHostExit() }
       process.prependListener('exit', onHostExit)
@@ -159,7 +192,7 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
   ): Promise<string> {
     if (command.length === 0) throw new Error('subprocess-local: executable must be non-empty')
     signal?.throwIfAborted()
-    const environment = childEnv(env)
+    const environment = this.runAs === undefined ? childEnv(env) : runAsEnvironment(this.runAs, env)
     const absolute = isAbsolute(command)
     if (!absolute && (command.includes('/') || (process.platform === 'win32' && command.includes('\\')))) {
       throw new Error(
@@ -194,20 +227,31 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
       extensions.map(extension => resolve(process.cwd(), directory, command + extension)))
   }
 
+  /** The complete target environment: run-as composition plus the secret guard, or the scrubbed parent base. */
+  private targetEnvironment(spec: Parameters<typeof targetEnvironment>[0]): Record<string, string> {
+    const runAs = this.runAs
+    if (runAs === undefined) return targetEnvironment(spec)
+    const env = targetEnvironment(spec, explicit => runAsEnvironment(runAs, explicit))
+    assertNoSecretNames(runAs, env)
+    return env
+  }
+
   spawn(spec: SubprocessSpawnSpec): SubprocessHandle {
     validateSubprocessSpec(spec)
-    const env = targetEnvironment(spec)
+    const env = this.targetEnvironment(spec)
     const containmentMode = this.selectContainmentMode('ordinary')
     let handle: LocalSubprocessHandle
     const internals: SpawnInternals = { ...this.internals, onSpillFailure: this.reportSpillFailure }
-    if (containmentMode === 'fallback') {
+    const linuxScope = containmentMode === 'linux-scope' ? this.linuxScopeDecision : undefined
+    if (containmentMode === 'fallback' && this.identity === undefined) {
       handle = spawnSubprocess(spec, internals)
     } else {
       const binding = prepareManagedProcessBinding(internals)
-      const linuxScope = containmentMode === 'linux-scope' ? this.linuxScopeDecision : undefined
-      const launch = linuxScope === undefined
-        ? launchWindowsJob(spec, env)
-        : launchLinuxScope(spec, env, linuxScope.literalArgv)
+      const launch = linuxScope !== undefined
+        ? launchLinuxScope(spec, env, linuxScope.literalArgv, {}, this.identity)
+        : this.identity !== undefined
+          ? launchLinuxBootstrap(spec, env, this.identity)
+          : launchWindowsJob(spec, env)
       handle = bindManagedProcess(spec, launch, binding)
       if (linuxScope !== undefined) this.watchLinuxScopeStart(handle.done, linuxScope.generation)
     }
@@ -281,7 +325,9 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
   async terminalEnvironment(signal?: AbortSignal): Promise<SubprocessTerminalEnvironment> {
     signal?.throwIfAborted()
     const platform = process.platform === 'win32' ? 'windows' : 'posix'
-    const defaultShell = platform === 'windows' ? process.env.ComSpec || undefined : process.env.SHELL || userInfo().shell || undefined
+    // A run-as child's shell comes from its own environment, never from this process's account.
+    const defaultShell = this.runAs !== undefined ? runAsEnvironment(this.runAs).SHELL || undefined
+      : platform === 'windows' ? process.env.ComSpec || undefined : process.env.SHELL || userInfo().shell || undefined
     return { platform, ...defaultShell === undefined ? {} : { defaultShell } }
   }
 
@@ -295,9 +341,9 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
     spec.signal?.throwIfAborted()
     const inspector = this.terminalInspector ?? createProcessInspector()
     const containmentMode = this.selectContainmentMode('terminal')
-    const env = targetEnvironment(spec)
+    const env = this.targetEnvironment(spec)
     const platform = this.internals.platform ?? process.platform
-    const activity = prepareShellActivity(spec, env, platform)
+    const activity = prepareShellActivity(spec, env, platform, this.identity)
     const launch = activity === undefined ? spec : { ...spec, argv: activity.argv, env: activity.env }
     const options: IPtyForkOptions | IWindowsPtyForkOptions = {
       name: spec.terminalType,
@@ -312,12 +358,19 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
       ...(platform === 'win32' ? { useConptyDll: true } : {}),
     }
     const linuxScope = containmentMode === 'linux-scope' ? this.linuxScopeDecision : undefined
-    let scope: ReturnType<typeof prepareLinuxTerminalScope> | undefined
+    let scope: LinuxTerminalBootstrapLaunch | undefined
+    let bindOwner: LinuxTerminalScopeLaunch['bindOwner'] | undefined
     let terminal: NodePty.IPty
     try {
-      scope = linuxScope === undefined
-        ? undefined
-        : prepareLinuxTerminalScope(launch, { ...activity?.env ?? env, PWD: spec.cwd, TERM: spec.terminalType }, linuxScope.literalArgv)
+      const bootstrapEnv = { ...activity?.env ?? env, PWD: spec.cwd, TERM: spec.terminalType }
+      if (this.runAs !== undefined) assertNoSecretNames(this.runAs, bootstrapEnv)
+      if (linuxScope !== undefined) {
+        const scoped = prepareLinuxTerminalScope(launch, bootstrapEnv, linuxScope.literalArgv, {}, this.identity)
+        bindOwner = scoped.bindOwner
+        scope = scoped
+      } else if (this.identity !== undefined) {
+        scope = prepareLinuxTerminalBootstrap(launch, bootstrapEnv, this.identity)
+      }
       if (scope !== undefined) { options.cwd = scope.cwd; options.env = scope.env }
       terminal = requireNodePty().spawn(
         scope?.command ?? file,
@@ -332,7 +385,7 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
     // oxlint-disable-next-line eslint/prefer-const -- The owner can query readiness before the handle is published.
     let handle: LocalTerminalHandle | undefined
     const directSettlement = Promise.withResolvers<void>()
-    const owner = scope?.bindOwner({
+    const owner = bindOwner?.({
       running: () => handle?.running ?? true,
       settled: directSettlement.promise,
       // node-pty swallows signal errors; the scope owner requires their delivery result.

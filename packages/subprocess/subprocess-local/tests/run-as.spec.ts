@@ -1,0 +1,497 @@
+import { EventEmitter } from 'node:events'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { PassThrough } from 'node:stream'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
+import type { SubprocessSpawnSpec, SubprocessTerminalHandle } from '@deepseek-ai/dsh-subprocess'
+import LocalSubprocessRuntime, { SubprocessSecretEnvironmentError } from '@deepseek-ai/dsh-subprocess-local'
+import type { RunAs } from '@deepseek-ai/dsh-subprocess-local'
+import { assertNoSecretNames, runAsEnvironment, validateRunAs } from '../src/run-as.ts'
+import { launchLinuxBootstrap, launchLinuxScope, prepareLinuxTerminalBootstrap, prepareLinuxTerminalScope } from '../src/linux-scope.ts'
+import { consumeLinuxLaunchRequest, linuxLaunchFilesFromLocator, openLinuxStartupError, readLinuxStartupError, createLinuxLaunchFiles } from '../src/runner-protocol.ts'
+import { SUBPROCESS_RUNNER_ENV } from '../src/runner-launch.ts'
+import { runSpawnRunner } from '../src/spawn-runner.ts'
+import type { SpawnRunnerInternals } from '../src/spawn-runner.ts'
+import { prepareShellActivity } from '../src/shell-activity.ts'
+
+const linux = process.platform === 'linux' ? describe : describe.skip
+const onLinux = process.platform === 'linux' ? it : it.skip
+const scratch: string[] = []
+const fibers: { dispose(): Promise<unknown> }[] = []
+
+afterEach(async () => {
+  for (const fiber of fibers.splice(0)) await fiber.dispose()
+  for (const path of scratch.splice(0)) rmSync(path, { recursive: true, force: true })
+  vi.unstubAllEnvs()
+  vi.restoreAllMocks()
+})
+
+/** The ids on one /proc/self/status line, sorted. */
+function statusIds(status: string, field: 'Uid' | 'Gid' | 'Groups'): number[] {
+  const line = status.split('\n').find(entry => entry.startsWith(`${field}:`)) as string
+  return line.slice(field.length + 1).trim().split(/\s+/u).filter(id => id !== '').map(Number).sort((a, b) => a - b)
+}
+
+/** This test process's own identity, the only one a non-root test can switch to. */
+function ownIdentity(): Pick<RunAs, 'uid' | 'gid' | 'groups'> {
+  const status = readFileSync('/proc/self/status', 'utf8')
+  return { uid: process.getuid!(), gid: process.getgid!(), groups: statusIds(status, 'Groups') }
+}
+
+function runAs(overrides: Partial<RunAs> = {}): RunAs {
+  return {
+    ...ownIdentity(),
+    inherit: ['PATH'],
+    set: { HOME: '/home/agent', USER: 'agent' },
+    secretNames: ['DEEPSEEK_API_KEY', 'MUMBO_MEMBER_KEY'],
+    ...overrides,
+  }
+}
+
+function directory(): string {
+  const path = mkdtempSync(join(tmpdir(), 'dsh-run-as-'))
+  scratch.push(path)
+  return path
+}
+
+/** What {@link REPORT} prints: the child's kernel credentials and its exact environment. */
+interface Report { uid: number[]; gid: number[]; groups: number[]; env: Record<string, string> }
+
+/** A Node child that reports its kernel credentials and its exact environment as JSON. */
+const REPORT = [
+  "const status = require('fs').readFileSync('/proc/self/status', 'utf8')",
+  "const ids = f => status.split('\\n').find(l => l.startsWith(f + ':')).slice(f.length + 1).trim().split(/\\s+/).filter(Boolean).map(Number)",
+  "process.stdout.write(JSON.stringify({ uid: ids('Uid'), gid: ids('Gid'), groups: ids('Groups').sort((a, b) => a - b), env: process.env }))",
+].join(';')
+
+function reportSpec(cwd: string, env?: NodeJS.ProcessEnv): SubprocessSpawnSpec {
+  return {
+    argv: [process.execPath, '-e', REPORT],
+    cwd,
+    stdio: { stdin: 'ignore', stdout: { maxBytes: 1 << 20 }, stderr: { maxBytes: 1 << 16 } },
+    graceMs: 200,
+    ...env === undefined ? {} : { env },
+  }
+}
+
+async function runtime(config: RunAs | undefined): Promise<Context> {
+  const ctx = new Context()
+  fibers.push(await ctx.plugin(LocalSubprocessRuntime, config === undefined ? {} : { runAs: config }))
+  return ctx
+}
+
+describe('run-as configuration', () => {
+  it.each([
+    [{ uid: 0 }, 'runAs .uid must be a positive integer, not 0; 0 is root'],
+    [{ gid: 0 }, 'runAs .gid must be a positive integer, not 0; 0 is root'],
+    [{ groups: [5, 0] }, 'runAs .groups must be a positive integer, not 0; 0 is root'],
+    [{ uid: 1.5 }, 'runAs .uid must be a positive integer, not 1.5; 0 is root'],
+    [{ secretNames: [] }, 'runAs .secretNames must name at least one variable'],
+    [{ inherit: ['BAD-NAME'] }, 'runAs names an invalid environment variable "BAD-NAME"'],
+    [{ set: { '1X': 'v' } }, 'runAs names an invalid environment variable "1X"'],
+    [{ secretNames: ['A=B'] }, 'runAs names an invalid environment variable "A=B"'],
+    [{ inherit: ['GITHUB_TOKEN'] }, 'runAs .inherit names credential-shaped GITHUB_TOKEN, which is never inherited; supply it through .set if the child needs it'],
+    [{ set: { HOME: 'a\0b' } }, 'runAs .set values must not contain NUL'],
+    [{ inherit: ['mumbo_launch'], secretNames: ['MUMBO_LAUNCH'] }, 'runAs passes mumbo_launch, which .secretNames lists'],
+    [{ set: { DEEPSEEK_API_KEY: 'x' } }, 'runAs passes DEEPSEEK_API_KEY, which .secretNames lists'],
+  ] as const)('rejects %o', (overrides, message) => {
+    expect(() => { validateRunAs(runAs(overrides as Partial<RunAs>), 'linux') }).toThrow(`subprocess-local: ${message}`)
+  })
+
+  it('refuses every non-Linux host', () => {
+    expect(() => { validateRunAs(runAs(), 'darwin') }).toThrow('subprocess-local: runAs requires Linux; this host is darwin')
+  })
+
+  it('accepts an identity with no supplementary groups', () => {
+    expect(() => { validateRunAs(runAs({ groups: [] }), 'linux') }).not.toThrow()
+  })
+
+  onLinux('fails the plugin at load for a root identity and leaves no service', async () => {
+    const ctx = new Context()
+    await expect(ctx.plugin(LocalSubprocessRuntime, { runAs: runAs({ uid: 0 }) }))
+      .rejects.toThrow('subprocess-local: runAs .uid must be a positive integer, not 0; 0 is root')
+    expect(ctx.get('subprocess')).toBeUndefined()
+  })
+
+  onLinux('fails the plugin at load when the exec bootstrap is unavailable', async () => {
+    vi.resetModules()
+    vi.doMock('../src/linux-scope.ts', async original => ({
+      ...await original<typeof import('../src/linux-scope.ts')>(),
+      probeLinuxBootstrap: () => false,
+    }))
+    try {
+      const { default: Isolated } = await import('../src/index.ts')
+      expect(() => new Isolated(new Context(), { runAs: runAs() })).toThrow(
+        'subprocess-local: runAs requires the Linux exec bootstrap (the koffi execve binding and the runner entry), which is unavailable',
+      )
+    } finally {
+      vi.doUnmock('../src/linux-scope.ts')
+    }
+  })
+})
+
+describe('run-as environment', () => {
+  it('inherits only allowlisted ambient names, then explicit entries, then fixed values', () => {
+    vi.stubEnv('KEPT', 'ambient')
+    vi.stubEnv('DROPPED', 'ambient')
+    vi.stubEnv('REMOVED', 'ambient')
+    vi.stubEnv('HOME', '/root')
+    const config = runAs({ inherit: ['KEPT', 'REMOVED', 'ABSENT'], set: { HOME: '/home/agent', FIXED: 'operator' } })
+    expect(runAsEnvironment(config, { REMOVED: undefined, CALLER: 'explicit', FIXED: 'caller' })).toEqual({
+      KEPT: 'ambient', CALLER: 'explicit', HOME: '/home/agent', FIXED: 'operator',
+    })
+    expect(runAsEnvironment(config)).toEqual({ KEPT: 'ambient', REMOVED: 'ambient', HOME: '/home/agent', FIXED: 'operator' })
+  })
+
+  it('never inherits a credential-shaped ambient name even when a consumer would', () => {
+    vi.stubEnv('DEEPSEEK_API_KEY', 'box-token')
+    vi.stubEnv('MUMBO_MEMBER_KEY', 'member-key')
+    const env = runAsEnvironment(runAs({ inherit: ['PATH'] }))
+    expect(Object.keys(env)).not.toContain('DEEPSEEK_API_KEY')
+    expect(Object.keys(env)).not.toContain('MUMBO_MEMBER_KEY')
+  })
+
+  it('refuses a final environment naming a secret in any case and reports names only', () => {
+    expect(() => { assertNoSecretNames(runAs(), { PATH: '/bin', deepseek_api_key: 'value' }) })
+      .toThrow(new SubprocessSecretEnvironmentError(['deepseek_api_key']))
+    try {
+      assertNoSecretNames(runAs(), { MUMBO_MEMBER_KEY: 'secret-value' })
+    } catch (error) {
+      expect(error).toBeInstanceOf(SubprocessSecretEnvironmentError)
+      expect((error as SubprocessSecretEnvironmentError).names).toEqual(['MUMBO_MEMBER_KEY'])
+      expect((error as Error).message).toBe('subprocess-local: refusing to start a process whose environment contains MUMBO_MEMBER_KEY; a run-as child must never receive these names')
+      expect((error as Error).message).not.toContain('secret-value')
+    }
+    expect(() => { assertNoSecretNames(runAs(), { PATH: '/bin' }) }).not.toThrow()
+  })
+})
+
+linux('run-as children through the provider', () => {
+  it('runs an ordinary child with the configured identity and exactly the explicit environment', async () => {
+    vi.stubEnv('PATH', process.env.PATH)
+    vi.stubEnv('DEEPSEEK_API_KEY', 'box-token')
+    vi.stubEnv('AMBIENT_ONLY', 'leak')
+    const config = runAs({ inherit: ['PATH'], set: { HOME: '/home/agent', USER: 'agent' } })
+    const ctx = await runtime(config)
+    const cwd = directory()
+    const handle = ctx.subprocess.spawn(reportSpec(cwd, { CALLER: 'explicit', PATH: undefined }))
+    await expect(handle.done).resolves.toEqual({ exitCode: 0, signal: null })
+    const report = JSON.parse(handle.collected.stdout!.readFrom(0).text) as Report
+    expect(report.uid).toEqual(Array(4).fill(config.uid))
+    expect(report.gid).toEqual(Array(4).fill(config.gid))
+    expect(report.groups).toEqual(config.groups)
+    expect(report.env).toEqual({ CALLER: 'explicit', HOME: '/home/agent', USER: 'agent' })
+  })
+
+  it('looks executables up on the run-as PATH', async () => {
+    const ctx = await runtime(runAs({ inherit: [], set: { PATH: '/nonexistent-run-as-path' } }))
+    await expect(ctx.subprocess.resolveExecutable('sh')).rejects.toThrow('was not found on PATH')
+    await expect(ctx.subprocess.resolveExecutable('sh', { PATH: '/bin:/usr/bin' })).rejects.toThrow('was not found on PATH')
+    const usable = await runtime(runAs({ inherit: [], set: { PATH: '/usr/bin:/bin' } }))
+    await expect(usable.subprocess.resolveExecutable('sh')).resolves.toMatch(/\/sh$/u)
+  })
+
+  it('reports the run-as shell, never this account\'s', async () => {
+    vi.stubEnv('SHELL', '/bin/root-shell')
+    await expect((await runtime(runAs({ set: { SHELL: '/bin/agent-shell' } }))).subprocess.terminalEnvironment())
+      .resolves.toEqual({ platform: 'posix', defaultShell: '/bin/agent-shell' })
+    await expect((await runtime(runAs({ set: {} }))).subprocess.terminalEnvironment())
+      .resolves.toEqual({ platform: 'posix' })
+  })
+
+  it('refuses a caller-forwarded secret before anything starts', async () => {
+    const ctx = await runtime(runAs())
+    const before = readdirSync(tmpdir()).filter(name => name.startsWith('dsh-subprocess-launch-')).length
+    expect(() => ctx.subprocess.spawn(reportSpec(directory(), { DEEPSEEK_API_KEY: 'forwarded' })))
+      .toThrow(SubprocessSecretEnvironmentError)
+    await expect(ctx.subprocess.spawnTerminal({
+      argv: ['/bin/sh'], cwd: directory(), env: { MUMBO_MEMBER_KEY: 'forwarded' }, rows: 24, cols: 80, terminalType: 'xterm', graceMs: 200,
+    })).rejects.toThrow(SubprocessSecretEnvironmentError)
+    expect(readdirSync(tmpdir()).filter(name => name.startsWith('dsh-subprocess-launch-')).length).toBe(before)
+  })
+
+  it('refuses a terminal whose launch-specific additions name a secret', async () => {
+    const ctx = await runtime(runAs({ secretNames: ['TERM'] }))
+    await expect(ctx.subprocess.spawnTerminal({
+      argv: ['/bin/sh'], cwd: directory(), rows: 24, cols: 80, terminalType: 'xterm', graceMs: 200,
+    })).rejects.toThrow(new SubprocessSecretEnvironmentError(['TERM']))
+  })
+
+  it('fails closed when the identity cannot be taken', async () => {
+    const own = ownIdentity()
+    const withDaemonGroup = [...new Set([...own.groups, 1])].sort((a, b) => a - b)
+    const otherGroup = await runtime(runAs({ groups: withDaemonGroup }))
+    const groupHandle = otherGroup.subprocess.spawn(reportSpec(directory()))
+    await expect(groupHandle.done).rejects.toThrow(/^run-as: could not take uid \d+, gid \d+, groups \[[\d, ]+\]: /u)
+    expect(groupHandle.collected.stdout!.readFrom(0).text).toBe('')
+
+    const otherUser = await runtime(runAs({ uid: own.uid + 1 }))
+    const userHandle = otherUser.subprocess.spawn(reportSpec(directory()))
+    await expect(userHandle.done).rejects.toThrow(`run-as: could not take uid ${own.uid + 1}`)
+    expect(userHandle.collected.stdout!.readFrom(0).text).toBe('')
+  })
+
+  it('reports a directory the identity cannot enter as a spawn failure', async () => {
+    const ctx = await runtime(runAs())
+    const handle = ctx.subprocess.spawn(reportSpec(join(directory(), 'missing')))
+    await expect(handle.done).rejects.toThrow(`spawn ${process.execPath} ENOENT`)
+  })
+
+  it('runs a terminal with the configured identity and environment and shares only its activity records', async () => {
+    vi.stubEnv('DEEPSEEK_API_KEY', 'box-token')
+    const config = runAs({ inherit: ['PATH'], set: { HOME: '/home/agent' } })
+    const ctx = await runtime(config)
+    const cwd = directory()
+    const terminal: SubprocessTerminalHandle = await ctx.subprocess.spawnTerminal({
+      argv: [process.execPath, '-e', REPORT], cwd, env: { CALLER: 'explicit' }, rows: 24, cols: 400, terminalType: 'xterm', graceMs: 500,
+    })
+    let output = ''
+    terminal.output.on('data', (chunk: Buffer) => { output += chunk.toString('utf8') })
+    await expect(terminal.done).resolves.toEqual({ exitCode: 0, signal: null })
+    await terminal.terminate()
+    const report = JSON.parse(output.slice(output.indexOf('{'), output.lastIndexOf('}') + 1)) as Report
+    expect(report.uid).toEqual(Array(4).fill(config.uid))
+    expect(report.gid).toEqual(Array(4).fill(config.gid))
+    expect(report.groups).toEqual(config.groups)
+    expect(report.env).toEqual({ PATH: process.env.PATH, CALLER: 'explicit', HOME: '/home/agent', PWD: cwd, TERM: 'xterm' })
+  })
+
+  it('observes an interactive run-as bash through activity records it can write but not replace', async () => {
+    const ctx = await runtime(runAs({ inherit: ['PATH'], set: { HOME: directory() } }))
+    const terminal = await ctx.subprocess.spawnTerminal({
+      argv: ['/bin/bash', '-i'], cwd: directory(), rows: 24, cols: 80, terminalType: 'xterm', graceMs: 500, shellActivity: true,
+    })
+    try {
+      const deadline = Date.now() + 10_000
+      let state = (await terminal.inspectActivity()).state
+      while (state !== 'idle' && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 50))
+        state = (await terminal.inspectActivity()).state
+      }
+      expect(state).toBe('idle')
+    } finally {
+      await terminal.terminate()
+    }
+  })
+})
+
+describe('run-as launch requests', () => {
+  class FakeChild extends EventEmitter {
+    pid = 4321
+    exitCode: number | null = null
+    signalCode: NodeJS.Signals | null = null
+    stdin = new PassThrough()
+    stdout = new PassThrough()
+    stderr = new PassThrough()
+    stdio = [this.stdin, this.stdout, this.stderr, null, null, null, null, new PassThrough()]
+  }
+
+  const identity = { uid: 2000, gid: 3000, groups: [3001] }
+  const ordinary: SubprocessSpawnSpec = {
+    argv: ['tool', 'arg'], cwd: '/work', stdio: { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' }, graceMs: 100,
+  }
+
+  function capture() {
+    const calls: { command: string; args: readonly string[]; env: NodeJS.ProcessEnv }[] = []
+    const child = new FakeChild()
+    const spawn = vi.fn((command: string, args: readonly string[], options: { env: NodeJS.ProcessEnv }) => {
+      calls.push({ command, args, env: options.env })
+      return child
+    })
+    return { calls, child, spawn }
+  }
+
+  function consumed(env: NodeJS.ProcessEnv) {
+    const locator = env[SUBPROCESS_RUNNER_ENV] as string
+    scratch.push(linuxLaunchFilesFromLocator(locator).directory)
+    return consumeLinuxLaunchRequest(locator)
+  }
+
+  it('hands the identity to the bootstrap inside a systemd scope', () => {
+    const { calls, spawn } = capture()
+    launchLinuxScope(ordinary, { TARGET: 'yes' }, [], { spawn: spawn as never, runnerInvocation: ['/node', '/runner.js'], systemdRun: '/bin/systemd-run' }, identity)
+    expect(calls[0]?.command).toBe('/bin/systemd-run')
+    expect(calls[0]?.args.slice(-5)).toEqual(['/node', '/runner.js', '--', 'tool', 'arg'])
+    expect(consumed(calls[0]!.env)).toEqual({ cwd: '/work', env: { TARGET: 'yes' }, runAs: identity })
+    const terminal = prepareLinuxTerminalScope({ argv: ordinary.argv, cwd: ordinary.cwd, graceMs: 100, rows: 1, cols: 1, terminalType: 'xterm' }, { T: '1' }, [], { runnerInvocation: ['/node', '/runner.js'] }, identity)
+    expect(consumed(terminal.env)).toEqual({ cwd: '/work', env: { T: '1' }, runAs: identity })
+    terminal.cleanup()
+  })
+
+  it('runs the bootstrap directly as a detached group when no scope exists, and removes its files', async () => {
+    const { calls, child, spawn } = capture()
+    const launch = launchLinuxBootstrap({ ...ordinary, stdio: { ...ordinary.stdio, control: 'pipe' } }, { TARGET: 'yes' }, identity, {
+      spawn: spawn as never, runnerInvocation: ['/node', '/runner.js'],
+    })
+    expect(calls[0]?.command).toBe('/node')
+    expect(calls[0]?.args).toEqual(['/runner.js', '--', 'tool', 'arg'])
+    const locator = calls[0]!.env[SUBPROCESS_RUNNER_ENV] as string
+    const files = linuxLaunchFilesFromLocator(locator)
+    expect(consumeLinuxLaunchRequest(locator)).toEqual({ cwd: '/work', env: { TARGET: 'yes' }, control: 'pipe', runAs: identity })
+    vi.spyOn(process, 'kill').mockImplementation(() => { throw Object.assign(new Error('gone'), { code: 'ESRCH' }) })
+    child.exitCode = 0
+    child.emit('exit', 0, null)
+    await expect(launch.direct).resolves.toEqual({ exitCode: 0, signal: null })
+    await launch.owner.waitForExit()
+    launch.owner.cleanup?.()
+    expect(existsSync(files.directory)).toBe(false)
+  })
+
+  it('reports a bootstrap that never consumed its request and removes the files on spawn failure', async () => {
+    const { calls, child, spawn } = capture()
+    const launch = launchLinuxBootstrap(ordinary, {}, identity, { spawn: spawn as never, runnerInvocation: ['/node', '/runner.js'] })
+    scratch.push(linuxLaunchFilesFromLocator(calls[0]!.env[SUBPROCESS_RUNNER_ENV] as string).directory)
+    child.emit('exit', 1, null)
+    await expect(launch.direct).rejects.toThrow('subprocess bootstrap exited before it consumed the launch request; its target never ran')
+
+    const before = readdirSync(tmpdir()).filter(name => name.startsWith('dsh-subprocess-launch-')).length
+    expect(() => launchLinuxBootstrap(ordinary, {}, identity, {
+      spawn: () => { throw new Error('spawn refused') }, runnerInvocation: ['/node', '/runner.js'],
+    })).toThrow('spawn refused')
+    expect(readdirSync(tmpdir()).filter(name => name.startsWith('dsh-subprocess-launch-')).length).toBe(before)
+  })
+
+  it('prepares a terminal bootstrap whose outcome reads the startup error and removes the files', () => {
+    const terminal = prepareLinuxTerminalBootstrap({ argv: ordinary.argv, cwd: ordinary.cwd, graceMs: 100, rows: 1, cols: 1, terminalType: 'xterm' }, { T: '1' }, identity, {
+      runnerInvocation: ['/node', '/runner.js'],
+    })
+    expect(terminal.command).toBe('/node')
+    expect(terminal.args).toEqual(['/runner.js', '--', 'tool', 'arg'])
+    const files = linuxLaunchFilesFromLocator(terminal.env[SUBPROCESS_RUNNER_ENV] as string)
+    expect(consumeLinuxLaunchRequest(files.requestPath)).toEqual({ cwd: '/work', env: { T: '1' }, runAs: identity })
+    openLinuxStartupError(files)({ type: 'error', error: { name: 'Error', message: 'run-as: refused' } })
+    expect(() => terminal.resolveOutcome({ exitCode: 127, signal: null })).toThrow('run-as: refused')
+    expect(existsSync(files.directory)).toBe(false)
+  })
+
+  it('reads a pre-opened startup error file left empty by a successful exec as no failure', () => {
+    const files = createLinuxLaunchFiles({ cwd: '/', env: {}, runAs: identity })
+    scratch.push(files.directory)
+    openLinuxStartupError(files)
+    expect(readLinuxStartupError(files.startupErrorPath)).toBeUndefined()
+  })
+
+  it('rejects a launch request whose identity is malformed', () => {
+    for (const runAsValue of [{ uid: 1, gid: 1 }, { uid: -1, gid: 1, groups: [] }, { uid: 1, gid: 1, groups: ['x'] }, { uid: 1, gid: 1, groups: [], extra: 1 }, 'root']) {
+      const files = createLinuxLaunchFiles({ cwd: '/', env: {}, runAs: runAsValue as never })
+      scratch.push(files.directory)
+      expect(() => consumeLinuxLaunchRequest(files.requestPath)).toThrow('subprocess runner received an invalid Linux launch request')
+    }
+  })
+})
+
+linux('run-as shell activity records', () => {
+  it.each(['bash', 'zsh'])('lets a %s child traverse its record directory and write only the records', (shell) => {
+    const identity = ownIdentity()
+    const activity = prepareShellActivity({
+      argv: [`/bin/${shell}`, '-i'], cwd: '/', rows: 1, cols: 1, terminalType: 'xterm', graceMs: 1, shellActivity: true,
+    }, {}, 'linux', identity)!
+    const startup = shell === 'bash' ? activity.argv[2] as string : join(activity.env.ZDOTDIR as string, '.zshenv')
+    const records = join(startup, '..')
+    try {
+      expect(statSync(records).mode & 0o777).toBe(0o711)
+      expect(statSync(startup).mode & 0o777).toBe(0o644)
+      for (const record of ['state', 'guards']) {
+        const info = statSync(join(records, record))
+        expect([info.mode & 0o777, info.uid, info.gid]).toEqual([0o600, identity.uid, identity.gid])
+      }
+    } finally {
+      activity.dispose()
+    }
+  })
+})
+
+describe('run-as exec bootstrap', () => {
+  const identity = { uid: 2000, gid: 3000, groups: [3002, 3001, 3001] }
+  const status = (uid: number, gid: number, groups: string): string =>
+    `Name:\tnode\nUid:\t${uid}\t${uid}\t${uid}\t${uid}\nGid:\t${gid}\t${gid}\t${gid}\t${gid}\nGroups:\t${groups}\n`
+
+  function host(steps: string[], overrides: Record<string, unknown> = {}) {
+    return {
+      env: {}, exitCode: undefined as number | undefined, connected: false, directory: '/',
+      cwd() { return this.directory },
+      chdir(path: string) { steps.push(`chdir ${path}`); this.directory = path },
+      on() {}, off() {}, once() {}, disconnect() {},
+      setgroups: (groups: number[]) => { steps.push(`setgroups ${groups.join(',')}`) },
+      setgid: (gid: number) => { steps.push(`setgid ${gid}`) },
+      setuid: (uid: number) => { steps.push(`setuid ${uid}`) },
+      ...overrides,
+    }
+  }
+
+  function bootstrap(statuses: string[], steps: string[], overrides: Record<string, unknown> = {}) {
+    const files = createLinuxLaunchFiles({ cwd: '/target', env: { PATH: '/bin', ONLY: 'target' }, runAs: identity })
+    scratch.push(files.directory)
+    const execve = vi.fn((file: string) => {
+      steps.push(`execve ${file}`)
+      throw Object.assign(new Error('stop'), { code: 'ENOEXEC_TEST' })
+    })
+    const runner = host(steps, overrides)
+    const internals: SpawnRunnerInternals = {
+      execve,
+      readProcessStatus: vi.fn(() => statuses.shift() ?? ''),
+      loadWin32ProcessBindings: vi.fn(),
+      spawnCurrentTokenJobProcess: vi.fn(),
+      closeFileDescriptor: vi.fn(),
+      resolveWindowsExecutable: vi.fn(),
+      pollProcessExit: vi.fn(),
+      isJobEmpty: vi.fn(),
+      terminateJob: vi.fn(),
+      closeHandleChecked: vi.fn(),
+    }
+    return { files, runner, execve, run: () => runSpawnRunner(files.requestPath, ['--', '/bin/tool'], runner as never, internals) }
+  }
+
+  it('takes groups, then group, then user, verifies them, and only then enters the target', async () => {
+    const steps: string[] = []
+    const { files, run, runner } = bootstrap([status(0, 0, '0'), status(2000, 3000, '3001 3002')], steps)
+    await run()
+    expect(steps).toEqual(['setgroups 3001,3002', 'setgid 3000', 'setuid 2000', 'chdir /target', 'execve /bin/tool'])
+    expect(runner.exitCode).toBe(127)
+    expect(readLinuxStartupError(files.startupErrorPath)?.error.message).toBe('spawn /bin/tool ENOEXEC_TEST')
+  })
+
+  it('leaves an already matching group list alone', async () => {
+    const steps: string[] = []
+    const { run } = bootstrap([status(0, 0, '3002 3001'), status(2000, 3000, '3001 3002')], steps)
+    await run()
+    expect(steps.slice(0, 2)).toEqual(['setgid 3000', 'setuid 2000'])
+  })
+
+  it.each([
+    ['a user id that did not change', status(0, 3000, '3001 3002')],
+    ['a saved group id that did not change', 'Uid:\t2000\t2000\t2000\t2000\nGid:\t3000\t3000\t0\t3000\nGroups:\t3001 3002\n'],
+    ['groups that did not change', status(2000, 3000, '3001')],
+  ])('refuses %s and never enters the target', async (_case, after) => {
+    const steps: string[] = []
+    const { files, run, execve, runner } = bootstrap([status(0, 0, ''), after], steps)
+    await run()
+    expect(execve).not.toHaveBeenCalled()
+    expect(steps).not.toContain('chdir /target')
+    expect(runner.exitCode).toBe(127)
+    expect(readLinuxStartupError(files.startupErrorPath)?.error.message)
+      .toBe('run-as: credentials after the change do not match uid 2000, gid 3000, groups [3001, 3002]')
+  })
+
+  it.each([
+    ['setgroups', status(0, 0, '0'), 'run-as: could not take uid 2000, gid 3000, groups [3001, 3002]: run-as: process.setgroups is unavailable on this host'],
+    ['setuid', status(0, 0, '3001 3002'), 'run-as: could not take uid 2000, gid 3000, groups [3001, 3002]: run-as: process.setuid is unavailable on this host'],
+  ])('fails closed when %s is unavailable', async (missing, before, message) => {
+    const steps: string[] = []
+    const { files, run, execve } = bootstrap([before], steps, { [missing]: undefined })
+    await run()
+    expect(execve).not.toHaveBeenCalled()
+    expect(readLinuxStartupError(files.startupErrorPath)?.error.message).toBe(message)
+  })
+
+  it('fails closed when the kernel reports no credentials', async () => {
+    const steps: string[] = []
+    const { files, run, execve } = bootstrap(['Name:\tnode\n'], steps)
+    await run()
+    expect(execve).not.toHaveBeenCalled()
+    expect(readLinuxStartupError(files.startupErrorPath)?.error.message)
+      .toBe('run-as: could not take uid 2000, gid 3000, groups [3001, 3002]: run-as: /proc/self/status has no Groups line')
+  })
+})

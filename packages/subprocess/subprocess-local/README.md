@@ -7,7 +7,7 @@ kind: "package-reference"
 
 ## Summary
 
-Mount `dsh-subprocess-local` in any composition that runs child processes on the host. It resolves local executables, gives ordinary Linux and Windows commands plus supported Linux terminal sessions an OS-owned managed range, and provides real terminal sessions through `node-pty`; unsupported hosts use an explicit weaker fallback. It has no configuration, so every disposition, limit, terminal size, and grace arrives on the spawn request from the calling capability seam. Output collection keeps a bounded in-memory tail with optional spill files for full-stream recovery, children start from a scrubbed environment, and disposal terminates and joins every selected range or session.
+Mount `dsh-subprocess-local` in any composition that runs child processes on the host. It resolves local executables, gives ordinary Linux and Windows commands plus supported Linux terminal sessions an OS-owned managed range, and provides real terminal sessions through `node-pty`; unsupported hosts use an explicit weaker fallback. Dispositions, limits, terminal sizes, and grace arrive on each spawn request; the one provider setting, `runAs`, starts every Linux child as a fixed non-root user. Output collection keeps a bounded in-memory tail with optional spill files for full-stream recovery, children start from a scrubbed environment, and disposal terminates and joins every selected range or session.
 
 ## Table of Contents
 
@@ -27,12 +27,39 @@ Mount the provider beside its consumers and start processes exactly as the subpr
 
 ### Mounting the provider
 
-Load the provider in the same composition as its consumers. It has no config fields: every choice arrives on the spawn request, so deployment-varying decisions stay with the caller's configuration. `terminalEnvironment()` reads a nonempty `SHELL` on POSIX, falling back to the account login shell, or a nonempty `ComSpec` on Windows. Empty values are omitted so the consumer can choose its platform fallback.
+Load the provider in the same composition as its consumers. Every per-process choice arrives on the spawn request, so deployment-varying decisions stay with the caller's configuration; only the [run-as identity](#running-children-as-another-user) is provider configuration. `terminalEnvironment()` reads a nonempty `SHELL` on POSIX, falling back to the account login shell, or a nonempty `ComSpec` on Windows. Empty values are omitted so the consumer can choose its platform fallback.
 
 ```yaml
 - name: '@deepseek-ai/dsh-subprocess-local'
 - name: '@deepseek-ai/dsh-bash-local'
 ```
+
+<a id="running-children-as-another-user"></a>
+### Running children as another user
+
+Set `runAs` to start every ordinary and terminal child of this provider as one non-root Linux identity, for example the `agent` user of a contained box. It covers every Consumer of `ctx.subprocess`: the model's shell commands, terminals including the person's Terminal tab, PTC code runtimes, language servers, `glob`/`grep`, and the processes of subagents. The [agent containment Agent Note](../../../.agents/notes/implemented/architecture/2026-11-10-agent-containment-run-as-and-model-roots.md) lists every spawn path and the ones outside this provider.
+
+```yaml
+- name: '@deepseek-ai/dsh-subprocess-local'
+  config:
+    runAs:
+      uid: 1001
+      gid: 1001
+      groups: []
+      inherit: [PATH, LANG]
+      set: { HOME: /home/agent, USER: agent, LOGNAME: agent, SHELL: /bin/bash }
+      secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY]
+```
+
+| Field | Meaning |
+|---|---|
+| `uid`, `gid` | User and group the child runs as; real, effective, saved, and filesystem ids all take these values. `0` is refused. |
+| `groups` | The complete supplementary group list; `[]` means none. Root's groups are never kept. |
+| `inherit` | Names the child takes from this process's credential-scrubbed environment. Every other ambient name is dropped; credential-shaped names are refused because the scrub never carries them. |
+| `set` | Fixed values the child always receives; they replace inherited and spawn-request entries of the same name. |
+| `secretNames` | Names that must never reach a child. A spawn whose final environment contains one, compared without case, throws `SubprocessSecretEnvironmentError` before anything starts. |
+
+The child's environment is the `inherit` names, then the spawn request's explicit entries (an `undefined` entry removes a name), then `set`. The Linux exec bootstrap takes the identity before it changes into the target's directory and enters the target, and it refuses to enter the target unless `/proc/self/status` reports exactly the configured ids and groups; a refused step rejects `done` with a `run-as:` message. Without a user-systemd scope the bootstrap runs directly as the detached process group. Executable lookup uses the run-as `PATH`, and `terminalEnvironment()` reports the run-as `SHELL`. Interactive shell activity records stay in a root-owned directory the child can only traverse; the child owns just its two record files. The provider fails at load on a non-Linux host, an unavailable exec bootstrap, a root identity, an invalid name, or a secret name in `inherit` or `set`. A process must start as root to switch to a different identity.
 
 ### Resolving executables
 
@@ -96,6 +123,7 @@ Each spawn selects one owner for both signalling and quiescence. Supported Linux
 | [`src/runner-launch.ts`](src/runner-launch.ts) | Source, built, and packaged private-runner selection |
 | [`src/spawn-runner.ts`](src/spawn-runner.ts) | Linux one-shot exec bootstrap and Windows Job runner |
 | [`src/runner-protocol.ts`](src/runner-protocol.ts) | Strict Linux launch/startup files and Windows IPC messages |
+| [`src/run-as.ts`](src/run-as.ts) | Run-as configuration, the explicit child environment, and the secret-name guard |
 | [`src/terminal.ts`](src/terminal.ts) | `node-pty` handle: Linux scope attachment, foreground inspection, and fallback cleanup |
 | [`src/process-inspector.ts`](src/process-inspector.ts) | POSIX process-tree and session inspection |
 | [`src/windows-inspector.ts`](src/windows-inspector.ts) | Windows Toolhelp32 process-table inspection via koffi |
@@ -151,6 +179,7 @@ These limits define when the provider is a poor fit or needs special operational
 - **Windows terminal allocation requires node-pty's bundled console host assets** — every Windows terminal is spawned with `useConptyDll: true`, so allocation resolves `conpty/conpty.dll` and `OpenConsole.exe` relative to node-pty's own addon; an asset that is missing or unpacked wrong makes `spawnTerminal` throw instead of falling back to the operating system console host. node-pty marks the option experimental, so a node-pty upgrade can change this behaviour. See the [bundled console host note](../../../.agents/notes/implemented/bug-fix/2026-09-28-pty-bundled-console-host.md).
 - **Fallback terminal ownership remains observational** — on macOS or Linux without usable user-systemd, a child that reparents before any foreground-inspection snapshot or leaves the owned terminal session can escape the process-table scan. The local provider does not add a continuous process-table monitor; supported Linux native mode instead retains these descendants through scope membership.
 - **In-process cleanup requires a JavaScript-observable exit** — direct `process.exit()`, default uncaught exceptions, and default unhandled rejections emit Node's synchronous `exit` event. The default OS disposition for an unhandled `SIGTERM`, `SIGINT`, or `SIGHUP` bypasses that event; an application covers those signals only by installing a handler that performs normal disposal or calls `process.exit()`. `SIGKILL`, fatal OOM, `process.abort()`, native crashes, power loss, and any failure that cannot run JavaScript require an external supervisor, container init, or equivalent OS owner.
+- **Run-as covers this provider only** — processes started outside `ctx.subprocess` (MCP stdio servers, plugin installation, the experimental Python PTC runtime, the SDK subagent's child `dsh`) keep this process's identity, and a credential a Consumer forwards under a name absent from `secretNames` reaches the child. Workspace change capture and superagent worker checks run as the run-as user too and need scratch and configuration paths that user can read and write.
 - **The credential scrub is a name heuristic** — `*KEY*`/`*PASSWORD*`/`*SECRET*`/`*TOKEN*` only; differently named secrets (for example `*PASSPHRASE*`) pass through, and a whitelist for over-scrubbed variables is noted future work.
 - **Completed spill files are not deleted** — bounded full-output recovery files accumulate under the OS tmpdir until something external cleans them; the private per-process spill directory is removed at a JavaScript-observable exit only when it holds no completed spill file.
 - **A removed spill directory is not recreated** — the private per-process directory is created once; after an external cleaner removes it, every later spill in that process degrades to the in-memory tail with an `error` log until the host restarts. Recreating a fresh random directory on `ENOENT` is deferred work.

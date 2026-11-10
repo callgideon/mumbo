@@ -105,6 +105,7 @@ function internals(overrides: Partial<SpawnRunnerInternals> = {}): SpawnRunnerIn
     isJobEmpty: vi.fn(() => true),
     terminateJob: vi.fn(),
     closeHandleChecked: vi.fn(),
+    readProcessStatus: vi.fn(() => 'Uid:\t0\t0\t0\t0\nGid:\t0\t0\t0\t0\nGroups:\t\n'),
     ...overrides,
   }
 }

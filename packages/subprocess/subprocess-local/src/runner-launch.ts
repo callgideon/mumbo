@@ -295,17 +295,19 @@ function validateNoNullByte(property: string, value: string, argument = false): 
 /**
  * Materialize and synchronously validate the final target environment.
  * @param spec - final target argv, cwd, and environment overrides.
+ * @param base - composes the environment from the explicit overrides; the scrubbed parent base by default.
  * @returns complete target environment after Node-equivalent validation.
  */
 export function targetEnvironment(
   spec: Pick<SubprocessSpawnSpec, 'argv' | 'cwd' | 'env'> & { stdio?: SubprocessSpawnSpec['stdio'] },
+  base: (explicit: SubprocessSpawnSpec['env']) => NodeJS.ProcessEnv = childEnv,
 ): Record<string, string> {
   spec.argv.forEach((value, index) => {
     validateNoNullByte(index === 0 ? 'file' : `args[${String(index - 1)}]`, value, true)
   })
   validateNoNullByte('options.cwd', spec.cwd)
   const env = Object.fromEntries(
-    Object.entries(childEnv(spec.env)).filter((entry): entry is [string, string] => entry[1] !== undefined),
+    Object.entries(base(spec.env)).filter((entry): entry is [string, string] => entry[1] !== undefined),
   )
   for (const [key, value] of Object.entries(env)) {
     validateNoNullByte(`options.env['${key}']`, key)

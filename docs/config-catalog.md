@@ -3872,6 +3872,42 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-subagent-spawn-in-process -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-subprocess-local -->
+<a id="deepseek-aidsh-subprocess-local"></a>
+
+## `@deepseek-ai/dsh-subprocess-local`
+
+- `source`: [`packages/subprocess/subprocess-local/src/index.ts:70`](../packages/subprocess/subprocess-local/src/index.ts)
+
+```ts config-catalog
+/** Provider configuration. */
+export interface Config {
+  /** Start every child as this identity with this environment; omitted, children run as this process with its scrubbed environment. */
+  runAs?: RunAs | undefined
+}
+
+/** Run every child of this provider as one fixed non-root identity with an explicit environment. */
+export interface RunAs extends RunAsIdentity {
+  /** Names a child inherits from this process's credential-scrubbed environment; every other ambient name is dropped. */
+  inherit: string[]
+  /** Fixed values every child receives; they replace inherited and caller-supplied entries of the same name. */
+  set: Record<string, string>
+  /** Names that must never reach a child; a launch whose final environment contains one fails before it starts. */
+  secretNames: string[]
+}
+
+/** The credentials the Linux bootstrap applies before it enters the target program. */
+export interface RunAsIdentity {
+  /** Real, effective, saved, and filesystem user id. */
+  uid: number
+  /** Real, effective, saved, and filesystem group id. */
+  gid: number
+  /** The complete supplementary group list; empty means none. */
+  groups: number[]
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-subprocess-local -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-system-prompt -->
 <a id="deepseek-aidsh-system-prompt"></a>
 
@@ -5129,7 +5165,6 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 | `@deepseek-ai/dsh-settings` | `configEditor` · `profileContext` | [`packages/settings/settings/src/index.ts`](../packages/settings/settings/src/index.ts) |
 | `@deepseek-ai/dsh-skill-badge` | `skills` | [`packages/experimental/skill-badge/src/index.ts`](../packages/experimental/skill-badge/src/index.ts) |
 | `@deepseek-ai/dsh-storage` | — | [`packages/storage/storage/src/index.ts`](../packages/storage/storage/src/index.ts) |
-| `@deepseek-ai/dsh-subprocess-local` | — | [`packages/subprocess/subprocess-local/src/index.ts`](../packages/subprocess/subprocess-local/src/index.ts) |
 | `@deepseek-ai/dsh-subprocess-ssh` | `ssh` | [`packages/ssh/subprocess-ssh/src/index.ts`](../packages/ssh/subprocess-ssh/src/index.ts) |
 | `@deepseek-ai/dsh-terminal` | — | [`packages/terminal/terminal/src/index.ts`](../packages/terminal/terminal/src/index.ts) |
 | `@deepseek-ai/dsh-tool-call-timeout-policy` | `tools` | [`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts) |
