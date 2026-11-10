@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, request } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { PORTS, OLD_PORTS, PORTS_MARKER, portsFrom, boxes, userServer, startScript, boxSite } from './edge.mjs'
+import { PORTS, OLD_PORTS, PORTS_MARKER, MUMBO_MCP_PORT, portsFrom, boxes, boxHeaders, userServer, startScript, boxSite } from './edge.mjs'
 import { PORTS_STEP } from './template.mjs'
 import { memoryStore } from './store.mjs'
 
@@ -36,6 +36,8 @@ test('ports: the marker names the pair, its absence is the old one, and anything
   assert.deepEqual(portsFrom('880 881\n'), PORTS)
   assert.deepEqual(portsFrom(''), OLD_PORTS)
   for (const bad of ['880', '880 881 882', 'x y', '880\t881']) assert.throws(() => portsFrom(bad), /box ports marker/, bad)
+  // The door (B33) is MUMBO_MCP_PORT on a box of either template.
+  for (const ports of [PORTS, undefined]) assert.equal(boxHeaders({}, {}, { id: 'b', traffic: 'T', ports }, 'door')['e2b-sandbox-port'], MUMBO_MCP_PORT)
   // The template writes the marker from PORTS, so the template, the start script and the edge agree.
   const t = mkdtempSync(join(tmpdir(), 'marker-'))
   try {

@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { startScript, boxSite, boxes, assistantInstructions, DENIED_URLS } from './edge.mjs'
+import { startScript, boxSite, boxes, assistantInstructions, DENIED_URLS, MUMBO_MCP_OVERLAY, MUMBO_MCP_PACKAGE, mumboMcpKey } from './edge.mjs'
 import { memoryStore } from './store.mjs'
 import { projects } from './projects.mjs'
 import { templateArgs } from './template.mjs'
@@ -16,14 +16,14 @@ const b64 = (s) => Buffer.from(s).toString('base64')
 const at = (text, needle) => { const i = text.indexOf(needle); assert.ok(i >= 0, `missing: ${needle}`); return i }
 
 test('a user box start script is byte-for-byte what it was before project boxes grew a proxy', () => {
-  const s = startScript(c, 'T', boxSite(c, 'a@x.com'), "role's", undefined, boxFiles, ['o@x.com'])
-  // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows, the X cookie, the first-run welcome, the interim Chromium policy (B27), the B18 desktop, the B25 consent rows, B19's KasmVNC and its own user, and B24 (same cfg, token T, role "role's").
+  const s = startScript(c, 'T', boxSite(c, 'a@x.com'), "role's", undefined, boxFiles, ['o@x.com'], { key: 'KEY', principal: 'a' })
+  // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows, the X cookie, the first-run welcome, the interim Chromium policy (B27), the B18 desktop, the B25 consent rows, B19's KasmVNC and its own user, B33's door to Mumbo and its gate on the linked package, and B24 (same cfg, token T, role "role's").
   // B24 moved it deliberately: the ports from the template's marker, the kernel and network part and the containment
   // layout and rows behind their gates, the session as xsession and the cookie root:desktop on the B24 template, the
   // consent, computer use and Browser tab identities, the welcome as agent, and the old Chromium profiles deleted. On a
   // template and image from before B24 the script runs as before, apart from that deletion (containment.test.mjs,
   // desktop.test.mjs, welcome.test.mjs, ports.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), '4a79a2910dd2da196f832671877022d2c813433f64c09c250e30246441be9b4c')
+  assert.equal(createHash('sha256').update(s).digest('hex'), '158e09dd0e46fcdb334a7469e9bad747a9584cb059e133e28889dce5e54855ef')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -340,6 +340,44 @@ test('create() starts a project box from projectTemplate with the owners as pane
   assert.deepEqual(made, ['T-project', 'T-user'])
   assert.match(written[0], /MUMBO_PANEL_ADMINS='owner@x\.com'/)
   assert.ok(!written[1].includes('MUMBO_PANEL_ADMINS'))
+  // The person box gets its own door key, derived from the edge key and its id, and its handle; the project box neither.
+  assert.ok(written[1].includes(`printf '%s' '${mumboMcpKey('k', 'b2')}' > /root/.mumbo/mcp.key`))
+  assert.ok(written[1].includes("MUMBO_MCP_PRINCIPAL='a'"))
+  assert.ok(!written[0].includes('MUMBO_MCP') && !written[0].includes(mumboMcpKey('k', 'b1')))
+})
+
+test('door to Mumbo: a person box writes its key root-only and patches the person overlay after the assistant\'s, only when the image ships it and links @mumbo/mcp', () => {
+  const mcp = { key: 'KEY_-1', principal: 'ann' }
+  const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles, [], mcp)
+  assert.ok(u.includes(' $ASSISTANT_PATCH $MCP_PATCH '), 'patched after the assistant overlay')
+  assert.ok(at(u, 'ASSISTANT_PATCH="--patch') < at(u, '# Mumbo through the MCP door'))
+  const from = at(u, '# Mumbo through the MCP door'), to = u.indexOf('\nfi\n', from) + 4
+  const dir = mkdtempSync(join(tmpdir(), 'mumbo-mcp-'))
+  const overlay = join(dir, MUMBO_MCP_OVERLAY), pkg = join(dir, MUMBO_MCP_PACKAGE)
+  const run = () => execFileSync('sh', ['-c', `set -eu\nmkdir -p ${dir}/root/.mumbo\n${u.slice(from, to).replaceAll('/root/', `${dir}/root/`).replaceAll(MUMBO_MCP_OVERLAY, overlay).replaceAll(MUMBO_MCP_PACKAGE, pkg)}echo "$MCP_PATCH|\${MUMBO_MCP_PORT-}|\${MUMBO_MCP_KEY_FILE-}|\${MUMBO_MCP_PRINCIPAL-}|\${MUMBO_MCP_ASSISTANT_CWD-}"`], { encoding: 'utf8' }).trim()
+  const keyFile = join(dir, 'root/.mumbo/mcp.key')
+  try {
+    // An image without the overlay: no key file, no variables, no patch.
+    assert.equal(run(), '||||')
+    assert.ok(!existsSync(keyFile))
+    mkdirSync(join(overlay, '..'), { recursive: true })
+    writeFileSync(overlay, '')
+    // An image with the overlay whose root package does not link @mumbo/mcp: the overlay could not load it, so nothing.
+    assert.equal(run(), '||||')
+    assert.ok(!existsSync(keyFile))
+    mkdirSync(join(pkg, '..'), { recursive: true })
+    writeFileSync(pkg, '{}')
+    assert.equal(run(), `--patch ${overlay}|882|${keyFile}|ann|${dir}/root/projects`)
+    assert.equal(readFileSync(keyFile, 'utf8'), 'KEY_-1')
+    assert.equal(statSync(keyFile).mode & 0o777, 0o600)
+    // A re-run over a file another mode left keeps it root's alone.
+    execFileSync('chmod', ['0644', keyFile])
+    run()
+    assert.equal(statSync(keyFile).mode & 0o777, 0o600)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+  // A project box gets none of it, even if handed the values.
+  const p = startScript({ ...c, projectDomain: 'boxes.x' }, 'T', boxSite({ ...c, projectDomain: 'boxes.x' }, 'project:0123456789abcdef'), 'role', 'K', boxFiles, [], mcp)
+  assert.ok(!p.includes('MCP_PATCH') && !p.includes('KEY_-1') && !p.includes('mumbo/mcp'))
 })
 
 test('create() charges a project box 4 capacity units and a person box 2', async () => {
