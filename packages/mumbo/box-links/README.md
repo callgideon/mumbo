@@ -7,7 +7,7 @@ kind: "package-reference"
 
 ## Summary
 
-`@mumbo/box-links` adds box links and views to a box's Web page. At the foot of the Web sidebar, above the account menu, it shows a Home link and, when configured, a Desktop link; both open in a new tab, so the conversation, its draft, and the page's connection stay open. In the right panel it adds a Desktop tab, which shows the desktop live view, and, when configured, a Browser tab: the same live view with the desktop's Chrome brought to the front by an owner-only Host call. Without this plugin's row the page shows none of them.
+`@mumbo/box-links` adds box links and views to a box's Web page: a Home link and, when configured, a Desktop link at the foot of the Web sidebar, both opening in a new tab; a right-panel Desktop tab showing the desktop live view; and, when configured, a Browser tab showing the same view with Chrome brought to the front by an owner-only Host call. With [browser consent](../browser-consent/README.md) loaded, the owner's Browser tab offers Take over and Hand back, to keep the assistant out while the person signs in. Without this plugin's row the page shows none of them.
 
 ## Table of Contents
 
@@ -15,6 +15,7 @@ kind: "package-reference"
 - [Links](#links)
 - [Desktop and Browser tabs](#desktop-and-browser-tabs)
 - [The Browser tab's Host call](#the-browser-tabs-host-call)
+- [The Browser tab's take-over route](#the-browser-tabs-take-over-route)
 - [Model Experience](#model-experience)
 - [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
 - [Dev Note](#dev-note)
@@ -61,6 +62,16 @@ Both bodies are an iframe of the `desktop` URL, without a `sandbox` attribute: t
 
 Each time a Browser tab shows, its body makes one [Host call](#the-browser-tabs-host-call) to bring Chrome to the front. A failed call shows its diagnostic and a Try again button above the live view, which stays usable.
 
+When the bootstrap also carries `takeover: true`, which the Host puts only in the owner's page and only while browser consent's service is loaded, the Browser tab reads who has the browser through the [take-over route](#the-browser-tabs-take-over-route) each time it shows, and draws a bar above the live view:
+
+| State | Bar | Action |
+|---|---|---|
+| The assistant has the browser | `Mumbo can use this browser. Take over to sign in or type something private.` | Take over |
+| The person has it | `You have the browser. Mumbo can't see or use it until you hand it back.` | Hand back |
+| A take over did not finish | A warning naming the failure and saying not to type anything private yet | Try again, which takes over again, and Hand back |
+
+While a change runs, the bar's buttons are disabled and the pressed one reads `Taking over…` or `Handing back…`. A failed hand back shows its failure above the bar, which stays on the person's state; a read that gets no state shows why with a Try again button. The Desktop tab shows the same live view without the bar: Take over belongs to the Browser tab, and the takeover holds whichever tab the person types in.
+
 A desktop app's local browser takes the Browser tab over by registering kind `box-browser` in the `extension` band with its own id and body: the right panel then renders that body for every `box-browser` tab and falls back to the live view when the registration leaves. Using the guide entry id `open` keeps the person's guide pin choice across the takeover. Nothing else in the product names the live view.
 
 <a id="the-browser-tabs-host-call"></a>
@@ -85,10 +96,21 @@ The desktop the edge starts must meet these conditions:
 - Its window manager supports EWMH (`_NET_CLIENT_LIST`, `_NET_ACTIVE_WINDOW`, `_NET_WM_STATE`), as xfwm4 and openbox do; without one, wmctrl reports `Cannot get client list properties` and the call fails at once.
 - `wmctrl` is on the Host's `PATH`, and the Host can read the `xauthority` file.
 
+<a id="the-browser-tabs-take-over-route"></a>
+## The Browser tab's take-over route
+
+With `browser`, while the `connection` service and browser consent's `mumbo-browser-consent` service are present, the Host half registers the exact Connection route `/api/box-links.browser-takeover`. Like the Chrome call it declares no `access`, so Connection answers every non-owner Peer 403 before the route runs.
+
+- `GET` answers 200 with JSON `{ "takenOver": boolean }`, adding `failure` while the browser stays taken over after a take over that did not finish.
+- `POST` with the JSON body `{ "takenOver": true }` takes the browser over and with `false` hands it back, through the [consent service](../browser-consent/README.md#take-over). It answers once the change finished: 200 with the state, or 500 with the state and the `failure` text, which is also logged as a warning. A take over answers only after the assistant's browser connections are closed, so the bar says the person has the browser only once that holds.
+- Any other body answers 400 with plain text.
+
+The Browser tab does not abort a change when it hides, and the Host finishes it either way. Unloading the plugin or browser consent removes the route.
+
 <a id="model-experience"></a>
 ## Model Experience
 
-None, as the links and tabs are browser navigation and views, and the Host call registers no tool, prompt section, or Session event.
+None, as the links and tabs are browser navigation and views, and the Host routes register no tool, prompt section, or Session event. What the model sees while the person has taken the browser over is browser consent's [refusal](../browser-consent/README.md#taken-over-browser).
 
 #### KV Cache effect
 
@@ -99,6 +121,7 @@ No model request prefix changes.
 <a id="known-limitations-and-deferred-work"></a>
 
 - **No house or monitor glyph** — Home uses the shared layers icon and Desktop the globe icon, and the Desktop guide card draws the guide's placeholder, until designers approve dedicated glyphs.
+- **The bar shows the state as of its last read** — the Browser tab reads who has the browser when it shows and after its own changes, so a change made from another device appears when the tab shows again.
 - **The oldest Chrome window comes forward** — wmctrl activates the first matching window in the window manager's client list, the one mapped first, not the one the person used last.
 
 <a id="dev-note"></a>

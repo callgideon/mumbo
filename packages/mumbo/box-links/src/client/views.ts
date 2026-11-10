@@ -4,8 +4,8 @@ import type { TranslateNS } from '@deepseek-ai/dsh-client-locale/client'
 import { GuideArtworkBrowser } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SidebarRightTabDefinition } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
-import { BROWSER_FRONT_PATH } from '../config.ts'
-import { LiveView, type LiveViewInjected } from './LiveView.tsx'
+import { BROWSER_FRONT_PATH, BROWSER_TAKEOVER_PATH, TakeoverState } from '../config.ts'
+import { LiveView, type LiveViewInjected, type TakeoverAnswer, type TakeoverCalls } from './LiveView.tsx'
 import { NS } from './locales.ts'
 
 /** Desktop tab kind. */
@@ -54,18 +54,52 @@ async function frontChrome(signal: AbortSignal): Promise<string | undefined> {
 }
 
 /**
+ * Call the owner-only take-over route.
+ * @param init - GET with the tab's abort signal to read, or POST with `{ takenOver }` to change.
+ * @returns the Host's state, with the failure of a change that did not finish, or why no state arrived.
+ */
+async function takeoverRoute(init: RequestInit): Promise<TakeoverAnswer> {
+  let response: Response
+  let text: string
+  try {
+    // Document-relative, so a page served under a path prefix reaches its own Host.
+    response = await fetch(BROWSER_TAKEOVER_PATH.slice(1), init)
+    text = await response.text()
+  } catch (error) {
+    // The request did not complete: offline, the page is unloading, or the tab hid and aborted the read.
+    return { failure: error instanceof Error ? error.message : String(error) }
+  }
+  try {
+    // The schema checks the answer the type names.
+    return TakeoverState(JSON.parse(text) as TakeoverState)
+  } catch {
+    // Not the route's JSON, such as Connection's 403 or a proxy's error page: report the response itself.
+    return { failure: text.trim() === '' ? `HTTP ${String(response.status)}` : text.trim() }
+  }
+}
+
+/** The Browser tab's take-over calls. */
+const takeoverCalls: TakeoverCalls = {
+  read: signal => takeoverRoute({ signal }),
+  change: takenOver => takeoverRoute({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ takenOver }) }),
+}
+
+/**
  * Register the Desktop tab and, when the Host serves its call, the Browser tab, while the right Sidebar is present.
  * @param ctx - Client plugin context carrying slots and locale.
  * @param url - desktop live view URL.
  * @param browser - whether the Host serves the Browser tab's call for this page.
+ * @param takeover - whether the Host also serves the Browser tab's take-over route for this page.
  */
-export function registerViews(ctx: Context, url: string, browser: boolean): void {
+export function registerViews(ctx: Context, url: string, browser: boolean, takeover: boolean): void {
   const definitions = viewDefinitions(ctx.locale.bind(NS))
   ctx.inject(['sidebarRightTabs'], (ctx) => {
     const views: { definition: SidebarRightTabDefinition; inject: LiveViewInjected }[] = [
       { definition: definitions.desktop, inject: { url } },
     ]
-    if (browser) views.push({ definition: definitions.browser, inject: { url, front: frontChrome } })
+    if (browser) {
+      views.push({ definition: definitions.browser, inject: { url, front: frontChrome, ...takeover ? { takeover: takeoverCalls } : {} } })
+    }
     for (const { definition, inject } of views) {
       ctx.effect(() => ctx.sidebarRightTabs.register(definition), `mumbo-box-links: ${definition.kind} tab`)
       ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({

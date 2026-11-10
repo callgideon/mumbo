@@ -13924,6 +13924,9 @@ importers:
       '@deepseek-ai/dsh-typert-registry':
         specifier: workspace:*
         version: link:../../typert/registry
+      '@mumbo/browser-consent':
+        specifier: workspace:~
+        version: link:../browser-consent
       '@mumbo/edge-member':
         specifier: workspace:~
         version: link:../edge-member

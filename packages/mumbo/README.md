@@ -25,8 +25,8 @@ Each package owns one deployment concern.
 | Package | Role |
 |---|---|
 | [`assistant/`](assistant/README.md) | Mumbo, the person's always-present assistant Session: pinned first, never archived, given its own instructions, and opened first |
-| [`box-links/`](box-links/README.md) | Sidebar links from a box's Web page to the box home page and desktop live view, and the right-panel Desktop and Browser tabs that show the live view |
-| [`browser-consent/`](browser-consent/README.md) | Reads free, writes ask, denied pages never: consent and an audit record for Playwright MCP browser writes in the person's own Chromium, and consent for desktop input |
+| [`box-links/`](box-links/README.md) | Sidebar links from a box's Web page to the box home page and desktop live view, and the right-panel Desktop and Browser tabs that show the live view, with Take over and Hand back in the Browser tab |
+| [`browser-consent/`](browser-consent/README.md) | Reads free, writes ask, denied pages never: consent and an audit record for Playwright MCP browser writes in the person's own Chromium, consent for desktop input, and the person's takeover of the browser |
 | [`edge-member/`](edge-member/README.md) | Admits project members from the edge-signed header as non-owner principals with collaborator access |
 | [`mcp/`](mcp/README.md) | Authenticated loopback MCP server through which allowlisted people drive the host's assistant Session |
 | [`superagent/`](superagent/README.md) | Pinned copy of the upstream superagent: a proactive agent that turns authorized GitHub requests into Tickets and works each in its own Session |

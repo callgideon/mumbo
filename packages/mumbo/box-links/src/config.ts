@@ -36,6 +36,19 @@ export interface PageLinks {
   desktop?: string
   /** True on the owner's page when the Host serves the Browser tab's call. */
   browser?: boolean
+  /** True on the owner's page when the Host also serves the Browser tab's take-over route, with browser consent loaded. */
+  takeover?: boolean
+}
+
+/** The Host's answer about the person's hold on the browser: whether they have taken it over, and why a change failed. */
+export interface TakeoverState {
+  /** Whether the person has taken over the browser. */
+  takenOver: boolean
+  /**
+   * Why the requested change failed; on a read, why the last take over did not finish while the browser stays taken
+   * over.
+   */
+  failure?: string
 }
 
 const link = z.string().pattern(/^https?:\/\/[^/\s]+\/\S*$/)
@@ -68,6 +81,13 @@ export const PageLinks: z<PageLinks> = z.object({
   home: link.required(),
   desktop: link,
   browser: z.boolean(),
+  takeover: z.boolean(),
+})
+
+/** Validate a take-over route answer in the browser. */
+export const TakeoverState: z<TakeoverState> = z.object({
+  takenOver: z.boolean().required(),
+  failure: z.string(),
 })
 
 /** Page bootstrap global that carries the validated {@link PageLinks} to the Client half. */
@@ -75,3 +95,9 @@ export const BOX_LINKS_GLOBAL = '__MUMBO_BOX_LINKS__'
 
 /** Owner-only exact route that brings Chrome to the front; the Client posts to its document-relative form. */
 export const BROWSER_FRONT_PATH = '/api/box-links.browser-front'
+
+/**
+ * Owner-only exact route through which the Browser tab reads, takes over, and hands back the browser: GET answers a
+ * {@link TakeoverState}, and POST with `{ takenOver }` changes it and answers the same.
+ */
+export const BROWSER_TAKEOVER_PATH = '/api/box-links.browser-takeover'
