@@ -258,7 +258,8 @@ export const PORTS = { dsh: '880', live: '881' }
 export const OLD_PORTS = { dsh: '3080', live: '6080' }
 /** The template's marker: one line, `<dsh port> <live view port>`. The start script and portsOf read it. */
 export const PORTS_MARKER = '/usr/local/share/mumbo/ports'
-/** E2B's in-box agent, envd, which runs commands as root for whoever reaches it: only root may connect (start script). */
+/** E2B's in-box agent, envd, which runs commands as root for whoever reaches it: no process in the box, root's included,
+ *  may connect (start script); the edge reaches it from outside. */
 export const ENVD_PORT = '49983'
 /** The image ships the B24 harness (the run-as subprocess provider with a server identity) when this file names
  *  serverIdentity: the start script then lays the box out for agent containment and writes its rows (containmentRows). */
@@ -300,13 +301,15 @@ const hardening = () => `if [ -n "$B24_TEMPLATE" ]; then
   grep -Eq '^[^ ]+ /proc proc [^ ]*hidepid=(2|invisible)' /proc/mounts || { echo 'mumbo-box: /proc is not mounted with hidepid=2' >&2; exit 1; }
   # Nobody becomes root through su or sudo (E2B's own account user can have sudo); root's own su needs no set-user-ID bit.
   for b in su sudo; do p=$(command -v $b) || continue; p=$(readlink -f "$p"); chmod u-s "$p"; [ ! -u "$p" ] || { echo "mumbo-box: $p is still set-user-ID" >&2; exit 1; }; done
-  # Only root connects, to any address (E2B's envd forwards every loopback listener to the box address), to E2B's envd,
-  # which runs commands as root, dsh, the live view, the Mumbo door, any VNC port and, beside browsermcp, the Playwright
-  # MCP server's user, the browser's debugging port.
+  # Only root connects, to any address (E2B's envd forwards every loopback listener to the box address), to dsh, the
+  # live view, the Mumbo door, any VNC port and, beside browsermcp, the Playwright MCP server's user, the browser's
+  # debugging port. Nothing in the box connects to E2B's envd, which runs commands as root: root's dsh fetches pages for
+  # the model, and the edge's commands reach envd from outside the box.
   CDP=
   if id browsermcp >/dev/null 2>&1; then CDP="-m owner ! --uid-owner $(id -u browsermcp)"; fi
   for t in iptables $IP6; do
-    for port in ${ENVD_PORT} $DSH_PORT $LIVE_PORT ${MUMBO_MCP_PORT} 5900:5999; do rule $t OUTPUT -p tcp --syn --dport $port -m owner ! --uid-owner 0 -j REJECT --reject-with tcp-reset; done
+    rule $t OUTPUT -p tcp --syn --dport ${ENVD_PORT} -j REJECT --reject-with tcp-reset
+    for port in $DSH_PORT $LIVE_PORT ${MUMBO_MCP_PORT} 5900:5999; do rule $t OUTPUT -p tcp --syn --dport $port -m owner ! --uid-owner 0 -j REJECT --reject-with tcp-reset; done
     rule $t OUTPUT -p tcp --syn --dport 9222 -m owner ! --uid-owner 0 $CDP -j REJECT --reject-with tcp-reset
   done
 fi
@@ -547,23 +550,24 @@ YML
 ` : ''}${site.desktop ? `# The user's Chromium for dsh's browser tools. With @mumbo/browser-consent in the image, writes on a site ask the
 # person first; consent mounts the Playwright MCP provider itself, so the plain provider row is used only without it.
 # A consent that knows deniedUrls (B25) refuses the denied pages and writes the server's files to a directory outside the
-# backups that only the server's user reads: root's, or under containment (B24) browsermcp's, made as browsermcp, the
-# user the server runs as; CONSENT=denied then gates computer use on it.
+# backups that only the server's user reads: root's, or under containment (B24) browsermcp's, in /var/lib/mumbo, which
+# is root's, so browsermcp cannot swap the directory for a link that aims consent's deletes, made as root, elsewhere.
+# CONSENT=denied then gates computer use on it. A consent that takes browser_file_upload's files from one directory
+# (B24) takes them from the shared Downloads.
 CONSENT=
 if [ -d /src/packages/mumbo/browser-consent ] && grep -q deniedUrls /src/packages/mumbo/browser-consent/src/index.ts 2>/dev/null; then
 CONSENT=denied
-if [ -n "$B24_IMAGE" ]; then OUT=/home/browsermcp/playwright-output; su browsermcp -s /bin/sh -c "mkdir -p -m 0700 $OUT"; else OUT=/root/.mumbo/playwright-output; install -d -m 0700 $OUT; fi
-cat >> /root/.mumbo/sandboxes.overlay.yml <<YML
+cat >> /root/.mumbo/sandboxes.overlay.yml <<'YML'
     - id: browser-consent
       name: '@mumbo/browser-consent'
       config:
         browser:
           mode: attach
           endpoint: http://127.0.0.1:9222
-          outputDir: $OUT
 YML
-if [ -n "$B24_IMAGE" ]; then echo '          identity: browsermcp' >> /root/.mumbo/sandboxes.overlay.yml; fi
-printf '%s\\n' '        deniedUrls: ${JSON.stringify(DENIED_URLS)}' >> /root/.mumbo/sandboxes.overlay.yml
+if [ -n "$B24_IMAGE" ]; then OUT=/var/lib/mumbo/playwright-output; install -d -o browsermcp -g browsermcp -m 0700 $OUT; echo '          identity: browsermcp' >> /root/.mumbo/sandboxes.overlay.yml; else OUT=/root/.mumbo/playwright-output; install -d -m 0700 $OUT; fi
+printf '%s\\n' "          outputDir: $OUT" '        deniedUrls: ${JSON.stringify(DENIED_URLS)}' >> /root/.mumbo/sandboxes.overlay.yml
+if grep -q uploadDirectory /src/packages/mumbo/browser-consent/src/index.ts; then echo '        uploadDirectory: /home/shared/Downloads' >> /root/.mumbo/sandboxes.overlay.yml; fi
 elif [ -d /src/packages/mumbo/browser-consent ]; then
 cat >> /root/.mumbo/sandboxes.overlay.yml <<'YML'
     - id: browser-consent
@@ -808,6 +812,10 @@ fi
 ` : ''}${site.desktop ? '' : `# Project box: a TLS-terminating GitHub proxy on loopback (its own CA, trusted system-wide) aims git and gh at the edge's
 # forwarder with this box's token (edge/box/github-local-proxy.mjs); dsh and its children reach GitHub only through it.
 # The gh wrapper (edge/box/gh) is root's and world-readable outside /root/.mumbo, so the agent's commands run it too.
+# On the B24 template the proxy becomes the user ghproxy (template.mjs) once its leaves are ready, so a CONNECT through it
+# is refused whatever the firewall refuses ghproxy: E2B's envd, dsh and the door.
+PROXY_USER=
+[ -z "$B24_TEMPLATE" ] || PROXY_USER=ghproxy
 mkdir -p /root/.mumbo/ca /root/.mumbo/bin
 install -d -m 0755 /usr/local/lib/mumbo /usr/local/lib/mumbo/bin
 # One start at a time: the router can re-run this script while a first run is still setting up the CA or the proxy.
@@ -829,7 +837,7 @@ echo ${b64(boxFiles.proxy)} | base64 -d > /root/.mumbo/bin/github-local-proxy.mj
 echo ${b64(boxFiles.gh)} | base64 -d > /usr/local/lib/mumbo/bin/gh
 chmod 0755 /root/.mumbo/bin/github-local-proxy.mjs /usr/local/lib/mumbo/bin/gh
 ln -sfn /usr/local/lib/mumbo/bin/gh /root/.mumbo/bin/gh
-pgrep -f github-local-proxy.mjs >/dev/null || PORT=8899 CA_DIR=/root/.mumbo/ca EDGE_GITHUB_URL=${llm}/github BOX_TOKEN=${token} nohup node /root/.mumbo/bin/github-local-proxy.mjs >/root/github-proxy.log 2>&1 9>&- &
+pgrep -f github-local-proxy.mjs >/dev/null || PORT=8899 CA_DIR=/root/.mumbo/ca RUN_AS=$PROXY_USER EDGE_GITHUB_URL=${llm}/github BOX_TOKEN=${token} nohup node /root/.mumbo/bin/github-local-proxy.mjs >/root/github-proxy.log 2>&1 9>&- &
 up=
 for i in $(seq 20); do curl -s -o /dev/null -m 1 http://127.0.0.1:8899/ && up=1 || { [ $? -ne 7 ] && up=1; }; [ -n "$up" ] && break; sleep 0.5; done
 [ -n "$up" ] || { echo 'github proxy did not start' >&2; exit 1; }
@@ -854,11 +862,14 @@ nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\
 `
 }
 /** Write a `.snap` copy of every *.sqlite and *.db under .dsh and projects (the live files are WAL-mode and cannot be tarred consistently). Files with the SQLite header get VACUUM INTO
- *  and a failure aborts the backup; any other file is copied verbatim. */
+ *  and a failure aborts the backup; any other file is copied verbatim. A projects directory another user owns (agent,
+ *  under containment, B24) is copied by a child process running as its owner and group, into `projects` of the output,
+ *  which that owner gets (the output directory lets it through): the owner can swap any directory in the tree for a
+ *  link between the listing and the copy, which then reads only what the owner may read. */
 const SNAPSHOT_JS = `const { DatabaseSync } = require("node:sqlite"), fs = require("fs"), path = require("path"), Q = String.fromCharCode(39)
-const [home, out] = process.argv.slice(1)
-for (const d of [".dsh", "projects"]) {
-  if (!fs.existsSync(path.join(home, d))) continue
+const [home, out, only] = process.argv.slice(1)
+const snap = (d) => {
+  if (!fs.existsSync(path.join(home, d))) return
   for (const e of fs.readdirSync(path.join(home, d), { recursive: true, withFileTypes: true })) {
     if (!e.isFile() || !/\\.(sqlite|db)$/.test(e.name)) continue
     const src = path.join(e.parentPath, e.name), dst = path.join(out, path.relative(home, src) + ".snap")
@@ -871,7 +882,17 @@ for (const d of [".dsh", "projects"]) {
     db.exec("VACUUM INTO " + Q + dst.replaceAll(Q, Q + Q) + Q)
     db.close()
   }
-}`
+}
+const owner = only ? undefined : fs.lstatSync(path.join(home, "projects"), { throwIfNoEntry: false })
+if (only) snap(only)
+else if (owner?.isDirectory() && owner.uid !== 0) {
+  snap(".dsh")
+  fs.mkdirSync(path.join(out, "projects"), { recursive: true })
+  fs.chmodSync(out, 0o711)
+  fs.chownSync(path.join(out, "projects"), owner.uid, owner.gid)
+  const r = require("child_process").spawnSync(process.execPath, [...process.execArgv, home, out, "projects"], { uid: owner.uid, gid: owner.gid, stdio: "inherit" })
+  if (r.status !== 0) throw new Error("projects snapshot as uid " + owner.uid + " failed: " + (r.error?.message ?? "status " + r.status))
+} else for (const d of [".dsh", "projects"]) snap(d)`
 /** What a backup leaves out of /home/browser: the old Chromium profile Google Chrome replaced (startScript), caches,
  *  re-downloaded browser components and models, and profile locks, in Chrome's and Chromium's profiles; tar's exclude
  *  patterns let `*` match `/`. */
@@ -881,12 +902,13 @@ const BROWSER_EXCLUDES = ['.cache', '.chromium-profile-old', ...['Singleton*', '
 /** Downloads items (a file, or a folder with everything in it) over this many bytes stay out of backups, and the rest is
  *  kept newest first up to the total: the archive is staged on the box's own disk. */
 const DOWNLOADS_ITEM_MAX = 1024 ** 3, DOWNLOADS_TOTAL_MAX = 2 * 1024 ** 3
-/** Lists, NUL-terminated and as exact bytes, what a backup takes from /home/browser and /home/shared: argv[3] gets the two
- *  homes and /home/shared/Downloads (archived without recursion), argv[4] every other top-level entry of the homes and the
- *  Downloads items kept (archived with recursion, by tar's own traversal, which follows no symlink). Only names whose
- *  enclosing directories are each an entry of a root-owned directory (/home, /home/shared) are listed: the homes'
- *  top-level entries and the shared Downloads items. Never list a name below one of these: browser could swap a
- *  directory above it for a symlink. An old ~/Downloads is one item, under the same limits. Downloads is never named by
+/** Lists, NUL-terminated and as exact bytes, what a backup takes from /home/browser, /home/shared and /home/xsession (the
+ *  desktop session's settings, B24): argv[3] gets the homes and /home/shared/Downloads (archived without recursion),
+ *  argv[4] every other top-level entry of the homes and the Downloads items kept (archived with recursion, by tar's own
+ *  traversal, which follows no symlink). Only names whose enclosing directories are each an entry of a root-owned
+ *  directory (/home, /home/shared) are listed: the homes' top-level entries and the shared Downloads items. Never list a
+ *  name below one of these: a home's user could swap a directory above it for a symlink. A ~/Downloads in browser's or
+ *  xsession's home is one item, under the same limits. Downloads is never named by
  *  a pattern, so no file name can exclude anything else. It reads with lstat; an item still being downloaded
  *  (*.crdownload) is skipped, an entry that vanishes while it is sized counts as empty, and an item it cannot read is
  *  left out. Prints one line when Downloads items are left out. */
@@ -899,13 +921,13 @@ const join = (r, n) => Buffer.concat([r, Buffer.from("/"), n])
 const gone = (e) => e.code === "ENOENT" || e.code === "ENOTDIR"
 const bytes = (r) => { let s, c; try { s = fs.lstatSync(abs(r)) } catch (e) { return gone(e) ? 0 : Infinity } if (s.isFile()) return s.size; if (!s.isDirectory()) return 0; try { c = fs.readdirSync(abs(r), { encoding: "buffer" }) } catch (e) { return gone(e) ? 0 : Infinity } return c.reduce((n, x) => n + bytes(join(r, x)), 0) }
 const dirs = [], units = [], items = []
-for (const home of ["home/browser", "home/shared"].map((h) => Buffer.from(h))) {
+for (const home of ["home/browser", "home/shared", "home/xsession"].map((h) => Buffer.from(h))) {
   if (!st(home)?.isDirectory()) continue
   dirs.push(home)
   for (const n of names(home) ?? []) {
     const r = join(home, n)
     const downloads = n.toString() === "Downloads" && st(r)?.isDirectory()
-    if (downloads && home.toString() === "home/browser") { items.push({ i: r, size: bytes(r), mtime: st(r)?.mtimeMs ?? 0 }); continue }
+    if (downloads && home.toString() !== "home/shared") { items.push({ i: r, size: bytes(r), mtime: st(r)?.mtimeMs ?? 0 }); continue }
     if (!downloads) { units.push(r); continue }
     dirs.push(r)
     for (const c of names(r) ?? []) if (!c.toString("latin1").endsWith(".crdownload")) { const i = join(r, c); items.push({ i, size: bytes(i), mtime: st(i)?.mtimeMs ?? 0 }) }
@@ -918,17 +940,17 @@ for (const { i, size } of items.sort((a, b) => b.mtime - a.mtime)) {
 const out = (f, list) => fs.writeFileSync(f, Buffer.concat(list.flatMap((r) => [r, NUL])))
 out(dirsOut, dirs); out(unitsOut, units)
 if (left) console.log("downloads left out of the backup: " + left + " items, " + Math.ceil(leftBytes / 1048576) + " MiB")`
-/** Upload chats, projects and the browser and shared homes (signed-in accounts, desktop settings, Downloads by SELECT_JS; BROWSER_EXCLUDES left out) to a presigned S3 PUT. Runs inside the box; S3 refuses a streamed (chunked) body,
+/** Upload chats, projects and the browser, shared and desktop session's homes (signed-in accounts, desktop settings, Downloads by SELECT_JS; BROWSER_EXCLUDES and the session's cache left out) to a presigned S3 PUT. Runs inside the box; S3 refuses a streamed (chunked) body,
  *  so the archive goes to a temporary file first. SQLite databases under /root travel as consistent `.snap` copies under root/.mumbo-sqlite. Extraction on restore also stays inside the box.
  *  The homes are only read, and tar archives a symlink there as a symlink. Chrome's SQLite and LevelDB stores travel as copies of the live files: Chrome holds most of its SQLite databases (History, Web Data) under an exclusive lock while it runs, so no other process can snapshot them.
  *  tar's status 1 (a file changed while it was read, as a running Chrome's do) still uploads the archive. Status 2 (a listed name vanished before tar read it) lists and archives once more; a second failure stops the backup. Prints SELECT_JS's line, if any.
  *  Under agent containment (B24) the uploads live in /var/lib/mumbo/attachments, which the backup takes without its
  *  cache; dsh's temporary directory is left out. It runs with umask 077: /root lets other users through (B24), so the
- *  snapshots it stages there are root's alone.
+ *  snapshots it stages there are root's alone, but for the workspace's, which its owner takes (SNAPSHOT_JS).
  *  `root` (default `/`) is the filesystem root, for tests. */
 export const backupCommand = (url, root = '/') => {
   const r = root.replace(/\/+$/, ''), snap = `${r}/root/.mumbo-sqlite`
-  return `set -e; umask 077; f=$(mktemp /tmp/mumbo-backup.XXXXXX); dirs=$(mktemp /tmp/mumbo-backup.XXXXXX); units=$(mktemp /tmp/mumbo-backup.XXXXXX); trap 'rm -f "$f" "$dirs" "$units"; rm -rf '${snap}'' EXIT; rm -rf '${snap}'; node -e '${SNAPSHOT_JS}' '${r}/root' '${snap}'; for try in 1 2; do msg=$(node -e '${SELECT_JS}' '${r}' "$dirs" "$units" ${DOWNLOADS_ITEM_MAX} ${DOWNLOADS_TOTAL_MAX}); rc=0; tar -C '${root}' --exclude=node_modules --exclude='*.sqlite-wal' --exclude='*.sqlite-shm' ${['root/.dsh', 'root/projects'].flatMap((d) => ['*.sqlite', '*.db', '*-wal', '*-shm', '*-journal'].map((p) => `--exclude='${d}/${p}'`)).join(' ')} ${BROWSER_EXCLUDES.map((p) => `--exclude='home/browser/${p}'`).join(' ')} --exclude='root/.dsh/tmp' --exclude='var/lib/mumbo/attachments/cache' -czf "$f" $(cd '${root}' && ls -d root/.dsh root/projects root/.mumbo-sqlite var/lib/mumbo/attachments 2>/dev/null) --null --verbatim-files-from --no-recursion -T "$dirs" --recursion -T "$units" || rc=$?; [ $rc -le 1 ] && break; [ $try = 2 ] && exit $rc; done; [ -z "$msg" ] || echo "$msg"; curl -fsS -m 600 -X PUT -H 'content-type: application/gzip' --upload-file "$f" '${url}'; rm -rf '${snap}'`
+  return `set -e; umask 077; f=$(mktemp /tmp/mumbo-backup.XXXXXX); dirs=$(mktemp /tmp/mumbo-backup.XXXXXX); units=$(mktemp /tmp/mumbo-backup.XXXXXX); trap 'rm -f "$f" "$dirs" "$units"; rm -rf '${snap}'' EXIT; rm -rf '${snap}'; node -e '${SNAPSHOT_JS}' '${r}/root' '${snap}'; for try in 1 2; do msg=$(node -e '${SELECT_JS}' '${r}' "$dirs" "$units" ${DOWNLOADS_ITEM_MAX} ${DOWNLOADS_TOTAL_MAX}); rc=0; tar -C '${root}' --exclude=node_modules --exclude='*.sqlite-wal' --exclude='*.sqlite-shm' ${['root/.dsh', 'root/projects'].flatMap((d) => ['*.sqlite', '*.db', '*-wal', '*-shm', '*-journal'].map((p) => `--exclude='${d}/${p}'`)).join(' ')} ${BROWSER_EXCLUDES.map((p) => `--exclude='home/browser/${p}'`).join(' ')} --exclude='home/xsession/.cache' --exclude='root/.dsh/tmp' --exclude='var/lib/mumbo/attachments/cache' -czf "$f" $(cd '${root}' && ls -d root/.dsh root/projects root/.mumbo-sqlite var/lib/mumbo/attachments 2>/dev/null) --null --verbatim-files-from --no-recursion -T "$dirs" --recursion -T "$units" || rc=$?; [ $rc -le 1 ] && break; [ $try = 2 ] && exit $rc; done; [ -z "$msg" ] || echo "$msg"; curl -fsS -m 600 -X PUT -H 'content-type: application/gzip' --upload-file "$f" '${url}'; rm -rf '${snap}'`
 }
 /** Download and unpack a backup, then move each `.snap` back over its database path, also when tar fails part way, and
  *  exit with tar's status. Runs before dsh starts, in a box
@@ -936,10 +958,13 @@ export const backupCommand = (url, root = '/') => {
  *  there; one with home/browser/Downloads has it moved into /home/shared/Downloads by the browser loop (startScript). Root writes /home/browser here, and GNU tar's defaults keep a symlink, in the
  *  box or in the archive, from aiming a write outside it: an archive symlink to an absolute or `..` target is made only
  *  after every other member, and an existing symlink is replaced, not written through. Never add -h (--dereference),
- *  --keep-directory-symlink or -P (backup.test.mjs). */
+ *  --keep-directory-symlink or -P (backup.test.mjs). The archive's /root/projects is agent's under containment (B24), so
+ *  its links lead anywhere: a snapshot whose database's directory is not at its own real path is left out, with a line
+ *  on stderr, and the snapshot replaces the database's name itself, a link included (mv -T). Nothing else runs in the
+ *  box yet, so no link changes between the check and the move. */
 export const restoreCommand = (url, root = '/') => {
-  const r = root.replace(/\/+$/, ''), snap = `${r}/root/.mumbo-sqlite`
-  return `set -e; rc=0; curl -fsS -m 600 '${url}' | tar -C '${root}' -xzf - || rc=$?; if [ -d '${snap}' ]; then (cd '${snap}' && find . -name '*.snap' -type f) | while IFS= read -r p; do d='${r}/root/'"\${p#./}"; d="\${d%.snap}"; rm -f "$d-wal" "$d-shm" "$d-journal"; mv '${snap}'/"$p" "$d"; done; rm -rf '${snap}'; fi; exit $rc`
+  const snap = `${root.replace(/\/+$/, '')}/root/.mumbo-sqlite`
+  return `set -e; rc=0; curl -fsS -m 600 '${url}' | tar -C '${root}' -xzf - || rc=$?; R=$(cd '${root}' && pwd -P); R=\${R%/}; if [ -d '${snap}' ]; then (cd '${snap}' && find . -name '*.snap' -type f) | while IFS= read -r p; do d="$R/root/\${p#./}"; d="\${d%.snap}"; if [ "$(cd "\${d%/*}" 2>/dev/null && pwd -P)" != "\${d%/*}" ]; then echo "restore: \${d#"$R"} left out: its directory is not at its real path" >&2; continue; fi; rm -f "$d-wal" "$d-shm" "$d-journal"; mv -fT '${snap}'/"$p" "$d" || echo "restore: \${d#"$R"} left out" >&2; done; rm -rf '${snap}'; fi; exit $rc`
 }
 
 /** Prints the earliest next run (epoch ms) of the box's active dsh scheduled tasks, or nothing. Reads both storage

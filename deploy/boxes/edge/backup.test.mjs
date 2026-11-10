@@ -347,3 +347,62 @@ test('a backup stages its SQLite snapshots root-only (umask 077): under containm
     assert.deepEqual(readFileSync(join(dir, 'modes'), 'utf8').trim().split('\n').map(m => Number.parseInt(m, 8) & 0o077), [0, 0])
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
+
+test('a projects tree another user owns (agent, B24) is snapshotted by a process of its own, and its database comes back', () => {
+  const { root, db, target } = fixture()
+  db.close()
+  mkdirSync(join(root, 'root/projects/app'), { recursive: true })
+  const p = new DatabaseSync(join(root, 'root/projects/app/data.db'))
+  p.exec('PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE t(v); INSERT INTO t VALUES (7)')
+  // Every listing the snapshot makes, with the pid that made it: the test's user owns projects, as agent does in a box.
+  const log = join(root, 'listings'), preload = join(root, 'listings.cjs')
+  writeFileSync(preload, `const fs = require("fs"), real = fs.readdirSync; fs.readdirSync = function (p, ...a) { fs.appendFileSync(${JSON.stringify(log)}, process.pid + " " + p + "\\n"); return real.call(this, p, ...a) }`)
+  const b = sh(backupCommand(target, root), { ...process.env, NODE_OPTIONS: `--require ${preload}` })
+  assert.equal(b.status, 0, b.stderr)
+  p.close()
+  const pid = (dir) => readFileSync(log, 'utf8').split('\n').find(l => l.endsWith(` ${join(root, dir)}`))?.split(' ')[0]
+  assert.ok(pid('root/.dsh') && pid('root/projects') && pid('root/.dsh') !== pid('root/projects'))
+  assert.match(execFileSync('tar', ['-tzf', `${root}.tgz`], { encoding: 'utf8' }), /root\/\.mumbo-sqlite\/projects\/app\/data\.db\.snap/)
+  rmSync(join(root, 'root'), { recursive: true })
+  const r = sh(restoreCommand(target, root))
+  assert.equal(r.status, 0, r.stderr)
+  const back = new DatabaseSync(join(root, 'root/projects/app/data.db'))
+  assert.deepEqual(back.prepare('SELECT v FROM t').all().map((x) => x.v), [7])
+  back.close()
+})
+
+test('a restore moves no snapshot through a link the archive holds on its database\'s path', () => {
+  const root = mkdtempSync(join(tmpdir(), 'bk-'))
+  const src = mkdtempSync(join(tmpdir(), 'bk-src-')), outside = mkdtempSync(join(tmpdir(), 'bk-out-'))
+  try {
+    writeFileSync(join(outside, 'keep.db'), 'root\'s')
+    mkdirSync(join(src, 'root/projects/ok'), { recursive: true })
+    symlinkSync(outside, join(src, 'root/projects/dir'))
+    symlinkSync(join(outside, 'keep.db'), join(src, 'root/projects/name.db'))
+    for (const n of ['dir/keep.db', 'name.db', 'ok/fine.db']) { mkdirSync(join(src, 'root/.mumbo-sqlite/projects', n, '..'), { recursive: true }); writeFileSync(join(src, 'root/.mumbo-sqlite/projects', `${n}.snap`), 'agent\'s') }
+    execFileSync('tar', ['-C', src, '-czf', `${root}.tgz`, 'root'])
+    const r = sh(restoreCommand(`file://${root}.tgz`, root))
+    assert.equal(r.status, 0, r.stderr)
+    assert.equal(r.stderr, 'restore: /root/projects/dir/keep.db left out: its directory is not at its real path\n')
+    assert.deepEqual([readdirSync(outside), readFileSync(join(outside, 'keep.db'), 'utf8')], [['keep.db'], 'root\'s'])
+    // A link in the database's own name is replaced, never written through.
+    assert.ok(lstatSync(join(root, 'root/projects/name.db')).isFile())
+    assert.equal(readFileSync(join(root, 'root/projects/ok/fine.db'), 'utf8'), 'agent\'s')
+    assert.ok(!existsSync(join(root, 'root/.mumbo-sqlite')))
+  } finally { for (const d of [root, src, outside]) rmSync(d, { recursive: true, force: true }); rmSync(`${root}.tgz`, { force: true }) }
+})
+
+test('backups carry the desktop session\'s home (B24: XFCE as xsession) without its cache', () => {
+  const { root, db, target } = fixture()
+  db.close()
+  const home = join(root, 'home/xsession')
+  for (const p of ['.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml', '.cache/sessions/x']) { mkdirSync(join(home, p, '..'), { recursive: true }); writeFileSync(join(home, p), p) }
+  const b = sh(backupCommand(target, root))
+  assert.equal(b.status, 0, b.stderr)
+  const names = execFileSync('tar', ['-tzf', `${root}.tgz`], { encoding: 'utf8' }).split('\n')
+  assert.ok(names.includes('home/xsession/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml'))
+  assert.ok(!names.some(n => n.startsWith('home/xsession/.cache')))
+  rmSync(home, { recursive: true })
+  assert.equal(sh(restoreCommand(target, root)).status, 0)
+  assert.equal(readFileSync(join(home, '.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml'), 'utf8'), '.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml')
+})

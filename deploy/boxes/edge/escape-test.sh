@@ -28,6 +28,8 @@ user() { id "$1" >/dev/null 2>&1; }
 CONNECT='const s=require("net").connect(+process.argv[1],process.argv[2]);s.on("connect",()=>process.exit(0));s.on("error",()=>process.exit(1));setTimeout(()=>process.exit(2),5000)'
 BIND='const v=require("net").createServer().listen(+process.argv[1],process.argv[2]);v.on("listening",()=>process.exit(0));v.on("error",e=>process.exit(e.code==="EACCES"?3:e.code==="EADDRINUSE"?4:1))'
 connect() { echo "node -e '$CONNECT' $1 $2"; }
+# A CONNECT to argv[1] through the project box's GitHub proxy: 0 when it opens a tunnel, 3 when the proxy refuses it.
+TUNNEL='const r=require("http").request({host:"127.0.0.1",port:8899,method:"CONNECT",path:process.argv[1]});r.on("connect",(s)=>process.exit(s.statusCode===200?0:3));r.on("error",()=>process.exit(1));r.setTimeout(5000,()=>process.exit(2));r.end()'
 
 [ "$(id -u)" = 0 ] || { echo 'escape-test: run as root' >&2; exit 2; }
 [ -r /usr/local/share/mumbo/ports ] || { echo 'escape-test: this box is not on the B24 template (no /usr/local/share/mumbo/ports)' >&2; exit 2; }
@@ -75,8 +77,8 @@ unwritable agent-write-attachments agent /var/lib/mumbo/attachments/attachments/
 unwritable agent-write-spill agent /var/lib/mumbo/spill
 unwritable agent-write-agents-home agent /usr/local/share/mumbo/agents/skills
 
-# Ports: only root binds below 1024; only root reaches E2B's envd, dsh, the live view, the door and VNC, and only
-# browsermcp beside it the browser's debugging port, on loopback and on the box address.
+# Ports: only root binds below 1024; only root reaches dsh, the live view, the door and VNC, and only browsermcp beside it
+# the browser's debugging port, on loopback and on the box address; nobody, root included, reaches E2B's envd.
 for b in "dsh $DSH_PORT $ip" "live $LIVE_PORT $ip" "door $DOOR_PORT 127.0.0.1"; do
   set -- $b
   su -s /bin/sh agent -c "node -e '$BIND' $2 $3" </dev/null >/dev/null 2>&1; rc=$?
@@ -91,9 +93,30 @@ for h in 127.0.0.1 "$ip"; do
     set -- $t
     refused "agent-connect-$1" agent "agent connects to $h:$2" "$(connect "$2" "$h")"
   done
-  for u in $USERS; do refused "envd-$u" "$u" "$u connects to E2B's envd on $h:$ENVD_PORT" "$(connect "$ENVD_PORT" "$h")"; done
+  if awk -v p=":$(printf %04X "$ENVD_PORT")" '$4 == "0A" && substr($2, length($2) - 4) == p' /proc/net/tcp /proc/net/tcp6 2>/dev/null | grep -q .; then
+    for u in root $USERS; do denied "envd-$u" "$u" "$u connects to E2B's envd on $h:$ENVD_PORT" "$(connect "$ENVD_PORT" "$h")"; done
+  else
+    say SKIP "envd" "nothing listens on $ENVD_PORT"
+  fi
   [ -z "$person" ] || allowed browsermcp-connect-cdp browsermcp "browsermcp connects to the debugging port on $h" "$(connect 9222 "$h")"
 done
+
+# KasmVNC's server, whose capability binds below 1024, runs only as root and xvnc: no other user takes dsh's port with it
+# (status 126: not allowed to run it).
+if [ -n "$person" ] && x=$(readlink -f "$(command -v Xkasmvnc)"); then
+  for u in $USERS; do
+    su -s /bin/sh "$u" -c "timeout 5 '$x' :9 -interface $ip -websocketPort $DSH_PORT -httpd /usr/share/kasmvnc/www -DisableBasicAuth -sslOnly=0 -SecurityTypes None" </dev/null >/dev/null 2>&1; rc=$?
+    if [ $rc = 126 ]; then say PASS "xkasmvnc-$u" "$u runs Xkasmvnc (not allowed)"; else say FAIL "xkasmvnc-$u" "$u runs Xkasmvnc on $ip:$DSH_PORT (status $rc, not 126)"; fi
+  done
+fi
+
+# The project box's GitHub proxy runs as ghproxy, so a tunnel through it reaches no more than agent does.
+if [ -z "$person" ]; then
+  for t in "127.0.0.1:$ENVD_PORT" "$ip:$ENVD_PORT" "$ip:$DSH_PORT"; do
+    su -s /bin/sh agent -c "node -e '$TUNNEL' $t" </dev/null >/dev/null 2>&1; rc=$?
+    if [ $rc = 3 ]; then say PASS proxy-tunnel "agent tunnels to $t through the GitHub proxy (refused)"; else say FAIL proxy-tunnel "agent tunnels to $t through the GitHub proxy (status $rc, not refused)"; fi
+  done
+fi
 
 # Root for nobody: no sudo, no su.
 for u in $USERS; do

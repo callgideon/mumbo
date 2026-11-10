@@ -67,9 +67,11 @@ export const kasmvncStep = ({ version, sha256 } = KASMVNC) => {
   const pages = '/usr/share/kasmvnc/www/index.html /usr/share/kasmvnc/www/vnc.html'
   return `curl -fsSL -o ${deb} https://github.com/kasmtech/KasmVNC/releases/download/v${version}/${name} && echo "${sha256}  ${deb}" | sha256sum -c - && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${deb} && rm -rf ${deb} /var/lib/apt/lists/* && sed -i 's|</head>|${style}</head>|' ${pages} && for f in ${pages}; do grep -qF '${style}' "$f" || { echo "mumbo-box: no screen cap in $f" >&2; exit 1; }; done`
 }
-/** The template step that lets KasmVNC's server, which runs as the user xvnc, bind the live view's port below 1024 (edge
- *  PORTS): file capability cap_net_bind_service on Xkasmvnc's real path, checked. */
-export const KASMVNC_BIND_STEP = 'x=$(readlink -f "$(command -v Xkasmvnc)") && setcap cap_net_bind_service=+ep "$x" && getcap "$x" | grep -q cap_net_bind_service'
+/** The template step, after the user xvnc exists, that lets KasmVNC's server, which runs as xvnc, bind the live view's
+ *  port below 1024 (edge PORTS): file capability cap_net_bind_service on Xkasmvnc's real path, which only root and the
+ *  group xvnc may run (root:xvnc 0750), so no other user binds dsh's or the live view's port with it. chgrp drops file
+ *  capabilities, so the capability is set last; both are checked. */
+export const KASMVNC_BIND_STEP = 'x=$(readlink -f "$(command -v Xkasmvnc)") && chgrp xvnc "$x" && chmod 0750 "$x" && setcap cap_net_bind_service=+ep "$x" && getcap "$x" | grep -q cap_net_bind_service && [ "$(stat -c %a:%U:%G "$x")" = 750:root:xvnc ]'
 /** The template step that writes edge PORTS_MARKER: boxes from this template run dsh and the live view on edge PORTS, and
  *  their start script treats a failed iptables rule as fatal. */
 export const PORTS_STEP = `install -d -m 0755 ${dirname(PORTS_MARKER)} && printf '%s\\n' '${PORTS.dsh} ${PORTS.live}' > ${PORTS_MARKER} && chmod 0644 ${PORTS_MARKER}`
@@ -105,10 +107,10 @@ export const BOX_STEPS = [
   ...(CHROME_SENSITIVE_SYNC ? [maskingGuardStep()] : []),
   'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google-chrome.asc && chmod go+r /etc/apt/keyrings/google-chrome.asc && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xfce4-session xfwm4 xfce4-panel xfdesktop4 thunar xfce4-terminal tango-icon-theme librsvg2-common google-chrome-stable dbus-x11 xdotool wmctrl imagemagick xsel xauth fonts-noto-core fonts-noto-color-emoji fonts-noto-cjk procps iptables libcap2-bin acl && rm -rf /var/lib/apt/lists/*',
   kasmvncStep(),
-  KASMVNC_BIND_STEP,
   'id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser',
   // KasmVNC's server runs as its own system user, with no home or login, so browser cannot signal it or take its place.
   'id xvnc >/dev/null 2>&1 || useradd -r -U -M -d /nonexistent -s /usr/sbin/nologin xvnc',
+  KASMVNC_BIND_STEP,
   // Downloads are shared through the group shared (B24 adds the agent's users): /home/shared is root's, so no member can
   // replace the folder itself. The browser's home stays its own.
   'groupadd -f shared && usermod -aG shared browser && chmod 0700 /home/browser && install -d -m 0755 /home/shared && install -d -o browser -g shared -m 2770 /home/shared/Downloads',
@@ -118,9 +120,10 @@ export const BOX_STEPS = [
   ...usersSteps(true),
 ]
 /** A project box is headless: git, gh (GitHub's apt repository) and openssl for the box-local GitHub proxy's CA, iptables
- *  and acl for the start script, and agent containment's users. */
+ *  and acl for the start script, the proxy's own system user ghproxy (edge startScript), and agent containment's users. */
 export const PROJECT_STEPS = [
   'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl gpg git openssl procps iptables acl && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*',
+  'id ghproxy >/dev/null 2>&1 || useradd -r -U -M -d /nonexistent -s /usr/sbin/nologin ghproxy',
   ...usersSteps(false),
 ]
 

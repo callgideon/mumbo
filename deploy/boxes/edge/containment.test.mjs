@@ -19,7 +19,7 @@ const IDS = { agent: [1001, 1001], browsermcp: [1002, 1002], desktop: [1003, 100
 const GROUPS = { shared: 1005, workspace: 1007, 'workspace-read': 1008 }
 const SECRETS = 'secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY, E2B_API_KEY, GH_TOKEN, GITHUB_TOKEN]'
 const PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
-/** The fixtures' rows without their comments, at the harness branch's 66c140167f, with agent also in workspace. */
+/** The fixtures' rows without their comments, at the harness branch's 68ed0e7357, with agent also in workspace. */
 const FIXTURE = (person, mcpGroups = '') => `- id: subprocess
   config:
     shellActivityDirectory: /run/dsh-shell
@@ -282,7 +282,8 @@ test('the B24 template\'s kernel and network part: port floor, link protections 
     assert.deepEqual(r.lines('mount'), ['-o remount,hidepid=2 /proc'])
     for (const b of ['su', 'sudo']) assert.equal(statSync(r.at(`bin/${b}`)).mode & 0o7777, 0o755, b)
     const reject = (port, extra = '') => `-I OUTPUT -p tcp --syn --dport ${port} -m owner ! --uid-owner 0${extra} -j REJECT --reject-with tcp-reset`
-    assert.deepEqual(r.lines('iptables').filter(l => l.startsWith('-I')), [...[ENVD_PORT, '880', '881', MUMBO_MCP_PORT, '5900:5999'].map(p => reject(p)), reject(9222, ' -m owner ! --uid-owner 1002')])
+    // E2B's envd, which runs commands as root, is refused to every process in the box, root's dsh included.
+    assert.deepEqual(r.lines('iptables').filter(l => l.startsWith('-I')), [`-I OUTPUT -p tcp --syn --dport ${ENVD_PORT} -j REJECT --reject-with tcp-reset`, ...['880', '881', MUMBO_MCP_PORT, '5900:5999'].map(p => reject(p)), reject(9222, ' -m owner ! --uid-owner 1002')])
     // Each rule is checked first, with exactly the arguments it is inserted with.
     assert.deepEqual(r.lines('iptables').filter(l => l.startsWith('-C')).map(l => l.replace('-C', '-I')), r.lines('iptables').filter(l => l.startsWith('-I')))
   } finally { r.done() }
@@ -326,7 +327,7 @@ test('escape-test.sh parses under sh and runs every escape test the B24 brief na
   const text = readFileSync(file, 'utf8')
   const ids = new Set([...text.matchAll(/\b(?:refused|allowed|unwritable|denied|manual|say (?:PASS|FAIL|SKIP))\s+"?([a-z0-9-]+)/g)].map(m => m[1]))
   // Ids built in loops, as the script spells them.
-  for (const loop of ['agent-bind-$1', 'agent-bind-$p', 'agent-connect-$1', 'envd-$u', 'sudo-$u', 'su-$u']) assert.ok(text.includes(`"${loop}"`), loop)
+  for (const loop of ['agent-bind-$1', 'agent-bind-$p', 'agent-connect-$1', 'envd-$u', 'xkasmvnc-$u', 'sudo-$u', 'su-$u']) assert.ok(text.includes(`"${loop}"`), loop)
   const required = [
     // agent: root's files, the browser's profile, other users' processes
     'start-sh-mode', 'agent-read-start-sh', 'agent-read-dsh-home', 'agent-read-dsh-log', 'agent-read-root-entries', 'agent-read-browser-home', 'agent-read-login-data', 'agent-read-cookies',
@@ -337,16 +338,18 @@ test('escape-test.sh parses under sh and runs every escape test the B24 brief na
     'agent-x-cookie', 'agent-x-display', 'xsession-login-data', 'computer-use-terminal', 'upload-outside-downloads',
     // the workspace and the person's MCP servers
     'mcpserver-workspace', 'mcpserver-node-modules', 'browsermcp-connect-cdp',
+    // tunnels through the project box's GitHub proxy
+    'proxy-tunnel',
     // restore, root setup, the model's file tools, a ticket's git hook
     'restore-symlink', 'browser-symlink-setup', 'file-tools-login-data', 'file-tools-dsh-environ', 'file-tools-dsh-log', 'file-tools-swap-read', 'file-tools-swap-write', 'git-hook-ticket',
   ]
   assert.deepEqual(required.filter(id => !ids.has(id)), [])
   // Binds: dsh, the live view and the door refused (EACCES); 3000 and 5173 allowed. Connects: CDP, VNC, dsh, the live view
-  // and the door on loopback and the box address; envd for every unprivileged user, E2B's own included.
+  // and the door on loopback and the box address; envd for root and every unprivileged user, E2B's own included.
   assert.ok(text.includes('for b in "dsh $DSH_PORT $ip" "live $LIVE_PORT $ip" "door $DOOR_PORT 127.0.0.1"; do') && text.includes('for p in 3000 5173; do'))
   assert.ok(text.includes('for h in 127.0.0.1 "$ip"; do') && text.includes('for t in "cdp 9222" "vnc 5900" "vnc 5901" "dsh $DSH_PORT" "live $LIVE_PORT" "door $DOOR_PORT"; do'))
   assert.ok(text.includes('USERS="agent mcpserver"; [ -z "$person" ] || USERS="$USERS browsermcp desktop xsession browser"\nuser user && USERS="$USERS user"'))
-  assert.ok(text.includes(`DOOR_PORT=${MUMBO_MCP_PORT} ENVD_PORT=${ENVD_PORT}`))
+  assert.ok(text.includes(`DOOR_PORT=${MUMBO_MCP_PORT} ENVD_PORT=${ENVD_PORT}`) && text.includes('for u in root $USERS; do denied "envd-$u"'))
 })
 
 test('template: containment\'s users and groups, homes 0700 with the run-as TMPDIRs, the ACL check, no empty password, the ports marker', () => {
@@ -380,9 +383,25 @@ test('template: containment\'s users and groups, homes 0700 with the run-as TMPD
       assert.equal(readFileSync(r.at('usr/local/share/mumbo/ports'), 'utf8'), '880 881\n')
     } finally { r.done() }
   }
-  // KasmVNC, which runs as xvnc, may bind the live view's port below 1024: the capability, checked, after it is installed.
-  assert.equal(BOX_STEPS[BOX_STEPS.indexOf(kasmvncStep()) + 1], KASMVNC_BIND_STEP)
-  assert.equal(KASMVNC_BIND_STEP, 'x=$(readlink -f "$(command -v Xkasmvnc)") && setcap cap_net_bind_service=+ep "$x" && getcap "$x" | grep -q cap_net_bind_service')
+  // KasmVNC, which runs as xvnc, may bind the live view's port below 1024, and only root and xvnc may run it: after it
+  // and xvnc exist, its group and mode, then the capability, which chgrp would drop, each checked.
+  const xvnc = BOX_STEPS.findIndex(s => s.endsWith(' xvnc') && s.includes('useradd'))
+  assert.ok(BOX_STEPS.indexOf(kasmvncStep()) < xvnc && BOX_STEPS[xvnc + 1] === KASMVNC_BIND_STEP)
+  const r = root()
+  try {
+    writeFileSync(r.at('Xkasmvnc'), ''); chmodSync(r.at('Xkasmvnc'), 0o755)
+    r.fake('Xkasmvnc', ''); r.fake('readlink', `echo ${r.at('Xkasmvnc')}`)
+    for (const name of ['chgrp', 'chmod', 'setcap']) r.fake(name, `echo "${name} $*" >> ${r.t}/log/bind`)
+    r.fake('getcap', 'echo "$1 cap_net_bind_service=ep"')
+    for (const [mode, code] of [['750:root:xvnc', 0], ['755:root:xvnc', 1]]) {
+      r.fake('stat', `echo ${mode}`)
+      const out = spawnSync('/bin/sh', ['-c', `set -eu\n${KASMVNC_BIND_STEP}`], { encoding: 'utf8', env: { PATH: r.at('bin') } })
+      assert.equal(out.status, code, mode)
+    }
+    assert.deepEqual(r.lines('bind').slice(0, 3), ['chgrp xvnc T/Xkasmvnc', 'chmod 0750 T/Xkasmvnc', 'setcap cap_net_bind_service=+ep T/Xkasmvnc'])
+  } finally { r.done() }
+  // The project box's GitHub proxy becomes its own system user (edge startScript).
+  assert.ok(PROJECT_STEPS.includes('id ghproxy >/dev/null 2>&1 || useradd -r -U -M -d /nonexistent -s /usr/sbin/nologin ghproxy'))
   // iptables, setfacl and setcap are installed, not assumed from the base image.
   const pkgs = (steps) => steps.find(s => s.includes('apt-get install')).match(/--no-install-recommends ([^&]+?) &&/g).join(' ')
   for (const p of ['iptables', 'acl', 'libcap2-bin']) assert.match(pkgs(BOX_STEPS), new RegExp(`\\b${p}\\b`), p)

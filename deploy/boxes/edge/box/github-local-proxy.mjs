@@ -7,7 +7,9 @@
 // - CONNECT to anything else: a raw TCP tunnel. A plain http:// proxy request answers 400.
 // Required settings: PORT, CA_DIR (holding ca.key, mode 0600, and ca.crt; the start script creates and trusts them),
 // EDGE_GITHUB_URL (https only) and BOX_TOKEN. Optional: EDGE_TIMEOUT_MS (120000), the silence after which a request to
-// the edge answers 504. Leaves are issued with openssl at start and cached in ${CA_DIR}/leaf/.
+// the edge answers 504; RUN_AS, a user (with its own group) the proxy becomes before it listens, so the box's firewall
+// refuses a tunnel whatever it refuses that user; a RUN_AS it cannot become stops it. Leaves are issued with openssl at
+// start and cached in ${CA_DIR}/leaf/.
 // Node built-ins only. The edge reads this file at start and hands it to startScript as boxFiles.proxy.
 import { execFileSync } from 'node:child_process'
 import { createPrivateKey, X509Certificate } from 'node:crypto'
@@ -73,6 +75,10 @@ const contexts = new Map(HOSTS.map((host) => {
   const crt = join(leafDir, `${host}.crt`)
   return [host, createSecureContext(cached(key, crt) ?? issue(host, key, crt))]
 }))
+const runAs = process.env.RUN_AS
+if (runAs) {
+  try { process.setgroups([]); process.setgid(runAs); process.setuid(runAs) } catch (e) { fail(`RUN_AS ${runAs}: ${e.message}`) }
+}
 
 const strip = (headers) => Object.fromEntries(Object.entries(headers).filter(([name]) => !HOP.has(name)))
 

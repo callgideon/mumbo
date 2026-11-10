@@ -170,6 +170,8 @@ test('leaf keys are private to their owner and cached across restarts; a readabl
     [{ CA_DIR: loose }, /ca\.key must be private to its owner \(mode 0600\)/],
     [{ BOX_TOKEN: '' }, /BOX_TOKEN is required/],
     [{ EDGE_GITHUB_URL: 'http://127.0.0.1:1/github' }, /EDGE_GITHUB_URL must be an https:\/\/ URL/],
+    // A user it cannot become (here: any, as the test's user) stops it before it listens, never a proxy left as root.
+    [{ RUN_AS: 'mumbo-no-such-user' }, /RUN_AS mumbo-no-such-user: /],
   ]) {
     const r = spawnSync(process.execPath, [PROXY], { env: proxyEnv(over), encoding: 'utf8', timeout: 10_000 })
     assert.equal(r.status, 1, JSON.stringify(over))

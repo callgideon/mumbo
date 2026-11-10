@@ -20,18 +20,20 @@ test('a user box start script is byte-for-byte what it was before project boxes 
   // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows, the X cookie, the first-run welcome, the interim Chromium policy (B27), the B18 desktop, the B25 consent rows, B19's KasmVNC and its own user, B33's door to Mumbo and its gate on the linked package, and B24 (same cfg, token T, role "role's").
   // B24 moved it deliberately: the ports from the template's marker, the kernel and network part and the containment
   // layout and rows behind their gates, the session as xsession and the cookie root:desktop on the B24 template, the
-  // consent, computer use and Browser tab identities, the welcome as agent, and the old Chromium profiles deleted. On a
+  // consent, computer use and Browser tab identities, the consent's uploadDirectory and its output directory in
+  // /var/lib/mumbo, the welcome as agent, and the old Chromium profiles deleted. On a
   // template and image from before B24 the script runs as before, apart from that deletion (containment.test.mjs,
   // desktop.test.mjs, welcome.test.mjs, ports.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), '158e09dd0e46fcdb334a7469e9bad747a9584cb059e133e28889dce5e54855ef')
+  assert.equal(createHash('sha256').update(s).digest('hex'), 'f7ddfb42732ee9af4b05bfb7d3ddc589c7878d79584622923093338cc8021ad9')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
   const p = { ...c, projectDomain: 'boxes.x', agentLogin: 'mumbo-bot[bot]', agentId: 341797844 }
   const s = startScript(p, 'TOK', boxSite(p, 'project:0123456789abcdef'), "role's", 'KEYTEXT', boxFiles, ['O@x.com'])
   // Updated for B24 deliberately: the ports, kernel and network part, containment layout and rows behind their gates,
-  // and the gh wrapper in /usr/local/lib/mumbo/bin (on dsh's PATH, linked from /root/.mumbo/bin/gh).
-  assert.equal(createHash('sha256').update(s).digest('hex'), '2cbe0495daf54bb042581b0ad5b19a4b4878e8994340326e905c477a260c4e20')
+  // the gh wrapper in /usr/local/lib/mumbo/bin (on dsh's PATH, linked from /root/.mumbo/bin/gh), and the GitHub proxy as
+  // ghproxy on the B24 template.
+  assert.equal(createHash('sha256').update(s).digest('hex'), 'f165b329b351b497c76dba7bf087d143bb825bacd04e642e481b7f64c199d41c')
 })
 
 const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'
@@ -191,12 +193,13 @@ test('slice 3: a consent that knows deniedUrls gets the denied pages and an outp
   const dir = mkdtempSync(join(tmpdir(), 'consent-row-'))
   try {
     const bin = join(dir, 'bin'); mkdirSync(bin)
-    for (const name of ['cat', 'grep', 'install', 'mkdir']) symlinkSync(execFileSync('sh', ['-c', `command -v ${name}`], { encoding: 'utf8' }).trim(), join(bin, name))
+    for (const name of ['cat', 'grep', 'mkdir']) symlinkSync(execFileSync('sh', ['-c', `command -v ${name}`], { encoding: 'utf8' }).trim(), join(bin, name))
     for (const name of ['xdotool', 'xauth']) { writeFileSync(join(bin, name), '#!/bin/sh\n'); execFileSync('chmod', ['+x', join(bin, name)]) }
-    // su runs the command as the test's user and logs whom it stood in for.
-    writeFileSync(join(bin, 'su'), `#!/bin/sh\necho "$1" >> ${dir}/su\nexec /bin/sh -c "$5"\n`); execFileSync('chmod', ['+x', join(bin, 'su')])
+    // install logs its owner and group, which the test's user cannot give, and makes the directory without them.
+    const install = execFileSync('sh', ['-c', 'command -v install'], { encoding: 'utf8' }).trim()
+    writeFileSync(join(bin, 'install'), `#!/bin/sh\na=; while [ $# -gt 0 ]; do case $1 in -o|-g) echo "$1 $2" >> ${dir}/owner; shift 2;; *) a="$a $1"; shift;; esac; done\nexec ${install} $a\n`); execFileSync('chmod', ['+x', join(bin, 'install')])
     const block = [...lines.slice(from, consentTo + 1), ...lines.slice(cuFrom, cuTo + 1)].join('\n')
-      .replaceAll('/src/packages', join(dir, 'pkg')).replaceAll('/root/.mumbo', join(dir, 'mumbo')).replaceAll('/home/browsermcp', join(dir, 'bmcp'))
+      .replaceAll('/src/packages', join(dir, 'pkg')).replaceAll('/root/.mumbo', join(dir, 'mumbo')).replaceAll('/var/lib/mumbo', join(dir, 'varlib'))
     mkdirSync(join(dir, 'pkg', 'experimental', 'computer-use-x11'), { recursive: true })
     const run = (b24 = '') => {
       rmSync(join(dir, 'mumbo'), { recursive: true, force: true }); mkdirSync(join(dir, 'mumbo'))
@@ -220,15 +223,23 @@ test('slice 3: a consent that knows deniedUrls gets the denied pages and an outp
     assert.equal(o.sandboxes, `    - id: browser-consent\n      name: '@mumbo/browser-consent'\n      config:\n        browser:\n          mode: attach\n          endpoint: http://127.0.0.1:9222\n          outputDir: ${join(dir, 'mumbo')}/playwright-output\n        deniedUrls: ${JSON.stringify(DENIED_URLS)}\n`)
     assert.equal(statSync(join(dir, 'mumbo', 'playwright-output')).mode & 0o777, 0o700)
     assert.equal(o.computer, cuRows(true))
-    assert.equal(existsSync(join(dir, 'su')), false)
-    // Agent containment (B24): the server runs as browsermcp, which makes its own output directory, 0700, in its home,
-    // where root never writes; computer use runs as desktop.
-    mkdirSync(join(dir, 'bmcp'))
+    assert.equal(existsSync(join(dir, 'owner')), false)
+    // Agent containment (B24): the server runs as browsermcp and writes to its own directory, 0700, in /var/lib/mumbo,
+    // which is root's; computer use runs as desktop.
+    mkdirSync(join(dir, 'varlib'))
+    const b24Row = (upload) => `    - id: browser-consent\n      name: '@mumbo/browser-consent'\n      config:\n        browser:\n          mode: attach\n          endpoint: http://127.0.0.1:9222\n          identity: browsermcp\n          outputDir: ${join(dir, 'varlib')}/playwright-output\n        deniedUrls: ${JSON.stringify(DENIED_URLS)}\n${upload ? '        uploadDirectory: /home/shared/Downloads\n' : ''}`
     o = run('1')
-    assert.equal(o.sandboxes, `    - id: browser-consent\n      name: '@mumbo/browser-consent'\n      config:\n        browser:\n          mode: attach\n          endpoint: http://127.0.0.1:9222\n          outputDir: ${join(dir, 'bmcp')}/playwright-output\n          identity: browsermcp\n        deniedUrls: ${JSON.stringify(DENIED_URLS)}\n`)
-    assert.equal(statSync(join(dir, 'bmcp', 'playwright-output')).mode & 0o777, 0o700)
-    assert.equal(readFileSync(join(dir, 'su'), 'utf8'), 'browsermcp\n')
+    assert.equal(o.sandboxes, b24Row(false))
+    assert.equal(statSync(join(dir, 'varlib', 'playwright-output')).mode & 0o777, 0o700)
+    assert.equal(readFileSync(join(dir, 'owner'), 'utf8'), '-o browsermcp\n-g browsermcp\n')
     assert.equal(o.computer, cuRows(true, true))
+    // A consent that requires uploadDirectory gets the shared Downloads: the harness's row (apps/cli/tests/fixtures/box-edge/
+    // personal.overlay.yml at 68ed0e7357), with deniedUrls, which that fixture leaves out.
+    writeFileSync(join(dir, 'pkg', 'mumbo', 'browser-consent', 'src', 'index.ts'), 'const deniedUrls = []\nconst uploadDirectory = ""\n')
+    o = run('1')
+    assert.equal(o.sandboxes, b24Row(true))
+    const fixtureRow = `    - id: browser-consent\n      name: '@mumbo/browser-consent'\n      config:\n        browser:\n          mode: attach\n          endpoint: http://127.0.0.1:9222\n          identity: browsermcp\n          outputDir: /var/lib/mumbo/playwright-output\n        uploadDirectory: /home/shared/Downloads\n`
+    assert.equal(o.sandboxes.replaceAll(join(dir, 'varlib'), '/var/lib/mumbo').split('\n').filter(l => !l.startsWith('        deniedUrls: ')).join('\n'), fixtureRow)
   } finally { rmSync(dir, { recursive: true, force: true }) }
   assert.deepEqual(DENIED_URLS, ['chrome:', 'chrome-untrusted:', 'chrome-extension:', 'devtools:', 'view-source:', 'file:', 'https://passwords.google.com', 'https://pay.google.com', 'https://payments.google.com', 'https://myaccount.google.com', 'https://accounts.google.com'])
 })
@@ -262,7 +273,8 @@ test('a project box start script has the proxy setup in order, before the member
     'chmod 0755 /root/.mumbo/bin/github-local-proxy.mjs /usr/local/lib/mumbo/bin/gh',
     // B24: the wrapper is root's and world-readable outside /root/.mumbo; the old path still names it.
     'ln -sfn /usr/local/lib/mumbo/bin/gh /root/.mumbo/bin/gh',
-    "pgrep -f github-local-proxy.mjs >/dev/null || PORT=8899 CA_DIR=/root/.mumbo/ca EDGE_GITHUB_URL=https://l/github BOX_TOKEN=TOK nohup node /root/.mumbo/bin/github-local-proxy.mjs",
+    // B24: on the B24 template the proxy becomes ghproxy (the firewall's owner rules then cover its tunnels).
+    "pgrep -f github-local-proxy.mjs >/dev/null || PORT=8899 CA_DIR=/root/.mumbo/ca RUN_AS=$PROXY_USER EDGE_GITHUB_URL=https://l/github BOX_TOKEN=TOK nohup node /root/.mumbo/bin/github-local-proxy.mjs",
     'curl -s -o /dev/null -m 1 http://127.0.0.1:8899/',
     'if [ -f /src/deploy/mumbo-project.overlay.yml ]',
     'export MUMBO_MEMBER_KEY=KEYTEXT',
@@ -278,6 +290,7 @@ test('a project box start script has the proxy setup in order, before the member
   assert.match(s, /MUMBO_PANEL_ADMINS='o@x\.com,p@x\.com' /)
   assert.ok(!/HTTP_PROXY/.test(s.replace('HTTPS_PROXY', '')), 'no plain HTTP_PROXY')
   assert.match(s, /touch \/root\/\.mumbo\/member-auth/)
+  assert.ok(s.includes('PROXY_USER=\n[ -z "$B24_TEMPLATE" ] || PROXY_USER=ghproxy\n') && at(s, 'PROXY_USER=ghproxy') < at(s, 'flock 9'))
 })
 
 const APP_GATE = 'if grep -qs MUMBO_GITHUB_APP_LOGIN /src/deploy/mumbo-project.overlay.yml; then export '
