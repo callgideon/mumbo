@@ -33,6 +33,7 @@ import * as ToolBash from '@deepseek-ai/dsh-tool-bash'
 import SandboxedFileSystem from '@deepseek-ai/dsh-fs-sandbox'
 import WorkingDirectory from '@deepseek-ai/dsh-working-directory'
 import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
+import * as ToolFsSearch from '@deepseek-ai/dsh-tool-fs-search'
 
 let root: string | undefined
 let context: Context | undefined
@@ -55,8 +56,7 @@ function text(result: { content: { type: string; text?: string }[] }): string {
   return result.content.filter(block => block.type === 'text').map(block => block.text).join('')
 }
 
-async function agent(ctx: Context, cwd: string): Promise<Agent> {
-  const id = SessionId('containment-agent')
+async function agent(ctx: Context, cwd: string, id = SessionId('containment-agent')): Promise<Agent> {
   const scope = ctx.plugin(() => {})
   const session = Session.create(id, [], { version: SESSION_FORMAT_VERSION, id, createdAt: 0, cwd, isSeeded: false })
   const value: Agent = {
@@ -75,7 +75,7 @@ interface Box {
   home: string
   secret: string
   owner: Agent
-  execute: (name: string, args: unknown) => ReturnType<typeof executeToolFixture>
+  execute: (name: string, args: unknown, as?: Agent) => ReturnType<typeof executeToolFixture>
 }
 
 /** Boot the contained rows through a cordis.yml Loader composition and register one Agent in the workspace. */
@@ -129,6 +129,9 @@ async function boot(): Promise<Box> {
     "- name: '@deepseek-ai/dsh-shell-env'",
     "- name: '@deepseek-ai/dsh-tool-bash'",
     "- name: '@deepseek-ai/dsh-tool-fs'",
+    "- name: '@deepseek-ai/dsh-tool-fs-search'",
+    '  config:',
+    '    sampleOverCapGlobResults: false',
     '',
   ].join('\n'))
 
@@ -151,6 +154,7 @@ async function boot(): Promise<Box> {
     ['@deepseek-ai/dsh-shell-env', ShellEnv],
     ['@deepseek-ai/dsh-tool-bash', ToolBash],
     ['@deepseek-ai/dsh-tool-fs', ToolFs],
+    ['@deepseek-ai/dsh-tool-fs-search', ToolFsSearch],
   ])
   context.loader.internal = {
     version: 'v2',
@@ -166,8 +170,8 @@ async function boot(): Promise<Box> {
   let callNumber = 0
   return {
     projects, home, secret, owner,
-    execute: (name, args) => executeToolFixture(context!, {
-      signal: new AbortController().signal, callId: ToolCallId(`containment-${++callNumber}`), name, arguments: args, agent: owner,
+    execute: (name, args, as = owner) => executeToolFixture(context!, {
+      signal: new AbortController().signal, callId: ToolCallId(`containment-${++callNumber}`), name, arguments: args, agent: as,
     }),
   }
 }
@@ -208,6 +212,35 @@ suite('agent containment through a real cordis.yml composition', () => {
     expect([made.uid, statSync(join(projects, 'made')).uid]).toEqual([process.getuid!(), process.getuid!()])
     expect(text(await execute('bash', { command: 'echo second >> made/new.txt && cat made/new.txt', description: 'Append as agent' })))
       .toContain('first\nsecond')
+  })
+
+  it('keeps the file tools in the roots for a Session whose own directory lies outside them', async () => {
+    const { projects, home, execute } = await boot()
+    // The person or the host may start a Session outside the roots; its directory never becomes one.
+    const origin = join(root!, 'origin')
+    await mkdir(origin)
+    await writeFile(join(origin, 'origin.txt'), 'outside the roots')
+    const visitor = await agent(context!, origin, SessionId('containment-origin'))
+    const refusal = (path: string): string =>
+      `Error: cannot access "${path}": its real path is outside the directories you can access (${projects}, ${home})`
+    for (const path of ['origin.txt', join(origin, 'origin.txt')]) {
+      expect(text(await execute('read', { file_path: path }, visitor)), path).toBe(refusal(join(origin, 'origin.txt')))
+    }
+    for (const path of ['new.txt', join(origin, 'new.txt')]) {
+      expect(text(await execute('write', { file_path: path, content: 'planted' }, visitor)), path).toBe(refusal(join(origin, 'new.txt')))
+    }
+    expect(readdirSync(origin)).toEqual(['origin.txt'])
+    for (const args of [{ pattern: '*.txt' }, { pattern: '*.txt', path: '.' }, { pattern: '*.txt', path: origin }]) {
+      const listed = await execute('glob', args, visitor)
+      expect(listed.isError, JSON.stringify(args)).toBe(true)
+      expect(text(listed)).toContain('outside the directories you can access')
+      expect(text(listed)).not.toContain('origin.txt')
+    }
+    // Inside the roots the same tools work from that Session.
+    expect(text(await execute('read', { file_path: join(projects, 'notes.txt') }, visitor))).toContain('project notes')
+    expect((await execute('write', { file_path: join(home, 'from-origin.txt'), content: 'inside' }, visitor)).isError).toBe(false)
+    expect(await readFile(join(home, 'from-origin.txt'), 'utf8')).toBe('inside')
+    expect(text(await execute('glob', { pattern: '*.txt', path: projects }, visitor))).toContain('notes.txt')
   })
 
   it('never reads or writes outside the roots while a link is swapped in during the tool calls', async () => {
