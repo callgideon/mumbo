@@ -935,22 +935,32 @@ export function boxHeaders(cfg, incoming, target, port = '3080') {
   return out
 }
 export const esc = (v) => String(v).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
+/** Headers of the edge's form pages (the approve page, the home page): no script, no framing, no caching. */
+export const PAGE_SECURITY = {
+  'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+  'x-frame-options': 'DENY',
+  'cache-control': 'no-store',
+  // Not no-referrer: under it a browser sends `Origin: null` on the page's own form POSTs, which the exact-Origin check
+  // refuses. same-origin still sends no Referer to other sites (github.com links).
+  'referrer-policy': 'same-origin',
+}
 /** The invite-only page text; names the domains the allowlist admits to join. */
 export const inviteText = (allowed) => {
   const domains = allowed.filter(a => a.startsWith('@'))
   return `mumbo boxes are invite-only for now. This account is not on the list yet.${domains.length ? ` Anyone with an address at ${domains.map(esc).join(' or ')} can join.` : ''}`
 }
-/** The signed-in person's home: their assistant, their desktop and the shared projects they belong to. Edge-served,
- *  so it loads without starting any box. */
-export function homePage(cfg, res, email, projects) {
+/** The signed-in person's home: their assistant, their desktop and the shared projects they belong to, then `keys`, the
+ *  door key manager's HTML (keys.mjs keyManager). Edge-served, so it loads without starting any box. It carries CSRF
+ *  tokens and, once, a new key: no other page may frame it or keep a handle to its window. */
+export function homePage(cfg, res, email, projects, keys = '') {
   const rows = projects.length
     ? projects.map(p => `<li><a href="${esc(boxSite(cfg, `project:${p.id}`).publicUrl)}">${esc(p.name)}</a> <small>${esc(p.members.length)} member${p.members.length === 1 ? '' : 's'}${p.owner === email ? ', yours' : ''}</small></li>`).join('')
     : '<li><small>None yet. Ask your assistant to create one.</small></li>'
-  res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>mumbo</title>
+  res.writeHead(200, { ...PAGE_SECURITY, 'cross-origin-opener-policy': 'same-origin', 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>mumbo</title>
 <style>body{font-family:system-ui;max-width:40rem;margin:3rem auto;padding:0 1rem;line-height:1.5}a{color:inherit}h1{font-size:1.4rem}h2{font-size:1rem;margin-top:2rem}ul{padding-left:1.2rem}small{color:#666}</style>
 <h1>mumbo</h1><p><small>Signed in as ${esc(email)}</small></p>
 <ul><li><a href="/">Your assistant</a></li><li><a href="/desktop/">Your desktop</a> <small>sign in to your accounts here</small></li></ul>
-<h2>Projects</h2><ul>${rows}</ul>`)
+<h2>Projects</h2><ul>${rows}</ul>${keys}`)
 }
 /** One request from the edge itself to a box's dsh through the client-proxy, as a browser on the box's own origin
  *  (`siteHost`, boxSite) would send it. */
@@ -1031,12 +1041,15 @@ export function authUi({ html, supabaseJs, consentJs, supabaseUrl, anonKey, clie
  *  is defence in depth. oauth2-proxy strips client identity headers on every route and sets X-Forwarded-Email only from a
  *  session, so a request without it is signed out. Who may enter is decided here (admitted()), never by oauth2-proxy flags. */
 const skippedSignin = (req) => req.headers['x-forwarded-uri'] !== undefined
+/** The home page's key actions on the public host (keys.mjs keyManager): create and revoke. */
+export const KEY_PATHS = ['/home/keys', '/home/keys/revoke']
 
 /** Signed-in users' traffic. The public host reaches the user's own box and p-<16 hex>.<project domain> a project's
  *  box, for its members only; `approve` (approve-page.mjs) serves cfg.approveHost, an origin no box serves; any other host
  *  answers 404. `signin` (authUi) answers its GETs on the approve host before any identity check; GET /oauth/consent on
- *  the public host, which a box serves, redirects there. A request or upgrade skippedSignin flags gets 400 before all that. */
-export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log = console.log }) {
+ *  the public host, which a box serves, redirects there. A request or upgrade skippedSignin flags gets 400 before all that.
+ *  `keys` (keys.mjs keyManager) adds the door key manager to /home on the public host and answers its KEY_PATHS there. */
+export function userServer({ cfg, box, verifyAlb, projects, approve, signin, keys, log = console.log }) {
   const identify = async (req) => verifyAlb
     ? (await verifyAlb(req.headers['x-amzn-oidc-data']).catch(() => undefined)) ?? ''
     : String(req.headers['x-forwarded-email'] ?? '').toLowerCase()
@@ -1091,7 +1104,11 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, log
     // A page that opened the public host keeps no handle to it or its frames: KasmVNC's client in the Desktop tab's frame
     // takes clipboard, resize and disconnect messages from any origin. dsh keeps handles to the popups it opens itself.
     if (host === cfg.publicHost) res.setHeader('cross-origin-opener-policy', 'same-origin-allow-popups')
-    if (!to.project && /^\/home\/?(?:\?|$)/.test(req.url)) return homePage(cfg, res, email, await projects?.list(email) ?? [])
+    if (!to.project && /^\/home\/?(?:\?|$)/.test(req.url)) {
+      const mine = await projects?.list(email) ?? []
+      return homePage(cfg, res, email, mine, await keys?.section(email, mine))
+    }
+    if (!to.project && keys && KEY_PATHS.includes(req.url)) return keys.post(req, res, email, await projects?.list(email) ?? [])
     if (to.redirect) return res.writeHead(302, { location: to.redirect, 'cache-control': 'no-store' }).end()
     // dsh refuses a cross-origin /api request itself; the desktop's server (KasmVNC, or websockify) checks no Origin, so
     // anything but a read must come from its own page.
@@ -1492,7 +1509,10 @@ async function main() {
   }
   const signin = cfg.supabaseUrl ? authUi({ html: read('html'), supabaseJs: read('supabaseJs'), consentJs: read('consentJs'), supabaseUrl: cfg.supabaseUrl,
     anonKey: env('SUPABASE_ANON_KEY'), clientIds: values('MUMBO_OAUTH_CLIENT_IDS'), redirectUris: cfg.oauthRedirectUris }) : undefined
-  userServer({ cfg, box, verifyAlb, projects: proj, approve, signin }).listen(8080, listenHost, () => console.log(`edge: users on ${listenHost}:8080`))
+  // Door keys (keys.mjs): minted, listed and revoked on /home; the door that accepts them is B32.
+  const { doorKeys, keyManager } = await import('./keys.mjs')
+  const keys = keyManager({ cfg, keys: doorKeys({ store, projects: proj, admitted: (e) => admitted(cfg.allowed, e) }), csrfKey: createHmac('sha256', edgeKey).update('home-csrf').digest() })
+  userServer({ cfg, box, verifyAlb, projects: proj, approve, signin, keys }).listen(8080, listenHost, () => console.log(`edge: users on ${listenHost}:8080`))
   const { children, mcpServer } = await import('./sandboxes.mjs')
   const mcp = mcpServer({ ops: children({ e2b, cfg }), projects: proj, relay, projectDomain: cfg.projectDomain, claimOf: (info) => verifyBox(edgeKey, String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
   modelServer({ cfg, edgeKey, modelKey, allow: budget(store, cfg.dailyRequests), owns: box.owns, touch: box.touch, mcp, github, halt, tokens })

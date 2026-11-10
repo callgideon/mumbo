@@ -603,7 +603,9 @@ test('the live view\'s pages may connect only to their own host, and a page that
     assert.deepEqual([desktop.status, desktop.headers['content-security-policy']], [200, "frame-ancestors 'self', connect-src 'self' wss://boxes.example data:"])
     assert.equal((await get('/desktop/own-csp')).headers['content-security-policy'], "default-src 'self'; frame-ancestors 'self', connect-src 'self' wss://boxes.example data:")
     assert.equal((await get('/')).headers['content-security-policy'], "frame-ancestors 'self'", 'dsh\'s pages keep their policy')
-    for (const path of ['/', '/desktop/', '/desktop/vnc.html', '/home']) assert.equal((await get(path)).headers['cross-origin-opener-policy'], 'same-origin-allow-popups', path)
+    for (const path of ['/', '/desktop/', '/desktop/vnc.html']) assert.equal((await get(path)).headers['cross-origin-opener-policy'], 'same-origin-allow-popups', path)
+    // The home page, which shows a new door key once (keys.mjs), keeps no handle to any page, its own origin's included.
+    assert.equal((await get('/home')).headers['cross-origin-opener-policy'], 'same-origin')
     // MCP clients sign in through popups: the consent redirect, the approve host and project hosts get none.
     for (const [path, host] of [['/oauth/consent?x=1', cfg.publicHost], ['/', 'approve.example'], ['/', `p-0123456789abcdef.${cfg.projectDomain}`]]) assert.equal((await get(path, host)).headers['cross-origin-opener-policy'], undefined, host + path)
   } finally { server.close(); upstream.close() }

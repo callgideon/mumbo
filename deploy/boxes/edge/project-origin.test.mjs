@@ -264,7 +264,9 @@ test('no other origin may frame our pages: box responses on the main and project
       'unknown host': await call(t.port, { headers: { host: 'other.boxes.mumbo.si' } }),
     }
     assert.deepEqual(Object.values(edgePages).map(r => r.status), [200, 302, 401, 403, 403, 404])
-    for (const [what, r] of Object.entries(edgePages)) assert.deepEqual(framing(r), ours, what)
+    // The home page carries CSRF tokens and, once, a new door key (keys.mjs): no page may frame it, not even its own origin's.
+    const home = ["default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'", 'DENY']
+    for (const [what, r] of Object.entries(edgePages)) assert.deepEqual(framing(r), what === 'home' ? home : ours, what)
     assert.equal(t.seen.length, 5, 'the edge answered those itself')
   } finally { t.close() }
 })

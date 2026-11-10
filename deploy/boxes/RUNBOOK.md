@@ -385,6 +385,22 @@ Check what the installation holds, read-only, with an App JWT: `GET /orgs/callgi
 - `only the agent's own comments and pull requests may be edited` (403): the box edited a comment, or edited, closed, marked ready, converted to draft or requested reviewers on a pull request, whose author is not `GITHUB_AGENT_ID`. This is expected when a prompt-injected agent tries it. An edit also refuses with 403 when the edge could not confirm the author: `the author lookup failed …` (REST), `the node id lookup failed …` (GraphQL) or `GITHUB_AGENT_ID is not set`.
 - `a new pull request may set only title, body, head, base, draft, maintainer_can_modify` (403): `POST /pulls` named another key, such as `issue`, which would turn a person's issue into the agent's pull request.
 
+### Door keys
+A person's door key (`edge/keys.mjs`, spec section 10) lets their own AI tools, such as Claude Code, reach mumbo over MCP as them. The door endpoint that accepts keys is B32; until it ships, a key reaches nothing.
+- **Minting:** only the signed-in person, on `https://<public host>/home` (Keys): a name, scopes (`read`, `prompt`, `workspace`), the projects the key may reach (only projects they are a member of), and an optional lifetime of 7, 30, 90 or 365 days. The key is shown once, in the answer to the create. The same page lists their keys (scopes, projects, created, expires, last used, revoked) and revokes them. Its POSTs need `Origin: https://<public host>`, a form navigation (`Sec-Fetch-Mode: navigate`, `Sec-Fetch-Dest: document`) and the day's CSRF token (HMAC of the edge key, `home-csrf`).
+- **Format:** `mumbo_pat_`, 32 base62 characters, then the CRC32 of everything before it as 6 base62 characters (jumbo's `key_format.py`); 48 characters. A malformed key or a bad checksum is refused without a store read.
+- **Storage:** the edge's Redis (ElastiCache `mumbo-boxes-edge`) holds only the SHA-256: `doc:key:<sha256 hex>` = JSON `{ id, owner, name, scopes, projects, createdAt, expiresAt?, revokedAt? }` (epoch ms), `set:keys:<email>` = the hashes of that person's keys, and `doc:key-used:<key id>` = `{ at }`, the last verified use. Nothing caches a key, so a revocation holds from the next call.
+- **Refusals** (jumbo's codes): `invalid_api_key` 401, `key_revoked` 401, `key_expired` 401 (from `expiresAt` on), `user_disabled` 403 (the owner is off `ALLOWED_EMAILS`, so an offboarding deny entry cuts off every key of the person), `insufficient_scope` 403, `user_key_required` 403 (a box token, the assistant's or a coordinator's), and `project_not_allowed` 403 (a project the key does not list, or one its owner has left).
+- **Revoke a person's key as an operator:** open the Redis tunnel of "Offboarding a person" step 4 (`REDIS_URL`, `REDIS_SERVERNAME`), then list their keys and revoke one by its id:
+  ```sh
+  cd deploy/boxes/edge && node --input-type=module -e "
+  import { createClient } from 'redis'; import { redisStore } from './store.mjs'; import { doorKeys } from './keys.mjs'
+  const c = createClient({ url: process.env.REDIS_URL, socket: { servername: process.env.REDIS_SERVERNAME } }); await c.connect()
+  const keys = doorKeys({ store: redisStore(c) }), [email, id] = process.argv.slice(1)
+  if (id) await keys.revoke(email, id); console.log(await keys.list(email)); await c.quit()" <email> [<key id>]
+  ```
+  Without a key id it only lists. The edge reads the record on every call, so no edge restart is needed.
+
 ### Restore Postgres to a point in time
 `aws rds restore-db-instance-to-point-in-time --source-db-instance-identifier mumbo-boxes-e2b --target-db-instance-identifier mumbo-boxes-e2b-restore --restore-time <UTC>` into the same subnet group and security group, then point `POSTGRES_CONNECTION_STRING` in the `mumbo-boxes/e2b` secret at the new instance and force a new deployment of api. Snapshots that newer rows point at stay in the versioned templates bucket for 14 days (review M4).
 

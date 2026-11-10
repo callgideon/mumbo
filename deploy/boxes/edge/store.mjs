@@ -1,5 +1,5 @@
 // Shared state for edge replicas: box records, per-user locks, daily budgets and token counters, the sweep and poll
-// leaders, and small documents and sets (projects, their members and repositories, approvals). TTLs are milliseconds,
+// leaders, and small documents and sets (projects, their members and repositories, approvals, door key hashes). TTLs are milliseconds,
 // except increment's seconds.
 // memoryStore serves tests and a single replica; redisStore serves production (ElastiCache, TLS).
 import { randomUUID } from 'node:crypto'

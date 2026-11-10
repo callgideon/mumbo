@@ -4,20 +4,12 @@
 // script served from a box (on another origin) can act here. The page runs no script (CSP default-src 'none').
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { STATUS_CODES } from 'node:http'
-import { esc } from './edge.mjs'
+import { esc, PAGE_SECURITY as SECURITY } from './edge.mjs'
 import { addRepo, getRepos, projectsOwnedBy, removeRepo } from './projects.mjs'
 
 const MAX_BODY = 8192
 const DAY_MS = 86_400_000
 const ITEM_ID = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#\d+$/
-const SECURITY = {
-  'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
-  'x-frame-options': 'DENY',
-  'cache-control': 'no-store',
-  // Not no-referrer: under it a browser sends `Origin: null` on the page's own form POSTs, which the exact-Origin check
-  // refuses. same-origin still sends no Referer to other sites (github.com links).
-  'referrer-policy': 'same-origin',
-}
 /** `?m=<code>` after a POST, and each `?s=<reason>:<id>` skip line, shows this fixed text; any other code shows nothing. */
 const NOTICES = new Map([
   ['merged', 'Merged.'],
@@ -51,13 +43,43 @@ button:disabled{opacity:.4;cursor:default}code{font:12px/24px ui-monospace,SFMon
 
 const fail = (status) => Object.assign(new Error(STATUS_CODES[status]), { status })
 const text = (res, status) => res.writeHead(status, { ...SECURITY, 'content-type': 'text/plain; charset=utf-8' }).end(STATUS_CODES[status])
-const hidden = (fields) => Object.entries(fields).map(([k, v]) => `<input type="hidden" name="${k}" value="${esc(v)}">`).join('')
+/** Hidden form inputs; values are escaped, names are the caller's literals. */
+export const hidden = (fields) => Object.entries(fields).map(([k, v]) => `<input type="hidden" name="${k}" value="${esc(v)}">`).join('')
 /** The request body as form fields; undefined when it exceeds MAX_BODY (an oversized chunked body is cut off). */
 async function readForm(req) {
   if (Number(req.headers['content-length'] ?? 0) > MAX_BODY) return undefined
   const chunks = []; let size = 0
   for await (const c of req) { if ((size += c.length) > MAX_BODY) return undefined; chunks.push(c) }
   return new URLSearchParams(Buffer.concat(chunks).toString('utf8'))
+}
+/**
+ * CSRF tokens bound to a person and the UTC day: base64url HMAC-SHA256(csrfKey, `<email>:<yyyy-mm-dd>`).
+ * @param {Buffer} csrfKey - HMAC-SHA256(edge key, <purpose>); one per page, so one page's token is refused by another.
+ * @param {() => number} now - epoch ms.
+ * @returns {{ token: (email: string) => string, valid: (email: string, given: string | null) => boolean }} today's token,
+ *   and a constant-time check that accepts today's or yesterday's.
+ */
+export function csrfTokens(csrfKey, now) {
+  const token = (email, ms) => createHmac('sha256', csrfKey).update(`${email}:${new Date(ms).toISOString().slice(0, 10)}`).digest('base64url')
+  return {
+    token: (email) => token(email, now()),
+    valid: (email, given) => {
+      const got = Buffer.from(given ?? '')
+      return [0, DAY_MS].some(back => { const want = Buffer.from(token(email, now() - back)); return got.length === want.length && timingSafeEqual(got, want) })
+    },
+  }
+}
+/**
+ * A state-changing POST's form fields, once its Origin is exactly `origin`, its body is a form of at most MAX_BODY bytes
+ * and its `csrf` field is `email`'s token. Otherwise answers 403, 415 or 413 and returns undefined.
+ */
+export async function checkedForm(req, res, email, origin, csrf) {
+  if (req.headers.origin !== origin) return void text(res, 403)
+  if (String(req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase() !== 'application/x-www-form-urlencoded') return void text(res, 415)
+  const form = await readForm(req)
+  if (!form) return void text(res, 413)
+  if (!csrf.valid(email, form.get('csrf'))) return void text(res, 403)
+  return form
 }
 
 /**
@@ -76,11 +98,7 @@ async function readForm(req) {
 export function approvePage({ approvals, halt, store, csrfKey, host, approvers, installationOf, now = () => Date.now(), bindRepo = addRepo }) {
   if (!Array.isArray(approvers)) throw new Error('approvePage: approvers must be the list of approver emails (APPROVER_EMAILS)')
   const origin = `https://${host}`
-  const token = (email, ms) => createHmac('sha256', csrfKey).update(`${email}:${new Date(ms).toISOString().slice(0, 10)}`).digest('base64url')
-  const validCsrf = (email, given) => {
-    const got = Buffer.from(given ?? '')
-    return [0, DAY_MS].some(back => { const want = Buffer.from(token(email, now() - back)); return got.length === want.length && timingSafeEqual(got, want) })
-  }
+  const csrfs = csrfTokens(csrfKey, now)
 
   // Each action returns the redirect's query fields, or throws fail(status).
   const actions = {
@@ -130,7 +148,7 @@ export function approvePage({ approvals, halt, store, csrfKey, host, approvers, 
 
   async function page(res, email, query) {
     const [items, stopped, owned] = await Promise.all([approvals.list(email), halt.get(email), projectsOwnedBy(store, email)])
-    const csrf = token(email, now())
+    const csrf = csrfs.token(email)
     const notice = NOTICES.get(query.get('m'))
     const skips = query.getAll('s').map(s => /^([a-z_]+):(.+)$/.exec(s)).filter(m => m && NOTICES.has(m[1]) && ITEM_ID.test(m[2]))
     const low = items.filter(i => i.lowRisk)
@@ -170,11 +188,8 @@ ${repos.length ? `<h2>Repository access</h2>\n${repos.join('\n')}` : ''}
     if (req.method === 'GET' && path === '/') return page(res, email, new URLSearchParams(q < 0 ? '' : req.url.slice(q + 1)))
     const action = req.method === 'POST' && Object.hasOwn(actions, path) ? actions[path] : undefined
     if (!action) return text(res, 404)
-    if (req.headers.origin !== origin) return text(res, 403)
-    if (String(req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase() !== 'application/x-www-form-urlencoded') return text(res, 415)
-    const form = await readForm(req)
-    if (!form) return text(res, 413)
-    if (!validCsrf(email, form.get('csrf'))) return text(res, 403)
+    const form = await checkedForm(req, res, email, origin, csrfs)
+    if (!form) return
     let query
     try { query = await action(email, form) } catch (e) { if ([400, 403, 404].includes(e.status)) return text(res, e.status); throw e }
     res.writeHead(303, { ...SECURITY, location: `/?${new URLSearchParams(query)}` }).end()
