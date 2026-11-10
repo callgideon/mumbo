@@ -77,6 +77,11 @@ interface SubagentStartRequest {
   /** Initial child directory; relative paths resolve against the parent's current directory. Omitted inherits that directory at start. */
   readonly cwd?: string
   /**
+   * Who chose `cwd`. The default `'model'` resolves it through `fs.resolveModelPath`, so a directory outside the model
+   * roots is refused before the child starts; a caller that derives `cwd` itself passes `'host'`.
+   */
+  readonly cwdChooser?: 'model' | 'host'
+  /**
    * Independent preset id; omission joins the parent's current generation.
    * Requires a provider with `capabilities.agentPreset` that does not inherit
    * parent context.

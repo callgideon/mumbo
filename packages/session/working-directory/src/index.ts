@@ -8,6 +8,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { z as zod } from 'zod'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { FsError } from '@deepseek-ai/dsh-fs'
 import type { FsTarget } from '@deepseek-ai/dsh-fs'
 import { createUserMessage, errorChain } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
@@ -127,7 +128,8 @@ export class WorkingDirectoryService extends Service {
   }
 
   /**
-   * Validate the current directory and restore the original project when it disappeared.
+   * Validate the current directory and restore the original project when it disappeared or, unless it is the original
+   * project, lies outside the model roots, so no directory reader follows a directory the model may not access.
    * A missing original project is recreated empty through the filesystem provider and logged;
    * files it held are not restored. Every Session in this process that was created before the
    * recreation and works in, or falls back to, that project is told once.
@@ -141,8 +143,11 @@ export class WorkingDirectoryService extends Service {
     return this.serialize(agent, signal, async (control) => {
       const current = this.get(agent.session)
       const original = agent.session.header.cwd ?? this.defaultDirectory
-      const target = await this.ctx.fs.resolve(current, { signal: control })
-      const info = await this.ctx.fs.stat(target, control)
+      // The original project is the person's choice; any other directory must stay inside the model roots.
+      const target = current === original
+        ? await this.ctx.fs.resolve(current, { signal: control })
+        : await this.withinModelRoots(current, control)
+      const info = target === undefined ? undefined : await this.ctx.fs.stat(target, control)
       control.throwIfAborted()
       agent.ctx.fiber.assertActive()
       if (info?.type === 'directory') {
@@ -173,17 +178,32 @@ export class WorkingDirectoryService extends Service {
    * @param agent - live or unpublished Agent owning the Session.
    * @param path - absolute path or a path relative to its current directory.
    * @param signal - cancellation before the durable change.
+   * @param chooser - who chose `path`: `'model'` resolves it through `fs.resolveModelPath`, so a directory outside the
+   * model roots is refused; `'host'`, the person or the harness, resolves it unconfined.
    * @returns the canonical absolute directory, committed before fulfillment.
    * A notice failure is warned; the next request still receives the committed directory.
-   * @throws when the requested path is not an existing directory.
+   * @throws when the requested path is not an existing directory, or a model-chosen one lies outside the model roots.
    */
-  set(agent: Agent, path: string, signal?: AbortSignal): Promise<string> {
+  set(agent: Agent, path: string, signal?: AbortSignal, chooser: 'model' | 'host' = 'host'): Promise<string> {
     return this.serialize(agent, signal, async (control) => {
       if (path.length === 0) throw new Error('working-directory: cd must not be empty')
-      const directory = await this.directory(path, this.get(agent.session), control)
+      const directory = await this.directory(path, this.get(agent.session), control, chooser)
       this.commit(agent, directory, 'changed', control)
       return directory
     })
+  }
+
+  /**
+   * Resolve a directory the model chose for another Session, such as a subagent's, without changing this one.
+   * @param agent - live Agent whose current directory anchors a relative `path`.
+   * @param path - absolute path or a path relative to the Agent's current directory.
+   * @param signal - cancellation for filesystem inspection.
+   * @returns the canonical absolute directory.
+   * @throws when `path` is not an existing directory or lies outside the model roots.
+   */
+  async resolveModelDirectory(agent: Agent, path: string, signal?: AbortSignal): Promise<string> {
+    const cwd = await this.ensure(agent, signal)
+    return this.directory(path, cwd, signal ?? this.lifecycle.signal, 'model')
   }
 
   private contextText(session: Session): string {
@@ -217,8 +237,20 @@ export class WorkingDirectoryService extends Service {
     return recreation
   }
 
-  private async directory(path: string, cwd: string, signal: AbortSignal): Promise<string> {
-    const target = await this.ctx.fs.resolve(path, { cwd, signal })
+  /** The target of a recorded directory, or undefined when it lies outside the model roots. */
+  private async withinModelRoots(directory: string, signal: AbortSignal): Promise<FsTarget | undefined> {
+    try {
+      return await this.ctx.fs.resolveModelPath(directory, { signal })
+    } catch (error) {
+      if (error instanceof FsError && error.code === 'FS_OUTSIDE_ROOTS') return undefined
+      throw error
+    }
+  }
+
+  private async directory(path: string, cwd: string, signal: AbortSignal, chooser: 'model' | 'host'): Promise<string> {
+    const target = chooser === 'model'
+      ? await this.ctx.fs.resolveModelPath(path, { cwd, signal })
+      : await this.ctx.fs.resolve(path, { cwd, signal })
     const info = await this.ctx.fs.stat(target, signal)
     signal.throwIfAborted()
     if (info?.type !== 'directory') {

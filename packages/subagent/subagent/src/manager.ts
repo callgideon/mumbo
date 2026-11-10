@@ -486,7 +486,10 @@ export class SubagentManager {
   }
 
   /** Capture the explicit or inherited directory while the parent still owns startup. */
-  private async resolveDirectory(request: Pick<SubagentStartRequest, 'parent' | 'cwd'>, signal: AbortSignal): Promise<string> {
+  private async resolveDirectory(request: Pick<SubagentStartRequest, 'parent' | 'cwd' | 'cwdChooser'>, signal: AbortSignal): Promise<string> {
+    if (request.cwd !== undefined && request.cwdChooser !== 'host') {
+      return this.ctx.workingDirectory.resolveModelDirectory(request.parent, request.cwd, signal)
+    }
     const cwd = request.cwd !== undefined && isAbsolute(request.cwd)
       ? request.cwd
       : resolve(await this.ctx.workingDirectory.ensure(request.parent, signal), request.cwd ?? '.')

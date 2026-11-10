@@ -517,3 +517,70 @@ describe('Session working directories', () => {
     expect(f.ctx.tools.schemas().some(tool => tool.name === 'working_directory')).toBe(false)
   })
 })
+
+describe.runIf(process.platform === 'linux')('working directories under model roots', () => {
+  async function confined() {
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-working-directory-roots-')))
+    const projects = join(root, 'projects')
+    const outside = join(root, 'outside')
+    await mkdir(join(projects, 'app'), { recursive: true })
+    await mkdir(outside)
+    const ctx = new Context()
+    await mountAgentLoopTestDependencies(ctx, { systemPrompt: { includeRuntimeContext: false } })
+    await ctx.plugin(LocalFileSystem, { cwd: projects, modelRoots: [projects] })
+    await ctx.plugin(WorkingDirectory, {})
+    await ctx.plugin(WorkingDirectoryTool)
+    const harness = await mountAgentLoopTestHarness(ctx)
+    return {
+      ctx, harness, projects, outside,
+      async [Symbol.asyncDispose]() {
+        await ctx.fiber.dispose()
+        await rm(root, { recursive: true, force: true })
+      },
+    }
+  }
+
+  it('refuses a model-chosen directory outside the roots and keeps the current one', async () => {
+    await using f = await confined()
+    const agent = await f.harness.create(SessionId('confined-model'), {}, { cwd: f.projects })
+    const execute = (cd: string) => executeToolFixture(f.ctx, {
+      name: 'working_directory', callId: ToolCallId('directory-call'), arguments: { cd }, signal: new AbortController().signal, agent,
+    })
+    expect(await execute('app')).toMatchObject({ value: { cwd: join(f.projects, 'app') }, isError: false })
+    const refused = await execute(f.outside)
+    expect(refused.isError).toBe(true)
+    expect(JSON.stringify(refused)).toContain(`cannot access \\"${f.outside}\\": its real path is outside the directories you can access (${f.projects})`)
+    expect(f.ctx.workingDirectory.get(agent.session)).toBe(join(f.projects, 'app'))
+    await expect(f.ctx.workingDirectory.resolveModelDirectory(agent, f.outside)).rejects.toMatchObject({ code: 'FS_OUTSIDE_ROOTS' })
+    await expect(f.ctx.workingDirectory.resolveModelDirectory(agent, '..')).resolves.toBe(f.projects)
+  })
+
+  it('returns to the original project from a recorded directory outside the roots, through a logged change', async () => {
+    await using f = await confined()
+    const agent = await f.harness.create(SessionId('confined-recorded'), {}, { cwd: f.projects })
+    await f.ctx.workingDirectory.set(agent, f.outside)
+    f.harness.claim(agent, 'next-step', 1)
+    await expect(f.ctx.workingDirectory.ensure(agent)).resolves.toBe(f.projects)
+    expect(agent.session.snapshotEvents().filter(event => event.type === 'working-directory/change').map(event => event.data))
+      .toEqual([{ cwd: f.outside }, { cwd: f.projects }])
+    expect(f.harness.claim(agent, 'next-step', 1)).toEqual([expect.objectContaining({
+      content: [{ type: 'text', text: `The working directory ${JSON.stringify(f.outside)} is unavailable. The working directory is now ${JSON.stringify(f.projects)}.` }],
+    })])
+  })
+
+  it('reports a failure other than the roots refusal while checking a recorded directory', async () => {
+    await using f = await confined()
+    const agent = await f.harness.create(SessionId('confined-failure'), {}, { cwd: f.projects })
+    await f.ctx.workingDirectory.set(agent, join(f.projects, 'app'))
+    vi.spyOn(f.ctx.fs, 'resolveModelPath').mockRejectedValueOnce(new FsError('disk unavailable', 'FS_IO_ERROR'))
+    await expect(f.ctx.workingDirectory.ensure(agent)).rejects.toMatchObject({ code: 'FS_IO_ERROR' })
+    expect(f.ctx.workingDirectory.get(agent.session)).toBe(join(f.projects, 'app'))
+  })
+
+  it('keeps an original project the person chose outside the roots', async () => {
+    await using f = await confined()
+    const agent = await f.harness.create(SessionId('confined-origin'), {}, { cwd: f.outside })
+    await expect(f.ctx.workingDirectory.ensure(agent)).resolves.toBe(f.outside)
+    expect(f.harness.claim(agent, 'next-step', 1)).toEqual([])
+  })
+})

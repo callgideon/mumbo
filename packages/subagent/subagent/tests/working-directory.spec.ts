@@ -12,12 +12,13 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import * as Spawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import * as Fork from '@deepseek-ai/dsh-subagent-fork-in-process'
+import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
 import { MockAdapter, textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import SubagentRuntime from '../src/index.ts'
 import { TestSessionQuery } from './test-session-query.ts'
 
-async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-child-directory-'))
+async function fixture(options: { confineTo?: 'origin' } = {}) {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-child-directory-')))
   const origin = join(root, 'origin')
   const first = join(origin, 'first')
   const second = join(origin, 'second')
@@ -28,6 +29,7 @@ async function fixture() {
     await ctx.fiber.dispose()
     await rm(root, { recursive: true, force: true })
   })
+  if (options.confineTo === 'origin') await ctx.plugin(LocalFileSystem, { cwd: origin, modelRoots: [origin] })
   await mountAgentLoopTestDependencies(ctx, { workingDirectory: true })
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(JsonlSessionPersistence, { root: join(root, 'sessions') })
@@ -43,7 +45,7 @@ async function fixture() {
     meta: { cwd: origin },
     agentOptions: { provider: 'mock', model: 'mock' },
   })
-  return { ctx, parent, origin, first, second, adapter }
+  return { ctx, parent, root, origin, first, second, adapter }
 }
 
 describe('subagent working directories', () => {
@@ -84,6 +86,22 @@ describe('subagent working directories', () => {
     expect(observed.header.cwd).toBe(origin)
     const last = observed.events.findLast(event => event.type === 'working-directory/change')
     expect(last?.data).toMatchObject({ cwd: selected })
+  })
+
+  it('refuses a model-chosen child directory outside the model roots before anything starts', async () => {
+    const { ctx, parent, root, first } = await fixture({ confineTo: 'origin' })
+    for (const cwd of [root, '..']) {
+      await expect(startTestActivation(ctx, 'spawn', { parent, cwd, prompt: [{ type: 'text', text: 'child' }] }))
+        .rejects.toMatchObject({ code: 'FS_OUTSIDE_ROOTS' })
+    }
+    expect(ctx.agents.list().map(agent => agent.id)).toEqual([parent.id])
+    const inside = await startTestActivation(ctx, 'spawn', { parent, cwd: 'first', prompt: [{ type: 'text', text: 'child' }] })
+    expect(ctx.workingDirectory.get(inside.localAgent.session)).toBe(first)
+    await inside.result
+    // A caller that derives the directory itself, such as a workflow, is not confined.
+    const derived = await startTestActivation(ctx, 'spawn', { parent, cwd: root, cwdChooser: 'host', prompt: [{ type: 'text', text: 'child' }] })
+    expect(ctx.workingDirectory.get(derived.localAgent.session)).toBe(root)
+    await derived.result
   })
 
   it('rolls back a local child whose setup realm has no directory service', async () => {

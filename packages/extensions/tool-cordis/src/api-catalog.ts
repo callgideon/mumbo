@@ -4498,17 +4498,24 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'ensure(agent: Agent, signal?: AbortSignal): Promise<string>',
-        description: 'Validate the current directory and restore the original project when it disappeared. A missing original project is recreated empty through the filesystem provider and logged; files it held are not restored. Every Session in this process that was created before the recreation and works in, or falls back to, that project is told once.',
+        description: 'Validate the current directory and restore the original project when it disappeared or, unless it is the original project, lies outside the model roots, so no directory reader follows a directory the model may not access. A missing original project is recreated empty through the filesystem provider and logged; files it held are not restored. Every Session in this process that was created before the recreation and works in, or falls back to, that project is told once.',
         parameters: [{ name: 'agent', description: 'live or unpublished Agent owning the Session.' }, { name: 'signal', description: 'cancellation for filesystem inspection and creation.' }],
         returns: 'the existing directory; recovery is committed before fulfillment. A notice failure is warned without reverting the committed state.',
         throws: ['when the original project cannot be recreated; the failure is logged.'],
       },
       {
-        signature: 'set(agent: Agent, path: string, signal?: AbortSignal): Promise<string>',
+        signature: 'set(agent: Agent, path: string, signal?: AbortSignal, chooser: \'model\' | \'host\' = \'host\'): Promise<string>',
         description: 'Change one Session\'s directory without changing existing processes or permissions.',
-        parameters: [{ name: 'agent', description: 'live or unpublished Agent owning the Session.' }, { name: 'path', description: 'absolute path or a path relative to its current directory.' }, { name: 'signal', description: 'cancellation before the durable change.' }],
+        parameters: [{ name: 'agent', description: 'live or unpublished Agent owning the Session.' }, { name: 'path', description: 'absolute path or a path relative to its current directory.' }, { name: 'signal', description: 'cancellation before the durable change.' }, { name: 'chooser', description: 'who chose `path`: `\'model\'` resolves it through `fs.resolveModelPath`, so a directory outside the model roots is refused; `\'host\'`, the person or the harness, resolves it unconfined.' }],
         returns: 'the canonical absolute directory, committed before fulfillment. A notice failure is warned; the next request still receives the committed directory.',
-        throws: ['when the requested path is not an existing directory.'],
+        throws: ['when the requested path is not an existing directory, or a model-chosen one lies outside the model roots.'],
+      },
+      {
+        signature: 'async resolveModelDirectory(agent: Agent, path: string, signal?: AbortSignal): Promise<string>',
+        description: 'Resolve a directory the model chose for another Session, such as a subagent\'s, without changing this one.',
+        parameters: [{ name: 'agent', description: 'live Agent whose current directory anchors a relative `path`.' }, { name: 'path', description: 'absolute path or a path relative to the Agent\'s current directory.' }, { name: 'signal', description: 'cancellation for filesystem inspection.' }],
+        returns: 'the canonical absolute directory.',
+        throws: ['when `path` is not an existing directory or lies outside the model roots.'],
       },
     ],
   },
@@ -9361,7 +9368,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SubagentStartRequest',
-    declaration: 'export interface SubagentStartRequest {\n    readonly cwd?: string;\n    readonly agentPreset?: string;\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly agentOptions?: AgentOptions;\n    readonly outputSchema?: ObjectJsonSchema;\n    readonly maxDepth?: number;\n}',
+    declaration: 'export interface SubagentStartRequest {\n    readonly cwd?: string;\n    readonly cwdChooser?: \'model\' | \'host\';\n    readonly agentPreset?: string;\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly agentOptions?: AgentOptions;\n    readonly outputSchema?: ObjectJsonSchema;\n    readonly maxDepth?: number;\n}',
   },
   {
     name: 'SubagentStopReason',
