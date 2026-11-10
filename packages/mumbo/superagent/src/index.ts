@@ -1,9 +1,10 @@
-/** Main plugin entry: mounts the Runtime and provides its restart callback for deployment account changes. */
+/** Main plugin entry: mounts the Runtime and the relay Source, and provides the Runtime's restart callback for deployment account changes. */
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-settings'
 import { Runtime } from './app/runtime.ts'
 import { Config, machineOf, type DeploymentConfig } from './deployment.ts'
+import { registerRelay } from './sources/relay.ts'
 
 export const name = 'dsh-superagent'
 export const inject = ['agents', 'sessionController', 'sessionPersistence', 'workspaceRegistry', 'permissionPresets', 'tools', 'systemPrompt', 'skills', 'webServer', 'connection', 'llm', 'subprocess']
@@ -21,6 +22,8 @@ export async function apply(ctx: Context, config: DeploymentConfig): Promise<voi
   }
   const runtime = new Runtime(ctx, machine, restart)
   ctx.effect(() => async () => { await runtime.stop() })
+  // The relay Source belongs to this entry rather than a plugin row of its own, so a profile that loads the bundle has it.
+  ctx.effect(() => registerRelay(ctx, runtime), 'dsh-superagent: relay Source')
   await runtime.ready
   ctx.logger.info(runtime.configured() ? 'dsh-superagent ready; the Superagent sidebar entry opens the management panel' : `dsh-superagent is waiting for setup: ${runtime.setupProblem?.detail ?? ''}`)
 }
