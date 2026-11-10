@@ -294,8 +294,8 @@ test('template: Chrome\'s managed policy file, byte for byte, read-only to the b
     assert.equal(statSync(join(t, 'etc/opt/chrome/policies/managed/mumbo.json')).mode & 0o777, 0o644)
     assert.equal(statSync(join(t, 'etc/opt/chrome/policies/managed')).mode & 0o777, 0o755)
     assert.equal(write(chromePolicyStep(true)), `{${base}}\n`)
-    // Slice 2: passwords and cards stay out of the box until browser snapshots mask them (B25).
-    assert.ok(BOX_STEPS.includes(chromePolicyStep(false)) && !BOX_STEPS.includes(chromePolicyStep(true)))
+    // Slice 3: full sync, passwords and cards included, now that browser snapshots mask them (B25).
+    assert.ok(BOX_STEPS.includes(chromePolicyStep(true)) && !BOX_STEPS.includes(chromePolicyStep(false)))
   } finally { rmSync(t, { recursive: true, force: true }) }
 })
 

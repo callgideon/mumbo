@@ -18,9 +18,9 @@ export function templateArgs(argv, env = process.env) {
   }
 }
 
-/** false until browser snapshots mask password and card fields (B25): Chrome then neither saves nor syncs passwords and
- *  payment cards. true gives the founder's full sync (decision 2026-11-10). */
-const CHROME_SENSITIVE_SYNC = false
+/** true: the founder's full sync (decision 2026-11-10), passwords and payment cards included, since browser snapshots
+ *  mask password and card fields (B25). false keeps Chrome from saving or syncing them. */
+const CHROME_SENSITIVE_SYNC = true
 /** The template step that writes Google Chrome's managed policy, root-owned. Downloads land in the shared folder the
  *  assistant reads (edge roleInstructions).
  *  @param {boolean} sensitiveSync CHROME_SENSITIVE_SYNC
