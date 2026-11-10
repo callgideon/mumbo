@@ -72,6 +72,15 @@ export class SourceRegistry implements SourceScope {
     const parsed = policy.schema.safeParse(rest)
     return { ...parsed.success ? parsed.data : policy.schema.parse({}), admission: AdmissionTableSchema.safeParse(admission ?? {}).data ?? {} }
   }
+  /**
+   * Whether `source`'s policy part sets `allMembers`, with its kind's default when the part does not; false when the kind is
+   * not installed or the stored part fails its kind's validation, so neither widens who may originate work.
+   */
+  allMembers(source: string, settings = this.settings()): boolean {
+    const { admission: _admission, ...rest } = settings.policy.sources[source] ?? {}
+    const parsed = this.kinds.get(source)?.policy?.schema.safeParse(rest)
+    return parsed?.success === true && parsed.data.allMembers === true
+  }
   channelAllowed(channel: { source: string; address: Record<string, string> }, settings = this.settings()): boolean {
     const kind = this.kinds.get(channel.source)
     if (!kind) return false

@@ -48,12 +48,20 @@ export const relayKind: SourceKind = {
   // A relayed message has one receiving scope, and the Source receives every message there: context reaches the admission table.
   scope: () => ({ listened: true, observed: true, row: SOURCE }),
   policy: {
-    schema: z.object({ allowed: z.array(z.object({ id: z.string().regex(MEMBER), name: z.string().trim().max(100).optional() }).strict())
-      .refine(members => new Set(members.map(member => member.id)).size === members.length, 'Duplicate members').default([]) }).strict(),
-    fields: [{ key: 'allowed', type: 'rows', label: 'Project members who may originate work',
-      columns: [{ key: 'id', type: 'text', label: 'Email (lowercase)', pattern: '[^\\s*,@A-Z]+@[^\\s*,@A-Z]+' },
-        { key: 'name', type: 'text', label: 'Name', optional: true }] }],
-    explicit: 'A member on the list sends a request; context they send is at most an inferred candidate.',
+    // `allMembers` suits this kind only: its actor is the member DSH admitted, never a name the message gives.
+    schema: z.object({
+      allowed: z.array(z.object({ id: z.string().regex(MEMBER), name: z.string().trim().max(100).optional() }).strict())
+        .refine(members => new Set(members.map(member => member.id)).size === members.length, 'Duplicate members').default([]),
+      allMembers: z.boolean().default(true),
+    }).strict(),
+    fields: [
+      { key: 'allowed', type: 'rows', label: 'Project members who may originate work',
+        columns: [{ key: 'id', type: 'text', label: 'Email (lowercase)', pattern: '[^\\s*,@A-Z]+@[^\\s*,@A-Z]+' },
+          { key: 'name', type: 'text', label: 'Name', optional: true }] },
+      { key: 'allMembers', type: 'switch', label: 'Every project member may originate work',
+        hint: 'On, every member the mumbo edge admits counts as on the list. Off, only the members on the list may.' },
+    ],
+    explicit: 'A member who may originate work sends a request; context they send is at most an inferred candidate.',
     rows: () => [{ id: SOURCE, label: 'Relayed messages', note: 'All',
       cells: { listedUnaddressed: true, unlistedAddressed: true, unlistedUnaddressed: true } }],
   },
