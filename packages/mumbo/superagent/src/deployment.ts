@@ -30,7 +30,7 @@ export const Config = s.object({
   edge: s.union([s.object({
     // Requests to it carry the box token, so plain `http` is accepted on the loopback address only.
     url: s.string().pattern(/^(?:https:\/\/[^\s/]+|http:\/\/127\.0\.0\.1(?::\d+)?)\/\S*$/).required()
-      .description('The mumbo edge\'s MCP endpoint for boxes, such as `https://<model host>/mcp`; `http` only on 127.0.0.1.'),
+      .description('The mumbo edge\'s `report_to_member` MCP endpoint, such as `https://<model host>/mcp/report`; `http` only on 127.0.0.1.'),
     tokenFile: absolute('File holding this box\'s edge token, which the edge writes; read on each call.').required(),
     project: s.string().pattern(/^[a-z0-9]{16}$/).required().description('The id of the project this box serves.'),
   })]).description('Where relay replies go: the mumbo edge\'s `report_to_member` tool. Unset, relay replies wait.'),
@@ -45,7 +45,7 @@ export interface Machine {
   panelAdmins: readonly string[]
   /** Set when the agent acts as a GitHub App's bot (App mode); unset when its CLI is signed in to a user account. */
   githubApp?: { login: string; userId: number } | undefined
-  /** The mumbo edge's MCP endpoint, this box's token file and project id, for relay replies; unset outside a project box. */
+  /** The mumbo edge's `report_to_member` endpoint, this box's token file and project id, for relay replies; unset outside a project box. */
   edge?: { url: string; tokenFile: string; project: string } | undefined
 }
 const MOVED: Record<string, string> = {

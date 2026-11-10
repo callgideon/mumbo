@@ -55,7 +55,7 @@ The `dsh-superagent` row accepts these fields:
 | `admissionContextTimeoutMs` | `15000` | Time limit of one context read during an assessment, from 1 to 90,000 milliseconds |
 | `panelAdmins` | `[]` | Lowercased emails of the `edge-member` principals admitted to the panel's views and the management API besides the owner, matched exactly; an entry that is not one lowercased address fails at load |
 | `githubApp` | unset | `{ login, userId }` of the GitHub App bot the agent acts as: `login` is `<slug>[bot]` and `userId` the bot user's numeric id, from `gh api 'users/<slug>[bot]' --jq .id`, not the App ID. Unset, the agent CLI is signed in to a user account |
-| `edge` | unset | `{ url, tokenFile, project }` for relay replies: the mumbo edge's MCP endpoint for boxes (`https`, or `http` on 127.0.0.1 only), the absolute path of the file holding this box's edge token, and the project id (16 characters of `a-z0-9`). Unset, relay replies wait |
+| `edge` | unset | `{ url, tokenFile, project }` for relay replies: the mumbo edge's `report_to_member` endpoint, `https://<model host>/mcp/report` (`https`, or `http` on 127.0.0.1 only), the absolute path of the file holding this box's edge token, and the project id (16 characters of `a-z0-9`). Unset, relay replies wait |
 
 `promptMaxChars`, `admissionContextMaxPages` and `admissionContextTimeoutMs` apply without a restart; a change to `stateDir`, `panelAdmins`, `githubApp` or `edge` remounts the plugin. The repository, the accounts, the Policy, the execution settings and the prompts are panel settings stored in the state database, not plugin configuration; [006 Deployment](docs/006-deployment.md) describes each one and the management API.
 

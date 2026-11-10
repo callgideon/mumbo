@@ -190,6 +190,6 @@ S9's relay Source took members' messages in but dropped every reply on their Thr
 
 Files outside the copy changed for S10:
 
-- `deploy/mumbo-project.overlay.yml`: the `dsh-superagent` row sets `edge` from `MUMBO_EDGE_MCP_URL`, `MUMBO_EDGE_TOKEN_FILE` and `MUMBO_PROJECT_ID` when any is set, so a partial set fails the Config at load, and leaves it unset when none is. The edge half exports the three in a project box's start script: the model host's `/mcp` URL, the path of a root-only file holding the box's token (the one dsh gets as `DEEPSEEK_API_KEY`), and the project id.
+- `deploy/mumbo-project.overlay.yml`: the `dsh-superagent` row sets `edge` from `MUMBO_EDGE_MCP_URL`, `MUMBO_EDGE_TOKEN_FILE` and `MUMBO_PROJECT_ID` when any is set, so a partial set fails the Config at load, and leaves it unset when none is. The edge half exports the three in a project box's start script: the model host's `/mcp/report` URL, the path of a root-only file holding the box's token (the one dsh gets as `DEEPSEEK_API_KEY`), and the project id.
 - `apps/cli/tests/project-overlay-loader.spec.ts`: boots the overlay through the real Loader with all three variables (resolved), none (unset), and two of them (the plugin fails at load).
 - `docs/config-catalog.md`: regenerated; the `DeploymentConfig` source line moved.
