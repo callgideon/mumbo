@@ -748,7 +748,10 @@ The region is section 17c. All of these build on stage 9 (the box as the person'
     - A keyring doesn't help while the agent is root, and a URL denylist doesn't protect the files.
   - **Containment is the fix and is pulled forward (B24, below).**
   - **Until then, the browser-level denials (B25)** stop the easy paths: the browser tools and computer use opening the password and payment pages, or reading a page while it shows them.
-  - **Recommended to the founder** **[my call]**: enable the `passwords` and `payments` sync types after B24 passes its escape tests. B24 is days, not weeks. B18 ships everything else syncing, with those two types behind one policy line.
+  - **Informed founder decision** **[founder: 2026-11-10, "Sync everything anyway"]**.
+    - The founder was told plainly that the agent, or anyone steering it, and the backups could read every password and card, and that blocking Chrome's pages doesn't stop it.
+    - So the `passwords` and `payments` sync types are on now, not gated on B24.
+    - The designer's recommendation was to wait for B24's escape tests.
   - Chrome Sync never carries sign-ins (cookies) in either direction. The person signs in to each site once in the box, and the profile, with its cookies, is in every backup.
 - **Signing in.**
   - The person signs in on the desktop.
@@ -840,7 +843,7 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
 | **B24** | mumbo-impl | Agent containment (above): the `agent` user and its environment through a harness "run as" on the subprocess seam; the file tools' readable-roots allowlist; box permissions and the iptables rules; the escape tests in a real box. Agent Notes, READMEs and tests per the repository rules | — (start now) |
 | **B25** | mumbo-impl | Browser-level denials (above): hard-denied URLs before and after every browser tool call in `@mumbo/browser-consent`; Chrome's `URLBlocklist`; computer use asking for writes | — (start now) |
 
-B17, B18, B20, B24 and B25 can run in parallel. B18 and B19 both change the template and the start script's desktop block, so they run in that order. B18 and B24 both touch the start script's desktop block too; B24 rebases on B18. **Turn on the `passwords` and `payments` sync types after B24's escape tests pass** (recommended; the founder decides).
+B17, B18, B20, B24 and B25 can run in parallel. B18 and B19 both change the template and the start script's desktop block, so they run in that order. B18 and B24 both touch the start script's desktop block too; B24 rebases on B18. Every sync type, passwords and payments included, is on from B18 (the founder's informed decision); B24 and B25 are the most urgent tasks in this list.
 
 ## 17c. Regions: the box near the person (N1) **[founder: 2026-11-10; my call on the how]**
 
@@ -982,7 +985,7 @@ The person's-computer track (N1: sections 17b and 17c, tasks B17–B23 and R1–
 - **WhatsApp Web automation can get the account banned** (part C).
 - **The box's Chrome holds the founder's saved passwords and payment cards** **[founder's choice, 2026-11-10]**.
   - Until B24 lands, the root agent, and anyone steering it, can read them from disk, and the backups carry them.
-  - Mitigation: B24 is pulled forward, and B25's denials close the browser paths. Recommended: turn the two sync types on after B24's escape tests (section 17b).
+  - The founder accepted this, informed (section 17b). Mitigation: B24 is pulled forward and runs first, and B25's denials close the browser paths.
 - **Google may refuse to sign in** a browser with remote debugging on, or one on a datacenter address.
   - Mitigation: the person signs in on the desktop and handles Google's checks.
   - If Google still refuses, Chrome is restarted once without the debugging port for the sign-in, then with it again. B18's acceptance tests this first.
