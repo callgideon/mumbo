@@ -17,18 +17,57 @@ export function templateArgs(argv, env = process.env) {
     minAvailMB: Number(minAvail),
   }
 }
+
+/** true: the founder's full sync (decision 2026-11-10), passwords and payment cards included, since browser snapshots
+ *  mask password and card fields (B25). false keeps Chrome from saving or syncing them. */
+const CHROME_SENSITIVE_SYNC = true
+/** Chrome's own pages for saved passwords, payment cards, addresses and their internals, blocked for everyone in the box's
+ *  Chrome (spec section 17b, B25): computer use drives Chrome without going through browser consent. The person manages
+ *  passwords and cards on their own devices. */
+export const CHROME_URL_BLOCKLIST = ['chrome://password-manager', 'chrome://settings/passwords', 'chrome://settings/payments', 'chrome://settings/autofill',
+  'chrome://settings/addresses', 'chrome://sync-internals', 'chrome://autofill-internals', 'chrome://password-manager-internals']
+/** The template step that fails the build unless the image's browser consent knows `deniedUrls` and the image installs
+ *  playwright-core with the masking patch (B25), so full sync never ships on an image whose snapshots show passwords:
+ *  the patch file must be listed in pnpm-workspace.yaml, and the installed bundle must carry it.
+ *  @param {string} src the image's source checkout, /src
+ *  @returns {string} the shell step */
+export const maskingGuardStep = (src = '/src') => [
+  `grep -q deniedUrls ${src}/packages/mumbo/browser-consent/src/index.ts || { echo 'mumbo-box: this image has no B25 browser consent (deniedUrls)' >&2; exit 1; }`,
+  `p=$(sed -n 's/^ *playwright-core@[^:]*: *\\(patches\\/playwright-core@[^ ]*\\.patch\\) *$/\\1/p' ${src}/pnpm-workspace.yaml) && [ -n "$p" ] && [ -f "${src}/$p" ] || { echo 'mumbo-box: pnpm-workspace.yaml lists no playwright-core patch under patches/' >&2; exit 1; }`,
+  `grep -qs maskedInjectedScriptSource ${src}/node_modules/.pnpm/playwright-core@*/node_modules/playwright-core/lib/coreBundle.js || { echo 'mumbo-box: the installed playwright-core lacks the masking patch' >&2; exit 1; }`,
+].join('; ')
+/** The template step that writes Google Chrome's managed policy, root-owned. Downloads land in the shared folder the
+ *  assistant reads (edge roleInstructions).
+ *  @param {boolean} sensitiveSync CHROME_SENSITIVE_SYNC
+ *  @returns {string} the shell step */
+export const chromePolicyStep = (sensitiveSync) => {
+  const policy = { RestoreOnStartup: 1, DefaultBrowserSettingEnabled: false, MetricsReportingEnabled: false, DownloadDirectory: '/home/shared/Downloads',
+    URLBlocklist: CHROME_URL_BLOCKLIST,
+    ...(sensitiveSync ? {} : { SyncTypesListDisabled: ['passwords', 'payments'], PasswordManagerEnabled: false, AutofillCreditCardEnabled: false }) }
+  return `install -d -m 0755 /etc/opt/chrome/policies/managed && printf '%s\\n' '${JSON.stringify(policy)}' > /etc/opt/chrome/policies/managed/mumbo.json && chmod 0644 /etc/opt/chrome/policies/managed/mumbo.json`
+}
+/** The user's box is their computer: a virtual display, the XFCE desktop, Google Chrome stable from Google's apt
+ *  repository (each build installs the current release) and the noVNC live view. The edge's start script runs them as
+ *  the user `browser`, and writes /usr/local/bin/google-chrome, the one way to start Chrome; the menu entry and XFCE's
+ *  web browser are aimed at it here. */
+export const BOX_STEPS = [
+  ...(CHROME_SENSITIVE_SYNC ? [maskingGuardStep()] : []),
+  'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google-chrome.asc && chmod go+r /etc/apt/keyrings/google-chrome.asc && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xvfb x11vnc novnc websockify xfce4-session xfwm4 xfce4-panel xfdesktop4 thunar xfce4-terminal tango-icon-theme librsvg2-common google-chrome-stable dbus-x11 xdotool wmctrl imagemagick xsel xauth fonts-noto-core fonts-noto-color-emoji fonts-noto-cjk procps && rm -rf /var/lib/apt/lists/*',
+  'id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser',
+  // Downloads are shared through the group shared (B24 adds the agent's users): /home/shared is root's, so no member can
+  // replace the folder itself. The browser's home stays its own.
+  'groupadd -f shared && usermod -aG shared browser && chmod 0700 /home/browser && install -d -m 0755 /home/shared && install -d -o browser -g shared -m 2770 /home/shared/Downloads',
+  chromePolicyStep(CHROME_SENSITIVE_SYNC),
+  // The stock panels, without the panel's first-start dialog; XFCE's web browser and Chrome's menu entry start the box's Chrome.
+  'cp /etc/xdg/xfce4/panel/default.xml /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml && sed -i "s/^WebBrowser=.*/WebBrowser=google-chrome/" /etc/xdg/xfce4/helpers.rc && install -d /usr/local/share/applications && sed "s#/usr/bin/google-chrome-stable#/usr/local/bin/google-chrome#" /usr/share/applications/google-chrome.desktop > /usr/local/share/applications/google-chrome.desktop',
+]
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) await build(templateArgs(process.argv))
 
 async function build({ image, name, memoryMB, cpuCount, minAvailMB }) {
 let tpl = Template().fromImage(image, { username: 'AWS', password: process.env.ECR_PASSWORD }).setUser('root')
-// The user's box is their computer: a virtual display, a window manager, Chromium and the noVNC live view
-// (PRODUCTION.md stage 9). The edge's start script runs them; children (mumbo-child) stay headless.
-if (name.startsWith('mumbo-box')) {
-  tpl = tpl.runCmd([
-    'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xvfb openbox x11vnc novnc websockify chromium dbus-x11 xdotool imagemagick xsel xauth fonts-noto-core fonts-noto-color-emoji fonts-noto-cjk procps && rm -rf /var/lib/apt/lists/*',
-    'id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser',
-  ])
-}
+// Children (mumbo-child) stay headless.
+if (name.startsWith('mumbo-box')) tpl = tpl.runCmd(BOX_STEPS)
 // A project box is headless: git, gh (GitHub's apt repository) and openssl for the box-local GitHub proxy's CA.
 if (name.startsWith('mumbo-project')) {
   tpl = tpl.runCmd([
