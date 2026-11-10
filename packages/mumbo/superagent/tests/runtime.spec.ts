@@ -1169,6 +1169,18 @@ it('under run-as refuses to recreate a deleted worker Session whose ticket direc
   expect(runtime.store.tickets.get(ticket.id)!.delivery).toMatchObject({ error: expect.stringContaining(`leads to ${outside} through a symbolic link`) })
   expect(sections.has(sessionId)).toBe(false)
   expect(relays(sessionId)).toEqual([])
+  // The refused recreation left the Session loaded where the link leads; the delivery's retries after their backoff find it
+  // loaded, and still steer nothing into it.
+  expect(agents.has(sessionId)).toBe(true)
+  const resolved = () => controller.resolveAgent.mock.calls.filter(([id]) => id === sessionId).length
+  const before = resolved()
+  for (const ms of [5_000, 15_000]) {
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + ms })
+    try { await runtime.pump(); await runtime.idle() } finally { vi.useRealTimers() }
+  }
+  expect(resolved()).toBeGreaterThan(before)
+  expect(runtime.store.tickets.get(ticket.id)!.delivery).toMatchObject({ error: expect.stringContaining(`leads to ${outside} through a symbolic link`) })
+  expect(relays(sessionId)).toEqual([])
 })
 
 it('under run-as starts a new main Session in the worker directory when the earlier one is in the state directory, which it keeps', async () => {
@@ -1207,9 +1219,33 @@ it('under run-as fails a ticket accepted before it, whose directory is in the st
   await next.pump()
   await next.idle()
   expect(next.store.tickets.get(ticket.id)!.assignments.at(-1)).toMatchObject({ report: expect.objectContaining({ state: 'failed',
-    summary: expect.stringContaining(`The ticket directory ${ticket.execution!.directory} is in the state directory ${directory}, which the worker cannot enter under a run-as subprocess provider: the ticket was accepted before it. Its files stay there; open a new ticket for this work`) }) })
+    summary: expect.stringContaining(`The ticket directory ${ticket.execution!.directory} is in the state directory ${directory}, which the worker cannot enter under a run-as subprocess provider; set the Execution directory, or workDirectory when it is empty, outside it. A ticket accepted before run-as has its directory there: its files stay there, and a new ticket must take the work`) }) })
   expect(subprocess.spawn.mock.calls.filter(([spec]) => spec.argv.includes(ticket.execution!.directory))).toEqual([])
   expect(relays(sessionId)).toEqual([])
+})
+
+it('under run-as fails a ticket accepted before it at the next message for its Assignment that settled before the restart, delivering nothing', async () => {
+  const { ticket, sessionId } = await acceptedTicket()
+  // The worker waits for a person, so its Assignment keeps its Session across the restart instead of launching again.
+  await runTool(sessionId, 'orchestrator_report', { state: 'blocked', summary: 'need credentials' })
+  const workerDirectory = join(directory, 'worker')
+  mkdirSync(workerDirectory)
+  answers[HELPERS] = `file:${workerGitConfig(workerDirectory)}\0${credentialHelper(AGENT())}\0`
+  // A restart unloads the worker Session.
+  agents.delete(sessionId)
+  const next = await restart({ runAs: true, workerDirectory, workDirectory: workOutsideState() })
+  await next.ready
+  next.sources.register(feishuKind); next.sources.register(githubKind)
+  deliveries.mockClear(); subprocess.spawn.mockClear()
+  await receive(feishu('2', 'the credentials are in the vault', { mentions: [], root_id: 'om_1' }))
+  await next.idle()
+  const current = next.store.tickets.get(ticket.id)!
+  expect(current.assignments).toHaveLength(1)
+  expect(current.assignments.at(-1)).toMatchObject({ report: expect.objectContaining({ state: 'failed',
+    summary: expect.stringContaining(`The ticket directory ${ticket.execution!.directory} is in the state directory ${directory}, which the worker cannot enter`) }) })
+  expect(relays(sessionId)).toEqual([])
+  expect(agents.has(sessionId)).toBe(false)
+  expect(subprocess.spawn.mock.calls.filter(([spec]) => spec.argv.includes(ticket.execution!.directory))).toEqual([])
 })
 
 it('gives the orchestrator\'s own CLI calls its gh configuration directory, which workers never receive', async () => {

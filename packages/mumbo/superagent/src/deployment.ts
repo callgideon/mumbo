@@ -1,7 +1,7 @@
 /** Plugin configuration and startup verification for repository access and agent CLI identities. */
 import { LIMITS } from './limits.ts'
 import { accessSync, constants, statSync } from 'node:fs'
-import { delimiter, isAbsolute, join } from 'node:path'
+import { delimiter, isAbsolute, join, relative, sep } from 'node:path'
 import type { Volatile } from '@deepseek-ai/cordis'
 import s from '@deepseek-ai/schemastery'
 import { z } from 'zod'
@@ -14,7 +14,7 @@ const absolute = (description: string) => s.string().pattern(/^\//).description(
 /** Plugin configuration of the dsh-superagent entry. Volatile fields apply without a restart because dsh-superagent reads them on each use; changing `stateDir` remounts the plugin. */
 export const Config = s.object({
   stateDir: absolute('Directory for the database, locks and, unless `workerDirectory` names another, the worker shims and the agent\'s git configuration.').required(),
-  workDirectory: absolute('Directory that holds the ticket directories when the Execution settings name none; defaults to `<stateDir>/work`. Under a run-as subprocess provider the worker user must be able to write it.'),
+  workDirectory: absolute('Directory that holds the ticket directories when the Execution settings name none; defaults to `<stateDir>/work`. Under a run-as subprocess provider the worker user must be able to write it, and it, the default included, must be outside `stateDir`, or the plugin fails at load.'),
   workerDirectory: absolute('Directory for the worker shims (`worker-bin`) and the agent\'s git configuration (`worker-gitconfig`), which workers run and read and the orchestrator reads too; defaults to `stateDir`. Required under a run-as subprocess provider, where it, every ancestor and everything in it must be owned by root and writable by no other user; give the worker\'s group read and search access, such as `root:agent` mode `2750`.'),
   ghConfigDirectory: absolute('`GH_CONFIG_DIR` of the orchestrator\'s own GitHub CLI calls; unset, the CLI uses its own default. Required under a run-as subprocess provider, where setup reads the agent\'s GitHub login through it, so it must be signed in to the agent\'s account, and where it, every ancestor and everything in it must be owned by root and writable by no other user, because a gh alias runs commands.'),
   promptMaxChars: s.number().min(LIMITS.promptMaxChars.min).max(LIMITS.promptMaxChars.max).step(1).default(100000)
@@ -57,13 +57,26 @@ const MOVED: Record<string, string> = {
 }
 
 /**
+ * Whether `path` is the state directory or inside it, which a run-as worker cannot enter.
+ * @param stateDir - the state directory.
+ * @param path - a directory; a relative one counts as outside.
+ * @returns whether the state directory holds it.
+ */
+export function inStateDirectory(stateDir: string, path: string): boolean {
+  const rest = relative(stateDir, path)
+  return isAbsolute(path) && rest !== '..' && !rest.startsWith(`..${sep}`) && !isAbsolute(rest)
+}
+
+/**
  * Read machine settings and reject unknown configuration keys (naming where deprecated keys moved). Under a run-as
  * subprocess provider the orchestrator runs as root what workers run as another user, so `workerDirectory` and
- * `ghConfigDirectory` must be set and pass {@link assertOwnedByRoot}; the machine keeps the real paths checked.
+ * `ghConfigDirectory` must be set and pass {@link assertOwnedByRoot}, and `workDirectory`, its default included, must be
+ * outside `stateDir`, which workers cannot enter; the machine keeps the real paths checked.
  * @param config - the validated plugin configuration.
  * @param runAs - whether the mounted subprocess provider runs children as a run-as identity.
  * @returns the machine settings.
- * @throws when a key is unknown, or under run-as when either directory is unset or another user could change it.
+ * @throws when a key is unknown, or under run-as when either directory is unset or another user could change it, or
+ *   `workDirectory` is in `stateDir`.
  */
 export function machineOf(config: DeploymentConfig, runAs = false): Machine {
   const unknown = Object.keys(config).filter(key => !(key in (Config.dict ?? {})))
@@ -74,8 +87,13 @@ export function machineOf(config: DeploymentConfig, runAs = false): Machine {
     if (path === undefined) throw new Error(`dsh-superagent ${key} must be set under a run-as subprocess provider: the orchestrator, as root, uses what it holds`)
     return assertOwnedByRoot(path, key)
   }
-  return { stateDir, workDirectory: workDirectory ?? join(stateDir, 'work'), workerDirectory: contained('workerDirectory', workerDirectory) ?? stateDir,
-    ghConfigDirectory: contained('ghConfigDirectory', ghConfigDirectory), runAs, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins, githubApp }
+  const worker = contained('workerDirectory', workerDirectory) ?? stateDir, gh = contained('ghConfigDirectory', ghConfigDirectory)
+  const work = workDirectory ?? join(stateDir, 'work')
+  if (runAs && inStateDirectory(stateDir, work)) {
+    throw new Error(`dsh-superagent workDirectory ${work}${workDirectory === undefined ? ' (its default, <stateDir>/work)' : ''} is in stateDir ${stateDir}, which workers cannot enter under a run-as subprocess provider; set workDirectory to a directory outside stateDir, such as /root/work`)
+  }
+  return { stateDir, workDirectory: work, workerDirectory: worker, ghConfigDirectory: gh, runAs, promptMaxChars, admissionContextMaxPages,
+    admissionContextTimeoutMs, panelAdmins, githubApp }
 }
 
 /** `owner/name`, where neither part is `.` or `..`, which would leave `repos/` in an API path. */

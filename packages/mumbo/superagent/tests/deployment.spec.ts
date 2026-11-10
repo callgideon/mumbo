@@ -79,7 +79,7 @@ describe('configuration schema', () => {
 
 describe('under a run-as subprocess provider', () => {
   const contained = (overrides: Record<string, unknown> = {}) =>
-    machineOf(Config(minimal({ workerDirectory: join(dir, 'worker'), ghConfigDirectory: join(dir, 'gh'), ...overrides })), true)
+    machineOf(Config(minimal({ workDirectory: join(dir, 'work'), workerDirectory: join(dir, 'worker'), ghConfigDirectory: join(dir, 'gh'), ...overrides })), true)
   beforeEach(() => {
     // Modes are set explicitly: the test process's umask may leave new entries group-writable.
     mkdirSync(join(dir, 'worker', 'worker-bin'), { recursive: true }); chmodSync(join(dir, 'worker'), 0o750); chmodSync(join(dir, 'worker', 'worker-bin'), 0o750)
@@ -96,6 +96,16 @@ describe('under a run-as subprocess provider', () => {
     expect(contained({ ghConfigDirectory: join(dir, 'gh-link') })).toMatchObject({ workerDirectory: join(dir, 'worker'), ghConfigDirectory: join(dir, 'gh'), runAs: true })
     // Without run-as nothing is checked, and the worker files stay in the state directory.
     expect(machineOf(Config(minimal()))).toMatchObject({ workerDirectory: join(dir, 'state'), ghConfigDirectory: undefined, runAs: false })
+  })
+  it('refuses at load a work directory in the state directory, which workers cannot enter, its default included', () => {
+    const state = join(dir, 'state')
+    expect(() => contained({ workDirectory: undefined })).toThrow(`dsh-superagent workDirectory ${join(state, 'work')} (its default, <stateDir>/work) is in stateDir ${state}, which workers cannot enter under a run-as subprocess provider; set workDirectory to a directory outside stateDir, such as /root/work`)
+    for (const work of [state, join(state, 'tickets'), `${state}/../state/work`]) {
+      expect(() => contained({ workDirectory: work }), work).toThrow(`is in stateDir ${state}, which workers cannot enter`)
+    }
+    expect(contained({ workDirectory: `${state}-work` }).workDirectory).toBe(`${state}-work`)
+    // Without run-as the default stays in the state directory.
+    expect(machineOf(Config(minimal())).workDirectory).toBe(join(state, 'work'))
   })
   it('refuses at load a directory, an entry in it or an ancestor that another user could change, and a link inside', () => {
     const refused = (change: () => void, restore: () => void, message: string) => {

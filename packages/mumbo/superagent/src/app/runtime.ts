@@ -124,8 +124,10 @@ export class Runtime extends Service implements SourceHost {
       const resources: ResourceHost = { store, pages: new TextCache(4_000_000), prompts, commands, masterId, context: ctx,
         promptVersion: id => this.sessions.promptVersion(id), mayRead: (id, revision) => this.sessions.mayRead(id, revision),
         feishuPageSize: () => feishuSettings(sources).readPageSize, sourceLink: link }
+      // Under run-as the main Session starts in the worker directory, which the run-as user can enter but not write: root
+      // reads instructions and skills from a Session's directory, so never one a worker could plant them in, such as the work directory.
       const sessions = this.sessions = new Sessions({ context: ctx, store, prompts, effects, health: board.claim('models'), masterId,
-        runAs: machine.runAs, lifetime: this.lifetime,
+        masterDirectory: machine.runAs ? machine.workerDirectory : machine.stateDir, runAs: machine.runAs, lifetime: this.lifetime,
         closing: () => this.closing(), environment,
         tools: (agent, ticket) => ticket ? executorTools(this.toolHost, ticket) : mainTools(this.toolHost, agent) })
       const policyChanged: EngineForSettings['policyChanged'] = (from, to, effects) => { this.engine.policyChanged(from, to, effects) }
@@ -210,9 +212,7 @@ export class Runtime extends Service implements SourceHost {
     }
     this.sessions.install()
     this.executor.install()
-    // Under run-as the main Session starts in the worker directory, which the run-as user can enter but not write: root reads
-    // instructions and skills from a Session's directory, so never one a worker could plant them in, such as the work directory.
-    await this.sessions.ensure(this.masterId, this.machine.runAs ? this.machine.workerDirectory : this.machine.stateDir, 'dsh-superagent orchestrator', 'orchestrator')
+    await this.sessions.ensure(this.masterId, this.sessions.masterDirectory, 'dsh-superagent orchestrator', 'orchestrator')
     for (const id of this.settings.syncable()) await this.settings.sync(id).catch(() => { /* sync() records its failure in health. */ })
     // If stop() was called while awaiting setup, session creation, or policy sync, do not start background loops.
     if (this.closing()) return

@@ -2,11 +2,11 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { dirname, join, relative } from 'node:path'
+import { dirname, join } from 'node:path'
 import { key, latestAssignment, latestReport, liveTicket, runningAssignment, threadKey, waitsForPerson } from '../core/index.ts'
 import type { AssessmentOutcome, Assignment, EngineForExecutor, Execution, Executor, Mandate, PolicyEffect, Ticket, TicketInput, Trigger }
   from '../core/index.ts'
-import type { Machine } from '../deployment.ts'
+import { inStateDirectory, type Machine } from '../deployment.ts'
 import { makeWorkerDirectory, runAsWorker, verifyDirectory } from '../infra/environment.ts'
 import type { Settings } from '../policy.ts'
 import type { Store } from '../app/store.ts'
@@ -298,6 +298,9 @@ export class DshExecutor implements Executor {
     const first = this.host.store.tickets.get(ticketId)
     const target = first && liveTicket(first) ? runningAssignment(first) : undefined
     if (!first || !target || !first.undelivered.length) return
+    // An Assignment that settled before run-as keeps its Session across a restart, so a message reaches it here, not at a launch.
+    const unreachable = this.unreachable(first)
+    if (unreachable !== undefined) { this.failed(ticketId, unreachable); return }
     let woken = false
     try {
       for (;;) {
@@ -430,6 +433,16 @@ export class DshExecutor implements Executor {
     })
   }
   private relay({ id, text }: { id: string; text: string }): void { this.host.sessions.relay(id, text) }
+  /**
+   * Under run-as, why a ticket's worker cannot work in its directory: the directory is in the state directory, which the
+   * worker cannot enter, as for a ticket accepted before run-as, under the state directory's default work directory.
+   */
+  private unreachable(ticket: Ticket): string | undefined {
+    const { runAs, stateDir } = this.host.machine
+    const directory = ticket.execution?.directory ?? ''
+    if (!runAs || !inStateDirectory(stateDir, directory)) return undefined
+    return `The ticket directory ${directory} is in the state directory ${stateDir}, which the worker cannot enter under a run-as subprocess provider; set the Execution directory, or workDirectory when it is empty, outside it. A ticket accepted before run-as has its directory there: its files stay there, and a new ticket must take the work`
+  }
   private async launch(ticket: Ticket, assignment: Assignment): Promise<void> {
     const current = () => {
       if (this.host.closing()) throw new Error('dsh-superagent is stopping')
@@ -440,13 +453,8 @@ export class DshExecutor implements Executor {
     const source = sourceTrigger(this.host, ticket)
     const workspace = ticket.execution?.directory ?? ''
     if (!current()) return
-    // Tickets accepted before run-as have their directories under the state directory's default work directory, where root
-    // ran their workers and the run-as user cannot enter.
-    const { runAs, stateDir } = this.host.machine
-    const fromState = relative(stateDir, workspace)
-    if (runAs && fromState !== '..' && !fromState.startsWith('../')) {
-      throw new Error(`The ticket directory ${workspace} is in the state directory ${stateDir}, which the worker cannot enter under a run-as subprocess provider: the ticket was accepted before it. Its files stay there; open a new ticket for this work`)
-    }
+    const unreachable = this.unreachable(ticket)
+    if (unreachable !== undefined) throw new Error(unreachable)
     // Prepare the workspace directory once; an existing directory counts as already prepared, including worktrees created before
     // `prepare` commands existed. The worker looks, so root follows no link the worker planted here.
     if (!await runAsWorker(this.host.context.subprocess, ['test', '-e', workspace], '/', this.host.lifetime).then(() => true, () => false)) {
