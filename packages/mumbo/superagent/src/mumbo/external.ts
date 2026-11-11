@@ -1,5 +1,5 @@
 /**
- * In Mumbo, the external-worker Executor (`UPSTREAM.md` S13, S14, S16): a worker outside the box, such as a member's own
+ * In Mumbo, the external-worker Executor (`UPSTREAM.md` S13, S14, S17): a worker outside the box, such as a member's own
  * Claude Code through the door, claims an external Ticket's Assignment under a lease, reports on it, pulls its Inputs, and
  * submits the head it pushed, whose independent review the submit then requests. Each call renews the lease, and so does each
  * of its git requests, which the edge fences here first. An expired lease ends, and a Ticket whose Assignment has no live

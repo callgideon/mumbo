@@ -266,7 +266,7 @@ Files outside the copy changed for S13:
 
 ## S14: fence and submit
 
-S13's worker could claim and report but neither push nor finish. The edge's worker git route fences each git request of a lease holder here before it forwards it, and the submit turns the head the worker pushed into the Ticket's draft pull request. In this entry a submit records `ready` without a review; S15 adds the review Ticket, and S16 has the submit request it. Written by task B37 T2b.
+S13's worker could claim and report but neither push nor finish. The edge's worker git route fences each git request of a lease holder here before it forwards it, and the submit turns the head the worker pushed into the Ticket's draft pull request. In this entry a submit records `ready` without a review; S15 adds the review Ticket, and S17 has the submit request it. Written by task B37 T2b.
 
 - `src/mumbo/external.ts`:
   - `fence`, in one transaction, checks the caller as `report` does, refuses `wrong_ref` when an update names another ref than `refs/heads/agent/<name>`, renews the lease, and appends each update's `new` head to `KV.external.pushed(ticket)`, keeping the newest 100 with a repeated head moved last. It answers `{ ok: true, leaseExpiresAt }`, and passes while paused.
@@ -283,7 +283,7 @@ S13's worker could claim and report but neither push nor finish. The edge's work
 
 ## S15: review Ticket
 
-Upstream's worker reviews its own pull request in a subagent and posts the review marker itself (S5). In Mumbo, a separate review Ticket, run by a fresh local worker, reviews an external worker's submitted head, and runtime code, not the model, posts the marker. Written by task B37 T3. `Engine.requestReview` has no caller in this entry: S16 has the external worker's submit (S14) call it, with the tests that a submit creates one review per commit and that the next claim after a second failed review answers `escalated: true`.
+Upstream's worker reviews its own pull request in a subagent and posts the review marker itself (S5). In Mumbo, a separate review Ticket, run by a fresh local worker, reviews an external worker's submitted head, and runtime code, not the model, posts the marker. Written by task B37 T3. `Engine.requestReview` has no caller in this entry: S17 has the external worker's submit (S14) call it, with the tests that a submit creates one review per commit and that the next claim after a second failed review answers `escalated: true`.
 
 - `src/core/model.ts`: `Ticket.review` (`{ of, pr, sha, round }`) on a review Ticket; `Ticket.reviews` (`{ sha, verdict, ticket, url, at, findings }[]`, findings cut at 2,000 characters) and `Ticket.escalated` on the ticket it reviews.
 - `src/core/tickets.ts`: `createReview(ticketId, { pr, sha })` creates one review Ticket per (ticket, commit) under the id `key('review', ticket, sha)`. It refuses an ended ticket (`ticketEnded`) and ends an open review of another commit `dropped`, with the reason `superseded`. It answers the commit's stored review while that one is open, has a verdict or was stopped by a person; one the executor dropped without a verdict, superseded or stale, gives way to a new review under `key('review', ticket, sha, <n>)`. The review Ticket has the ticket's Mandate and Decision, no Channel and no Subscription, the origin `{ triggerId: <the ticket's origin>, triggerIds: [] }` and no `executor`, so the DshExecutor launches it in a new Session, `worker-<review id>`. Its Execution comes from `prepareTicket` with the accept outcome `{ name: 'review', note: 'Review PR #<pr> at <sha>.' }`, so its directory is `review-<id12>`. `reviewed(...)` adds a verdict to the ticket's `reviews`; a `fail` adds the text Input "The independent review of <sha> failed: <findings> Fix it, push, and submit again." to an open ticket, which wakes a local worker and reaches an external Ticket's Executor through `deliver`; the second `fail` sets `escalated`. `attachable` refuses a review Ticket (`reviewTicket`, new in `src/core/errors.ts` and `src/client/locales.ts`), `wake` never resumes one, and `end` ends a ticket's open review `dropped`, with the reason `reviewedTicketEnded`.
@@ -300,7 +300,18 @@ Upstream's worker reviews its own pull request in a subagent and posts the revie
 
 Files outside the copy changed for S15: `apps/cli/tests/box-containment.spec.ts` (S12's classification of the orchestrator tools lists `orchestrator_review`, and the tool names it checks it against include those `executorTools` builds for a review Ticket's Session).
 
-## S16: review on submit
+## S16: start without waiting for the runtime
+
+Upstream's plugin start awaits `Runtime.ready`, which includes ensuring the main Session. That ensure resolves the router preset through DSH's preset registry, which waits for the Host Loader to settle while a preset row waits for a service, and the Loader waits for this start: neither settles. Written by task B24, harness side.
+
+- `src/index.ts`: `apply` does not await `runtime.ready`. Its settling logs `dsh-superagent ready` or `dsh-superagent is waiting for setup`, as before, or `dsh-superagent could not start: <error>`; a Runtime whose `lifetime` aborted first logs neither.
+- `src/app/runtime.ts`: a failed `initialize` sets the `runtime` health entry to `error` unless `lifetime` aborted first, by a stop or a compromised state directory lock whose entry stays, and `ready` still rejects. When `stop()` ran while Setup ran, `initialize` restores the environment Setup applied and returns before it installs anything.
+- `src/app/sessions.ts`: `ensure` aborts with `lifetime`'s reason after each await, so an ensure that outlives `stop()` starts no create, decoration, permission change or rename after it; one already running may still land.
+- `src/sources/github.ts`, `src/sources/feishu-loops.ts`: each Source loop waits for `ready` only until its unload aborts it, so the unload does not wait for a start that can wait for the Host Loader, which waits for that unload.
+- Docs: the README In Mumbo bullet and the startup paragraph of `docs/007-architecture.md`.
+- Tests: `tests/sources.spec.ts` (the GitHub and Feishu loops unload while `ready` never settles), `tests/index.spec.ts` (the start returns while `ready` is pending, logs its outcome, and logs nothing for a stopped Runtime) and `tests/runtime.spec.ts` (a stop while the main Session's resolve waits, after which the ensure creates and renames nothing; a stop during Setup, after which the environment is restored and no Session is resolved; a failed start in the `runtime` health entry, and a lock compromised during startup kept there).
+
+## S17: review on submit
 
 S14's submit recorded `ready` and requested no review, and S15's review Ticket had no caller, so an external worker's pull request never got the pass marker the edge's grant needs. Here the submit requests the review of the head it recorded. Written by task B37 T3 (wiring).
 
