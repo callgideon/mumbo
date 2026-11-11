@@ -361,6 +361,9 @@ it('collects both roles\' tools, prompts, skills and inputs', () => {
   // Only the review Ticket's worker reads the review section.
   const section = (sessionId: string) => host.sections.get(sessionId)!({})
   expect([section(sessions.reviewer), section(sessions.workerA)].map(text => text.includes(REVIEW_INSTRUCTIONS))).toEqual([true, false])
+  // It overrides the worker prompt's rules to acknowledge and answer the request in the first message, which the reviewer reads too.
+  expect(REVIEW_INSTRUCTIONS).toContain('This section takes precedence over every other section')
+  expect(REVIEW_INSTRUCTIONS).toContain('The other ticket\'s worker acknowledged the request already: do not acknowledge, answer or message anyone on any thread.')
   expect([...toolsOf('orchestrator').keys()]).toEqual(expect.arrayContaining(['orchestrator_route', 'orchestrator_eval_decide', 'orchestrator_reply']))
   // The one routing tool takes the place of four.
   for (const name of ['orchestrator_ticket_accept', 'orchestrator_ticket_attach', 'orchestrator_ticket_stop', 'orchestrator_trigger_ignore']) {

@@ -105,7 +105,8 @@ export class Engine {
    * message the ticket let go, read for context only, or had before it ended. An ended ticket resumes under its Mandate, at
    * once unless processing is paused.
    * @throws UserError for a Trigger the Policy does not deliver, such as one from a sender on neither the Source's allowed list nor
-   * its bot list, for a ticket a person stopped, which withdrew its Mandate, or for one whose Mandate the Policy no longer holds.
+   * its bot list, for a ticket a person stopped, which withdrew its Mandate, or for one whose Mandate the Policy no longer holds,
+   * and, in Mumbo, for a review Ticket (`UPSTREAM.md` S14).
    */
   attach(ticketId: string, triggerId: string, note?: string): Ticket {
     return this.repo.atomic(() => {

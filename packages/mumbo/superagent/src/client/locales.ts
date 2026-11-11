@@ -689,6 +689,7 @@ const TEXT = {
   'userError.evalFinished': USER_ERRORS.evalFinished[1],
   'userError.notAdmissible': USER_ERRORS.notAdmissible[1],
   'userError.notExplicit': USER_ERRORS.notExplicit[1],
+  'userError.reviewTicket': USER_ERRORS.reviewTicket[1],
   'userError.ticketStopped': USER_ERRORS.ticketStopped[1],
   'userError.mandateRevoked': USER_ERRORS.mandateRevoked[1],
   'userError.notRetryable': USER_ERRORS.notRetryable[1],
