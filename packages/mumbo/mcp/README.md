@@ -97,7 +97,7 @@ A turn is report-started when a project's report opened it. The turn's origin is
 In such a turn only these calls run unasked:
 
 - `read`, `read_image`, `glob` and `grep`, which `fs-local` confines to the model roots and read-only roots where a box configures them;
-- `needs_you`, `get_goal` and `job_list`, which read status;
+- `get_goal` and `job_list`, which read status;
 - `todo_write`;
 - a Playwright MCP browser call (`mcp__playwright-mcp__*`) that `@mumbo/browser-consent`'s `classify` counts as a read.
 

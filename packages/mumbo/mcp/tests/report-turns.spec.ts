@@ -51,7 +51,7 @@ const GATED = [
 ] as const
 
 /** Stand-ins that run unasked: file reads and searches, status reads, the todo list, and browser reads. */
-const UNASKED = ['read', 'read_image', 'glob', 'grep', 'needs_you', 'get_goal', 'job_list', 'todo_write', 'mcp__playwright-mcp__browser_snapshot'] as const
+const UNASKED = ['read', 'read_image', 'glob', 'grep', 'get_goal', 'job_list', 'todo_write', 'mcp__playwright-mcp__browser_snapshot'] as const
 
 /** Where the gate's listener sits relative to Run Wild's: mounted before it (inner) or after it (outer). */
 type Order = 'before Run Wild' | 'after Run Wild'
@@ -235,7 +235,8 @@ describe('reportStarted', () => {
 describe('runsUnasked', () => {
   it('lets only reads and the todo list run, and follows browser consent for browser calls', () => {
     expect(UNASKED.filter(name => !runsUnasked(name, {}))).toEqual([])
-    expect([...GATED, 'run_code'].filter(name => runsUnasked(name, {}))).toEqual([])
+    // `needs_you` is the door's tool for the edge, not a model tool, so the list does not name it.
+    expect([...GATED, 'run_code', 'needs_you'].filter(name => runsUnasked(name, {}))).toEqual([])
     expect(runsUnasked('mcp__playwright-mcp__browser_navigate', { url: 'https://example.com' })).toBe(true)
     expect(runsUnasked('mcp__playwright-mcp__browser_navigate', { url: 'file:///etc/passwd' })).toBe(false)
   })
