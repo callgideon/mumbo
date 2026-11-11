@@ -171,8 +171,9 @@ export async function ensureWithin(box, principal, ms, late) {
  * otherwise with the box's 400 or 409 and its code (`invalid_request`, `id_reused`, `relay_off`), or 502, also for an
  * answer whose Trigger id is not of that form.
  *
- * api(member, id) ensures the box once and resolves `(method, path) => Promise<object>`, which calls Superagent's management
- * API (`/orchestrator/api/<path>`) as the member, who must be one of the box's panel admins, and resolves its JSON answer.
+ * api(member, id) ensures the box once and resolves `(method, path, body?) => Promise<object>`, which calls Superagent's
+ * management API (`/orchestrator/api/<path>`) as the member, who must be one of the box's panel admins, with `body`, when
+ * given, as JSON (`content-type: application/json`), and resolves its JSON answer.
  * It fails with 403 (`code: 'owner_only'`) when the box refuses the member as no panel admin (NOT_PANEL_ADMIN), with the
  * box's 400, 404 or 409 and its message (`code` the box's, else `not_found` for 404 and `invalid_request` for 400 and 409),
  * and 502 (`code: 'box_refused'`, with the box's text) for any other answer, other 403s included (a Host or Origin fence,
@@ -220,8 +221,9 @@ export function projectRelay({ projects, box, boxFetch, siteHostOf, edgeHost, re
     },
     async api(member, id) {
       const { target, host, member: signed, timeoutMs } = await reach(member, id)
-      return async (method, path) => {
-        const r = await boxFetch(target, host, `/orchestrator/api/${path}`, { method, headers: { 'x-orchestrator-request': '1' }, member: signed, timeoutMs: timeoutMs() })
+      return async (method, path, body) => {
+        const r = await boxFetch(target, host, `/orchestrator/api/${path}`, { method, member: signed, timeoutMs: timeoutMs(),
+          headers: { 'x-orchestrator-request': '1', ...(body === undefined ? {} : { 'content-type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body) })
         let out
         try { out = JSON.parse(r.body) } catch { out = undefined }
         if (r.status === 200 && out && typeof out === 'object') return out

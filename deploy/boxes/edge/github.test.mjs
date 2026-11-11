@@ -71,7 +71,7 @@ const sendThenReset = (port, path, afterMs) => {
  * answered by `mint(asked body, nth mint, state.t)`, by default a token AGENT, and the installation lookup by
  * `installation()`. `state.t` is the clock (epoch ms).
  * `isHalted` takes `haltMs` and records each principal it is asked about in `haltChecks`; `state.settled` counts
- * handlers that have returned.
+ * handlers that have returned. With `state.worker` set, the claim is a worker's: `{ u: state.principal, worker }`.
  */
 async function forwarder({ reply = ok, lookup = lookupOk, author = () => Response.json({ user: { login: 'mumbo-bot[bot]', id: AGENT_ID } }), app = APP, noAgentId = false, mint = (asked, n, t) => granted(asked, 'AGENT', t), installation = () => Response.json({ id: 77 }), haltMs = 0, pushTimeoutMs } = {}) {
   const store = memoryStore()
@@ -102,7 +102,7 @@ async function forwarder({ reply = ok, lookup = lookupOk, author = () => Respons
     return reply(url, init)
   }
   const forward = githubForwarder({ store, halt: { isHalted }, app, agentId: noAgentId ? undefined : AGENT_ID, fetchImpl, now: () => state.t, log: (line) => logs.push(JSON.parse(line)), pushTimeoutMs })
-  const server = createServer((req, res) => forward(req, res, { u: state.principal, b: 'b1' }).finally(() => { state.settled++ }))
+  const server = createServer((req, res) => forward(req, res, state.worker ? { u: state.principal, worker: state.worker } : { u: state.principal, b: 'b1' }).finally(() => { state.settled++ }))
   await new Promise(r => server.listen(0, '127.0.0.1', r))
   const port = server.address().port
   const call = (path, { method = 'GET', headers = {}, body } = {}) => new Promise((resolve, reject) => {
@@ -569,6 +569,106 @@ test('git: a push updates refs/heads/agent/* only, unencoded; the probe, fetches
     assert.equal((await f.call(`github.com/${p}`)).status, 200, p)
     assert.equal(f.calls.at(-1).url, `https://github.com/${p}`)
   }
+})
+
+// ---- Worker mode (B37): an outside worker's token, which workers.mjs workerGit hands to the forwarder.
+const REF = 'refs/heads/agent/fix-login'
+/** A forwarder whose claim is a worker's for REF. Its fence records each call's updates with the number of requests
+ *  GitHub had been sent then, and answers `f.fenceAnswer()`. */
+async function workerForwarder() {
+  const f = await forwarder()
+  Object.assign(f, { fenced: [], fenceAnswer: async () => {} })
+  f.state.worker = { ref: REF, fence: async (updates) => { f.fenced.push({ updates, forwarded: f.calls.length }); return f.fenceAnswer() } }
+  return f
+}
+
+test('worker mode: ref adverts and fetches of the project repository are fenced, then go out with the App token', async (t) => {
+  const f = await workerForwarder(); t.after(f.close)
+  const basic = `Basic ${Buffer.from('x-access-token:AGENT').toString('base64')}`
+  for (const p of ['callgideon/mumbo.git/info/refs?service=git-upload-pack', 'callgideon/mumbo.git/info/refs?service=git-receive-pack']) {
+    assert.equal((await f.call(`github.com/${p}`)).status, 200, p)
+    assert.equal(f.calls.at(-1).url, `https://github.com/${p}`)
+    assert.equal(f.calls.at(-1).init.headers.authorization, basic)
+  }
+  const want = pkt('command=fetch\n') + '0001' + pkt(`want ${A}\n`) + '0000'
+  assert.equal((await f.call('github.com/callgideon/mumbo.git/git-upload-pack', { method: 'POST', headers: { 'content-type': 'application/x-git-upload-pack-request' }, body: want })).status, 200)
+  assert.equal(f.calls.at(-1).init.headers.authorization, basic)
+  assert.equal(f.calls.at(-1).streamed, true)
+  assert.deepEqual(f.fenced, [0, 1, 2].map(forwarded => ({ updates: undefined, forwarded })), 'each fence answers before GitHub is sent its request')
+})
+
+test('worker mode: a push passes only when every command updates the token\'s ref, and the fence gets the parsed commands', async (t) => {
+  const f = await workerForwarder(); t.after(f.close)
+  const push = (body) => f.call('github.com/callgideon/mumbo.git/git-receive-pack', { method: 'POST', headers: { 'content-type': 'application/x-git-receive-pack-request' }, body })
+  const update = Buffer.from(pkt(`${A} ${B} ${REF}\0 report-status side-band-64k\n`) + '0000' + 'PACK\0\0\0\x02\0\0\0\x01', 'latin1')
+  assert.equal((await push(update)).status, 200)
+  assert.deepEqual(Buffer.from(f.calls[0].init.body), update)
+  assert.deepEqual(f.fenced, [{ updates: [{ ref: REF, old: A, new: B }], forwarded: 0 }])
+  assert.equal((await push(pkt(`${Z} ${B} ${REF}\0report-status\n`) + '0000')).status, 200, 'creating the branch')
+  assert.deepEqual(f.fenced[1].updates, [{ ref: REF, old: Z, new: B }])
+  assert.equal((await push('0000')).status, 200, 'the probe')
+  assert.deepEqual(f.fenced[2].updates, [])
+  const forwarded = f.calls.length
+  for (const [why, body] of [
+    ['another agent branch', pkt(`${A} ${B} refs/heads/agent/other\0\n`) + '0000'],
+    ['main', pkt(`${A} ${B} refs/heads/main\0\n`) + '0000'],
+    ['a delete', pkt(`${A} ${Z} ${REF}\0\n`) + '0000'],
+    ['an extra command', pkt(`${A} ${B} ${REF}\0\n`) + pkt(`${A} ${B} refs/heads/agent/other\n`) + '0000'],
+    ['a longer ref', pkt(`${A} ${B} ${REF}-2\0\n`) + '0000'],
+  ]) {
+    const r = await push(body)
+    assert.equal(r.status, 403, why)
+    assert.equal(r.headers['content-type'], 'text/plain; charset=utf-8', 'git shows a text/plain refusal')
+  }
+  assert.equal(f.calls.length, forwarded)
+  assert.equal(f.fenced.length, 3, 'a refused push is not fenced')
+})
+
+test('worker mode: a refusing fence is the answer and nothing reaches GitHub; halted, a push is refused before its fence and a fetch passes', async (t) => {
+  const f = await workerForwarder(); t.after(f.close)
+  const advert = 'github.com/callgideon/mumbo.git/info/refs?service=git-receive-pack'
+  const pushPack = { method: 'POST', body: pkt(`${A} ${B} ${REF}\0report-status\n`) + '0000' }
+  f.fenceAnswer = async () => { throw Object.assign(new Error('fenced: lease_expired'), { status: 403 }) }
+  const advertised = await f.call(advert)
+  assert.equal(advertised.status, 403)
+  assert.equal(advertised.body, 'Mumbo edge refused GET /callgideon/mumbo.git/info/refs: fenced: lease_expired\n')
+  const pushed = await f.call('github.com/callgideon/mumbo.git/git-receive-pack', pushPack)
+  assert.equal(pushed.status, 403)
+  assert.equal(pushed.body, 'Mumbo edge refused POST /callgideon/mumbo.git/git-receive-pack: fenced: lease_expired\n')
+  f.fenceAnswer = async () => { throw new Error('no answer') }
+  assert.equal((await f.call(advert)).status, 503, 'a rejection without a status')
+  assert.deepEqual([f.calls.length, f.fenced.length], [0, 3])
+  f.fenceAnswer = async () => {}
+  f.halted.add(ME)
+  const stopped = await f.call('github.com/callgideon/mumbo.git/git-receive-pack', pushPack)
+  assert.equal(stopped.status, 403)
+  assert.match(stopped.body, /stopped by the founder\n$/)
+  assert.equal(f.fenced.length, 3)
+  assert.equal((await f.call('github.com/callgideon/mumbo.git/info/refs?service=git-upload-pack')).status, 200)
+  assert.equal(f.calls.length, 1)
+})
+
+test('worker mode: REST, GraphQL, codeload, objects, HEAD and other repositories are refused, unfenced', async (t) => {
+  const f = await workerForwarder(); t.after(f.close)
+  const json = { 'content-type': 'application/json' }
+  for (const [p, init] of [
+    ['api.github.com/repos/callgideon/mumbo/pulls', {}],
+    ['api.github.com/repos/callgideon/mumbo/issues/5/comments', { method: 'POST', headers: json, body: '{"body":"hi"}' }],
+    ['api.github.com/repos/callgideon/mumbo/pulls', { method: 'POST', headers: json, body: '{"title":"t","head":"agent/fix-login","base":"main"}' }],
+    ['api.github.com/graphql', { method: 'POST', headers: json, body: JSON.stringify({ query: '{ viewer { login } }' }) }],
+    ['api.github.com/graphql', { method: 'POST', headers: json, body: JSON.stringify({ query: 'mutation { addComment(input: {subjectId: "I_1", body: "x"}) { clientMutationId } }' }) }],
+    ['api.github.com/user', {}],
+    ['codeload.github.com/callgideon/mumbo/tar.gz/refs/heads/main', {}],
+    ['objects.githubusercontent.com/x', {}],
+    ['github.com/callgideon/mumbo.git/info/refs?service=git-upload-pack', { method: 'HEAD' }],
+    ['github.com/callgideon/other.git/info/refs?service=git-upload-pack', {}],
+    ['github.com/callgideon/other.git/git-upload-pack', { method: 'POST', body: '0000' }],
+  ]) {
+    const r = await f.call(p, init)
+    assert.equal(r.status, 403, p)
+    if (init.method !== 'HEAD') assert.match(r.body, /: a worker token fetches and pushes git only\n$/, p)
+  }
+  assert.equal(f.calls.length + f.lookups.length + f.authors.length + f.fenced.length, 0)
 })
 
 test('a body declared over 256 MB answers 413 without being read', { timeout: 10_000 }, async (t) => {

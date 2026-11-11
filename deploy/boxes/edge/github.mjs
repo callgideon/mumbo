@@ -80,6 +80,13 @@ const AGENT_PERMISSIONS = { contents: 'write', pull_requests: 'write', issues: '
  * `agentId`, by numeric id; without `agentId`, or when the author cannot be read, it answers 403 and nothing is
  * forwarded. `POST /pulls` takes only PULL_CREATE_KEYS. A request whose client has
  * left is not forwarded, and one in flight is aborted.
+ * Worker mode (`claim.worker`, an outside worker's token through workers.mjs workerGit): only git smart HTTP on the
+ * project's repositories passes (`GET info/refs` for either service, `POST git-upload-pack`, `POST git-receive-pack`); a
+ * push passes only when every command updates `claim.worker.ref`. Every other request is refused 403 `a worker token
+ * fetches and pushes git only`. After every other check, the token and, for a push, the whole pack, and immediately
+ * before GitHub is asked, `claim.worker.fence(updates)` runs (`updates` the push's `{ ref, old, new }` commands, [] for
+ * the probe, undefined for a fetch or ref advert); when it rejects, its `message` and `status` (503 without one) are the
+ * refusal and nothing reaches GitHub. Worker refusals are `text/plain`, which git shows to its user.
  * Credentials: requests to api.github.com and github.com carry the project's App installation token, for the project's
  * bound repositories and AGENT_PERMISSIONS (github-app.mjs tokenCache: one mint at a time per project, reused until 5
  * minutes before expiry, minted anew when the bound repositories change, dropped when GitHub answers 401, a failure
@@ -91,8 +98,9 @@ const AGENT_PERMISSIONS = { contents: 'write', pull_requests: 'write', issues: '
  * @param {{ store: object, halt: { isHalted(principal: string): Promise<boolean> }, app: { appId: string | undefined, privateKey: string | undefined } | undefined, agentId: number | undefined, fetchImpl: typeof fetch, now?: () => number, log?: (line: string) => void, pushTimeoutMs?: number }} deps
  *   `app` without both fields answers 503 to every request; `agentId` is the agent's numeric GitHub user id
  *   (GITHUB_AGENT_ID); `now` is epoch ms; `pushTimeoutMs` defaults to PUSH_TIMEOUT_MS.
- * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, claim: { u: string, b: string }) => Promise<void>}
- *   handles one request; `claim` is the verified box token (`u` the principal, `b` the box id).
+ * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, claim: { u: string, b?: string, worker?: { ref: string, fence(updates?: { ref: string, old: string, new: string }[]): Promise<void> } }) => Promise<void>}
+ *   handles one request; `claim` is the verified box token (`u` the principal, `b` the box id), or a worker token's
+ *   project principal with `worker`.
  */
 export function githubForwarder({ store, halt, app, agentId, fetchImpl, now = Date.now, log = console.log, pushTimeoutMs = PUSH_TIMEOUT_MS }) {
   // Principals with a receive-pack in flight on this replica: one buffered push each.
@@ -145,8 +153,8 @@ export function githubForwarder({ store, halt, app, agentId, fetchImpl, now = Da
     const refuse = (reason, status = 403) => {
       log(JSON.stringify({ edge: 'github', refused: reason ?? 'not an allowed operation', principal: claim.u, method, host, path }))
       const message = `Mumbo edge refused ${method} ${path}${reason ? `: ${reason}` : ''}`
-      res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', ...(status === 413 ? { connection: 'close' } : {}) })
-        .end(JSON.stringify(graphql ? { errors: [{ message }] } : { message }))
+      res.writeHead(status, { 'content-type': claim.worker ? 'text/plain; charset=utf-8' : 'application/json', 'cache-control': 'no-store', ...(status === 413 ? { connection: 'close' } : {}) })
+        .end(claim.worker ? `${message}\n` : JSON.stringify(graphql ? { errors: [{ message }] } : { message }))
     }
     const id = claim.u.startsWith('project:') ? claim.u.slice('project:'.length) : undefined
     if (!isProjectId(id)) return refuse('GitHub is only for project boxes')
@@ -166,9 +174,10 @@ export function githubForwarder({ store, halt, app, agentId, fetchImpl, now = Da
     }
     const ours = (owner, name) => name !== undefined && repos.includes(`${owner}/${name}`.toLowerCase().replace(/\.git$/, ''))
     const gitService = host === 'github.com' && method === 'POST' && segs.length === 3 && ours(segs[0], segs[1]) ? segs[2] : undefined
+    if (claim.worker && !(gitService || (host === 'github.com' && method === 'GET' && readable(host, segs, url, ours)))) return refuse('a worker token fetches and pushes git only')
     const headers = {}
     for (const k of REQUEST_HEADERS) if (req.headers[k] !== undefined) headers[k] = req.headers[k]
-    let body
+    let body, updates
     const read = method === 'GET' || method === 'HEAD'
     // GitHub may merge query parameters into a write's parameters (base, variables), past the body checks below.
     if (!read && url.search) return refuse('a write may not carry a query string')
@@ -222,14 +231,19 @@ export function githubForwarder({ store, halt, app, agentId, fetchImpl, now = Da
       left.signal.addEventListener('abort', () => pushing.delete(claim.u), { once: true })
       body = await readBody(req, PUSH_MAX)
       if (!body) return refuse('body over 256 MB', 413)
-      const why = body.length === 4 && body.toString('latin1') === '0000' ? undefined : pushRefusal(body)
-      if (why) return refuse(why)
+      const push = body.length === 4 && body.toString('latin1') === '0000' ? { updates: [] } : pushRefusal(body)
+      if (push.refused) return refuse(push.refused)
+      if (claim.worker && push.updates.some(u => u.ref !== claim.worker.ref)) return refuse(`a worker token pushes ${claim.worker.ref} only`)
+      updates = push.updates
     } else return refuse()
 
     if (host === 'api.github.com' || host === 'github.com') {
       const t = await token()
       if (!t) return
       headers.authorization = host === 'api.github.com' ? `token ${t}` : `Basic ${Buffer.from(`x-access-token:${t}`).toString('base64')}`
+    }
+    if (claim.worker) {
+      try { await claim.worker.fence(updates) } catch (e) { return refuse(e.message, e.status ?? 503) }
     }
     // A client that left during the checks gets nothing forwarded; one that leaves later aborts the upstream request,
     // so an abandoned push frees its buffer with its slot.
@@ -355,23 +369,25 @@ function checkGraphql(text) {
 /**
  * Checks a receive-pack request body: optional `shallow` lines, then one or more `<old> <new> <ref>` commands (the
  * first may carry capabilities after NUL) up to a flush packet. Every ref is under refs/heads/agent/ and none is
- * deleted. Returns the refusal reason, or undefined when the push may pass; the pack after the flush is not read.
+ * deleted. Returns `{ refused }`, the reason, or `{ updates }`, the commands as `{ ref, old, new }` when the push may
+ * pass; the pack after the flush is not read.
  */
 function pushRefusal(buf) {
-  let at = 0, commands = 0
+  let at = 0
+  const updates = []
   for (;;) {
     const hex = buf.toString('latin1', at, at + 4)
-    if (!/^[0-9a-fA-F]{4}$/.test(hex)) return 'malformed pkt-line'
+    if (!/^[0-9a-fA-F]{4}$/.test(hex)) return { refused: 'malformed pkt-line' }
     const len = parseInt(hex, 16)
-    if (len === 0) return commands ? undefined : 'no commands'
-    if (len < 4 || at + len > buf.length) return 'malformed pkt-line'
+    if (len === 0) return updates.length ? { updates } : { refused: 'no commands' }
+    if (len < 4 || at + len > buf.length) return { refused: 'malformed pkt-line' }
     let line = buf.toString('latin1', at + 4, at + len).replace(/\n$/, '')
     at += len
-    if (commands === 0 && /^shallow [0-9a-f]{40}$/.test(line)) continue
-    if (commands === 0) line = line.split('\0')[0]
-    const m = /^[0-9a-f]{40} ([0-9a-f]{40}) refs\/heads\/agent\/(?!.*\.\.)[^\x00-\x20\x7f]+$/.exec(line)
-    if (!m) return 'only refs/heads/agent/* may be updated'
-    if (/^0{40}$/.test(m[1])) return 'a branch may not be deleted'
-    commands++
+    if (!updates.length && /^shallow [0-9a-f]{40}$/.test(line)) continue
+    if (!updates.length) line = line.split('\0')[0]
+    const m = /^([0-9a-f]{40}) ([0-9a-f]{40}) (refs\/heads\/agent\/(?!.*\.\.)[^\x00-\x20\x7f]+)$/.exec(line)
+    if (!m) return { refused: 'only refs/heads/agent/* may be updated' }
+    if (/^0{40}$/.test(m[2])) return { refused: 'a branch may not be deleted' }
+    updates.push({ ref: m[3], old: m[1], new: m[2] })
   }
 }

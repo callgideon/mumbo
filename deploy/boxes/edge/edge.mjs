@@ -1,14 +1,16 @@
 // mumbo edge: routes each signed-in user to their own box (an E2B Firecracker VM running `dsh web`),
 // proxies the box's model and search calls with the server key, pauses idle boxes and backs them up to S3.
 // :8080 is reached only through oauth2-proxy (X-Forwarded-Email is trusted); :8081 serves the model host, which
-// accepts only box tokens, and the MCP door on the public host (door.mjs), which accepts only door keys. Design, review
-// fixes and failure handling: deploy/boxes/DESIGN.md.
+// accepts only box tokens, and on the public host the MCP door (door.mjs), which accepts only door keys, and the worker
+// git route (workers.mjs), which accepts only worker tokens. Design, review fixes and failure handling:
+// deploy/boxes/DESIGN.md.
 import { createHash, createHmac, createVerify, timingSafeEqual } from 'node:crypto'
 import { readFileSync, readdirSync } from 'node:fs'
 import { createServer, request as httpRequest } from 'node:http'
 import { Readable, pipeline } from 'node:stream'
 import { ownersOf } from './projects.mjs'
 import { atCapacity, unitsFor } from './capacity.mjs'
+import { workerGitRoute } from './workers.mjs'
 
 const env = (name, fallback) => process.env[name] ?? fallback ?? (() => { throw new Error(`edge: set ${name}`) })()
 /** A number setting that must be finite and at least `min`; a bad value stops the edge at start. */
@@ -115,6 +117,9 @@ export const config = () => ({
   // minute, per edge replica.
   doorRatePerMinute: atLeast('DOOR_RATE_PER_MINUTE', 1, 60),
   doorBurst: atLeast('DOOR_BURST', 1, 20),
+  // B37: a worker token's lifetime from its mint (workers.mjs workerTokens); the lease, checked on every git request, ends
+  // a worker's access sooner.
+  workerTokenHours: atLeast('WORKER_TOKEN_HOURS', 1, 8),
 })
 /** A setting that must be one of `values`; anything else fails at start. */
 function oneOf(name, values, fallback) {
@@ -1761,14 +1766,18 @@ export const readBody = (req, cap) => new Promise((resolve, reject) => {
 // answers 404, nothing is halted and tokens are not counted. main() passes all of them. `door` (door.mjs) gets every
 // request whose Host is the public host (the ALB rule R-door sends https://<public host>/mcp* here), before the source
 // and box token checks, and no such request reaches a box route; without `door` those requests are treated as any other.
-export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, mcp, reports, door, github, halt, tokens, fetchImpl = fetch, log = console.log }) {
+// `workerGit` (workers.mjs) gets, before the door, every request on the worker git route's host whose path starts with its
+// prefix (workers.mjs workerGitRoute).
+export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, mcp, reports, door, workerGit, github, halt, tokens, fetchImpl = fetch, log = console.log }) {
   if (cfg.openrouterModels?.length && !cfg.openrouterKey) throw new Error('edge: OPENROUTER_MODELS needs OPENROUTER_API_KEY')
+  const gitRoute = workerGitRoute(cfg)
   return createServer((req, res) => route(req, res).catch((e) => {
     log(JSON.stringify({ edge: 'error', path: req.url?.split('?')[0], error: e.message }))
     if (!res.headersSent) json(res, 502, { error: 'edge error' }); else res.destroy()
   }))
   async function route(req, res) {
     if (req.url === '/edge/healthz') return json(res, 200, { ok: true })
+    if (workerGit && hostOf(req) === gitRoute.host && req.url.startsWith(gitRoute.prefix)) return workerGit(req, res)
     if (door && hostOf(req) === cfg.publicHost) return door(req, res)
     // The last X-Forwarded-For entry is the one our load balancer appended; earlier entries come from the client.
     const source = String(req.headers['x-forwarded-for'] ?? '').split(',').at(-1).trim()
@@ -1967,7 +1976,10 @@ async function main() {
   const reports = reportServer({ report, claimOf })
   const allow = budget(store, cfg.dailyRequests)
   const doorHandler = door({ keys: doorKeyService, tools: doorTools({ projects: proj, mumbo, relay }), allow, tokens, rate: { perMinute: cfg.doorRatePerMinute, burst: cfg.doorBurst } })
-  modelServer({ cfg, edgeKey, modelKey, allow, owns: box.owns, touch: box.touch, mcp, reports, door: doorHandler, github, halt, tokens })
+  // Outside workers' git (workers.mjs): tokens the door's task_claim mints, fenced on the project box for every request.
+  const { workerTokens, workerGit } = await import('./workers.mjs')
+  const git = workerGit({ cfg, tokens: workerTokens({ edgeKey, hours: cfg.workerTokenHours }), keys: doorKeyService, relay, github })
+  modelServer({ cfg, edgeKey, modelKey, allow, owns: box.owns, touch: box.touch, mcp, reports, door: doorHandler, workerGit: git, github, halt, tokens })
     .listen(8081, modelHost, () => console.log(`edge: model host on ${modelHost}:8081`))
 }
 
