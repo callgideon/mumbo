@@ -39,7 +39,8 @@ const READ_PERMISSIONS = { contents: 'read', pull_requests: 'read', checks: 'rea
  * @property {boolean} lowRisk
  * @property {number} ruleVersion
  * @property {number} firstSeen - epoch ms; kept across new heads.
- * @property {string | undefined} notifiedSha
+ * @property {string | undefined} notifiedSha - the head SHA the founder was last notified for; a head is notified
+ *   once, when a poll first reads a `pass` review marker for it.
  */
 /**
  * @typedef {object} GrantResult
@@ -48,7 +49,8 @@ const READ_PERMISSIONS = { contents: 'read', pull_requests: 'read', checks: 'rea
  * @property {string} sha
  * @property {'not_found'|'not_owner'|'sha_moved'|'not_low_risk'|'not_reviewed'|'checks_not_green'|'not_candidate'|'github_error'} [reason] - why it
  *   did not merge; `not_owner` also covers an owner who is not an approver; `not_low_risk` comes only from grantLowRisk;
- *   `not_reviewed`: the item's review marker for `sha` is missing or not `pass`.
+ *   `not_reviewed`: the newest review marker for `sha`, as the last poll or the grant's re-read
+ *   found it, is missing or not `pass`.
  */
 
 /**
@@ -63,9 +65,9 @@ const READ_PERMISSIONS = { contents: 'read', pull_requests: 'read', checks: 'rea
  *   `poll` refreshes the queue from GitHub; a repository GitHub does not answer for, or whose read-only token GitHub
  *   does not mint (logged with mintToken's reason, such as permissions not approved), keeps its items, and an item stays
  *   with the project that first listed it while that project has its repository. `list` gives the items of the
- *   projects `email` owns. `grant` merges item `id` only at `sha`, and only with a `pass` review marker for `sha` as the
- *   last poll read it, after re-reading the PR and its checks, then audits it (with `via` and `mergeCommitSha`) and
- *   removes it; a moved head answers `sha_moved` and re-reads that PR.
+ *   projects `email` owns. `grant` merges item `id` only at `sha`, and only with a `pass` review marker for `sha`, both
+ *   as the last poll read it and as the grant re-reads it with the PR and its checks, then audits it (with `via`,
+ *   `mergeCommitSha` and the re-read review) and removes it; a moved head answers `sha_moved` and re-reads that PR.
  *   `grantLowRisk` grants only the `shown` pairs (what the founder's page displayed) that are still low-risk at that
  *   exact SHA, in order, and gives one result per pair. An item whose repository its project no longer has is dropped
  *   by `list` (not listed) and by `grant` (`not_found`). `dropRepo` drops the project's items for one repository, for
@@ -106,6 +108,15 @@ export function approvalsService({ store, github, notify, audit, fetchImpl, now,
     return { checks, green: requiredChecks.every(name => checks[name] === 'success') }
   }
 
+  /** The newest review marker for `sha` among the agent's comments on PR `number`, or null. */
+  async function reviewOf(repo, number, sha) {
+    const marker = (await pages(repo, `/repos/${repo}/issues/${number}/comments`))
+      .filter(c => c.user?.id === agentId)
+      .map(c => { const [first, ...rest] = String(c.body).split(/\r?\n/); return { match: MARKER.exec(first), url: c.html_url, excerpt: rest.join('\n').trim().slice(0, 400) } })
+      .filter(({ match }) => match?.[1] === sha).at(-1)
+    return marker ? { verdict: marker.match[2], url: marker.url, excerpt: marker.excerpt } : null
+  }
+
   /** Removes `id` from the project's open set, and its doc only when the doc belongs to that project. */
   async function drop(project, id) {
     if ((await store.getDoc(key(id)))?.project === project) await store.deleteDoc(key(id))
@@ -133,18 +144,15 @@ export function approvalsService({ store, github, notify, audit, fetchImpl, now,
     if (pr.head.sha !== listed.head.sha) return
     const sha = pr.head.sha
     const { checks, green } = await checksOf(repo, sha)
-    const marker = (await pages(repo, `/repos/${repo}/issues/${pr.number}/comments`))
-      .filter(c => c.user?.id === agentId)
-      .map(c => { const [first, ...rest] = String(c.body).split(/\r?\n/); return { match: MARKER.exec(first), url: c.html_url, excerpt: rest.join('\n').trim().slice(0, 400) } })
-      .filter(({ match }) => match?.[1] === sha).at(-1)
-    const review = marker ? { verdict: marker.match[2], url: marker.url, excerpt: marker.excerpt } : null
+    const review = await reviewOf(repo, pr.number, sha)
     const touched = [...new Set(files.flatMap(f => [f.filename, f.previous_filename]).filter(p => p && isProtected(p)))]
     const lines = pr.additions + pr.deletions
     const lowRisk = green && review?.verdict === 'pass' && lines < 200 && files.length === pr.changed_files && touched.length === 0
     // The repository may have been removed while this poll read GitHub: then neither notify nor save the item again.
     if (!(await stillBound({ project, repo }))) return drop(project, id)
     let notifiedSha = old?.notifiedSha
-    if (notifiedSha !== sha) {
+    // A head is notified once its review passes, so the founder is told only of an item they can approve.
+    if (notifiedSha !== sha && review?.verdict === 'pass') {
       try {
         await notify({ title: `Approve merge: ${id}`, body: `${pr.title} · ${lines} lines · ${lowRisk ? 'low-risk' : 'needs a look'}`, click: `https://${approveHost}/` })
         notifiedSha = sha
@@ -172,12 +180,15 @@ export function approvalsService({ store, github, notify, audit, fetchImpl, now,
     if (sha !== doc.sha) return no('sha_moved')
     if (lowRiskOnly && !doc.lowRisk) return no('not_low_risk')
     if (doc.review?.verdict !== 'pass') return no('not_reviewed')
-    let checks, mergeCommitSha
+    let checks, review, mergeCommitSha
     try {
       if (!isCandidate(await read(doc.repo, `/repos/${doc.repo}/pulls/${doc.number}`))) return no('not_candidate')
       const state = await checksOf(doc.repo, sha)
       if (!state.green) return no('checks_not_green')
       checks = state.checks
+      // A marker posted since the last poll counts: the newest one for `sha` must still be a pass.
+      review = await reviewOf(doc.repo, doc.number, sha)
+      if (review?.verdict !== 'pass') return no('not_reviewed')
       const bot = await mintToken({ appId: app.appId, privateKey: app.privateKey, repos: [doc.repo], permissions: MERGE_PERMISSIONS, fetchImpl, now })
       let r
       try { r = await githubRequest(fetchImpl, 'PUT', `/repos/${doc.repo}/pulls/${doc.number}/merge`, bot.token, { sha, merge_method: 'merge' }) }
@@ -196,7 +207,7 @@ export function approvalsService({ store, github, notify, audit, fetchImpl, now,
     }
     const record = {
       at: new Date(now()).toISOString(), email, via: lowRiskOnly ? 'grantLowRisk' : 'grant', id, sha, mergeCommitSha,
-      ruleVersion: doc.ruleVersion, lowRisk: doc.lowRisk, files: doc.files, checks, review: doc.review, firstSeen: doc.firstSeen,
+      ruleVersion: doc.ruleVersion, lowRisk: doc.lowRisk, files: doc.files, checks, review, firstSeen: doc.firstSeen,
     }
     // The merge happened: an audit write that fails is logged, and the edge's audit has already logged the record.
     await audit(record).catch(e => fail('audit write failed', { id, sha, error: e.message }))
