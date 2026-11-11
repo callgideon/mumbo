@@ -36,6 +36,8 @@ const REPORT: MessageSource = { kind: 'report', project: brandString<ProjectId>(
 const PERSON: MessageSource = { kind: 'user' }
 const DOOR: MessageSource = { kind: 'mcp', principal: 'ann' }
 const SCHEDULE: MessageSource = { kind: 'schedule' }
+/** The notice a schedule change outside the Session injects, which delivers no task. */
+const SCHEDULE_NOTICE: MessageSource = { kind: 'schedule', form: 'notice', summary: 'Scheduled task updated' }
 const GOAL: MessageSource = { kind: 'goal', goalId: GoalId('goal-1'), revision: 1, round: 1 }
 /** The runtime-context snapshot the loop appends after a step's claimed messages. */
 const CONTEXT: MessageSource = { kind: 'runtime-context', form: 'snapshot', sections: [{ name: 'time', text: 'Now: 09:00.' }] }
@@ -209,6 +211,13 @@ describe('reportStarted', () => {
     log.turn(PERSON)
     log.turn(RESUME)
     expect(ctx['mumbo-report-turns'].reportStarted(agent)).toBe(false)
+  })
+
+  it('keeps the previous turn\'s origin when the opening step claims a schedule change notice before a wake', async () => {
+    const { ctx, create } = await mounted()
+    const { agent, log } = await create('root', 'danger-full-access', [REPORT])
+    log.turn(SCHEDULE_NOTICE, RESUME)
+    expect(ctx['mumbo-report-turns'].reportStarted(agent)).toBe(true)
   })
 
   it('reads a report re-surfaced by a replacement as no new message', async () => {

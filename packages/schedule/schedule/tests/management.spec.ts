@@ -422,7 +422,8 @@ it('tells live involved Sessions about committed changes without activating stor
   }, actor.session.id)
   // The acting Session made the change, so only the target hears about it.
   await vi.waitFor(() => { expect(target.inject).toHaveBeenCalledOnce() })
-  expect(target.inject).toHaveBeenCalledWith(expect.objectContaining({ source: { kind: 'schedule' } }))
+  // The notice declares its form, so a reader tells it from a delivery, which declares none.
+  expect(target.inject).toHaveBeenCalledWith(expect.objectContaining({ source: { kind: 'schedule', form: 'notice', summary: 'Scheduled task created' } }))
   expect(notices(target)).toEqual([[
     '[SCHEDULE CHANGE]',
     'A scheduled task involving this session was changed outside this session. '

@@ -252,7 +252,7 @@ Reminder messages append to the target Session's history and preserve earlier me
 
 #### What the model sees
 
-A change notice enters each involved Session that has a loaded Agent as a user-role message with producer kind `schedule` for the next model step; it starts no turn. A running turn reads it at its next step, and an idle Session reads every queued notice in the first step of its next turn. After the fixed text below, it appends `change:` with `created`, `updated`, or `deleted`, then `schedule_id_json` and `schedule_title_json`, both JSON-encoded.
+A change notice enters each involved Session that has a loaded Agent as a user-role message with producer kind `schedule` and form `notice`, which a delivery does not declare, for the next model step; it starts no turn. A running turn reads it at its next step, and an idle Session reads every queued notice in the first step of its next turn. After the fixed text below, it appends `change:` with `created`, `updated`, or `deleted`, then `schedule_id_json` and `schedule_title_json`, both JSON-encoded.
 
 ##### Change notice framing
 

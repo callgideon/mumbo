@@ -31,8 +31,9 @@ export interface ReportTurns {
    * the first message logged in the turn's first step that names one: `report`; `user`, such as a browser prompt, or
    * `mcp`, through the door, for a person; `schedule`; or `goal`. A report claimed in that step with a person's message
    * still makes the turn report-started. Every later message of the turn, such as a runtime-context snapshot or a
-   * compaction checkpoint, and a message of any other source, leave the origin unchanged, so a turn that no such
-   * message opened keeps the previous turn's. A delegated child follows its live root Session.
+   * compaction checkpoint, a message whose source declares a context form, such as a schedule change notice, and a
+   * message of any other source, leave the origin unchanged, so a turn that no such message opened keeps the previous
+   * turn's. A delegated child follows its live root Session.
    * @param agent - the live Agent that acts.
    * @returns whether the turn's origin is a report; `false` before any origin.
    * @throws when the Agent is a delegated child whose root is no longer live.
@@ -91,7 +92,10 @@ function foldOrigin(state: Origin, event: SessionEvent): Origin {
   if (event.type === 'step/end') return { report: state.report, phase: 'closed' }
   // A replacement, such as a compaction checkpoint, re-surfaces earlier messages and opens nothing.
   if (event.type !== 'user/message' || event.surfaceOp !== 'append' || state.phase === 'closed') return state
-  switch (event.data.source.kind) {
+  const source = event.data.source
+  // A source that declares a context form, such as a schedule change notice, is context and names no origin.
+  if ('form' in source && source.form !== undefined) return state
+  switch (source.kind) {
     case 'report':
       return { report: true, phase: 'named' }
     case 'user':
@@ -116,7 +120,7 @@ function foldOrigin(state: Origin, event: SessionEvent): Origin {
 export async function gateReportTurns(ctx: Context): Promise<void> {
   const origin = await ctx.sessionProjections.register({
     key: 'mumboReportTurn',
-    stateVersion: 2,
+    stateVersion: 3,
     stateSchema: z.object({ report: z.boolean(), phase: z.enum(['open', 'named', 'closed']) }),
     init: (): Origin => ({ report: false, phase: 'open' }),
     apply: foldOrigin,

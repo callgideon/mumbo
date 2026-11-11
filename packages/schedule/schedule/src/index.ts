@@ -728,7 +728,10 @@ export class ScheduleService extends TypertRemoteService {
       try {
         const needsFlush = agent.status === 'idle'
         // Injected input joins the next model step, so a notice never opens a turn of its own.
-        agent.inject(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'schedule' } }))
+        agent.inject(createUserMessage({
+          content: [{ type: 'text', text }],
+          source: { kind: 'schedule', form: 'notice', summary: `Scheduled task ${change}` },
+        }))
         // A running driver persists the injected message itself; waiting for its Session lock here would make
         // the management operation depend on model latency.
         if (needsFlush && !await this.ctx.sessions.flush(agent.session)) {
