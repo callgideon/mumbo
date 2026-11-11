@@ -24,9 +24,10 @@ Finish with orchestrator_review, with your verdict, that commit's sha and your f
 If you cannot finish the review, report failed with orchestrator_report and say why.`
 /** The failed report of a review whose worker's turn ended without a verdict; it waits for a person's Retry. */
 export const NO_VERDICT = 'The review\'s worker ended its turn without orchestrator_review, so no verdict was posted.'
-/** The first two lines of a review comment: the marker the edge reads, then the automated-agent sentence. */
-const header = (sha: string, verdict: 'pass' | 'fail'): string =>
-  `<!-- mumbo-review sha=${sha} verdict=${verdict} -->\nThis is by an automated agent, not a human.`
+/** The first line of a review comment: the marker the edge reads. */
+const marker = (sha: string, verdict: 'pass' | 'fail'): string => `<!-- mumbo-review sha=${sha} verdict=${verdict} -->`
+/** The first two lines of a review comment: the marker, then the automated-agent sentence. */
+const header = (sha: string, verdict: 'pass' | 'fail'): string => `${marker(sha, verdict)}\nThis is by an automated agent, not a human.`
 const PullSchema = z.looseObject({ node_id: z.string(), draft: z.boolean().optional(), head: z.looseObject({ sha: z.string() }) })
 const CommentSchema = z.looseObject({ html_url: z.string(), body: z.string().nullish(), user: z.looseObject({ login: z.string() }).nullish() })
 const READY = 'mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { clientMutationId } }'
@@ -59,8 +60,9 @@ export function reviewLaunch(store: Pick<Store, 'tickets' | 'threads' | 'trigger
  * A review Ticket's tools: `orchestrator_review`, which posts its verdict and ends it, and `orchestrator_report`, which
  * reports only progress or failure. They have no question, answer or pull request field, since the review shares its
  * ticket's origin and answers no one. A call of `orchestrator_review` that failed after posting the review comment leaves
- * it on the pull request, tagged with the review's id; the next call finds it and posts no other, so the recorded verdict
- * and findings are the posted ones. One call runs at a time.
+ * it on the pull request, tagged with the review's id; the next call finds it, the agent's comment whose first line is the
+ * marker for the review's commit and that carries the tag, and posts no other, so the recorded verdict and findings are the
+ * posted ones. One call runs at a time.
  * @param host - What an Executor Session's tools use.
  * @param ticketId - The review Ticket.
  * @param review - What it reviews: the ticket `of`, its pull request `pr` and the commit `sha`.
@@ -81,10 +83,14 @@ export function reviewTools(host: ExecutorToolsHost, ticketId: string, { of, pr,
       return { posted: false, reason: STALE }
     }
     const login = commands.deployment.github.login
+    // The verdict of a comment whose first line is this commit's marker, exactly as this runtime posts it.
+    const marked = (body: string) => (['pass', 'fail'] as const).find(item => body.split('\n', 1)[0] === marker(sha, item))
+    // Only the agent's comment with that first line and this review's tag is this review's: another of the agent's comments
+    // may quote the tag, such as a reply the GitHub Channel posted, which never starts with a marker.
     const earlier = (await commands.pages(CommentSchema, `issues/${pr}/comments`))
-      .find(comment => sameName(comment.user?.login ?? '', login) && (comment.body ?? '').includes(tag))
+      .find(({ user, body }) => sameName(user?.login ?? '', login) && body?.includes(tag) && marked(body))
     const body = earlier?.body ?? ''
-    const verdict = earlier ? body.startsWith(header(sha, 'pass')) ? 'pass' : 'fail' : wanted
+    const verdict = marked(body) ?? wanted
     // The recorded findings are the posted ones too: an earlier comment's text after its two header lines and before its tag.
     const posted = earlier ? body.slice(0, body.lastIndexOf(tag)).split('\n').slice(2).join('\n').trim() : findings
     open()

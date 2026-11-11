@@ -144,7 +144,8 @@ export class Runtime extends Service implements SourceHost {
         lifetime: this.lifetime, sessions, closing: () => this.closing(), paused: () => this.paused(), environment, sourceLink: link,
         repliedTo: trigger => repliedTo({ store, sources }, trigger), delivers: trigger => policy().delivers(trigger) })
       const external = this.external = new ExternalExecutor({ get engine() { return runtime.engine }, store, effects, sessions,
-        get github() { return runtime.context({ kind: 'github', health: ['github'] }) }, health: board.claim('external'), machine, paused: () => this.paused(), repository: () => setup.deployment.repository, sourceLink: link })
+        get github() { return runtime.context({ kind: 'github', health: ['github'] }) }, health: board.claim('external'), machine, paused: () => this.paused(), repository: () => setup.deployment.repository, sourceLink: link,
+        logger: ctx.logger })
       const executors = this.executors = new Executors({ local: this.executor, external })
       this.assessor = new MasterAssessor({ get engine() { return runtime.engine }, commands, get deployment() { return setup.deployment }, effects,
         settings: () => store.settings(), paused: () => this.paused(), threadContext: trigger => sources.threadContext(trigger),
