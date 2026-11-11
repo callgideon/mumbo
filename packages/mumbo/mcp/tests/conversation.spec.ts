@@ -137,6 +137,35 @@ describe('agent_send attribution', () => {
   })
 })
 
+describe('agent_send report', () => {
+  const PROJECT = '0123456789abcdef'
+  const REPORT = '[project Site] report from its coordinator:\n<untrusted-00>\nshipped\n</untrusted-00>'
+
+  it('logs a report as sent, from the project and naming no person, and agent_read lists it as report:<project>', async () => {
+    const { host, agent } = await door()
+    const after = agent.log.length - 1
+    const reply = await call(host.url, 'agent_send', { text: REPORT, request_id: 'r1' }, 'ann', { 'x-mumbo-report-project': PROJECT })
+    expect(reply.isError).toBe(false)
+    const sent = agent.followup.mock.calls[0]?.[0] as { content: object[]; source: object }
+    expect(sent).toMatchObject({ role: 'user', content: [{ type: 'text', text: REPORT }] })
+    expect(sent.source).toEqual({ kind: 'report', project: PROJECT })
+    message(agent, 'user', sent.source, sent.content)
+    const read = (await call(host.url, 'agent_read', { after_seq: after })).value as { messages: { source: string; text: string }[] }
+    expect(read.messages.map(({ source, text }) => [source, unfence(text)])).toEqual([[`report:${PROJECT}`, REPORT]])
+  })
+
+  it('shares request ids with the principal\'s own sends, which without the header still come from the principal', async () => {
+    const { host, agent } = await door()
+    const report = await call(host.url, 'agent_send', { text: 'hello', request_id: 'r1' }, 'ann', { 'x-mumbo-report-project': PROJECT })
+    expect(await call(host.url, 'agent_send', { text: 'hello', request_id: 'r1' })).toEqual(report)
+    await call(host.url, 'agent_send', { text: 'hello', request_id: 'r2' })
+    expect(agent.followup.mock.calls.map(([sent]) => sent)).toMatchObject([
+      { content: [{ type: 'text', text: 'hello' }], source: { kind: 'report', project: PROJECT } },
+      { content: [{ type: 'text', text: 'hello' }], source: { kind: 'mcp', principal: 'ann' } },
+    ])
+  })
+})
+
 describe('agent_read', () => {
   it('returns the user and assistant messages after after_seq, oldest first, labelled and fenced', async () => {
     const { host, agent } = await door()

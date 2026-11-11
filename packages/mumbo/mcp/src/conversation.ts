@@ -1,10 +1,14 @@
-/** `agent_send` and `agent_read`: an allowlisted person's messages to the assistant Session, and its conversation back. */
+/**
+ * `agent_send` and `agent_read`: an allowlisted person's messages, and projects' reports to them, to the assistant
+ * Session, and its conversation back.
+ */
 
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SessionWireEvent } from '@deepseek-ai/dsh-api-session-controller'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, type MessageSource } from '@deepseek-ai/dsh-llm'
 import type { McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
+import type { ProjectId } from './auth.ts'
 import { ToolError } from './errors.ts'
 import { fence } from './fence.ts'
 import { isHalted } from './halt.ts'
@@ -15,6 +19,11 @@ declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
     /** A message an allowlisted person sent through the MCP door; `principal` is their handle. */
     mcp: { readonly kind: 'mcp'; readonly principal: string }
+    /**
+     * A project's report that the mumbo edge relayed from the project's coordinator to the person whose Session logs
+     * it; `project` is the project's id. It names no person: the text is the project's, never the person's request.
+     */
+    report: { readonly kind: 'report'; readonly project: ProjectId }
   }
 }
 
@@ -37,7 +46,7 @@ const readArgs = z.object({
 /** The logged message fields `agent_read` reports. */
 const messageData = z.object({
   content: z.array(z.object({ type: z.string(), text: z.unknown().optional() })),
-  source: z.object({ kind: z.string(), principal: z.unknown().optional() }),
+  source: z.object({ kind: z.string(), principal: z.unknown().optional(), project: z.unknown().optional() }),
 })
 
 /** An `assistant/message` event logs its message under `message`, beside the turn's settlement. */
@@ -49,7 +58,7 @@ const namedPrincipal = z.object({ kind: z.string(), email: z.string() })
 interface ReadMessage {
   readonly seq: number
   readonly role: 'user' | 'assistant'
-  /** `<kind>:<principal label>` when the source names a person, else the source kind. */
+  /** `<kind>:<principal label>` when the source names a person, `report:<project>` for a report, else the source kind. */
   readonly source: string
   /** Fenced text blocks joined by newlines. */
   readonly text: string
@@ -68,21 +77,21 @@ function principalLabel(principal: unknown): string | undefined {
 
 /**
  * Report one logged message, or nothing for other events, compaction re-surfaces, and messages without text.
- * Without `includeContext`, user-role messages count only when a person wrote them: the GUI's `user` kind or a
- * source naming a principal; the rest is context the harness adds.
+ * Without `includeContext`, user-role messages count only when a person wrote them (the GUI's `user` kind or a
+ * source naming a principal) or they are a project's report; the rest is context the harness adds.
  */
 function toMessage(event: SessionWireEvent, includeContext: boolean): ReadMessage[] {
   if (!MESSAGE_TYPES.has(event.type) || event.surfaceOp !== 'append') return []
   const { content, source } = event.type === 'user/message' ? messageData.parse(event.data) : assistantData.parse(event.data).message
-  const person = principalLabel(source.principal)
-  const fromPerson = source.kind === 'user' || person !== undefined
-  if (event.type === 'user/message' && !fromPerson && !includeContext) return []
+  const named = source.kind === 'report' && typeof source.project === 'string' ? source.project : principalLabel(source.principal)
+  const listed = source.kind === 'user' || named !== undefined
+  if (event.type === 'user/message' && !listed && !includeContext) return []
   const text = content.flatMap(block => block.type === 'text' && typeof block.text === 'string' ? [block.text] : []).join('\n')
   if (text === '') return []
   return [{
     seq: event.seq,
     role: event.type === 'user/message' ? 'user' : 'assistant',
-    source: person === undefined ? source.kind : `${source.kind}:${person}`,
+    source: named === undefined ? source.kind : `${source.kind}:${named}`,
     text: fence(text),
   }]
 }
@@ -127,10 +136,16 @@ async function messagesAfter(
 
 /**
  * The text `agent_send` logs: the caller's text, after `[from <principal> via <key name>] ` when the edge named the
- * key, so the Session log and the model both record who sent it through which key.
+ * key, so the Session log and the model both record who sent it through which key. A report carries no key name,
+ * which the route refuses on it, so it is logged as sent.
  */
 function attributed(deps: ToolDeps, text: string): string {
   return deps.via === undefined ? text : `[from ${deps.principal} via ${deps.via}] ${text}`
+}
+
+/** The source `agent_send` logs: the project for a report, which names no person, else the principal. */
+function sourceOf(deps: ToolDeps): MessageSource {
+  return deps.report === undefined ? { kind: 'mcp', principal: deps.principal } : { kind: 'report', project: deps.report }
 }
 
 /**
@@ -151,7 +166,7 @@ export function register(server: McpServer, deps: ToolDeps): void {
         if (isHalted(deps.halt)) throw new ToolError('halted', 'runs are halted until they are resumed')
         const agent = await deps.assistant()
         const afterSeq = agent.session.seq - 1
-        const sent = createUserMessage({ content: [{ type: 'text', text: attributed(deps, args.text) }], source: { kind: 'mcp', principal: deps.principal } })
+        const sent = createUserMessage({ content: [{ type: 'text', text: attributed(deps, args.text) }], source: sourceOf(deps) })
         deliver = () => { agent.followup(sent) }
         return JSON.stringify({ message_id: sent.id, after_seq: afterSeq })
       })
