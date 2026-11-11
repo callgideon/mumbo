@@ -35,8 +35,8 @@ test('a user box start script is byte-for-byte what it was before project boxes 
   // held the group uploads alone: with staged copies it no longer reads Downloads. Then the web_fetch contract of
   // 2026-11-11, on an image with the harness only: the containment rows disable web-fetch-http, which fetches from root
   // dsh outside the firewall and reaches loopback, and send web_fetch to the DeepSeek Fetch API through the edge's model
-  // host (containment.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), 'c16b487541ff4b07241a04a48439c8224751b3c8bf6211a8d2c2dbe98dd6c9b7')
+  // host (containment.test.mjs). Then the role's /home/agent line moved into the script, added on a B24 image only.
+  assert.equal(createHash('sha256').update(s).digest('hex'), '53e7f6b31c46f25ff31b5b2b44f0a4e402b171fb79ac40e5910311c6ade471ad')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -56,7 +56,8 @@ test('a project box start script is byte-for-byte what it was before B18 changed
   // a socket whose user nft cannot read is refused. Then the web_fetch contract of 2026-11-11, on an image with the
   // harness only: the containment rows disable web-fetch-http, which fetches from root dsh outside the firewall and
   // reaches loopback, and send web_fetch to the DeepSeek Fetch API through the edge's model host (containment.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), 'c6b23cba2f6be1765309775e02f50832743ec63c204cbef36d6e09c858ef4a49')
+  // Then the role's /home/agent line moved into the script, added on a B24 image only.
+  assert.equal(createHash('sha256').update(s).digest('hex'), '1c9c81b2405a16dff4daac3dfa8e48e9a24b1f5dad413c4c8f4e0ff81a4cc4b2')
 })
 
 const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'

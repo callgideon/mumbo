@@ -904,7 +904,7 @@ test('project_message: kind defaults to context, a messageId is required, and th
 })
 
 test('role instructions: assistant with write consent and desktop sign-in; coordinator without accounts', async () => {
-  const { roleInstructions } = await import('./edge.mjs')
+  const { roleInstructions, SCRATCH_LINE } = await import('./edge.mjs')
   const c = { publicHost: 'boxes.x', projectDomain: 'boxes.x' }
   const a = roleInstructions(c, 'a@x.com')
   assert.match(a, /personal assistant of a@x\.com/)
@@ -918,13 +918,13 @@ test('role instructions: assistant with write consent and desktop sign-in; coord
   assert.match(p, /through their own assistants, whose messages reach the project's Superagent as requests or context from the member\./)
   assert.match(p, /no browser and nobody's accounts/)
   assert.doesNotMatch(p, /Downloads/)
-  // Agent's home, a model root under containment (B24), is outside backups, on both kinds of box.
-  for (const role of [a, p]) assert.ok(role.split('\n').includes('- /home/agent is scratch space and is not backed up; keep durable files in /root/projects.'))
+  // Agent's home exists only under containment (B24): the role leaves it out, and the start script adds it on a B24 image.
+  for (const role of [a, p]) assert.doesNotMatch(role, /\/home\/agent/)
   const script = startScript(c, 'T', undefined, a)
   // The agents root is root's own, or under containment (B24) root's and readable by all, outside /root.
   assert.ok(script.includes('AGENTS_HOME=/root/.mumbo/agents\n[ -z "$B24_IMAGE" ] || AGENTS_HOME=/usr/local/share/mumbo/agents\n'))
   assert.match(script, / DSH_AGENTS_HOME="\$AGENTS_HOME" /)
-  assert.ok(script.includes(`cat > "$AGENTS_HOME/AGENTS.md" <<'MD'\n${a}\nMD`))
+  assert.ok(script.includes(`cat > "$AGENTS_HOME/AGENTS.md" <<'MD'\n${a}\nMD\n[ -z "$B24_IMAGE" ] || echo '${SCRATCH_LINE}' >> "$AGENTS_HOME/AGENTS.md"\n`))
 })
 
 test('home page lists the assistant, desktop and the member\'s projects without starting a box, escaping names', async () => {
