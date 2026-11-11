@@ -481,6 +481,10 @@ test('escape-test.sh parses under sh and runs every escape test the B24 brief na
   assert.ok(text.includes('node -e "$LISTEN" 9229 ') && text.includes('node -e "$LISTEN" 47999 ') && text.includes(`su -s /bin/sh agent -c "exec node -e '$LISTEN' 8000"`))
   assert.ok(text.includes('for t in "inspector 9229" "high 47999" "dev 8000" "cdp 9222" "vnc 5900"; do') && text.includes('if [ $rc = 2 ]; then say PASS "beyond-loopback-$1"'))
   assert.ok(text.includes('beyond() { for t in envd inspector high dev cdp vnc; do say SKIP "beyond-loopback-$t" "$1"; done; }'))
+  // The veth pair is on 198.18.0.0/30, not 192.0.2.0/24, where self-hosted E2B puts its in-guest orchestrator address;
+  // the namespace goes when the script exits or is interrupted during the checks.
+  assert.ok(text.includes('ip addr add 198.18.0.1/30 dev ${v}a') && text.includes('ip -n $ns addr add 198.18.0.2/30 dev ${v}b') && text.includes('route add default via 198.18.0.1') && !text.includes('192.0.2.1/30'))
+  assert.ok(text.includes("trap 'ip netns del $ns 2>/dev/null' EXIT; trap 'exit 1' HUP INT TERM\nif ! command -v ip ") && text.includes('\nfi\nip netns del $ns 2>/dev/null; trap - EXIT HUP INT TERM\n'))
 })
 
 /** escape-test.sh's uploads through consent (--with-uploads), with Downloads, the staging directory and the page's port

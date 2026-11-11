@@ -116,17 +116,19 @@ fi
 # Beyond loopback: E2B's envd forwards every loopback listener to the box address, where E2B's client proxy reaches it, so
 # from beyond loopback the input chain drops every new TCP connection but to envd, dsh, the live view and the door. A
 # connection from inside the box to its own address comes in on loopback, so these checks connect from a network
-# namespace joined to the box by a veth pair (192.0.2.0/30). envd must answer there; root's listeners on 127.0.0.1:9229
-# (Node's inspector) and 127.0.0.1:47999 (a high port), agent's on 127.0.0.1:8000 (a dev server), the debugging port and
-# VNC must time out there (dropped), neither connect nor be refused.
+# namespace joined to the box by a veth pair on 198.18.0.0/30 (RFC 2544's benchmarking range; self-hosted E2B puts its
+# in-guest orchestrator address in 192.0.2.0/24). The namespace, and with it the pair, is deleted afterwards, also when
+# the script exits or gets HUP, INT or TERM during these checks. envd must answer there; root's listeners on
+# 127.0.0.1:9229 (Node's inspector) and 127.0.0.1:47999 (a high port), agent's on 127.0.0.1:8000 (a dev server), the
+# debugging port and VNC must time out there (dropped), neither connect nor be refused.
 ns=mumbo-escape-$$ v=me$$
 LISTEN='const v=require("net").createServer(s=>s.end()).listen(+process.argv[1],"127.0.0.1");setTimeout(()=>process.exit(0),120000)'
 beyond() { for t in envd inspector high dev cdp vnc; do say SKIP "beyond-loopback-$t" "$1"; done; }
+trap 'ip netns del $ns 2>/dev/null' EXIT; trap 'exit 1' HUP INT TERM
 if ! command -v ip >/dev/null 2>&1 || ! ip netns add $ns 2>/dev/null; then
   beyond 'no network namespace here (ip from iproute2, and a kernel with network namespaces)'
-elif ! { ip link add ${v}a type veth peer name ${v}b netns $ns && ip addr add 192.0.2.1/30 dev ${v}a && ip link set ${v}a up && ip -n $ns addr add 192.0.2.2/30 dev ${v}b && ip -n $ns link set ${v}b up && ip -n $ns route add default via 192.0.2.1; } 2>/dev/null; then
+elif ! { ip link add ${v}a type veth peer name ${v}b netns $ns && ip addr add 198.18.0.1/30 dev ${v}a && ip link set ${v}a up && ip -n $ns addr add 198.18.0.2/30 dev ${v}b && ip -n $ns link set ${v}b up && ip -n $ns route add default via 198.18.0.1; } 2>/dev/null; then
   beyond 'no veth pair into a network namespace here'
-  ip netns del $ns
 else
   node -e "$LISTEN" 9229 </dev/null >/dev/null 2>&1 & l1=$!
   node -e "$LISTEN" 47999 </dev/null >/dev/null 2>&1 & l2=$!
@@ -145,8 +147,8 @@ else
     beyond "the namespace does not reach envd on $ip:$ENVD_PORT"
   fi
   kill $l1 $l2 $l3 2>/dev/null
-  ip netns del $ns
 fi
+ip netns del $ns 2>/dev/null; trap - EXIT HUP INT TERM
 
 # The project box's GitHub proxy runs as ghproxy, so a tunnel through it reaches no more than agent does.
 if [ -z "$person" ]; then
