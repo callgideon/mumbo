@@ -8,3 +8,4 @@ ntfy_enabled          = true
 # The agent is the mumbo-bot App's bot user (design section 9); id from GET /users/mumbo-bot%5Bbot%5D (2026-11-09).
 github_agent_login = "mumbo-bot[bot]"
 github_agent_id    = "341797844"
+store_default_open = false # R2 step 3: every edge authenticates as the user edge

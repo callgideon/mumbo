@@ -34,7 +34,7 @@ resource "random_password" "store" {
 resource "aws_elasticache_user" "edge" {
   user_id       = "${local.name}-edge"
   user_name     = "edge"
-  engine        = "valkey"
+  engine        = "redis" # Valkey refuses a no-password user; redis-engine users and groups serve Valkey groups
   access_string = "on ~* &* +@all"
   authentication_mode {
     type      = "password"
@@ -44,13 +44,13 @@ resource "aws_elasticache_user" "edge" {
 resource "aws_elasticache_user" "default" {
   user_id       = "${local.name}-default"
   user_name     = "default"
-  engine        = "valkey"
+  engine        = "redis"                                                 # Valkey refuses a no-password user; redis-engine users and groups serve Valkey groups
   access_string = var.store_default_open ? "on ~* &* +@all" : "off -@all" # closed: off, no commands
   authentication_mode { type = "no-password-required" }
 }
 resource "aws_elasticache_user_group" "edge" {
   user_group_id = "${local.name}-edge"
-  engine        = "valkey"
+  engine        = "redis" # Valkey refuses a no-password user; redis-engine users and groups serve Valkey groups
   user_ids      = [aws_elasticache_user.default.user_id, aws_elasticache_user.edge.user_id]
 }
 
