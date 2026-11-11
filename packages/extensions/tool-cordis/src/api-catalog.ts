@@ -3852,7 +3852,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'abstract resolveExecutable( command: string, env?: Readonly<Record<string, string>>, signal?: AbortSignal, identity?: string, ): Promise<string>',
-        description: 'Resolve one configured executable in this provider\'s execution world. Absolute paths are verified; bare names use the provider\'s scrubbed PATH plus explicit environment overrides. Relative paths containing separators are rejected: the resolution base is undefined, so providers fail loud instead of guessing.',
+        description: 'Resolve one configured executable in this provider\'s execution world. Absolute paths are verified; bare names use the provider\'s scrubbed PATH plus explicit environment overrides. Relative paths containing separators are rejected: the resolution base is undefined, so providers fail loud instead of guessing. The result is for a spawn through this provider as the same identity: under a childIdentity the lookup searches that identity\'s PATH, which may name directories it can write.',
         parameters: [{ name: 'command', description: 'absolute executable path or bare PATH name.' }, { name: 'env', description: 'explicit environment entries used for lookup.' }, { name: 'signal', description: 'aborts remote or local lookup.' }, { name: 'identity', description: 'the provider-configured identity whose environment supplies PATH, as on {@link SubprocessSpawnSpec.identity}; omitted, the default. An unknown name is refused.' }],
         returns: 'a canonical executable path.',
       },

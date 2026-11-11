@@ -8,7 +8,9 @@
 # /root/.mumbo, which stays 0700. dsh's own TMPDIR stays root-only; shell activity records go to /run/dsh-shell (root,
 # 0711) and command spill files to a directory agent can read. The superagent's worker shims come first on PATH and its
 # git configuration is the global one, as dsh-superagent sets them in its own environment, which run-as children do not
-# receive; both live in its root-owned worker directory. The MCP servers the person adds run as `mcpserver` (the server
+# receive; both live in its root-owned worker directory. /usr/local is root's alone, so agent's own program directories
+# follow the shims and the gh wrapper, ahead of the system's: npm's global prefix (NPM_CONFIG_PREFIX), so `npm i -g`
+# works as agent, and ~/.local/bin. Python packages go in a venv. The MCP servers the person adds run as `mcpserver` (the server
 # identity) in its home, with only HOME, USER, PATH, and LANG besides their own entries; its groups are empty while the
 # box's mcpServerWorkspace switch is `none`, the default, and for `read` or `readwrite` hold one dedicated workspace group
 # that only the workspace's directories carry, never agent's 1001, which owns every root:agent 2750 directory. The model
@@ -29,7 +31,8 @@
         USER: agent
         LOGNAME: agent
         SHELL: /bin/bash
-        PATH: /var/lib/mumbo/superagent/worker-bin:/usr/local/lib/mumbo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        NPM_CONFIG_PREFIX: /home/agent/.npm-global
+        PATH: /var/lib/mumbo/superagent/worker-bin:/usr/local/lib/mumbo/bin:/home/agent/.npm-global/bin:/home/agent/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
         GIT_CONFIG_GLOBAL: /var/lib/mumbo/superagent/worker-gitconfig
         GIT_CONFIG_NOSYSTEM: '1'
         GIT_ASKPASS: ''

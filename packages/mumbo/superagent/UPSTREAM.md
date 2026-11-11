@@ -299,3 +299,14 @@ Upstream's worker reviews its own pull request in a subagent and posts the revie
 - The marker fixture copies the edge's `MARKER` (`approvals.mjs`, outside this tree), which only this side reads; the edge's test does not pin it yet. Asserting there that `MARKER.source` equals the fixture's trimmed text is an edge follow-up, for task B37 E0 or E3.
 
 Files outside the copy changed for S15: `apps/cli/tests/box-containment.spec.ts` (S12's classification of the orchestrator tools lists `orchestrator_review`, and the tool names it checks it against include those `executorTools` builds for a review Ticket's Session).
+
+## S16: start without waiting for the runtime
+
+Upstream's plugin start awaits `Runtime.ready`, which includes ensuring the main Session. That ensure resolves the router preset through DSH's preset registry, which waits for the Host Loader to settle while a preset row waits for a service, and the Loader waits for this start: neither settles. Written by task B24, harness side.
+
+- `src/index.ts`: `apply` does not await `runtime.ready`. Its settling logs `dsh-superagent ready` or `dsh-superagent is waiting for setup`, as before, or `dsh-superagent could not start: <error>`; a Runtime whose `lifetime` aborted first logs neither.
+- `src/app/runtime.ts`: a failed `initialize` sets the `runtime` health entry to `error` unless `lifetime` aborted first, by a stop or a compromised state directory lock whose entry stays, and `ready` still rejects. When `stop()` ran while Setup ran, `initialize` restores the environment Setup applied and returns before it installs anything.
+- `src/app/sessions.ts`: `ensure` aborts with `lifetime`'s reason after each await, so an ensure that outlives `stop()` starts no create, decoration, permission change or rename after it; one already running may still land.
+- `src/sources/github.ts`, `src/sources/feishu-loops.ts`: each Source loop waits for `ready` only until its unload aborts it, so the unload does not wait for a start that can wait for the Host Loader, which waits for that unload.
+- Docs: the README In Mumbo bullet and the startup paragraph of `docs/007-architecture.md`.
+- Tests: `tests/sources.spec.ts` (the GitHub and Feishu loops unload while `ready` never settles), `tests/index.spec.ts` (the start returns while `ready` is pending, logs its outcome, and logs nothing for a stopped Runtime) and `tests/runtime.spec.ts` (a stop while the main Session's resolve waits, after which the ensure creates and renames nothing; a stop during Setup, after which the environment is restored and no Session is resolved; a failed start in the `runtime` health entry, and a lock compromised during startup kept there).

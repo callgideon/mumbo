@@ -178,7 +178,12 @@ export class Runtime extends Service implements SourceHost {
         get github() { return runtime.context({ kind: 'github', health: ['github'] }) },
         requestPass: () => { passes.request() }, sendReplies: () => outbox.sent(),
         quietly: run => { this.quiet++; try { return run() } finally { this.quiet-- } } }
-      this.ready = this.initialize()
+      // The plugin start does not wait for this (`UPSTREAM.md` S16), so the `runtime` health entry shows a failure; after a stop
+      // or a compromised lock, which aborts `lifetime` and keeps its own entry, the start's abort is no failure of its own.
+      this.ready = this.initialize().catch((error: unknown) => {
+        if (!this.lifetime.aborted) this.runtimeHealth.set({ state: 'error', detail: String(error), at: now() })
+        throw error
+      })
     } catch (error) {
       // Release the database and state lock if initialization fails so an in-process restart can reacquire them.
       try { opened?.close() } finally { release() }
@@ -220,6 +225,8 @@ export class Runtime extends Service implements SourceHost {
       this.runtimeHealth.set({ ...health('paused', 'setupPending'), at: now() })
       return
     }
+    // stop() may have run during setup (`UPSTREAM.md` S16): undo the environment setup applied after stop() restored it.
+    if (this.closing()) { this.setup.restore(); return }
     this.sessions.install()
     this.executors.install()
     await this.sessions.ensure(this.masterId, this.sessions.masterDirectory, 'dsh-superagent orchestrator', 'orchestrator')

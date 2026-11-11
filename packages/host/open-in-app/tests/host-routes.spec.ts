@@ -47,8 +47,18 @@ function pathTable(entries: Record<string, string> = {}): (name: string) => Prom
   return name => Promise.resolve(entries[name] ?? null)
 }
 
-/** Boot webserver + open-in-app rows through the real Loader. */
-async function boot(layers: readonly LaunchEnvironmentLayerInput[] = []): Promise<string> {
+/**
+ * Boot webserver + open-in-app rows through the real Loader.
+ * @param layers - launch environment layers.
+ * @param subprocess - the composition's subprocess service stub; the default rejects every lookup.
+ * @returns the server's base URL.
+ */
+async function boot(
+  layers: readonly LaunchEnvironmentLayerInput[] = [],
+  // The plugin resolves PATH names through the composition's subprocess
+  // capability; the not-found rejection is the provider's real signal.
+  subprocess: object = { resolveExecutable: () => Promise.reject(new Error('spec host resolves nothing')) },
+): Promise<string> {
   internals.catalog = { env: {}, ...internals.catalog }
   root = await mkdtemp(join(tmpdir(), 'dsh-open-in-app-loader-'))
   const configPath = join(root, 'cordis.yml')
@@ -69,11 +79,7 @@ async function boot(layers: readonly LaunchEnvironmentLayerInput[] = []): Promis
   context.provide(DSH_LAUNCH_ENVIRONMENT_KEY, createLaunchEnvironmentSnapshot(layers))
   context.baseUrl = pathToFileURL(root).href + '/'
   context.provide('connection', { requestRejection: () => trust.rejection } as never)
-  // The plugin resolves PATH names through the composition's subprocess
-  // capability; the not-found rejection is the provider's real signal.
-  context.provide('subprocess', {
-    resolveExecutable: () => Promise.reject(new Error('spec host resolves nothing')),
-  } as never)
+  context.provide('subprocess', subprocess as never)
   await context.plugin(Loader)
   context.loader.builtins.include = Include
   const modules = new Map<string, unknown>([
@@ -475,6 +481,36 @@ describe('open-in-app host routes (real Loader composition)', () => {
     // The spec host's subprocess stub rejects every lookup, which the plugin
     // reads as not-on-PATH: the catalog resolves empty instead of failing.
     expect(await (await fetch(`${base}/open-in-app/apps`)).json()).toEqual({ apps: [] })
+  })
+
+  it('neither offers nor launches an executable on a run-as provider\'s PATH, which the run-as user may write', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-open-in-app-home-'))
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace, { recursive: true })
+    const launch = vi.fn<OpenInAppLauncher>()
+    internals.catalog = {
+      platform: 'linux',
+      home,
+      env: { XDG_DATA_DIRS: join(home, 'xdg-empty'), DISPLAY: ':0' },
+      run: () => Promise.reject(new Error('fixture rejects')),
+      launch,
+    }
+    // The provider runs children as agent and finds `code` in agent's npm prefix, such as one `npm i -g` filled.
+    const resolveExecutable = vi.fn((name: string) => Promise.resolve(`/home/agent/.npm-global/bin/${name}`))
+    const base = await boot([], { childIdentity: { uid: 1001, gid: 1001, groups: [] }, resolveExecutable })
+    try {
+      expect(await (await fetch(`${base}/open-in-app/apps`)).json()).toEqual({ apps: [] })
+      const open = await fetch(`${base}/open-in-app/open`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ app: 'vscode', path: workspace }),
+      })
+      expect(open.status).toBe(400)
+      expect(resolveExecutable).not.toHaveBeenCalled()
+      expect(launch).not.toHaveBeenCalled()
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
   })
 
   it('removes all three routes when the plugin row is disposed (HMR safety)', async () => {
