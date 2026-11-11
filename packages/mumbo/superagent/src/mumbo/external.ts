@@ -37,7 +37,8 @@ const REFUSALS = {
   not_holder: 'Another door key holds this lease',
   wrong_ref: 'This lease pushes its Ticket\'s branch only',
   head_not_pushed: 'No holder of this Ticket\'s lease pushed that commit through the worker git route',
-  head_moved: 'The Ticket\'s branch head is another commit; submit the head you pushed last',
+  head_moved: 'The Ticket\'s branch on GitHub is at another commit or does not exist; push your head to the branch again, then '
+    + 'submit the commit the branch is at',
   not_found: 'Unknown Ticket or Assignment',
 } as const
 export type WorkerConflictCode = keyof typeof REFUSALS

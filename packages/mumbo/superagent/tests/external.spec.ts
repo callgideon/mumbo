@@ -587,7 +587,8 @@ describe('submit', () => {
     const view = await claimed()
     await push(view, sha('a'))
     // A push the fence admitted that never made the branch on GitHub.
-    expect(await submit(view)).toEqual(refused(409, 'head_moved'))
+    expect(await submit(view)).toEqual({ status: 409, body: { code: 'head_moved', error: 'The Ticket\'s branch on GitHub is at '
+      + 'another commit or does not exist; push your head to the branch again, then submit the commit the branch is at' } })
     github.heads.set(view.branch, sha('a'))
     expect(await submit(view, { headSha: sha('b') })).toEqual(refused(409, 'head_not_pushed'))
     await push(view, sha('b'))
