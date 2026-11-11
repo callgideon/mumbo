@@ -941,7 +941,9 @@ const FIBER_DISPOSED = 4 as FiberState.DISPOSED
  *
  * The list is global rather than profile metadata. Missing or disabled ids do
  * not affect startup; an enabled listed entry must activate. The list covers
- * shared Agent execution, application endpoints, and Web bootstrap/transport.
+ * shared Agent execution, application endpoints, Web bootstrap/transport, and
+ * the keyless snapshot replay provider, whose recording is the only model
+ * source a replay may use.
  */
 const requiredStartupEntryIds = new Set<string>([
   'agent-loop',
@@ -954,6 +956,7 @@ const requiredStartupEntryIds = new Set<string>([
   'headless-runner',
   'acp',
   'sdk-jsonrpc-server',
+  'llm-replay',
 ])
 
 /** Render plugin stacks, nested causes, and aggregate member failures once per error. */

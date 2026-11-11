@@ -47,12 +47,21 @@ export type { AgentUnderTest } from './launcher.ts'
 const DEFAULT_WAIT_TIMEOUT_MS = 10_000
 const WAIT_POLL_INTERVAL_MS = 10
 
+/** The loopback discard port, which hosts leave closed: a request sent here never leaves the machine. */
+const REPLAY_UNREACHABLE_ENDPOINT = 'http://127.0.0.1:9'
+
 /**
  * Credential environment every keyless replay layers under its scenario environment. Shipped
  * profiles offer `web_search` only while a DeepSeek search key is configured and recordings ran
  * with a real key, so a replay supplies a placeholder instead of whatever the runner exports.
+ * Both DeepSeek endpoints that read that key point at a closed loopback port, so a live adapter
+ * left mounted beside the replay provider fails its request locally instead of reaching the API.
  */
-export const REPLAY_CREDENTIAL_ENV: Readonly<Record<string, string>> = { DEEPSEEK_API_KEY: 'snapshot-replay-key' }
+export const REPLAY_CREDENTIAL_ENV: Readonly<Record<string, string>> = {
+  DEEPSEEK_API_KEY: 'snapshot-replay-key',
+  DEEPSEEK_BASE_URL: REPLAY_UNREACHABLE_ENDPOINT,
+  DEEPSEEK_SEARCH_BASE_URL: REPLAY_UNREACHABLE_ENDPOINT,
+}
 
 /**
  * One step of a scenario's deterministic input script (`input.json`). The

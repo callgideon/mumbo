@@ -566,6 +566,7 @@ describe('auditStartupEntries', () => {
     'headless-runner',
     'acp',
     'sdk-jsonrpc-server',
+    'llm-replay',
   ]
 
   interface FakeEntry {

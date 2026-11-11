@@ -79,6 +79,7 @@ Two failure modes are not reconstructable from a durable Assistant settlement al
 
 ### What can go wrong
 
+- **The fixture cannot be loaded** — `dsh` [startup requires](../../boot/app-boot/README.md) the `llm-replay` entry, so a missing, unparsable, or invalid fixture stops the process with `llm-replay (required)` and the fixture line before any model call; no other route answers in its place.
 - **The fixture is not fully consumed** — `assertConsumed()` at teardown turns a scenario that silently drove fewer model calls than recorded into a crisp diagnostic; call it when installing replay directly in a test.
 - **An unrecorded session makes a call** — replay fails loud and tells you to re-record the scenario.
 - **A scripted placeholder matches nothing** — `{{fromRequest:<regex>}}` resolution validates the pattern and the request corpus and fails loud on no match, an invalid pattern, or an unterminated placeholder.

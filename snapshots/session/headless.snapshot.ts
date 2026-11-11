@@ -4,6 +4,8 @@ import { startHttpMcpFixture } from '../../packages/mcp/mcp-client/tests/http-fi
 import { chmod, cp, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { basename, delimiter, dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -1109,6 +1111,73 @@ describe('headless recorded-session snapshots', () => {
       await readFile(join(snapshotsRoot, fixtureName), 'utf8'),
     )))).flat()
     expect(violations).toEqual([])
+  })
+
+  it.skipIf(mode !== 'replay')('stops a replay whose fixture cannot be parsed before any model request', async () => {
+    const liveRequests: string[] = []
+    const liveApi = createServer((request, response) => {
+      liveRequests.push(`${request.method ?? ''} ${request.url ?? ''}`)
+      response.writeHead(401).end()
+    })
+    await new Promise<void>(resolve => liveApi.listen(0, '127.0.0.1', resolve))
+    const fixtureDir = await mkdtemp(join(tmpdir(), 'dsh-replay-malformed-'))
+    try {
+      const base = compositionOwners.get('default')
+      if (base === undefined) throw new Error('headless corpus has no default composition')
+      const recorded = await readFile(join(base.dir, await primaryFixtureFile(base.dir)), 'utf8')
+      const fixture = join(fixtureDir, 'session.jsonl')
+      // A hand-written row cut off mid-object.
+      await writeFile(fixture, `${recorded.trimEnd()}\n{"type":"turn/end"\n`)
+      const patchSources = ['cordis.yml', 'cordis.snapshot.yml', 'model.cordis.yml'].map(file => join(base.dir, file))
+      const liveRoutePatch = `${String(patchSources.length)}-live-route.cordis.yml`
+      const patches = [...patchSources.map((source, index) => `${String(index)}-${basename(source)}`), liveRoutePatch]
+      const { port } = liveApi.address() as AddressInfo
+      const result = await runLoaderSmoke({
+        label: 'malformed replay fixture',
+        tempDirPrefix: 'dsh-log-snap-',
+        binScript: dshBin,
+        sourceImport: 'tsx/esm',
+        configPath: join(base.dir, 'cordis.yml'),
+        binArgs: [
+          '--profile', 'headless',
+          ...patches.flatMap(file => ['--patch', join('.snapshot-patches', file)]),
+          'Reply with exactly the word: PONG.',
+        ],
+        tsconfigPath,
+        expectedExitCode: 1,
+        env: {
+          ...REPLAY_CREDENTIAL_ENV,
+          DSH_SNAPSHOT: 'replay',
+          DSH_SNAPSHOT_FILE: fixture,
+          DSH_SNAPSHOT_PROVIDER: 'deepseek-official',
+          DSH_SNAPSHOT_MODEL: 'deepseek-v4-flash',
+          // The live route reaches this listener in place of the public API.
+          DEEPSEEK_BASE_URL: `http://127.0.0.1:${String(port)}/anthropic`,
+          NODE_OPTIONS: [process.env.NODE_OPTIONS, '--disable-warning=ExperimentalWarning'].filter(Boolean).join(' '),
+          DSH_TELEMETRY_DISABLED: '1',
+        },
+        prepare: async (cwd) => {
+          const patchRoot = join(cwd, '.snapshot-patches')
+          await mkdir(patchRoot, { recursive: true })
+          patchSources.forEach((source, index) => {
+            materializeProfilePatch(source, cwd, 'headless', patchRoot, index)
+          })
+          // A replay composition that leaves the live DeepSeek route mounted beside the replay provider.
+          await writeFile(join(patchRoot, liveRoutePatch), [
+            '- id: llm-deepseek',
+            "  name: '@deepseek-ai/dsh-llm-deepseek-api-key'",
+            '  disabled: false',
+            '',
+          ].join('\n'))
+        },
+      })
+      expect(result.stderr).toContain('llm-replay (required)')
+      expect(result.stderr).toContain('contains invalid JSON')
+      expect(liveRequests).toEqual([])
+    } finally {
+      await new Promise(resolve => liveApi.close(resolve))
+      await rm(fixtureDir, { recursive: true, force: true })
+    }
   })
 
   it('stores session-owned inputs with typed redaction and no ACP transcript', async () => {

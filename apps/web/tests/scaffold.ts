@@ -502,15 +502,16 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
   // ran with a real key. Other runs keep the launching environment, as their goldens do.
   const pinDeepSeekCredential = mode !== 'record' && !maskDeepSeekCredential
     && options.replayFixture !== undefined && options.replayProvidersOnly !== true
-  const originalDeepSeekCredential = process.env.DEEPSEEK_API_KEY
+  const originalCredentialEnvironment = Object.fromEntries(
+    Object.keys(REPLAY_CREDENTIAL_ENV).map(key => [key, process.env[key]]),
+  )
   let credentialEnvironmentRestored = false
   const restoreCredentialEnvironment = (): void => {
     if (credentialEnvironmentRestored || (!maskDeepSeekCredential && !pinDeepSeekCredential)) return
     credentialEnvironmentRestored = true
-    if (originalDeepSeekCredential === undefined) {
-      Reflect.deleteProperty(process.env, 'DEEPSEEK_API_KEY')
-    } else {
-      process.env.DEEPSEEK_API_KEY = originalDeepSeekCredential
+    for (const [key, value] of Object.entries(originalCredentialEnvironment)) {
+      if (value === undefined) Reflect.deleteProperty(process.env, key)
+      else process.env[key] = value
     }
   }
   const workspaceParent = await realpath(tmpdir())
