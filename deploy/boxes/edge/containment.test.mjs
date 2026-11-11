@@ -525,14 +525,14 @@ test('the B24 start script stops and masks each unused unit that is active, then
 })
 
 /** A root as E2B's build leaves a box's: /usr/local, its node, /code, envd and /etc/inittab world-writable. Also a
- *  module group-writable by workspace, a sticky world-writable directory, a link out of the root, world-writable paths in
+ *  library group-writable by root alone, a module group-writable by workspace, a sticky world-writable directory, a link out of the root, world-writable paths in
  *  each tree the repair leaves alone, of those trees' top directories /home world-writable, /tmp world-writable without
- *  the sticky bit and /var/tmp sticky, a build's file in /usr/local/bin, a system user's group-writable directory, the
+ *  the sticky bit and /var/tmp sticky, a build's group-writable file in /usr/local/bin, a system user's group-writable directory, the
  *  group-writable /var/mail and /var/local of the system groups mail and staff, and directories group-writable by the
  *  system groups uploads and users. */
-const E2B_MODES = { 'usr/local': 0o777, 'usr/local/bin': 0o777, 'usr/local/bin/node': 0o777, 'usr/bin/envd': 0o777, 'etc/inittab': 0o666, code: 0o777,
+const E2B_MODES = { 'usr/local': 0o777, 'usr/local/bin': 0o777, 'usr/local/bin/node': 0o777, 'usr/bin/envd': 0o777, 'etc/inittab': 0o666, code: 0o777, 'usr/lib/libg.so': 0o664,
   'src/node_modules/m': 0o775, 'var/spool/sticky': 0o1777, 'home/agent/w': 0o777, 'root/w': 0o777, 'tmp/w': 0o777, 'var/tmp/w': 0o777, 'var/lib/mumbo/playwright-output/f': 0o666,
-  home: 0o777, tmp: 0o777, 'var/tmp': 0o1777, 'usr/local/bin/oauth2-proxy': 0o755, 'var/lib/colord': 0o775, 'var/mail': 0o2775, 'var/local': 0o2775, 'opt/uploads': 0o775, 'opt/users': 0o775 }
+  home: 0o777, tmp: 0o777, 'var/tmp': 0o1777, 'usr/local/bin/oauth2-proxy': 0o775, 'var/lib/colord': 0o775, 'var/mail': 0o2775, 'var/local': 0o2775, 'opt/uploads': 0o775, 'opt/users': 0o775 }
 /** The owners and groups of e2bRoot's paths other than root:root: agent's (1001) a build's file in /usr/local/bin with
  *  a group no name has (as the web image's oauth2-proxy), the link, /tmp and paths in the trees the repair leaves alone;
  *  browsermcp's its Playwright output; the system user colord's (112) its directory; mail (8), staff (50), uploads
@@ -550,24 +550,25 @@ const E2B_GROUP = ['root:x:0:', 'mail:x:8:', 'sudo:x:27:user', 'staff:x:50:', 'u
   'user:x:1000:', 'agent:x:1001:', 'workspace:x:1007:agent,xsession', 'nogroup:x:65534:']
 /** A `find` for root `r` that reads the owners and groups in `ids` (relative path to [uid, gid]; every other path is
  *  root:root): it runs the real one with each `-uid n` and `-gid n` test (n, or +n, above 0) as the listed paths whose
- *  id matches. A chown logs its arguments and, when `holds`, takes its paths out of the list, as root:root. */
+ *  id matches, and with `-uid 0` and `-gid 0` as every path but the listed ones whose id is not 0. A chown logs its arguments and, when `holds`, takes its paths out of the list, as root:root. */
 function idsFind(r, ids, holds = true) {
   const list = r.at('log/ids')
   writeFileSync(list, Object.entries(ids).map(([p, [u, g]]) => `${u} ${g} ${r.at(p)}\n`).join(''))
   r.fake('find', `p=; for a; do shift
   case $p in -uid|-gid)
-    case $a in +[0-9]*|[1-9]*) ;; *) echo "fake find: $p $a matches unlisted paths" >&2; exit 99;; esac
-    set -- "$@" '(' -false; while read -r u g q; do v=$u; [ $p = -uid ] || v=$g; case $a in +*) [ $v -gt \${a#+} ];; *) [ $v = $a ];; esac && set -- "$@" -o -path "$q"; done < ${list}
-    set -- "$@" ')'; p=; continue;; esac
+    case $a in 0|+[0-9]*|[1-9]*) ;; *) echo "fake find: $p $a matches unlisted paths" >&2; exit 99;; esac
+    n=; [ $a != 0 ] || n=!
+    set -- "$@" '(' $n '(' -false; while read -r u g q; do v=$u; [ $p = -uid ] || v=$g; case $a in 0) [ $v != 0 ];; +*) [ $v -gt \${a#+} ];; *) [ $v = $a ];; esac && set -- "$@" -o -path "$q"; done < ${list}
+    set -- "$@" ')' ')'; p=; continue;; esac
   case $a in -uid|-gid) p=$a;; *) set -- "$@" "$a";; esac
 done
 exec ${which('find')} "$@"`)
   r.fake('chown', `echo "$*" >> ${r.t}/log/chown${holds ? `; shift 2; for q; do ${which('awk')} -v q="$q" '$3 != q' ${list} > ${list}.n; ${which('mv')} ${list}.n ${list}; done` : ''}`)
 }
 function e2bRoot(r, holds = true) {
-  for (const p of ['usr/bin', 'etc', 'src/node_modules', 'var/spool', 'var/lib', 'opt', 'home/agent', 'tmp', 'var/tmp', 'var/lib/mumbo/playwright-output']) mkdirSync(r.at(p), { recursive: true })
+  for (const p of ['usr/bin', 'usr/lib', 'etc', 'src/node_modules', 'var/spool', 'var/lib', 'opt', 'home/agent', 'tmp', 'var/tmp', 'var/lib/mumbo/playwright-output']) mkdirSync(r.at(p), { recursive: true })
   for (const [p, mode] of Object.entries(E2B_MODES)) {
-    if (!existsSync(r.at(p))) (/\/(node|envd|inittab|f|oauth2-proxy)$/.test(p) ? writeFileSync(r.at(p), '') : mkdirSync(r.at(p)))
+    if (!existsSync(r.at(p))) (/\/(node|envd|inittab|f|oauth2-proxy|libg\.so)$/.test(p) ? writeFileSync(r.at(p), '') : mkdirSync(r.at(p)))
     chmodSync(r.at(p), mode)
   }
   mkdirSync(r.at('home/outside')); chmodSync(r.at('home/outside'), 0o777); symlinkSync(r.at('home/outside'), r.at('usr/local/link'))
@@ -578,7 +579,7 @@ const modes = (r, paths) => Object.fromEntries(paths.map(p => [p, statSync(r.at(
 /** The paths the repair's check names in `err`, sorted. */
 const named = (err) => err.split('\n').slice(1, -1).map(l => l.split(' ')[2]).sort()
 
-test('the system repair: login users\' paths root\'s, g+w off login groups, o+w off all but sticky directories, outside the users\' and runtime trees, then checked; system users\' and groups\' paths as they were', () => {
+test('the system repair: login users\' paths root\'s, g+w off login groups and group root, o+w off all but sticky directories, outside the users\' and runtime trees, then checked; system users\' and groups\' paths as they were', () => {
   let r = root()
   try {
     e2bRoot(r)
@@ -591,15 +592,17 @@ test('the system repair: login users\' paths root\'s, g+w off login groups, o+w 
     const chowned = r.lines('chown').join(' ').split(' ')
     assert.deepEqual([chowned.slice(0, 2), chowned.slice(2).sort()], [['-h', '0:0'], ['T/tmp', 'T/usr/local/bin/oauth2-proxy', 'T/usr/local/link']])
     // The modes a box's start script leaves: /usr/local, node, /code, envd, inittab, /home and the non-sticky /tmp
-    // without o+w (group root's write bit stays: it holds only root), the sticky directories as they were, the module,
-    // agent's /tmp and the directories of uploads and users without g+w, colord's, /var/mail and /var/local as they were, what is in
-    // the users' and runtime trees as it was, the link not followed.
-    assert.deepEqual(modes(r, [...Object.keys(E2B_MODES), 'home/outside']), { 'usr/local': 0o775, 'usr/local/bin': 0o775, 'usr/local/bin/node': 0o775, 'usr/bin/envd': 0o775, 'etc/inittab': 0o664, code: 0o775,
+    // without o+w and g+w (E2B's 0777 /usr/local becomes 0755: dsh's run-as provider refuses a PATH directory any group
+    // can write), the library and the login user's file without group root's g+w, the sticky directories as they were,
+    // the module, agent's /tmp and the directories of uploads and users without g+w, colord's, /var/mail and /var/local
+    // as they were, what is in the users' and runtime trees as it was, the link not followed.
+    assert.deepEqual(modes(r, [...Object.keys(E2B_MODES), 'home/outside']), { 'usr/local': 0o755, 'usr/local/bin': 0o755, 'usr/local/bin/node': 0o755, 'usr/bin/envd': 0o755, 'etc/inittab': 0o644, code: 0o755, 'usr/lib/libg.so': 0o644,
       'src/node_modules/m': 0o755, 'var/spool/sticky': 0o1777, 'home/agent/w': 0o777, 'root/w': 0o777, 'tmp/w': 0o777, 'var/tmp/w': 0o777, 'var/lib/mumbo/playwright-output/f': 0o666,
-      home: 0o775, tmp: 0o755, 'var/tmp': 0o1777, 'usr/local/bin/oauth2-proxy': 0o755, 'var/lib/colord': 0o775, 'var/mail': 0o2775, 'var/local': 0o2775, 'opt/uploads': 0o755, 'opt/users': 0o755, 'home/outside': 0o777 })
+      home: 0o755, tmp: 0o755, 'var/tmp': 0o1777, 'usr/local/bin/oauth2-proxy': 0o755, 'var/lib/colord': 0o775, 'var/mail': 0o2775, 'var/local': 0o2775, 'opt/uploads': 0o755, 'opt/users': 0o755, 'home/outside': 0o777 })
   } finally { r.done() }
-  // The modes do not hold (chmod changes nothing): the start stops and names what every user or a login group can
-  // still change, and nothing a system group's or in the trees left alone.
+  // The modes do not hold (chmod changes nothing): the start stops and names what every user, a login group or group
+  // root (the library, and the login user's file it took) can still change, and nothing a system group's, a sticky
+  // directory or in the trees left alone.
   r = root()
   try {
     e2bRoot(r)
@@ -607,7 +610,7 @@ test('the system repair: login users\' paths root\'s, g+w off login groups, o+w 
     const out = r.run('echo reached', [], systemRepair(r.t))
     assert.equal(out.code, 1)
     assert.ok(out.err.startsWith('mumbo-box: a login user can still change these system files after their repair:\n'), out.err)
-    assert.deepEqual(named(out.err), ['T/code', 'T/etc/inittab', 'T/home', 'T/opt/uploads', 'T/opt/users', 'T/src/node_modules/m', 'T/tmp', 'T/usr/bin/envd', 'T/usr/local', 'T/usr/local/bin', 'T/usr/local/bin/node'])
+    assert.deepEqual(named(out.err), ['T/code', 'T/etc/inittab', 'T/home', 'T/opt/uploads', 'T/opt/users', 'T/src/node_modules/m', 'T/tmp', 'T/usr/bin/envd', 'T/usr/lib/libg.so', 'T/usr/local', 'T/usr/local/bin', 'T/usr/local/bin/node', 'T/usr/local/bin/oauth2-proxy'])
     assert.match(out.err, new RegExp(`^-rwxrwxrwx ${ME.owner} T/usr/bin/envd$`, 'm'))
     assert.ok(!out.out.includes('reached'))
   } finally { r.done() }
@@ -644,7 +647,7 @@ test('the system repair stops the start, before it changes anything, when E2B\'s
   }
   for (const name of REPAIR_USERS) assert.deepEqual(run(name), [1, below(name), '', false, 0o777], name)
   assert.deepEqual(run('user', false), [1, below('user'), '', false, 0o777])
-  assert.deepEqual(run('xvnc', false), [0, '', 'reached\n', true, 0o775])
+  assert.deepEqual(run('xvnc', false), [0, '', 'reached\n', true, 0o755])
   // The RUNBOOK's Rollout quotes the line an old B24 person box (xvnc) and project box (ghproxy) stops with.
   const rollout = readFileSync(new URL('../RUNBOOK.md', import.meta.url), 'utf8').split('\n').find(l => l.startsWith('- **Rollout.**'))
   for (const name of ['xvnc', 'ghproxy']) {
@@ -671,7 +674,7 @@ test('the start script repairs the system files first, before it reads the ports
       const firewall = r.at('root/.mumbo/firewall.nft')
       if (holds) {
         assert.equal(out.code, 0, out.err)
-        assert.deepEqual([out.out, statSync(r.at('usr/local/share/mumbo/ports')).mode & 0o777, readFileSync(firewall, 'utf8')], ['DSH_PORT=880\n', 0o664, FIREWALL('{ 0, 1002 }')])
+        assert.deepEqual([out.out, statSync(r.at('usr/local/share/mumbo/ports')).mode & 0o777, readFileSync(firewall, 'utf8')], ['DSH_PORT=880\n', 0o644, FIREWALL('{ 0, 1002 }')])
       } else {
         // Stopped before the marker is read: no firewall, no dsh.
         assert.equal(out.code, 1)
@@ -996,6 +999,9 @@ test('template: the dsh smoke check runs a box\'s start script with dummy values
     const s = smokeStartScript(person), step = dshSmokeStep(person)
     for (const text of [s, step]) execFileSync('sh', ['-n'], { input: text })
     assert.ok(step.includes(`; echo ${base64(s)} | base64 -d > $T/start.sh; `))
+    // What E2B's finalize phase does after the template's steps (its configure.sh:94-100), before start.sh runs.
+    const finalize = `; chmod -R 777 /usr/local && mkdir -p /code && chmod -R 777 /code || { echo "mumbo-box: the dsh smoke check could not make /usr/local and /code 0777 as E2B's finalize phase does" >&2; exit 1; }; `
+    assert.ok(step.includes(finalize) && step.indexOf(finalize) < step.indexOf('; why=; ps -e -o pid= > $T/pids; setsid -w '))
     assert.ok(step.includes('elif [ $n -ge 60 ]; then why=\'dsh printed no start line within 60 s\'; else sleep 1;'))
     // The script the edge would write for that box, line for line, less the kernel and network part, a person box's
     // desktop and a project box's GitHub proxy.
@@ -1046,7 +1052,8 @@ const SS_OK = [
   'LISTEN 0 5 127.0.0.1:8899 0.0.0.0:* users:(("node",pid=13,fd=3)) uid:4000010 ino:7 sk:7 <->',
   'LISTEN 0 5 0.0.0.0:3000 0.0.0.0:* users:(("node",pid=14,fd=3)) uid:4000001 ino:8 sk:8 <->',
 ]
-/** A fake start.sh in a temporary root `$T`: it lays out and writes as a box's does, in /root (also changing its modes
+/** A fake start.sh in a temporary root `$T`: for the system repair, unless `repair` is false, it sets /usr/local's modes
+ *  back to those in $T/usr-local.modes and takes g+w and o+w off /code; then it lays out and writes as a box's does, in /root (also changing its modes
  *  and writing into the image's .cargo), /home, /src, /var/lib/mumbo, /usr/local/share/mumbo, /run and /tmp, starts a
  *  fake dsh (a node process whose command line names dsh's entry point, pid in $T/dsh.pid) unless `dsh` is false,
  *  prints dsh's start line unless `line` is false, then dsh's warning that the entries `inactive` names did not activate
@@ -1054,8 +1061,9 @@ const SS_OK = [
  *  file. */
 /** dsh's warning that entries `ids` did not activate (app-boot activationDiagnostic), each with a stack line. */
 const warning = (ids) => [`dsh: warning: ${ids.length} ${ids.length === 1 ? 'entry' : 'entries'} did not activate`, ...ids.flatMap(id => [`${id} (@deepseek-ai/dsh-${id}): Error: ${id} could not load`, '    at apply (file:///src/x.ts:1:1)'])]
-const fakeStart = ({ line = true, dsh = true, exit = 0, extra = '', inactive = [] } = {}) => `set -eu
+const fakeStart = ({ line = true, dsh = true, exit = 0, extra = '', inactive = [], repair = true } = {}) => `set -eu
 : > $T/ran
+${repair ? 'while read -r m p; do chmod $m $p; done < $T/usr-local.modes; chmod -R go-w $T/code' : ''}
 echo 'start.sh: laying out'
 mkdir -p $T/root/.dsh/sessions $T/root/.dsh/logs $T/root/.mumbo $T/root/projects $T/var/lib/mumbo/spill $T/run/dsh-shell $T/home/agent/.mumbo-welcome $T/usr/local/share/mumbo/agents $T/tmp/tsx-0 $T/src/.dsh
 : > $T/root/.dsh/sessions/s.jsonl; : > $T/root/.cargo/cache
@@ -1070,7 +1078,7 @@ exit ${exit}
 `
 
 /** Runs `before && dshSmokeStep(true)` with the box paths moved into a temporary root whose /root (0700) holds .cargo
- *  (0755) and .profile, the start script replaced by `start`, real tools, and fake id (containment users 4000001 to
+ *  (0755) and .profile, /usr/local's modes after `setup` in usr-local.modes there, the start script replaced by `start`, real tools, and fake id (containment users 4000001 to
  *  4000005), ss (printing `ss`, or failing on null), sleep (20 ms), ps, which lists only the processes whose
  *  environment holds the run's MUMBO_SMOKE_TEST, so the step sees and kills no process of this host's, and su, which
  *  runs `su` when the step runs agentInstallScript(true) as agent with the moved /bin/sh, and fails otherwise. Returns the status, output with
@@ -1098,11 +1106,13 @@ function smoke({ start = fakeStart(), ss = SS_OK, before = 'true', setup = () =>
     fake('su', `[ "$1 $2 $3 $4" = '-s ${t}/bin/sh agent -c' ] && printf '%s\\n' "$5" | cmp -s - ${t}/agent.sh || exit 99\n${su}`)
     fake('ps', `[ "$1" = -e ] || exit 2; shift; exec ${which('ps')} -p "$(${which('grep')} -lsF 'MUMBO_SMOKE_TEST=${t}' /proc/[0-9]*/environ | ${which('cut')} -d/ -f3 | ${which('paste')} -sd, -)" "$@"`)
     setup(t)
+    writeFileSync(join(t, 'usr-local.modes'), ['usr/local', ...readdirSync(join(t, 'usr/local'), { recursive: true }).map(p => join('usr/local', p))]
+      .map(p => `${(lstatSync(join(t, p)).mode & 0o7777).toString(8)} ${join(t, p)}\n`).join(''))
     const listing = () => ['root', 'home', 'src', 'usr', 'var', 'run', 'tmp', 'dev'].flatMap(d => [d, ...readdirSync(join(t, d), { recursive: true }).map(p => join(d, p))])
       .map(p => `${p} ${(lstatSync(join(t, p)).mode & 0o7777).toString(8)}`).sort().join('\n')
     const was = listing()
     const step = dshSmokeStep(true).replace(base64(smokeStartScript(true)), base64(start.replaceAll('$T', t)))
-      .replace(/(?<=^|[\s'"=(<>])\/(root|home|src|run|tmp|usr|s?bin|var|etc|opt|proc|sys|dev(?!\/null))(?=[/\s'";)]|$)/g, `${t}/$1`).replaceAll('find / ', `find ${t} `)
+      .replace(/(?<=^|[\s'"=(<>])\/(root|home|src|run|tmp|usr|s?bin|var|etc|opt|proc|sys|code|dev(?!\/null))(?=[/\s'";)]|$)/g, `${t}/$1`).replaceAll('find / ', `find ${t} `)
     const out = spawnSync('/bin/sh', ['-c', `${before} && ${step}`], { encoding: 'utf8', env: { PATH: join(t, 'bin'), MUMBO_SMOKE_TEST: t }, timeout: 60000 })
     // A zombie waiting for its new parent to reap it is stopped.
     const running = readdirSync(t).filter(f => f.endsWith('.pid')).map(f => Number(readFileSync(join(t, f), 'utf8'))).filter(pid => {
@@ -1120,6 +1130,10 @@ test('template: the dsh smoke check passes when dsh prints its start line and no
   // dsh-subprocess-local starts each child in a session of its own, and without containment as root: the step stops it too.
   const detached = `setsid "${process.execPath}" -e 'setTimeout(() => {}, 30000)' </dev/null >/dev/null 2>&1 & echo $! > $T/detached.pid`
   assert.deepEqual(smoke({ start: fakeStart({ extra: detached }) }), ok)
+  // Before start.sh the step makes /usr/local and /code 0777, as E2B's finalize phase: without the repair the check names them.
+  const unrepaired = smoke({ start: fakeStart({ repair: false }) })
+  assert.equal(unrepaired.code, 1)
+  for (const [mode, p] of [['drwxrwxrwx', 'code'], ['drwxrwxrwx', 'usr/local/bin'], ['-rwxrwxrwx', 'usr/local/bin/node'], ['-rwxrwxrwx', 'usr/local/share/mumbo/ports']]) assert.match(unrepaired.err, new RegExp(`(: |\\n)${mode} ${ME.owner} T/${p}$`, 'm'), p)
 })
 
 test('template: the dsh smoke check fails on a slow, dead or failed dsh, an open listener or no ss, prints why with the logs, and still leaves nothing behind', (t) => {

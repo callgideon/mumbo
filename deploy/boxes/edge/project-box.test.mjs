@@ -52,7 +52,9 @@ test('a user box start script is byte-for-byte what it was before project boxes 
   // Then the repair first stops the start when E2B's user, or on a B24 template a user it makes, is below uid 1000 (containment.test.mjs).
   // Then the B24 template's kernel and network part stops and masks the unused ssh, rpcbind and nginx units that are
   // active and stops the start when anything listens on TCP 22, 80 or 111 (containment.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), '0c5829af5e78c59df24d54cd2b84a29a721ddea58eb45177675fab85c4a5ca7d')
+  // Then the repair also takes g+w from group root (but on a world-writable sticky directory), since dsh's run-as
+  // provider refuses a PATH directory any group can write and E2B's finalize leaves /usr/local/bin 0777 (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), '30a9fe05f648aa35dce8cf875c3191aa259629b411b2aee0c97de77f51aa6926')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -85,7 +87,9 @@ test('a project box start script is byte-for-byte what it was before B18 changed
   // Then the repair first stops the start when E2B's user, or on a B24 template a user it makes, is below uid 1000 (containment.test.mjs).
   // Then the B24 template's kernel and network part stops and masks the unused ssh, rpcbind and nginx units that are
   // active and stops the start when anything listens on TCP 22, 80 or 111 (containment.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), '76c1f494b42bfbc790a2f09c5ac1e3b98242fa67e683ce6b1f63757ccfa3ad17')
+  // Then the repair also takes g+w from group root (but on a world-writable sticky directory), since dsh's run-as
+  // provider refuses a PATH directory any group can write and E2B's finalize leaves /usr/local/bin 0777 (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), 'be6443f22c71f5d0597a82305b8e55bb3258de1b61eab802ec2d07e56f3455d9')
 })
 
 const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'

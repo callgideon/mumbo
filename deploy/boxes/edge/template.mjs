@@ -239,7 +239,9 @@ export const LISTENER_ALLOWLIST = [
 /** The directories dshSmokeStep compares before and after, for what the start script and dsh made. */
 const SMOKE_SCAN = '/root /home /src /var/lib/mumbo /usr/local/share/mumbo /run/dsh-shell /tmp /var/tmp /dev/shm'
 /** The template step, after NFT_SMOKE_STEP, that fails the build unless dsh starts on this template as a box starts it:
- *  it runs smokeStartScript as root in a session of its own (setsid), which lays the box out (containmentLayout, and the
+ *  it first does what E2B's finalize phase does after the template's steps, `chmod -R 777 /usr/local`, `mkdir -p /code`
+ *  and `chmod -R 777 /code`, so the start script's system repair and dsh's run-as checks see the modes a box starts
+ *  with. Then it runs smokeStartScript as root in a session of its own (setsid), which lays the box out (containmentLayout, and the
  *  containment rows on an image with serverIdentity), writes the overlays and starts dsh with the box's profile, patches
  *  and rows, and requires dsh's line `dsh web: http…?token=` in /root/dsh.log within DSH_SMOKE_SECONDS. DSH_SMOKE_SETTLE_SECONDS
  *  later it fails on any entry outside INACTIVE_ALLOWLIST in dsh's warning that entries did not activate: a failed row
@@ -263,7 +265,8 @@ const SMOKE_SCAN = '/root /home /src /var/lib/mumbo /usr/local/share/mumbo /run/
  *  such process is left and SMOKE_SCAN and those modes read as before. dsh runs at a box's own paths (HOME /root, DSH_HOME /root/.dsh, its log /root/dsh.log), which
  *  the rows and the layout name, so the step refuses a template that already has /root/.dsh, /root/.mumbo, /root/dsh.log,
  *  /root/projects or /root/work. What stays: mcpserver's supplementary groups set to none (`usermod -G ''`), as
- *  usersSteps left them, and smokeStartScript's sysctls and system repair, which every box's start script sets the same way. A template without the marker runs dsh on OLD_PORTS, as its boxes would; an image without
+ *  usersSteps left them, and smokeStartScript's sysctls and system repair, which every box's start script sets the same way;
+ *  /code, and /usr/local and /code at the repair's modes, which E2B's finalize phase makes 0777 again. A template without the marker runs dsh on OLD_PORTS, as its boxes would; an image without
  *  serverIdentity runs it as root without the rows. No text of the step matches start.sh's
  *  `pkill -f 'apps/cli/src/bin.ts'`, which would kill the step. A subshell, as NFT_SMOKE_STEP.
  *  @param {boolean} person a person box (mumbo-box), not a project box
@@ -280,6 +283,10 @@ export const dshSmokeStep = (person) => {
   return `(${[
     'export LC_ALL=C; echo "mumbo-box: dsh smoke check: start dsh as a box does, with dummy values"',
     'for p in /root/.dsh /root/.mumbo /root/dsh.log /root/projects /root/work; do [ ! -e "$p" ] || { echo "mumbo-box: the dsh smoke check needs a template without $p, which a box\'s start script makes" >&2; exit 1; }; done',
+    // What E2B's finalize phase does after the template's steps (its orchestrator's
+    // packages/orchestrator/pkg/template/build/phases/finalize/configure.sh:94-100), so start.sh repairs, and dsh checks,
+    // the modes a box starts with.
+    `chmod -R 777 /usr/local && mkdir -p /code && chmod -R 777 /code || { echo "mumbo-box: the dsh smoke check could not make /usr/local and /code 0777 as E2B's finalize phase does" >&2; exit 1; }`,
     `DSH_PORT=${OLD_PORTS.dsh} LIVE_PORT=${OLD_PORTS.live}; [ ! -e ${PORTS_MARKER} ] || read -r DSH_PORT LIVE_PORT < ${PORTS_MARKER}`,
     `S='${SMOKE_SCAN}'; T=$(mktemp -d /run/mumbo-smoke.XXXXXX) || exit 1`,
     'find $S -xdev 2>/dev/null | sort -T $T > $T/before; find /root -maxdepth 1 ! -type l -printf \'%m %p\\n\' | sort > $T/modes',
