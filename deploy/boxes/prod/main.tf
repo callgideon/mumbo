@@ -63,7 +63,43 @@ module "cell_us_east_1" {
   edge_role_arn  = module.edge_us_east_1.role_arn
 }
 
+# The Mumbai cell (design section 17c, R3), lean on the founder's choice (2026-11-11). node_count stays 0 until its E2B
+# build (setup/build.sh into its templates bucket, R5) is in place: a node boots from that build.
+provider "aws" {
+  alias  = "ap_south_1"
+  region = "ap-south-1"
+  default_tags { tags = { project = "mumbo", component = "boxes", stage = "prod" } }
+}
+
+variable "node_count_ap_south_1" {
+  description = "Sandbox nodes in the ap-south-1 cell; 0 until R5 puts the E2B build in its templates bucket."
+  type        = number
+  default     = 0
+}
+
+module "cell_ap_south_1" {
+  source    = "./modules/cell"
+  providers = { aws = aws.ap_south_1 }
+
+  name           = "${local.name}-aps1" # IAM role and S3 bucket names are global
+  vpc_cidr       = "10.21.0.0/16"       # clear of 10.11/16, 10.12/16 (E2B in-host) and 10.20/16 (us-east-1)
+  azs            = ["ap-south-1a", "ap-south-1b", "ap-south-1c"]
+  private_domain = "ap-south-1.boxes.internal"
+  zone_id        = module.cell_us_east_1.zone_id # one boxes.internal zone for every cell (R4)
+  lean           = true
+  e2b_sha        = var.e2b_sha
+  node_count     = var.node_count_ap_south_1
+  ecr            = local.ecr
+  mtls_env       = local.mtls_env
+  mtls_certs     = { ca_pem = module.mtls.ca_pem, leaves = module.mtls.leaves } # SPIFFE ids, not names: the same leaves serve every cell
+  backup_bucket  = "${local.name}-aps1-backup-${data.aws_caller_identity.this.account_id}"
+  edge_role_arn  = module.edge_us_east_1.role_arn # the Mumbai edge's role joins in R6
+}
+
 output "nat_egress_ips" { value = module.cell_us_east_1.nat_egress_ips }
+output "aps1_nat_egress_ips" { value = module.cell_ap_south_1.nat_egress_ips }
+output "aps1_e2b_api_url" { value = module.cell_ap_south_1.e2b_api_url }
+output "aps1_e2b_secret_arn" { value = module.cell_ap_south_1.e2b_secret_arn }
 output "postgres_endpoint" { value = module.cell_us_east_1.postgres_endpoint }
 output "memorydb_endpoint" { value = module.cell_us_east_1.memorydb_endpoint }
 output "templates_bucket" { value = module.cell_us_east_1.templates_bucket }

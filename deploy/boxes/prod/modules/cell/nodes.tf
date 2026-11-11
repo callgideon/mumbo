@@ -58,7 +58,7 @@ resource "aws_iam_role_policy" "nodes" {
     Resource = [aws_s3_bucket.templates.arn, "${aws_s3_bucket.templates.arn}/*"] },
     { Effect = "Allow", Action = ["kms:Decrypt", "kms:GenerateDataKey"], Resource = aws_kms_key.data.arn },
     { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = [aws_secretsmanager_secret.mtls["orchestrator"].arn, aws_secretsmanager_secret.e2b.arn] },
-    { Effect = "Allow", Action = ["route53:ChangeResourceRecordSets", "route53:ListResourceRecordSets"], Resource = aws_route53_zone.internal.arn },
+    { Effect = "Allow", Action = ["route53:ChangeResourceRecordSets", "route53:ListResourceRecordSets"], Resource = "arn:aws:route53:::hostedzone/${local.zone_id}" },
     { Effect = "Allow", Action = "ec2:DescribeInstances", Resource = "*" },
     { Effect = "Allow", Action = "autoscaling:CompleteLifecycleAction", Resource = "arn:aws:autoscaling:${local.region}:${data.aws_caller_identity.this.account_id}:autoScalingGroup:*:autoScalingGroupName/${local.name}-nodes" },
   ] })
@@ -88,7 +88,7 @@ resource "aws_launch_template" "nodes" {
     hugepages   = local.hugepages, nbds = 256,
     mtls_secret = aws_secretsmanager_secret.mtls["orchestrator"].arn, e2b_secret = aws_secretsmanager_secret.e2b.arn,
     mtls_env    = local.mtls_env.orchestrator,
-    api_url     = "http://${aws_lb.internal.dns_name}:3000", zone_id = aws_route53_zone.internal.zone_id, dns_name = local.orch_dns,
+    api_url     = "http://${aws_lb.internal.dns_name}:3000", zone_id = local.zone_id, dns_name = local.orch_dns,
     asg         = "${local.name}-nodes", hook = local.hook, log_group = aws_cloudwatch_log_group.nodes.name,
   }))
   iam_instance_profile { arn = aws_iam_instance_profile.nodes.arn }

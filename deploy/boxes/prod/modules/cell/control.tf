@@ -224,7 +224,7 @@ resource "aws_ecs_service" "e2b" {
   name                   = each.key
   cluster                = aws_ecs_cluster.e2b.id
   task_definition        = aws_ecs_task_definition.e2b[each.key].arn
-  desired_count          = 2
+  desired_count          = var.lean ? 1 : 2
   launch_type            = "FARGATE"
   enable_execute_command = false
   # Rolling: a new task registers and passes health before an old one drains (E2B's api and proxy are stateless).
