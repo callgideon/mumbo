@@ -300,7 +300,7 @@ describe('staging an upload', () => {
       sizes.push(bytes)
       return Promise.resolve(undefined)
     })
-    expect(staged).toEqual({ path: expect.stringMatching(new RegExp(`^${into}/[0-9a-f]{32}/tax return\\.pdf$`, 'u')) as unknown, name: 'tax return.pdf', bytes: 9, sha256: sha256('pdf bytes') })
+    expect(staged).toEqual({ path: expect.stringMatching(new RegExp(`^${into}/[0-9a-f]{32}/tax return\\.pdf$`, 'u')) as string, name: 'tax return.pdf', bytes: 9, sha256: sha256('pdf bytes') })
     const path = (staged as { path: string }).path
     expect(sizes).toEqual([9])
     expect(readFileSync(path, 'utf8')).toBe('pdf bytes')
@@ -360,6 +360,6 @@ describe('staging an upload', () => {
     writeFileSync(join(downloads, 'tax.pdf'), 'pdf')
     // The staging directory is gone, so no nonce directory can be made in it.
     const refused = await stageUpload(join(downloads, 'tax.pdf'), join(root, 'gone'), 64, room)
-    expect(refused).toEqual({ refusal: expect.stringMatching(new RegExp(`^${JSON.stringify(join(downloads, 'tax.pdf'))} could not be copied: Error: ENOENT`, 'u')) as unknown })
+    expect(refused).toEqual({ refusal: expect.stringMatching(new RegExp(`^${JSON.stringify(join(downloads, 'tax.pdf'))} could not be copied: Error: ENOENT`, 'u')) as string })
   })
 })
