@@ -96,9 +96,13 @@ describe('creating a review', () => {
     const { trigger, parent, sessionId } = await submitted('1', long)
     const more = feishu('2', `also handle the empty list ${'and its edge cases '.repeat(40)}`, { mentions: [], root_id: 'om_1' })
     const beyond = feishu('3', 'and add an export', { mentions: [], root_id: 'om_1' })
-    h.runtime.receive(more); h.runtime.receive(beyond)
+    const requeued = feishu('4', 'also add a CSV import', { mentions: [], root_id: 'om_1' })
+    h.runtime.receive(more); h.runtime.receive(beyond); h.runtime.receive(requeued)
     await h.runtime.idle()
     await h.runTool(sessionId, 'orchestrator_trigger_handback', { trigger_id: beyond.id, reason: 'It asks for an export feature.' })
+    // A person sends a message that reached the ticket to Eval from the panel: no ticket decides it now.
+    expect(await h.api('POST', `triggers/${requeued.id}/requeue`)).toMatchObject({ body: { queued: true } })
+    expect(stored(parent).inputs.some(input => input.kind === 'trigger' && input.triggerId === requeued.id)).toBe(true)
     const first = await review(parent)
     github({ sha: SHA })
     await verdict(first.session, 'fail', SHA, 'The empty list is not handled.')
@@ -109,7 +113,32 @@ describe('creating a review', () => {
       { trigger_id: more.id, from: more.actor.id, at: more.at, text: more.text },
       { at: expect.any(String), text: `The independent review of ${SHA} failed:\nThe empty list is not handled.\nFix it, push, and submit again.` }] })
     expect(launch!.follow_ups).toHaveLength(2)
+    expect(launch!.batch).toBeUndefined()
     expect(JSON.stringify(launch)).not.toMatch(/"(read|chars|source_url_read|assignment_read)"/)
+  })
+
+  it('launches the review of a ticket accepted from a batch with the batch\'s other messages in full', async () => {
+    // Paused, the two messages wait for one Eval, which takes both as the request.
+    await h.runtime.settings.pause(true, 'panel')
+    const request = feishu('1', `@bot fix the regression ${'in the parser '.repeat(15)}`)
+    const keep = feishu('2', `@bot keep the old output format ${'for the existing callers '.repeat(10)}`, { root_id: 'om_1' })
+    h.runtime.receive(request); h.runtime.receive(keep)
+    await h.runtime.settings.pause(false, 'panel')
+    await h.runtime.pump(); await h.runtime.idle()
+    const accepted = await h.route({ kind: 'accept', trigger_id: request.id, title: 'Fix it', worktree_name: 'fix-it', acknowledgement: 'Got it.' })
+    await h.runtime.idle()
+    const parent = (accepted.ticket as { ticket_id: string }).ticket_id
+    const origin = stored(parent).origin
+    const [other] = [request, keep].filter(trigger => trigger.id !== origin.triggerId)
+    expect([origin.triggerIds.length, other!.text.length > 160]).toEqual([2, true])
+    h.runtime.engine.bindThread(parent, { source: 'github', id: '12' }, true)
+    h.runtime.engine.report(parent, { state: 'ready', summary: 'PR 12 is ready.' })
+    const { session } = await review(parent)
+    const [launch] = h.relays(session)
+    expect(launch).toMatchObject({ trigger: { trigger_id: origin.triggerId },
+      batch: [{ trigger_id: other!.id, from: other!.actor.id, at: other!.at, text: other!.text }] })
+    expect(launch!.batch).toHaveLength(1)
+    expect(JSON.stringify(launch)).not.toMatch(/"(read|preview)"/)
   })
 
   it('ends the open review of an earlier commit as superseded when a new commit is submitted', async () => {
@@ -242,25 +271,28 @@ describe('the review Ticket\'s tools', () => {
     gh.failReady = 1
     await expect(verdict(session, 'pass', SHA, 'Correct.')).rejects.toThrow('502')
     expect([gh.posted.length, stored(parent).reviews, stored(id).ended]).toEqual([1, undefined, undefined])
-    // The model calls again, even with the other verdict: the posted pass is the review's.
-    expect(await verdict(session, 'fail', SHA, 'Correct.')).toEqual({ posted: url(1), verdict: 'pass', marked_ready: true })
+    // The model calls again, even with the other verdict and other findings: the posted pass and its findings are the review's.
+    expect(await verdict(session, 'fail', SHA, 'No test.')).toEqual({ posted: url(1), verdict: 'pass', marked_ready: true })
     expect(gh.posted).toHaveLength(1)
     expect(gh.readied).toHaveLength(1)
-    expect(stored(parent).reviews).toEqual([expect.objectContaining({ verdict: 'pass', url: url(1), ticket: id })])
+    expect(stored(parent).reviews).toEqual([expect.objectContaining({ verdict: 'pass', url: url(1), ticket: id, findings: 'Correct.' })])
     expect(stored(parent).inputs.filter(input => input.kind === 'text')).toEqual([])
   })
 
-  it('records a posted fail once when a later call finds it', async () => {
+  it('records a posted fail once, with its findings, when a later call finds it', async () => {
     const { parent } = await submitted()
     const { review: id, session } = await review(parent)
     const gh = github({ sha: SHA })
     // The comment is posted, and the record fails as the review's turn is cut.
     const reviewed = vi.spyOn(h.runtime.engine, 'reviewed').mockImplementationOnce(() => { throw new Error('The turn was cancelled') })
-    await expect(verdict(session, 'fail', SHA, 'No test.')).rejects.toThrow('cancelled')
+    await expect(verdict(session, 'fail', SHA, 'The empty list crashes.\n\nAdd a test for it.')).rejects.toThrow('cancelled')
     reviewed.mockRestore()
-    expect(await verdict(session, 'pass', SHA, 'No test.')).toEqual({ posted: url(1), verdict: 'fail', marked_ready: false })
+    expect(await verdict(session, 'pass', SHA, 'Correct and tested.')).toEqual({ posted: url(1), verdict: 'fail', marked_ready: false })
     expect([gh.posted.length, gh.readied]).toEqual([1, []])
-    expect(stored(parent).reviews).toEqual([expect.objectContaining({ verdict: 'fail', ticket: id })])
+    expect(stored(parent).reviews).toEqual([expect.objectContaining({ verdict: 'fail', ticket: id, findings: 'The empty list crashes.\n\nAdd a test for it.' })])
+    expect(stored(parent).inputs.flatMap(input => input.kind === 'text' ? [input.text] : []))
+      .toEqual([`The independent review of ${SHA} failed:\nThe empty list crashes.\n\nAdd a test for it.\nFix it, push, and submit again.`])
+    expect(latestReport(stored(id))!.summary).toBe('The empty list crashes.\n\nAdd a test for it.')
   })
 
   it('runs one verdict at a time', async () => {

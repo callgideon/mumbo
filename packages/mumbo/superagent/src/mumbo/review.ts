@@ -5,7 +5,8 @@
  * the pull request's head, and marks a draft pull request ready on a pass.
  */
 import { z } from 'zod'
-import type { Ticket, Trigger } from '../core/index.ts'
+import { followupOwners, type Ticket, type Trigger } from '../core/index.ts'
+import { batchOf } from '../executor/dsh.ts'
 import type { Commands } from '../infra/commands.ts'
 import { sameName } from '../infra/text.ts'
 import { receiptNotice, reportRelay } from '../app/notices.ts'
@@ -17,7 +18,7 @@ import { tool, type Tool } from '../app/tools/tool.ts'
 export const REVIEW_INSTRUCTIONS = `## Independent review
 This ticket is the independent review of another ticket's pull request. This section takes precedence over every other section, and your only tools beyond the work tools are orchestrator_review and orchestrator_report.
 The other ticket's worker acknowledged the request already: do not acknowledge, answer or message anyone on any thread.
-The assignment names the pull request and its head commit: fetch that commit, check it out detached, and review its diff from the pull request's base branch against the request the first message carries in full, and the person's messages among its follow_ups, for correctness, tests, scope and safety. Its other follow_ups are notes the other ticket's worker received, for context only. Run the checks you need.
+The assignment names the pull request and its head commit: fetch that commit, check it out detached, and review its diff from the pull request's base branch against the request the first message carries in full, as its trigger and batch, and the person's messages among its follow_ups, for correctness, tests, scope and safety. Its other follow_ups are notes the other ticket's worker received, for context only. Run the checks you need.
 Do not change, commit or push code, and do not comment on, edit, approve or mark ready the pull request.
 Finish with orchestrator_review, with your verdict, that commit's sha and your findings; the runtime posts them on the pull request. A turn that ends without orchestrator_review fails the review.
 If you cannot finish the review, report failed with orchestrator_report and say why.`
@@ -35,26 +36,31 @@ const STALE = 'Not reviewed: the pull request moved past the reviewed commit, so
 const full = (trigger: Trigger) => ({ trigger_id: trigger.id, from: trigger.actor.id, at: trigger.at, text: trigger.text })
 /**
  * What a review's launch message carries beside its assignment, in full, since its worker reads no resource: the request the
- * reviewed ticket started from, and, oldest first, what that ticket received since: the person's messages it decides, not
- * those it read for context or handed back, and its text notes, such as an earlier review's findings.
- * @param store - The tickets and Triggers.
+ * reviewed ticket was accepted from, its origin Trigger and the other Triggers of its batch, and, oldest first, what that
+ * ticket received since: the person's messages it decides (see `followupOwners`) and its text notes, such as an earlier
+ * review's findings.
+ * @param store - The tickets, Threads and Triggers.
  * @param of - The reviewed ticket.
  * @param request - Its origin Trigger.
- * @returns The launch message's `trigger` and, when there are any, its `follow_ups`.
+ * @returns The launch message's `trigger` and, when there are any, its `batch` and `follow_ups`.
  */
-export function reviewLaunch(store: Pick<Store, 'tickets' | 'triggers'>, of: string, request: Trigger) {
-  const handedBack = (triggerId: string) => !!store.triggers.disposition(triggerId)?.handbacks?.some(item => item.ticketId === of)
-  const follow_ups = store.tickets.get(of)!.inputs.flatMap(input => input.kind === 'text' ? [{ at: input.at, text: input.text }]
-    : input.kind === 'trigger' && input.human && !input.context && !handedBack(input.triggerId) ? [full(store.triggers.get(input.triggerId)!)] : [])
-  return { trigger: full(request), ...(follow_ups.length ? { follow_ups } : {}) }
+export function reviewLaunch(store: Pick<Store, 'tickets' | 'threads' | 'triggers'>, of: string, request: Trigger) {
+  const reviewed = store.tickets.get(of)!
+  const batch = batchOf({ store }, reviewed).map(full)
+  const follow_ups = reviewed.inputs.flatMap(input => {
+    if (input.kind === 'text') return [{ at: input.at, text: input.text }]
+    const trigger = input.kind === 'trigger' ? store.triggers.get(input.triggerId) : undefined
+    return trigger && followupOwners(trigger, store).includes(of) ? [full(trigger)] : []
+  })
+  return { trigger: full(request), ...(batch.length ? { batch } : {}), ...(follow_ups.length ? { follow_ups } : {}) }
 }
 
 /**
  * A review Ticket's tools: `orchestrator_review`, which posts its verdict and ends it, and `orchestrator_report`, which
  * reports only progress or failure. They have no question, answer or pull request field, since the review shares its
  * ticket's origin and answers no one. A call of `orchestrator_review` that failed after posting the review comment leaves
- * it on the pull request, tagged with the review's id; the next call finds it and posts no other, so the recorded verdict is
- * the posted one. One call runs at a time.
+ * it on the pull request, tagged with the review's id; the next call finds it and posts no other, so the recorded verdict
+ * and findings are the posted ones. One call runs at a time.
  * @param host - What an Executor Session's tools use.
  * @param ticketId - The review Ticket.
  * @param review - What it reviews: the ticket `of`, its pull request `pr` and the commit `sha`.
@@ -77,7 +83,10 @@ export function reviewTools(host: ExecutorToolsHost, ticketId: string, { of, pr,
     const login = commands.deployment.github.login
     const earlier = (await commands.pages(CommentSchema, `issues/${pr}/comments`))
       .find(comment => sameName(comment.user?.login ?? '', login) && (comment.body ?? '').includes(tag))
-    const verdict = earlier ? earlier.body!.startsWith(header(sha, 'pass')) ? 'pass' : 'fail' : wanted
+    const body = earlier?.body ?? ''
+    const verdict = earlier ? body.startsWith(header(sha, 'pass')) ? 'pass' : 'fail' : wanted
+    // The recorded findings are the posted ones too: an earlier comment's text after its two header lines and before its tag.
+    const posted = earlier ? body.slice(0, body.lastIndexOf(tag)).split('\n').slice(2).join('\n').trim() : findings
     open()
     const url = earlier?.html_url ?? (await commands.api(CommentSchema, `issues/${pr}/comments`, '--method', 'POST', '-f',
       `body=${header(sha, verdict)}\n\n${findings}\n\n${tag}`)).html_url
@@ -89,7 +98,7 @@ export function reviewTools(host: ExecutorToolsHost, ticketId: string, { of, pr,
       await commands.gh<object>(['api', 'graphql', '-f', `query=${READY}`, '-f', `id=${pull.node_id}`])
     }
     host.store.atomic(() => {
-      host.engine.reviewed(ticketId, verdict, findings, url)
+      host.engine.reviewed(ticketId, verdict, posted, url)
       host.sessions.notify(...receiptNotice({ review: { ticket_id: of, review_ticket_id: ticketId, sha, verdict, url } },
         `Review of ticket ${of} at ${sha}: ${verdict}`))
     })
