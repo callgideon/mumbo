@@ -293,8 +293,12 @@ export function boxSite(cfg, principal) {
 }
 
 /** The start script's kernel and network part on a template with PORTS_MARKER (B24), before any user's process starts:
- *  the unprivileged port floor, the link protections and hidepid, set and checked; no setuid su or sudo; and the OUTPUT
- *  owner rules. Every step is fatal. */
+ *  the unprivileged port floor, the link protections and hidepid, set and checked; no setuid su or sudo; and the firewall,
+ *  one native nftables table `inet mumbo` (IPv4 and IPv6) whose output chain refuses connections by the socket's user
+ *  (`meta skuid`), refusing a socket whose user it cannot read, and whose input chain keeps the debugging, VNC and WebRTC ports box-local. The script writes the table
+ *  to /root/.mumbo/firewall.nft (root's, 0600), loads it with `nft -f`, which replaces the whole table in one transaction,
+ *  and checks that it is loaded. E2B's kernel has nf_tables but not xt_owner, so iptables' `-m owner` cannot load there.
+ *  Every step is fatal. */
 const hardening = () => `if [ -n "$B24_TEMPLATE" ]; then
   # Only root binds below 1024, set rather than trusted (Docker's floor, and maybe a VM image's, is 0), so no other user
   # takes dsh's, the live view's or the door's port; hard and symbolic links in shared directories lead only where their
@@ -308,17 +312,39 @@ const hardening = () => `if [ -n "$B24_TEMPLATE" ]; then
   grep -Eq '^[^ ]+ /proc proc [^ ]*hidepid=(2|invisible)' /proc/mounts || { echo 'mumbo-box: /proc is not mounted with hidepid=2' >&2; exit 1; }
   # Nobody becomes root through su or sudo (E2B's own account user can have sudo); root's own su needs no set-user-ID bit.
   for b in su sudo; do p=$(command -v $b) || continue; p=$(readlink -f "$p"); chmod u-s "$p"; [ ! -u "$p" ] || { echo "mumbo-box: $p is still set-user-ID" >&2; exit 1; }; done
-  # Only root connects, to any address (E2B's envd forwards every loopback listener to the box address), to dsh, the
-  # live view, the Mumbo door, any VNC port and, beside browsermcp, the Playwright MCP server's user, the browser's
-  # debugging port. Nothing in the box connects to E2B's envd, which runs commands as root: root's dsh fetches pages for
-  # the model, and the edge's commands reach envd from outside the box.
-  CDP=
-  if id browsermcp >/dev/null 2>&1; then CDP="-m owner ! --uid-owner $(id -u browsermcp)"; fi
-  for t in iptables $IP6; do
-    rule $t OUTPUT -p tcp --syn --dport ${ENVD_PORT} -j REJECT --reject-with tcp-reset
-    for port in $DSH_PORT $LIVE_PORT ${MUMBO_MCP_PORT} 5900:5999; do rule $t OUTPUT -p tcp --syn --dport $port -m owner ! --uid-owner 0 -j REJECT --reject-with tcp-reset; done
-    rule $t OUTPUT -p tcp --syn --dport 9222 -m owner ! --uid-owner 0 $CDP -j REJECT --reject-with tcp-reset
-  done
+  # The firewall, one nftables table for IPv4 and IPv6, matched by the socket's user (meta skuid; E2B's kernel has no
+  # xt_owner for iptables). Output: only root connects, to any address (E2B's envd forwards every loopback listener to the
+  # box address), to dsh, the live view, the Mumbo door, any VNC port and, beside browsermcp, the Playwright MCP server's
+  # user, the browser's debugging port. The allowed users are accepted first and every other connection to those ports is
+  # reset, so a socket whose user nft cannot read (one with no file) is refused, as under iptables' xt_owner. Nothing in
+  # the box connects to E2B's envd, which runs commands as root: root's dsh fetches pages for the model, and the edge's
+  # commands reach envd from outside the box. Input: the debugging port,
+  # every VNC port and KasmVNC's WebRTC port (UDP, the live view's number, bound on every address), which the ALB cannot
+  # carry, stay box-local. The file's first two lines delete any table from an earlier start, so nft -f replaces the
+  # whole table in one transaction.
+  CDP=0
+  if id browsermcp >/dev/null 2>&1; then CDP="{ 0, $(id -u browsermcp) }"; fi
+  cat > /root/.mumbo/firewall.nft <<NFT
+table inet mumbo
+delete table inet mumbo
+table inet mumbo {
+  chain output {
+    type filter hook output priority 0; policy accept;
+    tcp flags & (fin|syn|rst|ack) == syn tcp dport ${ENVD_PORT} reject with tcp reset
+    tcp flags & (fin|syn|rst|ack) == syn tcp dport 9222 meta skuid $CDP accept
+    tcp flags & (fin|syn|rst|ack) == syn tcp dport { $DSH_PORT, $LIVE_PORT, ${MUMBO_MCP_PORT}, 5900-5999 } meta skuid 0 accept
+    tcp flags & (fin|syn|rst|ack) == syn tcp dport { $DSH_PORT, $LIVE_PORT, ${MUMBO_MCP_PORT}, 5900-5999, 9222 } reject with tcp reset
+  }
+  chain input {
+    type filter hook input priority 0; policy accept;
+    iifname != "lo" tcp dport { 9222, 5900-5999 } drop
+    iifname != "lo" udp dport $LIVE_PORT drop
+  }
+}
+NFT
+  chmod 0600 /root/.mumbo/firewall.nft
+  nft -f /root/.mumbo/firewall.nft || { echo 'mumbo-box: nft could not load the firewall table inet mumbo from /root/.mumbo/firewall.nft' >&2; exit 1; }
+  nft list table inet mumbo >/dev/null || { echo 'mumbo-box: the firewall table inet mumbo is not loaded' >&2; exit 1; }
 fi
 `
 
@@ -458,7 +484,7 @@ ${person ? `        PATH: ${path}
         NO_PROXY: 127.0.0.1,localhost,${cfg.llmHost}
 `}      ${secrets}
     identities:
-${person ? identity('browsermcp', '$BMCP_UID', '$BMCP_GID', '$SHARED_GID, $UPLOADS_GID') + identity('desktop', '$DESKTOP_UID', '$DESKTOP_GID', '') : ''}      mcpserver:
+${person ? identity('browsermcp', '$BMCP_UID', '$BMCP_GID', '$UPLOADS_GID') + identity('desktop', '$DESKTOP_UID', '$DESKTOP_GID', '') : ''}      mcpserver:
         uid: $MCP_UID
         gid: $MCP_GID
         groups: [$MCP_GROUPS]
@@ -529,9 +555,9 @@ B24_IMAGE=
 if grep -qs serverIdentity ${B24_SOURCE}; then B24_IMAGE=1; fi
 IP6=
 [ ! -e /proc/net/if_inet6 ] || IP6=ip6tables
-# One firewall rule, inserted once (-C before -I): fatal on a template with the marker, which installs iptables, and best
-# effort on one before it.
-rule() { fw=$1 chain=$2; shift 2; "$fw" -C "$chain" "$@" 2>/dev/null || "$fw" -I "$chain" "$@" || [ -z "$B24_TEMPLATE" ]; }
+# One iptables rule, inserted once (-C before -I), best effort: only a template before the marker uses it (the desktop
+# block), and it may lack iptables. A template with the marker loads its nftables table instead (edge hardening).
+rule() { fw=$1 chain=$2; shift 2; "$fw" -C "$chain" "$@" 2>/dev/null || "$fw" -I "$chain" "$@" || true; }
 ${hardening()}${containmentLayout(cfg, site.desktop)}AGENTS_HOME=/root/.mumbo/agents
 [ -z "$B24_IMAGE" ] || AGENTS_HOME=/usr/local/share/mumbo/agents
 mkdir -p "$AGENTS_HOME"
@@ -717,10 +743,13 @@ if id browser >/dev/null 2>&1; then
   if [ -n "$B24_TEMPLATE" ]; then SESSION_USER=xsession X_OWNER=root:desktop; fi
   # E2B forwards every loopback port to the box address; the browser's debugging port and every VNC port stay box-local,
   # and so does KasmVNC's WebRTC port (UDP, the WebSocket's number, bound on every address), which the ALB cannot carry.
-  for t in iptables $IP6; do
-    for port in 9222 5900:5999; do rule $t INPUT -p tcp --dport $port ! -i lo -j DROP; done
-    rule $t INPUT -p udp --dport $LIVE_PORT ! -i lo -j DROP
-  done
+  # The B24 template's nftables input chain does this (edge hardening); before it, these iptables rules.
+  if [ -z "$B24_TEMPLATE" ]; then
+    for t in iptables $IP6; do
+      for port in 9222 5900:5999; do rule $t INPUT -p tcp --dport $port ! -i lo -j DROP; done
+      rule $t INPUT -p udp --dport $LIVE_PORT ! -i lo -j DROP
+    done
+  fi
   # X access cookie, so only holders of /run/x11/auth can read or drive :1: root and, through the cookie's group, the
   # desktop's own users (B24 template: group desktop, which holds browser, xvnc, xsession and computer use's desktop;
   # before it, browser, which owns it, and KasmVNC's server through the group xvnc). su keeps the environment, so every X

@@ -28,7 +28,12 @@ test('a user box start script is byte-for-byte what it was before project boxes 
   // group uploads and names any group it needs that the template lacks, makes consent's staging directory
   // /var/lib/mumbo/uploads root:uploads 2750 and empties it at every start, browsermcp's row holds uploads, and a consent
   // that names uploadStaging gets that directory (containment.test.mjs, the consent rows test below).
-  assert.equal(createHash('sha256').update(s).digest('hex'), '7e6288be0f9588def46651e0d3c93aa8b8a96ac4dc2ab0b4538ea53e148e85df')
+  // Then the B24 template's firewall became one native nftables table (inet mumbo, root-only file, loaded with nft -f
+  // and checked), in place of the iptables OUTPUT rules and the desktop's INPUT rules, because E2B's kernel has no
+  // xt_owner; the iptables helper is best effort, for a template before B24 only. Then its output chain accepted the
+  // allowed users first and reset the rest, so a socket whose user nft cannot read is refused. Then browsermcp's row
+  // held the group uploads alone: with staged copies it no longer reads Downloads.
+  assert.equal(createHash('sha256').update(s).digest('hex'), '31654bfd201ec93f8f79f012587e339a40e6a84f375b9a179f79fbadb0eaddc5')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -42,7 +47,11 @@ test('a project box start script is byte-for-byte what it was before B18 changed
   // its $SUPERAGENT_EDGE grep, and the layout exports MUMBO_WORK_DIR, MUMBO_WORKER_DIR and MUMBO_GH_CONFIG_DIR for that
   // overlay, stops on an overlay that does not name MUMBO_WORK_DIR, and names any group it needs that the template
   // lacks (containment.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), 'a87043934ab15effa0d795bc69f6557a3554e080d9b12f988fdc4e49bd3c35aa')
+  // B24 template. Then for the B24 template's firewall as one native nftables table (inet mumbo, loaded with nft -f and
+  // checked) in place of the iptables OUTPUT rules, because E2B's kernel has no xt_owner, and the iptables helper best
+  // effort, for a template before B24 only. Then its output chain accepted the allowed users first and reset the rest, so
+  // a socket whose user nft cannot read is refused.
+  assert.equal(createHash('sha256').update(s).digest('hex'), '21eccfb61a58ee5ac6e7457d33116a4e348bd0d4767bb9090cb26280675d8a81')
 })
 
 const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'
@@ -288,7 +297,7 @@ test('a project box start script has the proxy setup in order, before the member
     'chmod 0755 /root/.mumbo/bin/github-local-proxy.mjs /usr/local/lib/mumbo/bin/gh',
     // B24: the wrapper is root's and world-readable outside /root/.mumbo; the old path still names it.
     'ln -sfn /usr/local/lib/mumbo/bin/gh /root/.mumbo/bin/gh',
-    // B24: on the B24 template the proxy becomes ghproxy (the firewall's owner rules then cover its tunnels).
+    // B24: on the B24 template the proxy becomes ghproxy (the firewall's rules by user then cover its tunnels).
     "pgrep -f github-local-proxy.mjs >/dev/null || PORT=8899 CA_DIR=/root/.mumbo/ca RUN_AS=$PROXY_USER EDGE_GITHUB_URL=https://l/github BOX_TOKEN=TOK nohup node /root/.mumbo/bin/github-local-proxy.mjs",
     'curl -s -o /dev/null -m 1 http://127.0.0.1:8899/',
     'if [ -f /src/deploy/mumbo-project.overlay.yml ]',
