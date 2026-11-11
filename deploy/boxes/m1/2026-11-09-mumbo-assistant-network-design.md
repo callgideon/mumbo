@@ -954,9 +954,15 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
   - `git` on a model-writable repository never runs as root. The repository's own config and hooks (`core.fsmonitor`, hooks, filter and textconv drivers) run code, so dsh's change summaries and anything else that runs `git` on the workspace use "run as". The workspace-changes scratch directory needs a harness follow-up for that.
   - `/src` (the dsh code root runs) is read-only for `agent`.
   - **Every helper process that acts on the model's behalf runs under a non-root identity of its own** through the same "run as" seam, never as root:
-    - **Playwright MCP** runs as `browsermcp`. That user alone, beside root, may reach the debugging port. It reads only the shared Downloads, so the kernel enforces the upload limit.
+    - **Playwright MCP** runs as `browsermcp`. That user alone, beside root, may reach the debugging port. It reads only the upload staging directory (below).
       - `browser_run_code_unsafe`, which runs model code inside that server, is hard-denied. In-page `browser_evaluate` keeps asking.
       - `browser_file_upload` paths are limited to the shared Downloads. The agent copies a file there first, so `browsermcp` needs no workspace access.
+      - **Uploads go through a staged copy** **[2026-11-11, B24 round-6 ruling]**. The model can change files in Downloads (`2770`, group `shared`) while the person is deciding. So consent works like this:
+        - It opens a file directly in Downloads (a name with no `/`) with `O_NOFOLLOW` and `O_NONBLOCK`, and refuses anything but a regular file or one over `uploadMaxBytes` (default 512 MiB). `/home/shared` is root's, so `agent` cannot replace Downloads itself, and that one open is race-free.
+        - Root copies it to `/var/lib/mumbo/uploads/<nonce>/<name>`, readable by `browser` and `browsermcp` and never by `agent`.
+        - The ask shows the copy's name, size and SHA-256 prefix.
+        - The tool gets the copy's path, and the copy is deleted after the call.
+      - Playwright MCP gets that staging directory as its only MCP root (option a), not Downloads. So the server can't upload anything consent didn't stage, and `--allow-unrestricted-file-access` stays off.
       - The edge never mounts a browser provider without consent: the plain fallback row is gone.
     - **Computer use** runs `xdotool` as `desktop`, the one user beside `browser` that may read the X authority file.
       - Every model-derived argument passes a strict check: numbers for coordinates; key names from a fixed pattern; typed text only as the final argument after `type --`. So no argument can chain another `xdotool` command, such as `exec`.
@@ -1008,18 +1014,29 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
     - root dsh's `TMPDIR=/root/.dsh/tmp`;
     - `protected_hardlinks=1`, asserted at load.
   - **The project box's `dsh-superagent` config has one source:** the containment overlay, or a gate that compares the whole object with the founder overlay's. Spot checks would miss drift.
+    - B24 box side restates the row in the edge's `containmentRows` and adds B36's `edge` by `grep`. That is two sources, and `edge` was nearly lost.
+    - The follow-up makes the image's `deploy/mumbo-project.overlay.yml` the one source: the row reads `workDirectory`, `workerDirectory` and `ghConfigDirectory` from variables the start script exports under containment, and the containment patch drops its `dsh-superagent` row. **[2026-11-11]**
+  - **Backups take `/root/work`** on project boxes, as they take `/root/projects`: SQLite snapshots made as the owner, and the restore's real-path check.
+    - Before containment, ticket directories lived under `/root/.dsh/superagent/work` and were backed up. Without this, a lost box loses in-flight checkouts, while the restored superagent database still names them.
+    - `/home/agent` stays out of backups; the role instructions say it is scratch, and durable files go in `/root/projects`. **[2026-11-11]**
 - **Box permissions** (edge start script):
   - `/root` is `0711`. `/root/projects` belongs to `agent`, so Session working directories don't change.
   - `/root/.dsh`, `/root/.mumbo` and `/root/dsh.log` are root-only.
   - `/home/browser` is `0700` for `browser`, and the Chrome policy file is root-owned.
   - The X authority file stays `0600` for `browser`.
   - There is no `sudo`.
-- **Network** (iptables owner match): `agent` can't connect to:
+- **Network** (a native nftables table, matching the socket's user with `meta skuid`): `agent` can't connect to:
   - the debugging port (`9222`);
   - the VNC ports;
   - E2B's in-box agent `envd` (`49983`), which runs commands as root;
   - dsh's own port.
   - In project boxes it still reaches the local GitHub proxy (`8899`).
+  - **Why nftables, not iptables** **[2026-11-11, throwaway box]:** E2B's 6.1 kernel has nf_tables but no `xt_owner`, so iptables-nft's `-m owner` fails ("Extension owner revision 0 not supported").
+    - The B24 template's rules are one `inet` table (IPv4 and IPv6 together), loaded atomically with `nft -f` from a file the start script writes, and replaced whole on every start.
+    - The template installs `nftables`.
+    - The template's smoke box loads the table and checks that `agent` is refused and root admitted on a test port, or the build fails. A template whose start script can't run is never published.
+    - If `meta skuid` is missing too: build our own self-hosted E2B kernel with `CONFIG_NETFILTER_XT_MATCH_OWNER`, rather than wait for 6.18.
+    - Never best effort: the debugging port has no authentication, so a connection to it reads every cookie.
 - **Cost to the person.** Installing system software (`apt`) needs root, so the agent and the Terminal tab can't. Project work already runs in sandboxes. Anything the person's box needs comes through the template or the operator.
 - **Escape tests**, run in a real box as `agent`, each of which must fail:
   - read `Login Data`, or anything else under `/home/browser`, with the shell and with the file tools;
@@ -1086,7 +1103,7 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
 | **B21** | mumbo-impl | Edge, by region (section 17c) | R6 |
 | **B22** | mumbo-impl | Edge, moving between regions (section 17c) | B21 |
 | **B23** **[founder: yes, 2026-11-10]** | mumbo-impl | Mumbo's push: a per-person ntfy topic set up from the home page, and a box "notify" call through the edge | B17 |
-| **B24** | mumbo-impl | Agent containment (above): the `agent` user and its environment through a harness "run as" on the subprocess seam; the file tools' readable-roots allowlist; box permissions and the iptables rules; the escape tests in a real box. Agent Notes, READMEs and tests per the repository rules | — (start now) |
+| **B24** | mumbo-impl | Agent containment (above): the `agent` user and its environment through a harness "run as" on the subprocess seam; the file tools' readable-roots allowlist; box permissions and the nftables rules; the escape tests in a real box. Agent Notes, READMEs and tests per the repository rules | — (start now) |
 | **B25** | mumbo-impl | Browser-level denials (above): hard-denied URLs before and after every browser tool call in `@mumbo/browser-consent`; Chrome's `URLBlocklist`; computer use asking for writes | — (start now) |
 
 B17, B18, B20, B24 and B25 can run in parallel. B18 and B19 both change the template and the start script's desktop block, so they run in that order. B18 and B24 both touch the start script's desktop block too; B24 rebases on B18. Every sync type, passwords and payments included, is on from B18 (the founder's informed decision); B24 and B25 are the most urgent tasks in this list.

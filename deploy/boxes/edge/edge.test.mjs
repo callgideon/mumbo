@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { request, createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
-import { inParallel, signBox, verifyBox, userPrefix, budget, needsLaunch, boxHeaders, boxes, modelServer, userServer, startScript, backupCommand, restoreCommand, restoreKey, presignGetter, admitted, secureCookies, albIdentity } from './edge.mjs'
+import { inParallel, signBox, verifyBox, userPrefix, budget, needsLaunch, boxHeaders, boxes, modelServer, userServer, startScript, backupCommand, restoreCommand, restoreKey, presignGetter, admitted, secureCookies, albIdentity, PORTS, OLD_PORTS } from './edge.mjs'
 import { memoryStore, redisStore } from './store.mjs'
 import { generateKeyPairSync, createSign } from 'node:crypto'
 
@@ -452,7 +452,7 @@ test('a create from a recorded version that fails in the restore or after it kee
   await assert.rejects(r.b.ensure('a@x.com'), (e) => e.status === 503 && e.restoreFailed === true)
   assert.deepEqual(r.logs.find(l => l.msg === 'restore'), { edge: 'box', level: 'error', msg: 'restore', user: 'a@x.com', box: 'b1', ok: false, versionId: 'v1' })
   assert.deepEqual(await r.store.getDoc(restoreKey('a@x.com')), { versionId: 'v1', at: 1 })
-  failing = 'chmod +x'  // restored, then start.sh fails: the box is dropped
+  failing = 'chmod 0700 /root/.mumbo/start.sh'  // restored, then start.sh fails: the box is dropped
   await assert.rejects(r.b.ensure('a@x.com'))
   assert.deepEqual(await r.store.getDoc(restoreKey('a@x.com')), { versionId: 'v1', at: 1 })
   failing = undefined
@@ -575,19 +575,23 @@ test('MCP endpoint on the model host: box token required, tools act as the token
   } finally { server.close() }
 })
 
-test('desktop live view: /desktop/ goes to the box\'s desktop port, everything else to dsh', async () => {
+test('desktop live view: /desktop/ goes to the box\'s live view, everything else to dsh, on the ports its record carries', async () => {
   const { boxRoute } = await import('./edge.mjs')
   // vnc.html is KasmVNC's web client and noVNC's (a template before KasmVNC); both read these from the query. The
   // WebSocket path keeps the /desktop prefix, and show_control_bar keeps KasmVNC's clipboard and remote resize on in a frame.
   assert.equal(boxRoute('/desktop').redirect, '/desktop/vnc.html?autoconnect=1&resize=remote&path=desktop/websockify&show_control_bar=1')
-  assert.deepEqual(boxRoute('/desktop/vnc.html?autoconnect=1'), { port: '6080', path: '/vnc.html?autoconnect=1', base: '' })
-  assert.deepEqual(boxRoute('/desktop/assets/ui-DKMQOe2K.js'), { port: '6080', path: '/assets/ui-DKMQOe2K.js', base: '' })
+  assert.deepEqual(boxRoute('/desktop/vnc.html?autoconnect=1'), { service: 'live', path: '/vnc.html?autoconnect=1', base: '' })
+  assert.deepEqual(boxRoute('/desktop/assets/ui-DKMQOe2K.js'), { service: 'live', path: '/assets/ui-DKMQOe2K.js', base: '' })
   // A former-host redirect adds its marker query (prod/modules/edge/edge.tf old_hosts).
   for (const url of ['/desktop/?moved=1&', '/desktop?moved=1&']) assert.equal(boxRoute(url).redirect, boxRoute('/desktop/').redirect, url)
-  assert.deepEqual(boxRoute('/desktop/websockify'), { port: '6080', path: '/websockify', base: '' })
-  assert.deepEqual(boxRoute('/desktop-not'), { port: '3080', path: '/desktop-not', base: '' })
-  assert.deepEqual(boxRoute('/api/remote.mux'), { port: '3080', path: '/api/remote.mux', base: '' })
-  assert.equal(boxHeaders(cfg, {}, { id: 'b1' }, '6080')['e2b-sandbox-port'], '6080')
+  assert.deepEqual(boxRoute('/desktop/websockify'), { service: 'live', path: '/websockify', base: '' })
+  assert.deepEqual(boxRoute('/desktop-not'), { service: 'dsh', path: '/desktop-not', base: '' })
+  assert.deepEqual(boxRoute('/api/remote.mux'), { service: 'dsh', path: '/api/remote.mux', base: '' })
+  // A box from a template with the ports marker (B24) carries its pair; a record without one is a box from before it.
+  const port = (target, service) => boxHeaders(cfg, {}, { id: 'b1', ...target }, service)['e2b-sandbox-port']
+  assert.deepEqual([port({ ports: PORTS }, 'live'), port({ ports: PORTS }, 'dsh'), port({ ports: PORTS })], ['881', '880', '880'])
+  assert.deepEqual([port({}, 'live'), port({}, 'dsh'), port({})], ['6080', '3080', '3080'])
+  assert.deepEqual([PORTS, OLD_PORTS], [{ dsh: '880', live: '881' }, { dsh: '3080', live: '6080' }])
 })
 
 test('the live view\'s pages may connect only to their own host, and a page that opened the public host keeps no handle to it', async () => {
@@ -614,7 +618,7 @@ test('the live view\'s pages may connect only to their own host, and a page that
 test('backups carry the browser user\'s home without caches or profile locks, and tolerate its absence', async () => {
   const { backupCommand } = await import('./edge.mjs')
   const c = backupCommand('URL')
-  assert.match(c, /ls -d root\/\.dsh root\/projects root\/\.mumbo-sqlite 2>\/dev\/null\) --null --verbatim-files-from --no-recursion -T "\$dirs" --recursion -T "\$units" /)
+  assert.match(c, /ls -d root\/\.dsh root\/projects root\/\.mumbo-sqlite var\/lib\/mumbo\/attachments 2>\/dev\/null\) --null --verbatim-files-from --no-recursion -T "\$dirs" --recursion -T "\$units" /)
   for (const x of ['.cache', '.chromium-profile-old', 'chrome-profile/Singleton*', 'chrome-profile/*/Cache', 'chrome-profile/*/Code Cache', 'chrome-profile/*/GPUCache', 'profile/Singleton*', 'profile/*/Cache']) assert.ok(c.includes(`--exclude='home/browser/${x}'`), x)
 })
 
@@ -913,8 +917,10 @@ test('role instructions: assistant with write consent and desktop sign-in; coord
   assert.match(p, /no browser and nobody's accounts/)
   assert.doesNotMatch(p, /Downloads/)
   const script = startScript(c, 'T', undefined, a)
-  assert.match(script, /DSH_AGENTS_HOME=\/root\/\.mumbo\/agents/)
-  assert.ok(script.includes(`<<'MD'\n${a}\nMD`))
+  // The agents root is root's own, or under containment (B24) root's and readable by all, outside /root.
+  assert.ok(script.includes('AGENTS_HOME=/root/.mumbo/agents\n[ -z "$B24_IMAGE" ] || AGENTS_HOME=/usr/local/share/mumbo/agents\n'))
+  assert.match(script, / DSH_AGENTS_HOME="\$AGENTS_HOME" /)
+  assert.ok(script.includes(`cat > "$AGENTS_HOME/AGENTS.md" <<'MD'\n${a}\nMD`))
 })
 
 test('home page lists the assistant, desktop and the member\'s projects without starting a box, escaping names', async () => {
@@ -970,7 +976,7 @@ test('project start script carries the member key and loads the project overlay 
   assert.match(p, /if \[ -f \/src\/deploy\/mumbo-project\.overlay\.yml \]; then PROJECT_PATCH="--patch \/src\/deploy\/mumbo-project\.overlay\.yml"; touch \/root\/\.mumbo\/member-auth; else rm -f \/root\/\.mumbo\/member-auth; fi/)
   assert.match(p, /sandboxes\.overlay\.yml \$LINKS_PATCH \$PROJECT_PATCH/)
   const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role')
-  assert.ok(!u.includes('MUMBO_MEMBER_KEY') && !u.includes('PROJECT_PATCH'))
+  assert.ok(!u.includes('export MUMBO_MEMBER_KEY') && !u.includes('PROJECT_PATCH'))
 })
 
 test('routing: browser member headers are stripped; member-capable project boxes get the member, never the owner token', async () => {
@@ -1180,7 +1186,7 @@ test('create records first only while it runs: true without a backup, false with
   for (const [url, first] of [[undefined, true], ['GET-URL', false]]) {
     const e2b = fakeE2B(); const store = memoryStore(); let release; const hold = new Promise(r => { release = r })
     const mk = e2b.Sandbox.create
-    e2b.Sandbox.create = async (...a) => { const b = await mk(...a); const run = b.commands.run; b.commands.run = async (c) => { if (c.includes('chmod +x')) await hold; return run(c) }; return b }
+    e2b.Sandbox.create = async (...a) => { const b = await mk(...a); const run = b.commands.run; b.commands.run = async (c) => { if (c.includes('chmod 0700 /root/.mumbo/start.sh')) await hold; return run(c) }; return b }
     const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => url, presignPut: async () => 'P', log: () => {} })
     const done = b.ensure('a@x.com')
     await new Promise(r => setTimeout(r, 60))

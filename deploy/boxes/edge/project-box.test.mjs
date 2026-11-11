@@ -17,15 +17,24 @@ const at = (text, needle) => { const i = text.indexOf(needle); assert.ok(i >= 0,
 
 test('a user box start script is byte-for-byte what it was before project boxes grew a proxy', () => {
   const s = startScript(c, 'T', boxSite(c, 'a@x.com'), "role's", undefined, boxFiles, ['o@x.com'], { key: 'KEY', principal: 'a' })
-  // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows, the X cookie, the first-run welcome, the interim Chromium policy (B27), the B18 desktop, the B25 consent rows, B19's KasmVNC and its own user, B33's door to Mumbo and its gate on the linked package, B36's filing and report lines in Mumbo's instructions and their fenced-report wording (same cfg, token T, role "role's").
-  assert.equal(createHash('sha256').update(s).digest('hex'), 'b58bb52353fd0b5bb3a09c9523939781df1d9111280be0f1793c4f9b0c8ddcba')
+  // sha256 of the output recorded before B7, updated for the box-links, computer-use and browser-consent rows, the X cookie, the first-run welcome, the interim Chromium policy (B27), the B18 desktop, the B25 consent rows, B19's KasmVNC and its own user, B33's door to Mumbo and its gate on the linked package, B36's filing and report lines in Mumbo's instructions and their fenced-report wording, and B24 (same cfg, token T, role "role's").
+  // B24 moved it deliberately: the ports from the template's marker, the kernel and network part and the containment
+  // layout and rows behind their gates, the session as xsession and the cookie root:desktop on the B24 template, the
+  // consent, computer use and Browser tab identities, the consent's uploadDirectory and its output directory in
+  // /var/lib/mumbo, the welcome as agent, and the old Chromium profiles deleted. On a
+  // template and image from before B24 the script runs as before, apart from that deletion (containment.test.mjs,
+  // desktop.test.mjs, welcome.test.mjs, ports.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), '8d0d13230d90240fab588a5a787e351e89a76286e8ec28bdb8a8b20cc8cb6ea0')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
   const p = { ...c, projectDomain: 'boxes.x', agentLogin: 'mumbo-bot[bot]', agentId: 341797844 }
   const s = startScript(p, 'TOK', boxSite(p, 'project:0123456789abcdef'), "role's", 'KEYTEXT', boxFiles, ['O@x.com'])
-  // Updated for B36's relay reply settings, the one block it adds, then for their own endpoint /mcp/report.
-  assert.equal(createHash('sha256').update(s).digest('hex'), '9bbefdfafe4ce5b92bd7ab803445edea89184db9660ef1bbb910e4a556fc8bda')
+  // Updated for B36's relay reply settings, the one block it adds, then for their own endpoint /mcp/report, and for B24
+  // deliberately: the ports, kernel and network part, containment layout and rows behind their gates, the gh wrapper in
+  // /usr/local/lib/mumbo/bin (on dsh's PATH, linked from /root/.mumbo/bin/gh), and the GitHub proxy as ghproxy on the
+  // B24 template.
+  assert.equal(createHash('sha256').update(s).digest('hex'), '3820c4b52e187d52535f32ca2fb058c73f451ab8b5a864079f71ef4a9e9aa03b')
 })
 
 const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'
@@ -103,7 +112,7 @@ test('slice 2: a person box adds the Browser and Desktop tabs and drops the stoc
   try {
     const bin = join(dir, 'bin'); mkdirSync(bin)
     const block = lines.slice(from, to + 1).join('\n').replaceAll('/src/packages/mumbo/box-links', join(dir, 'pkg')).replaceAll('/root/.mumbo', dir)
-    const run = (path) => { execFileSync('/bin/sh', ['-c', `set -eu\n${block}`], { encoding: 'utf8', env: { PATH: path } }); return readFileSync(join(dir, 'links.overlay.yml'), 'utf8') }
+    const run = (path, b24 = '') => { execFileSync('/bin/sh', ['-c', `set -eu\nB24_IMAGE=${b24}\n${block}`], { encoding: 'utf8', env: { PATH: path } }); return readFileSync(join(dir, 'links.overlay.yml'), 'utf8') }
     const tool = (name) => { writeFileSync(join(bin, name), '#!/bin/sh\n'); execFileSync('chmod', ['+x', join(bin, name)]) }
     // Only the fake tools and cat are on PATH, so the host's own xauth or wmctrl never leaks in.
     symlinkSync('/bin/cat', join(bin, 'cat'))
@@ -121,6 +130,8 @@ test('slice 2: a person box adds the Browser and Desktop tabs and drops the stoc
     tool('xauth')
     y = run(base)
     assert.equal(y, "- insert:\n    - id: box-links\n      name: '@mumbo/box-links'\n      config:\n        home: https://boxes.x/home\n        desktop: https://boxes.x/desktop/\n        browser:\n          display: ':1'\n          xauthority: /run/x11/auth\n- id: ui-sidebar-browser\n  disabled: true\n")
+    // Agent containment (B24): wmctrl runs as desktop, which reads the X cookie.
+    assert.equal(run(base, '1'), y.replace('/run/x11/auth\n', '/run/x11/auth\n          identity: desktop\n'))
     // No wmctrl: no tabs.
     execFileSync('rm', [join(bin, 'wmctrl')])
     y = run(bin)
@@ -173,7 +184,7 @@ test('box links: the overlay loads only when the image ships @mumbo/box-links; p
   assert.ok(!p.includes('desktop: https://'))
 })
 
-test('slice 3: a consent that knows deniedUrls gets the denied pages and a root-only outputDir, and computer use waits for it', () => {
+test('slice 3: a consent that knows deniedUrls gets the denied pages and an outputDir only its server reads, and computer use waits for it', () => {
   const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles)
   const lines = u.split('\n')
   const from = lines.findIndex(l => l === 'CONSENT=')
@@ -184,17 +195,20 @@ test('slice 3: a consent that knows deniedUrls gets the denied pages and a root-
   const dir = mkdtempSync(join(tmpdir(), 'consent-row-'))
   try {
     const bin = join(dir, 'bin'); mkdirSync(bin)
-    for (const name of ['cat', 'grep', 'install']) symlinkSync(execFileSync('sh', ['-c', `command -v ${name}`], { encoding: 'utf8' }).trim(), join(bin, name))
+    for (const name of ['cat', 'grep', 'mkdir']) symlinkSync(execFileSync('sh', ['-c', `command -v ${name}`], { encoding: 'utf8' }).trim(), join(bin, name))
     for (const name of ['xdotool', 'xauth']) { writeFileSync(join(bin, name), '#!/bin/sh\n'); execFileSync('chmod', ['+x', join(bin, name)]) }
+    // install logs its owner and group, which the test's user cannot give, and makes the directory without them.
+    const install = execFileSync('sh', ['-c', 'command -v install'], { encoding: 'utf8' }).trim()
+    writeFileSync(join(bin, 'install'), `#!/bin/sh\na=; while [ $# -gt 0 ]; do case $1 in -o|-g) echo "$1 $2" >> ${dir}/owner; shift 2;; *) a="$a $1"; shift;; esac; done\nexec ${install} $a\n`); execFileSync('chmod', ['+x', join(bin, 'install')])
     const block = [...lines.slice(from, consentTo + 1), ...lines.slice(cuFrom, cuTo + 1)].join('\n')
-      .replaceAll('/src/packages', join(dir, 'pkg')).replaceAll('/root/.mumbo', join(dir, 'mumbo'))
+      .replaceAll('/src/packages', join(dir, 'pkg')).replaceAll('/root/.mumbo', join(dir, 'mumbo')).replaceAll('/var/lib/mumbo', join(dir, 'varlib'))
     mkdirSync(join(dir, 'pkg', 'experimental', 'computer-use-x11'), { recursive: true })
-    const run = () => {
+    const run = (b24 = '') => {
       rmSync(join(dir, 'mumbo'), { recursive: true, force: true }); mkdirSync(join(dir, 'mumbo'))
-      execFileSync('/bin/sh', ['-c', `set -eu\n${block}\necho "$CONSENT"`], { encoding: 'utf8', env: { PATH: bin } })
+      execFileSync('/bin/sh', ['-c', `set -eu\nB24_IMAGE=${b24}\n${block}\necho "$CONSENT"`], { encoding: 'utf8', env: { PATH: bin } })
       return { sandboxes: readFileSync(join(dir, 'mumbo', 'sandboxes.overlay.yml'), 'utf8'), computer: readFileSync(join(dir, 'mumbo', 'computer.overlay.yml'), 'utf8') }
     }
-    const cuRows = (inject) => `- insert:\n    - id: computer-use\n      name: '@deepseek-ai/dsh-computer-use'\n    - id: computer-use-x11\n      name: '@deepseek-ai/dsh-computer-use-x11'\n${inject ? '      inject: [mumbo-browser-consent]\n' : ''}      config:\n        display: ':1'\n        xauthority: /run/x11/auth\n`
+    const cuRows = (inject, b24) => `- insert:\n    - id: computer-use\n      name: '@deepseek-ai/dsh-computer-use'\n    - id: computer-use-x11\n      name: '@deepseek-ai/dsh-computer-use-x11'\n${inject ? '      inject: [mumbo-browser-consent]\n' : ''}      config:\n        display: ':1'\n        xauthority: /run/x11/auth\n${b24 ? '        identity: desktop\n' : ''}`
     // No consent package: the plain provider row, and computer use without inject.
     let o = run()
     assert.match(o.sandboxes, /id: browser-use-box-chromium/)
@@ -211,6 +225,23 @@ test('slice 3: a consent that knows deniedUrls gets the denied pages and a root-
     assert.equal(o.sandboxes, `    - id: browser-consent\n      name: '@mumbo/browser-consent'\n      config:\n        browser:\n          mode: attach\n          endpoint: http://127.0.0.1:9222\n          outputDir: ${join(dir, 'mumbo')}/playwright-output\n        deniedUrls: ${JSON.stringify(DENIED_URLS)}\n`)
     assert.equal(statSync(join(dir, 'mumbo', 'playwright-output')).mode & 0o777, 0o700)
     assert.equal(o.computer, cuRows(true))
+    assert.equal(existsSync(join(dir, 'owner')), false)
+    // Agent containment (B24): the server runs as browsermcp and writes to its own directory, 0700, in /var/lib/mumbo,
+    // which is root's; computer use runs as desktop.
+    mkdirSync(join(dir, 'varlib'))
+    const b24Row = (upload) => `    - id: browser-consent\n      name: '@mumbo/browser-consent'\n      config:\n        browser:\n          mode: attach\n          endpoint: http://127.0.0.1:9222\n          identity: browsermcp\n          outputDir: ${join(dir, 'varlib')}/playwright-output\n        deniedUrls: ${JSON.stringify(DENIED_URLS)}\n${upload ? '        uploadDirectory: /home/shared/Downloads\n' : ''}`
+    o = run('1')
+    assert.equal(o.sandboxes, b24Row(false))
+    assert.equal(statSync(join(dir, 'varlib', 'playwright-output')).mode & 0o777, 0o700)
+    assert.equal(readFileSync(join(dir, 'owner'), 'utf8'), '-o browsermcp\n-g browsermcp\n')
+    assert.equal(o.computer, cuRows(true, true))
+    // A consent that requires uploadDirectory gets the shared Downloads: the harness's row (apps/cli/tests/fixtures/box-edge/
+    // personal.overlay.yml at 68ed0e7357), with deniedUrls, which that fixture leaves out.
+    writeFileSync(join(dir, 'pkg', 'mumbo', 'browser-consent', 'src', 'index.ts'), 'const deniedUrls = []\nconst uploadDirectory = ""\n')
+    o = run('1')
+    assert.equal(o.sandboxes, b24Row(true))
+    const fixtureRow = `    - id: browser-consent\n      name: '@mumbo/browser-consent'\n      config:\n        browser:\n          mode: attach\n          endpoint: http://127.0.0.1:9222\n          identity: browsermcp\n          outputDir: /var/lib/mumbo/playwright-output\n        uploadDirectory: /home/shared/Downloads\n`
+    assert.equal(o.sandboxes.replaceAll(join(dir, 'varlib'), '/var/lib/mumbo').split('\n').filter(l => !l.startsWith('        deniedUrls: ')).join('\n'), fixtureRow)
   } finally { rmSync(dir, { recursive: true, force: true }) }
   assert.deepEqual(DENIED_URLS, ['chrome:', 'chrome-untrusted:', 'chrome-extension:', 'devtools:', 'view-source:', 'file:', 'https://passwords.google.com', 'https://pay.google.com', 'https://payments.google.com', 'https://myaccount.google.com', 'https://accounts.google.com'])
 })
@@ -237,16 +268,19 @@ test('a project box start script has the proxy setup in order, before the member
   const order = [
     'flock 9',
     'openssl req -x509',
-    '/usr/local/share/ca-certificates/mumbo-box.crt',
+    'cp /root/.mumbo/ca/ca.crt /usr/local/share/ca-certificates/mumbo-box.crt',
     'update-ca-certificates',
     `echo ${b64(boxFiles.proxy)} | base64 -d > /root/.mumbo/bin/github-local-proxy.mjs`,
-    `echo ${b64(boxFiles.gh)} | base64 -d > /root/.mumbo/bin/gh`,
-    'chmod 0755 /root/.mumbo/bin/github-local-proxy.mjs /root/.mumbo/bin/gh',
-    "pgrep -f github-local-proxy.mjs >/dev/null || PORT=8899 CA_DIR=/root/.mumbo/ca EDGE_GITHUB_URL=https://l/github BOX_TOKEN=TOK nohup node /root/.mumbo/bin/github-local-proxy.mjs",
+    `echo ${b64(boxFiles.gh)} | base64 -d > /usr/local/lib/mumbo/bin/gh`,
+    'chmod 0755 /root/.mumbo/bin/github-local-proxy.mjs /usr/local/lib/mumbo/bin/gh',
+    // B24: the wrapper is root's and world-readable outside /root/.mumbo; the old path still names it.
+    'ln -sfn /usr/local/lib/mumbo/bin/gh /root/.mumbo/bin/gh',
+    // B24: on the B24 template the proxy becomes ghproxy (the firewall's owner rules then cover its tunnels).
+    "pgrep -f github-local-proxy.mjs >/dev/null || PORT=8899 CA_DIR=/root/.mumbo/ca RUN_AS=$PROXY_USER EDGE_GITHUB_URL=https://l/github BOX_TOKEN=TOK nohup node /root/.mumbo/bin/github-local-proxy.mjs",
     'curl -s -o /dev/null -m 1 http://127.0.0.1:8899/',
     'if [ -f /src/deploy/mumbo-project.overlay.yml ]',
     'export MUMBO_MEMBER_KEY=KEYTEXT',
-    'PATH=/root/.mumbo/bin:$PATH NODE_USE_ENV_PROXY=1 NODE_EXTRA_CA_CERTS=/root/.mumbo/ca/ca.crt HTTPS_PROXY=http://127.0.0.1:8899 NO_PROXY=127.0.0.1,localhost,l ',
+    'PATH=/usr/local/lib/mumbo/bin:$PATH NODE_USE_ENV_PROXY=1 NODE_EXTRA_CA_CERTS=/root/.mumbo/ca/ca.crt HTTPS_PROXY=http://127.0.0.1:8899 NO_PROXY=127.0.0.1,localhost,l ',
     '$PROJECT_PATCH',
   ].map(n => at(s, n))
   assert.deepEqual(order, [...order].sort((a, b) => a - b))
@@ -258,6 +292,7 @@ test('a project box start script has the proxy setup in order, before the member
   assert.match(s, /MUMBO_PANEL_ADMINS='o@x\.com,p@x\.com' /)
   assert.ok(!/HTTP_PROXY/.test(s.replace('HTTPS_PROXY', '')), 'no plain HTTP_PROXY')
   assert.match(s, /touch \/root\/\.mumbo\/member-auth/)
+  assert.ok(s.includes('PROXY_USER=\n[ -z "$B24_TEMPLATE" ] || PROXY_USER=ghproxy\n') && at(s, 'PROXY_USER=ghproxy') < at(s, 'flock 9'))
 })
 
 const APP_GATE = 'if grep -qs MUMBO_GITHUB_APP_LOGIN /src/deploy/mumbo-project.overlay.yml; then export '
@@ -279,7 +314,8 @@ test('GitHub App env: a project box exports the agent login and id after the pro
   assert.ok(!u.includes('MUMBO_GITHUB_APP'))
   // Without GITHUB_AGENT_LOGIN and GITHUB_AGENT_ID (edge config sets both or neither) a project box gets neither.
   const none = startScript(c, 'TOK', boxSite(c, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
-  assert.ok(!none.includes('MUMBO_GITHUB_APP'))
+  // The containment rows restate the project overlay's githubApp, which reads them; nothing exports them.
+  assert.ok(!none.includes('export MUMBO_GITHUB_APP'))
 })
 
 test('GitHub App env: sh exports both only when the overlay reads them, with the [bot] login quoted literally', () => {

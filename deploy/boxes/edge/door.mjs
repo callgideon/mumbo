@@ -17,7 +17,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { z } from 'zod'
 import { createMcpHandler, McpServer } from '@modelcontextprotocol/server'
 import { toNodeHandler } from '@modelcontextprotocol/node'
-import { MUMBO_MCP_PORT, mcpPrincipal, mumboMcpKey, readBody } from './edge.mjs'
+import { mcpPrincipal, mumboMcpKey, readBody } from './edge.mjs'
 import { SCOPES } from './keys.mjs'
 import { BOX_READY_MS, CALL_MS, ensureWithin, MESSAGE_ID, projectPrincipal, token } from './projects.mjs'
 
@@ -50,7 +50,7 @@ const READ_MARGIN_S = 5
 
 /**
  * Forwards a door call to Mumbo, @mumbo/mcp in the key owner's person box (its person overlay, startScript): ensures the
- * box as projectRelay does, then POSTs one `tools/call` to /mcp on MUMBO_MCP_PORT through the client proxy, with the
+ * box as projectRelay does, then POSTs one `tools/call` to /mcp on the box's door service (edge MUMBO_MCP_PORT) through the client proxy, with the
  * box's mumboMcpKey as the bearer, the owner's mcpPrincipal in `x-mcp-principal` and the key's name, percent-encoded, in
  * `x-mumbo-key-name`, which @mumbo/mcp's agent_send puts before the text as `[from <handle> via <key name>] `. A call
  * without a key name sends no `x-mumbo-key-name`, so agent_send logs the text alone. `reportProject`, which only
@@ -81,7 +81,7 @@ export function mumboForwarder({ box, boxFetch, edgeKey, siteHostOf, readyMs = B
     let r
     try {
       r = await boxFetch(target, siteHostOf(key.owner), '/mcp', {
-        method: 'POST', port: MUMBO_MCP_PORT, timeoutMs: Math.max(1000, deadline - now()),
+        method: 'POST', service: 'door', timeoutMs: Math.max(1000, deadline - now()),
         headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
         edgeHeaders: { authorization: `Bearer ${mumboMcpKey(edgeKey, target.id)}`, 'x-mcp-principal': mcpPrincipal(key.owner), ...(key.name === undefined ? {} : { 'x-mumbo-key-name': encodeURIComponent(key.name) }),
           ...(reportProject === undefined ? {} : { 'x-mumbo-report-project': reportProject }) },

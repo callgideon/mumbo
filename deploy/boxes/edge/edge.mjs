@@ -109,11 +109,19 @@ export const config = () => ({
   // The most input tokens one image is charged when a box drops a response before its usage (openrouterBody
   // inputEstimate), and the charge for an image whose size cannot be read. Qwen-VL's own per-image maximum.
   openrouterImageTokens: atLeast('OPENROUTER_IMAGE_TOKENS', 0, 16384),
+  // B24: whether the MCP servers people add (the box user mcpserver) reach the workspace (startScript).
+  mcpServerWorkspace: oneOf('MCP_SERVER_WORKSPACE', MCP_SERVER_WORKSPACE, 'none'),
   // The MCP door's rate limit (door.mjs): each key's bucket holds DOOR_BURST calls and refills DOOR_RATE_PER_MINUTE a
   // minute, per edge replica.
   doorRatePerMinute: atLeast('DOOR_RATE_PER_MINUTE', 1, 60),
   doorBurst: atLeast('DOOR_BURST', 1, 20),
 })
+/** A setting that must be one of `values`; anything else fails at start. */
+function oneOf(name, values, fallback) {
+  const value = env(name, fallback)
+  if (!values.includes(value)) throw new Error(`edge: ${name} must be one of ${values.join(', ')}, not ${JSON.stringify(value)}`)
+  return value
+}
 
 /** Address or @domain allowlist, lowercased (config()); an empty list admits nobody. The email compares lowercased. An
  *  @domain entry matches that exact domain only: @mumbo.si admits neither x@sub.mumbo.si nor x@evil-mumbo.si. An entry
@@ -163,7 +171,8 @@ export function memberHeader(key, email, now = Date.now()) {
 // ---- Mumbo through the door (spec section 10, B33). A person box serves @mumbo/mcp's person overlay on loopback
 // MUMBO_MCP_PORT, which E2B's client proxy reaches, to the edge alone: it accepts only the box's own key,
 // HMAC(edge key, "mumbo-mcp:" + box id) as unpadded base64url, which the start script writes to a root-only file. The door
-// (door.mjs mumboForwarder) derives it again for every call, so nothing stores it.
+// (door.mjs mumboForwarder) derives it again for every call, so nothing stores it. The port is below the B24 template's
+// unprivileged port floor, like PORTS, and no user but root reaches it (startScript).
 export const mumboMcpKey = (edgeKey, boxId) => createHmac('sha256', edgeKey).update(`mumbo-mcp:${boxId}`).digest('base64url')
 export const MUMBO_MCP_PORT = '882'
 export const MUMBO_MCP_OVERLAY = '/src/packages/mumbo/mcp/examples/person.overlay.yml'
@@ -221,8 +230,15 @@ export const DENIED_URLS = ['chrome:', 'chrome-untrusted:', 'chrome-extension:',
   'https://pay.google.com', 'https://payments.google.com', 'https://myaccount.google.com', 'https://accounts.google.com']
 
 /** Exists once a person box has given its first-run welcome, or had sessions before it (DESIGN.md#first-run-welcome). Under
- *  /root/.dsh, so backups carry it with the conversation that holds the welcome. */
+ *  /root/.dsh, so backups carry it with the conversation that holds the welcome. Under agent containment (B24) the
+ *  welcome hook runs as agent and the marker is AGENT_WELCOME/welcomed instead (startScript). */
 export const WELCOMED = '/root/.dsh/welcomed'
+/** Under agent containment (B24): agent's own directory of the first-run welcome, holding the marker `welcomed` and the
+ *  hook's output `message.json`. Backups leave it out; a restored box has sessions, so the start script marks it. */
+export const AGENT_WELCOME = '/home/agent/.mumbo-welcome'
+/** The welcome hooks file: a UserPromptSubmit hook that creates `marker` with noclobber, so exactly one prompt wins, and
+ *  prints `message`. */
+const welcomeHooks = (marker, message) => JSON.stringify({ UserPromptSubmit: [{ hooks: [{ type: 'command', command: `(set -C; : > ${marker}) 2>/dev/null && cat ${message} || true`, timeout: 10 }] }] })
 /** The first-run welcome (spec section 17a, step 5), added to the person's first prompt in a new box (startScript). */
 export function welcomeInstructions(cfg) {
   return [
@@ -234,11 +250,250 @@ export function welcomeInstructions(cfg) {
   ].join('\n')
 }
 
+/** The box ports of dsh and of the desktop's live view (KasmVNC) on a template that ships PORTS_MARKER (template.mjs
+ *  PORTS_STEP): below the box's unprivileged port floor (1024, which the start script sets), where only root and
+ *  Xkasmvnc (given cap_net_bind_service) may bind, so no other user can take either port over and serve pages on the
+ *  box's origin while dsh or KasmVNC is down (B24). The template writes them into its marker; the start script reads
+ *  them from there, and the edge records them on the box (portsOf) and routes by the record (boxHeaders). */
+export const PORTS = { dsh: '880', live: '881' }
+/** The ports of a template without PORTS_MARKER, and of a box record without `ports` (a box created before the edge
+ *  recorded them). Drop this fallback once no such box remains (RUNBOOK "Agent containment (B24)"). */
+export const OLD_PORTS = { dsh: '3080', live: '6080' }
+/** The template's marker: one line, `<dsh port> <live view port>`. The start script and portsOf read it. */
+export const PORTS_MARKER = '/usr/local/share/mumbo/ports'
+/** E2B's in-box agent, envd, which runs commands as root for whoever reaches it: no process in the box, root's included,
+ *  may connect (start script); the edge reaches it from outside. */
+export const ENVD_PORT = '49983'
+/** The image ships the B24 harness (the run-as subprocess provider with a server identity) when this file names
+ *  serverIdentity: the start script then lays the box out for agent containment and writes its rows (containmentRows). */
+const B24_SOURCE = '/src/packages/subprocess/subprocess-local/src/index.ts'
+/** What the MCP servers a person adds (the box user mcpserver) may do in the workspace (edge MCP_SERVER_WORKSPACE):
+ *  `none`, the default, `read` or `readwrite` (startScript). */
+export const MCP_SERVER_WORKSPACE = ['none', 'read', 'readwrite']
+/** The ports of a box, from its template's PORTS_MARKER, read by the edge's own command.
+ *  @param {string} marker the marker's text, empty when the template has none
+ *  @returns {{ dsh: string, live: string }} OLD_PORTS without a marker
+ *  @throws on a marker that is not two port numbers */
+export function portsFrom(marker) {
+  if (marker.trim() === '') return OLD_PORTS
+  const m = /^(\d{1,5}) (\d{1,5})$/.exec(marker.trim())
+  if (!m) throw new Error(`box ports marker ${PORTS_MARKER} reads ${JSON.stringify(marker)}, not "<dsh port> <live view port>"`)
+  return { dsh: m[1], live: m[2] }
+}
+
 export function boxSite(cfg, principal) {
   const id = principal.startsWith('project:') ? principal.slice('project:'.length) : undefined
   return id === undefined
     ? { host: cfg.publicHost, publicUrl: `https://${cfg.publicHost}/`, desktop: true }
     : { host: `p-${id}.${cfg.projectDomain}`, publicUrl: `https://p-${id}.${cfg.projectDomain}/`, desktop: false, project: id }
+}
+
+/** The start script's kernel and network part on a template with PORTS_MARKER (B24), before any user's process starts:
+ *  the unprivileged port floor, the link protections and hidepid, set and checked; no setuid su or sudo; and the OUTPUT
+ *  owner rules. Every step is fatal. */
+const hardening = () => `if [ -n "$B24_TEMPLATE" ]; then
+  # Only root binds below 1024, set rather than trusted (Docker's floor, and maybe a VM image's, is 0), so no other user
+  # takes dsh's, the live view's or the door's port; hard and symbolic links in shared directories lead only where their
+  # owner could already go.
+  for kv in net/ipv4/ip_unprivileged_port_start=1024 fs/protected_hardlinks=1 fs/protected_symlinks=1; do
+    echo "\${kv#*=}" > "/proc/sys/\${kv%=*}"
+    [ "$(cat "/proc/sys/\${kv%=*}")" = "\${kv#*=}" ] || { echo "mumbo-box: /proc/sys/\${kv%=*} is not \${kv#*=}" >&2; exit 1; }
+  done
+  # Every user but root sees only its own processes, their environments and command lines included.
+  mount -o remount,hidepid=2 /proc
+  grep -Eq '^[^ ]+ /proc proc [^ ]*hidepid=(2|invisible)' /proc/mounts || { echo 'mumbo-box: /proc is not mounted with hidepid=2' >&2; exit 1; }
+  # Nobody becomes root through su or sudo (E2B's own account user can have sudo); root's own su needs no set-user-ID bit.
+  for b in su sudo; do p=$(command -v $b) || continue; p=$(readlink -f "$p"); chmod u-s "$p"; [ ! -u "$p" ] || { echo "mumbo-box: $p is still set-user-ID" >&2; exit 1; }; done
+  # Only root connects, to any address (E2B's envd forwards every loopback listener to the box address), to dsh, the
+  # live view, the Mumbo door, any VNC port and, beside browsermcp, the Playwright MCP server's user, the browser's
+  # debugging port. Nothing in the box connects to E2B's envd, which runs commands as root: root's dsh fetches pages for
+  # the model, and the edge's commands reach envd from outside the box.
+  CDP=
+  if id browsermcp >/dev/null 2>&1; then CDP="-m owner ! --uid-owner $(id -u browsermcp)"; fi
+  for t in iptables $IP6; do
+    rule $t OUTPUT -p tcp --syn --dport ${ENVD_PORT} -j REJECT --reject-with tcp-reset
+    for port in $DSH_PORT $LIVE_PORT ${MUMBO_MCP_PORT} 5900:5999; do rule $t OUTPUT -p tcp --syn --dport $port -m owner ! --uid-owner 0 -j REJECT --reject-with tcp-reset; done
+    rule $t OUTPUT -p tcp --syn --dport 9222 -m owner ! --uid-owner 0 $CDP -j REJECT --reject-with tcp-reset
+  done
+fi
+`
+
+/** Agent containment's box layout (B24), in the start script on an image with its harness: the users' ids, read here
+ *  because E2B's own account `user` can take any of them, every directory the rows name, root's own files kept from the
+ *  agent once /root is 0711 for the workspace, the one-time moves of a restored backup, and the rows themselves
+ *  (containmentRows), patched after every other overlay. The workspace (/root/projects, and /root/work on a project box)
+ *  is agent's with the dedicated group workspace (agent, xsession and, with cfg.mcpServerWorkspace `readwrite`,
+ *  mcpserver) and gives other users nothing; `read` lets mcpserver in through the group workspace-read, which reads
+ *  what is inside by its other bits. dsh and the desktop then run with umask 002, so what one member writes there the
+ *  others can change. Root never writes into a directory another user can change.
+ *  @param {object} cfg config()
+ *  @param {boolean} person a person box
+ *  @returns {string} the start script's part */
+export function containmentLayout(cfg, person) {
+  const mode = cfg.mcpServerWorkspace ?? 'none'
+  if (!MCP_SERVER_WORKSPACE.includes(mode)) throw new Error(`edge: mcpServerWorkspace ${JSON.stringify(mode)} is not one of ${MCP_SERVER_WORKSPACE.join(', ')}`)
+  const workspace = person ? '/root/projects' : '/root/projects /root/work'
+  return `CONTAINMENT_PATCH=
+if [ -n "$B24_IMAGE" ]; then
+  [ -n "$B24_TEMPLATE" ] && id agent >/dev/null 2>&1 || { echo 'mumbo-box: this image runs agent containment (B24), which needs a template built with it (RUNBOOK "Agent containment (B24)")' >&2; exit 1; }
+  gid() { getent group "$1" | cut -d: -f3 | grep .; }
+  AGENT_UID=$(id -u agent)
+  AGENT_GID=$(id -g agent)
+  MCP_UID=$(id -u mcpserver)
+  MCP_GID=$(id -g mcpserver)
+  WS_GID=$(gid workspace)
+  WSR_GID=$(gid workspace-read)
+${person ? `  SHARED_GID=$(gid shared)
+  BMCP_UID=$(id -u browsermcp)
+  BMCP_GID=$(id -g browsermcp)
+  DESKTOP_UID=$(id -u desktop)
+  DESKTOP_GID=$(id -g desktop)
+` : ''}  # The MCP servers a person adds hold these groups (edge MCP_SERVER_WORKSPACE ${mode}), in the rows and for su alike.
+  MCP_GROUPS=${{ none: '', read: '$WSR_GID', readwrite: '$WS_GID' }[mode]}
+  usermod -G '${{ none: '', read: 'workspace-read', readwrite: 'workspace' }[mode]}' mcpserver
+  # Root's files: dsh's log${person ? '' : ' and the GitHub proxy\'s'}, and every entry of /root but the workspace, the image's dot
+  # directories included (find skips links), are root's alone; /root itself, once 0711 below, only lets users through.
+  for f in dsh.log${person ? '' : ' github-proxy.log'}; do : >> /root/$f; chmod 0600 /root/$f; done
+  find /root -mindepth 1 -maxdepth 1 ! -name projects ! -name work ! -type l -exec chmod go-rwx {} +
+  install -d -m 0700 /root/.dsh/tmp /root/.dsh/skills${person ? '' : ' /root/.config /root/.config/gh'}
+  install -d -m 0711 /run/dsh-shell
+  install -d -m 0755 /var/lib/mumbo /usr/local/share/mumbo/agents /usr/local/share/mumbo/agents/skills
+  for d in attachments attachments/attachments attachments/attachments/v1 spill subprocess-spill${person ? '' : ' superagent'}; do install -d -o root -g agent -m 2750 /var/lib/mumbo/$d; done
+  for d in ${workspace}; do
+    install -d -o agent -g workspace -m 2770 $d
+    setfacl --set 'u::rwx,g::rwx,${mode === 'read' ? 'g:workspace-read:r-x,' : ''}m::rwx,o::---' $d
+  done
+  # Once per box (a new box restores its backup first): what root wrote in the workspace before containment becomes
+  # agent's, writable by the group, whose directories pass the group on to what is made in them. Nothing runs as agent
+  # or xsession yet, and neither chown, chmod nor find follows a link.
+  if [ ! -e /root/.mumbo/workspace-owned ]; then
+    for d in ${workspace}; do chown -R agent:workspace $d; chmod -R g+rwX $d; find $d -type d -exec chmod g+s {} +; done
+    : > /root/.mumbo/workspace-owned
+  fi
+  chmod 0711 /root
+  # Uploads stored before containment, in dsh's home, move into the store the rows name (each is named by its content, so
+  # a repeat after an interruption copies the same bytes), readable by agent's group and changed only by root.
+  if [ -d /root/.dsh/attachments ]; then
+    cp -a --remove-destination /root/.dsh/attachments/. /var/lib/mumbo/attachments/attachments/
+    chown -R root:agent /var/lib/mumbo/attachments/attachments
+    find /var/lib/mumbo/attachments/attachments -type d -exec chmod 2750 {} +
+    find /var/lib/mumbo/attachments/attachments -type f -exec chmod 0440 {} +
+    rm -rf /root/.dsh/attachments
+  fi
+${person ? '' : `  # The image's project overlay sets superagent's edge (B36) from the MUMBO_EDGE_* variables; the row below replaces that
+  # row's config, so it says it again.
+  SUPERAGENT_EDGE=
+  if grep -qs MUMBO_EDGE_MCP_URL /src/deploy/mumbo-project.overlay.yml; then SUPERAGENT_EDGE='
+    edge: !!js "process.env.MUMBO_EDGE_MCP_URL || process.env.MUMBO_EDGE_TOKEN_FILE || process.env.MUMBO_PROJECT_ID ? { url: process.env.MUMBO_EDGE_MCP_URL, tokenFile: process.env.MUMBO_EDGE_TOKEN_FILE, project: process.env.MUMBO_PROJECT_ID } : undefined"'; fi
+`}  cat > /root/.mumbo/containment.overlay.yml <<YML
+${containmentRows(cfg, person)}YML
+  CONTAINMENT_PATCH="--patch /root/.mumbo/containment.overlay.yml"
+  umask 002
+fi
+`
+}
+
+/** Agent containment's rows (B24), patched after every other overlay: the harness's containment-person and
+ *  containment-project fixtures (apps/cli/tests/fixtures/box-edge, the harness branch's composition gate), with the
+ *  box's ids as the shell variables containmentLayout reads, and agent also in the group workspace, so it can change
+ *  what root, xsession or mcpserver write in the workspace. The project rows restate deploy/mumbo-project.overlay.yml's
+ *  dsh-superagent row, since a patch's config replaces the row's: change both together; $SUPERAGENT_EDGE (containmentLayout)
+ *  adds that row's B36 `edge` on an image whose overlay has it. Written into an unquoted heredoc, so the text holds no $
+ *  but those variables, no backquote and no backslash.
+ *  @param {object} cfg config(); llmHost ends the project rows' NO_PROXY
+ *  @param {boolean} person a person box
+ *  @returns {string} the YAML */
+export function containmentRows(cfg, person) {
+  const secrets = 'secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY, E2B_API_KEY, GH_TOKEN, GITHUB_TOKEN]'
+  const path = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+  /** A named identity's row with a home, TMPDIR and the system PATH, as the fixture's browsermcp and desktop. */
+  const identity = (name, uid, gid, groups) => `      ${name}:
+        uid: ${uid}
+        gid: ${gid}
+        groups: [${groups}]
+        inherit: [LANG, LC_ALL, TZ]
+        set:
+          HOME: /home/${name}
+          TMPDIR: /home/${name}/tmp
+          USER: ${name}
+          LOGNAME: ${name}
+          PATH: ${path}
+        ${secrets}
+`
+  return `- id: subprocess
+  config:
+    shellActivityDirectory: /run/dsh-shell
+    spillDirectory: /var/lib/mumbo/subprocess-spill
+    runAs:
+      uid: $AGENT_UID
+      gid: $AGENT_GID
+      groups: [${person ? '$SHARED_GID, ' : ''}$WS_GID]
+      inherit: [LANG, LC_ALL, TZ]
+      set:
+        HOME: /home/agent
+        TMPDIR: /home/agent/tmp
+        USER: agent
+        LOGNAME: agent
+        SHELL: /bin/bash
+${person ? `        PATH: ${path}
+` : `        PATH: /var/lib/mumbo/superagent/worker-bin:/usr/local/lib/mumbo/bin:${path}
+        GIT_CONFIG_GLOBAL: /var/lib/mumbo/superagent/worker-gitconfig
+        GIT_CONFIG_NOSYSTEM: '1'
+        GIT_ASKPASS: ''
+        GIT_TERMINAL_PROMPT: '0'
+        NODE_EXTRA_CA_CERTS: /usr/local/share/ca-certificates/mumbo-box.crt
+        NODE_USE_ENV_PROXY: '1'
+        HTTPS_PROXY: http://127.0.0.1:8899
+        NO_PROXY: 127.0.0.1,localhost,${cfg.llmHost}
+`}      ${secrets}
+    identities:
+${person ? identity('browsermcp', '$BMCP_UID', '$BMCP_GID', '$SHARED_GID') + identity('desktop', '$DESKTOP_UID', '$DESKTOP_GID', '') : ''}      mcpserver:
+        uid: $MCP_UID
+        gid: $MCP_GID
+        groups: [$MCP_GROUPS]
+        inherit: [LANG]
+        set:
+          HOME: /home/mcpserver
+          USER: mcpserver
+          PATH: /usr/local/bin:/usr/bin:/bin
+        ${secrets}
+    serverIdentity: mcpserver
+- id: fs-sandbox
+  config:
+    modelRoots: [/root/projects, /home/agent, ${person ? '/home/shared/Downloads' : '/root/work'}]
+    readOnlyRoots:
+      - /var/lib/mumbo/attachments/attachments/v1
+      - /root/.dsh/skills
+      - /usr/local/share/mumbo/agents/skills
+      - /var/lib/mumbo/spill
+      - /var/lib/mumbo/subprocess-spill
+- id: attachment-local
+  config:
+    dshHome: /var/lib/mumbo/attachments
+    groupReadable: true
+- id: spill-local
+  config:
+    root: /var/lib/mumbo/spill
+    groupReadable: true
+${person ? '' : `- id: dsh-superagent
+  config:
+    stateDir: !!js dshHomePath('superagent')
+    workDirectory: /root/work
+    workerDirectory: /var/lib/mumbo/superagent
+    ghConfigDirectory: /root/.config/gh
+    panelAdmins: !!js (process.env.MUMBO_PANEL_ADMINS ?? '').split(',').filter(Boolean)
+    githubApp: !!js "process.env.MUMBO_GITHUB_APP_LOGIN || process.env.MUMBO_GITHUB_APP_USER_ID ? { login: process.env.MUMBO_GITHUB_APP_LOGIN, userId: Number(process.env.MUMBO_GITHUB_APP_USER_ID) } : undefined"$SUPERAGENT_EDGE
+`}- id: mcp-manager
+  inject: [credentials, subprocess]
+- id: plugin-manager
+  config:
+    modelTools: false
+- id: preset-cordis
+  disabled: true
+- id: workspace-changes
+  config:
+    summaries: false
+`
 }
 
 // ---- inside a box. It never sees a server secret: its DeepSeek key is its own box token, valid only via LLM_HOST.
@@ -259,9 +514,26 @@ export function startScript(cfg, token, site = boxSite(cfg, ''), role = '', memb
 set -eu
 pkill -f 'apps/cli/src/bin.ts' 2>/dev/null || true
 ip=$(hostname -I | cut -d' ' -f1)
-mkdir -p /root/projects /root/.dsh /root/.mumbo/agents
+mkdir -p /root/projects /root/.dsh /root/.mumbo
+chmod 0700 /root/.mumbo
+# The ports of dsh and the live view (edge PORTS): a template with the marker names them (B24); one before it runs them
+# on ${OLD_PORTS.dsh} and ${OLD_PORTS.live}.
+B24_TEMPLATE= DSH_PORT=${OLD_PORTS.dsh} LIVE_PORT=${OLD_PORTS.live}
+if [ -e ${PORTS_MARKER} ]; then B24_TEMPLATE=1; read -r DSH_PORT LIVE_PORT < ${PORTS_MARKER}; fi
+# Agent containment (B24) when the image ships its harness: the model's processes run as the user agent and its file
+# tools stay in the model roots, by the rows and the layout below (edge containmentLayout).
+B24_IMAGE=
+if grep -qs serverIdentity ${B24_SOURCE}; then B24_IMAGE=1; fi
+IP6=
+[ ! -e /proc/net/if_inet6 ] || IP6=ip6tables
+# One firewall rule, inserted once (-C before -I): fatal on a template with the marker, which installs iptables, and best
+# effort on one before it.
+rule() { fw=$1 chain=$2; shift 2; "$fw" -C "$chain" "$@" 2>/dev/null || "$fw" -I "$chain" "$@" || [ -z "$B24_TEMPLATE" ]; }
+${hardening()}${containmentLayout(cfg, site.desktop)}AGENTS_HOME=/root/.mumbo/agents
+[ -z "$B24_IMAGE" ] || AGENTS_HOME=/usr/local/share/mumbo/agents
+mkdir -p "$AGENTS_HOME"
 # This box's role (edge roleInstructions), read by dsh as the shared agents root's AGENTS.md.
-cat > /root/.mumbo/agents/AGENTS.md <<'MD'
+cat > "$AGENTS_HOME/AGENTS.md" <<'MD'
 ${role}
 MD
 # Child sandboxes over MCP on the model host, authenticated by this box's token (edge sandboxes.mjs).
@@ -286,12 +558,14 @@ cat > /root/.mumbo/models.overlay.yml <<'YML'
 YML
 ` : ''}${site.desktop ? `# The user's Chromium for dsh's browser tools. With @mumbo/browser-consent in the image, writes on a site ask the
 # person first; consent mounts the Playwright MCP provider itself, so the plain provider row is used only without it.
-# A consent that knows deniedUrls (B25) refuses the denied pages and writes the server's files to a root-only directory
-# outside the backups; CONSENT=denied then gates computer use on it.
+# A consent that knows deniedUrls (B25) refuses the denied pages and writes the server's files to a directory outside the
+# backups that only the server's user reads: root's, or under containment (B24) browsermcp's, in /var/lib/mumbo, which
+# is root's, so browsermcp cannot swap the directory for a link that aims consent's deletes, made as root, elsewhere.
+# CONSENT=denied then gates computer use on it. A consent that takes browser_file_upload's files from one directory
+# (B24) takes them from the shared Downloads.
 CONSENT=
 if [ -d /src/packages/mumbo/browser-consent ] && grep -q deniedUrls /src/packages/mumbo/browser-consent/src/index.ts 2>/dev/null; then
 CONSENT=denied
-install -d -m 0700 /root/.mumbo/playwright-output
 cat >> /root/.mumbo/sandboxes.overlay.yml <<'YML'
     - id: browser-consent
       name: '@mumbo/browser-consent'
@@ -299,9 +573,10 @@ cat >> /root/.mumbo/sandboxes.overlay.yml <<'YML'
         browser:
           mode: attach
           endpoint: http://127.0.0.1:9222
-          outputDir: /root/.mumbo/playwright-output
-        deniedUrls: ${JSON.stringify(DENIED_URLS)}
 YML
+if [ -n "$B24_IMAGE" ]; then OUT=/var/lib/mumbo/playwright-output; install -d -o browsermcp -g browsermcp -m 0700 $OUT; echo '          identity: browsermcp' >> /root/.mumbo/sandboxes.overlay.yml; else OUT=/root/.mumbo/playwright-output; install -d -m 0700 $OUT; fi
+printf '%s\\n' "          outputDir: $OUT" '        deniedUrls: ${JSON.stringify(DENIED_URLS)}' >> /root/.mumbo/sandboxes.overlay.yml
+if grep -q uploadDirectory /src/packages/mumbo/browser-consent/src/index.ts; then echo '        uploadDirectory: /home/shared/Downloads' >> /root/.mumbo/sandboxes.overlay.yml; fi
 elif [ -d /src/packages/mumbo/browser-consent ]; then
 cat >> /root/.mumbo/sandboxes.overlay.yml <<'YML'
     - id: browser-consent
@@ -336,8 +611,9 @@ ${site.desktop ? `# The right panel's Browser and Desktop tabs (box-links' brows
 # Chrome with wmctrl and never start it: the desktop's restart loop keeps it running.
 if [ -f /src/packages/mumbo/box-links/src/browser.ts ] && command -v wmctrl >/dev/null 2>&1; then
   printf '%s\\n' '        browser:' "          display: ':1'" >> /root/.mumbo/links.overlay.yml
-  # The X cookie is made below with xauth, as for computer use.
+  # The X cookie is made below with xauth, as for computer use. Under containment (B24) wmctrl runs as desktop.
   if command -v xauth >/dev/null 2>&1; then echo '          xauthority: /run/x11/auth' >> /root/.mumbo/links.overlay.yml; fi
+  if [ -n "$B24_IMAGE" ]; then echo '          identity: desktop' >> /root/.mumbo/links.overlay.yml; fi
   printf '%s\\n' '- id: ui-sidebar-browser' '  disabled: true' >> /root/.mumbo/links.overlay.yml
 fi
 ` : ''}LINKS_PATCH="--patch /root/.mumbo/links.overlay.yml"
@@ -379,21 +655,42 @@ YML
 if [ "$CONSENT" = denied ]; then echo '      inject: [mumbo-browser-consent]' >> /root/.mumbo/computer.overlay.yml; fi
 printf '%s\\n' '      config:' "        display: ':1'" >> /root/.mumbo/computer.overlay.yml
 command -v xauth >/dev/null 2>&1 && echo "        xauthority: /run/x11/auth" >> /root/.mumbo/computer.overlay.yml
+# Under containment (B24) xdotool, xsel and import run as desktop, which reads the X cookie.
+if [ -n "$B24_IMAGE" ]; then echo '        identity: desktop' >> /root/.mumbo/computer.overlay.yml; fi
 CU_PATCH="--patch /root/.mumbo/computer.overlay.yml"
 fi
-` : ''}${site.desktop ? `# First-run welcome (edge welcomeInstructions): until ${WELCOMED} exists, a UserPromptSubmit hook creates it (noclobber,
+` : ''}${site.desktop ? `# First-run welcome (edge welcomeInstructions): until its marker exists, a UserPromptSubmit hook creates it (noclobber,
 # so exactly one prompt wins) and adds the welcome to that prompt. dsh reads AGENTS.md into every new session, so the
 # role file cannot carry a once-only greeting. A box with any session log under dsh's sessions root has been used (a
-# restart, or a restore from a backup taken before the marker existed): it is marked instead of welcomed.
-if [ ! -e ${WELCOMED} ] && [ -n "$(find /root/.dsh/sessions -type f 2>/dev/null | head -n 1)" ]; then : > ${WELCOMED}; fi
+# restart, or a restore from a backup taken before the marker existed): it is marked instead of welcomed. The hook runs
+# where the model's commands run: under containment (B24) as agent, so the marker and the message are agent's own, in
+# ${AGENT_WELCOME}, which this script writes only as agent; before it, as root, ${WELCOMED} and
+# /root/.mumbo/welcome.json.
 WELCOME_PATCH=
+if [ -n "$B24_IMAGE" ]; then
+if [ ! -e ${AGENT_WELCOME}/welcomed ] && [ -n "$(find /root/.dsh/sessions -type f 2>/dev/null | head -n 1)" ]; then su agent -s /bin/sh -c 'mkdir -p -m 0700 ${AGENT_WELCOME} && : > ${AGENT_WELCOME}/welcomed'; fi
+if [ ! -e ${AGENT_WELCOME}/welcomed ]; then
+su agent -s /bin/sh -c 'mkdir -p -m 0700 ${AGENT_WELCOME} && cat > ${AGENT_WELCOME}/message.json' <<'JSON'
+${JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: welcomeInstructions(cfg) } })}
+JSON
+cat > /root/.mumbo/welcome-hooks.json <<'JSON'
+${welcomeHooks(`${AGENT_WELCOME}/welcomed`, `${AGENT_WELCOME}/message.json`)}
+JSON
+WELCOME_PATCH=1
+fi
+else
+if [ ! -e ${WELCOMED} ] && [ -n "$(find /root/.dsh/sessions -type f 2>/dev/null | head -n 1)" ]; then : > ${WELCOMED}; fi
 if [ ! -e ${WELCOMED} ]; then
 cat > /root/.mumbo/welcome.json <<'JSON'
 ${JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: welcomeInstructions(cfg) } })}
 JSON
 cat > /root/.mumbo/welcome-hooks.json <<'JSON'
-${JSON.stringify({ UserPromptSubmit: [{ hooks: [{ type: 'command', command: `(set -C; : > ${WELCOMED}) 2>/dev/null && cat /root/.mumbo/welcome.json || true`, timeout: 10 }] }] })}
+${welcomeHooks(WELCOMED, '/root/.mumbo/welcome.json')}
 JSON
+WELCOME_PATCH=1
+fi
+fi
+if [ -n "$WELCOME_PATCH" ]; then
 cat > /root/.mumbo/welcome.overlay.yml <<'YML'
 - insert:
     - id: first-run-welcome
@@ -403,20 +700,26 @@ cat > /root/.mumbo/welcome.overlay.yml <<'YML'
 YML
 WELCOME_PATCH="--patch /root/.mumbo/welcome.overlay.yml"
 fi
-` : ''}${site.desktop ? `# Desktop: XFCE and the user's own Google Chrome (signed-in accounts live in its profile) on display :1, as the
-# unprivileged user browser; templates before XFCE run openbox and Chromium on the same profile. The browser's debugging
-# port stays on loopback for dsh's browser tools; the live view on :6080 (KasmVNC's web client, noVNC on a template
-# before it) is reached only by the edge (E2B traffic token). Re-runnable: each part starts only if it is not running.
-# This script never writes as root under /home/browser, which the user browser controls (a symlink there could aim a
-# root write anywhere): the loops below do that as browser.
+` : ''}${site.desktop ? `# Desktop: XFCE and the user's own Google Chrome (signed-in accounts live in its profile) on display :1, Chrome as the
+# unprivileged user browser and the XFCE session as xsession on a template with the B24 marker (as browser before it);
+# templates before XFCE run openbox and Chromium on the same profile. The browser's debugging port stays on loopback for
+# dsh's browser tools; the live view on $LIVE_PORT (KasmVNC's web client, noVNC on a template before it) is reached only
+# by the edge (E2B traffic token). Re-runnable: each part starts only if it is not running. This script never writes as
+# root under /home/browser, which the user browser controls (a symlink there could aim a root write anywhere): the loops
+# below do that as browser.
 if id browser >/dev/null 2>&1; then
-  # E2B forwards every loopback port to the box address; the browser's debugging port and raw VNC stay box-local, and
-  # so does KasmVNC's WebRTC port (UDP, the WebSocket's number, bound on every address), which the ALB cannot carry.
-  for port in 9222 5900; do iptables -C INPUT -p tcp --dport $port ! -i lo -j DROP 2>/dev/null || iptables -I INPUT -p tcp --dport $port ! -i lo -j DROP || true; done
-  iptables -C INPUT -p udp --dport 6080 ! -i lo -j DROP 2>/dev/null || iptables -I INPUT -p udp --dport 6080 ! -i lo -j DROP || true
-  # X access cookie, so only holders of /run/x11/auth (the browser user, root, and KasmVNC's server through its group) can
-  # read or drive :1. su keeps the environment, so every X client below inherits XAUTHORITY. Images without xauth run :1
-  # without one, as before.
+  SESSION_USER=browser X_OWNER=browser:xvnc
+  if [ -n "$B24_TEMPLATE" ]; then SESSION_USER=xsession X_OWNER=root:desktop; fi
+  # E2B forwards every loopback port to the box address; the browser's debugging port and every VNC port stay box-local,
+  # and so does KasmVNC's WebRTC port (UDP, the WebSocket's number, bound on every address), which the ALB cannot carry.
+  for t in iptables $IP6; do
+    for port in 9222 5900:5999; do rule $t INPUT -p tcp --dport $port ! -i lo -j DROP; done
+    rule $t INPUT -p udp --dport $LIVE_PORT ! -i lo -j DROP
+  done
+  # X access cookie, so only holders of /run/x11/auth can read or drive :1: root and, through the cookie's group, the
+  # desktop's own users (B24 template: group desktop, which holds browser, xvnc, xsession and computer use's desktop;
+  # before it, browser, which owns it, and KasmVNC's server through the group xvnc). su keeps the environment, so every X
+  # client below inherits XAUTHORITY. Images without xauth run :1 without one, as before.
   X_AUTH=
   if command -v xauth >/dev/null 2>&1; then
     mkdir -p /run/x11
@@ -441,11 +744,13 @@ if id browser >/dev/null 2>&1; then
     fi
   fi
   # The one way to start the browser: the loop below and the desktop's launchers (the template aims them here). A start
-  # while it runs opens a window in it. For any other user, such as the agent's root shell, it is plain Chrome. Google
-  # Chrome has its own new profile (founder decision); Chromium, on a template before Chrome, keeps the old one.
+  # while it runs opens a window in it. For the desktop session's user xsession (B24 template) the launchers bring the
+  # running Chrome to the front and never start a second one; for any other user it is plain Chrome. Google Chrome has
+  # its own new profile (founder decision); Chromium, on a template before Chrome, keeps the old one.
   cat > /usr/local/bin/google-chrome <<'SH'
 #!/bin/sh
 b=$(command -v google-chrome-stable) && p=/home/browser/chrome-profile || { b=chromium; p=/home/browser/profile; }
+[ "$(id -un)" != xsession ] || exec wmctrl -x -a google-chrome
 [ "$(id -un)" = browser ] || exec "$b" "$@"
 exec "$b" --user-data-dir=$p --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --no-first-run --no-default-browser-check --password-store=basic --start-maximized "$@"
 SH
@@ -469,8 +774,9 @@ SH
   # The browser, started again within 5 s of exiting, since the assistant's browser tools need it. While any Chrome runs
   # on the profile it waits. First it keeps /home/browser at 0700 (a restored archive can carry 0755), moves ~/Downloads (a
   # template before the shared folder, or its backup) into /home/shared/Downloads with group shared, keeping either side's
-  # file on a name clash, and, with Google Chrome, moves the old Chromium profile once to ~/.chromium-profile-old, mode
-  # 0700: no browser opens it, backups leave it out, and B24 deletes it. Neither move follows a symlink.
+  # file on a name clash, never following a symlink, and, with Google Chrome, deletes the old Chromium profile and its
+  # copy that B18 moved aside (B24): a backup from before Google Chrome restores ~/profile, which holds old saved
+  # passwords. It runs as browser, and rm removes a symlink, never what it points at.
   cat > /usr/local/bin/mumbo-browser <<'SH'
 #!/bin/sh
 chmod 0700 /home/browser/
@@ -484,8 +790,7 @@ if [ -d /home/browser/Downloads ] && [ ! -L /home/browser/Downloads ] && [ -d /h
 fi
 p=/home/browser/profile
 if command -v google-chrome-stable >/dev/null 2>&1; then
-  if [ -d /home/browser/profile ] && [ ! -L /home/browser/profile ] && [ ! -e /home/browser/.chromium-profile-old ] && [ ! -L /home/browser/.chromium-profile-old ]; then mv -T /home/browser/profile /home/browser/.chromium-profile-old; fi
-  [ ! -d /home/browser/.chromium-profile-old ] || [ -L /home/browser/.chromium-profile-old ] || chmod 0700 /home/browser/.chromium-profile-old
+  rm -rf /home/browser/profile /home/browser/.chromium-profile-old
   p=/home/browser/chrome-profile
 fi
 while :; do
@@ -495,26 +800,33 @@ done
 SH
   chmod 0755 /usr/local/bin/google-chrome /usr/local/bin/mumbo-desktop /usr/local/bin/mumbo-browser
   # KasmVNC (template.mjs, RUNBOOK "Person box desktop and Google Chrome"): one X server that encodes only what changed
-  # and serves its web client and WebSocket on $ip:6080, with no raw VNC port. Its own login and TLS are off: the edge
-  # terminates TLS and is the only gate. -PublicIP keeps it from asking public STUN servers at start (it exits when none
-  # answers); -IgnoreClientSettingsKasm keeps a viewer from raising the frame rate. KasmVNC 1.5.2 accepts -RectThreads but
-  # does not apply it (RUNBOOK). It runs as the system user xvnc (template.mjs), which browser can neither signal nor
-  # impersonate: whatever answers on :6080 serves pages on dsh's origin, and browser runs Chrome. A template before
-  # KasmVNC runs Xvfb, x11vnc and websockify with noVNC.
+  # and serves its web client and WebSocket on $ip:$LIVE_PORT, with no raw VNC port. Its own login and TLS are off: the
+  # edge terminates TLS and is the only gate. -PublicIP keeps it from asking public STUN servers at start (it exits when
+  # none answers); -IgnoreClientSettingsKasm keeps a viewer from raising the frame rate. KasmVNC 1.5.2 accepts
+  # -RectThreads but does not apply it (RUNBOOK). It runs as the system user xvnc (template.mjs), which browser can neither
+  # signal nor impersonate: whatever answers on the live view's port serves pages on dsh's origin, and browser runs
+  # Chrome. On the B24 template that port is below 1024, which xvnc binds through Xkasmvnc's cap_net_bind_service. A
+  # template before KasmVNC runs Xvfb, x11vnc and websockify with noVNC.
   if command -v Xkasmvnc >/dev/null 2>&1; then
-    [ -z "$X_AUTH" ] || { chown browser:xvnc /run/x11/auth; chmod 0640 /run/x11/auth; }
-    pgrep -u xvnc -x Xkasmvnc >/dev/null || { su xvnc -s /bin/sh -c "Xkasmvnc :1 $X_AUTH -geometry 1600x900 -depth 24 -nolisten tcp -interface $ip -websocketPort 6080 -httpd /usr/share/kasmvnc/www -DisableBasicAuth -sslOnly=0 -SecurityTypes None -PublicIP 127.0.0.1 -FrameRate 30 -RectThreads 2 -IgnoreClientSettingsKasm -DLP_ClipTypes text/plain -DLP_ClipSendMax 262144 -DLP_ClipAcceptMax 262144 -DLP_ClipDelay 500 >/tmp/xvnc.log 2>&1 &"; sleep 1; }
+    [ -z "$X_AUTH" ] || { chown $X_OWNER /run/x11/auth; chmod 0640 /run/x11/auth; }
+    pgrep -u xvnc -x Xkasmvnc >/dev/null || { su xvnc -s /bin/sh -c "Xkasmvnc :1 $X_AUTH -geometry 1600x900 -depth 24 -nolisten tcp -interface $ip -websocketPort $LIVE_PORT -httpd /usr/share/kasmvnc/www -DisableBasicAuth -sslOnly=0 -SecurityTypes None -PublicIP 127.0.0.1 -FrameRate 30 -RectThreads 2 -IgnoreClientSettingsKasm -DLP_ClipTypes text/plain -DLP_ClipSendMax 262144 -DLP_ClipAcceptMax 262144 -DLP_ClipDelay 500 >/tmp/xvnc.log 2>&1 &"; sleep 1; }
   else
     pgrep -x Xvfb >/dev/null || { su browser -s /bin/sh -c 'Xvfb :1 $X_AUTH -screen 0 1440x900x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &'; sleep 1; }
     pgrep -x x11vnc >/dev/null || su browser -s /bin/sh -c 'x11vnc -display :1 -localhost -forever -shared -nopw -rfbport 5900 -quiet >/tmp/x11vnc.log 2>&1 &'
-    pgrep -f websockify >/dev/null || nohup websockify --web /usr/share/novnc "$ip:6080" 127.0.0.1:5900 >/root/websockify.log 2>&1 &
+    pgrep -f websockify >/dev/null || nohup websockify --web /usr/share/novnc "$ip:$LIVE_PORT" 127.0.0.1:5900 >/root/websockify.log 2>&1 &
   fi
-  pgrep -f /usr/local/bin/mumbo-desktop >/dev/null || su browser -s /bin/sh -c 'SHELL=/bin/bash DISPLAY=:1 /usr/local/bin/mumbo-desktop >/tmp/desktop.log 2>&1 &'
+  pgrep -f /usr/local/bin/mumbo-desktop >/dev/null || su "$SESSION_USER" -s /bin/sh -c 'SHELL=/bin/bash DISPLAY=:1 /usr/local/bin/mumbo-desktop >/tmp/desktop.log 2>&1 &'
   pgrep -f /usr/local/bin/mumbo-browser >/dev/null || su browser -s /bin/sh -c 'DISPLAY=:1 /usr/local/bin/mumbo-browser >/tmp/chrome.log 2>&1 &'
 fi
 ` : ''}${site.desktop ? '' : `# Project box: a TLS-terminating GitHub proxy on loopback (its own CA, trusted system-wide) aims git and gh at the edge's
 # forwarder with this box's token (edge/box/github-local-proxy.mjs); dsh and its children reach GitHub only through it.
+# The gh wrapper (edge/box/gh) is root's and world-readable outside /root/.mumbo, so the agent's commands run it too.
+# On the B24 template the proxy becomes the user ghproxy (template.mjs) once its leaves are ready, so a CONNECT through it
+# is refused whatever the firewall refuses ghproxy: E2B's envd, dsh and the door.
+PROXY_USER=
+[ -z "$B24_TEMPLATE" ] || PROXY_USER=ghproxy
 mkdir -p /root/.mumbo/ca /root/.mumbo/bin
+install -d -m 0755 /usr/local/lib/mumbo /usr/local/lib/mumbo/bin
 # One start at a time: the router can re-run this script while a first run is still setting up the CA or the proxy.
 (
 flock 9
@@ -531,9 +843,10 @@ if [ -z "$a" ] || [ "$a" != "$b" ]; then
   update-ca-certificates
 fi
 echo ${b64(boxFiles.proxy)} | base64 -d > /root/.mumbo/bin/github-local-proxy.mjs
-echo ${b64(boxFiles.gh)} | base64 -d > /root/.mumbo/bin/gh
-chmod 0755 /root/.mumbo/bin/github-local-proxy.mjs /root/.mumbo/bin/gh
-pgrep -f github-local-proxy.mjs >/dev/null || PORT=8899 CA_DIR=/root/.mumbo/ca EDGE_GITHUB_URL=${llm}/github BOX_TOKEN=${token} nohup node /root/.mumbo/bin/github-local-proxy.mjs >/root/github-proxy.log 2>&1 9>&- &
+echo ${b64(boxFiles.gh)} | base64 -d > /usr/local/lib/mumbo/bin/gh
+chmod 0755 /root/.mumbo/bin/github-local-proxy.mjs /usr/local/lib/mumbo/bin/gh
+ln -sfn /usr/local/lib/mumbo/bin/gh /root/.mumbo/bin/gh
+pgrep -f github-local-proxy.mjs >/dev/null || PORT=8899 CA_DIR=/root/.mumbo/ca RUN_AS=$PROXY_USER EDGE_GITHUB_URL=${llm}/github BOX_TOKEN=${token} nohup node /root/.mumbo/bin/github-local-proxy.mjs >/root/github-proxy.log 2>&1 9>&- &
 up=
 for i in $(seq 20); do curl -s -o /dev/null -m 1 http://127.0.0.1:8899/ && up=1 || { [ $? -ne 7 ] && up=1; }; [ -n "$up" ] && break; sleep 0.5; done
 [ -n "$up" ] || { echo 'github proxy did not start' >&2; exit 1; }
@@ -554,21 +867,26 @@ if grep -qs MUMBO_EDGE_MCP_URL /src/deploy/mumbo-project.overlay.yml; then
 chmod 0600 /root/.mumbo/edge.token
 export MUMBO_EDGE_MCP_URL=${llm}/mcp/report MUMBO_EDGE_TOKEN_FILE=/root/.mumbo/edge.token MUMBO_PROJECT_ID=${site.project}
 fi
-` : ''}cd /src
-${site.desktop ? '' : `PATH=/root/.mumbo/bin:$PATH NODE_USE_ENV_PROXY=1 NODE_EXTRA_CA_CERTS=/root/.mumbo/ca/ca.crt HTTPS_PROXY=http://127.0.0.1:8899 NO_PROXY=127.0.0.1,localhost,${cfg.llmHost} MUMBO_PANEL_ADMINS=${sq(panelAdmins.map(e => e.toLowerCase()).join(','))} \\
-`}HOME=/root DSH_HOME=/root/.dsh DSH_AGENTS_HOME=/root/.mumbo/agents DSH_TELEMETRY_DISABLED=1 \\
+` : ''}# dsh's own temporary directory under containment (B24): root's alone, named by its real path (containmentLayout).
+[ -z "$B24_IMAGE" ] || export TMPDIR=/root/.dsh/tmp
+cd /src
+${site.desktop ? '' : `PATH=/usr/local/lib/mumbo/bin:$PATH NODE_USE_ENV_PROXY=1 NODE_EXTRA_CA_CERTS=/root/.mumbo/ca/ca.crt HTTPS_PROXY=http://127.0.0.1:8899 NO_PROXY=127.0.0.1,localhost,${cfg.llmHost} MUMBO_PANEL_ADMINS=${sq(panelAdmins.map(e => e.toLowerCase()).join(','))} \\
+`}HOME=/root DSH_HOME=/root/.dsh DSH_AGENTS_HOME="$AGENTS_HOME" DSH_TELEMETRY_DISABLED=1 \\
 DEEPSEEK_BASE_URL=${llm}/anthropic DEEPSEEK_SEARCH_BASE_URL=${llm} DEEPSEEK_API_KEY=${token} \\
 nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\
-  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml${openrouter ? ' --patch /root/.mumbo/models.overlay.yml' : ''} $LINKS_PATCH${site.desktop ? ' $CU_PATCH $WELCOME_PATCH $ASSISTANT_PATCH' : ''}${site.desktop && mumboMcp ? ' $MCP_PATCH' : ''}${memberKeyText ? ' $PROJECT_PATCH' : ''} \\
-  --no-open --host "$ip" --port 3080 --public-url ${site.publicUrl} --trusted-host ${cfg.publicHost}${site.host === cfg.publicHost ? '' : ` --trusted-host ${site.host}`} > /root/dsh.log 2>&1 &
+  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml${openrouter ? ' --patch /root/.mumbo/models.overlay.yml' : ''} $LINKS_PATCH${site.desktop ? ' $CU_PATCH $WELCOME_PATCH $ASSISTANT_PATCH' : ''}${site.desktop && mumboMcp ? ' $MCP_PATCH' : ''}${memberKeyText ? ' $PROJECT_PATCH' : ''} $CONTAINMENT_PATCH \\
+  --no-open --host "$ip" --port $DSH_PORT --public-url ${site.publicUrl} --trusted-host ${cfg.publicHost}${site.host === cfg.publicHost ? '' : ` --trusted-host ${site.host}`} > /root/dsh.log 2>&1 &
 `
 }
 /** Write a `.snap` copy of every *.sqlite and *.db under .dsh and projects (the live files are WAL-mode and cannot be tarred consistently). Files with the SQLite header get VACUUM INTO
- *  and a failure aborts the backup; any other file is copied verbatim. */
+ *  and a failure aborts the backup; any other file is copied verbatim. A projects directory another user owns (agent,
+ *  under containment, B24) is copied by a child process running as its owner and group, into `projects` of the output,
+ *  which that owner gets (the output directory lets it through): the owner can swap any directory in the tree for a
+ *  link between the listing and the copy, which then reads only what the owner may read. */
 const SNAPSHOT_JS = `const { DatabaseSync } = require("node:sqlite"), fs = require("fs"), path = require("path"), Q = String.fromCharCode(39)
-const [home, out] = process.argv.slice(1)
-for (const d of [".dsh", "projects"]) {
-  if (!fs.existsSync(path.join(home, d))) continue
+const [home, out, only] = process.argv.slice(1)
+const snap = (d) => {
+  if (!fs.existsSync(path.join(home, d))) return
   for (const e of fs.readdirSync(path.join(home, d), { recursive: true, withFileTypes: true })) {
     if (!e.isFile() || !/\\.(sqlite|db)$/.test(e.name)) continue
     const src = path.join(e.parentPath, e.name), dst = path.join(out, path.relative(home, src) + ".snap")
@@ -581,7 +899,17 @@ for (const d of [".dsh", "projects"]) {
     db.exec("VACUUM INTO " + Q + dst.replaceAll(Q, Q + Q) + Q)
     db.close()
   }
-}`
+}
+const owner = only ? undefined : fs.lstatSync(path.join(home, "projects"), { throwIfNoEntry: false })
+if (only) snap(only)
+else if (owner?.isDirectory() && owner.uid !== 0) {
+  snap(".dsh")
+  fs.mkdirSync(path.join(out, "projects"), { recursive: true })
+  fs.chmodSync(out, 0o711)
+  fs.chownSync(path.join(out, "projects"), owner.uid, owner.gid)
+  const r = require("child_process").spawnSync(process.execPath, [...process.execArgv, home, out, "projects"], { uid: owner.uid, gid: owner.gid, stdio: "inherit" })
+  if (r.status !== 0) throw new Error("projects snapshot as uid " + owner.uid + " failed: " + (r.error?.message ?? "status " + r.status))
+} else for (const d of [".dsh", "projects"]) snap(d)`
 /** What a backup leaves out of /home/browser: the old Chromium profile Google Chrome replaced (startScript), caches,
  *  re-downloaded browser components and models, and profile locks, in Chrome's and Chromium's profiles; tar's exclude
  *  patterns let `*` match `/`. */
@@ -591,12 +919,13 @@ const BROWSER_EXCLUDES = ['.cache', '.chromium-profile-old', ...['Singleton*', '
 /** Downloads items (a file, or a folder with everything in it) over this many bytes stay out of backups, and the rest is
  *  kept newest first up to the total: the archive is staged on the box's own disk. */
 const DOWNLOADS_ITEM_MAX = 1024 ** 3, DOWNLOADS_TOTAL_MAX = 2 * 1024 ** 3
-/** Lists, NUL-terminated and as exact bytes, what a backup takes from /home/browser and /home/shared: argv[3] gets the two
- *  homes and /home/shared/Downloads (archived without recursion), argv[4] every other top-level entry of the homes and the
- *  Downloads items kept (archived with recursion, by tar's own traversal, which follows no symlink). Only names whose
- *  enclosing directories are each an entry of a root-owned directory (/home, /home/shared) are listed: the homes'
- *  top-level entries and the shared Downloads items. Never list a name below one of these: browser could swap a
- *  directory above it for a symlink. An old ~/Downloads is one item, under the same limits. Downloads is never named by
+/** Lists, NUL-terminated and as exact bytes, what a backup takes from /home/browser, /home/shared and /home/xsession (the
+ *  desktop session's settings, B24): argv[3] gets the homes and /home/shared/Downloads (archived without recursion),
+ *  argv[4] every other top-level entry of the homes and the Downloads items kept (archived with recursion, by tar's own
+ *  traversal, which follows no symlink). Only names whose enclosing directories are each an entry of a root-owned
+ *  directory (/home, /home/shared) are listed: the homes' top-level entries and the shared Downloads items. Never list a
+ *  name below one of these: a home's user could swap a directory above it for a symlink. A ~/Downloads in browser's or
+ *  xsession's home is one item, under the same limits. Downloads is never named by
  *  a pattern, so no file name can exclude anything else. It reads with lstat; an item still being downloaded
  *  (*.crdownload) is skipped, an entry that vanishes while it is sized counts as empty, and an item it cannot read is
  *  left out. Prints one line when Downloads items are left out. */
@@ -609,13 +938,13 @@ const join = (r, n) => Buffer.concat([r, Buffer.from("/"), n])
 const gone = (e) => e.code === "ENOENT" || e.code === "ENOTDIR"
 const bytes = (r) => { let s, c; try { s = fs.lstatSync(abs(r)) } catch (e) { return gone(e) ? 0 : Infinity } if (s.isFile()) return s.size; if (!s.isDirectory()) return 0; try { c = fs.readdirSync(abs(r), { encoding: "buffer" }) } catch (e) { return gone(e) ? 0 : Infinity } return c.reduce((n, x) => n + bytes(join(r, x)), 0) }
 const dirs = [], units = [], items = []
-for (const home of ["home/browser", "home/shared"].map((h) => Buffer.from(h))) {
+for (const home of ["home/browser", "home/shared", "home/xsession"].map((h) => Buffer.from(h))) {
   if (!st(home)?.isDirectory()) continue
   dirs.push(home)
   for (const n of names(home) ?? []) {
     const r = join(home, n)
     const downloads = n.toString() === "Downloads" && st(r)?.isDirectory()
-    if (downloads && home.toString() === "home/browser") { items.push({ i: r, size: bytes(r), mtime: st(r)?.mtimeMs ?? 0 }); continue }
+    if (downloads && home.toString() !== "home/shared") { items.push({ i: r, size: bytes(r), mtime: st(r)?.mtimeMs ?? 0 }); continue }
     if (!downloads) { units.push(r); continue }
     dirs.push(r)
     for (const c of names(r) ?? []) if (!c.toString("latin1").endsWith(".crdownload")) { const i = join(r, c); items.push({ i, size: bytes(i), mtime: st(i)?.mtimeMs ?? 0 }) }
@@ -628,14 +957,17 @@ for (const { i, size } of items.sort((a, b) => b.mtime - a.mtime)) {
 const out = (f, list) => fs.writeFileSync(f, Buffer.concat(list.flatMap((r) => [r, NUL])))
 out(dirsOut, dirs); out(unitsOut, units)
 if (left) console.log("downloads left out of the backup: " + left + " items, " + Math.ceil(leftBytes / 1048576) + " MiB")`
-/** Upload chats, projects and the browser and shared homes (signed-in accounts, desktop settings, Downloads by SELECT_JS; BROWSER_EXCLUDES left out) to a presigned S3 PUT. Runs inside the box; S3 refuses a streamed (chunked) body,
+/** Upload chats, projects and the browser, shared and desktop session's homes (signed-in accounts, desktop settings, Downloads by SELECT_JS; BROWSER_EXCLUDES and the session's cache left out) to a presigned S3 PUT. Runs inside the box; S3 refuses a streamed (chunked) body,
  *  so the archive goes to a temporary file first. SQLite databases under /root travel as consistent `.snap` copies under root/.mumbo-sqlite. Extraction on restore also stays inside the box.
  *  The homes are only read, and tar archives a symlink there as a symlink. Chrome's SQLite and LevelDB stores travel as copies of the live files: Chrome holds most of its SQLite databases (History, Web Data) under an exclusive lock while it runs, so no other process can snapshot them.
  *  tar's status 1 (a file changed while it was read, as a running Chrome's do) still uploads the archive. Status 2 (a listed name vanished before tar read it) lists and archives once more; a second failure stops the backup. Prints SELECT_JS's line, if any.
+ *  Under agent containment (B24) the uploads live in /var/lib/mumbo/attachments, which the backup takes without its
+ *  cache; dsh's temporary directory is left out. It runs with umask 077: /root lets other users through (B24), so the
+ *  snapshots it stages there are root's alone, but for the workspace's, which its owner takes (SNAPSHOT_JS).
  *  `root` (default `/`) is the filesystem root, for tests. */
 export const backupCommand = (url, root = '/') => {
   const r = root.replace(/\/+$/, ''), snap = `${r}/root/.mumbo-sqlite`
-  return `set -e; f=$(mktemp /tmp/mumbo-backup.XXXXXX); dirs=$(mktemp /tmp/mumbo-backup.XXXXXX); units=$(mktemp /tmp/mumbo-backup.XXXXXX); trap 'rm -f "$f" "$dirs" "$units"; rm -rf '${snap}'' EXIT; rm -rf '${snap}'; node -e '${SNAPSHOT_JS}' '${r}/root' '${snap}'; for try in 1 2; do msg=$(node -e '${SELECT_JS}' '${r}' "$dirs" "$units" ${DOWNLOADS_ITEM_MAX} ${DOWNLOADS_TOTAL_MAX}); rc=0; tar -C '${root}' --exclude=node_modules --exclude='*.sqlite-wal' --exclude='*.sqlite-shm' ${['root/.dsh', 'root/projects'].flatMap((d) => ['*.sqlite', '*.db', '*-wal', '*-shm', '*-journal'].map((p) => `--exclude='${d}/${p}'`)).join(' ')} ${BROWSER_EXCLUDES.map((p) => `--exclude='home/browser/${p}'`).join(' ')} -czf "$f" $(cd '${root}' && ls -d root/.dsh root/projects root/.mumbo-sqlite 2>/dev/null) --null --verbatim-files-from --no-recursion -T "$dirs" --recursion -T "$units" || rc=$?; [ $rc -le 1 ] && break; [ $try = 2 ] && exit $rc; done; [ -z "$msg" ] || echo "$msg"; curl -fsS -m 600 -X PUT -H 'content-type: application/gzip' --upload-file "$f" '${url}'; rm -rf '${snap}'`
+  return `set -e; umask 077; f=$(mktemp /tmp/mumbo-backup.XXXXXX); dirs=$(mktemp /tmp/mumbo-backup.XXXXXX); units=$(mktemp /tmp/mumbo-backup.XXXXXX); trap 'rm -f "$f" "$dirs" "$units"; rm -rf '${snap}'' EXIT; rm -rf '${snap}'; node -e '${SNAPSHOT_JS}' '${r}/root' '${snap}'; for try in 1 2; do msg=$(node -e '${SELECT_JS}' '${r}' "$dirs" "$units" ${DOWNLOADS_ITEM_MAX} ${DOWNLOADS_TOTAL_MAX}); rc=0; tar -C '${root}' --exclude=node_modules --exclude='*.sqlite-wal' --exclude='*.sqlite-shm' ${['root/.dsh', 'root/projects'].flatMap((d) => ['*.sqlite', '*.db', '*-wal', '*-shm', '*-journal'].map((p) => `--exclude='${d}/${p}'`)).join(' ')} ${BROWSER_EXCLUDES.map((p) => `--exclude='home/browser/${p}'`).join(' ')} --exclude='home/xsession/.cache' --exclude='root/.dsh/tmp' --exclude='var/lib/mumbo/attachments/cache' -czf "$f" $(cd '${root}' && ls -d root/.dsh root/projects root/.mumbo-sqlite var/lib/mumbo/attachments 2>/dev/null) --null --verbatim-files-from --no-recursion -T "$dirs" --recursion -T "$units" || rc=$?; [ $rc -le 1 ] && break; [ $try = 2 ] && exit $rc; done; [ -z "$msg" ] || echo "$msg"; curl -fsS -m 600 -X PUT -H 'content-type: application/gzip' --upload-file "$f" '${url}'; rm -rf '${snap}'`
 }
 /** Download and unpack a backup, then move each `.snap` back over its database path, also when tar fails part way, and
  *  exit with tar's status. Runs before dsh starts, in a box
@@ -643,10 +975,13 @@ export const backupCommand = (url, root = '/') => {
  *  there; one with home/browser/Downloads has it moved into /home/shared/Downloads by the browser loop (startScript). Root writes /home/browser here, and GNU tar's defaults keep a symlink, in the
  *  box or in the archive, from aiming a write outside it: an archive symlink to an absolute or `..` target is made only
  *  after every other member, and an existing symlink is replaced, not written through. Never add -h (--dereference),
- *  --keep-directory-symlink or -P (backup.test.mjs). */
+ *  --keep-directory-symlink or -P (backup.test.mjs). The archive's /root/projects is agent's under containment (B24), so
+ *  its links lead anywhere: a snapshot whose database's directory is not at its own real path is left out, with a line
+ *  on stderr, and the snapshot replaces the database's name itself, a link included (mv -T). Nothing else runs in the
+ *  box yet, so no link changes between the check and the move. */
 export const restoreCommand = (url, root = '/') => {
-  const r = root.replace(/\/+$/, ''), snap = `${r}/root/.mumbo-sqlite`
-  return `set -e; rc=0; curl -fsS -m 600 '${url}' | tar -C '${root}' -xzf - || rc=$?; if [ -d '${snap}' ]; then (cd '${snap}' && find . -name '*.snap' -type f) | while IFS= read -r p; do d='${r}/root/'"\${p#./}"; d="\${d%.snap}"; rm -f "$d-wal" "$d-shm" "$d-journal"; mv '${snap}'/"$p" "$d"; done; rm -rf '${snap}'; fi; exit $rc`
+  const snap = `${root.replace(/\/+$/, '')}/root/.mumbo-sqlite`
+  return `set -e; rc=0; curl -fsS -m 600 '${url}' | tar -C '${root}' -xzf - || rc=$?; R=$(cd '${root}' && pwd -P); R=\${R%/}; if [ -d '${snap}' ]; then (cd '${snap}' && find . -name '*.snap' -type f) | while IFS= read -r p; do d="$R/root/\${p#./}"; d="\${d%.snap}"; if [ "$(cd "\${d%/*}" 2>/dev/null && pwd -P)" != "\${d%/*}" ]; then echo "restore: \${d#"$R"} left out: its directory is not at its real path" >&2; continue; fi; rm -f "$d-wal" "$d-shm" "$d-journal"; mv -fT '${snap}'/"$p" "$d" || echo "restore: \${d#"$R"} left out" >&2; done; rm -rf '${snap}'; fi; exit $rc`
 }
 
 /** Prints the earliest next run (epoch ms) of the box's active dsh scheduled tasks, or nothing. Reads both storage
@@ -666,8 +1001,9 @@ export async function inParallel(items, limit, fn) {
 }
 
 // ---- the router's view of E2B. `e2b` is the SDK module and `store` the shared state (store.mjs); both are injected.
-// A box record: { email, launch, traffic, active, extended, backedUp, paused }, plus { creating, first } until creation ends,
-// and { restored: versionId } until the first backup of a box created from a restore record.
+// A box record: { email, launch, traffic, active, extended, backedUp, paused, ports }, plus { creating, first } until
+// creation ends, and { restored: versionId } until the first backup of a box created from a restore record. `ports` is
+// the box's pair (portsFrom its template's marker); a record without it is routed to OLD_PORTS (boxHeaders).
 export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFiles, log = console.log }) {
   const LOCK_MS = 120_000
   const CREATE_STALE_MS = 15 * 60_000  // longer than a restore (11 min cap) plus dsh start
@@ -695,7 +1031,8 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
     throw Object.assign(new Error('dsh did not start'), { status: 503 })
   }
   const memberAuth = async (box) => (await run(box, 'test -f /root/.mumbo/member-auth && echo yes || true')) === 'yes'
-  const dshUp = async (box) => (await run(box, "curl -s -o /dev/null -m 5 -w '%{http_code}' http://$(hostname -I | cut -d' ' -f1):3080/ || true")) !== '000'
+  const dshUp = async (box, ports) => (await run(box, `curl -s -o /dev/null -m 5 -w '%{http_code}' http://$(hostname -I | cut -d' ' -f1):${ports.dsh}/ || true`)) !== '000'
+  const portsOf = async (box) => portsFrom(await run(box, `cat ${PORTS_MARKER} 2>/dev/null || true`))
 
   // A restore record whose version S3 does not serve (gone, a delete marker, a malformed id, or any other HEAD error) fails
   // the create as a failed restore would: no fallback to latest.tar.gz, and the record stays for the operator. `status` is
@@ -733,11 +1070,12 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
         // restores again.
         if (!ok) throw Object.assign(new Error('restore failed'), { status: 503, restoreFailed: true })
       }
-      await run(box, 'chmod +x /root/.mumbo/start.sh && /root/.mumbo/start.sh')
+      // The script holds the box token: root's alone.
+      await run(box, 'chmod 0700 /root/.mumbo/start.sh && /root/.mumbo/start.sh')
       const now = Date.now()
       // A box restored from a record keeps it until its first backup has put the restored data in latest.tar.gz (backup()),
       // so a box lost before then is recreated from the same version. backedUp 0: the next sweep takes that backup.
-      await store.putBox(box.sandboxId, { email, host: boxSite(cfg, email).host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), active: now, extended: now, backedUp: pin ? 0 : now, paused: false, ...(pin && { restored: pin.versionId }) })
+      await store.putBox(box.sandboxId, { email, host: boxSite(cfg, email).host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), ports: await portsOf(box), active: now, extended: now, backedUp: pin ? 0 : now, paused: false, ...(pin && { restored: pin.versionId }) })
       say({ msg: 'created', user: email, box: box.sandboxId })
       return box.sandboxId
     } catch (error) {
@@ -765,12 +1103,14 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
       if (found.state === 'paused' || !known || known.paused || !known.launch) {
         try {
           const box = await e2b.Sandbox.connect(id, { timeoutMs: timeout() })
-          if (!(await dshUp(box))) {
+          // A record without ports (an adopted box, or one an edge before B24 created) learns them from the box.
+          const ports = known?.ports ?? await portsOf(box)
+          if (!(await dshUp(box, ports))) {
             say({ level: 'warn', msg: 'dsh down after resume; restarting', user: email, box: id })
             await run(box, '/root/.mumbo/start.sh')
           }
           const now = Date.now()
-          await store.putBox(id, { email, host: known?.host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), active: now, extended: now, backedUp: known?.backedUp ?? 0, paused: false, ...(known?.restored && { restored: known.restored }) })
+          await store.putBox(id, { email, host: known?.host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), ports, active: now, extended: now, backedUp: known?.backedUp ?? 0, paused: false, ...(known?.restored && { restored: known.restored }) })
         } catch (error) {
           // A snapshot that cannot be resumed (its node died before the upload finished, or dsh never comes back)
           // must not strand the user: drop it and rebuild from the latest S3 backup.
@@ -795,7 +1135,7 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
     }
     // A project box whose image runs @mumbo/edge-member: members get a signed header, never the owner launch token.
     const member = b.memberAuth ? (email) => memberHeader(memberKey(edgeKey, id), email) : undefined
-    return { id, token: b.launch, traffic: b.traffic, host, ...(member ? { member } : {}) }
+    return { id, token: b.launch, traffic: b.traffic, host, ports: b.ports, ...(member ? { member } : {}) }
   }
 
   /** Record activity (a browser request, a WebSocket frame or a model call) and push E2B's own pause timer out. */
@@ -934,9 +1274,9 @@ const page = (res, status, text, refresh = true) => res.writeHead(status, { 'con
   .end(`<!doctype html><meta charset="utf-8">${refresh ? '<meta http-equiv="refresh" content="5">' : ''}<title>mumbo</title><body style="font-family:system-ui;display:grid;place-items:center;min-height:90vh;margin:0"><p>${text}</p>`)
 const DROP = new Set(['connection', 'keep-alive', 'proxy-connection', 'transfer-encoding', 'upgrade', 'te', 'trailer', 'host', 'authorization', 'x-mumbo-member'])
 
-/** Which box port a main-host request goes to: the desktop live view (:6080, KasmVNC's web client, or noVNC on a
- *  template before it) under /desktop/, otherwise dsh (:3080). The old project path /p/<id>/… redirects to the
- *  project's own origin (boxSite). */
+/** Which box service a main-host request goes to: the desktop live view (`live`, KasmVNC's web client, or noVNC on a
+ *  template before it) under /desktop/, otherwise dsh (`dsh`); boxHeaders takes the box's port for it. The old project
+ *  path /p/<id>/… redirects to the project's own origin (boxSite). */
 export function boxRoute(url, projectDomain) {
   // Matched on the path: former-host redirects add a query (moved=1) even to links that had none.
   const q = url.indexOf('?')
@@ -946,19 +1286,21 @@ export function boxRoute(url, projectDomain) {
   // Both clients serve vnc.html and read these from the query. The WebSocket path keeps the prefix the edge strips;
   // show_control_bar keeps KasmVNC's own controls, clipboard and remote resize on inside the Desktop tab's frame.
   if (path === '/desktop' || path === '/desktop/') return { redirect: '/desktop/vnc.html?autoconnect=1&resize=remote&path=desktop/websockify&show_control_bar=1' }
-  if (url.startsWith('/desktop/')) return { port: '6080', path: url.slice('/desktop'.length), base: '' }
-  return { port: '3080', path: url, base: '' }
+  if (url.startsWith('/desktop/')) return { service: 'live', path: url.slice('/desktop'.length), base: '' }
+  return { service: 'dsh', path: url, base: '' }
 }
 /** True when a cookie (`name=value…`, a Cookie pair or a Set-Cookie line) has a sign-in name: the name, the text before
  *  the first `=`, starts with cfg.signinCookie, which covers oauth2-proxy's <name>_0, _1… chunks and its
  *  <name>_<hash>_csrf cookies, or with oauth2-proxy's default name _oauth2_proxy, which browsers signed in before
  *  SIGNIN_COOKIE still hold. */
 const isSignin = (cfg, cookie) => [cfg.signinCookie ?? SIGNIN_COOKIE, '_oauth2_proxy'].some(p => cookie.split('=')[0].trim().startsWith(p))
-/** Headers for the box: client headers minus hop-by-hop, identity and E2B headers, plus E2B routing for this box only.
+/** Headers for the box: client headers minus hop-by-hop, identity and E2B headers, plus E2B routing for this box only:
+ *  the port of `service`: `dsh` or `live` in target.ports, the box record's pair, or OLD_PORTS for a record without it,
+ *  and `door` MUMBO_MCP_PORT, the same on every box.
  *  dsh accepts an Origin only when it equals the box's masked host (target.host). A same-origin Origin
  *  (https://<the request's Host>) becomes https://<target.host>, because a box created before PUBLIC_HOST or
  *  PROJECT_DOMAIN changed keeps the former name as its masked host. Any other Origin, and Sec-Fetch-Site, pass unchanged. */
-export function boxHeaders(cfg, incoming, target, port = '3080') {
+export function boxHeaders(cfg, incoming, target, service = 'dsh') {
   const out = {}
   for (const [k, v] of Object.entries(incoming)) if (!DROP.has(k) && !k.startsWith('x-forwarded-') && !k.startsWith('e2b-')) out[k] = v
   if (target.host && out.origin === `https://${hostOf({ headers: incoming })}`) out.origin = `https://${target.host}`
@@ -970,7 +1312,7 @@ export function boxHeaders(cfg, incoming, target, port = '3080') {
   }
   out.host = `sandbox.${cfg.publicHost}`
   out['e2b-sandbox-id'] = target.id
-  out['e2b-sandbox-port'] = port
+  out['e2b-sandbox-port'] = { ...(target.ports ?? OLD_PORTS), door: MUMBO_MCP_PORT }[service]
   if (target.traffic) out['e2b-traffic-access-token'] = target.traffic
   return out
 }
@@ -1004,13 +1346,13 @@ export function homePage(cfg, res, email, projects) {
 }
 /** The most of a box's answer boxFetcher reads: a box steered by untrusted input could otherwise fill the edge's memory. */
 export const BOX_ANSWER_MAX = 8 * 1024 * 1024
-/** One request from the edge itself to a box's dsh (`port` 3080, or another box port) through the client-proxy, as a
- *  browser on the box's own origin (`siteHost`, boxSite) would send it. `edgeHeaders` are set after boxHeaders, which drops
- *  identity headers such as authorization from `headers`; the request fails once the box sends nothing for `timeoutMs`, and
- *  with `box answer too large` once its body passes BOX_ANSWER_MAX bytes. */
-export const boxFetcher = (cfg) => (target, siteHost, path, { method = 'GET', headers = {}, body, member, port = '3080', edgeHeaders = {}, timeoutMs = 60_000 } = {}) => new Promise((resolve, reject) => {
+/** One request from the edge itself to a box's `service` (boxHeaders: `dsh` by default, or `door`) through the
+ *  client-proxy, as a browser on the box's own origin (`siteHost`, boxSite) would send it. `edgeHeaders` are set after
+ *  boxHeaders, which drops identity headers such as authorization from `headers`; the request fails once the box sends
+ *  nothing for `timeoutMs`, and with `box answer too large` once its body passes BOX_ANSWER_MAX bytes. */
+export const boxFetcher = (cfg) => (target, siteHost, path, { method = 'GET', headers = {}, body, member, service = 'dsh', edgeHeaders = {}, timeoutMs = 60_000 } = {}) => new Promise((resolve, reject) => {
   const req = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method, path,
-    headers: { ...boxHeaders(cfg, { ...headers, host: siteHost, origin: `https://${siteHost}`, ...(body ? { 'content-length': Buffer.byteLength(body) } : {}) }, target, port), ...(member ? { 'x-mumbo-member': member } : {}), ...edgeHeaders } }, (r) => {
+    headers: { ...boxHeaders(cfg, { ...headers, host: siteHost, origin: `https://${siteHost}`, ...(body ? { 'content-length': Buffer.byteLength(body) } : {}) }, target, service), ...(member ? { 'x-mumbo-member': member } : {}), ...edgeHeaders } }, (r) => {
     const chunks = []
     let size = 0
     r.on('data', (c) => {
@@ -1115,7 +1457,7 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, key
   const routeOf = (host, url) => {
     const label = host.endsWith(`.${cfg.projectDomain}`) ? host.slice(0, -cfg.projectDomain.length - 1) : ''
     const project = /^p-([0-9a-f]{16})$/.exec(label)?.[1]
-    if (project) return { project, port: '3080', path: url, base: '' }
+    if (project) return { project, service: 'dsh', path: url, base: '' }
     if (host === cfg.publicHost) return boxRoute(url, cfg.projectDomain)
   }
   // An unexpected throw answers 500, or closes the upgrade, instead of leaving it open. The log has the path without the
@@ -1170,7 +1512,7 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, key
     if (to.redirect) return res.writeHead(302, { location: to.redirect, 'cache-control': 'no-store' }).end()
     // dsh refuses a cross-origin /api request itself; the desktop's server (KasmVNC, or websockify) checks no Origin, so
     // anything but a read must come from its own page.
-    if (to.port === '6080' && req.method !== 'GET' && req.method !== 'HEAD' && req.headers.origin !== `https://${host}`) return page(res, 403, 'Forbidden.', false)
+    if (to.service === 'live' && req.method !== 'GET' && req.method !== 'HEAD' && req.headers.origin !== `https://${host}`) return page(res, 403, 'Forbidden.', false)
     if (to.project && !(await projects?.isMember(email, to.project))) return page(res, 403, 'No such project, or you are not one of its members.', false)
     let target
     const key = to.project ? `project:${to.project}` : email
@@ -1194,19 +1536,19 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, key
     } catch (e) {
       return e.capacity ? page(res, 503, 'mumbo is at capacity right now. This page retries every few seconds.') : starting()
     }
-    const dsh = to.port === '3080'
+    const dsh = to.service === 'dsh'
     // On a member-capable project box a member is themselves (signed header), never the box owner.
     const member = to.project && target.member ? target.member(email) : undefined
     const launch = `${to.base}/?token=${target.token}`
     if (dsh && !member && needsLaunch(req)) return res.writeHead(302, { location: launch, 'cache-control': 'no-store' }).end()
     quiet(box.touch(target.id))
-    const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: to.path, headers: { ...boxHeaders(cfg, req.headers, target, to.port), ...(member ? { 'x-mumbo-member': member } : {}) } }, (r) => {
+    const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: to.path, headers: { ...boxHeaders(cfg, req.headers, target, to.service), ...(member ? { 'x-mumbo-member': member } : {}) } }, (r) => {
       // A stale cookie (another account on this browser, or a recreated box) gets a fresh exchange instead of a dead end.
       if (dsh && !member && r.statusCode === 401 && isNavigation(req)) { r.resume(); return res.writeHead(302, { location: launch, 'cache-control': 'no-store' }).end() }
       const headers = noFraming(secureCookies(cfg, { ...r.headers }))
       // KasmVNC's client connects to the host, port and path its URL names and, in Chrome, sends the local clipboard
       // there: a second policy lets the live view's pages connect to this host only. data: is its video decoder probe.
-      if (to.port === '6080') headers['content-security-policy'] += `, connect-src 'self' wss://${host} data:`
+      if (to.service === 'live') headers['content-security-policy'] += `, connect-src 'self' wss://${host} data:`
       res.writeHead(r.statusCode ?? 502, headers)
       r.pipe(res)
     })
@@ -1228,7 +1570,7 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, key
       const target = await box.ensure(to.project ? `project:${to.project}` : email)
       quiet(box.touch(target.id))
       const member = to.project && target.member ? target.member(email) : undefined
-      const headers = { ...boxHeaders(cfg, req.headers, target, to.port), ...(member ? { 'x-mumbo-member': member } : {}), connection: 'Upgrade', upgrade: req.headers.upgrade ?? 'websocket' }
+      const headers = { ...boxHeaders(cfg, req.headers, target, to.service), ...(member ? { 'x-mumbo-member': member } : {}), connection: 'Upgrade', upgrade: req.headers.upgrade ?? 'websocket' }
       const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: to.path, headers })
       up.on('upgrade', (r, upSocket, upHead) => {
         const lines = Object.entries(secureCookies(cfg, { ...r.headers })).flatMap(([k, v]) => [v].flat().map(x => `${k}: ${x}`))
