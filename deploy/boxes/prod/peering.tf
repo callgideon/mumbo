@@ -31,11 +31,11 @@ resource "aws_route" "aps1_to_use1" {
 # The us-east-1 edge (in that cell's private subnets) reaches Mumbai's API (3000) and client proxy (3002).
 resource "aws_vpc_security_group_ingress_rule" "aps1_nlb_from_use1" {
   provider          = aws.ap_south_1
-  for_each          = toset(["3000", "3002"])
+  for_each          = { for p in setproduct(["3000", "3002"], module.cell_us_east_1.edge_subnet_cidrs) : "${p[0]}-${p[1]}" => p }
   security_group_id = module.cell_ap_south_1.nlb_security_group_id
-  cidr_ipv4         = module.cell_us_east_1.vpc_cidr
+  cidr_ipv4         = each.value[1]
   ip_protocol       = "tcp"
-  from_port         = tonumber(each.key)
-  to_port           = tonumber(each.key)
-  description       = "us-east-1 edge (R4)"
+  from_port         = tonumber(each.value[0])
+  to_port           = tonumber(each.value[0])
+  description       = "us-east-1 edge subnets (R4, R6)"
 }

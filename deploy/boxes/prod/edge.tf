@@ -79,7 +79,7 @@ module "edge_us_east_1" {
 
   vpc_id                 = module.cell_us_east_1.vpc_id
   public_subnets         = module.cell_us_east_1.public_subnets
-  private_subnets        = module.cell_us_east_1.private_subnets
+  private_subnets        = module.cell_us_east_1.edge_subnets                                                  # the edge's own /24s (R6)
   box_egress_ips         = concat(module.cell_us_east_1.nat_egress_ips, module.cell_ap_south_1.nat_egress_ips) # every cell's NAT (design 17c)
   ecs_cluster_id         = module.cell_us_east_1.ecs_cluster.id
   exec_role              = module.cell_us_east_1.exec_role
