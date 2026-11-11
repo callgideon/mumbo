@@ -103,7 +103,7 @@ export class Tickets extends EnginePart {
   }
   /**
    * The Trigger to attach to a ticket, once the ticket may take it.
-   * @throws UserError when the trigger or ticket is unknown, the Policy does not deliver the trigger, a ticket's worker still decides the trigger, a person stopped the ticket, or an ended ticket's Mandate no longer revalidates.
+   * @throws UserError when the trigger or ticket is unknown, the Policy does not deliver the trigger, a ticket's worker still decides the trigger, the ticket is a review (in Mumbo), a person stopped the ticket, or an ended ticket's Mandate no longer revalidates.
    */
   attachable(ticketId: string, triggerId: string): Trigger {
     const trigger = this.repo.triggers.get(triggerId)
@@ -112,6 +112,8 @@ export class Tickets extends EnginePart {
     // A follow-up that reached a ticket goes elsewhere only once the workers that decide it hand it back.
     this.leftToWorkers(trigger)
     const current = this.require(ticketId)
+    // In Mumbo, a review Ticket answers no one and takes no message (`UPSTREAM.md` S15).
+    if (current.review) throw new UserError('reviewTicket')
     if (current.ended?.by === 'human') throw new UserError('ticketStopped')
     if (!liveTicket(current) && !this.policy().revalidate(current.mandate)) throw new UserError('mandateRevoked')
     return trigger
@@ -180,6 +182,55 @@ export class Tickets extends EnginePart {
     this.options.executor.stop(ticket, latest, 'retried')
     this.options.executor.start(ticket, assignment)
     return ticket
+  }
+  /**
+   * In Mumbo (`UPSTREAM.md` S15): create, once per commit, the review Ticket of an open ticket's pull request `pr` at `sha`,
+   * under the ticket's Mandate and Decision, and queue its launch. It has no Channel and no Subscription, and its origin is the
+   * ticket's request alone, which its launch message carries. An open review of the ticket at another commit ends `dropped`,
+   * `superseded`. A review of the commit that ended without a verdict, dropped as superseded or stale, gives way to a new one;
+   * one a person stopped does not, so the ticket is reviewed again only at a new commit.
+   * @returns the review Ticket: the commit's open one, or the one that ended with a verdict or a person's stop, or a new one.
+   * @throws UserError when the ticket is unknown or has ended.
+   */
+  createReview(ticketId: string, { pr, sha }: { pr: number; sha: string }): Ticket {
+    const parent = this.require(ticketId)
+    if (!liveTicket(parent)) throw new UserError('ticketEnded')
+    for (const open of this.repo.tickets.open()) {
+      if (open.review?.of === ticketId && open.review.sha !== sha) this.end(open.id, 'executor', 'dropped', this.now(), 'superseded')
+    }
+    let id = key('review', ticketId, sha)
+    for (let n = 1, existing = this.repo.tickets.get(id); existing; existing = this.repo.tickets.get(id), n++) {
+      if (existing.ended?.by !== 'executor' || existing.ended.outcome !== 'dropped') return existing
+      id = key('review', ticketId, sha, String(n))
+    }
+    const at = this.now(), title = `Review of PR #${pr}: ${parent.title}`
+    const draft: Ticket = { id, title, decisionId: parent.decisionId, mandate: parent.mandate, channels: [], assignments: [], inputs: [],
+      undelivered: [], createdAt: at, updatedAt: at, origin: { triggerId: parent.origin.triggerId, triggerIds: [] },
+      review: { of: ticketId, pr, sha, round: (parent.reviews?.length ?? 0) + 1 } }
+    const ticket = this.options.prepareTicket?.(draft, { kind: 'accept', title, scope: title, reason: 'review', name: 'review',
+      note: `Review PR #${pr} at ${sha}.` }) ?? draft
+    const assignment = this.newAssignment(ticket)
+    this.repo.tickets.save(ticket)
+    this.options.executor.start(ticket, assignment)
+    this.emit('ticket.created', { ticketId: id, decisionId: ticket.decisionId, strength: ticket.mandate.strength })
+    return ticket
+  }
+  /**
+   * In Mumbo (`UPSTREAM.md` S15): record review `reviewId`'s verdict on the ticket it reviewed. The verdict joins the ticket's
+   * `reviews`; a failed one asks the worker of the open ticket, as a text Input, to fix the findings, and the second failed one
+   * sets `escalated`.
+   */
+  reviewed(reviewId: string, { of, sha }: { of: string; sha: string }, verdict: 'pass' | 'fail', findings: string, url: string): void {
+    const parent = this.require(of)
+    const at = this.now()
+    parent.reviews = [...parent.reviews ?? [], { sha, verdict, ticket: reviewId, url, at, findings: findings.slice(0, 2000) }]
+    if (parent.reviews.filter(item => item.verdict === 'fail').length >= 2) parent.escalated = true
+    parent.updatedAt = at
+    this.repo.tickets.save(parent)
+    if (verdict === 'fail' && liveTicket(parent)) {
+      this.addInput(parent, { id: key('input', of, 'review', reviewId), kind: 'text', at,
+        text: `The independent review of ${sha} failed:\n${findings}\nFix it, push, and submit again.` })
+    }
   }
   /**
    * Drops a ticket's Subscription to a Thread its worker found unrelated, and hands back, with `reason`, the person's messages there that the ticket decides.
@@ -251,10 +302,11 @@ export class Tickets extends EnginePart {
    * and no Decision, since nothing new is authorized. One whose Mandate the current Policy no longer holds stays ended and
    * takes nothing (see `refuse`). While processing is paused the message waits, and the first pass after the pause resumes
    * the ticket under the Policy then. Reads the ticket afresh, so it is idempotent and leaves an already-resumed ticket alone.
+   * In Mumbo, an ended review Ticket never resumes (`UPSTREAM.md` S15).
    */
   wake(ticketId: string): void {
     const ticket = this.repo.tickets.get(ticketId)
-    if (!ticket || liveTicket(ticket) || ticket.ended?.by === 'human' || !ticket.undelivered.length) return
+    if (!ticket || liveTicket(ticket) || ticket.review || ticket.ended?.by === 'human' || !ticket.undelivered.length) return
     const policy = this.policy()
     if (policy.paused) return
     if (!policy.revalidate(ticket.mandate)) { this.refuse(ticket); return }
@@ -344,6 +396,7 @@ export class Tickets extends EnginePart {
    * the person's messages it decides that its worker did not read before its latest report or turn end, the report that
    * ends the ticket included (see `readBefore`), and neither acknowledged, answered nor handed back: one may have come while
    * the worker wrote the report that ends the ticket, or after its turn ended, and either way it can no longer hand it back.
+   * In Mumbo, the ticket's open review Ticket ends with it, `dropped`, `reviewedTicketEnded` (`UPSTREAM.md` S15).
    */
   end(ticketId: string, by: TicketEndBy, outcome: TicketOutcome, at = this.now(), reason?: string): void {
     const ticket = this.require(ticketId)
@@ -363,6 +416,8 @@ export class Tickets extends EnginePart {
     this.letGo(ticketId, waiting, left)
     this.emit('ticket.ended', { ticketId, by, outcome, ...why })
     for (const assignment of stopping) this.options.executor.stop(ticket, assignment, reason ?? outcome)
+    // In Mumbo, the ticket's open review ends with it (`UPSTREAM.md` S15).
+    for (const open of this.repo.tickets.open()) if (open.review?.of === ticketId) this.end(open.id, 'executor', 'dropped', this.now(), 'reviewedTicketEnded')
   }
   /**
    * Whether a ticket's work has not finished at a close at `at`: its worker took up a person's message the ticket decides and

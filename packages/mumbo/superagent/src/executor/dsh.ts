@@ -18,6 +18,7 @@ import { resultRelay } from '../app/notices.ts'
 import type { HealthEntry } from '../infra/health.ts'
 import { cancelled, collectJob, killJobs, runningJobs, stopBackground, stopSubagents, until, untilQuiet } from './background.ts'
 import type { ExecutorPlugin } from '../mumbo/executors.ts'
+import { NO_VERDICT, reviewLaunch } from '../mumbo/review.ts'
 
 const now = (): string => new Date().toISOString()
 /** Returns the worker session ID (`worker-<ticketId>`) for a ticket. */
@@ -62,7 +63,7 @@ export interface ExecutorHost {
   /** Where the Executor reports what happened to Assignments and Inputs. */
   readonly engine: Pick<EngineForExecutor, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed' | 'report'
     | 'assignmentInterrupted'>
-  readonly store: Pick<Store, 'tickets' | 'triggers' | 'set' | 'settings' | 'atomic' | 'afterCommit'>
+  readonly store: Pick<Store, 'tickets' | 'threads' | 'triggers' | 'set' | 'settings' | 'atomic' | 'afterCommit'>
   /** Durable effect queue through which launches and input deliveries run. */
   readonly effects: Pick<Effects, 'enqueue' | 'handle'>
   /** The `worker` health entry, which reports whether background worker event handling failed. */
@@ -481,12 +482,14 @@ export class DshExecutor implements ExecutorPlugin {
     const retried = ticket.assignments.at(-2)?.endedReason === 'retried' ? { note: RETRIED } : {}
     const assignmentText = ticket.execution?.assignment ?? ''
     const { text: brief, chars, read } = capped(assignmentText, ASSIGNMENT_CHARS, `ticket/${ticket.id}/assignment`)
-    const card = told || !source ? undefined : await this.triggerCard(ticket, source.id)
+    // In Mumbo, a review's worker reads no resource, so its launch carries the request in full (`UPSTREAM.md` S15).
+    const review = told || !source || !ticket.review ? undefined : reviewLaunch(this.host.store, ticket.review.of, source)
+    const card = told || !source || review ? undefined : await this.triggerCard(ticket, source.id)
     if (!current()) return
     const batch = told ? [] : batchOf(this.host, ticket).map(batchLine)
     const text = told ? JSON.stringify({ ticket_id: ticket.id, assignment: ticket.assignments.length, ...retried })
       : JSON.stringify({ ticket_id: ticket.id, title: ticket.title, ...(brief ? { assignment: brief } : {}),
-        ...(read ? { assignment_chars: chars, assignment_read: read } : {}), ...(card ? { trigger: card } : {}),
+        ...(read ? { assignment_chars: chars, assignment_read: read } : {}), ...(card ? { trigger: card } : {}), ...review,
         ...(batch.length ? { batch } : {}), ...retried })
     const requestId = later ? `assignment:${ticket.id}:${assignment.id}` : first
     await this.host.sessions.prompt(sessionId, requestId, text, 'queue',
@@ -687,6 +690,8 @@ export class DshExecutor implements ExecutorPlugin {
     const text = last?.type === 'assistant/message'
       ? last.data.message.content.filter(block => block.type === 'text').map(block => block.text).join('\n').trim() : ''
     const said = [text, stopped].filter(Boolean).join('\n\n')
+    // In Mumbo, a review's turn that ends without its verdict fails the review, which waits for a Retry (`UPSTREAM.md` S15).
+    if (current.review) { this.failed(ticket.id, [NO_VERDICT, said].filter(Boolean).join('\n\n')); return }
     this.host.store.atomic(() => {
       const before = latestReport(current)?.summary ?? ''
       const updated = this.host.engine.report(ticket.id, { state: 'waiting', summary: said || before })
