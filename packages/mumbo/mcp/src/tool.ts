@@ -6,6 +6,7 @@ import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type { CallToolResult, McpServer, StandardSchemaWithJSON } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 import type { AskId, PendingAsk } from './asks.ts'
+import type { ProjectId } from './auth.ts'
 import { ToolError } from './errors.ts'
 import type { HaltRecord, Idem } from './store.ts'
 
@@ -17,6 +18,8 @@ export interface ToolDeps {
   readonly principal: string
   /** The sanitised name of the key the caller used, when the edge named it, such as `laptop Claude Code`. */
   readonly via: string | undefined
+  /** The project whose report the edge relays to the principal, when the request carries one; never set with `via`. */
+  readonly report: ProjectId | undefined
   /** Remembered results by request id. */
   readonly idem: Idem
   /** The halt flag. */
