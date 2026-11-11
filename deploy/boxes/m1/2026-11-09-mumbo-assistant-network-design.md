@@ -414,7 +414,7 @@ Every node can be driven by a higher agent or an external AI. **[founder]**
 | Ask | `agent_send`, then `agent_read` | prompt | `agent_read` long-polls for up to 40 s with a cursor (as in jumbo and `@mumbo/mcp`), inside CloudFront's 60 s origin timeout |
 | Answer an ask | `task_reply` | prompt | Asks only, never approvals |
 | Create task | `task_start` | workspace | Explicit only within the key's projects |
-| Take task | `task_claim`, `task_report`, `task_result` | workspace | Lease and fencing as in section 8 |
+| Take task | `task_claim`, `task_report`, `task_submit` | workspace | Lease and fencing as in section 8 |
 | Stop | `task_stop` | workspace | Stops one Ticket. "Stop everything" is only for a person (section 5) |
 
 - **No approvals through the door.** **[my call]**
@@ -475,7 +475,7 @@ Every node can be driven by a higher agent or an external AI. **[founder]**
     - **B36b:** a report's source names the project, not the person. Today `@mumbo/mcp` logs it as `{kind:'mcp', principal:<member>}`, so `agent_read` and the log say the person sent it. A source such as `{kind:'report', project}` with no principal is needed, still listed by `agent_read` as `report:<project>`. Required before anything reads person-sourced messages as the person's requests (the M4 brain and digest) and before a project has a second member.
     - **Report rate limit:** a bucket per (project, member) at the edge, such as burst 10 and 30 an hour, answering `rate_limited`, which the Outbox retries. Until B24, any process in a project box holds the box token, and each report starts a model turn on the member's budget.
     - A halted project (an owner's "Stop everything") gets `halted` from `report_to_member`, which the Outbox retries later. Stop everything covers a project's effects on other people's assistants.
-    - The management API's 403 reaches the door as `owner_only` ("only the project's owners can read its status or stop its Tickets"), not `box_refused`.
+    - Only the management API's panel-admin 403 reaches the door as `owner_only` ("only the project's owners can read its status or stop its Tickets"); any other 403 stays `box_refused` with the box's text.
     - `project_status`'s `waitingOnYou` becomes `waitingOnPeople`: superagent's list is every Ticket waiting on any person, not on the caller.
   - **Risk:** a report starts a Mumbo turn with the person's whole browser: Chrome with passwords and cards synced, and WhatsApp. Today four things limit it:
     - the fence;
@@ -484,10 +484,23 @@ Every node can be driven by a higher agent or an external AI. **[founder]**
     - the project's admission policy, with a private repository.
     The structural fix is B25b (section 17b): while a report started the turn, every browser write asks.
 - **M3, workers:** superagent gets a pluggable Executor port, and an external-worker Executor whose Assignments are leased through the door.
-  - `task_claim`, `task_report` and `task_result`.
-  - A 10-minute lease, renewed by any call on the Ticket.
-  - Fencing: a per-Assignment edge token for GitHub and model calls, revoked when the Assignment is replaced (section 8).
-  - Done means a reviewer's verdict on the exact head SHA plus CI.
+  - `task_claim`, `task_report` and `task_submit`. The worker's final call is `task_submit`, because B33's `task_result` (a Mumbo branch's diff) keeps its name.
+  - A 20-minute lease, renewed by any call on the Ticket and by every git request through the worker route. Claude Code has no timer, so builds between calls are long.
+  - Fencing: a per-lease edge token for GitHub only. The laptop worker uses its own model, so the token has no model scope.
+    - It is a stateless HMAC (`mwt.`), bound to the project, the Ticket, the Assignment, a random lease id, the repository, the exact `agent/<name>` ref, the door key and its owner.
+    - The edge asks superagent on every worker git request whether the lease is current, so revocation is immediate and the edge keeps no state.
+  - The laptop pushes through the edge's worker git route, `https://app.mumbo.si/mcp/git/<owner>/<repo>.git`, as `mumbo-bot`. Only heads that a live lease holder pushed there count at `task_submit`.
+  - Done means a reviewer's verdict on the exact head SHA plus CI. The reviewer is a separate local Ticket in a fresh Session, and the runtime, not the model, posts its marker.
+  - **[2026-11-11, B37 design ruling]** The rest:
+    - external work only on an explicit `worker: 'external'` on `task_start`;
+    - only owners and `panelAdmins` claim;
+    - `SCHEMA_VERSION` 12, so an older image refuses the database;
+    - B24 doesn't gate the acceptance; the pre-B24 forgeability of `workers/*` is a stated limit.
+  - **E0: a merge grant requires a `pass` marker for the head SHA** (section 4's "one tap, after agent review and CI pass", now enforced by the edge). M1's local workers keep posting their own marker until T5 moves them to the reviewer Ticket, so M1 merges are unaffected.
+  - **Risk:** an external worker is the founder's own Claude Code, on their laptop with their own credentials, so Ticket text reaching it is a stronger injection path than a contained box worker.
+    - That text is the request, its batch and later Inputs such as PR comments and CI logs.
+    - Only admitted authors' Triggers reach a Ticket (superagent's admission), the edge fences every text, and the worker protocol says fenced text is data.
+    - At public launch, admission stays strict for any project with external Tickets.
 
 **Tasks** (mumbo-impl unless marked; B31, B33, B35 and R-door start in parallel):
 
@@ -500,7 +513,8 @@ Every node can be driven by a higher agent or an external AI. **[founder]**
 | **B34** door to projects | `project_status` (project record, problems, Tickets and stages, what waits on a person, executor load, read through the project box's superagent API as the member), `project_message` (kind `context` only), `task_start` and `task_stop`, all within the key's projects | B32, B35 |
 | **B35** M2 down | Superagent `relay` Source (UPSTREAM S9): edge-posted messages become Triggers with the member as actor and the hop chain; `request` is explicit, `context` implicit. `projectRelay` posts there instead of the plain coordinator Session. Tests through the real Source | — |
 | **B36** M2 up | `relay` Thread replies go back through the edge (`report_to_member`, project boxes only, members only) into the person's `mumbo` Session as "[project X] …". Mumbo's instructions are updated for filing and reports | B35, B17 |
-| **B37** M3 workers | The Executor port and the external-worker Executor: leases, renewal, fencing tokens, `task_claim`, `task_report` and `task_result` on the door; the reviewer Ticket. The acceptance is M3's "Done when" | B34 |
+| **B37** M3 workers | The Executor port and the external-worker Executor: leases, renewal, fencing tokens, the worker git route, `task_claim`, `task_report` and `task_submit` on the door; the reviewer Ticket; E0. The acceptance is M3's "Done when". Plan: T1–T5, T7, E0–E3, F1, A1 (impl's B37 design, revision 2) | B34 |
+| **B38** M3 budgets | The budget ledger per node, per-Ticket caps (turns, wall time, pushes, CI retries) and the overnight anomaly pause (section 12). M3 is complete only with B38 | B37 T2a |
 
 **Acceptance for the door** (B31–B34): the founder mints a key on the approve host (linked from the home page) and points Claude Code's `mumbo` entry at `https://app.mumbo.si/mcp`. From Claude Code:
 - they send Mumbo a message and read its reply;
