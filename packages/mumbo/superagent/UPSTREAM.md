@@ -175,3 +175,19 @@ Upstream has no way for another node to hand Superagent a message. The `relay` S
 Files outside the copy changed for S9:
 
 - `packages/mumbo/edge-member/README.md` (Member access): `@mumbo/superagent` also serves `/orchestrator/relay` to every member.
+
+## S11: Executor port
+
+Upstream's Engine calls one Executor, the DshExecutor, for every Ticket. In Mumbo a Ticket may be taken by a worker outside the box, so the Engine's Executor routes each Ticket to the Executor of its kind. Nothing selects an external Ticket yet, and local Tickets behave as before. Written by task B37 T1.
+
+- `src/mumbo/executors.ts` (new): `ExecutorKind` (`local`, `external`); `ExecutorPlugin`, the core `Executor` with `install`, `resume(tickets)`, `shutdown` and `dispose`; `executorOf`, a Ticket's kind, `local` without `executor`; `Executors`, which sends `start`, `deliver` and `stop` to the Ticket's kind, calls `install`, `shutdown` and `dispose` on every kind, gives `resume` each kind's own Tickets only, and, when a kind's shutdown fails, fails with that failure once every kind has finished; and `heldExecutor`, the `external` kind, which does nothing, so an external Ticket is neither launched nor interrupted.
+- `src/core/model.ts`: `Ticket.executor?: 'external'`.
+- `src/executor/dsh.ts`: `DshExecutor` implements `ExecutorPlugin`; `resume(tickets)` reconciles the Tickets it is given, every open Ticket by default.
+- `src/app/runtime.ts`: `Runtime.executor` stays the DshExecutor. The private `executors` field, `Executors` over `{ local: executor, external: heldExecutor }`, is the Engine's Executor; start installs it after Sessions and resumes it with the open Tickets; stop shuts it down and disposes it. `prepareTicket` and `HttpHost.executor` are unchanged.
+- `src/app/migration.ts`, `src/app/store.ts`: `SCHEMA_VERSION` is 12, which changes no record: `migrateTo11` runs only on schema 10, and a schema 11 database opens as schema 12 unchanged. A build that predates external Tickets refuses the database (`Unsupported orchestrator database version 12`) instead of launching them in the box. A failed migration's error names schema 12 as its target.
+- Docs: the `src/mumbo/executors.ts` and `tests/executors.spec.ts` rows of `docs/007-architecture.md`, which `tests/docs.spec.ts` requires, and its DshExecutor and schema paragraphs; the README In Mumbo bullet.
+- Tests: `tests/executors.spec.ts` checks routing by kind, the lifecycle calls on every kind, a failed shutdown, `heldExecutor`, a Runtime start over stored Tickets (a running local Assignment ends `hostRestarted` with a new pending one and its launch queued; a running and a pending external Assignment stay as stored, with no launch), and schema 12 opening a schema 12 and a schema 11 database without a changed record. `tests/migration.spec.ts` expects `migration to schema 12 failed` in the two failed-migration messages.
+
+Files outside the copy changed for S11:
+
+- `vitest.config.ts`: the coverage `exclude` lists `packages/mumbo/superagent/src/!(mumbo)/**/*.{ts,tsx}` and `packages/mumbo/superagent/src/*.{ts,tsx}` instead of all of `src`, so `src/mumbo/` is under the per-file 100% gate.
