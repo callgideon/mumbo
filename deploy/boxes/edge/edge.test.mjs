@@ -924,10 +924,17 @@ test('role instructions: assistant with write consent and desktop sign-in; coord
   assert.match(p, /through their own assistants, whose messages reach the project's Superagent as requests or context from the member\./)
   assert.match(p, /no browser and nobody's accounts/)
   assert.doesNotMatch(p, /Downloads/)
-  // B48: the person signs in to GitHub themselves, the device flow first, without the workflow scope; the token never
+  // B48: the person signs in to GitHub themselves, by the device flow alone, without the workflow scope; the token never
   // passes through the chat. The coordinator keeps mumbo-bot through the edge.
-  const github = "\n- GitHub: gh, and git over https, use the user's own GitHub sign-in once they have signed in. To sign them in, run `gh auth login --web --git-protocol https`, which waits until they approve, and show them only the one-time code and the URL it prints; they enter the code there themselves. Tell them plainly that this sign-in reaches every repository they can, organizations included. Never add the `workflow` scope: GitHub Actions files hold CI secrets and stay theirs to change. If they prefer a fine-grained personal access token, they paste it into `gh auth login --with-token` in the desktop terminal themselves. Never ask for a token in the chat, never print one, and never copy gh's sign-in files anywhere.\n"
+  const github = "\n- GitHub: gh, and git over https, use the user's own GitHub sign-in once they have signed in. To sign them in, run exactly `GH_PROMPT_DISABLED=1 gh auth login --web --git-protocol https --hostname github.com </dev/null`, which asks only for gh's default scopes and waits until they approve, and show them only the one-time code and the URL it prints; they enter the code there themselves. Tell them plainly that this sign-in reaches every repository they can, organizations included. Then run `gh auth status`; if its token scopes include `workflow`, run `GH_PROMPT_DISABLED=1 gh auth refresh --hostname github.com --remove-scopes workflow </dev/null` the same way, and if `workflow` is still listed, tell them. Never add the `workflow` scope: GitHub Actions files hold CI secrets and stay theirs to change. This is the only way to sign you in: the desktop terminal runs as another user, so a token pasted there does not reach your gh. Never ask for a token in the chat or in a file, never print one, and never copy gh's sign-in files anywhere.\n"
   assert.ok(a.indexOf('\n- Never type passwords or one-time codes.') < a.indexOf(github) && a.indexOf(github) < a.indexOf('\n- Files: '))
+  // Run interactively (a terminal shell) with --git-protocol https, gh adds `workflow` unasked when it is the git
+  // credential helper, as /etc/gitconfig makes it: every gh sign-in command the role gives never prompts.
+  const signIn = a.match(/`[^`]*gh auth (?:login|refresh)[^`]*`/g)
+  assert.equal(signIn.length, 2)
+  for (const cmd of signIn) assert.match(cmd, /^`GH_PROMPT_DISABLED=1 gh auth \w+ .*--hostname github\.com .*<\/dev\/null`$/)
+  // The desktop terminal runs as xsession on a B24 template, so a pasted token would sign in xsession's gh: no token way.
+  assert.doesNotMatch(a, /--with-token/)
   assert.doesNotMatch(p, /GitHub|gh auth/)
   // Agent's home exists only under containment (B24): the role leaves it out, and the start script adds it on a B24 image.
   for (const role of [a, p]) assert.doesNotMatch(role, /\/home\/agent/)
@@ -938,6 +945,21 @@ test('role instructions: assistant with write consent and desktop sign-in; coord
   assert.ok(script.includes('AGENTS_HOME=/root/.mumbo/agents\n[ -z "$B24_IMAGE" ] || AGENTS_HOME=/usr/local/share/mumbo/agents\n'))
   assert.match(script, / DSH_AGENTS_HOME="\$AGENTS_HOME" /)
   assert.ok(script.includes(`cat > "$AGENTS_HOME/AGENTS.md" <<'MD'\n${a}\nMD\n[ -z "$B24_IMAGE" ] || echo '${SCRATCH_LINE}' >> "$AGENTS_HOME/AGENTS.md"\n`))
+})
+
+test('the RUNBOOK\'s B48 section gives the role\'s sign-in command, checks its scopes, and names what changes branch protection', async () => {
+  const { roleInstructions } = await import('./edge.mjs')
+  const runbook = readFileSync(new URL('../RUNBOOK.md', import.meta.url), 'utf8')
+  const from = runbook.indexOf('\n### GitHub sign-in on the person box (B48)\n')
+  const bullet = (b) => runbook.slice(from, runbook.indexOf('\n### ', from + 1)).split('\n').find(l => l.startsWith(`- **${b}.**`))
+  const login = roleInstructions({ publicHost: 'boxes.x' }, 'a@x.com').match(/`GH_PROMPT_DISABLED=1 gh auth login [^`]*`/)[0]
+  assert.ok(bullet('Sign-in').includes(`runs ${login} as \`agent\``))
+  for (const text of ['gh adds `workflow` unasked when it is already the git credential helper', 'is not offered: on a B24 template the desktop terminal runs as `xsession`']) assert.ok(bullet('Sign-in').includes(text), text)
+  // A sign-in with `repo` on an admin account can remove repository rules; an organization ruleset needs admin:org.
+  for (const text of ['can change or delete that repository\'s branch protection and rulesets', 'An organization ruleset on `main` and `boxes/production` with an empty bypass list', '`admin:org`, which the sign-in\'s `read:org` does not include']) assert.ok(bullet('What the model can do with it').includes(text), text)
+  assert.doesNotMatch(bullet('What the model can do with it'), /rules that admins cannot bypass/)
+  const real = runbook.split('\n').find(l => l.startsWith('- **Checked only on a real box.**'))
+  assert.ok(real.includes('`gh auth status` works and lists the token scopes `repo`, `read:org` and `gist` and not `workflow`'))
 })
 
 test('home page lists the assistant, desktop and the member\'s projects without starting a box, escaping names', async () => {
