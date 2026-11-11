@@ -1102,15 +1102,22 @@ describe('Runtime and LLM e2e Blacksmith routing', () => {
 })
 
 describe('bubblewrap preparation script', () => {
-  it('pins bubblewrap to a recorded Launchpad build and excludes Ubuntu pool downloads', () => {
+  it('pins bubblewrap to a recorded Launchpad build first, with pool mirrors only as checksum-verified fallbacks', () => {
     const script = readFileSync(resolve(root, 'scripts/prepare-ci-bubblewrap.sh'), 'utf8')
     const url = /^readonly BUBBLEWRAP_URL="([^"]+)"$/mu.exec(script)?.[1]
 
     expect(url).toMatch(
       /^https:\/\/launchpad\.net\/ubuntu\/\+source\/bubblewrap\/[^/]+\/\+build\/\d+\/\+files\/bubblewrap_[^/]+_amd64\.deb$/u,
     )
-    // Ubuntu removes superseded versions from its live package pool.
-    expect(script).not.toMatch(/https?:\/\/[^/'"\s]+\/ubuntu(?:-ports)?\/pool\//u)
+    // Ubuntu removes superseded versions from its live package pool, so a pool URL is only ever a fallback after the
+    // recorded build, for the same file name, and every source passes the same pinned checksum before it is used.
+    const fallbacks = /^readonly BUBBLEWRAP_FALLBACK_URLS=\(\n((?:  "[^"]+"\n)+)\)$/mu.exec(script)?.[1]
+    expect(fallbacks?.trim().split('\n').map(line => line.trim().slice(1, -1))).toEqual([
+      'https://mirrors.edge.kernel.org/ubuntu/pool/main/b/bubblewrap/bubblewrap_${BUBBLEWRAP_VERSION}_amd64.deb',
+      'http://archive.ubuntu.com/ubuntu/pool/main/b/bubblewrap/bubblewrap_${BUBBLEWRAP_VERSION}_amd64.deb',
+    ])
+    expect(script).toContain('for url in "$BUBBLEWRAP_URL" "${BUBBLEWRAP_FALLBACK_URLS[@]}"; do')
+    expect(script).toMatch(/--output "\$archive" "\$url" \\\n {4}&& printf '%s {2}%s\\n' "\$BUBBLEWRAP_SHA256" "\$archive" \| sha256sum --check --status; then/u)
   })
 })
 
