@@ -425,13 +425,13 @@ test('backups carry the desktop session\'s home (B24: XFCE as xsession) without 
   assert.equal(readFileSync(join(home, '.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml'), 'utf8'), '.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml')
 })
 
-test('backups carry agent\'s gh sign-in (B48), copied by a process of its own, and a restore puts it back as /home/agent\'s owner, 0700 and 0600', () => {
+test('backups carry agent\'s gh sign-in (B48) from its GH_CONFIG_DIR, copied by a process of its own, and a restore puts it back as /home/agent\'s owner, 0700 and 0600', () => {
   const { root, db, target } = fixture()
   db.close()
-  const gh = join(root, 'home/agent/.config/gh')
+  const gh = join(root, 'var/lib/mumbo/agent-gh')
   mkdirSync(gh, { recursive: true }); chmodSync(gh, 0o775)
   writeFileSync(join(gh, 'hosts.yml'), 'github.com:\n    user: me\n', { mode: 0o644 }); writeFileSync(join(gh, 'config.yml'), 'version: 1\n', { mode: 0o600 })
-  writeFileSync(join(root, 'home/agent/notes.txt'), 'scratch')
+  mkdirSync(join(root, 'home/agent'), { recursive: true }); writeFileSync(join(root, 'home/agent/notes.txt'), 'scratch')
   // Every cpSync, with the pid that made it, beside the listings of the snapshot's own process.
   const log = join(root, 'calls'), preload = join(root, 'calls.cjs')
   writeFileSync(preload, `const fs = require("fs"); for (const f of ["readdirSync", "cpSync"]) { const real = fs[f]; fs[f] = function (p, ...a) { fs.appendFileSync(${JSON.stringify(log)}, process.pid + " " + f + " " + p + "\\n"); return real.call(this, p, ...a) } }`)
@@ -439,19 +439,21 @@ test('backups carry agent\'s gh sign-in (B48), copied by a process of its own, a
   assert.equal(b.status, 0, b.stderr)
   const calls = readFileSync(log, 'utf8').split('\n')
   const pid = (re) => calls.find(l => re.test(l))?.split(' ')[0]
-  assert.ok(pid(/ cpSync .*\/home\/agent\/\.config\/gh$/) && pid(/ readdirSync .*\/root\/\.dsh$/) && pid(/ cpSync /) !== pid(/ readdirSync .*\/root\/\.dsh$/), calls.join('\n'))
+  assert.ok(pid(/ cpSync .*\/var\/lib\/mumbo\/agent-gh$/) && pid(/ readdirSync .*\/root\/\.dsh$/) && pid(/ cpSync /) !== pid(/ readdirSync .*\/root\/\.dsh$/), calls.join('\n'))
   const names = execFileSync('tar', ['-tzf', `${root}.tgz`], { encoding: 'utf8' }).split('\n')
   for (const n of ['hosts.yml', 'config.yml']) assert.ok(names.includes(`root/.mumbo-sqlite/gh/${n}`), n)
-  // The rest of agent's home stays out, and nothing is archived under its own path.
-  assert.ok(!names.some(n => n.startsWith('home/agent')))
-  rmSync(join(root, 'home/agent/.config'), { recursive: true }); rmSync(join(root, 'root'), { recursive: true })
+  // agent's home stays out, and nothing is archived under the sign-in's own path.
+  assert.ok(!names.some(n => n.startsWith('home/agent') || n.startsWith('var/lib/mumbo/agent-gh')))
+  rmSync(join(root, 'var'), { recursive: true }); rmSync(join(root, 'root'), { recursive: true })
   const r = sh(restoreCommand(target, root))
   assert.equal(r.status, 0, r.stderr)
   assert.equal(r.stderr, '')
   assert.equal(readFileSync(join(gh, 'hosts.yml'), 'utf8'), 'github.com:\n    user: me\n')
+  // /var/lib/mumbo, missing here, is made root's 0755, as the start script makes it.
   const home = lstatSync(join(root, 'home/agent'))
-  for (const [p, mode] of [['.config', 0o700], ['.config/gh', 0o700], ['.config/gh/hosts.yml', 0o600], ['.config/gh/config.yml', 0o600]]) {
-    const s = lstatSync(join(root, 'home/agent', p))
+  assert.equal(lstatSync(join(root, 'var/lib/mumbo')).mode & 0o777, 0o755)
+  for (const [p, mode] of [['agent-gh', 0o700], ['agent-gh/hosts.yml', 0o600], ['agent-gh/config.yml', 0o600]]) {
+    const s = lstatSync(join(root, 'var/lib/mumbo', p))
     assert.deepEqual([s.mode & 0o777, s.uid, s.gid], [mode, home.uid, home.gid], p)
   }
   assert.ok(!existsSync(join(root, 'root/.mumbo-sqlite')))
@@ -461,36 +463,38 @@ test('backups carry agent\'s gh sign-in (B48), copied by a process of its own, a
   back.close()
 })
 
-test('a backup without agent\'s gh sign-in, or without /home/agent, stages none, and a restore makes nothing in agent\'s home', () => {
-  for (const withHome of [true, false]) {
-    const { root, db, target } = fixture()
-    db.close()
-    if (withHome) mkdirSync(join(root, 'home/agent/.config'), { recursive: true })
-    const b = sh(backupCommand(target, root))
-    assert.equal(b.status, 0, b.stderr)
-    assert.ok(!execFileSync('tar', ['-tzf', `${root}.tgz`], { encoding: 'utf8' }).split('\n').some(n => n.startsWith('root/.mumbo-sqlite/gh')))
-    if (withHome) rmSync(join(root, 'home/agent/.config'), { recursive: true })
-    const r = sh(restoreCommand(target, root))
-    assert.equal(r.status, 0, r.stderr)
-    assert.deepEqual(withHome ? readdirSync(join(root, 'home/agent')) : existsSync(join(root, 'home')), withHome ? [] : false)
-  }
+test('a backup without agent\'s gh directory stages none, and a restore makes nothing in /var/lib/mumbo', () => {
+  const { root, db, target } = fixture()
+  db.close()
+  mkdirSync(join(root, 'home/agent/.config/gh'), { recursive: true }); writeFileSync(join(root, 'home/agent/.config/gh/hosts.yml'), 'old place')
+  const b = sh(backupCommand(target, root))
+  assert.equal(b.status, 0, b.stderr)
+  // gh's default directory in agent's home is scratch, as the rest of it.
+  assert.ok(!execFileSync('tar', ['-tzf', `${root}.tgz`], { encoding: 'utf8' }).split('\n').some(n => n.startsWith('root/.mumbo-sqlite/gh') || n.startsWith('home/agent')))
+  const r = sh(restoreCommand(target, root))
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(existsSync(join(root, 'var')), false)
 })
 
-test('a restore moves gh\'s sign-in through no link on /home/agent/.config, and leaves it out without /home/agent', () => {
+test('a restore moves gh\'s sign-in through no link on /var/lib/mumbo, replaces a link on its own name, and leaves it out without /home/agent', () => {
   const src = mkdtempSync(join(tmpdir(), 'gh-src-'))
   try {
     mkdirSync(join(src, 'root/.mumbo-sqlite/gh'), { recursive: true }); writeFileSync(join(src, 'root/.mumbo-sqlite/gh/hosts.yml'), 'token')
     // A .snap name in the sign-in is not a database snapshot.
     writeFileSync(join(src, 'root/.mumbo-sqlite/gh/x.snap'), 'not a database')
     execFileSync('tar', ['-C', src, '-czf', `${src}.tgz`, 'root'])
-    for (const box of ['link', 'no home']) {
+    for (const box of ['link', 'name link', 'no home']) {
       const root = mkdtempSync(join(tmpdir(), 'gh-box-')), outside = mkdtempSync(join(tmpdir(), 'gh-out-'))
       try {
-        if (box === 'link') { mkdirSync(join(root, 'home/agent'), { recursive: true }); symlinkSync(outside, join(root, 'home/agent/.config')) }
+        if (box !== 'no home') mkdirSync(join(root, 'home/agent'), { recursive: true })
+        if (box === 'link') { mkdirSync(join(root, 'var/lib'), { recursive: true }); symlinkSync(outside, join(root, 'var/lib/mumbo')) }
+        if (box === 'name link') { mkdirSync(join(root, 'var/lib/mumbo'), { recursive: true }); symlinkSync(outside, join(root, 'var/lib/mumbo/agent-gh')) }
         const r = sh(restoreCommand(`file://${src}.tgz`, root))
         assert.equal(r.status, 0, r.stderr)
-        assert.equal(r.stderr, 'restore: /home/agent/.config/gh left out\n', box)
+        assert.equal(r.stderr, box === 'name link' ? '' : 'restore: /var/lib/mumbo/agent-gh left out\n', box)
         assert.deepEqual(readdirSync(outside), [], box)
+        if (box === 'name link') assert.deepEqual([lstatSync(join(root, 'var/lib/mumbo/agent-gh')).isDirectory(), readFileSync(join(root, 'var/lib/mumbo/agent-gh/hosts.yml'), 'utf8')], [true, 'token'])
+        if (box === 'no home') assert.equal(existsSync(join(root, 'var')), false)
         assert.ok(!existsSync(join(root, 'root/.mumbo-sqlite')) && !existsSync(join(root, 'root/gh')), box)
       } finally { for (const d of [root, outside]) rmSync(d, { recursive: true, force: true }) }
     }

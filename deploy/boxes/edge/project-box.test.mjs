@@ -51,7 +51,9 @@ test('a user box start script is byte-for-byte what it was before project boxes 
   // rather than a system user, since the template makes it without `-r` (template.mjs).
   // Then the repair first stops the start when E2B's user, or on a B24 template a user it makes, is below uid 1000 (containment.test.mjs).
   // Then B48: the scratch line names the gh sign-in in /home/agent/.config/gh, which backups keep (backup.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), 'bab8d8000e32aa62d98110c713db03d628c97d0624226e4d75e4a9fe3b0ca513')
+  // Then B48's token-location ruling: agent's row sets GH_CONFIG_DIR /var/lib/mumbo/agent-gh, which the layout makes
+  // agent:agent 0700 and the system repair leaves as it is, so the scratch line names no exception (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), 'f2d9110833e11da8983729fa248eab6cf0c92cc4f0ee9b692e9ef0af9b74a98e')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -84,7 +86,9 @@ test('a project box start script is byte-for-byte what it was before B18 changed
   // Then the repair first stops the start when E2B's user, or on a B24 template a user it makes, is below uid 1000 (containment.test.mjs).
   // Then B48: the scratch line names the gh sign-in in /home/agent/.config/gh, which backups keep, on every box, since
   // the backup is the same for both (backup.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), '37d38edd9a433f736bf725c3c9bd951416e1709d37b6461af1dbcaed8a08c9de')
+  // Then B48's token-location ruling: agent's row sets GH_CONFIG_DIR /var/lib/mumbo/agent-gh on every box, which the
+  // layout makes agent:agent 0700 and the system repair leaves as it is, so the scratch line names no exception (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), '48d99899dd0a4ff6b3419ad2bc3de8b4fb24f0fb643cc258d9441c302bfc5867')
 })
 
 const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'

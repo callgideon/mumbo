@@ -32,7 +32,9 @@ const PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
  *  exports (the uploads and A2 contract of 2026-11-11, which the harness's fixtures take on). Both end with the web_fetch
  *  rows of that contract: the anonymous fetcher off, web_fetch through the edge's model host. agent's npm prefix and its
  *  own program directories on PATH, after a project box's command shims and gh wrapper, are the B24 fix's prefix
- *  rulings of 2026-11-11, which the harness's fixtures (m1/b24-fix-loader) take on. */
+ *  rulings of 2026-11-11, which the harness's fixtures (m1/b24-fix-loader) take on. agent's GH_CONFIG_DIR, after its
+ *  npm prefix in both rows, is B48's token-location ruling of 2026-11-11, which the harness's fixtures (m1/b48-gate)
+ *  take on. */
 const FIXTURE = (person, mcpGroups = '') => `- id: subprocess
   config:
     shellActivityDirectory: /run/dsh-shell
@@ -49,6 +51,7 @@ const FIXTURE = (person, mcpGroups = '') => `- id: subprocess
         LOGNAME: agent
         SHELL: /bin/bash
         NPM_CONFIG_PREFIX: /home/agent/.npm-global
+        GH_CONFIG_DIR: /var/lib/mumbo/agent-gh
 ${person ? `        PATH: /home/agent/.npm-global/bin:/home/agent/.local/bin:${PATH}
 ` : `        PATH: /var/lib/mumbo/superagent/worker-bin:/usr/local/lib/mumbo/bin:/home/agent/.npm-global/bin:/home/agent/.local/bin:${PATH}
         GIT_CONFIG_GLOBAL: /var/lib/mumbo/superagent/worker-gitconfig
@@ -227,6 +230,11 @@ test('containment rows: the harness fixtures with the box\'s ids and agent in th
     assert.ok(!rows.slice(0, rows.indexOf('- id: fs-sandbox')).includes('/root/.mumbo'))
     // dsh-superagent's row is the image's project overlay's alone: a patch's config would replace it.
     assert.ok(!rows.includes('dsh-superagent'))
+    // agent's gh sign-in (B48) is outside every root the file tools reach, so they refuse it; only the shell reads it.
+    assert.ok(rows.includes('\n        GH_CONFIG_DIR: /var/lib/mumbo/agent-gh\n'))
+    const roots = rows.slice(rows.indexOf('- id: fs-sandbox'), rows.indexOf('- id: attachment-local')).match(/\/[^\s,\]]+/g)
+    assert.equal(roots.length, 8)
+    for (const r of roots) assert.ok(!'/var/lib/mumbo/agent-gh/'.startsWith(`${r}/`) && !r.startsWith('/var/lib/mumbo/agent-gh'), r)
   }
   assert.throws(() => containmentLayout({ ...c, mcpServerWorkspace: 'all' }, true), /mcpServerWorkspace "all"/)
 })
@@ -298,6 +306,9 @@ test('the B24 layout: root\'s files kept from agent, every directory the rows na
     assert.equal(mode('outside'), 0o755, 'a link in /root is not followed')
     for (const d of ['attachments', 'attachments/attachments', 'attachments/attachments/v1', 'spill', 'subprocess-spill']) assert.equal(mode(`var/lib/mumbo/${d}`), 0o2750, d)
     assert.ok(r.lines('install').includes('-d -o root -g agent -m 2750 T/var/lib/mumbo/attachments/attachments/v1'))
+    // agent's GH_CONFIG_DIR (B48): agent's alone.
+    assert.ok(r.lines('install').includes('-d -o agent -g agent -m 0700 T/var/lib/mumbo/agent-gh'))
+    assert.equal(mode('var/lib/mumbo/agent-gh'), 0o700)
     assert.ok(r.lines('install').includes('-d -o agent -g workspace -m 2770 T/root/projects'))
     assert.equal(mode('root/projects'), 0o2770)
     assert.deepEqual(r.lines('setfacl'), ['--set u::rwx,g::rwx,m::rwx,o::--- T/root/projects'])
@@ -331,6 +342,9 @@ test('the B24 layout: root\'s files kept from agent, every directory the rows na
     assert.deepEqual(p.lines('setfacl'), ['--set u::rwx,g::rwx,g:workspace-read:r-x,m::rwx,o::--- T/root/projects', '--set u::rwx,g::rwx,g:workspace-read:r-x,m::rwx,o::--- T/root/work'])
     assert.equal(statSync(p.at('var/lib/mumbo/superagent')).mode & 0o7777, 0o2750)
     assert.deepEqual([statSync(p.at('root/.config/gh')).mode & 0o777, statSync(p.at('root/github-proxy.log')).mode & 0o777], [0o700, 0o600])
+    // The rows give agent the same GH_CONFIG_DIR on a project box, where its gh holds the wrapper's placeholder token.
+    assert.ok(p.lines('install').includes('-d -o agent -g agent -m 0700 T/var/lib/mumbo/agent-gh'))
+    assert.equal(statSync(p.at('var/lib/mumbo/agent-gh')).mode & 0o7777, 0o700)
     assert.equal(existsSync(p.at('var/lib/mumbo/uploads')), false, 'no browser, no upload staging')
   } finally { p.done() }
 })
@@ -445,16 +459,18 @@ test('the B24 input chain: from beyond loopback a new TCP connection (SYN alone)
  *  each tree the repair leaves alone, of those trees' top directories /home world-writable, /tmp world-writable without
  *  the sticky bit and /var/tmp sticky, a build's file in /usr/local/bin, a system user's group-writable directory, the
  *  group-writable /var/mail and /var/local of the system groups mail and staff, and directories group-writable by the
- *  system groups uploads and users. */
+ *  system groups uploads and users. agent's GH_CONFIG_DIR /var/lib/mumbo/agent-gh (B48) with a sign-in file. */
 const E2B_MODES = { 'usr/local': 0o777, 'usr/local/bin': 0o777, 'usr/local/bin/node': 0o777, 'usr/bin/envd': 0o777, 'etc/inittab': 0o666, code: 0o777,
   'src/node_modules/m': 0o775, 'var/spool/sticky': 0o1777, 'home/agent/w': 0o777, 'root/w': 0o777, 'tmp/w': 0o777, 'var/tmp/w': 0o777, 'var/lib/mumbo/playwright-output/f': 0o666,
-  home: 0o777, tmp: 0o777, 'var/tmp': 0o1777, 'usr/local/bin/oauth2-proxy': 0o755, 'var/lib/colord': 0o775, 'var/mail': 0o2775, 'var/local': 0o2775, 'opt/uploads': 0o775, 'opt/users': 0o775 }
+  home: 0o777, tmp: 0o777, 'var/tmp': 0o1777, 'usr/local/bin/oauth2-proxy': 0o755, 'var/lib/colord': 0o775, 'var/mail': 0o2775, 'var/local': 0o2775, 'opt/uploads': 0o775, 'opt/users': 0o775,
+  'var/lib/mumbo/agent-gh': 0o700, 'var/lib/mumbo/agent-gh/f': 0o600 }
 /** The owners and groups of e2bRoot's paths other than root:root: agent's (1001) a build's file in /usr/local/bin with
- *  a group no name has (as the web image's oauth2-proxy), the link, /tmp and paths in the trees the repair leaves alone;
- *  browsermcp's its Playwright output; the system user colord's (112) its directory; mail (8), staff (50), uploads
- *  (999) and users (100) their directories, and workspace (1007) the module. */
+ *  a group no name has (as the web image's oauth2-proxy), the link, /tmp, paths in the trees the repair leaves alone and
+ *  its gh sign-in; browsermcp's its Playwright output; the system user colord's (112) its directory; mail (8), staff (50),
+ *  uploads (999) and users (100) their directories, and workspace (1007) the module. */
 const E2B_IDS = { 'usr/local/bin/oauth2-proxy': [1001, 118], 'usr/local/link': [1001, 1001], tmp: [1001, 1001], 'tmp/w': [1001, 1001], 'home/agent/w': [1001, 1001],
   'var/lib/mumbo/playwright-output': [1002, 1002], 'var/lib/mumbo/playwright-output/f': [1002, 1002], 'var/lib/colord': [112, 112],
+  'var/lib/mumbo/agent-gh': [1001, 1001], 'var/lib/mumbo/agent-gh/f': [1001, 1001],
   'var/mail': [0, 8], 'var/local': [0, 50], 'opt/uploads': [0, 999], 'opt/users': [0, 100], 'src/node_modules/m': [0, 1007] }
 /** e2bRoot's users and groups, as getent lists them: the login users E2B's `user` (in sudo), agent, browsermcp (in the
  *  system group uploads) and legacy (whose primary group is the system group users), and nobody; the system users mail
@@ -502,8 +518,8 @@ test('the system repair: login users\' paths root\'s, g+w off login groups, o+w 
     assert.equal(out.code, 0, out.err)
     // The login groups: 1000 and up, sudo (E2B's user), users (legacy's primary group) and uploads (browsermcp).
     assert.equal(out.out, 'login=-gid +999 -o -gid 27 -o -gid 100 -o -gid 999\n')
-    // The paths a login user owns become root:root, the link itself, but in the users' and runtime trees and
-    // browsermcp's Playwright output; colord's stays its own.
+    // The paths a login user owns become root:root, the link itself, but in the users' and runtime trees,
+    // browsermcp's Playwright output and agent's gh sign-in; colord's stays its own.
     const chowned = r.lines('chown').join(' ').split(' ')
     assert.deepEqual([chowned.slice(0, 2), chowned.slice(2).sort()], [['-h', '0:0'], ['T/tmp', 'T/usr/local/bin/oauth2-proxy', 'T/usr/local/link']])
     // The modes a box's start script leaves: /usr/local, node, /code, envd, inittab, /home and the non-sticky /tmp
@@ -512,7 +528,8 @@ test('the system repair: login users\' paths root\'s, g+w off login groups, o+w 
     // the users' and runtime trees as it was, the link not followed.
     assert.deepEqual(modes(r, [...Object.keys(E2B_MODES), 'home/outside']), { 'usr/local': 0o775, 'usr/local/bin': 0o775, 'usr/local/bin/node': 0o775, 'usr/bin/envd': 0o775, 'etc/inittab': 0o664, code: 0o775,
       'src/node_modules/m': 0o755, 'var/spool/sticky': 0o1777, 'home/agent/w': 0o777, 'root/w': 0o777, 'tmp/w': 0o777, 'var/tmp/w': 0o777, 'var/lib/mumbo/playwright-output/f': 0o666,
-      home: 0o775, tmp: 0o755, 'var/tmp': 0o1777, 'usr/local/bin/oauth2-proxy': 0o755, 'var/lib/colord': 0o775, 'var/mail': 0o2775, 'var/local': 0o2775, 'opt/uploads': 0o755, 'opt/users': 0o755, 'home/outside': 0o777 })
+      home: 0o775, tmp: 0o755, 'var/tmp': 0o1777, 'usr/local/bin/oauth2-proxy': 0o755, 'var/lib/colord': 0o775, 'var/mail': 0o2775, 'var/local': 0o2775, 'opt/uploads': 0o755, 'opt/users': 0o755,
+      'var/lib/mumbo/agent-gh': 0o700, 'var/lib/mumbo/agent-gh/f': 0o600, 'home/outside': 0o777 })
   } finally { r.done() }
   // The modes do not hold (chmod changes nothing): the start stops and names what every user or a login group can
   // still change, and nothing a system group's or in the trees left alone.
