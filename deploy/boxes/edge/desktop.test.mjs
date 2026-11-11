@@ -383,7 +383,7 @@ test('template: Google Chrome stable from Google\'s signed amd64 repository and 
   for (const p of ['chromium', 'openbox', 'xfce4', 'xvfb', 'x11vnc', 'novnc', 'websockify']) assert.ok(!packages.includes(p), p)
   assert.equal(BOX_STEPS[BOX_STEPS.indexOf(install) + 1], kasmvncStep(), 'KasmVNC is installed once curl is')
   assert.ok(BOX_STEPS.includes('id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser'))
-  assert.ok(BOX_STEPS.includes('id xvnc >/dev/null 2>&1 || useradd -r -U -M -d /nonexistent -s /usr/sbin/nologin xvnc'), 'KasmVNC\'s own system user')
+  assert.ok(BOX_STEPS.includes('id xvnc >/dev/null 2>&1 || useradd -U -M -d /nonexistent -s /usr/sbin/nologin xvnc'), 'KasmVNC\'s own user')
   assert.ok(BOX_STEPS.indexOf('id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser') < BOX_STEPS.indexOf('groupadd -f shared && usermod -aG shared browser && chmod 0700 /home/browser && install -d -m 0755 /home/shared && install -d -o browser -g shared -m 2770 /home/shared/Downloads'))
 })
 

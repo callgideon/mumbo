@@ -305,8 +305,9 @@ export const BOX_STEPS = [
   'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google-chrome.asc && chmod go+r /etc/apt/keyrings/google-chrome.asc && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xfce4-session xfwm4 xfce4-panel xfdesktop4 thunar xfce4-terminal tango-icon-theme librsvg2-common google-chrome-stable dbus-x11 xdotool wmctrl imagemagick xsel xauth fonts-noto-core fonts-noto-color-emoji fonts-noto-cjk procps ripgrep nftables libcap2-bin acl iproute2 python3-venv && rm -rf /var/lib/apt/lists/*',
   kasmvncStep(),
   'id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser',
-  // KasmVNC's server runs as its own system user, with no home or login, so browser cannot signal it or take its place.
-  'id xvnc >/dev/null 2>&1 || useradd -r -U -M -d /nonexistent -s /usr/sbin/nologin xvnc',
+  // KasmVNC's server runs as its own user, with no home or login, so browser cannot signal it or take its place. Not a
+  // system user (`-r`): its uid is 1000 or more, so the system repair takes any system path it owns (edge systemRepair).
+  'id xvnc >/dev/null 2>&1 || useradd -U -M -d /nonexistent -s /usr/sbin/nologin xvnc',
   KASMVNC_BIND_STEP,
   // Downloads are shared through the group shared (B24 adds the agent's users): /home/shared is root's, so no member can
   // replace the folder itself. The browser's home stays its own.
@@ -320,12 +321,12 @@ export const BOX_STEPS = [
 ]
 /** A project box is headless: git, gh (GitHub's apt repository) and openssl for the box-local GitHub proxy's CA, nftables
  *  and acl for the start script, iproute2 for the dsh smoke check's ss and the escape test's network namespace, the
- *  proxy's own system user ghproxy (edge startScript), python3-venv for agent's venvs (as BOX_STEPS), agent containment's
- *  users, and the nftables and dsh smoke checks. */
+ *  proxy's own user ghproxy (edge startScript; no home or login, and, as xvnc in BOX_STEPS, not a system user), python3-venv
+ *  for agent's venvs (as BOX_STEPS), agent containment's users, and the nftables and dsh smoke checks. */
 export const PROJECT_STEPS = [
   UMASK_STEP,
   'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl gpg git openssl procps ripgrep nftables acl iproute2 python3-venv && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*',
-  'id ghproxy >/dev/null 2>&1 || useradd -r -U -M -d /nonexistent -s /usr/sbin/nologin ghproxy',
+  'id ghproxy >/dev/null 2>&1 || useradd -U -M -d /nonexistent -s /usr/sbin/nologin ghproxy',
   ...usersSteps(false),
   NFT_SMOKE_STEP,
   dshSmokeStep(false),

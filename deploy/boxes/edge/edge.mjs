@@ -334,14 +334,16 @@ const REPAIR_USER_PATHS = [
 ]
 /** The start script's first part (B24 fix), before it reads PORTS_MARKER and before any user's process starts. It
  *  guards the system files against the login users, a uid of 1000 or more (Debian's first uid for an account made
- *  without `-r`: E2B's `user`, browser and every containment user), and the login groups, a gid of 1000 or more or a
- *  group that holds a login user as a member or as its primary group (E2B's `user` in sudo, browser and browsermcp in
- *  the system group uploads), read with getent at each start, before the find. On the root filesystem outside
+ *  without `-r`: E2B's `user` and every user the template makes, browser, xvnc, ghproxy and the containment users), and
+ *  the login groups, a gid of 1000 or more or a group that holds a login user as a member or as its primary group
+ *  (E2B's `user` in sudo, browser and browsermcp in the system group uploads), read with getent at each start, before
+ *  the find. On the root filesystem outside
  *  REPAIR_EXCLUDES' contents and REPAIR_USER_PATHS, a path a login user owns becomes root:root, a path of a login group
  *  loses g+w, and every path but a sticky directory loses o+w, whoever owns it. Then it checks the same paths and stops
  *  the start, naming them, if any is left. A system user's or group's path keeps its owner and its group write bit (a
- *  package's daemon such as polkitd or colord, root:mail 2775 /var/mail, root:staff 2775 /var/local, and the template's
- *  xvnc and ghproxy, made with `-r`): no login user can change it, and taking it from its daemon can break the daemon.
+ *  package's daemon such as polkitd or colord, root:mail 2775 /var/mail, root:staff 2775 /var/local): no login user can
+ *  change it, and taking it from its daemon can break the daemon. A template built before xvnc and ghproxy were made
+ *  without `-r` has them below 1000, as system users the repair leaves alone, until it is rebuilt.
  *  The tree list is `/` less those excludes, so a top-level directory a new image or E2B build adds is covered, and
  *  /home, /tmp and the other excluded top directories are repaired and checked themselves: a writable /home would let
  *  a user replace another's home, and /tmp without the sticky bit another user's files. E2B's finalize phase, which
@@ -940,7 +942,7 @@ SH
   # and serves its web client and WebSocket on $ip:$LIVE_PORT, with no raw VNC port. Its own login and TLS are off: the
   # edge terminates TLS and is the only gate. -PublicIP keeps it from asking public STUN servers at start (it exits when
   # none answers); -IgnoreClientSettingsKasm keeps a viewer from raising the frame rate. KasmVNC 1.5.2 accepts
-  # -RectThreads but does not apply it (RUNBOOK). It runs as the system user xvnc (template.mjs), which browser can neither
+  # -RectThreads but does not apply it (RUNBOOK). It runs as its own user xvnc (template.mjs), which browser can neither
   # signal nor impersonate: whatever answers on the live view's port serves pages on dsh's origin, and browser runs
   # Chrome. On the B24 template that port is below 1024, which xvnc binds through Xkasmvnc's cap_net_bind_service. A
   # template before KasmVNC runs Xvfb, x11vnc and websockify with noVNC.

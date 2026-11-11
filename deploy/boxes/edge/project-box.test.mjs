@@ -47,8 +47,9 @@ test('a user box start script is byte-for-byte what it was before project boxes 
   // Then the repair took in /home, /tmp and the other excluded trees' top directories, leaving only what is in them; and
   // agent's row gained its npm prefix and its own program directories on PATH, since /usr/local is root's alone (containment.test.mjs).
   // Then the repair took ownership only from login users (uid 1000 or more) and g+w only from login groups, read with
-  // getent, so system daemons keep their paths (containment.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), '8e9525a296a26a027b5fb616ab201f212558a8bdba0cf8bc01397d3acd1f8074')
+  // getent, so system daemons keep their paths (containment.test.mjs). Then KasmVNC's comment named xvnc its own user
+  // rather than a system user, since the template makes it without `-r` (template.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), '9bac405ef38ce00fbe8a610b71ecadc6c00376ab22aeae0b02d666ee72345520')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {

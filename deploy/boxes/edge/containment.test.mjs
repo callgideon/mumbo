@@ -781,8 +781,13 @@ test('template: containment\'s users and groups, homes 0700 with the run-as TMPD
     }
     assert.deepEqual(r.lines('bind').slice(0, 3), ['chgrp xvnc T/Xkasmvnc', 'chmod 0750 T/Xkasmvnc', 'setcap cap_net_bind_service=+ep T/Xkasmvnc'])
   } finally { r.done() }
-  // The project box's GitHub proxy becomes its own system user (edge startScript).
-  assert.ok(PROJECT_STEPS.includes('id ghproxy >/dev/null 2>&1 || useradd -r -U -M -d /nonexistent -s /usr/sbin/nologin ghproxy'))
+  // The project box's GitHub proxy becomes its own user, with no home or login (edge startScript).
+  assert.ok(PROJECT_STEPS.includes('id ghproxy >/dev/null 2>&1 || useradd -U -M -d /nonexistent -s /usr/sbin/nologin ghproxy'))
+  // No template user is a system user (`useradd -r`): each gets a uid of 1000 or more, a login user's, whose paths the
+  // system repair takes and whose groups lose g+w there (edge systemRepair).
+  const useradds = [...BOX_STEPS, ...PROJECT_STEPS].flatMap(s => s.match(/\buseradd [^&|;]*/g) ?? [])
+  assert.ok(useradds.some(u => u.endsWith(' xvnc')) && useradds.some(u => u.endsWith(' ghproxy')), useradds.join('\n'))
+  assert.deepEqual(useradds.filter(u => /\s(-r|--system)\s/.test(u)), [])
   // nftables, setfacl, setcap and python3-venv (agent's venvs) are installed, not assumed from the base image;
   // iptables, which nothing on a template with the marker runs, is not.
   const pkgs = (steps) => steps.find(s => s.includes('apt-get install')).match(/--no-install-recommends ([^&]+?) &&/g).join(' ')
