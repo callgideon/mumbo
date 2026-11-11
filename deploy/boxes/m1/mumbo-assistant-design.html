@@ -1953,6 +1953,14 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>The output rules accept the allowed users first, then reset everyone else on those ports. So a socket whose user nft can't read is refused too, as <code>xt_owner</code> refused it.</li>
 </ul>
 </li>
+<li><strong>The box's own address</strong> <strong>[2026-11-11, B24 throwaway finding]:</strong> envd forwards every loopback listener to the box address (<code>socat … bind=169.254.0.21</code>).
+<ul>
+<li>Inside the box this adds nothing. The output rules match the port on any destination, and escape tests cover each protected port on 169.254.0.21.</li>
+<li>From outside, the client proxy could reach any loopback listener with a traffic token. So the input chain drops every new non-loopback TCP connection except to envd, dsh, the live view and the door (SYN-only, so no conntrack is needed), and keeps the WebRTC UDP drop.</li>
+<li>The template build lists TCP listeners after dsh starts. It fails when a listener owned by any user but <code>agent</code> is outside the reset set and not on a commented allowlist.</li>
+<li>The same build check fails when dsh's start line doesn't appear within 60 s, after the B24 image's startup hang.</li>
+</ul>
+</li>
 <li><strong>No root network path for the model</strong> <strong>[2026-11-11, B24 box-side review]:</strong> the owner rules only cover processes, so anything root fetches for the model gets past them.
 <ul>
 <li><code>web_fetch</code>'s HTTP provider (<code>web-fetch-http</code>) runs in root dsh and reaches loopback. From there, <code>http://127.0.0.1:9222/json/list</code> gives every open tab's URL and title, and <code>/json/close</code> closes tabs.</li>
