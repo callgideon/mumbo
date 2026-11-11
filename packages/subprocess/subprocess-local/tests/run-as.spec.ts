@@ -235,8 +235,12 @@ describe('run-as host facts', () => {
   onLinux('fails the plugin at load when the run-as user cannot search the directory that holds shell records', async () => {
     const own = ownIdentity()
     const records = realpathSync(tmpdir())
+    // The first directory on the way to the records that others cannot search: the records directory itself, or an
+    // ancestor such as a CI runner's 0750 home.
+    const prefixes = records.split('/').filter(Boolean).map((_, i, names) => `/${names.slice(0, i + 1).join('/')}`)
+    const blocked = prefixes.find(path => (statSync(path).mode & 0o001) === 0) ?? records
     await expect(new Context().plugin(LocalSubprocessRuntime, { runAs: runAs({ uid: own.uid + 1, gid: own.gid + 1, groups: [] }) }))
-      .rejects.toThrow(`subprocess-local: the run-as user (uid ${own.uid + 1}) cannot search ${JSON.stringify(records)}, so its shells cannot reach their activity records under ${JSON.stringify(records)}; set shellActivityDirectory to a directory it can search, such as /run/dsh-shell (root, 0711)`)
+      .rejects.toThrow(`subprocess-local: the run-as user (uid ${own.uid + 1}) cannot search ${JSON.stringify(blocked)}, so its shells cannot reach their activity records under ${JSON.stringify(records)}; set shellActivityDirectory to a directory it can search, such as /run/dsh-shell (root, 0711)`)
   })
 })
 

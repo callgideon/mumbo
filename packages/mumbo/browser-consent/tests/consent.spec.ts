@@ -203,8 +203,12 @@ describe('Config', () => {
     expect(() => Config({ browser, deniedUrls: [], uploadDirectory: uploads, uploadStaging: staging, uploadMaxBytes: 0 })).toThrow()
     expect(uploadStaging(`${staging}/`)).toBe(staging)
     expect(() => uploadStaging('uploads')).toThrow('uploadStaging "uploads" must be an absolute path to an existing directory, such as /var/lib/mumbo/uploads')
-    // /tmp itself: anyone can add entries to it.
-    expect(() => uploadStaging(uploads)).toThrow(`uploadStaging "${uploads}" must be owned by root or dsh's own user and writable by no other user`)
+    // A directory like /tmp: anyone can add entries to it.
+    const shared = join(staging, 'shared')
+    mkdirSync(shared)
+    onTestFinished(() => { rmSync(shared, { recursive: true, force: true }) })
+    chmodSync(shared, 0o1777)
+    expect(() => uploadStaging(shared)).toThrow(`uploadStaging "${shared}" must be owned by root or dsh's own user and writable by no other user`)
     const open = join(staging, 'open')
     mkdirSync(open)
     onTestFinished(() => { rmSync(open, { recursive: true, force: true }) })
