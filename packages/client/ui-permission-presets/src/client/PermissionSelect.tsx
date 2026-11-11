@@ -17,8 +17,10 @@ import type { PermissionCatalogState } from './catalog.ts'
 import { PERMISSION_ACCESS_NS } from './locales.ts'
 import {
   AUTO_REVIEW_PRESET as AUTO_REVIEW,
+  CONFIRMATION_PREFIXES,
   displayPermissionPreset,
   FULL_ACCESS_PRESET as FULL_ACCESS,
+  RUN_WILD_PRESET as RUN_WILD,
 } from './presentation.ts'
 import css from './PermissionSelect.module.css'
 
@@ -30,6 +32,8 @@ const permissionGlyphs = new Map<string, ReactNode>([
   ['workspace-write', <PermissionIconWorkspaceWriteRegular />],
   [FULL_ACCESS, <PermissionIconFullAccessRegular />],
   [AUTO_REVIEW, <PermissionIconAutoReviewRegular />],
+  // Run Wild has Full access's sandbox, so it shares its glyph.
+  [RUN_WILD, <PermissionIconFullAccessRegular />],
 ])
 
 /** Glyph for a permission option value; host-configured names outside the design set get none. */
@@ -50,12 +54,13 @@ function optionBadge(value: string, t: PermissionSelectProps['t']): string | und
   return value === AUTO_REVIEW ? t('auto.badge') : undefined
 }
 
-/** Resolve locale-owned copy for the shipped Auto option; preserve host copy for other presets. */
+/** Resolve locale-owned copy for the shipped Auto and Run Wild options; preserve host copy for other presets. */
 function optionDescription(
   option: PresetOption,
   t: PermissionSelectProps['t'],
 ): string | undefined {
-  return option.value === AUTO_REVIEW ? t('auto.description') : option.description
+  if (option.value === AUTO_REVIEW) return t('auto.description')
+  return option.value === RUN_WILD ? t('runWild.description') : option.description
 }
 
 /** Business face injected by the permission package's slot registration. */
@@ -130,7 +135,7 @@ export function PermissionSelect({
   const choose = (id: string): void => {
     setOpen(false)
     if (id === selection.currentValue) return
-    if (id === FULL_ACCESS || id === AUTO_REVIEW) {
+    if (CONFIRMATION_PREFIXES.has(id)) {
       setAcknowledged(false)
       setConfirmation(id)
       return
@@ -148,18 +153,7 @@ export function PermissionSelect({
     submit(id)
   }
 
-  const confirmationTitle = confirmation === AUTO_REVIEW
-    ? t('auto.confirm.title')
-    : t('confirm.title')
-  const confirmationDescription = confirmation === AUTO_REVIEW
-    ? t('auto.confirm.description')
-    : t('confirm.description')
-  const confirmationAcknowledge = confirmation === AUTO_REVIEW
-    ? t('auto.confirm.acknowledge')
-    : t('confirm.acknowledge')
-  const confirmationEnable = confirmation === AUTO_REVIEW
-    ? t('auto.confirm.enable')
-    : t('confirm.enable')
+  const confirm = confirmation === null ? undefined : CONFIRMATION_PREFIXES.get(confirmation)
 
   return (
     <>
@@ -190,15 +184,15 @@ export function PermissionSelect({
           </button>
         }
       />
-      {confirmation !== null && (
+      {confirmation !== null && confirm !== undefined && (
         <RiskConfirmation
           open
-          title={confirmationTitle}
-          description={confirmationDescription}
-          acknowledgeLabel={confirmationAcknowledge}
+          title={t(`${confirm}.title`)}
+          description={t(`${confirm}.description`)}
+          acknowledgeLabel={t(`${confirm}.acknowledge`)}
           cancelLabel={t('confirm.cancel')}
           closeLabel={t('close')}
-          confirmLabel={confirmationEnable}
+          confirmLabel={t(`${confirm}.enable`)}
           acknowledged={acknowledged}
           disabled={locked}
           onAcknowledgedChange={setAcknowledged}

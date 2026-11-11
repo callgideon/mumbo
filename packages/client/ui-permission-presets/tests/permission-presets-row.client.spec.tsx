@@ -133,6 +133,27 @@ describe('PermissionRow', () => {
     expect(dialog.isConnected).toBe(false)
   })
 
+  it('explains Run Wild before saving it as the default', async () => {
+    const wild = { ...catalog, defaultOptions: [...catalog.defaultOptions, { value: 'run-wild', name: 'run-wild' }] }
+    const mutate = vi.fn(() => Promise.resolve(ok(view('run-wild', 1))))
+    const ctx = { remote: { settings: {
+      describe: () => Promise.resolve(ok({ writable: true, hasDocument: false, namespaces: [view('read-only')] })),
+      mutate,
+    } } } as never
+    mount(new PermissionPresetSettingsController(new SettingsDescribeMirror(ctx, () => true), ctx,
+      { store: createSnapshotStore({ value: wild }), load: () => Promise.resolve(wild) }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Read Only' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Run Wild' }))
+    const dialog = screen.getByRole('dialog', { name: 'Start new sessions in Run Wild?' })
+    expect(dialog.textContent).toContain('New sessions will start in Run Wild')
+    expect(mutate).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'I understand Mumbo will act without asking' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Start in Run Wild' }))
+    await waitFor(() => { expect(mutate).toHaveBeenCalledOnce() })
+    expect(JSON.stringify(mutate.mock.calls[0])).toContain('run-wild')
+    expect(dialog.isConnected).toBe(false)
+  })
+
   it('hides an unavailable namespace and disables a read-only provider', async () => {
     const absent = derivedController({
       settings: {

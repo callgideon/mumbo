@@ -165,6 +165,34 @@ describe('PermissionSelect', () => {
     expect(trigger().getAttribute('title')).toBe('Run without a sandbox after an experimental same-model review of every native tool call and PTC inner call.')
   })
 
+  it('explains Run Wild before switching to it, with the Full access glyph and its own description', async () => {
+    const catalog = { ...CATALOG, options: [...CATALOG.options, { value: 'run-wild', name: 'run-wild' }] }
+    const { select, selection } = setup({ catalog })
+    fireEvent.click(trigger())
+    const option = screen.getByRole('menuitem', { name: 'Run Wild' })
+    expect(option.querySelector('svg')!.innerHTML)
+      .toBe(screen.getByRole('menuitem', { name: 'Full access' }).querySelector('svg')!.innerHTML)
+    fireEvent.click(option)
+
+    const dialog = screen.getByRole('dialog', { name: 'Turn on Run Wild?' })
+    expect(dialog.textContent).toContain('sends and posts as you, buys with saved payment methods, and deletes')
+    expect(dialog.textContent).toContain('merges, deploys and repository access still need your approval')
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(select).not.toHaveBeenCalled()
+
+    fireEvent.click(trigger())
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Run Wild' }))
+    const enable = screen.getByRole<HTMLButtonElement>('button', { name: 'Turn on Run Wild' })
+    expect(enable.disabled).toBe(true)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'I understand Mumbo will act without asking' }))
+    fireEvent.click(enable)
+    expect(select).toHaveBeenCalledExactlyOnceWith('run-wild')
+    act(() => { selection.set({ value: { currentValue: 'run-wild' } }) })
+    await act(async () => {})
+    expect(trigger().textContent).toBe('Run Wild')
+    expect(trigger().getAttribute('title')).toBe('Never asks: decides from context and your rules, acts, and logs what it did.')
+  })
+
   it('revokes open UI when locked or either source disappears', () => {
     const locked = setup()
     fireEvent.click(trigger())

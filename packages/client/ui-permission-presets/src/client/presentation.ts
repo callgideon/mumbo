@@ -6,6 +6,16 @@ export const FULL_ACCESS_PRESET = 'danger-full-access'
 /** Machine value of the experimental current-session review preset. */
 export const AUTO_REVIEW_PRESET = 'auto'
 
+/** Machine value of the mumbo preset in which the agent decides approvals and questions instead of asking. */
+export const RUN_WILD_PRESET = 'run-wild'
+
+/** Locale key prefix of each preset whose current-session switch first shows a risk confirmation. */
+export const CONFIRMATION_PREFIXES: ReadonlyMap<string, 'confirm' | 'auto.confirm' | 'runWild.confirm'> = new Map([
+  [FULL_ACCESS_PRESET, 'confirm'],
+  [AUTO_REVIEW_PRESET, 'auto.confirm'],
+  [RUN_WILD_PRESET, 'runWild.confirm'],
+])
+
 /** Locale dictionary key for a built-in permission preset label. */
 export type PermissionPresetLabelKey =
   | 'preset.readOnly'

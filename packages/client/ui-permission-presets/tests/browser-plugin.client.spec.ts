@@ -314,6 +314,30 @@ describe('ui-permission browser plugin', () => {
     await vi.waitFor(() => { expect(shell.state.getSnapshot().open).toBe(false) })
   })
 
+  it('offers Run Wild with its own detail and explanation, which a pick does not skip', async () => {
+    const b = await bench()
+    b.setCatalog({ ...CATALOG, options: [...CATALOG.options, { value: 'run-wild', name: 'run-wild' }] })
+    const proj = { sessionId: sid('s1') }
+    b.values.set(sid('s1'), { currentValue: 'danger-full-access' })
+    let options = await b.popup().options(proj, new AbortController().signal)
+    await vi.waitFor(async () => {
+      options = await b.popup().options(proj, new AbortController().signal)
+      expect(options.map(option => option.id)).toContain('run-wild')
+    })
+    expect(options.find(option => option.id === 'run-wild')).toEqual({
+      id: 'run-wild',
+      label: 'Run Wild',
+      detail: accessEn['runWild.description'],
+      confirmation: {
+        title: 'Turn on Run Wild?',
+        description: accessEn['runWild.confirm.description'],
+        acknowledgeLabel: 'I understand Mumbo will act without asking',
+        cancelLabel: 'Cancel',
+        confirmLabel: 'Turn on Run Wild',
+      },
+    })
+  })
+
   it('localizes the Auto description instead of displaying host English copy', async () => {
     const b = await bench()
     b.ctx.locale.setLocale('fr')
