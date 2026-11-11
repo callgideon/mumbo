@@ -8,7 +8,7 @@ const base = { PUBLIC_HOST: 'boxes.mumbo.si', LLM_HOST: 'llm.boxes.mumbo.si', BA
 const M1 = ['PROJECT_DOMAIN', 'APPROVE_HOST', 'GITHUB_AGENT_LOGIN', 'GITHUB_AGENT_ID', 'REQUIRED_CHECKS', 'DAILY_TOKENS_USER', 'DAILY_TOKENS_PROJECT', 'BOX_TEMPLATE', 'PROJECT_TEMPLATE',
   'AUDIT_PREFIX', 'GITHUB_AGENT_TOKEN', 'GITHUB_APP_ID', 'GITHUB_APP_KEY', 'GITHUB_MERGE_TOKEN', 'NTFY_TOPIC', 'SIGNIN_COOKIE', 'SUPABASE_URL', 'MUMBO_OAUTH_REDIRECT_URIS',
   'OPENROUTER_MODELS', 'OPENROUTER_API_KEY', 'OPENROUTER_ZDR', 'OPENROUTER_IMAGE_TOKENS', 'MCP_SERVER_WORKSPACE', 'DOOR_RATE_PER_MINUTE', 'DOOR_BURST',
-  'WORKER_TOKEN_HOURS']
+  'WORKER_TOKEN_HOURS', 'RUN_WILD_DEFAULT_EMAILS']
 /** config() with exactly `base` plus `vars` set among the variables it reads here. */
 function configWith(vars = {}) {
   const all = { ...Object.fromEntries(M1.map(k => [k, undefined])), ...base, ...vars }
@@ -167,4 +167,16 @@ test('a worker token lasts 8 hours by default; a value below 1 or not a number s
   assert.equal(configWith().workerTokenHours, 8)
   assert.equal(configWith({ WORKER_TOKEN_HOURS: '2' }).workerTokenHours, 2)
   for (const bad of ['0', '-1', 'abc', 'Infinity', '']) assert.throws(() => configWith({ WORKER_TOKEN_HOURS: bad }), /WORKER_TOKEN_HOURS/, bad)
+})
+
+test('RUN_WILD_DEFAULT_EMAILS: empty by default; exact addresses, trimmed and lowercased; any other entry stops the edge', () => {
+  assert.deepEqual(configWith().runWildDefaultEmails, [])
+  assert.deepEqual(configWith({ RUN_WILD_DEFAULT_EMAILS: ' , ' }).runWildDefaultEmails, [])
+  assert.deepEqual(configWith({ RUN_WILD_DEFAULT_EMAILS: ' Hi@Mumbo.si ,, a@x.com,' }).runWildDefaultEmails, ['hi@mumbo.si', 'a@x.com'])
+  for (const bad of ['@mumbo.si', '!a@mumbo.si', 'mumbo.si', 'a@', 'a b@x.com', 'a@b@x.com', 'hi@mumbo.si,@x.com']) {
+    assert.throws(() => configWith({ RUN_WILD_DEFAULT_EMAILS: bad }), /RUN_WILD_DEFAULT_EMAILS entry .* must be an exact address/, bad)
+  }
+  const tf = (f) => readFileSync(new URL(`../prod/${f}`, import.meta.url), 'utf8')
+  assert.match(tf('edge.tf'), /variable "run_wild_default_emails" \{[^}]*default\s*=\s*""/)
+  assert.match(tf('modules/edge/edge.tf'), /RUN_WILD_DEFAULT_EMAILS\s*=\s*var\.run_wild_default_emails\n/)
 })

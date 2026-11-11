@@ -14,6 +14,11 @@ variable "approver_emails" {
   type        = string
   default     = ""
 }
+variable "run_wild_default_emails" {
+  description = "RUN_WILD_DEFAULT_EMAILS: people whose person boxes start new Sessions in Run Wild where the image has it (comma-separated exact addresses, lowercased). Empty: nobody. Applies to boxes created afterwards."
+  type        = string
+  default     = ""
+}
 # Optional edge secrets: the task references an SSM parameter, and the exec role may read it, only when enabled. Create
 # the parameter first; a task whose parameter is missing does not start.
 variable "ntfy_enabled" {
@@ -64,18 +69,19 @@ variable "signin_cookie_name" {
 module "edge_us_east_1" {
   source = "./modules/edge"
 
-  name                  = local.name
-  edge_tag              = var.edge_tag
-  approver_emails       = var.approver_emails
-  ntfy_enabled          = var.ntfy_enabled
-  github_agent_login    = var.github_agent_login
-  github_agent_id       = var.github_agent_id
-  openrouter_models     = var.openrouter_models
-  openrouter_zdr        = var.openrouter_zdr
-  signin_cookie_name    = var.signin_cookie_name
-  node_count            = var.node_count
-  ecr                   = local.ecr
-  cert_validation_fqdns = [for r in aws_route53_record.cert : r.fqdn]
+  name                    = local.name
+  edge_tag                = var.edge_tag
+  approver_emails         = var.approver_emails
+  run_wild_default_emails = var.run_wild_default_emails
+  ntfy_enabled            = var.ntfy_enabled
+  github_agent_login      = var.github_agent_login
+  github_agent_id         = var.github_agent_id
+  openrouter_models       = var.openrouter_models
+  openrouter_zdr          = var.openrouter_zdr
+  signin_cookie_name      = var.signin_cookie_name
+  node_count              = var.node_count
+  ecr                     = local.ecr
+  cert_validation_fqdns   = [for r in aws_route53_record.cert : r.fqdn]
 
   vpc_id                 = module.cell_us_east_1.vpc_id
   public_subnets         = module.cell_us_east_1.public_subnets

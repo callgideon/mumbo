@@ -14,6 +14,7 @@ terraform {
 variable "name" { type = string }
 variable "edge_tag" { type = string }
 variable "approver_emails" { type = string }
+variable "run_wild_default_emails" { type = string }
 variable "ntfy_enabled" { type = bool }
 variable "github_agent_login" { type = string }
 variable "github_agent_id" { type = string }
@@ -392,6 +393,8 @@ resource "aws_ecs_task_definition" "edge" {
         AUDIT_PREFIX         = local.audit_prefix
         OPENROUTER_MODELS    = var.openrouter_models
         OPENROUTER_ZDR       = tostring(var.openrouter_zdr)
+        # Person boxes created afterwards start new Sessions in Run Wild (RUNBOOK "Run Wild").
+        RUN_WILD_DEFAULT_EMAILS = var.run_wild_default_emails
       } : { name = k, value = v }]
       secrets = concat([for k, p in local.edge_ssm : { name = k, valueFrom = "${local.ssm}/${p}" }], [for k, arn in local.edge_secrets : { name = k, valueFrom = arn }], [
         { name = "E2B_API_KEY", valueFrom = "${var.e2b_secret_arn}:TEAM_API_KEY::" },

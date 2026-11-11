@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { startScript, boxSite, boxes, assistantInstructions, DENIED_URLS, MUMBO_MCP_OVERLAY, MUMBO_MCP_PACKAGE, mumboMcpKey } from './edge.mjs'
+import { startScript, boxSite, boxes, assistantInstructions, DENIED_URLS, MUMBO_MCP_OVERLAY, MUMBO_MCP_PACKAGE, mumboMcpKey, RUN_WILD_OVERLAY, RUN_WILD_PACKAGE } from './edge.mjs'
 import { memoryStore } from './store.mjs'
 import { projects } from './projects.mjs'
 import { templateArgs } from './template.mjs'
@@ -36,7 +36,8 @@ test('a user box start script is byte-for-byte what it was before project boxes 
   // 2026-11-11, on an image with the harness only: the containment rows disable web-fetch-http, which fetches from root
   // dsh outside the firewall and reaches loopback, and send web_fetch to the DeepSeek Fetch API through the edge's model
   // host (containment.test.mjs). Then the role's /home/agent line moved into the script, added on a B24 image only.
-  assert.equal(createHash('sha256').update(s).digest('hex'), '53e7f6b31c46f25ff31b5b2b44f0a4e402b171fb79ac40e5910311c6ade471ad')
+  // Then RW1's Run Wild block and $RUNWILD_PATCH after $MCP_PATCH, behind the image's @mumbo/run-wild (the Run Wild test below).
+  assert.equal(createHash('sha256').update(s).digest('hex'), 'dbd2f52878ef794cc7ad10f504d68ba0518f8fc309b07015cfa7d8e83df5771d')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -375,12 +376,15 @@ test('create() starts a project box from projectTemplate with the owners as pane
     },
   }
   const store = memoryStore()
-  const cfg = { ...c, template: 'T-user', projectTemplate: 'T-project', idleMs: 1000, maxRunningUnits: 0 }
+  const cfg = { ...c, template: 'T-user', projectTemplate: 'T-project', idleMs: 1000, maxRunningUnits: 0, runWildDefaultEmails: ['a@x.com'] }
   const { id } = await projects({ store, admitted: () => true, log: () => {} }).create('Owner@x.com', 'P')
   const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'P', boxFiles, log: () => {} })
   await b.ensure(`project:${id}`)
   await b.ensure('a@x.com')
   assert.deepEqual(made, ['T-project', 'T-user'])
+  // The person box's own email decides its Run Wild default.
+  assert.ok(written[1].includes('export MUMBO_RUN_WILD=1 MUMBO_NEW_SESSION_PRESET=run-wild\n'))
+  assert.ok(!written[0].includes('RUN_WILD') && !written[0].includes('run-wild'))
   assert.match(written[0], /MUMBO_PANEL_ADMINS='owner@x\.com'/)
   assert.ok(!written[1].includes('MUMBO_PANEL_ADMINS'))
   // The person box gets its own door key, derived from the edge key and its id, and its handle; the project box neither.
@@ -421,6 +425,37 @@ test('door to Mumbo: a person box writes its key root-only and patches the perso
   // A project box gets none of it, even if handed the values.
   const p = startScript({ ...c, projectDomain: 'boxes.x' }, 'T', boxSite({ ...c, projectDomain: 'boxes.x' }, 'project:0123456789abcdef'), 'role', 'K', boxFiles, [], mcp)
   assert.ok(!p.includes('MCP_PATCH') && !p.includes('KEY_-1') && !p.includes('mumbo/mcp'))
+})
+
+test('Run Wild: a person box patches its overlay after the door\'s and exports MUMBO_RUN_WILD only when the image ships it and links @mumbo/run-wild; the default preset only for listed emails; a project box never', () => {
+  const listed = { ...c, runWildDefaultEmails: ['a@x.com'] }
+  const u = startScript(listed, 'T', boxSite(listed, 'a@x.com'), 'role', undefined, boxFiles, [], { key: 'KEY', principal: 'a' }, 'A@x.com')
+  assert.ok(u.includes(' $MCP_PATCH $RUNWILD_PATCH '), 'patched after the door overlay')
+  assert.ok(at(u, 'MCP_PATCH="--patch') < at(u, '# Run Wild'))
+  // A person box without the door's values still gets it.
+  assert.ok(startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles).includes(' $RUNWILD_PATCH '))
+  const dir = mkdtempSync(join(tmpdir(), 'mumbo-runwild-'))
+  const overlay = join(dir, RUN_WILD_OVERLAY), pkg = join(dir, RUN_WILD_PACKAGE)
+  const run = (script) => {
+    const from = at(script, '# Run Wild'), to = script.indexOf('\nfi\n', from) + 4
+    return execFileSync('sh', ['-c', `set -eu\n${script.slice(from, to).replaceAll(RUN_WILD_OVERLAY, overlay).replaceAll(RUN_WILD_PACKAGE, pkg)}echo "$RUNWILD_PATCH|\${MUMBO_RUN_WILD-}|\${MUMBO_NEW_SESSION_PRESET-}"`], { encoding: 'utf8' }).trim()
+  }
+  const other = startScript(listed, 'T', boxSite(listed, 'b@x.com'), 'role', undefined, boxFiles, [], undefined, 'b@x.com')
+  try {
+    // An image without the overlay, or with it but without the linked package: nothing, the listed person included.
+    assert.equal(run(u), '||')
+    mkdirSync(join(overlay, '..'), { recursive: true })
+    writeFileSync(overlay, '')
+    assert.equal(run(u), '||')
+    mkdirSync(join(pkg, '..'), { recursive: true })
+    writeFileSync(pkg, '{}')
+    assert.equal(run(u), `--patch ${overlay}|1|run-wild`)
+    assert.equal(run(other), `--patch ${overlay}|1|`, 'an unlisted person gets the preset, not the default')
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+  // A project box never mounts it, even with its principal listed.
+  const pc = { ...c, projectDomain: 'boxes.x', runWildDefaultEmails: ['project:0123456789abcdef'] }
+  const p = startScript(pc, 'T', boxSite(pc, 'project:0123456789abcdef'), 'role', 'K', boxFiles, [], undefined, 'project:0123456789abcdef')
+  assert.ok(!p.includes('RUNWILD') && !p.includes('RUN_WILD') && !p.includes('run-wild'))
 })
 
 test('relay replies: a project box writes its token root-only and exports the edge settings only when the image\'s project overlay reads them; a person box gets none', () => {

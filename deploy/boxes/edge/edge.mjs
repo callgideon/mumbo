@@ -26,6 +26,12 @@ const allowList = (value) => {
   for (const e of entries) if (e.startsWith('!') && !/^![^@\s!]+@[^@\s]+$/.test(e)) throw new Error(`edge: ALLOWED_EMAILS entry ${JSON.stringify(e)} must be !local@domain`)
   return entries
 }
+/** A list of exact addresses (`local@domain`), lowercased. An `@domain`, `!address` or other malformed entry fails at startup, since it would silently match nobody. */
+const addresses = (name) => {
+  const entries = list(env(name, ''))
+  for (const e of entries) if (!/^[^@\s!]+@[^@\s]+$/.test(e)) throw new Error(`edge: ${name} entry ${JSON.stringify(e)} must be an exact address, local@domain`)
+  return entries
+}
 const optional = (name) => process.env[name] || undefined
 /** Required CI check names (case-sensitive). An empty list would drop the merge gate's CI requirement, so it fails. */
 const checkNames = (name, fallback) => {
@@ -120,6 +126,8 @@ export const config = () => ({
   // B37: a worker token's lifetime from its mint (workers.mjs workerTokens); the lease, checked on every git request, ends
   // a worker's access sooner.
   workerTokenHours: atLeast('WORKER_TOKEN_HOURS', 1, 8),
+  // RW1: the people whose person boxes start new Sessions in Run Wild, where the image has it (startScript); empty: nobody.
+  runWildDefaultEmails: addresses('RUN_WILD_DEFAULT_EMAILS'),
 })
 /** A setting that must be one of `values`; anything else fails at start. */
 function oneOf(name, values, fallback) {
@@ -186,6 +194,12 @@ export const MUMBO_MCP_PACKAGE = '/src/node_modules/@mumbo/mcp/package.json'
 /** The person's @mumbo/mcp principal handle (`^[a-z][a-z0-9-]{0,31}$`): their email's local part, lowercased, each run of
  *  other characters a `-`, without leading non-letters or trailing `-`, cut to 32 characters; `person` when none is left. */
 export const mcpPrincipal = (email) => email.toLowerCase().split('@')[0].replace(/[^a-z0-9]+/g, '-').replace(/^[^a-z]+/, '').slice(0, 32).replace(/-+$/, '') || 'person'
+
+// ---- Run Wild (RW1). A person box patches @mumbo/run-wild's person overlay and exports MUMBO_RUN_WILD, which adds the
+// run-wild preset to the image's permission row, when the image ships both files below (startScript).
+export const RUN_WILD_OVERLAY = '/src/packages/mumbo/run-wild/examples/person.overlay.yml'
+/** The overlay names `@mumbo/run-wild` bare, which loads only when the root package links it into /src/node_modules. */
+export const RUN_WILD_PACKAGE = '/src/node_modules/@mumbo/run-wild/package.json'
 
 /** The role line on agent's home, which exists and is a model root only under containment (B24), and is outside backups
  *  (backupCommand). The start script adds it to the role on a B24 image only. */
@@ -546,7 +560,8 @@ ${person ? identity('browsermcp', '$BMCP_UID', '$BMCP_GID', '$UPLOADS_GID') + id
 // and box/gh as read by main() at start, written into project boxes. panelAdmins: the project owners' emails, for MUMBO_PANEL_ADMINS.
 // cfg.agentLogin and cfg.agentId (GITHUB_AGENT_LOGIN, GITHUB_AGENT_ID) become a project box's MUMBO_GITHUB_APP_LOGIN and
 // MUMBO_GITHUB_APP_USER_ID. mumboMcp: a person box's { key: mumboMcpKey, principal: mcpPrincipal } for the door to Mumbo.
-export function startScript(cfg, token, site = boxSite(cfg, ''), role = '', memberKeyText, boxFiles, panelAdmins = [], mumboMcp) {
+// email: a person box's email; when cfg.runWildDefaultEmails lists it, its new Sessions start in Run Wild.
+export function startScript(cfg, token, site = boxSite(cfg, ''), role = '', memberKeyText, boxFiles, panelAdmins = [], mumboMcp, email) {
   const llm = `https://${cfg.llmHost}`
   // dsh's OpenRouter route (@deepseek-ai/dsh-llm-pi-ai, the base composition's row llm-pi-ai) through the model host,
   // keyed by the box token. Images leave 8 MiB of OPENROUTER_MAX_BODY for the text.
@@ -688,6 +703,13 @@ if [ -f ${MUMBO_MCP_OVERLAY} ] && [ -f ${MUMBO_MCP_PACKAGE} ]; then
 chmod 0600 /root/.mumbo/mcp.key
 export MUMBO_MCP_PORT=${MUMBO_MCP_PORT} MUMBO_MCP_KEY_FILE=/root/.mumbo/mcp.key MUMBO_MCP_PRINCIPAL=${sq(mumboMcp.principal)} MUMBO_MCP_ASSISTANT_CWD=/root/projects
 MCP_PATCH="--patch ${MUMBO_MCP_OVERLAY}"
+fi
+` : ''}${site.desktop ? `# Run Wild (@mumbo/run-wild), when the image ships its person overlay and links the package, patched after the door's.
+# MUMBO_RUN_WILD offers the preset; MUMBO_NEW_SESSION_PRESET makes it new Sessions' default (edge RUN_WILD_DEFAULT_EMAILS).
+RUNWILD_PATCH=
+if [ -f ${RUN_WILD_OVERLAY} ] && [ -f ${RUN_WILD_PACKAGE} ]; then
+export MUMBO_RUN_WILD=1${email && cfg.runWildDefaultEmails?.includes(email.toLowerCase()) ? ' MUMBO_NEW_SESSION_PRESET=run-wild' : ''}
+RUNWILD_PATCH="--patch ${RUN_WILD_OVERLAY}"
 fi
 ` : ''}${site.desktop ? `# Desktop control on :1 (@deepseek-ai/dsh-computer-use-x11), when the image ships the package and xdotool.
 CU_PATCH=
@@ -925,7 +947,7 @@ ${site.desktop ? '' : `PATH=/usr/local/lib/mumbo/bin:$PATH NODE_USE_ENV_PROXY=1 
 `}HOME=/root DSH_HOME=/root/.dsh DSH_AGENTS_HOME="$AGENTS_HOME" DSH_TELEMETRY_DISABLED=1 \\
 DEEPSEEK_BASE_URL=${llm}/anthropic DEEPSEEK_SEARCH_BASE_URL=${llm} DEEPSEEK_API_KEY=${token} \\
 nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\
-  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml${openrouter ? ' --patch /root/.mumbo/models.overlay.yml' : ''} $LINKS_PATCH${site.desktop ? ' $CU_PATCH $WELCOME_PATCH $ASSISTANT_PATCH' : ''}${site.desktop && mumboMcp ? ' $MCP_PATCH' : ''}${memberKeyText ? ' $PROJECT_PATCH' : ''} $CONTAINMENT_PATCH \\
+  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml${openrouter ? ' --patch /root/.mumbo/models.overlay.yml' : ''} $LINKS_PATCH${site.desktop ? ' $CU_PATCH $WELCOME_PATCH $ASSISTANT_PATCH' : ''}${site.desktop && mumboMcp ? ' $MCP_PATCH' : ''}${site.desktop ? ' $RUNWILD_PATCH' : ''}${memberKeyText ? ' $PROJECT_PATCH' : ''} $CONTAINMENT_PATCH \\
   --no-open --host "$ip" --port $DSH_PORT --public-url ${site.publicUrl} --trusted-host ${cfg.publicHost}${site.host === cfg.publicHost ? '' : ` --trusted-host ${site.host}`} > /root/dsh.log 2>&1 &
 `
 }
@@ -1117,7 +1139,7 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
       await box.files.write('/root/.mumbo/start.sh', startScript(cfg, signBox(edgeKey, email, box.sandboxId), boxSite(cfg, email), roleInstructions(cfg, email),
         email.startsWith('project:') ? memberKey(edgeKey, box.sandboxId).toString('base64url') : undefined, boxFiles,
         email.startsWith('project:') ? await ownersOf(store, email.slice('project:'.length)) : undefined,
-        email.startsWith('project:') ? undefined : { key: mumboMcpKey(edgeKey, box.sandboxId), principal: mcpPrincipal(email) }))
+        email.startsWith('project:') ? undefined : { key: mumboMcpKey(edgeKey, box.sandboxId), principal: mcpPrincipal(email) }, email))
       if (restoreUrl) {
         const ok = await run(box, restoreCommand(restoreUrl), 660_000).then(() => true, () => false)
         say({ ...(ok ? {} : { level: 'error' }), msg: 'restore', user: email, box: box.sandboxId, ok, ...(pin && { versionId: pin.versionId }) })
