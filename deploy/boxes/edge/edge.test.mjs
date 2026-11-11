@@ -7,6 +7,7 @@ import { inParallel, signBox, verifyBox, userPrefix, budget, needsLaunch, boxHea
 import { presignGetter } from './cells.mjs'
 import { memoryStore, redisStore } from './store.mjs'
 import { generateKeyPairSync, createSign } from 'node:crypto'
+import { SandboxError, SandboxNotFoundError, SandboxNotRunningError, SandboxUnreachableError, TimeoutError } from 'e2b'
 
 const cfg = { pageAfterMs: 3000, publicHost: 'boxes.example', projectDomain: 'boxes.example', llmHost: 'llm.example', template: 'mumbo-box', idleMs: 60_000, backupEveryMs: 600_000, allowed: ['@x.com'], egressIps: [], signinCookie: '_oauth2_proxy_mumbo', upstream: 'https://model.example', edgeRegion: 'us-east-1' }
 const PROXY = new URL('http://127.0.0.1:1')
@@ -153,7 +154,7 @@ test('box creation stops at the running-box cap', async () => {
 })
 
 test('user router refuses requests without a signed-in email', async () => {
-  const s = userServer({ cfg, box: { ensure: async (e) => { if (e !== 'a@x.com') assert.fail('must not route'); throw new Error('starting') }, firstSetUp: async () => false, touch() {}, forget() {} }, log: () => {} })
+  const s = userServer({ cfg, box: { ensure: async (e) => { if (e !== 'a@x.com') assert.fail('must not route'); throw new Error('starting') }, firstSetUp: async () => false, touch() {}, uncache() {} }, log: () => {} })
   const port = await listen(s)
   assert.equal((await call(port)).status, 401)
   assert.equal((await call(port, { headers: { 'x-forwarded-email': 'z@other.com' } })).status, 403)
@@ -163,7 +164,7 @@ test('user router refuses requests without a signed-in email', async () => {
 })
 
 test('user router sends a cookie-less browser to its own launch token', async () => {
-  const s = userServer({ cfg, box: { ensure: async (e) => ({ id: 'b1', token: e === 'a@x.com' ? 'TA' : 'TB' }), touch() {}, forget() {} }, log: () => {} })
+  const s = userServer({ cfg, box: { ensure: async (e) => ({ id: 'b1', token: e === 'a@x.com' ? 'TA' : 'TB' }), touch() {}, uncache() {} }, log: () => {} })
   const port = await listen(s)
   const r = await call(port, { headers: { 'x-forwarded-email': 'A@x.com' } })
   s.close()
@@ -257,7 +258,7 @@ test('ALB identity: accepts our ALB\'s signed token, rejects other signers, bad 
 })
 
 test('user router behind an ALB trusts only the verified token, never the email header', async () => {
-  const s = userServer({ cfg, verifyAlb: async (t) => (t === 'good' ? 'a@x.com' : undefined), box: { ensure: async () => ({ id: 'b1', token: 'TA' }), touch: async () => {}, forget: async () => {} }, log: () => {} })
+  const s = userServer({ cfg, verifyAlb: async (t) => (t === 'good' ? 'a@x.com' : undefined), box: { ensure: async () => ({ id: 'b1', token: 'TA' }), touch: async () => {}, uncache() {} }, log: () => {} })
   const port = await listen(s)
   assert.equal((await call(port, { headers: { 'x-forwarded-email': 'a@x.com' } })).status, 401)
   const r = await call(port, { headers: { 'x-amzn-oidc-data': 'good' } })
@@ -275,7 +276,7 @@ test('an unexpected throw answers 500 or closes the upgrade, and the log has the
     req.end()
   })
   // A box whose touch throws (after the box is ready), and an identity check that throws (before any box).
-  const touchThrows = { box: { ensure: async () => ({ id: 'b1', token: 'T' }), touch: () => { throw new Error('touch broke') }, forget() {} } }
+  const touchThrows = { box: { ensure: async () => ({ id: 'b1', token: 'T' }), touch: () => { throw new Error('touch broke') }, uncache() {} } }
   const identityThrows = { verifyAlb: () => { throw new Error('verifier broke') }, box: {} }
   // The touch throw inside an upgrade is that upgrade's own box failure (closed, not logged); the identity throw is not.
   for (const [opts, error, logged] of [[touchThrows, 'touch broke', 1], [identityThrows, 'verifier broke', 2]]) {
@@ -295,7 +296,7 @@ test('an unexpected throw answers 500 or closes the upgrade, and the log has the
 test('a client reset while an upgrade waits on its box destroys the socket and does not throw out of the edge', async () => {
   let waiting
   const ensured = new Promise(r => { waiting = r })
-  const s = userServer({ cfg, box: { ensure: () => { waiting(); return new Promise(() => {}) }, touch() {}, forget() {} }, log: () => {} })
+  const s = userServer({ cfg, box: { ensure: () => { waiting(); return new Promise(() => {}) }, touch() {}, uncache() {} }, log: () => {} })
   let socket
   s.on('upgrade', (_, sock) => { socket = sock })
   const port = await listen(s)
@@ -336,11 +337,12 @@ test('redis store has the same contract', { skip: !process.env.TEST_REDIS_URL &&
   await store.close()
 })
 
-test('a box whose snapshot cannot be resumed is replaced from backup instead of stranding the user', async () => {
+test('a box whose snapshot E2B answers it cannot resume is replaced from backup instead of stranding the user', async () => {
   const e2b = fakeE2B(); const killed = []
   e2b.made.push({ id: 'broken', opts: {} })
   e2b.Sandbox.list = (o) => ({ hasNext: true, nextItems: async function () { this.hasNext = false; return o.query.metadata ? e2b.made.filter(m => m.id !== 'gone').map(m => ({ sandboxId: m.id, state: m.id === 'broken' ? 'paused' : 'running', startedAt: m.id })) : [] } })
-  e2b.Sandbox.connect = async () => { throw new Error('snapshot not found in storage') }
+  // The SDK's error for an API answer it has no class for: a SandboxError carrying the HTTP status.
+  e2b.Sandbox.connect = async () => { throw Object.assign(new SandboxError('500: Failed to create sandbox: snapshot not found in storage'), { statusCode: 500 }) }
   e2b.Sandbox.kill = async (id) => { killed.push(id); e2b.made = e2b.made.filter(m => m.id !== id); e2b.made.forEach(() => {}) }
   const b = boxes({ cells: oneCell(e2b, { presignGet: async () => undefined, presignPut: async () => 'P' }), store: memoryStore(), cfg, edgeKey: 'k', log: () => {} })
   const r = await b.ensure('a@x.com')
@@ -601,7 +603,7 @@ test('desktop live view: /desktop/ goes to the box\'s live view, everything else
 test('the live view\'s pages may connect only to their own host, and a page that opened the public host keeps no handle to it', async () => {
   const upstream = createServer((req, res) => res.writeHead(200, { 'content-type': 'text/html', ...(req.url === '/own-csp' ? { 'content-security-policy': "default-src 'self'" } : {}) }).end('page'))
   await new Promise(r => upstream.listen(0, '127.0.0.1', r))
-  const box = { ensure: async () => ({ id: 'ubox', token: 'T', proxy: new URL(`http://127.0.0.1:${upstream.address().port}`) }), touch: async () => {}, forget: async () => {} }
+  const box = { ensure: async () => ({ id: 'ubox', token: 'T', proxy: new URL(`http://127.0.0.1:${upstream.address().port}`) }), touch: async () => {}, uncache() {} }
   const server = userServer({ cfg: { ...cfg, approveHost: 'approve.example' }, box, signin: () => false, log: () => {} })
   const port = await listen(server)
   const get = (path, host = cfg.publicHost) => call(port, { path, headers: { host, 'x-forwarded-email': 'a@x.com', cookie: 'dsh-auth-x=1' } })
@@ -691,7 +693,7 @@ test('projects: owner creates and lists; adding a second member is refused by th
 
 test('project paths redirect to the project\'s own host, which members reach with its launch path at /', async () => {
   const ensured = []
-  const box = { ensure: async (principal) => { ensured.push(principal); return { id: principal === 'a@x.com' ? 'ubox' : 'pbox', token: 'TOK' } }, touch: async () => {}, forget: async () => {} }
+  const box = { ensure: async (principal) => { ensured.push(principal); return { id: principal === 'a@x.com' ? 'ubox' : 'pbox', token: 'TOK' } }, touch: async () => {}, uncache() {} }
   const proj = projectStore({ store: memoryStore(), admitted: () => true, log: () => {} })
   const { id } = await proj.create('a@x.com', 'P')
   const server = userServer({ cfg, box, projects: proj, log: () => {} })
@@ -933,7 +935,7 @@ test('role instructions: assistant with write consent and desktop sign-in; coord
 
 test('home page lists the assistant, desktop and the member\'s projects without starting a box, escaping names', async () => {
   const ensured = []
-  const box = { ensure: async (p) => { ensured.push(p); return { id: 'x', token: 'T' } }, touch: async () => {}, forget: async () => {} }
+  const box = { ensure: async (p) => { ensured.push(p); return { id: 'x', token: 'T' } }, touch: async () => {}, uncache() {} }
   const proj = projectStore({ store: memoryStore(), admitted: () => true, log: () => {} })
   const { id } = await proj.create('a@x.com', '<b>Shop</b>')
   await proj.create('c@x.com', 'Not mine')
@@ -952,7 +954,7 @@ test('home page lists the assistant, desktop and the member\'s projects without 
 
 test('never-pause keepalive drops a box E2B no longer has', async () => {
   const e2b = fakeE2B()
-  e2b.Sandbox.setTimeout = async (id) => { throw new Error(`Sandbox ${id} not found`) }
+  e2b.Sandbox.setTimeout = async (id) => { throw new SandboxNotFoundError(`Sandbox ${id} not found`) }
   const store = memoryStore()
   const b = boxes({ cells: oneCell(e2b, { presignGet: async () => undefined, presignPut: async () => 'PUT' }), store, cfg: { ...cfg, pauseIdle: false }, edgeKey: 'k', log: () => {} })
   const { id } = await b.ensure('a@x.com')
@@ -997,7 +999,7 @@ test('routing: browser member headers are stripped; member-capable project boxes
   const capable = (await proj.create('a@x.com', 'Capable')).id
   const legacy = (await proj.create('a@x.com', 'Legacy')).id
   const proxy = new URL(`http://127.0.0.1:${upstream.address().port}`)
-  const box = { ensure: async (p) => p === `project:${capable}` ? { id: 'pbox', token: 'OWNER', proxy, member: (e) => memberHeader(key, e) } : { id: p === 'a@x.com' ? 'ubox' : 'lbox', token: 'OWNER', proxy }, touch: async () => {}, forget: async () => {} }
+  const box = { ensure: async (p) => p === `project:${capable}` ? { id: 'pbox', token: 'OWNER', proxy, member: (e) => memberHeader(key, e) } : { id: p === 'a@x.com' ? 'ubox' : 'lbox', token: 'OWNER', proxy }, touch: async () => {}, uncache() {} }
   const server = userServer({ cfg, box, projects: proj, log: () => {} })
   const port = await listen(server)
   const go = (host, path = '/', extra = {}) => call(port, { path, headers: { host, 'x-forwarded-email': 'a@x.com', accept: 'text/html', ...extra } })
@@ -1132,7 +1134,7 @@ test('a !address entry denies exactly that address, before any allow match', () 
 
 // ---- edge pages: invite-only, first set-up, later start, capacity
 const pageOf = async (cfgx, ensure, email = 'a@x.com') => {
-  const s = userServer({ cfg: cfgx, box: { ensure, touch() {}, forget() {} }, log: () => {} })
+  const s = userServer({ cfg: cfgx, box: { ensure, touch() {}, uncache() {} }, log: () => {} })
   const r = await call(await listen(s), { headers: { 'x-forwarded-email': email } })
   s.close()
   return r
@@ -1162,7 +1164,7 @@ const gatedServer = async (presign, email = 'a@x.com') => {
   const g = gated(); const store = memoryStore()
   const b = boxes({ cells: oneCell(g.e2b, { presignGet: presign, presignPut: async () => 'P' }), store, cfg, edgeKey: 'k', log: () => {} })
   let ensures = 0
-  const counted = { ...b, ensure: (k) => { ensures++; return b.ensure(k) }, firstSetUp: b.firstSetUp, touch: b.touch, forget: b.forget }
+  const counted = { ...b, ensure: (k) => { ensures++; return b.ensure(k) }, firstSetUp: b.firstSetUp, touch: b.touch, uncache: b.uncache }
   const s = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: counted, log: () => {} })
   return { ...g, b, store, s, ensures: () => ensures, port: await listen(s) }
 }
@@ -1217,7 +1219,7 @@ test('a non-navigation request still waits for the box', async () => {
 })
 test('capacity page is kept and needs no first-set-up lookup', async () => {
   let lookups = 0
-  const s = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure: async () => { throw Object.assign(new Error('capacity'), { capacity: true }) }, firstSetUp: async () => { lookups++ }, touch() {}, forget() {} }, log: () => {} })
+  const s = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure: async () => { throw Object.assign(new Error('capacity'), { capacity: true }) }, firstSetUp: async () => { lookups++ }, touch() {}, uncache() {} }, log: () => {} })
   const r = await call(await listen(s), { headers: nav })
   s.close()
   assert.match(r.body, /at capacity/)
@@ -1227,7 +1229,7 @@ test('project routes get neutral text, never the person texts', async () => {
   const id = '0123456789abcdef'
   let lookups = 0
   for (const ensure of [() => new Promise(() => {}), async () => { throw new Error('boom') }]) {
-    const s = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure, firstSetUp: async () => { lookups++; return true }, touch() {}, forget() {} }, projects: { isMember: async () => true }, log: () => {} })
+    const s = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure, firstSetUp: async () => { lookups++; return true }, touch() {}, uncache() {} }, projects: { isMember: async () => true }, log: () => {} })
     const r = await call(await listen(s), { headers: { ...nav, host: `p-${id}.${cfg.projectDomain}` } })
     s.close()
     assert.match(r.body, /Starting this project's computer/)
@@ -1237,7 +1239,7 @@ test('project routes get neutral text, never the person texts', async () => {
 })
 test('a fast non-capacity failure uses the same first-set-up choice as a slow one, and is logged once', async () => {
   const logs = []
-  const mk = (first) => userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure: async () => { throw new Error('box is being created') }, firstSetUp: async () => first, touch() {}, forget() {} }, log: (l) => logs.push(l) })
+  const mk = (first) => userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure: async () => { throw new Error('box is being created') }, firstSetUp: async () => first, touch() {}, uncache() {} }, log: (l) => logs.push(l) })
   for (const [first, text] of [[true, /Setting up your computer/], [false, /Starting your computer/]]) {
     const s = mk(first)
     const r = await call(await listen(s), { headers: nav })
@@ -1255,7 +1257,7 @@ test('a failed restore shows its own page, keeps it while the next attempt runs,
     return { id: 'b1', token: 'T' }
   }
   const servers = []
-  const open = async () => { const s = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure, firstSetUp: async () => false, touch() {}, forget() {} }, log: () => {} }); servers.push(s); return listen(s) }
+  const open = async () => { const s = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure, firstSetUp: async () => false, touch() {}, uncache() {} }, log: () => {} }); servers.push(s); return listen(s) }
   const failed = /Your computer could not be restored from its backup\. The operator has been alerted\./
   try {
     const port = await open()
@@ -1305,7 +1307,7 @@ test('after a completed first set-up, a restart (box exists, still no backup) sa
   await t.store.patchBox('b1', { launch: undefined })
   await t.b.ensure('a@x.com')
   assert.equal(await t.b.firstSetUp('a@x.com'), false)
-  const slow = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure: () => new Promise(() => {}), firstSetUp: t.b.firstSetUp, touch() {}, forget() {} }, log: () => {} })
+  const slow = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure: () => new Promise(() => {}), firstSetUp: t.b.firstSetUp, touch() {}, uncache() {} }, log: () => {} })
   const r = await call(await listen(slow), { headers: nav })
   slow.close(); t.s.close()
   assert.match(r.body, /Starting your computer/)
@@ -1351,7 +1353,7 @@ function fakeCell(region, { backups = new Set(), port = 1, maxUnits = 0 } = {}) 
   const Sandbox = {
     list: ({ query }) => { calls.push(['list', query.metadata ?? 'all']); let more = true; return { get hasNext() { return more }, nextItems: async () => { more = false; return listed(query) } } },
     create: async (template, opts) => { calls.push(['create', opts.metadata]); const id = `${region}-${++n}`; sandboxes.set(id, { sandboxId: id, metadata: opts.metadata, state: 'running', startedAt: String(n), templateId: template }); return box(id) },
-    connect: async (id) => { calls.push(['connect', id]); if (!sandboxes.has(id)) throw new Error(`sandbox ${id} not found`); return box(id) },
+    connect: async (id) => { calls.push(['connect', id]); if (!sandboxes.has(id)) throw new SandboxNotFoundError(`Paused sandbox ${id} not found`); return box(id) },
     getInfo: async (id) => { calls.push(['getInfo', id]); if (!sandboxes.has(id)) throw new Error('not found'); return { ...sandboxes.get(id), network: {} } },
     setTimeout: async (id) => { calls.push(['setTimeout', id]) },
     kill: async (id) => { calls.push(['kill', id]); sandboxes.delete(id) },
@@ -1539,7 +1541,7 @@ test('child sandboxes run in their owner\'s cell: tools, capacity and ownership 
   assert.deepEqual([kinds(aps1, 'kill'), kinds(us, 'kill'), aps1.sandboxes.has(id)], [[['kill', id]], [], false])
 })
 
-test('placement cache: a second ensure within PLACEMENT_CACHE_MS asks neither the store nor E2B; forget, expiry and 0 end that', async () => {
+test('placement cache: a second ensure within PLACEMENT_CACHE_MS asks neither the store nor E2B; uncache, expiry and 0 end that', async () => {
   const counted = () => {
     const inner = memoryStore(); let calls = 0
     return { store: Object.fromEntries(Object.entries(inner).map(([k, f]) => [k, (...a) => { calls++; return f(...a) }])), calls: () => calls }
@@ -1551,10 +1553,10 @@ test('placement cache: a second ensure within PLACEMENT_CACHE_MS asks neither th
   const before = work(r)
   assert.equal(await r.b.ensure('new@x.com'), first)
   assert.deepEqual(work(r), before, 'no store or E2B call')
-  await r.b.forget(first.id)
-  const forgotten = work(r)
+  r.b.uncache('new@x.com')
+  const uncached = work(r)
   await r.b.ensure('new@x.com')
-  assert.ok(work(r)[0] > forgotten[0] && work(r)[1] > forgotten[1], 'after forget, the store and E2B again')
+  assert.ok(work(r)[0] > uncached[0] && work(r)[1] > uncached[1], 'after uncache, the store and E2B again')
   const short = rig(1)
   await short.b.ensure('new@x.com'); await new Promise(res => setTimeout(res, 10))
   const expired = work(short)
@@ -1646,4 +1648,99 @@ test('approval audit records go to the us-east-1 cell\'s bucket, whichever edge 
   assert.deepEqual(sent, [{ Bucket: 'bucket-us-east-1', Key: key, Body: '{"id":"a1","by":"hi@mumbo.si"}', ContentType: 'application/json' }])
   assert.deepEqual(logs, [{ edge: 'audit', key, id: 'a1', by: 'hi@mumbo.si' }])
   assert.match(readFileSync(new URL('./edge.mjs', import.meta.url), 'utf8'), /auditor\(\{ cell: cellIn\(cells, LEGACY_REGION\),/, 'main() passes the us-east-1 cell')
+})
+
+// ---- B47: a box E2B still runs is never killed for being unreachable
+/** Boxes over two fake cells, with a person box `u1` that us-east-1's E2B lists in `state` and a record without a launch
+ *  token (unless `record` gives one), so ensure resumes or repairs it. `connect(id, original)` replaces E2B's connect.
+ *  `changes()` lists the kills and creates. */
+async function repairRig({ state = 'running', record = {}, connect } = {}) {
+  const t = twoCells(); const store = memoryStore(); const logs = []
+  t.us.run('u1', 'a@x.com', state)
+  await store.putBox('u1', { email: 'a@x.com', host: cfg.publicHost, ports: PORTS, active: Date.now(), extended: Date.now(), backedUp: 1, paused: state === 'paused', ...record })
+  const original = t.us.Sandbox.connect
+  if (connect) t.us.Sandbox.connect = (id) => connect(id, original)
+  const b = boxes({ cells: t.cells, store, cfg, edgeKey: 'k', log: (l) => logs.push(JSON.parse(l)) })
+  return { ...t, store, logs, b, changes: () => t.us.calls.filter(c => ['kill', 'create'].includes(c[0])) }
+}
+/** A connect whose box fails every command with `error`, as a box behind an unreachable client-proxy does. */
+const failingCommands = (error) => async (id, original) => ({ ...await original(id), commands: { run: async () => { throw error } } })
+
+test('B47: a connection error to the client-proxy, from a page or a WebSocket, drops only the cached target: the record keeps its launch token and the next ensure makes no repair, kill or create', async () => {
+  const t = twoCells(); const store = memoryStore()  // us-east-1's client-proxy, 127.0.0.1:1, refuses connections
+  const b = boxes({ cells: t.cells, store, cfg: { ...cfg, placementCacheMs: 30_000 }, edgeKey: 'k', log: () => {} })
+  const server = userServer({ cfg, box: b, log: () => {} })
+  const port = await listen(server)
+  const { id } = await b.ensure('a@x.com')
+  const { launch } = await store.getBox(id)
+  // In-box commands fail too, as in a client-proxy outage, so a repair could only fail.
+  const connect = t.us.Sandbox.connect
+  t.us.Sandbox.connect = (i) => failingCommands(new SandboxUnreachableError('fetch failed'))(i, connect)
+  const page = async () => assert.equal((await call(port, { headers: { 'x-forwarded-email': 'a@x.com', accept: 'application/json', cookie: 'dsh-auth-x=1' } })).status, 502)
+  const upgrade = () => new Promise((resolve) => {
+    const req = request({ host: '127.0.0.1', port, path: '/', headers: { host: cfg.publicHost, origin: `https://${cfg.publicHost}`, 'x-forwarded-email': 'a@x.com', connection: 'Upgrade', upgrade: 'websocket' } })
+    req.on('error', resolve); req.on('upgrade', (res, socket) => { socket.destroy(); resolve() }); req.on('response', (res) => { res.resume(); resolve() }); req.end()
+  })
+  try {
+    for (const [name, send] of [['page', page], ['WebSocket', upgrade]]) {
+      const from = t.us.calls.length
+      await send()
+      assert.equal((await store.getBox(id)).launch, launch, name)
+      assert.equal((await b.ensure('a@x.com')).id, id, name)
+      assert.deepEqual(t.us.calls.slice(from).map(c => c[0]), ['list'], `${name}: past the cache, and nothing else`)
+    }
+  } finally { server.close() }
+})
+
+test('B47: a box E2B lists running that gives no answer is left as it is: 503, a box unreachable error line, no kill, no create, the record unchanged', async () => {
+  const fetchFailed = new TypeError('fetch failed', { cause: Object.assign(new Error('connect ECONNREFUSED 10.0.0.1:80'), { code: 'ECONNREFUSED' }) })
+  const connectFails = (error) => async () => { throw error }
+  const cases = {
+    'dshUp: SandboxUnreachableError': [new SandboxUnreachableError('fetch failed: The sandbox could not be reached and its health probe failed too'), failingCommands],
+    'dshUp: TimeoutError': [new TimeoutError('deadline_exceeded: This error is likely due to exceeding \'timeoutMs\''), failingCommands],
+    'dshUp: the client-proxy\'s 502 for a box E2B lists': [new SandboxNotRunningError('The sandbox was not found: The sandbox was killed or reached its timeout.'), failingCommands],
+    'connect: the API unreachable': [fetchFailed, connectFails],
+    'connect: a gateway\'s 502 for the API': [Object.assign(new SandboxError('502: Bad Gateway'), { statusCode: 502 }), connectFails],
+  }
+  for (const [name, [error, connect]] of Object.entries(cases)) {
+    const r = await repairRig({ connect: connect(error) })
+    const before = await r.store.getBox('u1')
+    await assert.rejects(r.b.ensure('a@x.com'), (e) => e === error && e.status === 503, name)
+    assert.deepEqual([r.changes(), await r.store.getBox('u1')], [[], before], name)
+    assert.deepEqual(r.logs.filter(l => l.msg === 'box unreachable'), [{ edge: 'error', level: 'error', msg: 'box unreachable', user: 'a@x.com', box: 'u1', region: 'us-east-1', error: error.message }], name)
+  }
+})
+
+test('B47: envd answers but dsh is still down after start.sh: the box is killed and recreated from its backup', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const ran = []
+  const r = await repairRig({ connect: async (id, original) => ({ ...await original(id), commands: { run: async (c) => {
+    ran.push(c)
+    // launchToken waits a second after each empty look for the token; the mocked clock moves once that wait is set.
+    if (c.includes('dsh.log')) setImmediate(() => t.mock.timers.tick(1000))
+    return { stdout: c.startsWith('curl') ? '000' : '' }
+  } } }) })
+  const target = await r.b.ensure('a@x.com')
+  assert.ok(ran.includes('/root/.mumbo/start.sh'), 'start.sh ran in the box')
+  assert.deepEqual(r.changes(), [['kill', 'u1'], ['create', { user: 'a@x.com' }]])
+  assert.deepEqual([target.id === 'u1', await r.store.getBox('u1')], [false, undefined])
+  assert.equal(r.logs.find(l => l.msg === 'resume failed; recreating from backup').error, 'dsh did not start')
+})
+
+test('B47: connect answering SandboxNotFoundError means the box is gone: its record goes and a box is created, with no kill', async () => {
+  const r = await repairRig({ state: 'paused', record: { launch: 'L' }, connect: async (id) => { throw new SandboxNotFoundError(`Paused sandbox ${id} not found`) } })
+  const target = await r.b.ensure('a@x.com')
+  assert.deepEqual(r.changes(), [['create', { user: 'a@x.com' }]])
+  assert.deepEqual([target.id === 'u1', await r.store.getBox('u1')], [false, undefined])
+  assert.ok(r.logs.some(l => l.msg === 'dropped missing box' && l.box === 'u1'))
+})
+
+test('B47: a backup the client-proxy answers with sandbox-not-found keeps the box\'s record; E2B\'s own not-found drops it', async () => {
+  const r = await repairRig({ record: { launch: 'L', backedUp: 0, restored: 'v1' }, connect: failingCommands(new SandboxNotRunningError('The sandbox was not found: The sandbox was killed or reached its timeout.')) })
+  const now = Date.now()
+  await r.b.sweep(now)
+  assert.deepEqual([(await r.store.getBox('u1')).restored, r.logs.filter(l => l.msg === 'backup failed').length], ['v1', 1])
+  r.us.sandboxes.delete('u1')
+  await r.b.sweep(now + 6 * 60_000)
+  assert.equal(await r.store.getBox('u1'), undefined)
 })

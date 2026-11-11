@@ -8,6 +8,7 @@ import { createHash, createHmac, createVerify, timingSafeEqual } from 'node:cryp
 import { readFileSync, readdirSync } from 'node:fs'
 import { createServer, request as httpRequest } from 'node:http'
 import { Readable, pipeline } from 'node:stream'
+import { CommandExitError, SandboxError, SandboxNotFoundError } from 'e2b'
 import { ownersOf } from './projects.mjs'
 import { atCapacity, unitsFor } from './capacity.mjs'
 import { LEGACY_REGION, cellClients, cellIn, cellsConfig, placementKey, regionOf } from './cells.mjs'
@@ -1104,8 +1105,8 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
   /** The cell a principal's placement doc names, without placing anyone: us-east-1 until a person's first ensure. */
   const placedCell = async (principal) => cellOf(await store.getDoc(placementKey(principal)))
   // ensure's targets by principal, for cfg.placementCacheMs. ponytail: per replica, so a box another replica replaces is
-  // reached at its old target until the entry expires, a proxy error forgets it, or the client-proxy's not-found answer or
-  // a 401 to a navigation uncaches it (userServer). B22: deleting an entry clears only this replica (other replicas, the
+  // reached at its old target until the entry expires, or a proxy error, the client-proxy's not-found answer or a 401 to
+  // a navigation uncaches it (userServer). B22: deleting an entry clears only this replica (other replicas, the
   // other region's edge and an operator script cannot reach it), so a move must either read the principal's placement doc
   // (its moving mark) on every hit, or wait at least cfg.placementCacheMs after setting the mark before its final backup.
   const cached = new Map()  // principal -> { target, until }
@@ -1127,11 +1128,17 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
       if (out) return out
       await new Promise(r => setTimeout(r, 1000))
     }
-    throw Object.assign(new Error('dsh did not start'), { status: 503 })
+    throw Object.assign(new Error('dsh did not start'), { status: 503, dshDown: true })
   }
   const memberAuth = async (box) => (await run(box, 'test -f /root/.mumbo/member-auth && echo yes || true')) === 'yes'
   const dshUp = async (box, ports) => (await run(box, `curl -s -o /dev/null -m 5 -w '%{http_code}' http://$(hostname -I | cut -d' ' -f1):${ports.dsh}/ || true`)) !== '000'
   const portsOf = async (box) => portsFrom(await run(box, `cat ${PORTS_MARKER} 2>/dev/null || true`))
+  // A resume or repair failure that is E2B's answer that the box cannot run: the API answered connect with an error (the
+  // SDK has no class for a failed resume; its API answers are SandboxErrors carrying the HTTP status, and a gateway's 502
+  // or 504 means the API was not reached), start.sh exited with an error in the box, or envd answered every look for the
+  // launch token and dsh never came back (launchToken).
+  const cannotRun = (e) => e.dshDown === true || e instanceof CommandExitError
+    || (e instanceof SandboxError && e.statusCode !== undefined && e.statusCode !== 502 && e.statusCode !== 504)
 
   // A restore record whose version S3 does not serve (gone, a delete marker, a malformed id, or any other HEAD error) fails
   // the create as a failed restore would: no fallback to latest.tar.gz, and the record stays for the operator. `status` is
@@ -1232,9 +1239,20 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
           const now = Date.now()
           await store.putBox(id, { email, region: cell.region, host: known?.host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), ports, active: now, extended: now, backedUp: known?.backedUp ?? 0, paused: false, ...(known?.restored && { restored: known.restored }) })
         } catch (error) {
-          // A snapshot that cannot be resumed (its node died before the upload finished, or dsh never comes back)
-          // must not strand the user: drop it and rebuild from the latest S3 backup.
           if (error.capacity || /capacity|place sandbox|rate limit/i.test(error.message)) throw Object.assign(error, { capacity: true })
+          if (error instanceof SandboxNotFoundError) {
+            await store.deleteBox(id)
+            say({ level: 'warn', msg: 'dropped missing box', user: email, box: id })
+            return pick(await create(email, cell))
+          }
+          // Without an answer that the box cannot run, the box and its record stay as they are, and the next visit tries
+          // again: during a client-proxy outage a recreate would fail too, and the box would be lost (RUNBOOK "Box unreachable").
+          if (!cannotRun(error)) {
+            log(JSON.stringify({ edge: 'error', level: 'error', msg: 'box unreachable', user: email, box: id, region: cell.region, error: error.message }))
+            throw Object.assign(error, { status: 503 })
+          }
+          // A snapshot that cannot be resumed (its node died before the upload finished), or dsh that never comes back,
+          // must not strand the user: drop the box and rebuild from the latest S3 backup.
           say({ level: 'error', msg: 'resume failed; recreating from backup', user: email, box: id, error: error.message })
           await cell.Sandbox.kill(id).catch(() => {})
           await store.deleteBox(id)
@@ -1331,7 +1349,7 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
       // Backups run in parallel (bounded) and take no user lock, so a long upload never blocks that user's visit.
       await inParallel(due, cfg.backupConcurrency ?? 8, b => backup(b.id, b).then(() => true, async (e) => {
         // A box E2B no longer has cannot be backed up again; its last backup stays the user's restore point.
-        if (/not found/i.test(e.message)) { await store.deleteBox(b.id); say({ level: 'warn', msg: 'dropped missing box', user: b.email, box: b.id }); return false }
+        if (e instanceof SandboxNotFoundError) { await store.deleteBox(b.id); say({ level: 'warn', msg: 'dropped missing box', user: b.email, box: b.id }); return false }
         await store.patchBox(b.id, { backedUp: now - cfg.backupEveryMs + 5 * 60_000 })  // retry in 5 minutes
         say({ level: 'error', msg: 'backup failed', user: b.email, box: b.id, region: b.cell.region, error: e.message })
         return false
@@ -1342,7 +1360,7 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
         await inParallel(listed.filter(b => !b.paused && !b.creating && now - b.extended >= 5 * 60_000), cfg.backupConcurrency ?? 8,
           b => b.cell.Sandbox.setTimeout(b.id, timeout()).then(() => store.patchBox(b.id, { extended: now }), async (e) => {
             // A box E2B no longer has (killed outside the edge) is dropped; the next visit creates it from its backup.
-            if (/not found/i.test(e.message)) { await store.deleteBox(b.id); return say({ level: 'warn', msg: 'dropped missing box', user: b.email, box: b.id }) }
+            if (e instanceof SandboxNotFoundError) { await store.deleteBox(b.id); return say({ level: 'warn', msg: 'dropped missing box', user: b.email, box: b.id }) }
             say({ level: 'warn', msg: 'keepalive failed', box: b.id, error: e.message })
           }))
       }
@@ -1371,16 +1389,12 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
       say({ msg: 'paused', user: b.email, box: b.id, region: b.cell.region, wakeAt: wakeAt && new Date(wakeAt).toISOString() })
     }).catch(async (e) => {
       // A box E2B no longer has is dropped; anything else is retried next sweep.
-      if (/not found/i.test(e.message)) await store.deleteBox(b.id)
+      if (e instanceof SandboxNotFoundError) await store.deleteBox(b.id)
       say({ level: 'error', msg: 'pause failed', box: b.id, error: e.message })
     })
   }
-  // forget: a proxy error to box `id`. This replica's cached targets for it go, and its next ensure repairs it (no launch).
   // uncache: only this replica's cached target for `principal` goes; the record keeps its launch token.
-  return { ensure, firstSetUp, touch, owns, sweep, adoptRunning, uncache: (principal) => { cached.delete(principal) }, forget: (id) => {
-    for (const [principal, c] of cached) if (c.target.id === id) cached.delete(principal)
-    return store.patchBox(id, { launch: undefined })
-  } }
+  return { ensure, firstSetUp, touch, owns, sweep, adoptRunning, uncache: (principal) => { cached.delete(principal) } }
 }
 
 // ---- who is asking. Behind oauth2-proxy (trial) the email header is trusted because only it can reach the router;
@@ -1691,8 +1705,7 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, key
       // E2B's client-proxy answers a box it cannot route with 502 and, in the head of the body, JSON `"message":"The
       // sandbox was not found"` or, for a browser, its page titled "Sandbox not found" (packages/shared/pkg/proxy/template/
       // sandbox_not_found.go): only the cached target goes. It sends the same answer for a box E2B still lists (a catalog
-      // read error, a box without a usable route), and dropping that box's launch would make the next ensure repair it
-      // through the same client-proxy, fail, and recreate it from its last backup.
+      // read error, a box without a usable route), so the box's record keeps its launch token.
       if (r.statusCode === 502) {
         let head = ''
         r.on('data', (c) => { if (head.length < 4096) head += c })
@@ -1705,7 +1718,7 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, key
       res.writeHead(r.statusCode ?? 502, headers)
       r.pipe(res)
     })
-    up.on('error', (e) => { quiet(box.forget(target.id)); if (!res.headersSent) page(res, 502, 'Could not reach your box. Retrying…'); else res.destroy(); log(JSON.stringify({ edge: 'error', user: email, error: e.message })) })
+    up.on('error', (e) => { box.uncache(key); if (!res.headersSent) page(res, 502, 'Could not reach your box. Retrying…'); else res.destroy(); log(JSON.stringify({ edge: 'error', user: email, error: e.message })) })
     req.pipe(up)
   }
   async function onUpgrade(req, socket, head) {
@@ -1720,7 +1733,8 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, key
     if (!email.includes('@') || !admitted(cfg.allowed, email)) return socket.destroy()
     try {
       if (to.redirect || (to.project && !(await projects?.isMember(email, to.project)))) return socket.destroy()
-      const target = await box.ensure(to.project ? `project:${to.project}` : email)
+      const key = to.project ? `project:${to.project}` : email
+      const target = await box.ensure(key)
       quiet(box.touch(target.id))
       const member = to.project && target.member ? target.member(email) : undefined
       const headers = { ...boxHeaders(cfg, req.headers, target, to.service), ...(member ? { 'x-mumbo-member': member } : {}), connection: 'Upgrade', upgrade: req.headers.upgrade ?? 'websocket' }
@@ -1736,7 +1750,7 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, key
         upSocket.on('error', () => socket.destroy()); socket.on('error', () => upSocket.destroy())
       })
       up.on('response', (r) => { socket.end(`HTTP/1.1 ${r.statusCode} ${r.statusMessage}\r\n\r\n`) })
-      up.on('error', () => socket.destroy())
+      up.on('error', () => { box.uncache(key); socket.destroy() })
       up.end()
     } catch { socket.destroy() }
   }

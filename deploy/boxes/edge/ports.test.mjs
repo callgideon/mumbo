@@ -79,7 +79,7 @@ async function serve(ports) {
   upstream.on('upgrade', (req, socket) => { seen.push(['UPGRADE', req.url, req.headers['e2b-sandbox-port']]); socket.end('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n') })
   await new Promise(r => upstream.listen(0, '127.0.0.1', r))
   const proxy = new URL(`http://127.0.0.1:${upstream.address().port}`)
-  const box = { ensure: async () => ({ id: 'ubox', token: 'T', host: 'boxes.example', proxy, ...(ports ? { ports } : {}) }), touch: async () => {}, forget: async () => {} }
+  const box = { ensure: async () => ({ id: 'ubox', token: 'T', host: 'boxes.example', proxy, ...(ports ? { ports } : {}) }), touch: async () => {}, uncache() {} }
   const server = userServer({ cfg: { ...cfg, approveHost: 'approve.example' }, box, log: () => {} })
   await new Promise(r => server.listen(0, '127.0.0.1', r))
   const call = ({ method = 'GET', path = '/', headers = {} } = {}) => new Promise((resolve, reject) => {

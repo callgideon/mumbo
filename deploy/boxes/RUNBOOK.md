@@ -49,7 +49,16 @@ The backup bucket is versioned and keeps noncurrent versions for 30 days. Only t
 An idle box could not be paused. E2B's own timeout pauses it 15 minutes later regardless. A box E2B no longer has is dropped from the store automatically; anything else is retried on the next sweep.
 
 ### edge-errors
-Unhandled edge errors (one log line each, with path and user). Read the lines; a burst after a deploy means roll back `edge_tag` in `terraform.tfvars` and apply. A line `box in a region with no cell`, every sweep, names a box record whose `region` is not in `CELLS`: add that cell to `CELLS`, or, if the box is gone, delete its record (`box:<id>` and its member of the set `boxes`).
+Unhandled edge errors (one log line each, with path and user). Read the lines; a burst after a deploy means roll back `edge_tag` in `terraform.tfvars` and apply. A line `box in a region with no cell`, every sweep, names a box record whose `region` is not in `CELLS`: add that cell to `CELLS`, or, if the box is gone, delete its record (`box:<id>` and its member of the set `boxes`). A line `box unreachable`: see "Box unreachable" below.
+
+### Box unreachable
+An `edge-errors` line `{"edge":"error","level":"error","msg":"box unreachable",…}` names a box (`box`, `region`, `error`) that the edge was resuming or repairing but got no answer for: E2B's API or the cell's client-proxy did not answer or timed out, or the client-proxy answered 502 for a box E2B lists. The edge leaves the box and its record as they are, the person gets the starting page, and their next visit tries again. The edge never recreates the box after such a failure: during a client-proxy outage the new box would fail too, and the old one would be lost. Tell the two causes apart by the cell's other boxes, whose sweep backups also go through the client-proxy:
+```sh
+aws logs filter-log-events --log-group-name /mumbo-boxes/edge --start-time $(( ($(date +%s) - 1200) * 1000 )) \
+  --filter-pattern '{ $.msg = "box unreachable" || $.msg = "backup" || $.msg = "backup failed" }' --query 'events[].message' --output text
+```
+- **Client-proxy outage: none answer.** Lines for several boxes of one `region`, and that region's backups fail or stop. Fix the client-proxy or the API (`unhealthy-proxy`, `tasks-client-proxy`, `unhealthy-api-http`) and kill nothing; each box answers again at its next visit.
+- **Hung box: the others answer.** Lines for one box only, while the other boxes of its region back up. Kill it as in "Moving a box to a new template build" step 2, without waiting for a backup (it cannot take one). The person's next visit creates a box and restores the last backup; work since that backup is lost.
 
 ### edge-deploy-failed
 Not a CloudWatch alarm: the EventBridge rule `mumbo-boxes-edge-deploy-failed` sends ECS's `SERVICE_DEPLOYMENT_FAILED` event for the edge service to the alarm topic as one line of text (`mumbo-boxes edge deployment <id> failed at <time>: <reason>`), not alarm JSON. The deployment circuit breaker stopped the rollout and rolls the service back to the previous task definition, so the edge keeps serving the old image while `edge_tag` in `prod/terraform.tfvars` names the failed one. Handle it as in "Ship a new edge", step 6.

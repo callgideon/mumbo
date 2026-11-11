@@ -48,7 +48,7 @@ async function setup(extra = {}) {
   const box = {
     // Both boxes were created under boxes.mumbo.si, so that is their masked host (boxSite at creation).
     ensure: async (p) => { ensured.push(p); return p === `project:${id}` ? { id: 'pbox', token: 'OWNER', host: `p-${id}.boxes.mumbo.si`, proxy, member: (e) => memberHeader(key, e) } : { id: 'ubox', token: 'T', host: 'boxes.mumbo.si', proxy } },
-    touch: async () => {}, forget: async () => {},
+    touch: async () => {}, uncache() {},
   }
   const approve = async (req, res) => { approved.push(req.url); res.writeHead(200).end('approve page') }
   const server = userServer({ cfg, box, projects: proj, approve, log: () => {} })

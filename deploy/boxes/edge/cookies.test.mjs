@@ -24,7 +24,7 @@ test('the sign-in cookie never reaches a box, Domain is dropped from box cookies
   const boxPort = await listen(fakeBox)
   const proxy = new URL(`http://127.0.0.1:${boxPort}`), cfg = { publicHost: 'boxes.mumbo.si', approveHost: 'approve.boxes.mumbo.si', allowed: ['@x.com'], signinCookie: '_oauth2_proxy_mumbo' }
   const ensured = []; const approved = []
-  const box = { ensure: async (p) => { ensured.push(p); return { id: 'b1', token: 'T', proxy } }, touch: async () => {}, forget: async () => {} }
+  const box = { ensure: async (p) => { ensured.push(p); return { id: 'b1', token: 'T', proxy } }, touch: async () => {}, uncache() {} }
   const approve = async (req, res, email) => { approved.push(email); res.writeHead(200).end('approve page') }
   const server = userServer({ cfg, box, approve, log: () => {} })
   const port = await listen(server)
@@ -63,7 +63,7 @@ test('a WebSocket upgrade reaches the box without the sign-in cookie, and its 10
   })
   const boxPort = await listen(fakeBox)
   const proxy = new URL(`http://127.0.0.1:${boxPort}`), cfg = { publicHost: 'boxes.mumbo.si', approveHost: 'approve.boxes.mumbo.si', allowed: ['@x.com'], signinCookie: '_oauth2_proxy_mumbo' }
-  const box = { ensure: async () => ({ id: 'b1', token: 'T', proxy }), touch: async () => {}, forget: async () => {} }
+  const box = { ensure: async () => ({ id: 'b1', token: 'T', proxy }), touch: async () => {}, uncache() {} }
   const server = userServer({ cfg, box, log: () => {} })
   const port = await listen(server)
   try {
@@ -94,7 +94,7 @@ test('a box cannot plant a sign-in cookie: Set-Cookie with a sign-in name or no 
     socket.end(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n${planted.map(c => `Set-Cookie: ${c}\r\n`).join('')}\r\n`)
   })
   const proxy = new URL(`http://127.0.0.1:${await listen(fakeBox)}`), cfg = { publicHost: 'boxes.mumbo.si', approveHost: 'approve.boxes.mumbo.si', allowed: ['@x.com'], signinCookie: '_oauth2_proxy_mumbo' }
-  const box = { ensure: async () => ({ id: 'b1', token: 'T', proxy }), touch: async () => {}, forget: async () => {} }
+  const box = { ensure: async () => ({ id: 'b1', token: 'T', proxy }), touch: async () => {}, uncache() {} }
   const server = userServer({ cfg, box, log: () => {} })
   const port = await listen(server)
   const signedIn = { host: 'boxes.mumbo.si', 'x-forwarded-email': 'a@x.com', cookie: 'dsh-auth-x=d' }
