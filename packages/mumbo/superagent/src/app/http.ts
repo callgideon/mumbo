@@ -88,11 +88,14 @@ function panelAdmitted(principal: { readonly kind: string; readonly email?: unkn
   if (principal.kind === 'owner') return true
   return principal.kind === 'edge-member' && typeof principal.email === 'string' && admins.includes(principal.email)
 }
-/** Maps errors to HTTP status codes and structured payloads that the panel words by code. */
-function failure(error: unknown): [number, Record<string, unknown>] {
+/**
+ * Maps errors to HTTP status codes and structured payloads that the panel words by code. A zod failure names what is invalid,
+ * `subject`: in Mumbo (`UPSTREAM.md` S13), `request` for a worker route's body, else `settings`.
+ */
+function failure(error: unknown, subject: 'request' | 'settings'): [number, Record<string, unknown>] {
   if (error instanceof z.ZodError) {
     const issues = error.issues.map(issue => ({ path: issue.path.join('.'), message: issue.message }))
-    return [400, { error: `Invalid settings: ${issues.map(issue => issue.path).join(', ')}`, issues }]
+    return [400, { error: `Invalid ${subject}: ${issues.map(issue => issue.path).join(', ')}`, issues }]
   }
   if (error instanceof SetupError) return [400, { error: error.message, setup: error.problem }]
   if (error instanceof RouteError) return [error.status, { error: error.message }]
@@ -269,7 +272,7 @@ export function registerHttp(ctx: Context, runtime: HttpHost): () => void {
         if (!route) throw new RouteError(404, 'Unknown operation')
         const query = Object.fromEntries(url.searchParams)
         json(res, 200, await route.run({ params: route.params as never, query, body: maxBytes => readBody(req, maxBytes) }))
-      } catch (error) { json(res, ...failure(error)) }
+      } catch (error) { json(res, ...failure(error, url.pathname.startsWith('/orchestrator/api/workers/') ? 'request' : 'settings')) }
     } })]
   return () => { for (const dispose of disposers) dispose() }
 }

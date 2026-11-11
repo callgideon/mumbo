@@ -138,6 +138,21 @@ describe('claim', () => {
     expect(await claim()).toEqual(refused(409, 'lease_released'))
   })
 
+  it('ends an expired lease that a failed sweep left when its claim is retried, then claims as if the sweep had ended it', async () => {
+    // An expired lease on a Ticket the store does not hold fails each sweep before it reaches the next lease.
+    store().set(KV.external.lease('0'), { id: '0'.repeat(32), ticketId: 'gone', worker: LAPTOP, request: 'r0', claimedAt: '', renewedAt: '',
+      expiresAt: new Date(0).toISOString() } satisfies Lease)
+    const ticket = await requested('m1')
+    const view = await claimed()
+    later(21)
+    const again = await claimed()
+    expect(host.runtime.health.external).toMatchObject({ state: 'error' })
+    expect(again).toMatchObject({ ticket: ticket.id, attempt: 2, assignment: stored(ticket.id).assignments[1]!.id })
+    expect(again.lease).not.toBe(view.lease)
+    expect(assignments(ticket.id)).toEqual([['ended', 'leaseExpired'], ['running', undefined]])
+    expect(await report(view)).toEqual(refused(409, 'lease_expired'))
+  })
+
   it('refuses a local Ticket, a leased one with any key, a released one and an unknown one, and every claim while paused', async () => {
     const local = await requested('m1', false)
     expect(local.executor).toBeUndefined()
@@ -187,7 +202,8 @@ describe('report', () => {
     expect(stored(ticket.id)).toMatchObject({ answers: [ticket.origin.triggerId] })
     await host.runtime.idle()
     expect(host.relays(host.runtime.masterId).filter(item => item.kind === 'worker_report')).toMatchObject([{ answer_to: ticket.origin.triggerId }])
-    expect(await report(view, { state: 'ready' })).toMatchObject({ status: 400 })
+    expect(await report(view, { state: 'ready' })).toEqual({ status: 400,
+      body: { error: 'Invalid request: state', issues: [{ path: 'state', message: expect.any(String) }] } })
     expect(latestState(ticket.id)).toBe('progress')
   })
 
@@ -306,6 +322,41 @@ describe('expiry', () => {
     const next = await claimed({ request: 'r4' })
     expect(inputText(next)[0]).toContain('Postgres')
     expect(inputText(next)[1]).toContain('new work waits')
+  })
+
+  it('keeps a replacement Assignment whose worker handed off without acknowledging the lease note, which only a claim of its Ticket takes', async () => {
+    const ticket = await requested('m1')
+    await claimed()
+    later(21)
+    host.runtime.external.sweep()
+    const next = await claimed({ request: 'r2' })
+    expect(inputText(next)).toEqual([expect.stringContaining('The previous worker\'s lease expired.')])
+    await report(next, { state: 'blocked', summary: 'Which database?' })
+    later(21)
+    host.runtime.external.sweep()
+    expect([lease(next.assignment), assignments(ticket.id)]).toEqual([undefined, [['ended', 'leaseExpired'], ['running', undefined]]])
+    expect(await claim({ request: 'r3' })).toEqual(refused(409, 'nothing_queued'))
+    const again = await claimed({ ticket: ticket.id, request: 'r4' })
+    expect(again).toMatchObject({ assignment: next.assignment, attempt: 2 })
+    expect(again.inputs.map(item => item.id)).toEqual(next.inputs.map(item => item.id))
+  })
+
+  it('keeps a replacement Assignment whose worker asked a person without acknowledging the lease note through a green CI change, and queues it again for a red one', async () => {
+    const ticket = await requested('m1')
+    host.runtime.engine.bindThread(ticket.id, { source: 'github', id: '7' }, true)
+    const pr = { number: 7, html_url: 'https://github.com/acme/widgets/pull/7', user: { login: 'agent-bot' } }
+    await claimed()
+    later(21)
+    host.runtime.external.sweep()
+    await report(await claimed({ request: 'r2' }), { question: 'Which button?' })
+    later(21)
+    host.runtime.external.sweep()
+    host.runtime.receive(ciTrigger(pr, 1, 'CI passed', false))
+    await host.runtime.idle()
+    expect(assignments(ticket.id)).toEqual([['ended', 'leaseExpired'], ['running', undefined]])
+    host.runtime.receive(ciTrigger(pr, 2, 'CI failed', true))
+    await host.runtime.idle()
+    expect(assignments(ticket.id)).toEqual([['ended', 'leaseExpired'], ['ended', 'workerLeft'], ['pending', undefined]])
   })
 
   it('keeps a lease across a Runtime restart and sweeps an expired one at once, then on its timer', async () => {

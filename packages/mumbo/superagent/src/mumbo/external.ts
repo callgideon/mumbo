@@ -6,7 +6,7 @@
  */
 import { randomBytes } from 'node:crypto'
 import { z } from 'zod'
-import { latestAssignment, liveTicket, waitsForPerson, type Assignment, type EngineForExecutor, type Execution, type Ticket,
+import { latestAssignment, liveTicket, restartNoteId, waitsForPerson, type Assignment, type EngineForExecutor, type Execution, type Ticket,
   type TicketInput, type Trigger, type WorkerReport } from '../core/index.ts'
 import { batchOf, inputMessage, mandateInstructions, triggerMessage } from '../executor/dsh.ts'
 import type { EffectPayloads, Effects } from '../app/effects.ts'
@@ -248,9 +248,9 @@ export class ExternalExecutor implements ExecutorPlugin {
 
   /**
    * Leases an Assignment to a worker, in one transaction: a claim retried with the same door key and `request` answers its
-   * lease again, renewed; otherwise the named Ticket, or the oldest one whose latest Assignment is pending, gets a new lease,
-   * and its Assignment runs with the worker recorded on it. Only a claim by Ticket id takes a handed-off Assignment, which
-   * waits for a person.
+   * lease again, renewed, while it is live; one that expired, which a failed sweep left, is ended as the sweep ends it first.
+   * Otherwise the named Ticket, or the oldest one whose latest Assignment is pending, gets a new lease, and its Assignment
+   * runs with the worker recorded on it. Only a claim by Ticket id takes a handed-off Assignment, which waits for a person.
    * @param request - The validated claim.
    * @returns The Ticket, its lease and brief, and its first undelivered Inputs.
    * @throws WorkerConflict `paused` while processing is paused or setup is pending; `lease_released` for a retry of a
@@ -408,7 +408,9 @@ export class ExternalExecutor implements ExecutorPlugin {
     if (retried) {
       const [assignment, lease] = retried
       if (lease.releasedAt) throw new WorkerConflict('lease_released')
-      return { ticket: ticketOf(lease.ticketId), assignment, lease: this.renew(assignment, lease) }
+      if (!expired(lease)) return { ticket: ticketOf(lease.ticketId), assignment, lease: this.renew(assignment, lease) }
+      // A failed sweep left it: it ends as the sweep ends it, and the claim goes on as one whose lease the sweep had ended.
+      this.expire(KV.external.lease(assignment))
     }
     const found = named === undefined
       ? store.tickets.open().reverse().find(item => latestOf(item).state === 'pending' && !this.refusal(item))
@@ -425,7 +427,8 @@ export class ExternalExecutor implements ExecutorPlugin {
   /**
    * Why a worker may not take `ticket`, or undefined when it may: an open external Ticket whose latest Assignment has no
    * lease, so it is pending, or runs without one because its worker handed off and the lease then expired. A claim sweeps
-   * first, so a lease it finds is live or released.
+   * first, so a lease it finds is live or released, unless the sweep failed: an expired one then refuses `already_claimed`
+   * until a sweep succeeds.
    */
   private refusal(ticket: Ticket): 'not_claimable' | 'already_claimed' | undefined {
     const lease = this.lease(latestOf(ticket).id)
@@ -476,11 +479,13 @@ export class ExternalExecutor implements ExecutorPlugin {
   }
   /**
    * Whether an undelivered Input that arrived at `since` or later asks for work: a person's message, a `text` Input such as
-   * review findings or a retry note, or a red CI result (`meta.ciFailed`). Other CI changes, notes and Policy changes wait
-   * for the next claim.
+   * review findings, or a red CI result (`meta.ciFailed`). The note a new Assignment gets first (`LEASE_NOTE`,
+   * `WORKER_LEFT_NOTE`) says where to pick up, not what to do, so a worker that hands off without acknowledging it keeps its
+   * Assignment. Other CI changes, notes and Policy changes wait for the next claim.
    */
   private workWaits(ticket: Ticket, since = ''): boolean {
-    const asks = (input: TicketInput): boolean => input.kind === 'text'
+    const notes = ticket.assignments.map(item => restartNoteId(ticket.id, item.id))
+    const asks = (input: TicketInput): boolean => (input.kind === 'text' && !notes.includes(input.id))
       || (input.kind === 'trigger' && (!!input.human || this.host.store.triggers.get(input.triggerId)?.meta.ciFailed === true))
     return ticket.inputs.some(input => input.at >= since && ticket.undelivered.includes(input.id) && asks(input))
   }
