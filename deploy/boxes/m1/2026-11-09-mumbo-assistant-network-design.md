@@ -954,9 +954,15 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
   - `git` on a model-writable repository never runs as root. The repository's own config and hooks (`core.fsmonitor`, hooks, filter and textconv drivers) run code, so dsh's change summaries and anything else that runs `git` on the workspace use "run as". The workspace-changes scratch directory needs a harness follow-up for that.
   - `/src` (the dsh code root runs) is read-only for `agent`.
   - **Every helper process that acts on the model's behalf runs under a non-root identity of its own** through the same "run as" seam, never as root:
-    - **Playwright MCP** runs as `browsermcp`. That user alone, beside root, may reach the debugging port. It reads only the shared Downloads, so the kernel enforces the upload limit.
+    - **Playwright MCP** runs as `browsermcp`. That user alone, beside root, may reach the debugging port. It reads only the upload staging directory (below).
       - `browser_run_code_unsafe`, which runs model code inside that server, is hard-denied. In-page `browser_evaluate` keeps asking.
       - `browser_file_upload` paths are limited to the shared Downloads. The agent copies a file there first, so `browsermcp` needs no workspace access.
+      - **Uploads go through a staged copy** **[2026-11-11, B24 round-6 ruling]**. The model can change files in Downloads (`2770`, group `shared`) while the person is deciding. So consent works like this:
+        - It opens the file named under Downloads (a regular file, by its real path, following no link).
+        - Root copies it to `/var/lib/mumbo/uploads/<nonce>/<name>`, readable by `browser` and `browsermcp` and never by `agent`.
+        - The ask shows the copy's name, size and SHA-256 prefix.
+        - The tool gets the copy's path, and the copy is deleted after the call.
+      - Playwright MCP gets that staging directory as its only MCP root (option a), not Downloads. So the server can't upload anything consent didn't stage, and `--allow-unrestricted-file-access` stays off.
       - The edge never mounts a browser provider without consent: the plain fallback row is gone.
     - **Computer use** runs `xdotool` as `desktop`, the one user beside `browser` that may read the X authority file.
       - Every model-derived argument passes a strict check: numbers for coordinates; key names from a fixed pattern; typed text only as the final argument after `type --`. So no argument can chain another `xdotool` command, such as `exec`.
@@ -1008,6 +1014,11 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
     - root dsh's `TMPDIR=/root/.dsh/tmp`;
     - `protected_hardlinks=1`, asserted at load.
   - **The project box's `dsh-superagent` config has one source:** the containment overlay, or a gate that compares the whole object with the founder overlay's. Spot checks would miss drift.
+    - B24 box side restates the row in the edge's `containmentRows` and adds B36's `edge` by `grep`. That is two sources, and `edge` was nearly lost.
+    - The follow-up makes the image's `deploy/mumbo-project.overlay.yml` the one source: the row reads `workDirectory`, `workerDirectory` and `ghConfigDirectory` from variables the start script exports under containment, and the containment patch drops its `dsh-superagent` row. **[2026-11-11]**
+  - **Backups take `/root/work`** on project boxes, as they take `/root/projects`: SQLite snapshots made as the owner, and the restore's real-path check.
+    - Before containment, ticket directories lived under `/root/.dsh/superagent/work` and were backed up. Without this, a lost box loses in-flight checkouts, while the restored superagent database still names them.
+    - `/home/agent` stays out of backups; the role instructions say it is scratch, and durable files go in `/root/projects`. **[2026-11-11]**
 - **Box permissions** (edge start script):
   - `/root` is `0711`. `/root/projects` belongs to `agent`, so Session working directories don't change.
   - `/root/.dsh`, `/root/.mumbo` and `/root/dsh.log` are root-only.
