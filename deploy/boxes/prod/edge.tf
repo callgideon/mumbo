@@ -85,8 +85,8 @@ module "edge_us_east_1" {
 
   vpc_id                 = module.cell_us_east_1.vpc_id
   public_subnets         = module.cell_us_east_1.public_subnets
-  private_subnets        = module.cell_us_east_1.private_subnets
-  box_egress_ips         = module.cell_us_east_1.nat_egress_ips
+  private_subnets        = module.cell_us_east_1.edge_subnets                                                  # the edge's own /24s (R6)
+  box_egress_ips         = concat(module.cell_us_east_1.nat_egress_ips, module.cell_ap_south_1.nat_egress_ips) # every cell's NAT (design 17c)
   ecs_cluster_id         = module.cell_us_east_1.ecs_cluster.id
   exec_role              = module.cell_us_east_1.exec_role
   edge_security_group_id = module.cell_us_east_1.edge_security_group_id
@@ -95,6 +95,7 @@ module "edge_us_east_1" {
   backup_bucket          = module.cell_us_east_1.backup_bucket
   backups_kms_key_arn    = module.cell_us_east_1.backups_kms_key_arn
   e2b_secret_arn         = module.cell_us_east_1.e2b_secret_arn
+  store_secret_arn       = aws_secretsmanager_secret.store.arn
   e2b_api_url            = module.cell_us_east_1.e2b_api_url
   e2b_sandbox_url        = module.cell_us_east_1.e2b_sandbox_url
 }
@@ -139,4 +140,4 @@ resource "aws_ssm_parameter" "edge" {
 }
 
 output "edge_alb" { value = module.edge_us_east_1.edge_alb.dns_name }
-output "edge_redis_endpoint" { value = module.edge_us_east_1.edge_redis_endpoint }
+output "edge_redis_endpoint" { value = aws_elasticache_replication_group.edge.primary_endpoint_address }

@@ -172,14 +172,19 @@ Deleting a box and its backup does not remove the person's access. A domain-admi
    aws ssm start-session --target $NODE --document-name AWS-StartPortForwardingSessionToRemoteHost \
      --parameters host=api.boxes.internal,portNumber=3000,localPortNumber=13000 &
    EP=$(terraform -chdir=deploy/boxes/prod output -raw edge_redis_endpoint)
+   # The store's security group admits only the edges: let this node in for the session, and revoke it afterwards (below).
+   STORE_SG=$(aws ec2 describe-security-groups --filters Name=group-name,Values=mumbo-boxes-edge-store --query 'SecurityGroups[0].GroupId' --output text)
+   NODE_SG=$(aws ec2 describe-security-groups --filters Name=group-name,Values=mumbo-boxes-nodes --query 'SecurityGroups[0].GroupId' --output text)
+   RULE=$(aws ec2 authorize-security-group-ingress --group-id $STORE_SG --ip-permissions "IpProtocol=tcp,FromPort=6379,ToPort=6379,UserIdGroupPairs=[{GroupId=$NODE_SG,Description=TEMP-operator}]" --query 'SecurityGroupRules[0].SecurityGroupRuleId' --output text)
    aws ssm start-session --target $NODE --document-name AWS-StartPortForwardingSessionToRemoteHost \
      --parameters host=$EP,portNumber=6379,localPortNumber=16379 &
    export E2B_API_URL=http://127.0.0.1:13000
    export E2B_API_KEY=$(aws secretsmanager get-secret-value --secret-id mumbo-boxes/e2b --query SecretString --output text | jq -r .TEAM_API_KEY)
-   export REDIS_URL=rediss://127.0.0.1:16379 REDIS_SERVERNAME=$EP   # the server certificate is checked against REDIS_SERVERNAME
+   # The store's user `edge` (R2 AUTH): the edge's URL with the tunnel as host; neither echoed nor kept in history.
+   export REDIS_URL=$(aws secretsmanager get-secret-value --secret-id mumbo-boxes/edge-store --query SecretString --output text | jq -r .url | sed -E 's#@[^/]+$#@127.0.0.1:16379#') REDIS_SERVERNAME=$EP   # the server certificate is checked against REDIS_SERVERNAME
    export BACKUP_BUCKET=mumbo-boxes-backup-$(aws sts get-caller-identity --query Account --output text) AWS_REGION=us-east-1
    ```
-   Do not echo `E2B_API_KEY`. The script refuses a Redis that holds no `boxes` set (the edge's box index); pass `--allow-empty-store` only if the edge has never created a box. Then:
+   Do not echo `E2B_API_KEY` or `REDIS_URL`. When done, close the tunnels and revoke the store rule: `aws ec2 revoke-security-group-ingress --group-id $STORE_SG --security-group-rule-ids $RULE`. The script refuses a Redis that holds no `boxes` set (the edge's box index); pass `--allow-empty-store` only if the edge has never created a box. Then:
    ```sh
    node deploy/boxes/edge/offboard.mjs <email>                    # dry run: sandbox ids with owners, backup versions, owned projects
    node deploy/boxes/edge/offboard.mjs <email> --delete <email>   # kill, delete, list again, fail if anything remains
