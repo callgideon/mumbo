@@ -1,5 +1,6 @@
 // The approve page on its own origin, https://<approveHost>/, which no box serves (design section 5): the founder's
-// queue of merges, "Approve N low-risk", the stop switch and repository access for projects.
+// queue of merges, "Approve N low-risk", the stop switch and repository access for projects. An item without a pass
+// review marker for its commit shows why it is not approvable, with no Approve form.
 // Every POST needs `Origin: https://<approveHost>` exactly and the day's CSRF token, so neither another site nor a
 // script served from a box (on another origin) can act here. The page runs no script (CSP default-src 'none').
 import { createHmac, timingSafeEqual } from 'node:crypto'
@@ -17,6 +18,7 @@ const NOTICES = new Map([
   ['sha_moved', 'The pull request changed or cannot be merged as it stands. Review it again.'],
   ['checks_not_green', 'Required checks are not green on that commit, so it was not merged.'],
   ['not_low_risk', 'No longer low-risk at that commit, so it was not merged.'],
+  ['not_reviewed', 'The agent\'s review has not passed that commit, so it was not merged.'],
   ['not_candidate', 'That pull request is no longer ready to merge: closed, a draft, or not into main.'],
   ['not_owner', 'You do not own the project of that pull request.'],
   ['not_found', 'That approval is no longer open.'],
@@ -161,7 +163,9 @@ export function approvePage({ approvals, halt, store, csrfKey, host, approvers, 
 <p>Protected paths: ${i.protected.length ? i.protected.map(p => `<code>${esc(p)}</code>`).join(', ') : '<span class="muted">none</span>'}</p>
 <p>Checks: ${Object.entries(i.checks).map(([name, state]) => `${esc(name)}: ${esc(state)}`).join(' · ')}</p>
 <p>Agent's review (claim): ${i.review ? `${esc(i.review.verdict)}<br><span class="muted">${esc(String(i.review.excerpt ?? i.review.body ?? '').slice(0, 400))}</span>` : '<span class="muted">none for this commit</span>'}</p>
-${approver ? `<form method="post" action="/grant">${hidden({ id: i.id, sha: i.sha, csrf })}<div class="row"><span></span><button class="primary">Approve</button></div></form>\n` : ''}</section>`
+${!approver ? '' : i.review?.verdict === 'pass'
+    ? `<form method="post" action="/grant">${hidden({ id: i.id, sha: i.sha, csrf })}<div class="row"><span></span><button class="primary">Approve</button></div></form>\n`
+    : '<div class="row"><span class="muted">Not approvable: the agent\'s review has not passed this commit.</span><button class="primary" disabled>Approve</button></div>\n'}</section>`
     const bound = (id, list) => list.length ? list.map(r => approver
       ? `<form method="post" action="/repo-remove">${hidden({ project: id, repo: r, csrf })}<div class="row"><code>${esc(r)}</code><button>Remove</button></div></form>`
       : `<p><code>${esc(r)}</code></p>`).join('\n') : '<p class="muted">No repositories yet.</p>'

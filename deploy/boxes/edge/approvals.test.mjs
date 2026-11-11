@@ -291,6 +291,23 @@ test('grant re-reads GitHub: a base changed to dev or a closed PR is not_candida
   assert.equal((await only(svc)).id, ID)
 })
 
+test('grant needs a pass review marker on the head SHA: none, a fail, or a pass for an older SHA is not_reviewed, with no GitHub call', async () => {
+  for (const [name, comments] of [['no marker', []], ['a fail marker', [marker(SHA, 'fail')]], ['a pass for an older SHA', [marker(OLD, 'pass')]]]) {
+    const { gh, svc, audits } = await setup()
+    gh.comments[1] = comments
+    await svc.poll()
+    const before = gh.calls.length
+    assert.deepEqual(await svc.grant(FOUNDER, ID, SHA), { id: ID, merged: false, sha: SHA, reason: 'not_reviewed' }, name)
+    // "Approve all low-risk" is unchanged: such an item is not low-risk.
+    assert.deepEqual(await svc.grantLowRisk(FOUNDER, [{ id: ID, sha: SHA }]), [{ id: ID, merged: false, sha: SHA, reason: 'not_low_risk' }], name)
+    assert.equal(gh.calls.length, before, name)
+    assert.deepEqual(audits, [], name)
+    gh.comments[1].push(marker(SHA, 'pass'))
+    await svc.poll()
+    assert.equal((await svc.grant(FOUNDER, ID, SHA)).merged, true, `${name}, then a pass on the head and checks green`)
+  }
+})
+
 test('grant merges at the SHA with a single-repository merge token, never the read token, revokes it, audits with firstSeen, and removes the item', async () => {
   const { gh, svc, audits, clock } = await setup()
   await svc.poll()
@@ -322,6 +339,7 @@ test('a head that moved after showing: the merge names the shown SHA, GitHub ref
   const { gh, svc, audits } = await setup()
   await svc.poll()
   gh.pulls[0].head.sha = NEW
+  gh.comments[1].push(marker(NEW, 'pass'))
   assert.deepEqual(await svc.grant(FOUNDER, ID, SHA), { id: ID, merged: false, sha: SHA, reason: 'sha_moved' })
   assert.deepEqual(gh.calls.filter(c => c.method === 'PUT').map(c => c.body), [{ sha: SHA, merge_method: 'merge' }])
   assert.equal(gh.calls.filter(c => c.method === 'DELETE').length, 1)

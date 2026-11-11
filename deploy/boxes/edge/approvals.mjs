@@ -46,8 +46,9 @@ const READ_PERMISSIONS = { contents: 'read', pull_requests: 'read', checks: 'rea
  * @property {string} id
  * @property {boolean} merged
  * @property {string} sha
- * @property {'not_found'|'not_owner'|'sha_moved'|'not_low_risk'|'checks_not_green'|'not_candidate'|'github_error'} [reason] - why it
- *   did not merge; `not_owner` also covers an owner who is not an approver; `not_low_risk` comes only from grantLowRisk.
+ * @property {'not_found'|'not_owner'|'sha_moved'|'not_low_risk'|'not_reviewed'|'checks_not_green'|'not_candidate'|'github_error'} [reason] - why it
+ *   did not merge; `not_owner` also covers an owner who is not an approver; `not_low_risk` comes only from grantLowRisk;
+ *   `not_reviewed`: the item's review marker for `sha` is missing or not `pass`.
  */
 
 /**
@@ -62,8 +63,9 @@ const READ_PERMISSIONS = { contents: 'read', pull_requests: 'read', checks: 'rea
  *   `poll` refreshes the queue from GitHub; a repository GitHub does not answer for, or whose read-only token GitHub
  *   does not mint (logged with mintToken's reason, such as permissions not approved), keeps its items, and an item stays
  *   with the project that first listed it while that project has its repository. `list` gives the items of the
- *   projects `email` owns. `grant` merges item `id` only at `sha`, after re-reading the PR and its checks, then audits
- *   it (with `via` and `mergeCommitSha`) and removes it; a moved head answers `sha_moved` and re-reads that PR.
+ *   projects `email` owns. `grant` merges item `id` only at `sha`, and only with a `pass` review marker for `sha` as the
+ *   last poll read it, after re-reading the PR and its checks, then audits it (with `via` and `mergeCommitSha`) and
+ *   removes it; a moved head answers `sha_moved` and re-reads that PR.
  *   `grantLowRisk` grants only the `shown` pairs (what the founder's page displayed) that are still low-risk at that
  *   exact SHA, in order, and gives one result per pair. An item whose repository its project no longer has is dropped
  *   by `list` (not listed) and by `grant` (`not_found`). `dropRepo` drops the project's items for one repository, for
@@ -169,6 +171,7 @@ export function approvalsService({ store, github, notify, audit, fetchImpl, now,
     if (!approvers.includes(email) || !(await ownersOf(store, doc.project)).includes(email)) return no('not_owner')
     if (sha !== doc.sha) return no('sha_moved')
     if (lowRiskOnly && !doc.lowRisk) return no('not_low_risk')
+    if (doc.review?.verdict !== 'pass') return no('not_reviewed')
     let checks, mergeCommitSha
     try {
       if (!isCandidate(await read(doc.repo, `/repos/${doc.repo}/pulls/${doc.number}`))) return no('not_candidate')
