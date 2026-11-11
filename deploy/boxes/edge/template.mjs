@@ -73,7 +73,7 @@ export const kasmvncStep = ({ version, sha256 } = KASMVNC) => {
  *  capabilities, so the capability is set last; both are checked. */
 export const KASMVNC_BIND_STEP = 'x=$(readlink -f "$(command -v Xkasmvnc)") && chgrp xvnc "$x" && chmod 0750 "$x" && setcap cap_net_bind_service=+ep "$x" && getcap "$x" | grep -q cap_net_bind_service && [ "$(stat -c %a:%U:%G "$x")" = 750:root:xvnc ]'
 /** The template step that writes edge PORTS_MARKER: boxes from this template run dsh and the live view on edge PORTS, and
- *  their start script treats a failed iptables rule as fatal. */
+ *  their start script loads its nftables firewall (edge hardening) and stops when the load fails. */
 export const PORTS_STEP = `install -d -m 0755 ${dirname(PORTS_MARKER)} && printf '%s\\n' '${PORTS.dsh} ${PORTS.live}' > ${PORTS_MARKER} && chmod 0644 ${PORTS_MARKER}`
 /** Agent containment's users and groups (B24, edge startScript), which the start script looks up by name at each start
  *  and writes into the containment rows by id, since E2B's own account `user` can take any id: `agent` runs the model's
@@ -98,6 +98,27 @@ export const usersSteps = (person) => {
     PORTS_STEP,
   ]
 }
+/** The port NFT_SMOKE_STEP probes; nothing in a box uses it. */
+const NFT_PROBE_PORT = 47999
+/** The template step, last, after the users exist, that fails the build unless this kernel enforces the kind of rule the
+ *  start script's nftables firewall is made of (edge hardening): it loads the probe table `inet mumbo_probe`, whose output
+ *  chain resets a TCP connection to NFT_PROBE_PORT from every user but root (`meta skuid != 0`), runs a listener on
+ *  127.0.0.1 there as root with node (the image's runtime), and requires that root connects and that agent is refused
+ *  (ECONNREFUSED). It deletes the table and stops the listener before it checks, and a table it cannot delete fails the
+ *  build too, so neither reaches the template. A subshell: e2b's runCmd joins the steps with `&&`, which then carries the
+ *  step's status and skips it after a failed step. */
+export const NFT_SMOKE_STEP = `(${[
+  `N=$(command -v node) || { echo 'mumbo-box: the nftables smoke check needs node' >&2; exit 1; }`,
+  `C='const s=require("net").connect(${NFT_PROBE_PORT},"127.0.0.1");s.on("connect",()=>process.exit(0));s.on("error",e=>process.exit(e.code==="ECONNREFUSED"?3:1));setTimeout(()=>process.exit(2),5000)'`,
+  'export N C',
+  `nft 'table inet mumbo_probe { chain output { type filter hook output priority 0; policy accept; meta skuid != 0 tcp dport ${NFT_PROBE_PORT} reject with tcp reset; }; }' || { echo 'mumbo-box: nft cannot load the probe table inet mumbo_probe' >&2; exit 1; }`,
+  `"$N" -e 'require("net").createServer(s=>s.end()).listen(${NFT_PROBE_PORT},"127.0.0.1")' </dev/null >/dev/null 2>&1 & l=$!`,
+  'r=1; for i in 1 2 3 4 5 6 7 8 9 10; do "$N" -e "$C" && { r=0; break; }; sleep 1; done',
+  `a=0; su -s /bin/sh agent -c '"$N" -e "$C"' </dev/null || a=$?`,
+  'kill $l 2>/dev/null || :; wait $l 2>/dev/null || :',
+  `nft delete table inet mumbo_probe || { echo 'mumbo-box: nft could not delete the probe table inet mumbo_probe' >&2; exit 1; }`,
+  `[ $r = 0 ] && [ $a = 3 ] || { echo "mumbo-box: the nftables smoke check failed: root's connection ended with $r and agent's with $a, not 0 and 3 (refused)" >&2; exit 1; }`,
+].join('; ')})`
 /** The user's box is their computer: KasmVNC's display and live view, the XFCE desktop and Google Chrome stable from
  *  Google's apt repository (each build installs the current release). The edge's start script runs KasmVNC as the user
  *  `xvnc`, Chrome as the user `browser` and, on an image with the B24 harness, the XFCE session as `xsession` (before it,
@@ -105,7 +126,7 @@ export const usersSteps = (person) => {
  *  browser are aimed at it here. */
 export const BOX_STEPS = [
   ...(CHROME_SENSITIVE_SYNC ? [maskingGuardStep()] : []),
-  'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google-chrome.asc && chmod go+r /etc/apt/keyrings/google-chrome.asc && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xfce4-session xfwm4 xfce4-panel xfdesktop4 thunar xfce4-terminal tango-icon-theme librsvg2-common google-chrome-stable dbus-x11 xdotool wmctrl imagemagick xsel xauth fonts-noto-core fonts-noto-color-emoji fonts-noto-cjk procps iptables libcap2-bin acl && rm -rf /var/lib/apt/lists/*',
+  'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google-chrome.asc && chmod go+r /etc/apt/keyrings/google-chrome.asc && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xfce4-session xfwm4 xfce4-panel xfdesktop4 thunar xfce4-terminal tango-icon-theme librsvg2-common google-chrome-stable dbus-x11 xdotool wmctrl imagemagick xsel xauth fonts-noto-core fonts-noto-color-emoji fonts-noto-cjk procps nftables libcap2-bin acl && rm -rf /var/lib/apt/lists/*',
   kasmvncStep(),
   'id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser',
   // KasmVNC's server runs as its own system user, with no home or login, so browser cannot signal it or take its place.
@@ -118,13 +139,16 @@ export const BOX_STEPS = [
   // The stock panels, without the panel's first-start dialog; XFCE's web browser and Chrome's menu entry start the box's Chrome.
   'cp /etc/xdg/xfce4/panel/default.xml /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml && sed -i "s/^WebBrowser=.*/WebBrowser=google-chrome/" /etc/xdg/xfce4/helpers.rc && install -d /usr/local/share/applications && sed "s#/usr/bin/google-chrome-stable#/usr/local/bin/google-chrome#" /usr/share/applications/google-chrome.desktop > /usr/local/share/applications/google-chrome.desktop',
   ...usersSteps(true),
+  NFT_SMOKE_STEP,
 ]
-/** A project box is headless: git, gh (GitHub's apt repository) and openssl for the box-local GitHub proxy's CA, iptables
- *  and acl for the start script, the proxy's own system user ghproxy (edge startScript), and agent containment's users. */
+/** A project box is headless: git, gh (GitHub's apt repository) and openssl for the box-local GitHub proxy's CA, nftables
+ *  and acl for the start script, the proxy's own system user ghproxy (edge startScript), agent containment's users, and
+ *  the nftables smoke check. */
 export const PROJECT_STEPS = [
-  'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl gpg git openssl procps iptables acl && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*',
+  'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl gpg git openssl procps nftables acl && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*',
   'id ghproxy >/dev/null 2>&1 || useradd -r -U -M -d /nonexistent -s /usr/sbin/nologin ghproxy',
   ...usersSteps(false),
+  NFT_SMOKE_STEP,
 ]
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) await build(templateArgs(process.argv))

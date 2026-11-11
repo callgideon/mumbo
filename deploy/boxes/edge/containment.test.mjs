@@ -1,7 +1,8 @@
 // node --test deploy/boxes/edge/containment.test.mjs
 // Agent containment (B24) in the start script: the rows it writes against the harness's fixtures, and its kernel,
-// network and layout parts run by sh in a temporary root with fake id, getent, usermod, chown, setfacl, mount and
-// iptables, and only those and the real tools they need on PATH. The escape-test script's check list.
+// network and layout parts run by sh in a temporary root with fake id, getent, usermod, chown, setfacl, mount and nft,
+// and only those and the real tools they need on PATH. The template's containment steps and nftables smoke check. The
+// escape-test script's check list.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -9,7 +10,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { startScript, boxSite, containmentRows, containmentLayout, ENVD_PORT, MUMBO_MCP_PORT } from './edge.mjs'
-import { BOX_STEPS, PROJECT_STEPS, KASMVNC_BIND_STEP, kasmvncStep, usersSteps } from './template.mjs'
+import { BOX_STEPS, PROJECT_STEPS, KASMVNC_BIND_STEP, NFT_SMOKE_STEP, kasmvncStep, usersSteps } from './template.mjs'
 
 const c = { llmHost: 'llm.example', publicHost: 'app.example', projectDomain: 'app.example' }
 const script = (cfg, person) => startScript(cfg, 'T', boxSite(cfg, person ? 'a@x.com' : 'project:0123456789abcdef'), 'role', person ? undefined : 'K', { proxy: 'P', gh: 'G' })
@@ -154,8 +155,26 @@ function root({ users = true } = {}) {
 }
 /** The start script's B24 layout part, after the gates. */
 const layoutOf = (s) => s.slice(s.indexOf('CONTAINMENT_PATCH=\n'), s.indexOf('AGENTS_HOME=/root/.mumbo/agents'))
-/** The start script's B24 kernel and network part, with the gates and the firewall helper it needs. */
-const hardeningOf = (s) => `IP6=\n${s.split('\n').find(l => l.startsWith('rule() { '))}\n${s.slice(s.indexOf('if [ -n "$B24_TEMPLATE" ]; then\n  # Only root binds'), s.indexOf('CONTAINMENT_PATCH=\n'))}`
+/** The start script's B24 kernel and network part. */
+const hardeningOf = (s) => s.slice(s.indexOf('if [ -n "$B24_TEMPLATE" ]; then\n  # Only root binds'), s.indexOf('CONTAINMENT_PATCH=\n'))
+/** The nftables ruleset the B24 start script loads with DSH_PORT 880 and LIVE_PORT 881; `cdp` is who besides root may
+ *  connect to the debugging port: `{ 0, <browsermcp's uid> }`, or `0` on a box without browsermcp. */
+const FIREWALL = (cdp) => `table inet mumbo
+delete table inet mumbo
+table inet mumbo {
+  chain output {
+    type filter hook output priority 0; policy accept;
+    tcp flags & (fin|syn|rst|ack) == syn tcp dport ${ENVD_PORT} reject with tcp reset
+    tcp flags & (fin|syn|rst|ack) == syn tcp dport { 880, 881, ${MUMBO_MCP_PORT}, 5900-5999 } meta skuid != 0 reject with tcp reset
+    tcp flags & (fin|syn|rst|ack) == syn tcp dport 9222 meta skuid != ${cdp} reject with tcp reset
+  }
+  chain input {
+    type filter hook input priority 0; policy accept;
+    iifname != "lo" tcp dport { 9222, 5900-5999 } drop
+    iifname != "lo" udp dport 881 drop
+  }
+}
+`
 
 test('containment rows: the harness fixtures with the box\'s ids and agent in the workspace group, for each mcpServerWorkspace', () => {
   for (const person of [true, false]) {
@@ -274,61 +293,84 @@ test('the B24 layout fails loud on a template without containment\'s users or ma
   } finally { r.done() }
 })
 
-test('the B24 template\'s kernel and network part: port floor, link protections and hidepid set and checked, no set-user-ID su or sudo, the OUTPUT rules, each fatal', () => {
-  const s = script(c, true)
-  const setup = (r, { hidepid = true } = {}) => {
+/** Runs the B24 kernel and network part of start script `s` in a fresh root whose sysctls, /proc mount and set-user-ID
+ *  su and sudo it can fix, with `nft` logging its arguments; `fail` breaks one of them first. What it did, and the
+ *  firewall file it wrote. */
+function hardening(s, { fail = () => {}, users = true, gates = 'B24_TEMPLATE=1 DSH_PORT=880 LIVE_PORT=881' } = {}) {
+  const r = root({ users })
+  try {
     for (const k of ['net/ipv4/ip_unprivileged_port_start', 'fs/protected_hardlinks', 'fs/protected_symlinks']) writeFileSync(r.at(`proc/sys/${k}`), '0\n')
-    writeFileSync(r.at('proc/mounts'), `proc /proc proc rw,nosuid,nodev,noexec,relatime${hidepid ? ',hidepid=invisible' : ''} 0 0\n`)
+    writeFileSync(r.at('proc/mounts'), 'proc /proc proc rw,nosuid,nodev,noexec,relatime,hidepid=invisible 0 0\n')
     for (const b of ['su', 'sudo']) { writeFileSync(r.at(`bin/${b}`), ''); chmodSync(r.at(`bin/${b}`), 0o4755) }
-    r.fake('iptables', `echo "$*" >> ${r.t}/log/iptables; [ "$1" != -C ]`)
+    r.fake('nft', `echo "$*" >> ${r.t}/log/nft`)
+    fail(r)
+    const out = r.run(`${gates}\n${hardeningOf(s)}`)
+    const file = r.at('root/.mumbo/firewall.nft')
+    return {
+      ...out, mount: r.lines('mount'), nft: r.lines('nft'),
+      sysctls: ['net/ipv4/ip_unprivileged_port_start', 'fs/protected_hardlinks', 'fs/protected_symlinks'].map(k => readFileSync(r.at(`proc/sys/${k}`), 'utf8')),
+      setuid: ['su', 'sudo'].map(b => statSync(r.at(`bin/${b}`)).mode & 0o7777),
+      firewall: existsSync(file) ? readFileSync(file, 'utf8') : undefined, firewallMode: existsSync(file) ? statSync(file).mode & 0o777 : undefined,
+    }
+  } finally { r.done() }
+}
+/** Fails unless run `h` loaded exactly FIREWALL(cdp) from a root-only file and checked that it is loaded. */
+const assertFirewall = (h, cdp) => {
+  assert.equal(h.code, 0, h.err)
+  assert.equal(h.firewall, FIREWALL(cdp))
+  assert.deepEqual([h.firewallMode, h.nft], [0o600, ['-f T/root/.mumbo/firewall.nft', 'list table inet mumbo']])
+}
+
+test('the B24 template\'s kernel and network part: port floor, link protections and hidepid set and checked, no set-user-ID su or sudo, the nftables firewall, each fatal', () => {
+  const s = script(c, true)
+  const h = hardening(s)
+  assert.deepEqual([h.sysctls, h.mount, h.setuid], [['1024\n', '1\n', '1\n'], ['-o remount,hidepid=2 /proc'], [0o755, 0o755]])
+  // One inet table (IPv4 and IPv6), replaced whole: every process, root's dsh included, is refused E2B's envd, which runs
+  // commands as root; every user but root dsh, the live view, the door and VNC; every user but root and browsermcp
+  // (1002) the debugging port. The debugging, VNC and WebRTC ports stay box-local.
+  assertFirewall(h, '{ 0, 1002 }')
+  // A project box has no browsermcp: only root reaches the debugging port.
+  assertFirewall(hardening(script(c, false), { users: false }), '0')
+  // Mutations: each port the rules name, taken out of the script, fails the check.
+  for (const [from, to] of [[`dport ${ENVD_PORT} `, 'dport '], ['{ $DSH_PORT, ', '{ '], [' $LIVE_PORT, ', ' '], [`, ${MUMBO_MCP_PORT}, `, ', '], [', 5900-5999 } meta', ' } meta'], ['dport 9222 meta', 'dport meta'], ['{ 9222, 5900-5999 } drop', '{ 9222 } drop'], ['udp dport $LIVE_PORT', 'udp dport 0']]) {
+    const mutant = s.replace(from, to)
+    assert.notEqual(mutant, s, from)
+    assert.throws(() => assertFirewall(hardening(mutant), '{ 0, 1002 }'), assert.AssertionError, from)
   }
-  const run = (r) => r.run(`B24_TEMPLATE=1 DSH_PORT=880 LIVE_PORT=881\n${hardeningOf(s)}`)
-  let r = root()
-  try {
-    setup(r)
-    const out = run(r)
-    assert.equal(out.code, 0, out.err)
-    assert.deepEqual(['net/ipv4/ip_unprivileged_port_start', 'fs/protected_hardlinks', 'fs/protected_symlinks'].map(k => readFileSync(r.at(`proc/sys/${k}`), 'utf8')), ['1024\n', '1\n', '1\n'])
-    assert.deepEqual(r.lines('mount'), ['-o remount,hidepid=2 /proc'])
-    for (const b of ['su', 'sudo']) assert.equal(statSync(r.at(`bin/${b}`)).mode & 0o7777, 0o755, b)
-    const reject = (port, extra = '') => `-I OUTPUT -p tcp --syn --dport ${port} -m owner ! --uid-owner 0${extra} -j REJECT --reject-with tcp-reset`
-    // E2B's envd, which runs commands as root, is refused to every process in the box, root's dsh included.
-    assert.deepEqual(r.lines('iptables').filter(l => l.startsWith('-I')), [`-I OUTPUT -p tcp --syn --dport ${ENVD_PORT} -j REJECT --reject-with tcp-reset`, ...['880', '881', MUMBO_MCP_PORT, '5900:5999'].map(p => reject(p)), reject(9222, ' -m owner ! --uid-owner 1002')])
-    // Each rule is checked first, with exactly the arguments it is inserted with.
-    assert.deepEqual(r.lines('iptables').filter(l => l.startsWith('-C')).map(l => l.replace('-C', '-I')), r.lines('iptables').filter(l => l.startsWith('-I')))
-  } finally { r.done() }
-  // IPv6, when the kernel has it, gets the same rules.
-  r = root()
-  try {
-    setup(r)
-    r.fake('ip6tables', `echo "$*" >> ${r.t}/log/ip6tables; [ "$1" != -C ]`)
-    const out = r.run(`B24_TEMPLATE=1 DSH_PORT=880 LIVE_PORT=881\n${hardeningOf(s).replace('IP6=\n', 'IP6=ip6tables\n')}`)
-    assert.equal(out.code, 0, out.err)
-    assert.deepEqual(r.lines('ip6tables'), r.lines('iptables'))
-  } finally { r.done() }
-  // Fatal: a sysctl that does not take, /proc without hidepid, a su that keeps its bit, a rule iptables refuses.
+  // Fatal: a sysctl that does not take, /proc without hidepid, a su that keeps its bit, a table nft does not load or
+  // does not list, and no nft at all.
   const failures = [
     [(r) => { rmSync(r.at('proc/sys/fs/protected_symlinks')); symlinkSync('/dev/null', r.at('proc/sys/fs/protected_symlinks')) }, `mumbo-box: T/proc/sys/fs/protected_symlinks is not 1\n`],
     [(r) => writeFileSync(r.at('proc/mounts'), 'proc /proc proc rw 0 0\n'), 'mumbo-box: /proc is not mounted with hidepid=2\n'],
     [(r) => r.fake('chmod', 'exit 0'), `mumbo-box: T/bin/su is still set-user-ID\n`],
-    [(r) => r.fake('iptables', 'exit 1'), ''],
+    [(r) => r.fake('nft', '[ "$1" != -f ]'), 'mumbo-box: nft could not load the firewall table inet mumbo from T/root/.mumbo/firewall.nft\n'],
+    [(r) => r.fake('nft', '[ "$1" != list ]'), 'mumbo-box: the firewall table inet mumbo is not loaded\n'],
+    [(r) => rmSync(r.at('bin/nft')), /^.*nft.*not found\nmumbo-box: nft could not load the firewall table inet mumbo from T\/root\/\.mumbo\/firewall\.nft\n$/],
   ]
   for (const [fail, err] of failures) {
-    r = root()
-    try {
-      setup(r); fail(r)
-      const out = run(r)
-      assert.notEqual(out.code, 0, err)
-      if (err) assert.equal(out.err, err)
-    } finally { r.done() }
+    const out = hardening(s, { fail })
+    assert.equal(out.code, 1, out.err)
+    if (typeof err === 'string') assert.equal(out.err, err); else assert.match(out.err, err)
   }
   // Before the marker none of it runs.
-  r = root()
+  const before = hardening(s, { gates: 'B24_TEMPLATE= DSH_PORT=3080 LIVE_PORT=6080' })
+  assert.deepEqual([before.code, before.mount, before.nft, before.firewall, before.setuid], [0, [], [], undefined, [0o4755, 0o4755]])
+})
+
+test('the start scripts parse under sh, name no iptables owner match, and their firewall parses under nft -c when this host can run it', (t) => {
+  for (const s of [script(c, true), script(c, false)]) {
+    execFileSync('sh', ['-n'], { input: s })
+    execFileSync('sh', ['-n'], { input: hardeningOf(s) })
+    assert.ok(!s.includes('-m owner') && !s.includes('uid-owner'))
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'firewall-'))
   try {
-    setup(r)
-    const out = r.run(`B24_TEMPLATE= DSH_PORT=3080 LIVE_PORT=6080\n${hardeningOf(s)}`)
-    assert.deepEqual([out.code, r.lines('mount'), r.lines('iptables'), statSync(r.at('bin/su')).mode & 0o7777], [0, [], [], 0o4755])
-  } finally { r.done() }
+    writeFileSync(join(dir, 'firewall.nft'), FIREWALL('{ 0, 1002 }'))
+    const check = spawnSync('nft', ['-c', '-f', join(dir, 'firewall.nft')], { encoding: 'utf8' })
+    if (check.error?.code === 'ENOENT') return t.skip('nft is not installed on this host')
+    if (/Operation not permitted/.test(check.stderr)) return t.skip('nft -c needs CAP_NET_ADMIN, which this test\'s user lacks')
+    assert.equal(check.status, 0, check.stderr)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
 })
 
 test('escape-test.sh parses under sh and runs every escape test the B24 brief names', () => {
@@ -412,9 +454,53 @@ test('template: containment\'s users and groups, homes 0700 with the run-as TMPD
   } finally { r.done() }
   // The project box's GitHub proxy becomes its own system user (edge startScript).
   assert.ok(PROJECT_STEPS.includes('id ghproxy >/dev/null 2>&1 || useradd -r -U -M -d /nonexistent -s /usr/sbin/nologin ghproxy'))
-  // iptables, setfacl and setcap are installed, not assumed from the base image.
+  // nftables, setfacl and setcap are installed, not assumed from the base image; iptables, which nothing on a template
+  // with the marker runs, is not.
   const pkgs = (steps) => steps.find(s => s.includes('apt-get install')).match(/--no-install-recommends ([^&]+?) &&/g).join(' ')
-  for (const p of ['iptables', 'acl', 'libcap2-bin']) assert.match(pkgs(BOX_STEPS), new RegExp(`\\b${p}\\b`), p)
-  for (const p of ['iptables', 'acl']) assert.match(pkgs(PROJECT_STEPS), new RegExp(`\\b${p}\\b`), p)
-  assert.deepEqual([BOX_STEPS.slice(-usersSteps(true).length), PROJECT_STEPS.slice(-usersSteps(false).length)], [usersSteps(true), usersSteps(false)])
+  for (const p of ['nftables', 'acl', 'libcap2-bin']) assert.match(pkgs(BOX_STEPS), new RegExp(`\\b${p}\\b`), p)
+  for (const p of ['nftables', 'acl']) assert.match(pkgs(PROJECT_STEPS), new RegExp(`\\b${p}\\b`), p)
+  assert.ok(![...BOX_STEPS, ...PROJECT_STEPS].some(s => /\biptables\b/.test(s)))
+  // The users, then the nftables smoke check, which runs as agent, last.
+  assert.deepEqual([BOX_STEPS.slice(-usersSteps(true).length - 1), PROJECT_STEPS.slice(-usersSteps(false).length - 1)], [[...usersSteps(true), NFT_SMOKE_STEP], [...usersSteps(false), NFT_SMOKE_STEP]])
+})
+
+test('template: the nftables smoke check passes only when root connects and agent is refused, always removes its table and listener, and runs only after the steps before it succeed', () => {
+  /** Runs `before && NFT_SMOKE_STEP`, as e2b's runCmd joins the steps, with fake nft, su and node: a connection exits
+   *  with `root` or, under su (as agent), `agent`, and the listener writes its pid and sleeps. `listener`: still alive. */
+  const run = ({ root: rootRc = 0, agent = 3, nft = '', before = 'true' } = {}) => {
+    const r = root()
+    try {
+      r.fake('nft', `echo "nft $*" >> ${r.t}/log/steps; ${nft}`)
+      r.fake('su', `echo "su $*" >> ${r.t}/log/steps; AS=agent /bin/sh -c "$5"`)
+      r.fake('node', `case "$2" in *createServer*) echo "listen $2" >> ${r.t}/log/steps; echo $$ > ${r.t}/listener; exec ${which('sleep')} 30;; esac; [ -n "\${AS:-}" ] && exit ${agent}; exit ${rootRc}`)
+      r.fake('sleep', '')
+      const out = spawnSync('/bin/sh', ['-c', `${before} && ${NFT_SMOKE_STEP}`], { encoding: 'utf8', env: { PATH: r.at('bin') }, timeout: 20000 })
+      const pid = existsSync(r.at('listener')) ? Number(readFileSync(r.at('listener'), 'utf8')) : undefined
+      let listener = pid !== undefined
+      try { if (listener) process.kill(pid, 'SIGKILL') } catch { listener = false /* ESRCH: the step stopped it */ }
+      return { code: out.status, err: out.stderr, steps: r.lines('steps'), listener }
+    } finally { r.done() }
+  }
+  const ok = run()
+  assert.equal(ok.code, 0, ok.err)
+  assert.deepEqual(ok.steps, [
+    'nft table inet mumbo_probe { chain output { type filter hook output priority 0; policy accept; meta skuid != 0 tcp dport 47999 reject with tcp reset; }; }',
+    'listen require("net").createServer(s=>s.end()).listen(47999,"127.0.0.1")',
+    'su -s /bin/sh agent -c "$N" -e "$C"',
+    'nft delete table inet mumbo_probe',
+  ])
+  assert.equal(ok.listener, false)
+  const failed = 'mumbo-box: the nftables smoke check failed'
+  // Agent connects, or fails some other way than a refusal; root cannot connect.
+  for (const [opts, err] of [[{ agent: 0 }, `${failed}: root's connection ended with 0 and agent's with 0, not 0 and 3 (refused)\n`], [{ agent: 1 }, `${failed}: root's connection ended with 0 and agent's with 1, not 0 and 3 (refused)\n`], [{ root: 3 }, `${failed}: root's connection ended with 1 and agent's with 3, not 0 and 3 (refused)\n`]]) {
+    const out = run(opts)
+    assert.deepEqual([out.code, out.err, out.steps.at(-1), out.listener], [1, err, 'nft delete table inet mumbo_probe', false])
+  }
+  // nft cannot load the table, or cannot delete it.
+  const load = run({ nft: '[ "$1" = delete ]' }), del = run({ nft: '[ "$1" != delete ]' })
+  assert.deepEqual([load.code, load.err, load.listener], [1, 'mumbo-box: nft cannot load the probe table inet mumbo_probe\n', false])
+  assert.deepEqual([del.code, del.err, del.listener], [1, 'mumbo-box: nft could not delete the probe table inet mumbo_probe\n', false])
+  // After a failed step it does not run, and the failure is the build's.
+  const after = run({ before: 'false' })
+  assert.deepEqual([after.code, after.steps], [1, []])
 })

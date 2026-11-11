@@ -24,7 +24,10 @@ test('a user box start script is byte-for-byte what it was before project boxes 
   // /var/lib/mumbo, the welcome as agent, and the old Chromium profiles deleted. On a
   // template and image from before B24 the script runs as before, apart from that deletion (containment.test.mjs,
   // desktop.test.mjs, welcome.test.mjs, ports.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), '8d0d13230d90240fab588a5a787e351e89a76286e8ec28bdb8a8b20cc8cb6ea0')
+  // Then the B24 template's firewall became one native nftables table (inet mumbo, root-only file, loaded with nft -f
+  // and checked), in place of the iptables OUTPUT rules and the desktop's INPUT rules, because E2B's kernel has no
+  // xt_owner; the iptables helper is best effort, for a template before B24 only.
+  assert.equal(createHash('sha256').update(s).digest('hex'), '4377814d88d4fc05cfa5917a2db6fe23323ec7a91fa1d86c8b8d724c1e19366c')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -33,8 +36,10 @@ test('a project box start script is byte-for-byte what it was before B18 changed
   // Updated for B36's relay reply settings, the one block it adds, then for their own endpoint /mcp/report, and for B24
   // deliberately: the ports, kernel and network part, containment layout and rows behind their gates, the gh wrapper in
   // /usr/local/lib/mumbo/bin (on dsh's PATH, linked from /root/.mumbo/bin/gh), and the GitHub proxy as ghproxy on the
-  // B24 template.
-  assert.equal(createHash('sha256').update(s).digest('hex'), '3820c4b52e187d52535f32ca2fb058c73f451ab8b5a864079f71ef4a9e9aa03b')
+  // B24 template. Then for the B24 template's firewall as one native nftables table (inet mumbo, loaded with nft -f and
+  // checked) in place of the iptables OUTPUT rules, because E2B's kernel has no xt_owner, and the iptables helper best
+  // effort, for a template before B24 only.
+  assert.equal(createHash('sha256').update(s).digest('hex'), '47c2d381049d5774656de7f58a88e692f675677dde173799481420d89c484926')
 })
 
 const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'
@@ -275,7 +280,7 @@ test('a project box start script has the proxy setup in order, before the member
     'chmod 0755 /root/.mumbo/bin/github-local-proxy.mjs /usr/local/lib/mumbo/bin/gh',
     // B24: the wrapper is root's and world-readable outside /root/.mumbo; the old path still names it.
     'ln -sfn /usr/local/lib/mumbo/bin/gh /root/.mumbo/bin/gh',
-    // B24: on the B24 template the proxy becomes ghproxy (the firewall's owner rules then cover its tunnels).
+    // B24: on the B24 template the proxy becomes ghproxy (the firewall's rules by user then cover its tunnels).
     "pgrep -f github-local-proxy.mjs >/dev/null || PORT=8899 CA_DIR=/root/.mumbo/ca RUN_AS=$PROXY_USER EDGE_GITHUB_URL=https://l/github BOX_TOKEN=TOK nohup node /root/.mumbo/bin/github-local-proxy.mjs",
     'curl -s -o /dev/null -m 1 http://127.0.0.1:8899/',
     'if [ -f /src/deploy/mumbo-project.overlay.yml ]',
