@@ -72,6 +72,11 @@ async function host() {
   const remove = async (id: SessionId): Promise<void> => { await unregister.get(id)?.() }
   let resolveError: Error | undefined
   let gate: Promise<unknown> | undefined
+  let createGate: Promise<unknown> | undefined
+  // The session-title service's read of a Session's latest title, over the titles the controller's renames record.
+  ctx.provide('sessionTitle', {
+    get: ({ id }: { id: SessionId }) => titles.has(id) ? { title: titles.get(id) } : undefined,
+  } as never)
   ctx.provide('sessionController', {
     resolveAgent: async (id: SessionId) => {
       calls.push(`resolve:${id}`)
@@ -84,6 +89,7 @@ async function host() {
     },
     create: async (request: { sessionId: SessionId; workspaceId: WorkspaceId; agentPreset?: string }) => {
       calls.push(`create:${request.sessionId}:${String(request.agentPreset)}`)
+      await createGate
       // Like the real controller, a composed preset registry resolves the Agent's preset first and refuses a broken one.
       const preset = await ctx.get('agentPresets')?.resolve(request.agentPreset)
       if (preset?.broken !== undefined) throw new Error(preset.broken)
@@ -119,6 +125,8 @@ async function host() {
     clearFailure: () => { resolveError = undefined },
     /** Hold every later resolve until `held` settles, as a slow resume would. */
     hold: (held: Promise<unknown> | undefined) => { gate = held },
+    /** Hold every later create until `held` settles, as one waiting for the preset registry would. */
+    holdCreate: (held: Promise<unknown> | undefined) => { createGate = held },
   }
 }
 
@@ -246,6 +254,28 @@ describe('ensuring Mumbo at start', () => {
     await new Promise(resolve => setTimeout(resolve, 20))
     expect(calls).toHaveLength(4)
     expect(error).not.toHaveBeenCalled()
+  })
+
+  it('titles a Mumbo whose create landed after an unload at the next start, and keeps the person\'s title after that', async () => {
+    const { ctx, calls, titles, load, start, holdCreate } = await host()
+    const slow = Promise.withResolvers<undefined>()
+    holdCreate(slow.promise)
+    const fiber = await load()
+    await vi.waitFor(() => { expect(calls).toEqual(['resolve:mumbo', 'create:mumbo:undefined']) })
+    await fiber.dispose()
+    // The create persists Mumbo after the unload, which skips its rename.
+    holdCreate(undefined)
+    slow.resolve(undefined)
+    await vi.waitFor(() => { expect(ctx.agents.get(MUMBO)).toBeDefined() })
+    expect(titles.has(MUMBO)).toBe(false)
+    const second = await start()
+    expect(calls).toEqual(['resolve:mumbo', 'create:mumbo:undefined', 'resolve:mumbo', 'rename:mumbo:Mumbo'])
+    expect(titles.get(MUMBO)).toBe('Mumbo')
+    titles.set(MUMBO, 'My desk')
+    await second.dispose()
+    await start()
+    expect(calls.at(-1)).toBe('resolve:mumbo')
+    expect(titles.get(MUMBO)).toBe('My desk')
   })
 
   it('stops after the configured retries and cancels a pending retry on unload', async () => {

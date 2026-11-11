@@ -2,6 +2,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-api-session-controller'
+import type {} from '@deepseek-ai/dsh-session-title'
 import { defineDomain, domainTable, type KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-workspace'
@@ -14,10 +15,13 @@ export { MUMBO_SESSION_ID } from './session.ts'
 /** Cordis function-plugin name. */
 export const name = 'mumbo-assistant'
 
-/** `sessionController` keeps the plugin to Web profiles; `agents` reaches an already resumed Mumbo. */
-export const inject = ['sessionController', 'workspaceRegistry', 'agents', 'storageDomain']
+/**
+ * `sessionController` keeps the plugin to Web profiles; `agents` reaches an already resumed Mumbo; `sessionTitle` tells
+ * whether Mumbo has a title.
+ */
+export const inject = ['sessionController', 'workspaceRegistry', 'agents', 'storageDomain', 'sessionTitle']
 
-/** Title a new Mumbo Session gets; the person may rename it afterwards. */
+/** Title Mumbo gets while it has none; the person may rename it afterwards. */
 export const MUMBO_TITLE = 'Mumbo'
 
 /** Name of Mumbo's system prompt section. */
@@ -66,9 +70,10 @@ export const Config: z<Config> = z.object({
 })
 
 /**
- * Resolve Mumbo's Session, creating and titling it only on `session/not-found`, then unarchive it as needed, and unpin it
- * once: the sidebar entry replaces the pin an earlier version of this plugin set, and a pin the person sets later stays.
- * Each write starts only while `signal` is not aborted.
+ * Resolve Mumbo's Session, creating it only on `session/not-found`, title it while it has no title, then unarchive it as
+ * needed, and unpin it once: the sidebar entry replaces the pin an earlier version of this plugin set, and a pin the person
+ * sets later stays. Each write starts only while `signal` is not aborted, so a write already running may still land: a
+ * create whose rename an unload skipped leaves Mumbo untitled until the next ensure.
  * @param ctx - plugin context carrying the injected services.
  * @param config - validated configuration.
  * @param steps - the finished one-time start steps.
@@ -83,9 +88,11 @@ async function ensure(ctx: Context, config: Config, steps: KvTable<typeof UNPINN
     if (resolved.error.code !== 'session/not-found') throw resolved.error
     const workspace = await ctx.workspaceRegistry.create(config.workspace)
     signal.throwIfAborted()
-    const { sessionId } = await ctx.sessionController.create({ sessionId: MUMBO_SESSION_ID, workspaceId: workspace.id })
+    await ctx.sessionController.create({ sessionId: MUMBO_SESSION_ID, workspaceId: workspace.id })
     signal.throwIfAborted()
-    await ctx.sessionController.rename({ sessionId, title: MUMBO_TITLE })
+  }
+  if ('error' in resolved || ctx.sessionTitle.get(resolved.agent.session) === undefined) {
+    await ctx.sessionController.rename({ sessionId: MUMBO_SESSION_ID, title: MUMBO_TITLE })
     signal.throwIfAborted()
   }
   if (ctx.workspaceRegistry.archivedSessionIds.includes(MUMBO_SESSION_ID)) {
@@ -102,10 +109,10 @@ async function ensure(ctx: Context, config: Config, steps: KvTable<typeof UNPINN
 
 /**
  * Open the `mumbo_assistant` domain, register the archive veto and the prompt section, then ensure Mumbo's Session:
- * create it on `session/not-found` in the configured Workspace with the deployment's default preset and title it,
- * unarchive it as needed, and unpin it once. Start returns once the domain is open, and the first ensure runs detached:
- * it reaches the Agent preset registry, which can wait for the Loader to settle and so for this start. An ensure that
- * succeeds is logged as info; one that fails is logged as an error and retried after each of `retryDelaysMs` in turn,
+ * create it on `session/not-found` in the configured Workspace with the deployment's default preset, title it while it has
+ * no title, unarchive it as needed, and unpin it once. Start returns once the domain is open, and the first ensure runs
+ * detached: it reaches the Agent preset registry, which can wait for the Loader to settle and so for this start. An ensure
+ * that succeeds is logged as info; one that fails is logged as an error and retried after each of `retryDelaysMs` in turn,
  * while the veto and the prompt section stay registered. Attempts of one start never overlap. Unload cancels a pending
  * retry, and a running attempt starts no write after it; unload does not wait for that attempt, whose session controller
  * call can wait for the Loader in turn.

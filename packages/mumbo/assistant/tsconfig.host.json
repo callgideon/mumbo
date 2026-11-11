@@ -29,6 +29,9 @@
       "path": "../../core/system-prompt"
     },
     {
+      "path": "../../session/session-title"
+    },
+    {
       "path": "../../storage/storage-domain"
     },
     {
