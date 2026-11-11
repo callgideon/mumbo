@@ -28,6 +28,8 @@ unwritable() {
 denied() { if as "$2" "$4"; then say FAIL "$1" "$3"; else say PASS "$1" "$3"; fi; }
 manual() { say MANUAL "$1" "$2"; }
 user() { id "$1" >/dev/null 2>&1; }
+# listening PORT: something listens on TCP PORT, on any address.
+listening() { awk -v p=":$(printf %04X "$1")" '$4 == "0A" && substr($2, length($2) - 4) == p' /proc/net/tcp /proc/net/tcp6 2>/dev/null | grep -q .; }
 CONNECT='const s=require("net").connect(+process.argv[1],process.argv[2]);s.on("connect",()=>process.exit(0));s.on("error",()=>process.exit(1));setTimeout(()=>process.exit(2),5000)'
 BIND='const v=require("net").createServer().listen(+process.argv[1],process.argv[2]);v.on("listening",()=>process.exit(0));v.on("error",e=>process.exit(e.code==="EACCES"?3:e.code==="EADDRINUSE"?4:1))'
 connect() { echo "node -e '$CONNECT' $1 $2"; }
@@ -103,7 +105,7 @@ for h in 127.0.0.1 "$ip"; do
     set -- $t
     refused "agent-connect-$1" agent "agent connects to $h:$2" "$(connect "$2" "$h")"
   done
-  if awk -v p=":$(printf %04X "$ENVD_PORT")" '$4 == "0A" && substr($2, length($2) - 4) == p' /proc/net/tcp /proc/net/tcp6 2>/dev/null | grep -q .; then
+  if listening "$ENVD_PORT"; then
     for u in root $USERS; do denied "envd-$u" "$u" "$u connects to E2B's envd on $h:$ENVD_PORT" "$(connect "$ENVD_PORT" "$h")"; done
   else
     say SKIP "envd" "nothing listens on $ENVD_PORT"
@@ -125,12 +127,13 @@ fi
 # connection from inside the box to its own address comes in on loopback, so these checks connect from a network
 # namespace joined to the box by a veth pair on 198.18.0.0/30 (RFC 2544's benchmarking range; self-hosted E2B puts its
 # in-guest orchestrator address in 192.0.2.0/24). The namespace, and with it the pair, is deleted afterwards, also when
-# the script exits or gets HUP, INT or TERM during these checks. envd must answer there; root's listeners on
-# 127.0.0.1:9229 (Node's inspector) and 127.0.0.1:47999 (a high port), agent's on 127.0.0.1:8000 (a dev server), the
-# debugging port and VNC must time out there (dropped), neither connect nor be refused.
+# the script exits or gets HUP, INT or TERM during these checks. envd must answer there, and dsh, the live view and the
+# door must connect, each SKIP when nothing listens on its port, so a rule that drops too much fails as well; root's
+# listeners on 127.0.0.1:9229 (Node's inspector) and 127.0.0.1:47999 (a high port), agent's on 127.0.0.1:8000 (a dev
+# server), the debugging port and VNC must time out there (dropped), neither connect nor be refused.
 ns=mumbo-escape-$$ v=me$$
 LISTEN='const v=require("net").createServer(s=>s.end()).listen(+process.argv[1],"127.0.0.1");setTimeout(()=>process.exit(0),120000)'
-beyond() { for t in envd inspector high dev cdp vnc; do say SKIP "beyond-loopback-$t" "$1"; done; }
+beyond() { for t in envd dsh live door inspector high dev cdp vnc; do say SKIP "beyond-loopback-$t" "$1"; done; }
 trap 'ip netns del $ns 2>/dev/null' EXIT; trap 'exit 1' HUP INT TERM
 if ! command -v ip >/dev/null 2>&1 || ! ip netns add $ns 2>/dev/null; then
   beyond 'no network namespace here (ip from iproute2, and a kernel with network namespaces)'
@@ -145,6 +148,12 @@ else
   from() { ip netns exec $ns node -e "$CONNECT" "$1" "$ip" </dev/null >/dev/null 2>&1; }
   if from "$ENVD_PORT"; then
     say PASS beyond-loopback-envd "envd answers on $ip:$ENVD_PORT from beyond loopback"
+    for t in "dsh $DSH_PORT" "live $LIVE_PORT" "door $DOOR_PORT"; do
+      set -- $t
+      if ! listening $2; then say SKIP "beyond-loopback-$1" "nothing listens on $2"; continue; fi
+      from $2; rc=$?
+      if [ $rc = 0 ]; then say PASS "beyond-loopback-$1" "a connection from beyond loopback to $ip:$2 connects"; else say FAIL "beyond-loopback-$1" "a connection from beyond loopback to $ip:$2 ended with status $rc, not connected (0)"; fi
+    done
     for t in "inspector 9229" "high 47999" "dev 8000" "cdp 9222" "vnc 5900"; do
       set -- $t
       from $2; rc=$?

@@ -174,8 +174,50 @@ export const WRITABLE_EXCLUDES = [
   { path: '/run', reason: "runtime sockets and state, this check's own directory among them" },
   { path: '/tmp', reason: "every user's temporary files, in a sticky directory, where only a file's owner removes or renames it" },
 ]
-/** The directories on the run-as users' PATHs, from containmentRows' `PATH:` values. */
-const rowPaths = (person) => [...new Set([...containmentRows(SMOKE_CFG, person).matchAll(/^ +PATH: (\S+)$/gm)].flatMap(m => m[1].split(':')))]
+/** The directories on the run-as users' PATHs, from containmentRows' `PATH:` values: `own`, those in agent's home on
+ *  agent's PATH (runAs) and no other user's, which agent may own; `root`, every other, which only root may change.
+ *  @param {boolean} person a person box
+ *  @returns {{ own: string[], root: string[] }} */
+const rowPaths = (person) => {
+  const rows = containmentRows(SMOKE_CFG, person), dirs = (re) => [...rows.matchAll(re)].flatMap(m => m[1].split(':'))
+  const agent = dirs(/^ {8}PATH: (\S+)$/gm), others = dirs(/^ {10}PATH: (\S+)$/gm)
+  const own = agent.filter(d => d.startsWith('/home/agent/') && !others.includes(d))
+  return { own, root: [...new Set([...agent, ...others])].filter(d => !own.includes(d)) }
+}
+/** agent's environment in the containment rows (runAs `set`) that agentInstallScript needs, as `NAME=value` words. */
+const agentEnv = (person) => [...containmentRows(SMOKE_CFG, person).matchAll(/^ {8}(HOME|TMPDIR|NPM_CONFIG_PREFIX|PATH): (\S+)$/gm)].map(m => `${m[1]}=${m[2]}`)
+/** The script dshSmokeStep runs as agent, with agent's HOME, TMPDIR, NPM_CONFIG_PREFIX and PATH from the containment
+ *  rows, to show that agent installs packages without /usr/local, which is root's alone (edge systemRepair): `npm i -g`
+ *  of a package it packs from a directory in its TMPDIR must land in its npm prefix and run from its PATH; then, when
+ *  the image has python3, a venv in its TMPDIR, the supported route for Python packages, whose pip installs a wheel the
+ *  script makes, which must import. Nothing reaches the network; dshSmokeStep removes what it leaves in /home.
+ *  @param {boolean} person a person box
+ *  @returns {string} the script */
+export const agentInstallScript = (person) => `set -eu
+export ${agentEnv(person).join(' ')}
+d=$(mktemp -d)
+mkdir $d/js
+printf '%s\\n' '{"name":"mumbo-smoke","version":"1.0.0","bin":{"mumbo-smoke":"cli.js"}}' > $d/js/package.json
+printf '#!/usr/bin/env node\\nconsole.log("mumbo-smoke npm")\\n' > $d/js/cli.js
+cd $d
+npm pack ./js --pack-destination $d --silent >/dev/null
+npm install -g --offline --no-audit --no-fund --silent $d/mumbo-smoke-1.0.0.tgz
+[ "$(command -v mumbo-smoke)" = "$NPM_CONFIG_PREFIX/bin/mumbo-smoke" ] || { echo "agent's PATH finds mumbo-smoke at $(command -v mumbo-smoke || echo nothing), not in $NPM_CONFIG_PREFIX/bin"; exit 1; }
+[ "$(mumbo-smoke)" = 'mumbo-smoke npm' ] || { echo 'mumbo-smoke did not run'; exit 1; }
+command -v python3 >/dev/null || { echo 'mumbo-box: this image has no python3, so the dsh smoke check makes no venv'; exit 0; }
+python3 -m venv $d/venv
+python3 - $d <<'PY'
+import sys, zipfile
+info = 'mumbo_smoke-1.0.dist-info/'
+files = {'mumbo_smoke.py': 'OK = 42\\n', info + 'METADATA': 'Metadata-Version: 2.1\\nName: mumbo-smoke\\nVersion: 1.0\\n',
+         info + 'WHEEL': 'Wheel-Version: 1.0\\nGenerator: mumbo-smoke\\nRoot-Is-Purelib: true\\nTag: py3-none-any\\n'}
+files[info + 'RECORD'] = ''.join(p + ',,\\n' for p in [*files, info + 'RECORD'])
+with zipfile.ZipFile(sys.argv[1] + '/mumbo_smoke-1.0-py3-none-any.whl', 'w') as z:
+    for p, text in files.items(): z.writestr(p, text)
+PY
+$d/venv/bin/pip install --no-index --disable-pip-version-check --quiet $d/mumbo_smoke-1.0-py3-none-any.whl
+[ "$($d/venv/bin/python -c 'import mumbo_smoke; print(mumbo_smoke.OK)')" = 42 ] || { echo "the venv's python did not import what its pip installed"; exit 1; }
+`
 /** Listeners dshSmokeStep accepts though their user is not agent and the output chain lets agent connect to their port,
  *  each with the reason. */
 export const LISTENER_ALLOWLIST = [
@@ -195,9 +237,10 @@ const SMOKE_SCAN = '/root /home /src /var/lib/mumbo /usr/local/share/mumbo /run/
  *  directory without the sticky bit on the root filesystem outside WRITABLE_EXCLUDES, and on any file a user other than
  *  root can change (another owner, o+w, or g+w with a group other than root) in a directory on root's PATH or a run-as
  *  user's (containmentRows), or anywhere in dsh's code tree, the real paths of /src and `npm root -g`: root runs and
- *  imports them. On a failure it prints the reason, with mode, owner and path for each file named, and the tails of
- *  start.sh's output, /root/dsh.log and dsh's start-up audit (/root/.dsh/logs/startup-*.log), and dsh's whole warning
- *  that entries did not activate. Either way it then kills every process of the containment
+ *  imports them. agent may also own the directories in its home on its own PATH alone (rowPaths). Then it runs
+ *  agentInstallScript as agent, and fails unless it succeeds. On a failure it prints the reason, with mode, owner and
+ *  path for each file named, and the tails of start.sh's output, /root/dsh.log and dsh's start-up audit
+ *  (/root/.dsh/logs/startup-*.log), and dsh's whole warning that entries did not activate. Either way it then kills every process of the containment
  *  users and every process that started during the step (one whose pid `ps -e` did not list before start.sh) but kernel
  *  threads, the step's own session and envd's children (its socat port forwarders, which envd stops itself):
  *  dsh-subprocess-local starts each child in a session of its own, and as root on an image without serverIdentity. A
@@ -218,7 +261,8 @@ export const dshSmokeStep = (person) => {
   // The ids in dsh's warning (app-boot activationDiagnostic: its count, then one `<id> (<package>): <detail>` line per
   // entry, which stack lines may follow) that INACTIVE_ALLOWLIST does not name.
   const inactive = `awk -v ok=" ${INACTIVE_ALLOWLIST.map(e => e.id).join(' ')} " '/^dsh: warning: [0-9]+ entr(y|ies) did not activate$/ { n = $3 + 0; next } n > 0 && /^[^ ]+ [(]/ { n--; if (!index(ok, " " $1 " ")) printf " %s", $1 }' /root/dsh.log`
-  const listed = `-printf '%M %u:%g %p\\n'`, changeable = '\\( ! -uid 0 -o -perm -0002 -o ! -gid 0 -perm -0020 \\)'
+  const listed = `-printf '%M %u:%g %p\\n'`, changeable = (owners) => `\\( ${owners} -o -perm -0002 -o ! -gid 0 -perm -0020 \\)`
+  const paths = rowPaths(person), real = (dirs) => `$(for d in ${dirs}; do [ ! -d "$d" ] || readlink -f "$d"; done | sort -u)`
   return `(${[
     'export LC_ALL=C; echo "mumbo-box: dsh smoke check: start dsh as a box does, with dummy values"',
     'for p in /root/.dsh /root/.mumbo /root/dsh.log /root/projects /root/work; do [ ! -e "$p" ] || { echo "mumbo-box: the dsh smoke check needs a template without $p, which a box\'s start script makes" >&2; exit 1; }; done',
@@ -232,7 +276,8 @@ export const dshSmokeStep = (person) => {
     `[ -n "$why" ] || { sleep ${DSH_SMOKE_SETTLE_SECONDS}; bad=$(${inactive}); [ -z "$bad" ] || why="these dsh entries did not activate, outside INACTIVE_ALLOWLIST (template.mjs):$bad"; }`,
     `[ -n "$why" ] || { L=$(ss -ltnpeH) || why='ss could not list the TCP listeners'; }; [ -n "$why" ] || { bad=$(printf '%s\\n' "$L" | ${listeners}); [ -z "$bad" ] || why="agent may connect to these listeners of other users, outside the output chain's reset set and LISTENER_ALLOWLIST (template.mjs): $bad"; }`,
     `[ -n "$why" ] || { bad=$(find / -xdev -ignore_readdir_race \\( ${WRITABLE_EXCLUDES.map(e => `-path ${e.path}`).join(' -o ')} \\) -prune -o \\( -type f -o -type d \\) -perm -0002 ! \\( -type d -perm -1000 \\) ${listed}) || why='find could not list the world-writable files'; }; [ -n "$why" ] || [ -z "$bad" ] || why="these are world-writable, outside WRITABLE_EXCLUDES (template.mjs), and no sticky directory: $bad"`,
-    `[ -n "$why" ] || { G=$(npm root -g --logs-max=0) && P=$(for d in $(printf '%s' "$PATH" | tr : ' ') ${rowPaths(person).join(' ')}; do [ ! -d "$d" ] || readlink -f "$d"; done | sort -u) && C=$(readlink -f /src "$G") && bad=$(find $P -maxdepth 1 ! -type l ${changeable} ${listed} && find $C -xdev -ignore_readdir_race ! -type l ${changeable} ${listed}) || why="could not list root's and the run-as users' PATH directories and dsh's code tree"; }; [ -n "$why" ] || [ -z "$bad" ] || why="a user other than root can change these, which root runs or dsh imports (on root's or a run-as user's PATH, or in dsh's code tree): $bad"`,
+    `[ -n "$why" ] || { A=$(id -u agent) && G=$(npm root -g --logs-max=0) && P=${real(`$(printf '%s' "$PATH" | tr : ' ') ${paths.root.join(' ')}`)} && O=${real(paths.own.join(' '))} && C=$(readlink -f /src "$G") && bad=$(find $P -maxdepth 1 ! -type l ${changeable('! -uid 0')} ${listed} && { [ -z "$O" ] || find $O -maxdepth 1 ! -type l ${changeable('! -uid 0 ! -uid $A')} ${listed}; } && find $C -xdev -ignore_readdir_race ! -type l ${changeable('! -uid 0')} ${listed}) || why="could not list root's and the run-as users' PATH directories and dsh's code tree"; }; [ -n "$why" ] || [ -z "$bad" ] || why="a user other than root can change these (in agent's own PATH directories, a user other than root or agent), which root or a run-as user runs or dsh imports (on root's or a run-as user's PATH, or in dsh's code tree): $bad"`,
+    `[ -n "$why" ] || { su -s /bin/sh agent -c "$(echo ${Buffer.from(agentInstallScript(person)).toString('base64')} | base64 -d)" </dev/null >$T/agent.log 2>&1 && { grep '^mumbo-box: ' $T/agent.log || :; } || why="agent could not install packages into its own prefixes (npm -g, pip in a venv): $(tail -n 20 $T/agent.log)"; }`,
     '[ -z "$why" ] || { echo "mumbo-box: the dsh smoke check failed: $why"; echo "--- start.sh"; tail -n 20 $T/start.log; echo "--- /root/dsh.log"; tail -n 60 /root/dsh.log; for f in /root/.dsh/logs/startup-*.log; do [ ! -e "$f" ] || { echo "--- $f"; tail -n 60 "$f"; }; done; ! grep -qs \' did not activate$\' /root/dsh.log || { echo "--- dsh\'s entries that did not activate"; awk \'/^dsh: .* did not activate$/ { p = 1 } p\' /root/dsh.log; }; } >&2',
     `U=$(for u in ${containmentUsers(person).join(' ')}; do id -u $u 2>/dev/null; done | tr '\\n' ' '); E=$(pgrep -x envd | tr '\\n' ' '); me=$(ps -e -o pid=,sid= | awk -v p=$$ '$1 == p { print $2 }')`,
     // The containment users' processes, and those that started during the step (not in $T/pids) but kernel threads
@@ -251,11 +296,12 @@ export const UMASK_STEP = 'umask 022'
  *  Google's apt repository (each build installs the current release). The edge's start script runs KasmVNC as the user
  *  `xvnc`, Chrome as the user `browser` and, on an image with the B24 harness, the XFCE session as `xsession` (before it,
  *  as `browser`), and writes /usr/local/bin/google-chrome, the one way to start Chrome; the menu entry and XFCE's web
- *  browser are aimed at it here. */
+ *  browser are aimed at it here. python3-venv gives agent venvs, its route for Python packages, since /usr/local is
+ *  root's alone (agentInstallScript): the web image has python3 without it, and only boxes need it. */
 export const BOX_STEPS = [
   UMASK_STEP,
   ...(CHROME_SENSITIVE_SYNC ? [maskingGuardStep()] : []),
-  'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google-chrome.asc && chmod go+r /etc/apt/keyrings/google-chrome.asc && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xfce4-session xfwm4 xfce4-panel xfdesktop4 thunar xfce4-terminal tango-icon-theme librsvg2-common google-chrome-stable dbus-x11 xdotool wmctrl imagemagick xsel xauth fonts-noto-core fonts-noto-color-emoji fonts-noto-cjk procps ripgrep nftables libcap2-bin acl iproute2 && rm -rf /var/lib/apt/lists/*',
+  'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google-chrome.asc && chmod go+r /etc/apt/keyrings/google-chrome.asc && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xfce4-session xfwm4 xfce4-panel xfdesktop4 thunar xfce4-terminal tango-icon-theme librsvg2-common google-chrome-stable dbus-x11 xdotool wmctrl imagemagick xsel xauth fonts-noto-core fonts-noto-color-emoji fonts-noto-cjk procps ripgrep nftables libcap2-bin acl iproute2 python3-venv && rm -rf /var/lib/apt/lists/*',
   kasmvncStep(),
   'id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser',
   // KasmVNC's server runs as its own system user, with no home or login, so browser cannot signal it or take its place.
@@ -273,10 +319,11 @@ export const BOX_STEPS = [
 ]
 /** A project box is headless: git, gh (GitHub's apt repository) and openssl for the box-local GitHub proxy's CA, nftables
  *  and acl for the start script, iproute2 for the dsh smoke check's ss and the escape test's network namespace, the
- *  proxy's own system user ghproxy (edge startScript), agent containment's users, and the nftables and dsh smoke checks. */
+ *  proxy's own system user ghproxy (edge startScript), python3-venv for agent's venvs (as BOX_STEPS), agent containment's
+ *  users, and the nftables and dsh smoke checks. */
 export const PROJECT_STEPS = [
   UMASK_STEP,
-  'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl gpg git openssl procps ripgrep nftables acl iproute2 && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*',
+  'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl gpg git openssl procps ripgrep nftables acl iproute2 python3-venv && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*',
   'id ghproxy >/dev/null 2>&1 || useradd -r -U -M -d /nonexistent -s /usr/sbin/nologin ghproxy',
   ...usersSteps(false),
   NFT_SMOKE_STEP,

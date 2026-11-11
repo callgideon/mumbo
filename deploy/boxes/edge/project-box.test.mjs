@@ -44,7 +44,9 @@ test('a user box start script is byte-for-byte what it was before project boxes 
   // Then the B24 fix's system repair, first, before the ports marker is read: on the root filesystem but the users',
   // temporary and runtime trees, other owners' paths become root's and o+w (sticky directories aside) and a group's g+w
   // other than root's go, then checked, because E2B's build leaves /usr/local, /code and envd world-writable (containment.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), '874b64bac6550f2fdb3e45d8ff494b6f48efab9cc3d17f311bef77232336da78')
+  // Then the repair took in /home, /tmp and the other excluded trees' top directories, leaving only what is in them; and
+  // agent's row gained its npm prefix and its own program directories on PATH, since /usr/local is root's alone (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), '4a979609de797ad34984db2e67cbc3099322a1a6267a5a540b49e29087c4e6f5')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -69,8 +71,10 @@ test('a project box start script is byte-for-byte what it was before B18 changed
   // every loopback listener to the box address (containment.test.mjs). Then the B24 fix's system repair, first, before the
   // ports marker is read: on the root filesystem but the users', temporary and runtime trees, other owners' paths become
   // root's and o+w (sticky directories aside) and a group's g+w other than root's go, then checked, because E2B's build
-  // leaves /usr/local, /code and envd world-writable (containment.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), '526f98f90614d1d326465b43d9c5fbcad35c01049c2ba2d105f2fdaf211159d3')
+  // leaves /usr/local, /code and envd world-writable (containment.test.mjs). Then the repair took in /home, /tmp and the
+  // other excluded trees' top directories, leaving only what is in them; and agent's row gained its npm prefix and its own
+  // program directories on PATH, after the command shims and the gh wrapper, since /usr/local is root's alone (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), '08f25745e2e9a9d99c43b1d8d69b5133fb5ac2afc530fd1219f3912d7ea257a6')
 })
 
 const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'

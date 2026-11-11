@@ -322,27 +322,33 @@ export function boxSite(cfg, principal) {
     : { host: `p-${id}.${cfg.projectDomain}`, publicUrl: `https://p-${id}.${cfg.projectDomain}/`, desktop: false, project: id }
 }
 
-/** What systemRepair leaves as it is. */
+/** What systemRepair leaves as it is: the contents of these trees, whose top directories are root's and repaired too. */
 const REPAIR_EXCLUDES = [
   '/root', '/home', // root's and the users' homes, the workspace and the shared Downloads among them
   '/tmp', '/var/tmp', // every user's temporary files, in sticky directories
   '/run', '/proc', '/sys', '/dev', // runtime state and the kernel's filesystems
+]
+/** What systemRepair leaves as it is, the path itself included. */
+const REPAIR_USER_PATHS = [
   '/var/lib/mumbo/playwright-output', // browsermcp's, 0700 (startScript): the Playwright MCP server writes its files there
 ]
 /** The start script's first part (B24 fix), before it reads PORTS_MARKER and before any user's process starts: on the
- *  root filesystem outside REPAIR_EXCLUDES, a path another user owns becomes root:root, every path but a sticky directory
- *  loses o+w, and a path whose group is not root (gid 0, which holds only root) loses g+w. Then it checks the same paths
- *  and stops the start, naming them, if any is left. The tree list is `/` less those excludes, so a top-level directory a
- *  new image or E2B build adds is covered. E2B's finalize phase, which runs after a template's steps, makes /usr/local
- *  and /code 0777 (its configure.sh), and its rootfs builder writes envd, which runs as root, 0777; a restored archive or
- *  a new base image could do the same. Repaired first, the ports marker, which sets the firewall's ports, and what root
- *  runs (/etc/inittab, envd and its service file, node) were never writable by a user's process. /code is E2B's work
- *  directory, which nothing in a box uses, and becomes root's like the rest. One find sets and one checks; neither follows
- *  a link or leaves the root filesystem, and both skip a path that goes while they run.
+ *  root filesystem outside REPAIR_EXCLUDES' contents and REPAIR_USER_PATHS, a path another user owns becomes root:root,
+ *  every path but a sticky directory loses o+w, and a path whose group is not root (gid 0, which holds only root) loses
+ *  g+w. Then it checks the same paths and stops the start, naming them, if any is left. The tree list is `/` less those
+ *  excludes, so a top-level directory a new image or E2B build adds is covered, and /home, /tmp and the other excluded
+ *  top directories are repaired and checked themselves: a writable /home would let a user replace another's home, and
+ *  /tmp without the sticky bit another user's files. E2B's finalize phase, which runs after a template's steps, makes
+ *  /usr/local and /code 0777 (its configure.sh), and its rootfs builder writes envd, which runs as root, 0777; a
+ *  restored archive or a new base image could do the same. Repaired first, the ports marker, which sets the firewall's
+ *  ports, and what root runs (/etc/inittab, envd and its service file, node) were never writable by a user's process.
+ *  /code is E2B's work directory, which nothing in a box uses, and becomes root's like the rest. One find sets and one
+ *  checks; neither follows a link or leaves the root filesystem, and both skip a path that goes while they run.
  *  @param {string} root the directory the box's paths are under: empty for the box itself
  *  @returns {string} the start script's part */
 export const systemRepair = (root = '') => {
-  const find = `find ${root || '/'} -xdev -ignore_readdir_race \\( ${REPAIR_EXCLUDES.map(p => `-path ${root}${p}`).join(' -o ')} \\) -prune -o`
+  const skip = [...REPAIR_EXCLUDES.map(p => `-path '${root}${p}/*'`), ...REPAIR_USER_PATHS.map(p => `-path ${root}${p}`)]
+  const find = `find ${root || '/'} -xdev -ignore_readdir_race \\( ${skip.join(' -o ')} \\) -prune -o`
   const world = '-perm -0002 ! \\( -type d -perm -1000 \\)', group = '! -gid 0 -perm -0020'
   return `# System files are root's alone (edge systemRepair): E2B's template build leaves /usr/local, /code and envd
 # world-writable. Set, then checked, before the ports marker is read and before any user's process starts.
@@ -508,6 +514,10 @@ fi
 export function containmentRows(cfg, person) {
   const secrets = 'secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY, E2B_API_KEY, GH_TOKEN, GITHUB_TOKEN]'
   const path = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+  // agent's own program directories, before the system's, since /usr/local is root's alone (systemRepair): npm's global
+  // prefix (NPM_CONFIG_PREFIX), so `npm i -g` works as agent, and ~/.local/bin. Python packages go in a venv. On a
+  // project box dsh-superagent's command shims, which must come first, and the gh wrapper stay ahead of agent's directories.
+  const agentBins = '/home/agent/.npm-global/bin:/home/agent/.local/bin'
   /** A named identity's row with a home, TMPDIR and the system PATH, as the fixture's browsermcp and desktop. */
   const identity = (name, uid, gid, groups) => `      ${name}:
         uid: ${uid}
@@ -537,8 +547,9 @@ export function containmentRows(cfg, person) {
         USER: agent
         LOGNAME: agent
         SHELL: /bin/bash
-${person ? `        PATH: ${path}
-` : `        PATH: /var/lib/mumbo/superagent/worker-bin:/usr/local/lib/mumbo/bin:${path}
+        NPM_CONFIG_PREFIX: /home/agent/.npm-global
+${person ? `        PATH: ${agentBins}:${path}
+` : `        PATH: /var/lib/mumbo/superagent/worker-bin:/usr/local/lib/mumbo/bin:${agentBins}:${path}
         GIT_CONFIG_GLOBAL: /var/lib/mumbo/superagent/worker-gitconfig
         GIT_CONFIG_NOSYSTEM: '1'
         GIT_ASKPASS: ''
