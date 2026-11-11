@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openAsBlob, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openAsBlob, readFileSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -465,8 +465,10 @@ test('escape-test.sh parses under sh and runs every escape test the B24 brief na
  *  moved, its 3 s read delay cut to 0.3 s, and root:uploads, the copies' owner and group, as the test's user's. The test
  *  plays consent, which stages a copy of each upload it allows (0440 in a 0750 directory unless `openCopies`), and
  *  Chrome, which runs the served page's script on a file-backed File of that copy; agent is the test's user, which su
- *  keeps out of the staging directory unless `openCopies`. Returns each upload check's status and the FAIL lines. */
-async function escapeUploads({ deleteAfterCall = false, blockOnFifo = false, openCopies = false }) {
+ *  keeps out of the staging directory unless `openCopies`. `staleCopies` leaves an earlier run's open copies of
+ *  mumbo-escape-swap.txt, the same size as this run's, and of mumbo-escape-nested.txt in the staging directory. Returns
+ *  each upload check's status and the FAIL lines. */
+async function escapeUploads({ deleteAfterCall = false, blockOnFifo = false, openCopies = false, staleCopies = false }) {
   const text = readFileSync(new URL('./escape-test.sh', import.meta.url), 'utf8')
   const t = mkdtempSync(join(tmpdir(), 'escape-uploads-'))
   const D = join(t, 'Downloads'), S = join(t, 'uploads')
@@ -482,6 +484,12 @@ async function escapeUploads({ deleteAfterCall = false, blockOnFifo = false, ope
     const block = text.slice(text.indexOf('D=/home/shared/Downloads\n'), text.indexOf('# Restore:')).replaceAll('/home/shared/Downloads', D)
       .replaceAll('/src/packages/mumbo/browser-consent/src/index.ts', join(t, 'consent.ts')).replaceAll('8790', String(port)).replace('}, 3000)', '}, 300)').replaceAll('root:uploads', owner)
     sh = spawn('/bin/sh', ['-c', `set -u\nfails=0 person=1 uploads=1 S=${S}\n${helpers}\n${block}`], { env: { ...process.env, PATH: `${join(t, 'bin')}:${process.env.PATH}` } })
+    if (staleCopies) {
+      mkdirSync(join(S, 'n0'))
+      writeFileSync(join(S, 'n0/mumbo-escape-swap.txt'), `original ${'9'.repeat(String(sh.pid).length)}\n`)
+      writeFileSync(join(S, 'n0/mumbo-escape-nested.txt'), 'nested')
+      for (const f of ['mumbo-escape-swap.txt', 'mumbo-escape-nested.txt']) utimesSync(join(S, 'n0', f), 0, 0)
+    }
     let out = ''
     sh.stdout.on('data', (c) => { out += c })
     const exited = new Promise(r => sh.on('close', r))
@@ -518,6 +526,10 @@ const UPLOAD_CHECKS = { 'upload-swap': 'PASS', 'upload-swap-ask': 'MANUAL', 'upl
 
 test('escape-test.sh --with-uploads passes a consent that keeps its copies, closed to agent, until it unmounts', async () => {
   assert.deepEqual(await escapeUploads({}), { status: UPLOAD_CHECKS, fails: [] })
+})
+
+test('escape-test.sh --with-uploads counts only the copies consent makes during the run, not an earlier run\'s kept copies', async () => {
+  assert.deepEqual(await escapeUploads({ staleCopies: true }), { status: UPLOAD_CHECKS, fails: [] })
 })
 
 test('escape-test.sh --with-uploads fails a consent that deletes its copy before the page reads it, or that is blocked opening the FIFO', async () => {

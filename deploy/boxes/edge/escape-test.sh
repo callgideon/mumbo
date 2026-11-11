@@ -170,7 +170,8 @@ fi
 # content consent staged. The nested file, the FIFO and the file over consent's default uploadMaxBytes (512 MiB; the edge
 # sets none) must be refused before anything is staged, with no reader left blocked opening the FIFO;
 # mumbo-escape-done.txt ends the wait. Consent keeps each copy until it unmounts: the copy of mumbo-escape-swap.txt is
-# still there, root's with group uploads, 0440 in a 0750 nonce directory, and agent can neither list nor read it.
+# still there, root's with group uploads, 0440 in a 0750 nonce directory, and agent can neither list nor read it. Only
+# copies newer than the page's ready file count, so an earlier run's kept copies are not taken for this run's.
 D=/home/shared/Downloads
 if [ -z "$person" ]; then
   :
@@ -211,10 +212,10 @@ HTML
     A=$(sha256sum < $D/mumbo-escape-swap.txt | cut -d' ' -f1) size=$(wc -c < $D/mumbo-escape-swap.txt)
     end=$(($(date +%s) + 600)) swapped= staged=
     while [ "$(date +%s)" -lt $end ]; do
-      if [ -z "$swapped" ] && [ -n "$(find $S -mindepth 2 -maxdepth 2 -name mumbo-escape-swap.txt -size "${size}c" 2>/dev/null)" ]; then
+      if [ -z "$swapped" ] && [ -n "$(find $S -mindepth 2 -maxdepth 2 -name mumbo-escape-swap.txt -size "${size}c" -newer "$t/ready" 2>/dev/null)" ]; then
         as agent "cd $D && printf swapped > .mumbo-escape-swap && mv -f .mumbo-escape-swap mumbo-escape-swap.txt" && swapped=1
       fi
-      staged="$staged$(find $S -mindepth 2 -maxdepth 2 \( -name mumbo-escape-nested.txt -o -name mumbo-escape-fifo -o -name mumbo-escape-big \) -printf ' %f' 2>/dev/null)"
+      staged="$staged$(find $S -mindepth 2 -maxdepth 2 \( -name mumbo-escape-nested.txt -o -name mumbo-escape-fifo -o -name mumbo-escape-big \) -newer "$t/ready" -printf ' %f' 2>/dev/null)"
       grep -qs '^mumbo-escape-done.txt ' "$t/reports" && break
       sleep 0.2
     done
@@ -224,7 +225,7 @@ HTML
     elif [ "$got" = unreadable ]; then say FAIL upload-swap 'the page could not read the file 3 s after the call: consent removed its staged copy before the page read it'
     else say FAIL upload-swap "agent swapped the Downloads file during the ask; the page got ${got:-nothing}, not $A"; fi
     manual upload-swap-ask "the ask for mumbo-escape-swap.txt must have shown $(printf %.12s "$A")"
-    copy=$(find $S -mindepth 2 -maxdepth 2 -name mumbo-escape-swap.txt 2>/dev/null | head -n 1)
+    copy=$(find $S -mindepth 2 -maxdepth 2 -name mumbo-escape-swap.txt -newer "$t/ready" 2>/dev/null | head -n 1)
     if [ -z "$copy" ]; then
       say FAIL upload-staged-copy 'consent kept no copy of mumbo-escape-swap.txt: copies stay until consent unmounts'
       say SKIP agent-list-staged 'no staged copy'; say SKIP agent-read-staged 'no staged copy'
