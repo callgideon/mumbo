@@ -32,8 +32,11 @@ test('a user box start script is byte-for-byte what it was before project boxes 
   // and checked), in place of the iptables OUTPUT rules and the desktop's INPUT rules, because E2B's kernel has no
   // xt_owner; the iptables helper is best effort, for a template before B24 only. Then its output chain accepted the
   // allowed users first and reset the rest, so a socket whose user nft cannot read is refused. Then browsermcp's row
-  // held the group uploads alone: with staged copies it no longer reads Downloads.
-  assert.equal(createHash('sha256').update(s).digest('hex'), '31654bfd201ec93f8f79f012587e339a40e6a84f375b9a179f79fbadb0eaddc5')
+  // held the group uploads alone: with staged copies it no longer reads Downloads. Then the web_fetch contract of
+  // 2026-11-11, on an image with the harness only: the containment rows disable web-fetch-http, which fetches from root
+  // dsh outside the firewall and reaches loopback, and send web_fetch to the DeepSeek Fetch API through the edge's model
+  // host (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), 'c16b487541ff4b07241a04a48439c8224751b3c8bf6211a8d2c2dbe98dd6c9b7')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -47,11 +50,13 @@ test('a project box start script is byte-for-byte what it was before B18 changed
   // its $SUPERAGENT_EDGE grep, and the layout exports MUMBO_WORK_DIR, MUMBO_WORKER_DIR and MUMBO_GH_CONFIG_DIR for that
   // overlay, stops on an overlay that does not name MUMBO_WORK_DIR, and names any group it needs that the template
   // lacks (containment.test.mjs).
-  // B24 template. Then for the B24 template's firewall as one native nftables table (inet mumbo, loaded with nft -f and
+  // Then for the B24 template's firewall as one native nftables table (inet mumbo, loaded with nft -f and
   // checked) in place of the iptables OUTPUT rules, because E2B's kernel has no xt_owner, and the iptables helper best
   // effort, for a template before B24 only. Then its output chain accepted the allowed users first and reset the rest, so
-  // a socket whose user nft cannot read is refused.
-  assert.equal(createHash('sha256').update(s).digest('hex'), '21eccfb61a58ee5ac6e7457d33116a4e348bd0d4767bb9090cb26280675d8a81')
+  // a socket whose user nft cannot read is refused. Then the web_fetch contract of 2026-11-11, on an image with the
+  // harness only: the containment rows disable web-fetch-http, which fetches from root dsh outside the firewall and
+  // reaches loopback, and send web_fetch to the DeepSeek Fetch API through the edge's model host (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), 'c6b23cba2f6be1765309775e02f50832743ec63c204cbef36d6e09c858ef4a49')
 })
 
 const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'

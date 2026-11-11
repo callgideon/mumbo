@@ -440,9 +440,11 @@ fi
  *  box's ids as the shell variables containmentLayout reads, agent also in the group workspace, so it can change what
  *  root, xsession or mcpserver write in the workspace, and browsermcp also in the group uploads, so the Playwright MCP
  *  server reaches the copies browser consent stages. No row configures dsh-superagent: a patch's config would replace
- *  the image's project overlay row's, which reads its directories from the variables containmentLayout exports. Written
- *  into an unquoted heredoc, so the text holds no $ but those variables, no backquote and no backslash.
- *  @param {object} cfg config(); llmHost ends the project rows' NO_PROXY
+ *  the image's project overlay row's, which reads its directories from the variables containmentLayout exports. The
+ *  anonymous web_fetch provider, which runs in root dsh outside the agent's firewall rules and reaches loopback, is off:
+ *  web_fetch goes to the DeepSeek Fetch API through the model host, whose /v1/tools/* the edge forwards with the box
+ *  token. Written into an unquoted heredoc, so the text holds no $ but those variables, no backquote and no backslash.
+ *  @param {object} cfg config(); llmHost ends the project rows' NO_PROXY and is web_fetch's base URL
  *  @param {boolean} person a person box
  *  @returns {string} the YAML */
 export function containmentRows(cfg, person) {
@@ -527,6 +529,15 @@ ${person ? identity('browsermcp', '$BMCP_UID', '$BMCP_GID', '$UPLOADS_GID') + id
 - id: workspace-changes
   config:
     summaries: false
+- id: web-fetch-http
+  disabled: true
+- id: web
+  config:
+    searchProvider: deepseek-search-api
+    fetchProvider: deepseek-fetch-api
+- id: web-deepseek-api
+  config:
+    fetchBaseURL: https://${cfg.llmHost}/v1/tools
 `
 }
 

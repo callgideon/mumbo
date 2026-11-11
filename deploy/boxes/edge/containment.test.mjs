@@ -24,9 +24,10 @@ const IDS = { agent: [1001, 1001], browsermcp: [1002, 1002], desktop: [1003, 100
 const GROUPS = { shared: 1005, workspace: 1007, 'workspace-read': 1008, uploads: 1009 }
 const SECRETS = 'secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY, E2B_API_KEY, GH_TOKEN, GITHUB_TOKEN]'
 const PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
-/** The fixtures' rows without their comments, at the harness branch's 68ed0e7357, with agent also in workspace,
+/** The fixtures' rows without their comments, at the harness branch's 500045c765, with agent also in workspace,
  *  browsermcp also in uploads, and no dsh-superagent row: the image's project overlay reads the directories from the
- *  variables the layout exports (the uploads and A2 contract of 2026-11-11, which the harness's fixtures take on). */
+ *  variables the layout exports (the uploads and A2 contract of 2026-11-11, which the harness's fixtures take on). Both
+ *  end with the web_fetch rows of that contract: the anonymous fetcher off, web_fetch through the edge's model host. */
 const FIXTURE = (person, mcpGroups = '') => `- id: subprocess
   config:
     shellActivityDirectory: /run/dsh-shell
@@ -116,6 +117,15 @@ ${person ? `      browsermcp:
 - id: workspace-changes
   config:
     summaries: false
+- id: web-fetch-http
+  disabled: true
+- id: web
+  config:
+    searchProvider: deepseek-search-api
+    fetchProvider: deepseek-fetch-api
+- id: web-deepseek-api
+  config:
+    fetchBaseURL: https://llm.example/v1/tools
 `
 
 const REAL = ['cat', 'grep', 'cut', 'chmod', 'find', 'cp', 'rm', 'mkdir', 'readlink', 'dirname', 'sort', 'stat']
@@ -439,6 +449,8 @@ test('escape-test.sh parses under sh and runs every escape test the B24 brief na
     'proxy-tunnel',
     // restore, root setup, the model's file tools, a ticket's git hook
     'restore-symlink', 'browser-symlink-setup', 'file-tools-login-data', 'file-tools-dsh-environ', 'file-tools-dsh-log', 'file-tools-swap-read', 'file-tools-swap-write', 'git-hook-ticket',
+    // web_fetch of the debugging port and of dsh (the web_fetch contract of 2026-11-11)
+    'web-fetch-cdp', 'web-fetch-dsh',
   ]
   assert.deepEqual(required.filter(id => !ids.has(id)), [])
   // Binds: dsh, the live view and the door refused (EACCES); 3000 and 5173 allowed. Connects: CDP, VNC, dsh, the live view
