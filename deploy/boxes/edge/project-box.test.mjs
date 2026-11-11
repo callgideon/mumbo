@@ -24,7 +24,16 @@ test('a user box start script is byte-for-byte what it was before project boxes 
   // /var/lib/mumbo, the welcome as agent, and the old Chromium profiles deleted. On a
   // template and image from before B24 the script runs as before, apart from that deletion (containment.test.mjs,
   // desktop.test.mjs, welcome.test.mjs, ports.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), '8d0d13230d90240fab588a5a787e351e89a76286e8ec28bdb8a8b20cc8cb6ea0')
+  // The uploads contract of 2026-11-11 moved it deliberately, on an image with the harness only: the layout looks up the
+  // group uploads and names any group it needs that the template lacks, makes consent's staging directory
+  // /var/lib/mumbo/uploads root:uploads 2750 and empties it at every start, browsermcp's row holds uploads, and a consent
+  // that names uploadStaging gets that directory (containment.test.mjs, the consent rows test below).
+  // Then the B24 template's firewall became one native nftables table (inet mumbo, root-only file, loaded with nft -f
+  // and checked), in place of the iptables OUTPUT rules and the desktop's INPUT rules, because E2B's kernel has no
+  // xt_owner; the iptables helper is best effort, for a template before B24 only. Then its output chain accepted the
+  // allowed users first and reset the rest, so a socket whose user nft cannot read is refused. Then browsermcp's row
+  // held the group uploads alone: with staged copies it no longer reads Downloads.
+  assert.equal(createHash('sha256').update(s).digest('hex'), '31654bfd201ec93f8f79f012587e339a40e6a84f375b9a179f79fbadb0eaddc5')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -33,8 +42,16 @@ test('a project box start script is byte-for-byte what it was before B18 changed
   // Updated for B36's relay reply settings, the one block it adds, then for their own endpoint /mcp/report, and for B24
   // deliberately: the ports, kernel and network part, containment layout and rows behind their gates, the gh wrapper in
   // /usr/local/lib/mumbo/bin (on dsh's PATH, linked from /root/.mumbo/bin/gh), and the GitHub proxy as ghproxy on the
-  // B24 template.
-  assert.equal(createHash('sha256').update(s).digest('hex'), '3820c4b52e187d52535f32ca2fb058c73f451ab8b5a864079f71ef4a9e9aa03b')
+  // B24 template. The A2 contract of 2026-11-11 moved it deliberately, on an image with the harness only: the image's
+  // project overlay carries dsh-superagent's whole config, so the containment rows lose their dsh-superagent row and
+  // its $SUPERAGENT_EDGE grep, and the layout exports MUMBO_WORK_DIR, MUMBO_WORKER_DIR and MUMBO_GH_CONFIG_DIR for that
+  // overlay, stops on an overlay that does not name MUMBO_WORK_DIR, and names any group it needs that the template
+  // lacks (containment.test.mjs).
+  // B24 template. Then for the B24 template's firewall as one native nftables table (inet mumbo, loaded with nft -f and
+  // checked) in place of the iptables OUTPUT rules, because E2B's kernel has no xt_owner, and the iptables helper best
+  // effort, for a template before B24 only. Then its output chain accepted the allowed users first and reset the rest, so
+  // a socket whose user nft cannot read is refused.
+  assert.equal(createHash('sha256').update(s).digest('hex'), '21eccfb61a58ee5ac6e7457d33116a4e348bd0d4767bb9090cb26280675d8a81')
 })
 
 const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'
@@ -229,7 +246,7 @@ test('slice 3: a consent that knows deniedUrls gets the denied pages and an outp
     // Agent containment (B24): the server runs as browsermcp and writes to its own directory, 0700, in /var/lib/mumbo,
     // which is root's; computer use runs as desktop.
     mkdirSync(join(dir, 'varlib'))
-    const b24Row = (upload) => `    - id: browser-consent\n      name: '@mumbo/browser-consent'\n      config:\n        browser:\n          mode: attach\n          endpoint: http://127.0.0.1:9222\n          identity: browsermcp\n          outputDir: ${join(dir, 'varlib')}/playwright-output\n        deniedUrls: ${JSON.stringify(DENIED_URLS)}\n${upload ? '        uploadDirectory: /home/shared/Downloads\n' : ''}`
+    const b24Row = (upload, staging) => `    - id: browser-consent\n      name: '@mumbo/browser-consent'\n      config:\n        browser:\n          mode: attach\n          endpoint: http://127.0.0.1:9222\n          identity: browsermcp\n          outputDir: ${join(dir, 'varlib')}/playwright-output\n        deniedUrls: ${JSON.stringify(DENIED_URLS)}\n${upload ? '        uploadDirectory: /home/shared/Downloads\n' : ''}${staging ? `        uploadStaging: ${join(dir, 'varlib')}/uploads\n` : ''}`
     o = run('1')
     assert.equal(o.sandboxes, b24Row(false))
     assert.equal(statSync(join(dir, 'varlib', 'playwright-output')).mode & 0o777, 0o700)
@@ -242,6 +259,11 @@ test('slice 3: a consent that knows deniedUrls gets the denied pages and an outp
     assert.equal(o.sandboxes, b24Row(true))
     const fixtureRow = `    - id: browser-consent\n      name: '@mumbo/browser-consent'\n      config:\n        browser:\n          mode: attach\n          endpoint: http://127.0.0.1:9222\n          identity: browsermcp\n          outputDir: /var/lib/mumbo/playwright-output\n        uploadDirectory: /home/shared/Downloads\n`
     assert.equal(o.sandboxes.replaceAll(join(dir, 'varlib'), '/var/lib/mumbo').split('\n').filter(l => !l.startsWith('        deniedUrls: ')).join('\n'), fixtureRow)
+    // A consent that stages a copy of each upload (the uploads contract of 2026-11-11) stages it in /var/lib/mumbo/uploads,
+    // which containmentLayout makes.
+    writeFileSync(join(dir, 'pkg', 'mumbo', 'browser-consent', 'src', 'index.ts'), 'const deniedUrls = []\nconst uploadDirectory = ""\nconst uploadStaging = ""\n')
+    o = run('1')
+    assert.equal(o.sandboxes, b24Row(true, true))
   } finally { rmSync(dir, { recursive: true, force: true }) }
   assert.deepEqual(DENIED_URLS, ['chrome:', 'chrome-untrusted:', 'chrome-extension:', 'devtools:', 'view-source:', 'file:', 'https://passwords.google.com', 'https://pay.google.com', 'https://payments.google.com', 'https://myaccount.google.com', 'https://accounts.google.com'])
 })
@@ -275,7 +297,7 @@ test('a project box start script has the proxy setup in order, before the member
     'chmod 0755 /root/.mumbo/bin/github-local-proxy.mjs /usr/local/lib/mumbo/bin/gh',
     // B24: the wrapper is root's and world-readable outside /root/.mumbo; the old path still names it.
     'ln -sfn /usr/local/lib/mumbo/bin/gh /root/.mumbo/bin/gh',
-    // B24: on the B24 template the proxy becomes ghproxy (the firewall's owner rules then cover its tunnels).
+    // B24: on the B24 template the proxy becomes ghproxy (the firewall's rules by user then cover its tunnels).
     "pgrep -f github-local-proxy.mjs >/dev/null || PORT=8899 CA_DIR=/root/.mumbo/ca RUN_AS=$PROXY_USER EDGE_GITHUB_URL=https://l/github BOX_TOKEN=TOK nohup node /root/.mumbo/bin/github-local-proxy.mjs",
     'curl -s -o /dev/null -m 1 http://127.0.0.1:8899/',
     'if [ -f /src/deploy/mumbo-project.overlay.yml ]',
@@ -314,7 +336,7 @@ test('GitHub App env: a project box exports the agent login and id after the pro
   assert.ok(!u.includes('MUMBO_GITHUB_APP'))
   // Without GITHUB_AGENT_LOGIN and GITHUB_AGENT_ID (edge config sets both or neither) a project box gets neither.
   const none = startScript(c, 'TOK', boxSite(c, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
-  // The containment rows restate the project overlay's githubApp, which reads them; nothing exports them.
+  // The image's project overlay's githubApp reads them; nothing exports them.
   assert.ok(!none.includes('export MUMBO_GITHUB_APP'))
 })
 

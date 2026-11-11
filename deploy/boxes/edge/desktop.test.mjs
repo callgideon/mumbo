@@ -123,7 +123,7 @@ test('KasmVNC runs as xvnc on :1 with the X cookie and each flag, once per re-ru
   } finally { b.done() }
 })
 
-test('B24 template: the live view on the marker\'s port, the X cookie root:desktop 0640, XFCE as xsession and Chrome as browser, and every INPUT rule fatal', async () => {
+test('B24 template: the live view on the marker\'s port, the X cookie root:desktop 0640, XFCE as xsession and Chrome as browser, and no iptables INPUT rules, which a template before it inserts best effort', async () => {
   /** The desktop block on a B24 template (or before it) with `iptables` the fake's body; what it started, as T paths. */
   const run = async (iptables, b24 = '1') => {
     const b = box()
@@ -138,17 +138,19 @@ test('B24 template: the live view on the marker\'s port, the X cookie root:deskt
       return { xvnc: b.lines('xvnc').map(l => l.replaceAll(b.t, 'T')), chown: b.lines('chown').map(l => l.replaceAll(b.t, 'T')), su: b.lines('su').sort(), iptables: b.lines('iptables'), dsh: b.lines('dsh'), mode: existsSync(auth) ? statSync(auth).mode & 0o777 : undefined }
     } finally { b.done() }
   }
-  // Each rule is checked (-C) and, when absent, inserted (-I).
-  const r = await run((t) => `echo "$*" >> ${t}/log/iptables; [ "$1" != -C ]`)
+  const logged = (t) => `echo "$*" >> ${t}/log/iptables; [ "$1" != -C ]`
+  const r = await run(logged)
   assert.deepEqual(r.xvnc, [xvncArgs('T/run/x11/auth', '881')])
   assert.deepEqual([r.chown, r.mode], [['browser T/run/x11/auth', 'root:desktop T/run/x11/auth'], 0o640])
   assert.deepEqual(r.su, ['browser', 'xsession', 'xvnc'])
-  assert.deepEqual(r.iptables.filter(l => l.startsWith('-I')), ['-I INPUT -p tcp --dport 9222 ! -i lo -j DROP', '-I INPUT -p tcp --dport 5900:5999 ! -i lo -j DROP', '-I INPUT -p udp --dport 881 ! -i lo -j DROP'])
+  // The nftables input chain keeps these ports box-local (edge hardening; containment.test.mjs).
+  assert.deepEqual(r.iptables, [])
   assert.deepEqual(r.dsh, ['reached'])
-  // A rule that cannot be inserted stops the script before any of the desktop starts.
-  const failed = await run(() => 'exit 1')
-  assert.deepEqual([failed.xvnc, failed.su, failed.dsh], [[], [], []])
-  // Before the marker a failed rule is passed over, as before, and the session and cookie stay browser's.
+  // Before the marker each rule is checked (-C) and, when absent, inserted (-I).
+  const old = await run(logged, '')
+  assert.deepEqual(old.iptables.filter(l => l.startsWith('-I')), ['-I INPUT -p tcp --dport 9222 ! -i lo -j DROP', '-I INPUT -p tcp --dport 5900:5999 ! -i lo -j DROP', '-I INPUT -p udp --dport 6080 ! -i lo -j DROP'])
+  assert.deepEqual(old.iptables.filter(l => l.startsWith('-C')).map(l => l.replace('-C', '-I')), old.iptables.filter(l => l.startsWith('-I')))
+  // A failed rule is passed over, as before, and the session and cookie stay browser's.
   const before = await run(() => 'exit 1', '')
   assert.deepEqual([before.su, before.chown, before.dsh], [['browser', 'browser', 'xvnc'], ['browser T/run/x11/auth', 'browser:xvnc T/run/x11/auth'], ['reached']])
 })

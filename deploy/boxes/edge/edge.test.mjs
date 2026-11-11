@@ -618,7 +618,9 @@ test('the live view\'s pages may connect only to their own host, and a page that
 test('backups carry the browser user\'s home without caches or profile locks, and tolerate its absence', async () => {
   const { backupCommand } = await import('./edge.mjs')
   const c = backupCommand('URL')
-  assert.match(c, /ls -d root\/\.dsh root\/projects root\/\.mumbo-sqlite var\/lib\/mumbo\/attachments 2>\/dev\/null\) --null --verbatim-files-from --no-recursion -T "\$dirs" --recursion -T "\$units" /)
+  assert.match(c, /ls -d root\/\.dsh root\/projects root\/work root\/\.mumbo-sqlite var\/lib\/mumbo\/attachments 2>\/dev\/null\) --null --verbatim-files-from --no-recursion -T "\$dirs" --recursion -T "\$units" /)
+  // A project box's work directory leaves its live databases to the snapshots, as projects does.
+  for (const d of ['root/projects', 'root/work']) for (const p of ['*.sqlite', '*.db', '*-wal', '*-shm', '*-journal']) assert.ok(c.includes(`--exclude='${d}/${p}'`), `${d}/${p}`)
   for (const x of ['.cache', '.chromium-profile-old', 'chrome-profile/Singleton*', 'chrome-profile/*/Cache', 'chrome-profile/*/Code Cache', 'chrome-profile/*/GPUCache', 'profile/Singleton*', 'profile/*/Cache']) assert.ok(c.includes(`--exclude='home/browser/${x}'`), x)
 })
 
@@ -916,6 +918,8 @@ test('role instructions: assistant with write consent and desktop sign-in; coord
   assert.match(p, /through their own assistants, whose messages reach the project's Superagent as requests or context from the member\./)
   assert.match(p, /no browser and nobody's accounts/)
   assert.doesNotMatch(p, /Downloads/)
+  // Agent's home, a model root under containment (B24), is outside backups, on both kinds of box.
+  for (const role of [a, p]) assert.ok(role.split('\n').includes('- /home/agent is scratch space and is not backed up; keep durable files in /root/projects.'))
   const script = startScript(c, 'T', undefined, a)
   // The agents root is root's own, or under containment (B24) root's and readable by all, outside /root.
   assert.ok(script.includes('AGENTS_HOME=/root/.mumbo/agents\n[ -z "$B24_IMAGE" ] || AGENTS_HOME=/usr/local/share/mumbo/agents\n'))
