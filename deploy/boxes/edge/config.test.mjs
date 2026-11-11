@@ -75,12 +75,14 @@ test('rollback safety: the pre-B13 edge filter strips the default sign-in cookie
 
 test('capacity: node_count drives both the node group and the edge cap (24 units per node minus 4, max 10 nodes)', () => {
   const tf = (f) => readFileSync(new URL(`../prod/${f}`, import.meta.url), 'utf8')
-  assert.match(tf('modules/edge/edge.tf'), /MAX_RUNNING_UNITS\s*=\s*tostring\(2 \* \(12 \* var\.node_count - 2\)\)/)
+  assert.match(tf('modules/edge/edge.tf'), /MAX_RUNNING_UNITS\s*=\s*tostring\(2 \* \(12 \* local\.home\.node_count - 2\)\)/)
+  assert.match(tf('modules/edge/edge.tf'), /maxUnits = 2 \* \(12 \* c\.node_count - 2\)/, 'CELLS: the same formula on each cell\'s own node count')
+  assert.match(tf('edge.tf'), /"us-east-1" = \{[^}]*node_count\s*= var\.node_count\n[^}]*\}\n\s*"ap-south-1" = \{[^}]*node_count\s*= var\.node_count_ap_south_1\n/)
   assert.match(tf('modules/cell/nodes.tf'), /min_size\s*=\s*min\(2, var\.node_count\)/)
   assert.match(tf('modules/cell/nodes.tf'), /termination_policies\s*=\s*\["OldestLaunchTemplate", "OldestInstance"\]/)
   assert.match(tf('modules/cell/nodes.tf'), /enabled_metrics\s*=\s*\["GroupInServiceInstances"/)
   assert.match(tf('modules/cell/alarms.tf'), /nodes-below-min = \{[^\n]*threshold = var\.node_count/)
-  assert.match(tf('modules/edge/edge.tf'), /MAX_RUNNING_BOXES\s*=\s*tostring\(12 \* var\.node_count - 2\)/)
+  assert.match(tf('modules/edge/edge.tf'), /MAX_RUNNING_BOXES\s*=\s*tostring\(12 \* local\.home\.node_count - 2\)/)
   assert.match(tf('modules/cell/nodes.tf'), /desired_capacity\s*=\s*var\.node_count/)
   assert.doesNotMatch(tf('modules/cell/nodes.tf'), /ignore_changes\s*=\s*\[desired_capacity\]/)
   assert.match(tf('modules/cell/nodes.tf'), /node_max_size = 10\b/)
@@ -243,4 +245,34 @@ test('REDIS_URL: the production rediss:// URL with the user edge works as is; an
   for (const bad of ['rediss://edge:CANARY-pw@bad host:6379', 'http://edge:CANARY-pw@h:6379', 'redis://edge:CANARY-pw@h:6379', 'rediss://edge:CANARY-pw@']) {
     assert.throws(() => redisUrl(bad), (e) => /^edge: REDIS_URL must be a redis:\/\/ or rediss:\/\/ URL with a host, and credentials only over rediss:\/\/; its value is not shown$/.test(e.message) && !e.message.includes('CANARY'), bad)
   }
+})
+
+test('prod Terraform: CELLS as edge/cells.mjs parses it, each cell\'s E2B key and the edge and model keys as ECS secrets by ARN; single-cell until edge_cells', async () => {
+  const { cellsConfig } = await import('./cells.mjs')
+  const tf = (f) => readFileSync(new URL(`../prod/${f}`, import.meta.url), 'utf8')
+  const mod = tf('modules/edge/edge.tf'), root = tf('edge.tf')
+  // The CELLS fields Terraform writes are exactly the ones cellsConfig takes (it refuses any other).
+  const fields = /CELLS = jsonencode\(\{ for r, c in var\.cells : r => \{\n\s*(.*)\n/.exec(mod)?.[1].split(', ').map(f => f.split(' = ')[0])
+  assert.deepEqual(fields, ['api', 'sandbox', 'bucket', 'maxUnits', 'e2bKeyEnv'])
+  assert.match(mod, /e2b_key_env = \{ for r in keys\(var\.cells\) : r => "E2B_API_KEY_\$\{upper\(replace\(r, "-", "_"\)\)\}" \}/)
+  const keyEnv = (r) => `E2B_API_KEY_${r.toUpperCase().replaceAll('-', '_')}`
+  // Production's values as Terraform renders them (modules/cell outputs, node_count 2 and 1).
+  const cell = (r, names, bucket, nodes) => ({ api: `http://api.${names}:3000`, sandbox: `http://sandbox.${names}:3002`, bucket, maxUnits: 2 * (12 * nodes - 2), e2bKeyEnv: keyEnv(r) })
+  const CELLS = JSON.stringify({ 'ap-south-1': cell('ap-south-1', 'ap-south-1.boxes.internal', 'mumbo-boxes-aps1-backup-641134885443', 1), 'us-east-1': cell('us-east-1', 'boxes.internal', 'mumbo-boxes-backup-641134885443', 2) })
+  const parsed = cellsConfig({ CELLS, EDGE_REGION: 'us-east-1', E2B_API_KEY_US_EAST_1: 'k1', E2B_API_KEY_AP_SOUTH_1: 'k2' })
+  assert.deepEqual([parsed.cells['us-east-1'].maxUnits, parsed.cells['ap-south-1'].maxUnits, parsed.cells['ap-south-1'].e2bKeyEnv], [44, 20, 'E2B_API_KEY_AP_SOUTH_1'])
+  assert.match(mod, /EDGE_REGION = local\.region/)
+  assert.match(mod, /e2b_keys\s*= var\.cells_enabled \? tomap\(\{ for r, c in var\.cells : local\.e2b_key_env\[r\] => c\.e2b_secret_arn \}\) : tomap\(\{ E2B_API_KEY = local\.home\.e2b_secret_arn \}\)/)
+  assert.match(mod, /environment = \[for k, v in merge\(var\.cells_enabled \? tomap\(local\.cells_env\) : tomap\(local\.single_cell_env\), \{/)
+  assert.match(mod, /\{ name = "EDGE_SECRET", valueFrom = var\.edge_secret_arn \}/)
+  assert.match(mod, /\{ name = "MODEL_KEY", valueFrom = var\.model_key_secret_arn \}/)
+  assert.match(root, /edge_secret_arn\s+= aws_ssm_parameter\.edge\["edge-secret"\]\.arn/)
+  assert.match(root, /model_key_secret_arn\s+= data\.aws_secretsmanager_secret\.model_key\.arn/)
+  assert.match(root, /variable "edge_cells" \{[^}]*default\s*= false/, 'single-cell until R6 part 1 sets it')
+  assert.match(root, /variable "placement_cache_ms" \{[^}]*default\s*= 30000/)
+  assert.match(mod, /PLACEMENT_CACHE_MS\s*= tostring\(var\.placement_cache_ms\)/)
+  // The edge reads neither key through its task role any more; the grants stay only for a rollback to an older image.
+  assert.match(mod, /Remove once a B21 revision is steady/)
+  assert.match(mod, /Action = "s3:PutObject", Resource = "arn:aws:s3:::\$\{local\.audit_bucket\}\/\$\{local\.audit_prefix\}\*"/)
+  assert.match(mod, /audit_bucket = var\.cells\["us-east-1"\]\.backup_bucket/)
 })

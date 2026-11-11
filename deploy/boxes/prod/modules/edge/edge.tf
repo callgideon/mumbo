@@ -21,10 +21,7 @@ variable "github_agent_id" { type = string }
 variable "openrouter_models" { type = string }
 variable "openrouter_zdr" { type = bool }
 variable "signin_cookie_name" { type = string }
-variable "node_count" {
-  description = "The cell's sandbox nodes; MAX_RUNNING_UNITS follows."
-  type        = number
-}
+variable "placement_cache_ms" { type = number }
 variable "ecr" {
   description = "Image prefix: <registry>/<repository prefix>; the image is <this>/edge."
   type        = string
@@ -49,15 +46,38 @@ variable "exec_role" {
 variable "edge_security_group_id" { type = string }
 variable "data_security_group_id" { type = string }
 variable "data_kms_key_arn" { type = string }
-variable "backup_bucket" { type = string }
-variable "backups_kms_key_arn" { type = string }
-variable "e2b_secret_arn" { type = string }
 variable "store_secret_arn" {
   description = "Secrets Manager secret (a replica in this region) whose url is the edge store's rediss:// URL with its user and password (root store.tf)."
   type        = string
 }
-variable "e2b_api_url" { type = string }
-variable "e2b_sandbox_url" { type = string }
+variable "cells" {
+  description = "Every cell the edge serves, by region (modules/cell outputs and the cell's node count). This edge's own region's cell gives the single-cell settings; with cells_enabled, all of them are CELLS (edge/cells.mjs)."
+  type = map(object({
+    e2b_api_url         = string
+    e2b_sandbox_url     = string
+    backup_bucket       = string
+    backups_kms_key_arn = string
+    data_kms_key_arn    = string
+    e2b_secret_arn      = string
+    node_count          = number
+  }))
+  validation {
+    condition     = contains(keys(var.cells), "us-east-1")
+    error_message = "cells must include us-east-1: records without a region are there, and so are approval audit records."
+  }
+}
+variable "cells_enabled" {
+  description = "CELLS and EDGE_REGION (an edge of B21 or later) instead of the single-cell BACKUP_BUCKET, E2B_API_URL, E2B_SANDBOX_URL, E2B_API_KEY and MAX_RUNNING_*; an edge outside us-east-1 runs only with it."
+  type        = bool
+}
+variable "edge_secret_arn" {
+  description = "The SSM parameter /mumbo/boxes/edge-secret by full us-east-1 ARN: EDGE_SECRET, the key every box token is signed with."
+  type        = string
+}
+variable "model_key_secret_arn" {
+  description = "The Secrets Manager secret mumbo/prod/deepseek-api-key (a plain string) by full us-east-1 ARN: MODEL_KEY."
+  type        = string
+}
 
 data "aws_caller_identity" "this" {}
 data "aws_region" "this" {}
@@ -80,7 +100,10 @@ locals {
   old_host     = "boxes.mumbo.si"
   llm_host     = "llm.${local.public_host}" # LLM_HOST: new boxes' model host
   llm_hosts    = [local.llm_host, "llm.${local.old_host}"]
-  backup_store = var.backup_bucket
+  # This edge's own cell: the single-cell settings without CELLS.
+  home = var.cells[local.region]
+  # Approval audit records go to the us-east-1 bucket from every edge (edge.mjs auditor).
+  audit_bucket = var.cells["us-east-1"].backup_bucket
   # api.mumbo.si was the retired shared server's (2026-11-09).
   old_hosts = [local.old_host, "api.mumbo.si"]
   # PROJECT_DOMAIN: project boxes are p-<16 hex>.<this>. It must stay in the mumbo.si zone.
@@ -273,13 +296,17 @@ resource "aws_iam_role" "edge" {
   name               = "${local.name}-edge"
   assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "sts:AssumeRole", Principal = { Service = "ecs-tasks.amazonaws.com" } }] })
 }
+# Every cell's backups: a box backs up into, and restores from, its own cell's bucket (each cell's backups key policy
+# admits this role, modules/cell edge_role_arn).
 resource "aws_iam_role_policy" "edge" {
   role = aws_iam_role.edge.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [
-    { Effect = "Allow", Action = ["s3:GetObject", "s3:GetObjectVersion", "s3:PutObject"], Resource = "arn:aws:s3:::${local.backup_store}/users/*" }, # GetObjectVersion: versioned restores (RUNBOOK "Restore an older S3 version")
-    { Effect = "Allow", Action = "s3:PutObject", Resource = "arn:aws:s3:::${local.backup_store}/${local.audit_prefix}*" },
-    { Effect = "Allow", Action = "s3:ListBucket", Resource = "arn:aws:s3:::${local.backup_store}" },
-    { Effect = "Allow", Action = ["kms:Decrypt", "kms:GenerateDataKey"], Resource = var.backups_kms_key_arn },
+    { Effect = "Allow", Action = ["s3:GetObject", "s3:GetObjectVersion", "s3:PutObject"], Resource = [for c in values(var.cells) : "arn:aws:s3:::${c.backup_bucket}/users/*"] }, # GetObjectVersion: versioned restores (RUNBOOK "Restore an older S3 version")
+    { Effect = "Allow", Action = "s3:PutObject", Resource = "arn:aws:s3:::${local.audit_bucket}/${local.audit_prefix}*" },
+    { Effect = "Allow", Action = "s3:ListBucket", Resource = [for c in values(var.cells) : "arn:aws:s3:::${c.backup_bucket}"] }, # a HEAD of a missing backup is then 404, not 403
+    { Effect = "Allow", Action = ["kms:Decrypt", "kms:GenerateDataKey"], Resource = [for c in values(var.cells) : c.backups_kms_key_arn] },
+    # Edge images before B21 read these two themselves, and a circuit-breaker rollback may run one; B21 and later get both
+    # as ECS secrets. Remove once a B21 revision is steady (RUNBOOK "Ship a new edge").
     { Effect = "Allow", Action = "ssm:GetParameter", Resource = "arn:aws:ssm:${local.region}:${data.aws_caller_identity.this.account_id}:parameter/mumbo/boxes/edge-secret" },
     { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = "arn:aws:secretsmanager:${local.region}:${data.aws_caller_identity.this.account_id}:secret:mumbo/prod/deepseek-api-key-*" },
   ] })
@@ -289,11 +316,14 @@ resource "aws_iam_role_policy" "exec_edge" {
   policy = jsonencode({ Version = "2012-10-17", Statement = [
     { Effect = "Allow", Action = "ssm:GetParameters", Resource = distinct(concat(
       [for p in values(merge(local.proxy_ssm, local.edge_ssm)) : "${local.ssm}/${p}"],
+      [var.edge_secret_arn],
       # Remove after the plain-env revision is steady (RUNBOOK.md): edge task definitions before it read SUPABASE_ANON_KEY
       # from this parameter, and a circuit-breaker rollback to one must still start.
       ["${local.ssm}/prod/supabase-anon-key"],
     )) },
-    { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = concat([data.aws_secretsmanager_secret.github_app.arn, var.store_secret_arn], values(local.edge_secrets)) },
+    { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = concat([data.aws_secretsmanager_secret.github_app.arn, var.store_secret_arn, var.model_key_secret_arn], values(local.edge_secrets), [for c in values(var.cells) : c.e2b_secret_arn]) },
+    # Each cell's e2b secret is under that cell's data key; the key policy leaves its use to IAM.
+    { Effect = "Allow", Action = "kms:Decrypt", Resource = [for c in values(var.cells) : c.data_kms_key_arn] },
   ] })
 }
 # The mumbo-bot GitHub App (app_id, slug, private_key), created outside Terraform under the cell's data key (kms:Decrypt in modules/cell/control.tf).
@@ -312,8 +342,32 @@ locals {
     { ALLOWED_EMAILS = "boxes/allowed-emails", MUMBO_OAUTH_CLIENT_IDS = "boxes/oauth-client-id" },
     var.ntfy_enabled ? { NTFY_TOPIC = "boxes/ntfy-topic" } : {},
   )
-  # Container env name -> plain-string Secrets Manager secret; with github_app, all the secrets the exec role may read.
+  # Container env name -> plain-string Secrets Manager secret; with github_app, the store, the model key and the cells' e2b
+  # secrets, all the secrets the exec role may read.
   edge_secrets = { for s in data.aws_secretsmanager_secret.openrouter : "OPENROUTER_API_KEY" => s.arn }
+  # Each cell's E2B key variable, named in CELLS.
+  e2b_key_env = { for r in keys(var.cells) : r => "E2B_API_KEY_${upper(replace(r, "-", "_"))}" }
+  # Container env name -> e2b secret: every cell's key with CELLS, else this edge's own cell's as E2B_API_KEY, which the
+  # SDK reads.
+  e2b_keys = var.cells_enabled ? tomap({ for r, c in var.cells : local.e2b_key_env[r] => c.e2b_secret_arn }) : tomap({ E2B_API_KEY = local.home.e2b_secret_arn })
+  cells_env = {
+    # Each cell's region is its key; maxUnits is MAX_RUNNING_UNITS's formula on the cell's own node count.
+    CELLS = jsonencode({ for r, c in var.cells : r => {
+      api = c.e2b_api_url, sandbox = c.e2b_sandbox_url, bucket = c.backup_bucket, maxUnits = 2 * (12 * c.node_count - 2), e2bKeyEnv = local.e2b_key_env[r]
+    } })
+    EDGE_REGION = local.region # newcomers' region
+  }
+  single_cell_env = {
+    BACKUP_BUCKET   = local.home.backup_bucket
+    E2B_API_URL     = local.home.e2b_api_url
+    E2B_SANDBOX_URL = local.home.e2b_sandbox_url
+    # Capacity units, not boxes (edge/capacity.mjs): a person box (4096 MB, edge/template.mjs) is 2, a project box (8192 MB, the
+    # mumbo-project build) is 4, a child sandbox (2048 MB, the mumbo-child build argument) is 1. 24 units per node
+    # (modules/cell/nodes.tf hugepages) minus 4 of headroom. An edge image from before
+    # the units change reads MAX_RUNNING_BOXES (running boxes of all kinds, children too, counted as one each) instead; both stay until no such image can be rolled back to.
+    MAX_RUNNING_UNITS = tostring(2 * (12 * local.home.node_count - 2))
+    MAX_RUNNING_BOXES = tostring(12 * local.home.node_count - 2)
+  }
 }
 resource "aws_ecs_task_definition" "edge" {
   family                   = "${local.name}-edge"
@@ -359,13 +413,10 @@ resource "aws_ecs_task_definition" "edge" {
       image        = "${var.ecr}/edge:${var.edge_tag}"
       essential    = true
       portMappings = [{ containerPort = 8081, protocol = "tcp" }]
-      environment = [for k, v in {
+      environment = [for k, v in merge(var.cells_enabled ? tomap(local.cells_env) : tomap(local.single_cell_env), {
         PUBLIC_HOST       = local.public_host
         LLM_HOST          = local.llm_host
-        BACKUP_BUCKET     = local.backup_store
         BOX_EGRESS_IPS    = join(",", var.box_egress_ips)
-        E2B_API_URL       = var.e2b_api_url
-        E2B_SANDBOX_URL   = var.e2b_sandbox_url
         LISTEN_HOST       = "127.0.0.1"
         MODEL_LISTEN_HOST = "0.0.0.0"
         AWS_REGION        = local.region
@@ -376,12 +427,7 @@ resource "aws_ecs_task_definition" "edge" {
         # The sign-in page consents only for this client (MUMBO_OAUTH_CLIENT_IDS, below) and redirect URI.
         MUMBO_OAUTH_REDIRECT_URIS = local.oauth_redirect_url
         SIGNIN_COOKIE             = var.signin_cookie_name
-        # Capacity units, not boxes (edge/capacity.mjs): a person box (4096 MB, edge/template.mjs) is 2, a project box (8192 MB, the
-        # mumbo-project build) is 4, a child sandbox (2048 MB, the mumbo-child build argument) is 1. 24 units per node
-        # (modules/cell/nodes.tf hugepages) minus 4 of headroom. An edge image from before
-        # the units change reads MAX_RUNNING_BOXES (running boxes of all kinds, children too, counted as one each) instead; both stay until no such image can be rolled back to.
-        MAX_RUNNING_UNITS = tostring(2 * (12 * var.node_count - 2))
-        MAX_RUNNING_BOXES = tostring(12 * var.node_count - 2)
+        PLACEMENT_CACHE_MS        = tostring(var.placement_cache_ms)
         # Project boxes: the mumbo-project template (8192 MB, 4 vCPU; superagent, gh, no desktop), built 2026-11-10 from
         # mumbo-web-prod:prod-546f42d7fb (RUNBOOK "Rebuild the box template").
         PROJECT_TEMPLATE = "mumbo-project"
@@ -398,9 +444,12 @@ resource "aws_ecs_task_definition" "edge" {
         OPENROUTER_ZDR       = tostring(var.openrouter_zdr)
         # Person boxes created afterwards start new Sessions in Run Wild (RUNBOOK "Run Wild").
         RUN_WILD_DEFAULT_EMAILS = var.run_wild_default_emails
-      } : { name = k, value = v }]
-      secrets = concat([for k, p in local.edge_ssm : { name = k, valueFrom = "${local.ssm}/${p}" }], [for k, arn in local.edge_secrets : { name = k, valueFrom = arn }], [
-        { name = "E2B_API_KEY", valueFrom = "${var.e2b_secret_arn}:TEAM_API_KEY::" },
+      }) : { name = k, value = v }]
+      secrets = concat([for k, p in local.edge_ssm : { name = k, valueFrom = "${local.ssm}/${p}" }], [for k, arn in local.edge_secrets : { name = k, valueFrom = arn }],
+        [for k, arn in local.e2b_keys : { name = k, valueFrom = "${arn}:TEAM_API_KEY::" }], [
+        # By full us-east-1 ARN, which ECS reads from any region.
+        { name = "EDGE_SECRET", valueFrom = var.edge_secret_arn },
+        { name = "MODEL_KEY", valueFrom = var.model_key_secret_arn },
         { name = "REDIS_URL", valueFrom = "${var.store_secret_arn}:url::" },
         { name = "GITHUB_APP_ID", valueFrom = "${data.aws_secretsmanager_secret.github_app.arn}:app_id::" },
         { name = "GITHUB_APP_KEY", valueFrom = "${data.aws_secretsmanager_secret.github_app.arn}:private_key::" },
