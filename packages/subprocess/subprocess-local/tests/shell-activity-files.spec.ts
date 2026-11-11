@@ -37,15 +37,15 @@ it('accepts only fresh complete records from the original shell and advances rev
 })
 
 it('leaves unsupported executables, platforms, and custom launch arguments untouched', () => {
-  expect(prepareShellActivity({ ...spec, argv: ['/bin/fish', '-i'] }, {}, 'darwin')).toBeUndefined()
-  expect(prepareShellActivity({ ...spec, argv: ['/bin/zsh', '-l'] }, {}, 'darwin')).toBeUndefined()
-  expect(prepareShellActivity({ ...spec, argv: ['/bin/zsh', '-l', '-i'] }, {}, 'darwin')).toBeUndefined()
-  expect(prepareShellActivity({ ...spec, shellActivity: false }, {}, 'darwin')).toBeUndefined()
-  expect(prepareShellActivity(spec, {}, 'win32')).toBeUndefined()
+  expect(prepareShellActivity({ ...spec, argv: ['/bin/fish', '-i'] }, {}, 'darwin', tmpdir())).toBeUndefined()
+  expect(prepareShellActivity({ ...spec, argv: ['/bin/zsh', '-l'] }, {}, 'darwin', tmpdir())).toBeUndefined()
+  expect(prepareShellActivity({ ...spec, argv: ['/bin/zsh', '-l', '-i'] }, {}, 'darwin', tmpdir())).toBeUndefined()
+  expect(prepareShellActivity({ ...spec, shellActivity: false }, {}, 'darwin', tmpdir())).toBeUndefined()
+  expect(prepareShellActivity(spec, {}, 'win32', tmpdir())).toBeUndefined()
 })
 
 it('supports an unset original ZDOTDIR and removes private files on disposal', () => {
-  const activity = prepareShellActivity(spec, {}, 'darwin')!
+  const activity = prepareShellActivity(spec, {}, 'darwin', tmpdir())!
   cleanups.push(() => { activity.dispose() })
   expect(activity.env.ZDOTDIR).toBeDefined()
   expect(existsSync(activity.env.ZDOTDIR!)).toBe(true)
@@ -55,7 +55,7 @@ it('supports an unset original ZDOTDIR and removes private files on disposal', (
 
 it('restores a quoted original ZDOTDIR before sourcing user startup files', () => {
   const env = Object.freeze({ ZDOTDIR: "/shell config/user's $settings", OTHER: 'preserved' })
-  const activity = prepareShellActivity(spec, env, 'linux')!
+  const activity = prepareShellActivity(spec, env, 'linux', tmpdir())!
   cleanups.push(() => { activity.dispose() })
   const directory = activity.env.ZDOTDIR!
   expect(directory).not.toBe(env.ZDOTDIR)
@@ -75,7 +75,7 @@ it('removes the allocated private directory when writing its startup file fails'
     directory = dirname(String(path))
     throw new Error('disk unavailable')
   })
-  expect(() => prepareShellActivity(spec, {}, 'darwin')).toThrow('disk unavailable')
+  expect(() => prepareShellActivity(spec, {}, 'darwin', tmpdir())).toThrow('disk unavailable')
   expect(directory).toBeDefined()
   expect(existsSync(directory!)).toBe(false)
 })

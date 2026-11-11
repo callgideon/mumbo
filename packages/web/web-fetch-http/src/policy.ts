@@ -42,7 +42,8 @@ export function parseFetchUrl(input: string): URL {
 /**
  * Validate a request URL against the provider's complete pre-network policy:
  * bounded length plus the restrictions enforced by {@link parseFetchUrl}.
- * Public-address resolution and connection pinning run after this check.
+ * No check of the destination address follows: loopback and private-network
+ * hosts are fetched like any other (README, Known Limitations).
  *
  * @param input - the raw URL string from the fetch request.
  * @returns the parsed `URL`.

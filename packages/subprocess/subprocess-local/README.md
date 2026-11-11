@@ -7,7 +7,7 @@ kind: "package-reference"
 
 ## Summary
 
-Mount `dsh-subprocess-local` in any composition that runs child processes on the host. It resolves local executables, gives ordinary Linux and Windows commands plus supported Linux terminal sessions an OS-owned managed range, and provides real terminal sessions through `node-pty`; unsupported hosts use an explicit weaker fallback. It has no configuration, so every disposition, limit, terminal size, and grace arrives on the spawn request from the calling capability seam. Output collection keeps a bounded in-memory tail with optional spill files for full-stream recovery, children start from a scrubbed environment, and disposal terminates and joins every selected range or session.
+Mount `dsh-subprocess-local` in any composition that runs child processes on the host. It resolves local executables, gives ordinary Linux and Windows commands plus supported Linux terminal sessions an OS-owned managed range, and provides real terminal sessions through `node-pty`; unsupported hosts use an explicit weaker fallback. Dispositions, limits, terminal sizes, and grace arrive on each spawn request; the provider settings `runAs` and `identities` start Linux children as fixed non-root users. Output collection keeps a bounded in-memory tail with optional spill files for full-stream recovery, children start from a scrubbed environment, and disposal terminates and joins every selected range or session.
 
 ## Table of Contents
 
@@ -27,11 +27,71 @@ Mount the provider beside its consumers and start processes exactly as the subpr
 
 ### Mounting the provider
 
-Load the provider in the same composition as its consumers. It has no config fields: every choice arrives on the spawn request, so deployment-varying decisions stay with the caller's configuration. `terminalEnvironment()` reads a nonempty `SHELL` on POSIX, falling back to the account login shell, or a nonempty `ComSpec` on Windows. Empty values are omitted so the consumer can choose its platform fallback.
+Load the provider in the same composition as its consumers. Every per-process choice arrives on the spawn request, so deployment-varying decisions stay with the caller's configuration; only the [run-as identities](#running-children-as-another-user), the server identity, and the two directories the provider writes into are provider configuration. `shellActivityDirectory` receives each interactive shell's private activity records and defaults to the OS temporary directory. `spillDirectory` receives spill files and defaults to a private per-process directory under the OS temporary directory. Each must be an absolute existing directory, or the provider fails at load. `terminalEnvironment()` reads a nonempty `SHELL` on POSIX, falling back to the account login shell, or a nonempty `ComSpec` on Windows. Empty values are omitted so the consumer can choose its platform fallback.
 
 ```yaml
 - name: '@deepseek-ai/dsh-subprocess-local'
 - name: '@deepseek-ai/dsh-bash-local'
+```
+
+<a id="running-children-as-another-user"></a>
+### Running children as another user
+
+Set `runAs` to start every ordinary and terminal child of this provider as one non-root Linux identity, for example the `agent` user of a contained box. It covers every Consumer of `ctx.subprocess`: the model's shell commands, terminals including the person's Terminal tab, PTC code runtimes, language servers, `glob`/`grep`, and the processes of subagents. The [agent containment Agent Note](../../../.agents/notes/implemented/architecture/2026-11-10-agent-containment-run-as-and-model-roots.md) lists every spawn path and the ones outside this provider.
+
+```yaml
+- name: '@deepseek-ai/dsh-subprocess-local'
+  config:
+    runAs:
+      uid: 1001
+      gid: 1001
+      groups: []
+      inherit: [PATH, LANG]
+      set: { HOME: /home/agent, TMPDIR: /home/agent/tmp, USER: agent, LOGNAME: agent, SHELL: /bin/bash }
+      secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY]
+```
+
+| Field | Meaning |
+|---|---|
+| `uid`, `gid` | User and group the child runs as; real, effective, saved, and filesystem ids all take these values. `0` is refused. |
+| `groups` | The complete supplementary group list; `[]` means none. Root's groups are never kept. |
+| `inherit` | Names the child takes from this process's credential-scrubbed environment. Every other ambient name is dropped; credential-shaped names are refused because the scrub never carries them. |
+| `set` | Fixed values the child always receives; they replace inherited and spawn-request entries of the same name. |
+| `secretNames` | Names that must never reach a child. A spawn whose final environment contains one, compared without case, throws `SubprocessSecretEnvironmentError` before anything starts. |
+
+The child's environment is the `inherit` names, then the spawn request's explicit entries (an `undefined` entry removes a name), then `set`. The Linux exec bootstrap takes the identity before it changes into the target's directory and enters the target, and it refuses to enter the target unless `/proc/self/status` reports exactly the configured ids and groups; a refused step rejects `done` with a `run-as:` message. Without a user-systemd scope the bootstrap runs directly as the detached process group. Executable lookup uses the run-as `PATH`, `terminalEnvironment()` reports the run-as `SHELL`, and `childIdentity` reports the identity so Consumers such as `dsh-fs-local` run model-chosen file changes as it. Interactive shell activity records stay in a root-owned directory the child can only traverse; the child owns just its two record files. After the drop the bootstrap sets `no_new_privs`, and it enters the target only when the ids, groups, empty permitted, effective, and ambient capabilities, and `NoNewPrivs: 1` all show in `/proc/self/status`. The provider fails at load on a non-Linux host, an unavailable exec bootstrap, a root identity, an invalid name, a secret name in `inherit` or `set`, a temporary directory (`os.tmpdir()`, which holds the root bootstrap's launch requests and module cache) whose spelling is not its real path or that another user could write, directly or by replacing it through an ancestor that user owns or may write, or `fs.protected_hardlinks` other than 1. Start dsh with `TMPDIR` set to the real path of a root-only directory such as `/root/.dsh/tmp`. A process must start as root to switch to a different identity.
+
+A run-as child never receives this process's standard output or error: an output stream the spawn request asks to inherit is read and discarded instead, because this process's streams may be a root-only log that other programs parse. Ask for `pipe` or collection to keep a child's output.
+
+Interactive shell activity records live in a record directory the provider creates in `shellActivityDirectory`, owned by this process with mode `0711`; the child can only search it, reads its startup file, and owns just its two record files. The run-as shell must reach that record directory, while the root-only temporary directory must stay closed to it, so a contained host sets `shellActivityDirectory` to a separate root-owned directory such as `/run/dsh-shell` (mode `0711`). Under `runAs` the provider fails at load unless that directory is owned by this process, no other user can write it or replace it through an ancestor, and the run-as user can search it and every ancestor; the provider then writes through the real path it checked, never through a link in the configured spelling.
+
+Spill files are created with mode `0640`. Under `runAs`, `spillDirectory` must be writable by no other user, directly or through an ancestor, or the provider fails at load, and spill files go to the real path that check examined. To let the run-as user read the full output of its own commands without writing there, create the directory owned by root with the run-as user's group and the set-group-ID bit, such as `install -d -o root -g agent -m 2750 /var/lib/mumbo/subprocess-spill`; new files then carry that group. List the directory in the file tools' [`readOnlyRoots`](../../fs/fs-local/README.md#confining-model-paths) so the model's `read` opens the spill paths that results name.
+
+`identities` adds further run-as identities by name, each with the same fields as `runAs`. A spawn request whose `identity` names one starts its child as that identity, with that identity's environment and secret names; every other ordinary child and every terminal starts as `runAs`, which `identities` requires. The name comes from the caller's own configuration, never from the model: `dsh-computer-use-x11` and `@mumbo/box-links` name the identity that may reach the X display, and an MCP stdio server row names the one its server runs as. `resolveExecutable` takes the same name and uses that identity's `PATH`. A spawn or lookup naming an identity this provider does not list, including any name when `runAs` is absent, throws before anything starts. Names match `^[a-z][a-z0-9-]{0,31}$`.
+
+```yaml
+    identities:
+      desktop:
+        uid: 1003
+        gid: 1003
+        groups: []
+        inherit: [LANG]
+        set: { HOME: /home/desktop, TMPDIR: /home/desktop/tmp, PATH: /usr/bin:/bin }
+        secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY]
+```
+
+`serverIdentity` names the `identities` entry that runs the servers a person configures rather than the model; `dsh-mcp-client` starts every stdio server that names no identity as it, in its home, so the person's server credentials never sit in the run-as user's processes. `serverIdentity` reports that name and the home's real path. The provider fails at load unless that entry's `set.HOME` is spelled as its real path, owned by that identity, writable by no other user but root, directly or through an ancestor, and searchable by it, and its `set.PATH` is present, so no caller replaces it. Every `PATH` and `NODE_PATH` entry that identity receives must be an absolute existing directory that only root can change: each directory along its spelling and along its real path is owned by root and writable by no group or other user. The provider checks the configured values at load and the final environment of every spawn as that identity, which a caller's `NODE_PATH` cannot then evade. `serverHome(identity)` applies the same rules to another `identities` entry a server starts as, such as the Playwright MCP server's row identity: it checks that entry the first time a server asks, fails then on any rule the entry breaks, returns its home's real path, and checks every later spawn as that identity the same way.
+
+```yaml
+    identities:
+      mcpserver:
+        uid: 1006
+        gid: 1006
+        groups: []
+        inherit: [LANG]
+        set: { HOME: /home/mcpserver, USER: mcpserver, PATH: /usr/local/bin:/usr/bin:/bin }
+        secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY]
+    serverIdentity: mcpserver
 ```
 
 ### Resolving executables
@@ -42,7 +102,7 @@ Windows ordinary subprocesses start the private Job runner with `windowsHide` an
 
 ### Collecting output
 
-Collect mode keeps the last `maxBytes` of a stream in memory — errors and final results cluster at the end — and, when a `spill` cap is configured, appends the complete stream to a private file under a per-process directory in the OS temp dir (a `0700` directory, `0600` random-named files). A stream larger than the spill cap discards its incomplete spill and returns only the marked truncated tail. Spilling is best-effort: when the spill file cannot be opened or appended (the per-process directory removed by a temporary-file cleaner, `EACCES`, `EMFILE`, `ENOSPC`), the collector discards the spill, logs one `error` through the plugin logger, and keeps collecting the in-memory tail, so the result is truncated with no spill path. Reads are offset-based and non-consuming, so background and batch readers coexist before and after exit.
+Collect mode keeps the last `maxBytes` of a stream in memory — errors and final results cluster at the end — and, when a `spill` cap is configured, appends the complete stream to a random-named `0640` file in `spillDirectory`, or by default under a `0700` per-process directory in the OS temp dir. A stream larger than the spill cap discards its incomplete spill and returns only the marked truncated tail. Spilling is best-effort: when the spill file cannot be opened or appended (the per-process directory removed by a temporary-file cleaner, `EACCES`, `EMFILE`, `ENOSPC`), the collector discards the spill, logs one `error` through the plugin logger, and keeps collecting the in-memory tail, so the result is truncated with no spill path. Reads are offset-based and non-consuming, so background and batch readers coexist before and after exit.
 
 The `./output` export shares this collector and retained-spill storage with process adapters. `snapshot()` returns the retained raw bytes and total byte count, allowing remote adapters to preserve offsets without forwarding the complete stream.
 
@@ -96,6 +156,7 @@ Each spawn selects one owner for both signalling and quiescence. Supported Linux
 | [`src/runner-launch.ts`](src/runner-launch.ts) | Source, built, and packaged private-runner selection |
 | [`src/spawn-runner.ts`](src/spawn-runner.ts) | Linux one-shot exec bootstrap and Windows Job runner |
 | [`src/runner-protocol.ts`](src/runner-protocol.ts) | Strict Linux launch/startup files and Windows IPC messages |
+| [`src/run-as.ts`](src/run-as.ts) | Run-as configuration, the explicit child environment, and the secret-name guard |
 | [`src/terminal.ts`](src/terminal.ts) | `node-pty` handle: Linux scope attachment, foreground inspection, and fallback cleanup |
 | [`src/process-inspector.ts`](src/process-inspector.ts) | POSIX process-tree and session inspection |
 | [`src/windows-inspector.ts`](src/windows-inspector.ts) | Windows Toolhelp32 process-table inspection via koffi |
@@ -151,8 +212,9 @@ These limits define when the provider is a poor fit or needs special operational
 - **Windows terminal allocation requires node-pty's bundled console host assets** — every Windows terminal is spawned with `useConptyDll: true`, so allocation resolves `conpty/conpty.dll` and `OpenConsole.exe` relative to node-pty's own addon; an asset that is missing or unpacked wrong makes `spawnTerminal` throw instead of falling back to the operating system console host. node-pty marks the option experimental, so a node-pty upgrade can change this behaviour. See the [bundled console host note](../../../.agents/notes/implemented/bug-fix/2026-09-28-pty-bundled-console-host.md).
 - **Fallback terminal ownership remains observational** — on macOS or Linux without usable user-systemd, a child that reparents before any foreground-inspection snapshot or leaves the owned terminal session can escape the process-table scan. The local provider does not add a continuous process-table monitor; supported Linux native mode instead retains these descendants through scope membership.
 - **In-process cleanup requires a JavaScript-observable exit** — direct `process.exit()`, default uncaught exceptions, and default unhandled rejections emit Node's synchronous `exit` event. The default OS disposition for an unhandled `SIGTERM`, `SIGINT`, or `SIGHUP` bypasses that event; an application covers those signals only by installing a handler that performs normal disposal or calls `process.exit()`. `SIGKILL`, fatal OOM, `process.abort()`, native crashes, power loss, and any failure that cannot run JavaScript require an external supervisor, container init, or equivalent OS owner.
+- **Run-as covers this provider only** — processes started outside `ctx.subprocess` (MCP stdio servers while no run-as provider is mounted, plugin installation, the experimental Python PTC runtime, the SDK subagent's child `dsh`) keep this process's identity, and a credential a Consumer forwards under a name absent from `secretNames` reaches the child. Workspace change capture and superagent worker checks run as the run-as user too and need scratch and configuration paths that user can read and write.
 - **The credential scrub is a name heuristic** — `*KEY*`/`*PASSWORD*`/`*SECRET*`/`*TOKEN*` only; differently named secrets (for example `*PASSPHRASE*`) pass through, and a whitelist for over-scrubbed variables is noted future work.
-- **Completed spill files are not deleted** — bounded full-output recovery files accumulate under the OS tmpdir until something external cleans them; the private per-process spill directory is removed at a JavaScript-observable exit only when it holds no completed spill file.
+- **Completed spill files are not deleted** — bounded full-output recovery files accumulate in `spillDirectory` or under the OS tmpdir until something external cleans them; the private per-process spill directory is removed at a JavaScript-observable exit only when it holds no completed spill file.
 - **A removed spill directory is not recreated** — the private per-process directory is created once; after an external cleaner removes it, every later spill in that process degrades to the in-memory tail with an `error` log until the host restarts. Recreating a fresh random directory on `ENOENT` is deferred work.
 
 <a id="dev-note"></a>

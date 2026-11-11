@@ -472,9 +472,11 @@
     # its own endpoint and key instead.
     # Legacy Messages search (deepseek-official) is selectable separately and
     # uses its own endpoint, with the account token or DEEPSEEK_API_KEY.
-    # Anonymous fetch accepts only public
-    # HTTP(S) destinations, resolves and validates every destination, and pins
-    # every actual connection. This composition gives web_search 60s whichever
+    # Anonymous fetch does not restrict destination addresses: it reaches
+    # loopback, private-network, and cloud metadata hosts (see the Known
+    # Limitations of packages/web/web-fetch-http/README.md), so a composition
+    # beside a loopback service the model must not reach disables it or uses
+    # deepseek-fetch-api. This composition gives web_search 60s whichever
     # provider serves it; the provider-neutral tool default remains 30s. The Web
     # search provider and Web fetch provider
     # menus on the Web search and fetch settings page select a provider for each

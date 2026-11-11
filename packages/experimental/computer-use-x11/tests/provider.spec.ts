@@ -1,6 +1,6 @@
 /** Provider lifecycle, command construction and failure reports with the subprocess boundary mocked. */
 import { PassThrough } from 'node:stream'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import ComputerUseRegistry from '@deepseek-ai/dsh-computer-use'
 import { ComputerUseProviderName } from '@deepseek-ai/dsh-computer-use/brand'
@@ -8,8 +8,15 @@ import type { SubprocessHandle, SubprocessOutcome, SubprocessSpawnSpec } from '@
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import * as X11Provider from '../src/index.ts'
-import { RELEASE_ARGS, resolveInput } from '../src/index.ts'
+import { assertXdotoolArgs, RELEASE_ARGS, resolveInput } from '../src/index.ts'
 import type { ScreenFrame } from '../src/index.ts'
+
+/** Key translation the next tool call uses in place of the real one, so a test can model a translation defect. */
+const translation = vi.hoisted(() => ({ override: undefined as string[] | undefined }))
+vi.mock('../src/keys.ts', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../src/keys.ts')>()
+  return { ...original, translateKeys: (keys: string) => translation.override ?? original.translateKeys(keys) }
+})
 
 interface Behavior {
   stdout?: string | Buffer
@@ -29,12 +36,15 @@ interface Spawned {
 
 let ctx: Context
 let spawned: Spawned[]
+/** The identity each spawn and executable lookup named, in order. */
+let identities: { spawns: (string | undefined)[]; lookups: (string | undefined)[] }
 let missing: Set<string>
 let behave: (argv: readonly string[]) => Behavior
 
 function spawn(spec: SubprocessSpawnSpec): SubprocessHandle {
   spec.signal?.throwIfAborted()
   spawned.push({ argv: spec.argv, env: spec.env, stdin: spec.stdio.stdin })
+  identities.spawns.push(spec.identity)
   const behavior = behave(spec.argv)
   const stdout = new PassThrough()
   const done = Promise.withResolvers<SubprocessOutcome>()
@@ -102,13 +112,15 @@ async function takeFrame(): Promise<void> {
 
 beforeEach(async () => {
   spawned = []
+  identities = { spawns: [], lookups: [] }
   missing = new Set()
   behave = argv => argv[1] === 'getdisplaygeometry' ? { stdout: '1440 900\n' } : {}
   ctx = new Context()
   ctx.provide('subprocess', {
-    resolveExecutable: (command: string) => missing.has(command)
-      ? Promise.reject(new Error('not on PATH'))
-      : Promise.resolve(`/usr/bin/${command}`),
+    resolveExecutable: (command: string, _env: unknown, _signal: unknown, identity?: string) => {
+      identities.lookups.push(identity)
+      return missing.has(command) ? Promise.reject(new Error('not on PATH')) : Promise.resolve(`/usr/bin/${command}`)
+    },
     spawn,
   } as never)
   await ctx.plugin(ComputerUseRegistry)
@@ -117,6 +129,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  translation.override = undefined
   await ctx.fiber.dispose()
 })
 
@@ -161,6 +174,21 @@ describe('provider lifecycle', () => {
     missing.add(command)
     await expect(ctx.plugin(X11Provider, { display: ':1' })).rejects.toThrow(guidance)
     expect(ctx.computerUse.providerName).toBeUndefined()
+  })
+
+  it('runs every command and finds every executable as the configured subprocess identity', async () => {
+    screenshotServices()
+    const fiber = await ctx.plugin(X11Provider, { display: ':1', identity: 'desktop' })
+    behave = () => ({ stdout: 'png' })
+    await call({ action: 'screenshot' })
+    behave = () => ({})
+    await call({ action: 'type', text: 'naïve' })
+    await call({ action: 'click', x: 1, y: 1 })
+    await fiber.dispose()
+    expect(identities.lookups).toEqual(['desktop', 'desktop', 'desktop'])
+    expect(spawned.map(entry => entry.argv[0])).toEqual(['/usr/bin/xdotool', '/usr/bin/import', '/usr/bin/xsel', '/usr/bin/xsel',
+      '/usr/bin/xdotool', '/usr/bin/xdotool', '/usr/bin/xdotool'])
+    expect(identities.spawns).toEqual(Array(7).fill('desktop'))
   })
 
   it('fails loud when the display does not answer', async () => {
@@ -236,6 +264,30 @@ describe('computer tool', () => {
     behave = () => ({ stderr: '(symbol) No such key name \'XF86AudioMute\'. Ignoring it.' })
     await expect(call({ action: 'key', keys: 'ctrl+XF86AudioMute' })).rejects.toThrow('xdotool skipped an unknown key name and sent the other keys')
     expect(spawned.map(entry => entry.argv.slice(1))).toEqual([['key', 'ctrl+XF86AudioMute'], RELEASE_ARGS])
+  })
+
+  it('types ASCII text as one final argument after `type --`, never as options or commands', async () => {
+    const text = '--file /etc/shadow exec xterm\n-- key ctrl+alt+Delete'
+    await expect(call({ action: 'type', text })).resolves.toEqual({ dispatched: true })
+    expect(spawned).toEqual([{ argv: ['/usr/bin/xdotool', 'type', '--delay', '12', '--', text], env: { DISPLAY: ':1', XAUTHORITY: undefined }, stdin: 'ignore' }])
+  })
+
+  it.each<[Record<string, unknown>, string]>([
+    [{ action: 'click', x: 1, y: 1, count: '1 exec' }, '"count" must be an integer'],
+    [{ action: 'click', x: 1, y: 1, count: -1 }, '"count" must be one of [1,2,3]'],
+    [{ action: 'click', x: 1, y: 1, modifiers: ['exec'] }, '"modifiers[0]" must be one of ["ctrl","shift","alt","super"]'],
+    [{ action: 'click', x: 1, y: 1, button: 'exec' }, '"button" must be one of ["left","right","middle"]'],
+    [{ action: 'move', x: 1.5, y: 1 }, '"x" must be an integer'],
+  ])('refuses model input %j that would inject an xdotool argument before running anything', async (args, message) => {
+    await takeFrame()
+    await expect(call(args)).rejects.toThrow(`invalid arguments: ${message}`)
+    expect(spawned).toEqual([])
+  })
+
+  it('refuses an argument list that chains another command even when key translation lets it through', async () => {
+    translation.override = ['Return', 'exec', 'xterm']
+    await expect(call({ action: 'key', keys: 'Return' })).rejects.toThrow('computer-use-x11 refused xdotool arguments: "exec" is not a key name')
+    expect(spawned.map(entry => entry.argv.slice(1))).toEqual([RELEASE_ARGS])
   })
 
   it.each([
@@ -318,7 +370,7 @@ describe('resolveInput', () => {
 
   it('extends the typing deadline by the per-character delay', () => {
     expect(resolveInput({ action: 'type', text: 'abc' }, undefined, config)).toEqual([
-      { program: 'xdotool', args: ['type', '--delay', '10', '--file', '-'], stdin: 'abc', timeoutMs: 1030 },
+      { program: 'xdotool', args: ['type', '--delay', '10', '--', 'abc'], timeoutMs: 1030 },
     ])
   })
 
@@ -334,5 +386,50 @@ describe('resolveInput', () => {
     [{ action: 'key', text: 'a' }, 'key does not accept text'],
   ])('rejects %j', (request, message) => {
     expect(() => resolveInput(request as Parameters<typeof resolveInput>[0], frame, config)).toThrow(message)
+  })
+})
+
+describe('assertXdotoolArgs', () => {
+  it('accepts every argument list this provider builds', () => {
+    const frame: ScreenFrame = { width: 100, height: 50, screenWidth: 1000, screenHeight: 500 }
+    const config = { timeoutMs: 1000, typeDelayMs: 10, dragSteps: 3 }
+    const requests: Parameters<typeof resolveInput>[0][] = [
+      { action: 'click', x: 99, y: 49, button: 'middle', count: 3, modifiers: ['ctrl', 'shift', 'alt', 'super'] },
+      { action: 'move', x: 0, y: 0 },
+      { action: 'drag', x: 0, y: 0, toX: 99, toY: 49, modifiers: ['alt'] },
+      { action: 'scroll', x: 1, y: 1, deltaX: -10, deltaY: 10 },
+      { action: 'type', text: 'exec xterm -- --file -' },
+      { action: 'type', text: 'naïve' },
+      { action: 'key', keys: 'ctrl+shift+t Return F24 KP_Enter + ctrl++ U00E9 é a 7' },
+    ]
+    for (const request of requests) {
+      for (const step of resolveInput(request, frame, config)) if (step.program === 'xdotool') assertXdotoolArgs(step.args)
+    }
+    expect(() => { assertXdotoolArgs(RELEASE_ARGS) }).not.toThrow()
+    expect(() => { assertXdotoolArgs(['getdisplaygeometry']) }).not.toThrow()
+  })
+
+  it.each<[string[], string]>([
+    [['exec', 'xterm'], '"exec" is not a command this provider sends'],
+    [['getdisplaygeometry', 'exec', 'xterm'], '"exec" is not a command this provider sends'],
+    [['mousemove', '1', '2', 'exec', 'xterm'], '"exec" is not a command this provider sends'],
+    [['click', '--repeat', '1', '1', 'search', '--sync', 'x'], '"search" is not a command this provider sends'],
+    [['key', 'Return', 'exec', 'xterm'], '"exec" is not a key name'],
+    [['key', 'Return', 'mousemove', '1', '1'], '"mousemove" is not a key name'],
+    [['keydown', 'ctrl+exec', 'click', '--repeat', '1', '1'], '"ctrl+exec" is not a valid chord argument of keydown'],
+    [['keyup', 'ctrl+'], '"ctrl+" is not a valid chord argument of keyup'],
+    [['key'], 'key is missing its arguments'],
+    [['mousemove', '1'], 'mousemove is missing its arguments'],
+    [['mousemove', '-1', '2'], '"-1" is not a valid number argument of mousemove'],
+    [['mousemove', '1e3', '2'], '"1e3" is not a valid number argument of mousemove'],
+    [['mousemove', '1234567', '2'], '"1234567" is not a valid number argument of mousemove'],
+    [['click', '--repeat', '1', '8'], '"8" is not a valid button argument of click'],
+    [['click', '--delay', '1', '1'], '"--delay" is not a valid --repeat argument of click'],
+    [['type', '--delay', '1', 'text'], '"text" is not a valid -- argument of type'],
+    [['type', '--delay', '1', '--', 'text', 'exec'], '"text" is not a valid text argument of type'],
+    [['type', '--file', '-', '--', 'text'], '"--file" is not a valid --delay argument of type'],
+    [['__proto__'], '"__proto__" is not a command this provider sends'],
+  ])('refuses %j', (args, message) => {
+    expect(() => { assertXdotoolArgs(args) }).toThrow(`computer-use-x11 refused xdotool arguments: ${message}`)
   })
 })

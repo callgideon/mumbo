@@ -64,7 +64,7 @@ it('loads from cordis.yml, maps screenshot pixels to the screen and logs the scr
 printf '%s|%s|%s\\n' "$DISPLAY" "\${XAUTHORITY-unset}" "$*" >> '${log}'
 case "$1" in
   getdisplaygeometry) echo '64 40' ;;
-  type) cat >> '${typed}' ;;
+  type) for last; do :; done; printf '%s' "$last" >> '${typed}' ;;
 esac
 `)
   await writeFile(join(root, 'import'), `#!/bin/sh\ncat '${join(root, 'screen.png')}'\n`)
@@ -103,7 +103,7 @@ esac
     // (10 + 0.5) * 64 / 32 and (5 + 0.5) * 40 / 20, rounded down.
     ':7|/run/x11-fixture/auth|mousemove 21 11 click --repeat 1 1',
     ':7|/run/x11-fixture/auth|key shift+Insert',
-    ':7|/run/x11-fixture/auth|type --delay 12 --file -',
+    ':7|/run/x11-fixture/auth|type --delay 12 -- ok',
   ])
   expect(await readFile(selections, 'utf8')).toBe('--clipboard:héllo ✓\n--primary:héllo ✓\n')
   expect(await readFile(typed, 'utf8')).toBe('ok\n')

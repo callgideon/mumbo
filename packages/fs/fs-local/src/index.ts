@@ -1,6 +1,8 @@
 /**
  * Host-filesystem implementation of `ctx.fs`. Realpath-derived target identity makes aliases
  * share stale guards, and writes through a symlink update its target without replacing the link.
+ * Optional model roots confine model-supplied paths and refuse any path that leaves them
+ * through a symbolic link; optional read-only roots extend reads but refuse every change.
  * @module @deepseek-ai/dsh-fs-local
  */
 
@@ -9,11 +11,17 @@ import type { PatchHunk } from '@deepseek-ai/dsh-fs-patch'
 import { Context } from '@deepseek-ai/cordis'
 import { constants as bufferConstants } from 'node:buffer'
 import { once } from 'node:events'
+import { constants, realpathSync, statSync } from 'node:fs'
+import type { Stats } from 'node:fs'
+import { lstat, open, readlink } from 'node:fs/promises'
+import type { FileHandle } from 'node:fs/promises'
+import { homedir, tmpdir } from 'node:os'
 import { watch } from 'chokidar'
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import z from '@deepseek-ai/schemastery'
-import { FileSystem, FsError, FsVersion } from '@deepseek-ai/dsh-fs'
+import { FileSystem, FsError, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
+import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type {
   FsDeleteOutcome,
   FsMoveOutcome,
@@ -46,7 +54,10 @@ import {
   streamWholeText,
   writeFileAtomic,
 } from './fsio.ts'
-import type { FsIoInternals, PathInfo } from './fsio.ts'
+import type { FsIoInternals, LocalTarget, PathInfo, ReadPin } from './fsio.ts'
+import { mutateInChild } from './child-mutations.ts'
+import type { MutationOutcomes, MutationRequest } from './child-mutations.ts'
+import type {} from '@deepseek-ai/dsh-subprocess'
 
 /** Configuration for the local filesystem backend. */
 export interface Config {
@@ -57,6 +68,102 @@ export interface Config {
    * runtime's safe allocation/decode maximum. Defaults to 10 MiB.
    */
   diffBasisMaxBytes?: number
+  /**
+   * Existing absolute directories the model's file tools are confined to. When set,
+   * {@link LocalFileSystem.resolveModelPath} refuses a real path outside every root, and every
+   * resolution refuses a path under a root whose real path leaves all roots, the symbolic-link
+   * escape. Omitted, model paths are unrestricted.
+   */
+  modelRoots?: string[] | undefined
+  /**
+   * Existing absolute directories the model's file tools may read but never change, such as the
+   * attachment and skill directories the harness names to the model. Requires `modelRoots`, which
+   * they may not overlap. Reads and listings under them are confined exactly as under a model root,
+   * except that a file's link count is not checked, so the run-as user must not be able to write
+   * there; every change whose path lies under one is refused. An entry may not be or contain the
+   * harness home (`DSH_HOME`), nor be, contain, or lie inside a conventional credential store under
+   * the user's home directory.
+   */
+  readOnlyRoots?: string[] | undefined
+}
+
+/** A target reduced to its two fields, as the change helper receives it. */
+function plainTarget(target: FsTarget): FsTarget {
+  return { targetKey: target.targetKey, displayPath: target.displayPath }
+}
+
+/** One model root as configured (for paths written under it) and as its real path. */
+interface ModelRoot {
+  configured: string
+  canonical: string
+}
+
+/** Whether `path` is `root` or lies below it; both are absolute. */
+function isUnder(root: string, path: string): boolean {
+  const rel = relative(root, path)
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+}
+
+/**
+ * Canonicalize configured roots once, failing loudly on an unusable entry.
+ * @param roots - configured absolute directories.
+ * @param platform - the host platform.
+ * @param field - the config field named in a refusal.
+ * @returns each root's configured and real form.
+ */
+function rootsOf(roots: readonly string[], platform: NodeJS.Platform, field: 'modelRoots' | 'readOnlyRoots'): ModelRoot[] {
+  // Reads confirm each opened descriptor through /proc/self/fd, which only Linux provides.
+  if (platform !== 'linux') throw new Error(`fs-local: ${field} requires Linux; this host is ${platform}`)
+  if (roots.length === 0) {
+    throw new Error(`fs-local: ${field} must list at least one directory; omit it to ${field === 'modelRoots' ? 'leave model paths unrestricted' : 'add none'}`)
+  }
+  return roots.map((root) => {
+    if (!isAbsolute(root)) throw new Error(`fs-local: ${field} entry ${JSON.stringify(root)} must be an absolute path`)
+    let canonical: string
+    try {
+      canonical = realpathSync.native(root)
+    } catch (error) {
+      throw new Error(`fs-local: ${field} entry ${JSON.stringify(root)} must be an existing directory: ${(error as Error).message}`, { cause: error })
+    }
+    if (!statSync(canonical).isDirectory()) throw new Error(`fs-local: ${field} entry ${JSON.stringify(root)} must be an existing directory`)
+    return { configured: resolve(root), canonical }
+  })
+}
+
+/**
+ * Open flags of a directory descriptor the model path walk holds: `O_PATH` (Linux, where model roots run), which
+ * needs no read permission and reads nothing, and `O_DIRECTORY`.
+ */
+const DIRECTORY_PATH = 0o10000000 | constants.O_DIRECTORY
+
+/** Conventional credential stores under the user's home directory that no read-only root may be, contain, or lie inside. */
+const CREDENTIAL_STORES = ['.ssh', '.gnupg', '.aws', '.azure', '.config/gcloud', '.config/gh', '.docker', '.kube', '.netrc', '.git-credentials', '.npmrc', '.pypirc']
+
+/**
+ * Canonicalize the read-only roots, refusing one that exposes the harness home or a credential
+ * store. The harness keeps its own credential file directly in its home, so no root inside the
+ * home holds it.
+ * @param roots - configured absolute directories.
+ * @param platform - the host platform.
+ * @returns each root's configured and real form.
+ */
+function readOnlyRootsOf(roots: readonly string[], platform: NodeJS.Platform): ModelRoot[] {
+  const resolved = rootsOf(roots, platform, 'readOnlyRoots')
+  // A home that does not exist is compared by its written path.
+  const real = (path: string): string => { try { return realpathSync.native(path) } catch { return resolve(path) } }
+  const dshHome = real(resolveDshHome())
+  const home = real(homedir())
+  for (const root of resolved) {
+    if (isUnder(root.canonical, dshHome)) {
+      throw new Error(`fs-local: readOnlyRoots entry ${JSON.stringify(root.configured)} must not be or contain the harness home ${JSON.stringify(dshHome)}; list the directories inside it that the model reads`)
+    }
+    const store = CREDENTIAL_STORES.map(name => join(home, name))
+      .find(path => isUnder(root.canonical, path) || isUnder(path, root.canonical))
+    if (store !== undefined) {
+      throw new Error(`fs-local: readOnlyRoots entry ${JSON.stringify(root.configured)} must not be, contain, or lie inside the credential store ${JSON.stringify(store)}`)
+    }
+  }
+  return resolved
 }
 
 type ResolvedConfig = Required<Config>
@@ -99,10 +206,18 @@ export class LocalFileSystem extends FileSystem {
   static Config: z<Config> = z.object({
     cwd: z.string().default(process.cwd()),
     diffBasisMaxBytes: z.number().default(DEFAULT_DIFF_BASIS_MAX_BYTES),
+    modelRoots: z.union([z.array(String), z.const(undefined)]),
+    readOnlyRoots: z.union([z.array(String), z.const(undefined)]),
   })
 
   /** Validated config (schemastery applied the defaults before construction). */
   readonly config: ResolvedConfig
+  /** Every root model paths are confined to, model and read-only; undefined leaves them unrestricted. */
+  private readonly modelRoots: readonly ModelRoot[] | undefined
+  /** The roots under which every change is refused. */
+  private readonly readOnlyRoots: readonly ModelRoot[]
+  /** With model roots, every read and listing opens its target once and accepts only the resolved file. */
+  private readonly readPin: ReadPin | undefined
   /** Test hook forwarded to fsio for atomic-publication boundaries. */
   internals: FsIoInternals = {}
   /** Per-targetKey tail promise: serializes mutating ops so the read→guard→write
@@ -119,6 +234,62 @@ export class LocalFileSystem extends FileSystem {
       throw new Error(`fs-local: diffBasisMaxBytes must be a positive safe integer no greater than ${MAX_DIFF_BASIS_BYTES}`)
     }
     this.config = resolved
+    if (resolved.readOnlyRoots !== undefined && resolved.modelRoots === undefined) {
+      throw new Error('fs-local: readOnlyRoots requires modelRoots; without them model paths are unrestricted')
+    }
+    const writable = resolved.modelRoots === undefined ? undefined : rootsOf(resolved.modelRoots, process.platform, 'modelRoots')
+    const readOnly = this.readOnlyRoots = resolved.readOnlyRoots === undefined ? []
+      : readOnlyRootsOf(resolved.readOnlyRoots, process.platform)
+    // Reads under a read-only root skip the link-count rule, which is sound only where the model's shell cannot write.
+    for (const root of readOnly) {
+      const overlap = writable?.find(other => isUnder(other.canonical, root.canonical) || isUnder(root.canonical, other.canonical))
+      if (overlap !== undefined) throw new Error(`fs-local: readOnlyRoots entry ${JSON.stringify(root.configured)} must not overlap modelRoots entry ${JSON.stringify(overlap.configured)}`)
+    }
+    this.modelRoots = writable === undefined ? undefined : [...writable, ...readOnly]
+    const roots = this.modelRoots
+    // This process keeps its own temporary files there, among them the module cache of the run-as bootstrap.
+    const temporary = realpathSync.native(tmpdir())
+    if (roots?.some(root => isUnder(root.canonical, temporary)) === true) {
+      throw new Error(`fs-local: modelRoots and readOnlyRoots must not contain this process's temporary directory ${JSON.stringify(temporary)}; start dsh with TMPDIR set to a root-only directory such as /root/.dsh/tmp`)
+    }
+    this.readPin = roots === undefined ? undefined : (opened: string, target: LocalTarget, info: Stats) => {
+      if (opened !== target.targetKey) {
+        // A link swapped in after resolution: the descriptor names another file than the one resolved.
+        if (!roots.some(root => isUnder(root.canonical, opened))) throw this.outsideRoots(roots, target.displayPath)
+        throw new FsError(`cannot read "${target.displayPath}": the path changed while it was being opened`, 'FS_STALE_VERSION')
+      }
+      // A hard link has no path of its own to check; one the run-as user does not own may lead to a file it could not read.
+      const identity = this.ctx.get('subprocess')?.childIdentity
+      if (identity !== undefined && info.isFile() && info.nlink > 1 && info.uid !== identity.uid
+        && !readOnly.some(root => isUnder(root.canonical, opened))) {
+        throw this.outsideRoots(roots, target.displayPath)
+      }
+    }
+  }
+
+  /**
+   * Refuse a change under a read-only root, then select the child that performs it, when the
+   * subprocess provider runs children as a separate identity: the kernel then judges every
+   * model-chosen path with that identity's permissions. With model roots and no subprocess
+   * provider mounted, changes are refused rather than performed by this process.
+   * @param verb - the operation named in a refusal.
+   * @param targets - every path the change writes or removes.
+   * @returns the child runner, or undefined to mutate in this process.
+   */
+  private childMutation(verb: string, ...targets: FsTarget[]): (<K extends MutationRequest['op']>(request: Extract<MutationRequest, { op: K }>, signal?: AbortSignal) => Promise<MutationOutcomes[K]>) | undefined {
+    const readOnly = this.readOnlyRoots
+    const underReadOnly = (target: FsTarget): boolean =>
+      readOnly.some(root => isUnder(root.canonical, target.targetKey) || isUnder(root.configured, target.displayPath))
+    if (targets.some(underReadOnly)) {
+      throw new FsError(`cannot ${verb}: it is in a directory you can only read (${readOnly.map(root => root.configured).join(', ')})`, 'FS_OUTSIDE_ROOTS')
+    }
+    const subprocess = this.ctx.get('subprocess')
+    if (subprocess === undefined) {
+      if (this.modelRoots !== undefined) throw new FsError(`cannot ${verb}: no process provider is mounted to make the change as the run-as user`, 'FS_IO_ERROR')
+      return undefined
+    }
+    if (subprocess.childIdentity === undefined) return undefined
+    return (request, signal) => mutateInChild(subprocess, request, this.config.diffBasisMaxBytes, signal)
   }
 
   /** Run one mutation under the same lock ordering as multi-target operations. */
@@ -145,11 +316,124 @@ export class LocalFileSystem extends FileSystem {
     return acquire(0)
   }
 
-  override async resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget> {
+  override async resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal; unconfined?: boolean }): Promise<FsTarget> {
     if (opts?.signal?.aborted) throw new FsError('resolve aborted', 'FS_ABORTED')
     const local = await resolveLocalTarget(opts?.cwd ?? this.config.cwd, expandHomePrefix(path))
     if (opts?.signal?.aborted) throw new FsError('resolve aborted', 'FS_ABORTED')
+    const roots = this.modelRoots
+    // The model can create symbolic links under its roots, so no harness reader follows one out of them.
+    if (roots !== undefined && opts?.unconfined !== true && this.underRoots(roots, local.displayPath)
+      && !roots.some(root => isUnder(root.canonical, local.targetKey))) {
+      throw this.outsideRoots(roots, local.displayPath)
+    }
     return { targetKey: local.targetKey, displayPath: local.displayPath }
+  }
+
+  /** Whether a path as written lies under a root, by its configured or real spelling. */
+  private underRoots(roots: readonly ModelRoot[], displayPath: string): boolean {
+    return roots.some(root => isUnder(root.configured, displayPath) || isUnder(root.canonical, displayPath))
+  }
+
+  /**
+   * Resolve like {@link resolve}, then refuse a real path outside every configured model root. With roots, the path is
+   * resolved by {@link walkModelPath}, so whether it leads outside, and whether it fails, comes from one walk that never
+   * examines a name outside the roots.
+   * @param path - the model-supplied path; relative paths resolve against `opts.cwd`.
+   * @param opts - optional cwd override and cancellation signal.
+   * @returns the stable target, under a model root when roots are configured.
+   */
+  override async resolveModelPath(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget> {
+    const roots = this.modelRoots
+    if (roots === undefined) return this.resolve(path, opts)
+    if (opts?.signal?.aborted) throw new FsError('resolve aborted', 'FS_ABORTED')
+    if (path.trim().length === 0) throw new FsError('file_path must be a non-empty string', 'FS_NOT_FOUND')
+    const displayPath = localDisplayPath(opts?.cwd ?? this.config.cwd, expandHomePrefix(path))
+    const targetKey = await this.walkModelPath(roots, displayPath)
+    if (!roots.some(root => isUnder(root.canonical, targetKey))) throw this.outsideRoots(roots, displayPath)
+    return { targetKey: FsTargetKey(targetKey), displayPath }
+  }
+
+  /**
+   * Resolve an absolute path one name at a time from the filesystem root, following links and `..` as the kernel does,
+   * and refuse before examining any name that is neither under a root nor on the way to one. The same walk decides where
+   * the path leads and how it fails, and it holds a descriptor of each directory it enters and examines the next name
+   * only within that directory, never following a link it has not read: a directory the model's shell swaps for a link,
+   * or a link it repoints, between two steps changes only which way the walk goes, so no outcome depends on what exists
+   * outside the roots. A name that changes between being examined and entered is examined again. A missing name ends the
+   * walk with the rest appended, as a target to create; a final link is followed, dangling or not.
+   * @returns the real path the walk reached.
+   */
+  private async walkModelPath(roots: readonly ModelRoot[], displayPath: string): Promise<string> {
+    const notFound = (why: string) => new FsError(`cannot resolve "${displayPath}": ${why}`, 'FS_NOT_FOUND')
+    // Under a root by its real path, or a directory a root's configured or real spelling passes through.
+    const reachable = (path: string) =>
+      roots.some(root => isUnder(root.canonical, path) || isUnder(path, root.canonical) || isUnder(path, root.configured))
+    const names = (path: string) => path.split(sep).filter(name => name !== '' && name !== '.')
+    const pending = names(displayPath)
+    // The directories entered, the filesystem root first; `..` returns to the one entered before.
+    const held: { path: string; handle: FileHandle }[] = [{ path: sep, handle: await open(sep, DIRECTORY_PATH) }]
+    // The filesystem root stays held until the walk ends, so the list is never empty.
+    const current = () => held.at(-1) as (typeof held)[number]
+    // A name within the held directory, never a path the kernel would walk again from the root.
+    const within = (name: string) => `/proc/self/fd/${String(current().handle.fd)}/${name}`
+    const leave = async (keep: number) => { for (const { handle } of held.splice(keep)) await handle.close() }
+    try {
+      // `links` counts links followed, the kernel's own limit for one lookup; `changes` counts names examined again.
+      for (let links = 0, changes = 0, name = pending.shift(); name !== undefined; name = pending.shift()) {
+        if (name === '..') {
+          await leave(Math.max(1, held.length - 1))
+          continue
+        }
+        const next = join(current().path, name)
+        if (!reachable(next)) throw this.outsideRoots(roots, displayPath)
+        const again = () => {
+          if (++changes > 40) throw notFound('it kept changing while it was resolved')
+          pending.unshift(name)
+        }
+        let info: Stats
+        try {
+          info = await lstat(within(name))
+        } catch (error: unknown) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+          if (pending.includes('..')) throw notFound('parent traversal crosses a missing directory')
+          return join(next, ...pending)
+        }
+        if (info.isSymbolicLink()) {
+          let target: string
+          try {
+            target = await readlink(within(name))
+          } catch (error: unknown) {
+            // The link was replaced or removed after it was examined.
+            if (!['EINVAL', 'ENOENT'].includes(String((error as NodeJS.ErrnoException).code))) throw error
+            again()
+            continue
+          }
+          if (++links > 40) throw notFound('too many levels of symbolic links')
+          pending.unshift(...names(target))
+          if (isAbsolute(target)) await leave(1)
+          continue
+        }
+        if (pending.length === 0) return next
+        if (!info.isDirectory()) throw notFound('a parent path segment is not a directory')
+        try {
+          held.push({ path: next, handle: await open(within(name), DIRECTORY_PATH | constants.O_NOFOLLOW) })
+        } catch (error: unknown) {
+          // The directory was replaced, by a link or a file, or removed after it was examined.
+          if (!['ENOTDIR', 'ELOOP', 'ENOENT'].includes(String((error as NodeJS.ErrnoException).code))) throw error
+          again()
+        }
+      }
+      return current().path
+    } finally {
+      await leave(0)
+    }
+  }
+
+  private outsideRoots(roots: readonly ModelRoot[], displayPath: string): FsError {
+    return new FsError(
+      `cannot access "${displayPath}": its real path is outside the directories you can access (${roots.map(root => root.configured).join(', ')})`,
+      'FS_OUTSIDE_ROOTS',
+    )
   }
 
   override processPath(target: FsTarget): string {
@@ -165,8 +449,7 @@ export class LocalFileSystem extends FileSystem {
   }
 
   override contains(parent: FsTarget, child: FsTarget): boolean {
-    const path = relative(this.processPath(parent), this.processPath(child))
-    return path === '' || (path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path))
+    return isUnder(this.processPath(parent), this.processPath(child))
   }
 
   override async stat(target: FsTarget, signal?: AbortSignal): Promise<FsInfo | undefined> {
@@ -188,24 +471,34 @@ export class LocalFileSystem extends FileSystem {
   }
 
   override async readText(target: FsTarget, signal?: AbortSignal): Promise<string> {
-    return readWholeText({ displayPath: target.displayPath, targetKey: target.targetKey }, signal)
+    return readWholeText({ displayPath: target.displayPath, targetKey: target.targetKey }, signal, this.readPin)
   }
 
   override streamText(target: FsTarget, signal?: AbortSignal): Promise<AsyncIterable<string>> {
-    return Promise.resolve(streamWholeText({ displayPath: target.displayPath, targetKey: target.targetKey }, signal))
+    return Promise.resolve(streamWholeText({ displayPath: target.displayPath, targetKey: target.targetKey }, signal, this.readPin))
   }
 
   override async readBytes(target: FsTarget, signal: AbortSignal | undefined, maxBytes: number): Promise<Uint8Array> {
-    return readWholeBytes({ displayPath: target.displayPath, targetKey: target.targetKey }, signal, maxBytes, this.internals)
+    return readWholeBytes({ displayPath: target.displayPath, targetKey: target.targetKey }, signal, maxBytes, this.internals, this.readPin)
   }
 
   override async readByteRange(target: FsTarget, range: { offset: number; length: number }, signal?: AbortSignal): Promise<Uint8Array> {
-    return readByteWindow({ displayPath: target.displayPath, targetKey: target.targetKey }, range, signal)
+    return readByteWindow({ displayPath: target.displayPath, targetKey: target.targetKey }, range, signal, this.readPin)
   }
 
   override async listDir(target: FsTarget, signal?: AbortSignal): Promise<FsDirEntry[]> {
-    const entries = await listDirectory({ displayPath: target.displayPath, targetKey: target.targetKey }, signal)
-    return entries.map(entry => ({
+    const entries = await listDirectory({ displayPath: target.displayPath, targetKey: target.targetKey }, signal, this.readPin)
+    const roots = this.modelRoots
+    // A child under a root whose real path leaves every root is reported as an opaque entry: no type,
+    // size, or version, and a target that is its own in-root path, which no read accepts.
+    const escapes = (entry: (typeof entries)[number]): boolean => roots !== undefined
+      && roots.some(root => isUnder(root.canonical, target.targetKey))
+      && !roots.some(root => isUnder(root.canonical, entry.target.targetKey))
+    return entries.map(entry => escapes(entry) ? {
+      name: entry.name,
+      type: 'other' as const,
+      target: { targetKey: FsTargetKey(join(target.targetKey, entry.name)), displayPath: entry.target.displayPath },
+    } : ({
       name: entry.name,
       type: entry.type,
       target: { targetKey: entry.target.targetKey, displayPath: entry.target.displayPath },
@@ -214,7 +507,12 @@ export class LocalFileSystem extends FileSystem {
     }))
   }
 
-  override makeDirectory(target: FsTarget, signal?: AbortSignal): Promise<void> {
+  override async makeDirectory(target: FsTarget, signal?: AbortSignal): Promise<void> {
+    const child = this.childMutation(`create directory "${target.displayPath}"`, target)
+    if (child !== undefined) {
+      await child({ op: 'mkdir', target: { targetKey: target.targetKey, displayPath: target.displayPath } }, signal)
+      return
+    }
     return createDirectory({ displayPath: target.displayPath, targetKey: target.targetKey }, signal)
   }
 
@@ -224,6 +522,10 @@ export class LocalFileSystem extends FileSystem {
     expected?: FsWriteIntent,
     signal?: AbortSignal,
   ): Promise<FsWriteOutcome> {
+    const child = this.childMutation(`write "${target.displayPath}"`, target)
+    if (child !== undefined) {
+      return this.withLock(target.targetKey, () => child({ op: 'write', target: plainTarget(target), content, ...expected === undefined ? {} : { expected } }, signal))
+    }
     return this.withLock(target.targetKey, async () => {
       const existing = await this.writeTarget(target, expected)
 
@@ -258,6 +560,10 @@ export class LocalFileSystem extends FileSystem {
     expected?: { version: FsVersion },
     signal?: AbortSignal,
   ): Promise<FsEditOutcome> {
+    const child = this.childMutation(`edit "${target.displayPath}"`, target)
+    if (child !== undefined) {
+      return this.withLock(target.targetKey, () => child({ op: 'edit', target: plainTarget(target), edit, ...expected === undefined ? {} : { expected } }, signal))
+    }
     return this.withLock(target.targetKey, async () => {
       const existing = await probe(target.targetKey)
       // Stale guard before literal matching: an edit based on an old read reports
@@ -291,6 +597,10 @@ export class LocalFileSystem extends FileSystem {
   override async patchText(
     target: FsTarget, hunks: readonly PatchHunk[], expected?: { version: FsVersion }, signal?: AbortSignal,
   ): Promise<FsEditOutcome> {
+    const child = this.childMutation(`patch "${target.displayPath}"`, target)
+    if (child !== undefined) {
+      return this.withLock(target.targetKey, () => child({ op: 'patch', target: plainTarget(target), hunks, ...expected === undefined ? {} : { expected } }, signal))
+    }
     return this.withLock(target.targetKey, async () => {
       const existing = await this.requireFile(target, expected, 'patch')
       const original = await readForEdit(target.targetKey, target.displayPath, signal)
@@ -302,6 +612,10 @@ export class LocalFileSystem extends FileSystem {
   }
 
   override async deleteFile(target: FsTarget, expected?: { version: FsVersion }, signal?: AbortSignal): Promise<FsDeleteOutcome> {
+    const child = this.childMutation(`delete "${target.displayPath}"`, target)
+    if (child !== undefined) {
+      return this.withLock(target.targetKey, () => child({ op: 'delete', target: plainTarget(target), ...expected === undefined ? {} : { expected } }, signal))
+    }
     return this.withLock(target.targetKey, async () => {
       await this.requireFile(target, expected, 'delete')
       const before = await readTextForDiff(target.targetKey, this.config.diffBasisMaxBytes, signal)
@@ -317,6 +631,11 @@ export class LocalFileSystem extends FileSystem {
   ): Promise<FsMoveOutcome> {
     if (source.targetKey === destination.targetKey) {
       throw new FsError(`cannot move "${source.displayPath}" to itself`, 'FS_SAME_TARGET')
+    }
+    const child = this.childMutation(`move "${source.displayPath}"`, source, destination)
+    if (child !== undefined) {
+      const request = { op: 'move' as const, source: plainTarget(source), destination: plainTarget(destination), options }
+      return this.withLocks([source.targetKey, destination.targetKey], () => child(request, signal))
     }
     return this.withLocks([source.targetKey, destination.targetKey], async () => {
       const sourceInfo = await this.requireFile(source, options.expectedSource, 'move')

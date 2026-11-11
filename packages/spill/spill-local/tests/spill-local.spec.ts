@@ -149,6 +149,16 @@ describe('LocalSpillStore service', () => {
     expect(ref.retrievalHint).toBe('Use read with offset/limit, or grep this path to search within it.')
   })
 
+  it.skipIf(process.platform === 'win32')('lets a set-group-ID root\'s group read spill files when groupReadable is set', async () => {
+    chmodSync(root, 0o2750)
+    const ctx = new Context()
+    await ctx.plugin(LocalSpillStore, { root, cleanupPeriodDays: 0, groupReadable: true })
+    const ref = await ctx.spillStore.saveText(request())
+    expect(statSync(dirname(ref.locator)).mode & 0o7777).toBe(0o2750)
+    expect(statSync(ref.locator).mode & 0o7777).toBe(0o640)
+    expect(statSync(ref.locator).gid).toBe(statSync(root).gid)
+  })
+
   it('resolves a relative configured root to absolute', async () => {
     const ctx = new Context()
     await ctx.plugin(LocalSpillStore, { root: '.', cleanupPeriodDays: 0 })

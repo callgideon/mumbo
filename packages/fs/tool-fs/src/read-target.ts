@@ -21,7 +21,7 @@ export async function resolveRegularReadTarget(
   exec: ToolExecution,
   requestedPath: string,
 ): Promise<{ target: FsTarget; info: FsInfo }> {
-  const target = await ctx.fs.resolve(requestedPath, await sessionResolveOptions(ctx, exec))
+  const target = await ctx.fs.resolveModelPath(requestedPath, await sessionResolveOptions(ctx, exec))
   const info = await ctx.fs.stat(target, exec.signal)
   if (info === undefined) {
     ctx.emit('fs/observed', target, { kind: 'absent' }, exec)

@@ -1,8 +1,8 @@
 /** Private shell lifecycle files; ordinary output never authorizes terminal reclamation. */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { chmodSync, chownSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import type { SubprocessTerminalActivity, SubprocessTerminalSpawnSpec } from '@deepseek-ai/dsh-subprocess'
+import type { RunAsIdentity } from './run-as.ts'
 
 function quote(value: string): string { return `'${value.replaceAll("'", "'\\''")}'` }
 
@@ -55,17 +55,29 @@ export class ShellActivity {
  * @param spec - terminal request; custom arguments and wrapped executables remain unmodified.
  * @param env - scrubbed target environment.
  * @param platform - execution platform.
+ * @param parent - directory that receives the record directory; the provider's `shellActivityDirectory`.
+ * @param runAs - the identity the shell runs as; it may then traverse the directory, read the
+ *   startup file, and write only the two record files.
  * @returns private integration, or undefined for unsupported launches.
  */
 export function prepareShellActivity(
-  spec: SubprocessTerminalSpawnSpec, env: Record<string, string>, platform: NodeJS.Platform,
+  spec: SubprocessTerminalSpawnSpec, env: Record<string, string>, platform: NodeJS.Platform, parent: string, runAs?: RunAsIdentity,
 ): ShellActivity | undefined {
   if (spec.shellActivity !== true || platform === 'win32' || spec.argv.length !== 2 || spec.argv[1] !== '-i') return undefined
   const shell = basename(spec.argv[0] as string)
   if (shell !== 'bash' && shell !== 'zsh') return undefined
-  const directory = mkdtempSync(join(tmpdir(), 'dsh-shell-'))
+  const directory = mkdtempSync(join(parent, 'dsh-shell-'))
   const state = quote(join(directory, 'state'))
   const guards = quote(join(directory, 'guards'))
+  // The directory stays owned by this process, so a run-as shell can neither add nor replace entries in it.
+  const shareWith = (identity: RunAsIdentity, startupFile: string): void => {
+    chmodSync(directory, 0o711)
+    chmodSync(startupFile, 0o644)
+    for (const record of ['state', 'guards']) {
+      writeFileSync(join(directory, record), '', { mode: 0o600, flag: 'wx' })
+      chownSync(join(directory, record), identity.uid, identity.gid)
+    }
+  }
   try {
     if (shell === 'bash') {
       const rc = join(directory, 'bashrc')
@@ -93,6 +105,7 @@ export function prepareShellActivity(
         'fi',
         '',
       ].join('\n'), { mode: 0o600, flag: 'wx' })
+      if (runAs !== undefined) shareWith(runAs, rc)
       return new ShellActivity(directory, [spec.argv[0] as string, '--rcfile', rc, '-i'], env)
     }
     writeFileSync(join(directory, '.zshenv'), [
@@ -123,6 +136,7 @@ export function prepareShellActivity(
       'precmd_functions+=(__dsh_shell_init)',
       '',
     ].join('\n'), { mode: 0o600, flag: 'wx' })
+    if (runAs !== undefined) shareWith(runAs, join(directory, '.zshenv'))
     return new ShellActivity(directory, spec.argv, { ...env, ZDOTDIR: directory })
   } catch (error) {
     rmSync(directory, { recursive: true, force: true })

@@ -40,6 +40,7 @@ Loading the plugin with no config is safe: files land in a lazily-created privat
 |---|---|---|
 | `root` | private 0700 temp dir | Root directory for spill files; set to keep them under a known location |
 | `cleanupPeriodDays` | `30` | File age in days before the one-shot startup cleanup may delete it; `0` disables cleanup |
+| `groupReadable` | `false` | Create session directories `0750` and files `0640` instead of `0700` and `0600`, so the root's group may read spill files but not change them. A contained box sets `root` to a directory owned by root with the run-as user's group and the set-group-ID bit (`install -d -o root -g agent -m 2750 /var/lib/mumbo/spill`), so the model's shell can read the files results name |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-spill-local) is the exhaustive source for every accepted field.
 
@@ -74,7 +75,7 @@ This section explains the design decisions behind the backend; the observable be
 
 ### Design philosophy
 
-The backend owns storage details only, on one principle: **a spilled artifact must be private and unredirectable**. The root is private (0700), the session directory is a stable hash, the leaf name is unpredictable, and the write is exclusive and owner-only. The storage mechanics live in a Cordis-free module so they are unit-testable without a context.
+The backend owns storage details only, on one principle: **a spilled artifact must be private and unredirectable**. The root is private (0700), the session directory is a stable hash, the leaf name is unpredictable, and the write is exclusive and owner-only; `groupReadable` widens reading to the root's group alone. The storage mechanics live in a Cordis-free module so they are unit-testable without a context.
 
 ### Source map
 

@@ -38,6 +38,8 @@ class TestFileSystem extends FileSystem {
   override watch(): never { throw new Error('Fixture does not support watching') }
   listDirCalls = 0
   failResolvePaths = new Set<string>()
+  /** Paths the provider refuses as leaving the model roots, as a planted link does. */
+  outsideResolvePaths = new Set<string>()
   failStatPaths = new Set<string>()
   failListDirPaths = new Set<string>()
   errorResolvePaths = new Set<string>()
@@ -51,6 +53,7 @@ class TestFileSystem extends FileSystem {
 
   override async resolve(path: string): Promise<FsTarget> {
     if (this.failResolvePaths.has(path)) throw new FsError('resolve failed', 'FS_NOT_FOUND')
+    if (this.outsideResolvePaths.has(path)) throw new FsError('cannot access: outside the roots', 'FS_OUTSIDE_ROOTS')
     if (this.errorResolvePaths.has(path)) throw new Error('resolve temporarily failed')
     return { targetKey: path as never, displayPath: path }
   }
@@ -488,6 +491,9 @@ describe('FileSystemSkillProvider', () => {
     await ctx.plugin(TestFileSystem)
     const fs = ctx.fs as TestFileSystem
     fs.failResolvePaths.add(join(root, 'resolve-fail.md'))
+    // A skill file the model linked out of its directories is skipped, not a failure of the root.
+    await writeFlatSkill(root, 'outside-link', 'Outside link')
+    fs.outsideResolvePaths.add(join(root, 'outside-link.md'))
     fs.failStatPaths.add(join(root, 'stat-fail.md'))
     fs.failResolvePaths.add(join(nestedCwd, '.git'))
     fs.failStatPaths.add(join(project, 'packages/.git'))

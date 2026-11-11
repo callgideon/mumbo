@@ -70,7 +70,7 @@ A successful navigation returns normalized locations, and hover returns normaliz
 
 ### Security boundary
 
-This provider trusts its configured server and adds no sandbox confinement; the server receives the filesystem and process authority of the mounted execution world. It rejects query sources that are missing, non-regular, non-UTF-8, oversized, or canonically outside the workspace before server startup. Result locations may point outside the workspace, but an external path can never become a query source. Mount filesystem and subprocess providers for the same execution world — a split-world composition is invalid.
+This provider trusts its configured server and adds no sandbox confinement; the server receives the filesystem and process authority of the mounted execution world. It rejects query sources that are missing, non-regular, non-UTF-8, oversized, or canonically outside the workspace before server startup. A query source resolves through the filesystem provider's `resolveModelPath`, so under model roots a source outside them is rejected too, and a run-as subprocess provider starts the server as its non-root user. Result locations may point outside the workspace, but an external path can never become a query source. Mount filesystem and subprocess providers for the same execution world — a split-world composition is invalid.
 
 -----
 

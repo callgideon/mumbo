@@ -13,7 +13,7 @@ vi.mock('../src/app/runtime.ts', () => ({ Runtime: class {
 /** Simulate the Cordis loader updating a volatile configuration reference in place. */
 const commit = (reference: unknown, value: unknown) => { (reference as Record<symbol, (value: unknown) => void>)[Symbol.for('cosmokit.volatile.write')]!(value) }
 
-function context() {
+function context(childIdentity?: { uid: number; gid: number; groups: number[] }) {
   const handlers = new Map<string, () => void>()
   const configure = vi.fn(() => () => {})
   const describe = vi.fn(() => [])
@@ -24,6 +24,7 @@ function context() {
     fiber: { restart: vi.fn(async () => {}) },
     get: vi.fn((name: string) => name === 'settings' ? { describe } : undefined),
     logger: { info: vi.fn(), error: vi.fn() },
+    subprocess: { childIdentity },
   }
   return { ctx, handlers, configure, describe }
 }
@@ -52,6 +53,12 @@ it('asks DSH to read its settings entry again once a restart it started finished
   expect(describe).not.toHaveBeenCalled()
   finish()
   await vi.waitFor(() => { expect(describe).toHaveBeenCalledTimes(1) })
+})
+
+it('refuses to start under a run-as subprocess provider without a worker directory or the orchestrator\'s gh configuration', async () => {
+  const { ctx } = context({ uid: 1001, gid: 1001, groups: [] })
+  await expect(apply(ctx as never, Config({ stateDir: '/srv/state' }))).rejects.toThrow('workerDirectory must be set under a run-as subprocess provider')
+  expect(ctx.on).not.toHaveBeenCalled()
 })
 
 it('refuses keys of the previous configuration before registering anything', async () => {

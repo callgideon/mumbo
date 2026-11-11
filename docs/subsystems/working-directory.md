@@ -35,7 +35,18 @@ One owner for each Session's effective directory and its model-visible changes.
 get(session: Session): string
 
 /**
- * Validate the current directory and restore the original project when it disappeared.
+ * Read who chose the committed directory, without filesystem I/O.
+ * @param session - Session whose directory is requested.
+ * @returns `'host'` for the original project and directories the person or the harness set; `'model'` otherwise,
+ * including directories recorded before the log named a chooser.
+ */
+chooser(session: Session): 'model' | 'host'
+
+/**
+ * Validate the current directory and restore the original project when it disappeared or, when the model chose it,
+ * lies outside the model roots, so no directory reader follows a directory the model may not access. A directory the
+ * person or the harness chose is kept wherever it is, except that one under a model root whose real path now leaves
+ * the roots is not followed either.
  * A missing original project is recreated empty through the filesystem provider and logged;
  * files it held are not restored. Every Session in this process that was created before the
  * recreation and works in, or falls back to, that project is told once.
@@ -52,11 +63,24 @@ ensure(agent: Agent, signal?: AbortSignal): Promise<string>
  * @param agent - live or unpublished Agent owning the Session.
  * @param path - absolute path or a path relative to its current directory.
  * @param signal - cancellation before the durable change.
+ * @param chooser - who chose `path`: `'model'` resolves it through `fs.resolveModelPath`, so a directory outside the
+ * model roots is refused; `'host'`, the person or the harness, resolves it unconfined and records it as theirs, so
+ * {@link ensure} keeps it.
  * @returns the canonical absolute directory, committed before fulfillment.
  * A notice failure is warned; the next request still receives the committed directory.
- * @throws when the requested path is not an existing directory.
+ * @throws when the requested path is not an existing directory, or a model-chosen one lies outside the model roots.
  */
-set(agent: Agent, path: string, signal?: AbortSignal): Promise<string>
+set(agent: Agent, path: string, signal?: AbortSignal, chooser: 'model' | 'host' = 'host'): Promise<string>
+
+/**
+ * Resolve a directory the model chose for another Session, such as a subagent's, without changing this one.
+ * @param agent - live Agent whose current directory anchors a relative `path`.
+ * @param path - absolute path or a path relative to the Agent's current directory.
+ * @param signal - cancellation for filesystem inspection.
+ * @returns the canonical absolute directory.
+ * @throws when `path` is not an existing directory or lies outside the model roots.
+ */
+async resolveModelDirectory(agent: Agent, path: string, signal?: AbortSignal): Promise<string>
 ```
 
 Types: [Agent](core.md) · [Session](session.md)

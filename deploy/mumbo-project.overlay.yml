@@ -226,9 +226,16 @@
 # neither, the agent CLI must be signed in to a user account. edge is where relay replies go: the edge's MCP endpoint for
 # boxes (MUMBO_EDGE_MCP_URL), the file holding this box's token, which the edge writes (MUMBO_EDGE_TOKEN_FILE), and this
 # project's id (MUMBO_PROJECT_ID); with only some of them set, the plugin fails at load. With none, relay replies wait.
+# Under agent containment (B24) the box's start script exports MUMBO_WORK_DIR, MUMBO_WORKER_DIR and MUMBO_GH_CONFIG_DIR,
+# the ticket work directory, the root-owned worker directory and the orchestrator's GH_CONFIG_DIR, which the plugin
+# requires under a run-as subprocess provider; each key is set only when its variable is, so a box without containment
+# keeps the defaults.
 - id: dsh-superagent
   config:
     stateDir: !!js dshHomePath('superagent')
+    workDirectory: !!js process.env.MUMBO_WORK_DIR || undefined
+    workerDirectory: !!js process.env.MUMBO_WORKER_DIR || undefined
+    ghConfigDirectory: !!js process.env.MUMBO_GH_CONFIG_DIR || undefined
     panelAdmins: !!js (process.env.MUMBO_PANEL_ADMINS ?? '').split(',').filter(Boolean)
     githubApp: !!js "process.env.MUMBO_GITHUB_APP_LOGIN || process.env.MUMBO_GITHUB_APP_USER_ID ? { login: process.env.MUMBO_GITHUB_APP_LOGIN, userId: Number(process.env.MUMBO_GITHUB_APP_USER_ID) } : undefined"
     edge: !!js "process.env.MUMBO_EDGE_MCP_URL || process.env.MUMBO_EDGE_TOKEN_FILE || process.env.MUMBO_PROJECT_ID ? { url: process.env.MUMBO_EDGE_MCP_URL, tokenFile: process.env.MUMBO_EDGE_TOKEN_FILE, project: process.env.MUMBO_PROJECT_ID } : undefined"

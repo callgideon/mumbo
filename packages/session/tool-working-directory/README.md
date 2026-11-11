@@ -23,7 +23,7 @@ Read the Session’s current directory or enter an existing directory with the s
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount alongside `tools` and `workingDirectory`. Call `working_directory({})` to read or `working_directory({ cd: "src" })` to change directory. The tool has no configuration fields.
+Mount alongside `tools` and `workingDirectory`. Call `working_directory({})` to read or `working_directory({ cd: "src" })` to change directory. The tool has no configuration fields. The `cd` path is the model's choice, so under the filesystem's model roots a directory outside them is refused with the filesystem's outside-roots error.
 
 ```yaml
 - name: '@deepseek-ai/dsh-tool-working-directory'

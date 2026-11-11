@@ -390,13 +390,19 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-attachment-local`
 
-- `source`: [`packages/attachment/attachment-local/src/index.ts:65`](../packages/attachment/attachment-local/src/index.ts)
+- `source`: [`packages/attachment/attachment-local/src/index.ts:68`](../packages/attachment/attachment-local/src/index.ts)
 
 ```ts config-catalog
 /** Local attachment backend configuration. */
 export interface Config {
   /** Explicit harness home; omitted follows `DSH_HOME`, then `~/.dsh`. */
   dshHome?: string
+  /**
+   * Let the home's group read the store but not change it: directories are created `2750` and objects `0440`, so a
+   * home owned by this process with another user's group and the set-group-ID bit passes that group to everything
+   * below it. Default `false`: directories `0700`, objects `0400`. The home itself takes the directory mode.
+   */
+  groupReadable?: boolean
   /** Maximum encoded bytes accepted for one submitted image. Default: 50 MiB. */
   maxImageBytes?: number
   /** Maximum image count accepted in one submitted message. Default: 20. */
@@ -843,6 +849,8 @@ export interface Config {
   typeDelayMs: number
   /** Pointer movements dispatched between the start and end of a drag. */
   dragSteps: number
+  /** Subprocess identity, by the provider's name for it, that runs every command and finds its executable; omitted, the default. */
+  identity?: string
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-computer-use-x11 -->
@@ -977,9 +985,15 @@ export type Config = BrowserMcpConfig
 export type Config = BrowserMcpConfig & {
   /**
    * Absolute directory for the snapshots, screenshots, and logs the server writes; omitted, the server writes them to
-   * `.playwright-mcp` in the Session's working directory.
+   * `.playwright-mcp` in its workspace, `fileRoot` or else its working directory.
    */
   outputDir?: string
+  /**
+   * Absolute directory passed as the server's only MCP root, which upstream takes as its workspace: besides `outputDir`,
+   * the one directory whose files the upload and drop tools may send. Omitted, the client offers no root and the server
+   * uses its working directory.
+   */
+  fileRoot?: string
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-experimental-browser-use-playwright-mcp -->
@@ -1597,7 +1611,7 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-fs-local`
 
-- `source`: [`packages/fs/fs-local/src/index.ts:52`](../packages/fs/fs-local/src/index.ts)
+- `source`: [`packages/fs/fs-local/src/index.ts:63`](../packages/fs/fs-local/src/index.ts)
 
 ```ts config-catalog
 /** Configuration for the local filesystem backend. */
@@ -1609,6 +1623,23 @@ export interface Config {
    * runtime's safe allocation/decode maximum. Defaults to 10 MiB.
    */
   diffBasisMaxBytes?: number
+  /**
+   * Existing absolute directories the model's file tools are confined to. When set,
+   * {@link LocalFileSystem.resolveModelPath} refuses a real path outside every root, and every
+   * resolution refuses a path under a root whose real path leaves all roots, the symbolic-link
+   * escape. Omitted, model paths are unrestricted.
+   */
+  modelRoots?: string[] | undefined
+  /**
+   * Existing absolute directories the model's file tools may read but never change, such as the
+   * attachment and skill directories the harness names to the model. Requires `modelRoots`, which
+   * they may not overlap. Reads and listings under them are confined exactly as under a model root,
+   * except that a file's link count is not checked, so the run-as user must not be able to write
+   * there; every change whose path lies under one is refused. An entry may not be or contain the
+   * harness home (`DSH_HOME`), nor be, contain, or lie inside a conventional credential store under
+   * the user's home directory.
+   */
+  readOnlyRoots?: string[] | undefined
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-fs-local -->
@@ -2419,7 +2450,7 @@ export interface LspLocalServerConfig {
 ## `@deepseek-ai/dsh-mcp-client`
 
 - `inject`: `tools`
-- `source`: [`packages/mcp/mcp-client/src/index.ts:138`](../packages/mcp/mcp-client/src/index.ts)
+- `source`: [`packages/mcp/mcp-client/src/index.ts:159`](../packages/mcp/mcp-client/src/index.ts)
 
 ```ts config-catalog
 /** Configuration for one stdio or Streamable HTTP MCP server. */
@@ -2441,8 +2472,26 @@ export interface StdioConfig {
   args: string[]
   /** Extra env vars merged on top of scrubbed ambient env. */
   env: Record<string, string>
-  /** Working directory for the child process. */
+  /**
+   * Working directory for the child process; empty, this process's. A server that names an identity, or names none under
+   * a provider that runs children as a run-as identity, always starts in its identity's home, and any other value fails it.
+   */
   cwd: string
+  /**
+   * Subprocess identity, by the subprocess provider's name for it, that runs the server. Set, the
+   * server starts through the subprocess service with that identity's environment plus `env`, in
+   * that identity's home, which the provider checks at load (`serverHome`). Omitted, it starts
+   * through the subprocess service as the provider's `serverIdentity`, in that
+   * identity's home, when that provider runs children as a run-as identity, and fails when the
+   * provider names no server identity; otherwise it starts as this process with the scrubbed
+   * ambient environment plus `env`.
+   */
+  identity?: string
+  /**
+   * Absolute directories the client offers as its MCP roots, in order; empty (the default), it declares no `roots`
+   * capability. A server such as Playwright MCP takes the first root as its workspace.
+   */
+  roots: string[]
   /** Timeout per tool call or resource request in milliseconds. */
   toolCallTimeoutMs: number
   /** Optional budget for one connection attempt plus its initial tool sync, in milliseconds. */
@@ -2756,6 +2805,11 @@ export interface Config {
   detailFetchTimeoutMs?: number
   /** npm file CDNs that offered bundles are read from, in order; a read's `npmFileSources` moves the CDNs it names first. */
   detailNpmFileSources?: NpmFileSource[]
+  /**
+   * Offer the model the `plugin_manager` tool. Installing or enabling a plugin loads its code into this process, so a
+   * deployment that keeps the model out of it sets `false`; the person's own plugin controls are unaffected.
+   */
+  modelTools?: boolean
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-plugin-manager -->
@@ -3505,6 +3559,12 @@ export interface Config {
    * ages out.
    */
   cleanupPeriodDays?: number
+  /**
+   * Let the root's group read spill files but not change them: session directories are created `0750` and files
+   * `0640`, so a configured root owned by this process with another user's group and the set-group-ID bit passes that
+   * group to every session directory and file. Defaults to `false` (`0700` and `0600`).
+   */
+  groupReadable?: boolean
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-spill-local -->
@@ -3877,6 +3937,69 @@ export interface Config {
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-subagent-spawn-in-process -->
+
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-subprocess-local -->
+<a id="deepseek-aidsh-subprocess-local"></a>
+
+## `@deepseek-ai/dsh-subprocess-local`
+
+- `source`: [`packages/subprocess/subprocess-local/src/index.ts:75`](../packages/subprocess/subprocess-local/src/index.ts)
+
+```ts config-catalog
+/** Provider configuration. */
+export interface Config {
+  /** Start every child as this identity with this environment; omitted, children run as this process with its scrubbed environment. */
+  runAs?: RunAs | undefined
+  /**
+   * Further run-as identities by name, each with its own environment and secret names. A spawn spec that names one
+   * starts its child as it; every other child starts as `runAs`, which these require. A spawn naming an identity not
+   * listed here is refused. A server started as one, such as an MCP stdio server whose row names it, starts in its home,
+   * whose `set` must then meet the rules of `serverIdentity`, checked when a server first asks for that home.
+   */
+  identities?: Record<string, RunAs> | undefined
+  /**
+   * Name of the `identities` entry that runs the servers a person configures rather than the model, such as MCP stdio
+   * servers that name no identity; each starts in that identity's home. Its `set` must name `HOME` by its real path, an
+   * existing directory owned by that identity, writable by no other user but root, directly or through an ancestor, and
+   * searchable by it, and `PATH`; every `PATH` and `NODE_PATH` entry that identity receives, at load and at each spawn,
+   * must be a directory only root can change.
+   */
+  serverIdentity?: string | undefined
+  /**
+   * Absolute existing directory that receives each interactive shell's private activity records; omitted, the OS
+   * temporary directory. Under `runAs` it must be writable by no other user, directly or through an ancestor, and
+   * searchable by the run-as user through every ancestor, so a root-only temporary directory needs this set.
+   */
+  shellActivityDirectory?: string | undefined
+  /**
+   * Absolute existing directory that receives spill files, created mode `0640`; omitted, a private per-process
+   * directory under the OS temporary directory. Under `runAs` it must be writable by no other user, directly or
+   * through an ancestor.
+   */
+  spillDirectory?: string | undefined
+}
+
+/** Run every child of this provider as one fixed non-root identity with an explicit environment. */
+export interface RunAs extends RunAsIdentity {
+  /** Names a child inherits from this process's credential-scrubbed environment; every other ambient name is dropped. */
+  inherit: string[]
+  /** Fixed values every child receives; they replace inherited and caller-supplied entries of the same name. */
+  set: Record<string, string>
+  /** Names that must never reach a child; a launch whose final environment contains one fails before it starts. */
+  secretNames: string[]
+}
+
+/** The credentials the Linux bootstrap applies before it enters the target program. */
+export interface RunAsIdentity {
+  /** Real, effective, saved, and filesystem user id. */
+  uid: number
+  /** Real, effective, saved, and filesystem group id. */
+  gid: number
+  /** The complete supplementary group list; empty means none. */
+  groups: number[]
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-subprocess-local -->
 
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-system-prompt -->
 <a id="deepseek-aidsh-system-prompt"></a>
@@ -4887,7 +5010,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-working-directory`
 
 - `inject`: `fs` · `sessionProjections` · `systemPrompt`
-- `source`: [`packages/session/working-directory/src/index.ts:51`](../packages/session/working-directory/src/index.ts)
+- `source`: [`packages/session/working-directory/src/index.ts:57`](../packages/session/working-directory/src/index.ts)
 
 ```ts config-catalog
 /** Deployment default for Sessions without an original project directory. */
@@ -4922,6 +5045,11 @@ export interface Config {
   maxFileBytes: number
   /** Milliseconds a line comparison may run before it degrades to whole-file replacement. */
   diffTimeoutMs: number
+  /**
+   * Record and serve change summaries. With `false` the service answers every summary and comparison with none and
+   * runs no git and reads no file; a deployment whose git cannot run as the subprocess provider's identity sets it.
+   */
+  summaries: boolean
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-workspace-changes -->
@@ -4952,7 +5080,7 @@ export interface Config {
 
 ## `@mumbo/box-links`
 
-- `source`: [`packages/mumbo/box-links/src/config.ts:22`](../packages/mumbo/box-links/src/config.ts)
+- `source`: [`packages/mumbo/box-links/src/config.ts:24`](../packages/mumbo/box-links/src/config.ts)
 
 ```ts config-catalog
 /** Absolute links from a box's Web page to the pages the box edge serves beside it, and the Browser tab's Host call. */
@@ -4980,6 +5108,8 @@ export interface BrowserConfig {
   wmctrl: string
   /** Milliseconds the call waits, from its start, for a Chrome window to exist, activate, and maximize. */
   timeoutMs: number
+  /** Subprocess identity, by the subprocess provider's name for it, that runs and finds `wmctrl`; omitted, the provider's default. */
+  identity?: string
 }
 ```
 <!-- END GENERATED config-catalog:@mumbo/box-links -->
@@ -4991,7 +5121,7 @@ export interface BrowserConfig {
 
 - `inject`: `browserUse` · `agents` · `tools` · `systemPrompt` · `workingDirectory`
 - `refs`: [`PlaywrightBrowser`](../packages/experimental/browser-use-playwright-mcp/src/index.ts)
-- `source`: [`packages/mumbo/browser-consent/src/index.ts:103`](../packages/mumbo/browser-consent/src/index.ts)
+- `source`: [`packages/mumbo/browser-consent/src/index.ts:128`](../packages/mumbo/browser-consent/src/index.ts)
 
 ```ts config-catalog
 /** Consent configuration. */
@@ -5007,6 +5137,22 @@ export interface Config {
   readonly allowedSites: string[]
   /** Milliseconds a write waits for the person's answer before it is denied as unanswered. */
   readonly approvalTimeoutMs: number
+  /**
+   * Absolute existing directory, such as the shared Downloads, whose files `browser_file_upload` and `browser_drop` may
+   * send, each named directly in it. Required, so each deployment states it, and named by its real path below
+   * directories that only root and dsh's own user can change (see {@link uploadDirectory}).
+   */
+  readonly uploadDirectory: string
+  /**
+   * Absolute existing directory, such as `/var/lib/mumbo/uploads`, where consent stages the copy of each file it sends
+   * and which the browser server receives as its only file root. Required, named by its real path, owned by root or
+   * dsh's own user and writable by no other user, below directories that only those users can change (see
+   * {@link uploadStaging}), and neither inside nor containing `uploadDirectory` or `browser.outputDir`. At load consent
+   * deletes the entries named like its copies' directories, 32 lowercase hex characters, and leaves every other entry.
+   */
+  readonly uploadStaging: string
+  /** Largest file, in bytes, that one upload or drop may send; 536870912 (512 MiB) by default. */
+  readonly uploadMaxBytes: number
 }
 ```
 <!-- END GENERATED config-catalog:@mumbo/browser-consent -->
@@ -5076,7 +5222,7 @@ export interface Config {
 ## `@mumbo/superagent`
 
 - `inject`: `agents` · `sessionController` · `sessionPersistence` · `workspaceRegistry` · `permissionPresets` · `tools` · `systemPrompt` · `skills` · `webServer` · `connection` · `llm` · `subprocess`
-- `source`: [`packages/mumbo/superagent/src/deployment.ts:40`](../packages/mumbo/superagent/src/deployment.ts)
+- `source`: [`packages/mumbo/superagent/src/deployment.ts:43`](../packages/mumbo/superagent/src/deployment.ts)
 
 ```ts config-catalog
 export type DeploymentConfig = ReturnType<typeof Config>
@@ -5197,7 +5343,6 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 | `@deepseek-ai/dsh-settings` | `configEditor` · `profileContext` | [`packages/settings/settings/src/index.ts`](../packages/settings/settings/src/index.ts) |
 | `@deepseek-ai/dsh-skill-badge` | `skills` | [`packages/experimental/skill-badge/src/index.ts`](../packages/experimental/skill-badge/src/index.ts) |
 | `@deepseek-ai/dsh-storage` | — | [`packages/storage/storage/src/index.ts`](../packages/storage/storage/src/index.ts) |
-| `@deepseek-ai/dsh-subprocess-local` | — | [`packages/subprocess/subprocess-local/src/index.ts`](../packages/subprocess/subprocess-local/src/index.ts) |
 | `@deepseek-ai/dsh-subprocess-ssh` | `ssh` | [`packages/ssh/subprocess-ssh/src/index.ts`](../packages/ssh/subprocess-ssh/src/index.ts) |
 | `@deepseek-ai/dsh-terminal` | — | [`packages/terminal/terminal/src/index.ts`](../packages/terminal/terminal/src/index.ts) |
 | `@deepseek-ai/dsh-tool-call-timeout-policy` | `tools` | [`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts) |

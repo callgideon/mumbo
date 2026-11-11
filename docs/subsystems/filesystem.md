@@ -373,7 +373,7 @@ import { FS_ERROR_CODES } from '@deepseek-ai/dsh-fs'
 type FsErrorCode = typeof FS_ERROR_CODES[number]
 ```
 
-`FS_NOT_DIRECTORY`, `FS_PERMISSION_DENIED`, and `FS_IO_ERROR` are used by directory listing to distinguish an existing non-directory target, a denied listing, and an unexpected backend I/O failure; directory creation uses them for an existing non-directory path segment, a denied creation, and other backend I/O failures. `FS_SANDBOX_DENIED` is a POLICY refusal from a sandbox-enforcing backend (`dsh-fs-sandbox`) — the mode fence denied a mutation, directory creation included — distinct from `FS_PERMISSION_DENIED` (the host kernel refusing). `FS_NOT_OBSERVED` means the policy plugin has no prior-observation record for this owner (or a `createIfAbsent` hit an existing file). `FS_NOT_FOUND` also represents an edit rejected from confirmed absence. `FS_STALE_VERSION` means the backend version no longer matches the observed one (or the provider itself receives an edit for a missing target). Freshness authorization has no partial/full distinction, so there is no `FS_PARTIAL_OBSERVATION`.
+`FS_NOT_DIRECTORY`, `FS_PERMISSION_DENIED`, and `FS_IO_ERROR` are used by directory listing to distinguish an existing non-directory target, a denied listing, and an unexpected backend I/O failure; directory creation uses them for an existing non-directory path segment, a denied creation, and other backend I/O failures. `FS_SANDBOX_DENIED` is a POLICY refusal from a sandbox-enforcing backend (`dsh-fs-sandbox`) — the mode fence denied a mutation, directory creation included — distinct from `FS_PERMISSION_DENIED` (the host kernel refusing). `FS_OUTSIDE_ROOTS` is the model-roots refusal of a backend configured with `modelRoots`: `resolveModelPath` found a real path outside every root, any resolution found a path under a root whose real path leaves the roots, or a change targets a path under a `readOnlyRoots` entry. `FS_NOT_OBSERVED` means the policy plugin has no prior-observation record for this owner (or a `createIfAbsent` hit an existing file). `FS_NOT_FOUND` also represents an edit rejected from confirmed absence. `FS_STALE_VERSION` means the backend version no longer matches the observed one (or the provider itself receives an edit for a missing target). Freshness authorization has no partial/full distinction, so there is no `FS_PARTIAL_OBSERVATION`.
 
 ## No timeouts on file IO
 
@@ -413,11 +413,27 @@ watch(target: FsTarget, changed: (error?: Error) => void, signal: AbortSignal): 
  * remote/sandboxed backend may need a round-trip to map a path to a stable identity), hence
  * async even though the local backend only normalizes + realpaths.
  *
+ * A provider that confines the model to roots refuses, for every caller, a path written under a
+ * root whose real path leaves the roots, because the model can plant such links; a reader the
+ * person drives directly, such as the Files panel, passes `unconfined` to resolve as before.
+ *
  * @param path - the path to resolve; relative paths resolve against `opts.cwd`.
- * @param opts - optional cwd override and cancellation signal.
+ * @param opts - optional cwd override, cancellation signal, and the person-facing `unconfined` resolution.
  * @returns the stable target; the same file yields the same `targetKey`.
  */
-abstract resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget>
+abstract resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal; unconfined?: boolean }): Promise<FsTarget>
+
+/**
+ * Resolve a path the model supplied to a model-facing tool. A provider that confines the
+ * model to configured roots refuses, with `FS_OUTSIDE_ROOTS`, a path whose real path lies
+ * outside every root; an absent path is judged by its nearest existing ancestor. The base
+ * provider has no roots and resolves exactly like {@link resolve}. Every model-facing tool
+ * resolves model-supplied paths through this method, never through {@link resolve}.
+ * @param path - the model-supplied path; relative paths resolve against `opts.cwd`.
+ * @param opts - optional cwd override and cancellation signal.
+ * @returns the stable target, under a root when the provider confines the model.
+ */
+resolveModelPath(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget>
 
 /**
  * Return the canonical absolute path a subprocess in this filesystem's

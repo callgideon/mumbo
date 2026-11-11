@@ -15,6 +15,11 @@ function environment(env?: NodeJS.ProcessEnv): Record<string, string | null> | u
   return env === undefined ? undefined : Object.fromEntries(Object.entries(env).map(([key, value]) => [key, value ?? null]))
 }
 
+/** Refuse a named child identity: this provider starts remote processes as the SSH account only. */
+function refuseIdentity(identity: string | undefined): void {
+  if (identity !== undefined) throw new Error(`subprocess-ssh: cannot start a process as identity ${JSON.stringify(identity)}; remote processes run as the SSH account`)
+}
+
 class RemoteCleanupError extends AggregateError {}
 
 /** One remote ordinary process; stdin and control remain usable during asynchronous SSH allocation. */
@@ -252,7 +257,10 @@ export class SshSubprocessRuntime extends SubprocessRuntime {
     })
   }
 
-  override async resolveExecutable(command: string, env?: Readonly<Record<string, string>>, signal?: AbortSignal): Promise<string> {
+  override async resolveExecutable(
+    command: string, env?: Readonly<Record<string, string>>, signal?: AbortSignal, identity?: string,
+  ): Promise<string> {
+    refuseIdentity(identity)
     try {
       return await this.ctx.ssh.request('executable', { command, env }, remotePath, signal)
     } catch (error) {
@@ -272,6 +280,7 @@ export class SshSubprocessRuntime extends SubprocessRuntime {
   }
 
   override spawn(spec: SubprocessSpawnSpec): SubprocessHandle {
+    refuseIdentity(spec.identity)
     this.lifetime.signal.throwIfAborted()
     spec.signal?.throwIfAborted()
     const handle = new RemoteProcess(this.ctx.ssh, spec)

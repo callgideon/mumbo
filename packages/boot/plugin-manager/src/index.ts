@@ -86,6 +86,11 @@ export interface Config {
   detailFetchTimeoutMs?: number
   /** npm file CDNs that offered bundles are read from, in order; a read's `npmFileSources` moves the CDNs it names first. */
   detailNpmFileSources?: NpmFileSource[]
+  /**
+   * Offer the model the `plugin_manager` tool. Installing or enabling a plugin loads its code into this process, so a
+   * deployment that keeps the model out of it sets `false`; the person's own plugin controls are unaffected.
+   */
+  modelTools?: boolean
 }
 
 /** The Fetch route serving images beside bundle detail documents. */
@@ -327,6 +332,7 @@ export class PluginManager extends TypertRemoteService {
     detailImageMaxBytes: z.natural().min(1).default(5 * 1024 * 1024),
     detailFetchTimeoutMs: z.natural().min(1).max(MAX_TIMER_DELAY_MS).default(15000),
     detailNpmFileSources: z.array(z.union(NPM_FILE_SOURCES)).min(1).default([...NPM_FILE_SOURCES]),
+    modelTools: z.boolean().default(true),
   })
   /** Management bundles remain protected if their files become unreadable. */
   private readonly managementBundles = new Set<string>()
@@ -349,6 +355,8 @@ export class PluginManager extends TypertRemoteService {
   private readonly versionLookupConcurrency: number
   private readonly configuredRegistries: Omit<PluginRegistries, 'resolved'>
   private readonly ownerContext: Context
+  /** Whether the model may hold the `plugin_manager` tool; see {@link Config.modelTools}. */
+  readonly modelTools: boolean
   private readonly abort = new AbortController()
   /** Installations by request id, from their call until it settles. */
   private readonly installs = new Map<PluginInstallRequestId, InstallControl>()
@@ -367,6 +375,7 @@ export class PluginManager extends TypertRemoteService {
     this.gitTransportTimeoutMs = (config as Required<Config>).gitTransportTimeoutMs
     this.idleTimeoutMs = (config as Required<Config>).idleTimeoutMs
     this.pnpmCommand = (config as Required<Config>).pnpmCommand
+    this.modelTools = (config as Required<Config>).modelTools
     this.versionListLimit = (config as Required<Config>).versionListLimit
     this.versionLookupConcurrency = (config as Required<Config>).versionLookupConcurrency
     this.configuredRegistries = {

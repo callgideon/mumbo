@@ -330,6 +330,24 @@ describe('workspace-changes in a repository', () => {
   })
 })
 
+describe('workspace-changes with summaries off', () => {
+  it('serves no summary and runs no git or file capture for an edited repository', async () => {
+    const cwd = await repository()
+    const { ctx } = await boot({ summaries: false })
+    const spawn = vi.spyOn(ctx.subprocess, 'spawn')
+    const session = ctx.sessions.create(SessionId('off'), { meta: { cwd } })
+    startTurn(session, 1)
+    await settle(ctx, session)
+    await mutate(ctx, session, 1, 'write', { file_path: 'new.txt', content: 'n\n' }, 'new.txt', () => writeFile(join(cwd, 'new.txt'), 'n\n'))
+    endTurn(session, 1)
+    await settle(ctx, session)
+    expect(session.snapshotEvents().filter(event => event.type === 'workspace/changes')).toEqual([])
+    expect(ctx.workspaceChanges.summary(session.id, 1)).toBeUndefined()
+    await expect(ctx.workspaceChanges.diff(session.id, 1, 0, signal)).resolves.toBeUndefined()
+    expect(spawn).not.toHaveBeenCalled()
+  })
+})
+
 describe('workspace-changes without a repository', () => {
   it('summarizes file-tool edits only for a working directory outside any git repository', async () => {
     const cwd = await scratchDir('dsh-workspace-changes-plain-', cleanups)

@@ -26,7 +26,7 @@ describe('lazy packaged-ripgrep resolution', () => {
     const controller = new AbortController()
     const exec = { signal: controller.signal, name: 'glob', callId: ToolCallId('missing-platform-package') } as unknown as ToolExecution
 
-    await expect(runRipgrep(new Context(), exec, 'glob', ['--files'], 1_000_000, 3_000, 64 * 1024))
+    await expect(runRipgrep(new Context(), exec, 'glob', ['--files'], undefined, 1_000_000, 3_000, 64 * 1024))
       .rejects.toMatchObject({ name: 'SearchError', code: 'SEARCH_FAILED' })
   })
 

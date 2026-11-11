@@ -1,7 +1,8 @@
 /** Probes repository and account CLIs, configures the worker execution environment and command shims, and tracks setup readiness. */
 import type { Context } from '@deepseek-ai/cordis'
 import { UserError } from '../core/index.ts'
-import { SETUP_FIELDS, resolveDeployment, resolveFeishuBot, workerProbe, type Deployment, type Machine } from '../deployment.ts'
+import { SETUP_FIELDS, resolveDeployment, resolveFeishuBot, workerProbe, type Deployment, type Machine, type Probe } from '../deployment.ts'
+import { Commands } from '../infra/commands.ts'
 import { agentVariables, applyEnvironment, verifyEnvironment, withoutDirectory, workerBin, writeEnvironment } from '../infra/environment.ts'
 import type { Settings, SettingsBlock } from '../policy.ts'
 import { SetupError, type SetupProblem } from '../setup.ts'
@@ -31,11 +32,17 @@ export class Setup {
   private readonly variables: Record<string, string | undefined>
   private restoreEnvironment?: () => void
   constructor(private readonly host: SetupHost) {
-    this.path = withoutDirectory(process.env.PATH ?? '', workerBin(host.machine.stateDir))
-    this.variables = agentVariables(host.machine.stateDir)
+    this.path = withoutDirectory(process.env.PATH ?? '', workerBin(host.machine.workerDirectory))
+    this.variables = agentVariables(host.machine.workerDirectory)
   }
-  /** Host command environment with agent git variables applied and the worker shim directory excluded from PATH. */
-  get commandEnvironment(): Record<string, string | undefined> { return { ...this.variables, PATH: this.path } }
+  /**
+   * Host command environment with agent git variables applied, the worker shim directory excluded from PATH, and the
+   * deployment's `ghConfigDirectory`, when set, as `GH_CONFIG_DIR`, which workers never receive.
+   */
+  get commandEnvironment(): Record<string, string | undefined> {
+    const { ghConfigDirectory } = this.host.machine
+    return { ...this.variables, PATH: this.path, ...ghConfigDirectory === undefined ? {} : { GH_CONFIG_DIR: ghConfigDirectory } }
+  }
   get deployment(): Deployment {
     if (!this.resolved) throw new Error(`dsh-superagent is waiting for setup: ${this.problem?.detail ?? 'setup has not run'}`)
     return this.resolved
@@ -61,22 +68,27 @@ export class Setup {
   async checkAccounts(block: SettingsBlock, settings: Settings): Promise<void> {
     const { machine } = this.host
     const check = block === 'source:feishu' ? resolveFeishuBot(machine, settings.sources.feishu?.config, this.probe())
-      : resolveDeployment(machine, settings.sources.github?.config, this.probe())
+      : resolveDeployment(machine, settings.sources.github?.config, this.probe(), this.own())
     await check.catch((error: unknown) => { if (!(error instanceof SetupError) || error.place === block.slice(7)) throw error })
   }
   async blockCommands(blocked: readonly string[]): Promise<void> {
     if (this.resolved) await writeEnvironment(this.resolved, blocked)
   }
   restore(): void { this.restoreEnvironment?.(); this.restoreEnvironment = undefined }
-  /** Probes CLIs the way worker shells run them, using `stateDir` as `cwd` since it exists even before the repository clone is valid. */
+  /** Probes CLIs the way worker shells run them, in `/`. */
   private probe() {
     const { context, machine, lifetime } = this.host
-    return workerProbe(context.subprocess, machine.stateDir, machine.stateDir, lifetime)
+    return workerProbe(context.subprocess, machine.workerDirectory, lifetime)
+  }
+  /** Runs a CLI the way the orchestrator's own calls run it (`Commands`): as this process's user, in `/`, with `commandEnvironment`. */
+  private own(): Probe {
+    const commands = new Commands(() => this.deployment, this.commandEnvironment, this.host.lifetime)
+    return ([program, ...args]) => commands.run(program!, args)
   }
   private async resolve(settings: Settings): Promise<Deployment> {
     const { context, machine, lifetime } = this.host
     const probe = this.probe()
-    const deployment = await resolveDeployment(machine, settings.sources.github?.config, probe)
+    const deployment = await resolveDeployment(machine, settings.sources.github?.config, probe, this.own())
     const feishu = await resolveFeishuBot(machine, settings.sources.feishu?.config, probe).catch((error: unknown) => {
       if (!(error instanceof SetupError)) throw error
       this.feishuProblem = error.problem
@@ -89,7 +101,7 @@ export class Setup {
       throw new SetupError('environmentFailed', { output: error instanceof Error ? error.message : String(error) })
     }
     await writeEnvironment(resolved, settings.executor.blockedCommands).catch(machineProblem)
-    this.restoreEnvironment = applyEnvironment(this.variables, machine.stateDir, this.path)
+    this.restoreEnvironment = applyEnvironment(this.variables, machine.workerDirectory, this.path)
     await verifyEnvironment(resolved, context.subprocess, lifetime).catch((error: unknown) => {
       this.restore()
       machineProblem(error)

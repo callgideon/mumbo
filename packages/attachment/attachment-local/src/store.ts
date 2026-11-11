@@ -1,4 +1,4 @@
-/** Content-addressed, owner-private local attachment storage. */
+/** Content-addressed local attachment storage, owner-private unless the store is group-readable. */
 
 import { createHash, randomUUID } from 'node:crypto'
 import { constants, createReadStream } from 'node:fs'
@@ -21,6 +21,23 @@ import type { DetectedImage } from './image.ts'
 
 const ID_PATTERN = /^sha256:([a-f0-9]{64})$/
 const durableHomes = new Set<string>()
+
+/** Modes the store gives the directories it creates and the objects it publishes. */
+export interface StoreModes {
+  /** Mode of each created directory, the harness home included. */
+  readonly directory: number
+  /** Mode of each published immutable object. */
+  readonly object: number
+}
+
+/** Owner-only store: directories `0700`, objects `0400`. */
+export const PRIVATE_MODES: StoreModes = Object.freeze({ directory: 0o700, object: 0o400 })
+
+/**
+ * Store the home's group may read but not change: directories `2750`, whose set-group-ID bit passes the home's group
+ * to every directory and object created below it, and objects `0440`.
+ */
+export const GROUP_READABLE_MODES: StoreModes = Object.freeze({ directory: 0o2750, object: 0o440 })
 
 function digest(data: Uint8Array): string {
   return createHash('sha256').update(data).digest('hex')
@@ -152,12 +169,13 @@ async function syncDirectory(path: string): Promise<void> {
  * entry is harmless; skipping an unsynced one is not.
  * @param path - absolute directory to create.
  * @param boundary - absolute ancestor the caller vouches is already durable.
+ * @param modes - the store's directory mode.
  */
-async function ensureDurableDirectory(path: string, boundary: string): Promise<void> {
+async function ensureDurableDirectory(path: string, boundary: string, modes: StoreModes): Promise<void> {
   const target = resolve(path)
   const stop = resolve(boundary)
-  await mkdir(target, { recursive: true, mode: 0o700 })
-  await chmod(target, 0o700)
+  await mkdir(target, { recursive: true, mode: modes.directory })
+  await chmod(target, modes.directory)
   let level = target
   while (level !== stop) {
     const parent = dirname(level)
@@ -173,10 +191,10 @@ async function ensureDurableDirectory(path: string, boundary: string): Promise<v
  * below the filesystem root are durable. Mere existence is insufficient: a
  * concurrent process may have created the directory but not synced its parent.
  */
-async function ensureDurableHome(path: string): Promise<string> {
+async function ensureDurableHome(path: string, modes: StoreModes): Promise<string> {
   const home = resolve(path)
   if (!durableHomes.has(home)) {
-    await ensureDurableDirectory(home, parse(home).root)
+    await ensureDurableDirectory(home, parse(home).root, modes)
     durableHomes.add(home)
   }
   return home
@@ -186,18 +204,20 @@ async function ensureDurableHome(path: string): Promise<string> {
  * Publish one already verified normalized image below a versioned attachment root.
  * @param root - absolute `DSH_HOME/attachments/v1` root.
  * @param prepared - deterministic normalized bytes and reference.
+ * @param modes - directory and object modes; owner-private by default.
  * @returns durable content-addressed normalized image reference.
  */
 export async function commitPreparedImageFile(
   root: string,
   prepared: PreparedImageFile,
+  modes: StoreModes = PRIVATE_MODES,
 ): Promise<ImageAttachmentRef> {
   const normalized = prepared.data
   const sha256 = ensureReference(prepared.ref)
   if (digest(normalized) !== sha256 || normalized.byteLength !== prepared.ref.bytes) {
     throw new AttachmentError('Prepared attachment bytes do not match their reference.', 'ATTACHMENT_CORRUPT')
   }
-  await publishImmutableObject(root, normalizedImagePath(root, prepared.ref), normalized, sha256)
+  await publishImmutableObject(root, normalizedImagePath(root, prepared.ref), normalized, sha256, modes)
   return prepared.ref
 }
 
@@ -210,21 +230,23 @@ export async function commitPreparedImageFile(
  * @param target - absolute final object path below `root`.
  * @param data - exact object bytes whose digest is `sha256`.
  * @param sha256 - hex digest the stored bytes must match on deduplication.
+ * @param modes - directory and object modes; owner-private by default.
  */
 export async function publishImmutableObject(
   root: string,
   target: string,
   data: Uint8Array,
   sha256: string,
+  modes: StoreModes = PRIVATE_MODES,
 ): Promise<void> {
   const staged = await stageImmutableObject(root, (function* (): Iterable<Uint8Array> {
     yield data
-  })())
+  })(), modes)
   if (staged.sha256 !== sha256) {
     await removeTemporary(staged.path)
     throw new AttachmentError('Attachment bytes do not match their publication digest.', 'ATTACHMENT_CORRUPT')
   }
-  await publishStagedObject(root, target, staged)
+  await publishStagedObject(root, target, staged, modes)
 }
 
 /** Digest and byte count produced while streaming one immutable object to disk. */
@@ -240,6 +262,7 @@ export interface StreamedImmutableObject {
  * @param data - exact object bytes in order.
  * @param targetFor - derive the final absolute target from the completed digest and byte count.
  * @param signal - optional cancellation for source reads and storage writes.
+ * @param modes - directory and object modes; owner-private by default.
  * @returns digest and exact byte count of the published object.
  */
 export async function publishImmutableObjectStream(
@@ -247,8 +270,9 @@ export async function publishImmutableObjectStream(
   data: AsyncIterable<Uint8Array>,
   targetFor: (sha256: string, bytes: number) => string,
   signal?: AbortSignal,
+  modes: StoreModes = PRIVATE_MODES,
 ): Promise<StreamedImmutableObject> {
-  const staged = await stageImmutableObject(root, data, signal)
+  const staged = await stageImmutableObject(root, data, modes, signal)
   let target: string
   try {
     target = targetFor(staged.sha256, staged.bytes)
@@ -258,7 +282,7 @@ export async function publishImmutableObjectStream(
     throw error
     /* v8 ignore stop */
   }
-  await publishStagedObject(root, target, staged)
+  await publishStagedObject(root, target, staged, modes)
   return { sha256: staged.sha256, bytes: staged.bytes }
 }
 
@@ -268,17 +292,19 @@ export async function publishImmutableObjectStream(
  * @param source - existing content-addressed object below `root`.
  * @param target - new alias below `root`.
  * @param sha256 - expected object digest for an existing-target race.
+ * @param modes - directory and object modes; owner-private by default.
  */
 export async function publishImmutableAlias(
   root: string,
   source: string,
   target: string,
   sha256: string,
+  modes: StoreModes = PRIVATE_MODES,
 ): Promise<void> {
   const parent = dirname(target)
   try {
-    const boundary = await ensureDurableHome(dirname(dirname(resolve(root))))
-    await ensureDurableDirectory(parent, boundary)
+    const boundary = await ensureDurableHome(dirname(dirname(resolve(root))), modes)
+    await ensureDurableDirectory(parent, boundary, modes)
     try {
       await link(source, target)
     } catch (error) {
@@ -288,7 +314,7 @@ export async function publishImmutableAlias(
         throw new AttachmentError('Stored attachment failed integrity verification.', 'ATTACHMENT_CORRUPT')
       }
     }
-    await chmod(target, 0o400)
+    await chmod(target, modes.object)
     const stop = resolve(root)
     for (let level = parent; level !== stop; level = dirname(level)) {
       await syncDirectory(level)
@@ -309,14 +335,15 @@ interface StagedImmutableObject extends StreamedImmutableObject {
 async function stageImmutableObject(
   root: string,
   data: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
+  modes: StoreModes,
   signal?: AbortSignal,
 ): Promise<StagedImmutableObject> {
   const staging = join(root, 'tmp')
   // Establish DSH_HOME itself against the filesystem root once per process.
   // Every process performs that proof independently, so observing a directory
   // another process created can never be mistaken for durable publication.
-  const boundary = await ensureDurableHome(dirname(dirname(resolve(root))))
-  await ensureDurableDirectory(staging, boundary)
+  const boundary = await ensureDurableHome(dirname(dirname(resolve(root))), modes)
+  await ensureDurableDirectory(staging, boundary, modes)
   const temporary = join(staging, randomUUID())
   let handle
   try {
@@ -351,10 +378,11 @@ async function publishStagedObject(
   root: string,
   target: string,
   staged: StagedImmutableObject,
+  modes: StoreModes,
 ): Promise<void> {
   const parent = dirname(target)
   try {
-    await ensureDurableDirectory(parent, staged.boundary)
+    await ensureDurableDirectory(parent, staged.boundary, modes)
     try {
       await link(staged.path, target)
     } catch (error) {
@@ -369,7 +397,7 @@ async function publishStagedObject(
     await unlink(staged.path)
     // The target remains the sole link for a new object; this also restores
     // read-only mode when the deduplication path observes an existing object.
-    await chmod(target, 0o400)
+    await chmod(target, modes.object)
     // Persist the target entry and close every concurrent parent-creation
     // window before the reference can reach a session checkpoint. The dedup
     // path repeats these syncs because it may observe another writer's link

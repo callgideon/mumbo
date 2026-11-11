@@ -1490,10 +1490,16 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         throws: ['when the provider does not support watching or cannot initialize the watcher.'],
       },
       {
-        signature: 'abstract resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget>',
-        description: 'Resolve a model/plugin-supplied path into a stable FsTarget. May perform I/O (a remote/sandboxed backend may need a round-trip to map a path to a stable identity), hence async even though the local backend only normalizes + realpaths.',
-        parameters: [{ name: 'path', description: 'the path to resolve; relative paths resolve against `opts.cwd`.' }, { name: 'opts', description: 'optional cwd override and cancellation signal.' }],
+        signature: 'abstract resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal; unconfined?: boolean }): Promise<FsTarget>',
+        description: 'Resolve a model/plugin-supplied path into a stable FsTarget. May perform I/O (a remote/sandboxed backend may need a round-trip to map a path to a stable identity), hence async even though the local backend only normalizes + realpaths.\n\nA provider that confines the model to roots refuses, for every caller, a path written under a root whose real path leaves the roots, because the model can plant such links; a reader the person drives directly, such as the Files panel, passes `unconfined` to resolve as before.',
+        parameters: [{ name: 'path', description: 'the path to resolve; relative paths resolve against `opts.cwd`.' }, { name: 'opts', description: 'optional cwd override, cancellation signal, and the person-facing `unconfined` resolution.' }],
         returns: 'the stable target; the same file yields the same `targetKey`.',
+      },
+      {
+        signature: 'resolveModelPath(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget>',
+        description: 'Resolve a path the model supplied to a model-facing tool. A provider that confines the model to configured roots refuses, with `FS_OUTSIDE_ROOTS`, a path whose real path lies outside every root; an absent path is judged by its nearest existing ancestor. The base provider has no roots and resolves exactly like resolve. Every model-facing tool resolves model-supplied paths through this method, never through resolve.',
+        parameters: [{ name: 'path', description: 'the model-supplied path; relative paths resolve against `opts.cwd`.' }, { name: 'opts', description: 'optional cwd override and cancellation signal.' }],
+        returns: 'the stable target, under a root when the provider confines the model.',
       },
       {
         signature: 'abstract processPath(target: FsTarget): string',
@@ -2283,6 +2289,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     summary: 'Manage profile files and apply their declared reload lifecycle.',
     description: 'Manage profile files and apply their declared reload lifecycle.',
     methods: [
+      {
+        signature: 'readonly modelTools: boolean',
+        description: 'Whether the model may hold the `plugin_manager` tool; see Config.modelTools.',
+        parameters: [],
+      },
       {
         signature: '@Remote async readBundleDetail(name: string, language: string, options?: { npmFileSources?: NpmFileSource[] }): Promise<BundleDetail>',
         description: 'Read a bundle\'s long description: the Markdown file its locale `meta.detail` names in `language`, otherwise its README. An installed bundle is read from its directory without network access; an official bundle the installation offers before it is installed is read from the npm file CDNs at its offered version. Nothing is cached.',
@@ -3819,9 +3830,16 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Abstract subprocess service. Subclass, implement spawn, and load the subclass as a plugin — it registers as `ctx.subprocess` (one implementation per context; loading a second throws, which is cordis\' standard duplicate-service behavior).\n\nImplementations must honor these semantics:\n\n- Executable paths belong to one execution world shared with the mounted filesystem provider.\n- spawn returns a live handle synchronously. Target identity remains provider-private; `done` resolves with the spawned command\'s exit facts and may reject for spawn or provider failures.\n- Collect-mode readers are offset-based and non-consuming, so independent readers never consume one another\'s output; lossy reads report truncation and the spill file holding the complete stream when one exists. Piped streams are handed to the caller raw and never buffered here.\n- SubprocessHandle.terminate (and the spec\'s abort signal) starts the provider\'s documented procedure against its managed range. SubprocessHandle.waitForExit observes that same range so a consumer-owned teardown ladder can hold each tier on real quiescence; each provider documents its signalling and observability limits.\n- Disposal of the service terminates all still-running managed processes and awaits their exit.\n- spawnTerminal owns terminal allocation, text transport, foreground groups, signalling, and whole-session quiescence behind one awaited termination method; readiness and persistent-shell policy stay in the PTY consumer. Its output stream ends after queued terminal output when the top-level process exits.',
     methods: [
       {
-        signature: 'abstract resolveExecutable( command: string, env?: Readonly<Record<string, string>>, signal?: AbortSignal, ): Promise<string>',
+        signature: 'serverHome(identity: string): string',
+        description: 'The home of a named identity that runs a server, such as an MCP stdio server whose config names the identity: the directory each such server starts in. A provider checks the home, and the search paths the identity receives, by the rules of its serverIdentity. The base provider configures no identity.',
+        parameters: [{ name: 'identity', description: 'the identity, as a spawn request\'s `identity` names it.' }],
+        returns: 'the identity\'s home, by its real path.',
+        throws: ['when the provider configures no such identity, or its home or search paths fail the provider\'s checks.'],
+      },
+      {
+        signature: 'abstract resolveExecutable( command: string, env?: Readonly<Record<string, string>>, signal?: AbortSignal, identity?: string, ): Promise<string>',
         description: 'Resolve one configured executable in this provider\'s execution world. Absolute paths are verified; bare names use the provider\'s scrubbed PATH plus explicit environment overrides. Relative paths containing separators are rejected: the resolution base is undefined, so providers fail loud instead of guessing.',
-        parameters: [{ name: 'command', description: 'absolute executable path or bare PATH name.' }, { name: 'env', description: 'explicit environment entries used for lookup.' }, { name: 'signal', description: 'aborts remote or local lookup.' }],
+        parameters: [{ name: 'command', description: 'absolute executable path or bare PATH name.' }, { name: 'env', description: 'explicit environment entries used for lookup.' }, { name: 'signal', description: 'aborts remote or local lookup.' }, { name: 'identity', description: 'the provider-configured identity whose environment supplies PATH, as on {@link SubprocessSpawnSpec.identity}; omitted, the default. An unknown name is refused.' }],
         returns: 'a canonical executable path.',
       },
       {
@@ -4512,18 +4530,31 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'its effective absolute directory.',
       },
       {
+        signature: 'chooser(session: Session): \'model\' | \'host\'',
+        description: 'Read who chose the committed directory, without filesystem I/O.',
+        parameters: [{ name: 'session', description: 'Session whose directory is requested.' }],
+        returns: '`\'host\'` for the original project and directories the person or the harness set; `\'model\'` otherwise, including directories recorded before the log named a chooser.',
+      },
+      {
         signature: 'ensure(agent: Agent, signal?: AbortSignal): Promise<string>',
-        description: 'Validate the current directory and restore the original project when it disappeared. A missing original project is recreated empty through the filesystem provider and logged; files it held are not restored. Every Session in this process that was created before the recreation and works in, or falls back to, that project is told once.',
+        description: 'Validate the current directory and restore the original project when it disappeared or, when the model chose it, lies outside the model roots, so no directory reader follows a directory the model may not access. A directory the person or the harness chose is kept wherever it is, except that one under a model root whose real path now leaves the roots is not followed either. A missing original project is recreated empty through the filesystem provider and logged; files it held are not restored. Every Session in this process that was created before the recreation and works in, or falls back to, that project is told once.',
         parameters: [{ name: 'agent', description: 'live or unpublished Agent owning the Session.' }, { name: 'signal', description: 'cancellation for filesystem inspection and creation.' }],
         returns: 'the existing directory; recovery is committed before fulfillment. A notice failure is warned without reverting the committed state.',
         throws: ['when the original project cannot be recreated; the failure is logged.'],
       },
       {
-        signature: 'set(agent: Agent, path: string, signal?: AbortSignal): Promise<string>',
+        signature: 'set(agent: Agent, path: string, signal?: AbortSignal, chooser: \'model\' | \'host\' = \'host\'): Promise<string>',
         description: 'Change one Session\'s directory without changing existing processes or permissions.',
-        parameters: [{ name: 'agent', description: 'live or unpublished Agent owning the Session.' }, { name: 'path', description: 'absolute path or a path relative to its current directory.' }, { name: 'signal', description: 'cancellation before the durable change.' }],
+        parameters: [{ name: 'agent', description: 'live or unpublished Agent owning the Session.' }, { name: 'path', description: 'absolute path or a path relative to its current directory.' }, { name: 'signal', description: 'cancellation before the durable change.' }, { name: 'chooser', description: 'who chose `path`: `\'model\'` resolves it through `fs.resolveModelPath`, so a directory outside the model roots is refused; `\'host\'`, the person or the harness, resolves it unconfined and records it as theirs, so {@link ensure} keeps it.' }],
         returns: 'the canonical absolute directory, committed before fulfillment. A notice failure is warned; the next request still receives the committed directory.',
-        throws: ['when the requested path is not an existing directory.'],
+        throws: ['when the requested path is not an existing directory, or a model-chosen one lies outside the model roots.'],
+      },
+      {
+        signature: 'async resolveModelDirectory(agent: Agent, path: string, signal?: AbortSignal): Promise<string>',
+        description: 'Resolve a directory the model chose for another Session, such as a subagent\'s, without changing this one.',
+        parameters: [{ name: 'agent', description: 'live Agent whose current directory anchors a relative `path`.' }, { name: 'path', description: 'absolute path or a path relative to the Agent\'s current directory.' }, { name: 'signal', description: 'cancellation for filesystem inspection.' }],
+        returns: 'the canonical absolute directory.',
+        throws: ['when `path` is not an existing directory or lies outside the model roots.'],
       },
     ],
   },
@@ -9380,7 +9411,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SubagentStartRequest',
-    declaration: 'export interface SubagentStartRequest {\n    readonly cwd?: string;\n    readonly agentPreset?: string;\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly agentOptions?: AgentOptions;\n    readonly outputSchema?: ObjectJsonSchema;\n    readonly maxDepth?: number;\n}',
+    declaration: 'export interface SubagentStartRequest {\n    readonly cwd?: string;\n    readonly cwdChooser?: \'model\' | \'host\';\n    readonly agentPreset?: string;\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly agentOptions?: AgentOptions;\n    readonly outputSchema?: ObjectJsonSchema;\n    readonly maxDepth?: number;\n}',
   },
   {
     name: 'SubagentStopReason',
@@ -9420,7 +9451,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SubprocessSpawnSpec',
-    declaration: 'export interface SubprocessSpawnSpec {\n    argv: readonly string[];\n    cwd: string;\n    stdio: SubprocessStdio;\n    graceMs: number;\n    signal?: AbortSignal | undefined;\n    env?: NodeJS.ProcessEnv | undefined;\n}',
+    declaration: 'export interface SubprocessSpawnSpec {\n    argv: readonly string[];\n    cwd: string;\n    stdio: SubprocessStdio;\n    graceMs: number;\n    signal?: AbortSignal | undefined;\n    env?: NodeJS.ProcessEnv | undefined;\n    identity?: string | undefined;\n}',
   },
   {
     name: 'SubprocessStdinMode',

@@ -1,15 +1,16 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, relative } from 'node:path'
+import { basename, dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import { BrowserUseProviderName } from '@deepseek-ai/dsh-browser-use/brand'
 import * as PlaywrightBrowser from '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp'
 import { mountSessionMcp } from '@deepseek-ai/dsh-experimental-browser-use-runtime/mcp'
 import { ToolCallId, createUserMessage } from '@deepseek-ai/dsh-llm'
+import type { SubprocessChildIdentity } from '@deepseek-ai/dsh-subprocess'
 import { defineContentToolFixture, executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import type { PreToolDecision, ToolExecution, ToolExecutionResult, ToolExecutionToken } from '@deepseek-ai/dsh-tools'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { bootComposition, consentRecords, tool, toolResults } from './harness.ts'
 import type { ScriptStep } from './harness.ts'
 
@@ -57,15 +58,21 @@ async function load(options: LoadOptions = {}) {
   vi.stubEnv('CONSENT_FIXTURE_ROOT', root)
   vi.stubEnv('CONSENT_FIXTURE_MODE', options.withoutTabs === true ? 'no-tabs' : '')
   vi.stubEnv('CONSENT_FIXTURE_START', options.start ?? '')
-  const consent = { browser: { mode: 'attach', endpoint: 'http://127.0.0.1:9' }, deniedUrls: DENIED_URLS, allowedSites: ['http://allowed.test'], ...options.consent }
+  const staging = join(root, 'staging')
+  const downloads = join(root, 'Downloads')
+  for (const directory of [staging, downloads]) await mkdir(directory, { recursive: true, mode: 0o700 })
+  const consent = {
+    browser: { mode: 'attach', endpoint: 'http://127.0.0.1:9', outputDir: join(root, '.playwright-mcp') }, deniedUrls: DENIED_URLS,
+    allowedSites: ['http://allowed.test'], uploadDirectory: downloads, uploadStaging: staging, ...options.consent,
+  }
   const booted = await bootComposition(root, { ...options, consent })
   contexts.push(booted.ctx)
   // Every call the browser received, in order, with the current tab's URL before the call.
   const allCalls = async () => (await readFile(join(root, 'calls.ndjson'), 'utf8').catch(() => '')).trim().split('\n').filter(Boolean)
-    .map(line => JSON.parse(line) as { name: string; args: { action?: string }; url: string })
+    .map(line => JSON.parse(line) as { name: string; args: { action?: string; paths?: string[] }; url: string; files?: string[] })
   // Every call except consent's own current-tab listings.
   const calls = async () => (await allCalls()).filter(call => !(call.name === 'browser_tabs' && call.args.action === 'list'))
-  return { ...booted, calls, allCalls, root }
+  return { ...booted, calls, allCalls, root, staging }
 }
 
 /** Run one call through the executor as the booted Session's Agent, or without an Agent. */
@@ -85,11 +92,19 @@ async function turn(options: LoadOptions & { script: readonly ScriptStep[] }) {
   return loaded
 }
 
+/** SHA-256 of the text `pdf`, the upload fixtures' content. */
+const PDF_SHA256 = 'c35b21d6ca39aa7cc3b79a705d989f1a6e88b99ab43988d74048799e3db926a3'
+
 const browserTools = (loaded: Awaited<ReturnType<typeof load>>) => loaded.ctx.tools.schemas(loaded.agent).filter(schema => schema.name.startsWith(tool('')))
 
 describe('browser write consent in the person-box composition', () => {
   it('decides each write on the tab it runs on, asks for the rest with its arguments, and logs every allowed write', { timeout: 60_000 }, async () => {
-    const { asked, events, calls, root } = await turn({
+    const downloads = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-downloads-'))
+    roots.push(downloads)
+    const upload = join(downloads, 'tax.pdf')
+    await writeFile(upload, 'pdf')
+    const { asked, events, calls, root, staging } = await turn({
+      consent: { uploadDirectory: downloads },
       script: [
         { name: 'browser_navigate', args: { url: 'http://allowed.test/inbox' } },
         { name: 'browser_click', args: { element: 'Archive', target: 'e1' } },
@@ -102,7 +117,7 @@ describe('browser write consent in the person-box composition', () => {
         { name: 'browser_navigate', args: { url: 'http://allowed.test/?redirect=http%3A%2F%2Fevil.test%2F' } },
         { name: 'browser_click', args: { target: 'e5' } },
         { name: 'browser_tabs', args: { action: 'select', index: 1 } },
-        { name: 'browser_file_upload', args: { paths: ['/root/tax.pdf'] } },
+        { name: 'browser_file_upload', args: { paths: [upload] } },
         { name: 'browser_evaluate', args: { function: '() => document.forms[0].submit()' } },
       ],
       answers: ['rejected', 'allowed-once', 'rejected', 'rejected', 'cancelled'],
@@ -128,7 +143,7 @@ describe('browser write consent in the person-box composition', () => {
       'Browser write: browser_type on http://other.test. Arguments: "target": "e2", "text": "hi\\nthere". Model-written target description: "Message".',
       'Browser write: browser_click on http://other.test. Arguments: "target": "e3". Model-written target description: "Send".',
       'Browser write: browser_click on http://evil.test. Arguments: "target": "e5".',
-      'Browser write: browser_file_upload on http://allowed.test. Arguments: "paths": ["/root/tax.pdf"]. Site allowances do not cover this action.',
+      `Browser write: browser_file_upload on http://allowed.test. Arguments: "paths": [${JSON.stringify(upload)}]. Files sent: "tax.pdf" (3 bytes, SHA-256 ${PDF_SHA256.slice(0, 12)}). Site allowances do not cover this action.`,
       'Browser write: browser_evaluate on http://allowed.test. Arguments: "function": "() => document.forms[0].submit()". Site allowances do not cover this action.',
     ])
     const results = toolResults(events)
@@ -141,6 +156,8 @@ describe('browser write consent in the person-box composition', () => {
       { callId: 'call-7', tool: 'browser_click', site: 'http://other.test', grant: 'approval', outcome: 'succeeded' },
     ])
     expect((await readdir(join(root, '.playwright-mcp'))).sort()).toEqual(['console-2.log', 'page-1.yml', 'page-2.yml', 'page-3.yml'])
+    // The declined upload's copy is gone.
+    expect(await readdir(staging)).toEqual([])
   })
 
   it('denies a write that a listener ahead of consent allowed, and loses its browser when consent unloads', { timeout: 60_000 }, async () => {
@@ -204,12 +221,62 @@ describe('browser write consent in the person-box composition', () => {
       { allowedSites: ['https://mail.google.com/'] }, { browser: { mode: 'attach', endpoint: 'http://localhost:bad/path' } },
       { deniedUrls: undefined }, { deniedUrls: ['https://accounts.google.com/'] }, { allowedSites: ['https://accounts.google.com'] },
       { browser: { mode: 'attach', endpoint: 'http://127.0.0.1:9', outputDir: 'playwright-output' } },
+      { browser: { mode: 'attach', endpoint: 'http://127.0.0.1:9' } }, { uploadStaging: undefined }, { uploadStaging: tmpdir() },
     ]) {
       const invalid = await load({ consent })
       expect(invalid.consentFiber?.state).toBe(FAILED)
       expect(invalid.ctx.browserUse.providerName).toBeUndefined()
       expect(browserTools(invalid)).toEqual([])
     }
+  })
+
+  it('mounts no browser, and deletes nothing, when the staging directory is, holds, or lies in the uploads or the server\'s output', { timeout: 60_000 }, async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-overlap-'))
+    roots.push(root)
+    const [downloads, staging] = [join(root, 'Downloads'), join(root, 'staging')]
+    const browser = (outputDir: string) => ({ browser: { mode: 'attach', endpoint: 'http://127.0.0.1:9', outputDir } })
+    // Named like a copy's directory, in the person's Downloads; every refused load leaves it.
+    const kept = join(downloads, '0123456789abcdef0123456789abcdef')
+    await mkdir(downloads, { mode: 0o700 })
+    await mkdir(kept)
+    for (const [consent, key, other, at] of [
+      [{ uploadStaging: downloads }, 'uploadDirectory', downloads, downloads], [{ uploadStaging: root }, 'uploadDirectory', downloads, root],
+      [{ uploadDirectory: root }, 'uploadDirectory', root, staging], [browser(staging), 'browser.outputDir', staging, staging],
+      [browser(join(staging, 'output')), 'browser.outputDir', join(staging, 'output'), staging], [browser(root), 'browser.outputDir', root, staging],
+    ] as const) {
+      const invalid = await load({ root, consent })
+      expect(invalid.consentFiber?.state).toBe(FAILED)
+      expect(invalid.errors).toContainEqual(expect.stringContaining(`uploadStaging "${at}" must not be, contain, or lie inside ${key} "${other}"`))
+      expect(browserTools(invalid)).toEqual([])
+    }
+    expect(await readdir(kept)).toEqual([])
+  })
+
+  it('mounts no browser when the subprocess service refuses the server\'s identity, and Sessions still start', { timeout: 60_000 }, async () => {
+    const checked: string[] = []
+    const subprocess = { apply(ctx: Context) {
+      ctx.provide('subprocess', { serverHome(identity: string): never {
+        checked.push(identity)
+        throw new Error(`subprocess-local: identities.${identity} set.HOME "/home/${identity}" must be writable by no other user`)
+      } })
+    } }
+    const browser = { mode: 'attach', endpoint: 'http://127.0.0.1:9', identity: 'browsermcp', outputDir: '/var/lib/mumbo/playwright-output' }
+    // The composition creates its Session after load, which rejects when a Session's creation fails.
+    const refused = await load({ before: [['subprocess', subprocess]], consent: { browser } })
+    expect(checked).toEqual(['browsermcp'])
+    expect(refused.consentFiber?.state).toBe(ACTIVE)
+    expect(refused.errors).toContainEqual(expect.stringContaining('subprocess-local: identities.browsermcp set.HOME "/home/browsermcp" must be writable by no other user'))
+    expect(refused.ctx.browserUse.providerName).toBeUndefined()
+    expect(browserTools(refused)).toEqual([])
+  })
+
+  it('mounts the browser of a server identity only once a subprocess service is mounted', { timeout: 60_000 }, async () => {
+    const browser = { mode: 'attach', endpoint: 'http://127.0.0.1:9', identity: 'browsermcp', outputDir: '/var/lib/mumbo/playwright-output' }
+    const waiting = await load({ consent: { browser } })
+    expect(waiting.consentFiber?.state).toBe(ACTIVE)
+    expect(waiting.errors).toEqual([])
+    expect(waiting.ctx.browserUse.providerName).toBeUndefined()
+    expect(browserTools(waiting)).toEqual([])
   })
 
   it('refuses every tool of a provider row that loaded ahead of consent', { timeout: 60_000 }, async () => {
@@ -319,6 +386,145 @@ describe('browser write consent in the person-box composition', () => {
     expect((await direct(loaded, tool('browser_network_requests'), {})).isError).toBe(false)
     expect(loaded.asked).toEqual([])
     expect((await loaded.calls()).map(call => call.name)).toEqual(['browser_navigate', 'browser_navigate', 'browser_navigate', 'browser_tabs', 'browser_network_requests'])
+  })
+
+  it('sends files only from directly in the upload directory, refusing every other path before asking anyone', { timeout: 60_000 }, async () => {
+    const downloads = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-downloads-'))
+    roots.push(downloads)
+    const loaded = await load({ consent: { uploadDirectory: downloads } })
+    const secret = join(loaded.root, 'Login Data')
+    await writeFile(secret, 'passwords')
+    await mkdir(join(downloads, 'folder'))
+    await writeFile(join(downloads, 'folder', 'scan.pdf'), 'pdf')
+    await symlink(secret, join(downloads, 'tax.pdf'))
+    const outside = (path: string) => `${JSON.stringify(path)} is not directly in ${downloads}; put the file directly in ${downloads} and retry`
+    for (const [name, args, why] of [
+      ['browser_file_upload', { paths: [secret] }, outside(secret)],
+      ['browser_drop', { target: 'e1', paths: [`${downloads}/../${relative(dirname(downloads), secret)}`] }, outside(`${downloads}/../${relative(dirname(downloads), secret)}`)],
+      ['browser_file_upload', { paths: [join(downloads, 'folder', 'scan.pdf')] }, outside(join(downloads, 'folder', 'scan.pdf'))],
+      ['browser_file_upload', { paths: [join(downloads, 'tax.pdf')] }, `${JSON.stringify(join(downloads, 'tax.pdf'))} is a symbolic link, not a regular file`],
+      ['browser_file_upload', { paths: [join(downloads, 'missing.pdf')] }, `${JSON.stringify(join(downloads, 'missing.pdf'))} does not exist`],
+    ] as const) {
+      const refusal = `Error: ${name} did not run: ${why}.`
+      expect(textOf(await direct(loaded, tool(name), args))).toBe(refusal)
+    }
+    // The guard refuses a path not directly in the directory when a listener ahead of consent would allow it.
+    const allow = loaded.ctx.on('tools/pre-execute', (): Promise<PreToolDecision> => Promise.resolve({ kind: 'allow' }), { prepend: true })
+    expect(textOf(await direct(loaded, tool('browser_file_upload'), { paths: [secret] }))).toBe(`Error: browser_file_upload did not run: ${outside(secret)}.`)
+    allow()
+    expect(loaded.asked).toEqual([])
+    expect(await loaded.calls()).toEqual([])
+    expect(await readdir(loaded.staging)).toEqual([])
+  })
+
+  it('refuses, before asking, a file in the upload directory that the model\'s identity cannot read', { timeout: 60_000 }, async () => {
+    const downloads = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-downloads-'))
+    roots.push(downloads)
+    const secret = join(downloads, 'secret.pdf')
+    await writeFile(secret, 'pdf', { mode: 0o600 })
+    // The model's processes run as another user, outside the file's group, once the Session's browser server is up.
+    const identity: { reader?: SubprocessChildIdentity } = {}
+    const subprocess = { apply(ctx: Context) { ctx.provide('subprocess', { get childIdentity() { return identity.reader } }) } }
+    const loaded = await load({ before: [['subprocess', subprocess]], consent: { uploadDirectory: downloads } })
+    const { uid, gid } = await stat(secret)
+    identity.reader = { uid: uid + 1, gid: gid + 1, groups: [] }
+    expect(textOf(await direct(loaded, tool('browser_file_upload'), { paths: [secret] })))
+      .toBe(`Error: browser_file_upload did not run: ${JSON.stringify(secret)} is a file the assistant cannot read itself.`)
+    expect(loaded.asked).toEqual([])
+    expect(await readdir(loaded.staging)).toEqual([])
+  })
+
+  it('sends the copy it staged and asked about, whatever replaces the original during the ask, and refuses that copy as an input', { timeout: 60_000 }, async () => {
+    const downloads = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-downloads-'))
+    roots.push(downloads)
+    const upload = join(downloads, 'tax.pdf')
+    await writeFile(upload, 'pdf')
+    // The model's shell swaps the file while the person reads the question.
+    const swap = async (): Promise<'allowed-once'> => {
+      await writeFile(upload, 'swapped')
+      return 'allowed-once'
+    }
+    const loaded = await turn({
+      consent: { uploadDirectory: downloads }, start: 'http://allowed.test/', answers: [swap],
+      script: [{ name: 'browser_file_upload', args: { paths: [upload] } }],
+    })
+    expect(loaded.asked).toEqual([
+      `Browser write: browser_file_upload on http://allowed.test. Arguments: "paths": [${JSON.stringify(upload)}]. Files sent: "tax.pdf" (3 bytes, SHA-256 ${PDF_SHA256.slice(0, 12)}). Site allowances do not cover this action.`,
+    ])
+    const [sent] = await loaded.calls()
+    expect(sent!.name).toBe('browser_file_upload')
+    const [copy] = sent!.args.paths!
+    expect(copy).toMatch(new RegExp(`^${loaded.staging}/[0-9a-f]{32}/tax\\.pdf$`, 'u'))
+    expect(sent!.files).toEqual(['pdf'])
+    expect(consentRecords(loaded.events)).toEqual([{ callId: 'call-0', tool: 'browser_file_upload', site: 'http://allowed.test', grant: 'approval', outcome: 'succeeded' }])
+    // The Session log keeps the model's own arguments.
+    expect(JSON.stringify(loaded.events)).not.toContain(loaded.staging)
+    // The copy stays for the browser to read after the call; naming it is refused before any question.
+    expect(await readFile(copy!, 'utf8')).toBe('pdf')
+    expect(textOf(await direct(loaded, tool('browser_file_upload'), { paths: [copy] })))
+      .toBe(`Error: browser_file_upload did not run: ${JSON.stringify(copy)} is not directly in ${downloads}; put the file directly in ${downloads} and retry.`)
+    expect(loaded.asked).toHaveLength(1)
+    // Unloading consent deletes its copies; loading it again clears the copies a crash left, and only those.
+    await loaded.consentFiber!.dispose()
+    expect(await readdir(loaded.staging)).toEqual([])
+    await mkdir(join(loaded.staging, basename(dirname(copy!)), 'left-over'), { recursive: true })
+    await mkdir(join(loaded.staging, 'attachments'))
+    const again = await load({ root: loaded.root, consent: { uploadDirectory: downloads } })
+    expect(again.consentFiber?.state).toBe(ACTIVE)
+    expect(await readdir(loaded.staging)).toEqual(['attachments'])
+  })
+
+  it('logs a staged copy it cannot delete when it unloads', { timeout: 60_000 }, async () => {
+    const downloads = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-downloads-'))
+    roots.push(downloads)
+    await writeFile(join(downloads, 'tax.pdf'), 'pdf')
+    const loaded = await turn({
+      consent: { uploadDirectory: downloads }, start: 'http://allowed.test/', answers: ['allowed-once'],
+      script: [{ name: 'browser_file_upload', args: { paths: [join(downloads, 'tax.pdf')] } }],
+    })
+    const [nonce] = await readdir(loaded.staging)
+    // The staging path names a file by the time consent unloads, so the copy's directory cannot be reached.
+    await rename(loaded.staging, `${loaded.staging}-moved`)
+    await writeFile(loaded.staging, '')
+    await loaded.consentFiber!.dispose()
+    expect(loaded.errors).toContainEqual(expect.stringContaining(`could not delete the staged upload copy ${join(loaded.staging, nonce!)}: Error: ENOTDIR`))
+  })
+
+  it('keeps copies within four times the upload limit, deletes them after a day, and refuses a call whose files alone pass it, deleting no other copy', { timeout: 60_000 }, async () => {
+    const downloads = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-downloads-'))
+    roots.push(downloads)
+    for (const name of ['a', 'b', 'c', 'd', 'e']) await writeFile(join(downloads, name), 'four')
+    await writeFile(join(downloads, 'x'), '1')
+    await writeFile(join(downloads, 'g'), 'xyz')
+    const staging = join(downloads, '..', `${basename(downloads)}-staging`)
+    await mkdir(staging, { mode: 0o700 })
+    roots.push(staging)
+    /** The names of the staged copies at each question. */
+    const seen: string[][] = []
+    const kept = async () => (await Promise.all((await readdir(staging)).map(nonce => readdir(join(staging, nonce))))).flat().sort()
+    const allow = async (): Promise<'allowed-once'> => {
+      seen.push(await kept())
+      return 'allowed-once'
+    }
+    // At the third question a day and an hour pass, so every earlier copy goes before the next one is staged.
+    const now = Date.now()
+    const later = async (): Promise<'allowed-once'> => {
+      vi.spyOn(Date, 'now').mockReturnValue(now + 25 * 60 * 60 * 1000)
+      return allow()
+    }
+    onTestFinished(() => { vi.restoreAllMocks() })
+    const send = (...names: string[]) => ({ name: 'browser_file_upload', args: { paths: names.map(name => join(downloads, name)) } })
+    const { events, asked } = await turn({
+      consent: { uploadDirectory: downloads, uploadStaging: staging, uploadMaxBytes: 4 }, start: 'http://allowed.test/', answers: [allow, allow, later, allow],
+      script: [send('a', 'b'), send('c', 'd'), send('e'), send('x'), send('a', 'b', 'c', 'g', 'e')],
+    })
+    // Four copies of four bytes fill the sixteen; the fifth makes room by deleting the oldest.
+    expect(seen).toEqual([['a', 'b'], ['a', 'b', 'c', 'd'], ['b', 'c', 'd', 'e'], ['x']])
+    expect(asked).toHaveLength(4)
+    // The last call's files reach fifteen bytes beside x's one; its fifth would pass the sixteen alone, so the call is
+    // refused there, and x's copy stays for the browser to read.
+    expect(toolResults(events)[4]).toEqual([{ type: 'text', text: 'Error: browser_file_upload did not run: the files of one call may not pass 16 bytes in total.' }])
+    expect(await kept()).toEqual(['x'])
   })
 
   it('withholds the result of every call that leaves or finds the tab on a denied page, and refuses writes there', { timeout: 60_000 }, async () => {
@@ -503,18 +709,6 @@ describe('browser write consent in the person-box composition', () => {
     expect(asked).toEqual([])
     expect((await calls()).map(call => call.name)).toEqual(['browser_navigate', 'browser_snapshot', 'browser_click'])
     expect(consentRecords(events)).toEqual([{ callId: 'call-1', tool: 'browser_click', site: 'http://allowed.test', grant: 'site', outcome: 'succeeded' }])
-  })
-
-  it('deletes a withheld result\'s files from the directory the server started in after the Session moves', { timeout: 60_000 }, async () => {
-    const loaded = await load({
-      script: [{ name: 'browser_navigate', args: { url: 'http://allowed.test/' } }, { name: 'browser_click', args: { element: 'Sign in', target: 'link:https://accounts.google.com/' } }],
-    })
-    await mkdir(join(loaded.root, 'elsewhere'))
-    await loaded.ctx.workingDirectory.set(loaded.agent, join(loaded.root, 'elsewhere'))
-    loaded.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Go.' }], source: { kind: 'user' } }))
-    await loaded.agent.whenIdle()
-    expect(JSON.stringify(toolResults(loaded.events)[1])).toContain('ran, but its result is withheld')
-    expect(await readdir(join(loaded.root, '.playwright-mcp'))).toEqual([])
   })
 
   it('starts a desktop row that injects consent\'s service only when consent loads', { timeout: 60_000 }, async () => {

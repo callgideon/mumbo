@@ -21,7 +21,7 @@ function resultText(result: ToolExecutionResult): string {
   return result.value
 }
 
-async function fixture(mode: 'read-only' | 'workspace-write' | 'danger-full-access' = 'danger-full-access', approval?: 'ask' | 'never') {
+async function fixture(mode: 'read-only' | 'workspace-write' | 'danger-full-access' = 'danger-full-access', approval?: 'ask' | 'never', modelTools = true) {
   const ctx = new Context()
   onTestFinished(() => ctx.fiber.dispose())
   const manager = {
@@ -34,6 +34,8 @@ async function fixture(mode: 'read-only' | 'workspace-write' | 'danger-full-acce
     listVersionExemptions: vi.fn(() => ({ exemptions: { 'example@1.2.3': ['0.1.7-alpha.1'] }, warnings: [] })),
     setVersionExemption: vi.fn(async () => ({ changed: true, application: 'applied' })),
   }
+  // Not enumerable, so the spy checks over the manager's methods skip it.
+  Object.defineProperty(manager, 'modelTools', { value: modelTools })
   ctx.provide('pluginManager', manager as unknown as PluginManager)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
@@ -47,6 +49,12 @@ async function fixture(mode: 'read-only' | 'workspace-write' | 'danger-full-acce
     callId: ToolCallId('manager-call'), signal })
   return { ctx, manager, call, fiber }
 }
+
+it('offers the model no tool when the manager withholds it, even under danger-full-access', async () => {
+  const { ctx, call } = await fixture('danger-full-access', undefined, false)
+  expect(ctx.tools.get('plugin_manager')).toBeUndefined()
+  expect((await call({ action: 'install_bundle', target: 'bundle' })).isError).toBe(true)
+})
 
 it.each(['read-only', 'workspace-write'] as const)('denies every management action in %s before accessing the manager', async (mode) => {
   const { call, manager } = await fixture(mode)

@@ -13,7 +13,7 @@ import { ComputerUseProviderName } from '@deepseek-ai/dsh-computer-use/brand'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
-import { MODIFIERS, translateKeys } from './keys.ts'
+import { isKeyArgument, MODIFIERS, translateKeys } from './keys.ts'
 import type { Modifier } from './keys.ts'
 import type {} from '@deepseek-ai/dsh-computer-use'
 import type {} from '@deepseek-ai/dsh-llm'
@@ -46,6 +46,8 @@ export interface Config {
   typeDelayMs: number
   /** Pointer movements dispatched between the start and end of a drag. */
   dragSteps: number
+  /** Subprocess identity, by the provider's name for it, that runs every command and finds its executable; omitted, the default. */
+  identity?: string
 }
 
 /** Validated configuration; `display` has no default because it names deployment-owned hardware. */
@@ -60,6 +62,7 @@ export const Config = Schema.object({
   maxScreenshotBytes: Schema.number().step(1).min(1024).max(2 ** 31 - 1).default(32 * 1024 * 1024),
   typeDelayMs: Schema.number().step(1).min(0).max(1000).default(12),
   dragSteps: Schema.number().step(1).min(1).max(240).default(10),
+  identity: Schema.string().min(1),
 }) satisfies Schema<Record<string, unknown>, Config>
 
 /** Bytes retained from diagnostic output; xdotool prints only short status lines. */
@@ -133,6 +136,56 @@ export interface InputStep {
   stdin?: string
   /** Deadline in milliseconds for this command. */
   timeoutMs: number
+}
+
+/** What one xdotool argument must be: a fixed word, a decimal count or coordinate, a button, or key chords. */
+type XdotoolArgument = `--${string}` | 'number' | 'button' | 'chord' | 'chords' | 'text'
+
+/**
+ * The xdotool commands this provider sends and their arguments. `key` and `type` take every remaining argument,
+ * and `type` takes its text only after `--`, so only these words ever start a command.
+ */
+const XDOTOOL_COMMANDS: Readonly<Record<string, readonly XdotoolArgument[]>> = {
+  getdisplaygeometry: [],
+  mousemove: ['number', 'number'],
+  mousedown: ['button'],
+  mouseup: ['button'],
+  keydown: ['chord'],
+  keyup: ['chord'],
+  click: ['--repeat', 'number', 'button'],
+  key: ['chords'],
+  type: ['--delay', 'number', '--', 'text'],
+}
+
+/**
+ * Refuse an xdotool argument list unless it is a sequence of the commands above, each with arguments of the kinds it
+ * takes, so no model-derived value can start another command such as `exec`.
+ * @param args - arguments after the xdotool executable.
+ * @throws Error naming the first argument that does not fit.
+ */
+export function assertXdotoolArgs(args: readonly string[]): void {
+  const refuse = (detail: string): never => { throw new Error(`computer-use-x11 refused xdotool arguments: ${detail}`) }
+  let index = 0
+  while (index < args.length) {
+    const command = args[index++] as string
+    const kinds = Object.hasOwn(XDOTOOL_COMMANDS, command) ? XDOTOOL_COMMANDS[command] as readonly XdotoolArgument[]
+      : refuse(`${JSON.stringify(command)} is not a command this provider sends`)
+    for (const kind of kinds) {
+      const argument = args[index] ?? refuse(`${command} is missing its arguments`)
+      const fits = kind === 'number' ? /^\d{1,6}$/.test(argument)
+        : kind === 'button' ? /^[1-7]$/.test(argument)
+          : kind === 'chord' || kind === 'chords' ? isKeyArgument(argument)
+            : kind === 'text' ? index === args.length - 1
+              : argument === kind
+      if (!fits) refuse(`${JSON.stringify(argument)} is not a valid ${kind} argument of ${command}`)
+      index++
+      if (kind === 'chords') {
+        for (; index < args.length; index++) {
+          if (!isKeyArgument(args[index] as string)) refuse(`${JSON.stringify(args[index])} is not a key name`)
+        }
+      }
+    }
+  }
 }
 
 /** Characters xdotool types through the US keymap without remapping keycodes. */
@@ -221,7 +274,7 @@ export function resolveInput(
           ...command(['key', 'shift+Insert']),
         ]
       }
-      return [{ program: 'xdotool', args: ['type', '--delay', String(config.typeDelayMs), '--file', '-'], stdin: text,
+      return [{ program: 'xdotool', args: ['type', '--delay', String(config.typeDelayMs), '--', text],
         timeoutMs: config.timeoutMs + text.length * config.typeDelayMs }]
     }
     case 'key':
@@ -254,22 +307,24 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
 
   async function resolve(command: string, label: string, install: string, field: string): Promise<string> {
     try {
-      return await ctx.subprocess.resolveExecutable(command)
+      return await ctx.subprocess.resolveExecutable(command, undefined, undefined, config.identity)
     } catch (error) {
       throw new Error(`computer-use-x11 could not find ${label} "${command}" (${errorMessage(error)}); install it (Debian/Ubuntu: apt-get install ${install}) or set ${field}`, { cause: error })
     }
   }
 
-  async function run(executable: string, args: readonly string[], options: {
+  async function run(program: 'xdotool' | 'xsel' | 'import', args: readonly string[], options: {
     signal: AbortSignal
     timeoutMs: number
     maxStdoutBytes: number
     stdin?: string
   }): Promise<{ stdout: Buffer; stderr: string }> {
+    if (program === 'xdotool') assertXdotoolArgs(args)
+    const executable = programs[program]
     const label = `${executable} ${args[0]}`
     const deadline = AbortSignal.timeout(options.timeoutMs)
     const handle = ctx.subprocess.spawn({
-      argv: [executable, ...args], cwd: '/', env, graceMs: config.graceMs,
+      argv: [executable, ...args], cwd: '/', env, graceMs: config.graceMs, identity: config.identity,
       signal: AbortSignal.any([options.signal, deadline]),
       stdio: {
         stdin: options.stdin === undefined ? 'ignore' : { data: options.stdin },
@@ -312,7 +367,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     import: await resolve(config.importPath, 'ImageMagick import', 'imagemagick', 'importPath'),
   }
   try {
-    await run(programs.xdotool, ['getdisplaygeometry'], { signal: lifetime.signal, timeoutMs: config.timeoutMs, maxStdoutBytes: DIAGNOSTIC_BYTES })
+    await run('xdotool', ['getdisplaygeometry'], { signal: lifetime.signal, timeoutMs: config.timeoutMs, maxStdoutBytes: DIAGNOSTIC_BYTES })
   } catch (error) {
     throw new Error(`computer-use-x11 cannot use X display "${config.display}": ${errorMessage(error)}. Start the X server for that display, or correct display or xauthority`, { cause: error })
   }
@@ -323,7 +378,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   /** Release held input after an interrupted or failed action; the caller's signal may already be aborted. */
   async function releaseInput(): Promise<void> {
     try {
-      await run(programs.xdotool, RELEASE_ARGS, {
+      await run('xdotool', RELEASE_ARGS, {
         signal: new AbortController().signal, timeoutMs: config.timeoutMs, maxStdoutBytes: DIAGNOSTIC_BYTES,
       })
     } catch (error) {
@@ -341,7 +396,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     if (provider === undefined || model === undefined || llm === undefined) throw new Error('computer screenshot model route could not be resolved')
     const info = await llm.resolveModelInfo(provider, model, signal)
     if (!info.inputModalities?.includes('image')) throw new Error(`computer screenshots require model "${model}" to declare image input`)
-    const { stdout } = await run(programs.import, ['-silent', '-window', 'root', 'png:-'], { signal, timeoutMs: config.timeoutMs, maxStdoutBytes: config.maxScreenshotBytes })
+    const { stdout } = await run('import', ['-silent', '-window', 'root', 'png:-'], { signal, timeoutMs: config.timeoutMs, maxStdoutBytes: config.maxScreenshotBytes })
     const [image] = await attachments.saveImages([{ data: stdout, mediaType: 'image/png' }]) as [ImageAttachmentRef]
     signal.throwIfAborted()
     const request = await attachments.readImageRequest(image, llm.imageRequestTarget(provider, model, image), signal)
@@ -408,7 +463,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         const steps = resolveInput({ ...args, action }, frames.get(agent), config)
         try {
           for (const step of steps) {
-            const { stderr } = await run(programs[step.program], step.args, {
+            const { stderr } = await run(step.program, step.args, {
               signal, timeoutMs: step.timeoutMs, maxStdoutBytes: DIAGNOSTIC_BYTES,
               ...step.stdin === undefined ? {} : { stdin: step.stdin },
             })

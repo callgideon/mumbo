@@ -141,11 +141,29 @@ export abstract class FileSystem extends Service {
    * remote/sandboxed backend may need a round-trip to map a path to a stable identity), hence
    * async even though the local backend only normalizes + realpaths.
    *
+   * A provider that confines the model to roots refuses, for every caller, a path written under a
+   * root whose real path leaves the roots, because the model can plant such links; a reader the
+   * person drives directly, such as the Files panel, passes `unconfined` to resolve as before.
+   *
    * @param path - the path to resolve; relative paths resolve against `opts.cwd`.
-   * @param opts - optional cwd override and cancellation signal.
+   * @param opts - optional cwd override, cancellation signal, and the person-facing `unconfined` resolution.
    * @returns the stable target; the same file yields the same `targetKey`.
    */
-  abstract resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget>
+  abstract resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal; unconfined?: boolean }): Promise<FsTarget>
+
+  /**
+   * Resolve a path the model supplied to a model-facing tool. A provider that confines the
+   * model to configured roots refuses, with `FS_OUTSIDE_ROOTS`, a path whose real path lies
+   * outside every root; an absent path is judged by its nearest existing ancestor. The base
+   * provider has no roots and resolves exactly like {@link resolve}. Every model-facing tool
+   * resolves model-supplied paths through this method, never through {@link resolve}.
+   * @param path - the model-supplied path; relative paths resolve against `opts.cwd`.
+   * @param opts - optional cwd override and cancellation signal.
+   * @returns the stable target, under a root when the provider confines the model.
+   */
+  resolveModelPath(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget> {
+    return this.resolve(path, opts)
+  }
 
   /**
    * Return the canonical absolute path a subprocess in this filesystem's

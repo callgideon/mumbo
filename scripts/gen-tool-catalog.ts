@@ -212,7 +212,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
     writes: ['tool/call', 'tool/result', 'user/message'],
     async mount(ctx) {
       // Schema harvest never executes a management method or opens a profile.
-      ctx.provide('pluginManager', {} as PluginManager)
+      ctx.provide('pluginManager', { modelTools: true } as PluginManager)
       await ctx.plugin(SandboxPolicy)
       await ctx.plugin(PluginManagerTools)
     },

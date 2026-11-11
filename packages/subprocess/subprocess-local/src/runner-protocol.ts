@@ -2,22 +2,28 @@
 
 import {
   chmodSync,
+  closeSync,
   existsSync,
   lstatSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   rmdirSync,
   unlinkSync,
   writeFileSync,
+  writeSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join } from 'node:path'
+import type { RunAsIdentity } from './run-as.ts'
 
 /** Target state restored by the Linux bootstrap after systemd establishes the scope. */
 export interface LinuxLaunchRequest {
   cwd: string
   env: Record<string, string>
   control?: 'pipe'
+  /** Credentials the bootstrap takes before it changes directory and enters the target. */
+  runAs?: RunAsIdentity
 }
 
 /** Bounded Node-shaped error fields allowed across a private runner boundary. */
@@ -70,6 +76,15 @@ function hasExactKeys(value: Record<string, unknown>, required: readonly string[
 
 function isStringRecord(value: unknown): value is Record<string, string> {
   return isRecord(value) && Object.values(value).every(entry => typeof entry === 'string')
+}
+
+function isId(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+function isRunAsIdentity(value: unknown): value is RunAsIdentity {
+  return isRecord(value) && hasExactKeys(value, ['uid', 'gid', 'groups'])
+    && isId(value.uid) && isId(value.gid) && Array.isArray(value.groups) && value.groups.every(isId)
 }
 
 function isSerializedRunnerError(value: unknown): value is SerializedRunnerError {
@@ -139,12 +154,17 @@ export function consumeLinuxLaunchRequest(requestPath: string): LinuxLaunchReque
   const text = readFileSync(requestPath, 'utf8')
   unlinkSync(requestPath)
   const value: unknown = JSON.parse(text)
-  if (!isRecord(value) || !hasExactKeys(value, ['cwd', 'env'], ['control'])
+  if (!isRecord(value) || !hasExactKeys(value, ['cwd', 'env'], ['control', 'runAs'])
     || typeof value.cwd !== 'string' || !isStringRecord(value.env)
-    || (value.control !== undefined && value.control !== 'pipe')) {
+    || (value.control !== undefined && value.control !== 'pipe')
+    || (value.runAs !== undefined && !isRunAsIdentity(value.runAs))) {
     throw new Error('subprocess runner received an invalid Linux launch request')
   }
-  return { cwd: value.cwd, env: value.env, ...value.control === 'pipe' ? { control: 'pipe' as const } : {} }
+  return {
+    cwd: value.cwd, env: value.env,
+    ...value.control === 'pipe' ? { control: 'pipe' as const } : {},
+    ...value.runAs === undefined ? {} : { runAs: value.runAs },
+  }
 }
 
 /**
@@ -157,13 +177,33 @@ export function writeLinuxStartupError(files: LinuxLaunchFiles, error: LinuxStar
 }
 
 /**
+ * Create the startup-error file before the bootstrap gives up the credentials that can create
+ * files in the private directory. The descriptor is close-on-exec, so a successful `execve`
+ * leaves the file empty, which {@link readLinuxStartupError} reads as no failure.
+ * @param files - private paths for this launch.
+ * @returns a one-shot writer for the pre-exec error.
+ */
+export function openLinuxStartupError(files: LinuxLaunchFiles): (error: LinuxStartupError) => void {
+  const descriptor = openSync(files.startupErrorPath, 'wx', 0o600)
+  return (error) => {
+    try {
+      writeSync(descriptor, JSON.stringify(error))
+    } finally {
+      closeSync(descriptor)
+    }
+  }
+}
+
+/**
  * Read the Linux pre-exec error, if the bootstrap published one.
  * @param path - expected startup-error path.
- * @returns the validated failure, or undefined when none was published.
+ * @returns the validated failure, or undefined when none was published or the pre-opened file stayed empty.
  */
 export function readLinuxStartupError(path: string): LinuxStartupError | undefined {
   if (!existsSync(path)) return undefined
-  const value: unknown = JSON.parse(readFileSync(path, 'utf8'))
+  const text = readFileSync(path, 'utf8')
+  if (text === '') return undefined
+  const value: unknown = JSON.parse(text)
   if (!isRecord(value)) throw new Error('subprocess runner emitted an invalid startup error')
   return parseErrorResult(value)
 }
