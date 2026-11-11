@@ -58,7 +58,10 @@ resource "aws_iam_role_policy" "nodes" {
     Resource = [aws_s3_bucket.templates.arn, "${aws_s3_bucket.templates.arn}/*"] },
     { Effect = "Allow", Action = ["kms:Decrypt", "kms:GenerateDataKey"], Resource = aws_kms_key.data.arn },
     { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = [aws_secretsmanager_secret.mtls["orchestrator"].arn, aws_secretsmanager_secret.e2b.arn] },
-    { Effect = "Allow", Action = ["route53:ChangeResourceRecordSets", "route53:ListResourceRecordSets"], Resource = "arn:aws:route53:::hostedzone/${local.zone_id}" },
+    # The zone is shared by every cell: a node may change only its own cell's orchestrators record (design R3).
+    { Effect = "Allow", Action = "route53:ChangeResourceRecordSets", Resource = "arn:aws:route53:::hostedzone/${local.zone_id}",
+    Condition = { "ForAllValues:StringEquals" = { "route53:ChangeResourceRecordSetsNormalizedRecordNames" = [local.orch_dns] } } },
+    { Effect = "Allow", Action = "route53:ListResourceRecordSets", Resource = "arn:aws:route53:::hostedzone/${local.zone_id}" },
     { Effect = "Allow", Action = "ec2:DescribeInstances", Resource = "*" },
     { Effect = "Allow", Action = "autoscaling:CompleteLifecycleAction", Resource = "arn:aws:autoscaling:${local.region}:${data.aws_caller_identity.this.account_id}:autoScalingGroup:*:autoScalingGroupName/${local.name}-nodes" },
   ] })
