@@ -168,8 +168,12 @@ ExecStart=/var/lib/e2b/bin/orchestrator
 StandardOutput=append:/var/log/e2b/orchestrator.log
 StandardError=inherit
 # Boot race: while systemd is still starting units it can withhold cpu and memory from the root cgroup, and the
-# orchestrator exits with "failed to initialize root cgroup". Restart below retries until they settle (observed: 3–5
-# restarts within about 25 s at first boot); no box is placed before the node serves /health.
+# orchestrator exits with "failed to initialize root cgroup". The early write above can be undone: a Mumbai node
+# (2026-11-11) kept only "memory pids" and restarted 199 times. So every start enables them again, then Restart below
+# retries; no box is placed before the node serves /health.
+# CPUAccounting keeps systemd from dropping +cpu (it disables controllers no unit asks for); ExecStartPre is the backup.
+CPUAccounting=yes
+ExecStartPre=/bin/sh -c 'echo "+cpu +memory" > /sys/fs/cgroup/cgroup.subtree_control'
 ExecStop=/usr/local/bin/mumbo-drain
 TimeoutStartSec=15min
 TimeoutStopSec=30min
