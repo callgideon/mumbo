@@ -223,9 +223,15 @@
 # MUMBO_PANEL_ADMINS); an empty list admits nobody but the box owner. githubApp is the GitHub App bot the agent acts as,
 # from MUMBO_GITHUB_APP_LOGIN (`<slug>[bot]`) and MUMBO_GITHUB_APP_USER_ID, the bot user's numeric id from
 # `gh api 'users/<slug>[bot]' --jq .id`, not the App ID; with only one of them set, the plugin fails at load. With
-# neither, the agent CLI must be signed in to a user account.
+# neither, the agent CLI must be signed in to a user account. Under agent containment (B24) the box's start script exports
+# MUMBO_WORK_DIR, MUMBO_WORKER_DIR and MUMBO_GH_CONFIG_DIR, the ticket work directory, the root-owned worker directory and
+# the orchestrator's GH_CONFIG_DIR, which the plugin requires under a run-as subprocess provider; each key is set only
+# when its variable is, so a box without containment keeps the defaults.
 - id: dsh-superagent
   config:
     stateDir: !!js dshHomePath('superagent')
+    workDirectory: !!js process.env.MUMBO_WORK_DIR || undefined
+    workerDirectory: !!js process.env.MUMBO_WORKER_DIR || undefined
+    ghConfigDirectory: !!js process.env.MUMBO_GH_CONFIG_DIR || undefined
     panelAdmins: !!js (process.env.MUMBO_PANEL_ADMINS ?? '').split(',').filter(Boolean)
     githubApp: !!js "process.env.MUMBO_GITHUB_APP_LOGIN || process.env.MUMBO_GITHUB_APP_USER_ID ? { login: process.env.MUMBO_GITHUB_APP_LOGIN, userId: Number(process.env.MUMBO_GITHUB_APP_USER_ID) } : undefined"

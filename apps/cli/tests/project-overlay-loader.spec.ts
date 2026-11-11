@@ -4,7 +4,7 @@
  * the `dsh-superagent` row. Only the Runtime and the services it needs are stubbed.
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -29,10 +29,27 @@ afterEach(async () => {
   vi.unstubAllEnvs()
 })
 
-const ENV = ['MUMBO_PANEL_ADMINS', 'MUMBO_GITHUB_APP_LOGIN', 'MUMBO_GITHUB_APP_USER_ID'] as const
-interface Booted { home: string; stateDir?: string; panelAdmins?: unknown; githubApp?: unknown; rejection?: string; failure?: string }
-/** Boot the project overlay's rows with `env` (unset variables are empty); returns the machine settings `dsh-superagent` resolved, the rejection of `machineOf`, or the load failure of its configuration. */
-async function boot(env: Partial<Record<(typeof ENV)[number], string | undefined>> = {}): Promise<Booted> {
+const ENV = [
+  'MUMBO_PANEL_ADMINS', 'MUMBO_GITHUB_APP_LOGIN', 'MUMBO_GITHUB_APP_USER_ID', 'MUMBO_WORK_DIR', 'MUMBO_WORKER_DIR', 'MUMBO_GH_CONFIG_DIR',
+] as const
+/** The directories `dsh-superagent` resolved: as configured, and as `machineOf` settles them. */
+interface Directories { workDirectory?: string; workerDirectory?: string; ghConfigDirectory?: string }
+interface Booted {
+  home: string
+  stateDir?: string
+  panelAdmins?: unknown
+  githubApp?: unknown
+  configured?: Directories
+  machine?: Directories
+  rejection?: string
+  failure?: string
+}
+/**
+ * Boot the project overlay's rows with `env` (unset variables are empty); returns the machine settings `dsh-superagent`
+ * resolved, the rejection of `machineOf`, under a run-as subprocess provider when `runAs`, or the load failure of its
+ * configuration.
+ */
+async function boot(env: Partial<Record<(typeof ENV)[number], string | undefined>> = {}, runAs = false): Promise<Booted> {
   dir = mkdtempSync(join(tmpdir(), 'dsh-project-loader-'))
   const home = join(dir, 'home')
   vi.stubEnv('DSH_HOME', home)
@@ -53,8 +70,12 @@ async function boot(env: Partial<Record<(typeof ENV)[number], string | undefined
     apply(_ctx: Context, resolved: DeploymentConfig) {
       seen.stateDir = resolved.stateDir
       seen.panelAdmins = (resolved as { panelAdmins?: unknown }).panelAdmins
+      const { workDirectory, workerDirectory, ghConfigDirectory } = resolved
+      seen.configured = { workDirectory, workerDirectory, ghConfigDirectory }
       try {
-        seen.githubApp = machineOf(resolved).githubApp
+        const machine = machineOf(resolved, runAs)
+        seen.githubApp = machine.githubApp
+        seen.machine = { workDirectory: machine.workDirectory, workerDirectory: machine.workerDirectory, ghConfigDirectory: machine.ghConfigDirectory }
       } catch (error) {
         // The plugin refuses keys its Config does not list; kept so the test reports it after the other assertions.
         seen.rejection = String(error)
@@ -100,6 +121,30 @@ describe('project-box overlay in the real Loader', () => {
     expect(result.githubApp).toEqual(expected)
     expect(result.rejection).toBeUndefined()
     expect(result.failure).toBeUndefined()
+  })
+  it('leaves the directories unset without their variables, so the plugin keeps its defaults', { timeout: 60_000 }, async () => {
+    const result = await boot()
+    expect(result.configured).toEqual({ workDirectory: undefined, workerDirectory: undefined, ghConfigDirectory: undefined })
+    expect(result.machine).toEqual({ workDirectory: join(result.home, 'superagent', 'work'), workerDirectory: join(result.home, 'superagent'), ghConfigDirectory: undefined })
+  })
+  it('reads the directories from the containment variables, which a run-as composition requires', { timeout: 60_000 }, async () => {
+    // Directories this process owns stand in for the box's root-owned ones, which the run-as checks require.
+    const scratch = mkdtempSync(join(tmpdir(), 'dsh-project-directories-'))
+    try {
+      const [work, worker, gh] = ['work', 'worker', 'gh'].map(name => join(scratch, name))
+      for (const directory of [work!, worker!, gh!]) mkdirSync(directory, { mode: 0o700 })
+      const contained = { MUMBO_WORK_DIR: work, MUMBO_WORKER_DIR: worker, MUMBO_GH_CONFIG_DIR: gh }
+      const result = await boot(contained, true)
+      expect(result.configured).toEqual({ workDirectory: work, workerDirectory: worker, ghConfigDirectory: gh })
+      expect(result.machine).toEqual({ workDirectory: work, workerDirectory: worker, ghConfigDirectory: gh })
+      expect(result.rejection).toBeUndefined()
+      // Under run-as, the plugin refuses the directories' defaults: no worker or gh directory, and a work directory in stateDir.
+      expect((await boot({}, true)).rejection).toMatch(/workerDirectory must be set under a run-as subprocess provider/u)
+      expect((await boot({ ...contained, MUMBO_WORK_DIR: undefined }, true)).rejection)
+        .toMatch(/workDirectory .*superagent\/work \(its default, <stateDir>\/work\) is in stateDir/u)
+    } finally {
+      rmSync(scratch, { recursive: true, force: true })
+    }
   })
   it.each([
     ['the login alone', { MUMBO_GITHUB_APP_LOGIN: 'mumbo-bot[bot]' }],
