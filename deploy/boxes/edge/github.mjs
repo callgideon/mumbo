@@ -85,8 +85,9 @@ const AGENT_PERMISSIONS = { contents: 'write', pull_requests: 'write', issues: '
  * push passes only when every command updates `claim.worker.ref`. Every other request is refused 403 `a worker token
  * fetches and pushes git only`. After every other check, the token and, for a push, the whole pack, and immediately
  * before GitHub is asked, `claim.worker.fence(updates)` runs (`updates` the push's `{ ref, old, new }` commands, [] for
- * the probe, undefined for a fetch or ref advert); when it rejects, its `message` and `status` (503 without one) are the
- * refusal and nothing reaches GitHub. Worker refusals are `text/plain`, which git shows to its user.
+ * the probe, undefined for a fetch or ref advert); when it rejects, its `message` and `status` are the refusal, a
+ * rejection without `status` rejects this handler, and nothing reaches GitHub. Worker refusals are `text/plain`, which git
+ * shows to its user. GitHub's 401 is answered 502 to a worker, since git answers any 401 by asking for a password.
  * Credentials: requests to api.github.com and github.com carry the project's App installation token, for the project's
  * bound repositories and AGENT_PERMISSIONS (github-app.mjs tokenCache: one mint at a time per project, reused until 5
  * minutes before expiry, minted anew when the bound repositories change, dropped when GitHub answers 401, a failure
@@ -243,7 +244,10 @@ export function githubForwarder({ store, halt, app, agentId, fetchImpl, now = Da
       headers.authorization = host === 'api.github.com' ? `token ${t}` : `Basic ${Buffer.from(`x-access-token:${t}`).toString('base64')}`
     }
     if (claim.worker) {
-      try { await claim.worker.fence(updates) } catch (e) { return refuse(e.message, e.status ?? 503) }
+      try { await claim.worker.fence(updates) } catch (e) {
+        if (e.status === undefined) throw e
+        return refuse(e.message, e.status)
+      }
     }
     // A client that left during the checks gets nothing forwarded; one that leaves later aborts the upstream request,
     // so an abandoned push frees its buffer with its slot.
@@ -259,6 +263,10 @@ export function githubForwarder({ store, halt, app, agentId, fetchImpl, now = Da
     }
     // GitHub no longer takes the token (revoked, or the installation changed): the next request mints another.
     if (upstream.status === 401 && headers.authorization) tokens.forget(id)
+    if (claim.worker && upstream.status === 401) {
+      upstream.body?.cancel().catch(() => {})  // its body is not read; a failed cancel leaves the connection to undici
+      return refuse('GitHub refused mumbo-bot\'s token; try again', 502)
+    }
     const out = {}
     for (const [k, v] of upstream.headers) if (!RESPONSE_DROP.has(k)) out[k] = v
     res.writeHead(upstream.status, out)

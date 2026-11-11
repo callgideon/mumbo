@@ -1761,6 +1761,11 @@ export const readBody = (req, cap) => new Promise((resolve, reject) => {
   req.on('close', () => { if (!req.complete) reject(new Error('request aborted')) })
 })
 
+// The model listener's `requestTimeout`: Node answers 408 to a request still arriving after it (300 s by default). A push's
+// pack (github.mjs PUSH_MAX, 256 MB) can come from a worker's home uplink, and this takes PUSH_MAX at about 1.8 Mbps, 50 MB
+// at about 0.35 Mbps.
+const MODEL_REQUEST_MS = 20 * 60_000
+
 // mcp (sandboxes.mjs mcpServer) serves /mcp and reports (sandboxes.mjs reportServer) /mcp/report to verified boxes.
 // github (github.mjs), halt (halt.mjs) and tokens (budget.mjs tokenBudget) are optional like mcp: absent, /github/
 // answers 404, nothing is halted and tokens are not counted. main() passes all of them. `door` (door.mjs) gets every
@@ -1771,7 +1776,7 @@ export const readBody = (req, cap) => new Promise((resolve, reject) => {
 export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, mcp, reports, door, workerGit, github, halt, tokens, fetchImpl = fetch, log = console.log }) {
   if (cfg.openrouterModels?.length && !cfg.openrouterKey) throw new Error('edge: OPENROUTER_MODELS needs OPENROUTER_API_KEY')
   const gitRoute = workerGitRoute(cfg)
-  return createServer((req, res) => route(req, res).catch((e) => {
+  return createServer({ requestTimeout: MODEL_REQUEST_MS }, (req, res) => route(req, res).catch((e) => {
     log(JSON.stringify({ edge: 'error', path: req.url?.split('?')[0], error: e.message }))
     if (!res.headersSent) json(res, 502, { error: 'edge error' }); else res.destroy()
   }))

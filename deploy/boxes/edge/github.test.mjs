@@ -71,7 +71,8 @@ const sendThenReset = (port, path, afterMs) => {
  * answered by `mint(asked body, nth mint, state.t)`, by default a token AGENT, and the installation lookup by
  * `installation()`. `state.t` is the clock (epoch ms).
  * `isHalted` takes `haltMs` and records each principal it is asked about in `haltChecks`; `state.settled` counts
- * handlers that have returned. With `state.worker` set, the claim is a worker's: `{ u: state.principal, worker }`.
+ * handlers that have returned, and a handler that rejects answers 500 with its error kept in `state.thrown`. With
+ * `state.worker` set, the claim is a worker's: `{ u: state.principal, worker }`.
  */
 async function forwarder({ reply = ok, lookup = lookupOk, author = () => Response.json({ user: { login: 'mumbo-bot[bot]', id: AGENT_ID } }), app = APP, noAgentId = false, mint = (asked, n, t) => granted(asked, 'AGENT', t), installation = () => Response.json({ id: 77 }), haltMs = 0, pushTimeoutMs } = {}) {
   const store = memoryStore()
@@ -102,7 +103,8 @@ async function forwarder({ reply = ok, lookup = lookupOk, author = () => Respons
     return reply(url, init)
   }
   const forward = githubForwarder({ store, halt: { isHalted }, app, agentId: noAgentId ? undefined : AGENT_ID, fetchImpl, now: () => state.t, log: (line) => logs.push(JSON.parse(line)), pushTimeoutMs })
-  const server = createServer((req, res) => forward(req, res, state.worker ? { u: state.principal, worker: state.worker } : { u: state.principal, b: 'b1' }).finally(() => { state.settled++ }))
+  const server = createServer((req, res) => forward(req, res, state.worker ? { u: state.principal, worker: state.worker } : { u: state.principal, b: 'b1' })
+    .catch((e) => { state.thrown = e; res.writeHead(500).end() }).finally(() => { state.settled++ }))
   await new Promise(r => server.listen(0, '127.0.0.1', r))
   const port = server.address().port
   const call = (path, { method = 'GET', headers = {}, body } = {}) => new Promise((resolve, reject) => {
@@ -624,7 +626,7 @@ test('worker mode: a push passes only when every command updates the token\'s re
   assert.equal(f.fenced.length, 3, 'a refused push is not fenced')
 })
 
-test('worker mode: a refusing fence is the answer and nothing reaches GitHub; halted, a push is refused before its fence and a fetch passes', async (t) => {
+test('worker mode: a refusing fence is the answer, one without a status rejects, and nothing reaches GitHub; halted, a push is refused before its fence and a fetch passes', async (t) => {
   const f = await workerForwarder(); t.after(f.close)
   const advert = 'github.com/callgideon/mumbo.git/info/refs?service=git-receive-pack'
   const pushPack = { method: 'POST', body: pkt(`${A} ${B} ${REF}\0report-status\n`) + '0000' }
@@ -635,8 +637,9 @@ test('worker mode: a refusing fence is the answer and nothing reaches GitHub; ha
   const pushed = await f.call('github.com/callgideon/mumbo.git/git-receive-pack', pushPack)
   assert.equal(pushed.status, 403)
   assert.equal(pushed.body, 'Mumbo edge refused POST /callgideon/mumbo.git/git-receive-pack: fenced: lease_expired\n')
-  f.fenceAnswer = async () => { throw new Error('no answer') }
-  assert.equal((await f.call(advert)).status, 503, 'a rejection without a status')
+  f.fenceAnswer = async () => { throw new Error('a bug') }
+  assert.equal((await f.call(advert)).status, 500, 'a rejection without a status rejects the handler')
+  assert.equal(f.state.thrown.message, 'a bug')
   assert.deepEqual([f.calls.length, f.fenced.length], [0, 3])
   f.fenceAnswer = async () => {}
   f.halted.add(ME)

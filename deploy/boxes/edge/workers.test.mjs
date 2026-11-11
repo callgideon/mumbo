@@ -3,8 +3,10 @@
 // project box's fence (Superagent's POST /orchestrator/api/workers/:assignment/fence), and the real GitHub forwarder in
 // front of a fake GitHub.
 import assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
 import { createHmac, generateKeyPairSync } from 'node:crypto'
 import { createServer, request } from 'node:http'
+import { tmpdir } from 'node:os'
 import { test } from 'node:test'
 import { door } from './door.mjs'
 import { boxFetcher, modelServer, signBox, verifyBox } from './edge.mjs'
@@ -39,11 +41,13 @@ const send = (port, { host = PUBLIC, path, method = 'GET', headers = {}, body } 
  * The model listener with the door and the worker git route over a memory store. A owns project P, bound to
  * CallGideon/Mumbo, and project Q, with none; A's key `record` lists P only. Project boxes answer through a fake client
  * proxy: the fence with `state.fence(seen)` (default 200 `{ ok: true }`), recorded in `fences`; `state.down` keeps the box
- * from being ready. GitHub answers 200 and records each forwarded request in `github`. `claims` are a worker token's for P.
+ * from being ready, and `state.bug`, a message, makes reaching it throw a TypeError. GitHub answers `state.reply()`
+ * (default 200) and records each forwarded request in `github`. `claims` are a worker token's for P.
  */
 async function setup() {
   const store = memoryStore(), lines = [], github = [], fences = [], halted = new Set()
-  const state = { now: NOW, down: false, fence: () => ({ body: { ok: true, leaseExpiresAt: '2026-11-11T12:20:00Z' } }) }
+  const state = { now: NOW, down: false, fence: () => ({ body: { ok: true, leaseExpiresAt: '2026-11-11T12:20:00Z' } }),
+    reply: () => new Response('ok', { status: 200, headers: { 'content-type': 'application/x-git-upload-pack-advertisement' } }) }
   const now = () => state.now, log = (l) => lines.push(l)
   const proj = projects({ store, admitted: () => true, log: () => {} })
   const P = (await proj.create(A, 'Mine')).id, Q = (await proj.create(A, 'Other')).id
@@ -64,7 +68,7 @@ async function setup() {
   await new Promise(r => proxy.listen(0, '127.0.0.1', r))
   const relay = projectRelay({ projects: proj, boxFetch: boxFetcher({ publicHost: PUBLIC, proxy: new URL(`http://127.0.0.1:${proxy.address().port}`) }), siteHostOf: (p) => `site-${p}`,
     edgeHost: PUBLIC, readyMs: 50, log,
-    box: { ensure: (p) => (state.down ? new Promise(() => {}) : Promise.resolve({ id: `box-${p}`, token: 'T', traffic: 'TT', host: `site-${p}`, member: (e) => `signed:${e}` })) } })
+    box: { ensure: (p) => (state.down ? new Promise(() => {}) : Promise.resolve({ id: `box-${p}`, token: 'T', traffic: 'TT', host: `site-${p}`, member: (e) => { if (state.bug) throw new TypeError(state.bug); return `signed:${e}` } })) } })
 
   const fetchImpl = async (url, init) => {
     if (init.headers.authorization?.startsWith('Bearer ')) {  // the App's installation lookup and token mint
@@ -73,7 +77,7 @@ async function setup() {
       return Response.json({ token: 'AGENT', expires_at: new Date(state.now + HOUR).toISOString(), repositories: asked.repositories.map(n => ({ full_name: `callgideon/${n}` })), permissions: { ...asked.permissions, metadata: 'read' } }, { status: 201 })
     }
     github.push({ method: init.method, url, authorization: init.headers.authorization, body: init.body == null ? undefined : Buffer.from(await new Response(init.body).arrayBuffer()).toString('latin1') })
-    return new Response('ok', { status: 200, headers: { 'content-type': 'application/x-git-upload-pack-advertisement' } })
+    return state.reply()
   }
   const forward = githubForwarder({ store, halt: { isHalted: async (u) => halted.has(u) }, app: { appId: '1', privateKey }, agentId: 1, fetchImpl, now, log })
   const tokens = workerTokens({ edgeKey: 'k', hours: 8, now })
@@ -83,7 +87,7 @@ async function setup() {
   await new Promise(r => server.listen(0, '127.0.0.1', r))
   const claims = { p: P, t: '2'.repeat(32), a: ASSIGNMENT, l: LEASE, repo: 'callgideon/mumbo', ref: REF, k: record.id, o: A }
   const git = (token, path, init = {}) => send(server.address().port, { ...init, path: `/mcp/git/${path}`, headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...init.headers } })
-  return { store, proj, keys, key, record, P, Q, allowed, halted, state, tokens, claims, git, port: server.address().port, lines, github, fences,
+  return { store, proj, keys, key, record, P, Q, allowed, halted, state, tokens, claims, git, server, port: server.address().port, lines, github, fences,
     logs: () => lines.map(l => JSON.parse(l)), close: () => { server.close(); proxy.close() } }
 }
 
@@ -135,7 +139,7 @@ test('the route lives in workerGitRoute: /mcp/git/ on the public host; the model
   } finally { t.close() }
 })
 
-test('git route admission: no or another credential is 401 with no challenge, an Origin 403, a bad path 400 before any rewrite; a revoked key, a disabled owner, a key or owner off the project, and another repository are refused; none reaches the box or GitHub', async () => {
+test('git route admission: no or another credential, an Origin, an expired token and a revoked or expired key are 403, a bad path 400 before any rewrite; a disabled owner, a key or owner off the project, and another repository are refused; none reaches the box or GitHub', async () => {
   const t = await setup()
   try {
     const token = t.tokens.mint(t.claims), advert = 'callgideon/mumbo.git/info/refs?service=git-upload-pack'
@@ -143,12 +147,11 @@ test('git route admission: no or another credential is 401 with no challenge, an
       assert.equal(r.status, status, r.body)
       assert.ok(r.body.startsWith(`${code}: `), r.body)
       assert.equal(r.headers['content-type'], 'text/plain; charset=utf-8')
-      assert.equal(r.headers['www-authenticate'], undefined, 'no challenge, so git asks no credential helper')
     }
-    refusedWith(await t.git(undefined, advert), 401, 'invalid_token')
-    refusedWith(await t.git(undefined, advert, { headers: { authorization: `Basic ${Buffer.from(`x:${token}`).toString('base64')}` } }), 401, 'invalid_token')
-    refusedWith(await send(t.port, { path: `/mcp/git/${advert}`, headers: ['authorization', `Bearer ${token}`, 'authorization', `Bearer ${token}`] }), 401, 'invalid_token')
-    refusedWith(await t.git(signBox('k', A, 'box1'), advert), 401, 'invalid_token')
+    refusedWith(await t.git(undefined, advert), 403, 'invalid_token')
+    refusedWith(await t.git(undefined, advert, { headers: { authorization: `Basic ${Buffer.from(`x:${token}`).toString('base64')}` } }), 403, 'invalid_token')
+    refusedWith(await send(t.port, { path: `/mcp/git/${advert}`, headers: ['authorization', `Bearer ${token}`, 'authorization', `Bearer ${token}`] }), 403, 'invalid_token')
+    refusedWith(await t.git(signBox('k', A, 'box1'), advert), 403, 'invalid_token')
     refusedWith(await t.git(token, advert, { headers: { origin: `https://${PUBLIC}` } }), 403, 'origin_refused')
     for (const path of ['callgideon/mumbo.git/../mumbo.git/info/refs', 'callgideon/mumbo.git/%2e%2e/info/refs', 'callgideon/%6dumbo.git/info/refs', 'callgideon/mumbo.git/info%2frefs',
       'callgideon//mumbo.git/info/refs', 'callgideon/mumbo.git/./info/refs', 'callgideon/mumbo.git/info/refs/', 'callgideon/mumbo/info/refs', 'callgideon/mumbo.git',
@@ -157,7 +160,7 @@ test('git route admission: no or another credential is 401 with no challenge, an
     }
     refusedWith(await t.git(t.tokens.mint({ ...t.claims, p: t.Q }), advert), 403, 'project_not_allowed')
     refusedWith(await t.git(token, 'callgideon/other.git/info/refs?service=git-upload-pack'), 403, 'wrong_repository')
-    refusedWith(await t.git(t.tokens.mint({ ...t.claims, k: 'nosuchkey' }), advert), 401, 'invalid_api_key')
+    refusedWith(await t.git(t.tokens.mint({ ...t.claims, k: 'nosuchkey' }), advert), 403, 'invalid_api_key')
     t.allowed.delete(A)
     refusedWith(await t.git(token, advert), 403, 'user_disabled')
     t.allowed.add(A)
@@ -170,12 +173,12 @@ test('git route admission: no or another credential is 401 with no challenge, an
     t.state.now = NOW
     const weekToken = t.tokens.mint({ ...t.claims, k: week.id })
     t.state.now = NOW + 2 * HOUR
-    refusedWith(await t.git(weekToken, advert), 401, 'key_expired')
+    refusedWith(await t.git(weekToken, advert), 403, 'key_expired')
     t.state.now = NOW
     await t.keys.revoke(A, t.record.id)
-    refusedWith(await t.git(token, advert), 401, 'key_revoked')
+    refusedWith(await t.git(token, advert), 403, 'key_revoked')
     t.state.now = NOW + 8 * HOUR
-    refusedWith(await t.git(token, advert), 401, 'token_expired')
+    refusedWith(await t.git(token, advert), 403, 'token_expired')
     assert.equal(t.fences.length + t.github.length, 0)
   } finally { t.close() }
 })
@@ -205,7 +208,7 @@ test('fetch and push: each request is fenced on the project box as the key\'s ow
   } finally { t.close() }
 })
 
-test('the fence decides: a box 409 or 404 is 403 fenced with its code and no box text, an unreachable or garbled box 503; nothing reaches GitHub, and a push to another ref is refused before any fence', async () => {
+test('the fence decides: a box 409 or 404 is 403 fenced with its code and no box text, an unreachable or garbled box 503, an edge bug 502; each failure is logged; nothing reaches GitHub, and a push to another ref is refused before any fence', async () => {
   const t = await setup()
   try {
     const token = t.tokens.mint(t.claims)
@@ -226,8 +229,16 @@ test('the fence decides: a box 409 or 404 is 403 fenced with its code and no box
       assert.equal(r.status, 503, why)
       assert.match(r.body, /: the project box did not answer the fence( \(\w+\))?; try again\n$/, why)
     }
+    Object.assign(t.state, { down: false, bug: 'fence bug' })
+    const broken = await push(REF)
+    assert.deepEqual([broken.status, JSON.parse(broken.body)], [502, { error: 'edge error' }], 'an error with no status or code is no fence outage')
+    t.state.bug = undefined
+    await settle()
+    const failed = t.logs().filter(l => l.msg === 'fence failed')
+    assert.deepEqual(failed.map(l => [l.assignment, l.code]), [[ASSIGNMENT, 'box_unavailable'], [ASSIGNMENT, 'box_refused'], [ASSIGNMENT, undefined], [ASSIGNMENT, undefined]])
+    assert.deepEqual(failed.slice(2).map(l => l.error), ['the box answered 200 without ok: true', 'fence bug'])
+    assert.ok(t.logs().some(l => l.edge === 'error' && l.error === 'fence bug'), 'modelServer reports it as an edge error')
     assert.equal(t.github.length, 0)
-    t.state.down = false
     const fenced = t.fences.length
     for (const ref of ['refs/heads/main', 'refs/heads/agent/other']) assert.equal((await push(ref)).status, 403, ref)
     assert.equal((await t.git(token, 'callgideon/mumbo.git/git-receive-pack', { method: 'POST', body: pushBody(`${OLD} ${ZERO} ${REF}`) })).status, 403, 'a delete')
@@ -258,8 +269,45 @@ test('one worker-git line per request with the token\'s project, Ticket, Assignm
       { edge: 'worker-git', ...who, method: 'GET', path, outcome: 'fenced: lease_expired', status: 403 },
       { edge: 'worker-git', ...who, method: 'POST', path: '/mcp/git/callgideon/mumbo.git/git-receive-pack', outcome: 'http_403', status: 403 },
       { edge: 'worker-git', method: 'GET', path: '/mcp/git/callgideon/mumbo.git/%2e%2e/info/refs', outcome: 'invalid_path', status: 400 },
-      { edge: 'worker-git', method: 'GET', path, outcome: 'invalid_token', status: 401 },
+      { edge: 'worker-git', method: 'GET', path, outcome: 'invalid_token', status: 403 },
     ])
     for (const l of t.lines) for (const part of token.split('.').slice(1)) assert.ok(!l.includes(part), l)
+  } finally { t.close() }
+})
+
+/** `git ls-remote` of the route as a worker runs it: the token in http.extraHeader, no terminal prompt and no askpass
+ *  program, credential helper, user or system config; resolves git's stderr. */
+const lsRemote = (port, token) => new Promise((resolve) => {
+  execFile('git', ['-c', `http.extraHeader=Authorization: Bearer ${token}`, '-c', `http.curloptResolve=${PUBLIC}:${port}:127.0.0.1`, 'ls-remote', `http://${PUBLIC}:${port}/mcp/git/callgideon/mumbo.git`],
+    { cwd: tmpdir(), env: { PATH: process.env.PATH, GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' }, timeout: 20_000 },
+    (_, __, stderr) => resolve(stderr))
+})
+
+test('git shows a refusal to the worker: an expired token and GitHub refusing mumbo-bot\'s token reach git as remote: lines, never as a password prompt', async () => {
+  const t = await setup()
+  try {
+    const token = t.tokens.mint(t.claims)
+    t.state.reply = () => new Response('Invalid username or token', { status: 401, headers: { 'www-authenticate': 'Basic realm="GitHub"', 'content-type': 'text/plain' } })
+    const github401 = await lsRemote(t.port, token)
+    assert.match(github401, /^remote: Mumbo edge refused GET \/callgideon\/mumbo\.git\/info\/refs: GitHub refused mumbo-bot's token; try again$/m)
+    t.state.now = NOW + 8 * HOUR
+    const expired = await lsRemote(t.port, token)
+    assert.match(expired, /^remote: token_expired: the worker token expired; repeat task_claim with the same request_id$/m)
+    for (const stderr of [github401, expired]) assert.doesNotMatch(stderr, /Username|Password|Authentication failed/, stderr)
+  } finally { t.close() }
+})
+
+test('a token minted with a mixed-case repository reaches it: mint lowercases repo', async () => {
+  const t = await setup()
+  try {
+    const token = t.tokens.mint({ ...t.claims, repo: 'CallGideon/Mumbo' })
+    assert.equal((await t.git(token, 'callgideon/mumbo.git/info/refs?service=git-upload-pack')).status, 200)
+  } finally { t.close() }
+})
+
+test('the model listener takes a request body for 20 minutes, so a worker\'s 256 MB push needs about 1.8 Mbps, not Node\'s default 300 s', async () => {
+  const t = await setup()
+  try {
+    assert.equal(t.server.requestTimeout, 20 * 60_000)
   } finally { t.close() }
 })
