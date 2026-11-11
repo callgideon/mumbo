@@ -9,6 +9,12 @@ readonly BUBBLEWRAP_VERSION='0.12.0-1'
 readonly BUBBLEWRAP_SHA256='db4d572a7927bfd34cc9b8e24b56983efa8e0483d03da6c810f6caae081dcc36'
 # The recorded build remains addressable after Ubuntu prunes its live package pool.
 readonly BUBBLEWRAP_URL="https://launchpad.net/ubuntu/+source/bubblewrap/${BUBBLEWRAP_VERSION}/+build/33546835/+files/bubblewrap_${BUBBLEWRAP_VERSION}_amd64.deb"
+# Fallbacks while Launchpad is unreachable: Ubuntu's pool serves the same payload until it prunes this version, and
+# the checksum below decides for every source.
+readonly BUBBLEWRAP_FALLBACK_URLS=(
+  "https://mirrors.edge.kernel.org/ubuntu/pool/main/b/bubblewrap/bubblewrap_${BUBBLEWRAP_VERSION}_amd64.deb"
+  "http://archive.ubuntu.com/ubuntu/pool/main/b/bubblewrap/bubblewrap_${BUBBLEWRAP_VERSION}_amd64.deb"
+)
 
 : "${RUNNER_TEMP:?prepare-ci-bubblewrap requires RUNNER_TEMP}"
 : "${GITHUB_PATH:?prepare-ci-bubblewrap requires GITHUB_PATH}"
@@ -21,8 +27,16 @@ fi
 archive="${RUNNER_TEMP}/bubblewrap_${BUBBLEWRAP_VERSION}_amd64.deb"
 root="${RUNNER_TEMP}/dsh-bubblewrap"
 
-curl --fail --silent --show-error --location --retry 3 --retry-all-errors --output "$archive" "$BUBBLEWRAP_URL"
-printf '%s  %s\n' "$BUBBLEWRAP_SHA256" "$archive" | sha256sum --check --status
+fetched=
+for url in "$BUBBLEWRAP_URL" "${BUBBLEWRAP_FALLBACK_URLS[@]}"; do
+  if curl --fail --silent --show-error --location --connect-timeout 15 --max-time 120 --retry 2 --retry-all-errors --output "$archive" "$url" \
+    && printf '%s  %s\n' "$BUBBLEWRAP_SHA256" "$archive" | sha256sum --check --status; then
+    fetched=1
+    break
+  fi
+  echo "prepare-ci-bubblewrap: $url did not serve the pinned payload; trying the next source" >&2
+done
+[[ -n "$fetched" ]] || { echo 'prepare-ci-bubblewrap: no source served the pinned payload' >&2; exit 1; }
 mkdir -p "$root"
 dpkg-deb --extract "$archive" "$root"
 printf '%s\n' "$root/usr/bin" >> "$GITHUB_PATH"
