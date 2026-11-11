@@ -1961,6 +1961,29 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>The same build check fails when dsh's start line doesn't appear within 60 s, after the B24 image's startup hang.</li>
 </ul>
 </li>
+<li><strong>No writable code paths</strong> <strong>[2026-11-11, B24 hang cause]:</strong> <code>/usr/local</code> and <code>/usr/local/bin</code> were <code>777</code> in our images. Under B24, <code>agent</code> could then plant a program that root runs through <code>PATH</code>. The subprocess check refused it, and the refused preset deadlocked <code>@mumbo/assistant</code>'s startup, which awaited it in activation and now starts it detached.
+<ul>
+<li>Every template build fails on a world-writable file, or a world-writable directory without the sticky bit, outside a commented allowlist.</li>
+<li>It also fails when a directory on root's or a run-as user's <code>PATH</code>, or in the tree root's dsh loads code from, is writable by anyone but root.</li>
+<li><code>start.sh</code> asserts <code>0755 root:root</code> on <code>/usr/local</code>'s directories, and the <code>777</code> is removed where it is made. The subprocess check stays as strict as it is.</li>
+<li><strong>Where the 777 comes from:</strong> our E2B fork's rootfs builder writes <code>/usr/bin/envd</code> (root's in-box agent) and <code>/usr/local/bin/provision.sh</code> at <code>0o777</code>, in a layer with no parent directory headers.
+<ul>
+<li>On a box it is wider: 5,910 world-writable paths, all of <code>/usr/local</code> (the <code>node</code> binary root's dsh runs, global <code>node_modules</code>, envd's OpenRC script, B24's own ports marker), plus <code>/usr/bin/envd</code>, <code>/etc/inittab</code> and <code>/code</code>.</li>
+<li>The fork's layer lands after our image is built. So the first step of <code>start.sh</code>'s hardening repairs the system trees generically: it removes world-write, and group-write for non-root groups, from every path under <code>/usr</code>, <code>/etc</code>, <code>/opt</code>, <code>/code</code> and the other system directories (not <code>/root</code>, <code>/home</code>, <code>/tmp</code> or <code>/run</code>), sticky directories excepted. Then it asserts none is left.</li>
+<li>This runs before the ports marker is read or any user's process runs: a tampered marker would aim the firewall at the wrong ports.</li>
+<li><strong>[2026-11-11, B24 fix review]</strong> The repair covers all of <code>/</code>, with user-data contents pruned. It takes about 3 to 5 s per start.
+<ul>
+<li>World-write goes for every owner.</li>
+<li>Ownership and group-write are repaired only for users with uid ≥ 1000, and for groups with gid ≥ 1000, groups with such a member, or such a user's primary group. System daemons' own paths (polkit, logind, mail) are left alone.</li>
+<li>Every containment user and E2B's <code>user</code> must have uid ≥ 1000, checked fatally, so none drops out of the repair's reach.</li>
+</ul>
+</li>
+<li>Agent installs into its own npm prefix, on its <code>PATH</code>. A user's <code>PATH</code> may hold directories only root, or that user alone, can write, and the run-as check in subprocess-local uses the same rule. Python stays under Bookworm's PEP 668 rule (venvs, with <code>python3-venv</code> in both templates).</li>
+<li><strong>R-rootfs</strong> (mumbo) fixes the fork's modes and parent headers and reviews every layer file. The source is E2B's finalize script (<code>phases/finalize/configure.sh</code>), which runs <code>chmod -R 777 /usr/local</code> and <code>/code</code> after every template's steps. Our web image itself has no world-writable path. The fix removes both lines. Any user that relied on them (the child template's default <code>user</code>) gets its own install prefix, and <code>/code</code> is owned by that user at <code>0755</code>. It rides the next E2B rebuild; <code>start.sh</code>'s set-and-check stays as the guard afterwards.</li>
+</ul>
+</li>
+</ul>
+</li>
 <li><strong>No root network path for the model</strong> <strong>[2026-11-11, B24 box-side review]:</strong> the owner rules only cover processes, so anything root fetches for the model gets past them.
 <ul>
 <li><code>web_fetch</code>'s HTTP provider (<code>web-fetch-http</code>) runs in root dsh and reaches loopback. From there, <code>http://127.0.0.1:9222/json/list</code> gives every open tab's URL and title, and <code>/json/close</code> closes tabs.</li>
@@ -2019,7 +2042,26 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 </ul>
 </li>
 <li><strong>No browser call writes files where the model chose.</strong> A call with a <code>filename</code> argument is refused, because page content could otherwise overwrite project files.</li>
-<li><strong>A turn started by a project's report asks before every browser write</strong> (B25b, after B36b; <strong>[2026-11-10, B36 review]</strong>): while the Session's newest user message has the <code>report</code> source, writes on every site ask, as on a page with a secret field. A report's text is steered by workers and outside issues, and it reaches the Mumbo that holds the person's accounts.</li>
+<li><strong>A turn started by a project's report asks before every browser write</strong> (B25b, after B36b; <strong>[2026-11-10, B36 review]</strong>): while the Session's newest user message has the <code>report</code> source, writes on every site ask, as on a page with a secret field. A report's text is steered by workers and outside issues, and it reaches the Mumbo that holds the person's accounts.
+<ul>
+<li><strong>[2026-11-11, B48]</strong> The same predicate gates the whole shell tool on person boxes. It asks in normal modes and is refused with a note under Run Wild, because a shell holding the person's GitHub sign-in, or any other credential, writes with their accounts. It gates the whole tool, never by parsing the command.</li>
+</ul>
+</li>
+<li><strong>The founder's GitHub sign-in on their person box</strong> (B48, after the B24 fix; <strong>[2026-11-11, founder's choice: &quot;gh plus my GitHub sign-in&quot;]</strong>):
+<ul>
+<li><code>gh</code> is in the person template. A root-owned <code>/etc/gitconfig</code> makes git over https use <code>gh auth git-credential</code>.</li>
+<li>The person signs in themselves, and the token never passes through the edge, a Session or Secrets Manager. Two ways, both allowed, the easier first <strong>[founder, 2026-11-11]</strong>:
+<ul>
+<li>the device flow, <code>gh auth login --web</code>: Mumbo runs it and shows only the one-time code and URL. gh's default scopes reach every repository the person can; <code>workflow</code> is not added, so Actions files, which hold CI secrets, stay the person's to change;</li>
+<li>or a fine-grained token, pasted into <code>gh auth login --with-token</code> in the desktop terminal as <code>agent</code>.</li>
+</ul>
+</li>
+<li><strong>The platform repositories are included</strong> <strong>[founder, 2026-11-11: &quot;that way it would be able to build itself&quot;]:</strong> the box's assistant can open, push to and merge pull requests on <code>callgideon/mumbo</code> and <code>callgideon/e2b-runtime</code> as the founder. Branch protection that admins can't bypass (required pull request and checks, no force pushes) on <code>main</code> and <code>boxes/production</code> keeps those merges to green pull requests. The setting is the founder's. Claude sessions' own rules are unchanged.</li>
+<li>The token lives in <code>agent</code>'s <code>/home/agent/.config/gh</code> (0700). The backup takes that directory, so the sign-in survives moves. It is never under <code>/root/projects</code> (a <code>git add -A</code> could commit it) or in Mumbo Sync's folders.</li>
+<li>The model can read and use the token. The token's scopes (and, for a fine-grained token, its repositories and expiry) are the boundary, and the README says so. Under Run Wild, pushes and merges in turns the founder started run unasked; branch protection is the founder's lever.</li>
+<li>A root-held token behind a local proxy, like the project box's, would keep it from the model entirely. That is a later option if the founder asks.</li>
+</ul>
+</li>
 <li><strong>Network request details are denied.</strong> A request's details carry its <code>Cookie</code> header and form body, so a login's password or a session cookie would reach the model.
 <ul>
 <li><code>browser_network_request</code> is refused outright.</li>
