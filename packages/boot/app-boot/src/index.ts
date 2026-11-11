@@ -956,6 +956,14 @@ const requiredStartupEntryIds = new Set<string>([
   'sdk-jsonrpc-server',
 ])
 
+/**
+ * Plugin packages whose enabled entries must activate under any entry id. The
+ * keyless snapshot replay provider is listed because its recording is the only
+ * model source a replay may use, and replay compositions mount it under
+ * several ids.
+ */
+const requiredStartupPackages = new Set<string>(['@deepseek-ai/dsh-llm-replay'])
+
 /** Render plugin stacks, nested causes, and aggregate member failures once per error. */
 function formatActivationError(error: unknown, stacks = true): string {
   const details: string[] = []
@@ -1137,7 +1145,7 @@ function startupDiagnostic(binName: string, failures: readonly InactiveEntry[], 
 /**
  * Apply DSH startup policy to a settled Loader tree.
  *
- * Inactive entries from the global required list reject startup. Other
+ * Inactive entries whose id or plugin package is on a global required list reject startup. Other
  * inactive entries join that failure diagnostic, or produce one warning when
  * no required entry failed and leave successful siblings running.
  * Required ids absent from the tree, and disabled required entries, are ignored.
@@ -1157,7 +1165,8 @@ export async function auditStartupEntries(
 ): Promise<void> {
   const failures = await inactiveEntries(ctx)
   const required = new Set(failures.filter(({ entry }) => entry === bootstrapIncludes.get(ctx)
-    || requiredStartupEntryIds.has(entry.options.id)).map(({ entry }) => entry))
+    || requiredStartupEntryIds.has(entry.options.id)
+    || requiredStartupPackages.has(entry.options.name)).map(({ entry }) => entry))
   if (required.size > 0) {
     throw new StartupError(startupDiagnostic(binName, failures, required), failures.map(({ entry, outcome }) => ({
       id: entry.options.id, module: entry.options.name, required: required.has(entry), fiberState: entry.fiber?.state, outcome,
