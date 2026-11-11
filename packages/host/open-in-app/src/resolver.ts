@@ -3,7 +3,8 @@
  * chain resolves to a verified {@link OpenInAppResolvedLaunch} — a
  * launcher this host actually holds — and one resolution pass yields the
  * map the routes serve and launch from, so a click never re-runs detection.
- * PATH names resolve in-process through the injected subprocess capability;
+ * PATH names resolve in-process through the injected subprocess capability,
+ * and to nothing when that capability runs children as another identity;
  * the remaining host commands (`xcode-select`, `reg.exe`) run through
  * `@deepseek-ai/dsh-native-command` (argv, never a shell). Application
  * adapters spawn detached with a credential-scrubbed environment and their

@@ -158,7 +158,9 @@ export abstract class SubprocessRuntime extends Service {
    * Absolute paths are verified; bare names use the provider's scrubbed PATH
    * plus explicit environment overrides. Relative paths containing separators
    * are rejected: the resolution base is undefined, so providers fail loud
-   * instead of guessing.
+   * instead of guessing. The result is for a spawn through this provider as the
+   * same identity: under a {@link childIdentity} the lookup searches that
+   * identity's PATH, which may name directories it can write.
    * @param command - absolute executable path or bare PATH name.
    * @param env - explicit environment entries used for lookup.
    * @param signal - aborts remote or local lookup.

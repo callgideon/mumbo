@@ -141,6 +141,9 @@ export function apply(ctx: Context, config: Config): void {
   const catalogInternals = (): OpenInAppInternals => ({
     ssh,
     resolveExecutable: async (name) => {
+      // A run-as provider searches its child identity's PATH, which may name directories that user writes, and this
+      // plugin launches what it resolves in this process, so under one no PATH name resolves.
+      if (ctx.subprocess.childIdentity !== undefined) return null
       try {
         return await ctx.subprocess.resolveExecutable(name)
       } catch {

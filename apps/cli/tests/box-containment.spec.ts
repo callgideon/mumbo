@@ -6,8 +6,9 @@
  * names must be the one its classification expects and a configured non-root identity of its own, every MCP stdio
  * server that names no identity must start as the dedicated `mcpserver` identity, never as root or `agent`, the
  * project box's `dsh-superagent` row is the founder's overlay row, read with the directories the start script exports,
- * `agent`'s PATH names only root's directories and its own npm global prefix and ~/.local/bin, and `web_fetch` goes to the DeepSeek Fetch API at the edge's model host. The person box includes the door to Mumbo
- * (`@mumbo/mcp`), whose tools the edge calls for the person.
+ * `agent`'s PATH names only root's directories and its own npm global prefix and ~/.local/bin, and `web_fetch` goes
+ * to the DeepSeek Fetch API at the edge's model host. The person box includes the door to Mumbo (`@mumbo/mcp`), whose
+ * tools the edge calls for the person.
  */
 
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -111,7 +112,9 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
   '@deepseek-ai/dsh-hmr': NONE,
   '@deepseek-ai/dsh-hooks-claude-code': { ...NONE, note: 'ruling #4: hook commands run through the shell, so as `agent`' },
   '@deepseek-ai/dsh-host-directory-picker-auto': NONE,
-  '@deepseek-ai/dsh-host-open-in-app': NONE,
+  '@deepseek-ai/dsh-host-open-in-app': {
+    ...NONE, note: 'launches as root; under the run-as provider it resolves no PATH name, since agent may write agent\'s PATH',
+  },
   '@deepseek-ai/dsh-host-plugin-inventory': NONE,
   '@deepseek-ai/dsh-host-webserver': NONE,
   '@deepseek-ai/dsh-jobs-local': NONE,
