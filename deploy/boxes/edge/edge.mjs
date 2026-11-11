@@ -1104,7 +1104,7 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
   /** The cell a principal's placement doc names, without placing anyone: us-east-1 until a person's first ensure. */
   const placedCell = async (principal) => cellOf(await store.getDoc(placementKey(principal)))
   // ensure's targets by principal, for cfg.placementCacheMs. ponytail: per replica, so a box another replica replaces is
-  // reached at its old target until the entry expires, a proxy error or the client-proxy's not-found answer forgets it, or
+  // reached at its old target until the entry expires, a proxy error forgets it, or the client-proxy's not-found answer or
   // a 401 to a navigation uncaches it (userServer). B22: deleting an entry clears only this replica (other replicas, the
   // other region's edge and an operator script cannot reach it), so a move must either read the principal's placement doc
   // (its moving mark) on every hit, or wait at least cfg.placementCacheMs after setting the mark before its final backup.
@@ -1375,9 +1375,8 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
       say({ level: 'error', msg: 'pause failed', box: b.id, error: e.message })
     })
   }
-  // forget: a proxy error to box `id`, or the client-proxy's not-found answer for it. This replica's cached targets for it
-  // go, and its next ensure repairs it (no launch). uncache: only this replica's cached target for `principal` goes; the
-  // record keeps its launch token.
+  // forget: a proxy error to box `id`. This replica's cached targets for it go, and its next ensure repairs it (no launch).
+  // uncache: only this replica's cached target for `principal` goes; the record keeps its launch token.
   return { ensure, firstSetUp, touch, owns, sweep, adoptRunning, uncache: (principal) => { cached.delete(principal) }, forget: (id) => {
     for (const [principal, c] of cached) if (c.target.id === id) cached.delete(principal)
     return store.patchBox(id, { launch: undefined })
@@ -1691,11 +1690,13 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, key
       if (dsh && !member && r.statusCode === 401 && isNavigation(req)) { r.resume(); box.uncache(key); return res.writeHead(302, { location: launch, 'cache-control': 'no-store' }).end() }
       // E2B's client-proxy answers a box it cannot route with 502 and, in the head of the body, JSON `"message":"The
       // sandbox was not found"` or, for a browser, its page titled "Sandbox not found" (packages/shared/pkg/proxy/template/
-      // sandbox_not_found.go): the box is forgotten, as on a connection error.
+      // sandbox_not_found.go): only the cached target goes. It sends the same answer for a box E2B still lists (a catalog
+      // read error, a box without a usable route), and dropping that box's launch would make the next ensure repair it
+      // through the same client-proxy, fail, and recreate it from its last backup.
       if (r.statusCode === 502) {
         let head = ''
         r.on('data', (c) => { if (head.length < 4096) head += c })
-        r.on('end', () => { if (/"message":"The sandbox was not found"|<title>Sandbox not found /.test(head)) quiet(box.forget(target.id)) })
+        r.on('end', () => { if (/"message":"The sandbox was not found"|<title>Sandbox not found /.test(head)) box.uncache(key) })
       }
       const headers = noFraming(secureCookies(cfg, { ...r.headers }))
       // KasmVNC's client connects to the host, port and path its URL names and, in Chrome, sends the local clipboard

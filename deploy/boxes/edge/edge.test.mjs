@@ -1577,20 +1577,35 @@ async function cachedRig(answer) {
   return { us, store, b, sent, port: await listen(server), close: () => { server.close(); proxy.close() } }
 }
 
-test('placement cache: the client-proxy\'s sandbox-not-found answer, as JSON or its browser page, forgets the cached box; its port-not-open answer does not', async () => {
+test('placement cache: the client-proxy\'s sandbox-not-found answer, as JSON or its browser page, drops only the cached target; its port-not-open answer keeps it', async () => {
   const notFound = (id) => ({ status: 502, type: 'application/json; charset=utf-8', body: `{"sandboxId":"${id}","message":"The sandbox was not found","code":502}` })
   const page = { status: 502, type: 'text/html; charset=utf-8', body: '<!DOCTYPE html>\n<html lang="en">\n<head>\n    <meta charset="utf-8">\n    <title>Sandbox not found · E2B</title>\n</head>\n</html>' }
   const portClosed = (id) => ({ status: 502, type: 'application/json; charset=utf-8', body: `{"sandboxId":"${id}","message":"The sandbox is running but port is not open","port":8080,"code":502}` })
   let next
   const t = await cachedRig((req) => next?.(req.headers['e2b-sandbox-id']) ?? { status: 200, body: 'ok' })
   const json = { 'x-forwarded-email': 'a@x.com', accept: 'application/json', cookie: 'dsh-auth-x=1' }
+  // The E2B calls after the first `from`, of the kinds that only an ensure past the cache makes.
+  const e2b = (from) => t.us.calls.slice(from).map(c => c[0]).filter(k => ['list', 'connect', 'kill', 'create'].includes(k))
   try {
     const { id: first } = await t.b.ensure('a@x.com')
+    const { launch } = await t.store.getBox(first)
+    let from = t.us.calls.length
     next = portClosed
     assert.equal((await call(t.port, { headers: json })).status, 502)
     next = undefined
     await call(t.port, { headers: json })
-    assert.deepEqual(t.sent.map(s => s[0]), [first, first], 'the port-not-open answer keeps the cached box')
+    assert.deepEqual(t.sent.map(s => s[0]), [first, first])
+    assert.deepEqual(e2b(from), [], 'the port-not-open answer keeps the cached box')
+    // E2B still lists the box, but the client-proxy cannot route it (a catalog read error), so in-box commands fail too:
+    // the next request looks the box up again and reaches it, without a repair that would recreate it from its backup.
+    const connect = t.us.Sandbox.connect
+    t.us.Sandbox.connect = async (id) => ({ ...await connect(id), commands: { run: async () => { throw new Error('The sandbox was not found') } } })
+    from = t.us.calls.length; next = notFound
+    assert.equal((await call(t.port, { headers: json })).status, 502)
+    next = undefined
+    assert.equal((await call(t.port, { headers: json })).body, 'ok')
+    assert.deepEqual([e2b(from), t.sent.at(-1)[0], (await t.store.getBox(first))?.launch], [['list'], first, launch], 'only the cached target went')
+    t.us.Sandbox.connect = connect
     // E2B lost the box; the proxy's answer reaches the browser unchanged, and the next request finds no box and makes one.
     t.us.sandboxes.delete(first); next = notFound
     const r = await call(t.port, { headers: json })
