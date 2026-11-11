@@ -66,9 +66,11 @@ function decide(session: Session, item: AskUserQuestionItem): AskUserQuestionAns
       })
       return { id: item.id, selected: [intent.approve] }
     case 'approval':
-      // Once, never `always`: a later ask in Run Wild is decided again and logged again.
+      // The approve option, never `always`. Its scope is the caller's: computer use's application access, for one,
+      // stays granted for the rest of the Session, also after the Session leaves Run Wild, and is not asked again.
       session.append('runwild/decision', {
-        kind: 'approval', target: intent.subject?.name ?? item.id, summary, reason: 'Run Wild grants approvals once.',
+        kind: 'approval', target: intent.subject?.name ?? item.id, summary,
+        reason: 'Run Wild picks the approve option, never always; the grant lasts as long as that option says, even after the Session leaves Run Wild.',
       })
       return { id: item.id, selected: [intent.approve] }
     /* v8 ignore next -- closed-union exhaustiveness guard */
@@ -80,8 +82,12 @@ function decide(session: Session, item: AskUserQuestionItem): AskUserQuestionAns
 /**
  * Register the two Run Wild listeners, each prepended so it decides before the person's answerers are reached.
  * @param ctx - plugin context; the listeners end with it.
+ * @throws when the `permission` row lists no `run-wild` preset, in which no Session could ever be in Run Wild.
  */
 export function apply(ctx: Context): void {
+  if (!ctx.permissionPresets.names.includes(RUN_WILD_PRESET)) {
+    throw new Error(`mumbo-run-wild: the permission row lists no "${RUN_WILD_PRESET}" preset; a person box lists it when MUMBO_RUN_WILD is set`)
+  }
   // Turns only an `ask` into `allow`; a policy that allows, denies or asks the person itself is unchanged, and a guard
   // can still refuse the call after this.
   ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {

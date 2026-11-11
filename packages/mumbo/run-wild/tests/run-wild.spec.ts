@@ -25,7 +25,7 @@ const PRESETS = {
  * Mount the real approval, permission and question services with Run Wild, then the person's answerers after it and
  * not prepended, as the browser bridge is: the person answers every question with `person` and rejects every approval.
  */
-async function mounted() {
+async function mounted(presets: Partial<typeof PRESETS> = PRESETS) {
   const ctx = new Context()
   onTestFinished(() => ctx.fiber.dispose())
   await mountAgentLoopTestDependencies(ctx)
@@ -37,7 +37,7 @@ async function mounted() {
     start() { throw new Error('run-wild tests do not execute bash') },
   })
   await ctx.plugin(Approval, { policy: 'ask' })
-  await ctx.plugin(PermissionPresetService, { presets: PRESETS })
+  await ctx.plugin(PermissionPresetService, { presets })
   await ctx.plugin(UserQuestionService)
   const runWild = await ctx.plugin(RunWild)
   const asked = { questions: [] as AskUserQuestionRequest[], approvals: [] as string[] }
@@ -91,16 +91,31 @@ const PLAN: AskUserQuestionItem = {
   intent: { kind: 'plan-review', approve: 'Approve', callId: ToolCallId('call-plan') },
 }
 
-/** A fixed-action permission card, as computer use asks for application access. */
+/** A fixed-action permission card, as computer use asks for application access: its approve option lasts the Session. */
 function access(subject?: string): AskUserQuestionItem {
   return {
     id: 'access',
     question: 'Allow access to Finder?',
     detail: 'Finder can read your files.',
-    options: [{ label: 'Allow once' }, { label: 'Deny' }, { label: 'Always allow' }],
-    intent: { kind: 'approval', approve: 'Allow once', reject: 'Deny', always: 'Always allow', ...subject === undefined ? {} : { subject: { name: subject } } },
+    options: [{ label: 'Allow for this session' }, { label: 'Deny' }, { label: 'Always allow' }],
+    intent: {
+      kind: 'approval', approve: 'Allow for this session', reject: 'Deny', always: 'Always allow',
+      ...subject === undefined ? {} : { subject: { name: subject } },
+    },
   }
 }
+
+/** The reason a Run Wild approval-card decision records. */
+const CARD_REASON = 'Run Wild picks the approve option, never always; the grant lasts as long as that option says, even after the Session leaves Run Wild.'
+
+describe('loading Run Wild', () => {
+  it('refuses to load over a permission table that lists no Run Wild preset', async () => {
+    const { 'run-wild': _runWild, ...withoutRunWild } = PRESETS
+    await expect(mounted(withoutRunWild)).rejects.toThrow(
+      'mumbo-run-wild: the permission row lists no "run-wild" preset; a person box lists it when MUMBO_RUN_WILD is set',
+    )
+  })
+})
 
 describe('questions in Run Wild', () => {
   it('answers each question with the Run Wild reply before any other answerer, and logs each decision', async () => {
@@ -142,15 +157,16 @@ describe('questions in Run Wild', () => {
     ])
   })
 
-  it('grants an approval question once, never always', async () => {
+  it('grants an approval question with its approve option, never always, and records that the grant keeps its scope', async () => {
     const { ctx, create } = await mounted()
     const agent = await create('root', RUN_WILD_PRESET)
-    expect(await ctx.userQuestions.ask({ agent, questions: [access('Finder')] })).toEqual({ answers: [{ id: 'access', selected: ['Allow once'] }] })
-    expect(await ctx.userQuestions.ask({ agent, questions: [access()] })).toEqual({ answers: [{ id: 'access', selected: ['Allow once'] }] })
+    const granted = { answers: [{ id: 'access', selected: ['Allow for this session'] }] }
+    expect(await ctx.userQuestions.ask({ agent, questions: [access('Finder')] })).toEqual(granted)
+    expect(await ctx.userQuestions.ask({ agent, questions: [access()] })).toEqual(granted)
     const summary = 'Allow access to Finder?\n\nFinder can read your files.'
     expect(decisions(agent)).toEqual([
-      { kind: 'approval', target: 'Finder', summary, reason: 'Run Wild grants approvals once.' },
-      { kind: 'approval', target: 'access', summary, reason: 'Run Wild grants approvals once.' },
+      { kind: 'approval', target: 'Finder', summary, reason: CARD_REASON },
+      { kind: 'approval', target: 'access', summary, reason: CARD_REASON },
     ])
   })
 
