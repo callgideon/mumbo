@@ -4,17 +4,24 @@
  * tools run; an unclassified package fails, catalogued tool names must match, the packages that would load code into
  * root dsh or start a root process for the model must be switched off or absent, every subprocess identity a row
  * names must be the one its classification expects and a configured non-root identity of its own, every MCP stdio
- * server that names no identity must start as the dedicated `mcpserver` identity, never as root or `agent`, and the
- * project box's `dsh-superagent` row may differ from the founder's overlay only by the keys containment adds. The person
- * box includes the door to Mumbo (`@mumbo/mcp`), whose tools the edge calls for the person.
+ * server that names no identity must start as the dedicated `mcpserver` identity, never as root or `agent`, the
+ * project box's `dsh-superagent` row is the founder's overlay row, read with the directories the start script exports,
+ * and `web_fetch` goes to the DeepSeek Fetch API at the edge's model host. The person box includes the door to Mumbo
+ * (`@mumbo/mcp`), whose tools the edge calls for the person.
  */
 
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { describe, expect, it } from 'vitest'
-import { composeEntries, loadOverlayPatches, loadProfile } from '@deepseek-ai/dsh-app-boot'
+import type { Context } from '@deepseek-ai/cordis'
+import type { ModuleLoaderV2 } from '@deepseek-ai/cordis-plugin-loader'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import { boot, composeEntries, loadOverlayPatches, loadProfile } from '@deepseek-ai/dsh-app-boot'
+import { createLaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
+import WebRuntime from '@deepseek-ai/dsh-web'
+import * as WebDeepseekApi from '@deepseek-ai/dsh-web-deepseek-api'
+import * as WebFetchHttp from '@deepseek-ai/dsh-web-fetch-http'
 
 const root = resolve(import.meta.dirname, '../../..')
 const installAnchor = fileURLToPath(new URL('../package.json', import.meta.url))
@@ -199,7 +206,8 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
   '@deepseek-ai/dsh-tool-subagent/model-selection-settings': NONE,
   '@deepseek-ai/dsh-tool-todo': { runs: 'in-process', tools: ['todo_write'], catalog: '@deepseek-ai/dsh-tool-todo' },
   '@deepseek-ai/dsh-tool-web': {
-    runs: 'remote', tools: ['web_fetch', 'web_search'], catalog: '@deepseek-ai/dsh-tool-web', note: 'fetches run from root dsh, outside the agent network rules',
+    runs: 'remote', tools: ['web_fetch', 'web_search'], catalog: '@deepseek-ai/dsh-tool-web',
+    note: 'searches and fetches go to the DeepSeek Search and Fetch APIs through the edge\'s model host, never from the box to an address the model names',
   },
   '@deepseek-ai/dsh-tool-workflow': { runs: 'in-process', tools: ['workflow'], catalog: '@deepseek-ai/dsh-tool-workflow' },
   '@deepseek-ai/dsh-tool-working-directory': {
@@ -214,7 +222,6 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
   '@deepseek-ai/dsh-web-app': NONE,
   '@deepseek-ai/dsh-web-app/startup': NONE,
   '@deepseek-ai/dsh-web-deepseek-api': NONE,
-  '@deepseek-ai/dsh-web-fetch-http': NONE,
   '@deepseek-ai/dsh-web-search-deepseek': NONE,
   '@deepseek-ai/dsh-workflow-ptc': NONE,
   '@deepseek-ai/dsh-working-directory': NONE,
@@ -246,26 +253,41 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
   '@mumbo/superagent/github-watch': NONE,
 }
 
-/** Packages that load code into root dsh or start a root process for the model; no box may mount them. */
+/**
+ * Packages that load code into root dsh, start a root process for the model, or send root dsh's requests to any address
+ * the model names, loopback and private ones included; no box may mount them.
+ */
 const FORBIDDEN = [
   '@deepseek-ai/dsh-tool-cordis',
   '@deepseek-ai/dsh-plugin-market/tools',
   '@deepseek-ai/dsh-experimental-ptc-runtime-python',
   '@deepseek-ai/dsh-subagent-dsh-sdk',
+  '@deepseek-ai/dsh-web-fetch-http',
 ]
 
 interface Row { id?: string; name?: string; disabled?: unknown; inject?: unknown; config?: unknown }
 
-/** Evaluate a row's `disabled` value the way a contained Linux box boots it: the launcher supplies a profile context. */
-function isDisabled(value: unknown): boolean {
-  if (value === true) return true
-  if (typeof value !== 'object' || value === null) return false
-  const expression = (value as { __jsExpr: string }).__jsExpr
+/** The directories a contained project box's start script exports for the project overlay's `dsh-superagent` row. */
+const CONTAINMENT_ENV = { MUMBO_WORK_DIR: '/root/work', MUMBO_WORKER_DIR: '/var/lib/mumbo/superagent', MUMBO_GH_CONFIG_DIR: '/root/.config/gh' }
+
+/**
+ * Evaluate `!!js` values in a row's field the way a contained Linux box boots it: the launcher supplies a profile
+ * context, `dshHomePath` names a path under root's DSH home, and `env` is the environment.
+ */
+function evaluated(value: unknown, env: Record<string, string> = {}): unknown {
+  if (Array.isArray(value)) return value.map(entry => evaluated(entry, env))
+  if (typeof value !== 'object' || value === null) return value
+  if (!('__jsExpr' in value)) return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, evaluated(entry, env)]))
   const context = { get: (name: string) => (name === 'profileContext' ? {} : undefined) }
   // The expressions are the repository's own composition files.
   // oxlint-disable-next-line typescript/no-implied-eval
-  const evaluate = new Function('ctx', 'process', `return (${expression})`) as (ctx: unknown, process: unknown) => unknown
-  return Boolean(evaluate(context, { platform: 'linux', env: {} }))
+  const evaluate = new Function('ctx', 'process', 'dshHomePath', `return (${String(value.__jsExpr)})`) as (ctx: unknown, process: unknown, home: unknown) => unknown
+  return evaluate(context, { platform: 'linux', env }, (name: string) => `/root/.dsh/${name}`)
+}
+
+/** Evaluate a row's `disabled` value the way a contained Linux box boots it. */
+function isDisabled(value: unknown): boolean {
+  return Boolean(evaluated(value))
 }
 
 /** Enabled rows, descending into groups and agent presets. */
@@ -278,7 +300,8 @@ function enabledRows(rows: readonly Row[]): Row[] {
   })
 }
 
-function compose(box: 'person' | 'project'): Row[] {
+/** The box's composed rows, with the edge's containment rows unless `contained` is false. */
+function compose(box: 'person' | 'project', contained = true): Row[] {
   const home = mkdtempSync(join(tmpdir(), 'dsh-box-containment-'))
   try {
     const profile = loadProfile('dsh', 'web', installAnchor, home)
@@ -289,7 +312,7 @@ function compose(box: 'person' | 'project'): Row[] {
       deployed('mumbo.overlay.yml'),
       deployed('mumbo-personal.overlay.yml'),
       ...box === 'person' ? [edge('personal.overlay.yml'), door()] : [edge('project.overlay.yml'), deployed('mumbo-project.overlay.yml')],
-      edge(`containment-${box}.overlay.yml`),
+      ...contained ? [edge(`containment-${box}.overlay.yml`)] : [],
     ], message => warnings.push(message))
     expect(warnings).toEqual([])
     return rows
@@ -313,8 +336,8 @@ const SERVER_IDENTITIES = { person: [SERVER_IDENTITY, 'browsermcp'], project: [S
 /** Root's directories, the only ones a server identity's `PATH` may name, so no model-writable directory supplies its code. */
 const SYSTEM_PATH = ['/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin']
 
-/** The box's group `shared`, which owns the Downloads: the only group the Playwright MCP server's identity holds. */
-const SHARED_GID = 1005
+/** The box's group `uploads`, which owns browser consent's staged copies: the only group the Playwright MCP server's identity holds. */
+const UPLOADS_GID = 1007
 
 /**
  * Ids of the enabled rows that could start an MCP stdio server as root, or as another identity than {@link SERVER_IDENTITY}.
@@ -380,9 +403,6 @@ async function doorTools(): Promise<string[]> {
   return names.sort()
 }
 
-/** Keys the containment rows add to the founder's `dsh-superagent` row; any other difference fails. */
-const SUPERAGENT_CONTAINMENT_KEYS = ['workDirectory', 'workerDirectory', 'ghConfigDirectory']
-
 /** Every string value in a config, at any depth. */
 function configStrings(value: unknown): string[] {
   if (typeof value === 'string') return [value]
@@ -441,7 +461,7 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     // The stores whose paths the model is told to read write where the read-only roots name, readable by agent's group.
     expect(byId('attachment-local')?.config).toEqual({ dshHome: '/var/lib/mumbo/attachments', groupReadable: true })
     expect(byId('spill-local')?.config).toEqual({ root: '/var/lib/mumbo/spill', groupReadable: true })
-    const superagent = byId('dsh-superagent')?.config as { workDirectory?: string; workerDirectory?: string; ghConfigDirectory?: string } | undefined
+    const superagent = evaluated(byId('dsh-superagent')?.config, CONTAINMENT_ENV) as { workDirectory?: string; workerDirectory?: string; ghConfigDirectory?: string } | undefined
     if (box === 'project') {
       // Ticket directories sit in a model root, created as agent; the worker files and the orchestrator's gh configuration are root's.
       expect(superagent).toMatchObject({ workDirectory: '/root/work', workerDirectory: '/var/lib/mumbo/superagent', ghConfigDirectory: '/root/.config/gh' })
@@ -453,15 +473,19 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     // Each of these must exist before dsh starts, so the documented box layout names every one.
     const layout = readFileSync(join(root, '.agents/notes/implemented/architecture/2026-11-10-agent-containment-run-as-and-model-roots.md'), 'utf8')
       .split('\n').find(line => line.startsWith('- Box layout the rows depend on')) ?? ''
-    const serverHomes = SERVER_IDENTITIES[box].map(name => (subprocess as { identities?: Record<string, { set: Record<string, string> }> }).identities?.[name]?.set.HOME)
-    const browserOutput = (byId('browser-consent')?.config as { browser?: { outputDir?: string } } | undefined)?.browser?.outputDir
+    const { identities: named } = subprocess as { identities?: Record<string, { set: Record<string, string> }> }
+    const serverHomes = SERVER_IDENTITIES[box].map(name => named?.[name]?.set.HOME)
+    const consent = byId('browser-consent')?.config as { browser?: { outputDir?: string }; uploadDirectory?: string; uploadStaging?: string } | undefined
     const required = [...modelRoots, ...(byId('fs-sandbox')?.config as { readOnlyRoots: string[] }).readOnlyRoots, subprocess.shellActivityDirectory!, subprocess.spillDirectory!,
-      ...serverHomes.map(home => home!), ...box === 'person' ? [browserOutput!] : [], ...box === 'project' ? [superagent!.workerDirectory!, superagent!.ghConfigDirectory!] : []]
+      ...serverHomes.map(home => home!), ...box === 'person' ? [consent!.browser!.outputDir!, consent!.uploadStaging!] : [],
+      ...box === 'project' ? [superagent!.workerDirectory!, superagent!.ghConfigDirectory!] : []]
     expect(required.filter(path => !layout.includes(`\`${path}\``))).toEqual([])
-    // The browser sends files only from the shared Downloads, which the model's tools reach as a model root.
+    // The browser sends copies of files directly in the shared Downloads, which the model's tools reach as a model root,
+    // staged in a directory only root writes.
     if (box === 'person') {
-      expect((byId('browser-consent')?.config as { uploadDirectory?: string }).uploadDirectory).toBe('/home/shared/Downloads')
+      expect([consent!.uploadDirectory, consent!.uploadStaging]).toEqual(['/home/shared/Downloads', '/var/lib/mumbo/uploads'])
       expect(modelRoots).toContain('/home/shared/Downloads')
+      expect(modelRoots).not.toContain('/var/lib/mumbo/uploads')
       // The desktop tool waits for consent's service, so a consent row that fails to load leaves no ungated input.
       expect(byId('computer-use-x11')?.inject).toEqual(['mumbo-browser-consent'])
     }
@@ -497,7 +521,9 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     // The person's server credentials reach no group another identity holds (`shared`, the workspace through agent's
     // group) while the box's mcpServerWorkspace switch is `none`, and its environment is the minimal base.
     const server = identities[SERVER_IDENTITY]!
-    const others = [subprocess.runAs, ...Object.entries(identities).filter(([name]) => name !== SERVER_IDENTITY).map(([, identity]) => identity)]
+    const others = [
+      subprocess.runAs, ...Object.entries(identities).filter(([name]) => name !== SERVER_IDENTITY).map(([, identity]) => identity),
+    ]
     const held = new Set(others.flatMap(identity => [identity.gid, ...identity.groups]))
     expect([server.gid, ...server.groups].filter(gid => held.has(gid))).toEqual([])
     expect(server.inherit).toEqual(['LANG'])
@@ -511,8 +537,8 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
       expect(identity.inherit.filter(variable => ['PATH', 'NODE_PATH'].includes(variable)), name).toEqual([])
       expect(identity.set, name).not.toHaveProperty('NODE_PATH')
     }
-    // The Playwright MCP server reads uploads from the shared Downloads, and holds no workspace group.
-    if (box === 'person') expect(identities.browsermcp!.groups).toEqual([SHARED_GID])
+    // The Playwright MCP server reads only the copies consent stages, and holds no workspace group or `shared`.
+    if (box === 'person') expect(identities.browsermcp!.groups).toEqual([UPLOADS_GID])
   })
 
   it('starts no MCP stdio server as root', () => {
@@ -538,19 +564,63 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     }
   })
 
-  it.runIf(box === 'project')('lists every orchestrator tool the superagent registers, and keeps the founder\'s superagent row apart from the containment keys', async () => {
+  it.runIf(box === 'project')('lists every orchestrator tool the superagent registers, and reads its directories from the start script\'s variables', async () => {
     const registered = await superagentTools()
     expect(CLASSIFICATION['@mumbo/superagent']!.tools).toEqual(registered)
     expect(registered).toContain('orchestrator_read')
-    const founder = deployed('mumbo-project.overlay.yml').filter(row => row.id === 'dsh-superagent' && row.config !== undefined).at(-1)?.config as Record<string, unknown>
-    const contained = edge('containment-project.overlay.yml').find(row => row.id === 'dsh-superagent')?.config as Record<string, unknown>
-    const without = (config: Record<string, unknown>) =>
-      Object.fromEntries(Object.entries(config).filter(([key]) => !SUPERAGENT_CONTAINMENT_KEYS.includes(key)))
-    expect(Object.keys(founder).length).toBeGreaterThan(1)
-    expect(without(contained)).toEqual(without(founder))
-    expect(SUPERAGENT_CONTAINMENT_KEYS.filter(key => key in contained)).toEqual(SUPERAGENT_CONTAINMENT_KEYS)
-    // The composed row is the containment row, whole.
-    expect(rows.find(row => row.id === 'dsh-superagent')?.config).toEqual(contained)
+    // No containment row patches it, which would replace the whole row: the composed row is the founder's overlay row.
+    expect(edge('containment-project.overlay.yml').map(row => row.id)).not.toContain('dsh-superagent')
+    const founder = deployed('mumbo-project.overlay.yml').filter(row => row.id === 'dsh-superagent' && row.config !== undefined).at(-1)?.config as object
+    expect(rows.find(row => row.id === 'dsh-superagent')?.config).toEqual(founder)
+    const directories = (env: Record<string, string>) => {
+      const { workDirectory, workerDirectory, ghConfigDirectory } = evaluated(founder, env) as Record<string, unknown>
+      return { workDirectory, workerDirectory, ghConfigDirectory }
+    }
+    expect(directories(CONTAINMENT_ENV)).toEqual({ workDirectory: '/root/work', workerDirectory: '/var/lib/mumbo/superagent', ghConfigDirectory: '/root/.config/gh' })
+    // Without containment the start script exports none, and the plugin keeps its defaults.
+    expect(directories({})).toEqual({ workDirectory: undefined, workerDirectory: undefined, ghConfigDirectory: undefined })
+  })
+
+  it('mounts no anonymous fetcher and sends web_fetch to the DeepSeek Fetch API at the edge\'s model host', { timeout: 60_000 }, async () => {
+    const byId = (from: readonly Row[], id: string) => from.find(row => row.id === id)
+    // The edge's model host, which the sandboxes server's URL names.
+    const host = new URL((byId(rows, 'mcp-sandboxes')?.config as { url: string }).url).origin
+    expect(isDisabled(byId(rows, 'web-fetch-http')?.disabled)).toBe(true)
+    // The containment rows change only the fetch provider of the base's `web` row, whose search provider they restate.
+    expect(byId(rows, 'web')?.config).toEqual({ ...byId(compose(box, false), 'web')?.config as object, fetchProvider: 'deepseek-fetch-api' })
+    expect(byId(rows, 'web-deepseek-api')?.config).toEqual({ fetchBaseURL: `${host}/v1/tools` })
+
+    // The composed rows in the real Loader: the box token goes only to the edge, whatever URL the model fetches.
+    const sent: Array<{ endpoint: string; authorization: string | null; body: unknown }> = []
+    vi.stubGlobal('fetch', vi.fn((endpoint: string, init?: RequestInit) => {
+      sent.push({ endpoint, authorization: new Headers(init?.headers).get('authorization'), body: JSON.parse(init?.body as string) })
+      return Promise.resolve(Response.json({ content: '# Page' }))
+    }))
+    const home = mkdtempSync(join(tmpdir(), 'dsh-box-containment-web-'))
+    onTestFinished(() => {
+      vi.unstubAllGlobals()
+      rmSync(home, { recursive: true, force: true })
+    })
+    const config = join(home, 'cordis.yml')
+    writeFileSync(config, JSON.stringify(['web', 'web-deepseek-api', 'web-fetch-http'].map(id => byId(rows, id))))
+    const modules = new Map<string, unknown>([
+      ['@deepseek-ai/dsh-web', WebRuntime], ['@deepseek-ai/dsh-web-deepseek-api', WebDeepseekApi], ['@deepseek-ai/dsh-web-fetch-http', WebFetchHttp],
+    ])
+    const ctx: Context = await boot('box-containment-web', config, [], (host) => {
+      host.loader.internal = {
+        version: 'v2', loadCache: new Map(),
+        import(specifier) { return Promise.resolve(modules.get(specifier)) },
+        register(): never { throw new Error('Unexpected module hook registration') },
+        getOrCreateModuleJob(): never { throw new Error('Unexpected module job creation') },
+        resolveSync(): never { throw new Error('Unexpected synchronous module resolution') },
+        load(): never { throw new Error('Unexpected module load') },
+      } satisfies ModuleLoaderV2
+      host.provide('launchEnvironment', createLaunchEnvironmentSnapshot([{ source: 'process', values: { DEEPSEEK_API_KEY: 'box-token' } }]))
+    })
+    onTestFinished(() => ctx.fiber.dispose())
+    expect(ctx.web.listProviders().fetch.map(provider => provider.id)).toEqual(['deepseek-fetch-api'])
+    await ctx.web.fetch({ url: 'http://127.0.0.1:9222/json/list' })
+    expect(sent).toEqual([{ endpoint: `${host}/v1/tools/fetch`, authorization: 'Bearer box-token', body: expect.objectContaining({ url: 'http://127.0.0.1:9222/json/list' }) as object }])
   })
 
   it.runIf(box === 'person')('lists every tool the door to Mumbo serves, with the ones that run git as agent', async () => {
@@ -572,7 +642,7 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     })
     expect(table).toEqual(expect.arrayContaining(box === 'person'
       ? ['computer — run-as as desktop (@deepseek-ai/dsh-computer-use-x11)', 'mcp__playwright-mcp__* — run-as as browsermcp (@mumbo/browser-consent)',
-          'agent_send — in-process (@mumbo/mcp)', 'task_result — run-as (@mumbo/mcp)', 'task_status — run-as (@mumbo/mcp)']
+        'agent_send — in-process (@mumbo/mcp)', 'task_result — run-as (@mumbo/mcp)', 'task_status — run-as (@mumbo/mcp)']
       : ['bash — run-as (@deepseek-ai/dsh-tool-bash)']))
     if (box === 'project') expect(table).toEqual(expect.arrayContaining(['orchestrator_read — in-process (@mumbo/superagent)']))
   })

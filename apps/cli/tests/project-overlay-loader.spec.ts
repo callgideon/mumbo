@@ -75,7 +75,8 @@ async function boot(env: Partial<Record<(typeof ENV)[number], string | undefined
       try {
         const machine = machineOf(resolved, runAs)
         seen.githubApp = machine.githubApp
-        seen.machine = { workDirectory: machine.workDirectory, workerDirectory: machine.workerDirectory, ghConfigDirectory: machine.ghConfigDirectory }
+        const { workDirectory: work, workerDirectory: worker, ghConfigDirectory: gh } = machine
+        seen.machine = { workDirectory: work, workerDirectory: worker, ghConfigDirectory: gh }
       } catch (error) {
         // The plugin refuses keys its Config does not list; kept so the test reports it after the other assertions.
         seen.rejection = String(error)

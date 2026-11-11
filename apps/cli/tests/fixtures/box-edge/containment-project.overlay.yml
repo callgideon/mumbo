@@ -1,6 +1,8 @@
 # Agent containment (B24): the rows the edge appends after every other overlay of a project box. The ids are the box's
-# users `agent` (1001) and `mcpserver` (1006); NO_PROXY ends with the edge's LLM host; the rest is fixed. A project box
-# has no desktop or browser, so no identity for them.
+# users `agent` (1001) and `mcpserver` (1006); NO_PROXY and the Fetch API base end with the edge's LLM host; the rest is
+# fixed. A project box has no desktop or browser, so no identity for them. No row configures dsh-superagent: a patch's
+# config would replace the project overlay's row, which reads its directories from MUMBO_WORK_DIR, MUMBO_WORKER_DIR and
+# MUMBO_GH_CONFIG_DIR, exported by the start script.
 # Start every process dsh runs for the model as `agent`, with an explicit environment that reaches GitHub through the
 # box-local proxy, as dsh itself does. The gh wrapper and the proxy CA are root-owned, world-readable copies outside
 # /root/.mumbo, which stays 0700. dsh's own TMPDIR stays root-only; shell activity records go to /run/dsh-shell (root,
@@ -75,19 +77,6 @@
   config:
     root: /var/lib/mumbo/spill
     groupReadable: true
-# Ticket directories go in the ticket work directory above, created as agent. The worker shims and git configuration live in
-# /var/lib/mumbo/superagent (root:agent 2750, worker-bin 2750, shims 0750, worker-gitconfig 0640), which agent reads and
-# runs but cannot change, and the orchestrator's own gh reads its configuration from root's /root/.config/gh (0700),
-# signed in to the agent's account, where setup reads the agent's login; the plugin refuses both at load unless they are
-# root's. The rest restates mumbo-project.overlay.yml, which the gate checks.
-- id: dsh-superagent
-  config:
-    stateDir: !!js dshHomePath('superagent')
-    workDirectory: /root/work
-    workerDirectory: /var/lib/mumbo/superagent
-    ghConfigDirectory: /root/.config/gh
-    panelAdmins: !!js (process.env.MUMBO_PANEL_ADMINS ?? '').split(',').filter(Boolean)
-    githubApp: !!js "process.env.MUMBO_GITHUB_APP_LOGIN || process.env.MUMBO_GITHUB_APP_USER_ID ? { login: process.env.MUMBO_GITHUB_APP_LOGIN, userId: Number(process.env.MUMBO_GITHUB_APP_USER_ID) } : undefined"
 # The manager starts the person's MCP stdio servers through the run-as provider as mcpserver, and runs only while a
 # subprocess service is mounted, so no server starts as root after a provider remount or when the provider failed at load. Only
 # `inject` is patched: a `config` patch would replace the servers the person added in Settings.
@@ -104,3 +93,16 @@
 - id: workspace-changes
   config:
     summaries: false
+# web_fetch runs in root dsh, outside the agent network rules, and the anonymous fetcher reaches loopback and private
+# addresses (the browser's debugging port, the box's own services), so it is off: web_fetch uses the DeepSeek Fetch API
+# through the edge's model host, which forwards /v1/tools/* to DeepSeek, with the box token. A patch replaces a row's
+# whole config, so `web` restates the base's searchProvider.
+- id: web-fetch-http
+  disabled: true
+- id: web
+  config:
+    searchProvider: deepseek-search-api
+    fetchProvider: deepseek-fetch-api
+- id: web-deepseek-api
+  config:
+    fetchBaseURL: https://llm.example/v1/tools

@@ -21,6 +21,7 @@
           outputDir: /var/lib/mumbo/playwright-output
         deniedUrls: ["chrome:","chrome-untrusted:","chrome-extension:","devtools:","view-source:","file:","https://passwords.google.com","https://pay.google.com","https://payments.google.com","https://myaccount.google.com","https://accounts.google.com"]
         uploadDirectory: /home/shared/Downloads
+        uploadStaging: /var/lib/mumbo/uploads
 - id: llm-pi-ai
   config:
     providers: {}
