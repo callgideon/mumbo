@@ -592,8 +592,8 @@ test('the system repair: login users\' paths root\'s, g+w off login groups and g
     const chowned = r.lines('chown').join(' ').split(' ')
     assert.deepEqual([chowned.slice(0, 2), chowned.slice(2).sort()], [['-h', '0:0'], ['T/tmp', 'T/usr/local/bin/oauth2-proxy', 'T/usr/local/link']])
     // The modes a box's start script leaves: /usr/local, node, /code, envd, inittab, /home and the non-sticky /tmp
-    // without o+w and g+w (E2B's 0777 /usr/local becomes 0755: dsh's run-as provider refuses a PATH directory any group
-    // can write), the library and the login user's file without group root's g+w, the sticky directories as they were,
+    // without o+w and g+w (E2B's 0777 /usr/local becomes 0755: dsh's run-as provider refuses a server identity's PATH
+    // directory, or an ancestor of one, that any group can write), the library and the login user's file without group root's g+w, the sticky directories as they were,
     // the module, agent's /tmp and the directories of uploads and users without g+w, colord's, /var/mail and /var/local
     // as they were, what is in the users' and runtime trees as it was, the link not followed.
     assert.deepEqual(modes(r, [...Object.keys(E2B_MODES), 'home/outside']), { 'usr/local': 0o755, 'usr/local/bin': 0o755, 'usr/local/bin/node': 0o755, 'usr/bin/envd': 0o755, 'etc/inittab': 0o644, code: 0o755, 'usr/lib/libg.so': 0o644,

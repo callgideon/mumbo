@@ -53,8 +53,9 @@ test('a user box start script is byte-for-byte what it was before project boxes 
   // Then the B24 template's kernel and network part stops and masks the unused ssh, rpcbind and nginx units that are
   // active and stops the start when anything listens on TCP 22, 80 or 111 (containment.test.mjs).
   // Then the repair also takes g+w from group root (but on a world-writable sticky directory), since dsh's run-as
-  // provider refuses a PATH directory any group can write and E2B's finalize leaves /usr/local/bin 0777 (containment.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), '30a9fe05f648aa35dce8cf875c3191aa259629b411b2aee0c97de77f51aa6926')
+  // provider refuses a server identity's PATH directory, or an ancestor of one, that any group can write and E2B's
+  // finalize leaves /usr/local and /usr/local/bin 0777 (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), '664cfe37ea72d477c3cda66dba7bb4de8722067992ca9fb68c16d0dae534b469')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -88,8 +89,9 @@ test('a project box start script is byte-for-byte what it was before B18 changed
   // Then the B24 template's kernel and network part stops and masks the unused ssh, rpcbind and nginx units that are
   // active and stops the start when anything listens on TCP 22, 80 or 111 (containment.test.mjs).
   // Then the repair also takes g+w from group root (but on a world-writable sticky directory), since dsh's run-as
-  // provider refuses a PATH directory any group can write and E2B's finalize leaves /usr/local/bin 0777 (containment.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), 'be6443f22c71f5d0597a82305b8e55bb3258de1b61eab802ec2d07e56f3455d9')
+  // provider refuses a server identity's PATH directory, or an ancestor of one, that any group can write and E2B's
+  // finalize leaves /usr/local and /usr/local/bin 0777 (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), '18fcb4711a4889d5b801c75926fc74b8cb17dcbb19661f1368f4eb1141cf2a49')
 })
 
 const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'
