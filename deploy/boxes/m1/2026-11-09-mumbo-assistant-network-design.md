@@ -411,7 +411,7 @@ Every node can be driven by a higher agent or an external AI. **[founder]**
 |---|---|---|---|
 | Status | `project_status`, `task_status`, `needs_you` | read | Read-only: the brief, Tickets and their stages, and what waits on the founder |
 | Send context | `project_message` (kind `context`), or `agent_send` to the assistant | prompt | Arrives as an implicit Trigger: context, never a work request |
-| Ask | `agent_send`, then `agent_read` | prompt | `agent_read` long-polls for up to 40 s with a cursor (as in jumbo and `@mumbo/mcp`), inside CloudFront's 60 s origin timeout |
+| Ask | `agent_send`, then `agent_read` | prompt | `agent_read` long-polls for up to 40 s with a cursor (as in jumbo and `@mumbo/mcp`), inside the door's 50 s call budget. app.mumbo.si has no CDN: it resolves to the ALB, whose idle timeout is 3600 s (checked 2026-11-11) |
 | Answer an ask | `task_reply` | prompt | Asks only, never approvals |
 | Create task | `task_start` | workspace | Explicit only within the key's projects |
 | Take task | `task_claim`, `task_report`, `task_submit` | workspace | Lease and fencing as in section 8 |
@@ -489,6 +489,7 @@ Every node can be driven by a higher agent or an external AI. **[founder]**
   - Fencing: a per-lease edge token for GitHub only. The laptop worker uses its own model, so the token has no model scope.
     - It is a stateless HMAC (`mwt.`), bound to the project, the Ticket, the Assignment, a random lease id, the repository, the exact `agent/<name>` ref, the door key and its owner.
     - The edge asks superagent on every worker git request whether the lease is current, so revocation is immediate and the edge keeps no state.
+    - The worker git route never answers 401: git meets a 401 with no `WWW-Authenticate` by prompting for a password, and never shows the body. An invalid, expired or revoked token or key is a 403 with a `remote:` reason, and GitHub's own 401 becomes a 502. A fence call the box never answers is a 502 edge error, not a 503 "try again". **[2026-11-11, E1 review]**
   - The laptop pushes through the edge's worker git route, `https://app.mumbo.si/mcp/git/<owner>/<repo>.git`, as `mumbo-bot`. Only heads that a live lease holder pushed there count at `task_submit`.
   - Done means a reviewer's verdict on the exact head SHA plus CI. The reviewer is a separate local Ticket in a fresh Session, and the runtime, not the model, posts its marker.
   - **[2026-11-11, B37 design ruling]** The rest:
