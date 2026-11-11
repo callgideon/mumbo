@@ -243,9 +243,9 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
     runs: 'in-process',
     tools: [
       'orchestrator_ack', 'orchestrator_eval', 'orchestrator_eval_decide', 'orchestrator_eval_read', 'orchestrator_read', 'orchestrator_reply',
-      'orchestrator_report', 'orchestrator_route', 'orchestrator_thread_follow', 'orchestrator_thread_unrelated', 'orchestrator_thread_unsubscribe',
-      'orchestrator_ticket_note', 'orchestrator_ticket_request_status', 'orchestrator_ticket_retry', 'orchestrator_trigger_handback',
-      'orchestrator_trigger_requeue',
+      'orchestrator_report', 'orchestrator_review', 'orchestrator_route', 'orchestrator_thread_follow', 'orchestrator_thread_unrelated',
+      'orchestrator_thread_unsubscribe', 'orchestrator_ticket_note', 'orchestrator_ticket_request_status', 'orchestrator_ticket_retry',
+      'orchestrator_trigger_handback', 'orchestrator_trigger_requeue',
     ],
     note: 'project boxes, root in-process and data only: the Store, and `gh api` on the configured repository through a root-owned CLI '
       + 'and GH_CONFIG_DIR; no tool runs a command or a path the model names; ticket directories are made and checked as agent',
@@ -374,15 +374,18 @@ const anything: object = new Proxy(() => undefined, {
 
 /**
  * Tool names the superagent copy registers: it registers exactly what `mainTools` builds for its main Session and
- * `executorTools` for an Executor Session (`src/app/runtime.ts`), so the names come from calling them, whatever a name
- * is or wherever a tool is defined.
+ * `executorTools` for an Executor Session (`src/app/runtime.ts`), whose tools differ for a review Ticket's Session, so the
+ * names come from calling them, whatever a name is or wherever a tool is defined.
  */
 async function superagentTools(): Promise<string[]> {
   // The copy is private and exports no tool builders; its sources are loaded from the repository.
   const load = async (file: string, name: string): Promise<SuperagentTools> =>
     ((await import(pathToFileURL(join(root, 'packages/mumbo/superagent/src/app/tools', file)).href)) as Record<string, SuperagentTools>)[name]!
   const [main, executor] = await Promise.all([load('main.ts', 'mainTools'), load('executor.ts', 'executorTools')])
-  return [...new Set([...main(anything, anything), ...executor(anything, anything)].map(tool => tool.name))].sort()
+  // A ticket with or without `review`, the field that gives a review Ticket's Session its own tools.
+  const ticket = (review: object | undefined): object => new Proxy({}, { get: (_target, key) => key === 'review' ? review : anything })
+  const tools = [...main(anything, anything), ...executor(anything, ticket(undefined)), ...executor(anything, ticket(anything))]
+  return [...new Set(tools.map(tool => tool.name))].sort()
 }
 
 /** The registration `@mumbo/mcp` performs on each request's MCP server, for one profile. */
