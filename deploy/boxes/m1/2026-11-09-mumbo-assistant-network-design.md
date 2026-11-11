@@ -203,15 +203,26 @@ For mumbo's own development the founder only dumps ideas and asks for updates; t
 In Run Wild, Mumbo never asks. It decides from context and the person's rules, acts, and logs what it did without asking. Inside Run Wild this overturns the table's "one tap to send" for sends as the founder **[founder]**. Edge approvals (merges, deploys, repository access) are outside it and unchanged.
 
 **A new mode, not a change to Full access** **[my call]**:
-- Full access is dsh's existing preset (Full access sandbox, approval policy `never`). Teammates' boxes use it too, so changing its meaning would silently remove asks they rely on.
+- Full access is dsh's existing preset (on person boxes, sandbox `danger-full-access` with approval policy `ask`, `deploy/mumbo.overlay.yml`). Teammates' boxes use it too, so changing its meaning would silently remove asks they rely on.
 - Most of the asks the founder meets aren't dsh approvals at all: browser consent, sends, questions and plan reviews. One named mode covers every layer, and its audit and banner are unambiguous.
 - Switching back is one click.
 
 **Where it's set:**
-- **Run Wild is an entry in dsh's Permissions selector** (`@deepseek-ai/dsh-permission-presets`), with the same knobs as Full access (sandbox `danger-full-access`, approval `never`). The recorded selection names it, so plugins can tell it from Full access.
-- It is per session. Settings' "New sessions start in" can pick it, so schedule-started sessions run wild too. The founder sets it on the `mumbo` Session once.
+- **Run Wild is an entry in dsh's Permissions selector** (`@deepseek-ai/dsh-permission-presets`), with the same knobs as person-box Full access (sandbox `danger-full-access`, approval `ask`). The recorded `permission/preset` names it, so plugins can tell it from Full access.
+  - Approval `never` can't carry it: `never` rejects every ask before any listener runs, and tells the model so.
+  - In Run Wild sessions, `@mumbo/run-wild` turns each `ask` into `allow` in a prepended `tools/pre-execute` listener, and logs it.
+  - The entry is last in the table, so a session with no recorded selection derives Full access, never Run Wild.
+  - **One source:** the entry and the new-session default live in `deploy/mumbo.overlay.yml`'s own `permission` row, in a PR the founder merges. **[founder: 2026-11-11, an exception to the standing rule that the founder's overlays are never edited; the rule stays for every other change]**
+    - The entry is last, and present only when the start script mounts `@mumbo/run-wild` and exports `MUMBO_RUN_WILD`.
+    - `defaultPreset` comes from `MUMBO_NEW_SESSION_PRESET` (default `danger-full-access`).
+    - The package's overlay only inserts its plugin row, and a composition test checks both cases.
+    - The edge exports `MUMBO_NEW_SESSION_PRESET=run-wild` for the people in `RUN_WILD_DEFAULT_EMAILS`.
+- It is per session. The founder sets it on the `mumbo` Session once.
+  - New sessions, schedule-started ones included, start in it when the edge sets `MUMBO_NEW_SESSION_PRESET=run-wild` for that person's box.
+  - The edge setting is needed because Settings can't write the default on person boxes: an overlay owns the `permission` row there, which predates Run Wild.
+  - The founder's box gets it.
 - **Only the person switches it.** No model tool changes the preset (`/permission` is a user command). After B24, the agent can't reach dsh's API: the firewall resets its connections to dsh's port. Before B24, the agent is root and could already do anything.
-- **Subagents and delegated children** inherit their root Session's mode: computer use runs in a subagent.
+- **Subagents and delegated children** follow their live root Session's mode, so switching the root back reaches running children at once. Computer use runs in a subagent.
 - **Turning it on shows one explanation, once, at the switch:** what Mumbo will now do unasked (send as you, post, buy with saved payment methods, delete) and what still holds (below). It is the only confirmation, given when the mode is chosen, never per action.
 
 **Every ask today, in Run Wild:**
@@ -1252,11 +1263,19 @@ The founder is in India, and their box must run in `ap-south-1` (Mumbai). The re
 | Task | Contents | Done when |
 |---|---|---|
 | **R1** | Split `deploy/boxes/prod` into a `modules/cell` and a `modules/edge`, and instantiate both for `us-east-1` with `moved` blocks. Parameterize every hard-coded region: the provider, the S3 endpoint service name and the node launch template. Per-cell private names, such as `api.<region>.boxes.internal` and `orchestrators.<region>.boxes.internal`; `us-east-1` keeps today's names | `terraform plan` for `us-east-1` shows no changes |
-| **R2** | Shared resources at the root: the public zone's records, the edge's Valkey store (still `us-east-1`), and the edge secrets every region reads (oauth2-proxy client and cookie secret, GitHub App, OpenRouter, each cell's E2B key) through replicas or full-ARN cross-region reads | No changes in plan; the secrets are readable from `ap-south-1` |
+| **R2** | Shared resources at the root: the public zone's records, the edge's Valkey store (still `us-east-1`), and the edge secrets every region reads (oauth2-proxy client and cookie secret, GitHub App, OpenRouter, each cell's E2B key) through replicas or full-ARN cross-region reads. **[2026-11-11]** The store gains both layers it lacked:
+- **Its own security group**, admitting 6379 from the edges only. The cell's data group admits nodes for MemoryDB, so until R2 a box VM, NATed as its node, could reach the store.
+- **AUTH:** an RBAC user `edge`, its URL in the Secrets Manager secret `mumbo-boxes/edge-store` (replicated to each edge region), and the `default` user switched off once every edge authenticates.
+- Operators' tunnels use the `edge` user. | The secrets are readable from `ap-south-1`. An unauthenticated connection to the store is refused, and a node can't open its port |
 | **R3** | The `ap-south-1` cell: VPC `10.21.0.0/16`, clear of 10.11/16, 10.12/16 and 10.20/16; E2B control; nodes with `node_count = 1` (12 boxes), set from 0 at R5 once its build is in its templates bucket; templates and backup buckets with KMS; NAT. Its fixed monthly cost goes to the founder before apply. **[founder, 2026-11-11: lean, about $840 a month against $1,195]** Lean means one NAT, single-AZ Postgres, MemoryDB with no replica and one task per E2B service, so there's no failover and backups are unchanged. Mumbai's Postgres is `db.t3.medium`, about $16 a month more: RDS twice had no `db.t4g.medium` capacity for Postgres 18 in `ap-south-1`, which offers that class in one zone only. One `boxes.internal` private zone serves every cell. Each cell's nodes may write only their own `orchestrators.<private_domain>` record, through `route53:ChangeResourceRecordSetsNormalizedRecordNames`, so a node in one cell can't redirect another cell's names. | Its API answers on its private name |
-| **R4** | Peering between `us-east-1` and `ap-south-1`, with routes, security groups and the private zone associated with both VPCs. Both edges reach both cells' API and client proxy, and the store. mTLS certificates for the new cell from the same CA | An edge task in each region reaches both cells |
+| **R4** | Peering between `us-east-1` and `ap-south-1`, with routes, security groups and the private zone associated with both VPCs. Both edges reach both cells' API and client proxy, and the store. mTLS certificates for the new cell from the same CA. **[2026-11-11]**
+- Mumbai's NLB admits 3000 and 3002 from `us-east-1`'s VPC CIDR, because security groups can't be referenced across regions. Both ports need credentials (the team key, or a per-sandbox traffic token).
+- Narrowing that rule to the edge's own subnets comes with R6. | An edge task in each region reaches both cells |
 | **R5** | E2B on the new cell: `setup/build.sh` into its templates bucket; the `mumbo-box`, `mumbo-child` and `mumbo-project` templates built on its API; the stage 4 move check on its nodes | `check/move.mjs` passes in `ap-south-1` |
-| **R6** | The `ap-south-1` edge: an ECS service, an ALB and an ACM certificate for every edge name, and both edges' cell configuration (B21). Not yet in DNS: tested with `curl --resolve` | The founder signs in through the Mumbai ALB with `--resolve` |
+| **R6** | The `ap-south-1` edge: an ECS service, an ALB and an ACM certificate for every edge name, and both edges' cell configuration (B21). Not yet in DNS: tested with `curl --resolve`.
+- **The edge store is network-protected only:** TLS with no AUTH. So cross-region access to it, and the R4 NLB rules, name only the edge tasks' own dedicated subnets in each region, never a cell's whole CIDR, which holds nodes and, through their NAT, box VMs.
+- The store also gains AUTH: an ElastiCache RBAC user, with its password in Secrets Manager, in both edges' `REDIS_URL`.
+- Optional: nodes drop forwarded traffic from the sandbox networks to both cells' VPC CIDRs, except the VPC resolver if box VMs use it. | The founder signs in through the Mumbai ALB with `--resolve`. A node, and a box, can't open the store's port |
 | **R7** | Latency records and health checks for the edge names, pointing at both ALBs. **The switch is the founder's go**, because DNS changes are theirs. Rollback is removing the Mumbai records | From India, `app.mumbo.si` resolves to the Mumbai ALB |
 | **R8** | Move the founder's box (B22) and run the acceptance | Below |
 
@@ -1267,7 +1286,21 @@ The founder is in India, and their box must run in `ap-south-1` (Mumbai). The re
   - every E2B and S3 call uses the record's cell, and capacity is per cell;
   - the model host accepts every cell's addresses;
   - newcomers get `EDGE_REGION`, and children follow their owner;
-  - tests for each. Measure store latency from Mumbai, and add the placement cache only if it is needed.
+  - tests for each. Measure store latency from Mumbai.
+  - **[2026-11-11, B21 design review]** The rest:
+    - The placement cache ships in B21, `PLACEMENT_CACHE_MS`, default 30 s, 0 off. Four sequential store round trips from Mumbai come to about 760 ms.
+    - Person records are written for existing people on their first visit, `us-east-1`.
+    - The edge secret and the model key become ECS secrets by full `us-east-1` ARN.
+    - Any edge may hold the sweep lease, released by token. The Mumbai edge logs to the `us-east-1` group.
+    - Approval audits always go to the `us-east-1` bucket.
+    - The single-cell variables leave the task definitions when `CELLS` arrives.
+    - A malformed `REDIS_URL` never prints its password.
+  - **[2026-11-11, B21 code review]**
+    - The cache is per replica. A replica drops its entry for a principal when the client-proxy reports the sandbox missing, and on dsh's 401 relaunch. Otherwise a launch token another replica renewed would loop the browser through redirects.
+    - The `us-east-1` edge runs with `placement_cache_ms = 0`: its store is in-region. The Mumbai edge gets 30000, and R6 measures both settings.
+    - B22 must read the moving mark on every cache hit, or wait `PLACEMENT_CACHE_MS` after setting it.
+    - Terraform clamps each cell's `maxUnits` at 0. A cell scaled to 0 nodes would otherwise stop every edge at start.
+    - Both cells' backups keys admit the Mumbai edge's role (R6).
 - **B22, moving between regions:**
   - the flow above, with its pages and the home-page control;
   - the RUNBOOK command, which also works for project boxes;
@@ -1338,7 +1371,7 @@ This replaces "A newcomer's region" above and step 4 of section 17a's flow. A ne
 
 | Task | Contents | Depends on |
 |---|---|---|
-| **B39** sign-up region | Step 2's page and route, the person record, step 3's region text, step 4's welcome line, capacity per cell on the page, the probe script with its nonce CSP, the one-cell skip. Tests: preselection from the probes and without script, a full nearest cell, the last-slot race, a refused cross-origin POST and an unknown region, an existing person skipping the page. A GIF of the flow (GUI PR) | B21 |
+| **B39** sign-up region | Step 2's page and route, the person record, step 3's region text, step 4's welcome line, capacity per cell on the page, the probe script with its nonce CSP, the one-cell skip. Tests: preselection from the probes and without script, a full nearest cell, the last-slot race, a refused cross-origin POST and an unknown region, an existing person skipping the page. The person record is written at sign-up, so a project made before the first box visit takes the person's region, not `us-east-1`. A GIF of the flow (GUI PR) | B21 |
 | **R-probe** (mumbo) | One ALB fixed-response rule per region for `edge-<region>.app.mumbo.si` `/edge/ping`; the DNS records are the founder's, with R7 | R6 |
 
 ## 17d. Sync between the laptop and the computer (N2) **[founder: 2026-11-11, "also create a sync system between local and VM - for browser and file-storage", and a desktop-app browser that switches between local and VM modes; my call on the how]**
