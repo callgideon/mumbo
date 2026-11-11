@@ -2047,7 +2047,12 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <ul>
 <li><strong>[2026-11-11, B48 review] A report-started turn is default-deny.</strong> Only a read-only allowlist runs unasked: file read, list and search within the model roots, Mumbo's read tools, <code>todo_write</code>, <code>plan_read</code>, and browser reads as above. Everything else asks in normal modes and is refused with a note under Run Wild: the shell, schedules, goals, subagent and team spawns, computer use, MCP writes, <code>web_fetch</code> and <code>web_search</code>. A test fails when a new tool is left unclassified.
 <ul>
-<li>The predicate is the source of the message that opened the turn (person-typed, <code>report</code>, <code>schedule</code> or <code>goal</code>), not the newest user message. Mid-turn messages the loop appends never change it: runtime-context snapshots, compaction checkpoints and the resume notice (§17e).</li>
+<li>The predicate is the turn's origin: the source of the message that opened it, fixed after its first step, not the newest user message. A person's own message and a <code>schedule</code> delivery are founder origins, and <code>report</code> is gated.
+<ul>
+<li>A <code>goal</code> round, a <code>retry</code> and unknown kinds inherit the previous origin. A goal round adds no authority, so a report taints the rounds after it until the person's own message or a schedule.</li>
+<li>Mid-turn messages never change the origin: runtime-context snapshots, compaction checkpoints, the resume notice (§17e), a schedule notice, and a person's message typed during the turn. A source with a <code>form</code> counts as context.</li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>
