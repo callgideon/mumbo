@@ -1317,6 +1317,12 @@ The founder is in India, and their box must run in `ap-south-1` (Mumbai). The re
   - a failure to get an answer (unreachable envd or API, a timeout, the client-proxy's 502 for a listed box) is a 503 starting page with the box and record unchanged, and an error-level `box unreachable` line for the edge-errors alarm. Nothing recreates automatically: during a client-proxy outage a recreate fails too and loses the box;
   - a RUNBOOK section tells a hung box (other boxes in the cell answer) from a client-proxy outage (none do); for a hung box the operator kills it and the next visit restores;
   - tests for each case, classified by the SDK's error classes.
+  - **[2026-11-11, B47 code review]** API answers kill only a box E2B listed paused (a resume); a box listed running is never killed on an API error. The sweep drops a record only on `SandboxNotFoundError`, the API's 404. The client-proxy's not-found answer (`SandboxNotRunningError`) once dropped a running box's record and its restore pin.
+- **B47b, resume and capacity failures from recorded answers** [after B24's fix, or after R6 if the case was only inferred]:
+  - on a throwaway in each cell, record the API's answers on resume for a full cell, a snapshot whose node is gone, and an unresponsive guest;
+  - classify capacity and resume failures by those answers in place of the message regex, with fixtures from the recordings. Today a broken snapshot whose resume times out at placement may show "at capacity" on every visit;
+  - try `onResume: 'reboot'` on `GuestUnresponsiveError`, which keeps the disk;
+  - weigh a final backup before a kill when envd answers but dsh is down, against the user lock's 120 s.
 
 **Acceptance (first milestone: the founder's box in Mumbai):**
 - **The move.** The founder's box runs in the `ap-south-1` cell, moved from `us-east-1` with Sessions, schedules, files and Chrome sign-ins intact.

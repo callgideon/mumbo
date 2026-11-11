@@ -2283,6 +2283,15 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>a failure to get an answer (unreachable envd or API, a timeout, the client-proxy's 502 for a listed box) is a 503 starting page with the box and record unchanged, and an error-level <code>box unreachable</code> line for the edge-errors alarm. Nothing recreates automatically: during a client-proxy outage a recreate fails too and loses the box;</li>
 <li>a RUNBOOK section tells a hung box (other boxes in the cell answer) from a client-proxy outage (none do); for a hung box the operator kills it and the next visit restores;</li>
 <li>tests for each case, classified by the SDK's error classes.</li>
+<li><strong>[2026-11-11, B47 code review]</strong> API answers kill only a box E2B listed paused (a resume); a box listed running is never killed on an API error. The sweep drops a record only on <code>SandboxNotFoundError</code>, the API's 404. The client-proxy's not-found answer (<code>SandboxNotRunningError</code>) once dropped a running box's record and its restore pin.</li>
+</ul>
+</li>
+<li><strong>B47b, resume and capacity failures from recorded answers</strong> [after B24's fix, or after R6 if the case was only inferred]:
+<ul>
+<li>on a throwaway in each cell, record the API's answers on resume for a full cell, a snapshot whose node is gone, and an unresponsive guest;</li>
+<li>classify capacity and resume failures by those answers in place of the message regex, with fixtures from the recordings. Today a broken snapshot whose resume times out at placement may show &quot;at capacity&quot; on every visit;</li>
+<li>try <code>onResume: 'reboot'</code> on <code>GuestUnresponsiveError</code>, which keeps the disk;</li>
+<li>weigh a final backup before a kill when envd answers but dsh is down, against the user lock's 120 s.</li>
 </ul>
 </li>
 </ul>
