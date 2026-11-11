@@ -97,9 +97,9 @@ locals {
   oauth_redirect_url = "https://${local.public_host}/oauth2/callback"
   # The former public host. Its names redirect (old_hosts rules), except its model host, which boxes created
   # under it have in their start script.
-  old_host     = "boxes.mumbo.si"
-  llm_host     = "llm.${local.public_host}" # LLM_HOST: new boxes' model host
-  llm_hosts    = [local.llm_host, "llm.${local.old_host}"]
+  old_host  = "boxes.mumbo.si"
+  llm_host  = "llm.${local.public_host}" # LLM_HOST: new boxes' model host
+  llm_hosts = [local.llm_host, "llm.${local.old_host}"]
   # This edge's own cell: the single-cell settings without CELLS.
   home = var.cells[local.region]
   # Approval audit records go to the us-east-1 bucket from every edge (edge.mjs auditor).
@@ -448,12 +448,12 @@ resource "aws_ecs_task_definition" "edge" {
       }) : { name = k, value = v }]
       secrets = concat([for k, p in local.edge_ssm : { name = k, valueFrom = "${local.ssm}/${p}" }], [for k, arn in local.edge_secrets : { name = k, valueFrom = arn }],
         [for k, arn in local.e2b_keys : { name = k, valueFrom = "${arn}:TEAM_API_KEY::" }], [
-        # By full us-east-1 ARN, which ECS reads from any region.
-        { name = "EDGE_SECRET", valueFrom = var.edge_secret_arn },
-        { name = "MODEL_KEY", valueFrom = var.model_key_secret_arn },
-        { name = "REDIS_URL", valueFrom = "${var.store_secret_arn}:url::" },
-        { name = "GITHUB_APP_ID", valueFrom = "${data.aws_secretsmanager_secret.github_app.arn}:app_id::" },
-        { name = "GITHUB_APP_KEY", valueFrom = "${data.aws_secretsmanager_secret.github_app.arn}:private_key::" },
+          # By full us-east-1 ARN, which ECS reads from any region.
+          { name = "EDGE_SECRET", valueFrom = var.edge_secret_arn },
+          { name = "MODEL_KEY", valueFrom = var.model_key_secret_arn },
+          { name = "REDIS_URL", valueFrom = "${var.store_secret_arn}:url::" },
+          { name = "GITHUB_APP_ID", valueFrom = "${data.aws_secretsmanager_secret.github_app.arn}:app_id::" },
+          { name = "GITHUB_APP_KEY", valueFrom = "${data.aws_secretsmanager_secret.github_app.arn}:private_key::" },
       ])
       stopTimeout      = 60
       logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.edge.name, awslogs-region = local.region, awslogs-stream-prefix = "edge" } }
