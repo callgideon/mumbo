@@ -25,8 +25,14 @@ export async function apply(ctx: Context, config: DeploymentConfig): Promise<voi
   ctx.effect(() => async () => { await runtime.stop() })
   // The relay Source belongs to this entry rather than a plugin row of its own, so a profile that loads the bundle has it.
   ctx.effect(() => registerRelay(ctx, runtime), 'dsh-superagent: relay Source')
-  await runtime.ready
-  ctx.logger.info(runtime.configured() ? 'dsh-superagent ready; the Superagent sidebar entry opens the management panel' : `dsh-superagent is waiting for setup: ${runtime.setupProblem?.detail ?? ''}`)
+  // Not awaited (`UPSTREAM.md` S15): the main Session's ensure resolves an Agent preset, and the preset registry waits for the
+  // Loader to settle while a preset row waits for a service, which would wait for this start.
+  runtime.ready.then(() => {
+    if (runtime.lifetime.aborted) return
+    ctx.logger.info(runtime.configured() ? 'dsh-superagent ready; the Superagent sidebar entry opens the management panel' : `dsh-superagent is waiting for setup: ${runtime.setupProblem?.detail ?? ''}`)
+  }, (error: unknown) => {
+    if (!runtime.lifetime.aborted) ctx.logger.error('dsh-superagent could not start: %s', String(error))
+  })
 }
 export type { Deployment, DeploymentConfig } from './deployment.ts'
 export * from './core/index.ts'

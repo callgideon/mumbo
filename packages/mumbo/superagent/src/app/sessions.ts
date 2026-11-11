@@ -143,24 +143,33 @@ export class Sessions {
    * Under run-as the Session's recorded directory must be `cwd` as written, for every Session it resolves or creates: the
    * workspace registry follows links, so a link a worker planted on the way would move the Session, whose instructions and
    * skills root reads, to wherever it leads.
+   * Each step after an await starts only while `lifetime` is not aborted, so an ensure that outlives `stop()` writes nothing.
    * @throws under run-as when the Session's directory is not `cwd`, before its role model, permissions and title are set. A
    *   Session the registry created there stays loaded, decorated as DSH creates it, and `prompt` refuses it as well.
+   * @throws `lifetime`'s reason once it is aborted.
    */
   async ensure(id: string, cwd: string, title: string, role: 'orchestrator' | 'worker'): Promise<Agent> {
     const ctx = this.ctx
+    const { lifetime } = this.host
     let result = await ctx.sessionController.resolveAgent(id as SessionId)
+    lifetime.throwIfAborted()
     if ('error' in result && result.error.code === 'session/not-found') {
       const workspace = await ctx.workspaceRegistry.create(cwd)
+      lifetime.throwIfAborted()
       // A Session keeps the preset it was created with, one of the bundle's own (cordis.patch.yml).
       await ctx.sessionController.create({ sessionId: id as SessionId, workspaceId: workspace.id,
         agentPreset: role === 'worker' ? WORKER_PRESET : ROUTER_PRESET })
+      lifetime.throwIfAborted()
       result = await ctx.sessionController.resolveAgent(id as SessionId)
+      lifetime.throwIfAborted()
     }
     if ('error' in result) throw result.error
     this.contained(result.agent, cwd)
     const settings = this.host.store.settings()
     await initializeRoleModel(ctx, result.agent, role === 'orchestrator' ? settings.eval.model : settings.executor.model)
+    lifetime.throwIfAborted()
     await this.decorate(result.agent)
+    lifetime.throwIfAborted()
     ctx.permissionPresets.set(result.agent.session, 'danger-full-access')
     await ctx.sessionController.rename({ sessionId: id as SessionId, title })
     return result.agent
