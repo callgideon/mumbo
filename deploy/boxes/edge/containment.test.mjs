@@ -134,7 +134,7 @@ ${person ? `      browsermcp:
     fetchBaseURL: https://llm.example/v1/tools
 `
 
-const REAL = ['cat', 'grep', 'cut', 'chmod', 'find', 'cp', 'rm', 'mkdir', 'readlink', 'dirname', 'sort', 'stat', 'head']
+const REAL = ['cat', 'grep', 'cut', 'chmod', 'find', 'cp', 'rm', 'mkdir', 'readlink', 'dirname', 'sort', 'stat', 'head', 'awk']
 const which = (tool) => execFileSync('sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).trim()
 const ME = { uid: process.getuid(), owner: `${execFileSync('id', ['-un'], { encoding: 'utf8' }).trim()}:${execFileSync('id', ['-gn'], { encoding: 'utf8' }).trim()}` }
 /** A `find` for bin directory `bin` that runs the real one with `-uid 0` as `uid` (this test's user: its files read as
@@ -159,7 +159,8 @@ function root({ users = true, groups = GROUPS } = {}) {
   const log = (name) => `echo "$*" >> ${t}/log/${name}`
   const ids = Object.entries(IDS).map(([u, [uid, gid]]) => `${u}) [ "$o" = -u ] && echo ${uid} || echo ${gid};;`).join(' ')
   fake('id', users ? `o=$1; [ $# = 1 ] && o=; u=\${2:-$1}; case $u in ${ids} *) exit 1;; esac` : 'exit 1')
-  fake('getent', `case $2 in ${Object.entries(groups).map(([g, gid]) => `${g}) echo ${g}:x:${gid}:;;`).join(' ')} *) exit 2;; esac`)
+  // Without a key, getent lists $t/etc/passwd or $t/etc/group (the system repair's login groups).
+  fake('getent', `[ $# != 1 ] || exec cat ${t}/etc/$1; case $2 in ${Object.entries(groups).map(([g, gid]) => `${g}) echo ${g}:x:${gid}:;;`).join(' ')} *) exit 2;; esac`)
   for (const name of ['usermod', 'chown', 'setfacl', 'mount']) fake(name, log(name))
   // install: logs, then runs the real one without the owner and group, which the test's user cannot give.
   fake('install', `${log('install')}; a=; while [ $# -gt 0 ]; do case $1 in -o|-g) shift 2;; *) a="$a $1"; shift;; esac; done; exec ${which('install')} $a`)
@@ -440,62 +441,107 @@ test('the B24 input chain: from beyond loopback a new TCP connection (SYN alone)
 })
 
 /** A root as E2B's build leaves a box's: /usr/local, its node, /code, envd and /etc/inittab world-writable. Also a
- *  group-writable module, a sticky world-writable directory, a link out of the root, world-writable paths in each tree
- *  the repair leaves alone, and of those trees' top directories /home world-writable, /tmp world-writable without the
- *  sticky bit and /var/tmp sticky. */
+ *  module group-writable by workspace, a sticky world-writable directory, a link out of the root, world-writable paths in
+ *  each tree the repair leaves alone, of those trees' top directories /home world-writable, /tmp world-writable without
+ *  the sticky bit and /var/tmp sticky, a build's file in /usr/local/bin, a system user's group-writable directory, the
+ *  group-writable /var/mail and /var/local of the system groups mail and staff, and directories group-writable by the
+ *  system groups uploads and users. */
 const E2B_MODES = { 'usr/local': 0o777, 'usr/local/bin': 0o777, 'usr/local/bin/node': 0o777, 'usr/bin/envd': 0o777, 'etc/inittab': 0o666, code: 0o777,
   'src/node_modules/m': 0o775, 'var/spool/sticky': 0o1777, 'home/agent/w': 0o777, 'root/w': 0o777, 'tmp/w': 0o777, 'var/tmp/w': 0o777, 'var/lib/mumbo/playwright-output/f': 0o666,
-  home: 0o777, tmp: 0o777, 'var/tmp': 0o1777 }
-function e2bRoot(r) {
-  for (const p of ['usr/bin', 'etc', 'src/node_modules', 'var/spool', 'home/agent', 'tmp', 'var/tmp', 'var/lib/mumbo/playwright-output']) mkdirSync(r.at(p), { recursive: true })
+  home: 0o777, tmp: 0o777, 'var/tmp': 0o1777, 'usr/local/bin/oauth2-proxy': 0o755, 'var/lib/colord': 0o775, 'var/mail': 0o2775, 'var/local': 0o2775, 'opt/uploads': 0o775, 'opt/users': 0o775 }
+/** The owners and groups of e2bRoot's paths other than root:root: agent's (1001) a build's file in /usr/local/bin with
+ *  a group no name has (as the web image's oauth2-proxy), the link, /tmp and paths in the trees the repair leaves alone;
+ *  browsermcp's its Playwright output; the system user colord's (112) its directory; mail (8), staff (50), uploads
+ *  (999) and users (100) their directories, and workspace (1007) the module. */
+const E2B_IDS = { 'usr/local/bin/oauth2-proxy': [1001, 118], 'usr/local/link': [1001, 1001], tmp: [1001, 1001], 'tmp/w': [1001, 1001], 'home/agent/w': [1001, 1001],
+  'var/lib/mumbo/playwright-output': [1002, 1002], 'var/lib/mumbo/playwright-output/f': [1002, 1002], 'var/lib/colord': [112, 112],
+  'var/mail': [0, 8], 'var/local': [0, 50], 'opt/uploads': [0, 999], 'opt/users': [0, 100], 'src/node_modules/m': [0, 1007] }
+/** e2bRoot's users and groups, as getent lists them: the login users E2B's `user` (in sudo), agent, browsermcp (in the
+ *  system group uploads) and legacy (whose primary group is the system group users), and nobody; the system users mail
+ *  and colord, and the system groups mail and staff, which hold no login user. */
+const E2B_PASSWD = ['root:x:0:0::/root:/bin/bash', 'mail:x:8:8::/var/mail:/usr/sbin/nologin', 'colord:x:112:112::/var/lib/colord:/usr/sbin/nologin',
+  'user:x:1000:1000::/home/user:/bin/bash', 'agent:x:1001:1001::/home/agent:/bin/bash', 'browsermcp:x:1002:1002::/home/browsermcp:/usr/sbin/nologin',
+  'legacy:x:1010:100::/home/legacy:/bin/sh', 'nobody:x:65534:65534::/nonexistent:/usr/sbin/nologin']
+const E2B_GROUP = ['root:x:0:', 'mail:x:8:', 'sudo:x:27:user', 'staff:x:50:', 'users:x:100:', 'colord:x:112:', 'uploads:x:999:browser,browsermcp',
+  'user:x:1000:', 'agent:x:1001:', 'workspace:x:1007:agent,xsession', 'nogroup:x:65534:']
+/** A `find` for root `r` that reads the owners and groups in `ids` (relative path to [uid, gid]; every other path is
+ *  root:root): it runs the real one with each `-uid n` and `-gid n` test (n, or +n, above 0) as the listed paths whose
+ *  id matches. A chown logs its arguments and, when `holds`, takes its paths out of the list, as root:root. */
+function idsFind(r, ids, holds = true) {
+  const list = r.at('log/ids')
+  writeFileSync(list, Object.entries(ids).map(([p, [u, g]]) => `${u} ${g} ${r.at(p)}\n`).join(''))
+  r.fake('find', `p=; for a; do shift
+  case $p in -uid|-gid)
+    case $a in +[0-9]*|[1-9]*) ;; *) echo "fake find: $p $a matches unlisted paths" >&2; exit 99;; esac
+    set -- "$@" '(' -false; while read -r u g q; do v=$u; [ $p = -uid ] || v=$g; case $a in +*) [ $v -gt \${a#+} ];; *) [ $v = $a ];; esac && set -- "$@" -o -path "$q"; done < ${list}
+    set -- "$@" ')'; p=; continue;; esac
+  case $a in -uid|-gid) p=$a;; *) set -- "$@" "$a";; esac
+done
+exec ${which('find')} "$@"`)
+  r.fake('chown', `echo "$*" >> ${r.t}/log/chown${holds ? `; shift 2; for q; do ${which('awk')} -v q="$q" '$3 != q' ${list} > ${list}.n; ${which('mv')} ${list}.n ${list}; done` : ''}`)
+}
+function e2bRoot(r, holds = true) {
+  for (const p of ['usr/bin', 'etc', 'src/node_modules', 'var/spool', 'var/lib', 'opt', 'home/agent', 'tmp', 'var/tmp', 'var/lib/mumbo/playwright-output']) mkdirSync(r.at(p), { recursive: true })
   for (const [p, mode] of Object.entries(E2B_MODES)) {
-    if (!existsSync(r.at(p))) (/\/(node|envd|inittab|f)$/.test(p) ? writeFileSync(r.at(p), '') : mkdirSync(r.at(p)))
+    if (!existsSync(r.at(p))) (/\/(node|envd|inittab|f|oauth2-proxy)$/.test(p) ? writeFileSync(r.at(p), '') : mkdirSync(r.at(p)))
     chmodSync(r.at(p), mode)
   }
   mkdirSync(r.at('home/outside')); chmodSync(r.at('home/outside'), 0o777); symlinkSync(r.at('home/outside'), r.at('usr/local/link'))
-  fakeFind(r.at('bin'))
+  writeFileSync(r.at('etc/passwd'), E2B_PASSWD.join('\n') + '\n'); writeFileSync(r.at('etc/group'), E2B_GROUP.join('\n') + '\n')
+  idsFind(r, E2B_IDS, holds)
 }
 const modes = (r, paths) => Object.fromEntries(paths.map(p => [p, statSync(r.at(p)).mode & 0o7777]))
+/** The paths the repair's check names in `err`, sorted. */
+const named = (err) => err.split('\n').slice(1, -1).map(l => l.split(' ')[2]).sort()
 
-test('the system repair: o+w off all but sticky directories, g+w off a group other than root\'s, other owners\' paths root\'s, outside the users\' and runtime trees, then checked', () => {
+test('the system repair: login users\' paths root\'s, g+w off login groups, o+w off all but sticky directories, outside the users\' and runtime trees, then checked; system users\' and groups\' paths as they were', () => {
   let r = root()
   try {
     e2bRoot(r)
-    const out = r.run('', [], systemRepair(r.t))
+    const out = r.run('', ['login'], systemRepair(r.t))
     assert.equal(out.code, 0, out.err)
-    // The modes a box's start script leaves: /usr/local, node, /code, envd, inittab and the module root's alone (a
-    // file here is root's, of a group other than root), the sticky directories world-writable (less their group's write
-    // bit, as for any group but root), /home and the non-sticky /tmp too, what is in the users' and runtime trees as it
-    // was, the link not followed.
-    assert.deepEqual(modes(r, [...Object.keys(E2B_MODES), 'home/outside']), { 'usr/local': 0o755, 'usr/local/bin': 0o755, 'usr/local/bin/node': 0o755, 'usr/bin/envd': 0o755, 'etc/inittab': 0o644, code: 0o755,
-      'src/node_modules/m': 0o755, 'var/spool/sticky': 0o1757, 'home/agent/w': 0o777, 'root/w': 0o777, 'tmp/w': 0o777, 'var/tmp/w': 0o777, 'var/lib/mumbo/playwright-output/f': 0o666,
-      home: 0o755, tmp: 0o755, 'var/tmp': 0o1757, 'home/outside': 0o777 })
-    assert.deepEqual(r.lines('chown'), [])
+    // The login groups: 1000 and up, sudo (E2B's user), users (legacy's primary group) and uploads (browsermcp).
+    assert.equal(out.out, 'login=-gid +999 -o -gid 27 -o -gid 100 -o -gid 999\n')
+    // The paths a login user owns become root:root, the link itself, but in the users' and runtime trees and
+    // browsermcp's Playwright output; colord's stays its own.
+    const chowned = r.lines('chown').join(' ').split(' ')
+    assert.deepEqual([chowned.slice(0, 2), chowned.slice(2).sort()], [['-h', '0:0'], ['T/tmp', 'T/usr/local/bin/oauth2-proxy', 'T/usr/local/link']])
+    // The modes a box's start script leaves: /usr/local, node, /code, envd, inittab, /home and the non-sticky /tmp
+    // without o+w (group root's write bit stays: it holds only root), the sticky directories as they were, the module,
+    // agent's /tmp and the directories of uploads and users without g+w, colord's, /var/mail and /var/local as they were, what is in
+    // the users' and runtime trees as it was, the link not followed.
+    assert.deepEqual(modes(r, [...Object.keys(E2B_MODES), 'home/outside']), { 'usr/local': 0o775, 'usr/local/bin': 0o775, 'usr/local/bin/node': 0o775, 'usr/bin/envd': 0o775, 'etc/inittab': 0o664, code: 0o775,
+      'src/node_modules/m': 0o755, 'var/spool/sticky': 0o1777, 'home/agent/w': 0o777, 'root/w': 0o777, 'tmp/w': 0o777, 'var/tmp/w': 0o777, 'var/lib/mumbo/playwright-output/f': 0o666,
+      home: 0o775, tmp: 0o755, 'var/tmp': 0o1777, 'usr/local/bin/oauth2-proxy': 0o755, 'var/lib/colord': 0o775, 'var/mail': 0o2775, 'var/local': 0o2775, 'opt/uploads': 0o755, 'opt/users': 0o755, 'home/outside': 0o777 })
   } finally { r.done() }
-  // The repair does not hold (chmod changes nothing): the start stops and names what is left.
+  // The modes do not hold (chmod changes nothing): the start stops and names what every user or a login group can
+  // still change, and nothing a system group's or in the trees left alone.
   r = root()
   try {
     e2bRoot(r)
     r.fake('chmod', 'exit 0')
     const out = r.run('echo reached', [], systemRepair(r.t))
     assert.equal(out.code, 1)
-    assert.ok(out.err.startsWith('mumbo-box: a user other than root can still change these system files after their repair:\n'), out.err)
-    for (const p of ['usr/local/bin', 'usr/local/bin/node', 'usr/bin/envd', 'etc/inittab', 'code', 'src/node_modules/m', 'home', 'tmp']) assert.match(out.err, new RegExp(`^\\S+ ${ME.owner} T/${p}$`, 'm'), p)
-    for (const p of ['home/', 'root/', 'tmp/', 'var/tmp/', 'var/lib/mumbo/playwright-output']) assert.ok(!out.err.includes(` T/${p}`), p)
+    assert.ok(out.err.startsWith('mumbo-box: a login user can still change these system files after their repair:\n'), out.err)
+    assert.deepEqual(named(out.err), ['T/code', 'T/etc/inittab', 'T/home', 'T/opt/uploads', 'T/opt/users', 'T/src/node_modules/m', 'T/tmp', 'T/usr/bin/envd', 'T/usr/local', 'T/usr/local/bin', 'T/usr/local/bin/node'])
+    assert.match(out.err, new RegExp(`^-rwxrwxrwx ${ME.owner} T/usr/bin/envd$`, 'm'))
     assert.ok(!out.out.includes('reached'))
   } finally { r.done() }
-  // Paths another user owns become root:root (link and all), but in the users' and runtime trees and browsermcp's
-  // Playwright output; with the fake chown changing nothing, the check names them.
+  // The owners do not hold (chown changes nothing): the check names the login user's paths alone.
+  r = root()
+  try {
+    e2bRoot(r, false)
+    const out = r.run('', [], systemRepair(r.t))
+    assert.equal(out.code, 1)
+    assert.deepEqual(named(out.err), ['T/tmp', 'T/usr/local/bin/oauth2-proxy', 'T/usr/local/link'])
+  } finally { r.done() }
+  // Without the users and groups the repair changes nothing and the start stops.
   r = root()
   try {
     e2bRoot(r)
-    fakeFind(r.at('bin'), 4000098)
+    r.fake('getent', 'exit 2')
     const out = r.run('', [], systemRepair(r.t))
-    assert.equal(out.code, 1)
-    const chowned = r.lines('chown').join(' ').split(' ')
-    assert.deepEqual(chowned.slice(0, 2), ['-h', '0:0'])
-    for (const p of ['T', 'T/usr/local/bin/node', 'T/usr/local/link', 'T/code', 'T/src/node_modules/m', 'T/bin', 'T/root', 'T/home', 'T/tmp', 'T/var/tmp', 'T/run', 'T/proc']) assert.ok(chowned.includes(p), p)
-    assert.deepEqual(chowned.filter(p => /^T\/(root|home|tmp|var\/tmp|run|proc)\/|^T\/var\/lib\/mumbo\/playwright-output(\/|$)/.test(p)), [])
+    assert.deepEqual([out.code, out.err, r.lines('chown'), modes(r, ['usr/local'])], [1, 'mumbo-box: could not read the users and groups for the system repair\n', [], { 'usr/local': 0o777 }])
   } finally { r.done() }
 })
 
@@ -517,7 +563,7 @@ test('the start script repairs the system files first, before it reads the ports
       const firewall = r.at('root/.mumbo/firewall.nft')
       if (holds) {
         assert.equal(out.code, 0, out.err)
-        assert.deepEqual([out.out, statSync(r.at('usr/local/share/mumbo/ports')).mode & 0o777, readFileSync(firewall, 'utf8')], ['DSH_PORT=880\n', 0o644, FIREWALL('{ 0, 1002 }')])
+        assert.deepEqual([out.out, statSync(r.at('usr/local/share/mumbo/ports')).mode & 0o777, readFileSync(firewall, 'utf8')], ['DSH_PORT=880\n', 0o664, FIREWALL('{ 0, 1002 }')])
       } else {
         // Stopped before the marker is read: no firewall, no dsh.
         assert.equal(out.code, 1)

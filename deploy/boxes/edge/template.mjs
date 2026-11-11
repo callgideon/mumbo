@@ -237,7 +237,8 @@ const SMOKE_SCAN = '/root /home /src /var/lib/mumbo /usr/local/share/mumbo /run/
  *  directory without the sticky bit on the root filesystem outside WRITABLE_EXCLUDES, and on any file a user other than
  *  root can change (another owner, o+w, or g+w with a group other than root) in a directory on root's PATH or a run-as
  *  user's (containmentRows), or anywhere in dsh's code tree, the real paths of /src and `npm root -g`: root runs and
- *  imports them. agent may also own the directories in its home on its own PATH alone (rowPaths). Then it runs
+ *  imports them, so this check also names what a system user or group could change there, which the repair leaves
+ *  (edge systemRepair). agent may also own the directories in its home on its own PATH alone (rowPaths). Then it runs
  *  agentInstallScript as agent, and fails unless it succeeds. On a failure it prints the reason, with mode, owner and
  *  path for each file named, and the tails of start.sh's output, /root/dsh.log and dsh's start-up audit
  *  (/root/.dsh/logs/startup-*.log), and dsh's whole warning that entries did not activate. Either way it then kills every process of the containment

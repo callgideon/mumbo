@@ -332,29 +332,38 @@ const REPAIR_EXCLUDES = [
 const REPAIR_USER_PATHS = [
   '/var/lib/mumbo/playwright-output', // browsermcp's, 0700 (startScript): the Playwright MCP server writes its files there
 ]
-/** The start script's first part (B24 fix), before it reads PORTS_MARKER and before any user's process starts: on the
- *  root filesystem outside REPAIR_EXCLUDES' contents and REPAIR_USER_PATHS, a path another user owns becomes root:root,
- *  every path but a sticky directory loses o+w, and a path whose group is not root (gid 0, which holds only root) loses
- *  g+w. Then it checks the same paths and stops the start, naming them, if any is left. The tree list is `/` less those
- *  excludes, so a top-level directory a new image or E2B build adds is covered, and /home, /tmp and the other excluded
- *  top directories are repaired and checked themselves: a writable /home would let a user replace another's home, and
- *  /tmp without the sticky bit another user's files. E2B's finalize phase, which runs after a template's steps, makes
- *  /usr/local and /code 0777 (its configure.sh), and its rootfs builder writes envd, which runs as root, 0777; a
- *  restored archive or a new base image could do the same. Repaired first, the ports marker, which sets the firewall's
- *  ports, and what root runs (/etc/inittab, envd and its service file, node) were never writable by a user's process.
- *  /code is E2B's work directory, which nothing in a box uses, and becomes root's like the rest. One find sets and one
- *  checks; neither follows a link or leaves the root filesystem, and both skip a path that goes while they run.
+/** The start script's first part (B24 fix), before it reads PORTS_MARKER and before any user's process starts. It
+ *  guards the system files against the login users, a uid of 1000 or more (Debian's first uid for an account made
+ *  without `-r`: E2B's `user`, browser and every containment user), and the login groups, a gid of 1000 or more or a
+ *  group that holds a login user as a member or as its primary group (E2B's `user` in sudo, browser and browsermcp in
+ *  the system group uploads), read with getent at each start, before the find. On the root filesystem outside
+ *  REPAIR_EXCLUDES' contents and REPAIR_USER_PATHS, a path a login user owns becomes root:root, a path of a login group
+ *  loses g+w, and every path but a sticky directory loses o+w, whoever owns it. Then it checks the same paths and stops
+ *  the start, naming them, if any is left. A system user's or group's path keeps its owner and its group write bit (a
+ *  package's daemon such as polkitd or colord, root:mail 2775 /var/mail, root:staff 2775 /var/local, and the template's
+ *  xvnc and ghproxy, made with `-r`): no login user can change it, and taking it from its daemon can break the daemon.
+ *  The tree list is `/` less those excludes, so a top-level directory a new image or E2B build adds is covered, and
+ *  /home, /tmp and the other excluded top directories are repaired and checked themselves: a writable /home would let
+ *  a user replace another's home, and /tmp without the sticky bit another user's files. E2B's finalize phase, which
+ *  runs after a template's steps, makes /usr/local and /code 0777 (its configure.sh), and its rootfs builder writes
+ *  envd, which runs as root, 0777; a restored archive or a new base image could do the same. Repaired first, the ports
+ *  marker, which sets the firewall's ports, and what root runs (/etc/inittab, envd and its service file, node) were
+ *  never writable by a user's process. /code is E2B's work directory, which nothing in a box uses, and becomes root's
+ *  like the rest. One find sets and one checks; neither follows a link or leaves the root filesystem, and both skip a
+ *  path that goes while they run.
  *  @param {string} root the directory the box's paths are under: empty for the box itself
  *  @returns {string} the start script's part */
 export const systemRepair = (root = '') => {
   const skip = [...REPAIR_EXCLUDES.map(p => `-path '${root}${p}/*'`), ...REPAIR_USER_PATHS.map(p => `-path ${root}${p}`)]
   const find = `find ${root || '/'} -xdev -ignore_readdir_race \\( ${skip.join(' -o ')} \\) -prune -o`
-  const world = '-perm -0002 ! \\( -type d -perm -1000 \\)', group = '! -gid 0 -perm -0020'
-  return `# System files are root's alone (edge systemRepair): E2B's template build leaves /usr/local, /code and envd
-# world-writable. Set, then checked, before the ports marker is read and before any user's process starts.
-${find} \\( ! -uid 0 -exec chown -h 0:0 {} + -o -true \\) ! -type l \\( ${world} -exec chmod o-w {} + -o -true \\) ${group} -exec chmod g-w {} + || :
-bad=$(${find} \\( ! -uid 0 -o ! -type l \\( ${world} -o ${group} \\) \\) -printf '%M %u:%g %p\\n') || { echo 'mumbo-box: could not check the system files after their repair' >&2; exit 1; }
-[ -z "$bad" ] || { printf 'mumbo-box: a user other than root can still change these system files after their repair:\\n%s\\n' "$bad" | head -n 50 >&2; exit 1; }
+  const world = '-perm -0002 ! \\( -type d -perm -1000 \\)', group = '\\( $login \\) -perm -0020'
+  return `# No login user (uid 1000 or more) can change the system files (edge systemRepair): E2B's template build leaves
+# /usr/local, /code and envd world-writable. Set, then checked, before the ports marker is read and before any user's
+# process starts. $login matches the login groups: a gid of 1000 or more, or a login user as a member or primary group.
+login=$({ getent passwd && echo - && getent group && echo -; } | awk -F: '$0 == "-" { s++; next } s == 0 { if ($3 > 999) { u[$1]; p[$4] } next } s == 1 && $3 ~ /^[0-9]+$/ && $3 < 1000 { k = ($3 in p); n = split($4, m, ","); for (i = 1; i <= n; i++) if (m[i] in u) k = 1; if (k) w = w " -o -gid " $3 } END { if (s != 2) exit 1; print "-gid +999" w }') || { echo 'mumbo-box: could not read the users and groups for the system repair' >&2; exit 1; }
+${find} \\( -uid +999 -exec chown -h 0:0 {} + -o -true \\) ! -type l \\( ${world} -exec chmod o-w {} + -o -true \\) ${group} -exec chmod g-w {} + || :
+bad=$(${find} \\( -uid +999 -o ! -type l \\( ${world} -o ${group} \\) \\) -printf '%M %u:%g %p\\n') || { echo 'mumbo-box: could not check the system files after their repair' >&2; exit 1; }
+[ -z "$bad" ] || { printf 'mumbo-box: a login user can still change these system files after their repair:\\n%s\\n' "$bad" | head -n 50 >&2; exit 1; }
 `
 }
 

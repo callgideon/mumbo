@@ -46,7 +46,9 @@ test('a user box start script is byte-for-byte what it was before project boxes 
   // other than root's go, then checked, because E2B's build leaves /usr/local, /code and envd world-writable (containment.test.mjs).
   // Then the repair took in /home, /tmp and the other excluded trees' top directories, leaving only what is in them; and
   // agent's row gained its npm prefix and its own program directories on PATH, since /usr/local is root's alone (containment.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), '4a979609de797ad34984db2e67cbc3099322a1a6267a5a540b49e29087c4e6f5')
+  // Then the repair took ownership only from login users (uid 1000 or more) and g+w only from login groups, read with
+  // getent, so system daemons keep their paths (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), '8e9525a296a26a027b5fb616ab201f212558a8bdba0cf8bc01397d3acd1f8074')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -74,7 +76,9 @@ test('a project box start script is byte-for-byte what it was before B18 changed
   // leaves /usr/local, /code and envd world-writable (containment.test.mjs). Then the repair took in /home, /tmp and the
   // other excluded trees' top directories, leaving only what is in them; and agent's row gained its npm prefix and its own
   // program directories on PATH, after the command shims and the gh wrapper, since /usr/local is root's alone (containment.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), '08f25745e2e9a9d99c43b1d8d69b5133fb5ac2afc530fd1219f3912d7ea257a6')
+  // Then the repair took ownership only from login users (uid 1000 or more) and g+w only from login groups, read with
+  // getent, so system daemons keep their paths (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), 'ea70bf40c1aabb347dc6a36d0b75c1e5f15c1d5de5ba93cd9f20c44bddfb664e')
 })
 
 const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'
