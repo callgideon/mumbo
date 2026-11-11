@@ -22,6 +22,7 @@ import { KV, type Key } from '../kv.ts'
 import { claimPull, PullSchema } from '../sources/github-pull.ts'
 import type { SourceContext } from '../sources/host.ts'
 import type { ExecutorPlugin } from './executors.ts'
+import { READY } from './review.ts'
 
 /** The Inputs one claim or report answers, oldest first; `more` counts the rest. It bounds one door answer, so it is fixed. */
 const INPUTS = 20
@@ -321,9 +322,9 @@ export class ExternalExecutor implements ExecutorPlugin {
   /**
    * Finishes the lease holder's work with the head it pushed: checks that a holder of this Ticket's lease pushed `headSha`
    * through the worker git route and that it is still the branch head, opens a draft pull request from the branch or turns
-   * the open one back into a draft, then, in one transaction, binds the pull request, records a `ready` report as a local
-   * worker's, relayed to the main Session alike, with the worker's declared `model` and `costUsd` on the Assignment's
-   * `worker`, and releases the lease with the result. The GitHub writes come first, so one that fails records nothing and
+   * the open one back into a draft, which instead stays or becomes ready once the Ticket's review of `headSha` passed, then,
+   * in one transaction, binds the pull request, records a `ready` report as a local worker's, relayed to the main Session alike,
+   * with the worker's declared `model` and `costUsd` on the Assignment's `worker`, and releases the lease with the result. The GitHub writes come first, so one that fails records nothing and
    * the worker submits again. A retry with the same head after the release, or while the first submit runs, answers the
    * stored result once the first one recorded it. Every answer requests the review of the head (see `answer`).
    * @param assignment - The Assignment the lease is on.
@@ -355,8 +356,10 @@ export class ExternalExecutor implements ExecutorPlugin {
       if (!made) throw error
       return made
     })
-    // An unreviewed head must not wait in the approval queue as a ready pull request.
-    if (!pull.draft) await commands.gh(['api', 'graphql', '-f', `query=${TO_DRAFT}`, '-f', `id=${pull.node_id}`])
+    // An unreviewed head must not wait in the approval queue as a ready pull request, and a head whose review passed waits
+    // there ready: its pass marker is on the pull request, and that review, which marks a draft ready, does not run again.
+    const passed = !!store.tickets.get(ticket.id)?.reviews?.some(item => item.sha === request.headSha && item.verdict === 'pass')
+    if (pull.draft === passed) await commands.gh(['api', 'graphql', '-f', `query=${passed ? READY : TO_DRAFT}`, '-f', `id=${pull.node_id}`])
     return this.answer(store.atomic(() => {
       // A concurrent submit of the same head may have recorded it, and the lease may have ended, during the GitHub calls.
       const recorded = this.submitted(assignment, request)
@@ -405,15 +408,16 @@ export class ExternalExecutor implements ExecutorPlugin {
    * The answer to a submit whose result is recorded, once it requested the review of the submitted head on its pull request
    * (`Engine.requestReview`, one review Ticket per Ticket and head, so a retried submit starts none). A refused request, such
    * as for a Ticket that ended since, leaves the recorded submit as it is: it is logged and set on the `external` health
-   * entry, which the next review request that succeeds clears.
+   * entry, which shows it until a later request for the same Ticket and head succeeds or a later failure replaces it.
    */
   private answer({ ticketId, result: { pr, headSha } }: Submitted): SubmitView {
     const { engine, health, logger } = this.host
+    const failed = `${REVIEW_FAILED} for head ${headSha} of Ticket ${ticketId}:`
     try {
       engine.requestReview(ticketId, { pr: pr.number, sha: headSha })
-      if (health.get()?.detail.startsWith(REVIEW_FAILED)) health.set({ state: 'ready', detail: 'Submitted heads are queued for review', at: iso(Date.now()) })
+      if (health.get()?.detail.startsWith(failed)) health.set({ state: 'ready', detail: 'Submitted heads are queued for review', at: iso(Date.now()) })
     } catch (error) {
-      const detail = `${REVIEW_FAILED} for head ${headSha} of Ticket ${ticketId}: ${String(error)}`
+      const detail = `${failed} ${String(error)}`
       logger.warn('dsh-superagent: %s', detail)
       health.set({ state: 'error', detail, at: iso(Date.now()) })
     }

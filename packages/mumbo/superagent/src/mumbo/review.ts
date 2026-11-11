@@ -30,7 +30,8 @@ const marker = (sha: string, verdict: 'pass' | 'fail'): string => `<!-- mumbo-re
 const header = (sha: string, verdict: 'pass' | 'fail'): string => `${marker(sha, verdict)}\nThis is by an automated agent, not a human.`
 const PullSchema = z.looseObject({ node_id: z.string(), draft: z.boolean().optional(), head: z.looseObject({ sha: z.string() }) })
 const CommentSchema = z.looseObject({ html_url: z.string(), body: z.string().nullish(), user: z.looseObject({ login: z.string() }).nullish() })
-const READY = 'mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { clientMutationId } }'
+/** The GraphQL mutation that marks a draft pull request ready for review. */
+export const READY = 'mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { clientMutationId } }'
 const STALE = 'Not reviewed: the pull request moved past the reviewed commit, so no review was posted.'
 
 /** A Trigger as a review's worker reads it: in full, since it reads no resource. */
