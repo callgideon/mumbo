@@ -1,6 +1,6 @@
 # Mumbo personal assistant: node network and assistant brain (design v2)
 
-Date: 2026-11-09, revision 2.1 (revision 2 plus the founder's answers to its open decisions). Updated 2026-11-10 with the north star (section 1), the person's computer (section 17b) and regions (section 17c). Covers parts **A** (the network of nodes) and **B** (the assistant's brain). Part **C** (the founder's accounts in the box: WhatsApp, email, browser, consent) and part **D** (teammates' assistants, phone number, the assistant's own WhatsApp number) get their own designs later.
+Date: 2026-11-09, revision 2.1 (revision 2 plus the founder's answers to its open decisions). Updated 2026-11-10 with the north star (section 1), the person's computer (section 17b) and regions (section 17c); updated 2026-11-11 with the door's build (section 10, B31–B38), sign-up and choosing a region (section 17c), and sync between the laptop and the computer (section 17d). Covers parts **A** (the network of nodes) and **B** (the assistant's brain). Part **C** (the founder's accounts in the box: WhatsApp, email, browser, consent) and part **D** (teammates' assistants, phone number, the assistant's own WhatsApp number) get their own designs later.
 
 Marks: **[founder]** = decided by the founder. **[my call]** = decided by the designer; the founder may overturn it. Unmarked = context or a requirement that follows from the above.
 
@@ -68,9 +68,9 @@ Milestones toward it. These run alongside M1–M6 and don't widen M1:
 | Step | Contents | Done when |
 |---|---|---|
 | **N1** the person's computer (sections 17b, 17c) | Mumbo, the always-present assistant session; a smooth, complete desktop with Google Chrome; Browser and Desktop tabs in the app; the box in the person's region | The founder works from India in Mumbo and their box's Chrome and calls it smooth |
-| **N2** desktop app as the client | `apps/desktop` connects to the person's box as its host, signed in through the edge, instead of running dsh locally. It is a native shell, with the Chromium host in a separate process and agent input injected below the UI (the split ChatGPT Atlas uses). It draws local tabs, address bar, agent panel and consent prompts, and decodes the box's stream with WebCodecs. Agent-driven and box-signed-in tabs show as the box's stream. A local engine (`WebContentsView`) handles the person's local-identity browsing, WebGL and webcam. Google sign-in in the app goes through the system browser. Later, an Electron transport over QUIC or WebTransport through an NLB, once E2B nodes can take UDP | Browsing in the app feels native: local controls, and a stream within two frames of the round trip. The assistant still works in the box's Chrome while the laptop sleeps |
+| **N2** desktop app as the client | `apps/desktop` connects to the person's box as its host, signed in through the edge, instead of running dsh locally. It is a native shell, with the Chromium host in a separate process and agent input injected below the UI (the split ChatGPT Atlas uses). It draws local tabs, address bar, agent panel and consent prompts, and decodes the box's stream with WebCodecs. Agent-driven and box-signed-in tabs show as the box's stream. The app's own view (`WebContentsView`) handles pages that need no sign-in, WebGL and webcam; the person's signed-in laptop browsing stays in their own Chrome, joined by a Mumbo extension ("My Chrome", section 17d). Google sign-in in the app goes through the system browser. Later, an Electron transport over QUIC or WebTransport through an NLB, once E2B nodes can take UDP | Browsing in the app feels native: local controls, and a stream within two frames of the round trip. The assistant still works in the box's Chrome while the laptop sleeps |
 | **N3** coding agents in one place | Local Claude Code and Codex sessions attach to mumbo through the MCP door (M3); agents that run in the box follow section 8.1 | A local Claude Code session takes a Mumbo Ticket and reports back into Mumbo |
-| **N4** handoff | Open work moves between the laptop and the box as navigation, never identity: URL, tab group, scroll position, non-secret form drafts and a task digest, over Mumbo's own channel in under a second (CDP on the box, a protocol to the app). Chrome Sync is not the channel, because it gives no latency guarantee. A per-tab driver lease means one engine drives a tab at a time. A task that needs a session bound to the laptop goes to that session, in a consented local tab, instead of moving it. When the laptop sleeps, Mumbo and the box's Chrome carry on; when it wakes, the app shows what happened (the digest, M4) | The founder closes the laptop mid-task and finds the task done on reopening |
+| **N4** handoff | Open work moves between the laptop and the box as navigation, never identity: URL, tab group, scroll position, non-secret form drafts and a task digest, over Mumbo's own channel in under a second (the box Chrome's Mumbo extension, B42, and a protocol to the app). Chrome Sync is not the channel, because it gives no latency guarantee. A per-tab driver lease means one engine drives a tab at a time. A task that needs a session bound to the laptop goes to that session, in a consented local tab, instead of moving it. When the laptop sleeps, Mumbo and the box's Chrome carry on; when it wakes, the app shows what happened (the digest, M4) | The founder closes the laptop mid-task and finds the task done on reopening |
 
 Research, 2026-11-10 (`.claude/research/reports/Cloud Chrome sync and native desktop.md`), still to be measured:
 - how often Google challenges sign-ins from the nodes' addresses;
@@ -644,7 +644,7 @@ Reference mockups (sample data): `mumbo-mockups-v2.html`.
   - **Computer use** runs in a subagent whose model is the image-capable one. The DeepSeek session delegates "do X on the desktop or in the browser" and receives text back, so screenshots never reach DeepSeek, which can't read them anyway.
   - **Images the founder drops in chat** go through a `look` tool on the image model, which returns a description and any text in the image as a logged tool result.
   - **Fallback.** If dsh can't do either yet, a session the user starts on Qwen is the fallback. Automatic per-turn routing between models is not wanted. **[my call]**
-- Backups are not encrypted with KMS until stage 9's open item on that closes.
+- Backups are encrypted at rest with each cell's KMS key: the backup bucket's default encryption is `aws:kms` (`modules/cell/backups.tf`), and only the edge's role may use the key. Objects written before that default stay as they were until their versions expire.
 
 ## 17. Quality and observability **[my call]**
 
@@ -1275,46 +1275,67 @@ This replaces "A newcomer's region" above and step 4 of section 17a's flow. A ne
 - Agents keep using the computer's Chrome, also while the laptop is off.
 - What the person makes and finds, browser data and files, is the same on both sides.
 
-**The rule that shapes it** (section 1, the 2026-11-10 research): each identity lives on one device, and sessions never move. The two browsers are two identities.
-- The laptop's engine is signed in as the laptop: Google sign-ins bound to its hardware, banking, webcam work.
-- The computer's Chrome is signed in as the computer, for everything an agent does while the laptop sleeps.
-- Mumbo Sync carries everything else between them: tabs, bookmarks, history, downloads and files. It never carries cookies, passwords, payment cards or profiles.
+**The rule that shapes it** (section 1, the 2026-11-10 research): each identity lives on one device, and sessions never move.
+- **The person's own Google Chrome on the laptop** holds their laptop sign-ins: Google, which may bind its sessions to the laptop's hardware (DBSC), banking, and their password manager.
+- **The computer's Chrome** is signed in as the computer, for everything an agent does while the laptop sleeps.
+- **The desktop app's own view** (`WebContentsView`) can't hold those sign-ins, so it is for pages that need no sign-in and for WebGL and webcam work.
+  - Google blocks sign-in in embedded browser frameworks, and Electron has no Chrome Sync, no real extension support and no password manager.
+  - **[2026-11-11, mumbo-research "Local VM browser and file sync" corrects the earlier text, which put the laptop's sign-ins in this view]**
+- **Mumbo Sync carries everything else between them:** tab lists, bookmarks, history, downloads and files. It never carries cookies, passwords, payment cards or profiles.
+- **Every comparable product keeps a separate cookie jar in the cloud,** OpenAI's dots included. LinkedIn's terms also forbid copying cookies.
 
-**The browser in the desktop app: one tab strip, two places to run** (it makes N2 explicit):
-- **Each tab runs in one place**, shown on the tab by an icon and in the address bar's chip:
-  - **"This laptop":** the local engine (`WebContentsView`), native speed, the laptop's sign-ins.
-  - **"Your computer":** the box's Chrome as a stream, with the box's sign-ins. Agents use only these tabs.
-- **A switch in the toolbar sets where new tabs open**: "Browse on this laptop" or "Browse on your computer". It is the founder's mode toggle.
+**The browser: three places a page can run, one switch** (it makes N2 explicit):
+- **"Your computer":** the box's Chrome, shown as a stream in the app, with the box's sign-ins. Agents use only these tabs.
+- **"My Chrome":** the person's own Google Chrome on the laptop, with all their sign-ins, extensions and password manager.
+  - A Mumbo extension in it talks to the desktop app over native messaging, with the same permissions as the box's extension (below).
+  - Its tabs live in Chrome's own window. The app lists them and brings that window forward, and doesn't host them.
+- **"This app":** the desktop app's own view, logged out by default. It is for fast pages that need no sign-in, WebGL and the webcam.
+  - It keeps a site's sign-in when the person signs in there, never Google's: Google sign-in goes through the system browser.
+- **The switch in the toolbar,** the founder's toggle, sets where new pages open: "On this laptop" or "On your computer".
+  - "On this laptop" means My Chrome when its extension is connected, else This app.
   - The default is this laptop, for speed.
-  - A link Mumbo opens, a task's tab, and anything an agent drives open on the computer whatever the switch says.
-- **"Move to your computer" and "Move to this laptop"** on a tab move navigation, never identity (N4):
-  - the URL, the tab group, the scroll position and non-secret form drafts move, in under a second;
-  - the person signs in on the other side if the site needs it.
-  - The menu says so: "Moves the page, not your sign-in".
+  - A link Mumbo opens, a task's page, and anything an agent drives open on the computer whatever the switch says.
+- **"Move to your computer" and "Move to this laptop"** move the page, never the sign-in (N4):
+  - the URL, the tab group and the scroll position (a hint applied after load) move;
+  - **form drafts don't move in v1.** On a page with unsaved input, the menu says "Finish or save the form first".
+  - The person signs in on the other side if the site needs it, and the menu says "Moves the page, not your sign-in".
+  - "In under a second" is the target, measured in B43.
+- **The same page in both browsers:** the app shows which pages an agent holds, and warns when the person opens one of them on the laptop. Two people editing a document is fine; two submits of a checkout are not.
 - **Offline:**
-  - with the laptop offline, laptop tabs keep working, and computer tabs show "Your computer keeps working. Reconnect to see it";
+  - with the laptop offline, laptop pages keep working, and computer tabs show "Your computer keeps working. Reconnect to see it";
   - with the laptop asleep, the computer's Chrome and Mumbo carry on, and on reconnect the app shows what happened (M4's digest).
-- **Agents and laptop sign-ins:** an agent never drives a laptop tab unseen. When a task needs a sign-in that exists only on the laptop, Mumbo asks in the app to open a consented laptop tab for that step (N4), and only while the laptop is online.
+- **A site the computer isn't signed in to:** the agent stops and asks the person to sign in through the stream ("Take over", B28), and doesn't retry.
+- **Agents and laptop sign-ins:** an agent never drives a laptop page unseen. When a task needs a sign-in that exists only on the laptop, Mumbo asks in the app to open a consented page in My Chrome for that step (N4), and only while the laptop is online. Browser consent's asks and B25's denials apply there as in the box.
+- **Per-site agent rules** (part C's approval tiers start here):
+  - **LinkedIn** forbids "bots or other unauthorized automated methods" (User Agreement §8.2). Founder's decision pending; the recommendation is that the agent drafts and the person acts there.
+  - **WhatsApp** stays as decided in v1: the agent reads and drafts, and a send needs the person's approval.
+  - Every other site follows browser consent's asks.
 
-**Mumbo Sync:** the computer is the hub, because it's always on and backed up; each laptop, and later the phone, is a replica.
-- **The hub** is a plugin in the box, `@mumbo/sync`.
+**Mumbo Sync:** the computer keeps the index, S3 keeps the bytes, and each laptop, and later the phone, is a replica. **[2026-11-11, from the research: "file bytes in storage, link in the database"]**
+- **The hub** is a plugin in the box, `@mumbo/sync`. It is the index and sequencer.
   - Its metadata is in `/root/.dsh/storages/sync`, backed up with the rest of `/root/.dsh`.
   - Every change gets a hub sequence number.
   - A replica sends its changes since its last acknowledged sequence and receives everyone else's.
-- **Transport:** the desktop app's signed-in connection to the edge (N2's sign-in), then the box like any other app request.
-  - Metadata travels over one WebSocket.
-  - File content goes as `PUT` and `GET` of `/sync/blobs/<sha256>` with `Range`, so large files resume.
-  - Content is addressed by its hash, so a renamed or copied file isn't sent twice.
-  - TLS covers the connection to the edge; backups are encrypted with KMS as today.
+- **Transport:**
+  - **Metadata** travels over the desktop app's signed-in connection to the edge (N2a), then to the box like any other app request, on one WebSocket.
+  - **File content** travels as objects `users/<principal hash>/files/<sha256>` in the person's region's backup bucket, the objects B40b already writes.
+  - The laptop uploads and downloads them through URLs the edge presigns. Each URL is short-lived, names one hash, and is presigned only for a live replica (below).
+  - The box fetches what laptops upload and uploads what it writes.
+  - So a laptop sends and receives bytes while the box is moving or restoring, and only its metadata waits.
+  - `Range` resumes large files. Content is addressed by its hash, so a renamed or copied file isn't sent twice.
+  - TLS covers every hop; the bucket encrypts with the cell's KMS key.
 - **Offline:** each replica keeps a journal of its local changes and replays it on reconnect. The hub keeps changes until every replica has acknowledged them, and drops a replica unseen for 30 days, which then re-syncs in full.
+- **Replicas are devices.** Each laptop registers a replica with the edge when sync is turned on, and the home page lists them with "Remove".
+  - A removed replica gets no metadata and no presigned URL from its next request, so a lost laptop stops syncing.
+  - Its files on the laptop stay; the person deletes them.
 
 **What syncs:**
 
 | Data | Laptop side | Computer side | Rule |
 |---|---|---|---|
-| Open tabs and tab groups | the app's tab strip | the box Chrome's tabs | Live, under a second. One engine drives a tab at a time (N4's driver lease) |
-| Bookmarks | the local engine's store | the box Chrome, so the person's Google bookmarks reach the laptop through the box's Chrome Sync | Last writer wins per bookmark and per field (title, URL, folder, position), with tombstones |
-| History | the local engine, for address-bar suggestions | the box Chrome | Append-only. 90 days on the laptop. Private windows are never recorded |
+| Open tabs and tab groups | the app's and My Chrome's tabs | the box Chrome's tabs | **A list** of the other side's tabs ("Tabs on your computer", "Tabs on this laptop"), live. Opening one is a Move: the box never opens a laptop page unasked. One engine drives a tab at a time (N4's driver lease) |
+| Bookmarks | My Chrome, or This app's store | the box Chrome | **With one Google account in both Chromes, Chrome Sync already carries them,** and Mumbo Sync doesn't. Otherwise last writer wins per bookmark and per field (title, URL, folder, position), with tombstones |
+| History | My Chrome, or This app, for address-bar suggestions | the box Chrome | Chrome Sync when both Chromes share an account; otherwise append-only, 90 days on the laptop. Private windows are never recorded |
 | Downloads | `~/Mumbo/Downloads` | `/home/shared/Downloads` (Chrome's download folder) | As files, below |
 | Files | `~/Mumbo/Files` | `/home/shared/Files` | Below |
 | Cookies, passwords, payment cards, autofill, site sign-ins, profiles | — | — | **Never** |
@@ -1323,9 +1344,13 @@ This replaces "A newcomer's region" above and step 4 of section 17a's flow. A ne
 - A Mumbo extension is force-installed by Chrome policy from a local update URL. It has the `bookmarks`, `history`, `tabs` and `tabGroups` permissions, and never `cookies`, `webRequest` or host permissions.
 - It talks to the hub through native messaging. The host runs as `browser` and connects to the root-owned socket `/run/mumbo/sync.sock`, which accepts only the `browser` user (`SO_PEERCRED`). So nothing opens a port that agent containment would have to police.
 - It remembers what it wrote, so the changes it applies don't echo back.
+- **The same extension serves My Chrome on the laptop** (published to the Chrome Web Store, so it needs a store review), talking to the desktop app's native-messaging host. It never gets `cookies`, `webRequest` or host permissions.
 
 **Files:**
 - **One folder:** `~/Mumbo` on the laptop, with `Files` and `Downloads` inside. Nothing else on the laptop syncs. **[founder: 2026-11-11, one folder as recommended]**
+- **Not synced, by default:** `.git`, `node_modules`, `.venv` and `target/`. Code belongs in a project, where git merges it; the app says so when it skips one.
+- **Symlinks never sync,** in either direction.
+- **One file is at most 2 GiB.** A larger one stays local and shows "Too large to sync". Whole-file hashes mean a small edit to a large file sends it again; content-defined chunking can come later.
 - **Conflicts:**
   - A change on one side, with the other side unchanged since the last sync, applies.
   - When both sides changed, both are kept: the later arrival becomes "name (conflict from <device>, <date>).ext".
@@ -1339,6 +1364,8 @@ This replaces "A newcomer's region" above and step 4 of section 17a's flow. A ne
   - They are marked as from the internet on the laptop (macOS quarantine attribute, Windows Mark of the Web), so Gatekeeper and SmartScreen treat them as downloads.
   - Executable bits never sync.
 - **Laptop files reach the agent:** `Files` and `Downloads` are model roots, so Mumbo reads what the person puts there. The app says so when sync is turned on: "Mumbo can read and change what you put in this folder."
+  - A document can carry injected instructions, as a web page can.
+  - No turn starts from a file change. If one ever does, B25b's rule covers it: every browser write asks while it runs.
 - **The box's file I/O runs as its own user, `filesync`** (group `shared`), through the run-as seam, opening without following links. Agent containment's rule holds: root never writes in a folder another user can change.
 - **Space: 20 GiB of synced files per person** **[founder: 2026-11-11, "about 20 GB"]**.
   - The quota is set by the edge, and `Files` and `.mumbo-trash` count against it.
@@ -1369,22 +1396,30 @@ This replaces "A newcomer's region" above and step 4 of section 17a's flow. A ne
 
 **Phone:** later, through the web app's uploads.
 
-**Tasks** (N2):
+**Tasks** (N2), in phases. Phase 0 is spec work (done here). Phase 1 is the desktop app as a client, and file sync. Phase 2 is the browser placements and the per-site rules. Phase 3 is My Chrome and passkeys.
 
 | Task | Contents | Depends on |
 |---|---|---|
+| **N2a** app sign-in | The desktop app signs in through the edge (Google in the system browser) and uses the person's box as its host instead of a local dsh. Today's app binds a local dsh on `127.0.0.1` (`apps/desktop/README.md`), so this is a rework of the app. The sync replica's identity is registered here | — |
+| **N2b** native shell | The app's own tabs, address bar, agent panel and consent prompts; the box's stream decoded with WebCodecs; the Chromium host in its own process | N2a |
 | **R-disk** (mumbo) | `box_free_disk` 32768 and `MIN_AVAIL_MB` 30720; setup; rebuild `mumbo-box` and check that its rootfs stays sparse; a node disk-use alarm at 75 %; measure a 20 GiB box's drain; move the founder's box to the new build | — |
-| **B40** sync hub | `@mumbo/sync`: sequences, journals, replica cursors, blob routes with `Range`, the 20 GiB quota, `filesync` run-as file I/O, trash, the mass-delete hold. Tests per rule above | B24, R-disk |
-| **B40b** synced-file backups | The edge presigns PUTs for missing hashes; the hub uploads by content; the archive leaves `Files` and `.mumbo-trash` out; restore fetches them by metadata; offboarding deletes the prefix. Tests: an incremental backup, a restore, a move | B40 |
-| **B41** file sync in the app | The desktop app's sync client for `~/Mumbo`: a watcher, a journal, conflict copies, OS trash, quarantine and Mark of the Web, the over-quota state, the mass-delete prompt, a sync status in the app. A GIF | N2's sign-in, B40 |
-| **B42** browser data | The force-installed extension, its native-messaging host and socket, bookmarks and history on both sides, and the live tab list (N4's channel) | B40 |
-| **B43** two places to run | The tab placement, its icons and chip, the toolbar switch, Move, offline states, and agent-opened tabs always on the computer. A GIF | N2's shell, B42 |
+| **B40** sync hub | `@mumbo/sync`: sequences, journals, replica cursors and their removal, the 20 GiB quota, `filesync` run-as file I/O, trash, the mass-delete hold. Tests per rule above | B24, R-disk |
+| **B40b** file bytes in S3 | The edge presigns per-hash PUTs and GETs, with `Range`, for the box and for live replicas only; the hub uploads and fetches by content; the archive leaves `Files` and `.mumbo-trash` out; restore fetches them by metadata; offboarding deletes the prefix. Tests: an incremental backup, a restore, a move, a removed replica refused | B40 |
+| **B41** file sync in the app | The desktop app's sync client for `~/Mumbo`: a watcher, a journal, bytes through S3, conflict copies, OS trash, quarantine and Mark of the Web, the default ignores, no symlinks, the 2 GiB file cap, the over-quota state, the mass-delete prompt, a sync status, the replica list and Remove. A GIF | N2a, B40b |
+| **B42** browser data | The box Chrome's force-installed extension, its native-messaging host and socket; the live tab lists both ways; bookmarks and history for This app, and for My Chrome only when it isn't on the same Google account | B40 |
+| **B43** placements | "Your computer" and "This app" placements, their icons and chip, the toolbar switch, Move (no form drafts), the same-page warning, offline states, agent-opened pages always on the computer, measured Move time. A GIF | N2b, B42 |
+| **B44** per-site agent rules | The per-site table in browser consent (LinkedIn per the founder's answer, WhatsApp as v1) and its ask tiers | B25 |
+| **B45** My Chrome | The Mumbo extension for the person's own Chrome, published to the Web Store, with native messaging to the app; Move and consented laptop steps target it | N2a, B42 |
+| **B46** passkeys in the box | Confirm synced passkeys in the box's Linux Chrome; WebAuthn forwarding from the laptop into the stream | N2b |
 
 **Not in this:**
 - moving sign-ins in either direction;
 - syncing the laptop's other folders;
 - sharing synced folders with other people (part D);
-- a password manager in the local engine: Electron's extensions omit what one needs, so the person uses their OS's password manager there. **[founder: A, then B, then C; my call on the cut]**
+- a password manager in This app: Electron's extensions omit what one needs, and signed-in work belongs in My Chrome;
+- end-to-end encryption against the operator (the bucket is encrypted with the cell's key, which the edge can use).
+
+## 18. Milestones **[founder: A, then B, then C; my call on the cut]**
 
 | Milestone | Contents | Done when |
 |---|---|---|
@@ -1397,7 +1432,7 @@ This replaces "A newcomer's region" above and step 4 of section 17a's flow. A ne
 
 Then the part C design (accounts in the box), then D.
 
-The person's-computer track (N1: sections 17b and 17c, tasks B17–B23 and R1–R8) runs alongside these milestones. It doesn't change their contents or their order. **[founder: 2026-11-10, "don't widen M1"]**
+The person's-computer tracks run alongside these milestones: N1 (sections 17b and 17c, tasks B17–B25, B39 and R1–R8) and N2 (section 17d, tasks N2a, N2b, R-disk and B40–B46). It doesn't change their contents or their order. **[founder: 2026-11-10, "don't widen M1"]**
 
 ## 19. Non-goals of this design
 
@@ -1461,13 +1496,12 @@ The person's-computer track (N1: sections 17b and 17c, tasks B17–B23 and R1–
   - Mitigation: the person signs in by hand through the stream with the agent detached (Take over, B28), and handles Google's checks.
   - If Google still refuses, Chrome is restarted once without the debugging port for the sign-in, then with it again.
   - How often Google challenges our nodes' addresses is still to be measured.
-- **A Workspace tenant that enforces Device Bound Session Credentials** blocks the box's Linux Chrome from its enforced apps. Mitigation: leave that enforcement off for the founder's tenants, or use those apps in the desktop app's local engine (N2).
+- **A Workspace tenant that enforces Device Bound Session Credentials** blocks the box's Linux Chrome from its enforced apps. Mitigation: leave that enforcement off for the founder's tenants, or use those apps in the person's own Chrome on the laptop ("My Chrome", section 17d); the desktop app's own view can't hold Google sign-ins.
 - **Google Chrome's terms.** Installing Chrome in boxes for the company's own people is ordinary use. Offering it to customers needs a review before productizing.
 - **A region costs a fixed amount each month** (E2B control, NAT, the ALB, a minimum of one node) whether or not anyone uses it. R3 states the amount before apply.
 - **One edge store for all regions** adds a cross-region round trip to the Mumbai edge's store reads (section 17c). Measured in B21; the cache and the Global Datastore are the next steps.
 
 **Before public launch** (checklist) **[founder]**
 - Branch rules on `main`, `dev` and `master` (section 9).
-- KMS encryption for backups.
 - Per-site consent and an audit log for account actions (part C).
 - A decision on Claude workers in sandboxes (section 8.1).
