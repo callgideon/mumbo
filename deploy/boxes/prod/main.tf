@@ -82,21 +82,21 @@ module "cell_ap_south_1" {
   source    = "./modules/cell"
   providers = { aws = aws.ap_south_1 }
 
-  name                 = "${local.name}-aps1" # IAM role and S3 bucket names are global
-  vpc_cidr             = "10.21.0.0/16"       # clear of 10.11/16, 10.12/16 (E2B in-host) and 10.20/16 (us-east-1)
-  azs                  = ["ap-south-1a", "ap-south-1b", "ap-south-1c"]
-  private_domain       = "ap-south-1.boxes.internal"
-  zone_id              = module.cell_us_east_1.zone_id # one boxes.internal zone for every cell (R4)
-  lean                 = true
-  db_availability_zone = "ap-south-1b" # the only zone with db.t4g.medium for Postgres 18
-  e2b_sha              = var.e2b_sha
-  node_count           = var.node_count_ap_south_1
-  ecr                  = local.ecr
-  mtls_env             = local.mtls_env
-  mtls_certs           = { ca_pem = module.mtls.ca_pem, leaves = module.mtls.leaves } # SPIFFE ids, not names: the same leaves serve every cell
-  backup_bucket        = "${local.name}-aps1-backup-${data.aws_caller_identity.this.account_id}"
-  edge_role_arn        = module.edge_us_east_1.role_arn # the Mumbai edge's role joins in R6
-  alarm_email          = var.ops_alert_email
+  name              = "${local.name}-aps1" # IAM role and S3 bucket names are global
+  vpc_cidr          = "10.21.0.0/16"       # clear of 10.11/16, 10.12/16 (E2B in-host) and 10.20/16 (us-east-1)
+  azs               = ["ap-south-1a", "ap-south-1b", "ap-south-1c"]
+  private_domain    = "ap-south-1.boxes.internal"
+  zone_id           = module.cell_us_east_1.zone_id # one boxes.internal zone for every cell (R4)
+  lean              = true
+  db_instance_class = "db.t3.medium" # no db.t4g.medium capacity in ap-south-1 (2026-11-11)
+  e2b_sha           = var.e2b_sha
+  node_count        = var.node_count_ap_south_1
+  ecr               = local.ecr
+  mtls_env          = local.mtls_env
+  mtls_certs        = { ca_pem = module.mtls.ca_pem, leaves = module.mtls.leaves } # SPIFFE ids, not names: the same leaves serve every cell
+  backup_bucket     = "${local.name}-aps1-backup-${data.aws_caller_identity.this.account_id}"
+  edge_role_arn     = module.edge_us_east_1.role_arn # the Mumbai edge's role joins in R6
+  alarm_email       = var.ops_alert_email
 }
 
 output "nat_egress_ips" { value = module.cell_us_east_1.nat_egress_ips }
