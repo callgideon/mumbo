@@ -10,3 +10,4 @@ ntfy_enabled          = true
 github_agent_login = "mumbo-bot[bot]"
 github_agent_id    = "341797844"
 store_default_open = false # R2 step 3: every edge authenticates as the user edge
+edge_cells         = true  # R6 step 2: the us-east-1 edge knows both cells (CELLS)
