@@ -46,7 +46,8 @@ import { sourceContextOf, type SourceContextDeps } from './source-context.ts'
 import type { ResourceHost } from './resources.ts'
 import { mainTools, type MainToolsHost } from './tools/main.ts'
 import { executorTools, type ExecutorToolsHost } from './tools/executor.ts'
-import { Executors, heldExecutor } from '../mumbo/executors.ts'
+import { Executors } from '../mumbo/executors.ts'
+import { ExternalExecutor, externalRequested } from '../mumbo/external.ts'
 
 // Source plugins interact with dsh-superagent exclusively through the `SourceHost` service interface.
 declare module '@deepseek-ai/cordis' { interface Context { orchestrator: SourceHost } }
@@ -67,6 +68,8 @@ export class Runtime extends Service implements SourceHost {
   readonly sessions: Sessions
   readonly settings: Settings
   readonly executor: DshExecutor
+  /** The Executor of external Tickets, which workers outside the box take under a lease (`UPSTREAM.md` S13). */
+  readonly external: ExternalExecutor
   /** The Engine's Executor: each Ticket's calls go to the Executor of its kind (`UPSTREAM.md` S11). */
   private readonly executors: Executors
   readonly assessor: MasterAssessor
@@ -132,14 +135,17 @@ export class Runtime extends Service implements SourceHost {
       this.executor = new DshExecutor({ context: ctx, get engine() { return runtime.engine }, store, effects, health: board.claim('worker'), machine,
         lifetime: this.lifetime, sessions, closing: () => this.closing(), paused: () => this.paused(), environment, sourceLink: link,
         repliedTo: trigger => repliedTo({ store, sources }, trigger), delivers: trigger => policy().delivers(trigger) })
-      const executors = this.executors = new Executors({ local: this.executor, external: heldExecutor })
+      const external = this.external = new ExternalExecutor({ get engine() { return runtime.engine }, store, effects, sessions,
+        health: board.claim('external'), machine, paused: () => this.paused(), repository: () => setup.deployment.repository, sourceLink: link })
+      const executors = this.executors = new Executors({ local: this.executor, external })
       this.assessor = new MasterAssessor({ get engine() { return runtime.engine }, commands, get deployment() { return setup.deployment }, effects,
         settings: () => store.settings(), paused: () => this.paused(), threadContext: trigger => sources.threadContext(trigger),
         deliver: (id, text) => sessions.prompt(masterId, id, text, 'steer'), candidateCard: candidate => candidateCard(links, candidate) })
       const outbox = this.outbox = new Outbox({ store, effects, sources, commands, paused: () => this.paused() })
       const { assessor, executor } = this
       const engine = this.engine = new Engine({ repo: store, scope: sources, policy, assessor, executor: executors,
-        outbox, prepareTicket: (ticket, outcome) => executor.prepare(ticket, outcome), emit: event => {
+        outbox, prepareTicket: (ticket, outcome) => ({ ...executor.prepare(ticket, outcome),
+          ...externalRequested(store, ticket) ? { executor: 'external' as const } : {} }), emit: event => {
           // Notify the main Session only about domain events it did not initiate itself.
           const notice = this.quiet ? undefined : eventNotice(event, id => store.tickets.get(id))
           if (notice) sessions.notify(...notice)
@@ -219,8 +225,8 @@ export class Runtime extends Service implements SourceHost {
   }
   private httpHost(): HttpHost {
     const runtime = this
-    const { store, sources, prompts, sessions, settings, engine, executor, health, machine, masterId, ready, sourceLinks, setup, passes } = this
-    return { store, sources, prompts, sessions, settings, engine, executor, health, machine, masterId, ready, sourceLinks,
+    const { store, sources, prompts, sessions, settings, engine, executor, external, health, machine, masterId, ready, sourceLinks, setup, passes } = this
+    return { store, sources, prompts, sessions, settings, engine, executor, external, health, machine, masterId, ready, sourceLinks,
       get deployment() { return setup.deployment },
       get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem },
       configured: () => setup.configured(), links: () => runtime.links(), ticketEnvironment: ticket => runtime.ticketEnvironment(ticket),

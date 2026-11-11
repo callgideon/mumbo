@@ -545,7 +545,7 @@ describe('github source', () => {
     expect([from('alice'), from('mallory'), from('dependabot[bot]', 'Bot'), from('mumbo-bot[bot]', 'Bot'), from('agent-bot')])
       .toEqual([true, false, true, false, false])
     // CI on a PR and on the default branch is delivered; a senderless Trigger is not, without `meta.ci` or from another Source.
-    const ci = ciTrigger({ number: 7, html_url: '', user: { login: 'agent-bot' } }, 1, 'CI passed')
+    const ci = ciTrigger({ number: 7, html_url: '', user: { login: 'agent-bot' } }, 1, 'CI passed', false)
     expect([ci, branchCiTrigger('main', 'abc', 1, 'CI passed', ''), { ...ci, meta: { number: 7, isPr: true } },
       { ...ci, source: 'feishu', actor: { source: 'feishu', id: '' } }].map(trigger => policy.delivers(trigger))).toEqual([true, true, false, false])
   })
@@ -648,7 +648,7 @@ describe('github source', () => {
     await pollRound(h)
     expect(facts()).not.toHaveProperty('autoMerge')
     // Only a change after the first look is a Trigger.
-    expect(h.receive.mock.calls.map(([trigger]) => trigger.meta)).toEqual([expect.objectContaining({ ci: true, revision: 1 })])
+    expect(h.receive.mock.calls.map(([trigger]) => trigger.meta)).toEqual([expect.objectContaining({ ci: true, revision: 1, ciFailed: true })])
     routes['pulls/9'] = { ...pr, state: 'closed', merged: true, merged_at: '2026-09-09T00:00:00Z' }
     await pollRound(h)
     expect(h.store.tickets.get('t9')).toMatchObject({ ended: { outcome: 'merged' } })

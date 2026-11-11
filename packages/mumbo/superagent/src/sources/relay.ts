@@ -27,7 +27,8 @@ const HopSchema = z.object({ node: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/), i
 /**
  * The request body: `id` is the edge's message id, its idempotency key per member; `kind` is `request` (an explicit request)
  * or `context` (context, never a request on its own); `hops` is the relay path; `thread` continues an earlier conversation of
- * the same member, named by the `thread` its first message answered, and defaults to `id`, a new conversation.
+ * the same member, named by the `thread` its first message answered, and defaults to `id`, a new conversation; `worker:
+ * 'external'`, on a request only, asks for a Ticket a worker outside the box takes (`UPSTREAM.md` S13).
  */
 export const RelayRequestSchema = z.object({
   id: z.string().regex(ID),
@@ -35,7 +36,8 @@ export const RelayRequestSchema = z.object({
   text: z.string().trim().min(1).max(RELAY_LIMITS.text),
   hops: z.array(HopSchema).min(1).max(RELAY_LIMITS.hops),
   thread: z.string().regex(ID).optional(),
-}).strict()
+  worker: z.literal('external').optional(),
+}).strict().refine(request => !(request.worker && request.kind === 'context'), { path: ['worker'], message: 'Only a request names a worker' })
 export type RelayRequest = z.infer<typeof RelayRequestSchema>
 
 export const relayKind: SourceKind = {
@@ -88,7 +90,7 @@ async function body(req: IncomingMessage): Promise<unknown> {
 
 /**
  * The Trigger of one relayed message: the member as its human actor, addressed `direct` for a request, on the Thread
- * `relay:<member>/<conversation>`, with a Channel to the member, and `meta` `{ kind, message, hops }`.
+ * `relay:<member>/<conversation>`, with a Channel to the member, and `meta` `{ kind, message, hops, worker? }`.
  * @param member - the admitted member's lowercased address.
  * @param request - the validated request body.
  * @param at - receive time, ISO.
@@ -100,7 +102,7 @@ export function relayTrigger(member: string, request: RelayRequest, at: string):
   return { id: key(SOURCE, member, request.id), source: SOURCE, threads: [thread], actor: { source: SOURCE, id: member }, human: true,
     ...request.kind === 'request' ? { addressed: 'direct' as const } : {}, at, text: request.text,
     channel: { source: SOURCE, thread: threadKey(thread), address: { member, thread: conversation } },
-    meta: { kind: request.kind, message: request.id, hops: request.hops } }
+    meta: { kind: request.kind, message: request.id, hops: request.hops, ...request.worker ? { worker: request.worker } : {} } }
 }
 
 /** Receive one admitted member's message; answers what the route responds with on success. */
@@ -112,7 +114,8 @@ async function relay(source: SourceContext, member: string, request: RelayReques
   if (result === 'filtered') throw new Refusal(409, 'relay_off', 'The project\'s relay Source is switched off')
   if (result === 'duplicate') {
     const stored = source.triggers.get(trigger.id)
-    const same = stored && stored.text === trigger.text && stored.meta.kind === request.kind && threadKey(stored.threads[0]!) === threadKey(trigger.threads[0]!)
+    const same = stored && stored.text === trigger.text && stored.meta.kind === request.kind && stored.meta.worker === request.worker
+      && threadKey(stored.threads[0]!) === threadKey(trigger.threads[0]!)
     if (!same) throw new Refusal(409, 'id_reused', `Message ${request.id} was relayed before with other content`)
   } else {
     source.threads.describe(threadKey(trigger.threads[0]!), { facts: { member: { label: 'Member', value: member },
@@ -125,8 +128,8 @@ async function relay(source: SourceContext, member: string, request: RelayReques
  * Register the relay Source kind and mount `POST /orchestrator/relay`. A request is received only when `ctx.connection.admit`
  * admits it (with DSH's Host and Origin checks) as a live `edge-member` Peer; its body is a {@link RelayRequest} whose first
  * hop is `{ node: 'member', id: <that member> }`. Responses:
- * 200 `{ result: 'stored' | 'duplicate', trigger, thread, waiting? }`, where a repeated message id with the same text, kind and
- * conversation is `duplicate` and `waiting: 'setup'` means evaluation waits for the Superagent setup; and `{ error, code }`
+ * 200 `{ result: 'stored' | 'duplicate', trigger, thread, waiting? }`, where a repeated message id with the same text, kind,
+ * worker and conversation is `duplicate` and `waiting: 'setup'` means evaluation waits for the Superagent setup; and `{ error, code }`
  * with 400 `invalid_request` (`issues` lists the fields, `hops.0` for another first hop), 401 or 403 `unauthenticated` (DSH admission), 403
  * `member_required`, 405 `method`, 409 `id_reused` or `relay_off`, 413 `too_large`, or 500 `failed`.
  * @param ctx - plugin context carrying the web server and Connection.

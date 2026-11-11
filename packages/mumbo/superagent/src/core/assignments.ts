@@ -2,7 +2,7 @@
 import { key } from './ids.ts'
 import { UserError } from './errors.ts'
 import { latestAssignment, liveTicket, runningAssignment } from './model.ts'
-import type { ReportState, Ticket } from './model.ts'
+import type { Assignment, ReportState, Ticket } from './model.ts'
 import { EnginePart, type EngineOptions } from './part.ts'
 import type { Replies } from './replies.ts'
 import { automatic, type Tickets } from './tickets.ts'
@@ -30,12 +30,16 @@ const RECOVERY_NOTE = 'The host restarted during this ticket. Inspect the curren
 export class Assignments extends EnginePart {
   constructor(options: EngineOptions, private readonly tickets: Tickets, private readonly replies: Replies) { super(options) }
 
-  /** Marks a non-ended assignment running, queues delivery of waiting undelivered inputs on an open ticket, and emits `assignment.started`. */
-  started(ticketId: string, assignmentId: string): void {
+  /**
+   * Marks a non-ended assignment running, records the external `worker` that took it when given, queues delivery of waiting
+   * undelivered inputs on an open ticket, and emits `assignment.started`.
+   */
+  started(ticketId: string, assignmentId: string, worker?: Assignment['worker']): void {
     const ticket = this.require(ticketId)
     const assignment = ticket.assignments.find(item => item.id === assignmentId)
     if (!assignment || assignment.state === 'ended') return
     assignment.state = 'running'; assignment.startedAt ??= this.now()
+    if (worker) assignment.worker = worker
     ticket.updatedAt = this.now()
     this.repo.tickets.save(ticket)
     if (liveTicket(ticket) && ticket.undelivered.length) this.options.executor.deliver(ticket, assignment)
@@ -89,6 +93,14 @@ export class Assignments extends EnginePart {
     const settled = !!report && ['waiting', 'ready', 'blocked', 'failed'].includes(report.state) && !busy
     if (!settled) this.tickets.restart(ticket, running, 'hostRestarted', RECOVERY_NOTE)
     else if (ticket.undelivered.length) this.options.executor.deliver(ticket, running)
+  }
+  /**
+   * In Mumbo (`UPSTREAM.md` S13), an external worker left the assignment that runs an open ticket: its lease expired, or work
+   * waits after it released the lease. A new pending assignment replaces it and receives `note` first; any other is ignored.
+   */
+  left(ticketId: string, assignmentId: string, reason: 'leaseExpired' | 'workerLeft', note: string): void {
+    const ticket = this.running(ticketId, assignmentId)
+    if (ticket) this.tickets.restart(ticket, runningAssignment(ticket)!, reason, note)
   }
   /**
    * Records a worker status report on an open ticket's current assignment, updating `attention`, `answers`, held automated

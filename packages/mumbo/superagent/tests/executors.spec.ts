@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Ticket } from '../src/core/index.ts'
-import { Executors, heldExecutor } from '../src/mumbo/executors.ts'
+import { Executors } from '../src/mumbo/executors.ts'
 import { SCHEMA_VERSION, Store } from '../src/app/store.ts'
 import { KV } from '../src/kv.ts'
 import { startRuntime } from './fixtures/host.ts'
@@ -60,16 +60,6 @@ describe('Executors', () => {
     const external = { ...plugin(), shutdown: vi.fn(async () => { await new Promise(resolve => setTimeout(resolve, 10)); finished = true }) }
     await expect(new Executors({ local, external }).shutdown()).rejects.toBe(failure)
     expect(finished).toBe(true)
-  })
-
-  it('holds external Tickets while no external-worker Executor exists: no call does anything', async () => {
-    const item = ticket('b', 'pending', '1', 'external'), assignment = item.assignments[0]!
-    heldExecutor.install()
-    heldExecutor.start(item, assignment); heldExecutor.deliver(item, assignment); heldExecutor.stop(item, assignment, 'stopped')
-    heldExecutor.resume([item])
-    await expect(heldExecutor.shutdown()).resolves.toBeUndefined()
-    heldExecutor.dispose()
-    expect(item).toEqual(ticket('b', 'pending', '1', 'external'))
   })
 })
 

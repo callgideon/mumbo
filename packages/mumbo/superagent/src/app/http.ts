@@ -15,6 +15,7 @@ import { SetupError, type SetupProblem } from '../setup.ts'
 import { UserError, type EngineForPeople, type Ticket } from '../core/index.ts'
 import type { Deployment, Machine } from '../deployment.ts'
 import type { DshExecutor } from '../executor/dsh.ts'
+import { ClaimRequestSchema, ReportRequestSchema, WorkerConflict, type ExternalExecutor } from '../mumbo/external.ts'
 import type { Health } from '../sources/host.ts'
 import type { SourceRegistry } from '../sources/registry.ts'
 import type { Sessions } from './sessions.ts'
@@ -39,6 +40,8 @@ export interface HttpHost {
   readonly settings: Pick<Settings, 'view' | 'save' | 'pause' | 'sync' | 'refreshLabels'>
   readonly engine: EngineForPeople
   readonly executor: Pick<DshExecutor, 'activeCount'>
+  /** In Mumbo, the Executor workers outside the box claim external Tickets from (`UPSTREAM.md` S13). */
+  readonly external: Pick<ExternalExecutor, 'claim' | 'report'>
   readonly health: Record<string, Health>
   readonly machine: Machine
   readonly masterId: string
@@ -94,6 +97,7 @@ function failure(error: unknown): [number, Record<string, unknown>] {
   if (error instanceof RouteError) return [error.status, { error: error.message }]
   if (error instanceof UserError) return [error.missing ? 404 : 400, { error: error.message, code: error.code, values: error.values }]
   if (error instanceof SettingsConflict || error instanceof PromptConflict) return [409, { error: error.message }]
+  if (error instanceof WorkerConflict) return [error.code === 'not_found' ? 404 : 409, { error: error.message, code: error.code }]
   return [500, { error: error instanceof Error ? error.message : String(error) }]
 }
 
@@ -217,6 +221,8 @@ function routes(runtime: HttpHost): Routes {
       return savePrompts(runtime, request.config, request.baseRevision, 'panel')
     },
     'POST prompts/preview': async input => runtime.prompts.preview(await promptBody(input)),
+    'POST workers/claim': async ({ body }) => runtime.external.claim(ClaimRequestSchema.parse(await body())),
+    'POST workers/:assignment/report': async ({ params, body }) => runtime.external.report(params.assignment, ReportRequestSchema.parse(await body())),
   }
 }
 function decoded(segment: string): string {

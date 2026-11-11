@@ -1,7 +1,7 @@
 /** The domain Engine: the single entry point of the core, and the role interfaces its callers receive. */
 import { UserError } from './errors.ts'
 import { isoTime, liveTicket } from './model.ts'
-import type { ChannelRef, Decision, PolicyEffect, ThreadRef, Ticket, Trigger } from './model.ts'
+import type { Assignment, ChannelRef, Decision, PolicyEffect, ThreadRef, Ticket, Trigger } from './model.ts'
 import type { Candidate, Repositories } from './ports.ts'
 import type { EngineOptions } from './part.ts'
 import { Assignments, type WorkerReport } from './assignments.ts'
@@ -169,11 +169,22 @@ export class Engine {
   // The Executor
 
   /**
-   * The Executor's fact that an Assignment runs; the Inputs that wait for it go out.
+   * The Executor's fact that an Assignment runs, taken by `worker` when a worker outside the box claimed it (`UPSTREAM.md`
+   * S13); the Inputs that wait for it go out.
    * @throws UserError when the ticket is unknown.
    */
-  assignmentStarted(ticketId: string, assignmentId: string): void {
-    this.repo.atomic(() => { this.assignments.started(ticketId, assignmentId) })
+  assignmentStarted(ticketId: string, assignmentId: string, worker?: Assignment['worker']): void {
+    this.repo.atomic(() => { this.assignments.started(ticketId, assignmentId, worker) })
+  }
+  /**
+   * In Mumbo (`UPSTREAM.md` S13), the external Executor's fact that the worker of the Assignment that runs an open ticket left
+   * it, because its lease expired (`leaseExpired`) or because work waits after it released the lease (`workerLeft`): a new
+   * pending Assignment replaces it, receiving `note` first and the Inputs its worker did not take. A fact about an Assignment
+   * that no longer runs is dropped.
+   * @throws UserError when the ticket is unknown.
+   */
+  assignmentLeft(ticketId: string, assignmentId: string, reason: 'leaseExpired' | 'workerLeft', note: string): void {
+    this.repo.atomic(() => { this.assignments.left(ticketId, assignmentId, reason, note) })
   }
   /**
    * The Executor's fact that Inputs reached the Assignment that runs the ticket, which clears a failed delivery. A fact about
@@ -268,4 +279,4 @@ export type EngineForPeople = Pick<Engine, 'stopTicket' | 'retryTicket' | 'reeva
 export type EngineForSettings = Pick<Engine, 'policyChanged'>
 /** What the Executor tells the Engine, and what its workers ask of it. */
 export type EngineForExecutor = Pick<Engine, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed'
-  | 'assignmentInterrupted' | 'report' | 'markUnrelated' | 'handback' | 'followForContext' | 'reply'>
+  | 'assignmentInterrupted' | 'assignmentLeft' | 'report' | 'markUnrelated' | 'handback' | 'followForContext' | 'reply'>

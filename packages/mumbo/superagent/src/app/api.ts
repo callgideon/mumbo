@@ -8,6 +8,7 @@ import type { SettingsView } from './views/settings.ts'
 import type { SourceStatusView } from './views/sources.ts'
 import type { DecisionListView, SearchView, ThreadDetailView, ThreadListView } from './views/threads.ts'
 import type { TicketListView } from './views/tickets.ts'
+import type { ClaimRequest, ClaimView, ReportRequest, ReportView } from '../mumbo/external.ts'
 
 export const TICKET_FILTERS = ['open', 'person', 'working', 'idle', 'ended'] as const
 export const THREAD_FILTERS = ['subscribed', 'evaluating', 'recent', 'all'] as const
@@ -43,6 +44,10 @@ export interface Api {
   'GET prompts': { query?: { revision?: number; offset?: number }; response: PromptsView }
   'PUT prompts': { body: { config: PromptConfig; baseRevision: number }; response: { revision: number; context_delivery: Delivery } }
   'POST prompts/preview': { body: PromptConfig; response: ReturnType<Prompts['preview']> }
+  /** In Mumbo, a worker outside the box takes an external Ticket under a lease, or a refusal by `code` (`UPSTREAM.md` S13). */
+  'POST workers/claim': { body: ClaimRequest; response: ClaimView }
+  /** In Mumbo, the lease holder's report, which renews the lease and answers the Inputs that wait (`UPSTREAM.md` S13). */
+  'POST workers/:assignment/report': { body: ReportRequest; response: ReportView }
 }
 type Path<K> = K extends `${string} ${infer P}` ? P : never
 type Params<P> = P extends `${string}:${infer Name}/${infer Rest}` ? Record<Name, string> & Params<Rest>

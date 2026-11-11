@@ -228,6 +228,11 @@ export interface Assignment {
    * into a step before, the worker read.
    */
   idleAt?: string
+  /**
+   * In Mumbo, the worker outside the box that last took this Assignment (`UPSTREAM.md` S13): the door key it claimed with, its
+   * name, and the model it declared; local Assignments record none.
+   */
+  worker?: { key: string; name: string; model?: string }
 }
 
 export type TicketInput =

@@ -121,9 +121,14 @@ export function branchCiTrigger(branch: string, sha: string, revision: number, s
     threads: [{ source: SOURCE, id: `ci:${branch}` }], actor: { source: SOURCE, id: '' }, human: false, at: new Date().toISOString(),
     text: summary, url, meta: { ci: true, branch, sha, revision } }
 }
-export function ciTrigger(pr: { number: number; html_url: string; user: { login: string } }, revision: number, summary: string): Trigger {
+/**
+ * Builds a trigger for a PR's CI change. `ciFailed` marks a red result, a check failed and none still runs, which in Mumbo asks
+ * an external Ticket's next worker for work (`UPSTREAM.md` S13).
+ */
+export function ciTrigger(pr: { number: number; html_url: string; user: { login: string } }, revision: number, summary: string,
+  ciFailed: boolean): Trigger {
   return { id: key('github-ci', String(pr.number), String(revision)), source: SOURCE, threads: [{ source: SOURCE, id: String(pr.number) }],
     actor: { source: SOURCE, id: '' }, human: false, at: new Date().toISOString(),
     text: summary, channel: githubChannel(pr.number), url: pr.html_url,
-    meta: { number: pr.number, isPr: true, prAuthor: pr.user.login, ci: true, revision } }
+    meta: { number: pr.number, isPr: true, prAuthor: pr.user.login, ci: true, revision, ciFailed } }
 }
