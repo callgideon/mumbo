@@ -696,7 +696,10 @@ test('template: the dsh smoke check runs a box\'s start script with dummy values
       person ? { key: mumboMcpKey('smoke', 'smoke'), principal: 'smoke' } : undefined, principal).split('\n')
     let i = 0
     for (const line of s.split('\n')) { while (i < full.length && full[i] !== line) i++; assert.ok(i++ < full.length, line) }
-    for (const gone of ['table inet mumbo', 'hidepid', 'ip_unprivileged_port_start', 'chmod u-s', ...(person ? ['Xkasmvnc', '/usr/local/bin/mumbo-desktop', '/usr/local/bin/google-chrome'] : ['update-ca-certificates', 'github-local-proxy', 'ca.key'])]) assert.ok(!s.includes(gone), gone)
+    for (const gone of ['table inet mumbo', 'hidepid', 'chmod u-s', ...(person ? ['Xkasmvnc', '/usr/local/bin/mumbo-desktop', '/usr/local/bin/google-chrome'] : ['update-ca-certificates', 'github-local-proxy', 'ca.key'])]) assert.ok(!s.includes(gone), gone)
+    // The kernel part's sysctls stay, set and checked as every start sets them: the run-as provider refuses to load
+    // without fs.protected_hardlinks=1.
+    assert.ok(s.includes('if [ -n "$B24_TEMPLATE" ]; then\n  # Only root binds') && s.includes('  for kv in net/ipv4/ip_unprivileged_port_start=1024 fs/protected_hardlinks=1 fs/protected_symlinks=1; do\n'))
     // The layout and rows a box gets, and dsh with a box's profile and patches.
     assert.ok(s.includes(containmentLayout(SMOKE_CFG, person)))
     const box = startScript(c, 'T', boxSite(c, person ? 'a@x.com' : 'project:0123456789abcdef'), 'role', person ? undefined : 'K', { proxy: 'P', gh: 'G' }, ['o@x.com'], person ? { key: 'K', principal: 'a' } : undefined, 'a@x.com')

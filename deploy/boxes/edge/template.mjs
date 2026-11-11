@@ -138,11 +138,14 @@ const without = (text, from, to) => {
 }
 /** The start script of a box from this template, made as the edge makes it (edge boxes create) from dummy values (box
  *  `smoke`, edge key `smoke`, SMOKE_CFG, a person `smoke@box.invalid` or the project `0000000000000000`), less the parts
- *  whose effects would stay in the template: the kernel and network part (edge hardening: sysctls, the /proc mount, su's
- *  and sudo's set-user-ID bits, the firewall table), a person box's desktop (X server, Chrome and session processes, their
- *  profiles, the X cookie, the launchers in /usr/local/bin) and a project box's GitHub proxy (a CA the system trusts).
- *  dsh runs as root, which the firewall refuses only envd, and NFT_SMOKE_STEP covers that kind of rule. Without the
- *  desktop, computer use's row does not activate and dsh warns.
+ *  whose effects would stay in the template: of the kernel and network part (edge hardening), the /proc mount, su's and
+ *  sudo's set-user-ID bits and the firewall table; a person box's desktop (X server, Chrome and session processes, their
+ *  profiles, the X cookie, the launchers in /usr/local/bin); and a project box's GitHub proxy (a CA the system trusts).
+ *  It keeps hardening's sysctls (the unprivileged port floor 1024, fs.protected_hardlinks=1, fs.protected_symlinks=1),
+ *  set and checked: the run-as provider refuses to load without fs.protected_hardlinks=1, and every box's start script
+ *  writes the same values at each start, so a template that keeps them runs no box differently. dsh runs as root, which
+ *  the firewall refuses only envd, and NFT_SMOKE_STEP covers that kind of rule. Without the desktop, computer use's row
+ *  does not activate and dsh warns.
  *  @param {boolean} person a person box (mumbo-box), not a project box
  *  @returns {string} the script */
 export function smokeStartScript(person) {
@@ -150,7 +153,7 @@ export function smokeStartScript(person) {
   const s = startScript(SMOKE_CFG, signBox(key, principal, box), boxSite(SMOKE_CFG, principal), roleInstructions(SMOKE_CFG, principal),
     person ? undefined : memberKey(key, box).toString('base64url'), { proxy: '', gh: '' }, person ? undefined : ['smoke@box.invalid'],
     person ? { key: mumboMcpKey(key, box), principal: mcpPrincipal(principal) } : undefined, principal)
-  const local = without(s, 'if [ -n "$B24_TEMPLATE" ]; then\n  # Only root binds', 'CONTAINMENT_PATCH=\n')
+  const local = without(s, '  # Every user but root sees only its own processes', 'fi\nCONTAINMENT_PATCH=\n')
   return person ? without(local, '# Desktop: XFCE', '# dsh\'s own temporary directory') : without(local, '# Project box: a TLS-terminating GitHub proxy', '# Project box: members sign in')
 }
 /** The seconds dshSmokeStep waits for dsh's start line. */
@@ -175,7 +178,7 @@ const SMOKE_SCAN = '/root /home /src /var/lib/mumbo /usr/local/share/mumbo /run/
  *  modes read as before. dsh runs at a box's own paths (HOME /root, DSH_HOME /root/.dsh, its log /root/dsh.log), which
  *  the rows and the layout name, so the step refuses a template that already has /root/.dsh, /root/.mumbo, /root/dsh.log,
  *  /root/projects or /root/work. What stays: mcpserver's supplementary groups set to none (`usermod -G ''`), as
- *  usersSteps left them. A template without the marker runs dsh on OLD_PORTS, as its boxes would; an image without
+ *  usersSteps left them, and smokeStartScript's sysctls, which every box's start script sets to the same values. A template without the marker runs dsh on OLD_PORTS, as its boxes would; an image without
  *  serverIdentity runs it as root without the rows. No text of the step matches start.sh's
  *  `pkill -f 'apps/cli/src/bin.ts'`, which would kill the step. A subshell, as NFT_SMOKE_STEP.
  *  @param {boolean} person a person box (mumbo-box), not a project box
