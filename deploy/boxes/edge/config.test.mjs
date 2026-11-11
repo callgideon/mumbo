@@ -192,6 +192,15 @@ test('a malformed REDIS_URL stops the edge with a line naming REDIS_URL that nev
   assert.doesNotMatch(r.stdout + r.stderr, /CANARY/)
 })
 
+test('a fatal error at start prints only its stack, never its own properties (a URL TypeError keeps the parsed input)', async () => {
+  const { spawnSync } = await import('node:child_process')
+  const r = spawnSync(process.execPath, ['edge.mjs'], { cwd: new URL('.', import.meta.url), encoding: 'utf8', timeout: 60_000,
+    env: { PATH: process.env.PATH, ...base, E2B_SANDBOX_URL: 'http://CANARY bad host' } })
+  assert.equal(r.status, 1)
+  assert.match(r.stderr, /edge: fatal TypeError: Invalid URL/)
+  assert.doesNotMatch(r.stdout + r.stderr, /CANARY/)
+})
+
 test('PLACEMENT_CACHE_MS: 30000 by default, 0 turns the cache off; anything but a whole number stops the edge', () => {
   assert.equal(configWith().placementCacheMs, 30_000)
   assert.equal(configWith({ PLACEMENT_CACHE_MS: '0' }).placementCacheMs, 0)

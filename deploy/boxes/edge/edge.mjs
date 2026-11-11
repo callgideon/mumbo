@@ -1104,8 +1104,10 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
   /** The cell a principal's placement doc names, without placing anyone: us-east-1 until a person's first ensure. */
   const placedCell = async (principal) => cellOf(await store.getDoc(placementKey(principal)))
   // ensure's targets by principal, for cfg.placementCacheMs. ponytail: per replica, so a box another replica replaces is
-  // reached at its old target until the entry expires or a proxy error forgets it. B22: a move must check the principal's
-  // moving mark even on a hit, or delete the principal's entry (cached.delete) when it sets the mark.
+  // reached at its old target until the entry expires or a proxy error forgets it. B22: deleting an entry clears only this
+  // replica (other replicas, the other region's edge and an operator script cannot reach it), so a move must either read
+  // the principal's placement doc (its moving mark) on every hit, or wait at least cfg.placementCacheMs after setting the
+  // mark before its final backup.
   const cached = new Map()  // principal -> { target, until }
 
   async function all(cell, query) {
