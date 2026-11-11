@@ -1980,10 +1980,11 @@ async function main() {
   const mcp = mcpServer({ ops: children({ e2b, cfg }), projects: proj, relay, projectDomain: cfg.projectDomain, claimOf })
   const reports = reportServer({ report, claimOf })
   const allow = budget(store, cfg.dailyRequests)
-  const doorHandler = door({ keys: doorKeyService, tools: doorTools({ projects: proj, mumbo, relay }), allow, tokens, rate: { perMinute: cfg.doorRatePerMinute, burst: cfg.doorBurst } })
   // Outside workers' git (workers.mjs): tokens the door's task_claim mints, fenced on the project box for every request.
   const { workerTokens, workerGit } = await import('./workers.mjs')
-  const git = workerGit({ cfg, tokens: workerTokens({ edgeKey, hours: cfg.workerTokenHours }), keys: doorKeyService, relay, github })
+  const minted = workerTokens({ edgeKey, hours: cfg.workerTokenHours })
+  const doorHandler = door({ keys: doorKeyService, tools: doorTools({ projects: proj, mumbo, relay, halt, workerTokens: minted, cfg }), allow, tokens, rate: { perMinute: cfg.doorRatePerMinute, burst: cfg.doorBurst } })
+  const git = workerGit({ cfg, tokens: minted, keys: doorKeyService, relay, github })
   modelServer({ cfg, edgeKey, modelKey, allow, owns: box.owns, touch: box.touch, mcp, reports, door: doorHandler, workerGit: git, github, halt, tokens })
     .listen(8081, modelHost, () => console.log(`edge: model host on ${modelHost}:8081`))
 }

@@ -161,8 +161,10 @@ export async function ensureWithin(box, principal, ms, late) {
  * sign-in, or no relay route for message(), with 409 (`code: 'relay_unavailable'`). Each box request may go quiet for
  * what remains of CALL_MS from the call's start, so a call ends within the ALB's and CloudFront's 60 s.
  *
- * message(member, id, text, { kind, messageId, via, door }) delivers a message to the project's Superagent relay route, which
- * receives it as a Trigger from the member. `kind` is 'context' (the default) or 'request'. `messageId`, required, is the
+ * message(member, id, text, { kind, messageId, via, door, worker }) delivers a message to the project's Superagent relay route,
+ * which receives it as a Trigger from the member. `kind` is 'context' (the default) or 'request'. `worker: 'external'` asks
+ * for a Ticket that an outside worker takes with the door's task_claim (B37); it is sent only then, and a box whose relay
+ * does not know it refuses it (`invalid_request`). `messageId`, required, is the
  * caller's idempotency key: a retry with the same id and content is answered `duplicate` and creates nothing, so a caller that
  * timed out retries with the id it chose. The relay path is the member, then `via`, the box id of the member's assistant
  * (hop `mumbo`), or `door`, the name of the door key that sent it (hop `door`), then this edge. Resolves { delivered, project,
@@ -178,7 +180,7 @@ export async function ensureWithin(box, principal, ms, late) {
  * box's 400, 404 or 409 and its message (`code` the box's, else `not_found` for 404 and `invalid_request` for 400 and 409),
  * and 502 (`code: 'box_refused'`, with the box's text) for any other answer, other 403s included (a Host or Origin fence,
  * a missing `x-orchestrator-request`). A box's refusal text is cut to 500 characters in either method and logged with the
- * `api refused` line.
+ * `api refused` line; api's refusals that carry it also carry it alone as `said`, for a caller that fences it.
  */
 export function projectRelay({ projects, box, boxFetch, siteHostOf, edgeHost, readyMs = BOX_READY_MS, log = console.log }) {
   const say = (fields) => log(JSON.stringify({ edge: 'relay', ...fields }))
@@ -198,14 +200,14 @@ export function projectRelay({ projects, box, boxFetch, siteHostOf, edgeHost, re
     return { target, host: siteHostOf(principal), member: target.member(member), timeoutMs: () => Math.max(1000, deadline - Date.now()) }
   }
   return {
-    async message(member, id, text, { kind = 'context', messageId, via, door } = {}) {
+    async message(member, id, text, { kind = 'context', messageId, via, door, worker } = {}) {
       if (typeof text !== 'string' || !text.trim()) throw fail(400, 'the message is empty')
       if (!MESSAGE_KINDS.includes(kind)) throw fail(400, `kind is one of ${MESSAGE_KINDS.join(', ')}`)
       if (typeof messageId !== 'string' || !MESSAGE_ID.test(messageId)) throw fail(400, 'messageId is 1 to 128 letters, digits and . _ : -')
       const { target, host, member: signed, timeoutMs } = await reach(member, id)
       const hops = [{ node: 'member', id: member }, ...(via ? [{ node: 'mumbo', id: via }] : []), ...(door ? [{ node: 'door', id: door }] : []), { node: 'edge', id: edgeHost }]
       const r = await boxFetch(target, host, RELAY_PATH, { method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ id: messageId, kind, text: text.trim(), hops }), member: signed, timeoutMs: timeoutMs() })
+        body: JSON.stringify({ id: messageId, kind, text: text.trim(), hops, ...(worker ? { worker } : {}) }), member: signed, timeoutMs: timeoutMs() })
       if (r.status === 404 || r.status === 405) throw unavailable(id)
       let out
       try { out = JSON.parse(r.body) } catch { out = undefined }  // a body that is not JSON is a refusal like any other
@@ -228,11 +230,11 @@ export function projectRelay({ projects, box, boxFetch, siteHostOf, edgeHost, re
         try { out = JSON.parse(r.body) } catch { out = undefined }
         if (r.status === 200 && out && typeof out === 'object') return out
         say({ level: 'warn', msg: 'api refused', project: id, member, path: path.split('?')[0], status: r.status, error: said(out) })
-        if (r.status === 403 && out?.error === NOT_PANEL_ADMIN) throw Object.assign(fail(403, 'only the project\'s owners can read its status or stop its Tickets'), { code: 'owner_only' })
+        if (r.status === 403 && out?.error === NOT_PANEL_ADMIN) throw Object.assign(fail(403, 'only the project\'s owners can read its status, stop its Tickets or take them'), { code: 'owner_only' })
         if ([400, 404, 409].includes(r.status) && typeof out?.error === 'string') {
-          throw Object.assign(fail(r.status, `the project box refused: ${said(out)}`), { code: token(out.code) ?? (r.status === 404 ? 'not_found' : 'invalid_request') })
+          throw Object.assign(fail(r.status, `the project box refused: ${said(out)}`), { code: token(out.code) ?? (r.status === 404 ? 'not_found' : 'invalid_request'), said: said(out) })
         }
-        throw Object.assign(fail(502, `the project box did not answer its management API: ${said(out) ?? `HTTP ${r.status}`}`), { code: 'box_refused' })
+        throw Object.assign(fail(502, `the project box did not answer its management API: ${said(out) ?? `HTTP ${r.status}`}`), { code: 'box_refused', said: said(out) })
       }
     },
   }
