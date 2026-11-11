@@ -154,14 +154,15 @@ describe('agent_send report', () => {
     expect(read.messages.map(({ source, text }) => [source, unfence(text)])).toEqual([[`report:${PROJECT}`, REPORT]])
   })
 
-  it('shares request ids with the principal\'s own sends, which without the header still come from the principal', async () => {
+  it('keeps a report\'s request ids apart from the principal\'s own sends', async () => {
     const { host, agent } = await door()
+    const own = await call(host.url, 'agent_send', { text: 'claimed', request_id: 'r1' })
     const report = await call(host.url, 'agent_send', { text: 'hello', request_id: 'r1' }, 'ann', { 'x-mumbo-report-project': PROJECT })
-    expect(await call(host.url, 'agent_send', { text: 'hello', request_id: 'r1' })).toEqual(report)
-    await call(host.url, 'agent_send', { text: 'hello', request_id: 'r2' })
+    expect(report).not.toEqual(own)
+    expect(await call(host.url, 'agent_send', { text: 'hello', request_id: 'r1' }, 'ann', { 'x-mumbo-report-project': PROJECT })).toEqual(report)
     expect(agent.followup.mock.calls.map(([sent]) => sent)).toMatchObject([
+      { content: [{ type: 'text', text: 'claimed' }], source: { kind: 'mcp', principal: 'ann' } },
       { content: [{ type: 'text', text: 'hello' }], source: { kind: 'report', project: PROJECT } },
-      { content: [{ type: 'text', text: 'hello' }], source: { kind: 'mcp', principal: 'ann' } },
     ])
   })
 })

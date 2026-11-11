@@ -162,7 +162,9 @@ export function register(server: McpServer, deps: ToolDeps): void {
     sendArgs,
     async (args) => {
       let deliver: (() => void) | undefined
-      const result = await once(deps.idem, 'agent_send', deps.principal, args.request_id, args, async () => {
+      // A report keeps its request ids apart from the principal's own sends; a handle holds no `/` or `:`.
+      const sender = deps.report === undefined ? deps.principal : `${deps.principal}/report:${deps.report}`
+      const result = await once(deps.idem, 'agent_send', sender, args.request_id, args, async () => {
         if (isHalted(deps.halt)) throw new ToolError('halted', 'runs are halted until they are resumed')
         const agent = await deps.assistant()
         const afterSeq = agent.session.seq - 1
