@@ -27,6 +27,9 @@
       "path": "../../core/tools"
     },
     {
+      "path": "../../goal/goal"
+    },
+    {
       "path": "../../host/webserver"
     },
     {
@@ -61,6 +64,9 @@
     },
     {
       "path": "../../workspace/workspace"
+    },
+    {
+      "path": "../browser-consent"
     },
     {
       "path": "../run-wild"

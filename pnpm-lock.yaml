@@ -14233,6 +14233,12 @@ importers:
       '@deepseek-ai/dsh-brand':
         specifier: workspace:*
         version: link:../../util/brand
+      '@deepseek-ai/dsh-compaction':
+        specifier: workspace:*
+        version: link:../../compaction/compaction
+      '@deepseek-ai/dsh-goal':
+        specifier: workspace:*
+        version: link:../../goal/goal
       '@deepseek-ai/dsh-host-webserver':
         specifier: workspace:*
         version: link:../../host/webserver
@@ -14290,6 +14296,9 @@ importers:
       '@modelcontextprotocol/client':
         specifier: 2.2.0
         version: 2.2.0
+      '@mumbo/browser-consent':
+        specifier: workspace:*
+        version: link:../browser-consent
       '@mumbo/run-wild':
         specifier: workspace:*
         version: link:../run-wild

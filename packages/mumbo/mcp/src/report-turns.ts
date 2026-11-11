@@ -1,16 +1,18 @@
 /**
- * Report-started turns: while the newest message that a person or a project sent to a Session is a project's report,
- * each tool that runs commands or programs or changes a schedule asks the person first, and under Run Wild it is
- * refused. The predicate is the `mumbo-report-turns` service, so other consent can gate its own tools the same way.
+ * Report-started turns: in a turn that a project's report opened, only reading tools and `todo_write` run unasked;
+ * every other tool asks the person first, and under Run Wild it is refused. The predicate is the `mumbo-report-turns`
+ * service, so other consent can gate its own tools the same way.
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type {} from '@deepseek-ai/dsh-goal'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-schedule'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-subagent'
-import { type PreToolDecision, RUN_CODE_NAME } from '@deepseek-ai/dsh-tools'
+import type { PreToolDecision } from '@deepseek-ai/dsh-tools'
+import { classify } from '@mumbo/browser-consent'
 import { inRunWild } from '@mumbo/run-wild'
 import { z } from 'zod'
 import type {} from './conversation.ts'
@@ -22,82 +24,110 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-/** Whether an Agent acts in a report-started turn: `@mumbo/mcp` provides it while loaded and gates commands with it. */
+/** Whether an Agent acts in a report-started turn: `@mumbo/mcp` provides it while loaded and gates tools with it. */
 export interface ReportTurns {
   /**
-   * Whether the newest message that a person or a project sent to the Agent's root Session is a project's report. A
-   * person's message is one with the `user` source, such as a browser prompt, the `mcp` source of the MCP door, or the
-   * `schedule` source of a scheduled task. Context the harness adds and every other source leave the answer unchanged.
-   * A delegated child follows its live root Session.
+   * Whether a project's report opened the current turn of the Agent's root Session. The turn's origin is the source of
+   * the first message logged in the turn's first step that names one: `report`; `user`, such as a browser prompt, or
+   * `mcp`, through the door, for a person; `schedule`; or `goal`. A report claimed in that step with a person's message
+   * still makes the turn report-started. Every later message of the turn, such as a runtime-context snapshot or a
+   * compaction checkpoint, and a message of any other source, leave the origin unchanged, so a turn that no such
+   * message opened keeps the previous turn's. A delegated child follows its live root Session.
    * @param agent - the live Agent that acts.
-   * @returns whether that message is a report; `false` before any such message.
+   * @returns whether the turn's origin is a report; `false` before any origin.
    * @throws when the Agent is a delegated child whose root is no longer live.
    */
   reportStarted(agent: Agent): boolean
 }
 
 /**
- * Tools gated whole: the shells, a workflow script and a PTC program run commands with the box's sign-ins, and a new or
- * changed schedule delivers a `schedule` message, which ends the gate.
+ * Tools that run unasked in a report-started turn: the file tools' reads and searches, which `fs-local` confines to
+ * the model roots where a box configures them; the status reads of the door, goals and jobs; and the todo list.
  */
-const GATED = new Set(['bash', 'pwsh', 'workflow', RUN_CODE_NAME, 'schedule_create', 'schedule_edit'])
+const UNASKED: ReadonlySet<string> = new Set(['read', 'read_image', 'glob', 'grep', 'needs_you', 'get_goal', 'job_list', 'todo_write'])
 
-/** Why a gated tool asks in a report-started turn, shown to the person on the approval card. */
-const REPORT_ASK = "The newest message in this Session is a project's report, so commands, programs and schedule changes ask first: they run with your box's sign-ins, such as GitHub."
+/** Public tool-name prefix of the Playwright MCP browser tools that `@mumbo/browser-consent` mounts. */
+const BROWSER = 'mcp__playwright-mcp__'
 
 /**
- * Why a gated tool does not run in a report-started turn under Run Wild; the model reads it as the call's error.
+ * Whether a call runs unasked in a report-started turn: a tool that only reads, as listed in {@link UNASKED}, or a
+ * browser call that `@mumbo/browser-consent` classifies as a read. Every other call asks, whatever its tool.
+ * @param name - the called tool's name.
+ * @param args - the call's parsed arguments.
+ * @returns whether the call runs without the person's approval in a report-started turn.
+ */
+export function runsUnasked(name: string, args: unknown): boolean {
+  return UNASKED.has(name) || (name.startsWith(BROWSER) && classify(name.slice(BROWSER.length), args) === 'read')
+}
+
+/** Why a tool asks in a report-started turn, shown to the person on the approval card. */
+const REPORT_ASK = "This turn started with a project's report, so every action but reading asks first: it runs with your box's sign-ins, such as GitHub."
+
+/**
+ * Why a tool does not run in a report-started turn under Run Wild; the model reads it as the call's error.
  * @param tool - the refused tool's name.
  * @returns the refusal note.
  */
 function reportRefusal(tool: string): string {
-  return `${tool} did not run: the newest message in this Session is a project's report, and in Run Wild commands, programs and schedule changes run only after a message from the person. Say what you would run and why, so the person can reply to let it run.`
+  return `${tool} did not run: this turn started with a project's report, and in Run Wild such a turn runs only reading tools and todo_write. Say what you would do and why, so the person can reply to let it run.`
+}
+
+/** The current turn's origin as the Session log records it. */
+interface Origin {
+  /** Whether the origin is a project's report. */
+  readonly report: boolean
+  /** `open` until a message in the turn's first step names an origin, `named` after it, `closed` once that step ends. */
+  readonly phase: 'open' | 'named' | 'closed'
 }
 
 /**
- * Fold one event into whether the newest message from a person or a project is a report.
- * @param state - whether it was a report before the event.
+ * Fold one event into the current turn's origin.
+ * @param state - the origin before the event.
  * @param event - the next committed event.
- * @returns the same state unless the event appends a report or a person's message.
+ * @returns the origin after the event.
  */
-function foldNewest(state: boolean, event: SessionEvent): boolean {
-  if (event.type !== 'user/message' || event.surfaceOp !== 'append') return state
+function foldOrigin(state: Origin, event: SessionEvent): Origin {
+  if (event.type === 'turn/start') return { report: state.report, phase: 'open' }
+  if (event.type === 'step/end') return { report: state.report, phase: 'closed' }
+  // A replacement, such as a compaction checkpoint, re-surfaces earlier messages and opens nothing.
+  if (event.type !== 'user/message' || event.surfaceOp !== 'append' || state.phase === 'closed') return state
   switch (event.data.source.kind) {
     case 'report':
-      return true
+      return { report: true, phase: 'named' }
     case 'user':
     case 'mcp':
     case 'schedule':
-      return false
-    // Context the harness adds, a hook's message, and late answers are nobody's new request.
+    case 'goal':
+      return state.phase === 'open' ? { report: false, phase: 'named' } : state
+    // Context the harness adds, a hook's or a retry's message, and every unknown source leave the origin as it was.
     default:
       return state
   }
 }
 
 /**
- * Provide `mumbo-report-turns` and gate commands: in a report-started turn, a call to a tool in {@link GATED} asks the
- * person, and under Run Wild it is refused without asking. The gate decides before Run Wild can allow it, in either
+ * Provide `mumbo-report-turns` and gate tools: in a report-started turn, a call that {@link runsUnasked} rejects asks
+ * the person, and under Run Wild it is refused without asking. The gate decides before Run Wild can allow it, in either
  * listener order; a policy after it that denies still denies. The listener, the service and the host-only projection
  * behind it release with the calling fiber.
  * @param ctx - plugin context carrying `sessionProjections` and `permissionPresets`.
  * @throws when the projection registration fails.
  */
 export async function gateReportTurns(ctx: Context): Promise<void> {
-  const newest = await ctx.sessionProjections.register({
+  const origin = await ctx.sessionProjections.register({
     key: 'mumboReportTurn',
-    stateVersion: 1,
-    stateSchema: z.boolean(),
-    init: () => false,
-    apply: foldNewest,
+    stateVersion: 2,
+    stateSchema: z.object({ report: z.boolean(), phase: z.enum(['open', 'named', 'closed']) }),
+    init: (): Origin => ({ report: false, phase: 'open' }),
+    apply: foldOrigin,
   })
   const turns: ReportTurns = {
-    reportStarted: agent => newest.stateOf((ctx.get('subagents')?.rootOf(agent) ?? agent).session),
+    reportStarted: agent => origin.stateOf((ctx.get('subagents')?.rootOf(agent) ?? agent).session).report,
   }
   ctx.provide('mumbo-report-turns', turns)
   ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
     const agent = exec.agent
-    if (!GATED.has(exec.name) || agent === undefined || !turns.reportStarted(agent)) return next()
+    if (agent === undefined || runsUnasked(exec.name, exec.arguments) || !turns.reportStarted(agent)) return next()
     if (inRunWild(ctx, agent)) return { kind: 'deny', reason: reportRefusal(exec.name) }
     const decision = await next()
     return decision.kind === 'allow' ? { kind: 'ask', reason: REPORT_ASK } : decision

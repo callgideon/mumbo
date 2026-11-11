@@ -987,7 +987,7 @@ const SERVICE_ROLES: ServiceRole[] = [
     pkg: 'mcp',
     title: 'Report-started turns',
     mode: 'service',
-    note: "Whether the newest message a person or a project sent to an Agent's root Session is a project's report; the MCP door provides it from a host-only projection and gates commands, programs and schedule changes with it.",
+    note: "Whether a project's report opened the current turn of an Agent's root Session; the MCP door provides it from a host-only projection and lets only reads run unasked in such a turn.",
   },
 ]
 

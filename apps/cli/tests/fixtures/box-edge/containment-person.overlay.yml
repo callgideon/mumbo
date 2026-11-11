@@ -12,7 +12,9 @@
 # other users no permission bits. All the servers share the one uid and /tmp with agent, so a server whose tools write
 # files or run commands lets the model run code as mcpserver and read every server's credentials.
 # /usr/local is root's alone, so agent's PATH starts with its own program directories: npm's global prefix
-# (NPM_CONFIG_PREFIX), so `npm i -g` works as agent, and ~/.local/bin. Python packages go in a venv.
+# (NPM_CONFIG_PREFIX), so `npm i -g` works as agent, and ~/.local/bin. Python packages go in a venv. gh keeps agent's
+# GitHub sign-in in /var/lib/mumbo/agent-gh (GH_CONFIG_DIR; agent, 0700), outside every model root, so the file tools
+# cannot read it; the shell, as agent, can.
 - id: subprocess
   config:
     shellActivityDirectory: /run/dsh-shell
@@ -29,6 +31,7 @@
         LOGNAME: agent
         SHELL: /bin/bash
         NPM_CONFIG_PREFIX: /home/agent/.npm-global
+        GH_CONFIG_DIR: /var/lib/mumbo/agent-gh
         PATH: /home/agent/.npm-global/bin:/home/agent/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY, E2B_API_KEY, GH_TOKEN, GITHUB_TOKEN]
     identities:
