@@ -18,3 +18,4 @@ output "internal_nlb_arn_suffix" { value = aws_lb.internal.arn_suffix }
 output "nodes_asg_name" { value = aws_autoscaling_group.nodes.name }
 output "memorydb_name" { value = aws_memorydb_cluster.e2b.name }
 output "postgres_identifier" { value = aws_db_instance.e2b.identifier }
+output "zone_id" { value = local.zone_id }

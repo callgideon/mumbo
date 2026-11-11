@@ -39,7 +39,8 @@ resource "aws_db_instance" "e2b" {
   db_name                      = "e2b"
   username                     = "e2b"
   password                     = random_password.postgres.result # one static secret the api and setup read; rotate with an apply
-  multi_az                     = true
+  multi_az                     = !var.lean
+  availability_zone            = var.lean ? var.db_availability_zone : null
   db_subnet_group_name         = aws_db_subnet_group.e2b.name
   vpc_security_group_ids       = [aws_security_group.data.id]
   backup_retention_period      = 14
@@ -83,7 +84,7 @@ resource "aws_memorydb_cluster" "e2b" {
   engine_version             = "7.2"
   node_type                  = "db.t4g.medium"
   num_shards                 = 1
-  num_replicas_per_shard     = 1
+  num_replicas_per_shard     = var.lean ? 0 : 1
   acl_name                   = aws_memorydb_acl.e2b.name
   subnet_group_name          = aws_memorydb_subnet_group.e2b.name
   security_group_ids         = [aws_security_group.data.id]

@@ -14,7 +14,8 @@ resource "aws_sns_topic_subscription" "ops_email" {
   endpoint  = var.ops_alert_email
 }
 
-# Log-derived signals: the edge logs one JSON line per box event; the api logs node status changes.
+# Log-derived signals: the edge logs one JSON line per box event. Each cell's own alarms (api, nodes, data, control
+# target groups, node disk) are in modules/cell/alarms.tf.
 locals {
   log_metrics = {
     edge-backup-failed  = { group = module.edge_us_east_1.log_group, pattern = "{ $.msg = \"backup failed\" }" }
@@ -24,7 +25,6 @@ locals {
     edge-dropped-create = { group = module.edge_us_east_1.log_group, pattern = "{ $.msg = \"dropped unfinished create\" }" }
     # The forwarder's refusal and the approvals poller's failure both carry this text (github-app.mjs mintToken).
     github-not-approved = { group = module.edge_us_east_1.log_group, pattern = "\"mumbo-bot App permissions not approved\"" }
-    api-node-unhealthy  = { group = module.cell_us_east_1.api_log_group, pattern = "\"NodeID status changed\" \"unhealthy\"" }
   }
 }
 resource "aws_cloudwatch_log_metric_filter" "ops" {
@@ -41,19 +41,15 @@ resource "aws_cloudwatch_log_metric_filter" "ops" {
 }
 
 locals {
-  tg  = { for k, v in module.edge_us_east_1.target_groups : "edge-${k}" => { tg = v, lb = module.edge_us_east_1.edge_alb.arn_suffix, ns = "AWS/ApplicationELB" } }
-  ntg = { for k, v in module.cell_us_east_1.control_target_groups : k => { tg = v, lb = module.cell_us_east_1.internal_nlb_arn_suffix, ns = "AWS/NetworkELB" } }
+  tg = { for k, v in module.edge_us_east_1.target_groups : "edge-${k}" => { tg = v, lb = module.edge_us_east_1.edge_alb.arn_suffix, ns = "AWS/ApplicationELB" } }
   alarms = merge(
     { for k, v in local.log_metrics : k => { ns = "mumbo/boxes", metric = k, dims = {}, stat = "Sum", period = 300, threshold = 0, cmp = "GreaterThanThreshold", missing = "notBreaching" } },
-    { for k, v in merge(local.tg, local.ntg) : "unhealthy-${k}" => { ns = v.ns, metric = "UnHealthyHostCount", dims = { TargetGroup = v.tg, LoadBalancer = v.lb }, stat = "Maximum", period = 60, threshold = 0, cmp = "GreaterThanThreshold", missing = "notBreaching" } },
+    { for k, v in local.tg : "unhealthy-${k}" => { ns = v.ns, metric = "UnHealthyHostCount", dims = { TargetGroup = v.tg, LoadBalancer = v.lb }, stat = "Maximum", period = 60, threshold = 0, cmp = "GreaterThanThreshold", missing = "notBreaching" } },
     {
-      edge-5xx        = { ns = "AWS/ApplicationELB", metric = "HTTPCode_Target_5XX_Count", dims = { LoadBalancer = module.edge_us_east_1.edge_alb.arn_suffix }, stat = "Sum", period = 300, threshold = 20, cmp = "GreaterThanThreshold", missing = "notBreaching" }
-      nodes-below-min = { ns = "AWS/AutoScaling", metric = "GroupInServiceInstances", dims = { AutoScalingGroupName = module.cell_us_east_1.nodes_asg_name }, stat = "Minimum", period = 300, threshold = var.node_count, cmp = "LessThanThreshold", missing = "breaching" }
-      memorydb-memory = { ns = "AWS/MemoryDB", metric = "DatabaseMemoryUsagePercentage", dims = { ClusterName = module.cell_us_east_1.memorydb_name }, stat = "Maximum", period = 300, threshold = 75, cmp = "GreaterThanThreshold", missing = "notBreaching" }
-      rds-cpu         = { ns = "AWS/RDS", metric = "CPUUtilization", dims = { DBInstanceIdentifier = module.cell_us_east_1.postgres_identifier }, stat = "Average", period = 300, threshold = 80, cmp = "GreaterThanThreshold", missing = "notBreaching" }
-      rds-storage     = { ns = "AWS/RDS", metric = "FreeStorageSpace", dims = { DBInstanceIdentifier = module.cell_us_east_1.postgres_identifier }, stat = "Minimum", period = 300, threshold = 5e9, cmp = "LessThanThreshold", missing = "notBreaching" }
+      edge-5xx = { ns = "AWS/ApplicationELB", metric = "HTTPCode_Target_5XX_Count", dims = { LoadBalancer = module.edge_us_east_1.edge_alb.arn_suffix }, stat = "Sum", period = 300, threshold = 20, cmp = "GreaterThanThreshold", missing = "notBreaching" }
     },
-    { for s in ["api", "client-proxy", "edge"] : "tasks-${s}" => { ns = "ECS/ContainerInsights", metric = "RunningTaskCount", dims = { ClusterName = module.cell_us_east_1.ecs_cluster.name, ServiceName = s }, stat = "Minimum", period = 300, threshold = 2, cmp = "LessThanThreshold", missing = "breaching" } },
+    # The edge service runs in the us-east-1 cell's cluster.
+    { for s in ["edge"] : "tasks-${s}" => { ns = "ECS/ContainerInsights", metric = "RunningTaskCount", dims = { ClusterName = module.cell_us_east_1.ecs_cluster.name, ServiceName = s }, stat = "Minimum", period = 300, threshold = 2, cmp = "LessThanThreshold", missing = "breaching" } },
   )
 }
 resource "aws_cloudwatch_metric_alarm" "ops" {
@@ -71,25 +67,6 @@ resource "aws_cloudwatch_metric_alarm" "ops" {
   alarm_description   = "Runbook: deploy/boxes/RUNBOOK.md#${each.key}"
   alarm_actions       = [aws_sns_topic.alarms.arn]
   ok_actions          = [aws_sns_topic.alarms.arn]
-}
-
-# The fullest node's root disk (CloudWatch agent disk_used_percent, nodes/node.sh.tftpl). A Metrics Insights query covers
-# every node the group launches without a per-instance alarm.
-resource "aws_cloudwatch_metric_alarm" "node_disk" {
-  alarm_name          = "${local.name}-node-disk"
-  evaluation_periods  = 1
-  threshold           = 75
-  comparison_operator = "GreaterThanThreshold"
-  treat_missing_data  = "notBreaching"
-  alarm_description   = "Runbook: deploy/boxes/RUNBOOK.md#node-disk"
-  alarm_actions       = [aws_sns_topic.alarms.arn]
-  ok_actions          = [aws_sns_topic.alarms.arn]
-  metric_query {
-    id          = "disk"
-    period      = 300
-    return_data = true
-    expression  = "SELECT MAX(disk_used_percent) FROM SCHEMA(\"mumbo/boxes/nodes\", AutoScalingGroupName, InstanceId, device, fstype, path) WHERE AutoScalingGroupName = '${module.cell_us_east_1.nodes_asg_name}' AND path = '/'"
-  }
 }
 
 # A failed edge deployment: the circuit breaker stopped it and rolls the service back to the previous task definition,

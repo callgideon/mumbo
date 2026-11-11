@@ -7,9 +7,9 @@ import { pathToFileURL } from 'node:url'
 import { Sandbox, Template } from 'e2b'
 import { PORTS, PORTS_MARKER } from './edge.mjs'
 // Usage: template.mjs <ecr image> [name=mumbo-box] [memoryMB=4096] [cpuCount=2]; children use: mumbo-child 2048.
-// MIN_AVAIL_MB (default 9216, 9 GiB): the least free space on / a box from the new build may have, or the script fails.
+// MIN_AVAIL_MB (default 30720, 30 GiB: box_free_disk in prod/modules/cell/control.tf less margin): the least free space on / a box from the new build may have, or the script fails.
 export function templateArgs(argv, env = process.env) {
-  const minAvail = env.MIN_AVAIL_MB ?? '9216'
+  const minAvail = env.MIN_AVAIL_MB ?? '30720'
   if (!/^\d+$/.test(minAvail)) throw new Error('MIN_AVAIL_MB must be a whole number of MiB')
   return {
     image: argv[2] ?? (() => { throw new Error('pass the ECR image URI') })(),
