@@ -31,6 +31,8 @@ const ITEMS = [
   item({ id: 'acme/app#8', number: 8, title: 'Touch deploy', sha: `${'b'.repeat(39)}"`, additions: 300, files: ['deploy/x.tf'], protected: ['deploy/x.tf'],
     checks: { static: 'success', unit: 'failure' }, checksGreen: false, review: { verdict: 'fail', excerpt: `bad ${EVIL}` }, lowRisk: false }),
   item({ id: 'acme/lib#2', repo: 'acme/lib', number: 2, title: 'Lib fix', sha: 'c'.repeat(40) }),
+  item({ id: 'acme/app#9', number: 9, title: 'Big change', sha: `${'e'.repeat(39)}"`, additions: 300, lowRisk: false }),
+  item({ id: 'acme/app#10', number: 10, title: 'Unreviewed', sha: 'f'.repeat(40), review: null, lowRisk: false }),
 ]
 
 const listen = (server) => new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port)))
@@ -93,12 +95,12 @@ test('GET / shows only list(email) items with their facts, escaped, and embeds t
   assert.ok(r.body.includes('acme/app#8') && r.body.includes('acme/lib#2'))
   assert.ok(!r.body.includes(EVIL) && !r.body.includes('<script') && !r.body.includes('<b>'), 'title, excerpt and project name are escaped')
   assert.ok(r.body.includes('&#34;&#62;&#60;form action=x&#62;&#60;script&#62;'))
-  assert.ok(r.body.includes(`name="sha" value="${'b'.repeat(39)}&#34;"`), 'hidden form values are escaped')
+  assert.ok(r.body.includes(`name="sha" value="${'e'.repeat(39)}&#34;"`), 'hidden form values are escaped')
   assert.ok(r.body.includes('<code>aaaaaaa</code>'), 'short SHA')
   assert.ok(r.body.includes('· 302 lines changed') && r.body.includes('· 12 lines changed'))
   assert.ok(r.body.includes('deploy/x.tf'), 'protected paths are listed')
   assert.ok(r.body.includes('unit: failure'), 'each required check state')
-  assert.equal((r.body.match(/Agent's review \(claim\): /g) ?? []).length, 3, 'every review is labelled a claim')
+  assert.equal((r.body.match(/Agent's review \(claim\): /g) ?? []).length, 5, 'every review is labelled a claim')
   assert.ok(r.body.includes('Small and tested.') && !/verif/i.test(r.body), 'never called verified')
   assert.equal((r.body.match(/>low-risk</g) ?? []).length, 2)
   assert.deepEqual(formFields(r.body, '/grant').filter(([k]) => k !== 'csrf'), [['id', 'acme/app#7'], ['sha', 'a'.repeat(40)]])
@@ -170,6 +172,19 @@ test('a valid grant merges exactly the posted item at the posted SHA; notices sh
     const page = await call(port, { path: `/?m=${m}` })
     assert.ok(!page.body.includes('class="notice"') && !page.body.includes('<script'), m)
   }
+})
+
+test('an item without a pass review on its commit is not approvable: the reason, a disabled button, no form; a not_reviewed grant shows its notice', async (t) => {
+  const { port } = await setup(t)
+  const body = (await call(port)).body
+  const cards = body.split('<section class="card">')
+  for (const id of ['acme/app#8', 'acme/app#10']) {  // a fail marker; no marker
+    const card = cards.find(c => c.includes(`>${id}</a>`))
+    assert.ok(card.includes("Not approvable: the agent's review has not passed this commit.") && card.includes('<button class="primary" disabled>Approve</button>'), id)
+    assert.ok(!card.includes('action="/grant"'), id)
+  }
+  assert.equal((body.match(/action="\/grant"/g) ?? []).length, 3, 'acme/app#7, acme/lib#2 and acme/app#9 pass')
+  assert.ok((await call(port, { path: '/?m=not_reviewed' })).body.includes('class="notice">The agent\'s review has not passed that commit, so it was not merged.'))
 })
 
 test('"Approve N low-risk" posts the displayed low-risk pairs, grants exactly those, and reports each skipped pair', async (t) => {

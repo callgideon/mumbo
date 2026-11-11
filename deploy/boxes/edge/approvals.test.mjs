@@ -223,13 +223,16 @@ test('a head that moves while the files are read is not saved with those files; 
 
 // ---- notifications and cleanup
 
-test('notify fires once per (id, sha), and again after a new head; firstSeen is kept', async () => {
+test('notify fires once per (id, sha), when a poll first reads a pass on that head, even one posted after a poll saw it unreviewed; firstSeen is kept', async () => {
   const { gh, svc, notes, clock } = await setup()
   await svc.poll()
   clock.t = NOW + 60_000
   await svc.poll()
   assert.deepEqual(notes, [{ title: 'Approve merge: acme/app#1', body: 'Change 1 · 12 lines · low-risk', click: 'https://approve.boxes.mumbo.si/' }])
   gh.pulls[0].head.sha = NEW
+  await svc.poll()
+  assert.equal(notes.length, 1, 'no notification for a head the founder cannot approve')
+  gh.comments[1].push(marker(NEW, 'pass'))
   await svc.poll()
   assert.deepEqual(notes[1], { title: 'Approve merge: acme/app#1', body: 'Change 1 · 12 lines · needs a look', click: 'https://approve.boxes.mumbo.si/' })
   await svc.poll()
@@ -291,7 +294,34 @@ test('grant re-reads GitHub: a base changed to dev or a closed PR is not_candida
   assert.equal((await only(svc)).id, ID)
 })
 
-test('grant merges at the SHA with a single-repository merge token, never the read token, revokes it, audits with firstSeen, and removes the item', async () => {
+test('grant needs a pass review marker on the head SHA: none, a fail, or a pass for an older SHA is not_reviewed, with no GitHub call', async () => {
+  for (const [name, comments] of [['no marker', []], ['a fail marker', [marker(SHA, 'fail')]], ['a pass for an older SHA', [marker(OLD, 'pass')]]]) {
+    const { gh, svc, audits } = await setup()
+    gh.comments[1] = comments
+    await svc.poll()
+    const before = gh.calls.length
+    assert.deepEqual(await svc.grant(FOUNDER, ID, SHA), { id: ID, merged: false, sha: SHA, reason: 'not_reviewed' }, name)
+    // "Approve all low-risk" is unchanged: such an item is not low-risk.
+    assert.deepEqual(await svc.grantLowRisk(FOUNDER, [{ id: ID, sha: SHA }]), [{ id: ID, merged: false, sha: SHA, reason: 'not_low_risk' }], name)
+    assert.equal(gh.calls.length, before, name)
+    assert.deepEqual(audits, [], name)
+    gh.comments[1].push(marker(SHA, 'pass'))
+    await svc.poll()
+    assert.equal((await svc.grant(FOUNDER, ID, SHA)).merged, true, `${name}, then a pass on the head and checks green`)
+  }
+})
+
+test('a fail marker posted after the pass, with no poll in between, makes grant not_reviewed, with no merge', async () => {
+  const { gh, svc, audits } = await setup()
+  await svc.poll()
+  gh.comments[1].push(marker(SHA, 'fail'))
+  assert.deepEqual(await svc.grant(FOUNDER, ID, SHA), { id: ID, merged: false, sha: SHA, reason: 'not_reviewed' })
+  assert.equal(gh.calls.filter(c => c.method === 'PUT' || c.path.endsWith('/access_tokens')).length, 1, 'only the poll\'s read-only mint')
+  assert.deepEqual(audits, [])
+  assert.equal((await only(svc)).id, ID)
+})
+
+test('grant merges at the SHA with a single-repository merge token, never the read token, after re-reading the review, revokes it, audits with firstSeen, and removes the item', async () => {
   const { gh, svc, audits, clock } = await setup()
   await svc.poll()
   clock.t = NOW + 60_000
@@ -299,12 +329,11 @@ test('grant merges at the SHA with a single-repository merge token, never the re
   assert.deepEqual(await svc.grant(FOUNDER, ID, SHA), { id: ID, merged: true, sha: SHA })
   const calls = gh.calls.slice(before)
   assert.deepEqual(calls.map(c => `${c.method} ${c.path}`), [
-    'GET /repos/acme/app/pulls/1', `GET /repos/acme/app/commits/${SHA}/check-runs`, 'GET /repos/acme/app/installation',
-    'POST /app/installations/77/access_tokens', 'PUT /repos/acme/app/pulls/1/merge', 'DELETE /installation/token',
+    'GET /repos/acme/app/pulls/1', `GET /repos/acme/app/commits/${SHA}/check-runs`, 'GET /repos/acme/app/issues/1/comments',
+    'GET /repos/acme/app/installation', 'POST /app/installations/77/access_tokens', 'PUT /repos/acme/app/pulls/1/merge', 'DELETE /installation/token',
   ])
-  const [pr, runs, installation, mint, merge, revoke] = calls
-  assert.equal(pr.auth, 'Bearer read-token')
-  assert.equal(runs.auth, 'Bearer read-token')
+  const [pr, runs, reviews, installation, mint, merge, revoke] = calls
+  for (const c of [pr, runs, reviews]) assert.equal(c.auth, 'Bearer read-token')
   assert.match(installation.auth, /^Bearer ey[\w-]+\.[\w-]+\.[\w-]+$/)
   assert.equal(mint.auth, installation.auth)
   assert.deepEqual(mint.body, { repositories: ['app'], permissions: { contents: 'write', pull_requests: 'write' } })
@@ -322,6 +351,7 @@ test('a head that moved after showing: the merge names the shown SHA, GitHub ref
   const { gh, svc, audits } = await setup()
   await svc.poll()
   gh.pulls[0].head.sha = NEW
+  gh.comments[1].push(marker(NEW, 'pass'))
   assert.deepEqual(await svc.grant(FOUNDER, ID, SHA), { id: ID, merged: false, sha: SHA, reason: 'sha_moved' })
   assert.deepEqual(gh.calls.filter(c => c.method === 'PUT').map(c => c.body), [{ sha: SHA, merge_method: 'merge' }])
   assert.equal(gh.calls.filter(c => c.method === 'DELETE').length, 1)
@@ -414,6 +444,7 @@ test('a repository removed while a poll reads its pull request: no notification 
   assert.equal(notes.length, 1)
   gh.pulls[0].head.sha = NEW
   gh.runs[NEW] = [run('static'), run('unit')]
+  gh.comments[1].push(marker(NEW, 'pass'))
   gh.onFiles = async () => { gh.onFiles = undefined; await removeRepo(store, project, REPO, { by: FOUNDER, approvers: [FOUNDER] }) }
   await svc.poll()
   assert.equal(notes.length, 1, 'no notification after the unbind')
