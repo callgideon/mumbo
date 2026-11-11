@@ -47,6 +47,7 @@ resource "aws_elasticache_user" "default" {
   engine        = "redis"                                                 # Valkey refuses a no-password user; redis-engine users and groups serve Valkey groups
   access_string = var.store_default_open ? "on ~* &* +@all" : "off -@all" # closed: off, no commands
   authentication_mode { type = "no-password-required" }
+  lifecycle { ignore_changes = [authentication_mode] } # the API reports it back as "no-password"
 }
 resource "aws_elasticache_user_group" "edge" {
   user_group_id = "${local.name}-edge"
