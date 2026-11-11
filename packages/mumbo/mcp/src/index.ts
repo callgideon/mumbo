@@ -9,7 +9,7 @@ import z from '@deepseek-ai/schemastery'
 import { McpServer } from '@modelcontextprotocol/server'
 import { listenForAsks, register as registerAsks } from './asks.ts'
 import { ensureAssistant, resolveExisting } from './assistant.ts'
-import { HANDLE_PATTERN, readKey } from './auth.ts'
+import { HANDLE_PATTERN, type ProjectId, readKey } from './auth.ts'
 import { register as registerConversation } from './conversation.ts'
 import { gateWhileHalted, register as registerHalt } from './halt.ts'
 import { createRouteHandler } from './http.ts'
@@ -133,11 +133,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     const asks = listenForAsks(ctx, config.irreversibleTools)
     const closing = new AbortController()
     const door = config.profile === 'door'
-    /** One server per request, its tools bound to the authenticated principal and key name. */
-    const buildServer = (principal: string, via: string | undefined): McpServer => {
+    /** One server per request, its tools bound to the request's principal, key name and report project. */
+    const buildServer = (principal: string, via: string | undefined, report: ProjectId | undefined): McpServer => {
       const server = new McpServer({ name, version: '0.0.1' }, { capabilities: { tools: {} }, instructions: INSTRUCTIONS })
       const deps: ToolDeps = {
-        ctx, principal, via, idem, halt, assistantCwd: config.assistantCwd, assistant, asks, questionsOnly: door, closing: closing.signal,
+        ctx, principal, via, report, idem, halt, assistantCwd: config.assistantCwd, assistant, asks, questionsOnly: door,
+        closing: closing.signal,
       }
       registerTools(server, deps, config.profile)
       return server

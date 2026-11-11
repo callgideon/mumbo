@@ -1,10 +1,20 @@
-/** Caller authentication for the MCP route: one bearer key from a file, a named, allowlisted principal, and the key's name. */
+/**
+ * Caller authentication for the MCP route: one bearer key from a file, a named, allowlisted principal, the key's name,
+ * and the project whose report the request carries.
+ */
 
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
+import { type Branded, brandString } from '@deepseek-ai/dsh-brand'
 
 /** Accepted principal handles: lowercase, starting with a letter, at most 32 characters. */
 export const HANDLE_PATTERN = /^[a-z][a-z0-9-]{0,31}$/
+
+/** A mumbo project id, as the edge names projects: 16 lowercase letters and digits. */
+export type ProjectId = Branded<'MumboProjectId'>
+
+/** Accepted project ids; a repeated header reaches the route joined by `, `, which falls outside them. */
+const PROJECT_ID = /^[a-z0-9]{16}$/
 
 /** Most characters (UTF-16 code units) of a key name once sanitised. */
 const KEY_NAME_MAX = 64
@@ -49,6 +59,17 @@ export function readKeyName(raw: string | undefined): string | undefined | false
   }
   const name = decoded.replace(/[\p{C}\p{Zl}\p{Zp}[\]]/gu, ' ').replace(/\s+/gu, ' ').trim()
   return name === '' ? undefined : name.slice(0, KEY_NAME_MAX).replace(/\p{Cs}$/u, '').trimEnd()
+}
+
+/**
+ * Read the project whose report the request carries from `x-mumbo-report-project`, which only the mumbo edge sets,
+ * when it relays a project's report to the principal.
+ * @param raw - the header value, absent when the request carried none.
+ * @returns the project id; `undefined` when the header is absent; `false` when it is repeated or not a project id.
+ */
+export function readReportProject(raw: string | undefined): ProjectId | undefined | false {
+  if (raw === undefined) return undefined
+  return PROJECT_ID.test(raw) ? brandString<ProjectId>(raw) : false
 }
 
 /** SHA-256 digest, so the comparison runs over equal-length buffers whatever the header length. */

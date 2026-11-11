@@ -30,6 +30,13 @@ export const Config = s.object({
     login: s.string().pattern(/^[A-Za-z0-9-]+\[bot\]$/).required().description('The App\'s bot login, `<slug>[bot]`.'),
     userId: s.number().min(1).step(1).required().description('The bot user\'s numeric id, from `gh api \'users/<slug>[bot]\' --jq .id`; not the App ID.'),
   })]).description('Act on GitHub as a GitHub App\'s bot. The agent CLI reaches GitHub with an installation token, which cannot read `/user` or notifications: setup takes the identity from here, and the GitHub Source reads the repository\'s Issues, pull requests and comments instead of notifications. Unset, the CLI is signed in to a user account.'),
+  edge: s.union([s.object({
+    // Requests to it carry the box token, so plain `http` is accepted on the loopback address only.
+    url: s.string().pattern(/^(?:https:\/\/[^\s/]+|http:\/\/127\.0\.0\.1(?::\d+)?)\/\S*$/).required()
+      .description('The mumbo edge\'s `report_to_member` MCP endpoint, such as `https://<model host>/mcp/report`; `http` only on 127.0.0.1.'),
+    tokenFile: absolute('File holding this box\'s edge token, which the edge writes; read on each call.').required(),
+    project: s.string().pattern(/^[a-z0-9]{16}$/).required().description('The id of the project this box serves.'),
+  })]).description('Where relay replies go: the mumbo edge\'s `report_to_member` tool. Unset, relay replies wait.'),
 })
 export type DeploymentConfig = ReturnType<typeof Config>
 export interface Machine {
@@ -49,6 +56,8 @@ export interface Machine {
   panelAdmins: readonly string[]
   /** Set when the agent acts as a GitHub App's bot (App mode); unset when its CLI is signed in to a user account. */
   githubApp?: { login: string; userId: number } | undefined
+  /** The mumbo edge's `report_to_member` endpoint, this box's token file and project id, for relay replies; unset outside a project box. */
+  edge?: { url: string; tokenFile: string; project: string } | undefined
 }
 const MOVED: Record<string, string> = {
   repository: 'on the GitHub Source', branchPrefix: 'in the prepare command of the Execution settings', github: 'on the GitHub Source',
@@ -81,7 +90,7 @@ export function inStateDirectory(stateDir: string, path: string): boolean {
 export function machineOf(config: DeploymentConfig, runAs = false): Machine {
   const unknown = Object.keys(config).filter(key => !(key in (Config.dict ?? {})))
   if (unknown.length) throw new Error(`dsh-superagent configuration has keys it does not use: ${unknown.map(key => MOVED[key] ? `${key} (now ${MOVED[key]})` : key).join(', ')}; the keys are ${Object.keys(Config.dict ?? {}).join(', ')}`)
-  const { stateDir, workDirectory, workerDirectory, ghConfigDirectory, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins, githubApp } = config
+  const { stateDir, workDirectory, workerDirectory, ghConfigDirectory, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins, githubApp, edge } = config
   const contained = (key: 'workerDirectory' | 'ghConfigDirectory', path: string | undefined): string | undefined => {
     if (!runAs) return path
     if (path === undefined) throw new Error(`dsh-superagent ${key} must be set under a run-as subprocess provider: the orchestrator, as root, uses what it holds`)
@@ -93,7 +102,7 @@ export function machineOf(config: DeploymentConfig, runAs = false): Machine {
     throw new Error(`dsh-superagent workDirectory ${work}${workDirectory === undefined ? ' (its default, <stateDir>/work)' : ''} is in stateDir ${stateDir}, which workers cannot enter under a run-as subprocess provider; set workDirectory to a directory outside stateDir, such as /root/work`)
   }
   return { stateDir, workDirectory: work, workerDirectory: worker, ghConfigDirectory: gh, runAs, promptMaxChars, admissionContextMaxPages,
-    admissionContextTimeoutMs, panelAdmins, githubApp }
+    admissionContextTimeoutMs, panelAdmins, githubApp, edge }
 }
 
 /** `owner/name`, where neither part is `.` or `..`, which would leave `repos/` in an API path. */

@@ -154,6 +154,36 @@ describe('key name header', () => {
   })
 })
 
+describe('report project header', () => {
+  it.each([
+    ['repeated', ['0123456789abcdef', '0123456789abcdef'], 'malformed x-mumbo-report-project'],
+    ['not lowercase', ['0123456789ABCDEF'], 'malformed x-mumbo-report-project'],
+    ['shorter than 16 characters', ['0123456789abcde'], 'malformed x-mumbo-report-project'],
+  ])('refuses a project that is %s with 400', async (_label, values, text) => {
+    const headers = new Headers({
+      authorization: `Bearer ${KEY}`,
+      'x-mcp-principal': 'ann',
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+    })
+    for (const value of values) headers.append('x-mumbo-report-project', value)
+    const response = await fetch(await serve(), { method: 'POST', headers, body: TOOLS_LIST })
+    expect(response.status).toBe(400)
+    expect(await response.text()).toBe(text)
+  })
+
+  it('refuses a report with a key name with 400', async () => {
+    const response = await post(await serve(), { headers: { 'x-mumbo-report-project': '0123456789abcdef', 'x-mumbo-key-name': 'laptop' } })
+    expect(response.status).toBe(400)
+    expect(await response.text()).toBe('x-mumbo-report-project with x-mumbo-key-name')
+  })
+
+  it('still refuses a principal outside the allowlist with 403', async () => {
+    const response = await post(await serve(), { principal: 'eve', headers: { 'x-mumbo-report-project': '0123456789abcdef' } })
+    expect(response.status).toBe(403)
+  })
+})
+
 describe('key file', () => {
   it('fails load naming the key file when it is missing, and registers no route', async () => {
     const { ctx, config, url } = await startHost()

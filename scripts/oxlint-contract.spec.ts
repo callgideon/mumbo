@@ -398,6 +398,19 @@ export function unrelatedRead(): void {
     }
   }, 90_000)
 
+  // pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md S11
+  it.each(['.oxlintrc.json', '.oxlintrc.staged.json'])('lints only src/mumbo/ of the pinned superagent copy under %s', (config) => {
+    const lint = (file: string) => runOxlint(['--config', config, '--format', 'unix', `packages/mumbo/superagent/${file}`])
+    const mumbo = lint('src/mumbo/executors.ts')
+    const upstream = lint('src/app/runtime.ts')
+
+    expect(mumbo.error).toBeUndefined()
+    expect(mumbo.status, normalizedOutput(mumbo)).toBe(0)
+    expect(normalizedOutput(mumbo)).not.toContain('No files found to lint')
+    expect(upstream.status).toBe(1)
+    expect(normalizedOutput(upstream)).toContain('No files found to lint')
+  }, 90_000)
+
   it('preserves successful fix output channels', async () => {
     const suffix = randomUUID()
     const path = join(repositoryRoot, 'scripts', `staged-lint-probe-${suffix}.ts`)

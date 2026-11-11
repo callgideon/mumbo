@@ -71,6 +71,16 @@ describe('configuration schema', () => {
       expect(() => machineOf(Config(minimal({ githubApp }))), JSON.stringify(githubApp)).toThrow()
     }
   })
+  it('reads the edge only with an https endpoint (http on 127.0.0.1 alone), an absolute token file and a project id', () => {
+    const edge = { url: 'https://llm.app.mumbo.si/mcp', tokenFile: '/root/.mumbo/edge.token', project: '0123456789abcdef' }
+    expect(machineOf(Config(minimal({ edge }))).edge).toEqual(edge)
+    expect(machineOf(Config(minimal({ edge: { ...edge, url: 'http://127.0.0.1:8080/mcp' } }))).edge?.url).toBe('http://127.0.0.1:8080/mcp')
+    expect(machineOf(Config(minimal())).edge).toBeUndefined()
+    for (const bad of [{ ...edge, url: 'http://llm.app.mumbo.si/mcp' }, { ...edge, url: 'https://llm.app.mumbo.si' }, { ...edge, url: 'ftp://x/mcp' },
+      { ...edge, tokenFile: 'edge.token' }, { ...edge, project: 'Project-1' }, { url: edge.url, tokenFile: edge.tokenFile }, { url: edge.url, project: edge.project }]) {
+      expect(() => machineOf(Config(minimal({ edge: bad }))), JSON.stringify(bad)).toThrow()
+    }
+  })
   it('names keys the configuration does not define, and where the values of older keys live now', () => {
     const raw = minimal({ repository: 'acme/widgets', repositoryPath: '/srv/widgets', blockedCommands: [], author: { name: 'Alice' }, extra: 1 })
     expect(() => machineOf(Config(raw))).toThrow('keys it does not use: repository (now on the GitHub Source), repositoryPath (now in the prepare command of the Execution settings), blockedCommands (now in the Execution settings), author (now prompt text), extra; the keys are stateDir, workDirectory, workerDirectory, ghConfigDirectory, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins')

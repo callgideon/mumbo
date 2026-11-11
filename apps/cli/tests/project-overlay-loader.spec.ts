@@ -30,7 +30,8 @@ afterEach(async () => {
 })
 
 const ENV = [
-  'MUMBO_PANEL_ADMINS', 'MUMBO_GITHUB_APP_LOGIN', 'MUMBO_GITHUB_APP_USER_ID', 'MUMBO_WORK_DIR', 'MUMBO_WORKER_DIR', 'MUMBO_GH_CONFIG_DIR',
+  'MUMBO_PANEL_ADMINS', 'MUMBO_GITHUB_APP_LOGIN', 'MUMBO_GITHUB_APP_USER_ID', 'MUMBO_EDGE_MCP_URL', 'MUMBO_EDGE_TOKEN_FILE', 'MUMBO_PROJECT_ID',
+  'MUMBO_WORK_DIR', 'MUMBO_WORKER_DIR', 'MUMBO_GH_CONFIG_DIR',
 ] as const
 /** The directories `dsh-superagent` resolved: as configured, and as `machineOf` settles them. */
 interface Directories { workDirectory: string | undefined; workerDirectory: string | undefined; ghConfigDirectory: string | undefined }
@@ -39,6 +40,7 @@ interface Booted {
   stateDir?: string
   panelAdmins?: unknown
   githubApp?: unknown
+  edge?: unknown
   configured?: Directories
   machine?: Directories
   rejection?: string
@@ -75,6 +77,7 @@ async function boot(env: Partial<Record<(typeof ENV)[number], string | undefined
       try {
         const machine = machineOf(resolved, runAs)
         seen.githubApp = machine.githubApp
+        seen.edge = machine.edge
         const { workDirectory: work, workerDirectory: worker, ghConfigDirectory: gh } = machine
         seen.machine = { workDirectory: work, workerDirectory: worker, ghConfigDirectory: gh }
       } catch (error) {
@@ -104,6 +107,7 @@ async function boot(env: Partial<Record<(typeof ENV)[number], string | undefined
 }
 
 describe('project-box overlay in the real Loader', () => {
+  const EDGE = { MUMBO_EDGE_MCP_URL: 'https://llm.app.mumbo.si/mcp', MUMBO_EDGE_TOKEN_FILE: '/root/.mumbo/edge.token', MUMBO_PROJECT_ID: '0123456789abcdef' }
   it.each([
     ['unset', undefined, []],
     ['a comma list', 'a@x.io,b@x.io', ['a@x.io', 'b@x.io']],
@@ -135,9 +139,11 @@ describe('project-box overlay in the real Loader', () => {
       const [work, worker, gh] = ['work', 'worker', 'gh'].map(name => join(scratch, name))
       for (const directory of [work!, worker!, gh!]) mkdirSync(directory, { mode: 0o700 })
       const contained = { MUMBO_WORK_DIR: work, MUMBO_WORKER_DIR: worker, MUMBO_GH_CONFIG_DIR: gh }
-      const result = await boot(contained, true)
+      // A contained project box also sets the edge for relay replies; the row carries both.
+      const result = await boot({ ...contained, ...EDGE }, true)
       expect(result.configured).toEqual({ workDirectory: work, workerDirectory: worker, ghConfigDirectory: gh })
       expect(result.machine).toEqual({ workDirectory: work, workerDirectory: worker, ghConfigDirectory: gh })
+      expect(result.edge).toEqual({ url: EDGE.MUMBO_EDGE_MCP_URL, tokenFile: EDGE.MUMBO_EDGE_TOKEN_FILE, project: EDGE.MUMBO_PROJECT_ID })
       expect(result.rejection).toBeUndefined()
       // Under run-as, the plugin refuses the directories' defaults: no worker or gh directory, and a work directory in stateDir.
       expect((await boot({}, true)).rejection).toMatch(/workerDirectory must be set under a run-as subprocess provider/u)
@@ -154,6 +160,20 @@ describe('project-box overlay in the real Loader', () => {
     const result = await boot(env)
     expect(result.failure).toMatch(/githubApp/)
     // Validation stops the plugin before it applies, so it never runs in user mode.
+    expect(result.stateDir).toBeUndefined()
+  })
+  it.each([
+    ['all three variables', EDGE, { url: EDGE.MUMBO_EDGE_MCP_URL, tokenFile: EDGE.MUMBO_EDGE_TOKEN_FILE, project: EDGE.MUMBO_PROJECT_ID }],
+    ['no variable', {}, undefined],
+  ])('resolves the edge from %s', { timeout: 60_000 }, async (_name, env, expected) => {
+    const result = await boot(env)
+    expect(result.edge).toEqual(expected)
+    expect(result.rejection).toBeUndefined()
+    expect(result.failure).toBeUndefined()
+  })
+  it('fails to load dsh-superagent with only some of the edge variables', { timeout: 60_000 }, async () => {
+    const result = await boot({ MUMBO_EDGE_MCP_URL: EDGE.MUMBO_EDGE_MCP_URL, MUMBO_PROJECT_ID: EDGE.MUMBO_PROJECT_ID })
+    expect(result.failure).toMatch(/edge/)
     expect(result.stateDir).toBeUndefined()
   })
 })
