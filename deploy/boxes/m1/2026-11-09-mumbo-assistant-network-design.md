@@ -1573,6 +1573,54 @@ This replaces "A newcomer's region" above and step 4 of section 17a's flow. A ne
 - a password manager in This app: Electron's extensions omit what one needs, and signed-in work belongs in My Chrome;
 - end-to-end encryption against the operator (the bucket is encrypted with the cell's key, which the edge can use).
 
+## 17e. Context, objectives and progress **[founder: 2026-11-11, "agents and coordinators manage context, objectives, task lists and plans, track everything, and keep building without losing context or drifting"; my call on the how]**
+
+Source: mumbo-research's report "Agent self managed project structure" (2026-11-11), `jumbo/.claude/worktrees/jumbo-research/reports/`. Nothing in it was measured; token figures are characters divided by four.
+
+**The finding.** Mumbo already records every piece of agent state durably: the Session log, its projections (todo, plan, goal, team) and superagent's Tickets. What fails is showing it again.
+- After a compaction, only AGENTS.md and the skills catalogue come back. The todo list, the approved plan, team tasks and live job handles survive only in whatever the summary model wrote. Mechanical extraction kept 79% of recurring details against at most 16% for model-written summaries (Compact-Bench, arXiv 2610.31710).
+- After a restart, jobs and workflows are gone, and nothing says so. The goal comes back disarmed. Our own three-session process needed a typed "resume and re-arm" after every restart.
+- Above Tickets there is nothing: no project objective, no brief (§7's living brief is not built), no parent Ticket.
+- A worker's `ready` ends an external Ticket. T3's `Engine.requestReview` has no caller on `main` (checked 2026-11-11), so no review marker is ever posted for E0 to find. External workers' PRs can't merge through the edge until it has one.
+
+**The rule.** Keep a small, structured record outside the model, written by the runtime wherever possible. Show it again at every compaction and restart. Let only an external check (CI, or a review verdict on the exact commit) mark work done.
+
+**How the tasks stay inside our rules:**
+- New behaviour is new plugins under `packages/mumbo/`, on documented seams (`PromptContext`, `agent.inject()`, the goal round prompt, superagent KV families). Upstream packages change only where a seam is missing, and then as an upstream-shaped change.
+- No new Session event type unless unavoidable. If one is needed, it carries `ignorable: true`, so an older reader skips it, and it updates both SDKs' expected outputs.
+- Nothing changes the agent loop or the model provider, and nothing adds a new service.
+- Anything shown to the model is a logged event, and goes through a snapshot test.
+- Mounting goes through the project overlay and the edge-written person overlay, never the founder's overlays.
+
+**Tasks** (K for "keep"; the report's R-numbers in brackets):
+
+| Task | What | Order |
+|---|---|---|
+| **T4** (R6) the reviewer Ticket's caller | `requestReview` on every external `ready` report and on `submit`, with the reused-comment first-line check parked from #42. A `ready` no longer ends a Ticket. A reviewer's `pass` on the head SHA plus green CI does, and the runtime posts the marker E0 checks. Tests: `ready` alone doesn't close; `pass` plus CI does; `fail` reopens; E0 finds the marker | Next superagent task; before E2's door tools go live |
+| **K1** (R1, R3) the state block | A `PromptContext` rendered mechanically from the session's projections, never by a model. It holds the goal and its phase, the open todo items, the approved plan's step headings, open team tasks, and live subagents and jobs, capped at 1,600 characters with pointers beyond. It renders only the parts the session mounts.<br>The text changes only at a boundary (a compaction, a resume, or a goal phase change), so ordinary todo edits don't re-log it. Between boundaries those edits are visible as recent tool calls.<br>The plan headings come from the logged `exit_plan_mode` call and its approval, folded by the plan projection, so no new event is needed. A `plan_read` tool returns the full text.<br>Tests: a snapshot with a compaction shows the block re-logged once after it and not on unchanged turns, and old fixtures load unchanged | After the B24 fix |
+| **K2** (R5) the resume reconciler | At the first step after a resume, it compares the log (jobs without `job/settled`, subagents without a completion, workflows) with the live registries, and injects one logged notice: what died, what finished and where its result is, and that the goal needs a person to resume it. The same fact appears in `needs_you`. Tests: a log with an unsettled job yields exactly one notice | With K1 |
+| **K3** (R4) the goal stall check | At each goal round start, a mechanical check from the log: files changed, todo progress, repeat chains, tool errors. After two rounds without change, the round prompt carries the progress questions (done? looping? progressing? what next?), and the existing `blocked` rule follows. No model call and no new event: the round prompt is the logged record | After K1, K2 |
+| **K4** (R7, R10) the project brief | Superagent KV family `brief:<project>`: typed items (objective, decision in force, where things live, note), each with id, date and source. Decisions carry `by`, `costIfWrong` and `supersedes`. The router changes it only by itemised deltas through one tool (add, edit or retire one item), never by a rewrite, and it is capped at §7's 600 words. It is sent to the coordinator and its Executors as a `system/message`, re-logged only on change. Tests: deltas apply in order; the cap is enforced; requests carry it | Schema 13, with M4 |
+| **K5** (R8) the objective tree | KV family `objective` `{id, parentId, title, acceptance, state, owner}` with depth at most 3, plus `Ticket.objective` and `Ticket.parent`. A parent can't close while a child is open. A node closes only when its acceptance passes: a named CI check on a commit, a T4 review `pass`, or a person's confirmation; no free commands. A person sets roots in the panel (a GUI change, so a GIF) or through the relay. `project_status` shows it. Tests: a migration 12 → 13 leaves old Tickets valid, plus each closing rule | Schema 13 |
+| **K6** (R9) handoffs and the Ticket record | `Assignment.report.handoff {done[], next, head, notes}` on progress reports. On lease expiry or `hostRestarted`, the successor's claim brief carries the last handoff instead of only the lease note. Adds §8's record fields: attempts per model, failed reviews, asks answered, CI result, wall time. Tests: an expired lease hands over the handoff | Schema 13 |
+
+**Measured, not assumed.**
+- Mechanics are checked by keyless snapshot tests.
+- Whether K1 and K2 help is checked by a small live eval on the pinned DeepSeek model, run on demand and not in CI: a scripted task with a forced compaction and a forced restart, against an uninterrupted control. It measures re-derivations, steps to the first productive call after the boundary, and objective completion by acceptance checks.
+- In production, the claim-truth gap is the share of `ready` reports that review or CI later fails.
+
+**Not now:**
+- todo item ids and a drop check (R2): no dropped item has been observed; add it if one is;
+- a separate decision store (folded into K4);
+- vector or graph memory services;
+- model-written summaries as the record;
+- tree-search planners;
+- more parallel writers per Ticket;
+- self-critique as the done check;
+- context resets in place of compaction (re-test per model with K1's eval).
+
+**Our own process** (no product work): task numbers are assigned only by mumbo-design, in this spec. The count of "resume / re-arm" prompts per week across the three sessions is the live metric this section should drive down once our own coordinators run on it.
+
 ## 18. Milestones **[founder: A, then B, then C; my call on the cut]**
 
 | Milestone | Contents | Done when |
