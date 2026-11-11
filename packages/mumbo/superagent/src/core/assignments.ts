@@ -133,7 +133,7 @@ export class Assignments extends EnginePart {
     return this.require(ticketId)
   }
   /**
-   * In Mumbo (`UPSTREAM.md` S14): a review Ticket's verdict ends it through its report, with `findings` as the summary: `pass`
+   * In Mumbo (`UPSTREAM.md` S15): a review Ticket's verdict ends it through its report, with `findings` as the summary: `pass`
    * or `fail` `completed`, recorded on the ticket it reviewed (see `Tickets.reviewed`), and `stale` `dropped`, recorded nowhere else.
    * @throws UserError for a ticket that is unknown or no review, and as `report` does.
    */

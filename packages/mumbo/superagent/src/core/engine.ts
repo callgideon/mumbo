@@ -106,7 +106,7 @@ export class Engine {
    * once unless processing is paused.
    * @throws UserError for a Trigger the Policy does not deliver, such as one from a sender on neither the Source's allowed list nor
    * its bot list, for a ticket a person stopped, which withdrew its Mandate, or for one whose Mandate the Policy no longer holds,
-   * and, in Mumbo, for a review Ticket (`UPSTREAM.md` S14).
+   * and, in Mumbo, for a review Ticket (`UPSTREAM.md` S15).
    */
   attach(ticketId: string, triggerId: string, note?: string): Ticket {
     return this.repo.atomic(() => {
@@ -248,7 +248,7 @@ export class Engine {
     this.repo.atomic(() => { this.assignments.interrupted(ticketId, assignmentId) })
   }
 
-  // In Mumbo, reviews (`UPSTREAM.md` S14)
+  // In Mumbo, reviews (`UPSTREAM.md` S15)
 
   /**
    * Start the independent review of an open ticket's pull request `pr` at its head commit `sha`, once per commit, superseding
@@ -292,5 +292,5 @@ export type EngineForSettings = Pick<Engine, 'policyChanged'>
 /** What the Executor tells the Engine, and what its workers ask of it. */
 export type EngineForExecutor = Pick<Engine, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed'
   | 'assignmentInterrupted' | 'report' | 'markUnrelated' | 'handback' | 'followForContext' | 'reply'
-  // In Mumbo (`UPSTREAM.md` S14).
+  // In Mumbo (`UPSTREAM.md` S15).
   | 'requestReview' | 'reviewed'>

@@ -246,7 +246,7 @@ export class Sessions {
       const version = this.promptFor(agent, context.signal !== undefined)
       const current = ticket && host.store.tickets.get(ticket.id)
       const composed = host.prompts.compose(version.config, master ? 'orchestrator' : 'worker', current ? host.environment(current) : undefined)
-      // In Mumbo, a review Ticket's worker also reads how it reviews (`UPSTREAM.md` S14).
+      // In Mumbo, a review Ticket's worker also reads how it reviews (`UPSTREAM.md` S15).
       const review = current?.review ? `\n${REVIEW_INSTRUCTIONS}` : ''
       return `[dsh-superagent prompt revision ${version.revision}]\n${composed}\n${current ? mandateInstructions(current.mandate) : ''}${review}`
     }, ...(master ? { complete: true } : {}) }))

@@ -28,7 +28,7 @@ export function ticketCard(ticket: Ticket) {
   const { attention } = ticket
   return { ticket_id: ticket.id, title: ticket.title, state: cardState(ticket), strength: ticket.mandate.strength,
     ...(pullOf(ticket) ? { pr_number: pullOf(ticket) } : {}), ...(ended ? { ended } : {}),
-    // In Mumbo, a review Ticket names the ticket it reviews (`UPSTREAM.md` S14).
+    // In Mumbo, a review Ticket names the ticket it reviews (`UPSTREAM.md` S15).
     ...(ticket.review ? { review_of: ticket.review.of } : {}),
     ...(attention ? { attention: { question: attention.question, ...attention.triggerId ? { trigger_id: attention.triggerId } : {} } } : {}),
     preview: preview(latestReport(ticket)?.summary ?? ''), read: `ticket/${ticket.id}` }

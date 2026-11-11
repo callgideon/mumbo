@@ -221,7 +221,7 @@ async function drive(host: Host) {
   runtime.executor.resume()
   await runtime.pump()
   await runtime.idle()
-  // In Mumbo, the review of ticket a's pull request, whose worker has only the review's tools (`UPSTREAM.md` S14).
+  // In Mumbo, the review of ticket a's pull request, whose worker has only the review's tools (`UPSTREAM.md` S15).
   const review = runtime.engine.requestReview(a, { pr: 12, sha: 'a'.repeat(40) }).id
   await runtime.idle()
   return { a, b, review, workerA, workerB, reviewer: workerSessionId(review), refusal }
@@ -400,7 +400,7 @@ it('enforces the word limits the text states', async () => {
 /** The enabled rules' lines of the main Session's Policy section, as the settings hold them now. */
 const ruleLines = () => host.runtime.store.settings().policy.rules.filter(rule => rule.enabled).map(rule => `- ${rule.name} (${rule.id}): ${rule.instruction}`)
 it.each(['orchestrator', 'worker'] as const)('keeps the %s within its character budget', role => {
-  // In Mumbo, the review Ticket's worker has its own tools (`UPSTREAM.md` S14).
+  // In Mumbo, the review Ticket's worker has its own tools (`UPSTREAM.md` S15).
   const ids = role === 'orchestrator' ? [host.runtime.masterId] : [sessions.workerA, sessions.workerB, sessions.reviewer]
   // Strip machine-dependent variable values (such as directory paths), and the team's rules, before measuring prompt length.
   const builtIn = (text: string) => ruleLines().reduce((rest, line) => rest.replace(line, ''), text).replace(/ = "[^"\n]*"/g, ' = ""')

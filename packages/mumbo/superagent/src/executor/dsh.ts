@@ -463,7 +463,7 @@ export class DshExecutor implements ExecutorPlugin {
     const retried = ticket.assignments.at(-2)?.endedReason === 'retried' ? { note: RETRIED } : {}
     const assignmentText = ticket.execution?.assignment ?? ''
     const { text: brief, chars, read } = capped(assignmentText, ASSIGNMENT_CHARS, `ticket/${ticket.id}/assignment`)
-    // In Mumbo, a review's worker reads no resource, so its launch carries the request in full (`UPSTREAM.md` S14).
+    // In Mumbo, a review's worker reads no resource, so its launch carries the request in full (`UPSTREAM.md` S15).
     const review = told || !source || !ticket.review ? undefined : reviewLaunch(this.host.store, ticket.review.of, source)
     const card = told || !source || review ? undefined : await this.triggerCard(ticket, source.id)
     if (!current()) return
@@ -671,7 +671,7 @@ export class DshExecutor implements ExecutorPlugin {
     const text = last?.type === 'assistant/message'
       ? last.data.message.content.filter(block => block.type === 'text').map(block => block.text).join('\n').trim() : ''
     const said = [text, stopped].filter(Boolean).join('\n\n')
-    // In Mumbo, a review's turn that ends without its verdict fails the review, which waits for a Retry (`UPSTREAM.md` S14).
+    // In Mumbo, a review's turn that ends without its verdict fails the review, which waits for a Retry (`UPSTREAM.md` S15).
     if (current.review) { this.failed(ticket.id, [NO_VERDICT, said].filter(Boolean).join('\n\n')); return }
     this.host.store.atomic(() => {
       const before = latestReport(current)?.summary ?? ''

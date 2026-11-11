@@ -1,5 +1,5 @@
 /**
- * In Mumbo, the review Ticket's worker (`UPSTREAM.md` S14): `REVIEW_INSTRUCTIONS`, its system prompt part; `reviewLaunch`, what
+ * In Mumbo, the review Ticket's worker (`UPSTREAM.md` S15): `REVIEW_INSTRUCTIONS`, its system prompt part; `reviewLaunch`, what
  * its launch message carries; `NO_VERDICT`, the failure of a turn that ends without a verdict; and `reviewTools`, its only
  * tools. The runtime, not the model, posts the review comment whose first line is the marker the edge reads, after it re-read
  * the pull request's head, and marks a draft pull request ready on a pass.

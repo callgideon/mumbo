@@ -22,7 +22,7 @@ export interface ExecutorToolsHost {
 }
 
 export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
-  // In Mumbo, a review Ticket's worker gets only the review's tools (`UPSTREAM.md` S14).
+  // In Mumbo, a review Ticket's worker gets only the review's tools (`UPSTREAM.md` S15).
   if (ticket.review) return reviewTools(host, ticket.id, ticket.review)
   const ticketId = ticket.id
   return [

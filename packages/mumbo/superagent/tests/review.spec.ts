@@ -1,5 +1,5 @@
 /**
- * In Mumbo, the review Ticket (`UPSTREAM.md` S14): one per reviewed commit, launched for a fresh local worker with the
+ * In Mumbo, the review Ticket (`UPSTREAM.md` S15): one per reviewed commit, launched for a fresh local worker with the
  * request in full and only the review's tools; its verdict, which the runtime posts once with the marker the edge reads, is
  * recorded on the ticket it reviews; and the GitHub Channel never posts a comment whose first line is a marker.
  */

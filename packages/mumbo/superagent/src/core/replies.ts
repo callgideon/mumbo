@@ -65,7 +65,7 @@ export class Replies extends EnginePart {
     const trigger = request.triggerId ? this.repo.triggers.get(request.triggerId) : undefined
     if (request.triggerId && !trigger) throw new UserError('unknownTrigger')
     const ticket = request.ticketId ? this.require(request.ticketId)
-      // In Mumbo, a review Ticket shares its ticket's origin but answers no one (`UPSTREAM.md` S14).
+      // In Mumbo, a review Ticket shares its ticket's origin but answers no one (`UPSTREAM.md` S15).
       : trigger ? this.repo.tickets.list().find(item => !item.review && this.reaches(item, trigger)) : undefined
     if (request.purpose === 'result') {
       const outcome = ticket && ticketOutcome(ticket)
