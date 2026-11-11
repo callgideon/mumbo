@@ -968,6 +968,7 @@ export function apply(ctx: Context, config: Config): void {
       return () => { owned = false }
     })
   }
-  const identityServices = config.browser.identity === undefined ? [] : ['subprocess']
-  ctx.plugin({ name: providerName, inject: [...inject, GATE, ...identityServices], Config: ProviderConfig, apply: applyOwned }, config.browser)
+  // With an identity, the browser mounts only once a subprocess service is mounted.
+  const providerInject = [...inject, GATE, ...config.browser.identity === undefined ? [] : ['subprocess']]
+  ctx.plugin({ name: providerName, inject: providerInject, Config: ProviderConfig, apply: applyOwned }, config.browser)
 }

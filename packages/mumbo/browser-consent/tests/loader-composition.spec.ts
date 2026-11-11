@@ -235,6 +235,15 @@ describe('browser write consent in the person-box composition', () => {
     expect(browserTools(refused)).toEqual([])
   })
 
+  it('mounts the browser of a server identity only once a subprocess service is mounted', { timeout: 60_000 }, async () => {
+    const browser = { mode: 'attach', endpoint: 'http://127.0.0.1:9', identity: 'browsermcp', outputDir: '/var/lib/mumbo/playwright-output' }
+    const waiting = await load({ consent: { browser } })
+    expect(waiting.consentFiber?.state).toBe(ACTIVE)
+    expect(waiting.errors).toEqual([])
+    expect(waiting.ctx.browserUse.providerName).toBeUndefined()
+    expect(browserTools(waiting)).toEqual([])
+  })
+
   it('refuses every tool of a provider row that loaded ahead of consent', { timeout: 60_000 }, async () => {
     const rival = { inject: PlaywrightBrowser.inject, async apply(ctx: Context) {
       await ctx.plugin(PlaywrightBrowser, { mode: 'attach', endpoint: 'http://127.0.0.1:9' })

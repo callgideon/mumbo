@@ -31,7 +31,7 @@ kind: "package-reference"
 
 | Field | Default | Meaning |
 |---|---|---|
-| `browser` | required | Settings of the mounted [Playwright MCP provider](../../experimental/browser-use-playwright-mcp/README.md), such as `mode: attach`, `endpoint`, and the subprocess `identity` its server runs as. With `identity` the server starts in that identity's home, and `outputDir` is required: the plugin deletes the files of a withheld result only there, so it must be a directory the identity owns in a root-owned parent. The subprocess service checks that identity when the browser mounts; a refusal leaves this plugin loaded without browser tools, and Sessions start without them. |
+| `browser` | required | Settings of the mounted [Playwright MCP provider](../../experimental/browser-use-playwright-mcp/README.md), such as `mode: attach`, `endpoint`, and the subprocess `identity` its server runs as. With `identity` the server starts in that identity's home, and `outputDir` is required: the plugin deletes the files of a withheld result only there, so it must be a directory the identity owns in a root-owned parent. The browser then mounts only once a subprocess service is mounted: until then this plugin stays loaded without browser tools and logs no error. The subprocess service checks that identity when the browser mounts; a refusal leaves this plugin loaded without browser tools, and Sessions start without them. |
 | `deniedUrls` | required | Schemes, such as `chrome:`, and origins, such as `https://accounts.google.com`, that the browser tools never open or read. `[]` denies nothing. |
 | `allowedSites` | `[]` | Origins, such as `https://mail.google.com`, where current-tab writes proceed without asking. |
 | `approvalTimeoutMs` | `300000` | How long a write waits for the person's answer before it is denied as unanswered. |
@@ -144,7 +144,7 @@ Mount it beside the `browserUse` registry, with `dsh-user-approval`, which the s
         display: ':1'
 ```
 
-The plugin requires the provider's services; it reads the approval service on each write. `browser.outputDir` moves the files the Playwright MCP server writes out of the Session's working directory, here to a root-only directory that backups skip. The server runs as a child of the dsh process, started by the MCP client's stdio transport rather than the subprocess service, so it keeps the dsh process's user and can write there. The `inject` line makes the desktop tool wait for this plugin's service, so a consent row that fails to load, or that refuses another browser provider, leaves no ungated desktop tool. [`@mumbo/box-links`](../box-links/README.md) finds the same service and shows Take over and Hand back in the owner's Browser tab.
+The plugin requires the provider's services, and with `browser.identity` a subprocess service row as well; it reads the approval service on each write. `browser.outputDir` moves the files the Playwright MCP server writes out of the Session's working directory, here to a root-only directory that backups skip. The server runs as a child of the dsh process, started by the MCP client's stdio transport rather than the subprocess service, so it keeps the dsh process's user and can write there. The `inject` line makes the desktop tool wait for this plugin's service, so a consent row that fails to load, or that refuses another browser provider, leaves no ungated desktop tool. [`@mumbo/box-links`](../box-links/README.md) finds the same service and shows Take over and Hand back in the owner's Browser tab.
 
 <a id="model-experience"></a>
 ## Model Experience
