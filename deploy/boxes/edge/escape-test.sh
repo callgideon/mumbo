@@ -28,6 +28,8 @@ unwritable() {
 denied() { if as "$2" "$4"; then say FAIL "$1" "$3"; else say PASS "$1" "$3"; fi; }
 manual() { say MANUAL "$1" "$2"; }
 user() { id "$1" >/dev/null 2>&1; }
+# listening PORT: something listens on TCP PORT, on any address.
+listening() { awk -v p=":$(printf %04X "$1")" '$4 == "0A" && substr($2, length($2) - 4) == p' /proc/net/tcp /proc/net/tcp6 2>/dev/null | grep -q .; }
 CONNECT='const s=require("net").connect(+process.argv[1],process.argv[2]);s.on("connect",()=>process.exit(0));s.on("error",()=>process.exit(1));setTimeout(()=>process.exit(2),5000)'
 BIND='const v=require("net").createServer().listen(+process.argv[1],process.argv[2]);v.on("listening",()=>process.exit(0));v.on("error",e=>process.exit(e.code==="EACCES"?3:e.code==="EADDRINUSE"?4:1))'
 connect() { echo "node -e '$CONNECT' $1 $2"; }
@@ -79,6 +81,13 @@ unwritable agent-write-superagent agent /var/lib/mumbo/superagent
 unwritable agent-write-attachments agent /var/lib/mumbo/attachments/attachments/v1
 unwritable agent-write-spill agent /var/lib/mumbo/spill
 unwritable agent-write-agents-home agent /usr/local/share/mumbo/agents/skills
+# What root runs and dsh imports (the start script's system repair, edge systemRepair): E2B's build leaves /usr/local and
+# envd, which runs commands as root, world-writable.
+unwritable agent-write-usr-local-bin agent /usr/local/bin
+refused agent-write-envd agent 'agent may write /usr/bin/envd' 'test -w /usr/bin/envd'
+G=$(npm root -g --logs-max=0 2>/dev/null)
+w=$(su -s /bin/sh agent -c "find /src $G -xdev ! -type l -writable 2>/dev/null | head -n 5" </dev/null)
+if [ -z "$w" ]; then say PASS agent-write-load-path "agent may change nothing in dsh's code tree (/src $G)"; else say FAIL agent-write-load-path "agent may change $(echo $w)"; fi
 
 # Ports: only root binds below 1024; only root reaches dsh, the live view, the door and VNC, and only browsermcp beside it
 # the browser's debugging port, on loopback and on the box address; nobody, root included, reaches E2B's envd.
@@ -96,7 +105,7 @@ for h in 127.0.0.1 "$ip"; do
     set -- $t
     refused "agent-connect-$1" agent "agent connects to $h:$2" "$(connect "$2" "$h")"
   done
-  if awk -v p=":$(printf %04X "$ENVD_PORT")" '$4 == "0A" && substr($2, length($2) - 4) == p' /proc/net/tcp /proc/net/tcp6 2>/dev/null | grep -q .; then
+  if listening "$ENVD_PORT"; then
     for u in root $USERS; do denied "envd-$u" "$u" "$u connects to E2B's envd on $h:$ENVD_PORT" "$(connect "$ENVD_PORT" "$h")"; done
   else
     say SKIP "envd" "nothing listens on $ENVD_PORT"
@@ -112,6 +121,50 @@ if [ -n "$person" ] && x=$(readlink -f "$(command -v Xkasmvnc)"); then
     if [ $rc = 126 ]; then say PASS "xkasmvnc-$u" "$u runs Xkasmvnc (not allowed)"; else say FAIL "xkasmvnc-$u" "$u runs Xkasmvnc on $ip:$DSH_PORT (status $rc, not 126)"; fi
   done
 fi
+
+# Beyond loopback: E2B's envd forwards every loopback listener to the box address, where E2B's client proxy reaches it, so
+# from beyond loopback the input chain drops every new TCP connection but to envd, dsh, the live view and the door. A
+# connection from inside the box to its own address comes in on loopback, so these checks connect from a network
+# namespace joined to the box by a veth pair on 198.18.0.0/30 (RFC 2544's benchmarking range; self-hosted E2B puts its
+# in-guest orchestrator address in 192.0.2.0/24). The namespace, and with it the pair, is deleted afterwards, also when
+# the script exits or gets HUP, INT or TERM during these checks. envd must answer there, and dsh, the live view and the
+# door must connect, each SKIP when nothing listens on its port, so a rule that drops too much fails as well; root's
+# listeners on 127.0.0.1:9229 (Node's inspector) and 127.0.0.1:47999 (a high port), agent's on 127.0.0.1:8000 (a dev
+# server), the debugging port and VNC must time out there (dropped), neither connect nor be refused.
+ns=mumbo-escape-$$ v=me$$
+LISTEN='const v=require("net").createServer(s=>s.end()).listen(+process.argv[1],"127.0.0.1");setTimeout(()=>process.exit(0),120000)'
+beyond() { for t in envd dsh live door inspector high dev cdp vnc; do say SKIP "beyond-loopback-$t" "$1"; done; }
+trap 'ip netns del $ns 2>/dev/null' EXIT; trap 'exit 1' HUP INT TERM
+if ! command -v ip >/dev/null 2>&1 || ! ip netns add $ns 2>/dev/null; then
+  beyond 'no network namespace here (ip from iproute2, and a kernel with network namespaces)'
+elif ! { ip link add ${v}a type veth peer name ${v}b netns $ns && ip addr add 198.18.0.1/30 dev ${v}a && ip link set ${v}a up && ip -n $ns addr add 198.18.0.2/30 dev ${v}b && ip -n $ns link set ${v}b up && ip -n $ns route add default via 198.18.0.1; } 2>/dev/null; then
+  beyond 'no veth pair into a network namespace here'
+else
+  node -e "$LISTEN" 9229 </dev/null >/dev/null 2>&1 & l1=$!
+  node -e "$LISTEN" 47999 </dev/null >/dev/null 2>&1 & l2=$!
+  su -s /bin/sh agent -c "exec node -e '$LISTEN' 8000" </dev/null >/dev/null 2>&1 & l3=$!
+  # envd forwards a new loopback listener to the box address within about a second.
+  sleep 3
+  from() { ip netns exec $ns node -e "$CONNECT" "$1" "$ip" </dev/null >/dev/null 2>&1; }
+  if from "$ENVD_PORT"; then
+    say PASS beyond-loopback-envd "envd answers on $ip:$ENVD_PORT from beyond loopback"
+    for t in "dsh $DSH_PORT" "live $LIVE_PORT" "door $DOOR_PORT"; do
+      set -- $t
+      if ! listening $2; then say SKIP "beyond-loopback-$1" "nothing listens on $2"; continue; fi
+      from $2; rc=$?
+      if [ $rc = 0 ]; then say PASS "beyond-loopback-$1" "a connection from beyond loopback to $ip:$2 connects"; else say FAIL "beyond-loopback-$1" "a connection from beyond loopback to $ip:$2 ended with status $rc, not connected (0)"; fi
+    done
+    for t in "inspector 9229" "high 47999" "dev 8000" "cdp 9222" "vnc 5900"; do
+      set -- $t
+      from $2; rc=$?
+      if [ $rc = 2 ]; then say PASS "beyond-loopback-$1" "a connection from beyond loopback to $ip:$2 is dropped"; else say FAIL "beyond-loopback-$1" "a connection from beyond loopback to $ip:$2 ended with status $rc, not dropped (2)"; fi
+    done
+  else
+    beyond "the namespace does not reach envd on $ip:$ENVD_PORT"
+  fi
+  kill $l1 $l2 $l3 2>/dev/null
+fi
+ip netns del $ns 2>/dev/null; trap - EXIT HUP INT TERM
 
 # The project box's GitHub proxy runs as ghproxy, so a tunnel through it reaches no more than agent does.
 if [ -z "$person" ]; then
@@ -169,14 +222,16 @@ fi
 # has staged its copy of mumbo-escape-swap.txt (the ask is up), agent swaps the Downloads file: the page must get the
 # content consent staged. The nested file, the FIFO and the file over consent's default uploadMaxBytes (512 MiB; the edge
 # sets none) must be refused before anything is staged, with no reader left blocked opening the FIFO;
-# mumbo-escape-done.txt ends the wait. Once the turn has ended, within 2 minutes, the staging directory must be empty.
+# mumbo-escape-done.txt ends the wait. Consent keeps each copy until it unmounts: the copy of mumbo-escape-swap.txt is
+# still there, root's with group uploads, 0440 in a 0750 nonce directory, and agent can neither list nor read it. Only
+# copies newer than the page's ready file count, so an earlier run's kept copies are not taken for this run's.
 D=/home/shared/Downloads
 if [ -z "$person" ]; then
   :
 elif ! grep -qs uploadStaging /src/packages/mumbo/browser-consent/src/index.ts; then
-  for id in upload-swap upload-nested upload-fifo upload-over-cap upload-staging-empty; do say SKIP "$id" "this image's browser consent stages no upload copy (no uploadStaging in /src/packages/mumbo/browser-consent/src/index.ts)"; done
+  for id in upload-swap upload-staged-copy agent-list-staged agent-read-staged upload-nested upload-fifo upload-over-cap; do say SKIP "$id" "this image's browser consent stages no upload copy (no uploadStaging in /src/packages/mumbo/browser-consent/src/index.ts)"; done
 elif [ -z "$uploads" ]; then
-  for id in upload-swap upload-nested upload-fifo upload-over-cap upload-staging-empty; do say SKIP "$id" 'needs --with-uploads (waits up to 10 minutes for the assistant'"'"'s uploads)'; done
+  for id in upload-swap upload-staged-copy agent-list-staged agent-read-staged upload-nested upload-fifo upload-over-cap; do say SKIP "$id" 'needs --with-uploads (waits up to 10 minutes for the assistant'"'"'s uploads)'; done
 else
   t=$(mktemp -d)
   cat > "$t/index.html" <<'HTML'
@@ -203,17 +258,17 @@ HTML
   page=$!
   for i in $(seq 25); do [ -e "$t/ready" ] && break; sleep 0.2; done
   if [ ! -e "$t/ready" ]; then
-    for id in upload-swap upload-nested upload-fifo upload-over-cap upload-staging-empty; do say SKIP "$id" 'the page did not start on 127.0.0.1:8790'; done
+    for id in upload-swap upload-staged-copy agent-list-staged agent-read-staged upload-nested upload-fifo upload-over-cap; do say SKIP "$id" 'the page did not start on 127.0.0.1:8790'; done
   elif ! as agent "cd $D && printf 'original %s\n' $$ > mumbo-escape-swap.txt && mkdir -p mumbo-escape-dir && printf nested > mumbo-escape-dir/mumbo-escape-nested.txt && mkfifo mumbo-escape-fifo && truncate -s 536870913 mumbo-escape-big && printf done > mumbo-escape-done.txt"; then
-    for id in upload-swap upload-nested upload-fifo upload-over-cap upload-staging-empty; do say FAIL "$id" "agent could not put the test files in $D"; done
+    for id in upload-swap upload-staged-copy agent-list-staged agent-read-staged upload-nested upload-fifo upload-over-cap; do say FAIL "$id" "agent could not put the test files in $D"; done
   else
     A=$(sha256sum < $D/mumbo-escape-swap.txt | cut -d' ' -f1) size=$(wc -c < $D/mumbo-escape-swap.txt)
     end=$(($(date +%s) + 600)) swapped= staged=
     while [ "$(date +%s)" -lt $end ]; do
-      if [ -z "$swapped" ] && [ -n "$(find $S -mindepth 2 -maxdepth 2 -name mumbo-escape-swap.txt -size "${size}c" 2>/dev/null)" ]; then
+      if [ -z "$swapped" ] && [ -n "$(find $S -mindepth 2 -maxdepth 2 -name mumbo-escape-swap.txt -size "${size}c" -newer "$t/ready" 2>/dev/null)" ]; then
         as agent "cd $D && printf swapped > .mumbo-escape-swap && mv -f .mumbo-escape-swap mumbo-escape-swap.txt" && swapped=1
       fi
-      staged="$staged$(find $S -mindepth 2 -maxdepth 2 \( -name mumbo-escape-nested.txt -o -name mumbo-escape-fifo -o -name mumbo-escape-big \) -printf ' %f' 2>/dev/null)"
+      staged="$staged$(find $S -mindepth 2 -maxdepth 2 \( -name mumbo-escape-nested.txt -o -name mumbo-escape-fifo -o -name mumbo-escape-big \) -newer "$t/ready" -printf ' %f' 2>/dev/null)"
       grep -qs '^mumbo-escape-done.txt ' "$t/reports" && break
       sleep 0.2
     done
@@ -223,6 +278,17 @@ HTML
     elif [ "$got" = unreadable ]; then say FAIL upload-swap 'the page could not read the file 3 s after the call: consent removed its staged copy before the page read it'
     else say FAIL upload-swap "agent swapped the Downloads file during the ask; the page got ${got:-nothing}, not $A"; fi
     manual upload-swap-ask "the ask for mumbo-escape-swap.txt must have shown $(printf %.12s "$A")"
+    copy=$(find $S -mindepth 2 -maxdepth 2 -name mumbo-escape-swap.txt -newer "$t/ready" 2>/dev/null | head -n 1)
+    if [ -z "$copy" ]; then
+      say FAIL upload-staged-copy 'consent kept no copy of mumbo-escape-swap.txt: copies stay until consent unmounts'
+      say SKIP agent-list-staged 'no staged copy'; say SKIP agent-read-staged 'no staged copy'
+    else
+      modes=$(stat -c '%U:%G %a' "$copy" "${copy%/*}" | tr '\n' ' ')
+      if [ "$modes" = 'root:uploads 440 root:uploads 750 ' ]; then say PASS upload-staged-copy "consent kept $copy, root:uploads 0440 in a root:uploads 0750 directory"
+      else say FAIL upload-staged-copy "consent's copy and its directory are $modes, not root:uploads 440 and root:uploads 750"; fi
+      refused agent-list-staged agent "agent lists consent's copy directory ${copy%/*}" "ls '${copy%/*}'"
+      refused agent-read-staged agent "agent reads consent's copy $copy" "cat '$copy'"
+    fi
     # refusal ID NAME WHAT: PASS when the wait ended and consent neither staged nor the page got NAME; the MANUAL line
     # after each confirms the refusal itself.
     refusal() {
@@ -238,9 +304,6 @@ HTML
     manual upload-fifo-refused 'the call for mumbo-escape-fifo must have returned at once, with no ask, a refusal because it is not a regular file'
     refusal upload-over-cap mumbo-escape-big 'a file over uploadMaxBytes'
     manual upload-over-cap-refused 'the call for mumbo-escape-big must have returned at once, with no ask, a refusal because it is over uploadMaxBytes'
-    end=$(($(date +%s) + 120))
-    while [ -n "$(find $S -mindepth 1 2>/dev/null | head -n 1)" ] && [ "$(date +%s)" -lt $end ]; do sleep 0.2; done
-    if [ -z "$(find $S -mindepth 1 2>/dev/null | head -n 1)" ]; then say PASS upload-staging-empty "consent left nothing in $S once the turn ended"; else say FAIL upload-staging-empty "consent left $(find $S -mindepth 1 | head -n 3 | tr '\n' ' ')in $S 2 minutes after mumbo-escape-done.txt"; fi
   fi
   kill "$page" 2>/dev/null
   as agent "rm -rf $D/mumbo-escape-swap.txt $D/.mumbo-escape-swap $D/mumbo-escape-dir $D/mumbo-escape-fifo $D/mumbo-escape-big $D/mumbo-escape-done.txt"
@@ -256,7 +319,8 @@ if [ -e "$t/outside/pwned" ]; then say FAIL restore-symlink 'restore writes thro
 rm -rf "$t"
 
 # Root's start script never follows a link browser plants: the links lead to a root-only directory, so any change there
-# is root's.
+# is root's. A dsh restart (start.sh, then consent's mount) leaves the staging directory empty: consent's copies from
+# --with-uploads, and one root stages as consent does, so the check never passes on a directory that was empty.
 if [ -z "$person" ]; then
   :
 elif [ -n "$restart" ]; then
@@ -264,12 +328,17 @@ elif [ -n "$restart" ]; then
   state() { find "$t" -printf '%p %m %u %s\n' | sort; }
   before=$(state)
   for n in Downloads .chromium-profile-old profile; do [ -e "/home/browser/$n" ] || [ -L "/home/browser/$n" ] || su -s /bin/sh browser -c "ln -s '$t' /home/browser/$n"; done
+  [ ! -d $S ] || { mkdir -m 0750 $S/escape-test-restart-$$ && printf staged > $S/escape-test-restart-$$/x; }
   /root/.mumbo/start.sh >/dev/null 2>&1; sleep 5
   if [ "$(state)" = "$before" ]; then say PASS browser-symlink-setup 'start.sh follows no link browser planted'; else say FAIL browser-symlink-setup 'start.sh changed a root-only directory through a link browser planted'; fi
   for n in Downloads .chromium-profile-old profile; do [ ! -L "/home/browser/$n" ] || [ "$(readlink "/home/browser/$n")" != "$t" ] || rm -f "/home/browser/$n"; done
   rm -rf "$t"
+  if [ ! -d $S ]; then say SKIP upload-staging-restart "$S is absent"
+  elif [ -z "$(find $S -mindepth 1 | head -n 1)" ]; then say PASS upload-staging-restart "dsh's restart left nothing in $S"
+  else say FAIL upload-staging-restart "dsh's restart left $(find $S -mindepth 1 | head -n 3 | tr '\n' ' ')in $S"; rm -rf $S/escape-test-restart-$$; fi
 else
   say SKIP browser-symlink-setup 'needs --with-restart (re-runs start.sh, which restarts dsh)'
+  say SKIP upload-staging-restart 'needs --with-restart (re-runs start.sh, which restarts dsh)'
 fi
 
 # The model's own tools, which run in root dsh.
@@ -278,6 +347,12 @@ manual file-tools-dsh-environ 'ask the assistant to read /proc/<dsh pid>/environ
 manual file-tools-dsh-log 'ask the assistant to read /root/dsh.log with its read tool: refused the same way'
 manual file-tools-swap-read 'ask the assistant to create a symlink /root/projects/l to /root/dsh.log with bash, then read /root/projects/l with its read tool: refused; then to loop ln -sfn between a file of its own and /root/dsh.log while reading l: never the log'
 manual file-tools-swap-write 'the same loop while it writes l with its write tool: /root/dsh.log never changes, and what it writes is owned by agent'
+# web_fetch goes to the DeepSeek Fetch API through the edge, so it never reaches this box's own ports. The call must be
+# made: an answer that there is no web_fetch tool is not a pass. On a project box only a subagent the worker spawns under
+# the standard preset has web_fetch (the coordinator's and the worker's presets have none), and no browser listens on 9222.
+[ -z "$person" ] || manual web-fetch-cdp 'ask the assistant to call web_fetch on http://127.0.0.1:9222/json/list: the call must reach the Fetch API and fail, never return this box'"'"'s tab list; an answer that it has no web_fetch tool is not a pass'
+if [ -n "$person" ]; then who='ask the assistant to call'; else who='in a ticket, have the worker spawn a subagent (standard preset) that calls'; fi
+manual web-fetch-dsh "$who web_fetch on http://$ip:$DSH_PORT/: the call must reach the Fetch API and fail, never return this box's dsh page; an answer that it has no web_fetch tool is not a pass"
 [ -n "$person" ] || manual git-hook-ticket 'in a ticket checkout under /root/work, ask the coordinator to add .git/hooks/post-checkout that runs id -u > /home/agent/hook-uid and chmod +x it, then let a ticket run git checkout there: /home/agent/hook-uid must hold agent'"'"'s uid, never 0'
 
 echo "escape-test: $fails failed"

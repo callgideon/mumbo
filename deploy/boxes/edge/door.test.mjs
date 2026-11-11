@@ -56,7 +56,7 @@ async function setup({ tools = [], rate = { perMinute: 60, burst: 100 }, budgetO
   const halt = haltService({ store }), minted = workerTokens({ edgeKey: 'k', hours: 8, now: () => now })
   const front = door({ keys, tools: [...doorTools({ projects: proj, mumbo, relay: relayOf(proj), halt, workerTokens: minted, cfg }), ...tools], rate, now: () => now, log: (l) => lines.push(l),
     allow: async (u) => { charged.push(`requests ${u}`); return budgetOpen }, tokens: { allow: async (u) => { charged.push(`tokens ${u}`); return tokensOpen } } })
-  const ops = children({ e2b: { Sandbox: { list: () => ({ hasNext: false }) } }, cfg: { childTemplates: ['c'], maxChildren: 1 }, log: () => {} })
+  const ops = children({ cells: new Map([['us-east-1', { region: 'us-east-1', Sandbox: { list: () => ({ hasNext: false }) }, maxUnits: 0 }]]), store: memoryStore(), cfg: { childTemplates: ['c'], maxChildren: 1 }, log: () => {} })
   const mcp = mcpServer({ ops, claimOf: (info) => verifyBox('k', String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
   const server = modelServer({ cfg, edgeKey: 'k', modelKey: 'SERVER', allow: async () => true, owns: async (u, b) => u === A && b === 'box1', touch: () => {}, mcp, door: front, log: () => {} })
   await new Promise(r => server.listen(0, '127.0.0.1', r))
@@ -324,7 +324,7 @@ test('Mumbo tools reach the owner\'s box: ensured, then one tools/call to its @m
   }
   const proxy = await fakeProxy(({ body }) => ({ body: { jsonrpc: '2.0', id: body.id, result: replies[body.params.name] } }))
   const ensured = [], touched = []
-  const mumbo = mumboForwarder({ box: boxOf(ensured, touched), boxFetch: boxFetcher({ publicHost: PUBLIC, proxy: proxy.url }), edgeKey: 'edge-secret', siteHostOf: () => PUBLIC, log: () => {} })
+  const mumbo = mumboForwarder({ box: boxOf(ensured, touched, async () => ({ ...BOX, proxy: proxy.url })), boxFetch: boxFetcher({ publicHost: PUBLIC }), edgeKey: 'edge-secret', siteHostOf: () => PUBLIC, log: () => {} })
   const t = await setup({ mumbo })
   try {
     const key = await t.mint({ name: 'laptop Claude Code [ü]', scopes: ['prompt'] })
@@ -376,7 +376,7 @@ test('Mumbo tools: read scope for needs_you, task_status and task_result, prompt
 test('box unavailable: an image without the door route, a box that cannot start or is still starting, and an answer without a tool result', async () => {
   let answer = () => ({ status: 502, body: 'The sandbox is running but port is not open' })
   const proxy = await fakeProxy((seen) => answer(seen))
-  const forward = (ensure, readyMs) => mumboForwarder({ box: boxOf([], [], ensure), boxFetch: boxFetcher({ publicHost: PUBLIC, proxy: proxy.url }), edgeKey: 'k', siteHostOf: () => PUBLIC, readyMs, log: () => {} })
+  const forward = (ensure = async () => ({ ...BOX, proxy: proxy.url }), readyMs) => mumboForwarder({ box: boxOf([], [], ensure), boxFetch: boxFetcher({ publicHost: PUBLIC }), edgeKey: 'k', siteHostOf: () => PUBLIC, readyMs, log: () => {} })
   const t = await setup({ mumbo: forward() })
   try {
     const r = await t.tool(await t.mint(), 'task_status')
@@ -442,8 +442,8 @@ async function projectDoor({ tickets = () => ({}), answer = () => undefined, rel
     if (seen.method === 'POST' && stop && items.some(x => x.id === stop[1])) return { body: { stopped: true } }
     return { status: 404, body: { error: 'Ticket not found' } }
   })
-  const relayOf = (proj) => projectRelay({ projects: proj, log: relayLog, boxFetch: boxFetcher({ publicHost: PUBLIC, proxy: proxy.url }), siteHostOf: (p) => `site-${p}`, edgeHost: PUBLIC,
-    box: { ensure: async (p) => { ensured.push(p); return { id: `box-${p}`, token: 'OWNER', traffic: 'TT', host: `site-${p}`, member: (e) => `signed:${e}` } } } })
+  const relayOf = (proj) => projectRelay({ projects: proj, log: relayLog, boxFetch: boxFetcher({ publicHost: PUBLIC }), siteHostOf: (p) => `site-${p}`, edgeHost: PUBLIC,
+    box: { ensure: async (p) => { ensured.push(p); return { id: `box-${p}`, token: 'OWNER', traffic: 'TT', host: `site-${p}`, proxy: proxy.url, member: (e) => `signed:${e}` } } } })
   const t = await setup({ relayOf, ...opts })
   known = tickets(t)
   return { ...t, proxy, ensured, close: () => { t.close(); proxy.close() } }
@@ -594,10 +594,10 @@ test('boxFetcher stops reading a box\'s answer past BOX_ANSWER_MAX bytes', async
   let body = 'x'.repeat(BOX_ANSWER_MAX)
   const proxy = await fakeProxy(() => ({ body }))
   try {
-    const fetch = boxFetcher({ publicHost: PUBLIC, proxy: proxy.url })
-    assert.equal((await fetch(BOX, PUBLIC, '/x')).body.length, BOX_ANSWER_MAX)
+    const fetch = boxFetcher({ publicHost: PUBLIC })
+    assert.equal((await fetch({ ...BOX, proxy: proxy.url }, PUBLIC, '/x')).body.length, BOX_ANSWER_MAX)
     body += 'x'
-    await assert.rejects(fetch(BOX, PUBLIC, '/x'), /box answer too large/)
+    await assert.rejects(fetch({ ...BOX, proxy: proxy.url }, PUBLIC, '/x'), /box answer too large/)
   } finally { proxy.close() }
 })
 
@@ -855,9 +855,9 @@ async function reportSetup() {
     if (!first.has(request_id)) first.set(request_id, { content: [{ type: 'text', text: JSON.stringify({ message_id: `m${first.size}`, after_seq: 0 }) }] })
     return t.answer(seen) ?? { body: { jsonrpc: '2.0', id: seen.body.id, result: first.get(request_id) } }
   })
-  const mumbo = mumboForwarder({ box: boxOf(ensured, []), boxFetch: boxFetcher({ publicHost: PUBLIC, proxy: proxy.url }), edgeKey: 'edge-secret', siteHostOf: () => PUBLIC, log: () => {} })
+  const mumbo = mumboForwarder({ box: boxOf(ensured, [], async () => ({ ...BOX, proxy: proxy.url })), boxFetch: boxFetcher({ publicHost: PUBLIC }), edgeKey: 'edge-secret', siteHostOf: () => PUBLIC, log: () => {} })
   const report = memberReporter({ projects: proj, admitted: (e) => allowed.has(e), halt, mumbo, now: () => t.now, log: (l) => lines.push(JSON.parse(l)) })
-  const ops = children({ e2b: { Sandbox: { list: () => ({ hasNext: false }) } }, cfg: { childTemplates: ['c'], maxChildren: 1 }, log: () => {} })
+  const ops = children({ cells: new Map([['us-east-1', { region: 'us-east-1', Sandbox: { list: () => ({ hasNext: false }) }, maxUnits: 0 }]]), store: memoryStore(), cfg: { childTemplates: ['c'], maxChildren: 1 }, log: () => {} })
   const claimOf = (info) => verifyBox('k', String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, ''))
   const mcp = mcpServer({ ops, projects: proj, relay: { message: async () => ({}) }, claimOf })
   const server = modelServer({ cfg, edgeKey: 'k', modelKey: 'SERVER', allow: async () => true, owns: async () => true, touch: () => {}, mcp, reports: reportServer({ report, claimOf }), log: () => {} })

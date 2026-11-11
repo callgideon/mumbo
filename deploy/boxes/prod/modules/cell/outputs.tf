@@ -18,3 +18,7 @@ output "internal_nlb_arn_suffix" { value = aws_lb.internal.arn_suffix }
 output "nodes_asg_name" { value = aws_autoscaling_group.nodes.name }
 output "memorydb_name" { value = aws_memorydb_cluster.e2b.name }
 output "postgres_identifier" { value = aws_db_instance.e2b.identifier }
+output "zone_id" { value = local.zone_id }
+output "vpc_cidr" { value = var.vpc_cidr }
+output "private_route_table_ids" { value = module.vpc.private_route_table_ids }
+output "nlb_security_group_id" { value = aws_security_group.nlb.id }

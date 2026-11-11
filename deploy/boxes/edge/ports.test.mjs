@@ -13,7 +13,9 @@ import { PORTS, OLD_PORTS, PORTS_MARKER, MUMBO_MCP_PORT, portsFrom, boxes, boxHe
 import { PORTS_STEP } from './template.mjs'
 import { memoryStore } from './store.mjs'
 
-const cfg = { pageAfterMs: 3000, publicHost: 'boxes.example', projectDomain: 'boxes.example', llmHost: 'llm.example', template: 'mumbo-box', idleMs: 60_000, backupEveryMs: 600_000, maxRunningUnits: 10, allowed: ['@x.com'], egressIps: [], signinCookie: '_oauth2_proxy_mumbo' }
+const cfg = { pageAfterMs: 3000, publicHost: 'boxes.example', projectDomain: 'boxes.example', llmHost: 'llm.example', template: 'mumbo-box', idleMs: 60_000, backupEveryMs: 600_000, allowed: ['@x.com'], egressIps: [], signinCookie: '_oauth2_proxy_mumbo', edgeRegion: 'us-east-1' }
+/** One us-east-1 cell over a fake E2B, as cells.mjs cellClients builds one; `extra` overrides its fields. */
+const oneCell = (e2b, extra = {}) => new Map([['us-east-1', { region: 'us-east-1', Sandbox: e2b.Sandbox, proxy: new URL('http://127.0.0.1:1'), bucket: 'bk', maxUnits: 10, presignGet: async () => undefined, presignPut: async () => 'P', ...extra }]])
 
 /** E2B with boxes whose marker reads `marker` ('' for a template without one); `ran` collects every command. */
 function fakeE2B(marker) {
@@ -49,7 +51,7 @@ test('ports: the marker names the pair, its absence is the old one, and anything
 test('create records the box\'s pair from its template; a record without one learns it at its next repair, which checks dsh on it', async () => {
   for (const [marker, ports] of [['880 881\n', PORTS], ['', OLD_PORTS]]) {
     const e2b = fakeE2B(marker), store = memoryStore()
-    const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'P', log: () => {} })
+    const b = boxes({ cells: oneCell(e2b, { presignGet: async () => undefined, presignPut: async () => 'P' }), store, cfg, edgeKey: 'k', log: () => {} })
     const { id, ports: picked, token } = await b.ensure('a@x.com')
     assert.deepEqual([(await store.getBox(id)).ports, picked, token], [ports, ports, 'launch123'], 'the launch token is read from dsh\'s log whichever the port')
     assert.ok(e2b.ran.includes('chmod 0700 /root/.mumbo/start.sh && /root/.mumbo/start.sh'), 'the script, which holds the box token, is root\'s alone')
@@ -64,7 +66,7 @@ test('create records the box\'s pair from its template; a record without one lea
 
 test('a running box\'s record without ports is a box from before the marker: its requests go to the old pair', async () => {
   const e2b = fakeE2B('880 881\n'), store = memoryStore()
-  const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'P', log: () => {} })
+  const b = boxes({ cells: oneCell(e2b, { presignGet: async () => undefined, presignPut: async () => 'P' }), store, cfg, edgeKey: 'k', log: () => {} })
   const { id } = await b.ensure('a@x.com')
   await store.patchBox(id, { ports: undefined })
   assert.equal((await b.ensure('a@x.com')).ports, undefined)
@@ -76,8 +78,9 @@ async function serve(ports) {
   const upstream = createServer((req, res) => { seen.push([req.method, req.url, req.headers['e2b-sandbox-port']]); res.writeHead(200, { 'content-type': 'text/html' }).end('box') })
   upstream.on('upgrade', (req, socket) => { seen.push(['UPGRADE', req.url, req.headers['e2b-sandbox-port']]); socket.end('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n') })
   await new Promise(r => upstream.listen(0, '127.0.0.1', r))
-  const box = { ensure: async () => ({ id: 'ubox', token: 'T', host: 'boxes.example', ...(ports ? { ports } : {}) }), touch: async () => {}, forget: async () => {} }
-  const server = userServer({ cfg: { ...cfg, approveHost: 'approve.example', proxy: new URL(`http://127.0.0.1:${upstream.address().port}`) }, box, log: () => {} })
+  const proxy = new URL(`http://127.0.0.1:${upstream.address().port}`)
+  const box = { ensure: async () => ({ id: 'ubox', token: 'T', host: 'boxes.example', proxy, ...(ports ? { ports } : {}) }), touch: async () => {}, uncache() {} }
+  const server = userServer({ cfg: { ...cfg, approveHost: 'approve.example' }, box, log: () => {} })
   await new Promise(r => server.listen(0, '127.0.0.1', r))
   const call = ({ method = 'GET', path = '/', headers = {} } = {}) => new Promise((resolve, reject) => {
     const req = request({ host: '127.0.0.1', port: server.address().port, method, path, headers: { host: cfg.publicHost, 'x-forwarded-email': 'a@x.com', ...headers } }, (res) => { res.resume(); res.on('end', () => resolve({ status: res.statusCode, location: res.headers.location })) })

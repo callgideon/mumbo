@@ -1,6 +1,6 @@
 # Mumbo personal assistant: node network and assistant brain (design v2)
 
-Date: 2026-11-09, revision 2.1 (revision 2 plus the founder's answers to its open decisions). Updated 2026-11-10 with the north star (section 1), the person's computer (section 17b) and regions (section 17c). Covers parts **A** (the network of nodes) and **B** (the assistant's brain). Part **C** (the founder's accounts in the box: WhatsApp, email, browser, consent) and part **D** (teammates' assistants, phone number, the assistant's own WhatsApp number) get their own designs later.
+Date: 2026-11-09, revision 2.1 (revision 2 plus the founder's answers to its open decisions). Updated 2026-11-10 with the north star (section 1), the person's computer (section 17b) and regions (section 17c); updated 2026-11-11 with the door's build (section 10, B31–B38), sign-up and choosing a region (section 17c), and sync between the laptop and the computer (section 17d). Covers parts **A** (the network of nodes) and **B** (the assistant's brain). Part **C** (the founder's accounts in the box: WhatsApp, email, browser, consent) and part **D** (teammates' assistants, phone number, the assistant's own WhatsApp number) get their own designs later.
 
 Marks: **[founder]** = decided by the founder. **[my call]** = decided by the designer; the founder may overturn it. Unmarked = context or a requirement that follows from the above.
 
@@ -68,9 +68,9 @@ Milestones toward it. These run alongside M1–M6 and don't widen M1:
 | Step | Contents | Done when |
 |---|---|---|
 | **N1** the person's computer (sections 17b, 17c) | Mumbo, the always-present assistant session; a smooth, complete desktop with Google Chrome; Browser and Desktop tabs in the app; the box in the person's region | The founder works from India in Mumbo and their box's Chrome and calls it smooth |
-| **N2** desktop app as the client | `apps/desktop` connects to the person's box as its host, signed in through the edge, instead of running dsh locally. It is a native shell, with the Chromium host in a separate process and agent input injected below the UI (the split ChatGPT Atlas uses). It draws local tabs, address bar, agent panel and consent prompts, and decodes the box's stream with WebCodecs. Agent-driven and box-signed-in tabs show as the box's stream. A local engine (`WebContentsView`) handles the person's local-identity browsing, WebGL and webcam. Google sign-in in the app goes through the system browser. Later, an Electron transport over QUIC or WebTransport through an NLB, once E2B nodes can take UDP | Browsing in the app feels native: local controls, and a stream within two frames of the round trip. The assistant still works in the box's Chrome while the laptop sleeps |
+| **N2** desktop app as the client | `apps/desktop` connects to the person's box as its host, signed in through the edge, instead of running dsh locally. It is a native shell, with the Chromium host in a separate process and agent input injected below the UI (the split ChatGPT Atlas uses). It draws local tabs, address bar, agent panel and consent prompts, and decodes the box's stream with WebCodecs. Agent-driven and box-signed-in tabs show as the box's stream. The app's own view (`WebContentsView`) handles pages that need no sign-in, WebGL and webcam; the person's signed-in laptop browsing stays in their own Chrome, joined by a Mumbo extension ("My Chrome", section 17d). Google sign-in in the app goes through the system browser. Later, an Electron transport over QUIC or WebTransport through an NLB, once E2B nodes can take UDP | Browsing in the app feels native: local controls, and a stream within two frames of the round trip. The assistant still works in the box's Chrome while the laptop sleeps |
 | **N3** coding agents in one place | Local Claude Code and Codex sessions attach to mumbo through the MCP door (M3); agents that run in the box follow section 8.1 | A local Claude Code session takes a Mumbo Ticket and reports back into Mumbo |
-| **N4** handoff | Open work moves between the laptop and the box as navigation, never identity: URL, tab group, scroll position, non-secret form drafts and a task digest, over Mumbo's own channel in under a second (CDP on the box, a protocol to the app). Chrome Sync is not the channel, because it gives no latency guarantee. A per-tab driver lease means one engine drives a tab at a time. A task that needs a session bound to the laptop goes to that session, in a consented local tab, instead of moving it. When the laptop sleeps, Mumbo and the box's Chrome carry on; when it wakes, the app shows what happened (the digest, M4) | The founder closes the laptop mid-task and finds the task done on reopening |
+| **N4** handoff | Open work moves between the laptop and the box as navigation, never identity: URL, tab group, scroll position, non-secret form drafts and a task digest, over Mumbo's own channel in under a second (the box Chrome's Mumbo extension, B42, and a protocol to the app). Chrome Sync is not the channel, because it gives no latency guarantee. A per-tab driver lease means one engine drives a tab at a time. A task that needs a session bound to the laptop goes to that session, in a consented local tab, instead of moving it. When the laptop sleeps, Mumbo and the box's Chrome carry on; when it wakes, the app shows what happened (the digest, M4) | The founder closes the laptop mid-task and finds the task done on reopening |
 
 Research, 2026-11-10 (`.claude/research/reports/Cloud Chrome sync and native desktop.md`), still to be measured:
 - how often Google challenges sign-ins from the nodes' addresses;
@@ -197,6 +197,90 @@ For mumbo's own development the founder only dumps ideas and asks for updates; t
 **"Deploying to production"** means changing what serves users: the edge, box templates and production Terraform. **[my call]**
 - Until the self-upgrade path (section 13) exists, deploys stay with the founder's interactive sessions under the standing rule.
 - There is no deploy approval before M5.
+
+### Run Wild mode **[founder: 2026-11-11, "in Full Access mode -> I don't want it to ask for any approval at all / or you can add another mode - "Run Wild" mode - where no access is requested - it assumes everything is allowed and takes the best decision based on the available context and set rules"; my call on the how]**
+
+In Run Wild, Mumbo never asks. It decides from context and the person's rules, acts, and logs what it did without asking. Inside Run Wild this overturns the table's "one tap to send" for sends as the founder **[founder]**. Edge approvals (merges, deploys, repository access) are outside it and unchanged.
+
+**A new mode, not a change to Full access** **[my call]**:
+- Full access is dsh's existing preset (on person boxes, sandbox `danger-full-access` with approval policy `ask`, `deploy/mumbo.overlay.yml`). Teammates' boxes use it too, so changing its meaning would silently remove asks they rely on.
+- Most of the asks the founder meets aren't dsh approvals at all: browser consent, sends, questions and plan reviews. One named mode covers every layer, and its audit and banner are unambiguous.
+- Switching back is one click.
+
+**Where it's set:**
+- **Run Wild is an entry in dsh's Permissions selector** (`@deepseek-ai/dsh-permission-presets`), with the same knobs as person-box Full access (sandbox `danger-full-access`, approval `ask`). The recorded `permission/preset` names it, so plugins can tell it from Full access.
+  - Approval `never` can't carry it: `never` rejects every ask before any listener runs, and tells the model so.
+  - In Run Wild sessions, `@mumbo/run-wild` turns each `ask` into `allow` in a prepended `tools/pre-execute` listener, and logs it.
+  - The entry is last in the table, so a session with no recorded selection derives Full access, never Run Wild.
+  - **One source:** the entry and the new-session default live in `deploy/mumbo.overlay.yml`'s own `permission` row, in a PR the founder merges. **[founder: 2026-11-11, an exception to the standing rule that the founder's overlays are never edited; the rule stays for every other change]**
+    - The entry is last, and present only when the start script mounts `@mumbo/run-wild` and exports `MUMBO_RUN_WILD`.
+    - `defaultPreset` comes from `MUMBO_NEW_SESSION_PRESET` (default `danger-full-access`).
+    - The package's overlay only inserts its plugin row, and a composition test checks both cases.
+    - The edge exports `MUMBO_NEW_SESSION_PRESET=run-wild` for the people in `RUN_WILD_DEFAULT_EMAILS`.
+- It is per session. The founder sets it on the `mumbo` Session once.
+  - New sessions, schedule-started ones included, start in it when the edge sets `MUMBO_NEW_SESSION_PRESET=run-wild` for that person's box.
+  - The edge setting is needed because Settings can't write the default on person boxes: an overlay owns the `permission` row there, which predates Run Wild.
+  - The founder's box gets it.
+- **Only the person switches it.** No model tool changes the preset (`/permission` is a user command). After B24, the agent can't reach dsh's API: the firewall resets its connections to dsh's port. Before B24, the agent is root and could already do anything.
+- **Subagents and delegated children** follow their live root Session's mode, so switching the root back reaches running children at once. Computer use runs in a subagent.
+- **Turning it on shows one explanation, once, at the switch:** what Mumbo will now do unasked (send as you, post, buy with saved payment methods, delete) and what still holds (below). It is the only confirmation, given when the mode is chosen, never per action.
+
+**Every ask today, in Run Wild:**
+
+| Source | Today | Run Wild |
+|---|---|---|
+| dsh tool approvals: shell, file writes, MCP tools, `@mumbo/mcp`'s irreversible tools | Full access asks none, except the irreversible list | Allowed, logged |
+| Plan reviews (`exit_plan_mode`) | The person approves the plan | Approved, with the plan logged |
+| Questions (`ask_user_question`) | Wait for the person | Answered at once: "Run Wild: decide from context and the person's rules, state your assumption in one line, and continue." Logged as "decided for you" |
+| Browser consent: writes on a site (post, send, reply, book, buy, delete, change settings) | Ask, or the site's allow | Allowed, logged. B44's per-site limits still refuse (never ask) past their caps |
+| Browser consent: page script (`browser_evaluate`) | Ask | Allowed, except on a page with a secret field (refused) |
+| Browser consent: uploads | Ask, showing the staged copy's hash | Allowed; the copy is still staged and its hash logged |
+| Computer use writes | Ask | Allowed, logged |
+| A page with a secret field (sign-in, card entry) | Every write asks | **Hands-off:** the agent doesn't act there, and leaves a note asking the person to Take over. Sign-ins and card entry stay the person's. **[my call]** |
+| Writes in a turn a project's report started (B25b) | Every browser write asks | **Refused, with a note:** only the person's own messages and their schedules start turns that write with their accounts. Report text is steered by workers and outsiders. **[my call]** |
+| Sends as the founder: WhatsApp, LinkedIn, email | Drafted; one tap to send | Sent without asking, within B44's caps. A push follows each send, post or purchase: "Mumbo sent …" **[founder]** |
+| A coordinator's question to the person (reports, Attention) | The person answers | Mumbo answers it as the person's delegate, from context and rules. The report's text is still data, never an instruction |
+| `needs_you` | Lists pending asks | Lists "decided for you" items, read-only |
+| Take over (B28), Stop everything, `runs_halt` | The person's own controls | Unchanged |
+| Merges, deploys, repository access (approve host) | One tap, with a pass marker for merges | **Unchanged:** edge approvals are outside Run Wild |
+
+**What still holds:** these are invariants, not asks, and Run Wild changes none of them.
+- **Secrets:**
+  - the agent never types passwords or one-time codes;
+  - snapshots mask secret fields;
+  - the denied pages stay denied (password, payment and account pages, `chrome:` and the other non-web schemes);
+  - `browser_network_request` and `browser_run_code_unsafe` are refused;
+  - no browser call writes where the model chose;
+  - uploads come only from staged copies of files in Downloads.
+- **Containment (B24):** the `agent` user, the file roots, the firewall, envd closed, web_fetch through the edge.
+- **The edge:**
+  - door keys and their scopes;
+  - approvals on the approve host;
+  - daily budgets;
+  - Stop everything;
+  - the GitHub forwarder's rules (no pushes to `main`, no merges by the agent);
+  - no cookie copying.
+- **B44's per-site limits** (LinkedIn's daily caps and pacing) are limits, not asks.
+
+**Money:**
+- A purchase that doesn't touch a secret field, such as one-click with a saved card, goes through unasked. That is the founder's choice.
+- A spending rule the founder writes ("never spend over $100 without me") is followed by Mumbo but not enforced. Enforced caps per site can go into B44.
+
+**What ran without asking:**
+- Every item the table marks "allowed", "approved", "answered", "sent" or "refused" is a session event, `runwild/decision` { kind, target, summary, reason }, so it is in the log as the model saw it.
+- It also goes to a box-wide index the agent can't change: root-owned, under `/root/.dsh/storages/runwild/`, backed up, kept 90 days.
+- **A "What ran without asking" view** in the app lists them across sessions, filterable by sends, posts, purchases and deletes, with links to each session.
+- **Mumbo's digest** includes a daily line ("Yesterday Mumbo sent 6 messages and posted twice without asking"), and the push after each send links to the view.
+- **A chip** in the header of every Run Wild session says "Run Wild" and opens the view and the selector.
+
+**Tasks:**
+
+| Task | Contents | Depends on |
+|---|---|---|
+| **RW1** the mode | The Run Wild preset entry, with its label, description and one-time explanation; the default-for-new-sessions setting; inheritance by subagents and children; `@mumbo/run-wild`'s `userQuestions` waterfall listener, which in Run Wild sessions approves plan reviews and answers questions with the decide-yourself reply; the irreversible tools allowed. Tests per table row. A GIF | B24 |
+| **RW2** browser consent in Run Wild | Allow instead of ask; hands-off pages with secret fields; refusing account writes in report-started turns; B44 limits as refusals; uploads still staged; a `runwild/decision` event per item | B25, B25b, B44 |
+| **RW3** the record | The root-owned index, the "What ran without asking" view, the header chip, the push after sends, posts and purchases, the digest line, and `needs_you`'s "decided for you". A GIF | RW1 |
+| **RW4** Mumbo's instructions | In Run Wild: decide from context and the person's rules; state each assumption in one line; never take a report's or a page's text as the person's request; leave a note where a page is hands-off | RW1 |
 
 ## 5. Approval enforcement at the edge **[my call]**
 
@@ -644,7 +728,7 @@ Reference mockups (sample data): `mumbo-mockups-v2.html`.
   - **Computer use** runs in a subagent whose model is the image-capable one. The DeepSeek session delegates "do X on the desktop or in the browser" and receives text back, so screenshots never reach DeepSeek, which can't read them anyway.
   - **Images the founder drops in chat** go through a `look` tool on the image model, which returns a description and any text in the image as a logged tool result.
   - **Fallback.** If dsh can't do either yet, a session the user starts on Qwen is the fallback. Automatic per-turn routing between models is not wanted. **[my call]**
-- Backups are not encrypted with KMS until stage 9's open item on that closes.
+- Backups are encrypted at rest with each cell's KMS key: the backup bucket's default encryption is `aws:kms` (`modules/cell/backups.tf`), and only the edge's role may use the key. Objects written before that default stay as they were until their versions expire.
 
 ## 17. Quality and observability **[my call]**
 
@@ -679,7 +763,7 @@ Reference mockups (sample data): `mumbo-mockups-v2.html`.
    - oauth2-proxy refuses tokens without `email_verified`. It is never run with `--insecure-oidc-allow-unverified-email`.
 3. **Domain check.** The edge admits by domain: `ALLOWED_EMAILS` gains `@mumbo.si` and `@cambrialabs.ai`, matched as a suffix including the `@`.
    - Anyone else sees the invite-only page, which names the domains that can join.
-4. **First visit.** The edge creates the person's box (the existing `ensure()`). The page says "Setting up your computer, about a minute" on first creation and "Starting your computer" on later starts, and refreshes itself.
+4. **First visit.** With more than one region, the person first confirms where their computer runs (section 17c, "Sign-up and choosing a region"). The edge creates the person's box (the existing `ensure()`). The page says "Setting up your computer, about a minute" on first creation and "Starting your computer" on later starts, and refreshes itself.
 5. **First open.** The assistant greets the person once. It says what it can do now and that connecting accounts and projects comes later, and links the box's home page.
 6. **What each account gets:**
    - one box (2 vCPU / 4 GiB) with a desktop and browser;
@@ -1053,6 +1137,26 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
     - Probed on kernel 6.1.177+: `meta skuid` rules, sets, reject and drop all work on IPv4 and IPv6, with `agent` refused and root admitted, so no custom kernel is needed.
     - Never best effort: the debugging port has no authentication, so a connection to it reads every cookie.
     - The output rules accept the allowed users first, then reset everyone else on those ports. So a socket whose user nft can't read is refused too, as `xt_owner` refused it.
+  - **The box's own address** **[2026-11-11, B24 throwaway finding]:** envd forwards every loopback listener to the box address (`socat … bind=169.254.0.21`).
+    - Inside the box this adds nothing. The output rules match the port on any destination, and escape tests cover each protected port on 169.254.0.21.
+    - From outside, the client proxy could reach any loopback listener with a traffic token. So the input chain drops every new non-loopback TCP connection except to envd, dsh, the live view and the door (SYN-only, so no conntrack is needed), and keeps the WebRTC UDP drop.
+    - The template build lists TCP listeners after dsh starts. It fails when a listener owned by any user but `agent` is outside the reset set and not on a commented allowlist.
+    - The same build check fails when dsh's start line doesn't appear within 60 s, after the B24 image's startup hang.
+  - **No writable code paths** **[2026-11-11, B24 hang cause]:** `/usr/local` and `/usr/local/bin` were `777` in our images. Under B24, `agent` could then plant a program that root runs through `PATH`. The subprocess check refused it, and the refused preset deadlocked `@mumbo/assistant`'s startup, which awaited it in activation and now starts it detached.
+    - Every template build fails on a world-writable file, or a world-writable directory without the sticky bit, outside a commented allowlist.
+    - It also fails when a directory on root's or a run-as user's `PATH`, or in the tree root's dsh loads code from, is writable by anyone but root.
+    - `start.sh` asserts `0755 root:root` on `/usr/local`'s directories, and the `777` is removed where it is made. The subprocess check stays as strict as it is.
+    - **Where the 777 comes from:** our E2B fork's rootfs builder writes `/usr/bin/envd` (root's in-box agent) and `/usr/local/bin/provision.sh` at `0o777`, in a layer with no parent directory headers.
+      - On a box it is wider: 5,910 world-writable paths, all of `/usr/local` (the `node` binary root's dsh runs, global `node_modules`, envd's OpenRC script, B24's own ports marker), plus `/usr/bin/envd`, `/etc/inittab` and `/code`.
+      - The fork's layer lands after our image is built. So the first step of `start.sh`'s hardening repairs the system trees generically: it removes world-write, and group-write for non-root groups, from every path under `/usr`, `/etc`, `/opt`, `/code` and the other system directories (not `/root`, `/home`, `/tmp` or `/run`), sticky directories excepted. Then it asserts none is left.
+      - This runs before the ports marker is read or any user's process runs: a tampered marker would aim the firewall at the wrong ports.
+      - **[2026-11-11, B24 fix review]** The repair covers all of `/`, with user-data contents pruned. It takes about 3 to 5 s per start.
+        - World-write goes for every owner.
+        - Ownership and group-write are repaired only for users with uid ≥ 1000, and for groups with gid ≥ 1000, groups with such a member, or such a user's primary group. System daemons' own paths (polkit, logind, mail) are left alone.
+        - Every containment user and E2B's `user` must have uid ≥ 1000, checked fatally, so none drops out of the repair's reach.
+      - **[2026-11-11, B24 fix approval]** The repair is in every template's start script, not only B24's. Before the edge ships, a throwaway from each template in use (today's person and project templates) must start with it, with dsh, the live view and the GitHub proxy working. On each rebuilt B24 template, the repair's list-only output (what it would change) is reviewed, because the build smoke doesn't run the desktop or the GitHub proxy, whose users (`xvnc`, `ghproxy`) are now login users.
+      - Agent installs into its own npm prefix, on its `PATH`. A user's `PATH` may hold directories only root, or that user alone, can write, and the run-as check in subprocess-local uses the same rule. Python stays under Bookworm's PEP 668 rule (venvs, with `python3-venv` in both templates).
+      - **R-rootfs** (mumbo) fixes the fork's modes and parent headers and reviews every layer file. The source is E2B's finalize script (`phases/finalize/configure.sh`), which runs `chmod -R 777 /usr/local` and `/code` after every template's steps. Our web image itself has no world-writable path. The fix removes both lines. Any user that relied on them (the child template's default `user`) gets its own install prefix, and `/code` is owned by that user at `0755`. It rides the next E2B rebuild; `start.sh`'s set-and-check stays as the guard afterwards.
   - **No root network path for the model** **[2026-11-11, B24 box-side review]:** the owner rules only cover processes, so anything root fetches for the model gets past them.
     - `web_fetch`'s HTTP provider (`web-fetch-http`) runs in root dsh and reaches loopback. From there, `http://127.0.0.1:9222/json/list` gives every open tab's URL and title, and `/json/close` closes tabs.
     - In boxes the provider is either not mounted, with `web_fetch` going through the DeepSeek fetch API at the edge, or it refuses loopback, link-local, private and ULA addresses. The check is on the resolved address and on every redirect, connecting to the address it checked.
@@ -1091,6 +1195,16 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
   - Allowing a site never depends on the operator leaving sign-in origins out.
 - **No browser call writes files where the model chose.** A call with a `filename` argument is refused, because page content could otherwise overwrite project files.
 - **A turn started by a project's report asks before every browser write** (B25b, after B36b; **[2026-11-10, B36 review]**): while the Session's newest user message has the `report` source, writes on every site ask, as on a page with a secret field. A report's text is steered by workers and outside issues, and it reaches the Mumbo that holds the person's accounts.
+  - **[2026-11-11, B48]** The same predicate gates the whole shell tool on person boxes. It asks in normal modes and is refused with a note under Run Wild, because a shell holding the person's GitHub sign-in, or any other credential, writes with their accounts. It gates the whole tool, never by parsing the command.
+- **The founder's GitHub sign-in on their person box** (B48, after the B24 fix; **[2026-11-11, founder's choice: "gh plus my GitHub sign-in"]**):
+  - `gh` is in the person template. A root-owned `/etc/gitconfig` makes git over https use `gh auth git-credential`.
+  - The person signs in themselves, and the token never passes through the edge, a Session or Secrets Manager. Two ways, both allowed, the easier first **[founder, 2026-11-11]**:
+    - the device flow, `gh auth login --web`: Mumbo runs it and shows only the one-time code and URL. gh's default scopes reach every repository the person can; `workflow` is not added, so Actions files, which hold CI secrets, stay the person's to change;
+    - or a fine-grained token, pasted into `gh auth login --with-token` in the desktop terminal as `agent`.
+  - **The platform repositories are included** **[founder, 2026-11-11: "that way it would be able to build itself"]:** the box's assistant can open, push to and merge pull requests on `callgideon/mumbo` and `callgideon/e2b-runtime` as the founder. Branch protection that admins can't bypass (required pull request and checks, no force pushes) on `main` and `boxes/production` keeps those merges to green pull requests. The setting is the founder's. Claude sessions' own rules are unchanged.
+  - The token lives in `agent`'s `/home/agent/.config/gh` (0700). The backup takes that directory, so the sign-in survives moves. It is never under `/root/projects` (a `git add -A` could commit it) or in Mumbo Sync's folders.
+  - The model can read and use the token. The token's scopes (and, for a fine-grained token, its repositories and expiry) are the boundary, and the README says so. Under Run Wild, pushes and merges in turns the founder started run unasked; branch protection is the founder's lever.
+  - A root-held token behind a local proxy, like the project box's, would keep it from the model entirely. That is a later option if the founder asks.
 - **Network request details are denied.** A request's details carry its `Cookie` header and form body, so a login's password or a session cookie would reach the model.
   - `browser_network_request` is refused outright.
   - The request list stays a read only if it shows no headers or bodies; otherwise it is refused too.
@@ -1152,7 +1266,7 @@ The founder is in India, and their box must run in `ap-south-1` (Mumbai). The re
   - the region must change atomically with the box record during a move;
   - the edge already keeps all placement in its store.
   - Records without a region are in `us-east-1`.
-- **A newcomer's region** is the region of the edge that served their first sign-in, which is the nearest region with a cell, through latency DNS.
+- **A newcomer's region** is the one they confirm at sign-up ("Sign-up and choosing a region", below), preselected as the nearest region with a cell.
 - **Backups.** Each cell has its own bucket and KMS key, and a box backs up into its own region's bucket, keeping the 10-minute uploads in-region.
   - No cross-region replication: disaster recovery across regions isn't a goal yet.
   - A move copies the latest backup once.
@@ -1179,11 +1293,19 @@ The founder is in India, and their box must run in `ap-south-1` (Mumbai). The re
 | Task | Contents | Done when |
 |---|---|---|
 | **R1** | Split `deploy/boxes/prod` into a `modules/cell` and a `modules/edge`, and instantiate both for `us-east-1` with `moved` blocks. Parameterize every hard-coded region: the provider, the S3 endpoint service name and the node launch template. Per-cell private names, such as `api.<region>.boxes.internal` and `orchestrators.<region>.boxes.internal`; `us-east-1` keeps today's names | `terraform plan` for `us-east-1` shows no changes |
-| **R2** | Shared resources at the root: the public zone's records, the edge's Valkey store (still `us-east-1`), and the edge secrets every region reads (oauth2-proxy client and cookie secret, GitHub App, OpenRouter, each cell's E2B key) through replicas or full-ARN cross-region reads | No changes in plan; the secrets are readable from `ap-south-1` |
-| **R3** | The `ap-south-1` cell: VPC `10.21.0.0/16`, clear of 10.11/16, 10.12/16 and 10.20/16; E2B control; nodes with `node_count = 1` (12 boxes); templates and backup buckets with KMS; NAT. Its fixed monthly cost goes to the founder before apply | Its API answers on its private name |
-| **R4** | Peering between `us-east-1` and `ap-south-1`, with routes, security groups and the private zone associated with both VPCs. Both edges reach both cells' API and client proxy, and the store. mTLS certificates for the new cell from the same CA | An edge task in each region reaches both cells |
+| **R2** | Shared resources at the root: the public zone's records, the edge's Valkey store (still `us-east-1`), and the edge secrets every region reads (oauth2-proxy client and cookie secret, GitHub App, OpenRouter, each cell's E2B key) through replicas or full-ARN cross-region reads. **[2026-11-11]** The store gains both layers it lacked:
+- **Its own security group**, admitting 6379 from the edges only. The cell's data group admits nodes for MemoryDB, so until R2 a box VM, NATed as its node, could reach the store.
+- **AUTH:** an RBAC user `edge`, its URL in the Secrets Manager secret `mumbo-boxes/edge-store` (replicated to each edge region), and the `default` user switched off once every edge authenticates.
+- Operators' tunnels use the `edge` user. | The secrets are readable from `ap-south-1`. An unauthenticated connection to the store is refused, and a node can't open its port |
+| **R3** | The `ap-south-1` cell: VPC `10.21.0.0/16`, clear of 10.11/16, 10.12/16 and 10.20/16; E2B control; nodes with `node_count = 1` (12 boxes), set from 0 at R5 once its build is in its templates bucket; templates and backup buckets with KMS; NAT. Its fixed monthly cost goes to the founder before apply. **[founder, 2026-11-11: lean, about $840 a month against $1,195]** Lean means one NAT, single-AZ Postgres, MemoryDB with no replica and one task per E2B service, so there's no failover and backups are unchanged. Mumbai's Postgres is `db.t3.medium`, about $16 a month more: RDS twice had no `db.t4g.medium` capacity for Postgres 18 in `ap-south-1`, which offers that class in one zone only. One `boxes.internal` private zone serves every cell. Each cell's nodes may write only their own `orchestrators.<private_domain>` record, through `route53:ChangeResourceRecordSetsNormalizedRecordNames`, so a node in one cell can't redirect another cell's names. | Its API answers on its private name |
+| **R4** | Peering between `us-east-1` and `ap-south-1`, with routes, security groups and the private zone associated with both VPCs. Both edges reach both cells' API and client proxy, and the store. mTLS certificates for the new cell from the same CA. **[2026-11-11]**
+- Mumbai's NLB admits 3000 and 3002 from `us-east-1`'s VPC CIDR, because security groups can't be referenced across regions. Both ports need credentials (the team key, or a per-sandbox traffic token).
+- Narrowing that rule to the edge's own subnets comes with R6. | An edge task in each region reaches both cells |
 | **R5** | E2B on the new cell: `setup/build.sh` into its templates bucket; the `mumbo-box`, `mumbo-child` and `mumbo-project` templates built on its API; the stage 4 move check on its nodes | `check/move.mjs` passes in `ap-south-1` |
-| **R6** | The `ap-south-1` edge: an ECS service, an ALB and an ACM certificate for every edge name, and both edges' cell configuration (B21). Not yet in DNS: tested with `curl --resolve` | The founder signs in through the Mumbai ALB with `--resolve` |
+| **R6** | The `ap-south-1` edge: an ECS service, an ALB and an ACM certificate for every edge name, and both edges' cell configuration (B21). Not yet in DNS: tested with `curl --resolve`.
+- **The edge store is network-protected only:** TLS with no AUTH. So cross-region access to it, and the R4 NLB rules, name only the edge tasks' own dedicated subnets in each region, never a cell's whole CIDR, which holds nodes and, through their NAT, box VMs.
+- The store also gains AUTH: an ElastiCache RBAC user, with its password in Secrets Manager, in both edges' `REDIS_URL`.
+- Optional: nodes drop forwarded traffic from the sandbox networks to both cells' VPC CIDRs, except the VPC resolver if box VMs use it. | The founder signs in through the Mumbai ALB with `--resolve`. A node, and a box, can't open the store's port |
 | **R7** | Latency records and health checks for the edge names, pointing at both ALBs. **The switch is the founder's go**, because DNS changes are theirs. Rollback is removing the Mumbai records | From India, `app.mumbo.si` resolves to the Mumbai ALB |
 | **R8** | Move the founder's box (B22) and run the acceptance | Below |
 
@@ -1194,12 +1316,38 @@ The founder is in India, and their box must run in `ap-south-1` (Mumbai). The re
   - every E2B and S3 call uses the record's cell, and capacity is per cell;
   - the model host accepts every cell's addresses;
   - newcomers get `EDGE_REGION`, and children follow their owner;
-  - tests for each. Measure store latency from Mumbai, and add the placement cache only if it is needed.
+  - tests for each. Measure store latency from Mumbai.
+  - **[2026-11-11, B21 design review]** The rest:
+    - The placement cache ships in B21, `PLACEMENT_CACHE_MS`, default 30 s, 0 off. Four sequential store round trips from Mumbai come to about 760 ms.
+    - Person records are written for existing people on their first visit, `us-east-1`.
+    - The edge secret and the model key become ECS secrets by full `us-east-1` ARN.
+    - Any edge may hold the sweep lease, released by token. The Mumbai edge logs to the `us-east-1` group.
+    - Approval audits always go to the `us-east-1` bucket.
+    - The single-cell variables leave the task definitions when `CELLS` arrives.
+    - A malformed `REDIS_URL` never prints its password.
+  - **[2026-11-11, B21 code review]**
+    - The cache is per replica. A replica drops its entry for a principal when the client-proxy reports the sandbox missing, and on dsh's 401 relaunch. Otherwise a launch token another replica renewed would loop the browser through redirects.
+    - The `us-east-1` edge runs with `placement_cache_ms = 0`: its store is in-region. The Mumbai edge gets 30000, and R6 measures both settings.
+    - B22 must read the moving mark on every cache hit, or wait `PLACEMENT_CACHE_MS` after setting it.
+    - Terraform clamps each cell's `maxUnits` at 0. A cell scaled to 0 nodes would otherwise stop every edge at start.
+    - Both cells' backups keys admit the Mumbai edge's role (R6).
 - **B22, moving between regions:**
   - the flow above, with its pages and the home-page control;
   - the RUNBOOK command, which also works for project boxes;
   - offboarding across every region.
   - Tests: a move, a target-restore failure that leaves the person on the source box, a visit and a WebSocket during a move, and a second move refused while one runs.
+- **B47, a box E2B still runs is never killed for being unreachable** [2026-11-11; predates B21, live today; lands before R6 step 3]:
+  - a connection error to the client-proxy drops only the replica's cached target, never the record's launch token (`forget` goes);
+  - ensure recreates from backup only when E2B answers that the box can't run (a failed resume, or envd up and dsh still down after `start.sh`); `SandboxNotFoundError` creates without a kill;
+  - a failure to get an answer (unreachable envd or API, a timeout, the client-proxy's 502 for a listed box) is a 503 starting page with the box and record unchanged, and an error-level `box unreachable` line for the edge-errors alarm. Nothing recreates automatically: during a client-proxy outage a recreate fails too and loses the box;
+  - a RUNBOOK section tells a hung box (other boxes in the cell answer) from a client-proxy outage (none do); for a hung box the operator kills it and the next visit restores;
+  - tests for each case, classified by the SDK's error classes.
+  - **[2026-11-11, B47 code review]** API answers kill only a box E2B listed paused (a resume); a box listed running is never killed on an API error. The sweep drops a record only on `SandboxNotFoundError`, the API's 404. The client-proxy's not-found answer (`SandboxNotRunningError`) once dropped a running box's record and its restore pin.
+- **B47b, resume and capacity failures from recorded answers** [after B24's fix, or after R6 if the case was only inferred]:
+  - on a throwaway in each cell, record the API's answers on resume for a full cell, a snapshot whose node is gone, and an unresponsive guest;
+  - classify capacity and resume failures by those answers in place of the message regex, with fixtures from the recordings. Today a broken snapshot whose resume times out at placement may show "at capacity" on every visit;
+  - try `onResume: 'reboot'` on `GuestUnresponsiveError`, which keeps the disk;
+  - weigh a final backup before a kill when envd answers but dsh is down, against the user lock's 120 s.
 
 **Acceptance (first milestone: the founder's box in Mumbai):**
 - **The move.** The founder's box runs in the `ap-south-1` cell, moved from `us-east-1` with Sessions, schedules, files and Chrome sign-ins intact.
@@ -1210,6 +1358,269 @@ The founder is in India, and their box must run in `ap-south-1` (Mumbai). The re
 - **Services from the Mumbai box.** Model calls, budgets, approvals, the GitHub forwarder and child sandboxes (created in Mumbai) all work.
 - **Moves.** A move back to `us-east-1` and again to Mumbai works. A forced failure leaves the founder on their source box.
 - **Backups.** The Mumbai box's backups land in the Mumbai bucket.
+
+### Sign-up and choosing a region **[founder: 2026-11-11, "make this part on Sign-Up onboarding process - to setup the server / region closest to the sign-up location, we must design a clean sign-up flow for users"; my call on the how]**
+
+This replaces "A newcomer's region" above and step 4 of section 17a's flow. A newcomer sees where their computer will run, close to them, and confirms it before it's created. There are still no passwords and no separate sign-up form: the first sign-in creates the account (section 17a).
+
+**The flow, four screens:**
+1. **Sign in** (unchanged, section 17a): "Continue with Google" or "Email me a sign-in link". A person outside the allowed domains gets the invite-only page.
+2. **"Where should your computer run?"**, shown once, to a signed-in person with no box and no region record.
+   - Copy:
+     - title "Where should your computer run?";
+     - "Your mumbo computer runs in the cloud, always on. Pick the region closest to you for the smoothest desktop and browser."
+     - One row per region with a cell: "India (Mumbai) · 24 ms · Recommended", "US East (Virginia) · 210 ms".
+     - Button "Set up my computer".
+     - Small print: "You can move it later from your home page. A move takes a few minutes."
+   - The nearest region is preselected; the person can pick another.
+   - The page is a form that works without script, so with no measurements it preselects the serving edge's region and shows no milliseconds.
+3. **"Setting up your computer in India (Mumbai). About a minute"** (today's setup page, which now names the region). It refreshes itself.
+4. **The app opens, and Mumbo's one-time welcome** (section 17a step 5; the Mumbo Session, section 17b) also says where the computer runs. The welcome guides the next steps in chat, not in more sign-up pages:
+   - sign in to Google in the Browser tab ("Take over");
+   - link WhatsApp by code;
+   - make a door key for Claude Code.
+
+**Finding the nearest region:**
+- **The default is the serving edge's region** (`EDGE_REGION`). Latency DNS (R7) already routes the person to the nearest edge from their resolver.
+- **The page measures the real round trip from the browser** to each region and preselects the fastest, when it's at least 30 % faster than the default.
+  - It does three no-cors `fetch`es to `https://edge-<region>.app.mumbo.si/edge/ping` (cache-busted) and takes the fastest of the last two, so the TLS setup doesn't count.
+  - This corrects for VPNs and distant DNS resolvers. Before R7 it is the only signal, while every request reaches `us-east-1`.
+  - The probe names answer from an ALB fixed-response rule (204) on each region's listener, so no edge code runs. The edge serves nothing else there.
+  - They need one DNS record per region, a founder step, added with R7; the existing `*.app.mumbo.si` certificate covers them.
+  - The script runs under a nonce CSP, `connect-src` limited to the probe names.
+- **Not used:**
+  - CloudFront's `CloudFront-Viewer-Country`: there is no CloudFront in front of `app.mumbo.si` (checked 2026-11-11);
+  - the ALB, which adds no location header;
+  - IP geolocation databases: a licence and a dependency, and they are wrong for mobile and CGNAT addresses.
+- **With one cell configured, step 2 is skipped.**
+
+**Choosing:**
+- "Set up my computer" POSTs the region. The edge refuses any Origin other than its own, and refuses a region that isn't a configured cell.
+- It writes the person's record `{ region, at }` in the edge store, then creates the box in that cell with the existing `ensure`, under that cell's capacity.
+- A second POST from another tab finds the record and goes straight to step 3. The record is written once; after that, only a move (B22) changes the region.
+
+**A full region:**
+- **On the page**, a cell at capacity shows "Full right now" and can't be picked.
+- **The nearest region is full:** the next nearest is preselected, with "India (Mumbai) is full right now. Your computer will start in US East (Virginia). You can move it to Mumbai from your home page when there's room."
+- **No region has room:** today's capacity page.
+- **The last slot goes between the page and the POST:** `ensure`'s capacity refusal brings the page back with that region marked full.
+- **Spilling over:** existing people are never moved to another region when theirs is full (above). A newcomer choosing another region is their choice, made on the page.
+- The operator already gets the capacity alarm.
+
+**Records without a region** are in `us-east-1`, as before. Existing people never see step 2.
+
+**Tasks:**
+
+| Task | Contents | Depends on |
+|---|---|---|
+| **B39** sign-up region | Step 2's page and route, the person record, step 3's region text, step 4's welcome line, capacity per cell on the page, the probe script with its nonce CSP, the one-cell skip. Tests: preselection from the probes and without script, a full nearest cell, the last-slot race, a refused cross-origin POST and an unknown region, an existing person skipping the page. The person record is written at sign-up, so a project made before the first box visit takes the person's region, not `us-east-1`. A GIF of the flow (GUI PR) | B21 |
+| **R-probe** (mumbo) | One ALB fixed-response rule per region for `edge-<region>.app.mumbo.si` `/edge/ping`; the DNS records are the founder's, with R7 | R6 |
+
+## 17d. Sync between the laptop and the computer (N2) **[founder: 2026-11-11, "also create a sync system between local and VM - for browser and file-storage", and a desktop-app browser that switches between local and VM modes; my call on the how]**
+
+**What the founder asked for:**
+- The desktop app browses with native performance on the laptop.
+- Agents keep using the computer's Chrome, also while the laptop is off.
+- What the person makes and finds, browser data and files, is the same on both sides.
+
+**The rule that shapes it** (section 1, the 2026-11-10 research): each identity lives on one device, and sessions never move.
+- **The person's own Google Chrome on the laptop** holds their laptop sign-ins: Google, which may bind its sessions to the laptop's hardware (DBSC), banking, and their password manager.
+- **The computer's Chrome** is signed in as the computer, for everything an agent does while the laptop sleeps.
+- **The desktop app's own view** (`WebContentsView`) can't hold those sign-ins, so it is for pages that need no sign-in and for WebGL and webcam work.
+  - Google blocks sign-in in embedded browser frameworks, and Electron has no Chrome Sync, no real extension support and no password manager.
+  - **[2026-11-11, mumbo-research "Local VM browser and file sync" corrects the earlier text, which put the laptop's sign-ins in this view]**
+- **Mumbo Sync carries everything else between them:** tab lists, bookmarks, history, downloads and files. It never carries cookies, passwords, payment cards or profiles.
+- **Every comparable product keeps a separate cookie jar in the cloud,** OpenAI's dots included. LinkedIn's terms also forbid copying cookies.
+
+**The browser: three places a page can run, one switch** (it makes N2 explicit):
+- **"Your computer":** the box's Chrome, shown as a stream in the app, with the box's sign-ins. Agents use only these tabs.
+- **"My Chrome":** the person's own Google Chrome on the laptop, with all their sign-ins, extensions and password manager. **[founder: 2026-11-11, "My Chrome", relayed by mumbo: signed-in laptop browsing happens in their own Chrome window, not inside the app]**
+  - A Mumbo extension in it talks to the desktop app over native messaging, with the same permissions as the box's extension (below).
+  - Its tabs live in Chrome's own window. The app lists them and brings that window forward, and doesn't host them.
+- **"This app":** the desktop app's own view, logged out by default. It is for fast pages that need no sign-in, WebGL and the webcam.
+  - It keeps a site's sign-in when the person signs in there, never Google's: Google sign-in goes through the system browser.
+- **The switch in the toolbar,** the founder's toggle, sets where new pages open: "On this laptop" or "On your computer".
+  - "On this laptop" means My Chrome when its extension is connected, else This app.
+  - The default is this laptop, for speed.
+  - A link Mumbo opens, a task's page, and anything an agent drives open on the computer whatever the switch says.
+- **"Move to your computer" and "Move to this laptop"** move the page, never the sign-in (N4):
+  - the URL, the tab group and the scroll position (a hint applied after load) move;
+  - **form drafts don't move in v1.** On a page with unsaved input, the menu says "Finish or save the form first".
+  - The person signs in on the other side if the site needs it, and the menu says "Moves the page, not your sign-in".
+  - "In under a second" is the target, measured in B43.
+- **The same page in both browsers:** the app shows which pages an agent holds, and warns when the person opens one of them on the laptop. Two people editing a document is fine; two submits of a checkout are not.
+- **Offline:**
+  - with the laptop offline, laptop pages keep working, and computer tabs show "Your computer keeps working. Reconnect to see it";
+  - with the laptop asleep, the computer's Chrome and Mumbo carry on, and on reconnect the app shows what happened (M4's digest).
+- **A site the computer isn't signed in to:** the agent stops and asks the person to sign in through the stream ("Take over", B28), and doesn't retry.
+- **Agents and laptop sign-ins:** an agent never drives a laptop page unseen. When a task needs a sign-in that exists only on the laptop, Mumbo asks in the app to open a consented page in My Chrome for that step (N4), and only while the laptop is online. Browser consent's asks and B25's denials apply there as in the box.
+- **Per-site agent rules** (part C's approval tiers start here):
+  - **LinkedIn: the agent may act** (send, connect, post) in the box's Chrome. **[founder: 2026-11-11, "Agent may act", relayed by mumbo; an informed decision]**
+    - The founder chose this over the recommended draft-only option after being told that LinkedIn's terms forbid "bots or other unauthorized automated methods" (User Agreement §8.2), and that acting risks a ban of their account.
+    - The consent model is unchanged: before a write the agent says exactly what it will do and waits, unless the person has allowed that kind of action on LinkedIn.
+    - B44 throttles it, to lower the risk:
+      - at most 20 connection requests, 30 messages and 3 posts a day, config per box;
+      - pauses between actions like a person's;
+      - no bulk actions or profile scraping.
+    - Copying LinkedIn cookies stays forbidden, as for every site.
+  - **WhatsApp** stays as decided in v1: the agent reads and drafts, and a send needs the person's approval.
+  - Every other site follows browser consent's asks.
+
+**Mumbo Sync:** the computer keeps the index, S3 keeps the bytes, and each laptop, and later the phone, is a replica. **[2026-11-11, from the research: "file bytes in storage, link in the database"]**
+- **The hub** is a plugin in the box, `@mumbo/sync`. It is the index and sequencer.
+  - Its metadata is in `/root/.dsh/storages/sync`, backed up with the rest of `/root/.dsh`.
+  - Every change gets a hub sequence number.
+  - A replica sends its changes since its last acknowledged sequence and receives everyone else's.
+- **Transport:**
+  - **Metadata** travels over the desktop app's signed-in connection to the edge (N2a), then to the box like any other app request, on one WebSocket.
+  - **File content** travels as objects `users/<principal hash>/files/<sha256>` in the person's region's backup bucket, the objects B40b already writes.
+  - The laptop uploads and downloads them through URLs the edge presigns. Each URL is short-lived, names one hash, and is presigned only for a live replica (below).
+  - The box fetches what laptops upload and uploads what it writes.
+  - So a laptop sends and receives bytes while the box is moving or restoring, and only its metadata waits.
+  - `Range` resumes large files. Content is addressed by its hash, so a renamed or copied file isn't sent twice.
+  - TLS covers every hop; the bucket encrypts with the cell's KMS key.
+- **Offline:** each replica keeps a journal of its local changes and replays it on reconnect. The hub keeps changes until every replica has acknowledged them, and drops a replica unseen for 30 days, which then re-syncs in full.
+- **Replicas are devices.** Each laptop registers a replica with the edge when sync is turned on, and the home page lists them with "Remove".
+  - A removed replica gets no metadata and no presigned URL from its next request, so a lost laptop stops syncing.
+  - Its files on the laptop stay; the person deletes them.
+
+**What syncs:**
+
+| Data | Laptop side | Computer side | Rule |
+|---|---|---|---|
+| Open tabs and tab groups | the app's and My Chrome's tabs | the box Chrome's tabs | **A list** of the other side's tabs ("Tabs on your computer", "Tabs on this laptop"), live. Opening one is a Move: the box never opens a laptop page unasked. One engine drives a tab at a time (N4's driver lease) |
+| Bookmarks | My Chrome, or This app's store | the box Chrome | **With one Google account in both Chromes, Chrome Sync already carries them,** and Mumbo Sync doesn't. Otherwise last writer wins per bookmark and per field (title, URL, folder, position), with tombstones |
+| History | My Chrome, or This app, for address-bar suggestions | the box Chrome | Chrome Sync when both Chromes share an account; otherwise append-only, 90 days on the laptop. Private windows are never recorded |
+| Downloads | `~/Mumbo/Downloads` | `/home/shared/Downloads` (Chrome's download folder) | As files, below |
+| Files | `~/Mumbo/Files` | `/home/shared/Files` | Below |
+| Cookies, passwords, payment cards, autofill, site sign-ins, profiles | — | — | **Never** |
+
+**The box Chrome side of browser data:**
+- A Mumbo extension is force-installed by Chrome policy from a local update URL. It has the `bookmarks`, `history`, `tabs` and `tabGroups` permissions, and never `cookies`, `webRequest` or host permissions.
+- It talks to the hub through native messaging. The host runs as `browser` and connects to the root-owned socket `/run/mumbo/sync.sock`, which accepts only the `browser` user (`SO_PEERCRED`). So nothing opens a port that agent containment would have to police.
+- It remembers what it wrote, so the changes it applies don't echo back.
+- **The same extension serves My Chrome on the laptop** (published to the Chrome Web Store, so it needs a store review), talking to the desktop app's native-messaging host. It never gets `cookies`, `webRequest` or host permissions.
+
+**Files:**
+- **One folder:** `~/Mumbo` on the laptop, with `Files` and `Downloads` inside. Nothing else on the laptop syncs. **[founder: 2026-11-11, one folder as recommended]**
+- **Not synced, by default:** `.git`, `node_modules`, `.venv` and `target/`. Code belongs in a project, where git merges it; the app says so when it skips one.
+- **Symlinks never sync,** in either direction.
+- **One file is at most 2 GiB.** A larger one stays local and shows "Too large to sync". Whole-file hashes mean a small edit to a large file sends it again; content-defined chunking can come later.
+- **Conflicts:**
+  - A change on one side, with the other side unchanged since the last sync, applies.
+  - When both sides changed, both are kept: the later arrival becomes "name (conflict from <device>, <date>).ext".
+  - An edit beats a delete: the file comes back.
+  - Nothing merges.
+- **Deletes go to a trash, never straight away:**
+  - the OS trash on the laptop;
+  - `/home/shared/.mumbo-trash` on the computer, kept 30 days.
+- **Mass deletes pause.** A batch that would delete more than 50 files, or a fifth of a folder, waits for the person in the app: "Your computer wants to delete 312 files from this laptop. Allow?"
+- **The agent writes these folders, so files from the computer arrive as downloads do.**
+  - They are marked as from the internet on the laptop (macOS quarantine attribute, Windows Mark of the Web), so Gatekeeper and SmartScreen treat them as downloads.
+  - Executable bits never sync.
+- **Laptop files reach the agent:** `Files` and `Downloads` are model roots, so Mumbo reads what the person puts there. The app says so when sync is turned on: "Mumbo can read and change what you put in this folder."
+  - A document can carry injected instructions, as a web page can.
+  - No turn starts from a file change. If one ever does, B25b's rule covers it: every browser write asks while it runs.
+- **The box's file I/O runs as its own user, `filesync`** (group `shared`), through the run-as seam, opening without following links. Agent containment's rule holds: root never writes in a folder another user can change.
+- **Space: 20 GiB of synced files per person** **[founder: 2026-11-11, "about 20 GB"]**.
+  - The quota is set by the edge, and `Files` and `.mumbo-trash` count against it.
+  - Over the quota, the laptop keeps new files local and marks them "Not synced: your computer's sync space is full".
+  - **The box disk grows for every person, not only when sync is on.** A box's disk comes from the team's `disk_mb` when its template is built, so per-person sizes would mean a second template. And E2B's disk only takes node space for what's written, so an unused quota costs nothing.
+    - `box_free_disk` goes from 10240 to 32768 (20 GiB of sync plus today's 10 GiB and some margin), so `disk_mb` = 32768 + `box_step_disk` (2048) = 34816.
+    - The template's smoke check raises `MIN_AVAIL_MB` to 30720.
+    - Existing boxes get it only by moving to a new build (RUNBOOK "Moving a box to a new template build"), the founder's first.
+  - **Boxes per node stay 12.** Memory bounds them: 48 GiB of guest hugepages at 4 GiB a box. The 500 GiB node disk holds the worst case:
+    - 12 boxes each using their whole 20 GiB plus about 4 GiB of other writes is about 290 GiB;
+    - the template cache, build layers and snapshots in transit take about 100 GiB;
+    - so `volume_size` doesn't change.
+    - Add a node disk-use alarm at 75 %, the signal to raise `volume_size` (RUNBOOK "Node disk size").
+  - **Checked at the first build:**
+    - whether the template's rootfs in the templates bucket and in the nodes' cache stays sparse, near its used size, at a 34 GiB `disk_mb`. If it doesn't, raise `disk_mb` only for the `mumbo-box` build, set the team limit back for `mumbo-project` and `mumbo-child`, and note it in the RUNBOOK;
+    - how long a node drain takes with boxes holding gigabytes of written disk. A drain snapshots each box's written blocks, so node replacement slows with synced data. Measure one 20 GiB box's pause and resume before relying on blue/green timings.
+  - **Backups.** `Files` and `.mumbo-trash` leave the 10-minute archive: 20 GiB re-uploaded every 10 minutes and kept for 30 days isn't workable.
+    - The hub backs them up by content instead: each file's SHA-256 is uploaded once, to `users/<principal hash>/files/<sha256>` in the person's region's backup bucket, through PUT URLs the edge presigns for the hashes that are missing.
+    - The 10-minute archive carries the hub's metadata, which names the hashes.
+    - A restore, and so a move, fetches the files the metadata names before dsh starts, so a move takes longer with more synced data, about 3 minutes for 20 GiB. The move page says so.
+    - Offboarding deletes the prefix too.
+    - `Downloads` keeps its own rule (newest 2 GiB, nothing over 1 GiB).
+  - **Cost:**
+    - S3 holds about 20 GiB plus changes per heavy user, around $0.50 a month;
+    - laptop downloads leave AWS at $0.09 per GB, so a first full sync of 20 GiB costs about $1.80 once;
+    - node disk is already paid for.
+    - About $1–3 a month for a heavy user, as told to the founder.
+
+**Phone:** later, through the web app's uploads.
+
+**Tasks** (N2), in phases. Phase 0 is spec work (done here). Phase 1 is the desktop app as a client, and file sync. Phase 2 is the browser placements and the per-site rules. Phase 3 is My Chrome and passkeys.
+
+| Task | Contents | Depends on |
+|---|---|---|
+| **N2a** app sign-in | The desktop app signs in through the edge (Google in the system browser) and uses the person's box as its host instead of a local dsh. Today's app binds a local dsh on `127.0.0.1` (`apps/desktop/README.md`), so this is a rework of the app. The sync replica's identity is registered here | — |
+| **N2b** native shell | The app's own tabs, address bar, agent panel and consent prompts; the box's stream decoded with WebCodecs; the Chromium host in its own process | N2a |
+| **R-disk** (mumbo) | `box_free_disk` 32768 and `MIN_AVAIL_MB` 30720; setup; rebuild `mumbo-box` and check that its rootfs stays sparse; a node disk-use alarm at 75 %; measure a 20 GiB box's drain; move the founder's box to the new build | — |
+| **B40** sync hub | `@mumbo/sync`: sequences, journals, replica cursors and their removal, the 20 GiB quota, `filesync` run-as file I/O, trash, the mass-delete hold. Tests per rule above | B24, R-disk |
+| **B40b** file bytes in S3 | The edge presigns per-hash PUTs and GETs, with `Range`, for the box and for live replicas only; the hub uploads and fetches by content; the archive leaves `Files` and `.mumbo-trash` out; restore fetches them by metadata; offboarding deletes the prefix. Tests: an incremental backup, a restore, a move, a removed replica refused | B40 |
+| **B41** file sync in the app | The desktop app's sync client for `~/Mumbo`: a watcher, a journal, bytes through S3, conflict copies, OS trash, quarantine and Mark of the Web, the default ignores, no symlinks, the 2 GiB file cap, the over-quota state, the mass-delete prompt, a sync status, the replica list and Remove. A GIF | N2a, B40b |
+| **B42** browser data | The box Chrome's force-installed extension, its native-messaging host and socket; the live tab lists both ways; bookmarks and history for This app, and for My Chrome only when it isn't on the same Google account | B40 |
+| **B43** placements | "Your computer" and "This app" placements, their icons and chip, the toolbar switch, Move (no form drafts), the same-page warning, offline states, agent-opened pages always on the computer, measured Move time. A GIF | N2b, B42 |
+| **B44** per-site agent rules | The per-site table in browser consent and its ask tiers: LinkedIn's daily caps and pacing, WhatsApp as v1 | B25 |
+| **B45** My Chrome | The Mumbo extension for the person's own Chrome, published to the Web Store, with native messaging to the app; Move and consented laptop steps target it | N2a, B42 |
+| **B46** passkeys in the box | Confirm synced passkeys in the box's Linux Chrome; WebAuthn forwarding from the laptop into the stream | N2b |
+
+**Not in this:**
+- moving sign-ins in either direction;
+- syncing the laptop's other folders;
+- sharing synced folders with other people (part D);
+- a password manager in This app: Electron's extensions omit what one needs, and signed-in work belongs in My Chrome;
+- end-to-end encryption against the operator (the bucket is encrypted with the cell's key, which the edge can use).
+
+## 17e. Context, objectives and progress **[founder: 2026-11-11, "agents and coordinators manage context, objectives, task lists and plans, track everything, and keep building without losing context or drifting"; my call on the how]**
+
+Source: mumbo-research's report "Agent self managed project structure" (2026-11-11), `jumbo/.claude/worktrees/jumbo-research/reports/`. Nothing in it was measured; token figures are characters divided by four.
+
+**The finding.** Mumbo already records every piece of agent state durably: the Session log, its projections (todo, plan, goal, team) and superagent's Tickets. What fails is showing it again.
+- After a compaction, only AGENTS.md and the skills catalogue come back. The todo list, the approved plan, team tasks and live job handles survive only in whatever the summary model wrote. Mechanical extraction kept 79% of recurring details against at most 16% for model-written summaries (Compact-Bench, arXiv 2610.31710).
+- After a restart, jobs and workflows are gone, and nothing says so. The goal comes back disarmed. Our own three-session process needed a typed "resume and re-arm" after every restart.
+- Above Tickets there is nothing: no project objective, no brief (§7's living brief is not built), no parent Ticket.
+- A worker's `ready` ends an external Ticket. T3's `Engine.requestReview` has no caller on `main` (checked 2026-11-11), so no review marker is ever posted for E0 to find. External workers' PRs can't merge through the edge until it has one.
+
+**The rule.** Keep a small, structured record outside the model, written by the runtime wherever possible. Show it again at every compaction and restart. Let only an external check (CI, or a review verdict on the exact commit) mark work done.
+
+**How the tasks stay inside our rules:**
+- New behaviour is new plugins under `packages/mumbo/`, on documented seams (`PromptContext`, `agent.inject()`, the goal round prompt, superagent KV families). Upstream packages change only where a seam is missing, and then as an upstream-shaped change.
+- No new Session event type unless unavoidable. If one is needed, it carries `ignorable: true`, so an older reader skips it, and it updates both SDKs' expected outputs.
+- Nothing changes the agent loop or the model provider, and nothing adds a new service.
+- Anything shown to the model is a logged event, and goes through a snapshot test.
+- Mounting goes through the project overlay and the edge-written person overlay, never the founder's overlays.
+
+**Tasks** (K for "keep"; the report's R-numbers in brackets):
+
+| Task | What | Order |
+|---|---|---|
+| **T4** (R6) the reviewer Ticket's caller | `requestReview` on every external `ready` report and on `submit`, with the reused-comment first-line check parked from #42. A `ready` no longer ends a Ticket. A reviewer's `pass` on the head SHA plus green CI does, and the runtime posts the marker E0 checks. Tests: `ready` alone doesn't close; `pass` plus CI does; `fail` reopens; E0 finds the marker | Next superagent task; before E2's door tools go live |
+| **K1** (R1, R3) the state block | A `PromptContext` rendered mechanically from the session's projections, never by a model. It holds the goal and its phase, the open todo items, the approved plan's step headings, open team tasks, and live subagents and jobs, capped at 1,600 characters with pointers beyond. It renders only the parts the session mounts.<br>The text changes only at a boundary (a compaction, a resume, or a goal phase change), so ordinary todo edits don't re-log it. Between boundaries those edits are visible as recent tool calls.<br>The plan headings come from the logged `exit_plan_mode` call and its approval, folded by the plan projection, so no new event is needed. A `plan_read` tool returns the full text.<br>Tests: a snapshot with a compaction shows the block re-logged once after it and not on unchanged turns, and old fixtures load unchanged | After the B24 fix |
+| **K2** (R5) the resume reconciler | At the first step after a resume, it compares the log (jobs without `job/settled`, subagents without a completion, workflows) with the live registries, and injects one logged notice: what died, what finished and where its result is, and that the goal needs a person to resume it. The same fact appears in `needs_you`. Tests: a log with an unsettled job yields exactly one notice | With K1 |
+| **K3** (R4) the goal stall check | At each goal round start, a mechanical check from the log: files changed, todo progress, repeat chains, tool errors. After two rounds without change, the round prompt carries the progress questions (done? looping? progressing? what next?), and the existing `blocked` rule follows. No model call and no new event: the round prompt is the logged record | After K1, K2 |
+| **K4** (R7, R10) the project brief | Superagent KV family `brief:<project>`: typed items (objective, decision in force, where things live, note), each with id, date and source. Decisions carry `by`, `costIfWrong` and `supersedes`. The router changes it only by itemised deltas through one tool (add, edit or retire one item), never by a rewrite, and it is capped at §7's 600 words. It is sent to the coordinator and its Executors as a `system/message`, re-logged only on change. Tests: deltas apply in order; the cap is enforced; requests carry it | Schema 13, with M4 |
+| **K5** (R8) the objective tree | KV family `objective` `{id, parentId, title, acceptance, state, owner}` with depth at most 3, plus `Ticket.objective` and `Ticket.parent`. A parent can't close while a child is open. A node closes only when its acceptance passes: a named CI check on a commit, a T4 review `pass`, or a person's confirmation; no free commands. A person sets roots in the panel (a GUI change, so a GIF) or through the relay. `project_status` shows it. Tests: a migration 12 → 13 leaves old Tickets valid, plus each closing rule | Schema 13 |
+| **K6** (R9) handoffs and the Ticket record | `Assignment.report.handoff {done[], next, head, notes}` on progress reports. On lease expiry or `hostRestarted`, the successor's claim brief carries the last handoff instead of only the lease note. Adds §8's record fields: attempts per model, failed reviews, asks answered, CI result, wall time. Tests: an expired lease hands over the handoff | Schema 13 |
+
+**Measured, not assumed.**
+- Mechanics are checked by keyless snapshot tests.
+- Whether K1 and K2 help is checked by a small live eval on the pinned DeepSeek model, run on demand and not in CI: a scripted task with a forced compaction and a forced restart, against an uninterrupted control. It measures re-derivations, steps to the first productive call after the boundary, and objective completion by acceptance checks.
+- In production, the claim-truth gap is the share of `ready` reports that review or CI later fails.
+
+**Not now:**
+- todo item ids and a drop check (R2): no dropped item has been observed; add it if one is;
+- a separate decision store (folded into K4);
+- vector or graph memory services;
+- model-written summaries as the record;
+- tree-search planners;
+- more parallel writers per Ticket;
+- self-critique as the done check;
+- context resets in place of compaction (re-test per model with K1's eval).
+
+**Our own process** (no product work): task numbers are assigned only by mumbo-design, in this spec. The count of "resume / re-arm" prompts per week across the three sessions is the live metric this section should drive down once our own coordinators run on it.
 
 ## 18. Milestones **[founder: A, then B, then C; my call on the cut]**
 
@@ -1224,7 +1635,7 @@ The founder is in India, and their box must run in `ap-south-1` (Mumbai). The re
 
 Then the part C design (accounts in the box), then D.
 
-The person's-computer track (N1: sections 17b and 17c, tasks B17–B23 and R1–R8) runs alongside these milestones. It doesn't change their contents or their order. **[founder: 2026-11-10, "don't widen M1"]**
+The person's-computer tracks run alongside these milestones: N1 (sections 17b and 17c, tasks B17–B25, B39 and R1–R8) and N2 (section 17d, tasks N2a, N2b, R-disk and B40–B46). It doesn't change their contents or their order. **[founder: 2026-11-10, "don't widen M1"]**
 
 ## 19. Non-goals of this design
 
@@ -1288,13 +1699,12 @@ The person's-computer track (N1: sections 17b and 17c, tasks B17–B23 and R1–
   - Mitigation: the person signs in by hand through the stream with the agent detached (Take over, B28), and handles Google's checks.
   - If Google still refuses, Chrome is restarted once without the debugging port for the sign-in, then with it again.
   - How often Google challenges our nodes' addresses is still to be measured.
-- **A Workspace tenant that enforces Device Bound Session Credentials** blocks the box's Linux Chrome from its enforced apps. Mitigation: leave that enforcement off for the founder's tenants, or use those apps in the desktop app's local engine (N2).
+- **A Workspace tenant that enforces Device Bound Session Credentials** blocks the box's Linux Chrome from its enforced apps. Mitigation: leave that enforcement off for the founder's tenants, or use those apps in the person's own Chrome on the laptop ("My Chrome", section 17d); the desktop app's own view can't hold Google sign-ins.
 - **Google Chrome's terms.** Installing Chrome in boxes for the company's own people is ordinary use. Offering it to customers needs a review before productizing.
 - **A region costs a fixed amount each month** (E2B control, NAT, the ALB, a minimum of one node) whether or not anyone uses it. R3 states the amount before apply.
 - **One edge store for all regions** adds a cross-region round trip to the Mumbai edge's store reads (section 17c). Measured in B21; the cache and the Global Datastore are the next steps.
 
 **Before public launch** (checklist) **[founder]**
 - Branch rules on `main`, `dev` and `master` (section 9).
-- KMS encryption for backups.
 - Per-site consent and an audit log for account actions (part C).
 - A decision on Claude workers in sandboxes (section 8.1).

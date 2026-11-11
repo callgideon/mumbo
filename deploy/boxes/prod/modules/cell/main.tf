@@ -47,6 +47,21 @@ variable "backup_bucket" {
   description = "Box backup bucket name."
   type        = string
 }
+variable "lean" {
+  description = "One NAT gateway, single-AZ Postgres, MemoryDB without a replica and one task per E2B service: no failover, about $350 a month less (founder, R3 lean, 2026-11-11)."
+  type        = bool
+  default     = false
+}
+variable "db_instance_class" {
+  description = "Postgres instance class. ap-south-1 had no db.t4g.medium capacity on 2026-11-11 (twice, insufficient-capacity), so its cell uses db.t3.medium, which every zone there offers."
+  type        = string
+  default     = "db.t4g.medium"
+}
+variable "zone_id" {
+  description = "An existing boxes.internal private zone to associate with this cell's VPC instead of creating one (one zone for every cell, design R4); null creates it."
+  type        = string
+  default     = null
+}
 variable "edge_role_arn" {
   description = "The edge task role, the only principal that may use the backup key."
   type        = string
@@ -59,4 +74,5 @@ locals {
   name     = var.name
   region   = data.aws_region.this.region
   mtls_env = var.mtls_env
+  zone_id  = var.zone_id != null ? var.zone_id : aws_route53_zone.internal[0].zone_id
 }

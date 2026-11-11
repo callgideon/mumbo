@@ -7,7 +7,7 @@ import { test } from 'node:test'
 import { runInNewContext } from 'node:vm'
 import { authUi, userServer } from './edge.mjs'
 
-const cfg = { publicHost: 'boxes.example', projectDomain: 'boxes.example', approveHost: 'approve.boxes.example', allowed: ['@x.com'], signinCookie: '_oauth2_proxy_mumbo', proxy: new URL('http://127.0.0.1:1') }
+const cfg = { publicHost: 'boxes.example', projectDomain: 'boxes.example', approveHost: 'approve.boxes.example', allowed: ['@x.com'], signinCookie: '_oauth2_proxy_mumbo' }
 const read = (name) => readFileSync(new URL(`./auth-ui/${name}`, import.meta.url), 'utf8')
 const html = read('index.html')
 const consentJs = read('consent.js')
@@ -29,7 +29,7 @@ const upgrade = (host) => ({ connection: 'Upgrade', upgrade: 'websocket', origin
 /** Runs fn against a user server whose box layer records every call; returns the calls. */
 async function serve(fn) {
   const boxCalls = []
-  const box = { ensure: async (e) => { boxCalls.push(['ensure', e]); throw new Error('starting') }, firstSetUp: async () => false, touch: (id) => { boxCalls.push(['touch', id]) }, forget: (id) => { boxCalls.push(['forget', id]) } }
+  const box = { ensure: async (e) => { boxCalls.push(['ensure', e]); throw new Error('starting') }, firstSetUp: async () => false, touch: (id) => { boxCalls.push(['touch', id]) }, uncache: (key) => { boxCalls.push(['uncache', key]) } }
   const server = userServer({ cfg, box, signin, log: () => {} })
   const port = await listen(server)
   try { await fn(port) } finally { server.close() }

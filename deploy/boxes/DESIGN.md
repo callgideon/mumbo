@@ -32,6 +32,8 @@ flowchart LR
 
 Code: `edge/edge.mjs` (router and model host in one Node process), `edge/compose.yaml` (Caddy, oauth2-proxy, edge, all on loopback except Caddy), `edge/up.sh` (secrets from SSM into `.env`, then `docker compose up`), `edge.tf` (bucket, IAM, SSM settings, DNS, ports 80/443), `edge/template.mjs` (builds the `mumbo-box` template from a shipped ECR image). For the trial all of this runs on the E2B host.
 
+Production has a cell per region (E2B, nodes, backup bucket; spec section 17c) and serves them from every edge (`edge/cells.mjs`): each person, box and project record names its cell, and every E2B and S3 call and box request for it goes to that cell (RUNBOOK "Cells (regions)").
+
 ## Flows
 
 **Open my box.**

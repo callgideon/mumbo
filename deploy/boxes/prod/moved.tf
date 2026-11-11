@@ -269,14 +269,6 @@ moved {
   to   = module.edge_us_east_1.aws_ecs_task_definition.edge
 }
 moved {
-  from = aws_elasticache_replication_group.edge
-  to   = module.edge_us_east_1.aws_elasticache_replication_group.edge
-}
-moved {
-  from = aws_elasticache_subnet_group.edge
-  to   = module.edge_us_east_1.aws_elasticache_subnet_group.edge
-}
-moved {
   from = aws_iam_role.edge
   to   = module.edge_us_east_1.aws_iam_role.edge
 }
@@ -331,4 +323,64 @@ moved {
 moved {
   from = aws_vpc_security_group_ingress_rule.edge
   to   = module.edge_us_east_1.aws_vpc_security_group_ingress_rule.edge
+}
+
+# The cell's alarms moved into modules/cell/alarms.tf (R5).
+moved {
+  from = aws_cloudwatch_metric_alarm.ops["api-node-unhealthy"]
+  to   = module.cell_us_east_1.aws_cloudwatch_metric_alarm.ops["api-node-unhealthy"]
+}
+moved {
+  from = aws_cloudwatch_metric_alarm.ops["unhealthy-api-http"]
+  to   = module.cell_us_east_1.aws_cloudwatch_metric_alarm.ops["unhealthy-api-http"]
+}
+moved {
+  from = aws_cloudwatch_metric_alarm.ops["unhealthy-api-grpc"]
+  to   = module.cell_us_east_1.aws_cloudwatch_metric_alarm.ops["unhealthy-api-grpc"]
+}
+moved {
+  from = aws_cloudwatch_metric_alarm.ops["unhealthy-proxy"]
+  to   = module.cell_us_east_1.aws_cloudwatch_metric_alarm.ops["unhealthy-proxy"]
+}
+moved {
+  from = aws_cloudwatch_metric_alarm.ops["nodes-below-min"]
+  to   = module.cell_us_east_1.aws_cloudwatch_metric_alarm.ops["nodes-below-min"]
+}
+moved {
+  from = aws_cloudwatch_metric_alarm.ops["memorydb-memory"]
+  to   = module.cell_us_east_1.aws_cloudwatch_metric_alarm.ops["memorydb-memory"]
+}
+moved {
+  from = aws_cloudwatch_metric_alarm.ops["rds-cpu"]
+  to   = module.cell_us_east_1.aws_cloudwatch_metric_alarm.ops["rds-cpu"]
+}
+moved {
+  from = aws_cloudwatch_metric_alarm.ops["rds-storage"]
+  to   = module.cell_us_east_1.aws_cloudwatch_metric_alarm.ops["rds-storage"]
+}
+moved {
+  from = aws_cloudwatch_metric_alarm.ops["tasks-api"]
+  to   = module.cell_us_east_1.aws_cloudwatch_metric_alarm.ops["tasks-api"]
+}
+moved {
+  from = aws_cloudwatch_metric_alarm.ops["tasks-client-proxy"]
+  to   = module.cell_us_east_1.aws_cloudwatch_metric_alarm.ops["tasks-client-proxy"]
+}
+moved {
+  from = aws_cloudwatch_metric_alarm.node_disk
+  to   = module.cell_us_east_1.aws_cloudwatch_metric_alarm.node_disk
+}
+moved {
+  from = aws_cloudwatch_log_metric_filter.ops["api-node-unhealthy"]
+  to   = module.cell_us_east_1.aws_cloudwatch_log_metric_filter.api_node_unhealthy
+}
+
+# R2: the edge store is shared by every region's edge, so it lives at the root (store.tf).
+moved {
+  from = module.edge_us_east_1.aws_elasticache_replication_group.edge
+  to   = aws_elasticache_replication_group.edge
+}
+moved {
+  from = module.edge_us_east_1.aws_elasticache_subnet_group.edge
+  to   = aws_elasticache_subnet_group.edge
 }

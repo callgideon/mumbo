@@ -14,12 +14,14 @@ locals {
   # Box disk, written to the E2B team limits by setup/setup.sh. A box gets it only from a template built afterwards
   # (RUNBOOK "Changing E2B limits"). On this fork disk_mb sizes the disk: it is the free rootfs space a build has before
   # the template's own steps, so a box keeps disk_mb minus what edge/template.mjs installs. disk_mb = box_free_disk (the
-  # 10 GiB a box should keep; ~1 GB left dsh, the browser profile and caches full) + box_step_disk, which covers the steps:
+  # 32 GiB a box should keep: 10 GiB for dsh, the browser profile and caches, 20 GiB for the person's synced ~/Mumbo
+  # (founder, 2026-11-11, design section 17d) and margin; E2B's disk takes node space only as it is written)
+  # + box_step_disk, which covers the steps:
   # mumbo-box measured 1007 MiB, mumbo-project 41, mumbo-child none (RUNBOOK "Changing E2B limits" says how), E2B's
   # 256 MiB root reserve, and ~0.75 GiB of margin.
   # default_free_disk_size_mb (set to box_free_disk) has no effect while E2B's build-ensure-free-disk-space flag is off,
-  # its default with no LaunchDarkly. template.mjs fails a build whose box has under 9 GiB free.
-  box_free_disk = 10240
+  # its default with no LaunchDarkly. template.mjs fails a build whose box has under 30 GiB free.
+  box_free_disk = 32768
   box_step_disk = 2048
 }
 
@@ -224,7 +226,7 @@ resource "aws_ecs_service" "e2b" {
   name                   = each.key
   cluster                = aws_ecs_cluster.e2b.id
   task_definition        = aws_ecs_task_definition.e2b[each.key].arn
-  desired_count          = 2
+  desired_count          = var.lean ? 1 : 2
   launch_type            = "FARGATE"
   enable_execute_command = false
   # Rolling: a new task registers and passes health before an old one drains (E2B's api and proxy are stateless).

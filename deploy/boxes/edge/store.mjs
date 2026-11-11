@@ -15,9 +15,10 @@ export function memoryStore() {
   const sets = new Map()
   const take = (key, ttlMs) => {
     const now = Date.now()
-    if ((leases.get(key) ?? 0) > now) return false
-    leases.set(key, now + ttlMs)
-    return true
+    if ((leases.get(key)?.until ?? 0) > now) return false
+    const token = randomUUID()
+    leases.set(key, { until: now + ttlMs, token })
+    return token
   }
   return {
     async getBox(id) { const b = boxes.get(id); return b && { ...b } },
@@ -29,7 +30,7 @@ export function memoryStore() {
     async incrementBy(key, n, ttlMs) { const v = (counters.get(key) ?? 0) + n; counters.set(key, v); void ttlMs; return v },
     async getCount(key) { return counters.get(key) ?? 0 },
     async lease(key, ttlMs) { return take(key, ttlMs) },
-    async release(key) { leases.delete(key) },
+    async release(key, token) { if (leases.get(key)?.token === token) leases.delete(key) },
     async withLock(key, ttlMs, fn) {
       for (let waited = 0; !take(`lock:${key}`, ttlMs); waited += 50) {
         if (waited > ttlMs) throw Object.assign(new Error(`lock ${key} busy`), { status: 503 })
@@ -80,8 +81,10 @@ export function redisStore(client) {
       return Number(v)
     },
     async getCount(key) { return Number(await client.get(key) ?? 0) },
-    async lease(key, ttlMs) { return (await client.set(key, randomUUID(), { NX: true, PX: ttlMs })) === 'OK' },
-    async release(key) { await client.del(key) },
+    /** The holder's token, or false while another holder has the lease. */
+    async lease(key, ttlMs) { const token = randomUUID(); return (await client.set(key, token, { NX: true, PX: ttlMs })) === 'OK' && token },
+    /** Deletes the lease only while `token` still holds it (compare-and-delete), never a later holder's. */
+    async release(key, token) { await client.eval(RELEASE, { keys: [key], arguments: [token] }) },
     async withLock(key, ttlMs, fn) {
       const token = randomUUID()
       for (let waited = 0; (await client.set(`lock:${key}`, token, { NX: true, PX: ttlMs })) !== 'OK'; waited += 100) {

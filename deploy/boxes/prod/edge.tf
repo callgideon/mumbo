@@ -3,14 +3,34 @@
 #   *.app.mumbo.si      -> the same; the edge serves approve.app.mumbo.si and project boxes p-<16 hex>.app.mumbo.si, 404 otherwise
 #   llm.app.mumbo.si    -> edge model host :8081 (box token + source address = one of our NAT EIPs); llm.boxes.mumbo.si too
 #   boxes.mumbo.si (the former public host), api.mumbo.si and *.boxes.mumbo.si -> redirect (old_hosts rules)
-# The edge itself is modules/edge; here are its settings and what every region's edge shares: the public records and
-# the SSM parameters.
+# The edge itself is modules/edge; here are its settings and what every region's edge shares: the public records, the
+# SSM parameters and the cells it serves.
 variable "edge_tag" {
   description = "Edge image tag in ECR (mumbo repo commit)."
   type        = string
 }
+variable "edge_cells" {
+  description = "CELLS (B21, edge/cells.mjs): the us-east-1 edge serves every cell in local.edge_cells, with EDGE_REGION us-east-1 and each cell's E2B key, instead of the single-cell BACKUP_BUCKET, E2B_API_URL, E2B_SANDBOX_URL, E2B_API_KEY and MAX_RUNNING_*. Needs an edge_tag of B21 or later. Turn it off again only while no record names ap-south-1 (RUNBOOK \"Cells (regions)\")."
+  type        = bool
+  default     = false
+}
+variable "placement_cache_ms" {
+  description = "PLACEMENT_CACHE_MS of the us-east-1 edge: how long an edge replica reuses a principal's box target without the store or E2B; 0 turns the cache off."
+  type        = number
+  default     = 30000
+  validation {
+    # The edge's check (edge.mjs wholeNumber): a whole number of at least 0.
+    condition     = floor(var.placement_cache_ms) == var.placement_cache_ms && var.placement_cache_ms >= 0 && var.placement_cache_ms <= 999999999
+    error_message = "placement_cache_ms must be a whole number of milliseconds, 0 or more."
+  }
+}
 variable "approver_emails" {
   description = "APPROVER_EMAILS: who may merge agent PRs and bind repositories (comma-separated, lowercased). Empty: nobody."
+  type        = string
+  default     = ""
+}
+variable "run_wild_default_emails" {
+  description = "RUN_WILD_DEFAULT_EMAILS: people whose person boxes start new Sessions in Run Wild where the image has it (comma-separated exact addresses, lowercased). Empty: nobody. Applies to boxes created afterwards."
   type        = string
   default     = ""
 }
@@ -61,36 +81,63 @@ variable "signin_cookie_name" {
   }
 }
 
+# Every cell the edges serve (CELLS): each cell's E2B names, backup bucket and keys, its e2b secret and its node count.
+locals {
+  edge_cells = {
+    "us-east-1" = {
+      e2b_api_url         = module.cell_us_east_1.e2b_api_url
+      e2b_sandbox_url     = module.cell_us_east_1.e2b_sandbox_url
+      backup_bucket       = module.cell_us_east_1.backup_bucket
+      backups_kms_key_arn = module.cell_us_east_1.backups_kms_key_arn
+      data_kms_key_arn    = module.cell_us_east_1.data_kms_key_arn
+      e2b_secret_arn      = module.cell_us_east_1.e2b_secret_arn
+      node_count          = var.node_count
+    }
+    "ap-south-1" = {
+      e2b_api_url         = module.cell_ap_south_1.e2b_api_url
+      e2b_sandbox_url     = module.cell_ap_south_1.e2b_sandbox_url
+      backup_bucket       = module.cell_ap_south_1.backup_bucket
+      backups_kms_key_arn = module.cell_ap_south_1.backups_kms_key_arn
+      data_kms_key_arn    = module.cell_ap_south_1.data_kms_key_arn
+      e2b_secret_arn      = module.cell_ap_south_1.e2b_secret_arn
+      node_count          = var.node_count_ap_south_1
+    }
+  }
+}
+# The model key (a plain string), created outside Terraform; every edge reads it by this us-east-1 ARN.
+data "aws_secretsmanager_secret" "model_key" { name = "mumbo/prod/deepseek-api-key" }
+
 module "edge_us_east_1" {
   source = "./modules/edge"
 
-  name                  = local.name
-  edge_tag              = var.edge_tag
-  approver_emails       = var.approver_emails
-  ntfy_enabled          = var.ntfy_enabled
-  github_agent_login    = var.github_agent_login
-  github_agent_id       = var.github_agent_id
-  openrouter_models     = var.openrouter_models
-  openrouter_zdr        = var.openrouter_zdr
-  signin_cookie_name    = var.signin_cookie_name
-  node_count            = var.node_count
-  ecr                   = local.ecr
-  cert_validation_fqdns = [for r in aws_route53_record.cert : r.fqdn]
+  name                    = local.name
+  edge_tag                = var.edge_tag
+  approver_emails         = var.approver_emails
+  run_wild_default_emails = var.run_wild_default_emails
+  ntfy_enabled            = var.ntfy_enabled
+  github_agent_login      = var.github_agent_login
+  github_agent_id         = var.github_agent_id
+  openrouter_models       = var.openrouter_models
+  openrouter_zdr          = var.openrouter_zdr
+  signin_cookie_name      = var.signin_cookie_name
+  placement_cache_ms      = var.placement_cache_ms
+  ecr                     = local.ecr
+  cert_validation_fqdns   = [for r in aws_route53_record.cert : r.fqdn]
 
   vpc_id                 = module.cell_us_east_1.vpc_id
   public_subnets         = module.cell_us_east_1.public_subnets
-  private_subnets        = module.cell_us_east_1.private_subnets
-  box_egress_ips         = module.cell_us_east_1.nat_egress_ips
+  private_subnets        = module.cell_us_east_1.edge_subnets                                                  # the edge's own /24s (R6)
+  box_egress_ips         = concat(module.cell_us_east_1.nat_egress_ips, module.cell_ap_south_1.nat_egress_ips) # every cell's NAT (design 17c)
   ecs_cluster_id         = module.cell_us_east_1.ecs_cluster.id
   exec_role              = module.cell_us_east_1.exec_role
   edge_security_group_id = module.cell_us_east_1.edge_security_group_id
   data_security_group_id = module.cell_us_east_1.data_security_group_id
   data_kms_key_arn       = module.cell_us_east_1.data_kms_key_arn
-  backup_bucket          = module.cell_us_east_1.backup_bucket
-  backups_kms_key_arn    = module.cell_us_east_1.backups_kms_key_arn
-  e2b_secret_arn         = module.cell_us_east_1.e2b_secret_arn
-  e2b_api_url            = module.cell_us_east_1.e2b_api_url
-  e2b_sandbox_url        = module.cell_us_east_1.e2b_sandbox_url
+  store_secret_arn       = aws_secretsmanager_secret.store.arn
+  cells                  = local.edge_cells
+  cells_enabled          = var.edge_cells
+  edge_secret_arn        = aws_ssm_parameter.edge["edge-secret"].arn
+  model_key_secret_arn   = data.aws_secretsmanager_secret.model_key.arn
 }
 
 data "aws_route53_zone" "public" { name = "mumbo.si" }
@@ -133,4 +180,4 @@ resource "aws_ssm_parameter" "edge" {
 }
 
 output "edge_alb" { value = module.edge_us_east_1.edge_alb.dns_name }
-output "edge_redis_endpoint" { value = module.edge_us_east_1.edge_redis_endpoint }
+output "edge_redis_endpoint" { value = aws_elasticache_replication_group.edge.primary_endpoint_address }

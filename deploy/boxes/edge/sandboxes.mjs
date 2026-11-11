@@ -1,11 +1,12 @@
 // Child sandboxes for agents (PRODUCTION.md stage 8). A box's agent reaches these tools over MCP on the model host
 // with its box token; the E2B key stays in the edge. Children are small E2B sandboxes owned by the box's user
 // (metadata `owner`, never `user`, so the router never mistakes one for the user's box), capped per user, and killed
-// when their timeout ends. Projects run here, never in the box that holds the user's signed-in accounts.
+// when their timeout ends. They run in their owner's cell, the one the owner's placement doc names (cells.mjs). Projects run here, never in the box that holds the user's signed-in accounts.
 import { z } from 'zod'
 import { createMcpHandler, McpServer } from '@modelcontextprotocol/server'
 import { toNodeHandler } from '@modelcontextprotocol/node'
 import { UNITS, atCapacity } from './capacity.mjs'
+import { cellIn, placementKey, regionOf } from './cells.mjs'
 import { MESSAGE_ID, MESSAGE_KINDS } from './projects.mjs'
 
 const MAX_OUTPUT = 64 * 1024
@@ -14,52 +15,57 @@ const REPORT_TEXT_MAX = 20_000
 const clip = (s) => (s.length > MAX_OUTPUT ? `${s.slice(0, MAX_OUTPUT)}\n[… ${s.length - MAX_OUTPUT} more characters cut]` : s)
 const fail = (status, message) => Object.assign(new Error(message), { status })
 
-/** The child-sandbox operations, each scoped to one user. `e2b` is the SDK module. */
-export function children({ e2b, cfg, log = console.log }) {
+/** The child-sandbox operations, each scoped to one user (an email or `project:<id>`), in that user's cell. `cells` is
+ *  cells.mjs cellClients' map and `store` the edge store, which holds the placement docs. */
+export function children({ cells, store, cfg, log = console.log }) {
   const say = (fields) => log(JSON.stringify({ edge: 'child', ...fields }))
-  async function mine(user) {
-    const pager = e2b.Sandbox.list({ query: { metadata: { owner: user }, state: ['running'] } })
+  const cellOf = async (user) => cellIn(cells, regionOf(await store.getDoc(placementKey(user))))
+  async function mine(cell, user) {
+    const pager = cell.Sandbox.list({ query: { metadata: { owner: user }, state: ['running'] } })
     const found = []
     while (pager.hasNext) found.push(...await pager.nextItems())
     return found
   }
-  async function owned(user, id) {
-    const info = await e2b.Sandbox.getInfo(id).catch(() => undefined)
+  // Another cell's sandbox is unknown to this cell's E2B: not yours.
+  async function owned(cell, user, id) {
+    const info = await cell.Sandbox.getInfo(id).catch(() => undefined)
     if (info?.metadata?.owner !== user) throw fail(404, `no sandbox ${id} of yours`)
-    return e2b.Sandbox.connect(id)
+    return cell.Sandbox.connect(id)
   }
   return {
     async create(user, parent, { template = cfg.childTemplates[0], timeoutMinutes = 30 } = {}) {
       if (!cfg.childTemplates.includes(template)) throw fail(400, `template must be one of ${cfg.childTemplates.join(', ')}`)
-      if ((await mine(user)).length >= cfg.maxChildren) throw fail(429, `you already run ${cfg.maxChildren} sandboxes; kill one first`)
-      if (await atCapacity(e2b, cfg, UNITS.child)) throw fail(503, 'mumbo is at capacity right now; try again in a few minutes')
-      const box = await e2b.Sandbox.create(template, {
+      const cell = await cellOf(user)
+      if ((await mine(cell, user)).length >= cfg.maxChildren) throw fail(429, `you already run ${cfg.maxChildren} sandboxes; kill one first`)
+      if (await atCapacity(cell, UNITS.child)) throw fail(503, 'mumbo is at capacity right now; try again in a few minutes')
+      const box = await cell.Sandbox.create(template, {
         timeoutMs: Math.min(Math.max(timeoutMinutes, 1), 240) * 60_000,
         metadata: { owner: user, parent },
         network: { allowPublicTraffic: false },
       })
-      say({ msg: 'created', user, parent, child: box.sandboxId, template })
+      say({ msg: 'created', user, parent, child: box.sandboxId, template, region: cell.region })
       return { id: box.sandboxId, template, timeoutMinutes }
     },
     async list(user) {
-      return (await mine(user)).map(s => ({ id: s.sandboxId, template: s.templateId, startedAt: s.startedAt, endAt: s.endAt }))
+      return (await mine(await cellOf(user), user)).map(s => ({ id: s.sandboxId, template: s.templateId, startedAt: s.startedAt, endAt: s.endAt }))
     },
     async run(user, id, { command, timeoutSeconds = 120, cwd }) {
-      const box = await owned(user, id)
+      const box = await owned(await cellOf(user), user, id)
       const r = await box.commands.run(command, { timeoutMs: Math.min(timeoutSeconds, 1800) * 1000, cwd })
         .catch((e) => (typeof e.exitCode === 'number' ? e : Promise.reject(e)))  // a non-zero exit is a result, not a failure
       return { exitCode: r.exitCode, stdout: clip(r.stdout ?? ''), stderr: clip(r.stderr ?? '') }
     },
     async write(user, id, { path, content }) {
-      await (await owned(user, id)).files.write(path, content)
+      await (await owned(await cellOf(user), user, id)).files.write(path, content)
       return { path, bytes: Buffer.byteLength(content) }
     },
     async read(user, id, { path }) {
-      return { path, content: clip(await (await owned(user, id)).files.read(path)) }
+      return { path, content: clip(await (await owned(await cellOf(user), user, id)).files.read(path)) }
     },
     async kill(user, id) {
-      await owned(user, id)
-      await e2b.Sandbox.kill(id)
+      const cell = await cellOf(user)
+      await owned(cell, user, id)
+      await cell.Sandbox.kill(id)
       say({ msg: 'killed', user, child: id })
       return { id, killed: true }
     },

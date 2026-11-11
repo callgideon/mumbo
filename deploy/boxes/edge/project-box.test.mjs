@@ -5,13 +5,15 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { startScript, boxSite, boxes, assistantInstructions, DENIED_URLS, MUMBO_MCP_OVERLAY, MUMBO_MCP_PACKAGE, mumboMcpKey } from './edge.mjs'
+import { startScript, boxSite, boxes, assistantInstructions, DENIED_URLS, MUMBO_MCP_OVERLAY, MUMBO_MCP_PACKAGE, mumboMcpKey, RUN_WILD_OVERLAY, RUN_WILD_PACKAGE } from './edge.mjs'
 import { memoryStore } from './store.mjs'
 import { projects } from './projects.mjs'
 import { templateArgs } from './template.mjs'
 
 const c = { llmHost: 'l', publicHost: 'boxes.x' }
 const boxFiles = { proxy: 'PROXY-JS\n', gh: '#!/bin/sh\nGH\n' }
+/** One us-east-1 cell over a fake E2B, as cells.mjs cellClients builds one; `extra` overrides its fields. */
+const oneCell = (e2b, extra = {}) => new Map([['us-east-1', { region: 'us-east-1', Sandbox: e2b.Sandbox, proxy: new URL('http://127.0.0.1:1'), bucket: 'bk', maxUnits: 0, presignGet: async () => undefined, presignPut: async () => 'P', ...extra }]])
 const b64 = (s) => Buffer.from(s).toString('base64')
 const at = (text, needle) => { const i = text.indexOf(needle); assert.ok(i >= 0, `missing: ${needle}`); return i }
 
@@ -32,8 +34,23 @@ test('a user box start script is byte-for-byte what it was before project boxes 
   // and checked), in place of the iptables OUTPUT rules and the desktop's INPUT rules, because E2B's kernel has no
   // xt_owner; the iptables helper is best effort, for a template before B24 only. Then its output chain accepted the
   // allowed users first and reset the rest, so a socket whose user nft cannot read is refused. Then browsermcp's row
-  // held the group uploads alone: with staged copies it no longer reads Downloads.
-  assert.equal(createHash('sha256').update(s).digest('hex'), '31654bfd201ec93f8f79f012587e339a40e6a84f375b9a179f79fbadb0eaddc5')
+  // held the group uploads alone: with staged copies it no longer reads Downloads. Then the web_fetch contract of
+  // 2026-11-11, on an image with the harness only: the containment rows disable web-fetch-http, which fetches from root
+  // dsh outside the firewall and reaches loopback, and send web_fetch to the DeepSeek Fetch API through the edge's model
+  // host (containment.test.mjs). Then the role's /home/agent line moved into the script, added on a B24 image only.
+  // Then RW1's Run Wild block and $RUNWILD_PATCH after $MCP_PATCH, behind the image's @mumbo/run-wild (the Run Wild test below).
+  // Then the B24 fix's input chain: from beyond loopback a new TCP connection reaches only envd, dsh, the live view and the
+  // door, since E2B's envd forwards every loopback listener to the box address (containment.test.mjs).
+  // Then the B24 fix's system repair, first, before the ports marker is read: on the root filesystem but the users',
+  // temporary and runtime trees, other owners' paths become root's and o+w (sticky directories aside) and a group's g+w
+  // other than root's go, then checked, because E2B's build leaves /usr/local, /code and envd world-writable (containment.test.mjs).
+  // Then the repair took in /home, /tmp and the other excluded trees' top directories, leaving only what is in them; and
+  // agent's row gained its npm prefix and its own program directories on PATH, since /usr/local is root's alone (containment.test.mjs).
+  // Then the repair took ownership only from login users (uid 1000 or more) and g+w only from login groups, read with
+  // getent, so system daemons keep their paths (containment.test.mjs). Then KasmVNC's comment named xvnc its own user
+  // rather than a system user, since the template makes it without `-r` (template.mjs).
+  // Then the repair first stops the start when E2B's user, or on a B24 template a user it makes, is below uid 1000 (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), '0a94a49e5253542595a72978812b2a9c77dd1dc4dfce4ff633393cd0ad45fc6e')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -47,11 +64,24 @@ test('a project box start script is byte-for-byte what it was before B18 changed
   // its $SUPERAGENT_EDGE grep, and the layout exports MUMBO_WORK_DIR, MUMBO_WORKER_DIR and MUMBO_GH_CONFIG_DIR for that
   // overlay, stops on an overlay that does not name MUMBO_WORK_DIR, and names any group it needs that the template
   // lacks (containment.test.mjs).
-  // B24 template. Then for the B24 template's firewall as one native nftables table (inet mumbo, loaded with nft -f and
+  // Then for the B24 template's firewall as one native nftables table (inet mumbo, loaded with nft -f and
   // checked) in place of the iptables OUTPUT rules, because E2B's kernel has no xt_owner, and the iptables helper best
   // effort, for a template before B24 only. Then its output chain accepted the allowed users first and reset the rest, so
-  // a socket whose user nft cannot read is refused.
-  assert.equal(createHash('sha256').update(s).digest('hex'), '21eccfb61a58ee5ac6e7457d33116a4e348bd0d4767bb9090cb26280675d8a81')
+  // a socket whose user nft cannot read is refused. Then the web_fetch contract of 2026-11-11, on an image with the
+  // harness only: the containment rows disable web-fetch-http, which fetches from root dsh outside the firewall and
+  // reaches loopback, and send web_fetch to the DeepSeek Fetch API through the edge's model host (containment.test.mjs).
+  // Then the role's /home/agent line moved into the script, added on a B24 image only. Then the B24 fix's input chain: from
+  // beyond loopback a new TCP connection reaches only envd, dsh, the live view and the door, since E2B's envd forwards
+  // every loopback listener to the box address (containment.test.mjs). Then the B24 fix's system repair, first, before the
+  // ports marker is read: on the root filesystem but the users', temporary and runtime trees, other owners' paths become
+  // root's and o+w (sticky directories aside) and a group's g+w other than root's go, then checked, because E2B's build
+  // leaves /usr/local, /code and envd world-writable (containment.test.mjs). Then the repair took in /home, /tmp and the
+  // other excluded trees' top directories, leaving only what is in them; and agent's row gained its npm prefix and its own
+  // program directories on PATH, after the command shims and the gh wrapper, since /usr/local is root's alone (containment.test.mjs).
+  // Then the repair took ownership only from login users (uid 1000 or more) and g+w only from login groups, read with
+  // getent, so system daemons keep their paths (containment.test.mjs).
+  // Then the repair first stops the start when E2B's user, or on a B24 template a user it makes, is below uid 1000 (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), '52eaff8f93a0fa176c7eea2e2da817b86c072d1ad73865ae40e1fd44639792b7')
 })
 
 const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'
@@ -369,12 +399,15 @@ test('create() starts a project box from projectTemplate with the owners as pane
     },
   }
   const store = memoryStore()
-  const cfg = { ...c, template: 'T-user', projectTemplate: 'T-project', idleMs: 1000, maxRunningUnits: 0 }
+  const cfg = { ...c, template: 'T-user', projectTemplate: 'T-project', idleMs: 1000, edgeRegion: 'us-east-1', runWildDefaultEmails: ['a@x.com'] }
   const { id } = await projects({ store, admitted: () => true, log: () => {} }).create('Owner@x.com', 'P')
-  const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'P', boxFiles, log: () => {} })
+  const b = boxes({ cells: oneCell(e2b), store, cfg, edgeKey: 'k', boxFiles, log: () => {} })
   await b.ensure(`project:${id}`)
   await b.ensure('a@x.com')
   assert.deepEqual(made, ['T-project', 'T-user'])
+  // The person box's own email decides its Run Wild default.
+  assert.ok(written[1].includes('export MUMBO_RUN_WILD=1 MUMBO_NEW_SESSION_PRESET=run-wild\n'))
+  assert.ok(!written[0].includes('RUN_WILD') && !written[0].includes('run-wild'))
   assert.match(written[0], /MUMBO_PANEL_ADMINS='owner@x\.com'/)
   assert.ok(!written[1].includes('MUMBO_PANEL_ADMINS'))
   // The person box gets its own door key, derived from the edge key and its id, and its handle; the project box neither.
@@ -417,6 +450,37 @@ test('door to Mumbo: a person box writes its key root-only and patches the perso
   assert.ok(!p.includes('MCP_PATCH') && !p.includes('KEY_-1') && !p.includes('mumbo/mcp'))
 })
 
+test('Run Wild: a person box patches its overlay after the door\'s and exports MUMBO_RUN_WILD only when the image ships it and links @mumbo/run-wild; the default preset only for listed emails; a project box never', () => {
+  const listed = { ...c, runWildDefaultEmails: ['a@x.com'] }
+  const u = startScript(listed, 'T', boxSite(listed, 'a@x.com'), 'role', undefined, boxFiles, [], { key: 'KEY', principal: 'a' }, 'A@x.com')
+  assert.ok(u.includes(' $MCP_PATCH $RUNWILD_PATCH '), 'patched after the door overlay')
+  assert.ok(at(u, 'MCP_PATCH="--patch') < at(u, '# Run Wild'))
+  // A person box without the door's values still gets it.
+  assert.ok(startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles).includes(' $RUNWILD_PATCH '))
+  const dir = mkdtempSync(join(tmpdir(), 'mumbo-runwild-'))
+  const overlay = join(dir, RUN_WILD_OVERLAY), pkg = join(dir, RUN_WILD_PACKAGE)
+  const run = (script) => {
+    const from = at(script, '# Run Wild'), to = script.indexOf('\nfi\n', from) + 4
+    return execFileSync('sh', ['-c', `set -eu\n${script.slice(from, to).replaceAll(RUN_WILD_OVERLAY, overlay).replaceAll(RUN_WILD_PACKAGE, pkg)}echo "$RUNWILD_PATCH|\${MUMBO_RUN_WILD-}|\${MUMBO_NEW_SESSION_PRESET-}"`], { encoding: 'utf8' }).trim()
+  }
+  const other = startScript(listed, 'T', boxSite(listed, 'b@x.com'), 'role', undefined, boxFiles, [], undefined, 'b@x.com')
+  try {
+    // An image without the overlay, or with it but without the linked package: nothing, the listed person included.
+    assert.equal(run(u), '||')
+    mkdirSync(join(overlay, '..'), { recursive: true })
+    writeFileSync(overlay, '')
+    assert.equal(run(u), '||')
+    mkdirSync(join(pkg, '..'), { recursive: true })
+    writeFileSync(pkg, '{}')
+    assert.equal(run(u), `--patch ${overlay}|1|run-wild`)
+    assert.equal(run(other), `--patch ${overlay}|1|`, 'an unlisted person gets the preset, not the default')
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+  // A project box never mounts it, even with its principal listed.
+  const pc = { ...c, projectDomain: 'boxes.x', runWildDefaultEmails: ['project:0123456789abcdef'] }
+  const p = startScript(pc, 'T', boxSite(pc, 'project:0123456789abcdef'), 'role', 'K', boxFiles, [], undefined, 'project:0123456789abcdef')
+  assert.ok(!p.includes('RUNWILD') && !p.includes('RUN_WILD') && !p.includes('run-wild'))
+})
+
 test('relay replies: a project box writes its token root-only and exports the edge settings only when the image\'s project overlay reads them; a person box gets none', () => {
   const p = startScript({ ...c, projectDomain: 'boxes.x' }, 'mbx.T.S', boxSite({ ...c, projectDomain: 'boxes.x' }, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
   const from = at(p, '# Project box: superagent reports relay replies'), to = p.indexOf('\nfi\n', from) + 4
@@ -454,16 +518,16 @@ test('create() charges a project box 4 capacity units and a person box 2', async
   }
   const store = memoryStore()
   // Nothing runs; 3 units are left: a person box (2) fits, a project box (4) does not.
-  const cfg = { ...c, template: 'T-user', projectTemplate: 'T-project', idleMs: 1000, maxRunningUnits: 3 }
+  const cfg = { ...c, template: 'T-user', projectTemplate: 'T-project', idleMs: 1000, edgeRegion: 'us-east-1' }
   const { id } = await projects({ store, admitted: () => true, log: () => {} }).create('Owner@x.com', 'P')
-  const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'P', boxFiles, log: () => {} })
+  const b = boxes({ cells: oneCell(e2b, { maxUnits: 3 }), store, cfg, edgeKey: 'k', boxFiles, log: () => {} })
   await assert.rejects(b.ensure(`project:${id}`), (e) => e.status === 503 && e.capacity === true)
   await b.ensure('a@x.com')
   assert.deepEqual(made, ['T-user'])
 })
 
 test('templateArgs defaults', () => {
-  assert.deepEqual(templateArgs(['n', 's', 'img'], {}), { image: 'img', name: 'mumbo-box', memoryMB: 4096, cpuCount: 2, minAvailMB: 9216 })
+  assert.deepEqual(templateArgs(['n', 's', 'img'], {}), { image: 'img', name: 'mumbo-box', memoryMB: 4096, cpuCount: 2, minAvailMB: 30720 })
   assert.deepEqual(templateArgs(['n', 's', 'img', 'mumbo-project', '2048', '4'], { MIN_AVAIL_MB: '10240' }), { image: 'img', name: 'mumbo-project', memoryMB: 2048, cpuCount: 4, minAvailMB: 10240 })
   assert.throws(() => templateArgs(['n', 's'], {}), /ECR image/)
   for (const bad of ['', 'x', '9.5', '-1']) assert.throws(() => templateArgs(['n', 's', 'img'], { MIN_AVAIL_MB: bad }), /MIN_AVAIL_MB/, bad)

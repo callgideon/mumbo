@@ -39,15 +39,16 @@ async function setup(extra = {}) {
     seen.push({ path: req.url, headers: req.headers })
     socket.end('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n')
   })
-  const cfg = { publicHost: 'boxes.mumbo.si', projectDomain: 'boxes.mumbo.si', approveHost: 'approve.boxes.mumbo.si', allowed: ['@x.com'], signinCookie: '_oauth2_proxy_mumbo', ...extra, proxy: new URL(`http://127.0.0.1:${await listen(fakeBox)}`) }
+  const cfg = { publicHost: 'boxes.mumbo.si', projectDomain: 'boxes.mumbo.si', approveHost: 'approve.boxes.mumbo.si', allowed: ['@x.com'], signinCookie: '_oauth2_proxy_mumbo', ...extra }
+  const proxy = new URL(`http://127.0.0.1:${await listen(fakeBox)}`)
   const proj = projects({ store: memoryStore(), admitted: () => true, log: () => {} })
   const { id } = await proj.create('a@x.com', 'P')
   const key = memberKey('k', 'pbox')
   const ensured = []; const approved = []
   const box = {
     // Both boxes were created under boxes.mumbo.si, so that is their masked host (boxSite at creation).
-    ensure: async (p) => { ensured.push(p); return p === `project:${id}` ? { id: 'pbox', token: 'OWNER', host: `p-${id}.boxes.mumbo.si`, member: (e) => memberHeader(key, e) } : { id: 'ubox', token: 'T', host: 'boxes.mumbo.si' } },
-    touch: async () => {}, forget: async () => {},
+    ensure: async (p) => { ensured.push(p); return p === `project:${id}` ? { id: 'pbox', token: 'OWNER', host: `p-${id}.boxes.mumbo.si`, proxy, member: (e) => memberHeader(key, e) } : { id: 'ubox', token: 'T', host: 'boxes.mumbo.si', proxy } },
+    touch: async () => {}, uncache() {},
   }
   const approve = async (req, res) => { approved.push(req.url); res.writeHead(200).end('approve page') }
   const server = userServer({ cfg, box, projects: proj, approve, log: () => {} })

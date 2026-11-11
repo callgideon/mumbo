@@ -197,8 +197,8 @@ const keyPage = (r) => {
 async function site(projectName, log = () => {}, wrap = (keys) => keys) {
   const t = await setup(undefined, log)
   if (projectName) t.H = (await t.proj.create(A, projectName)).id
-  const cfg = { publicHost: HOST, projectDomain: HOST, approveHost: APPROVE, allowed: ['@x.com'], signinCookie: '_oauth2_proxy_mumbo', proxy: new URL('http://127.0.0.1:1') }
-  const box = { ensure: async () => assert.fail('the key manager starts no box'), touch: async () => {}, forget: async () => {}, firstSetUp: async () => false }
+  const cfg = { publicHost: HOST, projectDomain: HOST, approveHost: APPROVE, allowed: ['@x.com'], signinCookie: '_oauth2_proxy_mumbo' }
+  const box = { ensure: async () => assert.fail('the key manager starts no box'), touch: async () => {}, uncache() {}, firstSetUp: async () => false }
   const approve = async (req, res) => { res.writeHead(200).end('the approve page') }
   const server = userServer({ cfg, box, projects: t.proj, approve, keys: keyManager({ cfg, keys: wrap(t.keys), projects: t.proj, csrfKey: CSRF_KEY, now: () => NOW }), log })
   return { ...t, port: await listen(server), close: () => server.close() }

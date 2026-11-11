@@ -22,9 +22,9 @@ test('the sign-in cookie never reaches a box, Domain is dropped from box cookies
   const seen = []
   const fakeBox = createServer((req, res) => { seen.push(req.headers); res.writeHead(200, { 'set-cookie': ['s=1; Domain=.boxes.mumbo.si; Path=/'] }).end('from box') })
   const boxPort = await listen(fakeBox)
-  const cfg = { publicHost: 'boxes.mumbo.si', approveHost: 'approve.boxes.mumbo.si', allowed: ['@x.com'], signinCookie: '_oauth2_proxy_mumbo', proxy: new URL(`http://127.0.0.1:${boxPort}`) }
+  const proxy = new URL(`http://127.0.0.1:${boxPort}`), cfg = { publicHost: 'boxes.mumbo.si', approveHost: 'approve.boxes.mumbo.si', allowed: ['@x.com'], signinCookie: '_oauth2_proxy_mumbo' }
   const ensured = []; const approved = []
-  const box = { ensure: async (p) => { ensured.push(p); return { id: 'b1', token: 'T' } }, touch: async () => {}, forget: async () => {} }
+  const box = { ensure: async (p) => { ensured.push(p); return { id: 'b1', token: 'T', proxy } }, touch: async () => {}, uncache() {} }
   const approve = async (req, res, email) => { approved.push(email); res.writeHead(200).end('approve page') }
   const server = userServer({ cfg, box, approve, log: () => {} })
   const port = await listen(server)
@@ -62,8 +62,8 @@ test('a WebSocket upgrade reaches the box without the sign-in cookie, and its 10
       'Set-Cookie: t=1; Domain=.boxes.mumbo.si; Path=/\r\nSet-Cookie: u=2; Path=/; Secure\r\n\r\n')
   })
   const boxPort = await listen(fakeBox)
-  const cfg = { publicHost: 'boxes.mumbo.si', approveHost: 'approve.boxes.mumbo.si', allowed: ['@x.com'], signinCookie: '_oauth2_proxy_mumbo', proxy: new URL(`http://127.0.0.1:${boxPort}`) }
-  const box = { ensure: async () => ({ id: 'b1', token: 'T' }), touch: async () => {}, forget: async () => {} }
+  const proxy = new URL(`http://127.0.0.1:${boxPort}`), cfg = { publicHost: 'boxes.mumbo.si', approveHost: 'approve.boxes.mumbo.si', allowed: ['@x.com'], signinCookie: '_oauth2_proxy_mumbo' }
+  const box = { ensure: async () => ({ id: 'b1', token: 'T', proxy }), touch: async () => {}, uncache() {} }
   const server = userServer({ cfg, box, log: () => {} })
   const port = await listen(server)
   try {
@@ -77,11 +77,11 @@ test('a WebSocket upgrade reaches the box without the sign-in cookie, and its 10
 test('a relay request (boxFetcher) reaches the box without sign-in cookies, even when its caller passes them', async () => {
   const seen = []
   const fakeBox = createServer((req, res) => { seen.push(req.headers); res.end('{}') })
-  const cfg = { publicHost: 'boxes.mumbo.si', signinCookie: '_oauth2_proxy_mumbo', proxy: new URL(`http://127.0.0.1:${await listen(fakeBox)}`) }
+  const proxy = new URL(`http://127.0.0.1:${await listen(fakeBox)}`), cfg = { publicHost: 'boxes.mumbo.si', signinCookie: '_oauth2_proxy_mumbo' }
   try {
-    await boxFetcher(cfg)({ id: 'b1' }, 'p-0123456789abcdef.boxes.mumbo.si', '/api/session/create', { method: 'POST', headers: { cookie: SIGNED_IN_COOKIES }, body: '{}' })
+    await boxFetcher(cfg)({ id: 'b1', proxy }, 'p-0123456789abcdef.boxes.mumbo.si', '/api/session/create', { method: 'POST', headers: { cookie: SIGNED_IN_COOKIES }, body: '{}' })
     assert.equal(seen[0].cookie, 'dsh-auth-x=d')
-    await boxFetcher(cfg)({ id: 'b1' }, 'p-0123456789abcdef.boxes.mumbo.si', '/api/session/create', { method: 'POST', headers: { cookie: ['dsh-auth-x=d', '_oauth2_proxy_mumbo=a'] }, body: '{}' })
+    await boxFetcher(cfg)({ id: 'b1', proxy }, 'p-0123456789abcdef.boxes.mumbo.si', '/api/session/create', { method: 'POST', headers: { cookie: ['dsh-auth-x=d', '_oauth2_proxy_mumbo=a'] }, body: '{}' })
     assert.equal(seen[1].cookie, 'dsh-auth-x=d', 'an array-valued cookie header is filtered per cookie')
   } finally { fakeBox.close() }
 })
@@ -93,8 +93,8 @@ test('a box cannot plant a sign-in cookie: Set-Cookie with a sign-in name or no 
   fakeBox.on('upgrade', (req, socket) => {
     socket.end(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n${planted.map(c => `Set-Cookie: ${c}\r\n`).join('')}\r\n`)
   })
-  const cfg = { publicHost: 'boxes.mumbo.si', approveHost: 'approve.boxes.mumbo.si', allowed: ['@x.com'], signinCookie: '_oauth2_proxy_mumbo', proxy: new URL(`http://127.0.0.1:${await listen(fakeBox)}`) }
-  const box = { ensure: async () => ({ id: 'b1', token: 'T' }), touch: async () => {}, forget: async () => {} }
+  const proxy = new URL(`http://127.0.0.1:${await listen(fakeBox)}`), cfg = { publicHost: 'boxes.mumbo.si', approveHost: 'approve.boxes.mumbo.si', allowed: ['@x.com'], signinCookie: '_oauth2_proxy_mumbo' }
+  const box = { ensure: async () => ({ id: 'b1', token: 'T', proxy }), touch: async () => {}, uncache() {} }
   const server = userServer({ cfg, box, log: () => {} })
   const port = await listen(server)
   const signedIn = { host: 'boxes.mumbo.si', 'x-forwarded-email': 'a@x.com', cookie: 'dsh-auth-x=d' }
