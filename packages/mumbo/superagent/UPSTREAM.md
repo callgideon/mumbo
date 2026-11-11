@@ -2,7 +2,7 @@
 
 `@mumbo/superagent` is a pinned copy of https://github.com/deepseek-ai/dsh-superagent-prototype at commit `8c32a9dc5d72c033816c6a8110b37f40cf94fba4`, MIT licensed (see `LICENSE`).
 
-Every change to the copy is an entry below. A path outside `packages/mumbo/superagent/` that exists for the copy is listed too. Oxlint ignores `packages/mumbo/superagent/**`; S1 lists the other repository gate exclusions.
+Every change to the copy is an entry below. A path outside `packages/mumbo/superagent/` that exists for the copy is listed too. Oxlint ignores `packages/mumbo/superagent/**` except `src/mumbo/` (S11); S1 lists the other repository gate exclusions, and S11 narrows two of them.
 
 ## S1: port and packaging
 
@@ -193,3 +193,24 @@ Files outside the copy changed for S10:
 - `deploy/mumbo-project.overlay.yml`: the `dsh-superagent` row sets `edge` from `MUMBO_EDGE_MCP_URL`, `MUMBO_EDGE_TOKEN_FILE` and `MUMBO_PROJECT_ID` when any is set, so a partial set fails the Config at load, and leaves it unset when none is. The edge half exports the three in a project box's start script: the model host's `/mcp/report` URL, the path of a root-only file holding the box's token (the one dsh gets as `DEEPSEEK_API_KEY`), and the project id.
 - `apps/cli/tests/project-overlay-loader.spec.ts`: boots the overlay through the real Loader with all three variables (resolved), none (unset), and two of them (the plugin fails at load).
 - `docs/config-catalog.md`: regenerated; the `DeploymentConfig` source line moved.
+
+## S11: Executor port
+
+Upstream's Engine calls one Executor, the DshExecutor, for every Ticket. In Mumbo a Ticket may be taken by a worker outside the box, so the Engine's Executor routes each Ticket to the Executor of its kind. Nothing selects an external Ticket yet, and local Tickets behave as before. Written by task B37 T1.
+
+The schema bump to 12 that makes an older build refuse a database holding external Tickets lands with T2a (S12), the first change after which an external Ticket can exist.
+
+- `src/mumbo/executors.ts` (new): `ExecutorKind` (`local`, `external`); `ExecutorPlugin`, the core `Executor` with `install`, `resume(tickets)`, `shutdown` and `dispose`; `executorOf`, a Ticket's kind, `local` without `executor`; `Executors`, which sends `start`, `deliver` and `stop` to the Ticket's kind, calls `install`, `shutdown` and `dispose` on every kind, gives `resume` each kind's own Tickets only, and, when a kind's shutdown fails, fails with that failure once every kind has finished; and `heldExecutor`, the `external` kind, which does nothing, so an external Ticket is neither launched nor interrupted.
+- `src/core/model.ts`: `Ticket.executor?: 'external'`.
+- `src/executor/dsh.ts`: `DshExecutor` implements `ExecutorPlugin`; `resume(tickets)` reconciles the Tickets it is given, every open Ticket by default.
+- `src/app/runtime.ts`: `Runtime.executor` stays the DshExecutor. The private `executors` field, `Executors` over `{ local: executor, external: heldExecutor }`, is the Engine's Executor; start installs it after Sessions and resumes it with the open Tickets; stop shuts it down and disposes it. `prepareTicket` and `HttpHost.executor` are unchanged.
+- Docs: the `src/mumbo/executors.ts` and `tests/executors.spec.ts` rows of `docs/007-architecture.md`, which `tests/docs.spec.ts` requires, its Core classes diagram (the Engine's Executor is `Executors`, whose `local` kind is the DshExecutor), and its DshExecutor paragraph; the README In Mumbo bullet.
+- Not updated, upstream prose: the Executor rows of `docs/001-domain.md` (What is reusable, and the glossary) describe the DshExecutor only: one Executor Session and one directory per Ticket.
+- Tests: `tests/executors.spec.ts` checks routing by kind, the lifecycle calls on every kind, a failed shutdown, `heldExecutor`, and a Runtime start over stored Tickets (a running local Assignment ends `hostRestarted` with a new pending one and its launch queued; a running and a pending external Assignment stay as stored, with no launch; then an Input to each external Ticket and a stop of the running one call no DshExecutor method, while an Input to the local Ticket starts it there).
+
+Files outside the copy changed for S11:
+
+- `vitest.config.ts`: the coverage `exclude` lists `packages/mumbo/superagent/src/!(mumbo)/**/*.{ts,tsx}` and `packages/mumbo/superagent/src/*.{ts,tsx}` instead of all of `src`, so `src/mumbo/` is under the per-file 100% gate.
+- `.oxlintrc.json` and `.oxlintrc.staged.json`: `!packages/mumbo/superagent/src/mumbo/**` after the copy's ignore pattern, so Oxlint checks `src/mumbo/` and nothing else of the copy; `scripts/oxlint-contract.spec.ts` checks both configs.
+- `scripts/verify-no-unknown-casts.ts`: the scan skips the copy except `src/mumbo/`; `scripts/verify-no-unknown-casts.spec.ts` checks it.
+- `scripts/verify-export-jsdoc.ts` still skips the whole copy. For a package whose `exports` has no `./src/*`, it checks only the names its entry points export, and `src/mumbo/` exports none of those, so including it would check nothing.

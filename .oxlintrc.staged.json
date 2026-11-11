@@ -14,6 +14,7 @@
     "website/.generated/**",
     "vendor/**",
     "packages/mumbo/superagent/**", // pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md
+    "!packages/mumbo/superagent/src/mumbo/**", // Mumbo's own modules in the copy are linted; see its UPSTREAM.md S11
     "native/**",
     "**/*.js",
     "**/*.mjs",

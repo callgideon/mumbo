@@ -236,6 +236,16 @@ describe('unknown assertion source discovery', () => {
     expect(verifyNoUnknownCasts(root)).toBe(0)
   })
 
+  it('checks src/mumbo/ of the pinned superagent copy and skips the rest of the copy', () => {
+    const root = fixture()
+    for (const file of ['src/mumbo/input.ts', 'src/app/input.ts', 'src/input.ts', 'tests/input.ts']) {
+      write(root, `packages/mumbo/superagent/${file}`, assertion)
+    }
+    git(root, 'add', '.')
+    expect(scanUnknownCasts(root).map(cast => cast.file)).toEqual(['packages/mumbo/superagent/src/mumbo/input.ts'])
+    expect(() => verifyNoUnknownCasts(root)).toThrow('packages/mumbo/superagent/src/mumbo/input.ts:1')
+  })
+
   it.each(['packages', 'apps', 'scripts', 'website'])('rejects discovery missing %s', (area) => {
     const root = fixture()
     unlinkSync(join(root, `${area}/seed.ts`))
