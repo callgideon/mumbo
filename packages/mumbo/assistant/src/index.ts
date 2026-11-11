@@ -68,25 +68,34 @@ export const Config: z<Config> = z.object({
 /**
  * Resolve Mumbo's Session, creating and titling it only on `session/not-found`, then unarchive it as needed, and unpin it
  * once: the sidebar entry replaces the pin an earlier version of this plugin set, and a pin the person sets later stays.
+ * Each write starts only while `signal` is not aborted.
  * @param ctx - plugin context carrying the injected services.
  * @param config - validated configuration.
  * @param steps - the finished one-time start steps.
- * @throws the session controller's, Workspace registry's, or storage domain's error from any step.
+ * @param signal - aborted when the plugin unloads.
+ * @throws the session controller's, Workspace registry's, or storage domain's error from any step, or `signal`'s reason
+ *   once it is aborted.
  */
-async function ensure(ctx: Context, config: Config, steps: KvTable<typeof UNPINNED, StepRecord>): Promise<void> {
+async function ensure(ctx: Context, config: Config, steps: KvTable<typeof UNPINNED, StepRecord>, signal: AbortSignal): Promise<void> {
   const resolved = await ctx.sessionController.resolveAgent(MUMBO_SESSION_ID)
+  signal.throwIfAborted()
   if ('error' in resolved) {
     if (resolved.error.code !== 'session/not-found') throw resolved.error
     const workspace = await ctx.workspaceRegistry.create(config.workspace)
+    signal.throwIfAborted()
     const { sessionId } = await ctx.sessionController.create({ sessionId: MUMBO_SESSION_ID, workspaceId: workspace.id })
+    signal.throwIfAborted()
     await ctx.sessionController.rename({ sessionId, title: MUMBO_TITLE })
+    signal.throwIfAborted()
   }
   if (ctx.workspaceRegistry.archivedSessionIds.includes(MUMBO_SESSION_ID)) {
     await ctx.workspaceRegistry.unarchiveSession(MUMBO_SESSION_ID)
+    signal.throwIfAborted()
   }
   if (steps.get(UNPINNED) !== undefined) return
   if (ctx.workspaceRegistry.pinnedSessionIds.includes(MUMBO_SESSION_ID)) {
     await ctx.workspaceRegistry.unpinSession(MUMBO_SESSION_ID)
+    signal.throwIfAborted()
   }
   await steps.put(UNPINNED, { at: Date.now() })
 }
@@ -94,9 +103,12 @@ async function ensure(ctx: Context, config: Config, steps: KvTable<typeof UNPINN
 /**
  * Open the `mumbo_assistant` domain, register the archive veto and the prompt section, then ensure Mumbo's Session:
  * create it on `session/not-found` in the configured Workspace with the deployment's default preset and title it,
- * unarchive it as needed, and unpin it once. Start awaits the first ensure. A failed ensure is logged as an error and
- * retried after each of `retryDelaysMs` in turn, while the veto and the prompt section stay registered. Attempts never
- * overlap, and unload cancels a pending retry and waits for a running one before the domain closes.
+ * unarchive it as needed, and unpin it once. Start returns once the domain is open, and the first ensure runs detached:
+ * it reaches the Agent preset registry, which can wait for the Loader to settle and so for this start. An ensure that
+ * succeeds is logged as info; one that fails is logged as an error and retried after each of `retryDelaysMs` in turn,
+ * while the veto and the prompt section stay registered. Attempts of one start never overlap. Unload cancels a pending
+ * retry, and a running attempt starts no write after it; unload does not wait for that attempt, whose session controller
+ * call can wait for the Loader in turn.
  * @param ctx - plugin context carrying the injected services.
  * @param config - validated configuration.
  * @throws when the domain does not open; the veto and the section go with the failed start.
@@ -116,20 +128,16 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }
   // A failed ensure must not take the veto and the section down with the plugin, so it is reported and retried.
   const lifetime = new AbortController()
-  let ensuring = Promise.resolve()
   const opening = ctx.storageDomain.open(assistantDomain)
-  // One composite effect tears down in reverse order: a running ensure drains before the section, the veto, and the
-  // domain go, so a restart never leaves Mumbo archivable while an old attempt finishes.
+  // One composite effect tears down in reverse order: the abort stops the ensure before the section, the veto, and the
+  // domain go.
   ctx.effect(function* () {
     // A failed open rejects the start below, which reports it.
     yield () => opening.then(domain => domain.close(), () => undefined)
     yield ctx.on('workspace/archive-veto', ({ sessionId }) => sessionId === MUMBO_SESSION_ID ? ARCHIVE_REFUSAL : undefined)
     yield ctx.on('agent/created', ({ agent }) => { instruct(agent); return undefined })
     yield () => release?.()
-    yield async () => {
-      lifetime.abort()
-      await ensuring
-    }
+    yield () => { lifetime.abort() }
   }, 'mumbo-assistant')
   // A schedule may resume Mumbo before this plugin starts.
   const live = ctx.agents.get(MUMBO_SESSION_ID)
@@ -138,16 +146,19 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const steps = (await opening).table('steps')
   const attempt = async (retry: number): Promise<void> => {
     try {
-      await ensure(ctx, config, steps)
+      await ensure(ctx, config, steps, lifetime.signal)
+      ctx.logger.info(`mumbo-assistant: ensured Session '${MUMBO_SESSION_ID}'`)
     } catch (error: unknown) {
+      // After unload the attempt reports nothing and schedules no retry.
+      if (lifetime.signal.aborted) return
       const delay = config.retryDelaysMs[retry]
       const next = delay === undefined ? 'no retry is left until the next start' : `retrying in ${String(delay)} ms`
       ctx.logger.error(`mumbo-assistant: could not ensure Session '${MUMBO_SESSION_ID}'; ${next}: ${String(error)}`)
-      if (delay === undefined || lifetime.signal.aborted) return
-      const timer = setTimeout(() => { ensuring = attempt(retry + 1) }, delay)
+      if (delay === undefined) return
+      const timer = setTimeout(() => { void attempt(retry + 1) }, delay)
       lifetime.signal.addEventListener('abort', () => { clearTimeout(timer) }, { once: true })
     }
   }
-  ensuring = attempt(0)
-  await ensuring
+  // attempt() settles every failure itself.
+  void attempt(0)
 }
