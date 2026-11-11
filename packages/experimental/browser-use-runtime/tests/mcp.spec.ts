@@ -84,7 +84,9 @@ class PresentationRuntime extends PtcRuntime {
 /** A subprocess identity the browser server runs as, and the subprocess provider config that defines it. */
 interface ServerIdentity { name: string; subprocess: Record<string, unknown> }
 
-async function load(exclusive = false, mode?: string, toolCallTimeoutMs?: number, toolOrder?: string[], identity?: ServerIdentity) {
+async function load(
+  exclusive = false, mode?: string, toolCallTimeoutMs?: number, toolOrder?: string[], identity?: ServerIdentity, mcpRoots?: string[],
+) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-browser-mcp-'))
   roots.push(root)
   const model = new FixtureModel()
@@ -96,7 +98,7 @@ async function load(exclusive = false, mode?: string, toolCallTimeoutMs?: number
     ['model', { inject: ['llm'], apply(ctx: Context) { ctx.effect(() => ctx.llm.registerAdapter(['fixture'], model)) } }],
     ['browser', { inject: ['browserUse', 'agents', 'tools', 'systemPrompt', 'workingDirectory'], apply(ctx: Context) {
       mountSessionMcp(ctx, { name: 'browser-fixture', exclusive, command: process.execPath, args: [fixture, root, ...mode === undefined ? [] : [mode]], ...toolCallTimeoutMs === undefined ? {} : { toolCallTimeoutMs, env: {} },
-        ...identity === undefined ? {} : { identity: identity.name } })
+        ...identity === undefined ? {} : { identity: identity.name }, ...mcpRoots === undefined ? {} : { roots: mcpRoots } })
     } }],
   ])
   const configPath = join(root, 'cordis.yml')
@@ -152,7 +154,7 @@ function registerIndependentTool(ctx: Context) {
 }
 
 async function events(root: string) {
-  return (await readFile(join(root, 'events.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line) as { event: string; pid: number; name?: string; cwd?: string })
+  return (await readFile(join(root, 'events.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line) as { event: string; pid: number; name?: string; cwd?: string; roots?: boolean })
 }
 
 it('requires a browser mode and validates launch and attachment settings', () => {
@@ -247,6 +249,15 @@ describe('Session MCP Loader composition', () => {
     expect(spawn.mock.calls.map(([spec]) => [spec.argv, spec.identity, spec.cwd])).toEqual([[[process.execPath, fixture, root], 'browsermcp', home]])
     // The server probes in place: one process per Session, with no disposable sibling.
     expect((await events(root)).filter(event => event.event === 'start')).toHaveLength(1)
+  })
+
+  it('offers the configured MCP roots to each Session\'s server, and none without them', async () => {
+    for (const mcpRoots of [['/var/lib/mumbo/uploads'], undefined]) {
+      const { ctx, root } = await load(false, undefined, undefined, undefined, undefined, mcpRoots)
+      const first = await ctx.agents.create({ sessionId: SessionId('first'), meta: { cwd: root } })
+      await warm(ctx, first.agent)
+      expect((await events(root)).filter(event => event.event === 'initialize').map(event => event.roots)).toEqual([mcpRoots !== undefined])
+    }
   })
 
   it('keeps unrelated and child Sessions running without a busy attachment and admits a later owner', async () => {

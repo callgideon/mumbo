@@ -17,25 +17,36 @@ export const inject = ['browserUse', 'agents', 'tools', 'systemPrompt', 'working
 export type Config = BrowserMcpConfig & {
   /**
    * Absolute directory for the snapshots, screenshots, and logs the server writes; omitted, the server writes them to
-   * `.playwright-mcp` in the Session's working directory.
+   * `.playwright-mcp` in its workspace, `fileRoot` or else its working directory.
    */
   outputDir?: string
+  /**
+   * Absolute directory passed as the server's only MCP root, which upstream takes as its workspace: besides `outputDir`,
+   * the one directory whose files the upload and drop tools may send. Omitted, the client offers no root and the server
+   * uses its working directory.
+   */
+  fileRoot?: string
 }
 
+/** Provider settings as written: the browser choice in its input form, and the optional directories. */
+type ConfigInput = NonNullable<Parameters<typeof BrowserMcpConfig>[0]> & { outputDir?: string; fileRoot?: string }
+
 /** Validate the launch or attachment configuration before activation. */
-export const Config: Schema<NonNullable<Parameters<typeof BrowserMcpConfig>[0]> & { outputDir?: string }, Config> = Schema.intersect([
+export const Config: Schema<ConfigInput, Config> = Schema.intersect([
   BrowserMcpConfig,
-  Schema.object({ outputDir: Schema.string() }),
+  Schema.object({ outputDir: Schema.string(), fileRoot: Schema.string() }),
 ])
 
 /**
- * Reject an invalid debugging endpoint or a relative output directory before acquiring provider or browser resources.
+ * Reject an invalid debugging endpoint or a relative output directory or file root before acquiring provider or browser
+ * resources.
  * @param config - schema-validated provider settings.
  */
 export function validateConfig(config: Config): void {
   validateBrowserMcpConfig(config)
-  if (config.outputDir !== undefined && !isAbsolute(config.outputDir)) {
-    throw new Error(`browser outputDir must be an absolute path, got "${config.outputDir}"`)
+  for (const key of ['outputDir', 'fileRoot'] as const) {
+    const path = config[key]
+    if (path !== undefined && !isAbsolute(path)) throw new Error(`browser ${key} must be an absolute path, got "${path}"`)
   }
 }
 
@@ -43,7 +54,7 @@ export function validateConfig(config: Config): void {
  * Expose Playwright's upstream tools in each live Session's scope.
  * The pinned npm server runs under the current Node executable; browser state is not persisted by DSH.
  * @param ctx - provider context supplying browser use, Agents, and tools.
- * @param config - validated browser choice, optional output directory, and optional tool timeout.
+ * @param config - validated browser choice, optional output directory and file root, and optional tool timeout.
  */
 export function apply(ctx: Context, config: Config): void {
   validateConfig(config)
@@ -70,5 +81,6 @@ export function apply(ctx: Context, config: Config): void {
     env,
     ...config.toolCallTimeoutMs === undefined ? {} : { toolCallTimeoutMs: config.toolCallTimeoutMs },
     ...config.identity === undefined ? {} : { identity: config.identity },
+    ...config.fileRoot === undefined ? {} : { roots: [config.fileRoot] },
   })
 }

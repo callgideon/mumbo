@@ -56,6 +56,7 @@ Add one entry per server; nothing else is required. After the harness starts, th
 | `serverName` | required | Namespace for the server's tool names; `[A-Za-z0-9_-]{1,32}`, unique inside one registration scope |
 | `command` / `args` / `env` / `cwd` | — | stdio: executable, arguments, extra env merged over scrubbed ambient env, working directory |
 | `identity` | unset | stdio: subprocess identity that runs the server in its home; unset under a run-as subprocess provider, its server identity in that identity's home; see [Environment scrubbing (stdio)](#environment-scrubbing-stdio) |
+| `roots` | `[]` | stdio: absolute directories the client offers as its MCP roots, in order, answering the server's `roots/list` with their `file:` URIs; empty, the client declares no `roots` capability. A relative entry fails at load |
 | `url` / `headers` | — | streamable-http: endpoint URL and extra request headers |
 | `toolCallTimeoutMs` | `60,000` | Timeout per `tools/call` or resource request |
 | `startupTimeoutMs` | unset | Optional budget for template resolution, negotiation, connection, and the initial tool sync |

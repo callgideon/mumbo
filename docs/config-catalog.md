@@ -985,9 +985,15 @@ export type Config = BrowserMcpConfig
 export type Config = BrowserMcpConfig & {
   /**
    * Absolute directory for the snapshots, screenshots, and logs the server writes; omitted, the server writes them to
-   * `.playwright-mcp` in the Session's working directory.
+   * `.playwright-mcp` in its workspace, `fileRoot` or else its working directory.
    */
   outputDir?: string
+  /**
+   * Absolute directory passed as the server's only MCP root, which upstream takes as its workspace: besides `outputDir`,
+   * the one directory whose files the upload and drop tools may send. Omitted, the client offers no root and the server
+   * uses its working directory.
+   */
+  fileRoot?: string
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-experimental-browser-use-playwright-mcp -->
@@ -2444,7 +2450,7 @@ export interface LspLocalServerConfig {
 ## `@deepseek-ai/dsh-mcp-client`
 
 - `inject`: `tools`
-- `source`: [`packages/mcp/mcp-client/src/index.ts:152`](../packages/mcp/mcp-client/src/index.ts)
+- `source`: [`packages/mcp/mcp-client/src/index.ts:159`](../packages/mcp/mcp-client/src/index.ts)
 
 ```ts config-catalog
 /** Configuration for one stdio or Streamable HTTP MCP server. */
@@ -2474,12 +2480,18 @@ export interface StdioConfig {
   /**
    * Subprocess identity, by the subprocess provider's name for it, that runs the server. Set, the
    * server starts through the subprocess service with that identity's environment plus `env`, in
-   * that identity's home, which the provider checks at load (`serverHome`). Omitted, it starts through the subprocess service as the provider's `serverIdentity`, in that
+   * that identity's home, which the provider checks at load (`serverHome`). Omitted, it starts
+   * through the subprocess service as the provider's `serverIdentity`, in that
    * identity's home, when that provider runs children as a run-as identity, and fails when the
    * provider names no server identity; otherwise it starts as this process with the scrubbed
    * ambient environment plus `env`.
    */
   identity?: string
+  /**
+   * Absolute directories the client offers as its MCP roots, in order; empty (the default), it declares no `roots`
+   * capability. A server such as Playwright MCP takes the first root as its workspace.
+   */
+  roots: string[]
   /** Timeout per tool call or resource request in milliseconds. */
   toolCallTimeoutMs: number
   /** Optional budget for one connection attempt plus its initial tool sync, in milliseconds. */
@@ -5109,7 +5121,7 @@ export interface BrowserConfig {
 
 - `inject`: `browserUse` · `agents` · `tools` · `systemPrompt` · `workingDirectory`
 - `refs`: [`PlaywrightBrowser`](../packages/experimental/browser-use-playwright-mcp/src/index.ts)
-- `source`: [`packages/mumbo/browser-consent/src/index.ts:106`](../packages/mumbo/browser-consent/src/index.ts)
+- `source`: [`packages/mumbo/browser-consent/src/index.ts:125`](../packages/mumbo/browser-consent/src/index.ts)
 
 ```ts config-catalog
 /** Consent configuration. */
@@ -5126,11 +5138,20 @@ export interface Config {
   /** Milliseconds a write waits for the person's answer before it is denied as unanswered. */
   readonly approvalTimeoutMs: number
   /**
-   * Absolute existing directory, such as the shared Downloads, that holds every file `browser_file_upload` and
-   * `browser_drop` may send; the browser reads those files as its own user. Required, so each deployment states it, and
-   * named by its real path below directories that only root and dsh's own user can change (see {@link uploadDirectory}).
+   * Absolute existing directory, such as the shared Downloads, whose files `browser_file_upload` and `browser_drop` may
+   * send, each named directly in it. Required, so each deployment states it, and named by its real path below
+   * directories that only root and dsh's own user can change (see {@link uploadDirectory}).
    */
   readonly uploadDirectory: string
+  /**
+   * Absolute existing directory, such as `/var/lib/mumbo/uploads`, where consent stages the copy of each file it sends
+   * and which the browser server receives as its only file root. Required, named by its real path, owned by root or
+   * dsh's own user and writable by no other user, below directories that only those users can change (see
+   * {@link uploadStaging}). Consent empties it at load.
+   */
+  readonly uploadStaging: string
+  /** Largest file, in bytes, that one upload or drop may send; 536870912 (512 MiB) by default. */
+  readonly uploadMaxBytes: number
 }
 ```
 <!-- END GENERATED config-catalog:@mumbo/browser-consent -->

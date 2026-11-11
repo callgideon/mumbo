@@ -1,22 +1,22 @@
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, openSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { appendFileSync, chmodSync, chownSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { spawnSync } from 'node:child_process'
 import { Context } from '@deepseek-ai/cordis'
-import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import { afterAll, describe, expect, it, onTestFinished } from 'vitest'
 import * as PlaywrightBrowser from '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp'
 import {
-  apply, classify, Config, currentTabUrl, denial, denyList, describeArguments, inject, tabUrl, targetUrl, uploadDirectory, uploadRefusal,
+  apply, classify, Config, currentTabUrl, denial, denyList, describeArguments, inject, stageUpload, tabUrl, targetUrl, uploadDirectory,
+  uploadRefusal, uploadStaging,
 } from '../src/index.ts'
 
-// A spy that passes through, so a test can act between the directory opens of an upload check.
-vi.mock('node:fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:fs')>()
-  return { ...actual, openSync: vi.fn(actual.openSync) }
-})
-
-const browser = { mode: 'attach', endpoint: 'http://127.0.0.1:9222' } as const
+const browser = { mode: 'attach', endpoint: 'http://127.0.0.1:9222', outputDir: '/var/lib/mumbo/playwright-output' } as const
 /** An existing directory for the configs that do not reach an upload. */
 const uploads = tmpdir()
+/** A staging directory only this user can change. */
+const staging = mkdtempSync(join(tmpdir(), 'mumbo-consent-staging-'))
+afterAll(() => { rmSync(staging, { recursive: true, force: true }) })
 /** The list the box edge writes. */
 const DENIED = denyList([
   'chrome:', 'chrome-untrusted:', 'chrome-extension:', 'devtools:', 'view-source:', 'file:', 'https://passwords.google.com',
@@ -155,14 +155,14 @@ describe('describeArguments', () => {
 describe('Config', () => {
   it('rejects an allowed site that is not an exact web origin and names the origin to use', () => {
     const deniedUrls: string[] = []
-    expect(() => { apply(new Context(), Config({ browser, deniedUrls, allowedSites: ['https://mail.google.com/'], uploadDirectory: uploads })) })
+    expect(() => { apply(new Context(), Config({ browser, deniedUrls, allowedSites: ['https://mail.google.com/'], uploadDirectory: uploads, uploadStaging: staging })) })
       .toThrow('allowedSites entry "https://mail.google.com/" is not an origin; use "https://mail.google.com"')
     for (const site of ['mail.google.com', 'ftp://files.example']) {
-      expect(() => { apply(new Context(), Config({ browser, deniedUrls, allowedSites: [site], uploadDirectory: uploads })) }).toThrow(`allowedSites entry "${site}" is not an origin; use one such as`)
+      expect(() => { apply(new Context(), Config({ browser, deniedUrls, allowedSites: [site], uploadDirectory: uploads, uploadStaging: staging })) }).toThrow(`allowedSites entry "${site}" is not an origin; use one such as`)
     }
-    expect(() => { apply(new Context(), Config({ browser, deniedUrls: ['https://mail.google.com'], allowedSites: ['http://mail.google.com'], uploadDirectory: uploads })) })
+    expect(() => { apply(new Context(), Config({ browser, deniedUrls: ['https://mail.google.com'], allowedSites: ['http://mail.google.com'], uploadDirectory: uploads, uploadStaging: staging })) })
       .toThrow('allowedSites entry "http://mail.google.com" is also denied by deniedUrls')
-    expect(Config({ browser, deniedUrls, uploadDirectory: uploads }).approvalTimeoutMs).toBe(300_000)
+    expect(Config({ browser, deniedUrls, uploadDirectory: uploads, uploadStaging: staging }).approvalTimeoutMs).toBe(300_000)
   })
 
   it('requires an existing absolute upload directory', () => {
@@ -187,14 +187,33 @@ describe('Config', () => {
     expect(uploadDirectory(join(root, 'sticky', 'Downloads'))).toBe(join(root, 'sticky', 'Downloads'))
   })
 
-  it('requires an output directory for a server that runs as an identity, which starts in that identity\'s home', () => {
-    expect(() => { apply(new Context(), Config({ browser: { ...browser, identity: 'browsermcp' }, deniedUrls: [], uploadDirectory: uploads })) })
-      .toThrow('browser.outputDir must be set when browser.identity is, because the server then starts in that identity\'s home')
+  it('requires an output directory, because the server\'s workspace is the staging directory, and sets the file root itself', () => {
+    const { outputDir: _unset, ...withoutOutput } = browser
+    expect(() => { apply(new Context(), Config({ browser: { ...withoutOutput, identity: 'browsermcp' }, deniedUrls: [], uploadDirectory: uploads, uploadStaging: staging })) })
+      .toThrow('browser.outputDir must be set, because the browser server\'s workspace is uploadStaging')
+    const rooted = Config({ browser: { ...browser, fileRoot: uploads }, deniedUrls: [], uploadDirectory: uploads, uploadStaging: staging })
+    expect(() => { apply(new Context(), rooted) })
+      .toThrow('browser.fileRoot must not be set; consent gives the browser server uploadStaging as its only file root')
+  })
+
+  it('requires a staging directory only root and dsh\'s own user can change, and an upload limit of at least one byte', () => {
+    expect(() => Config({ browser, deniedUrls: [], uploadDirectory: uploads } as never)).toThrow('uploadStaging missing required value')
+    expect(Config({ browser, deniedUrls: [], uploadDirectory: uploads, uploadStaging: staging }).uploadMaxBytes).toBe(536_870_912)
+    expect(() => Config({ browser, deniedUrls: [], uploadDirectory: uploads, uploadStaging: staging, uploadMaxBytes: 0 })).toThrow()
+    expect(uploadStaging(`${staging}/`)).toBe(staging)
+    expect(() => uploadStaging('uploads')).toThrow('uploadStaging "uploads" must be an absolute path to an existing directory, such as /var/lib/mumbo/uploads')
+    // /tmp itself: anyone can add entries to it.
+    expect(() => uploadStaging(uploads)).toThrow(`uploadStaging "${uploads}" must be owned by root or dsh's own user and writable by no other user`)
+    const open = join(staging, 'open')
+    mkdirSync(open)
+    onTestFinished(() => { rmSync(open, { recursive: true, force: true }) })
+    chmodSync(open, 0o770)
+    expect(() => uploadStaging(open)).toThrow(`uploadStaging "${open}" must be owned by root or dsh's own user and writable by no other user`)
   })
 
   it('requires the denied URLs and rejects an entry that is neither a lowercase scheme nor a canonical origin', () => {
-    expect(() => Config({ browser, uploadDirectory: uploads } as never)).toThrow('deniedUrls missing required value')
-    expect(Config({ browser, deniedUrls: [], uploadDirectory: uploads }).deniedUrls).toEqual([])
+    expect(() => Config({ browser, uploadDirectory: uploads, uploadStaging: staging } as never)).toThrow('deniedUrls missing required value')
+    expect(Config({ browser, deniedUrls: [], uploadDirectory: uploads, uploadStaging: staging }).deniedUrls).toEqual([])
     expect(() => denyList(['Chrome:'])).toThrow('deniedUrls entry "Chrome:" is not lowercase; use "chrome:"')
     expect(denial('https://h.example:8443/x', denyList(['https://h.example:8443']))).toBe('a page on https://h.example:8443')
     expect(() => denyList(['https://h.example:8443/'])).toThrow('use "https://h.example:8443"')
@@ -216,7 +235,7 @@ describe('Config', () => {
 })
 
 describe('upload paths', () => {
-  /** A Downloads directory beside a private one, with a file in each and the links a model could plant. */
+  /** A Downloads directory beside a private one, with a file in each and the paths a model could plant. */
   function layout() {
     const root = mkdtempSync(join(tmpdir(), 'mumbo-consent-uploads-'))
     onTestFinished(() => { rmSync(root, { recursive: true, force: true }) })
@@ -229,60 +248,118 @@ describe('upload paths', () => {
     writeFileSync(join(downloads, 'folder', 'scan.pdf'), 'pdf')
     writeFileSync(secret, 'passwords')
     symlinkSync(secret, join(downloads, 'tax-link.pdf'))
-    symlinkSync(join(root, 'browser'), join(downloads, 'profile'))
-    symlinkSync(join(downloads, 'tax.pdf'), join(downloads, 'inside-link.pdf'))
-    // Links whose targets pass through a directory outside and come back: one that exists, one that does not.
-    symlinkSync(`${root}/browser/../Downloads/tax.pdf`, join(downloads, 'through-private.pdf'))
-    symlinkSync(`${root}/nowhere/../Downloads/tax.pdf`, join(downloads, 'through-missing.pdf'))
-    symlinkSync(join(downloads, 'loop'), join(downloads, 'loop'))
     return { root, downloads, secret, upload: uploadDirectory(downloads) }
   }
 
-  it('sends regular files below the upload directory', () => {
+  it('accepts only names directly in the upload directory, without opening anything', () => {
     const { downloads, upload } = layout()
-    expect(uploadRefusal([join(downloads, 'tax.pdf'), join(downloads, 'folder', 'scan.pdf')], upload)).toBeUndefined()
+    // A link, a missing name, and a directory pass this check: staging opens the name and refuses them.
+    expect(uploadRefusal(['tax.pdf', 'tax-link.pdf', 'missing.pdf', 'folder', '..pdf', 'a b'].map(name => join(downloads, name)), upload)).toBeUndefined()
     // No paths cancels the file chooser, which sends nothing.
     expect(uploadRefusal(undefined, upload)).toBeUndefined()
+    expect(uploadRefusal([], upload)).toBeUndefined()
   })
 
-  it('refuses with one answer every path that is not a regular file reached below it through no link, whatever lies outside', () => {
+  it('refuses every other path with one answer that says where to put the file', () => {
     const { root, downloads, secret, upload } = layout()
-    const refusal = (path: unknown) => uploadRefusal([join(downloads, 'tax.pdf'), path], upload)
     for (const path of [
-      secret, `${downloads}/../browser/Login Data`, `${downloads}/./tax.pdf`, `${downloads}/folder/`, join(downloads, 'tax-link.pdf'),
-      join(downloads, 'profile', 'Login Data'), join(downloads, 'inside-link.pdf'), join(downloads, 'through-private.pdf'),
-      join(downloads, 'through-missing.pdf'), join(downloads, 'loop'), join(downloads, 'missing.pdf'), join(downloads, 'nowhere', 'scan.pdf'),
-      join(downloads, 'tax.pdf', 'scan.pdf'), join(downloads, 'folder'), downloads, join(root, 'Downloads-other', 'tax.pdf'),
-      // Names the file system cannot look up: one too long, and one holding NUL.
-      join(downloads, 'a'.repeat(300)), join(downloads, 'a'.repeat(300), 'scan.pdf'), join(downloads, 'a\u0000b'),
-    ]) expect(refusal(path), path).toBe(`${JSON.stringify(path)} is not a file in ${downloads}`)
-    expect(refusal('tax.pdf')).toBe('"tax.pdf" is not an absolute path')
-    expect(refusal(7)).toBe('7 is not an absolute path')
+      secret, join(downloads, 'folder', 'scan.pdf'), `${downloads}/../browser/Login Data`, `${downloads}/./tax.pdf`, `${downloads}/tax.pdf/`,
+      `${downloads}//tax.pdf`, `${downloads}/.`, `${downloads}/..`, downloads, join(root, 'Downloads-other', 'tax.pdf'), 'tax.pdf', 'Downloads/tax.pdf',
+      // A copy consent staged is never an input: it is not directly in the upload directory.
+      join(staging, '0123456789abcdef', 'tax.pdf'), 7, null, undefined,
+    ]) {
+      expect(uploadRefusal([join(downloads, 'tax.pdf'), path], upload), String(path))
+        .toBe(`${JSON.stringify(path)} is not directly in ${downloads}; put the file directly in ${downloads} and retry`)
+    }
     expect(uploadRefusal(join(downloads, 'tax.pdf'), upload)).toBe('paths is not a list of file paths')
   })
+})
 
-  it('reads each name inside the directory it checked, so a directory swapped for a link during the check leads nowhere', () => {
-    const { root, downloads, upload } = layout()
-    mkdirSync(join(downloads, 'swapped'))
-    writeFileSync(join(downloads, 'swapped', 'scan.pdf'), 'pdf')
-    const open = vi.mocked(openSync)
-    const actual = open.getMockImplementation()!
-    onTestFinished(() => { open.mockImplementation(actual) })
-    // Once the check has opened `swapped`, it becomes a link to the private directory, whose file the path now names.
-    open.mockImplementation((path, flags) => {
-      const descriptor = actual(path, flags)
-      if (String(path).endsWith('/swapped')) {
-        renameSync(join(downloads, 'swapped'), join(downloads, 'kept'))
-        symlinkSync(join(root, 'browser'), join(downloads, 'swapped'))
-      }
-      return descriptor
+describe('staging an upload', () => {
+  const room = () => Promise.resolve(undefined)
+  /** A Downloads and a staging directory of their own. */
+  function directories() {
+    const root = mkdtempSync(join(tmpdir(), 'mumbo-consent-stage-'))
+    onTestFinished(() => {
+      chmodSync(root, 0o700)
+      rmSync(root, { recursive: true, force: true })
     })
-    const path = join(downloads, 'swapped', 'Login Data')
-    expect(uploadRefusal([path], upload)).toBe(`${JSON.stringify(path)} is not a file in ${downloads}`)
-    expect(lstatSync(join(downloads, 'swapped')).isSymbolicLink() && statSync(path).isFile()).toBe(true)
-    // The check still finds a file of the directory it opened, after the same swap.
-    rmSync(join(downloads, 'swapped'))
-    renameSync(join(downloads, 'kept'), join(downloads, 'swapped'))
-    expect(uploadRefusal([join(downloads, 'swapped', 'scan.pdf')], upload)).toBeUndefined()
+    const downloads = join(root, 'Downloads')
+    const into = join(root, 'uploads')
+    mkdirSync(downloads)
+    mkdirSync(into, { mode: 0o700 })
+    return { root, downloads, staging: uploadStaging(into) }
+  }
+  const sha256 = (text: string) => createHash('sha256').update(text).digest('hex')
+
+  it('copies a regular file into a nonce directory of its own, read-only for the group, and hashes what it copied', async () => {
+    const { downloads, staging: into } = directories()
+    writeFileSync(join(downloads, 'tax return.pdf'), 'pdf bytes')
+    const sizes: number[] = []
+    const staged = await stageUpload(join(downloads, 'tax return.pdf'), into, 64, (bytes) => {
+      sizes.push(bytes)
+      return Promise.resolve(undefined)
+    })
+    expect(staged).toEqual({ path: expect.stringMatching(new RegExp(`^${into}/[0-9a-f]{32}/tax return\\.pdf$`, 'u')) as unknown, name: 'tax return.pdf', bytes: 9, sha256: sha256('pdf bytes') })
+    const path = (staged as { path: string }).path
+    expect(sizes).toEqual([9])
+    expect(readFileSync(path, 'utf8')).toBe('pdf bytes')
+    expect([statSync(path).mode & 0o7777, statSync(dirname(path)).mode & 0o7777]).toEqual([0o440, 0o750])
+  })
+
+  it('gives the copy the group of a set-group-ID staging directory', async (context) => {
+    const group = process.getgroups().find(gid => gid !== process.getegid())
+    if (group === undefined) context.skip()
+    const { downloads, staging: into } = directories()
+    chownSync(into, -1, group!)
+    chmodSync(into, 0o2750)
+    writeFileSync(join(downloads, 'tax.pdf'), 'pdf')
+    const { path } = await stageUpload(join(downloads, 'tax.pdf'), into, 64, room) as { path: string }
+    expect([statSync(path).gid, statSync(dirname(path)).gid]).toEqual([group, group])
+  })
+
+  it('refuses at once anything but a regular file, and a file it cannot open, staging nothing', async () => {
+    const { root, downloads, staging: into } = directories()
+    writeFileSync(join(root, 'Login Data'), 'passwords')
+    symlinkSync(join(root, 'Login Data'), join(downloads, 'link.pdf'))
+    mkdirSync(join(downloads, 'folder'))
+    // A FIFO with no writer would block an ordinary open or read for ever.
+    expect(spawnSync('mkfifo', [join(downloads, 'pipe')]).status).toBe(0)
+    writeFileSync(join(downloads, 'locked.pdf'), 'pdf')
+    chmodSync(join(downloads, 'locked.pdf'), 0o000)
+    const cases: Array<[string, string]> = [
+      ['link.pdf', 'is a symbolic link, not a regular file'], ['folder', 'is not a regular file'], ['pipe', 'is not a regular file'],
+      ['missing.pdf', 'does not exist'], ['nul\u0000.pdf', 'could not be opened'],
+    ]
+    // Root opens a file whatever its mode.
+    if (process.getuid?.() !== 0) cases.push(['locked.pdf', 'could not be opened'])
+    for (const [name, why] of cases) {
+      expect(await stageUpload(join(downloads, name), into, 64, room), name).toEqual({ refusal: `${JSON.stringify(join(downloads, name))} ${why}` })
+    }
+    expect(readdirSync(into)).toEqual([])
+  })
+
+  it('refuses a file over the limit, whether it is at the start or grows while it is copied, and one without room, leaving nothing', async () => {
+    const { downloads, staging: into } = directories()
+    writeFileSync(join(downloads, 'big.bin'), 'x'.repeat(65))
+    writeFileSync(join(downloads, 'growing.bin'), 'x'.repeat(64))
+    const over = (name: string) => ({ refusal: `${JSON.stringify(join(downloads, name))} is larger than the upload limit of 64 bytes` })
+    expect(await stageUpload(join(downloads, 'big.bin'), into, 64, room)).toEqual(over('big.bin'))
+    // It grows between the size check and the copy, as a file the model's shell writes can.
+    const growing = () => {
+      appendFileSync(join(downloads, 'growing.bin'), 'more')
+      return Promise.resolve(undefined)
+    }
+    expect(await stageUpload(join(downloads, 'growing.bin'), into, 64, growing)).toEqual(over('growing.bin'))
+    expect(await stageUpload(join(downloads, 'growing.bin'), into, 128, () => Promise.resolve('no room'))).toEqual({ refusal: 'no room' })
+    expect(readdirSync(into)).toEqual([])
+  })
+
+  it('refuses a file it cannot copy', async () => {
+    const { root, downloads } = directories()
+    writeFileSync(join(downloads, 'tax.pdf'), 'pdf')
+    // The staging directory is gone, so no nonce directory can be made in it.
+    const refused = await stageUpload(join(downloads, 'tax.pdf'), join(root, 'gone'), 64, room)
+    expect(refused).toEqual({ refusal: expect.stringMatching(new RegExp(`^${JSON.stringify(join(downloads, 'tax.pdf'))} could not be copied: Error: ENOENT`, 'u')) as unknown })
   })
 })

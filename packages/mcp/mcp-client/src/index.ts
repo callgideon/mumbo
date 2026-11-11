@@ -13,6 +13,7 @@
  * @module @deepseek-ai/dsh-mcp-client
  */
 
+import { isAbsolute } from 'node:path'
 import type { Context, Fiber } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { scopeOf } from '@deepseek-ai/dsh-scope'
@@ -96,12 +97,18 @@ export interface StdioConfig {
   /**
    * Subprocess identity, by the subprocess provider's name for it, that runs the server. Set, the
    * server starts through the subprocess service with that identity's environment plus `env`, in
-   * that identity's home, which the provider checks at load (`serverHome`). Omitted, it starts through the subprocess service as the provider's `serverIdentity`, in that
+   * that identity's home, which the provider checks at load (`serverHome`). Omitted, it starts
+   * through the subprocess service as the provider's `serverIdentity`, in that
    * identity's home, when that provider runs children as a run-as identity, and fails when the
    * provider names no server identity; otherwise it starts as this process with the scrubbed
    * ambient environment plus `env`.
    */
   identity?: string
+  /**
+   * Absolute directories the client offers as its MCP roots, in order; empty (the default), it declares no `roots`
+   * capability. A server such as Playwright MCP takes the first root as its workspace.
+   */
+  roots: string[]
   /** Timeout per tool call or resource request in milliseconds. */
   toolCallTimeoutMs: number
   /** Optional budget for one connection attempt plus its initial tool sync, in milliseconds. */
@@ -151,8 +158,8 @@ export interface StreamableHttpConfig {
 /** Configuration for one stdio or Streamable HTTP MCP server. */
 export type Config = StdioConfig | StreamableHttpConfig
 
-type StdioConfigInput = Omit<StdioConfig, 'args' | 'env' | 'cwd' | 'toolCallTimeoutMs' | 'startupTimeoutMs' | 'failOnStartupError' | 'closeTimeoutMs' | 'expandTemplates'>
-  & Partial<Pick<StdioConfig, 'args' | 'env' | 'cwd' | 'toolCallTimeoutMs' | 'startupTimeoutMs' | 'failOnStartupError' | 'closeTimeoutMs' | 'expandTemplates'>>
+type StdioConfigInput = Omit<StdioConfig, 'args' | 'env' | 'cwd' | 'roots' | 'toolCallTimeoutMs' | 'startupTimeoutMs' | 'failOnStartupError' | 'closeTimeoutMs' | 'expandTemplates'>
+  & Partial<Pick<StdioConfig, 'args' | 'env' | 'cwd' | 'roots' | 'toolCallTimeoutMs' | 'startupTimeoutMs' | 'failOnStartupError' | 'closeTimeoutMs' | 'expandTemplates'>>
 type StreamableHttpConfigInput = Omit<StreamableHttpConfig, 'headers' | 'toolCallTimeoutMs' | 'startupTimeoutMs' | 'failOnStartupError' | 'closeTimeoutMs' | 'expandTemplates'>
   & Partial<Pick<StreamableHttpConfig, 'headers' | 'toolCallTimeoutMs' | 'startupTimeoutMs' | 'failOnStartupError' | 'closeTimeoutMs' | 'expandTemplates'>>
 type ConfigInput = StdioConfigInput | StreamableHttpConfigInput
@@ -181,6 +188,7 @@ export const Config = z.union([
     env: z.dict(String).default({}),
     cwd: z.string().default(''),
     identity: z.string().min(1),
+    roots: z.array(String).default([]),
     toolCallTimeoutMs: z.number().default(DEFAULT_TOOL_CALL_TIMEOUT_MS),
     startupTimeoutMs: z.number().min(1).max(MAX_TIMER_DELAY_MS),
     closeTimeoutMs: z.number().min(1).max(MAX_TIMER_DELAY_MS).default(DEFAULT_CLOSE_TIMEOUT_MS),
@@ -225,6 +233,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     if (subprocess === undefined) throw new Error(`mcp-client(${config.serverName}): identity ${JSON.stringify(config.identity)} requires a subprocess service`)
     identityHome(config, config.identity, subprocess)
   }
+  const relativeRoot = config.transport === 'stdio' ? config.roots.find(root => !isAbsolute(root)) : undefined
+  if (relativeRoot !== undefined) throw new Error(`mcp-client(${config.serverName}): roots entry "${relativeRoot}" must be an absolute directory`)
 
   // Namespace reservations are scope-local; status belongs to the actual
   // Fiber and survives its reloads and final disposal.

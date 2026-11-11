@@ -55,3 +55,16 @@ it('passes an absolute output directory to the server and rejects a relative one
   expect(mountSessionMcp).toHaveBeenCalledTimes(2)
   expect(() => Provider.Config({ mode: 'launch', outputDir: 7 } as never)).toThrow()
 })
+
+it('offers a file root as the server\'s only MCP root, never unrestricted file access, and rejects a relative one', () => {
+  vi.stubEnv('PLAYWRIGHT_MCP_ALLOW_UNRESTRICTED_FILE_ACCESS', 'true')
+  Provider.apply(new Context(), Provider.Config({ mode: 'attach', endpoint: 'http://127.0.0.1:9222', fileRoot: '/var/lib/mumbo/uploads' }))
+  Provider.apply(new Context(), Provider.Config({ mode: 'launch' }))
+  const [rooted, unrooted] = vi.mocked(mountSessionMcp).mock.calls.map(([, options]) => options)
+  expect([rooted!.roots, unrooted!.roots]).toEqual([['/var/lib/mumbo/uploads'], undefined])
+  expect(rooted!.args).not.toContain('--allow-unrestricted-file-access')
+  expect(rooted!.env?.PLAYWRIGHT_MCP_ALLOW_UNRESTRICTED_FILE_ACCESS).toBe('')
+  expect(() => { Provider.apply(new Context(), Provider.Config({ mode: 'launch', fileRoot: 'uploads' })) })
+    .toThrow('browser fileRoot must be an absolute path, got "uploads"')
+  expect(mountSessionMcp).toHaveBeenCalledTimes(2)
+})

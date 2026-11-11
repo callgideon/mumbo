@@ -20,7 +20,7 @@ const { mockTransport } = vi.hoisted(() => ({ mockTransport: vi.fn<() => Transpo
 vi.mock('../src/transport.ts', () => ({ createTransport: mockTransport }))
 
 const config = Config({
-  transport: 'stdio', serverName: 'fixture', command: 'fixture', args: [], env: {}, cwd: '',
+  transport: 'stdio', serverName: 'fixture', command: 'fixture', args: [], env: {}, cwd: '', roots: [],
   toolCallTimeoutMs: 60_000, startupTimeoutMs: 30_000, failOnStartupError: false,
 })
 const fixture = fileURLToPath(new URL('./fixtures/negotiation-lifecycle.mjs', import.meta.url))

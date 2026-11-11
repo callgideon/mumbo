@@ -95,6 +95,8 @@ export interface SessionMcpOptions {
    * runs it as this process in the Session's working directory.
    */
   identity?: string
+  /** Absolute directories offered as the server's MCP roots, in order; omission declares none. */
+  roots?: string[]
 }
 
 interface ClientState {
@@ -166,6 +168,7 @@ export function mountSessionMcp(ctx: Context, options: SessionMcpOptions): void 
             ...options.identity === undefined ? { cwd: await workingDirectory.ensure(agent, signal) } : {},
             ...options.toolCallTimeoutMs === undefined ? {} : { toolCallTimeoutMs: options.toolCallTimeoutMs },
             ...options.identity === undefined ? {} : { identity: options.identity },
+            ...options.roots === undefined ? {} : { roots: options.roots },
             failOnStartupError: true,
             reconnect: { enabled: false },
           }))
