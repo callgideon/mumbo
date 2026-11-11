@@ -1325,7 +1325,7 @@ This replaces "A newcomer's region" above and step 4 of section 17a's flow. A ne
 - It remembers what it wrote, so the changes it applies don't echo back.
 
 **Files:**
-- **One folder, chosen by the person:** `~/Mumbo` on the laptop, with `Files` and `Downloads` inside. Nothing else on the laptop syncs.
+- **One folder:** `~/Mumbo` on the laptop, with `Files` and `Downloads` inside. Nothing else on the laptop syncs. **[founder: 2026-11-11, one folder as recommended]**
 - **Conflicts:**
   - A change on one side, with the other side unchanged since the last sync, applies.
   - When both sides changed, both are kept: the later arrival becomes "name (conflict from <device>, <date>).ext".
@@ -1340,10 +1340,32 @@ This replaces "A newcomer's region" above and step 4 of section 17a's flow. A ne
   - Executable bits never sync.
 - **Laptop files reach the agent:** `Files` and `Downloads` are model roots, so Mumbo reads what the person puts there. The app says so when sync is turned on: "Mumbo can read and change what you put in this folder."
 - **The box's file I/O runs as its own user, `filesync`** (group `shared`), through the run-as seam, opening without following links. Agent containment's rule holds: root never writes in a folder another user can change.
-- **Space:**
-  - A box has about 9 GiB free, so synced files have a quota per box, 4 GiB by default, set by the edge. The backups' Downloads rule (newest 2 GiB, nothing over 1 GiB) applies to `Files` too.
+- **Space: 20 GiB of synced files per person** **[founder: 2026-11-11, "about 20 GB"]**.
+  - The quota is set by the edge, and `Files` and `.mumbo-trash` count against it.
   - Over the quota, the laptop keeps new files local and marks them "Not synced: your computer's sync space is full".
-  - Larger libraries need a bigger box disk or a blob store in S3; that depends on the box sizing research.
+  - **The box disk grows for every person, not only when sync is on.** A box's disk comes from the team's `disk_mb` when its template is built, so per-person sizes would mean a second template. And E2B's disk only takes node space for what's written, so an unused quota costs nothing.
+    - `box_free_disk` goes from 10240 to 32768 (20 GiB of sync plus today's 10 GiB and some margin), so `disk_mb` = 32768 + `box_step_disk` (2048) = 34816.
+    - The template's smoke check raises `MIN_AVAIL_MB` to 30720.
+    - Existing boxes get it only by moving to a new build (RUNBOOK "Moving a box to a new template build"), the founder's first.
+  - **Boxes per node stay 12.** Memory bounds them: 48 GiB of guest hugepages at 4 GiB a box. The 500 GiB node disk holds the worst case:
+    - 12 boxes each using their whole 20 GiB plus about 4 GiB of other writes is about 290 GiB;
+    - the template cache, build layers and snapshots in transit take about 100 GiB;
+    - so `volume_size` doesn't change.
+    - Add a node disk-use alarm at 75 %, the signal to raise `volume_size` (RUNBOOK "Node disk size").
+  - **Checked at the first build:**
+    - whether the template's rootfs in the templates bucket and in the nodes' cache stays sparse, near its used size, at a 34 GiB `disk_mb`. If it doesn't, raise `disk_mb` only for the `mumbo-box` build, set the team limit back for `mumbo-project` and `mumbo-child`, and note it in the RUNBOOK;
+    - how long a node drain takes with boxes holding gigabytes of written disk. A drain snapshots each box's written blocks, so node replacement slows with synced data. Measure one 20 GiB box's pause and resume before relying on blue/green timings.
+  - **Backups.** `Files` and `.mumbo-trash` leave the 10-minute archive: 20 GiB re-uploaded every 10 minutes and kept for 30 days isn't workable.
+    - The hub backs them up by content instead: each file's SHA-256 is uploaded once, to `users/<principal hash>/files/<sha256>` in the person's region's backup bucket, through PUT URLs the edge presigns for the hashes that are missing.
+    - The 10-minute archive carries the hub's metadata, which names the hashes.
+    - A restore, and so a move, fetches the files the metadata names before dsh starts, so a move takes longer with more synced data, about 3 minutes for 20 GiB. The move page says so.
+    - Offboarding deletes the prefix too.
+    - `Downloads` keeps its own rule (newest 2 GiB, nothing over 1 GiB).
+  - **Cost:**
+    - S3 holds about 20 GiB plus changes per heavy user, around $0.50 a month;
+    - laptop downloads leave AWS at $0.09 per GB, so a first full sync of 20 GiB costs about $1.80 once;
+    - node disk is already paid for.
+    - About $1–3 a month for a heavy user, as told to the founder.
 
 **Phone:** later, through the web app's uploads.
 
@@ -1351,7 +1373,9 @@ This replaces "A newcomer's region" above and step 4 of section 17a's flow. A ne
 
 | Task | Contents | Depends on |
 |---|---|---|
-| **B40** sync hub | `@mumbo/sync`: sequences, journals, replica cursors, blob routes with `Range`, the quota, `filesync` run-as file I/O, trash, the mass-delete hold. Tests per rule above | B24 |
+| **R-disk** (mumbo) | `box_free_disk` 32768 and `MIN_AVAIL_MB` 30720; setup; rebuild `mumbo-box` and check that its rootfs stays sparse; a node disk-use alarm at 75 %; measure a 20 GiB box's drain; move the founder's box to the new build | — |
+| **B40** sync hub | `@mumbo/sync`: sequences, journals, replica cursors, blob routes with `Range`, the 20 GiB quota, `filesync` run-as file I/O, trash, the mass-delete hold. Tests per rule above | B24, R-disk |
+| **B40b** synced-file backups | The edge presigns PUTs for missing hashes; the hub uploads by content; the archive leaves `Files` and `.mumbo-trash` out; restore fetches them by metadata; offboarding deletes the prefix. Tests: an incremental backup, a restore, a move | B40 |
 | **B41** file sync in the app | The desktop app's sync client for `~/Mumbo`: a watcher, a journal, conflict copies, OS trash, quarantine and Mark of the Web, the over-quota state, the mass-delete prompt, a sync status in the app. A GIF | N2's sign-in, B40 |
 | **B42** browser data | The force-installed extension, its native-messaging host and socket, bookmarks and history on both sides, and the live tab list (N4's channel) | B40 |
 | **B43** two places to run | The tab placement, its icons and chip, the toolbar switch, Move, offline states, and agent-opened tabs always on the computer. A GIF | N2's shell, B42 |
