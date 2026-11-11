@@ -1,5 +1,5 @@
 e2b_sha         = "1619623fc"   # setup/build.sh output; nodes pick it up only when replaced (nodes.tf header)
-edge_tag        = "9c968cd179"  # deploy/boxes/edge at this mumbo commit
+edge_tag        = "b7655d80c2"  # deploy/boxes/edge at this mumbo commit
 node_count      = 2             # sandbox nodes; the edge cap MAX_RUNNING_UNITS = 2 * (12 * node_count - 2) follows (RUNBOOK: Adding nodes)
 approver_emails = "hi@mumbo.si" # founder sign-in (2026-11-09)
 ops_alert_email = "hi@mumbo.si" # alarms and edge-deploy-failed by email (the founder); confirm the AWS email once
