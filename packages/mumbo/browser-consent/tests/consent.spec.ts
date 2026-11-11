@@ -1,12 +1,18 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, openSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import { describe, expect, it, onTestFinished } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import * as PlaywrightBrowser from '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp'
 import {
   apply, classify, Config, currentTabUrl, denial, denyList, describeArguments, inject, tabUrl, targetUrl, uploadDirectory, uploadRefusal,
 } from '../src/index.ts'
+
+// A spy that passes through, so a test can act between the directory opens of an upload check.
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>()
+  return { ...actual, openSync: vi.fn(actual.openSync) }
+})
 
 const browser = { mode: 'attach', endpoint: 'http://127.0.0.1:9222' } as const
 /** An existing directory for the configs that do not reach an upload. */
@@ -166,6 +172,21 @@ describe('Config', () => {
     }
   })
 
+  it('requires the upload directory\'s real path, below directories no other user can change, because the browser reads by path', () => {
+    const root = mkdtempSync(join(tmpdir(), 'mumbo-consent-upload-directory-'))
+    onTestFinished(() => { rmSync(root, { recursive: true, force: true }) })
+    for (const directory of ['Downloads', 'open/Downloads', 'sticky/Downloads']) mkdirSync(join(root, directory), { recursive: true })
+    symlinkSync(join(root, 'Downloads'), join(root, 'linked'))
+    expect(() => uploadDirectory(join(root, 'linked'))).toThrow(`uploadDirectory "${join(root, 'linked')}" must be its own real path; use "${join(root, 'Downloads')}"`)
+    expect(uploadDirectory(`${root}/Downloads/`)).toBe(join(root, 'Downloads'))
+    chmodSync(join(root, 'open'), 0o777)
+    expect(() => uploadDirectory(join(root, 'open', 'Downloads')))
+      .toThrow(`uploadDirectory "${join(root, 'open', 'Downloads')}" must lie below directories that only root and dsh's own user can change, but another user can change ${join(root, 'open')}`)
+    // Another user can add entries to a sticky directory but not rename one this user owns.
+    chmodSync(join(root, 'sticky'), 0o1777)
+    expect(uploadDirectory(join(root, 'sticky', 'Downloads'))).toBe(join(root, 'sticky', 'Downloads'))
+  })
+
   it('requires an output directory for a server that runs as an identity, which starts in that identity\'s home', () => {
     expect(() => { apply(new Context(), Config({ browser: { ...browser, identity: 'browsermcp' }, deniedUrls: [], uploadDirectory: uploads })) })
       .toThrow('browser.outputDir must be set when browser.identity is, because the server then starts in that identity\'s home')
@@ -217,15 +238,11 @@ describe('upload paths', () => {
     return { root, downloads, secret, upload: uploadDirectory(downloads) }
   }
 
-  it('sends regular files below the upload directory, named below it as configured or as resolved', () => {
-    const { root, downloads, upload } = layout()
+  it('sends regular files below the upload directory', () => {
+    const { downloads, upload } = layout()
     expect(uploadRefusal([join(downloads, 'tax.pdf'), join(downloads, 'folder', 'scan.pdf')], upload)).toBeUndefined()
     // No paths cancels the file chooser, which sends nothing.
     expect(uploadRefusal(undefined, upload)).toBeUndefined()
-    symlinkSync(downloads, join(root, 'configured'))
-    const linked = uploadDirectory(join(root, 'configured'))
-    expect(uploadRefusal([join(root, 'configured', 'tax.pdf'), join(downloads, 'folder', 'scan.pdf')], linked)).toBeUndefined()
-    expect(uploadRefusal([join(root, 'configured', 'profile', 'Login Data')], linked)).toBe(`"${join(root, 'configured', 'profile', 'Login Data')}" is not a file in ${join(root, 'configured')}`)
   })
 
   it('refuses with one answer every path that is not a regular file reached below it through no link, whatever lies outside', () => {
@@ -236,9 +253,36 @@ describe('upload paths', () => {
       join(downloads, 'profile', 'Login Data'), join(downloads, 'inside-link.pdf'), join(downloads, 'through-private.pdf'),
       join(downloads, 'through-missing.pdf'), join(downloads, 'loop'), join(downloads, 'missing.pdf'), join(downloads, 'nowhere', 'scan.pdf'),
       join(downloads, 'tax.pdf', 'scan.pdf'), join(downloads, 'folder'), downloads, join(root, 'Downloads-other', 'tax.pdf'),
+      // Names the file system cannot look up: one too long, and one holding NUL.
+      join(downloads, 'a'.repeat(300)), join(downloads, 'a'.repeat(300), 'scan.pdf'), join(downloads, 'a\u0000b'),
     ]) expect(refusal(path), path).toBe(`${JSON.stringify(path)} is not a file in ${downloads}`)
     expect(refusal('tax.pdf')).toBe('"tax.pdf" is not an absolute path')
     expect(refusal(7)).toBe('7 is not an absolute path')
     expect(uploadRefusal(join(downloads, 'tax.pdf'), upload)).toBe('paths is not a list of file paths')
+  })
+
+  it('reads each name inside the directory it checked, so a directory swapped for a link during the check leads nowhere', () => {
+    const { root, downloads, upload } = layout()
+    mkdirSync(join(downloads, 'swapped'))
+    writeFileSync(join(downloads, 'swapped', 'scan.pdf'), 'pdf')
+    const open = vi.mocked(openSync)
+    const actual = open.getMockImplementation()!
+    onTestFinished(() => { open.mockImplementation(actual) })
+    // Once the check has opened `swapped`, it becomes a link to the private directory, whose file the path now names.
+    open.mockImplementation((path, flags) => {
+      const descriptor = actual(path, flags)
+      if (String(path).endsWith('/swapped')) {
+        renameSync(join(downloads, 'swapped'), join(downloads, 'kept'))
+        symlinkSync(join(root, 'browser'), join(downloads, 'swapped'))
+      }
+      return descriptor
+    })
+    const path = join(downloads, 'swapped', 'Login Data')
+    expect(uploadRefusal([path], upload)).toBe(`${JSON.stringify(path)} is not a file in ${downloads}`)
+    expect(lstatSync(join(downloads, 'swapped')).isSymbolicLink() && statSync(path).isFile()).toBe(true)
+    // The check still finds a file of the directory it opened, after the same swap.
+    rmSync(join(downloads, 'swapped'))
+    renameSync(join(downloads, 'kept'), join(downloads, 'swapped'))
+    expect(uploadRefusal([join(downloads, 'swapped', 'scan.pdf')], upload)).toBeUndefined()
   })
 })

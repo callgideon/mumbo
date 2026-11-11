@@ -6,7 +6,7 @@
  * @module @mumbo/browser-consent
  */
 
-import { lstatSync, realpathSync, statSync } from 'node:fs'
+import { closeSync, constants, lstatSync, openSync, realpathSync, statSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
@@ -117,7 +117,8 @@ export interface Config {
   readonly approvalTimeoutMs: number
   /**
    * Absolute existing directory, such as the shared Downloads, that holds every file `browser_file_upload` and
-   * `browser_drop` may send; the browser reads those files as its own user. Required, so each deployment states it.
+   * `browser_drop` may send; the browser reads those files as its own user. Required, so each deployment states it, and
+   * named by its real path below directories that only root and dsh's own user can change (see {@link uploadDirectory}).
    */
   readonly uploadDirectory: string
 }
@@ -134,21 +135,17 @@ export const Config: z<ConfigInput, Config> = z.object({
   uploadDirectory: z.string().required(),
 })
 
-/** The upload directory as configured, and its real path. */
-export interface UploadDirectory {
-  /** The configured directory, normalized. */
-  readonly configured: string
-  /** Its real path. */
-  readonly real: string
-}
-
 /**
- * Validate `uploadDirectory`.
+ * Validate `uploadDirectory`. The browser reads an upload by the path the call names, so the directory must be named by
+ * its real path below directories that no user other than root and this process's user can change; no one else can
+ * then make that path name another directory after load. A sticky directory counts as unchangeable for an entry that
+ * root or this process's user owns.
  * @param path - the configured directory.
- * @returns the directory as configured and its real path.
- * @throws when it is not an absolute path to an existing directory.
+ * @returns the directory, normalized.
+ * @throws when it is not an absolute path to an existing directory, is not its own real path, or lies below a directory
+ *   another user can change.
  */
-export function uploadDirectory(path: string): UploadDirectory {
+export function uploadDirectory(path: string): string {
   let real: string | undefined
   try {
     real = isAbsolute(path) ? realpathSync.native(path) : undefined
@@ -156,7 +153,15 @@ export function uploadDirectory(path: string): UploadDirectory {
     // Reported below as not an existing directory.
   }
   if (real === undefined || !statSync(real).isDirectory()) throw new Error(`${name}: uploadDirectory "${path}" must be an absolute path to an existing directory, such as /home/shared/Downloads`)
-  return { configured: resolve(path), real }
+  if (real !== resolve(path)) throw new Error(`${name}: uploadDirectory "${path}" must be its own real path; use "${real}"`)
+  const trusted = (uid: number): boolean => uid === 0 || uid === process.getuid?.()
+  for (let entry = real; dirname(entry) !== entry; entry = dirname(entry)) {
+    const parent = statSync(dirname(entry))
+    if (!trusted(parent.uid) || ((parent.mode & 0o022) !== 0 && ((parent.mode & 0o1000) === 0 || !trusted(statSync(entry).uid)))) {
+      throw new Error(`${name}: uploadDirectory "${path}" must lie below directories that only root and dsh's own user can change, but another user can change ${dirname(entry)}`)
+    }
+  }
+  return real
 }
 
 /** Whether `path` names an entry below `directory`, not the directory itself. */
@@ -168,33 +173,46 @@ function below(directory: string, path: string): boolean {
 /**
  * Say why a call may not send the files its `paths` argument names. Each must be an absolute path without `.` or `..`
  * names that leads below the upload directory through directories to a regular file, none of them a symbolic link, so
- * nothing leads out of the directory. Names below it are read without following links, so no refusal tells whether a
- * path outside the directory exists.
+ * nothing leads out of the directory. Each name is read inside the directory the check already opened, so no refusal
+ * tells whether a path outside the directory exists, even while a directory on the way is swapped for a link.
  * @param paths - the call's `paths` argument.
- * @param upload - the validated upload directory.
+ * @param directory - the validated upload directory.
  * @returns why the first refused path is refused, or `undefined` when every path may be sent.
  */
-export function uploadRefusal(paths: unknown, upload: UploadDirectory): string | undefined {
+export function uploadRefusal(paths: unknown, directory: string): string | undefined {
   if (paths === undefined) return undefined
   if (!Array.isArray(paths)) return 'paths is not a list of file paths'
   for (const path of paths as unknown[]) {
     const shown = JSON.stringify(path)
     if (typeof path !== 'string' || !isAbsolute(path)) return `${shown} is not an absolute path`
-    const base = resolve(path) === path ? [upload.configured, upload.real].find(directory => below(directory, path)) : undefined
-    if (base === undefined || !fileBelow(upload.real, relative(base, path).split(sep))) return `${shown} is not a file in ${upload.configured}`
+    if (resolve(path) !== path || !below(directory, path) || !fileBelow(directory, path)) return `${shown} is not a file in ${directory}`
   }
   return undefined
 }
 
-/** Whether `names`, joined below `directory`, are directories and then a regular file, with no symbolic link among them. */
-function fileBelow(directory: string, names: readonly string[]): boolean {
-  let entry = directory
-  for (const [index, name] of names.entries()) {
-    entry = join(entry, name)
-    const stats = lstatSync(entry, { throwIfNoEntry: false })
-    if (!(index === names.length - 1 ? stats?.isFile() : stats?.isDirectory())) return false
+/** Flags that open a directory without following a link as its last name, and fail for any other file. */
+const DIRECTORY = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW
+
+/**
+ * Whether `path`, below `directory`, names a regular file reached through directories, none of them a symbolic link.
+ * Each directory is opened, and the next name is read inside that open directory as `/proc/self/fd/<fd>/<name>`, so a
+ * directory swapped for a link after it was opened cannot lead the walk elsewhere. The file itself is never opened,
+ * because a swap could make it a device.
+ */
+function fileBelow(directory: string, path: string): boolean {
+  const opened: number[] = []
+  const inside = (name: string): string => `/proc/self/fd/${String(opened.at(-1))}/${name}`
+  try {
+    opened.push(openSync(directory, DIRECTORY))
+    for (const name of relative(directory, dirname(path)).split(sep).filter(name => name !== '')) opened.push(openSync(inside(name), DIRECTORY))
+    return lstatSync(inside(basename(path))).isFile()
+  } catch (_unusable) {
+    // A link (ELOOP), a file on the way (ENOTDIR), a missing name, a name too long or holding NUL, or a system without
+    // `/proc/self/fd`: none leads to a file below the directory.
+    return false
+  } finally {
+    for (const descriptor of opened) closeSync(descriptor)
   }
-  return true
 }
 
 /** A validated `deniedUrls` list. */

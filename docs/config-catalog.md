@@ -5127,7 +5127,8 @@ export interface Config {
   readonly approvalTimeoutMs: number
   /**
    * Absolute existing directory, such as the shared Downloads, that holds every file `browser_file_upload` and
-   * `browser_drop` may send; the browser reads those files as its own user. Required, so each deployment states it.
+   * `browser_drop` may send; the browser reads those files as its own user. Required, so each deployment states it, and
+   * named by its real path below directories that only root and dsh's own user can change (see {@link uploadDirectory}).
    */
   readonly uploadDirectory: string
 }
