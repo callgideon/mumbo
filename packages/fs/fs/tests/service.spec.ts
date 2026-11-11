@@ -96,6 +96,8 @@ describe('FileSystem provider seam', () => {
     const fs = ctx.fs as FakeFileSystem
     expect(fs.sandboxMode).toBeUndefined()
     expect(fs.processPathFromHostPath('/host/file')).toBeUndefined()
+    // A provider without model roots resolves model paths exactly like any other path.
+    expect(await fs.resolveModelPath('/proc/self/environ')).toEqual(await fs.resolve('/proc/self/environ'))
     fs.files.set('a.txt', 'hi')
     const target = await fs.resolve('a.txt')
     expect((await fs.stat(target))?.type).toBe('file')

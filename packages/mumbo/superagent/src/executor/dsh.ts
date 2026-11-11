@@ -2,13 +2,12 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { mkdir, rmdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { key, latestAssignment, latestReport, liveTicket, runningAssignment, threadKey, waitsForPerson } from '../core/index.ts'
 import type { AssessmentOutcome, Assignment, EngineForExecutor, Execution, Mandate, PolicyEffect, Ticket, TicketInput, Trigger }
   from '../core/index.ts'
-import type { Machine } from '../deployment.ts'
-import { runAsWorker, verifyDirectory } from '../infra/environment.ts'
+import { inStateDirectory, type Machine } from '../deployment.ts'
+import { makeWorkerDirectory, runAsWorker, verifyDirectory } from '../infra/environment.ts'
 import type { Settings } from '../policy.ts'
 import type { Store } from '../app/store.ts'
 import { Later, type Effects } from '../app/effects.ts'
@@ -69,7 +68,7 @@ export interface ExecutorHost {
   readonly effects: Pick<Effects, 'enqueue' | 'handle'>
   /** The `worker` health entry, which reports whether background worker event handling failed. */
   readonly health: HealthEntry
-  readonly machine: Pick<Machine, 'stateDir'>
+  readonly machine: Pick<Machine, 'stateDir' | 'workDirectory' | 'runAs'>
   readonly lifetime: AbortSignal
   /** Session manager for worker sessions and for relaying worker reports to the main Session. */
   readonly sessions: Pick<Sessions, 'ensure' | 'prompt' | 'promptedId' | 'relay' | 'holds'>
@@ -99,7 +98,7 @@ export function mandateInstructions(mandate: Pick<Mandate, 'strength'>): string 
 }
 /** Builds a newly accepted ticket's Execution metadata: its worktree name, workspace directory, and assignment text. */
 export function ticketExecution(ticket: Ticket, outcome: Extract<AssessmentOutcome, { kind: 'accept' }>, settings: Settings,
-  stateDir: string): Execution {
+  workDirectory: string): Execution {
   const name = ticketWorktreeName(outcome.name ?? '', ticket.id)
   const source = ticket.origin.triggerId
   const note = outcome.note ? `\nRouting note (not the source request): ${outcome.note}` : ''
@@ -111,7 +110,7 @@ export function ticketExecution(ticket: Ticket, outcome: Extract<AssessmentOutco
   const assignment = ticket.mandate.strength === 'inferred' && ruleIds
     ? `Proactively accepted under ${ruleIds.join(', ')}. Scope: ${outcome.scope}.${precedence}${note}`
     : note.trim()
-  return { name, directory: join(executionRoot(settings, stateDir), name), assignment }
+  return { name, directory: join(executionRoot(settings, workDirectory), name), assignment }
 }
 /** Character limits for inline assignment and trigger text in worker messages; longer text is read via its resource. */
 const ASSIGNMENT_CHARS = 1500, TRIGGER_CHARS = 600
@@ -240,28 +239,32 @@ export class DshExecutor implements ExecutorPlugin {
   }
   /** Populates a newly accepted ticket's `execution` attributes (worktree name, workspace directory, and assignment text). */
   prepare(ticket: Ticket, outcome: Extract<AssessmentOutcome, { kind: 'accept' }>): Ticket {
-    return { ...ticket, execution: ticketExecution(ticket, outcome, this.host.store.settings(), this.host.machine.stateDir) }
+    return { ...ticket, execution: ticketExecution(ticket, outcome, this.host.store.settings(), this.host.machine.workDirectory) }
   }
   /**
    * Runs the configured `executor.prepare` command for a new ticket workspace in its parent directory with the ticket's
-   * execution environment variables, then verifies the directory as the worker sees it.
+   * execution environment variables, then verifies the directory as the worker sees it. Every command on the directories,
+   * including their creation and the removal of one a failed command left empty, runs as the worker, so under a run-as
+   * subprocess provider the worker owns them and root never acts on a path the worker can change.
    * A failed prepare command throws `PrepareFailed`, which is not retried automatically; an empty directory it left is removed, a non-empty one kept.
    * @throws PrepareFailed with the command's output when the prepare command fails.
    */
   private async prepareDirectory(ticket: Ticket): Promise<void> {
     const directory = ticket.execution?.directory ?? ''
-    await mkdir(dirname(directory), { recursive: true })
     const command = this.host.store.settings().executor.prepare.trim()
     const env = Object.fromEntries(this.host.environment(ticket).map(variable => [variable.key, variable.value]))
     // Enforce a timeout so a hung prepare command (such as on a credential prompt) fails the ticket instead of holding a worker slot indefinitely.
     const signal = AbortSignal.any([this.host.lifetime, AbortSignal.timeout(PREPARE_TIMEOUT_MS)])
-    if (command) await runAsWorker(this.host.context.subprocess, ['sh', '-c', command], dirname(directory), signal, env)
+    const { subprocess } = this.host.context
+    await makeWorkerDirectory(subprocess, dirname(directory), signal)
+    if (command) await runAsWorker(subprocess, ['sh', '-c', command], dirname(directory), signal, env)
       .catch(async (error: unknown) => {
         // Remove an empty directory left by a failed prepare command so a later retry does not treat it as already prepared.
-        await rmdir(directory).catch(() => { /* Absent, or holding what the command wrote, which the output explains. */ })
+        await runAsWorker(subprocess, ['rmdir', '--', directory], '/', this.host.lifetime)
+          .catch(() => { /* Absent, or holding what the command wrote, which the output explains. */ })
         throw new PrepareFailed(`The prepare command failed: ${error instanceof Error ? error.message : String(error)}`)
       })
-    await mkdir(directory, { recursive: true })
+    await makeWorkerDirectory(subprocess, directory, signal)
     await verifyDirectory(directory, this.host.context.subprocess, this.host.lifetime)
   }
   /** Enqueues a `launch` effect for an accepted or resumed assignment; launches start in queue order as worker slots free up. */
@@ -297,6 +300,9 @@ export class DshExecutor implements ExecutorPlugin {
     const first = this.host.store.tickets.get(ticketId)
     const target = first && liveTicket(first) ? runningAssignment(first) : undefined
     if (!first || !target || !first.undelivered.length) return
+    // An Assignment that settled before run-as keeps its Session across a restart, so a message reaches it here, not at a launch.
+    const unreachable = this.unreachable(first)
+    if (unreachable !== undefined) { this.failed(ticketId, unreachable); return }
     let woken = false
     try {
       for (;;) {
@@ -429,6 +435,16 @@ export class DshExecutor implements ExecutorPlugin {
     })
   }
   private relay({ id, text }: { id: string; text: string }): void { this.host.sessions.relay(id, text) }
+  /**
+   * Under run-as, why a ticket's worker cannot work in its directory: the directory is in the state directory, which the
+   * worker cannot enter, as for a ticket accepted before run-as, under the state directory's default work directory.
+   */
+  private unreachable(ticket: Ticket): string | undefined {
+    const { runAs, stateDir } = this.host.machine
+    const directory = ticket.execution?.directory ?? ''
+    if (!runAs || !inStateDirectory(stateDir, directory)) return undefined
+    return `The ticket directory ${directory} is in the state directory ${stateDir}, which the worker cannot enter under a run-as subprocess provider; set the Execution directory, or workDirectory when it is empty, outside it. A ticket accepted before run-as has its directory there: its files stay there, and a new ticket must take the work`
+  }
   private async launch(ticket: Ticket, assignment: Assignment): Promise<void> {
     const current = () => {
       if (this.host.closing()) throw new Error('dsh-superagent is stopping')
@@ -439,8 +455,11 @@ export class DshExecutor implements ExecutorPlugin {
     const source = sourceTrigger(this.host, ticket)
     const workspace = ticket.execution?.directory ?? ''
     if (!current()) return
-    // Prepare the workspace directory once; an existing directory counts as already prepared, including worktrees created before `prepare` commands existed.
-    if (!await stat(workspace).then(() => true, () => false)) {
+    const unreachable = this.unreachable(ticket)
+    if (unreachable !== undefined) throw new Error(unreachable)
+    // Prepare the workspace directory once; an existing directory counts as already prepared, including worktrees created before
+    // `prepare` commands existed. The worker looks, so root follows no link the worker planted here.
+    if (!await runAsWorker(this.host.context.subprocess, ['test', '-e', workspace], '/', this.host.lifetime).then(() => true, () => false)) {
       await this.prepareDirectory(ticket)
       if (!current()) return
     }

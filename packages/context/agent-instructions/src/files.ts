@@ -147,7 +147,8 @@ function isMissingPathError(error: unknown): boolean {
 }
 
 function isMissingProviderPathError(error: unknown): boolean {
-  return error instanceof Error && 'code' in error && error.code === 'FS_NOT_FOUND'
+  // A link the model planted out of its directories reads as absent, never as a failure of the whole lookup.
+  return error instanceof Error && 'code' in error && (error.code === 'FS_NOT_FOUND' || error.code === 'FS_OUTSIDE_ROOTS')
 }
 
 async function nodeStatFile(path: string, signal?: AbortSignal): Promise<StatFileProbe> {

@@ -1,4 +1,4 @@
-/** Subprocess wrapper for running gh, lark-cli, and git commands under the deployment's configured accounts. */
+/** Subprocess wrapper for running the orchestrator's own gh and lark-cli commands under the deployment's configured accounts. */
 import { execFile } from 'node:child_process'
 import { basename } from 'node:path'
 import { promisify } from 'node:util'
@@ -54,8 +54,10 @@ function membership(error: unknown): unknown {
   return new CliError(hint, error.code, error.exitCode)
 }
 /**
- * Executes gh, lark-cli, and git subprocesses with deployment account credentials, timeouts, and abort signals.
+ * Executes the orchestrator's own gh and lark-cli subprocesses with deployment account credentials, timeouts, and abort signals.
  * Restricts GitHub API calls to the configured repository and translates CLI failures into CliError instances for Sources, MasterAssessor, Outbox, and Settings.
+ * A command runs in `/` unless its caller names a directory, so the orchestrator's CLIs never start in a directory a worker
+ * can change, such as a ticket directory; nothing here runs git.
  */
 export class Commands {
   /**
@@ -70,7 +72,7 @@ export class Commands {
   withSignal(signal?: AbortSignal): Commands { return signal ? new Commands(this.resolved, this.environment, AbortSignal.any([this.signal, signal])) : this }
   async run(program: string, args: string[], cwd?: string): Promise<string> {
     try {
-      const { stdout } = await exec(program, args, { cwd, signal: this.signal, timeout: COMMAND_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024,
+      const { stdout } = await exec(program, args, { cwd: cwd ?? '/', signal: this.signal, timeout: COMMAND_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024,
         env: { ...process.env, ...this.environment, GH_PROMPT_DISABLED: '1', LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1', LARKSUITE_CLI_NO_SKILLS_NOTIFIER: '1' } })
       return stdout
     } catch (error) { throw commandError(error, program) }
@@ -113,6 +115,4 @@ export class Commands {
     if (!result.ok) throw membership(new CliError(`${result.error?.message ?? 'Feishu command failed'}${code ? ` (${code})` : ''}`, code))
     return result.data
   }
-  /** Runs `git` on PATH using the agent's isolated git environment and credential helper. */
-  async git(args: string[], cwd: string): Promise<string> { return this.run('git', args, cwd) }
 }

@@ -196,8 +196,9 @@ export class OutputCollector {
     try {
       if (this.spillFd === undefined) {
         // Random suffix + O_EXCL + no-follow-equivalent ('wx' fails on any
-        // existing path, symlink or not) + owner-only mode: defeats spill-path
-        // prediction and symlink planting in shared tmp dirs. The path is
+        // existing path, symlink or not): defeats spill-path prediction and
+        // symlink planting. Mode 0640 lets the group of a configured spill
+        // directory read the file; the private default directory is 0700. The path is
         // published only once the open succeeded, so a failed open (EEXIST on a
         // planted entry included) never lets discardSpill unlink a path this
         // process did not create.
@@ -205,7 +206,7 @@ export class OutputCollector {
           spill.dir,
           `dsh-subprocess-${process.pid}-${++spillCounter}-${randomBytes(6).toString('hex')}-${this.label}.log`,
         )
-        const fd = openSync(file, 'wx', 0o600)
+        const fd = openSync(file, 'wx', 0o640)
         this.spillFile = file
         this.spillFd = fd
         for (const prior of this.chunks) writeSync(fd, prior)

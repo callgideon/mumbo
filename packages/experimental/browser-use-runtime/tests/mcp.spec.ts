@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
@@ -25,6 +25,7 @@ import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-test
 import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
 import Projections from '@deepseek-ai/dsh-session-projection'
 import WorkingDirectory from '@deepseek-ai/dsh-working-directory'
+import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import { bindScopeParent } from '@deepseek-ai/dsh-scope'
 import { BrowserMcpConfig, mountSessionMcp, validateBrowserMcpConfig } from '../src/mcp.ts'
 
@@ -80,7 +81,12 @@ class PresentationRuntime extends PtcRuntime {
   run(): Promise<never> { return Promise.reject(new Error('Unexpected PTC execution in a presentation test')) }
 }
 
-async function load(exclusive = false, mode?: string, toolCallTimeoutMs?: number, toolOrder?: string[]) {
+/** A subprocess identity the browser server runs as, and the subprocess provider config that defines it. */
+interface ServerIdentity { name: string; subprocess: Record<string, unknown> }
+
+async function load(
+  exclusive = false, mode?: string, toolCallTimeoutMs?: number, toolOrder?: string[], identity?: ServerIdentity, mcpRoots?: string[],
+) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-browser-mcp-'))
   roots.push(root)
   const model = new FixtureModel()
@@ -88,13 +94,16 @@ async function load(exclusive = false, mode?: string, toolCallTimeoutMs?: number
     ['browserUse', BrowserUse], ['prompt', SystemPrompt], ['tools', Tools], ['toolExecutor', NativeToolExecutor], ['llm', Llm],
     ['sessions', Sessions], ['agents', Agents], ['loop', AgentLoop], ['projections', Projections],
     ['fs', LocalFileSystem], ['workingDirectory', WorkingDirectory],
+    ...identity === undefined ? [] : [['subprocess', LocalSubprocessRuntime] as const],
     ['model', { inject: ['llm'], apply(ctx: Context) { ctx.effect(() => ctx.llm.registerAdapter(['fixture'], model)) } }],
     ['browser', { inject: ['browserUse', 'agents', 'tools', 'systemPrompt', 'workingDirectory'], apply(ctx: Context) {
-      mountSessionMcp(ctx, { name: 'browser-fixture', exclusive, command: process.execPath, args: [fixture, root, ...mode === undefined ? [] : [mode]], ...toolCallTimeoutMs === undefined ? {} : { toolCallTimeoutMs, env: {} } })
+      mountSessionMcp(ctx, { name: 'browser-fixture', exclusive, command: process.execPath, args: [fixture, root, ...mode === undefined ? [] : [mode]], ...toolCallTimeoutMs === undefined ? {} : { toolCallTimeoutMs, env: {} },
+        ...identity === undefined ? {} : { identity: identity.name }, ...mcpRoots === undefined ? {} : { roots: mcpRoots } })
     } }],
   ])
   const configPath = join(root, 'cordis.yml')
-  await writeFile(configPath, JSON.stringify([...modules.keys()].map(name => ({ id: name, name, config: name === 'loop' ? { agents: [] } : name === 'prompt' && toolOrder !== undefined ? { toolOrder } : {} }))))
+  await writeFile(configPath, JSON.stringify([...modules.keys()].map(name => ({ id: name, name, config: name === 'loop' ? { agents: [] }
+    : name === 'prompt' && toolOrder !== undefined ? { toolOrder } : name === 'subprocess' ? identity?.subprocess : {} }))))
   const ctx = new Context()
   contexts.push(ctx)
   ctx.baseUrl = pathToFileURL(root).href + '/'
@@ -145,7 +154,7 @@ function registerIndependentTool(ctx: Context) {
 }
 
 async function events(root: string) {
-  return (await readFile(join(root, 'events.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line) as { event: string; pid: number; name?: string; cwd?: string })
+  return (await readFile(join(root, 'events.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line) as { event: string; pid: number; name?: string; cwd?: string; roots?: boolean })
 }
 
 it('requires a browser mode and validates launch and attachment settings', () => {
@@ -216,6 +225,38 @@ describe('Session MCP Loader composition', () => {
     const closed = await events(root)
     for (const { pid } of closed.filter(event => event.event === 'start')) {
       expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }))
+    }
+  })
+
+  it.runIf(process.platform === 'linux')('starts each Session\'s server through the subprocess service as the configured identity, in its home', async () => {
+    // Run-as refuses a temporary directory other users can write.
+    const temporary = await mkdtemp(join(tmpdir(), 'dsh-browser-mcp-tmp-'))
+    roots.push(temporary)
+    vi.stubEnv('TMPDIR', temporary)
+    onTestFinished(() => { vi.unstubAllEnvs() })
+    const status = await readFile('/proc/self/status', 'utf8')
+    const groups = status.split('\n').find(line => line.startsWith('Groups:'))!.slice('Groups:'.length).trim().split(/\s+/u)
+      .filter(id => id !== '').map(Number).sort((a, b) => a - b)
+    const home = await realpath(await mkdtemp(join(tmpdir(), 'dsh-browser-mcp-home-')))
+    roots.push(home)
+    const own = { uid: process.getuid!(), gid: process.getgid!(), groups, inherit: [], set: { HOME: home, PATH: '/usr/bin:/bin' }, secretNames: ['DEEPSEEK_API_KEY'] }
+    const { ctx, root } = await load(false, undefined, 5000, undefined, { name: 'browsermcp', subprocess: { runAs: own, identities: { browsermcp: own } } })
+    const spawn = vi.spyOn(ctx.subprocess, 'spawn')
+    const first = await ctx.agents.create({ sessionId: SessionId('first'), meta: { cwd: root } })
+    await warm(ctx, first.agent)
+    expect((await execute(ctx, first.agent)).content).toEqual([{ type: 'text', text: 'Visit 1: direct' }])
+    // It starts in the identity's home, never in the Session's directory, where the model could plant what it reads.
+    expect(spawn.mock.calls.map(([spec]) => [spec.argv, spec.identity, spec.cwd])).toEqual([[[process.execPath, fixture, root], 'browsermcp', home]])
+    // The server probes in place: one process per Session, with no disposable sibling.
+    expect((await events(root)).filter(event => event.event === 'start')).toHaveLength(1)
+  })
+
+  it('offers the configured MCP roots to each Session\'s server, and none without them', async () => {
+    for (const mcpRoots of [['/var/lib/mumbo/uploads'], undefined]) {
+      const { ctx, root } = await load(false, undefined, undefined, undefined, undefined, mcpRoots)
+      const first = await ctx.agents.create({ sessionId: SessionId('first'), meta: { cwd: root } })
+      await warm(ctx, first.agent)
+      expect((await events(root)).filter(event => event.event === 'initialize').map(event => event.roots)).toEqual([mcpRoots !== undefined])
     }
   })
 

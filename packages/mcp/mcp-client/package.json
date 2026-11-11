@@ -69,7 +69,8 @@
     "zod": "4.4.3",
     "@deepseek-ai/dsh-mcp-resources": "workspace:*",
     "@deepseek-ai/dsh-system-prompt": "workspace:*",
-    "@deepseek-ai/dsh-credentials": "workspace:*"
+    "@deepseek-ai/dsh-credentials": "workspace:*",
+    "@deepseek-ai/dsh-subprocess-local": "workspace:*"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-mcp-resources": {

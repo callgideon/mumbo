@@ -79,10 +79,12 @@ function withNextStep(result: ChangeResult): ChangeResult & { nextStep?: string 
 /** Required services for the management tool. */
 export const inject = ['tools', 'pluginManager', 'sandboxPolicy']
 
-/** Register one management tool for discovery and the four persistent actions.
+/** Register one management tool for discovery and the four persistent actions, unless the manager withholds it from the model.
  * @param ctx Agent-scoped tool registration context.
  */
 export function apply(ctx: Context): void {
+  // A plugin the model installs or enables runs in this process; a deployment can keep that out of the model's reach.
+  if (!ctx.pluginManager.modelTools) return
   ctx.tools.register(defineTool({
     name: 'plugin_manager',
     description: 'List plugins or bundles in the current profile, enable or disable them, install a bundle, or remove an installed bundle. Every action requires danger-full-access permission or approval for this call. Approval does not change the session permission mode. Changes affect every session in this profile. List first to obtain exact identifiers. Package installation can execute allowed build scripts. Live profiles apply changes immediately, including upgrades of installed packages; a change result that is not applied carries nextStep, which says what to do or tell the user. Unmet DSH version requirements (engines.dsh, else DSH peer dependencies) block installation and activation. Version exemptions risk crashes and data loss: warn the user and obtain explicit permission for the exact plugin and runtime versions before granting one.',

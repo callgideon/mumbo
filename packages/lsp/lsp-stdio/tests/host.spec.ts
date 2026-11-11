@@ -182,3 +182,18 @@ describe('readHostSource', () => {
     expect(source.text).toBe('const s = "�"\n')
   })
 })
+
+describe.runIf(process.platform === 'linux')('readHostSource under model roots', () => {
+  it('refuses a source whose real path leaves the roots even inside the workspace', async () => {
+    await ctx.fiber.dispose()
+    ctx = new Context()
+    await ctx.plugin(LocalFileSystem, { cwd: root, modelRoots: [ws] })
+    fs = ctx.fs as LocalFileSystem
+    await writeFile(join(ws, 'inside.ts'), 'export const inside = 1\n')
+    await writeFile(join(root, 'secret.ts'), 'export const secret = 1\n')
+    expect((await readSource('inside.ts')).text).toBe('export const inside = 1\n')
+    await expect(readSource(join(root, 'secret.ts'))).rejects.toThrow(
+      `source "${join(root, 'secret.ts')}" cannot be resolved: cannot access "${join(root, 'secret.ts')}": its real path is outside the directories you can access (${ws})`,
+    )
+  })
+})

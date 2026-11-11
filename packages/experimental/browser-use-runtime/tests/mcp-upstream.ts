@@ -26,6 +26,40 @@ import WorkingDirectory from '@deepseek-ai/dsh-working-directory'
 import { expect, vi } from 'vitest'
 import type { BrowserMcpConfig } from '../src/mcp.ts'
 
+/**
+ * Boot `provider` with `browserConfig` through a real Loader composition in `ctx`, and create one Session in `root`.
+ * @param ctx - the context the composition boots in; the caller disposes it.
+ * @param provider - the browser provider plugin.
+ * @param browserConfig - the provider's configuration.
+ * @param root - the composition's directory and the Session's working directory.
+ * @returns the Session's handle, its system prompt assembled so its browser tools are listed.
+ */
+export async function bootBrowserProvider<T>(ctx: Context, provider: Pick<Plugin.Object<T>, 'apply'>, browserConfig: T, root: string) {
+  const modules = new Map<string, unknown>([
+    ['browserUse', BrowserUse], ['prompt', SystemPrompt], ['tools', Tools], ['toolExecutor', NativeToolExecutor], ['llm', Llm],
+    ['sessions', Sessions], ['agents', Agents], ['loop', AgentLoop], ['projections', Projections], ['browser', provider],
+    ['fs', LocalFileSystem], ['workingDirectory', WorkingDirectory],
+  ])
+  const configPath = join(root, 'cordis.yml')
+  await writeFile(configPath, JSON.stringify([...modules.keys()].map(name => ({ id: name, name, config: name === 'loop' ? { agents: [] } : name === 'browser' ? browserConfig : {} }))))
+  ctx.baseUrl = pathToFileURL(root).href + '/'
+  await ctx.plugin(Loader)
+  ctx.loader.builtins.include = Include
+  ctx.loader.internal = {
+    version: 'v2',
+    async import(specifier: string) {
+      if (!modules.has(specifier)) throw new Error(`Unexpected smoke module ${specifier}`)
+      return modules.get(specifier)
+    },
+  } as unknown as NonNullable<typeof ctx.loader.internal>
+  await ctx.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(configPath).href } })
+  await ctx.loader.await()
+  const owner = await ctx.agents.create({ sessionId: SessionId('browser-upstream'), meta: { cwd: root } })
+  await owner.agent.whenIdle()
+  await ctx.systemPrompt.assemble({ agent: owner.agent, scope: owner.agent, signal: new AbortController().signal })
+  return owner
+}
+
 export async function verifyMcpBrowser(
   provider: Pick<Plugin.Object<BrowserMcpConfig>, 'apply'>,
   namespace: string,
@@ -59,28 +93,7 @@ export async function verifyMcpBrowser(
       await vi.waitFor(async () => { port = (await readFile(portFile, 'utf8')).split('\n')[0]; expect(Number(port)).toBeGreaterThan(0) }, { timeout: 20000 })
       browserConfig = { mode: 'attach', endpoint: `http://127.0.0.1:${port}` }
     }
-    const modules = new Map<string, unknown>([
-      ['browserUse', BrowserUse], ['prompt', SystemPrompt], ['tools', Tools], ['toolExecutor', NativeToolExecutor], ['llm', Llm],
-      ['sessions', Sessions], ['agents', Agents], ['loop', AgentLoop], ['projections', Projections], ['browser', provider],
-      ['fs', LocalFileSystem], ['workingDirectory', WorkingDirectory],
-    ])
-    const configPath = join(root, 'cordis.yml')
-    await writeFile(configPath, JSON.stringify([...modules.keys()].map(name => ({ id: name, name, config: name === 'loop' ? { agents: [] } : name === 'browser' ? browserConfig : {} }))))
-    ctx.baseUrl = pathToFileURL(root).href + '/'
-    await ctx.plugin(Loader)
-    ctx.loader.builtins.include = Include
-    ctx.loader.internal = {
-      version: 'v2',
-      async import(specifier: string) {
-        if (!modules.has(specifier)) throw new Error(`Unexpected smoke module ${specifier}`)
-        return modules.get(specifier)
-      },
-    } as unknown as NonNullable<typeof ctx.loader.internal>
-    await ctx.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(configPath).href } })
-    await ctx.loader.await()
-    const owner = await ctx.agents.create({ sessionId: SessionId('browser-upstream'), meta: { cwd: root } })
-    await owner.agent.whenIdle()
-    await ctx.systemPrompt.assemble({ agent: owner.agent, scope: owner.agent, signal: new AbortController().signal })
+    const owner = await bootBrowserProvider(ctx, provider, browserConfig, root)
     const schemas = ctx.tools.schemas(owner.agent)
     expect(schemas.length).toBeGreaterThan(5)
     expect(schemas.every(tool => tool.name.startsWith(`mcp__${namespace}__`))).toBe(true)

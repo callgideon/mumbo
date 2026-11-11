@@ -95,6 +95,8 @@ type MaterializeInputs = MaterializeBase & (
       parent: Agent
       /** Absolute initial directory captured before provider preparation. */
       cwd: string
+      /** Who chose {@link cwd}; the child's working directory records it so model roots confine only the model's choice. */
+      cwdChooser: 'model' | 'host'
       seed: readonly SessionEvent[] | undefined
       meta: NonNullable<CreateAgentOptions['meta']>
       /** Exact parent-log prefix length inside {@link seed}. */
@@ -347,7 +349,7 @@ export class SubagentManager {
       // parent's future, not to this child.
       const delegatedPolicies = captureDelegatedPolicyOverrides(parent)
 
-      const cwd = await this.resolveDirectory(spec, signal)
+      const { cwd, chooser: cwdChooser } = await this.resolveDirectory(spec, signal)
       const prepared = await prepare({
         sessionId: childId,
         cwd,
@@ -382,6 +384,7 @@ export class SubagentManager {
           create: {
             parent,
             cwd,
+            cwdChooser,
             seed,
             meta: childSessionMeta(parent, childDepth, prepared.seed !== undefined, spec.agentPreset),
             inheritedEventCount,
@@ -453,7 +456,7 @@ export class SubagentManager {
     return this.trackStartup(ancestry.root, spec.signal, async (signal) => {
       let activation: Activation | undefined
       try {
-        const cwd = await this.resolveDirectory(spec, signal)
+        const { cwd } = await this.resolveDirectory(spec, signal)
         activation = await this.materialize({
           kind: 'external',
           provider,
@@ -485,13 +488,21 @@ export class SubagentManager {
     })
   }
 
-  /** Capture the explicit or inherited directory while the parent still owns startup. */
-  private async resolveDirectory(request: Pick<SubagentStartRequest, 'parent' | 'cwd'>, signal: AbortSignal): Promise<string> {
-    const cwd = request.cwd !== undefined && isAbsolute(request.cwd)
-      ? request.cwd
-      : resolve(await this.ctx.workingDirectory.ensure(request.parent, signal), request.cwd ?? '.')
+  /**
+   * Capture the explicit or inherited directory, and who chose it, while the parent still owns startup. An inherited
+   * directory keeps the parent's chooser.
+   */
+  private async resolveDirectory(
+    request: Pick<SubagentStartRequest, 'parent' | 'cwd' | 'cwdChooser'>, signal: AbortSignal,
+  ): Promise<{ cwd: string; chooser: 'model' | 'host' }> {
+    const workingDirectory = this.ctx.workingDirectory
+    if (request.cwd !== undefined && request.cwdChooser !== 'host') {
+      return { cwd: await workingDirectory.resolveModelDirectory(request.parent, request.cwd, signal), chooser: 'model' }
+    }
+    if (request.cwd !== undefined && isAbsolute(request.cwd)) return { cwd: request.cwd, chooser: 'host' }
+    const cwd = resolve(await workingDirectory.ensure(request.parent, signal), request.cwd ?? '.')
     signal.throwIfAborted()
-    return cwd
+    return { cwd, chooser: request.cwd === undefined ? workingDirectory.chooser(request.parent.session) : 'host' }
   }
 
   /**
@@ -831,7 +842,7 @@ export class SubagentManager {
           appendDelegatedPolicyOverrides(child.session, create.delegatedPolicies)
           const workingDirectory = childCtx.get('workingDirectory')
           if (workingDirectory === undefined) throw new Error('local subagents require the working-directory service')
-          await workingDirectory.set(child, create.cwd, inputs.signal)
+          await workingDirectory.set(child, create.cwd, inputs.signal, create.cwdChooser)
         }
         if (inputs.composition.agentPreset === undefined) await applyChildComposition(childCtx, create?.parent, inputs.composition)
         if (inputs.outputSchema !== undefined) {

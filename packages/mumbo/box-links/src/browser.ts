@@ -47,7 +47,7 @@ export async function frontChrome(ctx: Context, config: BrowserConfig, signal: A
     signal.throwIfAborted()
     if (expired()) throw unfinished(args)
     const handle = ctx.subprocess.spawn({
-      argv: [config.wmctrl, ...args], cwd: '/', env, graceMs: GRACE_MS, signal: bounded,
+      argv: [config.wmctrl, ...args], cwd: '/', env, graceMs: GRACE_MS, signal: bounded, identity: config.identity,
       stdio: { stdin: 'ignore', stdout: { maxBytes: OUTPUT_BYTES }, stderr: { maxBytes: OUTPUT_BYTES } },
     })
     const outcome = await handle.done.catch((error: unknown) => {

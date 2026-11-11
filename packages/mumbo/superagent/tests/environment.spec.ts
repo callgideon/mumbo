@@ -1,11 +1,11 @@
 import { execFile, spawn } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SENSITIVE_ENV_PATTERN, type SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
-import { GIT_LOCATION, agentVariables, credentialHelper, runAsWorker, verifyDirectory, withoutDirectory, workerBin, workerGitConfig, writeEnvironment }
+import { GIT_LOCATION, agentVariables, credentialHelper, runAsWorker, verifyDirectory, verifyEnvironment, withoutDirectory, workerBin, workerGitConfig, writeEnvironment }
   from '../src/infra/environment.ts'
 import { CliError } from '../src/infra/commands.ts'
 import { testDeployment } from './fixtures/deployment.ts'
@@ -60,6 +60,14 @@ describe('worker shims', () => {
     writeFileSync(workerGitConfig(dir), '[user]\n\tname = someone\n')
     await expect(writeEnvironment(testDeployment({ stateDir: dir }), [])).rejects.toThrow(`${workerGitConfig(dir)} was not written by dsh-superagent`)
     expect(readFileSync(workerGitConfig(dir), 'utf8')).toBe('[user]\n\tname = someone\n')
+  })
+  it('writes shims the worker\'s group may run and a git configuration it may read, neither of which it may change', async () => {
+    chmodSync(dir, 0o2750)
+    await writeEnvironment(testDeployment({ workerDirectory: dir }), ['old-cli'])
+    const mode = (path: string) => statSync(path).mode & 0o7777
+    // In a set-group-ID worker directory the shim directory keeps the bit, so its entries belong to the worker's group.
+    expect([mode(workerBin(dir)), mode(join(workerBin(dir), 'gh')), mode(join(workerBin(dir), 'old-cli')), mode(workerGitConfig(dir))])
+      .toEqual([0o2750, 0o750, 0o750, 0o640])
   })
   it('replaces the files it wrote under the project\'s earlier names', async () => {
     await writeEnvironment(testDeployment({ stateDir: dir }), ['old-cli', 'older-cli'])
@@ -158,6 +166,27 @@ describe('ticket directory check', () => {
     const error = await runAsWorker(subprocess(join(dir, 'global')), failing, dir, signal).catch((e: unknown) => e)
     expect(error).toBeInstanceOf(CliError)
     expect(error).toMatchObject({ message: 'nope', exitCode: 3 })
+  })
+})
+
+describe('the worker git check of setup', () => {
+  const signal = new AbortController().signal
+  it('runs where no repository a worker made adds configuration, such as one in the work directory', async () => {
+    const deployment = testDeployment({ stateDir: dir })
+    await writeEnvironment(deployment, [])
+    mkdirSync(deployment.workDirectory)
+    const git = (...args: string[]) => exec('git', args, { cwd: deployment.workDirectory, env: gitEnv({ GIT_CONFIG_GLOBAL: join(dir, 'unused'), GIT_CONFIG_NOSYSTEM: '1' }) })
+    await git('init', '-q')
+    await git('config', 'credential.https://github.com.helper', 'planted')
+    await expect(verifyEnvironment(deployment, subprocess(workerGitConfig(dir)), signal)).resolves.toBeUndefined()
+  })
+  it('reports a git failure as git reports it, and a missing helper with what git found', async () => {
+    const deployment = testDeployment({ stateDir: dir })
+    writeFileSync(workerGitConfig(dir), '[core\n')
+    await expect(verifyEnvironment(deployment, subprocess(workerGitConfig(dir)), signal)).rejects.toThrow(/bad config/)
+    writeFileSync(workerGitConfig(dir), '')
+    await expect(verifyEnvironment(deployment, subprocess(workerGitConfig(dir)), signal))
+      .rejects.toThrow('needs git 2.32 or later')
   })
 })
 

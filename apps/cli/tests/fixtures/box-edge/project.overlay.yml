@@ -1,0 +1,17 @@
+# The rows the mumbo edge writes into a project box (deploy/boxes/edge/edge.mjs startScript on boxes/production):
+# sandboxes.overlay.yml without browser rows, models.overlay.yml, and links.overlay.yml.
+- insert:
+    - id: mcp-sandboxes
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: sandboxes
+        transport: streamable-http
+        url: https://llm.example/mcp
+- id: llm-pi-ai
+  config:
+    providers: {}
+- insert:
+    - id: box-links
+      name: '@mumbo/box-links'
+      config:
+        home: https://app.example/home

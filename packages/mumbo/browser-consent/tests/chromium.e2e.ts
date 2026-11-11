@@ -1,7 +1,9 @@
 /** Consent against the pinned Playwright MCP server attached to a disposable Chromium and two loopback origins. */
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { once } from 'node:events'
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { writeFileSync } from 'node:fs'
+import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { connect, createServer as createTcpServer } from 'node:net'
 import type { AddressInfo, Socket } from 'node:net'
@@ -26,6 +28,17 @@ const accountPages = (port: number, path: string) => path === '/settings'
     : `<!doctype html><title>Home</title><a id="account" href="http://localhost:${String(port)}/settings">Account</a>`
 /** What the patched snapshot shows in place of a secret input's value. */
 const MASK = '•'.repeat(4)
+
+/**
+ * Upload settings for a composition in `root`: an upload directory and a staging directory, each of its own, in it.
+ * @param root - scratch directory.
+ * @returns the consent row's `uploadDirectory` and `uploadStaging`.
+ */
+async function uploads(root: string) {
+  const [uploadDirectory, uploadStaging] = [join(root, 'Downloads'), join(root, 'staging')]
+  for (const directory of [uploadDirectory, uploadStaging]) await mkdir(directory, { mode: 0o700 })
+  return { uploadDirectory, uploadStaging }
+}
 
 /**
  * Start a disposable headless Chromium with its profile in `root`.
@@ -54,11 +67,11 @@ function launchChromium(root: string) {
  * and run one scripted turn.
  * @param page - HTML for a request path, given the server port, or `REDIRECT <url>` for a redirect.
  * @param turn - consent's `deniedUrls`, `allowedSites`, the model's script, the person's answers, and whether the
- *   server writes to an `outputDir` outside the working directory, given the origins.
+ *   server writes to an `outputDir` outside the working directory, given the origins and the upload directory.
  * @returns each tool result's text, the approval reasons asked, the Session events, the hosts that received a POST,
  *   the files Playwright MCP left in its output directory, by name, and the names in the working directory.
  */
-async function runTurn(page: (port: number, path: string) => string, turn: (allowed: string, other: string) => {
+async function runTurn(page: (port: number, path: string) => string, turn: (allowed: string, other: string, downloads: string) => {
   deniedUrls: string[]
   allowedSites: string[]
   script: ScriptStep[]
@@ -88,11 +101,13 @@ async function runTurn(page: (port: number, path: string) => string, turn: (allo
   let booted: Awaited<ReturnType<typeof bootComposition>> | undefined
   try {
     const debugPort = await chromium.debugPort()
-    const { deniedUrls, allowedSites, script, answers, outputDir } = turn(`http://127.0.0.1:${String(port)}`, `http://localhost:${String(port)}`)
+    const upload = await uploads(root)
+    const { deniedUrls, allowedSites, script, answers, outputDir } = turn(`http://127.0.0.1:${String(port)}`, `http://localhost:${String(port)}`, upload.uploadDirectory)
     const output = outputDir === true ? join(tmpdir(), `${basename(root)}-output`) : join(root, '.playwright-mcp')
     cleanup.push(output)
-    const browser = { mode: 'attach', endpoint: `http://127.0.0.1:${debugPort}`, ...outputDir === true ? { outputDir: output } : {} }
-    booted = await bootComposition(root, { consent: { browser, deniedUrls, allowedSites }, script, answers: answers ?? [] })
+    const browser = { mode: 'attach', endpoint: `http://127.0.0.1:${debugPort}`, outputDir: output }
+    const consent = { browser, deniedUrls, allowedSites, ...upload }
+    booted = await bootComposition(root, { consent, script, answers: answers ?? [] })
     booted.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Go.' }], source: { kind: 'user' } }))
     await booted.agent.whenIdle()
     const names = await readdir(output).catch(() => [])
@@ -229,7 +244,7 @@ it.skipIf(skip)('shows a password field as dots in screenshots; revealing it tak
     ],
   }))
   // Each screenshot is the file its result links.
-  const png = (step: number) => files.get(/\]\(\.playwright-mcp\/([^)]+\.png)\)$/mu.exec(results[step] ?? '')?.[1] ?? '')!
+  const png = (step: number) => files.get(/\]\(\.\.\/\.playwright-mcp\/([^)]+\.png)\)$/mu.exec(results[step] ?? '')?.[1] ?? '')!
   const [pa, pb, ta, tb, pc, afterReads, revealed] = [1, 2, 3, 4, 6, 10, 13].map(png)
   expect(pa!.equals(pb!)).toBe(true)
   expect(pa!.equals(pc!)).toBe(true)
@@ -311,6 +326,27 @@ it.skipIf(skip)('writes to a configured outputDir outside the working directory,
   expect(workspace).not.toContain('.playwright-mcp')
 })
 
+it.skipIf(skip)('uploads the copy it staged and asked about, which the real server accepts from its file root', { timeout: 120_000 }, async () => {
+  // The page shows the content of the file it receives in its title.
+  const page = () => '<!doctype html><title>waiting</title><input id="f" type="file" onchange="this.files[0].text().then(text => { document.title = text })">'
+  const { results, asked } = await runTurn(page, (allowed, _other, downloads) => {
+    writeFileSync(join(downloads, 'tax.txt'), 'staged content')
+    return {
+      deniedUrls: [], allowedSites: [allowed], answers: ['allowed-once'],
+      script: [
+        { name: 'browser_navigate', args: { url: `${allowed}/` } },
+        { name: 'browser_click', args: { element: 'file input', target: '#f' } },
+        { name: 'browser_file_upload', args: { paths: [join(downloads, 'tax.txt')] } },
+        { name: 'browser_wait_for', args: { time: 1 } },
+        { name: 'browser_snapshot', args: {} },
+      ],
+    }
+  })
+  expect(asked).toEqual([expect.stringContaining(`Files sent: "tax.txt" (14 bytes, SHA-256 ${createHash('sha256').update('staged content').digest('hex').slice(0, 12)}).`)])
+  expect(results[2]).not.toMatch(/^Error/u)
+  expect(results[4]).toContain('- Page Title: staged content')
+})
+
 it.skipIf(skip)('asks before a click or typing on an allowed page with a masked field, or one whose snapshot fails, and not on a plain page', { timeout: 120_000 }, async () => {
   const page = (_port: number, path: string) => path === '/login'
     ? '<!doctype html><title>Sign in</title><input id="pw" type="password"><button id="go" type="button">Sign in</button>'
@@ -382,7 +418,7 @@ it('reports why a browser call failed when the browser is down', { timeout: 120_
   const root = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-down-'))
   vi.stubEnv('DSH_HOME', root)
   const booted = await bootComposition(root, {
-    consent: { browser: { mode: 'attach', endpoint: 'http://127.0.0.1:1' }, deniedUrls: [] },
+    consent: { browser: { mode: 'attach', endpoint: 'http://127.0.0.1:1', outputDir: join(root, '.playwright-mcp') }, deniedUrls: [], ...await uploads(root) },
     script: [{ name: 'browser_navigate', args: { url: 'https://example.com/' } }],
   })
   try {
@@ -422,7 +458,7 @@ it.skipIf(skip)('holds no connection to the browser while the person has it, and
     proxy.listen(0, '127.0.0.1')
     await once(proxy, 'listening')
     const endpoint = `http://127.0.0.1:${String((proxy.address() as AddressInfo).port)}`
-    booted = await bootComposition(root, { consent: { browser: { mode: 'attach', endpoint }, deniedUrls: ['chrome:'] } })
+    booted = await bootComposition(root, { consent: { browser: { mode: 'attach', endpoint, outputDir: join(root, '.playwright-mcp') }, deniedUrls: ['chrome:'], ...await uploads(root) } })
     const { ctx, agent } = booted
     const snapshot = async () => (await executeModelToolFixture(ctx, {
       agent, name: tool('browser_snapshot'), arguments: {}, callId: ToolCallId('snapshot'), signal: new AbortController().signal,

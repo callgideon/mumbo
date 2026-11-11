@@ -33,6 +33,8 @@ Pick [`fs-local`](../fs-local/README.md) for ordinary host files or [`fs-sandbox
 
 Through `ctx.fs`, resolve paths, read text or bounded bytes, list direct children, create a directory with its missing ancestors, and perform guarded mutations. `patchText` applies parsed hunks under the same lock as its version check. `deleteFile` removes a regular file. `moveFile` locks both targets, optionally patches the source text, publishes the destination, then removes the source. Guards are optional: omission mutates the current state unconditionally. Failures carry stable `FsError` codes from the runtime `FS_ERROR_CODES` list, which transport validators reuse.
 
+A model-facing tool resolves a model-supplied path with `resolveModelPath(path, { cwd })` instead of `resolve`. A provider that confines the model to configured roots, such as `dsh-fs-local` with `modelRoots`, refuses a real path outside every root with `FS_OUTSIDE_ROOTS`; the base provider resolves exactly like `resolve`. Such a provider's `resolve` also refuses, for every caller, a path under a root whose real path leaves the roots; a reader the person drives directly passes `resolve(path, { unconfined: true })` to keep following those links.
+
 `watch(target, changed, signal)` reports invalidations for one file or a directory's direct entries. It resolves once observation is ready with an asynchronous close function that the caller must await. The signal cancels initialization; unsupported providers reject without polling.
 
 -----

@@ -12,9 +12,9 @@
  * holds `login` shows a masked password field; a snapshot fails on a page whose URL holds `nosnap`, and a tab listing
  * on one whose URL holds `broken`. `browser_close` answers with upstream's fixed result followed by the page section,
  * and fails on a page whose URL holds `noclose`. Every other call on a page whose URL holds `stall` never answers, and
- * only `browser_tabs` on one whose URL holds `stalltabs`.
+ * only `browser_tabs` on one whose URL holds `stalltabs`. An upload logs the content of each file it receives.
  */
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { createInterface } from 'node:readline'
 
@@ -60,7 +60,9 @@ createInterface({ input: process.stdin }).on('line', line => {
       break
     case 'tools/call': {
       const { name, arguments: args } = request.params
-      appendFileSync(join(root, 'calls.ndjson'), JSON.stringify({ name, args, url: tabs[current].url }) + '\n')
+      // An upload records what the browser would read from each path it receives.
+      const files = name === 'browser_file_upload' ? args.paths?.map(path => readFileSync(path, 'utf8')) : undefined
+      appendFileSync(join(root, 'calls.ndjson'), JSON.stringify({ name, args, url: tabs[current].url, ...files === undefined ? {} : { files } }) + '\n')
       const url = tabs[current].url
       if (url.includes('stalltabs') ? name === 'browser_tabs' : url.includes('stall') && name !== 'browser_close') break
       const failing = name === 'browser_tabs' ? 'broken' : name === 'browser_snapshot' ? 'nosnap' : name === 'browser_close' ? 'noclose' : undefined

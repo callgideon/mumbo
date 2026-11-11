@@ -2,18 +2,23 @@
  * Local Service Provider for the subprocess capability seam. Each spawn owns a
  * platform-selected managed range with the spec's per-stream stdio dispositions.
  * Normal disposal terminates and joins live ranges; Node's synchronous exit
- * phase force-stops any ranges the service still owns. It has no config: every
- * disposition and limit arrives on the spec, so deployment-varying choices
- * stay with the caller's config (the bash executor's, the LSP host's, …).
+ * phase force-stops any ranges the service still owns. Every disposition and
+ * limit arrives on the spec, so deployment-varying choices stay with the
+ * caller's config (the bash executor's, the LSP host's, …). The provider
+ * config `runAs` starts every child on Linux as a fixed non-root identity with
+ * an explicit environment; `identities` adds further such identities that a
+ * spawn spec selects by name. A run-as child never receives this process's
+ * standard output or error: output a spec asks to inherit is read and discarded.
  * @module @deepseek-ai/dsh-subprocess-local
  */
 
-import { constants } from 'node:fs'
+import { constants, statSync } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
-import { userInfo } from 'node:os'
+import { tmpdir, userInfo } from 'node:os'
 import { delimiter, extname, isAbsolute, resolve } from 'node:path'
 import type { Duplex } from 'node:stream'
 import { Context } from '@deepseek-ai/cordis'
+import z from '@deepseek-ai/schemastery'
 import type * as NodePty from 'node-pty'
 import type { IPtyForkOptions, IWindowsPtyForkOptions } from 'node-pty'
 import { createLazyRequire } from '@deepseek-ai/dsh-lazy-require'
@@ -36,13 +41,22 @@ import type { LocalSubprocessHandle, SpawnInternals } from './spawn.ts'
 import {
   confirmLinuxManager,
   LinuxScopeNotStartedError,
+  launchLinuxBootstrap,
   launchLinuxScope,
   linuxManagerListener,
+  prepareLinuxTerminalBootstrap,
   prepareLinuxTerminalScope,
+  probeLinuxBootstrap,
   probeLinuxNative,
   signalLinuxDirectProcess,
   systemdRunIdentity,
 } from './linux-scope.ts'
+import type { LinuxTerminalBootstrapLaunch, LinuxTerminalScopeLaunch } from './linux-scope.ts'
+import {
+  assertNoSecretNames, assertPrivateDirectory, assertRunAsHost, assertSearchable, assertServerSearchPaths, credentialsOf, IDENTITY_NAME,
+  resolveServerIdentity, RunAs, runAsEnvironment, validateRunAs,
+} from './run-as.ts'
+import type { RunAsIdentity, ServerIdentity } from './run-as.ts'
 import { LinuxScopeSelector } from './linux-scope-selector.ts'
 import type { LinuxScopeDecision } from './linux-scope-selector.ts'
 import { launchWindowsJob, probeWindowsJob } from './windows-job.ts'
@@ -53,6 +67,78 @@ import { LocalTerminalHandle } from './terminal.ts'
 import { prepareShellActivity } from './shell-activity.ts'
 
 const requireNodePty = createLazyRequire<typeof NodePty>('node-pty', import.meta.url)
+
+export { SubprocessSecretEnvironmentError } from './run-as.ts'
+export type { RunAs, RunAsIdentity } from './run-as.ts'
+
+/** Provider configuration. */
+export interface Config {
+  /** Start every child as this identity with this environment; omitted, children run as this process with its scrubbed environment. */
+  runAs?: RunAs | undefined
+  /**
+   * Further run-as identities by name, each with its own environment and secret names. A spawn spec that names one
+   * starts its child as it; every other child starts as `runAs`, which these require. A spawn naming an identity not
+   * listed here is refused. A server started as one, such as an MCP stdio server whose row names it, starts in its home,
+   * whose `set` must then meet the rules of `serverIdentity`, checked when a server first asks for that home.
+   */
+  identities?: Record<string, RunAs> | undefined
+  /**
+   * Name of the `identities` entry that runs the servers a person configures rather than the model, such as MCP stdio
+   * servers that name no identity; each starts in that identity's home. Its `set` must name `HOME` by its real path, an
+   * existing directory owned by that identity, writable by no other user but root, directly or through an ancestor, and
+   * searchable by it, and `PATH`; every `PATH` and `NODE_PATH` entry that identity receives, at load and at each spawn,
+   * must be a directory only root can change.
+   */
+  serverIdentity?: string | undefined
+  /**
+   * Absolute existing directory that receives each interactive shell's private activity records; omitted, the OS
+   * temporary directory. Under `runAs` it must be writable by no other user, directly or through an ancestor, and
+   * searchable by the run-as user through every ancestor, so a root-only temporary directory needs this set.
+   */
+  shellActivityDirectory?: string | undefined
+  /**
+   * Absolute existing directory that receives spill files, created mode `0640`; omitted, a private per-process
+   * directory under the OS temporary directory. Under `runAs` it must be writable by no other user, directly or
+   * through an ancestor.
+   */
+  spillDirectory?: string | undefined
+}
+
+/** The directories a provider writes into, resolved from its config. */
+interface Directories {
+  /** Parent of each interactive shell's activity record directory. */
+  shellActivity: string
+  /** Spill file directory; undefined selects the private per-process directory. */
+  spill: string | undefined
+}
+
+/**
+ * Resolve and check the directories of a provider config, failing at load on any unusable entry. Under `runAs` each
+ * directory is replaced by the real path the checks examined, so no later write goes through a link in its spelling.
+ * @param config - the provider config.
+ * @returns the resolved directories.
+ * @throws when an entry is not an absolute existing directory, or under `runAs` fails its ownership or search check.
+ */
+function resolveDirectories(config: Config): Directories {
+  for (const [field, path] of [['shellActivityDirectory', config.shellActivityDirectory], ['spillDirectory', config.spillDirectory]] as const) {
+    if (path === undefined) continue
+    let directory = false
+    try {
+      directory = isAbsolute(path) && statSync(path).isDirectory()
+    } catch (_missing) {
+      // Reported below as not an existing directory.
+    }
+    if (!directory) throw new Error(`subprocess-local: ${field} ${JSON.stringify(path)} must be an absolute existing directory`)
+  }
+  const directories = { shellActivity: config.shellActivityDirectory ?? tmpdir(), spill: config.spillDirectory }
+  const runAs = config.runAs
+  if (runAs === undefined) return directories
+  const unshared = (field: string, path: string): string => `subprocess-local: ${field} ${JSON.stringify(path)} must be owned by this process and writable by no other user, directly or through an ancestor`
+  const shellActivity = assertPrivateDirectory(directories.shellActivity, unshared(config.shellActivityDirectory === undefined ? 'shellActivityDirectory (the temporary directory)' : 'shellActivityDirectory', directories.shellActivity))
+  assertSearchable(shellActivity, credentialsOf(runAs), path => `subprocess-local: the run-as user (uid ${runAs.uid}) cannot search ${JSON.stringify(path)}, so its shells cannot reach their activity records under ${JSON.stringify(shellActivity)}; set shellActivityDirectory to a directory it can search, such as /run/dsh-shell (root, 0711)`)
+  const spill = directories.spill === undefined ? undefined : assertPrivateDirectory(directories.spill, unshared('spillDirectory', directories.spill))
+  return { shellActivity, spill }
+}
 
 /**
  * Local subprocess service: platform-selected managed ranges, Node-shaped stdio
@@ -86,9 +172,76 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
   private linuxScopeDecision: Extract<LinuxScopeDecision, { kind: 'scope' }> | undefined
   /** Test hook for platform process inspection; production resolves lazily on terminal spawn. */
   terminalInspector: ProcessInspector | undefined
+  /** The identity and environment every child starts with, when configured. */
+  private readonly runAs: RunAs | undefined
+  /** The credentials alone, as the exec bootstrap receives them. */
+  private readonly identity: RunAsIdentity | undefined
+  /** Further identities a spawn spec selects by name. */
+  private readonly identities: ReadonlyMap<string, RunAs>
+  /** The identity that runs the servers a person configures, with its checked home. */
+  private readonly server: ServerIdentity | undefined
+  /** Checked homes of the identities servers have started as, by name; spawns as these identities check their search paths. */
+  private readonly serverHomes = new Map<string, string>()
+  /** The directories this provider writes into. */
+  private readonly directories: Directories
 
-  constructor(ctx: Context) {
+  /** The run-as identity every child starts with, when configured. */
+  override get childIdentity(): RunAsIdentity | undefined {
+    return this.identity
+  }
+
+  /** The identity that runs the servers a person configures, and its home, when configured. */
+  override get serverIdentity(): ServerIdentity | undefined {
+    return this.server
+  }
+
+  /**
+   * The home of a configured identity a server starts as, checked by {@link resolveServerIdentity} the first time it is
+   * asked; later spawns as that identity check their final `PATH` and `NODE_PATH` again.
+   * @param identity - an `identities` entry.
+   * @returns the identity's home, by its real path.
+   * @throws when no such identity is configured, or its home or search paths fail the checks.
+   */
+  override serverHome(identity: string): string {
+    let home = this.serverHomes.get(identity)
+    if (home === undefined) {
+      this.runAsFor(identity)
+      home = resolveServerIdentity(identity, this.identities).home
+      this.serverHomes.set(identity, home)
+    }
+    return home
+  }
+
+  static Config: z<Config> = z.object({
+    runAs: z.union([RunAs, z.const(undefined)]),
+    identities: z.union([z.dict(RunAs), z.const(undefined)]),
+    serverIdentity: z.union([String, z.const(undefined)]),
+    shellActivityDirectory: z.union([String, z.const(undefined)]),
+    spillDirectory: z.union([String, z.const(undefined)]),
+  })
+
+  constructor(ctx: Context, config: Config = {}) {
     super(ctx)
+    const identities = Object.entries(config.identities ?? {})
+    if (identities.length > 0 && config.runAs === undefined) {
+      throw new Error('subprocess-local: identities requires runAs, the identity of every child whose spawn names none')
+    }
+    for (const [name, runAs] of identities) {
+      if (!IDENTITY_NAME.test(name)) throw new Error(`subprocess-local: identities name ${JSON.stringify(name)} must match ${String(IDENTITY_NAME)}`)
+      validateRunAs(runAs, process.platform, `identities.${name}`)
+    }
+    if (config.runAs !== undefined) {
+      validateRunAs(config.runAs, process.platform)
+      assertRunAsHost(tmpdir())
+      // Only the exec bootstrap can take the identity before the target runs, with or without a systemd scope.
+      if (!probeLinuxBootstrap()) throw new Error('subprocess-local: runAs requires the Linux exec bootstrap (the koffi execve binding and the runner entry), which is unavailable')
+    }
+    this.directories = resolveDirectories(config)
+    this.runAs = config.runAs
+    this.identity = config.runAs === undefined ? undefined : credentialsOf(config.runAs)
+    this.identities = new Map(identities)
+    this.server = config.serverIdentity === undefined ? undefined : resolveServerIdentity(config.serverIdentity, this.identities)
+    if (this.server !== undefined) this.serverHomes.set(this.server.name, this.server.home)
     ctx.effect(() => {
       const onHostExit = (): void => { this.terminateForHostExit() }
       process.prependListener('exit', onHostExit)
@@ -156,10 +309,12 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
     command: string,
     env?: Readonly<Record<string, string>>,
     signal?: AbortSignal,
+    identity?: string,
   ): Promise<string> {
     if (command.length === 0) throw new Error('subprocess-local: executable must be non-empty')
     signal?.throwIfAborted()
-    const environment = childEnv(env)
+    const runAs = this.runAsFor(identity)
+    const environment = runAs === undefined ? childEnv(env) : runAsEnvironment(runAs, env)
     const absolute = isAbsolute(command)
     if (!absolute && (command.includes('/') || (process.platform === 'win32' && command.includes('\\')))) {
       throw new Error(
@@ -194,21 +349,52 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
       extensions.map(extension => resolve(process.cwd(), directory, command + extension)))
   }
 
+  /**
+   * The run-as configuration of one launch.
+   * @param name - the identity a spawn spec names; undefined selects `runAs`.
+   * @returns the configuration, or undefined when children run as this process.
+   * @throws when no identity of that name is configured.
+   */
+  private runAsFor(name: string | undefined): RunAs | undefined {
+    if (name === undefined) return this.runAs
+    const runAs = this.identities.get(name)
+    if (runAs === undefined) throw new Error(`subprocess-local: no run-as identity named ${JSON.stringify(name)} is configured; list it under identities`)
+    return runAs
+  }
+
+  /** The complete target environment: run-as composition plus the secret guard, or the scrubbed parent base. */
+  private targetEnvironment(spec: Parameters<typeof targetEnvironment>[0], runAs: RunAs | undefined): Record<string, string> {
+    if (runAs === undefined) return targetEnvironment(spec)
+    const env = targetEnvironment(spec, explicit => runAsEnvironment(runAs, explicit))
+    assertNoSecretNames(runAs, env)
+    return env
+  }
+
   spawn(spec: SubprocessSpawnSpec): SubprocessHandle {
     validateSubprocessSpec(spec)
-    const env = targetEnvironment(spec)
+    const runAs = this.runAsFor(spec.identity)
+    const request = runAs === undefined ? spec : withoutInheritedOutput(spec)
+    const identity = runAs === undefined ? undefined : credentialsOf(runAs)
+    const env = this.targetEnvironment(request, runAs)
+    // A caller's explicit NODE_PATH reaches a server too, so the final environment is checked again.
+    if (spec.identity !== undefined && this.serverHomes.has(spec.identity)) assertServerSearchPaths(env, `identities.${spec.identity}`)
     const containmentMode = this.selectContainmentMode('ordinary')
     let handle: LocalSubprocessHandle
-    const internals: SpawnInternals = { ...this.internals, onSpillFailure: this.reportSpillFailure }
-    if (containmentMode === 'fallback') {
-      handle = spawnSubprocess(spec, internals)
+    const spillDir = this.internals.spillDir ?? this.directories.spill
+    const internals: SpawnInternals = {
+      ...this.internals, ...spillDir === undefined ? {} : { spillDir }, onSpillFailure: this.reportSpillFailure,
+    }
+    const linuxScope = containmentMode === 'linux-scope' ? this.linuxScopeDecision : undefined
+    if (containmentMode === 'fallback' && identity === undefined) {
+      handle = spawnSubprocess(request, internals)
     } else {
       const binding = prepareManagedProcessBinding(internals)
-      const linuxScope = containmentMode === 'linux-scope' ? this.linuxScopeDecision : undefined
-      const launch = linuxScope === undefined
-        ? launchWindowsJob(spec, env)
-        : launchLinuxScope(spec, env, linuxScope.literalArgv)
-      handle = bindManagedProcess(spec, launch, binding)
+      const launch = linuxScope !== undefined
+        ? launchLinuxScope(request, env, linuxScope.literalArgv, {}, identity)
+        : identity !== undefined
+          ? launchLinuxBootstrap(request, env, identity)
+          : launchWindowsJob(request, env)
+      handle = bindManagedProcess(request, launch, binding)
       if (linuxScope !== undefined) this.watchLinuxScopeStart(handle.done, linuxScope.generation)
     }
     this.live.add(handle)
@@ -281,7 +467,9 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
   async terminalEnvironment(signal?: AbortSignal): Promise<SubprocessTerminalEnvironment> {
     signal?.throwIfAborted()
     const platform = process.platform === 'win32' ? 'windows' : 'posix'
-    const defaultShell = platform === 'windows' ? process.env.ComSpec || undefined : process.env.SHELL || userInfo().shell || undefined
+    // A run-as child's shell comes from its own environment, never from this process's account.
+    const defaultShell = this.runAs !== undefined ? runAsEnvironment(this.runAs).SHELL || undefined
+      : platform === 'windows' ? process.env.ComSpec || undefined : process.env.SHELL || userInfo().shell || undefined
     return { platform, ...defaultShell === undefined ? {} : { defaultShell } }
   }
 
@@ -295,9 +483,9 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
     spec.signal?.throwIfAborted()
     const inspector = this.terminalInspector ?? createProcessInspector()
     const containmentMode = this.selectContainmentMode('terminal')
-    const env = targetEnvironment(spec)
+    const env = this.targetEnvironment(spec, this.runAs)
     const platform = this.internals.platform ?? process.platform
-    const activity = prepareShellActivity(spec, env, platform)
+    const activity = prepareShellActivity(spec, env, platform, this.directories.shellActivity, this.identity)
     const launch = activity === undefined ? spec : { ...spec, argv: activity.argv, env: activity.env }
     const options: IPtyForkOptions | IWindowsPtyForkOptions = {
       name: spec.terminalType,
@@ -312,12 +500,19 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
       ...(platform === 'win32' ? { useConptyDll: true } : {}),
     }
     const linuxScope = containmentMode === 'linux-scope' ? this.linuxScopeDecision : undefined
-    let scope: ReturnType<typeof prepareLinuxTerminalScope> | undefined
+    let scope: LinuxTerminalBootstrapLaunch | undefined
+    let bindOwner: LinuxTerminalScopeLaunch['bindOwner'] | undefined
     let terminal: NodePty.IPty
     try {
-      scope = linuxScope === undefined
-        ? undefined
-        : prepareLinuxTerminalScope(launch, { ...activity?.env ?? env, PWD: spec.cwd, TERM: spec.terminalType }, linuxScope.literalArgv)
+      const bootstrapEnv = { ...activity?.env ?? env, PWD: spec.cwd, TERM: spec.terminalType }
+      if (this.runAs !== undefined) assertNoSecretNames(this.runAs, bootstrapEnv)
+      if (linuxScope !== undefined) {
+        const scoped = prepareLinuxTerminalScope(launch, bootstrapEnv, linuxScope.literalArgv, {}, this.identity)
+        bindOwner = scoped.bindOwner
+        scope = scoped
+      } else if (this.identity !== undefined) {
+        scope = prepareLinuxTerminalBootstrap(launch, bootstrapEnv, this.identity)
+      }
       if (scope !== undefined) { options.cwd = scope.cwd; options.env = scope.env }
       terminal = requireNodePty().spawn(
         scope?.command ?? file,
@@ -332,7 +527,7 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
     // oxlint-disable-next-line eslint/prefer-const -- The owner can query readiness before the handle is published.
     let handle: LocalTerminalHandle | undefined
     const directSettlement = Promise.withResolvers<void>()
-    const owner = scope?.bindOwner({
+    const owner = bindOwner?.({
       running: () => handle?.running ?? true,
       settled: directSettlement.promise,
       // node-pty swallows signal errors; the scope owner requires their delivery result.
@@ -360,6 +555,24 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
     }
     void handle.done.then(release, release).catch(() => {})
     return handle
+  }
+}
+
+/** Collection that keeps no byte: the provider reads the stream and discards it. */
+const DISCARD = { maxBytes: 0 } as const
+
+/**
+ * A run-as request with each output stream it asks to inherit read and discarded instead, so a contained child never
+ * holds this process's standard output or error, such as a root-only log another program parses.
+ * @param spec - the validated request.
+ * @returns the request with `'inherit'` output replaced by a collection that keeps nothing.
+ */
+function withoutInheritedOutput(spec: SubprocessSpawnSpec): SubprocessSpawnSpec {
+  const { stdout, stderr } = spec.stdio
+  if (stdout !== 'inherit' && stderr !== 'inherit') return spec
+  return {
+    ...spec,
+    stdio: { ...spec.stdio, stdout: stdout === 'inherit' ? DISCARD : stdout, stderr: stderr === 'inherit' ? DISCARD : stderr },
   }
 }
 

@@ -42,6 +42,7 @@ Use `mode: attach` and set `endpoint` to an HTTP(S) debugging URL or WS(S) brows
 | `executablePath` | upstream discovery | Chromium executable for launch |
 | `endpoint` | required for attach | Existing browser debugging endpoint |
 | `toolCallTimeoutMs` | MCP client default | Per-call timeout in milliseconds |
+| `identity` | this process | Subprocess identity that runs the MCP server, with that identity's environment; see the [MCP client](../../mcp/mcp-client/README.md#environment-scrubbing-stdio) |
 
 The [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-experimental-browser-use-chrome-devtools-mcp) lists accepted fields. The profile or preset selects the browser mode.
 

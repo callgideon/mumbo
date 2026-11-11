@@ -206,6 +206,7 @@ export class PtcWorkflowRun implements WorkflowRun {
       delivery: 'caller',
       signal: this.controller.signal,
       cwd: await this.cwd,
+      cwdChooser: 'host',
       prompt: [{ type: 'text', text: request.prompt }],
       parent: this.parent,
       ...request.schema === undefined ? {} : { outputSchema: request.schema },

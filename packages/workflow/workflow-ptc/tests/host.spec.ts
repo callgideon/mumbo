@@ -213,6 +213,7 @@ describe('workflow runtime outcomes', () => {
       expect(delegation).toEqual({
         provider: 'stub', label: 'host-test child 1', delivery: 'caller',
         cwd: ctx.workingDirectory.get(parent.session),
+        cwdChooser: 'host',
         prompt: [{ type: 'text', text: 'answer' }], outputSchema: schema, agentOptions: { model: 'selected' },
       })
       released.resolve(undefined)

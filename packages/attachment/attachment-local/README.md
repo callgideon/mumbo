@@ -36,6 +36,7 @@ Mount the plugin with no required configuration. The defaults below define what 
 | Field | Default | Meaning |
 |---|---|---|
 | `dshHome` | resolved | Explicit harness home; omitted follows `$DSH_HOME`, then `~/.dsh` |
+| `groupReadable` | `false` | Create store directories `2750` and objects `0440` instead of `0700` and `0400`, so the home's group may read stored files but not change them. A contained box sets a separate `dshHome` owned by root with the run-as user's group and the set-group-ID bit (`install -d -o root -g agent -m 2750 /var/lib/mumbo/attachments /var/lib/mumbo/attachments/attachments /var/lib/mumbo/attachments/attachments/v1`), so the model's shell can open uploads the model is told to read. The store creates `attachments/v1` only on its first save, so a deployment that names it as a file-tool read-only root creates it first |
 | `maxImageBytes` | `50 MiB` | Maximum encoded source bytes accepted for one image |
 | `maxImagesPerMessage` | `20` | Maximum image count accepted in one submitted message |
 | `maxMessageImageBytes` | `200 MiB` | Maximum aggregate encoded source bytes in one submitted message |

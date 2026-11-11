@@ -81,6 +81,19 @@ export const Config: z<Config> = z.object({
 })
 
 /**
+ * Register the tools a profile serves on one request's server.
+ * @param server - the request's MCP server.
+ * @param deps - what the tools receive for this request.
+ * @param profile - the configured profile; `door` leaves out the halt tools.
+ */
+export function registerTools(server: McpServer, deps: ToolDeps, profile: Config['profile']): void {
+  registerConversation(server, deps)
+  registerAsks(server, deps)
+  registerStatus(server, deps)
+  if (profile !== 'door') registerHalt(server, deps)
+}
+
+/**
  * Resolve where the tools find their Session: the configured existing Session, or the plugin's own.
  * @param ctx - plugin context carrying `sessionController` and `workspaceRegistry`.
  * @param config - validated configuration.
@@ -120,17 +133,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     const asks = listenForAsks(ctx, config.irreversibleTools)
     const closing = new AbortController()
     const door = config.profile === 'door'
-    /** One server per request, its tools bound to the request's principal, key name and report project; each tool module registers here. */
+    /** One server per request, its tools bound to the request's principal, key name and report project. */
     const buildServer = (principal: string, via: string | undefined, report: ProjectId | undefined): McpServer => {
       const server = new McpServer({ name, version: '0.0.1' }, { capabilities: { tools: {} }, instructions: INSTRUCTIONS })
       const deps: ToolDeps = {
         ctx, principal, via, report, idem, halt, assistantCwd: config.assistantCwd, assistant, asks, questionsOnly: door,
         closing: closing.signal,
       }
-      registerConversation(server, deps)
-      registerAsks(server, deps)
-      registerStatus(server, deps)
-      if (!door) registerHalt(server, deps)
+      registerTools(server, deps, config.profile)
       return server
     }
     // A key that turns unreadable or empty after load refuses requests until the edge writes it again.

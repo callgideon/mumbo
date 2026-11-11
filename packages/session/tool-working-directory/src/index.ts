@@ -35,7 +35,7 @@ export function apply(ctx: Context): void {
       if (exec.agent === undefined) throw new Error('working_directory requires an agent Session')
       const cwd = args.cd === undefined
         ? await ctx.workingDirectory.ensure(exec.agent, exec.signal)
-        : await ctx.workingDirectory.set(exec.agent, args.cd, exec.signal)
+        : await ctx.workingDirectory.set(exec.agent, args.cd, exec.signal, 'model')
       return { cwd }
     },
   }))

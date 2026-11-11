@@ -32,7 +32,7 @@ lines.on('line', line => {
       }
       break
     case 'initialize':
-      record('initialize')
+      record('initialize', { roots: request.params.capabilities.roots !== undefined })
       if (mode === 'fail') process.exit(1)
       if (mode === 'hold') return
       reply(request.id, {

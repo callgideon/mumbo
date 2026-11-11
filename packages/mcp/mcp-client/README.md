@@ -55,6 +55,8 @@ Add one entry per server; nothing else is required. After the harness starts, th
 | `transport` | required | `stdio` or `streamable-http` |
 | `serverName` | required | Namespace for the server's tool names; `[A-Za-z0-9_-]{1,32}`, unique inside one registration scope |
 | `command` / `args` / `env` / `cwd` | — | stdio: executable, arguments, extra env merged over scrubbed ambient env, working directory |
+| `identity` | unset | stdio: subprocess identity that runs the server in its home; unset under a run-as subprocess provider, its server identity in that identity's home; see [Environment scrubbing (stdio)](#environment-scrubbing-stdio) |
+| `roots` | `[]` | stdio: absolute directories the client offers as its MCP roots, in order, answering the server's `roots/list` with their `file:` URIs; empty, the client declares no `roots` capability. A relative entry fails at load |
 | `url` / `headers` | — | streamable-http: endpoint URL and extra request headers |
 | `toolCallTimeoutMs` | `60,000` | Timeout per `tools/call` or resource request |
 | `startupTimeoutMs` | unset | Optional budget for template resolution, negotiation, connection, and the initial tool sync |
@@ -96,7 +98,7 @@ When a server connection drops — for example a local server process crashes �
 <a id="runtime-templates-and-credentials"></a>
 ### Runtime templates and credentials
 
-With `expandTemplates: true`, `command`, `args`, `env` values, `cwd`, `url`, and `headers` values accept `${credential:REF}`. The current credentials provider resolves each reference; the [local provider](../../credentials/credentials-local/README.md) also reads the Host's inherited environment. Raw plugin configuration retains its template strings. A credential reference requires a credentials provider at load. Missing values enter `waiting-credentials` without consuming reconnect attempts unless strict startup rejects activation; a referenced credential update retries resolution.
+With `expandTemplates: true`, `command`, `args`, `env` values, `cwd`, `url`, and `headers` values accept `${credential:REF}`. The current credentials provider resolves each reference; the [local provider](../../credentials/credentials-local/README.md) also reads the Host's inherited environment. Raw plugin configuration retains its template strings. A credential reference requires a credentials provider at load. Under a run-as subprocess provider a stdio server whose `command` or `args` references a credential fails before anything resolves, because every user of the host, the identity whose shell the model drives included, can read a process's command line in `/proc/<pid>/cmdline` unless `/proc` is mounted with `hidepid`; pass the credential in `env`, which only the server's own identity and root can read. Missing values enter `waiting-credentials` without consuming reconnect attempts unless strict startup rejects activation; a referenced credential update retries resolution.
 
 Credential notifications rebuild the connection only when the resolved values change; same-value notifications preserve the connection and its reconnect budget. The old connection must close and finish local cleanup before a replacement starts. Incomplete cleanup blocks replacement until the Host restarts.
 
@@ -131,7 +133,7 @@ This section explains the design decisions behind the bridge and points at the c
 | [`src/templates.ts`](src/templates.ts) | Credential template syntax, substitution, and reference discovery |
 | [`src/server-context.ts`](src/server-context.ts) | Resource-provider registration and literal server instructions |
 | [`src/tools.ts`](src/tools.ts) | Tool bridge: discovery, naming, registration swap, execution, image projection |
-| [`src/transport.ts`](src/transport.ts) | Transport factory: stdio spawn with scrubbed env, Streamable HTTP |
+| [`src/transport.ts`](src/transport.ts) | Transport factory: stdio spawn with scrubbed env or through the subprocess service as a named identity or the provider's server identity, Streamable HTTP |
 | [`src/status.ts`](src/status.ts) | Status cell keyed by Fiber, retaining its final cleanup result |
 | [`src/probe.ts`](src/probe.ts) | One-shot probe: connect, identify, list tools, close — nothing registers |
 | [`src/deadline.ts`](src/deadline.ts) | Shared settlement deadline behind the startup and probe budgets |
@@ -157,6 +159,10 @@ A tool call uses the SDK with the raw name, complete tool definition, JSON argum
 ### Environment scrubbing (stdio)
 
 The child environment starts from the subprocess seam's `scrubbedParentEnv()` — ambient names matching `/KEY|PASSWORD|SECRET|TOKEN/i` and ambient `DSH_*` names are dropped — and the configured `env` merges on top, so explicit overrides survive. The MCP SDK owns the actual spawn; this package shares the scrub definition, not the spawn path.
+
+With `identity`, the server starts through `ctx.subprocess` instead, as the subprocess provider's identity of that name, for example a dedicated non-root user for a browser server in a contained box. Its environment is that identity's own plus the configured `env`, never this process's; the provider refuses an identity it does not list. Its standard error is read and discarded, so it never receives this process's standard error, which may be a root-only log. It starts in that identity's home, which the provider returns from `serverHome` after it checks it by the rules of its server identity, never in this process's directory or a Session's, so it runs no code or configuration the model planted in a directory it can write; a `cwd` naming any other directory fails it. This transport probes the protocol version in place, so a server that closes during the probe fails to connect rather than starting a second process. The plugin fails at load when `identity` is set and no subprocess service is mounted, or the provider refuses that identity's home.
+
+When the mounted subprocess provider runs children as a run-as identity (its `childIdentity` is set, as with `dsh-subprocess-local` `runAs`), a stdio server that names no identity starts through `ctx.subprocess` the same way, as that provider's `serverIdentity`, never as this process or as the default identity whose shell the model drives; a provider that names no server identity fails the server. It starts in the server identity's home, never in this process's directory or a Session's, and a `cwd` naming any other directory fails it. No configuration starts a stdio server as this process under such a provider, so servers a person adds through `dsh-mcp-manager` run as the server identity too, with the person's credentials out of the model's reach. The choice is made at each connection from the subprocess service mounted then, so a server that connects or reconnects while no such provider is mounted, after the provider's remount or when it failed at load, starts as this process. A contained composition therefore declares `subprocess` in the `inject` of every row that starts such servers, a stdio row naming no identity or `dsh-mcp-manager`: Cordis then runs the row only while a subprocess service is mounted, stops it with its servers when the provider goes, and starts it again under the next one. A start the provider refuses, such as an `env` that names one of its `secretNames`, fails with the provider's reason and confirms closure, so the server can be reconfigured and retried without a Host restart.
 
 </details>
 

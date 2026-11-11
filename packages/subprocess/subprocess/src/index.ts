@@ -11,12 +11,13 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import { proxyEnvironmentForChild } from '@deepseek-ai/dsh-http-proxy'
 import { DSH_ENV_PREFIX } from './types.ts'
-import type { SubprocessHandle, SubprocessSpawnSpec } from './types.ts'
+import type { SubprocessChildIdentity, SubprocessHandle, SubprocessServerIdentity, SubprocessSpawnSpec } from './types.ts'
 import type { SubprocessTerminalEnvironment, SubprocessTerminalHandle, SubprocessTerminalSpawnSpec } from './types.ts'
 
 export { DSH_ENV_PREFIX } from './types.ts'
 export type {
   CollectedOutput,
+  SubprocessChildIdentity,
   DshEnvironment,
   DshEnvironmentKey,
   SubprocessCollect,
@@ -26,6 +27,7 @@ export type {
   SubprocessOutputMode,
   SubprocessOutputRead,
   SubprocessOutputReader,
+  SubprocessServerIdentity,
   SubprocessSpawnSpec,
   SubprocessStdinMode,
   SubprocessStdio,
@@ -120,6 +122,38 @@ export abstract class SubprocessRuntime extends Service {
   }
 
   /**
+   * The identity this provider starts every child as whose spawn names no identity, when it differs
+   * from the harness process's own. Consumers that act on model-chosen paths use it to run that work as a child,
+   * so the kernel checks the paths with this identity. The base provider starts children as the
+   * harness process and reports none.
+   * @returns the child identity, or undefined when children run as the harness process.
+   */
+  get childIdentity(): SubprocessChildIdentity | undefined {
+    return undefined
+  }
+
+  /**
+   * The identity that runs servers a person configures rather than the model, such as MCP stdio servers that name no
+   * identity, and its home, where each of them starts. The base provider names none.
+   * @returns the identity's name and home, or undefined when the provider names none.
+   */
+  get serverIdentity(): SubprocessServerIdentity | undefined {
+    return undefined
+  }
+
+  /**
+   * The home of a named identity that runs a server, such as an MCP stdio server whose config names the identity: the
+   * directory each such server starts in. A provider checks the home, and the search paths the identity receives, by
+   * the rules of its {@link serverIdentity}. The base provider configures no identity.
+   * @param identity - the identity, as a spawn request's `identity` names it.
+   * @returns the identity's home, by its real path.
+   * @throws when the provider configures no such identity, or its home or search paths fail the provider's checks.
+   */
+  serverHome(identity: string): string {
+    throw new Error(`subprocess: this provider configures no identity ${JSON.stringify(identity)}, so no server can start as it`)
+  }
+
+  /**
    * Resolve one configured executable in this provider's execution world.
    * Absolute paths are verified; bare names use the provider's scrubbed PATH
    * plus explicit environment overrides. Relative paths containing separators
@@ -128,12 +162,15 @@ export abstract class SubprocessRuntime extends Service {
    * @param command - absolute executable path or bare PATH name.
    * @param env - explicit environment entries used for lookup.
    * @param signal - aborts remote or local lookup.
+   * @param identity - the provider-configured identity whose environment supplies PATH, as on
+   *   {@link SubprocessSpawnSpec.identity}; omitted, the default. An unknown name is refused.
    * @returns a canonical executable path.
    */
   abstract resolveExecutable(
     command: string,
     env?: Readonly<Record<string, string>>,
     signal?: AbortSignal,
+    identity?: string,
   ): Promise<string>
 
   /**

@@ -199,7 +199,17 @@ function directChildResult(child: ChildProcess): Promise<SubprocessOutcome> {
   })
 }
 
-function fallbackOwner(
+/**
+ * Own one detached process group (or Windows tree) as the managed range of a fallback launch.
+ * @param platform - signalling semantics to apply.
+ * @param pid - the group leader, when the launch published one.
+ * @param child - the direct child process.
+ * @param taskkill - Windows tree termination.
+ * @param linuxGroupHasLiveMembers - Linux group membership probe used after direct settlement.
+ * @param direct - the direct child's outcome.
+ * @returns the signal-and-wait owner for the group.
+ */
+export function fallbackOwner(
   platform: NodeJS.Platform,
   pid: number | undefined,
   child: ChildProcess,

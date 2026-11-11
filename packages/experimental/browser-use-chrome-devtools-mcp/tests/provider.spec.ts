@@ -31,6 +31,12 @@ it.each([
   expect(options.args.slice(1)).toEqual(['--no-usage-statistics', flag, endpoint])
 })
 
+it('passes a configured subprocess identity to the server and none otherwise', () => {
+  Provider.apply(new Context(), Provider.Config({ mode: 'attach', endpoint: 'http://127.0.0.1:9222', identity: 'browsermcp' }))
+  Provider.apply(new Context(), Provider.Config({ mode: 'launch' }))
+  expect(vi.mocked(mountSessionMcp).mock.calls.map(([, options]) => options.identity)).toEqual(['browsermcp', undefined])
+})
+
 it('rejects trailing endpoint garbage before mounting any browser resources', () => {
   expect(() => { Provider.apply(new Context(), Provider.Config({ mode: 'attach', endpoint: 'http://localhost trailing-junk' })) }).toThrow('browser endpoint')
   expect(mountSessionMcp).not.toHaveBeenCalled()

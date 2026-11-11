@@ -31,6 +31,10 @@ export interface SessionsHost {
   /** The `models` health entry, which reports managed sessions waiting on a model-budget retry. */
   readonly health: HealthEntry
   readonly masterId: string
+  /** The directory the main Session works in. */
+  readonly masterDirectory: string
+  /** Whether the subprocess provider runs workers as a run-as identity, so root reads no Session directory a link moved. */
+  readonly runAs: boolean
   readonly lifetime: AbortSignal
   closing(): boolean
   /** Execution environment variables for `ticket`, rendered into its worker's system prompt. */
@@ -135,7 +139,14 @@ export class Sessions {
       if (status === 'idle' && !this.host.closing()) { this.retryHealth.clear(agent.id); this.updateModelHealth() }
     })
   }
-  /** Resolves or creates session `id` in workspace `cwd`, initializes its role model, decorates it with prompts/skills/tools, sets `danger-full-access` permissions, and renames it to `title`. */
+  /**
+   * Resolves or creates session `id` in workspace `cwd`, initializes its role model, decorates it with prompts/skills/tools, sets `danger-full-access` permissions, and renames it to `title`.
+   * Under run-as the Session's recorded directory must be `cwd` as written, for every Session it resolves or creates: the
+   * workspace registry follows links, so a link a worker planted on the way would move the Session, whose instructions and
+   * skills root reads, to wherever it leads.
+   * @throws under run-as when the Session's directory is not `cwd`, before its role model, permissions and title are set. A
+   *   Session the registry created there stays loaded, decorated as DSH creates it, and `prompt` refuses it as well.
+   */
   async ensure(id: string, cwd: string, title: string, role: 'orchestrator' | 'worker'): Promise<Agent> {
     const ctx = this.ctx
     let result = await ctx.sessionController.resolveAgent(id as SessionId)
@@ -147,6 +158,7 @@ export class Sessions {
       result = await ctx.sessionController.resolveAgent(id as SessionId)
     }
     if ('error' in result) throw result.error
+    this.contained(result.agent, cwd)
     const settings = this.host.store.settings()
     await initializeRoleModel(ctx, result.agent, role === 'orchestrator' ? settings.eval.model : settings.executor.model)
     await this.decorate(result.agent)
@@ -154,16 +166,26 @@ export class Sessions {
     await ctx.sessionController.rename({ sessionId: id as SessionId, title })
     return result.agent
   }
+  /** The directory the main Session works in. */
+  get masterDirectory(): string { return this.host.masterDirectory }
   /** Returns whether `sessionId` already holds the message delivered under `requestId`, or `false` if the session does not exist. */
   async holds(sessionId: string, requestId: string): Promise<boolean> {
     const result = await this.ctx.sessionController.resolveAgent(sessionId as SessionId)
     return !('error' in result) && await this.agentDelivery.holds(result.agent, key(requestId))
   }
-  /** Deliver a message once per request id: to the next turn, the current one, or `inject`ed with its label without waking the agent. */
+  /**
+   * Deliver a message once per request id: to the next turn, the current one, or `inject`ed with its label without waking the agent.
+   * @throws under run-as when the main Session's or a worker Session's recorded directory is not the one it was made in.
+   */
   async prompt(sessionId: string, requestId: string, text: string, mode: 'queue' | 'steer' | { inject: string }, authorize?: () => void,
     accepted?: () => void): Promise<void> {
     const result = await this.ctx.sessionController.resolveAgent(sessionId as SessionId)
     if ('error' in result) throw result.error
+    // Every delivery checks, so a Session that a refused `ensure` left loaded, or that a person recreated, never gets one.
+    const ticketId = ticketOfSession(sessionId)
+    const cwd = sessionId === this.host.masterId ? this.host.masterDirectory
+      : ticketId === undefined ? undefined : this.host.store.tickets.get(ticketId)?.execution?.directory ?? ''
+    if (cwd !== undefined) this.contained(result.agent, cwd)
     await this.agentDelivery.send(result.agent, key(requestId), text, mode, this.host.lifetime, authorize, accepted)
   }
   /** The id of the message `prompt` delivers under `requestId`, which DSH's inbox events name it by. */
@@ -181,6 +203,7 @@ export class Sessions {
   private async inject(name: string, value: Record<string, unknown>, summary: string): Promise<void> {
     const resolved = await this.ctx.sessionController.resolveAgent(this.host.masterId as SessionId)
     if ('error' in resolved) return
+    this.contained(resolved.agent, this.host.masterDirectory)
     // Deduplicate by notice name and payload hash so retries are idempotent while updated payloads still deliver.
     const text = JSON.stringify(value)
     await this.agentDelivery.send(resolved.agent, `notice:${name}:${key(text)}`, text, { inject: summary }, this.host.lifetime)
@@ -225,6 +248,14 @@ export class Sessions {
     this.host.health.set(retries.length
       ? { state: 'error', detail: retries.slice(0, 5).map(item => `${item.sessionId}: ${item.provider} is over its model budget; retried ${item.attempts} times, waiting since ${item.since}; the model and retry policy are unchanged`).join('; ') + (retries.length > 5 ? `; ${retries.length - 5} more Sessions` : ''), at: retries.at(-1)!.lastAt }
       : { state: 'ready', detail: 'No managed Session is waiting on a model budget retry' })
+  }
+  /**
+   * Under run-as, refuse a Session whose recorded directory, which the workspace registry resolved through links, is not
+   * `cwd`, the one dsh-superagent made it in, before anything is delivered to it.
+   */
+  private contained(agent: Agent, cwd: string): void {
+    if (!this.host.runAs || agent.session.header.cwd === cwd) return
+    throw new Error(`The Session directory ${cwd} leads to ${String(agent.session.header.cwd)} through a symbolic link, which dsh-superagent does not follow under a run-as subprocess provider; remove the link, and name the ticket directory root by its real path`)
   }
   private ticketOf(agent: Agent): Ticket | undefined {
     const ticketId = ticketOfSession(agent.id)
