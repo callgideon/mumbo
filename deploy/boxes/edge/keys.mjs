@@ -45,7 +45,8 @@ const refusal = (status, code, message) => Object.assign(new Error(message), { s
 /**
  * The door keys in the edge store (store.mjs docs and sets).
  * @param {{ store: object, projects?: ReturnType<typeof import('./projects.mjs').projects>, admitted?: (email: string) => boolean, now?: () => number, log?: (line: string) => void }} deps
- *   `projects` is needed by mint and requireProject, `admitted` (the edge allowlist) by verify; list and revoke need neither.
+ *   `projects` is needed by mint and requireProject, `admitted` (the edge allowlist) by verify and live; list and revoke
+ *   need neither.
  */
 export function doorKeys({ store, projects, admitted, now = () => Date.now(), log = console.log }) {
   const say = (fields) => log(JSON.stringify({ edge: 'key', ...fields }))
@@ -56,6 +57,12 @@ export function doorKeys({ store, projects, admitted, now = () => Date.now(), lo
     const out = []
     for (const hash of await store.setMembers(`keys:${owner}`)) { const k = await store.getDoc(`key:${hash}`); if (k) out.push([hash, k]) }
     return out
+  }
+  /** Throws unless the stored key record `k` is neither revoked nor expired and its owner is admitted. */
+  function usable(k) {
+    if (k.revokedAt !== undefined) throw refusal(401, 'key_revoked', 'mumbo key revoked')
+    if (k.expiresAt !== undefined && k.expiresAt <= now()) throw refusal(401, 'key_expired', 'mumbo key expired')
+    if (!admitted(k.owner)) throw refusal(403, 'user_disabled', 'mumbo user disabled')
   }
   return {
     /**
@@ -108,14 +115,23 @@ export function doorKeys({ store, projects, admitted, now = () => Date.now(), lo
       if (!isKey(token)) throw invalid
       const k = await store.getDoc(`key:${keyHash(token)}`)
       if (!k) throw invalid
-      if (k.revokedAt !== undefined) throw refusal(401, 'key_revoked', 'mumbo key revoked')
-      if (k.expiresAt !== undefined && k.expiresAt <= now()) throw refusal(401, 'key_expired', 'mumbo key expired')
-      if (!admitted(k.owner)) throw refusal(403, 'user_disabled', 'mumbo user disabled')
+      usable(k)
       const at = now(), last = lastWrite.get(k.id)
       if (last === undefined || at - last >= LAST_USE_MS) {
         lastWrite.set(k.id, at)
         await store.putDoc(`key-used:${k.id}`, { at }).catch((e) => say({ level: 'warn', msg: 'last use not written', key: k.id, error: e.message }))
       }
+      return k
+    },
+    /**
+     * The record of `owner`'s key `id`, checked as verify checks a bearer key, for a worker token minted from it
+     * (workers.mjs): the record is read on every call, so a revocation holds from the next git request.
+     * @throws 401 invalid_api_key when the owner has no such key; 401 key_revoked; 401 key_expired; 403 user_disabled.
+     */
+    async live(owner, id) {
+      const k = (await own(owner)).find(([, r]) => r.id === id)?.[1]
+      if (!k) throw refusal(401, 'invalid_api_key', 'Invalid mumbo key')
+      usable(k)
       return k
     },
     /** @throws 403 insufficient_scope unless the verified `key` has `scope`. */

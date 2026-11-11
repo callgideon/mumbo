@@ -19,11 +19,31 @@ import { createMcpHandler, McpServer } from '@modelcontextprotocol/server'
 import { toNodeHandler } from '@modelcontextprotocol/node'
 import { mcpPrincipal, mumboMcpKey, readBody } from './edge.mjs'
 import { SCOPES } from './keys.mjs'
-import { BOX_READY_MS, CALL_MS, ensureWithin, MESSAGE_ID, token } from './projects.mjs'
+import { BOX_READY_MS, CALL_MS, ensureWithin, MESSAGE_ID, projectPrincipal, token } from './projects.mjs'
 
 /** The largest POST body the door reads; a larger one gets 413. */
 const MAX_BODY = 1024 * 1024
 const refusal = (status, code, message) => Object.assign(new Error(message), { status, code })
+/** report_to_member's rate per (project, member): a burst of 10, refilled at 30 an hour. */
+const REPORT_RATE = { perMinute: 0.5, burst: 10 }
+
+/**
+ * Token buckets by id: each id's bucket holds `burst` calls and refills at `perMinute`.
+ * @returns {(id: string) => number} takes one call from the id's bucket: 0 when taken, else the seconds until one is free.
+ */
+function rateBuckets({ perMinute, burst }, now) {
+  // ponytail: per edge process, so with N replicas an id gets up to N times the rate; move the buckets into the store if
+  // that ever matters. Entries are a few numbers per id, and ids (door keys, project members) are few.
+  const buckets = new Map()  // id -> { tokens, at }
+  return (id) => {
+    const at = now(), b = buckets.get(id) ?? { tokens: burst, at }
+    b.tokens = Math.min(burst, b.tokens + (at - b.at) * perMinute / 60_000)
+    b.at = at
+    buckets.set(id, b)
+    if (b.tokens >= 1) { b.tokens -= 1; return 0 }
+    return Math.ceil((1 - b.tokens) * 60 / perMinute)
+  }
+}
 
 /** What agent_read's wait leaves of CALL_MS for the box to answer: the door answers in one JSON body. */
 const READ_MARGIN_S = 5
@@ -33,19 +53,22 @@ const READ_MARGIN_S = 5
  * box as projectRelay does, then POSTs one `tools/call` to /mcp on the box's door service (edge MUMBO_MCP_PORT) through the client proxy, with the
  * box's mumboMcpKey as the bearer, the owner's mcpPrincipal in `x-mcp-principal` and the key's name, percent-encoded, in
  * `x-mumbo-key-name`, which @mumbo/mcp's agent_send puts before the text as `[from <handle> via <key name>] `. A call
- * without a key name sends no `x-mumbo-key-name`, so agent_send logs the text alone. agent_read's `wait_s` is cut so the
- * call ends within CALL_MS.
+ * without a key name sends no `x-mumbo-key-name`, so agent_send logs the text alone. `reportProject`, which only
+ * memberReporter passes (the door's tools call with three arguments), is sent as `x-mumbo-report-project`, so an image with
+ * B36b logs the message as the project's report, not as the person's; an older image ignores the header. agent_read's
+ * `wait_s` is cut so the call ends within CALL_MS.
  * @param {{ box: { ensure(principal: string): Promise<{ id: string }>, touch(id: string): Promise<void> },
  *   boxFetch: ReturnType<typeof import('./edge.mjs').boxFetcher>, edgeKey: string, siteHostOf: (principal: string) => string,
  *   readyMs?: number, now?: () => number, log?: (line: string) => void }} deps - `readyMs` defaults to BOX_READY_MS.
- * @returns {(key: { owner: string, name?: string }, name: string, args: object) => Promise<object>} the box tool's
- *   CallToolResult, unchanged. Throws `box_unavailable` when the box is not ready within `readyMs` (its start goes on),
- *   cannot start, or its route answers no tool result (an image without the overlay answers the client proxy's 502).
+ * @returns {(key: { owner: string, name?: string }, name: string, args: object, reportProject?: string) => Promise<object>}
+ *   the box tool's CallToolResult, unchanged. Throws `box_unavailable` when the box is not ready within `readyMs` (its
+ *   start goes on), cannot start, or its route answers no tool result (an image without the overlay answers the client
+ *   proxy's 502).
  */
 export function mumboForwarder({ box, boxFetch, edgeKey, siteHostOf, readyMs = BOX_READY_MS, now = () => Date.now(), log = console.log }) {
   const unavailable = (message) => Object.assign(new Error(message), { code: 'box_unavailable' })
   const say = (fields) => log(JSON.stringify({ edge: 'door', level: 'warn', ...fields }))
-  return async (key, name, args) => {
+  return async (key, name, args, reportProject) => {
     const deadline = now() + CALL_MS
     const failed = (e) => say({ msg: 'box unavailable', owner: key.owner, error: e.message })
     const target = await ensureWithin(box, key.owner, readyMs, failed).catch((e) => {
@@ -60,7 +83,8 @@ export function mumboForwarder({ box, boxFetch, edgeKey, siteHostOf, readyMs = B
       r = await boxFetch(target, siteHostOf(key.owner), '/mcp', {
         method: 'POST', service: 'door', timeoutMs: Math.max(1000, deadline - now()),
         headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
-        edgeHeaders: { authorization: `Bearer ${mumboMcpKey(edgeKey, target.id)}`, 'x-mcp-principal': mcpPrincipal(key.owner), ...(key.name === undefined ? {} : { 'x-mumbo-key-name': encodeURIComponent(key.name) }) },
+        edgeHeaders: { authorization: `Bearer ${mumboMcpKey(edgeKey, target.id)}`, 'x-mcp-principal': mcpPrincipal(key.owner), ...(key.name === undefined ? {} : { 'x-mumbo-key-name': encodeURIComponent(key.name) }),
+          ...(reportProject === undefined ? {} : { 'x-mumbo-report-project': reportProject }) },
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
       })
     } catch (e) {
@@ -84,27 +108,37 @@ export function mumboForwarder({ box, boxFetch, edgeKey, siteHostOf, readyMs = B
  * `[project <name>] report from its coordinator:`, a newline, and the text in a nonce'd `<untrusted-…>` tag (`fence`).
  * Workers and strangers' issues can steer that text, so Mumbo's instructions (edge.mjs assistantInstructions) treat it as
  * data, never as the person's words. In the prefix, brackets, line breaks and other control or separator characters of the
- * project's name are spaces. The request_id is derived from (project, messageId), so @mumbo/mcp runs a repeat once and
- * answers it with the first result.
+ * project's name are spaces. The call carries `x-mumbo-report-project: <project id>` (mumboForwarder's `reportProject`).
+ * The request_id is derived from (project, messageId), and the fence's tag from the request_id, so a repeat carries the same
+ * arguments, and @mumbo/mcp runs it once and answers it with the first result.
+ * Each (project, member) has a bucket of REPORT_RATE.burst reports, refilled at REPORT_RATE.perMinute, in this process: each
+ * report starts a model turn on the member's budget, and until B24 any process in a project box holds its box token.
  * @param {{ projects: ReturnType<typeof import('./projects.mjs').projects>, admitted: (email: string) => boolean,
- *   mumbo: ReturnType<typeof mumboForwarder>, log?: (line: string) => void }} deps - `admitted` is the edge allowlist.
+ *   halt: ReturnType<typeof import('./halt.mjs').haltService>, mumbo: ReturnType<typeof mumboForwarder>,
+ *   now?: () => number, log?: (line: string) => void }} deps - `admitted` is the edge allowlist.
  * @returns {(box: string, args: { member: string, project: string, thread: string, messageId: string, text: string }) =>
  *   Promise<object>} called with the calling box's project id; resolves { delivered: true, project, member, messageId }.
- *   Throws `not_a_member` when `member` is not a member of the project or not on the allowlist (Superagent settles the reply
- *   as gone), `wrong_project` when `project` is not the calling box's, `box_error` with @mumbo/mcp's refusal (such as
- *   `halted`), and mumboForwarder's `box_unavailable`; Superagent retries these.
+ *   Throws, in this order and before anything is forwarded: `wrong_project` when `project` is not the calling box's,
+ *   `not_a_member` when `member` is not a member of the project or not on the allowlist (Superagent settles the reply as
+ *   gone), `halted` while the project is stopped (an owner's Stop everything), and `rate_limited` when the bucket is empty;
+ *   then `box_error` with @mumbo/mcp's refusal (such as `halted`), and mumboForwarder's `box_unavailable`. Superagent
+ *   retries every code but `not_a_member`.
  */
-export function memberReporter({ projects, admitted, mumbo, log = console.log }) {
+export function memberReporter({ projects, admitted, halt, mumbo, now = () => Date.now(), log = console.log }) {
   const refuse = (code, message) => Object.assign(new Error(message), { code })
+  const take = rateBuckets(REPORT_RATE, now)
   return async (box, { member, project, thread, messageId, text }) => {
     if (project !== box) throw refuse('wrong_project', `this box serves project ${box}, not ${project}`)
     const p = await projects.get(project)
     if (!p?.members.includes(member) || !admitted(member)) throw refuse('not_a_member', `${member} is not a member of project ${project}`)
+    if (await halt.isHalted(projectPrincipal(project))) throw refuse('halted', `project ${project} is halted (an owner's Stop everything), so nothing was sent; retry once it resumes`)
+    const wait = take(`${project}/${member}`)
+    if (wait) throw refuse('rate_limited', `project ${project} may report to ${member} ${REPORT_RATE.perMinute * 60} times an hour, so nothing was sent; retry in ${wait} s`)
     // ponytail: @mumbo/mcp remembers a request_id for a day (IDEMPOTENCY_WINDOW_MS), so a report retried later than that
     // arrives twice; keep a (project, messageId) record in the store if Superagent's retries ever outlast it.
     const request_id = createHash('sha256').update(`report:${project}/${messageId}`).digest('base64url')
     const name = p.name.replace(/[\p{C}\p{Z}[\]]+/gu, ' ').trim() || project
-    const out = await mumbo({ owner: member }, 'agent_send', { text: `[project ${name}] report from its coordinator:\n${fence(text)}`, request_id })
+    const out = await mumbo({ owner: member }, 'agent_send', { text: `[project ${name}] report from its coordinator:\n${fence(text, request_id)}`, request_id }, project)
     if (out.isError) throw refuse('box_error', `Mumbo refused the report: ${String(out.content[0]?.text).slice(0, 500)}`)
     log(JSON.stringify({ edge: 'report', msg: 'delivered', project, member, thread, messageId }))
     return { delivered: true, project, member, messageId }
@@ -113,11 +147,18 @@ export function memberReporter({ projects, admitted, mumbo, log = console.log })
 
 /**
  * Wraps text from a box in a tag whose name the text does not contain, so the text cannot close it (as @mumbo/mcp's
- * fence.ts): `<untrusted-N>`, a newline, the text, a newline, `</untrusted-N>`.
+ * fence.ts): `<untrusted-N>`, a newline, the text, a newline, `</untrusted-N>`. With `seed`, N is derived from it, so the
+ * same seed and text give the same fence: a retried report then repeats its request_id with the same text, which
+ * @mumbo/mcp answers with the first result instead of refusing the id as reused. Without, N is random.
+ * @param {string} text - the box's text
+ * @param {string} [seed] - the report's request_id
+ * @returns {string} the fenced text
  */
-const fence = (text) => {
+const fence = (text, seed) => {
   let tag
-  do tag = `untrusted-${randomBytes(8).toString('hex')}`; while (text.includes(tag))
+  for (let i = 0; tag === undefined || text.includes(tag); i++) {
+    tag = `untrusted-${(seed === undefined ? randomBytes(8) : createHash('sha256').update(`fence:${seed}:${i}`).digest()).toString('hex').slice(0, 16)}`
+  }
   return `<${tag}>\n${text}\n</${tag}>`
 }
 
@@ -146,7 +187,7 @@ async function projectStatus(relay, projects, member, id) {
   return {
     project: { id, name: p.name, owner: p.owner, members: p.members },
     problems: problems.slice(0, STATUS.problems).map(x => token(x?.kind)), moreProblems: Math.max(0, problems.length - STATUS.problems),
-    waitingOnYou: person.slice(0, STATUS.tickets).map(ticketRow), moreWaiting: Math.max(0, person.length - STATUS.tickets),
+    waitingOnPeople: person.slice(0, STATUS.tickets).map(ticketRow), moreWaiting: Math.max(0, person.length - STATUS.tickets),
     executor: Object.fromEntries(['running', 'queued', 'idle', 'maxWorkers'].map(k => [k, Number(executor[k])])),
     tickets: items.slice(0, STATUS.tickets).map(ticketRow), openTickets: Number(open.total ?? items.length),
   }
@@ -210,7 +251,7 @@ export const doorTools = ({ projects, mumbo, relay }) => [
   },
   {
     name: 'project_status', scope: 'read', project: true, turns: false, input: z.object({ project: projectArg }),
-    description: `A project's status from its coordinator: the project, problems, the Tickets that wait on you, executor load, and the newest ${STATUS.tickets} open Tickets with their stages. Starts the project's box if needed.`,
+    description: `A project's status from its coordinator: the project, problems, the Tickets that wait on a person (any person, not only you), executor load, and the newest ${STATUS.tickets} open Tickets with their stages. Only the project's owners may read it. Starts the project's box if needed.`,
     run: (key, a) => projectStatus(relay, projects, key.owner, a.project),
   },
   {
@@ -227,7 +268,7 @@ export const doorTools = ({ projects, mumbo, relay }) => [
   {
     name: 'task_stop', scope: 'workspace', project: true, turns: false,
     input: z.object({ project: projectArg, ticket: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).describe('The Ticket id, from project_status.') }),
-    description: 'Stop one Ticket of a project. A Ticket of another project is not found there.',
+    description: 'Stop one Ticket of a project; only the project\'s owners may. A Ticket of another project is not found there.',
     // Superagent answers a stop { stopped: true }; its body is not passed on.
     run: async (key, a) => { await (await relay.api(key.owner, a.project))('POST', `tickets/${a.ticket}/stop`); return { stopped: true } },
   },
@@ -250,18 +291,7 @@ export const doorTools = ({ projects, mumbo, relay }) => [
  *   A request the SDK refuses itself (such as 406 or 415) logs the outcome `http_<status>`.
  */
 export function door({ keys, tools, allow, tokens, rate, now = () => Date.now(), log = console.log }) {
-  // ponytail: per edge process, so with N replicas a key gets up to N times the rate; move the bucket into the store if
-  // that ever matters. Entries are a few numbers per key id, and key ids are few.
-  const buckets = new Map()  // key id -> { tokens, at }
-  /** Takes one call from the key's bucket: 0 when taken, else the seconds until one is free. */
-  const take = (id) => {
-    const at = now(), b = buckets.get(id) ?? { tokens: rate.burst, at }
-    b.tokens = Math.min(rate.burst, b.tokens + (at - b.at) * rate.perMinute / 60_000)
-    b.at = at
-    buckets.set(id, b)
-    if (b.tokens >= 1) { b.tokens -= 1; return 0 }
-    return Math.ceil((1 - b.tokens) * 60 / rate.perMinute)
-  }
+  const take = rateBuckets(rate, now)  // by key id
   /** Throws the refusal for a call of `tool` with `args` by `key`. */
   async function admit(key, tool, args) {
     if (!SCOPES.includes(tool.scope) || typeof tool.project !== 'boolean' || typeof tool.turns !== 'boolean') throw refusal(403, 'tool_undeclared', `The door does not run ${tool.name}: it declares no scope, project or turns.`)

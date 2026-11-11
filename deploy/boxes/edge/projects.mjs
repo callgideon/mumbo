@@ -129,6 +129,9 @@ export const RELAY_PATH = '/orchestrator/relay'
 export const MESSAGE_KINDS = ['context', 'request']
 /** A message id as the relay route accepts it; a UUID is one. */
 export const MESSAGE_ID = /^[A-Za-z0-9._:-]{1,128}$/
+/** Superagent's 403 text for a member who is neither the box's owner nor a panel admin (packages/mumbo/superagent
+ *  src/app/http.ts registerHttp); it sends no code, and its other 403s mean a misconfigured box or edge. */
+export const NOT_PANEL_ADMIN = 'Management requires the owner or a panel admin'
 /** `s` when it is a string of MESSAGE_ID's form (an id, a stage or kind name, an ISO time), else undefined: how the edge
  *  passes on a box's ids and names, which a box steered by untrusted input could otherwise fill with any text. */
 export const token = (s) => (typeof s === 'string' && MESSAGE_ID.test(s) ? s : undefined)
@@ -168,11 +171,14 @@ export async function ensureWithin(box, principal, ms, late) {
  * otherwise with the box's 400 or 409 and its code (`invalid_request`, `id_reused`, `relay_off`), or 502, also for an
  * answer whose Trigger id is not of that form.
  *
- * api(member, id) ensures the box once and resolves `(method, path) => Promise<object>`, which calls Superagent's management
- * API (`/orchestrator/api/<path>`) as the member, who must be one of the box's panel admins, and resolves its JSON answer.
- * It fails with the box's 400, 404 or 409 and its message (`code` the box's, else `not_found` for 404 and `invalid_request`
- * for 400 and 409), and 502 (`code: 'box_refused'`) for any other answer. A box's refusal text is cut to 500 characters
- * in either method.
+ * api(member, id) ensures the box once and resolves `(method, path, body?) => Promise<object>`, which calls Superagent's
+ * management API (`/orchestrator/api/<path>`) as the member, who must be one of the box's panel admins, with `body`, when
+ * given, as JSON (`content-type: application/json`), and resolves its JSON answer.
+ * It fails with 403 (`code: 'owner_only'`) when the box refuses the member as no panel admin (NOT_PANEL_ADMIN), with the
+ * box's 400, 404 or 409 and its message (`code` the box's, else `not_found` for 404 and `invalid_request` for 400 and 409),
+ * and 502 (`code: 'box_refused'`, with the box's text) for any other answer, other 403s included (a Host or Origin fence,
+ * a missing `x-orchestrator-request`). A box's refusal text is cut to 500 characters in either method and logged with the
+ * `api refused` line.
  */
 export function projectRelay({ projects, box, boxFetch, siteHostOf, edgeHost, readyMs = BOX_READY_MS, log = console.log }) {
   const say = (fields) => log(JSON.stringify({ edge: 'relay', ...fields }))
@@ -215,12 +221,14 @@ export function projectRelay({ projects, box, boxFetch, siteHostOf, edgeHost, re
     },
     async api(member, id) {
       const { target, host, member: signed, timeoutMs } = await reach(member, id)
-      return async (method, path) => {
-        const r = await boxFetch(target, host, `/orchestrator/api/${path}`, { method, headers: { 'x-orchestrator-request': '1' }, member: signed, timeoutMs: timeoutMs() })
+      return async (method, path, body) => {
+        const r = await boxFetch(target, host, `/orchestrator/api/${path}`, { method, member: signed, timeoutMs: timeoutMs(),
+          headers: { 'x-orchestrator-request': '1', ...(body === undefined ? {} : { 'content-type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body) })
         let out
         try { out = JSON.parse(r.body) } catch { out = undefined }
         if (r.status === 200 && out && typeof out === 'object') return out
-        say({ level: 'warn', msg: 'api refused', project: id, member, path: path.split('?')[0], status: r.status })
+        say({ level: 'warn', msg: 'api refused', project: id, member, path: path.split('?')[0], status: r.status, error: said(out) })
+        if (r.status === 403 && out?.error === NOT_PANEL_ADMIN) throw Object.assign(fail(403, 'only the project\'s owners can read its status or stop its Tickets'), { code: 'owner_only' })
         if ([400, 404, 409].includes(r.status) && typeof out?.error === 'string') {
           throw Object.assign(fail(r.status, `the project box refused: ${said(out)}`), { code: token(out.code) ?? (r.status === 404 ? 'not_found' : 'invalid_request') })
         }

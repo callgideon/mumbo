@@ -1,5 +1,5 @@
 // Stop everything (design section 5): one switch per person. While it is on, the edge refuses model calls and GitHub
-// writes for that person and every project they own.
+// writes for that person and every project they own, and those projects' reports to members (door.mjs memberReporter).
 import { ownersOf } from './projects.mjs'
 
 const key = (email) => `halt:${email.toLowerCase()}`
