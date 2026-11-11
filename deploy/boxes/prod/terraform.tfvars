@@ -1,5 +1,5 @@
 e2b_sha               = "1619623fc"   # setup/build.sh output; nodes pick it up only when replaced (nodes.tf header)
-edge_tag              = "502b261af9"  # deploy/boxes/edge at this mumbo commit
+edge_tag              = "b9fbad11d2"  # deploy/boxes/edge at this mumbo commit
 node_count            = 2             # sandbox nodes; the edge cap MAX_RUNNING_UNITS = 2 * (12 * node_count - 2) follows (RUNBOOK: Adding nodes)
 node_count_ap_south_1 = 1             # Mumbai sandbox nodes (R5): its E2B build is in its templates bucket
 approver_emails       = "hi@mumbo.si" # founder sign-in (2026-11-09)
