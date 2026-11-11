@@ -109,7 +109,8 @@ export function mumboForwarder({ box, boxFetch, edgeKey, siteHostOf, readyMs = B
  * Workers and strangers' issues can steer that text, so Mumbo's instructions (edge.mjs assistantInstructions) treat it as
  * data, never as the person's words. In the prefix, brackets, line breaks and other control or separator characters of the
  * project's name are spaces. The call carries `x-mumbo-report-project: <project id>` (mumboForwarder's `reportProject`).
- * The request_id is derived from (project, messageId), so @mumbo/mcp runs a repeat once and answers it with the first result.
+ * The request_id is derived from (project, messageId), and the fence's tag from the request_id, so a repeat carries the same
+ * arguments, and @mumbo/mcp runs it once and answers it with the first result.
  * Each (project, member) has a bucket of REPORT_RATE.burst reports, refilled at REPORT_RATE.perMinute, in this process: each
  * report starts a model turn on the member's budget, and until B24 any process in a project box holds its box token.
  * @param {{ projects: ReturnType<typeof import('./projects.mjs').projects>, admitted: (email: string) => boolean,
@@ -137,7 +138,7 @@ export function memberReporter({ projects, admitted, halt, mumbo, now = () => Da
     // arrives twice; keep a (project, messageId) record in the store if Superagent's retries ever outlast it.
     const request_id = createHash('sha256').update(`report:${project}/${messageId}`).digest('base64url')
     const name = p.name.replace(/[\p{C}\p{Z}[\]]+/gu, ' ').trim() || project
-    const out = await mumbo({ owner: member }, 'agent_send', { text: `[project ${name}] report from its coordinator:\n${fence(text)}`, request_id }, project)
+    const out = await mumbo({ owner: member }, 'agent_send', { text: `[project ${name}] report from its coordinator:\n${fence(text, request_id)}`, request_id }, project)
     if (out.isError) throw refuse('box_error', `Mumbo refused the report: ${String(out.content[0]?.text).slice(0, 500)}`)
     log(JSON.stringify({ edge: 'report', msg: 'delivered', project, member, thread, messageId }))
     return { delivered: true, project, member, messageId }
@@ -146,11 +147,18 @@ export function memberReporter({ projects, admitted, halt, mumbo, now = () => Da
 
 /**
  * Wraps text from a box in a tag whose name the text does not contain, so the text cannot close it (as @mumbo/mcp's
- * fence.ts): `<untrusted-N>`, a newline, the text, a newline, `</untrusted-N>`.
+ * fence.ts): `<untrusted-N>`, a newline, the text, a newline, `</untrusted-N>`. With `seed`, N is derived from it, so the
+ * same seed and text give the same fence: a retried report then repeats its request_id with the same text, which
+ * @mumbo/mcp answers with the first result instead of refusing the id as reused. Without, N is random.
+ * @param {string} text - the box's text
+ * @param {string} [seed] - the report's request_id
+ * @returns {string} the fenced text
  */
-const fence = (text) => {
+const fence = (text, seed) => {
   let tag
-  do tag = `untrusted-${randomBytes(8).toString('hex')}`; while (text.includes(tag))
+  for (let i = 0; tag === undefined || text.includes(tag); i++) {
+    tag = `untrusted-${(seed === undefined ? randomBytes(8) : createHash('sha256').update(`fence:${seed}:${i}`).digest()).toString('hex').slice(0, 16)}`
+  }
   return `<${tag}>\n${text}\n</${tag}>`
 }
 

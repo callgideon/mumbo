@@ -728,6 +728,8 @@ test('report_to_member is idempotent on (project, messageId): a retry arrives on
     const once = await t.report(t.P)
     assert.deepEqual(await t.report(t.P), once)
     assert.deepEqual(t.proxy.seen.map(x => x.body.params.arguments.request_id), [requestIdOf(t.P, 'r1'), requestIdOf(t.P, 'r1')], 'both calls carry one request_id')
+    // @mumbo/mcp refuses a request_id repeated with other arguments (request_id_reused), so a retry must send the same text.
+    assert.deepEqual(t.proxy.seen[1].body.params.arguments, t.proxy.seen[0].body.params.arguments, 'a retry repeats the arguments, fence included')
     assert.equal(t.first.size, 1, 'one message reaches the Session')
     await t.report(t.Q)
     await t.report(t.P, { messageId: 'r2' })
