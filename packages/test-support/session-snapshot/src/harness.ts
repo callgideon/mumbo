@@ -47,15 +47,18 @@ export type { AgentUnderTest } from './launcher.ts'
 const DEFAULT_WAIT_TIMEOUT_MS = 10_000
 const WAIT_POLL_INTERVAL_MS = 10
 
-/** The loopback discard port, which hosts leave closed: a request sent here never leaves the machine. */
+/** The loopback discard port, which `fetch` refuses as a bad port before opening a socket. */
 const REPLAY_UNREACHABLE_ENDPOINT = 'http://127.0.0.1:9'
 
 /**
  * Credential environment every keyless replay layers under its scenario environment. Shipped
  * profiles offer `web_search` only while a DeepSeek search key is configured and recordings ran
  * with a real key, so a replay supplies a placeholder instead of whatever the runner exports.
- * Both DeepSeek endpoints that read that key point at a closed loopback port, so a live adapter
- * left mounted beside the replay provider fails its request locally instead of reaching the API.
+ * `DEEPSEEK_BASE_URL` (the Messages adapter) and `DEEPSEEK_SEARCH_BASE_URL` (legacy Messages
+ * search) point at a closed loopback port, so either adapter left mounted beside the replay
+ * provider fails its request locally instead of reaching the API. No environment value moves the
+ * `dsh-web-deepseek-api` Search/Fetch endpoint; a replay that runs those tools sets its
+ * `searchBaseURL` or `fetchBaseURL` in the composition.
  */
 export const REPLAY_CREDENTIAL_ENV: Readonly<Record<string, string>> = {
   DEEPSEEK_API_KEY: 'snapshot-replay-key',

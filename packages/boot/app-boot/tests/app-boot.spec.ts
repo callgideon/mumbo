@@ -566,7 +566,6 @@ describe('auditStartupEntries', () => {
     'headless-runner',
     'acp',
     'sdk-jsonrpc-server',
-    'llm-replay',
   ]
 
   interface FakeEntry {
@@ -739,6 +738,21 @@ describe('auditStartupEntries', () => {
     expect((error as Error).message).toContain(`  ${id} (required)\n    Package: ./required.mjs`)
     expect((error as Error).message).toContain('  tool-todo\n    Package: @deepseek-ai/dsh-tool-todo')
     expect(((error as Error).cause as AggregateError).errors).toEqual([requiredError, optionalError])
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it.each(['llm-replay', 'replay', 'llm-replay-title'])('requires the replay provider package under id %s', async (id) => {
+    const warn = vi.fn()
+    const replayError = new Error('contains invalid JSON')
+    const name = '@deepseek-ai/dsh-llm-replay'
+    await expect(auditStartupEntries(ctxWith([
+      { fiber: fiber(3, replayError), disabled: true, options: { id, name } },
+    ]), NAME, warn)).resolves.toBeUndefined()
+    const error = await auditStartupEntries(ctxWith([
+      { fiber: fiber(3, replayError), options: { id, name } },
+    ]), NAME, warn).catch((error: unknown) => error)
+    expect(error).toBeInstanceOf(StartupError)
+    expect((error as Error).message).toContain(`  ${id} (required)\n    Package: ${name}`)
     expect(warn).not.toHaveBeenCalled()
   })
 

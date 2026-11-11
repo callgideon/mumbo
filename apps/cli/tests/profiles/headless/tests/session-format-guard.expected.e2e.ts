@@ -10,6 +10,7 @@ import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import { LOADER_SMOKE_TEST_TIMEOUT_MS, runLoaderSmoke } from '@deepseek-ai/dsh-loader-smoke'
+import { REPLAY_CREDENTIAL_ENV } from '@deepseek-ai/dsh-session-snapshot'
 import {
   SESSION_FORMAT_VERSION,
   SessionId,
@@ -33,6 +34,7 @@ const tsconfigPath = fileURLToPath(new URL('../../../../../../tsconfig.json', im
 // The resumed-agent fixture in the shared config resumes exactly this id.
 const sessionId = SessionId('workspace-context-resume')
 const fixtureEnv = {
+  ...REPLAY_CREDENTIAL_ENV,
   DSH_SNAPSHOT_FILE: replayFixture,
   DSH_LOADER_SMOKE_REQUIRED_ENTRY_ID: 'resumed-agent',
 }

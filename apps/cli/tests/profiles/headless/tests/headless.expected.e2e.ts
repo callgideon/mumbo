@@ -10,6 +10,7 @@ import {
   normalizeSessionSnapshots,
   normalizeStdout,
   scrubModelRequestBulk,
+  REPLAY_CREDENTIAL_ENV,
   type NormalizeContext,
 } from '@deepseek-ai/dsh-session-snapshot'
 import { LOADER_SMOKE_TEST_TIMEOUT_MS, runLoaderSmoke } from '@deepseek-ai/dsh-loader-smoke'
@@ -1310,6 +1311,7 @@ describe('headless stream-json snapshots', () => {
       binArgs: [goalConfigPath, prompt],
       tsconfigPath,
       env: {
+        ...REPLAY_CREDENTIAL_ENV,
         DSH_SNAPSHOT: 'replay',
         DSH_SNAPSHOT_FILE: join(goalScenarioDir, 'session.jsonl'),
         DSH_SNAPSHOT_OVERRIDE: join(goalScenarioDir, 'replay.override.json'),
@@ -1370,6 +1372,7 @@ describe('headless stream-json snapshots', () => {
       binArgs: [settlementConfigPath, task],
       tsconfigPath,
       env: {
+        ...REPLAY_CREDENTIAL_ENV,
         // The override fully supplies the parent script; the child fixture
         // remains separate so replay binds it to the fresh child Session.
         DSH_SNAPSHOT_FILE: parentReplay,
