@@ -5,7 +5,7 @@
 // lists every project that has one, for the approvals poller. Docs `project-session:<id>` and the project doc's
 // `coordinatorSessionId` name the plain coordinator Session that relayed messages went to before the relay route; nothing
 // reads them now.
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 
 const fail = (status, message) => Object.assign(new Error(message), { status })
 /** Project ids are lowercase letters and digits, so they fit a hostname label (`p-<id>.<public host>`). */
@@ -136,6 +136,23 @@ export const NOT_PANEL_ADMIN = 'Management requires the owner or a panel admin'
  *  passes on a box's ids and names, which a box steered by untrusted input could otherwise fill with any text. */
 export const token = (s) => (typeof s === 'string' && MESSAGE_ID.test(s) ? s : undefined)
 
+/**
+ * Wraps text from a box in a tag whose name the text does not contain, so the text cannot close it (as @mumbo/mcp's
+ * fence.ts): `<untrusted-N>`, a newline, the text, a newline, `</untrusted-N>`. With `seed`, N is derived from it, so the
+ * same seed and text give the same fence: a retried report then repeats its request_id with the same text, which
+ * @mumbo/mcp answers with the first result instead of refusing the id as reused. Without, N is random.
+ * @param {string} text - the box's text
+ * @param {string} [seed] - the report's request_id
+ * @returns {string} the fenced text
+ */
+export const fence = (text, seed) => {
+  let tag
+  for (let i = 0; tag === undefined || text.includes(tag); i++) {
+    tag = `untrusted-${(seed === undefined ? randomBytes(8) : createHash('sha256').update(`fence:${seed}:${i}`).digest()).toString('hex').slice(0, 16)}`
+  }
+  return `<${tag}>\n${text}\n</${tag}>`
+}
+
 /** How long an edge call on a person's behalf waits for a box to be ready, and the most the call takes in all: the ALB
  *  and CloudFront drop a response that sends nothing for 60 s. */
 export const BOX_READY_MS = 20_000, CALL_MS = 50_000
@@ -179,8 +196,8 @@ export async function ensureWithin(box, principal, ms, late) {
  * It fails with 403 (`code: 'owner_only'`) when the box refuses the member as no panel admin (NOT_PANEL_ADMIN), with the
  * box's 400, 404 or 409 and its message (`code` the box's, else `not_found` for 404 and `invalid_request` for 400 and 409),
  * and 502 (`code: 'box_refused'`, with the box's text) for any other answer, other 403s included (a Host or Origin fence,
- * a missing `x-orchestrator-request`). A box's refusal text is cut to 500 characters in either method and logged with the
- * `api refused` line; api's refusals that carry it also carry it alone as `said`, for a caller that fences it.
+ * a missing `x-orchestrator-request`). A box's refusal text is cut to 500 characters in either method, logged as it is with
+ * the `api refused` line, and put in an error's message only fenced (`fence`), because every caller passes it to a model.
  */
 export function projectRelay({ projects, box, boxFetch, siteHostOf, edgeHost, readyMs = BOX_READY_MS, log = console.log }) {
   const say = (fields) => log(JSON.stringify({ edge: 'relay', ...fields }))
@@ -188,6 +205,8 @@ export function projectRelay({ projects, box, boxFetch, siteHostOf, edgeHost, re
   const unavailable = (id) => Object.assign(fail(409, `project ${id} runs an older build without the relay, so nothing was sent; its owner moves the box to the current build (RUNBOOK "Moving a box to a new template build")`), { code: 'relay_unavailable' })
   /** The box's refusal text, cut to 500 characters; undefined when it sent none. */
   const said = (out) => (typeof out?.error === 'string' ? out.error.slice(0, 500) : undefined)
+  /** The box's refusal text, fenced, for an error's message; the HTTP status when it sent none. */
+  const why = (out, status) => (said(out) === undefined ? `HTTP ${status}` : fence(said(out)))
   /** The project's box, ensured, for a member of the project, and `timeoutMs()`, what remains of CALL_MS. */
   async function reach(member, id) {
     const p = await projects.get(id)
@@ -214,7 +233,7 @@ export function projectRelay({ projects, box, boxFetch, siteHostOf, edgeHost, re
       if (r.status !== 200 || !token(out?.trigger)) {
         say({ level: 'warn', msg: 'refused', project: id, member, status: r.status, code: token(out?.code) })
         const status = r.status === 400 || r.status === 409 ? r.status : 502
-        throw Object.assign(fail(status, `the project box refused the message: ${said(out) ?? `HTTP ${r.status}`}`), token(out?.code) ? { code: out.code } : {})
+        throw Object.assign(fail(status, `the project box refused the message: ${why(out, r.status)}`), token(out?.code) ? { code: out.code } : {})
       }
       const result = token(out.result)
       say({ msg: 'delivered', project: id, member, kind, messageId, result })
@@ -232,9 +251,9 @@ export function projectRelay({ projects, box, boxFetch, siteHostOf, edgeHost, re
         say({ level: 'warn', msg: 'api refused', project: id, member, path: path.split('?')[0], status: r.status, error: said(out) })
         if (r.status === 403 && out?.error === NOT_PANEL_ADMIN) throw Object.assign(fail(403, 'only the project\'s owners can read its status, stop its Tickets or take them'), { code: 'owner_only' })
         if ([400, 404, 409].includes(r.status) && typeof out?.error === 'string') {
-          throw Object.assign(fail(r.status, `the project box refused: ${said(out)}`), { code: token(out.code) ?? (r.status === 404 ? 'not_found' : 'invalid_request'), said: said(out) })
+          throw Object.assign(fail(r.status, `the project box refused: ${why(out, r.status)}`), { code: token(out.code) ?? (r.status === 404 ? 'not_found' : 'invalid_request') })
         }
-        throw Object.assign(fail(502, `the project box did not answer its management API: ${said(out) ?? `HTTP ${r.status}`}`), { code: 'box_refused', said: said(out) })
+        throw Object.assign(fail(502, `the project box did not answer its management API: ${why(out, r.status)}`), { code: 'box_refused' })
       }
     },
   }

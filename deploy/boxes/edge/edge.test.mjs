@@ -822,10 +822,10 @@ test('project relay: posts the member\'s message to the box\'s relay route as th
   await assert.rejects(relay.message('a@x.com', id, 'hi', { kind: 'order', messageId: 'm-2' }), (e) => e.status === 400 && /context, request/.test(e.message))
   for (const messageId of ['a/b', undefined]) await assert.rejects(relay.message('a@x.com', id, 'hi', { messageId }), (e) => e.status === 400, String(messageId))
   assert.equal(posts.length, 3)
-  // The box's refusals keep their status and code; anything else is a 502.
+  // The box's refusals keep their status and code, their text fenced; anything else is a 502.
   for (const [status, code, expected] of [[409, 'id_reused', 409], [400, 'invalid_request', 400], [409, 'relay_off', 409], [403, 'member_required', 502], [500, 'failed', 502]]) {
     answer = () => ({ status, setCookie: [], body: JSON.stringify({ error: `no: ${code}`, code }) })
-    await assert.rejects(relay.message('a@x.com', id, 'hi', { messageId: 'm-3' }), (e) => e.status === expected && e.code === code && e.message === `the project box refused the message: no: ${code}`, code)
+    await assert.rejects(relay.message('a@x.com', id, 'hi', { messageId: 'm-3' }), (e) => e.status === expected && e.code === code && new RegExp(`^the project box refused the message: <(untrusted-[0-9a-f]{16})>\\nno: ${code}\\n</\\1>$`).test(e.message), code)
   }
   answer = () => ({ status: 200, setCookie: [], body: '<!doctype html>' })
   await assert.rejects(relay.message('a@x.com', id, 'hi', { messageId: 'm-3' }), (e) => e.status === 502)
