@@ -1,15 +1,16 @@
 /**
  * Report-started turns: while the newest message that a person or a project sent to a Session is a project's report,
- * the shell asks the person before each command, and under Run Wild it is refused. The predicate is the
- * `mumbo-report-turns` service, so other consent can gate its own tools the same way.
+ * each tool that runs commands or programs or changes a schedule asks the person first, and under Run Wild it is
+ * refused. The predicate is the `mumbo-report-turns` service, so other consent can gate its own tools the same way.
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-schedule'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-subagent'
-import type { PreToolDecision } from '@deepseek-ai/dsh-tools'
+import { type PreToolDecision, RUN_CODE_NAME } from '@deepseek-ai/dsh-tools'
 import { inRunWild } from '@mumbo/run-wild'
 import { z } from 'zod'
 import type {} from './conversation.ts'
@@ -21,13 +22,13 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-/** Whether an Agent acts in a report-started turn: `@mumbo/mcp` provides it while loaded and gates the shell with it. */
+/** Whether an Agent acts in a report-started turn: `@mumbo/mcp` provides it while loaded and gates commands with it. */
 export interface ReportTurns {
   /**
    * Whether the newest message that a person or a project sent to the Agent's root Session is a project's report. A
-   * person's message is one with the `user` source, such as a browser prompt, or the `mcp` source of the MCP door.
-   * Context the harness adds, a schedule's message and every other source leave the answer unchanged. A delegated
-   * child follows its live root Session.
+   * person's message is one with the `user` source, such as a browser prompt, the `mcp` source of the MCP door, or the
+   * `schedule` source of a scheduled task. Context the harness adds and every other source leave the answer unchanged.
+   * A delegated child follows its live root Session.
    * @param agent - the live Agent that acts.
    * @returns whether that message is a report; `false` before any such message.
    * @throws when the Agent is a delegated child whose root is no longer live.
@@ -35,14 +36,23 @@ export interface ReportTurns {
   reportStarted(agent: Agent): boolean
 }
 
-/** The shell tool, gated whole. */
-const SHELL = 'bash'
+/**
+ * Tools gated whole: the shells, a workflow script and a PTC program run commands with the box's sign-ins, and a new or
+ * changed schedule delivers a `schedule` message, which ends the gate.
+ */
+const GATED = new Set(['bash', 'pwsh', 'workflow', RUN_CODE_NAME, 'schedule_create', 'schedule_edit'])
 
-/** Why the shell asks in a report-started turn, shown to the person on the approval card. */
-const REPORT_SHELL_ASK = "The newest message in this Session is a project's report, so the shell asks before each command: it runs with your box's sign-ins, such as GitHub."
+/** Why a gated tool asks in a report-started turn, shown to the person on the approval card. */
+const REPORT_ASK = "The newest message in this Session is a project's report, so commands, programs and schedule changes ask first: they run with your box's sign-ins, such as GitHub."
 
-/** Why the shell does not run in a report-started turn under Run Wild; the model reads it as the call's error. */
-const REPORT_SHELL_REFUSAL = "bash did not run: the newest message in this Session is a project's report, and in Run Wild the shell runs only after a message from the person. Say what you would run and why, so the person can reply to let it run."
+/**
+ * Why a gated tool does not run in a report-started turn under Run Wild; the model reads it as the call's error.
+ * @param tool - the refused tool's name.
+ * @returns the refusal note.
+ */
+function reportRefusal(tool: string): string {
+  return `${tool} did not run: the newest message in this Session is a project's report, and in Run Wild commands, programs and schedule changes run only after a message from the person. Say what you would run and why, so the person can reply to let it run.`
+}
 
 /**
  * Fold one event into whether the newest message from a person or a project is a report.
@@ -57,18 +67,19 @@ function foldNewest(state: boolean, event: SessionEvent): boolean {
       return true
     case 'user':
     case 'mcp':
+    case 'schedule':
       return false
-    // Context the harness adds, a schedule's or a hook's message, and late answers are nobody's new request.
+    // Context the harness adds, a hook's message, and late answers are nobody's new request.
     default:
       return state
   }
 }
 
 /**
- * Provide `mumbo-report-turns` and gate the shell: in a report-started turn, a `bash` call asks the person, and under
- * Run Wild it is refused without asking. The gate decides before Run Wild can allow it, in either listener order; a
- * policy after it that denies still denies. The listener, the service and the host-only projection behind it release
- * with the calling fiber.
+ * Provide `mumbo-report-turns` and gate commands: in a report-started turn, a call to a tool in {@link GATED} asks the
+ * person, and under Run Wild it is refused without asking. The gate decides before Run Wild can allow it, in either
+ * listener order; a policy after it that denies still denies. The listener, the service and the host-only projection
+ * behind it release with the calling fiber.
  * @param ctx - plugin context carrying `sessionProjections` and `permissionPresets`.
  * @throws when the projection registration fails.
  */
@@ -86,9 +97,9 @@ export async function gateReportTurns(ctx: Context): Promise<void> {
   ctx.provide('mumbo-report-turns', turns)
   ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
     const agent = exec.agent
-    if (exec.name !== SHELL || agent === undefined || !turns.reportStarted(agent)) return next()
-    if (inRunWild(ctx, agent)) return { kind: 'deny', reason: REPORT_SHELL_REFUSAL }
+    if (!GATED.has(exec.name) || agent === undefined || !turns.reportStarted(agent)) return next()
+    if (inRunWild(ctx, agent)) return { kind: 'deny', reason: reportRefusal(exec.name) }
     const decision = await next()
-    return decision.kind === 'allow' ? { kind: 'ask', reason: REPORT_SHELL_ASK } : decision
+    return decision.kind === 'allow' ? { kind: 'ask', reason: REPORT_ASK } : decision
   }, { prepend: true })
 }

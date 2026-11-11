@@ -42,6 +42,9 @@
       "path": "../../llm/llm"
     },
     {
+      "path": "../../schedule/schedule"
+    },
+    {
       "path": "../../session/session-projection"
     },
     {

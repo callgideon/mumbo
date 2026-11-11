@@ -20,26 +20,30 @@ const PRESETS = {
   'run-wild': { sandbox: 'danger-full-access', approval: 'ask' },
 } as const
 
-const ASK = "The newest message in this Session is a project's report, so the shell asks before each command: it runs with your box's sign-ins, such as GitHub."
-const REFUSAL = "Error: bash did not run: the newest message in this Session is a project's report, and in Run Wild the shell runs only after a message from the person. Say what you would run and why, so the person can reply to let it run."
+const ASK = "The newest message in this Session is a project's report, so commands, programs and schedule changes ask first: they run with your box's sign-ins, such as GitHub."
+const refusal = (tool: string): string => `Error: ${tool} did not run: the newest message in this Session is a project's report, and in Run Wild commands, programs and schedule changes run only after a message from the person. Say what you would run and why, so the person can reply to let it run.`
 
 const REPORT: MessageSource = { kind: 'report', project: brandString<ProjectId>('site0000000000aa') }
 const PERSON: MessageSource = { kind: 'user' }
 const DOOR: MessageSource = { kind: 'mcp', principal: 'ann' }
+const SCHEDULE: MessageSource = { kind: 'schedule' }
+
+/** Registered stand-ins for the gated tools: the shells, a workflow script, and the schedule changes. */
+const GATED = ['bash', 'pwsh', 'workflow', 'schedule_create', 'schedule_edit'] as const
 
 /** Where the gate's listener sits relative to Run Wild's: mounted before it (inner) or after it (outer). */
 type Order = 'before Run Wild' | 'after Run Wild'
 
 /**
- * Mount the real approval and permission services, Run Wild and the gate, a `bash` fixture and a `deploy` fixture, and
- * the person's answerer, which records each approval reason and gives `answer`.
+ * Mount the real approval and permission services, Run Wild and the gate, a fixture for each gated tool and a `deploy`
+ * fixture, and the person's answerer, which records each approval reason and gives `answer`.
  */
 async function mounted(order: Order = 'before Run Wild') {
   const ctx = new Context()
   onTestFinished(() => ctx.fiber.dispose())
   await mountAgentLoopTestDependencies(ctx)
   const harness = await mountAgentLoopTestHarness(ctx)
-  // The permission presets read the sandbox mode; the `bash` fixture stands in for the shell tool.
+  // The permission presets read the sandbox mode; the fixtures stand in for the gated tools.
   ctx.provide('shell', { sandboxMode: 'danger-full-access' } as never)
   await ctx.plugin(Approval, { policy: 'ask' })
   await ctx.plugin(PermissionPresetService, { presets: PRESETS })
@@ -53,7 +57,7 @@ async function mounted(order: Order = 'before Run Wild') {
     asked.push(request.reason)
     return Promise.resolve(person.answer)
   })
-  for (const name of ['bash', 'deploy']) {
+  for (const name of [...GATED, 'deploy']) {
     ctx.tools.register(defineContentToolFixture({
       name, description: `${name} fixture`, parameters: {}, execute: () => Promise.resolve([{ type: 'text', text: `ran ${name}` }]),
     }))
@@ -94,14 +98,17 @@ describe('reportStarted', () => {
     expect(started()).toBe(false)
     say(agent, REPORT)
     expect(started()).toBe(true)
-    // Context the harness adds and a schedule's message are nobody's new request.
+    // Context the harness adds is nobody's new request.
     say(agent, { kind: 'runtime-context' })
-    say(agent, { kind: 'schedule' })
     expect(started()).toBe(true)
     say(agent, PERSON)
     expect(started()).toBe(false)
     say(agent, REPORT)
     say(agent, DOOR)
+    expect(started()).toBe(false)
+    // A scheduled task is the person's: changing one asks in a report-started turn.
+    say(agent, REPORT)
+    say(agent, SCHEDULE)
     expect(started()).toBe(false)
   })
 
@@ -125,27 +132,38 @@ describe('reportStarted', () => {
   })
 })
 
-describe('the shell in a report-started turn', () => {
-  it('asks the person in Full access, and runs only when they allow it', async () => {
+describe('commands in a report-started turn', () => {
+  it.each(GATED)('%s asks the person in Full access, and runs only when they allow it', async (name) => {
     const { asked, person, create, run } = await mounted()
     const agent = await create('root', 'danger-full-access', [PERSON, REPORT])
-    expect(text(await run('bash', agent))).toBe('Error: the user rejected tool "bash"')
+    expect(text(await run(name, agent))).toBe(`Error: the user rejected tool "${name}"`)
     person.answer = 'allowed-once'
-    expect(text(await run('bash', agent))).toBe('ran bash')
+    expect(text(await run(name, agent))).toBe(`ran ${name}`)
     expect(asked).toEqual([ASK, ASK])
-    // Only the shell is gated.
-    expect(text(await run('deploy', agent))).toBe('ran deploy')
-    expect(asked).toHaveLength(2)
   })
 
-  it.each(['before Run Wild', 'after Run Wild'] as const)('is refused without asking under Run Wild, mounted %s', async (order) => {
+  it('leaves every other tool alone', async () => {
+    const { asked, create, run } = await mounted()
+    const agent = await create('root', 'danger-full-access', [REPORT])
+    expect(text(await run('deploy', agent))).toBe('ran deploy')
+    expect(asked).toEqual([])
+  })
+
+  it.each(['before Run Wild', 'after Run Wild'] as const)('bash is refused without asking under Run Wild, mounted %s', async (order) => {
     const { asked, create, run } = await mounted(order)
     const agent = await create('root', RunWild.RUN_WILD_PRESET, [REPORT])
     const refused = await run('bash', agent)
     expect(refused.isError).toBe(true)
-    expect(text(refused)).toBe(REFUSAL)
+    expect(text(refused)).toBe(refusal('bash'))
     expect(asked).toEqual([])
     expect(decisions(agent)).toEqual([])
+  })
+
+  it.each(GATED)('%s is refused without asking under Run Wild', async (name) => {
+    const { asked, create, run } = await mounted('after Run Wild')
+    const agent = await create('root', RunWild.RUN_WILD_PRESET, [REPORT])
+    expect(text(await run(name, agent))).toBe(refusal(name))
+    expect(asked).toEqual([])
   })
 
   it('keeps a denial from a later policy', async () => {
@@ -157,11 +175,12 @@ describe('the shell in a report-started turn', () => {
   })
 })
 
-describe('the shell in a turn a person started', () => {
+describe('commands in a turn a person started', () => {
   it.each([
     ['Full access', 'danger-full-access', PERSON],
     ['Run Wild', RunWild.RUN_WILD_PRESET, PERSON],
     ['Full access, through the door', 'danger-full-access', DOOR],
+    ['Run Wild, by a scheduled task', RunWild.RUN_WILD_PRESET, SCHEDULE],
   ] as const)('runs unasked in %s', async (_label, preset, source) => {
     const { asked, create, run } = await mounted()
     const agent = await create('root', preset, [REPORT, source])
