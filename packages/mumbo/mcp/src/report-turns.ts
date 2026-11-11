@@ -101,9 +101,11 @@ function foldOrigin(state: Origin, event: SessionEvent): Origin {
     case 'user':
     case 'mcp':
     case 'schedule':
-    case 'goal':
       return state.phase === 'open' ? { report: false, phase: 'named' } : state
-    // Context the harness adds, a hook's or a retry's message, and every unknown source leave the origin as it was.
+    // A goal round continues what was going on and adds no authority, so it keeps the origin, as a retry does: a report
+    // taints the rounds after it until the person's own message or a schedule delivery. Context the harness adds, a
+    // hook's message, and every unknown source leave the origin as it was too.
+    case 'goal':
     default:
       return state
   }
@@ -120,7 +122,7 @@ function foldOrigin(state: Origin, event: SessionEvent): Origin {
 export async function gateReportTurns(ctx: Context): Promise<void> {
   const origin = await ctx.sessionProjections.register({
     key: 'mumboReportTurn',
-    stateVersion: 3,
+    stateVersion: 4,
     stateSchema: z.object({ report: z.boolean(), phase: z.enum(['open', 'named', 'closed']) }),
     init: (): Origin => ({ report: false, phase: 'open' }),
     apply: foldOrigin,

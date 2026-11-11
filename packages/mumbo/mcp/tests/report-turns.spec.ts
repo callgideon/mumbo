@@ -170,7 +170,7 @@ describe('reportStarted', () => {
     expect(started()).toBe(false)
     log.turn(REPORT, CONTEXT)
     expect(started()).toBe(true)
-    for (const source of [PERSON, DOOR, SCHEDULE, GOAL]) {
+    for (const source of [PERSON, DOOR, SCHEDULE]) {
       log.turn(REPORT)
       expect(started()).toBe(true)
       log.turn(source, CONTEXT)
@@ -201,6 +201,16 @@ describe('reportStarted', () => {
     expect(ctx['mumbo-report-turns'].reportStarted(agent)).toBe(true)
     log.turn(REPORT, DOOR)
     expect(ctx['mumbo-report-turns'].reportStarted(agent)).toBe(true)
+  })
+
+  it('keeps the previous turn\'s origin through a goal round, after a report and after a person alike', async () => {
+    const { ctx, create } = await mounted()
+    const { agent, log } = await create('root', 'danger-full-access', [REPORT])
+    log.turn(GOAL, CONTEXT)
+    expect(ctx['mumbo-report-turns'].reportStarted(agent)).toBe(true)
+    log.turn(PERSON)
+    log.turn(GOAL, CONTEXT)
+    expect(ctx['mumbo-report-turns'].reportStarted(agent)).toBe(false)
   })
 
   it('keeps the previous turn\'s origin when no message of a new turn names one', async () => {
@@ -316,12 +326,22 @@ describe('tools in a turn a person started', () => {
     ['Run Wild', RunWild.RUN_WILD_PRESET, PERSON],
     ['Full access, through the door', 'danger-full-access', DOOR],
     ['Run Wild, by a scheduled task', RunWild.RUN_WILD_PRESET, SCHEDULE],
-    ['Run Wild, by a goal', RunWild.RUN_WILD_PRESET, GOAL],
   ] as const)('run unasked in %s', async (_label, preset, source) => {
     const { asked, create, run } = await mounted()
     const { agent, log } = await create('root', preset, [REPORT])
     log.turn(source)
     for (const name of ['bash', 'web_fetch']) expect(text(await run(name, agent))).toBe(`ran ${name}`)
+    expect(asked).toEqual([])
+  })
+
+  it('run in Run Wild in a goal round after the person\'s turn, and stay refused in a goal round after a report', async () => {
+    const { asked, create, run } = await mounted()
+    const { agent, log } = await create('root', RunWild.RUN_WILD_PRESET, [REPORT])
+    log.turn(GOAL)
+    expect(text(await run('bash', agent))).toBe(refusal('bash'))
+    log.turn(PERSON)
+    log.turn(GOAL)
+    expect(text(await run('bash', agent))).toBe('ran bash')
     expect(asked).toEqual([])
   })
 
