@@ -1,0 +1,108 @@
+# Agent containment (B24): the rows the edge appends after every other overlay of a project box. The ids are the box's
+# users `agent` (1001) and `mcpserver` (1006); NO_PROXY and the Fetch API base end with the edge's LLM host; the rest is
+# fixed. A project box has no desktop or browser, so no identity for them. No row configures dsh-superagent: a patch's
+# config would replace the project overlay's row, which reads its directories from MUMBO_WORK_DIR, MUMBO_WORKER_DIR and
+# MUMBO_GH_CONFIG_DIR, exported by the start script.
+# Start every process dsh runs for the model as `agent`, with an explicit environment that reaches GitHub through the
+# box-local proxy, as dsh itself does. The gh wrapper and the proxy CA are root-owned, world-readable copies outside
+# /root/.mumbo, which stays 0700. dsh's own TMPDIR stays root-only; shell activity records go to /run/dsh-shell (root,
+# 0711) and command spill files to a directory agent can read. The superagent's worker shims come first on PATH and its
+# git configuration is the global one, as dsh-superagent sets them in its own environment, which run-as children do not
+# receive; both live in its root-owned worker directory. The MCP servers the person adds run as `mcpserver` (the server
+# identity) in its home, with only HOME, USER, PATH, and LANG besides their own entries; its groups are empty while the
+# box's mcpServerWorkspace switch is `none`, the default, and for `read` or `readwrite` hold one dedicated workspace group
+# that only the workspace's directories carry, never agent's 1001, which owns every root:agent 2750 directory. The model
+# roots give other users no permission bits. All the servers share the one uid and /tmp with agent, so a server whose
+# tools write files or run commands lets the model run code as mcpserver and read every server's credentials.
+- id: subprocess
+  config:
+    shellActivityDirectory: /run/dsh-shell
+    spillDirectory: /var/lib/mumbo/subprocess-spill
+    runAs:
+      uid: 1001
+      gid: 1001
+      groups: []
+      inherit: [LANG, LC_ALL, TZ]
+      set:
+        HOME: /home/agent
+        TMPDIR: /home/agent/tmp
+        USER: agent
+        LOGNAME: agent
+        SHELL: /bin/bash
+        PATH: /var/lib/mumbo/superagent/worker-bin:/usr/local/lib/mumbo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        GIT_CONFIG_GLOBAL: /var/lib/mumbo/superagent/worker-gitconfig
+        GIT_CONFIG_NOSYSTEM: '1'
+        GIT_ASKPASS: ''
+        GIT_TERMINAL_PROMPT: '0'
+        NODE_EXTRA_CA_CERTS: /usr/local/share/ca-certificates/mumbo-box.crt
+        NODE_USE_ENV_PROXY: '1'
+        HTTPS_PROXY: http://127.0.0.1:8899
+        NO_PROXY: 127.0.0.1,localhost,llm.example
+      secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY, E2B_API_KEY, GH_TOKEN, GITHUB_TOKEN]
+    identities:
+      mcpserver:
+        uid: 1006
+        gid: 1006
+        groups: []
+        inherit: [LANG]
+        set:
+          HOME: /home/mcpserver
+          USER: mcpserver
+          PATH: /usr/local/bin:/usr/bin:/bin
+        secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY, E2B_API_KEY, GH_TOKEN, GITHUB_TOKEN]
+    serverIdentity: mcpserver
+# Confine the model's file tools to the workspace, agent's home, and the ticket work directory; reads check each opened
+# file, changes run as agent. The attachment, skill, and spill directories the harness names to the model are read-only;
+# the ones outside /root are root-owned with group agent and set-group-ID (2750), so the agent shell can read but not
+# change them.
+# Every root below must exist when dsh starts, /root/.dsh/skills and /usr/local/share/mumbo/agents/skills included.
+- id: fs-sandbox
+  config:
+    modelRoots: [/root/projects, /home/agent, /root/work]
+    readOnlyRoots:
+      - /var/lib/mumbo/attachments/attachments/v1
+      - /root/.dsh/skills
+      - /usr/local/share/mumbo/agents/skills
+      - /var/lib/mumbo/spill
+      - /var/lib/mumbo/subprocess-spill
+# Uploads live outside the root-only harness home, readable by agent's group and writable only by root. The box creates
+# /var/lib/mumbo/attachments, its attachments, and attachments/v1 (each root:agent 2750): the store makes v1 only on its
+# first upload, and fs-sandbox needs every read-only root to exist at load.
+- id: attachment-local
+  config:
+    dshHome: /var/lib/mumbo/attachments
+    groupReadable: true
+# Spilled tool results the model is told to read, likewise.
+- id: spill-local
+  config:
+    root: /var/lib/mumbo/spill
+    groupReadable: true
+# The manager starts the person's MCP stdio servers through the run-as provider as mcpserver, and runs only while a
+# subprocess service is mounted, so no server starts as root after a provider remount or when the provider failed at load. Only
+# `inject` is patched: a `config` patch would replace the servers the person added in Settings.
+- id: mcp-manager
+  inject: [credentials, subprocess]
+# Installing or enabling a plugin loads code into root dsh: no plugin_manager tool for the model.
+- id: plugin-manager
+  config:
+    modelTools: false
+# Creator mode: runtime inspection and the plugin tools.
+- id: preset-cordis
+  disabled: true
+# Change summaries run git and read files for the model's turns; off until their scratch directory works as agent.
+- id: workspace-changes
+  config:
+    summaries: false
+# web_fetch runs in root dsh, outside the agent network rules, and the anonymous fetcher reaches loopback and private
+# addresses (the browser's debugging port, the box's own services), so it is off: web_fetch uses the DeepSeek Fetch API
+# through the edge's model host, which forwards /v1/tools/* to DeepSeek, with the box token. A patch replaces a row's
+# whole config, so `web` restates the base's searchProvider.
+- id: web-fetch-http
+  disabled: true
+- id: web
+  config:
+    searchProvider: deepseek-search-api
+    fetchProvider: deepseek-fetch-api
+- id: web-deepseek-api
+  config:
+    fetchBaseURL: https://llm.example/v1/tools

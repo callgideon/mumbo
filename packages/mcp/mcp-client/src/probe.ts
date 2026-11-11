@@ -72,7 +72,7 @@ export async function probeServer(ctx: Context, config: Config, options: McpProb
   let result: McpProbeSuccess | McpProbeFailure
   try {
     const resolved = await generation.run(signal => binding.resolve(signal), remaining())
-    await generation.connect(resolved, remaining())
+    await generation.connect(resolved, remaining(), ctx)
     const identity = client.getServerVersion()
     const serverInfo = identity === undefined ? undefined : { name: identity.name, version: identity.version }
     stage = 'list'

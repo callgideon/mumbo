@@ -42,6 +42,7 @@ Install the programs on the machine that runs DSH (Debian or Ubuntu: `apt-get in
 | `maxScreenshotBytes` | `33554432` | Largest PNG accepted from one capture |
 | `typeDelayMs` | `12` | Delay between typed characters |
 | `dragSteps` | `10` | Pointer movements between the start and end of a drag |
+| `identity` | provider default | Subprocess identity that runs every command and whose `PATH` finds the executables, such as a user that alone may read the X authority file |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-computer-use-x11) lists the accepted fields.
 
@@ -55,7 +56,7 @@ Start the X server with an authorization cookie and set `xauthority` to that fil
 
 A screenshot requires an Agent-owned call, an attachment store and a model route declaring image input; it fails before capture otherwise. Its value contains the image dimensions the model receives and the stored attachment reference. Input actions return `{"dispatched":true}`: the X server received the input, and the effect is unverified. Command failures, timeouts, oversized output and key names that `xdotool` skipped become tool errors.
 
-`key` accepts a closed set of names: common aliases such as `enter`, `esc`, `ctrl` and `win`, named keysyms such as `Return`, `Page_Up`, `KP_Enter` and `XF86AudioMute`, `F1` to `F24`, `U<hex>` code points and single printable characters. Any other name fails before `xdotool` starts, because `xdotool key` runs an argument that names one of its commands, such as `exec`, as a chained command.
+`key` accepts a closed set of names: common aliases such as `enter`, `esc`, `ctrl` and `win`, named keysyms such as `Return`, `Page_Up`, `KP_Enter` and `XF86AudioMute`, `F1` to `F24`, `U<hex>` code points and single printable characters. Any other name fails before `xdotool` starts, because `xdotool key` runs an argument that names one of its commands, such as `exec`, as a chained command. ASCII text goes to `xdotool type --delay <ms> -- <text>` as the final argument, so it is typed literally and nothing follows it. Before every `xdotool` start, the whole argument list must parse as the commands this provider sends (`getdisplaygeometry`, `mousemove`, `mousedown`, `mouseup`, `keydown`, `keyup`, `click --repeat`, `key`, `type`), with decimal numbers, buttons 1 to 7, and key names from the closed set; any other list fails with `computer-use-x11 refused xdotool arguments: <reason>` and starts nothing.
 
 -----
 
@@ -119,6 +120,7 @@ The definition preserves its request prefix while the display setting is unchang
 <a id="known-limitations-and-deferred-work"></a>
 
 - **No accessibility tree or window list** — the model works from screenshots; it cannot read element text, list windows or raise a window except by clicking or pressing keys.
+- **Typed text is a process argument** — while `xdotool type` runs, its text is readable in `/proc/<pid>/cmdline` by every user of the host unless `/proc` is mounted with `hidepid`.
 - **Shared desktop** — the provider does not reserve the display for a Session. Other Sessions, the user's own viewer and applications can change it between calls, and keyboard input goes to whichever window has focus.
 - **Clipboard replacement** — typing non-ASCII text replaces the CLIPBOARD and PRIMARY selections, and applications without shift+Insert paste do not receive it.
 - **Cancellation and partial input** — a cancelled, timed-out or failed command can have delivered part of its input. Held modifiers and buttons are released afterwards, but when the release command itself cannot run, for example because the display is gone, keys and buttons can stay pressed and only a warning is logged. The release does not cover the final non-modifier key of a chord, which a command killed between its press and release leaves held, or a Caps_Lock or Num_Lock press, which leaves the lock toggled. Observe with a screenshot before retrying.

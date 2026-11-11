@@ -46,6 +46,12 @@ export interface Config {
    * ages out.
    */
   cleanupPeriodDays?: number
+  /**
+   * Let the root's group read spill files but not change them: session directories are created `0750` and files
+   * `0640`, so a configured root owned by this process with another user's group and the set-group-ID bit passes that
+   * group to every session directory and file. Defaults to `false` (`0700` and `0600`).
+   */
+  groupReadable?: boolean
 }
 
 /** The shape after schemastery applied the defaults. */
@@ -66,6 +72,7 @@ export class LocalSpillStore extends SpillStore {
   static Config: z<Config> = z.object({
     root: z.string(),
     cleanupPeriodDays: z.number().step(1).min(0).default(30),
+    groupReadable: z.boolean().default(false),
   })
 
   /** Resolved absolute spill root (config `root`, else the private default), fixed at construction. */
@@ -152,6 +159,7 @@ export class LocalSpillStore extends SpillStore {
       sessionId: input.owner.sessionId,
       suggestedName: input.suggestedName,
       content: input.content,
+      groupReadable: this.config.groupReadable,
     })
     return {
       locator: SpillLocator(saved.path),

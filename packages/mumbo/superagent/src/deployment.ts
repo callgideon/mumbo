@@ -1,19 +1,22 @@
 /** Plugin configuration and startup verification for repository access and agent CLI identities. */
 import { LIMITS } from './limits.ts'
 import { accessSync, constants, statSync } from 'node:fs'
-import { delimiter, isAbsolute, join } from 'node:path'
+import { delimiter, isAbsolute, join, relative, sep } from 'node:path'
 import type { Volatile } from '@deepseek-ai/cordis'
 import s from '@deepseek-ai/schemastery'
 import { z } from 'zod'
 import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
-import { runAsWorker, sameDirectory, withoutDirectory, workerBin } from './infra/environment.ts'
+import { assertOwnedByRoot, runAsWorker, sameDirectory, withoutDirectory, workerBin } from './infra/environment.ts'
 import { SetupError } from './setup.ts'
 
 const reason = (error: unknown): string => error instanceof Error ? error.message : String(error)
 const absolute = (description: string) => s.string().pattern(/^\//).description(`${description} Absolute path.`)
 /** Plugin configuration of the dsh-superagent entry. Volatile fields apply without a restart because dsh-superagent reads them on each use; changing `stateDir` remounts the plugin. */
 export const Config = s.object({
-  stateDir: absolute('Directory for the database, locks, worker shims, the agent\'s git configuration and, by default, the ticket directories.').required(),
+  stateDir: absolute('Directory for the database, locks and, unless `workerDirectory` names another, the worker shims and the agent\'s git configuration.').required(),
+  workDirectory: absolute('Directory that holds the ticket directories when the Execution settings name none; defaults to `<stateDir>/work`. Under a run-as subprocess provider the worker user must be able to write it, and it, the default included, must be outside `stateDir`, or the plugin fails at load.'),
+  workerDirectory: absolute('Directory for the worker shims (`worker-bin`) and the agent\'s git configuration (`worker-gitconfig`), which workers run and read and the orchestrator reads too; defaults to `stateDir`. Required under a run-as subprocess provider, where it, every ancestor and everything in it must be owned by root and writable by no other user; give the worker\'s group read and search access, such as `root:agent` mode `2750`.'),
+  ghConfigDirectory: absolute('`GH_CONFIG_DIR` of the orchestrator\'s own GitHub CLI calls; unset, the CLI uses its own default. Required under a run-as subprocess provider, where setup reads the agent\'s GitHub login through it, so it must be signed in to the agent\'s account, and where it, every ancestor and everything in it must be owned by root and writable by no other user, because a gh alias runs commands.'),
   promptMaxChars: s.number().min(LIMITS.promptMaxChars.min).max(LIMITS.promptMaxChars.max).step(1).default(100000)
     .description('Largest saved prompt configuration, in characters.').volatile(),
   admissionContextMaxPages: s.number().min(LIMITS.admissionContextMaxPages.min).max(LIMITS.admissionContextMaxPages.max).step(1).default(10)
@@ -38,6 +41,14 @@ export const Config = s.object({
 export type DeploymentConfig = ReturnType<typeof Config>
 export interface Machine {
   stateDir: string
+  /** Default root of the ticket directories: `workDirectory`, else `<stateDir>/work`. */
+  workDirectory: string
+  /** Directory of `worker-bin` and `worker-gitconfig`: `workerDirectory`, else `stateDir`; under run-as, its checked real path. */
+  workerDirectory: string
+  /** `GH_CONFIG_DIR` of the orchestrator's own CLI calls; under run-as, its checked real path. */
+  ghConfigDirectory?: string | undefined
+  /** Whether the subprocess provider runs workers as a run-as identity, so root must never run what they can change. */
+  runAs: boolean
   promptMaxChars: Volatile<number>
   admissionContextMaxPages: Volatile<number>
   admissionContextTimeoutMs: Volatile<number>
@@ -54,16 +65,50 @@ const MOVED: Record<string, string> = {
   worktreeRoot: 'the ticket directory of the Execution settings', blockedCommands: 'in the Execution settings',
 }
 
-/** Read machine settings and reject unknown configuration keys (naming where deprecated keys moved). */
-export function machineOf(config: DeploymentConfig): Machine {
-  const unknown = Object.keys(config).filter(key => !(key in (Config.dict ?? {})))
-  if (unknown.length) throw new Error(`dsh-superagent configuration has keys it does not use: ${unknown.map(key => MOVED[key] ? `${key} (now ${MOVED[key]})` : key).join(', ')}; the keys are ${Object.keys(Config.dict ?? {}).join(', ')}`)
-  const { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins, githubApp, edge } = config
-  return { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins, githubApp, edge }
+/**
+ * Whether `path` is the state directory or inside it, which a run-as worker cannot enter.
+ * @param stateDir - the state directory.
+ * @param path - a directory; a relative one counts as outside.
+ * @returns whether the state directory holds it.
+ */
+export function inStateDirectory(stateDir: string, path: string): boolean {
+  const rest = relative(stateDir, path)
+  return isAbsolute(path) && rest !== '..' && !rest.startsWith(`..${sep}`) && !isAbsolute(rest)
 }
 
+/**
+ * Read machine settings and reject unknown configuration keys (naming where deprecated keys moved). Under a run-as
+ * subprocess provider the orchestrator runs as root what workers run as another user, so `workerDirectory` and
+ * `ghConfigDirectory` must be set and pass {@link assertOwnedByRoot}, and `workDirectory`, its default included, must be
+ * outside `stateDir`, which workers cannot enter; the machine keeps the real paths checked.
+ * @param config - the validated plugin configuration.
+ * @param runAs - whether the mounted subprocess provider runs children as a run-as identity.
+ * @returns the machine settings.
+ * @throws when a key is unknown, or under run-as when either directory is unset or another user could change it, or
+ *   `workDirectory` is in `stateDir`.
+ */
+export function machineOf(config: DeploymentConfig, runAs = false): Machine {
+  const unknown = Object.keys(config).filter(key => !(key in (Config.dict ?? {})))
+  if (unknown.length) throw new Error(`dsh-superagent configuration has keys it does not use: ${unknown.map(key => MOVED[key] ? `${key} (now ${MOVED[key]})` : key).join(', ')}; the keys are ${Object.keys(Config.dict ?? {}).join(', ')}`)
+  const { stateDir, workDirectory, workerDirectory, ghConfigDirectory, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins, githubApp, edge } = config
+  const contained = (key: 'workerDirectory' | 'ghConfigDirectory', path: string | undefined): string | undefined => {
+    if (!runAs) return path
+    if (path === undefined) throw new Error(`dsh-superagent ${key} must be set under a run-as subprocess provider: the orchestrator, as root, uses what it holds`)
+    return assertOwnedByRoot(path, key)
+  }
+  const worker = contained('workerDirectory', workerDirectory) ?? stateDir, gh = contained('ghConfigDirectory', ghConfigDirectory)
+  const work = workDirectory ?? join(stateDir, 'work')
+  if (runAs && inStateDirectory(stateDir, work)) {
+    throw new Error(`dsh-superagent workDirectory ${work}${workDirectory === undefined ? ' (its default, <stateDir>/work)' : ''} is in stateDir ${stateDir}, which workers cannot enter under a run-as subprocess provider; set workDirectory to a directory outside stateDir, such as /root/work`)
+  }
+  return { stateDir, workDirectory: work, workerDirectory: worker, ghConfigDirectory: gh, runAs, promptMaxChars, admissionContextMaxPages,
+    admissionContextTimeoutMs, panelAdmins, githubApp, edge }
+}
+
+/** `owner/name`, where neither part is `.` or `..`, which would leave `repos/` in an API path. */
+const REPOSITORY = /^(?!\.\.?\/)[A-Za-z0-9_.-]+\/(?!\.\.?$)[A-Za-z0-9_.-]+$/
 export const GithubAccountsSchema = z.object({
-  repository: z.string().trim().regex(/^([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?$/, 'owner/name').default(''),
+  repository: z.string().trim().regex(new RegExp(`^$|${REPOSITORY.source}`), 'owner/name').default(''),
   cli: z.string().trim().default(''),
 })
 export const FeishuBotSchema = z.object({ cli: z.string().trim().default('') })
@@ -89,14 +134,21 @@ export function executable(name: string, path: string, exclude?: string): string
 }
 
 export type Probe = (argv: string[]) => Promise<string>
-/** Run startup checks through DSH's worker subprocess service with worker shims removed from PATH so a `gh` wrapper script reaches the real binary. */
-export function workerProbe(subprocess: SubprocessRuntime, stateDir: string, cwd: string, signal: AbortSignal): Probe {
-  const path = withoutDirectory(process.env.PATH ?? '', workerBin(stateDir))
-  return argv => runAsWorker(subprocess, ['env', `PATH=${path}`, ...argv], cwd, AbortSignal.any([signal, AbortSignal.timeout(60_000)]))
+/**
+ * Run startup checks through DSH's worker subprocess service with worker shims removed from PATH so a `gh` wrapper script reaches the real binary.
+ * The checks run in `/`, where no repository a worker made can change what the CLIs read.
+ * @param subprocess - the service that starts worker commands, as the run-as identity when it has one.
+ * @param workerDirectory - the directory whose `worker-bin` is removed from PATH.
+ * @param signal - cancellation; each check also stops after 60 seconds.
+ * @returns the probe.
+ */
+export function workerProbe(subprocess: SubprocessRuntime, workerDirectory: string, signal: AbortSignal): Probe {
+  const path = withoutDirectory(process.env.PATH ?? '', workerBin(workerDirectory))
+  return argv => runAsWorker(subprocess, ['env', `PATH=${path}`, ...argv], '/', AbortSignal.any([signal, AbortSignal.timeout(60_000)]))
 }
 
 const GithubUser = z.object({ login: z.string().regex(/^[A-Za-z0-9-]+$/), id: z.number().int().positive() })
-const RepositoryAccess = z.object({ name: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/), push: z.boolean().nullable() })
+const RepositoryAccess = z.object({ name: z.string().regex(REPOSITORY), push: z.boolean().nullable() })
 function parsed<T>(schema: z.ZodType<T>, text: string): T | undefined {
   let value: unknown
   try { value = JSON.parse(text) } catch { return undefined /* Non-JSON output; the caller surfaces the setup failure. */ }
@@ -106,24 +158,42 @@ function parsed<T>(schema: z.ZodType<T>, text: string): T | undefined {
 /**
  * Verify the agent's GitHub CLI identity and push access to the configured repository.
  * With `machine.githubApp` the identity is the App's bot and `/user` is not read; an installation token does not report
- * `permissions`, so only a reported read-only access refuses.
+ * `permissions`, so only a reported read-only access refuses. Under run-as the CLI is kept by the real path checked,
+ * GitHub's name for the repository, which the worker reports, must equal the configured one but for case, and `/user` is
+ * read through `orchestrator`, because the worker answers `probe` through a gh configuration it can write.
+ * @param machine - the machine settings.
+ * @param github - the GitHub Source's configuration.
+ * @param probe - runs a command as worker shells do.
+ * @param orchestrator - runs a command as the orchestrator's own CLI calls do: as this process's user, in `/`, with its
+ *   `GH_CONFIG_DIR`.
+ * @param path - the `PATH` the agent CLI is looked up on.
+ * @returns the deployment.
+ * @throws SetupError naming what setup needs.
  */
-export async function resolveDeployment(machine: Machine, github: unknown, probe: Probe, path = process.env.PATH ?? ''): Promise<Deployment> {
-  const { stateDir, githubApp } = machine
+export async function resolveDeployment(machine: Machine, github: unknown, probe: Probe, orchestrator: Probe, path = process.env.PATH ?? ''): Promise<Deployment> {
+  const { workerDirectory, githubApp } = machine
   const accounts = GithubAccountsSchema.parse(github ?? {})
   const remote = accounts.repository
   if (!remote) throw new SetupError('repositoryUnset')
   if (!accounts.cli) throw new SetupError('agentCliUnset')
   let cli: string
-  try { cli = executable(accounts.cli, path, workerBin(stateDir)) } catch (error) { throw new SetupError('agentCliMissing', { output: reason(error) }) }
+  try { cli = executable(accounts.cli, path, workerBin(workerDirectory)) } catch (error) { throw new SetupError('agentCliMissing', { output: reason(error) }) }
+  // The orchestrator runs this CLI as root; under run-as, a CLI the worker could change would run the worker's code as root.
+  // Every caller then runs the real path checked here, so a link on the way that the worker repoints later changes nothing.
+  if (machine.runAs) try { cli = assertOwnedByRoot(cli, 'agent GitHub CLI') } catch (error) { throw new SetupError('agentCliUnsafe', { cli, output: reason(error) }) }
+  // The login decides which GitHub activity root takes for the agent's own: what intake skips and which pull requests a
+  // worker may claim. Under run-as no answer the worker can forge may name it.
+  const user = machine.runAs ? orchestrator : probe
   const agent = githubApp ? { login: githubApp.login, id: githubApp.userId }
-    : parsed(GithubUser, await probe([cli, 'api', 'user']).catch((error: unknown) => { throw new SetupError('agentCliSignedOut', { output: reason(error) }) }))
+    : parsed(GithubUser, await user([cli, 'api', 'user']).catch((error: unknown) => { throw new SetupError('agentCliSignedOut', { output: reason(error) }) }))
   if (!agent) throw new SetupError('agentCliNoAccount')
   // Use the canonical repository name returned by GitHub so renamed repositories match incoming notifications.
   const access = parsed(RepositoryAccess, await probe([cli, 'api', `repos/${remote}`, '--jq', '{name: .full_name, push: .permissions.push}']).catch((error: unknown) => {
     throw new SetupError('repositoryUnreadable', { account: agent.login, repository: remote, output: reason(error) })
   }))
   if (!access) throw new SetupError('repositoryUnreported', { repository: remote })
+  // Under run-as the worker answers this probe, so its answer may only correct the name's case, never pick another repository.
+  if (machine.runAs && access.name.toLowerCase() !== remote.toLowerCase()) throw new SetupError('repositoryRenamed', { repository: remote, name: access.name })
   const repository = access.name
   if (githubApp ? access.push === false : access.push !== true) throw new SetupError('repositoryReadOnly', { account: agent.login, repository })
   return { ...machine, repository, github: { cli, login: agent.login, noreply: `${agent.id}+${agent.login}@users.noreply.github.com` } }
@@ -140,7 +210,7 @@ export async function resolveFeishuBot(machine: Machine, feishu: unknown, probe:
   if (!name) return undefined
   const fail = (error: unknown): never => { throw error instanceof SetupError ? error : new SetupError('feishuCliFailed', { output: reason(error) }) }
   let cli = ''
-  try { cli = executable(name, path, workerBin(machine.stateDir)) } catch (error) { fail(error) }
+  try { cli = executable(name, path, workerBin(machine.workerDirectory)) } catch (error) { fail(error) }
   const run = (...args: string[]): Promise<string> => probe(['env', 'LARKSUITE_CLI_NO_UPDATE_NOTIFIER=1', 'LARKSUITE_CLI_NO_SKILLS_NOTIFIER=1', cli, ...args]).catch(fail)
   const text = await run('auth', 'status')
   const status = parsed(AuthStatus, text.slice(text.indexOf('{')))

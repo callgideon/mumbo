@@ -64,7 +64,8 @@ class ScriptedModel extends LlmAdapter {
 /**
  * Boot the composition in `root`: approval and the consent row, which mounts the real Playwright MCP provider.
  * @param root - scratch directory holding the config and serving as the Session's working directory.
- * @param options - consent config, approval policy, model script, the person's answers in order (`hang` never answers),
+ * @param options - consent config, approval policy, model script, the person's answers in order (`hang` never answers, and
+ *   a function answers once it settles),
  *   rows placed before and after consent, and extra services each row waits for, by row id.
  * @returns the booted context and Session, the approval reasons asked, every Session event, logged errors, and the
  *   consent Fiber.
@@ -73,7 +74,7 @@ export async function bootComposition(root: string, options: {
   consent: Record<string, unknown>
   approvalPolicy?: 'ask' | 'never'
   script?: readonly ScriptStep[]
-  answers?: Array<ApprovalOutcome | 'hang'>
+  answers?: Array<ApprovalOutcome | 'hang' | (() => Promise<ApprovalOutcome>)>
   withoutApproval?: boolean
   before?: ReadonlyArray<readonly [string, Plugin]>
   after?: ReadonlyArray<readonly [string, Plugin]>
@@ -93,6 +94,7 @@ export async function bootComposition(root: string, options: {
       ctx.on('approval/request', (request) => {
         asked.push(request.reason ?? '')
         const answer = answers.shift() ?? 'rejected'
+        if (typeof answer === 'function') return answer()
         if (answer !== 'hang') return Promise.resolve(answer)
         return new Promise<ApprovalOutcome>((resolve) => { request.signal?.addEventListener('abort', () => { resolve('cancelled') }) })
       })

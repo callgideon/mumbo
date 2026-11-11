@@ -30,7 +30,7 @@ const KEYSYMS: readonly string[] = [
   'KP_Home', 'KP_End', 'KP_Up', 'KP_Down', 'KP_Left', 'KP_Right', 'KP_Prior', 'KP_Next', 'KP_Insert', 'KP_Delete', 'KP_Begin',
   'XF86AudioMute', 'XF86AudioLowerVolume', 'XF86AudioRaiseVolume', 'XF86AudioMicMute',
   'XF86AudioPlay', 'XF86AudioPause', 'XF86AudioStop', 'XF86AudioNext', 'XF86AudioPrev',
-  'XF86MonBrightnessUp', 'XF86MonBrightnessDown', 'XF86Back', 'XF86Forward', 'XF86Reload',
+  'XF86MonBrightnessUp', 'XF86MonBrightnessDown', 'XF86Back', 'XF86Forward', 'XF86Reload', 'ISO_Level3_Shift',
 ]
 
 const normalize = (token: string) => token.toLowerCase().replace(/[-_]/g, '')
@@ -92,4 +92,17 @@ export function translateKeys(keys: string): string[] {
     })
     return [...modifiers, keysym(tokens.at(-1) as string, modifiers.length > 0)].join('+')
   })
+}
+
+/** Names {@link translateKeys} and the release arguments emit besides function keys, `U<hex>`, letters and digits. */
+const EMITTED: ReadonlySet<string> = new Set([...MODIFIERS, ...KEYSYMS])
+
+/**
+ * Whether one xdotool key argument consists only of names this module emits, joined by `+`; no such argument names an
+ * xdotool command.
+ * @param argument - one argument of `key`, `keydown` or `keyup`.
+ * @returns true when every `+`-separated part is a modifier, a listed keysym, F1 to F24, `U<hex>`, a letter or a digit.
+ */
+export function isKeyArgument(argument: string): boolean {
+  return argument.split('+').every(part => EMITTED.has(part) || /^(?:F(?:[1-9]|1\d|2[0-4])|U[0-9A-F]{4,6}|[A-Za-z0-9])$/.test(part))
 }

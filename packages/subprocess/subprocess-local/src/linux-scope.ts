@@ -27,7 +27,9 @@ import {
   spawnRunnerInvocation,
 } from './runner-launch.ts'
 import type { RunnerInvocation } from './runner-launch.ts'
-import { childEnv } from './spawn.ts'
+import type { RunAsIdentity } from './run-as.ts'
+import { childEnv, fallbackOwner, taskkillProcessTree } from './spawn.ts'
+import { linuxProcessGroupHasLiveMembers } from './process-inspector.ts'
 
 /** Test seams for systemd command execution. */
 export interface LinuxScopeInternals {
@@ -266,13 +268,18 @@ export class LinuxScopeNotStartedError extends Error {
 class LinuxScopeStartup {
   readonly terminationSignals = new Set<NodeJS.Signals>()
 
-  constructor(readonly files: LinuxLaunchFiles, private readonly kind: 'subprocess' | 'terminal') {}
+  constructor(
+    readonly files: LinuxLaunchFiles,
+    private readonly kind: 'subprocess' | 'terminal',
+    private readonly scoped = true,
+  ) {}
 
   resolveOutcome(outcome: SubprocessOutcome): SubprocessOutcome {
     const startup = readLinuxStartupError(this.files.startupErrorPath)
     if (startup !== undefined) throw deserializeRunnerError(startup.error)
     if (existsSync(this.files.requestPath)
       && !(outcome.signal !== null && this.terminationSignals.has(outcome.signal))) {
+      if (!this.scoped) throw new Error(`${this.kind} bootstrap exited before it consumed the launch request; its target never ran`)
       throw new LinuxScopeNotStartedError(
         `${this.kind} scope exited before its bootstrap consumed the launch request; the provider probes native containment again before its next command`,
       )
@@ -630,6 +637,7 @@ export interface LinuxTerminalScopeLaunch {
  * @param targetEnv - validated complete target environment.
  * @param literalArgv - options from the provider's positive scope probe.
  * @param internals - optional runner and systemd seams used by tests.
+ * @param runAs - credentials the bootstrap takes before entering the target.
  * @returns invocation and ownership callbacks; requested termination preserves the observed signal even before bootstrap consumption.
  */
 export function prepareLinuxTerminalScope(
@@ -637,9 +645,10 @@ export function prepareLinuxTerminalScope(
   targetEnv: Record<string, string>,
   literalArgv: LiteralArgvOptions,
   internals: LinuxScopeInternals = {},
+  runAs?: RunAsIdentity,
 ): LinuxTerminalScopeLaunch {
   const invocation = internals.runnerInvocation ?? spawnRunnerInvocation()
-  const files = createLinuxLaunchFiles({ cwd: spec.cwd, env: targetEnv })
+  const files = createLinuxLaunchFiles({ cwd: spec.cwd, env: targetEnv, ...runAs === undefined ? {} : { runAs } })
   const startup = new LinuxScopeStartup(files, 'terminal')
   const unitBase = unitStem('dsh-terminal')
   return {
@@ -667,6 +676,7 @@ export function prepareLinuxTerminalScope(
  * @param targetEnv - validated complete target environment.
  * @param literalArgv - options from the provider's positive scope probe.
  * @param internals - optional runner and systemd seams used by tests.
+ * @param runAs - credentials the bootstrap takes before entering the target.
  * @returns streams, result, and scope owner; requested termination preserves the observed signal even before bootstrap consumption.
  */
 export function launchLinuxScope(
@@ -674,12 +684,10 @@ export function launchLinuxScope(
   targetEnv: Record<string, string>,
   literalArgv: LiteralArgvOptions,
   internals: LinuxScopeInternals = {},
+  runAs?: RunAsIdentity,
 ): ManagedProcessLaunch {
   const invocation = internals.runnerInvocation ?? spawnRunnerInvocation()
-  const files = createLinuxLaunchFiles({
-    cwd: spec.cwd, env: targetEnv,
-    ...spec.stdio.control === undefined ? {} : { control: spec.stdio.control },
-  })
+  const files = ordinaryLaunchFiles(spec, targetEnv, runAs)
   const startup = new LinuxScopeStartup(files, 'subprocess')
   const unitBase = unitStem('dsh-subprocess')
   let child: ReturnType<typeof spawn>
@@ -720,5 +728,97 @@ export function launchLinuxScope(
     control: controlPipe(child, spec.stdio.control),
     direct,
     owner,
+  }
+}
+
+function ordinaryLaunchFiles(
+  spec: SubprocessSpawnSpec, targetEnv: Record<string, string>, runAs: RunAsIdentity | undefined,
+): LinuxLaunchFiles {
+  return createLinuxLaunchFiles({
+    cwd: spec.cwd, env: targetEnv,
+    ...spec.stdio.control === undefined ? {} : { control: spec.stdio.control },
+    ...runAs === undefined ? {} : { runAs },
+  })
+}
+
+/**
+ * Launch one ordinary target through the exec bootstrap without a systemd scope, so the bootstrap
+ * can take the run-as credentials where no user manager exists. The bootstrap execs in place, so
+ * the detached process group owns the target as on any fallback host.
+ * @param spec - ordinary target request.
+ * @param targetEnv - validated complete target environment.
+ * @param runAs - credentials the bootstrap takes before entering the target.
+ * @param internals - optional runner and spawn seams used by tests.
+ * @returns streams, result, and process-group owner whose cleanup removes the launch files.
+ */
+export function launchLinuxBootstrap(
+  spec: SubprocessSpawnSpec,
+  targetEnv: Record<string, string>,
+  runAs: RunAsIdentity,
+  internals: LinuxScopeInternals = {},
+): ManagedProcessLaunch {
+  const invocation = internals.runnerInvocation ?? spawnRunnerInvocation()
+  const files = ordinaryLaunchFiles(spec, targetEnv, runAs)
+  const startup = new LinuxScopeStartup(files, 'subprocess', false)
+  let child: ReturnType<typeof spawn>
+  try {
+    child = (internals.spawn ?? spawn)(invocation[0], [...invocation.slice(1), '--', ...spec.argv], {
+      cwd: process.cwd(),
+      env: runnerEnvironment(files.requestPath, invocation),
+      stdio: runnerStdio(spec, false),
+      detached: true,
+    })
+  } catch (error) {
+    cleanupLinuxLaunchFiles(files)
+    throw error
+  }
+  const direct = directOutcome(child, startup)
+  return {
+    stdin: child.stdin,
+    stdout: child.stdout,
+    stderr: child.stderr,
+    control: controlPipe(child, spec.stdio.control),
+    direct,
+    owner: {
+      ...fallbackOwner('linux', child.pid, child, taskkillProcessTree, linuxProcessGroupHasLiveMembers, direct),
+      cleanup: () => { cleanupLinuxLaunchFiles(files) },
+    },
+  }
+}
+
+/** Linux PTY invocation through the exec bootstrap alone; the terminal handle's session observation owns cleanup. */
+export type LinuxTerminalBootstrapLaunch = Omit<LinuxTerminalScopeLaunch, 'bindOwner'>
+
+/**
+ * Prepare one Linux PTY launch through the exec bootstrap without a systemd scope.
+ * @param spec - terminal target request.
+ * @param targetEnv - validated complete target environment.
+ * @param runAs - credentials the bootstrap takes before entering the target.
+ * @param internals - optional runner seam used by tests.
+ * @returns the invocation; its outcome resolver also removes the launch files.
+ */
+export function prepareLinuxTerminalBootstrap(
+  spec: SubprocessTerminalSpawnSpec,
+  targetEnv: Record<string, string>,
+  runAs: RunAsIdentity,
+  internals: LinuxScopeInternals = {},
+): LinuxTerminalBootstrapLaunch {
+  const invocation = internals.runnerInvocation ?? spawnRunnerInvocation()
+  const files = createLinuxLaunchFiles({ cwd: spec.cwd, env: targetEnv, runAs })
+  const startup = new LinuxScopeStartup(files, 'terminal', false)
+  const cleanup = (): void => { cleanupLinuxLaunchFiles(files) }
+  return {
+    command: invocation[0],
+    args: [...invocation.slice(1), '--', ...spec.argv],
+    cwd: process.cwd(),
+    env: runnerEnvironment(files.requestPath, invocation),
+    resolveOutcome: (outcome) => {
+      try {
+        return startup.resolveOutcome(outcome)
+      } finally {
+        cleanup()
+      }
+    },
+    cleanup,
   }
 }

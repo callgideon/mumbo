@@ -728,6 +728,8 @@ function isAbsentSkillPathError(error: unknown): boolean {
   return isAbsentPathError(error)
     || hasErrorCode(error, 'FS_NOT_FOUND')
     || hasErrorCode(error, 'FS_NOT_DIRECTORY')
+    // A link the model planted out of its directories reads as absent.
+    || hasErrorCode(error, 'FS_OUTSIDE_ROOTS')
 }
 
 function hasErrorCode(error: unknown, code: string): boolean {

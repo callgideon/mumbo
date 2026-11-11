@@ -268,7 +268,7 @@ class PersonalizedPages {
       const { initialContent } = proposal.details
       const activation = await this.ctx.subagents.startActivation({
         provider: 'spawn', label: proposal.title, delivery: 'caller', signal, childId,
-        parent: agent, agentPreset: 'cordis', cwd: sourceDirectory,
+        parent: agent, agentPreset: 'cordis', cwd: sourceDirectory, cwdChooser: 'host',
         prompt: [{ type: 'text', text: JSON.stringify({
           task: 'Create one new independently removable DSH interface plugin. Implement the accepted behavior and data scope in brief; research APIs and choose the technical details needed to make it work. Do not add independent operations, data sources, automation or wider access beyond that scope. If unresolved business meaning prevents faithful implementation, report ready:false rather than inventing it. Read and use the cordis-plugin-development skill. Generate and build the package only; the caller validates and installs it. Do not install, enable, remove, or edit any existing plugin or profile configuration.',
           title: proposal.title, brief: proposal.brief,

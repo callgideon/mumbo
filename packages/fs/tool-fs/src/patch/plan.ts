@@ -25,7 +25,7 @@ export async function planPatch(
   const parsed = parsePatch(request.patch)
   const targets = new Map<FsTargetKey, FsTarget>()
   const resolve = async (path: string): Promise<FsTarget> => {
-    const target = await ctx.fs.resolve(path, await sessionResolveOptions(ctx, exec))
+    const target = await ctx.fs.resolveModelPath(path, await sessionResolveOptions(ctx, exec))
     const prior = targets.get(target.targetKey)
     if (prior) return prior
     targets.set(target.targetKey, target)

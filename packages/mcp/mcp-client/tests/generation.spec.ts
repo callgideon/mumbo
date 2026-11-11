@@ -18,7 +18,7 @@ const { mockTransport } = vi.hoisted(() => ({ mockTransport: vi.fn<() => Transpo
 vi.mock('../src/transport.ts', () => ({ createTransport: mockTransport }))
 
 const config: Config = {
-  transport: 'stdio', serverName: 'fixture', command: 'fixture', args: [], env: {}, cwd: '',
+  transport: 'stdio', serverName: 'fixture', command: 'fixture', args: [], env: {}, cwd: '', roots: [],
   toolCallTimeoutMs: 60_000, startupTimeoutMs: 30, closeTimeoutMs: 5_000,
   expandTemplates: false, failOnStartupError: true,
 }
@@ -107,7 +107,7 @@ it('reports confirmed transport closure when local work outlives cleanup', async
     await generation.close()
     await serving.close()
   })
-  await generation.connect(config, 1_000)
+  await generation.connect(config, 1_000, new Context())
   const observedClose: PromiseWithResolvers<void> = Promise.withResolvers()
   const onclose = clientTransport.onclose
   clientTransport.onclose = () => { onclose?.(); observedClose.resolve() }
@@ -132,7 +132,7 @@ it.each([false, true])('distinguishes local work from unfinished negotiation (tr
   const connect = vi.spyOn(client, 'connect').mockImplementation(work)
   mockTransport.mockReturnValue({ start: async () => {}, close: async () => {}, send: async () => {} })
   const generation = new McpGeneration(client, 100, String)
-  const pending = (created ? generation.connect(config, undefined) : generation.run(work)).catch((error: unknown) => error)
+  const pending = (created ? generation.connect(config, undefined, new Context()) : generation.run(work)).catch((error: unknown) => error)
   onTestFinished(async () => {
     release.resolve()
     await pending

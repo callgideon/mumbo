@@ -99,6 +99,7 @@ The CLI exposes `dsh plugin --profile <profile> version-exemptions`, `allow-vers
 | `detailImageMaxBytes` | `5242880` | Largest image served beside a bundle detail document, in bytes. |
 | `detailFetchTimeoutMs` | `15000` | Deadline of one npm file CDN request for an offered bundle's detail document. |
 | `detailNpmFileSources` | `['jsdelivr', 'unpkg', 'npmmirror']` | npm file CDNs offered bundles are read from, in order; a read's `npmFileSources` moves the CDNs it names first. |
+| `modelTools` | `true` | Offer the model the `plugin_manager` tool. A plugin it installs or enables runs in this process, so a contained deployment sets `false`; the tool then never registers and the person's plugin controls are unchanged. |
 
 <a id="bundle-detail-documents"></a>
 ### Bundle detail documents

@@ -45,6 +45,11 @@ export interface Config {
   maxFileBytes: number
   /** Milliseconds a line comparison may run before it degrades to whole-file replacement. */
   diffTimeoutMs: number
+  /**
+   * Record and serve change summaries. With `false` the service answers every summary and comparison with none and
+   * runs no git and reads no file; a deployment whose git cannot run as the subprocess provider's identity sets it.
+   */
+  summaries: boolean
 }
 
 /** Schemastery validation for {@link Config}. */
@@ -54,6 +59,7 @@ export const Config: z<Config> = z.object({
   maxFiles: z.number().default(500),
   maxFileBytes: z.number().default(2 * 1024 * 1024),
   diffTimeoutMs: z.number().default(100),
+  summaries: z.boolean().default(true),
 })
 
 function eligible(session: Session): string | undefined {
@@ -118,6 +124,7 @@ export function apply(ctx: Context, config: Config): void {
     diff: (sessionId, seq, index, signal) => byId.get(sessionId)?.diff(seq, index, signal) ?? Promise.resolve(undefined),
   }
   ctx.provide('workspaceChanges', service)
+  if (!config.summaries) return
   let runner: Promise<GitRunner | null> | undefined
   const gitRunner = (): Promise<GitRunner | null> => {
     runner ??= resolveGit(ctx, lifetime.signal).then((executable) => {

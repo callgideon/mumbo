@@ -50,7 +50,8 @@ export class McpTemplateBinding {
    * Resolve transport strings without changing the plugin's raw configuration.
    * @param signal - cancellation checked before and after template resolution.
    * @returns resolved transport configuration, or the raw configuration when expansion is disabled.
-   * @throws when a credential or the credentials provider is unavailable.
+   * @throws when a credential or the credentials provider is unavailable, or, under a run-as subprocess provider, before
+   *   resolving anything when a stdio `command` or `args` entry references a credential.
    */
   async resolve(signal: AbortSignal): Promise<Config> {
     signal.throwIfAborted()
@@ -81,6 +82,12 @@ export class McpTemplateBinding {
     }
     const config = this.config
     if (config.transport === 'stdio') {
+      // Under a run-as provider the model's identity can read every process's command line in /proc/<pid>/cmdline, but not
+      // another identity's environment.
+      const [exposed] = [config.command, ...config.args].flatMap(credentialRefsIn)
+      if (exposed !== undefined && this.ctx.get('subprocess')?.childIdentity !== undefined) {
+        throw new McpLocalError(`command or args reference \${credential:${exposed}}, which would put the credential in the server's command line, readable by the identity whose shell the model drives under a run-as subprocess provider; pass it to the server in env instead`)
+      }
       const args: string[] = []
       for (const [index, arg] of config.args.entries()) args.push(await resolve(arg, `args[${index}]`))
       return {

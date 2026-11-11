@@ -1,6 +1,6 @@
 /** Model-written key chords translated to xdotool key names. */
 import { describe, expect, it } from 'vitest'
-import { translateKeys } from '../src/keys.ts'
+import { isKeyArgument, translateKeys } from '../src/keys.ts'
 
 describe('translateKeys', () => {
   it.each([
@@ -44,4 +44,14 @@ describe('translateKeys', () => {
   ])('rejects %j', (keys, message) => {
     expect(() => translateKeys(keys)).toThrow(message)
   })
+})
+
+describe('isKeyArgument', () => {
+  it.each(['Return', 'ctrl+shift+t', 'F24', 'U00E9', 'a', '7', 'ctrl+shift+alt+super+Control_R+Shift_R+Alt_R+Super_R+ISO_Level3_Shift', 'KP_Enter'])(
+    'accepts %j', (argument) => { expect(isKeyArgument(argument)).toBe(true) },
+  )
+
+  it.each(['exec', 'mousemove', 'ctrl+exec', 'ctrl+', '', 'F25', 'u00e9', 'é', '-', 'Return ', 'aa', '__proto__'])(
+    'refuses %j', (argument) => { expect(isKeyArgument(argument)).toBe(false) },
+  )
 })

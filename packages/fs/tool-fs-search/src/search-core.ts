@@ -22,6 +22,7 @@
 import { existsSync } from 'node:fs'
 import { isAbsolute, join, parse, relative, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-fs'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import { ItemRetainer, TextRetainer } from '@deepseek-ai/dsh-output-retention'
 import type { RetainedItems } from '@deepseek-ai/dsh-output-retention'
@@ -214,6 +215,8 @@ export function resolveRgPath(): Promise<string> {
  * @param exec - the tool-execution context; supplies the owning Agent and the abort signal.
  * @param toolName - `glob` or `grep`, used in error messages.
  * @param argv - the ripgrep arguments (every model value an unquoted argv element; no shell layer exists).
+ * @param searchPath - the model-supplied directory `argv` searches, or undefined for the workdir;
+ *   the mounted filesystem provider must accept it as a model path before ripgrep starts.
  * @param rawOutputMaxBytes - cap on the complete raw stdout the tool will parse.
  * @param graceMs - the seam's terminate-escalation grace period.
  * @param stderrMaxBytes - cap on the retained stderr diagnostic tail.
@@ -224,6 +227,7 @@ export async function runRipgrep(
   exec: ToolExecution,
   toolName: string,
   argv: readonly string[],
+  searchPath: string | undefined,
   rawOutputMaxBytes: number,
   graceMs: number,
   stderrMaxBytes: number,
@@ -234,6 +238,8 @@ export async function runRipgrep(
   const workdir = exec.agent === undefined
     ? process.cwd()
     : await ctx.workingDirectory.ensure(exec.agent, exec.signal)
+  // The search root is a model path: a provider that confines the model refuses it outside its roots.
+  await ctx.get('fs')?.resolveModelPath(searchPath ?? workdir, { cwd: workdir, signal: exec.signal })
   let handle: SubprocessHandle
   try {
     handle = ctx.subprocess.spawn({

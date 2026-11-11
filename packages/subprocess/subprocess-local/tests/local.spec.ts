@@ -645,6 +645,8 @@ describe('LocalSubprocessRuntime', () => {
         expect.objectContaining({ argv: ['shell', '--literal'] }),
         expect.objectContaining({ PWD: targetCwd, TERM: 'dumb', TARGET_VALUE: 'preserved' }),
         ['--expand-environment=no'],
+        {},
+        undefined,
       )
       expect(nodePtySpawn).toHaveBeenCalledWith(
         '/usr/bin/systemd-run',
@@ -1044,7 +1046,7 @@ describe('LocalSubprocessRuntime', () => {
       expect(probeLinuxNative).toHaveBeenCalledOnce()
       expect(confirmLinuxManager).toHaveBeenCalledTimes(2)
       expect(launchLinuxScope).toHaveBeenCalledTimes(2)
-      expect(launchLinuxScope).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), [])
+      expect(launchLinuxScope).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), [], {}, undefined)
       await linuxRuntime.spawn(spec('true')).done
       expect(confirmLinuxManager).toHaveBeenCalledTimes(3)
       expect(spawnSubprocess).toHaveBeenCalledOnce()

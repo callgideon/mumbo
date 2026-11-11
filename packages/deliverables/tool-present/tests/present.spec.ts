@@ -2,7 +2,7 @@
 import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import { unsupportedModel, provideWorkingDirectoryFixture, unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
-import { mkdtemp, rm, writeFile, symlink, realpath } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile, symlink, realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -53,8 +53,8 @@ async function agent(ctx: Context, cwd: string | undefined): Promise<Agent> {
 }
 
 
-async function setup() {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-present-minimal-'))
+async function setup(modelRoots?: (root: string) => string[]) {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-present-minimal-')))
   cleanups.push(() => rm(root, { recursive: true, force: true }))
   const ctx = new Context()
   provideWorkingDirectoryFixture(ctx)
@@ -64,7 +64,9 @@ async function setup() {
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(NativeToolExecutor)
   await ctx.plugin(AgentRegistry)
-  await ctx.plugin(LocalFileSystem, { cwd: root })
+  const roots = modelRoots?.(root)
+  for (const directory of roots ?? []) await mkdir(directory, { recursive: true })
+  await ctx.plugin(LocalFileSystem, { cwd: root, ...roots === undefined ? {} : { modelRoots: roots } })
   const fiber = ctx.plugin(Present, { maxFiles: 2 })
   await fiber
   const owner = await agent(ctx, root)
@@ -198,4 +200,27 @@ it('refuses a file replaced by a directory after inspecting its final component'
   const directory = await ctx.fs.stat(await ctx.fs.resolve(root))
   vi.spyOn(ctx.fs, 'stat').mockResolvedValueOnce(directory)
   expect((await execute([{ path: 'source' }])).isError).toBe(true)
+})
+
+describe.runIf(process.platform === 'linux')('present under model roots', () => {
+  it('refuses a file outside the roots and records no delivery', async () => {
+    const { owner, root, execute } = await setup(root => [join(root, 'projects')])
+    await writeFile(join(root, 'secret.txt'), 'secret')
+    const result = await execute([{ path: join(root, 'secret.txt'), description: 'Secret' }])
+    expect(result.isError).toBe(true)
+    expect(result.content.map(block => block.type === 'text' ? block.text : '').join('')).toContain(
+      `cannot access "${join(root, 'secret.txt')}": its real path is outside the directories you can access (${join(root, 'projects')})`,
+    )
+    expect(owner.session.snapshotEvents().filter(event => event.type === 'deliverables/presented')).toEqual([])
+  })
+
+  it('refuses an existing outside directory with the same refusal as a missing path', async () => {
+    const { root, execute } = await setup(root => [join(root, 'projects')])
+    await mkdir(join(root, 'dir'))
+    for (const path of [join(root, 'dir'), join(root, 'missing')]) {
+      const result = await execute([{ path, description: 'Probe' }])
+      expect(result.content.map(block => block.type === 'text' ? block.text : '').join(''))
+        .toContain(`cannot access "${path}": its real path is outside the directories you can access (${join(root, 'projects')})`)
+    }
+  })
 })

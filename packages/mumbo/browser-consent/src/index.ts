@@ -6,9 +6,12 @@
  * @module @mumbo/browser-consent
  */
 
-import { statSync } from 'node:fs'
-import { rm } from 'node:fs/promises'
-import { basename, dirname, join, resolve } from 'node:path'
+import { createHash, randomBytes } from 'node:crypto'
+import { constants, readdirSync, realpathSync, rmSync, statSync } from 'node:fs'
+import type { Stats } from 'node:fs'
+import { chmod, mkdir, open, rm } from 'node:fs/promises'
+import type { FileHandle } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
@@ -18,6 +21,7 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { McpResult } from '@deepseek-ai/dsh-mcp-client'
 import type { Session } from '@deepseek-ai/dsh-session'
+import type { SubprocessChildIdentity } from '@deepseek-ai/dsh-subprocess'
 import type { ToolExecution, ToolExecutionResult, ToolExecutionToken, PreToolDecision } from '@deepseek-ai/dsh-tools'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
@@ -46,12 +50,27 @@ const MASKED_FIELD = new RegExp(`: ${String.fromCharCode(0x2022).repeat(4)}$`, '
 const VALUE_LIMIT = 300
 /** Characters of arguments listed in an approval prompt; further arguments are counted as not shown. */
 const SUMMARY_LIMIT = 1200
+/**
+ * A queue of asynchronous steps.
+ * @returns a function that runs a step once every step queued before it settles, and returns the step's result.
+ */
+function sequence(): <T>(step: () => Promise<T>) => Promise<T> {
+  let tail = Promise.resolve()
+  return <T>(step: () => Promise<T>): Promise<T> => {
+    const result = tail.then(step)
+    tail = result.then(() => {}, () => {})
+    return result
+  }
+}
+
 /** Upstream tools whose output keeps entries from every page a tab has shown since Playwright last cleared it. */
 const TAB_LOGS: ReadonlySet<string> = new Set(['browser_console_messages', 'browser_network_requests'])
 /** Upstream tool that runs model-written code in the Playwright server process rather than the page; always refused. */
 const SERVER_CODE = 'browser_run_code_unsafe'
 /** Upstream tool that shows one request's headers and bodies, which carry cookies and submitted passwords; always refused. */
 const REQUEST_DETAILS = 'browser_network_request'
+/** Upstream tools that send the local files their `paths` argument names to the page. */
+const FILE_SENDERS: ReadonlySet<string> = new Set(['browser_file_upload', 'browser_drop'])
 /** Upstream tool that ends Playwright's browser connection and answers with fixed text. */
 const CLOSE = 'browser_close'
 /** Desktop tool of the `computer-use-x11` provider, whose `screenshot` action is its only read. */
@@ -67,8 +86,14 @@ const PAGE_URL_LINE = /^- Page URL: (.*)$/gmu
 const FILE_LINES = [
   /^- \[.*\]\(([^()\n]+)\)$/gmu, /^- New console entries: (.+?)(?:#L\d+(?:-L\d+)?)?$/gmu, /^- Downloaded file .* to "([^"\n]+)"$/gmu,
 ]
-/** Name of the directory where Playwright MCP writes the files it links when no `outputDir` is configured. */
-const OUTPUT_DIRECTORY = '.playwright-mcp'
+/** How long a staged upload copy is kept at most, in milliseconds: copies older than a day go before the next one is staged. */
+const STAGED_LIFETIME_MS = 24 * 60 * 60 * 1000
+/** The staged copies kept together, and the files of one call, stay within this many times `uploadMaxBytes`. */
+const STAGED_TOTAL_FACTOR = 4
+/** Name of a staged copy's directory: 16 random bytes in lowercase hex. */
+const NONCE_NAME = /^[0-9a-f]{32}$/u
+/** Bytes read from an upload at a time while it is copied. */
+const COPY_CHUNK_BYTES = 1 << 20
 /** {@link denial} phrase for a URL that does not parse or a tab whose URL cannot be read. */
 const UNREADABLE = 'a page whose address cannot be read'
 /** Why a browser or desktop call does not run, and the failure of a consent read that a takeover stopped. */
@@ -112,10 +137,27 @@ export interface Config {
   readonly allowedSites: string[]
   /** Milliseconds a write waits for the person's answer before it is denied as unanswered. */
   readonly approvalTimeoutMs: number
+  /**
+   * Absolute existing directory, such as the shared Downloads, whose files `browser_file_upload` and `browser_drop` may
+   * send, each named directly in it. Required, so each deployment states it, and named by its real path below
+   * directories that only root and dsh's own user can change (see {@link uploadDirectory}).
+   */
+  readonly uploadDirectory: string
+  /**
+   * Absolute existing directory, such as `/var/lib/mumbo/uploads`, where consent stages the copy of each file it sends
+   * and which the browser server receives as its only file root. Required, named by its real path, owned by root or
+   * dsh's own user and writable by no other user, below directories that only those users can change (see
+   * {@link uploadStaging}), and neither inside nor containing `uploadDirectory` or `browser.outputDir`. At load consent
+   * deletes the entries named like its copies' directories, 32 lowercase hex characters, and leaves every other entry.
+   */
+  readonly uploadStaging: string
+  /** Largest file, in bytes, that one upload or drop may send; 536870912 (512 MiB) by default. */
+  readonly uploadMaxBytes: number
 }
 
-/** Consent configuration as written: provider settings in their input form, the denied URLs, the other fields defaulted. */
-export type ConfigInput = Partial<Omit<Config, 'browser' | 'deniedUrls'>> & Pick<Config, 'deniedUrls'>
+/** Consent configuration as written: provider settings in their input form, the required fields, the others defaulted. */
+export type ConfigInput = Partial<Omit<Config, 'browser' | 'deniedUrls' | 'uploadDirectory' | 'uploadStaging'>>
+  & Pick<Config, 'deniedUrls' | 'uploadDirectory' | 'uploadStaging'>
   & { readonly browser: NonNullable<Parameters<typeof PlaywrightBrowser.Config>[0]> }
 
 export const Config: z<ConfigInput, Config> = z.object({
@@ -123,7 +165,191 @@ export const Config: z<ConfigInput, Config> = z.object({
   deniedUrls: z.array(z.string()).required(),
   allowedSites: z.array(z.string()).default([]),
   approvalTimeoutMs: z.natural().min(1).default(300_000),
+  uploadDirectory: z.string().required(),
+  uploadStaging: z.string().required(),
+  uploadMaxBytes: z.natural().min(1).default(536_870_912),
 })
+
+/** Whether a uid is root's or this process's. */
+function trusted(uid: number): boolean {
+  return uid === 0 || uid === process.getuid?.()
+}
+
+/** Whether the normalized absolute path `inner` is `outer` or lies inside it. */
+function within(inner: string, outer: string): boolean {
+  // `join` keeps one trailing separator, so `/a/bc` is not inside `/a/b`, and every path is inside `/`.
+  return join(inner, sep).startsWith(join(outer, sep))
+}
+
+/**
+ * Validate a directory setting as {@link uploadDirectory} describes.
+ * @param key - the setting's name, for errors.
+ * @param path - the configured directory.
+ * @param example - a directory of the form the setting takes, for errors.
+ * @returns the directory, normalized.
+ */
+function settledDirectory(key: 'uploadDirectory' | 'uploadStaging', path: string, example: string): string {
+  let real: string | undefined
+  try {
+    real = isAbsolute(path) ? realpathSync.native(path) : undefined
+  } catch (_missing) {
+    // Reported below as not an existing directory.
+  }
+  if (real === undefined || !statSync(real).isDirectory()) throw new Error(`${name}: ${key} "${path}" must be an absolute path to an existing directory, such as ${example}`)
+  if (real !== resolve(path)) throw new Error(`${name}: ${key} "${path}" must be its own real path; use "${real}"`)
+  for (let entry = real; dirname(entry) !== entry; entry = dirname(entry)) {
+    const parent = statSync(dirname(entry))
+    if (!trusted(parent.uid) || ((parent.mode & 0o022) !== 0 && ((parent.mode & 0o1000) === 0 || !trusted(statSync(entry).uid)))) {
+      throw new Error(`${name}: ${key} "${path}" must lie below directories that only root and dsh's own user can change, but another user can change ${dirname(entry)}`)
+    }
+  }
+  return real
+}
+
+/**
+ * Validate `uploadDirectory`. Consent opens an upload by its name in this directory, so the directory must be named by
+ * its real path below directories that no user other than root and this process's user can change; no one else can
+ * then make that path name another directory after load. A sticky directory counts as unchangeable for an entry that
+ * root or this process's user owns.
+ * @param path - the configured directory.
+ * @returns the directory, normalized.
+ * @throws when it is not an absolute path to an existing directory, is not its own real path, or lies below a directory
+ *   another user can change.
+ */
+export function uploadDirectory(path: string): string {
+  return settledDirectory('uploadDirectory', path, '/home/shared/Downloads')
+}
+
+/**
+ * Validate `uploadStaging`: a directory as {@link uploadDirectory} requires, which is also owned by root or this
+ * process's user and writable by no other user, because consent writes the copies it sends there.
+ * @param path - the configured directory.
+ * @returns the directory, normalized.
+ * @throws as {@link uploadDirectory} does, or when another user owns or can change the directory.
+ */
+export function uploadStaging(path: string): string {
+  const real = settledDirectory('uploadStaging', path, '/var/lib/mumbo/uploads')
+  const own = statSync(real)
+  if (!trusted(own.uid) || (own.mode & 0o022) !== 0) {
+    throw new Error(`${name}: uploadStaging "${path}" must be owned by root or dsh's own user and writable by no other user, because consent writes the copies it sends there`)
+  }
+  return real
+}
+
+/** Whether `path` is a string naming an entry directly in `directory`, exactly as `<directory>/<name>`. */
+function directlyIn(directory: string, path: unknown): path is string {
+  return typeof path === 'string' && isAbsolute(path) && resolve(path) === path && dirname(path) === directory && basename(path) !== ''
+}
+
+/**
+ * Say why a call may not send the files its `paths` argument names. Each must name an entry directly in the upload
+ * directory, exactly as `<directory>/<name>`, where `<name>` is one component other than `.` and `..`. No file is opened
+ * here, so a refusal says nothing about what exists outside the directory.
+ * @param paths - the call's `paths` argument.
+ * @param directory - the validated upload directory.
+ * @returns why the first refused path is refused, or `undefined` when every path may be staged.
+ */
+export function uploadRefusal(paths: unknown, directory: string): string | undefined {
+  if (paths === undefined) return undefined
+  if (!Array.isArray(paths)) return 'paths is not a list of file paths'
+  const outside = (paths as unknown[]).findIndex(path => !directlyIn(directory, path))
+  if (outside === -1) return undefined
+  return `${JSON.stringify(paths[outside])} is not directly in ${directory}; put the file directly in ${directory} and retry`
+}
+
+/** One file consent staged: its copy's path, its name in the upload directory, its size, and its SHA-256 in hex. */
+export interface StagedFile {
+  readonly path: string
+  readonly name: string
+  readonly bytes: number
+  readonly sha256: string
+}
+
+/**
+ * Whether a user may read a file by its mode bits, checked as the kernel checks them: the owner bits for its owner, else
+ * the group bits for a member of its group, else the other bits. ACL entries are not read.
+ * @param reader - the user's uid, primary gid, and supplementary groups.
+ * @param info - the file's `fstat`.
+ */
+function readableBy(reader: SubprocessChildIdentity, info: Stats): boolean {
+  const member = reader.gid === info.gid || reader.groups.includes(info.gid)
+  return (info.mode & (reader.uid === info.uid ? 0o400 : member ? 0o040 : 0o004)) !== 0
+}
+
+/**
+ * Copy one upload into a new directory, named by a random nonce, in the staging directory. The source is opened once,
+ * without following a link at its name and without blocking, as a FIFO or device would on open or read; `fstat` on that
+ * descriptor must show a regular file of at most `maxBytes` that `reader` may read, and the copy reads only through it,
+ * refusing a file that grows past that `fstat` size while it is copied. The SHA-256 is computed while copying; a write
+ * that stores fewer bytes than were read fails the copy. The nonce directory ends with mode `0750` and the copy with
+ * `0440`, both in the group that a set-group-ID staging directory gives them.
+ * @param source - a path directly in the upload directory.
+ * @param staging - the validated staging directory.
+ * @param maxBytes - the largest file it copies.
+ * @param reader - the identity the model's processes run as, which must be able to read the file itself; `undefined`
+ *   when they run as this process, which opened it.
+ * @param makeRoom - called with the file's `fstat` size before it is copied, which the copy never passes; returns why
+ *   there is no room for it, if so.
+ * @returns the staged file, or why it was refused; a refused or failed copy leaves nothing in the staging directory.
+ */
+export async function stageUpload(
+  source: string, staging: string, maxBytes: number, reader: SubprocessChildIdentity | undefined,
+  makeRoom: (bytes: number) => Promise<string | undefined>,
+): Promise<StagedFile | { readonly refusal: string }> {
+  const shown = JSON.stringify(source)
+  let input: FileHandle
+  try {
+    input = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+  } catch (error: unknown) {
+    // Node's file system calls reject with its errors, which carry a code.
+    const { code } = error as NodeJS.ErrnoException
+    return { refusal: `${shown} ${code === 'ENOENT' ? 'does not exist' : code === 'ELOOP' ? 'is a symbolic link, not a regular file' : 'could not be opened'}` }
+  }
+  try {
+    const info = await input.stat()
+    if (!info.isFile()) return { refusal: `${shown} is not a regular file` }
+    // Consent reads as root: a file the model could not read itself is never sent for it.
+    if (reader !== undefined && !readableBy(reader, info)) return { refusal: `${shown} is a file the assistant cannot read itself` }
+    if (info.size > maxBytes) return { refusal: `${shown} is larger than the upload limit of ${String(maxBytes)} bytes` }
+    const crowded = await makeRoom(info.size)
+    if (crowded !== undefined) return { refusal: crowded }
+    const directory = join(staging, randomBytes(16).toString('hex'))
+    const path = join(directory, basename(source))
+    try {
+      await mkdir(directory, { mode: 0o700 })
+      const hash = createHash('sha256')
+      let bytes = 0
+      const output = await open(path, 'wx', 0o600)
+      try {
+        const buffer = Buffer.allocUnsafe(COPY_CHUNK_BYTES)
+        for (;;) {
+          const { bytesRead } = await input.read(buffer, 0, buffer.length, null)
+          bytes += bytesRead
+          if (bytesRead === 0 || bytes > info.size) break
+          hash.update(buffer.subarray(0, bytesRead))
+          // One write(2), which a full disk can cut short without an error.
+          const { bytesWritten } = await output.write(buffer, 0, bytesRead)
+          if (bytesWritten !== bytesRead) throw new Error(`wrote ${String(bytesWritten)} of ${String(bytesRead)} bytes`)
+        }
+        await output.chmod(0o440)
+      } finally {
+        await output.close()
+      }
+      // Room was made for the fstat size, so a file that grew is not kept.
+      if (bytes > info.size) {
+        await rm(directory, { recursive: true, force: true })
+        return { refusal: `${shown} changed while it was copied` }
+      }
+      await chmod(directory, 0o750)
+      return { path, name: basename(source), bytes, sha256: hash.digest('hex') }
+    } catch (error: unknown) {
+      await rm(directory, { recursive: true, force: true })
+      return { refusal: `${shown} could not be copied: ${String(error)}` }
+    }
+  } finally {
+    await input.close()
+  }
+}
 
 /** A validated `deniedUrls` list. */
 export interface DenyList {
@@ -240,6 +466,15 @@ interface Consent {
   readonly tool: string
   readonly site: string | undefined
   readonly grant: BrowserWriteGrant
+  /** The arguments the browser receives in place of the model's: its `paths` name the staged copies. */
+  readonly sent?: Record<string, unknown>
+}
+
+/** A staged copy consent keeps until it unloads or makes room: its nonce directory, its size, and when it was made. */
+interface StagedCopy {
+  readonly directory: string
+  readonly bytes: number
+  readonly at: number
 }
 
 /**
@@ -367,23 +602,18 @@ function webOrigin(url: unknown): string | undefined {
 }
 
 /**
- * Delete the files Playwright MCP wrote for a withheld result, so the model cannot read them with other tools. With an
- * `outputDir`, each link's file name is deleted from that directory, where the server writes every linked file, so a
- * Session directory change after the server started does not matter. Otherwise only links that resolve to a file
- * directly inside a directory named `.playwright-mcp` are followed. A failed deletion is logged; the result stays
- * withheld.
+ * Delete the files Playwright MCP wrote for a withheld result, so the model cannot read them with other tools. Each
+ * link's file name is deleted from the output directory, where the server writes every linked file. A failed deletion
+ * is logged; the result stays withheld.
  * @param ctx - plugin context carrying the logger.
- * @param cwd - the Session's working directory, which is the server's and the base of its relative links.
- * @param outputDir - the configured absolute output directory, if any.
+ * @param outputDir - the configured absolute output directory.
  * @param result - the withheld result.
  */
-async function removeLinkedFiles(ctx: Context, cwd: string, outputDir: string | undefined, result: ToolExecutionResult): Promise<void> {
+async function removeLinkedFiles(ctx: Context, outputDir: string, result: ToolExecutionResult): Promise<void> {
   const text = result.content.map(block => block.type === 'text' ? block.text : '').join('\n')
   const links = FILE_LINES.flatMap(pattern => Array.from(text.matchAll(pattern), ([, link]) => link))
     .filter((link): link is string => link !== undefined)
-  const files = outputDir === undefined
-    ? links.map(link => resolve(cwd, link)).filter(file => basename(dirname(file)) === OUTPUT_DIRECTORY)
-    : links.map(link => basename(link)).filter(file => !['', '.', '..'].includes(file)).map(file => join(outputDir, file))
+  const files = links.map(link => basename(link)).filter(file => !['', '.', '..'].includes(file)).map(file => join(outputDir, file))
   await Promise.all(files.map(async (file) => {
     try {
       await rm(file, { force: true })
@@ -476,6 +706,23 @@ export function apply(ctx: Context, config: Config): void {
     if (denial(site, denied) !== undefined) throw new Error(`${name}: allowedSites entry "${site}" is also denied by deniedUrls`)
   }
   PlaywrightBrowser.validateConfig(config.browser)
+  const upload = uploadDirectory(config.uploadDirectory)
+  const staging = uploadStaging(config.uploadStaging)
+  // The server's workspace is the staging directory, which it cannot write; the files a withheld result links are
+  // deleted only from a configured output directory.
+  const { outputDir } = config.browser
+  if (outputDir === undefined) {
+    throw new Error(`${name}: browser.outputDir must be set, because the browser server's workspace is uploadStaging; name a directory the server's user owns in a root-owned parent, such as /var/lib/mumbo/playwright-output`)
+  }
+  if (config.browser.fileRoot !== undefined) {
+    throw new Error(`${name}: browser.fileRoot must not be set; consent gives the browser server uploadStaging as its only file root`)
+  }
+  // Load deletes copy directories in the staging directory, so it shares no directory with the person's or the server's files.
+  for (const [key, other] of [['uploadDirectory', upload], ['browser.outputDir', resolve(outputDir)]] as const) {
+    if (within(staging, other) || within(other, staging)) {
+      throw new Error(`${name}: uploadStaging "${staging}" must not be, contain, or lie inside ${key} "${other}"; use a directory of its own, such as /var/lib/mumbo/uploads`)
+    }
+  }
   const holder = ctx.browserUse.providerName
   if (holder !== undefined && PROVIDER_TOOL_PREFIXES[holder] === undefined) {
     throw new Error(`${name}: browser provider "${holder}" holds browserUse and its tools have no prefix this plugin can refuse; remove the row that mounts it`)
@@ -488,11 +735,69 @@ export function apply(ctx: Context, config: Config): void {
   const checkedSelects = new WeakSet<ToolExecution>()
   /** Sessions whose browser has listed or shown a denied page in some tab; their tabs' logs may keep its entries. */
   const shownDenied = new WeakSet<Session>()
-  /** The working directory each Session's Playwright server started in, the base of the links in its results. */
-  const serverDirectories = new WeakMap<Session, string>()
   /** What denies the page the browser's current tab showed when this plugin last read it; `undefined` when allowed. */
   let showing: string | undefined
   let owned = false
+  // Copies a crash or an earlier load left behind go before any new one is staged; nothing else in the directory is touched.
+  for (const entry of readdirSync(staging)) if (NONCE_NAME.test(entry)) rmSync(join(staging, entry), { recursive: true, force: true })
+  /** The staged copies kept, oldest first; Chromium can read a copy after its call returns, so each stays until room is made. */
+  const copies: StagedCopy[] = []
+  /** The total `copies` and one call's files may reach. */
+  const stagedLimit = STAGED_TOTAL_FACTOR * config.uploadMaxBytes
+  /** Run one staging step after those before it, so each sees every copy kept. */
+  const stagingStep = sequence()
+  /** Delete staged copies and forget them; a failed deletion is logged, and the start script empties the directory. */
+  const discard = async (doomed: readonly StagedCopy[]): Promise<void> => {
+    // A call's own copies can already be gone, deleted to make room while its question waited.
+    copies.splice(0, copies.length, ...copies.filter(copy => !doomed.includes(copy)))
+    await Promise.all(doomed.map(async (copy) => {
+      try {
+        await rm(copy.directory, { recursive: true, force: true })
+      } catch (error: unknown) {
+        ctx.logger.error(`${name}: could not delete the staged upload copy ${copy.directory}: ${String(error)}`)
+      }
+    }))
+  }
+  /**
+   * Stage a copy of each file a call sends, one call at a time. Once a file's size is known and before it is copied, a
+   * file that with the call's earlier copies would pass the limit is refused, deleting no other copy; otherwise copies
+   * older than a day go, then the oldest others while the copies kept and the new one would pass the limit. A refusal
+   * deletes the call's copies.
+   */
+  type Staged = { readonly files: StagedFile[]; readonly made: StagedCopy[] } | { readonly refusal: string }
+  const stageCall = (paths: readonly string[], reader: SubprocessChildIdentity | undefined): Promise<Staged> =>
+    stagingStep(async () => {
+      const made: StagedCopy[] = []
+      const files: StagedFile[] = []
+      const makeRoom = async (bytes: number): Promise<string | undefined> => {
+        if (made.reduce((sum, copy) => sum + copy.bytes, bytes) > stagedLimit) return `the files of one call may not pass ${String(stagedLimit)} bytes in total`
+        const now = Date.now()
+        const doomed = copies.filter(copy => now - copy.at > STAGED_LIFETIME_MS)
+        const kept = copies.filter(copy => !doomed.includes(copy))
+        let total = kept.reduce((sum, copy) => sum + copy.bytes, bytes)
+        // The call's own copies come last and fit, so the oldest others are enough.
+        for (const copy of kept) {
+          if (total <= stagedLimit) break
+          doomed.push(copy)
+          total -= copy.bytes
+        }
+        await discard(doomed)
+        return undefined
+      }
+      for (const path of paths) {
+        const staged = await stageUpload(path, staging, config.uploadMaxBytes, reader, makeRoom)
+        if ('refusal' in staged) {
+          await discard(made)
+          return staged
+        }
+        const copy = { directory: dirname(staged.path), bytes: staged.bytes, at: Date.now() }
+        copies.push(copy)
+        made.push(copy)
+        files.push(staged)
+      }
+      return { files, made }
+    })
+  ctx.effect(() => () => stagingStep(() => discard([...copies])), `${name}: staged uploads`)
   /** A refusal for a call to the tools of a provider that holds `browserUse` in place of this plugin's child. */
   const rivalRefusal = (exec: ToolExecution): string | undefined => {
     const current = ctx.browserUse.providerName
@@ -517,8 +822,8 @@ export function apply(ctx: Context, config: Config): void {
   let taking = 0
   /** Why the last take-over step failed; a later step that succeeds, or a hand back, clears it. */
   let unfinished: string | undefined
-  /** The take-over and hand-back steps, which run one at a time. */
-  let changes = Promise.resolve()
+  /** Run one take-over or hand-back step after those requested before it. */
+  const serialize = sequence()
   /** The name a takeover refusal gives a browser or desktop call; `undefined` for every other tool. */
   const takeoverTool = (exec: ToolExecution): string | undefined => toolOf(exec) ?? (exec.name === COMPUTER ? COMPUTER : undefined)
   /** The refusal of a browser or desktop call while the person has the browser. */
@@ -560,6 +865,9 @@ export function apply(ctx: Context, config: Config): void {
     if (tool !== undefined && fieldsOf(exec.arguments).filename !== undefined) {
       return `${tool} did not run: the assistant may not save browser output to a file; call it without filename to get the result directly.`
     }
+    // Only files named directly in the upload directory are staged; a staged copy's own path is refused like any other.
+    const unsent = tool !== undefined && FILE_SENDERS.has(tool) ? uploadRefusal(fieldsOf(exec.arguments).paths, upload) : undefined
+    if (unsent !== undefined) return `${tool} did not run: ${unsent}.`
     const target = tool === undefined ? undefined : targetUrl(exec.arguments)
     const blocked = target === undefined ? undefined : denial(target, denied)
     return blocked === undefined ? undefined : `${tool} did not run: the assistant may not open ${blocked}.`
@@ -684,12 +992,19 @@ export function apply(ctx: Context, config: Config): void {
       return { kind: 'deny', reason: `${tool} did not run: the current tab is ${blocked}, which the assistant may not use.` }
     }
     const site = webOrigin(tab.url)
+    // The browser reads what it sends after the call returns: it gets copies consent made, never the model's files.
+    const { paths } = fieldsOf(exec.arguments)
+    const staged = FILE_SENDERS.has(tool) && Array.isArray(paths) && paths.length > 0 ? await stageCall(paths as string[], ctx.get('subprocess')?.childIdentity) : undefined
+    if (staged !== undefined && 'refusal' in staged) return { kind: 'deny', reason: `${tool} did not run: ${staged.refusal}.` }
+    const sent = staged === undefined ? undefined : { ...fieldsOf(exec.arguments), paths: staged.files.map(file => file.path) }
     const grant = (granted: BrowserWriteGrant): Promise<PreToolDecision> => {
-      consents.set(exec, { session: agent.session, tool, site, grant: granted })
+      consents.set(exec, { session: agent.session, tool, site, grant: granted, ...sent === undefined ? {} : { sent } })
       return next()
     }
+    const files = staged === undefined ? '' : ` Files sent: ${staged.files.map(file =>
+      `${shown(file.name)} (${count(file.bytes, 'byte')}, SHA-256 ${file.sha256.slice(0, 12)})`).join(', ')}.`
     // An allowance never covers a page that shows a password or payment field, nor one that cannot be checked.
-    let uncovered = kind === 'always-ask' ? ' Site allowances do not cover this action.' : ''
+    let uncovered = kind === 'always-ask' ? `${files} Site allowances do not cover this action.` : ''
     if (kind === 'site-write' && site !== undefined && allowed.has(site)) {
       // The patched snapshot's mask is the single source of the secret-input rule.
       const read = await readSnapshot()
@@ -704,7 +1019,9 @@ export function apply(ctx: Context, config: Config): void {
     const reason = `Browser write: ${tool} on ${where}. Arguments: ${summary}.`
       + (element === undefined ? '' : ` Model-written target description: ${element}.`) + uncovered
     const decision = await ask(exec, agent, `${tool} on ${where}`, reason)
-    return decision === 'allowed' ? grant('approval') : decision
+    if (decision === 'allowed') return grant('approval')
+    if (staged !== undefined) await discard(staged.made)
+    return decision
   }
   ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
     const decision = await decide(exec, next)
@@ -715,13 +1032,7 @@ export function apply(ctx: Context, config: Config): void {
 
   /** The error that replaces a result, after deleting the files Playwright linked from a browser result. */
   const withhold = async (exec: ToolExecution, result: ToolExecutionResult | undefined, reason: string): Promise<ToolExecutionResult> => {
-    const agent = exec.agent
-    if (result !== undefined && toolOf(exec) !== undefined && agent !== undefined) {
-      // Every Session with a server of the provider passed the `agent/created` listener below, so its directory is known.
-      /* v8 ignore next */
-      const directory = serverDirectories.get(agent.session) ?? ctx.workingDirectory.get(agent.session)
-      await removeLinkedFiles(ctx, directory, config.browser.outputDir, result)
-    }
+    if (result !== undefined && toolOf(exec) !== undefined) await removeLinkedFiles(ctx, outputDir, result)
     return { isError: true, content: [{ type: 'text', text: `Error: ${reason}` }], error: { message: reason } }
   }
 
@@ -740,6 +1051,12 @@ export function apply(ctx: Context, config: Config): void {
     if (tool !== undefined && agent !== undefined) connected.add(agent)
     const original = exec.signal
     exec.signal = AbortSignal.any([original, stop])
+    // An upload or drop sends the staged copies: the browser receives their paths for this dispatch only, so the
+    // Session log and result observers keep the model's own arguments.
+    const dispatched: { arguments: unknown } = exec
+    const asked = exec.arguments
+    const sent = consents.get(exec)?.sent
+    if (sent !== undefined) dispatched.arguments = sent
     let result: ToolExecutionResult
     try {
       result = await track(next())
@@ -749,6 +1066,7 @@ export function apply(ctx: Context, config: Config): void {
       throw error
     } finally {
       exec.signal = original
+      dispatched.arguments = asked
     }
     if (interrupted()) return withhold(exec, result, stopped)
     // A listing after `browser_close` would reconnect and open a new tab; the close itself was refused before the call
@@ -775,11 +1093,6 @@ export function apply(ctx: Context, config: Config): void {
     return reason === undefined ? result : withhold(exec, result, reason)
   }, { prepend: true })
 
-  // The provider's own listener runs first and starts the Session's server in this directory.
-  ctx.on('agent/created', ({ agent }) => {
-    serverDirectories.set(agent.session, ctx.workingDirectory.get(agent.session))
-  })
-
   ctx.on('tools/result', (exec, result) => {
     const consent = consents.get(exec)
     if (consent === undefined) return
@@ -792,12 +1105,6 @@ export function apply(ctx: Context, config: Config): void {
     })
   })
 
-  /** Run one take-over or hand-back step after those requested before it. */
-  const serialize = (step: () => Promise<void>): Promise<void> => {
-    const result = changes.then(step)
-    changes = result.then(() => {}, () => {})
-    return result
-  }
   /** Close the browser connection of each live Session whose Playwright server may hold one, once its calls settle. */
   const disconnect = async (): Promise<string[]> => {
     await Promise.all(running)
@@ -848,7 +1155,7 @@ export function apply(ctx: Context, config: Config): void {
       })
     },
   }
-  ctx.effect(() => () => changes, `${name}: takeover`)
+  ctx.effect(() => () => serialize(() => Promise.resolve()), `${name}: takeover`)
 
   if (holder !== undefined) return
   // The provider depends on this plugin's service, so it unloads before the guard and listeners go.
@@ -861,11 +1168,15 @@ export function apply(ctx: Context, config: Config): void {
       reportRival(ctx, current)
       throw new Error(`${name}: browser provider "${current}" took browserUse before this plugin's browser started`)
     }
-    applyProvider(child, browser)
+    // Checked here, where a refused identity fails only the browser; each Session's server start would fail the Session.
+    if (browser.identity !== undefined) child.subprocess.serverHome(browser.identity)
+    applyProvider(child, { ...browser, fileRoot: staging })
     child.effect(() => {
       owned = true
       return () => { owned = false }
     })
   }
-  ctx.plugin({ name: providerName, inject: [...inject, GATE], Config: ProviderConfig, apply: applyOwned }, config.browser)
+  // With an identity, the browser mounts only once a subprocess service is mounted.
+  const providerInject = [...inject, GATE, ...config.browser.identity === undefined ? [] : ['subprocess']]
+  ctx.plugin({ name: providerName, inject: providerInject, Config: ProviderConfig, apply: applyOwned }, config.browser)
 }

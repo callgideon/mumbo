@@ -1,7 +1,7 @@
 /** One-shot Linux exec bootstrap and Windows Job-owning subprocess runner. */
 
 import { SUBPROCESS_CONTROL_FD } from '@deepseek-ai/dsh-subprocess/control'
-import { closeSync } from 'node:fs'
+import { closeSync, readFileSync } from 'node:fs'
 import {
   closeHandleChecked,
   isJobEmpty,
@@ -15,17 +15,19 @@ import type {
   CurrentTokenProcessBindings,
   NativePtr,
 } from '@deepseek-ai/dsh-win32-process'
-import { loadLinuxExecve } from './linux-execve.ts'
+import { loadLinuxExecve, setNoNewPrivileges } from './linux-execve.ts'
 import {
   consumeLinuxLaunchRequest,
   isWindowsTerminateRequest,
   linuxLaunchFilesFromLocator,
+  openLinuxStartupError,
   parseWindowsStartRequest,
   serializeRunnerError,
   writeLinuxStartupError,
 } from './runner-protocol.ts'
 import type {
   LinuxLaunchFiles,
+  LinuxStartupError,
   SerializedRunnerError,
   WindowsRunnerResult,
   WindowsStartRequest,
@@ -36,8 +38,11 @@ import {
   SUBPROCESS_RUNNER_ENV,
   WINDOWS_RUNNER_SELECTION,
 } from './runner-launch.ts'
+import type { RunAsIdentity } from './run-as.ts'
 
-type RunnerHost = Pick<NodeJS.Process, 'env' | 'exitCode' | 'connected' | 'cwd' | 'chdir' | 'on' | 'off' | 'once' | 'disconnect'> & {
+type RunnerProcessField = 'env' | 'exitCode' | 'connected' | 'cwd' | 'chdir' | 'on' | 'off' | 'once' | 'disconnect'
+  | 'setgroups' | 'setgid' | 'setuid'
+type RunnerHost = Pick<NodeJS.Process, RunnerProcessField> & {
   send?: NodeJS.Process['send']
 }
 
@@ -52,6 +57,10 @@ export interface SpawnRunnerInternals {
   isJobEmpty: typeof isJobEmpty
   terminateJob: typeof terminateJob
   closeHandleChecked: typeof closeHandleChecked
+  /** The Linux `/proc/self/status` text that reports the process's current credentials. */
+  readProcessStatus(): string
+  /** Set `no_new_privs` on this process. */
+  setNoNewPrivileges(): void
 }
 
 const defaultInternals: SpawnRunnerInternals = {
@@ -65,6 +74,10 @@ const defaultInternals: SpawnRunnerInternals = {
   isJobEmpty,
   terminateJob,
   closeHandleChecked,
+  /* v8 ignore next -- the run-as provider tests execute this only in the replaced bootstrap child process. */
+  readProcessStatus: () => readFileSync('/proc/self/status', 'utf8'),
+  /* v8 ignore next -- the run-as provider tests execute this only in the replaced bootstrap child process. */
+  setNoNewPrivileges,
 }
 
 const NODE_SPAWN_DETAIL_CODES = new Set(['EACCES', 'ENOENT'])
@@ -176,6 +189,57 @@ function execLinuxTarget(
   throw permissionFailure ?? linuxPathNotFoundError(program)
 }
 
+/** The value of one `/proc/self/status` line. */
+function statusField(status: string, field: string): string {
+  const line = status.split('\n').find(entry => entry.startsWith(`${field}:`))
+  if (line === undefined) throw new Error(`run-as: /proc/self/status has no ${field} line`)
+  return line.slice(field.length + 1).trim()
+}
+
+/** The ids on one `/proc/self/status` line (`Uid:`, `Gid:`, or `Groups:`), sorted for comparison. */
+function statusIds(status: string, field: 'Uid' | 'Gid' | 'Groups'): number[] {
+  return statusField(status, field).split(/\s+/u).filter(id => id !== '').map(Number).sort((a, b) => a - b)
+}
+
+function credentialSetter<T>(setter: ((id: T) => void) | undefined, name: string): (id: T) => void {
+  if (setter === undefined) throw new Error(`run-as: process.${name} is unavailable on this host`)
+  return setter
+}
+
+/**
+ * Take the configured identity irrevocably: supplementary groups first, then the group id, then
+ * the user id, which as root also sets the saved and filesystem ids, then `no_new_privs`, so no
+ * setuid program the target runs can regain privileges. A group list that already matches is
+ * left alone, because changing it needs privilege even when nothing changes.
+ * @throws when a step is refused, or the resulting real, effective, saved, and filesystem ids,
+ *   supplementary groups, capabilities, or `no_new_privs` differ from what the drop promises; the
+ *   caller never enters the target.
+ */
+function dropPrivileges(identity: RunAsIdentity, host: RunnerHost, internals: SpawnRunnerInternals): void {
+  const groups = [...new Set(identity.groups)].sort((a, b) => a - b)
+  const wanted = `uid ${identity.uid}, gid ${identity.gid}, groups [${groups.join(', ')}]`
+  try {
+    if (statusIds(internals.readProcessStatus(), 'Groups').join() !== groups.join()) {
+      credentialSetter(host.setgroups, 'setgroups')(groups)
+    }
+    credentialSetter(host.setgid, 'setgid')(identity.gid)
+    credentialSetter(host.setuid, 'setuid')(identity.uid)
+    internals.setNoNewPrivileges()
+  } catch (error) {
+    // A code would turn this into a Node-shaped "spawn <program> EPERM" that hides the run-as step.
+    throw new Error(`run-as: could not take ${wanted}: ${(error as Error).message}`)
+  }
+  const status = internals.readProcessStatus()
+  if (statusIds(status, 'Uid').some(id => id !== identity.uid)
+    || statusIds(status, 'Gid').some(id => id !== identity.gid)
+    || statusIds(status, 'Groups').join() !== groups.join()) {
+    throw new Error(`run-as: credentials after the change do not match ${wanted}`)
+  }
+  if (['CapPrm', 'CapEff', 'CapAmb'].some(field => !/^0+$/u.test(statusField(status, field))) || statusField(status, 'NoNewPrivs') !== '1') {
+    throw new Error('run-as: the process kept capabilities or lacks no_new_privs after the change')
+  }
+}
+
 function runLinux(
   locator: string,
   argv: string[],
@@ -191,11 +255,16 @@ function runLinux(
     host.exitCode = 127
     return
   }
+  // A run-as bootstrap can no longer create files in the root-owned private directory once it has dropped its credentials.
+  const report = request.runAs === undefined
+    ? (error: LinuxStartupError) => { writeLinuxStartupError(files, error) }
+    : openLinuxStartupError(files)
   try {
+    if (request.runAs !== undefined) dropPrivileges(request.runAs, host, internals)
     host.chdir(request.cwd)
     execLinuxTarget({ ...request, cwd: host.cwd() }, argv, internals)
   } catch (error) {
-    writeLinuxStartupError(files, {
+    report({
       type: 'error',
       error: asSpawnError(error, argv[0] as string),
     })

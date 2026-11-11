@@ -487,7 +487,7 @@ Every package below exports a Cordis plugin that a bundle patch can name in a Lo
 
 | Package | Config | Description |
 |---|---|---|
-| `@deepseek-ai/dsh-subprocess-local` | no | Local-subprocess implementation of the DeepSeek Harness subprocess seam |
+| `@deepseek-ai/dsh-subprocess-local` | yes | Local-subprocess implementation of the DeepSeek Harness subprocess seam |
 
 ## team
 

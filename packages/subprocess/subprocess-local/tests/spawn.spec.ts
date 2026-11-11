@@ -1490,7 +1490,7 @@ describe('environment and spill-file hardening', () => {
     }
   })
 
-  it.skipIf(process.platform === 'win32')('creates spill files with owner-only permissions and random names', async () => {
+  it.skipIf(process.platform === 'win32')('creates spill files readable by the owner and the directory group, with random names', async () => {
     const result = await finish(spawnSubprocess(
       spec('for i in $(seq 1 200); do printf "line-%04d\\n" $i; done', { stdoutMaxBytes: 500, stderrMaxBytes: 500 }),
       { spillDir },
@@ -1498,7 +1498,7 @@ describe('environment and spill-file hardening', () => {
     const path = result.stdout.spillPath!
     expect(path).toMatch(/dsh-subprocess-\d+-\d+-[0-9a-f]{12}-stdout\.log$/)
     const mode = statSync(path).mode & 0o777
-    expect(mode).toBe(0o600)
+    expect(mode).toBe(0o640)
   })
 
   it.skipIf(process.platform === 'win32')('defaults spills into a private per-process directory', async () => {

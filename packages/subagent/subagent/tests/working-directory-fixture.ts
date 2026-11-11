@@ -15,9 +15,18 @@ class FixtureWorkingDirectory extends Service {
     return this.directories.get(session) ?? session?.header.cwd ?? process.cwd()
   }
 
+  chooser(): 'host' {
+    return 'host'
+  }
+
   async ensure(agent: Agent, signal?: AbortSignal): Promise<string> {
     signal?.throwIfAborted()
     return this.get(agent.session)
+  }
+
+  async resolveModelDirectory(agent: Agent, path: string, signal?: AbortSignal): Promise<string> {
+    signal?.throwIfAborted()
+    return resolve(this.get(agent.session), path)
   }
 
   async set(agent: Agent, path: string, signal?: AbortSignal): Promise<string> {
