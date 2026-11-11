@@ -17,7 +17,11 @@ export interface ExecutorPlugin extends Executor {
   /** Undo `install`. */
   dispose(): void
 }
-/** The kind of Executor that runs `ticket`. */
+/**
+ * The kind of Executor that runs `ticket`.
+ * @param ticket - The Ticket, or only its `executor`.
+ * @returns `external` for an external Ticket, otherwise `local`.
+ */
 export const executorOf = (ticket: Pick<Ticket, 'executor'>): ExecutorKind => ticket.executor ?? 'local'
 
 /** The `external` kind until an external-worker Executor takes its place: it does nothing, so external Tickets stay as they are. */

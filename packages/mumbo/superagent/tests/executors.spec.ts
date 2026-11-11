@@ -73,7 +73,7 @@ describe('Executors', () => {
   })
 })
 
-it('on a host start, interrupts a running local Assignment as before, and neither interrupts nor launches an external one', async () => {
+it('on a host start, interrupts a running local Assignment as before, neither interrupts nor launches an external one, and later sends the Engine\'s calls on an external Ticket to no DshExecutor', async () => {
   // Paused, so the queued launches stay in the effect queue for the test to read.
   const host = await startRuntime(store => {
     store.saveSettings({ ...store.settings(), paused: true })
@@ -88,6 +88,12 @@ it('on a host start, interrupts a running local Assignment as before, and neithe
     expect(store.tickets.get('leased')).toEqual(ticket('leased', 'running', '2026-11-01T00:00:01.000Z', 'external'))
     expect(store.tickets.get('queued')).toEqual(ticket('queued', 'pending', '2026-11-01T00:00:02.000Z', 'external'))
     expect(store.db.prepare("SELECT key FROM effect WHERE kind = 'launch'").all().map(row => row.key)).toEqual([local.assignments[1]!.id])
+    // The Engine's own calls route by kind: an Input to a pending (start) or a running (deliver) Assignment, and a stop.
+    const { engine, executor } = host.runtime
+    const dsh = { start: vi.spyOn(executor, 'start'), deliver: vi.spyOn(executor, 'deliver'), stop: vi.spyOn(executor, 'stop') }
+    engine.note('queued', 'held'); engine.note('leased', 'held'); engine.stopTicket('leased')
+    engine.note('local', 'launched')
+    expect([dsh.start.mock.calls.map(([item]) => item.id), dsh.deliver.mock.calls, dsh.stop.mock.calls]).toEqual([['local'], [], []])
   } finally { await host.stop() }
 })
 

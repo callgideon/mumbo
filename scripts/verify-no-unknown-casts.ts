@@ -69,8 +69,8 @@ function isSource(file: string): boolean {
   return /\.(?:[cm]?[jt]s|[jt]sx)$/u.test(file)
     && !file.startsWith('vendor/')
     && !file.startsWith('.agents/notes/archived/')
-    // pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md
-    && !file.startsWith('packages/mumbo/superagent/')
+    // pinned upstream copy, except Mumbo's own modules in src/mumbo/; see packages/mumbo/superagent/UPSTREAM.md S11
+    && (!file.startsWith('packages/mumbo/superagent/') || file.startsWith('packages/mumbo/superagent/src/mumbo/'))
 }
 
 /**

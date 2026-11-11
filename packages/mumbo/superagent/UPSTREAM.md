@@ -2,7 +2,7 @@
 
 `@mumbo/superagent` is a pinned copy of https://github.com/deepseek-ai/dsh-superagent-prototype at commit `8c32a9dc5d72c033816c6a8110b37f40cf94fba4`, MIT licensed (see `LICENSE`).
 
-Every change to the copy is an entry below. A path outside `packages/mumbo/superagent/` that exists for the copy is listed too. Oxlint ignores `packages/mumbo/superagent/**`; S1 lists the other repository gate exclusions.
+Every change to the copy is an entry below. A path outside `packages/mumbo/superagent/` that exists for the copy is listed too. Oxlint ignores `packages/mumbo/superagent/**` except `src/mumbo/` (S11); S1 lists the other repository gate exclusions, and S11 narrows two of them.
 
 ## S1: port and packaging
 
@@ -185,9 +185,13 @@ Upstream's Engine calls one Executor, the DshExecutor, for every Ticket. In Mumb
 - `src/executor/dsh.ts`: `DshExecutor` implements `ExecutorPlugin`; `resume(tickets)` reconciles the Tickets it is given, every open Ticket by default.
 - `src/app/runtime.ts`: `Runtime.executor` stays the DshExecutor. The private `executors` field, `Executors` over `{ local: executor, external: heldExecutor }`, is the Engine's Executor; start installs it after Sessions and resumes it with the open Tickets; stop shuts it down and disposes it. `prepareTicket` and `HttpHost.executor` are unchanged.
 - `src/app/migration.ts`, `src/app/store.ts`: `SCHEMA_VERSION` is 12, which changes no record: `migrateTo11` runs only on schema 10, and a schema 11 database opens as schema 12 unchanged. A build that predates external Tickets refuses the database (`Unsupported orchestrator database version 12`) instead of launching them in the box. A failed migration's error names schema 12 as its target.
-- Docs: the `src/mumbo/executors.ts` and `tests/executors.spec.ts` rows of `docs/007-architecture.md`, which `tests/docs.spec.ts` requires, and its DshExecutor and schema paragraphs; the README In Mumbo bullet.
-- Tests: `tests/executors.spec.ts` checks routing by kind, the lifecycle calls on every kind, a failed shutdown, `heldExecutor`, a Runtime start over stored Tickets (a running local Assignment ends `hostRestarted` with a new pending one and its launch queued; a running and a pending external Assignment stay as stored, with no launch), and schema 12 opening a schema 12 and a schema 11 database without a changed record. `tests/migration.spec.ts` expects `migration to schema 12 failed` in the two failed-migration messages.
+- Docs: the `src/mumbo/executors.ts` and `tests/executors.spec.ts` rows of `docs/007-architecture.md`, which `tests/docs.spec.ts` requires, its Core classes diagram (the Engine's Executor is `Executors`, whose `local` kind is the DshExecutor), and its DshExecutor and schema paragraphs; the README In Mumbo bullet.
+- Not updated, upstream prose: the Executor rows of `docs/001-domain.md` (What is reusable, and the glossary) describe the DshExecutor only: one Executor Session and one directory per Ticket.
+- Tests: `tests/executors.spec.ts` checks routing by kind, the lifecycle calls on every kind, a failed shutdown, `heldExecutor`, a Runtime start over stored Tickets (a running local Assignment ends `hostRestarted` with a new pending one and its launch queued; a running and a pending external Assignment stay as stored, with no launch; then an Input to each external Ticket and a stop of the running one call no DshExecutor method, while an Input to the local Ticket starts it there), and schema 12 opening a schema 12 and a schema 11 database without a changed record. `tests/migration.spec.ts` expects `migration to schema 12 failed` in the two failed-migration messages.
 
 Files outside the copy changed for S11:
 
 - `vitest.config.ts`: the coverage `exclude` lists `packages/mumbo/superagent/src/!(mumbo)/**/*.{ts,tsx}` and `packages/mumbo/superagent/src/*.{ts,tsx}` instead of all of `src`, so `src/mumbo/` is under the per-file 100% gate.
+- `.oxlintrc.json` and `.oxlintrc.staged.json`: `!packages/mumbo/superagent/src/mumbo/**` after the copy's ignore pattern, so Oxlint checks `src/mumbo/` and nothing else of the copy; `scripts/oxlint-contract.spec.ts` checks both configs.
+- `scripts/verify-no-unknown-casts.ts`: the scan skips the copy except `src/mumbo/`; `scripts/verify-no-unknown-casts.spec.ts` checks it.
+- `scripts/verify-export-jsdoc.ts` still skips the whole copy. For a package whose `exports` has no `./src/*`, it checks only the names its entry points export, and `src/mumbo/` exports none of those, so including it would check nothing.

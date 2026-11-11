@@ -15,7 +15,7 @@ flowchart TB
   engine -->|Policy| policy[Policy]
   engine -->|SourceScope| registry[SourceRegistry]
   engine -->|Assessor| assessor[MasterAssessor]
-  engine -->|Executor| executor[DshExecutor]
+  engine -->|Executor| executors[Executors] -->|local| executor[DshExecutor]
   assessor -->|decide| engine
   engine -->|Outbox| outbox[Outbox]
   executor -->|assignmentStarted, inputsDelivered, report| engine
