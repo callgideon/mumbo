@@ -2,10 +2,13 @@ import { expect, it, vi } from 'vitest'
 import { Config, type Machine } from '../src/deployment.ts'
 import { apply } from '../src/index.ts'
 
-// Stub Runtime to capture the resolved Machine settings and restart callback.
+// Stub Runtime to capture the resolved Machine settings and restart callback; `next.ready` is the next Runtime's start.
 const runtimes = vi.hoisted(() => [] as { machine: Machine; restart: () => void }[])
+const next = vi.hoisted(() => ({}) as { ready?: Promise<void> })
 vi.mock('../src/app/runtime.ts', () => ({ Runtime: class {
-  ready = Promise.resolve()
+  ready = next.ready ?? Promise.resolve()
+  readonly stopped = new AbortController()
+  get lifetime() { return this.stopped.signal }
   constructor(_ctx: unknown, readonly machine: Machine, readonly restart: () => void) { runtimes.push(this) }
   configured() { return true }
   async stop() {}
@@ -73,4 +76,35 @@ it('registers the relay Source as an effect of the entry, after the Runtime\'s s
   await apply(ctx as never, Config({ stateDir: '/srv/state' }))
   expect(ctx.effect).toHaveBeenCalledTimes(2)
   expect(ctx.effect).toHaveBeenLastCalledWith(expect.any(Function), 'dsh-superagent: relay Source')
+})
+
+it('starts without waiting for the Runtime, and logs its start once it settles, unless it stopped first', async () => {
+  const { ctx } = context()
+  const ready = Promise.withResolvers<void>()
+  next.ready = ready.promise
+  await apply(ctx as never, Config({ stateDir: '/srv/state' }))
+  expect(ctx.logger.info).not.toHaveBeenCalled()
+  ready.resolve()
+  await vi.waitFor(() => { expect(ctx.logger.info).toHaveBeenCalledWith(expect.stringMatching(/^dsh-superagent ready/)) })
+
+  const failing = Promise.withResolvers<void>()
+  next.ready = failing.promise
+  await apply(ctx as never, Config({ stateDir: '/srv/state' }))
+  failing.reject(new Error('preset refused'))
+  await vi.waitFor(() => { expect(ctx.logger.error).toHaveBeenCalledWith('dsh-superagent could not start: %s', 'Error: preset refused') })
+
+  // A Runtime stopped before its start settled reports neither.
+  for (const settle of ['resolve', 'reject'] as const) {
+    const stopping = Promise.withResolvers<void>()
+    next.ready = stopping.promise
+    await apply(ctx as never, Config({ stateDir: '/srv/state' }))
+    ;(runtimes.at(-1) as unknown as { stopped: AbortController }).stopped.abort()
+    if (settle === 'resolve') stopping.resolve()
+    else stopping.reject(new Error('aborted'))
+    await stopping.promise.catch(() => undefined)
+    await Promise.resolve()
+  }
+  delete next.ready
+  expect(ctx.logger.info).toHaveBeenCalledTimes(1)
+  expect(ctx.logger.error).toHaveBeenCalledTimes(1)
 })

@@ -35,6 +35,17 @@ import { overview } from '../src/app/views/overview.ts'
 import { preview, readable } from '../src/app/views/text.ts'
 import { decisionList, search, threadDetail, threadList } from '../src/app/views/threads.ts'
 import { executorLoad, ticketDetail, ticketList } from '../src/app/views/tickets.ts'
+import type { LockOptions } from 'proper-lockfile'
+
+// The real lock, keeping the newest Runtime's handler of a compromised lock so a test can report one.
+const lock = vi.hoisted(() => ({ compromised: undefined as ((error: Error) => void) | undefined }))
+vi.mock('proper-lockfile', async (original) => {
+  const actual = await original<typeof import('proper-lockfile')>()
+  return { ...actual, lockSync: (file: string, options: LockOptions) => {
+    lock.compromised = options.onCompromised
+    return actual.lockSync(file, options)
+  } }
+})
 
 let runtime: Runtime
 const viewsOf = (value: Runtime) => ({ store: value.store, sources: value.sources, links: value.links() })
@@ -2013,4 +2024,62 @@ it('keeps the Policy the main Session judges by in its prompt, after admission a
   await runtime.settings.save('policy', { ...saved.policy, rules: rules.map(rule => ({ ...rule, enabled: false })) }, runtime.store.blockRevision('policy'), 'panel')
   expect(policy()).toContain('No rule is enabled: a proactive candidate can only be ignored.')
   expect(policy()).toContain('The accept mode and the rules decide proactive candidates only')
+})
+
+it('stops while the main Session\'s ensure waits, and that ensure then writes nothing', async () => {
+  await runtime.stop()
+  const creates = controller.create.mock.calls.length, renames = controller.rename.mock.calls.length
+  const resolves = controller.resolveAgent.mock.calls.length
+  const gate = Promise.withResolvers<void>()
+  // The next resolve waits, as one whose preset waits for the Loader to settle would, then finds no main Session.
+  controller.resolveAgent.mockImplementationOnce(async () => { await gate.promise; return { error: { code: 'session/not-found' } } })
+  const next = await restart()
+  await vi.waitFor(() => { expect(controller.resolveAgent).toHaveBeenCalledTimes(resolves + 1) })
+  expect(controller.resolveAgent).toHaveBeenLastCalledWith(next.masterId)
+  await next.stop()
+  const failed = expect(next.ready).rejects.toThrow('aborted')
+  gate.resolve()
+  await failed
+  expect(controller.create).toHaveBeenCalledTimes(creates)
+  expect(controller.rename).toHaveBeenCalledTimes(renames)
+  // A stopped Runtime reports no failure of its own.
+  expect(next.health.runtime).toMatchObject({ state: 'starting' })
+})
+
+it('stops during setup, and restores the environment setup applies after the stop', async () => {
+  await runtime.stop()
+  const answer = subprocess.spawn.getMockImplementation()!
+  const gate = Promise.withResolvers<void>()
+  // The first setup probe waits.
+  subprocess.spawn.mockImplementationOnce(spec => { const run = answer(spec); return { ...run, done: gate.promise.then(() => run.done) } })
+  const path = process.env.PATH
+  const calls = controller.resolveAgent.mock.calls.length
+  const next = await restart()
+  await next.stop()
+  gate.resolve()
+  await next.ready
+  expect(process.env.PATH).toBe(path)
+  expect(process.env.GIT_CONFIG_GLOBAL).toBeUndefined()
+  expect(controller.resolveAgent).toHaveBeenCalledTimes(calls)
+})
+
+it('shows a failed start in the runtime health entry', async () => {
+  controller.resolveAgent.mockImplementationOnce(async () => ({ error: new Error('preset refused') }))
+  const next = await restart()
+  await expect(next.ready).rejects.toThrow('preset refused')
+  expect(next.health.runtime).toMatchObject({ state: 'error', detail: 'Error: preset refused' })
+})
+
+it('keeps a lock compromised during startup in the runtime health entry', async () => {
+  await runtime.stop()
+  const resolves = controller.resolveAgent.mock.calls.length
+  const gate = Promise.withResolvers<void>()
+  controller.resolveAgent.mockImplementationOnce(async () => { await gate.promise; return { error: { code: 'session/not-found' } } })
+  const next = await restart()
+  await vi.waitFor(() => { expect(controller.resolveAgent).toHaveBeenCalledTimes(resolves + 1) })
+  lock.compromised?.(new Error('Unable to update lock within the stale threshold'))
+  const failed = expect(next.ready).rejects.toThrow('aborted')
+  gate.resolve()
+  await failed
+  expect(next.health.runtime).toMatchObject({ state: 'error', detail: 'Unable to update lock within the stale threshold' })
 })

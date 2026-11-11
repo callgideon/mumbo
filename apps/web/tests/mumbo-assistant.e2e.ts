@@ -1,6 +1,6 @@
 /**
- * Mumbo in the shipped Web composition with the person-box row: the Host creates, titles, and pins the Session at
- * start; a first page load opens it as a pinned row before its first turn, New Session beside it opens a real blank,
+ * Mumbo in the shipped Web composition with the person-box row: the Host creates and titles the Session after its start
+ * and leaves it unpinned; a first page load opens it before its first turn, New Session beside it opens a real blank,
  * and a Session the person chose stays open across a reload; archiving Mumbo is refused through the row button and the
  * Workspace Remote with and without stopActivity, and its schedules stay. Zero model calls.
  */
@@ -14,6 +14,7 @@ import { chromium, type Page } from 'playwright'
 import { expect, it } from 'vitest'
 import { LlmAdapter, type GenerateOptions, type LlmModelInfo, type LlmProviderInfo, type LlmResolvedModelInfo, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId, type Session } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-session-title'
 import {
   fixtureUserPrompts, launchWebScaffold, recordFixture, seedSession, selectedSessionFixture, watchConsole, webSnapshotMode,
   type WebScaffold,
@@ -46,6 +47,15 @@ async function remote(scaffold: WebScaffold, endpoint: string, args: Readonly<Re
   })
   if (!response.ok) throw new Error(`${endpoint} failed over HTTP ${response.status}: ${await response.text()}`)
   return (await response.json() as { result: unknown }).result
+}
+
+/** Wait for the Host's first ensure, which runs after the plugin start, to create and title Mumbo. */
+async function ensured(scaffold: WebScaffold): Promise<void> {
+  const { ctx } = scaffold
+  await expect.poll(() => {
+    const agent = ctx.agents.get(MUMBO)
+    return agent === undefined ? undefined : ctx.sessionTitle.get(agent.session)?.title
+  }, { timeout: 20_000 }).toBe('Mumbo')
 }
 
 /** A local model that answers every request with one line and keeps the requests it saw. */
@@ -91,9 +101,10 @@ it('opens a new box on Mumbo pinned first, starts real blanks beside it, and ref
   const elsewhere = await mkdtemp(join(tmpdir(), 'mumbo-e2e-elsewhere-'))
   try {
     const { ctx } = scaffold
+    await ensured(scaffold)
     const home = ctx.workspaceRegistry.list().find(workspace => workspace.sessionIds.includes(MUMBO))
     expect(home?.path).toBe(await realpath(scaffold.workspaceCwd))
-    expect(ctx.workspaceRegistry.pinnedSessionIds).toEqual([MUMBO])
+    expect(ctx.workspaceRegistry.pinnedSessionIds).toEqual([])
     expect(await remote(scaffold, 'session/list', { _request: {} })).toMatchObject({
       ok: true, value: { items: [{ sessionId: MUMBO, projections: { values: { title: 'Mumbo', agentPreset: 'standard' } } }] },
     })
@@ -153,7 +164,7 @@ it('opens a new box on Mumbo pinned first, starts real blanks beside it, and ref
           .toMatchObject({ ok: false, error: { code: 'gateway/bad-request', message: REFUSAL } })
       }
       expect(ctx.workspaceRegistry.archivedSessionIds).toEqual([])
-      expect(ctx.workspaceRegistry.pinnedSessionIds).toEqual([MUMBO])
+      expect(ctx.workspaceRegistry.pinnedSessionIds).toEqual([])
       expect((await ctx.schedule.list({ active: true })).items.map(item => item.id)).toEqual([schedule.id])
       // Other Sessions archive as before.
       expect(await remote(scaffold, 'workspace/archiveSession', { request: { sessionId: side } }))
@@ -173,6 +184,7 @@ it('runs a schedule aimed at Mumbo with no browser open, and logs its turn in Mu
   const scaffold = await launchWebScaffold({ extraOverlayPath: OVERLAY, profile: { hmr: false, packages: [{ dir: PACKAGE }] } })
   try {
     const { ctx } = scaffold
+    await ensured(scaffold)
     const model = new StubModel()
     const unregister = ctx.llm.registerAdapter(['mumbo-stub'], model)
     try {

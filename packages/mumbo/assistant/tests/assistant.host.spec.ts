@@ -1,11 +1,17 @@
-/** Mumbo's ensure, prompt section, and archive veto over the real Workspace registry, Session store, and Agent registry. */
+/**
+ * Mumbo's ensure, prompt section, and archive veto over the real Workspace registry, Session store, and Agent registry,
+ * and its start in a Loader composition whose default preset has a row waiting for a missing service.
+ */
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { Context, type Fiber } from '@deepseek-ai/cordis'
+import { Context, FiberState, type Fiber } from '@deepseek-ai/cordis'
+import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { createScope } from '@deepseek-ai/dsh-scope'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
+import AgentPreset from '@deepseek-ai/dsh-agent-preset'
+import AgentPresets from '@deepseek-ai/dsh-agent-preset-registry'
 import { loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
@@ -20,6 +26,7 @@ import { MemoryStorageBackend } from '../../../storage/storage-domain/tests/help
 import * as Assistant from '../src/index.ts'
 
 const INSTRUCTIONS = 'You are Mumbo, this person\'s assistant. Keep {{this}} literal.'
+const ENSURED = "mumbo-assistant: ensured Session 'mumbo'"
 const contexts: Context[] = []
 const dirs: string[] = []
 
@@ -65,6 +72,11 @@ async function host() {
   const remove = async (id: SessionId): Promise<void> => { await unregister.get(id)?.() }
   let resolveError: Error | undefined
   let gate: Promise<unknown> | undefined
+  let createGate: Promise<unknown> | undefined
+  // The session-title service's read of a Session's latest title, over the titles the controller's renames record.
+  ctx.provide('sessionTitle', {
+    get: ({ id }: { id: SessionId }) => titles.has(id) ? { title: titles.get(id) } : undefined,
+  } as never)
   ctx.provide('sessionController', {
     resolveAgent: async (id: SessionId) => {
       calls.push(`resolve:${id}`)
@@ -77,6 +89,10 @@ async function host() {
     },
     create: async (request: { sessionId: SessionId; workspaceId: WorkspaceId; agentPreset?: string }) => {
       calls.push(`create:${request.sessionId}:${String(request.agentPreset)}`)
+      await createGate
+      // Like the real controller, a composed preset registry resolves the Agent's preset first and refuses a broken one.
+      const preset = await ctx.get('agentPresets')?.resolve(request.agentPreset)
+      if (preset?.broken !== undefined) throw new Error(preset.broken)
       const target = ctx.workspaceRegistry.get(request.workspaceId)!
       ctx.sessions.create(request.sessionId, { meta: { cwd: target.path } })
       await target.attachSession(request.sessionId)
@@ -89,15 +105,28 @@ async function host() {
       return { title: request.title, seq: 0 }
     },
   } as never)
-  const start = (instructions = INSTRUCTIONS, retryDelaysMs: number[] = []): Promise<Fiber> =>
+  // Each ensure ends in one info or error line of the plugin's own.
+  const info = vi.spyOn(ctx.logger, 'info')
+  const error = vi.spyOn(ctx.logger, 'error')
+  const outcomes = (): number => [...info.mock.calls, ...error.mock.calls].filter(([line]) => String(line).startsWith('mumbo-assistant:')).length
+  const load = (instructions = INSTRUCTIONS, retryDelaysMs: number[] = []): Promise<Fiber> =>
     ctx.plugin(Assistant, { instructions, workspace, retryDelaysMs }).await()
+  /** Load the plugin and wait for its first ensure to end, which the start itself does not wait for. */
+  const start = async (instructions = INSTRUCTIONS, retryDelaysMs: number[] = []): Promise<Fiber> => {
+    const before = outcomes()
+    const fiber = await load(instructions, retryDelaysMs)
+    await vi.waitFor(() => { expect(outcomes()).toBeGreaterThan(before) })
+    return fiber
+  }
   const prompt = async (id: SessionId = MUMBO) => renderPrompt(await ctx.systemPrompt.assemble({ scope: ctx.agents.get(id)! }))
   return {
-    ctx, facility, workspace, calls, titles, start, prompt, resume, remove,
+    ctx, facility, workspace, calls, titles, load, start, outcomes, prompt, resume, remove,
     failResolve: (code: string) => { resolveError = Object.assign(new Error(code), { code }) },
     clearFailure: () => { resolveError = undefined },
     /** Hold every later resolve until `held` settles, as a slow resume would. */
     hold: (held: Promise<unknown> | undefined) => { gate = held },
+    /** Hold every later create until `held` settles, as one waiting for the preset registry would. */
+    holdCreate: (held: Promise<unknown> | undefined) => { createGate = held },
   }
 }
 
@@ -156,7 +185,8 @@ describe('ensuring Mumbo at start', () => {
     const unpin = vi.spyOn(registry, 'unpinSession').mockRejectedValueOnce(new Error('disk full'))
     const first = await start(INSTRUCTIONS, [5])
     expect(error).toHaveBeenCalledWith(expect.stringMatching(/retrying in 5 ms: .*disk full/))
-    await vi.waitFor(() => { expect(registry.pinnedSessionIds).toEqual(['side']) })
+    await vi.waitFor(() => { expect(ctx.logger.info).toHaveBeenCalledWith(ENSURED) })
+    expect(registry.pinnedSessionIds).toEqual(['side'])
     expect(unpin).toHaveBeenCalledTimes(2)
     await first.dispose()
     await registry.pinSession(MUMBO)
@@ -204,30 +234,48 @@ describe('ensuring Mumbo at start', () => {
     await vi.waitFor(() => { expect(calls).toEqual(['resolve:mumbo', 'resolve:mumbo']) })
   })
 
-  it('keeps the veto while a restart drains a running retry, and starts the next ensure after it', async () => {
-    const { ctx, calls, start, failResolve, clearFailure, hold } = await host()
-    vi.spyOn(ctx.logger, 'error').mockImplementation(() => {})
-    const first = await start()
-    await first.dispose()
-    failResolve('session/writer-held')
-    calls.length = 0
-    const fiber = await start(INSTRUCTIONS, [5])
-    // The retry's resolve hangs, as a slow resume would, while the plugin restarts.
+  it('restarts without waiting for a running ensure, which writes nothing once its resolve returns', async () => {
+    const { ctx, calls, load, outcomes, hold } = await host()
+    const error = vi.spyOn(ctx.logger, 'error').mockImplementation(() => {})
+    // Every resolve hangs, as one waiting for the Loader to settle would.
     const slow = Promise.withResolvers<undefined>()
     hold(slow.promise)
-    clearFailure()
-    await vi.waitFor(() => { expect(calls).toEqual(['resolve:mumbo', 'resolve:mumbo']) })
-    const restarting = fiber.restart()
-    await new Promise(resolve => setTimeout(resolve, 20))
+    const fiber = await load(INSTRUCTIONS, [5])
+    expect(calls).toEqual(['resolve:mumbo'])
+    await fiber.restart()
     expect(calls).toEqual(['resolve:mumbo', 'resolve:mumbo'])
-    const stopped: SessionId[] = []
-    ctx.on('workspace/session-stop', ({ sessionId }) => { stopped.push(sessionId) })
-    await expect(ctx.workspaceRegistry.archiveSession(MUMBO, { stopActivity: true })).rejects.toThrow(Assistant.ARCHIVE_REFUSAL)
-    expect(stopped).toEqual([])
     hold(undefined)
     slow.resolve(undefined)
-    await restarting
-    expect(calls).toEqual(['resolve:mumbo', 'resolve:mumbo', 'resolve:mumbo'])
+    await vi.waitFor(() => { expect(outcomes()).toBe(1) })
+    // Only the restarted start creates Mumbo; the unloaded attempt neither creates, reports, nor retries.
+    expect(ctx.logger.info).toHaveBeenCalledWith(ENSURED)
+    expect(calls).toEqual(['resolve:mumbo', 'resolve:mumbo', 'create:mumbo:undefined', 'rename:mumbo:Mumbo'])
+    expect(ctx.sessions.list().map(session => session.id)).toEqual([MUMBO])
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(calls).toHaveLength(4)
+    expect(error).not.toHaveBeenCalled()
+  })
+
+  it('titles a Mumbo whose create landed after an unload at the next start, and keeps the person\'s title after that', async () => {
+    const { ctx, calls, titles, load, start, holdCreate } = await host()
+    const slow = Promise.withResolvers<undefined>()
+    holdCreate(slow.promise)
+    const fiber = await load()
+    await vi.waitFor(() => { expect(calls).toEqual(['resolve:mumbo', 'create:mumbo:undefined']) })
+    await fiber.dispose()
+    // The create persists Mumbo after the unload, which skips its rename.
+    holdCreate(undefined)
+    slow.resolve(undefined)
+    await vi.waitFor(() => { expect(ctx.agents.get(MUMBO)).toBeDefined() })
+    expect(titles.has(MUMBO)).toBe(false)
+    const second = await start()
+    expect(calls).toEqual(['resolve:mumbo', 'create:mumbo:undefined', 'resolve:mumbo', 'rename:mumbo:Mumbo'])
+    expect(titles.get(MUMBO)).toBe('Mumbo')
+    titles.set(MUMBO, 'My desk')
+    await second.dispose()
+    await start()
+    expect(calls.at(-1)).toBe('resolve:mumbo')
+    expect(titles.get(MUMBO)).toBe('My desk')
   })
 
   it('stops after the configured retries and cancels a pending retry on unload', async () => {
@@ -241,10 +289,13 @@ describe('ensuring Mumbo at start', () => {
     expect(calls).toEqual(['resolve:mumbo', 'resolve:mumbo'])
     await exhausted.dispose()
 
-    const pending = await ctx.plugin(Assistant, { instructions: INSTRUCTIONS, workspace: join(workspace, 'missing'), retryDelaysMs: [30] }).await()
+    const pending = await ctx.plugin(Assistant, { instructions: INSTRUCTIONS, workspace: join(workspace, 'missing'), retryDelaysMs: [100] }).await()
+    await vi.waitFor(() => {
+      expect(error).toHaveBeenLastCalledWith(expect.stringMatching(/retrying in 100 ms: .*missing/))
+    }, { interval: 5 })
     await pending.dispose()
     calls.length = 0
-    await new Promise(resolve => setTimeout(resolve, 60))
+    await new Promise(resolve => setTimeout(resolve, 150))
     expect(calls).toEqual([])
   })
 
@@ -266,6 +317,34 @@ describe('ensuring Mumbo at start', () => {
     const config = Assistant.Config(row?.config as Assistant.Config)
     expect(config.workspace).toBe('/root/projects')
     expect(config.instructions).toMatch(/^You are Mumbo/)
+  })
+})
+
+describe('starting in a Loader composition', () => {
+  it('lets the Loader settle while the default preset has a row waiting for a missing service, then reports the preset', async () => {
+    const { ctx, workspace, calls, outcomes } = await host()
+    const error = vi.spyOn(ctx.logger, 'error').mockImplementation(() => {})
+    await ctx.plugin(Loader)
+    await ctx.plugin(AgentPresets, { default: 'standard' })
+    ctx.loader.builtins.preset = AgentPreset
+    ctx.loader.builtins.needsMissing = { name: 'needs-missing', inject: ['serviceThatDoesNotExist'], apply: () => {} }
+    ctx.loader.builtins.assistant = Assistant
+    await ctx.loader.create({ name: 'cordis:preset', config: { id: 'standard', plugins: [{ id: 'waiting', name: 'cordis:needsMissing' }] } })
+    // The registry's diagnostic of that row waits for the Loader to settle, and the Loader waits for this row's start.
+    let row = ''
+    const settling = ctx.loader.create({ name: 'cordis:assistant', config: { instructions: INSTRUCTIONS, workspace, retryDelaysMs: [] } })
+      .then(async (id) => { row = id; await ctx.loader.await(); return 'settled' })
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const hung = new Promise<string>((resolve) => { timer = setTimeout(() => { resolve('hung') }, 2000) })
+    expect(await Promise.race([settling, hung])).toBe('settled')
+    clearTimeout(timer)
+    expect(ctx.loader.resolve(row).fiber?.state).toBe(FiberState.ACTIVE)
+    // The ensure then gets the registry's report and logs it.
+    await vi.waitFor(() => { expect(outcomes()).toBe(1) })
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(
+      /could not ensure Session 'mumbo'; no retry is left until the next start: .*waiting for serviceThatDoesNotExist/,
+    ))
+    expect(calls).toEqual(['resolve:mumbo', 'create:mumbo:undefined'])
   })
 })
 

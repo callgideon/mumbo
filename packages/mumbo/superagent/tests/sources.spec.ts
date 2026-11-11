@@ -98,7 +98,8 @@ describe('feishu source', () => {
       const value = host({ sources: emptyRegistry(), ...overrides })
       const disposers: (() => unknown)[] = []
       applyFeishu({ orchestrator: value, effect: (effect: () => () => unknown) => { disposers.push(effect()) } } as never)
-      await vi.waitFor(() => expect(value.health.history).toBeDefined())
+      // Every case pauses the history loop, which reports after the live consumer's check.
+      await vi.waitFor(() => expect(value.health.history).toMatchObject({ state: 'paused' }))
       const registered = value.sources.kind('feishu')
       // Snapshot health before disposal clears the registered entries.
       const health = { ...value.health }
@@ -899,6 +900,21 @@ describe('github source', () => {
     await vi.waitFor(() => expect(value.health.github).toMatchObject({ state: 'error', detail: expect.stringContaining('lock held') }))
     for (const dispose of disposers) await dispose()
     value.store.close()
+  })
+  it('unloads the GitHub and Feishu loops while the Runtime still starts, without waiting for its start', async () => {
+    for (const apply of [applyGithub, applyFeishu]) {
+      // A start that never ends, as one whose main Session ensure waits for the Host Loader, which waits for this unload.
+      const value = host({ sources: emptyRegistry(), ready: new Promise<void>(() => {}) })
+      const disposers: (() => unknown)[] = []
+      apply({ orchestrator: value, effect: (effect: () => () => unknown) => { disposers.push(effect()) } } as never)
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const hung = new Promise<string>((resolve) => { timer = setTimeout(() => { resolve('hung') }, 1000) })
+      const unloaded = (async () => { for (const dispose of disposers) await dispose(); return 'unloaded' })()
+      expect(await Promise.race([unloaded, hung])).toBe('unloaded')
+      clearTimeout(timer)
+      expect(value.health).toEqual({})
+      value.store.close()
+    }
   })
   /** An Issue as GitHub returns it, opened by alice. */
   const issue = (number: number, fields: Partial<GithubIssue> = {}): GithubIssue => ({ id: 1000 + number, number, title: 'Login fails',
