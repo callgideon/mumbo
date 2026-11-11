@@ -372,7 +372,8 @@ export class LocalFileSystem extends FileSystem {
     const pending = names(displayPath)
     // The directories entered, the filesystem root first; `..` returns to the one entered before.
     const held: { path: string; handle: FileHandle }[] = [{ path: sep, handle: await open(sep, DIRECTORY_PATH) }]
-    const current = () => held[held.length - 1]!
+    // The filesystem root stays held until the walk ends, so the list is never empty.
+    const current = () => held.at(-1) as (typeof held)[number]
     // A name within the held directory, never a path the kernel would walk again from the root.
     const within = (name: string) => `/proc/self/fd/${String(current().handle.fd)}/${name}`
     const leave = async (keep: number) => { for (const { handle } of held.splice(keep)) await handle.close() }

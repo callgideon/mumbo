@@ -60,7 +60,7 @@ describe.runIf(process.platform === 'linux')('the model path walk', () => {
   it('gives up on a name that keeps changing, and reports a step the kernel refuses for another reason as it is', async () => {
     const fs = ctx.fs as LocalFileSystem
     vi.spyOn(promises, 'readlink').mockRejectedValue(failure('ENOENT'))
-    await expect(fs.resolveModelPath('link/x')).rejects.toMatchObject({ code: 'FS_NOT_FOUND', message: expect.stringContaining('it kept changing while it was resolved') })
+    await expect(fs.resolveModelPath('link/x')).rejects.toMatchObject({ code: 'FS_NOT_FOUND', message: expect.stringContaining('it kept changing while it was resolved') as string })
     vi.spyOn(promises, 'readlink').mockRejectedValue(failure('EIO'))
     await expect(fs.resolveModelPath('link/x')).rejects.toMatchObject({ code: 'EIO' })
     failOpens('EMFILE')

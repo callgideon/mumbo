@@ -149,7 +149,9 @@ function ancestry(directory: string): string[] {
  * @returns the directory's real path.
  * @throws when the directory or an ancestor fails the check.
  */
-export function assertPrivateDirectory(directory: string, refusal: string, statPath: StatPath = statSync, uid = process.getuid?.()): string {
+export function assertPrivateDirectory(
+  directory: string, refusal: string, statPath: StatPath = statSync, uid = process.getuid?.(),
+): string {
   const chain = ancestry(directory)
   chain.forEach((path, index) => {
     const info = statPath(path)

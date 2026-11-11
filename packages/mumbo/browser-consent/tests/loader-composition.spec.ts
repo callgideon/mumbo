@@ -423,11 +423,11 @@ describe('browser write consent in the person-box composition', () => {
     const secret = join(downloads, 'secret.pdf')
     await writeFile(secret, 'pdf', { mode: 0o600 })
     // The model's processes run as another user, outside the file's group, once the Session's browser server is up.
-    let reader: SubprocessChildIdentity | undefined
-    const subprocess = { apply(ctx: Context) { ctx.provide('subprocess', { get childIdentity() { return reader } }) } }
+    const identity: { reader?: SubprocessChildIdentity } = {}
+    const subprocess = { apply(ctx: Context) { ctx.provide('subprocess', { get childIdentity() { return identity.reader } }) } }
     const loaded = await load({ before: [['subprocess', subprocess]], consent: { uploadDirectory: downloads } })
     const { uid, gid } = await stat(secret)
-    reader = { uid: uid + 1, gid: gid + 1, groups: [] }
+    identity.reader = { uid: uid + 1, gid: gid + 1, groups: [] }
     expect(textOf(await direct(loaded, tool('browser_file_upload'), { paths: [secret] })))
       .toBe(`Error: browser_file_upload did not run: ${JSON.stringify(secret)} is a file the assistant cannot read itself.`)
     expect(loaded.asked).toEqual([])

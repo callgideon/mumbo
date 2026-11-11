@@ -774,7 +774,7 @@ linux('the server identity', () => {
     symlinkSync('/usr/bin', linked)
     // Owned by this user, not root; a link in a directory this user can change; relative; missing.
     for (const path of [own, linked, 'usr/bin', join(own, 'missing')]) expect(() => { assertRootOwnedPath(path, 'refused') }, path).toThrow('refused')
-    const groupWritable = (path: string) => ({ ...statSync(path), uid: 0, mode: path === '/usr' ? 0o40775 : statSync(path).mode })
+    const groupWritable = (path: string) => Object.assign(statSync(path), { uid: 0, mode: path === '/usr' ? 0o40775 : statSync(path).mode })
     expect(() => { assertRootOwnedPath('/usr/bin', 'refused', groupWritable) }).toThrow('refused')
   })
 
@@ -806,9 +806,9 @@ linux('the server identity', () => {
     symlinkSync(home, link)
     const identity = (set: Record<string, string>) => new Map([['mcpserver', runAs({ inherit: [], set: { PATH: '/usr/bin', ...set } })]])
     expect(() => resolveServerIdentity('mcpserver', identity({ HOME: link }))).toThrow('must be an existing directory named by its real path')
-    const foreign = (path: string) => ({ ...statSync(path), uid: path === home ? 4242 : statSync(path).uid })
+    const foreign = (path: string) => Object.assign(statSync(path), { uid: path === home ? 4242 : statSync(path).uid })
     expect(() => resolveServerIdentity('mcpserver', identity({ HOME: home }), foreign)).toThrow(`must be owned by uid ${String(process.getuid!())} and writable by no other user but root`)
-    const unsearchable = (path: string) => ({ ...statSync(path), mode: path === home ? 0o40600 : statSync(path).mode })
+    const unsearchable = (path: string) => Object.assign(statSync(path), { mode: path === home ? 0o40600 : statSync(path).mode })
     expect(() => resolveServerIdentity('mcpserver', identity({ HOME: home }), unsearchable)).toThrow('cannot search')
     expect(resolveServerIdentity('mcpserver', identity({ HOME: home }))).toEqual({ name: 'mcpserver', home })
   })
