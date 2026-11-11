@@ -340,18 +340,22 @@ describe('staging an upload', () => {
     expect(readdirSync(into)).toEqual([])
   })
 
-  it('refuses a file over the limit, whether it is at the start or grows while it is copied, and one without room, leaving nothing', async () => {
+  it('refuses a file over the limit, one that grows past the size room was made for while it is copied, and one without room, leaving nothing', async () => {
     const { downloads, staging: into } = directories()
     writeFileSync(join(downloads, 'big.bin'), 'x'.repeat(65))
-    writeFileSync(join(downloads, 'growing.bin'), 'x'.repeat(64))
-    const over = (name: string) => ({ refusal: `${JSON.stringify(join(downloads, name))} is larger than the upload limit of 64 bytes` })
-    expect(await stageUpload(join(downloads, 'big.bin'), into, 64, undefined, room)).toEqual(over('big.bin'))
-    // It grows between the size check and the copy, as a file the model's shell writes can.
-    const growing = () => {
+    writeFileSync(join(downloads, 'growing.bin'), 'x')
+    expect(await stageUpload(join(downloads, 'big.bin'), into, 64, undefined, room))
+      .toEqual({ refusal: `${JSON.stringify(join(downloads, 'big.bin'))} is larger than the upload limit of 64 bytes` })
+    // It grows between the size check and the copy, as a file the model's shell writes can, and stays within the limit.
+    const sizes: number[] = []
+    const growing = (bytes: number) => {
+      sizes.push(bytes)
       appendFileSync(join(downloads, 'growing.bin'), 'more')
       return Promise.resolve(undefined)
     }
-    expect(await stageUpload(join(downloads, 'growing.bin'), into, 64, undefined, growing)).toEqual(over('growing.bin'))
+    expect(await stageUpload(join(downloads, 'growing.bin'), into, 64, undefined, growing))
+      .toEqual({ refusal: `${JSON.stringify(join(downloads, 'growing.bin'))} changed while it was copied` })
+    expect(sizes).toEqual([1])
     expect(await stageUpload(join(downloads, 'growing.bin'), into, 128, undefined, () => Promise.resolve('no room'))).toEqual({ refusal: 'no room' })
     expect(readdirSync(into)).toEqual([])
   })

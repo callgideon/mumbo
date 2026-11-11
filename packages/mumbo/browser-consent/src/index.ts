@@ -280,15 +280,16 @@ function readableBy(reader: SubprocessChildIdentity, info: Stats): boolean {
  * Copy one upload into a new directory, named by a random nonce, in the staging directory. The source is opened once,
  * without following a link at its name and without blocking, as a FIFO or device would on open or read; `fstat` on that
  * descriptor must show a regular file of at most `maxBytes` that `reader` may read, and the copy reads only through it,
- * enforcing the cap again as the file may grow. The SHA-256 is computed while copying; a write that stores fewer bytes
- * than were read fails the copy. The nonce directory ends with mode `0750` and the copy with `0440`, both in the group
- * that a set-group-ID staging directory gives them.
+ * refusing a file that grows past that `fstat` size while it is copied. The SHA-256 is computed while copying; a write
+ * that stores fewer bytes than were read fails the copy. The nonce directory ends with mode `0750` and the copy with
+ * `0440`, both in the group that a set-group-ID staging directory gives them.
  * @param source - a path directly in the upload directory.
  * @param staging - the validated staging directory.
  * @param maxBytes - the largest file it copies.
  * @param reader - the identity the model's processes run as, which must be able to read the file itself; `undefined`
  *   when they run as this process, which opened it.
- * @param makeRoom - called with the file's size before it is copied; returns why there is no room for it, if so.
+ * @param makeRoom - called with the file's `fstat` size before it is copied, which the copy never passes; returns why
+ *   there is no room for it, if so.
  * @returns the staged file, or why it was refused; a refused or failed copy leaves nothing in the staging directory.
  */
 export async function stageUpload(
@@ -296,7 +297,6 @@ export async function stageUpload(
   makeRoom: (bytes: number) => Promise<string | undefined>,
 ): Promise<StagedFile | { readonly refusal: string }> {
   const shown = JSON.stringify(source)
-  const over = { refusal: `${shown} is larger than the upload limit of ${String(maxBytes)} bytes` }
   let input: FileHandle
   try {
     input = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
@@ -310,7 +310,7 @@ export async function stageUpload(
     if (!info.isFile()) return { refusal: `${shown} is not a regular file` }
     // Consent reads as root: a file the model could not read itself is never sent for it.
     if (reader !== undefined && !readableBy(reader, info)) return { refusal: `${shown} is a file the assistant cannot read itself` }
-    if (info.size > maxBytes) return over
+    if (info.size > maxBytes) return { refusal: `${shown} is larger than the upload limit of ${String(maxBytes)} bytes` }
     const crowded = await makeRoom(info.size)
     if (crowded !== undefined) return { refusal: crowded }
     const directory = join(staging, randomBytes(16).toString('hex'))
@@ -325,7 +325,7 @@ export async function stageUpload(
         for (;;) {
           const { bytesRead } = await input.read(buffer, 0, buffer.length, null)
           bytes += bytesRead
-          if (bytesRead === 0 || bytes > maxBytes) break
+          if (bytesRead === 0 || bytes > info.size) break
           hash.update(buffer.subarray(0, bytesRead))
           // One write(2), which a full disk can cut short without an error.
           const { bytesWritten } = await output.write(buffer, 0, bytesRead)
@@ -335,9 +335,10 @@ export async function stageUpload(
       } finally {
         await output.close()
       }
-      if (bytes > maxBytes) {
+      // Room was made for the fstat size, so a file that grew is not kept.
+      if (bytes > info.size) {
         await rm(directory, { recursive: true, force: true })
-        return over
+        return { refusal: `${shown} changed while it was copied` }
       }
       await chmod(directory, 0o750)
       return { path, name: basename(source), bytes, sha256: hash.digest('hex') }
