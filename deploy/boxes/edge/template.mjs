@@ -105,9 +105,11 @@ const NFT_PROBE_PORT = 47999
  *  chain accepts root's TCP connections to NFT_PROBE_PORT (`meta skuid 0`) and resets every other one, runs a listener on
  *  127.0.0.1 there as root with node (the image's runtime), and requires that root connects and that agent is refused
  *  (ECONNREFUSED). It deletes the table and stops the listener before it checks, and a table it cannot delete fails the
- *  build too, so neither reaches the template. A subshell: e2b's runCmd joins the steps with `&&`, which then carries the
+ *  build too, so neither reaches the template. It first prints the kernel release and its NFT_REJECT_INET setting into the
+ *  build log, for the operator to match against the boxes' kernel. A subshell: e2b's runCmd joins the steps with `&&`, which then carries the
  *  step's status and skips it after a failed step. */
 export const NFT_SMOKE_STEP = `(${[
+  'echo "mumbo-box: nftables smoke check on kernel $(uname -r 2>/dev/null)"; zcat /proc/config.gz 2>/dev/null | grep NFT_REJECT_INET || :',
   `N=$(command -v node) || { echo 'mumbo-box: the nftables smoke check needs node' >&2; exit 1; }`,
   `C='const s=require("net").connect(${NFT_PROBE_PORT},"127.0.0.1");s.on("connect",()=>process.exit(0));s.on("error",e=>process.exit(e.code==="ECONNREFUSED"?3:1));setTimeout(()=>process.exit(2),5000)'`,
   'export N C',
