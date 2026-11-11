@@ -47,7 +47,8 @@ export function cellsConfig(env) {
     const unknown = keys.filter(k => !FIELDS.includes(k)), missing = FIELDS.filter(k => !keys.includes(k))
     if (unknown.length || missing.length) fail(`${at} must have exactly ${FIELDS.join(', ')} (unknown: ${unknown.map(k => JSON.stringify(k)).join(', ') || 'none'}; missing: ${missing.join(', ') || 'none'})`)
     if (typeof c.bucket !== 'string' || !/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(c.bucket)) fail(`${at}.bucket must be an S3 bucket name`)
-    // 0 is no edge-side cap, as MAX_RUNNING_UNITS; a negative count (Terraform with node_count 0) stops the edge.
+    // 0 is no edge-side cap, as MAX_RUNNING_UNITS. Terraform never sends a negative (its formula is at least 0, also for a
+    // cell of 0 nodes), so one is a misconfiguration and stops the edge.
     if (!Number.isInteger(c.maxUnits) || c.maxUnits < 0) fail(`${at}.maxUnits must be a whole number of at least 0`)
     if (typeof c.e2bKeyEnv !== 'string' || !/^[A-Z][A-Z0-9_]*$/.test(c.e2bKeyEnv)) fail(`${at}.e2bKeyEnv must name an environment variable`)
     // The SDK takes E2B_API_KEY for an empty key, which is another cell's.
@@ -90,6 +91,8 @@ export function cellClients(cells, { env, E2B, Sandbox, S3Client, PutObjectComma
     return [region, {
       region, proxy: c.sandbox, bucket: c.bucket, maxUnits: c.maxUnits, s3,
       // The SDK uses sandboxUrl verbatim as the base of every in-box (envd) request: the origin, without a trailing slash.
+      // e2b marks sandboxUrl deprecated, to be removed in its next major version; that upgrade must keep a way to set
+      // each cell's client-proxy.
       Sandbox: c.e2bKeyEnv ? new E2B({ apiKey: env[c.e2bKeyEnv], apiUrl: c.api, sandboxUrl: c.sandbox.origin }).Sandbox : Sandbox,
       presignGet: presignGetter({ s3, bucket: c.bucket, HeadObjectCommand, GetObjectCommand, getSignedUrl }),
       presignPut: (key) => getSignedUrl(s3, new PutObjectCommand({ Bucket: c.bucket, Key: key, ContentType: 'application/gzip' }), { expiresIn: 900 }),

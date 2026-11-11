@@ -1104,10 +1104,10 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
   /** The cell a principal's placement doc names, without placing anyone: us-east-1 until a person's first ensure. */
   const placedCell = async (principal) => cellOf(await store.getDoc(placementKey(principal)))
   // ensure's targets by principal, for cfg.placementCacheMs. ponytail: per replica, so a box another replica replaces is
-  // reached at its old target until the entry expires or a proxy error forgets it. B22: deleting an entry clears only this
-  // replica (other replicas, the other region's edge and an operator script cannot reach it), so a move must either read
-  // the principal's placement doc (its moving mark) on every hit, or wait at least cfg.placementCacheMs after setting the
-  // mark before its final backup.
+  // reached at its old target until the entry expires, a proxy error or the client-proxy's not-found answer forgets it, or
+  // a 401 to a navigation uncaches it (userServer). B22: deleting an entry clears only this replica (other replicas, the
+  // other region's edge and an operator script cannot reach it), so a move must either read the principal's placement doc
+  // (its moving mark) on every hit, or wait at least cfg.placementCacheMs after setting the mark before its final backup.
   const cached = new Map()  // principal -> { target, until }
 
   async function all(cell, query) {
@@ -1375,8 +1375,10 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
       say({ level: 'error', msg: 'pause failed', box: b.id, error: e.message })
     })
   }
-  // forget: a proxy error to box `id`. This replica's cached targets for it go, and its next ensure repairs it (no launch).
-  return { ensure, firstSetUp, touch, owns, sweep, adoptRunning, forget: (id) => {
+  // forget: a proxy error to box `id`, or the client-proxy's not-found answer for it. This replica's cached targets for it
+  // go, and its next ensure repairs it (no launch). uncache: only this replica's cached target for `principal` goes; the
+  // record keeps its launch token.
+  return { ensure, firstSetUp, touch, owns, sweep, adoptRunning, uncache: (principal) => { cached.delete(principal) }, forget: (id) => {
     for (const [principal, c] of cached) if (c.target.id === id) cached.delete(principal)
     return store.patchBox(id, { launch: undefined })
   } }
@@ -1684,7 +1686,17 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, key
     quiet(box.touch(target.id))
     const up = httpRequest({ host: target.proxy.hostname, port: target.proxy.port, method: req.method, path: to.path, headers: { ...boxHeaders(cfg, req.headers, target, to.service), ...(member ? { 'x-mumbo-member': member } : {}) } }, (r) => {
       // A stale cookie (another account on this browser, or a recreated box) gets a fresh exchange instead of a dead end.
-      if (dsh && !member && r.statusCode === 401 && isNavigation(req)) { r.resume(); return res.writeHead(302, { location: launch, 'cache-control': 'no-store' }).end() }
+      // The cached launch token may be stale too (another replica's repair or a wake restarted dsh): the cached target
+      // goes, so the exchange's own 401 redirects to the store's token instead of looping.
+      if (dsh && !member && r.statusCode === 401 && isNavigation(req)) { r.resume(); box.uncache(key); return res.writeHead(302, { location: launch, 'cache-control': 'no-store' }).end() }
+      // E2B's client-proxy answers a box it cannot route with 502 and, in the head of the body, JSON `"message":"The
+      // sandbox was not found"` or, for a browser, its page titled "Sandbox not found" (packages/shared/pkg/proxy/template/
+      // sandbox_not_found.go): the box is forgotten, as on a connection error.
+      if (r.statusCode === 502) {
+        let head = ''
+        r.on('data', (c) => { if (head.length < 4096) head += c })
+        r.on('end', () => { if (/"message":"The sandbox was not found"|<title>Sandbox not found /.test(head)) quiet(box.forget(target.id)) })
+      }
       const headers = noFraming(secureCookies(cfg, { ...r.headers }))
       // KasmVNC's client connects to the host, port and path its URL names and, in Chrome, sends the local clipboard
       // there: a second policy lets the live view's pages connect to this host only. data: is its video decoder probe.

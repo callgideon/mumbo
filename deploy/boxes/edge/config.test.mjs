@@ -76,7 +76,8 @@ test('rollback safety: the pre-B13 edge filter strips the default sign-in cookie
 test('capacity: node_count drives both the node group and the edge cap (24 units per node minus 4, max 10 nodes)', () => {
   const tf = (f) => readFileSync(new URL(`../prod/${f}`, import.meta.url), 'utf8')
   assert.match(tf('modules/edge/edge.tf'), /MAX_RUNNING_UNITS\s*=\s*tostring\(2 \* \(12 \* local\.home\.node_count - 2\)\)/)
-  assert.match(tf('modules/edge/edge.tf'), /maxUnits = 2 \* \(12 \* c\.node_count - 2\)/, 'CELLS: the same formula on each cell\'s own node count')
+  // At least 0: a cell scaled to 0 nodes gets no edge-side cap, never a negative that cells.mjs refuses (every edge would stop).
+  assert.match(tf('modules/edge/edge.tf'), /maxUnits = max\(0, 2 \* \(12 \* c\.node_count - 2\)\)/, 'CELLS: the same formula on each cell\'s own node count, at least 0')
   assert.match(tf('edge.tf'), /"us-east-1" = \{[^}]*node_count\s*= var\.node_count\n[^}]*\}\n\s*"ap-south-1" = \{[^}]*node_count\s*= var\.node_count_ap_south_1\n/)
   assert.match(tf('modules/cell/nodes.tf'), /min_size\s*=\s*min\(2, var\.node_count\)/)
   assert.match(tf('modules/cell/nodes.tf'), /termination_policies\s*=\s*\["OldestLaunchTemplate", "OldestInstance"\]/)
@@ -261,7 +262,7 @@ test('prod Terraform: CELLS as edge/cells.mjs parses it, each cell\'s E2B key an
   const tf = (f) => readFileSync(new URL(`../prod/${f}`, import.meta.url), 'utf8')
   const mod = tf('modules/edge/edge.tf'), root = tf('edge.tf')
   // The CELLS fields Terraform writes are exactly the ones cellsConfig takes (it refuses any other).
-  const fields = /CELLS = jsonencode\(\{ for r, c in var\.cells : r => \{\n\s*(.*)\n/.exec(mod)?.[1].split(', ').map(f => f.split(' = ')[0])
+  const fields = /CELLS = jsonencode\(\{ for r, c in var\.cells : r => \{\n\s*(.*)\n/.exec(mod)?.[1].split(/, (?=\w+ = )/).map(f => f.split(' = ')[0])
   assert.deepEqual(fields, ['api', 'sandbox', 'bucket', 'maxUnits', 'e2bKeyEnv'])
   assert.match(mod, /e2b_key_env = \{ for r in keys\(var\.cells\) : r => "E2B_API_KEY_\$\{upper\(replace\(r, "-", "_"\)\)\}" \}/)
   const keyEnv = (r) => `E2B_API_KEY_${r.toUpperCase().replaceAll('-', '_')}`
@@ -280,6 +281,7 @@ test('prod Terraform: CELLS as edge/cells.mjs parses it, each cell\'s E2B key an
   assert.match(root, /variable "edge_cells" \{[^}]*default\s*= false/, 'single-cell until R6 part 1 sets it')
   assert.match(root, /variable "placement_cache_ms" \{[^}]*default\s*= 30000/)
   assert.match(mod, /PLACEMENT_CACHE_MS\s*= tostring\(var\.placement_cache_ms\)/)
+  assert.match(tf('terraform.tfvars'), /^placement_cache_ms\s*= 0\s/m, 'off on the us-east-1 edge, whose store is in-region')
   // The edge reads neither key through its task role any more; the grants stay only for a rollback to an older image.
   assert.match(mod, /Remove once a B21 revision is steady/)
   assert.match(mod, /Action = "s3:PutObject", Resource = "arn:aws:s3:::\$\{local\.audit_bucket\}\/\$\{local\.audit_prefix\}\*"/)

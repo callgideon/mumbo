@@ -351,9 +351,10 @@ locals {
   # SDK reads.
   e2b_keys = var.cells_enabled ? tomap({ for r, c in var.cells : local.e2b_key_env[r] => c.e2b_secret_arn }) : tomap({ E2B_API_KEY = local.home.e2b_secret_arn })
   cells_env = {
-    # Each cell's region is its key; maxUnits is MAX_RUNNING_UNITS's formula on the cell's own node count.
+    # Each cell's region is its key; maxUnits is MAX_RUNNING_UNITS's formula on the cell's own node count, at least 0: a
+    # cell scaled to 0 nodes gets 0 (no edge-side cap) instead of a negative, which edge/cells.mjs refuses at start.
     CELLS = jsonencode({ for r, c in var.cells : r => {
-      api = c.e2b_api_url, sandbox = c.e2b_sandbox_url, bucket = c.backup_bucket, maxUnits = 2 * (12 * c.node_count - 2), e2bKeyEnv = local.e2b_key_env[r]
+      api = c.e2b_api_url, sandbox = c.e2b_sandbox_url, bucket = c.backup_bucket, maxUnits = max(0, 2 * (12 * c.node_count - 2)), e2bKeyEnv = local.e2b_key_env[r]
     } })
     EDGE_REGION = local.region # newcomers' region
   }

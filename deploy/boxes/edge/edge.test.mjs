@@ -1567,6 +1567,61 @@ test('placement cache: a second ensure within PLACEMENT_CACHE_MS asks neither th
   assert.ok(work(off)[0] > once[0] && work(off)[1] > once[1], '0 turns the cache off')
 })
 
+/** userServer over boxes() with the placement cache on, and a fake client-proxy whose answer `answer(req)` gives. */
+async function cachedRig(answer) {
+  const sent = []
+  const proxy = createServer((req, res) => { sent.push([req.headers['e2b-sandbox-id'], req.url]); const a = answer(req); res.writeHead(a.status, { 'content-type': a.type ?? 'text/plain' }).end(a.body) })
+  const { us, cells } = twoCells({ us: { port: await listen(proxy) } }); const store = memoryStore()
+  const b = boxes({ cells, store, cfg: { ...cfg, placementCacheMs: 30_000 }, edgeKey: 'k', log: () => {} })
+  const server = userServer({ cfg, box: b, log: () => {} })
+  return { us, store, b, sent, port: await listen(server), close: () => { server.close(); proxy.close() } }
+}
+
+test('placement cache: the client-proxy\'s sandbox-not-found answer, as JSON or its browser page, forgets the cached box; its port-not-open answer does not', async () => {
+  const notFound = (id) => ({ status: 502, type: 'application/json; charset=utf-8', body: `{"sandboxId":"${id}","message":"The sandbox was not found","code":502}` })
+  const page = { status: 502, type: 'text/html; charset=utf-8', body: '<!DOCTYPE html>\n<html lang="en">\n<head>\n    <meta charset="utf-8">\n    <title>Sandbox not found · E2B</title>\n</head>\n</html>' }
+  const portClosed = (id) => ({ status: 502, type: 'application/json; charset=utf-8', body: `{"sandboxId":"${id}","message":"The sandbox is running but port is not open","port":8080,"code":502}` })
+  let next
+  const t = await cachedRig((req) => next?.(req.headers['e2b-sandbox-id']) ?? { status: 200, body: 'ok' })
+  const json = { 'x-forwarded-email': 'a@x.com', accept: 'application/json', cookie: 'dsh-auth-x=1' }
+  try {
+    const { id: first } = await t.b.ensure('a@x.com')
+    next = portClosed
+    assert.equal((await call(t.port, { headers: json })).status, 502)
+    next = undefined
+    await call(t.port, { headers: json })
+    assert.deepEqual(t.sent.map(s => s[0]), [first, first], 'the port-not-open answer keeps the cached box')
+    // E2B lost the box; the proxy's answer reaches the browser unchanged, and the next request finds no box and makes one.
+    t.us.sandboxes.delete(first); next = notFound
+    const r = await call(t.port, { headers: json })
+    assert.deepEqual([r.status, r.body], [502, notFound(first).body])
+    next = undefined
+    await call(t.port, { headers: json })
+    const second = t.sent.at(-1)[0]
+    assert.notEqual(second, first, 'after the JSON answer, a new box')
+    t.us.sandboxes.delete(second); next = () => page
+    assert.equal((await call(t.port, { headers: nav })).body, page.body)
+    next = undefined
+    await call(t.port, { headers: nav })
+    assert.ok(![first, second].includes(t.sent.at(-1)[0]), 'after the browser page, a new box')
+  } finally { t.close() }
+})
+
+test('placement cache: a 401 to a navigation drops only the cached target, so a launch token renewed elsewhere reaches the browser one hop later', async () => {
+  const t = await cachedRig((req) => req.url === '/?token=renewed' ? { status: 200, body: 'dsh' } : { status: 401, body: '' })
+  try {
+    const { id, token } = await t.b.ensure('a@x.com')
+    // Another replica's repair (or a wake) restarted dsh: the store has the new launch token, this replica's cache the old.
+    await t.store.patchBox(id, { launch: 'renewed' })
+    const first = await call(t.port, { headers: nav })
+    assert.deepEqual([first.status, first.headers.location], [302, `/?token=${token}`], 'the cached, stale token')
+    const second = await call(t.port, { path: first.headers.location, headers: nav })
+    assert.deepEqual([second.status, second.headers.location], [302, '/?token=renewed'], 'the store\'s token, not another stale redirect')
+    assert.equal((await call(t.port, { path: second.headers.location, headers: nav })).body, 'dsh')
+    assert.equal((await t.store.getBox(id)).launch, 'renewed', 'the record keeps its launch token')
+  } finally { t.close() }
+})
+
 test('approval audit records go to the us-east-1 cell\'s bucket, whichever edge writes them', async () => {
   const { auditor } = await import('./edge.mjs')
   const sent = [], logs = []

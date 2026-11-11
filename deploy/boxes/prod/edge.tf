@@ -15,7 +15,7 @@ variable "edge_cells" {
   default     = false
 }
 variable "placement_cache_ms" {
-  description = "PLACEMENT_CACHE_MS: how long an edge replica reuses a principal's box target without the store or E2B; 0 turns the cache off (R6 measures both)."
+  description = "PLACEMENT_CACHE_MS of the us-east-1 edge: how long an edge replica reuses a principal's box target without the store or E2B; 0 turns the cache off."
   type        = number
   default     = 30000
   validation {
