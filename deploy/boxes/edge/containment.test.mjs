@@ -738,7 +738,8 @@ const SS_OK = [
 /** A fake start.sh in a temporary root `$T`: it lays out and writes as a box's does, in /root (also changing its modes
  *  and writing into the image's .cargo), /home, /src, /var/lib/mumbo, /usr/local/share/mumbo, /run and /tmp, starts a
  *  fake dsh (a node process whose command line names dsh's entry point, pid in $T/dsh.pid) unless `dsh` is false,
- *  prints dsh's start line unless `line` is false, runs `extra` and exits with `exit`. */
+ *  prints dsh's start line unless `line` is false, runs `extra` and exits with `exit`. A process `extra` starts writes
+ *  its pid to another $T/*.pid file. */
 const fakeStart = ({ line = true, dsh = true, exit = 0, extra = '' } = {}) => `set -eu
 : > $T/ran
 echo 'start.sh: laying out'
@@ -755,8 +756,10 @@ exit ${exit}
 
 /** Runs `before && dshSmokeStep(true)` with the box paths moved into a temporary root whose /root (0700) holds .cargo
  *  (0755) and .profile, the start script replaced by `start`, real tools, and fake id (containment users 4000001 to
- *  4000005), ss (printing `ss`, or failing on null) and sleep (20 ms). Returns the status, output with the root as T,
- *  whether the fake dsh is still running, whether start.sh ran, and whether the moved paths read as before. */
+ *  4000005), ss (printing `ss`, or failing on null), sleep (20 ms) and ps, which lists only the processes whose
+ *  environment holds the run's MUMBO_SMOKE_TEST, so the step sees and kills no process of this host's. Returns the
+ *  status, output with the root as T, whether a process of a $T/*.pid file is still running, whether start.sh ran, and
+ *  whether the moved paths read as before. */
 function smoke({ start = fakeStart(), ss = SS_OK, before = 'true', setup = () => {} } = {}) {
   const t = mkdtempSync(join(tmpdir(), 'dsh-smoke-'))
   try {
@@ -764,33 +767,37 @@ function smoke({ start = fakeStart(), ss = SS_OK, before = 'true', setup = () =>
     writeFileSync(join(t, 'root/.profile'), '')
     chmodSync(join(t, 'root'), 0o700); chmodSync(join(t, 'root/.cargo'), 0o755)
     writeFileSync(join(t, 'usr/local/share/mumbo/ports'), '880 881\n')
-    for (const tool of ['sh', 'find', 'sort', 'comm', 'cmp', 'mktemp', 'base64', 'setsid', 'cat', 'grep', 'pgrep', 'ps', 'awk', 'xargs', 'rm', 'chmod', 'tail', 'tr', 'head', 'mkdir']) symlinkSync(which(tool), join(t, 'bin', tool))
+    for (const tool of ['sh', 'find', 'sort', 'comm', 'cmp', 'mktemp', 'base64', 'setsid', 'cat', 'grep', 'pgrep', 'awk', 'xargs', 'rm', 'chmod', 'tail', 'tr', 'head', 'mkdir']) symlinkSync(which(tool), join(t, 'bin', tool))
     symlinkSync('/bin/kill', join(t, 'bin/kill'))
     const fake = (name, body) => { writeFileSync(join(t, 'bin', name), `#!/bin/sh\n${body}\n`); chmodSync(join(t, 'bin', name), 0o755) }
     fake('id', 'case "$2" in agent) echo 4000001;; mcpserver) echo 4000002;; browsermcp) echo 4000003;; desktop) echo 4000004;; xsession) echo 4000005;; *) exit 1;; esac')
     writeFileSync(join(t, 'ss.txt'), ss === null ? '' : ss.join('\n') + '\n')
     fake('ss', ss === null ? 'exit 1' : `[ "$1" = -ltnpeH ] && cat ${t}/ss.txt`)
     fake('sleep', `exec ${which('sleep')} 0.02`)
+    fake('ps', `[ "$1" = -e ] || exit 2; shift; exec ${which('ps')} -p "$(${which('grep')} -lsF 'MUMBO_SMOKE_TEST=${t}' /proc/[0-9]*/environ | ${which('cut')} -d/ -f3 | ${which('paste')} -sd, -)" "$@"`)
     setup(t)
     const listing = () => ['root', 'home', 'src', 'usr', 'var', 'run', 'tmp', 'dev'].flatMap(d => [d, ...readdirSync(join(t, d), { recursive: true }).map(p => join(d, p))])
       .map(p => `${p} ${(lstatSync(join(t, p)).mode & 0o7777).toString(8)}`).sort().join('\n')
     const was = listing()
     const step = dshSmokeStep(true).replace(base64(smokeStartScript(true)), base64(start.replaceAll('$T', t)))
       .replace(/(?<=^|[\s'"=(<>])\/(var\/lib\/mumbo|usr\/local\/share\/mumbo|var\/tmp|dev\/shm|root|home|src|run|tmp)(?=[/\s'";)]|$)/g, `${t}/$1`)
-    const out = spawnSync('/bin/sh', ['-c', `${before} && ${step}`], { encoding: 'utf8', env: { PATH: join(t, 'bin') }, timeout: 60000 })
-    const pid = existsSync(join(t, 'dsh.pid')) ? readFileSync(join(t, 'dsh.pid'), 'utf8').trim() : undefined
+    const out = spawnSync('/bin/sh', ['-c', `${before} && ${step}`], { encoding: 'utf8', env: { PATH: join(t, 'bin'), MUMBO_SMOKE_TEST: t }, timeout: 60000 })
     // A zombie waiting for its new parent to reap it is stopped.
-    let running = false
-    try { running = pid !== undefined && readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1][0] !== 'Z' } catch { /* ENOENT: gone */ }
-    if (running) process.kill(Number(pid), 'SIGKILL')
-    return { code: out.status, out: out.stdout, err: out.stderr.replaceAll(t, 'T'), running, ran: existsSync(join(t, 'ran')), same: listing() === was }
+    const running = readdirSync(t).filter(f => f.endsWith('.pid')).map(f => Number(readFileSync(join(t, f), 'utf8'))).filter(pid => {
+      try { return readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1][0] !== 'Z' } catch { return false /* ENOENT: gone */ }
+    })
+    for (const pid of running) process.kill(pid, 'SIGKILL')
+    return { code: out.status, out: out.stdout, err: out.stderr.replaceAll(t, 'T'), running: running.length > 0, ran: existsSync(join(t, 'ran')), same: listing() === was }
   } finally { rmSync(t, { recursive: true, force: true }) }
 }
 
 test('template: the dsh smoke check passes when dsh prints its start line and no other user\'s listener is open to agent, and leaves nothing behind', (t) => {
   if (spawnSync('sh', ['-c', 'command -v setsid']).status !== 0) return t.skip('setsid is not installed on this host')
-  const ok = smoke()
-  assert.deepEqual(ok, { code: 0, out: 'mumbo-box: dsh smoke check: start dsh as a box does, with dummy values\nmumbo-box: dsh smoke check passed\n', err: '', running: false, ran: true, same: true })
+  const ok = { code: 0, out: 'mumbo-box: dsh smoke check: start dsh as a box does, with dummy values\nmumbo-box: dsh smoke check passed\n', err: '', running: false, ran: true, same: true }
+  assert.deepEqual(smoke(), ok)
+  // dsh-subprocess-local starts each child in a session of its own, and without containment as root: the step stops it too.
+  const detached = `setsid "${process.execPath}" -e 'setTimeout(() => {}, 30000)' </dev/null >/dev/null 2>&1 & echo $! > $T/detached.pid`
+  assert.deepEqual(smoke({ start: fakeStart({ extra: detached }) }), ok)
 })
 
 test('template: the dsh smoke check fails on a slow, dead or failed dsh, an open listener or no ss, prints why with the logs, and still leaves nothing behind', (t) => {

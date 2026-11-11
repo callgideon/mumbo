@@ -172,10 +172,13 @@ const SMOKE_SCAN = '/root /home /src /var/lib/mumbo /usr/local/share/mumbo /run/
  *  TCP listeners as root (`ss -ltnpeH`; `-e` prints a socket's uid, except root's) and fails on any whose user is not
  *  agent and whose port is neither in the output chain's reset set (envd, dsh, the live view, the door, 5900 to 5999,
  *  9222) nor in LISTENER_ALLOWLIST. On a failure it prints the reason and the tails of start.sh's output, /root/dsh.log
- *  and dsh's start-up audit (/root/.dsh/logs/startup-*.log). Either way it then kills every process of that session and
- *  of the containment users, removes every path that appeared under SMOKE_SCAN, restores the modes of /root and its
- *  entries (the layout sets them at every start), and fails unless no such process is left and SMOKE_SCAN and those
- *  modes read as before. dsh runs at a box's own paths (HOME /root, DSH_HOME /root/.dsh, its log /root/dsh.log), which
+ *  and dsh's start-up audit (/root/.dsh/logs/startup-*.log). Either way it then kills every process of the containment
+ *  users and every process that started during the step (one whose pid `ps -e` did not list before start.sh) but kernel
+ *  threads, the step's own session and envd's children (its socat port forwarders, which envd stops itself):
+ *  dsh-subprocess-local starts each child in a session of its own, and as root on an image without serverIdentity. A
+ *  process another service starts while the step runs is killed too. It removes every path that appeared under
+ *  SMOKE_SCAN, restores the modes of /root and its entries (the layout sets them at every start), and fails unless no
+ *  such process is left and SMOKE_SCAN and those modes read as before. dsh runs at a box's own paths (HOME /root, DSH_HOME /root/.dsh, its log /root/dsh.log), which
  *  the rows and the layout name, so the step refuses a template that already has /root/.dsh, /root/.mumbo, /root/dsh.log,
  *  /root/projects or /root/work. What stays: mcpserver's supplementary groups set to none (`usermod -G ''`), as
  *  usersSteps left them, and smokeStartScript's sysctls, which every box's start script sets to the same values. A template without the marker runs dsh on OLD_PORTS, as its boxes would; an image without
@@ -194,13 +197,16 @@ export const dshSmokeStep = (person) => {
     `S='${SMOKE_SCAN}'; T=$(mktemp -d /run/mumbo-smoke.XXXXXX) || exit 1`,
     'find $S -xdev 2>/dev/null | sort -T $T > $T/before; find /root -maxdepth 1 ! -type l -printf \'%m %p\\n\' | sort > $T/modes',
     `echo ${Buffer.from(smokeStartScript(person)).toString('base64')} | base64 -d > $T/start.sh`,
-    'why=; setsid -w sh -c \'echo $$ > "$1"; exec sh "$2"\' - $T/sid $T/start.sh </dev/null >$T/start.log 2>&1 || why="start.sh failed (status $?)"',
+    'why=; ps -e -o pid= > $T/pids; setsid -w sh -c \'echo $$ > "$1"; exec sh "$2"\' - $T/sid $T/start.sh </dev/null >$T/start.log 2>&1 || why="start.sh failed (status $?)"',
     'sid=$(cat $T/sid 2>/dev/null); case $sid in \'\'|0|*[!0-9]*) sid=; [ -n "$why" ] || why=\'start.sh wrote no session id\';; esac',
     `n=0; while [ -z "$why" ] && ! grep -qs 'dsh web: http[^ ]*[?]token=' /root/dsh.log; do if ! pgrep -s "$sid" -f 'apps/cli/src/bin[.]ts' >/dev/null; then why='dsh exited before its start line'; elif [ $n -ge ${DSH_SMOKE_SECONDS} ]; then why='dsh printed no start line within ${DSH_SMOKE_SECONDS} s'; else sleep 1; n=$((n + 1)); fi; done`,
     `[ -n "$why" ] || { L=$(ss -ltnpeH) || why='ss could not list the TCP listeners'; }; [ -n "$why" ] || { bad=$(printf '%s\\n' "$L" | ${listeners}); [ -z "$bad" ] || why="agent may connect to these listeners of other users, outside the output chain's reset set and LISTENER_ALLOWLIST (template.mjs): $bad"; }`,
     '[ -z "$why" ] || { echo "mumbo-box: the dsh smoke check failed: $why"; echo "--- start.sh"; tail -n 20 $T/start.log; echo "--- /root/dsh.log"; tail -n 60 /root/dsh.log; for f in /root/.dsh/logs/startup-*.log; do [ ! -e "$f" ] || { echo "--- $f"; tail -n 60 "$f"; }; done; } >&2',
-    `U=$(for u in ${containmentUsers(person).join(' ')}; do id -u $u 2>/dev/null; done | tr '\\n' ' '); procs() { ps -e -o sid=,uid=,stat=,pid=,args= | awk -v s="$sid" -v u=" $U" '$3 !~ /^Z/ && ($1 == s || index(u, " " $2 " "))'; }`,
-    'n=0; while [ -n "$(procs)" ] && [ $n -lt 10 ]; do procs | awk \'{ print $4 }\' | xargs -r kill -KILL 2>/dev/null; sleep 1; n=$((n + 1)); done; left=$(procs); [ -z "$left" ] || { echo "mumbo-box: the dsh smoke check could not stop: $left" >&2; why=1; }',
+    `U=$(for u in ${containmentUsers(person).join(' ')}; do id -u $u 2>/dev/null; done | tr '\\n' ' '); E=$(pgrep -x envd | tr '\\n' ' '); me=$(ps -e -o pid=,sid= | awk -v p=$$ '$1 == p { print $2 }')`,
+    // The containment users' processes, and those that started during the step (not in $T/pids) but kernel threads
+    // (kthreadd, pid 2, and its children), the step's own session and envd's children.
+    `procs() { ps -e -o pid=,ppid=,sid=,uid=,stat=,args= | awk -v u=" $U" -v e=" $E" -v me="$me" 'NR == FNR { old[$1]; next } $5 !~ /^Z/ && (index(u, " " $4 " ") || !($1 in old) && $1 != 2 && $2 != 2 && $3 != me && !index(e, " " $2 " "))' $T/pids -; }`,
+    'n=0; while [ -n "$(procs)" ] && [ $n -lt 10 ]; do procs | awk \'{ print $1 }\' | xargs -r kill -KILL 2>/dev/null; sleep 1; n=$((n + 1)); done; left=$(procs); [ -z "$left" ] || { echo "mumbo-box: the dsh smoke check could not stop: $left" >&2; why=1; }',
     'find $S -xdev 2>/dev/null | sort -T $T > $T/after; comm -13 $T/before $T/after | awk \'k == "" || index($0, k "/") != 1 { print; k = $0 }\' | while IFS= read -r p; do rm -rf -- "$p"; done; while read -r m p; do chmod "$m" "$p"; done < $T/modes',
     'left=$(find $S -xdev 2>/dev/null | sort -T $T | comm -3 $T/before - | head -n 20); [ -z "$left" ] || { echo "mumbo-box: the dsh smoke check could not undo: $left" >&2; why=1; }; find /root -maxdepth 1 ! -type l -printf \'%m %p\\n\' | sort | cmp -s - $T/modes || { echo "mumbo-box: the dsh smoke check could not restore the modes in /root" >&2; why=1; }',
     'rm -rf $T; [ -z "$why" ] && echo "mumbo-box: dsh smoke check passed"',
