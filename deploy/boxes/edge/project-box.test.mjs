@@ -50,7 +50,9 @@ test('a user box start script is byte-for-byte what it was before project boxes 
   // getent, so system daemons keep their paths (containment.test.mjs). Then KasmVNC's comment named xvnc its own user
   // rather than a system user, since the template makes it without `-r` (template.mjs).
   // Then the repair first stops the start when E2B's user, or on a B24 template a user it makes, is below uid 1000 (containment.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), '0a94a49e5253542595a72978812b2a9c77dd1dc4dfce4ff633393cd0ad45fc6e')
+  // Then the B24 template's kernel and network part stops and masks the unused ssh, rpcbind and nginx units that are
+  // active and stops the start when anything listens on TCP 22, 80 or 111 (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), '0c5829af5e78c59df24d54cd2b84a29a721ddea58eb45177675fab85c4a5ca7d')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -81,7 +83,9 @@ test('a project box start script is byte-for-byte what it was before B18 changed
   // Then the repair took ownership only from login users (uid 1000 or more) and g+w only from login groups, read with
   // getent, so system daemons keep their paths (containment.test.mjs).
   // Then the repair first stops the start when E2B's user, or on a B24 template a user it makes, is below uid 1000 (containment.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), '52eaff8f93a0fa176c7eea2e2da817b86c072d1ad73865ae40e1fd44639792b7')
+  // Then the B24 template's kernel and network part stops and masks the unused ssh, rpcbind and nginx units that are
+  // active and stops the start when anything listens on TCP 22, 80 or 111 (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), '76c1f494b42bfbc790a2f09c5ac1e3b98242fa67e683ce6b1f63757ccfa3ad17')
 })
 
 const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'

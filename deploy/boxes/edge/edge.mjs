@@ -375,8 +375,14 @@ bad=$(${find} \\( -uid +999 -o ! -type l \\( ${world} -o ${group} \\) \\) -print
 `
 }
 
+/** Units no box uses whose listeners reach beyond root: ssh (E2B's base provisioning installs openssh-server and enables
+ *  it), rpcbind (nfs-common in E2B's base, for E2B volumes) and nginx (the web image's login gate). The template masks
+ *  them (template.mjs MASK_UNITS_STEP); a B24 box's start script stops and masks any that is active (hardening). */
+export const UNUSED_UNITS = ['ssh.socket', 'ssh.service', 'rpcbind.socket', 'rpcbind.service', 'nginx.service']
+
 /** The start script's kernel and network part on a template with PORTS_MARKER (B24), before any user's process starts:
- *  the unprivileged port floor, the link protections and hidepid, set and checked; no setuid su or sudo; and the firewall,
+ *  the unprivileged port floor and the link protections, set and checked; UNUSED_UNITS stopped and masked when active,
+ *  then nothing listening on TCP 22, 80 or 111, checked; hidepid, set and checked; no setuid su or sudo; and the firewall,
  *  one native nftables table `inet mumbo` (IPv4 and IPv6) whose output chain refuses connections by the socket's user
  *  (`meta skuid`), refusing a socket whose user it cannot read, and whose input chain admits new TCP connections from
  *  beyond loopback only to envd, dsh, the live view and the door, and keeps the WebRTC port box-local. The script writes
@@ -391,6 +397,14 @@ const hardening = () => `if [ -n "$B24_TEMPLATE" ]; then
     echo "\${kv#*=}" > "/proc/sys/\${kv%=*}"
     [ "$(cat "/proc/sys/\${kv%=*}")" = "\${kv#*=}" ] || { echo "mumbo-box: /proc/sys/\${kv%=*} is not \${kv#*=}" >&2; exit 1; }
   done
+  # No ssh, rpcbind or nginx, set rather than trusted (a template from before their masking, or a unit enabled again):
+  # each of their units that is active is stopped and masked, and nothing may listen on TCP 22, 80 or 111.
+  for u in ${UNUSED_UNITS.join(' ')}; do
+    ! systemctl is-active --quiet "$u" || systemctl mask --now "$u" || { echo "mumbo-box: could not stop and mask $u" >&2; exit 1; }
+  done
+  L=$(ss -ltnpH) || { echo 'mumbo-box: ss could not list the TCP listeners' >&2; exit 1; }
+  bad=$(printf '%s\\n' "$L" | awk '{ p = $4; sub(/.*:/, "", p) } p == "22" || p == "80" || p == "111"')
+  [ -z "$bad" ] || { printf 'mumbo-box: these listen on TCP 22, 80 or 111, which no box serves:\\n%s\\n' "$bad" >&2; exit 1; }
   # Every user but root sees only its own processes, their environments and command lines included.
   mount -o remount,hidepid=2 /proc
   grep -Eq '^[^ ]+ /proc proc [^ ]*hidepid=(2|invisible)' /proc/mounts || { echo 'mumbo-box: /proc is not mounted with hidepid=2' >&2; exit 1; }

@@ -1,7 +1,8 @@
 // node --test deploy/boxes/edge/containment.test.mjs
 // Agent containment (B24) in the start script: the rows it writes against the harness's fixtures, and its kernel,
-// network and layout parts run by sh in a temporary root with fake id, getent, usermod, chown, setfacl, mount and nft,
-// and only those and the real tools they need on PATH. The template's containment steps and nftables smoke check. The
+// network and layout parts run by sh in a temporary root with fake id, getent, usermod, chown, setfacl, mount, nft,
+// systemctl and ss, and only those and the real tools they need on PATH. The template's containment steps, its masking of
+// the unused units and its nftables smoke check. The
 // escape-test script's check list.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
@@ -12,8 +13,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { runInNewContext } from 'node:vm'
-import { startScript, boxSite, containmentRows, containmentLayout, signBox, memberKey, mumboMcpKey, roleInstructions, systemRepair, REPAIR_USERS, ENVD_PORT, MUMBO_MCP_PORT, PORTS_MARKER } from './edge.mjs'
-import { BOX_STEPS, PROJECT_STEPS, KASMVNC_BIND_STEP, NFT_SMOKE_STEP, DSH_SMOKE_SECONDS, DSH_SMOKE_SETTLE_SECONDS, INACTIVE_ALLOWLIST, LISTENER_ALLOWLIST, UMASK_STEP, WRITABLE_EXCLUDES, agentInstallScript, dshSmokeStep, kasmvncStep, smokeStartScript, usersSteps } from './template.mjs'
+import { startScript, boxSite, containmentRows, containmentLayout, signBox, memberKey, mumboMcpKey, roleInstructions, systemRepair, REPAIR_USERS, UNUSED_UNITS, ENVD_PORT, MUMBO_MCP_PORT, PORTS_MARKER } from './edge.mjs'
+import { BOX_STEPS, PROJECT_STEPS, KASMVNC_BIND_STEP, MASK_UNITS_STEP, NFT_SMOKE_STEP, DSH_SMOKE_SECONDS, DSH_SMOKE_SETTLE_SECONDS, INACTIVE_ALLOWLIST, LISTENER_ALLOWLIST, UMASK_STEP, WRITABLE_EXCLUDES, agentInstallScript, dshSmokeStep, kasmvncStep, smokeStartScript, usersSteps } from './template.mjs'
 
 // The files these tests make get a box's modes (0644, 0755), not this host's umask's: the checks of system files read them.
 process.umask(0o022)
@@ -147,11 +148,12 @@ const fakeFind = (bin, uid = ME.uid, agent = 4000001) => {
 }
 
 /** A temporary root for the start script's B24 parts: box paths moved under it, fakes on PATH that log to log/<name>,
- *  and an image project overlay that reads MUMBO_WORK_DIR. */
+ *  and an image project overlay that reads MUMBO_WORK_DIR. Its systemctl keeps the units' states in units/ (setUnits),
+ *  and its ss lists the lines of the file ss and of each running unit. */
 function root({ users = true, groups = GROUPS } = {}) {
   const t = mkdtempSync(join(tmpdir(), 'containment-'))
   // What the start script's head makes before these parts: /root/projects, /root/.dsh and /root/.mumbo.
-  for (const d of ['bin', 'log', 'root/projects', 'root/.dsh', 'root/.mumbo', 'proc/sys/net/ipv4', 'proc/sys/fs', 'usr/local/share/mumbo', 'var/lib', 'run', 'src/deploy']) mkdirSync(join(t, d), { recursive: true })
+  for (const d of ['bin', 'log', 'units', 'root/projects', 'root/.dsh', 'root/.mumbo', 'proc/sys/net/ipv4', 'proc/sys/fs', 'usr/local/share/mumbo', 'var/lib', 'run', 'src/deploy']) mkdirSync(join(t, d), { recursive: true })
   writeFileSync(join(t, 'src/deploy/mumbo-project.overlay.yml'), '    workDirectory: !!js process.env.MUMBO_WORK_DIR\n')
   chmodSync(join(t, 'root'), 0o755)
   for (const tool of REAL) symlinkSync(which(tool), join(t, 'bin', tool))
@@ -162,6 +164,15 @@ function root({ users = true, groups = GROUPS } = {}) {
   // Without a key, getent lists $t/etc/passwd or $t/etc/group (the system repair's login groups).
   fake('getent', `[ $# != 1 ] || exec cat ${t}/etc/$1; case $2 in ${Object.entries(groups).map(([g, gid]) => `${g}) echo ${g}:x:${gid}:;;`).join(' ')} *) exit 2;; esac`)
   for (const name of ['usermod', 'chown', 'setfacl', 'mount']) fake(name, log(name))
+  fake('systemctl', `${log('systemctl')}; d=${t}/units
+case $1 in
+  is-active) [ "$2" = --quiet ] && [ -e "$d/$3.active" ];;
+  is-enabled) [ -e "$d/$2" ] || exit 1; cat "$d/$2"; [ "$(cat "$d/$2")" = enabled ];;
+  disable) [ "$2" = --now ] && [ -e "$d/$3" ] || exit 1; rm -f "$d/$3.active"; echo disabled > "$d/$3";;
+  mask) shift; now=; [ "$1" != --now ] || { now=1; shift; }; for u; do echo masked > "$d/$u" || exit 1; [ -z "$now" ] || rm -f "$d/$u.active"; done;;
+  *) exit 99;;
+esac`)
+  fake('ss', `[ "$*" = -ltnpH ] || exit 99; [ ! -e ${t}/ss ] || cat ${t}/ss; for f in ${t}/units/*.active; do [ ! -e "$f" ] || cat "$f"; done`)
   // install: logs, then runs the real one without the owner and group, which the test's user cannot give.
   fake('install', `${log('install')}; a=; while [ $# -gt 0 ]; do case $1 in -o|-g) shift 2;; *) a="$a $1"; shift;; esac; done; exec ${which('install')} $a`)
   return {
@@ -178,6 +189,27 @@ function root({ users = true, groups = GROUPS } = {}) {
     },
     done: () => rmSync(t, { recursive: true, force: true }),
   }
+}
+/** Sets root `r`'s units: `states` maps a unit to enabled, disabled or masked (no entry: the image lacks it), and
+ *  `listeners` a running unit to the lines ss prints for it. */
+const setUnits = (r, states, listeners = {}) => {
+  for (const [u, state] of Object.entries(states)) writeFileSync(r.at(`units/${u}`), `${state}\n`)
+  for (const [u, lines] of Object.entries(listeners)) writeFileSync(r.at(`units/${u}.active`), lines.map(l => `${l}\n`).join(''))
+}
+/** Root `r`'s units: each one's state, and the running ones. */
+const unitsOf = (r) => {
+  const files = readdirSync(r.at('units')).sort()
+  return { states: Object.fromEntries(files.filter(f => !f.endsWith('.active')).map(f => [f, readFileSync(r.at(`units/${f}`), 'utf8').trim()])), running: files.filter(f => f.endsWith('.active')).map(f => f.slice(0, -'.active'.length)) }
+}
+/** A template from before the units' masking, as E2B's base and the web image leave it: ssh's socket and service,
+ *  rpcbind's and nginx enabled; ssh's socket (systemd holds it), rpcbind's (on IPv4 and IPv6) and nginx listening, and
+ *  rpcbind's service running. */
+const OLD_UNITS = { 'ssh.socket': 'enabled', 'ssh.service': 'enabled', 'rpcbind.socket': 'enabled', 'rpcbind.service': 'enabled', 'nginx.service': 'enabled' }
+const OLD_LISTENERS = {
+  'ssh.socket': ['LISTEN 0 4096 *:22 *:* users:(("systemd",pid=1,fd=50))'],
+  'rpcbind.socket': ['LISTEN 0 4096 0.0.0.0:111 0.0.0.0:* users:(("rpcbind",pid=300,fd=4),("systemd",pid=1,fd=51))', 'LISTEN 0 4096 [::]:111 [::]:* users:(("rpcbind",pid=300,fd=6),("systemd",pid=1,fd=53))'],
+  'rpcbind.service': [],
+  'nginx.service': ['LISTEN 0 511 0.0.0.0:80 0.0.0.0:* users:(("nginx",pid=400,fd=6))', 'LISTEN 0 511 [::]:80 [::]:* users:(("nginx",pid=400,fd=7))'],
 }
 /** The start script's B24 layout part, after the gates. */
 const layoutOf = (s) => s.slice(s.indexOf('CONTAINMENT_PATCH=\n'), s.indexOf('AGENTS_HOME=/root/.mumbo/agents'))
@@ -361,8 +393,8 @@ test('the B24 layout fails loud on a template without containment\'s users or ma
 })
 
 /** Runs the B24 kernel and network part of start script `s` in a fresh root whose sysctls, /proc mount and set-user-ID
- *  su and sudo it can fix, with `nft` logging its arguments; `fail` breaks one of them first. What it did, and the
- *  firewall file it wrote. */
+ *  su and sudo it can fix, with `nft` logging its arguments and no units or listeners; `fail` breaks one of them first,
+ *  or sets units and listeners. What it did, and the firewall file it wrote. */
 function hardening(s, { fail = () => {}, users = true, gates = 'B24_TEMPLATE=1 DSH_PORT=880 LIVE_PORT=881' } = {}) {
   const r = root({ users })
   try {
@@ -374,7 +406,7 @@ function hardening(s, { fail = () => {}, users = true, gates = 'B24_TEMPLATE=1 D
     const out = r.run(`${gates}\n${hardeningOf(s)}`)
     const file = r.at('root/.mumbo/firewall.nft')
     return {
-      ...out, mount: r.lines('mount'), nft: r.lines('nft'),
+      ...out, mount: r.lines('mount'), nft: r.lines('nft'), systemctl: r.lines('systemctl'), units: unitsOf(r),
       sysctls: ['net/ipv4/ip_unprivileged_port_start', 'fs/protected_hardlinks', 'fs/protected_symlinks'].map(k => readFileSync(r.at(`proc/sys/${k}`), 'utf8')),
       setuid: ['su', 'sudo'].map(b => statSync(r.at(`bin/${b}`)).mode & 0o7777),
       firewall: existsSync(file) ? readFileSync(file, 'utf8') : undefined, firewallMode: existsSync(file) ? statSync(file).mode & 0o777 : undefined,
@@ -438,6 +470,58 @@ test('the B24 input chain: from beyond loopback a new TCP connection (SYN alone)
     iifname != "lo" udp dport 881 drop
 `)
   }
+})
+
+/** The start script's stop of the unused units and its check of their ports (edge hardening), comment lines included. */
+const UNITS_PART = `  # No ssh, rpcbind or nginx, set rather than trusted (a template from before their masking, or a unit enabled again):
+  # each of their units that is active is stopped and masked, and nothing may listen on TCP 22, 80 or 111.
+  for u in ssh.socket ssh.service rpcbind.socket rpcbind.service nginx.service; do
+    ! systemctl is-active --quiet "$u" || systemctl mask --now "$u" || { echo "mumbo-box: could not stop and mask $u" >&2; exit 1; }
+  done
+  L=$(ss -ltnpH) || { echo 'mumbo-box: ss could not list the TCP listeners' >&2; exit 1; }
+  bad=$(printf '%s\\n' "$L" | awk '{ p = $4; sub(/.*:/, "", p) } p == "22" || p == "80" || p == "111"')
+  [ -z "$bad" ] || { printf 'mumbo-box: these listen on TCP 22, 80 or 111, which no box serves:\\n%s\\n' "$bad" >&2; exit 1; }
+`
+
+test('the B24 start script stops and masks each unused unit that is active, then fails, naming the listener, when anything listens on TCP 22, 80 or 111', () => {
+  assert.deepEqual(UNUSED_UNITS, ['ssh.socket', 'ssh.service', 'rpcbind.socket', 'rpcbind.service', 'nginx.service'])
+  for (const person of [true, false]) {
+    const s = script(c, person)
+    // After the sysctls, before hidepid and the firewall: before any user's process starts.
+    assert.ok(hardeningOf(s).includes(`  done\n${UNITS_PART}  # Every user but root sees only its own processes`))
+  }
+  const s = script(c, true)
+  // Listeners on other ports, some ending or starting in 22, 80 or 111, pass.
+  const others = ['LISTEN 0 511 127.0.0.1:8080 0.0.0.0:* users:(("node",pid=20,fd=3))', 'LISTEN 0 5 [::]:2222 [::]:* users:(("node",pid=21,fd=3))',
+    'LISTEN 0 5 0.0.0.0:1110 0.0.0.0:* users:(("node",pid=22,fd=3))', 'LISTEN 0 511 169.254.0.21:880 0.0.0.0:* users:(("node",pid=23,fd=3))']
+  const older = (r) => { setUnits(r, OLD_UNITS, OLD_LISTENERS); writeFileSync(r.at('ss'), others.map(l => `${l}\n`).join('')) }
+  // A template from before the masking: each running unit stopped and masked, ssh's idle service left as it was.
+  const h = hardening(s, { fail: older })
+  assert.equal(h.code, 0, h.err)
+  const running = ['ssh.socket', 'rpcbind.socket', 'rpcbind.service', 'nginx.service']
+  assert.deepEqual(h.systemctl, UNUSED_UNITS.flatMap(u => [`is-active --quiet ${u}`, ...(running.includes(u) ? [`mask --now ${u}`] : [])]))
+  assert.deepEqual(h.units, { states: { 'nginx.service': 'masked', 'rpcbind.service': 'masked', 'rpcbind.socket': 'masked', 'ssh.service': 'enabled', 'ssh.socket': 'masked' }, running: [] })
+  assertFirewall(h, '{ 0, 1002 }')
+  // A template with the masking: nothing runs, nothing is changed.
+  const masked = Object.fromEntries(UNUSED_UNITS.map(u => [u, 'masked']))
+  const now = hardening(s, { fail: (r) => setUnits(r, masked) })
+  assert.deepEqual([now.code, now.systemctl, now.units], [0, UNUSED_UNITS.map(u => `is-active --quiet ${u}`), { states: masked, running: [] }], now.err)
+  // Fatal, before the firewall: a unit that cannot be masked, a stop that does not take (the listeners stay), a listener
+  // that is no unit's, and no ss.
+  const listed = (lines) => `mumbo-box: these listen on TCP 22, 80 or 111, which no box serves:\n${lines.join('\n')}\n`
+  const failures = [
+    [(r) => { older(r); r.fake('systemctl', '[ "$1" = is-active ]') }, 'mumbo-box: could not stop and mask ssh.socket\n'],
+    [(r) => { older(r); r.fake('systemctl', 'exit 0') }, listed([...OLD_LISTENERS['nginx.service'], ...OLD_LISTENERS['rpcbind.socket'], ...OLD_LISTENERS['ssh.socket']])],
+    [(r) => writeFileSync(r.at('ss'), [...others, 'LISTEN 0 5 0.0.0.0:80 0.0.0.0:* users:(("python3",pid=30,fd=3))'].map(l => `${l}\n`).join('')), listed(['LISTEN 0 5 0.0.0.0:80 0.0.0.0:* users:(("python3",pid=30,fd=3))'])],
+    [(r) => r.fake('ss', 'exit 1'), 'mumbo-box: ss could not list the TCP listeners\n'],
+  ]
+  for (const [fail, err] of failures) {
+    const out = hardening(s, { fail })
+    assert.deepEqual([out.code, out.err, out.nft, out.mount], [1, err, [], []])
+  }
+  // Before the marker none of it runs.
+  const before = hardening(s, { fail: older, gates: 'B24_TEMPLATE= DSH_PORT=3080 LIVE_PORT=6080' })
+  assert.deepEqual([before.code, before.systemctl, before.units.running], [0, [], Object.keys(OLD_LISTENERS).sort()])
 })
 
 /** A root as E2B's build leaves a box's: /usr/local, its node, /code, envd and /etc/inittab world-writable. Also a
@@ -821,8 +905,44 @@ test('template: containment\'s users and groups, homes 0700 with the run-as TMPD
   assert.ok(![...BOX_STEPS, ...PROJECT_STEPS].some(s => /\biptables\b/.test(s)))
   // First the umask for every step: e2b's runCmd runs them in one shell.
   assert.deepEqual([UMASK_STEP, BOX_STEPS[0], PROJECT_STEPS[0]], ['umask 022', UMASK_STEP, UMASK_STEP])
-  // The users, then the nftables smoke check, which runs as agent, and the dsh smoke check, last.
-  assert.deepEqual([BOX_STEPS.slice(-usersSteps(true).length - 2), PROJECT_STEPS.slice(-usersSteps(false).length - 2)], [[...usersSteps(true), NFT_SMOKE_STEP, dshSmokeStep(true)], [...usersSteps(false), NFT_SMOKE_STEP, dshSmokeStep(false)]])
+  // The users, the unused units masked, then the nftables smoke check, which runs as agent, and the dsh smoke check, last.
+  assert.deepEqual([BOX_STEPS.slice(-usersSteps(true).length - 3), PROJECT_STEPS.slice(-usersSteps(false).length - 3)], [[...usersSteps(true), MASK_UNITS_STEP, NFT_SMOKE_STEP, dshSmokeStep(true)], [...usersSteps(false), MASK_UNITS_STEP, NFT_SMOKE_STEP, dshSmokeStep(false)]])
+})
+
+test('template: the unused units are stopped, disabled and masked, also those the image lacks, and the build fails unless each reads masked', () => {
+  assert.equal(MASK_UNITS_STEP, '(for u in ssh.socket ssh.service rpcbind.socket rpcbind.service nginx.service; do systemctl disable --now "$u" 2>/dev/null || :; done; '
+    + 'systemctl mask ssh.socket ssh.service rpcbind.socket rpcbind.service nginx.service || exit 1; '
+    + 'for u in ssh.socket ssh.service rpcbind.socket rpcbind.service nginx.service; do [ "$(systemctl is-enabled "$u" 2>/dev/null)" = masked ] || { echo "mumbo-box: $u is not masked" >&2; exit 1; }; done)')
+  /** Runs `before && MASK_UNITS_STEP`, as e2b's runCmd joins the steps, on OLD_UNITS less `lacks`, after `setup`. */
+  const run = ({ before = 'true', lacks = [], setup = () => {} } = {}) => {
+    const r = root()
+    try {
+      setUnits(r, Object.fromEntries(Object.entries(OLD_UNITS).filter(([u]) => !lacks.includes(u))), Object.fromEntries(Object.entries(OLD_LISTENERS).filter(([u]) => !lacks.includes(u))))
+      setup(r)
+      const out = spawnSync('/bin/sh', ['-c', `${before} && ${MASK_UNITS_STEP}`], { encoding: 'utf8', env: { PATH: r.at('bin') } })
+      return { code: out.status, err: out.stderr, systemctl: r.lines('systemctl'), units: unitsOf(r) }
+    } finally { r.done() }
+  }
+  const masked = { states: Object.fromEntries(UNUSED_UNITS.map(u => [u, 'masked']).sort()), running: [] }
+  const calls = [...UNUSED_UNITS.map(u => `disable --now ${u}`), `mask ${UNUSED_UNITS.join(' ')}`, ...UNUSED_UNITS.map(u => `is-enabled ${u}`)]
+  // E2B's base and the web image: every unit stopped and masked.
+  assert.deepEqual(run(), { code: 0, err: '', systemctl: calls, units: masked })
+  // An image without nginx or rpcbind: their disable fails, and the mask covers them too.
+  assert.deepEqual(run({ lacks: ['rpcbind.socket', 'rpcbind.service', 'nginx.service'] }), { code: 0, err: '', systemctl: calls, units: masked })
+  // A mask that fails, or one that does not take, fails the build.
+  const cannot = run({ setup: (r) => r.fake('systemctl', `echo "$*" >> ${r.t}/log/systemctl; [ "$1" != mask ]`) })
+  assert.deepEqual([cannot.code, cannot.systemctl.at(-1)], [1, `mask ${UNUSED_UNITS.join(' ')}`])
+  const ignored = run({ setup: (r) => r.fake('systemctl', `case $1 in disable|mask) exit 0;; is-enabled) [ "$2" = ssh.socket ] && echo masked || echo enabled;; esac`) })
+  assert.deepEqual([ignored.code, ignored.err], [1, 'mumbo-box: ssh.service is not masked\n'])
+  // After a failed step it does not run, and the failure is the build's.
+  assert.deepEqual(run({ before: 'false' }).systemctl, [])
+  // The dsh smoke check's listener check stays strict: no entry for their ports.
+  for (const port of ['22', '80', '111']) assert.ok(!LISTENER_ALLOWLIST.some(l => l.port === port), port)
+  // The RUNBOOK names each unit, and checks their ports on a real box.
+  const runbook = readFileSync(new URL('../RUNBOOK.md', import.meta.url), 'utf8').split('\n')
+  const template = runbook.find(l => l.startsWith('- **Template (marker).**')), real = runbook.find(l => l.startsWith('- **Checked only on a real box.**'))
+  for (const text of [...UNUSED_UNITS.map(u => `\`${u}\``), '`MASK_UNITS_STEP`', '`systemctl mask --now`']) assert.ok(template.includes(text), text)
+  assert.ok(real.includes('`ss -ltn` showing nothing on 22, 80 or 111'))
 })
 
 test('template: the nftables smoke check passes only when root connects and agent is refused, always removes its table and listener, and runs only after the steps before it succeed', () => {
@@ -889,6 +1009,8 @@ test('template: the dsh smoke check runs a box\'s start script with dummy values
     // The kernel part's sysctls stay, set and checked as every start sets them: the run-as provider refuses to load
     // without fs.protected_hardlinks=1.
     assert.ok(s.includes('if [ -n "$B24_TEMPLATE" ]; then\n  # Only root binds') && s.includes('  for kv in net/ipv4/ip_unprivileged_port_start=1024 fs/protected_hardlinks=1 fs/protected_symlinks=1; do\n'))
+    // So do the unused units' stop and the check of their ports, which change nothing after MASK_UNITS_STEP.
+    assert.ok(s.includes(UNITS_PART))
     // The system repair, the layout and rows a box gets, and dsh with a box's profile and patches.
     assert.ok(s.includes(systemRepair()) && s.includes(containmentLayout(SMOKE_CFG, person)))
     const box = startScript(c, 'T', boxSite(c, person ? 'a@x.com' : 'project:0123456789abcdef'), 'role', person ? undefined : 'K', { proxy: 'P', gh: 'G' }, ['o@x.com'], person ? { key: 'K', principal: 'a' } : undefined, 'a@x.com')

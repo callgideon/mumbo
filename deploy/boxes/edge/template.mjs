@@ -6,7 +6,7 @@
 import { dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Sandbox, Template } from 'e2b'
-import { PORTS, PORTS_MARKER, OLD_PORTS, ENVD_PORT, MUMBO_MCP_PORT, startScript, boxSite, signBox, memberKey, mumboMcpKey, mcpPrincipal, roleInstructions, containmentRows } from './edge.mjs'
+import { PORTS, PORTS_MARKER, OLD_PORTS, ENVD_PORT, MUMBO_MCP_PORT, UNUSED_UNITS, startScript, boxSite, signBox, memberKey, mumboMcpKey, mcpPrincipal, roleInstructions, containmentRows } from './edge.mjs'
 // Usage: template.mjs <ecr image> [name=mumbo-box] [memoryMB=4096] [cpuCount=2]; children use: mumbo-child 2048.
 // MIN_AVAIL_MB (default 30720, 30 GiB: box_free_disk in prod/modules/cell/control.tf less margin): the least free space on / a box from the new build may have, or the script fails.
 export function templateArgs(argv, env = process.env) {
@@ -102,6 +102,17 @@ export const usersSteps = (person) => {
     PORTS_STEP,
   ]
 }
+/** The template step, after the users and before the smoke checks, that stops, disables and masks edge UNUSED_UNITS and
+ *  fails the build unless each reads `masked` from `systemctl is-enabled`. Template steps run under systemd, PID 1 of
+ *  E2B's build VM (its envd is envd.service), so `disable --now` stops a running unit; it fails for a unit the image
+ *  lacks, and the mask covers that one too: masking writes /etc/systemd/system/<unit> -> /dev/null whether or not the
+ *  unit exists, so a package installed later cannot start it either. E2B's finalize phase enables and unmasks none of
+ *  them, and the dsh smoke check's listener check fails the build on any that still listens. A subshell, as NFT_SMOKE_STEP. */
+export const MASK_UNITS_STEP = `(${[
+  `for u in ${UNUSED_UNITS.join(' ')}; do systemctl disable --now "$u" 2>/dev/null || :; done`,
+  `systemctl mask ${UNUSED_UNITS.join(' ')} || exit 1`,
+  `for u in ${UNUSED_UNITS.join(' ')}; do [ "$(systemctl is-enabled "$u" 2>/dev/null)" = masked ] || { echo "mumbo-box: $u is not masked" >&2; exit 1; }; done`,
+].join('; ')})`
 /** The port NFT_SMOKE_STEP probes; nothing in a box uses it. */
 const NFT_PROBE_PORT = 47999
 /** The template step, last, after the users exist, that fails the build unless this kernel enforces the kind of rule the
@@ -143,8 +154,10 @@ const without = (text, from, to) => {
  *  profiles, the X cookie, the launchers in /usr/local/bin); and a project box's GitHub proxy (a CA the system trusts).
  *  It keeps hardening's sysctls (the unprivileged port floor 1024, fs.protected_hardlinks=1, fs.protected_symlinks=1),
  *  set and checked: the run-as provider refuses to load without fs.protected_hardlinks=1, and every box's start script
- *  writes the same values at each start, so a template that keeps them runs no box differently. It keeps the system
- *  repair too (edge systemRepair), whose owners and modes every box's start script sets again. dsh runs as root, which
+ *  writes the same values at each start, so a template that keeps them runs no box differently. It keeps hardening's stop
+ *  and mask of edge UNUSED_UNITS and its check that nothing listens on TCP 22, 80 or 111, which change nothing after
+ *  MASK_UNITS_STEP. It keeps the system repair too (edge systemRepair), whose owners and modes every box's start script
+ *  sets again. dsh runs as root, which
  *  the firewall refuses only envd, and NFT_SMOKE_STEP covers that kind of rule. Without the desktop, computer use's row
  *  does not activate and dsh warns (INACTIVE_ALLOWLIST).
  *  @param {boolean} person a person box (mumbo-box), not a project box
@@ -316,18 +329,21 @@ export const BOX_STEPS = [
   // The stock panels, without the panel's first-start dialog; XFCE's web browser and Chrome's menu entry start the box's Chrome.
   'cp /etc/xdg/xfce4/panel/default.xml /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml && sed -i "s/^WebBrowser=.*/WebBrowser=google-chrome/" /etc/xdg/xfce4/helpers.rc && install -d /usr/local/share/applications && sed "s#/usr/bin/google-chrome-stable#/usr/local/bin/google-chrome#" /usr/share/applications/google-chrome.desktop > /usr/local/share/applications/google-chrome.desktop',
   ...usersSteps(true),
+  MASK_UNITS_STEP,
   NFT_SMOKE_STEP,
   dshSmokeStep(true),
 ]
 /** A project box is headless: git, gh (GitHub's apt repository) and openssl for the box-local GitHub proxy's CA, nftables
  *  and acl for the start script, iproute2 for the dsh smoke check's ss and the escape test's network namespace, the
  *  proxy's own user ghproxy (edge startScript; no home or login, and, as xvnc in BOX_STEPS, not a system user), python3-venv
- *  for agent's venvs (as BOX_STEPS), agent containment's users, and the nftables and dsh smoke checks. */
+ *  for agent's venvs (as BOX_STEPS), agent containment's users, the unused units masked, and the nftables and dsh smoke
+ *  checks. */
 export const PROJECT_STEPS = [
   UMASK_STEP,
   'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl gpg git openssl procps ripgrep nftables acl iproute2 python3-venv && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*',
   'id ghproxy >/dev/null 2>&1 || useradd -U -M -d /nonexistent -s /usr/sbin/nologin ghproxy',
   ...usersSteps(false),
+  MASK_UNITS_STEP,
   NFT_SMOKE_STEP,
   dshSmokeStep(false),
 ]
