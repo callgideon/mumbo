@@ -33,7 +33,7 @@ const ENV = [
   'MUMBO_PANEL_ADMINS', 'MUMBO_GITHUB_APP_LOGIN', 'MUMBO_GITHUB_APP_USER_ID', 'MUMBO_WORK_DIR', 'MUMBO_WORKER_DIR', 'MUMBO_GH_CONFIG_DIR',
 ] as const
 /** The directories `dsh-superagent` resolved: as configured, and as `machineOf` settles them. */
-interface Directories { workDirectory?: string; workerDirectory?: string; ghConfigDirectory?: string }
+interface Directories { workDirectory: string | undefined; workerDirectory: string | undefined; ghConfigDirectory: string | undefined }
 interface Booted {
   home: string
   stateDir?: string

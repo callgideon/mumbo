@@ -308,7 +308,7 @@ describe('staging an upload', () => {
   })
 
   it('gives the copy the group of a set-group-ID staging directory', async (context) => {
-    const group = process.getgroups().find(gid => gid !== process.getegid())
+    const group = process.getgroups?.().find(gid => gid !== process.getegid?.())
     if (group === undefined) context.skip()
     const { downloads, staging: into } = directories()
     chownSync(into, -1, group!)

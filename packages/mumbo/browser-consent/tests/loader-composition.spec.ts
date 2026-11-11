@@ -67,7 +67,7 @@ async function load(options: LoadOptions = {}) {
   contexts.push(booted.ctx)
   // Every call the browser received, in order, with the current tab's URL before the call.
   const allCalls = async () => (await readFile(join(root, 'calls.ndjson'), 'utf8').catch(() => '')).trim().split('\n').filter(Boolean)
-    .map(line => JSON.parse(line) as { name: string; args: { action?: string }; url: string })
+    .map(line => JSON.parse(line) as { name: string; args: { action?: string; paths?: string[] }; url: string; files?: string[] })
   // Every call except consent's own current-tab listings.
   const calls = async () => (await allCalls()).filter(call => !(call.name === 'browser_tabs' && call.args.action === 'list'))
   return { ...booted, calls, allCalls, root, staging }
@@ -410,9 +410,9 @@ describe('browser write consent in the person-box composition', () => {
     expect(loaded.asked).toEqual([
       `Browser write: browser_file_upload on http://allowed.test. Arguments: "paths": [${JSON.stringify(upload)}]. Files sent: "tax.pdf" (3 bytes, SHA-256 ${PDF_SHA256.slice(0, 12)}). Site allowances do not cover this action.`,
     ])
-    const [sent] = (await loaded.calls()) as Array<{ name: string; args: { paths: string[] }; files: string[] }>
+    const [sent] = await loaded.calls()
     expect(sent!.name).toBe('browser_file_upload')
-    const [copy] = sent!.args.paths
+    const [copy] = sent!.args.paths!
     expect(copy).toMatch(new RegExp(`^${loaded.staging}/[0-9a-f]{32}/tax\\.pdf$`, 'u'))
     expect(sent!.files).toEqual(['pdf'])
     expect(consentRecords(loaded.events)).toEqual([{ callId: 'call-0', tool: 'browser_file_upload', site: 'http://allowed.test', grant: 'approval', outcome: 'succeeded' }])
