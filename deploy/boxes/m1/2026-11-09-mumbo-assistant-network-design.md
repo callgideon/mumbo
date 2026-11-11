@@ -961,7 +961,7 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
         - It opens a file directly in Downloads (a name with no `/`) with `O_NOFOLLOW` and `O_NONBLOCK`, and refuses anything but a regular file or one over `uploadMaxBytes` (default 512 MiB). `/home/shared` is root's, so `agent` cannot replace Downloads itself, and that one open is race-free.
         - Root copies it to `/var/lib/mumbo/uploads/<nonce>/<name>`, readable by `browser` and `browsermcp` and never by `agent`.
         - The ask shows the copy's name, size and SHA-256 prefix.
-        - The tool gets the copy's path, and the copy is deleted after the call.
+        - The tool gets the copy's path. Chrome reads the file later (on submit, or in chunks for a resumable upload), so copies stay until consent unmounts and are cleared at every start. When staging a new copy, consent deletes copies older than 24 h, then the oldest ones while the total would pass 4 × `uploadMaxBytes`. A staged path is never accepted as a tool's input, so a kept copy can't be uploaded again without a new ask. **[2026-11-11]**
       - Playwright MCP gets that staging directory as its only MCP root (option a), not Downloads. So the server can't upload anything consent didn't stage, and `--allow-unrestricted-file-access` stays off.
       - The edge never mounts a browser provider without consent: the plain fallback row is gone.
     - **Computer use** runs `xdotool` as `desktop`, the one user beside `browser` that may read the X authority file.
@@ -1035,8 +1035,14 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
     - The B24 template's rules are one `inet` table (IPv4 and IPv6 together), loaded atomically with `nft -f` from a file the start script writes, and replaced whole on every start.
     - The template installs `nftables`.
     - The template's smoke box loads the table and checks that `agent` is refused and root admitted on a test port, or the build fails. A template whose start script can't run is never published.
-    - If `meta skuid` is missing too: build our own self-hosted E2B kernel with `CONFIG_NETFILTER_XT_MATCH_OWNER`, rather than wait for 6.18.
+    - Probed on kernel 6.1.177+: `meta skuid` rules, sets, reject and drop all work on IPv4 and IPv6, with `agent` refused and root admitted, so no custom kernel is needed.
     - Never best effort: the debugging port has no authentication, so a connection to it reads every cookie.
+    - The output rules accept the allowed users first, then reset everyone else on those ports. So a socket whose user nft can't read is refused too, as `xt_owner` refused it.
+  - **No root network path for the model** **[2026-11-11, B24 box-side review]:** the owner rules only cover processes, so anything root fetches for the model gets past them.
+    - `web_fetch`'s HTTP provider (`web-fetch-http`) runs in root dsh and reaches loopback. From there, `http://127.0.0.1:9222/json/list` gives every open tab's URL and title, and `/json/close` closes tabs.
+    - In boxes the provider is either not mounted, with `web_fetch` going through the DeepSeek fetch API at the edge, or it refuses loopback, link-local, private and ULA addresses. The check is on the resolved address and on every redirect, connecting to the address it checked.
+    - Local pages stay reachable through the model's shell, as `agent`, under the firewall.
+    - Escape test: the assistant's `web_fetch` of `http://127.0.0.1:9222/json/list` and of `http://$ip:880/` is refused.
 - **Cost to the person.** Installing system software (`apt`) needs root, so the agent and the Terminal tab can't. Project work already runs in sandboxes. Anything the person's box needs comes through the template or the operator.
 - **Escape tests**, run in a real box as `agent`, each of which must fail:
   - read `Login Data`, or anything else under `/home/browser`, with the shell and with the file tools;
