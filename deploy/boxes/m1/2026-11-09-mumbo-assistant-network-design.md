@@ -1142,6 +1142,20 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
     - From outside, the client proxy could reach any loopback listener with a traffic token. So the input chain drops every new non-loopback TCP connection except to envd, dsh, the live view and the door (SYN-only, so no conntrack is needed), and keeps the WebRTC UDP drop.
     - The template build lists TCP listeners after dsh starts. It fails when a listener owned by any user but `agent` is outside the reset set and not on a commented allowlist.
     - The same build check fails when dsh's start line doesn't appear within 60 s, after the B24 image's startup hang.
+  - **No writable code paths** **[2026-11-11, B24 hang cause]:** `/usr/local` and `/usr/local/bin` were `777` in our images. Under B24, `agent` could then plant a program that root runs through `PATH`. The subprocess check refused it, and the refused preset deadlocked `@mumbo/assistant`'s startup, which awaited it in activation and now starts it detached.
+    - Every template build fails on a world-writable file, or a world-writable directory without the sticky bit, outside a commented allowlist.
+    - It also fails when a directory on root's or a run-as user's `PATH`, or in the tree root's dsh loads code from, is writable by anyone but root.
+    - `start.sh` asserts `0755 root:root` on `/usr/local`'s directories, and the `777` is removed where it is made. The subprocess check stays as strict as it is.
+    - **Where the 777 comes from:** our E2B fork's rootfs builder writes `/usr/bin/envd` (root's in-box agent) and `/usr/local/bin/provision.sh` at `0o777`, in a layer with no parent directory headers.
+      - On a box it is wider: 5,910 world-writable paths, all of `/usr/local` (the `node` binary root's dsh runs, global `node_modules`, envd's OpenRC script, B24's own ports marker), plus `/usr/bin/envd`, `/etc/inittab` and `/code`.
+      - The fork's layer lands after our image is built. So the first step of `start.sh`'s hardening repairs the system trees generically: it removes world-write, and group-write for non-root groups, from every path under `/usr`, `/etc`, `/opt`, `/code` and the other system directories (not `/root`, `/home`, `/tmp` or `/run`), sticky directories excepted. Then it asserts none is left.
+      - This runs before the ports marker is read or any user's process runs: a tampered marker would aim the firewall at the wrong ports.
+      - **[2026-11-11, B24 fix review]** The repair covers all of `/`, with user-data contents pruned. It takes about 3 to 5 s per start.
+        - World-write goes for every owner.
+        - Ownership and group-write are repaired only for users with uid ≥ 1000, and for groups with gid ≥ 1000, groups with such a member, or such a user's primary group. System daemons' own paths (polkit, logind, mail) are left alone.
+        - Every containment user and E2B's `user` must have uid ≥ 1000, checked fatally, so none drops out of the repair's reach.
+      - Agent installs into its own npm prefix, on its `PATH`. A user's `PATH` may hold directories only root, or that user alone, can write, and the run-as check in subprocess-local uses the same rule. Python stays under Bookworm's PEP 668 rule (venvs, with `python3-venv` in both templates).
+      - **R-rootfs** (mumbo) fixes the fork's modes and parent headers and reviews every layer file. The source is E2B's finalize script (`phases/finalize/configure.sh`), which runs `chmod -R 777 /usr/local` and `/code` after every template's steps. Our web image itself has no world-writable path. The fix removes both lines. Any user that relied on them (the child template's default `user`) gets its own install prefix, and `/code` is owned by that user at `0755`. It rides the next E2B rebuild; `start.sh`'s set-and-check stays as the guard afterwards.
   - **No root network path for the model** **[2026-11-11, B24 box-side review]:** the owner rules only cover processes, so anything root fetches for the model gets past them.
     - `web_fetch`'s HTTP provider (`web-fetch-http`) runs in root dsh and reaches loopback. From there, `http://127.0.0.1:9222/json/list` gives every open tab's URL and title, and `/json/close` closes tabs.
     - In boxes the provider is either not mounted, with `web_fetch` going through the DeepSeek fetch API at the edge, or it refuses loopback, link-local, private and ULA addresses. The check is on the resolved address and on every redirect, connecting to the address it checked.
@@ -1180,6 +1194,16 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
   - Allowing a site never depends on the operator leaving sign-in origins out.
 - **No browser call writes files where the model chose.** A call with a `filename` argument is refused, because page content could otherwise overwrite project files.
 - **A turn started by a project's report asks before every browser write** (B25b, after B36b; **[2026-11-10, B36 review]**): while the Session's newest user message has the `report` source, writes on every site ask, as on a page with a secret field. A report's text is steered by workers and outside issues, and it reaches the Mumbo that holds the person's accounts.
+  - **[2026-11-11, B48]** The same predicate gates the whole shell tool on person boxes. It asks in normal modes and is refused with a note under Run Wild, because a shell holding the person's GitHub sign-in, or any other credential, writes with their accounts. It gates the whole tool, never by parsing the command.
+- **The founder's GitHub sign-in on their person box** (B48, after the B24 fix; **[2026-11-11, founder's choice: "gh plus my GitHub sign-in"]**):
+  - `gh` is in the person template. A root-owned `/etc/gitconfig` makes git over https use `gh auth git-credential`.
+  - The person signs in themselves, and the token never passes through the edge, a Session or Secrets Manager. Two ways, both allowed, the easier first **[founder, 2026-11-11]**:
+    - the device flow, `gh auth login --web`: Mumbo runs it and shows only the one-time code and URL. gh's default scopes reach every repository the person can; `workflow` is not added, so Actions files, which hold CI secrets, stay the person's to change;
+    - or a fine-grained token, pasted into `gh auth login --with-token` in the desktop terminal as `agent`.
+  - **The platform repositories are included** **[founder, 2026-11-11: "that way it would be able to build itself"]:** the box's assistant can open, push to and merge pull requests on `callgideon/mumbo` and `callgideon/e2b-runtime` as the founder. Branch protection that admins can't bypass (required pull request and checks, no force pushes) on `main` and `boxes/production` keeps those merges to green pull requests. The setting is the founder's. Claude sessions' own rules are unchanged.
+  - The token lives in `agent`'s `/home/agent/.config/gh` (0700). The backup takes that directory, so the sign-in survives moves. It is never under `/root/projects` (a `git add -A` could commit it) or in Mumbo Sync's folders.
+  - The model can read and use the token. The token's scopes (and, for a fine-grained token, its repositories and expiry) are the boundary, and the README says so. Under Run Wild, pushes and merges in turns the founder started run unasked; branch protection is the founder's lever.
+  - A root-held token behind a local proxy, like the project box's, would keep it from the model entirely. That is a later option if the founder asks.
 - **Network request details are denied.** A request's details carry its `Cookie` header and form body, so a login's password or a session cookie would reach the model.
   - `browser_network_request` is refused outright.
   - The request list stays a read only if it shows no headers or bodies; otherwise it is refused too.
@@ -1317,6 +1341,12 @@ The founder is in India, and their box must run in `ap-south-1` (Mumbai). The re
   - a failure to get an answer (unreachable envd or API, a timeout, the client-proxy's 502 for a listed box) is a 503 starting page with the box and record unchanged, and an error-level `box unreachable` line for the edge-errors alarm. Nothing recreates automatically: during a client-proxy outage a recreate fails too and loses the box;
   - a RUNBOOK section tells a hung box (other boxes in the cell answer) from a client-proxy outage (none do); for a hung box the operator kills it and the next visit restores;
   - tests for each case, classified by the SDK's error classes.
+  - **[2026-11-11, B47 code review]** API answers kill only a box E2B listed paused (a resume); a box listed running is never killed on an API error. The sweep drops a record only on `SandboxNotFoundError`, the API's 404. The client-proxy's not-found answer (`SandboxNotRunningError`) once dropped a running box's record and its restore pin.
+- **B47b, resume and capacity failures from recorded answers** [after B24's fix, or after R6 if the case was only inferred]:
+  - on a throwaway in each cell, record the API's answers on resume for a full cell, a snapshot whose node is gone, and an unresponsive guest;
+  - classify capacity and resume failures by those answers in place of the message regex, with fixtures from the recordings. Today a broken snapshot whose resume times out at placement may show "at capacity" on every visit;
+  - try `onResume: 'reboot'` on `GuestUnresponsiveError`, which keeps the disk;
+  - weigh a final backup before a kill when envd answers but dsh is down, against the user lock's 120 s.
 
 **Acceptance (first milestone: the founder's box in Mumbai):**
 - **The move.** The founder's box runs in the `ap-south-1` cell, moved from `us-east-1` with Sessions, schedules, files and Chrome sign-ins intact.
@@ -1542,6 +1572,54 @@ This replaces "A newcomer's region" above and step 4 of section 17a's flow. A ne
 - sharing synced folders with other people (part D);
 - a password manager in This app: Electron's extensions omit what one needs, and signed-in work belongs in My Chrome;
 - end-to-end encryption against the operator (the bucket is encrypted with the cell's key, which the edge can use).
+
+## 17e. Context, objectives and progress **[founder: 2026-11-11, "agents and coordinators manage context, objectives, task lists and plans, track everything, and keep building without losing context or drifting"; my call on the how]**
+
+Source: mumbo-research's report "Agent self managed project structure" (2026-11-11), `jumbo/.claude/worktrees/jumbo-research/reports/`. Nothing in it was measured; token figures are characters divided by four.
+
+**The finding.** Mumbo already records every piece of agent state durably: the Session log, its projections (todo, plan, goal, team) and superagent's Tickets. What fails is showing it again.
+- After a compaction, only AGENTS.md and the skills catalogue come back. The todo list, the approved plan, team tasks and live job handles survive only in whatever the summary model wrote. Mechanical extraction kept 79% of recurring details against at most 16% for model-written summaries (Compact-Bench, arXiv 2610.31710).
+- After a restart, jobs and workflows are gone, and nothing says so. The goal comes back disarmed. Our own three-session process needed a typed "resume and re-arm" after every restart.
+- Above Tickets there is nothing: no project objective, no brief (§7's living brief is not built), no parent Ticket.
+- A worker's `ready` ends an external Ticket. T3's `Engine.requestReview` has no caller on `main` (checked 2026-11-11), so no review marker is ever posted for E0 to find. External workers' PRs can't merge through the edge until it has one.
+
+**The rule.** Keep a small, structured record outside the model, written by the runtime wherever possible. Show it again at every compaction and restart. Let only an external check (CI, or a review verdict on the exact commit) mark work done.
+
+**How the tasks stay inside our rules:**
+- New behaviour is new plugins under `packages/mumbo/`, on documented seams (`PromptContext`, `agent.inject()`, the goal round prompt, superagent KV families). Upstream packages change only where a seam is missing, and then as an upstream-shaped change.
+- No new Session event type unless unavoidable. If one is needed, it carries `ignorable: true`, so an older reader skips it, and it updates both SDKs' expected outputs.
+- Nothing changes the agent loop or the model provider, and nothing adds a new service.
+- Anything shown to the model is a logged event, and goes through a snapshot test.
+- Mounting goes through the project overlay and the edge-written person overlay, never the founder's overlays.
+
+**Tasks** (K for "keep"; the report's R-numbers in brackets):
+
+| Task | What | Order |
+|---|---|---|
+| **T4** (R6) the reviewer Ticket's caller | `requestReview` on every external `ready` report and on `submit`, with the reused-comment first-line check parked from #42. A `ready` no longer ends a Ticket. A reviewer's `pass` on the head SHA plus green CI does, and the runtime posts the marker E0 checks. Tests: `ready` alone doesn't close; `pass` plus CI does; `fail` reopens; E0 finds the marker | Next superagent task; before E2's door tools go live |
+| **K1** (R1, R3) the state block | A `PromptContext` rendered mechanically from the session's projections, never by a model. It holds the goal and its phase, the open todo items, the approved plan's step headings, open team tasks, and live subagents and jobs, capped at 1,600 characters with pointers beyond. It renders only the parts the session mounts.<br>The text changes only at a boundary (a compaction, a resume, or a goal phase change), so ordinary todo edits don't re-log it. Between boundaries those edits are visible as recent tool calls.<br>The plan headings come from the logged `exit_plan_mode` call and its approval, folded by the plan projection, so no new event is needed. A `plan_read` tool returns the full text.<br>Tests: a snapshot with a compaction shows the block re-logged once after it and not on unchanged turns, and old fixtures load unchanged | After the B24 fix |
+| **K2** (R5) the resume reconciler | At the first step after a resume, it compares the log (jobs without `job/settled`, subagents without a completion, workflows) with the live registries, and injects one logged notice: what died, what finished and where its result is, and that the goal needs a person to resume it. The same fact appears in `needs_you`. Tests: a log with an unsettled job yields exactly one notice | With K1 |
+| **K3** (R4) the goal stall check | At each goal round start, a mechanical check from the log: files changed, todo progress, repeat chains, tool errors. After two rounds without change, the round prompt carries the progress questions (done? looping? progressing? what next?), and the existing `blocked` rule follows. No model call and no new event: the round prompt is the logged record | After K1, K2 |
+| **K4** (R7, R10) the project brief | Superagent KV family `brief:<project>`: typed items (objective, decision in force, where things live, note), each with id, date and source. Decisions carry `by`, `costIfWrong` and `supersedes`. The router changes it only by itemised deltas through one tool (add, edit or retire one item), never by a rewrite, and it is capped at §7's 600 words. It is sent to the coordinator and its Executors as a `system/message`, re-logged only on change. Tests: deltas apply in order; the cap is enforced; requests carry it | Schema 13, with M4 |
+| **K5** (R8) the objective tree | KV family `objective` `{id, parentId, title, acceptance, state, owner}` with depth at most 3, plus `Ticket.objective` and `Ticket.parent`. A parent can't close while a child is open. A node closes only when its acceptance passes: a named CI check on a commit, a T4 review `pass`, or a person's confirmation; no free commands. A person sets roots in the panel (a GUI change, so a GIF) or through the relay. `project_status` shows it. Tests: a migration 12 → 13 leaves old Tickets valid, plus each closing rule | Schema 13 |
+| **K6** (R9) handoffs and the Ticket record | `Assignment.report.handoff {done[], next, head, notes}` on progress reports. On lease expiry or `hostRestarted`, the successor's claim brief carries the last handoff instead of only the lease note. Adds §8's record fields: attempts per model, failed reviews, asks answered, CI result, wall time. Tests: an expired lease hands over the handoff | Schema 13 |
+
+**Measured, not assumed.**
+- Mechanics are checked by keyless snapshot tests.
+- Whether K1 and K2 help is checked by a small live eval on the pinned DeepSeek model, run on demand and not in CI: a scripted task with a forced compaction and a forced restart, against an uninterrupted control. It measures re-derivations, steps to the first productive call after the boundary, and objective completion by acceptance checks.
+- In production, the claim-truth gap is the share of `ready` reports that review or CI later fails.
+
+**Not now:**
+- todo item ids and a drop check (R2): no dropped item has been observed; add it if one is;
+- a separate decision store (folded into K4);
+- vector or graph memory services;
+- model-written summaries as the record;
+- tree-search planners;
+- more parallel writers per Ticket;
+- self-critique as the done check;
+- context resets in place of compaction (re-test per model with K1's eval).
+
+**Our own process** (no product work): task numbers are assigned only by mumbo-design, in this spec. The count of "resume / re-arm" prompts per week across the three sessions is the live metric this section should drive down once our own coordinators run on it.
 
 ## 18. Milestones **[founder: A, then B, then C; my call on the cut]**
 
