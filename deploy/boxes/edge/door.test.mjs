@@ -13,7 +13,7 @@ import { door, doorTools, memberReporter, mumboForwarder } from './door.mjs'
 import { BOX_ANSWER_MAX, boxFetcher, mcpPrincipal, memberKey, modelServer, mumboMcpKey, signBox, verifyBox } from './edge.mjs'
 import { haltService } from './halt.mjs'
 import { doorKeys, keyHash } from './keys.mjs'
-import { projectRelay, projects } from './projects.mjs'
+import { NOT_PANEL_ADMIN, projectRelay, projects } from './projects.mjs'
 import { children, mcpServer, reportServer } from './sandboxes.mjs'
 import { memoryStore } from './store.mjs'
 
@@ -422,7 +422,7 @@ const ticket = (id, fill = 0) => ({ id, title: `T ${id}${'t'.repeat(fill)}`, sta
  * A door whose project tools reach a fake client proxy. Each project's box is `box-project:<id>`; its Superagent knows the
  * Tickets `tickets[<project id>]`, answers the relay with a stored Trigger, and `answer(seen)`, when it returns one, first.
  */
-async function projectDoor({ tickets = () => ({}), answer = () => undefined, ...opts } = {}) {
+async function projectDoor({ tickets = () => ({}), answer = () => undefined, relayLog = () => {}, ...opts } = {}) {
   const ensured = [], projectOf = (seen) => seen.headers['e2b-sandbox-id'][0].slice('box-project:'.length)
   let known = {}
   const proxy = await fakeProxy((seen) => {
@@ -436,7 +436,7 @@ async function projectDoor({ tickets = () => ({}), answer = () => undefined, ...
     if (seen.method === 'POST' && stop && items.some(x => x.id === stop[1])) return { body: { stopped: true } }
     return { status: 404, body: { error: 'Ticket not found' } }
   })
-  const relayOf = (proj) => projectRelay({ projects: proj, log: () => {}, boxFetch: boxFetcher({ publicHost: PUBLIC, proxy: proxy.url }), siteHostOf: (p) => `site-${p}`, edgeHost: PUBLIC,
+  const relayOf = (proj) => projectRelay({ projects: proj, log: relayLog, boxFetch: boxFetcher({ publicHost: PUBLIC, proxy: proxy.url }), siteHostOf: (p) => `site-${p}`, edgeHost: PUBLIC,
     box: { ensure: async (p) => { ensured.push(p); return { id: `box-${p}`, token: 'OWNER', traffic: 'TT', host: `site-${p}`, member: (e) => `signed:${e}` } } } })
   const t = await setup({ relayOf, ...opts })
   known = tickets(t)
@@ -510,7 +510,7 @@ test('project_message and task_start: posted to the relay as the member, the key
   } finally { s.close() }
 })
 
-test('project_status: the project, problems, what waits on you and open Tickets, read through the management API as the member, bounded', async () => {
+test('project_status: the project, problems, what waits on a person and open Tickets, read through the management API as the member, bounded', async () => {
   const many = Array.from({ length: 50 }, (_, i) => ticket(`t${i}`, 10_000))
   const t = await projectDoor({ answer: (x) => x.url === '/orchestrator/api/overview' && { body: {
     problems: Array.from({ length: 30 }, (_, i) => ({ kind: i ? 'outgoing' : 'setup', detail: 'x'.repeat(10_000) })),
@@ -539,9 +539,11 @@ test('project_status: the project, problems, what waits on you and open Tickets,
     assert.deepEqual(t.charged, [], 'a read causes no model turns')
   } finally { t.close() }
   // A box that refuses the member (Superagent's management API admits only panel admins, the owners) is owner_only, for
-  // project_status and task_stop alike; any other answer the box does not explain is box_refused.
-  let answer = { status: 403, body: { error: 'Management requires the owner or a panel admin' } }
-  const s = await projectDoor({ answer: () => answer })
+  // project_status and task_stop alike; any other 403, and any other answer the box does not explain, is box_refused
+  // with the box's text, which the relay's `api refused` line also logs.
+  let answer = { status: 403, body: { error: NOT_PANEL_ADMIN } }
+  const relayLogs = []
+  const s = await projectDoor({ answer: () => answer, relayLog: (l) => relayLogs.push(JSON.parse(l)) })
   try {
     const key = await s.mint({ scopes: ['read', 'workspace'], projects: [s.P] })
     const text = async (name, args) => {
@@ -552,10 +554,14 @@ test('project_status: the project, problems, what waits on you and open Tickets,
     const ownerOnly = 'owner_only: only the project\'s owners can read its status or stop its Tickets'
     assert.equal(await text('project_status'), ownerOnly)
     assert.equal(await text('task_stop', { ticket: 'tp1' }), ownerOnly)
+    answer = { status: 403, body: { error: 'Same-origin management request required' } }
+    assert.match(await text('project_status'), /^box_refused: .*Same-origin management request required$/)
     answer = { status: 500, body: 'Internal error' }
     assert.match(await text('project_status'), /^box_refused: .*HTTP 500/)
     await settle()
-    assert.deepEqual(s.logs().map(l => l.outcome), ['owner_only', 'owner_only', 'box_refused'])
+    assert.deepEqual(s.logs().map(l => l.outcome), ['owner_only', 'owner_only', 'box_refused', 'box_refused'])
+    assert.deepEqual(relayLogs.filter(l => l.msg === 'api refused').map(l => [l.status, l.error]), [
+      [403, NOT_PANEL_ADMIN], [403, NOT_PANEL_ADMIN], [403, 'Same-origin management request required'], [500, undefined]])
   } finally { s.close() }
 })
 
