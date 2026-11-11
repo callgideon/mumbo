@@ -1,11 +1,14 @@
 // Shared projects (deploy/boxes/ASSISTANT.md, option B). A project has its own box, owned by the principal
 // `project:<id>` and running dsh as the coordinator; its members are signed-in users. Membership lives in the edge
-// store: doc `project:<id>` = { id, name, owner, members, createdAt, repos? } and set `projects:<email>` = ids.
+// store: doc `project:<id>` = { id, name, owner, members, createdAt, region, repos? } and set `projects:<email>` = ids.
+// `region` is the cell its box runs in (cells.mjs), the creator's at creation; a doc without one (created before cells)
+// is in us-east-1. Every write here keeps fields it does not set.
 // `repos` (`owner/name`) are the GitHub repositories the project may use through the edge; set `projects:with-repos`
 // lists every project that has one, for the approvals poller. Docs `project-session:<id>` and the project doc's
 // `coordinatorSessionId` name the plain coordinator Session that relayed messages went to before the relay route; nothing
 // reads them now.
 import { randomBytes } from 'node:crypto'
+import { placementKey, regionOf } from './cells.mjs'
 
 const fail = (status, message) => Object.assign(new Error(message), { status })
 /** Project ids are lowercase letters and digits, so they fit a hostname label (`p-<id>.<public host>`). */
@@ -91,7 +94,8 @@ export function projects({ store, admitted, log = console.log }) {
     async create(owner, name) {
       if (typeof name !== 'string' || !name.trim() || name.length > 80) throw fail(400, 'a project needs a name of 1 to 80 characters')
       const id = projectId()
-      await store.putDoc(`project:${id}`, { id, name: name.trim(), owner, members: [owner], createdAt: new Date().toISOString() })
+      const region = regionOf(await store.getDoc(placementKey(owner)))
+      await store.putDoc(`project:${id}`, { id, name: name.trim(), owner, members: [owner], createdAt: new Date().toISOString(), region })
       await store.addToSet(`projects:${owner}`, id)
       say({ msg: 'created', project: id, owner })
       return { id, name: name.trim() }

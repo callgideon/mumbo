@@ -4,10 +4,12 @@
 import * as e2b from 'e2b'
 import { boxes, boxFetcher, boxSite } from './edge.mjs'
 import { memoryStore } from './store.mjs'
-const cfg = { publicHost: 'boxes.mumbo.si', llmHost: 'llm.boxes.mumbo.si', template: 'mumbo-box', idleMs: 3600_000, backupEveryMs: 3600_000, maxRunningUnits: 0,
-  allowed: ['@mumbo.si'], egressIps: [], proxy: new URL(process.env.E2B_SANDBOX_URL), bucket: 'unused', pauseIdle: false }
+const cfg = { publicHost: 'boxes.mumbo.si', llmHost: 'llm.boxes.mumbo.si', template: 'mumbo-box', idleMs: 3600_000, backupEveryMs: 3600_000, edgeRegion: 'us-east-1',
+  allowed: ['@mumbo.si'], egressIps: [], pauseIdle: false }
+// The module's Sandbox reads E2B_API_URL and E2B_API_KEY; boxes are reached at E2B_SANDBOX_URL.
+const cells = new Map([['us-east-1', { region: 'us-east-1', Sandbox: e2b.Sandbox, proxy: new URL(process.env.E2B_SANDBOX_URL), maxUnits: 0, presignGet: async () => undefined, presignPut: async () => 'http://127.0.0.1:9/none' }]])
 const store = memoryStore()
-const box = boxes({ e2b, store, cfg, edgeKey: process.env.EDGE_KEY, presignGet: async () => undefined, presignPut: async () => 'http://127.0.0.1:9/none', log: () => {} })
+const box = boxes({ cells, store, cfg, edgeKey: process.env.EDGE_KEY, log: () => {} })
 const user = `boxtest-${Date.now()}@mumbo.si`
 const target = await box.ensure(user)
 console.log('box', target.id)

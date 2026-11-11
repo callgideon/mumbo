@@ -3,11 +3,15 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { request, createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
-import { inParallel, signBox, verifyBox, userPrefix, budget, needsLaunch, boxHeaders, boxes, modelServer, userServer, startScript, backupCommand, restoreCommand, restoreKey, presignGetter, admitted, secureCookies, albIdentity, PORTS, OLD_PORTS } from './edge.mjs'
+import { inParallel, signBox, verifyBox, userPrefix, budget, needsLaunch, boxHeaders, boxes, modelServer, userServer, startScript, backupCommand, restoreCommand, restoreKey, admitted, secureCookies, albIdentity, PORTS, OLD_PORTS } from './edge.mjs'
+import { presignGetter } from './cells.mjs'
 import { memoryStore, redisStore } from './store.mjs'
 import { generateKeyPairSync, createSign } from 'node:crypto'
 
-const cfg = { pageAfterMs: 3000, publicHost: 'boxes.example', projectDomain: 'boxes.example', llmHost: 'llm.example', template: 'mumbo-box', idleMs: 60_000, backupEveryMs: 600_000, maxRunningUnits: 10, allowed: ['@x.com'], egressIps: [], signinCookie: '_oauth2_proxy_mumbo', proxy: new URL('http://127.0.0.1:1'), upstream: 'https://model.example' }
+const cfg = { pageAfterMs: 3000, publicHost: 'boxes.example', projectDomain: 'boxes.example', llmHost: 'llm.example', template: 'mumbo-box', idleMs: 60_000, backupEveryMs: 600_000, allowed: ['@x.com'], egressIps: [], signinCookie: '_oauth2_proxy_mumbo', upstream: 'https://model.example', edgeRegion: 'us-east-1' }
+const PROXY = new URL('http://127.0.0.1:1')
+/** One us-east-1 cell over a fake E2B, as cells.mjs cellClients builds one; `extra` overrides its fields. */
+const oneCell = (e2b, extra = {}) => new Map([['us-east-1', { region: 'us-east-1', Sandbox: e2b.Sandbox, proxy: PROXY, bucket: 'bk', maxUnits: 10, presignGet: async () => undefined, presignPut: async () => 'P', ...extra }]])
 const listen = (server) => new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port)))
 const call = (port, { method = 'GET', path = '/', headers = {}, body } = {}) => new Promise((resolve, reject) => {
   const req = request({ host: '127.0.0.1', port, method, path, headers: { host: cfg.publicHost, ...headers } }, (res) => {
@@ -72,7 +76,7 @@ test('a backup that leaves Downloads items out is logged with its line', async (
   const realConnect = e2b.Sandbox.connect
   e2b.Sandbox.connect = async (id) => { const b = await realConnect(id); b.commands.run = async (c) => ({ stdout: c.includes('--upload-file') ? 'downloads left out of the backup: 2 items, 3000 MiB\n' : c.includes('dsh.log') ? 'launch123' : '' }); return b }
   e2b.Sandbox.pause = async () => {}
-  const b = boxes({ e2b, store: memoryStore(), cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'PUT', log: (l) => logs.push(JSON.parse(l)) })
+  const b = boxes({ cells: oneCell(e2b, { presignGet: async () => undefined, presignPut: async () => 'PUT' }), store: memoryStore(), cfg, edgeKey: 'k', log: (l) => logs.push(JSON.parse(l)) })
   await b.ensure('a@x.com')
   await b.sweep(Date.now() + cfg.idleMs + 1)
   assert.deepEqual(logs.filter(l => l.msg === 'backup').map(l => l.left), ['downloads left out of the backup: 2 items, 3000 MiB'])
@@ -112,7 +116,7 @@ function fakeE2B() {
 
 test('two first visits at once create exactly one box, tagged with the user', async () => {
   const e2b = fakeE2B()
-  const b = boxes({ e2b, store: memoryStore(), cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'P', log: () => {} })
+  const b = boxes({ cells: oneCell(e2b, { presignGet: async () => undefined, presignPut: async () => 'P' }), store: memoryStore(), cfg, edgeKey: 'k', log: () => {} })
   const [x, y] = await Promise.all([b.ensure('a@x.com'), b.ensure('a@x.com')])
   assert.equal(e2b.made.length, 1)
   assert.equal(x.id, y.id)
@@ -130,7 +134,7 @@ test('idle boxes are backed up, then paused; their tokens stop working', async (
   e2b.Sandbox.pause = async (id) => { paused.push(id) }
   const realConnect = e2b.Sandbox.connect
   e2b.Sandbox.connect = async (id) => { const b = await realConnect(id); b.commands.run = async (c) => { ran.push(c); return { stdout: '' } }; return b }
-  const b = boxes({ e2b, store: memoryStore(), cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'PUT', log: () => {} })
+  const b = boxes({ cells: oneCell(e2b, { presignGet: async () => undefined, presignPut: async () => 'PUT' }), store: memoryStore(), cfg, edgeKey: 'k', log: () => {} })
   const { id } = await b.ensure('a@x.com')
   await b.sweep(Date.now() + cfg.idleMs + 1)
   assert.ok(ran.some(c => c.includes("--upload-file \"$f\" 'PUT'")))
@@ -140,7 +144,7 @@ test('idle boxes are backed up, then paused; their tokens stop working', async (
 
 test('box creation stops at the running-box cap', async () => {
   const e2b = fakeE2B()
-  const b = boxes({ e2b, store: memoryStore(), cfg: { ...cfg, maxRunningUnits: 2 }, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'P', log: () => {} })
+  const b = boxes({ cells: oneCell(e2b, { maxUnits: 2, presignGet: async () => undefined, presignPut: async () => 'P' }), store: memoryStore(), cfg, edgeKey: 'k', log: () => {} })
   await b.ensure('a@x.com')
   e2b.Sandbox.list = () => ({ hasNext: true, nextItems: async function () { this.hasNext = false; return e2b.made.map(m => ({ sandboxId: m.id, state: 'running', startedAt: '1', metadata: { user: 'a@x.com' } })).filter(() => true) } })
   const findFor = e2b.Sandbox.list
@@ -226,7 +230,7 @@ test('after a restart the edge adopts running boxes and backs them up on the nex
   e2b.Sandbox.list = () => ({ hasNext: true, nextItems: async function () { this.hasNext = false; return [{ sandboxId: 'old', state: 'running', metadata: { user: 'a@x.com' } }, { sandboxId: 'stray', state: 'running', metadata: {} }] } })
   e2b.Sandbox.connect = async (id) => ({ sandboxId: id, commands: { run: async (c) => { ran.push(c); return { stdout: '' } } } })
   const store = memoryStore()
-  const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'PUT', log: () => {} })
+  const b = boxes({ cells: oneCell(e2b, { presignGet: async () => undefined, presignPut: async () => 'PUT' }), store, cfg, edgeKey: 'k', log: () => {} })
   await b.sweep()
   assert.deepEqual((await store.listBoxes()).map(x => x.id), ['old'])
   assert.ok(ran.some(c => c.includes("'PUT'")))
@@ -338,7 +342,7 @@ test('a box whose snapshot cannot be resumed is replaced from backup instead of 
   e2b.Sandbox.list = (o) => ({ hasNext: true, nextItems: async function () { this.hasNext = false; return o.query.metadata ? e2b.made.filter(m => m.id !== 'gone').map(m => ({ sandboxId: m.id, state: m.id === 'broken' ? 'paused' : 'running', startedAt: m.id })) : [] } })
   e2b.Sandbox.connect = async () => { throw new Error('snapshot not found in storage') }
   e2b.Sandbox.kill = async (id) => { killed.push(id); e2b.made = e2b.made.filter(m => m.id !== id); e2b.made.forEach(() => {}) }
-  const b = boxes({ e2b, store: memoryStore(), cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'P', log: () => {} })
+  const b = boxes({ cells: oneCell(e2b, { presignGet: async () => undefined, presignPut: async () => 'P' }), store: memoryStore(), cfg, edgeKey: 'k', log: () => {} })
   const r = await b.ensure('a@x.com')
   assert.deepEqual(killed, ['broken'])
   assert.notEqual(r.id, 'broken')
@@ -363,8 +367,8 @@ test('a box being restored is neither backed up nor started by another replica, 
   e2b.Sandbox.connect = async (id) => ({ sandboxId: id, commands: { run: async (c) => { ran.push(c); return { stdout: '' } } } })
   e2b.Sandbox.kill = async (id) => { killed.push(id) }
   const store = memoryStore()
-  const a = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => 'GET-URL', presignPut: async () => 'PUT', log: () => {} })
-  const other = boxes({ e2b, store, cfg: { ...cfg }, edgeKey: 'k', presignGet: async () => 'GET-URL', presignPut: async () => 'PUT', log: () => {} })
+  const a = boxes({ cells: oneCell(e2b, { presignGet: async () => 'GET-URL', presignPut: async () => 'PUT' }), store, cfg, edgeKey: 'k', log: () => {} })
+  const other = boxes({ cells: oneCell(e2b, { presignGet: async () => 'GET-URL', presignPut: async () => 'PUT' }), store, cfg, edgeKey: 'k', log: () => {} })
   const first = a.ensure('a@x.com')
   await new Promise(r => setTimeout(r, 20))
   await other.sweep(Date.now() + cfg.backupEveryMs + 1)
@@ -389,16 +393,16 @@ test('a failed restore drops the new box, logged at error, so no backup of it re
   }
   e2b.Sandbox.list = () => ({ hasNext: true, nextItems: async function () { this.hasNext = false; return e2b.made.filter(m => !killed.includes(m.id)).map(m => ({ sandboxId: m.id, state: 'running', startedAt: '1' })) } })
   const store = memoryStore()
-  const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => 'GET-URL', presignPut: async () => 'PUT', log: (l) => logs.push(JSON.parse(l)) })
+  const b = boxes({ cells: oneCell(e2b, { presignGet: async () => 'GET-URL', presignPut: async () => 'PUT' }), store, cfg, edgeKey: 'k', log: (l) => logs.push(JSON.parse(l)) })
   await assert.rejects(b.ensure('a@x.com'), (e) => e.status === 503 && e.restoreFailed === true)
   assert.deepEqual(killed, ['b1'])
   assert.equal(await store.getBox('b1'), undefined)
-  assert.deepEqual(logs.filter(l => l.msg === 'restore'), [{ edge: 'box', level: 'error', msg: 'restore', user: 'a@x.com', box: 'b1', ok: false }])
+  assert.deepEqual(logs.filter(l => l.msg === 'restore'), [{ edge: 'box', level: 'error', msg: 'restore', user: 'a@x.com', box: 'b1', region: 'us-east-1', ok: false }])
   assert.ok(!ran.some(c => c.includes('/root/.mumbo/start.sh') || c.includes('--upload-file')), 'neither started nor backed up')
   fail = false
   const { id } = await b.ensure('a@x.com')
   assert.equal(id, 'b2')
-  assert.deepEqual(logs.filter(l => l.msg === 'restore').at(-1), { edge: 'box', msg: 'restore', user: 'a@x.com', box: 'b2', ok: true })
+  assert.deepEqual(logs.filter(l => l.msg === 'restore').at(-1), { edge: 'box', msg: 'restore', user: 'a@x.com', box: 'b2', region: 'us-east-1', ok: true })
   // The alarm on that line, and the RUNBOOK entry its description links to.
   const { readFileSync } = await import('node:fs')
   assert.ok(readFileSync(new URL('../prod/ops.tf', import.meta.url), 'utf8').includes('edge-restore-failed = { group = module.edge_us_east_1.log_group, pattern = "{ ($.msg = \\"restore\\" && $.ok IS FALSE) || $.msg = \\"restore version unknown\\" }" }'))
@@ -416,7 +420,7 @@ async function restoreRig({ record, presign = async (key, v) => `GET-URL-${v ?? 
   e2b.Sandbox.list = () => ({ hasNext: true, nextItems: async function () { this.hasNext = false; return e2b.made.filter(m => !killed.includes(m.id)).map(m => ({ sandboxId: m.id, state: 'running', startedAt: '1' })) } })
   const store = memoryStore()
   if (record) await store.putDoc(restoreKey('a@x.com'), record)
-  const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async (key, versionId) => { presigned.push([key, versionId]); return presign(key, versionId) }, presignPut: async () => 'PUT', log: (l) => logs.push(JSON.parse(l)) })
+  const b = boxes({ cells: oneCell(e2b, { presignGet: async (key, versionId) => { presigned.push([key, versionId]); return presign(key, versionId) }, presignPut: async () => 'PUT' }), store, cfg, edgeKey: 'k', log: (l) => logs.push(JSON.parse(l)) })
   return { e2b, b, store, ran, killed, logs, presigned }
 }
 const KEY = `${userPrefix('a@x.com')}/latest.tar.gz`
@@ -426,7 +430,7 @@ test('a restore record: the next create restores that version, and the record st
   const { id } = await r.b.ensure('a@x.com')
   assert.deepEqual(r.presigned, [[KEY, 'v1']])
   assert.ok(r.ran.includes(restoreCommand('GET-URL-v1')), 'the restore command fetches the versioned URL')
-  assert.deepEqual(r.logs.filter(l => l.msg === 'restore'), [{ edge: 'box', msg: 'restore', user: 'a@x.com', box: id, ok: true, versionId: 'v1' }])
+  assert.deepEqual(r.logs.filter(l => l.msg === 'restore'), [{ edge: 'box', msg: 'restore', user: 'a@x.com', box: id, region: 'us-east-1', ok: true, versionId: 'v1' }])
   assert.deepEqual(await r.store.getDoc(restoreKey('a@x.com')), { versionId: 'v1', at: 1 }, 'no backup holds the restored data yet')
   // Lost before its first backup: the next creation restores the same version, not latest.tar.gz.
   r.killed.push(id); await r.store.deleteBox(id)
@@ -450,7 +454,7 @@ test('a create from a recorded version that fails in the restore or after it kee
   let failing = 'GET-URL'
   const r = await restoreRig({ record: { versionId: 'v1', at: 1 }, fail: (c) => failing !== undefined && c.includes(failing) })
   await assert.rejects(r.b.ensure('a@x.com'), (e) => e.status === 503 && e.restoreFailed === true)
-  assert.deepEqual(r.logs.find(l => l.msg === 'restore'), { edge: 'box', level: 'error', msg: 'restore', user: 'a@x.com', box: 'b1', ok: false, versionId: 'v1' })
+  assert.deepEqual(r.logs.find(l => l.msg === 'restore'), { edge: 'box', level: 'error', msg: 'restore', user: 'a@x.com', box: 'b1', region: 'us-east-1', ok: false, versionId: 'v1' })
   assert.deepEqual(await r.store.getDoc(restoreKey('a@x.com')), { versionId: 'v1', at: 1 })
   failing = 'chmod 0700 /root/.mumbo/start.sh'  // restored, then start.sh fails: the box is dropped
   await assert.rejects(r.b.ensure('a@x.com'))
@@ -469,13 +473,13 @@ test('an unknown recorded version fails loud: error line, restore-failed 503, no
     assert.deepEqual(r.presigned, [[KEY, 'gone']], 'latest.tar.gz is never presigned')
     assert.equal(r.e2b.made.length, 0, 'no box is created')
     assert.deepEqual(await r.store.getDoc(restoreKey('a@x.com')), { versionId: 'gone', at: 1 })
-    assert.deepEqual(r.logs, [{ edge: 'box', level: 'error', msg: 'restore version unknown', user: 'a@x.com', versionId: 'gone', ...(presign === deleteMarker ? { error: 'UnknownError', status: 405 } : { error: 'NotFound', status: 404 }) }])
+    assert.deepEqual(r.logs, [{ edge: 'box', msg: 'placed', user: 'a@x.com', region: 'us-east-1' }, { edge: 'box', level: 'error', msg: 'restore version unknown', user: 'a@x.com', versionId: 'gone', ...(presign === deleteMarker ? { error: 'UnknownError', status: 405 } : { error: 'NotFound', status: 404 }) }])
   }
   // A record without a version id would presign latest.tar.gz: refused before any presign.
   const r = await restoreRig({ record: { at: 1 } })
   await assert.rejects(r.b.ensure('a@x.com'), (e) => e.restoreFailed === true)
   assert.deepEqual(r.presigned, [])
-  assert.equal(r.logs[0].msg, 'restore version unknown')
+  assert.equal(r.logs.at(-1).msg, 'restore version unknown')
 })
 
 test('a record the operator replaces while a create runs stays for the next creation, past the box\'s first backup', async () => {
@@ -534,7 +538,7 @@ function fakeChildE2B() {
 const childCfg = { childTemplates: ['mumbo-child'], maxChildren: 2 }
 
 test('child sandboxes: owned per user, capped, template-limited, never tagged as the user\'s box', async () => {
-  const e2b = fakeChildE2B(); const ops = children({ e2b, cfg: childCfg, log: () => {} })
+  const e2b = fakeChildE2B(); const ops = children({ cells: oneCell(e2b, { maxUnits: 0 }), store: memoryStore(), cfg: childCfg, log: () => {} })
   const { id } = await ops.create('a@x.com', 'box1')
   assert.deepEqual(e2b.live.get(id).metadata, { owner: 'a@x.com', parent: 'box1' })
   assert.equal(e2b.live.get(id).metadata.user, undefined)
@@ -552,7 +556,7 @@ test('child sandboxes: owned per user, capped, template-limited, never tagged as
 })
 
 test('MCP endpoint on the model host: box token required, tools act as the token\'s user', async () => {
-  const e2b = fakeChildE2B(); const ops = children({ e2b, cfg: childCfg, log: () => {} })
+  const e2b = fakeChildE2B(); const ops = children({ cells: oneCell(e2b, { maxUnits: 0 }), store: memoryStore(), cfg: childCfg, log: () => {} })
   const mcp = mcpServer({ ops, claimOf: (info) => verifyBox('k', String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
   const server = modelServer({ cfg: { ...cfg, egressIps: [] }, edgeKey: 'k', modelKey: 'SERVER', allow: async () => true, owns: async (u, b) => u === 'a@x.com' && b === 'box1', touch: () => {}, mcp, log: () => {} })
   await new Promise(r => server.listen(0, '127.0.0.1', r))
@@ -597,8 +601,8 @@ test('desktop live view: /desktop/ goes to the box\'s live view, everything else
 test('the live view\'s pages may connect only to their own host, and a page that opened the public host keeps no handle to it', async () => {
   const upstream = createServer((req, res) => res.writeHead(200, { 'content-type': 'text/html', ...(req.url === '/own-csp' ? { 'content-security-policy': "default-src 'self'" } : {}) }).end('page'))
   await new Promise(r => upstream.listen(0, '127.0.0.1', r))
-  const box = { ensure: async () => ({ id: 'ubox', token: 'T' }), touch: async () => {}, forget: async () => {} }
-  const server = userServer({ cfg: { ...cfg, approveHost: 'approve.example', proxy: new URL(`http://127.0.0.1:${upstream.address().port}`) }, box, signin: () => false, log: () => {} })
+  const box = { ensure: async () => ({ id: 'ubox', token: 'T', proxy: new URL(`http://127.0.0.1:${upstream.address().port}`) }), touch: async () => {}, forget: async () => {} }
+  const server = userServer({ cfg: { ...cfg, approveHost: 'approve.example' }, box, signin: () => false, log: () => {} })
   const port = await listen(server)
   const get = (path, host = cfg.publicHost) => call(port, { path, headers: { host, 'x-forwarded-email': 'a@x.com', cookie: 'dsh-auth-x=1' } })
   try {
@@ -632,7 +636,7 @@ test('an idle box is paused with its next scheduled run and woken for it, restar
   const realConnect = e2b.Sandbox.connect
   e2b.Sandbox.connect = async (id) => { const b = await realConnect(id); b.commands.run = async (c) => { ran.push(c); return { stdout: c === NEXT_WAKE_COMMAND ? String(due) : c.includes('dsh.log') ? 'launch456' : '' } }; return b }
   const store = memoryStore()
-  const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'PUT', log: () => {} })
+  const b = boxes({ cells: oneCell(e2b, { presignGet: async () => undefined, presignPut: async () => 'PUT' }), store, cfg, edgeKey: 'k', log: () => {} })
   const { id } = await b.ensure('a@x.com')
   await b.sweep(Date.now() + cfg.idleMs + 1)
   assert.deepEqual(paused, [id])
@@ -655,7 +659,7 @@ test('with PAUSE_IDLE=false idle boxes stay running: no pause, backups only when
   const realConnect = e2b.Sandbox.connect
   e2b.Sandbox.connect = async (id) => { const b = await realConnect(id); b.commands.run = async (c) => { ran.push(c); return { stdout: '' } }; return b }
   const store = memoryStore()
-  const b = boxes({ e2b, store, cfg: { ...cfg, pauseIdle: false }, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'PUT', log: () => {} })
+  const b = boxes({ cells: oneCell(e2b, { presignGet: async () => undefined, presignPut: async () => 'PUT' }), store, cfg: { ...cfg, pauseIdle: false }, edgeKey: 'k', log: () => {} })
   const { id } = await b.ensure('a@x.com')
   const t = Date.now() + Math.max(cfg.idleMs, 5 * 60_000) + 1  // idle, and past the 5-minute keepalive interval
   await store.patchBox(id, { backedUp: t - 1000 })
@@ -716,7 +720,7 @@ test('project boxes: own masked host and public path, no desktop or browser tool
 
 test('project tools are offered to a person\'s box and not to a project box', async () => {
   const proj = projectStore({ store: memoryStore(), admitted: () => true, log: () => {} })
-  const ops = children({ e2b: fakeChildE2B(), cfg: childCfg, log: () => {} })
+  const ops = children({ cells: oneCell(fakeChildE2B(), { maxUnits: 0 }), store: memoryStore(), cfg: childCfg, log: () => {} })
   const mcp = mcpServer({ ops, projects: proj, projectDomain: 'projects.example', claimOf: (info) => verifyBox('k', String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
   const server = createServer((req, res) => mcp(req, res))
   await new Promise(r => server.listen(0, '127.0.0.1', r))
@@ -756,7 +760,7 @@ test('a box E2B reports no masked host for: a warning names it, and Origins pass
   const e2b = fakeE2B(); const logs = []
   e2b.Sandbox.getInfo = async () => ({})
   const store = memoryStore()
-  const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'P', log: (l) => logs.push(JSON.parse(l)) })
+  const b = boxes({ cells: oneCell(e2b, { presignGet: async () => undefined, presignPut: async () => 'P' }), store, cfg, edgeKey: 'k', log: (l) => logs.push(JSON.parse(l)) })
   const made = await b.ensure('a@x.com')
   const { host, ...before } = await store.getBox(made.id)
   await store.putBox(made.id, before)
@@ -770,7 +774,7 @@ test('a box\'s masked host: boxSite at creation; read once from E2B for a box th
   const e2b = fakeE2B(); const infos = []
   e2b.Sandbox.getInfo = async (id) => { infos.push(id); return { sandboxId: id, network: { maskRequestHost: 'boxes.mumbo.si' } } }
   const store = memoryStore()
-  const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'P', log: () => {} })
+  const b = boxes({ cells: oneCell(e2b, { presignGet: async () => undefined, presignPut: async () => 'P' }), store, cfg, edgeKey: 'k', log: () => {} })
   const made = await b.ensure('a@x.com')
   assert.equal(made.host, 'boxes.example')
   const { host, ...before } = await store.getBox(made.id)
@@ -882,7 +886,7 @@ test('project relay: a box whose image has no relay route refuses with relay_una
 test('project_message: kind defaults to context, a messageId is required, and the caller\'s box is the mumbo hop', async () => {
   const calls = []
   const relay = { message: async (...args) => { calls.push(args); return { delivered: true } } }
-  const mcp = mcpServer({ ops: children({ e2b: fakeChildE2B(), cfg: childCfg, log: () => {} }), projects: projectStore({ store: memoryStore(), admitted: () => true, log: () => {} }),
+  const mcp = mcpServer({ ops: children({ cells: oneCell(fakeChildE2B(), { maxUnits: 0 }), store: memoryStore(), cfg: childCfg, log: () => {} }), projects: projectStore({ store: memoryStore(), admitted: () => true, log: () => {} }),
     relay, projectDomain: 'projects.example', claimOf: (info) => verifyBox('k', String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
   const server = createServer((req, res) => mcp(req, res))
   await new Promise(r => server.listen(0, '127.0.0.1', r))
@@ -950,7 +954,7 @@ test('never-pause keepalive drops a box E2B no longer has', async () => {
   const e2b = fakeE2B()
   e2b.Sandbox.setTimeout = async (id) => { throw new Error(`Sandbox ${id} not found`) }
   const store = memoryStore()
-  const b = boxes({ e2b, store, cfg: { ...cfg, pauseIdle: false }, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'PUT', log: () => {} })
+  const b = boxes({ cells: oneCell(e2b, { presignGet: async () => undefined, presignPut: async () => 'PUT' }), store, cfg: { ...cfg, pauseIdle: false }, edgeKey: 'k', log: () => {} })
   const { id } = await b.ensure('a@x.com')
   await store.patchBox(id, { backedUp: Date.now() + 3600_000 })
   await b.sweep(Date.now() + 6 * 60_000)
@@ -992,8 +996,9 @@ test('routing: browser member headers are stripped; member-capable project boxes
   const proj = projectStore({ store: memoryStore(), admitted: () => true, log: () => {} })
   const capable = (await proj.create('a@x.com', 'Capable')).id
   const legacy = (await proj.create('a@x.com', 'Legacy')).id
-  const box = { ensure: async (p) => p === `project:${capable}` ? { id: 'pbox', token: 'OWNER', member: (e) => memberHeader(key, e) } : { id: p === 'a@x.com' ? 'ubox' : 'lbox', token: 'OWNER' }, touch: async () => {}, forget: async () => {} }
-  const server = userServer({ cfg: { ...cfg, proxy: new URL(`http://127.0.0.1:${upstream.address().port}`) }, box, projects: proj, log: () => {} })
+  const proxy = new URL(`http://127.0.0.1:${upstream.address().port}`)
+  const box = { ensure: async (p) => p === `project:${capable}` ? { id: 'pbox', token: 'OWNER', proxy, member: (e) => memberHeader(key, e) } : { id: p === 'a@x.com' ? 'ubox' : 'lbox', token: 'OWNER', proxy }, touch: async () => {}, forget: async () => {} }
+  const server = userServer({ cfg, box, projects: proj, log: () => {} })
   const port = await listen(server)
   const go = (host, path = '/', extra = {}) => call(port, { path, headers: { host, 'x-forwarded-email': 'a@x.com', accept: 'text/html', ...extra } })
   const at = (id) => `p-${id}.${cfg.publicHost}`
@@ -1020,11 +1025,11 @@ test('relay to a member-capable box sends the member header and no owner sign-in
     seen.push({ method: req.method, path: req.url, headers: req.headers, body: JSON.parse(body) })
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ result: 'stored', trigger: 't1', thread: 'm-1' }))
   })
-  const c = { ...cfg, proxy: new URL(`http://127.0.0.1:${await listen(upstream)}`) }
+  const c = cfg, proxy = new URL(`http://127.0.0.1:${await listen(upstream)}`)
   const proj = projectStore({ store: memoryStore(), admitted: () => true, log: () => {} })
   const { id } = await proj.create('a@x.com', 'P')
   // Masked under the former project domain: the relay sends the Origin that box's dsh accepts.
-  const box = { ensure: async () => ({ id: 'pbox', token: 'OWNER', host: `p-${id}.boxes.mumbo.si`, member: (e) => `hdr-for-${e}` }) }
+  const box = { ensure: async () => ({ id: 'pbox', token: 'OWNER', host: `p-${id}.boxes.mumbo.si`, proxy, member: (e) => `hdr-for-${e}` }) }
   const relay = projectRelay({ projects: proj, box, boxFetch: boxFetcher(c), siteHostOf: (p) => boxSite(c, p).host, edgeHost: c.publicHost, log: () => {} })
   try {
     assert.equal((await relay.message('a@x.com', id, 'hi', { messageId: 'm-1' })).result, 'stored')
@@ -1083,14 +1088,15 @@ test('capacity counts a person box at 2 units, a project box at 4 and a running 
   const { runningUnits, atCapacity, UNITS, unitsFor } = await import('./capacity.mjs')
   const list = (items) => ({ Sandbox: { list: () => { let more = true; return { get hasNext() { return more }, nextItems: async () => { more = false; return items } } } } })
   const e2b = list([{ metadata: { user: 'a@x.com' } }, { metadata: { user: 'project:p' } }, { metadata: { owner: 'a@x.com' } }, { metadata: { owner: 'a@x.com' } }])
-  assert.equal(await runningUnits(e2b), 2 + 4 + 1 + 1)
+  assert.equal(await runningUnits(e2b.Sandbox), 2 + 4 + 1 + 1)
   assert.deepEqual([unitsFor({ user: 'a@x.com' }), unitsFor({ user: 'project:0123456789abcdef' }), unitsFor({ owner: 'project:p', user: 'project:p' }), unitsFor(undefined)], [2, 4, 1, 2])
-  assert.equal(await atCapacity(e2b, { maxRunningUnits: 9 }, UNITS.child), false)
-  assert.equal(await atCapacity(e2b, { maxRunningUnits: 9 }, UNITS.box), true)
+  const cell = (maxUnits) => ({ Sandbox: e2b.Sandbox, maxUnits })
+  assert.equal(await atCapacity(cell(9), UNITS.child), false)
+  assert.equal(await atCapacity(cell(9), UNITS.box), true)
   // 8 in use: a person box (2) fits under 11, a project box (4) does not.
-  assert.equal(await atCapacity(e2b, { maxRunningUnits: 11 }, UNITS.box), false)
-  assert.equal(await atCapacity(e2b, { maxRunningUnits: 11 }, UNITS.project), true)
-  assert.equal(await atCapacity(e2b, { maxRunningUnits: 0 }, UNITS.box), false, '0 is no cap')
+  assert.equal(await atCapacity(cell(11), UNITS.box), false)
+  assert.equal(await atCapacity(cell(11), UNITS.project), true)
+  assert.equal(await atCapacity(cell(0), UNITS.box), false, '0 is no cap')
 })
 
 test('child creation goes through the same unit cap', async () => {
@@ -1101,7 +1107,7 @@ test('child creation goes through the same unit cap', async () => {
     list: ({ query }) => { let more = true; return { get hasNext() { return more }, nextItems: async () => { more = false; return running.filter(s => !query.metadata || s.metadata.owner === query.metadata.owner) } } },
     create: async (t, o) => { created.push(t); running.push({ metadata: o.metadata }); return { sandboxId: 'c' + created.length } },
   } }
-  const ops = children({ e2b, cfg: { childTemplates: ['mumbo-child'], maxChildren: 10, maxRunningUnits: 7 }, log: () => {} })
+  const ops = children({ cells: oneCell(e2b, { maxUnits: 7 }), store: memoryStore(), cfg: { childTemplates: ['mumbo-child'], maxChildren: 10 }, log: () => {} })
   await ops.create('a@x.com', 'p'); await ops.create('a@x.com', 'p')  // 6 then 7 units
   await assert.rejects(ops.create('a@x.com', 'p'), /capacity/)
   assert.equal(created.length, 2)
@@ -1110,7 +1116,7 @@ test('child creation goes through the same unit cap', async () => {
 test('a box create at 6 of 7 units is refused: it weighs 2, not the child weight of 1', async () => {
   const e2b = fakeE2B()
   e2b.Sandbox.list = ({ query }) => { let more = true; return { get hasNext() { return more }, nextItems: async () => { more = false; return query.metadata ? [] : [{ metadata: { user: 'b@x.com' } }, { metadata: { user: 'c@x.com' } }, { metadata: { user: 'd@x.com' } }] } } }
-  const b = boxes({ e2b, store: memoryStore(), cfg: { ...cfg, maxRunningUnits: 7 }, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'P', log: () => {} })
+  const b = boxes({ cells: oneCell(e2b, { maxUnits: 7, presignGet: async () => undefined, presignPut: async () => 'P' }), store: memoryStore(), cfg, edgeKey: 'k', log: () => {} })
   await assert.rejects(b.ensure('a@x.com'), /capacity/)
 })
 
@@ -1154,7 +1160,7 @@ const gated = () => {
 }
 const gatedServer = async (presign, email = 'a@x.com') => {
   const g = gated(); const store = memoryStore()
-  const b = boxes({ e2b: g.e2b, store, cfg, edgeKey: 'k', presignGet: presign, presignPut: async () => 'P', log: () => {} })
+  const b = boxes({ cells: oneCell(g.e2b, { presignGet: presign, presignPut: async () => 'P' }), store, cfg, edgeKey: 'k', log: () => {} })
   let ensures = 0
   const counted = { ...b, ensure: (k) => { ensures++; return b.ensure(k) }, firstSetUp: b.firstSetUp, touch: b.touch, forget: b.forget }
   const s = userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: counted, log: () => {} })
@@ -1191,7 +1197,7 @@ test('create records first only while it runs: true without a backup, false with
     const e2b = fakeE2B(); const store = memoryStore(); let release; const hold = new Promise(r => { release = r })
     const mk = e2b.Sandbox.create
     e2b.Sandbox.create = async (...a) => { const b = await mk(...a); const run = b.commands.run; b.commands.run = async (c) => { if (c.includes('chmod 0700 /root/.mumbo/start.sh')) await hold; return run(c) }; return b }
-    const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => url, presignPut: async () => 'P', log: () => {} })
+    const b = boxes({ cells: oneCell(e2b, { presignGet: async () => url, presignPut: async () => 'P' }), store, cfg, edgeKey: 'k', log: () => {} })
     const done = b.ensure('a@x.com')
     await new Promise(r => setTimeout(r, 60))
     assert.equal((await store.getBox('b1')).creating > 0, true)
@@ -1272,15 +1278,15 @@ test('a failed restore shows its own page, keeps it while the next attempt runs,
 })
 test('create looks up the backup before it creates the sandbox', async () => {
   const e2b = fakeE2B(); let seen
-  const b = boxes({ e2b, store: memoryStore(), cfg, edgeKey: 'k', presignGet: async () => { seen = e2b.made.length; return undefined }, presignPut: async () => 'P', log: () => {} })
+  const b = boxes({ cells: oneCell(e2b, { presignGet: async () => { seen = e2b.made.length; return undefined }, presignPut: async () => 'P' }), store: memoryStore(), cfg, edgeKey: 'k', log: () => {} })
   await b.ensure('a@x.com')
   assert.equal(seen, 0)
   const bad = fakeE2B()
-  await assert.rejects(boxes({ e2b: bad, store: memoryStore(), cfg, edgeKey: 'k', presignGet: async () => { throw new Error('s3') }, presignPut: async () => 'P', log: () => {} }).ensure('a@x.com'), /s3/)
+  await assert.rejects(boxes({ cells: oneCell(bad, { presignGet: async () => { throw new Error('s3') }, presignPut: async () => 'P' }), store: memoryStore(), cfg, edgeKey: 'k', log: () => {} }).ensure('a@x.com'), /s3/)
   assert.equal(bad.made.length, 0)
 })
 test('firstSetUp: no box and no backup, or a creating record marked first', async () => {
-  const mk = (presign) => { const e2b = fakeE2B(); const store = memoryStore(); return { e2b, store, b: boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: presign, presignPut: async () => 'P', log: () => {} }) } }
+  const mk = (presign) => { const e2b = fakeE2B(); const store = memoryStore(); return { e2b, store, b: boxes({ cells: oneCell(e2b, { presignGet: presign, presignPut: async () => 'P' }), store, cfg, edgeKey: 'k', log: () => {} }) } }
   assert.equal(await mk(async () => undefined).b.firstSetUp('a@x.com'), true)
   assert.equal(await mk(async () => 'GET-URL').b.firstSetUp('a@x.com'), false)
   const t = mk(async () => undefined); t.e2b.made.push({ id: 'b1' })
@@ -1332,4 +1338,242 @@ test('the image check (node edge.mjs --check) fails without a module, a dynamica
     assert.equal(r.status, 1, gone || extra)
     assert.match(r.stderr, error, gone || extra)
   }
+})
+
+// ---- cells (spec section 17c): every E2B and S3 call through the record's cell
+/** A fake cell: its own E2B, whose sandboxes and calls it records, its client-proxy address and its presigners. A HEAD
+ *  finds the keys in `backups`, and any key at a version. */
+function fakeCell(region, { backups = new Set(), port = 1, maxUnits = 0 } = {}) {
+  const calls = [], sandboxes = new Map(); let n = 0
+  const box = (id) => ({ sandboxId: id, trafficAccessToken: `T-${id}`, files: { write: async () => {} }, kill: async () => { sandboxes.delete(id) },
+    commands: { run: async (c) => { calls.push(['run', id, c]); return { exitCode: 0, stdout: c.includes('dsh.log') ? 'launch' : c.startsWith('curl') ? '200' : '', stderr: '' } } } })
+  const listed = (query) => [...sandboxes.values()].filter(s => query.state.includes(s.state) && Object.entries(query.metadata ?? {}).every(([k, v]) => s.metadata[k] === v))
+  const Sandbox = {
+    list: ({ query }) => { calls.push(['list', query.metadata ?? 'all']); let more = true; return { get hasNext() { return more }, nextItems: async () => { more = false; return listed(query) } } },
+    create: async (template, opts) => { calls.push(['create', opts.metadata]); const id = `${region}-${++n}`; sandboxes.set(id, { sandboxId: id, metadata: opts.metadata, state: 'running', startedAt: String(n), templateId: template }); return box(id) },
+    connect: async (id) => { calls.push(['connect', id]); if (!sandboxes.has(id)) throw new Error(`sandbox ${id} not found`); return box(id) },
+    getInfo: async (id) => { calls.push(['getInfo', id]); if (!sandboxes.has(id)) throw new Error('not found'); return { ...sandboxes.get(id), network: {} } },
+    setTimeout: async (id) => { calls.push(['setTimeout', id]) },
+    kill: async (id) => { calls.push(['kill', id]); sandboxes.delete(id) },
+    pause: async (id) => { calls.push(['pause', id]) },
+  }
+  const run = (id, user, state = 'running') => sandboxes.set(id, { sandboxId: id, metadata: { user }, state, startedAt: '0' })
+  return { region, Sandbox, sandboxes, calls, run, backups, proxy: new URL(`http://127.0.0.1:${port}`), bucket: `bucket-${region}`, maxUnits,
+    presignGet: async (key, versionId) => { calls.push(['head', key]); return versionId || backups.has(key) ? `GET-${region}` : undefined },
+    presignPut: async (key) => { calls.push(['put', key]); return `PUT-${region}` } }
+}
+const twoCells = (opts = {}) => {
+  const us = fakeCell('us-east-1', opts.us), aps1 = fakeCell('ap-south-1', opts.aps1)
+  return { us, aps1, cells: new Map([['us-east-1', us], ['ap-south-1', aps1]]) }
+}
+const MUMBAI = { ...cfg, edgeRegion: 'ap-south-1' }
+const backupOf = (principal) => `${userPrefix(principal)}/latest.tar.gz`
+const kinds = (cell, kind) => cell.calls.filter(c => c[0] === kind)
+
+test('a newcomer at the Mumbai edge is placed in ap-south-1: their person doc, sandbox, restore lookup, box record and proxy are that cell\'s', async () => {
+  const { us, aps1, cells } = twoCells(); const store = memoryStore(); const logs = []
+  const b = boxes({ cells, store, cfg: MUMBAI, edgeKey: 'k', log: (l) => logs.push(JSON.parse(l)) })
+  const target = await b.ensure('new@x.com')
+  assert.equal((await store.getDoc('person:new@x.com')).region, 'ap-south-1')
+  assert.deepEqual([us.sandboxes.size, [...aps1.sandboxes.values()].map(s => s.metadata)], [0, [{ user: 'new@x.com' }]])
+  assert.deepEqual(kinds(aps1, 'head'), [['head', backupOf('new@x.com')]], 'its restore is looked up in its own bucket')
+  assert.deepEqual(kinds(us, 'create'), [])
+  assert.equal((await store.getBox(target.id)).region, 'ap-south-1')
+  assert.equal(target.proxy, aps1.proxy)
+  assert.deepEqual(logs.filter(l => ['placed', 'created'].includes(l.msg)).map(l => [l.msg, l.region]), [['placed', 'ap-south-1'], ['created', 'ap-south-1']])
+})
+
+test('an existing person without a person doc stays in us-east-1 at the Mumbai edge (a box, a backup or a restore record there); the doc is written once', async () => {
+  const cases = {
+    'a running box': async (t) => { t.us.run('old', 'a@x.com'); await t.store.putBox('old', { email: 'a@x.com', launch: 'L', host: 'boxes.example', active: Date.now(), extended: Date.now(), backedUp: Date.now(), paused: false }) },
+    'only a backup': async (t) => { t.us.backups.add(backupOf('a@x.com')) },
+    'only a restore record': async (t) => { await t.store.putDoc(restoreKey('a@x.com'), { versionId: 'v1', at: 1 }) },
+  }
+  for (const [name, setup] of Object.entries(cases)) {
+    const t = { ...twoCells(), store: memoryStore() }
+    await setup(t)
+    const b = boxes({ cells: t.cells, store: t.store, cfg: MUMBAI, edgeKey: 'k', log: () => {} })
+    const first = await b.ensure('a@x.com')
+    const doc = await t.store.getDoc('person:a@x.com')
+    assert.equal(doc.region, 'us-east-1', name)
+    assert.deepEqual([t.aps1.sandboxes.size, first.proxy], [0, t.us.proxy], name)
+    t.us.calls.length = 0
+    await b.ensure('a@x.com')
+    assert.deepEqual(await t.store.getDoc('person:a@x.com'), doc, `${name}: written once`)
+    assert.deepEqual([kinds(t.us, 'list'), kinds(t.us, 'head')], [[['list', { user: 'a@x.com' }]], []], `${name}: no second legacy check`)
+  }
+})
+
+test('an edge in us-east-1 places a newcomer there without the legacy check', async () => {
+  const { us, aps1, cells } = twoCells(); const store = memoryStore()
+  const b = boxes({ cells, store, cfg, edgeKey: 'k', log: () => {} })
+  await b.ensure('new@x.com')
+  assert.equal((await store.getDoc('person:new@x.com')).region, 'us-east-1')
+  assert.deepEqual([kinds(us, 'list').length, kinds(us, 'head').length], [1, 1], 'only ensure\'s own lookup and create\'s restore lookup')
+  assert.deepEqual(aps1.calls, [])
+})
+
+test('a failing legacy lookup fails the visit and places nobody', async () => {
+  for (const broken of ['list', 'head']) {
+    const { us, aps1, cells } = twoCells(); const store = memoryStore()
+    if (broken === 'list') us.Sandbox.list = () => { throw new Error('E2B down') }; else us.presignGet = async () => { throw new Error('S3 down') }
+    const b = boxes({ cells, store, cfg: MUMBAI, edgeKey: 'k', log: () => {} })
+    await assert.rejects(b.ensure('new@x.com'), /down/, broken)
+    assert.equal(await store.getDoc('person:new@x.com'), undefined, broken)
+    assert.equal(aps1.sandboxes.size, 0, broken)
+  }
+})
+
+test('two first visits at once on two replicas place a newcomer once and create one box', async () => {
+  const { us, aps1, cells } = twoCells(); const store = memoryStore(); const placed = []
+  const replica = () => boxes({ cells, store, cfg: MUMBAI, edgeKey: 'k', log: (l) => { if (JSON.parse(l).msg === 'placed') placed.push(l) } })
+  const [x, y] = await Promise.all([replica().ensure('new@x.com'), replica().ensure('new@x.com')])
+  assert.equal(x.id, y.id)
+  assert.deepEqual([placed.length, aps1.sandboxes.size, us.sandboxes.size], [1, 1, 0])
+})
+
+test('a record in a region with no cell: ensure fails with 503, and the sweep logs that box as an error and still backs up the others', async () => {
+  const { us, cells } = twoCells(); const store = memoryStore(); const logs = []
+  const b = boxes({ cells, store, cfg, edgeKey: 'k', log: (l) => logs.push(JSON.parse(l)) })
+  await store.putDoc('person:far@x.com', { region: 'eu-west-1', at: 1 })
+  await assert.rejects(b.ensure('far@x.com'), (e) => e.status === 503 && e.message === 'no cell for region eu-west-1')
+  us.run('u1', 'a@x.com')
+  await store.putBox('far', { email: 'far@x.com', region: 'eu-west-1', active: Date.now(), extended: Date.now(), backedUp: 0, paused: false })
+  await store.putBox('u1', { email: 'a@x.com', active: Date.now(), extended: Date.now(), backedUp: 0, paused: false })
+  await b.sweep()
+  assert.deepEqual(logs.filter(l => l.edge === 'error'), [{ edge: 'error', msg: 'box in a region with no cell', box: 'far', region: 'eu-west-1' }])
+  assert.deepEqual(logs.filter(l => l.msg === 'backup').map(l => [l.box, l.region]), [['u1', 'us-east-1']])
+})
+
+test('a record without a region is in us-east-1: pick asks that cell and takes its proxy, touch extends there, the sweep backs it up there', async () => {
+  const { us, aps1, cells } = twoCells(); const store = memoryStore()
+  us.run('old', 'a@x.com')
+  await store.putBox('old', { email: 'a@x.com', launch: 'L', active: Date.now(), extended: 0, backedUp: 0, paused: false })
+  const b = boxes({ cells, store, cfg: { ...MUMBAI, pauseIdle: false }, edgeKey: 'k', log: () => {} })
+  const target = await b.ensure('a@x.com')
+  assert.deepEqual([target.id, target.proxy, kinds(us, 'getInfo')], ['old', us.proxy, [['getInfo', 'old']]])
+  await b.touch('old')
+  assert.deepEqual(kinds(us, 'setTimeout'), [['setTimeout', 'old']])
+  await b.sweep()
+  assert.deepEqual([kinds(us, 'put'), kinds(us, 'connect')], [[['put', backupOf('a@x.com')]], [['connect', 'old']]])
+  assert.deepEqual(aps1.calls.filter(c => c[0] !== 'list'), [], 'the other cell is only listed, by adoption')
+})
+
+test('the sweep covers every cell: adoption with each cell\'s region, even when another cell fails; backups and keepalives through each box\'s own cell', async () => {
+  const { us, aps1, cells } = twoCells(); const store = memoryStore(); const logs = []
+  us.run('u1', 'a@x.com'); aps1.run('m1', 'm@x.com')
+  const b = boxes({ cells, store, cfg: { ...cfg, pauseIdle: false }, edgeKey: 'k', log: (l) => logs.push(JSON.parse(l)) })
+  await b.sweep()
+  assert.deepEqual([(await store.getBox('u1')).region, (await store.getBox('m1')).region], ['us-east-1', 'ap-south-1'])
+  assert.deepEqual([kinds(us, 'put'), kinds(aps1, 'put')], [[['put', backupOf('a@x.com')]], [['put', backupOf('m@x.com')]]])
+  assert.deepEqual([kinds(us, 'connect'), kinds(aps1, 'connect')], [[['connect', 'u1']], [['connect', 'm1']]])
+  assert.deepEqual([kinds(us, 'setTimeout'), kinds(aps1, 'setTimeout')], [[['setTimeout', 'u1']], [['setTimeout', 'm1']]])
+  assert.deepEqual(logs.filter(l => l.msg === 'backup').map(l => [l.box, l.region]), [['u1', 'us-east-1'], ['m1', 'ap-south-1']])
+  const other = twoCells(); const store2 = memoryStore(); const warned = []
+  other.us.Sandbox.list = () => { throw new Error('E2B down') }
+  other.aps1.run('m1', 'm@x.com')
+  await boxes({ cells: other.cells, store: store2, cfg, edgeKey: 'k', log: (l) => warned.push(JSON.parse(l)) }).sweep()
+  assert.equal((await store2.getBox('m1')).region, 'ap-south-1')
+  assert.deepEqual(warned.find(l => l.msg === 'adopt failed'), { edge: 'box', level: 'warn', msg: 'adopt failed', region: 'us-east-1', error: 'E2B down' })
+})
+
+test('the sweep releases its lease with the token it got', async () => {
+  const released = [], store = { ...memoryStore(), lease: async () => 'T1', release: async (...a) => { released.push(a) } }
+  await boxes({ cells: twoCells().cells, store, cfg, edgeKey: 'k', log: () => {} }).sweep()
+  assert.deepEqual(released, [['sweep', 'T1']])
+})
+
+test('capacity per cell: a person in a full us-east-1 gets the capacity refusal while a newcomer gets a box in an empty Mumbai', async () => {
+  const { us, aps1, cells } = twoCells({ us: { maxUnits: 4 }, aps1: { maxUnits: 20 } }); const store = memoryStore()
+  us.run('u1', 'b@x.com'); us.run('u2', 'c@x.com')
+  us.backups.add(backupOf('a@x.com'))
+  const b = boxes({ cells, store, cfg: MUMBAI, edgeKey: 'k', log: () => {} })
+  await assert.rejects(b.ensure('a@x.com'), (e) => e.capacity === true && e.status === 503)
+  assert.equal((await b.ensure('new@x.com')).proxy, aps1.proxy)
+  assert.deepEqual([us.sandboxes.size, aps1.sandboxes.size], [2, 1])
+})
+
+test('a page, a WebSocket and a relay request for a box reach its own cell\'s client-proxy', async () => {
+  const seen = { 'us-east-1': [], 'ap-south-1': [] }
+  const upstreams = Object.keys(seen).map(region => {
+    const s = createServer((req, res) => { seen[region].push(['GET', req.headers['e2b-sandbox-id']]); res.writeHead(200).end(region) })
+    s.on('upgrade', (req, socket) => { seen[region].push(['UPGRADE', req.headers['e2b-sandbox-id']]); socket.end('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n') })
+    return s
+  })
+  const [usPort, aps1Port] = await Promise.all(upstreams.map(listen))
+  const { us, cells } = twoCells({ us: { port: usPort }, aps1: { port: aps1Port } }); const store = memoryStore()
+  us.backups.add(backupOf('a@x.com'))
+  const b = boxes({ cells, store, cfg: MUMBAI, edgeKey: 'k', log: () => {} })
+  const targets = { 'us-east-1': await b.ensure('a@x.com'), 'ap-south-1': await b.ensure('m@x.com') }
+  const server = userServer({ cfg: MUMBAI, box: b, log: () => {} })
+  const port = await listen(server)
+  const upgrade = (email) => new Promise((resolve) => {
+    const req = request({ host: '127.0.0.1', port, path: '/', headers: { host: cfg.publicHost, origin: `https://${cfg.publicHost}`, 'x-forwarded-email': email, connection: 'Upgrade', upgrade: 'websocket' } })
+    req.on('upgrade', (res, socket) => { socket.destroy(); resolve(res.statusCode) }); req.on('response', (res) => { res.resume(); resolve(res.statusCode) }); req.end()
+  })
+  const { boxFetcher } = await import('./edge.mjs')
+  try {
+    for (const [email, region] of [['a@x.com', 'us-east-1'], ['m@x.com', 'ap-south-1']]) {
+      assert.equal((await call(port, { headers: { 'x-forwarded-email': email, cookie: 'dsh-auth-x=1' } })).body, region)
+      assert.equal(await upgrade(email), 101)
+      assert.equal((await boxFetcher(cfg)(targets[region], cfg.publicHost, '/x')).body, region)
+      const id = targets[region].id
+      assert.deepEqual(seen[region], [['GET', id], ['UPGRADE', id], ['GET', id]], region)
+    }
+  } finally { server.close(); for (const s of upstreams) s.close() }
+})
+
+test('child sandboxes run in their owner\'s cell: tools, capacity and ownership there', async () => {
+  const { us, aps1, cells } = twoCells({ us: { maxUnits: 1 }, aps1: { maxUnits: 20 } }); const store = memoryStore()
+  await store.putDoc('person:m@x.com', { region: 'ap-south-1', at: 1 })
+  us.run('u1', 'a@x.com')  // 2 units: us-east-1 is full
+  const ops = children({ cells, store, cfg: childCfg, log: () => {} })
+  const { id } = await ops.create('m@x.com', 'box1')
+  assert.deepEqual([aps1.sandboxes.get(id).metadata, us.sandboxes.has(id)], [{ owner: 'm@x.com', parent: 'box1' }, false])
+  assert.deepEqual((await ops.list('m@x.com')).map(c => c.id), [id])
+  assert.equal((await ops.run('m@x.com', id, { command: 'ls' })).exitCode, 0)
+  assert.deepEqual(kinds(aps1, 'connect'), [['connect', id]])
+  await assert.rejects(ops.create('a@x.com', 'u1'), (e) => e.status === 503, 'us-east-1 counts only its own sandboxes, and it is full')
+  await assert.rejects(ops.run('a@x.com', id, { command: 'ls' }), (e) => e.status === 404 && /no sandbox .* of yours/.test(e.message), 'another cell\'s child')
+  await ops.kill('m@x.com', id)
+  assert.deepEqual([kinds(aps1, 'kill'), kinds(us, 'kill'), aps1.sandboxes.has(id)], [[['kill', id]], [], false])
+})
+
+test('placement cache: a second ensure within PLACEMENT_CACHE_MS asks neither the store nor E2B; forget, expiry and 0 end that', async () => {
+  const counted = () => {
+    const inner = memoryStore(); let calls = 0
+    return { store: Object.fromEntries(Object.entries(inner).map(([k, f]) => [k, (...a) => { calls++; return f(...a) }])), calls: () => calls }
+  }
+  const rig = (placementCacheMs) => { const c = counted(); const t = twoCells(); return { ...c, ...t, b: boxes({ cells: t.cells, store: c.store, cfg: { ...MUMBAI, placementCacheMs }, edgeKey: 'k', log: () => {} }) } }
+  const work = (r) => [r.calls(), r.us.calls.length + r.aps1.calls.length]
+  const r = rig(30_000)
+  const first = await r.b.ensure('new@x.com')
+  const before = work(r)
+  assert.equal(await r.b.ensure('new@x.com'), first)
+  assert.deepEqual(work(r), before, 'no store or E2B call')
+  await r.b.forget(first.id)
+  const forgotten = work(r)
+  await r.b.ensure('new@x.com')
+  assert.ok(work(r)[0] > forgotten[0] && work(r)[1] > forgotten[1], 'after forget, the store and E2B again')
+  const short = rig(1)
+  await short.b.ensure('new@x.com'); await new Promise(res => setTimeout(res, 10))
+  const expired = work(short)
+  await short.b.ensure('new@x.com')
+  assert.ok(work(short)[1] > expired[1], 'an expired entry is not used')
+  const off = rig(0)
+  await off.b.ensure('new@x.com')
+  const once = work(off)
+  await off.b.ensure('new@x.com')
+  assert.ok(work(off)[0] > once[0] && work(off)[1] > once[1], '0 turns the cache off')
+})
+
+test('approval audit records go to the us-east-1 cell\'s bucket, whichever edge writes them', async () => {
+  const { auditor } = await import('./edge.mjs')
+  const sent = [], logs = []
+  const cell = { bucket: 'bucket-us-east-1', s3: { send: async (c) => { sent.push(c.input) } } }
+  await auditor({ cell, prefix: 'audit/approvals/', PutObjectCommand: class { constructor(input) { this.input = input } }, now: () => Date.parse('2026-11-11T10:00:00Z'), log: (l) => logs.push(JSON.parse(l)) })({ id: 'a1', by: 'hi@mumbo.si' })
+  const key = `audit/approvals/2026-11-11/a1-${Date.parse('2026-11-11T10:00:00Z')}.json`
+  assert.deepEqual(sent, [{ Bucket: 'bucket-us-east-1', Key: key, Body: '{"id":"a1","by":"hi@mumbo.si"}', ContentType: 'application/json' }])
+  assert.deepEqual(logs, [{ edge: 'audit', key, id: 'a1', by: 'hi@mumbo.si' }])
+  assert.match(readFileSync(new URL('./edge.mjs', import.meta.url), 'utf8'), /auditor\(\{ cell: cellIn\(cells, LEGACY_REGION\),/, 'main() passes the us-east-1 cell')
 })

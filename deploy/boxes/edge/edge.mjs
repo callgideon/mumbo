@@ -10,6 +10,7 @@ import { createServer, request as httpRequest } from 'node:http'
 import { Readable, pipeline } from 'node:stream'
 import { ownersOf } from './projects.mjs'
 import { atCapacity, unitsFor } from './capacity.mjs'
+import { LEGACY_REGION, cellClients, cellIn, cellsConfig, placementKey, regionOf } from './cells.mjs'
 import { workerGitRoute } from './workers.mjs'
 
 const env = (name, fallback) => process.env[name] ?? fallback ?? (() => { throw new Error(`edge: set ${name}`) })()
@@ -78,14 +79,17 @@ export const config = () => ({
   idleMs: Number(env('IDLE_MINUTES', '30')) * 60_000,
   pauseIdle: env('PAUSE_IDLE', 'true') !== 'false',  // false: boxes stay running (founder, 2026-11-09); cost work comes later
   backupEveryMs: Number(env('BACKUP_MINUTES', '10')) * 60_000,
-  maxRunningUnits: Number(env('MAX_RUNNING_UNITS', '0')),  // capacity units (capacity.mjs UNITS); 0: no edge-side cap, E2B's own placement errors decide
   pageAfterMs: atLeast('PAGE_AFTER_MS', 1000, 3000),  // a page load waiting longer on a box gets the starting page
   backupConcurrency: Number(env('BACKUP_CONCURRENCY', '8')),
   allowed: allowList(env('ALLOWED_EMAILS', '')),
   egressIps: list(env('BOX_EGRESS_IPS', '')),
   dailyRequests: Number(env('DAILY_MODEL_REQUESTS', '3000')),
-  proxy: new URL(env('E2B_SANDBOX_URL', 'http://127.0.0.1:3002')),
-  bucket: env('BACKUP_BUCKET'),
+  // cells: each region's E2B, client-proxy, backup bucket and capacity in units (capacity.mjs UNITS; 0: no edge-side cap,
+  // E2B's own placement errors decide); edgeRegion: the cell newcomers are placed in (cells.mjs).
+  ...cellsConfig(process.env),
+  // How long a replica reuses a principal's box target without the store or E2B (spec 17c: the store is one region away
+  // from the Mumbai edge); 0 turns the cache off.
+  placementCacheMs: wholeNumber('PLACEMENT_CACHE_MS', 30_000),
   upstream: env('MODEL_UPSTREAM', 'https://api.deepseek.com'),
   childTemplates: list(env('CHILD_TEMPLATES', 'mumbo-child')),
   maxChildren: Number(env('MAX_CHILD_SANDBOXES', '10')),
@@ -129,6 +133,12 @@ export const config = () => ({
   // RW1: the people whose person boxes start new Sessions in Run Wild, where the image has it (startScript); empty: nobody.
   runWildDefaultEmails: addresses('RUN_WILD_DEFAULT_EMAILS'),
 })
+/** A whole number setting (digits only, at least 0); anything else, the empty string included, fails at start. */
+function wholeNumber(name, fallback) {
+  const value = env(name, String(fallback))
+  if (!/^\d{1,9}$/.test(value)) throw new Error(`edge: ${name} must be a whole number of at least 0, not ${JSON.stringify(value)}`)
+  return Number(value)
+}
 /** A setting that must be one of `values`; anything else fails at start. */
 function oneOf(name, values, fallback) {
   const value = env(name, fallback)
@@ -1077,25 +1087,35 @@ export async function inParallel(items, limit, fn) {
   return out
 }
 
-// ---- the router's view of E2B. `e2b` is the SDK module and `store` the shared state (store.mjs); both are injected.
-// A box record: { email, launch, traffic, active, extended, backedUp, paused, ports }, plus { creating, first } until
-// creation ends, and { restored: versionId } until the first backup of a box created from a restore record. `ports` is
-// the box's pair (portsFrom its template's marker); a record without it is routed to OLD_PORTS (boxHeaders).
-export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFiles, log = console.log }) {
+// ---- the router's view of E2B. `cells` (cells.mjs cellClients) holds every cell's E2B and S3 clients and `store` the
+// shared state (store.mjs); both are injected. A box record: { email, region, launch, traffic, active, extended, backedUp,
+// paused, ports }, plus { creating, first } until creation ends, and { restored: versionId } until the first backup of a
+// box created from a restore record. `region` is the cell the box runs in (regionOf: us-east-1 without one): every E2B
+// and S3 call for a box goes through its cell, and for a principal through the cell its placement doc names (cells.mjs
+// placementKey). `ports` is the box's pair (portsFrom its template's marker); a record without it is routed to OLD_PORTS
+// (boxHeaders).
+export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log }) {
   const LOCK_MS = 120_000
   const CREATE_STALE_MS = 15 * 60_000  // longer than a restore (11 min cap) plus dsh start
   const say = (fields) => log(JSON.stringify({ edge: 'box', ...fields }))
   const run = (box, cmd, timeoutMs = 60_000) => box.commands.run(cmd, { timeoutMs }).then(r => r.stdout.trim())
   const timeout = () => cfg.idleMs + 15 * 60_000
+  const cellOf = (record) => cellIn(cells, regionOf(record))
+  /** The cell a principal's placement doc names, without placing anyone: us-east-1 until a person's first ensure. */
+  const placedCell = async (principal) => cellOf(await store.getDoc(placementKey(principal)))
+  // ensure's targets by principal, for cfg.placementCacheMs. ponytail: per replica, so a box another replica replaces is
+  // reached at its old target until the entry expires or a proxy error forgets it. B22: a move must check the principal's
+  // moving mark even on a hit, or delete the principal's entry (cached.delete) when it sets the mark.
+  const cached = new Map()  // principal -> { target, until }
 
-  async function all(query) {
-    const pager = e2b.Sandbox.list({ query })
+  async function all(cell, query) {
+    const pager = cell.Sandbox.list({ query })
     const found = []
     while (pager.hasNext) found.push(...await pager.nextItems())
     return found
   }
-  async function find(email) {
-    const found = await all({ metadata: { user: email }, state: ['running', 'paused'] })
+  async function find(cell, email) {
+    const found = await all(cell, { metadata: { user: email }, state: ['running', 'paused'] })
     if (found.length > 1) say({ level: 'warn', msg: 'user has several boxes; using the oldest', user: email, ids: found.map(b => b.sandboxId) })
     return found.sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt)))[0]
   }
@@ -1118,23 +1138,23 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
     say({ level: 'error', msg: 'restore version unknown', user: email, versionId: pin.versionId, ...(e ? { error: e.message, status: e.$metadata?.httpStatusCode } : { error: 'NotFound', status: 404 }) })
     throw Object.assign(new Error('restore version unknown'), { status: 503, restoreFailed: true })
   }
-  async function create(email) {
-    if (await atCapacity(e2b, cfg, unitsFor({ user: email }))) throw Object.assign(new Error('capacity'), { status: 503, capacity: true })
+  async function create(email, cell) {
+    if (await atCapacity(cell, unitsFor({ user: email }))) throw Object.assign(new Error('capacity'), { status: 503, capacity: true })
     // Before the sandbox exists, so its `creating` record follows the create at once (adopt/backup race).
     const backupKey = `${userPrefix(email)}/latest.tar.gz`
     const pin = await store.getDoc(restoreKey(email))
-    const restoreUrl = !pin ? await presignGet(backupKey)
+    const restoreUrl = !pin ? await cell.presignGet(backupKey)
       // Without a version id the presign would be of latest.tar.gz.
       : typeof pin.versionId !== 'string' || !pin.versionId ? unknownVersion(email, pin, new Error('the record has no versionId'))
-      : await presignGet(backupKey, pin.versionId).then((url) => url ?? unknownVersion(email, pin), (e) => unknownVersion(email, pin, e))
-    const box = await e2b.Sandbox.create(email.startsWith('project:') ? cfg.projectTemplate : cfg.template, {
+      : await cell.presignGet(backupKey, pin.versionId).then((url) => url ?? unknownVersion(email, pin), (e) => unknownVersion(email, pin, e))
+    const box = await cell.Sandbox.create(email.startsWith('project:') ? cfg.projectTemplate : cfg.template, {
       timeoutMs: timeout(), metadata: { user: email },
       lifecycle: { onTimeout: 'pause', autoResume: true },
       network: { allowPublicTraffic: false, maskRequestHost: boxSite(cfg, email).host },
     }).catch((e) => { throw /place sandbox|capacity|too many|concurrent/i.test(e.message) ? Object.assign(e, { capacity: true, status: 503 }) : e })
     // Recorded before the restore: other replicas then neither adopt nor back up a box whose data is half restored.
     // `first`: no backup exists, so this is the person's first set-up (the edge pages say so).
-    await store.putBox(box.sandboxId, { email, creating: Date.now(), first: !restoreUrl, active: Date.now(), extended: Date.now(), backedUp: Date.now(), paused: false })
+    await store.putBox(box.sandboxId, { email, region: cell.region, creating: Date.now(), first: !restoreUrl, active: Date.now(), extended: Date.now(), backedUp: Date.now(), paused: false })
     try {
       await box.files.write('/root/.mumbo/start.sh', startScript(cfg, signBox(edgeKey, email, box.sandboxId), boxSite(cfg, email), roleInstructions(cfg, email),
         email.startsWith('project:') ? memberKey(edgeKey, box.sandboxId).toString('base64url') : undefined, boxFiles,
@@ -1142,7 +1162,7 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
         email.startsWith('project:') ? undefined : { key: mumboMcpKey(edgeKey, box.sandboxId), principal: mcpPrincipal(email) }, email))
       if (restoreUrl) {
         const ok = await run(box, restoreCommand(restoreUrl), 660_000).then(() => true, () => false)
-        say({ ...(ok ? {} : { level: 'error' }), msg: 'restore', user: email, box: box.sandboxId, ok, ...(pin && { versionId: pin.versionId }) })
+        say({ ...(ok ? {} : { level: 'error' }), msg: 'restore', user: email, box: box.sandboxId, region: cell.region, ok, ...(pin && { versionId: pin.versionId }) })
         // A partly restored box must never be backed up over the archive: the catch below drops it, and the next visit
         // restores again.
         if (!ok) throw Object.assign(new Error('restore failed'), { status: 503, restoreFailed: true })
@@ -1152,8 +1172,8 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
       const now = Date.now()
       // A box restored from a record keeps it until its first backup has put the restored data in latest.tar.gz (backup()),
       // so a box lost before then is recreated from the same version. backedUp 0: the next sweep takes that backup.
-      await store.putBox(box.sandboxId, { email, host: boxSite(cfg, email).host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), ports: await portsOf(box), active: now, extended: now, backedUp: pin ? 0 : now, paused: false, ...(pin && { restored: pin.versionId }) })
-      say({ msg: 'created', user: email, box: box.sandboxId })
+      await store.putBox(box.sandboxId, { email, region: cell.region, host: boxSite(cfg, email).host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), ports: await portsOf(box), active: now, extended: now, backedUp: pin ? 0 : now, paused: false, ...(pin && { restored: pin.versionId }) })
+      say({ msg: 'created', user: email, box: box.sandboxId, region: cell.region })
       return box.sandboxId
     } catch (error) {
       await box.kill().catch(() => {})  // nothing in it yet except the restored backup, which stays in S3
@@ -1162,24 +1182,45 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
     }
   }
 
-  /** The user's running box: id, dsh launch token and E2B traffic token. Creates, resumes or repairs as needed. */
   /** True while the person has no box, no restore record and no backup, or their box is still its first creation (edge pages). */
   async function firstSetUp(email) {
-    const found = await find(email)
+    const cell = await placedCell(email)
+    const found = await find(cell, email)
     if (found) return (await store.getBox(found.sandboxId))?.first === true
-    return !(await store.getDoc(restoreKey(email))) && !(await presignGet(`${userPrefix(email)}/latest.tar.gz`))
+    return !(await store.getDoc(restoreKey(email))) && !(await cell.presignGet(`${userPrefix(email)}/latest.tar.gz`))
   }
+  /** The principal's cell, under its user lock. A principal with a placement doc, and every project (its doc, or
+   *  us-east-1), is placed by it. A person without one gets a doc, once: us-east-1 when they have anything there (a box,
+   *  a restore record or a backup) or when this edge's own region is us-east-1, otherwise cfg.edgeRegion. A failed
+   *  lookup throws before anything is written. */
+  async function placement(principal) {
+    const doc = await store.getDoc(placementKey(principal))
+    if (doc || principal.startsWith('project:')) return cellOf(doc)
+    const legacy = cellIn(cells, LEGACY_REGION)
+    const stays = cfg.edgeRegion === LEGACY_REGION || await find(legacy, principal) || await store.getDoc(restoreKey(principal))
+      || await legacy.presignGet(`${userPrefix(principal)}/latest.tar.gz`)
+    const region = stays ? LEGACY_REGION : cfg.edgeRegion
+    const cell = cellIn(cells, region)
+    await store.putDoc(placementKey(principal), { region, at: Date.now() })
+    say({ msg: 'placed', user: principal, region })
+    return cell
+  }
+  /** The user's running box: id, dsh launch token, E2B traffic token and its cell's client-proxy. Creates, resumes or
+   *  repairs as needed; within cfg.placementCacheMs of the last one, this replica's answer again. */
   async function ensure(email) {
-    return store.withLock(`user:${email}`, LOCK_MS, async () => {
-      const found = await find(email)   // an API error throws here: never create a second box on a failed lookup
-      if (found === undefined) return pick(await create(email))
+    const hit = cached.get(email)
+    if (hit && hit.until > Date.now()) return hit.target
+    const target = await store.withLock(`user:${email}`, LOCK_MS, async () => {
+      const cell = await placement(email)
+      const found = await find(cell, email)   // an API error throws here: never create a second box on a failed lookup
+      if (found === undefined) return pick(await create(email, cell))
       const id = found.sandboxId
       const known = await store.getBox(id)
       // Another replica is still creating it (the user lock can expire during a long restore): wait, do not start it.
       if (known?.creating) throw Object.assign(new Error('box is being created'), { status: 503 })
       if (found.state === 'paused' || !known || known.paused || !known.launch) {
         try {
-          const box = await e2b.Sandbox.connect(id, { timeoutMs: timeout() })
+          const box = await cell.Sandbox.connect(id, { timeoutMs: timeout() })
           // A record without ports (an adopted box, or one an edge before B24 created) learns them from the box.
           const ports = known?.ports ?? await portsOf(box)
           if (!(await dshUp(box, ports))) {
@@ -1187,32 +1228,35 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
             await run(box, '/root/.mumbo/start.sh')
           }
           const now = Date.now()
-          await store.putBox(id, { email, host: known?.host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), ports, active: now, extended: now, backedUp: known?.backedUp ?? 0, paused: false, ...(known?.restored && { restored: known.restored }) })
+          await store.putBox(id, { email, region: cell.region, host: known?.host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), ports, active: now, extended: now, backedUp: known?.backedUp ?? 0, paused: false, ...(known?.restored && { restored: known.restored }) })
         } catch (error) {
           // A snapshot that cannot be resumed (its node died before the upload finished, or dsh never comes back)
           // must not strand the user: drop it and rebuild from the latest S3 backup.
           if (error.capacity || /capacity|place sandbox|rate limit/i.test(error.message)) throw Object.assign(error, { capacity: true })
           say({ level: 'error', msg: 'resume failed; recreating from backup', user: email, box: id, error: error.message })
-          await e2b.Sandbox.kill(id).catch(() => {})
+          await cell.Sandbox.kill(id).catch(() => {})
           await store.deleteBox(id)
-          return pick(await create(email))
+          return pick(await create(email, cell))
         }
       }
       return pick(id)
     })
+    if (cfg.placementCacheMs > 0) cached.set(email, { target, until: Date.now() + cfg.placementCacheMs })
+    return target
   }
   const pick = async (id) => {
     const b = await store.getBox(id)
+    const cell = cellOf(b)
     // The masked host (E2B maskRequestHost) is recorded at creation; for a box recorded without it (adopted, or created
     // before the record held it) E2B is asked once.
     let host = b.host
     if (!host) {
-      host = (await e2b.Sandbox.getInfo(id)).network?.maskRequestHost
+      host = (await cell.Sandbox.getInfo(id)).network?.maskRequestHost
       if (host) await store.patchBox(id, { host }); else say({ level: 'warn', msg: 'no masked host; Origin passes unchanged', user: b.email, box: id })
     }
     // A project box whose image runs @mumbo/edge-member: members get a signed header, never the owner launch token.
     const member = b.memberAuth ? (email) => memberHeader(memberKey(edgeKey, id), email) : undefined
-    return { id, token: b.launch, traffic: b.traffic, host, ports: b.ports, ...(member ? { member } : {}) }
+    return { id, token: b.launch, traffic: b.traffic, host, ports: b.ports, proxy: cell.proxy, ...(member ? { member } : {}) }
   }
 
   /** Record activity (a browser request, a WebSocket frame or a model call) and push E2B's own pause timer out. */
@@ -1222,50 +1266,61 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
     const now = Date.now()
     const extend = now - b.extended >= 60_000
     await store.patchBox(id, extend ? { active: now, extended: now } : { active: now })
-    if (extend) e2b.Sandbox.setTimeout(id, timeout()).catch(e => say({ level: 'warn', msg: 'timeout extension failed', box: id, error: e.message }))
+    if (extend) cellOf(b).Sandbox.setTimeout(id, timeout()).catch(e => say({ level: 'warn', msg: 'timeout extension failed', box: id, error: e.message }))
   }
   /** True when `id` is `email`'s current, running box. Boxes unknown to the store are adopted from E2B. */
   async function owns(email, id) {
     const b = await store.getBox(id)
     if (b) return b.email === email && !b.paused
-    const found = await find(email)
+    const cell = await placedCell(email)
+    const found = await find(cell, email)
     if (found?.sandboxId !== id || found.state !== 'running') return false
-    await store.putBox(id, { email, active: Date.now(), extended: 0, backedUp: 0, paused: false })
+    await store.putBox(id, { email, region: cell.region, active: Date.now(), extended: 0, backedUp: 0, paused: false })
     return true
   }
 
+  /** Back up `b` (a listed record with its `cell`) into its own cell's bucket, so uploads stay in-region. */
   async function backup(id, b) {
-    const url = await presignPut(`${userPrefix(b.email)}/latest.tar.gz`)
-    const box = await e2b.Sandbox.connect(id, { timeoutMs: timeout() })
+    const url = await b.cell.presignPut(`${userPrefix(b.email)}/latest.tar.gz`)
+    const box = await b.cell.Sandbox.connect(id, { timeoutMs: timeout() })
     const left = await run(box, backupCommand(url), 660_000)
     await store.patchBox(id, { backedUp: Date.now() })
-    say({ msg: 'backup', user: b.email, box: id, ...(left && { left }) })
+    say({ msg: 'backup', user: b.email, box: id, region: b.cell.region, ...(left && { left }) })
     // The restored data is now latest.tar.gz: the one-shot record is spent, unless the operator replaced it meanwhile.
     if (b.restored) {
       if ((await store.getDoc(restoreKey(b.email)))?.versionId === b.restored) await store.deleteDoc(restoreKey(b.email))
       await store.patchBox(id, { restored: undefined })
     }
   }
-  /** Take over every running box E2B reports, so backups and idle pauses cover boxes no replica has seen. */
-  async function adoptRunning(now = Date.now()) {
-    for (const r of await all({ state: ['running'] })) {
+  /** Take over every running box `cell`'s E2B reports, so backups and idle pauses cover boxes no replica has seen. */
+  async function adoptRunning(cell, now = Date.now()) {
+    for (const r of await all(cell, { state: ['running'] })) {
       const email = r.metadata?.user
       if (!email || await store.getBox(r.sandboxId)) continue
-      await store.putBox(r.sandboxId, { email, active: now, extended: 0, backedUp: 0, paused: false })
-      say({ msg: 'adopted', user: email, box: r.sandboxId })
+      await store.putBox(r.sandboxId, { email, region: cell.region, active: now, extended: 0, backedUp: 0, paused: false })
+      say({ msg: 'adopted', user: email, box: r.sandboxId, region: cell.region })
     }
   }
-  /** One replica at a time (a store lease): back up active boxes every BACKUP_MINUTES; back up and pause idle ones. */
+  /** One replica at a time (a store lease), for every cell: back up active boxes every BACKUP_MINUTES; back up and pause
+   *  idle ones. */
   async function sweep(now = Date.now()) {
     // The lease covers the whole run (released at the end), so replicas never overlap a long sweep.
-    if (!(await store.lease('sweep', 15 * 60_000))) return
+    const lease = await store.lease('sweep', 15 * 60_000)
+    if (!lease) return
     try {
-      await adoptRunning(now).catch(e => say({ level: 'warn', msg: 'adopt failed', error: e.message }))
-      const listed = await store.listBoxes()
+      // Cell by cell, each with its own failure, so one cell's outage never stops another's adoption.
+      for (const cell of cells.values()) await adoptRunning(cell, now).catch(e => say({ level: 'warn', msg: 'adopt failed', region: cell.region, error: e.message }))
+      // Each box through its own cell (`cell`, which patchBox never writes). A box in a region with no cell is an error,
+      // and the rest of the sweep runs.
+      const listed = []
+      for (const b of await store.listBoxes()) {
+        const cell = cells.get(regionOf(b))
+        if (cell) listed.push({ ...b, cell }); else log(JSON.stringify({ edge: 'error', msg: 'box in a region with no cell', box: b.id, region: b.region }))
+      }
       // A create that never finished (its replica died mid-restore) holds only a partial restore: drop it so the
       // next visit restores again from the backup, which no backup of the partial box has overwritten.
       for (const b of listed.filter(x => x.creating && now - x.creating >= CREATE_STALE_MS)) {
-        await e2b.Sandbox.kill(b.id).catch(() => {})
+        await b.cell.Sandbox.kill(b.id).catch(() => {})
         await store.deleteBox(b.id)
         say({ level: 'warn', msg: 'dropped unfinished create', user: b.email, box: b.id })
       }
@@ -1276,14 +1331,14 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
         // A box E2B no longer has cannot be backed up again; its last backup stays the user's restore point.
         if (/not found/i.test(e.message)) { await store.deleteBox(b.id); say({ level: 'warn', msg: 'dropped missing box', user: b.email, box: b.id }); return false }
         await store.patchBox(b.id, { backedUp: now - cfg.backupEveryMs + 5 * 60_000 })  // retry in 5 minutes
-        say({ level: 'error', msg: 'backup failed', user: b.email, box: b.id, error: e.message })
+        say({ level: 'error', msg: 'backup failed', user: b.email, box: b.id, region: b.cell.region, error: e.message })
         return false
       }))
       for (const b of due.filter(idle)) await pauseIdle(b)
       // Never-pause mode: keep E2B's own timer (onTimeout: pause) from pausing a box nobody is using.
       if (cfg.pauseIdle === false) {
         await inParallel(listed.filter(b => !b.paused && !b.creating && now - b.extended >= 5 * 60_000), cfg.backupConcurrency ?? 8,
-          b => e2b.Sandbox.setTimeout(b.id, timeout()).then(() => store.patchBox(b.id, { extended: now }), async (e) => {
+          b => b.cell.Sandbox.setTimeout(b.id, timeout()).then(() => store.patchBox(b.id, { extended: now }), async (e) => {
             // A box E2B no longer has (killed outside the edge) is dropped; the next visit creates it from its backup.
             if (/not found/i.test(e.message)) { await store.deleteBox(b.id); return say({ level: 'warn', msg: 'dropped missing box', user: b.email, box: b.id }) }
             say({ level: 'warn', msg: 'keepalive failed', box: b.id, error: e.message })
@@ -1291,14 +1346,15 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
       }
       for (const b of listed.filter(x => x.paused && x.wakeAt && x.wakeAt <= now + 60_000)) await wake(b, now)
     } finally {
-      await store.release('sweep').catch(() => {})
+      // With its own token: a holder whose lease ran out never deletes the next holder's.
+      await store.release('sweep', lease).catch(() => {})
     }
   }
   /** Resume a paused box for a scheduled task. dsh restarts: its timers ran on a clock that stood still while the
    *  box was paused, and a fresh start delivers every task already due. The box pauses again once idle. */
   async function wake(b, now) {
     await store.withLock(`user:${b.email}`, LOCK_MS, async () => {
-      const box = await e2b.Sandbox.connect(b.id, { timeoutMs: timeout() })
+      const box = await b.cell.Sandbox.connect(b.id, { timeoutMs: timeout() })
       await run(box, '/root/.mumbo/start.sh')
       await store.patchBox(b.id, { paused: false, wakeAt: undefined, active: now, extended: now, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box) })
       say({ msg: 'woke for schedule', user: b.email, box: b.id })
@@ -1307,17 +1363,21 @@ export function boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFil
   async function pauseIdle(b) {
     await store.withLock(`user:${b.email}`, LOCK_MS, async () => {
       // A paused box cannot run its scheduled tasks, so remember when the next one is due and wake the box then.
-      const wakeAt = await e2b.Sandbox.connect(b.id, { timeoutMs: timeout() }).then(box => run(box, NEXT_WAKE_COMMAND, 30_000)).then(Number).catch(() => 0) || undefined
-      await e2b.Sandbox.pause(b.id)
+      const wakeAt = await b.cell.Sandbox.connect(b.id, { timeoutMs: timeout() }).then(box => run(box, NEXT_WAKE_COMMAND, 30_000)).then(Number).catch(() => 0) || undefined
+      await b.cell.Sandbox.pause(b.id)
       await store.patchBox(b.id, { paused: true, wakeAt })
-      say({ msg: 'paused', user: b.email, box: b.id, wakeAt: wakeAt && new Date(wakeAt).toISOString() })
+      say({ msg: 'paused', user: b.email, box: b.id, region: b.cell.region, wakeAt: wakeAt && new Date(wakeAt).toISOString() })
     }).catch(async (e) => {
       // A box E2B no longer has is dropped; anything else is retried next sweep.
       if (/not found/i.test(e.message)) await store.deleteBox(b.id)
       say({ level: 'error', msg: 'pause failed', box: b.id, error: e.message })
     })
   }
-  return { ensure, firstSetUp, touch, owns, sweep, adoptRunning, forget: (id) => store.patchBox(id, { launch: undefined }) }
+  // forget: a proxy error to box `id`. This replica's cached targets for it go, and its next ensure repairs it (no launch).
+  return { ensure, firstSetUp, touch, owns, sweep, adoptRunning, forget: (id) => {
+    for (const [principal, c] of cached) if (c.target.id === id) cached.delete(principal)
+    return store.patchBox(id, { launch: undefined })
+  } }
 }
 
 // ---- who is asking. Behind oauth2-proxy (trial) the email header is trusted because only it can reach the router;
@@ -1423,12 +1483,13 @@ export function homePage(cfg, res, email, projects) {
 }
 /** The most of a box's answer boxFetcher reads: a box steered by untrusted input could otherwise fill the edge's memory. */
 export const BOX_ANSWER_MAX = 8 * 1024 * 1024
-/** One request from the edge itself to a box's `service` (boxHeaders: `dsh` by default, or `door`) through the
- *  client-proxy, as a browser on the box's own origin (`siteHost`, boxSite) would send it. `edgeHeaders` are set after
- *  boxHeaders, which drops identity headers such as authorization from `headers`; the request fails once the box sends
- *  nothing for `timeoutMs`, and with `box answer too large` once its body passes BOX_ANSWER_MAX bytes. */
+/** One request from the edge itself to a box's `service` (boxHeaders: `dsh` by default, or `door`) through its cell's
+ *  client-proxy (target.proxy, from ensure), as a browser on the box's own origin (`siteHost`, boxSite) would send it.
+ *  `edgeHeaders` are set after boxHeaders, which drops identity headers such as authorization from `headers`; the request
+ *  fails once the box sends nothing for `timeoutMs`, and with `box answer too large` once its body passes BOX_ANSWER_MAX
+ *  bytes. */
 export const boxFetcher = (cfg) => (target, siteHost, path, { method = 'GET', headers = {}, body, member, service = 'dsh', edgeHeaders = {}, timeoutMs = 60_000 } = {}) => new Promise((resolve, reject) => {
-  const req = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method, path,
+  const req = httpRequest({ host: target.proxy.hostname, port: target.proxy.port, method, path,
     headers: { ...boxHeaders(cfg, { ...headers, host: siteHost, origin: `https://${siteHost}`, ...(body ? { 'content-length': Buffer.byteLength(body) } : {}) }, target, service), ...(member ? { 'x-mumbo-member': member } : {}), ...edgeHeaders } }, (r) => {
     const chunks = []
     let size = 0
@@ -1619,7 +1680,7 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, key
     const launch = `${to.base}/?token=${target.token}`
     if (dsh && !member && needsLaunch(req)) return res.writeHead(302, { location: launch, 'cache-control': 'no-store' }).end()
     quiet(box.touch(target.id))
-    const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: to.path, headers: { ...boxHeaders(cfg, req.headers, target, to.service), ...(member ? { 'x-mumbo-member': member } : {}) } }, (r) => {
+    const up = httpRequest({ host: target.proxy.hostname, port: target.proxy.port, method: req.method, path: to.path, headers: { ...boxHeaders(cfg, req.headers, target, to.service), ...(member ? { 'x-mumbo-member': member } : {}) } }, (r) => {
       // A stale cookie (another account on this browser, or a recreated box) gets a fresh exchange instead of a dead end.
       if (dsh && !member && r.statusCode === 401 && isNavigation(req)) { r.resume(); return res.writeHead(302, { location: launch, 'cache-control': 'no-store' }).end() }
       const headers = noFraming(secureCookies(cfg, { ...r.headers }))
@@ -1648,7 +1709,7 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, key
       quiet(box.touch(target.id))
       const member = to.project && target.member ? target.member(email) : undefined
       const headers = { ...boxHeaders(cfg, req.headers, target, to.service), ...(member ? { 'x-mumbo-member': member } : {}), connection: 'Upgrade', upgrade: req.headers.upgrade ?? 'websocket' }
-      const up = httpRequest({ host: cfg.proxy.hostname, port: cfg.proxy.port, method: req.method, path: to.path, headers })
+      const up = httpRequest({ host: target.proxy.hostname, port: target.proxy.port, method: req.method, path: to.path, headers })
       up.on('upgrade', (r, upSocket, upHead) => {
         const lines = Object.entries(secureCookies(cfg, { ...r.headers })).flatMap(([k, v]) => [v].flat().map(x => `${k}: ${x}`))
         socket.write(`HTTP/1.1 101 Switching Protocols\r\n${lines.join('\r\n')}\r\n\r\n`)
@@ -1917,45 +1978,61 @@ export async function imageCheck() {
 }
 
 /**
- * boxes()'s presignGet over an S3 client, its command classes and the presigner.
- * @returns {(key: string, versionId?: string) => Promise<string | undefined>} HEADs the object, at `versionId` when given
- *   (s3:GetObjectVersion), and presigns a 15-minute GET of the same; undefined on NotFound, and any other error throws.
+ * REDIS_URL, checked before the store client parses it: that parser's error carries the whole URL, password included.
+ * @param {string} value the URL, as `rediss://edge:<password>@<host>:6379` in production
+ * @returns {string} the value, unchanged
+ * @throws a message that names REDIS_URL and never shows its value, unless it is a redis:// or rediss:// URL with a host
+ *   whose credentials, if any, go over rediss://
  */
-export const presignGetter = ({ s3, bucket, HeadObjectCommand, GetObjectCommand, getSignedUrl }) => async (key, versionId) => {
-  try { await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key, VersionId: versionId })) } catch (e) { if (e.name === 'NotFound') return undefined; throw e }
-  return getSignedUrl(s3, new GetObjectCommand({ Bucket: bucket, Key: key, VersionId: versionId }), { expiresIn: 900 })
+export function redisUrl(value) {
+  const u = URL.canParse(value) ? new URL(value) : undefined
+  if (!u || !['redis:', 'rediss:'].includes(u.protocol) || !u.hostname || ((u.username || u.password) && u.protocol !== 'rediss:')) {
+    throw new Error('edge: REDIS_URL must be a redis:// or rediss:// URL with a host, and credentials only over rediss://; its value is not shown')
+  }
+  return value
 }
 
-// ---- process wiring: secrets come from SSM / Secrets Manager through the host's instance role.
+/**
+ * The approvals audit: every grant is one log line, then a record in `cell`'s bucket (KMS by bucket default). main()
+ * passes the us-east-1 cell, so every edge writes the one audit trail. A failed write rejects.
+ * @returns {(record: { id: string }) => Promise<void>}
+ */
+export const auditor = ({ cell, prefix, PutObjectCommand, now = Date.now, log = console.log }) => async (record) => {
+  const ts = now()
+  const key = `${prefix}${new Date(ts).toISOString().slice(0, 10)}/${record.id}-${ts}.json`
+  log(JSON.stringify({ edge: 'audit', key, ...record }))
+  await cell.s3.send(new PutObjectCommand({ Bucket: cell.bucket, Key: key, Body: JSON.stringify(record), ContentType: 'application/json' }))
+}
+
+// ---- process wiring: secrets arrive as environment variables (ECS secrets, by ARN).
 async function main() {
   const cfg = config()
-  const e2b = await import('e2b')
+  const { E2B, Sandbox } = await import('e2b')
   const { createClient } = await import('redis')
   const { memoryStore, redisStore } = await import('./store.mjs')
   let store = memoryStore()
   if (process.env.REDIS_URL) {
-    const client = createClient({ url: process.env.REDIS_URL })
+    const client = createClient({ url: redisUrl(process.env.REDIS_URL) })
     client.on('error', (e) => console.error('edge: redis', e.message))
     await client.connect()
+    // The store's round trip from this edge (spec 17c: measured from Mumbai), the median of five.
+    const ms = []
+    for (let i = 0; i < 5; i++) { const t = performance.now(); await client.ping(); ms.push(performance.now() - t) }
+    console.log(JSON.stringify({ edge: 'store', msg: 'round trip', ms: Math.round(ms.sort((a, b) => a - b)[2]) }))
     store = redisStore(client)
   }
   const { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand } = await import('@aws-sdk/client-s3')
   const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner')
-  const { SSMClient, GetParameterCommand } = await import('@aws-sdk/client-ssm')
-  const { SecretsManagerClient, GetSecretValueCommand } = await import('@aws-sdk/client-secrets-manager')
-  const region = env('AWS_REGION', 'us-east-1')
-  const ssm = new SSMClient({ region })
-  const edgeKey = (await ssm.send(new GetParameterCommand({ Name: env('EDGE_SECRET_PARAM', '/mumbo/boxes/edge-secret'), WithDecryption: true }))).Parameter.Value
-  const modelKey = (await new SecretsManagerClient({ region }).send(new GetSecretValueCommand({ SecretId: env('MODEL_KEY_SECRET', 'mumbo/prod/deepseek-api-key') }))).SecretString
-  const s3 = new S3Client({ region, requestChecksumCalculation: 'WHEN_REQUIRED' })  // presigned for curl, which sends no checksum
-  const presignPut = (key) => getSignedUrl(s3, new PutObjectCommand({ Bucket: cfg.bucket, Key: key, ContentType: 'application/gzip' }), { expiresIn: 900 })
-  const presignGet = presignGetter({ s3, bucket: cfg.bucket, HeadObjectCommand, GetObjectCommand, getSignedUrl })
+  const secret = (name) => optional(name) ?? (() => { throw new Error(`edge: set ${name}`) })()
+  const edgeKey = secret('EDGE_SECRET')  // signs every box token; empty would sign them with no key
+  const modelKey = secret('MODEL_KEY')
+  const cells = cellClients(cfg.cells, { env: process.env, E2B, Sandbox, S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, getSignedUrl })
   const files = runtimeFiles()
   const read = (name) => readFileSync(files[name], 'utf8')
   // For project boxes' start script; read here so a missing file stops the edge at start.
   const boxFiles = { proxy: read('proxy'), gh: read('gh') }
-  const box = boxes({ e2b, store, cfg, edgeKey, presignGet, presignPut, boxFiles })
-  const verifyAlb = process.env.ALB_ARN ? albIdentity({ albArn: env('ALB_ARN'), region }) : undefined
+  const box = boxes({ cells, store, cfg, edgeKey, boxFiles })
+  const verifyAlb = process.env.ALB_ARN ? albIdentity({ albArn: env('ALB_ARN'), region: env('AWS_REGION', 'us-east-1') }) : undefined
   const listenHost = env('LISTEN_HOST', '127.0.0.1')  // beyond loopback only behind an ALB, where identity is the ALB token
   // The model host authenticates every call by box token and source address, so it may listen beyond loopback.
   const modelHost = env('MODEL_LISTEN_HOST', listenHost)
@@ -1975,13 +2052,7 @@ async function main() {
   const now = () => Date.now()
   const halt = haltService({ store })
   const notify = ntfy({ topic: cfg.ntfyTopic, fetchImpl: fetch })
-  // Every grant: one log line, then the record in the backup bucket (KMS by bucket default). A failed write rejects.
-  const audit = async (record) => {
-    const ts = now()
-    const key = `${cfg.auditPrefix}${new Date(ts).toISOString().slice(0, 10)}/${record.id}-${ts}.json`
-    console.log(JSON.stringify({ edge: 'audit', key, ...record }))
-    await s3.send(new PutObjectCommand({ Bucket: cfg.bucket, Key: key, Body: JSON.stringify(record), ContentType: 'application/json' }))
-  }
+  const audit = auditor({ cell: cellIn(cells, LEGACY_REGION), prefix: cfg.auditPrefix, PutObjectCommand, now })
   const csrfKey = createHmac('sha256', edgeKey).update('approve-csrf').digest()
   const app = { appId: cfg.appId, privateKey: cfg.appKey }
   const approvals = approvalsService({ store, github: { app, agentId: cfg.agentId, requiredChecks: cfg.requiredChecks }, notify, audit, fetchImpl: fetch, now, approveHost: cfg.approveHost, approvers: cfg.approverEmails })
@@ -2011,7 +2082,7 @@ async function main() {
   const report = memberReporter({ projects: proj, admitted: (e) => admitted(cfg.allowed, e), halt, mumbo })
   const { children, mcpServer, reportServer } = await import('./sandboxes.mjs')
   const claimOf = (info) => verifyBox(edgeKey, String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, ''))
-  const mcp = mcpServer({ ops: children({ e2b, cfg }), projects: proj, relay, projectDomain: cfg.projectDomain, claimOf })
+  const mcp = mcpServer({ ops: children({ cells, store, cfg }), projects: proj, relay, projectDomain: cfg.projectDomain, claimOf })
   const reports = reportServer({ report, claimOf })
   const allow = budget(store, cfg.dailyRequests)
   const doorHandler = door({ keys: doorKeyService, tools: doorTools({ projects: proj, mumbo, relay }), allow, tokens, rate: { perMinute: cfg.doorRatePerMinute, burst: cfg.doorBurst } })
@@ -2024,5 +2095,6 @@ async function main() {
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {
   const run = process.argv[2] === '--check' ? imageCheck().then(m => console.log(`edge: image check passed (${m.length} modules)`)) : main()
-  run.catch((e) => { console.error('edge: fatal', e); process.exit(1) })
+  // The stack only: a whole error prints its own properties too, such as the input a URL parser was given.
+  run.catch((e) => { console.error('edge: fatal', e?.stack ?? String(e)); process.exit(1) })
 }

@@ -82,8 +82,9 @@ test('--set writes exactly the record the edge reads at the next creation, which
   const presigned = []; const ran = []
   const box = (id) => ({ sandboxId: id, files: { write: async () => {} }, kill: async () => {}, commands: { run: async (c) => { ran.push(c); return { stdout: c.includes('dsh.log') ? 'launch123' : '' } } } })
   const e2b = { Sandbox: { list: () => ({ hasNext: true, nextItems: async function () { this.hasNext = false; return [] } }), create: async () => box('b1'), setTimeout: async () => {} } }
-  const cfg = { publicHost: 'boxes.example', projectDomain: 'boxes.example', llmHost: 'llm.example', template: 'mumbo-box', idleMs: 60_000, maxRunningUnits: 0 }
-  const edge = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async (key, v) => { presigned.push([key, v]); return `GET-${v}` }, presignPut: async () => 'PUT', log: () => {} })
+  const cfg = { publicHost: 'boxes.example', projectDomain: 'boxes.example', llmHost: 'llm.example', template: 'mumbo-box', idleMs: 60_000, edgeRegion: 'us-east-1' }
+  const cells = new Map([['us-east-1', { region: 'us-east-1', Sandbox: e2b.Sandbox, maxUnits: 0, presignGet: async (key, v) => { presigned.push([key, v]); return `GET-${v}` }, presignPut: async () => 'PUT' }]])
+  const edge = boxes({ cells, store, cfg, edgeKey: 'k', log: () => {} })
   await edge.ensure('a@mumbo.si')
   assert.deepEqual(presigned, [[KEY, 'v-old']])
   assert.ok(ran.includes(restoreCommand('GET-v-old')))

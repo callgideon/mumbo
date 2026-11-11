@@ -66,9 +66,9 @@ async function setup() {
     })
   })
   await new Promise(r => proxy.listen(0, '127.0.0.1', r))
-  const relay = projectRelay({ projects: proj, boxFetch: boxFetcher({ publicHost: PUBLIC, proxy: new URL(`http://127.0.0.1:${proxy.address().port}`) }), siteHostOf: (p) => `site-${p}`,
+  const relay = projectRelay({ projects: proj, boxFetch: boxFetcher({ publicHost: PUBLIC }), siteHostOf: (p) => `site-${p}`,
     edgeHost: PUBLIC, readyMs: 50, log,
-    box: { ensure: (p) => (state.down ? new Promise(() => {}) : Promise.resolve({ id: `box-${p}`, token: 'T', traffic: 'TT', host: `site-${p}`, member: (e) => { if (state.bug) throw new TypeError(state.bug); return `signed:${e}` } })) } })
+    box: { ensure: (p) => (state.down ? new Promise(() => {}) : Promise.resolve({ id: `box-${p}`, token: 'T', traffic: 'TT', host: `site-${p}`, proxy: new URL(`http://127.0.0.1:${proxy.address().port}`), member: (e) => { if (state.bug) throw new TypeError(state.bug); return `signed:${e}` } })) } })
 
   const fetchImpl = async (url, init) => {
     if (init.headers.authorization?.startsWith('Bearer ')) {  // the App's installation lookup and token mint

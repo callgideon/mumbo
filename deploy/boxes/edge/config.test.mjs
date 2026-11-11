@@ -2,13 +2,13 @@
 import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { admitted, config, startScript } from './edge.mjs'
+import { admitted, config, redisUrl, startScript } from './edge.mjs'
 
 const base = { PUBLIC_HOST: 'boxes.mumbo.si', LLM_HOST: 'llm.boxes.mumbo.si', BACKUP_BUCKET: 'backups' }
 const M1 = ['PROJECT_DOMAIN', 'APPROVE_HOST', 'GITHUB_AGENT_LOGIN', 'GITHUB_AGENT_ID', 'REQUIRED_CHECKS', 'DAILY_TOKENS_USER', 'DAILY_TOKENS_PROJECT', 'BOX_TEMPLATE', 'PROJECT_TEMPLATE',
   'AUDIT_PREFIX', 'GITHUB_AGENT_TOKEN', 'GITHUB_APP_ID', 'GITHUB_APP_KEY', 'GITHUB_MERGE_TOKEN', 'NTFY_TOPIC', 'SIGNIN_COOKIE', 'SUPABASE_URL', 'MUMBO_OAUTH_REDIRECT_URIS',
   'OPENROUTER_MODELS', 'OPENROUTER_API_KEY', 'OPENROUTER_ZDR', 'OPENROUTER_IMAGE_TOKENS', 'MCP_SERVER_WORKSPACE', 'DOOR_RATE_PER_MINUTE', 'DOOR_BURST',
-  'WORKER_TOKEN_HOURS', 'RUN_WILD_DEFAULT_EMAILS']
+  'WORKER_TOKEN_HOURS', 'RUN_WILD_DEFAULT_EMAILS', 'CELLS', 'EDGE_REGION', 'AWS_REGION', 'E2B_SANDBOX_URL', 'MAX_RUNNING_UNITS', 'PLACEMENT_CACHE_MS']
 /** config() with exactly `base` plus `vars` set among the variables it reads here. */
 function configWith(vars = {}) {
   const all = { ...Object.fromEntries(M1.map(k => [k, undefined])), ...base, ...vars }
@@ -85,7 +85,7 @@ test('capacity: node_count drives both the node group and the edge cap (24 units
   assert.doesNotMatch(tf('modules/cell/nodes.tf'), /ignore_changes\s*=\s*\[desired_capacity\]/)
   assert.match(tf('modules/cell/nodes.tf'), /node_max_size = 10\b/)
   assert.match(tf('main.tf'), /var\.node_count <= 10/)
-  assert.equal(configWith({ MAX_RUNNING_UNITS: String(2 * (12 * 2 - 2)) }).maxRunningUnits, 44)
+  assert.equal(configWith({ MAX_RUNNING_UNITS: String(2 * (12 * 2 - 2)) }).cells['us-east-1'].maxUnits, 44)
 })
 
 test('ALLOWED_EMAILS: a malformed deny entry fails at startup, a well-formed one is kept', () => {
@@ -179,4 +179,68 @@ test('RUN_WILD_DEFAULT_EMAILS: empty by default; exact addresses, trimmed and lo
   const tf = (f) => readFileSync(new URL(`../prod/${f}`, import.meta.url), 'utf8')
   assert.match(tf('edge.tf'), /variable "run_wild_default_emails" \{[^}]*default\s*=\s*""/)
   assert.match(tf('modules/edge/edge.tf'), /RUN_WILD_DEFAULT_EMAILS\s*=\s*var\.run_wild_default_emails\n/)
+})
+
+test('a malformed REDIS_URL stops the edge with a line naming REDIS_URL that never carries its password', async () => {
+  const { spawnSync } = await import('node:child_process')
+  const r = spawnSync(process.execPath, ['edge.mjs'], { cwd: new URL('.', import.meta.url), encoding: 'utf8', timeout: 60_000,
+    env: { PATH: process.env.PATH, PUBLIC_HOST: 'boxes.mumbo.si', LLM_HOST: 'llm.boxes.mumbo.si', BACKUP_BUCKET: 'backups', REDIS_URL: 'rediss://edge:CANARY-pw@bad host:6379' } })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout + r.stderr, /REDIS_URL/)
+  assert.doesNotMatch(r.stdout + r.stderr, /CANARY/)
+})
+
+test('PLACEMENT_CACHE_MS: 30000 by default, 0 turns the cache off; anything but a whole number stops the edge', () => {
+  assert.equal(configWith().placementCacheMs, 30_000)
+  assert.equal(configWith({ PLACEMENT_CACHE_MS: '0' }).placementCacheMs, 0)
+  assert.equal(configWith({ PLACEMENT_CACHE_MS: '5000' }).placementCacheMs, 5000)
+  for (const bad of ['', ' ', '-1', '1.5', '30s', 'Infinity', '1e4']) assert.throws(() => configWith({ PLACEMENT_CACHE_MS: bad }), /PLACEMENT_CACHE_MS must be a whole number/, JSON.stringify(bad))
+})
+
+test('cells in config(): without CELLS one us-east-1 cell from the single-cell variables; with CELLS, its cells and EDGE_REGION', () => {
+  const one = configWith({ E2B_SANDBOX_URL: 'http://sandbox.boxes.internal:3002', MAX_RUNNING_UNITS: '44' })
+  assert.deepEqual(Object.keys(one.cells), ['us-east-1'])
+  assert.equal(one.edgeRegion, 'us-east-1')
+  assert.deepEqual([one.cells['us-east-1'].sandbox.href, one.cells['us-east-1'].bucket], ['http://sandbox.boxes.internal:3002/', 'backups'])
+  for (const gone of ['proxy', 'bucket', 'maxRunningUnits']) assert.equal(gone in one, false, gone)
+  assert.throws(() => configWith({ AWS_REGION: 'ap-south-1' }), /without CELLS the edge serves only us-east-1/)
+  const CELLS = JSON.stringify({ 'us-east-1': { api: 'http://api.boxes.internal:3000', sandbox: 'http://sandbox.boxes.internal:3002', bucket: 'bucket-1', maxUnits: 44, e2bKeyEnv: 'K1' },
+    'ap-south-1': { api: 'http://api.ap-south-1.boxes.internal:3000', sandbox: 'http://sandbox.ap-south-1.boxes.internal:3002', bucket: 'bucket-2', maxUnits: 20, e2bKeyEnv: 'K2' } })
+  process.env.K1 = 'k1'; process.env.K2 = 'k2'
+  try {
+    const two = configWith({ CELLS, EDGE_REGION: 'ap-south-1', AWS_REGION: 'ap-south-1' })
+    assert.deepEqual([Object.keys(two.cells), two.edgeRegion], [['us-east-1', 'ap-south-1'], 'ap-south-1'])
+  } finally { delete process.env.K1; delete process.env.K2 }
+})
+
+test('the edge key and the model key are EDGE_SECRET and MODEL_KEY (ECS secrets), never SSM or Secrets Manager reads; an unset or empty one stops the edge', async () => {
+  const { spawnSync } = await import('node:child_process')
+  const { mkdtempSync, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  // No AWS credentials and no instance metadata: an SDK read would fail on credentials instead of naming the variable.
+  const home = mkdtempSync(join(tmpdir(), 'edge-home-'))
+  const start = (vars) => spawnSync(process.execPath, ['edge.mjs'], { cwd: new URL('.', import.meta.url), encoding: 'utf8', timeout: 60_000,
+    env: { PATH: process.env.PATH, HOME: home, AWS_EC2_METADATA_DISABLED: 'true', ...base, ...vars } })
+  try {
+    for (const [vars, name] of [[{}, 'EDGE_SECRET'], [{ EDGE_SECRET: '' }, 'EDGE_SECRET'], [{ EDGE_SECRET: 'CANARY-k' }, 'MODEL_KEY'], [{ EDGE_SECRET: 'CANARY-k', MODEL_KEY: '' }, 'MODEL_KEY']]) {
+      const r = start(vars)
+      assert.equal(r.status, 1, JSON.stringify(vars))
+      assert.match(r.stderr, new RegExp(`edge: set ${name}\\n`), JSON.stringify(vars))
+      assert.doesNotMatch(r.stdout + r.stderr, /CANARY/)
+    }
+  } finally { rmSync(home, { recursive: true, force: true }) }
+  assert.doesNotMatch(readFileSync(new URL('./edge.mjs', import.meta.url), 'utf8'), /client-ssm|client-secrets-manager|EDGE_SECRET_PARAM|MODEL_KEY_SECRET/)
+})
+
+test('REDIS_URL: the production rediss:// URL with the user edge works as is; anything else is refused without showing its value', async () => {
+  const prod = `rediss://edge:${'a1B2'.repeat(10)}@master.mumbo-boxes-edge.x.use1.cache.amazonaws.com:6379`
+  assert.equal(redisUrl(prod), prod)
+  assert.equal(redisUrl('redis://localhost:6379'), 'redis://localhost:6379')
+  const { createClient } = await import('redis')
+  const { socket, username, password } = createClient({ url: prod }).options
+  assert.deepEqual([socket.tls, socket.host, socket.port, username, password], [true, 'master.mumbo-boxes-edge.x.use1.cache.amazonaws.com', 6379, 'edge', 'a1B2'.repeat(10)])
+  for (const bad of ['rediss://edge:CANARY-pw@bad host:6379', 'http://edge:CANARY-pw@h:6379', 'redis://edge:CANARY-pw@h:6379', 'rediss://edge:CANARY-pw@']) {
+    assert.throws(() => redisUrl(bad), (e) => /^edge: REDIS_URL must be a redis:\/\/ or rediss:\/\/ URL with a host, and credentials only over rediss:\/\/; its value is not shown$/.test(e.message) && !e.message.includes('CANARY'), bad)
+  }
 })

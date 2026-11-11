@@ -12,6 +12,8 @@ import { templateArgs } from './template.mjs'
 
 const c = { llmHost: 'l', publicHost: 'boxes.x' }
 const boxFiles = { proxy: 'PROXY-JS\n', gh: '#!/bin/sh\nGH\n' }
+/** One us-east-1 cell over a fake E2B, as cells.mjs cellClients builds one; `extra` overrides its fields. */
+const oneCell = (e2b, extra = {}) => new Map([['us-east-1', { region: 'us-east-1', Sandbox: e2b.Sandbox, proxy: new URL('http://127.0.0.1:1'), bucket: 'bk', maxUnits: 0, presignGet: async () => undefined, presignPut: async () => 'P', ...extra }]])
 const b64 = (s) => Buffer.from(s).toString('base64')
 const at = (text, needle) => { const i = text.indexOf(needle); assert.ok(i >= 0, `missing: ${needle}`); return i }
 
@@ -376,9 +378,9 @@ test('create() starts a project box from projectTemplate with the owners as pane
     },
   }
   const store = memoryStore()
-  const cfg = { ...c, template: 'T-user', projectTemplate: 'T-project', idleMs: 1000, maxRunningUnits: 0, runWildDefaultEmails: ['a@x.com'] }
+  const cfg = { ...c, template: 'T-user', projectTemplate: 'T-project', idleMs: 1000, edgeRegion: 'us-east-1', runWildDefaultEmails: ['a@x.com'] }
   const { id } = await projects({ store, admitted: () => true, log: () => {} }).create('Owner@x.com', 'P')
-  const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'P', boxFiles, log: () => {} })
+  const b = boxes({ cells: oneCell(e2b), store, cfg, edgeKey: 'k', boxFiles, log: () => {} })
   await b.ensure(`project:${id}`)
   await b.ensure('a@x.com')
   assert.deepEqual(made, ['T-project', 'T-user'])
@@ -495,9 +497,9 @@ test('create() charges a project box 4 capacity units and a person box 2', async
   }
   const store = memoryStore()
   // Nothing runs; 3 units are left: a person box (2) fits, a project box (4) does not.
-  const cfg = { ...c, template: 'T-user', projectTemplate: 'T-project', idleMs: 1000, maxRunningUnits: 3 }
+  const cfg = { ...c, template: 'T-user', projectTemplate: 'T-project', idleMs: 1000, edgeRegion: 'us-east-1' }
   const { id } = await projects({ store, admitted: () => true, log: () => {} }).create('Owner@x.com', 'P')
-  const b = boxes({ e2b, store, cfg, edgeKey: 'k', presignGet: async () => undefined, presignPut: async () => 'P', boxFiles, log: () => {} })
+  const b = boxes({ cells: oneCell(e2b, { maxUnits: 3 }), store, cfg, edgeKey: 'k', boxFiles, log: () => {} })
   await assert.rejects(b.ensure(`project:${id}`), (e) => e.status === 503 && e.capacity === true)
   await b.ensure('a@x.com')
   assert.deepEqual(made, ['T-user'])

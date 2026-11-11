@@ -7,7 +7,7 @@ import { test } from 'node:test'
 import { runInNewContext } from 'node:vm'
 import { authUi, userServer } from './edge.mjs'
 
-const cfg = { publicHost: 'boxes.example', projectDomain: 'boxes.example', approveHost: 'approve.boxes.example', allowed: ['@x.com'], signinCookie: '_oauth2_proxy_mumbo', proxy: new URL('http://127.0.0.1:1') }
+const cfg = { publicHost: 'boxes.example', projectDomain: 'boxes.example', approveHost: 'approve.boxes.example', allowed: ['@x.com'], signinCookie: '_oauth2_proxy_mumbo' }
 const read = (name) => readFileSync(new URL(`./auth-ui/${name}`, import.meta.url), 'utf8')
 const html = read('index.html')
 const consentJs = read('consent.js')

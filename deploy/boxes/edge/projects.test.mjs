@@ -151,3 +151,16 @@ test('removeRepo: an approver who owns the project unbinds a repository; the las
   await addRepo(store, other, 'acme/a', as('m@x.com'))
   assert.deepEqual(await getRepos(store, other), ['acme/a'])
 })
+
+test('a project\'s region is its creator\'s at creation (us-east-1 for a person without a placement doc), and repository and member changes keep it', async () => {
+  const store = memoryStore()
+  const p = projects({ store, admitted: () => true, log: () => {} })
+  await store.putDoc('person:m@x.com', { region: 'ap-south-1', at: 1 })
+  const { id } = await p.create('m@x.com', 'Mumbai')
+  assert.equal((await p.get(id)).region, 'ap-south-1')
+  assert.equal((await p.get((await p.create('a@x.com', 'Virginia')).id)).region, 'us-east-1')
+  await addRepo(store, id, 'm/site', as('m@x.com'))
+  await p.addMember('m@x.com', id, 'm@x.com')
+  await removeRepo(store, id, 'm/site', as('m@x.com'))
+  assert.equal((await p.get(id)).region, 'ap-south-1')
+})
