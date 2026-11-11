@@ -1306,6 +1306,12 @@ The founder is in India, and their box must run in `ap-south-1` (Mumbai). The re
   - the RUNBOOK command, which also works for project boxes;
   - offboarding across every region.
   - Tests: a move, a target-restore failure that leaves the person on the source box, a visit and a WebSocket during a move, and a second move refused while one runs.
+- **B47, a box E2B still runs is never killed for being unreachable** [2026-11-11; predates B21, live today; lands before R6 step 3]:
+  - a connection error to the client-proxy drops only the replica's cached target, never the record's launch token (`forget` goes);
+  - ensure recreates from backup only when E2B answers that the box can't run (a failed resume, or envd up and dsh still down after `start.sh`); `SandboxNotFoundError` creates without a kill;
+  - a failure to get an answer (unreachable envd or API, a timeout, the client-proxy's 502 for a listed box) is a 503 starting page with the box and record unchanged, and an error-level `box unreachable` line for the edge-errors alarm. Nothing recreates automatically: during a client-proxy outage a recreate fails too and loses the box;
+  - a RUNBOOK section tells a hung box (other boxes in the cell answer) from a client-proxy outage (none do); for a hung box the operator kills it and the next visit restores;
+  - tests for each case, classified by the SDK's error classes.
 
 **Acceptance (first milestone: the founder's box in Mumbai):**
 - **The move.** The founder's box runs in the `ap-south-1` cell, moved from `us-east-1` with Sessions, schedules, files and Chrome sign-ins intact.

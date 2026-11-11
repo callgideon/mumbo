@@ -2268,6 +2268,15 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>Tests: a move, a target-restore failure that leaves the person on the source box, a visit and a WebSocket during a move, and a second move refused while one runs.</li>
 </ul>
 </li>
+<li><strong>B47, a box E2B still runs is never killed for being unreachable</strong> [2026-11-11; predates B21, live today; lands before R6 step 3]:
+<ul>
+<li>a connection error to the client-proxy drops only the replica's cached target, never the record's launch token (<code>forget</code> goes);</li>
+<li>ensure recreates from backup only when E2B answers that the box can't run (a failed resume, or envd up and dsh still down after <code>start.sh</code>); <code>SandboxNotFoundError</code> creates without a kill;</li>
+<li>a failure to get an answer (unreachable envd or API, a timeout, the client-proxy's 502 for a listed box) is a 503 starting page with the box and record unchanged, and an error-level <code>box unreachable</code> line for the edge-errors alarm. Nothing recreates automatically: during a client-proxy outage a recreate fails too and loses the box;</li>
+<li>a RUNBOOK section tells a hung box (other boxes in the cell answer) from a client-proxy outage (none do); for a hung box the operator kills it and the next visit restores;</li>
+<li>tests for each case, classified by the SDK's error classes.</li>
+</ul>
+</li>
 </ul>
 <p><strong>Acceptance (first milestone: the founder's box in Mumbai):</strong></p>
 <ul>
