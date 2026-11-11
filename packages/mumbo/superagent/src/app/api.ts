@@ -8,7 +8,7 @@ import type { SettingsView } from './views/settings.ts'
 import type { SourceStatusView } from './views/sources.ts'
 import type { DecisionListView, SearchView, ThreadDetailView, ThreadListView } from './views/threads.ts'
 import type { TicketListView } from './views/tickets.ts'
-import type { ClaimRequest, ClaimView, ReportRequest, ReportView } from '../mumbo/external.ts'
+import type { ClaimRequest, ClaimView, FenceRequest, FenceView, ReportRequest, ReportView, SubmitRequest, SubmitView } from '../mumbo/external.ts'
 
 export const TICKET_FILTERS = ['open', 'person', 'working', 'idle', 'ended'] as const
 export const THREAD_FILTERS = ['subscribed', 'evaluating', 'recent', 'all'] as const
@@ -48,6 +48,10 @@ export interface Api {
   'POST workers/claim': { body: ClaimRequest; response: ClaimView }
   /** In Mumbo, the lease holder's report, which renews the lease and answers the Inputs that wait (`UPSTREAM.md` S13). */
   'POST workers/:assignment/report': { body: ReportRequest; response: ReportView }
+  /** In Mumbo, the edge admits one git request of the lease holder, which renews the lease and records a push (`UPSTREAM.md` S14). */
+  'POST workers/:assignment/fence': { body: FenceRequest; response: FenceView }
+  /** In Mumbo, the lease holder's pushed head becomes the Ticket's draft pull request, and the lease is released (`UPSTREAM.md` S14). */
+  'POST workers/:assignment/submit': { body: SubmitRequest; response: SubmitView }
 }
 type Path<K> = K extends `${string} ${infer P}` ? P : never
 type Params<P> = P extends `${string}:${infer Name}/${infer Rest}` ? Record<Name, string> & Params<Rest>

@@ -241,3 +241,19 @@ In Mumbo a worker outside the box, such as a member's own Claude Code through th
 Files outside the copy changed for S13:
 
 - `docs/config-catalog.md`: regenerated; the `DeploymentConfig` source line moved.
+
+## S14: fence and submit
+
+S13's worker could claim and report but neither push nor finish. The edge's worker git route fences each git request of a lease holder here before it forwards it, and the submit turns the head the worker pushed into the Ticket's draft pull request. The reviewer Ticket that reviews the submitted head is a later entry; until then a submit records `ready` without a review. Written by task B37 T2b.
+
+- `src/mumbo/external.ts`:
+  - `fence`, in one transaction, checks the caller as `report` does, refuses `wrong_ref` when an update names another ref than `refs/heads/agent/<name>`, renews the lease, and appends each update's `new` head to `KV.external.pushed(ticket)`, keeping the newest 100 with a repeated head moved last. It answers `{ ok: true, leaseExpiresAt }`, and passes while paused.
+  - `submit` answers a retry with the same `headSha` on the released lease from the stored `result`. Otherwise it checks the caller as `report` does, refuses `paused`, `head_not_pushed` (the head is not in `KV.external.pushed`) and `head_moved` (`branches/agent/<name>` names another commit), then, through the GitHub Source context's `Commands`, finds the open pull request from the branch (`pulls?head=<owner>:agent/<name>&state=open`) or opens a draft one into `main` (title the Ticket's, body the automated-agent line, the summary and `Ticket <id>`), and converts an open pull request that is not a draft with the GraphQL mutation `convertPullRequestToDraft`. Last, in one transaction, it checks the caller again, binds the pull request with `claimPull` (a refusal fails the submit), records a `ready` report and relays it to the main Session as `report` does, and sets the lease's `releasedAt` and `result` (`{ pr: { number, url }, headSha, model?, costUsd? }`). It answers `{ pr, lease: 'released' }`. A failed GitHub call records nothing.
+  - `stop` also deletes `KV.external.pushed(ticket)` once the Ticket ended.
+  - `FenceRequestSchema`, `SubmitRequestSchema`, `FenceView`, `SubmitView`; `Lease.result`; the refusal codes `wrong_ref`, `head_not_pushed` and `head_moved`; `ExternalHost.github`, the GitHub Source context.
+- `src/kv.ts`: `KV.external.pushed`, `external-pushed:<ticket id>`.
+- `src/sources/github-pull.ts`: `PullSchema` is exported, for the pull requests the submit lists and opens.
+- `src/app/runtime.ts`: the `ExternalExecutor` gets the GitHub Source context as `github`.
+- `src/app/http.ts`, `src/app/api.ts`: `POST workers/:assignment/fence` and `POST workers/:assignment/submit`, with zod bodies, under the existing admission.
+- Docs: the `src/mumbo/external.ts` and `tests/external.spec.ts` rows, the diagram and the key-value records table of `docs/007-architecture.md`; the README In Mumbo bullet on pushes and submits, and the Known Limitations on unreviewed submits and on worker calls before B24.
+- Tests: `tests/external.spec.ts` covers fences of fetches, probes and pushes, the pushed-head record and its bound, their refusals (`wrong_ref`, a replaced, expired or released lease), the record kept through a retry and dropped at the end, a lease id from before a store rollback, and submits against a fake GitHub behind the box's `gh`: a new draft pull request, bound and `ready`, a retry, `head_not_pushed`, `head_moved`, a predecessor's head, a ready pull request turned back into a draft, a failed write, a pull request the Ticket cannot claim, and `paused`.

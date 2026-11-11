@@ -1,10 +1,12 @@
 /**
- * In Mumbo, the external-worker Executor (`UPSTREAM.md` S13) on a running Runtime: relayed requests become external Tickets,
- * which workers outside the box claim and report on through the management API under a lease that each call renews, an
- * expired lease ends, and work that waits queues again. DSH admission is the fixture's owner, or a stand-in member.
+ * In Mumbo, the external-worker Executor (`UPSTREAM.md` S13, S14) on a running Runtime: relayed requests become external
+ * Tickets, which workers outside the box claim, report on, fence their git requests with and submit through the management
+ * API under a lease that each call renews, an expired lease ends, and work that waits queues again. DSH admission is the
+ * fixture's owner, or a stand-in member; GitHub is a fake behind the box's gh.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { key, type Ticket } from '../src/core/index.ts'
+import { key, ticketStage, type Ticket } from '../src/core/index.ts'
+import { CliError, Commands } from '../src/infra/commands.ts'
 import { KV } from '../src/kv.ts'
 import type { ClaimView, Lease, ReportView } from '../src/mumbo/external.ts'
 import { ciSummary } from '../src/sources/github-read.ts'
@@ -410,6 +412,201 @@ describe('requeue', () => {
     await settled(answered<ClaimView>(await claim()))
     await requeue()
     expect(assignments(ticket.id)).toEqual([['running', undefined]])
+  })
+})
+
+const sha = (digit: string) => digit.repeat(40)
+const holding = (view: Pick<ClaimView, 'lease'>) => ({ lease: view.lease, worker: { key: LAPTOP.key } })
+const fence = (view: Pick<ClaimView, 'assignment' | 'lease'>, body: Record<string, unknown> = {}) =>
+  host.api('POST', `workers/${view.assignment}/fence`, { ...holding(view), ...body })
+/** The edge's fence of a push of `heads` to the claim's branch. */
+const push = (view: ClaimView, ...heads: string[]) =>
+  fence(view, { updates: heads.map(head => ({ ref: `refs/heads/${view.branch}`, old: sha('0'), new: head })) })
+const submit = (view: Pick<ClaimView, 'assignment' | 'lease'>, body: Record<string, unknown> = {}) =>
+  host.api('POST', `workers/${view.assignment}/submit`, { ...holding(view), headSha: sha('a'), summary: 'Fixed the login page', ...body })
+const pushed = (ticket: string) => store().get(KV.external.pushed(ticket))
+/** The pull request a submit answers. */
+const opened = (number: number) => ({ status: 200, body: { pr: { number, url: `https://github.com/acme/widgets/pull/${number}` }, lease: 'released' } })
+
+/**
+ * The GitHub API behind the box's gh: branch `heads`, `pulls` (a new one numbered from 7), and every call. While `halted`,
+ * each write fails as the edge refuses it.
+ */
+function fakeGithub() {
+  type FakePull = { number: number; node_id: string; draft: boolean; state: string; title: string; body: string; base: string; html_url: string
+    user: { login: string }; head: { sha: string; ref: string; repo: { full_name: string } } }
+  const heads = new Map<string, string>(), pulls: FakePull[] = [], calls: string[][] = []
+  const state = { halted: false }
+  const pull = (ref: string, fields: Partial<FakePull> = {}): FakePull => {
+    const number = pulls.length + 7
+    const made = { number, node_id: `PR_${number}`, draft: true, state: 'open', title: '', body: '', base: 'main', html_url: `https://github.com/acme/widgets/pull/${number}`,
+      user: { login: 'agent-bot' }, head: { sha: heads.get(ref)!, ref, repo: { full_name: 'acme/widgets' } }, ...fields }
+    pulls.push(made)
+    return made
+  }
+  vi.mocked(Commands.prototype.gh).mockImplementation(async (args: string[]) => {
+    calls.push(args)
+    const path = args[1]!, field = (name: string) => args.find(arg => arg.startsWith(`${name}=`))!.slice(name.length + 1)
+    if (state.halted && (args.includes('POST') || path === 'graphql')) throw new CliError('stopped: the project is halted (HTTP 403)', 403)
+    const branch = /^repos\/acme\/widgets\/branches\/(.+)$/.exec(path)?.[1]
+    if (branch) return { name: branch, commit: { sha: heads.get(branch) } }
+    const head = /^repos\/acme\/widgets\/pulls\?head=acme:(.+)&state=open$/.exec(path)?.[1]
+    if (head) return pulls.filter(item => item.state === 'open' && item.head.ref === head)
+    if (path === 'repos/acme/widgets/pulls') return pull(field('head'), { title: field('title'), body: field('body'), base: field('base'), draft: field('draft') === 'true' })
+    if (path === 'graphql') { pulls.find(item => item.node_id === field('id'))!.draft = true; return { data: {} } }
+    return path === 'user' ? { login: 'agent-bot' } : { default_branch: 'master', permissions: { push: true } }
+  })
+  return { heads, pulls, calls, state, pull, writes: () => calls.filter(args => args.includes('POST') || args[1] === 'graphql') }
+}
+
+describe('fence', () => {
+  it('renews the live lease for a fetch and a push alike, records the heads a push names, newest last, and passes while paused', async () => {
+    const ticket = await requested('m1')
+    const view = await claimed()
+    later(5)
+    expect(await fence(view)).toEqual({ status: 200, body: { ok: true, leaseExpiresAt: new Date(Date.now() + 20 * MINUTE).toISOString() } })
+    expect(pushed(ticket.id)).toBeUndefined()
+    later(1)
+    await host.runtime.settings.pause(true, 'panel')
+    expect(await push(view, sha('a'))).toMatchObject({ status: 200, body: { ok: true } })
+    expect(lease(view.assignment)?.renewedAt).toBe(new Date().toISOString())
+    // git's empty probe names no update.
+    expect((await fence(view, { updates: [] })).status).toBe(200)
+    await push(view, sha('b'), sha('c'))
+    await push(view, sha('a'))
+    expect(pushed(ticket.id)).toEqual([sha('b'), sha('c'), sha('a')])
+    // The record keeps the newest 100.
+    const many = Array.from({ length: 100 }, (_, index) => index.toString(16).padStart(40, '0'))
+    store().set(KV.external.pushed(ticket.id), many)
+    await push(view, sha('d'))
+    expect(pushed(ticket.id)).toEqual([...many.slice(1), sha('d')])
+    expect((await fence(view, { updates: [{ ref: `refs/heads/${view.branch}`, old: sha('0'), new: 'HEAD' }] })).status).toBe(400)
+  })
+
+  it('refuses an update of another ref, and a replaced, expired or released lease, recording nothing', async () => {
+    const ticket = await requested('m1')
+    const view = await claimed()
+    await push(view, sha('a'))
+    for (const updates of [[{ ref: 'refs/heads/agent/other', old: sha('0'), new: sha('b') }],
+      [{ ref: `refs/heads/${view.branch}`, old: sha('0'), new: sha('b') }, { ref: 'refs/heads/main', old: sha('0'), new: sha('c') }]]) {
+      expect(await fence(view, { updates })).toEqual(refused(409, 'wrong_ref'))
+    }
+    later(21)
+    expect(await push(view, sha('b'))).toEqual(refused(409, 'lease_expired'))
+    host.runtime.external.sweep()
+    const next = await claimed({ request: 'r2' })
+    expect(await push(view, sha('b'))).toEqual(refused(409, 'lease_expired'))
+    expect(await fence({ ...next, lease: view.lease })).toEqual(refused(409, 'lease_expired'))
+    release(next.assignment)
+    expect(await push(next, sha('b'))).toEqual(refused(409, 'lease_released'))
+    expect(pushed(ticket.id)).toEqual([sha('a')])
+  })
+
+  it('keeps the pushed heads while the Ticket is retried, and drops them when it ends', async () => {
+    const ticket = await requested('m1')
+    const view = await claimed()
+    await push(view, sha('a'))
+    await report(view, { state: 'failed', summary: 'The build is broken' })
+    expect(await host.api('POST', `tickets/${ticket.id}/retry`)).toMatchObject({ status: 200 })
+    expect([lease(view.assignment), pushed(ticket.id)]).toEqual([undefined, [sha('a')]])
+    host.runtime.engine.stopTicket(ticket.id)
+    expect(pushed(ticket.id)).toBeUndefined()
+  })
+
+  it('refuses a lease id from before a store rollback, although the Ticket\'s new claim leases the same Assignment', async () => {
+    const ticket = await requested('m1')
+    const before = stored(ticket.id)
+    const view = await claimed()
+    // The store goes back to its state before the claim.
+    store().tickets.save(before)
+    store().delete(KV.external.lease(view.assignment))
+    const again = await claimed({ request: 'r2' })
+    expect(again.assignment).toBe(view.assignment)
+    expect(await push(view, sha('a'))).toEqual(refused(409, 'lease_expired'))
+    expect((await push(again, sha('a'))).status).toBe(200)
+  })
+})
+
+describe('submit', () => {
+  it('opens a draft pull request from the pushed head, binds it, records ready, releases the lease, and answers a retry the same', async () => {
+    const github = fakeGithub()
+    const ticket = await requested('m1')
+    const view = await claimed()
+    await push(view, sha('a'))
+    github.heads.set(view.branch, sha('a'))
+    expect(await submit(view, { model: 'claude-opus', costUsd: 1.5 })).toEqual(opened(7))
+    expect(github.pulls).toMatchObject([{ number: 7, draft: true, title: 'Fix m1', base: 'main', head: { ref: view.branch },
+      body: `This is by an automated agent, not a human.\n\nFixed the login page\n\nTicket ${ticket.id}` }])
+    const current = stored(ticket.id)
+    expect(current.follows).toMatchObject([{ thread: 'github:7', own: true }])
+    expect([ticketStage(current), current.ended]).toEqual([{ stage: 'person', action: 'review' }, undefined])
+    expect(current.assignments.at(-1)).toMatchObject({ state: 'running', report: { state: 'ready', summary: 'Fixed the login page' } })
+    expect(lease(view.assignment)).toMatchObject({ releasedAt: expect.any(String),
+      result: { pr: { number: 7, url: 'https://github.com/acme/widgets/pull/7' }, headSha: sha('a'), model: 'claude-opus', costUsd: 1.5 } })
+    await host.runtime.idle()
+    expect(host.relays(host.runtime.masterId).filter(item => item.kind === 'worker_report')).toMatchObject([{ state: 'ready', summary: 'Fixed the login page' }])
+    // A retry gets the same answer and calls GitHub no more; another head finds the lease released.
+    const calls = github.calls.length
+    expect(await submit(view)).toEqual(opened(7))
+    expect(github.calls).toHaveLength(calls)
+    expect(await submit(view, { headSha: sha('b') })).toEqual(refused(409, 'lease_released'))
+    expect(await push(view, sha('b'))).toEqual(refused(409, 'lease_released'))
+  })
+
+  it('refuses a head no holder pushed and a moved branch head, and accepts a head the previous holder pushed', async () => {
+    const github = fakeGithub()
+    await requested('m1')
+    const view = await claimed()
+    await push(view, sha('a'))
+    github.heads.set(view.branch, sha('a'))
+    expect(await submit(view, { headSha: sha('b') })).toEqual(refused(409, 'head_not_pushed'))
+    await push(view, sha('b'))
+    expect(await submit(view, { headSha: sha('b') })).toEqual(refused(409, 'head_moved'))
+    later(21)
+    expect(await submit(view)).toEqual(refused(409, 'lease_expired'))
+    host.runtime.external.sweep()
+    const next = await claimed({ request: 'r2' })
+    expect(await submit(next)).toEqual(opened(7))
+    expect(github.writes()).toHaveLength(1)
+  })
+
+  it('turns the branch\'s open ready pull request back into a draft instead of opening another', async () => {
+    const github = fakeGithub()
+    await requested('m1')
+    const view = await claimed()
+    await push(view, sha('a'))
+    github.heads.set(view.branch, sha('a'))
+    // The pull request of an earlier head, which a review marked ready.
+    github.pull(view.branch, { draft: false })
+    expect(await submit(view)).toEqual(opened(7))
+    expect(github.writes()).toEqual([['api', 'graphql', '-f', expect.stringContaining('convertPullRequestToDraft'), '-f', 'id=PR_7']])
+    expect(github.pulls).toMatchObject([{ number: 7, draft: true }])
+  })
+
+  it('records nothing when a GitHub write fails or the branch has a pull request the Ticket cannot claim, and refuses while paused', async () => {
+    const github = fakeGithub()
+    const ticket = await requested('m1')
+    const view = await claimed()
+    await push(view, sha('a'))
+    github.heads.set(view.branch, sha('a'))
+    const unchanged = () => {
+      expect(lease(view.assignment)).not.toHaveProperty('releasedAt')
+      expect([stored(ticket.id).follows, latestState(ticket.id)]).toEqual([undefined, undefined])
+    }
+    github.state.halted = true
+    expect(await submit(view)).toEqual({ status: 500, body: { error: 'stopped: the project is halted (HTTP 403)' } })
+    unchanged()
+    github.state.halted = false
+    await host.runtime.settings.pause(true, 'panel')
+    expect(await submit(view)).toEqual(refused(409, 'paused'))
+    await host.runtime.settings.pause(false, 'panel')
+    unchanged()
+    // A pull request someone else opened from the branch.
+    github.pull(view.branch, { user: { login: 'alice' } })
+    expect(await submit(view)).toMatchObject({ status: 500, body: { error: expect.stringContaining('PR does not belong to this ticket') } })
+    unchanged()
+    github.pulls[0]!.state = 'closed'
+    expect(await submit(view)).toEqual(opened(8))
   })
 })
 

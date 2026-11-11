@@ -15,7 +15,8 @@ import { SetupError, type SetupProblem } from '../setup.ts'
 import { UserError, type EngineForPeople, type Ticket } from '../core/index.ts'
 import type { Deployment, Machine } from '../deployment.ts'
 import type { DshExecutor } from '../executor/dsh.ts'
-import { ClaimRequestSchema, ReportRequestSchema, WorkerConflict, type ExternalExecutor } from '../mumbo/external.ts'
+import { ClaimRequestSchema, FenceRequestSchema, ReportRequestSchema, SubmitRequestSchema, WorkerConflict, type ExternalExecutor }
+  from '../mumbo/external.ts'
 import type { Health } from '../sources/host.ts'
 import type { SourceRegistry } from '../sources/registry.ts'
 import type { Sessions } from './sessions.ts'
@@ -40,8 +41,8 @@ export interface HttpHost {
   readonly settings: Pick<Settings, 'view' | 'save' | 'pause' | 'sync' | 'refreshLabels'>
   readonly engine: EngineForPeople
   readonly executor: Pick<DshExecutor, 'activeCount'>
-  /** In Mumbo, the Executor workers outside the box claim external Tickets from (`UPSTREAM.md` S13). */
-  readonly external: Pick<ExternalExecutor, 'claim' | 'report'>
+  /** In Mumbo, the Executor workers outside the box claim external Tickets from (`UPSTREAM.md` S13, S14). */
+  readonly external: Pick<ExternalExecutor, 'claim' | 'report' | 'fence' | 'submit'>
   readonly health: Record<string, Health>
   readonly machine: Machine
   readonly masterId: string
@@ -223,6 +224,8 @@ function routes(runtime: HttpHost): Routes {
     'POST prompts/preview': async input => runtime.prompts.preview(await promptBody(input)),
     'POST workers/claim': async ({ body }) => runtime.external.claim(ClaimRequestSchema.parse(await body())),
     'POST workers/:assignment/report': async ({ params, body }) => runtime.external.report(params.assignment, ReportRequestSchema.parse(await body())),
+    'POST workers/:assignment/fence': async ({ params, body }) => runtime.external.fence(params.assignment, FenceRequestSchema.parse(await body())),
+    'POST workers/:assignment/submit': async ({ params, body }) => runtime.external.submit(params.assignment, SubmitRequestSchema.parse(await body())),
   }
 }
 function decoded(segment: string): string {

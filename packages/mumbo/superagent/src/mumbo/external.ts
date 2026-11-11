@@ -1,12 +1,13 @@
 /**
- * In Mumbo, the external-worker Executor (`UPSTREAM.md` S13): a worker outside the box, such as a member's own Claude Code
- * through the door, claims an external Ticket's Assignment under a lease, reports on it and pulls its Inputs. Each call renews
- * the lease. An expired lease ends, and a Ticket whose Assignment has no live lease is queued for a new worker once work waits.
+ * In Mumbo, the external-worker Executor (`UPSTREAM.md` S13, S14): a worker outside the box, such as a member's own Claude
+ * Code through the door, claims an external Ticket's Assignment under a lease, reports on it, pulls its Inputs, and submits
+ * the head it pushed. Each call renews the lease, and so does each of its git requests, which the edge fences here first. An
+ * expired lease ends, and a Ticket whose Assignment has no live lease is queued for a new worker once work waits.
  */
 import { randomBytes } from 'node:crypto'
 import { z } from 'zod'
 import { latestAssignment, liveTicket, waitsForPerson, type Assignment, type EngineForExecutor, type Execution, type Ticket,
-  type TicketInput, type Trigger } from '../core/index.ts'
+  type TicketInput, type Trigger, type WorkerReport } from '../core/index.ts'
 import { batchOf, inputMessage, mandateInstructions, triggerMessage } from '../executor/dsh.ts'
 import type { EffectPayloads, Effects } from '../app/effects.ts'
 import { reportRelay } from '../app/notices.ts'
@@ -15,13 +16,17 @@ import type { Store } from '../app/store.ts'
 import type { Machine } from '../deployment.ts'
 import type { HealthEntry } from '../infra/health.ts'
 import { KV, type Key } from '../kv.ts'
+import { claimPull, PullSchema } from '../sources/github-pull.ts'
+import type { SourceContext } from '../sources/host.ts'
 import type { ExecutorPlugin } from './executors.ts'
 
 /** The Inputs one claim or report answers, oldest first; `more` counts the rest. It bounds one door answer, so it is fixed. */
 const INPUTS = 20
+/** The commit SHAs one Ticket's `KV.external.pushed` keeps, newest last. It bounds one record, so it is fixed. */
+const PUSHED = 100
 /** Why a worker call is refused, by the code the management API answers with. */
 const REFUSALS = {
-  paused: 'Processing is paused or setup is not finished; claim again later',
+  paused: 'Processing is paused or setup is not finished; try again later',
   nothing_queued: 'No external Ticket waits for a worker',
   not_claimable: 'The Ticket is not open to an external worker: it is local, ended, or its result was submitted',
   already_claimed: 'Another worker holds the lease on this Ticket',
@@ -29,6 +34,9 @@ const REFUSALS = {
   lease_released: 'This lease was released when its result was submitted',
   assignment_ended: 'This Assignment no longer runs its Ticket; nothing was recorded',
   not_holder: 'Another door key holds this lease',
+  wrong_ref: 'This lease pushes its Ticket\'s branch only',
+  head_not_pushed: 'No holder of this Ticket\'s lease pushed that commit through the worker git route',
+  head_moved: 'The Ticket\'s branch head is another commit; submit the head you pushed last',
   not_found: 'Unknown Ticket or Assignment',
 } as const
 export type WorkerConflictCode = keyof typeof REFUSALS
@@ -45,17 +53,30 @@ const WorkerSchema = z.object({ key: z.string().min(1).max(200), name: z.string(
 /** The body of `POST workers/claim`: the Ticket to take, else the oldest queued one; the claim's idempotency key; and the worker. */
 export const ClaimRequestSchema = z.object({ ticket: z.string().min(1).max(64).optional(), request: z.string().min(1).max(200),
   worker: WorkerSchema }).strict()
+/** The fields of every call on a lease: its id and the door key that holds it. */
+const HOLDER = { lease: z.string().regex(/^[0-9a-f]{32}$/), worker: z.object({ key: z.string().min(1).max(200) }).strict() }
+const SHA = z.string().regex(/^[0-9a-f]{40}$/)
 /**
  * The body of `POST workers/:assignment/report`: the lease and the door key that hold it; a state other than `ready`, which
  * only a submit records; a question for a person (`null` clears it); the person's message it `answers`; and the Inputs it
  * acknowledges (`ack`) as read from earlier answers.
  */
-export const ReportRequestSchema = z.object({ lease: z.string().regex(/^[0-9a-f]{32}$/),
-  worker: z.object({ key: z.string().min(1).max(200) }).strict(), state: z.enum(['progress', 'blocked', 'failed', 'dropped']), summary: z.string().trim().min(1).max(4000),
+export const ReportRequestSchema = z.object({ ...HOLDER, state: z.enum(['progress', 'blocked', 'failed', 'dropped']), summary: z.string().trim().min(1).max(4000),
   question: z.string().trim().min(1).max(1000).nullable().optional(), answers: z.string().min(1).max(200).optional(),
   ack: z.array(z.string().min(1).max(200)).max(50).optional() }).strict()
+/**
+ * The body of `POST workers/:assignment/fence`, which the edge sends before it forwards one of the lease holder's git
+ * requests: the lease, and for a push, its ref updates as the edge parsed them (`[]` for git's empty probe).
+ */
+export const FenceRequestSchema = z.object({ ...HOLDER,
+  updates: z.array(z.object({ ref: z.string().min(1).max(300), old: SHA, new: SHA }).strict()).max(50).optional() }).strict()
+/** The body of `POST workers/:assignment/submit`: the lease, the head the worker pushed, its summary, and its own model and cost. */
+export const SubmitRequestSchema = z.object({ ...HOLDER, headSha: SHA, summary: z.string().trim().min(1).max(8000),
+  model: z.string().trim().min(1).max(80).optional(), costUsd: z.number().nonnegative().optional() }).strict()
 export type ClaimRequest = z.infer<typeof ClaimRequestSchema>
 export type ReportRequest = z.infer<typeof ReportRequestSchema>
+export type FenceRequest = z.infer<typeof FenceRequestSchema>
+export type SubmitRequest = z.infer<typeof SubmitRequestSchema>
 
 /**
  * The lease on one external Assignment, stored by Assignment id. `id`, 128 random bits, is the fencing epoch every worker call
@@ -71,6 +92,8 @@ export interface Lease {
   expiresAt: string
   /** Set when the worker's result was submitted: a released lease is not live, never renewed and never swept. */
   releasedAt?: string
+  /** The submitted result, set with `releasedAt`, which a submit retried with the same head answers again. */
+  result?: { pr: SubmitView['pr'] } & Pick<SubmitRequest, 'headSha' | 'model' | 'costUsd'>
 }
 /** `triggerMessage`'s fields with the full text, and without `chars`, `read` and `source_url_read`, which name in-box resources. */
 export type WorkerTrigger = Omit<ReturnType<typeof triggerMessage>, 'chars' | 'read' | 'source_url_read'>
@@ -96,6 +119,10 @@ export interface ClaimView {
 }
 /** The answer to a report: the renewed expiry, the first undelivered Inputs, and the Ticket's open question for a person. */
 export interface ReportView { leaseExpiresAt: string; inputs: WorkerInput[]; more: number; attention?: { question: string } }
+/** The answer to a fence that passed: the edge forwards the git request on `ok`. */
+export interface FenceView { ok: true; leaseExpiresAt: string }
+/** The answer to a submit: the Ticket's pull request, a draft, and the released lease. */
+export interface SubmitView { pr: { number: number; url: string }; lease: 'released' }
 
 /** The last line of a CI Trigger's text (`ciSummary`), which names the in-box resource of every check. */
 const CHECKS_LINE = /\nRead \S+ for every check\.$/
@@ -120,6 +147,10 @@ export function fullTrigger(trigger: Trigger, link: { source_url?: string; sourc
  */
 export const externalRequested = (store: Pick<Store, 'triggers'>, ticket: Ticket): boolean =>
   ticket.origin.triggerIds.some(id => store.triggers.get(id)?.meta.worker === 'external')
+
+/** An open pull request as the box reads and creates it, with what converting it to a draft needs. */
+const OpenPullSchema = PullSchema.extend({ number: z.number(), node_id: z.string(), draft: z.boolean() })
+const TO_DRAFT = 'mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { clientMutationId } }'
 
 const iso = (ms: number): string => new Date(ms).toISOString()
 /**
@@ -156,6 +187,8 @@ export interface ExternalHost {
   readonly effects: Pick<Effects, 'enqueue' | 'handle'>
   /** Relays a worker's report to the main Session. */
   readonly sessions: Pick<Sessions, 'relay'>
+  /** The GitHub Source's context: the box's GitHub CLI, through which a submit opens the pull request, and the binding to it. */
+  readonly github: SourceContext
   /** The `external` health entry, which reports whether the lease sweep failed. */
   readonly health: HealthEntry
   readonly machine: Pick<Machine, 'workerLeaseMinutes'>
@@ -192,8 +225,14 @@ export class ExternalExecutor implements ExecutorPlugin {
       this.host.effects.enqueue('requeue', ticket.id, { ticketId: ticket.id, assignmentId: assignment.id })
     }
   }
-  /** Deletes the Assignment's lease in the caller's transaction, so every later call with it is refused. */
-  stop(_ticket: Ticket, assignment: Assignment): void { this.host.store.delete(KV.external.lease(assignment.id)) }
+  /**
+   * Deletes the Assignment's lease in the caller's transaction, so every later call with it is refused, and the commits its
+   * holders pushed once the Ticket ended.
+   */
+  stop(ticket: Ticket, assignment: Assignment): void {
+    this.host.store.delete(KV.external.lease(assignment.id))
+    if (ticket.ended) this.host.store.delete(KV.external.pushed(ticket.id))
+  }
   /** Sweeps the leases every tenth of the lease length. */
   install(): void {
     this.timer = setInterval(() => { this.sweep() }, this.leaseMs() / 10)
@@ -231,20 +270,86 @@ export class ExternalExecutor implements ExecutorPlugin {
    * @throws WorkerConflict when the caller does not hold the live lease (see `holder`); UserError as `Engine.report` refuses.
    */
   async report(assignment: string, request: ReportRequest): Promise<ReportView> {
-    const { engine, store, sessions } = this.host
+    const { engine, store } = this.host
     const { lease: _lease, worker: _worker, ack = [], ...report } = request
     const { ticket, lease } = store.atomic(() => {
       const holding = this.holder(assignment, request)
       const renewed = this.renew(assignment, holding.lease)
       if (ack.length) { engine.inputsDelivered(holding.ticket.id, assignment, ack); engine.inputsRead(holding.ticket.id, ack) }
-      const updated = engine.report(holding.ticket.id, report)
-      const relay = reportRelay(updated, report)
-      if (relay) sessions.relay(relay.id, relay.text)
-      return { ticket: updated, lease: renewed }
+      return { ticket: this.record(holding.ticket.id, report), lease: renewed }
     })
     const { attention } = ticket
     return { leaseExpiresAt: lease.expiresAt, ...await this.inputs(ticket),
       ...attention ? { attention: { question: attention.question } } : {} }
+  }
+  /**
+   * Admits one git request of the lease holder before the edge forwards it, in one transaction: renews the lease and, for a
+   * push, appends each new head to the Ticket's `KV.external.pushed`, which a submit checks. Every update must be of the
+   * Ticket's branch. The edge parses the updates from the push itself, so a worker never names a commit here.
+   * @param assignment - The Assignment the lease is on.
+   * @param request - The validated fence.
+   * @returns `ok` and the renewed expiry.
+   * @throws WorkerConflict when the caller does not hold the live lease (see `holder`); `wrong_ref` for an update of another
+   * ref, recording nothing.
+   */
+  fence(assignment: string, request: FenceRequest): FenceView {
+    const { store } = this.host
+    return store.atomic(() => {
+      const { ticket, lease } = this.holder(assignment, request)
+      const updates = request.updates ?? []
+      if (updates.some(update => update.ref !== `refs/heads/${branchOf(ticket)}`)) throw new WorkerConflict('wrong_ref')
+      const renewed = this.renew(assignment, lease)
+      if (updates.length) {
+        const name = KV.external.pushed(ticket.id), heads = updates.map(update => update.new)
+        store.set(name, [...(store.get(name) ?? []).filter(sha => !heads.includes(sha)), ...heads].slice(-PUSHED))
+      }
+      return { ok: true, leaseExpiresAt: renewed.expiresAt }
+    })
+  }
+  /**
+   * Finishes the lease holder's work with the head it pushed: checks that a holder of this Ticket's lease pushed `headSha`
+   * through the worker git route and that it is still the branch head, opens a draft pull request from the branch or turns
+   * the open one back into a draft, then, in one transaction, binds the pull request, records a `ready` report as a local
+   * worker's, relayed to the main Session alike, and releases the lease with the result. The GitHub writes come first, so
+   * one that fails records nothing and the worker submits again. A retry with the same head after the release answers the
+   * stored result.
+   * @param assignment - The Assignment the lease is on.
+   * @param request - The validated submit.
+   * @returns The pull request and the released lease.
+   * @throws WorkerConflict when the caller does not hold the live lease (see `holder`); `paused` while processing is paused
+   * or setup is pending; `head_not_pushed`; `head_moved`. Error for a failed GitHub call, or a pull request from the branch
+   * that the Ticket cannot claim (see `claimPull`).
+   */
+  async submit(assignment: string, request: SubmitRequest): Promise<SubmitView> {
+    const { store, github } = this.host
+    const done = this.lease(assignment)
+    if (done?.id === request.lease && done.worker.key === request.worker.key && done.result?.headSha === request.headSha) {
+      return { pr: done.result.pr, lease: 'released' }
+    }
+    const { ticket } = this.holder(assignment, request)
+    if (this.host.paused()) throw new WorkerConflict('paused')
+    if (!store.get(KV.external.pushed(ticket.id))?.includes(request.headSha)) throw new WorkerConflict('head_not_pushed')
+    const { commands } = github, branch = branchOf(ticket)
+    const head = await commands.api(z.looseObject({ commit: z.looseObject({ sha: z.string() }) }), `branches/${branch}`)
+    if (head.commit.sha !== request.headSha) throw new WorkerConflict('head_moved')
+    const owner = this.host.repository().split('/')[0]
+    const [open] = await commands.api(z.array(OpenPullSchema), `pulls?head=${owner}:${branch}&state=open`)
+    const pull = open ?? await commands.api(OpenPullSchema, 'pulls', '--method', 'POST', '-f', `title=${ticket.title}`,
+      '-f', `body=This is by an automated agent, not a human.\n\n${request.summary}\n\nTicket ${ticket.id}`, '-f', `head=${branch}`,
+      '-f', 'base=main', '-F', 'draft=true')
+    // An unreviewed head must not wait in the approval queue as a ready pull request.
+    if (!pull.draft) await commands.gh(['api', 'graphql', '-f', `query=${TO_DRAFT}`, '-f', `id=${pull.node_id}`])
+    return store.atomic(() => {
+      // The lease may have ended during the GitHub calls.
+      const { lease } = this.holder(assignment, request)
+      const refused = claimPull(github, ticket.id, pull)
+      if (refused) throw new Error(refused)
+      const { lease: _lease, worker: _worker, summary, ...kept } = request
+      this.record(ticket.id, { state: 'ready', summary })
+      const result = { pr: { number: pull.number, url: pull.html_url }, ...kept }
+      store.set(KV.external.lease(assignment), { ...lease, releasedAt: iso(Date.now()), result })
+      return { pr: result.pr, lease: 'released' }
+    })
   }
   /**
    * Ends every expired lease, each in one transaction: deletes it and, unless its worker handed off to a person and no work
@@ -262,6 +367,13 @@ export class ExternalExecutor implements ExecutorPlugin {
   }
 
   private leaseMs(): number { return this.host.machine.workerLeaseMinutes * 60_000 }
+  /** Records a report as a local worker's (see `Engine.report`) and relays it to the main Session alike. */
+  private record(ticketId: string, report: WorkerReport): Ticket {
+    const updated = this.host.engine.report(ticketId, report)
+    const relay = reportRelay(updated, report)
+    if (relay) this.host.sessions.relay(relay.id, relay.text)
+    return updated
+  }
   private lease(assignment: string): Lease | undefined { return this.host.store.get(KV.external.lease(assignment)) }
   /** Writes the lease on `assignment` with a new expiry, one lease length from now. */
   private renew(assignment: string, lease: Omit<Lease, 'renewedAt' | 'expiresAt'>): Lease {

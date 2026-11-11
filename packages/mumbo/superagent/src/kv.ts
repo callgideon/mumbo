@@ -56,9 +56,11 @@ export const KV = {
   feishu: { chats: record<Record<string, boolean>>('feishu-chats'), history: family<string, [chat: string]>('feishu-history:'),
     topics: family<Record<string, string>, [chat: string]>('feishu-history-threads:'),
     seen: family<string[], [thread: string]>('thread-seen:'), initialized: family<boolean, [thread: string]>('thread-initialized:') },
-  /** In Mumbo, the external-worker Executor (`UPSTREAM.md` S13). */
+  /** In Mumbo, the external-worker Executor (`UPSTREAM.md` S13, S14). */
   external: {
     /** The lease on one external Assignment, by Assignment id. */
     lease: family<Lease, [assignment: string]>('external-lease:'),
+    /** The commit SHAs live lease holders of one Ticket pushed through the worker git route, newest last, at most 100. */
+    pushed: family<string[], [ticket: string]>('external-pushed:'),
   },
 }
