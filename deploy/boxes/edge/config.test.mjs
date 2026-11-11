@@ -79,7 +79,7 @@ test('capacity: node_count drives both the node group and the edge cap (24 units
   assert.match(tf('modules/cell/nodes.tf'), /min_size\s*=\s*min\(2, var\.node_count\)/)
   assert.match(tf('modules/cell/nodes.tf'), /termination_policies\s*=\s*\["OldestLaunchTemplate", "OldestInstance"\]/)
   assert.match(tf('modules/cell/nodes.tf'), /enabled_metrics\s*=\s*\["GroupInServiceInstances"/)
-  assert.match(tf('ops.tf'), /nodes-below-min = \{[^\n]*threshold = var\.node_count/)
+  assert.match(tf('modules/cell/alarms.tf'), /nodes-below-min = \{[^\n]*threshold = var\.node_count/)
   assert.match(tf('modules/edge/edge.tf'), /MAX_RUNNING_BOXES\s*=\s*tostring\(12 \* var\.node_count - 2\)/)
   assert.match(tf('modules/cell/nodes.tf'), /desired_capacity\s*=\s*var\.node_count/)
   assert.doesNotMatch(tf('modules/cell/nodes.tf'), /ignore_changes\s*=\s*\[desired_capacity\]/)
