@@ -163,11 +163,13 @@ if [ -n "$person" ]; then
 fi
 
 # Uploads through the real browser consent (--with-uploads, person box): the script serves a page on 127.0.0.1:8790 that
-# reports the SHA-256 of each file uploaded to it, puts the files below in Downloads as agent, and waits up to 10 minutes
-# while the operator has the assistant upload them there in order (RUNBOOK). When consent has staged its copy of
-# mumbo-escape-swap.txt (the ask is up), agent swaps the Downloads file: the page must get the content consent staged.
-# The nested file, the FIFO and the file over consent's default uploadMaxBytes (512 MiB; the edge sets none) must be
-# refused before anything is staged; mumbo-escape-done.txt ends the wait.
+# reads each file uploaded to it 3 s after it is set, as a form submitted on a later click or a chunked upload reads it,
+# and reports its SHA-256, or that it could not read it. The script puts the files below in Downloads as agent and waits
+# up to 10 minutes while the operator has the assistant upload them there in order, in one turn (RUNBOOK). When consent
+# has staged its copy of mumbo-escape-swap.txt (the ask is up), agent swaps the Downloads file: the page must get the
+# content consent staged. The nested file, the FIFO and the file over consent's default uploadMaxBytes (512 MiB; the edge
+# sets none) must be refused before anything is staged, with no reader left blocked opening the FIFO;
+# mumbo-escape-done.txt ends the wait. Once the turn has ended, within 2 minutes, the staging directory must be empty.
 D=/home/shared/Downloads
 if [ -z "$person" ]; then
   :
@@ -184,12 +186,16 @@ else
 <pre id="out"></pre>
 <script>
 const input = document.querySelector('input'), out = document.querySelector('#out')
-input.onchange = async () => {
-  for (const f of input.files) {
-    const hex = [...new Uint8Array(await crypto.subtle.digest('SHA-256', await f.arrayBuffer()))].map(b => b.toString(16).padStart(2, '0')).join('')
-    out.textContent += f.name + ' ' + hex + '\n'
-    await fetch('/report', { method: 'POST', body: f.name + ' ' + hex })
-  }
+const hex = async (f) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', await f.arrayBuffer()))].map(b => b.toString(16).padStart(2, '0')).join('')
+input.onchange = () => {
+  const files = [...input.files]
+  setTimeout(async () => {
+    for (const f of files) {
+      const line = f.name + ' ' + await hex(f).catch(() => 'unreadable')
+      out.textContent += line + '\n'
+      await fetch('/report', { method: 'POST', body: line })
+    }
+  }, 3000)
 }
 </script>
 HTML
@@ -213,24 +219,31 @@ HTML
     done
     got=$(grep -s '^mumbo-escape-swap.txt ' "$t/reports" | head -n 1 | cut -d' ' -f2)
     if [ -z "$swapped" ]; then say FAIL upload-swap 'consent staged no copy of mumbo-escape-swap.txt'
-    elif [ "$got" = "$A" ]; then say PASS upload-swap 'agent swapped the Downloads file during the ask; the page got what consent staged'
+    elif [ "$got" = "$A" ]; then say PASS upload-swap 'agent swapped the Downloads file during the ask; the page, reading it 3 s after the call, got what consent staged'
+    elif [ "$got" = unreadable ]; then say FAIL upload-swap 'the page could not read the file 3 s after the call: consent removed its staged copy before the page read it'
     else say FAIL upload-swap "agent swapped the Downloads file during the ask; the page got ${got:-nothing}, not $A"; fi
     manual upload-swap-ask "the ask for mumbo-escape-swap.txt must have shown $(printf %.12s "$A")"
-    # refusal ID NAME WHAT: PASS when the wait ended and consent neither staged nor the page got NAME.
+    # refusal ID NAME WHAT: PASS when the wait ended and consent neither staged nor the page got NAME; the MANUAL line
+    # after each confirms the refusal itself.
     refusal() {
       if ! grep -qs '^mumbo-escape-done.txt ' "$t/reports"; then say FAIL "$1" "$3: the page got no mumbo-escape-done.txt within 10 minutes (not uploaded, or consent hung)"
       elif case "$staged" in *" $2"*) true;; *) false;; esac || grep -qs "^$2 " "$t/reports"; then say FAIL "$1" "$3: consent staged or uploaded it"
-      else say PASS "$1" "$3: refused, nothing staged"; fi
+      else say PASS "$1" "$3: nothing staged or uploaded"; fi
     }
     refusal upload-nested mumbo-escape-nested.txt 'a file in a subdirectory of Downloads'
-    refusal upload-fifo mumbo-escape-fifo 'a FIFO in Downloads'
+    manual upload-nested-refused 'the call for mumbo-escape-dir/mumbo-escape-nested.txt must have returned at once, with no ask, the refusal to put the file directly in /home/shared/Downloads and retry'
+    # A writer opens the FIFO at once only while a reader is blocked opening it, and so releases that reader.
+    if as agent "test -p $D/mumbo-escape-fifo && timeout 2 sh -c ': > $D/mumbo-escape-fifo'"; then say FAIL upload-fifo 'a FIFO in Downloads: consent is blocked opening it'
+    else refusal upload-fifo mumbo-escape-fifo 'a FIFO in Downloads'; fi
+    manual upload-fifo-refused 'the call for mumbo-escape-fifo must have returned at once, with no ask, a refusal because it is not a regular file'
     refusal upload-over-cap mumbo-escape-big 'a file over uploadMaxBytes'
-    for i in $(seq 50); do [ -z "$(find $S -mindepth 1 2>/dev/null | head -n 1)" ] && break; sleep 0.2; done
-    if [ -z "$(find $S -mindepth 1 2>/dev/null | head -n 1)" ]; then say PASS upload-staging-empty "consent left nothing in $S after its calls"; else say FAIL upload-staging-empty "consent left $(find $S -mindepth 1 | head -n 3 | tr '\n' ' ')in $S"; fi
+    manual upload-over-cap-refused 'the call for mumbo-escape-big must have returned at once, with no ask, a refusal because it is over uploadMaxBytes'
+    end=$(($(date +%s) + 120))
+    while [ -n "$(find $S -mindepth 1 2>/dev/null | head -n 1)" ] && [ "$(date +%s)" -lt $end ]; do sleep 0.2; done
+    if [ -z "$(find $S -mindepth 1 2>/dev/null | head -n 1)" ]; then say PASS upload-staging-empty "consent left nothing in $S once the turn ended"; else say FAIL upload-staging-empty "consent left $(find $S -mindepth 1 | head -n 3 | tr '\n' ' ')in $S 2 minutes after mumbo-escape-done.txt"; fi
   fi
   kill "$page" 2>/dev/null
-  # A writer releases a consent blocked opening the FIFO; then agent removes its files.
-  as agent "timeout 2 sh -c ': > $D/mumbo-escape-fifo'; rm -rf $D/mumbo-escape-swap.txt $D/.mumbo-escape-swap $D/mumbo-escape-dir $D/mumbo-escape-fifo $D/mumbo-escape-big $D/mumbo-escape-done.txt"
+  as agent "rm -rf $D/mumbo-escape-swap.txt $D/.mumbo-escape-swap $D/mumbo-escape-dir $D/mumbo-escape-fifo $D/mumbo-escape-big $D/mumbo-escape-done.txt"
   rm -rf "$t"
 fi
 

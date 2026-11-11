@@ -4,10 +4,13 @@
 // iptables, and only those and the real tools they need on PATH. The escape-test script's check list.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { execFileSync, spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openAsBlob, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { setTimeout as sleep } from 'node:timers/promises'
+import { runInNewContext } from 'node:vm'
 import { startScript, boxSite, containmentRows, containmentLayout, ENVD_PORT, MUMBO_MCP_PORT } from './edge.mjs'
 import { BOX_STEPS, PROJECT_STEPS, KASMVNC_BIND_STEP, kasmvncStep, usersSteps } from './template.mjs'
 
@@ -384,7 +387,8 @@ test('escape-test.sh parses under sh and runs every escape test the B24 brief na
     // the display, computer use, uploads
     'agent-x-cookie', 'agent-x-display', 'xsession-login-data', 'computer-use-terminal', 'upload-outside-downloads',
     // consent's staged upload copies, and uploads through the real consent (the uploads contract of 2026-11-11)
-    'agent-list-uploads', 'agent-read-uploads', 'upload-swap', 'upload-swap-ask', 'upload-nested', 'upload-fifo', 'upload-over-cap', 'upload-staging-empty',
+    'agent-list-uploads', 'agent-read-uploads', 'upload-swap', 'upload-swap-ask', 'upload-nested', 'upload-nested-refused', 'upload-fifo', 'upload-fifo-refused',
+    'upload-over-cap', 'upload-over-cap-refused', 'upload-staging-empty',
     // the workspace and the person's MCP servers
     'mcpserver-workspace', 'mcpserver-node-modules', 'browsermcp-connect-cdp',
     // tunnels through the project box's GitHub proxy
@@ -399,6 +403,76 @@ test('escape-test.sh parses under sh and runs every escape test the B24 brief na
   assert.ok(text.includes('for h in 127.0.0.1 "$ip"; do') && text.includes('for t in "cdp 9222" "vnc 5900" "vnc 5901" "dsh $DSH_PORT" "live $LIVE_PORT" "door $DOOR_PORT"; do'))
   assert.ok(text.includes('USERS="agent mcpserver"; [ -z "$person" ] || USERS="$USERS browsermcp desktop xsession browser"\nuser user && USERS="$USERS user"'))
   assert.ok(text.includes(`DOOR_PORT=${MUMBO_MCP_PORT} ENVD_PORT=${ENVD_PORT}`) && text.includes('for u in root $USERS; do denied "envd-$u"'))
+})
+
+/** escape-test.sh's uploads through consent (--with-uploads), with Downloads, the staging directory and the page's port
+ *  moved and its 3 s read delay cut to 0.3 s. The test plays consent, which stages a copy of each upload it allows, and
+ *  Chrome, which runs the served page's script on a file-backed File of that copy; agent is the test's user. Returns each
+ *  upload check's status and the FAIL lines. */
+async function escapeUploads({ deleteAfterCall, blockOnFifo }) {
+  const text = readFileSync(new URL('./escape-test.sh', import.meta.url), 'utf8')
+  const t = mkdtempSync(join(tmpdir(), 'escape-uploads-'))
+  const D = join(t, 'Downloads'), S = join(t, 'uploads')
+  let sh, reader
+  try {
+    for (const d of [D, S, join(t, 'bin')]) mkdirSync(d)
+    writeFileSync(join(t, 'consent.ts'), 'uploadStaging')
+    writeFileSync(join(t, 'bin/su'), '#!/bin/sh\nexec /bin/sh -c "$5"\n')
+    chmodSync(join(t, 'bin/su'), 0o755)
+    const port = await new Promise(r => { const v = createServer().listen(0, '127.0.0.1', () => { const { port } = v.address(); v.close(() => r(port)) }) })
+    const helpers = text.split('\n').filter(l => /^(say|as|manual)\(\) /.test(l)).join('\n')
+    const block = text.slice(text.indexOf('D=/home/shared/Downloads\n'), text.indexOf('# Restore:')).replaceAll('/home/shared/Downloads', D)
+      .replaceAll('/src/packages/mumbo/browser-consent/src/index.ts', join(t, 'consent.ts')).replaceAll('8790', String(port)).replace('}, 3000)', '}, 300)')
+    sh = spawn('/bin/sh', ['-c', `set -u\nfails=0 person=1 uploads=1 S=${S}\n${helpers}\n${block}`], { env: { ...process.env, PATH: `${join(t, 'bin')}:${process.env.PATH}` } })
+    let out = ''
+    sh.stdout.on('data', (c) => { out += c })
+    const exited = new Promise(r => sh.on('close', r))
+    const until = async (f) => { while (!f()) await sleep(50) }
+    await until(() => existsSync(join(D, 'mumbo-escape-done.txt')))
+    const input = {}
+    const html = await (await fetch(`http://127.0.0.1:${port}/`)).text()
+    runInNewContext(html.match(/<script>([^]*)<\/script>/)[1], { document: { querySelector: (q) => q === 'input' ? input : { textContent: '' } }, crypto, setTimeout, fetch: (u, o) => fetch(`http://127.0.0.1:${port}${u}`, o) })
+    const upload = async (name, n, swapped = () => true) => {
+      mkdirSync(join(S, n))
+      copyFileSync(join(D, name), join(S, n, name))
+      await until(swapped)
+      input.files = [new File([await openAsBlob(join(S, n, name))], name)]
+      input.onchange()
+      if (deleteAfterCall) rmSync(join(S, n), { recursive: true })
+    }
+    await upload('mumbo-escape-swap.txt', 'n1', () => readFileSync(join(D, 'mumbo-escape-swap.txt'), 'utf8') === 'swapped')
+    if (blockOnFifo) reader = spawn('cat', [join(D, 'mumbo-escape-fifo')], { stdio: 'ignore' })
+    await upload('mumbo-escape-done.txt', 'n2')
+    // The turn ends once the script has its verdicts on the calls.
+    await until(() => out.includes(' upload-swap '))
+    rmSync(join(S, 'n1'), { recursive: true, force: true })
+    rmSync(join(S, 'n2'), { recursive: true, force: true })
+    await exited
+    if (reader) await new Promise(r => reader.exitCode === null ? reader.on('close', r) : r())
+    const lines = out.trim().split('\n').map(l => l.split(' '))
+    return { status: Object.fromEntries(lines.map(([s, id]) => [id, s])), fails: lines.filter(([s]) => s === 'FAIL').map(l => l.slice(1).join(' ')) }
+  } finally {
+    sh?.kill()
+    reader?.kill()
+    rmSync(t, { recursive: true, force: true })
+  }
+}
+
+const UPLOAD_CHECKS = { 'upload-swap': 'PASS', 'upload-swap-ask': 'MANUAL', 'upload-nested': 'PASS', 'upload-nested-refused': 'MANUAL', 'upload-fifo': 'PASS',
+  'upload-fifo-refused': 'MANUAL', 'upload-over-cap': 'PASS', 'upload-over-cap-refused': 'MANUAL', 'upload-staging-empty': 'PASS' }
+
+test('escape-test.sh --with-uploads passes a consent that keeps its copies until the turn ends, after the page has read them', async () => {
+  assert.deepEqual(await escapeUploads({ deleteAfterCall: false, blockOnFifo: false }), { status: UPLOAD_CHECKS, fails: [] })
+})
+
+test('escape-test.sh --with-uploads fails a consent that deletes its copy before the page reads it, or that is blocked opening the FIFO', async () => {
+  assert.deepEqual(await escapeUploads({ deleteAfterCall: true, blockOnFifo: true }), {
+    status: { ...UPLOAD_CHECKS, 'upload-swap': 'FAIL', 'upload-fifo': 'FAIL' },
+    fails: [
+      'upload-swap the page could not read the file 3 s after the call: consent removed its staged copy before the page read it',
+      'upload-fifo a FIFO in Downloads: consent is blocked opening it',
+    ],
+  })
 })
 
 test('template: containment\'s users and groups, homes 0700 with the run-as TMPDIRs, the ACL check, no empty password, the ports marker', () => {
