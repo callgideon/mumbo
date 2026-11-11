@@ -102,7 +102,7 @@ export const usersSteps = (person) => {
 const NFT_PROBE_PORT = 47999
 /** The template step, last, after the users exist, that fails the build unless this kernel enforces the kind of rule the
  *  start script's nftables firewall is made of (edge hardening): it loads the probe table `inet mumbo_probe`, whose output
- *  chain resets a TCP connection to NFT_PROBE_PORT from every user but root (`meta skuid != 0`), runs a listener on
+ *  chain accepts root's TCP connections to NFT_PROBE_PORT (`meta skuid 0`) and resets every other one, runs a listener on
  *  127.0.0.1 there as root with node (the image's runtime), and requires that root connects and that agent is refused
  *  (ECONNREFUSED). It deletes the table and stops the listener before it checks, and a table it cannot delete fails the
  *  build too, so neither reaches the template. A subshell: e2b's runCmd joins the steps with `&&`, which then carries the
@@ -111,9 +111,9 @@ export const NFT_SMOKE_STEP = `(${[
   `N=$(command -v node) || { echo 'mumbo-box: the nftables smoke check needs node' >&2; exit 1; }`,
   `C='const s=require("net").connect(${NFT_PROBE_PORT},"127.0.0.1");s.on("connect",()=>process.exit(0));s.on("error",e=>process.exit(e.code==="ECONNREFUSED"?3:1));setTimeout(()=>process.exit(2),5000)'`,
   'export N C',
-  `nft 'table inet mumbo_probe { chain output { type filter hook output priority 0; policy accept; meta skuid != 0 tcp dport ${NFT_PROBE_PORT} reject with tcp reset; }; }' || { echo 'mumbo-box: nft cannot load the probe table inet mumbo_probe' >&2; exit 1; }`,
+  `nft 'table inet mumbo_probe { chain output { type filter hook output priority 0; policy accept; tcp dport ${NFT_PROBE_PORT} meta skuid 0 accept; tcp dport ${NFT_PROBE_PORT} reject with tcp reset; }; }' || { echo 'mumbo-box: nft cannot load the probe table inet mumbo_probe' >&2; exit 1; }`,
   `"$N" -e 'require("net").createServer(s=>s.end()).listen(${NFT_PROBE_PORT},"127.0.0.1")' </dev/null >/dev/null 2>&1 & l=$!`,
-  'r=1; for i in 1 2 3 4 5 6 7 8 9 10; do "$N" -e "$C" && { r=0; break; }; sleep 1; done',
+  'r=1; for i in 1 2 3 4 5 6 7 8 9 10; do "$N" -e "$C" && { r=0; break; } || r=$?; sleep 1; done',
   `a=0; su -s /bin/sh agent -c '"$N" -e "$C"' </dev/null || a=$?`,
   'kill $l 2>/dev/null || :; wait $l 2>/dev/null || :',
   `nft delete table inet mumbo_probe || { echo 'mumbo-box: nft could not delete the probe table inet mumbo_probe' >&2; exit 1; }`,

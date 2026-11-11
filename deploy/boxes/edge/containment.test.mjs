@@ -165,8 +165,9 @@ table inet mumbo {
   chain output {
     type filter hook output priority 0; policy accept;
     tcp flags & (fin|syn|rst|ack) == syn tcp dport ${ENVD_PORT} reject with tcp reset
-    tcp flags & (fin|syn|rst|ack) == syn tcp dport { 880, 881, ${MUMBO_MCP_PORT}, 5900-5999 } meta skuid != 0 reject with tcp reset
-    tcp flags & (fin|syn|rst|ack) == syn tcp dport 9222 meta skuid != ${cdp} reject with tcp reset
+    tcp flags & (fin|syn|rst|ack) == syn tcp dport 9222 meta skuid ${cdp} accept
+    tcp flags & (fin|syn|rst|ack) == syn tcp dport { 880, 881, ${MUMBO_MCP_PORT}, 5900-5999 } meta skuid 0 accept
+    tcp flags & (fin|syn|rst|ack) == syn tcp dport { 880, 881, ${MUMBO_MCP_PORT}, 5900-5999, 9222 } reject with tcp reset
   }
   chain input {
     type filter hook input priority 0; policy accept;
@@ -327,12 +328,13 @@ test('the B24 template\'s kernel and network part: port floor, link protections 
   assert.deepEqual([h.sysctls, h.mount, h.setuid], [['1024\n', '1\n', '1\n'], ['-o remount,hidepid=2 /proc'], [0o755, 0o755]])
   // One inet table (IPv4 and IPv6), replaced whole: every process, root's dsh included, is refused E2B's envd, which runs
   // commands as root; every user but root dsh, the live view, the door and VNC; every user but root and browsermcp
-  // (1002) the debugging port. The debugging, VNC and WebRTC ports stay box-local.
+  // (1002) the debugging port. The allowed users are accepted first and the rest reset, so a socket whose user nft cannot
+  // read is refused. The debugging, VNC and WebRTC ports stay box-local.
   assertFirewall(h, '{ 0, 1002 }')
   // A project box has no browsermcp: only root reaches the debugging port.
   assertFirewall(hardening(script(c, false), { users: false }), '0')
   // Mutations: each port the rules name, taken out of the script, fails the check.
-  for (const [from, to] of [[`dport ${ENVD_PORT} `, 'dport '], ['{ $DSH_PORT, ', '{ '], [' $LIVE_PORT, ', ' '], [`, ${MUMBO_MCP_PORT}, `, ', '], [', 5900-5999 } meta', ' } meta'], ['dport 9222 meta', 'dport meta'], ['{ 9222, 5900-5999 } drop', '{ 9222 } drop'], ['udp dport $LIVE_PORT', 'udp dport 0']]) {
+  for (const [from, to] of [[`dport ${ENVD_PORT} `, 'dport '], ['{ $DSH_PORT, ', '{ '], [' $LIVE_PORT, ', ' '], [`, ${MUMBO_MCP_PORT}, `, ', '], [', 5900-5999 } meta', ' } meta'], ['dport 9222 meta', 'dport meta'], [', 9222 } reject', ' } reject'], ['{ 9222, 5900-5999 } drop', '{ 9222 } drop'], ['udp dport $LIVE_PORT', 'udp dport 0']]) {
     const mutant = s.replace(from, to)
     assert.notEqual(mutant, s, from)
     assert.throws(() => assertFirewall(hardening(mutant), '{ 0, 1002 }'), assert.AssertionError, from)
@@ -484,7 +486,7 @@ test('template: the nftables smoke check passes only when root connects and agen
   const ok = run()
   assert.equal(ok.code, 0, ok.err)
   assert.deepEqual(ok.steps, [
-    'nft table inet mumbo_probe { chain output { type filter hook output priority 0; policy accept; meta skuid != 0 tcp dport 47999 reject with tcp reset; }; }',
+    'nft table inet mumbo_probe { chain output { type filter hook output priority 0; policy accept; tcp dport 47999 meta skuid 0 accept; tcp dport 47999 reject with tcp reset; }; }',
     'listen require("net").createServer(s=>s.end()).listen(47999,"127.0.0.1")',
     'su -s /bin/sh agent -c "$N" -e "$C"',
     'nft delete table inet mumbo_probe',
@@ -492,7 +494,7 @@ test('template: the nftables smoke check passes only when root connects and agen
   assert.equal(ok.listener, false)
   const failed = 'mumbo-box: the nftables smoke check failed'
   // Agent connects, or fails some other way than a refusal; root cannot connect.
-  for (const [opts, err] of [[{ agent: 0 }, `${failed}: root's connection ended with 0 and agent's with 0, not 0 and 3 (refused)\n`], [{ agent: 1 }, `${failed}: root's connection ended with 0 and agent's with 1, not 0 and 3 (refused)\n`], [{ root: 3 }, `${failed}: root's connection ended with 1 and agent's with 3, not 0 and 3 (refused)\n`]]) {
+  for (const [opts, err] of [[{ agent: 0 }, `${failed}: root's connection ended with 0 and agent's with 0, not 0 and 3 (refused)\n`], [{ agent: 1 }, `${failed}: root's connection ended with 0 and agent's with 1, not 0 and 3 (refused)\n`], [{ root: 3 }, `${failed}: root's connection ended with 3 and agent's with 3, not 0 and 3 (refused)\n`], [{ root: 2 }, `${failed}: root's connection ended with 2 and agent's with 3, not 0 and 3 (refused)\n`]]) {
     const out = run(opts)
     assert.deepEqual([out.code, out.err, out.steps.at(-1), out.listener], [1, err, 'nft delete table inet mumbo_probe', false])
   }

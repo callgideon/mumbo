@@ -26,8 +26,9 @@ test('a user box start script is byte-for-byte what it was before project boxes 
   // desktop.test.mjs, welcome.test.mjs, ports.test.mjs).
   // Then the B24 template's firewall became one native nftables table (inet mumbo, root-only file, loaded with nft -f
   // and checked), in place of the iptables OUTPUT rules and the desktop's INPUT rules, because E2B's kernel has no
-  // xt_owner; the iptables helper is best effort, for a template before B24 only.
-  assert.equal(createHash('sha256').update(s).digest('hex'), '4377814d88d4fc05cfa5917a2db6fe23323ec7a91fa1d86c8b8d724c1e19366c')
+  // xt_owner; the iptables helper is best effort, for a template before B24 only. Then its output chain accepted the
+  // allowed users first and reset the rest, so a socket whose user nft cannot read is refused.
+  assert.equal(createHash('sha256').update(s).digest('hex'), '49c4e49059cdceb02f59dd35414a2a3a7903aa5f5ff538fe9d0c982500e86157')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -38,8 +39,9 @@ test('a project box start script is byte-for-byte what it was before B18 changed
   // /usr/local/lib/mumbo/bin (on dsh's PATH, linked from /root/.mumbo/bin/gh), and the GitHub proxy as ghproxy on the
   // B24 template. Then for the B24 template's firewall as one native nftables table (inet mumbo, loaded with nft -f and
   // checked) in place of the iptables OUTPUT rules, because E2B's kernel has no xt_owner, and the iptables helper best
-  // effort, for a template before B24 only.
-  assert.equal(createHash('sha256').update(s).digest('hex'), '47c2d381049d5774656de7f58a88e692f675677dde173799481420d89c484926')
+  // effort, for a template before B24 only. Then its output chain accepted the allowed users first and reset the rest, so
+  // a socket whose user nft cannot read is refused.
+  assert.equal(createHash('sha256').update(s).digest('hex'), 'e190fe162945e4e6227719d6435ae03dff7ae155f180a0d12e811d7b3a954568')
 })
 
 const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'
