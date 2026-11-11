@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { key, type Ticket } from '../src/core/index.ts'
 import { KV } from '../src/kv.ts'
 import type { ClaimView, Lease, ReportView } from '../src/mumbo/external.ts'
+import { ciSummary } from '../src/sources/github-read.ts'
 import { ciTrigger } from '../src/sources/github-trigger.ts'
 import { RELAY_PATH, registerRelay, relayTrigger } from '../src/sources/relay.ts'
 import { startRuntime, type Host } from './fixtures/host.ts'
@@ -135,7 +136,7 @@ describe('claim', () => {
     expect(await claim()).toEqual(refused(409, 'lease_released'))
   })
 
-  it('refuses a local Ticket, a leased one with any key, a released one, one waiting for a person and an unknown one, and every claim while paused', async () => {
+  it('refuses a local Ticket, a leased one with any key, a released one and an unknown one, and every claim while paused', async () => {
     const local = await requested('m1', false)
     expect(local.executor).toBeUndefined()
     expect(await claim({ ticket: local.id })).toEqual(refused(409, 'not_claimable'))
@@ -147,12 +148,6 @@ describe('claim', () => {
     }
     release(view.assignment)
     expect(await claim({ ticket: ticket.id, request: 'r2' })).toEqual(refused(409, 'not_claimable'))
-    // A pending Assignment whose Ticket waits for a person after a failed report.
-    const waiting = stored((await requested('m3')).id)
-    waiting.assignments[0]!.report = { state: 'failed', summary: 'Cannot start', at: new Date().toISOString() }
-    store().tickets.save(waiting)
-    expect(await claim({ ticket: waiting.id, request: 'r4' })).toEqual(refused(409, 'not_claimable'))
-    expect(await claim({ request: 'r4' })).toEqual(refused(409, 'nothing_queued'))
     expect(await claim({ ticket: 'f'.repeat(32), request: 'r4' })).toEqual(refused(404, 'not_found'))
     await requested('m4')
     await host.runtime.settings.pause(true, 'panel')
@@ -211,12 +206,21 @@ describe('report', () => {
     expect(await report(view)).toEqual(refused(409, 'assignment_ended'))
   })
 
-  it('ends the Ticket on a dropped report, and its lease with it', async () => {
+  it('ends the Ticket on a dropped report, and its lease with it; a person\'s message resumes it for a worker outside the box', async () => {
     const ticket = await requested('m1')
     const view = await claimed()
     expect((await report(view, { state: 'dropped', summary: 'Already fixed upstream' })).body).toMatchObject({ inputs: [], more: 0 })
     expect(stored(ticket.id).ended).toMatchObject({ outcome: 'dropped' })
     expect(lease(view.assignment)).toBeUndefined()
+    await relay(message('m2', 'context', 'Also the footer', { thread: 'm1' }))
+    expect(assignments(ticket.id)).toEqual([['ended', undefined], ['pending', undefined]])
+    const resumed = await claimed({ request: 'r2' })
+    expect(inputText(resumed)[0]).toBe('This ticket ended earlier and the message that follows, on its thread, resumed it under the same '
+      + `mandate. If it asks for more within the original scope, fetch \`agent/${ticket.execution!.name}\`, inspect what is pushed and the PR, `
+      + 'continue, and finish with task_submit; if it asks for work beyond that scope or for another ticket, report dropped with task_report '
+      + 'without acknowledging the message, so it is routed again; if it needs nothing, such as thanks, report dropped. Do not repeat completed work.')
+    expect(JSON.parse(inputText(resumed)[1]!).text).toBe('Also the footer')
+    expect(JSON.stringify(resumed)).not.toMatch(/orchestrator_|"(read|chars|source_url_read)"/)
   })
 })
 
@@ -240,6 +244,29 @@ describe('expiry', () => {
       + 'and continue; do not repeat finished outside actions.')
   })
 
+  it('sweeps before a claim, so a claim of a Ticket whose lease expired since the last sweep takes its new Assignment', async () => {
+    const ticket = await requested('m1')
+    const view = await claimed()
+    later(21)
+    const next = await claimed({ ticket: ticket.id, request: 'r2' })
+    expect(next).toMatchObject({ attempt: 2, assignment: stored(ticket.id).assignments[1]!.id })
+    expect(next.lease).not.toBe(view.lease)
+  })
+
+  it('replaces a handed-off Assignment whose lease expired while a person\'s message waits, with the message and the lease note', async () => {
+    const ticket = await requested('m1')
+    const view = await claimed()
+    await report(view, { question: 'Which button?' })
+    await relay(message('m2', 'context', 'The blue one', { thread: 'm1' }))
+    expect(assignments(ticket.id)).toEqual([['running', undefined]])
+    later(21)
+    host.runtime.external.sweep()
+    expect(assignments(ticket.id)).toEqual([['ended', 'leaseExpired'], ['pending', undefined]])
+    const next = await claimed({ request: 'r2' })
+    expect(JSON.parse(inputText(next)[0]!).text).toBe('The blue one')
+    expect(inputText(next)[1]).toContain('The previous worker\'s lease expired.')
+  })
+
   it('keeps a handed-off Assignment running without a lease, which a claim of its Ticket takes under a new lease, and brings the person\'s answer to the next report', async () => {
     const ticket = await requested('m1')
     const view = await claimed()
@@ -257,21 +284,24 @@ describe('expiry', () => {
     expect(answer.inputs.map(item => JSON.parse(item.text))).toMatchObject([{ text: 'The blue one' }])
   })
 
-  it('keeps a blocked Assignment whose lease expired for any claim, and queues its Ticket again once a person\'s message waits', async () => {
+  it('keeps a blocked Assignment whose lease expired for a claim of its Ticket, which a claim without one passes over, and queues the Ticket again once a person\'s message waits', async () => {
     const ticket = await requested('m1')
     const view = await claimed()
     await report(view, { state: 'blocked', summary: 'Which database?' })
+    const queued = await requested('m3')
     later(21)
     host.runtime.external.sweep()
     expect([lease(view.assignment), assignments(ticket.id)]).toEqual([undefined, [['running', undefined]]])
-    const again = await claimed({ request: 'r2' })
+    expect(await claimed({ request: 'r2' })).toMatchObject({ ticket: queued.id })
+    expect(await claim({ request: 'r3' })).toEqual(refused(409, 'nothing_queued'))
+    const again = await claimed({ ticket: ticket.id, request: 'r3' })
     expect(again).toMatchObject({ ticket: ticket.id, assignment: view.assignment, attempt: 1 })
     expect(again.lease).not.toBe(view.lease)
     later(21)
     host.runtime.external.sweep()
     await relay(message('m2', 'context', 'Postgres', { thread: 'm1' }))
     expect(assignments(ticket.id)).toEqual([['ended', 'workerLeft'], ['pending', undefined]])
-    const next = await claimed({ request: 'r3' })
+    const next = await claimed({ request: 'r4' })
     expect(inputText(next)[0]).toContain('Postgres')
     expect(inputText(next)[1]).toContain('new work waits')
   })
@@ -315,7 +345,11 @@ describe('requeue', () => {
     const ticket = await requested('m1')
     host.runtime.engine.bindThread(ticket.id, { source: 'github', id: '7' }, true)
     const pr = { number: 7, html_url: 'https://github.com/acme/widgets/pull/7', user: { login: 'agent-bot' } }
-    const ci = async (revision: number, failed: boolean) => { host.runtime.receive(ciTrigger(pr, revision, `CI ${revision}`, failed)); await host.runtime.idle() }
+    const ci = async (revision: number, failed: boolean) => {
+      const checks = [{ name: 'test', status: 'completed', conclusion: failed ? 'failure' : 'success' }]
+      host.runtime.receive(ciTrigger(pr, revision, ciSummary({ head: 'abc1234', checks, statuses: [] }, 'PR #7', 'github/pulls/7/checks'), failed))
+      await host.runtime.idle()
+    }
     let view = await claimed()
     await settled(view)
     await ci(1, false)
@@ -323,7 +357,10 @@ describe('requeue', () => {
     await ci(2, true)
     expect(assignments(ticket.id)).toEqual([['ended', 'workerLeft'], ['pending', undefined]])
     view = await claimed({ request: 'r2' })
-    expect(inputText(view).slice(0, 2).map(text => JSON.parse(text).text)).toEqual(['CI 1', 'CI 2'])
+    // The CI text names the failed checks, without the in-box resource of every check.
+    expect(inputText(view).slice(0, 2).map(text => JSON.parse(text).text)).toEqual(['CI passed 1/1 on PR #7 at abc1234',
+      'CI failed 1/1 on PR #7 at abc1234: test'])
+    expect(JSON.stringify(view)).not.toMatch(/github\/pulls|"(read|chars|source_url_read)"/)
     expect(inputText(view)[2]).toContain('new work waits')
     await settled(view)
     await relay(message('m2', 'context', 'One more thing', { thread: 'm1' }))
@@ -338,6 +375,25 @@ describe('requeue', () => {
     store().atomic(() => { host.runtime.external.deliver(stored(ticket.id), stored(ticket.id).assignments.at(-1)!) })
     await host.runtime.idle()
     expect(assignments(ticket.id).map(([state]) => state)).toEqual(['ended', 'ended', 'ended', 'pending'])
+  })
+
+  it('does not queue a released Ticket again for an Input its worker received before the release without acknowledging it', async () => {
+    const ticket = await requested('m1')
+    host.runtime.engine.bindThread(ticket.id, { source: 'github', id: '7' }, true)
+    const pr = { number: 7, html_url: 'https://github.com/acme/widgets/pull/7', user: { login: 'agent-bot' } }
+    await relay(message('m2', 'context', 'Also the footer', { thread: 'm1' }))
+    const view = await claimed()
+    expect(inputText(view)).toHaveLength(1)
+    later(1)
+    release(view.assignment)
+    host.runtime.receive(ciTrigger(pr, 1, 'CI running', false))
+    await host.runtime.idle()
+    expect(assignments(ticket.id)).toEqual([['running', undefined]])
+    // A red CI result after the release queues the Ticket, and the unacknowledged message goes with it.
+    host.runtime.receive(ciTrigger(pr, 2, 'CI failed', true))
+    await host.runtime.idle()
+    expect(assignments(ticket.id)).toEqual([['ended', 'workerLeft'], ['pending', undefined]])
+    expect(JSON.parse(inputText(await claimed({ request: 'r2' }))[0]!).text).toBe('Also the footer')
   })
 
   it('leaves a Ticket alone when its queued requeue runs after a worker holds it again, or once nothing waits', async () => {

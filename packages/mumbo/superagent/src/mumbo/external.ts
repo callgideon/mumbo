@@ -23,7 +23,7 @@ const INPUTS = 20
 const REFUSALS = {
   paused: 'Processing is paused or setup is not finished; claim again later',
   nothing_queued: 'No external Ticket waits for a worker',
-  not_claimable: 'The Ticket is not open to an external worker: it is local, ended, waits for a person, or its result was submitted',
+  not_claimable: 'The Ticket is not open to an external worker: it is local, ended, or its result was submitted',
   already_claimed: 'Another worker holds the lease on this Ticket',
   lease_expired: 'Your lease ended; nothing was recorded. Claim the Ticket again by its id and resend',
   lease_released: 'This lease was released when its result was submitted',
@@ -97,8 +97,11 @@ export interface ClaimView {
 /** The answer to a report: the renewed expiry, the first undelivered Inputs, and the Ticket's open question for a person. */
 export interface ReportView { leaseExpiresAt: string; inputs: WorkerInput[]; more: number; attention?: { question: string } }
 
+/** The last line of a CI Trigger's text (`ciSummary`), which names the in-box resource of every check. */
+const CHECKS_LINE = /\nRead \S+ for every check\.$/
 /**
- * A Trigger as a worker outside the box reads it: it cannot read in-box resources, so the text is whole and no field names one.
+ * A Trigger as a worker outside the box reads it: it cannot read in-box resources, so the text is whole, without a CI
+ * Trigger's line that points at its checks resource, and no field names one.
  * @param trigger - The stored Trigger.
  * @param link - Its source link, as `sourceLink` resolves it.
  * @param note - The routing note it was attached with.
@@ -107,7 +110,7 @@ export interface ReportView { leaseExpiresAt: string; inputs: WorkerInput[]; mor
 export function fullTrigger(trigger: Trigger, link: { source_url?: string; source_url_read?: string }, note?: string): WorkerTrigger {
   const { source_url_read: _resource, ...url } = link
   const { chars: _chars, read: _read, ...message }: WorkerTrigger & { chars?: number; read?: string } = triggerMessage(trigger, url, note)
-  return { ...message, text: trigger.text }
+  return { ...message, text: trigger.meta.ci === true ? trigger.text.replace(CHECKS_LINE, '') : trigger.text }
 }
 /**
  * Whether a Ticket is for a worker outside the box, which the Ticket's prepare step records as `executor: 'external'`.
@@ -139,6 +142,11 @@ const LEASE_NOTE = (ticket: Ticket) => `The previous worker's lease expired. Fet
   + 'and continue; do not repeat finished outside actions.'
 const WORKER_LEFT_NOTE = (ticket: Ticket) => `The previous worker's lease ended, and new work waits. Fetch \`${branchOf(ticket)}\`, inspect `
   + 'what is pushed and the PR, and continue with the Inputs that follow; do not repeat finished outside actions.'
+/** A `resumed` Input in the worker's own terms: the in-box text names tools a worker outside the box does not have. */
+const RESUMED_NOTE = (ticket: Ticket) => 'This ticket ended earlier and the message that follows, on its thread, resumed it under the same '
+  + `mandate. If it asks for more within the original scope, fetch \`${branchOf(ticket)}\`, inspect what is pushed and the PR, continue, `
+  + 'and finish with task_submit; if it asks for work beyond that scope or for another ticket, report dropped with task_report without '
+  + 'acknowledging the message, so it is routed again; if it needs nothing, such as thanks, report dropped. Do not repeat completed work.'
 
 /** Host dependencies used by `ExternalExecutor`. */
 export interface ExternalHost {
@@ -162,7 +170,7 @@ export interface ExternalHost {
  * The Executor of external Tickets. It launches nothing: a pending Assignment waits for a claim, which leases it to one worker
  * and records the worker on it. The worker renews the lease with every call and pulls its Inputs from the answers, so a lost
  * answer loses no Input. A sweep ends expired leases: the Assignment is replaced by a new pending one, unless its worker handed
- * off to a person and no work waits, in which case it runs on without a lease until a worker claims it.
+ * off to a person and no work waits, in which case it runs on without a lease until a worker claims it by its Ticket id.
  */
 export class ExternalExecutor implements ExecutorPlugin {
   private timer?: ReturnType<typeof setInterval>
@@ -174,11 +182,13 @@ export class ExternalExecutor implements ExecutorPlugin {
   start(): void {}
   /**
    * Nothing while the Assignment's lease is live: its worker reads the Inputs from its next answer. Otherwise, once an Input
-   * that asks for work waits (see `workWaits`), queues the Ticket for a new worker through a `requeue` effect, since the
-   * Engine calls this inside its commands.
+   * that asks for work waits (see `workWaits`), arrived after the lease was released if it was, queues the Ticket for a new
+   * worker through a `requeue` effect, since the Engine calls this inside its commands. An earlier Input may have reached the
+   * released worker in an answer it never acknowledged.
    */
   deliver(ticket: Ticket, assignment: Assignment): void {
-    if (!live(this.lease(assignment.id)) && this.workWaits(ticket)) {
+    const lease = this.lease(assignment.id)
+    if (!live(lease) && this.workWaits(ticket, lease?.releasedAt)) {
       this.host.effects.enqueue('requeue', ticket.id, { ticketId: ticket.id, assignmentId: assignment.id })
     }
   }
@@ -197,13 +207,14 @@ export class ExternalExecutor implements ExecutorPlugin {
 
   /**
    * Leases an Assignment to a worker, in one transaction: a claim retried with the same door key and `request` answers its
-   * lease again, renewed; otherwise the named Ticket, or the oldest queued one, gets a new lease, and its Assignment runs
-   * with the worker recorded on it.
+   * lease again, renewed; otherwise the named Ticket, or the oldest one whose latest Assignment is pending, gets a new lease,
+   * and its Assignment runs with the worker recorded on it. Only a claim by Ticket id takes a handed-off Assignment, which
+   * waits for a person.
    * @param request - The validated claim.
    * @returns The Ticket, its lease and brief, and its first undelivered Inputs.
    * @throws WorkerConflict `paused` while processing is paused or setup is pending; `lease_released` for a retry of a
    * released lease; `nothing_queued`; `not_found` for an unknown named Ticket; `already_claimed` for one another live lease
-   * holds; `not_claimable` for one that is local, ended, waits for a person, or whose lease was released.
+   * holds; `not_claimable` for one that is local, ended, or whose lease was released.
    */
   async claim(request: ClaimRequest): Promise<ClaimView> {
     if (this.host.paused()) throw new WorkerConflict('paused')
@@ -238,7 +249,7 @@ export class ExternalExecutor implements ExecutorPlugin {
   /**
    * Ends every expired lease, each in one transaction: deletes it and, unless its worker handed off to a person and no work
    * waits, replaces its Assignment with a new pending one that receives `LEASE_NOTE` first. A handed-off Assignment runs on
-   * without a lease, which the next claim takes. A failure is reported to the `external` health entry.
+   * without a lease, which a claim by its Ticket id takes. A failure is reported to the `external` health entry.
    */
   sweep(): void {
     const { store, health } = this.host
@@ -271,7 +282,9 @@ export class ExternalExecutor implements ExecutorPlugin {
       if (lease.releasedAt) throw new WorkerConflict('lease_released')
       return { ticket: ticketOf(lease.ticketId), assignment, lease: this.renew(assignment, lease) }
     }
-    const found = named === undefined ? store.tickets.open().reverse().find(item => !this.refusal(item)) : store.tickets.get(named)
+    const found = named === undefined
+      ? store.tickets.open().reverse().find(item => latestOf(item).state === 'pending' && !this.refusal(item))
+      : store.tickets.get(named)
     if (!found) throw new WorkerConflict(named === undefined ? 'nothing_queued' : 'not_found')
     const refusal = this.refusal(found)
     if (refusal) throw new WorkerConflict(refusal)
@@ -282,16 +295,14 @@ export class ExternalExecutor implements ExecutorPlugin {
     return { ticket: ticketOf(found.id), assignment, lease }
   }
   /**
-   * Why a worker may not take `ticket`, or undefined when it may: an open external Ticket whose latest Assignment is pending
-   * while the Ticket waits for no person, or runs without a lease because its worker handed off and the lease then expired.
-   * A claim sweeps first, so a lease it finds is live or released.
+   * Why a worker may not take `ticket`, or undefined when it may: an open external Ticket whose latest Assignment has no
+   * lease, so it is pending, or runs without one because its worker handed off and the lease then expired. A claim sweeps
+   * first, so a lease it finds is live or released.
    */
   private refusal(ticket: Ticket): 'not_claimable' | 'already_claimed' | undefined {
-    const latest = latestOf(ticket), lease = this.lease(latest.id)
+    const lease = this.lease(latestOf(ticket).id)
     if (lease) return lease.releasedAt ? 'not_claimable' : 'already_claimed'
-    if (!liveTicket(ticket) || ticket.executor !== 'external') return 'not_claimable'
-    // The latest Assignment of an open Ticket is pending or running.
-    return latest.state === 'running' || !waitsForPerson(ticket) ? undefined : 'not_claimable'
+    return liveTicket(ticket) && ticket.executor === 'external' ? undefined : 'not_claimable'
   }
   /**
    * The Ticket of a worker call and its lease, once the caller holds it.
@@ -324,24 +335,26 @@ export class ExternalExecutor implements ExecutorPlugin {
     const assignment = name.slice(KV.external.lease.prefix.length)
     if (!handedOff || this.workWaits(ticket)) engine.assignmentLeft(ticket.id, assignment, 'leaseExpired', LEASE_NOTE(ticket))
   }
-  /** Replaces an Assignment without a live lease once work waits for it, in one transaction; the lease is deleted. */
+  /** Replaces an Assignment without a live lease once work waits for it as `deliver` decides, in one transaction; the lease is deleted. */
   private requeue({ ticketId, assignmentId }: EffectPayloads['requeue']): void {
     const { store, engine } = this.host
     store.atomic(() => {
       const ticket = held(store.tickets.get(ticketId), `Ticket ${ticketId}`)
-      if (live(this.lease(assignmentId)) || !this.workWaits(ticket)) return
+      const lease = this.lease(assignmentId)
+      if (live(lease) || !this.workWaits(ticket, lease?.releasedAt)) return
       store.delete(KV.external.lease(assignmentId))
       engine.assignmentLeft(ticketId, assignmentId, 'workerLeft', WORKER_LEFT_NOTE(ticket))
     })
   }
   /**
-   * Whether an undelivered Input asks for work: a person's message, a `text` Input such as review findings or a retry note,
-   * or a red CI result (`meta.ciFailed`). Other CI changes, notes and Policy changes wait for the next claim.
+   * Whether an undelivered Input that arrived at `since` or later asks for work: a person's message, a `text` Input such as
+   * review findings or a retry note, or a red CI result (`meta.ciFailed`). Other CI changes, notes and Policy changes wait
+   * for the next claim.
    */
-  private workWaits(ticket: Ticket): boolean {
+  private workWaits(ticket: Ticket, since = ''): boolean {
     const asks = (input: TicketInput): boolean => input.kind === 'text'
       || (input.kind === 'trigger' && (!!input.human || this.host.store.triggers.get(input.triggerId)?.meta.ciFailed === true))
-    return ticket.inputs.some(input => ticket.undelivered.includes(input.id) && asks(input))
+    return ticket.inputs.some(input => input.at >= since && ticket.undelivered.includes(input.id) && asks(input))
   }
   private async view(ticket: Ticket, assignment: string, lease: Lease): Promise<ClaimView> {
     const execution = executionOf(ticket)
@@ -365,7 +378,7 @@ export class ExternalExecutor implements ExecutorPlugin {
       const input = held(ticket.inputs.find(item => item.id === id), `Input ${id}`)
       const trigger = input.kind === 'trigger' ? await this.full(this.triggerOf(input.triggerId), input.note) : undefined
       // Only legacy `reopen` Inputs render no text, and the schema 11 migration left none undelivered.
-      return { id, text: held(inputMessage(input, trigger), `The text of Input ${id}`) }
+      return { id, text: input.kind === 'resumed' ? RESUMED_NOTE(ticket) : held(inputMessage(input, trigger), `The text of Input ${id}`) }
     }))
     return { inputs, more: ticket.undelivered.length - ids.length }
   }

@@ -649,6 +649,13 @@ describe('github source', () => {
     expect(facts()).not.toHaveProperty('autoMerge')
     // Only a change after the first look is a Trigger.
     expect(h.receive.mock.calls.map(([trigger]) => trigger.meta)).toEqual([expect.objectContaining({ ci: true, revision: 1, ciFailed: true })])
+    // A result is red only once a check failed and none still runs.
+    routes['commits/abc/check-runs'] = { check_runs: [{ name: 'test', status: 'completed', conclusion: 'failure' },
+      { name: 'lint', status: 'in_progress', conclusion: null }] }
+    await pollRound(h)
+    routes['commits/abc/check-runs'] = { check_runs: [{ name: 'test', status: 'completed', conclusion: 'success' }] }
+    await pollRound(h)
+    expect(h.receive.mock.calls.map(([trigger]) => trigger.meta.ciFailed)).toEqual([true, false, false])
     routes['pulls/9'] = { ...pr, state: 'closed', merged: true, merged_at: '2026-09-09T00:00:00Z' }
     await pollRound(h)
     expect(h.store.tickets.get('t9')).toMatchObject({ ended: { outcome: 'merged' } })
