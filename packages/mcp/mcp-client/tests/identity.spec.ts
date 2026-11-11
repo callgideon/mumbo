@@ -189,7 +189,10 @@ linux('a stdio server started through the run-as provider', () => {
 
 /** A scripted process handle behind a subprocess service that only spawns. */
 async function fakeService(options: {
-  highWaterMark?: number; childIdentity?: SubprocessChildIdentity; serverIdentity?: SubprocessServerIdentity; refuse?: Error
+  highWaterMark?: number
+  childIdentity?: SubprocessChildIdentity
+  serverIdentity?: SubprocessServerIdentity
+  refuse?: Error
   homes?: Record<string, string>
 } = {}) {
   const homes = options.homes ?? { browsermcp: '/home/browsermcp' }
