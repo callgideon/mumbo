@@ -679,7 +679,7 @@ Reference mockups (sample data): `mumbo-mockups-v2.html`.
    - oauth2-proxy refuses tokens without `email_verified`. It is never run with `--insecure-oidc-allow-unverified-email`.
 3. **Domain check.** The edge admits by domain: `ALLOWED_EMAILS` gains `@mumbo.si` and `@cambrialabs.ai`, matched as a suffix including the `@`.
    - Anyone else sees the invite-only page, which names the domains that can join.
-4. **First visit.** The edge creates the person's box (the existing `ensure()`). The page says "Setting up your computer, about a minute" on first creation and "Starting your computer" on later starts, and refreshes itself.
+4. **First visit.** With more than one region, the person first confirms where their computer runs (section 17c, "Sign-up and choosing a region"). The edge creates the person's box (the existing `ensure()`). The page says "Setting up your computer, about a minute" on first creation and "Starting your computer" on later starts, and refreshes itself.
 5. **First open.** The assistant greets the person once. It says what it can do now and that connecting accounts and projects comes later, and links the box's home page.
 6. **What each account gets:**
    - one box (2 vCPU / 4 GiB) with a desktop and browser;
@@ -1152,7 +1152,7 @@ The founder is in India, and their box must run in `ap-south-1` (Mumbai). The re
   - the region must change atomically with the box record during a move;
   - the edge already keeps all placement in its store.
   - Records without a region are in `us-east-1`.
-- **A newcomer's region** is the region of the edge that served their first sign-in, which is the nearest region with a cell, through latency DNS.
+- **A newcomer's region** is the one they confirm at sign-up ("Sign-up and choosing a region", below), preselected as the nearest region with a cell.
 - **Backups.** Each cell has its own bucket and KMS key, and a box backs up into its own region's bucket, keeping the 10-minute uploads in-region.
   - No cross-region replication: disaster recovery across regions isn't a goal yet.
   - A move copies the latest backup once.
@@ -1211,7 +1211,156 @@ The founder is in India, and their box must run in `ap-south-1` (Mumbai). The re
 - **Moves.** A move back to `us-east-1` and again to Mumbai works. A forced failure leaves the founder on their source box.
 - **Backups.** The Mumbai box's backups land in the Mumbai bucket.
 
-## 18. Milestones **[founder: A, then B, then C; my call on the cut]**
+### Sign-up and choosing a region **[founder: 2026-11-11, "make this part on Sign-Up onboarding process - to setup the server / region closest to the sign-up location, we must design a clean sign-up flow for users"; my call on the how]**
+
+This replaces "A newcomer's region" above and step 4 of section 17a's flow. A newcomer sees where their computer will run, close to them, and confirms it before it's created. There are still no passwords and no separate sign-up form: the first sign-in creates the account (section 17a).
+
+**The flow, four screens:**
+1. **Sign in** (unchanged, section 17a): "Continue with Google" or "Email me a sign-in link". A person outside the allowed domains gets the invite-only page.
+2. **"Where should your computer run?"**, shown once, to a signed-in person with no box and no region record.
+   - Copy:
+     - title "Where should your computer run?";
+     - "Your mumbo computer runs in the cloud, always on. Pick the region closest to you for the smoothest desktop and browser."
+     - One row per region with a cell: "India (Mumbai) · 24 ms · Recommended", "US East (Virginia) · 210 ms".
+     - Button "Set up my computer".
+     - Small print: "You can move it later from your home page. A move takes a few minutes."
+   - The nearest region is preselected; the person can pick another.
+   - The page is a form that works without script, so with no measurements it preselects the serving edge's region and shows no milliseconds.
+3. **"Setting up your computer in India (Mumbai). About a minute"** (today's setup page, which now names the region). It refreshes itself.
+4. **The app opens, and Mumbo's one-time welcome** (section 17a step 5; the Mumbo Session, section 17b) also says where the computer runs. The welcome guides the next steps in chat, not in more sign-up pages:
+   - sign in to Google in the Browser tab ("Take over");
+   - link WhatsApp by code;
+   - make a door key for Claude Code.
+
+**Finding the nearest region:**
+- **The default is the serving edge's region** (`EDGE_REGION`). Latency DNS (R7) already routes the person to the nearest edge from their resolver.
+- **The page measures the real round trip from the browser** to each region and preselects the fastest, when it's at least 30 % faster than the default.
+  - It does three no-cors `fetch`es to `https://edge-<region>.app.mumbo.si/edge/ping` (cache-busted) and takes the fastest of the last two, so the TLS setup doesn't count.
+  - This corrects for VPNs and distant DNS resolvers. Before R7 it is the only signal, while every request reaches `us-east-1`.
+  - The probe names answer from an ALB fixed-response rule (204) on each region's listener, so no edge code runs. The edge serves nothing else there.
+  - They need one DNS record per region, a founder step, added with R7; the existing `*.app.mumbo.si` certificate covers them.
+  - The script runs under a nonce CSP, `connect-src` limited to the probe names.
+- **Not used:**
+  - CloudFront's `CloudFront-Viewer-Country`: there is no CloudFront in front of `app.mumbo.si` (checked 2026-11-11);
+  - the ALB, which adds no location header;
+  - IP geolocation databases: a licence and a dependency, and they are wrong for mobile and CGNAT addresses.
+- **With one cell configured, step 2 is skipped.**
+
+**Choosing:**
+- "Set up my computer" POSTs the region. The edge refuses any Origin other than its own, and refuses a region that isn't a configured cell.
+- It writes the person's record `{ region, at }` in the edge store, then creates the box in that cell with the existing `ensure`, under that cell's capacity.
+- A second POST from another tab finds the record and goes straight to step 3. The record is written once; after that, only a move (B22) changes the region.
+
+**A full region:**
+- **On the page**, a cell at capacity shows "Full right now" and can't be picked.
+- **The nearest region is full:** the next nearest is preselected, with "India (Mumbai) is full right now. Your computer will start in US East (Virginia). You can move it to Mumbai from your home page when there's room."
+- **No region has room:** today's capacity page.
+- **The last slot goes between the page and the POST:** `ensure`'s capacity refusal brings the page back with that region marked full.
+- **Spilling over:** existing people are never moved to another region when theirs is full (above). A newcomer choosing another region is their choice, made on the page.
+- The operator already gets the capacity alarm.
+
+**Records without a region** are in `us-east-1`, as before. Existing people never see step 2.
+
+**Tasks:**
+
+| Task | Contents | Depends on |
+|---|---|---|
+| **B39** sign-up region | Step 2's page and route, the person record, step 3's region text, step 4's welcome line, capacity per cell on the page, the probe script with its nonce CSP, the one-cell skip. Tests: preselection from the probes and without script, a full nearest cell, the last-slot race, a refused cross-origin POST and an unknown region, an existing person skipping the page. A GIF of the flow (GUI PR) | B21 |
+| **R-probe** (mumbo) | One ALB fixed-response rule per region for `edge-<region>.app.mumbo.si` `/edge/ping`; the DNS records are the founder's, with R7 | R6 |
+
+## 17d. Sync between the laptop and the computer (N2) **[founder: 2026-11-11, "also create a sync system between local and VM - for browser and file-storage", and a desktop-app browser that switches between local and VM modes; my call on the how]**
+
+**What the founder asked for:**
+- The desktop app browses with native performance on the laptop.
+- Agents keep using the computer's Chrome, also while the laptop is off.
+- What the person makes and finds, browser data and files, is the same on both sides.
+
+**The rule that shapes it** (section 1, the 2026-11-10 research): each identity lives on one device, and sessions never move. The two browsers are two identities.
+- The laptop's engine is signed in as the laptop: Google sign-ins bound to its hardware, banking, webcam work.
+- The computer's Chrome is signed in as the computer, for everything an agent does while the laptop sleeps.
+- Mumbo Sync carries everything else between them: tabs, bookmarks, history, downloads and files. It never carries cookies, passwords, payment cards or profiles.
+
+**The browser in the desktop app: one tab strip, two places to run** (it makes N2 explicit):
+- **Each tab runs in one place**, shown on the tab by an icon and in the address bar's chip:
+  - **"This laptop":** the local engine (`WebContentsView`), native speed, the laptop's sign-ins.
+  - **"Your computer":** the box's Chrome as a stream, with the box's sign-ins. Agents use only these tabs.
+- **A switch in the toolbar sets where new tabs open**: "Browse on this laptop" or "Browse on your computer". It is the founder's mode toggle.
+  - The default is this laptop, for speed.
+  - A link Mumbo opens, a task's tab, and anything an agent drives open on the computer whatever the switch says.
+- **"Move to your computer" and "Move to this laptop"** on a tab move navigation, never identity (N4):
+  - the URL, the tab group, the scroll position and non-secret form drafts move, in under a second;
+  - the person signs in on the other side if the site needs it.
+  - The menu says so: "Moves the page, not your sign-in".
+- **Offline:**
+  - with the laptop offline, laptop tabs keep working, and computer tabs show "Your computer keeps working. Reconnect to see it";
+  - with the laptop asleep, the computer's Chrome and Mumbo carry on, and on reconnect the app shows what happened (M4's digest).
+- **Agents and laptop sign-ins:** an agent never drives a laptop tab unseen. When a task needs a sign-in that exists only on the laptop, Mumbo asks in the app to open a consented laptop tab for that step (N4), and only while the laptop is online.
+
+**Mumbo Sync:** the computer is the hub, because it's always on and backed up; each laptop, and later the phone, is a replica.
+- **The hub** is a plugin in the box, `@mumbo/sync`.
+  - Its metadata is in `/root/.dsh/storages/sync`, backed up with the rest of `/root/.dsh`.
+  - Every change gets a hub sequence number.
+  - A replica sends its changes since its last acknowledged sequence and receives everyone else's.
+- **Transport:** the desktop app's signed-in connection to the edge (N2's sign-in), then the box like any other app request.
+  - Metadata travels over one WebSocket.
+  - File content goes as `PUT` and `GET` of `/sync/blobs/<sha256>` with `Range`, so large files resume.
+  - Content is addressed by its hash, so a renamed or copied file isn't sent twice.
+  - TLS covers the connection to the edge; backups are encrypted with KMS as today.
+- **Offline:** each replica keeps a journal of its local changes and replays it on reconnect. The hub keeps changes until every replica has acknowledged them, and drops a replica unseen for 30 days, which then re-syncs in full.
+
+**What syncs:**
+
+| Data | Laptop side | Computer side | Rule |
+|---|---|---|---|
+| Open tabs and tab groups | the app's tab strip | the box Chrome's tabs | Live, under a second. One engine drives a tab at a time (N4's driver lease) |
+| Bookmarks | the local engine's store | the box Chrome, so the person's Google bookmarks reach the laptop through the box's Chrome Sync | Last writer wins per bookmark and per field (title, URL, folder, position), with tombstones |
+| History | the local engine, for address-bar suggestions | the box Chrome | Append-only. 90 days on the laptop. Private windows are never recorded |
+| Downloads | `~/Mumbo/Downloads` | `/home/shared/Downloads` (Chrome's download folder) | As files, below |
+| Files | `~/Mumbo/Files` | `/home/shared/Files` | Below |
+| Cookies, passwords, payment cards, autofill, site sign-ins, profiles | — | — | **Never** |
+
+**The box Chrome side of browser data:**
+- A Mumbo extension is force-installed by Chrome policy from a local update URL. It has the `bookmarks`, `history`, `tabs` and `tabGroups` permissions, and never `cookies`, `webRequest` or host permissions.
+- It talks to the hub through native messaging. The host runs as `browser` and connects to the root-owned socket `/run/mumbo/sync.sock`, which accepts only the `browser` user (`SO_PEERCRED`). So nothing opens a port that agent containment would have to police.
+- It remembers what it wrote, so the changes it applies don't echo back.
+
+**Files:**
+- **One folder, chosen by the person:** `~/Mumbo` on the laptop, with `Files` and `Downloads` inside. Nothing else on the laptop syncs.
+- **Conflicts:**
+  - A change on one side, with the other side unchanged since the last sync, applies.
+  - When both sides changed, both are kept: the later arrival becomes "name (conflict from <device>, <date>).ext".
+  - An edit beats a delete: the file comes back.
+  - Nothing merges.
+- **Deletes go to a trash, never straight away:**
+  - the OS trash on the laptop;
+  - `/home/shared/.mumbo-trash` on the computer, kept 30 days.
+- **Mass deletes pause.** A batch that would delete more than 50 files, or a fifth of a folder, waits for the person in the app: "Your computer wants to delete 312 files from this laptop. Allow?"
+- **The agent writes these folders, so files from the computer arrive as downloads do.**
+  - They are marked as from the internet on the laptop (macOS quarantine attribute, Windows Mark of the Web), so Gatekeeper and SmartScreen treat them as downloads.
+  - Executable bits never sync.
+- **Laptop files reach the agent:** `Files` and `Downloads` are model roots, so Mumbo reads what the person puts there. The app says so when sync is turned on: "Mumbo can read and change what you put in this folder."
+- **The box's file I/O runs as its own user, `filesync`** (group `shared`), through the run-as seam, opening without following links. Agent containment's rule holds: root never writes in a folder another user can change.
+- **Space:**
+  - A box has about 9 GiB free, so synced files have a quota per box, 4 GiB by default, set by the edge. The backups' Downloads rule (newest 2 GiB, nothing over 1 GiB) applies to `Files` too.
+  - Over the quota, the laptop keeps new files local and marks them "Not synced: your computer's sync space is full".
+  - Larger libraries need a bigger box disk or a blob store in S3; that depends on the box sizing research.
+
+**Phone:** later, through the web app's uploads.
+
+**Tasks** (N2):
+
+| Task | Contents | Depends on |
+|---|---|---|
+| **B40** sync hub | `@mumbo/sync`: sequences, journals, replica cursors, blob routes with `Range`, the quota, `filesync` run-as file I/O, trash, the mass-delete hold. Tests per rule above | B24 |
+| **B41** file sync in the app | The desktop app's sync client for `~/Mumbo`: a watcher, a journal, conflict copies, OS trash, quarantine and Mark of the Web, the over-quota state, the mass-delete prompt, a sync status in the app. A GIF | N2's sign-in, B40 |
+| **B42** browser data | The force-installed extension, its native-messaging host and socket, bookmarks and history on both sides, and the live tab list (N4's channel) | B40 |
+| **B43** two places to run | The tab placement, its icons and chip, the toolbar switch, Move, offline states, and agent-opened tabs always on the computer. A GIF | N2's shell, B42 |
+
+**Not in this:**
+- moving sign-ins in either direction;
+- syncing the laptop's other folders;
+- sharing synced folders with other people (part D);
+- a password manager in the local engine: Electron's extensions omit what one needs, so the person uses their OS's password manager there. **[founder: A, then B, then C; my call on the cut]**
 
 | Milestone | Contents | Done when |
 |---|---|---|
