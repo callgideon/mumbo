@@ -37,6 +37,8 @@ export const Config = s.object({
     tokenFile: absolute('File holding this box\'s edge token, which the edge writes; read on each call.').required(),
     project: s.string().pattern(/^[a-z0-9]{16}$/).required().description('The id of the project this box serves.'),
   })]).description('Where relay replies go: the mumbo edge\'s `report_to_member` tool. Unset, relay replies wait.'),
+  workerLeaseMinutes: s.natural().min(2).max(60).default(20)
+    .description('How long a worker outside the box holds an external Ticket without a call, in minutes; each call renews it.'),
 })
 export type DeploymentConfig = ReturnType<typeof Config>
 export interface Machine {
@@ -58,6 +60,8 @@ export interface Machine {
   githubApp?: { login: string; userId: number } | undefined
   /** The mumbo edge's `report_to_member` endpoint, this box's token file and project id, for relay replies; unset outside a project box. */
   edge?: { url: string; tokenFile: string; project: string } | undefined
+  /** In Mumbo, the lease of a worker outside the box on an external Ticket, in minutes (`UPSTREAM.md` S13). */
+  workerLeaseMinutes: number
 }
 const MOVED: Record<string, string> = {
   repository: 'on the GitHub Source', branchPrefix: 'in the prepare command of the Execution settings', github: 'on the GitHub Source',
@@ -90,7 +94,7 @@ export function inStateDirectory(stateDir: string, path: string): boolean {
 export function machineOf(config: DeploymentConfig, runAs = false): Machine {
   const unknown = Object.keys(config).filter(key => !(key in (Config.dict ?? {})))
   if (unknown.length) throw new Error(`dsh-superagent configuration has keys it does not use: ${unknown.map(key => MOVED[key] ? `${key} (now ${MOVED[key]})` : key).join(', ')}; the keys are ${Object.keys(Config.dict ?? {}).join(', ')}`)
-  const { stateDir, workDirectory, workerDirectory, ghConfigDirectory, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins, githubApp, edge } = config
+  const { stateDir, workDirectory, workerDirectory, ghConfigDirectory, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins, githubApp, edge, workerLeaseMinutes } = config
   const contained = (key: 'workerDirectory' | 'ghConfigDirectory', path: string | undefined): string | undefined => {
     if (!runAs) return path
     if (path === undefined) throw new Error(`dsh-superagent ${key} must be set under a run-as subprocess provider: the orchestrator, as root, uses what it holds`)
@@ -102,7 +106,7 @@ export function machineOf(config: DeploymentConfig, runAs = false): Machine {
     throw new Error(`dsh-superagent workDirectory ${work}${workDirectory === undefined ? ' (its default, <stateDir>/work)' : ''} is in stateDir ${stateDir}, which workers cannot enter under a run-as subprocess provider; set workDirectory to a directory outside stateDir, such as /root/work`)
   }
   return { stateDir, workDirectory: work, workerDirectory: worker, ghConfigDirectory: gh, runAs, promptMaxChars, admissionContextMaxPages,
-    admissionContextTimeoutMs, panelAdmins, githubApp, edge }
+    admissionContextTimeoutMs, panelAdmins, githubApp, edge, workerLeaseMinutes }
 }
 
 /** `owner/name`, where neither part is `.` or `..`, which would leave `repos/` in an API path. */

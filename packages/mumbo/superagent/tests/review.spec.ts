@@ -8,7 +8,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { canRetry, latestReport, type Ticket } from '../src/core/index.ts'
 import { ticketCard } from '../src/app/cards.ts'
 import { Commands } from '../src/infra/commands.ts'
-import { heldExecutor } from '../src/mumbo/executors.ts'
 import { NO_VERDICT } from '../src/mumbo/review.ts'
 import { sendGithub } from '../src/sources/github-channel.ts'
 import { deferred, waitUntil } from './fixtures/async.ts'
@@ -335,7 +334,7 @@ describe('the review Ticket\'s tools', () => {
     h.runtime.store.tickets.save({ ...stored(parent), executor: 'external' })
     const { session } = await review(parent)
     github({ sha: SHA })
-    const deliver = vi.spyOn(heldExecutor, 'deliver')
+    const deliver = vi.spyOn(h.runtime.external, 'deliver')
     await verdict(session, 'fail', SHA, 'It breaks the build.')
     expect(deliver.mock.calls.map(([ticket]) => [ticket.id, ticket.undelivered.length])).toEqual([[parent, 1]])
   })

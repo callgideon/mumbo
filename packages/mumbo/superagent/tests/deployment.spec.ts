@@ -48,7 +48,8 @@ describe('configuration schema', () => {
     expect({ ...read, promptMaxChars: read.promptMaxChars.get(), admissionContextMaxPages: read.admissionContextMaxPages.get(),
       admissionContextTimeoutMs: read.admissionContextTimeoutMs.get() })
       .toEqual({ stateDir: join(dir, 'state'), workDirectory: join(dir, 'state', 'work'), workerDirectory: join(dir, 'state'), runAs: false,
-        promptMaxChars: 100000, admissionContextMaxPages: 10, admissionContextTimeoutMs: 15000, panelAdmins: [] })
+        promptMaxChars: 100000, admissionContextMaxPages: 10, admissionContextTimeoutMs: 15000, panelAdmins: [],
+        workerLeaseMinutes: 20 })
     // The ticket directories' root is its own row setting, as a contained box puts them inside the model's directories.
     expect(machineOf(Config({ stateDir: join(dir, 'state'), workDirectory: '/root/work' })).workDirectory).toBe('/root/work')
     expect(() => Config(minimal({ workDirectory: 'relative/work' }))).toThrow()
@@ -61,6 +62,10 @@ describe('configuration schema', () => {
     for (const entry of ['Alice@example.com', 'alice', '*@example.com', '@example.com', 'alice@', ' alice@example.com', 'a@b@c']) {
       expect(() => Config(minimal({ panelAdmins: [entry] })), entry).toThrow()
     }
+  })
+  it('accepts an external worker lease of 2 to 60 whole minutes', () => {
+    expect([2, 60].map(minutes => machineOf(Config(minimal({ workerLeaseMinutes: minutes }))).workerLeaseMinutes)).toEqual([2, 60])
+    for (const minutes of [1, 61, 2.5]) expect(() => Config(minimal({ workerLeaseMinutes: minutes })), String(minutes)).toThrow()
   })
   it('reads a GitHub App bot only as a `<slug>[bot]` login with a positive integer user id', () => {
     const app = { login: 'mumbo-bot[bot]', userId: 341797844 }
@@ -83,7 +88,7 @@ describe('configuration schema', () => {
   })
   it('names keys the configuration does not define, and where the values of older keys live now', () => {
     const raw = minimal({ repository: 'acme/widgets', repositoryPath: '/srv/widgets', blockedCommands: [], author: { name: 'Alice' }, extra: 1 })
-    expect(() => machineOf(Config(raw))).toThrow('keys it does not use: repository (now on the GitHub Source), repositoryPath (now in the prepare command of the Execution settings), blockedCommands (now in the Execution settings), author (now prompt text), extra; the keys are stateDir, workDirectory, workerDirectory, ghConfigDirectory, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins')
+    expect(() => machineOf(Config(raw))).toThrow('keys it does not use: repository (now on the GitHub Source), repositoryPath (now in the prepare command of the Execution settings), blockedCommands (now in the Execution settings), author (now prompt text), extra; the keys are stateDir, workDirectory, workerDirectory, ghConfigDirectory, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins, githubApp, edge, workerLeaseMinutes')
   })
 })
 

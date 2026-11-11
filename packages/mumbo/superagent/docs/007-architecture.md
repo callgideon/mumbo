@@ -16,6 +16,10 @@ flowchart TB
   engine -->|SourceScope| registry[SourceRegistry]
   engine -->|Assessor| assessor[MasterAssessor]
   engine -->|Executor| executors[Executors] -->|local| executor[DshExecutor]
+  executors -->|external| external[ExternalExecutor]
+  http -->|workers/*| external
+  external -->|assignmentStarted, assignmentLeft, report| engine
+  external -->|pull request| github[GitHub Source context]
   assessor -->|decide| engine
   engine -->|Outbox| outbox[Outbox]
   executor -->|assignmentStarted, inputsDelivered, report| engine
@@ -204,7 +208,7 @@ That context supplies deployment and commands, setup readiness (`ready`, `config
 
 Transient provider and network failures get three retries. Launches use effect backoff; failed turns receive continuation messages after 15, 30 and 60 seconds. `inputMessage` renders each Input from current Ticket state, and `mandateInstructions` adds the matched-rule limits for inferred work.
 
-`install` subscribes to Session events; `dispose` unsubscribes. A turn end normally reports waiting, except after readiness or while human action is required. Errors report failed. At startup, `resume` reports interrupted Assignments through `assignmentInterrupted` and requeues pending launches that do not wait for a person, oldest Ticket first. In Mumbo, the Engine's Executor is `Executors` (`src/mumbo/executors.ts`), which sends only Tickets without `executor` to the DshExecutor, so `resume` reconciles only those (`UPSTREAM.md` S11).
+`install` subscribes to Session events; `dispose` unsubscribes. A turn end normally reports waiting, except after readiness or while human action is required. Errors report failed. At startup, `resume` reports interrupted Assignments through `assignmentInterrupted` and requeues pending launches that do not wait for a person, oldest Ticket first. In Mumbo, the Engine's Executor is `Executors` (`src/mumbo/executors.ts`), which sends only Tickets without `executor` to the DshExecutor, so `resume` reconciles only those (`UPSTREAM.md` S11); `ExternalExecutor` (`src/mumbo/external.ts`) runs the external Tickets, which workers outside the box claim under a lease (`UPSTREAM.md` S13).
 
 ### MasterAssessor
 
@@ -352,7 +356,8 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/views/settings.ts` | The settings page's view: each block with its revision, each Source's settings with its kind's form, and the execution environment |
 | `src/app/views/overview.ts` | The overview: Tickets that need a person, problems, the last day's flow and the Executor's load |
 | `src/executor/dsh.ts` | The DshExecutor, `WorkerSlots`, `ticketExecution`, `inputMessage` and `mandateInstructions`; in Mumbo, a review's launch with `reviewLaunch`, and a review's turn that ends without a verdict as a failed report (`UPSTREAM.md` S15) |
-| `src/mumbo/executors.ts` | In Mumbo, the Executor port: `ExecutorPlugin`, an Executor with its lifecycle; `Executors`, the Engine's Executor, which sends a Ticket's calls to the Executor of its kind (`executorOf`) and lifecycle calls to every kind; and `heldExecutor`, the `external` kind, which does nothing (`UPSTREAM.md` S11) |
+| `src/mumbo/executors.ts` | In Mumbo, the Executor port: `ExecutorPlugin`, an Executor with its lifecycle; and `Executors`, the Engine's Executor, which sends a Ticket's calls to the Executor of its kind (`executorOf`) and lifecycle calls to every kind (`UPSTREAM.md` S11) |
+| `src/mumbo/external.ts` | In Mumbo, `ExternalExecutor`, the `external` kind: the claim and report of a worker outside the box under a lease (`Lease`, `KV.external.lease`), its brief and Inputs in full text (`fullTrigger`), the lease sweep, and the `requeue` effect that queues a Ticket for a new worker once work waits (`UPSTREAM.md` S13); the fence of the worker's git requests, which records pushed heads (`KV.external.pushed`), and the submit that opens or redrafts the Ticket's pull request and releases the lease (`UPSTREAM.md` S14); `WorkerConflict`, a refused worker call; and `externalRequested`, which the Ticket's prepare step reads |
 | `src/mumbo/review.ts` | In Mumbo, the review Ticket's worker: `REVIEW_INSTRUCTIONS`, the prompt part only it reads; `reviewLaunch`, the request and the reviewed ticket's follow-ups in full for its launch; `NO_VERDICT`; and `reviewTools`, its only tools, `orchestrator_review`, which posts the verdict with the review marker on the pull request once per review while its head is still the reviewed commit, marks a draft pull request ready on a pass and records the verdict, and an `orchestrator_report` of progress or failure only (`UPSTREAM.md` S15) |
 | `src/executor/background.ts` | A worker's background work in DeepSeek Harness, the shell jobs its Session owns (`ctx.jobs`) and its subagents (`ctx.subagents`): `runningJobs`, `untilQuiet`, `killJobs`, `collectJobs`, `stopSubagents`, `stopBackground`, `until`, and `cancelled`, the workers whose turn a stop of their subagents cancelled |
 | `src/infra/commands.ts` | `Commands`, the CLI transport: `run`; `api` and `pages`, limited to the configured repository and validated; `lark` as the bot; `git`. `CliError` carries the code a command's output reports, such as a GitHub HTTP status, and a command that prints nothing fails with how it ended, never with its arguments; `validItems` skips and counts the malformed items of a list |
@@ -411,7 +416,8 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/policy.spec.ts` | Source scope, the gate, the admission table, Mandate revalidation, the Policy version, settings migrations and assessment outcomes |
 | `tests/registry.spec.ts` | `SourceRegistry`: instances, validation, Policy parts, Channels and Thread context |
 | `tests/relay.spec.ts` | In Mumbo, the relay Source on a running Runtime: requests and context as Triggers and candidates, the Policy's allowed list and its every-member switch, admission, idempotent message ids, malformed bodies and continued conversations (`UPSTREAM.md` S9); replies reported to a fake edge, retried, dropped as gone, cut to the limit, waiting without a token or an edge, and aborted when the Runtime stops (`UPSTREAM.md` S10) |
-| `tests/executors.spec.ts` | In Mumbo, `Executors` routing and lifecycle, and a host start that resumes only local Tickets (`UPSTREAM.md` S11) |
+| `tests/executors.spec.ts` | In Mumbo, `Executors` routing and lifecycle, and a host start that resumes only local Tickets (`UPSTREAM.md` S11); schema 12 opening a schema 11 database without rewriting a record (`UPSTREAM.md` S13) |
+| `tests/external.spec.ts` | In Mumbo, external Tickets on a running Runtime: relayed requests with `worker: external`, claims and their refusals, idempotent claim retries, reports and their lease checks, lease expiry and hand-off, requeues, a restart, and admission (`UPSTREAM.md` S13); fences and the heads they record, a lease id from before a store rollback, and submits against a fake GitHub (`UPSTREAM.md` S14) |
 | `tests/review.spec.ts` | In Mumbo, the review Ticket on a running Runtime: one per commit, superseded by the next and replaced after a drop, ended with its ticket, refused as an attach target and never resumed, its full launch and its tools, a pass, a fail and a second fail, one marker per review across a retried call, one call at a time, a moved head, a wrong commit, a failed review, a turn without a verdict, the reply lookup that skips it, and the GitHub Channel's quoting of a marker, against the edge's marker in `tests/fixtures/review-marker.txt` (`UPSTREAM.md` S15) |
 | `tests/sources.spec.ts` | The Feishu and GitHub Sources on a `SourceContext`: translation, polls and read positions, the pull request rules, health |
 | `tests/commands.spec.ts` | CLI calls as the deployment's accounts, the Channels' answers, and repository-scoped GitHub calls |
@@ -481,6 +487,7 @@ A generated column is computed from its row's JSON and is empty outside its set,
 | Session prompt history | `session-prompts:<session id>` |
 | Source state | Read positions such as `github-cursor:<number>`, PR CI fingerprints and seen Feishu-topic messages; keys begin with the kind or `thread-` plus a Thread key |
 | Display names | `source-labels:<source id>` |
+| External worker leases | In Mumbo, `external-lease:<assignment id>` (`UPSTREAM.md` S13) and the heads a Ticket's lease holders pushed, `external-pushed:<ticket id>` (`UPSTREAM.md` S14) |
 
 Dismissal is stored on its Decision. Input text is rendered from the Ticket when read, so neither needs a separate key-value record.
 
@@ -488,7 +495,7 @@ Read caches use bounded in-memory `TextCache` instances and are lost on restart.
 
 Nothing deletes old records yet, so these grow without bound: the `trigger`, `disposition` and `decision` rows; ended Tickets and their Threads; the outbox's receipts; and in `kv`, every saved settings revision and prompt version, the prompt revisions each Session worked under, and the Sources' records per Thread and per Issue or pull request.
 
-`SCHEMA_VERSION` only increases. A database of a newer version refuses to start; `src/app/migration.ts` upgrades a database of the pre-release schema 10 once, at start, and refuses an older one.
+`SCHEMA_VERSION` only increases. A database of a newer version refuses to start; `src/app/migration.ts` upgrades a database of the pre-release schema 10 once, at start, and refuses an older one. In Mumbo, schema 12 changes no record: a schema 11 database opens as schema 12 unchanged, and a build that predates external Tickets (`Ticket.executor`) refuses it (`UPSTREAM.md` S13).
 
 ## Model-facing interfaces
 

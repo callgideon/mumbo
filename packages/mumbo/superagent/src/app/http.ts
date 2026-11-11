@@ -15,6 +15,8 @@ import { SetupError, type SetupProblem } from '../setup.ts'
 import { UserError, type EngineForPeople, type Ticket } from '../core/index.ts'
 import type { Deployment, Machine } from '../deployment.ts'
 import type { DshExecutor } from '../executor/dsh.ts'
+import { ClaimRequestSchema, FenceRequestSchema, ReportRequestSchema, SubmitRequestSchema, WorkerConflict, type ExternalExecutor }
+  from '../mumbo/external.ts'
 import type { Health } from '../sources/host.ts'
 import type { SourceRegistry } from '../sources/registry.ts'
 import type { Sessions } from './sessions.ts'
@@ -39,6 +41,8 @@ export interface HttpHost {
   readonly settings: Pick<Settings, 'view' | 'save' | 'pause' | 'sync' | 'refreshLabels'>
   readonly engine: EngineForPeople
   readonly executor: Pick<DshExecutor, 'activeCount'>
+  /** In Mumbo, the Executor workers outside the box claim external Tickets from (`UPSTREAM.md` S13, S14). */
+  readonly external: Pick<ExternalExecutor, 'claim' | 'report' | 'fence' | 'submit'>
   readonly health: Record<string, Health>
   readonly machine: Machine
   readonly masterId: string
@@ -60,6 +64,13 @@ export interface HttpHost {
  * Route handlers throw it when request bodies are malformed or target records are missing, and registerHttp serializes its status and message in the HTTP response.
  */
 class RouteError extends Error { constructor(readonly status: 400 | 404, message: string) { super(message) } }
+/** In Mumbo (`UPSTREAM.md` S13), a worker route's body that its schema refuses; any other zod failure is not the request's. */
+class InvalidRequest extends Error { constructor(readonly zod: z.ZodError) { super('Invalid request') } }
+async function workerBody<T>(schema: z.ZodType<T>, body: () => Promise<unknown>): Promise<T> {
+  const parsed = schema.safeParse(await body())
+  if (!parsed.success) throw new InvalidRequest(parsed.error)
+  return parsed.data
+}
 async function readBody(req: IncomingMessage, maxBytes = 128 * 1024): Promise<unknown> {
   let size = 0; const chunks: Buffer[] = []
   for await (const chunk of req) {
@@ -84,16 +95,19 @@ function panelAdmitted(principal: { readonly kind: string; readonly email?: unkn
   if (principal.kind === 'owner') return true
   return principal.kind === 'edge-member' && typeof principal.email === 'string' && admins.includes(principal.email)
 }
+function invalid(subject: 'request' | 'settings', error: z.ZodError): [number, Record<string, unknown>] {
+  const issues = error.issues.map(issue => ({ path: issue.path.join('.'), message: issue.message }))
+  return [400, { error: `Invalid ${subject}: ${issues.map(issue => issue.path).join(', ')}`, issues }]
+}
 /** Maps errors to HTTP status codes and structured payloads that the panel words by code. */
 function failure(error: unknown): [number, Record<string, unknown>] {
-  if (error instanceof z.ZodError) {
-    const issues = error.issues.map(issue => ({ path: issue.path.join('.'), message: issue.message }))
-    return [400, { error: `Invalid settings: ${issues.map(issue => issue.path).join(', ')}`, issues }]
-  }
+  if (error instanceof InvalidRequest) return invalid('request', error.zod)
+  if (error instanceof z.ZodError) return invalid('settings', error)
   if (error instanceof SetupError) return [400, { error: error.message, setup: error.problem }]
   if (error instanceof RouteError) return [error.status, { error: error.message }]
   if (error instanceof UserError) return [error.missing ? 404 : 400, { error: error.message, code: error.code, values: error.values }]
   if (error instanceof SettingsConflict || error instanceof PromptConflict) return [409, { error: error.message }]
+  if (error instanceof WorkerConflict) return [error.code === 'not_found' ? 404 : 409, { error: error.message, code: error.code }]
   return [500, { error: error instanceof Error ? error.message : String(error) }]
 }
 
@@ -217,6 +231,10 @@ function routes(runtime: HttpHost): Routes {
       return savePrompts(runtime, request.config, request.baseRevision, 'panel')
     },
     'POST prompts/preview': async input => runtime.prompts.preview(await promptBody(input)),
+    'POST workers/claim': async ({ body }) => runtime.external.claim(await workerBody(ClaimRequestSchema, body)),
+    'POST workers/:assignment/report': async ({ params, body }) => runtime.external.report(params.assignment, await workerBody(ReportRequestSchema, body)),
+    'POST workers/:assignment/fence': async ({ params, body }) => runtime.external.fence(params.assignment, await workerBody(FenceRequestSchema, body)),
+    'POST workers/:assignment/submit': async ({ params, body }) => runtime.external.submit(params.assignment, await workerBody(SubmitRequestSchema, body)),
   }
 }
 function decoded(segment: string): string {

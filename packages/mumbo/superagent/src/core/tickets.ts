@@ -19,6 +19,8 @@ export const automatic = (input: TicketInput | undefined): boolean => input?.kin
 const readBefore = (input: Extract<TicketInput, { kind: 'trigger' }>, until: string): boolean => input.readAt === undefined
   ? (input.deliveredAt && input.deliveredAt > input.at ? input.deliveredAt : input.at) <= until : !!input.readAt && input.readAt < until
 const STATUS_REQUEST = 'Report the current ticket status with orchestrator_report. This is a status-only request: do not resume implementation or perform external actions.'
+/** In Mumbo (`UPSTREAM.md` S13), the id of the note Input that `Tickets.restart` gives a ticket's new Assignment first. */
+export const restartNoteId = (ticketId: string, assignmentId: string): string => key('input', ticketId, 'restart', assignmentId)
 
 /**
  * Manages each ticket's lifecycle: creates the ticket for an accept decision with its Mandate, Subscriptions, and first
@@ -373,7 +375,7 @@ export class Tickets extends EnginePart {
     this.requeueUntaken(ticket, running)
     const assignment = this.newAssignment(ticket)
     const at = this.now()
-    const input: TicketInput = { id: key('input', ticket.id, 'restart', assignment.id), kind: 'text', text: note, at }
+    const input: TicketInput = { id: restartNoteId(ticket.id, assignment.id), kind: 'text', text: note, at }
     ticket.inputs.push(input); ticket.undelivered.push(input.id); ticket.updatedAt = at
     this.repo.tickets.save(ticket)
     this.options.executor.start(ticket, assignment)
