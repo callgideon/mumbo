@@ -178,9 +178,10 @@ export class Runtime extends Service implements SourceHost {
         get github() { return runtime.context({ kind: 'github', health: ['github'] }) },
         requestPass: () => { passes.request() }, sendReplies: () => outbox.sent(),
         quietly: run => { this.quiet++; try { return run() } finally { this.quiet-- } } }
-      // The plugin start does not wait for this (`UPSTREAM.md` S15), so the `runtime` health entry shows a failure.
+      // The plugin start does not wait for this (`UPSTREAM.md` S15), so the `runtime` health entry shows a failure; after a stop
+      // or a compromised lock, which aborts `lifetime` and keeps its own entry, the start's abort is no failure of its own.
       this.ready = this.initialize().catch((error: unknown) => {
-        if (!this.closing()) this.runtimeHealth.set({ state: 'error', detail: String(error), at: now() })
+        if (!this.lifetime.aborted) this.runtimeHealth.set({ state: 'error', detail: String(error), at: now() })
         throw error
       })
     } catch (error) {

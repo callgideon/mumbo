@@ -143,7 +143,8 @@ export class Sessions {
    * Under run-as the Session's recorded directory must be `cwd` as written, for every Session it resolves or creates: the
    * workspace registry follows links, so a link a worker planted on the way would move the Session, whose instructions and
    * skills root reads, to wherever it leads.
-   * Each step after an await starts only while `lifetime` is not aborted, so an ensure that outlives `stop()` writes nothing.
+   * Each step after an await starts only while `lifetime` is not aborted, so an ensure that outlives `stop()` starts no write
+   * after it; a write already running then may still land.
    * @throws under run-as when the Session's directory is not `cwd`, before its role model, permissions and title are set. A
    *   Session the registry created there stays loaded, decorated as DSH creates it, and `prompt` refuses it as well.
    * @throws `lifetime`'s reason once it is aborted.

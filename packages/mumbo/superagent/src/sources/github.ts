@@ -12,6 +12,7 @@ import type { GithubComment, PullRef } from './github-trigger.ts'
 import { observePull, pullsOf, readPull, type Pull } from './github-pull.ts'
 import { health, sourceContext, type Health, type SourceContext } from './host.ts'
 import { KV } from '../kv.ts'
+import { until } from '../executor/background.ts'
 import { cursorAt, pause, polled, POLL_HORIZON_MS, pollThreads as pollEach } from './poll.ts'
 import type { SourceKind } from './kind.ts'
 import { z } from 'zod'
@@ -127,7 +128,9 @@ export function pollFailure(failures: number, threshold: number, error: unknown)
 async function watch(ctx: SourceContext, signal: AbortSignal): Promise<void> {
   let interval = 60
   let failures = 0
-  await ctx.ready
+  // An unload does not wait for the Runtime's start, which can wait for the Host Loader and so for this unload.
+  await until(ctx.ready, signal)
+  if (signal.aborted) return
   // Setup restarts dsh-superagent once it resolves the accounts; until then nothing is polled.
   if (!ctx.configured()) { ctx.report('github', health('paused', 'setupPending')); return }
   while (!signal.aborted) {

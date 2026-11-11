@@ -35,6 +35,17 @@ import { overview } from '../src/app/views/overview.ts'
 import { preview, readable } from '../src/app/views/text.ts'
 import { decisionList, search, threadDetail, threadList } from '../src/app/views/threads.ts'
 import { executorLoad, ticketDetail, ticketList } from '../src/app/views/tickets.ts'
+import type { LockOptions } from 'proper-lockfile'
+
+// The real lock, keeping the newest Runtime's handler of a compromised lock so a test can report one.
+const lock = vi.hoisted(() => ({ compromised: undefined as ((error: Error) => void) | undefined }))
+vi.mock('proper-lockfile', async (original) => {
+  const actual = await original<typeof import('proper-lockfile')>()
+  return { ...actual, lockSync: (file: string, options: LockOptions) => {
+    lock.compromised = options.onCompromised
+    return actual.lockSync(file, options)
+  } }
+})
 
 let runtime: Runtime
 const viewsOf = (value: Runtime) => ({ store: value.store, sources: value.sources, links: value.links() })
@@ -2057,4 +2068,18 @@ it('shows a failed start in the runtime health entry', async () => {
   const next = await restart()
   await expect(next.ready).rejects.toThrow('preset refused')
   expect(next.health.runtime).toMatchObject({ state: 'error', detail: 'Error: preset refused' })
+})
+
+it('keeps a lock compromised during startup in the runtime health entry', async () => {
+  await runtime.stop()
+  const resolves = controller.resolveAgent.mock.calls.length
+  const gate = Promise.withResolvers<void>()
+  controller.resolveAgent.mockImplementationOnce(async () => { await gate.promise; return { error: { code: 'session/not-found' } } })
+  const next = await restart()
+  await vi.waitFor(() => { expect(controller.resolveAgent).toHaveBeenCalledTimes(resolves + 1) })
+  lock.compromised?.(new Error('Unable to update lock within the stale threshold'))
+  const failed = expect(next.ready).rejects.toThrow('aborted')
+  gate.resolve()
+  await failed
+  expect(next.health.runtime).toMatchObject({ state: 'error', detail: 'Unable to update lock within the stale threshold' })
 })

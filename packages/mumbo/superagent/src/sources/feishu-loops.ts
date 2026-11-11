@@ -12,9 +12,11 @@ import { feishuRef, feishuTime, feishuTrigger, HistoricalMessageSchema, historyE
   from './feishu-trigger.ts'
 import { health, type SourceContext } from './host.ts'
 import { KV } from '../kv.ts'
+import { until } from '../executor/background.ts'
 import { cursorAt, POLL_HORIZON_MS, polled, pollThreads as pollEach } from './poll.ts'
 import type { FeishuConfig } from './feishu.ts'
 
+/** Runs the Feishu loops until `signal` aborts; one aborted while the Runtime starts ends without waiting for that start. */
 export const runFeishu = (ctx: SourceContext, signal: AbortSignal): Promise<unknown> =>
   Promise.allSettled([watch, backfillLoop, chatNamesLoop].map(loop => loop(ctx, signal)))
 const enabled = (ctx: SourceContext): FeishuConfig | undefined => ctx.config<FeishuConfig>(SOURCE)
@@ -41,7 +43,8 @@ function available(ctx: SourceContext): boolean {
 
 /** Runs the live event consumer only while the Source is enabled; disabling it stops the consumer within five seconds. */
 async function watch(ctx: SourceContext, signal: AbortSignal): Promise<void> {
-  await ctx.ready
+  await until(ctx.ready, signal)
+  if (signal.aborted) return
   // Setup restarts dsh-superagent once it resolves the bot; until then nothing runs.
   if (!available(ctx)) return
   let retry: number | undefined
@@ -115,7 +118,8 @@ export async function refreshChatNames(ctx: SourceContext, signal?: AbortSignal)
 }
 /** Rereads the chat list every minute independently of history backfill (whose rounds can take much longer), so newly joined chats appear within a minute. */
 async function chatNamesLoop(ctx: SourceContext, signal: AbortSignal): Promise<void> {
-  await ctx.ready
+  await until(ctx.ready, signal)
+  if (signal.aborted) return
   if (!available(ctx)) return
   while (!signal.aborted) {
     if (enabled(ctx)) {
@@ -126,7 +130,8 @@ async function chatNamesLoop(ctx: SourceContext, signal: AbortSignal): Promise<v
   }
 }
 async function backfillLoop(ctx: SourceContext, signal: AbortSignal): Promise<void> {
-  await ctx.ready
+  await until(ctx.ready, signal)
+  if (signal.aborted) return
   if (!available(ctx)) { ctx.report('history', health('paused', 'feishuBotMissing')); return }
   while (!signal.aborted) {
     const config = enabled(ctx)
