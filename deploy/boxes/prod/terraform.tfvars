@@ -1,5 +1,5 @@
 e2b_sha               = "1619623fc"   # setup/build.sh output; nodes pick it up only when replaced (nodes.tf header)
-edge_tag              = "47493869d7"  # deploy/boxes/edge at this mumbo commit
+edge_tag              = "5ce1161634"  # deploy/boxes/edge at this mumbo commit
 node_count            = 2             # sandbox nodes; the edge cap MAX_RUNNING_UNITS = 2 * (12 * node_count - 2) follows (RUNBOOK: Adding nodes)
 node_count_ap_south_1 = 1             # Mumbai sandbox nodes (R5): its E2B build is in its templates bucket
 placement_cache_ms    = 0             # the us-east-1 edge: its store is in-region, so the cache saves about 1 ms there
