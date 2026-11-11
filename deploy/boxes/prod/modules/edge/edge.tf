@@ -51,6 +51,10 @@ variable "data_kms_key_arn" { type = string }
 variable "backup_bucket" { type = string }
 variable "backups_kms_key_arn" { type = string }
 variable "e2b_secret_arn" { type = string }
+variable "store_secret_arn" {
+  description = "Secrets Manager secret (a replica in this region) whose url is the edge store's rediss:// URL with its user and password (root store.tf)."
+  type        = string
+}
 variable "e2b_api_url" { type = string }
 variable "e2b_sandbox_url" { type = string }
 
@@ -288,7 +292,7 @@ resource "aws_iam_role_policy" "exec_edge" {
       # from this parameter, and a circuit-breaker rollback to one must still start.
       ["${local.ssm}/prod/supabase-anon-key"],
     )) },
-    { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = concat([data.aws_secretsmanager_secret.github_app.arn], values(local.edge_secrets)) },
+    { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = concat([data.aws_secretsmanager_secret.github_app.arn, var.store_secret_arn], values(local.edge_secrets)) },
   ] })
 }
 # The mumbo-bot GitHub App (app_id, slug, private_key), created outside Terraform under the cell's data key (kms:Decrypt in modules/cell/control.tf).
@@ -361,7 +365,6 @@ resource "aws_ecs_task_definition" "edge" {
         BOX_EGRESS_IPS    = join(",", var.box_egress_ips)
         E2B_API_URL       = var.e2b_api_url
         E2B_SANDBOX_URL   = var.e2b_sandbox_url
-        REDIS_URL         = "rediss://${aws_elasticache_replication_group.edge.primary_endpoint_address}:6379"
         LISTEN_HOST       = "127.0.0.1"
         MODEL_LISTEN_HOST = "0.0.0.0"
         AWS_REGION        = local.region
@@ -395,6 +398,7 @@ resource "aws_ecs_task_definition" "edge" {
       } : { name = k, value = v }]
       secrets = concat([for k, p in local.edge_ssm : { name = k, valueFrom = "${local.ssm}/${p}" }], [for k, arn in local.edge_secrets : { name = k, valueFrom = arn }], [
         { name = "E2B_API_KEY", valueFrom = "${var.e2b_secret_arn}:TEAM_API_KEY::" },
+        { name = "REDIS_URL", valueFrom = "${var.store_secret_arn}:url::" },
         { name = "GITHUB_APP_ID", valueFrom = "${data.aws_secretsmanager_secret.github_app.arn}:app_id::" },
         { name = "GITHUB_APP_KEY", valueFrom = "${data.aws_secretsmanager_secret.github_app.arn}:private_key::" },
       ])
@@ -434,32 +438,7 @@ resource "aws_ecs_service" "edge" {
   depends_on = [aws_lb_listener_rule.edge, aws_iam_role_policy.exec_edge]
 }
 
-# ---- ElastiCache for the edge (box records, locks, budgets, sweep lease). TLS, one replica. In the cell's data
-# security group and under its data key.
-resource "aws_elasticache_subnet_group" "edge" {
-  name       = "${local.name}-edge"
-  subnet_ids = var.private_subnets
-}
-resource "aws_elasticache_replication_group" "edge" {
-  replication_group_id       = "${local.name}-edge"
-  description                = "mumbo edge shared state"
-  engine                     = "valkey"
-  engine_version             = "7.2"
-  node_type                  = "cache.t4g.small"
-  num_cache_clusters         = 2
-  automatic_failover_enabled = true
-  multi_az_enabled           = true
-  subnet_group_name          = aws_elasticache_subnet_group.edge.name
-  security_group_ids         = [var.data_security_group_id]
-  transit_encryption_enabled = true
-  at_rest_encryption_enabled = true
-  kms_key_id                 = var.data_kms_key_arn
-  parameter_group_name       = "default.valkey7"
-  snapshot_retention_limit   = 3
-}
-
 output "edge_alb" { value = { dns_name = aws_lb.edge.dns_name, zone_id = aws_lb.edge.zone_id, arn_suffix = aws_lb.edge.arn_suffix } }
-output "edge_redis_endpoint" { value = aws_elasticache_replication_group.edge.primary_endpoint_address }
 # Every public name the certificate covers; the root points each at the ALB.
 output "public_names" { value = concat([local.public_host], local.llm_hosts, local.old_hosts, local.wildcards, ["*.${local.old_host}"]) }
 output "domain_validation_options" { value = aws_acm_certificate.edge.domain_validation_options }

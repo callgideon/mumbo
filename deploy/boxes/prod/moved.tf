@@ -269,14 +269,6 @@ moved {
   to   = module.edge_us_east_1.aws_ecs_task_definition.edge
 }
 moved {
-  from = aws_elasticache_replication_group.edge
-  to   = module.edge_us_east_1.aws_elasticache_replication_group.edge
-}
-moved {
-  from = aws_elasticache_subnet_group.edge
-  to   = module.edge_us_east_1.aws_elasticache_subnet_group.edge
-}
-moved {
   from = aws_iam_role.edge
   to   = module.edge_us_east_1.aws_iam_role.edge
 }
@@ -381,4 +373,14 @@ moved {
 moved {
   from = aws_cloudwatch_log_metric_filter.ops["api-node-unhealthy"]
   to   = module.cell_us_east_1.aws_cloudwatch_log_metric_filter.api_node_unhealthy
+}
+
+# R2: the edge store is shared by every region's edge, so it lives at the root (store.tf).
+moved {
+  from = module.edge_us_east_1.aws_elasticache_replication_group.edge
+  to   = aws_elasticache_replication_group.edge
+}
+moved {
+  from = module.edge_us_east_1.aws_elasticache_subnet_group.edge
+  to   = aws_elasticache_subnet_group.edge
 }
