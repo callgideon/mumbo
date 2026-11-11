@@ -4,8 +4,9 @@
  * API under a lease that each call renews, an expired lease ends, and work that waits queues again. DSH admission is the
  * fixture's owner, or a stand-in member; GitHub is a fake behind the box's gh.
  */
+import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { key, ticketStage, type Ticket } from '../src/core/index.ts'
+import { key, ticketStage, UserError, type Ticket } from '../src/core/index.ts'
 import { CliError, Commands } from '../src/infra/commands.ts'
 import { KV } from '../src/kv.ts'
 import type { ClaimView, Lease, ReportView } from '../src/mumbo/external.ts'
@@ -20,6 +21,8 @@ const HOPS = [{ node: 'member', id: ALICE }, { node: 'edge', id: 'app.mumbo.si' 
 const LAPTOP = { key: 'k1', name: 'laptop', model: 'claude-opus' }
 const MINUTE = 60_000
 const LONG = 'Steps: '.padEnd(700, 'x')
+/** The edge's `MARKER` (`approvals.mjs`), which the first line of a review comment must match. */
+const MARKER = new RegExp(readFileSync(new URL('fixtures/review-marker.txt', import.meta.url), 'utf8').trim())
 
 let host: Host
 let relayHandler: Handler | undefined
@@ -103,7 +106,7 @@ describe('claim', () => {
     const input = stored(first.id).undelivered[0]!
     const view = await claimed()
     expect(view).toMatchObject({ ticket: first.id, title: 'Fix m1', assignment: first.assignments[0]!.id, attempt: 1, renewWithinSeconds: 600,
-      repository: 'acme/widgets', branch: `agent/${first.execution!.name}`, base: 'main', more: 0,
+      repository: 'acme/widgets', branch: `agent/${first.execution!.name}`, base: 'main', escalated: false, more: 0,
       brief: { request: { trigger_id: request.id, from: ALICE, text: request.text }, batch: [{ trigger_id: context.id, text: context.text }],
         assignment: first.execution!.assignment, mandate: '' } })
     expect(view.lease).toMatch(/^[0-9a-f]{32}$/)
@@ -202,6 +205,7 @@ describe('report', () => {
     expect(stored(ticket.id)).toMatchObject({ answers: [ticket.origin.triggerId] })
     await host.runtime.idle()
     expect(host.relays(host.runtime.masterId).filter(item => item.kind === 'worker_report')).toMatchObject([{ answer_to: ticket.origin.triggerId }])
+    // Only a submit records ready, so every ready of a worker outside the box requests a review.
     expect(await report(view, { state: 'ready' })).toEqual({ status: 400,
       body: { error: 'Invalid request: state', issues: [{ path: 'state', message: expect.any(String) }] } })
     expect(latestState(ticket.id)).toBe('progress')
@@ -480,14 +484,14 @@ const pushed = (ticket: string) => store().get(KV.external.pushed(ticket))
 const opened = (number: number) => ({ status: 200, body: { pr: { number, url: `https://github.com/acme/widgets/pull/${number}` }, lease: 'released' } })
 
 /**
- * The GitHub API behind the box's gh: branch `heads`, `pulls` (a new one numbered from 7), and every call. A branch without
- * a head is not found, and a create of a second open pull request from a branch fails. While `halted`, each write fails as
- * the edge refuses it.
+ * The GitHub API behind the box's gh: branch `heads`, `pulls` (a new one numbered from 7) and each by its number, the
+ * `comments` posted as the agent on any pull request, and every call. A branch without a head is not found, and a create of
+ * a second open pull request from a branch fails. While `halted`, each write fails as the edge refuses it.
  */
 function fakeGithub() {
   type FakePull = { number: number; node_id: string; draft: boolean; state: string; title: string; body: string; base: string; html_url: string
     user: { login: string }; head: { sha: string; ref: string; repo: { full_name: string } } }
-  const heads = new Map<string, string>(), pulls: FakePull[] = [], calls: string[][] = []
+  const heads = new Map<string, string>(), pulls: FakePull[] = [], calls: string[][] = [], comments: string[] = []
   const state = { halted: false }
   const pull = (ref: string, fields: Partial<FakePull> = {}): FakePull => {
     const number = pulls.length + 7
@@ -505,6 +509,13 @@ function fakeGithub() {
       if (!heads.has(branch)) throw new CliError('gh: Branch not found (HTTP 404)', 404)
       return { name: branch, commit: { sha: heads.get(branch) } }
     }
+    const number = /^repos\/acme\/widgets\/pulls\/(\d+)$/.exec(path)?.[1]
+    if (number) return pulls.find(item => item.number === Number(number))
+    if (/^repos\/acme\/widgets\/issues\/\d+\/comments$/.test(path)) {
+      if (args.includes('--paginate')) return [comments.map((body, index) => ({ html_url: `${path}#${index + 1}`, body, user: { login: 'agent-bot' } }))]
+      comments.push(field('body'))
+      return { html_url: `${path}#${comments.length}` }
+    }
     const open = (ref: string) => pulls.filter(item => item.state === 'open' && item.head.ref === ref)
     const head = /^repos\/acme\/widgets\/pulls\?head=acme:(.+)&state=open$/.exec(path)?.[1]
     if (head) return open(head)
@@ -512,10 +523,13 @@ function fakeGithub() {
       if (open(field('head')).length) throw new CliError('gh: Validation Failed (HTTP 422)', 422)
       return pull(field('head'), { title: field('title'), body: field('body'), base: field('base'), draft: field('draft') === 'true' })
     }
-    if (path === 'graphql') { pulls.find(item => item.node_id === field('id'))!.draft = true; return { data: {} } }
+    if (path === 'graphql') {
+      pulls.find(item => item.node_id === field('id'))!.draft = !field('query').includes('markPullRequestReadyForReview')
+      return { data: {} }
+    }
     return path === 'user' ? { login: 'agent-bot' } : { default_branch: 'master', permissions: { push: true } }
   })
-  return { heads, pulls, calls, state, pull, writes: () => calls.filter(args => args.includes('POST') || args[1] === 'graphql') }
+  return { heads, pulls, calls, comments, state, pull, writes: () => calls.filter(args => args.includes('POST') || args[1] === 'graphql') }
 }
 
 describe('fence', () => {
@@ -696,6 +710,152 @@ describe('submit', () => {
     unchanged()
     github.pulls[0]!.state = 'closed'
     expect(await submit(view)).toEqual(opened(8))
+  })
+})
+
+describe('review of a submitted head', () => {
+  /** The review Tickets of `ticket`, oldest first. */
+  const reviews = (ticket: string) => store().tickets.list().filter(item => item.review?.of === ticket)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  /** An external Ticket whose head `a`, submitted as pull request 7, passed the review its submit requested. */
+  async function passedHead(github: ReturnType<typeof fakeGithub>) {
+    const ticket = await requested('m1')
+    const view = await claimed()
+    await push(view, sha('a'))
+    github.heads.set(view.branch, sha('a'))
+    expect(await submit(view)).toEqual(opened(7))
+    await host.runtime.idle()
+    expect(await host.runTool(`worker-${key('review', ticket.id, sha('a'))}`, 'orchestrator_review', { verdict: 'pass', sha: sha('a'), findings: 'Correct.' }))
+      .toMatchObject({ verdict: 'pass', marked_ready: true })
+    return ticket
+  }
+
+  it('ends the Ticket at its pull request\'s merge after the pass, which carries the edge\'s marker, marks it ready, and stays through green CI', async () => {
+    const github = fakeGithub()
+    const ticket = await passedHead(github)
+    expect(MARKER.exec(github.comments[0]!.split('\n', 1)[0]!)?.slice(1)).toEqual([sha('a'), 'pass'])
+    expect(github.pulls).toMatchObject([{ number: 7, draft: false }])
+    // Ready with a pass does not end the Ticket, and green CI queues no worker.
+    const pr = { number: 7, html_url: 'https://github.com/acme/widgets/pull/7', user: { login: 'agent-bot' } }
+    host.runtime.receive(ciTrigger(pr, 1, 'CI passed', false))
+    await host.runtime.idle()
+    expect([stored(ticket.id).ended, assignments(ticket.id)]).toEqual([undefined, [['running', undefined]]])
+    host.runtime.engine.threadClosed({ source: 'github', id: '7' }, 'merged', new Date().toISOString())
+    expect(stored(ticket.id).ended).toMatchObject({ outcome: 'merged' })
+  })
+
+  it('leaves the pull request of a head whose review passed ready when a later worker submits that head again, with no second review', async () => {
+    const github = fakeGithub()
+    const ticket = await passedHead(github)
+    // A person's message queues the Ticket again, and its next worker submits the same head.
+    await relay(message('m2', 'context', 'Is it done?', { thread: 'm1' }))
+    let view = await claimed({ request: 'r2' })
+    const writes = github.writes().length
+    expect(await submit(view)).toEqual(opened(7))
+    expect(github.writes()).toHaveLength(writes)
+    expect(github.pulls).toMatchObject([{ number: 7, draft: false }])
+    expect(reviews(ticket.id)).toHaveLength(1)
+    // The next worker submits another head, whose review fails; the one after goes back to the passed head, which is ready again.
+    await relay(message('m3', 'context', 'Also the footer', { thread: 'm1' }))
+    view = await claimed({ request: 'r3' })
+    await push(view, sha('b'))
+    github.heads.set(view.branch, sha('b'))
+    expect(await submit(view, { headSha: sha('b') })).toEqual(opened(7))
+    expect(github.pulls).toMatchObject([{ draft: true }])
+    host.runtime.engine.reviewed(key('review', ticket.id, sha('b')), 'fail', 'No test.', 'https://github.com/acme/widgets/pull/7#issuecomment-2')
+    await host.runtime.idle()
+    view = await claimed({ request: 'r4' })
+    await push(view, sha('a'))
+    github.heads.set(view.branch, sha('a'))
+    expect(await submit(view)).toEqual(opened(7))
+    expect(github.writes().at(-1)).toEqual(['api', 'graphql', '-f', expect.stringContaining('markPullRequestReadyForReview'), '-f', 'id=PR_7'])
+    expect([github.pulls[0]!.draft, reviews(ticket.id).length]).toEqual([false, 2])
+  })
+
+  it('requests one review of the head, which a concurrent or retried submit does not repeat, and the review of a later head supersedes it', async () => {
+    const github = fakeGithub()
+    const ticket = await requested('m1')
+    const view = await claimed()
+    await push(view, sha('a'))
+    github.heads.set(view.branch, sha('a'))
+    expect(await Promise.all([submit(view), submit(view)])).toEqual([opened(7), opened(7)])
+    expect(await submit(view)).toEqual(opened(7))
+    await host.runtime.idle()
+    const [first, ...others] = reviews(ticket.id)
+    expect(others).toEqual([])
+    expect(first).toMatchObject({ id: key('review', ticket.id, sha('a')), channels: [], review: { of: ticket.id, pr: 7, sha: sha('a'), round: 1 } })
+    expect(first!.executor).toBeUndefined()
+    // A fresh local worker reviews it; the Ticket waits for the review.
+    expect(host.relays(`worker-${first!.id}`)[0]).toMatchObject({ ticket_id: first!.id })
+    expect(ticketStage(stored(ticket.id))).toEqual({ stage: 'person', action: 'review' })
+    // A review Ticket is local, so no worker outside the box claims it, and no submit of it requests another review.
+    expect(await claim({ ticket: first!.id, request: 'r9' })).toEqual(refused(409, 'not_claimable'))
+    // A person's message queues the Ticket again, and the next worker submits another head.
+    await relay(message('m2', 'context', 'Also handle the empty list', { thread: 'm1' }))
+    const next = await claimed({ request: 'r2' })
+    await push(next, sha('b'))
+    github.heads.set(view.branch, sha('b'))
+    expect(await submit(next, { headSha: sha('b') })).toEqual(opened(7))
+    expect(reviews(ticket.id).map(item => [item.review!.sha, item.ended?.reason])).toEqual([[sha('a'), 'superseded'], [sha('b'), undefined]])
+  })
+
+  it('answers a submit whose review request fails with its result, logs the failure on the external health entry, and requests the review again on a retry', async () => {
+    const github = fakeGithub()
+    const ticket = await requested('m1')
+    const view = await claimed()
+    await push(view, sha('a'))
+    github.heads.set(view.branch, sha('a'))
+    const refusal = new UserError('ticketEnded')
+    const requestReview = vi.spyOn(host.runtime.engine, 'requestReview').mockImplementationOnce(() => { throw refusal })
+    const warn = vi.spyOn(host.ctx.logger, 'warn')
+    expect(await submit(view)).toEqual(opened(7))
+    expect([lease(view.assignment)?.releasedAt, latestState(ticket.id), reviews(ticket.id)]).toEqual([expect.any(String), 'ready', []])
+    const detail = `Requesting a review failed for head ${sha('a')} of Ticket ${ticket.id}: ${String(refusal)}`
+    expect(host.runtime.health.external).toMatchObject({ state: 'error', detail })
+    expect(warn).toHaveBeenCalledWith('dsh-superagent: %s', detail)
+    // A sweep, and another Ticket's review request that succeeds, leave the failure shown; the retried submit requests the
+    // review, which clears it.
+    host.runtime.external.sweep()
+    expect(host.runtime.health.external).toMatchObject({ state: 'error', detail })
+    await requested('m2')
+    const other = await claimed({ request: 'r2' })
+    await push(other, sha('b'))
+    github.heads.set(other.branch, sha('b'))
+    expect(await submit(other, { headSha: sha('b') })).toEqual(opened(8))
+    expect(host.runtime.health.external).toMatchObject({ state: 'error', detail })
+    expect(await submit(view)).toEqual(opened(7))
+    expect(requestReview).toHaveBeenCalledTimes(3)
+    expect(reviews(ticket.id)).toHaveLength(1)
+    expect(host.runtime.health.external).toMatchObject({ state: 'ready', detail: 'Submitted heads are queued for review' })
+  })
+
+  it('answers the next claim after the second failed review of a submitted head with escalated', async () => {
+    const github = fakeGithub()
+    const ticket = await requested('m1')
+    let view = await claimed()
+    for (const [head, request] of [['a', 'r2'], ['b', 'r3']] as const) {
+      await push(view, sha(head))
+      github.heads.set(view.branch, sha(head))
+      expect(await submit(view, { headSha: sha(head) })).toEqual(opened(7))
+      // The review's runtime records its failed verdict, whose findings queue the Ticket again.
+      host.runtime.engine.reviewed(key('review', ticket.id, sha(head)), 'fail', 'No test.', 'https://github.com/acme/widgets/pull/7#issuecomment-1')
+      await host.runtime.idle()
+      view = await claimed({ request })
+      expect([view.escalated, inputText(view)]).toEqual([request === 'r3', expect.arrayContaining([expect.stringContaining(`The independent review of ${sha(head)} failed`)])])
+    }
+  })
+
+  it('requests no review when a local Ticket\'s worker reports its pull request ready', async () => {
+    const github = fakeGithub()
+    const local = await requested('m1', false)
+    const branch = `agent/${local.execution!.name}`
+    github.heads.set(branch, sha('a'))
+    github.pull(branch)
+    expect(await host.runTool(`worker-${local.id}`, 'orchestrator_report', { state: 'ready', summary: 'PR 7 is ready.', pr_number: 7 }))
+      .toMatchObject({ reported: true })
+    expect([stored(local.id).follows, ticketStage(stored(local.id))]).toEqual([[expect.objectContaining({ thread: 'github:7', own: true })],
+      { stage: 'person', action: 'review' }])
+    expect(reviews(local.id)).toEqual([])
   })
 })
 

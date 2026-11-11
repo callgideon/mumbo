@@ -1,10 +1,12 @@
 /**
- * In Mumbo, the external-worker Executor (`UPSTREAM.md` S13, S14): a worker outside the box, such as a member's own Claude
- * Code through the door, claims an external Ticket's Assignment under a lease, reports on it, pulls its Inputs, and submits
- * the head it pushed. Each call renews the lease, and so does each of its git requests, which the edge fences here first. An
- * expired lease ends, and a Ticket whose Assignment has no live lease is queued for a new worker once work waits.
+ * In Mumbo, the external-worker Executor (`UPSTREAM.md` S13, S14, S17): a worker outside the box, such as a member's own
+ * Claude Code through the door, claims an external Ticket's Assignment under a lease, reports on it, pulls its Inputs, and
+ * submits the head it pushed, whose independent review the submit then requests. Each call renews the lease, and so does each
+ * of its git requests, which the edge fences here first. An expired lease ends, and a Ticket whose Assignment has no live
+ * lease is queued for a new worker once work waits.
  */
 import { randomBytes } from 'node:crypto'
+import type { Context } from '@deepseek-ai/cordis'
 import { z } from 'zod'
 import { latestAssignment, liveTicket, restartNoteId, waitsForPerson, type Assignment, type EngineForExecutor, type Execution, type Ticket,
   type TicketInput, type Trigger, type WorkerReport } from '../core/index.ts'
@@ -20,6 +22,7 @@ import { KV, type Key } from '../kv.ts'
 import { claimPull, PullSchema } from '../sources/github-pull.ts'
 import type { SourceContext } from '../sources/host.ts'
 import type { ExecutorPlugin } from './executors.ts'
+import { READY } from './review.ts'
 
 /** The Inputs one claim or report answers, oldest first; `more` counts the rest. It bounds one door answer, so it is fixed. */
 const INPUTS = 20
@@ -49,6 +52,8 @@ export class WorkerConflict extends Error {
 }
 /** The Assignment endings that leave its worker a new claim: the lease expired, or work waited after its lease ended. */
 const LEFT: readonly (string | undefined)[] = ['leaseExpired', 'workerLeft']
+/** How the `external` health entry's two failures start, so each success clears only its own. */
+const SWEEP_FAILED = 'Sweeping expired leases failed', REVIEW_FAILED = 'Requesting a review failed'
 
 const WorkerSchema = z.object({ key: z.string().min(1).max(200), name: z.string().trim().min(1).max(200),
   model: z.string().trim().min(1).max(80).optional() }).strict()
@@ -97,6 +102,8 @@ export interface Lease {
   /** The submitted result, set with `releasedAt`, which a submit retried with the same head answers again. */
   result?: { pr: SubmitView['pr']; headSha: string }
 }
+/** A recorded submit: its Ticket and result. */
+type Submitted = { ticketId: string; result: NonNullable<Lease['result']> }
 /** `triggerMessage`'s fields with the full text, and without `chars`, `read` and `source_url_read`, which name in-box resources. */
 export type WorkerTrigger = Omit<ReturnType<typeof triggerMessage>, 'chars' | 'read' | 'source_url_read'>
 /** An Input as a worker outside the box reads it, by its id, which it acknowledges with `ack`. */
@@ -115,6 +122,8 @@ export interface ClaimView {
   repository: string
   branch: string
   base: 'main'
+  /** Set once two independent reviews of the Ticket's submitted heads failed: the worker starts a new session on its strongest model. */
+  escalated: boolean
   brief: { request: WorkerTrigger; batch: WorkerTrigger[]; assignment: string; mandate: string }
   inputs: WorkerInput[]
   more: number
@@ -183,7 +192,7 @@ const RESUMED_NOTE = (ticket: Ticket) => 'This ticket ended earlier and the mess
 
 /** Host dependencies used by `ExternalExecutor`. */
 export interface ExternalHost {
-  readonly engine: Pick<EngineForExecutor, 'assignmentStarted' | 'assignmentLeft' | 'inputsDelivered' | 'inputsRead' | 'report'>
+  readonly engine: Pick<EngineForExecutor, 'assignmentStarted' | 'assignmentLeft' | 'inputsDelivered' | 'inputsRead' | 'report' | 'requestReview'>
   readonly store: Pick<Store, 'tickets' | 'triggers' | 'get' | 'set' | 'delete' | 'keys' | 'atomic'>
   /** Durable effect queue through which a Ticket is queued for a new worker. */
   readonly effects: Pick<Effects, 'enqueue' | 'handle'>
@@ -191,8 +200,10 @@ export interface ExternalHost {
   readonly sessions: Pick<Sessions, 'relay'>
   /** The GitHub Source's context: the box's GitHub CLI, through which a submit opens the pull request, and the binding to it. */
   readonly github: SourceContext
-  /** The `external` health entry, which reports whether the lease sweep failed. */
+  /** The `external` health entry, which reports whether the lease sweep, or the review request of a submit, failed. */
   readonly health: HealthEntry
+  /** Logs a failed review request, which the submit's answer does not carry. */
+  readonly logger: Pick<Context['logger'], 'warn'>
   readonly machine: Pick<Machine, 'workerLeaseMinutes'>
   /** Whether processing is paused or setup is pending, which refuses claims. */
   paused(): boolean
@@ -311,11 +322,11 @@ export class ExternalExecutor implements ExecutorPlugin {
   /**
    * Finishes the lease holder's work with the head it pushed: checks that a holder of this Ticket's lease pushed `headSha`
    * through the worker git route and that it is still the branch head, opens a draft pull request from the branch or turns
-   * the open one back into a draft, then, in one transaction, binds the pull request, records a `ready` report as a local
-   * worker's, relayed to the main Session alike, with the worker's declared `model` and `costUsd` on the Assignment's
-   * `worker`, and releases the lease with the result. The GitHub writes come first, so one that fails records nothing and
+   * the open one back into a draft, which instead stays or becomes ready once the Ticket's review of `headSha` passed, then,
+   * in one transaction, binds the pull request, records a `ready` report as a local worker's, relayed to the main Session alike,
+   * with the worker's declared `model` and `costUsd` on the Assignment's `worker`, and releases the lease with the result. The GitHub writes come first, so one that fails records nothing and
    * the worker submits again. A retry with the same head after the release, or while the first submit runs, answers the
-   * stored result once the first one recorded it.
+   * stored result once the first one recorded it. Every answer requests the review of the head (see `answer`).
    * @param assignment - The Assignment the lease is on.
    * @param request - The validated submit.
    * @returns The pull request and the released lease.
@@ -326,7 +337,7 @@ export class ExternalExecutor implements ExecutorPlugin {
   async submit(assignment: string, request: SubmitRequest): Promise<SubmitView> {
     const { store, github } = this.host
     const done = this.submitted(assignment, request)
-    if (done) return done
+    if (done) return this.answer(done)
     const { ticket } = this.holder(assignment, request)
     if (this.host.paused()) throw new WorkerConflict('paused')
     if (!store.get(KV.external.pushed(ticket.id))?.includes(request.headSha)) throw new WorkerConflict('head_not_pushed')
@@ -345,9 +356,11 @@ export class ExternalExecutor implements ExecutorPlugin {
       if (!made) throw error
       return made
     })
-    // An unreviewed head must not wait in the approval queue as a ready pull request.
-    if (!pull.draft) await commands.gh(['api', 'graphql', '-f', `query=${TO_DRAFT}`, '-f', `id=${pull.node_id}`])
-    return store.atomic(() => {
+    // An unreviewed head must not wait in the approval queue as a ready pull request, and a head whose review passed waits
+    // there ready: its pass marker is on the pull request, and that review, which marks a draft ready, does not run again.
+    const passed = !!store.tickets.get(ticket.id)?.reviews?.some(item => item.sha === request.headSha && item.verdict === 'pass')
+    if (pull.draft === passed) await commands.gh(['api', 'graphql', '-f', `query=${passed ? READY : TO_DRAFT}`, '-f', `id=${pull.node_id}`])
+    return this.answer(store.atomic(() => {
       // A concurrent submit of the same head may have recorded it, and the lease may have ended, during the GitHub calls.
       const recorded = this.submitted(assignment, request)
       if (recorded) return recorded
@@ -358,8 +371,8 @@ export class ExternalExecutor implements ExecutorPlugin {
       this.record(ticket.id, { state: 'ready', summary }, { ...lease.worker, ...declared })
       const result = { pr: { number: pull.number, url: pull.html_url }, headSha }
       store.set(KV.external.lease(assignment), { ...lease, releasedAt: iso(Date.now()), result })
-      return { pr: result.pr, lease: 'released' }
-    })
+      return { ticketId: ticket.id, result }
+    }))
   }
   /**
    * Ends every expired lease, each in one transaction: deletes it and, unless its worker handed off to a person and no work
@@ -370,9 +383,9 @@ export class ExternalExecutor implements ExecutorPlugin {
     const { store, health } = this.host
     try {
       for (const name of store.keys(KV.external.lease)) store.atomic(() => { this.expire(name) })
-      if (health.get()?.state === 'error') health.set({ state: 'ready', detail: 'Expired leases are swept', at: iso(Date.now()) })
+      if (health.get()?.detail.startsWith(SWEEP_FAILED)) health.set({ state: 'ready', detail: 'Expired leases are swept', at: iso(Date.now()) })
     } catch (error) {
-      health.set({ state: 'error', detail: `Sweeping expired leases failed: ${String(error)}`, at: iso(Date.now()) })
+      health.set({ state: 'error', detail: `${SWEEP_FAILED}: ${String(error)}`, at: iso(Date.now()) })
     }
   }
 
@@ -385,11 +398,30 @@ export class ExternalExecutor implements ExecutorPlugin {
     return updated
   }
   private lease(assignment: string): Lease | undefined { return this.host.store.get(KV.external.lease(assignment)) }
-  /** The answer a submit of `headSha` recorded on the caller's released lease, which a submit of the same head gets again. */
-  private submitted(assignment: string, request: SubmitRequest): SubmitView | undefined {
+  /** The result a submit of `headSha` recorded on the caller's released lease, which a submit of the same head gets again. */
+  private submitted(assignment: string, request: SubmitRequest): Submitted | undefined {
     const done = this.lease(assignment)
     return done?.id === request.lease && done.worker.key === request.worker.key && done.result?.headSha === request.headSha
-      ? { pr: done.result.pr, lease: 'released' } : undefined
+      ? { ticketId: done.ticketId, result: done.result } : undefined
+  }
+  /**
+   * The answer to a submit whose result is recorded, once it requested the review of the submitted head on its pull request
+   * (`Engine.requestReview`, one review Ticket per Ticket and head, so a retried submit starts none). A refused request, such
+   * as for a Ticket that ended since, leaves the recorded submit as it is: it is logged and set on the `external` health
+   * entry, which shows it until a later request for the same Ticket and head succeeds or a later failure replaces it.
+   */
+  private answer({ ticketId, result: { pr, headSha } }: Submitted): SubmitView {
+    const { engine, health, logger } = this.host
+    const failed = `${REVIEW_FAILED} for head ${headSha} of Ticket ${ticketId}:`
+    try {
+      engine.requestReview(ticketId, { pr: pr.number, sha: headSha })
+      if (health.get()?.detail.startsWith(failed)) health.set({ state: 'ready', detail: 'Submitted heads are queued for review', at: iso(Date.now()) })
+    } catch (error) {
+      const detail = `${failed} ${String(error)}`
+      logger.warn('dsh-superagent: %s', detail)
+      health.set({ state: 'error', detail, at: iso(Date.now()) })
+    }
+    return { pr, lease: 'released' }
   }
   /** Writes the lease on `assignment` with a new expiry, one lease length from now. */
   private renew(assignment: string, lease: Omit<Lease, 'renewedAt' | 'expiresAt'>): Lease {
@@ -494,7 +526,7 @@ export class ExternalExecutor implements ExecutorPlugin {
     return { ticket: ticket.id, title: ticket.title, assignment, lease: lease.id,
       attempt: ticket.assignments.findIndex(item => item.id === assignment) + 1,
       leaseExpiresAt: lease.expiresAt, renewWithinSeconds: this.leaseMs() / 2000,
-      repository: this.host.repository(), branch: branchOf(ticket), base: 'main',
+      repository: this.host.repository(), branch: branchOf(ticket), base: 'main', escalated: !!ticket.escalated,
       brief: { request: await this.full(this.triggerOf(ticket.origin.triggerId)),
         batch: await Promise.all(batchOf(this.host, ticket).map(trigger => this.full(trigger))),
         assignment: execution.assignment, mandate: mandateInstructions(ticket.mandate) },
