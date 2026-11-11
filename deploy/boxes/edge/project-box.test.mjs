@@ -39,7 +39,9 @@ test('a user box start script is byte-for-byte what it was before project boxes 
   // dsh outside the firewall and reaches loopback, and send web_fetch to the DeepSeek Fetch API through the edge's model
   // host (containment.test.mjs). Then the role's /home/agent line moved into the script, added on a B24 image only.
   // Then RW1's Run Wild block and $RUNWILD_PATCH after $MCP_PATCH, behind the image's @mumbo/run-wild (the Run Wild test below).
-  assert.equal(createHash('sha256').update(s).digest('hex'), 'dbd2f52878ef794cc7ad10f504d68ba0518f8fc309b07015cfa7d8e83df5771d')
+  // Then the B24 fix's input chain: from beyond loopback a new TCP connection reaches only envd, dsh, the live view and the
+  // door, since E2B's envd forwards every loopback listener to the box address (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), '4a9bfc5bd6af87f9b140cb53b2445bef96229c18d23459be8c6ab9fd553dc445')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -59,8 +61,10 @@ test('a project box start script is byte-for-byte what it was before B18 changed
   // a socket whose user nft cannot read is refused. Then the web_fetch contract of 2026-11-11, on an image with the
   // harness only: the containment rows disable web-fetch-http, which fetches from root dsh outside the firewall and
   // reaches loopback, and send web_fetch to the DeepSeek Fetch API through the edge's model host (containment.test.mjs).
-  // Then the role's /home/agent line moved into the script, added on a B24 image only.
-  assert.equal(createHash('sha256').update(s).digest('hex'), '1c9c81b2405a16dff4daac3dfa8e48e9a24b1f5dad413c4c8f4e0ff81a4cc4b2')
+  // Then the role's /home/agent line moved into the script, added on a B24 image only. Then the B24 fix's input chain: from
+  // beyond loopback a new TCP connection reaches only envd, dsh, the live view and the door, since E2B's envd forwards
+  // every loopback listener to the box address (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), '3fb3578020aacff41d520853fa0aea9c354e1630428a19f7873800d4289017ae')
 })
 
 const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'

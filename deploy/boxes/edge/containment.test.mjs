@@ -12,8 +12,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { runInNewContext } from 'node:vm'
-import { startScript, boxSite, containmentRows, containmentLayout, ENVD_PORT, MUMBO_MCP_PORT } from './edge.mjs'
-import { BOX_STEPS, PROJECT_STEPS, KASMVNC_BIND_STEP, NFT_SMOKE_STEP, kasmvncStep, usersSteps } from './template.mjs'
+import { startScript, boxSite, containmentRows, containmentLayout, signBox, memberKey, mumboMcpKey, roleInstructions, ENVD_PORT, MUMBO_MCP_PORT } from './edge.mjs'
+import { BOX_STEPS, PROJECT_STEPS, KASMVNC_BIND_STEP, NFT_SMOKE_STEP, DSH_SMOKE_SECONDS, LISTENER_ALLOWLIST, dshSmokeStep, kasmvncStep, smokeStartScript, usersSteps } from './template.mjs'
 
 const c = { llmHost: 'llm.example', publicHost: 'app.example', projectDomain: 'app.example' }
 const script = (cfg, person) => startScript(cfg, 'T', boxSite(cfg, person ? 'a@x.com' : 'project:0123456789abcdef'), 'role', person ? undefined : 'K', { proxy: 'P', gh: 'G' })
@@ -181,7 +181,7 @@ table inet mumbo {
   }
   chain input {
     type filter hook input priority 0; policy accept;
-    iifname != "lo" tcp dport { 9222, 5900-5999 } drop
+    iifname != "lo" tcp flags & (fin|syn|rst|ack) == syn tcp dport != { ${ENVD_PORT}, 880, 881, ${MUMBO_MCP_PORT} } drop
     iifname != "lo" udp dport 881 drop
   }
 }
@@ -379,12 +379,13 @@ test('the B24 template\'s kernel and network part: port floor, link protections 
   // One inet table (IPv4 and IPv6), replaced whole: every process, root's dsh included, is refused E2B's envd, which runs
   // commands as root; every user but root dsh, the live view, the door and VNC; every user but root and browsermcp
   // (1002) the debugging port. The allowed users are accepted first and the rest reset, so a socket whose user nft cannot
-  // read is refused. The debugging, VNC and WebRTC ports stay box-local.
+  // read is refused. From beyond loopback new TCP connections reach only envd, dsh, the live view and the door, and the
+  // WebRTC port stays box-local.
   assertFirewall(h, '{ 0, 1002 }')
   // A project box has no browsermcp: only root reaches the debugging port.
   assertFirewall(hardening(script(c, false), { users: false }), '0')
   // Mutations: each port the rules name, taken out of the script, fails the check.
-  for (const [from, to] of [[`dport ${ENVD_PORT} `, 'dport '], ['{ $DSH_PORT, ', '{ '], [' $LIVE_PORT, ', ' '], [`, ${MUMBO_MCP_PORT}, `, ', '], [', 5900-5999 } meta', ' } meta'], ['dport 9222 meta', 'dport meta'], [', 9222 } reject', ' } reject'], ['{ 9222, 5900-5999 } drop', '{ 9222 } drop'], ['udp dport $LIVE_PORT', 'udp dport 0']]) {
+  for (const [from, to] of [[`dport ${ENVD_PORT} `, 'dport '], ['{ $DSH_PORT, ', '{ '], [' $LIVE_PORT, ', ' '], [`, ${MUMBO_MCP_PORT}, `, ', '], [', 5900-5999 } meta', ' } meta'], ['dport 9222 meta', 'dport meta'], [', 9222 } reject', ' } reject'], [`!= { ${ENVD_PORT}, `, '!= { '], [`${ENVD_PORT}, $DSH_PORT, `, `${ENVD_PORT}, `], [`$LIVE_PORT, ${MUMBO_MCP_PORT} } drop`, `${MUMBO_MCP_PORT} } drop`], [`, ${MUMBO_MCP_PORT} } drop`, ' } drop'], ['"lo" tcp flags & (fin|syn|rst|ack) == syn tcp dport !=', '"lo" tcp dport !='], ['udp dport $LIVE_PORT', 'udp dport 0']]) {
     const mutant = s.replace(from, to)
     assert.notEqual(mutant, s, from)
     assert.throws(() => assertFirewall(hardening(mutant), '{ 0, 1002 }'), assert.AssertionError, from)
@@ -409,6 +410,20 @@ test('the B24 template\'s kernel and network part: port floor, link protections 
   assert.deepEqual([before.code, before.mount, before.nft, before.firewall, before.setuid], [0, [], [], undefined, [0o4755, 0o4755]])
 })
 
+test('the B24 input chain: from beyond loopback a new TCP connection (SYN alone) reaches only envd, dsh, the live view and the door, and WebRTC UDP stays box-local', () => {
+  // E2B's envd forwards every loopback listener to the box address, where its client proxy reaches it. Matching SYN alone
+  // lets replies to the box's own connections in without connection tracking.
+  for (const person of [true, false]) {
+    const { code, err, firewall } = hardening(script(c, person), { users: person })
+    assert.equal(code, 0, err)
+    assert.equal(firewall.slice(firewall.indexOf('  chain input {\n'), firewall.lastIndexOf('  }\n')), `  chain input {
+    type filter hook input priority 0; policy accept;
+    iifname != "lo" tcp flags & (fin|syn|rst|ack) == syn tcp dport != { 49983, 880, 881, 882 } drop
+    iifname != "lo" udp dport 881 drop
+`)
+  }
+})
+
 test('the start scripts parse under sh, name no iptables owner match, and their firewall parses under nft -c when this host can run it', (t) => {
   for (const s of [script(c, true), script(c, false)]) {
     execFileSync('sh', ['-n'], { input: s })
@@ -431,7 +446,7 @@ test('escape-test.sh parses under sh and runs every escape test the B24 brief na
   const text = readFileSync(file, 'utf8')
   const ids = new Set([...text.matchAll(/\b(?:refused|allowed|unwritable|denied|manual|refusal|say (?:PASS|FAIL|SKIP))\s+"?([a-z0-9-]+)/g)].map(m => m[1]))
   // Ids built in loops, as the script spells them.
-  for (const loop of ['agent-bind-$1', 'agent-bind-$p', 'agent-connect-$1', 'envd-$u', 'xkasmvnc-$u', 'sudo-$u', 'su-$u']) assert.ok(text.includes(`"${loop}"`), loop)
+  for (const loop of ['agent-bind-$1', 'agent-bind-$p', 'agent-connect-$1', 'envd-$u', 'xkasmvnc-$u', 'sudo-$u', 'su-$u', 'beyond-loopback-$1', 'beyond-loopback-$t']) assert.ok(text.includes(`"${loop}"`), loop)
   const required = [
     // agent: root's files, the browser's profile, other users' processes
     'start-sh-mode', 'agent-read-start-sh', 'agent-read-dsh-home', 'agent-read-dsh-log', 'agent-read-root-entries', 'agent-read-browser-home', 'agent-read-login-data', 'agent-read-cookies',
@@ -451,6 +466,8 @@ test('escape-test.sh parses under sh and runs every escape test the B24 brief na
     'restore-symlink', 'browser-symlink-setup', 'file-tools-login-data', 'file-tools-dsh-environ', 'file-tools-dsh-log', 'file-tools-swap-read', 'file-tools-swap-write', 'git-hook-ticket',
     // web_fetch of the debugging port and of dsh (the web_fetch contract of 2026-11-11)
     'web-fetch-cdp', 'web-fetch-dsh',
+    // from beyond loopback, where E2B's client proxy reaches envd's forwards (the B24 fix): envd answers
+    'beyond-loopback-envd',
   ]
   assert.deepEqual(required.filter(id => !ids.has(id)), [])
   // Binds: dsh, the live view and the door refused (EACCES); 3000 and 5173 allowed. Connects: CDP, VNC, dsh, the live view
@@ -459,6 +476,11 @@ test('escape-test.sh parses under sh and runs every escape test the B24 brief na
   assert.ok(text.includes('for h in 127.0.0.1 "$ip"; do') && text.includes('for t in "cdp 9222" "vnc 5900" "vnc 5901" "dsh $DSH_PORT" "live $LIVE_PORT" "door $DOOR_PORT"; do'))
   assert.ok(text.includes('USERS="agent mcpserver"; [ -z "$person" ] || USERS="$USERS browsermcp desktop xsession browser"\nuser user && USERS="$USERS user"'))
   assert.ok(text.includes(`DOOR_PORT=${MUMBO_MCP_PORT} ENVD_PORT=${ENVD_PORT}`) && text.includes('for u in root $USERS; do denied "envd-$u"'))
+  // From beyond loopback, through a network namespace: root's 9229 and a high port, agent's 8000, the debugging port and
+  // VNC dropped (status 2, a timeout), each SKIP when the box cannot make the namespace.
+  assert.ok(text.includes('node -e "$LISTEN" 9229 ') && text.includes('node -e "$LISTEN" 47999 ') && text.includes(`su -s /bin/sh agent -c "exec node -e '$LISTEN' 8000"`))
+  assert.ok(text.includes('for t in "inspector 9229" "high 47999" "dev 8000" "cdp 9222" "vnc 5900"; do') && text.includes('if [ $rc = 2 ]; then say PASS "beyond-loopback-$1"'))
+  assert.ok(text.includes('beyond() { for t in envd inspector high dev cdp vnc; do say SKIP "beyond-loopback-$t" "$1"; done; }'))
 })
 
 /** escape-test.sh's uploads through consent (--with-uploads), with Downloads, the staging directory and the page's port
@@ -603,11 +625,11 @@ test('template: containment\'s users and groups, homes 0700 with the run-as TMPD
   // nftables, setfacl and setcap are installed, not assumed from the base image; iptables, which nothing on a template
   // with the marker runs, is not.
   const pkgs = (steps) => steps.find(s => s.includes('apt-get install')).match(/--no-install-recommends ([^&]+?) &&/g).join(' ')
-  for (const p of ['nftables', 'acl', 'libcap2-bin']) assert.match(pkgs(BOX_STEPS), new RegExp(`\\b${p}\\b`), p)
-  for (const p of ['nftables', 'acl']) assert.match(pkgs(PROJECT_STEPS), new RegExp(`\\b${p}\\b`), p)
+  for (const p of ['nftables', 'acl', 'libcap2-bin', 'iproute2']) assert.match(pkgs(BOX_STEPS), new RegExp(`\\b${p}\\b`), p)
+  for (const p of ['nftables', 'acl', 'iproute2']) assert.match(pkgs(PROJECT_STEPS), new RegExp(`\\b${p}\\b`), p)
   assert.ok(![...BOX_STEPS, ...PROJECT_STEPS].some(s => /\biptables\b/.test(s)))
-  // The users, then the nftables smoke check, which runs as agent, last.
-  assert.deepEqual([BOX_STEPS.slice(-usersSteps(true).length - 1), PROJECT_STEPS.slice(-usersSteps(false).length - 1)], [[...usersSteps(true), NFT_SMOKE_STEP], [...usersSteps(false), NFT_SMOKE_STEP]])
+  // The users, then the nftables smoke check, which runs as agent, and the dsh smoke check, last.
+  assert.deepEqual([BOX_STEPS.slice(-usersSteps(true).length - 2), PROJECT_STEPS.slice(-usersSteps(false).length - 2)], [[...usersSteps(true), NFT_SMOKE_STEP, dshSmokeStep(true)], [...usersSteps(false), NFT_SMOKE_STEP, dshSmokeStep(false)]])
 })
 
 test('template: the nftables smoke check passes only when root connects and agent is refused, always removes its table and listener, and runs only after the steps before it succeed', () => {
@@ -649,4 +671,142 @@ test('template: the nftables smoke check passes only when root connects and agen
   // After a failed step it does not run, and the failure is the build's.
   const after = run({ before: 'false' })
   assert.deepEqual([after.code, after.steps], [1, []])
+})
+
+/** The dummy edge config smokeStartScript makes its script with (template.mjs SMOKE_CFG). */
+const SMOKE_CFG = { llmHost: 'llm.invalid', publicHost: 'box.invalid', projectDomain: 'box.invalid', agentLogin: 'smoke[bot]', agentId: 1 }
+const base64 = (text) => Buffer.from(text).toString('base64')
+
+test('template: the dsh smoke check runs a box\'s start script with dummy values, less the parts that would stay in the template, and waits 60 s for dsh', () => {
+  assert.equal(DSH_SMOKE_SECONDS, 60)
+  for (const person of [true, false]) {
+    const s = smokeStartScript(person), step = dshSmokeStep(person)
+    for (const text of [s, step]) execFileSync('sh', ['-n'], { input: text })
+    assert.ok(step.includes(`; echo ${base64(s)} | base64 -d > $T/start.sh; `))
+    assert.ok(step.includes('elif [ $n -ge 60 ]; then why=\'dsh printed no start line within 60 s\'; else sleep 1;'))
+    // The script the edge would write for that box, line for line, less the kernel and network part, a person box's
+    // desktop and a project box's GitHub proxy.
+    const principal = person ? 'smoke@box.invalid' : 'project:0000000000000000'
+    const full = startScript(SMOKE_CFG, signBox('smoke', principal, 'smoke'), boxSite(SMOKE_CFG, principal), roleInstructions(SMOKE_CFG, principal),
+      person ? undefined : memberKey('smoke', 'smoke').toString('base64url'), { proxy: '', gh: '' }, person ? undefined : ['smoke@box.invalid'],
+      person ? { key: mumboMcpKey('smoke', 'smoke'), principal: 'smoke' } : undefined, principal).split('\n')
+    let i = 0
+    for (const line of s.split('\n')) { while (i < full.length && full[i] !== line) i++; assert.ok(i++ < full.length, line) }
+    for (const gone of ['table inet mumbo', 'hidepid', 'ip_unprivileged_port_start', 'chmod u-s', ...(person ? ['Xkasmvnc', '/usr/local/bin/mumbo-desktop', '/usr/local/bin/google-chrome'] : ['update-ca-certificates', 'github-local-proxy', 'ca.key'])]) assert.ok(!s.includes(gone), gone)
+    // The layout and rows a box gets, and dsh with a box's profile and patches.
+    assert.ok(s.includes(containmentLayout(SMOKE_CFG, person)))
+    const box = startScript(c, 'T', boxSite(c, person ? 'a@x.com' : 'project:0123456789abcdef'), 'role', person ? undefined : 'K', { proxy: 'P', gh: 'G' }, ['o@x.com'], person ? { key: 'K', principal: 'a' } : undefined, 'a@x.com')
+    const patches = (text) => text.split('\n').filter(l => /^nohup node|^ {2}--patch /.test(l))
+    assert.deepEqual(patches(s), patches(box))
+    assert.equal(patches(s).length, 2)
+  }
+  // start.sh's first command is `pkill -f 'apps/cli/src/bin.ts'`: no template step's text may match it.
+  for (const steps of [BOX_STEPS, PROJECT_STEPS]) assert.ok(!/apps\/cli\/src\/bin.ts/.test(steps.join(' && ')))
+})
+
+test('template: the dsh smoke check\'s listeners: of users other than agent, only those on the output chain\'s reset set or the allowlist', () => {
+  // The output chain's reset set, read from the firewall a box loads: envd for everyone, the rest for all but root (and
+  // browsermcp on 9222).
+  const s = script(c, true)
+  const envd = /dport (\d+) reject with tcp reset/.exec(s)[1], reset = /dport \{ ([^}]+) \} reject with tcp reset/.exec(s)[1].split(', ')
+  assert.deepEqual([envd, reset], [ENVD_PORT, ['$DSH_PORT', '$LIVE_PORT', MUMBO_MCP_PORT, '5900-5999', '9222']])
+  for (const person of [true, false]) assert.ok(dshSmokeStep(person).includes(` -v open="${[envd, ...reset, ...LISTENER_ALLOWLIST.map(l => l.port)].join(' ')}" `))
+  // Each entry a port with its reason.
+  assert.deepEqual(LISTENER_ALLOWLIST.map(l => l.port), ['8899'])
+  for (const l of LISTENER_ALLOWLIST) assert.ok(/^\d+$/.test(l.port) && l.reason.length > 40, l.port)
+})
+
+/** Listeners every check below passes: root's on the reset set (dsh, the door, envd, envd's forward of the door, VNC),
+ *  another user's on 9222 and on the allowlist's 8899, and agent's own (uid 4000001). */
+const SS_OK = [
+  'LISTEN 0 511 169.254.0.21:880 0.0.0.0:* users:(("node",pid=10,fd=20)) ino:1 sk:1 <->',
+  'LISTEN 0 511 127.0.0.1:882 0.0.0.0:* users:(("node",pid=10,fd=21)) ino:2 sk:2 <->',
+  'LISTEN 0 4096 *:49983 *:* users:(("envd",pid=1,fd=3)) ino:3 sk:3 <->',
+  'LISTEN 0 5 169.254.0.21:882 0.0.0.0:* users:(("socat",pid=9,fd=5)) ino:4 sk:4 <->',
+  'LISTEN 0 5 127.0.0.1:5999 0.0.0.0:* users:(("x",pid=11,fd=3)) ino:5 sk:5 <->',
+  'LISTEN 0 5 [::1]:9222 [::]:* users:(("chrome",pid=12,fd=3)) uid:4000009 ino:6 sk:6 <->',
+  'LISTEN 0 5 127.0.0.1:8899 0.0.0.0:* users:(("node",pid=13,fd=3)) uid:4000010 ino:7 sk:7 <->',
+  'LISTEN 0 5 0.0.0.0:3000 0.0.0.0:* users:(("node",pid=14,fd=3)) uid:4000001 ino:8 sk:8 <->',
+]
+/** A fake start.sh in a temporary root `$T`: it lays out and writes as a box's does, in /root (also changing its modes
+ *  and writing into the image's .cargo), /home, /src, /var/lib/mumbo, /usr/local/share/mumbo, /run and /tmp, starts a
+ *  fake dsh (a node process whose command line names dsh's entry point, pid in $T/dsh.pid) unless `dsh` is false,
+ *  prints dsh's start line unless `line` is false, runs `extra` and exits with `exit`. */
+const fakeStart = ({ line = true, dsh = true, exit = 0, extra = '' } = {}) => `set -eu
+: > $T/ran
+echo 'start.sh: laying out'
+mkdir -p $T/root/.dsh/sessions $T/root/.dsh/logs $T/root/.mumbo $T/root/projects $T/var/lib/mumbo/spill $T/run/dsh-shell $T/home/agent/.mumbo-welcome $T/usr/local/share/mumbo/agents $T/tmp/tsx-0 $T/src/.dsh
+: > $T/root/.dsh/sessions/s.jsonl; : > $T/root/.cargo/cache
+chmod 0711 $T/root; chmod 0700 $T/root/.cargo
+echo 'startup audit: subprocess did not activate' > $T/root/.dsh/logs/startup-1.log
+echo 'dsh: loading' > $T/root/dsh.log
+${dsh ? `"${process.execPath}" -e 'setTimeout(() => {}, 30000)' apps/cli/src/bin.ts </dev/null >/dev/null 2>&1 & echo $! > $T/dsh.pid` : ''}
+${line ? 'echo \'dsh web: https://box.invalid/?token=abc\' >> $T/root/dsh.log' : ''}
+${extra}
+exit ${exit}
+`
+
+/** Runs `before && dshSmokeStep(true)` with the box paths moved into a temporary root whose /root (0700) holds .cargo
+ *  (0755) and .profile, the start script replaced by `start`, real tools, and fake id (containment users 4000001 to
+ *  4000005), ss (printing `ss`, or failing on null) and sleep (20 ms). Returns the status, output with the root as T,
+ *  whether the fake dsh is still running, whether start.sh ran, and whether the moved paths read as before. */
+function smoke({ start = fakeStart(), ss = SS_OK, before = 'true', setup = () => {} } = {}) {
+  const t = mkdtempSync(join(tmpdir(), 'dsh-smoke-'))
+  try {
+    for (const d of ['bin', 'root/.cargo', 'home/agent', 'src', 'usr/local/share/mumbo', 'var/lib', 'var/tmp', 'run', 'tmp', 'dev/shm']) mkdirSync(join(t, d), { recursive: true })
+    writeFileSync(join(t, 'root/.profile'), '')
+    chmodSync(join(t, 'root'), 0o700); chmodSync(join(t, 'root/.cargo'), 0o755)
+    writeFileSync(join(t, 'usr/local/share/mumbo/ports'), '880 881\n')
+    for (const tool of ['sh', 'find', 'sort', 'comm', 'cmp', 'mktemp', 'base64', 'setsid', 'cat', 'grep', 'pgrep', 'ps', 'awk', 'xargs', 'rm', 'chmod', 'tail', 'tr', 'head', 'mkdir']) symlinkSync(which(tool), join(t, 'bin', tool))
+    symlinkSync('/bin/kill', join(t, 'bin/kill'))
+    const fake = (name, body) => { writeFileSync(join(t, 'bin', name), `#!/bin/sh\n${body}\n`); chmodSync(join(t, 'bin', name), 0o755) }
+    fake('id', 'case "$2" in agent) echo 4000001;; mcpserver) echo 4000002;; browsermcp) echo 4000003;; desktop) echo 4000004;; xsession) echo 4000005;; *) exit 1;; esac')
+    writeFileSync(join(t, 'ss.txt'), ss === null ? '' : ss.join('\n') + '\n')
+    fake('ss', ss === null ? 'exit 1' : `[ "$1" = -ltnpeH ] && cat ${t}/ss.txt`)
+    fake('sleep', `exec ${which('sleep')} 0.02`)
+    setup(t)
+    const listing = () => ['root', 'home', 'src', 'usr', 'var', 'run', 'tmp', 'dev'].flatMap(d => [d, ...readdirSync(join(t, d), { recursive: true }).map(p => join(d, p))])
+      .map(p => `${p} ${(lstatSync(join(t, p)).mode & 0o7777).toString(8)}`).sort().join('\n')
+    const was = listing()
+    const step = dshSmokeStep(true).replace(base64(smokeStartScript(true)), base64(start.replaceAll('$T', t)))
+      .replace(/(?<=^|[\s'"=(<>])\/(var\/lib\/mumbo|usr\/local\/share\/mumbo|var\/tmp|dev\/shm|root|home|src|run|tmp)(?=[/\s'";)]|$)/g, `${t}/$1`)
+    const out = spawnSync('/bin/sh', ['-c', `${before} && ${step}`], { encoding: 'utf8', env: { PATH: join(t, 'bin') }, timeout: 60000 })
+    const pid = existsSync(join(t, 'dsh.pid')) ? readFileSync(join(t, 'dsh.pid'), 'utf8').trim() : undefined
+    // A zombie waiting for its new parent to reap it is stopped.
+    let running = false
+    try { running = pid !== undefined && readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1][0] !== 'Z' } catch { /* ENOENT: gone */ }
+    if (running) process.kill(Number(pid), 'SIGKILL')
+    return { code: out.status, out: out.stdout, err: out.stderr.replaceAll(t, 'T'), running, ran: existsSync(join(t, 'ran')), same: listing() === was }
+  } finally { rmSync(t, { recursive: true, force: true }) }
+}
+
+test('template: the dsh smoke check passes when dsh prints its start line and no other user\'s listener is open to agent, and leaves nothing behind', (t) => {
+  if (spawnSync('sh', ['-c', 'command -v setsid']).status !== 0) return t.skip('setsid is not installed on this host')
+  const ok = smoke()
+  assert.deepEqual(ok, { code: 0, out: 'mumbo-box: dsh smoke check: start dsh as a box does, with dummy values\nmumbo-box: dsh smoke check passed\n', err: '', running: false, ran: true, same: true })
+})
+
+test('template: the dsh smoke check fails on a slow, dead or failed dsh, an open listener or no ss, prints why with the logs, and still leaves nothing behind', (t) => {
+  if (spawnSync('sh', ['-c', 'command -v setsid']).status !== 0) return t.skip('setsid is not installed on this host')
+  const failed = 'mumbo-box: the dsh smoke check failed'
+  const logs = '--- start.sh\nstart.sh: laying out\n--- T/root/dsh.log\ndsh: loading\n--- T/root/.dsh/logs/startup-1.log\nstartup audit: subprocess did not activate\n'
+  const bad = ['LISTEN 0 5 127.0.0.1:9229 0.0.0.0:* users:(("node",pid=15,fd=3)) ino:9 sk:9 <->', 'LISTEN 0 5 [::]:6000 [::]:* users:(("python3",pid=16,fd=3)) uid:4000002 ino:10 sk:10 <->']
+  for (const [opts, why, tail] of [
+    [{ start: fakeStart({ line: false }) }, 'dsh printed no start line within 60 s', logs],
+    [{ start: fakeStart({ line: false, dsh: false }) }, 'dsh exited before its start line', logs],
+    [{ start: fakeStart({ line: false, exit: 3 }) }, 'start.sh failed (status 3)', logs],
+    [{ ss: [...SS_OK.slice(0, 4), bad[0], ...SS_OK.slice(4), bad[1]] }, `agent may connect to these listeners of other users, outside the output chain's reset set and LISTENER_ALLOWLIST (template.mjs): ${bad.join('\n')}`, logs.replace('dsh: loading\n', 'dsh: loading\ndsh web: https://box.invalid/?token=abc\n')],
+    [{ ss: null }, 'ss could not list the TCP listeners', logs.replace('dsh: loading\n', 'dsh: loading\ndsh web: https://box.invalid/?token=abc\n')],
+  ]) {
+    const out = smoke(opts)
+    assert.deepEqual(out, { code: 1, out: 'mumbo-box: dsh smoke check: start dsh as a box does, with dummy values\n', err: `${failed}: ${why}\n${tail}`, running: false, ran: true, same: true }, why)
+  }
+  // A path the template had, which start.sh removed, fails the build.
+  const gone = smoke({ start: fakeStart({ extra: 'rm $T/root/.profile' }) })
+  assert.deepEqual([gone.code, gone.err, gone.running], [1, "chmod: cannot access 'T/root/.profile': No such file or directory\nmumbo-box: the dsh smoke check could not undo: T/root/.profile\nmumbo-box: the dsh smoke check could not restore the modes in T/root\n", false])
+  // A template with a box's own paths is refused before anything runs; after a failed step the check does not run.
+  const kept = smoke({ setup: (root) => mkdirSync(join(root, 'root/.dsh')) })
+  assert.deepEqual([kept.code, kept.err, kept.ran, kept.same], [1, 'mumbo-box: the dsh smoke check needs a template without T/root/.dsh, which a box\'s start script makes\n', false, true])
+  const after = smoke({ before: 'false' })
+  assert.deepEqual([after.code, after.out, after.ran], [1, '', false])
 })

@@ -325,9 +325,10 @@ export function boxSite(cfg, principal) {
 /** The start script's kernel and network part on a template with PORTS_MARKER (B24), before any user's process starts:
  *  the unprivileged port floor, the link protections and hidepid, set and checked; no setuid su or sudo; and the firewall,
  *  one native nftables table `inet mumbo` (IPv4 and IPv6) whose output chain refuses connections by the socket's user
- *  (`meta skuid`), refusing a socket whose user it cannot read, and whose input chain keeps the debugging, VNC and WebRTC ports box-local. The script writes the table
- *  to /root/.mumbo/firewall.nft (root's, 0600), loads it with `nft -f`, which replaces the whole table in one transaction,
- *  and checks that it is loaded. E2B's kernel has nf_tables but not xt_owner, so iptables' `-m owner` cannot load there.
+ *  (`meta skuid`), refusing a socket whose user it cannot read, and whose input chain admits new TCP connections from
+ *  beyond loopback only to envd, dsh, the live view and the door, and keeps the WebRTC port box-local. The script writes
+ *  the table to /root/.mumbo/firewall.nft (root's, 0600), loads it with `nft -f`, which replaces the whole table in one
+ *  transaction, and checks that it is loaded. E2B's kernel has nf_tables but not xt_owner, so iptables' `-m owner` cannot load there.
  *  Every step is fatal. */
 const hardening = () => `if [ -n "$B24_TEMPLATE" ]; then
   # Only root binds below 1024, set rather than trusted (Docker's floor, and maybe a VM image's, is 0), so no other user
@@ -348,10 +349,12 @@ const hardening = () => `if [ -n "$B24_TEMPLATE" ]; then
   # user, the browser's debugging port. The allowed users are accepted first and every other connection to those ports is
   # reset, so a socket whose user nft cannot read (one with no file) is refused, as under iptables' xt_owner. Nothing in
   # the box connects to E2B's envd, which runs commands as root: root's dsh fetches pages for the model, and the edge's
-  # commands reach envd from outside the box. Input: the debugging port,
-  # every VNC port and KasmVNC's WebRTC port (UDP, the live view's number, bound on every address), which the ALB cannot
-  # carry, stay box-local. The file's first two lines delete any table from an earlier start, so nft -f replaces the
-  # whole table in one transaction.
+  # commands reach envd from outside the box. Input: E2B's envd forwards every loopback listener to the box address,
+  # where E2B's client proxy reaches it, so from beyond loopback a new TCP connection reaches only envd, dsh, the live
+  # view and the door. The rule matches SYN alone, so replies to the box's own connections pass without connection
+  # tracking. KasmVNC's WebRTC port (UDP, the live view's number, bound on every address), which the ALB cannot carry,
+  # stays box-local. The file's first two lines delete any table from an earlier start, so nft -f replaces the whole
+  # table in one transaction.
   CDP=0
   if id browsermcp >/dev/null 2>&1; then CDP="{ 0, $(id -u browsermcp) }"; fi
   cat > /root/.mumbo/firewall.nft <<NFT
@@ -367,7 +370,7 @@ table inet mumbo {
   }
   chain input {
     type filter hook input priority 0; policy accept;
-    iifname != "lo" tcp dport { 9222, 5900-5999 } drop
+    iifname != "lo" tcp flags & (fin|syn|rst|ack) == syn tcp dport != { ${ENVD_PORT}, $DSH_PORT, $LIVE_PORT, ${MUMBO_MCP_PORT} } drop
     iifname != "lo" udp dport $LIVE_PORT drop
   }
 }
