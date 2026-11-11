@@ -1133,12 +1133,15 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
   const memberAuth = async (box) => (await run(box, 'test -f /root/.mumbo/member-auth && echo yes || true')) === 'yes'
   const dshUp = async (box, ports) => (await run(box, `curl -s -o /dev/null -m 5 -w '%{http_code}' http://$(hostname -I | cut -d' ' -f1):${ports.dsh}/ || true`)) !== '000'
   const portsOf = async (box) => portsFrom(await run(box, `cat ${PORTS_MARKER} 2>/dev/null || true`))
-  // A resume or repair failure that is E2B's answer that the box cannot run: the API answered connect with an error (the
-  // SDK has no class for a failed resume; its API answers are SandboxErrors carrying the HTTP status, and a gateway's 502
-  // or 504 means the API was not reached), start.sh exited with an error in the box, or envd answered every look for the
-  // launch token and dsh never came back (launchToken).
-  const cannotRun = (e) => e.dshDown === true || e instanceof CommandExitError
-    || (e instanceof SandboxError && e.statusCode !== undefined && e.statusCode !== 502 && e.statusCode !== 504)
+  // A resume or repair failure that is E2B's answer that the box cannot run: start.sh exited with an error, envd answered
+  // every look for the launch token and dsh never came back (launchToken), or the API answered connect's resume of a box
+  // E2B listed paused (`resumed`) with an error. The SDK has no class for a failed resume; API answers are SandboxErrors
+  // carrying the HTTP status. 502 and 504 are a gateway's (the API's own 504, a placement timeout, is caught as capacity
+  // first); every other status counts as final, a 5xx from an internal API fault included. Connect to a box listed
+  // running resumes nothing, so its API errors (a 500 when the API cannot reach the box's node, a 409 while the box is
+  // being paused) say nothing about the box.
+  const cannotRun = (e, resumed) => e.dshDown === true || e instanceof CommandExitError
+    || (resumed && e instanceof SandboxError && e.statusCode !== undefined && e.statusCode !== 502 && e.statusCode !== 504)
 
   // A restore record whose version S3 does not serve (gone, a delete marker, a malformed id, or any other HEAD error) fails
   // the create as a failed restore would: no fallback to latest.tar.gz, and the record stays for the operator. `status` is
@@ -1247,7 +1250,7 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
           }
           // Without an answer that the box cannot run, the box and its record stay as they are, and the next visit tries
           // again: during a client-proxy outage a recreate would fail too, and the box would be lost (RUNBOOK "Box unreachable").
-          if (!cannotRun(error)) {
+          if (!cannotRun(error, found.state === 'paused')) {
             log(JSON.stringify({ edge: 'error', level: 'error', msg: 'box unreachable', user: email, box: id, region: cell.region, error: error.message }))
             throw Object.assign(error, { status: 503 })
           }

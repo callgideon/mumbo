@@ -1701,9 +1701,13 @@ test('B47: a box E2B lists running that gives no answer is left as it is: 503, a
     'dshUp: the client-proxy\'s 502 for a box E2B lists': [new SandboxNotRunningError('The sandbox was not found: The sandbox was killed or reached its timeout.'), failingCommands],
     'connect: the API unreachable': [fetchFailed, connectFails],
     'connect: a gateway\'s 502 for the API': [Object.assign(new SandboxError('502: Bad Gateway'), { statusCode: 502 }), connectFails],
+    // Connect to a box listed running resumes nothing: the API's error is not an answer about the box.
+    'connect: the API cannot reach the node of a box it lists running': [Object.assign(new SandboxError('500: Error when setting sandbox timeout'), { statusCode: 500 }), connectFails],
+    'connect: the API\'s 500 for a running box whose record says paused': [Object.assign(new SandboxError('500: Error when setting sandbox timeout'), { statusCode: 500 }), connectFails, { launch: 'L', paused: true }],
+    'connect: a running box that is changing state': [Object.assign(new SandboxError('409: Sandbox u1 is changing state'), { statusCode: 409 }), connectFails],
   }
-  for (const [name, [error, connect]] of Object.entries(cases)) {
-    const r = await repairRig({ connect: connect(error) })
+  for (const [name, [error, connect, record]] of Object.entries(cases)) {
+    const r = await repairRig({ connect: connect(error), record })
     const before = await r.store.getBox('u1')
     await assert.rejects(r.b.ensure('a@x.com'), (e) => e === error && e.status === 503, name)
     assert.deepEqual([r.changes(), await r.store.getBox('u1')], [[], before], name)

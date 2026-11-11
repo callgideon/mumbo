@@ -52,7 +52,14 @@ An idle box could not be paused. E2B's own timeout pauses it 15 minutes later re
 Unhandled edge errors (one log line each, with path and user). Read the lines; a burst after a deploy means roll back `edge_tag` in `terraform.tfvars` and apply. A line `box in a region with no cell`, every sweep, names a box record whose `region` is not in `CELLS`: add that cell to `CELLS`, or, if the box is gone, delete its record (`box:<id>` and its member of the set `boxes`). A line `box unreachable`: see "Box unreachable" below.
 
 ### Box unreachable
-An `edge-errors` line `{"edge":"error","level":"error","msg":"box unreachable",…}` names a box (`box`, `region`, `error`) that the edge was resuming or repairing but got no answer for: E2B's API or the cell's client-proxy did not answer or timed out, or the client-proxy answered 502 for a box E2B lists. The edge leaves the box and its record as they are, the person gets the starting page, and their next visit tries again. The edge never recreates the box after such a failure: during a client-proxy outage the new box would fail too, and the old one would be lost. Tell the two causes apart by the cell's other boxes, whose sweep backups also go through the client-proxy:
+An `edge-errors` line `{"edge":"error","level":"error","msg":"box unreachable",…}` names a box (`box`, `region`, `error`) whose resume or repair failed without an answer from E2B that the box cannot run. The edge leaves the box and its record as they are, the person gets the starting page, and their next visit tries again. The edge never recreates the box after such a failure: during a client-proxy outage the new box would fail too, and the old one would be lost. Read `error` first; these are not about the box or the client-proxy:
+- `Unauthorized, please check your credentials`: the cell's E2B API key (the `mumbo-boxes/e2b` secret) is wrong or rotated; every resume and backup of that region fails too.
+- `Service temporarily unavailable, please retry`: E2B's API answered 503 (busy); it clears by itself.
+- `box ports marker`: the box's template wrote no valid ports marker; see "Rebuild the box template".
+- `Error when setting sandbox timeout`: E2B lists the box running but its API cannot reach the box's node; check that node as in `api-node-unhealthy`.
+- A Redis error (`ClientClosedError`, `READONLY`, a socket to the store's port): the edge's store (MemoryDB), not E2B.
+
+Otherwise E2B's API or the cell's client-proxy did not answer or timed out, or the client-proxy answered 502 for a box E2B lists. Tell a hung box from a client-proxy outage by the cell's other boxes, whose sweep backups also go through the client-proxy:
 ```sh
 aws logs filter-log-events --log-group-name /mumbo-boxes/edge --start-time $(( ($(date +%s) - 1200) * 1000 )) \
   --filter-pattern '{ $.msg = "box unreachable" || $.msg = "backup" || $.msg = "backup failed" }' --query 'events[].message' --output text
