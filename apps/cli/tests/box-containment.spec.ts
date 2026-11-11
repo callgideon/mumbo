@@ -6,7 +6,7 @@
  * names must be the one its classification expects and a configured non-root identity of its own, every MCP stdio
  * server that names no identity must start as the dedicated `mcpserver` identity, never as root or `agent`, the
  * project box's `dsh-superagent` row is the founder's overlay row, read with the directories the start script exports,
- * and `web_fetch` goes to the DeepSeek Fetch API at the edge's model host. The person box includes the door to Mumbo
+ * `agent`'s PATH names only root's directories and its own npm global prefix and ~/.local/bin, and `web_fetch` goes to the DeepSeek Fetch API at the edge's model host. The person box includes the door to Mumbo
  * (`@mumbo/mcp`), whose tools the edge calls for the person.
  */
 
@@ -446,6 +446,14 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     const runAs = subprocess.runAs
     expect(runAs?.set).toMatchObject({ HOME: '/home/agent', TMPDIR: '/home/agent/tmp' })
     expect(runAs?.secretNames).toEqual(expect.arrayContaining(['DEEPSEEK_API_KEY', 'MUMBO_MEMBER_KEY']))
+    // /usr/local is root's alone, so agent installs npm packages under its own global prefix. Every directory on its PATH
+    // is root's or agent's own: a project box's worker shims and gh wrapper first, as dsh-superagent sets them in its own
+    // environment, then agent's npm and ~/.local/bin directories, then the system's.
+    expect(runAs?.set.NPM_CONFIG_PREFIX).toBe('/home/agent/.npm-global')
+    expect(runAs?.set.PATH?.split(':')).toEqual([
+      ...box === 'project' ? ['/var/lib/mumbo/superagent/worker-bin', '/usr/local/lib/mumbo/bin'] : [],
+      '/home/agent/.npm-global/bin', '/home/agent/.local/bin', ...SYSTEM_PATH,
+    ])
     // Shell activity records and command spill files leave dsh's root-only temporary directory for ones agent can reach.
     expect([subprocess.shellActivityDirectory, subprocess.spillDirectory]).toEqual(['/run/dsh-shell', '/var/lib/mumbo/subprocess-spill'])
     // /root/.mumbo stays 0700: no value a run-as child receives names a path inside it.
@@ -467,7 +475,6 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
       expect(superagent).toMatchObject({ workDirectory: '/root/work', workerDirectory: '/var/lib/mumbo/superagent', ghConfigDirectory: '/root/.config/gh' })
       expect(modelRoots).toContain('/root/work')
       // Workers receive the run-as environment, not dsh's, so it carries what dsh-superagent sets in its own.
-      expect(runAs?.set.PATH?.split(':')[0]).toBe('/var/lib/mumbo/superagent/worker-bin')
       expect(runAs?.set).toMatchObject({ GIT_CONFIG_GLOBAL: '/var/lib/mumbo/superagent/worker-gitconfig', GIT_CONFIG_NOSYSTEM: '1', GIT_ASKPASS: '', GIT_TERMINAL_PROMPT: '0' })
     }
     // Each of these must exist before dsh starts, so the documented box layout names every one.

@@ -752,11 +752,14 @@ describe('run-as exec bootstrap', () => {
 })
 
 linux('the server identity', () => {
-  /** A provider whose `serverIdentity` names `mcpserver`, this process's own identity with `server` as its own config. */
-  async function serving(server: Partial<RunAs> = {}): Promise<Context> {
+  /**
+   * A provider whose `serverIdentity` names `mcpserver`, this process's own identity with `server` as its own config;
+   * `agent` changes the run-as identity's.
+   */
+  async function serving(server: Partial<RunAs> = {}, agent: Partial<RunAs> = {}): Promise<Context> {
     const ctx = new Context()
     fibers.push(await ctx.plugin(LocalSubprocessRuntime, {
-      runAs: runAs({ inherit: [] }),
+      runAs: runAs({ inherit: [], ...agent }),
       identities: { mcpserver: runAs({ inherit: [], set: { HOME: realpathSync(directory()), USER: 'mcpserver', PATH: '/usr/bin:/bin' }, ...server }) },
       serverIdentity: 'mcpserver',
     }))
@@ -802,6 +805,18 @@ linux('the server identity', () => {
       serverIdentity: (change as { serverIdentity?: string }).serverIdentity ?? 'mcpserver',
     })).rejects.toThrow(message.replace('OWN', own))
     expect(ctx.get('subprocess')).toBeUndefined()
+  })
+
+  it('runs the run-as user with its own directory on PATH, and refuses that directory on the server identity\'s PATH', async () => {
+    // Such as npm's global prefix in agent's home, owned by the run-as user.
+    const prefix = realpathSync(directory())
+    const path = `${prefix}:/usr/bin:/bin`
+    const ctx = await serving({}, { set: { HOME: '/home/agent', USER: 'agent', PATH: path } })
+    const handle = ctx.subprocess.spawn(reportSpec(directory()))
+    await expect(handle.done).resolves.toEqual({ exitCode: 0, signal: null })
+    expect((JSON.parse(handle.collected.stdout!.readFrom(0).text) as Report).env.PATH).toBe(path)
+    await expect(serving({ set: { HOME: realpathSync(directory()), USER: 'mcpserver', PATH: path } }))
+      .rejects.toThrow(`identities.mcpserver PATH entry ${JSON.stringify(prefix)} must be an absolute existing directory that only root can change`)
   })
 
   it('refuses a home spelled through a link, owned by another user, or the identity cannot search', () => {
