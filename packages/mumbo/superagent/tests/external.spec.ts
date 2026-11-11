@@ -665,7 +665,7 @@ describe('submit', () => {
     expect(github.pulls).toMatchObject([{ number: 7, draft: true }])
   })
 
-  it('records nothing when a GitHub write fails or the branch has a pull request the Ticket cannot claim, and refuses while paused', async () => {
+  it('records nothing when a GitHub call fails or the branch has a pull request the Ticket cannot claim, and refuses while paused', async () => {
     const github = fakeGithub()
     const ticket = await requested('m1')
     const view = await claimed()
@@ -680,6 +680,10 @@ describe('submit', () => {
     unchanged()
     vi.mocked(Commands.prototype.gh).mockRejectedValueOnce(new CliError('gh: Bad Gateway (HTTP 502)', 502))
     expect(await submit(view)).toEqual({ status: 500, body: { error: 'gh: Bad Gateway (HTTP 502)' } })
+    unchanged()
+    // A GitHub answer that fails its schema does not blame the worker's request.
+    vi.mocked(Commands.prototype.gh).mockResolvedValueOnce({ commit: {} })
+    expect(await submit(view)).toMatchObject({ status: 400, body: { error: 'Invalid settings: commit.sha' } })
     unchanged()
     github.state.halted = false
     await host.runtime.settings.pause(true, 'panel')

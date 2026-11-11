@@ -64,6 +64,13 @@ export interface HttpHost {
  * Route handlers throw it when request bodies are malformed or target records are missing, and registerHttp serializes its status and message in the HTTP response.
  */
 class RouteError extends Error { constructor(readonly status: 400 | 404, message: string) { super(message) } }
+/** In Mumbo (`UPSTREAM.md` S13), a worker route's body that its schema refuses; any other zod failure is not the request's. */
+class InvalidRequest extends Error { constructor(readonly zod: z.ZodError) { super('Invalid request') } }
+async function workerBody<T>(schema: z.ZodType<T>, body: () => Promise<unknown>): Promise<T> {
+  const parsed = schema.safeParse(await body())
+  if (!parsed.success) throw new InvalidRequest(parsed.error)
+  return parsed.data
+}
 async function readBody(req: IncomingMessage, maxBytes = 128 * 1024): Promise<unknown> {
   let size = 0; const chunks: Buffer[] = []
   for await (const chunk of req) {
@@ -88,15 +95,14 @@ function panelAdmitted(principal: { readonly kind: string; readonly email?: unkn
   if (principal.kind === 'owner') return true
   return principal.kind === 'edge-member' && typeof principal.email === 'string' && admins.includes(principal.email)
 }
-/**
- * Maps errors to HTTP status codes and structured payloads that the panel words by code. A zod failure names what is invalid,
- * `subject`: in Mumbo (`UPSTREAM.md` S13), `request` for a worker route's body, else `settings`.
- */
-function failure(error: unknown, subject: 'request' | 'settings'): [number, Record<string, unknown>] {
-  if (error instanceof z.ZodError) {
-    const issues = error.issues.map(issue => ({ path: issue.path.join('.'), message: issue.message }))
-    return [400, { error: `Invalid ${subject}: ${issues.map(issue => issue.path).join(', ')}`, issues }]
-  }
+function invalid(subject: 'request' | 'settings', error: z.ZodError): [number, Record<string, unknown>] {
+  const issues = error.issues.map(issue => ({ path: issue.path.join('.'), message: issue.message }))
+  return [400, { error: `Invalid ${subject}: ${issues.map(issue => issue.path).join(', ')}`, issues }]
+}
+/** Maps errors to HTTP status codes and structured payloads that the panel words by code. */
+function failure(error: unknown): [number, Record<string, unknown>] {
+  if (error instanceof InvalidRequest) return invalid('request', error.zod)
+  if (error instanceof z.ZodError) return invalid('settings', error)
   if (error instanceof SetupError) return [400, { error: error.message, setup: error.problem }]
   if (error instanceof RouteError) return [error.status, { error: error.message }]
   if (error instanceof UserError) return [error.missing ? 404 : 400, { error: error.message, code: error.code, values: error.values }]
@@ -225,10 +231,10 @@ function routes(runtime: HttpHost): Routes {
       return savePrompts(runtime, request.config, request.baseRevision, 'panel')
     },
     'POST prompts/preview': async input => runtime.prompts.preview(await promptBody(input)),
-    'POST workers/claim': async ({ body }) => runtime.external.claim(ClaimRequestSchema.parse(await body())),
-    'POST workers/:assignment/report': async ({ params, body }) => runtime.external.report(params.assignment, ReportRequestSchema.parse(await body())),
-    'POST workers/:assignment/fence': async ({ params, body }) => runtime.external.fence(params.assignment, FenceRequestSchema.parse(await body())),
-    'POST workers/:assignment/submit': async ({ params, body }) => runtime.external.submit(params.assignment, SubmitRequestSchema.parse(await body())),
+    'POST workers/claim': async ({ body }) => runtime.external.claim(await workerBody(ClaimRequestSchema, body)),
+    'POST workers/:assignment/report': async ({ params, body }) => runtime.external.report(params.assignment, await workerBody(ReportRequestSchema, body)),
+    'POST workers/:assignment/fence': async ({ params, body }) => runtime.external.fence(params.assignment, await workerBody(FenceRequestSchema, body)),
+    'POST workers/:assignment/submit': async ({ params, body }) => runtime.external.submit(params.assignment, await workerBody(SubmitRequestSchema, body)),
   }
 }
 function decoded(segment: string): string {
@@ -272,7 +278,7 @@ export function registerHttp(ctx: Context, runtime: HttpHost): () => void {
         if (!route) throw new RouteError(404, 'Unknown operation')
         const query = Object.fromEntries(url.searchParams)
         json(res, 200, await route.run({ params: route.params as never, query, body: maxBytes => readBody(req, maxBytes) }))
-      } catch (error) { json(res, ...failure(error, url.pathname.startsWith('/orchestrator/api/workers/') ? 'request' : 'settings')) }
+      } catch (error) { json(res, ...failure(error)) }
     } })]
   return () => { for (const dispose of disposers) dispose() }
 }
