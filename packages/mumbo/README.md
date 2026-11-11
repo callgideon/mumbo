@@ -7,7 +7,7 @@ kind: "package-group"
 
 ## Summary
 
-The mumbo family holds what a per-user box deployment adds to a running Web host: authenticated access for people's own tools, the pages the box edge serves beside the host, project members, and consent for the assistant's actions with a person's signed-in accounts. Each package attaches to existing services and registers no model tools; `superagent/` is the exception, a pinned copy of an agent that works one GitHub repository in its own Sessions. Each package README owns its contract.
+The mumbo family holds what a per-user box deployment adds to a running Web host: authenticated access for people's own tools, the pages the box edge serves beside the host, project members, consent for the assistant's actions with a person's signed-in accounts, and Run Wild, the mode in which the assistant decides instead of asking. Each package attaches to existing services and registers no model tools; `superagent/` is the exception, a pinned copy of an agent that works one GitHub repository in its own Sessions. Each package README owns its contract.
 
 ## Table of Contents
 
@@ -29,6 +29,7 @@ Each package owns one deployment concern.
 | [`browser-consent/`](browser-consent/README.md) | Reads free, writes ask, denied pages never: consent and an audit record for Playwright MCP browser writes in the person's own Chromium, consent for desktop input, and the person's takeover of the browser |
 | [`edge-member/`](edge-member/README.md) | Admits project members from the edge-signed header as non-owner principals with collaborator access |
 | [`mcp/`](mcp/README.md) | Authenticated loopback MCP server through which allowlisted people drive the host's assistant Session |
+| [`run-wild/`](run-wild/README.md) | Run Wild, the permission preset in which the assistant decides tool approvals, plan reviews and questions instead of asking the person, with an audit record of each decision |
 | [`superagent/`](superagent/README.md) | Pinned copy of the upstream superagent: a proactive agent that turns authorized GitHub requests into Tickets and works each in its own Session |
 
 -----
