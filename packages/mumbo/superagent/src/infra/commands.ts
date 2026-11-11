@@ -6,7 +6,8 @@ import { z } from 'zod'
 import type { Deployment } from '../deployment.ts'
 
 const exec = promisify(execFile)
-const TIMEOUT_MS = 90_000
+/** Time limit of one command, and of one call a Channel makes without a subprocess, in milliseconds. */
+export const COMMAND_TIMEOUT_MS = 90_000
 /**
  * Error thrown by Commands when a CLI invocation fails, capturing stderr diagnostics, API error codes, and exit status without echoing command arguments.
  * Source channels and pollers inspect its code to distinguish deleted conversations from retryable failures.
@@ -34,7 +35,7 @@ function ended(error: unknown): string {
   const { killed, signal, code } = (error ?? {}) as { killed?: boolean; signal?: string | null; code?: unknown }
   if (code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') return 'printed more output than it may'
   // `execFile` timeout terminates the process with SIGTERM and sets `killed: true`.
-  if (killed && signal === 'SIGTERM') return `timed out after ${TIMEOUT_MS / 1000} s`
+  if (killed && signal === 'SIGTERM') return `timed out after ${COMMAND_TIMEOUT_MS / 1000} s`
   if (signal) return `was stopped by ${signal}`
   if (typeof code === 'number') return `exited with code ${code}`
   return typeof code === 'string' ? `could not run: ${code}` : 'failed'
@@ -60,14 +61,16 @@ export class Commands {
   /**
    * @param resolved - returns the resolved deployment setup, or throws while setup is still pending.
    * @param environment - variables overriding `process.env` for every command (such as isolated git settings).
+   * @param signal - aborts every command, and every call a Channel makes without a subprocess; the Runtime's lifetime, which
+   * `Runtime.stop` aborts.
    */
-  constructor(private readonly resolved: () => Deployment, private readonly environment: Record<string, string | undefined>, private readonly signal: AbortSignal) {}
+  constructor(private readonly resolved: () => Deployment, private readonly environment: Record<string, string | undefined>, readonly signal: AbortSignal) {}
   get deployment(): Deployment { return this.resolved() }
   get repository(): string { return this.deployment.repository }
   withSignal(signal?: AbortSignal): Commands { return signal ? new Commands(this.resolved, this.environment, AbortSignal.any([this.signal, signal])) : this }
   async run(program: string, args: string[], cwd?: string): Promise<string> {
     try {
-      const { stdout } = await exec(program, args, { cwd, signal: this.signal, timeout: TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024,
+      const { stdout } = await exec(program, args, { cwd, signal: this.signal, timeout: COMMAND_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024,
         env: { ...process.env, ...this.environment, GH_PROMPT_DISABLED: '1', LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1', LARKSUITE_CLI_NO_SKILLS_NOTIFIER: '1' } })
       return stdout
     } catch (error) { throw commandError(error, program) }

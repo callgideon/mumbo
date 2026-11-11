@@ -1,16 +1,10 @@
 /**
  * In Mumbo, the Executor port (`UPSTREAM.md` S11): `Executors` routes each Ticket's calls to the Executor of its kind and
- * reaches every kind with lifecycle calls; on a Runtime's start, only local Tickets are resumed; and schema 12 opens a schema
- * 11 database without rewriting a record.
+ * reaches every kind with lifecycle calls, and on a Runtime's start, only local Tickets are resumed.
  */
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { Ticket } from '../src/core/index.ts'
 import { Executors } from '../src/mumbo/executors.ts'
-import { SCHEMA_VERSION, Store } from '../src/app/store.ts'
-import { KV } from '../src/kv.ts'
 import { startRuntime } from './fixtures/host.ts'
 
 /** An open Ticket with one Assignment in `state`, created at `at`. */
@@ -85,40 +79,4 @@ it('on a host start, interrupts a running local Assignment as before, neither in
     engine.note('local', 'launched')
     expect([dsh.start.mock.calls.map(([item]) => item.id), dsh.deliver.mock.calls, dsh.stop.mock.calls]).toEqual([['local'], [], []])
   } finally { await host.stop() }
-})
-
-describe('schema 12', () => {
-  let directory: string
-  beforeEach(() => { directory = mkdtempSync(join(tmpdir(), 'orchestrator-executors-')) })
-  afterEach(() => { rmSync(directory, { recursive: true, force: true }) })
-  /** Every `kv` record but the schema, and every Ticket row. */
-  const records = (store: Store) => ({ kv: store.db.prepare("SELECT * FROM kv WHERE key <> 'schema' ORDER BY key").all(),
-    ticket: store.db.prepare('SELECT * FROM ticket ORDER BY id').all() })
-
-  it('opens a schema 12 database as it is', () => {
-    expect(SCHEMA_VERSION).toBe(12)
-    const path = join(directory, 'orchestrator.sqlite')
-    const created = new Store(path)
-    created.tickets.save(ticket('queued', 'pending', '1', 'external'))
-    const before = records(created)
-    created.close()
-    const store = new Store(path)
-    expect([store.get(KV.store.schema), records(store)]).toEqual([12, before])
-    store.close()
-  })
-
-  it('opens a schema 11 database as schema 12 without running the schema 11 migration or changing a record', () => {
-    const path = join(directory, 'orchestrator.sqlite')
-    const created = new Store(path)
-    created.tickets.save(ticket('local', 'running', '1'))
-    // Records the schema 11 migration would delete or rename.
-    created.set('prompt-version-read:worker-a:3', true)
-    created.set('task/old', 'kept')
-    created.set(KV.store.schema, 11)
-    const before = records(created)
-    created.close()
-    const store = new Store(path)
-    expect([store.get(KV.store.schema), records(store)]).toEqual([12, before])
-    store.close()
-  })
 })

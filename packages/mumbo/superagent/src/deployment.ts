@@ -27,6 +27,13 @@ export const Config = s.object({
     login: s.string().pattern(/^[A-Za-z0-9-]+\[bot\]$/).required().description('The App\'s bot login, `<slug>[bot]`.'),
     userId: s.number().min(1).step(1).required().description('The bot user\'s numeric id, from `gh api \'users/<slug>[bot]\' --jq .id`; not the App ID.'),
   })]).description('Act on GitHub as a GitHub App\'s bot. The agent CLI reaches GitHub with an installation token, which cannot read `/user` or notifications: setup takes the identity from here, and the GitHub Source reads the repository\'s Issues, pull requests and comments instead of notifications. Unset, the CLI is signed in to a user account.'),
+  edge: s.union([s.object({
+    // Requests to it carry the box token, so plain `http` is accepted on the loopback address only.
+    url: s.string().pattern(/^(?:https:\/\/[^\s/]+|http:\/\/127\.0\.0\.1(?::\d+)?)\/\S*$/).required()
+      .description('The mumbo edge\'s `report_to_member` MCP endpoint, such as `https://<model host>/mcp/report`; `http` only on 127.0.0.1.'),
+    tokenFile: absolute('File holding this box\'s edge token, which the edge writes; read on each call.').required(),
+    project: s.string().pattern(/^[a-z0-9]{16}$/).required().description('The id of the project this box serves.'),
+  })]).description('Where relay replies go: the mumbo edge\'s `report_to_member` tool. Unset, relay replies wait.'),
   workerLeaseMinutes: s.natural().min(2).max(60).default(20)
     .description('How long a worker outside the box holds an external Ticket without a call, in minutes; each call renews it.'),
 })
@@ -40,6 +47,8 @@ export interface Machine {
   panelAdmins: readonly string[]
   /** Set when the agent acts as a GitHub App's bot (App mode); unset when its CLI is signed in to a user account. */
   githubApp?: { login: string; userId: number } | undefined
+  /** The mumbo edge's `report_to_member` endpoint, this box's token file and project id, for relay replies; unset outside a project box. */
+  edge?: { url: string; tokenFile: string; project: string } | undefined
   /** In Mumbo, the lease of a worker outside the box on an external Ticket, in minutes (`UPSTREAM.md` S13). */
   workerLeaseMinutes: number
 }
@@ -53,8 +62,8 @@ const MOVED: Record<string, string> = {
 export function machineOf(config: DeploymentConfig): Machine {
   const unknown = Object.keys(config).filter(key => !(key in (Config.dict ?? {})))
   if (unknown.length) throw new Error(`dsh-superagent configuration has keys it does not use: ${unknown.map(key => MOVED[key] ? `${key} (now ${MOVED[key]})` : key).join(', ')}; the keys are ${Object.keys(Config.dict ?? {}).join(', ')}`)
-  const { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins, githubApp, workerLeaseMinutes } = config
-  return { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins, githubApp, workerLeaseMinutes }
+  const { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins, githubApp, edge, workerLeaseMinutes } = config
+  return { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, panelAdmins, githubApp, edge, workerLeaseMinutes }
 }
 
 export const GithubAccountsSchema = z.object({

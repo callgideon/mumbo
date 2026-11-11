@@ -3,7 +3,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Readable } from 'node:stream'
 import { type McpServer, WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/server'
-import { checkKey, checkPrincipal, readKeyName } from './auth.ts'
+import { checkKey, checkPrincipal, type ProjectId, readKeyName, readReportProject } from './auth.ts'
 
 /** Largest accepted request body: room for the largest valid tool call after JSON escaping. */
 const MAX_BODY_BYTES = 1024 * 1024
@@ -14,14 +14,20 @@ const FORWARDED_HEADERS = ['accept', 'content-type', 'content-length', 'mcp-prot
 /** Header naming the caller's key, read only once the key authenticated the request. */
 const KEY_NAME_HEADER = 'x-mumbo-key-name'
 
+/** Header naming the project whose report the request carries, read only once the key authenticated the request. */
+const REPORT_HEADER = 'x-mumbo-report-project'
+
 /** Values the route handler needs, fixed at plugin load. */
 export interface RouteOptions {
   /** The current trimmed bearer key, read per request; `undefined` when it cannot be read or is empty. */
   readonly key: () => Promise<string | undefined>
   /** Principal handles allowed to call. */
   readonly allowlist: readonly string[]
-  /** Build a fresh MCP server whose tools act for one principal, through the key named `via` when the edge named it. */
-  readonly buildServer: (principal: string, via: string | undefined) => McpServer
+  /**
+   * Build a fresh MCP server whose tools act for one principal, through the key named `via` when the edge named it, or
+   * for the project `report` whose report the edge relays to the principal.
+   */
+  readonly buildServer: (principal: string, via: string | undefined, report: ProjectId | undefined) => McpServer
 }
 
 /** Answer a refused request with a plain-text reason that carries no request data. */
@@ -34,7 +40,7 @@ function refuse(response: ServerResponse, status: 400 | 401 | 403 | 405 | 503, m
  * Create the `/mcp` handler. Only `POST` is served (`405` otherwise); an
  * unreadable or empty key file answers `503`, a wrong or missing key `401`,
  * a malformed or unlisted principal `403`, and a repeated or malformed key
- * name `400`, before any body is read. Each accepted request gets its own
+ * name or report project, or both on one request, `400`, before any body is read. Each accepted request gets its own
  * server and transport, closed once the JSON response is written; the
  * transport answers `413` for a body over 1 MiB and its JSON-RPC errors for
  * protocol failures.
@@ -69,11 +75,21 @@ export function createRouteHandler(options: RouteOptions): (request: IncomingMes
       refuse(response, 400, `malformed ${KEY_NAME_HEADER}`)
       return
     }
+    const report = readReportProject(request.headersDistinct[REPORT_HEADER]?.join(', '))
+    if (report === false) {
+      refuse(response, 400, `malformed ${REPORT_HEADER}`)
+      return
+    }
+    // A report comes from a project, not through a person's key.
+    if (report !== undefined && via !== undefined) {
+      refuse(response, 400, `${REPORT_HEADER} with ${KEY_NAME_HEADER}`)
+      return
+    }
     const headers = new Headers()
     for (const name of FORWARDED_HEADERS) {
       for (const value of request.headersDistinct[name] ?? []) headers.append(name, value)
     }
-    const server = options.buildServer(principal, via)
+    const server = options.buildServer(principal, via, report)
     try {
       const transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: undefined,

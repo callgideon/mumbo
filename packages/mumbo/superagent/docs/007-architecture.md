@@ -377,7 +377,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/sources/feishu-loops.ts` | The Feishu loops: the event consumer, history recovery, chat names and polling of subscribed topics |
 | `src/sources/feishu-channel.ts` | The Feishu Channel: topic replies, `sent` or `gone` |
 | `src/sources/feishu-read.ts` | The `feishu/` reads of a Trigger's message, its root, parent and topic, and `feishuThreadContext`, which gives them to assessments with their images |
-| `src/sources/relay.ts` | In Mumbo, the relay Source kind and its route `/orchestrator/relay`, which the main plugin entry registers: messages the edge posts for a project member as Triggers from that member (`UPSTREAM.md` S9) |
+| `src/sources/relay.ts` | In Mumbo, the relay Source kind and its route `/orchestrator/relay`, which the main plugin entry registers: messages the edge posts for a project member as Triggers from that member (`UPSTREAM.md` S9), and its Channel, which reports replies to the member through the edge's `report_to_member` tool (`UPSTREAM.md` S10) |
 | `src/sources/admission-context.ts` | The bounded window an assessment starts from: the first pages of a Trigger's Thread, read through its kind, and the messages around the Trigger |
 | `src/sources/feishu-image.ts` | Reads a Feishu message's image as an attachment for the assessing Session |
 | `src/client/index.tsx` | The client plugin entry: the sidebar entry, the main panel and the page in DeepSeek Harness's Plugin Manager |
@@ -413,8 +413,8 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/stage.spec.ts` | The Ticket stages, row by row |
 | `tests/policy.spec.ts` | Source scope, the gate, the admission table, Mandate revalidation, the Policy version, settings migrations and assessment outcomes |
 | `tests/registry.spec.ts` | `SourceRegistry`: instances, validation, Policy parts, Channels and Thread context |
-| `tests/relay.spec.ts` | In Mumbo, the relay Source on a running Runtime: requests and context as Triggers and candidates, the Policy's allowed list and its every-member switch, admission, idempotent message ids, malformed bodies and continued conversations (`UPSTREAM.md` S9) |
-| `tests/executors.spec.ts` | In Mumbo, `Executors` routing and lifecycle, a host start that resumes only local Tickets, and schema 12 opening a schema 11 database without rewriting a record (`UPSTREAM.md` S11) |
+| `tests/relay.spec.ts` | In Mumbo, the relay Source on a running Runtime: requests and context as Triggers and candidates, the Policy's allowed list and its every-member switch, admission, idempotent message ids, malformed bodies and continued conversations (`UPSTREAM.md` S9); replies reported to a fake edge, retried, dropped as gone, cut to the limit, waiting without a token or an edge, and aborted when the Runtime stops (`UPSTREAM.md` S10) |
+| `tests/executors.spec.ts` | In Mumbo, `Executors` routing and lifecycle, and a host start that resumes only local Tickets (`UPSTREAM.md` S11) |
 | `tests/external.spec.ts` | In Mumbo, external Tickets on a running Runtime: relayed requests with `worker: external`, claims and their refusals, idempotent claim retries, reports and their lease checks, lease expiry and hand-off, requeues, a restart, and admission (`UPSTREAM.md` S13) |
 | `tests/sources.spec.ts` | The Feishu and GitHub Sources on a `SourceContext`: translation, polls and read positions, the pull request rules, health |
 | `tests/commands.spec.ts` | CLI calls as the deployment's accounts, the Channels' answers, and repository-scoped GitHub calls |
@@ -492,7 +492,7 @@ Read caches use bounded in-memory `TextCache` instances and are lost on restart.
 
 Nothing deletes old records yet, so these grow without bound: the `trigger`, `disposition` and `decision` rows; ended Tickets and their Threads; the outbox's receipts; and in `kv`, every saved settings revision and prompt version, the prompt revisions each Session worked under, and the Sources' records per Thread and per Issue or pull request.
 
-`SCHEMA_VERSION` only increases. A database of a newer version refuses to start; `src/app/migration.ts` upgrades a database of the pre-release schema 10 once, at start, and refuses an older one. In Mumbo, schema 12 changes no record: a schema 11 database opens as schema 12 unchanged, and a build that predates external Tickets (`Ticket.executor`) refuses it (`UPSTREAM.md` S11).
+`SCHEMA_VERSION` only increases. A database of a newer version refuses to start; `src/app/migration.ts` upgrades a database of the pre-release schema 10 once, at start, and refuses an older one.
 
 ## Model-facing interfaces
 

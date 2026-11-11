@@ -29,8 +29,8 @@ afterEach(async () => {
   vi.unstubAllEnvs()
 })
 
-const ENV = ['MUMBO_PANEL_ADMINS', 'MUMBO_GITHUB_APP_LOGIN', 'MUMBO_GITHUB_APP_USER_ID'] as const
-interface Booted { home: string; stateDir?: string; panelAdmins?: unknown; githubApp?: unknown; rejection?: string; failure?: string }
+const ENV = ['MUMBO_PANEL_ADMINS', 'MUMBO_GITHUB_APP_LOGIN', 'MUMBO_GITHUB_APP_USER_ID', 'MUMBO_EDGE_MCP_URL', 'MUMBO_EDGE_TOKEN_FILE', 'MUMBO_PROJECT_ID'] as const
+interface Booted { home: string; stateDir?: string; panelAdmins?: unknown; githubApp?: unknown; edge?: unknown; rejection?: string; failure?: string }
 /** Boot the project overlay's rows with `env` (unset variables are empty); returns the machine settings `dsh-superagent` resolved, the rejection of `machineOf`, or the load failure of its configuration. */
 async function boot(env: Partial<Record<(typeof ENV)[number], string | undefined>> = {}): Promise<Booted> {
   dir = mkdtempSync(join(tmpdir(), 'dsh-project-loader-'))
@@ -54,7 +54,9 @@ async function boot(env: Partial<Record<(typeof ENV)[number], string | undefined
       seen.stateDir = resolved.stateDir
       seen.panelAdmins = (resolved as { panelAdmins?: unknown }).panelAdmins
       try {
-        seen.githubApp = machineOf(resolved).githubApp
+        const machine = machineOf(resolved)
+        seen.githubApp = machine.githubApp
+        seen.edge = machine.edge
       } catch (error) {
         // The plugin refuses keys its Config does not list; kept so the test reports it after the other assertions.
         seen.rejection = String(error)
@@ -108,6 +110,21 @@ describe('project-box overlay in the real Loader', () => {
     const result = await boot(env)
     expect(result.failure).toMatch(/githubApp/)
     // Validation stops the plugin before it applies, so it never runs in user mode.
+    expect(result.stateDir).toBeUndefined()
+  })
+  const EDGE = { MUMBO_EDGE_MCP_URL: 'https://llm.app.mumbo.si/mcp', MUMBO_EDGE_TOKEN_FILE: '/root/.mumbo/edge.token', MUMBO_PROJECT_ID: '0123456789abcdef' }
+  it.each([
+    ['all three variables', EDGE, { url: EDGE.MUMBO_EDGE_MCP_URL, tokenFile: EDGE.MUMBO_EDGE_TOKEN_FILE, project: EDGE.MUMBO_PROJECT_ID }],
+    ['no variable', {}, undefined],
+  ])('resolves the edge from %s', { timeout: 60_000 }, async (_name, env, expected) => {
+    const result = await boot(env)
+    expect(result.edge).toEqual(expected)
+    expect(result.rejection).toBeUndefined()
+    expect(result.failure).toBeUndefined()
+  })
+  it('fails to load dsh-superagent with only some of the edge variables', { timeout: 60_000 }, async () => {
+    const result = await boot({ MUMBO_EDGE_MCP_URL: EDGE.MUMBO_EDGE_MCP_URL, MUMBO_PROJECT_ID: EDGE.MUMBO_PROJECT_ID })
+    expect(result.failure).toMatch(/edge/)
     expect(result.stateDir).toBeUndefined()
   })
 })
