@@ -958,7 +958,7 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
       - `browser_run_code_unsafe`, which runs model code inside that server, is hard-denied. In-page `browser_evaluate` keeps asking.
       - `browser_file_upload` paths are limited to the shared Downloads. The agent copies a file there first, so `browsermcp` needs no workspace access.
       - **Uploads go through a staged copy** **[2026-11-11, B24 round-6 ruling]**. The model can change files in Downloads (`2770`, group `shared`) while the person is deciding. So consent works like this:
-        - It opens the file named under Downloads (a regular file, by its real path, following no link).
+        - It opens a file directly in Downloads (a name with no `/`) with `O_NOFOLLOW` and `O_NONBLOCK`, and refuses anything but a regular file or one over `uploadMaxBytes` (default 512 MiB). `/home/shared` is root's, so `agent` cannot replace Downloads itself, and that one open is race-free.
         - Root copies it to `/var/lib/mumbo/uploads/<nonce>/<name>`, readable by `browser` and `browsermcp` and never by `agent`.
         - The ask shows the copy's name, size and SHA-256 prefix.
         - The tool gets the copy's path, and the copy is deleted after the call.
@@ -1025,12 +1025,18 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
   - `/home/browser` is `0700` for `browser`, and the Chrome policy file is root-owned.
   - The X authority file stays `0600` for `browser`.
   - There is no `sudo`.
-- **Network** (iptables owner match): `agent` can't connect to:
+- **Network** (a native nftables table, matching the socket's user with `meta skuid`): `agent` can't connect to:
   - the debugging port (`9222`);
   - the VNC ports;
   - E2B's in-box agent `envd` (`49983`), which runs commands as root;
   - dsh's own port.
   - In project boxes it still reaches the local GitHub proxy (`8899`).
+  - **Why nftables, not iptables** **[2026-11-11, throwaway box]:** E2B's 6.1 kernel has nf_tables but no `xt_owner`, so iptables-nft's `-m owner` fails ("Extension owner revision 0 not supported").
+    - The B24 template's rules are one `inet` table (IPv4 and IPv6 together), loaded atomically with `nft -f` from a file the start script writes, and replaced whole on every start.
+    - The template installs `nftables`.
+    - The template's smoke box loads the table and checks that `agent` is refused and root admitted on a test port, or the build fails. A template whose start script can't run is never published.
+    - If `meta skuid` is missing too: build our own self-hosted E2B kernel with `CONFIG_NETFILTER_XT_MATCH_OWNER`, rather than wait for 6.18.
+    - Never best effort: the debugging port has no authentication, so a connection to it reads every cookie.
 - **Cost to the person.** Installing system software (`apt`) needs root, so the agent and the Terminal tab can't. Project work already runs in sandboxes. Anything the person's box needs comes through the template or the operator.
 - **Escape tests**, run in a real box as `agent`, each of which must fail:
   - read `Login Data`, or anything else under `/home/browser`, with the shell and with the file tools;
@@ -1097,7 +1103,7 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
 | **B21** | mumbo-impl | Edge, by region (section 17c) | R6 |
 | **B22** | mumbo-impl | Edge, moving between regions (section 17c) | B21 |
 | **B23** **[founder: yes, 2026-11-10]** | mumbo-impl | Mumbo's push: a per-person ntfy topic set up from the home page, and a box "notify" call through the edge | B17 |
-| **B24** | mumbo-impl | Agent containment (above): the `agent` user and its environment through a harness "run as" on the subprocess seam; the file tools' readable-roots allowlist; box permissions and the iptables rules; the escape tests in a real box. Agent Notes, READMEs and tests per the repository rules | — (start now) |
+| **B24** | mumbo-impl | Agent containment (above): the `agent` user and its environment through a harness "run as" on the subprocess seam; the file tools' readable-roots allowlist; box permissions and the nftables rules; the escape tests in a real box. Agent Notes, READMEs and tests per the repository rules | — (start now) |
 | **B25** | mumbo-impl | Browser-level denials (above): hard-denied URLs before and after every browser tool call in `@mumbo/browser-consent`; Chrome's `URLBlocklist`; computer use asking for writes | — (start now) |
 
 B17, B18, B20, B24 and B25 can run in parallel. B18 and B19 both change the template and the start script's desktop block, so they run in that order. B18 and B24 both touch the start script's desktop block too; B24 rebases on B18. Every sync type, passwords and payments included, is on from B18 (the founder's informed decision); B24 and B25 are the most urgent tasks in this list.
