@@ -44,7 +44,7 @@ const TEXT = {
   'health.notice': 'Notices to the main Session',
   'health.reply': 'Messages to Channels',
   'health.worker': 'Executor event handling',
-  'health.external': 'External worker leases',
+  'health.external': 'External workers',
   'health.requeue': 'External Tickets queued again',
   'health.evals': 'Unavailable Evals',
   none: 'None.',
