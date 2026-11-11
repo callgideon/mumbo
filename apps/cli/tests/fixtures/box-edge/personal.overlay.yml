@@ -19,6 +19,7 @@
           endpoint: http://127.0.0.1:9222
           identity: browsermcp
           outputDir: /var/lib/mumbo/playwright-output
+        deniedUrls: ["chrome:","chrome-untrusted:","chrome-extension:","devtools:","view-source:","file:","https://passwords.google.com","https://pay.google.com","https://payments.google.com","https://myaccount.google.com","https://accounts.google.com"]
         uploadDirectory: /home/shared/Downloads
 - id: llm-pi-ai
   config:
@@ -37,6 +38,7 @@
       name: '@deepseek-ai/dsh-computer-use'
     - id: computer-use-x11
       name: '@deepseek-ai/dsh-computer-use-x11'
+      inject: [mumbo-browser-consent]
       config:
         display: ':1'
         xauthority: /run/x11/auth

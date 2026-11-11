@@ -462,6 +462,8 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     if (box === 'person') {
       expect((byId('browser-consent')?.config as { uploadDirectory?: string }).uploadDirectory).toBe('/home/shared/Downloads')
       expect(modelRoots).toContain('/home/shared/Downloads')
+      // The desktop tool waits for consent's service, so a consent row that fails to load leaves no ungated input.
+      expect(byId('computer-use-x11')?.inject).toEqual(['mumbo-browser-consent'])
     }
     expect(byId('plugin-manager')?.config).toEqual({ modelTools: false })
     expect(byId('workspace-changes')?.config).toEqual({ summaries: false })
