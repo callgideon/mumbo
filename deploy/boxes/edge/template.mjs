@@ -293,16 +293,24 @@ export const dshSmokeStep = (person) => {
 /** The first template step: e2b's runCmd joins the steps with `&&` in one shell, so every file the steps create gets at
  *  most 0755 or 0644 unless a step sets its mode, whatever umask E2B's build runs them with. */
 export const UMASK_STEP = 'umask 022'
+/** GitHub CLI's apt keyring and source (cli.github.com), the same in both templates, each of which makes
+ *  /etc/apt/keyrings first. */
+export const GH_APT = 'curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list'
+/** The person template's step that makes git over https to github.com use gh's sign-in (B48): the system git config,
+ *  root's and 0644, so nothing depends on agent's own ~/.gitconfig, which is scratch. It fails the build unless the
+ *  file reads back with that one helper, root-owned and 0644. */
+export const GH_GITCONFIG_STEP = "git config --system credential.https://github.com.helper '!gh auth git-credential' && chown root:root /etc/gitconfig && chmod 0644 /etc/gitconfig && [ \"$(git config --system --get-all credential.https://github.com.helper)\" = '!gh auth git-credential' ] && [ \"$(stat -c %a:%U:%G /etc/gitconfig)\" = 644:root:root ]"
 /** The user's box is their computer: KasmVNC's display and live view, the XFCE desktop and Google Chrome stable from
  *  Google's apt repository (each build installs the current release). The edge's start script runs KasmVNC as the user
  *  `xvnc`, Chrome as the user `browser` and, on an image with the B24 harness, the XFCE session as `xsession` (before it,
  *  as `browser`), and writes /usr/local/bin/google-chrome, the one way to start Chrome; the menu entry and XFCE's web
  *  browser are aimed at it here. python3-venv gives agent venvs, its route for Python packages, since /usr/local is
- *  root's alone (agentInstallScript): the web image has python3 without it, and only boxes need it. */
+ *  root's alone (agentInstallScript): the web image has python3 without it, and only boxes need it. git and gh (GitHub's
+ *  apt repository, GH_APT) carry the person's own GitHub sign-in (B48, GH_GITCONFIG_STEP). */
 export const BOX_STEPS = [
   UMASK_STEP,
   ...(CHROME_SENSITIVE_SYNC ? [maskingGuardStep()] : []),
-  'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google-chrome.asc && chmod go+r /etc/apt/keyrings/google-chrome.asc && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xfce4-session xfwm4 xfce4-panel xfdesktop4 thunar xfce4-terminal tango-icon-theme librsvg2-common google-chrome-stable dbus-x11 xdotool wmctrl imagemagick xsel xauth fonts-noto-core fonts-noto-color-emoji fonts-noto-cjk procps ripgrep nftables libcap2-bin acl iproute2 python3-venv && rm -rf /var/lib/apt/lists/*',
+  `apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google-chrome.asc && chmod go+r /etc/apt/keyrings/google-chrome.asc && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && ${GH_APT} && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xfce4-session xfwm4 xfce4-panel xfdesktop4 thunar xfce4-terminal tango-icon-theme librsvg2-common google-chrome-stable dbus-x11 xdotool wmctrl imagemagick xsel xauth fonts-noto-core fonts-noto-color-emoji fonts-noto-cjk procps ripgrep nftables libcap2-bin acl iproute2 python3-venv git gh && rm -rf /var/lib/apt/lists/*`,
   kasmvncStep(),
   'id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser',
   // KasmVNC's server runs as its own user, with no home or login, so browser cannot signal it or take its place. Not a
@@ -315,6 +323,7 @@ export const BOX_STEPS = [
   chromePolicyStep(CHROME_SENSITIVE_SYNC),
   // The stock panels, without the panel's first-start dialog; XFCE's web browser and Chrome's menu entry start the box's Chrome.
   'cp /etc/xdg/xfce4/panel/default.xml /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml && sed -i "s/^WebBrowser=.*/WebBrowser=google-chrome/" /etc/xdg/xfce4/helpers.rc && install -d /usr/local/share/applications && sed "s#/usr/bin/google-chrome-stable#/usr/local/bin/google-chrome#" /usr/share/applications/google-chrome.desktop > /usr/local/share/applications/google-chrome.desktop',
+  GH_GITCONFIG_STEP,
   ...usersSteps(true),
   NFT_SMOKE_STEP,
   dshSmokeStep(true),
@@ -325,7 +334,7 @@ export const BOX_STEPS = [
  *  for agent's venvs (as BOX_STEPS), agent containment's users, and the nftables and dsh smoke checks. */
 export const PROJECT_STEPS = [
   UMASK_STEP,
-  'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl gpg git openssl procps ripgrep nftables acl iproute2 python3-venv && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*',
+  `apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl gpg git openssl procps ripgrep nftables acl iproute2 python3-venv && install -d -m 0755 /etc/apt/keyrings && ${GH_APT} && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*`,
   'id ghproxy >/dev/null 2>&1 || useradd -U -M -d /nonexistent -s /usr/sbin/nologin ghproxy',
   ...usersSteps(false),
   NFT_SMOKE_STEP,

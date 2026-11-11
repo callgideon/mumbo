@@ -924,8 +924,15 @@ test('role instructions: assistant with write consent and desktop sign-in; coord
   assert.match(p, /through their own assistants, whose messages reach the project's Superagent as requests or context from the member\./)
   assert.match(p, /no browser and nobody's accounts/)
   assert.doesNotMatch(p, /Downloads/)
+  // B48: the person signs in to GitHub themselves, the device flow first, without the workflow scope; the token never
+  // passes through the chat. The coordinator keeps mumbo-bot through the edge.
+  const github = "\n- GitHub: gh, and git over https, use the user's own GitHub sign-in once they have signed in. To sign them in, run `gh auth login --web --git-protocol https`, which waits until they approve, and show them only the one-time code and the URL it prints; they enter the code there themselves. Tell them plainly that this sign-in reaches every repository they can, organizations included. Never add the `workflow` scope: GitHub Actions files hold CI secrets and stay theirs to change. If they prefer a fine-grained personal access token, they paste it into `gh auth login --with-token` in the desktop terminal themselves. Never ask for a token in the chat, never print one, and never copy gh's sign-in files anywhere.\n"
+  assert.ok(a.indexOf('\n- Never type passwords or one-time codes.') < a.indexOf(github) && a.indexOf(github) < a.indexOf('\n- Files: '))
+  assert.doesNotMatch(p, /GitHub|gh auth/)
   // Agent's home exists only under containment (B24): the role leaves it out, and the start script adds it on a B24 image.
   for (const role of [a, p]) assert.doesNotMatch(role, /\/home\/agent/)
+  // The start script echoes it in single quotes.
+  assert.equal(SCRATCH_LINE, '- /home/agent is scratch space and is not backed up, apart from the gh sign-in in /home/agent/.config/gh; keep durable files in /root/projects.')
   const script = startScript(c, 'T', undefined, a)
   // The agents root is root's own, or under containment (B24) root's and readable by all, outside /root.
   assert.ok(script.includes('AGENTS_HOME=/root/.mumbo/agents\n[ -z "$B24_IMAGE" ] || AGENTS_HOME=/usr/local/share/mumbo/agents\n'))

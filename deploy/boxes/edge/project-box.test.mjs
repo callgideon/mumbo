@@ -50,7 +50,8 @@ test('a user box start script is byte-for-byte what it was before project boxes 
   // getent, so system daemons keep their paths (containment.test.mjs). Then KasmVNC's comment named xvnc its own user
   // rather than a system user, since the template makes it without `-r` (template.mjs).
   // Then the repair first stops the start when E2B's user, or on a B24 template a user it makes, is below uid 1000 (containment.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), '0a94a49e5253542595a72978812b2a9c77dd1dc4dfce4ff633393cd0ad45fc6e')
+  // Then B48: the scratch line names the gh sign-in in /home/agent/.config/gh, which backups keep (backup.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), 'bab8d8000e32aa62d98110c713db03d628c97d0624226e4d75e4a9fe3b0ca513')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -81,7 +82,9 @@ test('a project box start script is byte-for-byte what it was before B18 changed
   // Then the repair took ownership only from login users (uid 1000 or more) and g+w only from login groups, read with
   // getent, so system daemons keep their paths (containment.test.mjs).
   // Then the repair first stops the start when E2B's user, or on a B24 template a user it makes, is below uid 1000 (containment.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), '52eaff8f93a0fa176c7eea2e2da817b86c072d1ad73865ae40e1fd44639792b7')
+  // Then B48: the scratch line names the gh sign-in in /home/agent/.config/gh, which backups keep, on every box, since
+  // the backup is the same for both (backup.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), '37d38edd9a433f736bf725c3c9bd951416e1709d37b6461af1dbcaed8a08c9de')
 })
 
 const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'
