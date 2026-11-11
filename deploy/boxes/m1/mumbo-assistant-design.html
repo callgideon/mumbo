@@ -1953,6 +1953,14 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>The output rules accept the allowed users first, then reset everyone else on those ports. So a socket whose user nft can't read is refused too, as <code>xt_owner</code> refused it.</li>
 </ul>
 </li>
+<li><strong>The box's own address</strong> <strong>[2026-11-11, B24 throwaway finding]:</strong> envd forwards every loopback listener to the box address (<code>socat … bind=169.254.0.21</code>).
+<ul>
+<li>Inside the box this adds nothing. The output rules match the port on any destination, and escape tests cover each protected port on 169.254.0.21.</li>
+<li>From outside, the client proxy could reach any loopback listener with a traffic token. So the input chain drops every new non-loopback TCP connection except to envd, dsh, the live view and the door (SYN-only, so no conntrack is needed), and keeps the WebRTC UDP drop.</li>
+<li>The template build lists TCP listeners after dsh starts. It fails when a listener owned by any user but <code>agent</code> is outside the reset set and not on a commented allowlist.</li>
+<li>The same build check fails when dsh's start line doesn't appear within 60 s, after the B24 image's startup hang.</li>
+</ul>
+</li>
 <li><strong>No root network path for the model</strong> <strong>[2026-11-11, B24 box-side review]:</strong> the owner rules only cover processes, so anything root fetches for the model gets past them.
 <ul>
 <li><code>web_fetch</code>'s HTTP provider (<code>web-fetch-http</code>) runs in root dsh and reaches loopback. From there, <code>http://127.0.0.1:9222/json/list</code> gives every open tab's URL and title, and <code>/json/close</code> closes tabs.</li>
@@ -2266,6 +2274,15 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>the RUNBOOK command, which also works for project boxes;</li>
 <li>offboarding across every region.</li>
 <li>Tests: a move, a target-restore failure that leaves the person on the source box, a visit and a WebSocket during a move, and a second move refused while one runs.</li>
+</ul>
+</li>
+<li><strong>B47, a box E2B still runs is never killed for being unreachable</strong> [2026-11-11; predates B21, live today; lands before R6 step 3]:
+<ul>
+<li>a connection error to the client-proxy drops only the replica's cached target, never the record's launch token (<code>forget</code> goes);</li>
+<li>ensure recreates from backup only when E2B answers that the box can't run (a failed resume, or envd up and dsh still down after <code>start.sh</code>); <code>SandboxNotFoundError</code> creates without a kill;</li>
+<li>a failure to get an answer (unreachable envd or API, a timeout, the client-proxy's 502 for a listed box) is a 503 starting page with the box and record unchanged, and an error-level <code>box unreachable</code> line for the edge-errors alarm. Nothing recreates automatically: during a client-proxy outage a recreate fails too and loses the box;</li>
+<li>a RUNBOOK section tells a hung box (other boxes in the cell answer) from a client-proxy outage (none do); for a hung box the operator kills it and the next visit restores;</li>
+<li>tests for each case, classified by the SDK's error classes.</li>
 </ul>
 </li>
 </ul>
