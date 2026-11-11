@@ -30,7 +30,7 @@ resource "aws_db_instance" "e2b" {
   identifier                   = "${local.name}-e2b"
   engine                       = "postgres"
   engine_version               = "18.6"
-  instance_class               = "db.t4g.medium" # resize in place when load grows
+  instance_class               = var.db_instance_class # resize in place when load grows
   allocated_storage            = 50
   max_allocated_storage        = 500
   storage_type                 = "gp3"
@@ -40,7 +40,6 @@ resource "aws_db_instance" "e2b" {
   username                     = "e2b"
   password                     = random_password.postgres.result # one static secret the api and setup read; rotate with an apply
   multi_az                     = !var.lean
-  availability_zone            = var.lean ? var.db_availability_zone : null
   db_subnet_group_name         = aws_db_subnet_group.e2b.name
   vpc_security_group_ids       = [aws_security_group.data.id]
   backup_retention_period      = 14
