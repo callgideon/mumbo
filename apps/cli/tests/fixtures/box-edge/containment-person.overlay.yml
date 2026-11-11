@@ -1,6 +1,6 @@
 # Agent containment (B24): the rows the edge appends after every other overlay of a person box. The ids are the box's
 # users `agent` (1001), `browsermcp` (1002), `desktop` (1003), and `mcpserver` (1006) and groups `shared` (1005) and
-# `uploads` (1007); the edge's LLM host ends the Fetch API base; the rest is fixed.
+# `uploads` (1009); the edge's LLM host ends the Fetch API base; the rest is fixed.
 # Start every process dsh runs for the model as `agent`, with an explicit environment; the Playwright MCP server runs as
 # `browsermcp` in its home, in no workspace group (only `uploads`, for the copies browser consent stages), writing its files to
 # /var/lib/mumbo/playwright-output (browsermcp, 0700); the X clients of computer use and the Browser tab run as
@@ -32,7 +32,7 @@
       browsermcp:
         uid: 1002
         gid: 1002
-        groups: [1007]
+        groups: [1009]
         inherit: [LANG, LC_ALL, TZ]
         set:
           HOME: /home/browsermcp

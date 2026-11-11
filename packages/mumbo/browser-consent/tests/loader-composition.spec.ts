@@ -7,6 +7,7 @@ import { BrowserUseProviderName } from '@deepseek-ai/dsh-browser-use/brand'
 import * as PlaywrightBrowser from '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp'
 import { mountSessionMcp } from '@deepseek-ai/dsh-experimental-browser-use-runtime/mcp'
 import { ToolCallId, createUserMessage } from '@deepseek-ai/dsh-llm'
+import type { SubprocessChildIdentity } from '@deepseek-ai/dsh-subprocess'
 import { defineContentToolFixture, executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import type { PreToolDecision, ToolExecution, ToolExecutionResult, ToolExecutionToken } from '@deepseek-ai/dsh-tools'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
@@ -58,10 +59,11 @@ async function load(options: LoadOptions = {}) {
   vi.stubEnv('CONSENT_FIXTURE_MODE', options.withoutTabs === true ? 'no-tabs' : '')
   vi.stubEnv('CONSENT_FIXTURE_START', options.start ?? '')
   const staging = join(root, 'staging')
-  await mkdir(staging, { recursive: true, mode: 0o700 })
+  const downloads = join(root, 'Downloads')
+  for (const directory of [staging, downloads]) await mkdir(directory, { recursive: true, mode: 0o700 })
   const consent = {
     browser: { mode: 'attach', endpoint: 'http://127.0.0.1:9', outputDir: join(root, '.playwright-mcp') }, deniedUrls: DENIED_URLS,
-    allowedSites: ['http://allowed.test'], uploadDirectory: root, uploadStaging: staging, ...options.consent,
+    allowedSites: ['http://allowed.test'], uploadDirectory: downloads, uploadStaging: staging, ...options.consent,
   }
   const booted = await bootComposition(root, { ...options, consent })
   contexts.push(booted.ctx)
@@ -226,6 +228,28 @@ describe('browser write consent in the person-box composition', () => {
       expect(invalid.ctx.browserUse.providerName).toBeUndefined()
       expect(browserTools(invalid)).toEqual([])
     }
+  })
+
+  it('mounts no browser, and deletes nothing, when the staging directory is, holds, or lies in the uploads or the server\'s output', { timeout: 60_000 }, async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-overlap-'))
+    roots.push(root)
+    const [downloads, staging] = [join(root, 'Downloads'), join(root, 'staging')]
+    const browser = (outputDir: string) => ({ browser: { mode: 'attach', endpoint: 'http://127.0.0.1:9', outputDir } })
+    // Named like a copy's directory, in the person's Downloads; every refused load leaves it.
+    const kept = join(downloads, '0123456789abcdef0123456789abcdef')
+    await mkdir(downloads, { mode: 0o700 })
+    await mkdir(kept)
+    for (const [consent, key, other, at] of [
+      [{ uploadStaging: downloads }, 'uploadDirectory', downloads, downloads], [{ uploadStaging: root }, 'uploadDirectory', downloads, root],
+      [{ uploadDirectory: root }, 'uploadDirectory', root, staging], [browser(staging), 'browser.outputDir', staging, staging],
+      [browser(join(staging, 'output')), 'browser.outputDir', join(staging, 'output'), staging], [browser(root), 'browser.outputDir', root, staging],
+    ] as const) {
+      const invalid = await load({ root, consent })
+      expect(invalid.consentFiber?.state).toBe(FAILED)
+      expect(invalid.errors).toContainEqual(expect.stringContaining(`uploadStaging "${at}" must not be, contain, or lie inside ${key} "${other}"`))
+      expect(browserTools(invalid)).toEqual([])
+    }
+    expect(await readdir(kept)).toEqual([])
   })
 
   it('mounts no browser when the subprocess service refuses the server\'s identity, and Sessions still start', { timeout: 60_000 }, async () => {
@@ -393,6 +417,23 @@ describe('browser write consent in the person-box composition', () => {
     expect(await readdir(loaded.staging)).toEqual([])
   })
 
+  it('refuses, before asking, a file in the upload directory that the model\'s identity cannot read', { timeout: 60_000 }, async () => {
+    const downloads = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-downloads-'))
+    roots.push(downloads)
+    const secret = join(downloads, 'secret.pdf')
+    await writeFile(secret, 'pdf', { mode: 0o600 })
+    // The model's processes run as another user, outside the file's group, once the Session's browser server is up.
+    let reader: SubprocessChildIdentity | undefined
+    const subprocess = { apply(ctx: Context) { ctx.provide('subprocess', { get childIdentity() { return reader } }) } }
+    const loaded = await load({ before: [['subprocess', subprocess]], consent: { uploadDirectory: downloads } })
+    const { uid, gid } = await stat(secret)
+    reader = { uid: uid + 1, gid: gid + 1, groups: [] }
+    expect(textOf(await direct(loaded, tool('browser_file_upload'), { paths: [secret] })))
+      .toBe(`Error: browser_file_upload did not run: ${JSON.stringify(secret)} is a file the assistant cannot read itself.`)
+    expect(loaded.asked).toEqual([])
+    expect(await readdir(loaded.staging)).toEqual([])
+  })
+
   it('sends the copy it staged and asked about, whatever replaces the original during the ask, and refuses that copy as an input', { timeout: 60_000 }, async () => {
     const downloads = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-downloads-'))
     roots.push(downloads)
@@ -423,13 +464,14 @@ describe('browser write consent in the person-box composition', () => {
     expect(textOf(await direct(loaded, tool('browser_file_upload'), { paths: [copy] })))
       .toBe(`Error: browser_file_upload did not run: ${JSON.stringify(copy)} is not directly in ${downloads}; put the file directly in ${downloads} and retry.`)
     expect(loaded.asked).toHaveLength(1)
-    // Unloading consent deletes its copies; loading it again clears what a crash left.
+    // Unloading consent deletes its copies; loading it again clears the copies a crash left, and only those.
     await loaded.consentFiber!.dispose()
     expect(await readdir(loaded.staging)).toEqual([])
-    await mkdir(join(loaded.staging, 'left-over'))
+    await mkdir(join(loaded.staging, basename(dirname(copy!)), 'left-over'), { recursive: true })
+    await mkdir(join(loaded.staging, 'attachments'))
     const again = await load({ root: loaded.root, consent: { uploadDirectory: downloads } })
     expect(again.consentFiber?.state).toBe(ACTIVE)
-    expect(await readdir(loaded.staging)).toEqual([])
+    expect(await readdir(loaded.staging)).toEqual(['attachments'])
   })
 
   it('logs a staged copy it cannot delete when it unloads', { timeout: 60_000 }, async () => {
@@ -448,10 +490,12 @@ describe('browser write consent in the person-box composition', () => {
     expect(loaded.errors).toContainEqual(expect.stringContaining(`could not delete the staged upload copy ${join(loaded.staging, nonce!)}: Error: ENOTDIR`))
   })
 
-  it('keeps copies within four times the upload limit, deletes them after a day, and refuses a call whose files alone pass it', { timeout: 60_000 }, async () => {
+  it('keeps copies within four times the upload limit, deletes them after a day, and refuses a call whose files alone pass it, deleting no other copy', { timeout: 60_000 }, async () => {
     const downloads = await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-downloads-'))
     roots.push(downloads)
     for (const name of ['a', 'b', 'c', 'd', 'e']) await writeFile(join(downloads, name), 'four')
+    await writeFile(join(downloads, 'x'), '1')
+    await writeFile(join(downloads, 'g'), 'xyz')
     const staging = join(downloads, '..', `${basename(downloads)}-staging`)
     await mkdir(staging, { mode: 0o700 })
     roots.push(staging)
@@ -472,14 +516,15 @@ describe('browser write consent in the person-box composition', () => {
     const send = (...names: string[]) => ({ name: 'browser_file_upload', args: { paths: names.map(name => join(downloads, name)) } })
     const { events, asked } = await turn({
       consent: { uploadDirectory: downloads, uploadStaging: staging, uploadMaxBytes: 4 }, start: 'http://allowed.test/', answers: [allow, allow, later, allow],
-      script: [send('a', 'b'), send('c', 'd'), send('e'), send('a'), send('a', 'b', 'c', 'd', 'e')],
+      script: [send('a', 'b'), send('c', 'd'), send('e'), send('x'), send('a', 'b', 'c', 'g', 'e')],
     })
     // Four copies of four bytes fill the sixteen; the fifth makes room by deleting the oldest.
-    expect(seen).toEqual([['a', 'b'], ['a', 'b', 'c', 'd'], ['b', 'c', 'd', 'e'], ['a']])
+    expect(seen).toEqual([['a', 'b'], ['a', 'b', 'c', 'd'], ['b', 'c', 'd', 'e'], ['x']])
     expect(asked).toHaveLength(4)
-    // One call's own files are never deleted for each other: five of them pass the sixteen, so the call is refused.
+    // The last call's files reach fifteen bytes beside x's one; its fifth would pass the sixteen alone, so the call is
+    // refused there, and x's copy stays for the browser to read.
     expect(toolResults(events)[4]).toEqual([{ type: 'text', text: 'Error: browser_file_upload did not run: the files of one call may not pass 16 bytes in total.' }])
-    expect(await kept()).toEqual([])
+    expect(await kept()).toEqual(['x'])
   })
 
   it('withholds the result of every call that leaves or finds the tab on a denied page, and refuses writes there', { timeout: 60_000 }, async () => {

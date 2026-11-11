@@ -5121,7 +5121,7 @@ export interface BrowserConfig {
 
 - `inject`: `browserUse` · `agents` · `tools` · `systemPrompt` · `workingDirectory`
 - `refs`: [`PlaywrightBrowser`](../packages/experimental/browser-use-playwright-mcp/src/index.ts)
-- `source`: [`packages/mumbo/browser-consent/src/index.ts:125`](../packages/mumbo/browser-consent/src/index.ts)
+- `source`: [`packages/mumbo/browser-consent/src/index.ts:128`](../packages/mumbo/browser-consent/src/index.ts)
 
 ```ts config-catalog
 /** Consent configuration. */
@@ -5147,7 +5147,8 @@ export interface Config {
    * Absolute existing directory, such as `/var/lib/mumbo/uploads`, where consent stages the copy of each file it sends
    * and which the browser server receives as its only file root. Required, named by its real path, owned by root or
    * dsh's own user and writable by no other user, below directories that only those users can change (see
-   * {@link uploadStaging}). Consent empties it at load.
+   * {@link uploadStaging}), and neither inside nor containing `uploadDirectory` or `browser.outputDir`. At load consent
+   * deletes the entries named like its copies' directories, 32 lowercase hex characters, and leaves every other entry.
    */
   readonly uploadStaging: string
   /** Largest file, in bytes, that one upload or drop may send; 536870912 (512 MiB) by default. */

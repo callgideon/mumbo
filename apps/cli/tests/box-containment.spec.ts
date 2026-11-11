@@ -337,7 +337,7 @@ const SERVER_IDENTITIES = { person: [SERVER_IDENTITY, 'browsermcp'], project: [S
 const SYSTEM_PATH = ['/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin']
 
 /** The box's group `uploads`, which owns browser consent's staged copies: the only group the Playwright MCP server's identity holds. */
-const UPLOADS_GID = 1007
+const UPLOADS_GID = 1009
 
 /**
  * Ids of the enabled rows that could start an MCP stdio server as root, or as another identity than {@link SERVER_IDENTITY}.

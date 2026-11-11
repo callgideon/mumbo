@@ -8,9 +8,10 @@
 
 import { createHash, randomBytes } from 'node:crypto'
 import { constants, readdirSync, realpathSync, rmSync, statSync } from 'node:fs'
+import type { Stats } from 'node:fs'
 import { chmod, mkdir, open, rm } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
@@ -20,7 +21,7 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { McpResult } from '@deepseek-ai/dsh-mcp-client'
 import type { Session } from '@deepseek-ai/dsh-session'
-import type {} from '@deepseek-ai/dsh-subprocess'
+import type { SubprocessChildIdentity } from '@deepseek-ai/dsh-subprocess'
 import type { ToolExecution, ToolExecutionResult, ToolExecutionToken, PreToolDecision } from '@deepseek-ai/dsh-tools'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
@@ -89,6 +90,8 @@ const FILE_LINES = [
 const STAGED_LIFETIME_MS = 24 * 60 * 60 * 1000
 /** The staged copies kept together, and the files of one call, stay within this many times `uploadMaxBytes`. */
 const STAGED_TOTAL_FACTOR = 4
+/** Name of a staged copy's directory: 16 random bytes in lowercase hex. */
+const NONCE_NAME = /^[0-9a-f]{32}$/u
 /** Bytes read from an upload at a time while it is copied. */
 const COPY_CHUNK_BYTES = 1 << 20
 /** {@link denial} phrase for a URL that does not parse or a tab whose URL cannot be read. */
@@ -144,7 +147,8 @@ export interface Config {
    * Absolute existing directory, such as `/var/lib/mumbo/uploads`, where consent stages the copy of each file it sends
    * and which the browser server receives as its only file root. Required, named by its real path, owned by root or
    * dsh's own user and writable by no other user, below directories that only those users can change (see
-   * {@link uploadStaging}). Consent empties it at load.
+   * {@link uploadStaging}), and neither inside nor containing `uploadDirectory` or `browser.outputDir`. At load consent
+   * deletes the entries named like its copies' directories, 32 lowercase hex characters, and leaves every other entry.
    */
   readonly uploadStaging: string
   /** Largest file, in bytes, that one upload or drop may send; 536870912 (512 MiB) by default. */
@@ -169,6 +173,12 @@ export const Config: z<ConfigInput, Config> = z.object({
 /** Whether a uid is root's or this process's. */
 function trusted(uid: number): boolean {
   return uid === 0 || uid === process.getuid?.()
+}
+
+/** Whether the normalized absolute path `inner` is `outer` or lies inside it. */
+function within(inner: string, outer: string): boolean {
+  // `join` keeps one trailing separator, so `/a/bc` is not inside `/a/b`, and every path is inside `/`.
+  return join(inner, sep).startsWith(join(outer, sep))
 }
 
 /**
@@ -256,19 +266,34 @@ export interface StagedFile {
 }
 
 /**
+ * Whether a user may read a file by its mode bits, checked as the kernel checks them: the owner bits for its owner, else
+ * the group bits for a member of its group, else the other bits. ACL entries are not read.
+ * @param reader - the user's uid, primary gid, and supplementary groups.
+ * @param info - the file's `fstat`.
+ */
+function readableBy(reader: SubprocessChildIdentity, info: Stats): boolean {
+  const member = reader.gid === info.gid || reader.groups.includes(info.gid)
+  return (info.mode & (reader.uid === info.uid ? 0o400 : member ? 0o040 : 0o004)) !== 0
+}
+
+/**
  * Copy one upload into a new directory, named by a random nonce, in the staging directory. The source is opened once,
  * without following a link at its name and without blocking, as a FIFO or device would on open or read; `fstat` on that
- * descriptor must show a regular file of at most `maxBytes`, and the copy reads only through it, enforcing the cap again
- * as the file may grow. The SHA-256 is computed while copying. The nonce directory ends with mode `0750` and the copy
- * with `0440`, both in the group that a set-group-ID staging directory gives them.
+ * descriptor must show a regular file of at most `maxBytes` that `reader` may read, and the copy reads only through it,
+ * enforcing the cap again as the file may grow. The SHA-256 is computed while copying; a write that stores fewer bytes
+ * than were read fails the copy. The nonce directory ends with mode `0750` and the copy with `0440`, both in the group
+ * that a set-group-ID staging directory gives them.
  * @param source - a path directly in the upload directory.
  * @param staging - the validated staging directory.
  * @param maxBytes - the largest file it copies.
+ * @param reader - the identity the model's processes run as, which must be able to read the file itself; `undefined`
+ *   when they run as this process, which opened it.
  * @param makeRoom - called with the file's size before it is copied; returns why there is no room for it, if so.
  * @returns the staged file, or why it was refused; a refused or failed copy leaves nothing in the staging directory.
  */
 export async function stageUpload(
-  source: string, staging: string, maxBytes: number, makeRoom: (bytes: number) => Promise<string | undefined>,
+  source: string, staging: string, maxBytes: number, reader: SubprocessChildIdentity | undefined,
+  makeRoom: (bytes: number) => Promise<string | undefined>,
 ): Promise<StagedFile | { readonly refusal: string }> {
   const shown = JSON.stringify(source)
   const over = { refusal: `${shown} is larger than the upload limit of ${String(maxBytes)} bytes` }
@@ -283,6 +308,8 @@ export async function stageUpload(
   try {
     const info = await input.stat()
     if (!info.isFile()) return { refusal: `${shown} is not a regular file` }
+    // Consent reads as root: a file the model could not read itself is never sent for it.
+    if (reader !== undefined && !readableBy(reader, info)) return { refusal: `${shown} is a file the assistant cannot read itself` }
     if (info.size > maxBytes) return over
     const crowded = await makeRoom(info.size)
     if (crowded !== undefined) return { refusal: crowded }
@@ -300,7 +327,9 @@ export async function stageUpload(
           bytes += bytesRead
           if (bytesRead === 0 || bytes > maxBytes) break
           hash.update(buffer.subarray(0, bytesRead))
-          await output.write(buffer, 0, bytesRead)
+          // One write(2), which a full disk can cut short without an error.
+          const { bytesWritten } = await output.write(buffer, 0, bytesRead)
+          if (bytesWritten !== bytesRead) throw new Error(`wrote ${String(bytesWritten)} of ${String(bytesRead)} bytes`)
         }
         await output.chmod(0o440)
       } finally {
@@ -687,6 +716,12 @@ export function apply(ctx: Context, config: Config): void {
   if (config.browser.fileRoot !== undefined) {
     throw new Error(`${name}: browser.fileRoot must not be set; consent gives the browser server uploadStaging as its only file root`)
   }
+  // Load deletes copy directories in the staging directory, so it shares no directory with the person's or the server's files.
+  for (const [key, other] of [['uploadDirectory', upload], ['browser.outputDir', resolve(outputDir)]] as const) {
+    if (within(staging, other) || within(other, staging)) {
+      throw new Error(`${name}: uploadStaging "${staging}" must not be, contain, or lie inside ${key} "${other}"; use a directory of its own, such as /var/lib/mumbo/uploads`)
+    }
+  }
   const holder = ctx.browserUse.providerName
   if (holder !== undefined && PROVIDER_TOOL_PREFIXES[holder] === undefined) {
     throw new Error(`${name}: browser provider "${holder}" holds browserUse and its tools have no prefix this plugin can refuse; remove the row that mounts it`)
@@ -702,8 +737,8 @@ export function apply(ctx: Context, config: Config): void {
   /** What denies the page the browser's current tab showed when this plugin last read it; `undefined` when allowed. */
   let showing: string | undefined
   let owned = false
-  // Copies a crash or an earlier load left behind go before any new one is staged.
-  for (const entry of readdirSync(staging)) rmSync(join(staging, entry), { recursive: true, force: true })
+  // Copies a crash or an earlier load left behind go before any new one is staged; nothing else in the directory is touched.
+  for (const entry of readdirSync(staging)) if (NONCE_NAME.test(entry)) rmSync(join(staging, entry), { recursive: true, force: true })
   /** The staged copies kept, oldest first; Chromium can read a copy after its call returns, so each stays until room is made. */
   const copies: StagedCopy[] = []
   /** The total `copies` and one call's files may reach. */
@@ -723,30 +758,33 @@ export function apply(ctx: Context, config: Config): void {
     }))
   }
   /**
-   * Stage a copy of each file a call sends, one call at a time. Once a file's size is known and before it is copied,
-   * copies older than a day go, then the oldest others while the copies kept and the new one would pass the limit; the
-   * call's own copies stay, and a file that would still pass it is refused. A refusal deletes the call's copies.
+   * Stage a copy of each file a call sends, one call at a time. Once a file's size is known and before it is copied, a
+   * file that with the call's earlier copies would pass the limit is refused, deleting no other copy; otherwise copies
+   * older than a day go, then the oldest others while the copies kept and the new one would pass the limit. A refusal
+   * deletes the call's copies.
    */
   type Staged = { readonly files: StagedFile[]; readonly made: StagedCopy[] } | { readonly refusal: string }
-  const stageCall = (paths: readonly string[]): Promise<Staged> =>
+  const stageCall = (paths: readonly string[], reader: SubprocessChildIdentity | undefined): Promise<Staged> =>
     stagingStep(async () => {
       const made: StagedCopy[] = []
       const files: StagedFile[] = []
       const makeRoom = async (bytes: number): Promise<string | undefined> => {
+        if (made.reduce((sum, copy) => sum + copy.bytes, bytes) > stagedLimit) return `the files of one call may not pass ${String(stagedLimit)} bytes in total`
         const now = Date.now()
         const doomed = copies.filter(copy => now - copy.at > STAGED_LIFETIME_MS)
-        let total = bytes + copies.filter(copy => !doomed.includes(copy)).reduce((sum, copy) => sum + copy.bytes, 0)
-        for (const copy of copies) {
+        const kept = copies.filter(copy => !doomed.includes(copy))
+        let total = kept.reduce((sum, copy) => sum + copy.bytes, bytes)
+        // The call's own copies come last and fit, so the oldest others are enough.
+        for (const copy of kept) {
           if (total <= stagedLimit) break
-          if (doomed.includes(copy) || made.includes(copy)) continue
           doomed.push(copy)
           total -= copy.bytes
         }
         await discard(doomed)
-        return total <= stagedLimit ? undefined : `the files of one call may not pass ${String(stagedLimit)} bytes in total`
+        return undefined
       }
       for (const path of paths) {
-        const staged = await stageUpload(path, staging, config.uploadMaxBytes, makeRoom)
+        const staged = await stageUpload(path, staging, config.uploadMaxBytes, reader, makeRoom)
         if ('refusal' in staged) {
           await discard(made)
           return staged
@@ -955,7 +993,7 @@ export function apply(ctx: Context, config: Config): void {
     const site = webOrigin(tab.url)
     // The browser reads what it sends after the call returns: it gets copies consent made, never the model's files.
     const { paths } = fieldsOf(exec.arguments)
-    const staged = FILE_SENDERS.has(tool) && Array.isArray(paths) && paths.length > 0 ? await stageCall(paths as string[]) : undefined
+    const staged = FILE_SENDERS.has(tool) && Array.isArray(paths) && paths.length > 0 ? await stageCall(paths as string[], ctx.get('subprocess')?.childIdentity) : undefined
     if (staged !== undefined && 'refusal' in staged) return { kind: 'deny', reason: `${tool} did not run: ${staged.refusal}.` }
     const sent = staged === undefined ? undefined : { ...fieldsOf(exec.arguments), paths: staged.files.map(file => file.path) }
     const grant = (granted: BrowserWriteGrant): Promise<PreToolDecision> => {

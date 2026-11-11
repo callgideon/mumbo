@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto'
 import { appendFileSync, chmodSync, chownSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { open } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { Context } from '@deepseek-ai/cordis'
-import { afterAll, describe, expect, it, onTestFinished } from 'vitest'
+import { afterAll, describe, expect, it, onTestFinished, vi } from 'vitest'
 import * as PlaywrightBrowser from '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp'
 import {
   apply, classify, Config, currentTabUrl, denial, denyList, describeArguments, inject, stageUpload, tabUrl, targetUrl, uploadDirectory,
@@ -296,7 +297,7 @@ describe('staging an upload', () => {
     const { downloads, staging: into } = directories()
     writeFileSync(join(downloads, 'tax return.pdf'), 'pdf bytes')
     const sizes: number[] = []
-    const staged = await stageUpload(join(downloads, 'tax return.pdf'), into, 64, (bytes) => {
+    const staged = await stageUpload(join(downloads, 'tax return.pdf'), into, 64, undefined, (bytes) => {
       sizes.push(bytes)
       return Promise.resolve(undefined)
     })
@@ -314,7 +315,7 @@ describe('staging an upload', () => {
     chownSync(into, -1, group!)
     chmodSync(into, 0o2750)
     writeFileSync(join(downloads, 'tax.pdf'), 'pdf')
-    const { path } = await stageUpload(join(downloads, 'tax.pdf'), into, 64, room) as { path: string }
+    const { path } = await stageUpload(join(downloads, 'tax.pdf'), into, 64, undefined, room) as { path: string }
     expect([statSync(path).gid, statSync(dirname(path)).gid]).toEqual([group, group])
   })
 
@@ -334,7 +335,7 @@ describe('staging an upload', () => {
     // Root opens a file whatever its mode.
     if (process.getuid?.() !== 0) cases.push(['locked.pdf', 'could not be opened'])
     for (const [name, why] of cases) {
-      expect(await stageUpload(join(downloads, name), into, 64, room), name).toEqual({ refusal: `${JSON.stringify(join(downloads, name))} ${why}` })
+      expect(await stageUpload(join(downloads, name), into, 64, undefined, room), name).toEqual({ refusal: `${JSON.stringify(join(downloads, name))} ${why}` })
     }
     expect(readdirSync(into)).toEqual([])
   })
@@ -344,14 +345,14 @@ describe('staging an upload', () => {
     writeFileSync(join(downloads, 'big.bin'), 'x'.repeat(65))
     writeFileSync(join(downloads, 'growing.bin'), 'x'.repeat(64))
     const over = (name: string) => ({ refusal: `${JSON.stringify(join(downloads, name))} is larger than the upload limit of 64 bytes` })
-    expect(await stageUpload(join(downloads, 'big.bin'), into, 64, room)).toEqual(over('big.bin'))
+    expect(await stageUpload(join(downloads, 'big.bin'), into, 64, undefined, room)).toEqual(over('big.bin'))
     // It grows between the size check and the copy, as a file the model's shell writes can.
     const growing = () => {
       appendFileSync(join(downloads, 'growing.bin'), 'more')
       return Promise.resolve(undefined)
     }
-    expect(await stageUpload(join(downloads, 'growing.bin'), into, 64, growing)).toEqual(over('growing.bin'))
-    expect(await stageUpload(join(downloads, 'growing.bin'), into, 128, () => Promise.resolve('no room'))).toEqual({ refusal: 'no room' })
+    expect(await stageUpload(join(downloads, 'growing.bin'), into, 64, undefined, growing)).toEqual(over('growing.bin'))
+    expect(await stageUpload(join(downloads, 'growing.bin'), into, 128, undefined, () => Promise.resolve('no room'))).toEqual({ refusal: 'no room' })
     expect(readdirSync(into)).toEqual([])
   })
 
@@ -359,7 +360,52 @@ describe('staging an upload', () => {
     const { root, downloads } = directories()
     writeFileSync(join(downloads, 'tax.pdf'), 'pdf')
     // The staging directory is gone, so no nonce directory can be made in it.
-    const refused = await stageUpload(join(downloads, 'tax.pdf'), join(root, 'gone'), 64, room)
+    const refused = await stageUpload(join(downloads, 'tax.pdf'), join(root, 'gone'), 64, undefined, room)
     expect(refused).toEqual({ refusal: expect.stringMatching(new RegExp(`^${JSON.stringify(join(downloads, 'tax.pdf'))} could not be copied: Error: ENOENT`, 'u')) as string })
+  })
+
+  it('refuses a copy whose write stores fewer bytes than it read, leaving nothing', async () => {
+    const { downloads, staging: into } = directories()
+    writeFileSync(join(downloads, 'tax.pdf'), 'pdf bytes')
+    // A full disk cuts one write(2) short without an error.
+    const probe = await open(join(downloads, 'tax.pdf'))
+    await probe.close()
+    const handles = Object.getPrototypeOf(probe) as { write: () => Promise<{ bytesWritten: number }> }
+    vi.spyOn(handles, 'write').mockResolvedValueOnce({ bytesWritten: 4 })
+    onTestFinished(() => { vi.restoreAllMocks() })
+    expect(await stageUpload(join(downloads, 'tax.pdf'), into, 64, undefined, room))
+      .toEqual({ refusal: `${JSON.stringify(join(downloads, 'tax.pdf'))} could not be copied: Error: wrote 4 of 9 bytes` })
+    expect(readdirSync(into)).toEqual([])
+  })
+
+  it('refuses, before copying, a file the model\'s identity could not read by the mode bits the kernel checks for it', async () => {
+    const { downloads, staging: into } = directories()
+    const sizes: number[] = []
+    const counted = (bytes: number) => {
+      sizes.push(bytes)
+      return Promise.resolve(undefined)
+    }
+    const modes = { private: 0o600, group: 0o640, others: 0o604 }
+    for (const [name, mode] of Object.entries(modes)) {
+      writeFileSync(join(downloads, name), 'pdf')
+      chmodSync(join(downloads, name), mode)
+    }
+    const { uid, gid } = statSync(join(downloads, 'private'))
+    const other = { uid: uid + 1, gid: gid + 1, groups: [] }
+    const cases: Array<[keyof typeof modes, { uid: number; gid: number; groups: number[] }, boolean]> = [
+      ['private', other, false], ['private', { ...other, uid }, true], ['group', other, false], ['group', { ...other, gid }, true],
+      ['group', { ...other, groups: [gid] }, true], ['others', other, true],
+      // A member of the file's group gets the group bits, not the other bits.
+      ['others', { ...other, groups: [gid] }, false],
+    ]
+    for (const [name, reader, readable] of cases) {
+      const staged = await stageUpload(join(downloads, name), into, 64, reader, counted)
+      expect(staged, `${name} ${JSON.stringify(reader)}`).toEqual(readable
+        ? expect.objectContaining({ name, bytes: 3 })
+        : { refusal: `${JSON.stringify(join(downloads, name))} is a file the assistant cannot read itself` })
+    }
+    // Only the readable files reached the copy.
+    expect(sizes).toEqual([3, 3, 3, 3])
+    expect(readdirSync(into)).toHaveLength(4)
   })
 })

@@ -30,14 +30,14 @@ const accountPages = (port: number, path: string) => path === '/settings'
 const MASK = '•'.repeat(4)
 
 /**
- * Upload settings for a composition in `root`: `root` as the upload directory and a staging directory in it.
+ * Upload settings for a composition in `root`: an upload directory and a staging directory, each of its own, in it.
  * @param root - scratch directory.
  * @returns the consent row's `uploadDirectory` and `uploadStaging`.
  */
 async function uploads(root: string) {
-  const uploadStaging = join(root, 'staging')
-  await mkdir(uploadStaging, { mode: 0o700 })
-  return { uploadDirectory: root, uploadStaging }
+  const [uploadDirectory, uploadStaging] = [join(root, 'Downloads'), join(root, 'staging')]
+  for (const directory of [uploadDirectory, uploadStaging]) await mkdir(directory, { mode: 0o700 })
+  return { uploadDirectory, uploadStaging }
 }
 
 /**
@@ -101,11 +101,12 @@ async function runTurn(page: (port: number, path: string) => string, turn: (allo
   let booted: Awaited<ReturnType<typeof bootComposition>> | undefined
   try {
     const debugPort = await chromium.debugPort()
-    const { deniedUrls, allowedSites, script, answers, outputDir } = turn(`http://127.0.0.1:${String(port)}`, `http://localhost:${String(port)}`, root)
+    const upload = await uploads(root)
+    const { deniedUrls, allowedSites, script, answers, outputDir } = turn(`http://127.0.0.1:${String(port)}`, `http://localhost:${String(port)}`, upload.uploadDirectory)
     const output = outputDir === true ? join(tmpdir(), `${basename(root)}-output`) : join(root, '.playwright-mcp')
     cleanup.push(output)
     const browser = { mode: 'attach', endpoint: `http://127.0.0.1:${debugPort}`, outputDir: output }
-    const consent = { browser, deniedUrls, allowedSites, ...await uploads(root) }
+    const consent = { browser, deniedUrls, allowedSites, ...upload }
     booted = await bootComposition(root, { consent, script, answers: answers ?? [] })
     booted.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Go.' }], source: { kind: 'user' } }))
     await booted.agent.whenIdle()
