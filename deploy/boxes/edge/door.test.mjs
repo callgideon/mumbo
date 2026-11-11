@@ -781,7 +781,7 @@ test('worker tools pass a box\'s text only fenced and cut to 20,000 characters, 
     const report = result(await t.tool(t.key, 'task_report', { project: t.P, ...WORKER_ARGS.task_report }))
     assert.deepEqual([report.lease_expires_at, report.more, report.inputs.length, report.inputs[0].id, unfence(report.inputs[0].text), unfence(report.attention.question)],
       [undefined, null, 1, undefined, sneaky, sneaky])
-    assert.deepEqual(result(await t.tool(t.key, 'task_submit', { project: t.P, ...WORKER_ARGS.task_submit })), { pr: { number: 12 }, review: 'queued', lease: 'released' })
+    assert.deepEqual(result(await t.tool(t.key, 'task_submit', { project: t.P, ...WORKER_ARGS.task_submit })), { pr: { number: 12 }, lease: 'released' })
   } finally { t.close() }
 })
 
@@ -825,7 +825,7 @@ test('task_report and task_submit: posted to workers/<assignment>/report and /su
     result(await t.tool(t.key, 'task_report', { ...lease, state: 'progress', summary: 'Going on.', question: null }))
     assert.deepEqual(t.proxy.seen[1].body, { ...holder, state: 'progress', summary: 'Going on.', question: null }, 'null withdraws the question; an omitted one is not sent')
     assert.deepEqual(result(await t.tool(t.key, 'task_submit', { ...lease, head_sha: HEAD, summary: 'Fixed.', model: 'claude-opus', cost_usd: 1.5 })),
-      { pr: { number: 12, url: 'https://github.com/CallGideon/Mumbo/pull/12' }, review: 'queued', lease: 'released' })
+      { pr: { number: 12, url: 'https://github.com/CallGideon/Mumbo/pull/12' }, lease: 'released' })
     assert.deepEqual([t.proxy.seen[2].url, t.proxy.seen[2].body], [`/orchestrator/api/workers/${ASSIGNMENT}/submit`, { ...holder, headSha: HEAD, summary: 'Fixed.', model: 'claude-opus', costUsd: 1.5 }])
     for (const [name, a] of [['task_report', { ...lease, assignment: '../claim', state: 'progress', summary: 's' }], ['task_report', { ...lease, state: 'ready', summary: 's' }],
       ['task_report', { ...lease, lease: 'x', state: 'progress', summary: 's' }], ['task_submit', { ...lease, head_sha: 'abc', summary: 's' }], ['task_submit', { ...lease, head_sha: HEAD, summary: 's', cost_usd: -1 }],
