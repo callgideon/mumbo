@@ -182,6 +182,11 @@ const SDK_ASSERTIONS: Readonly<Record<string, SdkAssertions>> = {
     modelRequestsFile: 'command-identity-requests.jsonl',
     replayStandaloneCommands: true,
   },
+  'run-wild': {
+    expectedFinalResponse: 'RUN_WILD_OK',
+    environment: { DSH_PERMISSION_MODE: 'danger-full-access' },
+    patches: [fileURLToPath(new URL('./run-wild/runtime.cordis.yml', import.meta.url))],
+  },
   'plan-review': {
     expectedFinalResponse: 'SDK_PLAN_OK',
     environment: { DSH_PERMISSION_MODE: 'workspace-write' },

@@ -1,0 +1,24 @@
+# Run Wild as a person's box composes it: Full access's knobs, the run-wild preset listed last and chosen for new
+# Sessions, and @mumbo/run-wild answering the model's question.
+- id: approval
+  config:
+    policy: ask
+- id: permission
+  config:
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: ask
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: ask
+      run-wild:
+        sandbox: danger-full-access
+        approval: ask
+    defaultPreset: run-wild
+- insert:
+    - id: run-wild
+      name: '@mumbo/run-wild'

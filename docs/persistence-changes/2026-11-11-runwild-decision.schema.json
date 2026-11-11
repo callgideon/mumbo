@@ -1,0 +1,19 @@
+{
+  "formatVersion": 2,
+  "roots": [
+    {"key":"event:runwild/decision","kind":"event","event":"runwild/decision","surface":false,"digest":"1dab61b35564c8ba58b6343d7bc66e3ca4ddbaa00c42e317e4f4c12a8e06c36a"}
+  ],
+  "types": [],
+  "nodes": {
+    "0657d3ca5ac4e7bf": {"kind":"primitive","type":"number"},
+    "1dab61b35564c8ba": {"kind":"object","properties":[{"name":"data","type":"27464613500f8962","optional":false},{"name":"ignorable","type":"dacf3d5f3e4ff619","optional":true},{"name":"seq","type":"0657d3ca5ac4e7bf","optional":false},{"name":"time","type":"0657d3ca5ac4e7bf","optional":false},{"name":"type","type":"4831b87b0b615601","optional":false}],"indices":[]},
+    "27464613500f8962": {"kind":"object","properties":[{"name":"kind","type":"b8cc7992f3effe30","optional":false},{"name":"reason","type":"4cd48f3e5108bd6e","optional":false},{"name":"summary","type":"4cd48f3e5108bd6e","optional":false},{"name":"target","type":"4cd48f3e5108bd6e","optional":false}],"indices":[]},
+    "4831b87b0b615601": {"kind":"literal","value":"runwild/decision"},
+    "4cd48f3e5108bd6e": {"kind":"primitive","type":"string"},
+    "914b65dd567868cc": {"kind":"literal","value":"plan-review"},
+    "b8cc7992f3effe30": {"kind":"union","types":["914b65dd567868cc","bf25ee861c319f70","c914163c995adf6f"]},
+    "bf25ee861c319f70": {"kind":"literal","value":"question"},
+    "c914163c995adf6f": {"kind":"literal","value":"approval"},
+    "dacf3d5f3e4ff619": {"kind":"literal","value":true}
+  }
+}

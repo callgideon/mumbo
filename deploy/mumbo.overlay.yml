@@ -30,15 +30,10 @@
   config:
     policy: ask
 # The default preset is derived from the two rows above, so Full access needs a preset that asks.
+# Run Wild (@mumbo/run-wild) is listed only where the box's start script sets MUMBO_RUN_WILD, which it does when it
+# mounts that package. It has Full access's knobs, so it stays last: a Session without a recorded preset derives Full
+# access. MUMBO_NEW_SESSION_PRESET names the preset new Sessions start in.
 - id: permission
   config:
-    presets:
-      read-only:
-        sandbox: read-only
-        approval: ask
-      workspace-write:
-        sandbox: workspace-write
-        approval: ask
-      danger-full-access:
-        sandbox: danger-full-access
-        approval: ask
+    presets: !!js "({ 'read-only': { sandbox: 'read-only', approval: 'ask' }, 'workspace-write': { sandbox: 'workspace-write', approval: 'ask' }, 'danger-full-access': { sandbox: 'danger-full-access', approval: 'ask' }, ...(process.env.MUMBO_RUN_WILD ? { 'run-wild': { sandbox: 'danger-full-access', approval: 'ask' } } : {}) })"
+    defaultPreset: !!js "process.env.MUMBO_NEW_SESSION_PRESET ?? 'danger-full-access'"

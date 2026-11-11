@@ -7,7 +7,7 @@
  * server that names no identity must start as the dedicated `mcpserver` identity, never as root or `agent`, the
  * project box's `dsh-superagent` row is the founder's overlay row, read with the directories the start script exports,
  * and `web_fetch` goes to the DeepSeek Fetch API at the edge's model host. The person box includes the door to Mumbo
- * (`@mumbo/mcp`), whose tools the edge calls for the person.
+ * (`@mumbo/mcp`), whose tools the edge calls for the person, and Run Wild (`@mumbo/run-wild`).
  */
 
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -29,6 +29,8 @@ const deployed = (name: string) => loadOverlayPatches('dsh', join(root, 'deploy'
 const edge = (name: string) => loadOverlayPatches('dsh', join(import.meta.dirname, 'fixtures/box-edge', name))
 /** The overlay the edge patches into person boxes for the door to Mumbo. */
 const door = () => loadOverlayPatches('dsh', join(root, 'packages/mumbo/mcp/examples/person.overlay.yml'))
+/** The overlay the edge patches into person boxes for Run Wild. */
+const runWild = () => loadOverlayPatches('dsh', join(root, 'packages/mumbo/run-wild/examples/person.overlay.yml'))
 
 /** How a package's model-visible tools run in a contained box. */
 type Runs =
@@ -234,6 +236,7 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
     runs: 'run-as', tools: ['mcp__playwright-mcp__*'], identity: 'browsermcp', note: 'the Playwright MCP stdio server; uploads only from the shared Downloads',
   },
   '@mumbo/edge-member': NONE,
+  '@mumbo/run-wild': { ...NONE, note: 'decides asks in the person\'s Run Wild Sessions; registers no tool' },
   '@mumbo/mcp': {
     runs: 'in-process', tools: ['agent_read', 'agent_send', 'needs_you', 'task_reply'], runAsTools: ['task_result', 'task_status'],
     note: 'the door to Mumbo, served to the edge on its own loopback listener for the person\'s Mumbo, not to the box\'s model: '
@@ -311,7 +314,7 @@ function compose(box: 'person' | 'project', contained = true): Row[] {
       profile.patches,
       deployed('mumbo.overlay.yml'),
       deployed('mumbo-personal.overlay.yml'),
-      ...box === 'person' ? [edge('personal.overlay.yml'), door()] : [edge('project.overlay.yml'), deployed('mumbo-project.overlay.yml')],
+      ...box === 'person' ? [edge('personal.overlay.yml'), door(), runWild()] : [edge('project.overlay.yml'), deployed('mumbo-project.overlay.yml')],
       ...contained ? [edge(`containment-${box}.overlay.yml`)] : [],
     ], message => warnings.push(message))
     expect(warnings).toEqual([])
