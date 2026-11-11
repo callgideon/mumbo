@@ -25,7 +25,7 @@ export async function apply(ctx: Context, config: DeploymentConfig): Promise<voi
   ctx.effect(() => async () => { await runtime.stop() })
   // The relay Source belongs to this entry rather than a plugin row of its own, so a profile that loads the bundle has it.
   ctx.effect(() => registerRelay(ctx, runtime), 'dsh-superagent: relay Source')
-  // Not awaited (`UPSTREAM.md` S15): the main Session's ensure resolves an Agent preset, and the preset registry waits for the
+  // Not awaited (`UPSTREAM.md` S16): the main Session's ensure resolves an Agent preset, and the preset registry waits for the
   // Loader to settle while a preset row waits for a service, which would wait for this start.
   runtime.ready.then(() => {
     if (runtime.lifetime.aborted) return

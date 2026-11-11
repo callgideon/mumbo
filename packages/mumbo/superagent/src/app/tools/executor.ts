@@ -9,9 +9,10 @@ import type { Store } from '../store.ts'
 import { reportRelay, threadFollowedNotice } from '../notices.ts'
 import type { Sessions } from '../sessions.ts'
 import { AcknowledgementSchema, readTool, tool, type Tool } from './tool.ts'
+import { reviewTools } from '../../mumbo/review.ts'
 
 export interface ExecutorToolsHost {
-  readonly engine: Pick<EngineForExecutor, 'report' | 'reply' | 'markUnrelated' | 'handback' | 'followForContext'>
+  readonly engine: Pick<EngineForExecutor, 'report' | 'reply' | 'markUnrelated' | 'handback' | 'followForContext' | 'reviewed'>
   readonly store: Pick<Store, 'tickets' | 'replyStatus' | 'atomic'>
   readonly sessions: Pick<Sessions, 'relay' | 'notify'>
   readonly resources: ResourceHost
@@ -21,6 +22,8 @@ export interface ExecutorToolsHost {
 }
 
 export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
+  // In Mumbo, a review Ticket's worker gets only the review's tools (`UPSTREAM.md` S15).
+  if (ticket.review) return reviewTools(host, ticket.id, ticket.review)
   const ticketId = ticket.id
   return [
     readTool('Read one page of a resource of this ticket that the resource parameter lists. Follow next_offset, and next_resource where a page names one.',

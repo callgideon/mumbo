@@ -54,6 +54,7 @@ The [format references](persistence-changes/historical-formats/README.md) cover 
 | `event:plan/mode` | event | `a7cf43ce7c2a4c038feed1885cd7a00d5c6ee2d90a7e0d56b46f78a3e1ca327f` | [`{ type: "plan/mode" }`](#persistence-type-sha256-a7cf43ce7c2a4c038feed1885cd7a00d5c6ee2d90a7e0d56b46f78a3e1ca327f) |
 | `event:request/context` | event | `37cbc9cf06d494cfe5c67f078af1605eacb8e4c2c853e9e26455b73de0ee7ccf` | [`{ type: "request/context" }`](#persistence-type-sha256-37cbc9cf06d494cfe5c67f078af1605eacb8e4c2c853e9e26455b73de0ee7ccf) |
 | `event:request/header` | event | `4208123b50df5006b181481ab45fcf1cde807b88d3fd4d340090bc2e202fac41` | [`{ type: "request/header" }`](#persistence-type-sha256-4208123b50df5006b181481ab45fcf1cde807b88d3fd4d340090bc2e202fac41) |
+| `event:runwild/decision` | event | `1dab61b35564c8ba58b6343d7bc66e3ca4ddbaa00c42e317e4f4c12a8e06c36a` | [`{ type: "runwild/decision" }`](#persistence-type-sha256-1dab61b35564c8ba58b6343d7bc66e3ca4ddbaa00c42e317e4f4c12a8e06c36a) |
 | `event:sandbox/mode` | event | `516da4cdd6d2f1e5ce488e648578ca51f40e458f707b803e5b24de870e799415` | [`{ type: "sandbox/mode" }`](#persistence-type-sha256-516da4cdd6d2f1e5ce488e648578ca51f40e458f707b803e5b24de870e799415) |
 | `event:schedule/change` | event | `a0a2e5c42e1c929445ecd1cd70f49be6b66441894ec72c08e8ae332821d4a3cb` | [`{ type: "schedule/change" }`](#persistence-type-sha256-a0a2e5c42e1c929445ecd1cd70f49be6b66441894ec72c08e8ae332821d4a3cb) |
 | `event:session-log-deepseek/delivery-accepted` | event | `d63b8b8ffad9c02fd80c43a17df4f240c1fe8118ecca9de34f9d5871838ab5b9` | [`{ type: "session-log-deepseek/delivery-accepted" }`](#persistence-type-sha256-d63b8b8ffad9c02fd80c43a17df4f240c1fe8118ecca9de34f9d5871838ab5b9) |
@@ -800,6 +801,24 @@ Source: [`packages/core/session/src/types.ts:410`](../packages/core/session/src/
 ```
 
 Source: [`packages/core/session/src/types.ts:398`](../packages/core/session/src/types.ts)
+
+### `runwild/*`
+
+<a id="runwilddecision--log-only"></a>
+
+#### `runwild/decision` — log-only
+
+```ts persistence-catalog
+/**
+ * One ask that Run Wild decided instead of the person, appended inside the turn of the tool call that asked;
+ * log-only audit, never model-visible (the model sees the tool result the decision caused). `target` is the tool
+ * name, the plan's tool call id, the approval's subject, or the question id; `summary` is the ask's own text;
+ * `reason` is why it was decided this way, and for a question it is the reply the model received.
+ */
+'runwild/decision': { kind: RunWildDecisionKind; target: string; summary: string; reason: string }
+```
+
+Source: [`packages/mumbo/run-wild/src/index.ts:29`](../packages/mumbo/run-wild/src/index.ts)
 
 ### `sandbox/*`
 
@@ -2358,6 +2377,14 @@ SHA-256: `0fe52387f65052702ed9d7cd59db826468936595d1b3eec207e7a823adc719db`
 
 `"plan-mode"`
 
+<a id="persistence-type-sha256-914b65dd567868ccb9c77c69d7e76294cd1091354cb20b42cbd1859fd7ba47f5"></a>
+
+### `"plan-review"`
+
+SHA-256: `914b65dd567868ccb9c77c69d7e76294cd1091354cb20b42cbd1859fd7ba47f5`
+
+`"plan-review"`
+
 <a id="persistence-type-sha256-f634871d1e18b1eb199497ac8ab72d3964f48d03fbf611dc7521a1970cf429d9"></a>
 
 ### `"plan/mode"`
@@ -2413,6 +2440,14 @@ SHA-256: `871bfd6f7bb91061246768d3377f3fd58d6b8ea7c31f44c714ae7ab215650d62`
 SHA-256: `4edec1b770e8ec4ce1220bf42edc5ac46713a1b48d4caa778dcfc98bad1f28a3`
 
 `"ptc-mode"`
+
+<a id="persistence-type-sha256-bf25ee861c319f705c3275356dd55f1630ab56c31ab796bbe6228fd2c227fdba"></a>
+
+### `"question"`
+
+SHA-256: `bf25ee861c319f705c3275356dd55f1630ab56c31ab796bbe6228fd2c227fdba`
+
+`"question"`
 
 <a id="persistence-type-sha256-12a0cfa619ac4a5fc6c3e8e359c8dae15769edc61497a575935c78d5842f8e42"></a>
 
@@ -2557,6 +2592,14 @@ SHA-256: `63ba8895cc09e4693cf0819fdcd18c084bef195febda5b6a23af279b3852be36`
 SHA-256: `24b10f7cdae64928f89c49afc2eca0af9eb4a2f135e16f3416e6b8461fef1748`
 
 `"runtime-context"`
+
+<a id="persistence-type-sha256-4831b87b0b615601249f8ff9c1fa31db33f4b39c46c2567f618948c70723559c"></a>
+
+### `"runwild/decision"`
+
+SHA-256: `4831b87b0b615601249f8ff9c1fa31db33f4b39c46c2567f618948c70723559c`
+
+`"runwild/decision"`
 
 <a id="persistence-type-sha256-ca085dba2c877feceebf3c62f9d39c6c2a4d2314d97b94b3927a780fe8fe2bb2"></a>
 
@@ -4771,6 +4814,24 @@ One of:
 - `"resume"`
 - `"series"`
 
+<a id="persistence-type-sha256-b8cc7992f3effe30a261f3a17a24df9d10f44e8cf128b8a639196fac4f5a8413"></a>
+
+<a id="persistence-type-packagesmumborun-wildsrcindextsrunwilddecisionkind"></a>
+
+<a id="persistence-type-runwilddecisionkind"></a>
+
+### `RunWildDecisionKind`
+
+SHA-256: `b8cc7992f3effe30a261f3a17a24df9d10f44e8cf128b8a639196fac4f5a8413`
+
+Sources: [`packages/mumbo/run-wild/src/index.ts:19`](../packages/mumbo/run-wild/src/index.ts)
+
+One of:
+
+- `"approval"`
+- `"plan-review"`
+- `"question"`
+
 <a id="persistence-type-sha256-fab2bb09bc5e3b9db0685e8f5500b029af1a2b33e70bc703c1d5d0f596fbc1fd"></a>
 
 <a id="persistence-type-packagessandboxsandboxsrcindextssandboxmode"></a>
@@ -6756,6 +6817,21 @@ Sources: [`packages/core/session/src/types.ts:349`](../packages/core/session/src
 | `stream` | required | [`AssistantStreamRecord[]`](#persistence-type-sha256-84bbfdce7d2eab5b0c53e72ff7406db856c8bfd621b965b72fd86598ba493bf7) |
 | `turn` | required | `number` |
 | `usage` | optional | [`TokenUsage`](#persistence-type-sha256-fec5442b9ee4122e10514d81d5a43648003fe8bfb7ee2ba50c0cdbdd383ed394) |
+
+<a id="persistence-type-sha256-27464613500f8962028e8942a5a56705845887fecf9df0e54211877019a63cee"></a>
+
+### `{ kind, reason, summary, target }`
+
+SHA-256: `27464613500f8962028e8942a5a56705845887fecf9df0e54211877019a63cee`
+
+Sources: [`packages/mumbo/run-wild/src/index.ts:29`](../packages/mumbo/run-wild/src/index.ts)
+
+| Property | Presence | Type |
+|---|---|---|
+| `kind` | required | [`RunWildDecisionKind`](#persistence-type-sha256-b8cc7992f3effe30a261f3a17a24df9d10f44e8cf128b8a639196fac4f5a8413) |
+| `reason` | required | `string` |
+| `summary` | required | `string` |
+| `target` | required | `string` |
 
 <a id="persistence-type-sha256-0a30c3be336cdd4f8f34e66543a3d46d611c43986edd9b3ce6cbb9b721d3b5d3"></a>
 
@@ -9186,6 +9262,22 @@ SHA-256: `4208123b50df5006b181481ab45fcf1cde807b88d3fd4d340090bc2e202fac41`
 | `seq` | required | `number` |
 | `time` | required | `number` |
 | `type` | required | `"request/header"` |
+
+<a id="persistence-type-sha256-1dab61b35564c8ba58b6343d7bc66e3ca4ddbaa00c42e317e4f4c12a8e06c36a"></a>
+
+<a id="persistence-type-eventrunwilddecision"></a>
+
+### `{ type: "runwild/decision" }`
+
+SHA-256: `1dab61b35564c8ba58b6343d7bc66e3ca4ddbaa00c42e317e4f4c12a8e06c36a`
+
+| Property | Presence | Type |
+|---|---|---|
+| `data` | required | [`{ kind, reason, summary, target }`](#persistence-type-sha256-27464613500f8962028e8942a5a56705845887fecf9df0e54211877019a63cee) |
+| `ignorable` | optional | `true` |
+| `seq` | required | `number` |
+| `time` | required | `number` |
+| `type` | required | `"runwild/decision"` |
 
 <a id="persistence-type-sha256-516da4cdd6d2f1e5ce488e648578ca51f40e458f707b803e5b24de870e799415"></a>
 

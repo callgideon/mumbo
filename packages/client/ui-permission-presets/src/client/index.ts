@@ -10,8 +10,9 @@
  * session's `permissions` projection; a
  * pick submits the `/permission <preset>` command line, so both surfaces
  * write through one path and the pushed projection frame is the one
- * confirmation. The Full access row carries the same explicit risk gate as
- * the composer chip; the shared popup shell owns the modal mechanics.
+ * confirmation. The Full access, Auto review and Run Wild rows carry the same
+ * explicit risk gate as the composer chip; the shared popup shell owns the
+ * modal mechanics.
  * The General-settings row separately writes the default preset for sessions
  * created later through the host Settings API.
  */
@@ -46,7 +47,7 @@ import {
   accessEn, accessJa, accessEs, accessFr, accessDe, accessRu, accessPt, en, ja, es, fr, de, ru, pt, PERMISSION_ACCESS_NS,
 } from './locales.ts'
 import {
-  AUTO_REVIEW_PRESET, displayPermissionPreset, FULL_ACCESS_PRESET,
+  AUTO_REVIEW_PRESET, CONFIRMATION_PREFIXES, displayPermissionPreset, RUN_WILD_PRESET,
 } from './presentation.ts'
 import { PermissionPresetSettingsController } from './settings-store.ts'
 
@@ -83,28 +84,33 @@ function optionsOf(
   t: TranslateNS<typeof PERMISSION_ACCESS_NS>,
 ): SelectOption[] {
   return catalog.options
-    .map(option => ({
-      id: option.value,
-      label: option.value === AUTO_REVIEW_PRESET
-        ? t('auto.label')
-        : displayPermissionPreset(option.value, option.name, t),
-      ...(option.value === AUTO_REVIEW_PRESET ? { badge: t('auto.badge') } : {}),
-      ...(option.value === AUTO_REVIEW_PRESET
-        ? { detail: t('auto.description') }
-        : option.description !== undefined ? { detail: option.description } : {}),
-      ...(option.value === currentValue ? { active: true } : {}),
-      ...(option.value === FULL_ACCESS_PRESET || option.value === AUTO_REVIEW_PRESET
-        ? {
-          confirmation: {
-            title: t(option.value === AUTO_REVIEW_PRESET ? 'auto.confirm.title' : 'confirm.title'),
-            description: t(option.value === AUTO_REVIEW_PRESET ? 'auto.confirm.description' : 'confirm.description'),
-            acknowledgeLabel: t(option.value === AUTO_REVIEW_PRESET ? 'auto.confirm.acknowledge' : 'confirm.acknowledge'),
-            cancelLabel: t('confirm.cancel'),
-            confirmLabel: t(option.value === AUTO_REVIEW_PRESET ? 'auto.confirm.enable' : 'confirm.enable'),
-          },
-        }
-        : {}),
-    }))
+    .map((option) => {
+      const confirm = CONFIRMATION_PREFIXES.get(option.value)
+      return {
+        id: option.value,
+        label: option.value === AUTO_REVIEW_PRESET
+          ? t('auto.label')
+          : displayPermissionPreset(option.value, option.name, t),
+        ...(option.value === AUTO_REVIEW_PRESET ? { badge: t('auto.badge') } : {}),
+        ...(option.value === AUTO_REVIEW_PRESET
+          ? { detail: t('auto.description') }
+          : option.value === RUN_WILD_PRESET
+            ? { detail: t('runWild.description') }
+            : option.description !== undefined ? { detail: option.description } : {}),
+        ...(option.value === currentValue ? { active: true } : {}),
+        ...(confirm === undefined
+          ? {}
+          : {
+            confirmation: {
+              title: t(`${confirm}.title`),
+              description: t(`${confirm}.description`),
+              acknowledgeLabel: t(`${confirm}.acknowledge`),
+              cancelLabel: t('confirm.cancel'),
+              confirmLabel: t(`${confirm}.enable`),
+            },
+          }),
+      }
+    })
 }
 
 /**

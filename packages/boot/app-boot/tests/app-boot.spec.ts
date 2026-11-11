@@ -741,6 +741,21 @@ describe('auditStartupEntries', () => {
     expect(warn).not.toHaveBeenCalled()
   })
 
+  it.each(['llm-replay', 'replay', 'llm-replay-title'])('requires the replay provider package under id %s', async (id) => {
+    const warn = vi.fn()
+    const replayError = new Error('contains invalid JSON')
+    const name = '@deepseek-ai/dsh-llm-replay'
+    await expect(auditStartupEntries(ctxWith([
+      { fiber: fiber(3, replayError), disabled: true, options: { id, name } },
+    ]), NAME, warn)).resolves.toBeUndefined()
+    const error = await auditStartupEntries(ctxWith([
+      { fiber: fiber(3, replayError), options: { id, name } },
+    ]), NAME, warn).catch((error: unknown) => error)
+    expect(error).toBeInstanceOf(StartupError)
+    expect((error as Error).message).toContain(`  ${id} (required)\n    Package: ${name}`)
+    expect(warn).not.toHaveBeenCalled()
+  })
+
   it('omits an error cause when required plugins are only waiting for services', async () => {
     const error = await auditStartupEntries(ctxWith([
       { fiber: fiber(0, undefined, { webStartup: {} }), options: { id: 'connection', name: './connection.mjs' } },

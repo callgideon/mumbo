@@ -8,7 +8,7 @@
  * project box's `dsh-superagent` row is the founder's overlay row, read with the directories the start script exports,
  * `agent`'s PATH names only root's directories and its own npm global prefix and ~/.local/bin, and `web_fetch` goes
  * to the DeepSeek Fetch API at the edge's model host. The person box includes the door to Mumbo (`@mumbo/mcp`), whose
- * tools the edge calls for the person.
+ * tools the edge calls for the person, and Run Wild (`@mumbo/run-wild`).
  */
 
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -30,6 +30,8 @@ const deployed = (name: string) => loadOverlayPatches('dsh', join(root, 'deploy'
 const edge = (name: string) => loadOverlayPatches('dsh', join(import.meta.dirname, 'fixtures/box-edge', name))
 /** The overlay the edge patches into person boxes for the door to Mumbo. */
 const door = () => loadOverlayPatches('dsh', join(root, 'packages/mumbo/mcp/examples/person.overlay.yml'))
+/** The overlay the edge patches into person boxes for Run Wild. */
+const runWild = () => loadOverlayPatches('dsh', join(root, 'packages/mumbo/run-wild/examples/person.overlay.yml'))
 
 /** How a package's model-visible tools run in a contained box. */
 type Runs =
@@ -237,6 +239,7 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
     runs: 'run-as', tools: ['mcp__playwright-mcp__*'], identity: 'browsermcp', note: 'the Playwright MCP stdio server; uploads only from the shared Downloads',
   },
   '@mumbo/edge-member': NONE,
+  '@mumbo/run-wild': { ...NONE, note: 'decides asks in the person\'s Run Wild Sessions; registers no tool' },
   '@mumbo/mcp': {
     runs: 'in-process', tools: ['agent_read', 'agent_send', 'needs_you', 'task_reply'], runAsTools: ['task_result', 'task_status'],
     note: 'the door to Mumbo, served to the edge on its own loopback listener for the person\'s Mumbo, not to the box\'s model: '
@@ -246,9 +249,9 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
     runs: 'in-process',
     tools: [
       'orchestrator_ack', 'orchestrator_eval', 'orchestrator_eval_decide', 'orchestrator_eval_read', 'orchestrator_read', 'orchestrator_reply',
-      'orchestrator_report', 'orchestrator_route', 'orchestrator_thread_follow', 'orchestrator_thread_unrelated', 'orchestrator_thread_unsubscribe',
-      'orchestrator_ticket_note', 'orchestrator_ticket_request_status', 'orchestrator_ticket_retry', 'orchestrator_trigger_handback',
-      'orchestrator_trigger_requeue',
+      'orchestrator_report', 'orchestrator_review', 'orchestrator_route', 'orchestrator_thread_follow', 'orchestrator_thread_unrelated',
+      'orchestrator_thread_unsubscribe', 'orchestrator_ticket_note', 'orchestrator_ticket_request_status', 'orchestrator_ticket_retry',
+      'orchestrator_trigger_handback', 'orchestrator_trigger_requeue',
     ],
     note: 'project boxes, root in-process and data only: the Store, and `gh api` on the configured repository through a root-owned CLI '
       + 'and GH_CONFIG_DIR; no tool runs a command or a path the model names; ticket directories are made and checked as agent',
@@ -314,7 +317,7 @@ function compose(box: 'person' | 'project', contained = true): Row[] {
       profile.patches,
       deployed('mumbo.overlay.yml'),
       deployed('mumbo-personal.overlay.yml'),
-      ...box === 'person' ? [edge('personal.overlay.yml'), door()] : [edge('project.overlay.yml'), deployed('mumbo-project.overlay.yml')],
+      ...box === 'person' ? [edge('personal.overlay.yml'), door(), runWild()] : [edge('project.overlay.yml'), deployed('mumbo-project.overlay.yml')],
       ...contained ? [edge(`containment-${box}.overlay.yml`)] : [],
     ], message => warnings.push(message))
     expect(warnings).toEqual([])
@@ -377,15 +380,18 @@ const anything: object = new Proxy(() => undefined, {
 
 /**
  * Tool names the superagent copy registers: it registers exactly what `mainTools` builds for its main Session and
- * `executorTools` for an Executor Session (`src/app/runtime.ts`), so the names come from calling them, whatever a name
- * is or wherever a tool is defined.
+ * `executorTools` for an Executor Session (`src/app/runtime.ts`), whose tools differ for a review Ticket's Session, so the
+ * names come from calling them, whatever a name is or wherever a tool is defined.
  */
 async function superagentTools(): Promise<string[]> {
   // The copy is private and exports no tool builders; its sources are loaded from the repository.
   const load = async (file: string, name: string): Promise<SuperagentTools> =>
     ((await import(pathToFileURL(join(root, 'packages/mumbo/superagent/src/app/tools', file)).href)) as Record<string, SuperagentTools>)[name]!
   const [main, executor] = await Promise.all([load('main.ts', 'mainTools'), load('executor.ts', 'executorTools')])
-  return [...new Set([...main(anything, anything), ...executor(anything, anything)].map(tool => tool.name))].sort()
+  // A ticket with or without `review`, the field that gives a review Ticket's Session its own tools.
+  const ticket = (review: object | undefined): object => new Proxy({}, { get: (_target, key) => key === 'review' ? review : anything })
+  const tools = [...main(anything, anything), ...executor(anything, ticket(undefined)), ...executor(anything, ticket(anything))]
+  return [...new Set(tools.map(tool => tool.name))].sort()
 }
 
 /** The registration `@mumbo/mcp` performs on each request's MCP server, for one profile. */

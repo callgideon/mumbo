@@ -4,6 +4,8 @@ import { startHttpMcpFixture } from '../../packages/mcp/mcp-client/tests/http-fi
 import { chmod, cp, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { basename, delimiter, dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -52,7 +54,7 @@ import {
   type SnapshotManifest,
   type WorkspaceSnapshotEntry,
 } from '@deepseek-ai/dsh-session-snapshot'
-import { LOADER_SMOKE_TEST_TIMEOUT_MS, resolveExampleMode, runLoaderSmoke } from '@deepseek-ai/dsh-loader-smoke'
+import { LOADER_SMOKE_TEST_TIMEOUT_MS, resolveExampleMode, runLoaderSmoke, type LoaderSmokeResult } from '@deepseek-ai/dsh-loader-smoke'
 import { resolvePwshPath } from '@deepseek-ai/dsh-pwsh-local'
 import { parseSessionLog, prepareSessionSnapshotFixtureForComparison } from '@deepseek-ai/dsh-llm-replay'
 
@@ -1109,6 +1111,107 @@ describe('headless recorded-session snapshots', () => {
       await readFile(join(snapshotsRoot, fixtureName), 'utf8'),
     )))).flat()
     expect(violations).toEqual([])
+  })
+
+  /**
+   * Run one task through the default replay composition with the live DeepSeek route mounted beside the replay provider.
+   * @param label - the launch label in diagnostics.
+   * @param patch - extra patch rows applied last.
+   * @param env - the launch environment over the replay model selection.
+   * @param expectedExitCode - the exit code the launch must end with.
+   * @returns the finished launch.
+   */
+  async function runReplayWithLiveRoute(
+    label: string, patch: readonly string[], env: NodeJS.ProcessEnv, expectedExitCode: number,
+  ): Promise<LoaderSmokeResult> {
+    const base = compositionOwners.get('default')
+    if (base === undefined) throw new Error('headless corpus has no default composition')
+    const patchSources = ['cordis.yml', 'cordis.snapshot.yml', 'model.cordis.yml'].map(file => join(base.dir, file))
+    const liveRoutePatch = `${String(patchSources.length)}-live-route.cordis.yml`
+    const patches = [...patchSources.map((source, index) => `${String(index)}-${basename(source)}`), liveRoutePatch]
+    return runLoaderSmoke({
+      label,
+      tempDirPrefix: 'dsh-log-snap-',
+      binScript: dshBin,
+      sourceImport: 'tsx/esm',
+      configPath: join(base.dir, 'cordis.yml'),
+      binArgs: [
+        '--profile', 'headless',
+        ...patches.flatMap(file => ['--patch', join('.snapshot-patches', file)]),
+        'Reply with exactly the word: PONG.',
+      ],
+      tsconfigPath,
+      expectedExitCode,
+      env: {
+        DSH_SNAPSHOT: 'replay',
+        DSH_SNAPSHOT_PROVIDER: 'deepseek-official',
+        DSH_SNAPSHOT_MODEL: 'deepseek-v4-flash',
+        NODE_OPTIONS: [process.env.NODE_OPTIONS, '--disable-warning=ExperimentalWarning'].filter(Boolean).join(' '),
+        DSH_TELEMETRY_DISABLED: '1',
+        ...env,
+      },
+      prepare: async (cwd) => {
+        const patchRoot = join(cwd, '.snapshot-patches')
+        await mkdir(patchRoot, { recursive: true })
+        patchSources.forEach((source, index) => {
+          materializeProfilePatch(source, cwd, 'headless', patchRoot, index)
+        })
+        await writeFile(join(patchRoot, liveRoutePatch), [
+          '- id: llm-deepseek',
+          "  name: '@deepseek-ai/dsh-llm-deepseek-api-key'",
+          '  disabled: false',
+          ...patch,
+          '',
+        ].join('\n'))
+      },
+    })
+  }
+
+  it.skipIf(mode !== 'replay')('stops a replay whose fixture cannot be parsed before any model request', async () => {
+    const liveRequests: string[] = []
+    const liveApi = createServer((request, response) => {
+      liveRequests.push(`${request.method ?? ''} ${request.url ?? ''}`)
+      response.writeHead(401).end()
+    })
+    await new Promise<void>(resolve => liveApi.listen(0, '127.0.0.1', resolve))
+    const fixtureDir = await mkdtemp(join(tmpdir(), 'dsh-replay-malformed-'))
+    try {
+      const base = compositionOwners.get('default')
+      if (base === undefined) throw new Error('headless corpus has no default composition')
+      const recorded = await readFile(join(base.dir, await primaryFixtureFile(base.dir)), 'utf8')
+      const fixture = join(fixtureDir, 'session.jsonl')
+      // A hand-written row cut off mid-object.
+      await writeFile(fixture, `${recorded.trimEnd()}\n{"type":"turn/end"\n`)
+      const { port } = liveApi.address() as AddressInfo
+      const result = await runReplayWithLiveRoute('malformed replay fixture', [], {
+        ...REPLAY_CREDENTIAL_ENV,
+        DSH_SNAPSHOT_FILE: fixture,
+        // The live route reaches this listener in place of the public API.
+        DEEPSEEK_BASE_URL: `http://127.0.0.1:${String(port)}/anthropic`,
+      }, 1)
+      expect(result.stderr).toContain('llm-replay (required)')
+      expect(result.stderr).toContain('contains invalid JSON')
+      expect(liveRequests).toEqual([])
+    } finally {
+      await new Promise(resolve => liveApi.close(resolve))
+      await rm(fixtureDir, { recursive: true, force: true })
+    }
+  })
+
+  it.skipIf(mode !== 'replay')('keeps a live route in a replay process off the network', async () => {
+    // Without these pins the launch below would send its model request to the public API.
+    for (const name of ['DEEPSEEK_BASE_URL', 'DEEPSEEK_SEARCH_BASE_URL']) {
+      expect(REPLAY_CREDENTIAL_ENV[name], name).toMatch(/^http:\/\/127\.0\.0\.1:/)
+    }
+    // NODE_DEBUG=net logs every TCP connection attempt the process makes.
+    const result = await runReplayWithLiveRoute('live route under replay credentials', [
+      '  config:',
+      '    retryPolicy: { mode: normal, maxRetries: 0 }',
+      '- id: llm-replay',
+      '  disabled: true',
+    ], { ...REPLAY_CREDENTIAL_ENV, NODE_DEBUG: 'net' }, 1)
+    expect(result.stderr).toContain('dsh: TRANSPORT: DeepSeek Messages transport failed')
+    expect(result.stderr.split('\n').filter(line => /attempting to connect to .*\(addressType: [46]\)/.test(line))).toEqual([])
   })
 
   it('stores session-owned inputs with typed redaction and no ACP transcript', async () => {
