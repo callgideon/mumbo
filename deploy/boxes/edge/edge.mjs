@@ -437,14 +437,14 @@ fi
 
 /** Agent containment's rows (B24), patched after every other overlay: the harness's containment-person and
  *  containment-project fixtures (apps/cli/tests/fixtures/box-edge, the harness branch's composition gate), with the
- *  box's ids as the shell variables containmentLayout reads, agent also in the group workspace, so it can change what
- *  root, xsession or mcpserver write in the workspace, and browsermcp also in the group uploads, so the Playwright MCP
- *  server reaches the copies browser consent stages. No row configures dsh-superagent: a patch's config would replace
+ *  box's ids as the shell variables containmentLayout reads and agent also in the group workspace, so it can change what
+ *  root, xsession or mcpserver write in the workspace. No row configures dsh-superagent: a patch's config would replace
  *  the image's project overlay row's, which reads its directories from the variables containmentLayout exports. The
  *  anonymous web_fetch provider, which runs in root dsh outside the agent's firewall rules and reaches loopback, is off:
- *  web_fetch goes to the DeepSeek Fetch API through the model host, whose /v1/tools/* the edge forwards with the box
- *  token. Written into an unquoted heredoc, so the text holds no $ but those variables, no backquote and no backslash.
- *  @param {object} cfg config(); llmHost ends the project rows' NO_PROXY and is web_fetch's base URL
+ *  web_fetch goes to the DeepSeek Fetch API through the model host, whose /v1/tools/* the edge forwards to DeepSeek with
+ *  its own key in place of the box token. Written into an unquoted heredoc, so the text holds no $ but those variables,
+ *  no backquote and no backslash.
+ *  @param {object} cfg config(); llmHost ends the project rows' NO_PROXY and is the host of web_fetch's base URL
  *  @param {boolean} person a person box
  *  @returns {string} the YAML */
 export function containmentRows(cfg, person) {

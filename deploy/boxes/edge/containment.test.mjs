@@ -24,10 +24,10 @@ const IDS = { agent: [1001, 1001], browsermcp: [1002, 1002], desktop: [1003, 100
 const GROUPS = { shared: 1005, workspace: 1007, 'workspace-read': 1008, uploads: 1009 }
 const SECRETS = 'secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY, E2B_API_KEY, GH_TOKEN, GITHUB_TOKEN]'
 const PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
-/** The fixtures' rows without their comments, at the harness branch's 500045c765, with agent also in workspace,
- *  browsermcp also in uploads, and no dsh-superagent row: the image's project overlay reads the directories from the
- *  variables the layout exports (the uploads and A2 contract of 2026-11-11, which the harness's fixtures take on). Both
- *  end with the web_fetch rows of that contract: the anonymous fetcher off, web_fetch through the edge's model host. */
+/** The fixtures' rows without their comments, at the harness branch m1/b24-containment's dfcac61905, with agent also
+ *  in workspace. No dsh-superagent row: the image's project overlay reads the directories from the variables the layout
+ *  exports (the uploads and A2 contract of 2026-11-11, which the harness's fixtures take on). Both end with the web_fetch
+ *  rows of that contract: the anonymous fetcher off, web_fetch through the edge's model host. */
 const FIXTURE = (person, mcpGroups = '') => `- id: subprocess
   config:
     shellActivityDirectory: /run/dsh-shell
@@ -441,8 +441,8 @@ test('escape-test.sh parses under sh and runs every escape test the B24 brief na
     // the display, computer use, uploads
     'agent-x-cookie', 'agent-x-display', 'xsession-login-data', 'computer-use-terminal', 'upload-outside-downloads',
     // consent's staged upload copies, and uploads through the real consent (the uploads contract of 2026-11-11)
-    'agent-list-uploads', 'agent-read-uploads', 'upload-swap', 'upload-swap-ask', 'upload-nested', 'upload-nested-refused', 'upload-fifo', 'upload-fifo-refused',
-    'upload-over-cap', 'upload-over-cap-refused', 'upload-staging-empty',
+    'agent-list-uploads', 'agent-read-uploads', 'upload-swap', 'upload-swap-ask', 'upload-staged-copy', 'agent-list-staged', 'agent-read-staged', 'upload-nested',
+    'upload-nested-refused', 'upload-fifo', 'upload-fifo-refused', 'upload-over-cap', 'upload-over-cap-refused', 'upload-staging-restart',
     // the workspace and the person's MCP servers
     'mcpserver-workspace', 'mcpserver-node-modules', 'browsermcp-connect-cdp',
     // tunnels through the project box's GitHub proxy
@@ -462,10 +462,11 @@ test('escape-test.sh parses under sh and runs every escape test the B24 brief na
 })
 
 /** escape-test.sh's uploads through consent (--with-uploads), with Downloads, the staging directory and the page's port
- *  moved and its 3 s read delay cut to 0.3 s. The test plays consent, which stages a copy of each upload it allows, and
- *  Chrome, which runs the served page's script on a file-backed File of that copy; agent is the test's user. Returns each
- *  upload check's status and the FAIL lines. */
-async function escapeUploads({ deleteAfterCall, blockOnFifo }) {
+ *  moved, its 3 s read delay cut to 0.3 s, and root:uploads, the copies' owner and group, as the test's user's. The test
+ *  plays consent, which stages a copy of each upload it allows (0440 in a 0750 directory unless `openCopies`), and
+ *  Chrome, which runs the served page's script on a file-backed File of that copy; agent is the test's user, which su
+ *  keeps out of the staging directory unless `openCopies`. Returns each upload check's status and the FAIL lines. */
+async function escapeUploads({ deleteAfterCall = false, blockOnFifo = false, openCopies = false }) {
   const text = readFileSync(new URL('./escape-test.sh', import.meta.url), 'utf8')
   const t = mkdtempSync(join(tmpdir(), 'escape-uploads-'))
   const D = join(t, 'Downloads'), S = join(t, 'uploads')
@@ -473,12 +474,13 @@ async function escapeUploads({ deleteAfterCall, blockOnFifo }) {
   try {
     for (const d of [D, S, join(t, 'bin')]) mkdirSync(d)
     writeFileSync(join(t, 'consent.ts'), 'uploadStaging')
-    writeFileSync(join(t, 'bin/su'), '#!/bin/sh\nexec /bin/sh -c "$5"\n')
+    writeFileSync(join(t, 'bin/su'), `#!/bin/sh\n${openCopies ? '' : `case "$5" in *${S}*) exit 1;; esac\n`}exec /bin/sh -c "$5"\n`)
     chmodSync(join(t, 'bin/su'), 0o755)
     const port = await new Promise(r => { const v = createServer().listen(0, '127.0.0.1', () => { const { port } = v.address(); v.close(() => r(port)) }) })
-    const helpers = text.split('\n').filter(l => /^(say|as|manual)\(\) /.test(l)).join('\n')
+    const helpers = text.split('\n').filter(l => /^(say|as|refused|manual)\(\) /.test(l)).join('\n')
+    const owner = `${execFileSync('id', ['-un'], { encoding: 'utf8' }).trim()}:${execFileSync('id', ['-gn'], { encoding: 'utf8' }).trim()}`
     const block = text.slice(text.indexOf('D=/home/shared/Downloads\n'), text.indexOf('# Restore:')).replaceAll('/home/shared/Downloads', D)
-      .replaceAll('/src/packages/mumbo/browser-consent/src/index.ts', join(t, 'consent.ts')).replaceAll('8790', String(port)).replace('}, 3000)', '}, 300)')
+      .replaceAll('/src/packages/mumbo/browser-consent/src/index.ts', join(t, 'consent.ts')).replaceAll('8790', String(port)).replace('}, 3000)', '}, 300)').replaceAll('root:uploads', owner)
     sh = spawn('/bin/sh', ['-c', `set -u\nfails=0 person=1 uploads=1 S=${S}\n${helpers}\n${block}`], { env: { ...process.env, PATH: `${join(t, 'bin')}:${process.env.PATH}` } })
     let out = ''
     sh.stdout.on('data', (c) => { out += c })
@@ -491,6 +493,7 @@ async function escapeUploads({ deleteAfterCall, blockOnFifo }) {
     const upload = async (name, n, swapped = () => true) => {
       mkdirSync(join(S, n))
       copyFileSync(join(D, name), join(S, n, name))
+      if (!openCopies) { chmodSync(join(S, n, name), 0o440); chmodSync(join(S, n), 0o750) }
       await until(swapped)
       input.files = [new File([await openAsBlob(join(S, n, name))], name)]
       input.onchange()
@@ -499,10 +502,6 @@ async function escapeUploads({ deleteAfterCall, blockOnFifo }) {
     await upload('mumbo-escape-swap.txt', 'n1', () => readFileSync(join(D, 'mumbo-escape-swap.txt'), 'utf8') === 'swapped')
     if (blockOnFifo) reader = spawn('cat', [join(D, 'mumbo-escape-fifo')], { stdio: 'ignore' })
     await upload('mumbo-escape-done.txt', 'n2')
-    // The turn ends once the script has its verdicts on the calls.
-    await until(() => out.includes(' upload-swap '))
-    rmSync(join(S, 'n1'), { recursive: true, force: true })
-    rmSync(join(S, 'n2'), { recursive: true, force: true })
     await exited
     if (reader) await new Promise(r => reader.exitCode === null ? reader.on('close', r) : r())
     const lines = out.trim().split('\n').map(l => l.split(' '))
@@ -514,21 +513,27 @@ async function escapeUploads({ deleteAfterCall, blockOnFifo }) {
   }
 }
 
-const UPLOAD_CHECKS = { 'upload-swap': 'PASS', 'upload-swap-ask': 'MANUAL', 'upload-nested': 'PASS', 'upload-nested-refused': 'MANUAL', 'upload-fifo': 'PASS',
-  'upload-fifo-refused': 'MANUAL', 'upload-over-cap': 'PASS', 'upload-over-cap-refused': 'MANUAL', 'upload-staging-empty': 'PASS' }
+const UPLOAD_CHECKS = { 'upload-swap': 'PASS', 'upload-swap-ask': 'MANUAL', 'upload-staged-copy': 'PASS', 'agent-list-staged': 'PASS', 'agent-read-staged': 'PASS',
+  'upload-nested': 'PASS', 'upload-nested-refused': 'MANUAL', 'upload-fifo': 'PASS', 'upload-fifo-refused': 'MANUAL', 'upload-over-cap': 'PASS', 'upload-over-cap-refused': 'MANUAL' }
 
-test('escape-test.sh --with-uploads passes a consent that keeps its copies until the turn ends, after the page has read them', async () => {
-  assert.deepEqual(await escapeUploads({ deleteAfterCall: false, blockOnFifo: false }), { status: UPLOAD_CHECKS, fails: [] })
+test('escape-test.sh --with-uploads passes a consent that keeps its copies, closed to agent, until it unmounts', async () => {
+  assert.deepEqual(await escapeUploads({}), { status: UPLOAD_CHECKS, fails: [] })
 })
 
 test('escape-test.sh --with-uploads fails a consent that deletes its copy before the page reads it, or that is blocked opening the FIFO', async () => {
   assert.deepEqual(await escapeUploads({ deleteAfterCall: true, blockOnFifo: true }), {
-    status: { ...UPLOAD_CHECKS, 'upload-swap': 'FAIL', 'upload-fifo': 'FAIL' },
+    status: { ...UPLOAD_CHECKS, 'upload-swap': 'FAIL', 'upload-staged-copy': 'FAIL', 'agent-list-staged': 'SKIP', 'agent-read-staged': 'SKIP', 'upload-fifo': 'FAIL' },
     fails: [
       'upload-swap the page could not read the file 3 s after the call: consent removed its staged copy before the page read it',
+      'upload-staged-copy consent kept no copy of mumbo-escape-swap.txt: copies stay until consent unmounts',
       'upload-fifo a FIFO in Downloads: consent is blocked opening it',
     ],
   })
+})
+
+test('escape-test.sh --with-uploads fails a consent whose kept copy agent can list and read', async () => {
+  const { status } = await escapeUploads({ openCopies: true })
+  assert.deepEqual(status, { ...UPLOAD_CHECKS, 'upload-staged-copy': 'FAIL', 'agent-list-staged': 'FAIL', 'agent-read-staged': 'FAIL' })
 })
 
 test('template: containment\'s users and groups, homes 0700 with the run-as TMPDIRs, the ACL check, no empty password, the ports marker', () => {
