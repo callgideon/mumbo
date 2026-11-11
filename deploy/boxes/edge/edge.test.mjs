@@ -964,6 +964,12 @@ test('the RUNBOOK\'s B48 section gives the role\'s sign-in command, checks its s
   for (const text of ['`/var/lib/mumbo/agent-gh`, `agent`\'s `GH_CONFIG_DIR`', 'so the file tools refuse to read it', 'in turns the person started, the model can read the token through bash']) assert.ok(bullet('Where it lives').includes(text), text)
   const real = runbook.split('\n').find(l => l.startsWith('- **Checked only on a real box.**'))
   assert.ok(real.includes('`gh auth status` works and lists the token scopes `repo`, `read:org` and `gist` and not `workflow`'))
+  // su sets only HOME, SHELL, USER and LOGNAME, so a gh run through it names agent's GH_CONFIG_DIR from agent's row.
+  const { containmentRows } = await import('./edge.mjs')
+  const dir = containmentRows(cfg, true).match(/GH_CONFIG_DIR: (\S+)/)[1]
+  const su = real.match(/`su -s \/bin\/sh agent -c '[^']*\bgh [^']*'`/g)
+  assert.ok(su?.length)
+  for (const s of su) assert.ok(s.includes(`-c 'GH_CONFIG_DIR=${dir} gh `), s)
 })
 
 test('home page lists the assistant, desktop and the member\'s projects without starting a box, escaping names', async () => {
