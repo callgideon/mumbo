@@ -12,7 +12,7 @@ export const testMachine = (overrides: Partial<Machine> = {}): Machine => {
   const stateDir = overrides.stateDir ?? '/tmp/dsh-superagent-test'
   return {
     stateDir, workDirectory: join(stateDir, 'work'), workerDirectory: stateDir, runAs: false, promptMaxChars: reference(100000), admissionContextMaxPages: reference(10),
-    admissionContextTimeoutMs: reference(15000), panelAdmins: [], ...overrides,
+    admissionContextTimeoutMs: reference(15000), panelAdmins: [], workerLeaseMinutes: 20, ...overrides,
   }
 }
 export const testDeployment = (overrides: { [K in keyof Deployment]?: Deployment[K] | undefined } = {}): Deployment => ({

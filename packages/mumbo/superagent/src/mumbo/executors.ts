@@ -24,11 +24,6 @@ export interface ExecutorPlugin extends Executor {
  */
 export const executorOf = (ticket: Pick<Ticket, 'executor'>): ExecutorKind => ticket.executor ?? 'local'
 
-/** The `external` kind until an external-worker Executor takes its place: it does nothing, so external Tickets stay as they are. */
-export const heldExecutor: ExecutorPlugin = {
-  start() {}, deliver() {}, stop() {}, install() {}, resume() {}, async shutdown() {}, dispose() {},
-}
-
 /** The Executor the Engine sees: each call goes to the Ticket's kind; lifecycle calls reach every kind. */
 export class Executors implements ExecutorPlugin {
   /** @param kinds - The Executor of each kind. */
