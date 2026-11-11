@@ -429,8 +429,9 @@ const pushed = (ticket: string) => store().get(KV.external.pushed(ticket))
 const opened = (number: number) => ({ status: 200, body: { pr: { number, url: `https://github.com/acme/widgets/pull/${number}` }, lease: 'released' } })
 
 /**
- * The GitHub API behind the box's gh: branch `heads`, `pulls` (a new one numbered from 7), and every call. While `halted`,
- * each write fails as the edge refuses it.
+ * The GitHub API behind the box's gh: branch `heads`, `pulls` (a new one numbered from 7), and every call. A branch without
+ * a head is not found, and a create of a second open pull request from a branch fails. While `halted`, each write fails as
+ * the edge refuses it.
  */
 function fakeGithub() {
   type FakePull = { number: number; node_id: string; draft: boolean; state: string; title: string; body: string; base: string; html_url: string
@@ -449,10 +450,17 @@ function fakeGithub() {
     const path = args[1]!, field = (name: string) => args.find(arg => arg.startsWith(`${name}=`))!.slice(name.length + 1)
     if (state.halted && (args.includes('POST') || path === 'graphql')) throw new CliError('stopped: the project is halted (HTTP 403)', 403)
     const branch = /^repos\/acme\/widgets\/branches\/(.+)$/.exec(path)?.[1]
-    if (branch) return { name: branch, commit: { sha: heads.get(branch) } }
+    if (branch) {
+      if (!heads.has(branch)) throw new CliError('gh: Branch not found (HTTP 404)', 404)
+      return { name: branch, commit: { sha: heads.get(branch) } }
+    }
+    const open = (ref: string) => pulls.filter(item => item.state === 'open' && item.head.ref === ref)
     const head = /^repos\/acme\/widgets\/pulls\?head=acme:(.+)&state=open$/.exec(path)?.[1]
-    if (head) return pulls.filter(item => item.state === 'open' && item.head.ref === head)
-    if (path === 'repos/acme/widgets/pulls') return pull(field('head'), { title: field('title'), body: field('body'), base: field('base'), draft: field('draft') === 'true' })
+    if (head) return open(head)
+    if (path === 'repos/acme/widgets/pulls') {
+      if (open(field('head')).length) throw new CliError('gh: Validation Failed (HTTP 422)', 422)
+      return pull(field('head'), { title: field('title'), body: field('body'), base: field('base'), draft: field('draft') === 'true' })
+    }
     if (path === 'graphql') { pulls.find(item => item.node_id === field('id'))!.draft = true; return { data: {} } }
     return path === 'user' ? { login: 'agent-bot' } : { default_branch: 'master', permissions: { push: true } }
   })
@@ -534,15 +542,17 @@ describe('submit', () => {
     const view = await claimed()
     await push(view, sha('a'))
     github.heads.set(view.branch, sha('a'))
-    expect(await submit(view, { model: 'claude-opus', costUsd: 1.5 })).toEqual(opened(7))
+    expect(await submit(view, { model: 'claude-sonnet', costUsd: 1.5 })).toEqual(opened(7))
     expect(github.pulls).toMatchObject([{ number: 7, draft: true, title: 'Fix m1', base: 'main', head: { ref: view.branch },
       body: `This is by an automated agent, not a human.\n\nFixed the login page\n\nTicket ${ticket.id}` }])
     const current = stored(ticket.id)
     expect(current.follows).toMatchObject([{ thread: 'github:7', own: true }])
     expect([ticketStage(current), current.ended]).toEqual([{ stage: 'person', action: 'review' }, undefined])
-    expect(current.assignments.at(-1)).toMatchObject({ state: 'running', report: { state: 'ready', summary: 'Fixed the login page' } })
+    // The worker's declared model and cost stay on the Assignment, which outlives the lease.
+    expect(current.assignments.at(-1)).toMatchObject({ state: 'running', report: { state: 'ready', summary: 'Fixed the login page' },
+      worker: { ...LAPTOP, model: 'claude-sonnet', costUsd: 1.5 } })
     expect(lease(view.assignment)).toMatchObject({ releasedAt: expect.any(String),
-      result: { pr: { number: 7, url: 'https://github.com/acme/widgets/pull/7' }, headSha: sha('a'), model: 'claude-opus', costUsd: 1.5 } })
+      result: { pr: { number: 7, url: 'https://github.com/acme/widgets/pull/7' }, headSha: sha('a') } })
     await host.runtime.idle()
     expect(host.relays(host.runtime.masterId).filter(item => item.kind === 'worker_report')).toMatchObject([{ state: 'ready', summary: 'Fixed the login page' }])
     // A retry gets the same answer and calls GitHub no more; another head finds the lease released.
@@ -551,6 +561,24 @@ describe('submit', () => {
     expect(github.calls).toHaveLength(calls)
     expect(await submit(view, { headSha: sha('b') })).toEqual(refused(409, 'lease_released'))
     expect(await push(view, sha('b'))).toEqual(refused(409, 'lease_released'))
+    // The record outlives the end of the Ticket, which deletes the lease.
+    host.runtime.engine.stopTicket(ticket.id)
+    expect([lease(view.assignment), stored(ticket.id).assignments.at(-1)?.worker]).toEqual([undefined, { ...LAPTOP, model: 'claude-sonnet', costUsd: 1.5 }])
+  })
+
+  it('records a submit once when the worker sends it again while the first one waits on GitHub, and keeps the claimed model without one', async () => {
+    const github = fakeGithub()
+    const ticket = await requested('m1')
+    const view = await claimed()
+    await push(view, sha('a'))
+    github.heads.set(view.branch, sha('a'))
+    expect(await Promise.all([submit(view), submit(view)])).toEqual([opened(7), opened(7)])
+    // Both listed the branch's pull requests before either opened one, so GitHub refused the second create.
+    expect(github.calls.filter(args => args[1] === 'repos/acme/widgets/pulls')).toHaveLength(2)
+    expect(github.pulls).toHaveLength(1)
+    await host.runtime.idle()
+    expect(host.relays(host.runtime.masterId).filter(item => item.kind === 'worker_report')).toHaveLength(1)
+    expect(stored(ticket.id).assignments.at(-1)?.worker).toEqual(LAPTOP)
   })
 
   it('refuses a head no holder pushed and a moved branch head, and accepts a head the previous holder pushed', async () => {
@@ -558,6 +586,8 @@ describe('submit', () => {
     await requested('m1')
     const view = await claimed()
     await push(view, sha('a'))
+    // A push the fence admitted that never made the branch on GitHub.
+    expect(await submit(view)).toEqual(refused(409, 'head_moved'))
     github.heads.set(view.branch, sha('a'))
     expect(await submit(view, { headSha: sha('b') })).toEqual(refused(409, 'head_not_pushed'))
     await push(view, sha('b'))
@@ -595,6 +625,9 @@ describe('submit', () => {
     }
     github.state.halted = true
     expect(await submit(view)).toEqual({ status: 500, body: { error: 'stopped: the project is halted (HTTP 403)' } })
+    unchanged()
+    vi.mocked(Commands.prototype.gh).mockRejectedValueOnce(new CliError('gh: Bad Gateway (HTTP 502)', 502))
+    expect(await submit(view)).toEqual({ status: 500, body: { error: 'gh: Bad Gateway (HTTP 502)' } })
     unchanged()
     github.state.halted = false
     await host.runtime.settings.pause(true, 'panel')

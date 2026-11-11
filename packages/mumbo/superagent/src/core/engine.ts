@@ -247,8 +247,12 @@ export class Engine {
    * outcome once `followsDone` holds.
    * @throws UserError for an unknown or ended ticket, an ended assignment, a question that comes with a ready result or an
    * answer, or a question or answer that names a message that is not a person's or did not reach the ticket.
+   * @param worker - In Mumbo (`UPSTREAM.md` S14), the external worker that replaces the one recorded on the Assignment, as a
+   * submit records the model and cost its worker declared.
    */
-  report(ticketId: string, report: WorkerReport): Ticket { return this.repo.atomic(() => this.assignments.report(ticketId, report)) }
+  report(ticketId: string, report: WorkerReport, worker?: Assignment['worker']): Ticket {
+    return this.repo.atomic(() => this.assignments.report(ticketId, report, worker))
+  }
   /**
    * Handles an assignment that was running when the host stopped: restarts it with a recovery note unless its latest report is
    * `waiting`, `ready`, `blocked`, or `failed` and no Input reached its worker after that report, in which case it keeps its

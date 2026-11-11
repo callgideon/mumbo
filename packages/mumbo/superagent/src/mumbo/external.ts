@@ -14,6 +14,7 @@ import { reportRelay } from '../app/notices.ts'
 import type { Sessions } from '../app/sessions.ts'
 import type { Store } from '../app/store.ts'
 import type { Machine } from '../deployment.ts'
+import { CliError } from '../infra/commands.ts'
 import type { HealthEntry } from '../infra/health.ts'
 import { KV, type Key } from '../kv.ts'
 import { claimPull, PullSchema } from '../sources/github-pull.ts'
@@ -85,7 +86,7 @@ export type SubmitRequest = z.infer<typeof SubmitRequestSchema>
 export interface Lease {
   id: string
   ticketId: string
-  worker: NonNullable<Assignment['worker']>
+  worker: ClaimRequest['worker']
   request: string
   claimedAt: string
   renewedAt: string
@@ -93,7 +94,7 @@ export interface Lease {
   /** Set when the worker's result was submitted: a released lease is not live, never renewed and never swept. */
   releasedAt?: string
   /** The submitted result, set with `releasedAt`, which a submit retried with the same head answers again. */
-  result?: { pr: SubmitView['pr'] } & Pick<SubmitRequest, 'headSha' | 'model' | 'costUsd'>
+  result?: { pr: SubmitView['pr']; headSha: string }
 }
 /** `triggerMessage`'s fields with the full text, and without `chars`, `read` and `source_url_read`, which name in-box resources. */
 export type WorkerTrigger = Omit<ReturnType<typeof triggerMessage>, 'chars' | 'read' | 'source_url_read'>
@@ -310,43 +311,51 @@ export class ExternalExecutor implements ExecutorPlugin {
    * Finishes the lease holder's work with the head it pushed: checks that a holder of this Ticket's lease pushed `headSha`
    * through the worker git route and that it is still the branch head, opens a draft pull request from the branch or turns
    * the open one back into a draft, then, in one transaction, binds the pull request, records a `ready` report as a local
-   * worker's, relayed to the main Session alike, and releases the lease with the result. The GitHub writes come first, so
-   * one that fails records nothing and the worker submits again. A retry with the same head after the release answers the
-   * stored result.
+   * worker's, relayed to the main Session alike, with the worker's declared `model` and `costUsd` on the Assignment's
+   * `worker`, and releases the lease with the result. The GitHub writes come first, so one that fails records nothing and
+   * the worker submits again. A retry with the same head after the release, or while the first submit runs, answers the
+   * stored result once the first one recorded it.
    * @param assignment - The Assignment the lease is on.
    * @param request - The validated submit.
    * @returns The pull request and the released lease.
    * @throws WorkerConflict when the caller does not hold the live lease (see `holder`); `paused` while processing is paused
-   * or setup is pending; `head_not_pushed`; `head_moved`. Error for a failed GitHub call, or a pull request from the branch
-   * that the Ticket cannot claim (see `claimPull`).
+   * or setup is pending; `head_not_pushed`; `head_moved`, also when the branch is not on GitHub. Error for a failed GitHub
+   * call, or a pull request from the branch that the Ticket cannot claim (see `claimPull`).
    */
   async submit(assignment: string, request: SubmitRequest): Promise<SubmitView> {
     const { store, github } = this.host
-    const done = this.lease(assignment)
-    if (done?.id === request.lease && done.worker.key === request.worker.key && done.result?.headSha === request.headSha) {
-      return { pr: done.result.pr, lease: 'released' }
-    }
+    const done = this.submitted(assignment, request)
+    if (done) return done
     const { ticket } = this.holder(assignment, request)
     if (this.host.paused()) throw new WorkerConflict('paused')
     if (!store.get(KV.external.pushed(ticket.id))?.includes(request.headSha)) throw new WorkerConflict('head_not_pushed')
     const { commands } = github, branch = branchOf(ticket)
     const head = await commands.api(z.looseObject({ commit: z.looseObject({ sha: z.string() }) }), `branches/${branch}`)
+      // The fence records a push before GitHub applies it, so a pushed head may never have made the branch.
+      .catch((error: unknown) => { throw error instanceof CliError && error.code === 404 ? new WorkerConflict('head_moved') : error })
     if (head.commit.sha !== request.headSha) throw new WorkerConflict('head_moved')
     const owner = this.host.repository().split('/')[0]
-    const [open] = await commands.api(z.array(OpenPullSchema), `pulls?head=${owner}:${branch}&state=open`)
-    const pull = open ?? await commands.api(OpenPullSchema, 'pulls', '--method', 'POST', '-f', `title=${ticket.title}`,
+    const opened = async () => (await commands.api(z.array(OpenPullSchema), `pulls?head=${owner}:${branch}&state=open`))[0]
+    const pull = await opened() ?? await commands.api(OpenPullSchema, 'pulls', '--method', 'POST', '-f', `title=${ticket.title}`,
       '-f', `body=This is by an automated agent, not a human.\n\n${request.summary}\n\nTicket ${ticket.id}`, '-f', `head=${branch}`,
-      '-f', 'base=main', '-F', 'draft=true')
+      '-f', 'base=main', '-F', 'draft=true').catch(async (error: unknown) => {
+      // GitHub answers 422 when a concurrent submit opened the pull request since the listing, and for other invalid creates.
+      const made = error instanceof CliError && error.code === 422 ? await opened() : undefined
+      if (!made) throw error
+      return made
+    })
     // An unreviewed head must not wait in the approval queue as a ready pull request.
     if (!pull.draft) await commands.gh(['api', 'graphql', '-f', `query=${TO_DRAFT}`, '-f', `id=${pull.node_id}`])
     return store.atomic(() => {
-      // The lease may have ended during the GitHub calls.
+      // A concurrent submit of the same head may have recorded it, and the lease may have ended, during the GitHub calls.
+      const recorded = this.submitted(assignment, request)
+      if (recorded) return recorded
       const { lease } = this.holder(assignment, request)
       const refused = claimPull(github, ticket.id, pull)
       if (refused) throw new Error(refused)
-      const { lease: _lease, worker: _worker, summary, ...kept } = request
-      this.record(ticket.id, { state: 'ready', summary })
-      const result = { pr: { number: pull.number, url: pull.html_url }, ...kept }
+      const { lease: _lease, worker: _worker, summary, headSha, ...declared } = request
+      this.record(ticket.id, { state: 'ready', summary }, { ...lease.worker, ...declared })
+      const result = { pr: { number: pull.number, url: pull.html_url }, headSha }
       store.set(KV.external.lease(assignment), { ...lease, releasedAt: iso(Date.now()), result })
       return { pr: result.pr, lease: 'released' }
     })
@@ -367,14 +376,20 @@ export class ExternalExecutor implements ExecutorPlugin {
   }
 
   private leaseMs(): number { return this.host.machine.workerLeaseMinutes * 60_000 }
-  /** Records a report as a local worker's (see `Engine.report`) and relays it to the main Session alike. */
-  private record(ticketId: string, report: WorkerReport): Ticket {
-    const updated = this.host.engine.report(ticketId, report)
+  /** Records a report as a local worker's (see `Engine.report`), with `worker` when given, and relays it to the main Session alike. */
+  private record(ticketId: string, report: WorkerReport, worker?: Assignment['worker']): Ticket {
+    const updated = this.host.engine.report(ticketId, report, worker)
     const relay = reportRelay(updated, report)
     if (relay) this.host.sessions.relay(relay.id, relay.text)
     return updated
   }
   private lease(assignment: string): Lease | undefined { return this.host.store.get(KV.external.lease(assignment)) }
+  /** The answer a submit of `headSha` recorded on the caller's released lease, which a submit of the same head gets again. */
+  private submitted(assignment: string, request: SubmitRequest): SubmitView | undefined {
+    const done = this.lease(assignment)
+    return done?.id === request.lease && done.worker.key === request.worker.key && done.result?.headSha === request.headSha
+      ? { pr: done.result.pr, lease: 'released' } : undefined
+  }
   /** Writes the lease on `assignment` with a new expiry, one lease length from now. */
   private renew(assignment: string, lease: Omit<Lease, 'renewedAt' | 'expiresAt'>): Lease {
     const now = Date.now()
