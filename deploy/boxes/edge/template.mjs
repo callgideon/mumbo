@@ -250,10 +250,11 @@ const SMOKE_SCAN = '/root /home /src /var/lib/mumbo /usr/local/share/mumbo /run/
  *  agent and whose port is neither in the output chain's reset set (envd, dsh, the live view, the door, 5900 to 5999,
  *  9222) nor in LISTENER_ALLOWLIST. With the start script's system repair done, it fails on any world-writable file or
  *  directory without the sticky bit on the root filesystem outside WRITABLE_EXCLUDES, and on any file a user other than
- *  root can change (another owner, o+w, or g+w with a group other than root) in a directory on root's PATH or a run-as
- *  user's (containmentRows), or anywhere in dsh's code tree, the real paths of /src and `npm root -g`: root runs and
- *  imports them, so this check also names what a system user or group could change there, which the repair leaves
- *  (edge systemRepair). agent may also own the directories in its home on its own PATH alone (rowPaths). Then it runs
+ *  root owns, or with group or world write, in a directory on root's PATH or a run-as user's (containmentRows), or
+ *  anywhere in dsh's code tree, the real paths of /src and `npm root -g`: no group or world write, as dsh's run-as check
+ *  requires, whatever the group, group root's included. Root runs and imports them, so this check also names what a
+ *  system user or group could change there, which the repair leaves (edge systemRepair). agent may also own the
+ *  directories in its home on its own PATH alone (rowPaths), with no group or world write either. Then it runs
  *  agentInstallScript as agent, and fails unless it succeeds. On a failure it prints the reason, with mode, owner and
  *  path for each file named, and the tails of start.sh's output, /root/dsh.log and dsh's start-up audit
  *  (/root/.dsh/logs/startup-*.log), and dsh's whole warning that entries did not activate. Either way it then kills every process of the containment
@@ -278,7 +279,7 @@ export const dshSmokeStep = (person) => {
   // The ids in dsh's warning (app-boot activationDiagnostic: its count, then one `<id> (<package>): <detail>` line per
   // entry, which stack lines may follow) that INACTIVE_ALLOWLIST does not name.
   const inactive = `awk -v ok=" ${INACTIVE_ALLOWLIST.map(e => e.id).join(' ')} " '/^dsh: warning: [0-9]+ entr(y|ies) did not activate$/ { n = $3 + 0; next } n > 0 && /^[^ ]+ [(]/ { n--; if (!index(ok, " " $1 " ")) printf " %s", $1 }' /root/dsh.log`
-  const listed = `-printf '%M %u:%g %p\\n'`, changeable = (owners) => `\\( ${owners} -o -perm -0002 -o ! -gid 0 -perm -0020 \\)`
+  const listed = `-printf '%M %u:%g %p\\n'`, changeable = (owners) => `\\( ${owners} -o -perm -0002 -o -perm -0020 \\)`
   const paths = rowPaths(person), real = (dirs) => `$(for d in ${dirs}; do [ ! -d "$d" ] || readlink -f "$d"; done | sort -u)`
   return `(${[
     'export LC_ALL=C; echo "mumbo-box: dsh smoke check: start dsh as a box does, with dummy values"',
@@ -297,7 +298,7 @@ export const dshSmokeStep = (person) => {
     `[ -n "$why" ] || { sleep ${DSH_SMOKE_SETTLE_SECONDS}; bad=$(${inactive}); [ -z "$bad" ] || why="these dsh entries did not activate, outside INACTIVE_ALLOWLIST (template.mjs):$bad"; }`,
     `[ -n "$why" ] || { L=$(ss -ltnpeH) || why='ss could not list the TCP listeners'; }; [ -n "$why" ] || { bad=$(printf '%s\\n' "$L" | ${listeners}); [ -z "$bad" ] || why="agent may connect to these listeners of other users, outside the output chain's reset set and LISTENER_ALLOWLIST (template.mjs): $bad"; }`,
     `[ -n "$why" ] || { bad=$(find / -xdev -ignore_readdir_race \\( ${WRITABLE_EXCLUDES.map(e => `-path ${e.path}`).join(' -o ')} \\) -prune -o \\( -type f -o -type d \\) -perm -0002 ! \\( -type d -perm -1000 \\) ${listed}) || why='find could not list the world-writable files'; }; [ -n "$why" ] || [ -z "$bad" ] || why="these are world-writable, outside WRITABLE_EXCLUDES (template.mjs), and no sticky directory: $bad"`,
-    `[ -n "$why" ] || { A=$(id -u agent) && G=$(npm root -g --logs-max=0) && P=${real(`$(printf '%s' "$PATH" | tr : ' ') ${paths.root.join(' ')}`)} && O=${real(paths.own.join(' '))} && C=$(readlink -f /src "$G") && bad=$(find $P -maxdepth 1 ! -type l ${changeable('! -uid 0')} ${listed} && { [ -z "$O" ] || find $O -maxdepth 1 ! -type l ${changeable('! -uid 0 ! -uid $A')} ${listed}; } && find $C -xdev -ignore_readdir_race ! -type l ${changeable('! -uid 0')} ${listed}) || why="could not list root's and the run-as users' PATH directories and dsh's code tree"; }; [ -n "$why" ] || [ -z "$bad" ] || why="a user other than root can change these (in agent's own PATH directories, a user other than root or agent), which root or a run-as user runs or dsh imports (on root's or a run-as user's PATH, or in dsh's code tree): $bad"`,
+    `[ -n "$why" ] || { A=$(id -u agent) && G=$(npm root -g --logs-max=0) && P=${real(`$(printf '%s' "$PATH" | tr : ' ') ${paths.root.join(' ')}`)} && O=${real(paths.own.join(' '))} && C=$(readlink -f /src "$G") && bad=$(find $P -maxdepth 1 ! -type l ${changeable('! -uid 0')} ${listed} && { [ -z "$O" ] || find $O -maxdepth 1 ! -type l ${changeable('! -uid 0 ! -uid $A')} ${listed}; } && find $C -xdev -ignore_readdir_race ! -type l ${changeable('! -uid 0')} ${listed}) || why="could not list root's and the run-as users' PATH directories and dsh's code tree"; }; [ -n "$why" ] || [ -z "$bad" ] || why="a user other than root (in agent's own PATH directories, other than root or agent) owns these, or a group or every user can write them, which root or a run-as user runs or dsh imports (on root's or a run-as user's PATH, or in dsh's code tree): $bad"`,
     `[ -n "$why" ] || { su -s /bin/sh agent -c "$(echo ${Buffer.from(agentInstallScript(person)).toString('base64')} | base64 -d)" </dev/null >$T/agent.log 2>&1 && { grep '^mumbo-box: ' $T/agent.log || :; } || why="agent could not install packages into its own prefixes (npm -g, pip in a venv): $(tail -n 20 $T/agent.log)"; }`,
     '[ -z "$why" ] || { echo "mumbo-box: the dsh smoke check failed: $why"; echo "--- start.sh"; tail -n 20 $T/start.log; echo "--- /root/dsh.log"; tail -n 60 /root/dsh.log; for f in /root/.dsh/logs/startup-*.log; do [ ! -e "$f" ] || { echo "--- $f"; tail -n 60 "$f"; }; done; ! grep -qs \' did not activate$\' /root/dsh.log || { echo "--- dsh\'s entries that did not activate"; awk \'/^dsh: .* did not activate$/ { p = 1 } p\' /root/dsh.log; }; } >&2',
     `U=$(for u in ${containmentUsers(person).join(' ')}; do id -u $u 2>/dev/null; done | tr '\\n' ' '); E=$(pgrep -x envd | tr '\\n' ' '); me=$(ps -e -o pid=,sid= | awk -v p=$$ '$1 == p { print $2 }')`,

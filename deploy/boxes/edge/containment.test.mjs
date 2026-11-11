@@ -137,13 +137,13 @@ ${person ? `      browsermcp:
 
 const REAL = ['cat', 'grep', 'cut', 'chmod', 'find', 'cp', 'rm', 'mkdir', 'readlink', 'dirname', 'sort', 'stat', 'head', 'awk']
 const which = (tool) => execFileSync('sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).trim()
-const ME = { uid: process.getuid(), owner: `${execFileSync('id', ['-un'], { encoding: 'utf8' }).trim()}:${execFileSync('id', ['-gn'], { encoding: 'utf8' }).trim()}` }
+const ME = { uid: process.getuid(), gid: process.getgid(), owner: `${execFileSync('id', ['-un'], { encoding: 'utf8' }).trim()}:${execFileSync('id', ['-gn'], { encoding: 'utf8' }).trim()}` }
 /** A `find` for bin directory `bin` that runs the real one with `-uid 0` as `uid` (this test's user: its files read as
- *  root's), `-uid 4000001` (agent in the dsh smoke check's fake id) as `agent`, and `-gid 0` as a group no file here
- *  has, so g+w reads as writable by a group other than root. */
+ *  root's), `-uid 4000001` (agent in the dsh smoke check's fake id) as `agent`, and `-gid 0` as this test's group, so
+ *  its files read as group root's. */
 const fakeFind = (bin, uid = ME.uid, agent = 4000001) => {
   rmSync(join(bin, 'find'), { force: true })
-  writeFileSync(join(bin, 'find'), `#!/bin/sh\nfor a; do shift; case $p in -uid) case $a in 0) a=${uid};; 4000001) a=${agent};; esac;; -gid) [ "$a" != 0 ] || a=4000099;; esac; set -- "$@" "$a"; p=$a; done\nexec ${which('find')} "$@"\n`)
+  writeFileSync(join(bin, 'find'), `#!/bin/sh\nfor a; do shift; case $p in -uid) case $a in 0) a=${uid};; 4000001) a=${agent};; esac;; -gid) [ "$a" != 0 ] || a=${ME.gid};; esac; set -- "$@" "$a"; p=$a; done\nexec ${which('find')} "$@"\n`)
   chmodSync(join(bin, 'find'), 0o755)
 }
 
@@ -1163,6 +1163,8 @@ test('template: the dsh smoke check fails on a slow, dead or failed dsh, an open
 
 const SMOKE_START = 'mumbo-box: dsh smoke check: start dsh as a box does, with dummy values\n'
 const SMOKE_OK = { code: 0, out: `${SMOKE_START}mumbo-box: dsh smoke check passed\n`, err: '', running: false, ran: true, same: true }
+/** The dsh smoke check's reason for what another user or a group can change on a PATH or in dsh's code tree. */
+const SMOKE_CHANGEABLE = 'a user other than root (in agent\'s own PATH directories, other than root or agent) owns these, or a group or every user can write them, which root or a run-as user runs or dsh imports (on root\'s or a run-as user\'s PATH, or in dsh\'s code tree): '
 /** The output of a dsh smoke check that fails with `why` after dsh's start line, which `log` follows in dsh's log. */
 const smokeFailed = (why, log = '') => ({ code: 1, out: SMOKE_START, running: false, ran: true, same: true,
   err: `mumbo-box: the dsh smoke check failed: ${why}\n--- start.sh\nstart.sh: laying out\n--- T/root/dsh.log\ndsh: loading\ndsh web: https://box.invalid/?token=abc\n${log}--- T/root/.dsh/logs/startup-1.log\nstartup audit: subprocess did not activate\n` })
@@ -1195,11 +1197,10 @@ test('template: the dsh smoke check fails on a world-writable file or a director
   // A sticky world-writable directory, as /var/tmp, passes.
   assert.deepEqual(smoke({ setup: (root) => { mkdirSync(join(root, 'var/spool')); chmodSync(join(root, 'var/spool'), 0o1777) } }), SMOKE_OK)
   const world = 'these are world-writable, outside WRITABLE_EXCLUDES (template.mjs), and no sticky directory: '
-  const changeable = 'a user other than root can change these (in agent\'s own PATH directories, a user other than root or agent), which root or a run-as user runs or dsh imports (on root\'s or a run-as user\'s PATH, or in dsh\'s code tree): '
   const at = (mode, path) => `${mode} ${ME.owner} T/${path}`
   // E2B's build: /usr/local/bin and its node, envd and /etc/inittab world-writable, and the ports marker, which the
-  // start script's repair fixes before it reads it; then a world-writable directory elsewhere, and group-writable (by a
-  // group other than root) a PATH directory, a module in /src and one in npm's global root.
+  // start script's repair fixes before it reads it; then a world-writable directory elsewhere, and group-writable (by
+  // group root) a PATH directory, a module in /src and one in npm's global root.
   for (const [path, mode, why] of [
     ['usr/local/bin', 0o777, world + at('drwxrwxrwx', 'usr/local/bin')],
     ['usr/local/bin/node', 0o777, world + at('-rwxrwxrwx', 'usr/local/bin/node')],
@@ -1207,10 +1208,19 @@ test('template: the dsh smoke check fails on a world-writable file or a director
     ['etc/inittab', 0o666, world + at('-rw-rw-rw-', 'etc/inittab')],
     ['usr/local/share/mumbo/ports', 0o666, world + at('-rw-rw-rw-', 'usr/local/share/mumbo/ports')],
     ['var/lib', 0o777, world + at('drwxrwxrwx', 'var/lib')],
-    ['usr/local/bin', 0o775, changeable + at('drwxrwxr-x', 'usr/local/bin')],
-    ['src/node_modules/pkg', 0o775, changeable + at('drwxrwxr-x', 'src/node_modules/pkg')],
-    ['usr/local/lib/node_modules/npm', 0o775, changeable + at('drwxrwxr-x', 'usr/local/lib/node_modules/npm')],
+    ['usr/local/bin', 0o775, SMOKE_CHANGEABLE + at('drwxrwxr-x', 'usr/local/bin')],
+    ['src/node_modules/pkg', 0o775, SMOKE_CHANGEABLE + at('drwxrwxr-x', 'src/node_modules/pkg')],
+    ['usr/local/lib/node_modules/npm', 0o775, SMOKE_CHANGEABLE + at('drwxrwxr-x', 'usr/local/lib/node_modules/npm')],
   ]) assert.deepEqual(smoke({ setup: (root) => chmodSync(join(root, path), mode) }), smokeFailed(why), `${path} ${mode.toString(8)}`)
+})
+
+test('template: the dsh smoke check fails when the system repair leaves group root\'s write on /usr/local and /usr/local/bin, which dsh\'s run-as check refuses on a server identity\'s PATH', (t) => {
+  if (spawnSync('sh', ['-c', 'command -v setsid']).status !== 0) return t.skip('setsid is not installed on this host')
+  // The repair stand-in restores /usr/local's modes from before the step's chmod -R 777: root:root 0755, or 0775, as a
+  // repair that takes o+w and a login group's g+w but not group root's.
+  const local = (mode) => (root) => { for (const p of ['usr/local', 'usr/local/bin']) chmodSync(join(root, p), mode) }
+  assert.deepEqual(smoke({ setup: local(0o755) }), SMOKE_OK)
+  assert.deepEqual(smoke({ setup: local(0o775) }), smokeFailed(`${SMOKE_CHANGEABLE}drwxrwxr-x ${ME.owner} T/usr/local/bin`))
 })
 
 test('template: agent may own the directories in its home on its own PATH, but none on root\'s or another user\'s PATH, and the dsh smoke check fails when agent cannot install into its own prefixes', (t) => {
