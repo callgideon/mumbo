@@ -52,6 +52,11 @@ variable "lean" {
   type        = bool
   default     = false
 }
+variable "db_availability_zone" {
+  description = "Zone of a single-AZ (lean) Postgres; null lets RDS choose. ap-south-1 offers db.t4g.medium for Postgres 18 only in ap-south-1b (2026-11-11)."
+  type        = string
+  default     = null
+}
 variable "zone_id" {
   description = "An existing boxes.internal private zone to associate with this cell's VPC instead of creating one (one zone for every cell, design R4); null creates it."
   type        = string

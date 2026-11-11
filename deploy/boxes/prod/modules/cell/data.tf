@@ -40,6 +40,7 @@ resource "aws_db_instance" "e2b" {
   username                     = "e2b"
   password                     = random_password.postgres.result # one static secret the api and setup read; rotate with an apply
   multi_az                     = !var.lean
+  availability_zone            = var.lean ? var.db_availability_zone : null
   db_subnet_group_name         = aws_db_subnet_group.e2b.name
   vpc_security_group_ids       = [aws_security_group.data.id]
   backup_retention_period      = 14

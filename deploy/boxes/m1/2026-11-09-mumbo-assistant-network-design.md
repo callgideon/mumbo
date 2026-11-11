@@ -1286,7 +1286,7 @@ This replaces "A newcomer's region" above and step 4 of section 17a's flow. A ne
 
 **The browser: three places a page can run, one switch** (it makes N2 explicit):
 - **"Your computer":** the box's Chrome, shown as a stream in the app, with the box's sign-ins. Agents use only these tabs.
-- **"My Chrome":** the person's own Google Chrome on the laptop, with all their sign-ins, extensions and password manager.
+- **"My Chrome":** the person's own Google Chrome on the laptop, with all their sign-ins, extensions and password manager. **[founder: 2026-11-11, "My Chrome", relayed by mumbo: signed-in laptop browsing happens in their own Chrome window, not inside the app]**
   - A Mumbo extension in it talks to the desktop app over native messaging, with the same permissions as the box's extension (below).
   - Its tabs live in Chrome's own window. The app lists them and brings that window forward, and doesn't host them.
 - **"This app":** the desktop app's own view, logged out by default. It is for fast pages that need no sign-in, WebGL and the webcam.
@@ -1307,7 +1307,14 @@ This replaces "A newcomer's region" above and step 4 of section 17a's flow. A ne
 - **A site the computer isn't signed in to:** the agent stops and asks the person to sign in through the stream ("Take over", B28), and doesn't retry.
 - **Agents and laptop sign-ins:** an agent never drives a laptop page unseen. When a task needs a sign-in that exists only on the laptop, Mumbo asks in the app to open a consented page in My Chrome for that step (N4), and only while the laptop is online. Browser consent's asks and B25's denials apply there as in the box.
 - **Per-site agent rules** (part C's approval tiers start here):
-  - **LinkedIn** forbids "bots or other unauthorized automated methods" (User Agreement §8.2). Founder's decision pending; the recommendation is that the agent drafts and the person acts there.
+  - **LinkedIn: the agent may act** (send, connect, post) in the box's Chrome. **[founder: 2026-11-11, "Agent may act", relayed by mumbo; an informed decision]**
+    - The founder chose this over the recommended draft-only option after being told that LinkedIn's terms forbid "bots or other unauthorized automated methods" (User Agreement §8.2), and that acting risks a ban of their account.
+    - The consent model is unchanged: before a write the agent says exactly what it will do and waits, unless the person has allowed that kind of action on LinkedIn.
+    - B44 throttles it, to lower the risk:
+      - at most 20 connection requests, 30 messages and 3 posts a day, config per box;
+      - pauses between actions like a person's;
+      - no bulk actions or profile scraping.
+    - Copying LinkedIn cookies stays forbidden, as for every site.
   - **WhatsApp** stays as decided in v1: the agent reads and drafts, and a send needs the person's approval.
   - Every other site follows browser consent's asks.
 
@@ -1408,7 +1415,7 @@ This replaces "A newcomer's region" above and step 4 of section 17a's flow. A ne
 | **B41** file sync in the app | The desktop app's sync client for `~/Mumbo`: a watcher, a journal, bytes through S3, conflict copies, OS trash, quarantine and Mark of the Web, the default ignores, no symlinks, the 2 GiB file cap, the over-quota state, the mass-delete prompt, a sync status, the replica list and Remove. A GIF | N2a, B40b |
 | **B42** browser data | The box Chrome's force-installed extension, its native-messaging host and socket; the live tab lists both ways; bookmarks and history for This app, and for My Chrome only when it isn't on the same Google account | B40 |
 | **B43** placements | "Your computer" and "This app" placements, their icons and chip, the toolbar switch, Move (no form drafts), the same-page warning, offline states, agent-opened pages always on the computer, measured Move time. A GIF | N2b, B42 |
-| **B44** per-site agent rules | The per-site table in browser consent (LinkedIn per the founder's answer, WhatsApp as v1) and its ask tiers | B25 |
+| **B44** per-site agent rules | The per-site table in browser consent and its ask tiers: LinkedIn's daily caps and pacing, WhatsApp as v1 | B25 |
 | **B45** My Chrome | The Mumbo extension for the person's own Chrome, published to the Web Store, with native messaging to the app; Move and consented laptop steps target it | N2a, B42 |
 | **B46** passkeys in the box | Confirm synced passkeys in the box's Linux Chrome; WebAuthn forwarding from the laptop into the stream | N2b |
 
