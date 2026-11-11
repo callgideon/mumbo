@@ -67,6 +67,7 @@ export const SERVICE_PAGE: Record<string, string> = {
   agentPresets: 'core.md',
   agents: 'core.md',
   approval: 'approval.md',
+  'mumbo-report-turns': 'approval.md',
   officeToPdf: 'office-to-pdf.md',
   attachments: 'attachment.md',
   shell: 'shell.md',

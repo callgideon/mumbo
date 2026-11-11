@@ -67,8 +67,11 @@ async function boot(composition: Composition): Promise<Booted> {
       return { agent: { id: sessionId, session: { id: sessionId } } }
     },
   } as never)
-  context.provide('sessionProjections', { snapshot: () => ({ asOfSeq: 0, values: {} }) } as never)
-  for (const service of ['workspaceRegistry', 'agents', 'subagents', 'jobs']) context.provide(service, {} as never)
+  context.provide('sessionProjections', {
+    snapshot: () => ({ asOfSeq: 0, values: {} }),
+    register: () => Promise.resolve({ stateOf: () => false, dispose: () => Promise.resolve() }),
+  } as never)
+  for (const service of ['workspaceRegistry', 'agents', 'subagents', 'jobs', 'permissionPresets']) context.provide(service, {} as never)
   await context.plugin(Loader)
   const modules = new Map<string, object>([
     ['@deepseek-ai/dsh-host-webserver', WebServer],
@@ -131,10 +134,12 @@ describe('real Loader composition', () => {
   it.each([
     ['loopback' as const, [...DOOR_TOOLS, 'runs_halt', 'runs_resume']],
     ['person' as const, DOOR_TOOLS],
-  ])('mounts the %s composition on its own listener and serves its tools on /mcp', { timeout: 60_000 }, async (composition, tools) => {
+  ])('mounts the %s composition on its own listener, serves its tools on /mcp, and provides the report-turn gate to every plugin', { timeout: 60_000 }, async (composition, tools) => {
     const { url } = await boot(composition)
     const result = await rpc(url, 'tools/list', {}) as { tools: { name: string }[] }
     expect(result.tools.map(tool => tool.name)).toEqual(tools)
+    // The group isolates only webServer, so the service reaches plugins outside it, such as browser consent.
+    expect(Object.keys(context?.get('mumbo-report-turns') ?? {})).toEqual(['reportStarted'])
   })
 
   it('answers task_status in the person-box overlay from the Session mumbo and the checkout it names', { timeout: 60_000 }, async () => {

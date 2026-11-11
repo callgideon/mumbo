@@ -13,9 +13,12 @@ import { HANDLE_PATTERN, type ProjectId, readKey } from './auth.ts'
 import { register as registerConversation } from './conversation.ts'
 import { gateWhileHalted, register as registerHalt } from './halt.ts'
 import { createRouteHandler } from './http.ts'
+import { gateReportTurns } from './report-turns.ts'
 import { register as registerStatus } from './status.ts'
 import { type AssistantRecord, type Idem, mcpDomain, prune } from './store.ts'
 import type { ToolDeps } from './tool.ts'
+
+export type { ReportTurns } from './report-turns.ts'
 
 /** Cordis function-plugin name. */
 export const name = 'mumbo-mcp'
@@ -30,6 +33,7 @@ export const inject = [
   'jobs',
   'sessionProjections',
   'subprocess',
+  'permissionPresets',
 ]
 
 /** Route path on the injected WebServer; the listener, not the path, varies per deployment. */
@@ -111,16 +115,17 @@ function assistantOf(ctx: Context, config: Config, table: KvTable<'main', Assist
 }
 
 /**
- * Own the plugin's resources in one effect, so disposal runs in order: the route goes first, the requests it
- * admitted settle (a waiting `agent_read` returns early), then the halt gate and the `mumbo_mcp` domain go.
- * Load opens the domain and gates model steps on the stored halt flag before it reads the key, prunes expired
- * request ids, starts answering asks, and registers `/mcp`.
+ * Gate the shell in report-started turns first, then own the plugin's resources in one effect, so disposal runs in
+ * order: the route goes first, the requests it admitted settle (a waiting `agent_read` returns early), then the halt
+ * gate and the `mumbo_mcp` domain go. Load opens the domain and gates model steps on the stored halt flag before it
+ * reads the key, prunes expired request ids, starts answering asks, and registers `/mcp`.
  * @param ctx - plugin context carrying the injected services.
  * @param config - validated configuration.
- * @throws when the domain does not open, or the key file is missing, unreadable or holds only whitespace; no route
- *   registers then, and the gate goes with the failed load.
+ * @throws when the report-turn projection does not register, the domain does not open, or the key file is missing,
+ *   unreadable or holds only whitespace; no route registers then, and both gates go with the failed load.
  */
 export async function apply(ctx: Context, config: Config): Promise<void> {
+  await gateReportTurns(ctx)
   await ctx.effect(async function* () {
     const domain = await ctx.storageDomain.open(mcpDomain)
     yield () => domain.close()

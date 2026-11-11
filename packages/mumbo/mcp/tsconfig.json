@@ -24,6 +24,9 @@
       "path": "../../core/session"
     },
     {
+      "path": "../../core/tools"
+    },
+    {
       "path": "../../host/webserver"
     },
     {
@@ -55,6 +58,9 @@
     },
     {
       "path": "../../workspace/workspace"
+    },
+    {
+      "path": "../run-wild"
     }
   ]
 }

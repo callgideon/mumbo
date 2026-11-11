@@ -43,7 +43,7 @@ The plugin requires `permissionPresets` and registers two prepended listeners. I
 | Approval card | A question with an `approval` intent, such as application access | Answered with the intent's `approve` label, never `always`. The grant keeps the scope its caller gives that label and outlives Run Wild: application access stays allowed for the rest of the Session, also after the person switches it back to Full access |
 | Question | A question without an intent, from `ask_user_question` | Answered with `selected: []` and the reply as `custom` |
 
-Answers are synchronous, so the browser shows no card and no `needs_you` listing finds the question waiting. A Session in any other preset, and a question asked without an Agent, reach the next answerer unchanged. Asks that a plugin raises through the approval service itself, such as `@mumbo/browser-consent`'s browser writes, still reach the person.
+Answers are synchronous, so the browser shows no card and no `needs_you` listing finds the question waiting. A Session in any other preset, and a question asked without an Agent, reach the next answerer unchanged. Asks that a plugin raises through the approval service itself, such as `@mumbo/browser-consent`'s browser writes, still reach the person. In a turn that a project's report started, `@mumbo/mcp` refuses `bash` before Run Wild can allow it, in either listener order; see its [report-started turns](../mcp/README.md#report-started-turns).
 
 <a id="delegated-children"></a>
 ## Delegated children

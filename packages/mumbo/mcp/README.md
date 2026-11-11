@@ -7,13 +7,14 @@ kind: "package-reference"
 
 ## Summary
 
-`@mumbo/mcp` serves the Model Context Protocol on one exact `/mcp` route of the injected `ctx.webServer`. A caller presents the bearer key from the configured key file and names an allowlisted principal; every request gets a fresh stateless MCP server that answers in JSON, never in a stream. Use it when a person's MCP client on another machine reaches the host through a local relay, or, with the `door` profile, when the mumbo edge forwards a person's calls to Mumbo in their box. The key authenticates the relay, not the person.
+`@mumbo/mcp` serves the Model Context Protocol on one exact `/mcp` route of the injected `ctx.webServer`. A caller presents the bearer key from the configured key file and names an allowlisted principal; every request gets a fresh stateless MCP server that answers in JSON, never in a stream. Use it when a person's MCP client on another machine reaches the host through a local relay, or, with the `door` profile, when the mumbo edge forwards a person's calls to Mumbo in their box. The key authenticates the relay, not the person. It also gates the shell in report-started turns.
 
 ## Table of Contents
 
 - [Configuration](#configuration)
 - [HTTP contract](#http-contract)
 - [Tools](#tools)
+- [Report-started turns](#report-started-turns)
 - [Dedicated listener composition](#dedicated-listener-composition)
 - [Model Experience](#model-experience)
 - [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
@@ -88,6 +89,22 @@ The `door` profile lists and serves the first six tools only: `runs_halt` and `r
 
 With `session`, the assistant Session is that existing Session, such as the `mumbo` Session `@mumbo/assistant` creates: the plugin never creates a Session then, and every tool that needs it answers `not_ready` until it exists, then drives it without a reload. Without `session`, the assistant Session is the one whose id the plugin stored: the first call creates it in the `assistantCwd` workspace and titles it `assistantTitle`, and a later call creates a new one only when the stored Session no longer exists. The id, the halt flag, and the request-id results live in the `mumbo_mcp` storage domain; results older than 24 hours are pruned at load. Unloading removes the route first and waits for the requests it accepted before the gate and the domain go.
 
+<a id="report-started-turns"></a>
+## Report-started turns
+
+A turn is report-started while the newest message that a person or a project sent to the assistant's root Session is a project's report, a `user/message` appended with source `report`. A message with source `user`, such as a browser prompt, or `mcp`, through the door, ends it; context the harness adds, a schedule's message and every other source leave it as it is. A delegated child follows its live root Session. A host-only Session projection keeps the answer, so it holds across a host restart. The plugin provides it while loaded as the `mumbo-report-turns` service, whose `reportStarted(agent)` other plugins read; the listener group isolates only `webServer`, so the service reaches plugins outside it.
+
+In such a turn the plugin gates the `bash` tool as a whole, whatever the command and whether or not the box holds a GitHub sign-in:
+
+| Session preset | A `bash` call |
+|---|---|
+| Run Wild | Is refused before it runs, without asking; the model reads the note in [Model Experience](#model-experience) |
+| Any other | Asks the person, and runs only when they allow it |
+
+The approval card's reason is: "The newest message in this Session is a project's report, so the shell asks before each command: it runs with your box's sign-ins, such as GitHub."
+
+The listener is prepended to `tools/pre-execute` and reads Run Wild through `@mumbo/run-wild`'s `inRunWild`, so the refusal holds in either listener order: it denies without delegating, and Run Wild turns only an `ask` into `allow`. Outside Run Wild it delegates first and keeps a later policy's denial. The plugin requires `permissionPresets` for this, which every Web profile provides.
+
 <a id="dedicated-listener-composition"></a>
 ## Dedicated listener composition
 
@@ -118,6 +135,26 @@ Each accepted `agent_send` adds one data-dependent user-role message of at most 
 
 Append-only. The message follows the Session's existing history, so the reusable request prefix stays intact.
 
+### Shell refusal in a report-started turn
+
+#### What the model sees
+
+Under Run Wild, a `bash` call in a report-started turn returns an error result with this text, and the command does not run. Outside Run Wild the model sees the command's own result once the person allows it, or `Error: the user rejected tool "bash"`.
+
+##### Verbatim refusal
+
+```markdown
+Error: bash did not run: the newest message in this Session is a project's report, and in Run Wild the shell runs only after a message from the person. Say what you would run and why, so the person can reply to let it run.
+```
+
+#### Token effect
+
+About 50 tokens for each refused call, in place of the command's output, retained in the Session until compaction replaces or removes it.
+
+#### KV Cache effect
+
+Append-only. The refusal is an ordinary tool result after the Session's existing history.
+
 ## Known Limitations and Deferred Work
 
 <a id="known-limitations-and-deferred-work"></a>
@@ -130,6 +167,8 @@ Append-only. The message follows the Session's existing history, so the reusable
 - **A rejected step consumes its claimed messages** — while halted, a message that wakes a Session is claimed by the step the gate rejects and is not delivered after `runs_resume`; send it again.
 - **`agent_read` reads the whole assistant log** — each read takes one history page through the latest event, so its cost grows with the Session; `needs_you` does the same once per tool ask that names a call.
 - **No composition gate lists the door's tools** — B24's containment gate, which is to list `agent_send`, `agent_read`, `needs_you`, `task_reply`, `task_status` and `task_result`, has not landed; the tools join it when it does.
+- **The report-turn gate covers `bash` only** — the file tools still write, and a composition that adds another tool that starts processes, such as a persistent terminal or `run_code`, leaves that tool ungated in a report-started turn.
+- **The report-turn gate holds only while the plugin is loaded** — on a failed load, a report already in a Session's log no longer gates the shell, though no new report can arrive.
 - **The halt holds only while the plugin is loaded** — a failed load, such as an unreadable or empty key file or a `mumbo_mcp` domain that does not open, leaves no gate, and every Session steps freely until the plugin loads.
 
 <a id="dev-note"></a>

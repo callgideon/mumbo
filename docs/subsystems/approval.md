@@ -141,6 +141,29 @@ Types: [Agent](core.md) · [Session](session.md)
 
 Source: [`packages/interaction/user-approval/src/index.ts`](../../packages/interaction/user-approval/src/index.ts)
 
+<a id="ctxmumbo-report-turns--reportturns"></a>
+
+### `ctx.mumbo-report-turns` — `ReportTurns`
+
+Whether an Agent acts in a report-started turn: `@mumbo/mcp` provides it while loaded and gates the shell with it.
+
+```ts cordis-catalog
+/**
+ * Whether the newest message that a person or a project sent to the Agent's root Session is a project's report. A
+ * person's message is one with the `user` source, such as a browser prompt, or the `mcp` source of the MCP door.
+ * Context the harness adds, a schedule's message and every other source leave the answer unchanged. A delegated
+ * child follows its live root Session.
+ * @param agent - the live Agent that acts.
+ * @returns whether that message is a report; `false` before any such message.
+ * @throws when the Agent is a delegated child whose root is no longer live.
+ */
+reportStarted(agent: Agent): boolean
+```
+
+Types: [Agent](core.md)
+
+Source: [`packages/mumbo/mcp/src/report-turns.ts`](../../packages/mumbo/mcp/src/report-turns.ts)
+
 <a id="approval-events"></a>
 
 ### `approval/*` events
