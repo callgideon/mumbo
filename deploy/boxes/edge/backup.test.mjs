@@ -316,18 +316,19 @@ test('a corrupt database fails the backup and leaves the previous archive alone'
   assert.ok(!existsSync(join(root, 'root/.mumbo-sqlite')))
 })
 
-test('backups carry the uploads of agent containment (B24) without their cache, and a restore puts an upload back; dsh\'s temporary directory stays out', () => {
+test('backups carry the uploads of agent containment (B24) without their cache, and a restore puts an upload back; dsh\'s temporary directory, agent\'s home and consent\'s staged copies stay out', () => {
   const { root, db, target } = fixture()
   db.close()
   const store = join(root, 'var/lib/mumbo/attachments')
   for (const [p, v] of [['attachments/v1/ab/cdef', 'uploaded bytes'], ['cache/attachments/x', 'cache']]) { mkdirSync(join(store, p, '..'), { recursive: true }); writeFileSync(join(store, p), v) }
   chmodSync(join(store, 'attachments/v1/ab/cdef'), 0o440)
   mkdirSync(join(root, 'root/.dsh/tmp/tsx'), { recursive: true }); writeFileSync(join(root, 'root/.dsh/tmp/tsx/x'), 'module cache')
+  for (const p of ['var/lib/mumbo/uploads/n0nce/report.pdf', 'home/agent/notes.txt']) { mkdirSync(join(root, p, '..'), { recursive: true }); writeFileSync(join(root, p), p) }
   const b = sh(backupCommand(target, root))
   assert.equal(b.status, 0, b.stderr)
   const names = execFileSync('tar', ['-tzf', `${root}.tgz`], { encoding: 'utf8' }).split('\n')
   assert.ok(names.includes('var/lib/mumbo/attachments/attachments/v1/ab/cdef'))
-  assert.ok(!names.some(n => n.startsWith('var/lib/mumbo/attachments/cache') || n.startsWith('root/.dsh/tmp')))
+  assert.ok(!names.some(n => ['var/lib/mumbo/attachments/cache', 'root/.dsh/tmp', 'var/lib/mumbo/uploads', 'home/agent'].some(p => n.startsWith(p))))
   rmSync(join(root, 'var'), { recursive: true })
   assert.equal(sh(restoreCommand(target, root)).status, 0)
   assert.equal(readFileSync(join(store, 'attachments/v1/ab/cdef'), 'utf8'), 'uploaded bytes')
@@ -348,48 +349,65 @@ test('a backup stages its SQLite snapshots root-only (umask 077): under containm
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
 
-test('a projects tree another user owns (agent, B24) is snapshotted by a process of its own, and its database comes back', () => {
+test('the workspace trees another user owns (agent, B24), projects and a project box\'s work, are each snapshotted by a process of their own, and their databases come back', () => {
   const { root, db, target } = fixture()
   db.close()
-  mkdirSync(join(root, 'root/projects/app'), { recursive: true })
-  const p = new DatabaseSync(join(root, 'root/projects/app/data.db'))
-  p.exec('PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE t(v); INSERT INTO t VALUES (7)')
-  // Every listing the snapshot makes, with the pid that made it: the test's user owns projects, as agent does in a box.
+  const dbs = { projects: 'app/data.db', work: 'tickets/t1/data.db' }
+  const open = Object.entries(dbs).map(([d, f], i) => {
+    mkdirSync(join(root, 'root', d, f, '..'), { recursive: true })
+    const p = new DatabaseSync(join(root, 'root', d, f))
+    p.exec(`PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE t(v); INSERT INTO t VALUES (${7 + i})`)
+    return p
+  })
+  mkdirSync(join(root, 'root/work/tickets/t1/node_modules/x'), { recursive: true }); writeFileSync(join(root, 'root/work/tickets/t1/node_modules/x/i.js'), 'x')
+  writeFileSync(join(root, 'root/work/tickets/t1/main.c'), 'int main;')
+  // Every listing the snapshot makes, with the pid that made it: the test's user owns both trees, as agent does in a box.
   const log = join(root, 'listings'), preload = join(root, 'listings.cjs')
   writeFileSync(preload, `const fs = require("fs"), real = fs.readdirSync; fs.readdirSync = function (p, ...a) { fs.appendFileSync(${JSON.stringify(log)}, process.pid + " " + p + "\\n"); return real.call(this, p, ...a) }`)
   const b = sh(backupCommand(target, root), { ...process.env, NODE_OPTIONS: `--require ${preload}` })
   assert.equal(b.status, 0, b.stderr)
-  p.close()
+  for (const p of open) p.close()
   const pid = (dir) => readFileSync(log, 'utf8').split('\n').find(l => l.endsWith(` ${join(root, dir)}`))?.split(' ')[0]
-  assert.ok(pid('root/.dsh') && pid('root/projects') && pid('root/.dsh') !== pid('root/projects'))
-  assert.match(execFileSync('tar', ['-tzf', `${root}.tgz`], { encoding: 'utf8' }), /root\/\.mumbo-sqlite\/projects\/app\/data\.db\.snap/)
+  const pids = ['root/.dsh', 'root/projects', 'root/work'].map(pid)
+  assert.ok(pids.every(Boolean) && new Set(pids).size === 3, pids.join(' '))
+  const names = execFileSync('tar', ['-tzf', `${root}.tgz`], { encoding: 'utf8' }).split('\n')
+  for (const [d, f] of Object.entries(dbs)) {
+    assert.ok(names.includes(`root/.mumbo-sqlite/${d}/${f}.snap`), d)
+    // The live database and its WAL stay out: only the snapshot is consistent.
+    assert.ok(!names.some(n => n.startsWith(`root/${d}/${f}`)), d)
+  }
+  assert.ok(names.includes('root/work/tickets/t1/main.c') && !names.some(n => n.includes('node_modules')))
   rmSync(join(root, 'root'), { recursive: true })
   const r = sh(restoreCommand(target, root))
   assert.equal(r.status, 0, r.stderr)
-  const back = new DatabaseSync(join(root, 'root/projects/app/data.db'))
-  assert.deepEqual(back.prepare('SELECT v FROM t').all().map((x) => x.v), [7])
-  back.close()
+  Object.entries(dbs).forEach(([d, f], i) => {
+    const back = new DatabaseSync(join(root, 'root', d, f))
+    assert.deepEqual(back.prepare('SELECT v FROM t').all().map((x) => x.v), [7 + i])
+    back.close()
+  })
 })
 
-test('a restore moves no snapshot through a link the archive holds on its database\'s path', () => {
-  const root = mkdtempSync(join(tmpdir(), 'bk-'))
-  const src = mkdtempSync(join(tmpdir(), 'bk-src-')), outside = mkdtempSync(join(tmpdir(), 'bk-out-'))
-  try {
-    writeFileSync(join(outside, 'keep.db'), 'root\'s')
-    mkdirSync(join(src, 'root/projects/ok'), { recursive: true })
-    symlinkSync(outside, join(src, 'root/projects/dir'))
-    symlinkSync(join(outside, 'keep.db'), join(src, 'root/projects/name.db'))
-    for (const n of ['dir/keep.db', 'name.db', 'ok/fine.db']) { mkdirSync(join(src, 'root/.mumbo-sqlite/projects', n, '..'), { recursive: true }); writeFileSync(join(src, 'root/.mumbo-sqlite/projects', `${n}.snap`), 'agent\'s') }
-    execFileSync('tar', ['-C', src, '-czf', `${root}.tgz`, 'root'])
-    const r = sh(restoreCommand(`file://${root}.tgz`, root))
-    assert.equal(r.status, 0, r.stderr)
-    assert.equal(r.stderr, 'restore: /root/projects/dir/keep.db left out: its directory is not at its real path\n')
-    assert.deepEqual([readdirSync(outside), readFileSync(join(outside, 'keep.db'), 'utf8')], [['keep.db'], 'root\'s'])
-    // A link in the database's own name is replaced, never written through.
-    assert.ok(lstatSync(join(root, 'root/projects/name.db')).isFile())
-    assert.equal(readFileSync(join(root, 'root/projects/ok/fine.db'), 'utf8'), 'agent\'s')
-    assert.ok(!existsSync(join(root, 'root/.mumbo-sqlite')))
-  } finally { for (const d of [root, src, outside]) rmSync(d, { recursive: true, force: true }); rmSync(`${root}.tgz`, { force: true }) }
+test('a restore moves no snapshot through a link the archive holds on its database\'s path, in projects or work', () => {
+  for (const ws of ['projects', 'work']) {
+    const root = mkdtempSync(join(tmpdir(), 'bk-'))
+    const src = mkdtempSync(join(tmpdir(), 'bk-src-')), outside = mkdtempSync(join(tmpdir(), 'bk-out-'))
+    try {
+      writeFileSync(join(outside, 'keep.db'), 'root\'s')
+      mkdirSync(join(src, `root/${ws}/ok`), { recursive: true })
+      symlinkSync(outside, join(src, `root/${ws}/dir`))
+      symlinkSync(join(outside, 'keep.db'), join(src, `root/${ws}/name.db`))
+      for (const n of ['dir/keep.db', 'name.db', 'ok/fine.db']) { mkdirSync(join(src, 'root/.mumbo-sqlite', ws, n, '..'), { recursive: true }); writeFileSync(join(src, 'root/.mumbo-sqlite', ws, `${n}.snap`), 'agent\'s') }
+      execFileSync('tar', ['-C', src, '-czf', `${root}.tgz`, 'root'])
+      const r = sh(restoreCommand(`file://${root}.tgz`, root))
+      assert.equal(r.status, 0, r.stderr)
+      assert.equal(r.stderr, `restore: /root/${ws}/dir/keep.db left out: its directory is not at its real path\n`)
+      assert.deepEqual([readdirSync(outside), readFileSync(join(outside, 'keep.db'), 'utf8')], [['keep.db'], 'root\'s'])
+      // A link in the database's own name is replaced, never written through.
+      assert.ok(lstatSync(join(root, `root/${ws}/name.db`)).isFile())
+      assert.equal(readFileSync(join(root, `root/${ws}/ok/fine.db`), 'utf8'), 'agent\'s')
+      assert.ok(!existsSync(join(root, 'root/.mumbo-sqlite')))
+    } finally { for (const d of [root, src, outside]) rmSync(d, { recursive: true, force: true }); rmSync(`${root}.tgz`, { force: true }) }
+  }
 })
 
 test('backups carry the desktop session\'s home (B24: XFCE as xsession) without its cache', () => {

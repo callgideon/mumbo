@@ -81,7 +81,8 @@ export const PORTS_STEP = `install -d -m 0755 ${dirname(PORTS_MARKER)} && printf
  *  Playwright MCP server), `desktop` (the X clients of computer use and the Browser tab) and `xsession` (the XFCE
  *  session). Group `shared` holds the Downloads (agent, browsermcp, xsession, beside browser); `workspace` the workspace
  *  (agent and xsession; mcpserver joins at start with the edge's MCP_SERVER_WORKSPACE `readwrite`, and `workspace-read`
- *  with `read`); `desktop`, desktop's own group, reads the X cookie (browser, xvnc, xsession). Homes are their users'
+ *  with `read`); `desktop`, desktop's own group, reads the X cookie (browser, xvnc, xsession); the system group
+ *  `uploads` enters browser consent's staged upload copies (browser, browsermcp). Homes are their users'
  *  alone, and the run-as TMPDIRs exist. An ACL check fails the build on a filesystem the start script's setfacl would
  *  fail on. No account keeps an empty password; the start script also takes the set-user-ID bit off su and sudo.
  *  @param {boolean} person a person box (mumbo-box), not a project box
@@ -91,7 +92,7 @@ export const usersSteps = (person) => {
   const shell = (u) => ['agent', 'xsession'].includes(u) ? '/bin/bash' : '/usr/sbin/nologin'
   return [
     ...users.map(u => `id ${u} >/dev/null 2>&1 || useradd -m -s ${shell(u)} ${u}`),
-    `groupadd -f workspace && groupadd -f workspace-read && usermod -aG workspace agent${person ? ' && for u in agent browsermcp xsession; do usermod -aG shared $u; done && usermod -aG workspace xsession && for u in browser xvnc xsession; do usermod -aG desktop $u; done' : ''}`,
+    `groupadd -f workspace && groupadd -f workspace-read && usermod -aG workspace agent${person ? ' && for u in agent browsermcp xsession; do usermod -aG shared $u; done && usermod -aG workspace xsession && for u in browser xvnc xsession; do usermod -aG desktop $u; done && groupadd -f -r uploads && for u in browser browsermcp; do usermod -aG uploads $u; done' : ''}`,
     `for u in ${users.join(' ')}; do chmod 0700 /home/$u; done && for u in ${['agent', ...(person ? ['browsermcp', 'desktop'] : [])].join(' ')}; do install -d -o $u -g $u -m 0700 /home/$u/tmp; done`,
     'd=$(mktemp -d /var/tmp/acl.XXXXXX) && setfacl --set u::rwx,g::rwx,g:workspace-read:r-x,m::rwx,o::--- "$d" && getfacl -p "$d" | grep -qx group:workspace-read:r-x && rm -rf "$d"',
     'awk -F: \'$2 == "" { print $1 }\' /etc/shadow | xargs -r -n1 passwd -l',

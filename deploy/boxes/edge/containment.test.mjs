@@ -14,12 +14,15 @@ import { BOX_STEPS, PROJECT_STEPS, KASMVNC_BIND_STEP, kasmvncStep, usersSteps } 
 const c = { llmHost: 'llm.example', publicHost: 'app.example', projectDomain: 'app.example' }
 const script = (cfg, person) => startScript(cfg, 'T', boxSite(cfg, person ? 'a@x.com' : 'project:0123456789abcdef'), 'role', person ? undefined : 'K', { proxy: 'P', gh: 'G' })
 /** The fixtures' ids (apps/cli/tests/fixtures/box-edge/containment-*.overlay.yml): agent 1001, browsermcp 1002,
- *  desktop 1003, shared 1005, mcpserver 1006; the workspace groups, which the fixtures do not name, 1007 and 1008. */
+ *  desktop 1003, shared 1005, mcpserver 1006; the workspace groups and uploads, which the fixtures do not name, 1007,
+ *  1008 and 1009. */
 const IDS = { agent: [1001, 1001], browsermcp: [1002, 1002], desktop: [1003, 1003], mcpserver: [1006, 1006] }
-const GROUPS = { shared: 1005, workspace: 1007, 'workspace-read': 1008 }
+const GROUPS = { shared: 1005, workspace: 1007, 'workspace-read': 1008, uploads: 1009 }
 const SECRETS = 'secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY, E2B_API_KEY, GH_TOKEN, GITHUB_TOKEN]'
 const PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
-/** The fixtures' rows without their comments, at the harness branch's 68ed0e7357, with agent also in workspace. */
+/** The fixtures' rows without their comments, at the harness branch's 68ed0e7357, with agent also in workspace,
+ *  browsermcp also in uploads, and no dsh-superagent row: the image's project overlay reads the directories from the
+ *  variables the layout exports (the uploads and A2 contract of 2026-11-11, which the harness's fixtures take on). */
 const FIXTURE = (person, mcpGroups = '') => `- id: subprocess
   config:
     shellActivityDirectory: /run/dsh-shell
@@ -50,7 +53,7 @@ ${person ? `        PATH: ${PATH}
 ${person ? `      browsermcp:
         uid: 1002
         gid: 1002
-        groups: [1005]
+        groups: [1005, 1009]
         inherit: [LANG, LC_ALL, TZ]
         set:
           HOME: /home/browsermcp
@@ -99,15 +102,7 @@ ${person ? `      browsermcp:
   config:
     root: /var/lib/mumbo/spill
     groupReadable: true
-${person ? '' : `- id: dsh-superagent
-  config:
-    stateDir: !!js dshHomePath('superagent')
-    workDirectory: /root/work
-    workerDirectory: /var/lib/mumbo/superagent
-    ghConfigDirectory: /root/.config/gh
-    panelAdmins: !!js (process.env.MUMBO_PANEL_ADMINS ?? '').split(',').filter(Boolean)
-    githubApp: !!js "process.env.MUMBO_GITHUB_APP_LOGIN || process.env.MUMBO_GITHUB_APP_USER_ID ? { login: process.env.MUMBO_GITHUB_APP_LOGIN, userId: Number(process.env.MUMBO_GITHUB_APP_USER_ID) } : undefined"
-`}- id: mcp-manager
+- id: mcp-manager
   inject: [credentials, subprocess]
 - id: plugin-manager
   config:
@@ -122,18 +117,20 @@ ${person ? '' : `- id: dsh-superagent
 const REAL = ['cat', 'grep', 'cut', 'chmod', 'find', 'cp', 'rm', 'mkdir', 'readlink', 'dirname', 'sort', 'stat']
 const which = (tool) => execFileSync('sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).trim()
 
-/** A temporary root for the start script's B24 parts: box paths moved under it, fakes on PATH that log to log/<name>. */
-function root({ users = true } = {}) {
+/** A temporary root for the start script's B24 parts: box paths moved under it, fakes on PATH that log to log/<name>,
+ *  and an image project overlay that reads MUMBO_WORK_DIR. */
+function root({ users = true, groups = GROUPS } = {}) {
   const t = mkdtempSync(join(tmpdir(), 'containment-'))
   // What the start script's head makes before these parts: /root/projects, /root/.dsh and /root/.mumbo.
-  for (const d of ['bin', 'log', 'root/projects', 'root/.dsh', 'root/.mumbo', 'proc/sys/net/ipv4', 'proc/sys/fs', 'usr/local/share/mumbo', 'var/lib', 'run']) mkdirSync(join(t, d), { recursive: true })
+  for (const d of ['bin', 'log', 'root/projects', 'root/.dsh', 'root/.mumbo', 'proc/sys/net/ipv4', 'proc/sys/fs', 'usr/local/share/mumbo', 'var/lib', 'run', 'src/deploy']) mkdirSync(join(t, d), { recursive: true })
+  writeFileSync(join(t, 'src/deploy/mumbo-project.overlay.yml'), '    workDirectory: !!js process.env.MUMBO_WORK_DIR\n')
   chmodSync(join(t, 'root'), 0o755)
   for (const tool of REAL) symlinkSync(which(tool), join(t, 'bin', tool))
   const fake = (name, body) => { rmSync(join(t, 'bin', name), { force: true }); writeFileSync(join(t, 'bin', name), `#!/bin/sh\n${body}\n`); chmodSync(join(t, 'bin', name), 0o755) }
   const log = (name) => `echo "$*" >> ${t}/log/${name}`
   const ids = Object.entries(IDS).map(([u, [uid, gid]]) => `${u}) [ "$o" = -u ] && echo ${uid} || echo ${gid};;`).join(' ')
   fake('id', users ? `o=$1; [ $# = 1 ] && o=; u=\${2:-$1}; case $u in ${ids} *) exit 1;; esac` : 'exit 1')
-  fake('getent', `case $2 in ${Object.entries(GROUPS).map(([g, gid]) => `${g}) echo ${g}:x:${gid}:;;`).join(' ')} *) exit 2;; esac`)
+  fake('getent', `case $2 in ${Object.entries(groups).map(([g, gid]) => `${g}) echo ${g}:x:${gid}:;;`).join(' ')} *) exit 2;; esac`)
   for (const name of ['usermod', 'chown', 'setfacl', 'mount']) fake(name, log(name))
   // install: logs, then runs the real one without the owner and group, which the test's user cannot give.
   fake('install', `${log('install')}; a=; while [ $# -gt 0 ]; do case $1 in -o|-g) shift 2;; *) a="$a $1"; shift;; esac; done; exec ${which('install')} $a`)
@@ -146,7 +143,7 @@ function root({ users = true } = {}) {
     run: (text, show = []) => {
       const local = text.replaceAll('/root', `${t}/root`).replaceAll('/var/lib/mumbo', `${t}/var/lib/mumbo`).replaceAll('/usr/local/share/mumbo', `${t}/usr/local/share/mumbo`)
         .replaceAll('/run/dsh-shell', `${t}/run/dsh-shell`).replaceAll('/proc/', `${t}/proc/`).replaceAll('/src/deploy', `${t}/src/deploy`)
-      const r = spawnSync('/bin/sh', ['-c', `set -eu\n${local}\n${show.map(v => `printf '%s=%s\\n' ${v} "$${v}"`).join('\n')}`], { encoding: 'utf8', env: { PATH: join(t, 'bin') } })
+      const r = spawnSync('/bin/sh', ['-c', `set -eu\n${local}\n${show.map(v => `printf '%s=%s\\n' ${v} "\${${v}-}"`).join('\n')}`], { encoding: 'utf8', env: { PATH: join(t, 'bin') } })
       return { code: r.status, err: r.stderr.replaceAll(t, 'T'), out: r.stdout.replaceAll(t, 'T') }
     },
     done: () => rmSync(t, { recursive: true, force: true }),
@@ -175,21 +172,43 @@ test('containment rows: the harness fixtures with the box\'s ids and agent in th
   // An unquoted heredoc carries the rows: no $ but the id variables, no backquote, no backslash.
   for (const person of [true, false]) {
     const rows = containmentRows(c, person)
-    assert.deepEqual([...new Set(rows.match(/\$\w*/g))].sort(), ['$AGENT_GID', '$AGENT_UID', '$MCP_GID', '$MCP_GROUPS', '$MCP_UID', '$WS_GID', ...(person ? ['$BMCP_GID', '$BMCP_UID', '$DESKTOP_GID', '$DESKTOP_UID', '$SHARED_GID'] : ['$SUPERAGENT_EDGE'])].sort())
+    assert.deepEqual([...new Set(rows.match(/\$\w*/g))].sort(), ['$AGENT_GID', '$AGENT_UID', '$MCP_GID', '$MCP_GROUPS', '$MCP_UID', '$WS_GID', ...(person ? ['$BMCP_GID', '$BMCP_UID', '$DESKTOP_GID', '$DESKTOP_UID', '$SHARED_GID', '$UPLOADS_GID'] : [])].sort())
     assert.ok(!/[`\\]/.test(rows))
     // No value of the subprocess row names a path in /root/.mumbo, which stays 0700.
     assert.ok(!rows.slice(0, rows.indexOf('- id: fs-sandbox')).includes('/root/.mumbo'))
+    // dsh-superagent's row is the image's project overlay's alone: a patch's config would replace it.
+    assert.ok(!rows.includes('dsh-superagent'))
   }
   assert.throws(() => containmentLayout({ ...c, mcpServerWorkspace: 'all' }, true), /mcpServerWorkspace "all"/)
-  // An image whose project overlay gives superagent the edge's report endpoint (B36) keeps it: this row replaces that config.
-  const r = root()
+})
+
+test('a contained project box exports dsh-superagent\'s directories for the image\'s overlay, and stops on an overlay that does not read them', () => {
+  const vars = ['MUMBO_WORK_DIR', 'MUMBO_WORKER_DIR', 'MUMBO_GH_CONFIG_DIR']
+  let r = root()
   try {
-    mkdirSync(r.at('src/deploy'), { recursive: true })
-    writeFileSync(r.at('src/deploy/mumbo-project.overlay.yml'), '    edge: !!js "process.env.MUMBO_EDGE_MCP_URL"\n')
-    const out = r.run(`B24_IMAGE=1 B24_TEMPLATE=1\n${layoutOf(script(c, false))}`)
+    const out = r.run(`B24_IMAGE=1 B24_TEMPLATE=1\n${layoutOf(script(c, false))}`, vars)
     assert.equal(out.code, 0, out.err)
-    const githubApp = FIXTURE(false).split('\n').find(l => l.startsWith('    githubApp: '))
-    assert.equal(readFileSync(r.at('root/.mumbo/containment.overlay.yml'), 'utf8').replaceAll(r.t, ''), FIXTURE(false).replace(githubApp, `${githubApp}\n    edge: !!js "process.env.MUMBO_EDGE_MCP_URL || process.env.MUMBO_EDGE_TOKEN_FILE || process.env.MUMBO_PROJECT_ID ? { url: process.env.MUMBO_EDGE_MCP_URL, tokenFile: process.env.MUMBO_EDGE_TOKEN_FILE, project: process.env.MUMBO_PROJECT_ID } : undefined"`))
+    assert.equal(out.out, 'MUMBO_WORK_DIR=T/root/work\nMUMBO_WORKER_DIR=T/var/lib/mumbo/superagent\nMUMBO_GH_CONFIG_DIR=T/root/.config/gh\n')
+    // Exported, so dsh, started later by the same script, has them.
+    assert.ok(layoutOf(script(c, false)).includes('  export MUMBO_WORK_DIR=/root/work MUMBO_WORKER_DIR=/var/lib/mumbo/superagent MUMBO_GH_CONFIG_DIR=/root/.config/gh\n'))
+  } finally { r.done() }
+  // An overlay from before the variables, or none: nothing is laid out and dsh does not start.
+  for (const overlay of ['    workDirectory: /root/work\n', undefined]) {
+    r = root()
+    try {
+      if (overlay === undefined) rmSync(r.at('src/deploy/mumbo-project.overlay.yml'))
+      else writeFileSync(r.at('src/deploy/mumbo-project.overlay.yml'), overlay)
+      const out = r.run(`B24_IMAGE=1 B24_TEMPLATE=1\n${layoutOf(script(c, false))}`)
+      assert.deepEqual([out.code, out.err], [1, 'mumbo-box: this image runs agent containment (B24), but its T/src/deploy/mumbo-project.overlay.yml does not read MUMBO_WORK_DIR: build the image from a harness whose dsh-superagent row does (RUNBOOK "Agent containment (B24)")\n'])
+      assert.deepEqual([r.lines('install'), existsSync(r.at('root/.mumbo/containment.overlay.yml'))], [[], false])
+    } finally { r.done() }
+  }
+  // Person boxes run no superagent and export none.
+  r = root()
+  try {
+    rmSync(r.at('src/deploy/mumbo-project.overlay.yml'))
+    const out = r.run(`B24_IMAGE=1 B24_TEMPLATE=1\n${layoutOf(script(c, true))}`, vars)
+    assert.deepEqual([out.code, out.out], [0, 'MUMBO_WORK_DIR=\nMUMBO_WORKER_DIR=\nMUMBO_GH_CONFIG_DIR=\n'], out.err)
   } finally { r.done() }
 })
 
@@ -215,9 +234,15 @@ test('the B24 layout: root\'s files kept from agent, every directory the rows na
     writeFileSync(r.at('root/dsh.log'), 'token=x'); chmodSync(r.at('root/dsh.log'), 0o644)
     chmodSync(r.at('root/.cargo'), 0o755)
     mkdirSync(r.at('outside')); chmodSync(r.at('outside'), 0o755); symlinkSync(r.at('outside'), r.at('root/link'))
+    // A staged upload copy left over from before the start.
+    const staged = () => { mkdirSync(r.at('var/lib/mumbo/uploads/n0nce'), { recursive: true }); writeFileSync(r.at('var/lib/mumbo/uploads/n0nce/report.pdf'), 'pdf') }
+    staged()
     const run = () => r.run(`B24_IMAGE=1 B24_TEMPLATE=1\n${layoutOf(s)}`)
     let out = run()
     assert.equal(out.code, 0, out.err)
+    // Browser consent's staging directory: root's, entered by the group uploads alone, and emptied.
+    assert.ok(r.lines('install').includes('-d -o root -g uploads -m 2750 T/var/lib/mumbo/uploads'))
+    assert.deepEqual([statSync(r.at('var/lib/mumbo/uploads')).mode & 0o7777, readdirSync(r.at('var/lib/mumbo/uploads'))], [0o2750, []])
     const mode = (p) => statSync(r.at(p)).mode & 0o7777
     assert.deepEqual(['root', 'root/.cargo', 'root/.dsh', 'root/.mumbo', 'root/dsh.log', 'root/.dsh/tmp', 'root/.dsh/skills', 'run/dsh-shell', 'var/lib/mumbo', 'usr/local/share/mumbo/agents/skills'].map(p => [p, mode(p).toString(8)]),
       [['root', '711'], ['root/.cargo', '700'], ['root/.dsh', '700'], ['root/.mumbo', '700'], ['root/dsh.log', '600'], ['root/.dsh/tmp', '700'], ['root/.dsh/skills', '700'], ['run/dsh-shell', '711'], ['var/lib/mumbo', '755'], ['usr/local/share/mumbo/agents/skills', '755']])
@@ -235,9 +260,12 @@ test('the B24 layout: root\'s files kept from agent, every directory the rows na
     assert.deepEqual(r.lines('chown'), ['-R agent:workspace T/root/projects', '-R root:agent T/var/lib/mumbo/attachments/attachments'])
     assert.deepEqual([mode('root/projects/app'), mode('root/projects/app/sub'), mode('root/projects/app/a.txt')], [0o2775, 0o2775, 0o664])
     assert.ok(existsSync(r.at('root/.mumbo/workspace-owned')))
-    // Again: no second chown of the workspace, no second move; an interrupted move (both stores) completes.
+    // Again: no second chown of the workspace, no second move; an interrupted move (both stores) completes; the staging
+    // directory is emptied at every start.
+    staged()
     out = run()
     assert.equal(out.code, 0, out.err)
+    assert.deepEqual(readdirSync(r.at('var/lib/mumbo/uploads')), [])
     assert.deepEqual(r.lines('chown'), ['-R agent:workspace T/root/projects', '-R root:agent T/var/lib/mumbo/attachments/attachments'])
     for (const d of ['ab', 'cd']) mkdirSync(r.at(`root/.dsh/attachments/v1/${d}`), { recursive: true })
     writeFileSync(r.at('root/.dsh/attachments/v1/ab/obj'), 'img'); writeFileSync(r.at('root/.dsh/attachments/v1/cd/two'), 'two')
@@ -254,6 +282,7 @@ test('the B24 layout: root\'s files kept from agent, every directory the rows na
     assert.deepEqual(p.lines('setfacl'), ['--set u::rwx,g::rwx,g:workspace-read:r-x,m::rwx,o::--- T/root/projects', '--set u::rwx,g::rwx,g:workspace-read:r-x,m::rwx,o::--- T/root/work'])
     assert.equal(statSync(p.at('var/lib/mumbo/superagent')).mode & 0o7777, 0o2750)
     assert.deepEqual([statSync(p.at('root/.config/gh')).mode & 0o777, statSync(p.at('root/github-proxy.log')).mode & 0o777], [0o700, 0o600])
+    assert.equal(existsSync(p.at('var/lib/mumbo/uploads')), false, 'no browser, no upload staging')
   } finally { p.done() }
 })
 
@@ -267,7 +296,15 @@ test('the B24 layout fails loud on a template without containment\'s users or ma
       assert.deepEqual([r.lines('install'), existsSync(r.at('root/.mumbo/containment.overlay.yml'))], [[], false])
     } finally { r.done() }
   }
-  const r = root()
+  // A template built before a group the layout needs, here uploads, names it.
+  const { uploads, ...older } = GROUPS
+  let r = root({ groups: older })
+  try {
+    const out = r.run(`B24_IMAGE=1 B24_TEMPLATE=1\n${layoutOf(s)}`)
+    assert.deepEqual([out.code, out.err], [1, 'mumbo-box: the template has no group uploads (RUNBOOK "Agent containment (B24)")\n'])
+    assert.deepEqual([r.lines('install'), existsSync(r.at('root/.mumbo/containment.overlay.yml'))], [[], false])
+  } finally { r.done() }
+  r = root()
   try {
     const out = r.run(`B24_IMAGE= B24_TEMPLATE=1\n${layoutOf(s)}`, ['CONTAINMENT_PATCH'])
     assert.deepEqual([out.code, out.out, r.lines('install'), statSync(r.at('root')).mode & 0o777], [0, 'CONTAINMENT_PATCH=\n', [], 0o755])
@@ -335,7 +372,7 @@ test('escape-test.sh parses under sh and runs every escape test the B24 brief na
   const file = new URL('./escape-test.sh', import.meta.url)
   execFileSync('sh', ['-n', file.pathname])
   const text = readFileSync(file, 'utf8')
-  const ids = new Set([...text.matchAll(/\b(?:refused|allowed|unwritable|denied|manual|say (?:PASS|FAIL|SKIP))\s+"?([a-z0-9-]+)/g)].map(m => m[1]))
+  const ids = new Set([...text.matchAll(/\b(?:refused|allowed|unwritable|denied|manual|refusal|say (?:PASS|FAIL|SKIP))\s+"?([a-z0-9-]+)/g)].map(m => m[1]))
   // Ids built in loops, as the script spells them.
   for (const loop of ['agent-bind-$1', 'agent-bind-$p', 'agent-connect-$1', 'envd-$u', 'xkasmvnc-$u', 'sudo-$u', 'su-$u']) assert.ok(text.includes(`"${loop}"`), loop)
   const required = [
@@ -346,6 +383,8 @@ test('escape-test.sh parses under sh and runs every escape test the B24 brief na
     'agent-write-src', 'agent-write-plugin-paths', 'agent-write-mcp-home', 'agent-write-gh-wrapper', 'agent-write-superagent', 'agent-write-attachments', 'agent-write-spill', 'agent-write-agents-home',
     // the display, computer use, uploads
     'agent-x-cookie', 'agent-x-display', 'xsession-login-data', 'computer-use-terminal', 'upload-outside-downloads',
+    // consent's staged upload copies, and uploads through the real consent (the uploads contract of 2026-11-11)
+    'agent-list-uploads', 'agent-read-uploads', 'upload-swap', 'upload-swap-ask', 'upload-nested', 'upload-fifo', 'upload-over-cap', 'upload-staging-empty',
     // the workspace and the person's MCP servers
     'mcpserver-workspace', 'mcpserver-node-modules', 'browsermcp-connect-cdp',
     // tunnels through the project box's GitHub proxy
@@ -381,7 +420,9 @@ test('template: containment\'s users and groups, homes 0700 with the run-as TMPD
       assert.deepEqual(r.lines('steps'), [
         ...users.map(u => `useradd -m -s ${['agent', 'xsession'].includes(u) ? '/bin/bash' : '/usr/sbin/nologin'} ${u}`),
         'groupadd -f workspace', 'groupadd -f workspace-read', 'usermod -aG workspace agent',
-        ...(person ? ['usermod -aG shared agent', 'usermod -aG shared browsermcp', 'usermod -aG shared xsession', 'usermod -aG workspace xsession', 'usermod -aG desktop browser', 'usermod -aG desktop xvnc', 'usermod -aG desktop xsession'] : []),
+        ...(person ? ['usermod -aG shared agent', 'usermod -aG shared browsermcp', 'usermod -aG shared xsession', 'usermod -aG workspace xsession', 'usermod -aG desktop browser', 'usermod -aG desktop xvnc', 'usermod -aG desktop xsession',
+          // Browser consent's staged upload copies: browser and browsermcp, not agent, xsession, desktop or mcpserver.
+          'groupadd -f -r uploads', 'usermod -aG uploads browser', 'usermod -aG uploads browsermcp'] : []),
         ...users.map(u => `chmod 0700 /home/${u}`),
         ...['agent', ...(person ? ['browsermcp', 'desktop'] : [])].map(u => `install -d -o ${u} -g ${u} -m 0700 /home/${u}/tmp`),
         r.lines('steps').find(l => l.startsWith('setfacl')),
