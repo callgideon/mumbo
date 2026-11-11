@@ -6,7 +6,7 @@
 import { dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Sandbox, Template } from 'e2b'
-import { PORTS, PORTS_MARKER, OLD_PORTS, ENVD_PORT, MUMBO_MCP_PORT, startScript, boxSite, signBox, memberKey, mumboMcpKey, mcpPrincipal, roleInstructions } from './edge.mjs'
+import { PORTS, PORTS_MARKER, OLD_PORTS, ENVD_PORT, MUMBO_MCP_PORT, startScript, boxSite, signBox, memberKey, mumboMcpKey, mcpPrincipal, roleInstructions, containmentRows } from './edge.mjs'
 // Usage: template.mjs <ecr image> [name=mumbo-box] [memoryMB=4096] [cpuCount=2]; children use: mumbo-child 2048.
 // MIN_AVAIL_MB (default 30720, 30 GiB: box_free_disk in prod/modules/cell/control.tf less margin): the least free space on / a box from the new build may have, or the script fails.
 export function templateArgs(argv, env = process.env) {
@@ -143,9 +143,10 @@ const without = (text, from, to) => {
  *  profiles, the X cookie, the launchers in /usr/local/bin); and a project box's GitHub proxy (a CA the system trusts).
  *  It keeps hardening's sysctls (the unprivileged port floor 1024, fs.protected_hardlinks=1, fs.protected_symlinks=1),
  *  set and checked: the run-as provider refuses to load without fs.protected_hardlinks=1, and every box's start script
- *  writes the same values at each start, so a template that keeps them runs no box differently. dsh runs as root, which
+ *  writes the same values at each start, so a template that keeps them runs no box differently. It keeps the system
+ *  repair too (edge systemRepair), whose owners and modes every box's start script sets again. dsh runs as root, which
  *  the firewall refuses only envd, and NFT_SMOKE_STEP covers that kind of rule. Without the desktop, computer use's row
- *  does not activate and dsh warns.
+ *  does not activate and dsh warns (INACTIVE_ALLOWLIST).
  *  @param {boolean} person a person box (mumbo-box), not a project box
  *  @returns {string} the script */
 export function smokeStartScript(person) {
@@ -158,6 +159,23 @@ export function smokeStartScript(person) {
 }
 /** The seconds dshSmokeStep waits for dsh's start line. */
 export const DSH_SMOKE_SECONDS = 60
+/** The seconds dshSmokeStep waits after dsh's start line for dsh's warning that entries did not activate: both follow
+ *  the Loader's settling, each after its own audit of the entries (app-boot boot and web-app). */
+export const DSH_SMOKE_SETTLE_SECONDS = 3
+/** Entries dshSmokeStep accepts in dsh's warning that entries did not activate, each with the reason. */
+export const INACTIVE_ALLOWLIST = [
+  { id: 'computer-use-x11', reason: "a person box's computer use on X display :1 runs `xdotool getdisplaygeometry` when it loads, and this check starts no X server" },
+]
+/** The paths dshSmokeStep's check for world-writable files skips, each with the reason. */
+export const WRITABLE_EXCLUDES = [
+  { path: '/proc', reason: "the kernel's view of processes and settings" },
+  { path: '/sys', reason: "the kernel's view of devices and drivers" },
+  { path: '/dev', reason: 'device nodes, and /dev/shm, which is sticky' },
+  { path: '/run', reason: "runtime sockets and state, this check's own directory among them" },
+  { path: '/tmp', reason: "every user's temporary files, in a sticky directory, where only a file's owner removes or renames it" },
+]
+/** The directories on the run-as users' PATHs, from containmentRows' `PATH:` values. */
+const rowPaths = (person) => [...new Set([...containmentRows(SMOKE_CFG, person).matchAll(/^ +PATH: (\S+)$/gm)].flatMap(m => m[1].split(':')))]
 /** Listeners dshSmokeStep accepts though their user is not agent and the output chain lets agent connect to their port,
  *  each with the reason. */
 export const LISTENER_ALLOWLIST = [
@@ -168,11 +186,18 @@ const SMOKE_SCAN = '/root /home /src /var/lib/mumbo /usr/local/share/mumbo /run/
 /** The template step, after NFT_SMOKE_STEP, that fails the build unless dsh starts on this template as a box starts it:
  *  it runs smokeStartScript as root in a session of its own (setsid), which lays the box out (containmentLayout, and the
  *  containment rows on an image with serverIdentity), writes the overlays and starts dsh with the box's profile, patches
- *  and rows, and requires dsh's line `dsh web: http…?token=` in /root/dsh.log within DSH_SMOKE_SECONDS. Then it lists the
+ *  and rows, and requires dsh's line `dsh web: http…?token=` in /root/dsh.log within DSH_SMOKE_SECONDS. DSH_SMOKE_SETTLE_SECONDS
+ *  later it fails on any entry outside INACTIVE_ALLOWLIST in dsh's warning that entries did not activate: a failed row
+ *  that is not required, such as subprocess, no longer stops dsh's start. Then it lists the
  *  TCP listeners as root (`ss -ltnpeH`; `-e` prints a socket's uid, except root's) and fails on any whose user is not
  *  agent and whose port is neither in the output chain's reset set (envd, dsh, the live view, the door, 5900 to 5999,
- *  9222) nor in LISTENER_ALLOWLIST. On a failure it prints the reason and the tails of start.sh's output, /root/dsh.log
- *  and dsh's start-up audit (/root/.dsh/logs/startup-*.log). Either way it then kills every process of the containment
+ *  9222) nor in LISTENER_ALLOWLIST. With the start script's system repair done, it fails on any world-writable file or
+ *  directory without the sticky bit on the root filesystem outside WRITABLE_EXCLUDES, and on any file a user other than
+ *  root can change (another owner, o+w, or g+w with a group other than root) in a directory on root's PATH or a run-as
+ *  user's (containmentRows), or anywhere in dsh's code tree, the real paths of /src and `npm root -g`: root runs and
+ *  imports them. On a failure it prints the reason, with mode, owner and path for each file named, and the tails of
+ *  start.sh's output, /root/dsh.log and dsh's start-up audit (/root/.dsh/logs/startup-*.log), and dsh's whole warning
+ *  that entries did not activate. Either way it then kills every process of the containment
  *  users and every process that started during the step (one whose pid `ps -e` did not list before start.sh) but kernel
  *  threads, the step's own session and envd's children (its socat port forwarders, which envd stops itself):
  *  dsh-subprocess-local starts each child in a session of its own, and as root on an image without serverIdentity. A
@@ -181,7 +206,7 @@ const SMOKE_SCAN = '/root /home /src /var/lib/mumbo /usr/local/share/mumbo /run/
  *  such process is left and SMOKE_SCAN and those modes read as before. dsh runs at a box's own paths (HOME /root, DSH_HOME /root/.dsh, its log /root/dsh.log), which
  *  the rows and the layout name, so the step refuses a template that already has /root/.dsh, /root/.mumbo, /root/dsh.log,
  *  /root/projects or /root/work. What stays: mcpserver's supplementary groups set to none (`usermod -G ''`), as
- *  usersSteps left them, and smokeStartScript's sysctls, which every box's start script sets to the same values. A template without the marker runs dsh on OLD_PORTS, as its boxes would; an image without
+ *  usersSteps left them, and smokeStartScript's sysctls and system repair, which every box's start script sets the same way. A template without the marker runs dsh on OLD_PORTS, as its boxes would; an image without
  *  serverIdentity runs it as root without the rows. No text of the step matches start.sh's
  *  `pkill -f 'apps/cli/src/bin.ts'`, which would kill the step. A subshell, as NFT_SMOKE_STEP.
  *  @param {boolean} person a person box (mumbo-box), not a project box
@@ -190,6 +215,10 @@ export const dshSmokeStep = (person) => {
   const open = [ENVD_PORT, '$DSH_PORT', '$LIVE_PORT', MUMBO_MCP_PORT, '5900-5999', '9222', ...LISTENER_ALLOWLIST.map(l => l.port)].join(' ')
   // One line per listener whose user is not agent (ss -e prints no uid for root) and whose port is not in `open`.
   const listeners = `awk -v a="$(id -u agent)" -v open="${open}" '{ p = $4; sub(/.*:/, "", p); u = 0; for (i = 5; i <= NF; i++) if ($i ~ /^uid:/) u = substr($i, 5); if ((u "") == a) next; n = split(open, o, " "); for (i = 1; i <= n; i++) { split(o[i], r, "-"); if (p + 0 >= r[1] + 0 && p + 0 <= (r[2] == "" ? r[1] : r[2]) + 0) next } print }'`
+  // The ids in dsh's warning (app-boot activationDiagnostic: its count, then one `<id> (<package>): <detail>` line per
+  // entry, which stack lines may follow) that INACTIVE_ALLOWLIST does not name.
+  const inactive = `awk -v ok=" ${INACTIVE_ALLOWLIST.map(e => e.id).join(' ')} " '/^dsh: warning: [0-9]+ entr(y|ies) did not activate$/ { n = $3 + 0; next } n > 0 && /^[^ ]+ [(]/ { n--; if (!index(ok, " " $1 " ")) printf " %s", $1 }' /root/dsh.log`
+  const listed = `-printf '%M %u:%g %p\\n'`, changeable = '\\( ! -uid 0 -o -perm -0002 -o ! -gid 0 -perm -0020 \\)'
   return `(${[
     'export LC_ALL=C; echo "mumbo-box: dsh smoke check: start dsh as a box does, with dummy values"',
     'for p in /root/.dsh /root/.mumbo /root/dsh.log /root/projects /root/work; do [ ! -e "$p" ] || { echo "mumbo-box: the dsh smoke check needs a template without $p, which a box\'s start script makes" >&2; exit 1; }; done',
@@ -200,8 +229,11 @@ export const dshSmokeStep = (person) => {
     'why=; ps -e -o pid= > $T/pids; setsid -w sh -c \'echo $$ > "$1"; exec sh "$2"\' - $T/sid $T/start.sh </dev/null >$T/start.log 2>&1 || why="start.sh failed (status $?)"',
     'sid=$(cat $T/sid 2>/dev/null); case $sid in \'\'|0|*[!0-9]*) sid=; [ -n "$why" ] || why=\'start.sh wrote no session id\';; esac',
     `n=0; while [ -z "$why" ] && ! grep -qs 'dsh web: http[^ ]*[?]token=' /root/dsh.log; do if ! pgrep -s "$sid" -f 'apps/cli/src/bin[.]ts' >/dev/null; then why='dsh exited before its start line'; elif [ $n -ge ${DSH_SMOKE_SECONDS} ]; then why='dsh printed no start line within ${DSH_SMOKE_SECONDS} s'; else sleep 1; n=$((n + 1)); fi; done`,
+    `[ -n "$why" ] || { sleep ${DSH_SMOKE_SETTLE_SECONDS}; bad=$(${inactive}); [ -z "$bad" ] || why="these dsh entries did not activate, outside INACTIVE_ALLOWLIST (template.mjs):$bad"; }`,
     `[ -n "$why" ] || { L=$(ss -ltnpeH) || why='ss could not list the TCP listeners'; }; [ -n "$why" ] || { bad=$(printf '%s\\n' "$L" | ${listeners}); [ -z "$bad" ] || why="agent may connect to these listeners of other users, outside the output chain's reset set and LISTENER_ALLOWLIST (template.mjs): $bad"; }`,
-    '[ -z "$why" ] || { echo "mumbo-box: the dsh smoke check failed: $why"; echo "--- start.sh"; tail -n 20 $T/start.log; echo "--- /root/dsh.log"; tail -n 60 /root/dsh.log; for f in /root/.dsh/logs/startup-*.log; do [ ! -e "$f" ] || { echo "--- $f"; tail -n 60 "$f"; }; done; } >&2',
+    `[ -n "$why" ] || { bad=$(find / -xdev -ignore_readdir_race \\( ${WRITABLE_EXCLUDES.map(e => `-path ${e.path}`).join(' -o ')} \\) -prune -o \\( -type f -o -type d \\) -perm -0002 ! \\( -type d -perm -1000 \\) ${listed}) || why='find could not list the world-writable files'; }; [ -n "$why" ] || [ -z "$bad" ] || why="these are world-writable, outside WRITABLE_EXCLUDES (template.mjs), and no sticky directory: $bad"`,
+    `[ -n "$why" ] || { G=$(npm root -g --logs-max=0) && P=$(for d in $(printf '%s' "$PATH" | tr : ' ') ${rowPaths(person).join(' ')}; do [ ! -d "$d" ] || readlink -f "$d"; done | sort -u) && C=$(readlink -f /src "$G") && bad=$(find $P -maxdepth 1 ! -type l ${changeable} ${listed} && find $C -xdev -ignore_readdir_race ! -type l ${changeable} ${listed}) || why="could not list root's and the run-as users' PATH directories and dsh's code tree"; }; [ -n "$why" ] || [ -z "$bad" ] || why="a user other than root can change these, which root runs or dsh imports (on root's or a run-as user's PATH, or in dsh's code tree): $bad"`,
+    '[ -z "$why" ] || { echo "mumbo-box: the dsh smoke check failed: $why"; echo "--- start.sh"; tail -n 20 $T/start.log; echo "--- /root/dsh.log"; tail -n 60 /root/dsh.log; for f in /root/.dsh/logs/startup-*.log; do [ ! -e "$f" ] || { echo "--- $f"; tail -n 60 "$f"; }; done; ! grep -qs \' did not activate$\' /root/dsh.log || { echo "--- dsh\'s entries that did not activate"; awk \'/^dsh: .* did not activate$/ { p = 1 } p\' /root/dsh.log; }; } >&2',
     `U=$(for u in ${containmentUsers(person).join(' ')}; do id -u $u 2>/dev/null; done | tr '\\n' ' '); E=$(pgrep -x envd | tr '\\n' ' '); me=$(ps -e -o pid=,sid= | awk -v p=$$ '$1 == p { print $2 }')`,
     // The containment users' processes, and those that started during the step (not in $T/pids) but kernel threads
     // (kthreadd, pid 2, and its children), the step's own session and envd's children.
@@ -212,12 +244,16 @@ export const dshSmokeStep = (person) => {
     'rm -rf $T; [ -z "$why" ] && echo "mumbo-box: dsh smoke check passed"',
   ].join('; ')})`
 }
+/** The first template step: e2b's runCmd joins the steps with `&&` in one shell, so every file the steps create gets at
+ *  most 0755 or 0644 unless a step sets its mode, whatever umask E2B's build runs them with. */
+export const UMASK_STEP = 'umask 022'
 /** The user's box is their computer: KasmVNC's display and live view, the XFCE desktop and Google Chrome stable from
  *  Google's apt repository (each build installs the current release). The edge's start script runs KasmVNC as the user
  *  `xvnc`, Chrome as the user `browser` and, on an image with the B24 harness, the XFCE session as `xsession` (before it,
  *  as `browser`), and writes /usr/local/bin/google-chrome, the one way to start Chrome; the menu entry and XFCE's web
  *  browser are aimed at it here. */
 export const BOX_STEPS = [
+  UMASK_STEP,
   ...(CHROME_SENSITIVE_SYNC ? [maskingGuardStep()] : []),
   'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google-chrome.asc && chmod go+r /etc/apt/keyrings/google-chrome.asc && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xfce4-session xfwm4 xfce4-panel xfdesktop4 thunar xfce4-terminal tango-icon-theme librsvg2-common google-chrome-stable dbus-x11 xdotool wmctrl imagemagick xsel xauth fonts-noto-core fonts-noto-color-emoji fonts-noto-cjk procps ripgrep nftables libcap2-bin acl iproute2 && rm -rf /var/lib/apt/lists/*',
   kasmvncStep(),
@@ -239,6 +275,7 @@ export const BOX_STEPS = [
  *  and acl for the start script, iproute2 for the dsh smoke check's ss and the escape test's network namespace, the
  *  proxy's own system user ghproxy (edge startScript), agent containment's users, and the nftables and dsh smoke checks. */
 export const PROJECT_STEPS = [
+  UMASK_STEP,
   'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl gpg git openssl procps ripgrep nftables acl iproute2 && install -d -m 0755 /etc/apt/keyrings && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*',
   'id ghproxy >/dev/null 2>&1 || useradd -r -U -M -d /nonexistent -s /usr/sbin/nologin ghproxy',
   ...usersSteps(false),

@@ -41,7 +41,10 @@ test('a user box start script is byte-for-byte what it was before project boxes 
   // Then RW1's Run Wild block and $RUNWILD_PATCH after $MCP_PATCH, behind the image's @mumbo/run-wild (the Run Wild test below).
   // Then the B24 fix's input chain: from beyond loopback a new TCP connection reaches only envd, dsh, the live view and the
   // door, since E2B's envd forwards every loopback listener to the box address (containment.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), '4a9bfc5bd6af87f9b140cb53b2445bef96229c18d23459be8c6ab9fd553dc445')
+  // Then the B24 fix's system repair, first, before the ports marker is read: on the root filesystem but the users',
+  // temporary and runtime trees, other owners' paths become root's and o+w (sticky directories aside) and a group's g+w
+  // other than root's go, then checked, because E2B's build leaves /usr/local, /code and envd world-writable (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), '874b64bac6550f2fdb3e45d8ff494b6f48efab9cc3d17f311bef77232336da78')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -63,8 +66,11 @@ test('a project box start script is byte-for-byte what it was before B18 changed
   // reaches loopback, and send web_fetch to the DeepSeek Fetch API through the edge's model host (containment.test.mjs).
   // Then the role's /home/agent line moved into the script, added on a B24 image only. Then the B24 fix's input chain: from
   // beyond loopback a new TCP connection reaches only envd, dsh, the live view and the door, since E2B's envd forwards
-  // every loopback listener to the box address (containment.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), '3fb3578020aacff41d520853fa0aea9c354e1630428a19f7873800d4289017ae')
+  // every loopback listener to the box address (containment.test.mjs). Then the B24 fix's system repair, first, before the
+  // ports marker is read: on the root filesystem but the users', temporary and runtime trees, other owners' paths become
+  // root's and o+w (sticky directories aside) and a group's g+w other than root's go, then checked, because E2B's build
+  // leaves /usr/local, /code and envd world-writable (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), '526f98f90614d1d326465b43d9c5fbcad35c01049c2ba2d105f2fdaf211159d3')
 })
 
 const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'

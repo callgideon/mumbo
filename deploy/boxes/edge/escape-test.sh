@@ -79,6 +79,13 @@ unwritable agent-write-superagent agent /var/lib/mumbo/superagent
 unwritable agent-write-attachments agent /var/lib/mumbo/attachments/attachments/v1
 unwritable agent-write-spill agent /var/lib/mumbo/spill
 unwritable agent-write-agents-home agent /usr/local/share/mumbo/agents/skills
+# What root runs and dsh imports (the start script's system repair, edge systemRepair): E2B's build leaves /usr/local and
+# envd, which runs commands as root, world-writable.
+unwritable agent-write-usr-local-bin agent /usr/local/bin
+refused agent-write-envd agent 'agent may write /usr/bin/envd' 'test -w /usr/bin/envd'
+G=$(npm root -g --logs-max=0 2>/dev/null)
+w=$(su -s /bin/sh agent -c "find /src $G -xdev ! -type l -writable 2>/dev/null | head -n 5" </dev/null)
+if [ -z "$w" ]; then say PASS agent-write-load-path "agent may change nothing in dsh's code tree (/src $G)"; else say FAIL agent-write-load-path "agent may change $(echo $w)"; fi
 
 # Ports: only root binds below 1024; only root reaches dsh, the live view, the door and VNC, and only browsermcp beside it
 # the browser's debugging port, on loopback and on the box address; nobody, root included, reaches E2B's envd.

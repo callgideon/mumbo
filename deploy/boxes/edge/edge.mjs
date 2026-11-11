@@ -322,6 +322,36 @@ export function boxSite(cfg, principal) {
     : { host: `p-${id}.${cfg.projectDomain}`, publicUrl: `https://p-${id}.${cfg.projectDomain}/`, desktop: false, project: id }
 }
 
+/** What systemRepair leaves as it is. */
+const REPAIR_EXCLUDES = [
+  '/root', '/home', // root's and the users' homes, the workspace and the shared Downloads among them
+  '/tmp', '/var/tmp', // every user's temporary files, in sticky directories
+  '/run', '/proc', '/sys', '/dev', // runtime state and the kernel's filesystems
+  '/var/lib/mumbo/playwright-output', // browsermcp's, 0700 (startScript): the Playwright MCP server writes its files there
+]
+/** The start script's first part (B24 fix), before it reads PORTS_MARKER and before any user's process starts: on the
+ *  root filesystem outside REPAIR_EXCLUDES, a path another user owns becomes root:root, every path but a sticky directory
+ *  loses o+w, and a path whose group is not root (gid 0, which holds only root) loses g+w. Then it checks the same paths
+ *  and stops the start, naming them, if any is left. The tree list is `/` less those excludes, so a top-level directory a
+ *  new image or E2B build adds is covered. E2B's finalize phase, which runs after a template's steps, makes /usr/local
+ *  and /code 0777 (its configure.sh), and its rootfs builder writes envd, which runs as root, 0777; a restored archive or
+ *  a new base image could do the same. Repaired first, the ports marker, which sets the firewall's ports, and what root
+ *  runs (/etc/inittab, envd and its service file, node) were never writable by a user's process. /code is E2B's work
+ *  directory, which nothing in a box uses, and becomes root's like the rest. One find sets and one checks; neither follows
+ *  a link or leaves the root filesystem, and both skip a path that goes while they run.
+ *  @param {string} root the directory the box's paths are under: empty for the box itself
+ *  @returns {string} the start script's part */
+export const systemRepair = (root = '') => {
+  const find = `find ${root || '/'} -xdev -ignore_readdir_race \\( ${REPAIR_EXCLUDES.map(p => `-path ${root}${p}`).join(' -o ')} \\) -prune -o`
+  const world = '-perm -0002 ! \\( -type d -perm -1000 \\)', group = '! -gid 0 -perm -0020'
+  return `# System files are root's alone (edge systemRepair): E2B's template build leaves /usr/local, /code and envd
+# world-writable. Set, then checked, before the ports marker is read and before any user's process starts.
+${find} \\( ! -uid 0 -exec chown -h 0:0 {} + -o -true \\) ! -type l \\( ${world} -exec chmod o-w {} + -o -true \\) ${group} -exec chmod g-w {} + || :
+bad=$(${find} \\( ! -uid 0 -o ! -type l \\( ${world} -o ${group} \\) \\) -printf '%M %u:%g %p\\n') || { echo 'mumbo-box: could not check the system files after their repair' >&2; exit 1; }
+[ -z "$bad" ] || { printf 'mumbo-box: a user other than root can still change these system files after their repair:\\n%s\\n' "$bad" | head -n 50 >&2; exit 1; }
+`
+}
+
 /** The start script's kernel and network part on a template with PORTS_MARKER (B24), before any user's process starts:
  *  the unprivileged port floor, the link protections and hidepid, set and checked; no setuid su or sudo; and the firewall,
  *  one native nftables table `inet mumbo` (IPv4 and IPv6) whose output chain refuses connections by the socket's user
@@ -587,7 +617,7 @@ export function startScript(cfg, token, site = boxSite(cfg, ''), role = '', memb
 # Start dsh web for this box's user. Re-runnable: the router calls it again when dsh is found dead.
 set -eu
 pkill -f 'apps/cli/src/bin.ts' 2>/dev/null || true
-ip=$(hostname -I | cut -d' ' -f1)
+${systemRepair()}ip=$(hostname -I | cut -d' ' -f1)
 mkdir -p /root/projects /root/.dsh /root/.mumbo
 chmod 0700 /root/.mumbo
 # The ports of dsh and the live view (edge PORTS): a template with the marker names them (B24); one before it runs them

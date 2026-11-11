@@ -466,8 +466,8 @@ test('template: full sync fails the build unless every installed copy of the pat
     // A second, unpatched copy of the named version fails even beside a patched one; a patched other version satisfies nothing.
     assert.deepEqual(image({ copies: { [`playwright-core@${V}_patch_hash=abc`]: MASKED, [`playwright-core@${V}`]: 'unpatched' } }), [1, `mumbo-box: playwright-core@${V} lacks the masking patch\n`])
     assert.deepEqual(image({ copies: { 'playwright-core@1.61.1': MASKED } }), [1, `mumbo-box: playwright-core ${V} is not installed\n`])
-    // Full sync is on, so the guard is the first step, before anything is installed.
-    assert.equal(BOX_STEPS[0], maskingGuardStep())
+    // Full sync is on, so the guard is the first step after the umask, before anything is installed.
+    assert.equal(BOX_STEPS[1], maskingGuardStep())
   } finally { rmSync(t, { recursive: true, force: true }) }
 })
 
