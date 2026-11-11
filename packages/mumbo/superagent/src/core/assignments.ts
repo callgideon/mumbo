@@ -132,6 +132,18 @@ export class Assignments extends EnginePart {
     if (outcome) this.tickets.end(ticketId, 'executor', outcome, at)
     return this.require(ticketId)
   }
+  /**
+   * In Mumbo (`UPSTREAM.md` S14): a review Ticket's verdict ends it through its report, with `findings` as the summary: `pass`
+   * or `fail` `completed`, recorded on the ticket it reviewed (see `Tickets.reviewed`), and `stale` `dropped`, recorded nowhere else.
+   * @throws UserError for a ticket that is unknown or no review, and as `report` does.
+   */
+  reviewed(reviewId: string, verdict: 'pass' | 'fail' | 'stale', findings: string, url: string): Ticket {
+    const { review } = this.require(reviewId)
+    if (!review) throw new UserError('unknownTicket')
+    const ended = this.report(reviewId, { state: verdict === 'stale' ? 'dropped' : 'ready', summary: findings })
+    if (verdict !== 'stale') this.tickets.reviewed(reviewId, review, verdict, findings, url)
+    return ended
+  }
   /** The ticket, while it is open and `assignmentId` runs it. */
   private running(ticketId: string, assignmentId: string): Ticket | undefined {
     const ticket = this.require(ticketId)

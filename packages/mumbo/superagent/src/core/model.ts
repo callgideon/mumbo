@@ -305,6 +305,12 @@ export interface Ticket {
   delivery?: { error: string; at: string }
   /** In Mumbo, `external` when a worker outside the box takes it (`UPSTREAM.md` S11); without it, the DshExecutor runs it. */
   executor?: 'external'
+  /** In Mumbo, on a review Ticket: the Ticket `of` whose pull request `pr` it reviews at commit `sha`, its `round`th review (`UPSTREAM.md` S14). */
+  review?: { of: string; pr: number; sha: string; round: number }
+  /** In Mumbo, the verdicts of its review Tickets, oldest first, each with its PR comment and findings cut at 2,000 characters (`UPSTREAM.md` S14). */
+  reviews?: { sha: string; verdict: 'pass' | 'fail'; ticket: string; url: string; at: string; findings: string }[]
+  /** In Mumbo, set by its second failed review: its next worker should start afresh on the strongest model (`UPSTREAM.md` S14). */
+  escalated?: true
 }
 /**
  * A Thread a ticket follows, by its key: `own` when the ticket opened it, such as its own pull request, and when and how it

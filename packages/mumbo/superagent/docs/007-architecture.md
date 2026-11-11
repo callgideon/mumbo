@@ -341,7 +341,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/resources.ts` | `RESOURCES` and `readResource`: what `orchestrator_read` reads, for each role |
 | `src/app/tools/tool.ts` | The `Tool` type, `readTool`, the `orchestrator_read` of both roles, and `AcknowledgementSchema` |
 | `src/app/tools/main.ts` | The main Session's tools |
-| `src/app/tools/executor.ts` | An Executor Session's tools |
+| `src/app/tools/executor.ts` | An Executor Session's tools; in Mumbo, a review Ticket's worker gets `reviewTools` instead (`UPSTREAM.md` S14) |
 | `src/app/http.ts` | The `/orchestrator/api` routes: the same-origin check, request limits and one status per kind of failure; in Mumbo, DSH admission instead of the same-origin check (`UPSTREAM.md` S2) |
 | `src/app/api.ts` | `Api`, every route with its parameters, query, body and response, and the filters of the lists; it imports only types, so the panel bundles it |
 | `src/app/views/text.ts` | The two forms of a view's text: `preview`, plain text on one line, and `markdown` without HTML; `plain` and `readable` |
@@ -353,6 +353,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/views/overview.ts` | The overview: Tickets that need a person, problems, the last day's flow and the Executor's load |
 | `src/executor/dsh.ts` | The DshExecutor, `WorkerSlots`, `ticketExecution`, `inputMessage` and `mandateInstructions` |
 | `src/mumbo/executors.ts` | In Mumbo, the Executor port: `ExecutorPlugin`, an Executor with its lifecycle; `Executors`, the Engine's Executor, which sends a Ticket's calls to the Executor of its kind (`executorOf`) and lifecycle calls to every kind; and `heldExecutor`, the `external` kind, which does nothing (`UPSTREAM.md` S11) |
+| `src/mumbo/review.ts` | In Mumbo, the review Ticket's worker: `REVIEW_INSTRUCTIONS`, the prompt part only it reads, and `reviewTools`, its only tools, `orchestrator_review`, which posts the verdict with the review marker on the pull request once its head is still the reviewed commit, marks a draft pull request ready on a pass and records the verdict, and an `orchestrator_report` of progress or failure only (`UPSTREAM.md` S14) |
 | `src/executor/background.ts` | A worker's background work in DeepSeek Harness, the shell jobs its Session owns (`ctx.jobs`) and its subagents (`ctx.subagents`): `runningJobs`, `untilQuiet`, `killJobs`, `collectJobs`, `stopSubagents`, `stopBackground`, `until`, and `cancelled`, the workers whose turn a stop of their subagents cancelled |
 | `src/infra/commands.ts` | `Commands`, the CLI transport: `run`; `api` and `pages`, limited to the configured repository and validated; `lark` as the bot; `git`. `CliError` carries the code a command's output reports, such as a GitHub HTTP status, and a command that prints nothing fails with how it ended, never with its arguments; `validItems` skips and counts the malformed items of a list |
 | `src/infra/environment.ts` | The agent's process environment: command shims, the git configuration and credential helper, `runAsWorker`, and the checks of the environment and of a Ticket's directory |
@@ -366,7 +367,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/sources/github.ts` | The GitHub kind and plugin entry, exported as `./github-watch`: a poll round of notifications, the pull requests of open Tickets with their CI, and subscribed Threads |
 | `src/sources/github-trigger.ts` | GitHub comments, reviews, Issue bodies and CI changes as Triggers, and GitHub addresses |
 | `src/sources/github-pull.ts` | The pull request rules: which pull requests a Ticket follows (`claimPull`, `observePull`), the closes it reports to the Engine, and `pullEndNotices`, the chat notice of a Ticket that ended merged or closed |
-| `src/sources/github-channel.ts` | The GitHub Channel: comments and review thread replies, `sent` or `gone` |
+| `src/sources/github-channel.ts` | The GitHub Channel: comments and review thread replies, `sent` or `gone`; in Mumbo, a message whose first line is a review marker goes out after a `(quoted)` line (`UPSTREAM.md` S14) |
 | `src/sources/github-read.ts` | CI snapshots, repository reads, the `github/` resources, and `githubThreadContext`: an Issue's or pull request's conversation by page |
 | `src/sources/feishu.ts` | The Feishu kind and plugin entry, exported as `./feishu-watch` |
 | `src/sources/feishu-trigger.ts` | Feishu messages as Triggers, by one rule for live events, history pages and topic pages |
@@ -411,6 +412,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/registry.spec.ts` | `SourceRegistry`: instances, validation, Policy parts, Channels and Thread context |
 | `tests/relay.spec.ts` | In Mumbo, the relay Source on a running Runtime: requests and context as Triggers and candidates, the Policy's allowed list and its every-member switch, admission, idempotent message ids, malformed bodies and continued conversations (`UPSTREAM.md` S9) |
 | `tests/executors.spec.ts` | In Mumbo, `Executors` routing and lifecycle, a host start that resumes only local Tickets, and schema 12 opening a schema 11 database without rewriting a record (`UPSTREAM.md` S11) |
+| `tests/review.spec.ts` | In Mumbo, the review Ticket on a running Runtime: one per commit and superseded by the next, its launch and tools, a pass, a fail and a second fail, a moved head, a wrong commit, a failed review, the reply lookup that skips it, and the GitHub Channel's quoting of a marker, against the edge's marker in `tests/fixtures/review-marker.txt` (`UPSTREAM.md` S14) |
 | `tests/sources.spec.ts` | The Feishu and GitHub Sources on a `SourceContext`: translation, polls and read positions, the pull request rules, health |
 | `tests/commands.spec.ts` | CLI calls as the deployment's accounts, the Channels' answers, and repository-scoped GitHub calls |
 | `tests/feishu-read.spec.ts`, `tests/github-read.spec.ts` | Feishu and GitHub reads |
@@ -438,7 +440,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/store.spec.ts` | Repositories and their working sets, in SQLite as in memory, the kv area, with every key of `KV` spelled only in `src/kv.ts` and the migration, settings history and queries |
 | `tests/prompts.spec.ts` | Prompt validation, assembly and versions |
 | `tests/cards.spec.ts` | The rules the built-in text must state, file by file |
-| `tests/model-surface.spec.ts` | Everything models read: tools, prompts, skills and inputs, checked against the tool schemas, the execution environment and the glossary, within a size budget per role |
+| `tests/model-surface.spec.ts` | Everything models read: tools, prompts, skills and inputs, checked against the tool schemas, the execution environment and the glossary, within a size budget per role; in Mumbo, also a review Ticket's worker's |
 | `tests/deployment.spec.ts`, `tests/environment.spec.ts`, `tests/index.spec.ts` | The plugin configuration and setup, the agent's process environment, the plugin entry |
 | `tests/client.spec.tsx`, `tests/navigation.client.spec.ts`, `tests/controls.spec.tsx` | The client plugin's registration and polling, Session navigation and route memory, the local controls, and the panel's imports, which have no cycle |
 | `tests/panel-overview.spec.tsx`, `panel-source.spec.tsx`, `panel-trigger.spec.tsx`, `panel-eval.spec.tsx`, `panel-execution.spec.tsx` | Each page of the panel, against a fake management API answered by route |

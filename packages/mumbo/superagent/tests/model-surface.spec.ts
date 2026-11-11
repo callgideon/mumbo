@@ -17,6 +17,7 @@ import { workerSessionId } from '../src/executor/dsh.ts'
 import { Store } from '../src/app/store.ts'
 import { Commands } from '../src/infra/commands.ts'
 import { inputMessage } from '../src/executor/dsh.ts'
+import { REVIEW_INSTRUCTIONS } from '../src/mumbo/review.ts'
 import { credentialHelper, workerGitConfig } from '../src/infra/environment.ts'
 import { IM_WORDS, NOTE_WORDS, checkedImText } from '../src/infra/text.ts'
 import { SettingsSchema } from '../src/policy.ts'
@@ -220,7 +221,10 @@ async function drive(host: Host) {
   runtime.executor.resume()
   await runtime.pump()
   await runtime.idle()
-  return { a, b, workerA, workerB, refusal }
+  // In Mumbo, the review of ticket a's pull request, whose worker has only the review's tools (`UPSTREAM.md` S14).
+  const review = runtime.engine.requestReview(a, { pr: 12, sha: 'a'.repeat(40) }).id
+  await runtime.idle()
+  return { a, b, review, workerA, workerB, reviewer: workerSessionId(review), refusal }
 }
 
 function walk(node: unknown, visit: (node: Record<string, unknown>, property?: string) => void, property?: string): void {
@@ -236,12 +240,12 @@ function walk(node: unknown, visit: (node: Record<string, unknown>, property?: s
 }
 
 /** Collect all model-visible text surfaces (prompt sections, tool schemas, skills, errors, and session inputs) with their owning module. */
-function collect(host: Host, { a, b, workerA, workerB, refusal }: Awaited<ReturnType<typeof drive>>): Surface[] {
+function collect(host: Host, { a, b, review, workerA, workerB, reviewer, refusal }: Awaited<ReturnType<typeof drive>>): Surface[] {
   const { runtime } = host
   const surfaces: Surface[] = []
   const config = runtime.prompts.current().config
   const shared = new Set(['runtime/shared', 'communication', 'scope', 'delivery', 'runtime/subscriptions', 'runtime/replies'])
-  for (const [role, sessionId] of [['orchestrator', runtime.masterId], ['worker', workerA], ['worker', workerB]] as const) {
+  for (const [role, sessionId] of [['orchestrator', runtime.masterId], ['worker', workerA], ['worker', workerB], ['worker', reviewer]] as const) {
     const parts = promptParts(config, role)
     for (const { name, text } of parts) {
       surfaces.push({ where: `${role} prompt ${name}`, owner: PROMPTS, role: shared.has(name) ? 'both' : role, text })
@@ -250,7 +254,7 @@ function collect(host: Host, { a, b, workerA, workerB, refusal }: Awaited<Return
     const generated = parts.reduce((text, part) => text.replace(part.text, ''), host.sections.get(sessionId)!({}))
     surfaces.push({ where: `${role} prompt from the runtime`, owner: SESSIONS, role, text: generated })
   }
-  for (const [role, sessionId] of [['orchestrator', runtime.masterId], ['worker', workerA]] as const) {
+  for (const [role, sessionId] of [['orchestrator', runtime.masterId], ['worker', workerA], ['worker', reviewer]] as const) {
     for (const tool of host.tools.get(sessionId)!.values()) {
       const descriptions = [tool.description]
       walk(tool.parameters, node => { if (typeof node.description === 'string') descriptions.push(node.description) })
@@ -267,7 +271,7 @@ function collect(host: Host, { a, b, workerA, workerB, refusal }: Awaited<Return
     const owner = kind === 'candidate' ? LINKS : kind === 'worker_attention' ? TOOLS : kind === 'worker_report' ? EXECUTOR : NOTICES
     surfaces.push({ where: `orchestrator input ${kind}`, owner, role: 'orchestrator', text })
   }
-  for (const [id, sessionId] of [[a, workerA], [b, workerB]] as const) {
+  for (const [id, sessionId] of [[a, workerA], [b, workerB], [review, reviewer]] as const) {
     const ticket = runtime.store.tickets.get(id)!
     const assignment = ticket.execution!.assignment
     surfaces.push({ where: `worker input assignment (${ticket.mandate.strength})`, owner: EXECUTOR, role: 'worker', text: assignment })
@@ -296,17 +300,19 @@ beforeAll(async () => {
 })
 afterAll(async () => { await host?.stop() })
 const toolsOf = (role: Role) => host.tools.get(role === 'orchestrator' ? host.runtime.masterId : sessions.workerA)!
+/** The review Ticket's worker's tools, which are worker tools too. */
+const reviewerTools = () => host.tools.get(sessions.reviewer)!
 
 /** Check collected surfaces for unregistered tools, invalid enum options, legacy terms, banned phrases, and cross-role tool references. */
 function failures(): Map<string, string> {
   const found = new Map<string, string>()
   const options = new Map<string, Set<string>>()
-  const schemas = [...toolsOf('orchestrator').values(), ...toolsOf('worker').values()].map(tool => tool.parameters)
+  const schemas = [...toolsOf('orchestrator').values(), ...toolsOf('worker').values(), ...reviewerTools().values()].map(tool => tool.parameters)
   walk(schemas, (node, property) => {
     if (property && Array.isArray(node.enum)) options.set(property, new Set([...options.get(property) ?? [], ...node.enum.map(String)]))
   })
-  for (const name of ['decision', 'purpose', 'state']) expect(options.has(name), `${name} has options`).toBe(true)
-  const tools = { orchestrator: new Set(toolsOf('orchestrator').keys()), worker: new Set(toolsOf('worker').keys()) }
+  for (const name of ['decision', 'purpose', 'state', 'verdict']) expect(options.has(name), `${name} has options`).toBe(true)
+  const tools = { orchestrator: new Set(toolsOf('orchestrator').keys()), worker: new Set([...toolsOf('worker').keys(), ...reviewerTools().keys()]) }
   const registered = (token: string) => tools.orchestrator.has(token) || tools.worker.has(token)
   const variables = new Set(host.runtime.ticketEnvironment(host.runtime.store.tickets.get(sessions.a)!).map(variable => variable.key))
   for (const { where, owner, role, text } of surfaces) {
@@ -351,6 +357,10 @@ it('collects both roles\' tools, prompts, skills and inputs', () => {
   expect([...toolsOf('worker').keys()].sort()).toEqual(['orchestrator_ack', 'orchestrator_read', 'orchestrator_report',
     'orchestrator_thread_follow',
     'orchestrator_thread_unrelated', 'orchestrator_trigger_handback'])
+  expect([...reviewerTools().keys()].sort()).toEqual(['orchestrator_report', 'orchestrator_review'])
+  // Only the review Ticket's worker reads the review section.
+  const section = (sessionId: string) => host.sections.get(sessionId)!({})
+  expect([section(sessions.reviewer), section(sessions.workerA)].map(text => text.includes(REVIEW_INSTRUCTIONS))).toEqual([true, false])
   expect([...toolsOf('orchestrator').keys()]).toEqual(expect.arrayContaining(['orchestrator_route', 'orchestrator_eval_decide', 'orchestrator_reply']))
   // The one routing tool takes the place of four.
   for (const name of ['orchestrator_ticket_accept', 'orchestrator_ticket_attach', 'orchestrator_ticket_stop', 'orchestrator_trigger_ignore']) {
@@ -387,13 +397,18 @@ it('enforces the word limits the text states', async () => {
 /** The enabled rules' lines of the main Session's Policy section, as the settings hold them now. */
 const ruleLines = () => host.runtime.store.settings().policy.rules.filter(rule => rule.enabled).map(rule => `- ${rule.name} (${rule.id}): ${rule.instruction}`)
 it.each(['orchestrator', 'worker'] as const)('keeps the %s within its character budget', role => {
-  const ids = role === 'orchestrator' ? [host.runtime.masterId] : [sessions.workerA, sessions.workerB]
+  // In Mumbo, the review Ticket's worker has its own tools (`UPSTREAM.md` S14).
+  const ids = role === 'orchestrator' ? [host.runtime.masterId] : [sessions.workerA, sessions.workerB, sessions.reviewer]
   // Strip machine-dependent variable values (such as directory paths), and the team's rules, before measuring prompt length.
   const builtIn = (text: string) => ruleLines().reduce((rest, line) => rest.replace(line, ''), text).replace(/ = "[^"\n]*"/g, ' = ""')
-  const prompt = Math.max(...ids.map(id => builtIn(host.sections.get(id)!({})).length))
-  const definitions = [...toolsOf(role).values()].map(({ name, description, parameters }) => ({ name, description, parameters }))
-  const tools = JSON.stringify(definitions).length
-  expect(prompt + tools, `${prompt} characters of prompt and ${tools} of tools`).toBeLessThanOrEqual(BUDGET[role])
+  const sizes = ids.map(id => {
+    const prompt = builtIn(host.sections.get(id)!({})).length
+    const definitions = [...host.tools.get(id)!.values()].map(({ name, description, parameters }) => ({ name, description, parameters }))
+    return { prompt, tools: JSON.stringify(definitions).length }
+  })
+  for (const { prompt, tools } of sizes) {
+    expect(prompt + tools, `${prompt} characters of prompt and ${tools} of tools`).toBeLessThanOrEqual(BUDGET[role])
+  }
 })
 
 it('keeps the routing rules in dispatch, which says the main Session may accept the rest of a stop message as new work', () => {

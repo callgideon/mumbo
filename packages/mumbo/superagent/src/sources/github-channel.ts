@@ -36,7 +36,9 @@ export async function sendGithub(host: Pick<SourceContext, 'commands'>, message:
       && (rootId === undefined || comment.in_reply_to_id === rootId) && (comment.body ?? '').includes(marker)
     if ((await commands.pages(CommentSchema, path)).some(mine)) return 'sent'
     const target = rootId === undefined ? path : `${path}/${rootId}/replies`
-    await commands.api(z.unknown(), target, '--method', 'POST', '-f', `body=${message.text}\n\n${marker}`)
+    // In Mumbo, only the review tool posts a review marker as a comment's first line (`UPSTREAM.md` S14).
+    const text = /^\s*<!--\s*mumbo-review/i.test(message.text) ? `(quoted)\n${message.text}` : message.text
+    await commands.api(z.unknown(), target, '--method', 'POST', '-f', `body=${text}\n\n${marker}`)
     return 'sent'
   } catch (error) {
     if (gone(error)) return 'gone'

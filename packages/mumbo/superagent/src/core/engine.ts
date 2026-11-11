@@ -247,6 +247,28 @@ export class Engine {
     this.repo.atomic(() => { this.assignments.interrupted(ticketId, assignmentId) })
   }
 
+  // In Mumbo, reviews (`UPSTREAM.md` S14)
+
+  /**
+   * Start the independent review of an open ticket's pull request `pr` at its head commit `sha`, once per commit, superseding
+   * an open review of another commit (see `Tickets.createReview`).
+   * @returns the review Ticket.
+   * @throws UserError when the ticket is unknown or has ended.
+   */
+  requestReview(ticketId: string, review: { pr: number; sha: string }): Ticket {
+    return this.repo.atomic(() => this.tickets.createReview(ticketId, review))
+  }
+  /**
+   * A review Ticket's verdict on its commit, which ends it with `findings` as its report: `pass` or `fail` is recorded on the
+   * ticket it reviewed, with the review comment's `url`, and a failure asks that ticket's worker to fix it; `stale`, when no
+   * review was posted, such as for a pull request whose head moved, records nothing more (see `Assignments.reviewed`).
+   * @returns the ended review Ticket.
+   * @throws UserError for a ticket that is unknown, no review, or ended.
+   */
+  reviewed(reviewTicketId: string, verdict: 'pass' | 'fail' | 'stale', findings: string, url = ''): Ticket {
+    return this.repo.atomic(() => this.assignments.reviewed(reviewTicketId, verdict, findings, url))
+  }
+
   // Settings
 
   /**
@@ -268,4 +290,6 @@ export type EngineForPeople = Pick<Engine, 'stopTicket' | 'retryTicket' | 'reeva
 export type EngineForSettings = Pick<Engine, 'policyChanged'>
 /** What the Executor tells the Engine, and what its workers ask of it. */
 export type EngineForExecutor = Pick<Engine, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed'
-  | 'assignmentInterrupted' | 'report' | 'markUnrelated' | 'handback' | 'followForContext' | 'reply'>
+  | 'assignmentInterrupted' | 'report' | 'markUnrelated' | 'handback' | 'followForContext' | 'reply'
+  // In Mumbo (`UPSTREAM.md` S14).
+  | 'requestReview' | 'reviewed'>

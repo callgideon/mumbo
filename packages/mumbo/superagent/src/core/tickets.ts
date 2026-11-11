@@ -180,6 +180,50 @@ export class Tickets extends EnginePart {
     return ticket
   }
   /**
+   * In Mumbo (`UPSTREAM.md` S14): create, once per commit, the review Ticket of an open ticket's pull request `pr` at `sha`,
+   * under the ticket's Mandate and Decision, and queue its launch. It has no Channel and no Subscription, and its origin is the
+   * ticket's request alone, which its launch message carries. An open review of the ticket at another commit ends `dropped`,
+   * `superseded`.
+   * @returns the review Ticket, the stored one for a commit reviewed before.
+   * @throws UserError when the ticket is unknown or has ended.
+   */
+  createReview(ticketId: string, { pr, sha }: { pr: number; sha: string }): Ticket {
+    const parent = this.require(ticketId)
+    if (!liveTicket(parent)) throw new UserError('ticketEnded')
+    const id = key('review', ticketId, sha)
+    const existing = this.repo.tickets.get(id)
+    if (existing) return existing
+    for (const open of this.repo.tickets.open()) if (open.review?.of === ticketId) this.end(open.id, 'executor', 'dropped', this.now(), 'superseded')
+    const at = this.now(), title = `Review of PR #${pr}: ${parent.title}`
+    const draft: Ticket = { id, title, decisionId: parent.decisionId, mandate: parent.mandate, channels: [], assignments: [], inputs: [],
+      undelivered: [], createdAt: at, updatedAt: at, origin: { triggerId: parent.origin.triggerId, triggerIds: [] },
+      review: { of: ticketId, pr, sha, round: (parent.reviews?.length ?? 0) + 1 } }
+    const ticket = this.options.prepareTicket?.(draft, { kind: 'accept', title, scope: title, reason: 'review', name: 'review',
+      note: `Review PR #${pr} at ${sha}.` }) ?? draft
+    const assignment = this.newAssignment(ticket)
+    this.repo.tickets.save(ticket)
+    this.options.executor.start(ticket, assignment)
+    this.emit('ticket.created', { ticketId: id, decisionId: ticket.decisionId, strength: ticket.mandate.strength })
+    return ticket
+  }
+  /**
+   * In Mumbo (`UPSTREAM.md` S14): record review `reviewId`'s verdict on the ticket it reviewed. The verdict joins the ticket's
+   * `reviews`; a failed one asks the worker of the open ticket, as a text Input, to fix the findings, and the second failed one
+   * sets `escalated`.
+   */
+  reviewed(reviewId: string, { of, sha }: { of: string; sha: string }, verdict: 'pass' | 'fail', findings: string, url: string): void {
+    const parent = this.require(of)
+    const at = this.now()
+    parent.reviews = [...parent.reviews ?? [], { sha, verdict, ticket: reviewId, url, at, findings: findings.slice(0, 2000) }]
+    if (parent.reviews.filter(item => item.verdict === 'fail').length >= 2) parent.escalated = true
+    parent.updatedAt = at
+    this.repo.tickets.save(parent)
+    if (verdict === 'fail' && liveTicket(parent)) {
+      this.addInput(parent, { id: key('input', of, 'review', reviewId), kind: 'text', at,
+        text: `The independent review of ${sha} failed:\n${findings}\nFix it, push, and submit again.` })
+    }
+  }
+  /**
    * Drops a ticket's Subscription to a Thread its worker found unrelated, and hands back, with `reason`, the person's messages there that the ticket decides.
    * @throws UserError when the ticket is unknown, or `thread` is an origin thread, a bound `follows` thread, or not subscribed.
    */
