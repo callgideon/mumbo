@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { runInNewContext } from 'node:vm'
-import { startScript, boxSite, containmentRows, containmentLayout, signBox, memberKey, mumboMcpKey, roleInstructions, systemRepair, ENVD_PORT, MUMBO_MCP_PORT, PORTS_MARKER } from './edge.mjs'
+import { startScript, boxSite, containmentRows, containmentLayout, signBox, memberKey, mumboMcpKey, roleInstructions, systemRepair, REPAIR_USERS, ENVD_PORT, MUMBO_MCP_PORT, PORTS_MARKER } from './edge.mjs'
 import { BOX_STEPS, PROJECT_STEPS, KASMVNC_BIND_STEP, NFT_SMOKE_STEP, DSH_SMOKE_SECONDS, DSH_SMOKE_SETTLE_SECONDS, INACTIVE_ALLOWLIST, LISTENER_ALLOWLIST, UMASK_STEP, WRITABLE_EXCLUDES, agentInstallScript, dshSmokeStep, kasmvncStep, smokeStartScript, usersSteps } from './template.mjs'
 
 // The files these tests make get a box's modes (0644, 0755), not this host's umask's: the checks of system files read them.
@@ -545,6 +545,24 @@ test('the system repair: login users\' paths root\'s, g+w off login groups, o+w 
   } finally { r.done() }
 })
 
+test('the system repair stops the start, before it changes anything, when E2B\'s user, or on a B24 template (agent) a user the template makes, is below uid 1000; a template before B24 with its system user xvnc starts', () => {
+  const below = (name) => `mumbo-box: user ${name} has uid 999, below 1000, so the system repair would not cover it; rebuild the template (RUNBOOK "Rebuild the box template")\n`
+  /** Runs the repair on e2bRoot with `name` at uid 999 in place of its E2B_PASSWD line, and agent's dropped when `agent` is false. */
+  const run = (name, agent = true) => {
+    const r = root()
+    try {
+      e2bRoot(r)
+      const passwd = E2B_PASSWD.filter(l => ![name, ...(agent ? [] : ['agent'])].includes(l.split(':')[0]))
+      writeFileSync(r.at('etc/passwd'), [...passwd, `${name}:x:999:999::/nonexistent:/usr/sbin/nologin`].join('\n') + '\n')
+      const out = r.run('echo reached', [], systemRepair(r.t))
+      return [out.code, out.err, out.out, r.lines('chown').length > 0, modes(r, ['usr/local'])['usr/local']]
+    } finally { r.done() }
+  }
+  for (const name of REPAIR_USERS) assert.deepEqual(run(name), [1, below(name), '', false, 0o777], name)
+  assert.deepEqual(run('user', false), [1, below('user'), '', false, 0o777])
+  assert.deepEqual(run('xvnc', false), [0, '', 'reached\n', true, 0o775])
+})
+
 test('the start script repairs the system files first, before it reads the ports marker: a world-writable marker still sets the firewall on the template\'s ports', () => {
   const s = script(c, true)
   const read = `if [ -e ${PORTS_MARKER} ]; then B24_TEMPLATE=1; read -r DSH_PORT LIVE_PORT < ${PORTS_MARKER}; fi\n`
@@ -784,9 +802,10 @@ test('template: containment\'s users and groups, homes 0700 with the run-as TMPD
   // The project box's GitHub proxy becomes its own user, with no home or login (edge startScript).
   assert.ok(PROJECT_STEPS.includes('id ghproxy >/dev/null 2>&1 || useradd -U -M -d /nonexistent -s /usr/sbin/nologin ghproxy'))
   // No template user is a system user (`useradd -r`): each gets a uid of 1000 or more, a login user's, whose paths the
-  // system repair takes and whose groups lose g+w there (edge systemRepair).
+  // system repair takes and whose groups lose g+w there (edge systemRepair), and every one is a user whose uid the start
+  // checks before that repair (REPAIR_USERS).
   const useradds = [...BOX_STEPS, ...PROJECT_STEPS].flatMap(s => s.match(/\buseradd [^&|;]*/g) ?? [])
-  assert.ok(useradds.some(u => u.endsWith(' xvnc')) && useradds.some(u => u.endsWith(' ghproxy')), useradds.join('\n'))
+  assert.deepEqual([...new Set(useradds.map(u => u.split(' ').at(-1)))].sort(), REPAIR_USERS.filter(u => u !== 'user').sort())
   assert.deepEqual(useradds.filter(u => /\s(-r|--system)\s/.test(u)), [])
   // nftables, setfacl, setcap and python3-venv (agent's venvs) are installed, not assumed from the base image;
   // iptables, which nothing on a template with the marker runs, is not.

@@ -332,6 +332,8 @@ const REPAIR_EXCLUDES = [
 const REPAIR_USER_PATHS = [
   '/var/lib/mumbo/playwright-output', // browsermcp's, 0700 (startScript): the Playwright MCP server writes its files there
 ]
+/** The users systemRepair needs at a uid of 1000 or more: E2B's `user` and every user a template step makes (template.mjs). */
+export const REPAIR_USERS = ['user', 'browser', 'xvnc', 'ghproxy', 'agent', 'mcpserver', 'browsermcp', 'desktop', 'xsession']
 /** The start script's first part (B24 fix), before it reads PORTS_MARKER and before any user's process starts. It
  *  guards the system files against the login users, a uid of 1000 or more (Debian's first uid for an account made
  *  without `-r`: E2B's `user` and every user the template makes, browser, xvnc, ghproxy and the containment users), and
@@ -342,8 +344,10 @@ const REPAIR_USER_PATHS = [
  *  loses g+w, and every path but a sticky directory loses o+w, whoever owns it. Then it checks the same paths and stops
  *  the start, naming them, if any is left. A system user's or group's path keeps its owner and its group write bit (a
  *  package's daemon such as polkitd or colord, root:mail 2775 /var/mail, root:staff 2775 /var/local): no login user can
- *  change it, and taking it from its daemon can break the daemon. A template built before xvnc and ghproxy were made
- *  without `-r` has them below 1000, as system users the repair leaves alone, until it is rebuilt.
+ *  change it, and taking it from its daemon can break the daemon. Before the repair it stops the start when E2B's `user`,
+ *  or on a B24 template (one with agent) any user of REPAIR_USERS it has, is below 1000, where the repair would not
+ *  cover it: a B24 template built before xvnc and ghproxy were made without `-r` stops until it is rebuilt, and a
+ *  template before B24 starts with its system user xvnc as before.
  *  The tree list is `/` less those excludes, so a top-level directory a new image or E2B build adds is covered, and
  *  /home, /tmp and the other excluded top directories are repaired and checked themselves: a writable /home would let
  *  a user replace another's home, and /tmp without the sticky bit another user's files. E2B's finalize phase, which
@@ -363,6 +367,8 @@ export const systemRepair = (root = '') => {
 # /usr/local, /code and envd world-writable. Set, then checked, before the ports marker is read and before any user's
 # process starts. $login matches the login groups: a gid of 1000 or more, or a login user as a member or primary group.
 login=$({ getent passwd && echo - && getent group && echo -; } | awk -F: '$0 == "-" { s++; next } s == 0 { if ($3 > 999) { u[$1]; p[$4] } next } s == 1 && $3 ~ /^[0-9]+$/ && $3 < 1000 { k = ($3 in p); n = split($4, m, ","); for (i = 1; i <= n; i++) if (m[i] in u) k = 1; if (k) w = w " -o -gid " $3 } END { if (s != 2) exit 1; print "-gid +999" w }') || { echo 'mumbo-box: could not read the users and groups for the system repair' >&2; exit 1; }
+# The repair covers a user only at uid 1000 or more: E2B's user, and on a B24 template (agent) every user it makes.
+getent passwd | awk -F: 'BEGIN { n = split("${REPAIR_USERS.join(' ')}", l, " ") } { id[$1] = $3 } END { for (i = 1; i <= n; i++) if (l[i] in id && (l[i] == "user" || "agent" in id) && id[l[i]] < 1000) { printf "mumbo-box: user %s has uid %s, below 1000, so the system repair would not cover it; rebuild the template (RUNBOOK \\"Rebuild the box template\\")\\n", l[i], id[l[i]]; b = 1 } exit b }' >&2 || exit 1
 ${find} \\( -uid +999 -exec chown -h 0:0 {} + -o -true \\) ! -type l \\( ${world} -exec chmod o-w {} + -o -true \\) ${group} -exec chmod g-w {} + || :
 bad=$(${find} \\( -uid +999 -o ! -type l \\( ${world} -o ${group} \\) \\) -printf '%M %u:%g %p\\n') || { echo 'mumbo-box: could not check the system files after their repair' >&2; exit 1; }
 [ -z "$bad" ] || { printf 'mumbo-box: a login user can still change these system files after their repair:\\n%s\\n' "$bad" | head -n 50 >&2; exit 1; }

@@ -49,7 +49,8 @@ test('a user box start script is byte-for-byte what it was before project boxes 
   // Then the repair took ownership only from login users (uid 1000 or more) and g+w only from login groups, read with
   // getent, so system daemons keep their paths (containment.test.mjs). Then KasmVNC's comment named xvnc its own user
   // rather than a system user, since the template makes it without `-r` (template.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), '9bac405ef38ce00fbe8a610b71ecadc6c00376ab22aeae0b02d666ee72345520')
+  // Then the repair first stops the start when E2B's user, or on a B24 template a user it makes, is below uid 1000 (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), '0a94a49e5253542595a72978812b2a9c77dd1dc4dfce4ff633393cd0ad45fc6e')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -79,7 +80,8 @@ test('a project box start script is byte-for-byte what it was before B18 changed
   // program directories on PATH, after the command shims and the gh wrapper, since /usr/local is root's alone (containment.test.mjs).
   // Then the repair took ownership only from login users (uid 1000 or more) and g+w only from login groups, read with
   // getent, so system daemons keep their paths (containment.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), 'ea70bf40c1aabb347dc6a36d0b75c1e5f15c1d5de5ba93cd9f20c44bddfb664e')
+  // Then the repair first stops the start when E2B's user, or on a B24 template a user it makes, is below uid 1000 (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), '52eaff8f93a0fa176c7eea2e2da817b86c072d1ad73865ae40e1fd44639792b7')
 })
 
 const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'
