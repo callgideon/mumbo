@@ -1580,7 +1580,7 @@ async function main() {
   userServer({ cfg, box, verifyAlb, projects: proj, approve, signin, keys }).listen(8080, listenHost, () => console.log(`edge: users on ${listenHost}:8080`))
   const { door, doorTools, memberReporter, mumboForwarder } = await import('./door.mjs')
   const mumbo = mumboForwarder({ box, boxFetch: boxFetcher(cfg), edgeKey, siteHostOf: (p) => boxSite(cfg, p).host })
-  const report = memberReporter({ projects: proj, admitted: (e) => admitted(cfg.allowed, e), mumbo })
+  const report = memberReporter({ projects: proj, admitted: (e) => admitted(cfg.allowed, e), halt, mumbo })
   const { children, mcpServer, reportServer } = await import('./sandboxes.mjs')
   const claimOf = (info) => verifyBox(edgeKey, String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, ''))
   const mcp = mcpServer({ ops: children({ e2b, cfg }), projects: proj, relay, projectDomain: cfg.projectDomain, claimOf })

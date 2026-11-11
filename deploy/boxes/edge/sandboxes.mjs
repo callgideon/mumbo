@@ -146,7 +146,7 @@ export function reportServer({ report, claimOf }) {
     const mcp = new McpServer({ name: 'mumbo-reports', version: '1.0.0' }, { capabilities: { tools: {} } })
     if (claim?.u.startsWith('project:')) {
       mcp.registerTool('report_to_member', {
-        description: "For this project's Superagent: deliver one reply on a relay Thread to a member of this project. It arrives in the member's Mumbo, fenced as untrusted data after \"[project <name>] report from its coordinator:\", once per messageId. A member who is not one of this project's is refused with not_a_member.",
+        description: "For this project's Superagent: deliver one reply on a relay Thread to a member of this project. It arrives in the member's Mumbo, fenced as untrusted data after \"[project <name>] report from its coordinator:\", once per messageId. A member who is not one of this project's is refused with not_a_member; a halted project with halted, and too many reports to one member with rate_limited.",
         inputSchema: z.object({
           member: z.string().max(320).describe("The member's email, lowercased"),
           project: z.string().regex(/^[a-z0-9]{16}$/).describe("This box's project id"),

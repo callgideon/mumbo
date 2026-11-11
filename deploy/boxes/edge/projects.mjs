@@ -170,9 +170,9 @@ export async function ensureWithin(box, principal, ms, late) {
  *
  * api(member, id) ensures the box once and resolves `(method, path) => Promise<object>`, which calls Superagent's management
  * API (`/orchestrator/api/<path>`) as the member, who must be one of the box's panel admins, and resolves its JSON answer.
- * It fails with the box's 400, 404 or 409 and its message (`code` the box's, else `not_found` for 404 and `invalid_request`
- * for 400 and 409), and 502 (`code: 'box_refused'`) for any other answer. A box's refusal text is cut to 500 characters
- * in either method.
+ * It fails with 403 (`code: 'owner_only'`) when the box refuses the member, with the box's 400, 404 or 409 and its message
+ * (`code` the box's, else `not_found` for 404 and `invalid_request` for 400 and 409), and 502 (`code: 'box_refused'`) for
+ * any other answer. A box's refusal text is cut to 500 characters in either method.
  */
 export function projectRelay({ projects, box, boxFetch, siteHostOf, edgeHost, readyMs = BOX_READY_MS, log = console.log }) {
   const say = (fields) => log(JSON.stringify({ edge: 'relay', ...fields }))
@@ -221,6 +221,7 @@ export function projectRelay({ projects, box, boxFetch, siteHostOf, edgeHost, re
         try { out = JSON.parse(r.body) } catch { out = undefined }
         if (r.status === 200 && out && typeof out === 'object') return out
         say({ level: 'warn', msg: 'api refused', project: id, member, path: path.split('?')[0], status: r.status })
+        if (r.status === 403) throw Object.assign(fail(403, 'only the project\'s owners can read its status or stop its Tickets'), { code: 'owner_only' })
         if ([400, 404, 409].includes(r.status) && typeof out?.error === 'string') {
           throw Object.assign(fail(r.status, `the project box refused: ${said(out)}`), { code: token(out.code) ?? (r.status === 404 ? 'not_found' : 'invalid_request') })
         }
