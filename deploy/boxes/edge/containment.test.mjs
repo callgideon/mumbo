@@ -561,6 +561,12 @@ test('the system repair stops the start, before it changes anything, when E2B\'s
   for (const name of REPAIR_USERS) assert.deepEqual(run(name), [1, below(name), '', false, 0o777], name)
   assert.deepEqual(run('user', false), [1, below('user'), '', false, 0o777])
   assert.deepEqual(run('xvnc', false), [0, '', 'reached\n', true, 0o775])
+  // The RUNBOOK's Rollout quotes the line an old B24 person box (xvnc) and project box (ghproxy) stops with.
+  const rollout = readFileSync(new URL('../RUNBOOK.md', import.meta.url), 'utf8').split('\n').find(l => l.startsWith('- **Rollout.**'))
+  for (const name of ['xvnc', 'ghproxy']) {
+    const quoted = `mumbo-box: user ${name} has uid …, below 1000`
+    assert.ok(rollout.includes(`\`${quoted}\``) && below(name).startsWith(quoted.replace('…', '999')), name)
+  }
 })
 
 test('the start script repairs the system files first, before it reads the ports marker: a world-writable marker still sets the firewall on the template\'s ports', () => {
