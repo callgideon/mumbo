@@ -343,7 +343,11 @@ export const REPAIR_USERS = ['user', 'browser', 'xvnc', 'ghproxy', 'agent', 'mcp
  *  (E2B's `user` in sudo, browser and browsermcp in the system group uploads), read with getent at each start, before
  *  the find. On the root filesystem outside
  *  REPAIR_EXCLUDES' contents and REPAIR_USER_PATHS, a path a login user owns becomes root:root, a path of a login group
- *  loses g+w, and every path but a sticky directory loses o+w, whoever owns it. Then it checks the same paths and stops
+ *  loses g+w, so does a path of group root (a login user's among them, which the chown gives group root) but a
+ *  world-writable sticky directory such as /var/tmp, and every path but a sticky directory loses o+w, whoever owns it.
+ *  Group root holds no login user, but dsh's run-as provider refuses a server identity's PATH (mcpserver's, and
+ *  browsermcp's or desktop's when they start servers) when any group can write one of its directories or an ancestor of
+ *  one, so E2B's 0777 /usr/local/bin and its ancestor /usr/local become 0755. Then it checks the same paths and stops
  *  the start, naming them, if any is left. A system user's or group's path keeps its owner and its group write bit (a
  *  package's daemon such as polkitd or colord, root:mail 2775 /var/mail, root:staff 2775 /var/local): no login user can
  *  change it, and taking it from its daemon can break the daemon. Before the repair it stops the start when E2B's `user`,
@@ -364,10 +368,12 @@ export const REPAIR_USERS = ['user', 'browser', 'xvnc', 'ghproxy', 'agent', 'mcp
 export const systemRepair = (root = '') => {
   const skip = [...REPAIR_EXCLUDES.map(p => `-path '${root}${p}/*'`), ...REPAIR_USER_PATHS.map(p => `-path ${root}${p}`)]
   const find = `find ${root || '/'} -xdev -ignore_readdir_race \\( ${skip.join(' -o ')} \\) -prune -o`
-  const world = '-perm -0002 ! \\( -type d -perm -1000 \\)', group = '\\( $login \\) -perm -0020'
+  const world = '-perm -0002 ! \\( -type d -perm -1000 \\)', group = '\\( $login -o \\( -gid 0 -o -uid +999 \\) ! \\( -type d -perm -1002 \\) \\) -perm -0020'
   return `# No login user (uid 1000 or more) can change the system files (edge systemRepair): E2B's template build leaves
 # /usr/local, /code and envd world-writable. Set, then checked, before the ports marker is read and before any user's
 # process starts. $login matches the login groups: a gid of 1000 or more, or a login user as a member or primary group.
+# Group root loses its write bit too, but on a world-writable sticky directory: dsh's run-as provider refuses a server
+# identity's PATH directory, or an ancestor of one such as /usr/local, that any group can write.
 login=$({ getent passwd && echo - && getent group && echo -; } | awk -F: '$0 == "-" { s++; next } s == 0 { if ($3 > 999) { u[$1]; p[$4] } next } s == 1 && $3 ~ /^[0-9]+$/ && $3 < 1000 { k = ($3 in p); n = split($4, m, ","); for (i = 1; i <= n; i++) if (m[i] in u) k = 1; if (k) w = w " -o -gid " $3 } END { if (s != 2) exit 1; print "-gid +999" w }') || { echo 'mumbo-box: could not read the users and groups for the system repair' >&2; exit 1; }
 # The repair covers a user only at uid 1000 or more: E2B's user, and on a B24 template (agent) every user it makes.
 getent passwd | awk -F: 'BEGIN { n = split("${REPAIR_USERS.join(' ')}", l, " ") } { id[$1] = $3 } END { for (i = 1; i <= n; i++) if (l[i] in id && (l[i] == "user" || "agent" in id) && id[l[i]] < 1000) { printf "mumbo-box: user %s has uid %s, below 1000, so the system repair would not cover it; rebuild the template (RUNBOOK \\"Rebuild the box template\\")\\n", l[i], id[l[i]]; b = 1 } exit b }' >&2 || exit 1
@@ -377,8 +383,14 @@ bad=$(${find} \\( -uid +999 -o ! -type l \\( ${world} -o ${group} \\) \\) -print
 `
 }
 
+/** Units no box uses whose listeners reach beyond root: ssh (E2B's base provisioning installs openssh-server and enables
+ *  it), rpcbind (nfs-common in E2B's base, for E2B volumes) and nginx (the web image's login gate). The template masks
+ *  them (template.mjs MASK_UNITS_STEP); a B24 box's start script stops and masks any that is active (hardening). */
+export const UNUSED_UNITS = ['ssh.socket', 'ssh.service', 'rpcbind.socket', 'rpcbind.service', 'nginx.service']
+
 /** The start script's kernel and network part on a template with PORTS_MARKER (B24), before any user's process starts:
- *  the unprivileged port floor, the link protections and hidepid, set and checked; no setuid su or sudo; and the firewall,
+ *  the unprivileged port floor and the link protections, set and checked; UNUSED_UNITS stopped and masked when active,
+ *  then nothing listening on TCP 22, 80 or 111, checked; hidepid, set and checked; no setuid su or sudo; and the firewall,
  *  one native nftables table `inet mumbo` (IPv4 and IPv6) whose output chain refuses connections by the socket's user
  *  (`meta skuid`), refusing a socket whose user it cannot read, and whose input chain admits new TCP connections from
  *  beyond loopback only to envd, dsh, the live view and the door, and keeps the WebRTC port box-local. The script writes
@@ -393,6 +405,14 @@ const hardening = () => `if [ -n "$B24_TEMPLATE" ]; then
     echo "\${kv#*=}" > "/proc/sys/\${kv%=*}"
     [ "$(cat "/proc/sys/\${kv%=*}")" = "\${kv#*=}" ] || { echo "mumbo-box: /proc/sys/\${kv%=*} is not \${kv#*=}" >&2; exit 1; }
   done
+  # No ssh, rpcbind or nginx, set rather than trusted (a template from before their masking, or a unit enabled again):
+  # each of their units that is active is stopped and masked, and nothing may listen on TCP 22, 80 or 111.
+  for u in ${UNUSED_UNITS.join(' ')}; do
+    ! systemctl is-active --quiet "$u" || systemctl mask --now "$u" || { echo "mumbo-box: could not stop and mask $u" >&2; exit 1; }
+  done
+  L=$(ss -ltnpH) || { echo 'mumbo-box: ss could not list the TCP listeners' >&2; exit 1; }
+  bad=$(printf '%s\\n' "$L" | awk '{ p = $4; sub(/.*:/, "", p) } p == "22" || p == "80" || p == "111"')
+  [ -z "$bad" ] || { printf 'mumbo-box: these listen on TCP 22, 80 or 111, which no box serves:\\n%s\\n' "$bad" >&2; exit 1; }
   # Every user but root sees only its own processes, their environments and command lines included.
   mount -o remount,hidepid=2 /proc
   grep -Eq '^[^ ]+ /proc proc [^ ]*hidepid=(2|invisible)' /proc/mounts || { echo 'mumbo-box: /proc is not mounted with hidepid=2' >&2; exit 1; }

@@ -53,7 +53,12 @@ test('a user box start script is byte-for-byte what it was before project boxes 
   // Then B48: the scratch line names the gh sign-in in /home/agent/.config/gh, which backups keep (backup.test.mjs).
   // Then B48's token-location ruling: agent's row sets GH_CONFIG_DIR /var/lib/mumbo/agent-gh, which the layout makes
   // agent:agent 0700 and the system repair leaves as it is, so the scratch line names no exception (containment.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), 'f2d9110833e11da8983729fa248eab6cf0c92cc4f0ee9b692e9ef0af9b74a98e')
+  // Then the B24 template's kernel and network part stops and masks the unused ssh, rpcbind and nginx units that are
+  // active and stops the start when anything listens on TCP 22, 80 or 111 (containment.test.mjs).
+  // Then the repair also takes g+w from group root (but on a world-writable sticky directory), since dsh's run-as
+  // provider refuses a server identity's PATH directory, or an ancestor of one, that any group can write and E2B's
+  // finalize leaves /usr/local and /usr/local/bin 0777 (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), 'ecff6f7de7719313cfd84c48febd33d743e799df494bd72d29b6586b2a1b1ebd')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -88,7 +93,12 @@ test('a project box start script is byte-for-byte what it was before B18 changed
   // the backup is the same for both (backup.test.mjs).
   // Then B48's token-location ruling: agent's row sets GH_CONFIG_DIR /var/lib/mumbo/agent-gh on every box, which the
   // layout makes agent:agent 0700 and the system repair leaves as it is, so the scratch line names no exception (containment.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), '48d99899dd0a4ff6b3419ad2bc3de8b4fb24f0fb643cc258d9441c302bfc5867')
+  // Then the B24 template's kernel and network part stops and masks the unused ssh, rpcbind and nginx units that are
+  // active and stops the start when anything listens on TCP 22, 80 or 111 (containment.test.mjs).
+  // Then the repair also takes g+w from group root (but on a world-writable sticky directory), since dsh's run-as
+  // provider refuses a server identity's PATH directory, or an ancestor of one, that any group can write and E2B's
+  // finalize leaves /usr/local and /usr/local/bin 0777 (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), '3092038fc5ab6f8fa162151e16ee904f35fe4c352fbf281871d31177b5db8296')
 })
 
 const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'

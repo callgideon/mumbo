@@ -2045,21 +2045,33 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li><strong>No browser call writes files where the model chose.</strong> A call with a <code>filename</code> argument is refused, because page content could otherwise overwrite project files.</li>
 <li><strong>A turn started by a project's report asks before every browser write</strong> (B25b, after B36b; <strong>[2026-11-10, B36 review]</strong>): while the Session's newest user message has the <code>report</code> source, writes on every site ask, as on a page with a secret field. A report's text is steered by workers and outside issues, and it reaches the Mumbo that holds the person's accounts.
 <ul>
-<li><strong>[2026-11-11, B48]</strong> The same predicate gates the whole shell tool on person boxes. It asks in normal modes and is refused with a note under Run Wild, because a shell holding the person's GitHub sign-in, or any other credential, writes with their accounts. It gates the whole tool, never by parsing the command.</li>
+<li><strong>[2026-11-11, B48 review] A report-started turn is default-deny.</strong> Only a read-only allowlist runs unasked: file read, list and search within the model roots, Mumbo's read tools, <code>todo_write</code>, <code>plan_read</code>, and browser reads as above. Everything else asks in normal modes and is refused with a note under Run Wild: the shell, schedules, goals, subagent and team spawns, computer use, MCP writes, <code>web_fetch</code> and <code>web_search</code>. A test fails when a new tool is left unclassified.
+<ul>
+<li>The predicate is the turn's origin: the source of the message that opened it, fixed after its first step, not the newest user message. A person's own message and a <code>schedule</code> delivery are founder origins, and <code>report</code> is gated.
+<ul>
+<li>A <code>goal</code> round, a <code>retry</code> and unknown kinds inherit the previous origin. A goal round adds no authority, so a report taints the rounds after it until the person's own message or a schedule.</li>
+<li>Mid-turn messages never change the origin: runtime-context snapshots, compaction checkpoints, the resume notice (§17e), a schedule notice, and a person's message typed during the turn. A source with a <code>form</code> counts as context.</li>
+</ul>
+</li>
+</ul>
+</li>
 </ul>
 </li>
 <li><strong>The founder's GitHub sign-in on their person box</strong> (B48, after the B24 fix; <strong>[2026-11-11, founder's choice: &quot;gh plus my GitHub sign-in&quot;]</strong>):
 <ul>
 <li><code>gh</code> is in the person template. A root-owned <code>/etc/gitconfig</code> makes git over https use <code>gh auth git-credential</code>.</li>
-<li>The person signs in themselves, and the token never passes through the edge, a Session or Secrets Manager. Two ways, both allowed, the easier first <strong>[founder, 2026-11-11]</strong>:
+<li>The person signs in themselves, and the token never passes through the edge, a Session or Secrets Manager. <strong>[founder, 2026-11-11: &quot;allow both - start with whatever is easier&quot;]</strong> The device flow is the way in: Mumbo runs <code>gh auth login --web</code> non-interactively with <code>--git-protocol https</code>, shows only the one-time code and URL, then checks <code>gh auth status</code>. It removes <code>workflow</code> if gh added it (interactive gh adds it when its own credential helper is configured), so Actions files, which hold CI secrets, stay the person's to change. gh's default scopes reach every repository the person can.
 <ul>
-<li>the device flow, <code>gh auth login --web</code>: Mumbo runs it and shows only the one-time code and URL. gh's default scopes reach every repository the person can; <code>workflow</code> is not added, so Actions files, which hold CI secrets, stay the person's to change;</li>
-<li>or a fine-grained token, pasted into <code>gh auth login --with-token</code> in the desktop terminal as <code>agent</code>.</li>
+<li>A fine-grained token is deferred. On a B24 box the desktop terminal runs as <code>xsession</code> and can't reach <code>agent</code>'s gh.</li>
 </ul>
 </li>
-<li><strong>The platform repositories are included</strong> <strong>[founder, 2026-11-11: &quot;that way it would be able to build itself&quot;]:</strong> the box's assistant can open, push to and merge pull requests on <code>callgideon/mumbo</code> and <code>callgideon/e2b-runtime</code> as the founder. Branch protection that admins can't bypass (required pull request and checks, no force pushes) on <code>main</code> and <code>boxes/production</code> keeps those merges to green pull requests. The setting is the founder's. Claude sessions' own rules are unchanged.</li>
-<li>The token lives in <code>agent</code>'s <code>/home/agent/.config/gh</code> (0700). The backup takes that directory, so the sign-in survives moves. It is never under <code>/root/projects</code> (a <code>git add -A</code> could commit it) or in Mumbo Sync's folders.</li>
-<li>The model can read and use the token. The token's scopes (and, for a fine-grained token, its repositories and expiry) are the boundary, and the README says so. Under Run Wild, pushes and merges in turns the founder started run unasked; branch protection is the founder's lever.</li>
+<li><strong>The platform repositories are included</strong> <strong>[founder, 2026-11-11: &quot;that way it would be able to build itself&quot;]:</strong> the box's assistant can open, push to and merge pull requests on <code>callgideon/mumbo</code> and <code>callgideon/e2b-runtime</code> as the founder. Claude sessions' own rules are unchanged.
+<ul>
+<li><strong>Correction [2026-11-11, B48 review]:</strong> repository branch protection does not bind the assistant. With <code>repo</code> on an admin's account, it can remove the protection itself. Only an organization ruleset with an empty bypass list holds, because changing one needs <code>admin:org</code>, which the sign-in lacks. Rulesets on private repositories may need a paid GitHub plan. The setting is the founder's.</li>
+</ul>
+</li>
+<li>The token lives in <code>GH_CONFIG_DIR=/var/lib/mumbo/agent-gh</code> (<code>agent</code>, 0700), set in <code>agent</code>'s run-as row. It sits outside every model root, so the file tools can't read it, while <code>gh</code> in the shell can. The backup takes that directory, so the sign-in survives moves, and the system repair leaves it to <code>agent</code>. It is never under <code>/root/projects</code> (a <code>git add -A</code> could commit it) or in Mumbo Sync's folders.</li>
+<li>The model can still read and use the token through the shell in turns the founder started. The token's scopes are the boundary, and the README says so. Under Run Wild, pushes and merges in those turns run unasked.</li>
 <li>A root-held token behind a local proxy, like the project box's, would keep it from the model entirely. That is a later option if the founder asks.</li>
 </ul>
 </li>
