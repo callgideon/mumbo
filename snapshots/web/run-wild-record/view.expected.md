@@ -14,6 +14,5 @@
       - code: greeting
       - time: just now
       - paragraph: Should greeting.txt say Hello or Hi?
-      - paragraph: "Run Wild: decide from context and the person's rules, state your assumption in one line, and continue."
       - text: Ask me with ask_user_question whether
       - button "Open session"

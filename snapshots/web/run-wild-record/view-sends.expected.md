@@ -9,4 +9,3 @@
     - button "Purchases"
     - button "Deletes"
   - status: Nothing was sent without asking.
-  - list "Actions"
