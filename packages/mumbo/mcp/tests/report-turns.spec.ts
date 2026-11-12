@@ -4,24 +4,18 @@ import { mountAgentLoopTestDependencies, mountAgentLoopTestHarness } from '@deep
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { CompactionId, compactCheckpointSource } from '@deepseek-ai/dsh-compaction'
 import { GoalId } from '@deepseek-ai/dsh-goal'
-import { createUserMessage, type MessageSource, ToolCallId } from '@deepseek-ai/dsh-llm'
+import { createToolResultMessage, createUserMessage, type MessageSource, ToolCallId } from '@deepseek-ai/dsh-llm'
 import PermissionPresetService from '@deepseek-ai/dsh-permission-presets'
 import { SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
 import { defineContentToolFixture, executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
-import type { ToolExecutionResult } from '@deepseek-ai/dsh-tools'
+import type { ResolvedToolSet, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import Approval from '@deepseek-ai/dsh-user-approval'
 import * as RunWild from '@mumbo/run-wild'
+import * as MumboState from '@mumbo/state'
 import { describe, expect, it, onTestFinished } from 'vitest'
 import type { ProjectId } from '../src/auth.ts'
 import type {} from '../src/conversation.ts'
 import { gateReportTurns, runsUnasked } from '../src/report-turns.ts'
-
-declare module '@deepseek-ai/dsh-llm' {
-  interface MessageSourceMap {
-    /** Stands in for a source this package does not know, such as a resume notice. */
-    'mumbo-resume': { kind: 'mumbo-resume' }
-  }
-}
 
 /** The person-box preset table with the Run Wild entry. */
 const PRESETS = {
@@ -41,7 +35,10 @@ const SCHEDULE_NOTICE: MessageSource = { kind: 'schedule', form: 'notice', summa
 const GOAL: MessageSource = { kind: 'goal', goalId: GoalId('goal-1'), revision: 1, round: 1 }
 /** The runtime-context snapshot the loop appends after a step's claimed messages. */
 const CONTEXT: MessageSource = { kind: 'runtime-context', form: 'snapshot', sections: [{ name: 'time', text: 'Now: 09:00.' }] }
-const RESUME: MessageSource = { kind: 'mumbo-resume' }
+/** A source without a context form that this gate does not name. */
+const RESUME: MessageSource = { kind: MumboState.RESUME_SOURCE }
+/** The notice `@mumbo/state` adds to the first step after a restart. */
+const RESUME_NOTICE: MessageSource = { kind: MumboState.RESUME_SOURCE, form: 'notice', summary: 'Restart: 1 stopped.' }
 
 /**
  * Gated stand-ins: the shells, programs, schedule and goal changes, delegation, the web, the desktop, and MCP writes.
@@ -52,17 +49,18 @@ const GATED = [
   'web_search', 'computer', 'mcp__playwright-mcp__browser_click', 'mcp__sandboxes__create', 'write',
 ] as const
 
-/** Stand-ins that run unasked: file reads and searches, status reads, the todo list, and browser reads. */
-const UNASKED = ['read', 'read_image', 'glob', 'grep', 'get_goal', 'job_list', 'todo_write', 'mcp__playwright-mcp__browser_snapshot'] as const
+/** Stand-ins that run unasked: file reads and searches, status reads, the approved plan, the todo list, and browser reads. */
+const UNASKED = ['read', 'read_image', 'glob', 'grep', 'get_goal', 'job_list', 'plan_read', 'todo_write', 'mcp__playwright-mcp__browser_snapshot'] as const
 
 /** Where the gate's listener sits relative to Run Wild's: mounted before it (inner) or after it (outer). */
 type Order = 'before Run Wild' | 'after Run Wild'
 
 /**
  * Mount the real approval and permission services, Run Wild and the gate, a fixture for each named tool, and the
- * person's answerer, which records each approval reason and gives `answer`.
+ * person's answerer, which records each approval reason and gives `answer`. With `state`, `@mumbo/state` registers the
+ * real `plan_read` in place of its fixture.
  */
-async function mounted(order: Order = 'before Run Wild') {
+async function mounted(order: Order = 'before Run Wild', state = false) {
   const ctx = new Context()
   onTestFinished(() => ctx.fiber.dispose())
   await mountAgentLoopTestDependencies(ctx)
@@ -81,7 +79,8 @@ async function mounted(order: Order = 'before Run Wild') {
     asked.push(request.reason)
     return Promise.resolve(person.answer)
   })
-  for (const name of [...GATED, ...UNASKED, 'mcp__playwright-mcp__browser_navigate']) {
+  if (state) await ctx.plugin(MumboState)
+  for (const name of [...GATED, ...UNASKED, 'mcp__playwright-mcp__browser_navigate'].filter(name => !state || name !== MumboState.PLAN_READ)) {
     ctx.tools.register(defineContentToolFixture({
       name, description: `${name} fixture`, parameters: { url: { type: 'string' } }, execute: () => Promise.resolve([{ type: 'text', text: `ran ${name}` }]),
     }))
@@ -94,8 +93,10 @@ async function mounted(order: Order = 'before Run Wild') {
     log.turn(...sources)
     return { agent, log }
   }
-  const run = (name: string, agent?: Agent, args: Record<string, unknown> = {}): Promise<ToolExecutionResult> => executeToolFixture(ctx, {
+  /** Run one call; a conditional tool, such as `plan_read`, needs the step's admitted `toolSet`. */
+  const run = (name: string, agent?: Agent, args: Record<string, unknown> = {}, toolSet?: ResolvedToolSet): Promise<ToolExecutionResult> => executeToolFixture(ctx, {
     callId: ToolCallId(`call-${name}`), name, arguments: args, signal: new AbortController().signal, ...agent === undefined ? {} : { agent },
+    ...toolSet === undefined ? {} : { toolSet },
   })
   return { ctx, asked, person, create, run, fiber }
 }
@@ -223,6 +224,20 @@ describe('reportStarted', () => {
     expect(ctx['mumbo-report-turns'].reportStarted(agent)).toBe(false)
   })
 
+  it('keeps the origin of a turn whose opening step also carries @mumbo/state\'s resume notice', async () => {
+    const { ctx, create } = await mounted()
+    const started = (agent: Agent): boolean => ctx['mumbo-report-turns'].reportStarted(agent)
+    const { agent, log } = await create('root', 'danger-full-access', [REPORT, CONTEXT, RESUME_NOTICE])
+    expect(started(agent)).toBe(true)
+    log.turn(PERSON, CONTEXT, RESUME_NOTICE)
+    expect(started(agent)).toBe(false)
+    // A notice before the message that opens the turn names no origin either.
+    log.turn(RESUME_NOTICE, REPORT)
+    expect(started(agent)).toBe(true)
+    log.turn(RESUME_NOTICE, PERSON)
+    expect(started(agent)).toBe(false)
+  })
+
   it('keeps the previous turn\'s origin when the opening step claims a schedule change notice before a wake', async () => {
     const { ctx, create } = await mounted()
     const { agent, log } = await create('root', 'danger-full-access', [REPORT])
@@ -309,6 +324,22 @@ describe('tools in a report-started turn', () => {
     const { agent, log } = await create('root', RunWild.RUN_WILD_PRESET, [REPORT, CONTEXT])
     continueReportTurn(agent, log)
     expect(text(await run('bash', agent))).toBe(refusal('bash'))
+  })
+
+  it('runs @mumbo/state\'s plan_read unasked under Run Wild once a plan is approved', async () => {
+    const { ctx, asked, create, run } = await mounted('before Run Wild', true)
+    const { agent, log } = await create('root', RunWild.RUN_WILD_PRESET, [PERSON])
+    const callId = ToolCallId('call-plan')
+    agent.session.append('tool/call', { turn: 1, step: 1, callId, name: 'exit_plan_mode', arguments: JSON.stringify({ plan: '# Ship\n\n## Build' }) })
+    agent.session.append('tool/result', { turn: 1, step: 1, message: createToolResultMessage({ callId, content: [], isError: false }) }, { surfaceOp: 'append' })
+    log.step()
+    agent.session.append('plan/mode', { active: false })
+    log.turn(REPORT)
+    const toolSet = await ctx.tools.resolve({ agent, modelSelection: { provider: 'fixture', model: 'fixture' }, signal: new AbortController().signal })
+    const result = await run(MumboState.PLAN_READ, agent, {}, toolSet)
+    expect(text(result)).toBe('Approved in turn 1.\n\n# Ship\n\n## Build')
+    expect(asked).toEqual([])
+    expect(decisions(agent)).toEqual([])
   })
 
   it('keeps a denial from a later policy', async () => {

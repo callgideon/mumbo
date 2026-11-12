@@ -569,6 +569,7 @@
     { "path": "./packages/mumbo/browser-consent" },
     { "path": "./packages/mumbo/mcp" },
     { "path": "./packages/mumbo/run-wild" },
+    { "path": "./packages/mumbo/state" },
     { "path": "./packages/mumbo/edge-member/tsconfig.host.json" },
     { "path": "./packages/mumbo/superagent/tsconfig.host.json" },
     { "path": "./packages/todo/tool-todo" },

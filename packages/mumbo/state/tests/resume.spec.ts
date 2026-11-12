@@ -1,0 +1,206 @@
+/** The resume notice in a real agent loop, after a crash and after a graceful stop. */
+
+import type { Context } from '@deepseek-ai/cordis'
+import { agentEvents, type Agent, type PreStepDecision } from '@deepseek-ai/dsh-agent'
+import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
+import { createAssistantMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-subagent'
+import { WorkflowRunId } from '@deepseek-ai/dsh-workflow'
+import { describe, expect, it, vi } from 'vitest'
+import { textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
+import { subagentCatalogProjectionDefinition } from '../../../subagent/subagent/src/catalog.ts'
+import { PLAN_READ, STATE_CONTEXT } from '../src/index.ts'
+import { Log } from './events.ts'
+import { boot, notices, requestTexts, startJob, turn } from './harness.ts'
+
+const HEADER = 'This Session was restarted. What changed while it was down:'
+const CHECK = 'node scripts/slow-check.js'
+
+async function mountJobs(ctx: Context): Promise<void> {
+  await ctx.plugin(LocalJobRegistry)
+  ctx.jobs.attachController('test')
+}
+
+const replies = (count: number) => Array.from({ length: count }, (_, index) => textResponse(`reply ${String(index)}`))
+
+describe('background jobs', () => {
+  it.each([['a crash', true], ['a graceful stop', false]])('after %s, reports a job that was running exactly once, at the first step', { timeout: 60_000 }, async (_name, crash) => {
+    const harness = await boot(replies(3), mountJobs)
+    const handle = await harness.start(`job-${String(crash)}`)
+    await turn(handle.agent, 'Start the slow check.')
+    const job = startJob(harness.ctx, handle.agent, CHECK)
+    const settled = handle.agent.session.snapshotEvents().filter(event => event.type === 'job/settled')
+    expect(settled).toEqual([])
+    const { agent } = await harness.restart(handle, crash)
+    expect(agent.session.snapshotEvents().some(event => event.type === 'job/settled' && event.data.cause === 'teardown')).toBe(!crash)
+    await turn(agent, 'Back.')
+    await turn(agent, 'Again.')
+    const text = `${HEADER}\n- Stopped by the restart, output not kept: background job ${job.id} (bash: ${CHECK}).`
+    expect(notices(agent)).toEqual([{ turn: 2, text, summary: 'Restart: 1 stopped.' }])
+    expect(requestTexts(harness.model, 1)).toContain(text)
+    expect(requestTexts(harness.model, 2).filter(entry => entry === text)).toHaveLength(1)
+  })
+
+  it('reports jobs that ended after the last request with their outcome', { timeout: 60_000 }, async () => {
+    const harness = await boot(replies(2), mountJobs)
+    const handle = await harness.start('finished')
+    await turn(handle.agent, 'Start.')
+    const job = startJob(harness.ctx, handle.agent, CHECK)
+    job.finish()
+    const killed = startJob(harness.ctx, handle.agent, 'sleep 100')
+    harness.ctx.jobs.kill(killed.id, handle.agent.session.id)
+    await vi.waitFor(() => { expect(handle.agent.session.snapshotEvents().filter(event => event.type === 'job/settled')).toHaveLength(2) })
+    const { agent } = await harness.restart(handle, true)
+    // A job started after the restart is not one the restart stopped.
+    startJob(harness.ctx, agent, 'sleep 1000')
+    await turn(agent, 'Back.')
+    expect(notices(agent).map(notice => notice.text)).toEqual([
+      [
+        HEADER, `- Ended after your last request (completed, exit code: 0), output not kept: background job ${job.id} (bash: ${CHECK}).`,
+        `- Ended after your last request (killed), output not kept: background job ${killed.id} (bash: sleep 100).`,
+      ].join('\n'),
+    ])
+    expect(notices(agent)[0]?.summary).toBe('Restart: 2 finished.')
+  })
+
+  it('logs nothing when nothing stopped or finished, at the first step or any later one', { timeout: 60_000 }, async () => {
+    const harness = await boot(replies(3), mountJobs)
+    const handle = await harness.start('quiet')
+    await turn(handle.agent, 'Start.')
+    const { agent } = await harness.restart(handle)
+    await turn(agent, 'Back.')
+    await turn(agent, 'Again.')
+    expect(notices(agent)).toEqual([])
+  })
+})
+
+describe('the step the notice joins', () => {
+  /** Run the pre-step chain of a resumed Agent once, ending in `decision`. */
+  const preStep = (ctx: Context, agent: Agent, decision: PreStepDecision, signal = new AbortController().signal) => agentEvents(ctx, agent)
+    .waterfall('agent/pre-step', { messages: [], turn: 2, step: 1, signal, modelSelection: { provider: 'fixture', model: 'fixture' } }, () => Promise.resolve(decision))
+
+  it('adds nothing to a rejected or aborted step, and joins the next admitted one', { timeout: 60_000 }, async () => {
+    const harness = await boot([], mountJobs)
+    const handle = await harness.start('rejected')
+    startJob(harness.ctx, handle.agent, CHECK)
+    const { agent } = await harness.restart(handle, true)
+    expect(await preStep(harness.ctx, agent, { kind: 'reject' })).toEqual({ kind: 'reject' })
+    const aborted = new AbortController()
+    aborted.abort()
+    expect(await preStep(harness.ctx, agent, { kind: 'enter', messages: [] }, aborted.signal)).toEqual({ kind: 'enter', messages: [] })
+    const admitted = await preStep(harness.ctx, agent, { kind: 'enter', messages: [] })
+    expect(admitted.kind === 'enter' ? admitted.messages.map(message => message.source.kind) : []).toEqual(['mumbo-resume'])
+  })
+})
+
+it('removes the block, plan_read and the notice when the plugin unloads', { timeout: 60_000 }, async () => {
+  const harness = await boot(replies(1), mountJobs)
+  const handle = await harness.start('unloaded')
+  startJob(harness.ctx, handle.agent, CHECK)
+  const { agent } = await harness.restart(handle, true)
+  const contexts = async () => (await harness.ctx.systemPrompt.assemble({})).contexts.map(context => context.name)
+  expect(harness.ctx.tools.get(PLAN_READ)).toBeDefined()
+  expect(await contexts()).toContain(STATE_CONTEXT)
+  await harness.unload()
+  expect(harness.ctx.tools.get(PLAN_READ)).toBeUndefined()
+  expect(await contexts()).not.toContain(STATE_CONTEXT)
+  await turn(agent, 'Back.')
+  expect(notices(agent)).toEqual([])
+})
+
+describe('workflow runs', () => {
+  it('reports runs the restart stopped and runs that ended after the last request', { timeout: 60_000 }, async () => {
+    // Session queries without a subagent catalog report no children.
+    const harness = await boot(replies(2), (ctx) => {
+      ctx.provide('sessionQuery', { observeSession: () => Promise.reject(new Error('no child to read')) } as never)
+      return Promise.resolve()
+    })
+    const handle = await harness.start('runs')
+    await turn(handle.agent, 'Start.')
+    const session = handle.agent.session
+    const runId = (id: string) => WorkflowRunId(id)
+    session.append('tool-workflow/run-start', { runId: runId('r1'), name: 'review' })
+    session.append('tool-workflow/agent-start', { runId: runId('r1'), seq: 1, label: 'reader', childId: SessionId('reader') })
+    session.append('tool-workflow/run-start', { runId: runId('r2'), name: 'lint' })
+    session.append('tool-workflow/run-end', { runId: runId('r2'), stopReason: 'error' })
+    session.append('tool-workflow/run-start', { runId: runId('r3'), name: 'triage' })
+    const { agent } = await harness.restart(handle, true)
+    agent.session.append('tool-workflow/run-start', { runId: runId('r4'), name: 'after the restart' })
+    await turn(agent, 'Back.')
+    expect(notices(agent)).toEqual([{
+      turn: 2,
+      text: [
+        HEADER, '- Stopped by the restart: workflow review, with 1 of its agents running.', '- Workflow lint ended (error) after your last request.',
+        '- Stopped by the restart: workflow triage.',
+      ].join('\n'),
+      summary: 'Restart: 2 stopped, 1 finished.',
+    }])
+  })
+})
+
+describe('subagents', () => {
+  it('reads each unloaded direct child\'s log and reports the ones the restart stopped or that ended meanwhile', { timeout: 60_000 }, async () => {
+    const later = Date.now() + 3_600_000
+    const logs: Record<string, SessionEvent[]> = {
+      tester: new Log(later).add('turn/start', { turn: 1 }).assistant('Running the suite.').events,
+      reviewer: new Log(later).add('turn/start', { turn: 1 }).assistant('Looks right.').assistant('Approved: the parser change is safe.')
+        .add('turn/end', { turn: 1, reason: { kind: 'completed' } }).events,
+      quiet: new Log(later).add('turn/start', { turn: 1 }).user('Only a question.').add('assistant/message', {
+        turn: 1, step: 1, stream: [], message: createAssistantMessage({
+          content: [{ type: 'tool-call', id: ToolCallId('c'), name: 'read', arguments: '{}' }], source: { provider: 'mock', model: 'mock' },
+        }),
+      }).add('turn/end', { turn: 1, reason: { kind: 'completed' } }).events,
+      verbose: new Log(later).add('turn/start', { turn: 1 }).assistant('v'.repeat(500)).add('turn/end', { turn: 1, reason: { kind: 'completed' } }).events,
+      crashed: new Log(later).add('turn/start', { turn: 1 }).add('turn/end', { turn: 1, reason: { kind: 'interrupted' } }).events,
+      failed: new Log(later).add('turn/start', { turn: 1 }).add('turn/end', { turn: 1, reason: { kind: 'blocked' } }).events,
+      earlier: new Log(0).add('turn/start', { turn: 1 }).add('turn/end', { turn: 1, reason: { kind: 'completed' } }).events,
+    }
+    const read: string[] = []
+    const harness = await boot(replies(2), async (ctx) => {
+      await ctx.sessionProjections.register(subagentCatalogProjectionDefinition)
+      ctx.provide('sessionQuery', {
+        observeSession: (id: string) => {
+          read.push(id)
+          const events = logs[id]
+          return events === undefined ? Promise.reject(new Error(`session ${id} not found`)) : Promise.resolve({ events, [Symbol.dispose]() {} })
+        },
+      } as never)
+    })
+    const warn = vi.spyOn(harness.ctx.logger, 'warn')
+    const live = await harness.start('live')
+    const handle = await harness.start('parent')
+    await turn(handle.agent, 'Start.')
+    const catalog = (childId: string, entry: object) => {
+      handle.agent.session.append('subagent/catalog', { childId: SessionId(childId), childCreatedAt: 0, ...entry } as never)
+    }
+    catalog('tester', { version: 3, mode: 'continuable', label: 'run the slow suite', name: 'tester' })
+    catalog('reviewer', { version: 3, mode: 'continuable', label: 'review the parser', name: 'reviewer' })
+    catalog('quiet', { version: 1, mode: 'one-shot' })
+    catalog('verbose', { version: 1, mode: 'one-shot', label: 'talk' })
+    catalog('crashed', { version: 1, mode: 'one-shot', label: 'scan' })
+    catalog('failed', { version: 1, mode: 'one-shot', label: 'fail' })
+    catalog('earlier', { version: 1, mode: 'one-shot', label: 'old' })
+    catalog('missing', { version: 1, mode: 'one-shot', label: 'gone' })
+    catalog(String(live.agent.id), { version: 3, mode: 'continuable', label: 'still here', name: 'live' })
+    catalog('remote', { version: 3, mode: 'external', name: 'remote' })
+    const { agent } = await harness.restart(handle, true)
+    await turn(agent, 'Back.')
+    expect(read).toEqual(['tester', 'reviewer', 'quiet', 'verbose', 'crashed', 'failed', 'earlier', 'missing'])
+    expect(notices(agent)).toEqual([{
+      turn: 2,
+      text: [
+        HEADER,
+        '- Subagent tester stopped mid-task by the restart. Use send_message to tester to continue it.',
+        '- Subagent reviewer finished while this Session was not loaded. Its last message: "Approved: the parser change is safe."',
+        '- Subagent quiet finished while this Session was not loaded.',
+        `- Subagent talk finished while this Session was not loaded. Its last message: "${'v'.repeat(399)}…"`,
+        '- Subagent scan stopped mid-task by the restart.',
+        '- Subagent fail ended (blocked) while this Session was not loaded.',
+      ].join('\n'),
+      summary: 'Restart: 2 stopped, 4 finished.',
+    }])
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('subagent missing of parent is left out of the resume notice'))
+  })
+})

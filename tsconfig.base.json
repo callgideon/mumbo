@@ -421,6 +421,7 @@
       "@mumbo/browser-consent": ["./packages/mumbo/browser-consent/src/index.ts"],
       "@mumbo/mcp": ["./packages/mumbo/mcp/src/index.ts"],
       "@mumbo/run-wild": ["./packages/mumbo/run-wild/src/index.ts"],
+      "@mumbo/state": ["./packages/mumbo/state/src/index.ts"],
       "@mumbo/edge-member": ["./packages/mumbo/edge-member/src/index.ts"],
       "@mumbo/edge-member/client": ["./packages/mumbo/edge-member/src/client/index.ts"],
       "@mumbo/superagent": ["./packages/mumbo/superagent/src/index.ts"],

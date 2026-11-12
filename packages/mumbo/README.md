@@ -1,5 +1,5 @@
 ---
-description: "The mumbo package group: what a per-user box deployment adds to a running Web host, from access for people's own tools and the box edge pages beside it to consent for browser writes, and the agent that works a project's repository."
+description: "The mumbo package group: what a per-user box deployment adds to a running Web host, from access for people's own tools and the box edge pages beside it to consent for browser writes, the state block, and the agent that works a project's repository."
 kind: "package-group"
 ---
 
@@ -7,7 +7,7 @@ kind: "package-group"
 
 ## Summary
 
-The mumbo family holds what a per-user box deployment adds to a running Web host: authenticated access for people's own tools, the pages the box edge serves beside the host, project members, consent for the assistant's actions with a person's signed-in accounts, and Run Wild, the mode in which the assistant decides instead of asking. Each package attaches to existing services and registers no model tools; `superagent/` is the exception, a pinned copy of an agent that works one GitHub repository in its own Sessions. Each package README owns its contract.
+The mumbo family holds what a per-user box deployment adds to a running Web host: access for people's own tools, the edge's pages beside the host, project members, consent for actions with a person's signed-in accounts, Run Wild, where the assistant decides instead of asking, and a state block that keeps an agent oriented across compactions and restarts. Each package attaches to existing services and registers no model tools, except `state/`, which adds `plan_read`, and `superagent/`, a pinned copy of an agent that works one GitHub repository in its own Sessions. Each package README owns its contract.
 
 ## Table of Contents
 
@@ -30,6 +30,7 @@ Each package owns one deployment concern.
 | [`edge-member/`](edge-member/README.md) | Admits project members from the edge-signed header as non-owner principals with collaborator access |
 | [`mcp/`](mcp/README.md) | Authenticated loopback MCP server through which allowlisted people drive the host's assistant Session, and the gate that lets only reads run unasked in turns a project's report started |
 | [`run-wild/`](run-wild/README.md) | Run Wild, the permission preset in which the assistant decides tool approvals, plan reviews and questions instead of asking the person, with an audit record of each decision |
+| [`state/`](state/README.md) | The state block: the goal, the approved plan's steps, open todos and running work in a runtime context that changes only at a compaction, a restart or a goal phase change, `plan_read`, and a notice after a restart of what stopped or finished meanwhile |
 | [`superagent/`](superagent/README.md) | Pinned copy of the upstream superagent: a proactive agent that turns authorized GitHub requests into Tickets and works each in its own Session |
 
 -----

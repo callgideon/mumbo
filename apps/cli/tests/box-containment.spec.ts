@@ -8,7 +8,8 @@
  * project box's `dsh-superagent` row is the founder's overlay row, read with the directories the start script exports,
  * `agent`'s PATH names only root's directories and its own npm global prefix and ~/.local/bin, and `web_fetch` goes
  * to the DeepSeek Fetch API at the edge's model host. The person box includes the door to Mumbo (`@mumbo/mcp`), whose
- * tools the edge calls for the person, and Run Wild (`@mumbo/run-wild`).
+ * tools the edge calls for the person, Run Wild (`@mumbo/run-wild`), and the state block (`@mumbo/state`), which the
+ * project overlay mounts in project boxes too.
  */
 
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -34,6 +35,8 @@ const edge = (name: string) => loadOverlayPatches('dsh', join(import.meta.dirnam
 const door = () => loadOverlayPatches('dsh', join(root, 'packages/mumbo/mcp/examples/person.overlay.yml'))
 /** The overlay the edge patches into person boxes for Run Wild. */
 const runWild = () => loadOverlayPatches('dsh', join(root, 'packages/mumbo/run-wild/examples/person.overlay.yml'))
+/** The overlay the edge patches into person boxes for the state block. */
+const state = () => loadOverlayPatches('dsh', join(root, 'packages/mumbo/state/examples/person.overlay.yml'))
 
 /** How a package's model-visible tools run in a contained box. */
 type Runs =
@@ -242,6 +245,7 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
   },
   '@mumbo/edge-member': NONE,
   '@mumbo/run-wild': { ...NONE, note: 'decides asks in the person\'s Run Wild Sessions; registers no tool' },
+  '@mumbo/state': { runs: 'in-process', tools: ['plan_read'], note: 'returns the approved plan\'s text from the Session log' },
   '@mumbo/mcp': {
     runs: 'in-process', tools: ['agent_read', 'agent_send', 'needs_you', 'task_reply'], runAsTools: ['task_result', 'task_status'],
     note: 'the door to Mumbo, served to the edge on its own loopback listener for the person\'s Mumbo, not to the box\'s model: '
@@ -305,6 +309,7 @@ const REPORT_TURN: Readonly<Record<string, 'runs' | 'asks' | 'browser reads run'
   'mcp__*': 'asks',
   'mcp__playwright-mcp__*': 'browser reads run',
   'mcp__sandboxes__*': 'asks',
+  plan_read: 'runs',
   plugin_manager: 'asks',
   present: 'asks',
   read: 'runs',
@@ -376,7 +381,7 @@ function compose(box: 'person' | 'project', contained = true): Row[] {
       profile.patches,
       deployed('mumbo.overlay.yml'),
       deployed('mumbo-personal.overlay.yml'),
-      ...box === 'person' ? [edge('personal.overlay.yml'), door(), runWild()] : [edge('project.overlay.yml'), deployed('mumbo-project.overlay.yml')],
+      ...box === 'person' ? [edge('personal.overlay.yml'), door(), runWild(), state()] : [edge('project.overlay.yml'), deployed('mumbo-project.overlay.yml')],
       ...contained ? [edge(`containment-${box}.overlay.yml`)] : [],
     ], message => warnings.push(message))
     expect(warnings).toEqual([])

@@ -100,6 +100,7 @@ In such a turn only these calls run unasked:
 
 - `read`, `read_image`, `glob` and `grep`, which `fs-local` confines to the model roots and read-only roots where a box configures them;
 - `get_goal` and `job_list`, which read status;
+- `plan_read`, which [`@mumbo/state`](../state/README.md) registers and which returns the approved plan's text;
 - `todo_write`;
 - a Playwright MCP browser call (`mcp__playwright-mcp__*`) that `@mumbo/browser-consent`'s `classify` counts as a read.
 

@@ -1,0 +1,149 @@
+---
+description: "The state block that keeps an agent's goal, approved plan, open todos and running work in its context across compactions and restarts, the plan_read tool, and the notice after a restart of what stopped or finished meanwhile."
+kind: "package-reference"
+---
+
+# @mumbo/state
+
+## Summary
+
+`@mumbo/state` keeps an agent oriented across compactions and restarts. It adds a short state block to the runtime context: the goal and its phase, the approved plan's step headings, open todos, open team tasks, running subagents and background jobs. The block changes only at a compaction, a restart, or a goal phase change, so turns in between re-send nothing. `plan_read` returns the approved plan's full text. At the first step after a restart, one logged notice lists the jobs, workflow runs and subagents that the restart stopped or that finished meanwhile, and a goal that waits for a person.
+
+## Table of Contents
+
+- [The state block](#the-state-block)
+- [The approved plan and plan_read](#the-approved-plan-and-plan-read)
+- [The resume notice](#the-resume-notice)
+- [Composition](#composition)
+- [Model Experience](#model-experience)
+- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+- [Dev Note](#dev-note)
+
+-----
+
+<a id="the-state-block"></a>
+## The state block
+
+The plugin `mumbo-state` requires `systemPrompt`, `sessionProjections`, `tools` and `agents`, and reads `goals`, `jobs`, `agentTeams`, `subagents` and `sessionQuery` when the host provides them; a missing service removes its part of the block and of the notice. It registers the runtime context `mumbo:state` at order 300, after the harness's own contexts, with `interpolate: false`, because objectives and todos may contain `{{…}}`. The context is optional, so an agent preset that suppresses runtime context, such as `minimal`, drops it.
+
+The block's sections, in order, each present only when it has content:
+
+| Section | Source | Pointer for what does not fit |
+|---|---|---|
+| Goal | `goals.get(agent)`: phase, whether a restart stopped it, rounds, objective, block reason | `get_goal` |
+| Plan | The approved plan's title and step headings, from the log | `plan_read` |
+| Todo | The items of the last `todo_write` that are not `completed`, labelled with the turn that wrote them | your last `todo_write` |
+| Team tasks | `agentTeams.listTasks(agent)` with status `pending` or `in_progress`, while Team mode is on | `team_task_list` |
+| Subagents running | Direct children in the `subagentCatalog` projection whose Agent is running | `list_agents` |
+| Background jobs | `jobs.list(session)` with status `running` or `stopping`; a background workflow run is a `workflow` job | `job_list` |
+
+`maxChars` (default 1600, at least 400) caps the whole text. Lines are added in order while the text plus a 160-character reserve fits; the first item that does not fit becomes `… N more (<pointer>)`, and a section whose heading does not fit is named in a final `Not shown:` line. Each item line is clipped to 140 characters and the objective to 300. A Session with nothing to show contributes no section. The text holds no clock times.
+
+The host-only Session projection `mumboState` counts boundaries: a `compaction/end` without `error`, every `session/end-seed`, and every `goal/change` except an `edit`. The block renders on the first request after the count moves, and in this process every later request of that Session reuses the text, including each retry's context refresh. Live reads, such as the goal's activation, team tasks, running children and jobs, happen only in that render. A compaction moves the count during the step's `agent/pre-step`, after the step's first assembly, and the loop admits the re-rendered text through its context refresh before the request, replacing the earlier candidate. Todo edits and goal edits between boundaries reach the model as its own recent `todo_write` and goal tool calls, not as a new block.
+
+<a id="the-approved-plan-and-plan-read"></a>
+## The approved plan and plan_read
+
+The projection folds plan mode's own records; no event is added. An `exit_plan_mode` call presents a plan. A successful result followed by `plan/mode {active: false}` before the turn ends is an approval, which plan mode appends at the next step of the same turn; Run Wild's approval takes the same path. A failed result means the person kept planning. A successful result followed by the end of the turn is a dismissed review, also when the person turns plan mode off afterwards. The latest approval replaces an earlier plan.
+
+The title is the plan's first `# ` heading. Steps are its `##` and `###` headings in order, or, without any, its column-0 list items (`1.`, `1)`, `-`, `*`).
+
+`plan_read` takes no arguments and returns `Approved in turn N.`, a blank line, and the plan's markdown. It is offered only in a Session that holds an approved plan, so the tool list changes once, when the first plan is approved. It reads the log only, needs no approval, and may run beside other calls; its card is titled `Read approved plan`. In a turn a project's report started, `@mumbo/mcp`'s gate lets it run unasked, Run Wild included ([report-started turns](../mcp/README.md#report-started-turns)).
+
+<a id="the-resume-notice"></a>
+## The resume notice
+
+A `session/end-seed` without `inherited` records the restart: its seq and the time of the last message logged before it. A fork's inherited end-seed records no restart and drops the copied jobs and runs, which the fork does not own. The plugin's `agent/pre-step` listener lets the rest of the chain decide first; for a step it admits, at the first step after a restart, it compares what the log says ran with what runs now and adds at most one `user/message` with source `{kind: 'mumbo-resume', form: 'notice', summary}`. The loop logs it in that step, which clears the recorded restart, so no later step repeats it. A rejected or aborted step leaves the restart recorded for the next step. With nothing to report, nothing is logged, and this process does not compare again for that restart.
+
+| Item | Reported when | Line |
+|---|---|---|
+| Background job other than a workflow run, registered before the restart | It has no settlement, or its settlement's cause is `teardown`, as a graceful shutdown records | Stopped by the restart, output not kept |
+| Same | It settled after the last request before the restart | Ended after your last request, with its status and detail, output not kept |
+| Workflow run started before the restart | It has no `run-end` | Stopped by the restart, with the count of its agents that were running |
+| Same | It ended after the last request before the restart | Ended, with its stop reason |
+| Direct `one-shot` or `continuable` child that is not loaded, read through `sessionQuery.observeSession` | Its last turn is open, or ended `aborted` or `interrupted`, after this Session's last message | Stopped mid-task by the restart; a continuable child adds `Use send_message to <name> to continue it.` |
+| Same | Its last turn ended `completed` after this Session's last message | Finished while this Session was not loaded, with its last assistant text clipped to 400 characters |
+| Same | Its last turn ended otherwise after this Session's last message | Ended, with the reason |
+| Goal | It is `active` and disarmed | Still active, but the restart stopped its rounds: a person must resume it with `/goal resume` |
+
+A child whose log cannot be read is left out, with a warning in the host log. The notice's `summary` counts the items, such as `Restart: 1 stopped, 1 finished, goal needs a person.` `@mumbo/mcp`'s `needs_you` lists the same stopped goal in `stopped_goals` for every loaded Session. The notice declares a context form, so `@mumbo/mcp`'s report-turn gate does not read it as the message that opened a turn.
+
+The source kind is a declared persistence type, acknowledged in [`docs/persistence-changes/2026-11-12-mumbo-resume-message-source.md`](../../../docs/persistence-changes/2026-11-12-mumbo-resume-message-source.md). Readers fall through unknown source kinds, so an image without this package shows the notice as an injected-context row.
+
+<a id="composition"></a>
+## Composition
+
+A project box inserts the row from [`deploy/mumbo-project.overlay.yml`](../../../deploy/mumbo-project.overlay.yml) in its Host plane, so the coordinator's main Session, its Executor Sessions and their subagents all get the block, `plan_read` and the notice. A person's box loads [`examples/person.overlay.yml`](examples/person.overlay.yml), which inserts the same row, as a `--patch` overlay after `deploy/mumbo.overlay.yml`. The root manifest lists this private package as a development dependency, so a Host started from the repository resolves it by name. No shipped profile or bundle mounts it.
+
+What the block can show depends on what a Session's agent preset mounts. The Web `standard`, `cordis` and `ptc` presets mount goals, todos and plan mode; the superagent worker preset mounts todos only, and the router preset none of the three; `minimal` suppresses runtime context. A Session without `todo_write` or plan mode never logs their records, so its block has no such section, whatever the step's tool list.
+
+<a id="model-experience"></a>
+## Model Experience
+
+### State block
+
+#### What the model sees
+
+The block is the `mumbo:state` section of the loop's runtime-context snapshot, a user-role message that the loop logs before the request that carries it, with the sections above. It starts with the line below.
+
+##### Verbatim first line
+
+```markdown
+Mumbo state at the last compaction, restart or goal change. Changes after that point are in the conversation that follows.
+```
+
+#### Token effect
+
+Up to `maxChars` characters, about 400 tokens at the default, re-sent at most once per boundary as part of the whole runtime-context snapshot, which the loop re-sends when any of its sections changes. Nothing is added while the count stays the same.
+
+#### KV Cache effect
+
+Append-only. The snapshot is appended after the existing history, so the cached prefix stays reusable; a compaction already starts a new request series, and a restart or a goal phase change appends one snapshot.
+
+### plan_read
+
+#### What the model sees
+
+The tool, offered once a plan is approved, with the description `Read the full text of the latest approved plan. Use it when the step headings in the runtime context are not enough.` and no parameters; its result is `Approved in turn <N>.`, a blank line, and the plan.
+
+#### Token effect
+
+About 30 tokens of schema in every request once a plan is approved, and the plan's length for each call, retained until compaction.
+
+#### KV Cache effect
+
+The tool list changes once per Session, when the first plan is approved, which re-sends the request's tool declarations; each call's result is appended.
+
+### Resume notice
+
+#### What the model sees
+
+One user-role message at the first step after a restart that has something to report: `This Session was restarted. What changed while it was down:` followed by one `- ` line per item in the table above.
+
+#### Token effect
+
+About 25 tokens plus about 25 per item, once per restart, retained until compaction.
+
+#### KV Cache effect
+
+Append-only: the notice is appended after the restored history in the step that carries it.
+
+## Known Limitations and Deferred Work
+
+<a id="known-limitations-and-deferred-work"></a>
+
+- **Person boxes do not mount it yet** — the box edge's start-script patch that loads `examples/person.overlay.yml` on person boxes ships separately on `boxes/production`; until it lands, only project boxes mount the package.
+- **A plugin reload renders between boundaries** — reloading the plugin, such as after a configuration change, empties the per-process memo, so the next request renders the block anew; the rendered text is still logged.
+- **A disarm without a goal change is not a boundary** — `goals.disarm()` by a lifecycle owner is process-local and unlogged, so the block can say the goal runs until the next boundary; owners call it before an unload, which ends in an end-seed.
+- **Some approvals are not recorded** — an approval whose turn is cancelled before its next step, and an approval in a Session that already left plan mode, append no `plan/mode` record, so the plan is not kept.
+- **The notice reads direct children only** — grandchildren are not compared, and a continuable child that finished before this Session went down but whose result never reached it is not reported.
+
+<a id="dev-note"></a>
+### Dev Note
+
+<details>
+<summary>Working context for maintainers — click to expand</summary>
+
+None.
+
+</details>
