@@ -236,6 +236,12 @@ describe('reportStarted', () => {
     expect(started(agent)).toBe(true)
     log.turn(RESUME_NOTICE, PERSON)
     expect(started(agent)).toBe(false)
+    // A goal round names no origin, so a notice in its opening step keeps the previous turn's, as after a /goal resume.
+    log.turn(GOAL, RESUME_NOTICE)
+    expect(started(agent)).toBe(false)
+    log.turn(REPORT)
+    log.turn(GOAL, RESUME_NOTICE)
+    expect(started(agent)).toBe(true)
   })
 
   it('keeps the previous turn\'s origin when the opening step claims a schedule change notice before a wake', async () => {
