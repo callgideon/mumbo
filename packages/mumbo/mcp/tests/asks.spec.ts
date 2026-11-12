@@ -246,3 +246,33 @@ describe('door profile', () => {
     expect(Object.keys(tools.find(tool => tool.name === 'task_reply')?.inputSchema.properties ?? {})).toEqual(['ask_id', 'request_id', 'answers'])
   })
 })
+
+describe('stopped goals', () => {
+  /** The goal each fake Session holds, as the goal service reports it. */
+  const GOALS: Record<string, object | undefined> = {
+    stopped: { phase: 'active', activation: 'disarmed', objective: 'Ship the report', roundsStarted: 3, maxGoalRounds: 8 },
+    running: { phase: 'active', activation: 'armed', objective: 'Keep going', roundsStarted: 1, maxGoalRounds: 8 },
+    paused: { phase: 'paused', activation: 'disarmed', objective: 'Wait', roundsStarted: 2, maxGoalRounds: 8 },
+    none: undefined,
+  }
+
+  it.each(['full', 'door'] as const)('lists, in the %s profile, each loaded Session whose goal is active but disarmed', async (profile) => {
+    const host = await startHost()
+    for (const id of Object.keys(GOALS)) host.addAgent(id)
+    host.ctx.provide('goals', { get: (agent: { id: string }) => GOALS[agent.id] } as never)
+    await host.ctx.plugin(McpDoor, { ...host.config, profile })
+    const reply = await call(host.url, 'needs_you', {})
+    expect(reply.value).toEqual({
+      asks: [],
+      stopped_goals: [{ session_id: 'stopped', objective: fenced('Ship the report'), rounds_started: 3, max_rounds: 8 }],
+    })
+    const tools = await listTools(host.url)
+    expect(tools.find(tool => tool.name === 'needs_you')?.description).toContain('a person resumes one with /goal resume in that Session.')
+  })
+
+  it('lists none without a goal service', async () => {
+    const host = await door()
+    host.addAgent('stopped')
+    expect((await call(host.url, 'needs_you', {})).value).toEqual({ asks: [], stopped_goals: [] })
+  })
+})
