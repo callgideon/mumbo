@@ -3,7 +3,7 @@
 // edge process: empty placement cache, no last-use write or activity recorded yet) and then warm (the same request again on
 // that edge at once, so within a key's last-use minute and a box's 30 s of activity), against a person whose box runs and
 // whose records exist, as the founder's did when R6 measured the Mumbai edge, with a project whose box runs too and which
-// the door key reaches. The edge has the Mumbai edge's settings (EDGE_REGION ap-south-1, PLACEMENT_CACHE_MS 30000, so the
+// the door key reaches. The edge has the Mumbai edge's settings (EDGE_REGION ap-south-1, PLACEMENT_CACHE_MS 300000, so the
 // read cache is on and subscribed); E2B and the box are local stubs that answer at once. The counts asserted: depth, the
 // round trips the answer waited for one after another, and total, every store call the request caused, the unawaited ones
 // included. STORE_TRACE=<file> writes each path's levels there as Markdown.
@@ -21,7 +21,7 @@ import { tracedStore } from './testing/store-trace.mjs'
 
 const EMAIL = 'founder@x.com', BOX = 'sbx-founder', PBOX = 'sbx-project', PUBLIC = 'app.example', LLM = 'llm.app.example', EDGE_KEY = 'edge-key'
 const cfg = { publicHost: PUBLIC, projectDomain: PUBLIC, llmHost: LLM, allowed: ['@x.com'], egressIps: [], openrouterModels: [], upstream: 'https://model.example',
-  pageAfterMs: 3000, idleMs: 3_600_000, template: 'mumbo-box', signinCookie: '_oauth2_proxy_mumbo', edgeRegion: 'ap-south-1', placementCacheMs: 30_000 }
+  pageAfterMs: 3000, idleMs: 3_600_000, template: 'mumbo-box', signinCookie: '_oauth2_proxy_mumbo', edgeRegion: 'ap-south-1', placementCacheMs: 300_000 }
 const silent = () => {}
 const listen = (server) => new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port)))
 
