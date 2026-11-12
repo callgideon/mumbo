@@ -335,6 +335,12 @@ describe('the project Workspace while the box runs', () => {
     for (const request of [{}, { cwd: project }, { cwd: '/elsewhere' }]) {
       expect(await create(request), JSON.stringify(request)).toMatchObject({ result: { ok: false, error: { code: 'remote-access/denied' } } })
     }
+    // One that names a reachable Session and no Workspace is decided on that Session, whose binding requires a Workspace.
+    for (const request of [{ sessionId: 'blank' }, { sessionId: 'blank', cwd: project }]) {
+      expect(await create(request), JSON.stringify(request)).toMatchObject({
+        result: { ok: false, error: { code: 'remote-access/denied', details: { reason: 'workspace-required' } } },
+      })
+    }
     expect(await create({ workspaceId: projectWorkspace!.id })).toMatchObject({ result: { ok: true, value: 'new' } })
     expect(await create({ workspaceId: projectWorkspace!.id, sessionId: 'blank' })).toMatchObject({ result: { ok: true, value: 'blank' } })
   })
