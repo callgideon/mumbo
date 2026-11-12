@@ -15,6 +15,7 @@ kind: "package-reference"
 - [The approved plan and plan_read](#the-approved-plan-and-plan-read)
 - [The resume notice](#the-resume-notice)
 - [Composition](#composition)
+- [Evaluation](#evaluation)
 - [Model Experience](#model-experience)
 - [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
 - [Dev Note](#dev-note)
@@ -76,6 +77,13 @@ The source kind is a declared persistence type, acknowledged in [`docs/persisten
 A project box inserts the row from [`deploy/mumbo-project.overlay.yml`](../../../deploy/mumbo-project.overlay.yml) in its Host plane, so the coordinator's main Session, its Executor Sessions and their subagents all get the block, `plan_read` and the notice. A person's box loads [`examples/person.overlay.yml`](examples/person.overlay.yml), which inserts the same row, as a `--patch` overlay after `deploy/mumbo.overlay.yml`. The root manifest lists this private package as a development dependency, so a Host started from the repository resolves it by name. No shipped profile or bundle mounts it.
 
 What the block can show depends on what a Session's agent preset mounts. The Web `standard`, `cordis` and `ptc` presets mount goals, todos and plan mode; the superagent worker preset mounts todos only, and the router preset none of the three; `minimal` suppresses runtime context. A Session without `todo_write` or plan mode never logs their records, so its block has no such section, whatever the step's tool list.
+
+<a id="evaluation"></a>
+## Evaluation
+
+Two keyless snapshots replay the real `dsh --profile sdk` runtime with the package inserted. [`mumbo-state`](../../../snapshots/sdk/mumbo-state/) approves a plan and writes todos, compacts, then reads the plan with `plan_read`: the block is logged once, after the compaction, and every later request carries that text. [`mumbo-resume`](../../../snapshots/sdk/mumbo-resume/) starts a background job, restarts the runtime, and resumes: one notice names the stopped job at the first step, and the block is logged once, after the restart.
+
+The live eval in [`eval/`](eval/) measures whether the block and the notice help a DeepSeek model, and runs only on demand, never in CI: `pnpm --filter @mumbo/state run eval`. It reads `DEEPSEEK_API_KEY`, and `DEEPSEEK_BASE_URL` when set, from the environment or the repository's root `.env`, and stops before any run without a key. It spends API quota and runs the model's commands with full access in a temporary copy of [`eval/fixture/`](eval/fixture/), a small project with twelve failing tests and a two-minute background check. Each run plans with `/plan`, then the arms differ: `control` mounts the package and forces nothing, `k-on` compacts after turn 1 and restarts after turn 2 with the package, and `k-off` does the same without it. `K_EVAL_RUNS` (default 3), `K_EVAL_ARMS` (default `control,k-on,k-off`), `K_EVAL_MODEL` (default the `sdk` profile's model, which a box also uses) and `K_EVAL_MAX_TURNS` (default 8) set its size. After each boundary it counts repeated reads among the next ten tool calls and the steps until the first change; after the restart also calls on the stopped job and a rerun of the check. It writes each run's events, Session files and a `summary.json` under `eval/results/` (ignored by git) and prints medians per arm and the `k-on` deltas.
 
 <a id="model-experience"></a>
 ## Model Experience
