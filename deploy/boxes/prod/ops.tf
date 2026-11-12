@@ -77,7 +77,7 @@ resource "aws_cloudwatch_event_rule" "edge_deploy_failed" {
   event_pattern = jsonencode({
     source        = ["aws.ecs"]
     "detail-type" = ["ECS Deployment State Change"]
-    resources     = [module.edge_us_east_1.service_id]
+    resources     = [module.edge_us_east_1.service_id, module.edge_ap_south_1.service_id] # Mumbai's arrive from edge_deploy_failed_aps1
     detail        = { eventName = ["SERVICE_DEPLOYMENT_FAILED"] }
   })
 }
@@ -86,9 +86,36 @@ resource "aws_cloudwatch_event_target" "edge_deploy_failed" {
   arn  = aws_sns_topic.alarms.arn
   # One plain line instead of the raw event JSON.
   input_transformer {
-    input_paths    = { time = "$.time", deployment = "$.detail.deploymentId", reason = "$.detail.reason" }
-    input_template = "\"mumbo-boxes edge deployment <deployment> failed at <time>: <reason>. ECS rolls back to the previous task definition. Runbook: deploy/boxes/RUNBOOK.md#edge-deploy-failed\""
+    input_paths    = { time = "$.time", region = "$.region", deployment = "$.detail.deploymentId", reason = "$.detail.reason" }
+    input_template = "\"mumbo-boxes edge deployment <deployment> in <region> failed at <time>: <reason>. ECS rolls back to the previous task definition. Runbook: deploy/boxes/RUNBOOK.md#edge-deploy-failed\""
   }
+}
+# ECS events stay in their region: the Mumbai edge's failed deployments go to us-east-1's default bus, where the rule
+# above mails them like the us-east-1 edge's.
+resource "aws_cloudwatch_event_rule" "edge_deploy_failed_aps1" {
+  region      = "ap-south-1"
+  name        = "${local.name}-edge-deploy-failed"
+  description = "Forwards the Mumbai edge's failed deployments to us-east-1 (rule ${local.name}-edge-deploy-failed there)"
+  event_pattern = jsonencode({
+    source        = ["aws.ecs"]
+    "detail-type" = ["ECS Deployment State Change"]
+    resources     = [module.edge_ap_south_1.service_id]
+    detail        = { eventName = ["SERVICE_DEPLOYMENT_FAILED"] }
+  })
+}
+resource "aws_cloudwatch_event_target" "edge_deploy_failed_aps1" {
+  region   = "ap-south-1"
+  rule     = aws_cloudwatch_event_rule.edge_deploy_failed_aps1.name
+  arn      = "arn:aws:events:us-east-1:${data.aws_caller_identity.this.account_id}:event-bus/default"
+  role_arn = aws_iam_role.events_forward.arn
+}
+resource "aws_iam_role" "events_forward" {
+  name               = "${local.name}-events-forward"
+  assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "sts:AssumeRole", Principal = { Service = "events.amazonaws.com" } }] })
+}
+resource "aws_iam_role_policy" "events_forward" {
+  role   = aws_iam_role.events_forward.id
+  policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "events:PutEvents", Resource = "arn:aws:events:us-east-1:${data.aws_caller_identity.this.account_id}:event-bus/default" }] })
 }
 # The default topic policy (this account, which covers the alarms) plus EventBridge for the rule above.
 resource "aws_sns_topic_policy" "alarms" {

@@ -226,7 +226,7 @@ Run from the repository root. The image is built from `git archive` of the commi
    ```
 2. Set `edge_tag = "<C>"` in `deploy/boxes/prod/terraform.tfvars` and run `terraform -chdir=deploy/boxes/prod plan`. Expect `module.edge_us_east_1.aws_ecs_task_definition.edge` (replaced) and `module.edge_us_east_1.aws_ecs_service.edge` (updated); read every other line. Until the first apply after the move into modules (`prod/moved.tf`), the plan also lists every resource as "has moved to module.cell_us_east_1..." or "module.edge_us_east_1..."; a move alone changes nothing, and the summary counts only the edge changes.
 3. Apply. The apply returns once ECS has the new task definition, before any task of it runs.
-4. Wait for the rollout. Define `edge_rollout` once per shell (bash or zsh):
+4. Wait for the rollout of every edge: each region's edge runs the same `edge_tag` (R6), and the sweep and the approvals poll run on whichever edge holds their lease, so a rollout is done only when both are. Define `edge_rollout` once per shell (bash or zsh); it takes the edge's cluster:
    ```sh
    edge_rollout() {
      td=$(aws ecs describe-task-definition --task-definition mumbo-boxes-edge --query taskDefinition.taskDefinitionArn --output text) \
@@ -234,7 +234,7 @@ Run from the repository root. The image is built from `git archive` of the commi
      echo "edge_rollout: waiting for $td"
      for i in $(seq 120); do
        sleep 15
-       d=$(aws ecs describe-services --cluster mumbo-boxes-e2b --services edge \
+       d=$(aws ecs describe-services --cluster "$1" --services edge \
          --query 'services[0].deployments[].[status,taskDefinition,rolloutState,runningCount]' --output text) \
          || { echo "edge_rollout: describe-services failed"; return 2; }
        echo "$d"
@@ -245,9 +245,9 @@ Run from the repository root. The image is built from `git archive` of the commi
      done
      echo "edge_rollout: TIMED OUT after 30 minutes, the edge is not on $td"; return 2
    }
-   edge_rollout
+   edge_rollout mumbo-boxes-e2b && AWS_REGION=ap-south-1 edge_rollout mumbo-boxes-aps1-e2b
    ```
-   `td` is the newest active revision of family `mumbo-boxes-edge`, the one the apply registered. Each line printed is a deployment: status, task definition, rollout state, running tasks. It polls every 15 seconds, at most 120 times, and returns:
+   Each call waits for one edge; `AWS_REGION` points the second at Mumbai's family and cluster. `td` is the newest active revision of family `mumbo-boxes-edge`, the one the apply registered. Each line printed is a deployment: status, task definition, rollout state, running tasks. It polls every 15 seconds, at most 120 times, and returns:
    - 0: exactly one deployment is left, `PRIMARY` and `COMPLETED` on `td`. The rollout is done.
    - 1: a rollback. A deployment is `FAILED`, or the `PRIMARY` deployment is `COMPLETED` on an older revision. Go to step 6.
    - 2: no verdict. Either 30 minutes passed with the rollout still in progress, or an `aws` call failed. Read the events of step 6, then run `edge_rollout` again.
