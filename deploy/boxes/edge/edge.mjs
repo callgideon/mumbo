@@ -1259,6 +1259,7 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
     say({ level: 'error', msg: 'restore version unknown', user: email, versionId: pin.versionId, ...(e ? { error: e.message, status: e.$metadata?.httpStatusCode } : { error: 'NotFound', status: 404 }) })
     throw Object.assign(new Error('restore version unknown'), { status: 503, restoreFailed: true })
   }
+  /** Creates `email`'s box in `cell`; resolves [its id, its record]. */
   async function create(email, cell) {
     if (await atCapacity(cell, unitsFor({ user: email }))) throw Object.assign(new Error('capacity'), { status: 503, capacity: true })
     // Before the sandbox exists, so its `creating` record follows the create at once (adopt/backup race).
@@ -1293,9 +1294,10 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
       const now = Date.now()
       // A box restored from a record keeps it until its first backup has put the restored data in latest.tar.gz (backup()),
       // so a box lost before then is recreated from the same version. backedUp 0: the next sweep takes that backup.
-      await store.putBox(box.sandboxId, { email, region: cell.region, host: boxSite(cfg, email).host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), ports: await portsOf(box), active: now, extended: now, backedUp: pin ? 0 : now, paused: false, ...(pin && { restored: pin.versionId }) })
+      const record = { email, region: cell.region, host: boxSite(cfg, email).host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), ports: await portsOf(box), active: now, extended: now, backedUp: pin ? 0 : now, paused: false, ...(pin && { restored: pin.versionId }) }
+      await store.putBox(box.sandboxId, record)
       say({ msg: 'created', user: email, box: box.sandboxId, region: cell.region })
-      return box.sandboxId
+      return [box.sandboxId, record]
     } catch (error) {
       await box.kill().catch(() => {})  // nothing in it yet except the restored backup, which stays in S3
       await store.deleteBox(box.sandboxId)
@@ -1347,16 +1349,17 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
     const found = await find(cellOf(doc), email)  // an API error throws here, as under the lock
     if (found?.state !== 'running') return undefined
     const b = await store.getBox(found.sandboxId)
-    return b && !b.creating && !b.paused && b.launch ? pick(found.sandboxId) : undefined
+    return b && !b.creating && !b.paused && b.launch ? pick(found.sandboxId, b) : undefined
   }
   /** ensure's work under the user lock. The placement, E2B's listing and the box record are all read again here, so of
    *  two requests that both found the box paused, the second finds it resumed and resumes nothing. */
   async function repair(email) {
     const cell = await placement(email)
     const found = await find(cell, email)   // an API error throws here: never create a second box on a failed lookup
-    if (found === undefined) return pick(await create(email, cell))
+    if (found === undefined) return pick(...await create(email, cell))
     const id = found.sandboxId
     const known = await store.getBox(id, { fresh: true })
+    let record = known
     // Another replica is still creating it (the user lock can expire during a long restore): wait, do not start it.
     if (known?.creating) throw Object.assign(new Error('box is being created'), { status: 503 })
     if (found.state === 'paused' || !known || known.paused || !known.launch) {
@@ -1369,13 +1372,14 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
           await run(box, '/root/.mumbo/start.sh')
         }
         const now = Date.now()
-        await store.putBox(id, { email, region: cell.region, host: known?.host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), ports, active: now, extended: now, backedUp: known?.backedUp ?? 0, paused: false, ...(known?.restored && { restored: known.restored }) })
+        record = { email, region: cell.region, host: known?.host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), ports, active: now, extended: now, backedUp: known?.backedUp ?? 0, paused: false, ...(known?.restored && { restored: known.restored }) }
+        await store.putBox(id, record)
       } catch (error) {
         if (error.capacity || /capacity|place sandbox|rate limit/i.test(error.message)) throw Object.assign(error, { capacity: true })
         if (error instanceof SandboxNotFoundError) {
           await store.deleteBox(id)
           say({ level: 'warn', msg: 'dropped missing box', user: email, box: id })
-          return pick(await create(email, cell))
+          return pick(...await create(email, cell))
         }
         // Without an answer that the box cannot run, the box and its record stay as they are, and the next visit tries
         // again: during a client-proxy outage a recreate would fail too, and the box would be lost (RUNBOOK "Box unreachable").
@@ -1388,13 +1392,13 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
         say({ level: 'error', msg: 'resume failed; recreating from backup', user: email, box: id, error: error.message })
         await cell.Sandbox.kill(id).catch(() => {})
         await store.deleteBox(id)
-        return pick(await create(email, cell))
+        return pick(...await create(email, cell))
       }
     }
-    return pick(id)
+    return pick(id, record)
   }
-  const pick = async (id) => {
-    const b = await store.getBox(id)
+  /** The target of box `id` from `b`, the record ensure read or wrote for it: no second read. */
+  const pick = async (id, b) => {
     const cell = cellOf(b)
     // The masked host (E2B maskRequestHost) is recorded at creation; for a box recorded without it (adopted, or created
     // before the record held it) E2B is asked once.

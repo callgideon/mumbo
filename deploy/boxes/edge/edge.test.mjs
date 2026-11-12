@@ -1778,6 +1778,18 @@ test('two cold requests at once for a paused box, on two edge tasks, resume it o
   } finally { await Promise.all(tasks.map(s => s.close())) }
 })
 
+test('ensure reads a box record at most once: pick routes with the record ensure read or wrote, on a create, a running box and a resume', async () => {
+  const { us, cells } = twoCells(); const inner = memoryStore(); let reads = 0
+  const store = { ...inner, getBox: (...a) => { reads++; return inner.getBox(...a) } }
+  const b = boxes({ cells, store, cfg, edgeKey: 'k', log: () => {} })
+  const counted = async () => { reads = 0; const target = await b.ensure('a@x.com'); return [target.token, reads] }
+  assert.deepEqual(await counted(), ['launch', 0], 'a create routes with the record it wrote')
+  assert.deepEqual(await counted(), ['launch', 1], 'a running box: the one read that found it routes it')
+  const [id] = us.sandboxes.keys()
+  us.sandboxes.get(id).state = 'paused'; await inner.patchBox(id, { paused: true })
+  assert.deepEqual(await counted(), ['launch', 1], 'a resume: the read under the lock, then the record it wrote')
+})
+
 test('pauseIdle reads the record again under the lock and skips a box whose activity moved since the sweep listed it', async () => {
   const { us, cells } = twoCells(); const store = memoryStore(); const logs = []
   us.run('u1', 'a@x.com')
