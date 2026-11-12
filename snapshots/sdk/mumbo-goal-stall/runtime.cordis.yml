@@ -1,0 +1,10 @@
+# @mumbo/state with the goal stall check on, plus the model-request capture.
+- insert:
+    - id: mumbo-state
+      name: '@mumbo/state'
+      config:
+        stallCheck: true
+    - id: stall-request-capture
+      name: '../manual-compact/capture-requests.mjs'
+      config:
+        path: !!js dshHomePath('stall-requests.jsonl')

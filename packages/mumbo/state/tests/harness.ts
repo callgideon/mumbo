@@ -38,20 +38,21 @@ export interface Harness {
 }
 
 /**
- * Boot the loop's services, `mount`'s plugins, this plugin with its default configuration, and the loop, with a model
- * that answers from `script`.
+ * Boot the loop's services, `mount`'s plugins, this plugin, and the loop, with a model that answers from `script`.
  * @param script - the model's responses, in order.
  * @param mount - mounts the services the test needs before this plugin.
+ * @param config - this plugin's configuration.
  * @returns the composition.
  */
 export async function boot(
   script: ConstructorParameters<typeof MockAdapter>[0], mount: (ctx: Context) => Promise<void> = () => Promise.resolve(),
+  config: MumboState.Config = MumboState.Config(),
 ): Promise<Harness> {
   const ctx = new Context()
   onTestFinished(() => ctx.fiber.dispose())
   await mountAgentLoopTestDependencies(ctx)
   await mount(ctx)
-  const plugin = await ctx.plugin(MumboState)
+  const plugin = await ctx.plugin(MumboState, config)
   await mountAgentLoopTestHarness(ctx)
   const model = new MockAdapter(script)
   ctx.effect(() => ctx.llm.registerAdapter(['fixture'], model))

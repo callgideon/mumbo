@@ -1,7 +1,8 @@
 /**
  * Mumbo state: the `mumbo:state` runtime context, a short block of the goal, the approved plan's steps, open todos, team
  * tasks, running subagents and background jobs that changes only at a compaction, a restart or a goal phase change; the
- * `plan_read` tool; and the notice at the first step after a restart that lists what stopped or finished meanwhile.
+ * `plan_read` tool; the notice at the first step after a restart that lists what stopped or finished meanwhile; and, when
+ * `stallCheck` is on, the progress questions in a goal round's message after rounds that changed nothing.
  * @module @mumbo/state
  */
 
@@ -19,6 +20,7 @@ import { planHeadings, registerPlanRead } from './plan.ts'
 import { foldState, initState, type MumboState, stateSchema } from './projection.ts'
 import { render, type StateView } from './render.ts'
 import { childName, listenForResume } from './resume.ts'
+import { foldRounds, initRounds, listenForStall, roundsSchema } from './stall.ts'
 
 export { PLAN_READ } from './plan.ts'
 export { RESUME_SOURCE } from './projection.ts'
@@ -35,10 +37,16 @@ export const inject = ['systemPrompt', 'sessionProjections', 'tools', 'agents']
 export interface Config {
   /** Cap on the block's characters, at least 400 (default 1600); what does not fit is named with the tool that reads it. */
   readonly maxChars: number
+  /** Whether goal rounds get the progress questions after rounds that changed nothing (default false). */
+  readonly stallCheck: boolean
+  /** Closed rounds in a row that changed nothing before the questions appear, at least 2 (default 2). */
+  readonly stallRounds: number
 }
 
 export const Config: z<Config> = z.object({
   maxChars: z.number().step(1).min(400).default(1600),
+  stallCheck: z.boolean().default(false),
+  stallRounds: z.number().step(1).min(2).default(2),
 })
 
 /**
@@ -73,12 +81,13 @@ function collect(ctx: Context, agent: Agent, state: MumboState): StateView {
 }
 
 /**
- * Register the `mumboState` projection, the `mumbo:state` context, `plan_read`, and the resume listener. The context
- * renders on the first request after its Session's boundary counter moves, and every other request in this process
- * reuses that text, so the model sees a new block only after a compaction, a restart or a goal phase change.
+ * Register the `mumboState` projection, the `mumbo:state` context, `plan_read`, and the resume listener, and with
+ * `stallCheck` the `mumboRounds` projection and the stall listener. The context renders on the first request after its
+ * Session's boundary counter moves, and every other request in this process reuses that text, so the model sees a new
+ * block only after a compaction, a restart or a goal phase change.
  * @param ctx - plugin context; every registration ends with it.
  * @param config - validated configuration.
- * @throws when the projection does not register.
+ * @throws when a projection does not register.
  */
 export async function apply(ctx: Context, config: Config): Promise<void> {
   const handle = await ctx.sessionProjections.register({
@@ -104,4 +113,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   })
   registerPlanRead(ctx, agent => stateOf(agent.session).plan)
   listenForResume(ctx, stateOf)
+  if (!config.stallCheck) return
+  const rounds = await ctx.sessionProjections.register({
+    key: 'mumboRounds', stateVersion: 1, stateSchema: roundsSchema, init: initRounds, apply: foldRounds,
+  })
+  listenForStall(ctx, session => rounds.stateOf(session), config.stallRounds)
 }

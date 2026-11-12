@@ -1,11 +1,13 @@
 /**
- * The K eval's inputs and measures: the DeepSeek key and options it reads, and what it computes from one run's Session
- * events. Pure apart from reading the `.env` file it is given.
+ * The K and K3 evals' inputs and measures: the DeepSeek key and options they read, and what they compute from one run's
+ * Session events. Pure apart from reading the `.env` file it is given.
  * @module @mumbo/state/eval/measures
  */
 
 import { existsSync, readFileSync } from 'node:fs'
 import { parseEnv } from 'node:util'
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import { foldRounds, initRounds, type Rounds, stalled, stallText } from '../src/stall.ts'
 
 /** The DeepSeek route the eval's runtimes use. */
 export interface DeepSeekEnv {
@@ -54,21 +56,28 @@ export interface EvalOptions {
  * @throws when a count is not a whole number in range or an arm is unknown.
  */
 export function evalOptions(env: Readonly<Record<string, string | undefined>>): EvalOptions {
-  const count = (name: string, fallback: number, min: number): number => {
-    const value = Number(env[name] ?? fallback)
-    if (!Number.isInteger(value) || value < min) throw new Error(`${name} must be a whole number of at least ${String(min)}.`)
-    return value
-  }
-  const arms = (env.K_EVAL_ARMS ?? ARMS.join(',')).split(',').map(arm => arm.trim())
-  const unknown = arms.filter(arm => !ARMS.some(known => known === arm))
-  if (unknown.length > 0) throw new Error(`K_EVAL_ARMS names unknown arms: ${unknown.join(', ')}. Known: ${ARMS.join(', ')}.`)
   const model = env.K_EVAL_MODEL
   return {
-    runs: count('K_EVAL_RUNS', 3, 1),
-    arms: ARMS.filter(arm => arms.includes(arm)),
+    runs: count(env, 'K_EVAL_RUNS', 3, 1),
+    arms: pick(env, 'K_EVAL_ARMS', 'arms', ARMS),
     ...model === undefined || model === '' ? {} : { model },
-    maxTurns: count('K_EVAL_MAX_TURNS', 8, 3),
+    maxTurns: count(env, 'K_EVAL_MAX_TURNS', 8, 3),
   }
+}
+
+/** A whole number of at least `min` from the environment, or `fallback`. */
+function count(env: Readonly<Record<string, string | undefined>>, name: string, fallback: number, min: number): number {
+  const value = Number(env[name] ?? fallback)
+  if (!Number.isInteger(value) || value < min) throw new Error(`${name} must be a whole number of at least ${String(min)}.`)
+  return value
+}
+
+/** The known values a comma-separated variable names, in their known order; all of them when it is unset. */
+function pick<T extends string>(env: Readonly<Record<string, string | undefined>>, name: string, noun: string, known: readonly T[]): T[] {
+  const named = (env[name] ?? known.join(',')).split(',').map(value => value.trim())
+  const unknown = named.filter(value => !known.some(item => item === value))
+  if (unknown.length > 0) throw new Error(`${name} names unknown ${noun}: ${unknown.join(', ')}. Known: ${known.join(', ')}.`)
+  return known.filter(item => named.includes(item))
 }
 
 /** A Session event as the SDK delivered it. */
@@ -232,4 +241,150 @@ export function median(values: readonly (number | null)[]): number | null {
   if (present.length === 0) return null
   const middle = Math.floor(present.length / 2)
   return present.length % 2 === 1 ? present[middle]! : (present[middle - 1]! + present[middle]!) / 2
+}
+
+/** The K3 eval's arms: both mount the package as a person's box does; `k3-on` also turns the stall check on. */
+export const K3_ARMS = ['k3-on', 'k3-off'] as const
+/** One K3 arm. */
+export type K3Arm = typeof K3_ARMS[number]
+
+/** The K3 eval's tasks: a goal stopped by an unstated blocker, a goal that progresses, and a goal of shell work only. */
+export const K3_TASKS = ['stuck', 'progress', 'shell-only'] as const
+/** One K3 task. */
+export type K3Task = typeof K3_TASKS[number]
+
+/**
+ * The objective each K3 task's `/goal` sets. `stuck` does not name its blocker, and its check prints the same line on
+ * every failing run, so a model that repeats it changes nothing the stall check can see.
+ */
+export const K3_OBJECTIVES: Readonly<Record<K3Task, string>> = {
+  stuck: 'Make `node check.mjs` pass.',
+  progress: 'Fix the inventory project in this directory until `node --test` passes. Track the work with todo_write and keep '
+    + 'it current. Feature four needs the checksum that `node scripts/slow-check.mjs` prints after about two minutes: start '
+    + 'it early in the background (bash with run_in_background), work on the other features meanwhile, and write the '
+    + 'checksum it prints to checksum.txt. Do not change the tests.',
+  'shell-only': 'Apply all four migrations by running `node migrate.mjs` in the background, once per migration, until it '
+    + 'prints `all migrations applied`. Do not edit any file yourself.',
+}
+
+/** What the environment chose for one K3 eval. */
+export interface K3Options {
+  /** Runs per task and arm (`K3_EVAL_RUNS`, default 5). */
+  readonly runs: number
+  /** Arms to run, interleaved (`K3_EVAL_ARMS`, default both). */
+  readonly arms: readonly K3Arm[]
+  /** Tasks to run (`K3_EVAL_TASKS`, default all three). */
+  readonly tasks: readonly K3Task[]
+  /** Model for every runtime (`K_EVAL_MODEL`); absent selects the sdk profile's default model, as a box does. */
+  readonly model?: string
+  /** The goal's round cap, at least 3 (`K3_EVAL_MAX_ROUNDS`, default 10). */
+  readonly maxRounds: number
+}
+
+/**
+ * Read the K3 eval's options from the environment.
+ * @param env - the process environment.
+ * @returns the options.
+ * @throws when a count is not a whole number in range or an arm or task is unknown.
+ */
+export function k3Options(env: Readonly<Record<string, string | undefined>>): K3Options {
+  const model = env.K_EVAL_MODEL
+  return {
+    runs: count(env, 'K3_EVAL_RUNS', 5, 1),
+    arms: pick(env, 'K3_EVAL_ARMS', 'arms', K3_ARMS),
+    tasks: pick(env, 'K3_EVAL_TASKS', 'tasks', K3_TASKS),
+    ...model === undefined || model === '' ? {} : { model },
+    maxRounds: count(env, 'K3_EVAL_MAX_ROUNDS', 10, 3),
+  }
+}
+
+/**
+ * How a K3 run's goal ended: `complete`, the code of its block (`model-reported`, `round-limit` or another), or `none`
+ * while it is open, paused or cleared.
+ */
+export type K3Ending = string
+
+/** Everything the K3 eval measures in one run's Session events. */
+export interface K3Measures {
+  /** Goal rounds admitted. */
+  readonly rounds: number
+  readonly endedBy: K3Ending
+  /** Logged round messages that carry `<goal_progress_check>`. */
+  readonly questionsShown: number
+  /** `k3-on`: the first round whose logged message carries the questions; `k3-off`: the first round the check would have asked in. */
+  readonly firstStallRound: number | null
+  /** Rounds from the first stalled one to the end, both counted; `null` when none stalled. */
+  readonly roundsAfterStall: number | null
+  /** Rounds that changed nothing the check can see. */
+  readonly stalledRounds: number
+  /** Calls in rounds that repeat an earlier call of the run. */
+  readonly repeats: number
+  /** Failed calls in rounds. */
+  readonly toolErrors: number
+  /** Model requests. */
+  readonly requests: number
+  readonly inputTokens: number
+  readonly outputTokens: number
+}
+
+/** One round of the stall fold. */
+type Round = NonNullable<Rounds['current']>
+
+/**
+ * Measure one K3 run with the stall check's own fold, at the default streak of two rounds.
+ * @param events - the run's Session events in order.
+ * @param arm - the run's arm.
+ * @returns the measures.
+ */
+export function measureK3(events: readonly SessionEvent[], arm: K3Arm): K3Measures {
+  let state = initRounds()
+  const closed: Round[] = []
+  const shown: number[] = []
+  const wouldAsk: number[] = []
+  let rounds = 0
+  let endedBy: K3Ending = 'none'
+  // A round closes at the next round message or at a goal change.
+  const close = (): void => { if (state.current !== null) closed.push(state.current) }
+  for (const event of events) {
+    if (event.type === 'user/message' && event.data.source.kind === 'goal' && event.data.source.round > 0) {
+      rounds += 1
+      if (event.data.content.some(block => block.type === 'text' && block.text.includes('<goal_progress_check>'))) shown.push(event.data.source.round)
+      if (stallText(state, 2) !== undefined) wouldAsk.push(event.data.source.round)
+      close()
+    }
+    if (event.type === 'goal/change') {
+      const change = event.data
+      endedBy = change.operation === 'complete' ? 'complete' : change.operation === 'block' ? change.goal.blockedReason?.code ?? 'none' : 'none'
+      close()
+    }
+    state = foldRounds(state, event)
+  }
+  close()
+  const first = (arm === 'k3-on' ? shown : wouldAsk)[0] ?? null
+  const calls = new Map<string, number>()
+  for (const round of closed) for (const [key, entry] of Object.entries(round.keys)) calls.set(key, (calls.get(key) ?? 0) + entry.n)
+  const usage = events.flatMap(event => event.type === 'assistant/message' && event.data.usage !== undefined ? [event.data.usage] : [])
+  return {
+    rounds,
+    endedBy,
+    questionsShown: shown.length,
+    firstStallRound: first,
+    roundsAfterStall: first === null ? null : rounds - first + 1,
+    stalledRounds: closed.filter(stalled).length,
+    repeats: [...calls.values()].reduce((sum, n) => sum + n - 1, 0),
+    toolErrors: closed.reduce((sum, round) => sum + round.errors, 0),
+    requests: usage.length,
+    inputTokens: usage.reduce((sum, item) => sum + item.inputTokens, 0),
+    outputTokens: usage.reduce((sum, item) => sum + item.outputTokens, 0),
+  }
+}
+
+/**
+ * Whether a `shell-only` run stopped its goal early: completed before every migration was applied, or reported blocked.
+ * @param endedBy - how the goal ended.
+ * @param applied - migrations `db.json` lists at the end.
+ * @returns whether the ending was premature.
+ */
+export function premature(endedBy: K3Ending, applied: number): boolean {
+  return (endedBy === 'complete' && applied < 4) || endedBy === 'model-reported'
 }

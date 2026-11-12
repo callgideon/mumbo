@@ -5241,13 +5241,17 @@ export interface Config {
 ## `@mumbo/state`
 
 - `inject`: `systemPrompt` · `sessionProjections` · `tools` · `agents`
-- `source`: [`packages/mumbo/state/src/index.ts:35`](../packages/mumbo/state/src/index.ts)
+- `source`: [`packages/mumbo/state/src/index.ts:37`](../packages/mumbo/state/src/index.ts)
 
 ```ts config-catalog
 /** Mumbo state configuration. */
 export interface Config {
   /** Cap on the block's characters, at least 400 (default 1600); what does not fit is named with the tool that reads it. */
   readonly maxChars: number
+  /** Whether goal rounds get the progress questions after rounds that changed nothing (default false). */
+  readonly stallCheck: boolean
+  /** Closed rounds in a row that changed nothing before the questions appear, at least 2 (default 2). */
+  readonly stallRounds: number
 }
 ```
 <!-- END GENERATED config-catalog:@mumbo/state -->
