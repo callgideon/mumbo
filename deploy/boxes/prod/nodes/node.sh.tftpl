@@ -100,9 +100,19 @@ boxes() { ls "$${CGROUP_ROOT:-/sys/fs/cgroup/e2b}" 2>/dev/null | sed -n 's/^sbx-
 # Placement stops first: every api replica sees the status on its next node sync (10 s), so wait two syncs.
 curl -s -m 10 -X POST -H "X-Admin-Token: $ADMIN_TOKEN" -H 'content-type: application/json' -d '{"status":"draining"}' "$API_URL/nodes/$NODE_IP" -o /dev/null -w "mumbo-drain: mark draining %%{http_code}\n"
 sleep 20
+start=$SECONDS
+# A pause answers before its snapshot is in S3; the orchestrator uploads it, and on SIGTERM waits for every upload before
+# it exits. So stop it here (systemd sets MAINPID for ExecStop) and log when it exits: the total upload time, which bounds
+# how long a drained box's resume on another node can fail (RUNBOOK "Recording E2B answers").
+uploads() {
+  [ -n "$${MAINPID:-}" ] || return 0
+  kill -TERM "$MAINPID"
+  while kill -0 "$MAINPID" 2>/dev/null; do sleep 1; done
+  echo "mumbo-drain: uploads done, orchestrator exited $((SECONDS - start)) s after the first pause"
+}
 # Pause until empty: a box resumed here before every replica saw the status is paused in the next round.
 for round in $(seq 20); do
-  [ -z "$(boxes)" ] && { echo "mumbo-drain: node empty after $((round - 1)) round(s)"; exit 0; }
+  [ -z "$(boxes)" ] && { echo "mumbo-drain: node empty after $((round - 1)) round(s), $((SECONDS - start)) s"; uploads; exit 0; }
   boxes | xargs -r -P 4 -I{} sh -c 'echo "mumbo-drain: pause {} -> $(curl -s -o /dev/null -w %%{http_code} -m 600 -X POST -H "X-API-Key: $TEAM_API_KEY" "$API_URL/sandboxes/{}/pause")"'
   sleep 5
 done
@@ -138,6 +148,7 @@ until [ "$(md autoscaling/target-lifecycle-state)" = Terminated ]; do sleep 5; d
 echo "mumbo-lifecycle: terminating; draining"
 /usr/local/bin/mumbo-dns down
 systemctl stop e2b-orchestrator
+sleep 15  # the CloudWatch agent sends every 5 s: the drain's last lines, its upload time among them, leave before the node
 aws autoscaling complete-lifecycle-action --auto-scaling-group-name "$ASG" --lifecycle-hook-name "$HOOK" --instance-id "$NODE_ID" --lifecycle-action-result CONTINUE
 SH
 chmod 0755 /usr/local/bin/mumbo-drain /usr/local/bin/mumbo-dns /usr/local/bin/mumbo-lifecycle
