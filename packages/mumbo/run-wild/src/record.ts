@@ -272,14 +272,14 @@ function text(status: number, message: string): Response {
   return new Response(message, { status, headers: { 'content-type': 'text/plain; charset=utf-8' } })
 }
 
-/** The largest distance from the epoch, in milliseconds, that a `Date` holds. */
-const TIME_LIMIT = 8.64e15
+/** The last millisecond of UTC year 9999; `dayOf` yields a 4-digit year only from 0 through here. */
+const TIME_LIMIT = 253402300799999
 
-/** A query integer: absent gives undefined, anything but a whole number within the `Date` range gives NaN. */
+/** A query integer: absent gives undefined, anything but a whole number from 0 to `TIME_LIMIT` gives NaN. */
 function integer(params: URLSearchParams, name: string): number | undefined {
   const raw = params.get(name)
   if (raw === null) return undefined
-  return /^-?\d+$/.test(raw) && Math.abs(Number(raw)) <= TIME_LIMIT ? Number(raw) : Number.NaN
+  return /^\d+$/.test(raw) && Number(raw) <= TIME_LIMIT ? Number(raw) : Number.NaN
 }
 
 /** The listing request a `RECORD_PATH` query names, or the reason it is malformed. */

@@ -120,7 +120,7 @@ it('clears the rows of the previous filter while another loads, and when its rea
     const url = new URL(input, 'http://box.test/')
     if (url.pathname === RECORD_COUNTS_PATH) return Promise.resolve(Response.json({ counts: {}, skipped: 0, incomplete: false }))
     if (url.searchParams.get('kinds') === 'send') return new Promise<Response>((resolve) => { fail = resolve })
-    return Promise.resolve(Response.json(page([entry()])))
+    return Promise.resolve(Response.json(page([entry()], { next: '2026-11-12:0' as never })))
   }))
   const { runtime } = await bench()
   const { view } = await rendered(runtime)
@@ -134,6 +134,8 @@ it('clears the rows of the previous filter while another loads, and when its rea
   await act(async () => { fail(new Response('disk gone', { status: 500 })) })
   expect([view.getByRole('button', { name: 'Sends' }).getAttribute('aria-pressed'), view.queryAllByRole('listitem').length]).toEqual(['true', 0])
   expect(view.getByRole('alert').textContent).toContain('Could not load the record.')
+  // The previous filter's cursor is gone with its rows.
+  expect(view.queryByRole('button', { name: 'Show older' })).toBeNull()
 })
 
 it('keeps the rows on a failed read and offers Try again; an empty panel centers the notice', async () => {

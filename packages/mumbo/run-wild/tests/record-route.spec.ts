@@ -64,11 +64,17 @@ describe('the record routes', () => {
     [RECORD_PATH, '?limit=0'], [RECORD_PATH, '?limit=201'], [RECORD_PATH, '?limit=ten'], [RECORD_PATH, '?since=yesterday'],
     [RECORD_PATH, '?cursor=2026-11-11'], [RECORD_PATH, '?kinds=send,,post'],
     [RECORD_COUNTS_PATH, ''], [RECORD_COUNTS_PATH, '?since=1'], [RECORD_COUNTS_PATH, '?since=1&until=x'], [RECORD_COUNTS_PATH, '?since=x&until=1'],
-    // Whole numbers outside the Date range.
+    // Whole numbers outside years 0000 through 9999 (UTC).
+    [RECORD_PATH, '?since=253402300800000'], [RECORD_COUNTS_PATH, '?since=0&until=253402300800000'], [RECORD_PATH, '?since=-1'],
     [RECORD_PATH, '?since=8640000000000001'], [RECORD_COUNTS_PATH, '?since=0&until=99999999999999999999'], [RECORD_COUNTS_PATH, '?since=-8640000000000001&until=1'],
   ])('answer 400 to %s%s', async (path, query) => {
     const { get } = await mounted(recorded())
     expect((await get(path, query)).status).toBe(400)
+  })
+
+  it('accepts the last millisecond of year 9999', async () => {
+    const { get } = await mounted(recorded())
+    expect((await get(RECORD_COUNTS_PATH, '?since=253402300799999&until=253402300799999')).status).toBe(200)
   })
 
   it('answer 500 with the failure when the record cannot be read', async () => {
