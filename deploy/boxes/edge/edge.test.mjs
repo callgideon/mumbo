@@ -408,6 +408,32 @@ test('a box being restored is neither backed up nor started by another replica, 
   assert.equal(await store.getBox('dead'), undefined)
 })
 
+test('a restoring create runs the restore, then start.sh, and reads dsh.log only after start.sh returns', async () => {
+  const e2b = fakeE2B(); const ran = []; const store = memoryStore()
+  const gate = () => { let open; const held = new Promise(r => { open = r }); return { held, open } }
+  const restore = gate(), start = gate()
+  e2b.Sandbox.create = async (tpl, opts) => {
+    const id = `b${e2b.made.length + 1}`; e2b.made.push({ id, opts })
+    return { sandboxId: id, files: { write: async () => {} }, kill: async () => {}, commands: { run: async (c) => {
+      ran.push(c)
+      if (c.includes('GET-URL')) await restore.held
+      if (c.includes('/root/.mumbo/start.sh')) await start.held
+      return { stdout: c.includes('dsh.log') ? 'launch123' : '' }
+    } } }
+  }
+  const b = boxes({ cells: oneCell(e2b, { presignGet: async () => 'GET-URL', presignPut: async () => 'PUT' }), store, cfg, edgeKey: 'k', log: () => {} })
+  const steps = () => ran.flatMap(c => c.includes('GET-URL') ? ['restore'] : c.includes('/root/.mumbo/start.sh') ? ['start.sh'] : c.includes('/root/dsh.log') ? ['dsh.log'] : [])
+  const done = b.ensure('a@x.com')
+  await new Promise(r => setTimeout(r, 20))
+  assert.deepEqual(steps(), ['restore'], 'start.sh waits for the restore')
+  restore.open(); await new Promise(r => setTimeout(r, 20))
+  assert.deepEqual(steps(), ['restore', 'start.sh'], 'dsh.log is not read while start.sh runs')
+  start.open()
+  const { id } = await done
+  assert.deepEqual(steps(), ['restore', 'start.sh', 'dsh.log'])
+  assert.equal((await store.getBox(id)).launch, 'launch123')
+})
+
 test('a failed restore drops the new box, logged at error, so no backup of it replaces the archive; the next visit restores again', async () => {
   const e2b = fakeE2B(); const killed = []; const logs = []; const ran = []
   let fail = true
