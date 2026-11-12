@@ -1,0 +1,43 @@
+{
+  "case": "guest-unresponsive",
+  "step": "resume-marked",
+  "cell": "ap-south-1",
+  "e2bSha": "1619623fc",
+  "sdk": "e2b 2.63.0",
+  "recorded": false,
+  "source": [
+    "plan B47b section 1.2 A4: a snapshot marked envdUnresponsiveAtPause, only after the fork change of Q6",
+    "e2b-runtime packages/api/internal/handlers/sandbox_resume.go:308-315: the memory resume of a marked snapshot answers 409 with this code and text",
+    "e2b-runtime packages/api/internal/handlers/sandbox_connect.go:237-240: a resume error is sent with Retryable undefined, so no Should-Retry header"
+  ],
+  "raw": {
+    "request": {
+      "method": "POST",
+      "path": "/v2/sandboxes/{sandboxID}/connect",
+      "body": {
+        "timeout": 900
+      }
+    },
+    "response": {
+      "status": 409,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": {
+        "code": 409,
+        "error_code": "sandbox_snapshot_guest_agent_unresponsive",
+        "message": "Sandbox '<sandbox>' cannot be resumed with its memory: its snapshot was taken while the sandbox guest agent was not responding, and resuming the memory would bring that back. Resume it without memory (memory: false) to cold-boot it from its disk"
+      }
+    }
+  },
+  "sdkPath": {
+    "call": "Sandbox.connect",
+    "replayed": true,
+    "error": {
+      "class": "GuestUnresponsiveError",
+      "name": "GuestUnresponsiveError",
+      "statusCode": 409,
+      "message": "Sandbox '<sandbox>' cannot be resumed with its memory: its snapshot was taken while the sandbox guest agent was not responding, and resuming the memory would bring that back. Resume it without memory (memory: false) to cold-boot it from its disk. Resume the sandbox with `onResume: 'reboot'`."
+    }
+  }
+}

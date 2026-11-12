@@ -1,0 +1,33 @@
+{
+  "case": "busy-node",
+  "step": "resume",
+  "cell": "ap-south-1",
+  "e2bSha": "1619623fc",
+  "sdk": "e2b 2.63.0",
+  "recorded": false,
+  "source": [
+    "plan B47b section 1.2 C3: a node that refuses every start with ResourceExhausted (busy, not full) until the deadline",
+    "e2b-runtime packages/api/internal/orchestrator/placement/placement.go:285-297: ResourceExhausted is retried with backoff until the request context ends",
+    "e2b-runtime packages/api/internal/cfg/model.go:26: the API request context is 70 s",
+    "deploy/boxes/edge/node_modules/e2b/dist/index.mjs:921: the SDK aborts at 60 s, before the API answers"
+  ],
+  "raw": {
+    "request": {
+      "method": "POST",
+      "path": "/v2/sandboxes/{sandboxID}/connect",
+      "body": {
+        "timeout": 900
+      }
+    },
+    "hung": true
+  },
+  "sdkPath": {
+    "call": "Sandbox.connect",
+    "replayed": true,
+    "error": {
+      "class": "DOMException",
+      "name": "TimeoutError",
+      "message": "The operation was aborted due to timeout"
+    }
+  }
+}

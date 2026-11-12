@@ -1,0 +1,42 @@
+{
+  "case": "team-limit",
+  "step": "resume",
+  "cell": "ap-south-1",
+  "e2bSha": "1619623fc",
+  "sdk": "e2b 2.63.0",
+  "recorded": false,
+  "source": [
+    "deploy/boxes/prod/setup/setup.sh:11: the team limit is 2000 concurrent sandboxes",
+    "e2b-runtime packages/api/internal/orchestrator/create_instance.go:326-334: a resume past the team limit answers 429 with this text and no error_code",
+    "e2b-runtime packages/api/internal/handlers/sandbox_connect.go:237-240: a resume error is sent with Retryable undefined, so no Should-Retry header"
+  ],
+  "raw": {
+    "request": {
+      "method": "POST",
+      "path": "/v2/sandboxes/{sandboxID}/connect",
+      "body": {
+        "timeout": 900
+      }
+    },
+    "response": {
+      "status": 429,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": {
+        "code": 429,
+        "message": "you have reached the maximum number of concurrent E2B sandboxes (2000). If you need more, please visit 'https://e2b.dev/docs/billing'"
+      }
+    }
+  },
+  "sdkPath": {
+    "call": "Sandbox.connect",
+    "replayed": true,
+    "error": {
+      "class": "RateLimitError",
+      "name": "RateLimitError",
+      "statusCode": 429,
+      "message": "Rate limit exceeded, please try again later - you have reached the maximum number of concurrent E2B sandboxes (2000). If you need more, please visit 'https://e2b.dev/docs/billing'"
+    }
+  }
+}

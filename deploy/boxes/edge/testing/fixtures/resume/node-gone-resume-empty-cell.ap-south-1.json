@@ -1,0 +1,44 @@
+{
+  "case": "node-gone",
+  "step": "resume-empty-cell",
+  "cell": "ap-south-1",
+  "e2bSha": "1619623fc",
+  "sdk": "e2b 2.63.0",
+  "recorded": false,
+  "source": [
+    "plan B47b section 1.2 B3: Mumbai between the loss of its one node and the replacement",
+    "e2b-runtime packages/api/internal/orchestrator/placement/placement.go:202-207: an empty cluster counts as every node excluded, with no create run: NoNodesAvailableError",
+    "e2b-runtime packages/api/internal/orchestrator/placement_errors.go:160-164: 503 sandbox_capacity_unavailable",
+    "e2b-runtime packages/api/internal/handlers/sandbox_connect.go:237-240: a resume error is sent with Retryable undefined, so no Should-Retry header"
+  ],
+  "raw": {
+    "request": {
+      "method": "POST",
+      "path": "/v2/sandboxes/{sandboxID}/connect",
+      "body": {
+        "timeout": 900
+      }
+    },
+    "response": {
+      "status": 503,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": {
+        "code": 503,
+        "error_code": "sandbox_capacity_unavailable",
+        "message": "Failed to place sandbox: not enough capacity for the requested resources right now, please retry shortly"
+      }
+    }
+  },
+  "sdkPath": {
+    "call": "Sandbox.connect",
+    "replayed": true,
+    "error": {
+      "class": "ServiceBusyError",
+      "name": "ServiceBusyError",
+      "statusCode": 503,
+      "message": "Service temporarily unavailable, please retry - Failed to place sandbox: not enough capacity for the requested resources right now, please retry shortly"
+    }
+  }
+}

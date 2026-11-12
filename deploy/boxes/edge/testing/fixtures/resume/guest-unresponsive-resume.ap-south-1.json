@@ -1,0 +1,44 @@
+{
+  "case": "guest-unresponsive",
+  "step": "resume",
+  "cell": "ap-south-1",
+  "e2bSha": "1619623fc",
+  "sdk": "e2b 2.63.0",
+  "recorded": false,
+  "source": [
+    "plan B47b section 1.2 A1: envd SIGSTOPped before a pause that, with no envd probe at pause, runs as usual",
+    "e2b-runtime packages/orchestrator/pkg/sandbox/sandbox.go:2349-2355: the resume waits for the stopped envd and fails with a plain error, gRPC Unknown",
+    "e2b-runtime packages/api/internal/orchestrator/placement_errors.go:193: a code other than FailedPrecondition or InvalidArgument gets the generic message; 1 node in Mumbai",
+    "e2b-runtime packages/api/internal/handlers/sandbox_connect.go:237-240: a resume error is sent with Retryable undefined, so no Should-Retry header"
+  ],
+  "raw": {
+    "request": {
+      "method": "POST",
+      "path": "/v2/sandboxes/{sandboxID}/connect",
+      "body": {
+        "timeout": 900
+      }
+    },
+    "response": {
+      "status": 500,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": {
+        "code": 500,
+        "error_code": "sandbox_create_failed",
+        "message": "Failed to place sandbox: sandbox creation failed on 1 node(s), please retry; if the problem persists, contact us"
+      }
+    }
+  },
+  "sdkPath": {
+    "call": "Sandbox.connect",
+    "replayed": true,
+    "error": {
+      "class": "SandboxError",
+      "name": "SandboxError",
+      "statusCode": 500,
+      "message": "500: Failed to place sandbox: sandbox creation failed on 1 node(s), please retry; if the problem persists, contact us"
+    }
+  }
+}

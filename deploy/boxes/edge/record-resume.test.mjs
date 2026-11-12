@@ -1,6 +1,6 @@
 // node --test: the resume recorder (record-resume.e2e.mjs) acts only on its own throwaways and fills only a cell of
 // throwaways; its fixtures keep no secret; the real SDK maps each replayed answer to the class the edge sees; and every
-// committed fixture passes the leak guard.
+// committed fixture passes the leak guard, is recorded or names its sources, and still replays to the error it names.
 import assert from 'node:assert/strict'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { test } from 'node:test'
@@ -106,7 +106,18 @@ test('replay: each answer reaches the edge as the SDK class and status it maps t
   assert.deepEqual(await sdkError({ raw: { request: { method: 'POST', path: '/sandboxes/{sandboxID}/pause' }, response: { status: 204, headers: {} } } }), { call: 'Sandbox.pause', error: null })
 })
 
-test('every committed fixture passes the leak guard', () => {
+test('every committed fixture passes the leak guard, is recorded or names its sources, and replays to the SDK error it names', async () => {
   const dir = new URL('./testing/fixtures/resume/', import.meta.url)
-  for (const name of existsSync(dir) ? readdirSync(dir) : []) assert.equal(leak(readFileSync(new URL(name, dir), 'utf8')), null, name)
+  for (const name of existsSync(dir) ? readdirSync(dir) : []) {
+    const text = readFileSync(new URL(name, dir), 'utf8')
+    assert.equal(leak(text), null, name)
+    const fixture = JSON.parse(text)
+    assert.ok(fixture.recorded === true || (fixture.recorded === false && fixture.source?.length > 0), `${name}: recorded, or recorded: false with its source`)
+    // A later SDK that maps a recorded answer to another class or status fails here, before the edge's classification.
+    if (fixture.sdkPath?.replayed) {
+      const { call, error } = await sdkError(fixture)
+      assert.deepEqual({ call, class: error?.constructor.name, statusCode: error?.statusCode },
+        { call: fixture.sdkPath.call, class: fixture.sdkPath.error?.class, statusCode: fixture.sdkPath.error?.statusCode }, name)
+    }
+  }
 })
