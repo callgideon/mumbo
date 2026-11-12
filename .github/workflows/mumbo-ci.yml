@@ -55,9 +55,15 @@ jobs:
       - name: Egress check (unreviewed DeepSeek hosts)
         run: pnpm exec tsx scripts/mumbo-rebrand.ts && pnpm exec tsx scripts/mumbo-egress-check.ts
 
-  unit:
+  # The unit selection runs as two Vitest shards in parallel; `unit` below passes only when both pass.
+  unit-shard:
+    name: unit (${{ matrix.shard }}/2)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - name: Use runner-owned temporary storage
         run: echo "TMPDIR=${{ runner.temp }}" >> "$GITHUB_ENV"
@@ -94,4 +100,12 @@ jobs:
         run: |
           umask 0022
           pnpm run build:native-system
-          pnpm exec vitest run --config vitest.mumbo-ci.config.ts
+          pnpm exec vitest run --config vitest.mumbo-ci.config.ts --shard=${{ matrix.shard }}/2
+
+  unit:
+    needs: unit-shard
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Both unit shards passed
+        run: test "${{ needs.unit-shard.result }}" = success
