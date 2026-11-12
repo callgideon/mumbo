@@ -256,7 +256,7 @@ Run from the repository root. The image is built from `git archive` of the commi
    ```sh
    CL=mumbo-boxes-e2b R=us-east-1   # or CL=mumbo-boxes-aps1-e2b R=ap-south-1
    aws ecs describe-services --region $R --cluster $CL --services edge --query 'services[0].events[:5].[createdAt,message]' --output text
-   aws logs tail /mumbo-boxes/edge --region us-east-1 --since 30m | tail -50                  # us-east-1's edge
+   aws logs tail /mumbo-boxes/edge --region us-east-1 --since 30m --log-stream-name-prefix edge/ | tail -50   # us-east-1's edge
    aws logs tail /mumbo-boxes/edge --region us-east-1 --since 30m --log-stream-name-prefix edge-aps1 | tail -50   # Mumbai's
    ```
    Then set `edge_tag` back to the tag of the revision that runs, so a later apply does not deploy the failed image again, apply, and run `edge_rollout` for both edges:
