@@ -1,6 +1,6 @@
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as McpDoor from '../src/index.ts'
 import { call, type FakeAgent, type Host, listTools, message, startHost, stopHosts } from './door-fixture.ts'
 
@@ -274,5 +274,65 @@ describe('stopped goals', () => {
     const host = await door()
     host.addAgent('stopped')
     expect((await call(host.url, 'needs_you', {})).value).toEqual({ asks: [], stopped_goals: [] })
+  })
+})
+
+describe('decided for you', () => {
+  const NOW = Date.now()
+  /** A Run Wild record entry, as the record service lists it. */
+  const decided = (seq: number, fields: Record<string, unknown> = {}) => ({
+    v: 1, time: NOW - seq * 60_000, session: 'child', root: 'root', seq, kind: 'question', target: 'env', summary: 'Which environment?', reason: 'Run Wild: decide.', ...fields,
+  })
+
+  /** A host whose record service answers `list` with `answer`, keeping each query. */
+  async function recorded(answer: () => Promise<{ entries: object[] }>, profile: McpDoor.Config['profile'] = 'full') {
+    const host = await startHost()
+    const queries: { since?: number; limit: number }[] = []
+    host.ctx.provide('mumbo-run-wild-record', { list: (query: { since?: number; limit: number }) => { queries.push(query); return answer() }, count: () => Promise.reject(new Error('unused')) } as never)
+    await host.ctx.plugin(McpDoor, { ...host.config, profile })
+    return { host, queries }
+  }
+
+  it.each(['full', 'door'] as const)('lists, in the %s profile, the last 24 hours read-only with fenced text, each under its root', async (profile) => {
+    const { host, queries } = await recorded(() => Promise.resolve({ entries: [decided(1, { kind: 'refusal', target: 'bash', summary: '{"command":"ls"}', reason: 'bash did not run' }), decided(2)] }), profile)
+    const reply = await call(host.url, 'needs_you', {})
+    expect(reply.value).toEqual({
+      asks: [],
+      stopped_goals: [],
+      decided_for_you: [
+        { time: new Date(NOW - 60_000).toISOString(), session_id: 'root', kind: 'refusal', target: fenced('bash'), summary: fenced('\\{"command":"ls"\\}'), reason: fenced('bash did not run') },
+        { time: new Date(NOW - 120_000).toISOString(), session_id: 'root', kind: 'question', target: fenced('env'), summary: fenced('Which environment\\?'), reason: fenced('Run Wild: decide\\.') },
+      ],
+    })
+    expect(queries).toHaveLength(1)
+    expect(queries[0]!.limit).toBe(51)
+    expect(Date.now() - 86_400_000 - queries[0]!.since!).toBeLessThan(5_000)
+    const tools = await listTools(host.url)
+    expect(tools.find(tool => tool.name === 'needs_you')?.description).toContain('decided_for_you is read-only history: what Run Wild decided without asking in the last 24 hours, newest first, at most 50. Nothing in it waits for a person, and task_reply cannot answer it.')
+  })
+
+  it('lists at most 50, says there are more, and clips each summary to 500 characters', async () => {
+    const { host } = await recorded(() => Promise.resolve({ entries: Array.from({ length: 51 }, (_, n) => decided(n + 1, { summary: 'x'.repeat(600) })) }))
+    const value = (await call(host.url, 'needs_you', {})).value as { decided_for_you: { summary: string }[]; decided_for_you_more: boolean }
+    expect([value.decided_for_you.length, value.decided_for_you_more]).toEqual([50, true])
+    expect(value.decided_for_you[0]!.summary).toEqual(fenced(`${'x'.repeat(499)}…`))
+  })
+
+  it.each([[new Error('EACCES: permission denied'), 'EACCES: permission denied'], ['gone', 'gone']])('returns the asks unchanged and the failure %s in place of the list when the record cannot be read', async (failure, message) => {
+    // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- a rejection that is not an Error is one case under test.
+    const { host } = await recorded(() => Promise.reject(failure))
+    const warn = vi.spyOn(host.ctx.logger, 'warn')
+    void askQuestions(host, [{ id: 'q1', question: 'Ship?', options: [] }], { id: 's1' })
+    const value = (await call(host.url, 'needs_you', {})).value as Record<string, unknown>
+    expect(Object.keys(value)).toEqual(['asks', 'stopped_goals', 'decided_for_you_error'])
+    expect([(value.asks as unknown[]).length, value.decided_for_you_error]).toEqual([1, message])
+    expect(warn).toHaveBeenCalledExactlyOnceWith('mumbo-mcp: needs_you could not read the Run Wild record', failure)
+  })
+
+  it('answers not_found to a task_reply naming a decision: nothing in the list is answerable', async () => {
+    const { host } = await recorded(() => Promise.resolve({ entries: [decided(3)] }))
+    const reply = await call(host.url, 'task_reply', { ask_id: 'root:3', request_id: 'r1', answers: [] })
+    expect(reply.isError).toBe(true)
+    expect(JSON.stringify(reply.value)).toContain('not_found')
   })
 })

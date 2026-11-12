@@ -1,0 +1,36 @@
+/* The header's session label row (ui-agent-preset AgentPresetLabel): a small capsule beside the title. */
+.chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--dsw-radius-xs);
+  background: var(--dsw-alias-fill-tsp-secondary);
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 22px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chip:hover,
+.chip[aria-expanded='true'] {
+  color: var(--dsw-alias-label-primary);
+}
+
+.chip:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+
+/* A narrow title row (the header's inline-size container) keeps the glyph; the accessible name and tooltip still
+   say Run Wild. */
+@container (max-width: 540px) {
+  .label {
+    display: none;
+  }
+}

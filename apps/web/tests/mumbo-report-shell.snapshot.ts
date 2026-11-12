@@ -1,10 +1,10 @@
 /**
  * A project's report reaches a person's assistant through the MCP door, in the shipped Web composition with Run Wild
  * and the door mounted as a person's box mounts them: the model's shell call in that turn is refused with the
- * report-turn note, and the model answers without running it, with the Run Wild instructions in its runtime context.
- * Replays an authored Session; no browser.
+ * report-turn note and logged as a Run Wild refusal in the Session and the box-wide record, and the model answers
+ * without running it, with the Run Wild instructions in its runtime context. Replays an authored Session; no browser.
  */
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -30,6 +30,7 @@ it.skipIf(webSnapshotMode() === 'record')('refuses the shell in a Run Wild turn 
     await writeFile(join(keys, 'key'), KEY)
     vi.stubEnv('MUMBO_MCP_KEY_FILE', join(keys, 'key'))
     vi.stubEnv('MUMBO_MCP_PORT', String(port))
+    vi.stubEnv('MUMBO_RUN_WILD_RECORD_ROOT', join(keys, 'runwild'))
     const scaffold = await launchWebScaffold({
       extraOverlayPath: OVERLAY,
       profile: { hmr: false, packages: PACKAGES },
@@ -60,6 +61,17 @@ it.skipIf(webSnapshotMode() === 'record')('refuses the shell in a Run Wild turn 
         && event.data.source.kind === 'runtime-context' && event.data.source.form === 'snapshot'
         ? [event.data.source.sections.find(section => section.name === RUN_WILD_CONTEXT)?.text] : [])
       expect(runWild).toEqual([RUN_WILD_INSTRUCTIONS])
+      const decisions = session.snapshotEvents().filter(event => event.type === 'runwild/decision')
+      expect(decisions.map(event => event.data)).toEqual([{ kind: 'refusal', target: 'bash', summary: '{"command":"gh pr merge 12 --squash"}', reason: REFUSAL.slice('Error: '.length) }])
+      const recorded = async (): Promise<unknown[]> => {
+        const days = await readdir(join(keys, 'runwild'))
+        const text = await Promise.all(days.map(day => readFile(join(keys, 'runwild', day), 'utf8')))
+        return text.join('').split('\n').filter(line => line !== '').map((line): unknown => JSON.parse(line))
+      }
+      await vi.waitFor(async () => {
+        const lines = decisions.map(({ data, time, seq }) => ({ ...data, v: 1, time, session: session.id, root: session.id, seq }))
+        expect(await recorded()).toEqual(lines)
+      })
     } finally {
       await scaffold.close()
     }

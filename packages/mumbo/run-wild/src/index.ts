@@ -2,7 +2,8 @@
  * Run Wild: the permission preset in which the assistant never waits for the person. In a Session whose root is in
  * Run Wild, a tool call that asks for approval runs, a plan review is approved, and a question is answered with a fixed
  * reply that tells the model to decide for itself; each is logged as a `runwild/decision` record. The `mumbo:run-wild`
- * runtime context gives the model the rules it acts by while its root is in Run Wild. The preset itself is a
+ * runtime context gives the model the rules it acts by while its root is in Run Wild. Every decision is also copied into a
+ * box-wide record that the `mumbo-run-wild-record` service and its owner-only routes read. The preset itself is a
  * `permission` row entry that a person-box overlay lists; this plugin reads the recorded preset name.
  * @module @mumbo/run-wild
  */
@@ -16,9 +17,13 @@ import type {} from '@deepseek-ai/dsh-system-prompt'
 import type { PreToolDecision } from '@deepseek-ai/dsh-tools'
 import type { AskUserQuestionAnswerItem, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
+import { type Config, record, rootUnavailable } from './record.ts'
 
-/** What a Run Wild decision stood in for: a tool approval, a plan review, or a question. */
-export type RunWildDecisionKind = 'approval' | 'plan-review' | 'question'
+export { Config, clipSummary } from './record.ts'
+export type { RecordCounts, RecordCursor, RecordEntry, RecordPage, RecordQuery, RunWildRecord } from './record-types.ts'
+
+/** What a Run Wild decision stood in for: a tool approval, a plan review, a question, or a call refused without asking. */
+export type RunWildDecisionKind = 'approval' | 'plan-review' | 'question' | 'refusal'
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
@@ -26,7 +31,9 @@ declare module '@deepseek-ai/dsh-session/types' {
      * One ask that Run Wild decided instead of the person, appended inside the turn of the tool call that asked;
      * log-only audit, never model-visible (the model sees the tool result the decision caused). `target` is the tool
      * name, the plan's tool call id, the approval's subject, or the question id; `summary` is the ask's own text;
-     * `reason` is why it was decided this way, and for a question it is the reply the model received.
+     * `reason` is why it was decided this way, and for a question it is the reply the model received. A `refusal` is a
+     * call refused without asking, such as `@mumbo/mcp`'s in a report-started turn: `target` is the tool name, `summary`
+     * the call's arguments as JSON, clipped by {@link clipSummary}, and `reason` the refusal the model received.
      */
     'runwild/decision': { kind: RunWildDecisionKind; target: string; summary: string; reason: string }
   }
@@ -70,13 +77,6 @@ export function inRunWild(ctx: Context, agent: Agent): boolean {
   return ctx.permissionPresets.current(root.session) === RUN_WILD_PRESET
 }
 
-/** Whether `subagents.rootOf` failed because the caller is a delegated child whose root is no longer live. */
-function rootUnavailable(error: unknown): boolean {
-  return typeof error === 'object' && error !== null
-    && 'name' in error && error.name === 'SubagentError'
-    && 'code' in error && error.code === 'UNAUTHORIZED'
-}
-
 /** Answer one question in Run Wild and log the decision; the summary is the question and its detail, such as a plan. */
 function decide(session: Session, item: AskUserQuestionItem): AskUserQuestionAnswerItem {
   const intent = item.intent
@@ -105,12 +105,13 @@ function decide(session: Session, item: AskUserQuestionItem): AskUserQuestionAns
 }
 
 /**
- * Register the two Run Wild listeners, each prepended so it decides before the person's answerers are reached, and the
- * `mumbo:run-wild` runtime context.
- * @param ctx - plugin context; the listeners and the context end with it.
+ * Register the two Run Wild listeners, each prepended so it decides before the person's answerers are reached, the
+ * `mumbo:run-wild` runtime context, and the record with its service and routes.
+ * @param ctx - plugin context; the listeners, the context and the record end with it.
+ * @param config - the record's directory and retention.
  * @throws when the `permission` row lists no `run-wild` preset, in which no Session could ever be in Run Wild.
  */
-export function apply(ctx: Context): void {
+export function apply(ctx: Context, config: Config): void {
   if (!ctx.permissionPresets.names.includes(RUN_WILD_PRESET)) {
     throw new Error(`mumbo-run-wild: the permission row lists no "${RUN_WILD_PRESET}" preset; a person box lists it when MUMBO_RUN_WILD is set`)
   }
@@ -149,4 +150,5 @@ export function apply(ctx: Context): void {
       }
     },
   })
+  record(ctx, config)
 }

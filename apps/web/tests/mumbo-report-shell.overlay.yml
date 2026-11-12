@@ -1,6 +1,7 @@
 # Loader overlay for the report-started shell scenario: Run Wild listed last and chosen for new Sessions, as a person's
 # box lists it, and the MCP door on its own loopback listener, through which a project's report reaches the assistant.
-# The scaffold changes into its temporary workspace before boot, so the door's assistant Session starts there.
+# The scaffold changes into its temporary workspace before boot, so the door's assistant Session starts there. The Run
+# Wild record goes to a temporary directory the test names: a yml path would anchor to the real Harness home.
 - id: approval
   config:
     policy: ask
@@ -23,6 +24,8 @@
 - insert:
     - id: run-wild
       name: '@mumbo/run-wild'
+      config:
+        root: !!js process.env.MUMBO_RUN_WILD_RECORD_ROOT
     - id: mumbo-mcp-ingress
       name: cordis:group
       group: true

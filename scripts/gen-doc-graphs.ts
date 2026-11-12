@@ -989,6 +989,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     mode: 'service',
     note: "Whether a project's report opened the current turn of an Agent's root Session; the MCP door provides it from a host-only projection and lets only reads run unasked in such a turn.",
   },
+  {
+    key: 'mumbo-run-wild-record',
+    pkg: 'run-wild',
+    title: 'Run Wild record',
+    mode: 'service',
+    consumers: ['mcp'],
+    note: "The box-wide record of what Run Wild decided without asking, one append-only JSONL file per UTC day that only the Host writes; its owner-only routes feed the view, and the MCP door's needs_you lists the last day of it.",
+  },
 ]
 
 function generatedHeader(title: string): string[] {

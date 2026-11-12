@@ -5216,6 +5216,25 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@mumbo/mcp -->
 
+<!-- BEGIN GENERATED config-catalog:@mumbo/run-wild -->
+<a id="mumborun-wild"></a>
+
+## `@mumbo/run-wild`
+
+- `inject`: `permissionPresets` · `systemPrompt`
+- `source`: [`packages/mumbo/run-wild/src/record.ts:29`](../packages/mumbo/run-wild/src/record.ts)
+
+```ts config-catalog
+/** Where the record lives and how long it keeps entries. */
+export interface Config {
+  /** Absolute directory of the day files; created `0700` at the first write. */
+  root: string
+  /** Days the record keeps; older day files are deleted. */
+  retentionDays: number
+}
+```
+<!-- END GENERATED config-catalog:@mumbo/run-wild -->
+
 <!-- BEGIN GENERATED config-catalog:@mumbo/state -->
 <a id="mumbostate"></a>
 
@@ -5371,7 +5390,6 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 | `@deepseek-ai/dsh-user-questions` | — | [`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts) |
 | `@deepseek-ai/dsh-webhook` | `agents` · `agentDefaultModel` · `agentPresets` · `permissionPresets` · `sessionTitle` · `workspaceRegistry` | [`packages/experimental/webhook/src/index.ts`](../packages/experimental/webhook/src/index.ts) |
 | `@deepseek-ai/dsh-workspace` | `storageDomain` · `sessionPersistence` | [`packages/workspace/workspace/src/index.ts`](../packages/workspace/workspace/src/index.ts) |
-| `@mumbo/run-wild` | `permissionPresets` · `systemPrompt` | [`packages/mumbo/run-wild/src/index.ts`](../packages/mumbo/run-wild/src/index.ts) |
 <!-- END GENERATED config-catalog:no-config -->
 
 ## Seam packages (not directly loadable)

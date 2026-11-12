@@ -2186,6 +2186,27 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'mumbo-run-wild-record',
+    summary: 'The box-wide record of what Run Wild decided, as the `mumbo-run-wild-record` service reads it.',
+    description: 'The box-wide record of what Run Wild decided, as the `mumbo-run-wild-record` service reads it.',
+    methods: [
+      {
+        signature: 'list(query: RecordQuery): Promise<RecordPage>',
+        description: 'List entries newest first: by time, then by line order, both descending.',
+        parameters: [{ name: 'query', description: 'kinds, cursor, lower time bound and page size.' }],
+        returns: 'one page of entries.',
+        throws: ['when a day file cannot be read.'],
+      },
+      {
+        signature: 'count(since: number, until: number): Promise<RecordCounts>',
+        description: 'Count entries per kind with `since <= time < until`.',
+        parameters: [{ name: 'since', description: 'window start, Unix epoch milliseconds, inclusive.' }, { name: 'until', description: 'window end, Unix epoch milliseconds, exclusive.' }],
+        returns: 'the counts.',
+        throws: ['when a day file cannot be read.'],
+      },
+    ],
+  },
+  {
     key: 'officeToPdf',
     summary: 'A provider lifetime owns all converters, queued calls, and temporary files.',
     description: 'A provider lifetime owns all converters, queued calls, and temporary files.',
@@ -7986,6 +8007,26 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'RecommendationDetails',
     declaration: 'export type RecommendationDetails = {\n    readonly status: \'available\';\n    readonly title: LocalizedText;\n    readonly description: LocalizedText;\n    readonly enabled: boolean;\n} | {\n    readonly status: \'refused\';\n    readonly reason: \'unknown\' | \'unavailable\' | \'not-live-root\' | \'closing\';\n};',
+  },
+  {
+    name: 'RecordCounts',
+    declaration: 'export interface RecordCounts {\n    readonly counts: Readonly<Record<string, number>>;\n    readonly skipped: number;\n    readonly incomplete: boolean;\n}',
+  },
+  {
+    name: 'RecordCursor',
+    declaration: 'export type RecordCursor = Branded<\'RunWildRecordCursor\'>;',
+  },
+  {
+    name: 'RecordEntry',
+    declaration: 'export interface RecordEntry {\n    readonly v: 1;\n    readonly time: number;\n    readonly session: SessionId;\n    readonly root: SessionId;\n    readonly seq: number;\n    readonly kind: string;\n    readonly target: string;\n    readonly summary: string;\n    readonly reason: string;\n    readonly [field: string]: unknown;\n}',
+  },
+  {
+    name: 'RecordPage',
+    declaration: 'export interface RecordPage {\n    readonly entries: readonly RecordEntry[];\n    readonly next?: RecordCursor;\n    readonly skipped: number;\n    readonly incomplete: boolean;\n    readonly retentionDays: number;\n}',
+  },
+  {
+    name: 'RecordQuery',
+    declaration: 'export interface RecordQuery {\n    readonly kinds?: readonly string[];\n    readonly cursor?: RecordCursor;\n    readonly since?: number;\n    readonly limit: number;\n}',
   },
   {
     name: 'RecurringScheduleRecord',

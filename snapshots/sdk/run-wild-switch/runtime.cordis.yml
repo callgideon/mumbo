@@ -22,6 +22,8 @@
 - insert:
     - id: run-wild
       name: '@mumbo/run-wild'
+      config:
+        root: !!js dshHomePath('storages', 'runwild')
     - id: run-wild-switch-request-capture
       name: '../manual-compact/capture-requests.mjs'
       config:
