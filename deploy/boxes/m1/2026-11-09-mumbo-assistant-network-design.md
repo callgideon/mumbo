@@ -221,6 +221,7 @@ In Run Wild, Mumbo never asks. It decides from context and the person's rules, a
   - New sessions, schedule-started ones included, start in it when the edge sets `MUMBO_NEW_SESSION_PRESET=run-wild` for that person's box.
   - The edge setting is needed because Settings can't write the default on person boxes: an overlay owns the `permission` row there, which predates Run Wild.
   - The founder's box gets it.
+  - **[2026-11-12, live]** The edge sets it for `hi@mumbo.si` (edge :52). Run Wild is last in the selector and the default for new sessions. The founder's existing Sessions keep Full access until the founder switches them.
 - **Only the person switches it.** No model tool changes the preset (`/permission` is a user command). After B24, the agent can't reach dsh's API: the firewall resets its connections to dsh's port. Before B24, the agent is root and could already do anything.
 - **Subagents and delegated children** follow their live root Session's mode, so switching the root back reaches running children at once. Computer use runs in a subagent.
 - **Turning it on shows one explanation, once, at the switch:** what Mumbo will now do unasked (send as you, post, buy with saved payment methods, delete) and what still holds (below). It is the only confirmation, given when the mode is chosen, never per action.

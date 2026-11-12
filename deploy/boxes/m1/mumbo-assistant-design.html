@@ -422,6 +422,7 @@ th,td{text-align:left;vertical-align:top;padding:8px 12px;border-bottom:.5px sol
 <li>New sessions, schedule-started ones included, start in it when the edge sets <code>MUMBO_NEW_SESSION_PRESET=run-wild</code> for that person's box.</li>
 <li>The edge setting is needed because Settings can't write the default on person boxes: an overlay owns the <code>permission</code> row there, which predates Run Wild.</li>
 <li>The founder's box gets it.</li>
+<li><strong>[2026-11-12, live]</strong> The edge sets it for <code>hi@mumbo.si</code> (edge :52). Run Wild is last in the selector and the default for new sessions. The founder's existing Sessions keep Full access until the founder switches them.</li>
 </ul>
 </li>
 <li><strong>Only the person switches it.</strong> No model tool changes the preset (<code>/permission</code> is a user command). After B24, the agent can't reach dsh's API: the firewall resets its connections to dsh's port. Before B24, the agent is root and could already do anything.</li>
