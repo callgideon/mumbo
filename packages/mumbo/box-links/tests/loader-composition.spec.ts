@@ -108,6 +108,7 @@ async function personBox(desktop: 'chrome' | 'empty' | 'hung' = 'chrome', consen
   } as never)
   ctx.provide('workspaceRegistry', { list: () => [] } as never)
   ctx.provide('sessions', { list: () => [], get: () => undefined } as never)
+  ctx.provide('sessionPersistence', { list: async () => [] } as never)
   // Browser consent's take-over service, which the person box's consent row provides.
   const withdrawConsent = consent === undefined ? undefined : ctx.provide('mumbo-browser-consent', consent as never)
   const commands: string[] = []

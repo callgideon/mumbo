@@ -244,6 +244,7 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
     runs: 'run-as', tools: ['mcp__playwright-mcp__*'], identity: 'browsermcp', note: 'the Playwright MCP stdio server; uploads only from the shared Downloads',
   },
   '@mumbo/edge-member': NONE,
+  '@mumbo/edge-member/project-workspace': NONE,
   '@mumbo/run-wild': { ...NONE, note: 'decides asks in the person\'s Run Wild Sessions; registers no tool' },
   '@mumbo/state': { runs: 'in-process', tools: ['plan_read'], note: 'returns the approved plan\'s text from the Session log' },
   '@mumbo/mcp': {

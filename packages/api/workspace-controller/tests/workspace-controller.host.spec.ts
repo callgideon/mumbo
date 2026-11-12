@@ -10,11 +10,14 @@ import { RemoteError, type PeerId, type Principal, type RemoteInvocation } from 
 import WorkspaceRegistry from '@deepseek-ai/dsh-workspace'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import RemoteAccessService, { type RemoteAccessCondition, type RemoteAccessRole } from '@deepseek-ai/dsh-api-remote-access'
+import TypertGatewayService from '@deepseek-ai/dsh-api-gateway'
+import { Peer } from '@deepseek-ai/dsh-client-connection'
+import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
 import WorkspaceController from '../src/index.ts'
 import { DEFAULT_WORKSPACE_DIRECTORY } from '../src/default-workspace.ts'
 import { WorkspaceFeed } from '../src/feed.ts'
 import type { WorkspaceFollowFrame } from '../src/types.ts'
-import { MemoryStorageBackend } from '../../../storage/storage-domain/tests/helpers/memory-backend.ts'
+import { MemoryMediaPool, MemoryStorageBackend } from '../../../storage/storage-domain/tests/helpers/memory-backend.ts'
 
 // The controller relays whatever families the providers report; this suite merges its own.
 declare module '@deepseek-ai/dsh-workspace/types' {
@@ -589,6 +592,58 @@ describe('WorkspaceController follow', () => {
     await ctx.fiber.dispose()
     roots.splice(roots.indexOf(ctx), 1)
     await expect(closing).resolves.toEqual({ done: true, value: undefined })
+  })
+})
+
+describe('WorkspaceController after a restore', () => {
+  it('answers no Workspace call until the registry has read the restored store, then lists it without a write', async () => {
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'dsh-workspace-restore-')))
+    tempDirs.push(root)
+    const path = stageDir(root, 'restored')
+    const pool = new MemoryMediaPool()
+    pool.versions.set('workspace', 2)
+    pool.media.set('workspace', {
+      tables: new Map([['workspaces', new Map<string, unknown>([['restored', {
+        path, title: 'restored', sessionIds: [], createdAt: '2026-11-12T14:00:00.000Z', updatedAt: '2026-11-12T14:00:00.000Z',
+      }]])]]),
+      global: { initialized: true, workspaceIds: ['restored'] },
+    })
+    const read = Promise.withResolvers<undefined>()
+    pool.gate = read.promise
+    const ctx = new Context()
+    roots.push(ctx)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(Storage)
+    ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
+    const storageDomain = new DomainFacility(ctx, { backend: 'memory', routes: {} })
+    ctx.storage.mount('domain', storageDomain)
+    ctx.provide('storageDomain', storageDomain)
+    ctx.provide('sessionPersistence', { list: () => Promise.resolve([]) } as never)
+    await ctx.plugin(TypertRegistry)
+    await ctx.plugin(RemoteAccessService)
+    await ctx.plugin(TypertGatewayService)
+    const writes: unknown[] = []
+    ctx.on('domain/changed', (change) => { writes.push(change) })
+    void ctx.plugin(WorkspaceRegistry)
+    void ctx.plugin(WorkspaceController, { documentsDirectory: root })
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(ctx.get('workspaceRegistry')).toBeUndefined()
+    expect(ctx.get('workspaceController')).toBeUndefined()
+    const owner = new Peer(ctx.root, { principal: { kind: 'owner' } })
+    await expect(ctx.typertGateway.invoke({
+      peer: owner, namespace: 'workspace', method: 'rename', args: { request: { workspaceId: 'restored', title: 'early' } },
+    })).rejects.toMatchObject({ code: 'gateway/invocation-unavailable' })
+    pool.gate = undefined
+    read.resolve(undefined)
+    await vi.waitFor(() => { expect(ctx.get('workspaceController')).toBeDefined() })
+    const abort = new AbortController()
+    const iterator = ctx.workspaceController.follow(abort.signal)[Symbol.asyncIterator]()
+    await expect(nextFrame(iterator)).resolves.toMatchObject({
+      type: 'baseline', value: { items: [{ workspaceId: 'restored', path, title: 'restored' }] },
+    })
+    abort.abort()
+    await iterator.return?.()
+    expect(writes).toEqual([])
   })
 })
 

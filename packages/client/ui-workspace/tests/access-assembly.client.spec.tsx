@@ -48,6 +48,8 @@ async function bench(access: ClientAccessState, options: { ungroupedSession?: Se
     apply(ctx) {
       ctx.provide('remoteAccess', {
         source: (kind: TypertResourceKind, id: string, action: string) => access.resource(kind, id, action),
+        // No global grant installs effects here, as on a page without one.
+        whenAccess: () => () => {},
       })
       ctx.slots.provideRoot({ keyedHooks: { remoteAccess: action => access.global(action) } })
     },

@@ -5,6 +5,7 @@ import type { WorkspaceSnapshot, WorkspaceView } from '@deepseek-ai/dsh-api-work
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { LayoutController } from '@deepseek-ai/dsh-client-ui-layout/client'
+import { StaticRemoteAccess } from '@deepseek-ai/dsh-client-test-runtime'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { en } from '@deepseek-ai/dsh-client-ui-workspace/src/client/locales.ts'
 import { UiWorkspaceService } from '@deepseek-ai/dsh-client-ui-workspace/src/client/navigation.ts'
@@ -94,6 +95,8 @@ async function page(options: PageOptions) {
   ctx.provide('sessions', sessions as never)
   ctx.provide('workspaces', workspacesService as never)
   const view = createWorkspaceViewStore().create()
+  // The owner's page: every access answer allows.
+  new StaticRemoteAccess(ctx)
   // The service provides `uiWorkspace` on the root, as ui-workspace's apply does.
   const service = new UiWorkspaceService(ctx, {} as never, workspacesService as never, sessions as never, view.actions, vi.fn())
   const plugin = options.plugin === false ? undefined : await ctx.plugin({ inject, apply })
