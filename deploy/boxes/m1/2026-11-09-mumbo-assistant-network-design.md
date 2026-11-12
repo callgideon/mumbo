@@ -1390,6 +1390,10 @@ The cache's worst case is a subscription that dies silently: copies are served f
     - **Members hold the Workspace role on the project Workspace only.** A configured box would otherwise open a member into superagent's directory. Superagent's Sessions stay readable under Ungrouped.
     - **The member client never calls `initializeDefault`.** It checks the grant with `whenAccess`. The Gateway logs each refused or failed call at warn, or at error for internal failures, with no arguments.
     - **A member's existing Sessions stay reachable.** Sessions started outside any Workspace (cwd `/src`) are listed and openable for members, so earlier project conversations don't vanish once they stop running. New member Sessions start in the project Workspace.
+  - **[2026-11-12, build review, PR #56]**
+    - A re-create follows only the deletion of the project Workspace's own record. Reacting to any deletion looped on the registry's rollback delete.
+    - A Gateway failure line carries the message only when the Gateway wrote it. A handler's own error is logged by code, because handlers can build messages from arguments.
+    - `session/create` stays in members' global role for now. The sidebar's New Session and the Desktop titlebar button show only while that grant holds, though every client create names a Workspace. Until **B49b** moves both buttons to the target Workspace's grant and drops the global one, a member's Workspace-less create over the API can name any directory, or gets `/src`.
 
 **Acceptance (first milestone: the founder's box in Mumbai):**
 - **The move.** The founder's box runs in the `ap-south-1` cell, moved from `us-east-1` with Sessions, schedules, files and Chrome sign-ins intact.
