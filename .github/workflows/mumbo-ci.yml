@@ -86,10 +86,12 @@ jobs:
       - name: Prepare bubblewrap
         run: bash scripts/prepare-ci-bubblewrap.sh
 
-      # Spill and helper-permission tests expect umask 0022.
+      # Spill and helper-permission tests expect umask 0022. The ci-unit aggregate's two steps, with mumbo's selection:
+      # vitest.mumbo-ci.config.ts leaves out the tests scripts/mumbo-ci-unit-exclusions.ts lists.
       - name: Run unit tests
         env:
           DSH_COVERAGE_TEST_TIMEOUT_MS: '90000'
         run: |
           umask 0022
-          pnpm run check:ci:unit
+          pnpm run build:native-system
+          pnpm exec vitest run --config vitest.mumbo-ci.config.ts
