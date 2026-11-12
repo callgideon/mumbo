@@ -106,6 +106,8 @@ E2B's own `onTimeout: pause` (15 minutes later) is the safety net if the edge is
 | Failure | Behavior |
 |---|---|
 | E2B API error on lookup or create | 503 page that retries every 5 s. No duplicate box is created. |
+| Snapshot cannot resume (E2B answers the resume with a failure) | Starting page; each visit retries. From 10 minutes after the first failure, with room in the cell, the box is recreated from its latest backup. |
+| Cell full on resume (E2B's 503 or 429, or a node's memory refusal) | At-capacity page; the box and its record are unchanged. |
 | dsh not up 90 s after a new start | The new box is killed (it holds only the restored backup) and the user gets 503. |
 | dsh dead after a resume | `start.sh` restarts it in place; data stays. |
 | Edge restart | Launch tokens are re-read from boxes. Box tokens are re-validated against E2B. In-memory budgets reset. |

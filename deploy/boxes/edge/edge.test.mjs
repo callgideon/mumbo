@@ -10,12 +10,15 @@ import { haltService } from './halt.mjs'
 import { tokenBudget } from './budget.mjs'
 import { fakeRedis, subscribed } from './testing/store-trace.mjs'
 import { generateKeyPairSync, createSign } from 'node:crypto'
-import { SandboxError, SandboxNotFoundError, SandboxNotRunningError, SandboxUnreachableError, TimeoutError } from 'e2b'
+import { RateLimitError, SandboxError, SandboxNotFoundError, SandboxNotRunningError, SandboxUnreachableError, TimeoutError } from 'e2b'
+import { sdkError } from './testing/e2b-answers.mjs'
 
 const cfg = { pageAfterMs: 3000, publicHost: 'boxes.example', projectDomain: 'boxes.example', llmHost: 'llm.example', template: 'mumbo-box', idleMs: 60_000, backupEveryMs: 600_000, allowed: ['@x.com'], egressIps: [], signinCookie: '_oauth2_proxy_mumbo', upstream: 'https://model.example', edgeRegion: 'us-east-1' }
 const PROXY = new URL('http://127.0.0.1:1')
 /** A request budget that is always open and charges nothing. */
 const OPEN = { allow: async () => true, charge() {} }
+/** A `restore` or `backup` log line without its `ms`, which must be a duration in whole milliseconds. */
+const withoutMs = ({ ms, ...line }) => { assert.ok(Number.isInteger(ms) && ms >= 0, `ms ${ms}`); return line }
 /** One us-east-1 cell over a fake E2B, as cells.mjs cellClients builds one; `extra` overrides its fields. */
 const oneCell = (e2b, extra = {}) => new Map([['us-east-1', { region: 'us-east-1', Sandbox: e2b.Sandbox, proxy: PROXY, bucket: 'bk', maxUnits: 10, presignGet: async () => undefined, presignPut: async () => 'P', ...extra }]])
 const listen = (server) => new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port)))
@@ -77,7 +80,7 @@ test('a backup that leaves Downloads items out is logged with its line', async (
   const b = boxes({ cells: oneCell(e2b, { presignGet: async () => undefined, presignPut: async () => 'PUT' }), store: memoryStore(), cfg, edgeKey: 'k', log: (l) => logs.push(JSON.parse(l)) })
   await b.ensure('a@x.com')
   await b.sweep(Date.now() + cfg.idleMs + 1)
-  assert.deepEqual(logs.filter(l => l.msg === 'backup').map(l => l.left), ['downloads left out of the backup: 2 items, 3000 MiB'])
+  assert.deepEqual(logs.filter(l => l.msg === 'backup').map(withoutMs).map(l => l.left), ['downloads left out of the backup: 2 items, 3000 MiB'])
 })
 
 test('allowlist takes exact addresses and @domains, and admits nobody when empty', () => {
@@ -355,12 +358,13 @@ test('redis store has the same contract', { skip: !process.env.TEST_REDIS_URL &&
   await store.close()
 })
 
-test('a box whose snapshot E2B answers it cannot resume is replaced from backup instead of stranding the user', async () => {
+test('a paused box without a record whose snapshot E2B answers it cannot resume is replaced from backup at once: no record holds a grace', async () => {
   const e2b = fakeE2B(); const killed = []
   e2b.made.push({ id: 'broken', opts: {} })
   e2b.Sandbox.list = (o) => ({ hasNext: true, nextItems: async function () { this.hasNext = false; return o.query.metadata ? e2b.made.filter(m => m.id !== 'gone').map(m => ({ sandboxId: m.id, state: m.id === 'broken' ? 'paused' : 'running', startedAt: m.id })) : [] } })
-  // The SDK's error for an API answer it has no class for: a SandboxError carrying the HTTP status.
-  e2b.Sandbox.connect = async () => { throw Object.assign(new SandboxError('500: Failed to create sandbox: snapshot not found in storage'), { statusCode: 500 }) }
+  // The unresponsive guest's answer: a SandboxError 500 "Failed to place sandbox: …" that is not capacity.
+  const answer = await answered('guest-unresponsive-resume')
+  e2b.Sandbox.connect = async () => { throw answer }
   e2b.Sandbox.kill = async (id) => { killed.push(id); e2b.made = e2b.made.filter(m => m.id !== id); e2b.made.forEach(() => {}) }
   const b = boxes({ cells: oneCell(e2b, { presignGet: async () => undefined, presignPut: async () => 'P' }), store: memoryStore(), cfg, edgeKey: 'k', log: () => {} })
   const r = await b.ensure('a@x.com')
@@ -417,12 +421,12 @@ test('a failed restore drops the new box, logged at error, so no backup of it re
   await assert.rejects(b.ensure('a@x.com'), (e) => e.status === 503 && e.restoreFailed === true)
   assert.deepEqual(killed, ['b1'])
   assert.equal(await store.getBox('b1'), undefined)
-  assert.deepEqual(logs.filter(l => l.msg === 'restore'), [{ edge: 'box', level: 'error', msg: 'restore', user: 'a@x.com', box: 'b1', region: 'us-east-1', ok: false }])
+  assert.deepEqual(logs.filter(l => l.msg === 'restore').map(withoutMs), [{ edge: 'box', level: 'error', msg: 'restore', user: 'a@x.com', box: 'b1', region: 'us-east-1', ok: false }])
   assert.ok(!ran.some(c => c.includes('/root/.mumbo/start.sh') || c.includes('--upload-file')), 'neither started nor backed up')
   fail = false
   const { id } = await b.ensure('a@x.com')
   assert.equal(id, 'b2')
-  assert.deepEqual(logs.filter(l => l.msg === 'restore').at(-1), { edge: 'box', msg: 'restore', user: 'a@x.com', box: 'b2', region: 'us-east-1', ok: true })
+  assert.deepEqual(withoutMs(logs.filter(l => l.msg === 'restore').at(-1)), { edge: 'box', msg: 'restore', user: 'a@x.com', box: 'b2', region: 'us-east-1', ok: true })
   // The alarm on that line, and the RUNBOOK entry its description links to.
   const { readFileSync } = await import('node:fs')
   assert.ok(readFileSync(new URL('../prod/ops.tf', import.meta.url), 'utf8').includes('edge-restore-failed = { group = module.edge_us_east_1.log_group, pattern = "{ ($.msg = \\"restore\\" && $.ok IS FALSE) || $.msg = \\"restore version unknown\\" }" }'))
@@ -450,7 +454,7 @@ test('a restore record: the next create restores that version, and the record st
   const { id } = await r.b.ensure('a@x.com')
   assert.deepEqual(r.presigned, [[KEY, 'v1']])
   assert.ok(r.ran.includes(restoreCommand('GET-URL-v1')), 'the restore command fetches the versioned URL')
-  assert.deepEqual(r.logs.filter(l => l.msg === 'restore'), [{ edge: 'box', msg: 'restore', user: 'a@x.com', box: id, region: 'us-east-1', ok: true, versionId: 'v1' }])
+  assert.deepEqual(r.logs.filter(l => l.msg === 'restore').map(withoutMs), [{ edge: 'box', msg: 'restore', user: 'a@x.com', box: id, region: 'us-east-1', ok: true, versionId: 'v1' }])
   assert.deepEqual(await r.store.getDoc(restoreKey('a@x.com')), { versionId: 'v1', at: 1 }, 'no backup holds the restored data yet')
   // Lost before its first backup: the next creation restores the same version, not latest.tar.gz.
   r.killed.push(id); await r.store.deleteBox(id)
@@ -474,7 +478,7 @@ test('a create from a recorded version that fails in the restore or after it kee
   let failing = 'GET-URL'
   const r = await restoreRig({ record: { versionId: 'v1', at: 1 }, fail: (c) => failing !== undefined && c.includes(failing) })
   await assert.rejects(r.b.ensure('a@x.com'), (e) => e.status === 503 && e.restoreFailed === true)
-  assert.deepEqual(r.logs.find(l => l.msg === 'restore'), { edge: 'box', level: 'error', msg: 'restore', user: 'a@x.com', box: 'b1', region: 'us-east-1', ok: false, versionId: 'v1' })
+  assert.deepEqual(withoutMs(r.logs.find(l => l.msg === 'restore')), { edge: 'box', level: 'error', msg: 'restore', user: 'a@x.com', box: 'b1', region: 'us-east-1', ok: false, versionId: 'v1' })
   assert.deepEqual(await r.store.getDoc(restoreKey('a@x.com')), { versionId: 'v1', at: 1 })
   failing = 'chmod 0700 /root/.mumbo/start.sh'  // restored, then start.sh fails: the box is dropped
   await assert.rejects(r.b.ensure('a@x.com'))
@@ -648,7 +652,7 @@ test('backups carry the browser user\'s home without caches or profile locks, an
   for (const x of ['.cache', '.chromium-profile-old', 'chrome-profile/Singleton*', 'chrome-profile/*/Cache', 'chrome-profile/*/Code Cache', 'chrome-profile/*/GPUCache', 'profile/Singleton*', 'profile/*/Cache']) assert.ok(c.includes(`--exclude='home/browser/${x}'`), x)
 })
 
-test('an idle box is paused with its next scheduled run and woken for it, restarting dsh', async () => {
+test('an idle box is paused with its next scheduled run and woken for it, restarting dsh; the wake clears a failed resume\'s mark', async () => {
   const { NEXT_WAKE_COMMAND } = await import('./edge.mjs')
   const e2b = fakeE2B(); const ran = []; const paused = []
   const due = Date.now() + 3 * 3600_000
@@ -665,10 +669,11 @@ test('an idle box is paused with its next scheduled run and woken for it, restar
   await store.release('sweep')
   await b.sweep(due - 2 * 60_000)  // not yet due: stays paused
   assert.equal((await store.getBox(id)).paused, true)
+  await store.patchBox(id, { resumeFailedAt: Date.now() })  // a visit's resume failed (repair's grace); this one works
   await store.release('sweep')
   await b.sweep(due - 30_000)
   const rec = await store.getBox(id)
-  assert.equal(rec.paused, false); assert.equal(rec.wakeAt, undefined); assert.equal(rec.launch, 'launch456')
+  assert.equal(rec.paused, false); assert.equal(rec.wakeAt, undefined); assert.equal(rec.launch, 'launch456'); assert.equal(rec.resumeFailedAt, undefined)
   assert.ok(ran.includes('/root/.mumbo/start.sh'))
 })
 
@@ -1890,10 +1895,10 @@ test('pauseIdle skips a box that a request reached while its next scheduled wake
 
 // ---- B47: a box E2B still runs is never killed for being unreachable
 /** Boxes over two fake cells, with a person box `u1` that us-east-1's E2B lists in `state` and a record without a launch
- *  token (unless `record` gives one), so ensure resumes or repairs it. `connect(id, original)` replaces E2B's connect.
- *  `changes()` lists the kills and creates. */
-async function repairRig({ state = 'running', record = {}, connect } = {}) {
-  const t = twoCells(); const store = memoryStore(); const logs = []
+ *  token (unless `record` gives one), so ensure resumes or repairs it. `connect(id, original)` replaces E2B's connect;
+ *  `us` sets fakeCell's options for us-east-1. `changes()` lists the kills and creates. */
+async function repairRig({ state = 'running', record = {}, connect, us } = {}) {
+  const t = twoCells({ us }); const store = memoryStore(); const logs = []
   t.us.run('u1', 'a@x.com', state)
   await store.putBox('u1', { email: 'a@x.com', host: cfg.publicHost, ports: PORTS, active: Date.now(), extended: Date.now(), backedUp: 1, paused: state === 'paused', ...record })
   const original = t.us.Sandbox.connect
@@ -1903,6 +1908,12 @@ async function repairRig({ state = 'running', record = {}, connect } = {}) {
 }
 /** A connect whose box fails every command with `error`, as a box behind an unreachable client-proxy does. */
 const failingCommands = (error) => async (id, original) => ({ ...await original(id), commands: { run: async () => { throw error } } })
+/** The error the real SDK throws for the answer in testing/fixtures/resume/`name`.ap-south-1.json, replayed from a loopback
+ *  server (testing/e2b-answers.mjs); with `path`, the same answer to that request (`/v2/sandboxes`: a create). */
+async function answered(name, path) {
+  const { raw } = JSON.parse(readFileSync(new URL(`./testing/fixtures/resume/${name}.ap-south-1.json`, import.meta.url), 'utf8'))
+  return (await sdkError({ raw: path ? { ...raw, request: { ...raw.request, path } } : raw })).error
+}
 
 test('B47: a connection error to the client-proxy, from a page or a WebSocket, drops only the cached target: the record keeps its launch token and the next ensure makes no repair, kill or create', async () => {
   const t = twoCells(); const store = memoryStore()  // us-east-1's client-proxy, 127.0.0.1:1, refuses connections
@@ -1930,7 +1941,7 @@ test('B47: a connection error to the client-proxy, from a page or a WebSocket, d
   } finally { server.close() }
 })
 
-test('B47: a box E2B lists running that gives no answer is left as it is: 503, a box unreachable error line, no kill, no create, the record unchanged', async () => {
+test('B47: a box E2B lists running, or a resume or repair with no answer, is left as it is: 503, a box unreachable error line, no kill, no create, the record unchanged', async () => {
   const fetchFailed = new TypeError('fetch failed', { cause: Object.assign(new Error('connect ECONNREFUSED 10.0.0.1:80'), { code: 'ECONNREFUSED' }) })
   const connectFails = (error) => async () => { throw error }
   const cases = {
@@ -1943,9 +1954,15 @@ test('B47: a box E2B lists running that gives no answer is left as it is: 503, a
     'connect: the API cannot reach the node of a box it lists running': [Object.assign(new SandboxError('500: Error when setting sandbox timeout'), { statusCode: 500 }), connectFails],
     'connect: the API\'s 500 for a running box whose record says paused': [Object.assign(new SandboxError('500: Error when setting sandbox timeout'), { statusCode: 500 }), connectFails, { launch: 'L', paused: true }],
     'connect: a running box that is changing state': [Object.assign(new SandboxError('409: Sandbox u1 is changing state'), { statusCode: 409 }), connectFails],
+    // E2B's 503 to a connect of a box it lists running is about the API, not a full cell: no resume ran.
+    'connect: the API\'s 503 for a box it lists running': [await answered('node-gone-resume-empty-cell'), connectFails],
+    // A placement that outlasts the SDK's 60 s carries no answer.
+    'connect: a resume the SDK aborts': [await answered('busy-node-resume'), connectFails, undefined, 'paused'],
+    // After a resume that worked, envd's RateLimitError (its ResourceExhausted) is not E2B's capacity answer.
+    'dshUp after a resume: envd\'s RateLimitError': [new RateLimitError('resource_exhausted: Rate limit exceeded, please try again later.'), failingCommands, undefined, 'paused'],
   }
-  for (const [name, [error, connect, record]] of Object.entries(cases)) {
-    const r = await repairRig({ connect: connect(error), record })
+  for (const [name, [error, connect, record, state]] of Object.entries(cases)) {
+    const r = await repairRig({ connect: connect(error), record, state })
     const before = await r.store.getBox('u1')
     await assert.rejects(r.b.ensure('a@x.com'), (e) => e === error && e.status === 503, name)
     assert.deepEqual([r.changes(), await r.store.getBox('u1')], [[], before], name)
@@ -1985,4 +2002,72 @@ test('B47: a backup the client-proxy answers with sandbox-not-found keeps the bo
   r.us.sandboxes.delete('u1')
   await r.b.sweep(now + 6 * 60_000)
   assert.equal(await r.store.getBox('u1'), undefined)
+})
+
+// ---- B47b: resume and create failures classified by E2B's answers (testing/fixtures/resume/; recorded: false marks one
+// synthesized from source until record-resume.e2e.mjs records it)
+const GRACE_MS = 10 * 60_000  // edge.mjs RESUME_GRACE_MS
+
+test('B47b: a full cell answers a resume with capacity, by class (503, 429) or by the node\'s memory refusal: the at-capacity page, no kill, no create, the record unchanged', async () => {
+  for (const name of ['full-cell-resume', 'node-gone-resume-empty-cell', 'team-limit-resume']) {
+    const error = await answered(name)
+    const r = await repairRig({ state: 'paused', record: { launch: 'L' }, connect: async () => { throw error } })
+    const before = await r.store.getBox('u1')
+    await assert.rejects(r.b.ensure('a@x.com'), (e) => e === error && e.capacity === true, name)
+    assert.deepEqual([r.changes(), await r.store.getBox('u1')], [[], before], name)
+  }
+})
+
+test('B47b: any other final answer to a resume is retried for the grace: 503 and a resume failed; retrying line, resumeFailedAt set once, no kill; a resume that works clears it', async () => {
+  // The unresponsive guest's generic 500, a snapshot whose files are not in S3 yet, and a snapshot marked unresponsive.
+  for (const name of ['guest-unresponsive-resume', 'node-gone-resume', 'guest-unresponsive-resume-marked']) {
+    const error = await answered(name)
+    let failing = true
+    const r = await repairRig({ state: 'paused', record: { launch: 'L' }, connect: async (id, original) => { if (failing) throw error; return original(id) } })
+    const before = Date.now()
+    await assert.rejects(r.b.ensure('a@x.com'), (e) => e === error && e.status === 503 && !e.capacity, name)
+    const { resumeFailedAt } = await r.store.getBox('u1')
+    assert.ok(resumeFailedAt >= before && resumeFailedAt <= Date.now(), name)
+    // A later visit within the grace keeps the first failure's time.
+    await r.store.patchBox('u1', { resumeFailedAt: resumeFailedAt - GRACE_MS + 60_000 })
+    await assert.rejects(r.b.ensure('a@x.com'), (e) => e === error && e.status === 503, name)
+    assert.deepEqual(r.changes(), [], name)
+    assert.deepEqual(r.logs.filter(l => l.msg === 'resume failed; retrying').map(l => l.resumeFailedAt), [resumeFailedAt, resumeFailedAt - GRACE_MS + 60_000], name)
+    assert.deepEqual(r.logs.find(l => l.msg === 'resume failed; retrying'), { edge: 'error', level: 'error', msg: 'resume failed; retrying', user: 'a@x.com', box: 'u1', region: 'us-east-1', resumeFailedAt, error: error.message }, name)
+    failing = false
+    assert.equal((await r.b.ensure('a@x.com')).id, 'u1', name)
+    assert.equal((await r.store.getBox('u1')).resumeFailedAt, undefined, name)
+  }
+  // The RUNBOOK entry for both lines.
+  assert.match(readFileSync(new URL('../RUNBOOK.md', import.meta.url), 'utf8'), /^### Resume failures\n.*\n- \*\*`resume failed; retrying`\*\*.*\n- \*\*`resume failed; recreating from backup`\*\*/m)
+})
+
+test('B47b: past the grace, a final answer to a resume recreates the box from backup while the cell has room; in a cell full by the edge\'s count it is the at-capacity page, with no kill', async () => {
+  const error = await answered('guest-unresponsive-resume')
+  const record = { launch: 'L', resumeFailedAt: Date.now() - GRACE_MS }
+  const room = await repairRig({ state: 'paused', record, connect: async () => { throw error } })
+  assert.notEqual((await room.b.ensure('a@x.com')).id, 'u1')
+  assert.deepEqual(room.changes(), [['kill', 'u1'], ['create', { user: 'a@x.com' }]])
+  assert.equal(room.logs.find(l => l.msg === 'resume failed; recreating from backup').error, error.message)
+  // Another person's running box fills 2 of 3 units, and the box would need 2 more.
+  const full = await repairRig({ state: 'paused', record, connect: async () => { throw error }, us: { maxUnits: 3 } })
+  full.us.run('u2', 'b@x.com')
+  const before = await full.store.getBox('u1')
+  await assert.rejects(full.b.ensure('a@x.com'), (e) => e === error && e.capacity === true)
+  assert.deepEqual([full.changes(), await full.store.getBox('u1')], [[], before])
+})
+
+test('B47b: a create is at capacity on E2B\'s 503 or 429 or a node\'s memory refusal, and not on any other failure', async () => {
+  const CREATE = '/v2/sandboxes'
+  for (const [name, error, capacity] of [
+    ['503', await answered('node-gone-resume-empty-cell', CREATE), true],
+    ['429', await answered('team-limit-resume', CREATE), true],
+    ['memory refusal', await answered('full-cell-create'), true],
+    ['generic 500, "Failed to place sandbox"', await answered('guest-unresponsive-resume', CREATE), false],
+  ]) {
+    const e2b = fakeE2B()
+    e2b.Sandbox.create = async () => { throw error }
+    const b = boxes({ cells: oneCell(e2b), store: memoryStore(), cfg, edgeKey: 'k', log: () => {} })
+    await assert.rejects(b.ensure('a@x.com'), (e) => e === error && (e.capacity === true) === capacity && (!capacity || e.status === 503), name)
+  }
 })

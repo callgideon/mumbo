@@ -8,7 +8,7 @@ import { createHash, createHmac, createVerify, timingSafeEqual } from 'node:cryp
 import { readFileSync, readdirSync } from 'node:fs'
 import { createServer, request as httpRequest } from 'node:http'
 import { Readable, pipeline } from 'node:stream'
-import { CommandExitError, SandboxError, SandboxNotFoundError } from 'e2b'
+import { CommandExitError, RateLimitError, SandboxError, SandboxNotFoundError, ServiceBusyError } from 'e2b'
 import { ownersOf } from './projects.mjs'
 import { atCapacity, unitsFor } from './capacity.mjs'
 import { LEGACY_REGION, cellClients, cellIn, cellsConfig, placementKey, regionOf } from './cells.mjs'
@@ -1200,13 +1200,17 @@ export async function inParallel(items, limit, fn) {
 
 // ---- the router's view of E2B. `cells` (cells.mjs cellClients) holds every cell's E2B and S3 clients and `store` the
 // shared state (store.mjs); both are injected. A box record: { email, region, launch, traffic, active, extended, backedUp,
-// paused, ports }, plus { creating, first } until creation ends, and { restored: versionId } until the first backup of a
-// box created from a restore record. `region` is the cell the box runs in (regionOf: us-east-1 without one): every E2B
+// paused, ports }, plus { creating, first } until creation ends, { restored: versionId } until the first backup of a
+// box created from a restore record, and { resumeFailedAt } from E2B's first final answer to its resume until a resume
+// or wake works (repair). `region` is the cell the box runs in (regionOf: us-east-1 without one): every E2B
 // and S3 call for a box goes through its cell, and for a principal through the cell its placement doc names (cells.mjs
 // placementKey). `ports` is the box's pair (portsFrom its template's marker); a record without it is routed to OLD_PORTS
 // (boxHeaders).
 export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log }) {
   const LOCK_MS = 120_000
+  // How long a box whose resume E2B answers with a failure is retried before it is recreated from backup: a snapshot
+  // still uploading from a drained node resumes once the upload lands (RUNBOOK "Drain upload times").
+  const RESUME_GRACE_MS = 10 * 60_000
   const CREATE_STALE_MS = 15 * 60_000  // longer than a restore (11 min cap) plus dsh start
   const say = (fields) => log(JSON.stringify({ edge: 'box', ...fields }))
   const run = (box, cmd, timeoutMs = 60_000) => box.commands.run(cmd, { timeoutMs }).then(r => r.stdout.trim())
@@ -1256,12 +1260,17 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
   // A resume or repair failure that is E2B's answer that the box cannot run: start.sh exited with an error, envd answered
   // every look for the launch token and dsh never came back (launchToken), or the API answered connect's resume of a box
   // E2B listed paused (`resumed`) with an error. The SDK has no class for a failed resume; API answers are SandboxErrors
-  // carrying the HTTP status. 502 and 504 are a gateway's (the API's own 504, a placement timeout, is caught as capacity
-  // first); every other status counts as final, a 5xx from an internal API fault included. Connect to a box listed
-  // running resumes nothing, so its API errors (a 500 when the API cannot reach the box's node, a 409 while the box is
-  // being paused) say nothing about the box.
+  // carrying the HTTP status. 502 and 504 are a gateway's; every other status counts as final, a 5xx from an internal API
+  // fault included, and a final answer to a resume recreates the box only after RESUME_GRACE_MS (repair). Connect to a
+  // box listed running resumes nothing, so its API errors (a 500 when the API cannot reach the box's node, a 409 while
+  // the box is being paused) say nothing about the box.
   const cannotRun = (e, resumed) => e.dshDown === true || e instanceof CommandExitError
     || (resumed && e instanceof SandboxError && e.statusCode !== undefined && e.statusCode !== 502 && e.statusCode !== 504)
+  // E2B's "not now" to a create or a resume: no node has room (503, which is not a SandboxError), or the team's limit (429).
+  const busy = (e) => e instanceof ServiceBusyError || e instanceof RateLimitError
+  // A node's own refusal of a guest's memory as the API forwards it (e2b-runtime orchestrator/pkg/server/sandboxes.go,
+  // memoryRefusal): its hugepage pool is full. testing/fixtures/resume/full-cell-*.json pin the text.
+  const memoryFull = (e) => e instanceof SandboxError && /cannot map \d+ MiB of guest memory/.test(e.message)
 
   // A restore record whose version S3 does not serve (gone, a delete marker, a malformed id, or any other HEAD error) fails
   // the create as a failed restore would: no fallback to latest.tar.gz, and the record stays for the operator. `status` is
@@ -1284,7 +1293,7 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
       timeoutMs: timeout(), metadata: { user: email },
       lifecycle: { onTimeout: 'pause', autoResume: true },
       network: { allowPublicTraffic: false, maskRequestHost: boxSite(cfg, email).host },
-    }).catch((e) => { throw /place sandbox|capacity|too many|concurrent/i.test(e.message) ? Object.assign(e, { capacity: true, status: 503 }) : e })
+    }).catch((e) => { throw busy(e) || memoryFull(e) ? Object.assign(e, { capacity: true, status: 503 }) : e })
     // Recorded before the restore: other replicas then neither adopt nor back up a box whose data is half restored.
     // `first`: no backup exists, so this is the person's first set-up (the edge pages say so).
     await store.putBox(box.sandboxId, { email, region: cell.region, creating: Date.now(), first: !restoreUrl, active: Date.now(), extended: Date.now(), backedUp: Date.now(), paused: false })
@@ -1294,8 +1303,9 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
         email.startsWith('project:') ? await ownersOf(store, email.slice('project:'.length)) : undefined,
         email.startsWith('project:') ? undefined : { key: mumboMcpKey(edgeKey, box.sandboxId), principal: mcpPrincipal(email) }, email))
       if (restoreUrl) {
+        const t = Date.now()
         const ok = await run(box, restoreCommand(restoreUrl), 660_000).then(() => true, () => false)
-        say({ ...(ok ? {} : { level: 'error' }), msg: 'restore', user: email, box: box.sandboxId, region: cell.region, ok, ...(pin && { versionId: pin.versionId }) })
+        say({ ...(ok ? {} : { level: 'error' }), msg: 'restore', user: email, box: box.sandboxId, region: cell.region, ok, ms: Date.now() - t, ...(pin && { versionId: pin.versionId }) })
         // A partly restored box must never be backed up over the archive: the catch below drops it, and the next visit
         // restores again.
         if (!ok) throw Object.assign(new Error('restore failed'), { status: 503, restoreFailed: true })
@@ -1380,7 +1390,7 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
     if (known?.creating) throw Object.assign(new Error('box is being created'), { status: 503 })
     if (found.state === 'paused' || !known || known.paused || !known.launch) {
       try {
-        const box = await cell.Sandbox.connect(id, { timeoutMs: timeout() })
+        const box = await cell.Sandbox.connect(id, { timeoutMs: timeout() }).catch((e) => { throw Object.assign(e, { fromConnect: true }) })
         // A record without ports (an adopted box, or one an edge before B24 created) learns them from the box.
         const ports = known?.ports ?? await portsOf(box)
         if (!(await dshUp(box, ports))) {
@@ -1391,7 +1401,10 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
         record = { email, region: cell.region, host: known?.host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), ports, active: now, extended: now, backedUp: known?.backedUp ?? 0, paused: false, ...(known?.restored && { restored: known.restored }) }
         await store.putBox(id, record)
       } catch (error) {
-        if (error.capacity || /capacity|place sandbox|rate limit/i.test(error.message)) throw Object.assign(error, { capacity: true })
+        // The API's answer to the resume of a box E2B listed paused; an error from dshUp, start.sh or launchToken (envd's
+        // RateLimitError included) never is one.
+        const answer = error.fromConnect === true && found.state === 'paused'
+        if (memoryFull(error) || (answer && busy(error))) throw Object.assign(error, { capacity: true })
         if (error instanceof SandboxNotFoundError) {
           await store.deleteBox(id)
           say({ level: 'warn', msg: 'dropped missing box', user: email, box: id })
@@ -1399,12 +1412,23 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
         }
         // Without an answer that the box cannot run, the box and its record stay as they are, and the next visit tries
         // again: during a client-proxy outage a recreate would fail too, and the box would be lost (RUNBOOK "Box unreachable").
-        if (!cannotRun(error, found.state === 'paused')) {
+        if (!cannotRun(error, answer)) {
           log(JSON.stringify({ edge: 'error', level: 'error', msg: 'box unreachable', user: email, box: id, region: cell.region, error: error.message }))
           throw Object.assign(error, { status: 503 })
         }
-        // A snapshot that cannot be resumed (its node died before the upload finished), or dsh that never comes back,
-        // must not strand the user: drop the box and rebuild from the latest S3 backup.
+        // A final answer to a resume is retried at each visit for RESUME_GRACE_MS from the first: a snapshot still
+        // uploading from a drained node gives the same answer until the upload lands (RUNBOOK "Resume failures").
+        const failedAt = known?.resumeFailedAt ?? Date.now()
+        if (answer && known && Date.now() - failedAt < RESUME_GRACE_MS) {
+          if (known.resumeFailedAt === undefined) await store.patchBox(id, { resumeFailedAt: failedAt })
+          log(JSON.stringify({ edge: 'error', level: 'error', msg: 'resume failed; retrying', user: email, box: id, region: cell.region, resumeFailedAt: failedAt, error: error.message }))
+          throw Object.assign(error, { status: 503 })
+        }
+        // A create after the kill would be refused, and the box lost for nothing. A failed count throws: the box stays.
+        if (answer && await atCapacity(cell, unitsFor({ user: email }))) throw Object.assign(error, { capacity: true })
+        // A snapshot that still cannot be resumed (its node died before the upload finished, or its guest hung before the
+        // pause), a box without a record to hold the grace, or dsh that never comes back must not strand the user: drop
+        // the box and rebuild from the latest S3 backup.
         say({ level: 'error', msg: 'resume failed; recreating from backup', user: email, box: id, error: error.message })
         await cell.Sandbox.kill(id).catch(() => {})
         await store.deleteBox(id)
@@ -1458,9 +1482,10 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
   async function backup(id, b) {
     const url = await b.cell.presignPut(`${userPrefix(b.email)}/latest.tar.gz`)
     const box = await b.cell.Sandbox.connect(id, { timeoutMs: timeout() })
+    const t = Date.now()
     const left = await run(box, backupCommand(url), 660_000)
     await store.patchBox(id, { backedUp: Date.now() })
-    say({ msg: 'backup', user: b.email, box: id, region: b.cell.region, ...(left && { left }) })
+    say({ msg: 'backup', user: b.email, box: id, region: b.cell.region, ms: Date.now() - t, ...(left && { left }) })
     // The restored data is now latest.tar.gz: the one-shot record is spent, unless the operator replaced it meanwhile.
     if (b.restored) {
       if ((await store.getDoc(restoreKey(b.email)))?.versionId === b.restored) await store.deleteDoc(restoreKey(b.email))
@@ -1531,7 +1556,7 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
     await store.withLock(`user:${b.email}`, LOCK_MS, async () => {
       const box = await b.cell.Sandbox.connect(b.id, { timeoutMs: timeout() })
       await run(box, '/root/.mumbo/start.sh')
-      await store.patchBox(b.id, { paused: false, wakeAt: undefined, active: now, extended: now, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box) })
+      await store.patchBox(b.id, { paused: false, wakeAt: undefined, resumeFailedAt: undefined, active: now, extended: now, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box) })
       say({ msg: 'woke for schedule', user: b.email, box: b.id })
     }).catch(e => say({ level: 'error', msg: 'wake failed', user: b.email, box: b.id, error: e.message }))
   }
