@@ -2384,6 +2384,13 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 </li>
 </ul>
 </li>
+<li><strong>B49, the first page after a restore loads without an error</strong> [2026-11-12, seen once, on the founder's visit to the bitlane project box]:
+<ul>
+<li>The page called <code>workspace/initializeDefault</code> 14 s after the box started, while the restore was still settling, and showed &quot;unable to create default workspace&quot;. A later call succeeded.</li>
+<li>The cause comes from the box's logs first. The fix goes where the call fails: a request that arrives while dsh is starting waits for what it needs, or the edge keeps the starting page until dsh is ready. A client retry alone would hide the cause.</li>
+<li>Tests: a restore whose first <code>initializeDefault</code> arrives before settling succeeds, on person and project boxes.</li>
+</ul>
+</li>
 </ul>
 <p><strong>Acceptance (first milestone: the founder's box in Mumbai):</strong></p>
 <ul>
@@ -2840,12 +2847,12 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 </tr>
 <tr>
 <td><strong>K1</strong> (R1, R3) the state block</td>
-<td>A <code>PromptContext</code> rendered mechanically from the session's projections, never by a model. It holds the goal and its phase, the open todo items, the approved plan's step headings, open team tasks, and live subagents and jobs, capped at 1,600 characters with pointers beyond. It renders only the parts the session mounts.<br>The text changes only at a boundary (a compaction, a resume, or a goal phase change), so ordinary todo edits don't re-log it. Between boundaries those edits are visible as recent tool calls.<br>The plan headings come from the logged <code>exit_plan_mode</code> call and its approval, folded by the plan projection, so no new event is needed. A <code>plan_read</code> tool returns the full text.<br>Tests: a snapshot with a compaction shows the block re-logged once after it and not on unchanged turns, and old fixtures load unchanged</td>
+<td>A <code>PromptContext</code> rendered mechanically from the session's projections, never by a model. It holds the goal and its phase, the open todo items, the approved plan's step headings, open team tasks, and live subagents and jobs, capped at 1,600 characters with pointers beyond. It renders only the parts the session mounts.<br>The text changes only at a boundary (a compaction, a resume, or a goal phase change), so ordinary todo edits don't re-log it. Between boundaries those edits are visible as recent tool calls.<br>The plan headings come from the logged <code>exit_plan_mode</code> call and its approval, folded by the plan projection, so no new event is needed. A <code>plan_read</code> tool returns the full text.<br>Tests: a snapshot with a compaction shows the block re-logged once after it and not on unchanged turns, and old fixtures load unchanged<br><strong>[2026-11-12, live]</strong> On the bitlane project box (#50 image), a restore after a kill brought back a test Session whose first request carried the section with its open todo. Nothing ran at the kill, so there was no K2 notice and no reconcile line, and the log had no <code>mumbo-state</code> warnings. The test Session is archived</td>
 <td>After the B24 fix</td>
 </tr>
 <tr>
 <td><strong>K2</strong> (R5) the resume reconciler</td>
-<td>At the first step after a resume, it reads the log (jobs without <code>job/settled</code> or settled by teardown, subagents without a completion, workflows) and injects one logged notice: what died, what finished and where its result is, and that the goal needs a person to resume it. The same fact appears in <code>needs_you</code>. Tests: a log with an unsettled job yields exactly one notice.<br><strong>[2026-11-12, build review]</strong> It decides from the log alone: a job's owner settles it with <code>teardown</code> at shutdown, so a live-registry check could only hide one. Settled jobs and ended runs leave the state at the next <code>step/start</code>. A child counts as stopped when its last turn is open, interrupted or aborted by its Agent's disposal, and only if its last event falls inside the run that just ended, so a second restart doesn't repeat it. A disarmed goal reads &quot;automatic rounds stopped&quot;, because the goal driver also disarms on errors and cancelled turns, not only on restarts</td>
+<td>At the first step after a resume, it reads the log (jobs without <code>job/settled</code> or settled by teardown, subagents without a completion, workflows) and injects one logged notice: what died, what finished and where its result is, and that the goal needs a person to resume it. The same fact appears in <code>needs_you</code>. Tests: a log with an unsettled job yields exactly one notice.<br><strong>[2026-11-12, build review]</strong> It decides from the log alone: a job's owner settles it with <code>teardown</code> at shutdown, so a live-registry check could only hide one. Settled jobs and ended runs leave the state at the next <code>step/start</code>. A child counts as stopped when its last turn is open, interrupted or aborted by its Agent's disposal, and only if its last event falls inside the run that just ended, so a second restart doesn't repeat it. A disarmed goal reads &quot;automatic rounds stopped&quot;, because the goal driver also disarms on errors and cancelled turns, not only on restarts<br><strong>[2026-11-12]</strong> The live notice and the reconcile line with its time are checked at the first restart that interrupts a running turn. None is forced</td>
 <td>With K1</td>
 </tr>
 <tr>
