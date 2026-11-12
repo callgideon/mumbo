@@ -7,8 +7,8 @@
 
 /**
  * The evidence an exclusion rests on: no row, preset, optional bundle or loaded package reaches the package
- * (`not-mounted`), only Windows rows or Windows branches run it (`windows-only`), or no mumbo pipeline runs the
- * script the spec tests (`gate-not-run`).
+ * (`not-mounted`), only Windows rows or Windows branches run it (`windows-only`), or no mumbo pipeline runs a script
+ * the spec imports or names (`gate-not-run`).
  */
 export type ExclusionCategory = 'not-mounted' | 'windows-only' | 'gate-not-run'
 
@@ -22,8 +22,6 @@ export interface UnitExclusion {
   readonly reason: string
   /** For a `windows-only` package: the loaded packages that depend on it for a Windows-only row or branch. */
   readonly loadedDependents?: readonly string[]
-  /** For a `gate-not-run` spec: the scripts it tests, which no mumbo pipeline runs. */
-  readonly subjects?: readonly string[]
 }
 
 /** The unit job's exclusions, one entry per package, package glob or spec glob. */
@@ -53,6 +51,7 @@ export const MUMBO_CI_UNIT_EXCLUSIONS: readonly UnitExclusion[] = [
   { path: 'packages/experimental/webhook', category: 'not-mounted', reason: 'No row names it.' },
   { path: 'packages/experimental/webhook-github', category: 'not-mounted', reason: 'No row names it.' },
   { path: 'packages/experimental/webworker-packer', category: 'not-mounted', reason: 'Packs the worker-preview image for apps/web build:preview, which no deploy build runs.' },
+  { path: 'packages/experimental/claude-code-mods', category: 'not-mounted', reason: 'Only its own source-mode patch mounts it; liveshare imports only its Remote types.' },
   { path: 'packages/experimental/client-ui-claude-code-mods', category: 'not-mounted', reason: 'Only claude-code-mods\' source-mode patch mounts it, and no profile applies that patch.' },
   { path: 'apps/plugin-market-generator', category: 'not-mounted', reason: 'Command that writes plugin-market indexes; no profile loads it.' },
   { path: 'packages/test-support/*', category: 'not-mounted', reason: 'Test infrastructure; no profile loads it.' },
@@ -63,20 +62,16 @@ export const MUMBO_CI_UNIT_EXCLUSIONS: readonly UnitExclusion[] = [
   { path: 'packages/shell/tool-pwsh-persistent', category: 'windows-only', reason: 'Every row that names it is disabled off Windows.', loadedDependents: ['@deepseek-ai/dsh-web-app'] },
   { path: 'packages/sandbox/sandbox-windows-acl', category: 'windows-only', reason: 'Win32 ACL runner; sandbox-local imports it for its win32 chain only.', loadedDependents: ['@deepseek-ai/dsh-sandbox-local'] },
   { path: 'packages/subprocess/win32-process', category: 'windows-only', reason: 'Win32 process bindings; subprocess-local imports it for its win32 branch only.', loadedDependents: ['@deepseek-ai/dsh-subprocess-local'] },
-  { path: 'apps/desktop/tests/*windows*.spec.ts', category: 'windows-only', reason: 'Windows packaging, signing and runtime of the desktop app; mumbo-desktop.yml builds macOS arm64 only.' },
+  { path: 'apps/desktop/tests/{prepare-windows-ci,windows-*}.spec.ts', category: 'windows-only', reason: 'Windows packaging, signing and runtime of the desktop app; mumbo-desktop.yml builds macOS arm64 only.' },
 
-  { path: 'scripts/oxlint-contract.spec.ts', category: 'gate-not-run', reason: 'The lint gate; mumbo-ci runs no lint gate.', subjects: ['scripts/run-oxlint.ts'] },
-  { path: 'scripts/release/verify-packed-install.spec.ts', category: 'gate-not-run', reason: 'Installs packed npm release tarballs; mumbo publishes no npm packages.', subjects: ['scripts/release/verify-packed-install.ts'] },
-  { path: 'scripts/migrate-sessions-to-v4.spec.ts', category: 'gate-not-run', reason: 'One-time contributor command; no mumbo pipeline runs it.', subjects: ['scripts/migrate-sessions-to-v4.ts'] },
-  { path: 'scripts/{gen-third-party-notices,browser-bundled-externals}.spec.ts', category: 'gate-not-run', reason: 'Release third-party notices; neither the static job nor the image build writes them.', subjects: ['scripts/gen-third-party-notices.ts', 'scripts/browser-bundled-externals.ts'] },
-  { path: 'scripts/local-bundle-registry.spec.ts', category: 'gate-not-run', reason: 'The dev:bundle-registry development server; no pipeline runs it.', subjects: ['scripts/local-bundle-registry.ts'] },
-  { path: 'scripts/publint-all.spec.ts', category: 'gate-not-run', reason: 'The publint gate; mumbo-ci runs no publint gate.', subjects: ['scripts/publint-all.ts'] },
-  { path: 'scripts/build-exe-for-python-sdk*.spec.ts', category: 'gate-not-run', reason: 'The Python SDK executable build; mumbo ships no Python SDK.', subjects: ['scripts/build-exe-for-python-sdk.ts'] },
-  { path: 'scripts/python-runtime-download.spec.ts', category: 'gate-not-run', reason: 'The Python SDK runtime download; mumbo ships no Python SDK.', subjects: ['python/sdk-runtime/runtime-bootstrap.mjs'] },
-  { path: 'scripts/cua-helper/payload.spec.ts', category: 'gate-not-run', reason: 'Staging of the released computer-use helper payload; the desktop package step does not run it.', subjects: ['scripts/cua-helper/payload.ts'] },
-  { path: 'scripts/rescope-vendor.spec.ts', category: 'gate-not-run', reason: 'The vendor rescope command; mumbo-upstream-sync does not run it.', subjects: ['scripts/rescope-vendor.ts'] },
-  { path: 'scripts/session-query-spill-command.spec.ts', category: 'gate-not-run', reason: 'A recorded-session snapshot fixture; mumbo-ci runs no snapshot lane.', subjects: ['scripts/snapshot-spill-locators.ts'] },
-  { path: 'scripts/snapshot-shell-path.spec.ts', category: 'gate-not-run', reason: 'A recorded-session snapshot helper; mumbo-ci runs no snapshot lane.', subjects: ['scripts/snapshot-shell-path.ts'] },
+  { path: 'scripts/release/verify-packed-install.spec.ts', category: 'gate-not-run', reason: 'Installs packed npm release tarballs; mumbo publishes no npm packages.' },
+  { path: 'scripts/migrate-sessions-to-v4.spec.ts', category: 'gate-not-run', reason: 'One-time contributor command; no mumbo pipeline runs it.' },
+  { path: 'scripts/{gen-third-party-notices,browser-bundled-externals}.spec.ts', category: 'gate-not-run', reason: 'Release third-party notices; neither the static job nor the image build writes them.' },
+  { path: 'scripts/publint-all.spec.ts', category: 'gate-not-run', reason: 'The publint gate; mumbo-ci runs no publint gate.' },
+  { path: 'scripts/build-exe-for-python-sdk{,-assets,-native-pty,-resources,-staging}.spec.ts', category: 'gate-not-run', reason: 'The Python SDK executable build; mumbo ships no Python SDK.' },
+  { path: 'scripts/python-runtime-download.spec.ts', category: 'gate-not-run', reason: 'The Python SDK runtime download; mumbo ships no Python SDK.' },
+  { path: 'scripts/cua-helper/payload.spec.ts', category: 'gate-not-run', reason: 'Staging of the released computer-use helper payload; the desktop package step does not run it.' },
+  { path: 'scripts/rescope-vendor.spec.ts', category: 'gate-not-run', reason: 'The vendor rescope command; mumbo-upstream-sync does not run it.' },
 ]
 
 /**
