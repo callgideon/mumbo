@@ -39,6 +39,7 @@
     // Client packages outside packages/client with a local CSS module face.
     "packages/extensions/ui-cordis/src/css-modules.d.ts",
     "packages/mumbo/box-links/src/css-modules.d.ts",
+    "packages/mumbo/run-wild/src/css-modules.d.ts",
     "packages/mumbo/edge-member/src/css-modules.d.ts",
     "packages/client/tsdown.client.ts",
     "scripts/client-build-environment.ts",
@@ -71,6 +72,7 @@
     { "path": "./packages/experimental/client-ui-claude-code-mods" },
     { "path": "./packages/mumbo/assistant/tsconfig.client.json" },
     { "path": "./packages/mumbo/box-links/tsconfig.client.json" },
+    { "path": "./packages/mumbo/run-wild/tsconfig.client.json" },
 
     { "path": "./packages/client/ui-sidebar-terminal" },
     { "path": "./packages/api/terminal-controller/tsconfig.client.json" },

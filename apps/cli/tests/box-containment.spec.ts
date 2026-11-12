@@ -15,7 +15,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join, posix, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import type { ModuleLoaderV2 } from '@deepseek-ai/cordis-plugin-loader'
@@ -244,7 +244,7 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
     runs: 'run-as', tools: ['mcp__playwright-mcp__*'], identity: 'browsermcp', note: 'the Playwright MCP stdio server; uploads only from the shared Downloads',
   },
   '@mumbo/edge-member': NONE,
-  '@mumbo/run-wild': { ...NONE, note: 'decides asks in the person\'s Run Wild Sessions; registers no tool' },
+  '@mumbo/run-wild': { ...NONE, note: 'decides asks in the person\'s Run Wild Sessions and keeps their record under root\'s Harness home; registers no tool' },
   '@mumbo/state': { runs: 'in-process', tools: ['plan_read'], note: 'returns the approved plan\'s text from the Session log' },
   '@mumbo/mcp': {
     runs: 'in-process', tools: ['agent_read', 'agent_send', 'needs_you', 'task_reply'], runAsTools: ['task_result', 'task_status'],
@@ -352,7 +352,7 @@ function evaluated(value: unknown, env: Record<string, string> = {}): unknown {
   // The expressions are the repository's own composition files.
   // oxlint-disable-next-line typescript/no-implied-eval
   const evaluate = new Function('ctx', 'process', 'dshHomePath', `return (${String(value.__jsExpr)})`) as (ctx: unknown, process: unknown, home: unknown) => unknown
-  return evaluate(context, { platform: 'linux', env }, (name: string) => `/root/.dsh/${name}`)
+  return evaluate(context, { platform: 'linux', env }, (...segments: string[]) => posix.join('/root/.dsh', ...segments))
 }
 
 /** Evaluate a row's `disabled` value the way a contained Linux box boots it. */
@@ -588,6 +588,10 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
       expect(modelRoots).not.toContain('/var/lib/mumbo/uploads')
       // The desktop tool waits for consent's service, so a consent row that fails to load leaves no ungated input.
       expect(byId('computer-use-x11')?.inject).toEqual(['mumbo-browser-consent'])
+      // Run Wild's record stays under root's Harness home, outside every model root and read-only root.
+      const record = (evaluated(byId('run-wild')?.config) as { root: string }).root
+      expect(record).toBe('/root/.dsh/storages/runwild')
+      expect([...modelRoots, ...(byId('fs-sandbox')?.config as { readOnlyRoots: string[] }).readOnlyRoots].filter(path => record.startsWith(path))).toEqual([])
     }
     expect(byId('plugin-manager')?.config).toEqual({ modelTools: false })
     expect(byId('workspace-changes')?.config).toEqual({ summaries: false })
