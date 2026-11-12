@@ -29,7 +29,7 @@ Each package owns one deployment concern.
 | [`browser-consent/`](browser-consent/README.md) | Reads free, writes ask, denied pages never: consent and an audit record for Playwright MCP browser writes in the person's own Chromium, consent for desktop input, and the person's takeover of the browser |
 | [`edge-member/`](edge-member/README.md) | Admits project members from the edge-signed header as non-owner principals with collaborator access |
 | [`mcp/`](mcp/README.md) | Authenticated loopback MCP server through which allowlisted people drive the host's assistant Session, and the gate that lets only reads run unasked in turns a project's report started |
-| [`run-wild/`](run-wild/README.md) | Run Wild, the permission preset in which the assistant decides tool approvals, plan reviews and questions instead of asking the person, with an audit record of each decision |
+| [`run-wild/`](run-wild/README.md) | Run Wild, the permission preset in which the assistant decides tool approvals, plan reviews and questions instead of asking the person, with an audit record of each decision and instructions the model reads while a Session is in Run Wild |
 | [`state/`](state/README.md) | The state block: the goal, the approved plan's steps, open todos and running work in a runtime context that changes only at a compaction, a restart or a goal phase change, `plan_read`, a notice after a restart of what stopped or finished meanwhile, and, when turned on, progress questions in a goal round after rounds that changed nothing |
 | [`superagent/`](superagent/README.md) | Pinned copy of the upstream superagent: a proactive agent that turns authorized GitHub requests into Tickets and works each in its own Session |
 
