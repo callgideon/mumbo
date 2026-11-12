@@ -163,10 +163,10 @@ function foldWork(state: MumboState, event: SessionEvent): MumboState {
       return { ...state, runs: { ...state.runs, [event.data.runId]: { ...run, end } } }
     }
     // A step that starts after a settlement is taken to have claimed its notice from the inbox. Two windows leave the
-    // notice in memory instead, and a crash there loses it: a settlement during a step's own pre-step, after that step
-    // claimed its inbox, reaches only the next step; and any message queued for the next turn while no turn can start
-    // waits, since each turn claims one queued message, so a notice behind a person's message or another notice waits
-    // for a later turn. Work from before a restart stays for the resume notice.
+    // notice queued instead: a settlement during a step's own pre-step, after that step claimed its inbox, reaches only
+    // the next step; and each turn claims one queued message, so a notice behind a person's message or another notice
+    // waits for a later turn. The logged inbox keeps it through a crash, but a graceful stop disposes the Agent, which
+    // discards it, and the job's end is then reported nowhere. Work from before a restart stays for the resume notice.
     case 'step/start': {
       const pending = (seq: number): boolean => state.resume !== null && seq < state.resume.seedSeq
       const jobs = without(state.jobs, job => job.settled !== undefined && !pending(job.seq))

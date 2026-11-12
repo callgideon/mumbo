@@ -4,7 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { agentEvents, type Agent, type PreStepDecision } from '@deepseek-ai/dsh-agent'
 import GoalService from '@deepseek-ai/dsh-goal'
 import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
-import { createAssistantMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
+import { createAssistantMessage, createUserMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
 import { interruptedTurnClosers, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-subagent'
@@ -12,6 +12,7 @@ import { WorkflowRunId } from '@deepseek-ai/dsh-workflow'
 import { describe, expect, it, vi } from 'vitest'
 import { textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import * as GoalRoundDriver from '../../../goal/goal-round-driver/src/index.ts'
+import * as ToolJobs from '../../../jobs/tool-jobs/src/index.ts'
 import { subagentCatalogProjectionDefinition } from '../../../subagent/subagent/src/catalog.ts'
 import * as MumboState from '../src/index.ts'
 import { PLAN_READ, STATE_CONTEXT } from '../src/index.ts'
@@ -90,6 +91,29 @@ describe('background jobs', () => {
     const { agent } = await harness.restart(handle, true)
     await turn(agent, 'Back.')
     expect(notices(agent)).toEqual([])
+  })
+
+  it.each([['a crash', true], ['a graceful stop', false]])('after %s, a job whose own notice waited behind a person\'s message reaches the model only if the inbox survived', { timeout: 60_000 }, async (_name, crash) => {
+    const harness = await boot([textResponse('reply 0'), 'hang', ...replies(2)], async (ctx) => {
+      await mountJobs(ctx)
+      await ctx.plugin(ToolJobs)
+    })
+    const handle = await harness.start(`queued-${String(crash)}`)
+    await turn(handle.agent, 'Start.')
+    const job = startJob(harness.ctx, handle.agent, CHECK)
+    const release = Promise.withResolvers<void>()
+    const maintenance = handle.agent.runMaintenance(() => release.promise)
+    handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Person.' }], source: { kind: 'user' } }))
+    job.finish()
+    await vi.waitFor(() => { expect(handle.agent.inbox.nextTurn.map(message => message.source.kind)).toEqual(['user', 'tool-jobs']) })
+    release.resolve()
+    await maintenance
+    // The person's turn starts, which drops the settled job, and its request never answers.
+    await vi.waitFor(() => { expect(harness.model.requests).toHaveLength(2) })
+    const { agent } = await harness.restart(handle, crash)
+    await turn(agent, 'Back.')
+    expect(notices(agent)).toEqual([])
+    expect(harness.model.requests.some((_, index) => requestTexts(harness.model, index).some(text => text.includes(CHECK)))).toBe(crash)
   })
 
   it('logs nothing when nothing stopped or finished, at the first step or any later one', { timeout: 60_000 }, async () => {
