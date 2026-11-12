@@ -473,7 +473,7 @@ resource "aws_ecs_task_definition" "edge" {
         GITHUB_AGENT_LOGIN   = var.github_agent_login
         GITHUB_AGENT_ID      = var.github_agent_id
         REQUIRED_CHECKS      = "static,unit"
-        DAILY_TOKENS_USER    = "20000000"
+        DAILY_TOKENS_USER    = "200000000"
         DAILY_TOKENS_PROJECT = "50000000"
         AUDIT_PREFIX         = local.audit_prefix
         OPENROUTER_MODELS    = var.openrouter_models
