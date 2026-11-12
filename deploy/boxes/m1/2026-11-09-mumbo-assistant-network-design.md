@@ -1209,6 +1209,7 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
   - The token lives in `GH_CONFIG_DIR=/var/lib/mumbo/agent-gh` (`agent`, 0700), set in `agent`'s run-as row. It sits outside every model root, so the file tools can't read it, while `gh` in the shell can. The backup takes that directory, so the sign-in survives moves, and the system repair leaves it to `agent`. It is never under `/root/projects` (a `git add -A` could commit it) or in Mumbo Sync's folders.
   - The model can still read and use the token through the shell in turns the founder started. The token's scopes are the boundary, and the README says so. Under Run Wild, pushes and merges in those turns run unasked.
   - A root-held token behind a local proxy, like the project box's, would keep it from the model entirely. That is a later option if the founder asks.
+  - **Ship gate [2026-11-12]:** the person template the B48 edge builds runs a dsh image whose commit contains the report-turn gate (#48, main `f83453dfee`). `prod-9d673fcf64` doesn't contain it. Before the founder signs in, a project report on the founder's box that asks for `gh auth status` must get an ask, or under Run Wild a refusal, not a run.
 - **Network request details are denied.** A request's details carry its `Cookie` header and form body, so a login's password or a session cookie would reach the model.
   - `browser_network_request` is refused outright.
   - The request list stays a read only if it shows no headers or bodies; otherwise it is refused too.
