@@ -1,7 +1,8 @@
 // node --test: the edge's sequential store round trips per request path (spec R6b, trace first), through the real handlers
 // over testing/store-trace.mjs, a store whose every round trip answers after a fixed latency. Each path runs cold (a new
 // edge process: empty placement cache, no last-use write yet) and then warm (the same request again on that edge), against a
-// person whose box runs and whose records exist, as the founder's did when R6 measured the Mumbai edge. The edge has the
+// person whose box runs and whose records exist, as the founder's did when R6 measured the Mumbai edge, with a project whose
+// box runs too and which the door key reaches. The edge has the
 // Mumbai edge's settings (EDGE_REGION ap-south-1, PLACEMENT_CACHE_MS 30000, so the read cache is on and subscribed); E2B and
 // the box are local stubs that answer at once. The counts asserted: depth, the round trips the answer waited for one after
 // another, and total, every store call the request caused, the unawaited ones included. STORE_TRACE=<file> writes each
@@ -15,7 +16,7 @@ import { budget, tokenBudget } from './budget.mjs'
 import { admitted, boxes, boxFetcher, boxSite, modelServer, PORTS, signBox, userServer } from './edge.mjs'
 import { haltService } from './halt.mjs'
 import { doorKeys } from './keys.mjs'
-import { projects } from './projects.mjs'
+import { projectRelay, projects, RELAY_PATH } from './projects.mjs'
 import { tracedStore } from './testing/store-trace.mjs'
 
 const EMAIL = 'founder@x.com', BOX = 'sbx-founder', PBOX = 'sbx-project', PUBLIC = 'app.example', LLM = 'llm.app.example', EDGE_KEY = 'edge-key'
@@ -24,13 +25,19 @@ const cfg = { publicHost: PUBLIC, projectDomain: PUBLIC, llmHost: LLM, allowed: 
 const silent = () => {}
 const listen = (server) => new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port)))
 
-/** The box behind the client-proxy address: @mumbo/mcp's door answers a tools/call, dsh any page, the live view upgrades. */
+/** The box behind the client-proxy address: @mumbo/mcp's door answers a tools/call, a project box's Superagent its relay
+ *  route and management API, dsh any page, the live view upgrades. */
 function stubBox() {
+  const json = (res, value) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(value))
   const server = createServer((req, res) => {
     let body = ''
     req.on('data', (c) => { body += c }).on('end', () => {
-      if (req.url !== '/mcp') return res.writeHead(200, { 'content-type': 'text/plain' }).end('from the box')
-      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: JSON.parse(body).id, result: { content: [{ type: 'text', text: '{"messages":[]}' }] } }))
+      const path = req.url.split('?')[0]
+      if (path === '/mcp') return json(res, { jsonrpc: '2.0', id: JSON.parse(body).id, result: { content: [{ type: 'text', text: '{"messages":[]}' }] } })
+      if (path === RELAY_PATH) return json(res, { trigger: 'T1', thread: 'H1', result: 'queued' })
+      if (path === '/orchestrator/api/overview') return json(res, { problems: [], person: [], executor: { running: 0, queued: 0, idle: 1, maxWorkers: 1 } })
+      if (path === '/orchestrator/api/tickets') return json(res, { items: [], total: 0 })
+      res.writeHead(200, { 'content-type': 'text/plain' }).end('from the box')
     })
   })
   server.on('upgrade', (req, socket) => socket.end('HTTP/1.1 101 Switching Protocols\r\nconnection: Upgrade\r\nupgrade: websocket\r\n\r\n'))
@@ -94,7 +101,7 @@ test('store round trips per request path, cold and warm, at the Mumbai edge\'s s
   await store.putDoc(`person:${EMAIL}`, { region: 'us-east-1', at: Date.now() })
   const P = (await proj.create(EMAIL, 'Mine')).id
   const keys = doorKeys({ store, projects: proj, admitted: (e) => admitted(cfg.allowed, e), log: silent })
-  const { key, record } = await keys.mint(EMAIL, { name: 'laptop', scopes: ['read', 'prompt'] })
+  const { key, record } = await keys.mint(EMAIL, { name: 'laptop', scopes: ['read', 'prompt'], projects: [P] })
   names.push([P, '<project>'], [record.id, '<key id>'])
   const now = Date.now(), running = { region: 'us-east-1', traffic: 'TT', ports: PORTS, active: now, extended: now, backedUp: now, paused: false }
   await store.putBox(BOX, { ...running, email: EMAIL, host: PUBLIC, launch: 'L', memberAuth: false })
@@ -115,11 +122,13 @@ test('store round trips per request path, cold and warm, at the Mumbai edge\'s s
     const box = boxes({ cells, store, cfg, edgeKey: EDGE_KEY, log: silent })
     const traced = { ...box, touch: (id) => t.offPath(() => box.touch(id)) }
     const keys = doorKeys({ store, projects: proj, admitted: (e) => admitted(cfg.allowed, e), log: silent })
-    const mumbo = mumboForwarder({ box: traced, boxFetch: boxFetcher(cfg), edgeKey: EDGE_KEY, siteHostOf: (p) => boxSite(cfg, p).host, log: silent })
+    const siteHostOf = (p) => boxSite(cfg, p).host
+    const mumbo = mumboForwarder({ box: traced, boxFetch: boxFetcher(cfg), edgeKey: EDGE_KEY, siteHostOf, log: silent })
+    const relay = projectRelay({ projects: proj, box: traced, boxFetch: boxFetcher(cfg), siteHostOf, edgeHost: PUBLIC, log: silent })
     const counters = { ...store, increment: (...a) => t.offPath(() => store.increment(...a)), incrementBy: (...a) => t.offPath(() => store.incrementBy(...a)) }
     const requests = budget({ store: counters, limit: 1e6 })
     const tokens = tokenBudget({ store: counters, limits: { user: 1e9, project: 1e9 }, now: Date.now })
-    const front = door({ keys, tools: doorTools({ projects: proj, mumbo }), requests, tokens, rate: { perMinute: 60, burst: 100 }, log: silent })
+    const front = door({ keys, tools: doorTools({ projects: proj, mumbo, relay }), requests, tokens, rate: { perMinute: 60, burst: 100 }, log: silent })
     const model = modelServer({ cfg, edgeKey: EDGE_KEY, modelKey: 'SERVER', requests, owns: box.owns, touch: traced.touch, door: front, halt: haltService({ store }), tokens,
       fetchImpl: async () => anthropicStream(), log: silent })
     const users = userServer({ cfg, box: traced, projects: proj, log: silent })
@@ -138,12 +147,17 @@ test('store round trips per request path, cold and warm, at the Mumbai edge\'s s
     '(c) model host call (streamed)': ['model', { method: 'POST', path: '/anthropic/v1/messages', body: '{}', headers: { host: LLM, 'x-api-key': signBox(EDGE_KEY, EMAIL, BOX), 'content-type': 'application/json' } }],
     '(c) model host call, project box (streamed)': ['model', { method: 'POST', path: '/anthropic/v1/messages', body: '{}', headers: { host: LLM, 'x-api-key': signBox(EDGE_KEY, `project:${P}`, PBOX), 'content-type': 'application/json' } }],
     '(d) live view connect': ['users', { path: '/desktop/websockify', headers: { host: PUBLIC, origin: `https://${PUBLIC}`, 'x-forwarded-email': EMAIL, connection: 'Upgrade', upgrade: 'websocket' } }],
+    '(e) door: project_status': ['model', tool('project_status', { project: P })],
+    '(e) door: project_message (charged to the budgets, through the relay)': ['model', tool('project_message', { project: P, message: 'hi', messageId: 'm1' })],
   }
   const counts = {}, out = []
   try {
     for (const [name, [listener, req]] of Object.entries(paths)) {
       const e = await edge()
-      const run = () => t.trace(async (mark) => { const r = await send(e.ports[listener], mark, req); assert.ok([101, 200].includes(r.status), `${name}: ${r.status} ${r.text}`) })
+      const run = () => t.trace(async (mark) => {
+        const r = await send(e.ports[listener], mark, req)
+        assert.ok([101, 200].includes(r.status) && !r.text?.includes('"isError":true'), `${name}: ${r.status} ${r.text}`)
+      })
       const runs = { cold: await run(), warm: await run() }
       await e.close()
       counts[name] = Object.fromEntries(Object.entries(runs).map(([k, r]) => [k, [r.depth('end'), r.commands.length]]))
@@ -161,5 +175,7 @@ test('store round trips per request path, cold and warm, at the Mumbai edge\'s s
     '(c) model host call (streamed)': { cold: [1, 10], warm: [0, 6], firstByte: [1, 0] },
     '(c) model host call, project box (streamed)': { cold: [2, 11], warm: [0, 6], firstByte: [2, 0] },
     '(d) live view connect': { cold: [4, 7], warm: [0, 3] },
+    '(e) door: project_status': { cold: [6, 6], warm: [0, 0] },
+    '(e) door: project_message (charged to the budgets, through the relay)': { cold: [7, 9], warm: [0, 1] },
   })
 })
