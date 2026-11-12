@@ -313,8 +313,14 @@ describe('instructions in Run Wild', () => {
     let failure: Error = new SubagentError('the root is no longer live', 'UNAUTHORIZED')
     ctx.provide('subagents', { rootOf: () => { throw failure } } as never)
     expect(await instructions(ctx, child)).toBe('')
-    failure = new Error('lookup failed')
-    await expect(instructions(ctx, child)).rejects.toBe(failure)
+    for (const other of [
+      new Error('lookup failed'),
+      new SubagentError('the root lookup failed', 'NOT_FOUND'),
+      Object.assign(new Error('not a subagent failure'), { code: 'UNAUTHORIZED' }),
+    ]) {
+      failure = other
+      await expect(instructions(ctx, child)).rejects.toBe(other)
+    }
   })
 
   it('keeps the instructions when optional runtime context is suppressed', async () => {
