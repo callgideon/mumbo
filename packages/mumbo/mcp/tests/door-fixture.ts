@@ -80,7 +80,7 @@ export async function stopHosts(): Promise<void> {
 
 /**
  * Start a WebServer on an OS port, JSON storage, the local subprocess runtime, and fake
- * `sessionController`, `workspaceRegistry`, `agents`, `subagents`, `jobs` and `sessionProjections` services.
+ * `sessionController`, `workspaceRegistry`, `agents`, `subagents`, `jobs`, `sessionProjections` and `permissionPresets` services.
  * @param options - key file text and allowlist.
  * @returns the host; load the plugin with `host.ctx.plugin(McpDoor, host.config)`.
  */
@@ -115,7 +115,12 @@ export async function startHost(options: { keyText?: string; allowlist?: string[
   ctx.provide('subagents', {} as never)
   // Like the real registry, a caller sees its own jobs and the unowned ones.
   ctx.provide('jobs', { list: (caller?: string) => jobs.filter(job => job.owner === undefined || job.owner === caller), kill } as never)
-  ctx.provide('sessionProjections', { snapshot: (session: { id: string }) => ({ asOfSeq: 0, values: { ...projections, subagentCatalog: children.get(session.id) } }) } as never)
+  ctx.provide('sessionProjections', {
+    snapshot: (session: { id: string }) => ({ asOfSeq: 0, values: { ...projections, subagentCatalog: children.get(session.id) } }),
+    // The report-turn gate registers its projection; the door's tests never read it.
+    register: () => Promise.resolve({ stateOf: () => false, dispose: () => Promise.resolve() }),
+  } as never)
+  ctx.provide('permissionPresets', {} as never)
   ctx.provide('workspaceRegistry', {
     create: async (path: string) => {
       calls.push(`workspace:${path}`)

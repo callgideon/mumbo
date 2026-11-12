@@ -141,6 +141,32 @@ Types: [Agent](core.md) · [Session](session.md)
 
 Source: [`packages/interaction/user-approval/src/index.ts`](../../packages/interaction/user-approval/src/index.ts)
 
+<a id="ctxmumbo-report-turns--reportturns"></a>
+
+### `ctx.mumbo-report-turns` — `ReportTurns`
+
+Whether an Agent acts in a report-started turn: `@mumbo/mcp` provides it while loaded and gates tools with it.
+
+```ts cordis-catalog
+/**
+ * Whether a project's report opened the current turn of the Agent's root Session. The turn's origin is the source of
+ * the first message logged in the turn's first step that names one: `report`; `user`, such as a browser prompt, or
+ * `mcp`, through the door, for a person; `schedule`; or `goal`. A report claimed in that step with a person's message
+ * still makes the turn report-started. Every later message of the turn, such as a runtime-context snapshot or a
+ * compaction checkpoint, a message whose source declares a context form, such as a schedule change notice, and a
+ * message of any other source, leave the origin unchanged, so a turn that no such message opened keeps the previous
+ * turn's. A delegated child follows its live root Session.
+ * @param agent - the live Agent that acts.
+ * @returns whether the turn's origin is a report; `false` before any origin.
+ * @throws when the Agent is a delegated child whose root is no longer live.
+ */
+reportStarted(agent: Agent): boolean
+```
+
+Types: [Agent](core.md)
+
+Source: [`packages/mumbo/mcp/src/report-turns.ts`](../../packages/mumbo/mcp/src/report-turns.ts)
+
 <a id="approval-events"></a>
 
 ### `approval/*` events

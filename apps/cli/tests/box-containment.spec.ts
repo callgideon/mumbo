@@ -12,13 +12,15 @@
  */
 
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import type { Context } from '@deepseek-ai/cordis'
+import { Context } from '@deepseek-ai/cordis'
 import type { ModuleLoaderV2 } from '@deepseek-ai/cordis-plugin-loader'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { boot, composeEntries, loadOverlayPatches, loadProfile } from '@deepseek-ai/dsh-app-boot'
+import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
 import { createLaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
 import WebRuntime from '@deepseek-ai/dsh-web'
 import * as WebDeepseekApi from '@deepseek-ai/dsh-web-deepseek-api'
@@ -273,6 +275,63 @@ const FORBIDDEN = [
 
 interface Row { id?: string; name?: string; disabled?: unknown; inject?: unknown; config?: unknown }
 
+/** agent's gh configuration directory, which holds the person's GitHub sign-in in a person box: agent's, 0700. */
+const AGENT_GH = '/var/lib/mumbo/agent-gh'
+
+/**
+ * How each model tool of the person box runs in a turn a project's report started, under `@mumbo/mcp`'s report-turn
+ * gate: `runs` unasked, or `asks` the person and is refused under Run Wild; in the browser family, reads run and the
+ * rest asks. A `*` suffix names a dynamic family.
+ */
+const REPORT_TURN: Readonly<Record<string, 'runs' | 'asks' | 'browser reads run'>> = {
+  apply_patch: 'asks',
+  ask_user_question: 'asks',
+  bash: 'asks',
+  computer: 'asks',
+  create_goal: 'asks',
+  edit: 'asks',
+  exit_plan_mode: 'asks',
+  get_goal: 'runs',
+  glob: 'runs',
+  grep: 'runs',
+  interrupt_agent: 'asks',
+  job_kill: 'asks',
+  job_list: 'runs',
+  job_output: 'asks',
+  list_agents: 'asks',
+  list_mcp_resource_templates: 'asks',
+  list_mcp_resources: 'asks',
+  list_subagent_models: 'asks',
+  'mcp__*': 'asks',
+  'mcp__playwright-mcp__*': 'browser reads run',
+  'mcp__sandboxes__*': 'asks',
+  plugin_manager: 'asks',
+  present: 'asks',
+  read: 'runs',
+  read_image: 'runs',
+  read_mcp_resource: 'asks',
+  run_code: 'asks',
+  schedule_create: 'asks',
+  schedule_edit: 'asks',
+  schedule_list: 'asks',
+  schedule_view: 'asks',
+  send_message: 'asks',
+  skill: 'asks',
+  subagent: 'asks',
+  team_task_create: 'asks',
+  team_task_get: 'asks',
+  team_task_list: 'asks',
+  team_task_update: 'asks',
+  todo_write: 'runs',
+  update_goal: 'asks',
+  wait_agent: 'asks',
+  web_fetch: 'asks',
+  web_search: 'asks',
+  workflow: 'asks',
+  working_directory: 'asks',
+  write: 'asks',
+}
+
 /** The directories a contained project box's start script exports for the project overlay's `dsh-superagent` row. */
 const CONTAINMENT_ENV = { MUMBO_WORK_DIR: '/root/work', MUMBO_WORKER_DIR: '/var/lib/mumbo/superagent', MUMBO_GH_CONFIG_DIR: '/root/.config/gh' }
 
@@ -459,6 +518,8 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     // is root's or agent's own: a project box's worker shims and gh wrapper first, as dsh-superagent sets them in its own
     // environment, then agent's npm and ~/.local/bin directories, then the system's.
     expect(runAs?.set.NPM_CONFIG_PREFIX).toBe('/home/agent/.npm-global')
+    // gh keeps agent's sign-in outside every model and read-only root, where the file tools cannot read it.
+    expect(runAs?.set.GH_CONFIG_DIR).toBe(AGENT_GH)
     expect(runAs?.set.PATH?.split(':')).toEqual([
       ...box === 'project' ? ['/var/lib/mumbo/superagent/worker-bin', '/usr/local/lib/mumbo/bin'] : [],
       '/home/agent/.npm-global/bin', '/home/agent/.local/bin', ...SYSTEM_PATH,
@@ -637,6 +698,36 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     expect(ctx.web.listProviders().fetch.map(provider => provider.id)).toEqual(['deepseek-fetch-api'])
     await ctx.web.fetch({ url: 'http://127.0.0.1:9222/json/list' })
     expect(sent).toEqual([{ endpoint: `${host}/v1/tools/fetch`, authorization: 'Bearer box-token', body: expect.objectContaining({ url: 'http://127.0.0.1:9222/json/list' }) as object }])
+  })
+
+  it.runIf(box === 'person')('classifies every model tool for turns a project\'s report started', async () => {
+    // The door's tools serve the edge, never the box's model.
+    const tools = names.filter(name => name !== '@mumbo/mcp').flatMap(name => CLASSIFICATION[name]?.tools ?? [])
+    expect(Object.keys(REPORT_TURN).sort()).toEqual([...new Set(tools)].sort())
+    // The package is private and not a dependency of this app; its source is loaded from the repository.
+    const { runsUnasked } = await import(pathToFileURL(join(root, 'packages/mumbo/mcp/src/report-turns.ts')).href) as { runsUnasked: (name: string, args: unknown) => boolean }
+    // A family is checked through one member, the browser's through a read and a write.
+    const member = (tool: string, name: string) => runsUnasked(tool.replace(/\*$/u, name), {})
+    for (const [tool, runs] of Object.entries(REPORT_TURN)) {
+      if (runs === 'browser reads run') expect([member(tool, 'browser_snapshot'), member(tool, 'browser_click')], tool).toEqual([true, false])
+      else expect(member(tool, 'example'), tool).toBe(runs === 'runs')
+    }
+  })
+
+  it.runIf(box === 'person' && process.platform === 'linux')('keeps agent\'s GitHub sign-in out of the file tools\' reach', async () => {
+    const { modelRoots, readOnlyRoots } = rows.find(row => row.id === 'fs-sandbox')?.config as { modelRoots: string[]; readOnlyRoots: string[] }
+    // The box's directories, rebuilt under a temporary directory.
+    const base = await realpath(await mkdtemp(join(tmpdir(), 'dsh-box-containment-gh-')))
+    onTestFinished(() => rm(base, { recursive: true, force: true }))
+    const at = (path: string) => join(base, path)
+    for (const directory of [...modelRoots, ...readOnlyRoots, AGENT_GH]) await mkdir(at(directory), { recursive: true })
+    await writeFile(at(join(AGENT_GH, 'hosts.yml')), 'github.com: {}\n')
+    await writeFile(at('/home/agent/notes.txt'), 'notes\n')
+    const ctx = new Context()
+    onTestFinished(() => ctx.fiber.dispose())
+    await ctx.plugin(LocalFileSystem, { modelRoots: modelRoots.map(at), readOnlyRoots: readOnlyRoots.map(at) })
+    expect((await ctx.fs.resolveModelPath(at('/home/agent/notes.txt'))).displayPath).toBe(at('/home/agent/notes.txt'))
+    await expect(ctx.fs.resolveModelPath(at(join(AGENT_GH, 'hosts.yml')))).rejects.toMatchObject({ code: 'FS_OUTSIDE_ROOTS' })
   })
 
   it.runIf(box === 'person')('lists every tool the door to Mumbo serves, with the ones that run git as agent', async () => {

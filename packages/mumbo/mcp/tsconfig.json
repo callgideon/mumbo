@@ -24,6 +24,12 @@
       "path": "../../core/session"
     },
     {
+      "path": "../../core/tools"
+    },
+    {
+      "path": "../../goal/goal"
+    },
+    {
       "path": "../../host/webserver"
     },
     {
@@ -37,6 +43,9 @@
     },
     {
       "path": "../../llm/llm"
+    },
+    {
+      "path": "../../schedule/schedule"
     },
     {
       "path": "../../session/session-projection"
@@ -55,6 +64,12 @@
     },
     {
       "path": "../../workspace/workspace"
+    },
+    {
+      "path": "../browser-consent"
+    },
+    {
+      "path": "../run-wild"
     }
   ]
 }

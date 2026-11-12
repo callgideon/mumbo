@@ -2172,6 +2172,20 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'mumbo-report-turns',
+    summary: 'Whether an Agent acts in a report-started turn: `@mumbo/mcp` provides it while loaded and gates tools with it.',
+    description: 'Whether an Agent acts in a report-started turn: `@mumbo/mcp` provides it while loaded and gates tools with it.',
+    methods: [
+      {
+        signature: 'reportStarted(agent: Agent): boolean',
+        description: 'Whether a project\'s report opened the current turn of the Agent\'s root Session. The turn\'s origin is the source of the first message logged in the turn\'s first step that names one: `report`; `user`, such as a browser prompt, or `mcp`, through the door, for a person; `schedule`; or `goal`. A report claimed in that step with a person\'s message still makes the turn report-started. Every later message of the turn, such as a runtime-context snapshot or a compaction checkpoint, a message whose source declares a context form, such as a schedule change notice, and a message of any other source, leave the origin unchanged, so a turn that no such message opened keeps the previous turn\'s. A delegated child follows its live root Session.',
+        parameters: [{ name: 'agent', description: 'the live Agent that acts.' }],
+        returns: 'whether the turn\'s origin is a report; `false` before any origin.',
+        throws: ['when the Agent is a delegated child whose root is no longer live.'],
+      },
+    ],
+  },
+  {
     key: 'officeToPdf',
     summary: 'A provider lifetime owns all converters, queued calls, and temporary files.',
     description: 'A provider lifetime owns all converters, queued calls, and temporary files.',

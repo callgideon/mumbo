@@ -7,13 +7,14 @@ kind: "package-reference"
 
 ## Summary
 
-`@mumbo/mcp` serves the Model Context Protocol on one exact `/mcp` route of the injected `ctx.webServer`. A caller presents the bearer key from the configured key file and names an allowlisted principal; every request gets a fresh stateless MCP server that answers in JSON, never in a stream. Use it when a person's MCP client on another machine reaches the host through a local relay, or, with the `door` profile, when the mumbo edge forwards a person's calls to Mumbo in their box. The key authenticates the relay, not the person.
+`@mumbo/mcp` serves the Model Context Protocol on one exact `/mcp` route of the injected `ctx.webServer`. A caller presents the bearer key from the configured key file and names an allowlisted principal; every request gets a fresh stateless MCP server that answers in JSON, never in a stream. Use it when a person's MCP client on another machine reaches the host through a local relay, or, with the `door` profile, when the mumbo edge forwards a person's calls to Mumbo in their box. The key authenticates the relay, not the person. It also gates every tool but reads in report-started turns.
 
 ## Table of Contents
 
 - [Configuration](#configuration)
 - [HTTP contract](#http-contract)
 - [Tools](#tools)
+- [Report-started turns](#report-started-turns)
 - [Dedicated listener composition](#dedicated-listener-composition)
 - [Model Experience](#model-experience)
 - [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
@@ -88,6 +89,29 @@ The `door` profile lists and serves the first six tools only: `runs_halt` and `r
 
 With `session`, the assistant Session is that existing Session, such as the `mumbo` Session `@mumbo/assistant` creates: the plugin never creates a Session then, and every tool that needs it answers `not_ready` until it exists, then drives it without a reload. Without `session`, the assistant Session is the one whose id the plugin stored: the first call creates it in the `assistantCwd` workspace and titles it `assistantTitle`, and a later call creates a new one only when the stored Session no longer exists. The id, the halt flag, and the request-id results live in the `mumbo_mcp` storage domain; results older than 24 hours are pruned at load. Unloading removes the route first and waits for the requests it accepted before the gate and the domain go.
 
+<a id="report-started-turns"></a>
+## Report-started turns
+
+A turn is report-started when a project's report opened it. The turn's origin is the source of the first `user/message` that the turn's first step appends and that names one: `report`, a project's report; `user`, such as a browser prompt, or `mcp`, through the door, for the person; or `schedule`, a scheduled task. A goal's continuation round names none: it continues what was going on and adds no authority, so a report taints the goal rounds after it until the person's own message or a schedule delivery. A report that the opening step claims together with a person's message still makes the turn report-started. Messages logged later in the turn, such as runtime-context snapshots, compaction checkpoints and notices, messages whose source declares a context form, such as a schedule change notice, and messages of every other source, a retry included, leave the origin as it was, so a turn that no such message opened keeps the previous turn's origin. A delegated child follows its live root Session. A host-only Session projection keeps the origin, so it holds across a host restart. The plugin provides it while loaded as the `mumbo-report-turns` service, whose `reportStarted(agent)` other plugins read; the listener group isolates only `webServer`, so the service reaches plugins outside it.
+
+In such a turn only these calls run unasked:
+
+- `read`, `read_image`, `glob` and `grep`, which `fs-local` confines to the model roots and read-only roots where a box configures them;
+- `get_goal` and `job_list`, which read status;
+- `todo_write`;
+- a Playwright MCP browser call (`mcp__playwright-mcp__*`) that `@mumbo/browser-consent`'s `classify` counts as a read.
+
+Every other call is gated, whatever its arguments and whether or not the box holds a GitHub sign-in: the shells, `workflow` and `run_code`, file changes, subagent and team spawns, goal and schedule changes, computer use, MCP tools, `web_fetch` and `web_search`, and every tool added later. `apps/cli/tests/box-containment.spec.ts` lists how each model tool of the person box runs in such a turn and fails when the box registers a tool the list does not name.
+
+| Session preset | A gated call |
+|---|---|
+| Run Wild | Is refused before it runs, without asking; the model reads the note in [Model Experience](#model-experience) |
+| Any other | Asks the person, and runs only when they allow it |
+
+The approval card's reason is: "This turn started with a project's report, so every action but reading asks first: it runs with your box's sign-ins, such as GitHub."
+
+The listener is prepended to `tools/pre-execute` and reads Run Wild through `@mumbo/run-wild`'s `inRunWild`, so the refusal holds in either listener order: it denies without delegating, and Run Wild turns only an `ask` into `allow`. Outside Run Wild it delegates first and keeps a later policy's denial. The plugin requires `permissionPresets` for this, which every Web profile provides.
+
 <a id="dedicated-listener-composition"></a>
 ## Dedicated listener composition
 
@@ -118,6 +142,26 @@ Each accepted `agent_send` adds one data-dependent user-role message of at most 
 
 Append-only. The message follows the Session's existing history, so the reusable request prefix stays intact.
 
+### Refusal in a report-started turn
+
+#### What the model sees
+
+Under Run Wild, a gated call in a report-started turn returns an error result with this text, naming the tool, here `bash`, and the call does not run. Outside Run Wild the model sees the tool's own result once the person allows it, or `Error: the user rejected tool "bash"`.
+
+##### Verbatim refusal
+
+```markdown
+Error: bash did not run: this turn started with a project's report, and in Run Wild such a turn runs only reading tools and todo_write. Say what you would do and why, so the person can reply to let it run.
+```
+
+#### Token effect
+
+About 50 tokens for each refused call, in place of the command's output, retained in the Session until compaction replaces or removes it.
+
+#### KV Cache effect
+
+Append-only. The refusal is an ordinary tool result after the Session's existing history.
+
 ## Known Limitations and Deferred Work
 
 <a id="known-limitations-and-deferred-work"></a>
@@ -130,6 +174,11 @@ Append-only. The message follows the Session's existing history, so the reusable
 - **A rejected step consumes its claimed messages** — while halted, a message that wakes a Session is claimed by the step the gate rejects and is not delivered after `runs_resume`; send it again.
 - **`agent_read` reads the whole assistant log** — each read takes one history page through the latest event, so its cost grows with the Session; `needs_you` does the same once per tool ask that names a call.
 - **No composition gate lists the door's tools** — B24's containment gate, which is to list `agent_send`, `agent_read`, `needs_you`, `task_reply`, `task_status` and `task_result`, has not landed; the tools join it when it does.
+- **The report-turn allowlist matches tool names** — another tool registered under an allowed name runs unasked in a report-started turn, and outside a box, where `fs-local` has no model roots, `read` and `grep` reach every file the host user can read.
+- **A browser read can carry data out** — browser consent counts navigation to any `http:` or `https:` URL as a read, so a report-started turn can open a URL that holds text the model read, which `web_fetch` is refused.
+- **A browser write can ask twice** — outside Run Wild, browser consent's own approval card and the gate's both ask for a browser write in a report-started turn.
+- **The shell can read the GitHub sign-in in turns the person started** — a box keeps agent's gh configuration in `/var/lib/mumbo/agent-gh` (`GH_CONFIG_DIR`, agent, `0700`), outside every model root, so the file tools refuse it; the shell runs as agent, so in a turn the person started the model can read the token through `bash`. This residual is accepted.
+- **The report-turn gate holds only while the plugin is loaded** — on a failed load, a report already in a Session's log no longer gates the gated tools, though no new report can arrive.
 - **The halt holds only while the plugin is loaded** — a failed load, such as an unreadable or empty key file or a `mumbo_mcp` domain that does not open, leaves no gate, and every Session steps freely until the plugin loads.
 
 <a id="dev-note"></a>

@@ -319,6 +319,8 @@ flowchart LR
   pkg_browser_consent["browser-consent"]
   svc_mumbo_browser_consent["ctx.mumbo-browser-consent<br/>Browser takeover"]
   pkg_box_links["box-links"]
+  pkg_mcp["mcp"]
+  svc_mumbo_report_turns["ctx.mumbo-report-turns<br/>Report-started turns"]
   pkg_action_cards --> svc_actionCards
   pkg_agent --> svc_agents
   pkg_agent_default_model --> svc_agentDefaultModel
@@ -407,6 +409,7 @@ flowchart LR
   pkg_llm_replay --> svc_llm
   pkg_lsp --> svc_lsp
   pkg_lsp_stdio --> svc_lsp
+  pkg_mcp --> svc_mumbo_report_turns
   pkg_mcp_client --> svc_mcpResources
   pkg_mcp_manager --> svc_mcpManager
   pkg_mcp_resources --> svc_mcpResources
@@ -767,5 +770,6 @@ flowchart LR
 | `ctx.cordisInspect` | `core` | [`cordis-host-runner`](../packages/extensions/cordis-host-runner) | - | [`tool-cordis`](../packages/extensions/tool-cordis) | - | Registers host inspect providers, mirrors the client provider manifest, and routes client queries through the dynamic Cordis transport. |
 | `ctx.liveshareShares` | `service` | [`experimental-liveshare`](../packages/experimental/liveshare) | - | - | - | Publishes the owner share-management operations as one Typert Remote namespace that the owner client face calls; every method delegates to the same operations the same-origin routes used. |
 | `ctx.mumbo-browser-consent` | `service` | `browser-consent` | - | `box-links` | - | The person's hold on the box's browser: while taken over, browser consent refuses every browser tool and computer action and holds no CDP connection; box-links' owner-only route changes it. |
+| `ctx.mumbo-report-turns` | `service` | `mcp` | - | - | - | Whether a project's report opened the current turn of an Agent's root Session; the MCP door provides it from a host-only projection and lets only reads run unasked in such a turn. |
 
 Maintenance mode: hybrid: services are discovered from Cordis declarations; interface/implementation/consumer roles are classified in `scripts/gen-doc-graphs.ts` with a completeness guard.

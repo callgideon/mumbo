@@ -1,0 +1,42 @@
+# Loader overlay for the report-started shell scenario: Run Wild listed last and chosen for new Sessions, as a person's
+# box lists it, and the MCP door on its own loopback listener, through which a project's report reaches the assistant.
+# The scaffold changes into its temporary workspace before boot, so the door's assistant Session starts there.
+- id: approval
+  config:
+    policy: ask
+- id: permission
+  config:
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: ask
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: ask
+      run-wild:
+        sandbox: danger-full-access
+        approval: ask
+    defaultPreset: run-wild
+- insert:
+    - id: run-wild
+      name: '@mumbo/run-wild'
+    - id: mumbo-mcp-ingress
+      name: cordis:group
+      group: true
+      isolate:
+        webServer: true
+      config:
+        - id: mumbo-mcp-listener
+          name: '@deepseek-ai/dsh-host-webserver'
+          config:
+            host: '127.0.0.1'
+            port: !!js Number(process.env.MUMBO_MCP_PORT)
+        - id: mumbo-mcp
+          name: '@mumbo/mcp'
+          config:
+            keyFile: !!js process.env.MUMBO_MCP_KEY_FILE
+            allowlist: [ann]
+            assistantCwd: !!js process.cwd()

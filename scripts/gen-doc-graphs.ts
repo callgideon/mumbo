@@ -982,6 +982,13 @@ const SERVICE_ROLES: ServiceRole[] = [
     consumers: ['box-links'],
     note: "The person's hold on the box's browser: while taken over, browser consent refuses every browser tool and computer action and holds no CDP connection; box-links' owner-only route changes it.",
   },
+  {
+    key: 'mumbo-report-turns',
+    pkg: 'mcp',
+    title: 'Report-started turns',
+    mode: 'service',
+    note: "Whether a project's report opened the current turn of an Agent's root Session; the MCP door provides it from a host-only projection and lets only reads run unasked in such a turn.",
+  },
 ]
 
 function generatedHeader(title: string): string[] {
