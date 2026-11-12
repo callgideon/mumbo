@@ -15,15 +15,16 @@ const fail = (status, message) => Object.assign(new Error(message), { status })
 export const projectId = () => randomBytes(8).toString('hex')
 export const isProjectId = (id) => typeof id === 'string' && /^[a-z0-9]{16}$/.test(id)
 export const projectPrincipal = (id) => `project:${id}`
-const projectDoc = (store, id) => (isProjectId(id) ? store.getDoc(`project:${id}`) : undefined)
+/** The project doc, from the edge's read cache (store.mjs) unless `fresh`: a doc read to be written back is read fresh. */
+const projectDoc = (store, id, fresh = false) => (isProjectId(id) ? store.getDoc(`project:${id}`, { fresh }) : undefined)
 
-/** The project's repositories (`owner/name`); [] when it has none or does not exist. */
-export const getRepos = async (store, projectId) => (await projectDoc(store, projectId))?.repos ?? []
+/** The project's repositories (`owner/name`); [] when it has none or does not exist. `fresh` as projectDoc. */
+export const getRepos = async (store, projectId, fresh = false) => (await projectDoc(store, projectId, fresh))?.repos ?? []
 const REPO_NAME = /^(?!\.+\/)[A-Za-z0-9_.-]+\/(?!\.+$)[A-Za-z0-9_.-]+$/  // owner/name; neither part is only dots
 /** The project for a repository change by `by`, under the bindings lock: 403 unless `by` is in `approvers` and owns it. */
 async function ownedProject(store, projectId, by, approvers) {
   if (!approvers.includes(by)) throw fail(403, 'only an approver binds or unbinds repositories')
-  const p = await projectDoc(store, projectId)
+  const p = await projectDoc(store, projectId, true)
   if (!p) throw fail(404, `no project ${projectId}`)
   if (p.owner !== by) throw fail(403, 'only the project owner binds or unbinds its repositories')
   return p
@@ -54,7 +55,7 @@ export async function addRepo(store, projectId, repo, { by, approvers = [], inst
     const p = await ownedProject(store, projectId, by, approvers)
     if ((p.repos ?? [])[0] !== first) throw Object.assign(fail(409, 'the project\'s repositories changed meanwhile; try again'), { code: 'repo_changed' })
     for (const other of await projectsWithRepos(store)) {
-      if (other !== projectId && (await getRepos(store, other)).some(same)) throw Object.assign(fail(409, `${repo} already belongs to another project`), { code: 'repo_bound' })
+      if (other !== projectId && (await getRepos(store, other, true)).some(same)) throw Object.assign(fail(409, `${repo} already belongs to another project`), { code: 'repo_bound' })
     }
     const repos = p.repos ?? []
     if (!repos.some(same)) await store.putDoc(`project:${projectId}`, { ...p, repos: [...repos, repo] })
@@ -109,7 +110,7 @@ export function projects({ store, admitted, log = console.log }) {
       return out
     },
     async addMember(by, id, email) {
-      const p = await get(id)
+      const p = await projectDoc(store, id, true)
       if (!p?.members.includes(by)) throw fail(404, `no project ${id} of yours`)
       if (p.owner !== by) throw fail(403, 'only the project owner adds members')
       email = String(email).trim().toLowerCase()

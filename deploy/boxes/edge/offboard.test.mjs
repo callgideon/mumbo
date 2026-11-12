@@ -50,10 +50,12 @@ test('dry run lists ids with owners and the owned project, and deletes nothing',
   assert.doesNotMatch(text, /aa@mumbo.si/)
 })
 
-test('apply kills only the named person\'s box and child, deletes versions, verifies, and leaves projects', async () => {
+test('apply kills only the named person\'s box and child, drops the edges\' cached box, deletes versions, verifies, and leaves projects', async () => {
   const { e2b, s3, calls } = fakes()
-  await offboard({ email: 'a@mumbo.si', apply: true, e2b, s3, bucket: 'b', store: await storeWithProject(), say: () => {} })
-  assert.deepEqual(calls.filter(c => c[0] === 'kill'), [['kill', 'box-a'], ['kill', 'kid-a']])
+  const store = await storeWithProject()
+  store.invalidate = async (kind, id) => { calls.push(['invalidate', kind, id]) }
+  await offboard({ email: 'a@mumbo.si', apply: true, e2b, s3, bucket: 'b', store, say: () => {} })
+  assert.deepEqual(calls.filter(c => ['kill', 'invalidate'].includes(c[0])), [['kill', 'box-a'], ['invalidate', 'box', 'box-a'], ['kill', 'kid-a']])
   assert.ok(calls.findIndex(c => c[0] === 'kill') < calls.findIndex(c => c[0] === 'delete-s3'), 'kill first')
 })
 

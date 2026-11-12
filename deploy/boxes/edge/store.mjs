@@ -1,12 +1,38 @@
 // Shared state for edge replicas: box records, per-user locks, daily budgets and token counters, the sweep and poll
 // leaders, and small documents and sets (projects, their members and repositories, approvals, door key hashes). TTLs are milliseconds,
 // except increment's seconds.
-// memoryStore serves tests and a single replica; redisStore serves production (ElastiCache, TLS).
+// memoryStore serves tests and a single replica; redisStore serves production (ElastiCache, TLS), with the read cache.
+//
+// The read cache (spec R6b): redisStore given `cacheMs` keeps, per edge task, what it reads of the records on the request
+// paths: door key records (`doc:key:<sha256>`), person placement docs (`doc:person:<email>`), project docs
+// (`doc:project:<id>`), halt switches (`doc:halt:<email>`) and box records (`box:<id>`), a missing record included. Every
+// write of one of them through any redisStore publishes `{ kind, id, from }` on INVALIDATE in the write's own transaction,
+// after the write (kind `key`, `person`, `project`, `halt` or `box`; id the rest of the key; from the writing task, which
+// drops its own copy when the write returns and so skips its own message), and every other task that receives it drops
+// its copy. A task serves its copies only while its subscription to INVALIDATE is confirmed and answering; on a
+// disconnect or an error it empties the cache and reads through until it is subscribed again. `cacheMs` is each copy's
+// backstop lifetime.
 import { randomUUID } from 'node:crypto'
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
-/** In-process store with the same contract as redisStore. */
+/** The channel of the read cache's invalidations: JSON `{ kind, id, from? }`. Any other message, the bare word `all`
+ *  included (RUNBOOK "The edge's read cache"), empties every subscribed task's cache. */
+export const INVALIDATE = 'edge:invalidate'
+/** The kinds a message names one record of; every other message empties the whole cache. */
+const KINDS = ['key', 'person', 'project', 'halt', 'box']
+/** Box record fields no cached reader uses: a patch of only these (activity, keepalive and backup times) sends no message. */
+const QUIET = new Set(['active', 'extended', 'backedUp', 'restored'])
+/** How often a subscribed task pings its subscription; one that has not answered for twice this serves no copy. */
+const HEARTBEAT_MS = 5_000
+/** The most copies a task keeps; past it the cache starts again empty (format-valid door keys cost a read each). */
+const MAX_ENTRIES = 10_000
+/** `{ kind, id }` of a cached Redis key, or undefined for any other key. */
+const cachedKind = (key) => { const m = /^(?:doc:(key|person|project|halt)|(box)):(.+)$/.exec(key); return m ? { kind: m[1] ?? m[2], id: m[3] } : undefined }
+const keyOf = ({ kind, id }) => (kind === 'box' ? `box:${id}` : `doc:${kind}:${id}`)
+
+/** In-process store with the same contract as redisStore. One replica, so there is nothing to invalidate: reads are always
+ *  the latest write, `cacheLive` is always true, and no invalidation is ever reported. */
 export function memoryStore() {
   const boxes = new Map()
   const counters = new Map()
@@ -44,7 +70,73 @@ export function memoryStore() {
     async addToSet(key, member) { if (!sets.has(key)) sets.set(key, new Set()); sets.get(key).add(member) },
     async removeFromSet(key, member) { sets.get(key)?.delete(member) },
     async setMembers(key) { return [...(sets.get(key) ?? [])] },
+    cacheLive: () => true,
+    onInvalidate() {},
+    async invalidate() {},
     async close() {},
+  }
+}
+
+/**
+ * The read cache of one edge task over `client`, and its subscription (a duplicate client) when `cacheMs` > 0.
+ * @returns {{ get(key: string, fresh?: boolean): Promise<string | null>, drop(key: string): void, live(): boolean, self: string,
+ *   onInvalidate(fn: (m: { kind: string, id?: string }, remote: boolean) => void): void, close(): Promise<void> }}
+ *   `get` answers a cached key from the cache while live, unless `fresh`; a read keeps its answer only while live and when
+ *   no invalidation arrived during it. `drop` forgets one key after this task's own write; `onInvalidate` is told every
+ *   drop, `remote` false for this task's own writes (`{ kind: 'all' }`, remote, when the whole cache goes). `self` is the
+ *   `from` of this task's messages.
+ */
+function readCache(client, { cacheMs, now, log }) {
+  const entries = new Map()  // Redis key -> { value: the raw reply, until }
+  const watchers = []
+  const self = randomUUID()
+  let gen = 0, subscribed = false, up = false, heardAt = 0, pinging = false, sub, timer
+  const say = (fields) => log(JSON.stringify({ edge: 'store', ...fields }))
+  const tell = (m, remote) => { for (const w of watchers) w(m, remote) }
+  const flush = () => { entries.clear(); gen++; tell({ kind: 'all' }, true) }
+  const forget = (key, remote) => { entries.delete(key); gen++; tell(cachedKind(key), remote) }
+  const live = () => up && now() - heardAt < 2 * HEARTBEAT_MS
+  if (cacheMs > 0) {
+    const down = (why) => { if (up) say({ level: 'warn', msg: 'read cache off', why }); up = false; flush() }
+    sub = client.duplicate()
+    sub.on('error', (e) => down(e.message)).on('reconnecting', () => down('reconnecting')).on('end', () => down('closed'))
+    // node-redis emits ready after a reconnect only once its resubscription is confirmed.
+    sub.on('ready', () => { if (subscribed) { up = true; heardAt = now(); say({ msg: 'read cache on' }) } })
+    const onMessage = (message) => {
+      heardAt = now()
+      let m
+      try { m = JSON.parse(message) } catch { m = undefined }  // `all`, or anything unreadable: everything goes
+      if (m?.from === self) return
+      if (KINDS.includes(m?.kind) && typeof m.id === 'string') forget(keyOf(m), true); else flush()
+    }
+    sub.connect().then(() => sub.subscribe(INVALIDATE, onMessage)).then(() => { subscribed = up = true; heardAt = now(); say({ msg: 'read cache on' }) },
+      (e) => say({ level: 'error', msg: 'read cache subscription failed', error: e.message }))
+    // A half-open connection never errors: an unanswered ping takes the cache off within 2 * HEARTBEAT_MS. One ping at a
+    // time; a dropped connection rejects the one in flight (and emits its error).
+    timer = setInterval(() => {
+      if (!up || pinging) return
+      pinging = true
+      sub.ping().then(() => { heardAt = now() }, () => {}).finally(() => { pinging = false })
+    }, HEARTBEAT_MS)
+    timer.unref?.()
+  }
+  return {
+    async get(key, fresh) {
+      if (!live() || !cachedKind(key)) return client.get(key)
+      const hit = entries.get(key)
+      if (!fresh && hit && hit.until > now()) return hit.value
+      const at = gen, value = await client.get(key)
+      if (at === gen && live()) {
+        if (entries.size >= MAX_ENTRIES) entries.clear()
+        entries.set(key, { value, until: now() + cacheMs })
+      }
+      return value
+    },
+    drop: (key) => forget(key, false),
+    live,
+    self,
+    onInvalidate(fn) { watchers.push(fn) },
+    async close() { clearInterval(timer); up = false; if (sub) await sub.quit().catch(() => {}) },
   }
 }
 
@@ -52,23 +144,41 @@ export function memoryStore() {
  * Redis-backed store. Box records are JSON under `box:<id>` plus the set `boxes`; locks are SET NX PX with a
  * per-holder token released by compare-and-delete; counters expire on their own.
  * @param {import('redis').RedisClientType} client - a connected node-redis v4 client.
+ * @param {{ cacheMs?: number, now?: () => number, log?: (line: string) => void }} [opts] - `cacheMs` > 0 turns the read
+ *   cache on (file comment), with copies kept at most that long; 0 (the default, as in operator scripts) reads every
+ *   record from Redis and opens no subscription. Writes of cached records publish either way.
+ * Beyond memoryStore's methods: `getDoc(key, { fresh: true })` and `getBox(id, { fresh: true })` read Redis whatever the
+ * cache holds (a read before a write under a lock); `cacheLive()` is true while the cache may serve copies;
+ * `onInvalidate(fn)` calls `fn({ kind, id }, remote)` for every copy dropped, `remote` false for this task's own writes, and
+ * `fn({ kind: 'all' }, true)` when the cache empties;
+ * `invalidate(kind, id)` publishes a message without a write (a box killed outside the edge).
  */
-export function redisStore(client) {
+export function redisStore(client, { cacheMs = 0, now = Date.now, log = console.log } = {}) {
   const RELEASE = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end"
-  const read = async (id) => { const v = await client.get(`box:${id}`); return v ? JSON.parse(v) : undefined }
+  const cache = readCache(client, { cacheMs, now, log })
+  const read = async (id, fresh) => { const v = await cache.get(`box:${id}`, fresh); return v ? JSON.parse(v) : undefined }
+  /** Writes `key` with `op`; a cached record's write is a transaction that publishes its message after the write, and
+   *  drops this task's own copy once it is done. `kind` null writes without a message. */
+  async function commit(key, op, kind = cachedKind(key)) {
+    if (!kind) return op(client)
+    await op(client.multi()).publish(INVALIDATE, JSON.stringify({ ...kind, from: cache.self })).exec()
+    cache.drop(key)
+  }
   return {
-    getBox: read,
-    async putBox(id, record) { await client.multi().set(`box:${id}`, JSON.stringify(record)).sAdd('boxes', id).exec() },
+    getBox: (id, opts) => read(id, opts?.fresh),
+    async putBox(id, record) { await commit(`box:${id}`, (m) => m.set(`box:${id}`, JSON.stringify(record)).sAdd('boxes', id)) },
     async patchBox(id, fields) {
       // Last writer wins per field group; every caller holds the user's lock or writes timestamps only.
-      const b = await read(id)
-      if (b) await client.set(`box:${id}`, JSON.stringify({ ...b, ...fields }))
+      const b = await read(id, true)
+      if (!b) return
+      const quiet = Object.keys(fields).every(f => QUIET.has(f))
+      await commit(`box:${id}`, (c) => c.set(`box:${id}`, JSON.stringify({ ...b, ...fields })), quiet ? null : { kind: 'box', id })
     },
-    async deleteBox(id) { await client.multi().del(`box:${id}`).sRem('boxes', id).exec() },
+    async deleteBox(id) { await commit(`box:${id}`, (m) => m.del(`box:${id}`).sRem('boxes', id)) },
     async listBoxes() {
       const ids = await client.sMembers('boxes')
       const out = []
-      for (const id of ids) { const b = await read(id); if (b) out.push({ id, ...b }); else await client.sRem('boxes', id) }
+      for (const id of ids) { const b = await read(id, true); if (b) out.push({ id, ...b }); else await client.sRem('boxes', id) }
       return out
     },
     async increment(key, ttlSeconds) {
@@ -93,12 +203,15 @@ export function redisStore(client) {
       }
       try { return await fn() } finally { await client.eval(RELEASE, { keys: [`lock:${key}`], arguments: [token] }).catch(() => {}) }
     },
-    async getDoc(key) { const v = await client.get(`doc:${key}`); return v ? JSON.parse(v) : undefined },
-    async putDoc(key, value) { await client.set(`doc:${key}`, JSON.stringify(value)) },
-    async deleteDoc(key) { await client.del(`doc:${key}`) },
+    async getDoc(key, opts) { const v = await cache.get(`doc:${key}`, opts?.fresh); return v ? JSON.parse(v) : undefined },
+    async putDoc(key, value) { await commit(`doc:${key}`, (c) => c.set(`doc:${key}`, JSON.stringify(value))) },
+    async deleteDoc(key) { await commit(`doc:${key}`, (c) => c.del(`doc:${key}`)) },
     async addToSet(key, member) { await client.sAdd(`set:${key}`, member) },
     async removeFromSet(key, member) { await client.sRem(`set:${key}`, member) },
     async setMembers(key) { return client.sMembers(`set:${key}`) },
-    async close() { await client.quit() },
+    cacheLive: () => cache.live(),
+    onInvalidate: (fn) => cache.onInvalidate(fn),
+    async invalidate(kind, id) { await client.publish(INVALIDATE, JSON.stringify({ kind, id })) },
+    async close() { await cache.close(); await client.quit() },
   }
 }

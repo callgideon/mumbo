@@ -89,7 +89,7 @@ export const config = () => ({
   // E2B's own placement errors decide); edgeRegion: the cell newcomers are placed in (cells.mjs).
   ...cellsConfig(process.env),
   // How long a replica reuses a principal's box target without the store or E2B (spec 17c: the store is one region away
-  // from the Mumbai edge); 0 turns the cache off.
+  // from the Mumbai edge), and each copy in the store's read cache (store.mjs); 0 turns both off.
   placementCacheMs: wholeNumber('PLACEMENT_CACHE_MS', 30_000),
   upstream: env('MODEL_UPSTREAM', 'https://api.deepseek.com'),
   childTemplates: list(env('CHILD_TEMPLATES', 'mumbo-child')),
@@ -1205,12 +1205,20 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
   const cellOf = (record) => cellIn(cells, regionOf(record))
   /** The cell a principal's placement doc names, without placing anyone: us-east-1 until a person's first ensure. */
   const placedCell = async (principal) => cellOf(await store.getDoc(placementKey(principal)))
-  // ensure's targets by principal, for cfg.placementCacheMs. ponytail: per replica, so a box another replica replaces is
-  // reached at its old target until the entry expires, or a proxy error, the client-proxy's not-found answer or a 401 to
-  // a navigation uncaches it (userServer). B22: deleting an entry clears only this replica (other replicas, the
-  // other region's edge and an operator script cannot reach it), so a move must either read the principal's placement doc
-  // (its moving mark) on every hit, or wait at least cfg.placementCacheMs after setting the mark before its final backup.
+  // ensure's targets by principal, for cfg.placementCacheMs, used only while the store's read cache is live (store.mjs):
+  // a write of the principal's placement doc (`person` or `project`) or of the target's box record (`box`) through any
+  // edge drops the entry here once its message lands, and `all` or a lost subscription drops every entry. A box changed
+  // outside the edge without that message (killed in E2B) is reached at its old target until the entry expires, or a
+  // proxy error, the client-proxy's not-found answer or a 401 to a navigation uncaches it (userServer).
   const cached = new Map()  // principal -> { target, until }
+  let changes = 0  // other tasks' invalidations seen, so an ensure that overlapped one keeps no target
+  store.onInvalidate(({ kind, id }, remote) => {
+    if (remote) changes++
+    if (kind === 'person') cached.delete(id)
+    else if (kind === 'project') cached.delete(`project:${id}`)
+    else if (kind === 'box') { for (const [principal, e] of cached) if (e.target.id === id) cached.delete(principal) }
+    else if (kind === 'all') cached.clear()
+  })
 
   async function all(cell, query) {
     const pager = cell.Sandbox.list({ query })
@@ -1319,16 +1327,18 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
     return cell
   }
   /** The user's running box: id, dsh launch token, E2B traffic token and its cell's client-proxy. Creates, resumes or
-   *  repairs as needed; within cfg.placementCacheMs of the last one, this replica's answer again. */
+   *  repairs as needed; within cfg.placementCacheMs of the last one, this replica's answer again while the read cache is
+   *  live and nothing invalidated it. */
   async function ensure(email) {
     const hit = cached.get(email)
-    if (hit && hit.until > Date.now()) return hit.target
+    if (hit && hit.until > Date.now() && store.cacheLive()) return hit.target
+    const seen = changes
     const target = await store.withLock(`user:${email}`, LOCK_MS, async () => {
       const cell = await placement(email)
       const found = await find(cell, email)   // an API error throws here: never create a second box on a failed lookup
       if (found === undefined) return pick(await create(email, cell))
       const id = found.sandboxId
-      const known = await store.getBox(id)
+      const known = await store.getBox(id, { fresh: true })
       // Another replica is still creating it (the user lock can expire during a long restore): wait, do not start it.
       if (known?.creating) throw Object.assign(new Error('box is being created'), { status: 503 })
       if (found.state === 'paused' || !known || known.paused || !known.launch) {
@@ -1365,7 +1375,7 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
       }
       return pick(id)
     })
-    if (cfg.placementCacheMs > 0) cached.set(email, { target, until: Date.now() + cfg.placementCacheMs })
+    if (cfg.placementCacheMs > 0 && seen === changes && store.cacheLive()) cached.set(email, { target, until: Date.now() + cfg.placementCacheMs })
     return target
   }
   const pick = async (id) => {
@@ -1385,7 +1395,7 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
 
   /** Record activity (a browser request, a WebSocket frame or a model call) and push E2B's own pause timer out. */
   async function touch(id) {
-    const b = await store.getBox(id)
+    const b = await store.getBox(id, { fresh: true })  // `extended` changes without an invalidation
     if (!b) return
     const now = Date.now()
     const extend = now - b.extended >= 60_000
@@ -1420,7 +1430,7 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
   async function adoptRunning(cell, now = Date.now()) {
     for (const r of await all(cell, { state: ['running'] })) {
       const email = r.metadata?.user
-      if (!email || await store.getBox(r.sandboxId)) continue
+      if (!email || await store.getBox(r.sandboxId, { fresh: true })) continue
       await store.putBox(r.sandboxId, { email, region: cell.region, active: now, extended: 0, backedUp: 0, paused: false })
       say({ msg: 'adopted', user: email, box: r.sandboxId, region: cell.region })
     }
@@ -2152,7 +2162,8 @@ async function main() {
     const ms = []
     for (let i = 0; i < 5; i++) { const t = performance.now(); await client.ping(); ms.push(performance.now() - t) }
     console.log(JSON.stringify({ edge: 'store', msg: 'round trip', ms: Math.round(ms.sort((a, b) => a - b)[2]) }))
-    store = redisStore(client)
+    // The read cache's copies live at most PLACEMENT_CACHE_MS, the placement cache's backstop too (store.mjs).
+    store = redisStore(client, { cacheMs: cfg.placementCacheMs })
   }
   const { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand } = await import('@aws-sdk/client-s3')
   const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner')

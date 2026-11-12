@@ -82,7 +82,8 @@ export async function offboard({ email, apply, e2b, s3, bucket, store, say = con
     say(`  project ${p} owned by ${email}: sandbox(es) ${live.map(s => s.sandboxId).join(', ') || 'none'}; NOT deleted (founder decides: kill or transfer)`)
   }
   if (!apply) { say('dry run: nothing deleted'); return { sandboxes, versions, projects } }
-  for (const s of sandboxes) { await e2b.Sandbox.kill(s.id); say(`killed ${s.id}`) }
+  // A killed box's message drops every edge task's cached record and target of it (store.mjs read cache).
+  for (const s of sandboxes) { await e2b.Sandbox.kill(s.id); if (s.kind === 'box') await store.invalidate('box', s.id); say(`killed ${s.id}`) }
   if (versions.length) { await s3.deleteVersions(bucket, versions); say(`deleted ${versions.length} version(s)`) }
   const left = [...await theirs(e2b, email), ...(await s3.listObjectVersions(bucket, prefix)).map(v => ({ id: `${v.Key}@${v.VersionId}` }))]
   if (left.length) throw new Error(`offboarding incomplete, still present: ${left.map(l => l.id).join(', ')}`)

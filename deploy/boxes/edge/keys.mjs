@@ -5,7 +5,8 @@
 // The edge store holds only each key's SHA-256: doc `key:<sha256 hex>` = { id, owner, name, scopes, projects, createdAt,
 // expiresAt?, revokedAt? } (times in epoch ms), set `keys:<email>` = the hashes of that person's keys, and doc
 // `key-used:<id>` = { at }, the last verified use, written at most once a minute per key and edge process (as jumbo
-// does). Nothing caches a key, so a revocation holds from the next call.
+// does). Key records come from the edge's read cache (store.mjs): a revocation's write publishes its invalidation, so it
+// holds on every edge task once that message lands, and expiry is checked against the record's expiresAt on every call.
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto'
 import { crc32 } from 'node:zlib'
 import { checkedForm, csrfTokens, hidden, STYLE } from './approve-page.mjs'
@@ -92,7 +93,8 @@ export function doorKeys({ store, projects, admitted, now = () => Date.now(), lo
       for (const [, k] of await own(owner)) out.push({ ...k, lastUsedAt: (await store.getDoc(`key-used:${k.id}`))?.at })
       return out.sort((a, b) => b.createdAt - a.createdAt)
     },
-    /** Revokes the owner's key `id`, from the next verify on. 404 (`not_found`) for an id that is not one of the owner's keys. */
+    /** Revokes the owner's key `id`, on every edge task once the write's invalidation lands. 404 (`not_found`) for an id
+     *  that is not one of the owner's keys. */
     async revoke(owner, id) {
       const found = (await own(owner)).find(([, k]) => k.id === id)
       if (!found) throw refusal(404, 'not_found', 'No such key of yours.')
@@ -103,8 +105,9 @@ export function doorKeys({ store, projects, admitted, now = () => Date.now(), lo
     },
     /**
      * The record of a bearer `token`, checked as jumbo's MCP server does. Format and checksum are checked before any store
-     * read; the record is read on every call. Records the use in `key-used:<id>` at most once a minute per key and
-     * process (a failed write is logged, never fatal, and not retried within that minute).
+     * read; the record comes from the read cache, and revocation, expiry and the allowlist are checked on every call.
+     * Records the use in `key-used:<id>` at most once a minute per key and process (a failed write is logged, never fatal,
+     * and not retried within that minute).
      * @throws 403 user_key_required for a box token (a person's assistant or a project's coordinator); 401
      *   invalid_api_key for anything else that is not a stored key; 401 key_revoked; 401 key_expired from expiresAt on;
      *   403 user_disabled once the owner is off the allowlist.
@@ -125,7 +128,8 @@ export function doorKeys({ store, projects, admitted, now = () => Date.now(), lo
     },
     /**
      * The record of `owner`'s key `id`, checked as verify checks a bearer key, for a worker token minted from it
-     * (workers.mjs): the record is read on every call, so a revocation holds from the next git request.
+     * (workers.mjs): checked on every call against the read cache, so a revocation holds from the next git request after
+     * its invalidation lands.
      * @throws 401 invalid_api_key when the owner has no such key; 401 key_revoked; 401 key_expired; 403 user_disabled.
      */
     async live(owner, id) {

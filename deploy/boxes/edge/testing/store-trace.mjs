@@ -3,6 +3,7 @@
 // It is redisStore (store.mjs) over an in-memory stand-in for the node-redis client: each client call (GET, SET, EVAL, one
 // MULTI…EXEC) is one round trip, recorded with its key and the edge code that issued it, and answered after `latencyMs`.
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { EventEmitter } from 'node:events'
 import { redisStore } from '../store.mjs'
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
@@ -28,7 +29,8 @@ function issuer() {
  * A traced store.
  * @param {{ latencyMs?: number, names?: [string, string][] }} [opts] - `names` maps literal values in keys (an email, a box
  *   id) to the placeholders the trace shows; a SHA-256 hex and a YYYY-MM-DD date always show as `<sha256>` and `<day>`.
- * @returns {{ store: ReturnType<typeof redisStore>, offPath: <T>(fn: () => T) => T,
+ * @returns {{ store: ReturnType<typeof redisStore>, connect: (opts?: object) => Promise<ReturnType<typeof redisStore>>,
+ *   redis: ReturnType<typeof fakeRedis>, offPath: <T>(fn: () => T) => T,
  *   trace: (fn: (mark: (name: string) => void) => Promise<void>) => Promise<{ commands: object[], depth: (mark: string) => number }>}}
  *   Outside `trace` commands are neither recorded nor delayed (setting up). Inside, each command's reply waits
  *   `latencyMs`, and its `level` is one more than the highest level whose reply had arrived when it was issued: commands
@@ -59,8 +61,48 @@ export function tracedStore({ latencyMs = 50, names = [] } = {}) {
     })
   }
 
-  // The node-redis v4 calls redisStore makes. ponytail: no key expiry (PX, EXPIRE); the traced paths release their locks.
-  const strings = new Map(), sets = new Map()
+  const redis = fakeRedis({ send, deliverMs: latencyMs })
+  return {
+    store: redisStore(redis.client()),
+    /** A new edge task's store over the same data, with its own read cache and subscription (opts as redisStore's), once
+     *  its subscription is confirmed. Its subscriber's commands are never traced. */
+    async connect(opts) { const s = redisStore(redis.client(), { log: () => {}, ...opts }); await subscribed(s); return s },
+    redis,
+    offPath: (fn) => off.run(true, fn),
+    async trace(fn) {
+      log = []; replies = 0; doneAll = 0; doneOn = 0
+      const marks = {}
+      await fn((name) => { marks[name] = replies })
+      do await sleep(latencyMs); while (pending)
+      const commands = log
+      log = undefined
+      const depth = (mark) => Math.max(0, ...commands.filter(c => !c.off && c.reply <= marks[mark]).map(c => c.level))
+      return { commands, depth }
+    },
+  }
+}
+
+/** Resolves once `store`'s read cache is live (its subscription confirmed). */
+export async function subscribed(store) {
+  while (!store.cacheLive()) await new Promise(r => setImmediate(r))
+}
+
+/**
+ * The node-redis v4 calls redisStore makes, in memory, for any number of clients over one data set: GET, SET (NX), DEL,
+ * INCR, INCRBY, EXPIRE, PEXPIRE, SADD, SREM, SMEMBERS, store.mjs's RELEASE script, PUBLISH, MULTI…EXEC, and on a
+ * subscriber (`duplicate()`) connect, SUBSCRIBE, PING and quit, with node-redis's events (`ready`, `error`,
+ * `reconnecting`, `end`). A message reaches each subscriber `deliverMs` after its PUBLISH, unless the subscriber has
+ * dropped meanwhile. ponytail: no key expiry (PX, EXPIRE); the paths under test release their locks.
+ * @param {{ send?: (name: string, key: string, run: () => unknown) => Promise<unknown>, deliverMs?: number }} [opts] -
+ *   `send` carries every command of a client from `client()` (one round trip: its name, key and the operation), never a
+ *   subscriber's.
+ * @returns {{ client: (send?: Function) => object, drop: () => void, reconnect: () => void, silence: () => void }}
+ *   `client(send?)` makes a client, its commands carried by `send` when given (a test's own count). `drop()` cuts every subscriber as a lost socket does (`error`, then `reconnecting`; messages are lost) and
+ *   `reconnect()` resubscribes them (`ready`). `silence()` cuts them without a word, as a half-open connection: no message,
+ *   no event, and PING never answers.
+ */
+export function fakeRedis({ send = (name, key, run) => Promise.resolve(run()), deliverMs = 0 } = {}) {
+  const strings = new Map(), sets = new Map(), listening = new Set(), cut = new Set()
   const members = (k) => sets.get(k) ?? sets.set(k, new Set()).get(k)
   const ops = {
     get: (k) => strings.get(k) ?? null,
@@ -74,29 +116,34 @@ export function tracedStore({ latencyMs = 50, names = [] } = {}) {
     sRem: (k, m) => Number(members(k).delete(m)),
     sMembers: (k) => [...members(k)],
     eval: (_script, { keys: [k], arguments: [token] }) => (strings.get(k) === token ? ops.del(k) : 0),  // store.mjs RELEASE only
+    publish: (channel, message) => {
+      for (const s of listening) setTimeout(() => { if (listening.has(s)) s.channels.get(channel)?.(message) }, deliverMs)
+      return listening.size
+    },
   }
   const keyOf = (name, a) => (name === 'eval' ? a[1].keys[0] : a[0])
-  const client = { quit: async () => {} }
-  for (const [name, op] of Object.entries(ops)) client[name] = (...a) => send(`${name.toUpperCase()}${a[2]?.NX ? ' NX' : ''}`, keyOf(name, a), () => op(...a))
-  client.multi = () => {
-    const queued = []
-    const chain = { exec: () => send(`MULTI ${queued.map(q => q.name).join(' ')}`, queued[0].key, () => queued.map(q => q.run())) }
-    for (const [name, op] of Object.entries(ops)) chain[name] = (...a) => { queued.push({ name: name.toUpperCase(), key: a[0], run: () => op(...a) }); return chain }
-    return chain
+  const direct = (name, key, run) => Promise.resolve(run())
+  function client(carry = send) {
+    const c = new EventEmitter()
+    for (const [name, op] of Object.entries(ops)) c[name] = (...a) => carry(`${name.toUpperCase()}${a[2]?.NX ? ' NX' : ''}`, keyOf(name, a), () => op(...a))
+    c.multi = () => {
+      const queued = []
+      const chain = { exec: () => carry(`MULTI ${queued.map(q => q.name).join(' ')}`, queued[0].key, () => queued.map(q => q.run())) }
+      for (const [name, op] of Object.entries(ops)) chain[name] = (...a) => { queued.push({ name: name.toUpperCase(), key: a[0], run: () => op(...a) }); return chain }
+      return chain
+    }
+    c.channels = new Map()
+    c.duplicate = () => client(direct)
+    c.connect = async () => { c.emit('ready') }
+    c.subscribe = async (channel, listener) => { c.channels.set(channel, listener); listening.add(c) }
+    c.ping = () => (cut.has(c) ? new Promise(() => {}) : Promise.resolve('PONG'))
+    c.quit = async () => { listening.delete(c); c.emit('end') }
+    return c
   }
-
   return {
-    store: redisStore(client),
-    offPath: (fn) => off.run(true, fn),
-    async trace(fn) {
-      log = []; replies = 0; doneAll = 0; doneOn = 0
-      const marks = {}
-      await fn((name) => { marks[name] = replies })
-      do await sleep(latencyMs); while (pending)
-      const commands = log
-      log = undefined
-      const depth = (mark) => Math.max(0, ...commands.filter(c => !c.off && c.reply <= marks[mark]).map(c => c.level))
-      return { commands, depth }
-    },
+    client: (carry) => client(carry),
+    drop() { for (const c of listening) { listening.delete(c); cut.add(c); c.emit('error', new Error('Socket closed unexpectedly')); c.emit('reconnecting') } },
+    reconnect() { for (const c of cut) { cut.delete(c); listening.add(c); c.emit('ready') } },
+    silence() { for (const c of listening) { listening.delete(c); cut.add(c) } },
   }
 }

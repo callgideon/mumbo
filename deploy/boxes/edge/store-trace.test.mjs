@@ -2,9 +2,10 @@
 // over testing/store-trace.mjs, a store whose every round trip answers after a fixed latency. Each path runs cold (a new
 // edge process: empty placement cache, no last-use write yet) and then warm (the same request again on that edge), against a
 // person whose box runs and whose records exist, as the founder's did when R6 measured the Mumbai edge. The edge has the
-// Mumbai edge's settings (EDGE_REGION ap-south-1, PLACEMENT_CACHE_MS 30000); E2B and the box are local stubs that answer at
-// once. The counts asserted are today's: depth, the round trips the answer waited for one after another, and total, every
-// store call the request caused, the unawaited ones included. STORE_TRACE=<file> writes each path's levels there as Markdown.
+// Mumbai edge's settings (EDGE_REGION ap-south-1, PLACEMENT_CACHE_MS 30000, so the read cache is on and subscribed); E2B and
+// the box are local stubs that answer at once. The counts asserted: depth, the round trips the answer waited for one after
+// another, and total, every store call the request caused, the unawaited ones included. STORE_TRACE=<file> writes each
+// path's levels there as Markdown.
 import assert from 'node:assert/strict'
 import { appendFileSync } from 'node:fs'
 import { createServer, request } from 'node:http'
@@ -105,8 +106,11 @@ test('store round trips per request path, cold and warm, at the Mumbai edge\'s s
   }
   const cells = new Map(['us-east-1', 'ap-south-1'].map(region => [region, { region, Sandbox, proxy: proxyUrl, bucket: `b-${region}`, maxUnits: 0, presignGet: async () => undefined, presignPut: async () => 'P' }]))
 
-  /** A new edge process over the shared store, wired as main() wires it; the unawaited box touches are flagged off the path. */
+  /** A new edge process over the shared data, wired as main() wires it: its own store with the read cache on at
+   *  PLACEMENT_CACHE_MS and subscribed; the unawaited box touches are flagged off the path. */
   async function edge() {
+    const store = await t.connect({ cacheMs: cfg.placementCacheMs })
+    const proj = projects({ store, admitted: () => true, log: silent })
     const box = boxes({ cells, store, cfg, edgeKey: EDGE_KEY, log: silent })
     const traced = { ...box, touch: (id) => t.offPath(() => box.touch(id)) }
     const keys = doorKeys({ store, projects: proj, admitted: (e) => admitted(cfg.allowed, e), log: silent })
@@ -118,7 +122,7 @@ test('store round trips per request path, cold and warm, at the Mumbai edge\'s s
       fetchImpl: async () => anthropicStream(), log: silent })
     const users = userServer({ cfg, box: traced, projects: proj, log: silent })
     const ports = { model: await listen(model), users: await listen(users) }
-    return { ports, close: () => { for (const s of [model, users]) { s.close(); s.closeAllConnections() } } }
+    return { ports, close: () => { for (const s of [model, users]) { s.close(); s.closeAllConnections() } return store.close() } }
   }
 
   const tool = (name, args) => ({ method: 'POST', path: '/mcp', body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
@@ -138,7 +142,7 @@ test('store round trips per request path, cold and warm, at the Mumbai edge\'s s
       const e = await edge()
       const run = () => t.trace(async (mark) => { const r = await send(e.ports[listener], mark, req); assert.ok([101, 200].includes(r.status), `${name}: ${r.status} ${r.text}`) })
       const runs = { cold: await run(), warm: await run() }
-      e.close()
+      await e.close()
       counts[name] = Object.fromEntries(Object.entries(runs).map(([k, r]) => [k, [r.depth('end'), r.commands.length]]))
       if (name.startsWith('(c)')) counts[name].firstByte = [runs.cold.depth('first byte'), runs.warm.depth('first byte')]
       out.push(table(name, runs))
@@ -147,11 +151,11 @@ test('store round trips per request path, cold and warm, at the Mumbai edge\'s s
   if (process.env.STORE_TRACE) appendFileSync(process.env.STORE_TRACE, out.join('\n'))
   // [depth, total] per run; for the stream, the depth at its first byte, cold and warm.
   assert.deepEqual(counts, {
-    '(a) door: agent_read': { cold: [7, 10], warm: [1, 4] },
-    '(a) door: agent_send (charged to the budgets)': { cold: [9, 12], warm: [3, 6] },
-    '(b) app request: the person\'s box': { cold: [5, 8], warm: [0, 3] },
-    '(b) app request: a project\'s box': { cold: [6, 9], warm: [1, 4] },
-    '(c) model host call (streamed)': { cold: [6, 9], warm: [6, 9], firstByte: [5, 5] },
-    '(d) live view connect': { cold: [5, 8], warm: [0, 3] },
+    '(a) door: agent_read': { cold: [6, 9], warm: [0, 3] },
+    '(a) door: agent_send (charged to the budgets)': { cold: [8, 11], warm: [2, 5] },
+    '(b) app request: the person\'s box': { cold: [4, 7], warm: [0, 3] },
+    '(b) app request: a project\'s box': { cold: [4, 7], warm: [0, 3] },
+    '(c) model host call (streamed)': { cold: [6, 9], warm: [4, 7], firstByte: [5, 3] },
+    '(d) live view connect': { cold: [4, 7], warm: [0, 3] },
   })
 })

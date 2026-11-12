@@ -5,7 +5,9 @@ import { request, createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { inParallel, signBox, verifyBox, userPrefix, budget, needsLaunch, boxHeaders, boxes, modelServer, userServer, startScript, backupCommand, restoreCommand, restoreKey, admitted, secureCookies, albIdentity, PORTS, OLD_PORTS } from './edge.mjs'
 import { presignGetter } from './cells.mjs'
-import { memoryStore, redisStore } from './store.mjs'
+import { INVALIDATE, memoryStore, redisStore } from './store.mjs'
+import { haltService } from './halt.mjs'
+import { fakeRedis, subscribed } from './testing/store-trace.mjs'
 import { generateKeyPairSync, createSign } from 'node:crypto'
 import { SandboxError, SandboxNotFoundError, SandboxNotRunningError, SandboxUnreachableError, TimeoutError } from 'e2b'
 
@@ -1582,8 +1584,9 @@ test('child sandboxes run in their owner\'s cell: tools, capacity and ownership 
 
 test('placement cache: a second ensure within PLACEMENT_CACHE_MS asks neither the store nor E2B; uncache, expiry and 0 end that', async () => {
   const counted = () => {
+    // cacheLive and onInvalidate make no round trip.
     const inner = memoryStore(); let calls = 0
-    return { store: Object.fromEntries(Object.entries(inner).map(([k, f]) => [k, (...a) => { calls++; return f(...a) }])), calls: () => calls }
+    return { store: Object.fromEntries(Object.entries(inner).map(([k, f]) => [k, (...a) => { if (!['cacheLive', 'onInvalidate'].includes(k)) calls++; return f(...a) }])), calls: () => calls }
   }
   const rig = (placementCacheMs) => { const c = counted(); const t = twoCells(); return { ...c, ...t, b: boxes({ cells: t.cells, store: c.store, cfg: { ...MUMBAI, placementCacheMs }, edgeKey: 'k', log: () => {} }) } }
   const work = (r) => [r.calls(), r.us.calls.length + r.aps1.calls.length]
@@ -1687,6 +1690,54 @@ test('approval audit records go to the us-east-1 cell\'s bucket, whichever edge 
   assert.deepEqual(sent, [{ Bucket: 'bucket-us-east-1', Key: key, Body: '{"id":"a1","by":"hi@mumbo.si"}', ContentType: 'application/json' }])
   assert.deepEqual(logs, [{ edge: 'audit', key, id: 'a1', by: 'hi@mumbo.si' }])
   assert.match(readFileSync(new URL('./edge.mjs', import.meta.url), 'utf8'), /auditor\(\{ cell: cellIn\(cells, LEGACY_REGION\),/, 'main() passes the us-east-1 cell')
+})
+
+// ---- the read cache (store.mjs, spec R6b) across two edge tasks over one fake Redis
+/** An edge task's store over `redis` with the read cache on and subscribed; `send` as fakeRedis client's. */
+const cachedTask = async (redis, send) => { const store = redisStore(redis.client(send), { cacheMs: 30_000, log: () => {} }); await subscribed(store); return store }
+/** Lets every message published so far land (the fake delivers each on a timer). */
+const landed = () => new Promise(r => setTimeout(r, 5))
+
+test('read cache: a halt set through one edge task stops the next model call on another once its message lands', async () => {
+  const redis = fakeRedis(); const reads = []
+  const a = await cachedTask(redis), b = await cachedTask(redis, (cmd, key, run) => { if (key.startsWith('doc:halt:')) reads.push(cmd); return Promise.resolve(run()) })
+  const fetchImpl = async () => new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
+  const s = modelServer({ cfg, edgeKey: 'k', modelKey: 'SERVER', allow: async () => true, owns: async () => true, touch: () => {}, halt: haltService({ store: b }), fetchImpl, log: () => {} })
+  const port = await listen(s)
+  const model = async () => (await call(port, { method: 'POST', path: '/anthropic/v1/messages', headers: { 'x-api-key': signBox('k', 'a@x.com', 'b1') }, body: '{}' })).status
+  try {
+    assert.deepEqual([await model(), await model(), reads], [200, 200, ['GET']], 'the second call reads the halt from the copy')
+    await haltService({ store: a }).set('a@x.com', true)
+    await landed()
+    assert.equal(await model(), 503)
+    assert.deepEqual(reads, ['GET', 'GET'])
+  } finally { s.close(); await Promise.all([a.close(), b.close()]) }
+})
+
+test('read cache: another task\'s write of the box record or the placement doc, or PUBLISH all, drops the cached target; activity does not; without the subscription it is not used', async () => {
+  const redis = fakeRedis(); const { us, cells } = twoCells()
+  const a = await cachedTask(redis), b = await cachedTask(redis)
+  const box = boxes({ cells, store: b, cfg: { ...cfg, placementCacheMs: 30_000 }, edgeKey: 'k', log: () => {} })
+  /** Whether an ensure went past the cached target: only that asks E2B for the person's box. */
+  const past = async () => { const n = kinds(us, 'list').length; await box.ensure('a@x.com'); return kinds(us, 'list').length > n }
+  try {
+    const { id } = await box.ensure('a@x.com')
+    assert.equal(await past(), false, 'its own create left the target cached')
+    for (const [name, write, drops] of [
+      ['activity', () => a.patchBox(id, { active: Date.now(), extended: Date.now() }), false],
+      ['a pause', () => a.patchBox(id, { paused: true }), true],
+      ['the person doc', () => a.putDoc('person:a@x.com', { region: 'us-east-1', at: 1 }), true],
+      ['PUBLISH all', () => redis.client().publish(INVALIDATE, 'all'), true],
+    ]) {
+      await write(); await landed()
+      assert.equal(await past(), drops, name)
+      assert.equal(await past(), false, `${name}: cached again`)
+    }
+    redis.drop()
+    assert.deepEqual([await past(), await past()], [true, true], 'subscription lost')
+    redis.reconnect()
+    assert.deepEqual([await past(), await past()], [true, false], 'subscribed again')
+  } finally { await Promise.all([a.close(), b.close()]) }
 })
 
 // ---- B47: a box E2B still runs is never killed for being unreachable
