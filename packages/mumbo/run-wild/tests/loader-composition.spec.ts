@@ -13,6 +13,7 @@ import Agents from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import Llm, { createUserMessage } from '@deepseek-ai/dsh-llm'
+import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import PermissionPresetService from '@deepseek-ai/dsh-permission-presets'
 import PlanModeController from '@deepseek-ai/dsh-plan-mode'
 import Sessions, { SessionId } from '@deepseek-ai/dsh-session'
@@ -27,7 +28,7 @@ import UserQuestions from '@deepseek-ai/dsh-user-questions'
 import { afterEach, describe, expect, it } from 'vitest'
 import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import * as RunWild from '../src/index.ts'
-import { RUN_WILD_REPLY } from '../src/index.ts'
+import { RUN_WILD_CONTEXT, RUN_WILD_INSTRUCTIONS, RUN_WILD_PRESET, RUN_WILD_REPLY } from '../src/index.ts'
 
 const roots: string[] = []
 const contexts: Context[] = []
@@ -49,22 +50,26 @@ const PLAN_APPROVED = 'Plan approved — plan mode exited; carry out the plan st
 /** What the person was asked: plan reviews and questions by id, and tool approvals by tool name. */
 interface Asked { questions: string[]; approvals: string[] }
 
+/** The turn in which the model presents a plan, asks a question, and calls `deploy`, which a policy row asks approval for. */
+const DECIDING_TURN = (): StreamChunk[][] => [
+  toolCallResponse('call-plan', 'exit_plan_mode', { plan: '# Deploy plan\n\nShip the build.' }),
+  toolCallResponse('call-ask', 'ask_user_question', { questions: [{ id: 'env', question: 'Which environment?' }] }),
+  toolCallResponse('call-deploy', 'deploy', {}),
+  textResponse('Done.'),
+]
+
 /**
- * Boot the composition with `defaultPreset`, then run one turn in plan mode in which the model presents a plan, asks a
- * question, and calls `deploy`, which a policy row asks approval for. The person approves plans, answers `Production`,
- * and allows tools.
- * @returns the Session's Agent and what the person was asked.
+ * Boot the composition with `defaultPreset`, then run one turn of `script`, in plan mode when `planMode` is set. The
+ * person approves plans, answers `Production`, and allows tools.
+ * @returns the Session's Agent, the model, and what the person was asked.
  */
-async function runTurn(defaultPreset: string): Promise<{ ctx: Context; agent: Agent; asked: Asked }> {
+async function runTurn(
+  defaultPreset: string, script: StreamChunk[][] = DECIDING_TURN(), planMode = true,
+): Promise<{ ctx: Context; agent: Agent; model: MockAdapter; asked: Asked }> {
   const root = await mkdtemp(join(tmpdir(), 'mumbo-run-wild-'))
   roots.push(root)
   const asked: Asked = { questions: [], approvals: [] }
-  const model = new MockAdapter([
-    toolCallResponse('call-plan', 'exit_plan_mode', { plan: '# Deploy plan\n\nShip the build.' }),
-    toolCallResponse('call-ask', 'ask_user_question', { questions: [{ id: 'env', question: 'Which environment?' }] }),
-    toolCallResponse('call-deploy', 'deploy', {}),
-    textResponse('Done.'),
-  ])
+  const model = new MockAdapter(script)
   const modules = new Map<string, unknown>([
     ['llm', Llm], ['sessions', Sessions], ['projections', Projections], ['prompt', SystemPrompt], ['tools', Tools],
     ['toolExecutor', NativeToolExecutor], ['agents', Agents], ['loop', AgentLoop], ['approval', Approval],
@@ -76,6 +81,15 @@ async function runTurn(defaultPreset: string): Promise<{ ctx: Context; agent: Ag
         name: 'deploy', description: 'Deploy the build.', parameters: {}, execute: () => Promise.resolve([{ type: 'text', text: 'deployed' }]),
       }))
       ctx.on('tools/pre-execute', (exec, next) => exec.name === 'deploy' ? Promise.resolve({ kind: 'ask', reason: 'Deploy to production?' }) : next())
+    } }],
+    // The person's switch to Run Wild while the turn runs, as the selector makes it.
+    ['switch', { inject: ['tools', 'permissionPresets'], apply(ctx: Context) {
+      ctx.tools.register(defineContentToolFixture({
+        name: 'switch', description: 'Switch to Run Wild.', parameters: {}, execute: (_args, exec) => {
+          ctx.permissionPresets.set(exec.agent!.session, RUN_WILD_PRESET)
+          return Promise.resolve([{ type: 'text', text: 'switched' }])
+        },
+      }))
     } }],
     // The person in the browser, an external input.
     ['person', { apply(ctx: Context) {
@@ -122,7 +136,7 @@ async function runTurn(defaultPreset: string): Promise<{ ctx: Context; agent: Ag
   expect([...ctx.loader.entries()].filter(entry => entry.fiber === undefined).map(entry => entry.options.id)).toEqual([])
 
   const agent = await ctx.agentLoop.create(SessionId('mumbo'), { provider: 'fixture', model: 'fixture' })
-  ctx.planMode.set(agent, true)
+  if (planMode) ctx.planMode.set(agent, true)
   const idle = new Promise<void>((resolve) => {
     const dispose = ctx.on('agent/status', ({ agent: subject, status }) => {
       if (subject === agent && status === 'idle') {
@@ -133,7 +147,7 @@ async function runTurn(defaultPreset: string): Promise<{ ctx: Context; agent: Ag
   })
   agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Plan and ship the build.' }], source: { kind: 'user' } }))
   await idle
-  return { ctx, agent, asked }
+  return { ctx, agent, model, asked }
 }
 
 /** The model-visible text of each tool result, in order. */
@@ -141,6 +155,14 @@ function toolResults(agent: Agent): string[] {
   return agent.session.snapshotEvents().flatMap(event => event.type === 'tool/result'
     ? [event.data.message.content.map(block => block.type === 'text' ? block.text : '').join('')]
     : [])
+}
+
+/** The `mumbo:run-wild` section texts of a logged or requested runtime-context message. */
+function runWildSections(message: { source?: unknown }): string[] {
+  const source = message.source as { kind: string; sections?: { name: string; text: string }[] } | undefined
+  return source?.kind === 'runtime-context'
+    ? (source.sections ?? []).flatMap(section => section.name === RUN_WILD_CONTEXT ? [section.text] : [])
+    : []
 }
 
 /** The payloads of one event type, in log order. */
@@ -179,5 +201,22 @@ describe('real Loader composition', () => {
     ])
     expect(asked).toEqual({ questions: ['plan-review', 'env'], approvals: ['deploy'] })
     expect(logged(agent, 'runwild/decision')).toEqual([])
+  })
+})
+
+describe('Run Wild instructions through the real loop', () => {
+  it('reaches the model at the step after a switch made during the turn', { timeout: 60_000 }, async () => {
+    const { agent, model } = await runTurn('danger-full-access', [toolCallResponse('call-switch', 'switch', {}), textResponse('Done.')], false)
+    const rows = agent.session.snapshotEvents()
+    const snapshots = rows.flatMap((row, index) => row.type === 'user/message' && row.data.source.kind === 'runtime-context'
+      ? [{ index, sections: runWildSections(row.data) }] : [])
+    const step2 = rows.findIndex(row => row.type === 'step/start' && row.data.turn === 1 && row.data.step === 2)
+    const reply = rows.findIndex(row => row.type === 'assistant/message' && row.data.step === 2)
+    expect(snapshots.map(snapshot => snapshot.sections)).toEqual([[], [RUN_WILD_INSTRUCTIONS]])
+    expect(snapshots[0]!.index).toBeLessThan(step2)
+    expect(snapshots[1]!.index).toBeGreaterThan(step2)
+    expect(snapshots[1]!.index).toBeLessThan(reply)
+    expect(model.requests).toHaveLength(2)
+    expect(runWildSections(model.requests[1]!.messages.at(-1)!)).toEqual([RUN_WILD_INSTRUCTIONS])
   })
 })

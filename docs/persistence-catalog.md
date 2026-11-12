@@ -818,7 +818,7 @@ Source: [`packages/core/session/src/types.ts:398`](../packages/core/session/src/
 'runwild/decision': { kind: RunWildDecisionKind; target: string; summary: string; reason: string }
 ```
 
-Source: [`packages/mumbo/run-wild/src/index.ts:29`](../packages/mumbo/run-wild/src/index.ts)
+Source: [`packages/mumbo/run-wild/src/index.ts:31`](../packages/mumbo/run-wild/src/index.ts)
 
 ### `sandbox/*`
 
@@ -4839,7 +4839,7 @@ One of:
 
 SHA-256: `b8cc7992f3effe30a261f3a17a24df9d10f44e8cf128b8a639196fac4f5a8413`
 
-Sources: [`packages/mumbo/run-wild/src/index.ts:19`](../packages/mumbo/run-wild/src/index.ts)
+Sources: [`packages/mumbo/run-wild/src/index.ts:21`](../packages/mumbo/run-wild/src/index.ts)
 
 One of:
 
@@ -6839,7 +6839,7 @@ Sources: [`packages/core/session/src/types.ts:349`](../packages/core/session/src
 
 SHA-256: `27464613500f8962028e8942a5a56705845887fecf9df0e54211877019a63cee`
 
-Sources: [`packages/mumbo/run-wild/src/index.ts:29`](../packages/mumbo/run-wild/src/index.ts)
+Sources: [`packages/mumbo/run-wild/src/index.ts:31`](../packages/mumbo/run-wild/src/index.ts)
 
 | Property | Presence | Type |
 |---|---|---|

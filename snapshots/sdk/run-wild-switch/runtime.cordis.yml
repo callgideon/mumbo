@@ -1,0 +1,28 @@
+# Run Wild as a person's box composes it, with Full access chosen for new Sessions, so the person switches the Session
+# into Run Wild and back; the model requests are captured to show which ones carry the Run Wild instructions.
+- id: approval
+  config:
+    policy: ask
+- id: permission
+  config:
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: ask
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: ask
+      run-wild:
+        sandbox: danger-full-access
+        approval: ask
+    defaultPreset: danger-full-access
+- insert:
+    - id: run-wild
+      name: '@mumbo/run-wild'
+    - id: run-wild-switch-request-capture
+      name: '../manual-compact/capture-requests.mjs'
+      config:
+        path: !!js dshHomePath('run-wild-switch-requests.jsonl')
