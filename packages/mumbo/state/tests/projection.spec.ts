@@ -132,12 +132,16 @@ describe('resume', () => {
     expect(forked).toMatchObject({ jobs: {}, runs: {}, resume: null })
   })
 
-  it('keeps the load before the restart, or before an earlier restart whose notice is still pending', () => {
+  it('keeps the load before the restart, or before an earlier restart not yet checked', () => {
     const notice = { kind: 'mumbo-resume', form: 'notice', summary: 'x' } as const
     const twice = new Log().user('hi').add('session/end-seed', {}).user('notice', notice).user('later').add('session/end-seed', {})
     expect(fold(twice)).toMatchObject({ resume: { seedSeq: 4, downAt: 4000, upSince: 2000 }, loadedAt: 5000 })
-    const pending = new Log().user('hi').add('session/end-seed', {}).add('session/end-seed', {})
-    expect(fold(pending)).toMatchObject({ resume: { seedSeq: 2, downAt: 1000, upSince: 0 }, loadedAt: 3000 })
+    // A reply after a restart checks it, also without a notice: nothing to report, or no plugin then.
+    const replied = new Log().user('hi').add('session/end-seed', {}).user('again').assistant('ok').add('session/end-seed', {})
+    expect(fold(replied)).toMatchObject({ resume: { seedSeq: 4, downAt: 4000, upSince: 2000 }, loadedAt: 5000 })
+    // A person's message without a reply, as a rejected step leaves, does not.
+    const pending = new Log().user('hi').add('session/end-seed', {}).user('again').add('session/end-seed', {})
+    expect(fold(pending)).toMatchObject({ resume: { seedSeq: 3, downAt: 3000, upSince: 0 }, loadedAt: 4000 })
     const forked = new Log().add('session/end-seed', { inherited: true }).user('hi').add('session/end-seed', {})
     expect(fold(forked).resume).toEqual({ seedSeq: 2, downAt: 2000, upSince: 1000 })
   })
@@ -149,6 +153,14 @@ describe('resume', () => {
     expect(state).toMatchObject({ resume: null, lastActivity: 7000 })
     expect(Object.keys(state.jobs)).toEqual(['bash-2'])
     expect(Object.keys(state.runs)).toEqual(['r2'])
+  })
+
+  it('clears the resume and the work started before it at the first reply after it', () => {
+    const log = new Log().job('bash-1').settle('bash-1', 'teardown', 'killed').run('r1').add('session/end-seed', {}).job('bash-2').user('Back.')
+    expect(fold(log).resume).not.toBeNull()
+    const state = fold(log.assistant('ok'))
+    expect(state).toMatchObject({ resume: null, lastActivity: 7000, runs: {} })
+    expect(Object.keys(state.jobs)).toEqual(['bash-2'])
   })
 
   it('treats a notice without a pending resume as activity only', () => {
@@ -167,7 +179,8 @@ it('restores event seqs and call ids from a checkpoint with their brands', () =>
 it('validates its own states as checkpoints, and a restored checkpoint plus its suffix folds to the full replay', () => {
   const log = new Log().job('bash-1').settle('bash-1', 'teardown', 'killed').run('r1').runEnd('r1').plan('p', '# P')
     .add('plan/mode', { active: false }).todos([{ content: 'a', status: 'completed' }]).add('session/end-seed', {})
-    .job('bash-2').user('notice', { kind: 'mumbo-resume', form: 'notice', summary: 'x' }).compaction()
+    .job('bash-2').user('notice', { kind: 'mumbo-resume', form: 'notice', summary: 'x' }).compaction().add('session/end-seed', {})
+    .assistant('ok')
   const full = fold(log)
   expect(stateSchema.parse(full)).toEqual(full)
   expect(stateSchema.parse(initState())).toEqual(initState())

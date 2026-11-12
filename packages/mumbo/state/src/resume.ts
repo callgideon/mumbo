@@ -9,7 +9,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-goal'
 import { boundContextSummary, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContextFormed } from '@deepseek-ai/dsh-llm'
-import type { Session, SessionEvent, SessionSeq, TurnEndReason, UserMessage } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent, TurnEndReason, UserMessage } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type { SessionQueryEngine } from '@deepseek-ai/dsh-session-query'
 import type { SubagentCatalogEntry } from '@deepseek-ai/dsh-subagent'
@@ -121,8 +121,8 @@ async function childFindings(ctx: Context, agent: Agent, resume: Resume, signal:
     }
     const { end } = log
     // A shutdown can end a child's turn at or before the parent's last message, and a crash read closes it at the
-    // child's last event, so a stopped child is not compared with `downAt`. One that stopped before this Session's
-    // previous load was in that restart's notice.
+    // child's last event, so a stopped child is not compared with `downAt`. One that stopped before the load preceding
+    // this restart belongs to an earlier restart, which is checked.
     if (end === undefined || stopped(end.data.reason)) {
       if (log.lastAt < resume.upSince) continue
       const resumeHint = child.mode === 'continuable' ? ` Use send_message to ${name} to continue it.` : ''
@@ -178,30 +178,23 @@ async function reconcile(
 }
 
 /**
- * Add the resume notice to the first step after a resume that the rest of the chain admits. A step aborted before it is
- * logged leaves the resume pending, so the next step reconciles again; a step that already carries a notice, which an
- * outer listener returned to the inbox unlogged, gets no second one. Nothing to report is remembered per Session for
- * this process, and logs nothing.
+ * Add the resume notice to the first step after a resume that the rest of the chain admits. The notice, or with nothing
+ * to report the step's assistant message, checks the restart in the log; until then each admitted step reconciles. A
+ * step aborted before it is logged leaves the resume pending; a step that already carries a notice, which an outer
+ * listener returned to the inbox unlogged, gets no second one.
  * @param ctx - plugin context; the listener ends with it.
  * @param stateOf - the `mumboState` of a Session.
  */
 export function listenForResume(ctx: Context, stateOf: (session: Session) => MumboState): void {
-  const quiet = new WeakMap<Session, SessionSeq>()
   ctx.on('agent/pre-step', async (step, next) => {
     const decision = await next()
     if (decision.kind === 'reject') return decision
-    const session = step.agent.session
-    const state = stateOf(session)
+    const state = stateOf(step.agent.session)
     const resume = state.resume
-    if (resume === null || quiet.get(session) === resume.seedSeq) return decision
-    if (decision.messages.some(message => message.source.kind === RESUME_SOURCE)) return decision
+    if (resume === null || decision.messages.some(message => message.source.kind === RESUME_SOURCE)) return decision
     const notice = await reconcile(ctx, step.agent, state, resume, step.signal)
     // An aborted step, also one aborted before this listener ran, logs nothing, so the restart stays for the next one.
-    if (step.signal.aborted) return decision
-    if (notice === undefined) {
-      quiet.set(session, resume.seedSeq)
-      return decision
-    }
+    if (step.signal.aborted || notice === undefined) return decision
     return { ...decision, messages: [...decision.messages, notice] }
   })
 }

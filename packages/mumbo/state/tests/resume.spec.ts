@@ -11,6 +11,7 @@ import { WorkflowRunId } from '@deepseek-ai/dsh-workflow'
 import { describe, expect, it, vi } from 'vitest'
 import { textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import { subagentCatalogProjectionDefinition } from '../../../subagent/subagent/src/catalog.ts'
+import * as MumboState from '../src/index.ts'
 import { PLAN_READ, STATE_CONTEXT } from '../src/index.ts'
 import { Log } from './events.ts'
 import { boot, notices, requestTexts, startJob, turn } from './harness.ts'
@@ -168,6 +169,54 @@ it('removes the block, plan_read and the notice when the plugin unloads', { time
   expect(await contexts()).not.toContain(STATE_CONTEXT)
   await turn(agent, 'Back.')
   expect(notices(agent)).toEqual([])
+})
+
+describe('restarts already checked', () => {
+  /** Mount the subagent catalog and a session query that reads `logs`, an empty log for any other child. */
+  const children = (logs: Record<string, SessionEvent[]>) => async (ctx: Context) => {
+    await ctx.sessionProjections.register(subagentCatalogProjectionDefinition)
+    ctx.provide('sessionQuery', { observeSession: (id: string) => Promise.resolve({ events: logs[id] ?? [], [Symbol.dispose]() {} }) } as never)
+  }
+
+  it('compares nothing again after a plugin reload when the restart had nothing to report', { timeout: 60_000 }, async () => {
+    const logs: Record<string, SessionEvent[]> = {}
+    const harness = await boot(replies(4), children(logs))
+    const handle = await harness.start('reloaded')
+    await turn(handle.agent, 'Start.')
+    const { agent } = await harness.restart(handle)
+    await turn(agent, 'Back.')
+    // While loaded, a one-shot child runs and finishes, and the parent gets its result.
+    logs.tester = new Log(Date.now()).add('turn/start', { turn: 1 }).assistant('All green.')
+      .add('turn/end', { turn: 1, reason: { kind: 'completed' } }).events
+    agent.session.append('subagent/catalog', { childId: SessionId('tester'), childCreatedAt: 0, version: 1, mode: 'one-shot', label: 'run tests' } as never)
+    await turn(agent, 'The tester reported: all green.')
+    await harness.unload()
+    await harness.ctx.plugin(MumboState)
+    await turn(agent, 'Next.')
+    expect(notices(agent)).toEqual([])
+  })
+
+  it('reports only the latest restart on a Session that ran past earlier ones before the plugin was mounted', { timeout: 60_000 }, async () => {
+    // A child an earlier restart disposed mid-turn, a day ago.
+    const old = new Log(Date.now() - 86_400_000).add('turn/start', { turn: 1 })
+      .add('turn/end', { turn: 1, reason: { kind: 'aborted', reason: { kind: 'disposed' } } }).events
+    const harness = await boot(replies(4), async (ctx) => {
+      await mountJobs(ctx)
+      await children({ old })(ctx)
+    })
+    await harness.unload()
+    const handle = await harness.start('history')
+    handle.agent.session.append('subagent/catalog', { childId: SessionId('old'), childCreatedAt: 0, version: 3, mode: 'continuable', label: 'old', name: 'old' } as never)
+    await turn(handle.agent, 'Start a dev server.')
+    startJob(harness.ctx, handle.agent, 'npm run dev')
+    const first = await harness.restart(handle)
+    await turn(first.agent, 'Hello again.')
+    await turn(first.agent, 'More work.')
+    await harness.ctx.plugin(MumboState)
+    const { agent } = await harness.restart(first, true)
+    await turn(agent, 'Back.')
+    expect(notices(agent)).toEqual([])
+  })
 })
 
 describe('workflow runs', () => {

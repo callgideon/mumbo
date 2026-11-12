@@ -49,9 +49,9 @@ export const stateSchema = z.object({
   reviewed: planSchema.nullable(),
   /** The latest approved plan. */
   plan: planSchema.nullable(),
-  /** Jobs other than workflow runs, by id, until a step starts after their settlement or the resume notice reports them. */
+  /** Jobs other than workflow runs, by id, until a step starts after their settlement or a restart after them is checked. */
   jobs: z.record(z.string(), jobSchema),
-  /** Workflow runs, by run id, until a step starts after their end or the resume notice reports them. */
+  /** Workflow runs, by run id, until a step starts after their end or a restart after them is checked. */
   runs: z.record(z.string(), runSchema),
   /** Time of the last message logged, which a restart's end-seed keeps as the time the Session went down. */
   lastActivity: z.number(),
@@ -59,7 +59,8 @@ export const stateSchema = z.object({
   loadedAt: z.number(),
   /**
    * The restart's end-seed, the time the Session went down, and the time it was loaded before that restart (an earlier
-   * restart whose notice is still pending keeps its own), until the resume notice is logged.
+   * restart not yet checked keeps its own), until the restart is checked: the resume notice or the first assistant
+   * message after the end-seed is logged.
    */
   resume: z.object({ seedSeq: seqSchema, downAt: z.number(), upSince: z.number() }).nullable(),
 })
@@ -85,6 +86,18 @@ export function initState(): MumboState {
 function without<T>(record: Record<string, T>, drop: (entry: T) => boolean): Record<string, T> {
   const kept = Object.entries(record).filter(([, entry]) => !drop(entry))
   return kept.length === Object.keys(record).length ? record : Object.fromEntries(kept)
+}
+
+/** `state` with its pending restart checked: the restart cleared, and the jobs and runs started before it dropped. */
+function checked(state: MumboState): MumboState {
+  const resume = state.resume
+  if (resume === null) return state
+  return {
+    ...state,
+    resume: null,
+    jobs: without(state.jobs, job => job.seq < resume.seedSeq),
+    runs: without(state.runs, run => run.seq < resume.seedSeq),
+  }
 }
 
 /** The plan text of an `exit_plan_mode` call's raw arguments, or `undefined` when they hold none. */
@@ -185,20 +198,13 @@ export function foldState(state: MumboState, event: SessionEvent): MumboState {
       return { ...state, turn: event.data.turn }
     case 'todo/write':
       return { ...state, todos: { items: event.data.todos, turn: state.turn } }
-    case 'user/message': {
-      const resume = state.resume
-      if (event.data.source.kind !== RESUME_SOURCE || resume === null) return { ...state, lastActivity: event.time }
-      // The notice reported every job and run started before the restart.
-      return {
-        ...state,
-        lastActivity: event.time,
-        resume: null,
-        jobs: without(state.jobs, job => job.seq < resume.seedSeq),
-        runs: without(state.runs, run => run.seq < resume.seedSeq),
-      }
-    }
+    // The notice reported every job and run started before the restart.
+    case 'user/message':
+      return { ...event.data.source.kind === RESUME_SOURCE ? checked(state) : state, lastActivity: event.time }
+    // The loop logs a reply only in a step the pre-step chain admitted, so the resume listener logged its notice before
+    // it or found nothing to report, or the Session ran without this plugin.
     case 'assistant/message':
-      return { ...state, lastActivity: event.time }
+      return { ...checked(state), lastActivity: event.time }
     case 'tool/result': {
       const next = foldPlan(state, event)
       return { ...next, lastActivity: event.time }
