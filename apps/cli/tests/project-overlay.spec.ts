@@ -49,6 +49,22 @@ describe('project-box overlay', () => {
     }
   })
 
+  it('registers the project Workspace after the member row, both naming the directory with one expression', () => {
+    const { rows, home } = compose()
+    try {
+      const ids = rows.map(row => row.id)
+      expect(ids.indexOf('mumbo-project-workspace')).toBe(ids.indexOf('mumbo-edge-member') + 1)
+      const project = rows.find(row => row.id === 'mumbo-project-workspace')
+      const member = rows.find(row => row.id === 'mumbo-edge-member')
+      expect(project?.name).toBe('@mumbo/edge-member/project-workspace')
+      const workspace = { __jsExpr: "process.env.HOME + '/projects'" }
+      expect(project?.config).toEqual({ workspace })
+      expect(member?.config).toMatchObject({ workspace })
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
   it('agrees on approval never in the policy and every permission preset', () => {
     const { rows, home } = compose()
     try {

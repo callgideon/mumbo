@@ -21,3 +21,4 @@
   name: '@mumbo/edge-member'
   config:
     key: !!js process.env.MUMBO_MEMBER_KEY
+    workspace: /projects/project

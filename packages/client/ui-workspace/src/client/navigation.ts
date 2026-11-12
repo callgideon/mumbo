@@ -202,6 +202,8 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   private readonly hiddenSource = createSnapshotStore<readonly SessionId[]>([])
   /** Hidden Session ids, one per live {@link UiWorkspace.hideSession} registration; the browser lists none of them. */
   readonly hiddenSessionIds: ObservableSnapshot<readonly SessionId[]> = this.hiddenSource
+  /** Whether this Peer may ask the Host for a default Workspace; a project member may not. */
+  private mayInitializeDefault = false
 
   /**
    * @param ctx - Client root Context.
@@ -220,6 +222,11 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     private readonly notify: (toast: RowToast) => void,
   ) {
     super(ctx, 'uiWorkspace')
+    // Before navigation starts: with both lists ready, restoration reads the grant synchronously inside that effect.
+    ctx.remoteAccess.whenAccess('workspace/initializeDefault', () => {
+      this.mayInitializeDefault = true
+      return () => { this.mayInitializeDefault = false }
+    })
     ctx.effect(() => {
       const stop = this.watchNavigation()
       return () => {
@@ -525,7 +532,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     let sessionId: SessionId | undefined
     if (reclaim !== undefined) sessionId = await this.restoreBlank(reclaim.workspaceId, reclaim.sessionId)
     let target = workspace?.workspaceId ?? recentWorkspace(workspaces.items, sessions.byId)
-    if (target === undefined && workspaces.items.length === 0 && sessions.ids.length === 0) {
+    if (target === undefined && this.mayInitializeDefault && workspaces.items.length === 0 && sessions.ids.length === 0) {
       const prepared = await this.initializeDefaultWorkspace(navigation)
       if (navigation.aborted) return
       target = prepared?.workspaceId
@@ -539,8 +546,10 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   private async initializeDefaultWorkspace(signal: AbortSignal): Promise<WorkspaceView | undefined> {
     try {
       return await this.workspaces.initializeDefault(signal)
-    } catch (_error: unknown) {
-      if (!signal.aborted) this.notify({ kind: 'defaultWorkspaceFailed' })
+    } catch (error: unknown) {
+      if (signal.aborted) return undefined
+      console.warn('default Workspace creation failed:', error)
+      this.notify({ kind: 'defaultWorkspaceFailed' })
       return undefined
     }
   }
