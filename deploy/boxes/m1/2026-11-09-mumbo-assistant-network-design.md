@@ -221,6 +221,7 @@ In Run Wild, Mumbo never asks. It decides from context and the person's rules, a
   - New sessions, schedule-started ones included, start in it when the edge sets `MUMBO_NEW_SESSION_PRESET=run-wild` for that person's box.
   - The edge setting is needed because Settings can't write the default on person boxes: an overlay owns the `permission` row there, which predates Run Wild.
   - The founder's box gets it.
+  - **[2026-11-12, live]** The edge sets it for `hi@mumbo.si` (edge :52). Run Wild is last in the selector and the default for new sessions. The founder's existing Sessions keep Full access until the founder switches them.
 - **Only the person switches it.** No model tool changes the preset (`/permission` is a user command). After B24, the agent can't reach dsh's API: the firewall resets its connections to dsh's port. Before B24, the agent is root and could already do anything.
 - **Subagents and delegated children** follow their live root Session's mode, so switching the root back reaches running children at once. Computer use runs in a subagent.
 - **Turning it on shows one explanation, once, at the switch:** what Mumbo will now do unasked (send as you, post, buy with saved payment methods, delete) and what still holds (below). It is the only confirmation, given when the mode is chosen, never per action.
@@ -1209,6 +1210,7 @@ The box's Chrome now holds the founder's saved passwords and cards. Two layers p
   - The token lives in `GH_CONFIG_DIR=/var/lib/mumbo/agent-gh` (`agent`, 0700), set in `agent`'s run-as row. It sits outside every model root, so the file tools can't read it, while `gh` in the shell can. The backup takes that directory, so the sign-in survives moves, and the system repair leaves it to `agent`. It is never under `/root/projects` (a `git add -A` could commit it) or in Mumbo Sync's folders.
   - The model can still read and use the token through the shell in turns the founder started. The token's scopes are the boundary, and the README says so. Under Run Wild, pushes and merges in those turns run unasked.
   - A root-held token behind a local proxy, like the project box's, would keep it from the model entirely. That is a later option if the founder asks.
+  - **Ship gate [2026-11-12]:** the person template the B48 edge builds runs a dsh image whose commit contains the report-turn gate (#48, main `f83453dfee`). `prod-9d673fcf64` doesn't contain it. Before the founder signs in, a project report on the founder's box that asks for `gh auth status` must get an ask, or under Run Wild a refusal, not a run.
 - **Network request details are denied.** A request's details carry its `Cookie` header and form body, so a login's password or a session cookie would reach the model.
   - `browser_network_request` is refused outright.
   - The request list stays a read only if it shows no headers or bodies; otherwise it is refused too.

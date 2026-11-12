@@ -422,6 +422,7 @@ th,td{text-align:left;vertical-align:top;padding:8px 12px;border-bottom:.5px sol
 <li>New sessions, schedule-started ones included, start in it when the edge sets <code>MUMBO_NEW_SESSION_PRESET=run-wild</code> for that person's box.</li>
 <li>The edge setting is needed because Settings can't write the default on person boxes: an overlay owns the <code>permission</code> row there, which predates Run Wild.</li>
 <li>The founder's box gets it.</li>
+<li><strong>[2026-11-12, live]</strong> The edge sets it for <code>hi@mumbo.si</code> (edge :52). Run Wild is last in the selector and the default for new sessions. The founder's existing Sessions keep Full access until the founder switches them.</li>
 </ul>
 </li>
 <li><strong>Only the person switches it.</strong> No model tool changes the preset (<code>/permission</code> is a user command). After B24, the agent can't reach dsh's API: the firewall resets its connections to dsh's port. Before B24, the agent is root and could already do anything.</li>
@@ -2074,6 +2075,7 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>The token lives in <code>GH_CONFIG_DIR=/var/lib/mumbo/agent-gh</code> (<code>agent</code>, 0700), set in <code>agent</code>'s run-as row. It sits outside every model root, so the file tools can't read it, while <code>gh</code> in the shell can. The backup takes that directory, so the sign-in survives moves, and the system repair leaves it to <code>agent</code>. It is never under <code>/root/projects</code> (a <code>git add -A</code> could commit it) or in Mumbo Sync's folders.</li>
 <li>The model can still read and use the token through the shell in turns the founder started. The token's scopes are the boundary, and the README says so. Under Run Wild, pushes and merges in those turns run unasked.</li>
 <li>A root-held token behind a local proxy, like the project box's, would keep it from the model entirely. That is a later option if the founder asks.</li>
+<li><strong>Ship gate [2026-11-12]:</strong> the person template the B48 edge builds runs a dsh image whose commit contains the report-turn gate (#48, main <code>f83453dfee</code>). <code>prod-9d673fcf64</code> doesn't contain it. Before the founder signs in, a project report on the founder's box that asks for <code>gh auth status</code> must get an ask, or under Run Wild a refusal, not a run.</li>
 </ul>
 </li>
 <li><strong>Network request details are denied.</strong> A request's details carry its <code>Cookie</code> header and form body, so a login's password or a session cookie would reach the model.
