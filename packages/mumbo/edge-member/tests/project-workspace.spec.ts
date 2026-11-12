@@ -322,6 +322,34 @@ describe('the project Workspace while the box runs', () => {
     expect(grants.get(`workspace:${superagent.id}`)).toBeUndefined()
     expect(grants.get(`workspace:${workspaces(box.ctx).find(item => item.path === project)!.id}`)).toEqual(['session/create', 'workspace/follow'])
     expect(grants.get('session:coordinator')).toContain('session/follow')
+    // A snapshot carries no arguments, so the Session binding's condition withholds `session/create`.
+    expect(grants.get('session:coordinator')).not.toContain('session/create')
+  })
+
+  it('lets members start a Session only in the project Workspace, refusing a create that names none', { timeout: 60_000 }, async () => {
+    const project = directory()
+    const box = await startBox({ pool: initializedEmptyStore(), workspace: project, stored: [header('blank', project)] })
+    const origin = await serve(box)
+    const [projectWorkspace] = workspaces(box.ctx)
+    const member = signMemberHeader(KEY, 'ann@example.com', now() + 300)
+    const create = async (request: object) => (await call(origin, 'session/create', { request }, member)).body
+    // A create that names no Workspace or Session is decided on the global resource, even for the project directory.
+    for (const request of [{}, { cwd: project }, { cwd: '/elsewhere' }]) {
+      expect(await create(request), JSON.stringify(request)).toMatchObject({ result: { ok: false, error: { code: 'remote-access/denied' } } })
+    }
+    // One that names a reachable Session and no Workspace is decided on that Session, whose binding requires a Workspace.
+    for (const request of [{ sessionId: 'blank' }, { sessionId: 'blank', cwd: project }]) {
+      expect(await create(request), JSON.stringify(request)).toMatchObject({
+        result: { ok: false, error: { code: 'remote-access/denied', details: { reason: 'workspace-required' } } },
+      })
+    }
+    // Every named resource must allow: a reachable Session does not carry a create into a Workspace the member lacks.
+    const other = await box.ctx.workspaceRegistry.create(directory())
+    for (const request of [{ workspaceId: other.id }, { workspaceId: other.id, sessionId: 'blank' }]) {
+      expect(await create(request), JSON.stringify(request)).toMatchObject({ result: { ok: false, error: { code: 'remote-access/denied' } } })
+    }
+    expect(await create({ workspaceId: projectWorkspace!.id })).toMatchObject({ result: { ok: true, value: 'new' } })
+    expect(await create({ workspaceId: projectWorkspace!.id, sessionId: 'blank' })).toMatchObject({ result: { ok: true, value: 'blank' } })
   })
 
   it('lets members open a stored Session with no Workspace, and one created later after it stops', { timeout: 60_000 }, async () => {

@@ -105,6 +105,13 @@ export interface UiWorkspace {
    */
   startSession(workspaceId?: WorkspaceId, options?: StartSessionOptions): void
   /**
+   * Whether the current Peer may call `session/create` where {@link UiWorkspace.startSession} without a Workspace
+   * would start: on the Workspace it targets, the current Session's Workspace and then the most recently active one,
+   * or on the global resource while it targets none and would clear into the blank New Session page. Always true
+   * for the owner.
+   */
+  readonly newSessionAccess: ObservableSnapshot<boolean>
+  /**
    * Archive a Session and clear it when it is the current selection.
    * @param sessionId - Session to archive.
    * @param options - `stopActivity` asks the Host to stop the Session's running work instead of refusing.
@@ -204,6 +211,8 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   readonly hiddenSessionIds: ObservableSnapshot<readonly SessionId[]> = this.hiddenSource
   /** Whether this Peer may ask the Host for a default Workspace; a project member may not. */
   private mayInitializeDefault = false
+  private readonly newSessionGrant = createSnapshotStore(false)
+  readonly newSessionAccess: ObservableSnapshot<boolean> = this.newSessionGrant
 
   /**
    * @param ctx - Client root Context.
@@ -237,6 +246,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
         reference?.release()
       }
     }, 'ui-workspace: Workspace navigation policy')
+    ctx.effect(() => this.followNewSessionAccess(), 'ui-workspace: New Session access')
   }
 
   connectWorkspace(workspaceId: WorkspaceId, options: Pick<StartSessionOptions, 'agentPreset'> = {}): Promise<SessionId> {
@@ -373,16 +383,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     const draftOptions = options === undefined ? undefined : draft
     const initializeDraft = draftOptions !== undefined && (draftOptions.prompt !== undefined
       || (draftOptions.whenDraftExists ?? (draftOptions.clearPreviousDraft === true ? 'replace' : 'keep')) === 'replace')
-    const workspace = this.workspaces.list.getSnapshot()
-    const sessions = this.sessions.list.getSnapshot()
-    const current = this.mainReference?.sessionId
-    const currentWorkspaceId = current === undefined
-      ? undefined
-      : workspace.items.find(item => item.sessionIds.includes(current))?.workspaceId
-    const recent = workspace.phase === 'ready' && sessions.phase === 'ready'
-      ? recentWorkspace(workspace.items, sessions.byId)
-      : undefined
-    const target = workspaceId ?? currentWorkspaceId ?? recent
+    const target = workspaceId ?? this.newSessionTarget()
     if (target === undefined) {
       if (initializeDraft) {
         this.notify({ kind: 'createFailed', message: this.ctx.locale.bind('workspace')('draft.workspaceRequired') })
@@ -399,6 +400,45 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     void opening.catch(
       (reason: unknown) => { console.warn('new session failed:', reason) },
     )
+  }
+
+  /** The Workspace New Session without one targets: the current Session's, then the most recently active once both lists are ready. */
+  private newSessionTarget(): WorkspaceId | undefined {
+    const workspace = this.workspaces.list.getSnapshot()
+    const current = this.mainReference?.sessionId
+    const currentWorkspaceId = current === undefined
+      ? undefined
+      : workspace.items.find(item => item.sessionIds.includes(current))?.workspaceId
+    if (currentWorkspaceId !== undefined) return currentWorkspaceId
+    const sessions = this.sessions.list.getSnapshot()
+    return workspace.phase === 'ready' && sessions.phase === 'ready' ? recentWorkspace(workspace.items, sessions.byId) : undefined
+  }
+
+  /** Keep {@link UiWorkspace.newSessionAccess} on New Session's current target, watching a new grant only when the target changes. */
+  private followNewSessionAccess(): () => void {
+    let followed: { readonly target: WorkspaceId | undefined; readonly stop: () => void } | undefined
+    const granted = (): (() => void) => {
+      this.newSessionGrant.set(true)
+      return () => { this.newSessionGrant.set(false) }
+    }
+    const follow = (): void => {
+      const target = this.newSessionTarget()
+      if (followed !== undefined && followed.target === target) return
+      followed?.stop()
+      followed = {
+        target,
+        // With no target, New Session creates nothing itself; a create that names no Workspace asks the global resource.
+        stop: target === undefined
+          ? this.ctx.remoteAccess.whenAccess('session/create', granted)
+          : this.whenAccess(target, 'session/create', granted),
+      }
+    }
+    const unsubscribe = [this.workspaces.list, this.sessions.list, this.selection].map(source => source.subscribe(follow))
+    follow()
+    return () => {
+      for (const stop of unsubscribe) stop()
+      followed?.stop()
+    }
   }
 
   private prepareDraft(binding: SessionBinding, options: DraftInitializationOptions): void {
@@ -579,6 +619,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   ): void {
     signal.throwIfAborted()
     const reference = this.sessions.retain(target, { source: 'mainView' })
+    let selection: MainSelection
     try {
       signal.throwIfAborted()
       beforeOpen?.(reference.sessionId)
@@ -589,16 +630,18 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       const subagentAddress = typeof target === 'string'
         ? this.sessions.subagentAddress(reference.sessionId)
         : target
-      this.selection.set({
+      selection = {
         sessionId: reference.sessionId,
         ...(subagentAddress === undefined ? {} : { subagentAddress }),
-      })
+      }
     } catch (error: unknown) {
       reference.release()
       throw error
     }
     const previous = this.mainReference
     this.mainReference = reference
+    // Published after the reference changes: New Session's access follows this store and reads the reference.
+    this.selection.set(selection)
     previous?.release()
     if (panel === 'reveal') this.ctx.layout.selectPanel(null)
   }

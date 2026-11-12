@@ -36,6 +36,7 @@ async function page(withPlugin = true) {
   let main: { release(): void } | undefined
   const uiWorkspace = {
     restoration: createSnapshotStore<UiWorkspaceRestoration>('pending'),
+    newSessionAccess: createSnapshotStore(true),
     startSession: vi.fn(),
     openSession: vi.fn((sessionId: SessionId) => {
       main?.release()

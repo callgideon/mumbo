@@ -5,13 +5,19 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { RemoteAccessBinding, RemoteAccessRole } from '@deepseek-ai/dsh-api-remote-access'
+import type {
+  RemoteAccessBinding,
+  RemoteAccessCondition,
+  RemoteAccessDecision,
+  RemoteAccessRole,
+} from '@deepseek-ai/dsh-api-remote-access'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 
 /**
- * Host-wide reads a collaborator's page needs, and starting a Session; list and follow results are filtered per
- * Session and Workspace. `hostFiles/readAny` is excluded: `/api/file` reads any file the box can read, including
- * its secrets and every Session log.
+ * Host-wide reads a collaborator's page needs; list and follow results are filtered per Session and Workspace.
+ * `hostFiles/readAny` is excluded: `/api/file` reads any file the box can read, including its secrets and every
+ * Session log. `session/create` is excluded: a create that names no Workspace or Session starts in any directory its
+ * `cwd` names, so members start Sessions only through the Workspace and Session roles.
  */
 export const MEMBER_GLOBAL_ROLE: RemoteAccessRole<'global'> = {
   name: 'mumbo:member-global',
@@ -23,7 +29,6 @@ export const MEMBER_GLOBAL_ROLE: RemoteAccessRole<'global'> = {
     'llm/listProviders',
     'session/canOpenWorkspacePath',
     'session/control',
-    'session/create',
     'session/list',
     'session/modelCatalog',
     'session/search',
@@ -35,8 +40,9 @@ export const MEMBER_GLOBAL_ROLE: RemoteAccessRole<'global'> = {
 /**
  * Reading, following, prompting, and stopping one Session, reading its jobs and workspace files, uploading files
  * for it through the Remote or the browser's binary route, downloading its log archive and copying it as Markdown,
- * answering its questions, and reusing it as a blank Session. Queue edits are excluded: an edit keeps the edited
- * message's source, so it would record one person's text as another's.
+ * answering its questions, and reusing it as a blank Session; each member binding's condition admits that reuse only
+ * in a create that names a Workspace. Queue edits are excluded: an edit keeps the edited message's source, so it would
+ * record one person's text as another's.
  */
 export const MEMBER_SESSION_ROLE: RemoteAccessRole<'session'> = {
   name: 'mumbo:member-session',
@@ -78,6 +84,23 @@ export const MEMBER_SESSION_ROLE: RemoteAccessRole<'session'> = {
     'event:api-session/removed',
     'event:api-session/status',
   ],
+}
+
+const ALLOW: RemoteAccessDecision = { kind: 'allow' }
+const WORKSPACE_REQUIRED: RemoteAccessDecision = { kind: 'deny', reason: 'workspace-required' }
+
+/**
+ * Refuses, with reason `workspace-required`, a `session/create` on a member's Session binding that names no
+ * `workspaceId`, and every Session-resource `session/create` asked without arguments, such as a snapshot. The Host
+ * decides a create that names a Session and no Workspace on that Session alone, and when the Session is no longer a
+ * reusable blank it starts a new Session with no Workspace in that Session's directory. With a `workspaceId`, the
+ * Workspace role limits the create to the project Workspace. Every other action is allowed.
+ */
+const MEMBER_SESSION_CONDITION: RemoteAccessCondition<'session'> = ({ action, args }) => {
+  if (action !== 'session/create') return ALLOW
+  const request = args?.['request']
+  const named = typeof request === 'object' && request !== null && 'workspaceId' in request && request.workspaceId !== undefined
+  return named ? ALLOW : WORKSPACE_REQUIRED
 }
 
 /** Following the project Workspace and starting a Session in it. */
@@ -139,7 +162,9 @@ export class MemberBindings {
       for (const id of workspace.sessionIds) sessions.add(id)
     }
     for (const session of this.ctx.sessions.list()) sessions.add(session.id)
-    for (const id of sessions) bindings.push({ role: MEMBER_SESSION_ROLE, resource: { kind: 'session', id } })
+    for (const id of sessions) {
+      bindings.push({ role: MEMBER_SESSION_ROLE, resource: { kind: 'session', id }, condition: MEMBER_SESSION_CONDITION })
+    }
     return bindings
   }
 }
