@@ -69,7 +69,7 @@ aws logs filter-log-events --log-group-name /mumbo-boxes/edge --start-time $(( (
 - **Hung box: the others answer.** Lines for one box only, while the other boxes of its region back up. Kill it as in "Moving a box to a new template build" step 2, without waiting for a backup (it cannot take one). The person's next visit creates a box and restores the last backup; work since that backup is lost.
 
 ### edge-deploy-failed
-Not a CloudWatch alarm: the EventBridge rule `mumbo-boxes-edge-deploy-failed` sends ECS's `SERVICE_DEPLOYMENT_FAILED` event for the edge service to the alarm topic as one line of text (`mumbo-boxes edge deployment <id> failed at <time>: <reason>`), not alarm JSON. The deployment circuit breaker stopped the rollout and rolls the service back to the previous task definition, so the edge keeps serving the old image while `edge_tag` in `prod/terraform.tfvars` names the failed one. Handle it as in "Ship a new edge", step 6.
+Not a CloudWatch alarm: the EventBridge rule `mumbo-boxes-edge-deploy-failed` sends ECS's `SERVICE_DEPLOYMENT_FAILED` event for the edge service to the alarm topic as one line of text (`mumbo-boxes edge deployment <id> in <region> failed at <time>: <reason>`; Mumbai's edge's events reach it through a forwarding rule in `ap-south-1`), not alarm JSON. The deployment circuit breaker stopped the rollout and rolls the service back to the previous task definition, so the edge keeps serving the old image while `edge_tag` in `prod/terraform.tfvars` names the failed one. Handle it as in "Ship a new edge", step 6.
 
 ### edge-dropped-create
 A replica died while restoring a new box; the box was killed and the next visit restores from the backup again. One is harmless. Several mean edge tasks are being killed mid-request: check `tasks-edge`.
@@ -224,17 +224,17 @@ Run from the repository root. The image is built from `git archive` of the commi
    docker build --platform linux/amd64 -t "$REG/mumbo-boxes/edge:$C" "$B/deploy/boxes/edge" && docker push "$REG/mumbo-boxes/edge:$C"
    rm -rf "$B"
    ```
-2. Set `edge_tag = "<C>"` in `deploy/boxes/prod/terraform.tfvars` and run `terraform -chdir=deploy/boxes/prod plan`. Expect `module.edge_us_east_1.aws_ecs_task_definition.edge` (replaced) and `module.edge_us_east_1.aws_ecs_service.edge` (updated); read every other line. Until the first apply after the move into modules (`prod/moved.tf`), the plan also lists every resource as "has moved to module.cell_us_east_1..." or "module.edge_us_east_1..."; a move alone changes nothing, and the summary counts only the edge changes.
+2. Set `edge_tag = "<C>"` in `deploy/boxes/prod/terraform.tfvars` and run `terraform -chdir=deploy/boxes/prod plan`. Expect, for each edge (`module.edge_us_east_1` and `module.edge_ap_south_1`), `aws_ecs_task_definition.edge` (replaced) and `aws_ecs_service.edge` (updated); read every other line. Until the first apply after the move into modules (`prod/moved.tf`), the plan also lists every resource as "has moved to module.cell_us_east_1..." or "module.edge_us_east_1..."; a move alone changes nothing, and the summary counts only the edge changes.
 3. Apply. The apply returns once ECS has the new task definition, before any task of it runs.
-4. Wait for the rollout of every edge: each region's edge runs the same `edge_tag` (R6), and the sweep and the approvals poll run on whichever edge holds their lease, so a rollout is done only when both are. Define `edge_rollout` once per shell (bash or zsh); it takes the edge's cluster:
+4. Wait for the rollout of every edge: each region's edge runs the same `edge_tag` (R6), and the sweep and the approvals poll run on whichever edge holds their lease, so a rollout is done only when both are. Define `edge_rollout` once per shell (bash or zsh); it takes the edge's cluster and region:
    ```sh
    edge_rollout() {
-     td=$(aws ecs describe-task-definition --task-definition mumbo-boxes-edge --query taskDefinition.taskDefinitionArn --output text) \
+     td=$(aws ecs describe-task-definition --region "$2" --task-definition mumbo-boxes-edge --query taskDefinition.taskDefinitionArn --output text) \
        || { echo "edge_rollout: describe-task-definition failed"; return 2; }
      echo "edge_rollout: waiting for $td"
      for i in $(seq 120); do
        sleep 15
-       d=$(aws ecs describe-services --cluster "$1" --services edge \
+       d=$(aws ecs describe-services --region "$2" --cluster "$1" --services edge \
          --query 'services[0].deployments[].[status,taskDefinition,rolloutState,runningCount]' --output text) \
          || { echo "edge_rollout: describe-services failed"; return 2; }
        echo "$d"
@@ -245,23 +245,26 @@ Run from the repository root. The image is built from `git archive` of the commi
      done
      echo "edge_rollout: TIMED OUT after 30 minutes, the edge is not on $td"; return 2
    }
-   edge_rollout mumbo-boxes-e2b && AWS_REGION=ap-south-1 edge_rollout mumbo-boxes-aps1-e2b
+   edge_rollout mumbo-boxes-e2b us-east-1 && edge_rollout mumbo-boxes-aps1-e2b ap-south-1
    ```
-   Each call waits for one edge; `AWS_REGION` points the second at Mumbai's family and cluster. `td` is the newest active revision of family `mumbo-boxes-edge`, the one the apply registered. Each line printed is a deployment: status, task definition, rollout state, running tasks. It polls every 15 seconds, at most 120 times, and returns:
+   Each call waits for one edge, in its own region's family and cluster. `td` is the newest active revision of family `mumbo-boxes-edge`, the one the apply registered. Each line printed is a deployment: status, task definition, rollout state, running tasks. It polls every 15 seconds, at most 120 times, and returns:
    - 0: exactly one deployment is left, `PRIMARY` and `COMPLETED` on `td`. The rollout is done.
    - 1: a rollback. A deployment is `FAILED`, or the `PRIMARY` deployment is `COMPLETED` on an older revision. Go to step 6.
    - 2: no verdict. Either 30 minutes passed with the rollout still in progress, or an `aws` call failed. Read the events of step 6, then run `edge_rollout` again.
 5. Only after it returns 0, commit `terraform.tfvars` (`deploy(boxes): ship edge <C>`).
-6. Rollback (`edge_rollout` returned 1, or the `edge-deploy-failed` notification): the circuit breaker put the previous revision back. Read why; a task that crashes at start logs its error as its last lines:
+6. Rollback (`edge_rollout` returned 1, or the `edge-deploy-failed` notification, whose line names the region): the circuit breaker put the previous revision back. Set the edge's cluster and region (`us-east-1`: `mumbo-boxes-e2b`; Mumbai: `mumbo-boxes-aps1-e2b`, `ap-south-1`) and read why; a task that crashes at start logs its error as its last lines. Both edges log to `us-east-1`'s `/mumbo-boxes/edge` (Mumbai's streams start `edge-aps1/` and `oauth2-proxy-aps1/`), so the log command always runs in `us-east-1`:
    ```sh
-   aws ecs describe-services --cluster mumbo-boxes-e2b --services edge --query 'services[0].events[:5].[createdAt,message]' --output text
-   aws logs tail /mumbo-boxes/edge --since 30m | tail -50
+   CL=mumbo-boxes-e2b R=us-east-1   # or CL=mumbo-boxes-aps1-e2b R=ap-south-1
+   aws ecs describe-services --region $R --cluster $CL --services edge --query 'services[0].events[:5].[createdAt,message]' --output text
+   aws logs tail /mumbo-boxes/edge --region us-east-1 --since 30m | tail -50                  # us-east-1's edge
+   aws logs tail /mumbo-boxes/edge --region us-east-1 --since 30m --log-stream-name-prefix edge-aps1 | tail -50   # Mumbai's
    ```
-   Then set `edge_tag` back to the tag of the revision that runs, so a later apply does not deploy the failed image again, apply, and run `edge_rollout`:
+   Then set `edge_tag` back to the tag of the revision that runs, so a later apply does not deploy the failed image again, apply, and run `edge_rollout` for both edges:
    ```sh
-   aws ecs describe-task-definition --task-definition "$(aws ecs describe-services --cluster mumbo-boxes-e2b --services edge --query 'services[0].taskDefinition' --output text)" \
+   aws ecs describe-task-definition --region $R --task-definition "$(aws ecs describe-services --region $R --cluster $CL --services edge --query 'services[0].taskDefinition' --output text)" \
      --query "taskDefinition.containerDefinitions[?name=='edge'].image" --output text
    ```
+   When only one edge rolled back and the other completed on the new revision, do the same: set `edge_tag` back to the previous value and apply, so both edges run the same revision again, then investigate. The sweep and the approvals poll run on whichever edge holds their lease, so a pair on different revisions is never left running.
    Fix the cause in a new commit and ship that from step 1.
 
 From B21 the edge reads `EDGE_SECRET` and `MODEL_KEY` from its environment: the task definition passes `/mumbo/boxes/edge-secret` and `mumbo/prod/deepseek-api-key` as ECS secrets by full `us-east-1` ARN (`prod/edge.tf`), so the first B21 `edge_tag` must go out in the same apply as that Terraform, which plan shows as two new secrets on the task definition and new exec-role grants. An image without them stops at start with `edge: set EDGE_SECRET`. Pending after a B21 revision is steady: delete the `ssm:GetParameter` and `secretsmanager:GetSecretValue` statements for those two from `module.edge_us_east_1.aws_iam_role_policy.edge` (`prod/modules/edge/edge.tf`) and apply; until then an older image that a circuit-breaker rollback starts can still read them.
