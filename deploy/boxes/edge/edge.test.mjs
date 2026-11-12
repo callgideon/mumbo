@@ -1867,6 +1867,25 @@ test('pauseIdle reads the record again under the lock and skips a box whose acti
   assert.deepEqual([kinds(us, 'pause'), (await store.getBox('u1')).paused], [[['pause', 'u1']], true], 'idle since the listing: paused')
 })
 
+test('pauseIdle skips a box that a request reached while its next scheduled wake was being read', async () => {
+  const { NEXT_WAKE_COMMAND } = await import('./edge.mjs')
+  const { us, cells } = twoCells(); const store = memoryStore(); const logs = []
+  us.run('u1', 'a@x.com')
+  await store.putDoc('person:a@x.com', { region: 'us-east-1', at: 1 })
+  await store.putBox('u1', { email: 'a@x.com', region: 'us-east-1', host: cfg.publicHost, ports: PORTS, launch: 'L', active: 1, extended: 1, backedUp: 1, paused: false })
+  const b = boxes({ cells, store, cfg, edgeKey: 'k', log: (l) => logs.push(JSON.parse(l)) })
+  const connect = us.Sandbox.connect
+  us.Sandbox.connect = async (id) => {
+    const box = await connect(id), run = box.commands.run
+    // NEXT_WAKE_COMMAND runs up to 30 s; a request routes to the box meanwhile, without the user lock.
+    box.commands.run = async (c) => { if (c === NEXT_WAKE_COMMAND) { assert.equal((await b.ensure('a@x.com')).id, 'u1'); await b.touch('u1') } return run(c) }
+    return box
+  }
+  await b.sweep(Date.now() + cfg.idleMs)
+  assert.deepEqual([kinds(us, 'pause'), (await store.getBox('u1')).paused], [[], false])
+  assert.deepEqual(logs.filter(l => l.msg?.startsWith('pause')), [{ edge: 'box', msg: 'pause skipped: in use since the listing', user: 'a@x.com', box: 'u1' }])
+})
+
 // ---- B47: a box E2B still runs is never killed for being unreachable
 /** Boxes over two fake cells, with a person box `u1` that us-east-1's E2B lists in `state` and a record without a launch
  *  token (unless `record` gives one), so ensure resumes or repairs it. `connect(id, original)` replaces E2B's connect.

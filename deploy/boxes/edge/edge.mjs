@@ -1528,11 +1528,11 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
   }
   async function pauseIdle(b) {
     await store.withLock(`user:${b.email}`, LOCK_MS, async () => {
-      // `b` is the sweep's listing: a request since then (its activity, or a resume) moved `active`, and the box stays up.
-      // Read fresh, since an activity patch sends no invalidation.
-      if ((await store.getBox(b.id, { fresh: true }))?.active !== b.active) return say({ msg: 'pause skipped: in use since the listing', user: b.email, box: b.id })
       // A paused box cannot run its scheduled tasks, so remember when the next one is due and wake the box then.
       const wakeAt = await b.cell.Sandbox.connect(b.id, { timeoutMs: timeout() }).then(box => run(box, NEXT_WAKE_COMMAND, 30_000)).then(Number).catch(() => 0) || undefined
+      // `b` is the sweep's listing: a request since then (its activity, or a resume) moved `active`, and the box stays up.
+      // Read fresh, since an activity patch sends no invalidation, and last, since a running box's requests take no lock.
+      if ((await store.getBox(b.id, { fresh: true }))?.active !== b.active) return say({ msg: 'pause skipped: in use since the listing', user: b.email, box: b.id })
       await b.cell.Sandbox.pause(b.id)
       await store.patchBox(b.id, { paused: true, wakeAt })
       say({ msg: 'paused', user: b.email, box: b.id, region: b.cell.region, wakeAt: wakeAt && new Date(wakeAt).toISOString() })
