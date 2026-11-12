@@ -1418,20 +1418,21 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
         }
         // A final answer to a resume is retried at each visit for RESUME_GRACE_MS from the first: a snapshot still
         // uploading from a drained node gives the same answer until the upload lands (RUNBOOK "Resume failures").
-        // Within it a visit logs a warn line, and `retrying` keeps the page's edge-errors line out (userServer); past it,
-        // one edge-errors line comes before the recreate or the at-capacity page.
+        // Within it a visit logs a warn line; past it, one edge-errors line comes before the recreate or the at-capacity
+        // page. Either way the error carries `logged`, so userServer and modelServer add no edge-errors line of their own.
+        // `paused` is the record's: false for a box a node drain paused (see backup).
         const failedAt = known?.resumeFailedAt ?? Date.now()
         if (answer && known) {
           const ms = Date.now() - failedAt
           if (ms < RESUME_GRACE_MS) {
             if (known.resumeFailedAt === undefined) await store.patchBox(id, { resumeFailedAt: failedAt })
             say({ level: 'warn', msg: 'resume failed; retrying', user: email, box: id, region: cell.region, resumeFailedAt: failedAt, error: error.message })
-            throw Object.assign(error, { status: 503, retrying: true })
+            throw Object.assign(error, { status: 503, logged: true })
           }
-          log(JSON.stringify({ edge: 'error', level: 'error', msg: 'resume failed past the grace', user: email, box: id, region: cell.region, state: found.state, class: error.name, status: error.statusCode, ms, error: error.message }))
+          log(JSON.stringify({ edge: 'error', level: 'error', msg: 'resume failed past the grace', user: email, box: id, region: cell.region, paused: known.paused, class: error.name, status: error.statusCode, ms, error: error.message }))
         }
         // A create after the kill would be refused, and the box lost for nothing. A failed count throws: the box stays.
-        if (answer && await atCapacity(cell, unitsFor({ user: email }))) throw Object.assign(error, { capacity: true })
+        if (answer && await atCapacity(cell, unitsFor({ user: email }))) throw Object.assign(error, { capacity: true, logged: Boolean(known) })
         // A snapshot that still cannot be resumed (its node died before the upload finished, or its guest hung before the
         // pause), a box without a record to hold the grace, or dsh that never comes back must not strand the user: drop
         // the box and rebuild from the latest S3 backup.
@@ -1874,9 +1875,9 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, key
         p = box.ensure(key); pending.set(key, p)
         p.then(() => { pending.delete(key); restoreFailed.delete(key) }, (e) => {
           pending.delete(key); if (e.restoreFailed) restoreFailed.add(key)
-          // A resume retried within its grace has repair's warn line instead: a node drain whose uploads land in time
-          // raises no alarm (RUNBOOK "Resume failures").
-          if (!e.retrying) log(JSON.stringify({ edge: 'error', user: email, project: to.project, error: e.message }))
+          // A failed resume has repair's line instead: a warn within the grace, so a node drain whose uploads land in time
+          // raises no alarm, and one edge-errors line past it (RUNBOOK "Resume failures").
+          if (!e.logged) log(JSON.stringify({ edge: 'error', user: email, project: to.project, error: e.message }))
         })
       }
       // A page load that waits on a box shows the starting page after cfg.pageAfterMs; reloads join the same ensure.
@@ -2096,7 +2097,9 @@ export function modelServer({ cfg, edgeKey, modelKey, requests, owns, touch, mcp
   if (cfg.openrouterModels?.length && !cfg.openrouterKey) throw new Error('edge: OPENROUTER_MODELS needs OPENROUTER_API_KEY')
   const gitRoute = workerGitRoute(cfg)
   return createServer({ requestTimeout: MODEL_REQUEST_MS }, (req, res) => route(req, res).catch((e) => {
-    log(JSON.stringify({ edge: 'error', path: req.url?.split('?')[0], error: e.message }))
+    // An error repair already logged (`logged`: a failed resume, which a worker's fence on its project box rethrows) gets
+    // no second line.
+    if (!e.logged) log(JSON.stringify({ edge: 'error', path: req.url?.split('?')[0], error: e.message }))
     if (!res.headersSent) json(res, 502, { error: 'edge error' }); else res.destroy()
   }))
   async function route(req, res) {

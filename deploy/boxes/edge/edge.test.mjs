@@ -1302,7 +1302,8 @@ test('project routes get neutral text, never the person texts', async () => {
 })
 test('a fast non-capacity failure uses the same first-set-up choice as a slow one, and is logged once', async () => {
   const logs = []
-  const mk = (first) => userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure: async () => { throw new Error('box is being created') }, firstSetUp: async () => first, touch() {}, uncache() {} }, log: (l) => logs.push(l) })
+  // repair's own 503 for a box another replica is creating.
+  const mk = (first) => userServer({ cfg: { ...cfg, pageAfterMs: 30 }, box: { ensure: async () => { throw Object.assign(new Error('box is being created'), { status: 503 }) }, firstSetUp: async () => first, touch() {}, uncache() {} }, log: (l) => logs.push(l) })
   for (const [first, text] of [[true, /Setting up your computer/], [false, /Starting your computer/]]) {
     const s = mk(first)
     const r = await call(await listen(s), { headers: nav })
@@ -2054,11 +2055,11 @@ test('B47b: a page visit within the grace logs no edge-errors line, from repair 
   assert.deepEqual([r.logs.filter(l => l.edge === 'error'), r.logs.filter(l => l.msg === 'resume failed; retrying').map(l => [l.edge, l.level])], [[], [['box', 'warn']]])
 })
 
-test('B47b: past the grace, a final answer to a resume logs one edge-errors line, then recreates the box from backup while the cell has room; in a cell full by the edge\'s count it is the at-capacity page, with no kill', async (t) => {
+test('B47b: past the grace, a final answer to a resume logs one edge-errors line, then recreates the box from backup while the cell has room; in a cell full by the edge\'s count it is the at-capacity page, with no kill and no line from the page', async (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: Date.now() })
   const error = await answered('guest-unresponsive-resume')
   const record = { launch: 'L', resumeFailedAt: Date.now() - GRACE_MS }
-  const line = { edge: 'error', level: 'error', msg: 'resume failed past the grace', user: 'a@x.com', box: 'u1', region: 'us-east-1', state: 'paused', class: 'SandboxError', status: 500, ms: GRACE_MS, error: error.message }
+  const line = { edge: 'error', level: 'error', msg: 'resume failed past the grace', user: 'a@x.com', box: 'u1', region: 'us-east-1', paused: true, class: 'SandboxError', status: 500, ms: GRACE_MS, error: error.message }
   const room = await repairRig({ state: 'paused', record, connect: async () => { throw error } })
   assert.notEqual((await room.b.ensure('a@x.com')).id, 'u1')
   assert.deepEqual(room.changes(), [['kill', 'u1'], ['create', { user: 'a@x.com' }]])
@@ -2069,9 +2070,21 @@ test('B47b: past the grace, a final answer to a resume logs one edge-errors line
   const full = await repairRig({ state: 'paused', record, connect: async () => { throw error }, us: { maxUnits: 3 } })
   full.us.run('u2', 'b@x.com')
   const before = await full.store.getBox('u1')
-  await assert.rejects(full.b.ensure('a@x.com'), (e) => e === error && e.capacity === true)
-  assert.deepEqual([full.changes(), await full.store.getBox('u1')], [[], before])
-  assert.deepEqual(full.logs.filter(l => l.edge === 'error'), [line])
+  const server = userServer({ cfg, box: full.b, log: (l) => full.logs.push(JSON.parse(l)) })
+  const port = await listen(server)
+  const visit = async () => {
+    const r = await call(port, { headers: { 'x-forwarded-email': 'a@x.com', accept: 'application/json' } })
+    assert.deepEqual([r.status, /at capacity/.test(r.body)], [503, true])
+  }
+  try {
+    await visit()
+    assert.deepEqual([full.changes(), await full.store.getBox('u1')], [[], before])
+    assert.deepEqual(full.logs.filter(l => l.edge === 'error'), [line])
+    // A box without a record has no past-grace line: the page's line is the visit's edge-errors line.
+    await full.store.deleteBox('u1')
+    await visit()
+    assert.deepEqual(full.logs.filter(l => l.edge === 'error'), [line, { edge: 'error', user: 'a@x.com', error: error.message }])
+  } finally { server.close() }
 })
 
 test('B47b: a create is at capacity on E2B\'s 503 or 429 or a node\'s memory refusal, and not on any other failure', async () => {

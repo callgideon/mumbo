@@ -41,7 +41,8 @@ const send = (port, { host = PUBLIC, path, method = 'GET', headers = {}, body } 
  * The model listener with the door and the worker git route over a memory store. A owns project P, bound to
  * CallGideon/Mumbo, and project Q, with none; A's key `record` lists P only. Project boxes answer through a fake client
  * proxy: the fence with `state.fence(seen)` (default 200 `{ ok: true }`), recorded in `fences`; `state.down` keeps the box
- * from being ready, and `state.bug`, a message, makes reaching it throw a TypeError. GitHub answers `state.reply()`
+ * from being ready, `state.fail`, an error, is its ensure's rejection, and `state.bug`, a message, makes reaching it
+ * throw a TypeError. GitHub answers `state.reply()`
  * (default 200) and records each forwarded request in `github`. `claims` are a worker token's for P.
  */
 async function setup() {
@@ -68,7 +69,7 @@ async function setup() {
   await new Promise(r => proxy.listen(0, '127.0.0.1', r))
   const relay = projectRelay({ projects: proj, boxFetch: boxFetcher({ publicHost: PUBLIC }), siteHostOf: (p) => `site-${p}`,
     edgeHost: PUBLIC, readyMs: 50, log,
-    box: { ensure: (p) => (state.down ? new Promise(() => {}) : Promise.resolve({ id: `box-${p}`, token: 'T', traffic: 'TT', host: `site-${p}`, proxy: new URL(`http://127.0.0.1:${proxy.address().port}`), member: (e) => { if (state.bug) throw new TypeError(state.bug); return `signed:${e}` } })) } })
+    box: { ensure: (p) => (state.down ? new Promise(() => {}) : state.fail ? Promise.reject(state.fail) : Promise.resolve({ id: `box-${p}`, token: 'T', traffic: 'TT', host: `site-${p}`, proxy: new URL(`http://127.0.0.1:${proxy.address().port}`), member: (e) => { if (state.bug) throw new TypeError(state.bug); return `signed:${e}` } })) } })
 
   const fetchImpl = async (url, init) => {
     if (init.headers.authorization?.startsWith('Bearer ')) {  // the App's installation lookup and token mint
@@ -238,6 +239,12 @@ test('the fence decides: a box 409 or 404 is 403 fenced with its code and no box
     assert.deepEqual(failed.map(l => [l.assignment, l.code]), [[ASSIGNMENT, 'box_unavailable'], [ASSIGNMENT, 'box_refused'], [ASSIGNMENT, undefined], [ASSIGNMENT, undefined]])
     assert.deepEqual(failed.slice(2).map(l => l.error), ['the box answered 200 without ok: true', 'fence bug'])
     assert.ok(t.logs().some(l => l.edge === 'error' && l.error === 'fence bug'), 'modelServer reports it as an edge error')
+    // repair's resume past the grace in a full cell logged its own edge-errors line (edge.mjs `logged`).
+    t.state.fail = Object.assign(new Error('full cell'), { capacity: true, logged: true })
+    assert.equal((await push(REF)).status, 502)
+    t.state.fail = undefined
+    await settle()
+    assert.deepEqual(t.logs().filter(l => l.edge === 'error' && l.error === 'full cell'), [], 'no second edge-errors line')
     assert.equal(t.github.length, 0)
     const fenced = t.fences.length
     for (const ref of ['refs/heads/main', 'refs/heads/agent/other']) assert.equal((await push(ref)).status, 403, ref)
