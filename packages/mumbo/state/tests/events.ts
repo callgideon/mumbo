@@ -1,4 +1,4 @@
-/** Session event builders for the fold tests: one log with contiguous seqs and one second between events. */
+/** Session event builders for the fold tests: one log with contiguous seqs and, by default, one second between events. */
 
 import { CompactionId } from '@deepseek-ai/dsh-compaction'
 import type { GoalOperation } from '@deepseek-ai/dsh-goal'
@@ -17,14 +17,17 @@ import type {} from '../src/resume.ts'
 export class Log {
   readonly events: SessionEvent[] = []
 
-  /** @param base - the time before the first event, in epoch milliseconds. */
-  constructor(private readonly base = 0) {}
+  /**
+   * @param base - the time before the first event, in epoch milliseconds.
+   * @param spacing - the milliseconds between events; 0 logs every event at `base`.
+   */
+  constructor(private readonly base = 0, private readonly spacing = 1000) {}
 
   /** Append one event; message events take the `append` surface operation. */
   add<T extends SessionEventType>(type: T, data: SessionEventMap[T]): this {
     const seq = this.events.length
     const surface = ['user/message', 'assistant/message', 'tool/result'].includes(type) ? { surfaceOp: 'append' } : {}
-    this.events.push({ type, seq: SessionSeq(seq), time: this.base + (seq + 1) * 1000, data, ...surface } as SessionEvent)
+    this.events.push({ type, seq: SessionSeq(seq), time: this.base + (seq + 1) * this.spacing, data, ...surface } as SessionEvent)
     return this
   }
 

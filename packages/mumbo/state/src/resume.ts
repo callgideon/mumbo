@@ -101,7 +101,9 @@ async function childLog(query: SessionQueryEngine, child: SubagentCatalogEntry, 
 }
 
 /** Direct children whose last turn the restart cut off, or that ended while this Session was not loaded. */
-async function childFindings(ctx: Context, agent: Agent, resume: Resume, signal: AbortSignal): Promise<Finding[]> {
+async function childFindings(
+  ctx: Context, agent: Agent, state: MumboState, resume: Resume, signal: AbortSignal,
+): Promise<Finding[]> {
   const query = ctx.get('sessionQuery')
   if (query === undefined) return []
   const catalog = ctx.sessionProjections.snapshot(agent.session, ['subagentCatalog']).values.subagentCatalog ?? []
@@ -121,10 +123,11 @@ async function childFindings(ctx: Context, agent: Agent, resume: Resume, signal:
     }
     const { end } = log
     // A shutdown can end a child's turn at or before the parent's last message, and a crash read closes it at the
-    // child's last event, so a stopped child is not compared with `downAt`. One that stopped before the load preceding
-    // this restart belongs to an earlier restart, which is checked.
+    // child's last event, so a stopped child is not compared with `downAt` but with the run the restart ended. One idle
+    // since before that run belongs to an earlier restart, which is checked, and one whose log moved after the
+    // end-seed was not stopped by this restart.
     if (end === undefined || stopped(end.data.reason)) {
-      if (log.lastAt < resume.upSince) continue
+      if (log.lastAt < resume.upSince || log.lastAt > state.loadedAt) continue
       const resumeHint = child.mode === 'continuable' ? ` Use send_message to ${name} to continue it.` : ''
       findings.push({ line: `Subagent ${name} stopped mid-task by the restart.${resumeHint}`, kind: 'stopped' })
       continue
@@ -157,7 +160,7 @@ async function reconcile(
   const findings = [
     ...jobFindings(state, resume),
     ...runFindings(state, resume),
-    ...await childFindings(ctx, agent, resume, signal),
+    ...await childFindings(ctx, agent, state, resume, signal),
   ]
   const goal = ctx.get('goals')?.get(agent)
   if (goal?.phase === 'active' && goal.activation === 'disarmed') {

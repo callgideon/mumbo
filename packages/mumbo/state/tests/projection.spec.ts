@@ -24,10 +24,10 @@ describe('boundary', () => {
   })
 
   it('keeps the state itself for an event it does not read', () => {
-    const state = fold(new Log().todos([{ content: 'a', status: 'pending' }]))
-    const [event] = new Log().add('step/end', { turn: 1, step: 1 }).events
+    const log = new Log().todos([{ content: 'a', status: 'pending' }])
+    const state = fold(log)
+    const [, event, edit] = log.add('step/end', { turn: 1, step: 1 }).goal('edit').events
     expect(foldState(state, event!)).toBe(state)
-    const [edit] = new Log().goal('edit').events
     expect(foldState(state, edit!)).toBe(state)
   })
 })
@@ -75,9 +75,9 @@ describe('plan', () => {
     const log = new Log().call('x', 'exit_plan_mode', '{"plan":').call('y', 'exit_plan_mode', '{"plan":3}').call('z', 'exit_plan_mode', 'null')
       .call('r', 'read', '{"plan":"# No"}').result('r').add('plan/mode', { active: true })
     expect(fold(log)).toMatchObject({ plan: null, proposed: null, reviewed: null })
-    const pending = fold(new Log().plan('p1', PLAN))
-    const [on] = new Log().add('plan/mode', { active: true }).events
-    expect(foldState(pending, on!)).toBe(pending)
+    const proposed = new Log().plan('p1', PLAN)
+    const pending = fold(proposed)
+    expect(foldState(pending, proposed.add('plan/mode', { active: true }).events.at(-1)!)).toBe(pending)
   })
 })
 
@@ -117,9 +117,9 @@ describe('jobs and workflow runs', () => {
   })
 
   it('keeps the state itself at a step that drops nothing', () => {
-    const state = fold(new Log().job('bash-1'))
-    const [step] = new Log().step().events
-    expect(foldState(state, step!)).toBe(state)
+    const log = new Log().job('bash-1')
+    const state = fold(log)
+    expect(foldState(state, log.step().events.at(-1)!)).toBe(state)
   })
 })
 
@@ -127,9 +127,14 @@ describe('resume', () => {
   it('records the end-seed and the last activity before it, and a fork drops copied work', () => {
     const log = new Log().user('hi').assistant('hello').job('bash-1').run('r1')
     const restored = fold(log.add('session/end-seed', {}))
-    expect(restored).toMatchObject({ resume: { seedSeq: 4, downAt: 2000, upSince: 0 }, loadedAt: 5000 })
+    expect(restored).toMatchObject({ resume: { seedSeq: 4, downAt: 2000, upSince: 1000 }, loadedAt: 5000 })
     const forked = fold(new Log().user('hi').job('bash-1').run('r1').add('session/end-seed', { inherited: true }))
     expect(forked).toMatchObject({ jobs: {}, runs: {}, resume: null })
+  })
+
+  it('starts the first run at the Session\'s first event', () => {
+    expect(fold(new Log(60_000).todos([]))).toMatchObject({ loadedAt: 61_000, resume: null })
+    expect(fold(new Log(60_000).todos([]).add('session/end-seed', {})).resume).toMatchObject({ upSince: 61_000 })
   })
 
   it('keeps the load before the restart, or before an earlier restart not yet checked', () => {
@@ -141,7 +146,7 @@ describe('resume', () => {
     expect(fold(replied)).toMatchObject({ resume: { seedSeq: 4, downAt: 4000, upSince: 2000 }, loadedAt: 5000 })
     // A person's message without a reply, as a rejected step leaves, does not.
     const pending = new Log().user('hi').add('session/end-seed', {}).user('again').add('session/end-seed', {})
-    expect(fold(pending)).toMatchObject({ resume: { seedSeq: 3, downAt: 3000, upSince: 0 }, loadedAt: 4000 })
+    expect(fold(pending)).toMatchObject({ resume: { seedSeq: 3, downAt: 3000, upSince: 1000 }, loadedAt: 4000 })
     const forked = new Log().add('session/end-seed', { inherited: true }).user('hi').add('session/end-seed', {})
     expect(fold(forked).resume).toEqual({ seedSeq: 2, downAt: 2000, upSince: 1000 })
   })

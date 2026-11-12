@@ -55,10 +55,10 @@ export const stateSchema = z.object({
   runs: z.record(z.string(), runSchema),
   /** Time of the last message logged, which a restart's end-seed keeps as the time the Session went down. */
   lastActivity: z.number(),
-  /** Time of the last end-seed, when this Session was last loaded from its log; 0 before any. */
+  /** Time the current run began: the last end-seed, when this Session was last loaded from its log, else its first event. */
   loadedAt: z.number(),
   /**
-   * The restart's end-seed, the time the Session went down, and the time it was loaded before that restart (an earlier
+   * The restart's end-seed, the time the Session went down, and the time the run before that restart began (an earlier
    * restart not yet checked keeps its own), until the restart is checked: the resume notice or the first assistant
    * message after the end-seed is logged.
    */
@@ -178,12 +178,18 @@ function foldWork(state: MumboState, event: SessionEvent): MumboState {
 }
 
 /**
- * Fold one committed event. Pure and synchronous; an event the unit does not read returns `state` itself.
+ * Fold one committed event. Pure and synchronous; an event the unit does not read returns `state` itself, except the
+ * Session's first event, which starts its first run.
  * @param state - the state before the event.
  * @param event - the next committed event.
  * @returns the state after the event.
  */
 export function foldState(state: MumboState, event: SessionEvent): MumboState {
+  return foldEvent(event.seq === 0 ? { ...state, loadedAt: event.time } : state, event)
+}
+
+/** Fold one event; {@link foldState} also starts the first run at the Session's first event. */
+function foldEvent(state: MumboState, event: SessionEvent): MumboState {
   switch (event.type) {
     case 'compaction/end':
       return event.data.error === undefined ? { ...state, boundary: state.boundary + 1 } : state

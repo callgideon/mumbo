@@ -16,7 +16,7 @@ import { subagentCatalogProjectionDefinition } from '../../../subagent/subagent/
 import * as MumboState from '../src/index.ts'
 import { PLAN_READ, STATE_CONTEXT } from '../src/index.ts'
 import { Log } from './events.ts'
-import { boot, notices, requestTexts, startJob, turn } from './harness.ts'
+import { boot, notices, OPTIONS, requestTexts, startJob, turn } from './harness.ts'
 
 const HEADER = 'This Session was restarted. What changed while it was down:'
 const CHECK = 'node scripts/slow-check.js'
@@ -27,6 +27,15 @@ async function mountJobs(ctx: Context): Promise<void> {
 }
 
 const replies = (count: number) => Array.from({ length: count }, (_, index) => textResponse(`reply ${String(index)}`))
+
+/** Mount the subagent catalog and a session query that reads `logs`, an empty log for any other child. */
+const children = (logs: Record<string, SessionEvent[]>) => async (ctx: Context) => {
+  await ctx.sessionProjections.register(subagentCatalogProjectionDefinition)
+  ctx.provide('sessionQuery', { observeSession: (id: string) => Promise.resolve({ events: logs[id] ?? [], [Symbol.dispose]() {} }) } as never)
+}
+
+/** Time of a Session's first event, when its first run began. */
+const firstAt = (agent: Agent): number => agent.session.snapshotEvents()[0]!.time
 
 describe('background jobs', () => {
   it.each([['a crash', true], ['a graceful stop', false]])('after %s, reports a job that was running exactly once, at the first step', { timeout: 60_000 }, async (_name, crash) => {
@@ -114,7 +123,7 @@ describe('the step the notice joins', () => {
 
   it('reconciles again at the next step when the step is aborted while it reads a child\'s log', { timeout: 60_000 }, async () => {
     const reads: (() => void)[] = []
-    const child = new Log().add('turn/start', { turn: 1 }).assistant('Running the suite.').events
+    let child: SessionEvent[] = []
     const harness = await boot([], async (ctx) => {
       await ctx.sessionProjections.register(subagentCatalogProjectionDefinition)
       // As session-query's reader does, the read checks the signal before and after it waits.
@@ -130,6 +139,7 @@ describe('the step the notice joins', () => {
     const warn = vi.spyOn(harness.ctx.logger, 'warn')
     const handle = await harness.start('aborted-read')
     handle.agent.session.append('subagent/catalog', { childId: SessionId('tester'), childCreatedAt: 0, version: 3, mode: 'continuable', label: 'run the slow suite', name: 'tester' } as never)
+    child = new Log(firstAt(handle.agent), 0).add('turn/start', { turn: 1 }).assistant('Running the suite.').events
     const { agent } = await harness.restart(handle, true)
     const aborted = new AbortController()
     const first = preStep(harness.ctx, agent, { kind: 'enter', messages: [] }, aborted.signal)
@@ -174,12 +184,6 @@ it('removes the block, plan_read and the notice when the plugin unloads', { time
 })
 
 describe('restarts already checked', () => {
-  /** Mount the subagent catalog and a session query that reads `logs`, an empty log for any other child. */
-  const children = (logs: Record<string, SessionEvent[]>) => async (ctx: Context) => {
-    await ctx.sessionProjections.register(subagentCatalogProjectionDefinition)
-    ctx.provide('sessionQuery', { observeSession: (id: string) => Promise.resolve({ events: logs[id] ?? [], [Symbol.dispose]() {} }) } as never)
-  }
-
   it('compares nothing again after a plugin reload when the restart had nothing to report', { timeout: 60_000 }, async () => {
     const logs: Record<string, SessionEvent[]> = {}
     const harness = await boot(replies(4), children(logs))
@@ -280,7 +284,8 @@ describe('subagents', () => {
   it('reads each unloaded direct child\'s log and reports the ones the restart stopped or that ended meanwhile', { timeout: 60_000 }, async () => {
     const later = Date.now() + 3_600_000
     const logs: Record<string, SessionEvent[]> = {
-      tester: new Log(later).add('turn/start', { turn: 1 }).assistant('Running the suite.').events,
+      // A child whose log moved after this Session's load, as when another process ran it, was not stopped by the restart.
+      moved: new Log(later).add('turn/start', { turn: 1 }).assistant('Running elsewhere.').events,
       reviewer: new Log(later).add('turn/start', { turn: 1 }).assistant('Looks right.').assistant('Approved: the parser change is safe.')
         .add('turn/end', { turn: 1, reason: { kind: 'completed' } }).events,
       quiet: new Log(later).add('turn/start', { turn: 1 }).user('Only a question.').add('assistant/message', {
@@ -289,7 +294,6 @@ describe('subagents', () => {
         }),
       }).add('turn/end', { turn: 1, reason: { kind: 'completed' } }).events,
       verbose: new Log(later).add('turn/start', { turn: 1 }).assistant('v'.repeat(500)).add('turn/end', { turn: 1, reason: { kind: 'completed' } }).events,
-      crashed: new Log(later).add('turn/start', { turn: 1 }).add('turn/end', { turn: 1, reason: { kind: 'interrupted' } }).events,
       failed: new Log(later).add('turn/start', { turn: 1 }).add('turn/end', { turn: 1, reason: { kind: 'blocked' } }).events,
       cancelled: new Log(later).add('turn/start', { turn: 1 }).add('turn/end', { turn: 1, reason: { kind: 'aborted', reason: { kind: 'user' } } }).events,
       earlier: new Log(0).add('turn/start', { turn: 1 }).add('turn/end', { turn: 1, reason: { kind: 'completed' } }).events,
@@ -309,6 +313,10 @@ describe('subagents', () => {
     const live = await harness.start('live')
     const handle = await harness.start('parent')
     await turn(handle.agent, 'Start.')
+    // Children the restart stopped, in the run it ended.
+    const run = () => new Log(firstAt(handle.agent), 0).add('turn/start', { turn: 1 })
+    logs.tester = run().assistant('Running the suite.').events
+    logs.crashed = run().add('turn/end', { turn: 1, reason: { kind: 'interrupted' } }).events
     const catalog = (childId: string, entry: object) => {
       handle.agent.session.append('subagent/catalog', { childId: SessionId(childId), childCreatedAt: 0, ...entry } as never)
     }
@@ -321,11 +329,12 @@ describe('subagents', () => {
     catalog('cancelled', { version: 1, mode: 'one-shot', label: 'stop' })
     catalog('earlier', { version: 1, mode: 'one-shot', label: 'old' })
     catalog('missing', { version: 1, mode: 'one-shot', label: 'gone' })
+    catalog('moved', { version: 3, mode: 'continuable', label: 'elsewhere', name: 'moved' })
     catalog(String(live.agent.id), { version: 3, mode: 'continuable', label: 'still here', name: 'live' })
     catalog('remote', { version: 3, mode: 'external', name: 'remote' })
     const { agent } = await harness.restart(handle, true)
     await turn(agent, 'Back.')
-    expect(read).toEqual(['tester', 'reviewer', 'quiet', 'verbose', 'crashed', 'failed', 'cancelled', 'earlier', 'missing'])
+    expect(read).toEqual(['tester', 'reviewer', 'quiet', 'verbose', 'crashed', 'failed', 'cancelled', 'earlier', 'missing', 'moved'])
     expect(notices(agent)).toEqual([{
       turn: 2,
       text: [
@@ -343,26 +352,24 @@ describe('subagents', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('subagent missing of parent is left out of the resume notice'))
   })
 
-  it('reports a child the restart stopped though its last event precedes this Session\'s last message, at that restart only', { timeout: 60_000 }, async () => {
-    // A minute before the parent's own messages: the child's last event was a long tool call.
-    const early = Date.now() - 60_000
-    const running = new Log(early).add('turn/start', { turn: 1 }).assistant('Running the suite.').call('c1', 'bash', '{"command":"npm test"}').events
-    const logs: Record<string, SessionEvent[]> = {
-      // A shutdown that disposes every Agent at once can end the child's turn before the parent logs its last result.
-      disposed: new Log(early).add('turn/start', { turn: 1 }).add('turn/end', { turn: 1, reason: { kind: 'aborted', reason: { kind: 'disposed' } } }).events,
+  it('reports a child stopped in the run a restart ended once, at that restart and not after the next, also when it stopped before the last message', { timeout: 60_000 }, async () => {
+    // The parent's log from an hour ago: it started two children, waited for them, and its last message is at base + 5000.
+    const base = Date.now() - 3_600_000
+    const seed = new Log(base)
+    for (const name of ['disposed', 'crashed']) {
+      seed.add('subagent/catalog', { childId: SessionId(name), childCreatedAt: 0, version: 3, mode: 'continuable', label: name, name } as never)
+    }
+    seed.add('turn/start', { turn: 1 }).user('Wait for them.').assistant('Waiting.').add('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    // The child's last event was a long tool call.
+    const running = new Log(base + 1000).add('turn/start', { turn: 1 }).assistant('Running the suite.').call('c1', 'bash', '{"command":"npm test"}').events
+    const harness = await boot(replies(2), children({
+      // A shutdown that disposes every Agent at once can end the child's turn before the parent logs its last message.
+      disposed: new Log(base + 1000).add('turn/start', { turn: 1 }).add('turn/end', { turn: 1, reason: { kind: 'aborted', reason: { kind: 'disposed' } } }).events,
       // After a crash, session-query's read closes the open turn at the child's last event.
       crashed: [...running, ...interruptedTurnClosers(running)],
-    }
-    const harness = await boot(replies(3), async (ctx) => {
-      await ctx.sessionProjections.register(subagentCatalogProjectionDefinition)
-      ctx.provide('sessionQuery', { observeSession: (id: string) => Promise.resolve({ events: logs[id] ?? [], [Symbol.dispose]() {} }) } as never)
-    })
-    const handle = await harness.start('waiting')
-    for (const name of Object.keys(logs)) {
-      handle.agent.session.append('subagent/catalog', { childId: SessionId(name), childCreatedAt: 0, version: 3, mode: 'continuable', label: name, name } as never)
-    }
-    await turn(handle.agent, 'Wait for them.')
-    const first = await harness.restart(handle, true)
+    }))
+    // The first restart: the host loads the parent from its log.
+    const first = await harness.ctx.agents.create({ sessionId: SessionId('waiting'), seed: seed.events, agentOptions: OPTIONS })
     await turn(first.agent, 'Back.')
     const { agent } = await harness.restart(first, true)
     await turn(agent, 'Back again.')
@@ -374,5 +381,20 @@ describe('subagents', () => {
       ].join('\n'),
       summary: 'Restart: 2 stopped.',
     }])
+  })
+
+  it('never reports a child idle since before this Session\'s first event', { timeout: 60_000 }, async () => {
+    const harness = await boot(replies(3), children({
+      old: new Log(Date.now() - 86_400_000).add('turn/start', { turn: 1 })
+        .add('turn/end', { turn: 1, reason: { kind: 'aborted', reason: { kind: 'disposed' } } }).events,
+    }))
+    const handle = await harness.start('idle')
+    handle.agent.session.append('subagent/catalog', { childId: SessionId('old'), childCreatedAt: 0, version: 3, mode: 'continuable', label: 'old', name: 'old' } as never)
+    await turn(handle.agent, 'Start.')
+    const first = await harness.restart(handle, true)
+    await turn(first.agent, 'Back.')
+    const { agent } = await harness.restart(first, true)
+    await turn(agent, 'Back again.')
+    expect(notices(agent)).toEqual([])
   })
 })
