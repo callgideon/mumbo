@@ -44,7 +44,9 @@ export interface Harness {
  * @param mount - mounts the services the test needs before this plugin.
  * @returns the composition.
  */
-export async function boot(script: ConstructorParameters<typeof MockAdapter>[0], mount: (ctx: Context) => Promise<void> = () => Promise.resolve()): Promise<Harness> {
+export async function boot(
+  script: ConstructorParameters<typeof MockAdapter>[0], mount: (ctx: Context) => Promise<void> = () => Promise.resolve(),
+): Promise<Harness> {
   const ctx = new Context()
   onTestFinished(() => ctx.fiber.dispose())
   await mountAgentLoopTestDependencies(ctx)

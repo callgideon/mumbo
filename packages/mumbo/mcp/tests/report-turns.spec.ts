@@ -94,7 +94,9 @@ async function mounted(order: Order = 'before Run Wild', state = false) {
     return { agent, log }
   }
   /** Run one call; a conditional tool, such as `plan_read`, needs the step's admitted `toolSet`. */
-  const run = (name: string, agent?: Agent, args: Record<string, unknown> = {}, toolSet?: ResolvedToolSet): Promise<ToolExecutionResult> => executeToolFixture(ctx, {
+  const run = (
+    name: string, agent?: Agent, args: Record<string, unknown> = {}, toolSet?: ResolvedToolSet,
+  ): Promise<ToolExecutionResult> => executeToolFixture(ctx, {
     callId: ToolCallId(`call-${name}`), name, arguments: args, signal: new AbortController().signal, ...agent === undefined ? {} : { agent },
     ...toolSet === undefined ? {} : { toolSet },
   })

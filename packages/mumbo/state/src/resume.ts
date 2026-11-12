@@ -71,7 +71,7 @@ function runFindings(state: MumboState, resume: Resume): Finding[] {
   })
 }
 
-/** How a child's log ends: its last turn's end, or none while that turn is open, its last assistant text, and the time of its last event. */
+/** How a child's log ends: its last turn's end (none while that turn is open), its last assistant text, its last event's time. */
 interface ChildLog {
   readonly end: SessionEvent<'turn/end'> | undefined
   readonly text: string
@@ -149,7 +149,9 @@ async function childFindings(ctx: Context, agent: Agent, resume: Resume, signal:
  * @param signal - the step's cancellation.
  * @returns the notice, or `undefined` when nothing stopped, finished or needs a person.
  */
-async function reconcile(ctx: Context, agent: Agent, state: MumboState, resume: Resume, signal: AbortSignal): Promise<UserMessage | undefined> {
+async function reconcile(
+  ctx: Context, agent: Agent, state: MumboState, resume: Resume, signal: AbortSignal,
+): Promise<UserMessage | undefined> {
   const findings = [
     ...jobFindings(state, resume),
     ...runFindings(state, resume),
@@ -185,13 +187,14 @@ export function listenForResume(ctx: Context, stateOf: (session: Session) => Mum
   const quiet = new WeakMap<Session, SessionSeq>()
   ctx.on('agent/pre-step', async (step, next) => {
     const decision = await next()
-    if (decision.kind === 'reject' || step.signal.aborted) return decision
+    if (decision.kind === 'reject') return decision
     const session = step.agent.session
     const state = stateOf(session)
     const resume = state.resume
     if (resume === null || quiet.get(session) === resume.seedSeq) return decision
     if (decision.messages.some(message => message.source.kind === RESUME_SOURCE)) return decision
     const notice = await reconcile(ctx, step.agent, state, resume, step.signal)
+    // An aborted step, also one aborted before this listener ran, logs nothing, so the restart stays for the next one.
     if (step.signal.aborted) return decision
     if (notice === undefined) {
       quiet.set(session, resume.seedSeq)

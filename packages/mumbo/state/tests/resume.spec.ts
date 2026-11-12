@@ -110,7 +110,7 @@ describe('the step the notice joins', () => {
   })
 
   it('reconciles again at the next step when the step is aborted while it reads a child\'s log', { timeout: 60_000 }, async () => {
-    const reads: PromiseWithResolvers<void>[] = []
+    const reads: (() => void)[] = []
     const child = new Log().add('turn/start', { turn: 1 }).assistant('Running the suite.').events
     const harness = await boot([], async (ctx) => {
       await ctx.sessionProjections.register(subagentCatalogProjectionDefinition)
@@ -118,9 +118,7 @@ describe('the step the notice joins', () => {
       ctx.provide('sessionQuery', {
         observeSession: async (_id: string, { signal }: { signal: AbortSignal }) => {
           signal.throwIfAborted()
-          const read = Promise.withResolvers<void>()
-          reads.push(read)
-          await read.promise
+          await new Promise<void>((resolve) => { reads.push(resolve) })
           signal.throwIfAborted()
           return { events: child, [Symbol.dispose]() {} }
         },
@@ -134,11 +132,11 @@ describe('the step the notice joins', () => {
     const first = preStep(harness.ctx, agent, { kind: 'enter', messages: [] }, aborted.signal)
     await vi.waitFor(() => { expect(reads).toHaveLength(1) })
     aborted.abort()
-    reads[0]!.resolve()
+    reads[0]!()
     expect(await first).toEqual({ kind: 'enter', messages: [] })
     const second = preStep(harness.ctx, agent, { kind: 'enter', messages: [] })
     await vi.waitFor(() => { expect(reads).toHaveLength(2) })
-    reads[1]!.resolve()
+    reads[1]!()
     const admitted = await second
     expect(admitted.kind === 'enter' ? admitted.messages.map(message => message.source.kind) : []).toEqual(['mumbo-resume'])
     expect(warn).not.toHaveBeenCalled()

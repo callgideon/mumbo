@@ -146,7 +146,8 @@ function foldWork(state: MumboState, event: SessionEvent): MumboState {
     case 'tool-workflow/run-end': {
       const run = state.runs[event.data.runId]
       if (run === undefined) return state
-      return { ...state, runs: { ...state.runs, [event.data.runId]: { ...run, end: { stopReason: event.data.stopReason, seq: event.seq } } } }
+      const end = { stopReason: event.data.stopReason, seq: event.seq }
+      return { ...state, runs: { ...state.runs, [event.data.runId]: { ...run, end } } }
     }
     // A step that starts after a settlement claims its notice from the inbox, so the model was told of it; a settlement
     // during that step's own pre-step reaches the next step. Work from before a restart stays for the resume notice.
