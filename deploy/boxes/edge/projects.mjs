@@ -162,12 +162,13 @@ export const fence = (text, seed) => {
  *  and CloudFront drop a response that sends nothing for 60 s. */
 export const BOX_READY_MS = 20_000, CALL_MS = 50_000
 /**
- * box.ensure(principal), awaited at most `ms`.
+ * box.ensure(principal, placed), awaited at most `ms`. `placed` is the principal's placement doc when the caller has read
+ * it (a project's doc), so that ensure reads it no more.
  * @returns {Promise<object | undefined>} the box, or undefined when it is not ready by then: its start goes on, and a
  *   later failure goes to `late(error)`. Rejects as box.ensure does.
  */
-export async function ensureWithin(box, principal, ms, late) {
-  const ensuring = box.ensure(principal)
+export async function ensureWithin(box, principal, ms, late, placed) {
+  const ensuring = box.ensure(principal, placed)
   let timer
   const target = await Promise.race([ensuring, new Promise((r) => { timer = setTimeout(r, ms) })]).finally(() => clearTimeout(timer))
   if (!target) ensuring.catch(late)
@@ -183,7 +184,10 @@ export async function ensureWithin(box, principal, ms, late) {
  * sign-in, or no relay route for message(), with 409 (`code: 'relay_unavailable'`). Each box request may go quiet for
  * what remains of CALL_MS from the call's start, so a call ends within the ALB's and CloudFront's 60 s.
  *
- * message(member, id, text, { kind, messageId, via, door, worker }) delivers a message to the project's Superagent relay route,
+ * Both methods take `doc`, the project's doc when the caller has just read it (the door's dispatcher), and then read it no
+ * more, neither for the membership check nor for the box's placement.
+ *
+ * message(member, id, text, { kind, messageId, via, door, worker, doc }) delivers a message to the project's Superagent relay route,
  * which receives it as a Trigger from the member. `kind` is 'context' (the default) or 'request'. `worker: 'external'` asks
  * for a Ticket that an outside worker takes with the door's task_claim (B37); it is sent only then, and a box whose relay
  * does not know it refuses it (`invalid_request`). `messageId`, required, is the
@@ -195,7 +199,7 @@ export async function ensureWithin(box, principal, ms, late) {
  * otherwise with the box's 400 or 409 and its code (`invalid_request`, `id_reused`, `relay_off`), or 502, also for an
  * answer whose Trigger id is not of that form.
  *
- * api(member, id) ensures the box once and resolves `(method, path, body?) => Promise<object>`, which calls Superagent's
+ * api(member, id, doc) ensures the box once and resolves `(method, path, body?) => Promise<object>`, which calls Superagent's
  * management API (`/orchestrator/api/<path>`) as the member, who must be one of the box's panel admins, with `body`, when
  * given, as JSON (`content-type: application/json`), and resolves its JSON answer.
  * It fails with 403 (`code: 'owner_only'`) when the box refuses the member as no panel admin (NOT_PANEL_ADMIN), with the
@@ -212,23 +216,24 @@ export function projectRelay({ projects, box, boxFetch, siteHostOf, edgeHost, re
   const said = (out) => (typeof out?.error === 'string' ? out.error.slice(0, 500) : undefined)
   /** The box's refusal text, fenced, for an error's message; the HTTP status when it sent none. */
   const why = (out, status) => (said(out) === undefined ? `HTTP ${status}` : fence(said(out)))
-  /** The project's box, ensured, for a member of the project, and `timeoutMs()`, what remains of CALL_MS. */
-  async function reach(member, id) {
-    const p = await projects.get(id)
+  /** The project's box, ensured, for a member of the project, and `timeoutMs()`, what remains of CALL_MS. `doc` is the
+   *  project's doc when the caller has it. */
+  async function reach(member, id, doc) {
+    const p = doc ?? await projects.get(id)
     if (!p?.members.includes(member)) throw fail(404, `no project ${id} of yours`)
     const deadline = Date.now() + CALL_MS
     const principal = projectPrincipal(id)
-    const target = await ensureWithin(box, principal, readyMs, (e) => say({ level: 'warn', msg: 'box unavailable', project: id, error: e.message }))
+    const target = await ensureWithin(box, principal, readyMs, (e) => say({ level: 'warn', msg: 'box unavailable', project: id, error: e.message }), p)
     if (!target) throw Object.assign(fail(503, `project ${id}'s box is starting, so nothing was sent; try again in a minute`), { code: 'box_unavailable' })
     if (!target.member) throw unavailable(id)
     return { target, host: siteHostOf(principal), member: target.member(member), timeoutMs: () => Math.max(1000, deadline - Date.now()) }
   }
   return {
-    async message(member, id, text, { kind = 'context', messageId, via, door, worker } = {}) {
+    async message(member, id, text, { kind = 'context', messageId, via, door, worker, doc } = {}) {
       if (typeof text !== 'string' || !text.trim()) throw fail(400, 'the message is empty')
       if (!MESSAGE_KINDS.includes(kind)) throw fail(400, `kind is one of ${MESSAGE_KINDS.join(', ')}`)
       if (typeof messageId !== 'string' || !MESSAGE_ID.test(messageId)) throw fail(400, 'messageId is 1 to 128 letters, digits and . _ : -')
-      const { target, host, member: signed, timeoutMs } = await reach(member, id)
+      const { target, host, member: signed, timeoutMs } = await reach(member, id, doc)
       const hops = [{ node: 'member', id: member }, ...(via ? [{ node: 'mumbo', id: via }] : []), ...(door ? [{ node: 'door', id: door }] : []), { node: 'edge', id: edgeHost }]
       const r = await boxFetch(target, host, RELAY_PATH, { method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ id: messageId, kind, text: text.trim(), hops, ...(worker ? { worker } : {}) }), member: signed, timeoutMs: timeoutMs() })
@@ -245,8 +250,8 @@ export function projectRelay({ projects, box, boxFetch, siteHostOf, edgeHost, re
       return { delivered: true, project: id, kind, messageId, result, trigger: out.trigger, thread: token(out.thread),
         ...(out.waiting ? { waiting: 'the project\'s coordinator is not set up yet; the message waits for it' } : {}) }
     },
-    async api(member, id) {
-      const { target, host, member: signed, timeoutMs } = await reach(member, id)
+    async api(member, id, doc) {
+      const { target, host, member: signed, timeoutMs } = await reach(member, id, doc)
       return async (method, path, body) => {
         const r = await boxFetch(target, host, `/orchestrator/api/${path}`, { method, member: signed, timeoutMs: timeoutMs(),
           headers: { 'x-orchestrator-request': '1', ...(body === undefined ? {} : { 'content-type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body) })

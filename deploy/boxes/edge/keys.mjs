@@ -142,9 +142,14 @@ export function doorKeys({ store, projects, admitted, now = () => Date.now(), lo
     requireScope(key, scope) {
       if (!key.scopes.includes(scope)) throw refusal(403, 'insufficient_scope', 'Insufficient scope')
     },
-    /** @throws 403 project_not_allowed unless the verified `key` lists the project and its owner is still a member. */
+    /**
+     * @returns {Promise<object>} the project's doc, read once here so that the caller can pass it on.
+     * @throws 403 project_not_allowed unless the verified `key` lists the project and its owner is still a member.
+     */
     async requireProject(key, projectId) {
-      if (!key.projects.includes(projectId) || !(await projects.isMember(key.owner, projectId))) throw refusal(403, 'project_not_allowed', 'This key may not reach that project.')
+      const p = key.projects.includes(projectId) ? await projects.get(projectId) : undefined
+      if (!p?.members.includes(key.owner)) throw refusal(403, 'project_not_allowed', 'This key may not reach that project.')
+      return p
     },
   }
 }

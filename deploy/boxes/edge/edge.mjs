@@ -1315,10 +1315,10 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
   /** The principal's cell, under its user lock. A principal with a placement doc, and every project (its doc, or
    *  us-east-1), is placed by it. A person without one gets a doc, once: us-east-1 when they have anything there (a box,
    *  a restore record or a backup) or when this edge's own region is us-east-1, otherwise cfg.edgeRegion. A failed
-   *  lookup throws before anything is written. The doc is read fresh: a copy from before the lock may predate another
-   *  edge's placement. */
-  async function placement(principal) {
-    const doc = await store.getDoc(placementKey(principal), { fresh: true })
+   *  lookup throws before anything is written. The doc is `placed`, ensure's caller's, or read fresh: a copy from before
+   *  the lock may predate another edge's placement. */
+  async function placement(principal, placed) {
+    const doc = placed ?? await store.getDoc(placementKey(principal), { fresh: true })
     if (doc || principal.startsWith('project:')) return cellOf(doc)
     const legacy = cellIn(cells, LEGACY_REGION)
     const stays = cfg.edgeRegion === LEGACY_REGION || await find(legacy, principal) || await store.getDoc(restoreKey(principal))
@@ -1332,19 +1332,20 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
   /** The user's running box: id, dsh launch token, E2B traffic token and its cell's client-proxy. A box E2B lists running
    *  whose record routes it is used without the user lock; creating, resuming or repairing one takes the lock (repair).
    *  Within cfg.placementCacheMs of the last one, this replica's answer again while the read cache is live and nothing
-   *  invalidated it. */
-  async function ensure(email) {
+   *  invalidated it. `placed` is the principal's placement doc when the caller has just read it (a project's doc, which
+   *  placement never writes); ensure then reads it no more. */
+  async function ensure(email, placed) {
     const hit = cached.get(email)
     if (hit && hit.until > Date.now() && store.cacheLive()) return hit.target
     const seen = changes
-    const target = await running(email) ?? await store.withLock(`user:${email}`, LOCK_MS, () => repair(email))
+    const target = await running(email, placed) ?? await store.withLock(`user:${email}`, LOCK_MS, () => repair(email, placed))
     if (cfg.placementCacheMs > 0 && seen === changes && store.cacheLive()) cached.set(email, { target, until: Date.now() + cfg.placementCacheMs })
     return target
   }
   /** The principal's box when its cell's E2B lists it running and its record routes it (not creating or paused, with a
    *  launch token); undefined when it is to be created, resumed or repaired, or when a person has no placement doc yet. */
-  async function running(email) {
-    const doc = await store.getDoc(placementKey(email))
+  async function running(email, placed) {
+    const doc = placed ?? await store.getDoc(placementKey(email))
     if (!doc && !email.startsWith('project:')) return undefined
     const found = await find(cellOf(doc), email)  // an API error throws here, as under the lock
     if (found?.state !== 'running') return undefined
@@ -1353,8 +1354,8 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
   }
   /** ensure's work under the user lock. The placement, E2B's listing and the box record are all read again here, so of
    *  two requests that both found the box paused, the second finds it resumed and resumes nothing. */
-  async function repair(email) {
-    const cell = await placement(email)
+  async function repair(email, placed) {
+    const cell = await placement(email, placed)
     const found = await find(cell, email)   // an API error throws here: never create a second box on a failed lookup
     if (found === undefined) return pick(...await create(email, cell))
     const id = found.sandboxId

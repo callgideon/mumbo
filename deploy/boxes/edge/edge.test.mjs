@@ -1810,6 +1810,22 @@ test('touch: one EVAL nobody waits for, at most once per 30 s per box and edge t
   assert.deepEqual(logs, [{ edge: 'box', level: 'warn', msg: 'activity not recorded', box: 'u1', error: 'store down' }])
 })
 
+test('ensure given the principal\'s placement doc reads it no more, for a running box and under the lock', async () => {
+  const { us, cells } = twoCells(); const inner = memoryStore(); const reads = []
+  const store = { ...inner, getDoc: (k, o) => { reads.push(k); return inner.getDoc(k, o) } }
+  const doc = { id: 'p1', owner: 'a@x.com', members: ['a@x.com'], region: 'us-east-1' }
+  await inner.putDoc('project:p1', doc)
+  us.run('pb', 'project:p1')
+  await inner.putBox('pb', { email: 'project:p1', region: 'us-east-1', host: 'p-p1.boxes.example', ports: PORTS, launch: 'L', active: 1, extended: 1, backedUp: 1, paused: false })
+  const b = boxes({ cells, store, cfg, edgeKey: 'k', log: () => {} })
+  assert.equal((await b.ensure('project:p1')).id, 'pb')
+  assert.deepEqual(reads.splice(0), ['project:p1'], 'without it, ensure reads it')
+  assert.equal((await b.ensure('project:p1', doc)).id, 'pb')
+  us.sandboxes.get('pb').state = 'paused'; await inner.patchBox('pb', { paused: true })
+  assert.equal((await b.ensure('project:p1', doc)).token, 'launch', 'resumed under the lock')
+  assert.deepEqual(reads, [])
+})
+
 test('pauseIdle reads the record again under the lock and skips a box whose activity moved since the sweep listed it', async () => {
   const { us, cells } = twoCells(); const store = memoryStore(); const logs = []
   us.run('u1', 'a@x.com')

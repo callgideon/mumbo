@@ -158,16 +158,16 @@ const ticketRow = (t) => ({ id: token(t.id), title: boxText(t.title, STATUS.titl
   note: boxText(t.note?.text, STATUS.note), summary: boxText(t.summary, STATUS.summary), updatedAt: token(t.updatedAt) })
 
 /**
- * A project's status for the door, read through its box's Superagent management API as `member`: the edge's project record,
+ * A project's status for the door, read through its box's Superagent management API as `member`: the edge's project record
+ * (`p`, the doc the dispatcher read),
  * Superagent's problems (by kind), the open Tickets that wait on a person, executor load, and the newest open Tickets with
  * their stages, each list cut to STATUS. Only the box's ids and names (token), numbers, and its fenced, cut text pass,
  * whatever the box answers.
  * @param {ReturnType<typeof import('./projects.mjs').projectRelay>} relay
  * @param {ReturnType<typeof import('./projects.mjs').projects>} projects
  */
-async function projectStatus(relay, projects, member, id) {
-  const api = await relay.api(member, id)
-  const p = await projects.get(id)
+async function projectStatus(relay, member, id, p) {
+  const api = await relay.api(member, id, p)
   const overview = await api('GET', 'overview')
   const open = await api('GET', `tickets?state=open&limit=${STATUS.tickets}`)
   const problems = overview.problems ?? [], person = overview.person ?? [], items = open.items ?? [], executor = overview.executor ?? {}
@@ -216,8 +216,9 @@ const workerInputs = (x) => listOf(x).map(i => ({ id: token(i.id), text: boxText
  * POSTs `body` to `workers/<path>` of the project box's Superagent management API as the key's owner (relay.api), and
  * resolves its answer. A box refusal keeps its code, with the box's text fenced (relay.api).
  * @param {ReturnType<typeof import('./projects.mjs').projectRelay>} relay
+ * @param {object} p - the project's doc, as the dispatcher read it
  */
-const workerCall = async (relay, key, project, path, body) => (await relay.api(key.owner, project))('POST', `workers/${path}`, body)
+const workerCall = async (relay, key, project, p, path, body) => (await relay.api(key.owner, project, p))('POST', `workers/${path}`, body)
 
 const projectArg = z.string().describe('The project id, from project_list.')
 const messageText = z.string().min(1).max(20_000).describe('The message, as you would write it to the project.')
@@ -240,8 +241,9 @@ const workerModel = z.string().min(1).max(80).optional().describe('The model you
 /**
  * The door's own tools. A door tool is { name, description, input (a zod object), scope (one of keys.mjs SCOPES),
  * project (true: it takes the project id in its `project` argument, and the key must reach that project), turns (true:
- * it causes model turns, so it is charged to the owner's daily budget), run(key, args), raw? (true: run returns an MCP
- * CallToolResult, which the door answers unchanged) }. scope, project and turns must all be declared: the dispatcher
+ * it causes model turns, so it is charged to the owner's daily budget), run(key, args, p), raw? (true: run returns an MCP
+ * CallToolResult, which the door answers unchanged) }. `p` is the project's doc for a project tool, which the dispatcher
+ * read when it checked that the key reaches the project; the project tools read it no more. scope, project and turns must all be declared: the dispatcher
  * refuses a tool missing any of them (`tool_undeclared`).
  * The Mumbo tools are @mumbo/mcp's door profile, forwarded by `mumbo` (mumboForwarder); their schemas list the box's
  * arguments, and the box checks them again. runs_halt and runs_resume are not on the door: stopping a box is a person's.
@@ -298,27 +300,27 @@ export const doorTools = ({ projects, mumbo, relay, halt, workerTokens, cfg }) =
   {
     name: 'project_status', scope: 'read', project: true, turns: false, input: z.object({ project: projectArg }),
     description: `A project's status from its coordinator: the project, problems, the Tickets that wait on a person (any person, not only you), executor load, and the newest ${STATUS.tickets} open Tickets with their stages. Only the project's owners may read it. Starts the project's box if needed.`,
-    run: (key, a) => projectStatus(relay, projects, key.owner, a.project),
+    run: (key, a, p) => projectStatus(relay, key.owner, a.project, p),
   },
   {
     name: 'project_message', scope: 'prompt', project: true, turns: true,
     input: z.object({ project: projectArg, message: messageText, kind: z.enum(['context']).default('context').describe("Only 'context' here: information, never a work request; task_start asks for work"), messageId: messageId() }),
     description: "Send a project's coordinator context as yourself: something to keep in mind, never a work request. To ask for work, use task_start. Starts the project's box if needed.",
-    run: (key, a) => relay.message(key.owner, a.project, a.message, { kind: 'context', messageId: a.messageId, door: key.name }),
+    run: (key, a, p) => relay.message(key.owner, a.project, a.message, { kind: 'context', messageId: a.messageId, door: key.name, doc: p }),
   },
   {
     name: 'task_start', scope: 'workspace', project: true, turns: true,
     input: z.object({ project: projectArg, message: messageText, messageId: messageId(),
       worker: z.enum(['mumbo', 'external']).default('mumbo').describe('Who does the work: mumbo, the project\'s own workers, or external: leave it for a worker that takes it with task_claim, such as this session.') }),
     description: "Ask a project's coordinator for one piece of work, as an explicit request: its Eval turns it into a Ticket. Returns the request's trigger and thread ids; project_status shows the Ticket.",
-    run: (key, a) => relay.message(key.owner, a.project, a.message, { kind: 'request', messageId: a.messageId, door: key.name, worker: a.worker === 'external' ? 'external' : undefined }),
+    run: (key, a, p) => relay.message(key.owner, a.project, a.message, { kind: 'request', messageId: a.messageId, door: key.name, worker: a.worker === 'external' ? 'external' : undefined, doc: p }),
   },
   {
     name: 'task_stop', scope: 'workspace', project: true, turns: false,
     input: z.object({ project: projectArg, ticket: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).describe('The Ticket id, from project_status.') }),
     description: 'Stop one Ticket of a project; only the project\'s owners may. A Ticket of another project is not found there.',
     // Superagent answers a stop { stopped: true }; its body is not passed on.
-    run: async (key, a) => { await (await relay.api(key.owner, a.project))('POST', `tickets/${a.ticket}/stop`); return { stopped: true } },
+    run: async (key, a, p) => { await (await relay.api(key.owner, a.project, p))('POST', `tickets/${a.ticket}/stop`); return { stopped: true } },
   },
   {
     name: 'task_claim', scope: 'workspace', project: true, turns: false,
@@ -329,10 +331,10 @@ export const doorTools = ({ projects, mumbo, relay, halt, workerTokens, cfg }) =
       model: workerModel,
     }),
     description: 'Take an external Ticket of a project to work on yourself, under a lease. Returns its brief, its branch, a git remote and header that fetch and push only that branch while the lease lives, and the protocol to follow. Only the project\'s owners may.',
-    run: async (key, a) => {
+    run: async (key, a, p) => {
       await notHalted(halt, a.project, 'claimed')
-      const c = await workerCall(relay, key, a.project, 'claim', { ticket: a.ticket, request: a.request_id, worker: { key: key.id, name: key.name, model: a.model } })
-      const repo = ((await projects.get(a.project))?.repos ?? []).find(r => r.toLowerCase() === String(c.repository).toLowerCase())
+      const c = await workerCall(relay, key, a.project, p, 'claim', { ticket: a.ticket, request: a.request_id, worker: { key: key.id, name: key.name, model: a.model } })
+      const repo = (p.repos ?? []).find(r => r.toLowerCase() === String(c.repository).toLowerCase())
       if (!repo || !AGENT_BRANCH.test(c.branch) || ![c.ticket, c.assignment, c.lease].every(x => HEX32.test(x))) {
         throw toolError('box_refused', 'the project box answered the claim with a branch outside agent/, a repository not bound to the project or malformed ids, so no worker token was made; it may hold a Ticket for you now, so do not claim again: tell a person')
       }
@@ -359,8 +361,8 @@ export const doorTools = ({ projects, mumbo, relay, halt, workerTokens, cfg }) =
       ack: z.array(z.string().regex(MESSAGE_ID)).max(50).optional().describe('The ids of the inputs you have read.'),
     }),
     description: 'Report on the Ticket you claimed and renew its lease. Returns the new lease expiry, inputs that arrived for the Ticket, and the open question to a person, if any.',
-    run: async (key, a) => {
-      const out = await workerCall(relay, key, a.project, `${a.assignment}/report`, { ...holder(key, a), state: a.state, summary: a.summary, question: a.question, answers: a.answers, ack: a.ack })
+    run: async (key, a, p) => {
+      const out = await workerCall(relay, key, a.project, p, `${a.assignment}/report`, { ...holder(key, a), state: a.state, summary: a.summary, question: a.question, answers: a.answers, ack: a.ack })
       return { lease_expires_at: token(out.leaseExpiresAt), inputs: workerInputs(out.inputs), more: Number(out.more),
         attention: out.attention ? { question: boxText(out.attention.question, WORKER.text) } : undefined }
     },
@@ -375,9 +377,9 @@ export const doorTools = ({ projects, mumbo, relay, halt, workerTokens, cfg }) =
       cost_usd: z.number().min(0).optional().describe('What the work cost you, in US dollars, as far as you know it.'),
     }),
     description: 'Finish the Ticket you claimed: mumbo opens or updates its pull request from your pushed head and requests an independent review of that head; a head already reviewed keeps its verdict, so after a failed review push a fix first. Releases your lease.',
-    run: async (key, a) => {
+    run: async (key, a, p) => {
       await notHalted(halt, a.project, 'submitted')
-      const out = await workerCall(relay, key, a.project, `${a.assignment}/submit`, { ...holder(key, a), headSha: a.head_sha, summary: a.summary, model: a.model, costUsd: a.cost_usd })
+      const out = await workerCall(relay, key, a.project, p, `${a.assignment}/submit`, { ...holder(key, a), headSha: a.head_sha, summary: a.summary, model: a.model, costUsd: a.cost_usd })
       return { pr: { number: Number(out.pr?.number), url: PULL_URL.test(out.pr?.url) ? out.pr.url : undefined }, lease: 'released' }
     },
   },
@@ -402,11 +404,11 @@ export const doorTools = ({ projects, mumbo, relay, halt, workerTokens, cfg }) =
  */
 export function door({ keys, tools, requests, tokens, rate, now = () => Date.now(), log = console.log }) {
   const take = rateBuckets(rate, now)  // by key id
-  /** Throws the refusal for a call of `tool` with `args` by `key`. */
+  /** Throws the refusal for a call of `tool` with `args` by `key`; resolves the project's doc for a project tool. */
   async function admit(key, tool, args) {
     if (!SCOPES.includes(tool.scope) || typeof tool.project !== 'boolean' || typeof tool.turns !== 'boolean') throw refusal(403, 'tool_undeclared', `The door does not run ${tool.name}: it declares no scope, project or turns.`)
     keys.requireScope(key, tool.scope)
-    if (tool.project) await keys.requireProject(key, args?.project)
+    return tool.project ? keys.requireProject(key, args?.project) : undefined
   }
 
   const mcp = toNodeHandler(createMcpHandler(({ authInfo }) => {
@@ -427,7 +429,7 @@ export function door({ keys, tools, requests, tokens, rate, now = () => Date.now
           return { isError: true, content: [{ type: 'text', text: 'tool_undeclared: the door did not admit this call.' }] }
         }
         try {
-          const out = await tool.run(key, args)
+          const out = await tool.run(key, args, call.doc)
           call.outcome = tool.raw && out.isError ? 'box_error' : 'ok'
           return tool.raw ? out : { content: [{ type: 'text', text: JSON.stringify(out, null, 2) }] }
         } catch (e) {
@@ -443,7 +445,7 @@ export function door({ keys, tools, requests, tokens, rate, now = () => Date.now
     const started = now()
     const call = { outcome: 'error' }  // what the log line says; refusals and the tool wrapper set outcome
     res.on('close', () => {
-      const { admitted, project, ...fields } = call
+      const { admitted, project, doc, ...fields } = call
       // The SDK's own refusals (such as 406 or 415) set no outcome; they log their status.
       if (res.statusCode >= 400 && ['ok', 'not_run'].includes(fields.outcome)) fields.outcome = `http_${res.statusCode}`
       log(JSON.stringify({ edge: 'door', ...fields, status: res.statusCode, ms: now() - started }))
@@ -480,7 +482,8 @@ export function door({ keys, tools, requests, tokens, rate, now = () => Date.now
     if (tool) {
       call.tool = tool.name
       const args = msg.params.arguments
-      try { await admit(key, tool, args) } catch (e) {
+      let doc
+      try { doc = await admit(key, tool, args) } catch (e) {
         if (!e.code) throw e
         return refuse(e.status, e.code, e.message, { id: msg.id ?? null })
       }
@@ -489,7 +492,7 @@ export function door({ keys, tools, requests, tokens, rate, now = () => Date.now
         if (open.includes(false)) return refuse(429, 'budget_exhausted', `The daily model budget of ${key.owner} is spent.`, { id: msg.id ?? null })
         requests.charge(key.owner)
       }
-      Object.assign(call, { admitted: tool.name, project: args?.project })
+      Object.assign(call, { admitted: tool.name, project: args?.project, doc })
     }
     // A tools/call that reaches the SDK but runs no tool (unknown name, invalid arguments) logs not_run.
     call.outcome = call.method === 'tools/call' ? 'not_run' : 'ok'

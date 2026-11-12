@@ -46,8 +46,8 @@ const send = (port, { host = PUBLIC, path = '/mcp', method = 'POST', headers = {
  * door's own; `rate` and the budgets can be set. `at(ms)` moves the clock. `halt` is the stop switch and `minted` the
  * worker tokens the door's task_claim signs.
  */
-async function setup({ tools = [], rate = { perMinute: 60, burst: 100 }, budgetOpen = true, tokensOpen = true, mumbo = async () => { throw new Error('no box here') }, relayOf = () => undefined } = {}) {
-  const store = memoryStore(), lines = [], charged = []
+async function setup({ tools = [], rate = { perMinute: 60, burst: 100 }, budgetOpen = true, tokensOpen = true, mumbo = async () => { throw new Error('no box here') }, relayOf = () => undefined, store = memoryStore() } = {}) {
+  const lines = [], charged = []
   let now = NOW
   const proj = projects({ store, admitted: () => true, log: () => {} })
   const P = (await proj.create(A, 'Mine')).id, Q = (await proj.create(A, 'Other')).id, R = (await proj.create(B, 'Theirs')).id
@@ -430,7 +430,7 @@ const ticket = (id, fill = 0) => ({ id, title: `T ${id}${'t'.repeat(fill)}`, sta
  * Tickets `tickets[<project id>]`, answers the relay with a stored Trigger, and `answer(seen)`, when it returns one, first.
  */
 async function projectDoor({ tickets = () => ({}), answer = () => undefined, relayLog = () => {}, ...opts } = {}) {
-  const ensured = [], projectOf = (seen) => seen.headers['e2b-sandbox-id'][0].slice('box-project:'.length)
+  const ensured = [], placed = [], projectOf = (seen) => seen.headers['e2b-sandbox-id'][0].slice('box-project:'.length)
   let known = {}
   const proxy = await fakeProxy((seen) => {
     const own = answer(seen)
@@ -444,10 +444,10 @@ async function projectDoor({ tickets = () => ({}), answer = () => undefined, rel
     return { status: 404, body: { error: 'Ticket not found' } }
   })
   const relayOf = (proj) => projectRelay({ projects: proj, log: relayLog, boxFetch: boxFetcher({ publicHost: PUBLIC }), siteHostOf: (p) => `site-${p}`, edgeHost: PUBLIC,
-    box: { ensure: async (p) => { ensured.push(p); return { id: `box-${p}`, token: 'OWNER', traffic: 'TT', host: `site-${p}`, proxy: proxy.url, member: (e) => `signed:${e}` } } } })
+    box: { ensure: async (p, doc) => { ensured.push(p); placed.push(doc?.id); return { id: `box-${p}`, token: 'OWNER', traffic: 'TT', host: `site-${p}`, proxy: proxy.url, member: (e) => `signed:${e}` } } } })
   const t = await setup({ relayOf, ...opts })
   known = tickets(t)
-  return { ...t, proxy, ensured, close: () => { t.close(); proxy.close() } }
+  return { ...t, proxy, ensured, placed, close: () => { t.close(); proxy.close() } }
 }
 
 test('project tools: read scope for project_status, prompt for project_message, workspace for task_start and task_stop; only messages and task_start are charged', async () => {
@@ -462,6 +462,20 @@ test('project tools: read scope for project_status, prompt for project_message, 
       t.ensured.length = 0
     }
     assert.deepEqual(t.charged, [`requests ${A}`, `requests ${A}`], 'project_message and task_start cause model turns')
+  } finally { t.close() }
+})
+
+test('project tools read the project\'s doc once per call: the dispatcher\'s check passes it to the relay and to the box\'s placement', async () => {
+  const inner = memoryStore(), reads = []
+  const store = { ...inner, getDoc: (k, o) => { if (k.startsWith('project:')) reads.push(k); return inner.getDoc(k, o) } }
+  const t = await projectDoor({ store, tickets: (t) => ({ [t.P]: [ticket('tp1')] }) })
+  try {
+    const key = await t.mint({ scopes: ['read', 'prompt', 'workspace'], projects: [t.P] })
+    for (const [name, args] of [['project_status', {}], ['project_message', { message: 'fyi', messageId: 'm1' }], ['task_start', { message: 'go', messageId: 'm2' }], ['task_stop', { ticket: 'tp1' }]]) {
+      reads.length = 0; t.placed.length = 0
+      result(await t.tool(key, name, { project: t.P, ...args }))
+      assert.deepEqual([reads, t.placed], [[`project:${t.P}`], [t.P]], name)
+    }
   } finally { t.close() }
 })
 
