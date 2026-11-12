@@ -186,7 +186,7 @@ test('one log line per call: key id and name, owner, method, tool, outcome, stat
     await t.tool(reader, 'echo', { text: 'fail' })
     await t.tool(reader, 'echo', { wrong: 1 })
     await t.tool(key, 'whoami')
-    await send(t.port, { headers: { authorization: `Bearer ${key.slice(0, -1)}x` }, body: '{}' })
+    await send(t.port, { headers: { authorization: `Bearer ${key.slice(0, -1)}${key.endsWith('x') ? 'y' : 'x'}` }, body: '{}' })
     await send(t.port, { method: 'DELETE', headers: { authorization: `Bearer ${reader}` } })
     // The SDK's own refusal of a body that is not JSON.
     await t.rpc(reader, 'tools/list', {}, { headers: { 'content-type': 'text/plain' } })
