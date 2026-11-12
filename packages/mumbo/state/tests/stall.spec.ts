@@ -74,8 +74,10 @@ describe('the stall predicate', () => {
     expect(streakAfter(log => log.call('w', 'write', JSON.stringify({ file_path: 'a', content: 'a' })).result('w', true))).toBe(1)
     const done = (log: Log): Log => log.todos([{ content: 'a', status: 'completed' }, { content: 'b', status: 'pending' }])
     expect(streakAfter(done, done)).toBe(1)
-    const write = (log: Log): Log => log.ran('w', 'write', { file_path: 'a.txt', content: 'a' })
-    const twice = fold(write(write(new Log().round(1)).round(2)).round(3))
+    // The `write` tool's results: the second write of the same content reports an update, not a creation.
+    const write = (verb: string) => (log: Log): Log =>
+      log.ran(`w-${verb}`, 'write', { file_path: 'a.txt', content: 'a' }, `<path>/w/a.txt</path>\n<type>file</type>\n<content>\n${verb} file\n</content>`)
+    const twice = fold(write('Updated')(write('Created')(new Log().round(1)).round(2)).round(3))
     expect(twice).toMatchObject({ streak: 1, previous: { round: 2, changed: false } })
     expect(streakAfter(log => log.ran('v', 'str_replace_editor', { command: 'view', path: 'a.txt' }))).toBe(1)
     expect(streakAfter(log => log.call('x', 'bash', '{not json').result('x', false, 'error'))).toBe(1)
@@ -109,10 +111,19 @@ describe('the stall predicate', () => {
     expect(streakAfter(log => job('b', 'line 1')(job('a', 'line 1')(log)))).toBe(1)
     expect(streakAfter(log => job('b', 'line 2')(job('a', 'line 1')(log)))).toBe(0)
     expect(streakAfter(log => job('c', 'line 1')(job('b', 'failed', true)(job('a', 'line 1')(log))))).toBe(1)
-    expect(streakAfter(log => job('b', 'line 1')(job('a', 'failed', true)(log)))).toBe(1)
+    expect(streakAfter(log => job('b', 'failed', true)(job('a', 'failed', true)(log)))).toBe(1)
     const rounds = (second: string): Rounds => fold(job('b', second)(job('a', 'line 1')(new Log().round(1)).round(2)).round(3))
     expect(rounds('line 1').previous?.changed).toBe(false)
     expect(rounds('line 2').previous?.changed).toBe(true)
+  })
+
+  it('reads a call that failed earlier in the window and now succeeds as a change', () => {
+    const read = (id: string, isError: boolean, text: string) => (log: Log): Log =>
+      log.call(id, 'read', '{"file_path":"report.txt"}').result(id, isError, text)
+    const missing = 'Error: cannot read "/w/report.txt": not found'
+    expect(streakAfter(log => read('b', false, 'report ready')(read('a', true, missing)(log)))).toBe(0)
+    const across = fold(read('b', false, 'report ready')(read('a', true, missing)(new Log().round(1)).round(2)).round(3))
+    expect(across).toMatchObject({ streak: 0, previous: { round: 2, changed: true } })
   })
 
   it('compares only the text of a result', () => {

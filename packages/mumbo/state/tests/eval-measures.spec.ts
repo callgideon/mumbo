@@ -1,11 +1,14 @@
 /** The K and K3 evals' key resolution, options and measures; the evals themselves only run on demand against the live API. */
+import { spawnSync } from 'node:child_process'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { GoalId } from '@deepseek-ai/dsh-goal'
 import { createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { evalOptions, k3Options, type LoggedEvent, measureK3, measureRun, median, premature, resolveDeepSeekEnv } from '../eval/measures.ts'
+import { evalOptions, K3_OBJECTIVES, k3Options, type LoggedEvent, measureK3, measureRun, median, premature, resolveDeepSeekEnv } from '../eval/measures.ts'
+import { foldRounds, initRounds } from '../src/stall.ts'
 import { Log } from './events.ts'
 
 describe('resolveDeepSeekEnv', () => {
@@ -75,6 +78,21 @@ describe('k3Options', () => {
   it('rejects an unknown task and a round cap below three', () => {
     expect(() => k3Options({ K3_EVAL_TASKS: 'stuck,idle' })).toThrow(/K3_EVAL_TASKS names unknown tasks: idle/u)
     expect(() => k3Options({ K3_EVAL_MAX_ROUNDS: '2' })).toThrow(/K3_EVAL_MAX_ROUNDS/u)
+  })
+})
+
+describe('the stuck task', () => {
+  it('names a check whose failing output repeats exactly, so a model that only reruns it stalls', () => {
+    const command = /`(node [^`]+)`/u.exec(K3_OBJECTIVES.stuck)?.[1] ?? ''
+    const cwd = fileURLToPath(new URL('../eval/fixture-k3/stuck/', import.meta.url))
+    const check = (): string => {
+      const { stdout, stderr, status } = spawnSync(process.execPath, command.split(' ').slice(1), { cwd, encoding: 'utf8' })
+      return `${stdout}${stderr}[exit code: ${String(status)}]`
+    }
+    const first = check()
+    expect(first).toMatch(/config\/signing\.key.*\n\[exit code: 1\]$/u)
+    const log = new Log().round(1).ran('c1', 'bash', { command }, first).round(2).ran('c2', 'bash', { command }, check()).round(3)
+    expect(log.events.reduce(foldRounds, initRounds()).streak).toBe(2)
   })
 })
 

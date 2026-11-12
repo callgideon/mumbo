@@ -36,6 +36,8 @@ const keySchema = z.object({
   write: z.literal(true).optional(),
   /** First 16 hex characters of the SHA-256 of the last successful result's text in the round. */
   out: z.string().optional(),
+  /** Set when a result with the key failed in the round. */
+  failed: z.literal(true).optional(),
 })
 
 const roundSchema = z.object({
@@ -164,18 +166,22 @@ function called(current: Round, callId: string, name: string, args: unknown, raw
 
 /**
  * The open round with a call's result recorded. A successful result changes the round when it belongs to a file write
- * with no successful identical write earlier in the two-round window, or to a repeated call whose output differs from
- * the last successful output of that call in each round of the window.
+ * with no successful write of the same key earlier in the two-round window, or to a call with an earlier result in the
+ * window whose output differs from the last successful output of that call in each round of the window; an earlier
+ * failure has no output to match.
  */
 function settled(previous: Round | null, current: Round, callId: string, isError: boolean, content: readonly ContentBlock[]): Round {
   const key = current.pending[callId]
   const { [callId]: _settled, ...pending } = current.pending
   const round = { ...current, calls: current.calls + 1, errors: current.errors + (isError ? 1 : 0), pending }
   const entry = key === undefined ? undefined : current.keys[key]
-  if (key === undefined || entry === undefined || isError) return round
+  if (key === undefined || entry === undefined) return round
+  if (isError) return { ...round, keys: { ...round.keys, [key]: { ...entry, failed: true as const } } }
   const out = digest(content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n'), 'hex')
-  const earlier = [entry.out, previous?.keys[key]?.out].filter(hash => hash !== undefined)
-  const changed = entry.write === true ? !earlier.includes(out) : earlier.length > 0 && !earlier.includes(out)
+  const before = previous?.keys[key]
+  const earlier = [entry.out, before?.out].filter(hash => hash !== undefined)
+  const repeated = earlier.length > 0 || entry.failed === true || before?.failed === true
+  const changed = entry.write === true ? earlier.length === 0 : repeated && !earlier.includes(out)
   return { ...round, changed: round.changed || changed, keys: { ...round.keys, [key]: { ...entry, out } } }
 }
 

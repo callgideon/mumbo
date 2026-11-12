@@ -253,6 +253,20 @@ export const K3_TASKS = ['stuck', 'progress', 'shell-only'] as const
 /** One K3 task. */
 export type K3Task = typeof K3_TASKS[number]
 
+/**
+ * The objective each K3 task's `/goal` sets. `stuck` does not name its blocker, and its check prints the same line on
+ * every failing run, so a model that repeats it changes nothing the stall check can see.
+ */
+export const K3_OBJECTIVES: Readonly<Record<K3Task, string>> = {
+  stuck: 'Make `node check.mjs` pass.',
+  progress: 'Fix the inventory project in this directory until `node --test` passes. Track the work with todo_write and keep '
+    + 'it current. Feature four needs the checksum that `node scripts/slow-check.mjs` prints after about two minutes: start '
+    + 'it early in the background (bash with run_in_background), work on the other features meanwhile, and write the '
+    + 'checksum it prints to checksum.txt. Do not change the tests.',
+  'shell-only': 'Apply all four migrations by running `node migrate.mjs` in the background, once per migration, until it '
+    + 'prints `all migrations applied`. Do not edit any file yourself.',
+}
+
 /** What the environment chose for one K3 eval. */
 export interface K3Options {
   /** Runs per task and arm (`K3_EVAL_RUNS`, default 5). */
