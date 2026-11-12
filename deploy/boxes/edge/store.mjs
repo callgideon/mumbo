@@ -8,9 +8,10 @@
 // (`doc:project:<id>`), halt switches (`doc:halt:<email>`) and box records (`box:<id>`), a missing record included. Every
 // write of one of them through any redisStore publishes `{ kind, id, from }` on INVALIDATE in the write's own transaction
 // (for patchBox, its script), after the write (kind `key`, `person`, `project`, `halt` or `box`; id the rest of the key;
-// from the writing task, which drops its own copy when the write returns and so skips its own message), and every other
-// task that receives it drops its copy. A task serves its copies only while its subscription to INVALIDATE is confirmed
-// and answering; on a disconnect or an error it empties the cache and reads through until it is subscribed again.
+// from the writing task, which drops its own copy when the write answers or fails and so skips its own message), and
+// every other task that receives it drops its copy. A task serves its copies only while its subscription to INVALIDATE is
+// confirmed and answering; on a disconnect or an error it empties the cache and reads through until it is subscribed
+// again.
 // `cacheMs` is each copy's backstop lifetime.
 import { randomUUID } from 'node:crypto'
 
@@ -179,11 +180,11 @@ export function redisStore(client, { cacheMs = 0, now = Date.now, log = console.
   const cache = readCache(client, { cacheMs, now, log })
   const read = async (id, fresh) => { const v = await cache.get(`box:${id}`, fresh); return v ? JSON.parse(v) : undefined }
   /** Writes `key` with `op`; a cached record's write is a transaction that publishes its message after the write, and
-   *  drops this task's own copy once it is done. `kind` null writes without a message. */
+   *  drops this task's own copy once it answers or fails: a lost reply may follow a write Redis applied, whose message this
+   *  task skips. `kind` null writes without a message. */
   async function commit(key, op, kind = cachedKind(key)) {
     if (!kind) return op(client)
-    await op(client.multi()).publish(INVALIDATE, JSON.stringify({ ...kind, from: cache.self })).exec()
-    cache.drop(key)
+    try { await op(client.multi()).publish(INVALIDATE, JSON.stringify({ ...kind, from: cache.self })).exec() } finally { cache.drop(key) }
   }
   return {
     getBox: (id, opts) => read(id, opts?.fresh),
@@ -194,9 +195,12 @@ export function redisStore(client, { cacheMs = 0, now = Date.now, log = console.
      *  patch, or undefined, writing nothing, when there is none. A patch of only QUIET fields publishes nothing. */
     async patchBox(id, fields, extendMs) {
       const quiet = Object.keys(fields).every(f => QUIET.has(f))
-      const v = await client.eval(PATCH, { keys: [`box:${id}`], arguments: [JSON.stringify(fields, (k, x) => (x === undefined ? null : x)),
-        extendMs === undefined ? '' : String(extendMs), quiet ? '' : JSON.stringify({ kind: 'box', id, from: cache.self })] })
-      if (!quiet) cache.drop(`box:${id}`)
+      let v
+      // As in commit, the copy goes even when the EVAL fails.
+      try {
+        v = await client.eval(PATCH, { keys: [`box:${id}`], arguments: [JSON.stringify(fields, (k, x) => (x === undefined ? null : x)),
+          extendMs === undefined ? '' : String(extendMs), quiet ? '' : JSON.stringify({ kind: 'box', id, from: cache.self })] })
+      } finally { if (!quiet) cache.drop(`box:${id}`) }
       return v ? JSON.parse(v) : undefined
     },
     async deleteBox(id) { await commit(`box:${id}`, (m) => m.del(`box:${id}`).sRem('boxes', id)) },

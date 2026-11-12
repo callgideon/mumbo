@@ -182,6 +182,23 @@ test('read cache: each cached record\'s write publishes { kind, id } after it, i
   await sub.quit()
 })
 
+test('read cache: a write Redis applied whose reply was lost still drops the writing task\'s own copy, as every other task drops its own', async () => {
+  const redis = fakeRedis(); let lose = false
+  const task = async (send) => { const store = redisStore(redis.client(send), { cacheMs: 300_000, log: () => {} }); await subscribed(store); return store }
+  // Task A's socket breaks after Redis ran its MULTI or EVAL, before the reply.
+  const a = await task((cmd, key, run) => { const v = run(); return lose && /^(MULTI|EVAL)/.test(cmd) ? Promise.reject(new Error('Socket closed unexpectedly')) : Promise.resolve(v) })
+  const b = await task()
+  try {
+    await a.putDoc('key:h', { id: 'k' }); await a.putBox('b1', { email: 'a@x.com', paused: false }); await landed()
+    for (const s of [a, b]) { await s.getDoc('key:h'); await s.getBox('b1') }
+    lose = true
+    await assert.rejects(a.putDoc('key:h', { id: 'k', revokedAt: 2 }), /Socket closed/)
+    await assert.rejects(a.patchBox('b1', { paused: true }), /Socket closed/)
+    await landed()
+    for (const [name, s] of [['the other task', b], ['the writing task', a]]) assert.deepEqual([(await s.getDoc('key:h')).revokedAt, (await s.getBox('b1')).paused], [2, true], name)
+  } finally { await Promise.all([a.close(), b.close()]) }
+})
+
 /** The patchBox contract, for memoryStore and redisStore alike. */
 async function patches(store) {
   const first = { email: 'a@x.com', active: 1, extended: 1, restored: 'v1', ports: { dsh: '880', live: '881' } }
