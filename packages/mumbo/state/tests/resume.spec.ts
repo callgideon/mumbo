@@ -19,7 +19,7 @@ import { PLAN_READ, STATE_CONTEXT } from '../src/index.ts'
 import { Log } from './events.ts'
 import { boot, notices, OPTIONS, requestTexts, startJob, turn } from './harness.ts'
 
-const HEADER = 'This Session was restarted. What changed while it was down:'
+const HEADER = 'This Session was restarted. Changes it may not have been told about:'
 const CHECK = 'node scripts/slow-check.js'
 
 async function mountJobs(ctx: Context): Promise<void> {
@@ -334,6 +334,7 @@ describe('subagents', () => {
       } as never)
     })
     const warn = vi.spyOn(harness.ctx.logger, 'warn')
+    const info = vi.spyOn(harness.ctx.logger, 'info')
     const live = await harness.start('live')
     const handle = await harness.start('parent')
     await turn(handle.agent, 'Start.')
@@ -364,16 +365,22 @@ describe('subagents', () => {
       text: [
         HEADER,
         '- Subagent tester stopped mid-task by the restart. Use send_message to tester to continue it.',
-        '- Subagent reviewer finished while this Session was not loaded. Its last message: "Approved: the parser change is safe."',
-        '- Subagent quiet finished while this Session was not loaded.',
-        `- Subagent talk finished while this Session was not loaded. Its last message: "${'v'.repeat(399)}…"`,
+        '- Subagent reviewer finished after this Session\'s last activity. Its last message: "Approved: the parser change is safe."',
+        '- Subagent quiet finished after this Session\'s last activity.',
+        `- Subagent talk finished after this Session's last activity. Its last message: "${'v'.repeat(399)}…"`,
         '- Subagent scan stopped mid-task by the restart.',
-        '- Subagent fail ended (blocked) while this Session was not loaded.',
-        '- Subagent stop ended (aborted) while this Session was not loaded.',
+        '- Subagent fail ended (blocked) after this Session\'s last activity.',
+        '- Subagent stop ended (aborted) after this Session\'s last activity.',
       ].join('\n'),
       summary: 'Restart: 2 stopped, 5 finished.',
     }])
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('subagent missing of parent is left out of the resume notice'))
+    // One host line for the comparison, counting the catalog's 12 children and the 10 logs read; the log does not hold it.
+    const reconcile = 'mumbo-state: resume reconcile'
+    expect(info.mock.calls.filter(([message]) => message === reconcile)).toEqual([
+      [reconcile, { session: 'parent', children: 12, read: 10, ms: expect.any(Number) as number }],
+    ])
+    expect(JSON.stringify(agent.session.snapshotEvents())).not.toContain(reconcile)
   })
 
   it('reports a child stopped in the run a restart ended once, at that restart and not after the next, also when it stopped before the last message', { timeout: 60_000 }, async () => {

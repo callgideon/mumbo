@@ -1,6 +1,6 @@
 /**
  * The resume notice: at the first step after a resume, one logged message naming the background jobs, workflow runs and
- * subagents that stopped or finished while the Session was down, and a goal that needs a person.
+ * subagents that the restart stopped or whose end the Session may not have been told about, and a goal that needs a person.
  * @module @mumbo/state/resume
  */
 
@@ -25,6 +25,9 @@ declare module '@deepseek-ai/dsh-llm' {
 
 /** Longest quoted last message of a subagent that finished. */
 const LAST_MESSAGE_CHARS = 400
+
+/** The message of the host log line each comparison writes; its fields follow as one object. */
+const RECONCILE_LOG = 'mumbo-state: resume reconcile'
 
 /** The resume facts the projection recorded at the end-seed. */
 type Resume = NonNullable<MumboState['resume']>
@@ -100,19 +103,28 @@ async function childLog(query: SessionQueryEngine, child: SubagentCatalogEntry, 
   return { end, text, lastAt }
 }
 
-/** Direct children whose last turn the restart cut off, or that ended while this Session was not loaded. */
+/** The direct children's findings, the count of children in the catalog, and the count of child logs read, failed reads included. */
+interface ChildScan {
+  readonly findings: Finding[]
+  readonly children: number
+  readonly read: number
+}
+
+/** Direct children whose last turn the restart cut off, or that ended after this Session's last activity. */
 async function childFindings(
   ctx: Context, agent: Agent, state: MumboState, resume: Resume, signal: AbortSignal,
-): Promise<Finding[]> {
-  const query = ctx.get('sessionQuery')
-  if (query === undefined) return []
+): Promise<ChildScan> {
   const catalog = ctx.sessionProjections.snapshot(agent.session, ['subagentCatalog']).values.subagentCatalog ?? []
   const findings: Finding[] = []
+  let read = 0
+  const query = ctx.get('sessionQuery')
+  if (query === undefined) return { findings, children: catalog.length, read }
   for (const child of catalog) {
     // A loaded child is still running in this process; external and unknown children keep no log here.
     if ((child.mode !== 'one-shot' && child.mode !== 'continuable') || ctx.agents.get(child.id) !== undefined) continue
     const name = childName(child)
     let log: ChildLog
+    read += 1
     try {
       log = await childLog(query, child, signal)
     } catch (error: unknown) {
@@ -132,21 +144,24 @@ async function childFindings(
       findings.push({ line: `Subagent ${name} stopped mid-task by the restart.${resumeHint}`, kind: 'stopped' })
       continue
     }
-    // A child that ended while this Session was loaded already reported to it.
+    // A child that ended at or before this Session's last activity is taken to have reported to it. One that ended later
+    // while this Session was loaded but idle may still have its own notice queued, and the model then reads both.
     if (end.time <= resume.downAt) continue
     const kind = end.data.reason.kind
     if (kind === 'completed') {
       const said = log.text === '' ? '' : ` Its last message: "${clip(log.text, LAST_MESSAGE_CHARS)}"`
-      findings.push({ line: `Subagent ${name} finished while this Session was not loaded.${said}`, kind: 'finished' })
+      findings.push({ line: `Subagent ${name} finished after this Session's last activity.${said}`, kind: 'finished' })
     } else {
-      findings.push({ line: `Subagent ${name} ended (${kind}) while this Session was not loaded.`, kind: 'finished' })
+      findings.push({ line: `Subagent ${name} ended (${kind}) after this Session's last activity.`, kind: 'finished' })
     }
   }
-  return findings
+  return { findings, children: catalog.length, read }
 }
 
 /**
- * Compare what the log says ran before the restart with what runs now.
+ * Compare what the log says ran before the restart with what runs now. Writes one host log line, never to the Session
+ * log: {@link RECONCILE_LOG} with the Session id, the catalog's child count, the child logs read, and the milliseconds
+ * the comparison took.
  * @param ctx - plugin context; `sessionQuery` and `goals` are read when present.
  * @param agent - the resumed Agent.
  * @param state - its `mumboState`.
@@ -157,15 +172,14 @@ async function childFindings(
 async function reconcile(
   ctx: Context, agent: Agent, state: MumboState, resume: Resume, signal: AbortSignal,
 ): Promise<UserMessage | undefined> {
-  const findings = [
-    ...jobFindings(state, resume),
-    ...runFindings(state, resume),
-    ...await childFindings(ctx, agent, state, resume, signal),
-  ]
+  const started = performance.now()
+  const { findings: childLines, children, read } = await childFindings(ctx, agent, state, resume, signal)
+  const findings = [...jobFindings(state, resume), ...runFindings(state, resume), ...childLines]
   const goal = ctx.get('goals')?.get(agent)
   if (goal?.phase === 'active' && goal.activation === 'disarmed') {
     findings.push({ line: 'The goal is still active, but its automatic rounds are stopped: a person must resume it with /goal resume.', kind: 'goal' })
   }
+  ctx.logger.info(RECONCILE_LOG, { session: agent.session.id, children, read, ms: Math.round(performance.now() - started) })
   if (findings.length === 0) return undefined
   const count = (kind: Finding['kind']): number => findings.filter(finding => finding.kind === kind).length
   const parts = [
@@ -173,7 +187,7 @@ async function reconcile(
     ...count('finished') > 0 ? [`${String(count('finished'))} finished`] : [],
     ...count('goal') > 0 ? ['goal needs a person'] : [],
   ]
-  const text = ['This Session was restarted. What changed while it was down:', ...findings.map(finding => `- ${finding.line}`)].join('\n')
+  const text = ['This Session was restarted. Changes it may not have been told about:', ...findings.map(finding => `- ${finding.line}`)].join('\n')
   return createUserMessage({
     content: [{ type: 'text', text }],
     source: { kind: RESUME_SOURCE, form: 'notice', summary: boundContextSummary(`Restart: ${parts.join(', ')}.`) },
