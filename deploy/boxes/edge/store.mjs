@@ -23,7 +23,8 @@ export const INVALIDATE = 'edge:invalidate'
 /** patchBox's script. KEYS[1] is the box record; ARGV[1] the fields as JSON, null for a field to remove; ARGV[2] '' or,
  *  for touch, how old `extended` may get before it moves to the new `active` too; ARGV[3] '' or the invalidation to
  *  publish after the write. Merges the fields into the stored record in one step and returns the record as it was before,
- *  or nil, writing nothing, when there is none. */
+ *  or nil, writing nothing, when there is none. The record goes through cjson, which writes an empty array as `{}`;
+ *  box records hold no arrays, and a field that does would need its own handling here. */
 const PATCH = `local v = redis.call('get', KEYS[1])
 if not v then return false end
 local b, fields = cjson.decode(v), cjson.decode(ARGV[1])
