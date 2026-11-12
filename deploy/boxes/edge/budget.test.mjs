@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { memoryStore } from './store.mjs'
-import { tokenBudget } from './budget.mjs'
+import { budget, OPEN_MS, tokenBudget } from './budget.mjs'
 
 const now = () => Date.parse('2026-11-09T12:00:00Z')
 const key = (p) => `tokens:2026-11-09:${p}`
@@ -56,17 +56,54 @@ test('other media types pass through unmetered', async () => {
   assert.equal(t.meter('a@x.co', body, 'text/plain'), body)
 })
 
-test('allow is false at or over the limit; project and user limits are separate', async () => {
-  const { store, t } = make()
+/** A memory store that records the counters it reads. */
+const counting = () => { const store = memoryStore(), reads = []; return { store, reads, counted: { ...store, getCount: (k) => { reads.push(k); return store.getCount(k) } } } }
+
+test('allow is false at or over the limit; an open answer is kept OPEN_MS, a closed one is read again on every call; project and user limits are separate', async () => {
+  let at = now()
+  const { store, reads, counted } = counting(), t = tokenBudget({ store: counted, limits: { user: 1000, project: 5000 }, now: () => at })
   assert.equal(await t.allow('a@x.co'), true)
-  await store.incrementBy(key('a@x.co'), 999, 1)
-  assert.equal(await t.allow('a@x.co'), true)
-  await store.incrementBy(key('a@x.co'), 1, 1)
+  await store.incrementBy(key('a@x.co'), 1000, 1)
+  assert.equal(await t.allow('a@x.co'), true, 'the open answer is kept')
+  at += OPEN_MS
   assert.equal(await t.allow('a@x.co'), false)
-  await store.incrementBy(key('project:p1'), 1000, 1)
+  assert.equal(await t.allow('a@x.co'), false)
+  assert.deepEqual(reads, Array(3).fill(key('a@x.co')), 'a closed answer is read again')
+  await store.incrementBy(key('project:p1'), 4999, 1)
   assert.equal(await t.allow('project:p1'), true)
-  await store.incrementBy(key('project:p1'), 4000, 1)
+  at += OPEN_MS
+  await store.incrementBy(key('project:p1'), 1, 1)
   assert.equal(await t.allow('project:p1'), false)
+})
+
+test('the request budget: open under its limit per principal and day, an open answer kept OPEN_MS, a closed one read again; charge adds one without waiting and logs a failure', async (t) => {
+  let at = Date.parse('2026-11-08T10:00:00Z')
+  const { reads, counted } = counting(), requests = budget({ store: counted, limit: 2, now: () => at })
+  assert.equal(await requests.allow('a'), true)
+  assert.equal(requests.charge('a'), undefined); requests.charge('a')
+  assert.equal(await requests.allow('a'), true, 'the open answer is kept')
+  at += OPEN_MS
+  assert.deepEqual([await requests.allow('a'), await requests.allow('a'), await requests.allow('b')], [false, false, true])
+  assert.deepEqual(reads, ['budget:2026-11-08:a', 'budget:2026-11-08:a', 'budget:2026-11-08:a', 'budget:2026-11-08:b'], 'a closed answer is read again')
+  at = Date.parse('2026-11-09T00:00:01Z')
+  assert.equal(await requests.allow('a'), true, 'a new day')
+  const errors = t.mock.method(console, 'error', () => {})
+  budget({ store: { increment: () => new Promise(() => {}) }, limit: 1 }).charge('a')  // a store that never answers holds nothing up
+  budget({ store: { increment: async () => { throw new Error('store down') } }, limit: 1 }).charge('a')
+  await new Promise(r => setImmediate(r))
+  assert.deepEqual(errors.mock.calls.map(c => c.arguments), [['edge: request count failed', 'store down']])
+})
+
+test('the meter passes every chunk on without waiting for the store, and logs a failed count', { timeout: 5_000 }, async (t) => {
+  const never = tokenBudget({ store: { incrementBy: () => new Promise(() => {}) }, limits: { user: 1, project: 1 }, now })
+  assert.equal(await drain(never.meter('a@x.co', stream(start, delta), 'text/event-stream')), start + delta)
+  const json = JSON.stringify({ usage: { input_tokens: 1 } })
+  assert.equal(await drain(never.meter('a@x.co', stream(json), 'application/json')), json)
+  const errors = t.mock.method(console, 'error', () => {})
+  const down = tokenBudget({ store: { incrementBy: async () => { throw new Error('store down') } }, limits: { user: 1, project: 1 }, now })
+  assert.equal(await drain(down.meter('a@x.co', stream(start, delta), 'text/event-stream')), start + delta)
+  await new Promise(r => setImmediate(r))
+  assert.deepEqual(errors.mock.calls.map(c => c.arguments), [['edge: token count failed', 'store down'], ['edge: token count failed', 'store down']])
 })
 
 const textDelta = (text) => ev({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } })

@@ -1,9 +1,36 @@
 // Daily model budgets per principal, shared by every edge replica through the store (store.mjs): a request count
-// (budget) and a token count read from the model's responses (tokenBudget).
+// (budget) and a token count read from the model's responses (tokenBudget). Both counters are read before a call and
+// added to without waiting (spec R6b ruling 2), so a principal can pass its limit by the calls that were admitted
+// together, and by the calls each edge task admits within OPEN_MS of reading the count open.
 
-/** Per-user daily request budget. Returns `(email, now?) => Promise<boolean>`: true while today's count is within `limit`. */
-export function budget(store, limit) {
-  return async (email, now = new Date()) => (await store.increment(`budget:${now.toISOString().slice(0, 10)}:${email}`, 2 * 86_400)) <= limit
+/** How long one edge task keeps a principal's open verdict (a count under its limit) before reading the count again. */
+export const OPEN_MS = 10_000
+const day = (ms) => new Date(ms).toISOString().slice(0, 10)
+
+/** `check` with each principal's open verdict kept OPEN_MS; a closed verdict is checked again on every call. */
+function openFor(now, check) {
+  const until = new Map()  // principal -> epoch ms
+  return async (principal) => {
+    if ((until.get(principal) ?? 0) > now()) return true
+    const open = await check(principal)
+    if (open) until.set(principal, now() + OPEN_MS); else until.delete(principal)
+    return open
+  }
+}
+
+/**
+ * Per-principal daily request budget.
+ * @param {{ store: object, limit: number, now?: () => number }} deps - `now` is epoch ms.
+ * @returns {{ allow(principal: string): Promise<boolean>, charge(principal: string): void }}
+ *   `allow` is true while today's count is under `limit`, an open answer kept OPEN_MS; `charge` adds one call to today's
+ *   count without waiting, and logs a failed write. A caller charges only a call it admitted.
+ */
+export function budget({ store, limit, now = Date.now }) {
+  const key = (principal) => `budget:${day(now())}:${principal}`
+  return {
+    allow: openFor(now, async (principal) => (await store.getCount(key(principal))) < limit),
+    charge(principal) { store.increment(key(principal), 2 * 86_400).catch((err) => console.error('edge: request count failed', err.message)) },
+  }
 }
 
 const USAGE_FIELDS = ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens']
@@ -24,26 +51,24 @@ const generated = (d) => [d?.text, d?.thinking, d?.partial_json, d?.content, d?.
  * Daily token budget per principal: `limits.project` for `project:*` principals, `limits.user` otherwise.
  * @param {{ store: object, limits: { user: number, project: number }, now: () => number }} deps - `now` is epoch ms.
  * @returns {{ allow(principal: string): Promise<boolean>, meter(principal: string, webBody: ReadableStream, contentType: string | null, inputEstimate?: number): ReadableStream }}
- *   `allow` is false once today's tokens reach the limit. `meter` passes every byte through and counts the usage it reads,
- *   Anthropic Messages or OpenAI Chat Completions, SSE or JSON. Without readable usage it charges an estimate instead:
- *   `inputEstimate` (default 0; OpenAI streams report input only in their last chunk) plus ceil(generated characters / 3),
- *   when an SSE body ends or is cancelled before its final usage, when a JSON body has no usage, and (input only) when a
- *   JSON body is cancelled before its end. The OpenRouter route forces streaming, so its JSON bodies are upstream errors,
+ *   `allow` is false once today's tokens reach the limit; an open answer is kept OPEN_MS. `meter` passes every byte
+ *   through without waiting for the store, adds the usage it reads to today's count without waiting, and logs a failed
+ *   write. It reads Anthropic Messages or OpenAI Chat Completions, SSE or JSON. Without readable usage it charges an
+ *   estimate instead: `inputEstimate` (default 0; OpenAI streams report input only in their last chunk) plus
+ *   ceil(generated characters / 3), when an SSE body ends or is cancelled before its final usage, when a JSON body has
+ *   no usage, and (input only) when a JSON body is cancelled before its end. The OpenRouter route forces streaming, so its JSON bodies are upstream errors,
  *   which the caller meters with inputEstimate 0.
  */
 export function tokenBudget({ store, limits, now }) {
-  const key = (principal) => `tokens:${new Date(now()).toISOString().slice(0, 10)}:${principal}`
+  const key = (principal) => `tokens:${day(now())}:${principal}`
   return {
-    async allow(principal) {
-      return (await store.getCount(key(principal))) < (principal.startsWith('project:') ? limits.project : limits.user)
-    },
+    allow: openFor(now, async (principal) => (await store.getCount(key(principal))) < (principal.startsWith('project:') ? limits.project : limits.user)),
     meter(principal, webBody, contentType, inputEstimate = 0) {
       const type = (contentType ?? '').split(';')[0].trim().toLowerCase()
       if (type !== 'text/event-stream' && type !== 'application/json') return webBody
       const k = key(principal)
-      const add = async (n) => {
-        if (n <= 0) return
-        try { await store.incrementBy(k, n, TWO_DAYS_MS) } catch (err) { console.error('edge: token count failed', err.message) }
+      const add = (n) => {
+        if (n > 0) store.incrementBy(k, n, TWO_DAYS_MS).catch((err) => console.error('edge: token count failed', err.message))
       }
       const decoder = new TextDecoder()
       let pending = ''

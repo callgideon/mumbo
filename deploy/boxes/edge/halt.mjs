@@ -20,8 +20,8 @@ export function haltService({ store }) {
     async set(email, on) { await store.putDoc(key(email), { on, at: Date.now() }) },
     async isHalted(principal) {
       if (!principal.startsWith('project:')) return get(principal)
-      for (const owner of await ownersOf(store, principal.slice('project:'.length))) if (await get(owner)) return true
-      return false
+      // The owners' switches together: a warm read cache answers the project doc and each switch with no round trip.
+      return (await Promise.all((await ownersOf(store, principal.slice('project:'.length))).map(get))).includes(true)
     },
   }
 }

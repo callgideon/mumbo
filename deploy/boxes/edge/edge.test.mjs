@@ -7,12 +7,15 @@ import { inParallel, signBox, verifyBox, userPrefix, budget, needsLaunch, boxHea
 import { presignGetter } from './cells.mjs'
 import { INVALIDATE, memoryStore, redisStore } from './store.mjs'
 import { haltService } from './halt.mjs'
+import { tokenBudget } from './budget.mjs'
 import { fakeRedis, subscribed } from './testing/store-trace.mjs'
 import { generateKeyPairSync, createSign } from 'node:crypto'
 import { SandboxError, SandboxNotFoundError, SandboxNotRunningError, SandboxUnreachableError, TimeoutError } from 'e2b'
 
 const cfg = { pageAfterMs: 3000, publicHost: 'boxes.example', projectDomain: 'boxes.example', llmHost: 'llm.example', template: 'mumbo-box', idleMs: 60_000, backupEveryMs: 600_000, allowed: ['@x.com'], egressIps: [], signinCookie: '_oauth2_proxy_mumbo', upstream: 'https://model.example', edgeRegion: 'us-east-1' }
 const PROXY = new URL('http://127.0.0.1:1')
+/** A request budget that is always open and charges nothing. */
+const OPEN = { allow: async () => true, charge() {} }
 /** One us-east-1 cell over a fake E2B, as cells.mjs cellClients builds one; `extra` overrides its fields. */
 const oneCell = (e2b, extra = {}) => new Map([['us-east-1', { region: 'us-east-1', Sandbox: e2b.Sandbox, proxy: PROXY, bucket: 'bk', maxUnits: 10, presignGet: async () => undefined, presignPut: async () => 'P', ...extra }]])
 const listen = (server) => new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port)))
@@ -38,14 +41,6 @@ test('backup prefix is per user, case-insensitive, and path-safe', () => {
   assert.equal(userPrefix('A@x.com'), userPrefix('a@x.com'))
   assert.notEqual(userPrefix('a@x.com'), userPrefix('b@x.com'))
   assert.match(userPrefix('../../etc@x.com'), /^users\/[0-9a-f]{64}$/)
-})
-
-test('daily budget counts per user and per day', async () => {
-  const allow = budget(memoryStore(), 2)
-  const d = new Date('2026-11-08T10:00:00Z')
-  assert.ok(await allow('a', d)); assert.ok(await allow('a', d)); assert.equal(await allow('a', d), false)
-  assert.ok(await allow('b', d))
-  assert.ok(await allow('a', new Date('2026-11-09T00:00:01Z')))
 })
 
 test('only cookie-less, token-less GETs go to the launch exchange', () => {
@@ -178,7 +173,7 @@ test('model host swaps the box token for the server key, checks ownership, sourc
   const seen = []; const touched = []
   const fetchImpl = async (url, init) => { seen.push({ url, init }); return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } }) }
   let allowed = true
-  const s = modelServer({ cfg: { ...cfg, egressIps: ['1.2.3.4'] }, edgeKey: 'k', modelKey: 'SERVER', allow: async () => allowed, owns: async (u, b) => u === 'a@x.com' && b === 'b1', touch: (b) => touched.push(b), fetchImpl, log: () => {} })
+  const s = modelServer({ cfg: { ...cfg, egressIps: ['1.2.3.4'] }, edgeKey: 'k', modelKey: 'SERVER', requests: { allow: async () => allowed, charge() {} }, owns: async (u, b) => u === 'a@x.com' && b === 'b1', touch: (b) => touched.push(b), fetchImpl, log: () => {} })
   const port = await listen(s)
   const tok = signBox('k', 'a@x.com', 'b1')
   const from = { 'x-forwarded-for': '1.2.3.4' }
@@ -200,14 +195,14 @@ test('model host swaps the box token for the server key, checks ownership, sourc
   s.close()
 })
 
-test('model host hooks: /github/ reaches the forwarder after the token check; halt answers 503 uncounted; token budget after the request count; bodies metered', async () => {
-  const forwarded = []; const counted = []; const metered = []
+test('model host hooks: /github/ reaches the forwarder after the token check; halt answers 503; a halted or refused call is not charged; bodies metered', async () => {
+  const forwarded = []; const charged = []; const metered = []
   const fetchImpl = async () => new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
   const s = modelServer({ cfg, edgeKey: 'k', modelKey: 'SERVER', owns: async () => true, touch: () => {}, fetchImpl, log: () => {},
-    allow: async (u) => { counted.push(`requests ${u}`); return true },
+    requests: { allow: async () => true, charge: (u) => charged.push(u) },
     github: async (req, res, claim) => { forwarded.push([req.url, claim.u]); res.writeHead(204).end() },
     halt: { isHalted: async (u) => u === 'halted@x.com' },
-    tokens: { allow: async (u) => { counted.push(`tokens ${u}`); return u !== 'spent@x.com' }, meter: (u, body, type) => { metered.push([u, type]); return body } } })
+    tokens: { allow: async (u) => u !== 'spent@x.com', meter: (u, body, type) => { metered.push([u, type]); return body } } })
   const port = await listen(s)
   const as = (u) => ({ 'x-api-key': signBox('k', u, 'b1') })
   const model = (u) => call(port, { method: 'POST', path: '/anthropic/v1/messages', headers: as(u), body: '{}' })
@@ -221,10 +216,31 @@ test('model host hooks: /github/ reaches the forwarder after the token check; ha
     const spent = await model('spent@x.com')
     assert.equal(spent.status, 429)
     assert.equal(JSON.parse(spent.body).error.message, 'Daily token budget reached for spent@x.com')
-    assert.deepEqual(counted, ['requests spent@x.com', 'tokens spent@x.com'], 'a halted call is not counted; requests are counted before tokens')
+    assert.deepEqual(charged, [], 'neither a halted call nor one refused for its token budget is charged')
     const ok = await model('a@x.com')
     assert.equal(ok.status, 200); assert.equal(ok.body, '{"ok":true}')
     assert.deepEqual(metered, [['a@x.com', 'application/json']])
+    assert.deepEqual(charged, ['a@x.com'])
+  } finally { s.close() }
+})
+
+test('model host: a refused or halted call is never charged to either budget; an admitted one is charged once', async () => {
+  const store = memoryStore(), day = '2026-11-09', now = () => Date.parse(`${day}T12:00:00Z`)
+  const requests = budget({ store, limit: 5, now }), tokens = tokenBudget({ store, limits: { user: 100, project: 100 }, now }), halt = haltService({ store })
+  const fetchImpl = async () => new Response('{"usage":{"input_tokens":3,"output_tokens":4}}', { status: 200, headers: { 'content-type': 'application/json' } })
+  const s = modelServer({ cfg, edgeKey: 'k', modelKey: 'SERVER', requests, tokens, halt, owns: async (u, b) => b === 'b1', touch: () => {}, fetchImpl, log: () => {} })
+  const port = await listen(s)
+  const model = async (u, box = 'b1') => (await call(port, { method: 'POST', path: '/anthropic/v1/messages', headers: { 'x-api-key': signBox('k', u, box) }, body: '{}' })).status
+  /** [requests, tokens] counted today for `u`. */
+  const counts = (u) => Promise.all([store.getCount(`budget:${day}:${u}`), store.getCount(`tokens:${day}:${u}`)])
+  try {
+    await halt.set('halted@x.com', true)
+    for (let i = 0; i < 5; i++) await store.increment(`budget:${day}:full@x.com`, 60)
+    await store.incrementBy(`tokens:${day}:spent@x.com`, 100, 60_000)
+    assert.deepEqual([await model('a@x.com', 'not-theirs'), await model('halted@x.com'), await model('full@x.com'), await model('spent@x.com')], [401, 503, 429, 429])
+    assert.deepEqual(await Promise.all(['a@x.com', 'halted@x.com', 'full@x.com', 'spent@x.com'].map(counts)), [[0, 0], [0, 0], [5, 0], [0, 100]])
+    assert.equal(await model('a@x.com'), 200)
+    assert.deepEqual(await counts('a@x.com'), [1, 7])
   } finally { s.close() }
 })
 
@@ -562,7 +578,7 @@ test('child sandboxes: owned per user, capped, template-limited, never tagged as
 test('MCP endpoint on the model host: box token required, tools act as the token\'s user', async () => {
   const e2b = fakeChildE2B(); const ops = children({ cells: oneCell(e2b, { maxUnits: 0 }), store: memoryStore(), cfg: childCfg, log: () => {} })
   const mcp = mcpServer({ ops, claimOf: (info) => verifyBox('k', String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
-  const server = modelServer({ cfg: { ...cfg, egressIps: [] }, edgeKey: 'k', modelKey: 'SERVER', allow: async () => true, owns: async (u, b) => u === 'a@x.com' && b === 'box1', touch: () => {}, mcp, log: () => {} })
+  const server = modelServer({ cfg: { ...cfg, egressIps: [] }, edgeKey: 'k', modelKey: 'SERVER', requests: OPEN, owns: async (u, b) => u === 'a@x.com' && b === 'box1', touch: () => {}, mcp, log: () => {} })
   await new Promise(r => server.listen(0, '127.0.0.1', r))
   const url = `http://127.0.0.1:${server.address().port}/mcp`
   const rpc = async (method, params, token = signBox('k', 'a@x.com', 'box1')) => {
@@ -793,7 +809,7 @@ test('model host: the edge does not filter Host, so llm.app.mumbo.si and llm.box
   assert.match(tf, /llm_hosts\s*=\s*\[local\.llm_host, "llm\.\$\{local\.old_host\}"\]/)
   assert.match(tf, /model = \[20, local\.llm_hosts, "model"\]/)
   const fetchImpl = async () => new Response('{"data":[]}', { status: 200, headers: { 'content-type': 'application/json' } })
-  const s = modelServer({ cfg, edgeKey: 'k', modelKey: 'SERVER', allow: async () => true, owns: async () => true, touch: () => {}, fetchImpl, log: () => {} })
+  const s = modelServer({ cfg, edgeKey: 'k', modelKey: 'SERVER', requests: OPEN, owns: async () => true, touch: () => {}, fetchImpl, log: () => {} })
   const port = await listen(s)
   try {
     for (const host of ['llm.app.mumbo.si', 'llm.boxes.mumbo.si']) assert.equal((await call(port, { path: '/models', headers: { host, 'x-api-key': signBox('k', 'a@x.com', 'b1') } })).status, 200, host)
@@ -1104,7 +1120,6 @@ test('the sign-in cookie never reaches a box, and boxes cannot set parent-domain
 })
 
 test('model host: a client that drops mid-stream cancels the upstream and the metered stream charges', async () => {
-  const { tokenBudget } = await import('./budget.mjs')
   const store = memoryStore()
   const tokens = tokenBudget({ store, limits: { user: 1e9, project: 1e9 }, now: () => Date.parse('2026-11-09T12:00:00Z') })
   const enc = new TextEncoder()
@@ -1114,7 +1129,7 @@ test('model host: a client that drops mid-stream cancels the upstream and the me
     start(c) { c.enqueue(ev({ type: 'message_start', message: { usage: { input_tokens: 100 } } })) },
     cancel() { cancelled = true },
   }), { status: 200, headers: { 'content-type': 'text/event-stream' } })
-  const s = modelServer({ cfg, edgeKey: 'k', modelKey: 'SERVER', owns: async () => true, touch: () => {}, fetchImpl, log: () => {}, allow: async () => true, tokens })
+  const s = modelServer({ cfg, edgeKey: 'k', modelKey: 'SERVER', owns: async () => true, touch: () => {}, fetchImpl, log: () => {}, requests: OPEN, tokens })
   const port = await listen(s)
   try {
     await new Promise((resolve, reject) => {
@@ -1702,7 +1717,7 @@ test('read cache: a halt set through one edge task stops the next model call on 
   const redis = fakeRedis(); const reads = []
   const a = await cachedTask(redis), b = await cachedTask(redis, (cmd, key, run) => { if (key.startsWith('doc:halt:')) reads.push(cmd); return Promise.resolve(run()) })
   const fetchImpl = async () => new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
-  const s = modelServer({ cfg, edgeKey: 'k', modelKey: 'SERVER', allow: async () => true, owns: async () => true, touch: () => {}, halt: haltService({ store: b }), fetchImpl, log: () => {} })
+  const s = modelServer({ cfg, edgeKey: 'k', modelKey: 'SERVER', requests: OPEN, owns: async () => true, touch: () => {}, halt: haltService({ store: b }), fetchImpl, log: () => {} })
   const port = await listen(s)
   const model = async () => (await call(port, { method: 'POST', path: '/anthropic/v1/messages', headers: { 'x-api-key': signBox('k', 'a@x.com', 'b1') }, body: '{}' })).status
   try {

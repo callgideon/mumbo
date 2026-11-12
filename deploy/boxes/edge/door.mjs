@@ -385,12 +385,13 @@ export const doorTools = ({ projects, mumbo, relay, halt, workerTokens, cfg }) =
 
 /**
  * The door's request handler for the model listener (modelServer sends it every request whose Host is the public host).
- * @param {{ keys: ReturnType<typeof import('./keys.mjs').doorKeys>, tools: object[], allow: (email: string) => Promise<boolean>,
+ * @param {{ keys: ReturnType<typeof import('./keys.mjs').doorKeys>, tools: object[],
+ *   requests: { allow(principal: string): Promise<boolean>, charge(principal: string): void },
  *   tokens?: { allow(principal: string): Promise<boolean> }, rate: { perMinute: number, burst: number }, now?: () => number,
  *   log?: (line: string) => void }} deps
- *   `allow` is the daily request budget (budget.mjs budget), charged once per call to a `turns` tool; `tokens` the daily
- *   token budget, which such a call must find open (the turns' own model calls are metered on the model host). `rate`:
- *   each key id has a bucket of `burst` calls, refilled at `perMinute`, in this process.
+ *   `requests` is the daily request budget (budget.mjs budget) and `tokens` the daily token budget: a call to a `turns`
+ *   tool must find both open, and is then charged one request (the turns' own model calls are metered on the model
+ *   host). `rate`: each key id has a bucket of `burst` calls, refilled at `perMinute`, in this process.
  * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => Promise<void>}
  *   Refusals answer a JSON-RPC error `{ code: -32001, message: '<code>: <text>', data: { code } }` with the HTTP status:
  *   401 invalid_api_key, key_revoked, key_expired (with `WWW-Authenticate: Bearer realm="mumbo"`); 403 origin_refused,
@@ -399,7 +400,7 @@ export const doorTools = ({ projects, mumbo, relay, halt, workerTokens, cfg }) =
  *   `Allow: POST`); 413 body_too_large; 404 not_found.
  *   A request the SDK refuses itself (such as 406 or 415) logs the outcome `http_<status>`.
  */
-export function door({ keys, tools, allow, tokens, rate, now = () => Date.now(), log = console.log }) {
+export function door({ keys, tools, requests, tokens, rate, now = () => Date.now(), log = console.log }) {
   const take = rateBuckets(rate, now)  // by key id
   /** Throws the refusal for a call of `tool` with `args` by `key`. */
   async function admit(key, tool, args) {
@@ -483,7 +484,11 @@ export function door({ keys, tools, allow, tokens, rate, now = () => Date.now(),
         if (!e.code) throw e
         return refuse(e.status, e.code, e.message, { id: msg.id ?? null })
       }
-      if (tool.turns && !((await allow(key.owner)) && (!tokens || await tokens.allow(key.owner)))) return refuse(429, 'budget_exhausted', `The daily model budget of ${key.owner} is spent.`, { id: msg.id ?? null })
+      if (tool.turns) {
+        const open = await Promise.all([requests.allow(key.owner), tokens?.allow(key.owner) ?? true])
+        if (open.includes(false)) return refuse(429, 'budget_exhausted', `The daily model budget of ${key.owner} is spent.`, { id: msg.id ?? null })
+        requests.charge(key.owner)
+      }
       Object.assign(call, { admitted: tool.name, project: args?.project })
     }
     // A tools/call that reaches the SDK but runs no tool (unknown name, invalid arguments) logs not_run.

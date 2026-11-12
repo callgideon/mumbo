@@ -21,11 +21,11 @@ const OPENROUTER_LIMIT = 20 * 1024 * 1024
 const sse = (...events) => new Response(events.map(e => `data: ${typeof e === 'string' ? e : JSON.stringify(e)}\n\n`).join(''), { status: 200, headers: { 'content-type': 'text/event-stream' } })
 
 /** A model server over a fake upstream; `respond(url, init)` answers each forwarded request. */
-async function host({ respond = () => Response.json({ choices: [], usage: { prompt_tokens: 1, completion_tokens: 1 } }), halted = false, allow = async () => true, limit = 1e9, config = cfg } = {}) {
+async function host({ respond = () => Response.json({ choices: [], usage: { prompt_tokens: 1, completion_tokens: 1 } }), halted = false, requests = { allow: async () => true, charge() {} }, limit = 1e9, config = cfg } = {}) {
   const seen = []; const logged = []; const store = memoryStore()
   const tokens = tokenBudget({ store, limits: { user: limit, project: limit }, now: () => Date.parse('2026-11-09T12:00:00Z') })
   const fetchImpl = async (url, init) => { seen.push({ url, init, body: init.body === undefined ? undefined : JSON.parse(init.body) }); return respond(url, init) }
-  const server = modelServer({ cfg: config, edgeKey: 'k', modelKey: 'DEEPSEEK-KEY', allow, owns: async (u, b) => u === 'a@x.com' && b === 'b1', touch: () => {}, fetchImpl, log: (l) => logged.push(JSON.parse(l)), tokens, halt: { isHalted: async () => halted } })
+  const server = modelServer({ cfg: config, edgeKey: 'k', modelKey: 'DEEPSEEK-KEY', requests, owns: async (u, b) => u === 'a@x.com' && b === 'b1', touch: () => {}, fetchImpl, log: (l) => logged.push(JSON.parse(l)), tokens, halt: { isHalted: async () => halted } })
   const port = await listen(server)
   return { port, seen, logged, store, close: () => server.close(), counted: () => store.getCount('tokens:2026-11-09:a@x.com') }
 }
@@ -201,7 +201,7 @@ test('a box that drops a stream before its usage chunk is charged ceil(bytes wit
 
 test('halt, the request budget and the token budget refuse before anything is forwarded', async () => {
   const halted = await host({ halted: true })
-  const requests = await host({ allow: async () => false })
+  const requests = await host({ requests: { allow: async () => false, charge() {} } })
   const spent = await host({ limit: 0 })
   try {
     assert.equal((await call(halted.port, { body: chat() })).status, 503)
@@ -270,7 +270,7 @@ test('/models lists only allowlisted models from the upstream list, fetched with
 })
 
 test('the model host refuses to start with OpenRouter models but no OpenRouter key', () => {
-  assert.throws(() => modelServer({ cfg: { ...cfg, openrouterKey: undefined }, edgeKey: 'k', modelKey: 'x', allow: async () => true, owns: async () => true, touch: () => {} }), /OPENROUTER_API_KEY/)
+  assert.throws(() => modelServer({ cfg: { ...cfg, openrouterKey: undefined }, edgeKey: 'k', modelKey: 'x', requests: { allow: async () => true, charge() {} }, owns: async () => true, touch: () => {} }), /OPENROUTER_API_KEY/)
 })
 
 test('box start script: an OpenRouter route on the model host for every allowlisted model, image input declared, context from the catalog; none when off', () => {

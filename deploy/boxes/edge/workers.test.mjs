@@ -81,8 +81,8 @@ async function setup() {
   }
   const forward = githubForwarder({ store, halt: { isHalted: async (u) => halted.has(u) }, app: { appId: '1', privateKey }, agentId: 1, fetchImpl, now, log })
   const tokens = workerTokens({ edgeKey: 'k', hours: 8, now })
-  const front = door({ keys, tools: [], allow: async () => true, rate: { perMinute: 60, burst: 100 }, now, log })
-  const server = modelServer({ cfg, edgeKey: 'k', modelKey: 'SERVER', allow: async () => true, owns: async () => true, touch: () => {}, door: front,
+  const front = door({ keys, tools: [], requests: { allow: async () => true, charge() {} }, rate: { perMinute: 60, burst: 100 }, now, log })
+  const server = modelServer({ cfg, edgeKey: 'k', modelKey: 'SERVER', requests: { allow: async () => true, charge() {} }, owns: async () => true, touch: () => {}, door: front,
     workerGit: workerGit({ cfg, tokens, keys, relay, github: forward, log }), log })
   await new Promise(r => server.listen(0, '127.0.0.1', r))
   const claims = { p: P, t: '2'.repeat(32), a: ASSIGNMENT, l: LEASE, repo: 'callgideon/mumbo', ref: REF, k: record.id, o: A }

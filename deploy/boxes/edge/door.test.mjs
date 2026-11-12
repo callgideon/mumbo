@@ -55,10 +55,10 @@ async function setup({ tools = [], rate = { perMinute: 60, burst: 100 }, budgetO
   const keys = doorKeys({ store, projects: proj, admitted: (e) => allowed.has(e), now: () => now, log: () => {} })
   const halt = haltService({ store }), minted = workerTokens({ edgeKey: 'k', hours: 8, now: () => now })
   const front = door({ keys, tools: [...doorTools({ projects: proj, mumbo, relay: relayOf(proj), halt, workerTokens: minted, cfg }), ...tools], rate, now: () => now, log: (l) => lines.push(l),
-    allow: async (u) => { charged.push(`requests ${u}`); return budgetOpen }, tokens: { allow: async (u) => { charged.push(`tokens ${u}`); return tokensOpen } } })
+    requests: { allow: async () => budgetOpen, charge: (u) => charged.push(`requests ${u}`) }, tokens: { allow: async () => tokensOpen } })
   const ops = children({ cells: new Map([['us-east-1', { region: 'us-east-1', Sandbox: { list: () => ({ hasNext: false }) }, maxUnits: 0 }]]), store: memoryStore(), cfg: { childTemplates: ['c'], maxChildren: 1 }, log: () => {} })
   const mcp = mcpServer({ ops, claimOf: (info) => verifyBox('k', String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, '')) })
-  const server = modelServer({ cfg, edgeKey: 'k', modelKey: 'SERVER', allow: async () => true, owns: async (u, b) => u === A && b === 'box1', touch: () => {}, mcp, door: front, log: () => {} })
+  const server = modelServer({ cfg, edgeKey: 'k', modelKey: 'SERVER', requests: { allow: async () => true, charge() {} }, owns: async (u, b) => u === A && b === 'box1', touch: () => {}, mcp, door: front, log: () => {} })
   await new Promise(r => server.listen(0, '127.0.0.1', r))
   const port = server.address().port
   const mint = async (spec = {}, owner = A) => (await keys.mint(owner, { name: 'laptop', scopes: ['read'], ...spec })).key
@@ -231,16 +231,17 @@ test('the dispatcher checks declaration, scope, project and budget before a tool
     refused(await t.tool(key, 'send', { project: t.P }), 403, 'insufficient_scope')
     assert.deepEqual(t.charged, [], 'a refused call is not charged; read tools are never charged')
     assert.equal(result(await t.tool(both, 'send', { project: t.P })), t.P)
-    assert.deepEqual(t.charged, [`requests ${A}`, `tokens ${A}`])
+    assert.deepEqual(t.charged, [`requests ${A}`])
     assert.deepEqual(ran, ['in_project', 'send'])
     assert.equal(result(await t.tool(both, 'whoami')).name, 'both')
-    assert.equal(t.charged.length, 2, 'whoami causes no model turns')
+    assert.equal(t.charged.length, 1, 'whoami causes no model turns')
   } finally { t.close() }
   for (const [budgetOpen, tokensOpen] of [[false, true], [true, false]]) {
     const s = await setup({ tools, budgetOpen, tokensOpen })
     try {
       const key = await s.mint({ scopes: ['prompt'], projects: [s.P] })
       refused(await s.tool(key, 'send', { project: s.P }), 429, 'budget_exhausted')
+      assert.deepEqual(s.charged, [], 'a call refused for either budget is not charged')
     } finally { s.close() }
   }
   assert.deepEqual(ran, ['in_project', 'send'], 'nothing ran on a spent budget')
@@ -362,7 +363,7 @@ test('Mumbo tools: read scope for needs_you, task_status and task_result, prompt
       refused(await t.tool(read ? prompter : reader, name, a), 403, 'insufficient_scope')
     }
     assert.deepEqual(forwarded, Object.keys(args))
-    assert.deepEqual(t.charged, [`requests ${A}`, `tokens ${A}`], 'agent_send alone causes model turns')
+    assert.deepEqual(t.charged, [`requests ${A}`], 'agent_send alone causes model turns')
     const listed = (await t.rpc(reader, 'tools/list')).json.result.tools.map(x => x.name)
     for (const name of ['runs_halt', 'runs_resume']) {
       assert.ok(!listed.includes(name), name)
@@ -460,7 +461,7 @@ test('project tools: read scope for project_status, prompt for project_message, 
       result(await t.tool(keys[scope], name, { project: t.P, ...args }))
       t.ensured.length = 0
     }
-    assert.deepEqual(t.charged, [`requests ${A}`, `tokens ${A}`, `requests ${A}`, `tokens ${A}`], 'project_message and task_start cause model turns')
+    assert.deepEqual(t.charged, [`requests ${A}`, `requests ${A}`], 'project_message and task_start cause model turns')
   } finally { t.close() }
 })
 
@@ -691,7 +692,7 @@ test('worker tools: the workspace scope and a listed project; task_claim and tas
     assert.deepEqual(t.proxy.seen.map(x => x.url), [`/orchestrator/api/workers/${ASSIGNMENT}/report`], 'a halted submit never reaches the box')
     await t.halt.set(A, false)
     for (const [name, a] of Object.entries(WORKER_ARGS)) result(await t.tool(t.key, name, { project: t.P, ...a }))
-    assert.deepEqual(t.charged, [`requests ${A}`, `tokens ${A}`, `requests ${A}`, `tokens ${A}`], 'task_submit alone causes model turns, charged before the halt check')
+    assert.deepEqual(t.charged, [`requests ${A}`, `requests ${A}`], 'task_submit alone causes model turns, charged before the halt check')
   } finally { t.close() }
   const s = await workerDoor({ budgetOpen: false })
   try {
@@ -860,7 +861,7 @@ async function reportSetup() {
   const ops = children({ cells: new Map([['us-east-1', { region: 'us-east-1', Sandbox: { list: () => ({ hasNext: false }) }, maxUnits: 0 }]]), store: memoryStore(), cfg: { childTemplates: ['c'], maxChildren: 1 }, log: () => {} })
   const claimOf = (info) => verifyBox('k', String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, ''))
   const mcp = mcpServer({ ops, projects: proj, relay: { message: async () => ({}) }, claimOf })
-  const server = modelServer({ cfg, edgeKey: 'k', modelKey: 'SERVER', allow: async () => true, owns: async () => true, touch: () => {}, mcp, reports: reportServer({ report, claimOf }), log: () => {} })
+  const server = modelServer({ cfg, edgeKey: 'k', modelKey: 'SERVER', requests: { allow: async () => true, charge() {} }, owns: async () => true, touch: () => {}, mcp, reports: reportServer({ report, claimOf }), log: () => {} })
   await new Promise(r => server.listen(0, '127.0.0.1', r))
   const rpc = (principal, method, params, path = '/mcp/report') => send(server.address().port, { host: LLM, path, headers: { authorization: `Bearer ${signBox('k', principal, 'pbox')}`, 'x-forwarded-for': '1.2.3.4' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) })

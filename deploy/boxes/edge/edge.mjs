@@ -2005,13 +2005,14 @@ export const readBody = (req, cap) => new Promise((resolve, reject) => {
 const MODEL_REQUEST_MS = 20 * 60_000
 
 // mcp (sandboxes.mjs mcpServer) serves /mcp and reports (sandboxes.mjs reportServer) /mcp/report to verified boxes.
+// `requests` (budget.mjs budget) is the daily request budget, charged once per admitted model call.
 // github (github.mjs), halt (halt.mjs) and tokens (budget.mjs tokenBudget) are optional like mcp: absent, /github/
 // answers 404, nothing is halted and tokens are not counted. main() passes all of them. `door` (door.mjs) gets every
 // request whose Host is the public host (the ALB rule R-door sends https://<public host>/mcp* here), before the source
 // and box token checks, and no such request reaches a box route; without `door` those requests are treated as any other.
 // `workerGit` (workers.mjs) gets, before the door, every request on the worker git route's host whose path starts with its
 // prefix (workers.mjs workerGitRoute).
-export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, mcp, reports, door, workerGit, github, halt, tokens, fetchImpl = fetch, log = console.log }) {
+export function modelServer({ cfg, edgeKey, modelKey, requests, owns, touch, mcp, reports, door, workerGit, github, halt, tokens, fetchImpl = fetch, log = console.log }) {
   if (cfg.openrouterModels?.length && !cfg.openrouterKey) throw new Error('edge: OPENROUTER_MODELS needs OPENROUTER_API_KEY')
   const gitRoute = workerGitRoute(cfg)
   return createServer({ requestTimeout: MODEL_REQUEST_MS }, (req, res) => route(req, res).catch((e) => {
@@ -2027,16 +2028,24 @@ export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, mcp, r
     if (cfg.egressIps.length > 0 && !cfg.egressIps.includes(source)) return json(res, 403, { error: 'box tokens work only from mumbo boxes' })
     const token = req.headers['x-api-key'] ?? String(req.headers.authorization ?? '').replace(/^Bearer /, '')
     const claim = verifyBox(edgeKey, token)
-    if (!claim || !(await owns(claim.u, claim.b))) return json(res, 401, { error: 'invalid box token' })
+    const invalid = () => json(res, 401, { error: 'invalid box token' })
+    if (!claim) return invalid()
     const path = new URL(req.url, 'http://x').pathname
     // Child sandboxes (sandboxes.mjs) for the same verified box; they count as activity but not against the model budget.
     // report_to_member (sandboxes.mjs reportServer) has its own path, which no box's mcp-sandboxes client connects to.
     const boxMcp = path === '/mcp' ? mcp : path === '/mcp/report' ? reports : undefined
-    if (boxMcp) { Promise.resolve(touch(claim.b)).catch(() => {}); return boxMcp(req, res) }
     // GitHub for project boxes; the forwarder applies its own rules and the stop switch.
-    if (path.startsWith('/github/') && github) return github(req, res, claim)
+    const toGithub = path.startsWith('/github/') && github
     const openrouter = cfg.openrouterModels?.length ? OPENROUTER_PATHS[`${req.method} ${path}`] : undefined
-    if (!openrouter && !MODEL_PATHS.some(p => p.test(path))) return json(res, 404, { error: 'not found' })
+    const modelCall = !boxMcp && !toGithub && (openrouter || MODEL_PATHS.some(p => p.test(path)))
+    // A model call's admission reads (the stop switch, both budgets) go out with the ownership read: one store round trip
+    // when the read cache misses, none when it holds them (spec R6b ruling 2).
+    const [mine, halted, requestsOpen, tokensOpen] = await Promise.all([owns(claim.u, claim.b),
+      ...(modelCall ? [halt?.isHalted(claim.u), requests.allow(claim.u), tokens?.allow(claim.u) ?? true] : [])])
+    if (!mine) return invalid()
+    if (boxMcp) { Promise.resolve(touch(claim.b)).catch(() => {}); return boxMcp(req, res) }
+    if (toGithub) return github(req, res, claim)
+    if (!modelCall) return json(res, 404, { error: 'not found' })
     const started = Date.now()
     const logCall = (status, model) => log(JSON.stringify({ edge: 'model', user: claim.u, box: claim.b, path, ...(model ? { model } : {}), status, ms: Date.now() - started }))
     const cap = openrouter ? OPENROUTER_MAX_BODY : Infinity
@@ -2047,9 +2056,11 @@ export function modelServer({ cfg, edgeKey, modelKey, allow, owns, touch, mcp, r
         .end(JSON.stringify({ error: { type: 'invalid_request_error', message: `Request bodies are limited to ${cap} bytes here.` } }), () => req.destroy())
     }
     if (Number(req.headers['content-length']) > cap) return tooLarge()
-    if (halt && await halt.isHalted(claim.u)) return json(res, 503, { type: 'error', error: { type: 'api_error', message: 'Stopped by the founder' } })
-    if (!(await allow(claim.u))) return json(res, 429, { type: 'error', error: { type: 'rate_limit_error', message: 'Daily model budget reached for this account.' } })
-    if (tokens && !(await tokens.allow(claim.u))) return json(res, 429, { type: 'error', error: { type: 'rate_limit_error', message: `Daily token budget reached for ${claim.u}` } })
+    if (halted) return json(res, 503, { type: 'error', error: { type: 'api_error', message: 'Stopped by the founder' } })
+    if (!requestsOpen) return json(res, 429, { type: 'error', error: { type: 'rate_limit_error', message: 'Daily model budget reached for this account.' } })
+    if (!tokensOpen) return json(res, 429, { type: 'error', error: { type: 'rate_limit_error', message: `Daily token budget reached for ${claim.u}` } })
+    // Admitted: only now is the call counted, without waiting for the store.
+    requests.charge(claim.u)
     Promise.resolve(touch(claim.b)).catch(() => {})
     const raw = await readBody(req, cap)
     if (raw === null) return tooLarge()
@@ -2228,13 +2239,13 @@ async function main() {
   const claimOf = (info) => verifyBox(edgeKey, String(info?.headers.get('authorization') ?? '').replace(/^Bearer /, ''))
   const mcp = mcpServer({ ops: children({ cells, store, cfg }), projects: proj, relay, projectDomain: cfg.projectDomain, claimOf })
   const reports = reportServer({ report, claimOf })
-  const allow = budget(store, cfg.dailyRequests)
+  const requests = budget({ store, limit: cfg.dailyRequests, now })
   // Outside workers' git (workers.mjs): tokens the door's task_claim mints, fenced on the project box for every request.
   const { workerTokens, workerGit } = await import('./workers.mjs')
   const minted = workerTokens({ edgeKey, hours: cfg.workerTokenHours })
-  const doorHandler = door({ keys: doorKeyService, tools: doorTools({ projects: proj, mumbo, relay, halt, workerTokens: minted, cfg }), allow, tokens, rate: { perMinute: cfg.doorRatePerMinute, burst: cfg.doorBurst } })
+  const doorHandler = door({ keys: doorKeyService, tools: doorTools({ projects: proj, mumbo, relay, halt, workerTokens: minted, cfg }), requests, tokens, rate: { perMinute: cfg.doorRatePerMinute, burst: cfg.doorBurst } })
   const git = workerGit({ cfg, tokens: minted, keys: doorKeyService, relay, github })
-  modelServer({ cfg, edgeKey, modelKey, allow, owns: box.owns, touch: box.touch, mcp, reports, door: doorHandler, workerGit: git, github, halt, tokens })
+  modelServer({ cfg, edgeKey, modelKey, requests, owns: box.owns, touch: box.touch, mcp, reports, door: doorHandler, workerGit: git, github, halt, tokens })
     .listen(8081, modelHost, () => console.log(`edge: model host on ${modelHost}:8081`))
 }
 

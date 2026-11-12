@@ -107,7 +107,8 @@ test('store round trips per request path, cold and warm, at the Mumbai edge\'s s
   const cells = new Map(['us-east-1', 'ap-south-1'].map(region => [region, { region, Sandbox, proxy: proxyUrl, bucket: `b-${region}`, maxUnits: 0, presignGet: async () => undefined, presignPut: async () => 'P' }]))
 
   /** A new edge process over the shared data, wired as main() wires it: its own store with the read cache on at
-   *  PLACEMENT_CACHE_MS and subscribed; the unawaited box touches are flagged off the path. */
+   *  PLACEMENT_CACHE_MS and subscribed. The box touches and the budgets' additions (a call's charge, the meter's token
+   *  counts), which the code fires and forgets (budget.test.mjs shows they hold nothing up), are flagged off the path. */
   async function edge() {
     const store = await t.connect({ cacheMs: cfg.placementCacheMs })
     const proj = projects({ store, admitted: () => true, log: silent })
@@ -115,10 +116,11 @@ test('store round trips per request path, cold and warm, at the Mumbai edge\'s s
     const traced = { ...box, touch: (id) => t.offPath(() => box.touch(id)) }
     const keys = doorKeys({ store, projects: proj, admitted: (e) => admitted(cfg.allowed, e), log: silent })
     const mumbo = mumboForwarder({ box: traced, boxFetch: boxFetcher(cfg), edgeKey: EDGE_KEY, siteHostOf: (p) => boxSite(cfg, p).host, log: silent })
-    const allow = budget(store, 1e6)
-    const tokens = tokenBudget({ store, limits: { user: 1e9, project: 1e9 }, now: Date.now })
-    const front = door({ keys, tools: doorTools({ projects: proj, mumbo }), allow, tokens, rate: { perMinute: 60, burst: 100 }, log: silent })
-    const model = modelServer({ cfg, edgeKey: EDGE_KEY, modelKey: 'SERVER', allow, owns: box.owns, touch: traced.touch, door: front, halt: haltService({ store }), tokens,
+    const counters = { ...store, increment: (...a) => t.offPath(() => store.increment(...a)), incrementBy: (...a) => t.offPath(() => store.incrementBy(...a)) }
+    const requests = budget({ store: counters, limit: 1e6 })
+    const tokens = tokenBudget({ store: counters, limits: { user: 1e9, project: 1e9 }, now: Date.now })
+    const front = door({ keys, tools: doorTools({ projects: proj, mumbo }), requests, tokens, rate: { perMinute: 60, burst: 100 }, log: silent })
+    const model = modelServer({ cfg, edgeKey: EDGE_KEY, modelKey: 'SERVER', requests, owns: box.owns, touch: traced.touch, door: front, halt: haltService({ store }), tokens,
       fetchImpl: async () => anthropicStream(), log: silent })
     const users = userServer({ cfg, box: traced, projects: proj, log: silent })
     const ports = { model: await listen(model), users: await listen(users) }
@@ -134,6 +136,7 @@ test('store round trips per request path, cold and warm, at the Mumbai edge\'s s
     '(b) app request: the person\'s box': ['users', { headers: { host: PUBLIC, ...browser } }],
     '(b) app request: a project\'s box': ['users', { headers: { host: `p-${P}.${PUBLIC}`, ...browser } }],
     '(c) model host call (streamed)': ['model', { method: 'POST', path: '/anthropic/v1/messages', body: '{}', headers: { host: LLM, 'x-api-key': signBox(EDGE_KEY, EMAIL, BOX), 'content-type': 'application/json' } }],
+    '(c) model host call, project box (streamed)': ['model', { method: 'POST', path: '/anthropic/v1/messages', body: '{}', headers: { host: LLM, 'x-api-key': signBox(EDGE_KEY, `project:${P}`, PBOX), 'content-type': 'application/json' } }],
     '(d) live view connect': ['users', { path: '/desktop/websockify', headers: { host: PUBLIC, origin: `https://${PUBLIC}`, 'x-forwarded-email': EMAIL, connection: 'Upgrade', upgrade: 'websocket' } }],
   }
   const counts = {}, out = []
@@ -152,10 +155,11 @@ test('store round trips per request path, cold and warm, at the Mumbai edge\'s s
   // [depth, total] per run; for the stream, the depth at its first byte, cold and warm.
   assert.deepEqual(counts, {
     '(a) door: agent_read': { cold: [6, 9], warm: [0, 3] },
-    '(a) door: agent_send (charged to the budgets)': { cold: [8, 11], warm: [2, 5] },
+    '(a) door: agent_send (charged to the budgets)': { cold: [7, 12], warm: [0, 4] },
     '(b) app request: the person\'s box': { cold: [4, 7], warm: [0, 3] },
     '(b) app request: a project\'s box': { cold: [4, 7], warm: [0, 3] },
-    '(c) model host call (streamed)': { cold: [6, 9], warm: [4, 7], firstByte: [5, 3] },
+    '(c) model host call (streamed)': { cold: [1, 10], warm: [0, 6], firstByte: [1, 0] },
+    '(c) model host call, project box (streamed)': { cold: [2, 11], warm: [0, 6], firstByte: [2, 0] },
     '(d) live view connect': { cold: [4, 7], warm: [0, 3] },
   })
 })
