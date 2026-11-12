@@ -1,0 +1,5 @@
+# Loader overlay (`dsh --patch`) for a person's box, after deploy/mumbo.overlay.yml: the state block, plan_read, and the
+# resume notice. Project boxes insert the same row from deploy/mumbo-project.overlay.yml.
+- insert:
+    - id: mumbo-state
+      name: '@mumbo/state'

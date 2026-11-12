@@ -24,6 +24,11 @@
       name: '@mumbo/edge-member'
       config:
         key: !!js process.env.MUMBO_MEMBER_KEY
+# The state block, plan_read, and the resume notice, for the coordinator's main Session, its workers and their subagents
+# (@mumbo/state).
+- insert:
+    - id: mumbo-state
+      name: '@mumbo/state'
 
 # dsh-superagent bundle layer: inserts the plugins without configuration, and the agent presets its Sessions run under. The
 # profile supplies the `dsh-superagent` entry's stateDir (see docs/006-deployment.md and examples/profile.cordis.patch.yml); the plugin

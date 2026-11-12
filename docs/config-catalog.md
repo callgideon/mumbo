@@ -5216,6 +5216,23 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@mumbo/mcp -->
 
+<!-- BEGIN GENERATED config-catalog:@mumbo/state -->
+<a id="mumbostate"></a>
+
+## `@mumbo/state`
+
+- `inject`: `systemPrompt` · `sessionProjections` · `tools` · `agents`
+- `source`: [`packages/mumbo/state/src/index.ts:35`](../packages/mumbo/state/src/index.ts)
+
+```ts config-catalog
+/** Mumbo state configuration. */
+export interface Config {
+  /** Cap on the block's characters, at least 400 (default 1600); what does not fit is named with the tool that reads it. */
+  readonly maxChars: number
+}
+```
+<!-- END GENERATED config-catalog:@mumbo/state -->
+
 <!-- BEGIN GENERATED config-catalog:@mumbo/superagent -->
 <a id="mumbosuperagent"></a>
 

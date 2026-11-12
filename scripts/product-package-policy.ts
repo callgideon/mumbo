@@ -41,6 +41,7 @@ export const PRODUCT_PACKAGE_POLICY: Readonly<Record<string, ProductPackagePolic
   'packages/mumbo/edge-member': { category: 'optional', reason: 'Project-member admission mounted only in mumbo project boxes, with the edge-derived member key.' },
   'packages/mumbo/mcp': { category: 'optional', reason: 'Loopback MCP server mounted only with an explicit key file, allowlist, and listener.' },
   'packages/mumbo/run-wild': { category: 'optional', reason: 'Run Wild answerer that a per-user box overlay mounts beside the Run Wild permission preset.' },
+  'packages/mumbo/state': { category: 'optional', reason: 'State block, plan_read and resume notice that only the mumbo project overlay and a person-box overlay mount.' },
   // pinned upstream copy; see packages/mumbo/superagent/UPSTREAM.md
   'packages/mumbo/superagent': { category: 'optional', reason: 'Profile layer added only by an explicit profile patch or overlay, which supplies its state directory.' },
   'packages/sdk/client': { category: 'sdk', reason: 'Published TypeScript embedding client runs in the consumer process.' },

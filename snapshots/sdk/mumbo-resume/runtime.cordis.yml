@@ -1,0 +1,4 @@
+# @mumbo/state as the project overlay mounts it.
+- insert:
+    - id: mumbo-state
+      name: '@mumbo/state'

@@ -1,9 +1,13 @@
-/** `needs_you` and `task_reply`: tool approvals, plan reviews and questions, answered here or in the browser, whichever is first. */
+/**
+ * `needs_you` and `task_reply`: tool approvals, plan reviews and questions, answered here or in the browser, whichever is
+ * first, and the goals that wait for a person to resume them.
+ */
 
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-api-session-controller'
+import type {} from '@deepseek-ai/dsh-goal'
 import { type Branded, brandString } from '@deepseek-ai/dsh-brand'
 import type { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -180,17 +184,46 @@ async function callArguments(deps: ToolDeps, ask: PendingAsk, signal: AbortSigna
   return {}
 }
 
+/** One loaded Session whose goal is active but whose rounds stopped, as `needs_you` lists it. */
+export interface StoppedGoal {
+  readonly session_id: SessionId
+  /** The goal's objective, fenced: a person or a model wrote it. */
+  readonly objective: string
+  readonly rounds_started: number
+  readonly max_rounds: number
+}
+
+/**
+ * The loaded Sessions whose goal is active but disarmed, such as after a host restart: its rounds continue only once a
+ * person resumes it in that Session.
+ * @param ctx - context carrying `agents`; without a `goals` service there are none.
+ * @returns one entry per such Session, in the Agent registry's order.
+ */
+function stoppedGoals(ctx: Context): StoppedGoal[] {
+  const goals = ctx.get('goals')
+  if (goals === undefined) return []
+  return ctx.agents.list().flatMap((agent) => {
+    const goal = goals.get(agent)
+    if (goal?.phase !== 'active' || goal.activation !== 'disarmed') return []
+    return [{ session_id: agent.id, objective: fence(goal.objective), rounds_started: goal.roundsStarted, max_rounds: goal.maxGoalRounds }]
+  })
+}
+
+/** What `needs_you` says of stopped goals, in both profiles. */
+const STOPPED_GOALS = ' stopped_goals lists Sessions whose goal is active but stopped, such as by a restart; a person resumes one with /goal resume in that Session.'
+
 /** Tool descriptions by whether `task_reply` answers questions only. */
 const DESCRIPTIONS = {
   all: {
     needsYou: 'List what waits for a person: tool approvals with the call\'s arguments, plan reviews and questions from any Session. '
-      + 'Answer one whose answerable is true with task_reply; the others can only be answered in the browser.',
+      + 'Answer one whose answerable is true with task_reply; the others can only be answered in the browser.' + STOPPED_GOALS,
     reply: 'Answer one ask from needs_you. A tool or plan ask takes decision approve or reject; a rejected plan may carry feedback. '
       + 'A question ask takes answers. An ask answered in the browser first gives not_found.',
   },
   questionsOnly: {
     needsYou: 'List what waits for a person: questions from any Session, and tool approvals with the call\'s arguments and plan reviews '
-      + 'for information. Answer a question with task_reply; approvals and plan reviews (answerable false) can only be answered in the browser.',
+      + 'for information. Answer a question with task_reply; approvals and plan reviews (answerable false) can only be answered in the browser.'
+      + STOPPED_GOALS,
     reply: 'Answer one question from needs_you with answers. Tool approvals and plan reviews cannot be answered here. '
       + 'A question answered in the browser first gives not_found.',
   },
@@ -215,6 +248,7 @@ export function register(server: McpServer, deps: ToolDeps): void {
         answerable: !ask.view.irreversible && (!deps.questionsOnly || ask.view.kind === 'question'),
         ...await callArguments(deps, ask, signal),
       }))),
+      stopped_goals: stoppedGoals(deps.ctx),
     }),
   )
   defineTool(

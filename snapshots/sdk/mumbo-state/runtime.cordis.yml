@@ -1,0 +1,8 @@
+# @mumbo/state as the project overlay mounts it, plus the model-request capture.
+- insert:
+    - id: mumbo-state
+      name: '@mumbo/state'
+    - id: state-request-capture
+      name: '../manual-compact/capture-requests.mjs'
+      config:
+        path: !!js dshHomePath('state-requests.jsonl')

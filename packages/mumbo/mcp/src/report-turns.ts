@@ -43,9 +43,10 @@ export interface ReportTurns {
 
 /**
  * Tools that run unasked in a report-started turn: the file tools' reads and searches, which `fs-local` confines to
- * the model roots where a box configures them; the status reads of goals and jobs; and the todo list.
+ * the model roots where a box configures them; the status reads of goals and jobs; `@mumbo/state`'s read of the
+ * approved plan; and the todo list.
  */
-const UNASKED: ReadonlySet<string> = new Set(['read', 'read_image', 'glob', 'grep', 'get_goal', 'job_list', 'todo_write'])
+const UNASKED: ReadonlySet<string> = new Set(['read', 'read_image', 'glob', 'grep', 'get_goal', 'job_list', 'plan_read', 'todo_write'])
 
 /** Public tool-name prefix of the Playwright MCP browser tools that `@mumbo/browser-consent` mounts. */
 const BROWSER = 'mcp__playwright-mcp__'

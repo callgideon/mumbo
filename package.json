@@ -239,6 +239,7 @@
     "@mumbo/edge-member": "workspace:*",
     "@mumbo/mcp": "workspace:*",
     "@mumbo/run-wild": "workspace:*",
+    "@mumbo/state": "workspace:*",
     "@mumbo/superagent": "workspace:*",
     "@deepseek-ai/dsh-computer-use": "workspace:*",
     "@deepseek-ai/dsh-experimental-computer-use-cua-driver-mcp": "workspace:*",
