@@ -5162,14 +5162,19 @@ export interface Config {
 
 ## `@mumbo/edge-member`
 
-- `inject`: `connection` · `remoteAccess` · `workspaceRegistry` · `sessions`
-- `source`: [`packages/mumbo/edge-member/src/index.ts:50`](../packages/mumbo/edge-member/src/index.ts)
+- `inject`: `connection` · `remoteAccess` · `workspaceRegistry` · `sessions` · `sessionPersistence`
+- `source`: [`packages/mumbo/edge-member/src/index.ts:52`](../packages/mumbo/edge-member/src/index.ts)
 
 ```ts config-catalog
 /** Edge member configuration. */
 export interface Config {
   /** This box's member key in unpadded base64url, at least 32 bytes; the edge derives it from the box id. */
   readonly key: string
+  /**
+   * Canonical path of the project Workspace, the only Workspace members follow and start Sessions in; the same value
+   * as `@mumbo/edge-member/project-workspace`'s `workspace`.
+   */
+  readonly workspace: string
 }
 ```
 <!-- END GENERATED config-catalog:@mumbo/edge-member -->

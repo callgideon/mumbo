@@ -18,12 +18,20 @@
       danger-full-access:
         sandbox: danger-full-access
         approval: never
-# Project members reach this box through the mumbo edge, which signs each request with a key derived for this box.
+# Project members reach this box through the mumbo edge, which signs each request with a key derived for this box. They
+# follow and start Sessions only in the project Workspace, /root/projects (the edge makes it on every box and backs it
+# up), which the next row registers at every start and again after a deletion; remove that row to retire it. Both rows
+# name the directory with one expression.
 - insert:
     - id: mumbo-edge-member
       name: '@mumbo/edge-member'
       config:
         key: !!js process.env.MUMBO_MEMBER_KEY
+        workspace: !!js process.env.HOME + '/projects'
+    - id: mumbo-project-workspace
+      name: '@mumbo/edge-member/project-workspace'
+      config:
+        workspace: !!js process.env.HOME + '/projects'
 # The state block, plan_read, and the resume notice, for the coordinator's main Session, its workers and their subagents
 # (@mumbo/state).
 - insert:

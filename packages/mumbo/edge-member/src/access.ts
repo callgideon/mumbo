@@ -80,7 +80,7 @@ export const MEMBER_SESSION_ROLE: RemoteAccessRole<'session'> = {
   ],
 }
 
-/** Following one Workspace and starting a Session in it. */
+/** Following the project Workspace and starting a Session in it. */
 export const MEMBER_WORKSPACE_ROLE: RemoteAccessRole<'workspace'> = {
   name: 'mumbo:member-workspace',
   resource: 'workspace',
@@ -90,14 +90,33 @@ export const MEMBER_WORKSPACE_ROLE: RemoteAccessRole<'workspace'> = {
 /**
  * The bindings every member holds, rebuilt only after the Sessions or Workspaces change.
  *
- * Every member holds the global role, the Workspace role on every Workspace, and the Session role on every
- * Session a Workspace lists and every live Session, which includes subagent children while they run.
+ * Every member holds the global role, the Workspace role on the project Workspace only, and the Session role on
+ * every Session a Workspace lists, every Session stored when the plugin loaded or created since, and every live
+ * Session, which includes subagent children while they run. A Session with no Workspace, such as one started under
+ * Ungrouped, stays reachable after it stops.
  */
 export class MemberBindings {
   private cached: readonly RemoteAccessBinding[] | undefined
+  private readonly stored = new Set<SessionId>()
 
-  /** @param ctx - context carrying the Workspace registry and the live Session registry. */
-  constructor(private readonly ctx: Context) {}
+  /**
+   * @param ctx - context carrying the Workspace registry, the live Session registry, and Session persistence.
+   * @param workspace - canonical path of the project Workspace.
+   */
+  constructor(private readonly ctx: Context, private readonly workspace: string) {}
+
+  /** Read every stored Session id once; Sessions created later arrive through {@link MemberBindings.add}. */
+  async load(): Promise<void> {
+    for (const { header } of await this.ctx.sessionPersistence.list()) this.stored.add(header.id)
+  }
+
+  /**
+   * Keep a created Session bound after it stops being live.
+   * @param id - the created Session.
+   */
+  add(id: SessionId): void {
+    this.stored.add(id)
+  }
 
   /** @returns the current bindings of any `edge-member` principal. */
   current(): readonly RemoteAccessBinding[] {
@@ -112,9 +131,11 @@ export class MemberBindings {
 
   private build(): RemoteAccessBinding[] {
     const bindings: RemoteAccessBinding[] = [{ role: MEMBER_GLOBAL_ROLE, resource: { kind: 'global' } }]
-    const sessions = new Set<SessionId>()
+    const sessions = new Set<SessionId>(this.stored)
     for (const workspace of this.ctx.workspaceRegistry.list()) {
-      bindings.push({ role: MEMBER_WORKSPACE_ROLE, resource: { kind: 'workspace', id: workspace.id } })
+      if (workspace.path === this.workspace) {
+        bindings.push({ role: MEMBER_WORKSPACE_ROLE, resource: { kind: 'workspace', id: workspace.id } })
+      }
       for (const id of workspace.sessionIds) sessions.add(id)
     }
     for (const session of this.ctx.sessions.list()) sessions.add(session.id)

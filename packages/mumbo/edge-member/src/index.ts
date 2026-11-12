@@ -11,6 +11,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { ConnectionTrustRequest } from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-api-remote-access'
 import type {} from '@deepseek-ai/dsh-session'
+// Type-only: the Session persistence service merge (ctx.sessionPersistence).
+import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-storage-domain'
 // Type-only: the Workspace registry service merge (ctx.workspaceRegistry).
 import type {} from '@deepseek-ai/dsh-workspace'
@@ -43,28 +45,38 @@ const WORKSPACE_DOMAIN = 'workspace'
 
 /** Cordis function-plugin name. */
 export const name = 'mumbo-edge-member'
-/** Admission, the access policy, and the Workspace and live Session lists the policy grants over. */
-export const inject = ['connection', 'remoteAccess', 'workspaceRegistry', 'sessions']
+/** Admission, the access policy, and the Workspace, live Session, and stored Session lists the policy grants over. */
+export const inject = ['connection', 'remoteAccess', 'workspaceRegistry', 'sessions', 'sessionPersistence']
 
 /** Edge member configuration. */
 export interface Config {
   /** This box's member key in unpadded base64url, at least 32 bytes; the edge derives it from the box id. */
   readonly key: string
+  /**
+   * Canonical path of the project Workspace, the only Workspace members follow and start Sessions in; the same value
+   * as `@mumbo/edge-member/project-workspace`'s `workspace`.
+   */
+  readonly workspace: string
 }
 
 export const Config: z<Config> = z.object({
   key: z.string().required(),
+  workspace: z.string().required(),
 })
 
 /**
  * Register the `edge-member` access policy, the member authenticator, and member attribution.
- * @param ctx - plugin context carrying Connection, remote access, and the Workspace and Session registries.
+ * @param ctx - plugin context carrying Connection, remote access, the Workspace and Session registries, and Session
+ *   persistence.
  * @param config - validated configuration.
- * @throws when the key is not unpadded base64url of at least 32 bytes.
+ * @throws when the key is not unpadded base64url of at least 32 bytes, or listing the stored Sessions fails.
  */
-export function apply(ctx: Context, config: Config): void {
+export async function apply(ctx: Context, config: Config): Promise<void> {
   const key = decodeMemberKey(config.key)
-  const bindings = new MemberBindings(ctx)
+  const bindings = new MemberBindings(ctx, config.workspace)
+  // Before the listing, so a Session created while it runs stays bound.
+  ctx.on('session/created', (session) => { bindings.add(session.id) })
+  await bindings.load()
   // The policy exists before any member can be admitted, and outlives the authenticator on unload.
   ctx.effect(() => ctx.remoteAccess.registerPolicy('edge-member', {
     bindings: () => bindings.current(),

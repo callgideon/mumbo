@@ -14,6 +14,7 @@ kind: "package-reference"
 - [Configuration](#configuration)
 - [Member header](#member-header)
 - [Member access](#member-access)
+- [Project Workspace](#project-workspace)
 - [Member attribution](#member-attribution)
 - [Composition](#composition)
 - [Model Experience](#model-experience)
@@ -28,8 +29,9 @@ kind: "package-reference"
 | Field | Default | Meaning |
 |---|---|---|
 | `key` | required | This box's member key in unpadded base64url, at least 32 bytes. |
+| `workspace` | required | Canonical path of the project Workspace, the only Workspace members follow and start Sessions in. |
 
-A key that is not unpadded base64url or decodes to fewer than 32 bytes fails plugin load, and no authenticator registers. The plugin requires the `connection`, `remoteAccess`, `workspaceRegistry`, and `sessions` services. The generated [configuration catalog](../../../docs/config-catalog.md#mumboedge-member) is the exhaustive source for accepted fields.
+A key that is not unpadded base64url or decodes to fewer than 32 bytes fails plugin load, and no authenticator registers; so does a failure to list the stored Sessions. The plugin requires the `connection`, `remoteAccess`, `workspaceRegistry`, `sessions`, and `sessionPersistence` services. `workspace` is compared with each Workspace's stored path exactly, so it must be the realpath of the directory, as the [project Workspace](#project-workspace) row's `workspace` is. The generated [configuration catalog](../../../docs/config-catalog.md#mumboedge-member) is the exhaustive source for accepted fields.
 
 <a id="member-header"></a>
 ## Member header
@@ -54,10 +56,25 @@ Every member holds the same grants, exported as `MEMBER_GLOBAL_ROLE`, `MEMBER_WO
 | Resource | Actions |
 |---|---|
 | `global` | `session/create`, `session/list`, `session/search`, `session/control`, `session/modelCatalog`, `session/canOpenWorkspacePath`, `agentPresets/list`, `llm/listProviders`, `llm/listConfigurableProviders`, `web/listProviders`, `commands/list`, `workspace/follow` |
-| Each Workspace | `workspace/follow`, `session/create` |
-| Each Session a Workspace lists, and each live Session | Page, follow, projections, state, events, attachments, jobs (`job/list`), workspace files (`workspaceFiles/list`, `workspaceFiles/changes`), `fileUploads/upload`, `fileUploads/uploadBinary`, `sessionLog/export`, `sessionLog/markdown`, `session/prompt`, `session/cancel`, `session/create` for reusing a blank Session, `userQuestions/answer`, `userQuestions/attachWait`, skills, goals, tool results, and the forwarded `api-session/*` notifications |
+| The project Workspace | `workspace/follow`, `session/create` |
+| Each stored Session, each Session a Workspace lists, and each live Session | Page, follow, projections, state, events, attachments, jobs (`job/list`), workspace files (`workspaceFiles/list`, `workspaceFiles/changes`), `fileUploads/upload`, `fileUploads/uploadBinary`, `sessionLog/export`, `sessionLog/markdown`, `session/prompt`, `session/cancel`, `session/create` for reusing a blank Session, `userQuestions/answer`, `userQuestions/attachWait`, skills, goals, tool results, and the forwarded `api-session/*` notifications |
 
-Live Sessions include subagent children while they run. Remote access refuses every other action, including settings, credentials, plugins, fork, rename, model selection (which also saves the owner's default model), queue edits, and Workspace administration; a queue edit keeps the edited message's source, so it would record one person's text as another's. Of the exact Fetch routes outside the Gateway, members reach three, each on the Session its `sessionId` query names: the browser's binary upload `/api/session/uploadFileBinary` through `fileUploads/uploadBinary`, and the Session log download `/api/session.export` and Markdown copy `/api/session.markdown` through `sessionLog/export` and `sessionLog/markdown`. Every other exact route, including file media references `/api/file`, change summaries, and opening files on the box, dedicated RPC channels, and other routes outside the Gateway answer 403, except a route that admits Peers itself through `connection.admit` and checks their principal: `@mumbo/superagent` serves its management API `/orchestrator/api/`, settings and prompt saves included, to the members its `panelAdmins` configuration lists, and its relay route `/orchestrator/relay`, which turns a member's posted message into a Superagent Trigger from that member, to every member. The plugin rebuilds the bindings and calls `remoteAccess.invalidate()` when a Session is created or disposed, and after a Workspace-domain change has committed, so a member's access snapshot follows both lists; the registry emits the change before its entity holds the new list, so that rebuild runs once the emitting write has settled.
+Stored Sessions are those Session persistence lists when the plugin loads and every Session created after it, so a Session with no Workspace, such as one started under Ungrouped, and a finished subagent child stay reachable after they stop. Members see other Workspaces only through the Sessions they list, which appear under Ungrouped, and cannot start a Session in them. Remote access refuses every other action, including settings, credentials, plugins, fork, rename, model selection (which also saves the owner's default model), queue edits, and Workspace administration; a queue edit keeps the edited message's source, so it would record one person's text as another's. Of the exact Fetch routes outside the Gateway, members reach three, each on the Session its `sessionId` query names: the browser's binary upload `/api/session/uploadFileBinary` through `fileUploads/uploadBinary`, and the Session log download `/api/session.export` and Markdown copy `/api/session.markdown` through `sessionLog/export` and `sessionLog/markdown`. Every other exact route, including file media references `/api/file`, change summaries, and opening files on the box, dedicated RPC channels, and other routes outside the Gateway answer 403, except a route that admits Peers itself through `connection.admit` and checks their principal: `@mumbo/superagent` serves its management API `/orchestrator/api/`, settings and prompt saves included, to the members its `panelAdmins` configuration lists, and its relay route `/orchestrator/relay`, which turns a member's posted message into a Superagent Trigger from that member, to every member. The plugin rebuilds the bindings and calls `remoteAccess.invalidate()` when a Session is created or disposed, and after a Workspace-domain change has committed, so a member's access snapshot follows both lists; the registry emits the change before its entity holds the new list, so that rebuild runs once the emitting write has settled.
+
+<a id="project-workspace"></a>
+## Project Workspace
+
+The `@mumbo/edge-member/project-workspace` sub-export is a separate function plugin, `mumbo-project-workspace`, that registers its `workspace` directory as a Workspace while the Host starts, so a member's first page opens a blank Session there instead of asking for a default Workspace that members may not create.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `workspace` | required | Existing directory registered as the project Workspace, in a canonical absolute spelling; the same value as the member plugin's `workspace`. |
+
+- **At start.** Its load awaits `workspaceRegistry.create(workspace)`, which matches the canonical path, so a box that already has the Workspace gets no write and keeps its id and title, and a store marked `initialized` with no Workspace gets one. The Loader settles, and the Web carrier prints its URL line, only after the create, so no page is served before the Workspace exists.
+- **After a deletion.** When a Workspace record is deleted, the plugin calls `create` again; the registry queues it behind the deletion, and a present Workspace returns with no write. A failure is logged at error. Remove the row to retire the Workspace.
+- **Failure.** A relative, missing, or non-directory path fails this entry at load; the member plugin and every other entry keep running, and members are still admitted.
+
+The create runs in-process as the Host; no member role grants `workspace/create`, `workspace/initializeDefault`, or `workspace/delete`.
 
 <a id="member-attribution"></a>
 ## Member attribution
@@ -69,7 +86,7 @@ The package's browser half shows the member's address above each user message a 
 <a id="composition"></a>
 ## Composition
 
-A project box loads [`deploy/mumbo-project.overlay.yml`](../../../deploy/mumbo-project.overlay.yml), which inserts the plugin with `key: !!js process.env.MUMBO_MEMBER_KEY` and sets the approval policy to `never`, so a member's turn never waits for an owner approval. The root manifest lists this private package as a development dependency, so a Host started from the repository resolves it by name from a `--patch` overlay; the published `@deepseek-ai/dsh` package does not depend on it.
+A project box loads [`deploy/mumbo-project.overlay.yml`](../../../deploy/mumbo-project.overlay.yml), which inserts the plugin with `key: !!js process.env.MUMBO_MEMBER_KEY`, then the project Workspace row; both rows set `workspace: !!js process.env.HOME + '/projects'`, the directory the edge creates and backs up on every box. The overlay sets the approval policy to `never`, so a member's turn never waits for an owner approval. The root manifest lists this private package as a development dependency, so a Host started from the repository resolves it by name from a `--patch` overlay; the published `@deepseek-ai/dsh` package does not depend on it.
 
 <a id="model-experience"></a>
 ## Model Experience
@@ -100,7 +117,8 @@ Append-only. The notice enters with the message it precedes, after the Session's
 
 - **Members direct code that runs with the box's power** — a member's prompt runs the coordinator's tools; under Full access with approval `never`, those tools can read the member key and the owner's cookie signing record inside the box. The access policy keeps members off settings, credentials, and plugin calls and attributes their messages, but it does not contain a member who directs the agent to escalate. Treat members as trusted collaborators until the box runs tools under a separate identity.
 - **Media references do not render for members** — `/api/file` reads any file the box can read, including `/root/.mumbo/start.sh`, the owner launch token in the dsh log, and every Session log, so no member role grants its `hostFiles/readAny`. It opens to members once the route can confine a non-owner to one Session's workspace root, which needs the missing seam: `ConnectionFetchRoute.fetch` receives no Peer.
-- **Finished subagent transcripts are closed to members in the page** — a subagent's child Session is granted only while it is live, because no Workspace lists it; the Session log download of a granted Session still includes every subagent descendant's log.
+- **A Session another process stores is bound only after a restart** — the stored list is read once at load and extended by Sessions this Host creates; a Session a separate process writes with no Workspace stays closed to members until the next start.
+- **Members can still start a Session with no Workspace** — the global role keeps `session/create` because the sidebar's New Session control reads the global grant, though it creates in a Workspace; a call naming no Workspace starts in the Host's working directory, `/src` on a box. Dropping it needs that control to read the target Workspace's grant.
 - **Deliverables routes are owner-only** — change summaries, comparisons, and opening declared or changed files (`/api/changes.*`, `/api/present.*`) answer 403 to members.
 - **Steering messages and continuations show no author line** — Chat renders the message-source seat only on user rows that open a turn. A member message admitted while a turn runs, and a member's content-less continuation (a `retry` source, which Chat shows as its continuation receipt), therefore show no address; the notice row in that turn still names the member.
 - **Answers carry no member** — `userQuestions/answer` records no principal, so the model cannot tell which member answered a question.

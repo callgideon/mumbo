@@ -1,17 +1,14 @@
 /**
  * The member plugin in a real Loader composition: Web carrier, Connection, Gateway, remote access, and the browser
  * upload and Session log routes. A request carrying the edge-signed header reaches Remote methods and those routes
- * as the `edge-member` principal on the Sessions the Workspace list holds; a tampered, expired, or missing header is
- * not a member, and a member reaches no settings method.
+ * as the `edge-member` principal on the Sessions the box stores, lists, or runs; a tampered, expired, or missing header
+ * is not a member, and a member reaches no settings method.
  */
 
 import { randomBytes } from 'node:crypto'
 import { request as httpRequest } from 'node:http'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
-import Group from '@deepseek-ai/cordis-plugin-group'
-import Include from '@deepseek-ai/cordis-plugin-include'
-import Loader from '@deepseek-ai/cordis-plugin-loader'
 import TypertGatewayService from '@deepseek-ai/dsh-api-gateway'
 import RemoteAccessService, { type RemoteAccessRole } from '@deepseek-ai/dsh-api-remote-access'
 import * as Connection from '@deepseek-ai/dsh-client-connection'
@@ -19,11 +16,12 @@ import FileUploads from '@deepseek-ai/dsh-client-file-upload'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
 import { SESSION_FORMAT_VERSION, type SessionHeader } from '@deepseek-ai/dsh-session'
 import * as SessionLogExport from '@deepseek-ai/dsh-session-log-export'
-import { Remote, TypertRemoteService, principalOf, type Principal } from '@deepseek-ai/dsh-typert-protocol'
+import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as EdgeMember from '../src/index.ts'
 import { signMemberHeader } from '../src/header.ts'
+import { PromptProbe, call, now, provideCredentials, startLoader } from './helpers/composition.ts'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface PrincipalMap {
@@ -34,34 +32,6 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
 
 const CONFIG = fileURLToPath(new URL('./fixtures/cordis.yml', import.meta.url))
 const KEY = randomBytes(32)
-
-/** Stands in for the Session Controller's methods: records the caller the Gateway admitted. */
-class PromptProbe extends TypertRemoteService {
-  readonly callers: (Principal | undefined)[] = []
-  constructor(ctx: Context) {
-    super(ctx, 'promptProbe', { namespace: 'session' })
-  }
-
-  @Remote('prompt')
-  prompt(request: { readonly sessionId: string; readonly text: string }): string {
-    void request
-    this.callers.push(principalOf(this.ctx.invocation))
-    return 'queued'
-  }
-
-  @Remote('create')
-  create(request: { readonly workspaceId?: string; readonly sessionId?: string }): string {
-    this.callers.push(principalOf(this.ctx.invocation))
-    return request.sessionId ?? 'new'
-  }
-
-  @Remote('updateQueue')
-  updateQueue(request: { readonly sessionId: string }): string {
-    void request
-    this.callers.push(principalOf(this.ctx.invocation))
-    return 'edited'
-  }
-}
 
 /** Stands in for a settings write. */
 class SettingsProbe extends TypertRemoteService {
@@ -91,16 +61,11 @@ async function boot(): Promise<{ readonly origin: string; readonly probe: Prompt
   vi.stubEnv('MUMBO_MEMBER_KEY', KEY.toString('base64url'))
   workspaceSessions = ['s1', 'blank']
   context = new Context()
-  const records = new Map<unknown, unknown>()
-  context.provide('credentials', {
-    async modifyRecord(key: unknown, mutate: (current: unknown) => Promise<unknown>): Promise<unknown> {
-      const next = await mutate(records.get(key))
-      if (next !== undefined) records.set(key, next)
-      return next ?? records.get(key)
-    },
+  provideCredentials(context)
+  // The project Workspace holding two Sessions, and another Workspace members may not follow or start Sessions in.
+  context.provide('workspaceRegistry', {
+    list: () => [{ id: 'w1', path: '/projects/project', sessionIds: workspaceSessions }, { id: 'w2', path: '/srv/other', sessionIds: [] }],
   } as never)
-  // One Workspace holding one Session; the policy grants over exactly this list.
-  context.provide('workspaceRegistry', { list: () => [{ id: 'w1', sessionIds: workspaceSessions }] } as never)
   // One live subagent child Session that no Workspace lists.
   context.provide('sessions', { list: () => [{ id: 'child' }], get: () => undefined } as never)
   // Every Session id names a stored, empty Session, so only access decides which log is exported.
@@ -111,7 +76,9 @@ async function boot(): Promise<{ readonly origin: string; readonly probe: Prompt
     traceSession: async () => ({ descendants: [] }),
     readSession: async (id: string) => ({ session: header(id), inheritedEventCount: 0, events: [] }),
   } as never)
+  // The store lists the Workspace's Sessions and one with no Workspace; stat and open answer every id.
   context.provide('sessionPersistence', {
+    list: async () => ['s1', 'blank', 'loose'].map(id => ({ header: header(id) })),
     stat: async (id: string) => ({ header: header(id) }),
     open: async (id: string) => ({
       id, header: header(id), access: 'read', read: async () => ({ eventState: 'detached', events: [] }), close: async () => {},
@@ -138,7 +105,6 @@ async function boot(): Promise<{ readonly origin: string; readonly probe: Prompt
     readImage: async () => { throw new Error('fixture has no images') },
   } as never)
   context.provide('commands', { registerFileReceiptResolver: () => () => {}, register: () => () => {} } as never)
-  await context.plugin(Loader)
   const modules = new Map<string, object>([
     ['@deepseek-ai/dsh-typert-registry', TypertRegistry],
     ['@deepseek-ai/dsh-api-remote-access', RemoteAccessService],
@@ -149,18 +115,8 @@ async function boot(): Promise<{ readonly origin: string; readonly probe: Prompt
     ['@deepseek-ai/dsh-session-log-export', SessionLogExport],
     ['@mumbo/edge-member', EdgeMember],
   ])
-  const loader = context.loader
-  loader.builtins.group = Group
-  loader.builtins.include = class FixtureInclude extends Include {
-    override import(specifier: string, getOuterStack?: () => string[]): unknown {
-      if (specifier.startsWith('cordis:')) return super.import(specifier, getOuterStack)
-      const module = modules.get(specifier)
-      if (module === undefined) throw new Error(`unexpected Loader import: ${specifier}`)
-      return module
-    }
-  }
-  await loader.create({ name: 'cordis:include', config: { path: pathToFileURL(CONFIG).href } })
-  await loader.await()
+  const { loader, settled } = await startLoader(context, CONFIG, modules)
+  await settled
   const entries = [...loader.entries()]
   expect(entries.filter(entry => entry.fiber === undefined && !entry.disabled).map(entry => entry.options.id)).toEqual([])
   context.typert.resources.register('session', { field: 'sessionId' })
@@ -169,21 +125,6 @@ async function boot(): Promise<{ readonly origin: string; readonly probe: Prompt
   await context.plugin(SettingsProbe)
   const probe = context.get('promptProbe') as PromptProbe
   return { origin: `http://127.0.0.1:${String(context.webServer.port)}`, probe }
-}
-
-async function call(
-  origin: string,
-  method: string,
-  args: Record<string, unknown>,
-  header?: string,
-  extra: Record<string, string> = {},
-): Promise<{ status: number; body: unknown }> {
-  const response = await fetch(`${origin}/api/${method}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...extra, ...header === undefined ? {} : { 'x-mumbo-member': header } },
-    body: JSON.stringify({ type: 'client-request', rpcId: 'r1', method, payload: { args } }),
-  })
-  return { status: response.status, body: response.ok ? await response.json() : await response.text() }
 }
 
 /** Exchange the Host's launch token for the owner's browser cookie. */
@@ -212,8 +153,6 @@ function callWithRepeatedHeader(origin: string, headers: readonly string[]): Pro
     outgoing.end(body)
   })
 }
-
-const now = (): number => Math.floor(Date.now() / 1000)
 
 describe('real Loader composition', () => {
   it('admits a signed member and records the member as the caller of a prompt', { timeout: 60_000 }, async () => {
@@ -269,7 +208,7 @@ describe('real Loader composition', () => {
     }
   })
 
-  it('refuses a member a Session no Workspace lists, and every settings method', { timeout: 60_000 }, async () => {
+  it('refuses a member a Session the box neither stores nor runs, and every settings method', { timeout: 60_000 }, async () => {
     const { origin, probe } = await boot()
     const header = signMemberHeader(KEY, 'ann@example.com', now() + 300)
     const elsewhere = await call(origin, 'session/prompt', { request: { sessionId: 's2', text: 'hi' } }, header)
@@ -293,7 +232,7 @@ describe('real Loader composition', () => {
     expect(probe.callers).toHaveLength(3)
   })
 
-  it('snapshots the member grants on every listed and live Session', { timeout: 60_000 }, async () => {
+  it('snapshots the member grants on the project Workspace and every stored, listed, and live Session', { timeout: 60_000 }, async () => {
     await boot()
     const snapshot = context!.remoteAccess.snapshotFor({ kind: 'edge-member', email: 'ann@example.com' })
     expect(snapshot).toMatchObject({ type: 'baseline', owner: false })
@@ -303,8 +242,10 @@ describe('real Loader composition', () => {
       { kind: 'workspace', id: 'w1' },
       { kind: 'session', id: 's1' },
       { kind: 'session', id: 'blank' },
+      { kind: 'session', id: 'loose' },
       { kind: 'session', id: 'child' },
     ]))
+    expect(resources).not.toContainEqual({ kind: 'workspace', id: 'w2' })
     const s1 = 'grants' in snapshot ? snapshot.grants.find(grant => grant.resource.kind === 'session' && grant.resource.id === 's1') : undefined
     expect(s1?.actions).toEqual(expect.arrayContaining([
       'session/prompt', 'fileUploads/upload', 'fileUploads/uploadBinary', 'sessionLog/export', 'sessionLog/markdown',
@@ -322,6 +263,12 @@ describe('real Loader composition', () => {
       return 'grants' in snapshot ? snapshot.grants.flatMap(grant => grant.resource.kind === 'session' ? [grant.resource.id] : []) : []
     }
     expect(sessionsOf()).not.toContain('fresh')
+    // Another domain's change keeps the grants already built.
+    workspaceSessions = [...workspaceSessions, 'fresh']
+    context!.emit('domain/changed', { domain: 'settings', table: '', key: '', operation: 'put', value: {} })
+    await new Promise(resolve => setImmediate(resolve))
+    expect(sessionsOf()).not.toContain('fresh')
+    workspaceSessions = workspaceSessions.filter(id => id !== 'fresh')
     // The registry emits the change before its entity holds the new list, which it commits a microtask later.
     context!.emit('domain/changed', { domain: 'workspace', table: 'workspaces', key: 'w1', operation: 'put', value: {} })
     queueMicrotask(() => { workspaceSessions = [...workspaceSessions, 'fresh'] })
@@ -340,6 +287,20 @@ describe('real Loader composition', () => {
     const valid = signMemberHeader(KEY, 'ann@example.com', now() + 300)
     await expect(callWithRepeatedHeader(origin, [valid, valid])).resolves.toBe(401)
     expect(probe.callers).toEqual([undefined])
+  })
+
+  it('reads the member header from Fetch headers too, and refuses a repeated one there', { timeout: 60_000 }, async () => {
+    await boot()
+    const valid = signMemberHeader(KEY, 'ann@example.com', now() + 300)
+    const headers = (...members: string[]): Headers => {
+      const result = new Headers({ host: '127.0.0.1' })
+      for (const member of members) result.append('x-mumbo-member', member)
+      return result
+    }
+    const admitted = context!.connection.admit({ headers: headers(valid) })
+    expect('peer' in admitted ? admitted.peer.principal : admitted).toEqual({ kind: 'edge-member', email: 'ann@example.com' })
+    expect(context!.connection.admit({ headers: headers(valid, valid) })).toEqual({ rejection: 401 })
+    expect(context!.connection.admit({ headers: headers() })).toEqual({ rejection: 401 })
   })
 
   it('does not admit a tampered, expired, too-distant, foreign-key, or missing header', { timeout: 60_000 }, async () => {

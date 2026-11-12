@@ -1,0 +1,26 @@
+# Test-only project box Host: the Web carrier, Connection, the Gateway with remote access, the Workspace Controller, the
+# member plugin, and the project Workspace row, both naming the directory with one expression as the project overlay does.
+- id: typert-registry
+  name: '@deepseek-ai/dsh-typert-registry'
+- id: remote-access
+  name: '@deepseek-ai/dsh-api-remote-access'
+- id: typert-gateway
+  name: '@deepseek-ai/dsh-api-gateway'
+- id: webserver
+  name: '@deepseek-ai/dsh-host-webserver'
+  config:
+    host: '127.0.0.1'
+    port: 0
+- id: client-connection
+  name: '@deepseek-ai/dsh-client-connection'
+- id: mumbo-edge-member
+  name: '@mumbo/edge-member'
+  config:
+    key: !!js process.env.MUMBO_MEMBER_KEY
+    workspace: !!js process.env.MUMBO_PROJECT_WORKSPACE
+- id: workspace-controller
+  name: '@deepseek-ai/dsh-api-workspace-controller'
+- id: mumbo-project-workspace
+  name: '@mumbo/edge-member/project-workspace'
+  config:
+    workspace: !!js process.env.MUMBO_PROJECT_WORKSPACE

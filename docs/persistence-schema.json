@@ -661,7 +661,7 @@
     {"digest":"dde0cdf9d426768b649b5a9783d2144e7f900c35ef65229cd89036dbf411d1b0","names":[],"sources":[]},
     {"digest":"de25352d2dc4196309bd84b5bac6319f6d5c898ea0e82bb5ae66c5738d0d426f","names":[],"sources":[]},
     {"digest":"de30b1fa12c75f81df6aa4096e1595296d2d04e2be14a7c29849cf8028b79048","names":[],"sources":[]},
-    {"digest":"de5b34128b6ab550240b161e9b56b872c93ccb9358818642304bcaa82f8ab1d9","names":["packages/mumbo/edge-member/src/index.ts#EdgeMemberPrincipal"],"sources":["packages/mumbo/edge-member/src/index.ts:35"]},
+    {"digest":"de5b34128b6ab550240b161e9b56b872c93ccb9358818642304bcaa82f8ab1d9","names":["packages/mumbo/edge-member/src/index.ts#EdgeMemberPrincipal"],"sources":["packages/mumbo/edge-member/src/index.ts:37"]},
     {"digest":"deaae5cd30987d4f49398e8f9d994c125907e7f928300745fb1dbf15f145d0e7","names":[],"sources":[]},
     {"digest":"deebfc7c62177ea840f23c6362b8615bc78ffa93377dd5d243c04e541c413af5","names":[],"sources":["packages/typert/protocol/src/types.ts:457"]},
     {"digest":"df5d9709b7db2a72510dc52052a23f0c38f39730af1504bab8bccabc14fae528","names":[],"sources":[]},
