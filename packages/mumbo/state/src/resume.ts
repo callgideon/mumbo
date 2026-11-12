@@ -45,7 +45,7 @@ export function childName(child: SubagentCatalogEntry): string {
 }
 
 /**
- * Jobs registered before the restart that it stopped or that finished after the last request. A job's owner cancels it
+ * Jobs registered before the restart that it stopped or that finished after the last step began. A job's owner cancels it
  * when the owner's Agent goes, so none of them still runs.
  */
 function jobFindings(state: MumboState, resume: Resume): Finding[] {
@@ -57,15 +57,15 @@ function jobFindings(state: MumboState, resume: Resume): Finding[] {
       return [{ line: `Stopped by the restart, output not kept: ${what}.`, kind: 'stopped' }]
     }
     const detail = job.settled.detail === undefined ? '' : `, ${job.settled.detail}`
-    return [{ line: `Ended after your last request (${job.settled.status}${detail}), output not kept: ${what}.`, kind: 'finished' }]
+    return [{ line: `Finished after the last step began (${job.settled.status}${detail}), output not kept: ${what}.`, kind: 'finished' }]
   })
 }
 
-/** Workflow runs started before the restart that it stopped or that ended after the last request. */
+/** Workflow runs started before the restart that it stopped or that finished after the last step began. */
 function runFindings(state: MumboState, resume: Resume): Finding[] {
   return Object.values(state.runs).flatMap((run): Finding[] => {
     if (run.seq >= resume.seedSeq) return []
-    if (run.end !== undefined) return [{ line: `Workflow ${run.name} ended (${run.end.stopReason}) after your last request.`, kind: 'finished' }]
+    if (run.end !== undefined) return [{ line: `Workflow ${run.name} finished (${run.end.stopReason}) after the last step began.`, kind: 'finished' }]
     const agents = run.running > 0 ? `, with ${String(run.running)} of its agents running` : ''
     return [{ line: `Stopped by the restart: workflow ${run.name}${agents}.`, kind: 'stopped' }]
   })
@@ -161,7 +161,7 @@ async function reconcile(
   ]
   const goal = ctx.get('goals')?.get(agent)
   if (goal?.phase === 'active' && goal.activation === 'disarmed') {
-    findings.push({ line: 'The goal is still active, but the restart stopped its rounds: a person must resume it with /goal resume.', kind: 'goal' })
+    findings.push({ line: 'The goal is still active, but its automatic rounds are stopped: a person must resume it with /goal resume.', kind: 'goal' })
   }
   if (findings.length === 0) return undefined
   const count = (kind: Finding['kind']): number => findings.filter(finding => finding.kind === kind).length

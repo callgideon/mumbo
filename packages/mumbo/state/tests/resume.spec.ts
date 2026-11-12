@@ -46,7 +46,7 @@ describe('background jobs', () => {
     expect(requestTexts(harness.model, 2).filter(entry => entry === text)).toHaveLength(1)
   })
 
-  it('reports jobs that ended after the last request with their outcome', { timeout: 60_000 }, async () => {
+  it('reports jobs that finished after the last step began with their outcome', { timeout: 60_000 }, async () => {
     const harness = await boot(replies(2), mountJobs)
     const handle = await harness.start('finished')
     await turn(handle.agent, 'Start.')
@@ -61,8 +61,8 @@ describe('background jobs', () => {
     await turn(agent, 'Back.')
     expect(notices(agent).map(notice => notice.text)).toEqual([
       [
-        HEADER, `- Ended after your last request (completed, exit code: 0), output not kept: background job ${job.id} (bash: ${CHECK}).`,
-        `- Ended after your last request (killed), output not kept: background job ${killed.id} (bash: sleep 100).`,
+        HEADER, `- Finished after the last step began (completed, exit code: 0), output not kept: background job ${job.id} (bash: ${CHECK}).`,
+        `- Finished after the last step began (killed), output not kept: background job ${killed.id} (bash: sleep 100).`,
       ].join('\n'),
     ])
     expect(notices(agent)[0]?.summary).toBe('Restart: 2 finished.')
@@ -247,7 +247,7 @@ describe('restarts already checked', () => {
 })
 
 describe('workflow runs', () => {
-  it('reports runs the restart stopped and runs that ended after the last request', { timeout: 60_000 }, async () => {
+  it('reports runs the restart stopped and runs that finished after the last step began', { timeout: 60_000 }, async () => {
     // Session queries without a subagent catalog report no children.
     const harness = await boot(replies(2), (ctx) => {
       ctx.provide('sessionQuery', { observeSession: () => Promise.reject(new Error('no child to read')) } as never)
@@ -268,7 +268,7 @@ describe('workflow runs', () => {
     expect(notices(agent)).toEqual([{
       turn: 2,
       text: [
-        HEADER, '- Stopped by the restart: workflow review, with 1 of its agents running.', '- Workflow lint ended (error) after your last request.',
+        HEADER, '- Stopped by the restart: workflow review, with 1 of its agents running.', '- Workflow lint finished (error) after the last step began.',
         '- Stopped by the restart: workflow triage.',
       ].join('\n'),
       summary: 'Restart: 2 stopped, 1 finished.',
