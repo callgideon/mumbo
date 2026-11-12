@@ -7,8 +7,8 @@ approver_emails       = "hi@mumbo.si" # founder sign-in (2026-11-09)
 ops_alert_email       = "hi@mumbo.si" # alarms and edge-deploy-failed by email (the founder); confirm the AWS email once
 ntfy_enabled          = true
 # The agent is the mumbo-bot App's bot user (design section 9); id from GET /users/mumbo-bot%5Bbot%5D (2026-11-09).
-github_agent_login = "mumbo-bot[bot]"
-github_agent_id    = "341797844"
-store_default_open = false # R2 step 3: every edge authenticates as the user edge
-edge_cells         = true  # R6 step 2: the us-east-1 edge knows both cells (CELLS)
+github_agent_login      = "mumbo-bot[bot]"
+github_agent_id         = "341797844"
+store_default_open      = false # R2 step 3: every edge authenticates as the user edge
+edge_cells              = true  # R6 step 2: the us-east-1 edge knows both cells (CELLS)
 run_wild_default_emails = "hi@mumbo.si"
