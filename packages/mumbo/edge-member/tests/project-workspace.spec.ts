@@ -322,6 +322,8 @@ describe('the project Workspace while the box runs', () => {
     expect(grants.get(`workspace:${superagent.id}`)).toBeUndefined()
     expect(grants.get(`workspace:${workspaces(box.ctx).find(item => item.path === project)!.id}`)).toEqual(['session/create', 'workspace/follow'])
     expect(grants.get('session:coordinator')).toContain('session/follow')
+    // A snapshot carries no arguments, so the Session binding's condition withholds `session/create`.
+    expect(grants.get('session:coordinator')).not.toContain('session/create')
   })
 
   it('lets members start a Session only in the project Workspace, refusing a create that names none', { timeout: 60_000 }, async () => {
