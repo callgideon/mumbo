@@ -18,14 +18,14 @@ export type HeaderLeadingControlsProps =
  * Sidebar-open and New Session controls in the frame's window-chrome seat.
  * The frame mounts this seat for hidden sidebars and owns its placement.
  * Web shows only the sidebar opener; Desktop also retains New Session.
- * @param props - Injected sidebar actions, the global access Hook, and the sidebar locale seat.
- * @returns the sidebar toggle, plus New Session on Desktop while access allows `session/create`.
+ * @param props - Injected sidebar actions and New Session access, and the sidebar locale seat.
+ * @returns the sidebar toggle, plus New Session on Desktop while access allows `session/create` where it would start.
  */
 export function HeaderLeadingControls({
-  toggleSidebar, startSession, trackEntryClick, useRemoteAccess, useShortcuts, t,
+  toggleSidebar, startSession, trackEntryClick, useNewSessionAccess, useShortcuts, t,
 }: HeaderLeadingControlsProps) {
-  // A page whose access snapshot excludes starting a Session keeps only the sidebar toggle here.
-  const canStartSession = useRemoteAccess('session/create')
+  // A Peer refused `session/create` where New Session would start keeps only the sidebar toggle here.
+  const canStartSession = useNewSessionAccess(allowed => allowed)
   const desktop = document.documentElement.hasAttribute('data-platform')
   const shortcut = useShortcuts(rows => rows.find(row => row.id === 'sidebar.left.toggle'))
   const newShortcut = useShortcuts(rows => rows.find(row => row.id === 'session.new'))

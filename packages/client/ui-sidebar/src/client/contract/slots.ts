@@ -239,6 +239,11 @@ export type SidebarRootInjected = {
     entryPins: ObservableSnapshot<readonly string[]>
     /** Whether `sidebar.panellist.actions` has registrations. */
     entryActions: ObservableSnapshot<boolean>
+    /**
+     * Whether the current Peer may create the Session `startSession()` without a Workspace would start, from the
+     * Workspace UI's `newSessionAccess`; the New Session controls and the brand shortcut render only while it is true.
+     */
+    newSessionAccess: ObservableSnapshot<boolean>
   }
 }
 
