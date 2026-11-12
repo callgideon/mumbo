@@ -108,6 +108,53 @@ describe('the step the notice joins', () => {
     const admitted = await preStep(harness.ctx, agent, { kind: 'enter', messages: [] })
     expect(admitted.kind === 'enter' ? admitted.messages.map(message => message.source.kind) : []).toEqual(['mumbo-resume'])
   })
+
+  it('reconciles again at the next step when the step is aborted while it reads a child\'s log', { timeout: 60_000 }, async () => {
+    const reads: PromiseWithResolvers<void>[] = []
+    const child = new Log().add('turn/start', { turn: 1 }).assistant('Running the suite.').events
+    const harness = await boot([], async (ctx) => {
+      await ctx.sessionProjections.register(subagentCatalogProjectionDefinition)
+      // As session-query's reader does, the read checks the signal before and after it waits.
+      ctx.provide('sessionQuery', {
+        observeSession: async (_id: string, { signal }: { signal: AbortSignal }) => {
+          signal.throwIfAborted()
+          const read = Promise.withResolvers<void>()
+          reads.push(read)
+          await read.promise
+          signal.throwIfAborted()
+          return { events: child, [Symbol.dispose]() {} }
+        },
+      } as never)
+    })
+    const warn = vi.spyOn(harness.ctx.logger, 'warn')
+    const handle = await harness.start('aborted-read')
+    handle.agent.session.append('subagent/catalog', { childId: SessionId('tester'), childCreatedAt: 0, version: 3, mode: 'continuable', label: 'run the slow suite', name: 'tester' } as never)
+    const { agent } = await harness.restart(handle, true)
+    const aborted = new AbortController()
+    const first = preStep(harness.ctx, agent, { kind: 'enter', messages: [] }, aborted.signal)
+    await vi.waitFor(() => { expect(reads).toHaveLength(1) })
+    aborted.abort()
+    reads[0]!.resolve()
+    expect(await first).toEqual({ kind: 'enter', messages: [] })
+    const second = preStep(harness.ctx, agent, { kind: 'enter', messages: [] })
+    await vi.waitFor(() => { expect(reads).toHaveLength(2) })
+    reads[1]!.resolve()
+    const admitted = await second
+    expect(admitted.kind === 'enter' ? admitted.messages.map(message => message.source.kind) : []).toEqual(['mumbo-resume'])
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('adds no second notice to a step that claims one an outer listener returned to the inbox unlogged', { timeout: 60_000 }, async () => {
+    const harness = await boot([], mountJobs)
+    const handle = await harness.start('requeued')
+    startJob(harness.ctx, handle.agent, CHECK)
+    const { agent } = await harness.restart(handle, true)
+    const first = await preStep(harness.ctx, agent, { kind: 'enter', messages: [] })
+    const claimed = first.kind === 'enter' ? first.messages : []
+    expect(claimed.map(message => message.source.kind)).toEqual(['mumbo-resume'])
+    // A goal round's driver, outside this listener, rejected that step and put its messages back in the inbox.
+    expect(await preStep(harness.ctx, agent, { kind: 'enter', messages: claimed })).toEqual({ kind: 'enter', messages: claimed })
+  })
 })
 
 it('removes the block, plan_read and the notice when the plugin unloads', { timeout: 60_000 }, async () => {

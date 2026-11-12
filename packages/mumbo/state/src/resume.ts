@@ -112,6 +112,8 @@ async function childFindings(ctx: Context, agent: Agent, resume: Resume, signal:
     try {
       log = await childLog(query, child, signal)
     } catch (error: unknown) {
+      // An aborted step's read fails with the abort; the listener drops this step's findings.
+      if (signal.aborted) break
       ctx.logger.warn(`mumbo-state: subagent ${child.id} of ${agent.session.id} is left out of the resume notice; its log could not be read: ${String(error)}`)
       continue
     }
@@ -173,7 +175,8 @@ async function reconcile(ctx: Context, agent: Agent, state: MumboState, resume: 
 
 /**
  * Add the resume notice to the first step after a resume that the rest of the chain admits. A step aborted before it is
- * logged leaves the resume pending, so the next step reconciles again; nothing to report is remembered per Session for
+ * logged leaves the resume pending, so the next step reconciles again; a step that already carries a notice, which an
+ * outer listener returned to the inbox unlogged, gets no second one. Nothing to report is remembered per Session for
  * this process, and logs nothing.
  * @param ctx - plugin context; the listener ends with it.
  * @param stateOf - the `mumboState` of a Session.
@@ -187,7 +190,9 @@ export function listenForResume(ctx: Context, stateOf: (session: Session) => Mum
     const state = stateOf(session)
     const resume = state.resume
     if (resume === null || quiet.get(session) === resume.seedSeq) return decision
+    if (decision.messages.some(message => message.source.kind === RESUME_SOURCE)) return decision
     const notice = await reconcile(ctx, step.agent, state, resume, step.signal)
+    if (step.signal.aborted) return decision
     if (notice === undefined) {
       quiet.set(session, resume.seedSeq)
       return decision
