@@ -166,7 +166,13 @@ export function RecordPage({ list, counts, openSession, useSessions, t }: Record
           <div className={css.filters} role="group" aria-label={t('filter.label')}>
             {(['all', ...RECORD_FILTER_KINDS] as const).map(value => (
               <button key={value} type="button" className={classes(css.filter, filter === value && css.filterActive)}
-                aria-pressed={filter === value} onClick={() => { setFilter(value) }}>
+                aria-pressed={filter === value} onClick={() => {
+                  if (value === filter) return
+                  // Another filter's rows never show under this one, not even while it loads or after it fails.
+                  setFilter(value)
+                  setEntries([])
+                  setNext(undefined)
+                }}>
                 {t(`filter.${value}`)}
               </button>
             ))}

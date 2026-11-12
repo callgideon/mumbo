@@ -157,16 +157,24 @@ export function record(ctx: Context, config: Config): void {
 
   ctx.on('session/event', (session: Session, event: SessionEvent) => {
     if (event.type !== 'runwild/decision') return
-    const line = {
-      ...event.data, summary: clipSummary(event.data.summary),
-      v: 1, time: event.time, session: session.id, root: rootOf(session), seq: event.seq,
-    }
-    const text = `${JSON.stringify(line)}\n`
-    queue = queue.then(() => append(dayOf(event.time), text)).catch((error: unknown) => {
+    const lost = (error: unknown): void => {
       failures += 1
       // The summary may hold a refused call's arguments: the line names only where the decision is logged.
       ctx.logger.error('mumbo-run-wild: the record lost a decision', session.id, event.seq, error)
-    })
+    }
+    let root: Session['id']
+    try {
+      root = rootOf(session)
+    } catch (error: unknown) {
+      lost(error)
+      return
+    }
+    const line = {
+      ...event.data, summary: clipSummary(event.data.summary),
+      v: 1, time: event.time, session: session.id, root, seq: event.seq,
+    }
+    const text = `${JSON.stringify(line)}\n`
+    queue = queue.then(() => append(dayOf(event.time), text)).catch(lost)
   })
   queue = queue.then(prune).catch((error: unknown) => { ctx.logger.warn('mumbo-run-wild: could not read the record directory for retention', error) })
   ctx.effect(() => async () => { await queue }, 'mumbo-run-wild: record writes')
@@ -264,11 +272,14 @@ function text(status: number, message: string): Response {
   return new Response(message, { status, headers: { 'content-type': 'text/plain; charset=utf-8' } })
 }
 
-/** A query integer: absent gives undefined, anything but a whole number gives NaN. */
+/** The largest distance from the epoch, in milliseconds, that a `Date` holds. */
+const TIME_LIMIT = 8.64e15
+
+/** A query integer: absent gives undefined, anything but a whole number within the `Date` range gives NaN. */
 function integer(params: URLSearchParams, name: string): number | undefined {
   const raw = params.get(name)
   if (raw === null) return undefined
-  return /^-?\d+$/.test(raw) ? Number(raw) : Number.NaN
+  return /^-?\d+$/.test(raw) && Math.abs(Number(raw)) <= TIME_LIMIT ? Number(raw) : Number.NaN
 }
 
 /** The listing request a `RECORD_PATH` query names, or the reason it is malformed. */

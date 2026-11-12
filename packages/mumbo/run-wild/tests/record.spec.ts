@@ -1,5 +1,5 @@
 /** The box-wide record: what the `session/event` listener writes, what retention deletes, and what the service reads. */
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -115,15 +115,18 @@ describe('the writer', () => {
     expect(lines(root, today())).toMatchObject([{ session: 'child', root: 'parent' }, { session: 'child', root: 'child' }])
   })
 
-  it('records nothing for an unexpected rootOf failure, which the Session reports', async () => {
-    const { ctx, root, create } = await mounted()
+  it.each([new Error('broken registry'), new SubagentError('no manager', 'CONTINUATION_UNAVAILABLE')])('loses a decision whose root cannot be read (%s): logs only its Session and seq, and reports the record incomplete', async (failure) => {
+    const { ctx, root, create, errors, record } = await mounted()
     const agent = await create('root')
-    let rootOf = (_agent: Agent): Agent => { throw new Error('broken registry') }
+    let rootOf = (_agent: Agent): Agent => { throw failure }
     ctx.provide('subagents', { rootOf: (subject: Agent) => rootOf(subject) } as never)
     agent.session.append('runwild/decision', QUESTION)
     rootOf = subject => subject
     agent.session.append('runwild/decision', { ...QUESTION, target: 'second' })
     await vi.waitFor(() => { expect(lines(root, today())).toMatchObject([{ target: 'second' }]) })
+    const seq = agent.session.snapshotEvents().find(event => event.type === 'runwild/decision')!.seq
+    expect(errors.mock.calls).toEqual([['mumbo-run-wild: the record lost a decision', SessionId('root'), seq, failure]])
+    expect(await record().list({ limit: 5 })).toMatchObject({ entries: [{ target: 'second' }], incomplete: true })
   })
 
   it('links a Session without a live Agent to itself', async () => {
@@ -156,6 +159,19 @@ describe('the writer', () => {
     expect(readFileSync(join(root, `${today()}.jsonl`), 'utf8').startsWith(first)).toBe(true)
     expect(statSync(root).mode & 0o777).toBe(0o700)
     expect(statSync(join(root, `${today()}.jsonl`)).mode & 0o777).toBe(0o600)
+  })
+
+  it('narrows a directory and a day file that already exist with wider modes', async () => {
+    const root = join(temporary(), 'runwild')
+    mkdirSync(root)
+    writeFileSync(join(root, `${today()}.jsonl`), '')
+    chmodSync(root, 0o755)
+    chmodSync(join(root, `${today()}.jsonl`), 0o644)
+    const { create } = await mounted(root)
+    const agent = await create('root')
+    agent.session.append('runwild/decision', QUESTION)
+    await vi.waitFor(() => { expect(lines(root, today())).toHaveLength(1) })
+    expect([statSync(root).mode & 0o777, statSync(join(root, `${today()}.jsonl`)).mode & 0o777]).toEqual([0o700, 0o600])
   })
 
   it('starts on a new line after a partial line a crash left, and leaves a complete file as it is', async () => {

@@ -7,7 +7,7 @@ export const NS = 'mumbo.runWild'
 export const en = {
   'entry': 'Ran without asking',
   'title': 'What ran without asking',
-  'description': 'What Mumbo did in Run Wild without asking you, from the last {days} days. Each action is recorded in its session too.',
+  'description': 'What Mumbo did in Run Wild without asking you, from the last {days} days.',
   'filter.label': 'Show',
   'filter.all': 'All',
   'filter.send': 'Sends',
@@ -81,7 +81,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 export const ja = {
   'entry': '確認なしの実行',
   'title': '確認なしで実行されたこと',
-  'description': 'Run Wild で Mumbo があなたに確認せずに行ったこと（過去 {days} 日間）。各操作はそのセッションにも記録されています。',
+  'description': 'Run Wild で Mumbo があなたに確認せずに行ったこと（過去 {days} 日間）。',
   'filter.label': '表示',
   'filter.all': 'すべて',
   'filter.send': '送信',
@@ -145,7 +145,7 @@ export const ja = {
 export const es = {
   'entry': 'Hecho sin preguntar',
   'title': 'Lo que se hizo sin preguntar',
-  'description': 'Lo que Mumbo hizo en Run Wild sin preguntarle, en los últimos {days} días. Cada acción también queda registrada en su sesión.',
+  'description': 'Lo que Mumbo hizo en Run Wild sin preguntarle, en los últimos {days} días.',
   'filter.label': 'Mostrar',
   'filter.all': 'Todo',
   'filter.send': 'Envíos',
@@ -209,7 +209,7 @@ export const es = {
 export const fr = {
   'entry': 'Fait sans demander',
   'title': 'Ce qui a été fait sans demander',
-  'description': 'Ce que Mumbo a fait en Run Wild sans vous demander, sur les {days} derniers jours. Chaque action est aussi consignée dans sa session.',
+  'description': 'Ce que Mumbo a fait en Run Wild sans vous demander, sur les {days} derniers jours.',
   'filter.label': 'Afficher',
   'filter.all': 'Tout',
   'filter.send': 'Envois',
@@ -273,7 +273,7 @@ export const fr = {
 export const de = {
   'entry': 'Ohne Nachfrage ausgeführt',
   'title': 'Was ohne Nachfrage ausgeführt wurde',
-  'description': 'Was Mumbo in Run Wild ohne Nachfrage bei Ihnen getan hat, aus den letzten {days} Tagen. Jede Aktion ist auch in ihrer Sitzung festgehalten.',
+  'description': 'Was Mumbo in Run Wild ohne Nachfrage bei Ihnen getan hat, aus den letzten {days} Tagen.',
   'filter.label': 'Anzeigen',
   'filter.all': 'Alle',
   'filter.send': 'Gesendet',
@@ -337,7 +337,7 @@ export const de = {
 export const ru = {
   'entry': 'Сделано без вопросов',
   'title': 'Что было сделано без вопросов',
-  'description': 'Что Mumbo сделал в режиме Run Wild, не спрашивая вас, за последние {days} дн. Каждое действие также записано в его сеансе.',
+  'description': 'Что Mumbo сделал в режиме Run Wild, не спрашивая вас, за последние {days} дн.',
   'filter.label': 'Показать',
   'filter.all': 'Все',
   'filter.send': 'Отправки',
@@ -401,7 +401,7 @@ export const ru = {
 export const pt = {
   'entry': 'Feito sem perguntar',
   'title': 'O que foi feito sem perguntar',
-  'description': 'O que o Mumbo fez em Run Wild sem lhe perguntar, nos últimos {days} dias. Cada ação também fica registrada na sua sessão.',
+  'description': 'O que o Mumbo fez em Run Wild sem lhe perguntar, nos últimos {days} dias.',
   'filter.label': 'Mostrar',
   'filter.all': 'Tudo',
   'filter.send': 'Envios',

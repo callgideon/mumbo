@@ -92,7 +92,7 @@ it('lists entries newest first as plain text, with kind labels, the Session link
   expect(rows[3]!.querySelector('button')).toBeNull()
   fireEvent.click(view.getAllByRole('button', { name: 'Open session' })[0]!)
   expect(opened).toEqual(['root'])
-  expect(view.getByText('What Mumbo did in Run Wild without asking you, from the last 90 days. Each action is recorded in its session too.')).toBeTruthy()
+  expect(view.getByText('What Mumbo did in Run Wild without asking you, from the last 90 days.')).toBeTruthy()
 })
 
 it('sends each filter as kinds, shows its empty sentence, and pages with Show older', async () => {
@@ -112,6 +112,28 @@ it('sends each filter as kinds, shows its empty sentence, and pages with Show ol
   expect(view.getByText('Nothing was deleted without asking.')).toBeTruthy()
   const listed = requests.filter(url => url.pathname === RECORD_PATH).map(url => Object.fromEntries(url.searchParams))
   expect(listed).toEqual([{ limit: '50' }, { limit: '50', cursor: '2026-11-12:0' }, { limit: '50', kinds: 'send' }, { limit: '50', kinds: 'delete' }])
+})
+
+it('clears the rows of the previous filter while another loads, and when its read fails', async () => {
+  let fail: (response: Response) => void = () => {}
+  vi.stubGlobal('fetch', vi.fn((input: string) => {
+    const url = new URL(input, 'http://box.test/')
+    if (url.pathname === RECORD_COUNTS_PATH) return Promise.resolve(Response.json({ counts: {}, skipped: 0, incomplete: false }))
+    if (url.searchParams.get('kinds') === 'send') return new Promise<Response>((resolve) => { fail = resolve })
+    return Promise.resolve(Response.json(page([entry()])))
+  }))
+  const { runtime } = await bench()
+  const { view } = await rendered(runtime)
+  // The pressed filter reads nothing again and keeps its rows.
+  fireEvent.click(view.getByRole('button', { name: 'All' }))
+  await act(async () => { await Promise.resolve() })
+  expect(view.getAllByRole('listitem')).toHaveLength(1)
+  fireEvent.click(view.getByRole('button', { name: 'Sends' }))
+  await act(async () => { await Promise.resolve() })
+  expect(view.queryAllByRole('listitem')).toHaveLength(0)
+  await act(async () => { fail(new Response('disk gone', { status: 500 })) })
+  expect([view.getByRole('button', { name: 'Sends' }).getAttribute('aria-pressed'), view.queryAllByRole('listitem').length]).toEqual(['true', 0])
+  expect(view.getByRole('alert').textContent).toContain('Could not load the record.')
 })
 
 it('keeps the rows on a failed read and offers Try again; an empty panel centers the notice', async () => {

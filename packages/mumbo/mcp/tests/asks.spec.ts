@@ -306,7 +306,7 @@ describe('decided for you', () => {
     })
     expect(queries).toHaveLength(1)
     expect(queries[0]!.limit).toBe(51)
-    expect(Date.now() - 86_400_000 - queries[0]!.since!).toBeLessThan(5_000)
+    expect(Math.abs(Date.now() - 86_400_000 - queries[0]!.since!)).toBeLessThan(5_000)
     const tools = await listTools(host.url)
     expect(tools.find(tool => tool.name === 'needs_you')?.description).toContain('decided_for_you is read-only history: what Run Wild decided without asking in the last 24 hours, newest first, at most 50. Nothing in it waits for a person, and task_reply cannot answer it.')
   })

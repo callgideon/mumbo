@@ -1,7 +1,7 @@
 - region "What ran without asking":
   - heading "What ran without asking" [level=1]
   - button "Refresh"
-  - paragraph: What Mumbo did in Run Wild without asking you, from the last 90 days. Each action is recorded in its session too.
+  - paragraph: What Mumbo did in Run Wild without asking you, from the last 90 days.
   - group "Show":
     - button "All"
     - button "Sends" [pressed]
