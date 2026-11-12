@@ -231,6 +231,27 @@ resource "aws_lb_listener_rule" "door" {
     target_group_arn = aws_lb_target_group.edge["model"].arn
   }
 }
+# R-probe: https://edge-<region>.<public host>/edge/ping answers this edge's region from the ALB itself, so latency DNS
+# (R7) can be checked per region without reaching a task. The certificate's wildcard covers the name; its DNS record is
+# the founder's, with R7. Ranks below the X-Forwarded-Uri refusal (1), above the former names (5) and the wildcards (30).
+resource "aws_lb_listener_rule" "probe" {
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 3
+  condition {
+    host_header { values = ["edge-${local.region}.${local.public_host}"] }
+  }
+  condition {
+    path_pattern { values = ["/edge/ping"] }
+  }
+  action {
+    type = "fixed-response"
+    fixed_response {
+      content_type = "text/plain"
+      message_body = local.region
+      status_code  = "200"
+    }
+  }
+}
 # Former names redirect to the new ones with the same path and query. A project box moved from p-<id>.boxes.mumbo.si
 # to p-<id>.app.mumbo.si, which a redirect cannot derive (it keeps or replaces the whole host), so those land on the
 # home page, which links every project of the signed-in person.
