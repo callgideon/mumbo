@@ -8,7 +8,7 @@
 import { randomBytes } from 'node:crypto'
 import { request as httpRequest } from 'node:http'
 import { fileURLToPath } from 'node:url'
-import { Context } from '@deepseek-ai/cordis'
+import { Context, FiberState } from '@deepseek-ai/cordis'
 import TypertGatewayService from '@deepseek-ai/dsh-api-gateway'
 import RemoteAccessService, { type RemoteAccessRole } from '@deepseek-ai/dsh-api-remote-access'
 import * as Connection from '@deepseek-ai/dsh-client-connection'
@@ -32,6 +32,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
 
 const CONFIG = fileURLToPath(new URL('./fixtures/cordis.yml', import.meta.url))
 const KEY = randomBytes(32)
+const MEMBER = { kind: 'edge-member', email: 'ann@example.com' } as const
 
 /** Stands in for a settings write. */
 class SettingsProbe extends TypertRemoteService {
@@ -57,7 +58,12 @@ afterEach(async () => {
   vi.unstubAllEnvs()
 })
 
-async function boot(): Promise<{ readonly origin: string; readonly probe: PromptProbe }> {
+/**
+ * Provide the root services and start the fixture's Loader.
+ * @param listed - holds the stored-Session listing until it resolves.
+ * @returns the Loader and its settlement.
+ */
+async function start(listed?: Promise<void>): ReturnType<typeof startLoader> {
   vi.stubEnv('MUMBO_MEMBER_KEY', KEY.toString('base64url'))
   workspaceSessions = ['s1', 'blank']
   context = new Context()
@@ -78,7 +84,10 @@ async function boot(): Promise<{ readonly origin: string; readonly probe: Prompt
   } as never)
   // The store lists the Workspace's Sessions and one with no Workspace; stat and open answer every id.
   context.provide('sessionPersistence', {
-    list: async () => ['s1', 'blank', 'loose'].map(id => ({ header: header(id) })),
+    list: async () => {
+      await listed
+      return ['s1', 'blank', 'loose'].map(id => ({ header: header(id) }))
+    },
     stat: async (id: string) => ({ header: header(id) }),
     open: async (id: string) => ({
       id, header: header(id), access: 'read', read: async () => ({ eventState: 'detached', events: [] }), close: async () => {},
@@ -115,16 +124,21 @@ async function boot(): Promise<{ readonly origin: string; readonly probe: Prompt
     ['@deepseek-ai/dsh-session-log-export', SessionLogExport],
     ['@mumbo/edge-member', EdgeMember],
   ])
-  const { loader, settled } = await startLoader(context, CONFIG, modules)
+  return startLoader(context, CONFIG, modules)
+}
+
+async function boot(): Promise<{ readonly origin: string; readonly probe: PromptProbe }> {
+  const { loader, settled } = await start()
   await settled
   const entries = [...loader.entries()]
   expect(entries.filter(entry => entry.fiber === undefined && !entry.disabled).map(entry => entry.options.id)).toEqual([])
-  context.typert.resources.register('session', { field: 'sessionId' })
-  context.typert.resources.register('workspace', { field: 'workspaceId' })
-  await context.plugin(PromptProbe)
-  await context.plugin(SettingsProbe)
-  const probe = context.get('promptProbe') as PromptProbe
-  return { origin: `http://127.0.0.1:${String(context.webServer.port)}`, probe }
+  const ctx = context!
+  ctx.typert.resources.register('session', { field: 'sessionId' })
+  ctx.typert.resources.register('workspace', { field: 'workspaceId' })
+  await ctx.plugin(PromptProbe)
+  await ctx.plugin(SettingsProbe)
+  const probe = ctx.get('promptProbe') as PromptProbe
+  return { origin: `http://127.0.0.1:${String(ctx.webServer.port)}`, probe }
 }
 
 /** Exchange the Host's launch token for the owner's browser cookie. */
@@ -253,6 +267,24 @@ describe('real Loader composition', () => {
     expect(s1?.actions).not.toContain('session/updateQueue')
     const global = 'grants' in snapshot ? snapshot.grants.find(grant => grant.resource.kind === 'global') : undefined
     expect(global?.actions).not.toContain('hostFiles/readAny')
+  })
+
+  it('registers the member policy only after the stored Sessions are listed', { timeout: 60_000 }, async () => {
+    const listed = Promise.withResolvers<undefined>()
+    const { loader, settled } = await start(listed.promise)
+    const entry = () => [...loader.entries()].find(item => item.options.id === 'mumbo-edge-member')
+    const sessionsOf = () => {
+      const snapshot = context!.remoteAccess.snapshotFor(MEMBER)
+      return 'grants' in snapshot ? snapshot.grants.flatMap(grant => grant.resource.kind === 'session' ? [grant.resource.id] : []) : []
+    }
+    await vi.waitFor(() => { expect(entry()?.fiber?.state).toBe(FiberState.LOADING) })
+    for (let turn = 0; turn < 5; turn += 1) await new Promise(resolve => setImmediate(resolve))
+    expect(entry()?.fiber?.state).toBe(FiberState.LOADING)
+    expect(context!.remoteAccess.snapshotFor(MEMBER)).toEqual({ type: 'baseline', owner: false, grants: [] })
+    listed.resolve(undefined)
+    await settled
+    expect(entry()?.fiber?.state).toBe(FiberState.ACTIVE)
+    expect(sessionsOf()).toContain('loose')
   })
 
   it('rebuilds member grants after a Workspace change has committed', { timeout: 60_000 }, async () => {

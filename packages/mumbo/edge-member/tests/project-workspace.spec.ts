@@ -230,6 +230,7 @@ describe('the project Workspace at start', () => {
     const first = await startBox({ pool, workspace: project })
     await first.settled
     const before = workspaces(first.ctx)
+    expect(before).toEqual([expect.objectContaining({ path: project })])
     await first.ctx.fiber.dispose()
     const second = await startBox({ pool, workspace: project })
     await second.settled
