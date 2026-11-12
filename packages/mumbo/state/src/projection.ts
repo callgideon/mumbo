@@ -162,8 +162,10 @@ function foldWork(state: MumboState, event: SessionEvent): MumboState {
       const end = { stopReason: event.data.stopReason, seq: event.seq }
       return { ...state, runs: { ...state.runs, [event.data.runId]: { ...run, end } } }
     }
-    // A step that starts after a settlement claims its notice from the inbox, so the model was told of it; a settlement
-    // during that step's own pre-step reaches the next step. Work from before a restart stays for the resume notice.
+    // A step that starts after a settlement claims its notice from the inbox, so the model was told of it. A settlement
+    // during that step's own pre-step reaches only the next step, and of the notices queued for the next turn while no
+    // turn can start, such as during maintenance, each turn claims one; a crash before the rest are logged loses them.
+    // Work from before a restart stays for the resume notice.
     case 'step/start': {
       const pending = (seq: number): boolean => state.resume !== null && seq < state.resume.seedSeq
       const jobs = without(state.jobs, job => job.settled !== undefined && !pending(job.seq))
