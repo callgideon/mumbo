@@ -54,7 +54,7 @@ The title is the plan's first `# ` heading. Steps are its `##` and `###` heading
 <a id="the-resume-notice"></a>
 ## The resume notice
 
-A `session/end-seed` without `inherited` records the restart: its seq and the time of the last message logged before it. A fork's inherited end-seed records no restart and drops the copied jobs and runs, which the fork does not own. The plugin's `agent/pre-step` listener lets the rest of the chain decide first; for a step it admits, at the first step after a restart, it compares what the log says ran with what runs now and adds at most one `user/message` with source `{kind: 'mumbo-resume', form: 'notice', summary}`. The loop logs it in that step, which clears the recorded restart, so no later step repeats it. A rejected or aborted step leaves the restart recorded for the next step. With nothing to report, nothing is logged, and this process does not compare again for that restart.
+A `session/end-seed` without `inherited` records the restart: its seq, the time of the last message logged before it, and the time of the end-seed before it, when the Session was last loaded. A fork's inherited end-seed records no restart and drops the copied jobs and runs, which the fork does not own. The plugin's `agent/pre-step` listener lets the rest of the chain decide first; for a step it admits, at the first step after a restart, it compares what the log says ran with what runs now and adds at most one `user/message` with source `{kind: 'mumbo-resume', form: 'notice', summary}`. The loop logs it in that step, which clears the recorded restart, so no later step repeats it. A rejected or aborted step leaves the restart recorded for the next step. With nothing to report, nothing is logged, and this process does not compare again for that restart.
 
 | Item | Reported when | Line |
 |---|---|---|
@@ -62,9 +62,9 @@ A `session/end-seed` without `inherited` records the restart: its seq and the ti
 | Same | It settled after the last step before the restart started, so its notice reached no request | Ended after your last request, with its status and detail, output not kept |
 | Workflow run started before the restart | It has no `run-end` | Stopped by the restart, with the count of its agents that were running |
 | Same | It ended after the last step before the restart started | Ended, with its stop reason |
-| Direct `one-shot` or `continuable` child that is not loaded, read through `sessionQuery.observeSession` | Its last turn is open, or ended `aborted` or `interrupted`, after this Session's last message | Stopped mid-task by the restart; a continuable child adds `Use send_message to <name> to continue it.` |
+| Direct `one-shot` or `continuable` child that is not loaded, read through `sessionQuery.observeSession` | Its last turn is open, ended `interrupted`, or was aborted because its Agent was disposed, and its last event comes after the load that preceded the restart; a child that stopped before that load was in that earlier restart's notice | Stopped mid-task by the restart; a continuable child adds `Use send_message to <name> to continue it.` |
 | Same | Its last turn ended `completed` after this Session's last message | Finished while this Session was not loaded, with its last assistant text clipped to 400 characters |
-| Same | Its last turn ended otherwise after this Session's last message | Ended, with the reason |
+| Same | Its last turn ended otherwise, a person's cancel included, after this Session's last message | Ended, with the reason |
 | Goal | It is `active` and disarmed | Still active, but the restart stopped its rounds: a person must resume it with `/goal resume` |
 
 A child whose log cannot be read is left out, with a warning in the host log. The notice's `summary` counts the items, such as `Restart: 1 stopped, 1 finished, goal needs a person.` `@mumbo/mcp`'s `needs_you` lists the same stopped goal in `stopped_goals` for every loaded Session. The notice declares a context form, so `@mumbo/mcp`'s report-turn gate does not read it as the message that opened a turn.

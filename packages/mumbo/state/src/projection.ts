@@ -53,8 +53,13 @@ export const stateSchema = z.object({
   runs: z.record(z.string(), runSchema),
   /** Time of the last message logged, which a restart's end-seed keeps as the time the Session went down. */
   lastActivity: z.number(),
-  /** The restart's end-seed and the time the Session went down, until the resume notice is logged. */
-  resume: z.object({ seedSeq: z.number(), downAt: z.number() }).nullable(),
+  /** Time of the last end-seed, when this Session was last loaded from its log; 0 before any. */
+  loadedAt: z.number(),
+  /**
+   * The restart's end-seed, the time the Session went down, and the time it was loaded before that restart (an earlier
+   * restart whose notice is still pending keeps its own), until the resume notice is logged.
+   */
+  resume: z.object({ seedSeq: z.number(), downAt: z.number(), upSince: z.number() }).nullable(),
 })
 
 /** The `mumboState` projection state. */
@@ -69,7 +74,8 @@ export type PlanRecord = z.output<typeof planSchema>
  */
 export function initState(): MumboState {
   return {
-    boundary: 0, turn: 0, todos: null, proposed: null, reviewed: null, plan: null, jobs: {}, runs: {}, lastActivity: 0, resume: null,
+    boundary: 0, turn: 0, todos: null, proposed: null, reviewed: null, plan: null, jobs: {}, runs: {}, lastActivity: 0, loadedAt: 0,
+    resume: null,
   }
 }
 
@@ -163,11 +169,13 @@ export function foldState(state: MumboState, event: SessionEvent): MumboState {
   switch (event.type) {
     case 'compaction/end':
       return event.data.error === undefined ? { ...state, boundary: state.boundary + 1 } : state
-    case 'session/end-seed':
+    case 'session/end-seed': {
+      const loaded = { ...state, boundary: state.boundary + 1, loadedAt: event.time }
       // Copied fork history owns no executions and was not restarted.
-      return event.data.inherited === true
-        ? { ...state, boundary: state.boundary + 1, jobs: {}, runs: {}, resume: null }
-        : { ...state, boundary: state.boundary + 1, resume: { seedSeq: event.seq, downAt: state.lastActivity } }
+      if (event.data.inherited === true) return { ...loaded, jobs: {}, runs: {}, resume: null }
+      const upSince = state.resume?.upSince ?? state.loadedAt
+      return { ...loaded, resume: { seedSeq: event.seq, downAt: state.lastActivity, upSince } }
+    }
     case 'goal/change':
       return event.data.operation === 'edit' ? state : { ...state, boundary: state.boundary + 1 }
     case 'turn/start':

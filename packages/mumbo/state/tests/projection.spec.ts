@@ -125,9 +125,19 @@ describe('resume', () => {
   it('records the end-seed and the last activity before it, and a fork drops copied work', () => {
     const log = new Log().user('hi').assistant('hello').job('bash-1').run('r1')
     const restored = fold(log.add('session/end-seed', {}))
-    expect(restored.resume).toEqual({ seedSeq: 4, downAt: 2000 })
+    expect(restored).toMatchObject({ resume: { seedSeq: 4, downAt: 2000, upSince: 0 }, loadedAt: 5000 })
     const forked = fold(new Log().user('hi').job('bash-1').run('r1').add('session/end-seed', { inherited: true }))
     expect(forked).toMatchObject({ jobs: {}, runs: {}, resume: null })
+  })
+
+  it('keeps the load before the restart, or before an earlier restart whose notice is still pending', () => {
+    const notice = { kind: 'mumbo-resume', form: 'notice', summary: 'x' } as const
+    const twice = new Log().user('hi').add('session/end-seed', {}).user('notice', notice).user('later').add('session/end-seed', {})
+    expect(fold(twice)).toMatchObject({ resume: { seedSeq: 4, downAt: 4000, upSince: 2000 }, loadedAt: 5000 })
+    const pending = new Log().user('hi').add('session/end-seed', {}).add('session/end-seed', {})
+    expect(fold(pending)).toMatchObject({ resume: { seedSeq: 2, downAt: 1000, upSince: 0 }, loadedAt: 3000 })
+    const forked = new Log().add('session/end-seed', { inherited: true }).user('hi').add('session/end-seed', {})
+    expect(fold(forked).resume).toEqual({ seedSeq: 2, downAt: 2000, upSince: 1000 })
   })
 
   it('clears the resume and the work started before it at the notice', () => {

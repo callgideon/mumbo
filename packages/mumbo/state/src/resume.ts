@@ -9,7 +9,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-goal'
 import { boundContextSummary, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContextFormed } from '@deepseek-ai/dsh-llm'
-import type { Session, SessionEvent, UserMessage } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent, TurnEndReason, UserMessage } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type { SessionQueryEngine } from '@deepseek-ai/dsh-session-query'
 import type { SubagentCatalogEntry } from '@deepseek-ai/dsh-subagent'
@@ -71,10 +71,16 @@ function runFindings(state: MumboState, resume: Resume): Finding[] {
   })
 }
 
-/** How a child's log ends: its last turn's end, or none while that turn is open, and its last assistant text. */
+/** How a child's log ends: its last turn's end, or none while that turn is open, its last assistant text, and the time of its last event. */
 interface ChildLog {
   readonly end: SessionEvent<'turn/end'> | undefined
   readonly text: string
+  readonly lastAt: number
+}
+
+/** Whether a turn ended because its process stopped: a shutdown disposed its Agent, or a read closed it after a crash. */
+function stopped(reason: TurnEndReason): boolean {
+  return reason.kind === 'interrupted' || (reason.kind === 'aborted' && reason.reason.kind === 'disposed')
 }
 
 /** Read how a child's log ends. */
@@ -89,7 +95,7 @@ async function childLog(query: SessionQueryEngine, child: SubagentCatalogEntry, 
       text = event.data.message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n')
     }
   }
-  return { end, text }
+  return { end, text, lastAt: observed.events.at(-1)?.time ?? 0 }
 }
 
 /** Direct children whose last turn the restart cut off, or that ended while this Session was not loaded. */
@@ -110,13 +116,19 @@ async function childFindings(ctx: Context, agent: Agent, resume: Resume, signal:
       continue
     }
     const { end } = log
-    // A child that ended while this Session was loaded already reported to it.
-    if (end !== undefined && end.time <= resume.downAt) continue
-    const kind = end?.data.reason.kind
-    if (kind === undefined || kind === 'aborted' || kind === 'interrupted') {
+    // A shutdown can end a child's turn at or before the parent's last message, and a crash read closes it at the
+    // child's last event, so a stopped child is not compared with `downAt`. One that stopped before this Session's
+    // previous load was in that restart's notice.
+    if (end === undefined || stopped(end.data.reason)) {
+      if (log.lastAt < resume.upSince) continue
       const resumeHint = child.mode === 'continuable' ? ` Use send_message to ${name} to continue it.` : ''
       findings.push({ line: `Subagent ${name} stopped mid-task by the restart.${resumeHint}`, kind: 'stopped' })
-    } else if (kind === 'completed') {
+      continue
+    }
+    // A child that ended while this Session was loaded already reported to it.
+    if (end.time <= resume.downAt) continue
+    const kind = end.data.reason.kind
+    if (kind === 'completed') {
       const said = log.text === '' ? '' : ` Its last message: "${clip(log.text, LAST_MESSAGE_CHARS)}"`
       findings.push({ line: `Subagent ${name} finished while this Session was not loaded.${said}`, kind: 'finished' })
     } else {

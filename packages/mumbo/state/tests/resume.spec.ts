@@ -4,7 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { agentEvents, type Agent, type PreStepDecision } from '@deepseek-ai/dsh-agent'
 import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
 import { createAssistantMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { interruptedTurnClosers, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-subagent'
 import { WorkflowRunId } from '@deepseek-ai/dsh-workflow'
@@ -170,6 +170,7 @@ describe('subagents', () => {
       verbose: new Log(later).add('turn/start', { turn: 1 }).assistant('v'.repeat(500)).add('turn/end', { turn: 1, reason: { kind: 'completed' } }).events,
       crashed: new Log(later).add('turn/start', { turn: 1 }).add('turn/end', { turn: 1, reason: { kind: 'interrupted' } }).events,
       failed: new Log(later).add('turn/start', { turn: 1 }).add('turn/end', { turn: 1, reason: { kind: 'blocked' } }).events,
+      cancelled: new Log(later).add('turn/start', { turn: 1 }).add('turn/end', { turn: 1, reason: { kind: 'aborted', reason: { kind: 'user' } } }).events,
       earlier: new Log(0).add('turn/start', { turn: 1 }).add('turn/end', { turn: 1, reason: { kind: 'completed' } }).events,
     }
     const read: string[] = []
@@ -196,13 +197,14 @@ describe('subagents', () => {
     catalog('verbose', { version: 1, mode: 'one-shot', label: 'talk' })
     catalog('crashed', { version: 1, mode: 'one-shot', label: 'scan' })
     catalog('failed', { version: 1, mode: 'one-shot', label: 'fail' })
+    catalog('cancelled', { version: 1, mode: 'one-shot', label: 'stop' })
     catalog('earlier', { version: 1, mode: 'one-shot', label: 'old' })
     catalog('missing', { version: 1, mode: 'one-shot', label: 'gone' })
     catalog(String(live.agent.id), { version: 3, mode: 'continuable', label: 'still here', name: 'live' })
     catalog('remote', { version: 3, mode: 'external', name: 'remote' })
     const { agent } = await harness.restart(handle, true)
     await turn(agent, 'Back.')
-    expect(read).toEqual(['tester', 'reviewer', 'quiet', 'verbose', 'crashed', 'failed', 'earlier', 'missing'])
+    expect(read).toEqual(['tester', 'reviewer', 'quiet', 'verbose', 'crashed', 'failed', 'cancelled', 'earlier', 'missing'])
     expect(notices(agent)).toEqual([{
       turn: 2,
       text: [
@@ -213,9 +215,43 @@ describe('subagents', () => {
         `- Subagent talk finished while this Session was not loaded. Its last message: "${'v'.repeat(399)}…"`,
         '- Subagent scan stopped mid-task by the restart.',
         '- Subagent fail ended (blocked) while this Session was not loaded.',
+        '- Subagent stop ended (aborted) while this Session was not loaded.',
       ].join('\n'),
-      summary: 'Restart: 2 stopped, 4 finished.',
+      summary: 'Restart: 2 stopped, 5 finished.',
     }])
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('subagent missing of parent is left out of the resume notice'))
+  })
+
+  it('reports a child the restart stopped though its last event precedes this Session\'s last message, at that restart only', { timeout: 60_000 }, async () => {
+    // A minute before the parent's own messages: the child's last event was a long tool call.
+    const early = Date.now() - 60_000
+    const running = new Log(early).add('turn/start', { turn: 1 }).assistant('Running the suite.').call('c1', 'bash', '{"command":"npm test"}').events
+    const logs: Record<string, SessionEvent[]> = {
+      // A shutdown that disposes every Agent at once can end the child's turn before the parent logs its last result.
+      disposed: new Log(early).add('turn/start', { turn: 1 }).add('turn/end', { turn: 1, reason: { kind: 'aborted', reason: { kind: 'disposed' } } }).events,
+      // After a crash, session-query's read closes the open turn at the child's last event.
+      crashed: [...running, ...interruptedTurnClosers(running)],
+    }
+    const harness = await boot(replies(3), async (ctx) => {
+      await ctx.sessionProjections.register(subagentCatalogProjectionDefinition)
+      ctx.provide('sessionQuery', { observeSession: (id: string) => Promise.resolve({ events: logs[id] ?? [], [Symbol.dispose]() {} }) } as never)
+    })
+    const handle = await harness.start('waiting')
+    for (const name of Object.keys(logs)) {
+      handle.agent.session.append('subagent/catalog', { childId: SessionId(name), childCreatedAt: 0, version: 3, mode: 'continuable', label: name, name } as never)
+    }
+    await turn(handle.agent, 'Wait for them.')
+    const first = await harness.restart(handle, true)
+    await turn(first.agent, 'Back.')
+    const { agent } = await harness.restart(first, true)
+    await turn(agent, 'Back again.')
+    expect(notices(agent)).toEqual([{
+      turn: 2,
+      text: [
+        HEADER, '- Subagent disposed stopped mid-task by the restart. Use send_message to disposed to continue it.',
+        '- Subagent crashed stopped mid-task by the restart. Use send_message to crashed to continue it.',
+      ].join('\n'),
+      summary: 'Restart: 2 stopped.',
+    }])
   })
 })
