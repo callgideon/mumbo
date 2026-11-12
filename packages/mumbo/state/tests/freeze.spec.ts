@@ -75,7 +75,7 @@ it('changes the block once at each compaction, restart and goal phase change, an
   await turn(restarted.agent, 'Back.')
   const sections = stateSections(restarted.agent)
   expect(sections).toHaveLength(3)
-  expect(sections[2]).toContain('Goal (active, stopped by a restart: a person must resume it with /goal resume; round 0 of 8): Ship something else')
+  expect(sections[2]).toContain('Goal (active, automatic rounds stopped: a person must resume it with /goal resume; round 0 of 8): Ship something else')
   expect(carried(7)).toContain(sections[2])
   expect(notices(restarted.agent).map(notice => notice.summary)).toEqual(['Restart: goal needs a person.'])
 

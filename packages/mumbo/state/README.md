@@ -31,14 +31,14 @@ The block's sections, in order, each present only when it has content:
 
 | Section | Source | Pointer for what does not fit |
 |---|---|---|
-| Goal | `goals.get(agent)`: phase, whether a restart stopped it, rounds, objective, block reason | `get_goal` |
+| Goal | `goals.get(agent)`: phase, whether its automatic rounds stopped, which a restart or the goal round driver's disarm after a failed, cut-off or cancelled turn causes, rounds, objective, block reason | `get_goal` |
 | Plan | The approved plan's title and step headings, from the log | `plan_read` |
 | Todo | The items of the last `todo_write` that are not `completed`, labelled with the turn that wrote them | your last `todo_write` |
 | Team tasks | `agentTeams.listTasks(agent)` with status `pending` or `in_progress`, while Team mode is on | `team_task_list` |
 | Subagents running | Direct children in the `subagentCatalog` projection whose Agent is running | `list_agents` |
 | Background jobs | `jobs.list(session)` with status `running` or `stopping`; a background workflow run is a `workflow` job | `job_list` |
 
-`maxChars` (default 1600, at least 400) caps the whole text. Lines are added in order while the text plus a 160-character reserve fits; the first item that does not fit becomes `… N more (<pointer>)`, and a section whose heading does not fit is named in a final `Not shown:` line. Each item line is clipped to 140 characters and the objective to 300. A Session with nothing to show contributes no section. The text holds no clock times.
+`maxChars` (default 1600, at least 400) caps the whole text. Lines are added in order while the text plus a 160-character reserve fits; the first item that does not fit becomes `… N more (<pointer>)`, and a section whose heading does not fit is named in a final `Not shown:` line. Each item line, the block reason and the plan title are put on one line and clipped to 140 UTF-16 code units, the objective to 300, never inside a surrogate pair. A Session with nothing to show contributes no section. The text holds no clock times.
 
 The host-only Session projection `mumboState` counts boundaries: a `compaction/end` without `error`, every `session/end-seed`, and every `goal/change` except an `edit`. The block renders on the first request after the count moves, and in this process every later request of that Session reuses the text, including each retry's context refresh. Live reads, such as the goal's activation, team tasks, running children and jobs, happen only in that render. A compaction moves the count during the step's `agent/pre-step`, after the step's first assembly, and the loop admits the re-rendered text through its context refresh before the request, replacing the earlier candidate. Todo edits and goal edits between boundaries reach the model as its own recent `todo_write` and goal tool calls, not as a new block.
 
@@ -142,7 +142,7 @@ Append-only: the notice is appended after the restored history in the step that 
 
 - **Person boxes do not mount it yet** — the box edge's start-script patch that loads `examples/person.overlay.yml` on person boxes ships separately on `boxes/production`; until it lands, only project boxes mount the package.
 - **A plugin reload renders between boundaries** — reloading the plugin, such as after a configuration change, empties the per-process memo, so the next request renders the block anew; the rendered text is still logged.
-- **A disarm without a goal change is not a boundary** — `goals.disarm()` by a lifecycle owner is process-local and unlogged, so the block can say the goal runs until the next boundary; owners call it before an unload, which ends in an end-seed.
+- **A disarm without a goal change is not a boundary** — `goals.disarm()` is process-local and unlogged, so after a disarm without a restart, such as the goal round driver's after a failed, cut-off or cancelled turn, the block can say the goal runs until the next boundary.
 - **Some approvals are not recorded** — an approval whose turn is cancelled before its next step, and an approval in a Session that already left plan mode, append no `plan/mode` record, so the plan is not kept.
 - **The notice reads direct children only** — grandchildren are not compared, and a continuable child that finished before this Session went down but whose result never reached it is not reported.
 

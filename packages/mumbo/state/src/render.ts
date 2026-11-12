@@ -46,24 +46,30 @@ interface Section {
 }
 
 /**
- * Cut text to a length.
+ * Cut text to a length in UTF-16 code units, never inside a surrogate pair.
  * @param text - the text.
  * @param max - the longest result.
- * @returns `text`, or its first `max - 1` characters and `…` when it is longer.
+ * @returns `text`, or at most its first `max - 1` code units and `…` when it is longer.
  */
 export function clip(text: string, max: number): string {
-  return text.length <= max ? text : `${text.slice(0, max - 1)}…`
+  return text.length <= max ? text : `${text.slice(0, max - 1).replace(/[\uD800-\uDBFF]$/u, '')}…`
+}
+
+/** Text on one line, clipped. */
+function oneLine(text: string, max: number): string {
+  return clip(text.replace(/\s+/gu, ' '), max)
 }
 
 /** An item line: indented, on one line, clipped. */
 function item(text: string): string {
-  return clip(`  ${text.replace(/\s+/gu, ' ')}`, ITEM_CHARS)
+  return `  ${oneLine(text, ITEM_CHARS - 2)}`
 }
 
 /** The goal's state, as the heading's parenthesis starts. */
 function goalState(goal: NonNullable<StateView['goal']>): string {
-  if (goal.blockedReason !== undefined) return `blocked: ${goal.blockedReason}`
-  return goal.phase === 'active' && !goal.armed ? 'active, stopped by a restart: a person must resume it with /goal resume' : goal.phase
+  if (goal.blockedReason !== undefined) return `blocked: ${oneLine(goal.blockedReason, ITEM_CHARS)}`
+  // A restart disarms a goal, and so does the goal round driver after a failed, cut-off or cancelled turn.
+  return goal.phase === 'active' && !goal.armed ? 'active, automatic rounds stopped: a person must resume it with /goal resume' : goal.phase
 }
 
 /** The sections of a view, in their fixed order, without the empty ones. */
@@ -71,12 +77,12 @@ function sections(view: StateView): Section[] {
   const out: Section[] = []
   const { goal, plan, todos, team = [], subagents = [], jobs = [] } = view
   if (goal !== undefined) {
-    const objective = clip(goal.objective.replace(/\s+/gu, ' '), OBJECTIVE_CHARS)
+    const objective = oneLine(goal.objective, OBJECTIVE_CHARS)
     const rounds = `round ${String(goal.roundsStarted)} of ${String(goal.maxGoalRounds)}`
     out.push({ name: 'goal', heading: `Goal (${goalState(goal)}; ${rounds}): ${objective}`, items: [], pointer: 'get_goal' })
   }
   if (plan !== undefined) {
-    const title = plan.title === undefined ? 'Plan' : `Plan "${plan.title}"`
+    const title = plan.title === undefined ? 'Plan' : `Plan "${oneLine(plan.title, ITEM_CHARS)}"`
     out.push({
       name: 'plan',
       heading: `${title} (approved in turn ${String(plan.turn)}; full text: plan_read):`,

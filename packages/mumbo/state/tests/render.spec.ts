@@ -30,7 +30,7 @@ describe('render', () => {
   it('renders every section in its fixed order', () => {
     expect(render(FULL, 1600)).toBe([
       BLOCK_HEADER,
-      'Goal (active, stopped by a restart: a person must resume it with /goal resume; round 3 of 256): Make the inventory tests pass and ship the checksum report.',
+      'Goal (active, automatic rounds stopped: a person must resume it with /goal resume; round 3 of 256): Make the inventory tests pass and ship the checksum report.',
       'Plan "Inventory fixes" (approved in turn 2; full text: plan_read):',
       '  1. Fix parsing of quantities',
       '  2. Add the restock rule',
@@ -56,6 +56,23 @@ describe('render', () => {
     expect(render({ goal: { ...goal, phase: 'blocked', armed: false, blockedReason: 'needs a key' } }, 1600))
       .toContain('Goal (blocked: needs a key; round 1 of 8): Ship')
     expect(render({ plan: { title: undefined, steps: [], turn: 1 } }, 1600)).toBe(`${BLOCK_HEADER}\nPlan (approved in turn 1; full text: plan_read):`)
+  })
+
+  it('puts a block reason and a plan title on one line, clipped, so their sections stay in the block', () => {
+    const goal = { phase: 'blocked' as const, armed: false, roundsStarted: 3, maxGoalRounds: 8, objective: 'Ship it' }
+    expect(render({ goal: { ...goal, blockedReason: 'Key missing.\nTried A.\n\tTried B.' } }, 1600))
+      .toBe(`${BLOCK_HEADER}\nGoal (blocked: Key missing. Tried A. Tried B.; round 3 of 8): Ship it`)
+    expect(render({ goal: { ...goal, blockedReason: 'r'.repeat(1500) } }, 1600))
+      .toBe(`${BLOCK_HEADER}\nGoal (blocked: ${'r'.repeat(139)}…; round 3 of 8): Ship it`)
+    expect(render({ plan: { title: `${'t'.repeat(1400)}\nmore`, steps: ['Build'], turn: 1 } }, 1600))
+      .toBe(`${BLOCK_HEADER}\nPlan "${'t'.repeat(139)}…" (approved in turn 1; full text: plan_read):\n  1. Build`)
+  })
+
+  it('never clips inside a surrogate pair', () => {
+    const text = render({ todos: { items: [{ content: `${'a'.repeat(120)}${'😀'.repeat(30)}`, status: 'pending' }], turn: 1 } }, 1600)
+    const line = text.split('\n')[2]!
+    expect(line.isWellFormed()).toBe(true)
+    expect(line).toBe(`  [pending] ${'a'.repeat(120)}${'😀'.repeat(3)}…`)
   })
 
   it('keeps the cap with a long objective, 40 todos and 30 headings, pointing at what does not fit', () => {
@@ -86,7 +103,7 @@ describe('render', () => {
 })
 
 /** The goal heading's length with an objective clipped to 300 characters. */
-const OBJECTIVE_LINE_MAX = 'Goal (active, stopped by a restart: a person must resume it with /goal resume; round 3 of 256): '.length + 300
+const OBJECTIVE_LINE_MAX = 'Goal (active, automatic rounds stopped: a person must resume it with /goal resume; round 3 of 256): '.length + 300
 
 describe('planHeadings', () => {
   it('reads the title and the second- and third-level headings', () => {
