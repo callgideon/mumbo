@@ -1,12 +1,14 @@
 /**
  * A project's report reaches a person's assistant through the MCP door, in the shipped Web composition with Run Wild
  * and the door mounted as a person's box mounts them: the model's shell call in that turn is refused with the
- * report-turn note, and the model answers without running it. Replays an authored Session; no browser.
+ * report-turn note, and the model answers without running it, with the Run Wild instructions in its runtime context.
+ * Replays an authored Session; no browser.
  */
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { RUN_WILD_CONTEXT, RUN_WILD_INSTRUCTIONS } from '@mumbo/run-wild'
 import { expect, it, vi } from 'vitest'
 import { launchWebScaffold, webSnapshotMode } from './scaffold.ts'
 import { probeFreePort } from './support.ts'
@@ -54,6 +56,10 @@ it.skipIf(webSnapshotMode() === 'record')('refuses the shell in a Run Wild turn 
       if (session === undefined) throw new Error('the report turn has no Session')
       const results = session.snapshotEvents().flatMap(event => event.type === 'tool/result' ? [event.data.message] : [])
       expect(results.map(({ isError, content }) => ({ isError, content }))).toEqual([{ isError: true, content: [{ type: 'text', text: REFUSAL }] }])
+      const runWild = session.snapshotEvents().flatMap(event => event.type === 'user/message'
+        && event.data.source.kind === 'runtime-context' && event.data.source.form === 'snapshot'
+        ? [event.data.source.sections.find(section => section.name === RUN_WILD_CONTEXT)?.text] : [])
+      expect(runWild).toEqual([RUN_WILD_INSTRUCTIONS])
     } finally {
       await scaffold.close()
     }

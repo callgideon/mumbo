@@ -66,6 +66,7 @@ import {
 } from '@deepseek-ai/dsh-sdk-client'
 import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 import { deriveReplayScript, parseSessionLog } from '@deepseek-ai/dsh-llm-replay'
+import { RUN_WILD_CONTEXT, RUN_WILD_INSTRUCTIONS } from '@mumbo/run-wild'
 
 const corpusRoot = fileURLToPath(new URL('../', import.meta.url))
 
@@ -192,6 +193,13 @@ const SDK_ASSERTIONS: Readonly<Record<string, SdkAssertions>> = {
     expectedFinalResponse: 'RUN_WILD_OK',
     environment: { DSH_PERMISSION_MODE: 'danger-full-access' },
     patches: [fileURLToPath(new URL('./run-wild/runtime.cordis.yml', import.meta.url))],
+  },
+  'run-wild-switch': {
+    expectedFinalResponse: 'RUN_WILD_SWITCH_OK',
+    environment: { DSH_PERMISSION_MODE: 'danger-full-access' },
+    patches: [fileURLToPath(new URL('./run-wild-switch/runtime.cordis.yml', import.meta.url))],
+    modelRequestsFile: 'run-wild-switch-requests.jsonl',
+    replayStandaloneCommands: true,
   },
   'plan-review': {
     expectedFinalResponse: 'SDK_PLAN_OK',
@@ -452,12 +460,23 @@ function assembledRuntimeContexts(log: PersistedLog): string[] {
   })
 }
 
-/** The `mumbo:state` section texts of a logged or requested runtime-context message. */
-function mumboStateSections(message: { source?: unknown }): string[] {
+/** The texts of one named section in a logged or requested runtime-context message. */
+function contextSections(message: { source?: unknown }, name: string): string[] {
   const source = message.source as { kind?: unknown; sections?: Array<{ name?: unknown; text?: unknown }> } | undefined
   if (source?.kind !== 'runtime-context') return []
-  return source.sections?.flatMap(section => section.name === 'mumbo:state' && typeof section.text === 'string'
+  return source.sections?.flatMap(section => section.name === name && typeof section.text === 'string'
     ? [section.text] : []) ?? []
+}
+
+/** The `mumbo:state` section texts of a logged or requested runtime-context message. */
+const mumboStateSections = (message: { source?: unknown }): string[] => contextSections(message, 'mumbo:state')
+
+/** The `mumbo:run-wild` section texts of a logged or requested runtime-context message. */
+const runWildSections = (message: { source?: unknown }): string[] => contextSections(message, RUN_WILD_CONTEXT)
+
+/** Whether a logged or requested message is a runtime-context snapshot. */
+function isRuntimeContext(message: { source?: unknown }): boolean {
+  return (message.source as { kind?: unknown } | undefined)?.kind === 'runtime-context'
 }
 
 function contextOf(logs: readonly { content: string; header: Record<string, unknown> }[], cwd: string): NormalizeContext {
@@ -1536,6 +1555,29 @@ describe('TypeScript SDK snapshots over the jsonrpc runtime', () => {
         const blocks = rows.flatMap((row, index) => row.type === 'user/message' && mumboStateSections(row.data as JsonObject).length > 0 ? [index] : [])
         expect(blocks, 'the state block is logged once, at the restart').toHaveLength(1)
         expect(blocks[0]).toBeGreaterThan(seed)
+      }
+      if (scenario.name === 'run-wild') {
+        const parent = ordered[0]
+        if (parent === undefined) throw new Error('run wild has no persisted Session')
+        const snapshots = records(parent.content).flatMap(row => row.type === 'user/message' && isRuntimeContext(row.data as JsonObject)
+          ? [runWildSections(row.data as JsonObject)] : [])
+        expect(snapshots, 'one runtime-context snapshot, carrying the Run Wild instructions').toEqual([[RUN_WILD_INSTRUCTIONS]])
+      }
+      if (scenario.name === 'run-wild-switch') {
+        const parent = ordered[0]
+        if (parent === undefined) throw new Error('run wild switch has no persisted Session')
+        const events = parseSessionLog(parent.content)
+        expect(events.filter(event => event.type === 'permission/preset').map(event => event.data.preset))
+          .toEqual(['danger-full-access', 'run-wild', 'danger-full-access'])
+        expect(events.filter(event => event.type === 'sandbox/mode')).toHaveLength(1)
+        expect(events.filter(event => event.type === 'approval/policy')).toHaveLength(1)
+        expect(events.filter(event => event.type === 'user/message' && event.data.source.kind === 'user-approval')).toEqual([])
+        const expected = [[], [RUN_WILD_INSTRUCTIONS], []]
+        const snapshots = records(parent.content).flatMap(row => row.type === 'user/message' && isRuntimeContext(row.data as JsonObject)
+          ? [runWildSections(row.data as JsonObject)] : [])
+        expect(snapshots, 'a snapshot at each switch, with the instructions only while in Run Wild').toEqual(expected)
+        expect(modelRequests.map(request => runWildSections((request.messages as JsonObject[]).filter(isRuntimeContext).at(-1)!)),
+          'each request carries the last logged snapshot').toEqual(expected)
       }
       if (scenario.name === 'ptc-cancel') {
         const events = results.flatMap(result => result.events)
