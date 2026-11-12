@@ -2053,6 +2053,16 @@ test('B47: a backup the client-proxy answers with sandbox-not-found keeps the bo
   assert.equal(await r.store.getBox('u1'), undefined)
 })
 
+test('a failed backup names its box\'s cell, and the RUNBOOK\'s edge-backup-failed drain check reads that cell\'s node group', async () => {
+  const r = await repairRig({ record: { launch: 'L', backedUp: 0 }, connect: failingCommands(new SandboxNotRunningError('The sandbox was not found')) })
+  await r.b.sweep(Date.now())
+  assert.equal(r.logs.find(l => l.msg === 'backup failed').region, 'us-east-1')
+  const runbook = readFileSync(new URL('../RUNBOOK.md', import.meta.url), 'utf8')
+  const from = runbook.indexOf('\n### edge-backup-failed\n')
+  const section = runbook.slice(from, runbook.indexOf('\n### ', from + 1))
+  for (const text of ['the `region` of its `backup failed` line', '--auto-scaling-group-name mumbo-boxes-nodes ', '`--auto-scaling-group-name mumbo-boxes-aps1-nodes --region ap-south-1` for Mumbai', 'that cell\'s node log group ("Drain upload times")']) assert.ok(section.includes(text), text)
+})
+
 // ---- B47b: resume and create failures classified by E2B's answers (testing/fixtures/resume/; recorded: false marks one
 // synthesized from source until record-resume.e2e.mjs records it)
 const GRACE_MS = 10 * 60_000  // edge.mjs RESUME_GRACE_MS
