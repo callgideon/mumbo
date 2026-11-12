@@ -1378,6 +1378,11 @@ The cache's worst case is a subscription that dies silently: copies are served f
   - The page called `workspace/initializeDefault` 14 s after the box started, while the restore was still settling, and showed "unable to create default workspace". A later call succeeded.
   - The cause comes from the box's logs first. The fix goes where the call fails: a request that arrives while dsh is starting waits for what it needs, or the edge keeps the starting page until dsh is ready. A client retry alone would hide the cause.
   - Tests: a restore whose first `initializeDefault` arrives before settling succeeds, on person and project boxes.
+  - **[2026-11-12, design ruling]**
+    - **Evidence.** The founder's call came through the edge as a member. It got a 200 whose body held an RPC error, wrote nothing, and dsh logged nothing. A later call with the box's own token returned ok but created no workspace either: it only stored `initialized: true`. So the cause is either a startup race or members being refused the create. A replay on a fresh box gets the error code.
+    - **A project box creates its own workspace from the project directory when it starts.** No visitor's role decides it, and members get no create right. The step checks for a workspace at that directory and ignores the `initialized` flag, so a box like bitlane, already marked initialized with no workspaces, is fixed at its next start. A person never lands on a project box with no workspace.
+    - An RPC error answered as a 200 is logged by dsh and named to the client.
+    - Tests: a member's first visit to a restored project box with no workspace record shows the project workspace, with no create call and no error.
 
 **Acceptance (first milestone: the founder's box in Mumbai):**
 - **The move.** The founder's box runs in the `ap-south-1` cell, moved from `us-east-1` with Sessions, schedules, files and Chrome sign-ins intact.

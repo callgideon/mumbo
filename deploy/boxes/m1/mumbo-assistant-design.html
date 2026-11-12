@@ -2389,6 +2389,14 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>The page called <code>workspace/initializeDefault</code> 14 s after the box started, while the restore was still settling, and showed &quot;unable to create default workspace&quot;. A later call succeeded.</li>
 <li>The cause comes from the box's logs first. The fix goes where the call fails: a request that arrives while dsh is starting waits for what it needs, or the edge keeps the starting page until dsh is ready. A client retry alone would hide the cause.</li>
 <li>Tests: a restore whose first <code>initializeDefault</code> arrives before settling succeeds, on person and project boxes.</li>
+<li><strong>[2026-11-12, design ruling]</strong>
+<ul>
+<li><strong>Evidence.</strong> The founder's call came through the edge as a member. It got a 200 whose body held an RPC error, wrote nothing, and dsh logged nothing. A later call with the box's own token returned ok but created no workspace either: it only stored <code>initialized: true</code>. So the cause is either a startup race or members being refused the create. A replay on a fresh box gets the error code.</li>
+<li><strong>A project box creates its own workspace from the project directory when it starts.</strong> No visitor's role decides it, and members get no create right. The step checks for a workspace at that directory and ignores the <code>initialized</code> flag, so a box like bitlane, already marked initialized with no workspaces, is fixed at its next start. A person never lands on a project box with no workspace.</li>
+<li>An RPC error answered as a 200 is logged by dsh and named to the client.</li>
+<li>Tests: a member's first visit to a restored project box with no workspace record shows the project workspace, with no create call and no error.</li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>
