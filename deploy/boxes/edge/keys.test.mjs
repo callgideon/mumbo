@@ -142,6 +142,20 @@ test('the last use is written at most once a minute per key, as jumbo does', asy
   assert.equal((await t.keys.list(A)).find(k => k.name === 'one').lastUsedAt, NOW + 60_000)
 })
 
+test('verify never waits for the last-use write, and logs one that fails', { timeout: 5_000 }, async () => {
+  const inner = memoryStore(); let answer = () => new Promise(() => {})
+  const store = { ...inner, putDoc: (k, v) => (k.startsWith('key-used:') ? answer() : inner.putDoc(k, v)) }
+  const logs = []
+  const t = await setup(store, (l) => logs.push(JSON.parse(l)))
+  const { key, record } = await t.keys.mint(A, { name: 'one', scopes: ['read'] })
+  assert.equal((await t.keys.verify(key)).id, record.id, 'a write that never answers holds nothing up')
+  answer = async () => { throw new Error('store down') }
+  t.at(NOW + 60_000)
+  assert.equal((await t.keys.verify(key)).id, record.id)
+  await new Promise(r => setImmediate(r))
+  assert.deepEqual(logs.filter(l => l.msg === 'last use not written'), [{ edge: 'key', level: 'warn', msg: 'last use not written', key: record.id, error: 'store down' }])
+})
+
 test('mint takes a name, known scopes, an offered lifetime and only projects the owner is a member of', async () => {
   const t = await setup()
   for (const [what, input] of [['no name', { name: ' ', scopes: ['read'] }], ['a long name', { name: 'n'.repeat(81), scopes: ['read'] }],

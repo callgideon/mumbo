@@ -201,7 +201,11 @@ export function redisStore(client, { cacheMs = 0, now = Date.now, log = console.
         if (waited > ttlMs) throw Object.assign(new Error(`lock ${key} busy`), { status: 503 })
         await sleep(100)
       }
-      try { return await fn() } finally { await client.eval(RELEASE, { keys: [`lock:${key}`], arguments: [token] }).catch(() => {}) }
+      // The release is not awaited: fn's caller goes on at once, and a release that fails leaves the lock to expire.
+      try { return await fn() } finally {
+        client.eval(RELEASE, { keys: [`lock:${key}`], arguments: [token] })
+          .catch((e) => log(JSON.stringify({ edge: 'store', level: 'warn', msg: 'lock release failed', lock: key, error: e.message })))
+      }
     },
     async getDoc(key, opts) { const v = await cache.get(`doc:${key}`, opts?.fresh); return v ? JSON.parse(v) : undefined },
     async putDoc(key, value) { await commit(`doc:${key}`, (c) => c.set(`doc:${key}`, JSON.stringify(value))) },

@@ -51,6 +51,16 @@ test('redis store: a lease holds a fresh token, and release is the compare-and-d
   assert.equal(await store.lease('sweep', 900_000), false, 'held by another')
 })
 
+test('redis store: withLock answers once its work is done, without waiting for the release, and logs a release that fails', { timeout: 5_000 }, async () => {
+  const logs = []; let release = () => new Promise(() => {})
+  const store = redisStore({ set: async () => 'OK', eval: (...a) => release(...a) }, { log: (l) => logs.push(JSON.parse(l)) })
+  assert.equal(await store.withLock('user:a@x.com', 5_000, async () => 'done'), 'done', 'a release that never answers holds nothing up')
+  release = async () => { throw new Error('store down') }
+  await store.withLock('user:a@x.com', 5_000, async () => {})
+  await new Promise(r => setImmediate(r))
+  assert.deepEqual(logs, [{ edge: 'store', level: 'warn', msg: 'lock release failed', lock: 'user:a@x.com', error: 'store down' }])
+})
+
 // Flushes the database: only a disposable Redis named by TEST_REDIS_URL, never REDIS_URL (the edge's, as offboarding exports it).
 test('redis store: incrementBy, getCount, deleteDoc, removeFromSet, and incrementBy sets a millisecond expiry', { skip: !process.env.TEST_REDIS_URL && 'set TEST_REDIS_URL to a disposable Redis to run' }, async () => {
   const { createClient } = await import('redis')

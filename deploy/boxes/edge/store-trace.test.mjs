@@ -114,14 +114,16 @@ test('store round trips per request path, cold and warm, at the Mumbai edge\'s s
   const cells = new Map(['us-east-1', 'ap-south-1'].map(region => [region, { region, Sandbox, proxy: proxyUrl, bucket: `b-${region}`, maxUnits: 0, presignGet: async () => undefined, presignPut: async () => 'P' }]))
 
   /** A new edge process over the shared data, wired as main() wires it: its own store with the read cache on at
-   *  PLACEMENT_CACHE_MS and subscribed. The box touches and the budgets' additions (a call's charge, the meter's token
-   *  counts), which the code fires and forgets (budget.test.mjs shows they hold nothing up), are flagged off the path. */
+   *  PLACEMENT_CACHE_MS and subscribed. The box touches, the budgets' additions (a call's charge, the meter's token
+   *  counts) and a door key's last-use write, which the code fires and forgets (budget.test.mjs and keys.test.mjs show
+   *  they hold nothing up), are flagged off the path. */
   async function edge() {
     const store = await t.connect({ cacheMs: cfg.placementCacheMs })
     const proj = projects({ store, admitted: () => true, log: silent })
     const box = boxes({ cells, store, cfg, edgeKey: EDGE_KEY, log: silent })
     const traced = { ...box, touch: (id) => t.offPath(() => box.touch(id)) }
-    const keys = doorKeys({ store, projects: proj, admitted: (e) => admitted(cfg.allowed, e), log: silent })
+    const lastUse = { ...store, putDoc: (k, v) => (k.startsWith('key-used:') ? t.offPath(() => store.putDoc(k, v)) : store.putDoc(k, v)) }
+    const keys = doorKeys({ store: lastUse, projects: proj, admitted: (e) => admitted(cfg.allowed, e), log: silent })
     const siteHostOf = (p) => boxSite(cfg, p).host
     const mumbo = mumboForwarder({ box: traced, boxFetch: boxFetcher(cfg), edgeKey: EDGE_KEY, siteHostOf, log: silent })
     const relay = projectRelay({ projects: proj, box: traced, boxFetch: boxFetcher(cfg), siteHostOf, edgeHost: PUBLIC, log: silent })
@@ -168,14 +170,14 @@ test('store round trips per request path, cold and warm, at the Mumbai edge\'s s
   if (process.env.STORE_TRACE) appendFileSync(process.env.STORE_TRACE, out.join('\n'))
   // [depth, total] per run; for the stream, the depth at its first byte, cold and warm.
   assert.deepEqual(counts, {
-    '(a) door: agent_read': { cold: [6, 9], warm: [0, 3] },
-    '(a) door: agent_send (charged to the budgets)': { cold: [7, 12], warm: [0, 4] },
-    '(b) app request: the person\'s box': { cold: [4, 7], warm: [0, 3] },
-    '(b) app request: a project\'s box': { cold: [4, 7], warm: [0, 3] },
+    '(a) door: agent_read': { cold: [3, 7], warm: [0, 3] },
+    '(a) door: agent_send (charged to the budgets)': { cold: [4, 10], warm: [0, 4] },
+    '(b) app request: the person\'s box': { cold: [2, 5], warm: [0, 3] },
+    '(b) app request: a project\'s box': { cold: [2, 5], warm: [0, 3] },
     '(c) model host call (streamed)': { cold: [1, 10], warm: [0, 6], firstByte: [1, 0] },
     '(c) model host call, project box (streamed)': { cold: [2, 11], warm: [0, 6], firstByte: [2, 0] },
-    '(d) live view connect': { cold: [4, 7], warm: [0, 3] },
-    '(e) door: project_status': { cold: [6, 6], warm: [0, 0] },
-    '(e) door: project_message (charged to the budgets, through the relay)': { cold: [7, 9], warm: [0, 1] },
+    '(d) live view connect': { cold: [2, 5], warm: [0, 3] },
+    '(e) door: project_status': { cold: [3, 4], warm: [0, 0] },
+    '(e) door: project_message (charged to the budgets, through the relay)': { cold: [4, 7], warm: [0, 1] },
   })
 })

@@ -1755,6 +1755,44 @@ test('read cache: another task\'s write of the box record or the placement doc, 
   } finally { await Promise.all([a.close(), b.close()]) }
 })
 
+test('two cold requests at once for a paused box, on two edge tasks, resume it once: the second reads its record again under the lock; a running box then takes no lock', async () => {
+  // Messages land late, so the second task still holds its copy of the paused record when it takes the lock.
+  const redis = fakeRedis({ deliverMs: 500 }); const { us, cells } = twoCells()
+  const tasks = [await cachedTask(redis), await cachedTask(redis)]
+  us.run('u1', 'a@x.com', 'paused')
+  const connect = us.Sandbox.connect
+  us.Sandbox.connect = async (id) => { us.sandboxes.get(id).state = 'running'; return connect(id) }
+  const raw = redis.client()
+  await raw.set('doc:person:a@x.com', JSON.stringify({ region: 'us-east-1', at: 1 }))
+  await raw.set('box:u1', JSON.stringify({ email: 'a@x.com', region: 'us-east-1', host: cfg.publicHost, ports: PORTS, launch: 'old', active: 1, extended: 1, backedUp: 1, paused: true }))
+  const locks = []
+  const edges = tasks.map(store => boxes({ cells, store: { ...store, withLock: (key, ...a) => { locks.push(key); return store.withLock(key, ...a) } }, cfg: { ...cfg, placementCacheMs: 30_000 }, edgeKey: 'k', log: () => {} }))
+  try {
+    for (const store of tasks) assert.equal((await store.getBox('u1')).paused, true, 'each task\'s copy is the paused record')
+    const [x, y] = await Promise.all(edges.map(b => b.ensure('a@x.com')))
+    assert.deepEqual([x.id, y.id, x.token, y.token], ['u1', 'u1', 'launch', 'launch'])
+    assert.deepEqual(kinds(us, 'connect'), [['connect', 'u1']], 'resumed once')
+    assert.deepEqual(locks, ['user:a@x.com', 'user:a@x.com'])
+    for (const b of edges) { b.uncache('a@x.com'); assert.equal((await b.ensure('a@x.com')).id, 'u1') }
+    assert.equal(locks.length, 2, 'the running box is routed without the lock')
+  } finally { await Promise.all(tasks.map(s => s.close())) }
+})
+
+test('pauseIdle reads the record again under the lock and skips a box whose activity moved since the sweep listed it', async () => {
+  const { us, cells } = twoCells(); const store = memoryStore(); const logs = []
+  us.run('u1', 'a@x.com')
+  await store.putBox('u1', { email: 'a@x.com', region: 'us-east-1', launch: 'L', active: 1, extended: 1, backedUp: 1, paused: false })
+  const b = boxes({ cells, store, cfg, edgeKey: 'k', log: (l) => logs.push(JSON.parse(l)) })
+  // A request lands while the idle box's backup runs, between the listing and the pause.
+  us.presignPut = async () => { await b.touch('u1'); return 'PUT' }
+  await b.sweep(Date.now() + cfg.idleMs)
+  assert.deepEqual([kinds(us, 'pause'), (await store.getBox('u1')).paused], [[], false])
+  assert.deepEqual(logs.filter(l => l.msg?.startsWith('pause')), [{ edge: 'box', msg: 'pause skipped: in use since the listing', user: 'a@x.com', box: 'u1' }])
+  us.presignPut = async () => 'PUT'
+  await b.sweep(Date.now() + cfg.idleMs + 1)
+  assert.deepEqual([kinds(us, 'pause'), (await store.getBox('u1')).paused], [[['pause', 'u1']], true], 'idle since the listing: paused')
+})
+
 // ---- B47: a box E2B still runs is never killed for being unreachable
 /** Boxes over two fake cells, with a person box `u1` that us-east-1's E2B lists in `state` and a record without a launch
  *  token (unless `record` gives one), so ensure resumes or repairs it. `connect(id, original)` replaces E2B's connect.

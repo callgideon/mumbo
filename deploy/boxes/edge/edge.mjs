@@ -1313,9 +1313,10 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
   /** The principal's cell, under its user lock. A principal with a placement doc, and every project (its doc, or
    *  us-east-1), is placed by it. A person without one gets a doc, once: us-east-1 when they have anything there (a box,
    *  a restore record or a backup) or when this edge's own region is us-east-1, otherwise cfg.edgeRegion. A failed
-   *  lookup throws before anything is written. */
+   *  lookup throws before anything is written. The doc is read fresh: a copy from before the lock may predate another
+   *  edge's placement. */
   async function placement(principal) {
-    const doc = await store.getDoc(placementKey(principal))
+    const doc = await store.getDoc(placementKey(principal), { fresh: true })
     if (doc || principal.startsWith('project:')) return cellOf(doc)
     const legacy = cellIn(cells, LEGACY_REGION)
     const stays = cfg.edgeRegion === LEGACY_REGION || await find(legacy, principal) || await store.getDoc(restoreKey(principal))
@@ -1326,57 +1327,71 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
     say({ msg: 'placed', user: principal, region })
     return cell
   }
-  /** The user's running box: id, dsh launch token, E2B traffic token and its cell's client-proxy. Creates, resumes or
-   *  repairs as needed; within cfg.placementCacheMs of the last one, this replica's answer again while the read cache is
-   *  live and nothing invalidated it. */
+  /** The user's running box: id, dsh launch token, E2B traffic token and its cell's client-proxy. A box E2B lists running
+   *  whose record routes it is used without the user lock; creating, resuming or repairing one takes the lock (repair).
+   *  Within cfg.placementCacheMs of the last one, this replica's answer again while the read cache is live and nothing
+   *  invalidated it. */
   async function ensure(email) {
     const hit = cached.get(email)
     if (hit && hit.until > Date.now() && store.cacheLive()) return hit.target
     const seen = changes
-    const target = await store.withLock(`user:${email}`, LOCK_MS, async () => {
-      const cell = await placement(email)
-      const found = await find(cell, email)   // an API error throws here: never create a second box on a failed lookup
-      if (found === undefined) return pick(await create(email, cell))
-      const id = found.sandboxId
-      const known = await store.getBox(id, { fresh: true })
-      // Another replica is still creating it (the user lock can expire during a long restore): wait, do not start it.
-      if (known?.creating) throw Object.assign(new Error('box is being created'), { status: 503 })
-      if (found.state === 'paused' || !known || known.paused || !known.launch) {
-        try {
-          const box = await cell.Sandbox.connect(id, { timeoutMs: timeout() })
-          // A record without ports (an adopted box, or one an edge before B24 created) learns them from the box.
-          const ports = known?.ports ?? await portsOf(box)
-          if (!(await dshUp(box, ports))) {
-            say({ level: 'warn', msg: 'dsh down after resume; restarting', user: email, box: id })
-            await run(box, '/root/.mumbo/start.sh')
-          }
-          const now = Date.now()
-          await store.putBox(id, { email, region: cell.region, host: known?.host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), ports, active: now, extended: now, backedUp: known?.backedUp ?? 0, paused: false, ...(known?.restored && { restored: known.restored }) })
-        } catch (error) {
-          if (error.capacity || /capacity|place sandbox|rate limit/i.test(error.message)) throw Object.assign(error, { capacity: true })
-          if (error instanceof SandboxNotFoundError) {
-            await store.deleteBox(id)
-            say({ level: 'warn', msg: 'dropped missing box', user: email, box: id })
-            return pick(await create(email, cell))
-          }
-          // Without an answer that the box cannot run, the box and its record stay as they are, and the next visit tries
-          // again: during a client-proxy outage a recreate would fail too, and the box would be lost (RUNBOOK "Box unreachable").
-          if (!cannotRun(error, found.state === 'paused')) {
-            log(JSON.stringify({ edge: 'error', level: 'error', msg: 'box unreachable', user: email, box: id, region: cell.region, error: error.message }))
-            throw Object.assign(error, { status: 503 })
-          }
-          // A snapshot that cannot be resumed (its node died before the upload finished), or dsh that never comes back,
-          // must not strand the user: drop the box and rebuild from the latest S3 backup.
-          say({ level: 'error', msg: 'resume failed; recreating from backup', user: email, box: id, error: error.message })
-          await cell.Sandbox.kill(id).catch(() => {})
-          await store.deleteBox(id)
-          return pick(await create(email, cell))
-        }
-      }
-      return pick(id)
-    })
+    const target = await running(email) ?? await store.withLock(`user:${email}`, LOCK_MS, () => repair(email))
     if (cfg.placementCacheMs > 0 && seen === changes && store.cacheLive()) cached.set(email, { target, until: Date.now() + cfg.placementCacheMs })
     return target
+  }
+  /** The principal's box when its cell's E2B lists it running and its record routes it (not creating or paused, with a
+   *  launch token); undefined when it is to be created, resumed or repaired, or when a person has no placement doc yet. */
+  async function running(email) {
+    const doc = await store.getDoc(placementKey(email))
+    if (!doc && !email.startsWith('project:')) return undefined
+    const found = await find(cellOf(doc), email)  // an API error throws here, as under the lock
+    if (found?.state !== 'running') return undefined
+    const b = await store.getBox(found.sandboxId)
+    return b && !b.creating && !b.paused && b.launch ? pick(found.sandboxId) : undefined
+  }
+  /** ensure's work under the user lock. The placement, E2B's listing and the box record are all read again here, so of
+   *  two requests that both found the box paused, the second finds it resumed and resumes nothing. */
+  async function repair(email) {
+    const cell = await placement(email)
+    const found = await find(cell, email)   // an API error throws here: never create a second box on a failed lookup
+    if (found === undefined) return pick(await create(email, cell))
+    const id = found.sandboxId
+    const known = await store.getBox(id, { fresh: true })
+    // Another replica is still creating it (the user lock can expire during a long restore): wait, do not start it.
+    if (known?.creating) throw Object.assign(new Error('box is being created'), { status: 503 })
+    if (found.state === 'paused' || !known || known.paused || !known.launch) {
+      try {
+        const box = await cell.Sandbox.connect(id, { timeoutMs: timeout() })
+        // A record without ports (an adopted box, or one an edge before B24 created) learns them from the box.
+        const ports = known?.ports ?? await portsOf(box)
+        if (!(await dshUp(box, ports))) {
+          say({ level: 'warn', msg: 'dsh down after resume; restarting', user: email, box: id })
+          await run(box, '/root/.mumbo/start.sh')
+        }
+        const now = Date.now()
+        await store.putBox(id, { email, region: cell.region, host: known?.host, launch: await launchToken(box), traffic: box.trafficAccessToken, memberAuth: await memberAuth(box), ports, active: now, extended: now, backedUp: known?.backedUp ?? 0, paused: false, ...(known?.restored && { restored: known.restored }) })
+      } catch (error) {
+        if (error.capacity || /capacity|place sandbox|rate limit/i.test(error.message)) throw Object.assign(error, { capacity: true })
+        if (error instanceof SandboxNotFoundError) {
+          await store.deleteBox(id)
+          say({ level: 'warn', msg: 'dropped missing box', user: email, box: id })
+          return pick(await create(email, cell))
+        }
+        // Without an answer that the box cannot run, the box and its record stay as they are, and the next visit tries
+        // again: during a client-proxy outage a recreate would fail too, and the box would be lost (RUNBOOK "Box unreachable").
+        if (!cannotRun(error, found.state === 'paused')) {
+          log(JSON.stringify({ edge: 'error', level: 'error', msg: 'box unreachable', user: email, box: id, region: cell.region, error: error.message }))
+          throw Object.assign(error, { status: 503 })
+        }
+        // A snapshot that cannot be resumed (its node died before the upload finished), or dsh that never comes back,
+        // must not strand the user: drop the box and rebuild from the latest S3 backup.
+        say({ level: 'error', msg: 'resume failed; recreating from backup', user: email, box: id, error: error.message })
+        await cell.Sandbox.kill(id).catch(() => {})
+        await store.deleteBox(id)
+        return pick(await create(email, cell))
+      }
+    }
+    return pick(id)
   }
   const pick = async (id) => {
     const b = await store.getBox(id)
@@ -1496,6 +1511,9 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
   }
   async function pauseIdle(b) {
     await store.withLock(`user:${b.email}`, LOCK_MS, async () => {
+      // `b` is the sweep's listing: a request since then (its activity, or a resume) moved `active`, and the box stays up.
+      // Read fresh, since an activity patch sends no invalidation.
+      if ((await store.getBox(b.id, { fresh: true }))?.active !== b.active) return say({ msg: 'pause skipped: in use since the listing', user: b.email, box: b.id })
       // A paused box cannot run its scheduled tasks, so remember when the next one is due and wake the box then.
       const wakeAt = await b.cell.Sandbox.connect(b.id, { timeoutMs: timeout() }).then(box => run(box, NEXT_WAKE_COMMAND, 30_000)).then(Number).catch(() => 0) || undefined
       await b.cell.Sandbox.pause(b.id)

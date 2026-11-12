@@ -106,8 +106,8 @@ export function doorKeys({ store, projects, admitted, now = () => Date.now(), lo
     /**
      * The record of a bearer `token`, checked as jumbo's MCP server does. Format and checksum are checked before any store
      * read; the record comes from the read cache, and revocation, expiry and the allowlist are checked on every call.
-     * Records the use in `key-used:<id>` at most once a minute per key and process (a failed write is logged, never fatal,
-     * and not retried within that minute).
+     * Records the use in `key-used:<id>` at most once a minute per key and process, without waiting for the write (a failed
+     * write is logged, never fatal, and not retried within that minute).
      * @throws 403 user_key_required for a box token (a person's assistant or a project's coordinator); 401
      *   invalid_api_key for anything else that is not a stored key; 401 key_revoked; 401 key_expired from expiresAt on;
      *   403 user_disabled once the owner is off the allowlist.
@@ -122,7 +122,7 @@ export function doorKeys({ store, projects, admitted, now = () => Date.now(), lo
       const at = now(), last = lastWrite.get(k.id)
       if (last === undefined || at - last >= LAST_USE_MS) {
         lastWrite.set(k.id, at)
-        await store.putDoc(`key-used:${k.id}`, { at }).catch((e) => say({ level: 'warn', msg: 'last use not written', key: k.id, error: e.message }))
+        store.putDoc(`key-used:${k.id}`, { at }).catch((e) => say({ level: 'warn', msg: 'last use not written', key: k.id, error: e.message }))
       }
       return k
     },
