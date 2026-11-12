@@ -1755,6 +1755,32 @@ test('read cache: another task\'s write of the box record or the placement doc, 
   } finally { await Promise.all([a.close(), b.close()]) }
 })
 
+test('read cache: a lock-free ensure keeps no target when a pause of its box landed during it, written by this task as by another', async () => {
+  for (const own of [false, true]) {
+    const redis = fakeRedis(); const { us, cells } = twoCells()
+    const b = await cachedTask(redis), other = await cachedTask(redis)
+    us.run('u1', 'a@x.com')
+    const raw = redis.client()
+    await raw.set('doc:person:a@x.com', JSON.stringify({ region: 'us-east-1', at: 1 }))
+    // No masked host, so pick asks E2B; the idle pause (this task's sweep, or another's) lands before E2B answers.
+    await raw.set('box:u1', JSON.stringify({ email: 'a@x.com', region: 'us-east-1', ports: PORTS, launch: 'L', active: 1, extended: 1, backedUp: 1, paused: false }))
+    const getInfo = us.Sandbox.getInfo
+    us.Sandbox.getInfo = async (id) => {
+      us.Sandbox.getInfo = getInfo; us.sandboxes.get(id).state = 'paused'
+      await (own ? b : other).patchBox(id, { paused: true, wakeAt: undefined }); await landed()
+      return getInfo(id)
+    }
+    const box = boxes({ cells, store: b, cfg: { ...cfg, placementCacheMs: 300_000 }, edgeKey: 'k', log: () => {} })
+    try {
+      assert.equal((await box.ensure('a@x.com')).id, 'u1')
+      assert.equal((await b.getBox('u1')).paused, true)
+      const lists = kinds(us, 'list').length
+      await box.ensure('a@x.com')
+      assert.ok(kinds(us, 'list').length > lists, `${own ? 'this' : 'another'} task's pause: the next ensure asks E2B again`)
+    } finally { await Promise.all([b.close(), other.close()]) }
+  }
+})
+
 test('two cold requests at once for a paused box, on two edge tasks, resume it once: the second reads its record again under the lock; a running box then takes no lock', async () => {
   // Messages land late, so the second task still holds its copy of the paused record when it takes the lock.
   const redis = fakeRedis({ deliverMs: 500 }); const { us, cells } = twoCells()

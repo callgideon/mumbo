@@ -1211,13 +1211,15 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
   // outside the edge without that message (killed in E2B) is reached at its old target until the entry expires, or a
   // proxy error, the client-proxy's not-found answer or a 401 to a navigation uncaches it (userServer).
   const cached = new Map()  // principal -> { target, until }
-  let changes = 0  // other tasks' invalidations seen, so an ensure that overlapped one keeps no target
+  // Invalidations that can drop a target, other tasks' and this task's own, so an ensure that overlapped one keeps no target.
+  const changes = { remote: 0, own: 0 }
   store.onInvalidate(({ kind, id }, remote) => {
-    if (remote) changes++
     if (kind === 'person') cached.delete(id)
     else if (kind === 'project') cached.delete(`project:${id}`)
     else if (kind === 'box') { for (const [principal, e] of cached) if (e.target.id === id) cached.delete(principal) }
     else if (kind === 'all') cached.clear()
+    else return
+    changes[remote ? 'remote' : 'own']++
   })
 
   async function all(cell, query) {
@@ -1337,9 +1339,13 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
   async function ensure(email, placed) {
     const hit = cached.get(email)
     if (hit && hit.until > Date.now() && store.cacheLive()) return hit.target
-    const seen = changes
-    const target = await running(email, placed) ?? await store.withLock(`user:${email}`, LOCK_MS, () => repair(email, placed))
-    if (cfg.placementCacheMs > 0 && seen === changes && store.cacheLive()) cached.set(email, { target, until: Date.now() + cfg.placementCacheMs })
+    const seen = { ...changes }
+    const free = await running(email, placed)
+    const target = free ?? await store.withLock(`user:${email}`, LOCK_MS, () => repair(email, placed))
+    // A lock-free answer overlaps this task's own writes too (its sweep's pause or delete takes no lock running waits for);
+    // repair's own writes are its answer, made under the user lock that pauseIdle and wake take.
+    const quiet = seen.remote === changes.remote && (!free || seen.own === changes.own)
+    if (cfg.placementCacheMs > 0 && quiet && store.cacheLive()) cached.set(email, { target, until: Date.now() + cfg.placementCacheMs })
     return target
   }
   /** The principal's box when its cell's E2B lists it running and its record routes it (not creating or paused, with a
