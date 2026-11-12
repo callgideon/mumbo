@@ -11,6 +11,7 @@ import RemoteAccessService, {
 } from '@deepseek-ai/dsh-api-remote-access'
 import {
   Remote,
+  RemoteError,
   RemoteScope,
   TypertRemoteService,
   type InvocationDescriptor,
@@ -44,6 +45,10 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
   }
   interface TypertContextMap {
     gatewayAccessScope: TypertContext<string>
+  }
+  interface RemoteErrorDetailsMap {
+    /** Test-only handler failure whose message quotes its argument. */
+    'fixture/echoed': {}
   }
   interface TypertResourceMap {
     /** Test-only resource kinds; the Gateway itself names no kind. */
@@ -164,6 +169,11 @@ class AccessFixture extends TypertRemoteService {
   broken(request: { readonly title: string }): string {
     void request
     throw new Error('fixture store unavailable')
+  }
+
+  @Remote
+  echoes(request: { readonly title: string }): string {
+    throw new RemoteError('fixture/echoed', `title refused: ${request.title}`, {})
   }
 
   @Remote
@@ -476,12 +486,12 @@ describe('Gateway access checks', () => {
 })
 
 describe('Gateway failure logging', () => {
-  /** POST one unary call through Connection's shared `/api` handler as `peer`. */
-  async function post(ctx: Context, peer: PeerScope, method: string, args: Record<string, unknown>): Promise<unknown> {
-    const response = await ctx.connection.createSharedFetchHandler('/api').fetch(new Request(`http://host/api/accessFixture/${method}`, {
+  /** POST one unary call to `endpoint` through Connection's shared `/api` handler as `peer`. */
+  async function post(ctx: Context, peer: PeerScope, endpoint: string, args: Record<string, unknown>): Promise<unknown> {
+    const response = await ctx.connection.createSharedFetchHandler('/api').fetch(new Request(`http://host/api/${endpoint}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ type: 'client-request', rpcId: 'rpc-1', method: `accessFixture/${method}`, payload: { args } }),
+      body: JSON.stringify({ type: 'client-request', rpcId: 'rpc-1', method: endpoint, payload: { args } }),
     }), peer)
     expect(response.status).toBe(200)
     return response.json()
@@ -492,7 +502,7 @@ describe('Gateway failure logging', () => {
     const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
     const error = vi.spyOn(ctx.logger, 'error').mockImplementation(() => {})
     const guest = ctx.connection.createPeer({ principal: GUEST })
-    await expect(post(ctx, guest, 'annotate', { request: { title: 'private words' } })).resolves.toMatchObject({
+    await expect(post(ctx, guest, 'accessFixture/annotate', { request: { title: 'private words' } })).resolves.toMatchObject({
       result: { ok: false, error: { code: 'remote-access/denied' } },
     })
     expect(warn.mock.calls).toEqual([[
@@ -506,7 +516,7 @@ describe('Gateway failure logging', () => {
     const { ctx } = await setup({ connection: true })
     const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
     const error = vi.spyOn(ctx.logger, 'error').mockImplementation(() => {})
-    await expect(post(ctx, ctx.connection.browserPeer, 'broken', { request: { title: 'private words' } })).resolves.toMatchObject({
+    await expect(post(ctx, ctx.connection.browserPeer, 'accessFixture/broken', { request: { title: 'private words' } })).resolves.toMatchObject({
       result: { ok: false, error: { code: 'gateway/internal', message: 'fixture store unavailable' } },
     })
     expect(error).toHaveBeenCalledOnce()
@@ -515,6 +525,39 @@ describe('Gateway failure logging', () => {
     expect(logged.message).toBe('fixture store unavailable')
     expect(logged.stack).toContain('broken')
     expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('logs only the code of a handler\'s Remote error, whose message may quote its arguments', async () => {
+    const { ctx } = await setup({ connection: true })
+    const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
+    const title = 'https://ann:s3cret-token@index.example/i.json'
+    await expect(post(ctx, ctx.connection.browserPeer, 'accessFixture/echoes', { request: { title } })).resolves.toMatchObject({
+      result: { ok: false, error: { code: 'fixture/echoed', message: `title refused: ${title}` } },
+    })
+    expect(warn.mock.calls).toEqual([['typert gateway: accessFixture/echoes failed (principal owner): fixture/echoed']])
+  })
+
+  it('logs a refused Remote event result: a fault at error, the Gateway\'s own refusal at warn', async () => {
+    const { ctx } = await setup({ connection: true })
+    const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
+    const error = vi.spyOn(ctx.logger, 'error').mockImplementation(() => {})
+    const args = { clientId: 'absent', eventId: 'absent', outcome: { kind: 'next' } }
+    await expect(post(ctx, ctx.connection.browserPeer, '$events/result', args)).resolves.toMatchObject({
+      result: { ok: false, error: { code: 'gateway/internal' } },
+    })
+    expect(error).toHaveBeenCalledExactlyOnceWith(
+      'typert gateway: $events/result failed (principal owner): gateway/internal: '
+      + 'typert gateway: Remote event result identifies no active event stream',
+      expect.any(Error),
+    )
+    await expect(post(ctx, ctx.connection.createPeer({ principal: GUEST }), '$events/result', args)).resolves.toMatchObject({
+      result: { ok: false, error: { code: 'gateway/invocation-unavailable' } },
+    })
+    expect(warn.mock.calls).toEqual([[
+      'typert gateway: $events/result failed (principal test-guest): gateway/invocation-unavailable: '
+      + 'typert gateway: $events/result: only owner Peers answer forwarded Remote events',
+    ]])
+    expect(error).toHaveBeenCalledOnce()
   })
 })
 

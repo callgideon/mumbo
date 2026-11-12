@@ -794,12 +794,15 @@ export class TypertGatewayService extends Service implements TypertGateway {
   /**
    * Log one failed unary call, then encode its failure. Connection answers every result with HTTP 200, so this line
    * is the Host's only record of a refused or failed call. It names the endpoint, the caller's principal kind, and
-   * the code and message, never the arguments: a Remote failure at warn, any other failure at error with its stack.
+   * the code, never the arguments. A Remote failure logs at warn, with its message only when the Gateway wrote it (a
+   * {@link TypertGatewayError} or the access denial), since a handler's message may quote its arguments. Any other
+   * failure logs at error with the error, whose message and stack its thrower wrote.
    */
   private loggedRpcFailure(endpoint: string, peer: PeerScope, error: unknown): ConnectionRpcResult {
     const failure = rpcError(error)
-    const line = `typert gateway: ${endpoint} failed (principal ${peer.principal.kind}): ${failure.code}: ${failure.message}`
-    if (remoteErrorOf(error) === undefined) this.ctx.logger.error(line, error)
+    const line = `typert gateway: ${endpoint} failed (principal ${peer.principal.kind}): ${failure.code}`
+    if (remoteErrorOf(error) === undefined) this.ctx.logger.error(`${line}: ${failure.message}`, error)
+    else if (error instanceof TypertGatewayError || failure.code === 'remote-access/denied') this.ctx.logger.warn(`${line}: ${failure.message}`)
     else this.ctx.logger.warn(line)
     return { ok: false, error: failure }
   }
