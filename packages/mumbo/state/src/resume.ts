@@ -27,7 +27,7 @@ declare module '@deepseek-ai/dsh-llm' {
 const LAST_MESSAGE_CHARS = 400
 
 /** The message of the host log line each comparison writes; its fields follow as one object. */
-const RECONCILE_LOG ='mumbo-state: resume reconcile'
+const RECONCILE_LOG = 'mumbo-state: resume reconcile'
 
 /** The resume facts the projection recorded at the end-seed. */
 type Resume = NonNullable<MumboState['resume']>
