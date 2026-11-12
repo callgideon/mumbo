@@ -43,6 +43,11 @@ export class MemoryMediaPool {
    * untouched after a durability failure.
    */
   failNextWrites = 0
+  /**
+   * While set, every load and mutation waits for it before touching the medium, so a spec can hold a consumer in
+   * the middle of its load or its next write.
+   */
+  gate: Promise<void> | undefined
 
   /** Consume one injected failure, throwing in a rejected write's place. */
   consumeInjectedFailure(): void {
@@ -72,6 +77,7 @@ class MemoryKvUnit implements KvUnit {
 
   async loadAll(): Promise<{ tables: Record<string, Record<string, unknown>>; global: unknown }> {
     this.assertOpen()
+    if (this.pool.gate !== undefined) await this.pool.gate
     const tables: Record<string, Record<string, unknown>> = {}
     for (const table of this.descriptor.tables) {
       tables[table] = Object.fromEntries(this.medium.tables.get(table) ?? [])
@@ -81,6 +87,7 @@ class MemoryKvUnit implements KvUnit {
 
   async putRecord(table: string, key: string, value: unknown): Promise<void> {
     this.assertOpen()
+    if (this.pool.gate !== undefined) await this.pool.gate
     this.pool.consumeInjectedFailure()
     let records = this.medium.tables.get(table)
     if (records === undefined) {
@@ -97,6 +104,7 @@ class MemoryKvUnit implements KvUnit {
 
   async deleteRecords(table: string, keys: readonly string[]): Promise<void> {
     this.assertOpen()
+    if (this.pool.gate !== undefined) await this.pool.gate
     const records = this.medium.tables.get(table)
     if (records === undefined) return
     const present = [...new Set(keys)].filter(key => records.has(key))
@@ -108,6 +116,7 @@ class MemoryKvUnit implements KvUnit {
 
   async setGlobal(value: unknown): Promise<void> {
     this.assertOpen()
+    if (this.pool.gate !== undefined) await this.pool.gate
     this.pool.consumeInjectedFailure()
     this.medium.global = value
     this.pool.versions.set(this.descriptor.name, this.descriptor.version)
