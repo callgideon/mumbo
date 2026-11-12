@@ -1422,7 +1422,7 @@ This replaces "A newcomer's region" above and step 4 of section 17a's flow. A ne
 | Task | Contents | Depends on |
 |---|---|---|
 | **B39** sign-up region | Step 2's page and route, the person record, step 3's region text, step 4's welcome line, capacity per cell on the page, the probe script with its nonce CSP, the one-cell skip. Tests: preselection from the probes and without script, a full nearest cell, the last-slot race, a refused cross-origin POST and an unknown region, an existing person skipping the page. The person record is written at sign-up, so a project made before the first box visit takes the person's region, not `us-east-1`. A GIF of the flow (GUI PR) | B21 |
-| **R-probe** (mumbo) | One ALB fixed-response rule per region for `edge-<region>.app.mumbo.si` `/edge/ping`; the DNS records are the founder's, with R7 | R6 |
+| **R-probe** (mumbo) | One ALB fixed-response rule per region for `edge-<region>.app.mumbo.si` `/edge/ping`; the DNS records are the founder's, with R7. **[2026-11-12]** The probe shows only which region answered. R7's latency records judge health by alias target-health evaluation, so a region whose edge has no healthy task drops out. Mumbai's edge alarms mail through the Mumbai cell's topic, so its confirmation click comes before R8 | R6 |
 
 ## 17d. Sync between the laptop and the computer (N2) **[founder: 2026-11-11, "also create a sync system between local and VM - for browser and file-storage", and a desktop-app browser that switches between local and VM modes; my call on the how]**
 

@@ -2452,7 +2452,7 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 </tr>
 <tr>
 <td><strong>R-probe</strong> (mumbo)</td>
-<td>One ALB fixed-response rule per region for <code>edge-&lt;region&gt;.app.mumbo.si</code> <code>/edge/ping</code>; the DNS records are the founder's, with R7</td>
+<td>One ALB fixed-response rule per region for <code>edge-&lt;region&gt;.app.mumbo.si</code> <code>/edge/ping</code>; the DNS records are the founder's, with R7. <strong>[2026-11-12]</strong> The probe shows only which region answered. R7's latency records judge health by alias target-health evaluation, so a region whose edge has no healthy task drops out. Mumbai's edge alarms mail through the Mumbai cell's topic, so its confirmation click comes before R8</td>
 <td>R6</td>
 </tr>
 </tbody>
