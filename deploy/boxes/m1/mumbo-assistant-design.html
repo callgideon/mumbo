@@ -2814,7 +2814,7 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 </tr>
 <tr>
 <td><strong>K2</strong> (R5) the resume reconciler</td>
-<td>At the first step after a resume, it compares the log (jobs without <code>job/settled</code>, subagents without a completion, workflows) with the live registries, and injects one logged notice: what died, what finished and where its result is, and that the goal needs a person to resume it. The same fact appears in <code>needs_you</code>. Tests: a log with an unsettled job yields exactly one notice</td>
+<td>At the first step after a resume, it reads the log (jobs without <code>job/settled</code> or settled by teardown, subagents without a completion, workflows) and injects one logged notice: what died, what finished and where its result is, and that the goal needs a person to resume it. The same fact appears in <code>needs_you</code>. Tests: a log with an unsettled job yields exactly one notice.<br><strong>[2026-11-12, build review]</strong> It decides from the log alone: a job's owner settles it with <code>teardown</code> at shutdown, so a live-registry check could only hide one. Settled jobs and ended runs leave the state at the next <code>step/start</code>. A child counts as stopped when its last turn is open, interrupted or aborted by its Agent's disposal, and only if its last event falls inside the run that just ended, so a second restart doesn't repeat it. A disarmed goal reads &quot;automatic rounds stopped&quot;, because the goal driver also disarms on errors and cancelled turns, not only on restarts</td>
 <td>With K1</td>
 </tr>
 <tr>
