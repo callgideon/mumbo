@@ -523,6 +523,61 @@ Each edge task whose `PLACEMENT_CACHE_MS` is above 0 keeps copies of the store r
   When you cannot send it (no tunnel or store access), wait 5 minutes, the Mumbai edge's `placement_cache_ms_ap_south_1` (300000), before relying on the change through the Mumbai edge; the `us-east-1` edge keeps no copies and sees it at once. A box killed outside the edge needs no message: the first request through Mumbai fails at the client-proxy (the person sees one error), drops the copy and ensures the box again. A rollback of either edge below R6b sets `placement_cache_ms_ap_south_1 = 0` in the same apply instead.
 - **Rollout and rollback.** An edge image before R6b publishes nothing. While tasks of such an image run beside caching tasks (during the deploy that brings the cache in, or a rollback of one edge only), their writes can leave other tasks' copies stale for up to `PLACEMENT_CACHE_MS`: once both edges run one image, send `PUBLISH edge:invalidate all`, and for a rollback of one edge only, set the other edge's `placement_cache_ms` to 0 until both match again.
 
+### Recording E2B answers
+`edge/record-resume.e2e.mjs` records the E2B API's raw answers to a resume, as redacted fixtures in `edge/testing/fixtures/resume/` that the edge's tests replay through the real SDK (`edge/testing/e2b-answers.mjs`). It acts only on throwaway sandboxes it creates itself: their metadata is `purpose: b47b-recording` and a nonce of the run, never `user` or `owner`, so no edge adopts, backs up or pauses them, and before it connects to, pauses, resumes or kills a sandbox it checks that E2B lists that sandbox with the run's nonce. Two cases: `guest-unresponsive` stops envd (SIGSTOP) in a running throwaway, then records an in-box command, a strict pause and three resumes (two plain, one with `memory: false`); `full-cell` pauses a victim, fills the cell with throwaways until a create fails, then records the victim's resume. It prints statuses, error codes, class names and durations, never a key, a token or an id. A fixture that would still hold the API key, a throwaway id, an `e2b_` string, a UUID or a run of 32 token characters is not written, and the run exits 1.
+
+**Where and when: `ap-south-1` only, before R8, with the founder's go-ahead.** The fill makes the Mumbai cell refuse every create and resume for about 15 minutes, and while hugepage admission is off a running neighbour can crash, so it runs only while Mumbai holds no person's or project's box; never in `us-east-1`. One go-ahead covers the fill and the client-proxy rule of step 1, a production change; the script takes its date as `--go-ahead <YYYY-MM-DD>` and refuses any `CELL` but `ap-south-1`. `full-cell prepare` and `fill` refuse while the cell lists any sandbox but a recording throwaway, unless its owner's email is named with `--lose <email>`: a test account the founder agreed to lose (a project box, never). Run `npm ci --prefix deploy/boxes/edge` once, then from the repository root:
+1. Add the temporary client-proxy rule (the internal NLB admits :3002 only from the edges) and open the tunnels through the Mumbai node, in the same shell:
+   ```sh
+   R=ap-south-1
+   NODE=$(aws autoscaling describe-auto-scaling-groups --region $R --auto-scaling-group-names mumbo-boxes-aps1-nodes \
+     --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`]|[0].InstanceId' --output text)
+   NLB_SG=$(aws ec2 describe-security-groups --region $R --filters Name=group-name,Values=mumbo-boxes-aps1-internal-nlb --query 'SecurityGroups[0].GroupId' --output text)
+   NODE_SG=$(aws ec2 describe-security-groups --region $R --filters Name=group-name,Values=mumbo-boxes-aps1-nodes --query 'SecurityGroups[0].GroupId' --output text)
+   RULE=$(aws ec2 authorize-security-group-ingress --region $R --group-id $NLB_SG --query 'SecurityGroupRules[0].SecurityGroupRuleId' --output text \
+     --ip-permissions "IpProtocol=tcp,FromPort=3002,ToPort=3002,UserIdGroupPairs=[{GroupId=$NODE_SG,Description=TEMP-recording}]")
+   aws ssm start-session --region $R --target $NODE --document-name AWS-StartPortForwardingSessionToRemoteHost \
+     --parameters host=api.ap-south-1.boxes.internal,portNumber=3000,localPortNumber=13000 &
+   aws ssm start-session --region $R --target $NODE --document-name AWS-StartPortForwardingSessionToRemoteHost \
+     --parameters host=sandbox.ap-south-1.boxes.internal,portNumber=3002,localPortNumber=13002 &
+   export E2B_API_URL=http://127.0.0.1:13000 E2B_SANDBOX_URL=http://127.0.0.1:13002 CELL=ap-south-1
+   export E2B_API_KEY=$(aws secretsmanager get-secret-value --region $R --secret-id mumbo-boxes-aps1/e2b --query SecretString --output text | jq -r .TEAM_API_KEY)   # never echoed
+   ```
+2. The unresponsive guest, about 3 minutes. It kills its throwaway at the end and writes `guest-unresponsive-<step>.ap-south-1.json` for the steps `command`, `pause-strict` (and `pause` when the strict pause answered 503), `resume`, `resume-2` and `resume-reboot`; a resume that works ends the resumes there:
+   ```sh
+   node deploy/boxes/edge/record-resume.e2e.mjs guest-unresponsive --go-ahead <YYYY-MM-DD>
+   ```
+3. The full cell, its four commands in a row (the fillers die 20 minutes after their create). `prepare` creates and pauses the victim, a `mumbo-child`. `fill` creates `mumbo-project` throwaways, then `mumbo-child` ones, each faulting about 85% of its memory into hugepages, until a create fails; it records the failing creates as `create-project` and `create`. `resume` records the victim's resume as `resume`:
+   ```sh
+   node deploy/boxes/edge/record-resume.e2e.mjs full-cell prepare --go-ahead <YYYY-MM-DD> [--lose <email>]
+   node deploy/boxes/edge/record-resume.e2e.mjs full-cell fill --go-ahead <YYYY-MM-DD> [--lose <email>]
+   node deploy/boxes/edge/record-resume.e2e.mjs full-cell resume --go-ahead <YYYY-MM-DD>
+   node deploy/boxes/edge/record-resume.e2e.mjs cleanup
+   ```
+   Optionally read the node's hugepages before `fill` and after `resume`, and add the numbers by hand to `full-cell-resume.ap-south-1.json` as `"notes": { "hugePages": … }`:
+   ```sh
+   CMD=$(aws ssm send-command --region $R --instance-ids $NODE --document-name AWS-RunShellScript --query Command.CommandId --output text --parameters 'commands=["grep HugePages_ /proc/meminfo"]')
+   aws ssm get-command-invocation --region $R --command-id $CMD --instance-id $NODE --query StandardOutputContent --output text
+   ```
+   `cleanup` kills every throwaway of the open run, found by the nonce kept in `edge/record-resume.local.json` (not committed), deletes that file, and prints how many recording throwaways of other runs remain in the cell, which must be 0. A run that stopped part way is cleaned up the same way, and a new run refuses to start while one is open. Throwaways of a run whose file is lost are killed by purpose, with the tunnel and variables still set:
+   ```sh
+   (cd deploy/boxes/edge && node --input-type=module -e "import { Sandbox } from 'e2b'
+   const p = Sandbox.list({ query: { metadata: { purpose: 'b47b-recording' }, state: ['running', 'paused'] } })
+   while (p.hasNext) for (const s of await p.nextItems()) await Sandbox.kill(s.sandboxId)")
+   ```
+4. Close the tunnels and remove the rule; the last command prints nothing once it is gone:
+   ```sh
+   kill %1 %2
+   aws ec2 revoke-security-group-ingress --region $R --group-id $NLB_SG --security-group-rule-ids $RULE
+   aws ec2 describe-security-group-rules --region $R --filters Name=group-id,Values=$NLB_SG --query "SecurityGroupRules[?Description=='TEMP-recording'].SecurityGroupRuleId" --output text
+   ```
+5. Read the new fixtures' statuses, codes and messages (every throwaway id reads `<sandbox>`), run `(cd deploy/boxes/edge && node --test record-resume.test.mjs)`, whose last test checks every committed fixture for leaks, and commit them. Nothing is written to the store, so no `PUBLISH edge:invalidate all` is needed.
+
+**Drain upload times.** A pause answers before its snapshot is in S3, so a box paused by a node drain cannot resume on another node until the drained node's uploads land. `mumbo-drain` logs `mumbo-drain: node empty after <n> round(s), <s> s` once its pauses are done, then stops the orchestrator, which waits for its uploads, and logs `mumbo-drain: uploads done, orchestrator exited <s> s after the first pause`: the longest time such a resume can fail. Both lines are in the node's `<instance>/orchestrator` stream, on nodes launched after the apply that carries them (a node picks up `node.sh.tftpl` only when replaced, `prod/modules/cell/nodes.tf`). Read them per cell (`/mumbo-boxes-aps1/nodes` with `--region ap-south-1` for Mumbai):
+```sh
+aws logs filter-log-events --log-group-name /mumbo-boxes/nodes --filter-pattern '"mumbo-drain: uploads done"' --query 'events[].message' --output text
+```
+
 ### Restore Postgres to a point in time
 `aws rds restore-db-instance-to-point-in-time --source-db-instance-identifier mumbo-boxes-e2b --target-db-instance-identifier mumbo-boxes-e2b-restore --restore-time <UTC>` into the same subnet group and security group, then point `POSTGRES_CONNECTION_STRING` in the `mumbo-boxes/e2b` secret at the new instance and force a new deployment of api. Snapshots that newer rows point at stay in the versioned templates bucket for 14 days (review M4).
 
