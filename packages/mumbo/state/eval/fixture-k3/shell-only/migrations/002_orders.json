@@ -1,0 +1,1 @@
+{ "table": "orders", "columns": ["id", "user_id", "total"] }

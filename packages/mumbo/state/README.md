@@ -1,5 +1,5 @@
 ---
-description: "The state block that keeps an agent's goal, approved plan, open todos and running work in its context across compactions and restarts, the plan_read tool, and the notice after a restart of what stopped or finished meanwhile."
+description: "The state block that keeps an agent's goal, approved plan, open todos and running work in its context across compactions and restarts, the plan_read tool, the notice after a restart of what stopped or finished meanwhile, and the goal stall check."
 kind: "package-reference"
 ---
 
@@ -7,13 +7,14 @@ kind: "package-reference"
 
 ## Summary
 
-`@mumbo/state` keeps an agent oriented across compactions and restarts. It adds a short state block to the runtime context: the goal and its phase, the approved plan's step headings, open todos, open team tasks, running subagents and background jobs. The block changes only at a compaction, a restart, or a goal phase change, so turns in between re-send nothing. `plan_read` returns the approved plan's full text. At the first step after a restart, one logged notice lists the jobs, workflow runs and subagents that the restart stopped or that finished meanwhile, and a goal that waits for a person.
+`@mumbo/state` keeps an agent oriented across compactions and restarts. Its runtime-context block shows the goal and its phase, the approved plan's steps, open todos and team tasks, and running subagents and jobs, and changes only at a compaction, a restart or a goal phase change. `plan_read` returns the approved plan. After a restart, one logged notice lists the work the restart stopped or that finished meanwhile, and a goal that waits for a person. With `stallCheck` on, a goal round after two rounds without a visible change asks whether the goal is done, looping or progressing.
 
 ## Table of Contents
 
 - [The state block](#the-state-block)
 - [The approved plan and plan_read](#the-approved-plan-and-plan-read)
 - [The resume notice](#the-resume-notice)
+- [The goal stall check](#the-goal-stall-check)
 - [Composition](#composition)
 - [Evaluation](#evaluation)
 - [Model Experience](#model-experience)
@@ -71,6 +72,28 @@ A child that ended while this Session was loaded but idle usually woke it, and t
 
 The source kind is a declared persistence type, acknowledged in [`docs/persistence-changes/2026-11-12-mumbo-resume-message-source.md`](../../../docs/persistence-changes/2026-11-12-mumbo-resume-message-source.md). Readers fall through unknown source kinds, so an image without this package shows the notice as an injected-context row.
 
+<a id="the-goal-stall-check"></a>
+## The goal stall check
+
+`stallCheck` (default `false`) turns the check on, and `stallRounds` (default 2, at least 2) sets how many closed rounds in a row must have changed nothing. With the check on, the plugin registers the host-only Session projection `mumboRounds` (`stateVersion` 1) and a second `agent/pre-step` listener; with it off, it registers neither. Both box overlays leave it off.
+
+A round runs from a `user/message` whose source is `{kind: 'goal', round > 0}` to the next one; a person's turn in between counts toward the earlier round. Every `goal/change`, an edit included, ends the open round and the round before it and resets the streak. The projection keeps the open round and the one before it. For each round it folds:
+
+| Fact | Events |
+|---|---|
+| Calls by call key: the tool name and its arguments parsed as JSON, without null fields, `description` and `justification`, with keys sorted by code unit; arguments that are not a JSON object are keyed by their trimmed text | `tool/call`, and each `tool/ptc-dispatch`, whose arguments are already parsed |
+| The last successful result of each call key: the first 16 hex characters of the SHA-256 of its text blocks | `tool/result` without `isError`, `tool/ptc-dispatch` without `isError` |
+| Calls and failed calls | Every `tool/result`, a result that session repair added for an unlogged call included, and every `tool/ptc-dispatch` |
+| Todo items newly completed: `completed` in the round's latest list and not in the latest list before the round started, matched by exact content | `todo/write` |
+
+A round changed something when one of these happened in it:
+
+- A file write succeeded through `write`, `edit`, `apply_patch`, or `str_replace_editor` with a command other than `view`, and no write with the same call key succeeded earlier in this round or the round before. A successful retry of a failed write is a change; writing the same content again is not.
+- A call key that already had a successful result in this round or the round before returned a successful result whose text differs from the last successful result of that key in each of those rounds. A shell command, job read, page or MCP call that runs again with new output is a change. A key's first result is not, so exploring is not progress, and the same failing command with the same output is not. `get_goal` never counts, because its result carries the round count.
+- A todo item was newly completed.
+
+At a goal round's step, the listener, registered with `prepend` so it runs before the goal round driver's listener, first lets the rest of the chain decide. For an admitted step, it closes the open round as the fold will when the round's message is logged; when that round and the rounds before it give a streak of at least `stallRounds`, it appends a `<goal_progress_check>` text block to the round's message, which keeps its id and source. The loop logs that message as the round's `user/message`, so the questions are in the log and resume replays them. The block repeats at every round while the streak lasts; a round that changes something, or any goal change, resets it. The check never blocks, pauses or edits a goal: its last line points to the goal tool's existing `blocked` rule, which `@deepseek-ai/dsh-tool-goal` enforces with its own round threshold.
+
 <a id="composition"></a>
 ## Composition
 
@@ -81,9 +104,11 @@ What the block can show depends on what a Session's agent preset mounts. The Web
 <a id="evaluation"></a>
 ## Evaluation
 
-Two keyless snapshots replay the real `dsh --profile sdk` runtime with the package inserted. [`mumbo-state`](../../../snapshots/sdk/mumbo-state/) approves a plan and writes todos, compacts, then reads the plan with `plan_read`: the block is logged once, after the compaction, and every later request carries that text. [`mumbo-resume`](../../../snapshots/sdk/mumbo-resume/) starts a background job, restarts the runtime, and resumes: one notice names the stopped job at the first step, and the block is logged once, after the restart.
+Two keyless snapshots replay the real `dsh --profile sdk` runtime with the package inserted. [`mumbo-state`](../../../snapshots/sdk/mumbo-state/) approves a plan and writes todos, compacts, then reads the plan with `plan_read`: the block is logged once, after the compaction, and every later request carries that text. [`mumbo-resume`](../../../snapshots/sdk/mumbo-resume/) starts a background job, restarts the runtime, and resumes: one notice names the stopped job at the first step, and the block is logged once, after the restart. [`mumbo-goal-stall`](../../../snapshots/sdk/mumbo-goal-stall/) turns the stall check on and runs two goals: one writes a file, stalls one round and completes in round 3 without questions; the other repeats a failing `cat`, a failed `read` and the same todo list for two rounds, gets the questions in round 3, answers them and reports the goal blocked.
 
 The live eval in [`eval/`](eval/) measures whether the block and the notice help a DeepSeek model, and runs only on demand, never in CI: `pnpm --filter @mumbo/state run eval`. It reads `DEEPSEEK_API_KEY`, and `DEEPSEEK_BASE_URL` when set, from the environment or the repository's root `.env`, and stops before any run without a key. It spends API quota and runs the model's commands with full access in a temporary copy of [`eval/fixture/`](eval/fixture/), a small project with twelve failing tests and a two-minute background check. Each run plans with `/plan`, then the arms differ: `control` mounts the package and forces nothing, `k-on` compacts after turn 1 and restarts after turn 2 with the package, and `k-off` does the same without it. `K_EVAL_RUNS` (default 3), `K_EVAL_ARMS` (default `control,k-on,k-off`), `K_EVAL_MODEL` (default the `sdk` profile's model, which a box also uses) and `K_EVAL_MAX_TURNS` (default 8) set its size. After each boundary it counts repeated reads among the next ten tool calls and the steps until the first change; after the restart also calls on the stopped job and a rerun of the check. It writes each run's events, Session files and a `summary.json` under `eval/results/` (ignored by git) and prints medians per arm and the `k-on` deltas.
+
+The K3 eval measures whether the stall check helps, also on demand only: `pnpm --filter @mumbo/state run eval:k3`, with the same key and the same costs. Both arms mount [`examples/person.overlay.yml`](examples/person.overlay.yml); `k3-on` also sets `stallCheck: true`. Each run starts one goal with `/goal` in a fresh workspace and returns when its rounds stop. The `stuck` task ([`eval/fixture-k3/stuck/`](eval/fixture-k3/stuck/)) asks for `node --test` to pass when the signing key it needs is absent and the operator issues it; the right ending is a reported block. The `progress` task is the K eval's inventory project as a goal. The `shell-only` task ([`eval/fixture-k3/shell-only/`](eval/fixture-k3/shell-only/)) applies four migrations through a two-minute background script and forbids file edits, so its progress is shell work. `K3_EVAL_RUNS` (default 5), `K3_EVAL_ARMS` (default `k3-on,k3-off`), `K3_EVAL_TASKS` (default `stuck,progress,shell-only`), `K3_EVAL_MAX_ROUNDS` (the goal's round cap, default 10) and `K_EVAL_MODEL` set its size. Each run reports its admitted rounds, how the goal ended, the logged questions, the first stalled round (in `k3-off`, the first round the check would have asked in), the rounds from there to the end, stalled rounds, repeated calls and tool errors from the check's own fold, whether `stuck` passed by changing the test, whether `progress` passed its tests, whether `shell-only` ended before all four migrations or reported a block, requests, tokens and wall time. It writes them under `eval/results/k3-<time>/` and prints every run, then medians per task and arm and the `k3-on` deltas. The `shell-only` result decides whether box overlays turn the check on.
 
 <a id="model-experience"></a>
 ## Model Experience
@@ -136,6 +161,34 @@ About 25 tokens plus about 25 per item, once per restart, retained until compact
 
 Append-only: the notice is appended after the restored history in the step that carries it.
 
+### Goal progress questions
+
+#### What the model sees
+
+With `stallCheck` on, a second text block in a goal round's message, after `</goal_round>`, when the rounds before it changed nothing the check sees. The evidence line names the streak, the last two rounds' tool calls, how many repeat an earlier call with the most repeated one (`most often`, or `for example` on a tie, path first and clipped to 80 characters), and how many failed; a part without a count is left out, and without calls it reads `you made no tool call`. After three or more stalled rounds, `In those two rounds` reads `In the last two of them`.
+
+##### Verbatim block, as goal B's third round in the snapshot has it
+
+```markdown
+<goal_progress_check>
+The last 2 rounds of this goal (1 to 2) showed no progress that this check can see. In those two rounds you made 6 tool calls, 3 of them repeating an earlier call (for example bash {"command":"cat config/token.txt"}, 2 times), and 2 failed.
+Before you continue, answer these in your reply:
+1. Done? If the whole objective is achieved, gather the evidence and mark the goal complete.
+2. Looping? Name any call or approach you keep repeating, and stop repeating it.
+3. Progressing? If you made progress this check cannot see, such as shell commands, browser or MCP work, or work by subagents, say what changed and continue.
+4. What next? Name the one step that moves the objective forward, and take it.
+If one condition outside your control has stopped progress in each of these rounds, follow the goal policy for blocked: call update_goal with action blocked and name that condition in blocked_reason.
+</goal_progress_check>
+```
+
+#### Token effect
+
+About 250 tokens in each round message that carries it, retained until compaction; nothing while rounds change something or the check is off.
+
+#### KV Cache effect
+
+Append-only: the block is part of the round's own message, which already starts a new request series, so the cached prefix stays reusable.
+
 ## Known Limitations and Deferred Work
 
 <a id="known-limitations-and-deferred-work"></a>
@@ -148,6 +201,13 @@ Append-only: the notice is appended after the restored history in the step that 
 - **An SDK server restart can hide a stopped child** — the SDK server's own shutdown, which an SDK client's `close()` requests, cancels running descendants with cause `parent` before it disposes the roots, so a running child's turn ends `aborted` with reason `parent`. The notice reads that as an ordinary end: it reports the child as ended (aborted), without the `send_message` hint, only when the end comes after this Session's last message, and omits it otherwise. A host stopped by a signal, as a box's Web host is, disposes the whole host, which ends the child's turn with reason `disposed`, reported as stopped.
 - **Each comparison reads every child's whole log** — the subagent catalog records no end time or status, so a comparison reads the full log of every direct `one-shot` or `continuable` child that is not loaded, also one that ended long before; the `mumbo-state: resume reconcile` host line reports how many and how long.
 - **The notice reads direct children only** — grandchildren are not compared, and a continuable child that finished before this Session went down but whose result never reached it is not reported.
+- **The stall check is off on boxes** — work that leaves no file-tool write, no completed todo and no repeated call with new output, such as a new shell command, browser, MCP or computer-use work, a subagent's or team's work, or a wait for a background job, reads as no change; that is much of a person's assistant's work, and from round 3 such a goal is asked whether it is done and pointed at `blocked`. Delegated work is not counted. Box overlays turn the check on only after the K3 eval's `shell-only` task shows no premature ending.
+- **Changed output can be noise** — a repeated call whose output holds a time, a duration, a fresh id or a spill file path counts as a change each time, so a loop over such a call never stalls; a repeated `node --test`, whose report holds durations, is one.
+- **Each round keeps one output per call** — a call's new result is compared with its last successful result in this round and in the round before, not with every earlier one, so output that alternates within a round counts as a change. Write repeats, likewise, are seen only within the open round and the one before, so a write loop over three rounds counts each write as a change.
+- **The stall check measures activity, not correctness** — marking a todo item completed, or writing a progress file with new content each round, resets the streak; a reworded or removed and re-added item counts as newly completed.
+- **Call keys drop free text** — calls that differ only in `description`, `justification` or null fields count as one key, and a `run_code` counts once plus once per sub-call.
+- **The streak restarts after any goal change** — a person's resume after a restart, or an edit, resets it, so a goal that stalled before gets two more rounds before the questions.
+- **The shown block and the fold can differ** — the listener computes the block before the round's message is logged, and events another producer appends in between can change the streak the fold records; the logged block is what the model saw.
 
 <a id="dev-note"></a>
 ### Dev Note

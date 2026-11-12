@@ -1,0 +1,149 @@
+{
+  "patches": [
+    {
+      "at": 8,
+      "entry": {
+        "kind": "chunks",
+        "chunks": [
+          {
+            "type": "block-start",
+            "index": 0,
+            "blockType": "tool-call"
+          },
+          {
+            "type": "tool-call-delta",
+            "index": 0,
+            "id": "stall-a3-update",
+            "name": "update_goal",
+            "argumentsDelta": ""
+          },
+          {
+            "type": "tool-call-delta",
+            "index": 0,
+            "id": "stall-a3-update",
+            "argumentsDelta": "{\"goal_id\": \"{{fromRequest:goal-[0-9a-f-]+}}\", \"revision\": 1, \"action\": \"complete\"}"
+          },
+          {
+            "type": "block-end",
+            "index": 0,
+            "block": {
+              "type": "tool-call",
+              "id": "stall-a3-update",
+              "name": "update_goal",
+              "arguments": "{\"goal_id\": \"{{fromRequest:goal-[0-9a-f-]+}}\", \"revision\": 1, \"action\": \"complete\"}"
+            }
+          },
+          {
+            "type": "usage",
+            "usage": {
+              "inputTokens": 10000,
+              "outputTokens": 32,
+              "totalTokens": 10032
+            }
+          },
+          {
+            "type": "finish",
+            "reason": {
+              "kind": "tool-calls"
+            },
+            "replayState": {
+              "response": {
+                "kind": "deepseek-messages",
+                "version": 1,
+                "model": "deepseek-v4-flash"
+              },
+              "blocks": [
+                {
+                  "type": "tool-call"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "at": 19,
+      "entry": {
+        "kind": "chunks",
+        "chunks": [
+          {
+            "type": "block-start",
+            "index": 0,
+            "blockType": "text"
+          },
+          {
+            "type": "text-delta",
+            "index": 0,
+            "text": "1. Done? No: config/token.txt does not exist, so there is no token to report.\n2. Looping? Yes: I ran cat config/token.txt and read config/token.txt in both rounds. I stop repeating them.\n3. Progressing? No: nothing changed outside what this check counts either.\n4. What next? The operator must issue config/token.txt, which the objective forbids me to create, so I report the goal blocked."
+          },
+          {
+            "type": "block-end",
+            "index": 0,
+            "block": {
+              "type": "text",
+              "text": "1. Done? No: config/token.txt does not exist, so there is no token to report.\n2. Looping? Yes: I ran cat config/token.txt and read config/token.txt in both rounds. I stop repeating them.\n3. Progressing? No: nothing changed outside what this check counts either.\n4. What next? The operator must issue config/token.txt, which the objective forbids me to create, so I report the goal blocked."
+            }
+          },
+          {
+            "type": "block-start",
+            "index": 1,
+            "blockType": "tool-call"
+          },
+          {
+            "type": "tool-call-delta",
+            "index": 1,
+            "id": "stall-b3-update",
+            "name": "update_goal",
+            "argumentsDelta": ""
+          },
+          {
+            "type": "tool-call-delta",
+            "index": 1,
+            "id": "stall-b3-update",
+            "argumentsDelta": "{\"goal_id\": \"{{fromRequest:goal-[0-9a-f-]+}}\", \"revision\": 1, \"action\": \"blocked\", \"blocked_reason\": \"config/token.txt is missing, and the operator issues it; the objective forbids creating it.\"}"
+          },
+          {
+            "type": "block-end",
+            "index": 1,
+            "block": {
+              "type": "tool-call",
+              "id": "stall-b3-update",
+              "name": "update_goal",
+              "arguments": "{\"goal_id\": \"{{fromRequest:goal-[0-9a-f-]+}}\", \"revision\": 1, \"action\": \"blocked\", \"blocked_reason\": \"config/token.txt is missing, and the operator issues it; the objective forbids creating it.\"}"
+            }
+          },
+          {
+            "type": "usage",
+            "usage": {
+              "inputTokens": 10000,
+              "outputTokens": 32,
+              "totalTokens": 10032
+            }
+          },
+          {
+            "type": "finish",
+            "reason": {
+              "kind": "tool-calls"
+            },
+            "replayState": {
+              "response": {
+                "kind": "deepseek-messages",
+                "version": 1,
+                "model": "deepseek-v4-flash"
+              },
+              "blocks": [
+                {
+                  "type": "text"
+                },
+                {
+                  "type": "tool-call"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

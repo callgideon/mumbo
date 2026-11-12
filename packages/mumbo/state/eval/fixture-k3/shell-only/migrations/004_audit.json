@@ -1,0 +1,1 @@
+{ "table": "audit", "columns": ["id", "at", "event"] }
