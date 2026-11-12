@@ -476,6 +476,24 @@ async function doorTools(): Promise<string[]> {
   return names.sort()
 }
 
+/**
+ * Tool names `@mumbo/state` registers: its plugin registers each tool through `ctx.tools.register` in `apply`
+ * (`src/index.ts`), so the names come from applying it to a context that records them.
+ */
+async function stateTools(): Promise<string[]> {
+  const names: string[] = []
+  const services: Record<string, unknown> = {
+    tools: { register: (tool: { name: string }) => { names.push(tool.name) } },
+    // Without `then`, so the awaited registration resolves.
+    sessionProjections: { register: () => Promise.resolve({ stateOf: anything }) },
+  }
+  const ctx = new Proxy({}, { get: (_target, key) => typeof key === 'string' && key in services ? services[key] : anything })
+  // The package is private and not a dependency of this app; its source is loaded from the repository.
+  const { apply } = await import(pathToFileURL(join(root, 'packages/mumbo/state/src/index.ts')).href) as { apply: (ctx: object, config: object) => Promise<void> }
+  await apply(ctx, { maxChars: 1600 })
+  return names.sort()
+}
+
 /** Every string value in a config, at any depth. */
 function configStrings(value: unknown): string[] {
   if (typeof value === 'string') return [value]
@@ -742,6 +760,10 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     expect([...tools, ...runAsTools ?? []].sort()).toEqual(await doorTools())
     // The door serves no halt or resume of the person's runs.
     expect(await doorTools()).not.toContain('runs_halt')
+  })
+
+  it.runIf(box === 'person')('lists every tool @mumbo/state registers', async () => {
+    expect(CLASSIFICATION['@mumbo/state']!.tools).toEqual(await stateTools())
   })
 
   it('lists every mounted model tool with how it runs', () => {
