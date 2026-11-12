@@ -22,3 +22,4 @@ output "zone_id" { value = local.zone_id }
 output "vpc_cidr" { value = var.vpc_cidr }
 output "private_route_table_ids" { value = module.vpc.private_route_table_ids }
 output "nlb_security_group_id" { value = aws_security_group.nlb.id }
+output "alarm_topic" { value = local.alarm_topic }

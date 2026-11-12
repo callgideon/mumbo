@@ -8,7 +8,7 @@ import { createHmac, generateKeyPairSync } from 'node:crypto'
 import { createServer, request } from 'node:http'
 import { tmpdir } from 'node:os'
 import { test } from 'node:test'
-import { door } from './door.mjs'
+import { door, WORKER_PROTOCOL } from './door.mjs'
 import { boxFetcher, modelServer, signBox, verifyBox } from './edge.mjs'
 import { githubForwarder } from './github.mjs'
 import { doorKeys } from './keys.mjs'
@@ -275,24 +275,29 @@ test('one worker-git line per request with the token\'s project, Ticket, Assignm
   } finally { t.close() }
 })
 
-/** `git ls-remote` of the route as a worker runs it: the token in http.extraHeader, no terminal prompt and no askpass
- *  program, credential helper, user or system config; resolves git's stderr. */
-const lsRemote = (port, token) => new Promise((resolve) => {
-  execFile('git', ['-c', `http.extraHeader=Authorization: Bearer ${token}`, '-c', `http.curloptResolve=${PUBLIC}:${port}:127.0.0.1`, 'ls-remote', `http://${PUBLIC}:${port}/mcp/git/callgideon/mumbo.git`],
+/** `git ls-remote` of `repo` on the route as a worker runs it: with the `-c` setting WORKER_PROTOCOL gives for the token
+ *  and the remote callgideon/mumbo, no terminal prompt and no askpass program, credential helper, user or system config;
+ *  resolves git's stderr. */
+const lsRemote = (port, token, repo = 'callgideon/mumbo') => new Promise((resolve) => {
+  const route = (r) => `http://${PUBLIC}:${port}/mcp/git/${r}.git`
+  const setting = /git -c "([^"]+)"/.exec(WORKER_PROTOCOL.join('\n'))[1].replace('<git.remote>', route('callgideon/mumbo')).replace('<git.header>', `Authorization: Bearer ${token}`)
+  execFile('git', ['-c', setting, '-c', `http.curloptResolve=${PUBLIC}:${port}:127.0.0.1`, 'ls-remote', route(repo)],
     { cwd: tmpdir(), env: { PATH: process.env.PATH, GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' }, timeout: 20_000 },
     (_, __, stderr) => resolve(stderr))
 })
 
-test('git shows a refusal to the worker: an expired token and GitHub refusing mumbo-bot\'s token reach git as remote: lines, never as a password prompt', async () => {
+test('git shows a refusal to the worker: an expired token and GitHub refusing mumbo-bot\'s token reach git as remote: lines, never as a password prompt; the protocol\'s header setting reaches git.remote only', async () => {
   const t = await setup()
   try {
     const token = t.tokens.mint(t.claims)
     t.state.reply = () => new Response('Invalid username or token', { status: 401, headers: { 'www-authenticate': 'Basic realm="GitHub"', 'content-type': 'text/plain' } })
     const github401 = await lsRemote(t.port, token)
     assert.match(github401, /^remote: Mumbo edge refused GET \/callgideon\/mumbo\.git\/info\/refs: GitHub refused mumbo-bot's token; try again$/m)
+    // Another URL, such as a submodule's, gets no header: here another repository on the same host.
+    assert.match(await lsRemote(t.port, token, 'callgideon/mumbo-sub'), /^remote: invalid_token: send the worker token from task_claim as one Authorization: Bearer header$/m)
     t.state.now = NOW + 8 * HOUR
     const expired = await lsRemote(t.port, token)
-    assert.match(expired, /^remote: token_expired: the worker token expired; repeat task_claim with the same request_id$/m)
+    assert.match(expired, /^remote: token_expired: the worker token expired; repeat task_claim with the same request_id and your ticket$/m)
     for (const stderr of [github401, expired]) assert.doesNotMatch(stderr, /Username|Password|Authentication failed/, stderr)
   } finally { t.close() }
 })

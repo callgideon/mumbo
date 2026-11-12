@@ -52,6 +52,33 @@ locals {
     { for s in ["edge"] : "tasks-${s}" => { ns = "ECS/ContainerInsights", metric = "RunningTaskCount", dims = { ClusterName = module.cell_us_east_1.ecs_cluster.name, ServiceName = s }, stat = "Minimum", period = 300, threshold = 2, cmp = "LessThanThreshold", missing = "breaching" } },
   )
 }
+# The Mumbai edge's ALB, target groups and service (R6, before R7): the same alarms in ap-south-1, where its metrics are,
+# to the Mumbai cell's topic (mailed to ops_alert_email once its confirmation link is clicked). Runbook sections as above.
+locals {
+  aps1_tg = { for k, v in module.edge_ap_south_1.target_groups : "edge-${k}" => v }
+  aps1_alarms = merge(
+    { for k, v in local.aps1_tg : "unhealthy-${k}" => { ns = "AWS/ApplicationELB", metric = "UnHealthyHostCount", dims = { TargetGroup = v, LoadBalancer = module.edge_ap_south_1.edge_alb.arn_suffix }, stat = "Maximum", period = 60, threshold = 0, cmp = "GreaterThanThreshold", missing = "notBreaching" } },
+    { edge-5xx = { ns = "AWS/ApplicationELB", metric = "HTTPCode_Target_5XX_Count", dims = { LoadBalancer = module.edge_ap_south_1.edge_alb.arn_suffix }, stat = "Sum", period = 300, threshold = 20, cmp = "GreaterThanThreshold", missing = "notBreaching" } },
+    { tasks-edge = { ns = "ECS/ContainerInsights", metric = "RunningTaskCount", dims = { ClusterName = module.cell_ap_south_1.ecs_cluster.name, ServiceName = "edge" }, stat = "Minimum", period = 300, threshold = 2, cmp = "LessThanThreshold", missing = "breaching" } },
+  )
+}
+resource "aws_cloudwatch_metric_alarm" "ops_aps1" {
+  for_each            = local.aps1_alarms
+  region              = "ap-south-1"
+  alarm_name          = "${local.name}-aps1-${each.key}"
+  namespace           = each.value.ns
+  metric_name         = each.value.metric
+  dimensions          = each.value.dims
+  statistic           = each.value.stat
+  period              = each.value.period
+  evaluation_periods  = 1
+  threshold           = each.value.threshold
+  comparison_operator = each.value.cmp
+  treat_missing_data  = each.value.missing
+  alarm_description   = "Mumbai edge. Runbook: deploy/boxes/RUNBOOK.md#${each.key}"
+  alarm_actions       = [module.cell_ap_south_1.alarm_topic]
+  ok_actions          = [module.cell_ap_south_1.alarm_topic]
+}
 resource "aws_cloudwatch_metric_alarm" "ops" {
   for_each            = local.alarms
   alarm_name          = "${local.name}-${each.key}"

@@ -49,7 +49,7 @@ export function workerTokens({ edgeKey, hours, now = () => Date.now() }) {
       const expected = Buffer.from(mac(body))
       if (Buffer.byteLength(sig) !== expected.length || !timingSafeEqual(Buffer.from(sig), expected)) throw invalid
       const claims = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'))  // the edge signed it, so it parses
-      if (!(claims.x > now())) throw refusal(401, 'token_expired', 'the worker token expired; repeat task_claim with the same request_id')
+      if (!(claims.x > now())) throw refusal(401, 'token_expired', 'the worker token expired; repeat task_claim with the same request_id and your ticket')
       return claims
     },
   }
