@@ -2,6 +2,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { agentEvents, type Agent, type PreStepDecision } from '@deepseek-ai/dsh-agent'
+import GoalService from '@deepseek-ai/dsh-goal'
 import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
 import { createAssistantMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
 import { interruptedTurnClosers, SessionId } from '@deepseek-ai/dsh-session'
@@ -10,6 +11,7 @@ import type {} from '@deepseek-ai/dsh-subagent'
 import { WorkflowRunId } from '@deepseek-ai/dsh-workflow'
 import { describe, expect, it, vi } from 'vitest'
 import { textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
+import * as GoalRoundDriver from '../../../goal/goal-round-driver/src/index.ts'
 import { subagentCatalogProjectionDefinition } from '../../../subagent/subagent/src/catalog.ts'
 import * as MumboState from '../src/index.ts'
 import { PLAN_READ, STATE_CONTEXT } from '../src/index.ts'
@@ -193,6 +195,31 @@ describe('restarts already checked', () => {
     await harness.unload()
     await harness.ctx.plugin(MumboState)
     await turn(agent, 'Next.')
+    expect(notices(agent)).toEqual([])
+  })
+
+  it('compares nothing again in this process when the first step after a quiet restart fails before its reply', { timeout: 60_000 }, async () => {
+    const harness = await boot([
+      textResponse('started'),
+      // The goal round's request fails, as during a provider outage, so no assistant message is logged.
+      () => { throw new Error('provider unavailable') },
+      textResponse('answer'),
+    ], async (ctx) => {
+      await ctx.plugin(GoalService)
+      await ctx.plugin(GoalRoundDriver)
+    })
+    const { ctx, model } = harness
+    const handle = await harness.start('goal-outage')
+    await turn(handle.agent, 'Start.')
+    const { agent } = await harness.restart(handle)
+    // Before any person's message, a person sets a goal and the driver starts round 1, which the restart did not stop.
+    ctx.goals.create(agent, { objective: 'Ship the report', maxGoalRounds: 3 })
+    await expect.poll(() => model.requests.length).toBe(2)
+    await agent.whenIdle()
+    // The driver disarms the goal after the failed round, and the log holds no reply after the restart.
+    await expect.poll(() => ctx.goals.get(agent)?.activation).toBe('disarmed')
+    expect(agent.session.snapshotEvents().filter(event => event.type === 'assistant/message')).toHaveLength(1)
+    await turn(agent, 'What happened?')
     expect(notices(agent)).toEqual([])
   })
 
