@@ -240,6 +240,18 @@ describe('New Session controls under the page access snapshot', () => {
       })
       expect(newSessionControls()).toEqual(ABSENT)
 
+      // A Session's activity alone makes the project Workspace the most recent one again.
+      const recent = await runtime.sessions.add({ id: 'recent', summary: { cwd: `/projects/${PROJECT}` } })
+      await runtime.workspaces.update((draft) => {
+        draft.items = [
+          { ...workspaceRow(PROJECT, '2026-01-01T00:00:00.000Z'), sessionIds: [recent] },
+          workspaceRow(OTHER, '2026-02-01T00:00:00.000Z'),
+        ] as never
+      })
+      expect(newSessionControls()).toEqual(ABSENT)
+      await runtime.sessions.updateSummary(recent, { updatedAt: Date.parse('2026-03-01T00:00:00.000Z') })
+      expect(newSessionControls()).toEqual(OFFERED)
+
       // The current Session's Workspace wins over the most recent one.
       const current = await runtime.sessions.add({ id: 'current', summary: { cwd: `/projects/${PROJECT}` } })
       await runtime.workspaces.update((draft) => {
