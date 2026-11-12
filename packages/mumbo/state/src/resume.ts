@@ -88,14 +88,16 @@ async function childLog(query: SessionQueryEngine, child: SubagentCatalogEntry, 
   using observed = await query.observeSession(child.id, { signal, projectionMode: 'none' })
   let end: SessionEvent<'turn/end'> | undefined
   let text = ''
+  let lastAt = 0
   for (const event of observed.events) {
+    lastAt = event.time
     if (event.type === 'turn/start') end = undefined
     else if (event.type === 'turn/end') end = event
     else if (event.type === 'assistant/message') {
       text = event.data.message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n')
     }
   }
-  return { end, text, lastAt: observed.events.at(-1)?.time ?? 0 }
+  return { end, text, lastAt }
 }
 
 /** Direct children whose last turn the restart cut off, or that ended while this Session was not loaded. */
