@@ -2397,6 +2397,16 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>Tests: a member's first visit to a restored project box with no workspace record shows the project workspace, with no create call and no error.</li>
 </ul>
 </li>
+<li><strong>[2026-11-12, fix-point review]</strong>
+<ul>
+<li><strong>Cause, confirmed by a replay.</strong> Every person visiting a project box through the edge is a member, the founder included. The Gateway refused <code>initializeDefault</code> with <code>remote-access/denied</code> (<code>no-allow</code>) before the controller ran. The startup race is refuted: the edge serves no page before dsh's URL line, which comes after the restored stores load. The owner's later call created nothing because the registry skips the default once any Session exists.</li>
+<li><strong>The directory is <code>/root/projects</code>, not <code>/src</code>.</strong> <code>/src</code> is outside the model's file roots and isn't backed up, so a member's Session there has no usable file tools. <code>/root/projects</code> is a model root, is backed up, and is already where the coordinator keeps the project.</li>
+<li><strong>The step runs before dsh prints its URL line.</strong> It is a plugin row in the project overlay, so dsh holds the visit and the edge doesn't change. It re-creates the Workspace if the box-local owner deletes it.</li>
+<li><strong>Members hold the Workspace role on the project Workspace only.</strong> A configured box would otherwise open a member into superagent's directory. Superagent's Sessions stay readable under Ungrouped.</li>
+<li><strong>The member client never calls <code>initializeDefault</code>.</strong> It checks the grant with <code>whenAccess</code>. The Gateway logs each refused or failed call at warn, or at error for internal failures, with no arguments.</li>
+<li><strong>A member's existing Sessions stay reachable.</strong> Sessions started outside any Workspace (cwd <code>/src</code>) are listed and openable for members, so earlier project conversations don't vanish once they stop running. New member Sessions start in the project Workspace.</li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

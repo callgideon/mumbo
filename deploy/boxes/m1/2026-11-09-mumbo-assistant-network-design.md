@@ -1383,6 +1383,13 @@ The cache's worst case is a subscription that dies silently: copies are served f
     - **A project box creates its own workspace from the project directory when it starts.** No visitor's role decides it, and members get no create right. The step checks for a workspace at that directory and ignores the `initialized` flag, so a box like bitlane, already marked initialized with no workspaces, is fixed at its next start. A person never lands on a project box with no workspace.
     - An RPC error answered as a 200 is logged by dsh and named to the client.
     - Tests: a member's first visit to a restored project box with no workspace record shows the project workspace, with no create call and no error.
+  - **[2026-11-12, fix-point review]**
+    - **Cause, confirmed by a replay.** Every person visiting a project box through the edge is a member, the founder included. The Gateway refused `initializeDefault` with `remote-access/denied` (`no-allow`) before the controller ran. The startup race is refuted: the edge serves no page before dsh's URL line, which comes after the restored stores load. The owner's later call created nothing because the registry skips the default once any Session exists.
+    - **The directory is `/root/projects`, not `/src`.** `/src` is outside the model's file roots and isn't backed up, so a member's Session there has no usable file tools. `/root/projects` is a model root, is backed up, and is already where the coordinator keeps the project.
+    - **The step runs before dsh prints its URL line.** It is a plugin row in the project overlay, so dsh holds the visit and the edge doesn't change. It re-creates the Workspace if the box-local owner deletes it.
+    - **Members hold the Workspace role on the project Workspace only.** A configured box would otherwise open a member into superagent's directory. Superagent's Sessions stay readable under Ungrouped.
+    - **The member client never calls `initializeDefault`.** It checks the grant with `whenAccess`. The Gateway logs each refused or failed call at warn, or at error for internal failures, with no arguments.
+    - **A member's existing Sessions stay reachable.** Sessions started outside any Workspace (cwd `/src`) are listed and openable for members, so earlier project conversations don't vanish once they stop running. New member Sessions start in the project Workspace.
 
 **Acceptance (first milestone: the founder's box in Mumbai):**
 - **The move.** The founder's box runs in the `ap-south-1` cell, moved from `us-east-1` with Sessions, schedules, files and Chrome sign-ins intact.
