@@ -91,7 +91,8 @@ function Row({ entry, now, title, listed, openSession, t }: {
       {long && <button type="button" className={css.toggle} aria-expanded={expanded} onClick={() => { setExpanded(value => !value) }}>
         {t(expanded ? 'summary.less' : 'summary.more')}
       </button>}
-      <p className={css.reason}>{entry.reason}</p>
+      {/* A question's reason is always the decide-yourself reply the model received, the same on every such row. */}
+      {entry.kind !== 'question' && <p className={css.reason}>{entry.reason}</p>}
       <div className={css.session}>
         {listed
           ? <>
@@ -183,13 +184,15 @@ export function RecordPage({ list, counts, openSession, useSessions, t }: Record
             <Button size="sm" variant="outline" onClick={() => { void load() }}>{t('retry')}</Button>
           </div>}
           {status === 'ready' && entries.length === 0 && <p className={css.empty} role="status">{t(`empty.${filter}`)}</p>}
-          <ul className={css.rows} aria-label={t('list.label')} aria-busy={status === 'loading'}>
+          {/* An empty sentence or a failed first read stands alone: an empty list after it reads as "list, 0 items". */}
+          {(status === 'loading' || entries.length > 0) && <ul className={css.rows} aria-label={t('list.label')}
+            aria-busy={status === 'loading'}>
             {status === 'loading' && entries.length === 0 && [0, 1, 2].map(n => <li key={n} className={css.skeleton} aria-hidden />)}
             {entries.map(entry => (
               <Row key={`${entry.session}:${String(entry.seq)}`} entry={entry} now={now} t={t} openSession={openSession}
                 listed={sessions.ids.includes(entry.root)} title={sessions.byId[entry.root]?.displayTitle} />
             ))}
-          </ul>
+          </ul>}
           {next !== undefined && status !== 'loading' && <Button className={css.older} variant="outline" onClick={() => { void load(next) }}>{t('older')}</Button>}
         </div>
       </div>

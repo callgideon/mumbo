@@ -95,6 +95,14 @@ it('lists entries newest first as plain text, with kind labels, the Session link
   expect(view.getByText('What Mumbo did in Run Wild without asking you, from the last 90 days.')).toBeTruthy()
 })
 
+it('shows the reason of every kind but a question, whose reason is the same decide-yourself reply on every row', async () => {
+  host([page([entry({ seq: 2 }), entry({ kind: 'approval', target: 'bash', summary: 'ls', reason: 'Run Wild allows tool approvals.', seq: 1 })])])
+  const { runtime } = await bench()
+  const { view } = await rendered(runtime)
+  const [question, approval] = view.getAllByRole('listitem').map(row => [...row.querySelectorAll('p')].map(p => p.textContent))
+  expect([question, approval]).toEqual([['Which environment?'], ['ls', 'Run Wild allows tool approvals.']])
+})
+
 it('sends each filter as kinds, shows its empty sentence, and pages with Show older', async () => {
   const requests = host([page([entry()], { next: '2026-11-12:0' as never }), page([entry({ seq: 9, target: 'older' })]), page([]), page([])])
   const { runtime } = await bench()
@@ -151,6 +159,22 @@ it('keeps the rows on a failed read and offers Try again; an empty panel centers
   expect([view.queryByRole('alert'), view.getAllByRole('listitem').length]).toEqual([null, 2])
 })
 
+it('shows no list under an empty sentence or after a failed read with no rows', async () => {
+  host([page([]), page([]), new Error('disk gone'), page([entry()])])
+  const { runtime } = await bench()
+  const { view } = await rendered(runtime)
+  expect([view.getByRole('status').textContent, view.queryByRole('list')]).toEqual(['Nothing has run without asking yet.', null])
+  fireEvent.click(view.getByRole('button', { name: 'Sends' }))
+  await act(async () => { await Promise.resolve() })
+  expect([view.getByRole('status').textContent, view.queryByRole('list')]).toEqual(['Nothing was sent without asking.', null])
+  fireEvent.click(view.getByRole('button', { name: 'Posts' }))
+  await act(async () => { await Promise.resolve() })
+  expect([view.getByRole('alert').textContent, view.queryByRole('list')]).toEqual([expect.stringContaining('Could not load the record.'), null])
+  fireEvent.click(view.getByRole('button', { name: 'Try again' }))
+  await act(async () => { await Promise.resolve() })
+  expect(view.getByRole('list', { name: 'Actions' }).children).toHaveLength(1)
+})
+
 it('shows the empty sentence for All, a loading skeleton first, and the incomplete notice', async () => {
   host([page([], { incomplete: true })])
   const { runtime } = await bench()
@@ -183,7 +207,7 @@ it('hides the Yesterday row when its read fails', async () => {
 })
 
 it('clamps a long summary with a disclosure, and says just now for a fresh entry', async () => {
-  host([page([entry({ summary: 'plan '.repeat(40), time: NOW }), entry({ summary: 'two\nlines', seq: 2 }), entry({ summary: '', seq: 3 })])])
+  host([page([entry({ summary: 'plan '.repeat(40), time: NOW }), entry({ summary: 'two\nlines', seq: 2 }), entry({ kind: 'refusal', summary: '', seq: 3 })])])
   const { runtime } = await bench()
   const { view } = await rendered(runtime)
   const [toggle, second] = view.getAllByRole('button', { name: 'Show more' })
