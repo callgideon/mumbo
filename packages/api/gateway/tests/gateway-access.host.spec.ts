@@ -161,6 +161,12 @@ class AccessFixture extends TypertRemoteService {
   }
 
   @Remote
+  broken(request: { readonly title: string }): string {
+    void request
+    throw new Error('fixture store unavailable')
+  }
+
+  @Remote
   async slow(): Promise<string> {
     await this.release.promise
     return this.seen()
@@ -466,6 +472,49 @@ describe('Gateway access checks', () => {
       { action: 'accessFixture/read', resources: [shelf('s1')] },
       { action: 'accessFixture/read', resources: [shelf('s2')] },
     ])
+  })
+})
+
+describe('Gateway failure logging', () => {
+  /** POST one unary call through Connection's shared `/api` handler as `peer`. */
+  async function post(ctx: Context, peer: PeerScope, method: string, args: Record<string, unknown>): Promise<unknown> {
+    const response = await ctx.connection.createSharedFetchHandler('/api').fetch(new Request(`http://host/api/accessFixture/${method}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'client-request', rpcId: 'rpc-1', method: `accessFixture/${method}`, payload: { args } }),
+    }), peer)
+    expect(response.status).toBe(200)
+    return response.json()
+  }
+
+  it('logs a refused non-owner call at warn with its endpoint, principal kind, code, and message, never its arguments', async () => {
+    const { ctx } = await setup({ connection: true })
+    const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
+    const error = vi.spyOn(ctx.logger, 'error').mockImplementation(() => {})
+    const guest = ctx.connection.createPeer({ principal: GUEST })
+    await expect(post(ctx, guest, 'annotate', { request: { title: 'private words' } })).resolves.toMatchObject({
+      result: { ok: false, error: { code: 'remote-access/denied' } },
+    })
+    expect(warn.mock.calls).toEqual([[
+      'typert gateway: accessFixture/annotate failed (principal test-guest): remote-access/denied: '
+      + 'remote access: accessFixture/annotate: access denied (no-allow)',
+    ]])
+    expect(error).not.toHaveBeenCalled()
+  })
+
+  it('logs a failure that is not a Remote error at error with the error and its stack', async () => {
+    const { ctx } = await setup({ connection: true })
+    const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
+    const error = vi.spyOn(ctx.logger, 'error').mockImplementation(() => {})
+    await expect(post(ctx, ctx.connection.browserPeer, 'broken', { request: { title: 'private words' } })).resolves.toMatchObject({
+      result: { ok: false, error: { code: 'gateway/internal', message: 'fixture store unavailable' } },
+    })
+    expect(error).toHaveBeenCalledOnce()
+    const [line, logged] = error.mock.calls[0] as [string, Error]
+    expect(line).toBe('typert gateway: accessFixture/broken failed (principal owner): gateway/internal: fixture store unavailable')
+    expect(logged.message).toBe('fixture store unavailable')
+    expect(logged.stack).toContain('broken')
+    expect(warn).not.toHaveBeenCalled()
   })
 })
 

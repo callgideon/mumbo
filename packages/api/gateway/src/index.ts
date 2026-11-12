@@ -518,7 +518,7 @@ export class TypertGatewayService extends Service implements TypertGateway {
         this.receiveRemoteEventResult(client, result)
         return { ok: true, value: undefined }
       } catch (error) {
-        return rpcFailure(error)
+        return this.loggedRpcFailure(endpoint, peer, error)
       }
     }
     return this.invokeRpc(endpoint, payload, signal, peer)
@@ -787,8 +787,21 @@ export class TypertGatewayService extends Service implements TypertGateway {
       // representation of absence that both args and results already use.
       return encodeRpcResult(value, prepared.descriptor.result)
     } catch (error) {
-      return rpcFailure(error)
+      return this.loggedRpcFailure(endpoint, peer, error)
     }
+  }
+
+  /**
+   * Log one failed unary call, then encode its failure. Connection answers every result with HTTP 200, so this line
+   * is the Host's only record of a refused or failed call. It names the endpoint, the caller's principal kind, and
+   * the code and message, never the arguments: a Remote failure at warn, any other failure at error with its stack.
+   */
+  private loggedRpcFailure(endpoint: string, peer: PeerScope, error: unknown): ConnectionRpcResult {
+    const failure = rpcError(error)
+    const line = `typert gateway: ${endpoint} failed (principal ${peer.principal.kind}): ${failure.code}: ${failure.message}`
+    if (remoteErrorOf(error) === undefined) this.ctx.logger.error(line, error)
+    else this.ctx.logger.warn(line)
+    return { ok: false, error: failure }
   }
 
   /** `control` fails the logical stream when an uplink item is rejected; unary calls hand over an inert one. */
