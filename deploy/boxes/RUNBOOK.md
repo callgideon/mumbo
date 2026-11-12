@@ -520,6 +520,7 @@ Each edge task whose `PLACEMENT_CACHE_MS` is above 0 keeps copies of the store r
   console.log('edge tasks told:', await c.publish('edge:invalidate', 'all')); await c.quit()")
   ```
   It prints how many subscribed edge tasks received it; 0 means no task keeps copies.
+  When you cannot send it (no tunnel or store access), wait 5 minutes, the Mumbai edge's `placement_cache_ms_ap_south_1` (300000), before relying on the change through the Mumbai edge; the `us-east-1` edge keeps no copies and sees it at once. A box killed outside the edge needs no message: the first request through Mumbai fails at the client-proxy, drops the copy and ensures the box again. A rollback of either edge below R6b sets `placement_cache_ms_ap_south_1 = 0` in the same apply instead.
 - **Rollout and rollback.** An edge image before R6b publishes nothing. While tasks of such an image run beside caching tasks (during the deploy that brings the cache in, or a rollback of one edge only), their writes can leave other tasks' copies stale for up to `PLACEMENT_CACHE_MS`: once both edges run one image, send `PUBLISH edge:invalidate all`, and for a rollback of one edge only, set the other edge's `placement_cache_ms` to 0 until both match again.
 
 ### Restore Postgres to a point in time
