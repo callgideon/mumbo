@@ -1,0 +1,19 @@
+- region "What ran without asking":
+  - heading "What ran without asking" [level=1]
+  - button "Refresh"
+  - paragraph: What Mumbo did in Run Wild without asking you, from the last 90 days. Each action is recorded in its session too.
+  - group "Show":
+    - button "All" [pressed]
+    - button "Sends"
+    - button "Posts"
+    - button "Purchases"
+    - button "Deletes"
+  - list "Actions":
+    - listitem:
+      - text: Answered a question
+      - code: greeting
+      - time: just now
+      - paragraph: Should greeting.txt say Hello or Hi?
+      - paragraph: "Run Wild: decide from context and the person's rules, state your assumption in one line, and continue."
+      - text: Ask me with ask_user_question whether
+      - button "Open session"

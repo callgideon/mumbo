@@ -1,0 +1,27 @@
+# Loader overlay for the Run Wild record scenario: Run Wild listed last and chosen for new Sessions, as a person's box
+# lists it, and @mumbo/run-wild with its record in a temporary directory the test names: a yml path would anchor to the
+# real Harness home.
+- id: approval
+  config:
+    policy: ask
+- id: permission
+  config:
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: ask
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: ask
+      run-wild:
+        sandbox: danger-full-access
+        approval: ask
+    defaultPreset: run-wild
+- insert:
+    - id: run-wild
+      name: '@mumbo/run-wild'
+      config:
+        root: !!js process.env.MUMBO_RUN_WILD_RECORD_ROOT
