@@ -282,6 +282,8 @@ test('prod Terraform: CELLS as edge/cells.mjs parses it, each cell\'s E2B key an
   assert.match(root, /variable "placement_cache_ms" \{[^}]*default\s*= 30000/)
   assert.match(mod, /PLACEMENT_CACHE_MS\s*= tostring\(var\.placement_cache_ms\)/)
   assert.match(tf('terraform.tfvars'), /^placement_cache_ms\s*= 0\s/m, 'off on the us-east-1 edge, whose store is in-region')
+  assert.match(root, /placement_cache_ms\s+= var\.placement_cache_ms_ap_south_1/)
+  assert.match(tf('terraform.tfvars'), /^placement_cache_ms_ap_south_1\s*= 300000\s/m, 'the Mumbai edge: 5 minutes, since invalidation keeps its read cache current (R6b)')
   // The edge reads neither key through its task role any more; the grants stay only for a rollback to an older image.
   assert.match(mod, /Remove once a B21 revision is steady/)
   assert.match(mod, /Action = "s3:PutObject", Resource = "arn:aws:s3:::\$\{local\.audit_bucket\}\/\$\{local\.audit_prefix\}\*"/)
