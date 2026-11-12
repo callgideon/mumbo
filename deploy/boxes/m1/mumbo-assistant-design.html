@@ -2362,6 +2362,20 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>classify capacity and resume failures by those answers in place of the message regex, with fixtures from the recordings. Today a broken snapshot whose resume times out at placement may show &quot;at capacity&quot; on every visit;</li>
 <li>try <code>onResume: 'reboot'</code> on <code>GuestUnresponsiveError</code>, which keeps the disk;</li>
 <li>weigh a final backup before a kill when envd answers but dsh is down, against the user lock's 120 s.</li>
+<li><strong>[2026-11-12, plan ruling]</strong>
+<ul>
+<li><strong>Classification by class and status.</strong> <code>ServiceBusyError</code> and <code>RateLimitError</code> on a resume, and the node's memory refusal (&quot;cannot map N MiB of guest memory&quot;), mean at capacity. Both broad message regexes go.</li>
+<li><strong>Other resume failures.</strong> Any other final answer to a resume shows the starting page and records <code>resumeFailedAt</code>. The box is recreated from backup only after a <strong>10-minute grace</strong> and only while the cell has room by the edge's count.
+<ul>
+<li>Ten minutes, not the orchestrator's 30-minute stop timeout: a grace is pure outage for a lost node or a broken snapshot, a planned drain is the operator's to time, and one box's drain measured 82 s.</li>
+<li>The drain script logs its upload time, so the number can be revisited.</li>
+</ul>
+</li>
+<li><strong>Dropped from B47b.</strong> The reboot needs a fork change first. The final backup has no time left inside the lock. Backup and restore log their durations.</li>
+<li><strong>Recordings: the unresponsive guest and the full cell, in Mumbai only and before R8.</strong> The answers don't depend on the cell. No us-east-1 node is filled or stopped. The node-gone case is synthesized from source and marked so.</li>
+<li><strong>Access.</strong> Both recordings need the temporary client-proxy rule, a production change outside the operator session's permissions. That and the fill are one go-ahead for the founder.</li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>
@@ -2830,7 +2844,7 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 </tr>
 <tr>
 <td><strong>K3</strong> (R4) the goal stall check</td>
-<td>At each goal round start, a mechanical check from the log: files changed, todo progress, repeat chains, tool errors. After two rounds without change, the round prompt carries the progress questions (done? looping? progressing? what next?), and the existing <code>blocked</code> rule follows. No model call and no new event: the round prompt is the logged record</td>
+<td>At each goal round start, a mechanical check from the log: files changed, todo progress, repeat chains, tool errors. After two rounds without change, the round prompt carries the progress questions (done? looping? progressing? what next?), and the existing <code>blocked</code> rule follows. No model call and no new event: the round prompt is the logged record.<br><strong>[2026-11-12, design ruling]</strong> A prepended <code>agent/pre-step</code> listener adds the questions to the round's own message, keeping its id and source. A round counts as changed by a new successful file-tool write, a newly completed todo item, or <strong>a repeated call (same tool and arguments) whose successful result differs from its earlier ones</strong>. That last signal is what lets shell, browser and MCP progress register: re-running a migration or polling a growing job output counts, and the same failing command with the same output doesn't. It stays off (<code>stallCheck: false</code>) until the eval's <code>shell-only</code> task shows no premature ending and its <code>progress</code> task shows no questions, then goes on in both overlays</td>
 <td>After K1, K2</td>
 </tr>
 <tr>
