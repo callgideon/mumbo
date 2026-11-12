@@ -1,12 +1,12 @@
 // node --test: the edge's sequential store round trips per request path (spec R6b, trace first), through the real handlers
 // over testing/store-trace.mjs, a store whose every round trip answers after a fixed latency. Each path runs cold (a new
-// edge process: empty placement cache, no last-use write yet) and then warm (the same request again on that edge), against a
-// person whose box runs and whose records exist, as the founder's did when R6 measured the Mumbai edge, with a project whose
-// box runs too and which the door key reaches. The edge has the
-// Mumbai edge's settings (EDGE_REGION ap-south-1, PLACEMENT_CACHE_MS 30000, so the read cache is on and subscribed); E2B and
-// the box are local stubs that answer at once. The counts asserted: depth, the round trips the answer waited for one after
-// another, and total, every store call the request caused, the unawaited ones included. STORE_TRACE=<file> writes each
-// path's levels there as Markdown.
+// edge process: empty placement cache, no last-use write or activity recorded yet) and then warm (the same request again on
+// that edge at once, so within a key's last-use minute and a box's 30 s of activity), against a person whose box runs and
+// whose records exist, as the founder's did when R6 measured the Mumbai edge, with a project whose box runs too and which
+// the door key reaches. The edge has the Mumbai edge's settings (EDGE_REGION ap-south-1, PLACEMENT_CACHE_MS 30000, so the
+// read cache is on and subscribed); E2B and the box are local stubs that answer at once. The counts asserted: depth, the
+// round trips the answer waited for one after another, and total, every store call the request caused, the unawaited ones
+// included. STORE_TRACE=<file> writes each path's levels there as Markdown.
 import assert from 'node:assert/strict'
 import { appendFileSync } from 'node:fs'
 import { createServer, request } from 'node:http'
@@ -85,7 +85,7 @@ test('the traced store: commands issued together are one level, a command after 
     mark('end')
   })
   assert.deepEqual(commands.map(c => [c.level, c.name, c.key, c.method, c.off]),
-    [[1, 'GET', 'doc:a', 'getDoc', false], [1, 'GET', 'b', 'getCount', false], [2, 'GET', 'box:x', 'getBox', true], [2, 'GET', 'box:z', 'patchBox', false], [3, 'GET', 'box:y', 'getBox', true]])
+    [[1, 'GET', 'doc:a', 'getDoc', false], [1, 'GET', 'b', 'getCount', false], [2, 'GET', 'box:x', 'getBox', true], [2, 'EVAL', 'box:z', 'patchBox', false], [3, 'GET', 'box:y', 'getBox', true]])
   assert.equal(depth('end'), 2)
 })
 
@@ -170,13 +170,13 @@ test('store round trips per request path, cold and warm, at the Mumbai edge\'s s
   if (process.env.STORE_TRACE) appendFileSync(process.env.STORE_TRACE, out.join('\n'))
   // [depth, total] per run; for the stream, the depth at its first byte, cold and warm.
   assert.deepEqual(counts, {
-    '(a) door: agent_read': { cold: [3, 7], warm: [0, 3] },
-    '(a) door: agent_send (charged to the budgets)': { cold: [4, 10], warm: [0, 4] },
-    '(b) app request: the person\'s box': { cold: [2, 5], warm: [0, 3] },
-    '(b) app request: a project\'s box': { cold: [2, 5], warm: [0, 3] },
-    '(c) model host call (streamed)': { cold: [1, 10], warm: [0, 6], firstByte: [1, 0] },
-    '(c) model host call, project box (streamed)': { cold: [2, 11], warm: [0, 6], firstByte: [2, 0] },
-    '(d) live view connect': { cold: [2, 5], warm: [0, 3] },
+    '(a) door: agent_read': { cold: [3, 5], warm: [0, 0] },
+    '(a) door: agent_send (charged to the budgets)': { cold: [4, 8], warm: [0, 1] },
+    '(b) app request: the person\'s box': { cold: [2, 3], warm: [0, 0] },
+    '(b) app request: a project\'s box': { cold: [2, 3], warm: [0, 0] },
+    '(c) model host call (streamed)': { cold: [1, 8], warm: [0, 3], firstByte: [1, 0] },
+    '(c) model host call, project box (streamed)': { cold: [2, 9], warm: [0, 3], firstByte: [2, 0] },
+    '(d) live view connect': { cold: [2, 3], warm: [0, 0] },
     '(e) door: project_status': { cold: [3, 4], warm: [0, 0] },
     '(e) door: project_message (charged to the budgets, through the relay)': { cold: [4, 7], warm: [0, 1] },
   })

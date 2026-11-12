@@ -1790,6 +1790,26 @@ test('ensure reads a box record at most once: pick routes with the record ensure
   assert.deepEqual(await counted(), ['launch', 1], 'a resume: the read under the lock, then the record it wrote')
 })
 
+test('touch: one EVAL nobody waits for, at most once per 30 s per box and edge task; E2B\'s timer is pushed out when that patch moved `extended`', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 })
+  const { us, cells } = twoCells(); const sent = []
+  const store = redisStore(fakeRedis().client((cmd, key, run) => { sent.push(cmd); return Promise.resolve(run()) }))
+  await store.putBox('u1', { email: 'a@x.com', region: 'us-east-1', launch: 'L', active: 0, extended: 0, backedUp: 0, paused: false })
+  sent.length = 0
+  const [b, other] = [1, 2].map(() => boxes({ cells, store, cfg, edgeKey: 'k', log: () => {} }))
+  await b.touch('u1'); await b.touch('u1')
+  assert.deepEqual([sent, kinds(us, 'setTimeout').length], [['EVAL'], 1], 'the second within 30 s sends nothing; the first moved extended')
+  t.mock.timers.tick(30_000)
+  await b.touch('u1'); await other.touch('u1')
+  assert.deepEqual([sent.length, kinds(us, 'setTimeout').length], [3, 1], 'each task on its own; extended is 30 s old, so it stays')
+  t.mock.timers.tick(30_000)
+  await b.touch('u1')
+  assert.deepEqual([sent.length, kinds(us, 'setTimeout').length, (await store.getBox('u1')).extended], [4, 2, 1_060_000])
+  const logs = []
+  await boxes({ cells, store: { ...store, patchBox: async () => { throw new Error('store down') } }, cfg, edgeKey: 'k', log: (l) => logs.push(JSON.parse(l)) }).touch('u1')
+  assert.deepEqual(logs, [{ edge: 'box', level: 'warn', msg: 'activity not recorded', box: 'u1', error: 'store down' }])
+})
+
 test('pauseIdle reads the record again under the lock and skips a box whose activity moved since the sweep listed it', async () => {
   const { us, cells } = twoCells(); const store = memoryStore(); const logs = []
   us.run('u1', 'a@x.com')

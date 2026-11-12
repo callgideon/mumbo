@@ -4,7 +4,7 @@
 // MULTI…EXEC) is one round trip, recorded with its key and the edge code that issued it, and answered after `latencyMs`.
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { EventEmitter } from 'node:events'
-import { redisStore } from '../store.mjs'
+import { INVALIDATE, redisStore } from '../store.mjs'
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
@@ -89,7 +89,8 @@ export async function subscribed(store) {
 
 /**
  * The node-redis v4 calls redisStore makes, in memory, for any number of clients over one data set: GET, SET (NX), DEL,
- * INCR, INCRBY, EXPIRE, PEXPIRE, SADD, SREM, SMEMBERS, store.mjs's RELEASE script, PUBLISH, MULTI…EXEC, and on a
+ * INCR, INCRBY, EXPIRE, PEXPIRE, SADD, SREM, SMEMBERS, store.mjs's RELEASE and PATCH scripts (PATCH in JavaScript, with
+ * the same merge, extension and message), PUBLISH, MULTI…EXEC, and on a
  * subscriber (`duplicate()`) connect, SUBSCRIBE, PING and quit, with node-redis's events (`ready`, `error`,
  * `reconnecting`, `end`). A message reaches each subscriber `deliverMs` after its PUBLISH, unless the subscriber has
  * dropped meanwhile. ponytail: no key expiry (PX, EXPIRE); the paths under test release their locks.
@@ -104,6 +105,16 @@ export async function subscribed(store) {
 export function fakeRedis({ send = (name, key, run) => Promise.resolve(run()), deliverMs = 0 } = {}) {
   const strings = new Map(), sets = new Map(), listening = new Set(), cut = new Set()
   const members = (k) => sets.get(k) ?? sets.set(k, new Set()).get(k)
+  const patch = (k, fields, extendMs, message) => {
+    const old = strings.get(k)
+    if (old === undefined) return null
+    const b = JSON.parse(old), f = JSON.parse(fields), extended = Number(b.extended) || 0
+    for (const [name, value] of Object.entries(f)) { if (value === null) delete b[name]; else b[name] = value }
+    if (extendMs !== '' && f.active - extended >= Number(extendMs)) b.extended = f.active
+    strings.set(k, JSON.stringify(b))
+    if (message) ops.publish(INVALIDATE, message)
+    return old
+  }
   const ops = {
     get: (k) => strings.get(k) ?? null,
     set: (k, v, o = {}) => { if (o.NX && strings.has(k)) return null; strings.set(k, String(v)); return 'OK' },
@@ -115,7 +126,7 @@ export function fakeRedis({ send = (name, key, run) => Promise.resolve(run()), d
     sAdd: (k, m) => { members(k).add(m); return 1 },
     sRem: (k, m) => Number(members(k).delete(m)),
     sMembers: (k) => [...members(k)],
-    eval: (_script, { keys: [k], arguments: [token] }) => (strings.get(k) === token ? ops.del(k) : 0),  // store.mjs RELEASE only
+    eval: (script, { keys: [k], arguments: a }) => (script.includes('cjson') ? patch(k, ...a) : strings.get(k) === a[0] ? ops.del(k) : 0),
     publish: (channel, message) => {
       for (const s of listening) setTimeout(() => { if (listening.has(s)) s.channels.get(channel)?.(message) }, deliverMs)
       return listening.size

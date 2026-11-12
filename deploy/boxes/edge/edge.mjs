@@ -1412,14 +1412,20 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
     return { id, token: b.launch, traffic: b.traffic, host, ports: b.ports, proxy: cell.proxy, ...(member ? { member } : {}) }
   }
 
-  /** Record activity (a browser request, a WebSocket frame or a model call) and push E2B's own pause timer out. */
-  async function touch(id) {
-    const b = await store.getBox(id, { fresh: true })  // `extended` changes without an invalidation
-    if (!b) return
+  const TOUCH_MS = 30_000, EXTEND_MS = 60_000
+  const touched = new Map()  // box id -> when this task last recorded its activity
+  /** Record activity (a browser request, a WebSocket frame, a door call or a model call), at most once per TOUCH_MS per box
+   *  and edge task, in one store call (patchBox) that no request waits for. The patch also moves `extended` once it is
+   *  EXTEND_MS old; the record it answers, as it was before, shows when that happened, and E2B's own pause timer is then
+   *  pushed out. A failed patch is logged. */
+  function touch(id) {
     const now = Date.now()
-    const extend = now - b.extended >= 60_000
-    await store.patchBox(id, extend ? { active: now, extended: now } : { active: now })
-    if (extend) cellOf(b).Sandbox.setTimeout(id, timeout()).catch(e => say({ level: 'warn', msg: 'timeout extension failed', box: id, error: e.message }))
+    if (now - (touched.get(id) ?? -Infinity) < TOUCH_MS) return Promise.resolve()
+    if (touched.size >= 10_000) touched.clear()
+    touched.set(id, now)
+    return store.patchBox(id, { active: now }, EXTEND_MS).then((old) => {
+      if (old && now - (Number(old.extended) || 0) >= EXTEND_MS) cellOf(old).Sandbox.setTimeout(id, timeout()).catch(e => say({ level: 'warn', msg: 'timeout extension failed', box: id, error: e.message }))
+    }, (e) => say({ level: 'warn', msg: 'activity not recorded', box: id, error: e.message }))
   }
   /** True when `id` is `email`'s current, running box. Boxes unknown to the store are adopted from E2B. */
   async function owns(email, id) {

@@ -6,12 +6,12 @@
 // The read cache (spec R6b): redisStore given `cacheMs` keeps, per edge task, what it reads of the records on the request
 // paths: door key records (`doc:key:<sha256>`), person placement docs (`doc:person:<email>`), project docs
 // (`doc:project:<id>`), halt switches (`doc:halt:<email>`) and box records (`box:<id>`), a missing record included. Every
-// write of one of them through any redisStore publishes `{ kind, id, from }` on INVALIDATE in the write's own transaction,
-// after the write (kind `key`, `person`, `project`, `halt` or `box`; id the rest of the key; from the writing task, which
-// drops its own copy when the write returns and so skips its own message), and every other task that receives it drops
-// its copy. A task serves its copies only while its subscription to INVALIDATE is confirmed and answering; on a
-// disconnect or an error it empties the cache and reads through until it is subscribed again. `cacheMs` is each copy's
-// backstop lifetime.
+// write of one of them through any redisStore publishes `{ kind, id, from }` on INVALIDATE in the write's own transaction
+// (for patchBox, its script), after the write (kind `key`, `person`, `project`, `halt` or `box`; id the rest of the key;
+// from the writing task, which drops its own copy when the write returns and so skips its own message), and every other
+// task that receives it drops its copy. A task serves its copies only while its subscription to INVALIDATE is confirmed
+// and answering; on a disconnect or an error it empties the cache and reads through until it is subscribed again.
+// `cacheMs` is each copy's backstop lifetime.
 import { randomUUID } from 'node:crypto'
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
@@ -19,6 +19,19 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 /** The channel of the read cache's invalidations: JSON `{ kind, id, from? }`. Any other message, the bare word `all`
  *  included (RUNBOOK "The edge's read cache"), empties every subscribed task's cache. */
 export const INVALIDATE = 'edge:invalidate'
+/** patchBox's script. KEYS[1] is the box record; ARGV[1] the fields as JSON, null for a field to remove; ARGV[2] '' or,
+ *  for touch, how old `extended` may get before it moves to the new `active` too; ARGV[3] '' or the invalidation to
+ *  publish after the write. Merges the fields into the stored record in one step and returns the record as it was before,
+ *  or nil, writing nothing, when there is none. */
+const PATCH = `local v = redis.call('get', KEYS[1])
+if not v then return false end
+local b, fields = cjson.decode(v), cjson.decode(ARGV[1])
+local extended = tonumber(b.extended) or 0
+for k, x in pairs(fields) do if x == cjson.null then b[k] = nil else b[k] = x end end
+if ARGV[2] ~= '' and fields.active - extended >= tonumber(ARGV[2]) then b.extended = fields.active end
+redis.call('set', KEYS[1], cjson.encode(b))
+if ARGV[3] ~= '' then redis.call('publish', '${INVALIDATE}', ARGV[3]) end
+return v`
 /** The kinds a message names one record of; every other message empties the whole cache. */
 const KINDS = ['key', 'person', 'project', 'halt', 'box']
 /** Box record fields no cached reader uses: a patch of only these (activity, keepalive and backup times) sends no message. */
@@ -49,7 +62,15 @@ export function memoryStore() {
   return {
     async getBox(id) { const b = boxes.get(id); return b && { ...b } },
     async putBox(id, record) { boxes.set(id, { ...record }) },
-    async patchBox(id, fields) { const b = boxes.get(id); if (b) boxes.set(id, { ...b, ...fields }) },
+    async patchBox(id, fields, extendMs) {
+      const b = boxes.get(id)
+      if (!b) return undefined
+      const next = { ...b, ...fields }
+      for (const [k, v] of Object.entries(fields)) if (v === undefined) delete next[k]
+      if (extendMs !== undefined && fields.active - (Number(b.extended) || 0) >= extendMs) next.extended = fields.active
+      boxes.set(id, next)
+      return { ...b }
+    },
     async deleteBox(id) { boxes.delete(id) },
     async listBoxes() { return [...boxes].map(([id, b]) => ({ id, ...b })) },
     async increment(key, ttlSeconds) { const n = (counters.get(key) ?? 0) + 1; counters.set(key, n); void ttlSeconds; return n },
@@ -167,12 +188,16 @@ export function redisStore(client, { cacheMs = 0, now = Date.now, log = console.
   return {
     getBox: (id, opts) => read(id, opts?.fresh),
     async putBox(id, record) { await commit(`box:${id}`, (m) => m.set(`box:${id}`, JSON.stringify(record)).sAdd('boxes', id)) },
-    async patchBox(id, fields) {
-      // Last writer wins per field group; every caller holds the user's lock or writes timestamps only.
-      const b = await read(id, true)
-      if (!b) return
+    /** Merges `fields` into the stored record in one EVAL (PATCH), so concurrent patches never lose each other's fields;
+     *  only a putBox replaces the whole record. A field given as undefined is removed. With `extendMs` (touch), `extended`
+     *  also moves to `fields.active` once the stored one is at least that old. Resolves the record as it was before the
+     *  patch, or undefined, writing nothing, when there is none. A patch of only QUIET fields publishes nothing. */
+    async patchBox(id, fields, extendMs) {
       const quiet = Object.keys(fields).every(f => QUIET.has(f))
-      await commit(`box:${id}`, (c) => c.set(`box:${id}`, JSON.stringify({ ...b, ...fields })), quiet ? null : { kind: 'box', id })
+      const v = await client.eval(PATCH, { keys: [`box:${id}`], arguments: [JSON.stringify(fields, (k, x) => (x === undefined ? null : x)),
+        extendMs === undefined ? '' : String(extendMs), quiet ? '' : JSON.stringify({ kind: 'box', id, from: cache.self })] })
+      if (!quiet) cache.drop(`box:${id}`)
+      return v ? JSON.parse(v) : undefined
     },
     async deleteBox(id) { await commit(`box:${id}`, (m) => m.del(`box:${id}`).sRem('boxes', id)) },
     async listBoxes() {

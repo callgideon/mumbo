@@ -171,11 +171,58 @@ test('read cache: each cached record\'s write publishes { kind, id } after it, i
   await store.putBox('b1', { email: 'a@x.com' })
   await store.patchBox('b1', { active: 1, extended: 1 }); await store.patchBox('b1', { backedUp: 1, restored: undefined })
   await store.patchBox('b1', { paused: true }); await store.deleteBox('b1')
-  assert.deepEqual(published(), [['MULTI SET SADD PUBLISH', 'box:b1'], ['GET', 'box:b1'], ['SET', 'box:b1'], ['GET', 'box:b1'], ['SET', 'box:b1'], ['GET', 'box:b1'], ['MULTI SET PUBLISH', 'box:b1'], ['MULTI DEL SREM PUBLISH', 'box:b1']])
+  // A patch is one EVAL, which publishes inside the script (below).
+  assert.deepEqual(published(), [['MULTI SET SADD PUBLISH', 'box:b1'], ['EVAL', 'box:b1'], ['EVAL', 'box:b1'], ['EVAL', 'box:b1'], ['MULTI DEL SREM PUBLISH', 'box:b1']])
   // The message names the record and the writing task.
   const raw = redis.client(); const heard = []
   const sub = raw.duplicate(); await sub.connect(); await sub.subscribe(INVALIDATE, (m) => heard.push(JSON.parse(m)))
-  await store.putDoc('key:h', { id: 'k' }); await store.invalidate('box', 'b2'); await landed()
-  assert.deepEqual(heard.map(({ kind, id, from }) => [kind, id, typeof from]), [['key', 'h', 'string'], ['box', 'b2', 'undefined']])
+  await store.putDoc('key:h', { id: 'k' }); await store.invalidate('box', 'b2')
+  await raw.set('box:b3', '{}'); await store.patchBox('b3', { active: 1 }); await store.patchBox('b3', { paused: true }); await landed()
+  assert.deepEqual(heard.map(({ kind, id, from }) => [kind, id, typeof from]), [['key', 'h', 'string'], ['box', 'b2', 'undefined'], ['box', 'b3', 'string']])
   await sub.quit()
+})
+
+/** The patchBox contract, for memoryStore and redisStore alike. */
+async function patches(store) {
+  const first = { email: 'a@x.com', active: 1, extended: 1, restored: 'v1', ports: { dsh: '880', live: '881' } }
+  await store.putBox('b1', first)
+  assert.deepEqual(await store.patchBox('b1', { active: 5, restored: undefined }), first, 'it answers the record as it was')
+  assert.deepEqual(await store.getBox('b1', { fresh: true }), { email: 'a@x.com', active: 5, extended: 1, ports: { dsh: '880', live: '881' } }, 'merged; an undefined field removed')
+  const now = 1_762_000_000_123
+  const extended = async (active) => { await store.patchBox('b1', { active }, 60_000); return (await store.getBox('b1', { fresh: true })).extended }
+  assert.equal(await extended(now), now, 'extended moves once it is the given age')
+  assert.equal(await extended(now + 59_999), now, 'and not before')
+  assert.equal(await extended(now + 60_000), now + 60_000)
+  assert.equal(await store.patchBox('none', { active: 1 }), undefined)
+  assert.equal(await store.getBox('none'), undefined, 'a patch of no record writes nothing')
+}
+
+test('patchBox merges into the record and answers it as it was; with an age, touch\'s extension; memory and Redis alike', async () => {
+  await patches(memoryStore())
+  await patches(redisStore(fakeRedis().client()))
+})
+
+test('redis store: two patches of different fields at once both land (one EVAL each, no read-then-write)', async () => {
+  // Each round trip answers after 5 ms, as a read-then-write would interleave.
+  const redis = fakeRedis({ send: (name, key, run) => new Promise(r => setTimeout(r, 5)).then(run) })
+  const store = redisStore(redis.client())
+  await store.putBox('b1', { email: 'a@x.com', active: 1, paused: false })
+  await Promise.all([store.patchBox('b1', { paused: true, wakeAt: 9 }), store.patchBox('b1', { active: 2 })])
+  assert.deepEqual(await store.getBox('b1'), { email: 'a@x.com', active: 2, paused: true, wakeAt: 9 })
+})
+
+// Flushes database 2: only a disposable Redis named by TEST_REDIS_URL, never REDIS_URL. Runs store.mjs's PATCH, cjson and all.
+test('redis store: PATCH on a real Redis merges, removes, extends, publishes and answers as the fake does', { skip: !process.env.TEST_REDIS_URL && 'set TEST_REDIS_URL to a disposable Redis to run' }, async () => {
+  const { createClient } = await import('redis')
+  const client = createClient({ url: process.env.TEST_REDIS_URL, database: 2 }); await client.connect(); await client.flushDb()
+  const store = redisStore(client)
+  const sub = client.duplicate(); await sub.connect(); const heard = []
+  await sub.subscribe(INVALIDATE, (m) => heard.push(JSON.parse(m)))
+  try {
+    await patches(store)
+    await store.patchBox('b1', { paused: true, wakeAt: 9 }); await store.patchBox('b1', { backedUp: 3 })
+    await new Promise(r => setTimeout(r, 50))
+    assert.deepEqual(heard.map(({ kind, id }) => [kind, id]), [['box', 'b1'], ['box', 'b1']], 'the putBox and the pause; activity and backups are quiet')
+    assert.deepEqual(await store.getBox('b1', { fresh: true }), { email: 'a@x.com', active: 1_762_000_060_123, extended: 1_762_000_060_123, ports: { dsh: '880', live: '881' }, paused: true, wakeAt: 9, backedUp: 3 })
+  } finally { await sub.quit(); await store.close() }
 })
