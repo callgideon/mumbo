@@ -60,7 +60,7 @@ module "cell_us_east_1" {
   mtls_env        = local.mtls_env
   mtls_certs      = { ca_pem = module.mtls.ca_pem, leaves = module.mtls.leaves }
   backup_bucket   = "mumbo-boxes-backup-${data.aws_caller_identity.this.account_id}" # created by the trial (../edge.tf); users' backups carry over
-  edge_role_arn   = module.edge_us_east_1.role_arn
+  edge_role_arns  = local.edge_role_arns
   alarm_topic_arn = aws_sns_topic.alarms.arn
 }
 
@@ -95,7 +95,7 @@ module "cell_ap_south_1" {
   mtls_env          = local.mtls_env
   mtls_certs        = { ca_pem = module.mtls.ca_pem, leaves = module.mtls.leaves } # SPIFFE ids, not names: the same leaves serve every cell
   backup_bucket     = "${local.name}-aps1-backup-${data.aws_caller_identity.this.account_id}"
-  edge_role_arn     = module.edge_us_east_1.role_arn # the Mumbai edge's role joins in R6
+  edge_role_arns    = local.edge_role_arns
   alarm_email       = var.ops_alert_email
 }
 

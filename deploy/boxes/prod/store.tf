@@ -17,6 +17,16 @@ resource "aws_vpc_security_group_ingress_rule" "edge_store" {
   to_port                      = 6379
   description                  = "us-east-1 edge"
 }
+# The Mumbai edge over peering (R6): a security group in another region cannot be referenced, so its subnets' CIDRs.
+resource "aws_vpc_security_group_ingress_rule" "edge_store_aps1" {
+  for_each          = toset(module.cell_ap_south_1.edge_subnet_cidrs)
+  security_group_id = aws_security_group.edge_store.id
+  cidr_ipv4         = each.key
+  ip_protocol       = "tcp"
+  from_port         = 6379
+  to_port           = 6379
+  description       = "ap-south-1 edge subnets (R6)"
+}
 resource "aws_elasticache_subnet_group" "edge" {
   name       = "${local.name}-edge"
   subnet_ids = module.cell_us_east_1.private_subnets

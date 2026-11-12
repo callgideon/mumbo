@@ -39,3 +39,13 @@ resource "aws_vpc_security_group_ingress_rule" "aps1_nlb_from_use1" {
   to_port           = tonumber(each.value[0])
   description       = "us-east-1 edge subnets (R4, R6)"
 }
+# The Mumbai edge reaches the us-east-1 cell's E2B API and client proxy (R6): every edge serves every cell.
+resource "aws_vpc_security_group_ingress_rule" "use1_nlb_from_aps1" {
+  for_each          = { for p in setproduct(["3000", "3002"], module.cell_ap_south_1.edge_subnet_cidrs) : "${p[0]}-${p[1]}" => p }
+  security_group_id = module.cell_us_east_1.nlb_security_group_id
+  cidr_ipv4         = each.value[1]
+  ip_protocol       = "tcp"
+  from_port         = tonumber(each.value[0])
+  to_port           = tonumber(each.value[0])
+  description       = "ap-south-1 edge subnets (R6)"
+}

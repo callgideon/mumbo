@@ -384,3 +384,8 @@ moved {
   from = module.edge_us_east_1.aws_elasticache_subnet_group.edge
   to   = aws_elasticache_subnet_group.edge
 }
+# R6 step 3: the edge's log group is created only by the us-east-1 edge (modules/edge count).
+moved {
+  from = module.edge_us_east_1.aws_cloudwatch_log_group.edge
+  to   = module.edge_us_east_1.aws_cloudwatch_log_group.edge[0]
+}

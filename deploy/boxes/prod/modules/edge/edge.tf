@@ -22,6 +22,11 @@ variable "openrouter_models" { type = string }
 variable "openrouter_zdr" { type = bool }
 variable "signin_cookie_name" { type = string }
 variable "placement_cache_ms" { type = number }
+variable "suffix" {
+  description = "Appended to this edge's account-wide names (its IAM role) and its log stream prefixes: \"\" for the us-east-1 edge, \"-aps1\" for Mumbai's."
+  type        = string
+  default     = ""
+}
 variable "ecr" {
   description = "Image prefix: <registry>/<repository prefix>; the image is <this>/edge."
   type        = string
@@ -85,6 +90,10 @@ data "aws_region" "this" {}
 locals {
   name   = var.name
   region = data.aws_region.this.region
+  # Where the shared parts live: the /mumbo SSM parameters, the GitHub App and OpenRouter secrets, the log group (R6: every
+  # edge logs to us-east-1's /mumbo-boxes/edge, so the alarms in prod/ops.tf cover both) and the approval audit bucket.
+  home_region = "us-east-1"
+  log_group   = "/${var.name}/edge"
 }
 
 locals {
@@ -289,15 +298,16 @@ resource "aws_lb_listener" "http" {
 
 # ---- task
 resource "aws_cloudwatch_log_group" "edge" {
-  name              = "/${local.name}/edge"
+  count             = local.region == local.home_region ? 1 : 0
+  name              = local.log_group
   retention_in_days = 30
 }
 resource "aws_iam_role" "edge" {
-  name               = "${local.name}-edge"
+  name               = "${local.name}-edge${var.suffix}"
   assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "sts:AssumeRole", Principal = { Service = "ecs-tasks.amazonaws.com" } }] })
 }
 # Every cell's backups: a box backs up into, and restores from, its own cell's bucket (each cell's backups key policy
-# admits this role, modules/cell edge_role_arn).
+# admits this role, modules/cell edge_role_arns).
 resource "aws_iam_role_policy" "edge" {
   role = aws_iam_role.edge.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [
@@ -307,8 +317,8 @@ resource "aws_iam_role_policy" "edge" {
     { Effect = "Allow", Action = ["kms:Decrypt", "kms:GenerateDataKey"], Resource = [for c in values(var.cells) : c.backups_kms_key_arn] },
     # Edge images before B21 read these two themselves, and a circuit-breaker rollback may run one; B21 and later get both
     # as ECS secrets. Remove once a B21 revision is steady (RUNBOOK "Ship a new edge").
-    { Effect = "Allow", Action = "ssm:GetParameter", Resource = "arn:aws:ssm:${local.region}:${data.aws_caller_identity.this.account_id}:parameter/mumbo/boxes/edge-secret" },
-    { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = "arn:aws:secretsmanager:${local.region}:${data.aws_caller_identity.this.account_id}:secret:mumbo/prod/deepseek-api-key-*" },
+    { Effect = "Allow", Action = "ssm:GetParameter", Resource = "arn:aws:ssm:${local.home_region}:${data.aws_caller_identity.this.account_id}:parameter/mumbo/boxes/edge-secret" },
+    { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = "arn:aws:secretsmanager:${local.home_region}:${data.aws_caller_identity.this.account_id}:secret:mumbo/prod/deepseek-api-key-*" },
   ] })
 }
 resource "aws_iam_role_policy" "exec_edge" {
@@ -327,15 +337,19 @@ resource "aws_iam_role_policy" "exec_edge" {
   ] })
 }
 # The mumbo-bot GitHub App (app_id, slug, private_key), created outside Terraform under the cell's data key (kms:Decrypt in modules/cell/control.tf).
-data "aws_secretsmanager_secret" "github_app" { name = "${local.name}/github-app" }
+data "aws_secretsmanager_secret" "github_app" {
+  region = local.home_region
+  name   = "${local.name}/github-app"
+}
 # The OpenRouter API key (a plain string), created outside Terraform under the data key; read only while the route is on.
 data "aws_secretsmanager_secret" "openrouter" {
-  count = var.openrouter_models == "" ? 0 : 1
-  name  = "${local.name}/openrouter"
+  count  = var.openrouter_models == "" ? 0 : 1
+  region = local.home_region
+  name   = "${local.name}/openrouter"
 }
 
 locals {
-  ssm = "arn:aws:ssm:${local.region}:${data.aws_caller_identity.this.account_id}:parameter/mumbo"
+  ssm = "arn:aws:ssm:${local.home_region}:${data.aws_caller_identity.this.account_id}:parameter/mumbo"
   # Container env name -> SSM parameter under /mumbo; these are all the exec role may read.
   proxy_ssm = { OAUTH2_PROXY_CLIENT_ID = "boxes/oauth-client-id", OAUTH2_PROXY_CLIENT_SECRET = "boxes/oauth-client-secret", OAUTH2_PROXY_COOKIE_SECRET = "boxes/cookie-secret" }
   edge_ssm = merge(
@@ -407,7 +421,7 @@ resource "aws_ecs_task_definition" "edge" {
         "--skip-auth-strip-headers=true",
       ]
       secrets          = [for k, p in local.proxy_ssm : { name = k, valueFrom = "${local.ssm}/${p}" }]
-      logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.edge.name, awslogs-region = local.region, awslogs-stream-prefix = "oauth2-proxy" } }
+      logConfiguration = { logDriver = "awslogs", options = { awslogs-group = local.log_group, awslogs-region = local.home_region, awslogs-stream-prefix = "oauth2-proxy${var.suffix}" } }
     },
     {
       name         = "edge"
@@ -456,7 +470,7 @@ resource "aws_ecs_task_definition" "edge" {
           { name = "GITHUB_APP_KEY", valueFrom = "${data.aws_secretsmanager_secret.github_app.arn}:private_key::" },
       ])
       stopTimeout      = 60
-      logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.edge.name, awslogs-region = local.region, awslogs-stream-prefix = "edge" } }
+      logConfiguration = { logDriver = "awslogs", options = { awslogs-group = local.log_group, awslogs-region = local.home_region, awslogs-stream-prefix = "edge${var.suffix}" } }
     },
   ])
 }
@@ -488,7 +502,7 @@ resource "aws_ecs_service" "edge" {
     container_port   = 8081
   }
   # The exec role's grant first: a task whose secrets it may not read does not start.
-  depends_on = [aws_lb_listener_rule.edge, aws_iam_role_policy.exec_edge]
+  depends_on = [aws_lb_listener_rule.edge, aws_iam_role_policy.exec_edge, aws_cloudwatch_log_group.edge]
 }
 
 output "edge_alb" { value = { dns_name = aws_lb.edge.dns_name, zone_id = aws_lb.edge.zone_id, arn_suffix = aws_lb.edge.arn_suffix } }
@@ -496,6 +510,6 @@ output "edge_alb" { value = { dns_name = aws_lb.edge.dns_name, zone_id = aws_lb.
 output "public_names" { value = concat([local.public_host], local.llm_hosts, local.old_hosts, local.wildcards, ["*.${local.old_host}"]) }
 output "domain_validation_options" { value = aws_acm_certificate.edge.domain_validation_options }
 output "role_arn" { value = aws_iam_role.edge.arn }
-output "log_group" { value = aws_cloudwatch_log_group.edge.name }
+output "log_group" { value = local.log_group }
 output "target_groups" { value = { for k, v in aws_lb_target_group.edge : k => v.arn_suffix } }
 output "service_id" { value = aws_ecs_service.edge.id }

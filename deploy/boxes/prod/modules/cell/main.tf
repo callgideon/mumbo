@@ -62,9 +62,9 @@ variable "zone_id" {
   type        = string
   default     = null
 }
-variable "edge_role_arn" {
-  description = "The edge task role, the only principal that may use the backup key."
-  type        = string
+variable "edge_role_arns" {
+  description = "Every edge's task role (one per edge region, R6): the only principals that may use the backup key."
+  type        = list(string)
 }
 
 data "aws_caller_identity" "this" {}

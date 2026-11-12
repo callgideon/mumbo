@@ -24,6 +24,15 @@ variable "placement_cache_ms" {
     error_message = "placement_cache_ms must be a whole number of milliseconds, 0 or more."
   }
 }
+variable "placement_cache_ms_ap_south_1" {
+  description = "PLACEMENT_CACHE_MS of the Mumbai edge (R6): its store is in us-east-1, so the cache saves a cross-region round trip per request."
+  type        = number
+  default     = 30000
+  validation {
+    condition     = floor(var.placement_cache_ms_ap_south_1) == var.placement_cache_ms_ap_south_1 && var.placement_cache_ms_ap_south_1 >= 0 && var.placement_cache_ms_ap_south_1 <= 999999999
+    error_message = "placement_cache_ms_ap_south_1 must be a whole number of milliseconds, 0 or more."
+  }
+}
 variable "approver_emails" {
   description = "APPROVER_EMAILS: who may merge agent PRs and bind repositories (comma-separated, lowercased). Empty: nobody."
   type        = string
@@ -139,6 +148,50 @@ module "edge_us_east_1" {
   edge_secret_arn        = aws_ssm_parameter.edge["edge-secret"].arn
   model_key_secret_arn   = data.aws_secretsmanager_secret.model_key.arn
 }
+
+# The Mumbai edge (R6 step 3): the same edge on the Mumbai cell's network and cluster, serving the same CELLS with
+# EDGE_REGION ap-south-1. Its secrets and parameters are read by full us-east-1 ARN, and it logs to us-east-1's
+# /mumbo-boxes/edge with stream prefixes edge-aps1 and oauth2-proxy-aps1. No public record points at it until R7
+# (the founder's DNS switch); test it with curl --resolve against its ALB (output aps1_edge_alb).
+module "edge_ap_south_1" {
+  source    = "./modules/edge"
+  providers = { aws = aws.ap_south_1 }
+
+  name                    = local.name
+  suffix                  = "-aps1"
+  edge_tag                = var.edge_tag
+  approver_emails         = var.approver_emails
+  run_wild_default_emails = var.run_wild_default_emails
+  ntfy_enabled            = var.ntfy_enabled
+  github_agent_login      = var.github_agent_login
+  github_agent_id         = var.github_agent_id
+  openrouter_models       = var.openrouter_models
+  openrouter_zdr          = var.openrouter_zdr
+  signin_cookie_name      = var.signin_cookie_name
+  placement_cache_ms      = var.placement_cache_ms_ap_south_1
+  ecr                     = local.ecr
+  cert_validation_fqdns   = [for r in aws_route53_record.cert : r.fqdn] # ACM validates the same names with the same records in every region
+
+  vpc_id                 = module.cell_ap_south_1.vpc_id
+  public_subnets         = module.cell_ap_south_1.public_subnets
+  private_subnets        = module.cell_ap_south_1.edge_subnets
+  box_egress_ips         = concat(module.cell_us_east_1.nat_egress_ips, module.cell_ap_south_1.nat_egress_ips)
+  ecs_cluster_id         = module.cell_ap_south_1.ecs_cluster.id
+  exec_role              = module.cell_ap_south_1.exec_role
+  edge_security_group_id = module.cell_ap_south_1.edge_security_group_id
+  data_security_group_id = module.cell_ap_south_1.data_security_group_id
+  data_kms_key_arn       = module.cell_ap_south_1.data_kms_key_arn
+  store_secret_arn       = replace(aws_secretsmanager_secret.store.arn, ":us-east-1:", ":ap-south-1:") # its replica (store.tf)
+  cells                  = local.edge_cells
+  cells_enabled          = true # an edge outside us-east-1 runs only with CELLS
+  edge_secret_arn        = aws_ssm_parameter.edge["edge-secret"].arn
+  model_key_secret_arn   = data.aws_secretsmanager_secret.model_key.arn
+}
+locals {
+  # Every edge's task role: each cell's backups key admits them all (modules/cell edge_role_arns).
+  edge_role_arns = [module.edge_us_east_1.role_arn, module.edge_ap_south_1.role_arn]
+}
+output "aps1_edge_alb" { value = module.edge_ap_south_1.edge_alb.dns_name }
 
 data "aws_route53_zone" "public" { name = "mumbo.si" }
 resource "aws_route53_record" "cert" {

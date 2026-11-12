@@ -10,7 +10,7 @@ import { tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { startScript, boxSite } from './edge.mjs'
-import { BOX_STEPS, KASMVNC, chromePolicyStep, kasmvncStep, maskingGuardStep } from './template.mjs'
+import { BOX_STEPS, PROJECT_STEPS, GH_APT, GH_GITCONFIG_STEP, KASMVNC, chromePolicyStep, kasmvncStep, maskingGuardStep, usersSteps } from './template.mjs'
 
 const c = { llmHost: 'l', publicHost: 'boxes.x' }
 const person = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, {})
@@ -385,6 +385,41 @@ test('template: Google Chrome stable from Google\'s signed amd64 repository and 
   assert.ok(BOX_STEPS.includes('id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser'))
   assert.ok(BOX_STEPS.includes('id xvnc >/dev/null 2>&1 || useradd -U -M -d /nonexistent -s /usr/sbin/nologin xvnc'), 'KasmVNC\'s own user')
   assert.ok(BOX_STEPS.indexOf('id browser >/dev/null 2>&1 || useradd -m -s /bin/bash browser') < BOX_STEPS.indexOf('groupadd -f shared && usermod -aG shared browser && chmod 0700 /home/browser && install -d -m 0755 /home/shared && install -d -o browser -g shared -m 2770 /home/shared/Downloads'))
+})
+
+test('template: gh from GitHub\'s apt repository, as in the project template, and a root-owned system git config that gives git over https gh\'s sign-in (B48)', () => {
+  const install = BOX_STEPS.find(s => s.startsWith('apt-get update')), project = PROJECT_STEPS.find(s => s.startsWith('apt-get update'))
+  // The project template's keyring and source line, byte for byte, which both now take from GH_APT.
+  const source = 'curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list'
+  assert.equal(GH_APT, source)
+  for (const s of [install, project]) assert.ok(at(s, 'install -d -m 0755 /etc/apt/keyrings') < at(s, GH_APT) && at(s, GH_APT) < s.lastIndexOf('apt-get update'))
+  const packages = install.slice(at(install, GH_APT)).match(/apt-get install -y --no-install-recommends ([^&]+) &&/)[1].trim().split(' ')
+  for (const p of ['git', 'gh']) assert.ok(packages.includes(p), p)
+  // After git is installed and before the users: the users, the nftables and dsh smoke checks stay last (containment.test.mjs).
+  assert.ok(BOX_STEPS.indexOf(install) < BOX_STEPS.indexOf(GH_GITCONFIG_STEP) && BOX_STEPS.indexOf(GH_GITCONFIG_STEP) < BOX_STEPS.indexOf(usersSteps(true)[0]))
+  assert.ok(!PROJECT_STEPS.includes(GH_GITCONFIG_STEP), 'project boxes keep mumbo-bot through the edge forwarder')
+  // The step with the real git, its system file in a temporary directory: chown is logged and stat reports the real mode
+  // as root's, which the test's user cannot make it.
+  const t = mkdtempSync(join(tmpdir(), 'gitconfig-'))
+  try {
+    mkdirSync(join(t, 'bin'))
+    for (const [name, body] of [['chown', `echo "$*" >> ${t}/chown`], ['stat', `printf '%s:root:root\\n' "$(${execFileSync('sh', ['-c', 'command -v stat'], { encoding: 'utf8' }).trim()} -c %a "$3")"`]]) { writeFileSync(join(t, 'bin', name), `#!/bin/sh\n${body}\n`); chmodSync(join(t, 'bin', name), 0o755) }
+    const file = join(t, 'gitconfig'), env = { ...process.env, PATH: `${join(t, 'bin')}:${process.env.PATH}`, GIT_CONFIG_SYSTEM: file, HOME: t }
+    const run = () => spawnSync('sh', ['-c', `umask 022; ${GH_GITCONFIG_STEP.replaceAll('/etc/gitconfig', file)}`], { encoding: 'utf8', env })
+    assert.equal(run().status, 0)
+    assert.equal(readFileSync(file, 'utf8'), '[credential "https://github.com"]\n\thelper = !gh auth git-credential\n')
+    assert.equal(statSync(file).mode & 0o777, 0o644)
+    assert.equal(readFileSync(join(t, 'chown'), 'utf8'), `root:root ${file}\n`)
+    // git asks that helper for github.com over https, and only there.
+    assert.equal(execFileSync('git', ['config', '--get-urlmatch', 'credential.helper', 'https://github.com/callgideon/mumbo.git'], { encoding: 'utf8', env }), '!gh auth git-credential\n')
+    assert.equal(spawnSync('git', ['config', '--get-urlmatch', 'credential.helper', 'https://gitlab.com/x/y.git'], { env }).status, 1)
+    // One helper already there for github.com is replaced; two fail the build.
+    rmSync(file); execFileSync('git', ['config', '--system', '--add', 'credential.https://github.com.helper', 'store'], { env })
+    assert.equal(run().status, 0)
+    assert.equal(execFileSync('git', ['config', '--system', '--get-all', 'credential.https://github.com.helper'], { encoding: 'utf8', env }), '!gh auth git-credential\n')
+    execFileSync('git', ['config', '--system', '--add', 'credential.https://github.com.helper', 'store'], { env })
+    assert.notEqual(run().status, 0)
+  } finally { rmSync(t, { recursive: true, force: true }) }
 })
 
 test('template: KasmVNC 1.5.2 or later from its release, installed only when the download has the pinned sha256, with the screen cap in both entry pages', () => {

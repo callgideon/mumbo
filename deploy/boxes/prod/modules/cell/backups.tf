@@ -8,7 +8,7 @@ resource "aws_kms_key" "backups" {
   policy = jsonencode({ Version = "2012-10-17", Statement = [
     { Sid = "Administration", Effect = "Allow", Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.this.account_id}:root" },
     Action = ["kms:Create*", "kms:Describe*", "kms:Enable*", "kms:List*", "kms:Put*", "kms:Update*", "kms:Revoke*", "kms:Disable*", "kms:Get*", "kms:Delete*", "kms:TagResource", "kms:UntagResource", "kms:ScheduleKeyDeletion", "kms:CancelKeyDeletion"], Resource = "*" },
-    { Sid = "EdgeUse", Effect = "Allow", Principal = { AWS = var.edge_role_arn }, Action = ["kms:Decrypt", "kms:GenerateDataKey"], Resource = "*" },
+    { Sid = "EdgeUse", Effect = "Allow", Principal = { AWS = var.edge_role_arns }, Action = ["kms:Decrypt", "kms:GenerateDataKey"], Resource = "*" },
   ] })
 }
 resource "aws_kms_alias" "backups" {
