@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { startScript, boxSite, boxes, assistantInstructions, DENIED_URLS, MUMBO_MCP_OVERLAY, MUMBO_MCP_PACKAGE, mumboMcpKey, RUN_WILD_OVERLAY, RUN_WILD_PACKAGE } from './edge.mjs'
+import { startScript, boxSite, boxes, assistantInstructions, DENIED_URLS, MUMBO_MCP_OVERLAY, MUMBO_MCP_PACKAGE, mumboMcpKey, RUN_WILD_OVERLAY, RUN_WILD_PACKAGE, STATE_OVERLAY, STATE_PACKAGE } from './edge.mjs'
 import { memoryStore } from './store.mjs'
 import { projects } from './projects.mjs'
 import { templateArgs } from './template.mjs'
@@ -58,7 +58,8 @@ test('a user box start script is byte-for-byte what it was before project boxes 
   // Then the repair also takes g+w from group root (but on a world-writable sticky directory), since dsh's run-as
   // provider refuses a server identity's PATH directory, or an ancestor of one, that any group can write and E2B's
   // finalize leaves /usr/local and /usr/local/bin 0777 (containment.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), 'ecff6f7de7719313cfd84c48febd33d743e799df494bd72d29b6586b2a1b1ebd')
+  // Then K1's state block and $STATE_PATCH after $RUNWILD_PATCH, behind the image's @mumbo/state (the state block test below).
+  assert.equal(createHash('sha256').update(s).digest('hex'), 'e80342f3c57887239c0d40c711ea13f90f4cc22f611179a225c99a1a5f3de893')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -496,6 +497,32 @@ test('Run Wild: a person box patches its overlay after the door\'s and exports M
   const pc = { ...c, projectDomain: 'boxes.x', runWildDefaultEmails: ['project:0123456789abcdef'] }
   const p = startScript(pc, 'T', boxSite(pc, 'project:0123456789abcdef'), 'role', 'K', boxFiles, [], undefined, 'project:0123456789abcdef')
   assert.ok(!p.includes('RUNWILD') && !p.includes('RUN_WILD') && !p.includes('run-wild'))
+})
+
+test('state block: a person box patches @mumbo/state\'s overlay after Run Wild\'s only when the image ships it and links the package; a project box never', () => {
+  const u = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', undefined, boxFiles, [], { key: 'KEY', principal: 'a' })
+  assert.ok(u.includes(' $RUNWILD_PATCH $STATE_PATCH '), 'patched after Run Wild')
+  assert.ok(at(u, 'RUNWILD_PATCH="--patch') < at(u, '# The state block'))
+  const dir = mkdtempSync(join(tmpdir(), 'mumbo-state-'))
+  const overlay = join(dir, STATE_OVERLAY), pkg = join(dir, STATE_PACKAGE)
+  const from = at(u, '# The state block'), to = u.indexOf('\nfi\n', from) + 4
+  const run = () => execFileSync('sh', ['-c', `set -eu\n${u.slice(from, to).replaceAll(STATE_OVERLAY, overlay).replaceAll(STATE_PACKAGE, pkg)}echo "$STATE_PATCH"`], { encoding: 'utf8' }).trim()
+  try {
+    // An older image without the overlay, or with it but without the linked package: no patch.
+    assert.equal(run(), '')
+    mkdirSync(join(overlay, '..'), { recursive: true })
+    writeFileSync(overlay, '')
+    assert.equal(run(), '')
+    mkdirSync(join(pkg, '..'), { recursive: true })
+    writeFileSync(pkg, '{}')
+    assert.equal(run(), `--patch ${overlay}`)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+  // A project box gets the row from deploy/mumbo-project.overlay.yml, so its script never inserts it again, nor would a
+  // desktop site handed a member key.
+  const pc = { ...c, projectDomain: 'boxes.x' }
+  const p = startScript(pc, 'T', boxSite(pc, 'project:0123456789abcdef'), 'role', 'K', boxFiles)
+  const d = startScript(c, 'T', boxSite(c, 'a@x.com'), 'role', 'K', boxFiles)
+  for (const s of [p, d]) assert.ok(!s.includes('STATE_PATCH') && !s.includes('mumbo/state'))
 })
 
 test('relay replies: a project box writes its token root-only and exports the edge settings only when the image\'s project overlay reads them; a person box gets none', () => {

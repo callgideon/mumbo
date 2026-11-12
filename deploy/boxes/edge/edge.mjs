@@ -212,6 +212,12 @@ export const RUN_WILD_OVERLAY = '/src/packages/mumbo/run-wild/examples/person.ov
 /** The overlay names `@mumbo/run-wild` bare, which loads only when the root package links it into /src/node_modules. */
 export const RUN_WILD_PACKAGE = '/src/node_modules/@mumbo/run-wild/package.json'
 
+// ---- The state block (K1/K2). A person box patches @mumbo/state's person overlay when the image ships both files below
+// (startScript); a project box gets the same row from the image's deploy/mumbo-project.overlay.yml.
+export const STATE_OVERLAY = '/src/packages/mumbo/state/examples/person.overlay.yml'
+/** The overlay names `@mumbo/state` bare, which loads only when the root package links it into /src/node_modules. */
+export const STATE_PACKAGE = '/src/node_modules/@mumbo/state/package.json'
+
 /** The role line on agent's home, which exists and is a model root only under containment (B24), and is outside backups
  *  (backupCommand). The start script adds it to the role on a B24 image only, in single quotes, so it holds none. */
 export const SCRATCH_LINE = '- /home/agent is scratch space and is not backed up; keep durable files in /root/projects.'
@@ -810,6 +816,9 @@ if [ -f ${RUN_WILD_OVERLAY} ] && [ -f ${RUN_WILD_PACKAGE} ]; then
 export MUMBO_RUN_WILD=1${email && cfg.runWildDefaultEmails?.includes(email.toLowerCase()) ? ' MUMBO_NEW_SESSION_PRESET=run-wild' : ''}
 RUNWILD_PATCH="--patch ${RUN_WILD_OVERLAY}"
 fi
+` : ''}${site.desktop && !memberKeyText ? `# The state block (@mumbo/state), when the image ships its person overlay and links the package, patched after Run Wild's.
+STATE_PATCH=
+if [ -f ${STATE_OVERLAY} ] && [ -f ${STATE_PACKAGE} ]; then STATE_PATCH="--patch ${STATE_OVERLAY}"; fi
 ` : ''}${site.desktop ? `# Desktop control on :1 (@deepseek-ai/dsh-computer-use-x11), when the image ships the package and xdotool.
 CU_PATCH=
 if [ -d /src/packages/experimental/computer-use-x11 ] && command -v xdotool >/dev/null 2>&1; then
@@ -1046,7 +1055,7 @@ ${site.desktop ? '' : `PATH=/usr/local/lib/mumbo/bin:$PATH NODE_USE_ENV_PROXY=1 
 `}HOME=/root DSH_HOME=/root/.dsh DSH_AGENTS_HOME="$AGENTS_HOME" DSH_TELEMETRY_DISABLED=1 \\
 DEEPSEEK_BASE_URL=${llm}/anthropic DEEPSEEK_SEARCH_BASE_URL=${llm} DEEPSEEK_API_KEY=${token} \\
 nohup node --import tsx/esm apps/cli/src/bin.ts --profile web \\
-  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml${openrouter ? ' --patch /root/.mumbo/models.overlay.yml' : ''} $LINKS_PATCH${site.desktop ? ' $CU_PATCH $WELCOME_PATCH $ASSISTANT_PATCH' : ''}${site.desktop && mumboMcp ? ' $MCP_PATCH' : ''}${site.desktop ? ' $RUNWILD_PATCH' : ''}${memberKeyText ? ' $PROJECT_PATCH' : ''} $CONTAINMENT_PATCH \\
+  --patch /src/deploy/mumbo.overlay.yml --patch /src/deploy/mumbo-personal.overlay.yml --patch /root/.mumbo/sandboxes.overlay.yml${openrouter ? ' --patch /root/.mumbo/models.overlay.yml' : ''} $LINKS_PATCH${site.desktop ? ' $CU_PATCH $WELCOME_PATCH $ASSISTANT_PATCH' : ''}${site.desktop && mumboMcp ? ' $MCP_PATCH' : ''}${site.desktop ? ' $RUNWILD_PATCH' : ''}${site.desktop && !memberKeyText ? ' $STATE_PATCH' : ''}${memberKeyText ? ' $PROJECT_PATCH' : ''} $CONTAINMENT_PATCH \\
   --no-open --host "$ip" --port $DSH_PORT --public-url ${site.publicUrl} --trusted-host ${cfg.publicHost}${site.host === cfg.publicHost ? '' : ` --trusted-host ${site.host}`} > /root/dsh.log 2>&1 &
 `
 }
