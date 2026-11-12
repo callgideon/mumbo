@@ -1,9 +1,15 @@
-/** The K eval's key resolution, options and measures; the eval itself only runs on demand against the live API. */
+/** The K and K3 evals' key resolution, options and measures; the evals themselves only run on demand against the live API. */
+import { spawnSync } from 'node:child_process'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { GoalId } from '@deepseek-ai/dsh-goal'
+import { createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { evalOptions, type LoggedEvent, measureRun, median, resolveDeepSeekEnv } from '../eval/measures.ts'
+import { evalOptions, K3_OBJECTIVES, k3Options, type LoggedEvent, measureK3, measureRun, median, premature, resolveDeepSeekEnv } from '../eval/measures.ts'
+import { foldRounds, initRounds } from '../src/stall.ts'
+import { Log } from './events.ts'
 
 describe('resolveDeepSeekEnv', () => {
   let dir: string
@@ -59,5 +65,77 @@ describe('measureRun', () => {
     expect(median([3, null, 1, 2])).toBe(2)
     expect(median([4, 1])).toBe(2.5)
     expect(median([null])).toBeNull()
+  })
+})
+
+describe('k3Options', () => {
+  it('defaults to five runs of both arms on all three tasks, with ten rounds, on the profile model', () => {
+    expect(k3Options({})).toEqual({ runs: 5, arms: ['k3-on', 'k3-off'], tasks: ['stuck', 'progress', 'shell-only'], maxRounds: 10 })
+    expect(k3Options({ K3_EVAL_TASKS: 'shell-only, stuck', K3_EVAL_ARMS: 'k3-on', K_EVAL_MODEL: 'deepseek-v4-pro', K3_EVAL_RUNS: '1' }))
+      .toEqual({ runs: 1, arms: ['k3-on'], tasks: ['stuck', 'shell-only'], model: 'deepseek-v4-pro', maxRounds: 10 })
+  })
+
+  it('rejects an unknown task and a round cap below three', () => {
+    expect(() => k3Options({ K3_EVAL_TASKS: 'stuck,idle' })).toThrow(/K3_EVAL_TASKS names unknown tasks: idle/u)
+    expect(() => k3Options({ K3_EVAL_MAX_ROUNDS: '2' })).toThrow(/K3_EVAL_MAX_ROUNDS/u)
+  })
+})
+
+describe('the stuck task', () => {
+  it('names a check whose failing output repeats exactly, so a model that only reruns it stalls', () => {
+    const command = /`(node [^`]+)`/u.exec(K3_OBJECTIVES.stuck)?.[1] ?? ''
+    const cwd = fileURLToPath(new URL('../eval/fixture-k3/stuck/', import.meta.url))
+    const check = (): string => {
+      const { stdout, stderr, status } = spawnSync(process.execPath, command.split(' ').slice(1), { cwd, encoding: 'utf8' })
+      return `${stdout}${stderr}[exit code: ${String(status)}]`
+    }
+    const first = check()
+    expect(first).toMatch(/config\/signing\.key.*\n\[exit code: 1\]$/u)
+    const log = new Log().round(1).ran('c1', 'bash', { command }, first).round(2).ran('c2', 'bash', { command }, check()).round(3)
+    expect(log.events.reduce(foldRounds, initRounds()).streak).toBe(2)
+  })
+})
+
+describe('measureK3', () => {
+  const source = (round: number) => ({ kind: 'goal', goalId: GoalId('g'), revision: 1, round }) as const
+  /** Rounds 1 and 2 repeat a failing `cat` and a failed `read`; round 3, carrying `blocks`, writes a file. */
+  const run = (blocks: string[]): Log => {
+    const stuck = (log: Log, id: string): Log => log.ran(`${id}c`, 'bash', { command: 'cat key' }, 'missing')
+      .call(`${id}r`, 'read', '{"file_path":"key"}').result(`${id}r`, true)
+    const log = stuck(stuck(new Log().goal('create').round(1), '1').round(2), '2')
+      .add('user/message', createUserMessage({ content: ['<goal_round>', ...blocks].map(text => ({ type: 'text', text })), source: source(3) }))
+      .ran('w', 'write', { file_path: 'key', content: 'x' })
+    log.add('assistant/message', {
+      turn: 1, step: 1, stream: [], usage: { inputTokens: 100, outputTokens: 7 },
+      message: createAssistantMessage({ content: [{ type: 'text', text: 'Blocked.' }], source: { provider: 'mock', model: 'mock' } }),
+    })
+    const goal = { id: GoalId('g'), revision: 2, objective: 'Ship it', phase: 'blocked' as const, maxGoalRounds: 8, blockedReason: { code: 'model-reported', message: 'No key.' } }
+    return log.add('goal/change', { kind: 'goal/change', version: 1, operation: 'block', goal, roundsStarted: 3, createdAt: 0, updatedAt: 0 })
+  }
+
+  it('counts the rounds, the questions shown, the stalled rounds, repeats and errors, and how the goal ended', () => {
+    expect(measureK3(run(['<goal_progress_check>\n…']).events, 'k3-on')).toEqual({
+      rounds: 3, endedBy: 'model-reported', questionsShown: 1, firstStallRound: 3, roundsAfterStall: 1, stalledRounds: 2, repeats: 2,
+      toolErrors: 2, requests: 1, inputTokens: 100, outputTokens: 7,
+    })
+  })
+
+  it('takes the first stalled round from the logged questions with the check on, and from the fold with it off', () => {
+    const quiet = run([]).events
+    expect(measureK3(quiet, 'k3-on')).toMatchObject({ questionsShown: 0, firstStallRound: null, roundsAfterStall: null })
+    expect(measureK3(quiet, 'k3-off')).toMatchObject({ questionsShown: 0, firstStallRound: 3, roundsAfterStall: 1 })
+  })
+
+  it('reads a completed goal, and an open one as not ended', () => {
+    expect(measureK3(new Log().goal('create').round(1).goal('complete').events, 'k3-on')).toMatchObject({ rounds: 1, endedBy: 'complete', stalledRounds: 1 })
+    expect(measureK3(new Log().goal('block').goal('resume').round(1).events, 'k3-on')).toMatchObject({ endedBy: 'none', stalledRounds: 1 })
+    expect(measureK3(new Log().goal('block').events, 'k3-on').endedBy).toBe('none')
+  })
+
+  it('calls a shell-only run premature when it completed before all four migrations, or reported a block', () => {
+    expect(premature('complete', 3)).toBe(true)
+    expect(premature('complete', 4)).toBe(false)
+    expect(premature('model-reported', 4)).toBe(true)
+    expect(premature('round-limit', 2)).toBe(false)
   })
 })
