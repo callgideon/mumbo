@@ -101,12 +101,12 @@ describe('background jobs', () => {
     const handle = await harness.start(`queued-${String(crash)}`)
     await turn(handle.agent, 'Start.')
     const job = startJob(harness.ctx, handle.agent, CHECK)
-    const release = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<undefined>()
     const maintenance = handle.agent.runMaintenance(() => release.promise)
     handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Person.' }], source: { kind: 'user' } }))
     job.finish()
     await vi.waitFor(() => { expect(handle.agent.inbox.nextTurn.map(message => message.source.kind)).toEqual(['user', 'tool-jobs']) })
-    release.resolve()
+    release.resolve(undefined)
     await maintenance
     // The person's turn starts, which drops the settled job, and its request never answers.
     await vi.waitFor(() => { expect(harness.model.requests).toHaveLength(2) })
