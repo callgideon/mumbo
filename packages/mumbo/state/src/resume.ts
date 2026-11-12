@@ -100,7 +100,7 @@ async function childLog(query: SessionQueryEngine, child: SubagentCatalogEntry, 
   return { end, text, lastAt }
 }
 
-/** Direct children whose last turn the restart cut off, or that ended while this Session was not loaded. */
+/** Direct children whose last turn the restart cut off, or that ended after this Session's last activity. */
 async function childFindings(
   ctx: Context, agent: Agent, state: MumboState, resume: Resume, signal: AbortSignal,
 ): Promise<Finding[]> {
@@ -132,14 +132,15 @@ async function childFindings(
       findings.push({ line: `Subagent ${name} stopped mid-task by the restart.${resumeHint}`, kind: 'stopped' })
       continue
     }
-    // A child that ended while this Session was loaded already reported to it.
+    // A child that ended at or before this Session's last activity is taken to have reported to it. One that ended later
+    // while this Session was loaded but idle may still have its own notice queued, and the model then reads both.
     if (end.time <= resume.downAt) continue
     const kind = end.data.reason.kind
     if (kind === 'completed') {
       const said = log.text === '' ? '' : ` Its last message: "${clip(log.text, LAST_MESSAGE_CHARS)}"`
-      findings.push({ line: `Subagent ${name} finished while this Session was not loaded.${said}`, kind: 'finished' })
+      findings.push({ line: `Subagent ${name} finished after this Session's last activity.${said}`, kind: 'finished' })
     } else {
-      findings.push({ line: `Subagent ${name} ended (${kind}) while this Session was not loaded.`, kind: 'finished' })
+      findings.push({ line: `Subagent ${name} ended (${kind}) after this Session's last activity.`, kind: 'finished' })
     }
   }
   return findings

@@ -364,12 +364,12 @@ describe('subagents', () => {
       text: [
         HEADER,
         '- Subagent tester stopped mid-task by the restart. Use send_message to tester to continue it.',
-        '- Subagent reviewer finished while this Session was not loaded. Its last message: "Approved: the parser change is safe."',
-        '- Subagent quiet finished while this Session was not loaded.',
-        `- Subagent talk finished while this Session was not loaded. Its last message: "${'v'.repeat(399)}…"`,
+        '- Subagent reviewer finished after this Session\'s last activity. Its last message: "Approved: the parser change is safe."',
+        '- Subagent quiet finished after this Session\'s last activity.',
+        `- Subagent talk finished after this Session's last activity. Its last message: "${'v'.repeat(399)}…"`,
         '- Subagent scan stopped mid-task by the restart.',
-        '- Subagent fail ended (blocked) while this Session was not loaded.',
-        '- Subagent stop ended (aborted) while this Session was not loaded.',
+        '- Subagent fail ended (blocked) after this Session\'s last activity.',
+        '- Subagent stop ended (aborted) after this Session\'s last activity.',
       ].join('\n'),
       summary: 'Restart: 2 stopped, 5 finished.',
     }])
