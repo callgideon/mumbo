@@ -343,6 +343,11 @@ describe('the project Workspace while the box runs', () => {
         result: { ok: false, error: { code: 'remote-access/denied', details: { reason: 'workspace-required' } } },
       })
     }
+    // Every named resource must allow: a reachable Session does not carry a create into a Workspace the member lacks.
+    const other = await box.ctx.workspaceRegistry.create(directory())
+    for (const request of [{ workspaceId: other.id }, { workspaceId: other.id, sessionId: 'blank' }]) {
+      expect(await create(request), JSON.stringify(request)).toMatchObject({ result: { ok: false, error: { code: 'remote-access/denied' } } })
+    }
     expect(await create({ workspaceId: projectWorkspace!.id })).toMatchObject({ result: { ok: true, value: 'new' } })
     expect(await create({ workspaceId: projectWorkspace!.id, sessionId: 'blank' })).toMatchObject({ result: { ok: true, value: 'blank' } })
   })
