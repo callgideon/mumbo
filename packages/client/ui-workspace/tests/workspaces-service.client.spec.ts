@@ -7,11 +7,11 @@ import type {
 } from '@deepseek-ai/dsh-api-session-controller/client'
 import { SessionCreateError } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
-import type {
-  IWorkspaces, WorkspaceId, WorkspaceSnapshot, WorkspaceView,
+import {
+  WorkspaceCreateError, type IWorkspaces, type WorkspaceId, type WorkspaceSnapshot, type WorkspaceView,
 } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { ClientRemote, DirectoryListing } from '@deepseek-ai/dsh-api-remotes/client'
-import { RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
+import { RemoteError, StaticRemoteAccess } from '@deepseek-ai/dsh-client-test-runtime'
 import type { RemoteResult } from '@deepseek-ai/dsh-api-remotes/client'
 import { SessionId } from '@deepseek-ai/dsh-session/types'
 import { LayoutController } from '@deepseek-ai/dsh-client-ui-layout/client'
@@ -276,6 +276,8 @@ interface BenchOptions {
   readonly workspaces?: WorkspaceSnapshot
   readonly sessions?: SessionListState
   readonly configureSessions?: (sessions: FakeSessions) => void
+  /** The page's fixed access answers; the owner's, allowing every action, when omitted. */
+  readonly allows?: (action: string) => boolean
 }
 
 function bench(options: BenchOptions = {}) {
@@ -302,6 +304,7 @@ function bench(options: BenchOptions = {}) {
   options.configureSessions?.(sessions)
   const view = createWorkspaceViewStore().create()
   const notify = vi.fn<(toast: RowToast) => void>()
+  new StaticRemoteAccess(ctx, options.allows)
   const uiWorkspace = new UiWorkspaceService(
     ctx,
     directoryPicker.remote,
@@ -349,6 +352,40 @@ describe('UiWorkspaceService', () => {
     expect(b.workspaces.initializeDefault).toHaveBeenCalledOnce()
     expect(b.sessions.create).not.toHaveBeenCalled()
     expect(b.notify).not.toHaveBeenCalled()
+  })
+
+  it('opens a restored Workspace that arrives after both lists were pending, without asking for a default', async () => {
+    const b = bench()
+    await setImmediate()
+    b.workspaces.list.set(workspaceState([workspace('restored')]))
+    b.sessions.list.set(sessionState())
+    await vi.waitFor(() => {
+      expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('created-restored'), { source: 'mainView' })
+    })
+    expect(b.workspaces.initializeDefault).not.toHaveBeenCalled()
+    expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('restored') })
+    expect(b.notify).not.toHaveBeenCalled()
+  })
+
+  it('asks for no default Workspace and shows no notice on a page not granted initializeDefault', async () => {
+    const b = bench({ allows: action => action !== 'workspace/initializeDefault' })
+    b.workspaces.list.set(workspaceState())
+    b.sessions.list.set(sessionState())
+    await setImmediate()
+    expect(b.workspaces.initializeDefault).not.toHaveBeenCalled()
+    expect(b.sessions.create).not.toHaveBeenCalled()
+    expect(b.notify).not.toHaveBeenCalled()
+  })
+
+  it('logs the code of a default Workspace creation the Host refused the owner, and shows the notice', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const refusal = new WorkspaceCreateError(new RemoteError('workspace/invalid-path', 'not a directory', { path: '/w/default' }))
+    const b = bench({ workspaces: workspaceState(), sessions: sessionState(), configureWorkspaces: (workspaces) => {
+      workspaces.initializeDefault.mockRejectedValueOnce(refusal)
+    } })
+    await vi.waitFor(() => { expect(b.notify).toHaveBeenCalledExactlyOnceWith({ kind: 'defaultWorkspaceFailed' }) })
+    expect(warn).toHaveBeenCalledExactlyOnceWith('default Workspace creation failed:', refusal)
+    expect(refusal.message).toContain('workspace/invalid-path')
   })
 
   it('requires explicit selection when the startup Session list contains history', async () => {

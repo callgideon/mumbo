@@ -75,7 +75,8 @@ async function bench(access: 'fake' | 'static' = 'fake') {
   const stopGuard = vi.fn()
   const whenResourceAccess = vi.fn((): () => void => stopGuard)
   if (access === 'static') new StaticRemoteAccess(ctx)
-  else ctx.provide('remoteAccess', { source: accessSource, whenAccess: vi.fn(() => () => {}), whenResourceAccess })
+  // The owner's page: a global grant installs its effects at once.
+  else ctx.provide('remoteAccess', { source: accessSource, whenAccess: vi.fn((_action: string, effect: () => () => void) => effect()), whenResourceAccess })
   const create = vi.fn(async (input: { name: string } | { path: string }) => ({
     workspaceId: 'ws-new' as never,
     path: 'name' in input ? `/projects/${input.name}` : input.path,
