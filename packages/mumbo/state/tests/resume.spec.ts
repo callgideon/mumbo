@@ -65,6 +65,21 @@ describe('background jobs', () => {
     expect(notices(agent)[0]?.summary).toBe('Restart: 2 finished.')
   })
 
+  it('does not report a job that settled before later requests that logged no request header', { timeout: 60_000 }, async () => {
+    const harness = await boot(replies(5), mountJobs)
+    const handle = await harness.start('told')
+    await turn(handle.agent, 'Start.')
+    startJob(harness.ctx, handle.agent, 'node quick.js').finish()
+    await vi.waitFor(() => { expect(handle.agent.session.snapshotEvents().some(event => event.type === 'job/settled')).toBe(true) })
+    for (const text of ['Two.', 'Three.', 'Four.']) await turn(handle.agent, text)
+    const events = handle.agent.session.snapshotEvents()
+    const settledAt = events.find(event => event.type === 'job/settled')!.seq
+    expect(events.filter(event => event.type === 'request/header' && event.seq > settledAt)).toEqual([])
+    const { agent } = await harness.restart(handle, true)
+    await turn(agent, 'Back.')
+    expect(notices(agent)).toEqual([])
+  })
+
   it('logs nothing when nothing stopped or finished, at the first step or any later one', { timeout: 60_000 }, async () => {
     const harness = await boot(replies(3), mountJobs)
     const handle = await harness.start('quiet')

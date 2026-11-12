@@ -59,9 +59,9 @@ A `session/end-seed` without `inherited` records the restart: its seq and the ti
 | Item | Reported when | Line |
 |---|---|---|
 | Background job other than a workflow run, registered before the restart | It has no settlement, or its settlement's cause is `teardown`, as a graceful shutdown records | Stopped by the restart, output not kept |
-| Same | It settled after the last request before the restart | Ended after your last request, with its status and detail, output not kept |
+| Same | It settled after the last step before the restart started, so its notice reached no request | Ended after your last request, with its status and detail, output not kept |
 | Workflow run started before the restart | It has no `run-end` | Stopped by the restart, with the count of its agents that were running |
-| Same | It ended after the last request before the restart | Ended, with its stop reason |
+| Same | It ended after the last step before the restart started | Ended, with its stop reason |
 | Direct `one-shot` or `continuable` child that is not loaded, read through `sessionQuery.observeSession` | Its last turn is open, or ended `aborted` or `interrupted`, after this Session's last message | Stopped mid-task by the restart; a continuable child adds `Use send_message to <name> to continue it.` |
 | Same | Its last turn ended `completed` after this Session's last message | Finished while this Session was not loaded, with its last assistant text clipped to 400 characters |
 | Same | Its last turn ended otherwise after this Session's last message | Ended, with the reason |

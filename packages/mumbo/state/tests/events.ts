@@ -93,7 +93,9 @@ export class Log {
     return this.add('tool-workflow/run-end', { runId: WorkflowRunId(id), stopReason: 'completed' })
   }
 
-  request(): this {
-    return this.add('request/header', { header: { config: { provider: 'mock', model: 'mock' } }, reason: 'initial' })
+  /** A step's start; only a series start or a changed header also logs a `request/header`. */
+  step(header = false): this {
+    this.add('step/start', { turn: 1, step: 1 })
+    return header ? this.add('request/header', { header: { config: { provider: 'mock', model: 'mock' } }, reason: 'initial' }) : this
   }
 }

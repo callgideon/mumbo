@@ -47,9 +47,9 @@ export const stateSchema = z.object({
   reviewed: planSchema.nullable(),
   /** The latest approved plan. */
   plan: planSchema.nullable(),
-  /** Jobs other than workflow runs, by id, until a request follows their settlement or the resume notice reports them. */
+  /** Jobs other than workflow runs, by id, until a step starts after their settlement or the resume notice reports them. */
   jobs: z.record(z.string(), jobSchema),
-  /** Workflow runs, by run id, until a request follows their end or the resume notice reports them. */
+  /** Workflow runs, by run id, until a step starts after their end or the resume notice reports them. */
   runs: z.record(z.string(), runSchema),
   /** Time of the last message logged, which a restart's end-seed keeps as the time the Session went down. */
   lastActivity: z.number(),
@@ -140,10 +140,12 @@ function foldWork(state: MumboState, event: SessionEvent): MumboState {
       if (run === undefined) return state
       return { ...state, runs: { ...state.runs, [event.data.runId]: { ...run, end: { stopReason: event.data.stopReason, seq: event.seq } } } }
     }
-    // A request followed every settlement before it, so the model was told of them.
-    case 'request/header': {
-      const jobs = without(state.jobs, job => job.settled !== undefined)
-      const runs = without(state.runs, run => run.end !== undefined)
+    // A step that starts after a settlement claims its notice from the inbox, so the model was told of it; a settlement
+    // during that step's own pre-step reaches the next step. Work from before a restart stays for the resume notice.
+    case 'step/start': {
+      const pending = (seq: number): boolean => state.resume !== null && seq < state.resume.seedSeq
+      const jobs = without(state.jobs, job => job.settled !== undefined && !pending(job.seq))
+      const runs = without(state.runs, run => run.end !== undefined && !pending(run.seq))
       return jobs === state.jobs && runs === state.runs ? state : { ...state, jobs, runs }
     }
     default:
