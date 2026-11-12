@@ -2071,3 +2071,45 @@ test('B47b: a create is at capacity on E2B\'s 503 or 429 or a node\'s memory ref
     await assert.rejects(b.ensure('a@x.com'), (e) => e === error && (e.capacity === true) === capacity && (!capacity || e.status === 503), name)
   }
 })
+
+test('B47b: the sweep\'s backup that resumes a drained box clears the mark, so a later drain\'s failed resume gets its own grace', async (t) => {
+  const error = await answered('node-gone-resume')
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() })
+  let failing = true
+  // A box a node drain paused: E2B lists it paused while its record says paused: false, so the sweep backs it up.
+  const r = await repairRig({ state: 'paused', record: { launch: 'L', paused: false }, connect: async (id, original) => { if (failing) throw error; return original(id) } })
+  await assert.rejects(r.b.ensure('a@x.com'), (e) => e === error && e.status === 503)
+  assert.equal((await r.store.getBox('u1')).resumeFailedAt, Date.now())
+  // The upload lands, and the backup's connect resumes the box.
+  failing = false
+  r.us.sandboxes.get('u1').state = 'running'
+  await r.b.sweep(Date.now())
+  assert.deepEqual([r.logs.filter(l => l.msg === 'backup').length, (await r.store.getBox('u1')).resumeFailedAt], [1, undefined])
+  // A day later the next drain pauses it again, and its resume fails until that upload lands.
+  t.mock.timers.tick(24 * 3600_000)
+  r.us.sandboxes.get('u1').state = 'paused'
+  failing = true
+  await assert.rejects(r.b.ensure('a@x.com'), (e) => e === error && e.status === 503)
+  assert.deepEqual([r.changes(), (await r.store.getBox('u1')).resumeFailedAt], [[], Date.now()])
+})
+
+test('B47b: the idle pause\'s connect that works clears the mark; one that fails keeps it', async () => {
+  for (const works of [true, false]) {
+    const r = await repairRig({ record: { launch: 'L', active: 1, resumeFailedAt: 1 }, connect: async (id, original) => { if (works) return original(id); throw new Error('resume failed') } })
+    // The backup fails before its connect, so only the pause's connect can resume the box.
+    r.us.presignPut = async () => { throw new Error('S3 down') }
+    await r.b.sweep(Date.now())
+    assert.deepEqual([kinds(r.us, 'pause').length, (await r.store.getBox('u1')).resumeFailedAt], [1, works ? undefined : 1], `connect works: ${works}`)
+  }
+})
+
+test('B47b: dsh down in a cell full by the edge\'s count, the box itself counted, is still killed and recreated: only a resume E2B answered is counted', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const r = await repairRig({ us: { maxUnits: 2 }, connect: async (id, original) => ({ ...await original(id), commands: { run: async (c) => {
+    // launchToken waits a second after each empty look for the token; the mocked clock moves once that wait is set.
+    if (c.includes('dsh.log')) setImmediate(() => t.mock.timers.tick(1000))
+    return { stdout: c.startsWith('curl') ? '000' : '' }
+  } } }) })
+  await r.b.ensure('a@x.com')
+  assert.deepEqual(r.changes(), [['kill', 'u1'], ['create', { user: 'a@x.com' }]])
+})

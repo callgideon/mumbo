@@ -1201,8 +1201,8 @@ export async function inParallel(items, limit, fn) {
 // ---- the router's view of E2B. `cells` (cells.mjs cellClients) holds every cell's E2B and S3 clients and `store` the
 // shared state (store.mjs); both are injected. A box record: { email, region, launch, traffic, active, extended, backedUp,
 // paused, ports }, plus { creating, first } until creation ends, { restored: versionId } until the first backup of a
-// box created from a restore record, and { resumeFailedAt } from E2B's first final answer to its resume until a resume
-// or wake works (repair). `region` is the cell the box runs in (regionOf: us-east-1 without one): every E2B
+// box created from a restore record, and { resumeFailedAt } from E2B's first final answer to its resume until a connect
+// works (repair, wake, backup, pauseIdle). `region` is the cell the box runs in (regionOf: us-east-1 without one): every E2B
 // and S3 call for a box goes through its cell, and for a principal through the cell its placement doc names (cells.mjs
 // placementKey). `ports` is the box's pair (portsFrom its template's marker); a record without it is routed to OLD_PORTS
 // (boxHeaders).
@@ -1482,6 +1482,8 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
   async function backup(id, b) {
     const url = await b.cell.presignPut(`${userPrefix(b.email)}/latest.tar.gz`)
     const box = await b.cell.Sandbox.connect(id, { timeoutMs: timeout() })
+    // The connect resumed a box E2B lists paused (one a node drain paused keeps paused: false): a failed resume's mark goes.
+    if (b.resumeFailedAt !== undefined) await store.patchBox(id, { resumeFailedAt: undefined })
     const t = Date.now()
     const left = await run(box, backupCommand(url), 660_000)
     await store.patchBox(id, { backedUp: Date.now() })
@@ -1563,12 +1565,13 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
   async function pauseIdle(b) {
     await store.withLock(`user:${b.email}`, LOCK_MS, async () => {
       // A paused box cannot run its scheduled tasks, so remember when the next one is due and wake the box then.
-      const wakeAt = await b.cell.Sandbox.connect(b.id, { timeoutMs: timeout() }).then(box => run(box, NEXT_WAKE_COMMAND, 30_000)).then(Number).catch(() => 0) || undefined
+      let resumed = false
+      const wakeAt = await b.cell.Sandbox.connect(b.id, { timeoutMs: timeout() }).then(box => { resumed = true; return run(box, NEXT_WAKE_COMMAND, 30_000) }).then(Number).catch(() => 0) || undefined
       // `b` is the sweep's listing: a request since then (its activity, or a resume) moved `active`, and the box stays up.
       // Read fresh, since an activity patch sends no invalidation, and last, since a running box's requests take no lock.
       if ((await store.getBox(b.id, { fresh: true }))?.active !== b.active) return say({ msg: 'pause skipped: in use since the listing', user: b.email, box: b.id })
       await b.cell.Sandbox.pause(b.id)
-      await store.patchBox(b.id, { paused: true, wakeAt })
+      await store.patchBox(b.id, { paused: true, wakeAt, ...(resumed && { resumeFailedAt: undefined }) })
       say({ msg: 'paused', user: b.email, box: b.id, region: b.cell.region, wakeAt: wakeAt && new Date(wakeAt).toISOString() })
     }).catch(async (e) => {
       // A box E2B no longer has is dropped; anything else is retried next sweep.
