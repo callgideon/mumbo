@@ -78,7 +78,7 @@ it('changes the block once at each compaction, restart and goal phase change, an
   expect(sections[2]).toContain('Goal (active, automatic rounds stopped: a person must resume it with /goal resume; round 0 of 8): Ship something else')
   expect(carried(7)).toContain(sections[2])
   expect(notices(restarted.agent).map(({ text, summary }) => ({ text, summary }))).toEqual([{
-    text: 'This Session was restarted. What changed while it was down:\n'
+    text: 'This Session was restarted. Changes it may not have been told about:\n'
       + '- The goal is still active, but its automatic rounds are stopped: a person must resume it with /goal resume.',
     summary: 'Restart: goal needs a person.',
   }])

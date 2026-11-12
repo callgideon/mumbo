@@ -19,7 +19,7 @@ import { PLAN_READ, STATE_CONTEXT } from '../src/index.ts'
 import { Log } from './events.ts'
 import { boot, notices, OPTIONS, requestTexts, startJob, turn } from './harness.ts'
 
-const HEADER = 'This Session was restarted. What changed while it was down:'
+const HEADER = 'This Session was restarted. Changes it may not have been told about:'
 const CHECK = 'node scripts/slow-check.js'
 
 async function mountJobs(ctx: Context): Promise<void> {

@@ -126,7 +126,7 @@ The tool list changes once per Session, when the first plan is approved, which r
 
 #### What the model sees
 
-One user-role message at the first step after a restart that has something to report: `This Session was restarted. What changed while it was down:` followed by one `- ` line per item in the table above.
+One user-role message at the first step after a restart that has something to report: `This Session was restarted. Changes it may not have been told about:` followed by one `- ` line per item in the table above.
 
 #### Token effect
 

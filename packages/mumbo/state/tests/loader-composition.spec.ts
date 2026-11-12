@@ -110,7 +110,7 @@ describe('real Loader composition', () => {
       'Todo (1 of 1 open, written in turn 1):', '  [in_progress] Build the image',
     ].join('\n'))
     expect(notices(agent).map(notice => notice.text)).toEqual([
-      `This Session was restarted. What changed while it was down:\n- Stopped by the restart, output not kept: background job ${job.id} (bash: docker build .).`,
+      `This Session was restarted. Changes it may not have been told about:\n- Stopped by the restart, output not kept: background job ${job.id} (bash: docker build .).`,
     ])
     const read = agent.session.snapshotEvents().flatMap(event => event.type === 'tool/result' && event.data.message.toolCallId === 'call-read'
       ? event.data.message.content.flatMap(block => block.type === 'text' ? [block.text] : [])

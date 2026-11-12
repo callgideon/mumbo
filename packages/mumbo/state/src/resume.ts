@@ -1,6 +1,6 @@
 /**
  * The resume notice: at the first step after a resume, one logged message naming the background jobs, workflow runs and
- * subagents that stopped or finished while the Session was down, and a goal that needs a person.
+ * subagents that the restart stopped or whose end the Session may not have been told about, and a goal that needs a person.
  * @module @mumbo/state/resume
  */
 
@@ -187,7 +187,7 @@ async function reconcile(
     ...count('finished') > 0 ? [`${String(count('finished'))} finished`] : [],
     ...count('goal') > 0 ? ['goal needs a person'] : [],
   ]
-  const text = ['This Session was restarted. What changed while it was down:', ...findings.map(finding => `- ${finding.line}`)].join('\n')
+  const text = ['This Session was restarted. Changes it may not have been told about:', ...findings.map(finding => `- ${finding.line}`)].join('\n')
   return createUserMessage({
     content: [{ type: 'text', text }],
     source: { kind: RESUME_SOURCE, form: 'notice', summary: boundContextSummary(`Restart: ${parts.join(', ')}.`) },
