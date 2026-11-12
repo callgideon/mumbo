@@ -9,6 +9,7 @@ import { createAssistantMessage, createToolResultMessage, createUserMessage, Too
 import type { MessageSource } from '@deepseek-ai/dsh-llm'
 import { SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionEventMap, SessionEventType } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-tool-executor-ptc/types'
 import type { TodoItem } from '@deepseek-ai/dsh-tool-todo'
 import { WorkflowRunId } from '@deepseek-ai/dsh-workflow'
 import type {} from '../src/resume.ts'
@@ -45,8 +46,28 @@ export class Log {
     return this.add('tool/call', { turn, step: 1, callId: ToolCallId(id), name, arguments: args })
   }
 
-  result(id: string, isError = false): this {
-    return this.add('tool/result', { turn: 1, step: 1, message: createToolResultMessage({ callId: ToolCallId(id), content: [], isError }) })
+  /** A call's result; `text` becomes its one text block. */
+  result(id: string, isError = false, text?: string): this {
+    const content = text === undefined ? [] : [{ type: 'text' as const, text }]
+    return this.add('tool/result', { turn: 1, step: 1, message: createToolResultMessage({ callId: ToolCallId(id), content, isError }) })
+  }
+
+  /** A call and its successful result with `text`. */
+  ran(id: string, name: string, args: object, text = 'ok'): this {
+    return this.call(id, name, JSON.stringify(args)).result(id, false, text)
+  }
+
+  /** One settled `run_code` sub-call. */
+  dispatch(id: string, name: string, args: unknown, isError = false, text = 'ok'): this {
+    const callId = ToolCallId('ptc')
+    return this.add('tool/ptc-dispatch', {
+      rootCallId: callId, parentCallId: callId, subCallId: ToolCallId(id), name, arguments: args, isError, content: [{ type: 'text', text }],
+    })
+  }
+
+  /** The goal round driver's message for `round` of goal `g`. */
+  round(round: number): this {
+    return this.user(`<goal_round>\nRound: ${String(round)}\n</goal_round>`, { kind: 'goal', goalId: GoalId('g'), revision: 1, round })
   }
 
   /** `exit_plan_mode` presenting `plan`, and its review result. */

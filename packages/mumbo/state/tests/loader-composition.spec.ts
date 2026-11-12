@@ -13,6 +13,7 @@ import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Agents from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
+import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
 import Llm from '@deepseek-ai/dsh-llm'
 import PlanModeController from '@deepseek-ai/dsh-plan-mode'
@@ -27,6 +28,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import * as MumboState from '../src/index.ts'
 import { BLOCK_HEADER } from '../src/render.ts'
+import { initRounds, roundsSchema } from '../src/stall.ts'
 import { notices, OPTIONS, startJob, stateSections, turn } from './harness.ts'
 
 const repo = resolve(import.meta.dirname, '../../../..')
@@ -47,10 +49,64 @@ function patches(composition: 'project' | 'person'): ReturnType<typeof loadOverl
   return rows.filter(row => 'insert' in row && JSON.stringify(row.insert).includes('"@mumbo/state"'))
 }
 
+/** The loaded composition. */
+interface Loaded {
+  readonly ctx: Context
+  /** Ids of the entries whose plugin did not load. */
+  readonly failed: readonly (string | undefined)[]
+}
+
+/**
+ * Boot the fixture's base config through the Loader with a composition's rows and `extra` rows after them.
+ * @param composition - which overlay mounts the plugin.
+ * @param model - the scripted model.
+ * @param extra - rows applied after the overlay's.
+ * @returns the context and the entries that failed.
+ */
+async function load(composition: 'project' | 'person', model: MockAdapter, extra: PatchOptions[] = []): Promise<Loaded> {
+  const root = await mkdtemp(join(tmpdir(), 'mumbo-state-'))
+  roots.push(root)
+  const modules = new Map<string, unknown>([
+    ['llm', Llm], ['sessions', Sessions], ['projections', Projections], ['prompt', SystemPrompt], ['tools', Tools],
+    ['toolExecutor', NativeToolExecutor], ['agents', Agents], ['loop', AgentLoop], ['userQuestions', UserQuestions],
+    ['planMode', PlanModeController], ['todo', ToolTodo], ['jobs', LocalJobRegistry], ['@mumbo/state', MumboState],
+    // The person in the browser approves every plan.
+    ['person', { apply(ctx: Context) {
+      ctx.on('user-questions/request', request => Promise.resolve({
+        answers: request.questions.map(item => ({ id: item.id, selected: [item.intent?.approve ?? ''] })),
+      }))
+    } }],
+    ['model', { inject: ['llm'], apply(ctx: Context) { ctx.effect(() => ctx.llm.registerAdapter(['fixture'], model)) } }],
+  ])
+  const configs: Record<string, unknown> = { loop: { agents: [] }, planMode: { section: 'Plan before you act.' }, todo: { allowParallelInProgress: true } }
+  const base = join(root, 'cordis.yml')
+  await writeFile(base, JSON.stringify([...modules.keys()].filter(id => id !== '@mumbo/state').map(id => ({ id, name: id, config: configs[id] ?? {} }))))
+
+  const ctx = new Context()
+  contexts.push(ctx)
+  ctx.baseUrl = pathToFileURL(root).href + '/'
+  await ctx.plugin(Loader)
+  ctx.loader.builtins.include = class FixtureInclude extends Include {
+    override import(specifier: string, getOuterStack?: () => string[]): unknown {
+      if (specifier.startsWith('cordis:')) return super.import(specifier, getOuterStack)
+      if (!modules.has(specifier)) throw new Error(`unexpected fixture module ${specifier}`)
+      return modules.get(specifier)
+    }
+  }
+  await ctx.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(base).href, patches: [...patches(composition), ...extra] } })
+  await ctx.loader.await()
+  const entries = [...ctx.loader.entries()]
+  expect(entries.filter(entry => entry.options.name === '@mumbo/state').map(entry => entry.options.id)).toEqual(['mumbo-state'])
+  const failed: (string | undefined)[] = []
+  for (const entry of entries) {
+    // A fiber whose configuration does not validate exists but rejects its await.
+    if (entry.fiber === undefined || await entry.fiber.await().then(() => false, () => true)) failed.push(entry.options.id)
+  }
+  return { ctx, failed }
+}
+
 describe('real Loader composition', () => {
   it.each(['project', 'person'] as const)('mounts from the %s overlay: the block, plan_read once a plan is approved, and the resume notice', { timeout: 60_000 }, async (composition) => {
-    const root = await mkdtemp(join(tmpdir(), 'mumbo-state-'))
-    roots.push(root)
     const model = new MockAdapter([
       toolCallResponse('call-plan', 'exit_plan_mode', { plan: PLAN }),
       toolCallResponse('call-todo', 'todo_write', { todos: [{ content: 'Build the image', status: 'in_progress' }] }),
@@ -58,38 +114,10 @@ describe('real Loader composition', () => {
       toolCallResponse('call-read', 'plan_read', {}),
       textResponse('Read.'),
     ])
-    const modules = new Map<string, unknown>([
-      ['llm', Llm], ['sessions', Sessions], ['projections', Projections], ['prompt', SystemPrompt], ['tools', Tools],
-      ['toolExecutor', NativeToolExecutor], ['agents', Agents], ['loop', AgentLoop], ['userQuestions', UserQuestions],
-      ['planMode', PlanModeController], ['todo', ToolTodo], ['jobs', LocalJobRegistry], ['@mumbo/state', MumboState],
-      // The person in the browser approves every plan.
-      ['person', { apply(ctx: Context) {
-        ctx.on('user-questions/request', request => Promise.resolve({
-          answers: request.questions.map(item => ({ id: item.id, selected: [item.intent?.approve ?? ''] })),
-        }))
-      } }],
-      ['model', { inject: ['llm'], apply(ctx: Context) { ctx.effect(() => ctx.llm.registerAdapter(['fixture'], model)) } }],
-    ])
-    const configs: Record<string, unknown> = { loop: { agents: [] }, planMode: { section: 'Plan before you act.' }, todo: { allowParallelInProgress: true } }
-    const base = join(root, 'cordis.yml')
-    await writeFile(base, JSON.stringify([...modules.keys()].filter(id => id !== '@mumbo/state').map(id => ({ id, name: id, config: configs[id] ?? {} }))))
-
-    const ctx = new Context()
-    contexts.push(ctx)
-    ctx.baseUrl = pathToFileURL(root).href + '/'
-    await ctx.plugin(Loader)
-    ctx.loader.builtins.include = class FixtureInclude extends Include {
-      override import(specifier: string, getOuterStack?: () => string[]): unknown {
-        if (specifier.startsWith('cordis:')) return super.import(specifier, getOuterStack)
-        if (!modules.has(specifier)) throw new Error(`unexpected fixture module ${specifier}`)
-        return modules.get(specifier)
-      }
-    }
-    await ctx.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(base).href, patches: patches(composition) } })
-    await ctx.loader.await()
-    const entries = [...ctx.loader.entries()]
-    expect(entries.filter(entry => entry.fiber === undefined).map(entry => entry.options.id)).toEqual([])
-    expect(entries.filter(entry => entry.options.name === '@mumbo/state').map(entry => entry.options.id)).toEqual(['mumbo-state'])
+    const { ctx, failed } = await load(composition, model)
+    expect(failed).toEqual([])
+    // The stall check is off by default, so the `mumboRounds` key is free for a unit at another state version.
+    await ctx.sessionProjections.register({ key: 'mumboRounds', stateVersion: 2, stateSchema: roundsSchema, init: initRounds, apply: state => state })
     ctx.jobs.attachController('test')
 
     const handle = await ctx.agents.create({ sessionId: SessionId('mumbo'), agentOptions: OPTIONS })
@@ -116,5 +144,10 @@ describe('real Loader composition', () => {
       ? event.data.message.content.flatMap(block => block.type === 'text' ? [block.text] : [])
       : [])
     expect(read).toEqual([`Approved in turn 1.\n\n${PLAN}`])
+  })
+
+  it('refuses a stall streak shorter than two rounds', { timeout: 60_000 }, async () => {
+    const { failed } = await load('project', new MockAdapter([]), [{ id: 'mumbo-state', config: { stallRounds: 1 } }])
+    expect(failed).toEqual(['mumbo-state'])
   })
 })

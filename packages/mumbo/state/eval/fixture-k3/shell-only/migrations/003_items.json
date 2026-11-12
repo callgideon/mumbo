@@ -1,0 +1,1 @@
+{ "table": "items", "columns": ["id", "order_id", "sku"] }

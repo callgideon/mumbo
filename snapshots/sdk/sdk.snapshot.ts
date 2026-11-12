@@ -146,6 +146,21 @@ interface SdkAssertions {
   restartModel?: string
 }
 
+/** The progress questions `@mumbo/state` adds to goal B's third round in `mumbo-goal-stall`. */
+const MUMBO_STALL_QUESTIONS = [
+  '<goal_progress_check>',
+  'The last 2 rounds of this goal (1 to 2) showed no progress that this check can see. In those two rounds you made 6 tool calls, '
+  + '3 of them repeating an earlier call (for example bash {"command":"cat config/token.txt"}, 2 times), and 2 failed.',
+  'Before you continue, answer these in your reply:',
+  '1. Done? If the whole objective is achieved, gather the evidence and mark the goal complete.',
+  '2. Looping? Name any call or approach you keep repeating, and stop repeating it.',
+  '3. Progressing? If you made progress this check cannot see, such as shell commands, browser or MCP work, or work by subagents, say what changed and continue.',
+  '4. What next? Name the one step that moves the objective forward, and take it.',
+  'If one condition outside your control has stopped progress in each of these rounds, follow the goal policy for blocked: '
+  + 'call update_goal with action blocked and name that condition in blocked_reason.',
+  '</goal_progress_check>',
+].join('\n')
+
 const SDK_ASSERTIONS: Readonly<Record<string, SdkAssertions>> = {
   'team-default-enabled': {
     expectedFinalResponse: 'TEAM_CONFIG_OK',
@@ -232,6 +247,12 @@ const SDK_ASSERTIONS: Readonly<Record<string, SdkAssertions>> = {
     environment: { DSH_PERMISSION_MODE: 'workspace-write' },
     patches: [fileURLToPath(new URL('./goal-rounds/capture.cordis.yml', import.meta.url))],
     modelRequestsFile: 'goal-requests.jsonl',
+    replayStandaloneCommands: true,
+  },
+  'mumbo-goal-stall': {
+    environment: { DSH_PERMISSION_MODE: 'danger-full-access' },
+    patches: [fileURLToPath(new URL('./mumbo-goal-stall/runtime.cordis.yml', import.meta.url))],
+    modelRequestsFile: 'stall-requests.jsonl',
     replayStandaloneCommands: true,
   },
   'command-attachments': {
@@ -1578,6 +1599,29 @@ describe('TypeScript SDK snapshots over the jsonrpc runtime', () => {
         expect(snapshots, 'a snapshot at each switch, with the instructions only while in Run Wild').toEqual(expected)
         expect(modelRequests.map(request => runWildSections((request.messages as JsonObject[]).filter(isRuntimeContext).at(-1)!)),
           'each request carries the last logged snapshot').toEqual(expected)
+      }
+      if (scenario.name === 'mumbo-goal-stall') {
+        const parent = ordered[0]
+        if (parent === undefined) throw new Error('mumbo goal stall has no persisted Session')
+        const events = parseSessionLog(parent.content)
+        const changes = events.filter(event => event.type === 'goal/change')
+        expect(changes.map(event => event.data.operation)).toEqual(['create', 'complete', 'create', 'block'])
+        expect(changes.at(-1)).toMatchObject({ data: { goal: { blockedReason: { code: 'model-reported' } } } })
+        const rounds = events.flatMap(event => event.type === 'user/message' && event.data.source.kind === 'goal'
+          ? [event.data.content.map(block => block.type === 'text' ? block.text : '')] : [])
+        expect(rounds.map(content => content.length), 'only goal B\'s third round carries the questions').toEqual([1, 1, 1, 1, 1, 2])
+        expect(rounds.at(-1)?.[1]).toBe(MUMBO_STALL_QUESTIONS)
+        expect(modelRequests.map(request => JSON.stringify(request.messages).includes('<goal_progress_check>')),
+          'requests carry the questions from goal B\'s third round on').toEqual([...Array.from({ length: 18 }, () => false), true, true, true])
+        // Each state block renders at the first step after a goal change, so the stall check renders none.
+        const rows = records(parent.content)
+        const blocks = rows.flatMap((row, index) => row.type === 'user/message' && mumboStateSections(row.data as JsonObject).length > 0 ? [index] : [])
+        expect(blocks).toHaveLength(changes.length)
+        for (const block of blocks) {
+          const change = rows.findLastIndex((row, index) => index < block && row.type === 'goal/change')
+          expect(rows.slice(change, block).filter(row => row.type === 'step/start'), 'the state block is in the first step after its goal change')
+            .toHaveLength(1)
+        }
       }
       if (scenario.name === 'ptc-cancel') {
         const events = results.flatMap(result => result.events)
