@@ -89,8 +89,10 @@
   cursor: pointer;
 }
 
-.filter:hover {
-  color: var(--dsw-alias-label-primary);
+@media (hover: hover) {
+  .filter:hover {
+    color: var(--dsw-alias-label-primary);
+  }
 }
 
 .filter:focus-visible {
@@ -142,8 +144,10 @@
   border-radius: 12px;
 }
 
-.row:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
+@media (hover: hover) {
+  .row:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
 }
 
 .rowHead {

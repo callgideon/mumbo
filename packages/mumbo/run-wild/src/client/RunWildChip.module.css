@@ -17,9 +17,14 @@
   cursor: pointer;
 }
 
-.chip:hover,
 .chip[aria-expanded='true'] {
   color: var(--dsw-alias-label-primary);
+}
+
+@media (hover: hover) {
+  .chip:hover {
+    color: var(--dsw-alias-label-primary);
+  }
 }
 
 .chip:focus-visible {
