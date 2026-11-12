@@ -8,7 +8,7 @@ import { randomBytes } from 'node:crypto'
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { setImmediate as tick } from 'node:timers/promises'
+import { setImmediate as tick, setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { Context, FiberState } from '@deepseek-ai/cordis'
 import TypertGatewayService from '@deepseek-ai/dsh-api-gateway'
@@ -18,11 +18,11 @@ import * as Connection from '@deepseek-ai/dsh-client-connection'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
 import SessionStore, { SESSION_FORMAT_VERSION, SessionId, type SessionHeader } from '@deepseek-ai/dsh-session'
 import { SessionPersistenceRevision } from '@deepseek-ai/dsh-session-persistence'
-import Storage from '@deepseek-ai/dsh-storage'
+import Storage, { type StorageBackend } from '@deepseek-ai/dsh-storage'
 import { DomainFacility, type DomainChanged } from '@deepseek-ai/dsh-storage-domain'
 import type { PeerId, Principal, RemoteInvocation } from '@deepseek-ai/dsh-typert-protocol'
 import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
-import WorkspaceRegistry from '@deepseek-ai/dsh-workspace'
+import WorkspaceRegistry, { type WorkspaceDomainState } from '@deepseek-ai/dsh-workspace'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MemoryMediaPool, MemoryStorageBackend } from '../../../storage/storage-domain/tests/helpers/memory-backend.ts'
 import { signMemberHeader } from '../src/header.ts'
@@ -83,6 +83,36 @@ interface BoxOptions {
   readonly stored?: readonly SessionHeader[]
   /** Holds every store access from the Loader's start until it settles. */
   readonly hold?: Promise<void>
+  /** While it returns true, every Workspace-registry commit rejects. */
+  readonly failCommits?: () => boolean
+}
+
+/**
+ * @returns `backend`, except that a write of the Workspace domain's global state that lists a Workspace and names no
+ *   pending mutation, the registry's commit of a create, rejects while `failing` returns true.
+ */
+function failingCommits(backend: MemoryStorageBackend, failing: () => boolean): StorageBackend {
+  return {
+    kv: {
+      open: async (descriptor) => {
+        const unit = await backend.kv.open(descriptor)
+        if (descriptor.name !== 'workspace') return unit
+        return {
+          loadAll: () => unit.loadAll(),
+          putRecord: (table, key, value) => unit.putRecord(table, key, value),
+          deleteRecord: (table, key) => unit.deleteRecord(table, key),
+          deleteRecords: (table, keys) => unit.deleteRecords(table, keys),
+          setGlobal: async (value) => {
+            const state = value as WorkspaceDomainState
+            if (failing() && state.pendingMutation === undefined && state.workspaceIds.length > 0) throw new Error('commit rejected')
+            await unit.setGlobal(value)
+          },
+          close: () => unit.close(),
+        }
+      },
+    },
+    close: () => backend.close(),
+  }
 }
 
 /**
@@ -99,7 +129,8 @@ async function startBox(options: BoxOptions) {
   ctx.on('domain/changed', (change) => { if (change.domain === 'workspace') changes.push(change) })
   await ctx.plugin(SessionStore)
   await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(options.pool))
+  const memory = new MemoryStorageBackend(options.pool)
+  ctx.storage.backend.register('memory', options.failCommits === undefined ? memory : failingCommits(memory, options.failCommits))
   const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
   ctx.storage.mount('domain', facility)
   ctx.provide('storageDomain', facility)
@@ -222,19 +253,43 @@ describe('the project Workspace at start', () => {
 })
 
 describe('the project Workspace while the box runs', () => {
-  it('registers it again once after the owner deletes it, and then writes nothing more', { timeout: 60_000 }, async () => {
+  it('registers it again once after each deletion by the owner, and then writes nothing more', { timeout: 60_000 }, async () => {
     const project = directory()
     const box = await startBox({ pool: initializedEmptyStore(), workspace: project })
     await box.settled
-    const [deleted] = workspaces(box.ctx)
     const create = vi.spyOn(WorkspaceRegistry.prototype, 'create')
-    await box.ctx.workspaceController.delete({ workspaceId: deleted!.id as never })
-    await vi.waitFor(() => { expect(workspaces(box.ctx)).toEqual([expect.objectContaining({ path: project })]) })
-    expect(workspaces(box.ctx)[0]!.id).not.toBe(deleted!.id)
+    const ids = [workspaces(box.ctx)[0]!.id]
+    for (const deleted of [1, 2]) {
+      await box.ctx.workspaceController.delete({ workspaceId: ids.at(-1) as never })
+      await vi.waitFor(() => { expect(workspaces(box.ctx)).toEqual([expect.objectContaining({ path: project })]) })
+      ids.push(workspaces(box.ctx)[0]!.id)
+      expect(create, `deletion ${String(deleted)}`).toHaveBeenCalledTimes(deleted)
+    }
+    expect(new Set(ids).size).toBe(3)
     const writes = box.changes.length
     for (let turn = 0; turn < 5; turn += 1) await tick()
     expect(box.changes).toHaveLength(writes)
-    expect(create).toHaveBeenCalledExactlyOnceWith(project)
+    expect(create.mock.calls).toEqual([[project], [project]])
+  })
+
+  it('registers it once after a deletion while the registry cannot commit it, and logs the failure', { timeout: 60_000 }, async () => {
+    const project = directory()
+    let failing = false
+    const box = await startBox({ pool: initializedEmptyStore(), workspace: project, failCommits: () => failing })
+    await box.settled
+    const error = vi.spyOn(box.ctx.logger, 'error').mockImplementation(() => {})
+    const create = vi.spyOn(WorkspaceRegistry.prototype, 'create')
+    const [deleted] = workspaces(box.ctx)
+    failing = true
+    await box.ctx.workspaceController.delete({ workspaceId: deleted!.id as never })
+    await vi.waitFor(() => { expect(error).toHaveBeenCalled() })
+    // The registry's rollback deletes the uncommitted record, which must not start another create.
+    await delay(100)
+    expect(create).toHaveBeenCalledOnce()
+    expect(error).toHaveBeenCalledExactlyOnceWith(
+      `mumbo-project-workspace: registering ${project} again after a deletion failed`, expect.objectContaining({ message: 'commit rejected' }),
+    )
+    expect(workspaces(box.ctx)).toEqual([])
   })
 
   it('logs a failed registration after a deletion', { timeout: 60_000 }, async () => {

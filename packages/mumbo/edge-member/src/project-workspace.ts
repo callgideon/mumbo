@@ -36,20 +36,23 @@ export const Config: z<Config> = z.object({
 })
 
 /**
- * Register the project Workspace unless one exists at its path, and register it again whenever a Workspace record is
- * deleted. The registry matches the canonical path, so a present Workspace causes no write.
+ * Register the project Workspace unless one exists at its path, and register it again whenever its own record is
+ * deleted. The registry matches the canonical path, so a present Workspace causes no write. Deleting another
+ * Workspace, or the registry rolling back a failed create, deletes a different record and starts no create.
  * @param ctx - plugin context carrying the Workspace registry.
  * @param config - validated configuration.
  * @throws when the path is relative, missing, or not a directory, or the registry write fails; the entry then fails
  *   at load and other entries keep running.
  */
 export async function apply(ctx: Context, config: Config): Promise<void> {
+  let id: string | undefined
   ctx.on('domain/changed', (change) => {
-    if (change.domain !== WORKSPACE_DOMAIN || change.table !== WORKSPACE_TABLE || change.operation !== 'deleted') return
+    if (change.domain !== WORKSPACE_DOMAIN || change.table !== WORKSPACE_TABLE || change.operation !== 'deleted'
+      || change.key !== id) return
     // The registry queues this create behind the deletion that emitted the change.
-    ctx.workspaceRegistry.create(config.workspace).catch((error: unknown) => {
+    ctx.workspaceRegistry.create(config.workspace).then((workspace) => { id = workspace.id }, (error: unknown) => {
       ctx.logger.error(`mumbo-project-workspace: registering ${config.workspace} again after a deletion failed`, error)
     })
   })
-  await ctx.workspaceRegistry.create(config.workspace)
+  id = (await ctx.workspaceRegistry.create(config.workspace)).id
 }

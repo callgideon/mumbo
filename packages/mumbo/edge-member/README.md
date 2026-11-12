@@ -71,7 +71,7 @@ The `@mumbo/edge-member/project-workspace` sub-export is a separate function plu
 | `workspace` | required | Existing directory registered as the project Workspace, in a canonical absolute spelling; the same value as the member plugin's `workspace`. |
 
 - **At start.** Its load awaits `workspaceRegistry.create(workspace)`, which matches the canonical path, so a box that already has the Workspace gets no write and keeps its id and title, and a store marked `initialized` with no Workspace gets one. The Loader settles, and the Web carrier prints its URL line, only after the create; the edge proxies to the box only after reading that line, so a member's page never loads before the Workspace exists.
-- **After a deletion.** When a Workspace record is deleted, the plugin calls `create` again; the registry queues it behind the deletion, and a present Workspace returns with no write. A failure is logged at error. Remove the row to retire the Workspace.
+- **After a deletion.** When the project Workspace's own record is deleted, the plugin calls `create` again; the registry queues it behind the deletion, and a present Workspace returns with no write. Deleting another Workspace, or the registry deleting the record of a create it rolls back, starts no create, so a failing store write ends in one logged error instead of a loop. A failure is logged at error, and the Workspace stays absent until the next start. Remove the row to retire the Workspace.
 - **Failure.** A relative, missing, or non-directory path fails this entry at load; the member plugin and every other entry keep running, and members are still admitted.
 
 The create runs in-process as the Host; no member role grants `workspace/create`, `workspace/initializeDefault`, or `workspace/delete`.
