@@ -268,6 +268,16 @@ test('whoami and project_list: the key itself, and the projects it names whose o
   } finally { t.close() }
 })
 
+test('needs_you: its description and the server instructions say decided_for_you is read-only Run Wild history and name stopped_goals, so an external caller never waits on it', async () => {
+  const t = await setup()
+  try {
+    const key = await t.mint()
+    const { description } = (await t.rpc(key, 'tools/list')).json.result.tools.find(x => x.name === 'needs_you')
+    for (const text of [/decided_for_you is read-only/, /task_reply cannot answer it/, /stopped_goals/]) assert.match(description, text)
+    assert.match((await t.rpc(key, 'initialize', INIT)).json.result.instructions, /what Run Wild decided for you/)
+  } finally { t.close() }
+})
+
 test('the box-token endpoint beside the door: unchanged on the model host, closed to a door key; the public host reaches only the door', async () => {
   const t = await setup()
   try {

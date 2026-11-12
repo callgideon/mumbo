@@ -271,7 +271,9 @@ export const doorTools = ({ projects, mumbo, relay, halt, workerTokens, cfg }) =
         wait_s: z.number().int().min(0).max(40).optional().describe('Seconds to wait for a first message when none is there yet; default 0.'),
         include_context: z.boolean().optional().describe('Also return the messages the harness adds, such as instructions, skill lists and reminders.'),
       })],
-    ['needs_you', 'read', false, 'List what waits for you: questions from any of Mumbo\'s Sessions, and tool approvals with the call\'s arguments and plan reviews for information. Answer a question with task_reply; approvals and plan reviews (answerable false) can only be answered in the browser.',
+    ['needs_you', 'read', false, 'List what waits for you: questions from any of Mumbo\'s Sessions, and tool approvals with the call\'s arguments and plan reviews for information. Answer a question with task_reply; approvals and plan reviews (answerable false) can only be answered in the browser. '
+      + 'stopped_goals lists Sessions whose goal is active but stopped, such as by a restart; resume one with /goal resume in that Session. '
+      + 'decided_for_you is read-only history: what Run Wild decided without asking in the last 24 hours, newest first, at most 50. Nothing in it waits for you, and task_reply cannot answer it.',
       z.object({})],
     ['task_reply', 'prompt', false, 'Answer one question from needs_you with answers. Tool approvals and plan reviews cannot be answered here. A question answered in the browser first gives not_found.',
       z.object({
@@ -415,7 +417,7 @@ export function door({ keys, tools, requests, tokens, rate, now = () => Date.now
     const { key, call } = authInfo.extra
     const server = new McpServer({ name: 'mumbo', version: '1.0.0' }, {
       capabilities: { tools: {} },
-      instructions: 'Your own mumbo, as you, through a door key. agent_send and agent_read talk with Mumbo, your assistant; needs_you lists what waits for you, '
+      instructions: 'Your own mumbo, as you, through a door key. agent_send and agent_read talk with Mumbo, your assistant; needs_you lists what waits for you, and what Run Wild decided for you in the last day, read-only; '
         + 'task_reply answers its questions (approvals are given only in the browser), and task_status and task_result show its work. whoami shows the key, '
         + 'project_list the projects it may reach; project_status, project_message, task_start and task_stop work with one of them. '
         + 'task_claim takes one of a project\'s external Tickets for you to work on, under the protocol it returns, and task_report and task_submit report on it. '

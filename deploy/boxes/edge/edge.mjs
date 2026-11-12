@@ -1414,7 +1414,8 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
         // again: during a client-proxy outage a recreate would fail too, and the box would be lost (RUNBOOK "Box unreachable").
         if (!cannotRun(error, answer)) {
           log(JSON.stringify({ edge: 'error', level: 'error', msg: 'box unreachable', user: email, box: id, region: cell.region, error: error.message }))
-          throw Object.assign(error, { status: 503 })
+          // `logged`: this line is the visit's edge-errors line, so userServer and modelServer add none of their own.
+          throw Object.assign(error, { status: 503, logged: true })
         }
         // A final answer to a resume is retried at each visit for RESUME_GRACE_MS from the first: a snapshot still
         // uploading from a drained node gives the same answer until the upload lands (RUNBOOK "Resume failures").
@@ -1456,7 +1457,7 @@ export function boxes({ cells, store, cfg, edgeKey, boxFiles, log = console.log 
     }
     // A project box whose image runs @mumbo/edge-member: members get a signed header, never the owner launch token.
     const member = b.memberAuth ? (email) => memberHeader(memberKey(edgeKey, id), email) : undefined
-    return { id, token: b.launch, traffic: b.traffic, host, ports: b.ports, proxy: cell.proxy, ...(member ? { member } : {}) }
+    return { id, token: b.launch, traffic: b.traffic, host, ports: b.ports, proxy: cell.proxy, region: cell.region, ...(member ? { member } : {}) }
   }
 
   const TOUCH_MS = 30_000, EXTEND_MS = 60_000
@@ -1791,6 +1792,7 @@ export const KEY_PATHS = ['/keys', '/keys/revoke']
  *  `keys` (keys.mjs keyManager) answers KEY_PATHS on the approve host; on the public host they redirect (302) there.
  *  The public host answers 403 to any service-worker script fetch. */
 export function userServer({ cfg, box, verifyAlb, projects, approve, signin, keys, log = console.log }) {
+  const say = (fields) => log(JSON.stringify({ edge: 'box', ...fields }))
   const identify = async (req) => verifyAlb
     ? (await verifyAlb(req.headers['x-amzn-oidc-data']).catch(() => undefined)) ?? ''
     : String(req.headers['x-forwarded-email'] ?? '').toLowerCase()
@@ -1913,7 +1915,16 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, key
       res.writeHead(r.statusCode ?? 502, headers)
       r.pipe(res)
     })
-    up.on('error', (e) => { box.uncache(key); if (!res.headersSent) page(res, 502, 'Could not reach your box. Retrying…'); else res.destroy(); log(JSON.stringify({ edge: 'error', user: email, error: e.message })) })
+    up.on('error', (e) => {
+      box.uncache(key)
+      // Read before the answer below ends or destroys res. Not req.destroyed: a request whose body was read to its end
+      // is destroyed too, so every waiting GET would count as gone.
+      const clientGone = res.destroyed || res.writableEnded
+      if (!res.headersSent) page(res, 502, 'Could not reach your box. Retrying…'); else res.destroy()
+      const line = { msg: 'box request failed', user: email, path, box: target.id, region: target.region, error: e.message }
+      // A person who left first (a closed tab, an aborted load) is not a failing box: a warn line, which fires no alarm.
+      if (clientGone) say({ level: 'warn', ...line, clientGone: true }); else log(JSON.stringify({ edge: 'error', ...line }))
+    })
     req.pipe(up)
   }
   async function onUpgrade(req, socket, head) {

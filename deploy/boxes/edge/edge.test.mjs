@@ -1942,6 +1942,54 @@ test('B47: a connection error to the client-proxy, from a page or a WebSocket, d
   } finally { server.close() }
 })
 
+/** userServer over boxes() and a box `a@x.com` whose client-proxy runs `onRequest(req)` for each request the edge passes on,
+ *  without answering; `logs` holds userServer's lines. */
+async function hangupRig(onRequest) {
+  const proxy = createServer(onRequest)
+  const { cells } = twoCells({ us: { port: await listen(proxy) } }); const logs = []
+  const b = boxes({ cells, store: memoryStore(), cfg, edgeKey: 'k', log: () => {} })
+  const { id } = await b.ensure('a@x.com')
+  const server = userServer({ cfg, box: b, log: (l) => logs.push(JSON.parse(l)) })
+  return { id, logs, server, port: await listen(server), close: () => { server.close(); proxy.close() } }
+}
+const ASKED = { 'x-forwarded-email': 'a@x.com', accept: 'application/json', cookie: 'dsh-auth-x=1' }
+
+test('a box that hangs up on a request while the person waits: 502 and one edge-errors line with the path without its query, the box and its region', async () => {
+  const t = await hangupRig((req) => req.socket.destroy())
+  try {
+    assert.equal((await call(t.port, { path: '/api/x?token=secret', headers: ASKED })).status, 502)
+    assert.deepEqual(t.logs, [{ edge: 'error', msg: 'box request failed', user: 'a@x.com', path: '/api/x', box: t.id, region: 'us-east-1', error: 'socket hang up' }])
+  } finally { t.close() }
+})
+
+test('a request the person left before the box hung up logs a warn box line with clientGone, and no edge-errors line', async () => {
+  let passed
+  const atBox = new Promise(r => { passed = r })
+  const t = await hangupRig(passed)
+  const left = new Promise(r => t.server.once('request', (req, res) => res.on('close', r)))
+  try {
+    const client = request({ host: '127.0.0.1', port: t.port, path: '/api/x?token=secret', headers: { host: cfg.publicHost, ...ASKED } })
+    client.on('error', () => {})
+    client.end()
+    const boxReq = await atBox
+    client.destroy()
+    await left
+    boxReq.socket.destroy()
+    while (!t.logs.length) await new Promise(r => setTimeout(r, 5))
+    assert.deepEqual(t.logs, [{ edge: 'box', level: 'warn', msg: 'box request failed', user: 'a@x.com', path: '/api/x', box: t.id, region: 'us-east-1', error: 'socket hang up', clientGone: true }])
+  } finally { t.close() }
+})
+
+test('B47: a page visit to an unreachable box logs one edge-errors line, box unreachable, and none from the page', async () => {
+  const r = await repairRig({ connect: failingCommands(new SandboxUnreachableError('fetch failed: The sandbox could not be reached and its health probe failed too')) })
+  const server = userServer({ cfg, box: r.b, log: (l) => r.logs.push(JSON.parse(l)) })
+  const port = await listen(server)
+  try {
+    assert.equal((await call(port, { headers: { 'x-forwarded-email': 'a@x.com', accept: 'application/json' } })).status, 503)
+  } finally { server.close() }
+  assert.deepEqual(r.logs.filter(l => l.edge === 'error').map(l => l.msg), ['box unreachable'])
+})
+
 test('B47: a box E2B lists running, or a resume or repair with no answer, is left as it is: 503, a box unreachable error line, no kill, no create, the record unchanged', async () => {
   const fetchFailed = new TypeError('fetch failed', { cause: Object.assign(new Error('connect ECONNREFUSED 10.0.0.1:80'), { code: 'ECONNREFUSED' }) })
   const connectFails = (error) => async () => { throw error }
@@ -1965,7 +2013,7 @@ test('B47: a box E2B lists running, or a resume or repair with no answer, is lef
   for (const [name, [error, connect, record, state]] of Object.entries(cases)) {
     const r = await repairRig({ connect: connect(error), record, state })
     const before = await r.store.getBox('u1')
-    await assert.rejects(r.b.ensure('a@x.com'), (e) => e === error && e.status === 503, name)
+    await assert.rejects(r.b.ensure('a@x.com'), (e) => e === error && e.status === 503 && e.logged === true, name)
     assert.deepEqual([r.changes(), await r.store.getBox('u1')], [[], before], name)
     assert.deepEqual(r.logs.filter(l => l.msg === 'box unreachable'), [{ edge: 'error', level: 'error', msg: 'box unreachable', user: 'a@x.com', box: 'u1', region: 'us-east-1', error: error.message }], name)
   }
