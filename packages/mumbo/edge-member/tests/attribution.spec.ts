@@ -3,12 +3,13 @@ import { Context } from '@deepseek-ai/cordis'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import type { SessionRequestId } from '@deepseek-ai/dsh-api-session-controller/types'
+import type { PreStepDecision } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { describe, expect, it, onTestFinished } from 'vitest'
 import { MockAdapter, textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import type {} from '../src/index.ts'
-import { ATTRIBUTION_SOURCE, attributeMemberMessages, attributionText } from '../src/attribution.ts'
+import { ATTRIBUTION_SOURCE, attributeMemberMessages, attributionText, memberOf } from '../src/attribution.ts'
 
 function text(value: string, principal?: { readonly kind: 'edge-member'; readonly email: string }) {
   return createUserMessage({
@@ -51,6 +52,25 @@ describe('member attribution', () => {
     const order = ['owner asks', 'The next message is from project member ann@example.com.', 'member asks']
       .map(value => requestTexts?.indexOf(value))
     expect(order).toEqual([...order].sort((left, right) => (left ?? 0) - (right ?? 0)))
+  })
+
+  it('adds a notice only before the member message of a step that also holds an owner message', async () => {
+    let listener: ((payload: unknown, next: () => Promise<PreStepDecision>) => Promise<PreStepDecision>) | undefined
+    attributeMemberMessages({ on: (_event: string, callback: typeof listener) => { listener = callback } } as never)
+    const member = text('member asks', { kind: 'edge-member', email: 'ann@example.com' })
+    const owner = text('owner adds')
+    const decision = await listener!({}, async () => ({ kind: 'enter', messages: [member, owner] }))
+    expect(decision.kind === 'enter' ? decision.messages.map(message => message.source.kind) : decision)
+      .toEqual([ATTRIBUTION_SOURCE, 'user', 'user'])
+    expect(decision.kind === 'enter' ? decision.messages.slice(1) : decision).toEqual([member, owner])
+  })
+
+  it('names no member for a message whose source is not a person\'s', () => {
+    const notice = createUserMessage({
+      content: [{ type: 'text', text: attributionText('ann@example.com') }],
+      source: { kind: ATTRIBUTION_SOURCE, form: 'notice', summary: attributionText('ann@example.com') },
+    })
+    expect(memberOf(notice)).toBeUndefined()
   })
 
   it('leaves a step without member messages unchanged', async () => {
