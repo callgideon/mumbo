@@ -2369,6 +2369,7 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <ul>
 <li>Ten minutes, not the orchestrator's 30-minute stop timeout: a grace is pure outage for a lost node or a broken snapshot, a planned drain is the operator's to time, and one box's drain measured 82 s.</li>
 <li>The drain script logs its upload time, so the number can be revisited.</li>
+<li><strong>[2026-11-12, build review]</strong> Retries inside the grace log a warning only. One error line, which alarms, marks a grace that ran out, so a blue/green whose uploads land in time stays quiet. A successful repair, wake, backup or idle pause clears the mark.</li>
 </ul>
 </li>
 <li><strong>Dropped from B47b.</strong> The reboot needs a fork change first. The final backup has no time left inside the lock. Backup and restore log their durations.</li>

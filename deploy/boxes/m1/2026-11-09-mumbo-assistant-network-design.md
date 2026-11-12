@@ -1369,6 +1369,7 @@ The cache's worst case is a subscription that dies silently: copies are served f
     - **Other resume failures.** Any other final answer to a resume shows the starting page and records `resumeFailedAt`. The box is recreated from backup only after a **10-minute grace** and only while the cell has room by the edge's count.
       - Ten minutes, not the orchestrator's 30-minute stop timeout: a grace is pure outage for a lost node or a broken snapshot, a planned drain is the operator's to time, and one box's drain measured 82 s.
       - The drain script logs its upload time, so the number can be revisited.
+      - **[2026-11-12, build review]** Retries inside the grace log a warning only. One error line, which alarms, marks a grace that ran out, so a blue/green whose uploads land in time stays quiet. A successful repair, wake, backup or idle pause clears the mark.
     - **Dropped from B47b.** The reboot needs a fork change first. The final backup has no time left inside the lock. Backup and restore log their durations.
     - **Recordings: the unresponsive guest and the full cell, in Mumbai only and before R8.** The answers don't depend on the cell. No us-east-1 node is filled or stopped. The node-gone case is synthesized from source and marked so.
     - **Access.** Both recordings need the temporary client-proxy rule, a production change outside the operator session's permissions. That and the fill are one go-ahead for the founder.
