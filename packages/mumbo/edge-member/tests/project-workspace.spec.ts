@@ -324,6 +324,21 @@ describe('the project Workspace while the box runs', () => {
     expect(grants.get('session:coordinator')).toContain('session/follow')
   })
 
+  it('lets members start a Session only in the project Workspace, refusing a create that names none', { timeout: 60_000 }, async () => {
+    const project = directory()
+    const box = await startBox({ pool: initializedEmptyStore(), workspace: project, stored: [header('blank', project)] })
+    const origin = await serve(box)
+    const [projectWorkspace] = workspaces(box.ctx)
+    const member = signMemberHeader(KEY, 'ann@example.com', now() + 300)
+    const create = async (request: object) => (await call(origin, 'session/create', { request }, member)).body
+    // A create that names no Workspace or Session is decided on the global resource, even for the project directory.
+    for (const request of [{}, { cwd: project }, { cwd: '/elsewhere' }]) {
+      expect(await create(request), JSON.stringify(request)).toMatchObject({ result: { ok: false, error: { code: 'remote-access/denied' } } })
+    }
+    expect(await create({ workspaceId: projectWorkspace!.id })).toMatchObject({ result: { ok: true, value: 'new' } })
+    expect(await create({ workspaceId: projectWorkspace!.id, sessionId: 'blank' })).toMatchObject({ result: { ok: true, value: 'blank' } })
+  })
+
   it('lets members open a stored Session with no Workspace, and one created later after it stops', { timeout: 60_000 }, async () => {
     const box = await startBox({ pool: initializedEmptyStore(), workspace: directory(), stored: [header('ungrouped', '/src')] })
     const origin = await serve(box)

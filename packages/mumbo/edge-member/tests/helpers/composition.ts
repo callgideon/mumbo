@@ -31,7 +31,7 @@ export class PromptProbe extends TypertRemoteService {
   }
 
   @Remote('create')
-  create(request: { readonly workspaceId?: string; readonly sessionId?: string }): string {
+  create(request: { readonly workspaceId?: string; readonly cwd?: string; readonly sessionId?: string }): string {
     this.callers.push(principalOf(this.ctx.invocation))
     return request.sessionId ?? 'new'
   }

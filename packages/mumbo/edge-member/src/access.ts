@@ -9,9 +9,10 @@ import type { RemoteAccessBinding, RemoteAccessRole } from '@deepseek-ai/dsh-api
 import type { SessionId } from '@deepseek-ai/dsh-session'
 
 /**
- * Host-wide reads a collaborator's page needs, and starting a Session; list and follow results are filtered per
- * Session and Workspace. `hostFiles/readAny` is excluded: `/api/file` reads any file the box can read, including
- * its secrets and every Session log.
+ * Host-wide reads a collaborator's page needs; list and follow results are filtered per Session and Workspace.
+ * `hostFiles/readAny` is excluded: `/api/file` reads any file the box can read, including its secrets and every
+ * Session log. `session/create` is excluded: a create that names no Workspace or Session starts in any directory its
+ * `cwd` names, so members start Sessions only through the Workspace and Session roles.
  */
 export const MEMBER_GLOBAL_ROLE: RemoteAccessRole<'global'> = {
   name: 'mumbo:member-global',
@@ -23,7 +24,6 @@ export const MEMBER_GLOBAL_ROLE: RemoteAccessRole<'global'> = {
     'llm/listProviders',
     'session/canOpenWorkspacePath',
     'session/control',
-    'session/create',
     'session/list',
     'session/modelCatalog',
     'session/search',
