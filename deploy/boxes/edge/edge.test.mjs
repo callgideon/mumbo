@@ -2018,7 +2018,7 @@ test('B47b: a full cell answers a resume with capacity, by class (503, 429) or b
   }
 })
 
-test('B47b: any other final answer to a resume is retried for the grace: 503 and a resume failed; retrying line, resumeFailedAt set once, no kill; a resume that works clears it', async () => {
+test('B47b: any other final answer to a resume is retried for the grace: 503 and a resume failed; retrying warn line with no error line, resumeFailedAt set once, no kill; a resume that works clears it', async () => {
   // The unresponsive guest's generic 500, a snapshot whose files are not in S3 yet, and a snapshot marked unresponsive.
   for (const name of ['guest-unresponsive-resume', 'node-gone-resume', 'guest-unresponsive-resume-marked']) {
     const error = await answered(name)
@@ -2033,21 +2033,37 @@ test('B47b: any other final answer to a resume is retried for the grace: 503 and
     await assert.rejects(r.b.ensure('a@x.com'), (e) => e === error && e.status === 503, name)
     assert.deepEqual(r.changes(), [], name)
     assert.deepEqual(r.logs.filter(l => l.msg === 'resume failed; retrying').map(l => l.resumeFailedAt), [resumeFailedAt, resumeFailedAt - GRACE_MS + 60_000], name)
-    assert.deepEqual(r.logs.find(l => l.msg === 'resume failed; retrying'), { edge: 'error', level: 'error', msg: 'resume failed; retrying', user: 'a@x.com', box: 'u1', region: 'us-east-1', resumeFailedAt, error: error.message }, name)
+    assert.deepEqual(r.logs.find(l => l.msg === 'resume failed; retrying'), { edge: 'box', level: 'warn', msg: 'resume failed; retrying', user: 'a@x.com', box: 'u1', region: 'us-east-1', resumeFailedAt, error: error.message }, name)
+    assert.deepEqual(r.logs.filter(l => l.edge === 'error'), [], name)
     failing = false
     assert.equal((await r.b.ensure('a@x.com')).id, 'u1', name)
     assert.equal((await r.store.getBox('u1')).resumeFailedAt, undefined, name)
   }
   // The RUNBOOK entry for both lines.
-  assert.match(readFileSync(new URL('../RUNBOOK.md', import.meta.url), 'utf8'), /^### Resume failures\n.*\n- \*\*`resume failed; retrying`\*\*.*\n- \*\*`resume failed; recreating from backup`\*\*/m)
+  assert.match(readFileSync(new URL('../RUNBOOK.md', import.meta.url), 'utf8'), /^### Resume failures\n.*\n- \*\*`resume failed; retrying`\*\*.*\n- \*\*`resume failed past the grace`\*\*.*\n- \*\*`resume failed; recreating from backup`\*\*/m)
 })
 
-test('B47b: past the grace, a final answer to a resume recreates the box from backup while the cell has room; in a cell full by the edge\'s count it is the at-capacity page, with no kill', async () => {
+test('B47b: a page visit within the grace logs no edge-errors line, from repair or from the page: a node drain whose uploads land in time raises no alarm', async () => {
+  const error = await answered('node-gone-resume')
+  const r = await repairRig({ state: 'paused', record: { launch: 'L', paused: false }, connect: async () => { throw error } })
+  const server = userServer({ cfg, box: r.b, log: (l) => r.logs.push(JSON.parse(l)) })
+  const port = await listen(server)
+  try {
+    assert.equal((await call(port, { headers: { 'x-forwarded-email': 'a@x.com', accept: 'application/json' } })).status, 503)
+  } finally { server.close() }
+  assert.deepEqual([r.logs.filter(l => l.edge === 'error'), r.logs.filter(l => l.msg === 'resume failed; retrying').map(l => [l.edge, l.level])], [[], [['box', 'warn']]])
+})
+
+test('B47b: past the grace, a final answer to a resume logs one edge-errors line, then recreates the box from backup while the cell has room; in a cell full by the edge\'s count it is the at-capacity page, with no kill', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() })
   const error = await answered('guest-unresponsive-resume')
   const record = { launch: 'L', resumeFailedAt: Date.now() - GRACE_MS }
+  const line = { edge: 'error', level: 'error', msg: 'resume failed past the grace', user: 'a@x.com', box: 'u1', region: 'us-east-1', state: 'paused', class: 'SandboxError', status: 500, ms: GRACE_MS, error: error.message }
   const room = await repairRig({ state: 'paused', record, connect: async () => { throw error } })
   assert.notEqual((await room.b.ensure('a@x.com')).id, 'u1')
   assert.deepEqual(room.changes(), [['kill', 'u1'], ['create', { user: 'a@x.com' }]])
+  assert.deepEqual(room.logs.filter(l => l.edge === 'error'), [line])
+  assert.deepEqual(room.logs.filter(l => l.msg?.startsWith('resume failed')).map(l => l.msg), ['resume failed past the grace', 'resume failed; recreating from backup'])
   assert.equal(room.logs.find(l => l.msg === 'resume failed; recreating from backup').error, error.message)
   // Another person's running box fills 2 of 3 units, and the box would need 2 more.
   const full = await repairRig({ state: 'paused', record, connect: async () => { throw error }, us: { maxUnits: 3 } })
@@ -2055,6 +2071,7 @@ test('B47b: past the grace, a final answer to a resume recreates the box from ba
   const before = await full.store.getBox('u1')
   await assert.rejects(full.b.ensure('a@x.com'), (e) => e === error && e.capacity === true)
   assert.deepEqual([full.changes(), await full.store.getBox('u1')], [[], before])
+  assert.deepEqual(full.logs.filter(l => l.edge === 'error'), [line])
 })
 
 test('B47b: a create is at capacity on E2B\'s 503 or 429 or a node\'s memory refusal, and not on any other failure', async () => {
