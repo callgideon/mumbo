@@ -137,6 +137,12 @@ interface SdkAssertions {
   expectedToolDescriptions?: Readonly<Record<string, string>>
   /** Expected runtime-context state in the real assembled request. */
   runtimeContext?: false | { includes: readonly string[]; excludes: readonly string[] }
+  /**
+   * Turns before which the runtime closes and a new one resumes the Session; each runtime replays only its own turns.
+   */
+  restartBeforeTurns?: readonly number[]
+  /** Model each restarted runtime selects; defaults to the recorded route's model. */
+  restartModel?: string
 }
 
 const SDK_ASSERTIONS: Readonly<Record<string, SdkAssertions>> = {
@@ -194,6 +200,25 @@ const SDK_ASSERTIONS: Readonly<Record<string, SdkAssertions>> = {
     modelRequestsFile: 'plan-requests.jsonl',
     replayStandaloneCommands: true,
     planReviews: ['keep', 'approve', 'dismiss'],
+  },
+  'session-resume': {
+    patches: [fileURLToPath(new URL('./session-resume/replay.cordis.yml', import.meta.url))],
+    restartBeforeTurns: [2],
+    restartModel: 'deepseek-v4-pro',
+  },
+  'mumbo-state': {
+    expectedFinalResponse: 'SDK_STATE_OK',
+    environment: { DSH_PERMISSION_MODE: 'workspace-write' },
+    patches: [fileURLToPath(new URL('./mumbo-state/runtime.cordis.yml', import.meta.url))],
+    modelRequestsFile: 'state-requests.jsonl',
+    replayStandaloneCommands: true,
+    planReviews: ['approve'],
+  },
+  'mumbo-resume': {
+    expectedFinalResponse: 'SDK_RESUME_OK',
+    environment: { DSH_PERMISSION_MODE: 'danger-full-access' },
+    patches: [fileURLToPath(new URL('./mumbo-resume/runtime.cordis.yml', import.meta.url))],
+    restartBeforeTurns: [2],
   },
   'goal-rounds': {
     environment: { DSH_PERMISSION_MODE: 'workspace-write' },
@@ -425,6 +450,14 @@ function assembledRuntimeContexts(log: PersistedLog): string[] {
       || event.data?.source?.kind !== 'runtime-context') return []
     return event.data.content?.flatMap(block => block.type === 'text' && typeof block.text === 'string' ? [block.text] : []) ?? []
   })
+}
+
+/** The `mumbo:state` section texts of a logged or requested runtime-context message. */
+function mumboStateSections(message: { source?: unknown }): string[] {
+  const source = message.source as { kind?: unknown; sections?: Array<{ name?: unknown; text?: unknown }> } | undefined
+  if (source?.kind !== 'runtime-context') return []
+  return source.sections?.flatMap(section => section.name === 'mumbo:state' && typeof section.text === 'string'
+    ? [section.text] : []) ?? []
 }
 
 function contextOf(logs: readonly { content: string; header: Record<string, unknown> }[], cwd: string): NormalizeContext {
@@ -758,6 +791,7 @@ async function runScenario(scenario: CorpusScenario): Promise<{
   const workspaceParent = await realpath(tmpdir())
   let workspacePrefix = `sdk-snapshot-${scenario.name}-`
   const fixedWidthCwd = scenario.name === 'minimal-image-compaction' || scenario.name === 'manual-compact'
+    || scenario.name === 'mumbo-state'
   if (fixedWidthCwd) {
     // mkdtemp appends six characters; JSON quoting is part of the runtime-context text.
     const paddingLength = 192 - JSON.stringify(join(workspaceParent, `${workspacePrefix}XXXXXX`)).length
@@ -780,7 +814,6 @@ async function runScenario(scenario: CorpusScenario): Promise<{
     ...legacySdkCompositions.has(scenario.manifest.composition) ? [legacySdkContextPatch] : [],
     ...authoredPatches(scenario, !recording),
     ...assertions.patches ?? [],
-    ...scenario.name === 'session-resume' && !recording ? [join(scenario.dir, 'replay.cordis.yml')] : [],
   ]
     .map((patch, index) => materializeProfilePatch(patch, cwd, scenario.manifest.profile, patchRoot, index))
   let childSessionsRoot: string | undefined
@@ -807,12 +840,16 @@ async function runScenario(scenario: CorpusScenario): Promise<{
   })
   const [parentFixture, ...childFixtures] = replayFixtures
   const actions = sdkActions(primaryFixture, assertions.replayStandaloneCommands === true)
-  const resumeReplayFile = scenario.name === 'session-resume' && !recording
+  const restarts = assertions.restartBeforeTurns ?? []
+  const resumeReplayFile = restarts.length > 0 && !recording
     ? join(patchRoot, 'resume-replay.json') : undefined
+  // A runtime that starts at `turn` replays that turn and every later one before the next restart.
   const prepareTurnReplay = async (turn: number): Promise<void> => {
     if (resumeReplayFile === undefined || parentFixture === undefined) return
+    const end = Math.min(...restarts.filter(restart => restart > turn))
     const events = parseSessionLog(await readFile(parentFixture, 'utf8'))
-      .filter(event => 'turn' in event.data && event.data.turn === turn)
+      .filter(event => 'turn' in event.data && typeof event.data.turn === 'number'
+        && event.data.turn >= turn && event.data.turn < end)
     await writeFile(resumeReplayFile, JSON.stringify(deriveReplayScript(events)))
   }
   const firstTurn = actions.find(action => action.kind === 'turn')
@@ -942,11 +979,11 @@ async function runScenario(scenario: CorpusScenario): Promise<{
           )
           continue
         }
-        if (scenario.name === 'session-resume' && results.length > 0) {
+        if (restarts.includes(action.turn)) {
           subscription.close()
           await harness.close()
           await prepareTurnReplay(action.turn)
-          harness = createHarness('deepseek-v4-pro')
+          harness = createHarness(assertions.restartModel)
           await harness.start()
           subscription = harness.client.subscribeSessionTree(sessionId)
           await expect(harness.resumeSession('missing-session')).rejects.toThrow()
@@ -1456,6 +1493,49 @@ describe('TypeScript SDK snapshots over the jsonrpc runtime', () => {
         expect(texts).not.toContain('/compact')
         expect(texts).not.toContain(done?.data.text)
         expect(texts).toContain('SDK_COMPACT_READY')
+      }
+      if (scenario.name === 'mumbo-state') {
+        const parent = ordered[0]
+        if (parent === undefined) throw new Error('mumbo state has no persisted Session')
+        const rows = records(parent.content)
+        const blocks = rows.flatMap((row, index) => row.type === 'user/message'
+          ? mumboStateSections(row.data as JsonObject).map(text => ({ index, text })) : [])
+        expect(blocks, 'the state block is logged once, at the compaction boundary').toHaveLength(1)
+        const block = blocks[0]!
+        const turn3 = rows.findIndex(row => row.type === 'turn/start' && (row.data as JsonObject).turn === 3)
+        expect(rows.findIndex(row => row.type === 'compaction/end')).toBeLessThan(turn3)
+        expect(block.index).toBeGreaterThan(turn3)
+        expect(block.index).toBeLessThan(rows.findIndex((row, index) => index > turn3 && row.type === 'request/header'))
+        expect(modelRequests.map(request => request.purpose))
+          .toEqual([undefined, undefined, undefined, undefined, 'compaction', undefined, undefined, undefined, undefined])
+        expect(modelRequests.map(request => (request.messages as JsonObject[]).flatMap(mumboStateSections)),
+          'each request carries the last logged block').toEqual([[], [], [], [], [], ...Array.from({ length: 4 }, () => [block.text])])
+        const events = parseSessionLog(parent.content)
+        const proposal = events.find(event => event.type === 'tool/call' && event.data.name === 'exit_plan_mode')
+        const read = events.find(event => event.type === 'tool/call' && event.data.name === 'plan_read')
+        if (proposal?.type !== 'tool/call' || read?.type !== 'tool/call') throw new Error('mumbo state has no plan proposal or plan_read call')
+        const plan = (JSON.parse(proposal.data.arguments) as { plan: string }).plan
+        expect(events.find(event => event.type === 'tool/result' && event.data.message.toolCallId === read.data.callId))
+          .toMatchObject({ data: { message: { isError: false, content: [{ type: 'text', text: `Approved in turn 1.\n\n${plan}` }] } } })
+      }
+      if (scenario.name === 'mumbo-resume') {
+        const parent = ordered[0]
+        if (parent === undefined) throw new Error('mumbo resume has no persisted Session')
+        const rows = records(parent.content)
+        const at = (type: string, turn: number, step: number): number => rows.findIndex(row => row.type === type
+          && (row.data as JsonObject).turn === turn && (row.data as JsonObject).step === step)
+        const notices = rows.flatMap((row, index) => row.type === 'user/message'
+          && ((row.data as JsonObject).source as JsonObject).kind === 'mumbo-resume' ? [index] : [])
+        expect(notices, 'one resume notice').toHaveLength(1)
+        const notice = notices[0]!
+        expect(notice).toBeGreaterThan(at('step/start', 2, 1))
+        expect(notice).toBeLessThan(at('step/end', 2, 1))
+        const job = rows.find(row => row.type === 'job/registered')?.data as JsonObject | undefined
+        expect(JSON.stringify(rows[notice])).toContain(`Stopped by the restart, output not kept: background job ${String(job?.jobId)} (bash: `)
+        const seed = rows.findIndex(row => row.type === 'session/end-seed')
+        const blocks = rows.flatMap((row, index) => row.type === 'user/message' && mumboStateSections(row.data as JsonObject).length > 0 ? [index] : [])
+        expect(blocks, 'the state block is logged once, at the restart').toHaveLength(1)
+        expect(blocks[0]).toBeGreaterThan(seed)
       }
       if (scenario.name === 'ptc-cancel') {
         const events = results.flatMap(result => result.events)
