@@ -9,7 +9,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-goal'
 import { boundContextSummary, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContextFormed } from '@deepseek-ai/dsh-llm'
-import type { Session, SessionEvent, TurnEndReason, UserMessage } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent, SessionSeq, TurnEndReason, UserMessage } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type { SessionQueryEngine } from '@deepseek-ai/dsh-session-query'
 import type { SubagentCatalogEntry } from '@deepseek-ai/dsh-subagent'
@@ -182,7 +182,7 @@ async function reconcile(ctx: Context, agent: Agent, state: MumboState, resume: 
  * @param stateOf - the `mumboState` of a Session.
  */
 export function listenForResume(ctx: Context, stateOf: (session: Session) => MumboState): void {
-  const quiet = new WeakMap<Session, number>()
+  const quiet = new WeakMap<Session, SessionSeq>()
   ctx.on('agent/pre-step', async (step, next) => {
     const decision = await next()
     if (decision.kind === 'reject' || step.signal.aborted) return decision

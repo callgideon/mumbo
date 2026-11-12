@@ -8,7 +8,8 @@ import type {} from '@deepseek-ai/dsh-compaction'
 import type {} from '@deepseek-ai/dsh-goal'
 import type {} from '@deepseek-ai/dsh-jobs'
 import type {} from '@deepseek-ai/dsh-plan-mode'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { type SessionEvent, SessionSeq } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-tool-todo'
 import type {} from '@deepseek-ai/dsh-tool-workflow/types'
 import { z } from 'zod'
@@ -16,21 +17,22 @@ import { z } from 'zod'
 /** Source kind of the resume notice; its `user/message` clears {@link MumboState.resume}. */
 export const RESUME_SOURCE = 'mumbo-resume'
 
+const seqSchema = z.number().int().nonnegative().transform(SessionSeq)
 const todoSchema = z.object({ content: z.string(), status: z.enum(['pending', 'in_progress', 'completed']) })
-const planSchema = z.object({ callId: z.string(), text: z.string(), turn: z.number() })
+const planSchema = z.object({ callId: z.string().min(1).transform(ToolCallId), text: z.string(), turn: z.number() })
 const jobSchema = z.object({
   kind: z.string(),
   label: z.string(),
-  seq: z.number(),
+  seq: seqSchema,
   settled: z.object({
-    status: z.enum(['completed', 'killed', 'failed']), cause: z.enum(['producer', 'kill', 'teardown']), detail: z.string().optional(), seq: z.number(),
+    status: z.enum(['completed', 'killed', 'failed']), cause: z.enum(['producer', 'kill', 'teardown']), detail: z.string().optional(), seq: seqSchema,
   }).optional(),
 })
 const runSchema = z.object({
   name: z.string(),
-  seq: z.number(),
+  seq: seqSchema,
   running: z.number(),
-  end: z.object({ stopReason: z.enum(['completed', 'cancelled', 'error']), seq: z.number() }).optional(),
+  end: z.object({ stopReason: z.enum(['completed', 'cancelled', 'error']), seq: seqSchema }).optional(),
 })
 
 /** Validates a persisted `mumboState` checkpoint. */
@@ -59,7 +61,7 @@ export const stateSchema = z.object({
    * The restart's end-seed, the time the Session went down, and the time it was loaded before that restart (an earlier
    * restart whose notice is still pending keeps its own), until the resume notice is logged.
    */
-  resume: z.object({ seedSeq: z.number(), downAt: z.number(), upSince: z.number() }).nullable(),
+  resume: z.object({ seedSeq: seqSchema, downAt: z.number(), upSince: z.number() }).nullable(),
 })
 
 /** The `mumboState` projection state. */

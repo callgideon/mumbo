@@ -1,6 +1,8 @@
 /** The `mumboState` fold over hand-built logs. */
 
-import { describe, expect, it } from 'vitest'
+import type { ToolCallId } from '@deepseek-ai/dsh-llm'
+import type { SessionSeq } from '@deepseek-ai/dsh-session'
+import { describe, expect, expectTypeOf, it } from 'vitest'
 import { foldState, initState, type MumboState, stateSchema } from '../src/projection.ts'
 import { Log } from './events.ts'
 
@@ -153,6 +155,13 @@ describe('resume', () => {
     const state = fold(new Log().job('bash-1').user('late', { kind: 'mumbo-resume', form: 'notice', summary: 'x' }))
     expect(state).toMatchObject({ resume: null, lastActivity: 2000, jobs: { 'bash-1': { seq: 0 } } })
   })
+})
+
+it('restores event seqs and call ids from a checkpoint with their brands', () => {
+  type Job = MumboState['jobs'][string]
+  expectTypeOf<[Job['seq'], NonNullable<Job['settled']>['seq'], MumboState['runs'][string]['seq']]>().toEqualTypeOf<[SessionSeq, SessionSeq, SessionSeq]>()
+  expectTypeOf<[NonNullable<MumboState['resume']>['seedSeq'], NonNullable<MumboState['plan']>['callId']]>().toEqualTypeOf<[SessionSeq, ToolCallId]>()
+  expect(() => stateSchema.parse({ ...initState(), resume: { seedSeq: -1, downAt: 0, upSince: 0 } })).toThrow()
 })
 
 it('validates its own states as checkpoints, and a restored checkpoint plus its suffix folds to the full replay', () => {
