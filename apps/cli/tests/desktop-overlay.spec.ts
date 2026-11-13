@@ -36,7 +36,7 @@ it('leaves no enabled row on a deepseek.com host other than api.deepseek.com', (
     expect(warnings).toEqual([])
     expect(rows.find(row => row.id === 'deepseek-account')?.disabled).toBeFalsy()
     const hosts = rows.filter(row => row.disabled !== true).flatMap((row) => {
-      const config = row.name === '@deepseek-ai/dsh-deepseek-account' ? resolveAccount(row.config) : row.config
+      const config: unknown = row.name === '@deepseek-ai/dsh-deepseek-account' ? resolveAccount(row.config) : row.config
       return strings(config).flatMap(text => [...text.matchAll(DEEPSEEK_HOST)].map(match => `${row.id}: ${match[0]}`))
     })
     expect(hosts.filter(host => !host.endsWith(': api.deepseek.com'))).toEqual([])
