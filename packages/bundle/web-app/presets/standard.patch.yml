@@ -127,8 +127,10 @@
               searchTimeoutMs: 60000
           - id: present
             name: '@deepseek-ai/dsh-tool-present'
+          # Off where dsh runs as root, i.e. on boxes: these tools parse model-chosen documents in-process (§B24).
           - id: tool-office
             name: '@deepseek-ai/dsh-tool-office'
+            disabled: !!js "process.getuid?.() === 0"
           - id: tool-plugin-manager
             name: '@deepseek-ai/dsh-plugin-manager/tools'
             disabled: !!js "!ctx.get('profileContext')"
