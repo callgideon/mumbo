@@ -74,6 +74,7 @@ const NONE: Classification = { runs: 'none', tools: [] }
 
 /** Every package a box composition mounts. Browser-side `@deepseek-ai/dsh-client-*` packages register no host tool. */
 const CLASSIFICATION: Readonly<Record<string, Classification>> = {
+  '@deepseek-ai/cordis-plugin-logger-console': { ...NONE, note: 'writes the Host\'s warn and error log lines to stdout' },
   '@deepseek-ai/cordis-plugin-timer': NONE,
   '@deepseek-ai/dsh-agent': NONE,
   '@deepseek-ai/dsh-agent-default-model': NONE,
