@@ -1,16 +1,18 @@
 /**
  * The member plugin in a real Loader composition: Web carrier, Connection, Gateway, remote access, and the browser
  * upload and Session log routes. A request carrying the edge-signed header reaches Remote methods and those routes
- * as the `edge-member` principal on the Sessions the box stores, lists, or runs; a tampered, expired, or missing header
- * is not a member, and a member reaches no settings method.
+ * as the `edge-member` principal on the Sessions the box stores, lists, or runs, including the terminal controller's
+ * methods; a tampered, expired, or missing header is not a member, and a member reaches no settings method.
  */
 
 import { randomBytes } from 'node:crypto'
 import { request as httpRequest } from 'node:http'
+import { PassThrough } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import { Context, FiberState } from '@deepseek-ai/cordis'
 import TypertGatewayService from '@deepseek-ai/dsh-api-gateway'
 import RemoteAccessService, { type RemoteAccessRole } from '@deepseek-ai/dsh-api-remote-access'
+import TerminalController from '@deepseek-ai/dsh-api-terminal-controller'
 import * as Connection from '@deepseek-ai/dsh-client-connection'
 import FileUploads from '@deepseek-ai/dsh-client-file-upload'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
@@ -232,6 +234,49 @@ describe('real Loader composition', () => {
     expect(probe.callers).toEqual([])
   })
 
+  it('lets a member open a terminal on a Session they reach and refuses one on a Session they do not', { timeout: 60_000 }, async () => {
+    const { origin } = await boot()
+    const ctx = context!
+    // The Session's execution providers: a shell that runs until the controller ends it.
+    const spawned: string[] = []
+    ctx.provide('subprocess', {
+      terminalEnvironment: async () => ({ platform: 'posix', defaultShell: '/bin/bash' }),
+      resolveExecutable: async (path: string) => path,
+      spawnTerminal: async (spec: { readonly env: { readonly DSH_SESSION_ID: string } }) => {
+        spawned.push(spec.env.DSH_SESSION_ID)
+        const output = new PassThrough()
+        const done = Promise.withResolvers<{ exitCode: number; signal: null }>()
+        return {
+          pid: 1, output, done: done.promise, write: async () => {}, resize: async () => {},
+          inspectActivity: async () => ({ state: 'unknown', revision: 0 }), inspectForeground: async () => undefined,
+          signalForeground: async () => 1, terminate: async () => { output.end(); done.resolve({ exitCode: 0, signal: null }) },
+        }
+      },
+    } as never)
+    ctx.provide('sandboxPolicy', {} as never)
+    ctx.provide('workingDirectory', { get: () => '/projects/project', ensure: async () => '/projects/project' } as never)
+    // The Agent lookup the Agent registry registers: every Session id resolves to an Agent running on this context.
+    ctx.typert.lookups.register('agent', {
+      parameter: 'agent', wire: 'agentId', resource: 'session',
+      hostTypeSymbol: '@deepseek-ai/dsh-agent#Agent', wireTypeSymbol: '@deepseek-ai/dsh-session/types#SessionId',
+      resolve: (id: string) => ({ id, ctx, session: { id, header: {} } }),
+    } as never)
+    await ctx.plugin(TerminalController)
+    const header = signMemberHeader(KEY, 'ann@example.com', now() + 300)
+    const request = (agentId: string) => ({ agentId, request: { id: `t-${agentId}`, cols: 80, rows: 24 } })
+    const environment = await call(origin, 'terminal/environment', { agentId: 's1' }, header)
+    expect(environment.body).toMatchObject({ result: { ok: true, value: { cwd: '/projects/project' } } })
+    const opened = await call(origin, 'terminal/create', request('s1'), header)
+    expect(opened.body).toMatchObject({ result: { ok: true, value: { id: 't-s1', state: 'running', shell: { path: '/bin/bash' } } } })
+    for (const [method, args] of [['terminal/environment', { agentId: 's2' }], ['terminal/create', request('s2')]] as const) {
+      const refused = await call(origin, method, args, header)
+      expect(refused.body, method).toMatchObject({
+        result: { ok: false, error: { code: 'remote-access/denied', details: { action: method, reason: 'no-allow' } } },
+      })
+    }
+    expect(spawned).toEqual(['s1'])
+  })
+
   it('reuses a listed blank Session, prompts a live child Session, and refuses queue edits', { timeout: 60_000 }, async () => {
     const { origin, probe } = await boot()
     const header = signMemberHeader(KEY, 'ann@example.com', now() + 300)
@@ -263,6 +308,7 @@ describe('real Loader composition', () => {
     const s1 = 'grants' in snapshot ? snapshot.grants.find(grant => grant.resource.kind === 'session' && grant.resource.id === 's1') : undefined
     expect(s1?.actions).toEqual(expect.arrayContaining([
       'session/prompt', 'fileUploads/upload', 'fileUploads/uploadBinary', 'sessionLog/export', 'sessionLog/markdown',
+      'terminal/environment', 'terminal/create', 'terminal/attach', 'terminal/retain',
     ]))
     expect(s1?.actions).not.toContain('session/updateQueue')
     const global = 'grants' in snapshot ? snapshot.grants.find(grant => grant.resource.kind === 'global') : undefined

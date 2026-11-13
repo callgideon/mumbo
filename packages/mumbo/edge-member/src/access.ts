@@ -40,9 +40,10 @@ export const MEMBER_GLOBAL_ROLE: RemoteAccessRole<'global'> = {
 /**
  * Reading, following, prompting, and stopping one Session, reading its jobs and workspace files, uploading files
  * for it through the Remote or the browser's binary route, downloading its log archive and copying it as Markdown,
- * answering its questions, and reusing it as a blank Session; each member binding's condition admits that reuse only
- * in a create that names a Workspace. Queue edits are excluded: an edit keeps the edited message's source, so it would
- * record one person's text as another's.
+ * answering its questions, opening and using its terminals, and reusing it as a blank Session; each member binding's
+ * condition admits that reuse only in a create that names a Workspace. A terminal runs a shell through the Session's
+ * execution providers, never as the caller, so it has the power of that Session's shell tool. Queue edits are
+ * excluded: an edit keeps the edited message's source, so it would record one person's text as another's.
  */
 export const MEMBER_SESSION_ROLE: RemoteAccessRole<'session'> = {
   name: 'mumbo:member-session',
@@ -72,6 +73,14 @@ export const MEMBER_SESSION_ROLE: RemoteAccessRole<'session'> = {
     'sessionLog/export',
     'sessionLog/markdown',
     'skills/list',
+    'terminal/attach',
+    'terminal/close',
+    'terminal/create',
+    'terminal/environment',
+    'terminal/list',
+    'terminal/rename',
+    'terminal/retain',
+    'terminal/shells',
     'toolResults/watch',
     'userQuestions/answer',
     'userQuestions/attachWait',
