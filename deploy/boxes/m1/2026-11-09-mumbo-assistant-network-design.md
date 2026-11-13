@@ -1419,7 +1419,7 @@ The cache's worst case is a subscription that dies silently: copies are served f
     - Revisit when the converter can run as `agent` through the subprocess provider and write into the model roots. **[my call]**
   - **The account package's hosts:** upstream folded `account-controller` into `deepseek-account`, which now also reads notifications from `harness.deepseek.com`. Boxes keep the row off. The desktop overlay points `harnessOrigin` at `api.mumbo.si`, whose gateway serves an empty notification list. A desktop-overlay test fails if any enabled desktop row names a deepseek.com host other than `api.deepseek.com`. Deploy order: the gateway goes out before the next desktop build. Approved.
   - **Search:** upstream's new person-facing Workspace search resolves the root `unconfined`, as the person's listing does since §B24. Members hold no search action. Approved.
-  - **Blocker for the founder:** the founder's `deploy/mumbo.overlay.yml` still turns off `account-controller`, a row that no longer exists. The fix is deleting those two lines, and it needs the founder's go-ahead.
+  - **The founder's overlay:** `deploy/mumbo.overlay.yml` turned off `account-controller`, a row that no longer exists. The founder approved deleting those two lines, and f937651317 removes only them. `deepseek-account` stays off.
 
 **Acceptance (first milestone: the founder's box in Mumbai):**
 - **The move.** The founder's box runs in the `ap-south-1` cell, moved from `us-east-1` with Sessions, schedules, files and Chrome sign-ins intact.

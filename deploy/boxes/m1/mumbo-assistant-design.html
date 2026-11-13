@@ -2451,7 +2451,7 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 </li>
 <li><strong>The account package's hosts:</strong> upstream folded <code>account-controller</code> into <code>deepseek-account</code>, which now also reads notifications from <code>harness.deepseek.com</code>. Boxes keep the row off. The desktop overlay points <code>harnessOrigin</code> at <code>api.mumbo.si</code>, whose gateway serves an empty notification list. A desktop-overlay test fails if any enabled desktop row names a deepseek.com host other than <code>api.deepseek.com</code>. Deploy order: the gateway goes out before the next desktop build. Approved.</li>
 <li><strong>Search:</strong> upstream's new person-facing Workspace search resolves the root <code>unconfined</code>, as the person's listing does since §B24. Members hold no search action. Approved.</li>
-<li><strong>Blocker for the founder:</strong> the founder's <code>deploy/mumbo.overlay.yml</code> still turns off <code>account-controller</code>, a row that no longer exists. The fix is deleting those two lines, and it needs the founder's go-ahead.</li>
+<li><strong>The founder's overlay:</strong> <code>deploy/mumbo.overlay.yml</code> turned off <code>account-controller</code>, a row that no longer exists. The founder approved deleting those two lines, and f937651317 removes only them. <code>deepseek-account</code> stays off.</li>
 </ul>
 </li>
 </ul>
