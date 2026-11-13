@@ -63,6 +63,7 @@ interface AckRecord {
 async function mockPlatform() {
   const unnotified: Granted[] = []
   const gets: GetRecord[] = []
+  const contentReads: { id: string | null; locale: string | undefined }[] = []
   const contents = new Map<string, Granted>()
   /** Reads already answered; a request the client is still awaiting is not evidence of a delivered response. */
   const served: GetRecord[] = []
@@ -153,6 +154,7 @@ async function mockPlatform() {
     }
     if (url.pathname === '/api/v0/users/notifications/content') {
       const id = url.searchParams.get('id')
+      contentReads.push({ id, locale })
       const value = id === null ? undefined : contents.get(id)
       if (value === undefined) { res.writeHead(404).end(); return }
       reply({ code: 0, data: { biz_code: 0, biz_data: wire(value) } })
@@ -194,7 +196,7 @@ async function mockPlatform() {
   if (address === null || typeof address === 'string') throw new Error('bonus notice: missing mock listener')
   return {
     origin: `http://127.0.0.1:${String(address.port)}`,
-    grant, gets, served, acks, clicks, dismissals, summaries,
+    grant, gets, served, acks, clicks, dismissals, summaries, contentReads,
     setUnsupportedNotification: (value: boolean): void => { includeUnsupportedNotification = value },
     holdProfiles: (): void => { holdProfile = true },
     pendingProfileResponses: (): number => pendingProfiles.length,
@@ -743,6 +745,25 @@ describe.skipIf(MODE === 'record')('web e2e: bonus notice', () => {
     expect(await refreshCards.first().evaluate((element, previous) => element === previous, firstNode)).toBe(true)
     expect(platform.acks.slice(refreshAckStart).map(ack => ack.orderId)).toEqual(['b1111111-1111-4111-8111-111111111111'])
     observations.push('refresh.retained cards=3 acks=refresh-first same-node=true')
+    // A language change re-reads each card's content in place; every language but Chinese reads en_US copy.
+    const localeReads = platform.gets.length
+    const localeContents = platform.contentReads.length
+    await refreshPage.getByRole('dialog', { name: 'Settings', exact: true }).getByRole('button', { name: 'General', exact: true }).click()
+    await refreshPage.getByRole('button', { name: 'English', exact: true }).click()
+    await refreshPage.getByRole('menuitem', { name: 'Français', exact: true }).click()
+    const frenchSettings = refreshPage.getByRole('dialog', { name: 'Paramètres', exact: true })
+    await frenchSettings.waitFor()
+    await expect.poll(() => platform.contentReads.length).toBe(localeContents + 3)
+    expect(await cardText(refreshCards.first())).toContain('You received a CNY 31.00')
+    expect(await refreshCards.first().evaluate((element, previous) => element === previous, firstNode)).toBe(true)
+    expect(platform.gets.length).toBe(localeReads)
+    expect(platform.acks.length).toBe(refreshAckStart + 1)
+    expect(platform.contentReads.slice(localeContents).map(read => read.locale)).toEqual(['en_US', 'en_US', 'en_US'])
+    observations.push('refresh.localized locale=en_US content-reads=3 list-reads=0 acks=1 same-node=true')
+    await frenchSettings.getByRole('button', { name: 'Français', exact: true }).click()
+    await refreshPage.getByRole('menuitem', { name: 'English', exact: true }).click()
+    await refreshPage.getByRole('dialog', { name: 'Settings', exact: true }).waitFor()
+    await expect.poll(() => platform.contentReads.length).toBe(localeContents + 6)
     expect(await refreshCards.first().getByRole('button', { name: 'View balance', exact: true }).count()).toBe(1)
     await refreshPage.keyboard.press('Escape')
     await refreshPage.getByRole('dialog', { name: 'Settings', exact: true }).waitFor({ state: 'detached' })

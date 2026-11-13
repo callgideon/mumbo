@@ -41,6 +41,7 @@ stack.expanded cards=3 duplicate-acks=0 dismissed=0
 stack.promoted cards=2 acks=stack-first,stack-second width=260 same-node=true
 stack.dismissed cards=0 acks=stack-first,stack-second,stack-third
 refresh.retained cards=3 acks=refresh-first same-node=true
+refresh.localized locale=en_US content-reads=3 list-reads=0 acks=1 same-node=true
 refresh.business-action event=cta_clicked cards=3 account-open=true
 refresh.drawer width=390 notice-above-sidebar=true
 refresh.action event=dismissed got-it=true
