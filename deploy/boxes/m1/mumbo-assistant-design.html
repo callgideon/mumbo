@@ -2414,6 +2414,15 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li><code>session/create</code> stays in members' global role for now. The sidebar's New Session and the Desktop titlebar button show only while that grant holds, though every client create names a Workspace. Until <strong>B49b</strong> moves both buttons to the target Workspace's grant and drops the global one, a member's Workspace-less create over the API can name any directory, or gets <code>/src</code>.</li>
 </ul>
 </li>
+<li><strong>[2026-11-13, live]</strong> #56 and #58 run on bitlane (image prod-053b71af12). It has one Workspace at <code>/root/projects</code> holding the founder's new Session, and its first load logged no gateway failures.</li>
+</ul>
+</li>
+<li><strong>B50, the project box's Terminal tab for members</strong> [2026-11-13, found live on bitlane]:
+<ul>
+<li>A member got &quot;terminal/environment: access denied (no-allow)&quot;. The terminal endpoints run in a Session's execution environment, as <code>agent</code> (§B24), so a member's terminal on a Session they may prompt has the same power as that Session's shell. The terminal actions join the member Session role.</li>
+<li>The grant waits on one check: on a contained project box, a browser terminal must run as <code>agent</code> with no read of <code>/root/.dsh</code>. If it doesn't, members don't get the tab at all, rather than an error.</li>
+<li>The denial wasn't in dsh.log. The same change finds out why: a stream path that B49's logging misses, or the log level.</li>
+<li><strong>Open, the founder's call:</strong> a member's Session on a project box runs <code>danger-full-access</code> with approval <code>never</code>. The ruling at &quot;The project overlay needs no approval override&quot; considered only workers.</li>
 </ul>
 </li>
 </ul>

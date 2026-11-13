@@ -1394,6 +1394,12 @@ The cache's worst case is a subscription that dies silently: copies are served f
     - A re-create follows only the deletion of the project Workspace's own record. Reacting to any deletion looped on the registry's rollback delete.
     - A Gateway failure line carries the message only when the Gateway wrote it. A handler's own error is logged by code, because handlers can build messages from arguments.
     - `session/create` stays in members' global role for now. The sidebar's New Session and the Desktop titlebar button show only while that grant holds, though every client create names a Workspace. Until **B49b** moves both buttons to the target Workspace's grant and drops the global one, a member's Workspace-less create over the API can name any directory, or gets `/src`.
+  - **[2026-11-13, live]** #56 and #58 run on bitlane (image prod-053b71af12). It has one Workspace at `/root/projects` holding the founder's new Session, and its first load logged no gateway failures.
+- **B50, the project box's Terminal tab for members** [2026-11-13, found live on bitlane]:
+  - A member got "terminal/environment: access denied (no-allow)". The terminal endpoints run in a Session's execution environment, as `agent` (§B24), so a member's terminal on a Session they may prompt has the same power as that Session's shell. The terminal actions join the member Session role.
+  - The grant waits on one check: on a contained project box, a browser terminal must run as `agent` with no read of `/root/.dsh`. If it doesn't, members don't get the tab at all, rather than an error.
+  - The denial wasn't in dsh.log. The same change finds out why: a stream path that B49's logging misses, or the log level.
+  - **Open, the founder's call:** a member's Session on a project box runs `danger-full-access` with approval `never`. The ruling at "The project overlay needs no approval override" considered only workers.
 
 **Acceptance (first milestone: the founder's box in Mumbai):**
 - **The move.** The founder's box runs in the `ap-south-1` cell, moved from `us-east-1` with Sessions, schedules, files and Chrome sign-ins intact.
