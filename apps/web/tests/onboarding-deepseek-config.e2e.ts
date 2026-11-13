@@ -33,6 +33,7 @@ describe.skipIf(MODE === 'record')('web e2e: first-run DeepSeek credential setup
   let page: Page
   let tripwire: ReturnType<typeof watchConsole>
   const browserConsole: string[] = []
+  const secret = `dsh_onboarding_${randomBytes(12).toString('hex')}_test`
 
   beforeAll(async () => {
     scaffold = await launchWebScaffold({ deepSeekMissingCredential: true, welcomeNoticePending: true })
@@ -85,7 +86,6 @@ describe.skipIf(MODE === 'record')('web e2e: first-run DeepSeek credential setup
     const initial = await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd)
     await compareOrRefreshGolden(MISSING_EXPECTED, initial, MODE)
 
-    const secret = `dsh_onboarding_${randomBytes(12).toString('hex')}`
     await keyInput.fill(secret)
     await credentialStep.getByRole('button', { name: 'Save and continue' }).click()
     await credentialStep.waitFor({ state: 'detached', timeout: 15_000 })
@@ -114,7 +114,7 @@ describe.skipIf(MODE === 'record')('web e2e: first-run DeepSeek credential setup
     await expect.poll(
       () => configuredInput.getAttribute('placeholder'),
       { timeout: 10_000 },
-    ).toBe('Leave blank to use saved credentials')
+    ).toBe(`dsh_onboa${'•'.repeat(31)}test`)
 
     const secondReloadWarnings = tripwire.warnings.length
     await page.reload({ waitUntil: 'load' })
@@ -256,7 +256,7 @@ describe.skipIf(MODE === 'record')('web e2e: first-run DeepSeek credential setup
     await expect.poll(
       () => settings.getByLabel('API key', { exact: true }).getAttribute('placeholder'),
       { timeout: 10_000 },
-    ).toBe('Leave blank to use saved credentials')
+    ).toBe(`dsh_onboa${'•'.repeat(31)}test`)
     const modelEditor = await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd)
     await compareOrRefreshGolden(MODELS_EXPECTED, modelEditor, MODE)
     await settings.getByRole('button', { name: 'Apply', exact: true }).click()

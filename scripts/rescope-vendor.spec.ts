@@ -89,8 +89,10 @@ describe('product identifiers', () => {
     'apps/web/tests/agent-preset-selection.e2e.ts',
     'apps/web/tests/developer-tools-settings.e2e.ts',
     'docs/subsystems/extensions.md',
+    'docs/tool-catalog.md',
     'docs/upgrade-guide/v0.2.0-rc.2/schedule-bundle-retired/guide.md',
     'docs/upgrade-guide/v0.2.1-alpha.1/subagent-preset-composition/guide.md',
+    'docs/upgrade-guide/v0.2.2-alpha.2/fs-observation-policy-default-off/guide.md',
     'docs/user/guide/schedule.md',
     'packages/bundle/web-app/cordis.patch.yml',
     'packages/client/ui-agent-preset/src/client/CreatePluginMenuItem.tsx',
@@ -105,6 +107,7 @@ describe('product identifiers', () => {
     'packages/client/ui-entry-customization/tests/menu.client.spec.tsx',
     'packages/client/ui-workspace/tests/workspaces-service.client.spec.ts',
     'packages/extensions/cordis-host-runner/tests/inspect-registry.spec.ts',
+    'scripts/gen-tool-catalog.ts',
     'snapshots/session/cordis-inspect-liveness/client-fixture.mjs',
     'snapshots/session/cordis-inspect-timeout/client-fixture.mjs',
   ])('preserves the product values in %s', (file) => {
@@ -162,6 +165,7 @@ describe('product identifiers', () => {
     ['packages/client/ui-entry-customization/tests/menu.client.spec.tsx', 1],
     ['packages/client/ui-workspace/tests/workspaces-service.client.spec.ts', 1],
     ['packages/extensions/cordis-host-runner/tests/inspect-registry.spec.ts', 2],
+    ['scripts/gen-tool-catalog.ts', 1],
     ['snapshots/session/cordis-inspect-liveness/client-fixture.mjs', 1],
     ['snapshots/session/cordis-inspect-timeout/client-fixture.mjs', 2],
   ] as const)('reverses real package references in %s and restores them', (file, lines) => {

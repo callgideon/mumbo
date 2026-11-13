@@ -14,8 +14,27 @@ import { createUserMessage, errorChain } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { ProjectionHandle } from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-system-prompt'
+import { WorkingDirectoryError } from './error.ts'
+
+export { WorkingDirectoryError, type WorkingDirectoryErrorCode } from './error.ts'
 
 declare module '@deepseek-ai/cordis' {
+  interface Events {
+    /**
+     * Coordinate directory validation and publication with a resource operation
+     * on the directory, such as a checkout being removed. A listener that must
+     * wait awaits that operation, then calls `next()`; every other listener
+     * calls `next()` at once. A rejection fails this access and leaves the
+     * recorded directory unchanged; it is not a fallback.
+     * @param request - owner, requested path (null validates the current directory), and the access's cancellation.
+     * @param next - perform validation and commit.
+     * @mode waterfall
+     */
+    'working-directory/access'(
+      request: { agent: Agent; path: string | null; signal: AbortSignal },
+      next: () => Promise<string>,
+    ): Promise<string>
+  }
   interface Context {
     workingDirectory: WorkingDirectoryService
   }
@@ -122,7 +141,7 @@ export class WorkingDirectoryService extends Service {
       return assembly
     }, { prepend: true })
     ctx.effect(() => async () => {
-      this.lifecycle.abort(new Error('working-directory service disposed'))
+      this.lifecycle.abort(new WorkingDirectoryError('working-directory service disposed', 'WORKING_DIRECTORY_UNAVAILABLE'))
       await Promise.allSettled(this.operations)
     })
   }
@@ -159,10 +178,12 @@ export class WorkingDirectoryService extends Service {
    * @param signal - cancellation for filesystem inspection and creation.
    * @returns the existing directory; recovery is committed before fulfillment.
    * A notice failure is warned without reverting the committed state.
-   * @throws when the original project cannot be recreated; the failure is logged.
+   * @throws {@link WorkingDirectoryError} `WORKING_DIRECTORY_UNAVAILABLE` when the original project is missing and
+   *   cannot be recreated, which is logged, or the service is disposed, or the rejection of a
+   *   `working-directory/access` listener.
    */
   ensure(agent: Agent, signal?: AbortSignal): Promise<string> {
-    return this.serialize(agent, signal, async (control) => {
+    return this.serialize(agent, signal, control => this.ctx.waterfall('working-directory/access', { agent, path: null, signal: control }, async () => {
       const current = this.get(agent.session)
       const original = agent.session.header.cwd ?? this.defaultDirectory
       const target = await this.available(current, this.chooser(agent.session), control)
@@ -189,7 +210,7 @@ export class WorkingDirectoryService extends Service {
       this.commit(agent, restored, recreation === undefined ? 'recovered' : 'recreated', control)
       recreation?.told.add(agent.session.id)
       return restored
-    })
+    }))
   }
 
   /**
@@ -202,15 +223,17 @@ export class WorkingDirectoryService extends Service {
    * {@link ensure} keeps it.
    * @returns the canonical absolute directory, committed before fulfillment.
    * A notice failure is warned; the next request still receives the committed directory.
-   * @throws when the requested path is not an existing directory, or a model-chosen one lies outside the model roots.
+   * @throws {@link WorkingDirectoryError} `WORKING_DIRECTORY_INVALID` for an empty path and
+   *   `WORKING_DIRECTORY_NOT_FOUND` when the path is not an existing directory, `FsError` `FS_OUTSIDE_ROOTS` when a
+   *   model-chosen one lies outside the model roots, or the rejection of a `working-directory/access` listener.
    */
   set(agent: Agent, path: string, signal?: AbortSignal, chooser: 'model' | 'host' = 'host'): Promise<string> {
-    return this.serialize(agent, signal, async (control) => {
-      if (path.length === 0) throw new Error('working-directory: cd must not be empty')
+    return this.serialize(agent, signal, control => this.ctx.waterfall('working-directory/access', { agent, path, signal: control }, async () => {
+      if (path.length === 0) throw new WorkingDirectoryError('working-directory: cd must not be empty', 'WORKING_DIRECTORY_INVALID')
       const directory = await this.directory(path, this.get(agent.session), control, chooser)
       this.commit(agent, directory, 'changed', control, chooser === 'host' ? 'host' : undefined)
       return directory
-    })
+    }))
   }
 
   /**
@@ -242,7 +265,11 @@ export class WorkingDirectoryService extends Service {
         if (info?.type === 'directory') this.recreations.set(original, { at: Date.now(), told: new Set() })
         signal.throwIfAborted()
       }
-      const failure = new Error(`working-directory: directory does not exist and could not be recreated: ${JSON.stringify(original)}: ${errorChain(error)}; restore it or select another existing directory`, { cause: error })
+      const failure = new WorkingDirectoryError(
+        `working-directory: directory does not exist and could not be recreated: ${JSON.stringify(original)}: ${errorChain(error)}; restore it or select another existing directory`,
+        'WORKING_DIRECTORY_UNAVAILABLE',
+        { cause: error },
+      )
       this.ctx.logger.error(failure.message)
       throw failure
     }
@@ -279,7 +306,7 @@ export class WorkingDirectoryService extends Service {
     const info = await this.ctx.fs.stat(target, signal)
     signal.throwIfAborted()
     if (info?.type !== 'directory') {
-      throw new Error(`working-directory: directory does not exist: ${JSON.stringify(path)}`)
+      throw new WorkingDirectoryError(`working-directory: directory does not exist: ${JSON.stringify(path)}`, 'WORKING_DIRECTORY_NOT_FOUND')
     }
     return this.ctx.fs.processPath(target)
   }

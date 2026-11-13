@@ -42,6 +42,7 @@ const homeAndGuide: DocsPage[] = [
     ['docs/user/guide/providers.md', 'guide/providers.md', 'Configure models', 'Guide', 2],
     ['docs/user/guide/network-proxy.md', 'guide/network-proxy.md', 'Network proxy', 'Guide', 3],
     ['docs/user/guide/public-deployments.md', 'guide/public-deployments.md', 'Public deployments', 'Guide', 4],
+    ['docs/user/guide/desktop-uninstall-cleanup.md', 'guide/desktop-uninstall-cleanup.md', 'Uninstall DSH Desktop', 'Guide', 5],
     ['docs/user/guide/python-sdk.md', 'guide/python-sdk.md', 'Python', 'SDK', 1],
     ['docs/user/guide/github-review.md', 'guide/github-review.md', 'GitHub review sessions', 'Automation', 1],
     ['docs/user/guide/schedule.md', 'guide/schedule.md', 'Session reminders', 'Automation', 2],

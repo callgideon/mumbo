@@ -1,0 +1,15 @@
+- complementary "Review threads, 5 in total":
+  - text: Threads 5
+  - button "Close the thread list"
+  - radiogroup "Filter threads":
+    - radio "Unresolved 4"
+    - radio "Resolved 1"
+    - radio "All 5" [checked]
+  - heading "docs/panel.md" [level=3]
+  - button "File thread Add a screenshot."
+  - heading "src/panel.ts" [level=3]
+  - button "R2 · 1 replies Why two?"
+  - button "L15 The old fifteen was a number."
+  - button "R15 Settled. Resolved"
+  - button "Originally R9 · on fffffff This line moved. Outdated"
+  - button "View on GitHub"

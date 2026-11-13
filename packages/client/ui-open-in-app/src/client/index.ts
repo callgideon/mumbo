@@ -68,6 +68,7 @@ export function apply(ctx: ClientContext): void {
     paths.resume()
     return () => { launchable = false }
   })
+  ctx.effect(() => () => { paths.dispose() }, 'open-in-app: association refreshes')
   ctx.effect(() => ctx.locale.register(NS, { en, ja, es, fr, de, ru, pt }), 'open-in-app: dictionaries')
   const t = ctx.locale.bind(NS)
   // Keep operation feedback visible after its initiating panel closes.

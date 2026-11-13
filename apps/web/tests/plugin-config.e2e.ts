@@ -180,14 +180,15 @@ describe('web e2e: plugin configuration pages', () => {
     expect(await panel.getByRole('link', { name: 'Search & Fetch guide', exact: true }).getAttribute('href'))
       .toBe('https://api-docs.deepseek.com/guides/search')
     // Each section shows the description its selected provider registered with the Host, in the active language.
-    expect(await searchSection.getByText('Queries the search endpoint directly for titles, URLs, and snippets without an extra model call. Uses the DeepSeek account of the current conversation, or a DeepSeek API key, and may incur API charges.', { exact: true }).count()).toBe(1)
-    expect(await fetchSection.getByText('Fetches URLs directly from this machine with no API key or charges, including intranet and loopback addresses. Decodes text, HTML, JSON, and XML only; no JavaScript, cookies, or PDFs. You can also try DeepSeek Fetch API.', { exact: true }).count()).toBe(1)
+    expect(await searchSection.getByText('Incurs charges, paid by the account or API key chosen under Billing.', { exact: true }).count()).toBe(1)
+    expect(await fetchSection.getByText('Free, and can reach intranet and local addresses. Does not support pages that need JavaScript or sign-in, or PDFs.', { exact: true }).count()).toBe(1)
     // The Fetch API suggestion is text, not an action.
     expect(await fetchSection.getByRole('button').count()).toBe(1)
     expect(await save.isDisabled()).toBe(true)
 
-    // The Search panel holds only the result count.
+    // The Search panel holds the result count and the billing menu, automatic by default.
     expect(await searchSection.getByRole('textbox').count()).toBe(1)
+    expect(await panel.locator('#plugin-config-web-search-billing').textContent()).toBe('Automatic')
     expect(await count.inputValue()).toBe('10')
     await count.fill('51')
     await panel.getByText('Enter an integer from 1 to 50, or leave blank to use the default.', { exact: true }).waitFor()
@@ -196,14 +197,22 @@ describe('web e2e: plugin configuration pages', () => {
     await count.fill('10')
     expect(await save.isDisabled()).toBe(true)
 
-    // The Fetch API takes no settings here, so its section shows no panel.
+    // The Fetch API shows only its billing menu, and the page saves the billing with the selection.
     await choose(fetchMenu, 'DeepSeek Fetch API')
-    expect(await fetchSection.getByText('Fetches public URLs on DeepSeek servers and returns Markdown. Uses the DeepSeek account of the current conversation, or a DeepSeek API key, may incur API charges, and cannot reach intranet or loopback addresses.', { exact: true }).count()).toBe(1)
+    expect(await fetchSection.getByText("Can't reach intranet or local addresses. Incurs charges, paid by the account or API key chosen under Billing.", { exact: true }).count()).toBe(1)
     expect(await fetchSection.getByRole('textbox').count()).toBe(0)
-    expect(await fetchSection.getByRole('button').count()).toBe(1)
+    expect(await fetchSection.getByRole('button').count()).toBe(2)
+    const fetchBilling = panel.locator('#plugin-config-web-fetch-billing')
+    await choose(fetchBilling, 'DeepSeek API key')
+    await fetchSection.getByText('Uses the API key from the Models page; set one first.', { exact: true }).waitFor()
     await save.click()
     await expect.poll(() => save.isDisabled()).toBe(true)
     await expect.poll(settingsDocument).toContain('fetchProvider: deepseek-fetch-api')
+    await expect.poll(settingsDocument).toContain('fetchBilling: api-key')
+    await choose(fetchBilling, 'Automatic')
+    await save.click()
+    await expect.poll(() => save.isDisabled()).toBe(true)
+    await expect.poll(settingsDocument).not.toContain('fetchBilling:')
 
     await page.reload({ waitUntil: 'load' })
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })

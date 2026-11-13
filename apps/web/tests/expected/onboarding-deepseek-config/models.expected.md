@@ -17,12 +17,19 @@
       - text: DeepSeek deepseek-official API key
       - button "Authentication details": "?"
       - textbox "API key":
-        - /placeholder: Leave blank to use saved credentials
+        - /placeholder: dsh_onboa•••••••••••••••••••••••••••••••test
+      - paragraph: Use the existing saved API key.
       - group:
         - text: Customized settings Base URL
         - textbox "Base URL":
           - /placeholder: https://api.deepseek.com/anthropic (Default to use DEEPSEEK_BASE_URL)
         - text: Use an API endpoint compatible with Anthropic Messages.
+        - group "Retry policy":
+          - text: Retry policy
+          - combobox "Retry policy":
+            - option "Default (Transient errors)" [selected]
+            - option "Transient errors"
+            - option "All errors"
         - region "Models":
           - text: Models Customized model catalog
           - button "Restore defaults"

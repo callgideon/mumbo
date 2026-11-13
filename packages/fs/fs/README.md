@@ -31,7 +31,7 @@ Pick [`fs-local`](../fs-local/README.md) for ordinary host files or [`fs-sandbox
 
 ### What the service lets you do
 
-Through `ctx.fs`, resolve paths, read text or bounded bytes, list direct children, create a directory with its missing ancestors, and perform guarded mutations. `patchText` applies parsed hunks under the same lock as its version check. `deleteFile` removes a regular file. `moveFile` locks both targets, optionally patches the source text, publishes the destination, then removes the source. Guards are optional: omission mutates the current state unconditionally. Failures carry stable `FsError` codes from the runtime `FS_ERROR_CODES` list, which transport validators reuse.
+Through `ctx.fs`, resolve paths, read text or bounded bytes, list direct children, create a directory with its missing ancestors, and perform guarded mutations. `patchText` applies parsed hunks under the same lock as its version check. `deleteFile` removes a regular file. `moveFile` locks both targets, optionally patches the source text, publishes the destination, then removes the source. Guards are optional: omission mutates the current state unconditionally. Failures carry stable `FsError` codes from the runtime `FS_ERROR_CODES` list, which transport validators reuse. Host-backed providers, currently `dsh-fs-local` and the `dsh-fs-sandbox` containment check, classify errno failures with `fsErrorFromErrno`: `ENOENT` and `ENOTDIR` become `FS_NOT_FOUND`, `EACCES` and `EPERM` become `FS_PERMISSION_DENIED`, `EISDIR` where a file is required becomes `FS_NOT_REGULAR_FILE`, and other errno values become `FS_IO_ERROR`, with the original error as `cause`.
 
 A model-facing tool resolves a model-supplied path with `resolveModelPath(path, { cwd })` instead of `resolve`. A provider that confines the model to configured roots, such as `dsh-fs-local` with `modelRoots`, refuses a real path outside every root with `FS_OUTSIDE_ROOTS`; the base provider resolves exactly like `resolve`. Such a provider's `resolve` also refuses, for every caller, a path under a root whose real path leaves the roots; a reader the person drives directly passes `resolve(path, { unconfined: true })` to keep following those links.
 
@@ -62,6 +62,7 @@ The contract is built on one separation and three commitments:
 |---|---|
 | [`src/index.ts`](src/index.ts) | Service definition: the abstract `FileSystem` class, the `ctx.fs` declaration, and the `fs/*` event vocabulary |
 | [`src/types.ts`](src/types.ts) | Vocabulary: `FsTarget`/`FsTargetKey`, `FsVersion`, `FsObservation`, `FsWriteIntent`, `FsError` and its codes |
+| [`src/errno.ts`](src/errno.ts) | `fsErrorFromErrno`: errno classification into `FsError` codes |
 
 ### How a call flows
 

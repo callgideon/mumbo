@@ -169,7 +169,7 @@ describe('Session working directories', () => {
     const logged = vi.spyOn(f.ctx.logger, 'error').mockImplementation(() => {})
     const message = `working-directory: directory does not exist and could not be recreated: ${JSON.stringify(origin)}: ${cause.message}; restore it or select another existing directory`
     try {
-      await expect(f.ctx.workingDirectory.ensure(agent)).rejects.toMatchObject({ message, cause })
+      await expect(f.ctx.workingDirectory.ensure(agent)).rejects.toMatchObject({ name: 'WorkingDirectoryError', code: 'WORKING_DIRECTORY_UNAVAILABLE', message, cause })
       expect(logged).toHaveBeenCalledExactlyOnceWith(message)
       expect(f.harness.claim(agent, 'next-step', 1)).toEqual([])
       expect(agent.session.snapshotEvents().filter(event => event.type === 'working-directory/change')).toEqual([])
@@ -282,7 +282,9 @@ describe('Session working directories', () => {
     await using f = await fixture()
     await writeFile(join(f.root, 'file'), '')
     await expect(f.ctx.workingDirectory.set(f.agent, 'file')).rejects.toThrow('directory does not exist')
+    await expect(f.ctx.workingDirectory.set(f.agent, 'file')).rejects.toMatchObject({ name: 'WorkingDirectoryError', code: 'WORKING_DIRECTORY_NOT_FOUND' })
     await expect(f.ctx.workingDirectory.set(f.agent, '')).rejects.toThrow('cd must not be empty')
+    await expect(f.ctx.workingDirectory.set(f.agent, '')).rejects.toMatchObject({ name: 'WorkingDirectoryError', code: 'WORKING_DIRECTORY_INVALID' })
     const controller = new AbortController()
     controller.abort(new Error('cancelled directory change'))
     await expect(f.ctx.workingDirectory.set(f.agent, f.root, controller.signal)).rejects.toThrow('cancelled directory change')
@@ -437,6 +439,7 @@ describe('Session working directories', () => {
       expect(f.agent.session.snapshotEvents().filter(event => event.type === 'working-directory/change')).toEqual([])
       expect(f.harness.claim(f.agent, 'next-step', 1)).toEqual([])
       await expect(directories.ensure(f.agent)).rejects.toThrow('working-directory service disposed')
+      await expect(directories.ensure(f.agent)).rejects.toMatchObject({ name: 'WorkingDirectoryError', code: 'WORKING_DIRECTORY_UNAVAILABLE' })
       expect(probe).toHaveBeenCalledOnce()
     } finally {
       release.resolve(undefined)
@@ -512,7 +515,18 @@ describe('Session working directories', () => {
     })
     expect(await execute({})).toMatchObject({ value: { cwd: f.root }, isError: false })
     expect(await execute({ cd: 'child' })).toMatchObject({ value: { cwd: join(f.root, 'child') }, isError: false })
-    expect(await execute({}, false)).toMatchObject({ isError: true })
+    expect(await execute({}, false)).toMatchObject({
+      isError: true,
+      error: { info: { name: 'ToolContextUnavailableError', code: 'TOOL_CONTEXT_UNAVAILABLE' } },
+    })
+    expect(await execute({ cd: '' })).toMatchObject({
+      isError: true,
+      error: { info: { name: 'ToolArgsError', code: 'INVALID_ARGS' } },
+    })
+    expect(await execute({ cd: 'missing' })).toMatchObject({
+      isError: true,
+      error: { info: { name: 'WorkingDirectoryError', code: 'WORKING_DIRECTORY_NOT_FOUND' } },
+    })
     await fiber.dispose()
     expect(f.ctx.tools.schemas().some(tool => tool.name === 'working_directory')).toBe(false)
   })

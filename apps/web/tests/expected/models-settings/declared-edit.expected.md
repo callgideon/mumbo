@@ -36,6 +36,13 @@
           - option "OpenAI Chat Completions" [selected]
           - option "OpenAI Responses"
           - option "Anthropic Messages"
+          - option "Gemini API"
+        - group "Retry policy":
+          - text: Retry policy
+          - combobox "Retry policy":
+            - option "Default (Transient errors)" [selected]
+            - option "Transient errors"
+            - option "All errors"
         - region "Models":
           - text: Models Customized model catalog
           - button "Restore defaults"

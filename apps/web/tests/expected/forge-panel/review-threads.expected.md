@@ -1,0 +1,91 @@
+- button "Collapse panel.ts" [expanded]
+- text: src/panel.ts
+- button "panel.ts has 3 unresolved threads; go to the next one": 3 unresolved
+- text: +2 −2
+- checkbox "Mark panel.ts as viewed"
+- button "More actions for panel.ts"
+- button "Select line L1": "1"
+- text: export const n1 = 1
+- button "Select line R1": "1"
+- text: export const n1 = 1
+- button "Select line L2": "2"
+- text: export const n2 = 2
+- button "Select line R2": "2"
+- text: export const n2 = 'two'
+- region "R2":
+  - text: R2 · on aaaaaaa lin 2 h ago
+  - button "Actions for the comment by lin"
+  - paragraph:
+    - text: Why
+    - strong: two
+    - text: "?"
+  - text: octo 2 h ago Author
+  - paragraph: It reads better.
+  - button "Reply…"
+  - button "Add to input"
+  - button "View on GitHub"
+  - button "Resolve thread"
+- button "Select line L3": "3"
+- text: export const n3 = 3
+- button "Select line R3": "3"
+- text: export const n3 = 3
+- button "Select line L4": "4"
+- text: export const n4 = 4
+- button "Select line R4": "4"
+- text: export const n4 = 4
+- button "Select line L5": "5"
+- text: export const n5 = 5
+- button "Select line R5": "5"
+- text: export const n5 = 5
+- button "6 unchanged lines"
+- button "Select line L12": "12"
+- text: export const n12 = 12
+- button "Select line R12": "12"
+- text: export const n12 = 12
+- button "Select line L13": "13"
+- text: export const n13 = 13
+- button "Select line R13": "13"
+- text: export const n13 = 13
+- button "Select line L14": "14"
+- text: export const n14 = 14
+- button "Select line R14": "14"
+- text: export const n14 = 14
+- button "Select line L15": "15"
+- text: export const n15 = 15
+- button "Select line R15": "15"
+- text: export const n15 = 'fifteen'
+- region "L15":
+  - text: L15 · on aaaaaaa lin 2 h ago
+  - button "Actions for the comment by lin"
+  - paragraph: The old fifteen was a number.
+  - button "Reply…"
+  - button "Add to input"
+  - button "View on GitHub"
+  - button "Resolve thread"
+- text: Resolved thread · lin
+- button "Expand"
+- button "Select line L16": "16"
+- text: export const n16 = 16
+- button "Select line R16": "16"
+- text: export const n16 = 16
+- button "Select line L17": "17"
+- text: export const n17 = 17
+- button "Select line R17": "17"
+- text: export const n17 = 17
+- button "Select line L18": "18"
+- text: export const n18 = 18
+- button "Select line R18": "18"
+- text: export const n18 = 18
+- button "Remaining unchanged lines"
+- text: "1 outdated threads: later commits changed their code"
+- button "Collapse" [expanded]
+- region "Originally R9":
+  - text: Originally R9 · on fffffff Outdated
+  - button "View file at that commit"
+  - text: "@@ -1,5 +1,5 @@ export const n1 = 1 -export const n2 = 2 +export const n2 = 'two' lin 2 h ago"
+  - button "Actions for the comment by lin"
+  - paragraph: This line moved.
+  - button "Reply…"
+  - button "Add to input"
+  - button "View on GitHub"
+  - button "Resolve thread"

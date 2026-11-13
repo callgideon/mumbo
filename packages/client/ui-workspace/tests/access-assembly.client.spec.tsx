@@ -5,8 +5,8 @@
  *
  * Hand-built row props spread allow-all access Hooks, so they cannot show that the browsing region
  * reads the Hooks a page actually binds. This spec replaces the runtime's allow-all access row with the
- * remote-access snapshot owner itself and renders the real slot tree, so the global and Workspace
- * access Hooks, and the access New Session follows, are the renderer's bindings over one snapshot.
+ * remote-access snapshot owner itself and renders the real slot tree, so the Workspace access Hooks,
+ * and the access New Session follows, are the renderer's bindings over one snapshot.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, screen, within } from '@testing-library/react'
@@ -149,7 +149,7 @@ describe('Workspace header actions under the page access snapshot', () => {
     }
   })
 
-  it('asks the global resource before the Ungrouped header offers New Session', async () => {
+  it('never offers New Session on the Ungrouped header, even under a global grant', async () => {
     const access = new ClientAccessState({ type: 'baseline', owner: false, grants: [] })
     const runtime = await bench(access, { ungroupedSession: 'loose' as SessionId })
     try {
@@ -159,7 +159,7 @@ describe('Workspace header actions under the page access snapshot', () => {
       act(() => {
         access.update({ type: 'upsert', grant: { resource: { kind: 'global' }, actions: ['session/create'] } })
       })
-      expect(screen.getByRole('button', { name: 'New session in Ungrouped' })).toBeTruthy()
+      expect(screen.queryByRole('button', { name: 'New session in Ungrouped' })).toBeNull()
     } finally {
       await runtime.dispose()
     }

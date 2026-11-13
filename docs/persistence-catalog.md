@@ -163,7 +163,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }[T]
 ```
 
-Sources: [`packages/core/session/src/types.ts:439`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:447`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:470`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:501`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:439`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:447`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:470`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:506`](../packages/core/session/src/types.ts)
 
 ## Events
 
@@ -1380,7 +1380,7 @@ Source: [`packages/web/web-search-deepseek/src/provider.ts:89`](../packages/web/
 }
 ```
 
-Source: [`packages/session/working-directory/src/index.ts:37`](../packages/session/working-directory/src/index.ts)
+Source: [`packages/session/working-directory/src/index.ts:56`](../packages/session/working-directory/src/index.ts)
 
 ### `workspace/*`
 
@@ -4857,7 +4857,7 @@ One of:
 
 SHA-256: `fab2bb09bc5e3b9db0685e8f5500b029af1a2b33e70bc703c1d5d0f596fbc1fd`
 
-Sources: [`packages/sandbox/sandbox/src/index.ts:30`](../packages/sandbox/sandbox/src/index.ts)
+Sources: [`packages/sandbox/sandbox/src/index.ts:38`](../packages/sandbox/sandbox/src/index.ts)
 
 One of:
 
@@ -5507,7 +5507,7 @@ Sources: [`packages/llm/llm/src/types.ts:134`](../packages/llm/llm/src/types.ts)
 
 SHA-256: `3cfc3a56502da1f8c6153c2c56657bab4b749056968634dd0991d325ec1c919f`
 
-Sources: [`packages/core/tools/src/contracts.ts:376`](../packages/core/tools/src/contracts.ts)
+Sources: [`packages/core/tools/src/contracts.ts:395`](../packages/core/tools/src/contracts.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -6380,7 +6380,7 @@ SHA-256: `cbbe8377ee744964537dbafd83607219e58ba79a13f6db0d0645c7ad3d5e8a09`
 
 SHA-256: `0b937d3e1e426b9dbc5894c0fff7598cd55b735861256da7c28715e11f7e2025`
 
-Sources: [`packages/session/working-directory/src/index.ts:37`](../packages/session/working-directory/src/index.ts)
+Sources: [`packages/session/working-directory/src/index.ts:56`](../packages/session/working-directory/src/index.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -8495,7 +8495,7 @@ Sources: [`packages/experimental/webhook/src/types.ts:74`](../packages/experimen
 
 SHA-256: `2235d957bf4b7c6cf959231d480f0ba1f3a6d72d82981493fb6c7c963021d3d5`
 
-Sources: [`packages/session/working-directory/src/index.ts:30`](../packages/session/working-directory/src/index.ts)
+Sources: [`packages/session/working-directory/src/index.ts:49`](../packages/session/working-directory/src/index.ts)
 
 | Property | Presence | Type |
 |---|---|---|

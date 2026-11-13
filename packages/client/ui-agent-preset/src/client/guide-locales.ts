@@ -11,6 +11,7 @@ export const guideEn = {
   guideStandardExplanation: [
     '### How it works',
     'The agent calls tools directly to read and edit files, search, and run terminal commands. It includes Skills, planning, goals, subagents, workflows, plugin management, and context compaction.',
+    'For questions about DSH and plugin or preset work you request, the dsh-doc skill guides the agent to the installed documentation and source. Its instructions load only when requested or relevant; loading it does not change files, tools, or the profile.',
     '### When to choose it',
     'Start here for everyday coding, file work, and research. Standard mode can also write scripts and process files in batches. PTC changes how tool calls are organized; it is not required for batch tasks.',
   ].join('\n\n'),
@@ -54,7 +55,7 @@ export const guideEn = {
   guideCordisIntro: 'Choose Creator mode for a new task. Describe the capability you want, where it should appear, and how you will verify it.',
   guideCordisExplanation: [
     '### What you can create',
-    'Creator mode includes the standard task tools plus runtime inspection and guidance for authoring Cordis plugins and agent presets. It can create a plugin that adds a capability or UI, or a preset that combines tools and prompts for a particular job.',
+    'Creator mode includes the standard task tools and adds runtime inspection. Standard and Creator share the dsh-doc guidance for plugin and preset development. The agent can create a plugin that adds a capability or UI, or a preset that combines tools and prompts for a particular job.',
     '### Plugins and modes',
     'A plugin adds capabilities to DSH, such as a tool, a service connection, or a UI entry. A mode is an agent preset that selects tools and defines how the agent works in a task. A plugin can be included in a custom preset.',
     '### How the result takes effect',

@@ -28,6 +28,12 @@
         - text: Customized settings Base URL
         - textbox "Base URL":
           - /placeholder: https://api.openai.com/v1
+        - group "Retry policy":
+          - text: Retry policy
+          - combobox "Retry policy":
+            - option "Default (Transient errors)" [selected]
+            - option "Transient errors"
+            - option "All errors"
         - region "Models":
           - text: Models Customized model catalog
           - button "Restore defaults"

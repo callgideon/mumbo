@@ -10,7 +10,7 @@
   - paragraph:
     - img "A conversation linked to a GitHub pull request, with checks, reviews, code diffs, and an isolated worktree"
 - heading "Components" [level=4]
-- text: 7 total · 7 off
+- text: 6 total · 6 off
 - list:
   - listitem:
     - text: Worktree service Create named Git worktrees and change the current session's working directory.
@@ -36,11 +36,6 @@
     - text: Session change requests Bind change requests to the Session that created, pushed, or tracked them, and watch their status.
     - code: forge-session
     - code: "@deepseek-ai/dsh-experimental-forge-session"
-    - text: "Off"
-  - listitem:
-    - text: Worktree service Create named Git worktrees and change the current session's working directory.
-    - code: forge-worktree
-    - code: "@deepseek-ai/dsh-experimental-worktree"
     - text: "Off"
   - listitem:
     - text: Change request panel Shows a Session's change requests in a sidebar tab and lets a new Session start in a worktree.

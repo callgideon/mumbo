@@ -477,15 +477,9 @@
 - button "List subagents 3 agents" [expanded]
 - text: Recorded result
 - list:
-  - listitem:
-    - text: agent-demo-review Running
-    - button "Expand description for agent-demo-review": Check tool card layout
-  - listitem:
-    - text: agent-demo-docs Idle
-    - button "Expand description for agent-demo-docs": Organize the tool display list
-  - listitem:
-    - text: agent-demo-icons Ready
-    - button "Expand description for agent-demo-icons": Check status icons
+  - listitem: Check tool card layout Running agent-demo-review
+  - listitem: Organize the tool display list Idle agent-demo-docs
+  - listitem: Check status icons Ready agent-demo-icons
 - button "Inspect"
 - button "Send message agent-demo-review" [expanded]
 - text: Recorded result
@@ -658,8 +652,7 @@
     - term: Role
     - definition: lead
   - listitem:
-    - text: ui-review Running
-    - paragraph: Check tool card readability
+    - text: Check tool card readability Running ui-review
     - term: ID
     - definition: agent-demo-review
     - term: Role
@@ -669,8 +662,7 @@
     - term: Context
     - definition: fresh
   - listitem:
-    - text: docs Inactive
-    - paragraph: Organize the tool list
+    - text: Organize the tool list Inactive docs
     - term: ID
     - definition: agent-demo-docs
     - term: Role
