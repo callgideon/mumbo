@@ -1420,6 +1420,11 @@ The cache's worst case is a subscription that dies silently: copies are served f
     - Revisit when the converter can run as `agent` through the subprocess provider and write into the model roots. **[my call]**
   - **The account package's hosts:** upstream folded `account-controller` into `deepseek-account`, which now also reads notifications from `harness.deepseek.com`. Boxes keep the row off. The desktop overlay points `harnessOrigin` at `api.mumbo.si`, whose gateway serves an empty notification list. A desktop-overlay test fails if any enabled desktop row names a deepseek.com host other than `api.deepseek.com`. Deploy order: the gateway goes out before the next desktop build. Approved.
   - **Search:** upstream's new person-facing Workspace search resolves the root `unconfined`, as the person's listing does since §B24. Members hold no search action. Approved.
+  - **CI and CodeQL [2026-11-13]:**
+    - Static and unit pass on Node 24 at 6058b21698. mumbo-ci runs no session snapshots, so the two ptc snapshots were checked against main locally. ptc-persistent passes. ptc-script-imports fails the same way on main under Node 22, and boxes run `node:24-bookworm`.
+    - CodeQL counts 17 alerts in touched files. Most exist on main. The critical one at `deploy/gateway.mjs:79` is a false positive: the host is a constant, and the path must start with `/anthropic/`.
+    - One alert is new in shipped upstream code: a quadratic regex on model-written diff fence headers in `ui-primitives`, which a crafted fence could use to hang the person's tab. It gets a one-line fork fix (`split('\t', 1)`) with a test. **[my call]**
+    - Dismissing the rest is the founder's call.
   - **The founder's overlay:** `deploy/mumbo.overlay.yml` turned off `account-controller`, a row that no longer exists. The founder approved deleting those two lines, and f937651317 removes only them. `deepseek-account` stays off.
 
 **Acceptance (first milestone: the founder's box in Mumbai):**
