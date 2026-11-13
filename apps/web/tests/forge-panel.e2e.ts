@@ -2479,7 +2479,7 @@ it.skipIf(MODE === 'record')('keeps the changes toolbar and header on one line, 
     seen.push(`${width}:${fold}`)
   }
   expect(seen[0]).toBe('1680:0')
-  // The English labels fit at 340px with two folded groups; upstream's Chinese surface needed three.
+  // At 340px two groups fold.
   expect(seen.at(-1)).toBe('340:2')
   expect(await more.isVisible()).toBe(true)
 
