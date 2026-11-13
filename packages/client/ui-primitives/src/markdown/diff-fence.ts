@@ -82,7 +82,7 @@ function isDiffMeta(raw: string): boolean {
  */
 function headerLanguage(raw: string): string | undefined {
   // Mumbo fork: upstream's `/\t.*$/u` is quadratic on a model-written line of many tabs; split is linear.
-  const path = raw.slice(4).split('\t', 1)[0]!.trim()
+  const path = (raw.slice(4).split('\t', 1)[0] ?? '').trim()
   const unquoted = path.startsWith('"') && path.endsWith('"')
     ? path.slice(1, -1).replace(/\\(["\\])/gu, '$1')
     : path
