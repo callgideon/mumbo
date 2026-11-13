@@ -232,7 +232,7 @@ function flipper(directory: string, secretDirectory: string): () => Promise<void
 }
 
 describe.runIf(process.platform === 'linux')('reads through an accepted descriptor', () => {
-  it('reports a target that vanished, a non-file, a FIFO, and a non-directory listing without blocking', async () => {
+  it('reports a target that vanished, a non-file, a FIFO, a non-directory listing, and a refused open without blocking', async () => {
     const fs = await mount({ cwd: workspace, modelRoots: [workspace, scratch] })
     const gone = await fs.resolveModelPath('notes.txt')
     await rm(join(workspace, 'notes.txt'))
@@ -245,7 +245,7 @@ describe.runIf(process.platform === 'linux')('reads through an accepted descript
     await expect(fs.readByteRange(await fs.resolveModelPath('plain'), { offset: 0, length: 0 })).resolves.toEqual(new Uint8Array(0))
     await expect(fs.readBytes(await fs.resolveModelPath('plain'), undefined, 0)).rejects.toMatchObject({ code: 'FS_TOO_LARGE' })
     await chmod(join(workspace, 'plain'), 0o000)
-    await expect(fs.readText(await fs.resolveModelPath('plain'))).rejects.toMatchObject({ code: 'EACCES' })
+    await expect(fs.readText(await fs.resolveModelPath('plain'))).rejects.toEqual(new FsError(`cannot read "${join(workspace, 'plain')}": permission denied`, 'FS_PERMISSION_DENIED'))
   })
 
   it('refuses a descriptor that names a different file inside the roots', async () => {

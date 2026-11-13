@@ -318,9 +318,8 @@ async function openPinned(target: LocalTarget, verb: 'read' | 'list', pin: ReadP
   try {
     handle = await open(target.targetKey, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | (directory ? fsConstants.O_DIRECTORY : 0))
   } catch (error: unknown) {
-    if (isENOENT(error)) throw new FsError(`cannot ${verb} "${target.displayPath}": not found`, 'FS_NOT_FOUND', { cause: error })
     if (directory && isENOTDIR(error)) throw new FsError(`cannot ${verb} "${target.displayPath}": not a directory`, 'FS_NOT_DIRECTORY', { cause: error })
-    throw error
+    throw fsErrorFromErrno(verb, target.displayPath, error)
   }
   try {
     pin(await readlink(`/proc/self/fd/${handle.fd}`), target, await handle.stat())
