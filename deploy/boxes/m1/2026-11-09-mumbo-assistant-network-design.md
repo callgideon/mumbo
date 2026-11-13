@@ -1703,6 +1703,7 @@ The person's-computer tracks run alongside these milestones: N1 (sections 17b an
 - Box and child sizes, after measuring.
 - Test design per `docs/testing.md`; documentation and upgrade guides per the repository rules.
 - Lower priority, for M6: which Sources bitlane, openinfrx and whiteboard need. whiteboard uses Scion and may need its own Source kind.
+- **[2026-11-13]** A project's repository is set in two places that don't fill each other in: the edge's project record (the approvals page's binding, which routes merge approvals) and the box's GitHub Source in the Superagent panel (what the coordinator works on). For M1 both are set by hand to the same repo, the binding first. At M6 the box's Source comes from the edge record.
 
 ### Follow-ups after M1 (found in implementation review)
 

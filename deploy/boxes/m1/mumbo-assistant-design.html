@@ -2987,6 +2987,7 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>Box and child sizes, after measuring.</li>
 <li>Test design per <code>docs/testing.md</code>; documentation and upgrade guides per the repository rules.</li>
 <li>Lower priority, for M6: which Sources bitlane, openinfrx and whiteboard need. whiteboard uses Scion and may need its own Source kind.</li>
+<li><strong>[2026-11-13]</strong> A project's repository is set in two places that don't fill each other in: the edge's project record (the approvals page's binding, which routes merge approvals) and the box's GitHub Source in the Superagent panel (what the coordinator works on). For M1 both are set by hand to the same repo, the binding first. At M6 the box's Source comes from the edge record.</li>
 </ul>
 <h3>Follow-ups after M1 (found in implementation review)</h3>
 <ul>
