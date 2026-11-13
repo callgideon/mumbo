@@ -28,6 +28,9 @@ importers:
 
   .:
     devDependencies:
+      '@deepseek-ai/cordis-plugin-logger-console':
+        specifier: workspace:~
+        version: link:vendor/logger-console
       '@deepseek-ai/dsh-action-cards':
         specifier: workspace:*
         version: link:packages/experimental/action-cards

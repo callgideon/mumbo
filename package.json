@@ -233,6 +233,7 @@
     "@deepseek-ai/dsh-experimental-browser-use-playwright-mcp": "workspace:*",
     "@deepseek-ai/dsh-experimental-browser-use-chrome-devtools-mcp": "workspace:*",
     "@deepseek-ai/dsh-experimental-browser-use-stagehand-native": "workspace:*",
+    "@deepseek-ai/cordis-plugin-logger-console": "workspace:~",
     "@mumbo/assistant": "workspace:*",
     "@mumbo/box-links": "workspace:*",
     "@mumbo/browser-consent": "workspace:*",
