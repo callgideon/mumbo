@@ -679,6 +679,10 @@ it('discovers menu choices without creating a process and remembers a choice bef
   )
   vi.mocked(h.remote.shells).mockResolvedValueOnce(failure('host offline'))
   await expect(service.launchShells(sessionId, new AbortController().signal)).rejects.toThrow('host offline')
+  vi.mocked(h.remote.shells).mockResolvedValueOnce({ ok: false, error: new RemoteError('remote-access/denied',
+    'remote access: terminal/shells: access denied (no-allow)', { action: 'terminal/shells', reason: 'no-allow' }) })
+  await expect(service.launchShells(sessionId, new AbortController().signal))
+    .rejects.toMatchObject({ code: 'terminal/view', details: { issue: 'accessDenied' } })
   vi.mocked(h.remote.shells).mockResolvedValue(success([]))
   expect((await service.launchShells(sessionId, new AbortController().signal)).selectedShell).toBeUndefined()
   await h.view().refresh()

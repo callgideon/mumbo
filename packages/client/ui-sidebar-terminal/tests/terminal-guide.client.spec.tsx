@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { allowAllAccess, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import type { TerminalLaunchShells } from '@deepseek-ai/dsh-api-terminal-controller/client'
+import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import type { GlobalStandardProps, SessionStandardProps } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { PaneId, TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
@@ -126,6 +127,14 @@ it.each([new Error('offline'), 'offline'])('offers an in-place retry after disco
   await h.view.findByRole('menuitem', { name: 'bash' })
   expect(h.loadShells).toHaveBeenCalledTimes(2)
   expect(h.openTab).not.toHaveBeenCalled()
+})
+
+it('names a refused discovery in the locale instead of the Host refusal', async () => {
+  const h = mount()
+  h.loadShells.mockRejectedValueOnce(new RemoteError('terminal/view', 'accessDenied', { issue: 'accessDenied' }))
+  h.open()
+  await h.view.findByText(`Terminal error: ${en.accessDenied}`)
+  expect(h.view.queryByText(/accessDenied/u)).toBeNull()
 })
 
 it('shows empty discovery without opening a terminal and supports title-only cards', async () => {
