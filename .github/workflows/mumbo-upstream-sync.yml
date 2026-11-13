@@ -1,6 +1,6 @@
 name: Mumbo upstream sync
 
-# Fast-forwards `master` to deepseek-ai/deepseek-harness and opens a master -> dev
+# Fast-forwards `master` to deepseek-ai/deepseek-harness and opens a master -> main
 # merge PR. `master` carries no Mumbo commits, so the fast-forward cannot conflict.
 # UPSTREAM_SYNC_TOKEN: PAT with `repo` + `workflow` scopes (upstream changes workflow files).
 
@@ -28,10 +28,10 @@ jobs:
           git fetch upstream master
           git merge --ff-only upstream/master
           git push origin master
-      - name: Open master -> dev PR
+      - name: Open master -> main PR
         env:
           GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
         run: |
-          if [ "$(git rev-list --count origin/dev..master)" = 0 ]; then exit 0; fi
-          gh pr list --base dev --head master --state open --json number --jq 'length' | grep -qx 0 || exit 0
-          gh pr create --base dev --head master --title "Upstream sync" --body "Merge deepseek-ai/deepseek-harness master into dev (use a merge commit, never squash)."
+          if [ "$(git rev-list --count origin/main..master)" = 0 ]; then exit 0; fi
+          gh pr list --base main --head master --state open --json number --jq 'length' | grep -qx 0 || exit 0
+          gh pr create --base main --head master --title "Upstream sync" --body "Merge deepseek-ai/deepseek-harness master into main (use a merge commit, never squash)."
