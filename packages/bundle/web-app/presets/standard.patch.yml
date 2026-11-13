@@ -127,7 +127,8 @@
               searchTimeoutMs: 60000
           - id: present
             name: '@deepseek-ai/dsh-tool-present'
-          # Off where dsh runs as root, i.e. on boxes: these tools parse model-chosen documents in-process (§B24).
+          # Off where dsh runs as root, i.e. on boxes: these tools parse model-chosen documents in-process. See
+          # .agents/notes/implemented/architecture/2026-11-10-agent-containment-run-as-and-model-roots.md.
           - id: tool-office
             name: '@deepseek-ai/dsh-tool-office'
             disabled: !!js "process.getuid?.() === 0"
