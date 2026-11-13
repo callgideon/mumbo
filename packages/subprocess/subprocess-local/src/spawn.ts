@@ -208,7 +208,8 @@ function directChildResult(child: ChildProcess): Promise<SubprocessOutcome> {
  * @param pid - the group leader, when the launch published one.
  * @param child - the direct child process.
  * @param taskkill - Windows tree termination.
- * @param linuxGroupLiveMember - Linux group probe used after direct settlement: an executing member's PID, `false` when only zombie entries remain, or `undefined` when unknown.
+ * @param linuxGroupLiveMember - Linux group probe used after direct settlement: an executing member's PID, `false`
+ *   when only zombie entries remain, or `undefined` when unknown.
  * @param direct - the direct child's outcome.
  * @returns the signal-and-wait owner for the group.
  */

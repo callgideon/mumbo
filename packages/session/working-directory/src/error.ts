@@ -6,7 +6,8 @@ import { HarnessError } from '@deepseek-ai/dsh-error'
  * Every {@link WorkingDirectoryError} code:
  * - `WORKING_DIRECTORY_INVALID` — a requested directory is empty or otherwise malformed.
  * - `WORKING_DIRECTORY_NOT_FOUND` — the requested directory does not exist or is not a directory; the caller picks another path.
- * - `WORKING_DIRECTORY_UNAVAILABLE` — the current directory and the original project are missing and the original project cannot be recreated, or the owning service was disposed.
+ * - `WORKING_DIRECTORY_UNAVAILABLE` — the current directory and the original project are missing and the original
+ *   project cannot be recreated, or the owning service was disposed.
  */
 export const WORKING_DIRECTORY_ERROR_CODES = [
   'WORKING_DIRECTORY_INVALID',
