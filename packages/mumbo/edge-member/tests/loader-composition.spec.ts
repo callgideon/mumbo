@@ -6,6 +6,7 @@
  */
 
 import { randomBytes } from 'node:crypto'
+import { once } from 'node:events'
 import { request as httpRequest } from 'node:http'
 import { PassThrough } from 'node:stream'
 import { fileURLToPath } from 'node:url'
@@ -21,6 +22,7 @@ import * as SessionLogExport from '@deepseek-ai/dsh-session-log-export'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import WebSocket, { type RawData } from 'ws'
 import * as EdgeMember from '../src/index.ts'
 import { signMemberHeader } from '../src/header.ts'
 import { PromptProbe, call, now, provideCredentials, startLoader } from './helpers/composition.ts'
@@ -234,11 +236,12 @@ describe('real Loader composition', () => {
     expect(probe.callers).toEqual([])
   })
 
-  it('lets a member open a terminal on a Session they reach and refuses one on a Session they do not', { timeout: 60_000 }, async () => {
+  it('lets a member open, attach to, and type into a terminal on a Session they reach and refuses one on a Session they do not', { timeout: 60_000 }, async () => {
     const { origin } = await boot()
     const ctx = context!
     // The Session's execution providers: a shell that runs until the controller ends it.
     const spawned: string[] = []
+    const typed: string[] = []
     ctx.provide('subprocess', {
       terminalEnvironment: async () => ({ platform: 'posix', defaultShell: '/bin/bash' }),
       resolveExecutable: async (path: string) => path,
@@ -247,7 +250,7 @@ describe('real Loader composition', () => {
         const output = new PassThrough()
         const done = Promise.withResolvers<{ exitCode: number; signal: null }>()
         return {
-          pid: 1, output, done: done.promise, write: async () => {}, resize: async () => {},
+          pid: 1, output, done: done.promise, write: async (data: string) => { typed.push(data) }, resize: async () => {},
           inspectActivity: async () => ({ state: 'unknown', revision: 0 }), inspectForeground: async () => undefined,
           signalForeground: async () => 1, terminate: async () => { output.end(); done.resolve({ exitCode: 0, signal: null }) },
         }
@@ -275,6 +278,35 @@ describe('real Loader composition', () => {
       })
     }
     expect(spawned).toEqual(['s1'])
+    // The Terminal tab retains and attaches over the WebSocket mux, then sends keyboard input on the attach uplink.
+    const socket = new WebSocket(`${origin.replace(/^http/u, 'ws')}/api/remote.mux`, { headers: { 'x-mumbo-member': header } })
+    type Frame = { readonly type: string; readonly streamId: string; readonly value?: unknown; readonly error?: unknown }
+    const frames: Frame[] = []
+    socket.on('message', (data: RawData) => { frames.push(JSON.parse((data as Buffer).toString('utf8')) as Frame) })
+    await once(socket, 'open')
+    const send = (message: object): void => { socket.send(JSON.stringify(message)) }
+    const streams = (sessionId: string) => [
+      ['retain', { sessionId, id: `t-${sessionId}` }],
+      ['attach', { agentId: sessionId, id: `t-${sessionId}` }],
+    ] as const
+    for (const sessionId of ['s1', 's2']) {
+      for (const [method, args] of streams(sessionId)) send({ type: 'open', streamId: `${method}-${sessionId}`, endpoint: `terminal/${method}`, payload: { args } })
+    }
+    send({ type: 'item', streamId: 'attach-s1', value: { type: 'write', sequence: 1, data: 'id\r' } })
+    await vi.waitFor(() => {
+      expect(frames).toContainEqual({ type: 'item', streamId: 'attach-s1', value: { type: 'ack', sequence: 1 } })
+      expect(frames.filter(frame => frame.type === 'error')).toHaveLength(2)
+    })
+    socket.close()
+    expect(typed).toEqual(['id\r'])
+    const first = (streamId: string) => frames.find(frame => frame.streamId === streamId)
+    expect(first('retain-s1')).toEqual({ type: 'item', streamId: 'retain-s1', value: { type: 'retained' } })
+    expect(first('attach-s1')).toMatchObject({ type: 'item', value: { type: 'snapshot', writable: true, info: { id: 't-s1' } } })
+    for (const [method] of streams('s2')) {
+      expect(first(`${method}-s2`), method).toMatchObject({
+        type: 'error', error: { code: 'remote-access/denied', details: { action: `terminal/${method}`, reason: 'no-allow' } },
+      })
+    }
   })
 
   it('reuses a listed blank Session, prompts a live child Session, and refuses queue edits', { timeout: 60_000 }, async () => {
@@ -308,8 +340,11 @@ describe('real Loader composition', () => {
     const s1 = 'grants' in snapshot ? snapshot.grants.find(grant => grant.resource.kind === 'session' && grant.resource.id === 's1') : undefined
     expect(s1?.actions).toEqual(expect.arrayContaining([
       'session/prompt', 'fileUploads/upload', 'fileUploads/uploadBinary', 'sessionLog/export', 'sessionLog/markdown',
-      'terminal/environment', 'terminal/create', 'terminal/attach', 'terminal/retain',
     ]))
+    expect(s1?.actions.filter(action => action.startsWith('terminal/')).toSorted()).toEqual([
+      'terminal/attach', 'terminal/close', 'terminal/create', 'terminal/environment',
+      'terminal/list', 'terminal/rename', 'terminal/retain', 'terminal/shells',
+    ])
     expect(s1?.actions).not.toContain('session/updateQueue')
     const global = 'grants' in snapshot ? snapshot.grants.find(grant => grant.resource.kind === 'global') : undefined
     expect(global?.actions).not.toContain('hostFiles/readAny')
