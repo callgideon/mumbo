@@ -7,9 +7,13 @@ import { spawnSync } from 'node:child_process'
 
 const HOST = /[a-z0-9.-]*(?:deepseek|deepseeksvc)\.(?:com|cn|ai)\b/gi
 const ALLOWED_HOSTS = new Set(['api.deepseek.com'])
+// Reviewed defaults: deploy/mumbo.overlay.yml disables the row, and deploy/mumbo-desktop.overlay.yml points each origin
+// at the mumbo gateway (apps/cli/tests/desktop-overlay.spec.ts). A new host in this file fails again.
+const ALLOWED_IN_FILE: Record<string, string[]> = {
+  'packages/credentials/deepseek-account/src/index.ts': ['platform.deepseek.com', 'harness.deepseek.com'],
+}
 // Disabled by deploy/mumbo.overlay.yml or rewritten by scripts/mumbo-rebrand.ts, or docs-only strings.
 const ALLOWED_FILES = [
-  'packages/credentials/deepseek-account/',
   'apps/desktop/scripts/',
   // Upstream's release-upload templates (placeholder buckets and keys); no Mumbo build reads them.
   'apps/desktop/config/publishing/',
@@ -21,11 +25,12 @@ const ALLOWED_FILES = [
 
 const SKIP = /(^|\/)(node_modules|lib|dist|tests?)\/|\.(md|spec\.ts|test\.ts)$|(^|\/)package\.json$/
 const grep = spawnSync('grep', ['-rIliE', 'deepseek(svc)?\\.(com|cn|ai)', 'apps', 'packages', 'scripts', '--exclude-dir=node_modules', '--exclude-dir=lib', '--exclude-dir=dist'], { encoding: 'utf8', maxBuffer: 1 << 28 })
-const files = grep.stdout.split('\n').filter((f) => f && !SKIP.test(f))
+const files = grep.stdout.split('\n').filter(f => f && !SKIP.test(f))
 
 const { readFileSync } = await import('node:fs')
-const hits = files.filter((f) => !ALLOWED_FILES.some((p) => f.startsWith(p)))
-  .flatMap((f) => [...readFileSync(f, 'utf8').matchAll(HOST)].map((m) => `${f}: ${m[0]}`).filter((l) => !ALLOWED_HOSTS.has(l.split(': ')[1]!.toLowerCase())))
+const hits = files.filter(f => !ALLOWED_FILES.some(p => f.startsWith(p)))
+  .flatMap(f => [...readFileSync(f, 'utf8').matchAll(HOST)].map(m => m[0].toLowerCase())
+    .filter(host => !ALLOWED_HOSTS.has(host) && !ALLOWED_IN_FILE[f]?.includes(host)).map(host => `${f}: ${host}`))
 if (hits.length) {
   console.error(`unreviewed DeepSeek hosts:\n${[...new Set(hits)].join('\n')}`)
   process.exit(1)
