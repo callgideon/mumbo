@@ -81,7 +81,8 @@ function isDiffMeta(raw: string): boolean {
  * @returns the language id, or `undefined` for `/dev/null` or an unknown path.
  */
 function headerLanguage(raw: string): string | undefined {
-  const path = raw.slice(4).replace(/\t.*$/u, '').trim()
+  // Mumbo fork: upstream's `/\t.*$/u` is quadratic on a model-written line of many tabs; split is linear.
+  const path = raw.slice(4).split('\t', 1)[0]!.trim()
   const unquoted = path.startsWith('"') && path.endsWith('"')
     ? path.slice(1, -1).replace(/\\(["\\])/gu, '$1')
     : path

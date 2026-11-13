@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import type { ComponentProps } from 'react'
 import { CodeBlock as LocalizedCodeBlock } from '../src/markdown/CodeBlock.tsx'
+import { parseDiffFence } from '../src/markdown/diff-fence.ts'
 import { diffBlockLabels, markdownLabels } from './labels.client.ts'
 
 function CodeBlock(props: Omit<ComponentProps<typeof LocalizedCodeBlock>, 'copyLabel' | 'copiedLabel'>) {
@@ -151,6 +152,17 @@ describe('diff fences', () => {
     const lines = rows(render(<CodeBlock code={'@@ -1 +1 @@\n-old\n+new'} lang="Diff" showHeader={false} />).container)
     expect(lines[1]!.className).toContain('_diffDel_')
     expect(lines[2]!.className).toContain('_diffAdd_')
+  })
+
+  it('names a header file by the text before its first tab, in time linear in the line', () => {
+    const dated = parseDiffFence('--- a/x.ts\t2026-11-13 10:00:00.000000000 +0000\n+++ b/x.ts')
+    expect(dated.languages.get(0)).toBe(parseDiffFence('--- a/x.ts\n+++ b/x.ts').languages.get(0))
+    expect(dated.languages.get(0)).toBeDefined()
+    // A line separator after the tabs keeps `$` from matching, which made a `\t.*$` scan quadratic.
+    const started = performance.now()
+    const tabs = parseDiffFence(`--- a/x.ts${'\t'.repeat(50_000)}\u2028\n+++ b/x.ts`)
+    expect(performance.now() - started).toBeLessThan(1000)
+    expect(tabs.languages.get(0)).toBe(dated.languages.get(0))
   })
 
   it('resolves quoted header paths', () => {
