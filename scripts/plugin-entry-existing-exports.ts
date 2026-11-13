@@ -53,6 +53,7 @@ export const EXISTING_PLUGIN_ENTRY_EXPORTS = {
   '@deepseek-ai/dsh-command-feedback': ['FEEDBACK_CATEGORIES', 'recordFeedback'],
   '@deepseek-ai/dsh-commands': ['CommandDefinitionId', 'CommandId', 'name', 'parseCommand'],
   '@deepseek-ai/dsh-compaction-tool-result-pruner': ['DEFAULTS', 'PRUNE_MARKER', 'codePointLength', 'resolveConfig'],
+  '@deepseek-ai/dsh-computer-use-x11': ['ACTIONS', 'RELEASE_ARGS', 'assertXdotoolArgs', 'resolveInput'],
   '@deepseek-ai/dsh-cordis-host-runner': [
     'ApprovalRequestId', 'CordisDynamicPackageId', 'CordisDynamicPluginId', 'CordisDynamicPluginRunId',
   ],
@@ -60,6 +61,7 @@ export const EXISTING_PLUGIN_ENTRY_EXPORTS = {
     'CREDENTIALS_FILENAME', 'DOCUMENT_VERSION', 'parseCredentialsDocument', 'renderFlatLayoutMigration', 'resolveSpec',
   ],
   '@deepseek-ai/dsh-cua': ['CuaConfig', 'installCua'],
+  '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp': ['validateConfig'],
   '@deepseek-ai/dsh-experimental-claude-code-mods': [
     'DEFAULT_TOOL_ALIASES', 'KNOWN_EVENTS', 'MODS_API_VERSION', 'SERVED_EVENTS', 'defineMod',
   ],
@@ -255,5 +257,22 @@ export const EXISTING_PLUGIN_ENTRY_EXPORTS = {
   '@deepseek-ai/dsh-workflow-ptc': ['materializeFromRealm', 'validateMeta'],
   '@deepseek-ai/dsh-workspace': [
     'WorkspaceId', 'realpathNormalize', 'workspaceDomainSpec', 'workspaceDomainState', 'workspaceRecord',
+  ],
+  '@mumbo/assistant': ['ARCHIVE_REFUSAL', 'MUMBO_SECTION', 'MUMBO_SESSION_ID', 'MUMBO_TITLE'],
+  '@mumbo/browser-consent': [
+    'classify', 'currentTabUrl', 'denial', 'denyList', 'describeArguments', 'stageUpload', 'tabUrl', 'targetUrl',
+    'uploadDirectory', 'uploadRefusal', 'uploadStaging',
+  ],
+  '@mumbo/edge-member': [
+    'ATTRIBUTION_SOURCE', 'MAX_FUTURE_SECONDS', 'MEMBER_GLOBAL_ROLE', 'MEMBER_HEADER', 'MEMBER_SESSION_ROLE',
+    'MEMBER_WORKSPACE_ROLE', 'attributionText', 'signMemberHeader', 'verifyMemberHeader',
+  ],
+  '@mumbo/mcp': ['registerTools'],
+  '@mumbo/run-wild': ['RUN_WILD_CONTEXT', 'RUN_WILD_INSTRUCTIONS', 'RUN_WILD_PRESET', 'RUN_WILD_REPLY', 'inRunWild'],
+  '@mumbo/state': ['PLAN_READ', 'RESUME_SOURCE', 'STATE_CONTEXT'],
+  '@mumbo/superagent': [
+    'Engine', 'MemoryRepositories', 'REASONS', 'USER_ERRORS', 'canRetry', 'followupOwners', 'isoTime', 'key',
+    'latestAssignment', 'latestReport', 'liveTicket', 'reached', 'readUntil', 'reasonText', 'restartNoteId',
+    'runningAssignment', 'said', 'settled', 'threadKey', 'ticketOutcome', 'ticketStage', 'waitsForPerson',
   ],
 } as const satisfies Readonly<Record<string, readonly string[]>>
