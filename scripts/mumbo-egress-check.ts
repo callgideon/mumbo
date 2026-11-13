@@ -9,7 +9,7 @@ const HOST = /[a-z0-9.-]*(?:deepseek|deepseeksvc)\.(?:com|cn|ai)\b/gi
 const ALLOWED_HOSTS = new Set(['api.deepseek.com'])
 // Disabled by deploy/mumbo.overlay.yml or rewritten by scripts/mumbo-rebrand.ts, or docs-only strings.
 const ALLOWED_FILES = [
-  'packages/credentials/deepseek-account-platform/',
+  'packages/credentials/deepseek-account/',
   'apps/desktop/scripts/',
   // Upstream's release-upload templates (placeholder buckets and keys); no Mumbo build reads them.
   'apps/desktop/config/publishing/',
