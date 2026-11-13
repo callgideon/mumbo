@@ -29,7 +29,7 @@ import {
 import type { RunnerInvocation } from './runner-launch.ts'
 import type { RunAsIdentity } from './run-as.ts'
 import { childEnv, fallbackOwner, taskkillProcessTree } from './spawn.ts'
-import { linuxProcessGroupHasLiveMembers } from './process-inspector.ts'
+import { linuxProcessGroupLiveMember } from './process-inspector.ts'
 
 /** Test seams for systemd command execution. */
 export interface LinuxScopeInternals {
@@ -783,7 +783,7 @@ export function launchLinuxBootstrap(
     control: controlPipe(child, spec.stdio.control),
     direct,
     owner: {
-      ...fallbackOwner('linux', child.pid, child, taskkillProcessTree, linuxProcessGroupHasLiveMembers, direct),
+      ...fallbackOwner('linux', child.pid, child, taskkillProcessTree, linuxProcessGroupLiveMember, direct),
       cleanup: () => { cleanupLinuxLaunchFiles(files) },
     },
   }

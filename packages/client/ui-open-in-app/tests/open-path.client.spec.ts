@@ -136,14 +136,14 @@ describe('OpenInAppPathController association answers', () => {
       queries.push({ path: request.path, signal, answer })
       signal?.addEventListener('abort', () => { reject(new Error('cancelled')) }, { once: true })
     }))
-    return { queries, controller: new OpenInAppPathController(remoteOf({ workspacePathApplications })) }
+    return { queries, controller: new OpenInAppPathController(remoteOf({ workspacePathApplications }), () => true) }
   }
 
   it('shares an answer across files with the same final extension and keeps extensionless names apart', async () => {
     const answers: Record<string, Answer> = {
       '/w/notes.txt': answered(app('TextEdit')), '/w/Makefile': answered(app('Xcode')), '/w/.env': answered(app('Zed')),
     }
-    const controller = new OpenInAppPathController(remoteOf({ workspacePathApplications: async ({ path }) => answers[path]! }))
+    const controller = new OpenInAppPathController(remoteOf({ workspacePathApplications: async ({ path }) => answers[path]! }), () => true)
     const signal = new AbortController().signal
     expect(controller.cachedApplications('/w/notes.txt')).toBeUndefined()
     for (const path of Object.keys(answers)) await controller.applications(path, signal)
@@ -189,7 +189,7 @@ describe('OpenInAppPathController association answers', () => {
       .mockResolvedValueOnce(answered(app('Preview')))
       .mockResolvedValueOnce({ ok: false, error: new RemoteError('gateway/internal', 'boom', {}) })
       .mockRejectedValueOnce(new Error('down'))
-    const controller = new OpenInAppPathController(remoteOf({ workspacePathApplications }))
+    const controller = new OpenInAppPathController(remoteOf({ workspacePathApplications }), () => true)
     const signal = new AbortController().signal
     await controller.applications('/w/a.png', signal)
     expect(await controller.applications('/w/a.png', signal)).toBeNull()
