@@ -15,7 +15,6 @@ import { TerminalBindings } from './bindings.ts'
 import { TerminalInventory } from './inventory.ts'
 
 export type { TerminalView, TerminalViewState, TerminalViewIssue, TerminalRenderFrame, TerminalRemote } from './model.ts'
-export { terminalIssue } from './model.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {

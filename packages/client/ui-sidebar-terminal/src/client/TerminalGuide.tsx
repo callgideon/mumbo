@@ -3,7 +3,8 @@ import { useEffect, useState, type ReactNode } from 'react'
 import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/client'
 import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import { PluginArtworkTerminal, ShortcutKeys, Button, IconChevronDownOutlineRegular, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
-import { terminalIssue, type TerminalLaunchShells, type TerminalViewIssue } from '@deepseek-ai/dsh-api-terminal-controller/client'
+import type { TerminalLaunchShells, TerminalViewIssue } from '@deepseek-ai/dsh-api-terminal-controller/client'
+import { remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type {} from './locales.ts'
@@ -44,7 +45,10 @@ export function TerminalGuide({
     void loadShells(lifetime.signal).then((choices) => {
       if (!lifetime.signal.aborted) setState({ phase: 'ready', choices })
     }, (error: unknown) => {
-      if (!lifetime.signal.aborted) setState({ phase: 'failed', message: error instanceof Error ? error.message : String(error), issue: terminalIssue(error) })
+      if (lifetime.signal.aborted) return
+      const failure = remoteErrorOf(error)
+      setState({ phase: 'failed', message: error instanceof Error ? error.message : String(error),
+        issue: failure?.code === 'terminal/view' ? failure.details.issue : undefined })
     })
     return () => { lifetime.abort() }
   }, [open, attempt, loadShells])
