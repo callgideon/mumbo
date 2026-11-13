@@ -2437,6 +2437,23 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li><strong>Member approval, corrected [2026-11-13]:</strong> <code>never</code> refuses every ask at once; it doesn't approve it. Under Full access, plain commands run unasked either way, so on a project box <code>never</code> only turns would-be asks into refusals, and <code>ask</code> would leave a member's turn waiting, because no member can answer an approval. See the amended ruling at &quot;The project overlay sets approval <code>never</code>&quot;. Recommendation: keep it. The founder decides.</li>
 </ul>
 </li>
+<li><strong>B51, the upstream sync to 0.2.2-rc.2</strong> [2026-11-13, PR #61, head d1151b530e]: merge commit only, never squash or rebase, so the next sync keeps its merge base.
+<ul>
+<li><strong>Ruling, Office tools:</strong> upstream's <code>@deepseek-ai/dsh-tool-office</code> (<code>office_render</code>, <code>office_convert</code>, <code>office_recalculate</code>) is mounted on no box.
+<ul>
+<li>Its tools read files the model picks and parse them with LibreOffice Kit inside root dsh, the class of work §B24 moves to <code>agent</code>.</li>
+<li>It also writes outputs under <code>$DSH_HOME</code>, outside the model roots.</li>
+<li>The edge's containment rows turn its row off on person and project boxes, and box-containment's FORBIDDEN lists the package.</li>
+<li>The edge change deploys before any box gets an image built from #61. The Office skill text stays, and upstream's no-renderer path covers a turn without the tools.</li>
+<li><code>office-kit</code> stays: it renders previews the person opens, as <code>office-to-pdf</code> did.</li>
+<li>Revisit when the converter can run as <code>agent</code> through the subprocess provider and write into the model roots. <span class="tag m">my call</span></li>
+</ul>
+</li>
+<li><strong>The account package's hosts:</strong> upstream folded <code>account-controller</code> into <code>deepseek-account</code>, which now also reads notifications from <code>harness.deepseek.com</code>. Boxes keep the row off. The desktop overlay points <code>harnessOrigin</code> at <code>api.mumbo.si</code>, whose gateway serves an empty notification list. A desktop-overlay test fails if any enabled desktop row names a deepseek.com host other than <code>api.deepseek.com</code>. Deploy order: the gateway goes out before the next desktop build. Approved.</li>
+<li><strong>Search:</strong> upstream's new person-facing Workspace search resolves the root <code>unconfined</code>, as the person's listing does since §B24. Members hold no search action. Approved.</li>
+<li><strong>Blocker for the founder:</strong> the founder's <code>deploy/mumbo.overlay.yml</code> still turns off <code>account-controller</code>, a row that no longer exists. The fix is deleting those two lines, and it needs the founder's go-ahead.</li>
+</ul>
+</li>
 </ul>
 <p><strong>Acceptance (first milestone: the founder's box in Mumbai):</strong></p>
 <ul>
