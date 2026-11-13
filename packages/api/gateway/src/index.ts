@@ -533,14 +533,20 @@ export class TypertGatewayService extends Service implements TypertGateway {
     control: AbortController,
     uplinkWindow?: RemoteInvocation['uplinkWindow'],
   ): Promise<AsyncIterable<unknown>> {
-    if (endpoint === REMOTE_EVENT_STREAM_ENDPOINT) {
-      // A Gateway-owned stream reads no uplink: releasing it now keeps its items out of the bounded inbox.
-      releaseUplink(uplink)
-      assertPeerLive(peer, endpoint)
-      requireInteractions(peer, endpoint)
-      return this.openRemoteEvents(payload, signal, peer)
+    try {
+      if (endpoint === REMOTE_EVENT_STREAM_ENDPOINT) {
+        // A Gateway-owned stream reads no uplink: releasing it now keeps its items out of the bounded inbox.
+        releaseUplink(uplink)
+        assertPeerLive(peer, endpoint)
+        requireInteractions(peer, endpoint)
+        return this.openRemoteEvents(payload, signal, peer)
+      }
+      return await this.openStream({ ...remoteRequest(endpoint, payload, signal, peer), uplink, uplinkWindow }, control)
+    } catch (error) {
+      // Carriers send the failure frame without logging it.
+      this.logFailure(endpoint, peer, error)
+      throw error
     }
-    return this.openStream({ ...remoteRequest(endpoint, payload, signal, peer), uplink, uplinkWindow }, control)
   }
 
   private async *openRemoteEvents(
@@ -791,20 +797,29 @@ export class TypertGatewayService extends Service implements TypertGateway {
     }
   }
 
-  /**
-   * Log one failed unary call, then encode its failure. Connection answers every result with HTTP 200, so this line
-   * is the Host's only record of a refused or failed call. It names the endpoint, the caller's principal kind, and
-   * the code, never the arguments. A Remote failure logs at warn, with its message only when the Gateway wrote it (a
-   * {@link TypertGatewayError} or the access denial), since a handler's message may quote its arguments. Any other
-   * failure logs at error with the error, whose message and stack its thrower wrote.
-   */
+  /** Log one failed unary call, then encode its failure. Connection answers every result with HTTP 200. */
   private loggedRpcFailure(endpoint: string, peer: PeerScope, error: unknown): ConnectionRpcResult {
+    return { ok: false, error: this.logFailure(endpoint, peer, error) }
+  }
+
+  /**
+   * Log one failed unary call or stream open: the Host's only record of a refused or failed call. The line names the
+   * endpoint, the caller's principal kind, and the code, never the arguments. A Remote failure logs at warn, with its
+   * message only when the Gateway wrote it (a {@link TypertGatewayError} or the access denial), since a handler's
+   * message may quote its arguments. Any other failure logs at error with the error, whose message and stack its
+   * thrower wrote.
+   * @param endpoint - the called `namespace/method`.
+   * @param peer - the caller.
+   * @param error - the thrown failure.
+   * @returns the failure encoded for the carrier.
+   */
+  private logFailure(endpoint: string, peer: PeerScope, error: unknown): ConnectionRpcError {
     const failure = rpcError(error)
     const line = `typert gateway: ${endpoint} failed (principal ${peer.principal.kind}): ${failure.code}`
     if (remoteErrorOf(error) === undefined) this.ctx.logger.error(`${line}: ${failure.message}`, error)
     else if (error instanceof TypertGatewayError || failure.code === 'remote-access/denied') this.ctx.logger.warn(`${line}: ${failure.message}`)
     else this.ctx.logger.warn(line)
-    return { ok: false, error: failure }
+    return failure
   }
 
   /** `control` fails the logical stream when an uplink item is rejected; unary calls hand over an inert one. */
