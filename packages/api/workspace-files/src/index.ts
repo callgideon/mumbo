@@ -365,7 +365,8 @@ export class WorkspaceFiles extends TypertRemoteService {
     if (query.length === 0) throw new RemoteError('gateway/bad-request', 'query must not be blank', {})
     signal.throwIfAborted()
     const { workspaceRoot } = workspaceFileScope
-    const root = await this.ctx.fs.resolve(workspaceRoot, { signal })
+    // The person's own search resolves the root as their browsing does, through links that leave the model's directories.
+    const root = await this.ctx.fs.resolve(workspaceRoot, { signal, unconfined: true })
     const info = await this.ctx.fs.stat(root, signal)
     if (info === undefined) {
       throw new RemoteError('workspace-file/not-found', `no entry at "${workspaceRoot}"`, { path: workspaceRoot })

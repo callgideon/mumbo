@@ -256,3 +256,19 @@ it('fills the remaining search defaults when the search group is partial', () =>
   expect(parseConfig({ search: { maxResults: 3, timeoutMs: 10 } }).search)
     .toEqual({ maxResults: 3, maxEntries: 100000, graceMs: 3000, timeoutMs: 10, stderrMaxBytes: 65536 })
 })
+
+describe.runIf(process.platform === 'linux')('search under model roots', () => {
+  it('searches a Workspace root reached through a link that leaves the model roots', async () => {
+    const roots = await openWorkspace('dsh-workspace-search-roots-', workspace => [workspace])
+    try {
+      await mountSearchSubprocess(roots)
+      await writeFile(join(roots.outside, 'shared.txt'), '')
+      await symlink(roots.outside, join(roots.workspace, 'linked'))
+      const scope = { ...roots.scope, workspaceRoot: join(roots.workspace, 'linked') }
+      expect((await roots.endpoint().search(scope, request('shared'), signal())).matches).toEqual([{ path: 'shared.txt', type: 'file' }])
+    } finally {
+      await roots.ctx.fiber.dispose()
+      await roots.dispose()
+    }
+  })
+})
