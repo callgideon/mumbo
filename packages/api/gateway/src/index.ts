@@ -543,7 +543,7 @@ export class TypertGatewayService extends Service implements TypertGateway {
       }
       return await this.openStream({ ...remoteRequest(endpoint, payload, signal, peer), uplink, uplinkWindow }, control)
     } catch (error) {
-      // Carriers send the failure frame without logging it.
+      // The mux and webworker carriers send the failure frame without logging it.
       this.logFailure(endpoint, peer, error)
       throw error
     }
@@ -803,7 +803,7 @@ export class TypertGatewayService extends Service implements TypertGateway {
   }
 
   /**
-   * Log one failed unary call or stream open: the Host's only record of a refused or failed call. The line names the
+   * Log one failed unary call or stream open. The line names the
    * endpoint, the caller's principal kind, and the code, never the arguments. A Remote failure logs at warn, with its
    * message only when the Gateway wrote it (a {@link TypertGatewayError} or the access denial), since a handler's
    * message may quote its arguments. Any other failure logs at error with the error, whose message and stack its
