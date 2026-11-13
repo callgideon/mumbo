@@ -1,3 +1,3 @@
-- button "Current branch: main": main
+- 'button "Current branch: main"': main
 - checkbox "New worktree"
 - text: New worktree
