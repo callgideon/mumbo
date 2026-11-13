@@ -164,7 +164,7 @@ it('requires initial publication evidence and prepares approval without installe
 
 const rolloutWorkflow = '.github/workflows/desktop-rollout.yml'
 
-// The Mumbo fork ships only mumbo-* workflows, so the upstream rollout workflow is absent there.
+// A Mumbo checkout lacks upstream's rollout workflow; mumbo-ci restores upstream's workflows before these tests run.
 it.skipIf(!existsSync(rolloutWorkflow))('keeps rollout approval and website recovery separate without tag creation or full package verification', async () => {
   const text = await readFile(rolloutWorkflow, 'utf8')
   const workflow = load(text) as {
