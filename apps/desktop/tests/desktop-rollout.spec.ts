@@ -2,6 +2,7 @@ import { execFile, spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { promisify } from 'node:util'
 import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -161,8 +162,11 @@ it('requires initial publication evidence and prepares approval without installe
   } finally { await rm(f.root, { recursive: true, force: true }) }
 })
 
-it('keeps rollout approval and website recovery separate without tag creation or full package verification', async () => {
-  const text = await readFile('.github/workflows/desktop-rollout.yml', 'utf8')
+const rolloutWorkflow = '.github/workflows/desktop-rollout.yml'
+
+// The Mumbo fork ships only mumbo-* workflows, so the upstream rollout workflow is absent there.
+it.skipIf(!existsSync(rolloutWorkflow))('keeps rollout approval and website recovery separate without tag creation or full package verification', async () => {
+  const text = await readFile(rolloutWorkflow, 'utf8')
   const workflow = load(text) as {
     name: string
     on: { workflow_dispatch: { inputs: Record<string, { required?: boolean; default?: unknown }> } }
@@ -382,8 +386,8 @@ it.each(['missing-yaml', 'wrong-approval', 'not-uploaded', 'wrong-zone', 'not-se
     } finally { vi.restoreAllMocks(); await rm(f.root, { recursive: true, force: true }) }
   })
 
-it('executes the master guard and keeps all rollout preflights ahead of dependency installation', async () => {
-  const workflow = load(await readFile('.github/workflows/desktop-rollout.yml', 'utf8')) as {
+it.skipIf(!existsSync(rolloutWorkflow))('executes the master guard and keeps all rollout preflights ahead of dependency installation', async () => {
+  const workflow = load(await readFile(rolloutWorkflow, 'utf8')) as {
     jobs: Record<string, { steps: Array<{ id?: string; run?: string; uses?: string; env?: Record<string, string> }> }>
   }
   const route = workflow.jobs.route!.steps
