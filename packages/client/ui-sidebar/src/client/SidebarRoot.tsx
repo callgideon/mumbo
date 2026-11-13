@@ -212,7 +212,7 @@ export function SidebarRoot({
   openSession,
   setPinned,
   trackEntryClick,
-  useRemoteAccess,
+  useNewSessionAccess,
   useSessions,
   useSessionStatus,
   usePanels,
@@ -230,8 +230,8 @@ export function SidebarRoot({
   const hasEntryActions = useEntryActions(registered => registered)
   const shortcut = useShortcuts(rows => rows.find(row => row.id === 'sidebar.left.toggle'))
   const newShortcut = useShortcuts(rows => rows.find(row => row.id === 'session.new'))
-  // A page whose access snapshot excludes starting a Session offers no New Session affordance.
-  const canStartSession = useRemoteAccess('session/create')
+  // A Peer refused `session/create` where New Session would start gets no New Session affordance.
+  const canStartSession = useNewSessionAccess(allowed => allowed)
   const toggleLabel = collapsed ? t('toggle.open') : t('toggle.collapse')
   // Wide content stays mounted while the collapse animates (fading via
   // .collapsed .wide), unmounts at settle, and remounts right away on expand.
@@ -386,7 +386,7 @@ export function SidebarRoot({
       {darwinDesktop && <div className={css.topStrip} data-window-drag>{toggle}</div>}
       <div className={css.logoRow} data-window-drag>
         {/* Expanded, the brand doubles as a New Session shortcut while the
-            access snapshot allows `session/create` — except on
+            access snapshot allows `session/create` where New Session would start — except on
             macOS, where it stays part of the logo row's window-drag surface
             (a button would subtract itself through the global no-drag rule);
             the collapsed rail's logo is the expand toggle below instead.
