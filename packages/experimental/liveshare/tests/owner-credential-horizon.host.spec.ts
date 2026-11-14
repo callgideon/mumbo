@@ -17,9 +17,9 @@ import { describe, expect, it, onTestFinished } from 'vitest'
 import type {} from '../src/index.ts'
 import { apply } from '../src/host/share-host.ts'
 
-const START = Date.parse('2026-10-15T00:00:00.000Z')
-const PAST = new Date(START).toISOString()
-const LIVE = new Date(START + 30 * 24 * 60 * 60_000).toISOString()
+const PAST = new Date(Date.parse('2026-10-15T00:00:00.000Z')).toISOString()
+// Mumbo fork: the host compares horizons with the wall clock, so a fixed date stops being live once it passes.
+const LIVE = new Date(Date.now() + 30 * 24 * 60 * 60_000).toISOString()
 const STORED_TOKEN = 'stored-payload.stored-signature'
 
 /**
