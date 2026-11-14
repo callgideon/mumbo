@@ -2455,7 +2455,11 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>Revisit when the converter can run as <code>agent</code> through the subprocess provider and write into the model roots. <span class="tag m">my call</span></li>
 </ul>
 </li>
-<li><strong>The account package's hosts:</strong> upstream folded <code>account-controller</code> into <code>deepseek-account</code>, which now also reads notifications from <code>harness.deepseek.com</code>. Boxes keep the row off. The desktop overlay points <code>harnessOrigin</code> at <code>api.mumbo.si</code>, whose gateway serves an empty notification list. A desktop-overlay test fails if any enabled desktop row names a deepseek.com host other than <code>api.deepseek.com</code>. Deploy order: the gateway goes out before the next desktop build. Approved.</li>
+<li><strong>The account package's hosts:</strong> upstream folded <code>account-controller</code> into <code>deepseek-account</code>, which now also reads notifications from <code>harness.deepseek.com</code>. Boxes keep the row off. The desktop overlay points <code>harnessOrigin</code> at <code>api.mumbo.si</code>, whose gateway serves an empty notification list. A desktop-overlay test fails if any enabled desktop row names a deepseek.com host other than <code>api.deepseek.com</code>. Deploy order: the gateway goes out before the next desktop build. Approved.
+<ul>
+<li><strong>Amended [2026-11-14]: the gateway stays retired.</strong> Nothing hosts <code>deploy/gateway.mjs</code>. The shared server was retired on 2026-11-09, and <code>api.mumbo.si</code> redirects to <code>app.mumbo.si</code>, as section 17a says. So today's desktop app can't sign in to Mumbo or reach the model through it, with or without #61, and no one ships or uses that build. N2a replaces that path: the app signs in through the edge and uses the person's box, which reaches the model as any box does. The gateway won't come back as its own service, which would mean new spend for no one, and it won't move onto the edge. N2a deletes <code>deploy/gateway.mjs</code> and the desktop overlay's <code>api.mumbo.si</code> origins. Until then they stay as they are, unused, and the deploy-order note above has nothing to do. <span class="tag m">my call</span></li>
+</ul>
+</li>
 <li><strong>Search:</strong> upstream's new person-facing Workspace search resolves the root <code>unconfined</code>, as the person's listing does since §B24. Members hold no search action. Approved.</li>
 <li><strong>CI and CodeQL [2026-11-13]:</strong>
 <ul>
@@ -2835,7 +2839,7 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <tbody>
 <tr>
 <td><strong>N2a</strong> app sign-in</td>
-<td>The desktop app signs in through the edge (Google in the system browser) and uses the person's box as its host instead of a local dsh. Today's app binds a local dsh on <code>127.0.0.1</code> (<code>apps/desktop/README.md</code>), so this is a rework of the app. The sync replica's identity is registered here</td>
+<td>The desktop app signs in through the edge (Google in the system browser) and uses the person's box as its host instead of a local dsh. Today's app binds a local dsh on <code>127.0.0.1</code> (<code>apps/desktop/README.md</code>), so this is a rework of the app. The sync replica's identity is registered here. It deletes <code>deploy/gateway.mjs</code> and the desktop overlay's <code>api.mumbo.si</code> origins (B51)</td>
 <td>—</td>
 </tr>
 <tr>
