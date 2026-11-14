@@ -510,7 +510,9 @@ ${person ? `  SHARED_GID=$(gid shared)
   install -d -m 0700 /root/.dsh/tmp /root/.dsh/skills${person ? '' : ' /root/.config /root/.config/gh'}
   install -d -m 0711 /run/dsh-shell
   install -d -m 0755 /var/lib/mumbo /usr/local/share/mumbo/agents /usr/local/share/mumbo/agents/skills
-  for d in attachments attachments/attachments attachments/attachments/v1 spill subprocess-spill${person ? '' : ' superagent'}; do install -d -o root -g agent -m 2750 /var/lib/mumbo/$d; done
+  # The stores root writes and agent's group reads (attachments, spill, subprocess spill and Office outputs, B54), and on
+  # a project box dsh-superagent's worker directory.
+  for d in attachments attachments/attachments attachments/attachments/v1 spill subprocess-spill office-outputs${person ? '' : ' superagent'}; do install -d -o root -g agent -m 2750 /var/lib/mumbo/$d; done
   # agent's GH_CONFIG_DIR (B48): gh's configuration and sign-in, agent's alone, outside every model root, in a directory
   # only root changes. The system repair leaves it as it is (REPAIR_USER_PATHS), and backups carry it.
   install -d -o agent -g agent -m 0700 /var/lib/mumbo/agent-gh
@@ -630,6 +632,7 @@ ${person ? identity('browsermcp', '$BMCP_UID', '$BMCP_GID', '$UPLOADS_GID') + id
       - /usr/local/share/mumbo/agents/skills
       - /var/lib/mumbo/spill
       - /var/lib/mumbo/subprocess-spill
+      - /var/lib/mumbo/office-outputs
 - id: attachment-local
   config:
     dshHome: /var/lib/mumbo/attachments
@@ -637,6 +640,10 @@ ${person ? identity('browsermcp', '$BMCP_UID', '$BMCP_GID', '$UPLOADS_GID') + id
 - id: spill-local
   config:
     root: /var/lib/mumbo/spill
+    groupReadable: true
+- id: office-kit
+  config:
+    outputDirectory: /var/lib/mumbo/office-outputs
     groupReadable: true
 - id: mcp-manager
   inject: [credentials, subprocess]
