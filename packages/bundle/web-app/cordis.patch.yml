@@ -305,8 +305,11 @@
         source: !!js process.env.DSH_PRIMARY_RUNTIME
         root: !!js dshHomePath('dsh-runtimes', 'dsh-primary-runtime')
 
+    # Off where dsh runs as root, i.e. on boxes, together with the Office tools these skills direct the model to. See
+    # .agents/notes/implemented/architecture/2026-11-10-agent-containment-run-as-and-model-roots.md.
     - id: skill-office
       name: '@deepseek-ai/dsh-skill-office'
+      disabled: !!js "process.getuid?.() === 0"
       config:
         pythonEnvironment: !!js "ctx.get('profileContext')?.name === 'desktop' && process.env.DSH_PRIMARY_RUNTIME ? 'workspace-dependencies' : 'user'"
 

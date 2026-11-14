@@ -1,7 +1,7 @@
 /**
  * The desktop overlay that mumbo-desktop.yml appends to the web-app bundle: no row it leaves on names a deepseek.com
  * host other than the model API, counting the origins the deepseek-account row leaves at their defaults, and the
- * desktop, which runs dsh as the person, keeps the Office tools that a root dsh turns off.
+ * desktop, which runs dsh as the person, keeps the Office tools and skills that a root dsh turns off.
  */
 
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -64,8 +64,12 @@ it('leaves no enabled row on a deepseek.com host other than api.deepseek.com', (
   expect(hosts.filter(host => !host.endsWith(': api.deepseek.com'))).toEqual([])
 })
 
-it('keeps the Office tools in both presets for a non-root dsh and turns them off under root', () => {
+it('keeps the Office tools in both presets and the Office skills for a non-root dsh and turns them off under root', () => {
   const rows = compose()
+  const skills = rows.find(row => row.name === '@deepseek-ai/dsh-skill-office')
+  expect(skills).toBeDefined()
+  expect(disabledFor(skills?.disabled, 1000)).toBe(false)
+  expect(disabledFor(skills?.disabled, 0)).toBe(true)
   for (const id of ['preset-standard', 'preset-ptc']) {
     const plugins = (rows.find(row => row.id === id)?.config as { plugins: { id?: string; name?: string; disabled?: unknown }[] }).plugins
     const office = plugins.find(row => row.name === '@deepseek-ai/dsh-tool-office')
