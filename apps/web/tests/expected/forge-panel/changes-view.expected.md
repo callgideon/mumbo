@@ -1,16 +1,21 @@
-- img "Change request state: Needs attention"
+- 'img "Change request state: Needs attention"'
 - text: "Add the pull request panel #7"
+- 'button "Commits shown: All commits"': All commits
 - button "Submit review"
 - button "Open in browser"
 - button "All 2 files"
+- 'button "Review layer: All"': All
+- switch "Hide test files"
+- progressbar "Viewed files": 0 / 2 viewed
 - text: +4 −2
 - button "Refresh changes"
 - button "Collapse all files"
-- button "Split view" [pressed]
-- button "Line wrap" [pressed]
+- button "Side by side" [pressed]
+- button "Wrap lines" [pressed]
 - region "All 2 files":
   - button "Collapse panel.md" [expanded]
   - text: docs/panel.md New file +2 −0
+  - checkbox "Mark panel.md as viewed"
   - button "More actions for panel.md"
   - button "Select line R1": "1"
   - text: "+ # Panel"
@@ -18,6 +23,7 @@
   - text: + Shows the change requests of a Session.
   - button "Collapse panel.ts" [expanded]
   - text: src/panel.ts +2 −2
+  - checkbox "Mark panel.ts as viewed"
   - button "More actions for panel.ts"
   - button "Select line L1": "1"
   - text: export const n1 = 1

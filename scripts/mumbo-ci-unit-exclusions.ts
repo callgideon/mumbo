@@ -71,7 +71,6 @@ export const MUMBO_CI_UNIT_EXCLUSIONS: readonly UnitExclusion[] = [
   { path: 'scripts/build-exe-for-python-sdk{,-assets,-native-pty,-resources,-staging}.spec.ts', category: 'gate-not-run', reason: 'The Python SDK executable build; mumbo ships no Python SDK.' },
   { path: 'scripts/python-runtime-download.spec.ts', category: 'gate-not-run', reason: 'The Python SDK runtime download; mumbo ships no Python SDK.' },
   { path: 'scripts/cua-helper/payload.spec.ts', category: 'gate-not-run', reason: 'Staging of the released computer-use helper payload; the desktop package step does not run it.' },
-  { path: 'scripts/rescope-vendor.spec.ts', category: 'gate-not-run', reason: 'The vendor rescope command; mumbo-upstream-sync does not run it.' },
 ]
 
 /**

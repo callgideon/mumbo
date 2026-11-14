@@ -13,7 +13,8 @@
     "src/client/shell-preference.ts",
     "src/types.ts",
     "src/client/close-requests.ts",
-    "src/client/inventory.ts"
+    "src/client/inventory.ts",
+    "src/client/roster.ts"
   ],
   "references": [
     {
@@ -21,6 +22,9 @@
     },
     {
       "path": "../gateway/tsconfig.client.json"
+    },
+    {
+      "path": "../remote-access/tsconfig.client.json"
     },
     {
       "path": "../../client/store"

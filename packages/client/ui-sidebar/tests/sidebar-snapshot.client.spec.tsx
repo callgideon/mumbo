@@ -42,7 +42,7 @@ async function bench() {
   const runtime = await SlotTestRuntime.create()
   runtime.ctx.provide('shortcuts', { catalog: createSnapshotStore([]) } as never)
   runtime.ctx.provide('layout', { toggleSidebar: vi.fn() })
-  runtime.ctx.provide('uiWorkspace', { startSession: vi.fn(), openSession: vi.fn() } as never)
+  runtime.ctx.provide('uiWorkspace', { startSession: vi.fn(), openSession: vi.fn(), newSessionAccess: createSnapshotStore(true) } as never)
   const locale = new LocaleRuntime(runtime.ctx)
   locale.register('common', { en: commonEn })
   runtime.ctx.provide('locale', locale)

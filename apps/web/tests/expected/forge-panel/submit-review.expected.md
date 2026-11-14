@@ -10,5 +10,6 @@
   - text: Approve
   - radio "Request changes" [checked]
   - text: Request changes
+  - button "Discard review"
   - button "Cancel"
   - button "Submit review"

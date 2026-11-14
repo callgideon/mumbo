@@ -5,8 +5,6 @@
   disabled: true
 - id: llm-deepseek-account
   disabled: true
-- id: account-controller
-  disabled: true
 # Desktop-only product analytics; there is no Mumbo collector yet.
 - id: desktop-product-telemetry
   disabled: true

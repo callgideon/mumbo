@@ -1,0 +1,25 @@
+- dialog "Settings":
+  - text: Settings
+  - navigation:
+    - button "General"
+    - button "Models"
+    - button "Built-in plugins"
+    - button "Agent presets"
+  - button "Open configuration file"
+  - button "Close"
+  - heading "Models" [level=2]
+  - paragraph: Enter your API keys to use models from the following providers.
+  - list:
+    - listitem:
+      - text: DeepSeek
+      - img "API key configured"
+      - button "Edit DeepSeek (deepseek-official)": Edit
+      - text: DeepSeek deepseek-official API key
+      - button "Authentication details": "?"
+      - textbox "API key":
+        - /placeholder: Leave blank to use env as auth (DEEPSEEK_API_KEY)
+      - paragraph: Apply to clear the saved API key. Environment authentication will be used (DEEPSEEK_API_KEY).
+      - group: Customized settings
+      - button "Cancel"
+      - button "Apply"
+  - button "Add model provider"

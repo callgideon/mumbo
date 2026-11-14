@@ -39,7 +39,7 @@ Each dated record has three sibling files:
 
 A maintainer captures an agreed format with [`createPersistenceFinalizationCheckpoint`](../../scripts/persistence-finalization.ts), writes a new version-named checkpoint without replacing an earlier one, and advances the paired `latestFinalizedVersion`. The helper requires current schemas to match complete acknowledged history. Run the ordinary verifier before committing.
 
-The [record template](../../.agents/skills/dsh-doc/templates/persistence-change.md) defines the authored format. Record creation accepts a prose input and generates the machine declaration, snapshots, and catalog. The verifier reads the machine declaration once from the English file. A declaration names each affected root, its predecessor record, its after digest, and its compatibility decision. A new root has no predecessor; a deletion has no after schema and retains an explicit tombstone.
+The [record template](../../.agents/skills/dsh-doc-writing/templates/persistence-change.md) defines the authored format. Record creation accepts a prose input and generates the machine declaration, snapshots, and catalog. The verifier reads the machine declaration once from the English file. A declaration names each affected root, its predecessor record, its after digest, and its compatibility decision. A new root has no predecessor; a deletion has no after schema and retains an explicit tombstone.
 
 <a id="compatibility-rules"></a>
 ## Compatibility rules

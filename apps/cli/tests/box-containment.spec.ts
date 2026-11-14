@@ -74,6 +74,7 @@ const NONE: Classification = { runs: 'none', tools: [] }
 
 /** Every package a box composition mounts. Browser-side `@deepseek-ai/dsh-client-*` packages register no host tool. */
 const CLASSIFICATION: Readonly<Record<string, Classification>> = {
+  '@deepseek-ai/cordis-plugin-logger-console': { ...NONE, note: 'writes the Host\'s warn and error log lines to stdout' },
   '@deepseek-ai/cordis-plugin-timer': NONE,
   '@deepseek-ai/dsh-agent': NONE,
   '@deepseek-ai/dsh-agent-default-model': NONE,
@@ -142,7 +143,7 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
   },
   '@deepseek-ai/dsh-message-feedback': NONE,
   '@deepseek-ai/dsh-message-quotes': NONE,
-  '@deepseek-ai/dsh-office-to-pdf': { ...NONE, note: 'document previews the person opens' },
+  '@deepseek-ai/dsh-office-kit': { ...NONE, note: 'document previews the person opens' },
   '@deepseek-ai/dsh-otel': NONE,
   '@deepseek-ai/dsh-permission-presets': NONE,
   '@deepseek-ai/dsh-persona': NONE,
@@ -172,6 +173,7 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
   '@deepseek-ai/dsh-shell-env': NONE,
   '@deepseek-ai/dsh-skill': NONE,
   '@deepseek-ai/dsh-skill-filesystem': NONE,
+  '@deepseek-ai/dsh-skill-office': { ...NONE, note: 'Office skill text the skill tool loads' },
   '@deepseek-ai/dsh-spill-local': NONE,
   '@deepseek-ai/dsh-spill-policy': NONE,
   '@deepseek-ai/dsh-storage': NONE,
@@ -267,8 +269,9 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
 }
 
 /**
- * Packages that load code into root dsh, start a root process for the model, or send root dsh's requests to any address
- * the model names, loopback and private ones included; no box may mount them.
+ * Packages that load code into root dsh, start a root process for the model, send root dsh's requests to any address
+ * the model names, loopback and private ones included, or run a document converter in root dsh on files the model names;
+ * no box may mount them.
  */
 const FORBIDDEN = [
   '@deepseek-ai/dsh-tool-cordis',
@@ -276,6 +279,7 @@ const FORBIDDEN = [
   '@deepseek-ai/dsh-experimental-ptc-runtime-python',
   '@deepseek-ai/dsh-subagent-dsh-sdk',
   '@deepseek-ai/dsh-web-fetch-http',
+  '@deepseek-ai/dsh-tool-office',
 ]
 
 interface Row { id?: string; name?: string; disabled?: unknown; inject?: unknown; config?: unknown }
@@ -342,8 +346,8 @@ const REPORT_TURN: Readonly<Record<string, 'runs' | 'asks' | 'browser reads run'
 const CONTAINMENT_ENV = { MUMBO_WORK_DIR: '/root/work', MUMBO_WORKER_DIR: '/var/lib/mumbo/superagent', MUMBO_GH_CONFIG_DIR: '/root/.config/gh' }
 
 /**
- * Evaluate `!!js` values in a row's field the way a contained Linux box boots it: the launcher supplies a profile
- * context, `dshHomePath` names a path under root's DSH home, and `env` is the environment.
+ * Evaluate `!!js` values in a row's field the way a contained Linux box boots it: dsh runs as root (uid 0), the launcher
+ * supplies a profile context, `dshHomePath` names a path under root's DSH home, and `env` is the environment.
  */
 function evaluated(value: unknown, env: Record<string, string> = {}): unknown {
   if (Array.isArray(value)) return value.map(entry => evaluated(entry, env))
@@ -353,7 +357,7 @@ function evaluated(value: unknown, env: Record<string, string> = {}): unknown {
   // The expressions are the repository's own composition files.
   // oxlint-disable-next-line typescript/no-implied-eval
   const evaluate = new Function('ctx', 'process', 'dshHomePath', `return (${String(value.__jsExpr)})`) as (ctx: unknown, process: unknown, home: unknown) => unknown
-  return evaluate(context, { platform: 'linux', env }, (...segments: string[]) => posix.join('/root/.dsh', ...segments))
+  return evaluate(context, { platform: 'linux', env, getuid: () => 0 }, (...segments: string[]) => posix.join('/root/.dsh', ...segments))
 }
 
 /** Evaluate a row's `disabled` value the way a contained Linux box boots it. */
@@ -530,6 +534,8 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
 
   it('mounts none of the packages that would load code into root dsh or start a root process for the model', () => {
     expect(names.filter(name => FORBIDDEN.includes(name))).toEqual([])
+    // The Office previews and skills stay; only the in-process Office tools are off under root.
+    expect(names).toEqual(expect.arrayContaining(['@deepseek-ai/dsh-office-kit', '@deepseek-ai/dsh-skill-office']))
   })
 
   it('applies the containment rows', () => {

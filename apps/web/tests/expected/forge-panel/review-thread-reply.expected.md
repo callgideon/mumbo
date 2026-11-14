@@ -1,0 +1,16 @@
+- region "R2":
+  - text: R2 · on aaaaaaa lin 2 h ago
+  - button "Actions for the comment by lin"
+  - paragraph:
+    - text: Why
+    - strong: two
+    - text: "?"
+  - text: octo 2 h ago Author
+  - paragraph: It reads better.
+  - textbox "Reply…": Changed to a string
+  - button "Cancel"
+  - button "Reply"
+  - button "Reply options"
+  - button "Add to input"
+  - button "View on GitHub"
+  - button "Resolve thread"

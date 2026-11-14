@@ -33,6 +33,11 @@
     "reason": "Inline Japanese dictionary entries of the macOS permission guide"
   },
   {
+    "path": "packages/experimental/cua/src/{locales,mouse-control-locales}.ts",
+    "line": "^\\s*ja: '",
+    "reason": "Inline Japanese (ja) entries of the per-language Computer Use consent prompts"
+  },
+  {
     "path": "packages/web/*/src/*.ts",
     "line": "^\\s*ja: '",
     "reason": "Japanese (ja) web provider descriptions"

@@ -1,0 +1,42 @@
+- 'img "Change request state: Needs attention"'
+- text: "Add the pull request panel #7"
+- 'button "Commits shown: All commits"': All commits
+- button "Submit review"
+- button "Open in browser"
+- radiogroup "Review layer":
+  - radio "All 3" [checked]
+  - radio "Interface 1"
+  - radio "Implementation 2"
+  - radio "Tests" [disabled]
+- button "All 3 files"
+- switch "Hide test files" [checked]
+- progressbar "Viewed files": 2 / 3 viewed
+- text: +5 −2
+- button "Refresh changes"
+- button "Collapse all files"
+- button "Side by side" [pressed]
+- button "Wrap lines" [pressed]
+- button "Move file tree to the right" [expanded]
+- region "All 3 files":
+  - button "Expand panel.md"
+  - text: docs/panel.md New file +2 −0
+  - checkbox "Mark panel.md as viewed" [checked]
+  - button "More actions for panel.md"
+  - button "Expand panel.ts"
+  - text: src/panel.ts +2 −2
+  - checkbox "Mark panel.ts as viewed" [checked]
+  - button "More actions for panel.ts"
+  - button "Collapse package.json" [expanded]
+  - text: package.json New file +1 −0
+  - checkbox "Mark package.json as viewed"
+  - button "More actions for package.json"
+  - button "Select line R1": "1"
+  - text: "+ { \"name\": \"demo\" }"
+- separator "Resize file tree"
+- navigation "All 3 files":
+  - textbox "Filter files…"
+  - button "docs" [expanded]
+  - button "docs/panel.md": panel.md +2 −0
+  - button "src" [expanded]
+  - button "src/panel.ts": panel.ts +2 −2
+  - button "package.json": package.json +1 −0

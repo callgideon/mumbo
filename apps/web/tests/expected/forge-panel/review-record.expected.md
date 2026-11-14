@@ -1,4 +1,8 @@
-- region "Comment on R2–4":
-  - text: Your comment R2–4 Published to GitHub please check the boundary conditions
+- region "R2–4":
+  - text: R2–4 · on aaaaaaa lin 1 mo ago
+  - button "Actions for the comment by lin"
+  - paragraph: please check the boundary conditions
+  - button "Reply…"
   - button "Add to input"
   - button "View on GitHub"
+  - button "Resolve thread"

@@ -554,7 +554,7 @@ describe('run-as launch requests', () => {
     launchLinuxScope(ordinary, { TARGET: 'yes' }, [], { spawn: spawn as never, runnerInvocation: ['/node', '/runner.js'], systemdRun: '/bin/systemd-run' }, identity)
     expect(calls[0]?.command).toBe('/bin/systemd-run')
     expect(calls[0]?.args.slice(-5)).toEqual(['/node', '/runner.js', '--', 'tool', 'arg'])
-    expect(consumed(calls[0]!.env)).toEqual({ cwd: '/work', env: { TARGET: 'yes' }, runAs: identity })
+    expect(consumed(calls[0]!.env)).toEqual({ cwd: '/work', env: { TARGET: 'yes' }, runAs: identity, pipeFds: [1, 2] })
     const terminal = prepareLinuxTerminalScope({ argv: ordinary.argv, cwd: ordinary.cwd, graceMs: 100, rows: 1, cols: 1, terminalType: 'xterm' }, { T: '1' }, [], { runnerInvocation: ['/node', '/runner.js'] }, identity)
     expect(consumed(terminal.env)).toEqual({ cwd: '/work', env: { T: '1' }, runAs: identity })
     terminal.cleanup()
@@ -569,7 +569,7 @@ describe('run-as launch requests', () => {
     expect(calls[0]?.args).toEqual(['/runner.js', '--', 'tool', 'arg'])
     const locator = calls[0]!.env[SUBPROCESS_RUNNER_ENV] as string
     const files = linuxLaunchFilesFromLocator(locator)
-    expect(consumeLinuxLaunchRequest(locator)).toEqual({ cwd: '/work', env: { TARGET: 'yes' }, control: 'pipe', runAs: identity })
+    expect(consumeLinuxLaunchRequest(locator)).toEqual({ cwd: '/work', env: { TARGET: 'yes' }, control: 'pipe', runAs: identity, pipeFds: [1, 2] })
     vi.spyOn(process, 'kill').mockImplementation(() => { throw Object.assign(new Error('gone'), { code: 'ESRCH' }) })
     child.exitCode = 0
     child.emit('exit', 0, null)

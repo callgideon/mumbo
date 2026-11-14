@@ -6,6 +6,7 @@ import { Deque } from '@deepseek-ai/dsh-deque'
 import { RemoteStreamCarrierError, type ClientRemote, type RemoteStream } from '@deepseek-ai/dsh-api-gateway/client'
 import { RemoteError, remoteErrorOf, type RemoteResult, type RemoteStreamHandle, type RemoteUplinkWindow } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-api-terminal-controller/remote'
+import type {} from '@deepseek-ai/dsh-api-remote-access/types'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {
   TerminalInput, TerminalEnvironment, TerminalFrame,
@@ -16,7 +17,7 @@ import type {
 export type TerminalRemote = ClientRemote['terminal']
 
 /** Product error identifiers translated by the terminal UI. */
-export type TerminalViewIssue = 'missingTerminal' | 'inputFull' | 'attachmentEnded' | 'invalidOutput' | 'terminalLimit'
+export type TerminalViewIssue = 'missingTerminal' | 'inputFull' | 'attachmentEnded' | 'invalidOutput' | 'terminalLimit' | 'accessDenied'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface RemoteErrorDetailsMap {
@@ -25,7 +26,8 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
   }
 }
 
-class TerminalViewError extends RemoteError<'terminal/view'> {
+/** Client terminal failure that names its locale-owned issue. */
+export class TerminalViewError extends RemoteError<'terminal/view'> {
   constructor(issue: TerminalViewIssue, message: string = issue) { super('terminal/view', message, { issue }) }
 }
 
@@ -224,15 +226,16 @@ export class TerminalView {
   /**
    * Queue input within the raw UTF-8 and encoded-frame budgets, waiting for carrier capacity.
    * @param data - input from the terminal emulator; never replayed after disconnection.
+   * @param typed - whether the person produced the input, as opposed to a terminal-protocol reply.
    */
-  write(data: string): void {
+  write(data: string, typed: boolean = false): void {
     const state = this.state.getSnapshot()
     const attachment = this.attachment
     if (!state.writable || state.info === undefined || attachment === undefined || attachment.signal.aborted) return
     if (data.length === 0) return
     const bytes = new TextEncoder().encode(data).byteLength
     if (attachment.bytes + bytes > (state.environment?.maxInputBytes ?? 0)) { this.failInput(new TerminalViewError('inputFull')); return }
-    this.send(attachment, { type: 'write', sequence: attachment.sequence + 1, data }, bytes)
+    this.send(attachment, { type: 'write', sequence: attachment.sequence + 1, data, ...typed ? { typed: true } : {} }, bytes)
   }
 
   /**
@@ -403,10 +406,26 @@ export class TerminalView {
   }
 
   private fail(error: unknown): void {
-    const failure = remoteErrorOf(error)
-    const issue = failure?.code === 'terminal/view' ? failure.details.issue : failure?.code === 'terminal/limit-reached' ? 'terminalLimit' : failure?.code === 'terminal/unavailable' ? 'missingTerminal' : undefined
+    const issue = terminalIssue(error)
     if (!this.stopped() && issue === 'missingTerminal') this.inventory.remove(this.id)
     this.patch({ phase: error instanceof RemoteStreamCarrierError ? 'disconnected' : 'failed', writable: false, issue, error: error instanceof Error ? error.message : String(error) })
+  }
+}
+
+/**
+ * Name the locale-owned issue of a terminal failure, so the tab never shows a Host message such as a remote-access refusal.
+ * @param error - a caught failure.
+ * @returns the issue, or `undefined` for a failure the tab reports by its message.
+ */
+export function terminalIssue(error: unknown): TerminalViewIssue | undefined {
+  const failure = remoteErrorOf(error)
+  switch (failure?.code) {
+    case 'terminal/view': return failure.details.issue
+    case 'terminal/limit-reached': return 'terminalLimit'
+    case 'terminal/unavailable': return 'missingTerminal'
+    case 'remote-access/denied': return 'accessDenied'
+    // Other Remote codes and non-Remote failures keep their message.
+    default: return undefined
   }
 }
 
