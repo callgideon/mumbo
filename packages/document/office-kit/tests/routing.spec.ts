@@ -90,6 +90,7 @@ posix('conversion routing', () => {
   })
 
   it('runs a conversion in the in-process Kit converter when the subprocess provider has no child identity', async () => {
+    vi.spyOn(process, 'getuid').mockReturnValue(1000)
     const specs = await subprocess(false, 'pdf')
     const result = await (await officeKit()).convert(request)
     expect(Buffer.from(result.pdf)).toEqual(KIT_PDF)
@@ -101,5 +102,13 @@ posix('conversion routing', () => {
     vi.spyOn(process, 'getuid').mockReturnValue(0)
     await expect((await officeKit()).convert(request)).rejects.toMatchObject({ name: 'OfficeKitError', code: 'unavailable' })
     expect(kit.create).not.toHaveBeenCalled()
+  })
+
+  it('refuses every conversion as root when the subprocess provider has no child identity', async () => {
+    vi.spyOn(process, 'getuid').mockReturnValue(0)
+    const specs = await subprocess(false, 'pdf')
+    await expect((await officeKit()).convert(request)).rejects.toMatchObject({ name: 'OfficeKitError', code: 'unavailable' })
+    expect(kit.create).not.toHaveBeenCalled()
+    expect(specs).toEqual([])
   })
 })

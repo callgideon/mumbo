@@ -404,7 +404,7 @@ export class OfficeKit extends TypertRemoteService {
 
   /**
    * Choose the converter of one operation. When the subprocess provider starts children as another identity, a
-   * conversion helper runs as that identity; when DSH runs as root without a subprocess provider, the operation fails
+   * conversion helper runs as that identity; when DSH runs as root without a child identity, the operation fails
    * `unavailable` and nothing runs in-process; otherwise the slot's in-process Kit converter runs it.
    */
   private converterFor(slot: Slot): Promise<OperationConverter> {
@@ -412,7 +412,7 @@ export class OfficeKit extends TypertRemoteService {
     if (subprocess?.childIdentity !== undefined) {
       return Promise.resolve(new ChildConverter(subprocess, this.options, helperDeadlineMs(this.config.timeoutMs)))
     }
-    if (subprocess === undefined && process.getuid?.() === 0) {
+    if (process.getuid?.() === 0) {
       return Promise.reject(new OfficeKitError('unavailable', 'Office conversion as root requires a subprocess provider that runs the converter as another user.'))
     }
     slot.converter ??= this.loadKit().then(({ createConverter, resolveEnginePackage }) =>
