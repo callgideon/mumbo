@@ -71,8 +71,9 @@
         secretNames: [DEEPSEEK_API_KEY, MUMBO_MEMBER_KEY, E2B_API_KEY, GH_TOKEN, GITHUB_TOKEN]
     serverIdentity: mcpserver
 # Confine the model's file tools to the workspace, agent's home, and the shared Downloads; reads check each opened file,
-# changes run as agent. The attachment, skill, and spill directories the harness names to the model are read-only; the
-# ones outside /root are root-owned with group agent and set-group-ID (2750), so the agent shell can read but not change them.
+# changes run as agent. The attachment, skill, spill, and Office output directories the harness names to the model are
+# read-only; the ones outside /root are root-owned with group agent and set-group-ID (2750), so the agent shell can read
+# but not change them.
 # Every root below must exist when dsh starts, /root/.dsh/skills and /usr/local/share/mumbo/agents/skills included.
 - id: fs-sandbox
   config:
@@ -83,6 +84,7 @@
       - /usr/local/share/mumbo/agents/skills
       - /var/lib/mumbo/spill
       - /var/lib/mumbo/subprocess-spill
+      - /var/lib/mumbo/office-outputs
 # Uploads live outside the root-only harness home, readable by agent's group and writable only by root. The box creates
 # /var/lib/mumbo/attachments, its attachments, and attachments/v1 (each root:agent 2750): the store makes v1 only on its
 # first upload, and fs-sandbox needs every read-only root to exist at load.
@@ -94,6 +96,12 @@
 - id: spill-local
   config:
     root: /var/lib/mumbo/spill
+    groupReadable: true
+# Office conversions run as agent in office-kit's helper; root writes the converted and recalculated files to
+# /var/lib/mumbo/office-outputs (root:agent 2750), a read-only root, readable by agent's group.
+- id: office-kit
+  config:
+    outputDirectory: /var/lib/mumbo/office-outputs
     groupReadable: true
 # The manager starts the person's MCP stdio servers through the run-as provider as mcpserver, and runs only while a
 # subprocess service is mounted, so no server starts as root after a provider remount or when the provider failed at load. Only

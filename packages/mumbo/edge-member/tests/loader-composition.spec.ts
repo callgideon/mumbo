@@ -348,6 +348,9 @@ describe('real Loader composition', () => {
     expect(s1?.actions).not.toContain('session/updateQueue')
     const global = 'grants' in snapshot ? snapshot.grants.find(grant => grant.resource.kind === 'global') : undefined
     expect(global?.actions).not.toContain('hostFiles/readAny')
+    // Members read no file contents, so Office previews are withheld too.
+    const granted = 'grants' in snapshot ? snapshot.grants.flatMap(grant => grant.actions) : []
+    expect(granted.filter(action => action.startsWith('officeKit/'))).toEqual([])
   })
 
   it('registers the member policy only after the stored Sessions are listed', { timeout: 60_000 }, async () => {

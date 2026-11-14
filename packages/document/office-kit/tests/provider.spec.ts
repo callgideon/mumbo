@@ -59,8 +59,13 @@ beforeEach(() => {
     recalculate: vi.fn<Converter['recalculate']>().mockRejectedValue(new Error('Unexpected Converter.recalculate call')),
   }
   kit.create.mockReset().mockImplementation(async () => ({ ...converter }))
+  // The provider refuses in-process conversions as root; these cases exercise the in-process converter under any uid.
+  if (process.getuid !== undefined) vi.spyOn(process, 'getuid').mockReturnValue(1000)
 })
-afterEach(async () => { await ctx.fiber.dispose() })
+afterEach(async () => {
+  await ctx.fiber.dispose()
+  vi.restoreAllMocks()
+})
 
 async function mount(config: Partial<Config> = {}): Promise<OfficeKit> {
   const outputDirectory = await mkdtemp(join(tmpdir(), 'dsh-office-kit-outputs-'))
@@ -180,8 +185,8 @@ it('passes configured limits to the kit, reuses the converter, and removes all s
   await provider.convert(request)
   const { maxConcurrentConversions: _count, maxQueuedJobs: _queued, maxReaders: _readers, maxSourceBytes: _source,
     maxBackgroundConversions: _background, maxCachedEntries: _entries, maxCachedBytes: _cached,
-    maxSourceEntries: _aliases, outputDirectory: _outputs, outputRetentionMs: _retention, maxOutputStoreBytes: _stored,
-    ...options } = config
+    maxSourceEntries: _aliases, outputDirectory: _outputs, groupReadable: _groupReadable, outputRetentionMs: _retention,
+    maxOutputStoreBytes: _stored, ...options } = config
   expect(kit.create).toHaveBeenCalledExactlyOnceWith({ ...options, resolveEnginePackage: resolvedKit().resolveEnginePackage })
   await ctx.fiber.dispose()
   expect(dispose).toHaveBeenCalledOnce()

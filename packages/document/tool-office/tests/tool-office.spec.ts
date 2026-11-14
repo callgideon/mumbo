@@ -1,14 +1,14 @@
 /**
  * The Office tools over the real local filesystem, attachment store, and tool pipeline, with a
  * controlled Office service: model-visible content, canonical values, argument rules, output-path refusals, render
- * bounds, read authority, Office service failures, cancellation, PTC dispatch, and disposal.
+ * bounds, read authority and model roots, Office service failures, cancellation, PTC dispatch, and disposal.
  */
 import { executeModelToolFixture, executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import * as PtcToolExecutor from '@deepseek-ai/dsh-tool-executor-ptc'
 import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
-import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { crc32, deflateSync } from 'node:zlib'
@@ -135,6 +135,7 @@ interface SetupOptions {
   llm?: boolean
   kit?: boolean
   config?: Partial<ToolOffice.Config>
+  modelRoots?: string[]
 }
 
 async function setup(options: SetupOptions = {}) {
@@ -147,7 +148,7 @@ async function setup(options: SetupOptions = {}) {
   if (options.ptc === true) await ctx.plugin(FakeRuntime)
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(AgentRegistry)
-  await ctx.plugin(LocalFileSystem, { cwd: dir })
+  await ctx.plugin(LocalFileSystem, { cwd: dir, ...options.modelRoots === undefined ? {} : { modelRoots: options.modelRoots } })
   if (options.attachments !== false) {
     await ctx.plugin(LocalAttachmentStore, { dshHome: home, ...typeof options.attachments === 'object' ? options.attachments : {} })
   }
@@ -509,11 +510,11 @@ describe('Office service failures', () => {
 })
 
 describe('arguments and paths', () => {
-  /** Refuse `args` with `message` after exactly `resolveCalls` filesystem resolutions. */
+  /** Refuse `args` with `message` after exactly `resolveCalls` model path resolutions. */
   async function expectRefusal(args: Record<string, unknown>, message: string, resolveCalls: number): Promise<void> {
     await mkdir(join(dir, 'folder.pptx'))
     const { ctx, kit } = await setup()
-    const resolve = vi.spyOn(ctx.fs, 'resolve')
+    const resolve = vi.spyOn(ctx.fs, 'resolveModelPath')
     const result = await office(ctx, args)
     expect(resolve).toHaveBeenCalledTimes(resolveCalls)
     expect(result.isError).toBe(true)
@@ -598,6 +599,40 @@ describe('arguments and paths', () => {
     const result = await office(ctx, { operation: 'convert', input: join(outside, 'shared.docx'), format: 'pdf' })
     expect(result.isError).toBe(false)
     expect(Buffer.from(await readSource(kit.convertTo.mock.calls[0]![0].source)).toString()).toBe('docx bytes')
+  })
+
+  // Model roots need Linux, where fs-local confirms each opened descriptor through /proc/self/fd.
+  describe.runIf(process.platform === 'linux')('under model roots', () => {
+    let outside: string
+    beforeEach(async () => {
+      outside = await realpath(await mkdtemp(join(tmpdir(), 'dsh-tool-office-outside-')))
+      await writeFile(join(outside, 'secret.pptx'), 'secret pptx bytes')
+    })
+    afterEach(() => rm(outside, { recursive: true, force: true }))
+
+    it('reads an input under the roots', async () => {
+      const { ctx, kit } = await setup({ modelRoots: [dir] })
+      expect(await office(ctx, { operation: 'render', input: 'deck.pptx' })).toMatchObject({ isError: false })
+      expect(Buffer.from(await readSource(kit.renderImages.mock.calls[0]![0].source)).toString()).toBe('pptx bytes')
+    })
+
+    it.each([
+      ['a path outside the roots', () => Promise.resolve(join(outside, 'secret.pptx'))],
+      ['a symbolic link out of them', async () => {
+        await symlink(join(outside, 'secret.pptx'), join(dir, 'link.pptx'))
+        return join(dir, 'link.pptx')
+      }],
+    ])('refuses %s with the read tool refusal', async (_label, input) => {
+      const path = await input()
+      const { ctx, kit } = await setup({ modelRoots: [dir] })
+      for (const args of [{ operation: 'render', input: path }, { operation: 'convert', input: path, format: 'pdf' }]) {
+        const result = await office(ctx, args)
+        expect(result.isError).toBe(true)
+        expect(text(result)).toBe(`Error: cannot access "${path}": its real path is outside the directories you can access (${dir})`)
+      }
+      expect(kit.renderImages).not.toHaveBeenCalled()
+      expect(kit.convertTo).not.toHaveBeenCalled()
+    })
   })
 
   it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('reports an input the filesystem refuses to read', async () => {

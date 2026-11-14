@@ -1,7 +1,8 @@
 /**
  * The desktop overlay that mumbo-desktop.yml appends to the web-app bundle: no row it leaves on names a deepseek.com
- * host other than the model API, counting the origins the deepseek-account row leaves at their defaults, and the
- * desktop, which runs dsh as the person, keeps the Office tools that a root dsh turns off.
+ * host other than the model API, counting the origins the deepseek-account row leaves at their defaults, and the Office
+ * tools and skills are on whether dsh runs as the person or as root, as on a box, where office-kit converts as the
+ * run-as identity.
  */
 
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -64,13 +65,15 @@ it('leaves no enabled row on a deepseek.com host other than api.deepseek.com', (
   expect(hosts.filter(host => !host.endsWith(': api.deepseek.com'))).toEqual([])
 })
 
-it('keeps the Office tools in both presets for a non-root dsh and turns them off under root', () => {
+it('keeps the Office tools in both presets and the Office skills on for a non-root and a root dsh', () => {
   const rows = compose()
+  const skills = rows.find(row => row.name === '@deepseek-ai/dsh-skill-office')
+  expect(skills).toBeDefined()
+  for (const uid of [1000, 0]) expect(disabledFor(skills?.disabled, uid), `skill-office as ${uid}`).toBe(false)
   for (const id of ['preset-standard', 'preset-ptc']) {
     const plugins = (rows.find(row => row.id === id)?.config as { plugins: { id?: string; name?: string; disabled?: unknown }[] }).plugins
     const office = plugins.find(row => row.name === '@deepseek-ai/dsh-tool-office')
     expect(office, id).toBeDefined()
-    expect(disabledFor(office?.disabled, 1000), id).toBe(false)
-    expect(disabledFor(office?.disabled, 0), id).toBe(true)
+    for (const uid of [1000, 0]) expect(disabledFor(office?.disabled, uid), `${id} as ${uid}`).toBe(false)
   }
 })

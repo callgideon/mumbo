@@ -1,18 +1,23 @@
-/** Private, bounded, Session-owned files for converted and recalculated Office outputs. */
+/** Private or group-readable, bounded, Session-owned files for converted and recalculated Office outputs. */
 import { createHash, randomUUID } from 'node:crypto'
 import type { Dirent } from 'node:fs'
-import { lstat, mkdir, readdir, rm, rmdir, writeFile } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { chmod, lstat, mkdir, readdir, rm, rmdir, stat, writeFile } from 'node:fs/promises'
+import { basename, dirname, join } from 'node:path'
 import { OfficeKitError } from './errors.ts'
 
 /** Limits and location of the output store. */
 export interface OutputStoreOptions {
-  /** Absolute directory owned by the store; created on first save with owner-only permissions. */
+  /** Absolute directory owned by the store; created on first save with the store's directory mode. */
   readonly root: string
   /** Milliseconds a saved file is kept before deletion. */
   readonly retentionMs: number
   /** Inclusive bytes across retained files; older files are deleted first to make room. */
   readonly maxBytes: number
+  /**
+   * Create directories `0750` and files `0640` instead of `0700` and `0600`, so the group of a set-group-ID root may
+   * read saved files but not change them.
+   */
+  readonly groupReadable: boolean
 }
 
 interface Entry {
@@ -35,11 +40,19 @@ function ownerDirectory(owner: string): string {
   return `session-${createHash('sha256').update(owner).digest('hex').slice(0, 24)}`
 }
 
-/** Create an output's private directory and write its file, removing the directory when either step fails. */
-async function writeOutput(directory: string, path: string, data: Uint8Array): Promise<void> {
+/**
+ * Create an output's own directory and write its file, removing the directory when either step fails. Group-readable
+ * modes are set again with `chmod`, which the process umask does not reduce, keeping the set-group-ID bit a directory
+ * inherited so the file below it takes the root's group.
+ */
+async function writeOutput(directory: string, path: string, data: Uint8Array, groupReadable: boolean): Promise<void> {
   try {
-    await mkdir(directory, { recursive: true, mode: 0o700 })
-    await writeFile(path, data, { flag: 'wx', mode: 0o600 })
+    await mkdir(directory, { recursive: true, mode: groupReadable ? 0o750 : 0o700 })
+    if (groupReadable) {
+      for (const level of [dirname(directory), directory]) await chmod(level, ((await stat(level)).mode & 0o2000) | 0o750)
+    }
+    await writeFile(path, data, { flag: 'wx', mode: groupReadable ? 0o640 : 0o600 })
+    if (groupReadable) await chmod(path, 0o640)
   } catch (error) {
     await rm(directory, { recursive: true, force: true })
     throw error
@@ -51,12 +64,13 @@ function isMissingPath(error: unknown): boolean {
 }
 
 /**
- * Keeps each saved output in its own private directory under a per-owner directory. Files leave when their retention
- * expires, when newer files need the byte budget, when their owner is released, and when the store is disposed. A file
- * counts toward the byte budget until its deletion succeeds; a failed deletion is reported and retried by later
- * eviction, release, and disposal. Only files this store saved are deleted, apart from a startup sweep of expired
- * leftovers of earlier processes. The sweep considers only real directories, never links or junctions, whose names this
- * store generates: `session-` and 24 lowercase hexadecimal digits under the root, and a lowercase UUID v4 below that.
+ * Keeps each saved output in its own directory under a per-owner directory, private unless `groupReadable` is set.
+ * Files leave when their retention expires, when newer files need the byte budget, when their owner is released, and
+ * when the store is disposed. A file counts toward the byte budget until its deletion succeeds; a failed deletion is
+ * reported and retried by later eviction, release, and disposal. Only files this store saved are deleted, apart from a
+ * startup sweep of expired leftovers of earlier processes. The sweep considers only real directories, never links or
+ * junctions, whose names this store generates: `session-` and 24 lowercase hexadecimal digits under the root, and a
+ * lowercase UUID v4 below that.
  */
 export class OutputStore {
   private readonly entries = new Map<string, Entry>()
@@ -106,10 +120,10 @@ export class OutputStore {
     }
     const directory = join(this.options.root, ownerDirectory(owner), randomUUID())
     const path = join(directory, basename(name))
-    await writeOutput(directory, path, data).catch((error: unknown) => {
+    await writeOutput(directory, path, data, this.options.groupReadable).catch((error: unknown) => {
       if (!isMissingPath(error)) throw error
       // A concurrent release, or another process's sweep, removed the empty owner directory before the write.
-      return writeOutput(directory, path, data)
+      return writeOutput(directory, path, data, this.options.groupReadable)
     })
     const timer = setTimeout(() => { void this.remove(entry) }, this.options.retentionMs)
     timer.unref()
