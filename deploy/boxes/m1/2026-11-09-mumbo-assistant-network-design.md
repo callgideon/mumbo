@@ -1432,6 +1432,7 @@ The cache's worst case is a subscription that dies silently: copies are served f
     - The Gateway's stream-open logging, the `logger-console` row and its classification, and the Office switch with its FORBIDDEN entry all survive the merge.
     - It includes the comment fix and the diff-fence fix with its 50,000-tab test. Upstream's regex fails that test at 8.3 s.
     - Approved, pending CI on this head and the CodeQL triage in the PR body.
+    - **A test that expired with the date [2026-11-14]:** a5e0283c13 fixes an upstream liveshare test that main also has. Its "live" owner credential was fixed at 2026-10-15 plus 30 days, so it expired at midnight on 2026-11-14 against the host's clock. It is now 30 days from the test's start. Until #61 lands, main's unit job fails on whichever shard runs that file, so #61 merges before any other PR. Approved.
   - **The founder's overlay:** `deploy/mumbo.overlay.yml` turned off `account-controller`, a row that no longer exists. The founder approved deleting those two lines, and f937651317 removes only them. `deepseek-account` stays off.
 
 **Acceptance (first milestone: the founder's box in Mumbai):**

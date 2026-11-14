@@ -2471,6 +2471,7 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>The Gateway's stream-open logging, the <code>logger-console</code> row and its classification, and the Office switch with its FORBIDDEN entry all survive the merge.</li>
 <li>It includes the comment fix and the diff-fence fix with its 50,000-tab test. Upstream's regex fails that test at 8.3 s.</li>
 <li>Approved, pending CI on this head and the CodeQL triage in the PR body.</li>
+<li><strong>A test that expired with the date [2026-11-14]:</strong> a5e0283c13 fixes an upstream liveshare test that main also has. Its &quot;live&quot; owner credential was fixed at 2026-10-15 plus 30 days, so it expired at midnight on 2026-11-14 against the host's clock. It is now 30 days from the test's start. Until #61 lands, main's unit job fails on whichever shard runs that file, so #61 merges before any other PR. Approved.</li>
 </ul>
 </li>
 <li><strong>The founder's overlay:</strong> <code>deploy/mumbo.overlay.yml</code> turned off <code>account-controller</code>, a row that no longer exists. The founder approved deleting those two lines, and f937651317 removes only them. <code>deepseek-account</code> stays off.</li>
