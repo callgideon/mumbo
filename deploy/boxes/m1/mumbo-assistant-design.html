@@ -2487,7 +2487,16 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li><strong>A test that expired with the date [2026-11-14]:</strong> a5e0283c13 fixes an upstream liveshare test that main also has. Its &quot;live&quot; owner credential was fixed at 2026-10-15 plus 30 days, so it expired at midnight on 2026-11-14 against the host's clock. It is now 30 days from the test's start. Until #61 lands, main's unit job fails on whichever shard runs that file, so #61 merges before any other PR. Approved.</li>
 </ul>
 </li>
-<li><strong>The founder's overlay:</strong> <code>deploy/mumbo.overlay.yml</code> turned off <code>account-controller</code>, a row that no longer exists.  The founder approved deleting those two lines, and f937651317 removes only them. <code>deepseek-account</code> stays off.</li>
+<li><strong>The founder's overlay:</strong> <code>deploy/mumbo.overlay.yml</code> turned off <code>account-controller</code>, a row that no longer exists. The founder approved deleting those two lines, and f937651317 removes only them. <code>deepseek-account</code> stays off.</li>
+</ul>
+</li>
+<li><strong>B53, App mode's GitHub setup check</strong> [2026-11-14, found live on bitlane]: saving bitlane's GitHub Source (<code>callgideon/bitlane</code>, cli <code>gh</code>) was refused with <code>repositoryReadOnly</code> for <code>mumbo-bot[bot]</code>.
+<ul>
+<li>The App is set up correctly. The installation (170921050, all repositories) grants <code>contents: write</code>, <code>pull_requests: write</code> and <code>issues: write</code>. The edge mints the project's token with those permissions, and a permission GitHub hadn't approved would answer 503. <code>gh</code> on dsh's PATH resolves to the box's wrapper (<code>/usr/local/lib/mumbo/bin/gh</code>), and the read of the private repository through it succeeded. GitHub's answer reports <code>admin</code>, <code>maintain</code>, <code>pull</code>, <code>push</code> and <code>triage</code> all <code>false</code>.</li>
+<li>The check is wrong. <code>superagent/src/deployment.ts</code> refuses App mode when <code>permissions.push</code> is <code>false</code>, on the belief that an installation token doesn't report <code>permissions</code>. GitHub does report them, all <code>false</code>, so no App-mode project could ever pass setup.</li>
+<li><strong>Ruling:</strong> in App mode the check reads the repository through the edge and doesn't consult <code>permissions</code>. The edge enforces what a worker can do. It refuses repositories the project hasn't bound and permissions the installation hasn't approved, and both still fail the read. The renamed-repository check stays. User-account mode is unchanged. <code>deployment.spec.ts</code> expects App mode with <code>push: false</code> to resolve. The doc comment, the README and <code>UPSTREAM.md</code> record the change.</li>
+<li>Not a write probe (<code>git push --dry-run</code> or a test ref): it needs a local repository and adds a GitHub write to setup, and the edge already enforces writes. An archived repository fails at the first push, visibly. <span class="tag m">my call</span></li>
+<li>Rollout: after deploy, mumbo saves the Source again on bitlane, and the card shows the repository.</li>
 </ul>
 </li>
 </ul>
