@@ -742,7 +742,8 @@ test('escape-test.sh parses under sh and runs every escape test the B24 brief na
     'start-sh-mode', 'agent-read-start-sh', 'agent-read-dsh-home', 'agent-read-dsh-log', 'agent-read-root-entries', 'agent-read-browser-home', 'agent-read-login-data', 'agent-read-cookies',
     'agent-proc-environ', 'agent-proc-cmdline', 'agent-proc-browser', 'mcpserver-proc-environ',
     // agent: what root runs or reads for it, and install paths
-    'agent-write-src', 'agent-write-plugin-paths', 'agent-write-mcp-home', 'agent-write-gh-wrapper', 'agent-write-superagent', 'agent-write-attachments', 'agent-write-spill', 'agent-write-agents-home',
+    'agent-write-src', 'agent-write-plugin-paths', 'agent-write-mcp-home', 'agent-write-gh-wrapper', 'agent-write-superagent', 'agent-write-attachments', 'agent-write-spill', 'agent-write-subprocess-spill',
+    'agent-write-office-outputs', 'agent-write-agents-home',
     // the display, computer use, uploads
     'agent-x-cookie', 'agent-x-display', 'xsession-login-data', 'computer-use-terminal', 'upload-outside-downloads',
     // consent's staged upload copies, and uploads through the real consent (the uploads contract of 2026-11-11)

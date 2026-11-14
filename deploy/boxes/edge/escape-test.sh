@@ -80,6 +80,8 @@ unwritable agent-write-gh-wrapper agent /usr/local/lib/mumbo/bin
 unwritable agent-write-superagent agent /var/lib/mumbo/superagent
 unwritable agent-write-attachments agent /var/lib/mumbo/attachments/attachments/v1
 unwritable agent-write-spill agent /var/lib/mumbo/spill
+unwritable agent-write-subprocess-spill agent /var/lib/mumbo/subprocess-spill
+unwritable agent-write-office-outputs agent /var/lib/mumbo/office-outputs
 unwritable agent-write-agents-home agent /usr/local/share/mumbo/agents/skills
 # What root runs and dsh imports (the start script's system repair, edge systemRepair): E2B's build leaves /usr/local and
 # envd, which runs commands as root, world-writable.
