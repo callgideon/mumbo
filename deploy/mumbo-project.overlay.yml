@@ -32,6 +32,15 @@
       name: '@mumbo/edge-member/project-workspace'
       config:
         workspace: !!js process.env.HOME + '/projects'
+# Writes the Host's warn and error log lines to stdout, which the edge sends to /root/dsh.log; without an exporter they reach
+# only the logger's in-memory buffer. Project boxes only: members' refused calls are the lines an operator needs there.
+- insert:
+    - id: logger-console
+      name: '@deepseek-ai/cordis-plugin-logger-console'
+      config:
+        colors: false
+        levels:
+          default: 1
 # The state block, plan_read, and the resume notice, for the coordinator's main Session, its workers and their subagents
 # (@mumbo/state).
 - insert:

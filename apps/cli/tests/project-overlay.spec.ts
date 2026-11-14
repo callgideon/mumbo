@@ -65,6 +65,18 @@ describe('project-box overlay', () => {
     }
   })
 
+  it('writes warn and error log lines to the console without colors', () => {
+    const { rows, home } = compose()
+    try {
+      const logger = rows.find(row => row.id === 'logger-console')
+      expect(logger?.name).toBe('@deepseek-ai/cordis-plugin-logger-console')
+      expect(logger?.disabled).toBeFalsy()
+      expect(logger?.config).toEqual({ colors: false, levels: { default: 1 } })
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
   it('agrees on approval never in the policy and every permission preset', () => {
     const { rows, home } = compose()
     try {

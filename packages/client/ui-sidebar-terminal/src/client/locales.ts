@@ -23,6 +23,7 @@ export const en = {
   attachmentEnded: 'The terminal connection ended. Reconnect to continue.',
   invalidOutput: 'The terminal screen could not be received. Reconnect to recover it.',
   terminalLimit: 'The terminal limit has been reached. Close unused terminals and try again. Exited terminals also count toward the limit.',
+  accessDenied: 'You do not have access to terminals in this Session.',
 } satisfies Record<string, string>
 
 /** Japanese copy, checked against the English keys. */
@@ -55,6 +56,7 @@ export const ja = {
   'attachmentEnded': 'ターミナル接続が終了しました。続行するには再接続してください。',
   'invalidOutput': 'ターミナル画面を受信できませんでした。再接続して復元してください。',
   'terminalLimit': 'ターミナルの上限に達しました。未使用のターミナルを閉じて再試行してください。終了したターミナルも上限に含まれます。',
+  'accessDenied': 'このセッションのターミナルにアクセスする権限がありません。',
 } satisfies Record<keyof typeof en, string>
 
 /** Spanish dictionary, checked against the English keys. */
@@ -73,6 +75,7 @@ export const es = {
   attachmentEnded: 'La conexión del terminal terminó. Vuelva a conectarse para continuar.',
   invalidOutput: 'No se pudo recibir la pantalla del terminal. Vuelva a conectarse para recuperarlo.',
   terminalLimit: 'Se ha alcanzado el límite terminal. Cierre los terminales no utilizados y vuelva a intentarlo. Las terminales salidas también cuentan para el límite.',
+  accessDenied: 'No tiene acceso a los terminales de esta sesión.',
 } satisfies Record<keyof typeof en, string>
 
 /** French dictionary, checked against the English keys. */
@@ -91,6 +94,7 @@ export const fr = {
   attachmentEnded: 'La connexion du terminal est terminée. Reconnectez-vous pour continuer.',
   invalidOutput: "L'écran du terminal n'a pas pu être reçu. Reconnectez-vous pour le récupérer.",
   terminalLimit: 'La limite terminale a été atteinte. Fermez les terminaux inutilisés et réessayez. Les terminaux sortis comptent également dans la limite.',
+  accessDenied: "Vous n'avez pas accès aux terminaux de cette session.",
 } satisfies Record<keyof typeof en, string>
 
 /** German dictionary, checked against the English keys. */
@@ -109,6 +113,7 @@ export const de = {
   attachmentEnded: 'Die Terminalverbindung wurde beendet. Stellen Sie die Verbindung wieder her, um fortzufahren.',
   invalidOutput: 'Der Terminalbildschirm konnte nicht empfangen werden. Stellen Sie die Verbindung wieder her, um es wiederherzustellen.',
   terminalLimit: 'Das Endlimit wurde erreicht. Schließen Sie nicht verwendete Terminals und versuchen Sie es erneut. Auch verlassene Terminals werden auf das Limit angerechnet.',
+  accessDenied: 'Sie haben keinen Zugriff auf die Terminals dieser Sitzung.',
 } satisfies Record<keyof typeof en, string>
 
 /** Russian dictionary, checked against the English keys. */
@@ -127,6 +132,7 @@ export const ru = {
   attachmentEnded: 'Терминальное соединение завершилось. Подключитесь повторно, чтобы продолжить.',
   invalidOutput: 'Не удалось получить экран терминала. Повторно подключитесь, чтобы восстановить его.',
   terminalLimit: 'Достигнут лимит терминала. Закройте неиспользуемые терминалы и повторите попытку. Вышедшие терминалы также учитываются в лимите.',
+  accessDenied: 'У вас нет доступа к терминалам этого сеанса.',
 } satisfies Record<keyof typeof en, string>
 
 /** Portuguese dictionary, checked against the English keys. */
@@ -145,4 +151,5 @@ export const pt = {
   attachmentEnded: 'A conexão do terminal terminou. Reconecte para continuar.',
   invalidOutput: 'A tela do terminal não pôde ser recebida. Reconecte para recuperá-lo.',
   terminalLimit: 'O limite terminal foi atingido. Feche os terminais não utilizados e tente novamente. Os terminais encerrados também contam para o limite.',
+  accessDenied: 'Você não tem acesso aos terminais desta sessão.',
 } satisfies Record<keyof typeof en, string>

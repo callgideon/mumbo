@@ -559,6 +559,23 @@ describe('Gateway failure logging', () => {
     ]])
     expect(error).toHaveBeenCalledOnce()
   })
+
+  it('logs a refused stream open, a Remote event stream included, at warn once each', async () => {
+    const { ctx } = await setup({ connection: true })
+    const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
+    const error = vi.spyOn(ctx.logger, 'error').mockImplementation(() => {})
+    const open = (endpoint: string, peer: PeerScope) =>
+      ctx.typertGateway.wireStream.open(endpoint, { args: {} }, (async function* () {})(), peer, new AbortController().signal)
+    await expect(open('accessFixture/watch', ctx.connection.createPeer({ principal: GUEST }))).rejects.toMatchObject({ code: 'remote-access/denied' })
+    await expect(open('$events', ctx.connection.createPeer({ principal: GUEST, interactions: 'none' })))
+      .rejects.toMatchObject({ code: 'gateway/interactions-forbidden' })
+    expect(warn.mock.calls).toEqual([
+      ['typert gateway: accessFixture/watch failed (principal test-guest): remote-access/denied: '
+        + 'remote access: accessFixture/watch: access denied (no-allow)'],
+      [expect.stringMatching(/^typert gateway: \$events failed \(principal test-guest\): gateway\/interactions-forbidden: /u)],
+    ])
+    expect(error).not.toHaveBeenCalled()
+  })
 })
 
 describe('Gateway access checks on Typert-validated arguments', () => {

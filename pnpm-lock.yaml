@@ -28,6 +28,9 @@ importers:
 
   .:
     devDependencies:
+      '@deepseek-ai/cordis-plugin-logger-console':
+        specifier: workspace:~
+        version: link:vendor/logger-console
       '@deepseek-ai/dsh-action-cards':
         specifier: workspace:*
         version: link:packages/experimental/action-cards
@@ -1865,6 +1868,9 @@ importers:
       '@deepseek-ai/dsh-api-gateway':
         specifier: workspace:*
         version: link:../gateway
+      '@deepseek-ai/dsh-api-remote-access':
+        specifier: workspace:*
+        version: link:../remote-access
       '@deepseek-ai/dsh-brand':
         specifier: workspace:*
         version: link:../../util/brand
@@ -6640,6 +6646,9 @@ importers:
       '@deepseek-ai/dsh-session':
         specifier: workspace:*
         version: link:../../core/session
+      '@deepseek-ai/dsh-typert-protocol':
+        specifier: workspace:*
+        version: link:../../typert/protocol
       '@testing-library/react':
         specifier: ^16.3.3
         version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -14151,6 +14160,9 @@ importers:
       '@deepseek-ai/dsh-api-session-controller':
         specifier: workspace:*
         version: link:../../api/session-controller
+      '@deepseek-ai/dsh-api-terminal-controller':
+        specifier: workspace:*
+        version: link:../../api/terminal-controller
       '@deepseek-ai/dsh-api-workspace-controller':
         specifier: workspace:*
         version: link:../../api/workspace-controller
@@ -14202,12 +14214,18 @@ importers:
       '@testing-library/react':
         specifier: ^16.3.3
         version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       react:
         specifier: ^18.2.0
         version: 18.3.1
       react-dom:
         specifier: ^18.2.0
         version: 18.3.1(react@18.3.1)
+      ws:
+        specifier: ^8.21.3
+        version: 8.21.3
 
   packages/mumbo/mcp:
     dependencies:
