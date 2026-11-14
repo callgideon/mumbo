@@ -1413,7 +1413,7 @@ The cache's worst case is a subscription that dies silently: copies are served f
   - **Ruling, Office tools:** upstream's `@deepseek-ai/dsh-tool-office` (`office_render`, `office_convert`, `office_recalculate`) is mounted on no box.
     - Its tools read files the model picks and parse them with LibreOffice Kit inside root dsh, the class of work §B24 moves to `agent`.
     - It also writes outputs under `$DSH_HOME`, outside the model roots.
-    - **How [amended 2026-11-13]:** the row is a child of the `standard` and `ptc` agent presets, and a Loader patch can't reach a preset's child. Turning it off from the edge would mean restating both presets whole, which pins them, overrides the person's own preset edits, and changes today's images. Instead, our copies of the two web-app preset files set that child to `disabled: !!js "process.getuid?.() === 0"`, with a comment naming §B24. A box's dsh runs as root and a desktop's doesn't, so the tools are off exactly where they'd parse documents as root. The cost is a two-line divergence from upstream that a later sync shows as a conflict, not a silent drift. No edge change, no deploy order.
+    - **How [amended 2026-11-13]:** the row is a child of the `standard` and `ptc` agent presets, and a Loader patch can't reach a preset's child. Turning it off from the edge would mean restating both presets whole, which pins them, overrides the person's own preset edits, and changes today's images. Instead, our copies of the two web-app preset files set that child to `disabled: !!js "process.getuid?.() === 0"`, with a comment that links the containment Agent Note (`.agents/notes/implemented/architecture/2026-11-10-agent-containment-run-as-and-model-roots.md`). A box's dsh runs as root and a desktop's doesn't, so the tools are off exactly where they'd parse documents as root. The cost is a two-line divergence from upstream that a later sync shows as a conflict, not a silent drift. No edge change, no deploy order.
     - box-containment's FORBIDDEN lists the package. A test pins it both ways: off when composed as uid 0, on otherwise.
     - The Office skill text stays. Upstream's `office-skills-no-renderer` snapshot shows the docx, pptx and xlsx skills working without the tools. It doesn't load the `office` router skill, though, which says the tools "appear next step". A mumbo-owned box snapshot that loads that router comes as a follow-up, and its text is fixed only if the model then misbehaves.
     - `office-kit` stays: it renders previews the person opens, as `office-to-pdf` did.
@@ -1425,6 +1425,11 @@ The cache's worst case is a subscription that dies silently: copies are served f
     - CodeQL counts 17 alerts in touched files. Most exist on main. The critical one at `deploy/gateway.mjs:79` is a false positive: the host is a constant, and the path must start with `/anthropic/`.
     - One alert is new in shipped upstream code: a quadratic regex on model-written diff fence headers in `ui-primitives`, which a crafted fence could use to hang the person's tab. It gets a one-line fork fix (`split('\t', 1)`) with a test. **[my call]**
     - Dismissing the rest is the founder's call.
+  - **Merge-in of #60 [2026-11-14]:** head 1eec077169 merges main 7baafa6519 (#60) into the branch. It brings #60's 26 files in unchanged.
+    - The one conflict, `ui-sidebar-terminal` locales, keeps upstream's agent and sandbox badge keys and #60's `accessDenied` in every dictionary.
+    - The Gateway's stream-open logging, the `logger-console` row and its classification, and the Office switch with its FORBIDDEN entry all survive the merge.
+    - It includes the comment fix and the diff-fence fix with its 50,000-tab test. Upstream's regex fails that test at 8.3 s.
+    - Approved, pending CI on this head and the CodeQL triage in the PR body.
   - **The founder's overlay:** `deploy/mumbo.overlay.yml` turned off `account-controller`, a row that no longer exists. The founder approved deleting those two lines, and f937651317 removes only them. `deepseek-account` stays off.
 
 **Acceptance (first milestone: the founder's box in Mumbai):**
