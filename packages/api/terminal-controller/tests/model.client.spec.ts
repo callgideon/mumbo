@@ -361,6 +361,15 @@ it('exposes a localized quota error and clears it after a successful retry', asy
   expect(model.state.getSnapshot()).toMatchObject({ phase: 'connected', issue: undefined, error: undefined })
 })
 
+it('names a remote-access refusal as an issue and starts no shell', async () => {
+  const { model, remote } = fixture()
+  vi.mocked(remote.environment).mockResolvedValueOnce({ ok: false, error: new RemoteError('remote-access/denied',
+    'remote access: terminal/environment: access denied (no-allow)', { action: 'terminal/environment', reason: 'no-allow' }) })
+  await model.refresh()
+  expect(model.state.getSnapshot()).toMatchObject({ phase: 'failed', issue: 'accessDenied' })
+  expect(remote.create).not.toHaveBeenCalled()
+})
+
 it('sends input and clamped resize in order without waiting for acknowledgements', async () => {
   const h = fixture()
   await connected(h.model)

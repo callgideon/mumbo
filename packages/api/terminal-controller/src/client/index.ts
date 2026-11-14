@@ -4,7 +4,7 @@ import { remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {} from '@deepseek-ai/dsh-api-gateway/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
-import { TerminalView, type TerminalRemote } from './model.ts'
+import { TerminalView, TerminalViewError, terminalIssue, type TerminalRemote } from './model.ts'
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { randomUUID } from '@deepseek-ai/dsh-util-crypto'
 import type { TerminalShell, WebTerminalId, WebTerminalInfo } from '../types.ts'
@@ -179,7 +179,10 @@ export class ClientTerminals extends Service {
    */
   async launchShells(sessionId: SessionId, signal: AbortSignal): Promise<TerminalLaunchShells> {
     const result = await this.remote.shells(sessionId, signal)
-    if (!result.ok) throw new Error(result.error.message)
+    if (!result.ok) {
+      const issue = terminalIssue(result.error)
+      throw issue === undefined ? new Error(result.error.message) : new TerminalViewError(issue)
+    }
     const previous = preferredShell()
     return { shells: result.value, selectedShell: result.value.find(shell => shell.path === previous)?.path ?? result.value[0]?.path }
   }

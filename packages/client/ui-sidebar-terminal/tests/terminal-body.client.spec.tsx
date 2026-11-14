@@ -459,13 +459,19 @@ it('starts a recovered screen with no local history when environment discovery i
 
 it.each([en, fr])('translates known terminal failures while retaining unknown Host diagnostics', (dictionary) => {
   const h = mount(idle, dictionary)
-  for (const issue of ['missingTerminal', 'inputFull', 'attachmentEnded', 'invalidOutput', 'terminalLimit'] as const) {
+  for (const issue of ['missingTerminal', 'inputFull', 'attachmentEnded', 'invalidOutput', 'terminalLimit', 'accessDenied'] as const) {
     h.update({ ...idle, phase: 'failed', issue, error: 'raw diagnostic' })
     expect(h.view.getByRole('alert').textContent).toContain(dictionary[issue])
     expect(h.view.getByRole('alert').textContent).not.toContain('raw diagnostic')
   }
   h.update({ ...idle, phase: 'failed', error: 'Host permission denied' })
   expect(h.view.getByRole('alert').textContent).toContain('Host permission denied')
+})
+
+it.each([en, fr])('reports a refused terminal in the locale and never shows the Host refusal', (dictionary) => {
+  const h = mount({ ...idle, phase: 'failed', issue: 'accessDenied', error: 'remote access: terminal/environment: access denied (no-allow)' }, dictionary)
+  expect(h.view.getByRole('alert').textContent).toBe(makeTranslate(dictionary)('failed', { message: dictionary.accessDenied }))
+  expect(h.view.container.textContent).not.toContain('remote access')
 })
 
 it.each([en, fr])('offers an explicit new terminal for missing instances without retrying the lost process', (dictionary) => {
