@@ -1425,7 +1425,7 @@ The cache's worst case is a subscription that dies silently: copies are served f
       - No recording before the change: removing text that promises missing tools needs no model round to justify it. If Office work on boxes turns out to need the guidance, the fix is the same revisit as the tools: run the converter as `agent`, then turn both back on. **[my call]**
       - **Build review, PR #62 (B52)** [2026-11-14]: approved at 2dbddb4a1d, pending CI. It changes one row plus tests, the web-app README and the Agent Note, and needs no GIF. Removing the switch makes 5 tests fail, across both boxes and the desktop's uid 0 case.
     - `office-kit` stays: it renders previews the person opens, as `office-to-pdf` did.
-    - Revisit when the converter can run as `agent` through the subprocess provider and write into the model roots. **[my call]**
+    - Revisit when the converter can run as `agent` through the subprocess provider and write into the model roots. **[my call]** **Done by B54 [2026-11-14]:** the converter runs as `agent`. Outputs go to a read-only root rather than the model roots.
   - **The account package's hosts:** upstream folded `account-controller` into `deepseek-account`, which now also reads notifications from `harness.deepseek.com`. Boxes keep the row off. The desktop overlay points `harnessOrigin` at `api.mumbo.si`, whose gateway serves an empty notification list. A desktop-overlay test fails if any enabled desktop row names a deepseek.com host other than `api.deepseek.com`. Deploy order: the gateway goes out before the next desktop build. Approved.
     - **Amended [2026-11-14]: the gateway stays retired.** Nothing hosts `deploy/gateway.mjs`. The shared server was retired on 2026-11-09, and `api.mumbo.si` redirects to `app.mumbo.si`, as section 17a says. So today's desktop app can't sign in to Mumbo or reach the model through it, with or without #61, and no one ships or uses that build. N2a replaces that path: the app signs in through the edge and uses the person's box, which reaches the model as any box does. The gateway won't come back as its own service, which would mean new spend for no one, and it won't move onto the edge. N2a deletes `deploy/gateway.mjs` and the desktop overlay's `api.mumbo.si` origins. Until then they stay as they are, unused, and the deploy-order note above has nothing to do. **[my call]**
   - **Search:** upstream's new person-facing Workspace search resolves the root `unconfined`, as the person's listing does since §B24. Members hold no search action. Approved.
@@ -1448,6 +1448,92 @@ The cache's worst case is a subscription that dies silently: copies are served f
   - Not a write probe (`git push --dry-run` or a test ref): it needs a local repository and adds a GitHub write to setup, and the edge already enforces writes. An archived repository fails at the first push, visibly. **[my call]**
   - Rollout: after deploy, mumbo saves the Source again on bitlane, and the card shows the repository.
   - **Build review, PR #63** [2026-11-14]: approved at a962347152, pending CI. The condition is now `!githubApp && access.push !== true`. App mode resolves with push `false`, `true` or `null`, and a 404 from the edge is still `repositoryUnreadable`. User-account mode still refuses `false` and `null`. Putting the old condition back fails the App-mode test.
+- **B54, Office on boxes, contained** [2026-11-14; the founder asked through mumbo: "making presentation / spreadsheets would be a good use-case"]: `office_render`, `office_convert`, `office_recalculate` and the four Office skills come back on person and project boxes, with LibreOffice running as `agent`. B51's and #62's off switches stay until this ships, and this PR removes them.
+  - **What runs as root today:** on Linux the Kit (`@deepseek-ai/libreoffice-kit` 0.2.3) has no native engine. Each operation runs LibreOffice, compiled to WASM, in a Node worker thread inside root dsh.
+    - A thread can't change its uid, so the engine must move into its own process.
+    - The Kit's own CLI (`dsoffice`) isn't the way. It takes file paths, so root would have to read output files in a directory `agent` controls. It also lacks office-kit's limits and font options.
+  - **Ruling, the engine:** office-kit gains a one-shot conversion helper, `@deepseek-ai/dsh-office-kit/convert-helper`. It's a subpath export, started the same way as fs-local's mutation helper, and runs the Kit in its own process.
+    - **When the helper runs:**
+      - office-kit starts it through `ctx.subprocess.spawn` whenever the provider has a `childIdentity`. So on boxes it runs as `agent`, under the same bootstrap, environment and secret guard as the model's shell.
+      - Without a child identity, the in-process Worker stays, so the desktop and SDK are unchanged.
+      - With no subprocess provider mounted while dsh runs as root, every operation fails `unavailable`. None runs in-process.
+    - **Where it plugs in:** the helper sits behind the Kit's `Converter` interface. office-kit's queue, cache, admission limits, scratch directory and output reads stay as they are. The parent sends the source bytes to the helper and writes what comes back into its own root-only scratch directory, so root never opens a path `agent` can write.
+    - **Protocol:**
+      - It runs over raw pipes (`stdin: 'pipe'`, `stdout: 'pipe'`), not collected text, which would decode the binary output as UTF-8 and keep only the tail of anything over its cap.
+      - The parent writes one JSON header (the operation, its parameters and the resolved converter options), then the source bytes, length-prefixed.
+      - The helper converts in a private `0700` directory under its own `TMPDIR` (`/home/agent/tmp`). It answers with one JSON header, then length-prefixed outputs: the PDF, the converted file, or each PNG with its page, sheet and range.
+    - **Helper output is untrusted, as with fs-local:**
+      - The parent decodes the header strictly.
+      - It refuses a frame longer than `maxOutputBytes` (for renders, the image budget) and more images than the request allows. It stops reading at the cap and terminates the helper.
+      - A malformed answer is `invalid-output`.
+      - Kit failure codes cross as codes. The helper's text reaches only the tool result.
+    - **No helper text reaches `ctx.logger`.** On project boxes the warn sink writes to `/root/dsh.log`, and the edge parses the launch-token line in that file. A helper that put a forged line into its error message would forge the log. office-kit logs only its own fixed text and the failure code.
+    - **Deadline:**
+      - The Kit's own `timeoutMs` runs inside the helper.
+      - The parent bounds the helper's whole run at `timeoutMs` plus a fixed 30 s start allowance. On expiry it terminates the helper and rejects with `timeout`. `agent`'s shell can stop its own processes, and a stopped helper must not hold a conversion slot forever.
+      - Cancellation passes the caller's signal to `spawn`, which terminates the helper. **[my call]**
+    - **Font metadata:** the Kit's disk cache follows the helper's `HOME`, to `/home/agent/.cache/libreoffice-kit`. The model can change that cache, which affects only conversions that run as `agent`.
+    - **Cost:**
+      - One Node start per operation, about 0.3 s from source. Every operation already pays for a fresh WASM engine start.
+      - Outputs of up to 100 MiB through a pipe.
+  - **Ruling, which files the tools open:** the same files `read` opens.
+    - tool-office resolves its input through `ctx.fs.resolveModelPath`, not `resolve`. That means model roots plus read-only roots, with pinned reads and the hard-link rule.
+    - Today it uses `resolve`. With the tools on, the model could therefore render or convert any Office-named file root can read, including ones under `/root/.mumbo`.
+    - The rule isn't "only files whose mode lets `agent` read them". The model can already read every file in the roots with `read` and write those bytes wherever it may, so a stricter check adds no protection. Root also has no call that asks the kernel what `agent` could open. **[my call]**
+  - **Ruling, outputs:** converted and recalculated files go to `/var/lib/mumbo/office-outputs` (`root:agent`, `2750`), which `fs` lists in `readOnlyRoots`.
+    - office-kit's output store gains `groupReadable`, as the attachment and spill stores have it: directories `0750`, which take the parent's group, and files `0640`.
+    - `agent` can read and copy the files, as the skills' "copy with the shell" step needs, and `read` opens them.
+    - Only root writes there, so no link can be planted. `mcpserver`, `browsermcp` and `desktop` can read none of it.
+    - **Not chosen:**
+      - World-readable `0755`/`0644`: other users would read the person's documents.
+      - The helper writing outputs into the model roots: retention and Session cleanup would then delete files as `agent`, in directories the model controls, for no gain. **[my call]**
+    - The directory stays outside backups. Outputs live 24 hours.
+  - **Ruling, previews:** the person's document previews go through the helper too, because they share office-kit. So a preview of a document the model wrote no longer parses as root, a risk B51 had accepted.
+    - Residual: while a preview converts, its bytes pass through an `agent` process and its scratch file.
+      - For a file in the model roots or the attachment store, that changes nothing: `agent` can read it anyway.
+      - A person who previews an Office file in a Session directory outside the roots exposes it to `agent` for that moment. Boxes create every project under the roots. Accepted. **[my call]**
+    - The model can change what a preview shows, by stopping or replacing the helper. It could write that document itself anyway.
+  - **Members on project boxes:**
+    - A member's turn uses the tools as any turn does, as `agent`, and `office_render`'s images appear in the transcript, which members can read.
+    - Members hold no action that reads file contents, only `workspaceFiles/list` and `workspaceFiles/changes`. So they don't get `officeKit/render` either: no Office previews for members, the same as for every other file. Revisit with member file reads. **[my call]**
+  - **Python:** boxes run the web profile, whose skills use `pythonEnvironment: user`. That means `python3` on `agent`'s PATH, plus `python3-venv` from the template.
+    - The skill tells the model to check for python-docx, python-pptx and openpyxl, and to ask before installing any that are missing. Expect the first Office task to ask to install them in a venv under `/home/agent`.
+    - If the founder wants that step gone, a follow-up has the template preinstall them. **[my call]**
+  - **Composition:**
+    - Remove B51's `disabled` lines from our copies of the `standard` and `ptc` preset files, and B52's from `skill-office`. The three rows then match upstream again.
+    - **box-containment:**
+      - Both packages leave FORBIDDEN.
+      - Classification: tool-office is model roots plus run-as, office-kit is run-as, and skill-office is none.
+      - On both boxes, the gate asserts that the `office-kit` row sets `outputDirectory: /var/lib/mumbo/office-outputs` and `groupReadable: true`, that `fs` lists that directory in `readOnlyRoots`, and that the box layout names it.
+    - desktop-overlay: the tools and skills are on for uid 0 too.
+    - **The edge's containment rows**, on both boxes: the `office-kit` row and the `readOnlyRoots` entry. `start.sh`'s `containmentLayout` creates the directory. `apps/cli/tests/fixtures/box-edge` mirrors them.
+    - **The containment Agent Note:**
+      - The spawn-path table gains Office conversions: run-as, previews included.
+      - The "must be absent" and "revisit" sentences go.
+      - The box layout list gains the directory.
+    - The tool-office, office-kit and web-app READMEs and `UPSTREAM.md` record the fork changes.
+  - **Tests:**
+    - The helper runs a real WASM conversion of a small .pptx and .xlsx as a child of the test process, through the local subprocess provider.
+    - A malformed or oversized answer from the helper is refused.
+    - A stopped helper runs into the parent's deadline.
+    - Routing picks the helper when the provider has a child identity and the Worker when it doesn't. With no provider under uid 0, stubbed, it refuses.
+    - tool-office refuses a path outside the roots, and a link out of them, with `read`'s wording.
+    - With `groupReadable`, the output store writes `0750` directories and `0640` files.
+    - Reverting any one of the four changes (the helper, its routing, the input resolution, the output modes) fails a test.
+  - **Snapshot and GIF:** no client code changes, so no GIF. A box-composition session snapshot needs model rounds, so it waits on the key, as #59 does. The live rollout below is the evidence until then.
+  - **PRs and order:** two PRs.
+    1. The harness PR to main: the helper, tool-office's input resolution, the output modes, the composition, the gate and the docs.
+    2. The edge PR to `boxes/production`: the rows, the layout and `containment.test.mjs`.
+    - Deploy the image first. With the tools on and the old edge, the helper already runs as `agent`, because it follows `childIdentity`. Convert fails visibly there, since outputs stay in root's home.
+    - Then deploy the edge. Then repair the founder's box after a backup check, and then bitlane.
+  - **Rollout check (mumbo):**
+    1. On the founder's box, in a new Session, ask for a 3-slide .pptx and a small .xlsx with formulas. The model loads the Office skills and renders the slides.
+    2. While a render or preview runs, `ps -eo uid,user,args | grep convert-helper` shows the helper as `agent`'s uid (1003 on bitlane). As `agent`, `ls /root/.dsh` is denied.
+    3. Open both files in the document tab. Both previews render.
+    4. Convert the .pptx to PDF. The tool's `file` is under `/var/lib/mumbo/office-outputs`, `root:agent`, mode `0640`, and the model's `cp` into the project works.
+    5. Refusal: as root, put a copy of the .pptx at `/root/probe.pptx`, then ask the model to render it. It's refused as outside the directories it can access. Delete the probe.
+    6. On bitlane, one member turn renders a slide, which shows that fonts load on a project box. If the engine reports no usable fonts, the template adds fonts in a follow-up.
+    7. bitlane's `dsh.log` gains no line per conversion.
 
 **Acceptance (first milestone: the founder's box in Mumbai):**
 - **The move.** The founder's box runs in the `ap-south-1` cell, moved from `us-east-1` with Sessions, schedules, files and Chrome sign-ins intact.
