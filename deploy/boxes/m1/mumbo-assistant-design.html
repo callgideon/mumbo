@@ -2514,7 +2514,7 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <ul>
 <li>office-kit starts it through <code>ctx.subprocess.spawn</code> whenever the provider has a <code>childIdentity</code>. So on boxes it runs as <code>agent</code>, under the same bootstrap, environment and secret guard as the model's shell.</li>
 <li>Without a child identity, the in-process Worker stays, so the desktop and SDK are unchanged.</li>
-<li>With no subprocess provider mounted while dsh runs as root, every operation fails <code>unavailable</code>. None runs in-process.</li>
+<li>While dsh runs as root, an operation runs only through a provider with a <code>childIdentity</code>. With no provider, or with one that has no child identity, every operation fails <code>unavailable</code>. None runs in-process as root. <span class="tag m">my call, review of #64, 2026-11-14</span></li>
 </ul>
 </li>
 <li><strong>Where it plugs in:</strong> the helper sits behind the Kit's <code>Converter</code> interface. office-kit's queue, cache, admission limits, scratch directory and output reads stay as they are. The parent sends the source bytes to the helper and writes what comes back into its own root-only scratch directory, so root never opens a path <code>agent</code> can write.</li>
@@ -2621,7 +2621,7 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>The helper runs a real WASM conversion of a small .pptx and .xlsx as a child of the test process, through the local subprocess provider.</li>
 <li>A malformed or oversized answer from the helper is refused.</li>
 <li>A stopped helper runs into the parent's deadline.</li>
-<li>Routing picks the helper when the provider has a child identity and the Worker when it doesn't. With no provider under uid 0, stubbed, it refuses.</li>
+<li>Routing picks the helper when the provider has a child identity and the Worker when it doesn't. Under uid 0, stubbed, it refuses both with no provider and with a provider that has no child identity.</li>
 <li>tool-office refuses a path outside the roots, and a link out of them, with <code>read</code>'s wording.</li>
 <li>With <code>groupReadable</code>, the output store writes <code>0750</code> directories and <code>0640</code> files.</li>
 <li>Reverting any one of the four changes (the helper, its routing, the input resolution, the output modes) fails a test.</li>

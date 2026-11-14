@@ -1456,7 +1456,7 @@ The cache's worst case is a subscription that dies silently: copies are served f
     - **When the helper runs:**
       - office-kit starts it through `ctx.subprocess.spawn` whenever the provider has a `childIdentity`. So on boxes it runs as `agent`, under the same bootstrap, environment and secret guard as the model's shell.
       - Without a child identity, the in-process Worker stays, so the desktop and SDK are unchanged.
-      - With no subprocess provider mounted while dsh runs as root, every operation fails `unavailable`. None runs in-process.
+      - While dsh runs as root, an operation runs only through a provider with a `childIdentity`. With no provider, or with one that has no child identity, every operation fails `unavailable`. None runs in-process as root. **[my call, review of #64, 2026-11-14]**
     - **Where it plugs in:** the helper sits behind the Kit's `Converter` interface. office-kit's queue, cache, admission limits, scratch directory and output reads stay as they are. The parent sends the source bytes to the helper and writes what comes back into its own root-only scratch directory, so root never opens a path `agent` can write.
     - **Protocol:**
       - It runs over raw pipes (`stdin: 'pipe'`, `stdout: 'pipe'`), not collected text, which would decode the binary output as UTF-8 and keep only the tail of anything over its cap.
@@ -1516,7 +1516,7 @@ The cache's worst case is a subscription that dies silently: copies are served f
     - The helper runs a real WASM conversion of a small .pptx and .xlsx as a child of the test process, through the local subprocess provider.
     - A malformed or oversized answer from the helper is refused.
     - A stopped helper runs into the parent's deadline.
-    - Routing picks the helper when the provider has a child identity and the Worker when it doesn't. With no provider under uid 0, stubbed, it refuses.
+    - Routing picks the helper when the provider has a child identity and the Worker when it doesn't. Under uid 0, stubbed, it refuses both with no provider and with a provider that has no child identity.
     - tool-office refuses a path outside the roots, and a link out of them, with `read`'s wording.
     - With `groupReadable`, the output store writes `0750` directories and `0640` files.
     - Reverting any one of the four changes (the helper, its routing, the input resolution, the output modes) fails a test.
