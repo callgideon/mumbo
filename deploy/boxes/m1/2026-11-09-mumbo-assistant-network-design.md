@@ -455,6 +455,7 @@ Not built now. The platform comes first. When this comes back, start from these 
     - It takes its identity from config (`mumbo-bot[bot]` and the bot's numeric user id), not from `/user`.
     - Commits use `<bot id>+mumbo-bot[bot]@users.noreply.github.com`.
     - It doesn't poll notifications (App tokens can't). It polls the repository streams it already has (new issues, new PRs, comments, reviews) plus check runs.
+    - Its setup check reads the repository through the edge and doesn't consult `permissions.push`. GitHub reports `push: false` to an installation token even when it has `contents: write`. See B53.
     - To keep strangers on a public repo from costing an Eval each, a comment becomes a Trigger only when at least one holds:
       - it is on a Thread a Ticket subscribes to;
       - it mentions `@mumbo-bot` (or `@mumbo-bot[bot]`) outside code and HTML comments, where GitHub renders it.
@@ -1439,7 +1440,7 @@ The cache's worst case is a subscription that dies silently: copies are served f
     - It includes the comment fix and the diff-fence fix with its 50,000-tab test. Upstream's regex fails that test at 8.3 s.
     - Approved, pending CI on this head and the CodeQL triage in the PR body.
     - **A test that expired with the date [2026-11-14]:** a5e0283c13 fixes an upstream liveshare test that main also has. Its "live" owner credential was fixed at 2026-10-15 plus 30 days, so it expired at midnight on 2026-11-14 against the host's clock. It is now 30 days from the test's start. Until #61 lands, main's unit job fails on whichever shard runs that file, so #61 merges before any other PR. Approved.
-  - **The founder's overlay:** `deploy/mumbo.overlay.yml` turned off `account-controller`, a row that no longer exists. The founder approved deleting those two lines, and f937651317 removes only them. `deepseek-account` stays off.
+  - **The founder's overlay:** `deploy/mumbo.overlay.yml` turned off `account-controller`, a row that no longer exists.  The founder approved deleting those two lines, and f937651317 removes only them. `deepseek-account` stays off.
 
 **Acceptance (first milestone: the founder's box in Mumbai):**
 - **The move.** The founder's box runs in the `ap-south-1` cell, moved from `us-east-1` with Sessions, schedules, files and Chrome sign-ins intact.
