@@ -167,6 +167,33 @@ Types: [Agent](core.md)
 
 Source: [`packages/mumbo/mcp/src/report-turns.ts`](../../packages/mumbo/mcp/src/report-turns.ts)
 
+<a id="ctxmumbo-run-wild-record--runwildrecord"></a>
+
+### `ctx.mumbo-run-wild-record` — `RunWildRecord`
+
+The box-wide record of what Run Wild decided, as the `mumbo-run-wild-record` service reads it.
+
+```ts cordis-catalog
+/**
+ * List entries newest first: by time, then by line order, both descending.
+ * @param query - kinds, cursor, lower time bound and page size.
+ * @returns one page of entries.
+ * @throws when a day file cannot be read.
+ */
+list(query: RecordQuery): Promise<RecordPage>
+
+/**
+ * Count entries per kind with `since <= time < until`.
+ * @param since - window start, Unix epoch milliseconds, inclusive.
+ * @param until - window end, Unix epoch milliseconds, exclusive.
+ * @returns the counts.
+ * @throws when a day file cannot be read.
+ */
+count(since: number, until: number): Promise<RecordCounts>
+```
+
+Source: [`packages/mumbo/run-wild/src/record-types.ts`](../../packages/mumbo/run-wild/src/record-types.ts)
+
 <a id="approval-events"></a>
 
 ### `approval/*` events

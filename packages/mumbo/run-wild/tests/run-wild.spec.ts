@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { assembleContextFor } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -42,7 +45,9 @@ async function mounted(presets: Partial<typeof PRESETS> = PRESETS, systemPrompt:
   await ctx.plugin(Approval, { policy: 'ask' })
   await ctx.plugin(PermissionPresetService, { presets })
   await ctx.plugin(UserQuestionService)
-  const runWild = await ctx.plugin(RunWild)
+  const root = mkdtempSync(join(tmpdir(), 'mumbo-run-wild-record-'))
+  onTestFinished(() => { rmSync(root, { recursive: true, force: true }) })
+  const runWild = await ctx.plugin(RunWild, { root, retentionDays: 90 })
   const asked = { questions: [] as AskUserQuestionRequest[], approvals: [] as string[] }
   ctx.on('user-questions/request', (request) => {
     asked.questions.push(request)

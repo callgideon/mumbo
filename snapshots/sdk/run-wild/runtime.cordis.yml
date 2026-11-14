@@ -22,3 +22,5 @@
 - insert:
     - id: run-wild
       name: '@mumbo/run-wild'
+      config:
+        root: !!js dshHomePath('storages', 'runwild')

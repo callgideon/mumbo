@@ -25,7 +25,7 @@ import { defineContentToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import Tools from '@deepseek-ai/dsh-tools'
 import Approval from '@deepseek-ai/dsh-user-approval'
 import UserQuestions from '@deepseek-ai/dsh-user-questions'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import * as RunWild from '../src/index.ts'
 import { RUN_WILD_CONTEXT, RUN_WILD_INSTRUCTIONS, RUN_WILD_PRESET, RUN_WILD_REPLY } from '../src/index.ts'
@@ -109,6 +109,7 @@ async function runTurn(
     approval: { policy: 'ask' },
     planMode: { section: 'Plan before you act.' },
     permission: { presets: PRESETS, defaultPreset },
+    runWild: { root: join(root, 'runwild') },
   }
   const configPath = join(root, 'cordis.yml')
   await writeFile(configPath, JSON.stringify([...modules.keys()].map(id => ({ id, name: id, config: configs[id] ?? {} }))))
@@ -189,6 +190,15 @@ describe('real Loader composition', () => {
       { kind: 'question', target: 'env', summary: 'Which environment?', reason: RUN_WILD_REPLY },
       { kind: 'approval', target: 'deploy', summary: 'Deploy to production?', reason: 'Run Wild allows tool approvals.' },
     ])
+  })
+
+  it('copies the turn\'s decisions into the box-wide record, which the service lists newest first', { timeout: 60_000 }, async () => {
+    const { ctx, agent } = await runTurn('run-wild')
+    const listed = async () => (await ctx['mumbo-run-wild-record'].list({ limit: 10 })).entries
+    await vi.waitFor(async () => { expect(await listed()).toHaveLength(3) })
+    const decisions = agent.session.snapshotEvents().filter(event => event.type === 'runwild/decision').reverse()
+    const lines = decisions.map(event => ({ ...event.data, v: 1, time: event.time, session: agent.id, root: agent.id, seq: event.seq }))
+    expect(await listed()).toEqual(lines)
   })
 
   it('in Full access, with the same knobs, leaves the plan, the question and the approval to the person', { timeout: 60_000 }, async () => {

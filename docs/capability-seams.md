@@ -321,6 +321,8 @@ flowchart LR
   pkg_box_links["box-links"]
   pkg_mcp["mcp"]
   svc_mumbo_report_turns["ctx.mumbo-report-turns<br/>Report-started turns"]
+  pkg_run_wild["run-wild"]
+  svc_mumbo_run_wild_record["ctx.mumbo-run-wild-record<br/>Run Wild record"]
   pkg_action_cards --> svc_actionCards
   pkg_agent --> svc_agents
   pkg_agent_default_model --> svc_agentDefaultModel
@@ -424,6 +426,7 @@ flowchart LR
   pkg_ptc_runtime --> svc_ptcRuntime
   pkg_ptc_runtime_node --> svc_ptcRuntime
   pkg_pwsh_local --> svc_shell
+  pkg_run_wild --> svc_mumbo_run_wild_record
   pkg_sandbox --> svc_sandbox
   pkg_sandbox_local --> svc_sandbox
   pkg_sandbox_policy --> svc_sandboxPolicy
@@ -547,6 +550,7 @@ flowchart LR
   svc_lsp --> pkg_tool_lsp
   svc_mcpResources --> pkg_mcp_resources
   svc_mumbo_browser_consent --> pkg_box_links
+  svc_mumbo_run_wild_record --> pkg_mcp
   svc_officeKit --> pkg_client_ui_sidebar_documentpreview
   svc_officeKit --> pkg_tool_office
   svc_otel --> pkg_host_product_telemetry_otel
@@ -773,5 +777,6 @@ flowchart LR
 | `ctx.liveshareShares` | `service` | [`experimental-liveshare`](../packages/experimental/liveshare) | - | - | - | Publishes the owner share-management operations as one Typert Remote namespace that the owner client face calls; every method delegates to the same operations the same-origin routes used. |
 | `ctx.mumbo-browser-consent` | `service` | `browser-consent` | - | `box-links` | - | The person's hold on the box's browser: while taken over, browser consent refuses every browser tool and computer action and holds no CDP connection; box-links' owner-only route changes it. |
 | `ctx.mumbo-report-turns` | `service` | `mcp` | - | - | - | Whether a project's report opened the current turn of an Agent's root Session; the MCP door provides it from a host-only projection and lets only reads run unasked in such a turn. |
+| `ctx.mumbo-run-wild-record` | `service` | `run-wild` | - | `mcp` | - | The box-wide record of what Run Wild decided without asking, one append-only JSONL file per UTC day that only the Host writes; its owner-only routes feed the view, and the MCP door's needs_you lists the last day of it. |
 
 Maintenance mode: hybrid: services are discovered from Cordis declarations; interface/implementation/consumer roles are classified in `scripts/gen-doc-graphs.ts` with a completeness guard.
