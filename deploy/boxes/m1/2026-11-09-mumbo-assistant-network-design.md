@@ -1447,6 +1447,7 @@ The cache's worst case is a subscription that dies silently: copies are served f
   - **Ruling:** in App mode the check reads the repository through the edge and doesn't consult `permissions`. The edge enforces what a worker can do. It refuses repositories the project hasn't bound and permissions the installation hasn't approved, and both still fail the read. The renamed-repository check stays. User-account mode is unchanged. `deployment.spec.ts` expects App mode with `push: false` to resolve. The doc comment, the README and `UPSTREAM.md` record the change.
   - Not a write probe (`git push --dry-run` or a test ref): it needs a local repository and adds a GitHub write to setup, and the edge already enforces writes. An archived repository fails at the first push, visibly. **[my call]**
   - Rollout: after deploy, mumbo saves the Source again on bitlane, and the card shows the repository.
+  - **Build review, PR #63** [2026-11-14]: approved at a962347152, pending CI. The condition is now `!githubApp && access.push !== true`. App mode resolves with push `false`, `true` or `null`, and a 404 from the edge is still `repositoryUnreadable`. User-account mode still refuses `false` and `null`. Putting the old condition back fails the App-mode test.
 
 **Acceptance (first milestone: the founder's box in Mumbai):**
 - **The move.** The founder's box runs in the `ap-south-1` cell, moved from `us-east-1` with Sessions, schedules, files and Chrome sign-ins intact.

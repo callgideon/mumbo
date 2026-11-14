@@ -2497,6 +2497,7 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li><strong>Ruling:</strong> in App mode the check reads the repository through the edge and doesn't consult <code>permissions</code>. The edge enforces what a worker can do. It refuses repositories the project hasn't bound and permissions the installation hasn't approved, and both still fail the read. The renamed-repository check stays. User-account mode is unchanged. <code>deployment.spec.ts</code> expects App mode with <code>push: false</code> to resolve. The doc comment, the README and <code>UPSTREAM.md</code> record the change.</li>
 <li>Not a write probe (<code>git push --dry-run</code> or a test ref): it needs a local repository and adds a GitHub write to setup, and the edge already enforces writes. An archived repository fails at the first push, visibly. <span class="tag m">my call</span></li>
 <li>Rollout: after deploy, mumbo saves the Source again on bitlane, and the card shows the repository.</li>
+<li><strong>Build review, PR #63</strong> [2026-11-14]: approved at a962347152, pending CI. The condition is now <code>!githubApp &amp;&amp; access.push !== true</code>. App mode resolves with push <code>false</code>, <code>true</code> or <code>null</code>, and a 404 from the edge is still <code>repositoryUnreadable</code>. User-account mode still refuses <code>false</code> and <code>null</code>. Putting the old condition back fails the App-mode test.</li>
 </ul>
 </li>
 </ul>
