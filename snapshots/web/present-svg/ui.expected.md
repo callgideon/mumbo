@@ -4,6 +4,7 @@
 - button "Completed in {{duration}}" [expanded]
 - button "Analysis completed" [expanded]
 - button "Context injection runtime-context"
+- button "Context injection skill-catalog"
 - button "Context injection time-context"
 - button "Think The user wants a simple SVG diagram of the von Neumann architecture, saved as von-neumann.svg. Let me create a clean SVG showing CPU (control unit, ALU), memory, input, and output with bidirectional data/control buses."
 - paragraph: I'll create a von Neumann architecture SVG diagram.

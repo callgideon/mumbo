@@ -54,7 +54,9 @@ chooser(session: Session): 'model' | 'host'
  * @param signal - cancellation for filesystem inspection and creation.
  * @returns the existing directory; recovery is committed before fulfillment.
  * A notice failure is warned without reverting the committed state.
- * @throws when the original project cannot be recreated; the failure is logged.
+ * @throws {@link WorkingDirectoryError} `WORKING_DIRECTORY_UNAVAILABLE` when the original project is missing and
+ *   cannot be recreated, which is logged, or the service is disposed, or the rejection of a
+ *   `working-directory/access` listener.
  */
 ensure(agent: Agent, signal?: AbortSignal): Promise<string>
 
@@ -68,7 +70,9 @@ ensure(agent: Agent, signal?: AbortSignal): Promise<string>
  * {@link ensure} keeps it.
  * @returns the canonical absolute directory, committed before fulfillment.
  * A notice failure is warned; the next request still receives the committed directory.
- * @throws when the requested path is not an existing directory, or a model-chosen one lies outside the model roots.
+ * @throws {@link WorkingDirectoryError} `WORKING_DIRECTORY_INVALID` for an empty path and
+ *   `WORKING_DIRECTORY_NOT_FOUND` when the path is not an existing directory, `FsError` `FS_OUTSIDE_ROOTS` when a
+ *   model-chosen one lies outside the model roots, or the rejection of a `working-directory/access` listener.
  */
 set(agent: Agent, path: string, signal?: AbortSignal, chooser: 'model' | 'host' = 'host'): Promise<string>
 
@@ -84,6 +88,34 @@ async resolveModelDirectory(agent: Agent, path: string, signal?: AbortSignal): P
 ```
 
 Types: [Agent](core.md) · [Session](session.md)
+
+Source: [`packages/session/working-directory/src/index.ts`](../../packages/session/working-directory/src/index.ts)
+
+<a id="working-directory-events"></a>
+
+### `working-directory/*` events
+
+<a id="working-directoryaccess--waterfall"></a>
+
+#### `working-directory/access` — waterfall
+
+Coordinate directory validation and publication with a resource operation on the directory, such as a checkout being removed. A listener that must wait awaits that operation, then calls `next()`; every other listener calls `next()` at once. A rejection fails this access and leaves the recorded directory unchanged; it is not a fallback.
+
+```ts cordis-catalog
+/**
+ * Coordinate directory validation and publication with a resource operation
+ * on the directory, such as a checkout being removed. A listener that must
+ * wait awaits that operation, then calls `next()`; every other listener
+ * calls `next()` at once. A rejection fails this access and leaves the
+ * recorded directory unchanged; it is not a fallback.
+ * @param request - owner, requested path (null validates the current directory), and the access's cancellation.
+ * @param next - perform validation and commit.
+ * @mode waterfall
+ */
+'working-directory/access'( request: { agent: Agent; path: string | null; signal: AbortSignal }, next: () => Promise<string>, ): Promise<string>
+```
+
+Types: [Agent](core.md)
 
 Source: [`packages/session/working-directory/src/index.ts`](../../packages/session/working-directory/src/index.ts)
 <!-- END GENERATED cordis-surface -->

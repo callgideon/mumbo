@@ -1,0 +1,5 @@
+- region "The worktree is unavailable":
+  - text: The worktree is unavailable dsh-{{worktree}}
+  - paragraph: The worktree of branch dsh-{{worktree}} can be restored at its original location. Uncommitted changes from before the removal cannot be recovered
+  - button "Restore worktree"
+  - button "Continue in the project"

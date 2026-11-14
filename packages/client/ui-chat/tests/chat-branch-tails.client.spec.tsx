@@ -778,6 +778,23 @@ describe('MessageItem arms', () => {
       .toBe('Supersedes earlier snapshots')
   })
 
+  it('an empty runtime snapshot keeps the cleared reminder visible', () => {
+    const text = '<system-reminder>\nCurrent runtime context: none. Earlier runtime-context snapshots no longer apply.\n</system-reminder>'
+    const view = render(
+      <MessageItem t={t} node={{
+        kind: 'context', seq: 3, content: [{ type: 'text', text }],
+        source: { kind: 'runtime-context', form: 'snapshot', sections: [] },
+        producer: { role: 'inject', label: 'runtime-context' },
+        form: 'snapshot',
+      } as never}
+      />,
+    )
+    fireEvent.click(view.getByRole('button', { name: /^Context injection\s*runtime-context$/ }))
+    expect(view.container.querySelector('[data-context-text]')?.textContent).toBe(text)
+    expect(view.container.querySelector('[data-context-sections]')).toBeNull()
+    expect(view.queryByText('Supersedes earlier snapshots')).toBeNull()
+  })
+
   it('a relay names the agent that sent it above what it said', () => {
     const view = render(
       <MessageItem t={t} node={{

@@ -1,13 +1,14 @@
 - text: main
-- button "Base branch: origin/main": origin/main
+- 'button "Base branch: origin/main"': origin/main
 - text: Including uncommitted changes
+- 'button "Commits shown: All commits"': All commits
 - button "Create change request"
 - button "Branch"
 - button "All 0 files" [disabled]
 - button "Refresh changes"
 - button "Expand all files" [disabled]
-- button "Split view" [pressed]
-- button "Line wrap" [pressed]
+- button "Side by side" [pressed]
+- button "Wrap lines" [pressed]
 - status:
   - text: No comparison was run because Git filter settings could not be read completely. Check the Git settings and output limit, then retry.
   - button "Retry"

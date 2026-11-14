@@ -19,6 +19,7 @@
 - button "Completed in {{duration}}" [expanded]
 - button "Ran commands and updated the plan" [expanded]
 - button "Context injection runtime-context"
+- button "Context injection skill-catalog"
 - button "Context injection time-context"
 - 'button "Think The user''s goal is: \"Do two turns. In each turn, output the file structure of one random package. Note that after you finish one turn, output the content directly and stop; our system will open another turn for you, and you do a similar one.\" — in short: two turns, each outputting the file structure of a random package; after finishing one turn I output the content directly and stop, and the system opens another turn where I do something similar."'
 - button "Bash List package directories deterministically"

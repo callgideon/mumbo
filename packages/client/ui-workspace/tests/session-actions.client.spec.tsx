@@ -602,6 +602,18 @@ describe('RowActionToast', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
+
+  it.each(['archived', 'stoppedAndArchived'] as const)('renders a %s follow-up in the same toast with undo', async (kind) => {
+    const { notify, undoArchive } = await toastSurface()
+    notify({ kind, sessionId: sid('one'), message: 'Archived; the worktree will be cleaned up', tone: 'success' })
+    expect(screen.getAllByRole('alert')).toHaveLength(1)
+    expect(screen.getByRole('alert').textContent).toContain('Archived; the worktree will be cleaned up')
+    notify({ kind, sessionId: sid('one'), message: 'Archived; worktree cleanup failed', tone: 'warning' })
+    expect(screen.getAllByRole('alert')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'annuler' }))
+    expect(undoArchive).toHaveBeenCalledWith(sid('one'))
+  })
+
   it('the archived notice takes itself down, then undoes the archive or shows the archived rows', async () => {
     const { dismissToast, undoArchive, showArchived, notify } = await toastSurface()
     notify({ kind: 'archived', sessionId: sid('one') })

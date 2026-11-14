@@ -21,6 +21,8 @@ import type { RunAsIdentity } from './run-as.ts'
 export interface LinuxLaunchRequest {
   cwd: string
   env: Record<string, string>
+  /** Only child-owned pipe endpoints may have their shared file status flags changed. */
+  pipeFds?: number[]
   control?: 'pipe'
   /** Credentials the bootstrap takes before it changes directory and enters the target. */
   runAs?: RunAsIdentity
@@ -154,7 +156,8 @@ export function consumeLinuxLaunchRequest(requestPath: string): LinuxLaunchReque
   const text = readFileSync(requestPath, 'utf8')
   unlinkSync(requestPath)
   const value: unknown = JSON.parse(text)
-  if (!isRecord(value) || !hasExactKeys(value, ['cwd', 'env'], ['control', 'runAs'])
+  if (!isRecord(value) || !hasExactKeys(value, ['cwd', 'env'], ['control', 'pipeFds', 'runAs'])
+    || (value.pipeFds !== undefined && !isStdioFdList(value.pipeFds))
     || typeof value.cwd !== 'string' || !isStringRecord(value.env)
     || (value.control !== undefined && value.control !== 'pipe')
     || (value.runAs !== undefined && !isRunAsIdentity(value.runAs))) {
@@ -162,9 +165,14 @@ export function consumeLinuxLaunchRequest(requestPath: string): LinuxLaunchReque
   }
   return {
     cwd: value.cwd, env: value.env,
+    ...value.pipeFds === undefined ? {} : { pipeFds: value.pipeFds },
     ...value.control === 'pipe' ? { control: 'pipe' as const } : {},
     ...value.runAs === undefined ? {} : { runAs: value.runAs },
   }
+}
+
+function isStdioFdList(value: unknown): value is number[] {
+  return Array.isArray(value) && value.every((fd: unknown) => fd === 0 || fd === 1 || fd === 2)
 }
 
 /**

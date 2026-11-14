@@ -4,7 +4,7 @@
 - region "Web search provider":
   - heading "Web search provider" [level=4]
   - button "Web search provider DeepSeek Search API": DeepSeek Search API
-  - paragraph: Queries the search endpoint directly for titles, URLs, and snippets without an extra model call. Uses the DeepSeek account of the current conversation, or a DeepSeek API key, and may incur API charges.
+  - paragraph: Incurs charges, paid by the account or API key chosen under Billing.
   - paragraph:
     - link "Search & Fetch guide":
       - /url: https://api-docs.deepseek.com/guides/search
@@ -12,9 +12,15 @@
   - textbox "Results per search":
     - /placeholder: ""
     - text: "10"
-  - paragraph: "Results returned per query: an integer from 1 to 50, default 10. This controls result count, not search calls. web_search keeps no more sources than its own result limit."
+  - paragraph: "Results returned per search: 1 to 50, default 10."
+  - text: Billing
+  - button "Billing Automatic": Automatic
+  - paragraph: Follows the conversation's DeepSeek account or API key; with other models, uses the API key first, then the signed-in account.
 - region "Web fetch provider":
   - heading "Web fetch provider" [level=4]
   - button "Web fetch provider DeepSeek Fetch API": DeepSeek Fetch API
-  - paragraph: Fetches public URLs on DeepSeek servers and returns Markdown. Uses the DeepSeek account of the current conversation, or a DeepSeek API key, may incur API charges, and cannot reach intranet or loopback addresses.
+  - paragraph: Can't reach intranet or local addresses. Incurs charges, paid by the account or API key chosen under Billing.
+  - text: Billing
+  - button "Billing Automatic": Automatic
+  - paragraph: Follows the conversation's DeepSeek account or API key; with other models, uses the API key first, then the signed-in account.
 - button "Save" [disabled]

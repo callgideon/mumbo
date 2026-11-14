@@ -1374,18 +1374,15 @@ describe('WorkspaceBrowser', () => {
     expect(startSession).toHaveBeenCalledWith(wid('alpha'))
   })
 
-  it('auto-expands the Ungrouped bucket for a loose current session; its header has no menu and its + is inert', () => {
-    const startSession = vi.fn()
+  it('auto-expands the Ungrouped bucket for a loose current session; its header has neither menu nor +', () => {
     mount({
       useSessions: hook(sessionState([summary('loose', 1)], { main: sid('loose') })),
       useWorkspaces: hook(workspaceState([workspace('alpha', [])])),
-      startSession,
     })
     // The loose session's group is UNGROUPED_KEY: expanded by the effect.
     expect(screen.getByText('loose')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Workspace actions for Ungrouped' })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'New session in Ungrouped' }))
-    expect(startSession).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: 'New session in Ungrouped' })).toBeNull()
   })
 
   it('keeps an already-expanded group when the selection moves within it', () => {

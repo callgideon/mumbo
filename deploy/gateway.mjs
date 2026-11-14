@@ -1,5 +1,5 @@
 // mumbo account gateway on the API host: speaks the desktop account protocol of
-// @deepseek-ai/dsh-deepseek-account-platform (platformOrigin) and llm-deepseek-account (inference).
+// @deepseek-ai/dsh-deepseek-account (platformOrigin and harnessOrigin) and llm-deepseek-account (inference).
 // Sign-in uses the Supabase login page at https://<app host>/oauth/consent in desktop mode. Only accounts in
 // GATEWAY_ALLOWED_EMAILS (comma-separated addresses or @domain; unset = nobody) may sign in or send model requests,
 // which are forwarded to DeepSeek with the server API key; the list is re-checked per request, so removing an address revokes it.
@@ -139,8 +139,9 @@ async function handle(req, res) {
   if (!account || !allowed(account.u.email)) return json(res, 401, { code: 40003, msg: 'sign in again' })
   if (req.method === 'GET' && path === '/auth-api/v0/users/current') return json(res, 200, ok(profile(account.u)))
   if (req.method === 'GET' && path === '/api/v0/users/get_user_summary') return json(res, 200, ok({ normal_wallets: [], bonus_wallets: [] }))
-  if (req.method === 'GET' && path === '/api/v0/users/get_unnotified_bonuses') return json(res, 200, ok([]))
-  if (req.method === 'POST' && ['/api/v0/users/ack_bonus_notified', '/auth-api/v0/users/logout'].includes(path)) return json(res, 200, ok(null))
+  // mumbo sends no account notifications; the app reads the empty list again after next_poll_after seconds.
+  if (req.method === 'GET' && path === '/api/v0/users/notifications/list') return json(res, 200, ok({ next_poll_after: 86400, notifications: [] }))
+  if (req.method === 'POST' && path === '/auth-api/v0/users/logout') return json(res, 200, ok(null))
   if (req.method === 'GET' && path === '/models') return json(res, 200, MODELS)
   if (path.startsWith('/anthropic/')) return proxyModel(req, res, account, `${path}${url.search}`)
   return json(res, 404, { error: 'not found' })

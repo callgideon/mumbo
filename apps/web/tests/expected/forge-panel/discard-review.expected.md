@@ -1,0 +1,19 @@
+- dialog "Submit review":
+  - heading "Submit review" [level=2]
+  - button "Close"
+  - text: Pending comments (1)
+  - group "Discard review":
+    - text: Discard your pending review and its 1 comments? This cannot be undone.
+    - button "Cancel"
+    - button "Discard review"
+  - textbox "Review summary…"
+  - status
+  - radio "Comment" [checked]
+  - text: Comment
+  - radio "Approve"
+  - text: Approve
+  - radio "Request changes"
+  - text: Request changes
+  - button "Discard review" [disabled]
+  - button "Cancel"
+  - button "Submit review" [disabled]

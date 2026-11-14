@@ -2,12 +2,12 @@
 - button "Copy project directory path"
 - button "Local changes"
 - text: HEAD → origin/main
-- button "View the changes of this Session: 4 files, 4 lines added, 1 lines deleted": +4 −1 4 files
+- 'button "View the changes of this Session: 4 files, 4 lines added, 1 lines deleted"': +4 −1 4 files
 - heading "Change requests of this Session · 1" [level=3]
 - button "Refresh status"
 - list:
   - listitem:
-    - img "Change request state: Needs attention"
+    - 'img "Change request state: Needs attention"'
     - link "Add the pull request panel":
       - /url: https://github.com/octo/demo/pull/7
     - text: "#7 feat → main"
@@ -16,5 +16,6 @@
     - 'button "Remove #7 from this Session"'
     - 'button "Collapse #7" [expanded]'
     - button "Checks 1 checks loaded; more available"
-    - text: Review Review required · 1 unresolved Merge No conflicts
-    - 'button "View the changes of #7: 128 lines added, 14 lines deleted"': Changes +128 −14
+    - button "Review Review required"
+    - text: Merge No conflicts
+    - 'button "View the changes of #7: 128 lines added, 14 lines deleted"': Changes +128 −14 1 unresolved threads

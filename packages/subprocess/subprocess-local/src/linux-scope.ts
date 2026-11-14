@@ -29,7 +29,7 @@ import {
 import type { RunnerInvocation } from './runner-launch.ts'
 import type { RunAsIdentity } from './run-as.ts'
 import { childEnv, fallbackOwner, taskkillProcessTree } from './spawn.ts'
-import { linuxProcessGroupHasLiveMembers } from './process-inspector.ts'
+import { linuxProcessGroupLiveMember } from './process-inspector.ts'
 
 /** Test seams for systemd command execution. */
 export interface LinuxScopeInternals {
@@ -687,7 +687,8 @@ export function launchLinuxScope(
   runAs?: RunAsIdentity,
 ): ManagedProcessLaunch {
   const invocation = internals.runnerInvocation ?? spawnRunnerInvocation()
-  const files = ordinaryLaunchFiles(spec, targetEnv, runAs)
+  const stdio = runnerStdio(spec, false)
+  const files = ordinaryLaunchFiles(spec, targetEnv, stdio, runAs)
   const startup = new LinuxScopeStartup(files, 'subprocess')
   const unitBase = unitStem('dsh-subprocess')
   let child: ReturnType<typeof spawn>
@@ -700,7 +701,7 @@ export function launchLinuxScope(
     ), {
       cwd: process.cwd(),
       env: runnerEnvironment(files.requestPath, invocation),
-      stdio: runnerStdio(spec, false),
+      stdio,
       detached: true,
     })
   } catch (error) {
@@ -732,10 +733,11 @@ export function launchLinuxScope(
 }
 
 function ordinaryLaunchFiles(
-  spec: SubprocessSpawnSpec, targetEnv: Record<string, string>, runAs: RunAsIdentity | undefined,
+  spec: SubprocessSpawnSpec, targetEnv: Record<string, string>, stdio: ReturnType<typeof runnerStdio>, runAs: RunAsIdentity | undefined,
 ): LinuxLaunchFiles {
   return createLinuxLaunchFiles({
     cwd: spec.cwd, env: targetEnv,
+    pipeFds: stdio.slice(0, 3).flatMap((disposition, fd) => disposition === 'pipe' ? [fd] : []),
     ...spec.stdio.control === undefined ? {} : { control: spec.stdio.control },
     ...runAs === undefined ? {} : { runAs },
   })
@@ -758,14 +760,15 @@ export function launchLinuxBootstrap(
   internals: LinuxScopeInternals = {},
 ): ManagedProcessLaunch {
   const invocation = internals.runnerInvocation ?? spawnRunnerInvocation()
-  const files = ordinaryLaunchFiles(spec, targetEnv, runAs)
+  const stdio = runnerStdio(spec, false)
+  const files = ordinaryLaunchFiles(spec, targetEnv, stdio, runAs)
   const startup = new LinuxScopeStartup(files, 'subprocess', false)
   let child: ReturnType<typeof spawn>
   try {
     child = (internals.spawn ?? spawn)(invocation[0], [...invocation.slice(1), '--', ...spec.argv], {
       cwd: process.cwd(),
       env: runnerEnvironment(files.requestPath, invocation),
-      stdio: runnerStdio(spec, false),
+      stdio,
       detached: true,
     })
   } catch (error) {
@@ -780,7 +783,7 @@ export function launchLinuxBootstrap(
     control: controlPipe(child, spec.stdio.control),
     direct,
     owner: {
-      ...fallbackOwner('linux', child.pid, child, taskkillProcessTree, linuxProcessGroupHasLiveMembers, direct),
+      ...fallbackOwner('linux', child.pid, child, taskkillProcessTree, linuxProcessGroupLiveMember, direct),
       cleanup: () => { cleanupLinuxLaunchFiles(files) },
     },
   }
