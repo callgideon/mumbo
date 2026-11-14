@@ -2456,6 +2456,7 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>Cost: boxes lose the python-docx, python-pptx and openpyxl guidance. The model still edits Office files with Python through bash, using its own knowledge.</li>
 <li>Not a box-only copy of the skill text: a copy pointed to by <code>assetRoot</code> goes stale without notice on every sync, while a <code>disabled</code> line shows up as a conflict.</li>
 <li>No recording before the change: removing text that promises missing tools needs no model round to justify it. If Office work on boxes turns out to need the guidance, the fix is the same revisit as the tools: run the converter as <code>agent</code>, then turn both back on. <span class="tag m">my call</span></li>
+<li><strong>Build review, PR #62 (B52)</strong> [2026-11-14]: approved at 2dbddb4a1d, pending CI. It changes one row plus tests, the web-app README and the Agent Note, and needs no GIF. Removing the switch makes 5 tests fail, across both boxes and the desktop's uid 0 case.</li>
 </ul>
 </li>
 <li><code>office-kit</code> stays: it renders previews the person opens, as <code>office-to-pdf</code> did.</li>
