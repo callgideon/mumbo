@@ -2462,7 +2462,7 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>Static and unit pass on Node 24 at 6058b21698. mumbo-ci runs no session snapshots, so the two ptc snapshots were checked against main locally. ptc-persistent passes. ptc-script-imports fails the same way on main under Node 22, and boxes run <code>node:24-bookworm</code>.</li>
 <li>CodeQL counts 17 alerts in touched files. Most exist on main. The critical one at <code>deploy/gateway.mjs:79</code> is a false positive: the host is a constant, and the path must start with <code>/anthropic/</code>.</li>
 <li>One alert is new in shipped upstream code: a quadratic regex on model-written diff fence headers in <code>ui-primitives</code>, which a crafted fence could use to hang the person's tab. It gets a one-line fork fix (<code>split('\t', 1)</code>) with a test. <span class="tag m">my call</span></li>
-<li>Dismissing the rest is the founder's call.</li>
+<li>Dismissing the rest is the founder's call. main has no branch protection, so CodeQL doesn't block the merge, and the dismissals are cleanup. At a5e0283c13 [2026-11-14], CI passes and #78 is fixed. Of the 16 alerts, the founder dismisses one as a false positive (#58, the gateway) and 11 as &quot;used in tests&quot;. Four are upstream code already open on main: #17, #19, #35 and #36. They are &quot;won't fix&quot; or stay open.</li>
 </ul>
 </li>
 <li><strong>Merge-in of #60 [2026-11-14]:</strong> head 1eec077169 merges main 7baafa6519 (#60) into the branch. It brings #60's 26 files in unchanged.

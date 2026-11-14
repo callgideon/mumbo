@@ -1426,7 +1426,7 @@ The cache's worst case is a subscription that dies silently: copies are served f
     - Static and unit pass on Node 24 at 6058b21698. mumbo-ci runs no session snapshots, so the two ptc snapshots were checked against main locally. ptc-persistent passes. ptc-script-imports fails the same way on main under Node 22, and boxes run `node:24-bookworm`.
     - CodeQL counts 17 alerts in touched files. Most exist on main. The critical one at `deploy/gateway.mjs:79` is a false positive: the host is a constant, and the path must start with `/anthropic/`.
     - One alert is new in shipped upstream code: a quadratic regex on model-written diff fence headers in `ui-primitives`, which a crafted fence could use to hang the person's tab. It gets a one-line fork fix (`split('\t', 1)`) with a test. **[my call]**
-    - Dismissing the rest is the founder's call.
+    - Dismissing the rest is the founder's call. main has no branch protection, so CodeQL doesn't block the merge, and the dismissals are cleanup. At a5e0283c13 [2026-11-14], CI passes and #78 is fixed. Of the 16 alerts, the founder dismisses one as a false positive (#58, the gateway) and 11 as "used in tests". Four are upstream code already open on main: #17, #19, #35 and #36. They are "won't fix" or stay open.
   - **Merge-in of #60 [2026-11-14]:** head 1eec077169 merges main 7baafa6519 (#60) into the branch. It brings #60's 26 files in unchanged.
     - The one conflict, `ui-sidebar-terminal` locales, keeps upstream's agent and sandbox badge keys and #60's `accessDenied` in every dictionary.
     - The Gateway's stream-open logging, the `logger-console` row and its classification, and the Office switch with its FORBIDDEN entry all survive the merge.
