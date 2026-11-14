@@ -19,7 +19,7 @@ import type { AskUserQuestionAnswerItem, AskUserQuestionItem } from '@deepseek-a
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import { type Config, record, rootUnavailable } from './record.ts'
 
-export { Config, clipSummary } from './record.ts'
+export { Config } from './record.ts'
 export type { RecordCounts, RecordCursor, RecordEntry, RecordPage, RecordQuery, RunWildRecord } from './record-types.ts'
 
 /** What a Run Wild decision stood in for: a tool approval, a plan review, a question, or a call refused without asking. */
@@ -33,7 +33,7 @@ declare module '@deepseek-ai/dsh-session/types' {
      * name, the plan's tool call id, the approval's subject, or the question id; `summary` is the ask's own text;
      * `reason` is why it was decided this way, and for a question it is the reply the model received. A `refusal` is a
      * call refused without asking, such as `@mumbo/mcp`'s in a report-started turn: `target` is the tool name, `summary`
-     * the call's arguments as JSON, clipped by {@link clipSummary}, and `reason` the refusal the model received.
+     * the call's arguments as JSON, clipped to 2,000 characters, and `reason` the refusal the model received.
      */
     'runwild/decision': { kind: RunWildDecisionKind; target: string; summary: string; reason: string }
   }

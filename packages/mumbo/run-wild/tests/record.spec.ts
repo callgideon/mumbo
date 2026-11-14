@@ -13,7 +13,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { SubagentError } from '@deepseek-ai/dsh-subagent'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import * as RunWild from '../src/index.ts'
-import { clipSummary } from '../src/index.ts'
+import { clipSummary } from '../src/record.ts'
 import type { RecordCursor, RecordEntry } from '../src/record-types.ts'
 
 const PRESETS = {

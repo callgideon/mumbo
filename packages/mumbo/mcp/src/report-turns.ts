@@ -14,9 +14,21 @@ import type {} from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-subagent'
 import type { PreToolDecision } from '@deepseek-ai/dsh-tools'
 import { classify } from '@mumbo/browser-consent'
-import { clipSummary, inRunWild } from '@mumbo/run-wild'
+import { inRunWild } from '@mumbo/run-wild'
 import { z } from 'zod'
 import type {} from './conversation.ts'
+
+/** The longest refusal summary this gate logs, in characters: the Run Wild record keeps summaries to the same length. */
+const REFUSAL_SUMMARY_LIMIT = 2000
+
+/**
+ * Clip a refused call's arguments for its `runwild/decision` summary.
+ * @param json - the arguments as JSON.
+ * @returns the JSON, or its first characters followed by `…`.
+ */
+function clipArguments(json: string): string {
+  return json.length <= REFUSAL_SUMMARY_LIMIT ? json : `${json.slice(0, REFUSAL_SUMMARY_LIMIT - 1)}…`
+}
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -140,7 +152,7 @@ export async function gateReportTurns(ctx: Context): Promise<void> {
     if (agent === undefined || runsUnasked(exec.name, exec.arguments) || !turns.reportStarted(agent)) return next()
     if (inRunWild(ctx, agent)) {
       const reason = reportRefusal(exec.name)
-      agent.session.append('runwild/decision', { kind: 'refusal', target: exec.name, summary: clipSummary(JSON.stringify(exec.arguments)), reason })
+      agent.session.append('runwild/decision', { kind: 'refusal', target: exec.name, summary: clipArguments(JSON.stringify(exec.arguments)), reason })
       return { kind: 'deny', reason }
     }
     const decision = await next()

@@ -62,7 +62,7 @@ Each decision appends `runwild/decision { kind, target, summary, reason }` to th
 |---|---|
 | `kind` | `approval`, `plan-review`, `question`, or `refusal` |
 | `target` | The tool name; the plan's `exit_plan_mode` call id; the approval card's subject; or the question id |
-| `summary` | The approval reason, or the tool name without one; the question and its detail, which for a plan review is the plan; for a refusal, the call's arguments as JSON, clipped by `clipSummary` to 2,000 characters |
+| `summary` | The approval reason, or the tool name without one; the question and its detail, which for a plan review is the plan; for a refusal, the call's arguments as JSON, clipped to 2,000 characters |
 | `reason` | Why Run Wild decided it; for a question or a refusal, the text the model received |
 
 `refusal` is appended by `@mumbo/mcp`'s report-turn gate when it refuses a call in a report-started turn of a Run Wild Session ([report-started turns](../mcp/README.md#report-started-turns)), to the calling Agent's own Session; a delegated child's refusal is in the child's Session.
